@@ -65,3 +65,10 @@ def test_two_independent_cycles_both_reported():
     errors = check_metamodel(mm)
     cycle_errors = [e for e in errors if "cycle" in e.lower()]
     assert len(cycle_errors) == 2
+
+
+def test_invalid_regex_pattern_reported():
+    mm = Metamodel(elements=[ElementType(name="A",
+                  properties=[PropertyDef(name="p", datatype="string", pattern="[bad")])])
+    errors = check_metamodel(mm)
+    assert any("pattern" in e.lower() for e in errors)

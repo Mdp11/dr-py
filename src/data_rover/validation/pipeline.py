@@ -32,8 +32,8 @@ def default_pipeline() -> "ValidationPipeline":
 
     return ValidationPipeline([
         TypeConformanceValidator(),
-        FacetsValidator(),
         MultiplicityValidator(),
+        FacetsValidator(),
         EndpointTypingValidator(),
         ContainmentValidator(),
     ])

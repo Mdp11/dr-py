@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from .multiplicity import Multiplicity
 from .schema import PRIMITIVES, Metamodel, PropertyDef
 
@@ -18,6 +20,12 @@ def _check_properties(mm: Metamodel, owner: str, props: list[PropertyDef],
         except ValueError:
             errors.append(
                 f"{owner}.{p.name}: invalid multiplicity {p.multiplicity!r}")
+        if p.pattern is not None:
+            try:
+                re.compile(p.pattern)
+            except re.error:
+                errors.append(
+                    f"{owner}.{p.name}: invalid regex pattern {p.pattern!r}")
 
 
 def check_metamodel(mm: Metamodel) -> list[str]:
