@@ -43,12 +43,20 @@ def test_full_flow_catches_multiple_violations():
     # endpoint-typing violation: Satisfies target must be Requirement
     model.connect("Satisfies", block.id, block.id)
 
+    # containment violation: shared_child has two containment parents
+    parent_a = model.create_element("Block")
+    parent_b = model.create_element("Block")
+    shared_child = model.create_element("Block")
+    model.connect("BlockHasPart", parent_a.id, shared_child.id)
+    model.connect("BlockHasPart", parent_b.id, shared_child.id)  # two parents
+
     messages = [i.message for i in default_pipeline().validate(model)]
     assert any("name" in m for m in messages)          # multiplicity
     assert any("heavy" in m for m in messages)         # type conformance
     assert any("Status" in m for m in messages)        # enum
     assert any("priority" in m for m in messages)      # facet
     assert any("Satisfies" in m for m in messages)     # endpoint typing
+    assert any("parent" in m.lower() for m in messages)  # containment
 
 
 def test_cascade_delete_through_full_stack():

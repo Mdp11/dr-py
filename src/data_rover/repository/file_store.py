@@ -40,6 +40,9 @@ class FileRepository:
         }
         self._path(name, "model").write_text(
             yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+        # Optimistic-concurrency rev tracking is deferred for the file adapter
+        # (see design spec §6/§8); expected_rev is accepted to satisfy the port
+        # but not yet enforced here.
         return 1
 
     def load_model(self, name: str, metamodel: Metamodel) -> Model:
