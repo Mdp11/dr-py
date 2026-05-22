@@ -53,3 +53,15 @@ def test_bad_multiplicity_reported():
                   properties=[PropertyDef(name="p", datatype="string", multiplicity="xx")])])
     errors = check_metamodel(mm)
     assert any("multiplicity" in e.lower() for e in errors)
+
+
+def test_two_independent_cycles_both_reported():
+    mm = Metamodel(elements=[
+        ElementType(name="A", extends="B"),
+        ElementType(name="B", extends="A"),
+        ElementType(name="C", extends="D"),
+        ElementType(name="D", extends="C"),
+    ])
+    errors = check_metamodel(mm)
+    cycle_errors = [e for e in errors if "cycle" in e.lower()]
+    assert len(cycle_errors) == 2
