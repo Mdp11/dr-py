@@ -40,3 +40,14 @@ class Model:
         if rel_id not in self.relationships:
             raise KeyError(f"No relationship with id {rel_id!r}")
         return self.relationships[rel_id]
+
+    def set(self, target: Element | Relationship, prop: str, value) -> None:
+        if isinstance(target, Element):
+            defs = self.metamodel.effective_element_properties(target.type_name)
+        else:
+            defs = self.metamodel.effective_relationship_properties(target.type_name)
+        if prop not in {p.name for p in defs}:
+            raise KeyError(
+                f"{target.type_name!r} has no property {prop!r}")
+        target.properties[prop] = value
+        target.rev += 1
