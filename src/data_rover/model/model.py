@@ -51,3 +51,28 @@ class Model:
                 f"{target.type_name!r} has no property {prop!r}")
         target.properties[prop] = value
         target.rev += 1
+
+    def connect(self, rel_type: str, source_id: str, target_id: str) -> Relationship:
+        if self.metamodel.relationship_type(rel_type) is None:
+            raise KeyError(f"Unknown relationship type {rel_type!r}")
+        if source_id not in self.elements:
+            raise KeyError(f"No source element {source_id!r}")
+        if target_id not in self.elements:
+            raise KeyError(f"No target element {target_id!r}")
+        rel = Relationship(id=self._ids.new_id(), type_name=rel_type,
+                           source_id=source_id, target_id=target_id)
+        self.relationships[rel.id] = rel
+        return rel
+
+    def disconnect(self, rel_id: str) -> None:
+        if rel_id not in self.relationships:
+            raise KeyError(f"No relationship with id {rel_id!r}")
+        del self.relationships[rel_id]
+
+    def relationships_from(self, element_id: str) -> list[Relationship]:
+        return [r for r in self.relationships.values()
+                if r.source_id == element_id]
+
+    def relationships_to(self, element_id: str) -> list[Relationship]:
+        return [r for r in self.relationships.values()
+                if r.target_id == element_id]
