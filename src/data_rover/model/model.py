@@ -89,16 +89,20 @@ class Model:
                 return r.source_id
         return None
 
-    def delete_element(self, element_id: str) -> None:
+    def delete_element(self, element_id: str, _visiting: set[str] | None = None) -> None:
         if element_id not in self.elements:
             raise KeyError(f"No element with id {element_id!r}")
+        visiting = _visiting if _visiting is not None else set()
+        if element_id in visiting:
+            return
+        visiting.add(element_id)
         # cascade: delete contained children first (recursively)
         for rel in self._containment_children(element_id):
             child_id = rel.target_id
             if rel.id in self.relationships:
                 self.disconnect(rel.id)
             if child_id in self.elements:
-                self.delete_element(child_id)
+                self.delete_element(child_id, visiting)
         # remove any remaining relationships touching this element
         incident = [r.id for r in self.relationships.values()
                     if r.source_id == element_id or r.target_id == element_id]
