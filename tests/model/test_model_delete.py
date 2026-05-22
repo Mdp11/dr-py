@@ -45,3 +45,14 @@ def test_container_of_returns_containing_element():
     model.connect("HasPart", parent.id, child.id)
     assert model.container_of(child.id) == parent.id
     assert model.container_of(parent.id) is None
+
+
+def test_delete_does_not_hang_on_instance_level_cycle():
+    model = _model()
+    a = model.create_element("Block")
+    b = model.create_element("Block")
+    model.connect("HasPart", a.id, b.id)
+    model.connect("HasPart", b.id, a.id)  # cyclic containment at the model level
+    model.delete_element(a.id)            # must terminate, not recurse forever
+    assert a.id not in model.elements
+    assert b.id not in model.elements

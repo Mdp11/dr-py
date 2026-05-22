@@ -1,43 +1,53 @@
 from __future__ import annotations
 
 import os
+import threading
 import time
 import uuid
 from typing import Protocol
-
-_last_ms: int = 0
-_seq: int = 0
 
 
 class IdGenerator(Protocol):
     def new_id(self) -> str: ...
 
 
-def _uuid7() -> uuid.UUID:
-    # RFC 9562 UUIDv7: 48-bit ms timestamp + 12-bit monotonic seq + random.
-    global _last_ms, _seq
-    unix_ms = int(time.time() * 1000)
-    if unix_ms <= _last_ms:
-        unix_ms = _last_ms
-        _seq += 1
-    else:
-        _last_ms = unix_ms
-        _seq = 0
-    rand = os.urandom(8)
-    # Layout: [6 bytes ms][1 byte ver+seq_hi][1 byte seq_lo][8 bytes random]
-    seq_hi = (_seq >> 8) & 0x0F
-    seq_lo = _seq & 0xFF
-    raw = bytearray(unix_ms.to_bytes(6, "big") + bytes([seq_hi, seq_lo]) + rand)
+def _uuid7(unix_ms: int, seq: int) -> uuid.UUID:
+    raw = bytearray(16)
+    raw[0:6] = unix_ms.to_bytes(6, "big")
+    raw[6] = (seq >> 8) & 0x0F   # high 4 bits of the 12-bit sequence
+    raw[7] = seq & 0xFF          # low 8 bits
+    raw[8:16] = os.urandom(8)
     raw[6] = (raw[6] & 0x0F) | 0x70  # version 7
     raw[8] = (raw[8] & 0x3F) | 0x80  # RFC 4122 variant
     return uuid.UUID(bytes=bytes(raw))
 
 
 class Uuid7Generator:
-    """Default generator: time-ordered, coordination-free UUIDv7."""
+    """Default generator: time-ordered, coordination-free UUIDv7.
+
+    A per-instance monotonic counter (guarded by a lock) keeps ids strictly
+    increasing within and across the same millisecond. State is instance-scoped,
+    not global, so the generator is safe to use from concurrent threads.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._last_ms = 0
+        self._seq = 0
 
     def new_id(self) -> str:
-        return str(_uuid7())
+        with self._lock:
+            ms = int(time.time() * 1000)
+            if ms > self._last_ms:
+                self._last_ms = ms
+                self._seq = 0
+            else:
+                self._seq += 1
+                if self._seq > 0xFFF:  # 12-bit counter exhausted this ms
+                    self._last_ms += 1  # advance the virtual clock
+                    self._seq = 0
+                ms = self._last_ms
+            return str(_uuid7(ms, self._seq))
 
 
 class SequentialIdGenerator:
