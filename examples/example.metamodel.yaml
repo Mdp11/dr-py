@@ -1,0 +1,26 @@
+enums:
+  Status: [Draft, Reviewed, Approved]
+elements:
+  - name: NamedElement
+    abstract: true
+    properties:
+      - {name: name, datatype: string, multiplicity: "1"}
+  - name: Requirement
+    extends: NamedElement
+    properties:
+      - {name: status, datatype: Status, multiplicity: "1"}
+      - {name: priority, datatype: integer, min: 1, max: 5}
+  - name: Block
+    extends: NamedElement
+    properties:
+      - {name: mass, datatype: float, min: 0}
+relationships:
+  - name: BlockHasPart
+    containment: true
+    source: Block
+    target: Block
+  - name: Satisfies
+    containment: false
+    source: Block
+    target: Requirement
+    target_multiplicity: "0..*"
