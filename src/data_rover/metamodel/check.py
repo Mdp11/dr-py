@@ -20,17 +20,6 @@ def _check_properties(mm: Metamodel, owner: str, props: list[PropertyDef],
                 f"{owner}.{p.name}: invalid multiplicity {p.multiplicity!r}")
 
 
-def _has_cycle(get_extends, name: str) -> bool:
-    seen: set[str] = set()
-    current: str | None = name
-    while current is not None:
-        if current in seen:
-            return True
-        seen.add(current)
-        current = get_extends(current)
-    return False
-
-
 def check_metamodel(mm: Metamodel) -> list[str]:
     """Return a list of human-readable error strings; empty means valid."""
     errors: list[str] = []
@@ -41,11 +30,23 @@ def check_metamodel(mm: Metamodel) -> list[str]:
             errors.append(f"Element {et.name!r} extends unknown type {et.extends!r}")
         _check_properties(mm, et.name, et.properties, errors)
 
+    in_cycle: set[str] = set()
     for et in mm.elements:
-        if _has_cycle(lambda n: (mm.element_type(n).extends
-                                 if mm.element_type(n) else None), et.name):
-            errors.append(f"Inheritance cycle involving element {et.name!r}")
-            break
+        if et.name in in_cycle:
+            continue
+        visited: list[str] = []
+        seen_set: set[str] = set()
+        node: str | None = et.name
+        while node is not None and node not in seen_set:
+            seen_set.add(node)
+            visited.append(node)
+            nxt = mm.element_type(node)
+            node = nxt.extends if nxt else None
+        if node is not None:  # re-entered a visited node => cycle starting at `node`
+            if node not in in_cycle:
+                errors.append(f"Inheritance cycle involving element {node!r}")
+            for member in visited[visited.index(node):]:
+                in_cycle.add(member)
 
     rel_names = {r.name for r in mm.relationships}
     for rt in mm.relationships:

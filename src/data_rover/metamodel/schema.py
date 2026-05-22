@@ -106,7 +106,9 @@ class Metamodel(BaseModel):
         return props
 
     def is_containment(self, rel_type_name: str) -> bool:
-        return any(
-            self.relationship_type(t).containment
-            for t in self.relationship_ancestors(rel_type_name)
-        )
+        for t in self.relationship_ancestors(rel_type_name):
+            rt = self.relationship_type(t)
+            assert rt is not None  # relationship_ancestors only yields existing types
+            if rt.containment:
+                return True
+        return False
