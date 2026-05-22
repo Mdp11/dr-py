@@ -20,3 +20,20 @@ class ValidationPipeline:
         for validator in self._validators:
             issues.extend(validator.validate(model, scope))
         return issues
+
+
+def default_pipeline() -> "ValidationPipeline":
+    # imported here to avoid a circular import at module load time
+    from .validators.containment import ContainmentValidator
+    from .validators.endpoint_typing import EndpointTypingValidator
+    from .validators.facets import FacetsValidator
+    from .validators.multiplicity import MultiplicityValidator
+    from .validators.type_conformance import TypeConformanceValidator
+
+    return ValidationPipeline([
+        TypeConformanceValidator(),
+        FacetsValidator(),
+        MultiplicityValidator(),
+        EndpointTypingValidator(),
+        ContainmentValidator(),
+    ])
