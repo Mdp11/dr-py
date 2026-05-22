@@ -16,7 +16,7 @@ class ContainmentValidator:
         for r in containment_rels:
             parents.setdefault(r.target_id, []).append(r.source_id)
         for target_id, srcs in parents.items():
-            if len(srcs) > 1:
+            if len(srcs) > 1 and scope.includes(target_id):
                 issues.append(Issue(
                     Severity.ERROR,
                     f"Element {target_id} has {len(srcs)} containment parents "
@@ -30,7 +30,7 @@ class ContainmentValidator:
             while node is not None and node not in seen:
                 seen.add(node)
                 node = parent_of.get(node)
-            if node is not None:  # revisited a node => cycle
+            if node is not None and scope.includes(start):
                 issues.append(Issue(
                     Severity.ERROR,
                     f"Containment cycle detected involving element {start}",

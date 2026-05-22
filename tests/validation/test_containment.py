@@ -40,3 +40,14 @@ def test_cycle_is_error():
     model.connect("HasPart", b.id, a.id)
     issues = ContainmentValidator().validate(model, Scope.all())
     assert any("cycle" in i.message.lower() for i in issues)
+
+
+def test_out_of_scope_violations_are_skipped():
+    model = _model()
+    p1 = model.create_element("Block")
+    p2 = model.create_element("Block")
+    child = model.create_element("Block")
+    model.connect("HasPart", p1.id, child.id)
+    model.connect("HasPart", p2.id, child.id)  # two parents -> violation
+    # child is out of scope -> the violation must not be reported
+    assert ContainmentValidator().validate(model, Scope(set())) == []
