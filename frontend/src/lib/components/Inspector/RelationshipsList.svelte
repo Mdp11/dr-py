@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Element, Relationship } from '$lib/api/types';
-	import { emit, getWorkingModel, select } from '$lib/state';
-	import { Pencil, X } from '@lucide/svelte';
+	import { emit, getIssues, getWorkingModel, indexIssues, select } from '$lib/state';
+	import { AlertCircle, AlertTriangle, Pencil, X } from '@lucide/svelte';
 
 	type Props = {
 		elementId: string;
@@ -10,6 +10,7 @@
 	let { elementId }: Props = $props();
 
 	const working = $derived(getWorkingModel());
+	const issueIndex = $derived(indexIssues(getIssues()));
 
 	const outgoing = $derived(working.relationships.filter((r) => r.source_id === elementId));
 	const incoming = $derived(working.relationships.filter((r) => r.target_id === elementId));
@@ -105,6 +106,11 @@
 								<span class="shrink-0 rounded bg-zinc-800 px-1 font-mono text-[9px] text-zinc-400">
 									{other.type_name}
 								</span>
+							{/if}
+							{#if issueIndex.errorIds.has(rel.id) || issueIndex.errorIds.has(otherId)}
+								<AlertCircle class="h-3 w-3 shrink-0 text-red-400" />
+							{:else if issueIndex.warningIds.has(rel.id) || issueIndex.warningIds.has(otherId)}
+								<AlertTriangle class="h-3 w-3 shrink-0 text-amber-400" />
 							{/if}
 						</button>
 						<button

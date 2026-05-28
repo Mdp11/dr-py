@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Element } from '$lib/api/types';
-	import { ChevronDown, ChevronRight } from '@lucide/svelte';
+	import { getIssues, indexIssues } from '$lib/state';
+	import { AlertCircle, AlertTriangle, ChevronDown, ChevronRight } from '@lucide/svelte';
 	import TreeNode from './TreeNode.svelte';
 
 	type Props = {
@@ -33,6 +34,9 @@
 	const hasChildren = $derived(visibleChildren.length > 0);
 	const isCollapsed = $derived(collapsed.has(id));
 	const isSelected = $derived(selectedId === id);
+	const issueIndex = $derived(indexIssues(getIssues()));
+	const hasError = $derived(issueIndex.errorIds.has(id));
+	const hasWarning = $derived(!hasError && issueIndex.warningIds.has(id));
 
 	function displayName(e: Element): string {
 		const n = e.properties?.name;
@@ -74,6 +78,11 @@
 				<span class="ml-auto shrink-0 rounded bg-zinc-800 px-1 font-mono text-[10px] text-zinc-400">
 					{el.type_name}
 				</span>
+				{#if hasError}
+					<AlertCircle class="h-3 w-3 shrink-0 text-red-400" aria-label="has errors" />
+				{:else if hasWarning}
+					<AlertTriangle class="h-3 w-3 shrink-0 text-amber-400" aria-label="has warnings" />
+				{/if}
 			</button>
 		</div>
 		{#if hasChildren && !isCollapsed}

@@ -5,14 +5,20 @@
 	import {
 		getBaseline,
 		getDiff,
+		getIssues,
+		getLastError,
+		getLastRunAt,
 		getMetamodelName,
 		getPendingOps,
+		isRunning,
 		resetOps,
 		setBaseline,
-		setMetamodel
+		setMetamodel,
+		clearIssues
 	} from '$lib/state';
+	import { runValidation } from '$lib/state/validate-action';
 	import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-	import { ChevronDown } from '@lucide/svelte';
+	import { AlertCircle, AlertTriangle, ChevronDown, RefreshCw } from '@lucide/svelte';
 	import LoadMetamodelDialog from './LoadMetamodelDialog.svelte';
 	import CreateModelDialog from './CreateModelDialog.svelte';
 	import DiffDrawer from './DiffDrawer.svelte';
@@ -40,6 +46,13 @@
 		diff.counts.added + diff.counts.modified + diff.counts.deleted
 	);
 	const saveDisabled = $derived(totalChanges === 0 || baseline === null);
+	const validating = $derived(isRunning());
+	const validateDisabled = $derived(validating || baseline === null);
+	const issues = $derived(getIssues());
+	const lastRunAt = $derived(getLastRunAt());
+	const lastValidateError = $derived(getLastError());
+	const errorCount = $derived(issues.filter((i) => i.severity === 'error').length);
+	const warningCount = $derived(issues.length - errorCount);
 	const filteredModels = $derived(
 		(modelsListQuery.data ?? []).filter(
 			(m) => selectedMetamodel === null || m.metamodel === selectedMetamodel
@@ -72,6 +85,7 @@
 			});
 			setBaseline(model);
 			resetOps();
+			clearIssues();
 		} catch (err) {
 			console.error('Failed to load model', name, err);
 		}
@@ -188,7 +202,40 @@
 	</div>
 
 	<div class="flex items-center gap-2">
-		<Button variant="ghost" size="sm" class="h-7 text-xs">Validate</Button>
+		<Button
+			variant="ghost"
+			size="sm"
+			class="h-7 gap-1 text-xs"
+			disabled={validateDisabled}
+			onclick={() => void runValidation()}
+		>
+			<RefreshCw class="h-3 w-3 {validating ? 'animate-spin' : ''}" />
+			Validate
+		</Button>
+		{#if lastValidateError !== null}
+			<span class="rounded bg-red-950/60 px-1.5 py-0.5 font-mono text-[10px] text-red-300">
+				Validation failed
+			</span>
+		{:else if lastRunAt !== null}
+			{#if issues.length === 0}
+				<span class="rounded bg-emerald-500/15 px-1.5 py-0.5 font-mono text-[10px] text-emerald-300">
+					✓ no issues
+				</span>
+			{:else}
+				<span class="flex items-center gap-1 rounded bg-zinc-900 px-1.5 py-0.5 font-mono text-[10px]">
+					{#if errorCount > 0}
+						<AlertCircle class="h-3 w-3 text-red-400" />
+						<span class="text-red-300">{errorCount} {errorCount === 1 ? 'error' : 'errors'}</span>
+					{/if}
+					{#if warningCount > 0}
+						<AlertTriangle class="h-3 w-3 text-amber-400" />
+						<span class="text-amber-300">
+							{warningCount} {warningCount === 1 ? 'warning' : 'warnings'}
+						</span>
+					{/if}
+				</span>
+			{/if}
+		{/if}
 		<Button
 			variant="ghost"
 			size="sm"
