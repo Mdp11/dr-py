@@ -55,3 +55,59 @@ test('load metamodel + empty model -> create element -> see in diff', async ({ p
 	await expect(drawer.getByText(/added \(\d+\)/i)).toBeVisible();
 	await expect(drawer.getByText(ENGINE_NAME).first()).toBeVisible();
 });
+
+test('Export CR checkbox produces a second .cr.json download', async ({ page }) => {
+	test.setTimeout(90_000);
+
+	// Force the <a download> fallback path inside saveJsonToFile.
+	await page.addInitScript(() => {
+		// @ts-expect-error - removing the function for this test only
+		delete (window as { showSaveFilePicker?: unknown }).showSaveFilePicker;
+	});
+
+	await page.goto('/');
+
+	// Same setup as the first smoke test.
+	await page.getByRole('button', { name: 'Load metamodel...' }).click();
+	const mmDialog = page.getByRole('dialog', { name: /load metamodel/i });
+	await mmDialog.locator('input[type="file"]').setInputFiles(METAMODEL_PATH);
+	await mmDialog.getByRole('button', { name: 'Load', exact: true }).click();
+	await expect(mmDialog).toBeHidden();
+
+	await page.getByRole('button', { name: 'Load model...' }).click();
+	const modelDialog = page.getByRole('dialog', { name: /load model/i });
+	await modelDialog.locator('input[type="file"]').setInputFiles({
+		name: 'cr-smoke.json',
+		mimeType: 'application/json',
+		buffer: Buffer.from('{"elements": [], "relationships": []}')
+	});
+	await modelDialog.getByRole('button', { name: 'Load', exact: true }).click();
+	await expect(modelDialog).toBeHidden();
+
+	// Create an element so there's something to save.
+	await page.getByRole('button', { name: 'New Block' }).click();
+	const inspector = page.getByTestId('inspector');
+	const nameInput = inspector.locator('input[type="text"]').first();
+	await nameInput.fill(`cr-block-${RUN_ID}`);
+	await nameInput.blur();
+
+	// Open the drawer.
+	await page.getByRole('button', { name: /save \(\d+\)/i }).click();
+	const drawer = page.getByRole('dialog', { name: /pending changes/i });
+	await expect(drawer).toBeVisible();
+
+	// Check the checkbox.
+	const exportCrCheckbox = drawer.getByLabel('Export CR');
+	await exportCrCheckbox.check();
+
+	// Two downloads expected: the model JSON first, then the CR.
+	const [download1, download2] = await Promise.all([
+		page.waitForEvent('download'),
+		page.waitForEvent('download'),
+		drawer.getByRole('button', { name: /save \(\d+\)/i }).click()
+	]);
+
+	expect(download1.suggestedFilename()).toMatch(/\.json$/);
+	expect(download1.suggestedFilename()).not.toMatch(/\.cr\.json$/);
+	expect(download2.suggestedFilename()).toMatch(/^\d{8}T\d{6}_.+\.cr\.json$/);
+});
