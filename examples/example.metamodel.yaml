@@ -10,6 +10,7 @@ elements:
     properties:
       - {name: status, datatype: Status, multiplicity: "1"}
       - {name: priority, datatype: integer, min: 1, max: 5}
+      - {name: refines, datatype: Requirement, multiplicity: "0..*"}
   - name: Block
     extends: NamedElement
     properties:

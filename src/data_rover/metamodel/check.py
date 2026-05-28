@@ -7,7 +7,11 @@ from .schema import PRIMITIVES, Metamodel, PropertyDef
 
 
 def _valid_datatype(mm: Metamodel, datatype: str) -> bool:
-    return datatype in PRIMITIVES or datatype in mm.enums
+    return (
+        datatype in PRIMITIVES
+        or datatype in mm.enums
+        or mm.is_element_type(datatype)
+    )
 
 
 def _check_properties(
@@ -26,34 +30,49 @@ def _check_properties(
             except re.error:
                 errors.append(f"{owner}.{p.name}: invalid regex pattern {p.pattern!r}")
 
+def _check_extend_cycles(objects, types) -> list[str]:
+    errors: list[str] = []
+
+    in_cycle: set[str] = set()
+    for o in objects:
+        if o.name in in_cycle:
+            continue
+        visited: list[str] = []
+        seen_set: set[str] = set()
+        node: str | None = o.name
+        while node is not None and node not in seen_set:
+            seen_set.add(node)
+            visited.append(node)
+            nxt = types(node)
+            node = nxt.extends if nxt else None
+        if node is not None:  # re-entered a visited node => cycle starting at `node`
+            if node not in in_cycle:
+                errors.append(f"Inheritance cycle involving {node!r}")
+            for member in visited[visited.index(node) :]:
+                in_cycle.add(member)
+
+    return errors
+
 
 def check_metamodel(mm: Metamodel) -> list[str]:
     """Return a list of human-readable error strings; empty means valid."""
     errors: list[str] = []
     element_names = {e.name for e in mm.elements}
 
+    for name in element_names & set(mm.enums):
+        errors.append(f"Name {name!r} is used both as enum and element type")
+    for name in element_names & PRIMITIVES:
+        errors.append(f"Name {name!r} is used both as primitive and element type")
+    for name in set(mm.enums) & PRIMITIVES:
+        errors.append(f"Name {name!r} is used both as primitive and enum")
+
     for et in mm.elements:
         if et.extends is not None and et.extends not in element_names:
             errors.append(f"Element {et.name!r} extends unknown type {et.extends!r}")
         _check_properties(mm, et.name, et.properties, errors)
 
-    in_cycle: set[str] = set()
-    for et in mm.elements:
-        if et.name in in_cycle:
-            continue
-        visited: list[str] = []
-        seen_set: set[str] = set()
-        node: str | None = et.name
-        while node is not None and node not in seen_set:
-            seen_set.add(node)
-            visited.append(node)
-            nxt = mm.element_type(node)
-            node = nxt.extends if nxt else None
-        if node is not None:  # re-entered a visited node => cycle starting at `node`
-            if node not in in_cycle:
-                errors.append(f"Inheritance cycle involving element {node!r}")
-            for member in visited[visited.index(node) :]:
-                in_cycle.add(member)
+    errors.extend(_check_extend_cycles(mm.elements, mm.element_type))
+    errors.extend(_check_extend_cycles(mm.relationships, mm.relationship_type))
 
     for et in mm.elements:
         e_ancestor_props: dict[str, str] = {}

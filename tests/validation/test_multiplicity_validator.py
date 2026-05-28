@@ -75,3 +75,60 @@ def test_relationship_target_multiplicity_lower_bound():
     model.create_element("Block")  # no outgoing Owns
     issues = MultiplicityValidator().validate(model, Scope.all())
     assert any("Owns" in i.message for i in issues)
+
+
+def _rel_prop_model():
+    mm = Metamodel(
+        elements=[ElementType(name="Block")],
+        relationships=[
+            RelationshipType(
+                name="Trace",
+                source="Block",
+                target="Block",
+                properties=[
+                    PropertyDef(name="label", datatype="string", multiplicity="1"),
+                    PropertyDef(name="tags", datatype="string", multiplicity="1..*"),
+                ],
+            )
+        ],
+    )
+    return Model(mm)
+
+
+def test_relationship_required_property_missing_is_error():
+    model = _rel_prop_model()
+    a = model.create_element("Block")
+    b = model.create_element("Block")
+    rel = model.connect("Trace", a.id, b.id)
+    model.set_property(rel, "tags", ["t1"])  # label not set
+    issues = MultiplicityValidator().validate(model, Scope.all())
+    assert any("label" in i.message and rel.id in i.target_ids for i in issues)
+
+
+def test_relationship_required_property_present_ok():
+    model = _rel_prop_model()
+    a = model.create_element("Block")
+    b = model.create_element("Block")
+    rel = model.connect("Trace", a.id, b.id)
+    model.set_property(rel, "label", "x")
+    model.set_property(rel, "tags", ["t1"])
+    assert MultiplicityValidator().validate(model, Scope.all()) == []
+
+
+def test_relationship_many_property_count_bounds():
+    model = _rel_prop_model()
+    a = model.create_element("Block")
+    b = model.create_element("Block")
+    rel = model.connect("Trace", a.id, b.id)
+    model.set_property(rel, "label", "x")
+    model.set_property(rel, "tags", [])  # below lower bound
+    issues = MultiplicityValidator().validate(model, Scope.all())
+    assert any("tags" in i.message and rel.id in i.target_ids for i in issues)
+
+
+def test_relationship_property_out_of_scope_skipped():
+    model = _rel_prop_model()
+    a = model.create_element("Block")
+    b = model.create_element("Block")
+    model.connect("Trace", a.id, b.id)  # label missing
+    assert MultiplicityValidator().validate(model, Scope(set())) == []

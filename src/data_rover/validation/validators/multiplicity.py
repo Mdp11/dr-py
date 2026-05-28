@@ -33,6 +33,21 @@ class MultiplicityValidator:
                             [el.id],
                         )
                     )
+        for rel in model.relationships.values():
+            if not scope.includes(rel.id):
+                continue
+            for pdef in mm.effective_relationship_properties(rel.type_name):
+                mult = Multiplicity.parse(pdef.multiplicity)
+                count = _count(rel.properties.get(pdef.name))
+                if not mult.count_ok(count):
+                    issues.append(
+                        Issue(
+                            Severity.ERROR,
+                            f"{rel.type_name}.{pdef.name}: {count} value(s) violates "
+                            f"multiplicity {pdef.multiplicity!r}",
+                            [rel.id],
+                        )
+                    )
         # relationship-end multiplicity (target end: targets per source)
         for rt in mm.relationships:
             if rt.abstract:

@@ -16,7 +16,7 @@ def load_metamodel_str(text: str) -> Metamodel:
     data = yaml.safe_load(text) or {}
     try:
         mm = Metamodel.model_validate(data)
-    except Exception as exc:  # pydantic ValidationError
+    except Exception as exc:
         raise MetamodelError(f"Malformed metamodel: {exc}") from exc
     errors = check_metamodel(mm)
     if errors:
