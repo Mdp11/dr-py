@@ -319,7 +319,7 @@ describe('saveWithOptionalCr', () => {
 			fileHandle: null,
 			exportCr: true,
 			saveModel: async () => OK_SAVE,
-			saveFile: async (_v, name) => {
+			saveFile: async (_v: unknown, name: string) => {
 				calls++;
 				if (calls === 1) return { filename: name, handle: null };
 				throw new DOMException('user cancelled', 'AbortError');
@@ -342,7 +342,7 @@ describe('saveWithOptionalCr', () => {
 			fileHandle: null,
 			exportCr: true,
 			saveModel: async () => OK_SAVE,
-			saveFile: async (_v, name) => {
+			saveFile: async (_v: unknown, name: string) => {
 				calls++;
 				if (calls === 1) return { filename: name, handle: null };
 				throw new Error('quota exceeded');
