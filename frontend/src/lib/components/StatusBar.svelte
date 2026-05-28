@@ -1,8 +1,12 @@
 <script lang="ts">
-	import { getBaseline, getWorkingModel } from '$lib/state';
+	import { getBaseline, getDiff, getWorkingModel } from '$lib/state';
 
 	const working = $derived(getWorkingModel());
 	const baseline = $derived(getBaseline());
+	const diff = $derived(getDiff());
+	const totalChanges = $derived(
+		diff.counts.added + diff.counts.modified + diff.counts.deleted
+	);
 </script>
 
 <footer
@@ -10,7 +14,7 @@
 >
 	<span>{working.elements.length} elements</span>
 	<span class="text-zinc-700">·</span>
-	<span>0 modified</span>
+	<span>{totalChanges} unsaved</span>
 	<span class="text-zinc-700">·</span>
 	<span>0 errors</span>
 	<span class="text-zinc-700">·</span>
