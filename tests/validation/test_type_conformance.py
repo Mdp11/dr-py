@@ -125,8 +125,7 @@ def test_reference_to_wrong_type_is_error():
     model.set_property(req, "owner", other.id)
     issues = TypeConformanceValidator().validate(model, Scope.all())
     assert any(
-        "expected Person" in i.message and "Requirement" in i.message
-        for i in issues
+        "expected Person" in i.message and "Requirement" in i.message for i in issues
     )
 
 
@@ -143,9 +142,7 @@ def test_non_string_reference_value_is_error():
     req = model.create_element("Requirement")
     model.set_property(req, "owner", 42)
     issues = TypeConformanceValidator().validate(model, Scope.all())
-    assert any(
-        "not a valid Person reference" in i.message for i in issues
-    )
+    assert any("not a valid Person reference" in i.message for i in issues)
 
 
 def test_list_of_references_validated_per_item():
@@ -219,8 +216,7 @@ def test_relationship_reference_to_missing_element_is_error():
     model.set_property(rel, "owner", "does-not-exist")
     issues = TypeConformanceValidator().validate(model, Scope.all())
     assert any(
-        "points to no element" in i.message and rel.id in i.target_ids
-        for i in issues
+        "points to no element" in i.message and rel.id in i.target_ids for i in issues
     )
 
 

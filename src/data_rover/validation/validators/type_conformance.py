@@ -88,8 +88,7 @@ class TypeConformanceValidator:
             return [
                 Issue(
                     Severity.ERROR,
-                    f"{type_name}.{prop_name}: reference {item!r} points to "
-                    f"no element",
+                    f"{type_name}.{prop_name}: reference {item!r} points to no element",
                     [owner_id],
                 )
             ]
