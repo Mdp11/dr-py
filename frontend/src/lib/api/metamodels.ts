@@ -1,16 +1,20 @@
 import { apiFetch, type ApiFetchInit, type ClientConfig } from './client';
-import { MetamodelNameListSchema } from './types';
+import { MetamodelNameListSchema, MetamodelSchema, type Metamodel } from './types';
 
 export function listMetamodels(cfg?: ClientConfig): Promise<string[]> {
 	return apiFetch('/metamodels', { method: 'GET', schema: MetamodelNameListSchema }, cfg);
 }
 
 /**
- * Returns the raw metamodel JSON (server-side structure may vary; typed as
- * `unknown` here — a dedicated helper module will mirror the shape later).
+ * Returns the parsed metamodel matching the backend Pydantic Metamodel shape
+ * (see `src/data_rover/core/metamodel/schema.py`).
  */
-export function getMetamodel(name: string, cfg?: ClientConfig): Promise<unknown> {
-	return apiFetch(`/metamodels/${encodeURIComponent(name)}`, { method: 'GET' }, cfg);
+export function getMetamodel(name: string, cfg?: ClientConfig): Promise<Metamodel> {
+	return apiFetch(
+		`/metamodels/${encodeURIComponent(name)}`,
+		{ method: 'GET', schema: MetamodelSchema },
+		cfg
+	);
 }
 
 /**

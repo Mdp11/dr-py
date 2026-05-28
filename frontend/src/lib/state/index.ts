@@ -26,3 +26,11 @@ export {
 	getMetamodelName,
 	setMetamodel
 } from './metamodel.svelte';
+export {
+	clearFilters,
+	getSearchText,
+	getTypeFilter,
+	setSearchText,
+	setTypeFilter,
+	toggleType
+} from './filters.svelte';
