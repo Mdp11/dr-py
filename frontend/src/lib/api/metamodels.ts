@@ -1,4 +1,4 @@
-import { apiFetch, type ClientConfig } from './client';
+import { apiFetch, type ApiFetchInit, type ClientConfig } from './client';
 import { MetamodelNameListSchema } from './types';
 
 export function listMetamodels(cfg?: ClientConfig): Promise<string[]> {
@@ -29,19 +29,11 @@ export function putMetamodel(
 	body: unknown,
 	cfg?: ClientConfig
 ): Promise<unknown> {
-	const isString = typeof body === 'string';
-	const init: RequestInit & { body?: unknown } = {
-		method: 'PUT',
-		body: isString ? body : (body as object)
-	};
-	if (isString) {
+	const init: ApiFetchInit = { method: 'PUT', body };
+	if (typeof body === 'string') {
 		init.headers = { 'Content-Type': 'application/x-yaml' };
 	}
-	return apiFetch(
-		`/metamodels/${encodeURIComponent(name)}`,
-		init as never,
-		cfg
-	);
+	return apiFetch(`/metamodels/${encodeURIComponent(name)}`, init, cfg);
 }
 
 export function deleteMetamodel(name: string, cfg?: ClientConfig): Promise<void> {

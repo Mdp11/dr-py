@@ -6,7 +6,8 @@ export interface ClientConfig {
 	fetch?: typeof fetch;
 }
 
-export interface ApiFetchInit extends RequestInit {
+export interface ApiFetchInit extends Omit<RequestInit, 'body'> {
+	body?: unknown;
 	schema?: z.ZodType<unknown>;
 	query?: Record<string, string | number | boolean | undefined | null>;
 }

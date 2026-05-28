@@ -20,7 +20,7 @@ export function createModel(
 ): Promise<ModelOut> {
 	return apiFetch(
 		'/models',
-		{ method: 'POST', body: payload as unknown as BodyInit, schema: ModelOutSchema },
+		{ method: 'POST', body: payload, schema: ModelOutSchema },
 		cfg
 	);
 }
@@ -48,7 +48,7 @@ export function snapshotModel(
 ): Promise<SnapshotOut> {
 	return apiFetch(
 		`/models/${encodeURIComponent(name)}/snapshot`,
-		{ method: 'PUT', body: payload as unknown as BodyInit, schema: SnapshotOutSchema },
+		{ method: 'PUT', body: payload, schema: SnapshotOutSchema },
 		cfg
 	);
 }

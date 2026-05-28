@@ -26,7 +26,7 @@ export function createElement(
 ): Promise<Element> {
 	return apiFetch(
 		`/models/${encodeURIComponent(modelName)}/elements`,
-		{ method: 'POST', body: payload as unknown as BodyInit, schema: ElementSchema },
+		{ method: 'POST', body: payload, schema: ElementSchema },
 		cfg
 	);
 }
@@ -51,7 +51,7 @@ export function patchElement(
 ): Promise<Element> {
 	return apiFetch(
 		`/models/${encodeURIComponent(modelName)}/elements/${encodeURIComponent(elementId)}`,
-		{ method: 'PATCH', body: payload as unknown as BodyInit, schema: ElementSchema },
+		{ method: 'PATCH', body: payload, schema: ElementSchema },
 		cfg
 	);
 }

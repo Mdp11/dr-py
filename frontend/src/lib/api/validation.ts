@@ -17,7 +17,7 @@ export function validateModel(
 ): Promise<Issue[]> {
 	const body =
 		options && (options.inline !== undefined || options.scope !== undefined)
-			? ({ inline: options.inline, scope: options.scope } as unknown as BodyInit)
+			? { inline: options.inline, scope: options.scope }
 			: undefined;
 	return apiFetch(
 		`/models/${encodeURIComponent(modelName)}/validate`,
