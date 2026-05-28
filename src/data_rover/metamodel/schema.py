@@ -21,6 +21,7 @@ class ElementType(BaseModel):
     abstract: bool = False
     extends: str | None = None
     properties: list[PropertyDef] = Field(default_factory=list)
+    key: list[str] | None = None
 
 
 class RelationshipType(BaseModel):
@@ -94,6 +95,17 @@ class Metamodel(BaseModel):
                     props.append(p)
                     seen.add(p.name)
         return props
+
+    def effective_element_key(self, name: str) -> list[str] | None:
+        """First declared key found walking from `name` up its `extends` chain.
+
+        Child override wins; returns None if no ancestor declares one.
+        """
+        for type_name in self.element_ancestors(name):
+            et = self.element_type(type_name)
+            if et is not None and et.key is not None:
+                return list(et.key)
+        return None
 
     def effective_relationship_properties(self, name: str) -> list[PropertyDef]:
         props: list[PropertyDef] = []

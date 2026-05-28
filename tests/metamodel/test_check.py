@@ -196,6 +196,48 @@ def test_name_clash_primitive_and_element_reported():
     assert any("'string'" in e and "primitive" in e for e in errors)
 
 
+def test_empty_key_list_rejected():
+    mm = Metamodel(
+        elements=[
+            ElementType(
+                name="Block",
+                properties=[PropertyDef(name="name", datatype="string")],
+                key=[],
+            )
+        ]
+    )
+    errors = check_metamodel(mm)
+    assert any("Block" in e and "key" in e.lower() for e in errors)
+
+
+def test_key_references_unknown_property_rejected():
+    mm = Metamodel(
+        elements=[
+            ElementType(
+                name="Block",
+                properties=[PropertyDef(name="name", datatype="string")],
+                key=["ghost"],
+            )
+        ]
+    )
+    errors = check_metamodel(mm)
+    assert any("Block" in e and "ghost" in e for e in errors)
+
+
+def test_key_referencing_inherited_property_ok():
+    mm = Metamodel(
+        elements=[
+            ElementType(
+                name="NamedElement",
+                abstract=True,
+                properties=[PropertyDef(name="name", datatype="string")],
+            ),
+            ElementType(name="Block", extends="NamedElement", key=["name"]),
+        ]
+    )
+    assert check_metamodel(mm) == []
+
+
 def test_distinct_property_names_in_child_ok():
     mm = Metamodel(
         elements=[

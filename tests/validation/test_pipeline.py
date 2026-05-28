@@ -24,7 +24,9 @@ def test_pipeline_aggregates_issues_from_all_validators():
 def test_pipeline_defaults_to_scope_all():
     v = _StubValidator([])
     ValidationPipeline([v]).validate(model=None)
-    assert v.last_scope.is_all is True
+    last_scope = v.last_scope
+    assert last_scope is not None
+    assert last_scope.is_all is True
 
 
 def test_pipeline_passes_through_explicit_scope():

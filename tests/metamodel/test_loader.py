@@ -23,7 +23,9 @@ relationships:
 
 def test_load_valid_metamodel():
     mm = load_metamodel_str(VALID)
-    assert mm.element_type("Block").extends == "NamedElement"
+    et = mm.element_type("Block")
+    assert et is not None
+    assert et.extends == "NamedElement"
     assert mm.is_containment("HasPart") is True
 
 

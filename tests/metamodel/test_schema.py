@@ -31,9 +31,13 @@ def test_build_metamodel():
             ),
         ],
     )
-    assert mm.element_type("Block").extends == "NamedElement"
+    et = mm.element_type("Block")
+    assert et is not None
+    assert et.extends == "NamedElement"
     assert mm.element_type("Missing") is None
-    assert mm.relationship_type("HasPart").containment is True
+    rt = mm.relationship_type("HasPart")
+    assert rt is not None
+    assert rt.containment is True
 
 
 def test_relationship_defaults():

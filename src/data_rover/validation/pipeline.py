@@ -29,6 +29,7 @@ def default_pipeline() -> "ValidationPipeline":
     from .validators.facets import FacetsValidator
     from .validators.multiplicity import MultiplicityValidator
     from .validators.type_conformance import TypeConformanceValidator
+    from .validators.uniqueness import UniquenessValidator
 
     return ValidationPipeline(
         [
@@ -37,5 +38,6 @@ def default_pipeline() -> "ValidationPipeline":
             FacetsValidator(),
             EndpointTypingValidator(),
             ContainmentValidator(),
+            UniquenessValidator(),
         ]
     )
