@@ -2,7 +2,9 @@
 	import type { Element, Relationship } from '$lib/api/types';
 	import { Separator } from '$lib/components/ui/separator';
 	import { getSelection, getWorkingModel } from '$lib/state';
+	import NewRelationshipPicker from './Inspector/NewRelationshipPicker.svelte';
 	import PropertyForm from './Inspector/PropertyForm.svelte';
+	import RelationshipsList from './Inspector/RelationshipsList.svelte';
 
 	const selection = $derived(getSelection());
 	const working = $derived(getWorkingModel());
@@ -19,30 +21,40 @@
 <aside
 	class="flex h-full flex-col overflow-hidden border-l border-zinc-800 bg-zinc-950 text-sm text-zinc-300"
 >
-	<section class="flex-1 overflow-auto px-3 py-2">
-		<h2 class="mb-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-			Properties
-		</h2>
-		{#if selection === null}
-			<p class="text-xs text-zinc-500">No selection.</p>
-		{:else if entity === null}
+	{#if selection === null}
+		<section class="flex-1 overflow-auto px-3 py-2">
+			<h2 class="mb-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+				Properties
+			</h2>
+			<p class="text-xs text-zinc-500">Select an entity from the tree…</p>
+		</section>
+	{:else if entity === null}
+		<section class="flex-1 overflow-auto px-3 py-2">
+			<h2 class="mb-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+				Properties
+			</h2>
 			<p class="text-xs text-zinc-500">Selection no longer exists.</p>
-		{:else}
-			<PropertyForm {entity} kind={selection.kind} />
-		{/if}
-	</section>
-	<Separator class="bg-zinc-800" />
-	<section class="px-3 py-2">
-		<h2 class="mb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-			Incoming relationships
-		</h2>
-		<p class="font-mono text-xs text-zinc-500">—</p>
-	</section>
-	<Separator class="bg-zinc-800" />
-	<section class="px-3 py-2">
-		<h2 class="mb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-			Outgoing relationships
-		</h2>
-		<p class="font-mono text-xs text-zinc-500">—</p>
-	</section>
+		</section>
+	{:else}
+		<div class="flex-1 overflow-auto">
+			<section class="px-3 py-2">
+				<h2 class="mb-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+					Properties
+				</h2>
+				<PropertyForm {entity} kind={selection.kind} />
+			</section>
+			{#if selection.kind === 'element'}
+				<Separator class="bg-zinc-800" />
+				<section class="px-3 py-2">
+					<h2 class="mb-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+						Relationships
+					</h2>
+					<RelationshipsList elementId={entity.id} />
+					<div class="mt-3">
+						<NewRelationshipPicker sourceId={entity.id} />
+					</div>
+				</section>
+			{/if}
+		</div>
+	{/if}
 </aside>
