@@ -45,6 +45,10 @@ class FileRepository:
             return 0
         return int(data.get("rev", 0))
 
+    def exists(self, name: str) -> bool:
+        """Return True if a persisted model JSON file exists for `name`."""
+        return self._path(name, "model", "json").exists()
+
     def save_model(
         self, name: str, model: Model, expected_rev: int | None = None
     ) -> int:
@@ -60,9 +64,13 @@ class FileRepository:
             "elements": [asdict(e) for e in model.elements.values()],
             "relationships": [asdict(r) for r in model.relationships.values()],
         }
-        self._path(name, "model", "json").write_text(
-            json.dumps(data, indent=2), encoding="utf-8"
-        )
+        path = self._path(name, "model", "json")
+        # Atomic write: stage to a temp file in the same directory, then rename.
+        # A crash mid-write leaves the previous model JSON intact, preventing
+        # `current_rev` from silently falling back to 0 on corruption.
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        tmp.replace(path)
         return new_rev
 
     def load_model(self, name: str, metamodel: Metamodel) -> Model:

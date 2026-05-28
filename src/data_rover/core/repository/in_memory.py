@@ -49,3 +49,6 @@ class InMemoryRepository:
         for rel in copy.deepcopy(relationships):
             model.relationships[rel.id] = rel
         return model
+
+    def exists(self, name: str) -> bool:
+        return name in self._models
