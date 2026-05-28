@@ -2,17 +2,57 @@
 	import type { Element } from '$lib/api/types';
 	import { containmentRelTypes } from '$lib/metamodel/helpers';
 	import {
+		createTempId,
+		emit,
+		ensureTypeFilterInitialized,
 		getMetamodel,
 		getSelection,
 		getTypeFilter,
 		getWorkingModel,
-		select
+		select,
+		setTypeFilter,
+		toggleType
 	} from '$lib/state';
+	import { Filter, Plus } from '@lucide/svelte';
+	import StereotypePicker from './StereotypePicker.svelte';
 	import TreeNode from './TreeNode.svelte';
 
 	const mm = $derived(getMetamodel());
 	const working = $derived(getWorkingModel());
 	const typeFilter = $derived(getTypeFilter());
+
+	// Concrete (non-abstract) element types — the only ones that can be
+	// instantiated or that ever appear as `el.type_name` in the model.
+	const concreteTypeNames = $derived.by<string[]>(() => {
+		if (mm === null) return [];
+		return mm.elements.filter((e) => !e.abstract).map((e) => e.name);
+	});
+
+	$effect(() => {
+		if (mm !== null) ensureTypeFilterInitialized(concreteTypeNames);
+	});
+
+	let filterOpen = $state(false);
+	let createOpen = $state(false);
+
+	function onSelectAll(): void {
+		setTypeFilter(new Set(concreteTypeNames));
+	}
+
+	function onDeselectAll(): void {
+		setTypeFilter(new Set());
+	}
+
+	function onCreateElement(typeName: string): void {
+		const tempId = createTempId();
+		emit({
+			kind: 'create_element',
+			temp_id: tempId,
+			type_name: typeName,
+			properties: {}
+		});
+		select({ kind: 'element', id: tempId });
+	}
 
 	let collapsed: Set<string> = $state(new Set());
 
@@ -79,13 +119,10 @@
 	}
 
 	// `keep(id)` is true if the element passes the type filter directly OR any
-	// descendant (via containment) does. Empty filter => keep everything.
+	// descendant (via containment) does. The filter is a strict allowlist:
+	// an empty set hides all elements.
 	function buildKeepSet(): Set<string> {
 		const keep = new Set<string>();
-		if (typeFilter.size === 0) {
-			for (const el of working.elements) keep.add(el.id);
-			return keep;
-		}
 		const { childrenByParent: kids } = childrenByParent;
 		const visit = (id: string): boolean => {
 			if (keep.has(id)) return true;
@@ -196,14 +233,62 @@
 	});
 </script>
 
-<div
-	class="flex min-h-0 flex-1 flex-col gap-1 overflow-auto px-3 py-2 outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500"
-	tabindex="0"
-	role="tree"
-	aria-label="Containment tree"
-	onkeydown={onKeyDown}
->
-	<h2 class="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Tree</h2>
+<div class="flex min-h-0 flex-1 flex-col">
+	<div class="flex items-center justify-between gap-2 px-3 pt-2">
+		<h2 class="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Tree</h2>
+		{#if mm !== null}
+			<div class="flex items-center gap-0.5">
+				<StereotypePicker
+					mode="filter"
+					names={concreteTypeNames}
+					checked={typeFilter}
+					onToggle={toggleType}
+					onSelectAll={onSelectAll}
+					onDeselectAll={onDeselectAll}
+					open={filterOpen}
+					onOpenChange={(v) => (filterOpen = v)}
+					searchPlaceholder="Filter stereotypes…"
+					emptyLabel="No stereotypes."
+				>
+					{#snippet trigger()}
+						<span
+							class="inline-flex h-5 w-5 items-center justify-center rounded text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+							aria-label="Filter stereotypes"
+							title="Filter stereotypes"
+						>
+							<Filter class="h-3 w-3" />
+						</span>
+					{/snippet}
+				</StereotypePicker>
+				<StereotypePicker
+					mode="create"
+					names={concreteTypeNames}
+					onPick={onCreateElement}
+					open={createOpen}
+					onOpenChange={(v) => (createOpen = v)}
+					searchPlaceholder="Search stereotypes…"
+					emptyLabel="No stereotypes."
+				>
+					{#snippet trigger()}
+						<span
+							class="inline-flex h-5 w-5 items-center justify-center rounded text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+							aria-label="New element"
+							title="New element"
+						>
+							<Plus class="h-3 w-3" />
+						</span>
+					{/snippet}
+				</StereotypePicker>
+			</div>
+		{/if}
+	</div>
+	<div
+		class="flex min-h-0 flex-1 flex-col gap-1 overflow-auto px-3 py-2 outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500"
+		tabindex="0"
+		role="tree"
+		aria-label="Containment tree"
+		onkeydown={onKeyDown}
+	>
 	{#if mm === null}
 		<p class="text-xs text-zinc-600">Load a metamodel and model to begin.</p>
 	{:else if working.elements.length === 0}
@@ -228,4 +313,5 @@
 			{/each}
 		</ul>
 	{/if}
+	</div>
 </div>

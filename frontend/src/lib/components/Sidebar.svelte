@@ -3,7 +3,6 @@
 	import { getBaseline, getMetamodel } from '$lib/state';
 	import ContainmentTree from './Sidebar/ContainmentTree.svelte';
 	import Search from './Sidebar/Search.svelte';
-	import TypeFilter from './Sidebar/TypeFilter.svelte';
 
 	const mm = $derived(getMetamodel());
 	const baseline = $derived(getBaseline());
@@ -18,8 +17,6 @@
 		</section>
 	{:else}
 		<Search />
-		<Separator class="bg-zinc-800" />
-		<TypeFilter />
 		<Separator class="bg-zinc-800" />
 		<ContainmentTree />
 	{/if}

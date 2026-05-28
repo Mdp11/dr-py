@@ -38,11 +38,13 @@ ruff check {% if check_only == 'false' %}--fix{% endif %} .
 mypy .
 pyright
 """
+cwd = "src/data_rover/core"
 default-environment = "core-dev"
 
 [feature.core-dev.tasks.format-core]
 args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
 cmd = "ruff format {% if check_only == 'true' %}--check{% endif %} ."
+cwd = "src/data_rover/core"
 default-environment = "core-dev"
 
 [feature.core-dev.tasks.tidy-core]
@@ -56,8 +58,17 @@ depends-on = [
 [feature.frontend.dependencies]
 nodejs = "22.*"
 
+[feature.frontend.tasks.start-frontend]
+args = [
+    { arg = "metamodel", default = "examples/smart-city.metamodel.yaml" },
+    { arg = "model", default = "examples/smart-city.model.json" },
+]
+cmd = """
+AUTOLOAD_METAMODEL_PATH="{{ metamodel }}" AUTOLOAD_MODEL_PATH="{{ model }}" npm run dev
+"""
+cwd = "frontend"
+
 [feature.frontend.tasks]
-start-frontend = { cmd = "npm run dev", cwd = "frontend" }
 frontend-build = { cmd = "npm run build", cwd = "frontend" }
 frontend-install = { cmd = "npm install", cwd = "frontend" }
 
