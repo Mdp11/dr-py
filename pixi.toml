@@ -23,7 +23,11 @@ default-environment = "core-dev"
 
 [feature.core-dev.tasks.lint-core]
 args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
-cmd = "ruff check {% if check_only == 'false' %}--fix{% endif %} . && mypy ."
+cmd = """
+ruff check {% if check_only == 'false' %}--fix{% endif %} .
+mypy .
+pyright
+"""
 default-environment = "core-dev"
 
 [feature.core-dev.tasks.format-core]
@@ -35,8 +39,8 @@ default-environment = "core-dev"
 args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
 cmd = "true"
 depends-on = [
-    { task = "lint-core", args = [{ check_only = "{{ check_only }}" }]},
     { task = "format-core", args = [{ check_only = "{{ check_only }}" }] },
+    { task = "lint-core", args = [{ check_only = "{{ check_only }}" }]},
 ]
 
 [environments]

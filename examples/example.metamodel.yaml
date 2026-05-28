@@ -5,6 +5,7 @@ elements:
     abstract: true
     properties:
       - {name: name, datatype: string, multiplicity: "1"}
+    key: [name]
   - name: Requirement
     extends: NamedElement
     properties:

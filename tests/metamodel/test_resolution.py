@@ -63,3 +63,52 @@ def test_effective_relationship_containment_inherited():
 def test_is_relationship_subtype():
     mm = _mm()
     assert mm.is_relationship_subtype("HasPart", "Link") is True
+
+
+def test_effective_element_key_none_when_undeclared():
+    mm = _mm()
+    assert mm.effective_element_key("Block") is None
+
+
+def test_effective_element_key_inherited_from_ancestor():
+    mm = Metamodel(
+        elements=[
+            ElementType(
+                name="NamedElement",
+                abstract=True,
+                properties=[
+                    PropertyDef(name="name", datatype="string", multiplicity="1")
+                ],
+                key=["name"],
+            ),
+            ElementType(name="Block", extends="NamedElement"),
+            ElementType(name="CpuBlock", extends="Block"),
+        ]
+    )
+    assert mm.effective_element_key("NamedElement") == ["name"]
+    assert mm.effective_element_key("Block") == ["name"]
+    assert mm.effective_element_key("CpuBlock") == ["name"]
+
+
+def test_effective_element_key_child_overrides_ancestor():
+    mm = Metamodel(
+        elements=[
+            ElementType(
+                name="NamedElement",
+                abstract=True,
+                properties=[
+                    PropertyDef(name="name", datatype="string", multiplicity="1")
+                ],
+                key=["name"],
+            ),
+            ElementType(
+                name="Document",
+                extends="NamedElement",
+                properties=[
+                    PropertyDef(name="isbn", datatype="string", multiplicity="1")
+                ],
+                key=["isbn"],
+            ),
+        ]
+    )
+    assert mm.effective_element_key("Document") == ["isbn"]

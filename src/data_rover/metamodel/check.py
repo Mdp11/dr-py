@@ -74,6 +74,20 @@ def check_metamodel(mm: Metamodel) -> list[str]:
     errors.extend(_check_extend_cycles(mm.relationships, mm.relationship_type))
 
     for et in mm.elements:
+        if et.key is not None:
+            if len(et.key) == 0:
+                errors.append(
+                    f"Element {et.name!r}: key must be non-empty (omit to mean 'no key')"
+                )
+            else:
+                effective = {p.name for p in mm.effective_element_properties(et.name)}
+                for k in et.key:
+                    if k not in effective:
+                        errors.append(
+                            f"Element {et.name!r}: key references unknown property {k!r}"
+                        )
+
+    for et in mm.elements:
         e_ancestor_props: dict[str, str] = {}
         for ancestor_name in mm.element_ancestors(et.name)[1:]:
             e_ancestor = mm.element_type(ancestor_name)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from ..containment_context import containment_parents
 from ..issue import Issue, Severity
 from ..scope import Scope
 
@@ -7,15 +8,9 @@ from ..scope import Scope
 class ContainmentValidator:
     def validate(self, model, scope: Scope) -> list[Issue]:
         issues: list[Issue] = []
-        mm = model.metamodel
-        containment_rels = [
-            r for r in model.relationships.values() if mm.is_containment(r.type_name)
-        ]
+        parents = containment_parents(model)
 
         # single-parent: each target contained at most once
-        parents: dict[str, list[str]] = {}
-        for r in containment_rels:
-            parents.setdefault(r.target_id, []).append(r.source_id)
         for target_id, srcs in parents.items():
             if len(srcs) > 1 and scope.includes(target_id):
                 issues.append(
