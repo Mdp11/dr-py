@@ -17,13 +17,19 @@ class EndpointTypingValidator:
             src = model.elements.get(rel.source_id)
             tgt = model.elements.get(rel.target_id)
             if src is not None and not mm.is_element_subtype(src.type_name, rt.source):
-                issues.append(Issue(
-                    Severity.ERROR,
-                    f"{rt.name}: source {src.type_name} is not a {rt.source}",
-                    [rel.id]))
+                issues.append(
+                    Issue(
+                        Severity.ERROR,
+                        f"{rt.name}: source {src.type_name} is not a {rt.source}",
+                        [rel.id],
+                    )
+                )
             if tgt is not None and not mm.is_element_subtype(tgt.type_name, rt.target):
-                issues.append(Issue(
-                    Severity.ERROR,
-                    f"{rt.name}: target {tgt.type_name} is not a {rt.target}",
-                    [rel.id]))
+                issues.append(
+                    Issue(
+                        Severity.ERROR,
+                        f"{rt.name}: target {tgt.type_name} is not a {rt.target}",
+                        [rel.id],
+                    )
+                )
         return issues

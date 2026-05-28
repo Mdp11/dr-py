@@ -10,22 +10,21 @@ def _valid_datatype(mm: Metamodel, datatype: str) -> bool:
     return datatype in PRIMITIVES or datatype in mm.enums
 
 
-def _check_properties(mm: Metamodel, owner: str, props: list[PropertyDef],
-                      errors: list[str]) -> None:
+def _check_properties(
+    mm: Metamodel, owner: str, props: list[PropertyDef], errors: list[str]
+) -> None:
     for p in props:
         if not _valid_datatype(mm, p.datatype):
             errors.append(f"{owner}.{p.name}: unknown datatype {p.datatype!r}")
         try:
             Multiplicity.parse(p.multiplicity)
         except ValueError:
-            errors.append(
-                f"{owner}.{p.name}: invalid multiplicity {p.multiplicity!r}")
+            errors.append(f"{owner}.{p.name}: invalid multiplicity {p.multiplicity!r}")
         if p.pattern is not None:
             try:
                 re.compile(p.pattern)
             except re.error:
-                errors.append(
-                    f"{owner}.{p.name}: invalid regex pattern {p.pattern!r}")
+                errors.append(f"{owner}.{p.name}: invalid regex pattern {p.pattern!r}")
 
 
 def check_metamodel(mm: Metamodel) -> list[str]:
@@ -53,26 +52,60 @@ def check_metamodel(mm: Metamodel) -> list[str]:
         if node is not None:  # re-entered a visited node => cycle starting at `node`
             if node not in in_cycle:
                 errors.append(f"Inheritance cycle involving element {node!r}")
-            for member in visited[visited.index(node):]:
+            for member in visited[visited.index(node) :]:
                 in_cycle.add(member)
+
+    for et in mm.elements:
+        e_ancestor_props: dict[str, str] = {}
+        for ancestor_name in mm.element_ancestors(et.name)[1:]:
+            e_ancestor = mm.element_type(ancestor_name)
+            if e_ancestor is None:
+                continue
+            for p in e_ancestor.properties:
+                e_ancestor_props.setdefault(p.name, ancestor_name)
+        for p in et.properties:
+            if p.name in e_ancestor_props:
+                errors.append(
+                    f"Element {et.name!r} redefines property {p.name!r} "
+                    f"from ancestor {e_ancestor_props[p.name]!r}"
+                )
 
     rel_names = {r.name for r in mm.relationships}
     for rt in mm.relationships:
         if rt.extends is not None and rt.extends not in rel_names:
             errors.append(
-                f"Relationship {rt.name!r} extends unknown type {rt.extends!r}")
+                f"Relationship {rt.name!r} extends unknown type {rt.extends!r}"
+            )
         if rt.source not in element_names:
-            errors.append(f"Relationship {rt.name!r} source {rt.source!r} "
-                          "is not an element type")
+            errors.append(
+                f"Relationship {rt.name!r} source {rt.source!r} is not an element type"
+            )
         if rt.target not in element_names:
-            errors.append(f"Relationship {rt.name!r} target {rt.target!r} "
-                          "is not an element type")
+            errors.append(
+                f"Relationship {rt.name!r} target {rt.target!r} is not an element type"
+            )
         for spec in (rt.source_multiplicity, rt.target_multiplicity):
             try:
                 Multiplicity.parse(spec)
             except ValueError:
                 errors.append(
-                    f"Relationship {rt.name!r}: invalid multiplicity {spec!r}")
+                    f"Relationship {rt.name!r}: invalid multiplicity {spec!r}"
+                )
         _check_properties(mm, rt.name, rt.properties, errors)
+
+    for rt in mm.relationships:
+        r_ancestor_props: dict[str, str] = {}
+        for ancestor_name in mm.relationship_ancestors(rt.name)[1:]:
+            r_ancestor = mm.relationship_type(ancestor_name)
+            if r_ancestor is None:
+                continue
+            for p in r_ancestor.properties:
+                r_ancestor_props.setdefault(p.name, ancestor_name)
+        for p in rt.properties:
+            if p.name in r_ancestor_props:
+                errors.append(
+                    f"Relationship {rt.name!r} redefines property {p.name!r} "
+                    f"from ancestor {r_ancestor_props[p.name]!r}"
+                )
 
     return errors

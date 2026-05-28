@@ -27,18 +27,29 @@ class FacetsValidator:
         out: list[Issue] = []
         if isinstance(item, (int, float)) and not isinstance(item, bool):
             if pdef.min is not None and item < pdef.min:
-                out.append(Issue(Severity.ERROR,
-                                 f"{name}: {item} below min {pdef.min}", [eid]))
+                out.append(
+                    Issue(Severity.ERROR, f"{name}: {item} below min {pdef.min}", [eid])
+                )
             if pdef.max is not None and item > pdef.max:
-                out.append(Issue(Severity.ERROR,
-                                 f"{name}: {item} above max {pdef.max}", [eid]))
+                out.append(
+                    Issue(Severity.ERROR, f"{name}: {item} above max {pdef.max}", [eid])
+                )
         if isinstance(item, str):
             if pdef.pattern is not None and not re.fullmatch(pdef.pattern, item):
-                out.append(Issue(Severity.ERROR,
-                                 f"{name}: {item!r} does not match pattern "
-                                 f"{pdef.pattern!r}", [eid]))
+                out.append(
+                    Issue(
+                        Severity.ERROR,
+                        f"{name}: {item!r} does not match pattern {pdef.pattern!r}",
+                        [eid],
+                    )
+                )
             if pdef.max_length is not None and len(item) > pdef.max_length:
-                out.append(Issue(Severity.ERROR,
-                                 f"{name}: length {len(item)} exceeds "
-                                 f"max_length {pdef.max_length}", [eid]))
+                out.append(
+                    Issue(
+                        Severity.ERROR,
+                        f"{name}: length {len(item)} exceeds "
+                        f"max_length {pdef.max_length}",
+                        [eid],
+                    )
+                )
         return out

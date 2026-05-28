@@ -31,7 +31,7 @@ def test_optimistic_conflict_on_stale_expected_rev():
     repo = InMemoryRepository()
     mm = _mm()
     model = Model(mm)
-    rev = repo.save_model("m1", model)          # rev 1
+    rev = repo.save_model("m1", model)  # rev 1
     repo.save_model("m1", model, expected_rev=rev)  # ok -> rev 2
     with pytest.raises(ConflictError):
         repo.save_model("m1", model, expected_rev=rev)  # stale

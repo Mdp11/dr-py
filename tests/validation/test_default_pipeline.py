@@ -4,8 +4,16 @@ from data_rover.validation.pipeline import default_pipeline
 
 
 def test_default_pipeline_runs_all_first_cut_validators():
-    mm = Metamodel(elements=[ElementType(name="Block", properties=[
-        PropertyDef(name="name", datatype="string", multiplicity="1")])])
+    mm = Metamodel(
+        elements=[
+            ElementType(
+                name="Block",
+                properties=[
+                    PropertyDef(name="name", datatype="string", multiplicity="1")
+                ],
+            )
+        ]
+    )
     model = Model(mm)
     model.create_element("Block")  # missing required name -> multiplicity error
     issues = default_pipeline().validate(model)

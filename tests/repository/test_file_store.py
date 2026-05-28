@@ -6,8 +6,11 @@ from data_rover.repository.file_store import FileRepository
 def _mm():
     return Metamodel(
         elements=[ElementType(name="Block")],
-        relationships=[RelationshipType(name="HasPart", containment=True,
-                                        source="Block", target="Block")],
+        relationships=[
+            RelationshipType(
+                name="HasPart", containment=True, source="Block", target="Block"
+            )
+        ],
     )
 
 

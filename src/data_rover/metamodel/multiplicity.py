@@ -24,7 +24,7 @@ class Multiplicity:
         return True
 
     @staticmethod
-    def parse(spec: str) -> "Multiplicity":
+    def parse(spec: str) -> Multiplicity:
         spec = spec.strip()
         try:
             if ".." in spec:

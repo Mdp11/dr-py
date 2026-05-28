@@ -13,8 +13,9 @@ def _model():
             ElementType(name="Requirement"),
             ElementType(name="SubComponent", extends="Component"),
         ],
-        relationships=[RelationshipType(name="Satisfies", source="Component",
-                                        target="Requirement")],
+        relationships=[
+            RelationshipType(name="Satisfies", source="Component", target="Requirement")
+        ],
     )
     return Model(mm)
 

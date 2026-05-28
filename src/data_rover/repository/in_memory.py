@@ -22,13 +22,15 @@ class InMemoryRepository:
             raise KeyError(f"No metamodel named {name!r}")
         return self._metamodels[name].model_copy(deep=True)
 
-    def save_model(self, name: str, model: Model,
-                   expected_rev: int | None = None) -> int:
+    def save_model(
+        self, name: str, model: Model, expected_rev: int | None = None
+    ) -> int:
         current_rev = self._models[name][0] if name in self._models else 0
         if expected_rev is not None and expected_rev != current_rev:
             raise ConflictError(
                 f"Stale write to {name!r}: expected rev {expected_rev}, "
-                f"current {current_rev}")
+                f"current {current_rev}"
+            )
         new_rev = current_rev + 1
         self._models[name] = (
             new_rev,

@@ -7,8 +7,11 @@ from data_rover.validation.validators.containment import ContainmentValidator
 def _model():
     mm = Metamodel(
         elements=[ElementType(name="Block")],
-        relationships=[RelationshipType(name="HasPart", containment=True,
-                                        source="Block", target="Block")],
+        relationships=[
+            RelationshipType(
+                name="HasPart", containment=True, source="Block", target="Block"
+            )
+        ],
     )
     return Model(mm)
 

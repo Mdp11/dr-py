@@ -6,11 +6,39 @@ authors = ["Mattia Di Pietro <mattia.dipi@gmail.com>"]
 channels = ["conda-forge"]
 platforms = ["linux-64"]
 
-[dependencies]
-python = ">=3.10"
-pydantic = ">=2.6"
-pyyaml = ">=6.0"
-pytest = ">=8.0"
+[feature.core.dependencies]
+python = "3.14.*"
+pydantic = "2.13.*"
+pyyaml = "6.0.*"
+types-pyyaml = "6.0.*"
 
-[tasks]
-test = "pytest"
+[feature.core-dev.dependencies]
+pytest = "9.0.*"
+ruff = "0.15.*"
+mypy = "1.20.*"
+
+[feature.core-dev.tasks.test-core]
+cmd = "pytest"
+default-environment = "core-dev"
+
+[feature.core-dev.tasks.lint-core]
+args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
+cmd = "ruff check {% if check_only == 'false' %}--fix{% endif %} . && mypy ."
+default-environment = "core-dev"
+
+[feature.core-dev.tasks.format-core]
+args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
+cmd = "ruff format {% if check_only == 'true' %}--check{% endif %} ."
+default-environment = "core-dev"
+
+[feature.core-dev.tasks.tidy-core]
+args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
+cmd = "true"
+depends-on = [
+    { task = "lint-core", args = [{ check_only = "{{ check_only }}" }]},
+    { task = "format-core", args = [{ check_only = "{{ check_only }}" }] },
+]
+
+[environments]
+core = { features = ["core"]}
+core-dev = { features = ["core", "core-dev"]}

@@ -32,14 +32,16 @@ class FileRepository:
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         return Metamodel.model_validate(data)
 
-    def save_model(self, name: str, model: Model,
-                   expected_rev: int | None = None) -> int:
+    def save_model(
+        self, name: str, model: Model, expected_rev: int | None = None
+    ) -> int:
         data = {
             "elements": [asdict(e) for e in model.elements.values()],
             "relationships": [asdict(r) for r in model.relationships.values()],
         }
         self._path(name, "model").write_text(
-            yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+            yaml.safe_dump(data, sort_keys=False), encoding="utf-8"
+        )
         # Optimistic-concurrency rev tracking is deferred for the file adapter
         # (see design spec §6/§8); expected_rev is accepted to satisfy the port
         # but not yet enforced here.

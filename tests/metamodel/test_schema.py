@@ -16,14 +16,19 @@ def test_build_metamodel():
     mm = Metamodel(
         enums={"Status": ["Draft", "Approved"]},
         elements=[
-            ElementType(name="NamedElement", abstract=True,
-                        properties=[PropertyDef(name="name", datatype="string",
-                                                multiplicity="1")]),
+            ElementType(
+                name="NamedElement",
+                abstract=True,
+                properties=[
+                    PropertyDef(name="name", datatype="string", multiplicity="1")
+                ],
+            ),
             ElementType(name="Block", extends="NamedElement"),
         ],
         relationships=[
-            RelationshipType(name="HasPart", containment=True,
-                             source="Block", target="Block"),
+            RelationshipType(
+                name="HasPart", containment=True, source="Block", target="Block"
+            ),
         ],
     )
     assert mm.element_type("Block").extends == "NamedElement"
