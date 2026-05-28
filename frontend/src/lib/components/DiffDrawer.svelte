@@ -19,6 +19,7 @@
 	import { saveJsonToFile } from '$lib/util/fileSave';
 	import { AlertTriangle } from '@lucide/svelte';
 	import { saveCurrentModel, type SaveResult } from '$lib/state/save';
+	import { saveWithOptionalCr } from '$lib/state/cr';
 	import DiffRow from './DiffRow.svelte';
 
 	type Props = { open: boolean };
@@ -42,6 +43,8 @@
 
 	let saving = $state(false);
 	let lastResult: SaveResult | null = $state(null);
+	let exportCr = $state(false);
+	let crNotice: { kind: 'cancelled' | 'failed'; message: string } | null = $state(null);
 
 	const issueIndex = $derived(indexIssues(getIssues()));
 	const pendingEntityIds = $derived.by(() => {
@@ -67,6 +70,8 @@
 		open = next;
 		if (!next) {
 			lastResult = null;
+			crNotice = null;
+			exportCr = false;
 		}
 	}
 
@@ -74,24 +79,52 @@
 		if (!baseline) return;
 		saving = true;
 		lastResult = null;
+		crNotice = null;
+		const baselineAtSaveTime = baseline;
+		const filenameAtSaveTime = filename;
 		try {
-			const result = await saveCurrentModel(getWorkingModel());
-			lastResult = result;
-			if (!result.ok) return;
+			const outcome = await saveWithOptionalCr({
+				working: getWorkingModel(),
+				baseline: baselineAtSaveTime,
+				baselineFilename: filenameAtSaveTime,
+				fileHandle: getFileHandle(),
+				exportCr,
+				saveModel: saveCurrentModel,
+				saveFile: saveJsonToFile
+			});
 
-			const suggested = filename ?? 'model.json';
-			const saved = await saveJsonToFile(result.model, suggested, getFileHandle());
-			setBaseline(result.model);
-			setFilename(saved.filename);
-			setFileHandle(saved.handle);
-			resetOps();
-			clearIssues();
-			open = false;
-		} catch (err) {
-			if (err instanceof DOMException && err.name === 'AbortError') {
-				// User cancelled the save dialog; treat as no-op.
+			if (outcome.kind === 'save-failed') {
+				lastResult = outcome.result;
 				return;
 			}
+
+			// All non-save-failed branches mean the model was saved; apply state.
+			setBaseline(outcome.savedModel);
+			setFilename(outcome.savedFilename);
+			setFileHandle(outcome.savedHandle);
+			resetOps();
+			clearIssues();
+
+			if (outcome.kind === 'saved') {
+				open = false;
+				return;
+			}
+			if (outcome.kind === 'saved-cr-cancelled') {
+				crNotice = {
+					kind: 'cancelled',
+					message: 'Model saved. CR export cancelled.'
+				};
+				return;
+			}
+			// saved-cr-failed
+			crNotice = {
+				kind: 'failed',
+				message: `Model saved. CR export failed: ${outcome.message}`
+			};
+		} catch (err) {
+			// saveWithOptionalCr should not throw for the AbortError case
+			// (it's caught internally), but a non-Error throw or programmer
+			// error should still surface as a save failure.
 			const message = err instanceof Error ? err.message : String(err);
 			lastResult = { ok: false, kind: 'api', message };
 		} finally {
@@ -175,6 +208,27 @@
 				</span>
 			</div>
 		{/if}
+
+		{#if crNotice}
+			<div
+				class="rounded border px-3 py-2 text-xs {crNotice.kind === 'failed'
+					? 'border-red-900 bg-red-950/40 text-red-200'
+					: 'border-zinc-800 bg-zinc-900 text-zinc-200'}"
+				role={crNotice.kind === 'failed' ? 'alert' : 'status'}
+			>
+				{crNotice.message}
+			</div>
+		{/if}
+
+		<label class="flex items-center gap-2 text-xs text-zinc-300">
+			<input
+				type="checkbox"
+				class="h-3.5 w-3.5 rounded border-zinc-700 bg-zinc-900 text-indigo-500 focus:ring-2 focus:ring-indigo-500"
+				bind:checked={exportCr}
+				disabled={saving}
+			/>
+			Export CR
+		</label>
 
 		<Dialog.Footer>
 			<Button type="button" variant="ghost" onclick={close} disabled={saving}>
