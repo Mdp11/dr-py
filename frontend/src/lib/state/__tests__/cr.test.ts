@@ -178,3 +178,181 @@ describe('composeCrFilename', () => {
 		expect(out).toMatch(/^\d{8}T\d{6}_m\.cr\.json$/);
 	});
 });
+
+import { saveWithOptionalCr } from '../cr';
+import type { Snapshot } from '../ops';
+import type { SaveResult } from '../save';
+
+interface FileSaveInvocation {
+	value: unknown;
+	suggestedName: string;
+	handle: unknown;
+}
+
+function makeFileSaveStub(): {
+	stub: (value: unknown, name: string, handle: unknown) =>
+		Promise<{ filename: string; handle: null }>;
+	calls: FileSaveInvocation[];
+} {
+	const calls: FileSaveInvocation[] = [];
+	return {
+		stub: async (value, suggestedName, handle) => {
+			calls.push({ value, suggestedName, handle });
+			return { filename: suggestedName, handle: null };
+		},
+		calls
+	};
+}
+
+const EMPTY_WORKING: Snapshot = { elements: [], relationships: [] };
+const SAVED_MODEL: ModelOut = {
+	elements: [{ id: 'e1', type_name: 'Thing', properties: {}, rev: 1 }],
+	relationships: []
+};
+const OK_SAVE: SaveResult = { ok: true, model: SAVED_MODEL };
+
+const NOW = (): Date => new Date(2026, 4, 28, 14, 30, 22, 0);
+
+describe('saveWithOptionalCr', () => {
+	it('writes only the model when exportCr is false', async () => {
+		const fs = makeFileSaveStub();
+		const result = await saveWithOptionalCr({
+			working: EMPTY_WORKING,
+			baseline: { elements: [], relationships: [] },
+			baselineFilename: 'm.json',
+			fileHandle: null,
+			exportCr: false,
+			saveModel: async () => OK_SAVE,
+			saveFile: fs.stub,
+			now: NOW
+		});
+		expect(result.kind).toBe('saved');
+		expect(fs.calls).toHaveLength(1);
+		expect(fs.calls[0].value).toBe(SAVED_MODEL);
+	});
+
+	it('writes model then CR when exportCr is true', async () => {
+		const fs = makeFileSaveStub();
+		const result = await saveWithOptionalCr({
+			working: EMPTY_WORKING,
+			baseline: { elements: [], relationships: [] },
+			baselineFilename: 'myModel.json',
+			fileHandle: null,
+			exportCr: true,
+			saveModel: async () => OK_SAVE,
+			saveFile: fs.stub,
+			now: NOW
+		});
+		expect(result.kind).toBe('saved');
+		expect(fs.calls).toHaveLength(2);
+		// Model first, with original suggested name and handle reused.
+		expect(fs.calls[0].value).toBe(SAVED_MODEL);
+		expect(fs.calls[0].suggestedName).toBe('myModel.json');
+		// CR second, with the .cr.json name and a null handle (forces dialog).
+		expect(fs.calls[1].suggestedName).toBe('20260528T143022_myModel.cr.json');
+		expect(fs.calls[1].handle).toBeNull();
+		expect((fs.calls[1].value as { format: string }).format).toBe('datarover.cr/v1');
+	});
+
+	it('reuses the existing file handle when saving the model', async () => {
+		const fs = makeFileSaveStub();
+		const handle = { name: 'myModel.json' } as unknown as FileSystemFileHandle | null;
+		await saveWithOptionalCr({
+			working: EMPTY_WORKING,
+			baseline: { elements: [], relationships: [] },
+			baselineFilename: 'myModel.json',
+			fileHandle: handle,
+			exportCr: false,
+			saveModel: async () => OK_SAVE,
+			saveFile: fs.stub,
+			now: NOW
+		});
+		expect(fs.calls[0].handle).toBe(handle);
+	});
+
+	it('does not attempt the CR when the model save fails', async () => {
+		const fs = makeFileSaveStub();
+		const result = await saveWithOptionalCr({
+			working: EMPTY_WORKING,
+			baseline: { elements: [], relationships: [] },
+			baselineFilename: 'm.json',
+			fileHandle: null,
+			exportCr: true,
+			saveModel: async () => ({ ok: false, kind: 'api', message: 'boom' }),
+			saveFile: fs.stub,
+			now: NOW
+		});
+		expect(result.kind).toBe('save-failed');
+		if (result.kind === 'save-failed') {
+			expect(result.result.ok).toBe(false);
+		}
+		expect(fs.calls).toHaveLength(0);
+	});
+
+	it('does not attempt the CR when the model file write throws', async () => {
+		const result = await saveWithOptionalCr({
+			working: EMPTY_WORKING,
+			baseline: { elements: [], relationships: [] },
+			baselineFilename: 'm.json',
+			fileHandle: null,
+			exportCr: true,
+			saveModel: async () => OK_SAVE,
+			saveFile: async () => { throw new Error('disk full'); },
+			now: NOW
+		});
+		expect(result.kind).toBe('save-failed');
+		if (result.kind === 'save-failed') {
+			expect(result.result.ok).toBe(false);
+			if (!result.result.ok) {
+				expect(result.result.kind).toBe('api');
+				expect(result.result.message).toBe('disk full');
+			}
+		}
+	});
+
+	it('treats CR write AbortError as cancellation, preserves the saved model', async () => {
+		let calls = 0;
+		const result = await saveWithOptionalCr({
+			working: EMPTY_WORKING,
+			baseline: { elements: [], relationships: [] },
+			baselineFilename: 'm.json',
+			fileHandle: null,
+			exportCr: true,
+			saveModel: async () => OK_SAVE,
+			saveFile: async (_v, name) => {
+				calls++;
+				if (calls === 1) return { filename: name, handle: null };
+				throw new DOMException('user cancelled', 'AbortError');
+			},
+			now: NOW
+		});
+		expect(result.kind).toBe('saved-cr-cancelled');
+		if (result.kind === 'saved-cr-cancelled') {
+			expect(result.savedModel).toBe(SAVED_MODEL);
+			expect(result.savedFilename).toBe('m.json');
+		}
+	});
+
+	it('treats a non-AbortError CR write failure as cr-failed, preserves the saved model', async () => {
+		let calls = 0;
+		const result = await saveWithOptionalCr({
+			working: EMPTY_WORKING,
+			baseline: { elements: [], relationships: [] },
+			baselineFilename: 'm.json',
+			fileHandle: null,
+			exportCr: true,
+			saveModel: async () => OK_SAVE,
+			saveFile: async (_v, name) => {
+				calls++;
+				if (calls === 1) return { filename: name, handle: null };
+				throw new Error('quota exceeded');
+			},
+			now: NOW
+		});
+		expect(result.kind).toBe('saved-cr-failed');
+		if (result.kind === 'saved-cr-failed') {
+			expect(result.savedModel).toBe(SAVED_MODEL);
+			expect(result.message).toBe('quota exceeded');
+		}
+	});
+});
