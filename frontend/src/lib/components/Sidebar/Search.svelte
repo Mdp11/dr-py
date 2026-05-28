@@ -67,7 +67,7 @@
 					<li>
 						<button
 							type="button"
-							class="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left hover:bg-zinc-800"
+							class="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
 							onclick={() => onPick(r.el.id)}
 						>
 							<span class="truncate text-zinc-200">{r.displayName}</span>

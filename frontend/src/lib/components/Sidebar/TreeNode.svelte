@@ -12,6 +12,7 @@
 		keepSet: Set<string>;
 		collapsed: Set<string>;
 		selectedId: string | null;
+		focusedId?: string | null;
 		onToggle: (id: string) => void;
 		onPick: (id: string) => void;
 	};
@@ -24,6 +25,7 @@
 		keepSet,
 		collapsed,
 		selectedId,
+		focusedId = null,
 		onToggle,
 		onPick
 	}: Props = $props();
@@ -34,6 +36,7 @@
 	const hasChildren = $derived(visibleChildren.length > 0);
 	const isCollapsed = $derived(collapsed.has(id));
 	const isSelected = $derived(selectedId === id);
+	const isFocused = $derived(focusedId === id);
 	const issueIndex = $derived(indexIssues(getIssues()));
 	const hasError = $derived(issueIndex.errorIds.has(id));
 	const hasWarning = $derived(!hasError && issueIndex.warningIds.has(id));
@@ -49,6 +52,11 @@
 		<div
 			class="flex items-center gap-1 rounded px-1 py-0.5"
 			class:bg-zinc-800={isSelected}
+			class:ring-1={isFocused}
+			class:ring-indigo-500={isFocused}
+			role="treeitem"
+			aria-selected={isSelected}
+			aria-level={depth + 1}
 			style="padding-left: {depth * 12 + 4}px"
 		>
 			{#if hasChildren}
@@ -69,7 +77,7 @@
 			{/if}
 			<button
 				type="button"
-				class="flex flex-1 items-center gap-2 truncate text-left text-zinc-200 hover:text-zinc-50"
+				class="flex flex-1 items-center gap-2 truncate rounded text-left text-zinc-200 hover:text-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
 				class:font-medium={isSelected}
 				onclick={() => onPick(id)}
 				title={id}
@@ -96,6 +104,7 @@
 						{keepSet}
 						{collapsed}
 						{selectedId}
+						{focusedId}
 						{onToggle}
 						{onPick}
 					/>

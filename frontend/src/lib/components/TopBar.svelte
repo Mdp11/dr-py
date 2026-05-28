@@ -13,6 +13,7 @@
 		isRunning,
 		resetOps,
 		setBaseline,
+		setDiffDrawerOpen,
 		setMetamodel,
 		clearIssues
 	} from '$lib/state';
@@ -21,11 +22,9 @@
 	import { AlertCircle, AlertTriangle, ChevronDown, RefreshCw } from '@lucide/svelte';
 	import LoadMetamodelDialog from './LoadMetamodelDialog.svelte';
 	import CreateModelDialog from './CreateModelDialog.svelte';
-	import DiffDrawer from './DiffDrawer.svelte';
 
 	let uploadDialogOpen = $state(false);
 	let createModelDialogOpen = $state(false);
-	let diffDrawerOpen = $state(false);
 
 	const queryClient = useQueryClient();
 
@@ -205,14 +204,20 @@
 		<Button
 			variant="ghost"
 			size="sm"
-			class="h-7 gap-1 text-xs"
+			class="h-7 gap-1 text-xs focus-visible:ring-2 focus-visible:ring-indigo-500"
 			disabled={validateDisabled}
+			aria-busy={validating}
 			onclick={() => void runValidation()}
 		>
 			<RefreshCw class="h-3 w-3 {validating ? 'animate-spin' : ''}" />
 			Validate
 		</Button>
-		{#if lastValidateError !== null}
+		<span class="contents" aria-live="polite">
+		{#if validating}
+			<span class="rounded bg-zinc-900 px-1.5 py-0.5 font-mono text-[10px] text-zinc-300">
+				Running validation…
+			</span>
+		{:else if lastValidateError !== null}
 			<span class="rounded bg-red-950/60 px-1.5 py-0.5 font-mono text-[10px] text-red-300">
 				Validation failed
 			</span>
@@ -236,12 +241,13 @@
 				</span>
 			{/if}
 		{/if}
+		</span>
 		<Button
 			variant="ghost"
 			size="sm"
-			class="h-7 text-xs"
+			class="h-7 text-xs focus-visible:ring-2 focus-visible:ring-indigo-500"
 			disabled={saveDisabled}
-			onclick={() => (diffDrawerOpen = true)}
+			onclick={() => setDiffDrawerOpen(true)}
 		>
 			{totalChanges > 0 ? `Save (${totalChanges})` : 'Save'}
 		</Button>
@@ -259,4 +265,3 @@
 	defaultMetamodel={selectedMetamodel}
 	onCreated={onModelCreated}
 />
-<DiffDrawer bind:open={diffDrawerOpen} />
