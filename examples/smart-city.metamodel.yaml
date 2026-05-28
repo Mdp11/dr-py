@@ -1,0 +1,454 @@
+## Smart-City platform metamodel.
+##
+## Exercises every facet of the metamodel language:
+##   - 12 enums
+##   - ~45 element types with multi-level inheritance (abstract roots,
+##     diamond-free chains up to 5 levels deep)
+##   - ~30 relationship types, including 5 containment edges, 1 abstract base
+##     and 1 inherited rel type
+##   - properties with single / optional / multi-valued multiplicities
+##   - min/max/pattern/max_length facets
+##   - element-typed properties (cross-element references)
+##   - keyed element types (for uniqueness)
+##
+## Validates with `check_metamodel` and is the target schema for the
+## generated `smart-city.model.json`.
+
+enums:
+  Status: [Draft, Proposed, Approved, Active, Deprecated, Retired]
+  Criticality: [Low, Medium, High, Critical]
+  Environment: [Development, Testing, Staging, Production]
+  Protocol: [HTTP, HTTPS, MQTT, AMQP, TCP, UDP, gRPC, WebSocket]
+  DataClassification: [Public, Internal, Confidential, Restricted]
+  LifecyclePhase: [Inception, Development, Operation, Maintenance, Decommission]
+  DeploymentRegion: [NA_East, NA_West, EU_Central, EU_North, APAC, SA, AF, ME]
+  HealthState: [Unknown, Healthy, Degraded, Failed, Maintenance]
+  ComplianceStandard: [GDPR, HIPAA, SOC2, ISO27001, PCI_DSS, NIST]
+  OperatingSystem: [Linux, Windows, MacOS, RTOS, Android, iOS]
+  DeviceCategory: [Sensor, Actuator, Gateway, Edge, Controller]
+  ApprovalLevel: [Individual, TeamLead, Department, Executive, Board]
+
+elements:
+  # ---------------------------------------------------------------- abstract roots
+  - name: NamedElement
+    abstract: true
+    properties:
+      - {name: name, datatype: string, multiplicity: "1", max_length: 200}
+    key: [name]
+  - name: IdentifiedElement
+    abstract: true
+    extends: NamedElement
+    properties:
+      - {name: description, datatype: string, multiplicity: "0..1", max_length: 2000}
+      - {name: tags, datatype: string, multiplicity: "0..*", max_length: 64}
+  - name: TimestampedElement
+    abstract: true
+    extends: IdentifiedElement
+    properties:
+      - {name: created_at, datatype: date, multiplicity: "1"}
+      - {name: updated_at, datatype: date, multiplicity: "0..1"}
+  - name: VersionedElement
+    abstract: true
+    extends: TimestampedElement
+    properties:
+      - {name: version, datatype: string, multiplicity: "1", pattern: '^v?\d+\.\d+\.\d+$'}
+      - {name: status, datatype: Status, multiplicity: "1"}
+  - name: OwnedElement
+    abstract: true
+    extends: VersionedElement
+    properties:
+      - {name: priority, datatype: integer, multiplicity: "0..1", min: 1, max: 5}
+
+  # ---------------------------------------------------------------- requirements
+  - name: Requirement
+    abstract: true
+    extends: OwnedElement
+    properties:
+      - {name: criticality, datatype: Criticality, multiplicity: "1"}
+      - {name: rationale, datatype: string, multiplicity: "0..1", max_length: 1000}
+  - name: FunctionalRequirement
+    extends: Requirement
+    properties:
+      - {name: feature_id, datatype: string, multiplicity: "1", pattern: '^FR-\d{4}$'}
+      - {name: related_use_cases, datatype: UseCase, multiplicity: "0..*"}
+    key: [feature_id]
+  - name: NonFunctionalRequirement
+    extends: Requirement
+    properties:
+      - {name: metric, datatype: string, multiplicity: "1", max_length: 120}
+      - {name: target_value, datatype: float, multiplicity: "1", min: 0}
+      - {name: unit, datatype: string, multiplicity: "1", max_length: 32}
+  - name: PerformanceRequirement
+    extends: NonFunctionalRequirement
+    properties:
+      - {name: latency_p99_ms, datatype: float, multiplicity: "1", min: 0, max: 600000}
+      - {name: throughput_rps, datatype: float, multiplicity: "1", min: 0}
+  - name: ComplianceRequirement
+    extends: Requirement
+    properties:
+      - {name: standard, datatype: ComplianceStandard, multiplicity: "1"}
+      - {name: clause, datatype: string, multiplicity: "1", max_length: 64}
+  - name: SecurityRequirement
+    extends: Requirement
+    properties:
+      - {name: threat, datatype: string, multiplicity: "1", max_length: 200}
+      - {name: mitigation, datatype: string, multiplicity: "1", max_length: 500}
+  - name: UseCase
+    extends: OwnedElement
+    properties:
+      - {name: primary_actor, datatype: string, multiplicity: "1"}
+      - {name: preconditions, datatype: string, multiplicity: "0..*", max_length: 200}
+      - {name: postconditions, datatype: string, multiplicity: "0..*", max_length: 200}
+      - {name: approval_level, datatype: ApprovalLevel, multiplicity: "0..1"}
+      - {name: systems_in_scope, datatype: System, multiplicity: "0..*"}
+
+  # ---------------------------------------------------------------- stakeholders
+  - name: Stakeholder
+    abstract: true
+    extends: VersionedElement
+    properties:
+      - {name: email, datatype: string, multiplicity: "0..1", pattern: '^[^@\s]+@[^@\s]+\.[^@\s]+$'}
+  - name: Person
+    extends: Stakeholder
+    properties:
+      - {name: first_name, datatype: string, multiplicity: "1", max_length: 64}
+      - {name: last_name, datatype: string, multiplicity: "1", max_length: 64}
+      - {name: role, datatype: string, multiplicity: "0..1", max_length: 80}
+    key: [first_name, last_name]
+  - name: Team
+    extends: Stakeholder
+    properties:
+      - {name: size, datatype: integer, multiplicity: "0..1", min: 1, max: 500}
+      - {name: location, datatype: string, multiplicity: "0..1", max_length: 80}
+  - name: Organization
+    extends: Stakeholder
+    properties:
+      - {name: country, datatype: string, multiplicity: "1", max_length: 64}
+      - {name: industry, datatype: string, multiplicity: "0..1", max_length: 80}
+
+  # ---------------------------------------------------------------- systems
+  - name: System
+    abstract: true
+    extends: OwnedElement
+    properties:
+      - {name: criticality, datatype: Criticality, multiplicity: "1"}
+      - {name: lifecycle_phase, datatype: LifecyclePhase, multiplicity: "1"}
+  - name: SoftwareSystem
+    extends: System
+    properties:
+      - {name: repository_url, datatype: string, multiplicity: "0..1", pattern: '^https://.+'}
+  - name: PhysicalSystem
+    extends: System
+    properties:
+      - {name: site_code, datatype: string, multiplicity: "0..1", pattern: '^SITE-\d{3}$'}
+  - name: Subsystem
+    extends: System
+    properties:
+      - {name: discriminator, datatype: string, multiplicity: "0..1"}
+
+  # ---------------------------------------------------------------- components
+  - name: Component
+    abstract: true
+    extends: OwnedElement
+    properties:
+      - {name: api_version, datatype: string, multiplicity: "0..1", pattern: '^v\d+(\.\d+)*$'}
+  - name: Service
+    extends: Component
+    properties:
+      - {name: protocol, datatype: Protocol, multiplicity: "1"}
+      - {name: port, datatype: integer, multiplicity: "0..1", min: 1, max: 65535}
+      - {name: sla_uptime, datatype: float, multiplicity: "0..1", min: 0, max: 1}
+  - name: Microservice
+    extends: Service
+    properties:
+      - {name: language, datatype: string, multiplicity: "1", max_length: 32}
+      - {name: framework, datatype: string, multiplicity: "0..1", max_length: 64}
+      - {name: replica_count, datatype: integer, multiplicity: "1", min: 1, max: 100}
+  - name: Database
+    extends: Component
+    properties:
+      - {name: engine, datatype: string, multiplicity: "1", max_length: 32}
+      - {name: storage_gb, datatype: float, multiplicity: "1", min: 0, max: 1048576}
+      - {name: schema_version, datatype: string, multiplicity: "0..1"}
+  - name: MessageBroker
+    extends: Component
+    properties:
+      - {name: broker_protocol, datatype: Protocol, multiplicity: "1"}
+      - {name: partition_count, datatype: integer, multiplicity: "0..1", min: 1, max: 1024}
+  - name: Cache
+    extends: Component
+    properties:
+      - {name: eviction_policy, datatype: string, multiplicity: "0..1", max_length: 32}
+      - {name: memory_gb, datatype: float, multiplicity: "1", min: 0, max: 4096}
+  - name: UI
+    extends: Component
+    properties:
+      - {name: ui_framework, datatype: string, multiplicity: "1", max_length: 64}
+      - {name: locales, datatype: string, multiplicity: "0..*", max_length: 16}
+  - name: Library
+    extends: Component
+    properties:
+      - {name: package_name, datatype: string, multiplicity: "1", max_length: 100}
+      - {name: license, datatype: string, multiplicity: "0..1", max_length: 32}
+
+  # ---------------------------------------------------------------- infrastructure
+  - name: Node
+    abstract: true
+    extends: OwnedElement
+    properties:
+      - {name: hostname, datatype: string, multiplicity: "1", pattern: '^[a-z0-9][a-z0-9-]*$', max_length: 64}
+      - {name: ip_address, datatype: string, multiplicity: "0..1", pattern: '^(\d{1,3}\.){3}\d{1,3}$'}
+  - name: Server
+    extends: Node
+    properties:
+      - {name: cpu_cores, datatype: integer, multiplicity: "1", min: 1, max: 256}
+      - {name: ram_gb, datatype: float, multiplicity: "1", min: 1, max: 8192}
+      - {name: os, datatype: OperatingSystem, multiplicity: "1"}
+  - name: ContainerHost
+    extends: Server
+    properties:
+      - {name: container_runtime, datatype: string, multiplicity: "1", max_length: 32}
+  - name: VirtualMachine
+    extends: Server
+    properties:
+      - {name: hypervisor, datatype: string, multiplicity: "0..1", max_length: 32}
+  - name: IoTDevice
+    extends: Node
+    properties:
+      - {name: device_category, datatype: DeviceCategory, multiplicity: "1"}
+      - {name: firmware_version, datatype: string, multiplicity: "1", pattern: '^\d+\.\d+\.\d+$'}
+      - {name: battery_powered, datatype: boolean, multiplicity: "1"}
+  - name: EdgeGateway
+    extends: IoTDevice
+    properties:
+      - {name: max_connected_devices, datatype: integer, multiplicity: "1", min: 1, max: 10000}
+
+  - name: Cloud
+    abstract: true
+    extends: OwnedElement
+    properties:
+      - {name: provider, datatype: string, multiplicity: "1", max_length: 64}
+  - name: CloudRegion
+    extends: Cloud
+    properties:
+      - {name: region_code, datatype: DeploymentRegion, multiplicity: "1"}
+  - name: AvailabilityZone
+    extends: Cloud
+    properties:
+      - {name: az_code, datatype: string, multiplicity: "1", pattern: '^[a-z]{2,5}-\d[a-z]$'}
+
+  # ---------------------------------------------------------------- data & APIs
+  - name: DataEntity
+    extends: VersionedElement
+    properties:
+      - {name: classification, datatype: DataClassification, multiplicity: "1"}
+      - {name: retention_days, datatype: integer, multiplicity: "0..1", min: 1, max: 36500}
+      - {name: upstream_entities, datatype: DataEntity, multiplicity: "0..*"}
+  - name: DataSchema
+    extends: VersionedElement
+    properties:
+      - {name: format, datatype: string, multiplicity: "1", max_length: 32}
+      - {name: schema_text, datatype: string, multiplicity: "0..1", max_length: 10000}
+  - name: APIEndpoint
+    extends: NamedElement
+    properties:
+      - {name: path, datatype: string, multiplicity: "1", pattern: '^/.*', max_length: 200}
+      - {name: method, datatype: string, multiplicity: "1", pattern: '^(GET|POST|PUT|DELETE|PATCH)$'}
+      - {name: endpoint_protocol, datatype: Protocol, multiplicity: "1"}
+      - {name: deprecated, datatype: boolean, multiplicity: "0..1"}
+
+  # ---------------------------------------------------------------- operations
+  - name: Process
+    extends: VersionedElement
+    properties:
+      - {name: sla_minutes, datatype: integer, multiplicity: "0..1", min: 0, max: 525600}
+  - name: SLA
+    extends: VersionedElement
+    properties:
+      - {name: availability_target, datatype: float, multiplicity: "1", min: 0, max: 1}
+      - {name: response_time_ms, datatype: integer, multiplicity: "1", min: 0, max: 600000}
+  - name: Document
+    extends: VersionedElement
+    properties:
+      - {name: url, datatype: string, multiplicity: "0..1", pattern: '^https?://.+'}
+      - {name: content_type, datatype: string, multiplicity: "0..1", max_length: 64}
+  - name: Project
+    extends: OwnedElement
+    properties:
+      - {name: start_date, datatype: date, multiplicity: "1"}
+      - {name: end_date, datatype: date, multiplicity: "0..1"}
+      - {name: budget_usd, datatype: float, multiplicity: "0..1", min: 0}
+  - name: Incident
+    extends: IdentifiedElement
+    properties:
+      - {name: severity, datatype: Criticality, multiplicity: "1"}
+      - {name: opened_at, datatype: date, multiplicity: "1"}
+      - {name: resolved, datatype: boolean, multiplicity: "1"}
+  - name: Risk
+    extends: IdentifiedElement
+    properties:
+      - {name: likelihood, datatype: integer, multiplicity: "1", min: 1, max: 5}
+      - {name: impact, datatype: integer, multiplicity: "1", min: 1, max: 5}
+      - {name: risk_owner, datatype: Person, multiplicity: "0..1"}
+
+relationships:
+  # -- abstract base + two inherited trace rels (exercise rel inheritance) ----
+  - name: Trace
+    abstract: true
+    source: VersionedElement
+    target: VersionedElement
+  - name: Refines
+    extends: Trace
+    source: Requirement
+    target: Requirement
+    source_multiplicity: "0..*"
+    target_multiplicity: "0..*"
+  - name: DerivedFrom
+    extends: Trace
+    source: Requirement
+    target: Requirement
+
+  # -- requirements <-> design --------------------------------------------------
+  - name: Satisfies
+    source: Component
+    target: Requirement
+  - name: Verifies
+    source: UseCase
+    target: Requirement
+
+  # -- organizational containment ----------------------------------------------
+  - name: Owns
+    containment: true
+    source: Organization
+    target: Team
+    source_multiplicity: "0..1"
+    target_multiplicity: "0..*"
+  - name: MemberOf
+    source: Person
+    target: Team
+    properties:
+      - {name: since, datatype: date, multiplicity: "0..1"}
+      - {name: is_lead, datatype: boolean, multiplicity: "0..1"}
+  - name: Responsible
+    source: Stakeholder
+    target: System
+    properties:
+      - {name: role, datatype: string, multiplicity: "0..1", max_length: 64}
+      - {name: since, datatype: date, multiplicity: "0..1"}
+
+  # -- system / component composition ------------------------------------------
+  - name: SystemContainsComponent
+    containment: true
+    source: System
+    target: Component
+    source_multiplicity: "0..1"
+    target_multiplicity: "0..*"
+  - name: DependsOn
+    source: Component
+    target: Component
+    properties:
+      - {name: critical, datatype: boolean, multiplicity: "0..1"}
+      - {name: version_constraint, datatype: string, multiplicity: "0..1", max_length: 64}
+  - name: UsesDatabase
+    extends: DependsOn
+    source: Microservice
+    target: Database
+  - name: ConnectsTo
+    source: Service
+    target: Service
+    properties:
+      - {name: transport_protocol, datatype: Protocol, multiplicity: "1"}
+      - {name: latency_ms_avg, datatype: float, multiplicity: "0..1", min: 0, max: 600000}
+  - name: CachedBy
+    source: Microservice
+    target: Cache
+    properties:
+      - {name: ttl_seconds, datatype: integer, multiplicity: "0..1", min: 0, max: 31536000}
+  - name: PublishesTo
+    source: Microservice
+    target: MessageBroker
+    properties:
+      - {name: topic, datatype: string, multiplicity: "1", max_length: 100}
+  - name: SubscribesTo
+    source: Microservice
+    target: MessageBroker
+    properties:
+      - {name: topic, datatype: string, multiplicity: "1", max_length: 100}
+      - {name: queue_group, datatype: string, multiplicity: "0..1", max_length: 100}
+
+  # -- deployment / hosting ----------------------------------------------------
+  - name: DeployedOn
+    source: Component
+    target: Node
+    properties:
+      - {name: environment, datatype: Environment, multiplicity: "1"}
+      - {name: since, datatype: date, multiplicity: "0..1"}
+  - name: HostedIn
+    source: Node
+    target: Cloud
+    properties:
+      - {name: region_code, datatype: DeploymentRegion, multiplicity: "0..1"}
+  - name: HasZone
+    containment: true
+    source: CloudRegion
+    target: AvailabilityZone
+    source_multiplicity: "1"
+    target_multiplicity: "0..*"
+  - name: GatewayServes
+    containment: true
+    source: EdgeGateway
+    target: IoTDevice
+    source_multiplicity: "0..1"
+    target_multiplicity: "0..*"
+
+  # -- API surface -------------------------------------------------------------
+  - name: ExposesEndpoint
+    containment: true
+    source: Service
+    target: APIEndpoint
+    source_multiplicity: "0..1"
+    target_multiplicity: "0..*"
+  - name: DefinedBy
+    source: APIEndpoint
+    target: DataSchema
+    source_multiplicity: "0..*"
+    target_multiplicity: "0..2"
+    properties:
+      - {name: role, datatype: string, multiplicity: "1", pattern: '^(request|response)$'}
+
+  # -- data flow ---------------------------------------------------------------
+  - name: PersistsData
+    source: Database
+    target: DataEntity
+  - name: GovernedBySchema
+    source: DataEntity
+    target: DataSchema
+    source_multiplicity: "0..*"
+    target_multiplicity: "0..1"
+
+  # -- operations / compliance / risk ------------------------------------------
+  - name: AffectsProcess
+    source: Incident
+    target: Process
+    properties:
+      - {name: downtime_minutes, datatype: integer, multiplicity: "0..1", min: 0, max: 525600}
+  - name: Mitigates
+    source: SecurityRequirement
+    target: Risk
+  - name: AssignedTo
+    source: Risk
+    target: Person
+    source_multiplicity: "0..*"
+    target_multiplicity: "0..1"
+  - name: MustComplyWith
+    source: System
+    target: ComplianceRequirement
+  - name: AppliesUseCase
+    source: UseCase
+    target: System
+  - name: DocumentedBy
+    source: VersionedElement
+    target: Document
+  - name: PartOfProject
+    source: System
+    target: Project

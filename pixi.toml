@@ -23,7 +23,7 @@ uvicorn = "0.32.*"
 pydantic-settings = "2.6.*"
 httpx = "0.27.*"
 
-[feature.api.tasks.serve]
+[feature.api.tasks.start-backend]
 cmd = "uvicorn data_rover.api.main:app --reload --reload-dir src --host 127.0.0.1 --port 8000 --app-dir src"
 default-environment = "api"
 
@@ -57,7 +57,7 @@ depends-on = [
 nodejs = "22.*"
 
 [feature.frontend.tasks]
-frontend-dev = { cmd = "npm run dev", cwd = "frontend" }
+start-frontend = { cmd = "npm run dev", cwd = "frontend" }
 frontend-build = { cmd = "npm run build", cwd = "frontend" }
 frontend-install = { cmd = "npm install", cwd = "frontend" }
 
