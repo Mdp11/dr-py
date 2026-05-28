@@ -106,3 +106,35 @@ function partitionEntities<T>(
 		}
 	}
 }
+
+/**
+ * Produce `<TS>_<base>.cr.json`.
+ * - `<TS>` is local-time `YYYYMMDDTHHmmss`, zero-padded, no colons.
+ * - `<base>` is `modelFilename` with the trailing extension stripped.
+ * - Null or empty `modelFilename` falls back to `model`.
+ */
+export function composeCrFilename(
+	modelFilename: string | null,
+	now: () => Date = () => new Date()
+): string {
+	const base = stripExtension(modelFilename);
+	const ts = localTimestamp(now());
+	return `${ts}_${base}.cr.json`;
+}
+
+function stripExtension(filename: string | null): string {
+	if (filename === null || filename.length === 0) return 'model';
+	const dot = filename.lastIndexOf('.');
+	if (dot <= 0) return filename; // no extension or leading dot
+	return filename.slice(0, dot);
+}
+
+function localTimestamp(d: Date): string {
+	const yyyy = d.getFullYear().toString().padStart(4, '0');
+	const mm = (d.getMonth() + 1).toString().padStart(2, '0');
+	const dd = d.getDate().toString().padStart(2, '0');
+	const hh = d.getHours().toString().padStart(2, '0');
+	const mi = d.getMinutes().toString().padStart(2, '0');
+	const ss = d.getSeconds().toString().padStart(2, '0');
+	return `${yyyy}${mm}${dd}T${hh}${mi}${ss}`;
+}
