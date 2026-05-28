@@ -4,6 +4,7 @@
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import {
 		getBaseline,
+		getDiff,
 		getMetamodelName,
 		getPendingOps,
 		resetOps,
@@ -14,9 +15,11 @@
 	import { ChevronDown } from '@lucide/svelte';
 	import LoadMetamodelDialog from './LoadMetamodelDialog.svelte';
 	import CreateModelDialog from './CreateModelDialog.svelte';
+	import DiffDrawer from './DiffDrawer.svelte';
 
 	let uploadDialogOpen = $state(false);
 	let createModelDialogOpen = $state(false);
+	let diffDrawerOpen = $state(false);
 
 	const queryClient = useQueryClient();
 
@@ -32,6 +35,11 @@
 
 	const selectedMetamodel = $derived(getMetamodelName());
 	const baseline = $derived(getBaseline());
+	const diff = $derived(getDiff());
+	const totalChanges = $derived(
+		diff.counts.added + diff.counts.modified + diff.counts.deleted
+	);
+	const saveDisabled = $derived(totalChanges === 0 || baseline === null);
 	const filteredModels = $derived(
 		(modelsListQuery.data ?? []).filter(
 			(m) => selectedMetamodel === null || m.metamodel === selectedMetamodel
@@ -181,8 +189,20 @@
 
 	<div class="flex items-center gap-2">
 		<Button variant="ghost" size="sm" class="h-7 text-xs">Validate</Button>
-		<Button variant="ghost" size="sm" class="h-7 text-xs">Save</Button>
-		<span class="font-mono text-xs text-zinc-400">● 0 changes</span>
+		<Button
+			variant="ghost"
+			size="sm"
+			class="h-7 text-xs"
+			disabled={saveDisabled}
+			onclick={() => (diffDrawerOpen = true)}
+		>
+			{totalChanges > 0 ? `Save (${totalChanges})` : 'Save'}
+		</Button>
+		<span
+			class="font-mono text-xs {totalChanges > 0 ? 'text-red-400' : 'text-zinc-500'}"
+		>
+			● {totalChanges} {totalChanges === 1 ? 'change' : 'changes'}
+		</span>
 	</div>
 </header>
 
@@ -192,3 +212,4 @@
 	defaultMetamodel={selectedMetamodel}
 	onCreated={onModelCreated}
 />
+<DiffDrawer bind:open={diffDrawerOpen} />
