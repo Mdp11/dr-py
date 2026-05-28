@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Element, ModelOut, Relationship } from '$lib/api/types';
-import { buildChangeRequest } from '../cr';
+import { buildChangeRequest, composeCrFilename } from '../cr';
 
 function el(
 	id: string,
@@ -131,5 +131,50 @@ describe('buildChangeRequest', () => {
 		const cr = buildChangeRequest(model([], []), model([], []), null);
 		// Should be a valid ISO 8601 timestamp ending in Z.
 		expect(cr.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+	});
+});
+
+describe('composeCrFilename', () => {
+	// 2026-05-28 14:30:22 local time. Using a UTC fixed clock would make
+	// the assertion timezone-dependent; instead we build a Date from local
+	// components so the assertion is stable regardless of TZ.
+	const localNow = (): Date =>
+		new Date(2026, 4 /* May */, 28, 14, 30, 22, 123);
+
+	it('strips the trailing extension from the model filename', () => {
+		expect(composeCrFilename('myModel.json', localNow))
+			.toBe('20260528T143022_myModel.cr.json');
+	});
+
+	it('keeps a filename without extension as-is for the base', () => {
+		expect(composeCrFilename('myModel', localNow))
+			.toBe('20260528T143022_myModel.cr.json');
+	});
+
+	it('falls back to "model" when filename is null', () => {
+		expect(composeCrFilename(null, localNow))
+			.toBe('20260528T143022_model.cr.json');
+	});
+
+	it('falls back to "model" when filename is an empty string', () => {
+		expect(composeCrFilename('', localNow))
+			.toBe('20260528T143022_model.cr.json');
+	});
+
+	it('strips only the last extension on a multi-dot filename', () => {
+		expect(composeCrFilename('my.model.json', localNow))
+			.toBe('20260528T143022_my.model.cr.json');
+	});
+
+	it('zero-pads single-digit timestamp components', () => {
+		const padNow = (): Date =>
+			new Date(2026, 0 /* Jan */, 3, 4, 5, 6, 0);
+		expect(composeCrFilename('m.json', padNow))
+			.toBe('20260103T040506_m.cr.json');
+	});
+
+	it('uses the runtime clock when none is injected', () => {
+		const out = composeCrFilename('m.json');
+		expect(out).toMatch(/^\d{8}T\d{6}_m\.cr\.json$/);
 	});
 });
