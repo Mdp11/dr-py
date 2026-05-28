@@ -8,3 +8,8 @@ venv/
 .pixi/
 # JetBrains IDE
 .idea/
+# frontend
+frontend/node_modules
+frontend/.svelte-kit
+frontend/build
+frontend/.env.local
