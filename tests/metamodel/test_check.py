@@ -168,6 +168,36 @@ def test_relationship_property_redefinition_reported():
     )
 
 
+def test_element_type_as_datatype_is_valid():
+    mm = Metamodel(
+        elements=[
+            ElementType(name="Block"),
+            ElementType(
+                name="Req",
+                properties=[PropertyDef(name="target", datatype="Block")],
+            ),
+        ]
+    )
+    assert check_metamodel(mm) == []
+
+
+def test_name_clash_enum_and_element_reported():
+    mm = Metamodel(
+        enums={"Status": ["Draft"]},
+        elements=[ElementType(name="Status")],
+    )
+    errors = check_metamodel(mm)
+    assert any(
+        "'Status'" in e and "enum" in e and "element" in e for e in errors
+    )
+
+
+def test_name_clash_primitive_and_element_reported():
+    mm = Metamodel(elements=[ElementType(name="string")])
+    errors = check_metamodel(mm)
+    assert any("'string'" in e and "primitive" in e for e in errors)
+
+
 def test_distinct_property_names_in_child_ok():
     mm = Metamodel(
         elements=[

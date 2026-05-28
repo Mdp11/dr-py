@@ -14,14 +14,26 @@ class FacetsValidator:
             if not scope.includes(el.id):
                 continue
             defs = {p.name: p for p in mm.effective_element_properties(el.type_name)}
-            for name, value in el.properties.items():
-                pdef = defs.get(name)
-                if pdef is None or value is None:
-                    continue
-                values = value if isinstance(value, list) else [value]
-                for item in values:
-                    issues.extend(self._check(el.id, name, pdef, item))
+            issues.extend(self._check_properties(el.id, defs, el.properties))
+        for rel in model.relationships.values():
+            if not scope.includes(rel.id):
+                continue
+            defs = {
+                p.name: p for p in mm.effective_relationship_properties(rel.type_name)
+            }
+            issues.extend(self._check_properties(rel.id, defs, rel.properties))
         return issues
+
+    def _check_properties(self, owner_id, defs, properties) -> list[Issue]:
+        out: list[Issue] = []
+        for name, value in properties.items():
+            pdef = defs.get(name)
+            if pdef is None or value is None:
+                continue
+            values = value if isinstance(value, list) else [value]
+            for item in values:
+                out.extend(self._check(owner_id, name, pdef, item))
+        return out
 
     def _check(self, eid, name, pdef, item) -> list[Issue]:
         out: list[Issue] = []

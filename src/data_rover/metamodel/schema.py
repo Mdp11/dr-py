@@ -43,6 +43,9 @@ class Metamodel(BaseModel):
     def element_type(self, name: str) -> ElementType | None:
         return next((e for e in self.elements if e.name == name), None)
 
+    def is_element_type(self, name: str) -> bool:
+        return self.element_type(name) is not None
+
     def relationship_type(self, name: str) -> RelationshipType | None:
         return next((r for r in self.relationships if r.name == name), None)
 
