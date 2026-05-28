@@ -82,8 +82,9 @@ describe('buildChangeRequest', () => {
 	});
 
 	it('omits modified entries when before and after are deep-equal even if rev changed', () => {
-		// rev bumps without property changes should not appear; computeDiff
-		// only reports modified when properties differ.
+		// Characterises the buildChangeRequest -> computeDiff pass-through:
+		// computeDiff does not emit a 'modified' entry when only `rev` changed,
+		// so the CR should not contain one either.
 		const eBefore = el('e1', { name: 'A' }, 1);
 		const eAfter = el('e1', { name: 'A' }, 2);
 		const cr = buildChangeRequest(
