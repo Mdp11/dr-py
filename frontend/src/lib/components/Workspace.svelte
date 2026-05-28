@@ -1,6 +1,7 @@
 <script lang="ts">
 	import * as Tabs from '$lib/components/ui/tabs';
 	import DetailView from './Workspace/DetailView.svelte';
+	import GraphView from './Workspace/GraphView.svelte';
 
 	let activeTab = $state('detail');
 </script>
@@ -15,8 +16,8 @@
 		<Tabs.Content value="detail" class="flex-1 overflow-auto">
 			<DetailView />
 		</Tabs.Content>
-		<Tabs.Content value="graph" class="flex-1 overflow-auto p-3 text-xs text-zinc-500">
-			Graph view placeholder (T9).
+		<Tabs.Content value="graph" class="flex-1 overflow-hidden">
+			<GraphView />
 		</Tabs.Content>
 		<Tabs.Content value="issues" class="flex-1 overflow-auto p-3 text-xs text-zinc-500">
 			No validation issues yet.
