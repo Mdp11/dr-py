@@ -39,7 +39,7 @@ export function createRelationship(
 ): Promise<Relationship> {
 	return apiFetch(
 		`/models/${encodeURIComponent(modelName)}/relationships`,
-		{ method: 'POST', body: payload as unknown as BodyInit, schema: RelationshipSchema },
+		{ method: 'POST', body: payload, schema: RelationshipSchema },
 		cfg
 	);
 }
