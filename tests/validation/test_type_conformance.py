@@ -54,6 +54,34 @@ def test_value_outside_enum_is_error():
     assert any("Status" in i.message for i in issues)
 
 
+def _date_model():
+    mm = Metamodel(
+        elements=[
+            ElementType(
+                name="Org",
+                properties=[PropertyDef(name="updated_at", datatype="date")],
+            )
+        ]
+    )
+    return Model(mm)
+
+
+def test_iso_date_string_is_accepted():
+    model = _date_model()
+    el = model.create_element("Org")
+    model.set_property(el, "updated_at", "2024-01-23")
+    assert TypeConformanceValidator().validate(model, Scope.all()) == []
+
+
+def test_malformed_date_string_is_error():
+    model = _date_model()
+    el = model.create_element("Org")
+    model.set_property(el, "updated_at", "not-a-date")
+    issues = TypeConformanceValidator().validate(model, Scope.all())
+    assert len(issues) == 1
+    assert el.id in issues[0].target_ids
+
+
 def test_bool_is_not_accepted_as_integer_or_float():
     mm = Metamodel(
         elements=[

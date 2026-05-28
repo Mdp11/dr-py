@@ -1,9 +1,5 @@
 import { apiFetch, type ClientConfig } from './client';
-import {
-	IssueListSchema,
-	type InlineModel,
-	type Issue
-} from './types';
+import { IssueListSchema, type InlineModel, type Issue } from './types';
 
 export interface ValidateOptions {
 	inline?: InlineModel;
@@ -11,7 +7,6 @@ export interface ValidateOptions {
 }
 
 export function validateModel(
-	modelName: string,
 	options?: ValidateOptions,
 	cfg?: ClientConfig
 ): Promise<Issue[]> {
@@ -20,7 +15,7 @@ export function validateModel(
 			? { inline: options.inline, scope: options.scope }
 			: undefined;
 	return apiFetch(
-		`/models/${encodeURIComponent(modelName)}/validate`,
+		'/model/validate',
 		{ method: 'POST', body, schema: IssueListSchema },
 		cfg
 	);

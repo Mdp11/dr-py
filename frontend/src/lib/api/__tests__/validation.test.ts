@@ -15,7 +15,7 @@ describe('validateModel', () => {
 	it('POSTs with inline body and parses Issue[]', async () => {
 		let body: unknown;
 		server.use(
-			http.post(`${BASE}/models/m/validate`, async ({ request }) => {
+			http.post(`${BASE}/model/validate`, async ({ request }) => {
 				body = await request.json();
 				return HttpResponse.json([
 					{ severity: 'error', message: 'oops', target_ids: ['e1'] }
@@ -23,12 +23,10 @@ describe('validateModel', () => {
 			})
 		);
 		const inline = {
-			elements: [
-				{ id: 'e1', type_name: 'Block', properties: {}, rev: 0 }
-			],
+			elements: [{ id: 'e1', type_name: 'Block', properties: {}, rev: 0 }],
 			relationships: []
 		};
-		const result = await validateModel('m', { inline }, cfg);
+		const result = await validateModel({ inline }, cfg);
 		expect(body).toEqual({ inline, scope: undefined });
 		expect(result).toEqual([
 			{ severity: 'error', message: 'oops', target_ids: ['e1'] }
@@ -38,14 +36,14 @@ describe('validateModel', () => {
 	it('POSTs with scope only and parses warnings', async () => {
 		let body: unknown;
 		server.use(
-			http.post(`${BASE}/models/m/validate`, async ({ request }) => {
+			http.post(`${BASE}/model/validate`, async ({ request }) => {
 				body = await request.json();
 				return HttpResponse.json([
 					{ severity: 'warning', message: 'hint', target_ids: [] }
 				]);
 			})
 		);
-		const result = await validateModel('m', { scope: ['e1', 'e2'] }, cfg);
+		const result = await validateModel({ scope: ['e1', 'e2'] }, cfg);
 		expect(body).toEqual({ inline: undefined, scope: ['e1', 'e2'] });
 		expect(result[0].severity).toBe('warning');
 	});
@@ -54,15 +52,14 @@ describe('validateModel', () => {
 		let contentLength: string | null = null;
 		let text = '';
 		server.use(
-			http.post(`${BASE}/models/m/validate`, async ({ request }) => {
+			http.post(`${BASE}/model/validate`, async ({ request }) => {
 				contentLength = request.headers.get('content-length');
 				text = await request.text();
 				return HttpResponse.json([]);
 			})
 		);
-		const result = await validateModel('m', undefined, cfg);
+		const result = await validateModel(undefined, cfg);
 		expect(result).toEqual([]);
-		// Either no content-length or "0", and body is empty.
 		expect(text).toBe('');
 		if (contentLength !== null) {
 			expect(contentLength).toBe('0');

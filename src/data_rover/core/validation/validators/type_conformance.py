@@ -19,7 +19,17 @@ def value_conforms(value, datatype: str, metamodel: Metamodel) -> bool:
     if datatype == "float":
         return isinstance(value, (int, float)) and not isinstance(value, bool)
     if datatype == "date":
-        return isinstance(value, datetime.date)
+        if isinstance(value, datetime.date):
+            return True
+        # JSON has no native date type, so accept ISO-8601 strings as a
+        # well-defined wire format for transported model files.
+        if isinstance(value, str):
+            try:
+                datetime.date.fromisoformat(value)
+            except ValueError:
+                return False
+            return True
+        return False
     return False
 
 

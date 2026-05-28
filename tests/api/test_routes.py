@@ -5,18 +5,16 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from data_rover.api.deps import _repo_for
 from data_rover.api.main import create_app
-from data_rover.api.settings import Settings, get_settings
+from data_rover.api.session import reset_session
 
 EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "example.metamodel.yaml"
 
 
 @pytest.fixture
-def client(tmp_path: Path) -> TestClient:
+def client() -> TestClient:
+    reset_session()
     app = create_app()
-    app.dependency_overrides[get_settings] = lambda: Settings(data_dir=tmp_path)
-    _repo_for.cache_clear()
     return TestClient(app)
 
 
@@ -26,21 +24,28 @@ def test_healthz(client: TestClient) -> None:
     assert res.json() == {"status": "ok"}
 
 
-def test_full_lifecycle(client: TestClient, tmp_path: Path) -> None:
+def _upload_example_metamodel(client: TestClient) -> None:
     yaml_text = EXAMPLE.read_text(encoding="utf-8")
-    res = client.put(
-        "/api/v1/metamodels/example",
+    res = client.post(
+        "/api/v1/metamodel",
         content=yaml_text,
         headers={"content-type": "application/x-yaml"},
     )
     assert res.status_code == 200, res.text
-    assert (tmp_path / "example.metamodel.yaml").exists()
 
-    res = client.get("/api/v1/metamodels")
-    assert res.status_code == 200
-    assert res.json() == ["example"]
 
-    res = client.get("/api/v1/metamodels/example")
+def _empty_model(client: TestClient) -> None:
+    res = client.post(
+        "/api/v1/model",
+        json={"elements": [], "relationships": []},
+    )
+    assert res.status_code == 200, res.text
+
+
+def test_full_lifecycle(client: TestClient) -> None:
+    _upload_example_metamodel(client)
+
+    res = client.get("/api/v1/metamodel")
     assert res.status_code == 200
     assert {e["name"] for e in res.json()["elements"]} == {
         "NamedElement",
@@ -48,16 +53,10 @@ def test_full_lifecycle(client: TestClient, tmp_path: Path) -> None:
         "Block",
     }
 
-    res = client.post(
-        "/api/v1/models",
-        json={"name": "demo", "metamodel": "example"},
-    )
-    assert res.status_code == 201, res.text
-    assert (tmp_path / "demo.model.json").exists()
-    assert (tmp_path / "_models.json").exists()
+    _empty_model(client)
 
     res = client.post(
-        "/api/v1/models/demo/elements",
+        "/api/v1/model/elements",
         json={
             "type": "Block",
             "properties": {"name": "Wing", "mass": 12.5},
@@ -69,7 +68,7 @@ def test_full_lifecycle(client: TestClient, tmp_path: Path) -> None:
     assert block["properties"] == {"name": "Wing", "mass": 12.5}
 
     res = client.post(
-        "/api/v1/models/demo/elements",
+        "/api/v1/model/elements",
         json={
             "type": "Requirement",
             "properties": {"name": "REQ-1", "status": "Draft", "priority": 3},
@@ -79,7 +78,7 @@ def test_full_lifecycle(client: TestClient, tmp_path: Path) -> None:
     req = res.json()
 
     res = client.post(
-        "/api/v1/models/demo/relationships",
+        "/api/v1/model/relationships",
         json={"type": "Satisfies", "source_id": block["id"], "target_id": req["id"]},
     )
     assert res.status_code == 201, res.text
@@ -87,46 +86,71 @@ def test_full_lifecycle(client: TestClient, tmp_path: Path) -> None:
     assert rel["type_name"] == "Satisfies"
 
     res = client.patch(
-        f"/api/v1/models/demo/elements/{block['id']}",
+        f"/api/v1/model/elements/{block['id']}",
         json={"properties": {"mass": 13.0}},
     )
     assert res.status_code == 200
     assert res.json()["properties"]["mass"] == 13.0
 
-    res = client.get("/api/v1/models/demo")
+    res = client.get("/api/v1/model")
     assert res.status_code == 200
     snapshot = res.json()
     assert len(snapshot["elements"]) == 2
     assert len(snapshot["relationships"]) == 1
 
-    res = client.get("/api/v1/models/demo/elements", params={"type": "Block"})
+    res = client.get("/api/v1/model/elements", params={"type": "Block"})
     assert res.status_code == 200
     assert len(res.json()) == 1
 
-    res = client.post("/api/v1/models/demo/validate")
+    res = client.post("/api/v1/model/validate")
     assert res.status_code == 200
     assert res.json() == []
 
-    res = client.delete(f"/api/v1/models/demo/relationships/{rel['id']}")
+    res = client.delete(f"/api/v1/model/relationships/{rel['id']}")
     assert res.status_code == 204
 
-    res = client.delete(f"/api/v1/models/demo/elements/{block['id']}")
+    res = client.delete(f"/api/v1/model/elements/{block['id']}")
     assert res.status_code == 204
 
-    res = client.get("/api/v1/models/demo")
+    res = client.get("/api/v1/model")
     assert res.status_code == 200
     assert len(res.json()["elements"]) == 1
     assert res.json()["relationships"] == []
 
 
-def test_404_on_missing_model(client: TestClient) -> None:
-    res = client.get("/api/v1/models/nope")
+def test_404_when_no_metamodel_loaded(client: TestClient) -> None:
+    res = client.get("/api/v1/metamodel")
+    assert res.status_code == 404
+
+
+def test_404_when_no_model_loaded(client: TestClient) -> None:
+    _upload_example_metamodel(client)
+    res = client.get("/api/v1/model")
+    assert res.status_code == 404
+
+
+def test_upload_model_requires_metamodel(client: TestClient) -> None:
+    res = client.post("/api/v1/model", json={"elements": [], "relationships": []})
+    assert res.status_code == 404
+
+
+def test_upload_metamodel_clears_model(client: TestClient) -> None:
+    _upload_example_metamodel(client)
+    _empty_model(client)
+    res = client.post(
+        "/api/v1/model/elements",
+        json={"type": "Block", "properties": {"name": "X", "mass": 1.0}},
+    )
+    assert res.status_code == 201
+    # Re-upload metamodel; model should be cleared.
+    _upload_example_metamodel(client)
+    res = client.get("/api/v1/model")
     assert res.status_code == 404
 
 
 def test_422_on_bad_metamodel(client: TestClient) -> None:
-    res = client.put(
-        "/api/v1/metamodels/bad",
+    res = client.post(
+        "/api/v1/metamodel",
         content="elements: [{name: A, extends: B}]",
         headers={"content-type": "application/x-yaml"},
     )
@@ -134,29 +158,19 @@ def test_422_on_bad_metamodel(client: TestClient) -> None:
 
 
 def _seed_example_model(client: TestClient) -> dict:
-    """Create the example metamodel + a 'demo' model with one Block and one
-    Requirement and a Satisfies relationship between them. Returns the GET
-    snapshot of the model.
+    """Load example metamodel + a model with one Block, one Requirement, and a
+    Satisfies relationship. Returns the GET snapshot of the model.
     """
-    yaml_text = EXAMPLE.read_text(encoding="utf-8")
-    resp = client.put(
-        "/api/v1/metamodels/example",
-        content=yaml_text,
-        headers={"content-type": "application/x-yaml"},
-    )
-    assert resp.status_code == 200, resp.text
+    _upload_example_metamodel(client)
+    _empty_model(client)
     resp = client.post(
-        "/api/v1/models", json={"name": "demo", "metamodel": "example"}
-    )
-    assert resp.status_code == 201, resp.text
-    resp = client.post(
-        "/api/v1/models/demo/elements",
+        "/api/v1/model/elements",
         json={"type": "Block", "properties": {"name": "Wing", "mass": 12.5}},
     )
     assert resp.status_code == 201, resp.text
     block = resp.json()
     resp = client.post(
-        "/api/v1/models/demo/elements",
+        "/api/v1/model/elements",
         json={
             "type": "Requirement",
             "properties": {"name": "REQ-1", "status": "Draft", "priority": 3},
@@ -165,19 +179,17 @@ def _seed_example_model(client: TestClient) -> dict:
     assert resp.status_code == 201, resp.text
     req = resp.json()
     resp = client.post(
-        "/api/v1/models/demo/relationships",
+        "/api/v1/model/relationships",
         json={"type": "Satisfies", "source_id": block["id"], "target_id": req["id"]},
     )
     assert resp.status_code == 201, resp.text
-    resp = client.get("/api/v1/models/demo")
+    resp = client.get("/api/v1/model")
     assert resp.status_code == 200, resp.text
     return resp.json()
 
 
-def test_snapshot_round_trip(client: TestClient) -> None:
+def test_snapshot_replaces_model(client: TestClient) -> None:
     snapshot = _seed_example_model(client)
-    rev = snapshot["rev"]
-    assert rev >= 1
     elements = list(snapshot["elements"])
     relationships = list(snapshot["relationships"])
 
@@ -204,41 +216,18 @@ def test_snapshot_round_trip(client: TestClient) -> None:
     relationships.append(new_rel)
 
     res = client.put(
-        "/api/v1/models/demo/snapshot",
-        json={"rev": rev, "elements": elements, "relationships": relationships},
+        "/api/v1/model/snapshot",
+        json={"elements": elements, "relationships": relationships},
     )
     assert res.status_code == 200, res.text
-    body = res.json()
-    assert body["rev"] == rev + 1
 
-    fetched = client.get("/api/v1/models/demo").json()
-    assert fetched["rev"] == rev + 1
+    fetched = client.get("/api/v1/model").json()
     assert len(fetched["elements"]) == 3
     assert len(fetched["relationships"]) == 2
     fetched_block = next(e for e in fetched["elements"] if e["id"] == block["id"])
     assert fetched_block["properties"]["mass"] == 21.0
     assert any(e["id"] == "req-new" for e in fetched["elements"])
     assert any(r["id"] == "rel-new" for r in fetched["relationships"])
-
-
-def test_snapshot_conflict(client: TestClient) -> None:
-    snapshot = _seed_example_model(client)
-    stale_rev = snapshot["rev"] - 1
-    res = client.put(
-        "/api/v1/models/demo/snapshot",
-        json={
-            "rev": stale_rev,
-            "elements": snapshot["elements"],
-            "relationships": snapshot["relationships"],
-        },
-    )
-    assert res.status_code == 409, res.text
-    body = res.json()
-    assert "error" in body
-    message = body["error"].lower()
-    # Stable words from `ConflictError` text -- guards against accidental
-    # rewording that still happens to contain "rev".
-    assert any(token in message for token in ("stale write", "expected", "current"))
 
 
 def test_snapshot_rejects_unknown_type(client: TestClient) -> None:
@@ -252,9 +241,8 @@ def test_snapshot_rejects_unknown_type(client: TestClient) -> None:
         }
     ]
     res = client.put(
-        "/api/v1/models/demo/snapshot",
+        "/api/v1/model/snapshot",
         json={
-            "rev": snapshot["rev"],
             "elements": bad_elements,
             "relationships": snapshot["relationships"],
         },
@@ -267,15 +255,14 @@ def test_snapshot_rejects_abstract_type(client: TestClient) -> None:
     bad_elements = list(snapshot["elements"]) + [
         {
             "id": "abstract-instance",
-            "type_name": "NamedElement",  # abstract in example metamodel
+            "type_name": "NamedElement",
             "properties": {"name": "nope"},
             "rev": 0,
         }
     ]
     res = client.put(
-        "/api/v1/models/demo/snapshot",
+        "/api/v1/model/snapshot",
         json={
-            "rev": snapshot["rev"],
             "elements": bad_elements,
             "relationships": snapshot["relationships"],
         },
@@ -287,7 +274,6 @@ def test_snapshot_rejects_abstract_type(client: TestClient) -> None:
 def test_snapshot_rejects_duplicate_element_id(client: TestClient) -> None:
     snapshot = _seed_example_model(client)
     elements = list(snapshot["elements"])
-    # Duplicate the first element's id onto a fresh Block payload.
     dup_id = elements[0]["id"]
     elements.append(
         {
@@ -298,9 +284,8 @@ def test_snapshot_rejects_duplicate_element_id(client: TestClient) -> None:
         }
     )
     res = client.put(
-        "/api/v1/models/demo/snapshot",
+        "/api/v1/model/snapshot",
         json={
-            "rev": snapshot["rev"],
             "elements": elements,
             "relationships": snapshot["relationships"],
         },
@@ -320,7 +305,7 @@ def test_validate_inline_rejects_abstract_type(client: TestClient) -> None:
         }
     ]
     res = client.post(
-        "/api/v1/models/demo/validate",
+        "/api/v1/model/validate",
         json={
             "inline": {
                 "elements": inline_elements,
@@ -334,7 +319,6 @@ def test_validate_inline_rejects_abstract_type(client: TestClient) -> None:
 
 def test_validate_inline(client: TestClient) -> None:
     snapshot = _seed_example_model(client)
-    # Use an inline body where priority is out of range (1..5).
     inline_elements = []
     for e in snapshot["elements"]:
         clone = {**e, "properties": dict(e["properties"])}
@@ -343,7 +327,7 @@ def test_validate_inline(client: TestClient) -> None:
         inline_elements.append(clone)
 
     res = client.post(
-        "/api/v1/models/demo/validate",
+        "/api/v1/model/validate",
         json={
             "inline": {
                 "elements": inline_elements,
@@ -358,18 +342,15 @@ def test_validate_inline(client: TestClient) -> None:
     ), issues
 
     # Stored model should be untouched: validating it produces no issues.
-    res = client.post("/api/v1/models/demo/validate")
+    res = client.post("/api/v1/model/validate")
     assert res.status_code == 200
     assert res.json() == []
 
 
-def test_delete_metamodel_with_bound_model_fails(client: TestClient) -> None:
-    yaml_text = EXAMPLE.read_text(encoding="utf-8")
-    client.put(
-        "/api/v1/metamodels/example",
-        content=yaml_text,
-        headers={"content-type": "application/x-yaml"},
-    )
-    client.post("/api/v1/models", json={"name": "demo", "metamodel": "example"})
-    res = client.delete("/api/v1/metamodels/example")
-    assert res.status_code == 422
+def test_delete_metamodel_clears_model(client: TestClient) -> None:
+    _upload_example_metamodel(client)
+    _empty_model(client)
+    res = client.delete("/api/v1/metamodel")
+    assert res.status_code == 204
+    assert client.get("/api/v1/metamodel").status_code == 404
+    assert client.get("/api/v1/model").status_code == 404

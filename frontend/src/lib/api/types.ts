@@ -19,19 +19,10 @@ export const RelationshipSchema = z.object({
 export type Relationship = z.infer<typeof RelationshipSchema>;
 
 export const ModelOutSchema = z.object({
-	name: z.string(),
-	metamodel: z.string(),
-	rev: z.number().int(),
 	elements: z.array(ElementSchema),
 	relationships: z.array(RelationshipSchema)
 });
 export type ModelOut = z.infer<typeof ModelOutSchema>;
-
-export const ModelRefSchema = z.object({
-	name: z.string(),
-	metamodel: z.string()
-});
-export type ModelRef = z.infer<typeof ModelRefSchema>;
 
 export const IssueSchema = z.object({
 	severity: z.enum(['error', 'warning']),
@@ -41,22 +32,10 @@ export const IssueSchema = z.object({
 export type Issue = z.infer<typeof IssueSchema>;
 
 export const SnapshotInSchema = z.object({
-	rev: z.number().int(),
 	elements: z.array(ElementSchema),
 	relationships: z.array(RelationshipSchema)
 });
 export type SnapshotIn = z.infer<typeof SnapshotInSchema>;
-
-export const SnapshotOutSchema = z.object({
-	rev: z.number().int()
-});
-export type SnapshotOut = z.infer<typeof SnapshotOutSchema>;
-
-export const CreateModelRequestSchema = z.object({
-	name: z.string(),
-	metamodel: z.string()
-});
-export type CreateModelRequest = z.infer<typeof CreateModelRequestSchema>;
 
 export const CreateElementRequestSchema = z.object({
 	type: z.string(),
@@ -128,8 +107,6 @@ export const MetamodelSchema = z.object({
 });
 export type Metamodel = z.infer<typeof MetamodelSchema>;
 
-export const MetamodelNameListSchema = z.array(z.string());
-export const ModelRefListSchema = z.array(ModelRefSchema);
 export const ElementListSchema = z.array(ElementSchema);
 export const RelationshipListSchema = z.array(RelationshipSchema);
 export const IssueListSchema = z.array(IssueSchema);
