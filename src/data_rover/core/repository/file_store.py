@@ -10,6 +10,7 @@ from ..metamodel.schema import Metamodel
 from ..model.element import Element
 from ..model.model import Model
 from ..model.relationship import Relationship
+from .repository import ConflictError
 
 
 class FileRepository:
@@ -33,20 +34,36 @@ class FileRepository:
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         return Metamodel.model_validate(data)
 
+    def current_rev(self, name: str) -> int:
+        """Return the current persisted rev for a model, or 0 if absent."""
+        path = self._path(name, "model", "json")
+        if not path.exists():
+            return 0
+        try:
+            data = json.loads(path.read_text(encoding="utf-8")) or {}
+        except json.JSONDecodeError:
+            return 0
+        return int(data.get("rev", 0))
+
     def save_model(
         self, name: str, model: Model, expected_rev: int | None = None
     ) -> int:
+        current = self.current_rev(name)
+        if expected_rev is not None and expected_rev != current:
+            raise ConflictError(
+                f"Stale write to {name!r}: expected rev {expected_rev}, "
+                f"current {current}"
+            )
+        new_rev = current + 1
         data = {
+            "rev": new_rev,
             "elements": [asdict(e) for e in model.elements.values()],
             "relationships": [asdict(r) for r in model.relationships.values()],
         }
         self._path(name, "model", "json").write_text(
             json.dumps(data, indent=2), encoding="utf-8"
         )
-        # Optimistic-concurrency rev tracking is deferred for the file adapter
-        # (see design spec §6/§8); expected_rev is accepted to satisfy the port
-        # but not yet enforced here.
-        return 1
+        return new_rev
 
     def load_model(self, name: str, metamodel: Metamodel) -> Model:
         path = self._path(name, "model", "json")

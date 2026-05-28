@@ -38,14 +38,18 @@ class RelationshipOut(BaseModel):
 class ModelOut(BaseModel):
     name: str
     metamodel: str
+    rev: int = 0
     elements: list[ElementOut]
     relationships: list[RelationshipOut]
 
     @classmethod
-    def from_core(cls, name: str, metamodel_name: str, model: Model) -> "ModelOut":
+    def from_core(
+        cls, name: str, metamodel_name: str, model: Model, rev: int = 0
+    ) -> "ModelOut":
         return cls(
             name=name,
             metamodel=metamodel_name,
+            rev=rev,
             elements=[ElementOut.from_core(e) for e in model.elements.values()],
             relationships=[
                 RelationshipOut.from_core(r) for r in model.relationships.values()
@@ -78,8 +82,24 @@ class CreateRelationshipRequest(BaseModel):
     target_id: str
 
 
+class InlineModel(BaseModel):
+    elements: list[ElementOut] = Field(default_factory=list)
+    relationships: list[RelationshipOut] = Field(default_factory=list)
+
+
+class SnapshotIn(BaseModel):
+    rev: int
+    elements: list[ElementOut] = Field(default_factory=list)
+    relationships: list[RelationshipOut] = Field(default_factory=list)
+
+
+class SnapshotOut(BaseModel):
+    rev: int
+
+
 class ValidateRequest(BaseModel):
     scope: list[str] | None = None
+    inline: InlineModel | None = None
 
 
 class IssueOut(BaseModel):
