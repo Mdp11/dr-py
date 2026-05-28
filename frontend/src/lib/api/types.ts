@@ -88,6 +88,46 @@ export const ValidateRequestSchema = z.object({
 });
 export type ValidateRequest = z.infer<typeof ValidateRequestSchema>;
 
+export const PropertyDefSchema = z.object({
+	name: z.string(),
+	datatype: z.string(),
+	multiplicity: z.string().default('0..1'),
+	min: z.number().nullable().default(null),
+	max: z.number().nullable().default(null),
+	pattern: z.string().nullable().default(null),
+	max_length: z.number().int().nullable().default(null)
+});
+export type PropertyDef = z.infer<typeof PropertyDefSchema>;
+
+export const ElementTypeSchema = z.object({
+	name: z.string(),
+	abstract: z.boolean().default(false),
+	extends: z.string().nullable().default(null),
+	properties: z.array(PropertyDefSchema).default([]),
+	key: z.array(z.string()).nullable().default(null)
+});
+export type ElementType = z.infer<typeof ElementTypeSchema>;
+
+export const RelationshipTypeSchema = z.object({
+	name: z.string(),
+	abstract: z.boolean().default(false),
+	extends: z.string().nullable().default(null),
+	containment: z.boolean().default(false),
+	source: z.string(),
+	target: z.string(),
+	source_multiplicity: z.string().default('0..*'),
+	target_multiplicity: z.string().default('0..*'),
+	properties: z.array(PropertyDefSchema).default([])
+});
+export type RelationshipType = z.infer<typeof RelationshipTypeSchema>;
+
+export const MetamodelSchema = z.object({
+	enums: z.record(z.string(), z.array(z.string())).default({}),
+	elements: z.array(ElementTypeSchema).default([]),
+	relationships: z.array(RelationshipTypeSchema).default([])
+});
+export type Metamodel = z.infer<typeof MetamodelSchema>;
+
 export const MetamodelNameListSchema = z.array(z.string());
 export const ModelRefListSchema = z.array(ModelRefSchema);
 export const ElementListSchema = z.array(ElementSchema);

@@ -27,17 +27,38 @@ describe('metamodels client', () => {
 		expect(result).toEqual(['alpha', 'beta']);
 	});
 
-	it('getMetamodel hits the right URL and returns the raw body', async () => {
+	it('getMetamodel hits the right URL and parses a Metamodel payload', async () => {
 		let path = '';
+		const payload = {
+			enums: { Status: ['Draft', 'Approved'] },
+			elements: [
+				{
+					name: 'Block',
+					properties: [{ name: 'mass', datatype: 'float' }]
+				}
+			],
+			relationships: [
+				{
+					name: 'BlockHasPart',
+					containment: true,
+					source: 'Block',
+					target: 'Block'
+				}
+			]
+		};
 		server.use(
 			http.get(`${BASE}/metamodels/foo`, ({ request }) => {
 				path = new URL(request.url).pathname;
-				return HttpResponse.json({ name: 'foo', types: {} });
+				return HttpResponse.json(payload);
 			})
 		);
 		const result = await getMetamodel('foo', cfg);
 		expect(path).toBe('/api/v1/metamodels/foo');
-		expect(result).toEqual({ name: 'foo', types: {} });
+		expect(result.elements[0].name).toBe('Block');
+		expect(result.elements[0].abstract).toBe(false);
+		expect(result.elements[0].properties[0].multiplicity).toBe('0..1');
+		expect(result.relationships[0].containment).toBe(true);
+		expect(result.enums.Status).toEqual(['Draft', 'Approved']);
 	});
 
 	it('putMetamodel with object body sends application/json', async () => {

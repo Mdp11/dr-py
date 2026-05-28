@@ -1,22 +1,26 @@
 <script lang="ts">
 	import { Separator } from '$lib/components/ui/separator';
+	import { getBaseline, getMetamodel } from '$lib/state';
+	import ContainmentTree from './Sidebar/ContainmentTree.svelte';
+	import Search from './Sidebar/Search.svelte';
+	import TypeFilter from './Sidebar/TypeFilter.svelte';
+
+	const mm = $derived(getMetamodel());
+	const baseline = $derived(getBaseline());
 </script>
 
 <aside
 	class="flex h-full flex-col overflow-hidden border-r border-zinc-800 bg-zinc-950 text-sm text-zinc-300"
 >
-	<section class="px-3 py-2">
-		<h2 class="mb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Search</h2>
-		<p class="text-xs text-zinc-500">Filter by name, type, id…</p>
-	</section>
-	<Separator class="bg-zinc-800" />
-	<section class="flex-1 overflow-auto px-3 py-2">
-		<h2 class="mb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Tree</h2>
-		<p class="text-xs text-zinc-500">Containment tree placeholder.</p>
-	</section>
-	<Separator class="bg-zinc-800" />
-	<section class="px-3 py-2">
-		<h2 class="mb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Types</h2>
-		<p class="text-xs text-zinc-500">Type filters placeholder.</p>
-	</section>
+	{#if mm === null || baseline === null}
+		<section class="px-3 py-3">
+			<p class="text-xs text-zinc-500">Load a metamodel and model to begin.</p>
+		</section>
+	{:else}
+		<Search />
+		<Separator class="bg-zinc-800" />
+		<TypeFilter />
+		<Separator class="bg-zinc-800" />
+		<ContainmentTree />
+	{/if}
 </aside>
