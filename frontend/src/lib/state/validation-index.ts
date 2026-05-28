@@ -22,10 +22,7 @@ export function indexIssues(issues: readonly Issue[]): IssueIndex {
 	return { byEntity, errorIds, warningIds };
 }
 
-export function worstSeverityFor(
-	index: IssueIndex,
-	id: string
-): 'error' | 'warning' | null {
+export function worstSeverityFor(index: IssueIndex, id: string): 'error' | 'warning' | null {
 	if (index.errorIds.has(id)) return 'error';
 	if (index.warningIds.has(id)) return 'warning';
 	return null;

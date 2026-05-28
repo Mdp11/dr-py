@@ -67,16 +67,14 @@ def _build_model_from_payload(
             raise HTTPException(
                 status_code=422,
                 detail=(
-                    f"Relationship {r.id!r} references unknown source "
-                    f"{r.source_id!r}"
+                    f"Relationship {r.id!r} references unknown source {r.source_id!r}"
                 ),
             )
         if r.target_id not in model.elements:
             raise HTTPException(
                 status_code=422,
                 detail=(
-                    f"Relationship {r.id!r} references unknown target "
-                    f"{r.target_id!r}"
+                    f"Relationship {r.id!r} references unknown target {r.target_id!r}"
                 ),
             )
         if r.id in seen_relationship_ids:

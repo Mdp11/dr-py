@@ -14,7 +14,7 @@ def list_elements(
     session: Session = Depends(get_session),
 ) -> list[ElementOut]:
     _, model = require_model(session)
-    items = model.elements.values()
+    items = list(model.elements.values())
     if type is not None:
         items = [e for e in items if e.type_name == type]
     return [ElementOut.from_core(e) for e in items]

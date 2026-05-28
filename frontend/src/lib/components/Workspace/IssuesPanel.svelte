@@ -6,6 +6,7 @@
 		getIssues,
 		getLastError,
 		getLastRunAt,
+		getViewWarnings,
 		getWorkingModel,
 		isRunning,
 		select
@@ -13,7 +14,9 @@
 	import { runValidation } from '$lib/state/validate-action';
 	import { AlertCircle, AlertTriangle, RefreshCw } from '@lucide/svelte';
 
-	const issues = $derived(getIssues());
+	const modelIssues = $derived(getIssues());
+	const viewWarnings = $derived(getViewWarnings());
+	const issues = $derived<readonly Issue[]>([...modelIssues, ...viewWarnings]);
 	const lastRunAt = $derived(getLastRunAt());
 	const running = $derived(isRunning());
 	const lastError = $derived(getLastError());
@@ -106,10 +109,13 @@
 				{:else if issues.length === 0}
 					<span class="text-emerald-400">No issues</span>
 				{:else}
-					<span class="text-red-400">{errors.length} {errors.length === 1 ? 'error' : 'errors'}</span>
+					<span class="text-red-400"
+						>{errors.length} {errors.length === 1 ? 'error' : 'errors'}</span
+					>
 					<span class="text-zinc-700">·</span>
 					<span class="text-amber-400">
-						{warnings.length} {warnings.length === 1 ? 'warning' : 'warnings'}
+						{warnings.length}
+						{warnings.length === 1 ? 'warning' : 'warnings'}
 					</span>
 				{/if}
 			</div>

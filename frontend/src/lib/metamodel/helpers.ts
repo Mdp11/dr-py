@@ -2,12 +2,7 @@
 // `src/data_rover/core/metamodel/schema.py`. Kept Svelte-free so they can be
 // unit-tested in isolation.
 
-import type {
-	ElementType,
-	Metamodel,
-	PropertyDef,
-	RelationshipType
-} from '$lib/api/types';
+import type { ElementType, Metamodel, PropertyDef, RelationshipType } from '$lib/api/types';
 
 /** Look up a concrete or abstract element type by name. */
 export function elementType(mm: Metamodel, name: string): ElementType | undefined {
@@ -15,10 +10,7 @@ export function elementType(mm: Metamodel, name: string): ElementType | undefine
 }
 
 /** Look up a concrete or abstract relationship type by name. */
-export function relationshipType(
-	mm: Metamodel,
-	name: string
-): RelationshipType | undefined {
+export function relationshipType(mm: Metamodel, name: string): RelationshipType | undefined {
 	return mm.relationships.find((r) => r.name === name);
 }
 
@@ -41,10 +33,7 @@ export function elementAncestors(mm: Metamodel, name: string): ElementType[] {
 }
 
 /** Walk the relationship `extends` chain starting at `name` (inclusive). */
-export function relationshipAncestors(
-	mm: Metamodel,
-	name: string
-): RelationshipType[] {
+export function relationshipAncestors(mm: Metamodel, name: string): RelationshipType[] {
 	const chain: RelationshipType[] = [];
 	const seen = new Set<string>();
 	let current: string | null = name;
@@ -92,10 +81,7 @@ export function isSubtype(mm: Metamodel, sub: string, sup: string): boolean {
  * `effectiveProperties` but walks `RelationshipType.extends`. Child overrides
  * win over ancestor declarations of the same property name.
  */
-export function effectiveRelationshipProperties(
-	mm: Metamodel,
-	typeName: string
-): PropertyDef[] {
+export function effectiveRelationshipProperties(mm: Metamodel, typeName: string): PropertyDef[] {
 	const byName = new Map<string, PropertyDef>();
 	const order: string[] = [];
 	const rootToLeaf = relationshipAncestors(mm, typeName).slice().reverse();

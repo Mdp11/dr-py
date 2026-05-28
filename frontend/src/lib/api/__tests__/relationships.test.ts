@@ -1,11 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { http, HttpResponse } from 'msw';
 
-import {
-	createRelationship,
-	deleteRelationship,
-	listRelationships
-} from '../relationships';
+import { createRelationship, deleteRelationship, listRelationships } from '../relationships';
 import { server } from './server';
 
 const BASE = 'http://api.test/api/v1';
@@ -33,10 +29,7 @@ describe('relationships client', () => {
 				return HttpResponse.json([sampleRel]);
 			})
 		);
-		const result = await listRelationships(
-			{ type: 'Conn', source_id: 's1', target_id: 't1' },
-			cfg
-		);
+		const result = await listRelationships({ type: 'Conn', source_id: 's1', target_id: 't1' }, cfg);
 		expect(url).toContain('type=Conn');
 		expect(url).toContain('source_id=s1');
 		expect(url).toContain('target_id=t1');

@@ -1,9 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-	isEditableTarget,
-	matchShortcut,
-	shortcutWorksInInputs
-} from '../keyboard';
+import { isEditableTarget, matchShortcut, shortcutWorksInInputs } from '../keyboard';
 
 function fakeKey(opts: {
 	key: string;
@@ -41,9 +37,15 @@ describe('matchShortcut', () => {
 	});
 
 	it('matches Cmd+1/2/3 to tab switches', () => {
-		expect(matchShortcut(fakeKey({ key: '1', meta: true }))).toEqual({ kind: 'tab', tab: 'detail' });
+		expect(matchShortcut(fakeKey({ key: '1', meta: true }))).toEqual({
+			kind: 'tab',
+			tab: 'detail'
+		});
 		expect(matchShortcut(fakeKey({ key: '2', meta: true }))).toEqual({ kind: 'tab', tab: 'graph' });
-		expect(matchShortcut(fakeKey({ key: '3', meta: true }))).toEqual({ kind: 'tab', tab: 'issues' });
+		expect(matchShortcut(fakeKey({ key: '3', meta: true }))).toEqual({
+			kind: 'tab',
+			tab: 'issues'
+		});
 	});
 
 	it('ignores alt-modified keys', () => {

@@ -20,7 +20,6 @@
 	type Props = (FilterMode | CreateMode) & {
 		open: boolean;
 		onOpenChange: (next: boolean) => void;
-		triggerRef?: HTMLElement | null;
 		searchPlaceholder?: string;
 		emptyLabel?: string;
 		/** Children renders the trigger button (Popover.Trigger wraps it). */
@@ -98,9 +97,7 @@
 					{#each filtered as name (name)}
 						{#if props.mode === 'filter'}
 							<li>
-								<label
-									class="flex cursor-pointer items-center gap-2 px-3 py-1 hover:bg-zinc-800"
-								>
+								<label class="flex cursor-pointer items-center gap-2 px-3 py-1 hover:bg-zinc-800">
 									<input
 										type="checkbox"
 										class="h-3 w-3 shrink-0 accent-zinc-300"

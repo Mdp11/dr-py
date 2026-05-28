@@ -56,17 +56,17 @@ The UI is a fixed grid:
 
 ## Keyboard shortcuts
 
-| Shortcut         | Action                              |
-| ---------------- | ----------------------------------- |
-| `Cmd/Ctrl+K`     | Open the command palette            |
-| `Cmd/Ctrl+S`     | Open the diff drawer (Save)         |
-| `Cmd/Ctrl+E`     | Run validation                      |
-| `Cmd/Ctrl+1`     | Switch to Detail tab                |
-| `Cmd/Ctrl+2`     | Switch to Graph tab                 |
-| `Cmd/Ctrl+3`     | Switch to Issues tab                |
-| `Arrow Up/Down`  | Move focus in the containment tree  |
-| `Arrow Left/Right` | Collapse / expand tree row        |
-| `Enter` / `Space`  | Select focused tree row           |
+| Shortcut           | Action                             |
+| ------------------ | ---------------------------------- |
+| `Cmd/Ctrl+K`       | Open the command palette           |
+| `Cmd/Ctrl+S`       | Open the diff drawer (Save)        |
+| `Cmd/Ctrl+E`       | Run validation                     |
+| `Cmd/Ctrl+1`       | Switch to Detail tab               |
+| `Cmd/Ctrl+2`       | Switch to Graph tab                |
+| `Cmd/Ctrl+3`       | Switch to Issues tab               |
+| `Arrow Up/Down`    | Move focus in the containment tree |
+| `Arrow Left/Right` | Collapse / expand tree row         |
+| `Enter` / `Space`  | Select focused tree row            |
 
 `Cmd+K` and `Cmd+S` fire even when focus is inside an input; the others are
 suppressed while typing.

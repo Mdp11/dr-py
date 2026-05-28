@@ -1,11 +1,6 @@
 <script lang="ts">
-	import {
-		SvelteFlow,
-		Background,
-		Controls,
-		type Node,
-		type Edge
-	} from '@xyflow/svelte';
+	import { SvelteMap } from 'svelte/reactivity';
+	import { SvelteFlow, Background, Controls, type Node, type Edge } from '@xyflow/svelte';
 	import '@xyflow/svelte/dist/style.css';
 	import { AlertTriangle } from '@lucide/svelte';
 
@@ -62,13 +57,13 @@
 	// Simple radial layout: hop 0 at origin, hop h placed on a ring of radius
 	// 200*h with equal angular spacing among siblings at that hop.
 	function radialLayout(nodes: GraphNode[]): Map<string, { x: number; y: number }> {
-		const byHop = new Map<number, GraphNode[]>();
+		const byHop = new SvelteMap<number, GraphNode[]>();
 		for (const n of nodes) {
 			const arr = byHop.get(n.hops) ?? [];
 			arr.push(n);
 			byHop.set(n.hops, arr);
 		}
-		const positions = new Map<string, { x: number; y: number }>();
+		const positions = new SvelteMap<string, { x: number; y: number }>();
 		for (const [hop, group] of byHop) {
 			if (hop === 0) {
 				for (const n of group) positions.set(n.id, { x: 0, y: 0 });
@@ -104,9 +99,7 @@
 			border = '#fbbf24';
 			borderWidth = '2px';
 		}
-		const ring = isCenter
-			? ' box-shadow: 0 0 0 2px rgba(129,140,248,0.35) inset;'
-			: '';
+		const ring = isCenter ? ' box-shadow: 0 0 0 2px rgba(129,140,248,0.35) inset;' : '';
 		return `background:${bg}; color:${color}; border:${borderWidth} solid ${border}; border-radius:6px; padding:6px 10px; font-size:11px;${ring}`;
 	}
 
@@ -131,10 +124,7 @@
 			labelStyle: 'fill:#a1a1aa; font-size:10px;',
 			labelBgStyle: 'fill:#09090b;',
 			data: { containment: e.containment },
-			style: e.containment
-				? 'stroke:#a5b4fc; stroke-width:2px;'
-				: 'stroke:#71717a;',
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			style: e.containment ? 'stroke:#a5b4fc; stroke-width:2px;' : 'stroke:#71717a;',
 			markerEnd: {
 				type: 'arrowclosed',
 				color: e.containment ? '#a5b4fc' : '#71717a'

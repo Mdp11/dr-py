@@ -1,0 +1,72 @@
+{
+  "name": "Operational",
+  "folders": [
+    {
+      "name": "Organizations",
+      "folders": [],
+      "elements": [
+        "e_000001",
+        "e_000002",
+        "e_000003",
+        "e_000004",
+        "e_000005"
+      ]
+    },
+    {
+      "name": "Systems",
+      "folders": [
+        {
+          "name": "Software",
+          "folders": [],
+          "elements": [
+            "e_000285",
+            "e_000286",
+            "e_000287"
+          ]
+        },
+        {
+          "name": "Physical",
+          "folders": [],
+          "elements": [
+            "e_000297",
+            "e_000298",
+            "e_000299"
+          ]
+        }
+      ],
+      "elements": []
+    },
+    {
+      "name": "Requirements",
+      "folders": [
+        {
+          "name": "Functional",
+          "folders": [],
+          "elements": [
+            "e_000206",
+            "e_000207",
+            "e_000208"
+          ]
+        },
+        {
+          "name": "Security",
+          "folders": [],
+          "elements": [
+            "e_000273",
+            "e_000274"
+          ]
+        }
+      ],
+      "elements": []
+    },
+    {
+      "name": "Use cases",
+      "folders": [],
+      "elements": [
+        "e_000191",
+        "e_000192",
+        "e_000193"
+      ]
+    }
+  ]
+}

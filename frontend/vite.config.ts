@@ -14,6 +14,7 @@ function resolveAgainstWorkspace(p: string | undefined): string | null {
 
 const AUTOLOAD_METAMODEL = resolveAgainstWorkspace(process.env.AUTOLOAD_METAMODEL_PATH);
 const AUTOLOAD_MODEL = resolveAgainstWorkspace(process.env.AUTOLOAD_MODEL_PATH);
+const AUTOLOAD_VIEW = resolveAgainstWorkspace(process.env.AUTOLOAD_VIEW_PATH);
 
 // Surface filenames to the client via Vite's standard VITE_* prefix. Must be
 // set before defineConfig runs so SvelteKit's env loader picks them up.
@@ -23,12 +24,16 @@ if (AUTOLOAD_METAMODEL) {
 if (AUTOLOAD_MODEL) {
 	process.env.VITE_AUTOLOAD_MODEL_NAME = basename(AUTOLOAD_MODEL);
 }
+if (AUTOLOAD_VIEW) {
+	process.env.VITE_AUTOLOAD_VIEW_NAME = basename(AUTOLOAD_VIEW);
+}
 
 /**
- * Dev-only autoload helper. When AUTOLOAD_METAMODEL_PATH / AUTOLOAD_MODEL_PATH
- * env vars are set (e.g. via `pixi run start-frontend <mm> <model>`), serve
- * those local files from `/__autoload/metamodel` and `/__autoload/model` so
- * the client can fetch them on mount.
+ * Dev-only autoload helper. When AUTOLOAD_METAMODEL_PATH / AUTOLOAD_MODEL_PATH /
+ * AUTOLOAD_VIEW_PATH env vars are set (e.g. via `pixi run start-frontend <mm>
+ * <model> <view>`), serve those local files from `/__autoload/metamodel`,
+ * `/__autoload/model`, and `/__autoload/view` so the client can fetch them on
+ * mount.
  */
 function autoloadPlugin(): Plugin {
 	return {
@@ -56,10 +61,11 @@ function autoloadPlugin(): Plugin {
 				serve(AUTOLOAD_METAMODEL, 'application/octet-stream')
 			);
 			server.middlewares.use('/__autoload/model', serve(AUTOLOAD_MODEL, 'application/json'));
+			server.middlewares.use('/__autoload/view', serve(AUTOLOAD_VIEW, 'application/json'));
 
-			if (AUTOLOAD_METAMODEL || AUTOLOAD_MODEL) {
+			if (AUTOLOAD_METAMODEL || AUTOLOAD_MODEL || AUTOLOAD_VIEW) {
 				server.config.logger.info(
-					`[autoload] metamodel=${AUTOLOAD_METAMODEL ?? '(none)'} model=${AUTOLOAD_MODEL ?? '(none)'}`
+					`[autoload] metamodel=${AUTOLOAD_METAMODEL ?? '(none)'} model=${AUTOLOAD_MODEL ?? '(none)'} view=${AUTOLOAD_VIEW ?? '(none)'}`
 				);
 			}
 		}

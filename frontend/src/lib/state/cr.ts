@@ -206,9 +206,7 @@ export type SaveWithCrResult =
  * - Any other CR write error returns `saved-cr-failed` with the message;
  *   again the model save stands.
  */
-export async function saveWithOptionalCr(
-	input: SaveWithCrInput
-): Promise<SaveWithCrResult> {
+export async function saveWithOptionalCr(input: SaveWithCrInput): Promise<SaveWithCrResult> {
 	const saveResult = await input.saveModel(input.working);
 	if (!saveResult.ok) {
 		return { kind: 'save-failed', result: saveResult };
@@ -237,12 +235,7 @@ export async function saveWithOptionalCr(
 		};
 	}
 
-	const cr = buildChangeRequest(
-		input.baseline,
-		savedModel,
-		input.baselineFilename,
-		input.now
-	);
+	const cr = buildChangeRequest(input.baseline, savedModel, input.baselineFilename, input.now);
 	const crName = composeCrFilename(input.baselineFilename, input.now);
 
 	try {

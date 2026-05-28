@@ -86,9 +86,7 @@
 
 	function actionDiscardChanges(): void {
 		close();
-		const ok = window.confirm(
-			'Discard all unsaved changes? This cannot be undone.'
-		);
+		const ok = window.confirm('Discard all unsaved changes? This cannot be undone.');
 		if (ok) resetOps();
 	}
 
@@ -100,16 +98,12 @@
 
 <Command.Dialog
 	{open}
-	onOpenChange={onOpenChange}
+	{onOpenChange}
 	title="Command Palette"
 	description="Search entities, run actions, or switch tabs."
 	shouldFilter={false}
 >
-	<Command.Input
-		placeholder="Search entities, actions, tabs…"
-		bind:value={query}
-		autofocus
-	/>
+	<Command.Input placeholder="Search entities, actions, tabs…" bind:value={query} autofocus />
 	<Command.List>
 		<Command.Empty>No results.</Command.Empty>
 
@@ -155,12 +149,11 @@
 			<Command.Separator />
 			<Command.Group heading="Entities">
 				{#each entityHits as r (r.el.id)}
-					<Command.Item
-						value={'entity:' + r.el.id}
-						onSelect={() => pickEntity(r.el.id)}
-					>
+					<Command.Item value={'entity:' + r.el.id} onSelect={() => pickEntity(r.el.id)}>
 						<span class="truncate">{r.displayName}</span>
-						<span class="ml-auto shrink-0 rounded bg-zinc-800 px-1 font-mono text-[10px] text-zinc-400">
+						<span
+							class="ml-auto shrink-0 rounded bg-zinc-800 px-1 font-mono text-[10px] text-zinc-400"
+						>
 							{r.el.type_name}
 						</span>
 						<span class="shrink-0 font-mono text-[10px] text-zinc-600">{r.el.id}</span>

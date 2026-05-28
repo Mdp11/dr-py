@@ -19,16 +19,8 @@
  * without dragging the Svelte rune compiler into vitest.
  */
 
-import {
-	setActiveTab,
-	setCommandPaletteOpen,
-	setDiffDrawerOpen
-} from './state';
-import {
-	isEditableTarget,
-	matchShortcut,
-	shortcutWorksInInputs
-} from './keyboard';
+import { setActiveTab, setCommandPaletteOpen, setDiffDrawerOpen } from './state';
+import { isEditableTarget, matchShortcut, shortcutWorksInInputs } from './keyboard';
 import { runValidation } from './state/validate-action';
 
 function handle(e: KeyboardEvent): void {

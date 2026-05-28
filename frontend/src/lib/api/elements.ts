@@ -7,10 +7,7 @@ import {
 	type UpdateElementRequest
 } from './types';
 
-export function listElements(
-	filters?: { type?: string },
-	cfg?: ClientConfig
-): Promise<Element[]> {
+export function listElements(filters?: { type?: string }, cfg?: ClientConfig): Promise<Element[]> {
 	return apiFetch(
 		'/model/elements',
 		{ method: 'GET', schema: ElementListSchema, query: { type: filters?.type } },
@@ -18,15 +15,8 @@ export function listElements(
 	);
 }
 
-export function createElement(
-	payload: CreateElementRequest,
-	cfg?: ClientConfig
-): Promise<Element> {
-	return apiFetch(
-		'/model/elements',
-		{ method: 'POST', body: payload, schema: ElementSchema },
-		cfg
-	);
+export function createElement(payload: CreateElementRequest, cfg?: ClientConfig): Promise<Element> {
+	return apiFetch('/model/elements', { method: 'POST', body: payload, schema: ElementSchema }, cfg);
 }
 
 export function getElement(elementId: string, cfg?: ClientConfig): Promise<Element> {
@@ -50,9 +40,5 @@ export function patchElement(
 }
 
 export function deleteElement(elementId: string, cfg?: ClientConfig): Promise<void> {
-	return apiFetch(
-		`/model/elements/${encodeURIComponent(elementId)}`,
-		{ method: 'DELETE' },
-		cfg
-	);
+	return apiFetch(`/model/elements/${encodeURIComponent(elementId)}`, { method: 'DELETE' }, cfg);
 }

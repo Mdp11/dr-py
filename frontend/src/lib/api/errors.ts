@@ -30,11 +30,7 @@ export class ValidationError extends ApiError {
 	}
 }
 
-export function errorForStatus(
-	status: number,
-	body: unknown,
-	message: string
-): ApiError {
+export function errorForStatus(status: number, body: unknown, message: string): ApiError {
 	if (status === 404) return new NotFoundError(status, body, message);
 	if (status === 409) return new ConflictError(status, body, message);
 	if (status === 422) return new ValidationError(status, body, message);

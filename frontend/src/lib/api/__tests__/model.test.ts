@@ -12,9 +12,7 @@ afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
 const sampleModel = {
-	elements: [
-		{ id: 'e1', type_name: 'Block', properties: { x: 1 }, rev: 1 }
-	],
+	elements: [{ id: 'e1', type_name: 'Block', properties: { x: 1 }, rev: 1 }],
 	relationships: [
 		{
 			id: 'r1',

@@ -3,6 +3,7 @@
 	import { getBaseline, getMetamodel } from '$lib/state';
 	import ContainmentTree from './Sidebar/ContainmentTree.svelte';
 	import Search from './Sidebar/Search.svelte';
+	import ViewSelector from './Sidebar/ViewSelector.svelte';
 
 	const mm = $derived(getMetamodel());
 	const baseline = $derived(getBaseline());
@@ -18,6 +19,7 @@
 	{:else}
 		<Search />
 		<Separator class="bg-zinc-800" />
+		<ViewSelector />
 		<ContainmentTree />
 	{/if}
 </aside>

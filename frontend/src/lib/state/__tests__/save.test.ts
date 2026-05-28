@@ -43,10 +43,7 @@ describe('resolveTempIds', () => {
 	it('rewrites a relationship endpoint that points at a new element', () => {
 		const working: Snapshot = {
 			elements: [el('tmp_a'), el('e1')],
-			relationships: [
-				rel('tmp_r', 'tmp_a', 'e1'),
-				rel('r2', 'e1', 'tmp_a')
-			]
+			relationships: [rel('tmp_r', 'tmp_a', 'e1'), rel('r2', 'e1', 'tmp_a')]
 		};
 		const { resolved, mapping } = resolveTempIds(working, counter());
 		expect(mapping['tmp_a']).toBe('gen_1');

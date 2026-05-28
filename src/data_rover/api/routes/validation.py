@@ -26,6 +26,8 @@ def validate_model(
         )
     else:
         model = current
-    scope = Scope(payload.scope) if payload and payload.scope is not None else Scope.all()
+    scope = (
+        Scope(payload.scope) if payload and payload.scope is not None else Scope.all()
+    )
     issues = default_pipeline().validate(model, scope)
     return [IssueOut.from_core(i) for i in issues]

@@ -29,7 +29,7 @@ export default defineConfig({
 	],
 	webServer: [
 		{
-			command: 'pixi run -e api serve',
+			command: 'pixi run -e api start-backend',
 			cwd: '..',
 			url: 'http://127.0.0.1:8000/healthz',
 			timeout: 60_000,

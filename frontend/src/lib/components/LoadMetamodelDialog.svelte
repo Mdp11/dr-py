@@ -1,4 +1,3 @@
-
 <script lang="ts">
 	import { metamodel as metamodelApi, ApiError } from '$lib/api';
 	import type { Metamodel } from '$lib/api/types';
@@ -77,7 +76,7 @@
 	}
 </script>
 
-<Dialog.Root bind:open onOpenChange={onOpenChange}>
+<Dialog.Root bind:open {onOpenChange}>
 	<Dialog.Content class="max-w-md">
 		<Dialog.Header>
 			<Dialog.Title>Load metamodel</Dialog.Title>
