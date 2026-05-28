@@ -53,7 +53,16 @@ depends-on = [
     { task = "lint-core", args = [{ check_only = "{{ check_only }}" }]},
 ]
 
+[feature.frontend.dependencies]
+nodejs = "22.*"
+
+[feature.frontend.tasks]
+frontend-dev = { cmd = "npm run dev", cwd = "frontend" }
+frontend-build = { cmd = "npm run build", cwd = "frontend" }
+frontend-install = { cmd = "npm install", cwd = "frontend" }
+
 [environments]
 core = { features = ["core"]}
 core-dev = { features = ["core", "core-dev", "api"]}
 api = { features = ["core", "api"]}
+frontend = { features = ["frontend"] }
