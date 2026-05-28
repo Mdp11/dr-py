@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Download } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -35,8 +35,9 @@ test('load metamodel + empty model -> create element -> see in diff', async ({ p
 	await modelDialog.getByRole('button', { name: 'Load', exact: true }).click();
 	await expect(modelDialog).toBeHidden();
 
-	// --- 3. Create a Block element via the TypeFilter "New Block" button -----
-	await page.getByRole('button', { name: 'New Block' }).click();
+	// --- 3. Create a Block element via the Tree "New element" popover --------
+	await page.getByRole('button', { name: 'New element' }).click();
+	await page.getByRole('button', { name: 'Block', exact: true }).click();
 	await expect(page.getByRole('heading', { name: 'Block' })).toBeVisible();
 
 	// --- 4. Edit its `name` --------------------------------------------------
@@ -84,7 +85,8 @@ test('Export CR checkbox produces a second .cr.json download', async ({ page }) 
 	await expect(modelDialog).toBeHidden();
 
 	// Create an element so there's something to save.
-	await page.getByRole('button', { name: 'New Block' }).click();
+	await page.getByRole('button', { name: 'New element' }).click();
+	await page.getByRole('button', { name: 'Block', exact: true }).click();
 	const inspector = page.getByTestId('inspector');
 	const nameInput = inspector.locator('input[type="text"]').first();
 	await nameInput.fill(`cr-block-${RUN_ID}`);
@@ -99,14 +101,17 @@ test('Export CR checkbox produces a second .cr.json download', async ({ page }) 
 	const exportCrCheckbox = drawer.getByLabel('Export CR');
 	await exportCrCheckbox.check();
 
-	// Two downloads expected: the model JSON first, then the CR.
-	const [download1, download2] = await Promise.all([
-		page.waitForEvent('download'),
-		page.waitForEvent('download'),
-		drawer.getByRole('button', { name: /save \(\d+\)/i }).click()
-	]);
+	// Two downloads expected: the model JSON first, then the CR. Parallel
+	// `waitForEvent('download')` calls both resolve to the *same* first
+	// event, so collect every download via a `page.on` listener instead.
+	const downloads: Download[] = [];
+	page.on('download', (d) => downloads.push(d));
 
-	expect(download1.suggestedFilename()).toMatch(/\.json$/);
-	expect(download1.suggestedFilename()).not.toMatch(/\.cr\.json$/);
-	expect(download2.suggestedFilename()).toMatch(/^\d{8}T\d{6}_.+\.cr\.json$/);
+	await drawer.getByRole('button', { name: /save \(\d+\)/i }).click();
+
+	await expect.poll(() => downloads.length, { timeout: 10_000 }).toBe(2);
+
+	expect(downloads[0].suggestedFilename()).toMatch(/\.json$/);
+	expect(downloads[0].suggestedFilename()).not.toMatch(/\.cr\.json$/);
+	expect(downloads[1].suggestedFilename()).toMatch(/^\d{8}T\d{6}_.+\.cr\.json$/);
 });

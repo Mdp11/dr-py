@@ -45,6 +45,7 @@ export {
 export { clearMetamodel, getMetamodel, setMetamodel } from './metamodel.svelte';
 export {
 	clearFilters,
+	ensureTypeFilterInitialized,
 	getSearchText,
 	getTypeFilter,
 	setSearchText,

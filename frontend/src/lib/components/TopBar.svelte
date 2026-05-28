@@ -84,7 +84,7 @@
 </script>
 
 <header
-	class="sticky top-0 z-20 col-span-3 flex h-10 items-center justify-between border-b border-zinc-800 bg-zinc-950 px-3 text-sm"
+	class="sticky top-0 z-20 col-span-5 flex h-10 items-center justify-between border-b border-zinc-800 bg-zinc-950 px-3 text-sm"
 >
 	<div class="flex items-center gap-3">
 		<span class="font-semibold tracking-tight text-zinc-100">Data Rover</span>
