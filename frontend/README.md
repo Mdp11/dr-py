@@ -1,42 +1,137 @@
-# sv
+# data-rover-py — frontend
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+A SvelteKit single-page UI for the `data-rover-py` MBSE engine. Browse a model,
+edit elements and relationships against a live metamodel, validate, and save
+snapshots back to the FastAPI backend.
 
-## Creating a project
+The app is rendered statically (adapter-static) and proxies `/api/v1/*` to the
+backend in dev. It does not require Node at runtime — only at build time.
 
-If you're seeing this, you've probably already done this step. Congrats!
+## Running
 
-```sh
-# create a new project
-npx sv create my-app
-```
-
-To recreate this project with the same configuration:
+All tasks are wired through `pixi` so you don't need a global `node`.
 
 ```sh
-# recreate this project
-npx sv@0.15.3 create --template minimal --types ts --add prettier eslint sveltekit-adapter="adapter:static" --no-install frontend
+# install the npm deps (creates frontend/node_modules)
+pixi run frontend-install
+
+# dev server on http://127.0.0.1:5173 (proxies /api/v1 -> :8000)
+pixi run frontend-dev
+
+# production build into frontend/build (static, hashed assets)
+pixi run frontend-build
 ```
 
-## Developing
+In a separate terminal, start the backend (`pixi run -e api serve`) before
+opening the dev server so the API calls succeed.
 
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
+## Layout
+
+The UI is a fixed grid:
+
+```
+┌──────────────────────────────────────────────────────────┐
+│  TopBar   metamodel ▾  model ▾   Validate    Save (n)    │
+├────────────┬─────────────────────────┬───────────────────┤
+│  Sidebar   │  Workspace              │  Inspector        │
+│  Search    │  ┌────────────────────┐ │  Properties       │
+│  Types  +  │  │ Detail / Graph /   │ │  Relationships    │
+│  Tree      │  │ Issues             │ │                   │
+│            │  └────────────────────┘ │                   │
+├────────────┴─────────────────────────┴───────────────────┤
+│  StatusBar   n elements · n unsaved · errors/warn · rev  │
+└──────────────────────────────────────────────────────────┘
+```
+
+- **TopBar** — pick or upload a metamodel, pick or create a model, trigger
+  validation, open the diff drawer to save.
+- **Sidebar** — fuzzy search, type filter (each concrete type has a `+` button
+  to create a new element of that type), containment tree with keyboard nav.
+- **Workspace** — tabbed Detail / Graph / Issues view of the current
+  selection.
+- **Inspector** — property form + relationships list + new-relationship
+  picker for the selected entity.
+- **StatusBar** — model size, unsaved-change counter, validation summary,
+  baseline `rev`.
+
+## Keyboard shortcuts
+
+| Shortcut         | Action                              |
+| ---------------- | ----------------------------------- |
+| `Cmd/Ctrl+K`     | Open the command palette            |
+| `Cmd/Ctrl+S`     | Open the diff drawer (Save)         |
+| `Cmd/Ctrl+E`     | Run validation                      |
+| `Cmd/Ctrl+1`     | Switch to Detail tab                |
+| `Cmd/Ctrl+2`     | Switch to Graph tab                 |
+| `Cmd/Ctrl+3`     | Switch to Issues tab                |
+| `Arrow Up/Down`  | Move focus in the containment tree  |
+| `Arrow Left/Right` | Collapse / expand tree row        |
+| `Enter` / `Space`  | Select focused tree row           |
+
+`Cmd+K` and `Cmd+S` fire even when focus is inside an input; the others are
+suppressed while typing.
+
+## Architecture
+
+### State model
+
+The client never mutates the baseline model. Instead:
+
+1. A baseline `ModelOut` is fetched from `/api/v1/models/:name` and stored.
+2. The user's edits are emitted as **ops** (`create_element`,
+   `update_element`, `delete_element`, and the matching three for
+   relationships) into a `pendingOps` array. Each op references either the
+   baseline id or a `tmp_*` temp id.
+3. A pure `apply(baseline, ops)` derives the **working model** — what the
+   user sees in the tree / detail / graph views.
+4. A pure `computeDiff(baseline, working)` produces the **diff** rendered in
+   the drawer and the status bar.
+5. On Save, ops are translated into a snapshot POSTed to
+   `/api/v1/models/:name/snapshot`. Temp ids returned by the server are
+   resolved back into real ids before the new baseline is installed.
+
+This keeps undo, diffing, and conflict detection trivial: at any moment the
+truth is `(baseline, ops)`.
+
+### Where to find things
+
+```
+src/
+  app.html              SvelteKit shell
+  routes/+page.svelte   Single page; grids the four panels + diff drawer
+  lib/
+    api/                Typed REST client, zod schemas, ApiError, MSW tests
+    state/              baseline / pendingOps / working / diff / selection
+                        ui / filters / metamodel / workspace / validation
+    metamodel/          Pure helpers (effective properties, multiplicity,
+                        containment, subtype) mirroring the Python schema
+    components/         TopBar, Sidebar, Workspace, Inspector, StatusBar,
+                        DiffDrawer, CommandPalette, dialogs, and ui/ shadcn
+                        primitives (button, dialog, dropdown-menu, …)
+    keyboard.ts         Pure shortcut matcher
+    keyboard.svelte.ts  Global window listener + dispatch to state
+```
+
+## Tests
 
 ```sh
-npm run dev
+# Unit tests (vitest + happy-dom + MSW)
+pixi run -e frontend npm test
 
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
+# End-to-end smoke (Playwright + chromium, headless)
+pixi run -e frontend bash -c 'cd frontend && npx playwright install chromium && npm run test:e2e'
 ```
 
-## Building
+The Playwright config (`playwright.config.ts`) boots both the backend
+(`pixi run -e api serve`, isolated to `frontend/e2e/.data` via
+`DATA_ROVER_DATA_DIR`) and the Vite dev server, and reuses them if already
+up. The smoke covers upload metamodel → create model → add element → edit →
+save → reload → verify the element is still there.
 
-To create a production version of your app:
+## Type-checking & lint
 
 ```sh
-npm run build
+pixi run -e frontend npm run check    # svelte-check
+pixi run -e frontend npm run lint     # prettier + eslint
+pixi run -e frontend npm run format   # prettier --write
 ```
-
-You can preview the production build with `npm run preview`.
-
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
