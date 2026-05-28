@@ -97,7 +97,7 @@
 						<span class="font-mono text-[10px] text-zinc-500">{arrow}</span>
 						<button
 							type="button"
-							class="flex flex-1 items-center gap-1 truncate text-left text-[11px] text-zinc-200 hover:text-blue-300"
+							class="flex flex-1 items-center gap-1 truncate rounded text-left text-[11px] text-zinc-200 hover:text-blue-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
 							onclick={() => navigateTo(otherId)}
 							title={otherId}
 						>

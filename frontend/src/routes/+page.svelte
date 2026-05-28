@@ -4,6 +4,19 @@
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import Workspace from '$lib/components/Workspace.svelte';
 	import Inspector from '$lib/components/Inspector.svelte';
+	import DiffDrawer from '$lib/components/DiffDrawer.svelte';
+	import { getDiffDrawerOpen, setDiffDrawerOpen } from '$lib/state';
+
+	// Local bindable mirror of the global ui store so DiffDrawer's existing
+	// `bind:open` contract keeps working.
+	let drawerOpen = $state(false);
+
+	$effect(() => {
+		drawerOpen = getDiffDrawerOpen();
+	});
+	$effect(() => {
+		if (drawerOpen !== getDiffDrawerOpen()) setDiffDrawerOpen(drawerOpen);
+	});
 </script>
 
 <div
@@ -15,3 +28,5 @@
 	<Inspector />
 	<StatusBar />
 </div>
+
+<DiffDrawer bind:open={drawerOpen} />

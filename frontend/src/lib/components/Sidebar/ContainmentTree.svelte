@@ -23,6 +23,14 @@
 		collapsed = next;
 	}
 
+	function setCollapsed(id: string, value: boolean): void {
+		if (collapsed.has(id) === value) return;
+		const next = new Set(collapsed);
+		if (value) next.add(id);
+		else next.delete(id);
+		collapsed = next;
+	}
+
 	const elementsById = $derived.by(() => {
 		const m = new Map<string, Element>();
 		for (const el of working.elements) m.set(el.id, el);
@@ -106,16 +114,102 @@
 	function onPick(id: string): void {
 		select({ kind: 'element', id });
 	}
+
+	// ----- keyboard navigation -----
+
+	// Build a flattened list of currently visible rows (id + parent id) in DOM order.
+	type VisibleRow = { id: string; parent: string | null };
+	const visibleRows = $derived.by<VisibleRow[]>(() => {
+		const out: VisibleRow[] = [];
+		const { childrenByParent: kids } = childrenByParent;
+		const walk = (id: string, parent: string | null): void => {
+			if (!keepSet.has(id)) return;
+			out.push({ id, parent });
+			if (collapsed.has(id)) return;
+			const cs = kids.get(id) ?? [];
+			for (const c of cs) walk(c, id);
+		};
+		for (const r of roots) walk(r, null);
+		return out;
+	});
+
+	let focusedId: string | null = $state(null);
+
+	const focusedIndex = $derived.by(() => {
+		if (focusedId === null) return -1;
+		return visibleRows.findIndex((r) => r.id === focusedId);
+	});
+
+	function moveTo(idx: number): void {
+		if (idx < 0 || idx >= visibleRows.length) return;
+		focusedId = visibleRows[idx].id;
+	}
+
+	function onKeyDown(e: KeyboardEvent): void {
+		if (visibleRows.length === 0) return;
+		const cur = focusedIndex;
+		const k = e.key;
+		if (k === 'ArrowDown') {
+			e.preventDefault();
+			if (cur < 0) moveTo(0);
+			else moveTo(Math.min(visibleRows.length - 1, cur + 1));
+		} else if (k === 'ArrowUp') {
+			e.preventDefault();
+			if (cur < 0) moveTo(visibleRows.length - 1);
+			else moveTo(Math.max(0, cur - 1));
+		} else if (k === 'ArrowRight') {
+			if (cur < 0) return;
+			e.preventDefault();
+			const row = visibleRows[cur];
+			const kids = childrenByParent.childrenByParent.get(row.id) ?? [];
+			const hasChildren = kids.some((c) => keepSet.has(c));
+			if (hasChildren && collapsed.has(row.id)) {
+				setCollapsed(row.id, false);
+			} else if (hasChildren) {
+				// Already expanded — jump to first visible child.
+				moveTo(cur + 1);
+			}
+		} else if (k === 'ArrowLeft') {
+			if (cur < 0) return;
+			e.preventDefault();
+			const row = visibleRows[cur];
+			const kids = childrenByParent.childrenByParent.get(row.id) ?? [];
+			const hasChildren = kids.some((c) => keepSet.has(c));
+			if (hasChildren && !collapsed.has(row.id)) {
+				setCollapsed(row.id, true);
+			} else if (row.parent !== null) {
+				const pIdx = visibleRows.findIndex((r) => r.id === row.parent);
+				if (pIdx >= 0) moveTo(pIdx);
+			}
+		} else if (k === 'Enter' || k === ' ') {
+			if (cur < 0) return;
+			e.preventDefault();
+			select({ kind: 'element', id: visibleRows[cur].id });
+		}
+	}
+
+	// Sync focused-row from the global selection when it changes externally.
+	$effect(() => {
+		if (selection?.kind === 'element' && visibleRows.some((r) => r.id === selection.id)) {
+			focusedId = selection.id;
+		}
+	});
 </script>
 
-<section class="flex min-h-0 flex-1 flex-col gap-1 overflow-auto px-3 py-2">
+<div
+	class="flex min-h-0 flex-1 flex-col gap-1 overflow-auto px-3 py-2 outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500"
+	tabindex="0"
+	role="tree"
+	aria-label="Containment tree"
+	onkeydown={onKeyDown}
+>
 	<h2 class="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Tree</h2>
 	{#if mm === null}
 		<p class="text-xs text-zinc-600">Load a metamodel and model to begin.</p>
 	{:else if working.elements.length === 0}
 		<p class="text-xs text-zinc-600">Model is empty.</p>
 	{:else}
-		<ul class="flex flex-col text-xs">
+		<ul class="flex flex-col text-xs" role="group">
 			{#each roots as rootId (rootId)}
 				{#if keepSet.has(rootId)}
 					<TreeNode
@@ -126,6 +220,7 @@
 						{keepSet}
 						{collapsed}
 						selectedId={selection?.kind === 'element' ? selection.id : null}
+						{focusedId}
 						onToggle={toggleCollapsed}
 						onPick={onPick}
 					/>
@@ -133,4 +228,4 @@
 			{/each}
 		</ul>
 	{/if}
-</section>
+</div>

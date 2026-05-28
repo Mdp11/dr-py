@@ -49,3 +49,9 @@ export {
 	setTypeFilter,
 	toggleType
 } from './filters.svelte';
+export {
+	getCommandPaletteOpen,
+	getDiffDrawerOpen,
+	setCommandPaletteOpen,
+	setDiffDrawerOpen
+} from './ui.svelte';
