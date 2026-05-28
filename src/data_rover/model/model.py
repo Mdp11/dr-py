@@ -12,8 +12,9 @@ class Model:
     All mutation flows through this object's methods (the mutation boundary).
     """
 
-    def __init__(self, metamodel: Metamodel,
-                 id_generator: IdGenerator | None = None) -> None:
+    def __init__(
+        self, metamodel: Metamodel, id_generator: IdGenerator | None = None
+    ) -> None:
         self.metamodel = metamodel
         self._ids: IdGenerator = id_generator or Uuid7Generator()
         self.elements: dict[str, Element] = {}
@@ -41,14 +42,13 @@ class Model:
             raise KeyError(f"No relationship with id {rel_id!r}")
         return self.relationships[rel_id]
 
-    def set(self, target: Element | Relationship, prop: str, value) -> None:
+    def set_property(self, target: Element | Relationship, prop: str, value) -> None:
         if isinstance(target, Element):
             defs = self.metamodel.effective_element_properties(target.type_name)
         else:
             defs = self.metamodel.effective_relationship_properties(target.type_name)
         if prop not in {p.name for p in defs}:
-            raise KeyError(
-                f"{target.type_name!r} has no property {prop!r}")
+            raise KeyError(f"{target.type_name!r} has no property {prop!r}")
         target.properties[prop] = value
         target.rev += 1
 
@@ -59,8 +59,12 @@ class Model:
             raise KeyError(f"No source element {source_id!r}")
         if target_id not in self.elements:
             raise KeyError(f"No target element {target_id!r}")
-        rel = Relationship(id=self._ids.new_id(), type_name=rel_type,
-                           source_id=source_id, target_id=target_id)
+        rel = Relationship(
+            id=self._ids.new_id(),
+            type_name=rel_type,
+            source_id=source_id,
+            target_id=target_id,
+        )
         self.relationships[rel.id] = rel
         return rel
 
@@ -70,26 +74,27 @@ class Model:
         del self.relationships[rel_id]
 
     def relationships_from(self, element_id: str) -> list[Relationship]:
-        return [r for r in self.relationships.values()
-                if r.source_id == element_id]
+        return [r for r in self.relationships.values() if r.source_id == element_id]
 
     def relationships_to(self, element_id: str) -> list[Relationship]:
-        return [r for r in self.relationships.values()
-                if r.target_id == element_id]
+        return [r for r in self.relationships.values() if r.target_id == element_id]
 
     def _containment_children(self, element_id: str) -> list[Relationship]:
-        return [r for r in self.relationships.values()
-                if r.source_id == element_id
-                and self.metamodel.is_containment(r.type_name)]
+        return [
+            r
+            for r in self.relationships.values()
+            if r.source_id == element_id and self.metamodel.is_containment(r.type_name)
+        ]
 
     def container_of(self, element_id: str) -> str | None:
         for r in self.relationships.values():
-            if (r.target_id == element_id
-                    and self.metamodel.is_containment(r.type_name)):
+            if r.target_id == element_id and self.metamodel.is_containment(r.type_name):
                 return r.source_id
         return None
 
-    def delete_element(self, element_id: str, _visiting: set[str] | None = None) -> None:
+    def delete_element(
+        self, element_id: str, _visiting: set[str] | None = None
+    ) -> None:
         if element_id not in self.elements:
             raise KeyError(f"No element with id {element_id!r}")
         visiting = _visiting if _visiting is not None else set()
@@ -104,8 +109,11 @@ class Model:
             if child_id in self.elements:
                 self.delete_element(child_id, visiting)
         # remove any remaining relationships touching this element
-        incident = [r.id for r in self.relationships.values()
-                    if r.source_id == element_id or r.target_id == element_id]
+        incident = [
+            r.id
+            for r in self.relationships.values()
+            if r.source_id == element_id or r.target_id == element_id
+        ]
         for rel_id in incident:
             self.disconnect(rel_id)
         del self.elements[element_id]

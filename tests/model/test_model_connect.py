@@ -8,8 +8,11 @@ from data_rover.model.model import Model
 def _model():
     mm = Metamodel(
         elements=[ElementType(name="Block")],
-        relationships=[RelationshipType(name="HasPart", containment=True,
-                                        source="Block", target="Block")],
+        relationships=[
+            RelationshipType(
+                name="HasPart", containment=True, source="Block", target="Block"
+            )
+        ],
     )
     return Model(mm, id_generator=SequentialIdGenerator("x"))
 
@@ -66,6 +69,7 @@ def test_relationships_to_filters_by_target():
 
 def test_disconnect_unknown_raises():
     import pytest
+
     model = _model()
     with pytest.raises(KeyError):
         model.disconnect("missing")

@@ -6,10 +6,12 @@ from data_rover.model.model import Model
 
 
 def _mm():
-    return Metamodel(elements=[
-        ElementType(name="Abstract", abstract=True),
-        ElementType(name="Block"),
-    ])
+    return Metamodel(
+        elements=[
+            ElementType(name="Abstract", abstract=True),
+            ElementType(name="Block"),
+        ]
+    )
 
 
 def test_create_element_assigns_id_and_stores():

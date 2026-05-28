@@ -14,8 +14,8 @@ class IdGenerator(Protocol):
 def _uuid7(unix_ms: int, seq: int) -> uuid.UUID:
     raw = bytearray(16)
     raw[0:6] = unix_ms.to_bytes(6, "big")
-    raw[6] = (seq >> 8) & 0x0F   # high 4 bits of the 12-bit sequence
-    raw[7] = seq & 0xFF          # low 8 bits
+    raw[6] = (seq >> 8) & 0x0F  # high 4 bits of the 12-bit sequence
+    raw[7] = seq & 0xFF  # low 8 bits
     raw[8:16] = os.urandom(8)
     raw[6] = (raw[6] & 0x0F) | 0x70  # version 7
     raw[8] = (raw[8] & 0x3F) | 0x80  # RFC 4122 variant

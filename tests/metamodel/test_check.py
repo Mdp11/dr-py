@@ -10,8 +10,11 @@ from data_rover.metamodel.schema import (
 def test_valid_metamodel_has_no_errors():
     mm = Metamodel(
         enums={"Status": ["Draft"]},
-        elements=[ElementType(name="Block",
-                              properties=[PropertyDef(name="s", datatype="Status")])],
+        elements=[
+            ElementType(
+                name="Block", properties=[PropertyDef(name="s", datatype="Status")]
+            )
+        ],
         relationships=[RelationshipType(name="R", source="Block", target="Block")],
     )
     assert check_metamodel(mm) == []
@@ -24,17 +27,22 @@ def test_unknown_extends_reported():
 
 
 def test_inheritance_cycle_reported():
-    mm = Metamodel(elements=[
-        ElementType(name="A", extends="B"),
-        ElementType(name="B", extends="A"),
-    ])
+    mm = Metamodel(
+        elements=[
+            ElementType(name="A", extends="B"),
+            ElementType(name="B", extends="A"),
+        ]
+    )
     errors = check_metamodel(mm)
     assert any("cycle" in e.lower() for e in errors)
 
 
 def test_unknown_datatype_reported():
-    mm = Metamodel(elements=[ElementType(name="A",
-                  properties=[PropertyDef(name="p", datatype="Weird")])])
+    mm = Metamodel(
+        elements=[
+            ElementType(name="A", properties=[PropertyDef(name="p", datatype="Weird")])
+        ]
+    )
     errors = check_metamodel(mm)
     assert any("Weird" in e for e in errors)
 
@@ -49,26 +57,128 @@ def test_relationship_endpoint_must_be_element_type():
 
 
 def test_bad_multiplicity_reported():
-    mm = Metamodel(elements=[ElementType(name="A",
-                  properties=[PropertyDef(name="p", datatype="string", multiplicity="xx")])])
+    mm = Metamodel(
+        elements=[
+            ElementType(
+                name="A",
+                properties=[
+                    PropertyDef(name="p", datatype="string", multiplicity="xx")
+                ],
+            )
+        ]
+    )
     errors = check_metamodel(mm)
     assert any("multiplicity" in e.lower() for e in errors)
 
 
 def test_two_independent_cycles_both_reported():
-    mm = Metamodel(elements=[
-        ElementType(name="A", extends="B"),
-        ElementType(name="B", extends="A"),
-        ElementType(name="C", extends="D"),
-        ElementType(name="D", extends="C"),
-    ])
+    mm = Metamodel(
+        elements=[
+            ElementType(name="A", extends="B"),
+            ElementType(name="B", extends="A"),
+            ElementType(name="C", extends="D"),
+            ElementType(name="D", extends="C"),
+        ]
+    )
     errors = check_metamodel(mm)
     cycle_errors = [e for e in errors if "cycle" in e.lower()]
     assert len(cycle_errors) == 2
 
 
 def test_invalid_regex_pattern_reported():
-    mm = Metamodel(elements=[ElementType(name="A",
-                  properties=[PropertyDef(name="p", datatype="string", pattern="[bad")])])
+    mm = Metamodel(
+        elements=[
+            ElementType(
+                name="A",
+                properties=[PropertyDef(name="p", datatype="string", pattern="[bad")],
+            )
+        ]
+    )
     errors = check_metamodel(mm)
     assert any("pattern" in e.lower() for e in errors)
+
+
+def test_property_redefinition_in_child_reported():
+    mm = Metamodel(
+        elements=[
+            ElementType(
+                name="Parent", properties=[PropertyDef(name="name", datatype="string")]
+            ),
+            ElementType(
+                name="Child",
+                extends="Parent",
+                properties=[PropertyDef(name="name", datatype="string")],
+            ),
+        ]
+    )
+    errors = check_metamodel(mm)
+    assert any(
+        "redefines" in e and "'name'" in e and "'Child'" in e and "'Parent'" in e
+        for e in errors
+    )
+
+
+def test_property_redefinition_in_grandchild_reported():
+    mm = Metamodel(
+        elements=[
+            ElementType(
+                name="Root", properties=[PropertyDef(name="id", datatype="string")]
+            ),
+            ElementType(name="Mid", extends="Root"),
+            ElementType(
+                name="Leaf",
+                extends="Mid",
+                properties=[PropertyDef(name="id", datatype="string")],
+            ),
+        ]
+    )
+    errors = check_metamodel(mm)
+    assert any(
+        "redefines" in e and "'id'" in e and "'Leaf'" in e and "'Root'" in e
+        for e in errors
+    )
+
+
+def test_relationship_property_redefinition_reported():
+    mm = Metamodel(
+        elements=[ElementType(name="A")],
+        relationships=[
+            RelationshipType(
+                name="ParentRel",
+                source="A",
+                target="A",
+                properties=[PropertyDef(name="weight", datatype="integer")],
+            ),
+            RelationshipType(
+                name="ChildRel",
+                source="A",
+                target="A",
+                extends="ParentRel",
+                properties=[PropertyDef(name="weight", datatype="integer")],
+            ),
+        ],
+    )
+    errors = check_metamodel(mm)
+    assert any(
+        "redefines" in e
+        and "'weight'" in e
+        and "'ChildRel'" in e
+        and "'ParentRel'" in e
+        for e in errors
+    )
+
+
+def test_distinct_property_names_in_child_ok():
+    mm = Metamodel(
+        elements=[
+            ElementType(
+                name="Parent", properties=[PropertyDef(name="name", datatype="string")]
+            ),
+            ElementType(
+                name="Child",
+                extends="Parent",
+                properties=[PropertyDef(name="mass", datatype="float")],
+            ),
+        ]
+    )
+    assert check_metamodel(mm) == []

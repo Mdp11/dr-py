@@ -9,16 +9,29 @@ from data_rover.metamodel.schema import (
 def _mm():
     return Metamodel(
         elements=[
-            ElementType(name="NamedElement", abstract=True,
-                        properties=[PropertyDef(name="name", datatype="string", multiplicity="1")]),
-            ElementType(name="Block", extends="NamedElement",
-                        properties=[PropertyDef(name="mass", datatype="float")]),
+            ElementType(
+                name="NamedElement",
+                abstract=True,
+                properties=[
+                    PropertyDef(name="name", datatype="string", multiplicity="1")
+                ],
+            ),
+            ElementType(
+                name="Block",
+                extends="NamedElement",
+                properties=[PropertyDef(name="mass", datatype="float")],
+            ),
             ElementType(name="CpuBlock", extends="Block"),
         ],
         relationships=[
             RelationshipType(name="Link", source="NamedElement", target="NamedElement"),
-            RelationshipType(name="HasPart", extends="Link", containment=True,
-                             source="Block", target="Block"),
+            RelationshipType(
+                name="HasPart",
+                extends="Link",
+                containment=True,
+                source="Block",
+                target="Block",
+            ),
         ],
     )
 

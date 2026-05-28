@@ -13,13 +13,13 @@ def test_full_flow_valid_model_has_no_errors():
     model = Model(mm, id_generator=SequentialIdGenerator())
 
     block = model.create_element("Block")
-    model.set(block, "name", "Engine")
-    model.set(block, "mass", 120.0)
+    model.set_property(block, "name", "Engine")
+    model.set_property(block, "mass", 120.0)
 
     req = model.create_element("Requirement")
-    model.set(req, "name", "MaxMass")
-    model.set(req, "status", "Approved")
-    model.set(req, "priority", 2)
+    model.set_property(req, "name", "MaxMass")
+    model.set_property(req, "status", "Approved")
+    model.set_property(req, "priority", 2)
 
     model.connect("Satisfies", block.id, req.id)
 
@@ -33,12 +33,12 @@ def test_full_flow_catches_multiple_violations():
 
     block = model.create_element("Block")
     # missing required name; mass wrong type; bad enum + out-of-range on req
-    model.set(block, "mass", "heavy")
+    model.set_property(block, "mass", "heavy")
 
     req = model.create_element("Requirement")
-    model.set(req, "name", "R")
-    model.set(req, "status", "Rejected")  # not in enum
-    model.set(req, "priority", 99)        # above max
+    model.set_property(req, "name", "R")
+    model.set_property(req, "status", "Rejected")  # not in enum
+    model.set_property(req, "priority", 99)  # above max
 
     # endpoint-typing violation: Satisfies target must be Requirement
     model.connect("Satisfies", block.id, block.id)
@@ -51,11 +51,11 @@ def test_full_flow_catches_multiple_violations():
     model.connect("BlockHasPart", parent_b.id, shared_child.id)  # two parents
 
     messages = [i.message for i in default_pipeline().validate(model)]
-    assert any("name" in m for m in messages)          # multiplicity
-    assert any("heavy" in m for m in messages)         # type conformance
-    assert any("Status" in m for m in messages)        # enum
-    assert any("priority" in m for m in messages)      # facet
-    assert any("Satisfies" in m for m in messages)     # endpoint typing
+    assert any("name" in m for m in messages)  # multiplicity
+    assert any("heavy" in m for m in messages)  # type conformance
+    assert any("Status" in m for m in messages)  # enum
+    assert any("priority" in m for m in messages)  # facet
+    assert any("Satisfies" in m for m in messages)  # endpoint typing
     assert any("parent" in m.lower() for m in messages)  # containment
 
 

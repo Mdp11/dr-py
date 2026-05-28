@@ -30,10 +30,12 @@ def default_pipeline() -> "ValidationPipeline":
     from .validators.multiplicity import MultiplicityValidator
     from .validators.type_conformance import TypeConformanceValidator
 
-    return ValidationPipeline([
-        TypeConformanceValidator(),
-        MultiplicityValidator(),
-        FacetsValidator(),
-        EndpointTypingValidator(),
-        ContainmentValidator(),
-    ])
+    return ValidationPipeline(
+        [
+            TypeConformanceValidator(),
+            MultiplicityValidator(),
+            FacetsValidator(),
+            EndpointTypingValidator(),
+            ContainmentValidator(),
+        ]
+    )

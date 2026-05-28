@@ -6,10 +6,12 @@ def _model():
     mm = Metamodel(
         elements=[ElementType(name="Block")],
         relationships=[
-            RelationshipType(name="HasPart", containment=True,
-                             source="Block", target="Block"),
-            RelationshipType(name="Refers", containment=False,
-                             source="Block", target="Block"),
+            RelationshipType(
+                name="HasPart", containment=True, source="Block", target="Block"
+            ),
+            RelationshipType(
+                name="Refers", containment=False, source="Block", target="Block"
+            ),
         ],
     )
     return Model(mm)
@@ -53,6 +55,6 @@ def test_delete_does_not_hang_on_instance_level_cycle():
     b = model.create_element("Block")
     model.connect("HasPart", a.id, b.id)
     model.connect("HasPart", b.id, a.id)  # cyclic containment at the model level
-    model.delete_element(a.id)            # must terminate, not recurse forever
+    model.delete_element(a.id)  # must terminate, not recurse forever
     assert a.id not in model.elements
     assert b.id not in model.elements
