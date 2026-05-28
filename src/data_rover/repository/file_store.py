@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import asdict
 from pathlib import Path
 
@@ -18,15 +19,15 @@ class FileRepository:
         self._dir = Path(directory)
         self._dir.mkdir(parents=True, exist_ok=True)
 
-    def _path(self, name: str, kind: str) -> Path:
-        return self._dir / f"{name}.{kind}.yaml"
+    def _path(self, name: str, kind: str, ext: str) -> Path:
+        return self._dir / f"{name}.{kind}.{ext}"
 
     def save_metamodel(self, name: str, metamodel: Metamodel) -> None:
         text = yaml.safe_dump(metamodel.model_dump(), sort_keys=False)
-        self._path(name, "metamodel").write_text(text, encoding="utf-8")
+        self._path(name, "metamodel", "yaml").write_text(text, encoding="utf-8")
 
     def load_metamodel(self, name: str) -> Metamodel:
-        path = self._path(name, "metamodel")
+        path = self._path(name, "metamodel", "yaml")
         if not path.exists():
             raise KeyError(f"No metamodel file for {name!r}")
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
@@ -39,8 +40,8 @@ class FileRepository:
             "elements": [asdict(e) for e in model.elements.values()],
             "relationships": [asdict(r) for r in model.relationships.values()],
         }
-        self._path(name, "model").write_text(
-            yaml.safe_dump(data, sort_keys=False), encoding="utf-8"
+        self._path(name, "model", "json").write_text(
+            json.dumps(data, indent=2), encoding="utf-8"
         )
         # Optimistic-concurrency rev tracking is deferred for the file adapter
         # (see design spec §6/§8); expected_rev is accepted to satisfy the port
@@ -48,10 +49,10 @@ class FileRepository:
         return 1
 
     def load_model(self, name: str, metamodel: Metamodel) -> Model:
-        path = self._path(name, "model")
+        path = self._path(name, "model", "json")
         if not path.exists():
             raise KeyError(f"No model file for {name!r}")
-        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        data = json.loads(path.read_text(encoding="utf-8")) or {}
         model = Model(metamodel)
         for e in data.get("elements", []):
             element = Element(**e)

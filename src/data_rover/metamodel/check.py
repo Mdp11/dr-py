@@ -8,9 +8,7 @@ from .schema import PRIMITIVES, Metamodel, PropertyDef
 
 def _valid_datatype(mm: Metamodel, datatype: str) -> bool:
     return (
-        datatype in PRIMITIVES
-        or datatype in mm.enums
-        or mm.is_element_type(datatype)
+        datatype in PRIMITIVES or datatype in mm.enums or mm.is_element_type(datatype)
     )
 
 
@@ -29,6 +27,7 @@ def _check_properties(
                 re.compile(p.pattern)
             except re.error:
                 errors.append(f"{owner}.{p.name}: invalid regex pattern {p.pattern!r}")
+
 
 def _check_extend_cycles(objects, types) -> list[str]:
     errors: list[str] = []

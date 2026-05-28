@@ -187,9 +187,7 @@ def test_name_clash_enum_and_element_reported():
         elements=[ElementType(name="Status")],
     )
     errors = check_metamodel(mm)
-    assert any(
-        "'Status'" in e and "enum" in e and "element" in e for e in errors
-    )
+    assert any("'Status'" in e and "enum" in e and "element" in e for e in errors)
 
 
 def test_name_clash_primitive_and_element_reported():
