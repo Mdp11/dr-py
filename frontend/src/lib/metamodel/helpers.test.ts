@@ -4,6 +4,7 @@ import type { Metamodel } from '$lib/api/types';
 import {
 	containmentRelTypes,
 	effectiveProperties,
+	effectiveRelationshipProperties,
 	elementAncestors,
 	elementType,
 	isSubtype,
@@ -93,7 +94,17 @@ const mm: Metamodel = {
 			target: 'NamedElement',
 			source_multiplicity: '0..*',
 			target_multiplicity: '0..*',
-			properties: []
+			properties: [
+				{
+					name: 'note',
+					datatype: 'string',
+					multiplicity: '0..1',
+					min: null,
+					max: null,
+					pattern: null,
+					max_length: null
+				}
+			]
 		},
 		{
 			name: 'BlockHasPart',
@@ -115,7 +126,17 @@ const mm: Metamodel = {
 			target: 'Block',
 			source_multiplicity: '0..*',
 			target_multiplicity: '0..*',
-			properties: []
+			properties: [
+				{
+					name: 'weight',
+					datatype: 'float',
+					multiplicity: '0..1',
+					min: 0,
+					max: null,
+					pattern: null,
+					max_length: null
+				}
+			]
 		},
 		{
 			name: 'Satisfies',
@@ -202,6 +223,20 @@ describe('containmentRelTypes', () => {
 	it('excludes non-containment types', () => {
 		const names = containmentRelTypes(mm).map((r) => r.name);
 		expect(names).not.toContain('Satisfies');
+	});
+});
+
+describe('effectiveRelationshipProperties', () => {
+	it('combines own + inherited relationship properties (ancestor order)', () => {
+		const ps = effectiveRelationshipProperties(mm, 'RoomHasFurniture').map((p) => p.name);
+		expect(ps).toEqual(['note', 'weight']);
+	});
+	it('returns own properties when the type has no parent', () => {
+		const ps = effectiveRelationshipProperties(mm, 'Contains').map((p) => p.name);
+		expect(ps).toEqual(['note']);
+	});
+	it('returns [] for unknown relationship types', () => {
+		expect(effectiveRelationshipProperties(mm, 'Ghost')).toEqual([]);
 	});
 });
 
