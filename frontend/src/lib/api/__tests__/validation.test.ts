@@ -17,9 +17,7 @@ describe('validateModel', () => {
 		server.use(
 			http.post(`${BASE}/model/validate`, async ({ request }) => {
 				body = await request.json();
-				return HttpResponse.json([
-					{ severity: 'error', message: 'oops', target_ids: ['e1'] }
-				]);
+				return HttpResponse.json([{ severity: 'error', message: 'oops', target_ids: ['e1'] }]);
 			})
 		);
 		const inline = {
@@ -28,9 +26,7 @@ describe('validateModel', () => {
 		};
 		const result = await validateModel({ inline }, cfg);
 		expect(body).toEqual({ inline, scope: undefined });
-		expect(result).toEqual([
-			{ severity: 'error', message: 'oops', target_ids: ['e1'] }
-		]);
+		expect(result).toEqual([{ severity: 'error', message: 'oops', target_ids: ['e1'] }]);
 	});
 
 	it('POSTs with scope only and parses warnings', async () => {
@@ -38,9 +34,7 @@ describe('validateModel', () => {
 		server.use(
 			http.post(`${BASE}/model/validate`, async ({ request }) => {
 				body = await request.json();
-				return HttpResponse.json([
-					{ severity: 'warning', message: 'hint', target_ids: [] }
-				]);
+				return HttpResponse.json([{ severity: 'warning', message: 'hint', target_ids: [] }]);
 			})
 		);
 		const result = await validateModel({ scope: ['e1', 'e2'] }, cfg);

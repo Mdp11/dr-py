@@ -60,15 +60,8 @@ describe('buildChangeRequest', () => {
 	it('captures a modified element with full before and after', () => {
 		const eBefore = el('e1', { name: 'A' }, 1);
 		const eAfter = el('e1', { name: 'B' }, 2);
-		const cr = buildChangeRequest(
-			model([eBefore], []),
-			model([eAfter], []),
-			'm.json',
-			FIXED_NOW
-		);
-		expect(cr.ops.elements.modified).toEqual([
-			{ id: 'e1', before: eBefore, after: eAfter }
-		]);
+		const cr = buildChangeRequest(model([eBefore], []), model([eAfter], []), 'm.json', FIXED_NOW);
+		expect(cr.ops.elements.modified).toEqual([{ id: 'e1', before: eBefore, after: eAfter }]);
 		expect(cr.ops.elements.added).toEqual([]);
 		expect(cr.ops.elements.deleted).toEqual([]);
 	});
@@ -87,12 +80,7 @@ describe('buildChangeRequest', () => {
 		// so the CR should not contain one either.
 		const eBefore = el('e1', { name: 'A' }, 1);
 		const eAfter = el('e1', { name: 'A' }, 2);
-		const cr = buildChangeRequest(
-			model([eBefore], []),
-			model([eAfter], []),
-			'm.json',
-			FIXED_NOW
-		);
+		const cr = buildChangeRequest(model([eBefore], []), model([eAfter], []), 'm.json', FIXED_NOW);
 		expect(cr.ops.elements.modified).toEqual([]);
 	});
 
@@ -108,9 +96,7 @@ describe('buildChangeRequest', () => {
 			FIXED_NOW
 		);
 		expect(cr.ops.relationships.added).toEqual([rNew]);
-		expect(cr.ops.relationships.modified).toEqual([
-			{ id: 'r1', before: rBefore, after: rAfter }
-		]);
+		expect(cr.ops.relationships.modified).toEqual([{ id: 'r1', before: rBefore, after: rAfter }]);
 		expect(cr.ops.relationships.deleted).toEqual([rGone]);
 	});
 
@@ -138,39 +124,31 @@ describe('composeCrFilename', () => {
 	// 2026-05-28 14:30:22 local time. Using a UTC fixed clock would make
 	// the assertion timezone-dependent; instead we build a Date from local
 	// components so the assertion is stable regardless of TZ.
-	const localNow = (): Date =>
-		new Date(2026, 4 /* May */, 28, 14, 30, 22, 123);
+	const localNow = (): Date => new Date(2026, 4 /* May */, 28, 14, 30, 22, 123);
 
 	it('strips the trailing extension from the model filename', () => {
-		expect(composeCrFilename('myModel.json', localNow))
-			.toBe('20260528T143022_myModel.cr.json');
+		expect(composeCrFilename('myModel.json', localNow)).toBe('20260528T143022_myModel.cr.json');
 	});
 
 	it('keeps a filename without extension as-is for the base', () => {
-		expect(composeCrFilename('myModel', localNow))
-			.toBe('20260528T143022_myModel.cr.json');
+		expect(composeCrFilename('myModel', localNow)).toBe('20260528T143022_myModel.cr.json');
 	});
 
 	it('falls back to "model" when filename is null', () => {
-		expect(composeCrFilename(null, localNow))
-			.toBe('20260528T143022_model.cr.json');
+		expect(composeCrFilename(null, localNow)).toBe('20260528T143022_model.cr.json');
 	});
 
 	it('falls back to "model" when filename is an empty string', () => {
-		expect(composeCrFilename('', localNow))
-			.toBe('20260528T143022_model.cr.json');
+		expect(composeCrFilename('', localNow)).toBe('20260528T143022_model.cr.json');
 	});
 
 	it('strips only the last extension on a multi-dot filename', () => {
-		expect(composeCrFilename('my.model.json', localNow))
-			.toBe('20260528T143022_my.model.cr.json');
+		expect(composeCrFilename('my.model.json', localNow)).toBe('20260528T143022_my.model.cr.json');
 	});
 
 	it('zero-pads single-digit timestamp components', () => {
-		const padNow = (): Date =>
-			new Date(2026, 0 /* Jan */, 3, 4, 5, 6, 0);
-		expect(composeCrFilename('m.json', padNow))
-			.toBe('20260103T040506_m.cr.json');
+		const padNow = (): Date => new Date(2026, 0 /* Jan */, 3, 4, 5, 6, 0);
+		expect(composeCrFilename('m.json', padNow)).toBe('20260103T040506_m.cr.json');
 	});
 
 	it('uses the runtime clock when none is injected', () => {
@@ -190,8 +168,11 @@ interface FileSaveInvocation {
 }
 
 function makeFileSaveStub(): {
-	stub: (value: unknown, name: string, handle: unknown) =>
-		Promise<{ filename: string; handle: null }>;
+	stub: (
+		value: unknown,
+		name: string,
+		handle: unknown
+	) => Promise<{ filename: string; handle: null }>;
 	calls: FileSaveInvocation[];
 } {
 	const calls: FileSaveInvocation[] = [];
@@ -298,7 +279,9 @@ describe('saveWithOptionalCr', () => {
 			fileHandle: null,
 			exportCr: true,
 			saveModel: async () => OK_SAVE,
-			saveFile: async () => { throw new Error('disk full'); },
+			saveFile: async () => {
+				throw new Error('disk full');
+			},
 			now: NOW
 		});
 		expect(result.kind).toBe('save-failed');

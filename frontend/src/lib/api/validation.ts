@@ -6,17 +6,10 @@ export interface ValidateOptions {
 	scope?: string[];
 }
 
-export function validateModel(
-	options?: ValidateOptions,
-	cfg?: ClientConfig
-): Promise<Issue[]> {
+export function validateModel(options?: ValidateOptions, cfg?: ClientConfig): Promise<Issue[]> {
 	const body =
 		options && (options.inline !== undefined || options.scope !== undefined)
 			? { inline: options.inline, scope: options.scope }
 			: undefined;
-	return apiFetch(
-		'/model/validate',
-		{ method: 'POST', body, schema: IssueListSchema },
-		cfg
-	);
+	return apiFetch('/model/validate', { method: 'POST', body, schema: IssueListSchema }, cfg);
 }

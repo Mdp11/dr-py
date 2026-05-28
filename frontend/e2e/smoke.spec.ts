@@ -25,13 +25,11 @@ test('load metamodel + empty model -> create element -> see in diff', async ({ p
 	await page.getByRole('button', { name: 'Load model...' }).click();
 	const modelDialog = page.getByRole('dialog', { name: /load model/i });
 	await expect(modelDialog).toBeVisible();
-	await modelDialog
-		.locator('input[type="file"]')
-		.setInputFiles({
-			name: 'empty.json',
-			mimeType: 'application/json',
-			buffer: Buffer.from('{"elements": [], "relationships": []}')
-		});
+	await modelDialog.locator('input[type="file"]').setInputFiles({
+		name: 'empty.json',
+		mimeType: 'application/json',
+		buffer: Buffer.from('{"elements": [], "relationships": []}')
+	});
 	await modelDialog.getByRole('button', { name: 'Load', exact: true }).click();
 	await expect(modelDialog).toBeHidden();
 

@@ -26,7 +26,7 @@
 	});
 
 	const current = $derived(
-		valueId !== null ? working.elements.find((el) => el.id === valueId) ?? null : null
+		valueId !== null ? (working.elements.find((el) => el.id === valueId) ?? null) : null
 	);
 
 	function displayName(el: Element): string {

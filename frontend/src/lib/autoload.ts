@@ -1,11 +1,14 @@
-// Dev-time autoload: when `pixi run start-frontend <mm> <model>` is used, the
-// Vite dev server serves the two files at `/__autoload/metamodel` and
-// `/__autoload/model` and exposes their basenames as `VITE_AUTOLOAD_*` so we
-// can detect the request and replay the dialog upload paths.
+// Dev-time autoload: when `pixi run start-frontend <mm> <model> <view>` is used,
+// the Vite dev server serves the files at `/__autoload/metamodel`,
+// `/__autoload/model`, and `/__autoload/view` and exposes their basenames as
+// `VITE_AUTOLOAD_*` so we can detect the request and replay the dialog upload
+// paths.
 
 import { metamodel as metamodelApi, model as modelApi } from '$lib/api';
+import { ViewSchema } from '$lib/api/types';
 import {
 	clearIssues,
+	pushView,
 	resetOps,
 	setBaseline,
 	setFileHandle,
@@ -21,6 +24,7 @@ export async function maybeAutoload(): Promise<void> {
 
 	const mmName = import.meta.env.VITE_AUTOLOAD_METAMODEL_NAME as string | undefined;
 	const modelName = import.meta.env.VITE_AUTOLOAD_MODEL_NAME as string | undefined;
+	const viewName = import.meta.env.VITE_AUTOLOAD_VIEW_NAME as string | undefined;
 	if (!mmName) return;
 
 	try {
@@ -50,6 +54,15 @@ export async function maybeAutoload(): Promise<void> {
 		setFileHandle(null);
 		resetOps();
 		clearIssues();
+
+		if (!viewName) return;
+
+		// The view snapshot requires an active model on the backend, which the
+		// step above just established. Mirror the Load-view dialog: validate
+		// against ViewSchema, then push.
+		const viewText = await fetchText('/__autoload/view');
+		const view = ViewSchema.parse(JSON.parse(viewText));
+		await pushView(view);
 	} catch (err) {
 		console.error('[autoload] failed:', err);
 	}

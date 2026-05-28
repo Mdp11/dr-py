@@ -1,28 +1,47 @@
 <script lang="ts">
+	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import type { Element } from '$lib/api/types';
 	import { containmentRelTypes } from '$lib/metamodel/helpers';
 	import {
+		createFolder,
 		createTempId,
 		emit,
 		ensureTypeFilterInitialized,
 		getMetamodel,
 		getSelection,
 		getTypeFilter,
+		getView,
+		getViewWarnings,
 		getWorkingModel,
+		moveFolder,
+		placeElement,
+		placeElements,
+		removeElement,
 		select,
 		setTypeFilter,
 		toggleType
 	} from '$lib/state';
-	import { Filter, Plus } from '@lucide/svelte';
+	import { Filter, FolderPlus, Plus } from '@lucide/svelte';
 	import StereotypePicker from './StereotypePicker.svelte';
 	import TreeNode from './TreeNode.svelte';
+	import {
+		buildUnifiedTree,
+		canDropElement,
+		canDropFolder,
+		computeVisibility,
+		folderPathFromKey,
+		isFolderKey,
+		movableElementIds,
+		VIEW_ROOT_DROP_KEY,
+		type DndContext
+	} from './view-tree';
 
 	const mm = $derived(getMetamodel());
 	const working = $derived(getWorkingModel());
 	const typeFilter = $derived(getTypeFilter());
+	const view = $derived(getView());
+	const viewWarnings = $derived(getViewWarnings());
 
-	// Concrete (non-abstract) element types — the only ones that can be
-	// instantiated or that ever appear as `el.type_name` in the model.
 	const concreteTypeNames = $derived.by<string[]>(() => {
 		if (mm === null) return [];
 		return mm.elements.filter((e) => !e.abstract).map((e) => e.name);
@@ -36,11 +55,11 @@
 	let createOpen = $state(false);
 
 	function onSelectAll(): void {
-		setTypeFilter(new Set(concreteTypeNames));
+		setTypeFilter(new SvelteSet(concreteTypeNames));
 	}
 
 	function onDeselectAll(): void {
-		setTypeFilter(new Set());
+		setTypeFilter(new SvelteSet());
 	}
 
 	function onCreateElement(typeName: string): void {
@@ -54,38 +73,39 @@
 		select({ kind: 'element', id: tempId });
 	}
 
-	let collapsed: Set<string> = $state(new Set());
+	// SvelteSet is reactive on its own; mutate in place (no `$state` wrapper).
+	const collapsed = new SvelteSet<string>();
 
-	function toggleCollapsed(id: string): void {
-		const next = new Set(collapsed);
-		if (next.has(id)) next.delete(id);
-		else next.add(id);
-		collapsed = next;
+	function toggleCollapsed(key: string): void {
+		if (collapsed.has(key)) collapsed.delete(key);
+		else collapsed.add(key);
 	}
 
-	function setCollapsed(id: string, value: boolean): void {
-		if (collapsed.has(id) === value) return;
-		const next = new Set(collapsed);
-		if (value) next.add(id);
-		else next.delete(id);
-		collapsed = next;
+	function setCollapsed(key: string, value: boolean): void {
+		if (collapsed.has(key) === value) return;
+		if (value) collapsed.add(key);
+		else collapsed.delete(key);
 	}
 
 	const elementsById = $derived.by(() => {
-		const m = new Map<string, Element>();
+		const m = new SvelteMap<string, Element>();
 		for (const el of working.elements) m.set(el.id, el);
 		return m;
 	});
 
 	const containmentRelTypeNames = $derived.by(() => {
-		if (mm === null) return new Set<string>();
-		return new Set(containmentRelTypes(mm).map((r) => r.name));
+		if (mm === null) return new SvelteSet<string>();
+		return new SvelteSet(containmentRelTypes(mm).map((r) => r.name));
 	});
 
-	// childrenByParent: source -> [target,...] (source contains target).
+	function displayName(el: Element): string {
+		const n = el.properties?.name;
+		return typeof n === 'string' && n.length > 0 ? n : el.id;
+	}
+
 	const childrenByParent = $derived.by(() => {
-		const m = new Map<string, string[]>();
-		const containedIds = new Set<string>();
+		const m = new SvelteMap<string, string[]>();
+		const containedIds = new SvelteSet<string>();
 		for (const rel of working.relationships) {
 			if (!containmentRelTypeNames.has(rel.type_name)) continue;
 			if (!elementsById.has(rel.source_id) || !elementsById.has(rel.target_id)) continue;
@@ -95,78 +115,99 @@
 			if (arr) arr.push(rel.target_id);
 			else m.set(rel.source_id, [rel.target_id]);
 		}
-		// Stable ordering by display name within each parent.
 		for (const [k, ids] of m) {
-			ids.sort((a, b) => displayName(elementsById.get(a)!).localeCompare(displayName(elementsById.get(b)!)));
+			ids.sort((a, b) =>
+				displayName(elementsById.get(a)!).localeCompare(displayName(elementsById.get(b)!))
+			);
 			m.set(k, ids);
 		}
-		return { childrenByParent: m, containedIds };
+		return { children: m, containedIds };
 	});
 
-	const roots = $derived.by(() => {
+	const rootElements = $derived.by(() => {
 		const { containedIds } = childrenByParent;
 		const rs: string[] = [];
 		for (const el of working.elements) {
 			if (!containedIds.has(el.id)) rs.push(el.id);
 		}
-		rs.sort((a, b) => displayName(elementsById.get(a)!).localeCompare(displayName(elementsById.get(b)!)));
 		return rs;
 	});
 
-	function displayName(el: Element): string {
-		const n = el.properties?.name;
-		return typeof n === 'string' && n.length > 0 ? n : el.id;
-	}
+	const tree = $derived.by(() =>
+		buildUnifiedTree(
+			view,
+			rootElements,
+			elementsById,
+			childrenByParent.children,
+			childrenByParent.containedIds,
+			displayName
+		)
+	);
 
-	// `keep(id)` is true if the element passes the type filter directly OR any
-	// descendant (via containment) does. The filter is a strict allowlist:
-	// an empty set hides all elements.
-	function buildKeepSet(): Set<string> {
-		const keep = new Set<string>();
-		const { childrenByParent: kids } = childrenByParent;
-		const visit = (id: string): boolean => {
-			if (keep.has(id)) return true;
-			const el = elementsById.get(id);
-			let self = false;
-			if (el && typeFilter.has(el.type_name)) self = true;
-			let descendant = false;
-			const cs = kids.get(id) ?? [];
-			for (const c of cs) {
-				if (visit(c)) descendant = true;
-			}
-			if (self || descendant) {
-				keep.add(id);
-				return true;
-			}
-			return false;
-		};
-		for (const r of roots) visit(r);
-		return keep;
-	}
+	const visibility = $derived.by(() => computeVisibility(tree, elementsById, typeFilter));
 
-	const keepSet = $derived.by(() => buildKeepSet());
+	const warningsByElementId = $derived.by(() => {
+		const set = new SvelteSet<string>();
+		for (const w of viewWarnings) {
+			for (const tid of w.target_ids) set.add(tid);
+		}
+		return set;
+	});
 
 	const selection = $derived(getSelection());
 
-	function onPick(id: string): void {
-		select({ kind: 'element', id });
+	// ----- multi-selection (sidebar-local; the Inspector still tracks the single
+	// `selection`, which we keep pointed at the last-touched element) -----
+	// SvelteSet is reactive on its own; mutate in place (no `$state` wrapper).
+	const multiSelected = new SvelteSet<string>();
+	let anchorId: string | null = $state(null);
+
+	function replaceMultiSelected(keys: Iterable<string>): void {
+		multiSelected.clear();
+		for (const k of keys) multiSelected.add(k);
 	}
 
-	// ----- keyboard navigation -----
+	function onPick(key: string, e: MouseEvent): void {
+		if (isFolderKey(key)) {
+			// folders aren't selectable in the inspector; clicking one clears the
+			// element multi-selection for predictability.
+			multiSelected.clear();
+			anchorId = null;
+			return;
+		}
+		if (e.shiftKey && anchorId !== null) {
+			const keys = visibleRows.map((r) => r.key);
+			const a = keys.indexOf(anchorId);
+			const b = keys.indexOf(key);
+			if (a >= 0 && b >= 0) {
+				const [lo, hi] = a < b ? [a, b] : [b, a];
+				replaceMultiSelected(keys.slice(lo, hi + 1).filter((k) => !isFolderKey(k)));
+			} else {
+				replaceMultiSelected([key]);
+			}
+		} else if (e.metaKey || e.ctrlKey) {
+			if (multiSelected.has(key)) multiSelected.delete(key);
+			else multiSelected.add(key);
+			anchorId = key;
+		} else {
+			replaceMultiSelected([key]);
+			anchorId = key;
+		}
+		select({ kind: 'element', id: key });
+	}
 
-	// Build a flattened list of currently visible rows (id + parent id) in DOM order.
-	type VisibleRow = { id: string; parent: string | null };
+	type VisibleRow = { key: string; parent: string | null };
 	const visibleRows = $derived.by<VisibleRow[]>(() => {
 		const out: VisibleRow[] = [];
-		const { childrenByParent: kids } = childrenByParent;
-		const walk = (id: string, parent: string | null): void => {
-			if (!keepSet.has(id)) return;
-			out.push({ id, parent });
-			if (collapsed.has(id)) return;
-			const cs = kids.get(id) ?? [];
-			for (const c of cs) walk(c, id);
+		const walk = (key: string, parent: string | null): void => {
+			const vis = visibility.get(key);
+			if (vis === 'hidden' || vis === undefined) return;
+			out.push({ key, parent });
+			if (vis === 'stub') return;
+			if (collapsed.has(key)) return;
+			for (const c of tree.children.get(key) ?? []) walk(c, key);
 		};
-		for (const r of roots) walk(r, null);
+		for (const r of tree.roots) walk(r, null);
 		return out;
 	});
 
@@ -174,12 +215,12 @@
 
 	const focusedIndex = $derived.by(() => {
 		if (focusedId === null) return -1;
-		return visibleRows.findIndex((r) => r.id === focusedId);
+		return visibleRows.findIndex((r) => r.key === focusedId);
 	});
 
 	function moveTo(idx: number): void {
 		if (idx < 0 || idx >= visibleRows.length) return;
-		focusedId = visibleRows[idx].id;
+		focusedId = visibleRows[idx].key;
 	}
 
 	function onKeyDown(e: KeyboardEvent): void {
@@ -198,39 +239,253 @@
 			if (cur < 0) return;
 			e.preventDefault();
 			const row = visibleRows[cur];
-			const kids = childrenByParent.childrenByParent.get(row.id) ?? [];
-			const hasChildren = kids.some((c) => keepSet.has(c));
-			if (hasChildren && collapsed.has(row.id)) {
-				setCollapsed(row.id, false);
-			} else if (hasChildren) {
-				// Already expanded — jump to first visible child.
+			const kids = tree.children.get(row.key) ?? [];
+			const hasVisibleChild = kids.some((c) => visibility.get(c) !== 'hidden');
+			if (hasVisibleChild && collapsed.has(row.key)) {
+				setCollapsed(row.key, false);
+			} else if (hasVisibleChild) {
 				moveTo(cur + 1);
 			}
 		} else if (k === 'ArrowLeft') {
 			if (cur < 0) return;
 			e.preventDefault();
 			const row = visibleRows[cur];
-			const kids = childrenByParent.childrenByParent.get(row.id) ?? [];
-			const hasChildren = kids.some((c) => keepSet.has(c));
-			if (hasChildren && !collapsed.has(row.id)) {
-				setCollapsed(row.id, true);
+			const kids = tree.children.get(row.key) ?? [];
+			const hasVisibleChild = kids.some((c) => visibility.get(c) !== 'hidden');
+			if (hasVisibleChild && !collapsed.has(row.key)) {
+				setCollapsed(row.key, true);
 			} else if (row.parent !== null) {
-				const pIdx = visibleRows.findIndex((r) => r.id === row.parent);
+				const pIdx = visibleRows.findIndex((r) => r.key === row.parent);
 				if (pIdx >= 0) moveTo(pIdx);
 			}
 		} else if (k === 'Enter' || k === ' ') {
 			if (cur < 0) return;
 			e.preventDefault();
-			select({ kind: 'element', id: visibleRows[cur].id });
+			const row = visibleRows[cur];
+			if (!isFolderKey(row.key)) {
+				replaceMultiSelected([row.key]);
+				anchorId = row.key;
+				select({ kind: 'element', id: row.key });
+			}
 		}
 	}
 
-	// Sync focused-row from the global selection when it changes externally.
 	$effect(() => {
-		if (selection?.kind === 'element' && visibleRows.some((r) => r.id === selection.id)) {
+		if (selection?.kind === 'element' && visibleRows.some((r) => r.key === selection.id)) {
 			focusedId = selection.id;
 		}
 	});
+
+	// Drop ids that no longer exist (model swap / element deletion).
+	$effect(() => {
+		for (const id of [...multiSelected]) {
+			if (!knownIds.has(id)) multiSelected.delete(id);
+		}
+	});
+
+	// ----- drag-and-drop (Pointer Events) -----
+	//
+	// Native HTML5 DnD was deliberately dropped here: it relies on the OS drag
+	// loop, which fails to start in some Chromium setups (drag never begins in
+	// Chrome/Edge while Firefox works). Pointer events are driven by the browser
+	// input pipeline, so they behave the same everywhere and support touch/pen.
+	// Drop targets tag themselves with data-drop-key / data-drop-path; we hit-test
+	// them with elementFromPoint rather than per-row dragover/drop handlers.
+
+	const movableIds = $derived(movableElementIds(tree));
+	const knownIds = $derived(new SvelteSet(elementsById.keys()));
+
+	type DragPayload = { kind: 'element'; ids: string[] } | { kind: 'folder'; path: string[] };
+	let draggingPayload: DragPayload | null = $state(null);
+	let dragHoverKey: string | null = $state(null);
+	let dragHoverValid = $state(false);
+
+	// Press → threshold → drag bookkeeping.
+	const DRAG_THRESHOLD_PX = 4;
+	let pendingPayload: DragPayload | null = null;
+	let activePointerId: number | null = null;
+	let startX = 0;
+	let startY = 0;
+	let dragging = $state(false);
+	let dragX = $state(0);
+	let dragY = $state(0);
+	// Set on pointerup after a real drag so the click it synthesizes doesn't also
+	// select/toggle the row; cleared on the next pointerdown so it never goes stale.
+	let suppressClick = false;
+
+	const dragLabel = $derived.by((): string => {
+		if (draggingPayload === null) return '';
+		if (draggingPayload.kind === 'folder') {
+			const p = draggingPayload.path;
+			return p.length > 0 ? p[p.length - 1] : 'folder';
+		}
+		const ids = draggingPayload.ids;
+		if (ids.length === 1) {
+			const el = elementsById.get(ids[0]);
+			return el ? displayName(el) : ids[0];
+		}
+		return `${ids.length} elements`;
+	});
+
+	function dropAllowed(destPath: string[] | null): boolean {
+		if (draggingPayload === null) return false;
+		if (draggingPayload.kind === 'element') {
+			return canDropElement({ elementIds: draggingPayload.ids, movableIds, knownIds }).ok;
+		}
+		return canDropFolder({ sourcePath: draggingPayload.path, destParentPath: destPath ?? [] }).ok;
+	}
+
+	/** Resolve the drop target under a viewport point to its key + destination path. */
+	function dropTargetAt(x: number, y: number): { key: string; path: string[] | null } | null {
+		const hit = document.elementFromPoint(x, y);
+		const el = hit?.closest<HTMLElement>('[data-drop-key]') ?? null;
+		if (el === null) return null;
+		const raw = el.dataset.dropPath ?? 'null';
+		const path = raw === 'null' ? null : (JSON.parse(raw) as string[]);
+		return { key: el.dataset.dropKey ?? '', path };
+	}
+
+	function buildPayload(
+		key: string,
+		kind: 'element' | 'folder',
+		folderPath: string[]
+	): DragPayload | null {
+		if (kind === 'folder') return { kind: 'folder', path: folderPath };
+		const base = multiSelected.has(key) && multiSelected.size > 1 ? [...multiSelected] : [key];
+		const ids = base.filter((id) => movableIds.has(id));
+		if (ids.length === 0) return null;
+		return { kind: 'element', ids };
+	}
+
+	function onPointerDown(
+		e: PointerEvent,
+		key: string,
+		kind: 'element' | 'folder',
+		folderPath: string[]
+	): void {
+		if (e.button !== 0 || !e.isPrimary) return;
+		suppressClick = false;
+		const payload = buildPayload(key, kind, folderPath);
+		if (payload === null) return; // nothing movable under this press
+		pendingPayload = payload;
+		activePointerId = e.pointerId;
+		startX = e.clientX;
+		startY = e.clientY;
+		window.addEventListener('pointermove', onWindowPointerMove);
+		window.addEventListener('pointerup', onWindowPointerUp);
+		window.addEventListener('pointercancel', onWindowPointerUp);
+		window.addEventListener('keydown', onWindowKeyDown);
+	}
+
+	function onWindowPointerMove(e: PointerEvent): void {
+		if (pendingPayload === null || e.pointerId !== activePointerId) return;
+		dragX = e.clientX;
+		dragY = e.clientY;
+		if (!dragging) {
+			if (Math.hypot(e.clientX - startX, e.clientY - startY) < DRAG_THRESHOLD_PX) return;
+			dragging = true;
+			draggingPayload = pendingPayload;
+			document.body.style.userSelect = 'none'; // no text selection mid-drag
+		}
+		const target = dropTargetAt(e.clientX, e.clientY);
+		dragHoverKey = target?.key ?? null;
+		dragHoverValid = target !== null && dropAllowed(target.path);
+	}
+
+	async function onWindowPointerUp(e: PointerEvent): Promise<void> {
+		if (e.pointerId !== activePointerId) return;
+		if (!dragging) {
+			endGesture();
+			return; // a plain click — let it select/toggle normally
+		}
+		const target = dropTargetAt(e.clientX, e.clientY);
+		const payload = draggingPayload;
+		const valid = target !== null && dropAllowed(target.path);
+		suppressClick = true;
+		endGesture();
+		if (!valid || payload === null || target === null) return;
+		try {
+			if (payload.kind === 'element') {
+				await placeElements(target.path ?? [], payload.ids);
+			} else {
+				await moveFolder(payload.path, target.path ?? []);
+			}
+		} catch (err) {
+			console.error('Drop failed', err);
+		}
+	}
+
+	function onWindowKeyDown(e: KeyboardEvent): void {
+		if (e.key === 'Escape') endGesture();
+	}
+
+	function endGesture(): void {
+		pendingPayload = null;
+		activePointerId = null;
+		dragging = false;
+		draggingPayload = null;
+		dragHoverKey = null;
+		dragHoverValid = false;
+		document.body.style.userSelect = '';
+		window.removeEventListener('pointermove', onWindowPointerMove);
+		window.removeEventListener('pointerup', onWindowPointerUp);
+		window.removeEventListener('pointercancel', onWindowPointerUp);
+		window.removeEventListener('keydown', onWindowKeyDown);
+	}
+
+	// Tear down a mid-flight drag if the component unmounts.
+	$effect(() => endGesture);
+
+	// Capturing click handler on the tree: swallow the click a finished drag
+	// synthesizes so it doesn't also select/toggle the row it landed on.
+	function onTreeClickCapture(e: MouseEvent): void {
+		if (!suppressClick) return;
+		suppressClick = false;
+		e.preventDefault();
+		e.stopPropagation();
+	}
+
+	const dndContext = $derived<DndContext>({
+		onPointerDown,
+		hoverKey: dragHoverKey,
+		hoverValid: dragHoverValid
+	});
+
+	const isViewRootHover = $derived(dragHoverKey === VIEW_ROOT_DROP_KEY);
+
+	// ----- folder targets for "Move to folder…" picker -----
+
+	type FolderOption = { path: string[]; label: string };
+	const folderOptions = $derived.by<FolderOption[]>(() => {
+		const opts: FolderOption[] = [];
+		const walk = (key: string): void => {
+			if (!isFolderKey(key)) return;
+			const path = folderPathFromKey(key);
+			opts.push({ path, label: path.join(' / ') });
+			for (const c of tree.children.get(key) ?? []) walk(c);
+		};
+		for (const r of tree.roots) walk(r);
+		return opts;
+	});
+
+	async function onNewRootFolder(): Promise<void> {
+		const name = window.prompt('New top-level folder name');
+		if (name === null || name.trim() === '') return;
+		try {
+			await createFolder([], name.trim());
+		} catch (err) {
+			alert(err instanceof Error ? err.message : 'Failed to create folder');
+		}
+	}
+
+	async function onMoveToFolder(elementId: string, path: string[] | null): Promise<void> {
+		try {
+			if (path === null) await removeElement(elementId);
+			else await placeElement(path, elementId);
+		} catch (err) {
+			console.error('Move element failed', err);
+		}
+	}
 </script>
 
 <div class="flex min-h-0 flex-1 flex-col">
@@ -243,8 +498,8 @@
 					names={concreteTypeNames}
 					checked={typeFilter}
 					onToggle={toggleType}
-					onSelectAll={onSelectAll}
-					onDeselectAll={onDeselectAll}
+					{onSelectAll}
+					{onDeselectAll}
 					open={filterOpen}
 					onOpenChange={(v) => (filterOpen = v)}
 					searchPlaceholder="Filter stereotypes…"
@@ -260,6 +515,17 @@
 						</span>
 					{/snippet}
 				</StereotypePicker>
+				{#if view !== null}
+					<button
+						type="button"
+						class="inline-flex h-5 w-5 items-center justify-center rounded text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+						aria-label="New top-level folder"
+						title="New top-level folder"
+						onclick={onNewRootFolder}
+					>
+						<FolderPlus class="h-3 w-3" />
+					</button>
+				{/if}
 				<StereotypePicker
 					mode="create"
 					names={concreteTypeNames}
@@ -288,30 +554,62 @@
 		role="tree"
 		aria-label="Containment tree"
 		onkeydown={onKeyDown}
+		onclickcapture={onTreeClickCapture}
 	>
-	{#if mm === null}
-		<p class="text-xs text-zinc-600">Load a metamodel and model to begin.</p>
-	{:else if working.elements.length === 0}
-		<p class="text-xs text-zinc-600">Model is empty.</p>
-	{:else}
-		<ul class="flex flex-col text-xs" role="group">
-			{#each roots as rootId (rootId)}
-				{#if keepSet.has(rootId)}
-					<TreeNode
-						id={rootId}
-						depth={0}
-						{elementsById}
-						childrenByParent={childrenByParent.childrenByParent}
-						{keepSet}
-						{collapsed}
-						selectedId={selection?.kind === 'element' ? selection.id : null}
-						{focusedId}
-						onToggle={toggleCollapsed}
-						onPick={onPick}
-					/>
-				{/if}
-			{/each}
-		</ul>
-	{/if}
+		{#if mm === null}
+			<p class="text-xs text-zinc-600">Load a metamodel and model to begin.</p>
+		{:else if working.elements.length === 0 && tree.roots.length === 0}
+			<p class="text-xs text-zinc-600">Model is empty.</p>
+		{:else}
+			{#if view !== null && draggingPayload !== null}
+				<div
+					role="button"
+					tabindex="-1"
+					aria-label="Move to top level"
+					class="mb-1 rounded border border-dashed border-zinc-700 px-2 py-1 text-[10px] text-zinc-500"
+					class:border-emerald-500={isViewRootHover && dragHoverValid}
+					class:text-emerald-400={isViewRootHover && dragHoverValid}
+					class:border-red-500={isViewRootHover && !dragHoverValid}
+					data-drop-key={VIEW_ROOT_DROP_KEY}
+					data-drop-path="null"
+				>
+					Drop here to move to top level
+				</div>
+			{/if}
+			<ul class="flex flex-col text-xs" role="group">
+				{#each tree.roots as rootKey (rootKey)}
+					{#if visibility.get(rootKey) !== 'hidden'}
+						<TreeNode
+							nodeKey={rootKey}
+							depth={0}
+							{tree}
+							{elementsById}
+							{visibility}
+							{collapsed}
+							{folderOptions}
+							{warningsByElementId}
+							selectedId={selection?.kind === 'element' ? selection.id : null}
+							multiSelectedIds={multiSelected}
+							{focusedId}
+							dnd={dndContext}
+							onToggle={toggleCollapsed}
+							{onPick}
+							{onMoveToFolder}
+						/>
+					{/if}
+				{/each}
+			</ul>
+		{/if}
 	</div>
+
+	{#if dragging && dragLabel !== ''}
+		<!-- Floating drag preview following the cursor (pointer-events DnD has no
+		     native drag image). pointer-events:none so it never blocks hit-testing. -->
+		<div
+			class="pointer-events-none fixed z-50 truncate rounded border border-indigo-500/60 bg-zinc-900 px-2 py-0.5 text-xs text-zinc-100 shadow-lg"
+			style="left: {dragX + 12}px; top: {dragY + 8}px; max-width: 220px"
+		>
+			{dragLabel}
+		</div>
+	{/if}
 </div>

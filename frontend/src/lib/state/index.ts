@@ -37,11 +37,7 @@ export {
 	setRunning
 } from './validation.svelte';
 export { indexIssues, worstSeverityFor, type IssueIndex } from './validation-index';
-export {
-	getActiveTab,
-	setActiveTab,
-	type WorkspaceTab
-} from './workspace.svelte';
+export { getActiveTab, setActiveTab, type WorkspaceTab } from './workspace.svelte';
 export { clearMetamodel, getMetamodel, setMetamodel } from './metamodel.svelte';
 export {
 	clearFilters,
@@ -58,3 +54,19 @@ export {
 	setCommandPaletteOpen,
 	setDiffDrawerOpen
 } from './ui.svelte';
+export {
+	clearViewState,
+	cloneView,
+	createFolder,
+	deleteFolder,
+	dropView,
+	getView,
+	getViewWarnings,
+	moveFolder,
+	placeElement,
+	placeElements,
+	pushView,
+	refreshView,
+	removeElement,
+	renameFolder
+} from './view.svelte';

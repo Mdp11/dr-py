@@ -1,4 +1,3 @@
-
 <script lang="ts">
 	import { model as modelApi, ApiError } from '$lib/api';
 	import type { ModelOut, SnapshotIn } from '$lib/api/types';
@@ -87,7 +86,7 @@
 	}
 </script>
 
-<Dialog.Root bind:open onOpenChange={onOpenChange}>
+<Dialog.Root bind:open {onOpenChange}>
 	<Dialog.Content class="max-w-md">
 		<Dialog.Header>
 			<Dialog.Title>Load model</Dialog.Title>

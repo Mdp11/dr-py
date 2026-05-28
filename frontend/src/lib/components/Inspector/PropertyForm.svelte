@@ -1,9 +1,6 @@
 <script lang="ts">
 	import type { Element, PropertyDef, Relationship } from '$lib/api/types';
-	import {
-		effectiveProperties,
-		effectiveRelationshipProperties
-	} from '$lib/metamodel/helpers';
+	import { effectiveProperties, effectiveRelationshipProperties } from '$lib/metamodel/helpers';
 	import { emit, getMetamodel } from '$lib/state';
 	import PropertyField from './PropertyField.svelte';
 

@@ -2,11 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Issue } from '$lib/api/types';
 import { indexIssues, worstSeverityFor } from '../validation-index';
 
-function issue(
-	severity: 'error' | 'warning',
-	message: string,
-	target_ids: string[]
-): Issue {
+function issue(severity: 'error' | 'warning', message: string, target_ids: string[]): Issue {
 	return { severity, message, target_ids };
 }
 
@@ -37,10 +33,7 @@ describe('indexIssues', () => {
 	});
 
 	it('separates error and warning buckets', () => {
-		const idx = indexIssues([
-			issue('error', 'x', ['e1']),
-			issue('warning', 'y', ['e2'])
-		]);
+		const idx = indexIssues([issue('error', 'x', ['e1']), issue('warning', 'y', ['e2'])]);
 		expect(idx.errorIds.has('e1')).toBe(true);
 		expect(idx.errorIds.has('e2')).toBe(false);
 		expect(idx.warningIds.has('e2')).toBe(true);
@@ -61,10 +54,7 @@ describe('worstSeverityFor', () => {
 	});
 
 	it('returns "error" when id has an error (even with warnings too)', () => {
-		const idx = indexIssues([
-			issue('error', 'x', ['e1']),
-			issue('warning', 'y', ['e1'])
-		]);
+		const idx = indexIssues([issue('error', 'x', ['e1']), issue('warning', 'y', ['e1'])]);
 		expect(worstSeverityFor(idx, 'e1')).toBe('error');
 	});
 

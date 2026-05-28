@@ -78,7 +78,11 @@
 	}
 
 	const multiplicityWarning = $derived.by((): string | null => {
-		const count = isMany ? arrayValue.length : value === null || value === undefined || value === '' ? 0 : 1;
+		const count = isMany
+			? arrayValue.length
+			: value === null || value === undefined || value === ''
+				? 0
+				: 1;
 		if (mult.lower >= 1 && count === 0) return 'required';
 		if (mult.upper !== null && count > mult.upper) return `max ${mult.upper} values`;
 		return null;

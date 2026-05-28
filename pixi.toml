@@ -55,6 +55,40 @@ depends-on = [
     { task = "lint-core", args = [{ check_only = "{{ check_only }}" }]},
 ]
 
+[feature.core-dev.tasks.lint-backend]
+args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
+cmd = """
+ruff check {% if check_only == 'false' %}--fix{% endif %} .
+mypy .
+pyright
+"""
+cwd = "src/data_rover/api"
+default-environment = "core-dev"
+
+[feature.core-dev.tasks.format-backend]
+args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
+cmd = "ruff format {% if check_only == 'true' %}--check{% endif %} ."
+cwd = "src/data_rover/api"
+default-environment = "core-dev"
+
+[feature.core-dev.tasks.tidy-backend]
+args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
+cmd = "true"
+depends-on = [
+    { task = "format-backend", args = [{ check_only = "{{ check_only }}" }] },
+    { task = "lint-backend", args = [{ check_only = "{{ check_only }}" }]},
+]
+
+[feature.core-dev.tasks.tidy]
+args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
+cmd = "true"
+default-environment = "core-dev"
+depends-on = [
+    { task = "tidy-frontend", args = [{ check_only = "{{ check_only }}" }], environment = "frontend" },
+    { task = "tidy-core", args = [{ check_only = "{{ check_only }}" }] },
+    { task = "tidy-backend", args = [{ check_only = "{{ check_only }}" }] },
+]
+
 [feature.frontend.dependencies]
 nodejs = "22.*"
 
@@ -62,15 +96,37 @@ nodejs = "22.*"
 args = [
     { arg = "metamodel", default = "examples/smart-city.metamodel.yaml" },
     { arg = "model", default = "examples/smart-city.model.json" },
+    { arg = "view", default = "examples/smart-city.view.json" },
 ]
 cmd = """
-AUTOLOAD_METAMODEL_PATH="{{ metamodel }}" AUTOLOAD_MODEL_PATH="{{ model }}" npm run dev
+AUTOLOAD_METAMODEL_PATH="{{ metamodel }}" AUTOLOAD_MODEL_PATH="{{ model }}" AUTOLOAD_VIEW_PATH="{{ view }}" npm run dev
 """
 cwd = "frontend"
 
 [feature.frontend.tasks]
 frontend-build = { cmd = "npm run build", cwd = "frontend" }
 frontend-install = { cmd = "npm install", cwd = "frontend" }
+
+[feature.frontend.tasks.lint-frontend]
+args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
+cmd = """
+npx eslint {% if check_only == 'false' %}--fix{% endif %} .
+npm run check
+"""
+cwd = "frontend"
+
+[feature.frontend.tasks.format-frontend]
+args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
+cmd = "npx prettier {% if check_only == 'true' %}--check{% else %}--write{% endif %} ."
+cwd = "frontend"
+
+[feature.frontend.tasks.tidy-frontend]
+args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
+cmd = "true"
+depends-on = [
+    { task = "format-frontend", args = [{ check_only = "{{ check_only }}" }] },
+    { task = "lint-frontend", args = [{ check_only = "{{ check_only }}" }]},
+]
 
 [environments]
 core = { features = ["core"]}

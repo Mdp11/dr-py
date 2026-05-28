@@ -1,13 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { http, HttpResponse } from 'msw';
 
-import {
-	createElement,
-	deleteElement,
-	getElement,
-	listElements,
-	patchElement
-} from '../elements';
+import { createElement, deleteElement, getElement, listElements, patchElement } from '../elements';
 import { server } from './server';
 
 const BASE = 'http://api.test/api/v1';
@@ -58,10 +52,7 @@ describe('elements client', () => {
 				return HttpResponse.json(sampleElement, { status: 201 });
 			})
 		);
-		const result = await createElement(
-			{ type: 'Block', properties: { name: 'A' } },
-			cfg
-		);
+		const result = await createElement({ type: 'Block', properties: { name: 'A' } }, cfg);
 		expect(body).toEqual({ type: 'Block', properties: { name: 'A' } });
 		expect(result.id).toBe('e1');
 	});

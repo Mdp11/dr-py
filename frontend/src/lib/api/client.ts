@@ -14,11 +14,7 @@ export interface ApiFetchInit extends Omit<RequestInit, 'body'> {
 
 const DEFAULT_BASE_URL = '/api/v1';
 
-function buildUrl(
-	baseUrl: string,
-	path: string,
-	query?: ApiFetchInit['query']
-): string {
+function buildUrl(baseUrl: string, path: string, query?: ApiFetchInit['query']): string {
 	const normalizedBase = baseUrl.replace(/\/$/, '');
 	const normalizedPath = path.startsWith('/') ? path : `/${path}`;
 	let url = `${normalizedBase}${normalizedPath}`;
@@ -34,9 +30,7 @@ function buildUrl(
 	return url;
 }
 
-function prepareBody(
-	init: ApiFetchInit
-): { body: BodyInit | null | undefined; headers: Headers } {
+function prepareBody(init: ApiFetchInit): { body: BodyInit | null | undefined; headers: Headers } {
 	const headers = new Headers(init.headers ?? {});
 	let body = init.body;
 	const isObjectBody =

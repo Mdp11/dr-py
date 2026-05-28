@@ -21,7 +21,11 @@ function snap(elements: Element[], relationships: Relationship[] = []): Snapshot
 	return { elements, relationships };
 }
 
-function rt(name: string, containment = false, extendsName: string | null = null): RelationshipType {
+function rt(
+	name: string,
+	containment = false,
+	extendsName: string | null = null
+): RelationshipType {
 	return {
 		name,
 		abstract: false,
@@ -57,9 +61,7 @@ describe('buildGraph', () => {
 			working: snap([el('a', { name: 'Alpha' })]),
 			centerId: 'a'
 		});
-		expect(out.nodes).toEqual([
-			{ id: 'a', type_name: 'Thing', label: 'Alpha', hops: 0 }
-		]);
+		expect(out.nodes).toEqual([{ id: 'a', type_name: 'Thing', label: 'Alpha', hops: 0 }]);
 		expect(out.edges).toEqual([]);
 		expect(out.truncated).toBe(false);
 	});

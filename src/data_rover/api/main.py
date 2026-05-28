@@ -4,7 +4,15 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .errors import register_exception_handlers
-from .routes import elements, health, metamodel, model, relationships, validation
+from .routes import (
+    elements,
+    health,
+    metamodel,
+    model,
+    relationships,
+    validation,
+    view,
+)
 from .settings import get_settings
 
 
@@ -33,6 +41,7 @@ def create_app() -> FastAPI:
     app.include_router(elements.router, prefix=prefix, tags=["elements"])
     app.include_router(relationships.router, prefix=prefix, tags=["relationships"])
     app.include_router(validation.router, prefix=prefix, tags=["validation"])
+    app.include_router(view.router, prefix=prefix, tags=["view"])
 
     return app
 

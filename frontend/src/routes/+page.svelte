@@ -16,12 +16,11 @@
 	});
 
 	// Local bindable mirror of the global ui store so DiffDrawer's existing
-	// `bind:open` contract keeps working.
-	let drawerOpen = $state(false);
+	// `bind:open` contract keeps working. Writable $derived: it tracks the
+	// store, and DiffDrawer's `bind:open` can override it until the store
+	// changes again; the effect pushes any local override back to the store.
+	let drawerOpen = $derived(getDiffDrawerOpen());
 
-	$effect(() => {
-		drawerOpen = getDiffDrawerOpen();
-	});
 	$effect(() => {
 		if (drawerOpen !== getDiffDrawerOpen()) setDiffDrawerOpen(drawerOpen);
 	});

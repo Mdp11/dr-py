@@ -9,6 +9,7 @@ from data_rover.core.model.element import Element
 from data_rover.core.model.model import Model
 from data_rover.core.model.relationship import Relationship
 from data_rover.core.validation.issue import Issue
+from data_rover.core.view.schema import Folder, View
 
 
 class ElementOut(BaseModel):
@@ -91,3 +92,52 @@ class IssueOut(BaseModel):
             message=issue.message,
             target_ids=list(issue.target_ids),
         )
+
+
+class FolderOut(BaseModel):
+    name: str
+    folders: list["FolderOut"] = Field(default_factory=list)
+    elements: list[str] = Field(default_factory=list)
+
+    @classmethod
+    def from_core(cls, folder: Folder) -> "FolderOut":
+        return cls(
+            name=folder.name,
+            folders=[FolderOut.from_core(f) for f in folder.folders],
+            elements=list(folder.elements),
+        )
+
+
+FolderOut.model_rebuild()
+
+
+class ViewOut(BaseModel):
+    name: str
+    folders: list[FolderOut] = Field(default_factory=list)
+
+    @classmethod
+    def from_core(cls, view: View) -> "ViewOut":
+        return cls(
+            name=view.name,
+            folders=[FolderOut.from_core(f) for f in view.folders],
+        )
+
+
+class ViewIn(BaseModel):
+    """Inbound view snapshot. Accepts the same shape as ViewOut."""
+
+    name: str
+    folders: list[FolderOut] = Field(default_factory=list)
+
+    def to_core(self) -> View:
+        return View.model_validate(self.model_dump())
+
+
+class ViewSnapshotResponse(BaseModel):
+    view: ViewOut
+    warnings: list[IssueOut] = Field(default_factory=list)
+
+
+class ViewStateResponse(BaseModel):
+    view: ViewOut | None = None
+    warnings: list[IssueOut] = Field(default_factory=list)

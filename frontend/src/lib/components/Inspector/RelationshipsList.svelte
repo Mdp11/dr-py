@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import type { Element, Relationship } from '$lib/api/types';
 	import { emit, getIssues, getWorkingModel, indexIssues, select } from '$lib/state';
 	import { AlertCircle, AlertTriangle, Pencil, X } from '@lucide/svelte';
@@ -18,7 +19,7 @@
 	type Group = { type_name: string; items: Relationship[] };
 
 	function groupByType(rels: Relationship[]): Group[] {
-		const map = new Map<string, Relationship[]>();
+		const map = new SvelteMap<string, Relationship[]>();
 		for (const r of rels) {
 			const arr = map.get(r.type_name);
 			if (arr) arr.push(r);
@@ -44,7 +45,8 @@
 
 	let outgoingOpen = $state(true);
 	let incomingOpen = $state(true);
-	let collapsedGroups = $state(new Set<string>());
+	// SvelteSet is reactive on its own; mutate in place (no `$state` wrapper).
+	const collapsedGroups = new SvelteSet<string>();
 
 	function groupKey(direction: 'out' | 'in', type_name: string): string {
 		return `${direction}:${type_name}`;
@@ -52,10 +54,8 @@
 
 	function toggleGroup(direction: 'out' | 'in', type_name: string): void {
 		const key = groupKey(direction, type_name);
-		const next = new Set(collapsedGroups);
-		if (next.has(key)) next.delete(key);
-		else next.add(key);
-		collapsedGroups = next;
+		if (collapsedGroups.has(key)) collapsedGroups.delete(key);
+		else collapsedGroups.add(key);
 	}
 
 	function isGroupOpen(direction: 'out' | 'in', type_name: string): boolean {

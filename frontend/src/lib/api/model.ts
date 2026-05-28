@@ -6,11 +6,7 @@ import { ModelOutSchema, type ModelOut, type SnapshotIn } from './types';
  * the request returns 404.
  */
 export function uploadModel(payload: SnapshotIn, cfg?: ClientConfig): Promise<ModelOut> {
-	return apiFetch(
-		'/model',
-		{ method: 'POST', body: payload, schema: ModelOutSchema },
-		cfg
-	);
+	return apiFetch('/model', { method: 'POST', body: payload, schema: ModelOutSchema }, cfg);
 }
 
 export function getModel(cfg?: ClientConfig): Promise<ModelOut> {
@@ -25,9 +21,5 @@ export function clearModel(cfg?: ClientConfig): Promise<void> {
  * Replace the active model with a full snapshot.
  */
 export function snapshotModel(payload: SnapshotIn, cfg?: ClientConfig): Promise<ModelOut> {
-	return apiFetch(
-		'/model/snapshot',
-		{ method: 'PUT', body: payload, schema: ModelOutSchema },
-		cfg
-	);
+	return apiFetch('/model/snapshot', { method: 'PUT', body: payload, schema: ModelOutSchema }, cfg);
 }

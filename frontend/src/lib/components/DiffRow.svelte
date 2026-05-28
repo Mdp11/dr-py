@@ -10,9 +10,7 @@
 	const { diff, kind }: Props = $props();
 
 	const status = $derived(diff.status as Exclude<EntityStatus, 'unchanged'>);
-	const entity = $derived(
-		(diff.after ?? diff.before) as Element | Relationship | undefined
-	);
+	const entity = $derived((diff.after ?? diff.before) as Element | Relationship | undefined);
 	const label = $derived(deriveLabel(entity));
 	const typeName = $derived(entity?.type_name ?? '');
 
@@ -54,9 +52,7 @@
 		return (diff.after.properties as Record<string, unknown>)[key];
 	}
 
-	const glyphChar = $derived(
-		status === 'added' ? '+' : status === 'modified' ? '~' : '-'
-	);
+	const glyphChar = $derived(status === 'added' ? '+' : status === 'modified' ? '~' : '-');
 	const glyphClass = $derived(
 		status === 'added'
 			? 'text-emerald-400'

@@ -3,12 +3,7 @@ import { http, HttpResponse } from 'msw';
 import { z } from 'zod';
 
 import { apiFetch } from '../client';
-import {
-	ApiError,
-	ConflictError,
-	NotFoundError,
-	ValidationError
-} from '../errors';
+import { ApiError, ConflictError, NotFoundError, ValidationError } from '../errors';
 import { server } from './server';
 
 const BASE = 'http://api.test/api/v1';
@@ -21,9 +16,7 @@ afterAll(() => server.close());
 describe('apiFetch', () => {
 	it('parses and validates a successful JSON response via zod schema', async () => {
 		const schema = z.object({ ok: z.boolean(), n: z.number() });
-		server.use(
-			http.get(`${BASE}/thing`, () => HttpResponse.json({ ok: true, n: 7 }))
-		);
+		server.use(http.get(`${BASE}/thing`, () => HttpResponse.json({ ok: true, n: 7 })));
 		const result = await apiFetch('/thing', { method: 'GET', schema }, cfg);
 		expect(result).toEqual({ ok: true, n: 7 });
 	});
@@ -48,9 +41,7 @@ describe('apiFetch', () => {
 	});
 
 	it('returns undefined for 204 No Content', async () => {
-		server.use(
-			http.delete(`${BASE}/x`, () => new HttpResponse(null, { status: 204 }))
-		);
+		server.use(http.delete(`${BASE}/x`, () => new HttpResponse(null, { status: 204 })));
 		const result = await apiFetch<void>('/x', { method: 'DELETE' }, cfg);
 		expect(result).toBeUndefined();
 	});
@@ -61,14 +52,12 @@ describe('apiFetch', () => {
 				HttpResponse.json({ error: 'No model named foo' }, { status: 404 })
 			)
 		);
-		await expect(apiFetch('/missing', { method: 'GET' }, cfg)).rejects.toMatchObject(
-			{
-				name: 'NotFoundError',
-				status: 404,
-				message: 'No model named foo',
-				body: { error: 'No model named foo' }
-			}
-		);
+		await expect(apiFetch('/missing', { method: 'GET' }, cfg)).rejects.toMatchObject({
+			name: 'NotFoundError',
+			status: 404,
+			message: 'No model named foo',
+			body: { error: 'No model named foo' }
+		});
 		await expect(apiFetch('/missing', { method: 'GET' }, cfg)).rejects.toBeInstanceOf(
 			NotFoundError
 		);
@@ -76,9 +65,7 @@ describe('apiFetch', () => {
 
 	it('throws ConflictError on 409 preserving the body envelope', async () => {
 		const conflictBody = { error: 'rev mismatch: expected 2, got 1' };
-		server.use(
-			http.put(`${BASE}/c`, () => HttpResponse.json(conflictBody, { status: 409 }))
-		);
+		server.use(http.put(`${BASE}/c`, () => HttpResponse.json(conflictBody, { status: 409 })));
 		try {
 			await apiFetch('/c', { method: 'PUT' }, cfg);
 			throw new Error('expected throw');
@@ -93,20 +80,14 @@ describe('apiFetch', () => {
 
 	it('throws ValidationError on 422', async () => {
 		server.use(
-			http.post(`${BASE}/v`, () =>
-				HttpResponse.json({ error: 'bad input' }, { status: 422 })
-			)
+			http.post(`${BASE}/v`, () => HttpResponse.json({ error: 'bad input' }, { status: 422 }))
 		);
-		await expect(apiFetch('/v', { method: 'POST' }, cfg)).rejects.toBeInstanceOf(
-			ValidationError
-		);
+		await expect(apiFetch('/v', { method: 'POST' }, cfg)).rejects.toBeInstanceOf(ValidationError);
 	});
 
 	it('throws plain ApiError on 500', async () => {
 		server.use(
-			http.get(`${BASE}/boom`, () =>
-				HttpResponse.json({ message: 'kaboom' }, { status: 500 })
-			)
+			http.get(`${BASE}/boom`, () => HttpResponse.json({ message: 'kaboom' }, { status: 500 }))
 		);
 		try {
 			await apiFetch('/boom', { method: 'GET' }, cfg);
@@ -120,9 +101,7 @@ describe('apiFetch', () => {
 	});
 
 	it('falls back to "HTTP {status}" when body has no message keys', async () => {
-		server.use(
-			http.get(`${BASE}/bare`, () => new HttpResponse('', { status: 503 }))
-		);
+		server.use(http.get(`${BASE}/bare`, () => new HttpResponse('', { status: 503 })));
 		try {
 			await apiFetch('/bare', { method: 'GET' }, cfg);
 			throw new Error('expected throw');

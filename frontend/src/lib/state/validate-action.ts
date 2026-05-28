@@ -1,12 +1,7 @@
 import * as validationApi from '$lib/api/validation';
 import { getBaseline } from './baseline.svelte';
 import { setActiveTab } from './workspace.svelte';
-import {
-	isRunning,
-	setIssues,
-	setLastError,
-	setRunning
-} from './validation.svelte';
+import { isRunning, setIssues, setLastError, setRunning } from './validation.svelte';
 import { getWorkingModel } from './working.svelte';
 
 /**

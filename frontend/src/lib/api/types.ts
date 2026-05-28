@@ -110,3 +110,35 @@ export type Metamodel = z.infer<typeof MetamodelSchema>;
 export const ElementListSchema = z.array(ElementSchema);
 export const RelationshipListSchema = z.array(RelationshipSchema);
 export const IssueListSchema = z.array(IssueSchema);
+
+export interface Folder {
+	name: string;
+	folders: Folder[];
+	elements: string[];
+}
+
+export const FolderSchema: z.ZodType<Folder> = z.lazy(() =>
+	z.object({
+		name: z.string(),
+		folders: z.array(FolderSchema).default([]),
+		elements: z.array(z.string()).default([])
+	})
+);
+
+export const ViewSchema = z.object({
+	name: z.string(),
+	folders: z.array(FolderSchema).default([])
+});
+export type View = z.infer<typeof ViewSchema>;
+
+export const ViewSnapshotResponseSchema = z.object({
+	view: ViewSchema,
+	warnings: z.array(IssueSchema).default([])
+});
+export type ViewSnapshotResponse = z.infer<typeof ViewSnapshotResponseSchema>;
+
+export const ViewStateResponseSchema = z.object({
+	view: ViewSchema.nullable().default(null),
+	warnings: z.array(IssueSchema).default([])
+});
+export type ViewStateResponse = z.infer<typeof ViewStateResponseSchema>;

@@ -1,5 +1,5 @@
-
 <script lang="ts">
+	import { SvelteSet } from 'svelte/reactivity';
 	import { Button } from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import {
@@ -48,7 +48,7 @@
 
 	const issueIndex = $derived(indexIssues(getIssues()));
 	const pendingEntityIds = $derived.by(() => {
-		const ids = new Set<string>();
+		const ids = new SvelteSet<string>();
 		for (const d of diff.elements) ids.add(d.id);
 		for (const d of diff.relationships) ids.add(d.id);
 		return ids;
@@ -133,7 +133,7 @@
 	}
 </script>
 
-<Dialog.Root bind:open onOpenChange={onOpenChange}>
+<Dialog.Root bind:open {onOpenChange}>
 	<Dialog.Content class="max-w-2xl">
 		<Dialog.Header>
 			<Dialog.Title>
@@ -141,7 +141,7 @@
 				<span class="ml-2 font-mono text-xs font-normal text-zinc-400">({total})</span>
 			</Dialog.Title>
 			<Dialog.Description>
-				Review the changes to be saved. The model will be written to{' '}
+				Review the changes to be saved. The model will be written to
 				<span class="font-mono">{filename ?? 'a new file'}</span>.
 			</Dialog.Description>
 		</Dialog.Header>
@@ -231,9 +231,7 @@
 		</label>
 
 		<Dialog.Footer>
-			<Button type="button" variant="ghost" onclick={close} disabled={saving}>
-				Cancel
-			</Button>
+			<Button type="button" variant="ghost" onclick={close} disabled={saving}>Cancel</Button>
 			<Button
 				type="button"
 				class="bg-red-600 text-white hover:bg-red-500"

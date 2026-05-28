@@ -5,7 +5,11 @@
 // concrete element types on first load via `ensureTypeFilterInitialized`,
 // so the default UX is "everything checked = everything visible".
 
-let _typeFilter: Set<string> = $state(new Set());
+import { SvelteSet } from 'svelte/reactivity';
+
+// SvelteSet is itself reactive, so it needs no `$state` wrapper; we keep a
+// single instance and mutate it in place rather than reassigning.
+const _typeFilter = new SvelteSet<string>();
 let _typeFilterInitialized = false;
 let _searchText: string = $state('');
 
@@ -13,16 +17,19 @@ export function getTypeFilter(): ReadonlySet<string> {
 	return _typeFilter;
 }
 
+function replaceTypeFilter(types: Iterable<string>): void {
+	_typeFilter.clear();
+	for (const t of types) _typeFilter.add(t);
+}
+
 export function setTypeFilter(types: Set<string>): void {
-	_typeFilter = new Set(types);
+	replaceTypeFilter(types);
 	_typeFilterInitialized = true;
 }
 
 export function toggleType(name: string): void {
-	const next = new Set(_typeFilter);
-	if (next.has(name)) next.delete(name);
-	else next.add(name);
-	_typeFilter = next;
+	if (_typeFilter.has(name)) _typeFilter.delete(name);
+	else _typeFilter.add(name);
 	_typeFilterInitialized = true;
 }
 
@@ -30,7 +37,7 @@ export function toggleType(name: string): void {
  *  No-op once the user (or a prior call) has touched the filter. */
 export function ensureTypeFilterInitialized(allNames: Iterable<string>): void {
 	if (_typeFilterInitialized) return;
-	_typeFilter = new Set(allNames);
+	replaceTypeFilter(allNames);
 	_typeFilterInitialized = true;
 }
 
@@ -43,6 +50,6 @@ export function setSearchText(s: string): void {
 }
 
 export function clearFilters(): void {
-	_typeFilter = new Set();
+	_typeFilter.clear();
 	_searchText = '';
 }

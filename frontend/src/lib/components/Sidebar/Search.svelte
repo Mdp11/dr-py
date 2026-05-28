@@ -1,11 +1,6 @@
 <script lang="ts">
 	import { Input } from '$lib/components/ui/input';
-	import {
-		getSearchText,
-		getWorkingModel,
-		select,
-		setSearchText
-	} from '$lib/state';
+	import { getSearchText, getWorkingModel, select, setSearchText } from '$lib/state';
 	import type { Element } from '$lib/api/types';
 
 	type ScoredHit = { el: Element; score: number; displayName: string };
@@ -116,7 +111,9 @@
 								onclick={() => onPick(r.el.id)}
 							>
 								<span class="truncate text-zinc-200">{r.displayName}</span>
-								<span class="ml-auto shrink-0 rounded bg-zinc-800 px-1 font-mono text-[10px] text-zinc-400">
+								<span
+									class="ml-auto shrink-0 rounded bg-zinc-800 px-1 font-mono text-[10px] text-zinc-400"
+								>
 									{r.el.type_name}
 								</span>
 								<span class="shrink-0 font-mono text-[10px] text-zinc-600">{r.el.id}</span>
