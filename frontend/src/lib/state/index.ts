@@ -20,3 +20,9 @@ export {
 	type SelectionKind
 } from './selection.svelte';
 export { clearIssues, getIssues, setIssues } from './validation.svelte';
+export {
+	clearMetamodel,
+	getMetamodel,
+	getMetamodelName,
+	setMetamodel
+} from './metamodel.svelte';
