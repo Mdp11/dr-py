@@ -139,29 +139,39 @@ def _seed_example_model(client: TestClient) -> dict:
     snapshot of the model.
     """
     yaml_text = EXAMPLE.read_text(encoding="utf-8")
-    client.put(
+    resp = client.put(
         "/api/v1/metamodels/example",
         content=yaml_text,
         headers={"content-type": "application/x-yaml"},
     )
-    client.post("/api/v1/models", json={"name": "demo", "metamodel": "example"})
-    block = client.post(
+    assert resp.status_code == 200, resp.text
+    resp = client.post(
+        "/api/v1/models", json={"name": "demo", "metamodel": "example"}
+    )
+    assert resp.status_code == 201, resp.text
+    resp = client.post(
         "/api/v1/models/demo/elements",
         json={"type": "Block", "properties": {"name": "Wing", "mass": 12.5}},
-    ).json()
-    req = client.post(
+    )
+    assert resp.status_code == 201, resp.text
+    block = resp.json()
+    resp = client.post(
         "/api/v1/models/demo/elements",
         json={
             "type": "Requirement",
             "properties": {"name": "REQ-1", "status": "Draft", "priority": 3},
         },
-    ).json()
-    client.post(
+    )
+    assert resp.status_code == 201, resp.text
+    req = resp.json()
+    resp = client.post(
         "/api/v1/models/demo/relationships",
         json={"type": "Satisfies", "source_id": block["id"], "target_id": req["id"]},
     )
-    snapshot = client.get("/api/v1/models/demo").json()
-    return snapshot
+    assert resp.status_code == 201, resp.text
+    resp = client.get("/api/v1/models/demo")
+    assert resp.status_code == 200, resp.text
+    return resp.json()
 
 
 def test_snapshot_round_trip(client: TestClient) -> None:
@@ -223,7 +233,12 @@ def test_snapshot_conflict(client: TestClient) -> None:
         },
     )
     assert res.status_code == 409, res.text
-    assert "rev" in res.json()["error"].lower()
+    body = res.json()
+    assert "error" in body
+    message = body["error"].lower()
+    # Stable words from `ConflictError` text -- guards against accidental
+    # rewording that still happens to contain "rev".
+    assert any(token in message for token in ("stale write", "expected", "current"))
 
 
 def test_snapshot_rejects_unknown_type(client: TestClient) -> None:
@@ -245,6 +260,76 @@ def test_snapshot_rejects_unknown_type(client: TestClient) -> None:
         },
     )
     assert res.status_code == 422, res.text
+
+
+def test_snapshot_rejects_abstract_type(client: TestClient) -> None:
+    snapshot = _seed_example_model(client)
+    bad_elements = list(snapshot["elements"]) + [
+        {
+            "id": "abstract-instance",
+            "type_name": "NamedElement",  # abstract in example metamodel
+            "properties": {"name": "nope"},
+            "rev": 0,
+        }
+    ]
+    res = client.put(
+        "/api/v1/models/demo/snapshot",
+        json={
+            "rev": snapshot["rev"],
+            "elements": bad_elements,
+            "relationships": snapshot["relationships"],
+        },
+    )
+    assert res.status_code == 422, res.text
+    assert "abstract" in res.json()["detail"].lower()
+
+
+def test_snapshot_rejects_duplicate_element_id(client: TestClient) -> None:
+    snapshot = _seed_example_model(client)
+    elements = list(snapshot["elements"])
+    # Duplicate the first element's id onto a fresh Block payload.
+    dup_id = elements[0]["id"]
+    elements.append(
+        {
+            "id": dup_id,
+            "type_name": "Block",
+            "properties": {"name": "Other", "mass": 1.0},
+            "rev": 0,
+        }
+    )
+    res = client.put(
+        "/api/v1/models/demo/snapshot",
+        json={
+            "rev": snapshot["rev"],
+            "elements": elements,
+            "relationships": snapshot["relationships"],
+        },
+    )
+    assert res.status_code == 422, res.text
+    assert "duplicate" in res.json()["detail"].lower()
+
+
+def test_validate_inline_rejects_abstract_type(client: TestClient) -> None:
+    snapshot = _seed_example_model(client)
+    inline_elements = list(snapshot["elements"]) + [
+        {
+            "id": "abstract-instance",
+            "type_name": "NamedElement",
+            "properties": {"name": "nope"},
+            "rev": 0,
+        }
+    ]
+    res = client.post(
+        "/api/v1/models/demo/validate",
+        json={
+            "inline": {
+                "elements": inline_elements,
+                "relationships": snapshot["relationships"],
+            }
+        },
+    )
+    assert res.status_code == 422, res.text
+    assert "abstract" in res.json()["detail"].lower()
 
 
 def test_validate_inline(client: TestClient) -> None:

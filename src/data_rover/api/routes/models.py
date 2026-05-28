@@ -2,13 +2,12 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 
-from data_rover.core.model.element import Element
 from data_rover.core.model.model import Model
-from data_rover.core.model.relationship import Relationship
 from data_rover.core.repository.file_store import FileRepository
 
 from ..deps import ModelIndex, get_index, get_repository
 from ..schemas import CreateModelRequest, ModelOut, ModelRef, SnapshotIn, SnapshotOut
+from ._snapshot import _build_model_from_payload
 
 router = APIRouter()
 
@@ -52,67 +51,15 @@ def snapshot_model(
 ) -> SnapshotOut:
     metamodel_name = index.get(name)
     metamodel = repo.load_metamodel(metamodel_name)
-    # Ensure the model already exists; load to surface a KeyError -> 404 if not.
-    repo.load_model(name, metamodel)
+    # Narrow probe for existence so we get a clean 404 without re-parsing the
+    # full model. The subsequent `save_model(expected_rev=...)` provides the
+    # optimistic-concurrency check.
+    if not repo.exists(name):
+        raise HTTPException(status_code=404, detail=f"No model named {name!r}")
 
-    model = Model(metamodel)
-    for e in payload.elements:
-        if not metamodel.is_element_type(e.type_name):
-            raise HTTPException(
-                status_code=422,
-                detail=f"Unknown element type {e.type_name!r}",
-            )
-        if not isinstance(e.properties, dict):
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    f"Element {e.id!r} properties must be an object"
-                ),
-            )
-        model.elements[e.id] = Element(
-            id=e.id,
-            type_name=e.type_name,
-            properties=dict(e.properties),
-            rev=e.rev,
-        )
-    for r in payload.relationships:
-        if metamodel.relationship_type(r.type_name) is None:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Unknown relationship type {r.type_name!r}",
-            )
-        if r.source_id not in model.elements:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    f"Relationship {r.id!r} references unknown source "
-                    f"{r.source_id!r}"
-                ),
-            )
-        if r.target_id not in model.elements:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    f"Relationship {r.id!r} references unknown target "
-                    f"{r.target_id!r}"
-                ),
-            )
-        if not isinstance(r.properties, dict):
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    f"Relationship {r.id!r} properties must be an object"
-                ),
-            )
-        model.relationships[r.id] = Relationship(
-            id=r.id,
-            type_name=r.type_name,
-            source_id=r.source_id,
-            target_id=r.target_id,
-            properties=dict(r.properties),
-            rev=r.rev,
-        )
-
+    model = _build_model_from_payload(
+        metamodel, payload.elements, payload.relationships
+    )
     new_rev = repo.save_model(name, model, expected_rev=payload.rev)
     return SnapshotOut(rev=new_rev)
 
