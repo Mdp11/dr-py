@@ -257,7 +257,7 @@ describe('saveWithOptionalCr', () => {
 	it('reuses the existing file handle when saving the model', async () => {
 		const fs = makeFileSaveStub();
 		const handle = { name: 'myModel.json' } as unknown as FileSystemFileHandle | null;
-		await saveWithOptionalCr({
+		const result = await saveWithOptionalCr({
 			working: EMPTY_WORKING,
 			baseline: { elements: [], relationships: [] },
 			baselineFilename: 'myModel.json',
@@ -267,6 +267,7 @@ describe('saveWithOptionalCr', () => {
 			saveFile: fs.stub,
 			now: NOW
 		});
+		expect(result.kind).toBe('saved');
 		expect(fs.calls[0].handle).toBe(handle);
 	});
 
