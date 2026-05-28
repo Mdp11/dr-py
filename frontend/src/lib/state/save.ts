@@ -5,7 +5,7 @@ import { isTempId, type Snapshot } from './ops';
 
 export type SaveResult =
 	| { ok: true; model: ModelOut }
-	| { ok: false; kind: 'api' | 'tempid' | 'cr'; message: string };
+	| { ok: false; kind: 'api' | 'tempid'; message: string };
 
 /**
  * Resolve every `tmp_*` id in `working` into a freshly generated id and
