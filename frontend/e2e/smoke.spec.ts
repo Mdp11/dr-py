@@ -61,7 +61,6 @@ test('Export CR checkbox produces a second .cr.json download', async ({ page }) 
 
 	// Force the <a download> fallback path inside saveJsonToFile.
 	await page.addInitScript(() => {
-		// @ts-expect-error - removing the function for this test only
 		delete (window as { showSaveFilePicker?: unknown }).showSaveFilePicker;
 	});
 
