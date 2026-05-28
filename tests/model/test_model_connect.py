@@ -1,8 +1,8 @@
 import pytest
 
-from data_rover.metamodel.schema import ElementType, Metamodel, RelationshipType
-from data_rover.model.ids import SequentialIdGenerator
-from data_rover.model.model import Model
+from data_rover.core.metamodel.schema import ElementType, Metamodel, RelationshipType
+from data_rover.core.model.ids import SequentialIdGenerator
+from data_rover.core.model.model import Model
 
 
 def _model():

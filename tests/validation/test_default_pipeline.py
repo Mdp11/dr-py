@@ -1,11 +1,11 @@
-from data_rover.metamodel.schema import (
+from data_rover.core.metamodel.schema import (
     ElementType,
     Metamodel,
     PropertyDef,
     RelationshipType,
 )
-from data_rover.model.model import Model
-from data_rover.validation.pipeline import default_pipeline
+from data_rover.core.model.model import Model
+from data_rover.core.validation.pipeline import default_pipeline
 
 
 def test_default_pipeline_runs_all_first_cut_validators():

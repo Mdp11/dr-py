@@ -1,6 +1,6 @@
 import pytest
 
-from data_rover.metamodel.multiplicity import Multiplicity
+from data_rover.core.metamodel.multiplicity import Multiplicity
 
 
 def test_parse_exact():

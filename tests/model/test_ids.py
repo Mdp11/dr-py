@@ -1,6 +1,6 @@
 import uuid
 
-from data_rover.model.ids import SequentialIdGenerator, Uuid7Generator
+from data_rover.core.model.ids import SequentialIdGenerator, Uuid7Generator
 
 
 def test_uuid7_is_valid_uuid_version_7():

@@ -1,5 +1,5 @@
-from data_rover.metamodel.check import check_metamodel
-from data_rover.metamodel.schema import (
+from data_rover.core.metamodel.check import check_metamodel
+from data_rover.core.metamodel.schema import (
     ElementType,
     Metamodel,
     PropertyDef,

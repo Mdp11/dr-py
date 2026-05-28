@@ -1,12 +1,12 @@
-from data_rover.metamodel.schema import (
+from data_rover.core.metamodel.schema import (
     ElementType,
     Metamodel,
     PropertyDef,
     RelationshipType,
 )
-from data_rover.model.model import Model
-from data_rover.validation.scope import Scope
-from data_rover.validation.validators.type_conformance import (
+from data_rover.core.model.model import Model
+from data_rover.core.validation.scope import Scope
+from data_rover.core.validation.validators.type_conformance import (
     TypeConformanceValidator,
 )
 

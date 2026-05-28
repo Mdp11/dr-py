@@ -1,12 +1,12 @@
-from data_rover.metamodel.schema import (
+from data_rover.core.metamodel.schema import (
     ElementType,
     Metamodel,
     PropertyDef,
     RelationshipType,
 )
-from data_rover.model.model import Model
-from data_rover.validation.scope import Scope
-from data_rover.validation.validators.uniqueness import UniquenessValidator
+from data_rover.core.model.model import Model
+from data_rover.core.validation.scope import Scope
+from data_rover.core.validation.validators.uniqueness import UniquenessValidator
 
 
 def _named_mm(named_key: list[str] | None = None, with_doc_key: bool = False):

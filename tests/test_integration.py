@@ -1,9 +1,9 @@
 from pathlib import Path
 
-from data_rover.metamodel.loader import load_metamodel_file
-from data_rover.model.ids import SequentialIdGenerator
-from data_rover.model.model import Model
-from data_rover.validation.pipeline import default_pipeline
+from data_rover.core.metamodel.loader import load_metamodel_file
+from data_rover.core.model.ids import SequentialIdGenerator
+from data_rover.core.model.model import Model
+from data_rover.core.validation.pipeline import default_pipeline
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "example.metamodel.yaml"
 
