@@ -1,7 +1,7 @@
-from data_rover.metamodel.schema import ElementType, Metamodel, RelationshipType
-from data_rover.model.model import Model
-from data_rover.validation.scope import Scope
-from data_rover.validation.validators.endpoint_typing import (
+from data_rover.core.metamodel.schema import ElementType, Metamodel, RelationshipType
+from data_rover.core.model.model import Model
+from data_rover.core.validation.scope import Scope
+from data_rover.core.validation.validators.endpoint_typing import (
     EndpointTypingValidator,
 )
 

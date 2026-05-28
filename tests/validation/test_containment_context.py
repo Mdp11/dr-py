@@ -1,6 +1,6 @@
-from data_rover.metamodel.schema import ElementType, Metamodel, RelationshipType
-from data_rover.model.model import Model
-from data_rover.validation.containment_context import containment_parents
+from data_rover.core.metamodel.schema import ElementType, Metamodel, RelationshipType
+from data_rover.core.model.model import Model
+from data_rover.core.validation.containment_context import containment_parents
 
 
 def _model():

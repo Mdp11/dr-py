@@ -1,6 +1,6 @@
 import pytest
 
-from data_rover.metamodel.loader import MetamodelError, load_metamodel_str
+from data_rover.core.metamodel.loader import MetamodelError, load_metamodel_str
 
 
 VALID = """

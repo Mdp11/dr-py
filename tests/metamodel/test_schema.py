@@ -1,4 +1,4 @@
-from data_rover.metamodel.schema import (
+from data_rover.core.metamodel.schema import (
     ElementType,
     Metamodel,
     PropertyDef,

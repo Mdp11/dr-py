@@ -1,9 +1,9 @@
 import pytest
 
-from data_rover.metamodel.schema import ElementType, Metamodel
-from data_rover.model.model import Model
-from data_rover.repository.in_memory import InMemoryRepository
-from data_rover.repository.repository import ConflictError
+from data_rover.core.metamodel.schema import ElementType, Metamodel
+from data_rover.core.model.model import Model
+from data_rover.core.repository.in_memory import InMemoryRepository
+from data_rover.core.repository.repository import ConflictError
 
 
 def _mm():

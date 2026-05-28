@@ -1,5 +1,5 @@
-from data_rover.validation.issue import Issue, Severity
-from data_rover.validation.scope import Scope
+from data_rover.core.validation.issue import Issue, Severity
+from data_rover.core.validation.scope import Scope
 
 
 def test_issue_holds_fields():

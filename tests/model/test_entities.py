@@ -1,5 +1,5 @@
-from data_rover.model.element import Element
-from data_rover.model.relationship import Relationship
+from data_rover.core.model.element import Element
+from data_rover.core.model.relationship import Relationship
 
 
 def test_element_identity_is_by_id_not_value():

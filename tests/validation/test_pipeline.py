@@ -1,6 +1,6 @@
-from data_rover.validation.issue import Issue, Severity
-from data_rover.validation.pipeline import ValidationPipeline
-from data_rover.validation.scope import Scope
+from data_rover.core.validation.issue import Issue, Severity
+from data_rover.core.validation.pipeline import ValidationPipeline
+from data_rover.core.validation.scope import Scope
 
 
 class _StubValidator:
