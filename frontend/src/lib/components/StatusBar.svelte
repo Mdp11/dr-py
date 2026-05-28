@@ -1,5 +1,11 @@
 <script lang="ts">
-	import { getBaseline, getDiff, getWorkingModel } from '$lib/state';
+	import {
+		getBaseline,
+		getDiff,
+		getIssues,
+		getWorkingModel,
+		indexIssues
+	} from '$lib/state';
 
 	const working = $derived(getWorkingModel());
 	const baseline = $derived(getBaseline());
@@ -7,6 +13,9 @@
 	const totalChanges = $derived(
 		diff.counts.added + diff.counts.modified + diff.counts.deleted
 	);
+	const issueIndex = $derived(indexIssues(getIssues()));
+	const errorCount = $derived(issueIndex.errorIds.size);
+	const warningCount = $derived(issueIndex.warningIds.size);
 </script>
 
 <footer
@@ -16,7 +25,13 @@
 	<span class="text-zinc-700">·</span>
 	<span>{totalChanges} unsaved</span>
 	<span class="text-zinc-700">·</span>
-	<span>0 errors</span>
+	<span class={errorCount > 0 ? 'text-red-400' : ''}>
+		{errorCount} {errorCount === 1 ? 'error' : 'errors'}
+	</span>
+	<span class="text-zinc-700">·</span>
+	<span class={warningCount > 0 ? 'text-amber-400' : ''}>
+		{warningCount} {warningCount === 1 ? 'warning' : 'warnings'}
+	</span>
 	<span class="text-zinc-700">·</span>
 	<span>rev {baseline?.rev ?? '—'}</span>
 </footer>

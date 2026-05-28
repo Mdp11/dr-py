@@ -3,12 +3,16 @@
 	import { Button } from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import {
+		clearIssues,
 		getBaseline,
 		getDiff,
+		getIssues,
 		getWorkingModel,
+		indexIssues,
 		resetOps,
 		setBaseline
 	} from '$lib/state';
+	import { AlertTriangle } from '@lucide/svelte';
 	import { useQueryClient } from '@tanstack/svelte-query';
 	import { saveCurrentModel, type SaveResult } from '$lib/state/save';
 	import DiffRow from './DiffRow.svelte';
@@ -36,6 +40,22 @@
 	let saving = $state(false);
 	let lastResult: SaveResult | null = $state(null);
 
+	const issueIndex = $derived(indexIssues(getIssues()));
+	const pendingEntityIds = $derived.by(() => {
+		const ids = new Set<string>();
+		for (const d of diff.elements) ids.add(d.id);
+		for (const d of diff.relationships) ids.add(d.id);
+		return ids;
+	});
+	const pendingIssueCount = $derived.by(() => {
+		let n = 0;
+		for (const id of pendingEntityIds) {
+			const arr = issueIndex.byEntity.get(id);
+			if (arr) n += arr.length;
+		}
+		return n;
+	});
+
 	function close(): void {
 		open = false;
 	}
@@ -54,6 +74,7 @@
 		});
 		setBaseline(fresh);
 		resetOps();
+		clearIssues();
 	}
 
 	async function onSaveClick(): Promise<void> {
@@ -169,6 +190,18 @@
 				{:else}
 					<p>Save failed: {lastResult.message}</p>
 				{/if}
+			</div>
+		{/if}
+
+		{#if pendingIssueCount > 0}
+			<div
+				class="flex items-center gap-1.5 rounded border border-amber-900 bg-amber-950/30 px-2 py-1 text-[11px] text-amber-200"
+			>
+				<AlertTriangle class="h-3 w-3" />
+				<span>
+					{pendingIssueCount}
+					{pendingIssueCount === 1 ? 'issue' : 'issues'} among pending changes
+				</span>
 			</div>
 		{/if}
 

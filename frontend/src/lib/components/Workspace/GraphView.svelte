@@ -9,7 +9,14 @@
 	import '@xyflow/svelte/dist/style.css';
 	import { AlertTriangle } from '@lucide/svelte';
 
-	import { getMetamodel, getSelection, getWorkingModel, select } from '$lib/state';
+	import {
+		getIssues,
+		getMetamodel,
+		getSelection,
+		getWorkingModel,
+		indexIssues,
+		select
+	} from '$lib/state';
 	import { buildGraph, type GraphData, type GraphNode } from './graph-data';
 
 	let maxHops = $state(2);
@@ -80,6 +87,29 @@
 		return positions;
 	}
 
+	const issueIndex = $derived(indexIssues(getIssues()));
+
+	function nodeStyle(n: GraphNode): string {
+		const isCenter = n.hops === 0;
+		const hasError = issueIndex.errorIds.has(n.id);
+		const hasWarning = !hasError && issueIndex.warningIds.has(n.id);
+		const bg = isCenter ? '#1e293b' : '#18181b';
+		const color = isCenter ? '#f1f5f9' : '#e4e4e7';
+		let border = isCenter ? '#818cf8' : '#3f3f46';
+		let borderWidth = '1px';
+		if (hasError) {
+			border = '#f87171';
+			borderWidth = '2px';
+		} else if (hasWarning) {
+			border = '#fbbf24';
+			borderWidth = '2px';
+		}
+		const ring = isCenter
+			? ' box-shadow: 0 0 0 2px rgba(129,140,248,0.35) inset;'
+			: '';
+		return `background:${bg}; color:${color}; border:${borderWidth} solid ${border}; border-radius:6px; padding:6px 10px; font-size:11px;${ring}`;
+	}
+
 	const flowNodes: Node[] = $derived.by(() => {
 		const positions = radialLayout(data.nodes);
 		return data.nodes.map((n) => ({
@@ -87,10 +117,7 @@
 			type: 'default',
 			data: { label: n.label, type_name: n.type_name, hops: n.hops },
 			position: positions.get(n.id) ?? { x: 0, y: 0 },
-			style:
-				n.hops === 0
-					? 'background:#1e293b; color:#f1f5f9; border:1px solid #818cf8; border-radius:6px; padding:6px 10px; font-size:11px;'
-					: 'background:#18181b; color:#e4e4e7; border:1px solid #3f3f46; border-radius:6px; padding:6px 10px; font-size:11px;'
+			style: nodeStyle(n)
 		}));
 	});
 

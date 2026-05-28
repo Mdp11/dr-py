@@ -1,13 +1,19 @@
 <script lang="ts">
 	import * as Tabs from '$lib/components/ui/tabs';
+	import { getActiveTab, setActiveTab, type WorkspaceTab } from '$lib/state';
 	import DetailView from './Workspace/DetailView.svelte';
 	import GraphView from './Workspace/GraphView.svelte';
+	import IssuesPanel from './Workspace/IssuesPanel.svelte';
 
-	let activeTab = $state('detail');
+	const activeTab = $derived(getActiveTab());
+
+	function onValueChange(v: string): void {
+		setActiveTab(v as WorkspaceTab);
+	}
 </script>
 
 <section class="flex h-full flex-col overflow-hidden bg-zinc-950 text-sm text-zinc-200">
-	<Tabs.Root bind:value={activeTab} class="flex h-full flex-col">
+	<Tabs.Root value={activeTab} onValueChange={onValueChange} class="flex h-full flex-col">
 		<Tabs.List class="h-9 w-full justify-start rounded-none border-b border-zinc-800 bg-zinc-950 px-2">
 			<Tabs.Trigger value="detail" class="h-7 text-xs">Detail</Tabs.Trigger>
 			<Tabs.Trigger value="graph" class="h-7 text-xs">Graph</Tabs.Trigger>
@@ -19,8 +25,8 @@
 		<Tabs.Content value="graph" class="flex-1 overflow-hidden">
 			<GraphView />
 		</Tabs.Content>
-		<Tabs.Content value="issues" class="flex-1 overflow-auto p-3 text-xs text-zinc-500">
-			No validation issues yet.
+		<Tabs.Content value="issues" class="flex-1 overflow-hidden">
+			<IssuesPanel />
 		</Tabs.Content>
 	</Tabs.Root>
 </section>

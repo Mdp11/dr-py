@@ -19,7 +19,22 @@ export {
 	type Selection,
 	type SelectionKind
 } from './selection.svelte';
-export { clearIssues, getIssues, setIssues } from './validation.svelte';
+export {
+	clearIssues,
+	getIssues,
+	getLastError,
+	getLastRunAt,
+	isRunning,
+	setIssues,
+	setLastError,
+	setRunning
+} from './validation.svelte';
+export { indexIssues, worstSeverityFor, type IssueIndex } from './validation-index';
+export {
+	getActiveTab,
+	setActiveTab,
+	type WorkspaceTab
+} from './workspace.svelte';
 export {
 	clearMetamodel,
 	getMetamodel,
