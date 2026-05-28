@@ -19,6 +19,7 @@
 </script>
 
 <aside
+	data-testid="inspector"
 	class="flex h-full flex-col overflow-hidden border-l border-zinc-800 bg-zinc-950 text-sm text-zinc-300"
 >
 	{#if selection === null}
