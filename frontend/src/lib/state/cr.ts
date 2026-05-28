@@ -53,6 +53,9 @@ export function buildChangeRequest(
 	baselineFilename: string | null,
 	now: () => Date = () => new Date()
 ): ChangeRequest {
+	// computeDiff's second parameter is typed Snapshot, but ModelOut is
+	// structurally identical ({ elements, relationships }) and the diff
+	// algorithm doesn't care which type label the working set carries.
 	const diff = computeDiff(baseline, saved);
 
 	const elementsAdded: Element[] = [];
