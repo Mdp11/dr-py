@@ -1,5 +1,6 @@
 <script lang="ts">
 	import * as Tabs from '$lib/components/ui/tabs';
+	import DetailView from './Workspace/DetailView.svelte';
 
 	let activeTab = $state('detail');
 </script>
@@ -11,8 +12,8 @@
 			<Tabs.Trigger value="graph" class="h-7 text-xs">Graph</Tabs.Trigger>
 			<Tabs.Trigger value="issues" class="h-7 text-xs">Issues</Tabs.Trigger>
 		</Tabs.List>
-		<Tabs.Content value="detail" class="flex-1 overflow-auto p-3 text-xs text-zinc-500">
-			Select an element to inspect its properties.
+		<Tabs.Content value="detail" class="flex-1 overflow-auto">
+			<DetailView />
 		</Tabs.Content>
 		<Tabs.Content value="graph" class="flex-1 overflow-auto p-3 text-xs text-zinc-500">
 			Graph view placeholder (T9).

@@ -87,6 +87,28 @@ export function isSubtype(mm: Metamodel, sub: string, sup: string): boolean {
 }
 
 /**
+ * Effective properties for a relationship `typeName` — own properties plus
+ * those inherited through the relationship `extends` chain. Same algorithm as
+ * `effectiveProperties` but walks `RelationshipType.extends`. Child overrides
+ * win over ancestor declarations of the same property name.
+ */
+export function effectiveRelationshipProperties(
+	mm: Metamodel,
+	typeName: string
+): PropertyDef[] {
+	const byName = new Map<string, PropertyDef>();
+	const order: string[] = [];
+	const rootToLeaf = relationshipAncestors(mm, typeName).slice().reverse();
+	for (const rt of rootToLeaf) {
+		for (const p of rt.properties) {
+			if (!byName.has(p.name)) order.push(p.name);
+			byName.set(p.name, p);
+		}
+	}
+	return order.map((n) => byName.get(n)!);
+}
+
+/**
  * Relationship types that are containment, either directly or via inheritance
  * (mirrors `Metamodel.is_containment` in the backend). Returns all
  * relationship types whose ancestor chain contains at least one type marked
