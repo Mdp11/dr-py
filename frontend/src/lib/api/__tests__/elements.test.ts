@@ -28,12 +28,12 @@ describe('elements client', () => {
 	it('listElements forwards type filter as query param', async () => {
 		let url = '';
 		server.use(
-			http.get(`${BASE}/models/m/elements`, ({ request }) => {
+			http.get(`${BASE}/model/elements`, ({ request }) => {
 				url = request.url;
 				return HttpResponse.json([sampleElement]);
 			})
 		);
-		const result = await listElements('m', { type: 'Block' }, cfg);
+		const result = await listElements({ type: 'Block' }, cfg);
 		expect(url).toContain('type=Block');
 		expect(result).toEqual([sampleElement]);
 	});
@@ -41,25 +41,24 @@ describe('elements client', () => {
 	it('listElements without filters sends no query string', async () => {
 		let url = '';
 		server.use(
-			http.get(`${BASE}/models/m/elements`, ({ request }) => {
+			http.get(`${BASE}/model/elements`, ({ request }) => {
 				url = request.url;
 				return HttpResponse.json([]);
 			})
 		);
-		await listElements('m', undefined, cfg);
+		await listElements(undefined, cfg);
 		expect(url).not.toContain('?');
 	});
 
 	it('createElement POSTs the payload and returns parsed Element', async () => {
 		let body: unknown;
 		server.use(
-			http.post(`${BASE}/models/m/elements`, async ({ request }) => {
+			http.post(`${BASE}/model/elements`, async ({ request }) => {
 				body = await request.json();
 				return HttpResponse.json(sampleElement, { status: 201 });
 			})
 		);
 		const result = await createElement(
-			'm',
 			{ type: 'Block', properties: { name: 'A' } },
 			cfg
 		);
@@ -68,12 +67,8 @@ describe('elements client', () => {
 	});
 
 	it('getElement fetches by id', async () => {
-		server.use(
-			http.get(`${BASE}/models/m/elements/e1`, () =>
-				HttpResponse.json(sampleElement)
-			)
-		);
-		const result = await getElement('m', 'e1', cfg);
+		server.use(http.get(`${BASE}/model/elements/e1`, () => HttpResponse.json(sampleElement)));
+		const result = await getElement('e1', cfg);
 		expect(result.properties.name).toBe('A');
 	});
 
@@ -81,7 +76,7 @@ describe('elements client', () => {
 		let method = '';
 		let body: unknown;
 		server.use(
-			http.patch(`${BASE}/models/m/elements/e1`, async ({ request }) => {
+			http.patch(`${BASE}/model/elements/e1`, async ({ request }) => {
 				method = request.method;
 				body = await request.json();
 				return HttpResponse.json({
@@ -91,12 +86,7 @@ describe('elements client', () => {
 				});
 			})
 		);
-		const result = await patchElement(
-			'm',
-			'e1',
-			{ properties: { name: 'B' } },
-			cfg
-		);
+		const result = await patchElement('e1', { properties: { name: 'B' } }, cfg);
 		expect(method).toBe('PATCH');
 		expect(body).toEqual({ properties: { name: 'B' } });
 		expect(result.rev).toBe(2);
@@ -104,8 +94,8 @@ describe('elements client', () => {
 
 	it('deleteElement resolves on 204', async () => {
 		server.use(
-			http.delete(`${BASE}/models/m/elements/e1`, () => new HttpResponse(null, { status: 204 }))
+			http.delete(`${BASE}/model/elements/e1`, () => new HttpResponse(null, { status: 204 }))
 		);
-		await expect(deleteElement('m', 'e1', cfg)).resolves.toBeUndefined();
+		await expect(deleteElement('e1', cfg)).resolves.toBeUndefined();
 	});
 });

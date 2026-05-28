@@ -1,11 +1,11 @@
 import type { Element, ModelOut, Relationship } from '$lib/api/types';
-import { ApiError, ConflictError } from '../api/errors';
-import * as models from '../api/models';
+import { ApiError } from '../api/errors';
+import * as model from '../api/model';
 import { isTempId, type Snapshot } from './ops';
 
 export type SaveResult =
-	| { ok: true; new_rev: number }
-	| { ok: false; kind: 'conflict' | 'api' | 'tempid'; message: string };
+	| { ok: true; model: ModelOut }
+	| { ok: false; kind: 'api' | 'tempid'; message: string };
 
 /**
  * Resolve every `tmp_*` id in `working` into a freshly generated id and
@@ -78,19 +78,16 @@ function defaultGenerateId(): string {
 	const c =
 		typeof globalThis !== 'undefined' ? (globalThis.crypto as Crypto | undefined) : undefined;
 	if (c && typeof c.randomUUID === 'function') return c.randomUUID();
-	// fallback: not strictly UUID but unique enough for tests / older runtimes
 	return 'id_' + Math.random().toString(36).slice(2, 14);
 }
 
 /**
- * Orchestrate a save: resolve temp ids, build a snapshot body, and call
- * the snapshot endpoint. Pure-ish: only touches the API client, never the
- * Svelte stores. Caller is responsible for refetching and resetting state.
+ * Resolve temp ids, push the snapshot to the backend (single session, no
+ * concurrency), and return the resolved server model. Pure-ish: only touches
+ * the API client. Callers are responsible for refetching state and saving
+ * the returned model to a file.
  */
-export async function saveCurrentModel(
-	baseline: ModelOut,
-	working: Snapshot
-): Promise<SaveResult> {
+export async function saveCurrentModel(working: Snapshot): Promise<SaveResult> {
 	let resolved: Snapshot;
 	try {
 		resolved = resolveTempIds(working, defaultGenerateId).resolved;
@@ -100,16 +97,12 @@ export async function saveCurrentModel(
 	}
 
 	try {
-		const result = await models.snapshotModel(baseline.name, {
-			rev: baseline.rev,
+		const result = await model.snapshotModel({
 			elements: resolved.elements,
 			relationships: resolved.relationships
 		});
-		return { ok: true, new_rev: result.rev };
+		return { ok: true, model: result };
 	} catch (err) {
-		if (err instanceof ConflictError) {
-			return { ok: false, kind: 'conflict', message: err.message };
-		}
 		if (err instanceof ApiError) {
 			return { ok: false, kind: 'api', message: err.message };
 		}

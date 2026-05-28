@@ -24,7 +24,7 @@ export async function runValidation(): Promise<void> {
 	setLastError(null);
 	try {
 		const working = getWorkingModel();
-		const issues = await validationApi.validateModel(baseline.name, {
+		const issues = await validationApi.validateModel({
 			inline: {
 				elements: working.elements,
 				relationships: working.relationships

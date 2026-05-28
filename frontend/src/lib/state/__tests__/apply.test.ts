@@ -18,7 +18,7 @@ function rel(
 }
 
 function model(elements: Element[] = [], relationships: Relationship[] = []): ModelOut {
-	return { name: 'm', metamodel: 'mm', rev: 1, elements, relationships };
+	return { elements, relationships };
 }
 
 describe('apply', () => {

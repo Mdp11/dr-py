@@ -1,5 +1,5 @@
-export * as metamodels from './metamodels';
-export * as models from './models';
+export * as metamodel from './metamodel';
+export * as model from './model';
 export * as elements from './elements';
 export * as relationships from './relationships';
 export * as validation from './validation';

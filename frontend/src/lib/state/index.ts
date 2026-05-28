@@ -9,7 +9,14 @@ export {
 } from './ops';
 export { ApplyError, apply } from './apply';
 export { computeDiff, deepEqual, type Diff, type EntityDiff, type EntityStatus } from './diff';
-export { getBaseline, setBaseline } from './baseline.svelte';
+export {
+	getBaseline,
+	setBaseline,
+	getFilename,
+	setFilename,
+	getFileHandle,
+	setFileHandle
+} from './baseline.svelte';
 export { emit, getPendingOps, resetOps, undoLast } from './pending.svelte';
 export { getDiff, getWorkingModel } from './working.svelte';
 export {
@@ -35,12 +42,7 @@ export {
 	setActiveTab,
 	type WorkspaceTab
 } from './workspace.svelte';
-export {
-	clearMetamodel,
-	getMetamodel,
-	getMetamodelName,
-	setMetamodel
-} from './metamodel.svelte';
+export { clearMetamodel, getMetamodel, setMetamodel } from './metamodel.svelte';
 export {
 	clearFilters,
 	getSearchText,

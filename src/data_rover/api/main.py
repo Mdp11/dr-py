@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .errors import register_exception_handlers
-from .routes import elements, health, metamodels, models, relationships, validation
+from .routes import elements, health, metamodel, model, relationships, validation
 from .settings import get_settings
 
 
@@ -28,8 +28,8 @@ def create_app() -> FastAPI:
 
     app.include_router(health.router)
     prefix = "/api/v1"
-    app.include_router(metamodels.router, prefix=prefix, tags=["metamodels"])
-    app.include_router(models.router, prefix=prefix, tags=["models"])
+    app.include_router(metamodel.router, prefix=prefix, tags=["metamodel"])
+    app.include_router(model.router, prefix=prefix, tags=["model"])
     app.include_router(elements.router, prefix=prefix, tags=["elements"])
     app.include_router(relationships.router, prefix=prefix, tags=["relationships"])
     app.include_router(validation.router, prefix=prefix, tags=["validation"])

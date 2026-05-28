@@ -1,45 +1,37 @@
+
 <script lang="ts">
-	import { metamodels as metamodelsApi, models as modelsApi } from '$lib/api';
 	import { Button } from '$lib/components/ui/button';
-	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import {
+		clearIssues,
 		getBaseline,
 		getDiff,
+		getFilename,
 		getIssues,
 		getLastError,
 		getLastRunAt,
-		getMetamodelName,
+		getMetamodel,
 		getPendingOps,
 		isRunning,
 		resetOps,
 		setBaseline,
 		setDiffDrawerOpen,
-		setMetamodel,
-		clearIssues
+		setFileHandle,
+		setFilename,
+		setMetamodel
 	} from '$lib/state';
+	import type { Metamodel, ModelOut } from '$lib/api/types';
 	import { runValidation } from '$lib/state/validate-action';
-	import { createQuery, useQueryClient } from '@tanstack/svelte-query';
-	import { AlertCircle, AlertTriangle, ChevronDown, RefreshCw } from '@lucide/svelte';
+	import { AlertCircle, AlertTriangle, RefreshCw } from '@lucide/svelte';
 	import LoadMetamodelDialog from './LoadMetamodelDialog.svelte';
-	import CreateModelDialog from './CreateModelDialog.svelte';
+	import LoadModelDialog from './LoadModelDialog.svelte';
 
-	let uploadDialogOpen = $state(false);
-	let createModelDialogOpen = $state(false);
+	let loadMetamodelOpen = $state(false);
+	let loadModelOpen = $state(false);
+	let metamodelLabel: string | null = $state(null);
 
-	const queryClient = useQueryClient();
-
-	const metamodelsListQuery = createQuery(() => ({
-		queryKey: ['metamodels'],
-		queryFn: () => metamodelsApi.listMetamodels()
-	}));
-
-	const modelsListQuery = createQuery(() => ({
-		queryKey: ['models'],
-		queryFn: () => modelsApi.listModels()
-	}));
-
-	const selectedMetamodel = $derived(getMetamodelName());
+	const metamodel = $derived(getMetamodel());
 	const baseline = $derived(getBaseline());
+	const modelFilename = $derived(getFilename());
 	const diff = $derived(getDiff());
 	const totalChanges = $derived(
 		diff.counts.added + diff.counts.modified + diff.counts.deleted
@@ -52,50 +44,42 @@
 	const lastValidateError = $derived(getLastError());
 	const errorCount = $derived(issues.filter((i) => i.severity === 'error').length);
 	const warningCount = $derived(issues.length - errorCount);
-	const filteredModels = $derived(
-		(modelsListQuery.data ?? []).filter(
-			(m) => selectedMetamodel === null || m.metamodel === selectedMetamodel
-		)
-	);
 
-	async function selectMetamodel(name: string): Promise<void> {
-		try {
-			const mm = await queryClient.fetchQuery({
-				queryKey: ['metamodels', name],
-				queryFn: () => metamodelsApi.getMetamodel(name)
-			});
-			setMetamodel(name, mm);
-		} catch (err) {
-			console.error('Failed to load metamodel', name, err);
-		}
+	function confirmDiscardChanges(message: string): boolean {
+		if (getPendingOps().length === 0) return true;
+		return window.confirm(message);
 	}
 
-	async function selectModel(name: string): Promise<void> {
-		if (getPendingOps().length > 0) {
-			const ok = window.confirm(
-				'You have unsaved changes that will be discarded. Continue?'
-			);
-			if (!ok) return;
+	function onLoadMetamodelClick(): void {
+		if (!confirmDiscardChanges('Loading a new metamodel discards the current model and unsaved changes. Continue?')) {
+			return;
 		}
-		try {
-			const model = await queryClient.fetchQuery({
-				queryKey: ['models', name],
-				queryFn: () => modelsApi.getModel(name)
-			});
-			setBaseline(model);
-			resetOps();
-			clearIssues();
-		} catch (err) {
-			console.error('Failed to load model', name, err);
-		}
+		loadMetamodelOpen = true;
 	}
 
-	function onMetamodelUploaded(name: string): void {
-		void selectMetamodel(name);
+	function onLoadModelClick(): void {
+		if (!confirmDiscardChanges('Loading a new model discards your unsaved changes. Continue?')) {
+			return;
+		}
+		loadModelOpen = true;
 	}
 
-	function onModelCreated(name: string): void {
-		void selectModel(name);
+	function onMetamodelUploaded(mm: Metamodel, filename: string): void {
+		setMetamodel(mm);
+		metamodelLabel = filename;
+		setBaseline(null);
+		setFilename(null);
+		setFileHandle(null);
+		resetOps();
+		clearIssues();
+	}
+
+	function onModelLoaded(loaded: ModelOut, filename: string): void {
+		setBaseline(loaded);
+		setFilename(filename);
+		setFileHandle(null);
+		resetOps();
+		clearIssues();
 	}
 </script>
 
@@ -105,98 +89,35 @@
 	<div class="flex items-center gap-3">
 		<span class="font-semibold tracking-tight text-zinc-100">Data Rover</span>
 
-		<div class="flex items-center gap-1">
+		<div class="flex items-center gap-2">
 			<span class="text-xs text-zinc-500">Metamodel:</span>
-			<DropdownMenu.Root>
-				<DropdownMenu.Trigger>
-					{#snippet child({ props })}
-						<Button
-							{...props}
-							variant="ghost"
-							size="sm"
-							class="h-7 gap-1 text-xs"
-						>
-							<span class="font-mono">
-								{selectedMetamodel ?? 'Metamodel'}
-							</span>
-							<ChevronDown class="h-3 w-3" />
-						</Button>
-					{/snippet}
-				</DropdownMenu.Trigger>
-				<DropdownMenu.Content align="start" class="min-w-48">
-					{#if metamodelsListQuery.isLoading}
-						<DropdownMenu.Label class="text-xs text-zinc-500">Loading...</DropdownMenu.Label>
-					{:else if (metamodelsListQuery.data ?? []).length === 0}
-						<DropdownMenu.Label class="text-xs text-zinc-500">
-							No metamodels
-						</DropdownMenu.Label>
-					{:else}
-						{#each metamodelsListQuery.data ?? [] as mm (mm)}
-							<DropdownMenu.Item onSelect={() => selectMetamodel(mm)}>
-								<span class="font-mono text-xs">{mm}</span>
-								{#if mm === selectedMetamodel}
-									<span class="ml-auto text-xs text-zinc-500">●</span>
-								{/if}
-							</DropdownMenu.Item>
-						{/each}
-					{/if}
-					<DropdownMenu.Separator />
-					<DropdownMenu.Item onSelect={() => (uploadDialogOpen = true)}>
-						<span class="text-xs">Upload new...</span>
-					</DropdownMenu.Item>
-				</DropdownMenu.Content>
-			</DropdownMenu.Root>
+			<span class="font-mono text-xs text-zinc-300">
+				{metamodelLabel ?? (metamodel ? 'loaded' : '—')}
+			</span>
+			<Button
+				variant="ghost"
+				size="sm"
+				class="h-7 text-xs"
+				onclick={onLoadMetamodelClick}
+			>
+				Load metamodel...
+			</Button>
 		</div>
 
-		<div class="flex items-center gap-1">
+		<div class="flex items-center gap-2">
 			<span class="text-xs text-zinc-500">Model:</span>
-			<DropdownMenu.Root>
-				<DropdownMenu.Trigger disabled={selectedMetamodel === null}>
-					{#snippet child({ props })}
-						<Button
-							{...props}
-							variant="ghost"
-							size="sm"
-							class="h-7 gap-1 text-xs"
-							disabled={selectedMetamodel === null}
-						>
-							<span class="font-mono">
-								{baseline?.name ?? 'Model'}
-							</span>
-							<ChevronDown class="h-3 w-3" />
-						</Button>
-					{/snippet}
-				</DropdownMenu.Trigger>
-				<DropdownMenu.Content align="start" class="min-w-48">
-					{#if selectedMetamodel === null}
-						<DropdownMenu.Label class="text-xs text-zinc-500">
-							Select a metamodel first
-						</DropdownMenu.Label>
-					{:else if modelsListQuery.isLoading}
-						<DropdownMenu.Label class="text-xs text-zinc-500">Loading...</DropdownMenu.Label>
-					{:else if filteredModels.length === 0}
-						<DropdownMenu.Label class="text-xs text-zinc-500">
-							(no models — Create new model...)
-						</DropdownMenu.Label>
-					{:else}
-						{#each filteredModels as m (m.name)}
-							<DropdownMenu.Item onSelect={() => selectModel(m.name)}>
-								<span class="font-mono text-xs">{m.name}</span>
-								{#if m.name === baseline?.name}
-									<span class="ml-auto text-xs text-zinc-500">●</span>
-								{/if}
-							</DropdownMenu.Item>
-						{/each}
-					{/if}
-					<DropdownMenu.Separator />
-					<DropdownMenu.Item
-						disabled={selectedMetamodel === null}
-						onSelect={() => (createModelDialogOpen = true)}
-					>
-						<span class="text-xs">Create new model...</span>
-					</DropdownMenu.Item>
-				</DropdownMenu.Content>
-			</DropdownMenu.Root>
+			<span class="font-mono text-xs text-zinc-300">
+				{modelFilename ?? (baseline ? 'loaded' : '—')}
+			</span>
+			<Button
+				variant="ghost"
+				size="sm"
+				class="h-7 text-xs"
+				disabled={metamodel === null}
+				onclick={onLoadModelClick}
+			>
+				Load model...
+			</Button>
 		</div>
 	</div>
 
@@ -259,9 +180,5 @@
 	</div>
 </header>
 
-<LoadMetamodelDialog bind:open={uploadDialogOpen} onUploaded={onMetamodelUploaded} />
-<CreateModelDialog
-	bind:open={createModelDialogOpen}
-	defaultMetamodel={selectedMetamodel}
-	onCreated={onModelCreated}
-/>
+<LoadMetamodelDialog bind:open={loadMetamodelOpen} onUploaded={onMetamodelUploaded} />
+<LoadModelDialog bind:open={loadModelOpen} onLoaded={onModelLoaded} />

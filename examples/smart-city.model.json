@@ -1,5 +1,4 @@
 {
-  "rev": 1,
   "elements": [
     {
       "id": "e_000001",
@@ -157,7 +156,7 @@
         "status": "Active",
         "email": "team3@org.example",
         "size": 6,
-        "location": "S\u00e3o Paulo"
+        "location": "São Paulo"
       },
       "rev": 0
     },
@@ -257,7 +256,7 @@
         "status": "Active",
         "email": "team8@org.example",
         "size": 11,
-        "location": "S\u00e3o Paulo"
+        "location": "São Paulo"
       },
       "rev": 0
     },
@@ -357,7 +356,7 @@
         "status": "Active",
         "email": "team13@org.example",
         "size": 16,
-        "location": "S\u00e3o Paulo"
+        "location": "São Paulo"
       },
       "rev": 0
     },
@@ -457,7 +456,7 @@
         "status": "Active",
         "email": "team18@org.example",
         "size": 21,
-        "location": "S\u00e3o Paulo"
+        "location": "São Paulo"
       },
       "rev": 0
     },
@@ -557,7 +556,7 @@
         "status": "Active",
         "email": "team23@org.example",
         "size": 26,
-        "location": "S\u00e3o Paulo"
+        "location": "São Paulo"
       },
       "rev": 0
     },
@@ -647,7 +646,7 @@
       "id": "e_000033",
       "type_name": "Person",
       "properties": {
-        "name": "Ada Costa",
+        "name": "Ada Costaaaa",
         "description": "Person entity #3 in the smart-city reference model.",
         "tags": [
           "person",
@@ -696,7 +695,7 @@
           "batch-00"
         ],
         "created_at": "2024-01-06",
-        "updated_at": "2024-01-23",
+        "updated_at": "0020-01-02",
         "version": "v2.5.5",
         "status": "Draft",
         "email": "ada.esposito@example.com",
@@ -731,7 +730,7 @@
       "id": "e_000037",
       "type_name": "Person",
       "properties": {
-        "name": "Ada Garc\u00eda",
+        "name": "Ada García",
         "description": "Person entity #7 in the smart-city reference model.",
         "tags": [
           "person",
@@ -743,7 +742,7 @@
         "status": "Approved",
         "email": "ada.garcia@example.com",
         "first_name": "Ada",
-        "last_name": "Garc\u00eda",
+        "last_name": "García",
         "role": "Lead"
       },
       "rev": 0
@@ -857,7 +856,7 @@
       "id": "e_000043",
       "type_name": "Person",
       "properties": {
-        "name": "Ada M\u00fcller",
+        "name": "Ada Müller",
         "description": "Person entity #13 in the smart-city reference model.",
         "tags": [
           "person",
@@ -869,7 +868,7 @@
         "status": "Active",
         "email": "ada.muller@example.com",
         "first_name": "Ada",
-        "last_name": "M\u00fcller",
+        "last_name": "Müller",
         "role": "Operator"
       },
       "rev": 0
@@ -1277,7 +1276,7 @@
       "id": "e_000063",
       "type_name": "Person",
       "properties": {
-        "name": "Bo Garc\u00eda",
+        "name": "Bo García",
         "description": "Person entity #33 in the smart-city reference model.",
         "tags": [
           "person",
@@ -1289,7 +1288,7 @@
         "status": "Active",
         "email": "bo.garcia@example.com",
         "first_name": "Bo",
-        "last_name": "Garc\u00eda",
+        "last_name": "García",
         "role": "Engineer"
       },
       "rev": 0
@@ -1403,7 +1402,7 @@
       "id": "e_000069",
       "type_name": "Person",
       "properties": {
-        "name": "Bo M\u00fcller",
+        "name": "Bo Müller",
         "description": "Person entity #39 in the smart-city reference model.",
         "tags": [
           "person",
@@ -1415,7 +1414,7 @@
         "status": "Deprecated",
         "email": "bo.muller@example.com",
         "first_name": "Bo",
-        "last_name": "M\u00fcller",
+        "last_name": "Müller",
         "role": "Lead"
       },
       "rev": 0
@@ -1823,7 +1822,7 @@
       "id": "e_000089",
       "type_name": "Person",
       "properties": {
-        "name": "Cai Garc\u00eda",
+        "name": "Cai García",
         "description": "Person entity #59 in the smart-city reference model.",
         "tags": [
           "person",
@@ -1835,7 +1834,7 @@
         "status": "Deprecated",
         "email": "cai.garcia@example.com",
         "first_name": "Cai",
-        "last_name": "Garc\u00eda",
+        "last_name": "García",
         "role": "Analyst"
       },
       "rev": 0
@@ -1949,7 +1948,7 @@
       "id": "e_000095",
       "type_name": "Person",
       "properties": {
-        "name": "Cai M\u00fcller",
+        "name": "Cai Müller",
         "description": "Person entity #65 in the smart-city reference model.",
         "tags": [
           "person",
@@ -1961,7 +1960,7 @@
         "status": "Draft",
         "email": "cai.muller@example.com",
         "first_name": "Cai",
-        "last_name": "M\u00fcller",
+        "last_name": "Müller",
         "role": "Engineer"
       },
       "rev": 0
@@ -2369,7 +2368,7 @@
       "id": "e_000115",
       "type_name": "Person",
       "properties": {
-        "name": "Devi Garc\u00eda",
+        "name": "Devi García",
         "description": "Person entity #85 in the smart-city reference model.",
         "tags": [
           "person",
@@ -2381,7 +2380,7 @@
         "status": "Draft",
         "email": "devi.garcia@example.com",
         "first_name": "Devi",
-        "last_name": "Garc\u00eda",
+        "last_name": "García",
         "role": "Operator"
       },
       "rev": 0
@@ -2495,7 +2494,7 @@
       "id": "e_000121",
       "type_name": "Person",
       "properties": {
-        "name": "Devi M\u00fcller",
+        "name": "Devi Müller",
         "description": "Person entity #91 in the smart-city reference model.",
         "tags": [
           "person",
@@ -2507,7 +2506,7 @@
         "status": "Proposed",
         "email": "devi.muller@example.com",
         "first_name": "Devi",
-        "last_name": "M\u00fcller",
+        "last_name": "Müller",
         "role": "Analyst"
       },
       "rev": 0
@@ -2915,7 +2914,7 @@
       "id": "e_000141",
       "type_name": "Person",
       "properties": {
-        "name": "Eli Garc\u00eda",
+        "name": "Eli García",
         "description": "Person entity #111 in the smart-city reference model.",
         "tags": [
           "person",
@@ -2927,7 +2926,7 @@
         "status": "Proposed",
         "email": "eli.garcia@example.com",
         "first_name": "Eli",
-        "last_name": "Garc\u00eda",
+        "last_name": "García",
         "role": "Lead"
       },
       "rev": 0
@@ -3041,7 +3040,7 @@
       "id": "e_000147",
       "type_name": "Person",
       "properties": {
-        "name": "Eli M\u00fcller",
+        "name": "Eli Müller",
         "description": "Person entity #117 in the smart-city reference model.",
         "tags": [
           "person",
@@ -3053,7 +3052,7 @@
         "status": "Approved",
         "email": "eli.muller@example.com",
         "first_name": "Eli",
-        "last_name": "M\u00fcller",
+        "last_name": "Müller",
         "role": "Operator"
       },
       "rev": 0
@@ -3461,7 +3460,7 @@
       "id": "e_000167",
       "type_name": "Person",
       "properties": {
-        "name": "Fen Garc\u00eda",
+        "name": "Fen García",
         "description": "Person entity #137 in the smart-city reference model.",
         "tags": [
           "person",
@@ -3473,7 +3472,7 @@
         "status": "Approved",
         "email": "fen.garcia@example.com",
         "first_name": "Fen",
-        "last_name": "Garc\u00eda",
+        "last_name": "García",
         "role": "Engineer"
       },
       "rev": 0
@@ -3587,7 +3586,7 @@
       "id": "e_000173",
       "type_name": "Person",
       "properties": {
-        "name": "Fen M\u00fcller",
+        "name": "Fen Müller",
         "description": "Person entity #143 in the smart-city reference model.",
         "tags": [
           "person",
@@ -3599,7 +3598,7 @@
         "status": "Active",
         "email": "fen.muller@example.com",
         "first_name": "Fen",
-        "last_name": "M\u00fcller",
+        "last_name": "Müller",
         "role": "Lead"
       },
       "rev": 0
@@ -5068,7 +5067,7 @@
         "priority": 2,
         "criticality": "High",
         "metric": "throughput",
-        "target_value": 107.0,
+        "target_value": 107,
         "unit": "rps"
       },
       "rev": 0
@@ -5090,7 +5089,7 @@
         "priority": 3,
         "criticality": "Critical",
         "metric": "MTTR",
-        "target_value": 114.0,
+        "target_value": 114,
         "unit": "minutes"
       },
       "rev": 0
@@ -5112,7 +5111,7 @@
         "priority": 4,
         "criticality": "Low",
         "metric": "MTBF",
-        "target_value": 121.0,
+        "target_value": 121,
         "unit": "hours"
       },
       "rev": 0
@@ -5134,7 +5133,7 @@
         "priority": 5,
         "criticality": "Medium",
         "metric": "availability",
-        "target_value": 128.0,
+        "target_value": 128,
         "unit": "percent"
       },
       "rev": 0
@@ -5156,7 +5155,7 @@
         "priority": 1,
         "criticality": "High",
         "metric": "throughput",
-        "target_value": 135.0,
+        "target_value": 135,
         "unit": "rps"
       },
       "rev": 0
@@ -5178,7 +5177,7 @@
         "priority": 2,
         "criticality": "Critical",
         "metric": "MTTR",
-        "target_value": 142.0,
+        "target_value": 142,
         "unit": "minutes"
       },
       "rev": 0
@@ -5200,7 +5199,7 @@
         "priority": 3,
         "criticality": "Low",
         "metric": "MTBF",
-        "target_value": 149.0,
+        "target_value": 149,
         "unit": "hours"
       },
       "rev": 0
@@ -5222,7 +5221,7 @@
         "priority": 4,
         "criticality": "Medium",
         "metric": "availability",
-        "target_value": 156.0,
+        "target_value": 156,
         "unit": "percent"
       },
       "rev": 0
@@ -5244,7 +5243,7 @@
         "priority": 5,
         "criticality": "High",
         "metric": "throughput",
-        "target_value": 163.0,
+        "target_value": 163,
         "unit": "rps"
       },
       "rev": 0
@@ -5266,7 +5265,7 @@
         "priority": 1,
         "criticality": "Critical",
         "metric": "MTTR",
-        "target_value": 170.0,
+        "target_value": 170,
         "unit": "minutes"
       },
       "rev": 0
@@ -5288,7 +5287,7 @@
         "priority": 2,
         "criticality": "Low",
         "metric": "MTBF",
-        "target_value": 177.0,
+        "target_value": 177,
         "unit": "hours"
       },
       "rev": 0
@@ -5310,7 +5309,7 @@
         "priority": 3,
         "criticality": "Medium",
         "metric": "availability",
-        "target_value": 184.0,
+        "target_value": 184,
         "unit": "percent"
       },
       "rev": 0
@@ -5332,7 +5331,7 @@
         "priority": 4,
         "criticality": "High",
         "metric": "throughput",
-        "target_value": 191.0,
+        "target_value": 191,
         "unit": "rps"
       },
       "rev": 0
@@ -5354,7 +5353,7 @@
         "priority": 5,
         "criticality": "Critical",
         "metric": "MTTR",
-        "target_value": 198.0,
+        "target_value": 198,
         "unit": "minutes"
       },
       "rev": 0
@@ -5376,7 +5375,7 @@
         "priority": 1,
         "criticality": "Low",
         "metric": "MTBF",
-        "target_value": 205.0,
+        "target_value": 205,
         "unit": "hours"
       },
       "rev": 0
@@ -5398,10 +5397,10 @@
         "priority": 2,
         "criticality": "Medium",
         "metric": "latency_p99",
-        "target_value": 55.0,
+        "target_value": 55,
         "unit": "ms",
-        "latency_p99_ms": 55.0,
-        "throughput_rps": 120.0
+        "latency_p99_ms": 55,
+        "throughput_rps": 120
       },
       "rev": 0
     },
@@ -5422,10 +5421,10 @@
         "priority": 3,
         "criticality": "High",
         "metric": "latency_p99",
-        "target_value": 60.0,
+        "target_value": 60,
         "unit": "ms",
-        "latency_p99_ms": 60.0,
-        "throughput_rps": 140.0
+        "latency_p99_ms": 60,
+        "throughput_rps": 140
       },
       "rev": 0
     },
@@ -5446,10 +5445,10 @@
         "priority": 4,
         "criticality": "Critical",
         "metric": "latency_p99",
-        "target_value": 65.0,
+        "target_value": 65,
         "unit": "ms",
-        "latency_p99_ms": 65.0,
-        "throughput_rps": 160.0
+        "latency_p99_ms": 65,
+        "throughput_rps": 160
       },
       "rev": 0
     },
@@ -5470,10 +5469,10 @@
         "priority": 5,
         "criticality": "Low",
         "metric": "latency_p99",
-        "target_value": 70.0,
+        "target_value": 70,
         "unit": "ms",
-        "latency_p99_ms": 70.0,
-        "throughput_rps": 180.0
+        "latency_p99_ms": 70,
+        "throughput_rps": 180
       },
       "rev": 0
     },
@@ -5494,10 +5493,10 @@
         "priority": 1,
         "criticality": "Medium",
         "metric": "latency_p99",
-        "target_value": 75.0,
+        "target_value": 75,
         "unit": "ms",
-        "latency_p99_ms": 75.0,
-        "throughput_rps": 200.0
+        "latency_p99_ms": 75,
+        "throughput_rps": 200
       },
       "rev": 0
     },
@@ -5518,10 +5517,10 @@
         "priority": 2,
         "criticality": "High",
         "metric": "latency_p99",
-        "target_value": 80.0,
+        "target_value": 80,
         "unit": "ms",
-        "latency_p99_ms": 80.0,
-        "throughput_rps": 220.0
+        "latency_p99_ms": 80,
+        "throughput_rps": 220
       },
       "rev": 0
     },
@@ -5542,10 +5541,10 @@
         "priority": 3,
         "criticality": "Critical",
         "metric": "latency_p99",
-        "target_value": 85.0,
+        "target_value": 85,
         "unit": "ms",
-        "latency_p99_ms": 85.0,
-        "throughput_rps": 240.0
+        "latency_p99_ms": 85,
+        "throughput_rps": 240
       },
       "rev": 0
     },
@@ -5566,10 +5565,10 @@
         "priority": 4,
         "criticality": "Low",
         "metric": "latency_p99",
-        "target_value": 90.0,
+        "target_value": 90,
         "unit": "ms",
-        "latency_p99_ms": 90.0,
-        "throughput_rps": 260.0
+        "latency_p99_ms": 90,
+        "throughput_rps": 260
       },
       "rev": 0
     },
@@ -5590,10 +5589,10 @@
         "priority": 5,
         "criticality": "Medium",
         "metric": "latency_p99",
-        "target_value": 95.0,
+        "target_value": 95,
         "unit": "ms",
-        "latency_p99_ms": 95.0,
-        "throughput_rps": 280.0
+        "latency_p99_ms": 95,
+        "throughput_rps": 280
       },
       "rev": 0
     },
@@ -5614,10 +5613,10 @@
         "priority": 1,
         "criticality": "High",
         "metric": "latency_p99",
-        "target_value": 100.0,
+        "target_value": 100,
         "unit": "ms",
-        "latency_p99_ms": 100.0,
-        "throughput_rps": 300.0
+        "latency_p99_ms": 100,
+        "throughput_rps": 300
       },
       "rev": 0
     },
@@ -5638,10 +5637,10 @@
         "priority": 2,
         "criticality": "Critical",
         "metric": "latency_p99",
-        "target_value": 105.0,
+        "target_value": 105,
         "unit": "ms",
-        "latency_p99_ms": 105.0,
-        "throughput_rps": 320.0
+        "latency_p99_ms": 105,
+        "throughput_rps": 320
       },
       "rev": 0
     },
@@ -5662,10 +5661,10 @@
         "priority": 3,
         "criticality": "Low",
         "metric": "latency_p99",
-        "target_value": 110.0,
+        "target_value": 110,
         "unit": "ms",
-        "latency_p99_ms": 110.0,
-        "throughput_rps": 340.0
+        "latency_p99_ms": 110,
+        "throughput_rps": 340
       },
       "rev": 0
     },
@@ -5686,10 +5685,10 @@
         "priority": 4,
         "criticality": "Medium",
         "metric": "latency_p99",
-        "target_value": 115.0,
+        "target_value": 115,
         "unit": "ms",
-        "latency_p99_ms": 115.0,
-        "throughput_rps": 360.0
+        "latency_p99_ms": 115,
+        "throughput_rps": 360
       },
       "rev": 0
     },
@@ -5710,10 +5709,10 @@
         "priority": 5,
         "criticality": "High",
         "metric": "latency_p99",
-        "target_value": 120.0,
+        "target_value": 120,
         "unit": "ms",
-        "latency_p99_ms": 120.0,
-        "throughput_rps": 380.0
+        "latency_p99_ms": 120,
+        "throughput_rps": 380
       },
       "rev": 0
     },
@@ -5734,10 +5733,10 @@
         "priority": 1,
         "criticality": "Critical",
         "metric": "latency_p99",
-        "target_value": 125.0,
+        "target_value": 125,
         "unit": "ms",
-        "latency_p99_ms": 125.0,
-        "throughput_rps": 400.0
+        "latency_p99_ms": 125,
+        "throughput_rps": 400
       },
       "rev": 0
     },
@@ -5758,7 +5757,7 @@
         "priority": 2,
         "criticality": "Medium",
         "standard": "HIPAA",
-        "clause": "\u00a71.2"
+        "clause": "§1.2"
       },
       "rev": 0
     },
@@ -5779,7 +5778,7 @@
         "priority": 3,
         "criticality": "High",
         "standard": "SOC2",
-        "clause": "\u00a72.3"
+        "clause": "§2.3"
       },
       "rev": 0
     },
@@ -5800,7 +5799,7 @@
         "priority": 4,
         "criticality": "Critical",
         "standard": "ISO27001",
-        "clause": "\u00a73.4"
+        "clause": "§3.4"
       },
       "rev": 0
     },
@@ -5821,7 +5820,7 @@
         "priority": 5,
         "criticality": "Low",
         "standard": "PCI_DSS",
-        "clause": "\u00a74.5"
+        "clause": "§4.5"
       },
       "rev": 0
     },
@@ -5842,7 +5841,7 @@
         "priority": 1,
         "criticality": "Medium",
         "standard": "NIST",
-        "clause": "\u00a75.6"
+        "clause": "§5.6"
       },
       "rev": 0
     },
@@ -5863,7 +5862,7 @@
         "priority": 2,
         "criticality": "High",
         "standard": "GDPR",
-        "clause": "\u00a76.7"
+        "clause": "§6.7"
       },
       "rev": 0
     },
@@ -5884,7 +5883,7 @@
         "priority": 3,
         "criticality": "Critical",
         "standard": "HIPAA",
-        "clause": "\u00a77.8"
+        "clause": "§7.8"
       },
       "rev": 0
     },
@@ -5905,7 +5904,7 @@
         "priority": 4,
         "criticality": "Low",
         "standard": "SOC2",
-        "clause": "\u00a78.9"
+        "clause": "§8.9"
       },
       "rev": 0
     },
@@ -5926,7 +5925,7 @@
         "priority": 5,
         "criticality": "Medium",
         "standard": "ISO27001",
-        "clause": "\u00a79.10"
+        "clause": "§9.10"
       },
       "rev": 0
     },
@@ -5947,7 +5946,7 @@
         "priority": 1,
         "criticality": "High",
         "standard": "PCI_DSS",
-        "clause": "\u00a710.11"
+        "clause": "§10.11"
       },
       "rev": 0
     },
@@ -5968,7 +5967,7 @@
         "priority": 2,
         "criticality": "Critical",
         "standard": "NIST",
-        "clause": "\u00a711.12"
+        "clause": "§11.12"
       },
       "rev": 0
     },
@@ -5989,7 +5988,7 @@
         "priority": 3,
         "criticality": "Low",
         "standard": "GDPR",
-        "clause": "\u00a712.13"
+        "clause": "§12.13"
       },
       "rev": 0
     },
@@ -9814,7 +9813,7 @@
         "priority": 2,
         "api_version": "v2",
         "engine": "mysql",
-        "storage_gb": 75.0,
+        "storage_gb": 75,
         "schema_version": "2.1"
       },
       "rev": 0
@@ -9836,7 +9835,7 @@
         "priority": 3,
         "api_version": "v3",
         "engine": "mongodb",
-        "storage_gb": 100.0,
+        "storage_gb": 100,
         "schema_version": "3.2"
       },
       "rev": 0
@@ -9858,7 +9857,7 @@
         "priority": 4,
         "api_version": "v1",
         "engine": "cassandra",
-        "storage_gb": 125.0,
+        "storage_gb": 125,
         "schema_version": "4.3"
       },
       "rev": 0
@@ -9880,7 +9879,7 @@
         "priority": 5,
         "api_version": "v2",
         "engine": "clickhouse",
-        "storage_gb": 150.0,
+        "storage_gb": 150,
         "schema_version": "1.4"
       },
       "rev": 0
@@ -9902,7 +9901,7 @@
         "priority": 1,
         "api_version": "v3",
         "engine": "postgres",
-        "storage_gb": 175.0,
+        "storage_gb": 175,
         "schema_version": "2.5"
       },
       "rev": 0
@@ -9924,7 +9923,7 @@
         "priority": 2,
         "api_version": "v1",
         "engine": "mysql",
-        "storage_gb": 200.0,
+        "storage_gb": 200,
         "schema_version": "3.6"
       },
       "rev": 0
@@ -9946,7 +9945,7 @@
         "priority": 3,
         "api_version": "v2",
         "engine": "mongodb",
-        "storage_gb": 225.0,
+        "storage_gb": 225,
         "schema_version": "4.7"
       },
       "rev": 0
@@ -9968,7 +9967,7 @@
         "priority": 4,
         "api_version": "v3",
         "engine": "cassandra",
-        "storage_gb": 250.0,
+        "storage_gb": 250,
         "schema_version": "1.0"
       },
       "rev": 0
@@ -9990,7 +9989,7 @@
         "priority": 5,
         "api_version": "v1",
         "engine": "clickhouse",
-        "storage_gb": 275.0,
+        "storage_gb": 275,
         "schema_version": "2.1"
       },
       "rev": 0
@@ -10012,7 +10011,7 @@
         "priority": 1,
         "api_version": "v2",
         "engine": "postgres",
-        "storage_gb": 300.0,
+        "storage_gb": 300,
         "schema_version": "3.2"
       },
       "rev": 0
@@ -10034,7 +10033,7 @@
         "priority": 2,
         "api_version": "v3",
         "engine": "mysql",
-        "storage_gb": 325.0,
+        "storage_gb": 325,
         "schema_version": "4.3"
       },
       "rev": 0
@@ -10056,7 +10055,7 @@
         "priority": 3,
         "api_version": "v1",
         "engine": "mongodb",
-        "storage_gb": 350.0,
+        "storage_gb": 350,
         "schema_version": "1.4"
       },
       "rev": 0
@@ -10078,7 +10077,7 @@
         "priority": 4,
         "api_version": "v2",
         "engine": "cassandra",
-        "storage_gb": 375.0,
+        "storage_gb": 375,
         "schema_version": "2.5"
       },
       "rev": 0
@@ -10100,7 +10099,7 @@
         "priority": 5,
         "api_version": "v3",
         "engine": "clickhouse",
-        "storage_gb": 400.0,
+        "storage_gb": 400,
         "schema_version": "3.6"
       },
       "rev": 0
@@ -10122,7 +10121,7 @@
         "priority": 1,
         "api_version": "v1",
         "engine": "postgres",
-        "storage_gb": 425.0,
+        "storage_gb": 425,
         "schema_version": "4.7"
       },
       "rev": 0
@@ -10144,7 +10143,7 @@
         "priority": 2,
         "api_version": "v2",
         "engine": "mysql",
-        "storage_gb": 450.0,
+        "storage_gb": 450,
         "schema_version": "1.0"
       },
       "rev": 0
@@ -10166,7 +10165,7 @@
         "priority": 3,
         "api_version": "v3",
         "engine": "mongodb",
-        "storage_gb": 475.0,
+        "storage_gb": 475,
         "schema_version": "2.1"
       },
       "rev": 0
@@ -10188,7 +10187,7 @@
         "priority": 4,
         "api_version": "v1",
         "engine": "cassandra",
-        "storage_gb": 500.0,
+        "storage_gb": 500,
         "schema_version": "3.2"
       },
       "rev": 0
@@ -10210,7 +10209,7 @@
         "priority": 5,
         "api_version": "v2",
         "engine": "clickhouse",
-        "storage_gb": 525.0,
+        "storage_gb": 525,
         "schema_version": "4.3"
       },
       "rev": 0
@@ -10232,7 +10231,7 @@
         "priority": 1,
         "api_version": "v3",
         "engine": "postgres",
-        "storage_gb": 550.0,
+        "storage_gb": 550,
         "schema_version": "1.4"
       },
       "rev": 0
@@ -10254,7 +10253,7 @@
         "priority": 2,
         "api_version": "v1",
         "engine": "mysql",
-        "storage_gb": 575.0,
+        "storage_gb": 575,
         "schema_version": "2.5"
       },
       "rev": 0
@@ -10276,7 +10275,7 @@
         "priority": 3,
         "api_version": "v2",
         "engine": "mongodb",
-        "storage_gb": 600.0,
+        "storage_gb": 600,
         "schema_version": "3.6"
       },
       "rev": 0
@@ -10298,7 +10297,7 @@
         "priority": 4,
         "api_version": "v3",
         "engine": "cassandra",
-        "storage_gb": 625.0,
+        "storage_gb": 625,
         "schema_version": "4.7"
       },
       "rev": 0
@@ -10320,7 +10319,7 @@
         "priority": 5,
         "api_version": "v1",
         "engine": "clickhouse",
-        "storage_gb": 650.0,
+        "storage_gb": 650,
         "schema_version": "1.0"
       },
       "rev": 0
@@ -10342,7 +10341,7 @@
         "priority": 1,
         "api_version": "v2",
         "engine": "postgres",
-        "storage_gb": 675.0,
+        "storage_gb": 675,
         "schema_version": "2.1"
       },
       "rev": 0
@@ -10364,7 +10363,7 @@
         "priority": 2,
         "api_version": "v3",
         "engine": "mysql",
-        "storage_gb": 700.0,
+        "storage_gb": 700,
         "schema_version": "3.2"
       },
       "rev": 0
@@ -10386,7 +10385,7 @@
         "priority": 3,
         "api_version": "v1",
         "engine": "mongodb",
-        "storage_gb": 725.0,
+        "storage_gb": 725,
         "schema_version": "4.3"
       },
       "rev": 0
@@ -10408,7 +10407,7 @@
         "priority": 4,
         "api_version": "v2",
         "engine": "cassandra",
-        "storage_gb": 750.0,
+        "storage_gb": 750,
         "schema_version": "1.4"
       },
       "rev": 0
@@ -10430,7 +10429,7 @@
         "priority": 5,
         "api_version": "v3",
         "engine": "clickhouse",
-        "storage_gb": 775.0,
+        "storage_gb": 775,
         "schema_version": "2.5"
       },
       "rev": 0
@@ -10452,7 +10451,7 @@
         "priority": 1,
         "api_version": "v1",
         "engine": "postgres",
-        "storage_gb": 800.0,
+        "storage_gb": 800,
         "schema_version": "3.6"
       },
       "rev": 0
@@ -10873,7 +10872,7 @@
         "status": "Proposed",
         "priority": 2,
         "eviction_policy": "LFU",
-        "memory_gb": 2.0
+        "memory_gb": 2
       },
       "rev": 0
     },
@@ -10893,7 +10892,7 @@
         "status": "Approved",
         "priority": 3,
         "eviction_policy": "FIFO",
-        "memory_gb": 3.0
+        "memory_gb": 3
       },
       "rev": 0
     },
@@ -10913,7 +10912,7 @@
         "status": "Active",
         "priority": 4,
         "eviction_policy": "LRU",
-        "memory_gb": 4.0
+        "memory_gb": 4
       },
       "rev": 0
     },
@@ -10933,7 +10932,7 @@
         "status": "Deprecated",
         "priority": 5,
         "eviction_policy": "LFU",
-        "memory_gb": 5.0
+        "memory_gb": 5
       },
       "rev": 0
     },
@@ -10953,7 +10952,7 @@
         "status": "Draft",
         "priority": 1,
         "eviction_policy": "FIFO",
-        "memory_gb": 6.0
+        "memory_gb": 6
       },
       "rev": 0
     },
@@ -10973,7 +10972,7 @@
         "status": "Proposed",
         "priority": 2,
         "eviction_policy": "LRU",
-        "memory_gb": 7.0
+        "memory_gb": 7
       },
       "rev": 0
     },
@@ -10993,7 +10992,7 @@
         "status": "Approved",
         "priority": 3,
         "eviction_policy": "LFU",
-        "memory_gb": 8.0
+        "memory_gb": 8
       },
       "rev": 0
     },
@@ -11013,7 +11012,7 @@
         "status": "Active",
         "priority": 4,
         "eviction_policy": "FIFO",
-        "memory_gb": 9.0
+        "memory_gb": 9
       },
       "rev": 0
     },
@@ -11033,7 +11032,7 @@
         "status": "Deprecated",
         "priority": 5,
         "eviction_policy": "LRU",
-        "memory_gb": 10.0
+        "memory_gb": 10
       },
       "rev": 0
     },
@@ -11053,7 +11052,7 @@
         "status": "Draft",
         "priority": 1,
         "eviction_policy": "LFU",
-        "memory_gb": 11.0
+        "memory_gb": 11
       },
       "rev": 0
     },
@@ -11073,7 +11072,7 @@
         "status": "Proposed",
         "priority": 2,
         "eviction_policy": "FIFO",
-        "memory_gb": 12.0
+        "memory_gb": 12
       },
       "rev": 0
     },
@@ -11093,7 +11092,7 @@
         "status": "Approved",
         "priority": 3,
         "eviction_policy": "LRU",
-        "memory_gb": 13.0
+        "memory_gb": 13
       },
       "rev": 0
     },
@@ -11113,7 +11112,7 @@
         "status": "Active",
         "priority": 4,
         "eviction_policy": "LFU",
-        "memory_gb": 14.0
+        "memory_gb": 14
       },
       "rev": 0
     },
@@ -11133,7 +11132,7 @@
         "status": "Deprecated",
         "priority": 5,
         "eviction_policy": "FIFO",
-        "memory_gb": 15.0
+        "memory_gb": 15
       },
       "rev": 0
     },
@@ -11153,7 +11152,7 @@
         "status": "Draft",
         "priority": 1,
         "eviction_policy": "LRU",
-        "memory_gb": 16.0
+        "memory_gb": 16
       },
       "rev": 0
     },
@@ -11936,7 +11935,7 @@
         "hostname": "srv-0001",
         "ip_address": "10.0.0.1",
         "cpu_cores": 8,
-        "ram_gb": 32.0,
+        "ram_gb": 32,
         "os": "Windows"
       },
       "rev": 0
@@ -11959,7 +11958,7 @@
         "hostname": "srv-0002",
         "ip_address": "10.0.0.2",
         "cpu_cores": 16,
-        "ram_gb": 64.0,
+        "ram_gb": 64,
         "os": "MacOS"
       },
       "rev": 0
@@ -11982,7 +11981,7 @@
         "hostname": "srv-0003",
         "ip_address": "10.0.0.3",
         "cpu_cores": 32,
-        "ram_gb": 128.0,
+        "ram_gb": 128,
         "os": "RTOS"
       },
       "rev": 0
@@ -12005,7 +12004,7 @@
         "hostname": "srv-0004",
         "ip_address": "10.0.0.4",
         "cpu_cores": 64,
-        "ram_gb": 256.0,
+        "ram_gb": 256,
         "os": "Linux"
       },
       "rev": 0
@@ -12028,7 +12027,7 @@
         "hostname": "srv-0005",
         "ip_address": "10.0.0.5",
         "cpu_cores": 4,
-        "ram_gb": 16.0,
+        "ram_gb": 16,
         "os": "Windows"
       },
       "rev": 0
@@ -12051,7 +12050,7 @@
         "hostname": "srv-0006",
         "ip_address": "10.0.0.6",
         "cpu_cores": 8,
-        "ram_gb": 32.0,
+        "ram_gb": 32,
         "os": "MacOS"
       },
       "rev": 0
@@ -12074,7 +12073,7 @@
         "hostname": "srv-0007",
         "ip_address": "10.0.0.7",
         "cpu_cores": 16,
-        "ram_gb": 64.0,
+        "ram_gb": 64,
         "os": "RTOS"
       },
       "rev": 0
@@ -12097,7 +12096,7 @@
         "hostname": "srv-0008",
         "ip_address": "10.0.0.8",
         "cpu_cores": 32,
-        "ram_gb": 128.0,
+        "ram_gb": 128,
         "os": "Linux"
       },
       "rev": 0
@@ -12120,7 +12119,7 @@
         "hostname": "srv-0009",
         "ip_address": "10.0.0.9",
         "cpu_cores": 64,
-        "ram_gb": 256.0,
+        "ram_gb": 256,
         "os": "Windows"
       },
       "rev": 0
@@ -12143,7 +12142,7 @@
         "hostname": "srv-0010",
         "ip_address": "10.0.0.10",
         "cpu_cores": 4,
-        "ram_gb": 16.0,
+        "ram_gb": 16,
         "os": "MacOS"
       },
       "rev": 0
@@ -12166,7 +12165,7 @@
         "hostname": "srv-0011",
         "ip_address": "10.0.0.11",
         "cpu_cores": 8,
-        "ram_gb": 32.0,
+        "ram_gb": 32,
         "os": "RTOS"
       },
       "rev": 0
@@ -12189,7 +12188,7 @@
         "hostname": "srv-0012",
         "ip_address": "10.0.0.12",
         "cpu_cores": 16,
-        "ram_gb": 64.0,
+        "ram_gb": 64,
         "os": "Linux"
       },
       "rev": 0
@@ -12212,7 +12211,7 @@
         "hostname": "srv-0013",
         "ip_address": "10.0.0.13",
         "cpu_cores": 32,
-        "ram_gb": 128.0,
+        "ram_gb": 128,
         "os": "Windows"
       },
       "rev": 0
@@ -12235,7 +12234,7 @@
         "hostname": "srv-0014",
         "ip_address": "10.0.0.14",
         "cpu_cores": 64,
-        "ram_gb": 256.0,
+        "ram_gb": 256,
         "os": "MacOS"
       },
       "rev": 0
@@ -12258,7 +12257,7 @@
         "hostname": "srv-0015",
         "ip_address": "10.0.0.15",
         "cpu_cores": 4,
-        "ram_gb": 16.0,
+        "ram_gb": 16,
         "os": "RTOS"
       },
       "rev": 0
@@ -12281,7 +12280,7 @@
         "hostname": "srv-0016",
         "ip_address": "10.0.0.16",
         "cpu_cores": 8,
-        "ram_gb": 32.0,
+        "ram_gb": 32,
         "os": "Linux"
       },
       "rev": 0
@@ -12304,7 +12303,7 @@
         "hostname": "srv-0017",
         "ip_address": "10.0.0.17",
         "cpu_cores": 16,
-        "ram_gb": 64.0,
+        "ram_gb": 64,
         "os": "Windows"
       },
       "rev": 0
@@ -12327,7 +12326,7 @@
         "hostname": "srv-0018",
         "ip_address": "10.0.0.18",
         "cpu_cores": 32,
-        "ram_gb": 128.0,
+        "ram_gb": 128,
         "os": "MacOS"
       },
       "rev": 0
@@ -12350,7 +12349,7 @@
         "hostname": "srv-0019",
         "ip_address": "10.0.0.19",
         "cpu_cores": 64,
-        "ram_gb": 256.0,
+        "ram_gb": 256,
         "os": "RTOS"
       },
       "rev": 0
@@ -12373,7 +12372,7 @@
         "hostname": "srv-0020",
         "ip_address": "10.0.0.20",
         "cpu_cores": 4,
-        "ram_gb": 16.0,
+        "ram_gb": 16,
         "os": "Linux"
       },
       "rev": 0
@@ -12396,7 +12395,7 @@
         "hostname": "srv-0021",
         "ip_address": "10.0.0.21",
         "cpu_cores": 8,
-        "ram_gb": 32.0,
+        "ram_gb": 32,
         "os": "Windows"
       },
       "rev": 0
@@ -12419,7 +12418,7 @@
         "hostname": "srv-0022",
         "ip_address": "10.0.0.22",
         "cpu_cores": 16,
-        "ram_gb": 64.0,
+        "ram_gb": 64,
         "os": "MacOS"
       },
       "rev": 0
@@ -12442,7 +12441,7 @@
         "hostname": "srv-0023",
         "ip_address": "10.0.0.23",
         "cpu_cores": 32,
-        "ram_gb": 128.0,
+        "ram_gb": 128,
         "os": "RTOS"
       },
       "rev": 0
@@ -12465,7 +12464,7 @@
         "hostname": "srv-0024",
         "ip_address": "10.0.0.24",
         "cpu_cores": 64,
-        "ram_gb": 256.0,
+        "ram_gb": 256,
         "os": "Linux"
       },
       "rev": 0
@@ -12488,7 +12487,7 @@
         "hostname": "srv-0025",
         "ip_address": "10.0.0.25",
         "cpu_cores": 4,
-        "ram_gb": 16.0,
+        "ram_gb": 16,
         "os": "Windows"
       },
       "rev": 0
@@ -12511,7 +12510,7 @@
         "hostname": "srv-0026",
         "ip_address": "10.0.0.26",
         "cpu_cores": 8,
-        "ram_gb": 32.0,
+        "ram_gb": 32,
         "os": "MacOS"
       },
       "rev": 0
@@ -12534,7 +12533,7 @@
         "hostname": "srv-0027",
         "ip_address": "10.0.0.27",
         "cpu_cores": 16,
-        "ram_gb": 64.0,
+        "ram_gb": 64,
         "os": "RTOS"
       },
       "rev": 0
@@ -12557,7 +12556,7 @@
         "hostname": "srv-0028",
         "ip_address": "10.0.0.28",
         "cpu_cores": 32,
-        "ram_gb": 128.0,
+        "ram_gb": 128,
         "os": "Linux"
       },
       "rev": 0
@@ -12580,7 +12579,7 @@
         "hostname": "srv-0029",
         "ip_address": "10.0.0.29",
         "cpu_cores": 64,
-        "ram_gb": 256.0,
+        "ram_gb": 256,
         "os": "Windows"
       },
       "rev": 0
@@ -12603,7 +12602,7 @@
         "hostname": "srv-0030",
         "ip_address": "10.0.0.30",
         "cpu_cores": 4,
-        "ram_gb": 16.0,
+        "ram_gb": 16,
         "os": "MacOS"
       },
       "rev": 0
@@ -12626,7 +12625,7 @@
         "hostname": "srv-0031",
         "ip_address": "10.0.0.31",
         "cpu_cores": 8,
-        "ram_gb": 32.0,
+        "ram_gb": 32,
         "os": "RTOS"
       },
       "rev": 0
@@ -12649,7 +12648,7 @@
         "hostname": "srv-0032",
         "ip_address": "10.0.0.32",
         "cpu_cores": 16,
-        "ram_gb": 64.0,
+        "ram_gb": 64,
         "os": "Linux"
       },
       "rev": 0
@@ -12672,7 +12671,7 @@
         "hostname": "srv-0033",
         "ip_address": "10.0.0.33",
         "cpu_cores": 32,
-        "ram_gb": 128.0,
+        "ram_gb": 128,
         "os": "Windows"
       },
       "rev": 0
@@ -12695,7 +12694,7 @@
         "hostname": "srv-0034",
         "ip_address": "10.0.0.34",
         "cpu_cores": 64,
-        "ram_gb": 256.0,
+        "ram_gb": 256,
         "os": "MacOS"
       },
       "rev": 0
@@ -12718,7 +12717,7 @@
         "hostname": "srv-0035",
         "ip_address": "10.0.0.35",
         "cpu_cores": 4,
-        "ram_gb": 16.0,
+        "ram_gb": 16,
         "os": "RTOS"
       },
       "rev": 0
@@ -12741,7 +12740,7 @@
         "hostname": "srv-0036",
         "ip_address": "10.0.0.36",
         "cpu_cores": 8,
-        "ram_gb": 32.0,
+        "ram_gb": 32,
         "os": "Linux"
       },
       "rev": 0
@@ -12764,7 +12763,7 @@
         "hostname": "srv-0037",
         "ip_address": "10.0.0.37",
         "cpu_cores": 16,
-        "ram_gb": 64.0,
+        "ram_gb": 64,
         "os": "Windows"
       },
       "rev": 0
@@ -12787,7 +12786,7 @@
         "hostname": "srv-0038",
         "ip_address": "10.0.0.38",
         "cpu_cores": 32,
-        "ram_gb": 128.0,
+        "ram_gb": 128,
         "os": "MacOS"
       },
       "rev": 0
@@ -12810,7 +12809,7 @@
         "hostname": "srv-0039",
         "ip_address": "10.0.0.39",
         "cpu_cores": 64,
-        "ram_gb": 256.0,
+        "ram_gb": 256,
         "os": "RTOS"
       },
       "rev": 0
@@ -12833,7 +12832,7 @@
         "hostname": "srv-0040",
         "ip_address": "10.0.0.40",
         "cpu_cores": 4,
-        "ram_gb": 16.0,
+        "ram_gb": 16,
         "os": "Linux"
       },
       "rev": 0
@@ -12856,7 +12855,7 @@
         "hostname": "chost-0001",
         "ip_address": "10.1.0.1",
         "cpu_cores": 16,
-        "ram_gb": 64.0,
+        "ram_gb": 64,
         "os": "Linux",
         "container_runtime": "containerd"
       },
@@ -12880,7 +12879,7 @@
         "hostname": "chost-0002",
         "ip_address": "10.1.0.2",
         "cpu_cores": 32,
-        "ram_gb": 128.0,
+        "ram_gb": 128,
         "os": "Linux",
         "container_runtime": "podman"
       },
@@ -12904,7 +12903,7 @@
         "hostname": "chost-0003",
         "ip_address": "10.1.0.3",
         "cpu_cores": 64,
-        "ram_gb": 256.0,
+        "ram_gb": 256,
         "os": "Linux",
         "container_runtime": "docker"
       },
@@ -12928,7 +12927,7 @@
         "hostname": "chost-0004",
         "ip_address": "10.1.0.4",
         "cpu_cores": 8,
-        "ram_gb": 32.0,
+        "ram_gb": 32,
         "os": "Linux",
         "container_runtime": "containerd"
       },
@@ -12952,7 +12951,7 @@
         "hostname": "chost-0005",
         "ip_address": "10.1.0.5",
         "cpu_cores": 16,
-        "ram_gb": 64.0,
+        "ram_gb": 64,
         "os": "Linux",
         "container_runtime": "podman"
       },
@@ -12976,7 +12975,7 @@
         "hostname": "chost-0006",
         "ip_address": "10.1.0.6",
         "cpu_cores": 32,
-        "ram_gb": 128.0,
+        "ram_gb": 128,
         "os": "Linux",
         "container_runtime": "docker"
       },
@@ -13000,7 +12999,7 @@
         "hostname": "chost-0007",
         "ip_address": "10.1.0.7",
         "cpu_cores": 64,
-        "ram_gb": 256.0,
+        "ram_gb": 256,
         "os": "Linux",
         "container_runtime": "containerd"
       },
@@ -13024,7 +13023,7 @@
         "hostname": "chost-0008",
         "ip_address": "10.1.0.8",
         "cpu_cores": 8,
-        "ram_gb": 32.0,
+        "ram_gb": 32,
         "os": "Linux",
         "container_runtime": "podman"
       },
@@ -13048,7 +13047,7 @@
         "hostname": "chost-0009",
         "ip_address": "10.1.0.9",
         "cpu_cores": 16,
-        "ram_gb": 64.0,
+        "ram_gb": 64,
         "os": "Linux",
         "container_runtime": "docker"
       },
@@ -13072,7 +13071,7 @@
         "hostname": "chost-0010",
         "ip_address": "10.1.0.10",
         "cpu_cores": 32,
-        "ram_gb": 128.0,
+        "ram_gb": 128,
         "os": "Linux",
         "container_runtime": "containerd"
       },
@@ -13096,7 +13095,7 @@
         "hostname": "chost-0011",
         "ip_address": "10.1.0.11",
         "cpu_cores": 64,
-        "ram_gb": 256.0,
+        "ram_gb": 256,
         "os": "Linux",
         "container_runtime": "podman"
       },
@@ -13120,7 +13119,7 @@
         "hostname": "chost-0012",
         "ip_address": "10.1.0.12",
         "cpu_cores": 8,
-        "ram_gb": 32.0,
+        "ram_gb": 32,
         "os": "Linux",
         "container_runtime": "docker"
       },
@@ -13144,7 +13143,7 @@
         "hostname": "chost-0013",
         "ip_address": "10.1.0.13",
         "cpu_cores": 16,
-        "ram_gb": 64.0,
+        "ram_gb": 64,
         "os": "Linux",
         "container_runtime": "containerd"
       },
@@ -13168,7 +13167,7 @@
         "hostname": "chost-0014",
         "ip_address": "10.1.0.14",
         "cpu_cores": 32,
-        "ram_gb": 128.0,
+        "ram_gb": 128,
         "os": "Linux",
         "container_runtime": "podman"
       },
@@ -13192,7 +13191,7 @@
         "hostname": "chost-0015",
         "ip_address": "10.1.0.15",
         "cpu_cores": 64,
-        "ram_gb": 256.0,
+        "ram_gb": 256,
         "os": "Linux",
         "container_runtime": "docker"
       },
@@ -13216,7 +13215,7 @@
         "hostname": "chost-0016",
         "ip_address": "10.1.0.16",
         "cpu_cores": 8,
-        "ram_gb": 32.0,
+        "ram_gb": 32,
         "os": "Linux",
         "container_runtime": "containerd"
       },
@@ -13240,7 +13239,7 @@
         "hostname": "chost-0017",
         "ip_address": "10.1.0.17",
         "cpu_cores": 16,
-        "ram_gb": 64.0,
+        "ram_gb": 64,
         "os": "Linux",
         "container_runtime": "podman"
       },
@@ -13264,7 +13263,7 @@
         "hostname": "chost-0018",
         "ip_address": "10.1.0.18",
         "cpu_cores": 32,
-        "ram_gb": 128.0,
+        "ram_gb": 128,
         "os": "Linux",
         "container_runtime": "docker"
       },
@@ -13288,7 +13287,7 @@
         "hostname": "chost-0019",
         "ip_address": "10.1.0.19",
         "cpu_cores": 64,
-        "ram_gb": 256.0,
+        "ram_gb": 256,
         "os": "Linux",
         "container_runtime": "containerd"
       },
@@ -13312,7 +13311,7 @@
         "hostname": "chost-0020",
         "ip_address": "10.1.0.20",
         "cpu_cores": 8,
-        "ram_gb": 32.0,
+        "ram_gb": 32,
         "os": "Linux",
         "container_runtime": "podman"
       },
@@ -13336,7 +13335,7 @@
         "hostname": "chost-0021",
         "ip_address": "10.1.0.21",
         "cpu_cores": 16,
-        "ram_gb": 64.0,
+        "ram_gb": 64,
         "os": "Linux",
         "container_runtime": "docker"
       },
@@ -13360,7 +13359,7 @@
         "hostname": "chost-0022",
         "ip_address": "10.1.0.22",
         "cpu_cores": 32,
-        "ram_gb": 128.0,
+        "ram_gb": 128,
         "os": "Linux",
         "container_runtime": "containerd"
       },
@@ -13384,7 +13383,7 @@
         "hostname": "chost-0023",
         "ip_address": "10.1.0.23",
         "cpu_cores": 64,
-        "ram_gb": 256.0,
+        "ram_gb": 256,
         "os": "Linux",
         "container_runtime": "podman"
       },
@@ -13408,7 +13407,7 @@
         "hostname": "chost-0024",
         "ip_address": "10.1.0.24",
         "cpu_cores": 8,
-        "ram_gb": 32.0,
+        "ram_gb": 32,
         "os": "Linux",
         "container_runtime": "docker"
       },
@@ -13432,7 +13431,7 @@
         "hostname": "chost-0025",
         "ip_address": "10.1.0.25",
         "cpu_cores": 16,
-        "ram_gb": 64.0,
+        "ram_gb": 64,
         "os": "Linux",
         "container_runtime": "containerd"
       },
@@ -13456,7 +13455,7 @@
         "hostname": "chost-0026",
         "ip_address": "10.1.0.26",
         "cpu_cores": 32,
-        "ram_gb": 128.0,
+        "ram_gb": 128,
         "os": "Linux",
         "container_runtime": "podman"
       },
@@ -13480,7 +13479,7 @@
         "hostname": "chost-0027",
         "ip_address": "10.1.0.27",
         "cpu_cores": 64,
-        "ram_gb": 256.0,
+        "ram_gb": 256,
         "os": "Linux",
         "container_runtime": "docker"
       },
@@ -13504,7 +13503,7 @@
         "hostname": "chost-0028",
         "ip_address": "10.1.0.28",
         "cpu_cores": 8,
-        "ram_gb": 32.0,
+        "ram_gb": 32,
         "os": "Linux",
         "container_runtime": "containerd"
       },
@@ -13528,7 +13527,7 @@
         "hostname": "chost-0029",
         "ip_address": "10.1.0.29",
         "cpu_cores": 16,
-        "ram_gb": 64.0,
+        "ram_gb": 64,
         "os": "Linux",
         "container_runtime": "podman"
       },
@@ -13552,7 +13551,7 @@
         "hostname": "chost-0030",
         "ip_address": "10.1.0.30",
         "cpu_cores": 32,
-        "ram_gb": 128.0,
+        "ram_gb": 128,
         "os": "Linux",
         "container_runtime": "docker"
       },
@@ -13576,7 +13575,7 @@
         "hostname": "vm-0001",
         "ip_address": "10.2.0.1",
         "cpu_cores": 4,
-        "ram_gb": 16.0,
+        "ram_gb": 16,
         "os": "Windows",
         "hypervisor": "vmware"
       },
@@ -13600,7 +13599,7 @@
         "hostname": "vm-0002",
         "ip_address": "10.2.0.2",
         "cpu_cores": 8,
-        "ram_gb": 32.0,
+        "ram_gb": 32,
         "os": "MacOS",
         "hypervisor": "hyper-v"
       },
@@ -13624,7 +13623,7 @@
         "hostname": "vm-0003",
         "ip_address": "10.2.0.3",
         "cpu_cores": 16,
-        "ram_gb": 64.0,
+        "ram_gb": 64,
         "os": "RTOS",
         "hypervisor": "kvm"
       },
@@ -13648,7 +13647,7 @@
         "hostname": "vm-0004",
         "ip_address": "10.2.0.4",
         "cpu_cores": 2,
-        "ram_gb": 8.0,
+        "ram_gb": 8,
         "os": "Linux",
         "hypervisor": "vmware"
       },
@@ -13672,7 +13671,7 @@
         "hostname": "vm-0005",
         "ip_address": "10.2.0.5",
         "cpu_cores": 4,
-        "ram_gb": 16.0,
+        "ram_gb": 16,
         "os": "Windows",
         "hypervisor": "hyper-v"
       },
@@ -13696,7 +13695,7 @@
         "hostname": "vm-0006",
         "ip_address": "10.2.0.6",
         "cpu_cores": 8,
-        "ram_gb": 32.0,
+        "ram_gb": 32,
         "os": "MacOS",
         "hypervisor": "kvm"
       },
@@ -13720,7 +13719,7 @@
         "hostname": "vm-0007",
         "ip_address": "10.2.0.7",
         "cpu_cores": 16,
-        "ram_gb": 64.0,
+        "ram_gb": 64,
         "os": "RTOS",
         "hypervisor": "vmware"
       },
@@ -13744,7 +13743,7 @@
         "hostname": "vm-0008",
         "ip_address": "10.2.0.8",
         "cpu_cores": 2,
-        "ram_gb": 8.0,
+        "ram_gb": 8,
         "os": "Linux",
         "hypervisor": "hyper-v"
       },
@@ -13768,7 +13767,7 @@
         "hostname": "vm-0009",
         "ip_address": "10.2.0.9",
         "cpu_cores": 4,
-        "ram_gb": 16.0,
+        "ram_gb": 16,
         "os": "Windows",
         "hypervisor": "kvm"
       },
@@ -13792,7 +13791,7 @@
         "hostname": "vm-0010",
         "ip_address": "10.2.0.10",
         "cpu_cores": 8,
-        "ram_gb": 32.0,
+        "ram_gb": 32,
         "os": "MacOS",
         "hypervisor": "vmware"
       },
@@ -13816,7 +13815,7 @@
         "hostname": "vm-0011",
         "ip_address": "10.2.0.11",
         "cpu_cores": 16,
-        "ram_gb": 64.0,
+        "ram_gb": 64,
         "os": "RTOS",
         "hypervisor": "hyper-v"
       },
@@ -13840,7 +13839,7 @@
         "hostname": "vm-0012",
         "ip_address": "10.2.0.12",
         "cpu_cores": 2,
-        "ram_gb": 8.0,
+        "ram_gb": 8,
         "os": "Linux",
         "hypervisor": "kvm"
       },
@@ -13864,7 +13863,7 @@
         "hostname": "vm-0013",
         "ip_address": "10.2.0.13",
         "cpu_cores": 4,
-        "ram_gb": 16.0,
+        "ram_gb": 16,
         "os": "Windows",
         "hypervisor": "vmware"
       },
@@ -13888,7 +13887,7 @@
         "hostname": "vm-0014",
         "ip_address": "10.2.0.14",
         "cpu_cores": 8,
-        "ram_gb": 32.0,
+        "ram_gb": 32,
         "os": "MacOS",
         "hypervisor": "hyper-v"
       },
@@ -13912,7 +13911,7 @@
         "hostname": "vm-0015",
         "ip_address": "10.2.0.15",
         "cpu_cores": 16,
-        "ram_gb": 64.0,
+        "ram_gb": 64,
         "os": "RTOS",
         "hypervisor": "kvm"
       },
@@ -13936,7 +13935,7 @@
         "hostname": "vm-0016",
         "ip_address": "10.2.0.16",
         "cpu_cores": 2,
-        "ram_gb": 8.0,
+        "ram_gb": 8,
         "os": "Linux",
         "hypervisor": "vmware"
       },
@@ -13960,7 +13959,7 @@
         "hostname": "vm-0017",
         "ip_address": "10.2.0.17",
         "cpu_cores": 4,
-        "ram_gb": 16.0,
+        "ram_gb": 16,
         "os": "Windows",
         "hypervisor": "hyper-v"
       },
@@ -13984,7 +13983,7 @@
         "hostname": "vm-0018",
         "ip_address": "10.2.0.18",
         "cpu_cores": 8,
-        "ram_gb": 32.0,
+        "ram_gb": 32,
         "os": "MacOS",
         "hypervisor": "kvm"
       },
@@ -14008,7 +14007,7 @@
         "hostname": "vm-0019",
         "ip_address": "10.2.0.19",
         "cpu_cores": 16,
-        "ram_gb": 64.0,
+        "ram_gb": 64,
         "os": "RTOS",
         "hypervisor": "vmware"
       },
@@ -14032,7 +14031,7 @@
         "hostname": "vm-0020",
         "ip_address": "10.2.0.20",
         "cpu_cores": 2,
-        "ram_gb": 8.0,
+        "ram_gb": 8,
         "os": "Linux",
         "hypervisor": "hyper-v"
       },
@@ -20390,7 +20389,7 @@
         "priority": 2,
         "start_date": "2024-01-08",
         "end_date": "2025-01-07",
-        "budget_usd": 200000.0
+        "budget_usd": 200000
       },
       "rev": 0
     },
@@ -20411,7 +20410,7 @@
         "priority": 3,
         "start_date": "2024-01-15",
         "end_date": "2025-01-14",
-        "budget_usd": 300000.0
+        "budget_usd": 300000
       },
       "rev": 0
     },
@@ -20432,7 +20431,7 @@
         "priority": 4,
         "start_date": "2024-01-22",
         "end_date": "2025-01-21",
-        "budget_usd": 400000.0
+        "budget_usd": 400000
       },
       "rev": 0
     },
@@ -20453,7 +20452,7 @@
         "priority": 5,
         "start_date": "2024-01-29",
         "end_date": "2025-01-28",
-        "budget_usd": 500000.0
+        "budget_usd": 500000
       },
       "rev": 0
     },
@@ -20474,7 +20473,7 @@
         "priority": 1,
         "start_date": "2024-02-05",
         "end_date": "2025-02-04",
-        "budget_usd": 600000.0
+        "budget_usd": 600000
       },
       "rev": 0
     },
@@ -20495,7 +20494,7 @@
         "priority": 2,
         "start_date": "2024-02-12",
         "end_date": "2025-02-11",
-        "budget_usd": 700000.0
+        "budget_usd": 700000
       },
       "rev": 0
     },
@@ -20516,7 +20515,7 @@
         "priority": 3,
         "start_date": "2024-02-19",
         "end_date": "2025-02-18",
-        "budget_usd": 800000.0
+        "budget_usd": 800000
       },
       "rev": 0
     },
@@ -20537,7 +20536,7 @@
         "priority": 4,
         "start_date": "2024-02-26",
         "end_date": "2025-02-25",
-        "budget_usd": 900000.0
+        "budget_usd": 900000
       },
       "rev": 0
     },
@@ -24497,7 +24496,7 @@
       "target_id": "e_000322",
       "properties": {
         "transport_protocol": "HTTP",
-        "latency_ms_avg": 5.0
+        "latency_ms_avg": 5
       },
       "rev": 0
     },
@@ -24508,7 +24507,7 @@
       "target_id": "e_000323",
       "properties": {
         "transport_protocol": "HTTPS",
-        "latency_ms_avg": 6.0
+        "latency_ms_avg": 6
       },
       "rev": 0
     },
@@ -24519,7 +24518,7 @@
       "target_id": "e_000324",
       "properties": {
         "transport_protocol": "MQTT",
-        "latency_ms_avg": 7.0
+        "latency_ms_avg": 7
       },
       "rev": 0
     },
@@ -24530,7 +24529,7 @@
       "target_id": "e_000325",
       "properties": {
         "transport_protocol": "AMQP",
-        "latency_ms_avg": 8.0
+        "latency_ms_avg": 8
       },
       "rev": 0
     },
@@ -24541,7 +24540,7 @@
       "target_id": "e_000326",
       "properties": {
         "transport_protocol": "TCP",
-        "latency_ms_avg": 9.0
+        "latency_ms_avg": 9
       },
       "rev": 0
     },
@@ -24552,7 +24551,7 @@
       "target_id": "e_000327",
       "properties": {
         "transport_protocol": "UDP",
-        "latency_ms_avg": 10.0
+        "latency_ms_avg": 10
       },
       "rev": 0
     },
@@ -24563,7 +24562,7 @@
       "target_id": "e_000328",
       "properties": {
         "transport_protocol": "gRPC",
-        "latency_ms_avg": 11.0
+        "latency_ms_avg": 11
       },
       "rev": 0
     },
@@ -24574,7 +24573,7 @@
       "target_id": "e_000329",
       "properties": {
         "transport_protocol": "WebSocket",
-        "latency_ms_avg": 12.0
+        "latency_ms_avg": 12
       },
       "rev": 0
     },
@@ -24585,7 +24584,7 @@
       "target_id": "e_000330",
       "properties": {
         "transport_protocol": "HTTP",
-        "latency_ms_avg": 13.0
+        "latency_ms_avg": 13
       },
       "rev": 0
     },
@@ -24596,7 +24595,7 @@
       "target_id": "e_000331",
       "properties": {
         "transport_protocol": "HTTPS",
-        "latency_ms_avg": 14.0
+        "latency_ms_avg": 14
       },
       "rev": 0
     },
@@ -24607,7 +24606,7 @@
       "target_id": "e_000332",
       "properties": {
         "transport_protocol": "MQTT",
-        "latency_ms_avg": 15.0
+        "latency_ms_avg": 15
       },
       "rev": 0
     },
@@ -24618,7 +24617,7 @@
       "target_id": "e_000333",
       "properties": {
         "transport_protocol": "AMQP",
-        "latency_ms_avg": 16.0
+        "latency_ms_avg": 16
       },
       "rev": 0
     },
@@ -24629,7 +24628,7 @@
       "target_id": "e_000334",
       "properties": {
         "transport_protocol": "TCP",
-        "latency_ms_avg": 17.0
+        "latency_ms_avg": 17
       },
       "rev": 0
     },
@@ -24640,7 +24639,7 @@
       "target_id": "e_000335",
       "properties": {
         "transport_protocol": "UDP",
-        "latency_ms_avg": 18.0
+        "latency_ms_avg": 18
       },
       "rev": 0
     },
@@ -24651,7 +24650,7 @@
       "target_id": "e_000336",
       "properties": {
         "transport_protocol": "gRPC",
-        "latency_ms_avg": 19.0
+        "latency_ms_avg": 19
       },
       "rev": 0
     },
@@ -24662,7 +24661,7 @@
       "target_id": "e_000337",
       "properties": {
         "transport_protocol": "WebSocket",
-        "latency_ms_avg": 20.0
+        "latency_ms_avg": 20
       },
       "rev": 0
     },
@@ -24673,7 +24672,7 @@
       "target_id": "e_000338",
       "properties": {
         "transport_protocol": "HTTP",
-        "latency_ms_avg": 21.0
+        "latency_ms_avg": 21
       },
       "rev": 0
     },
@@ -24684,7 +24683,7 @@
       "target_id": "e_000339",
       "properties": {
         "transport_protocol": "HTTPS",
-        "latency_ms_avg": 22.0
+        "latency_ms_avg": 22
       },
       "rev": 0
     },
@@ -24695,7 +24694,7 @@
       "target_id": "e_000340",
       "properties": {
         "transport_protocol": "MQTT",
-        "latency_ms_avg": 23.0
+        "latency_ms_avg": 23
       },
       "rev": 0
     },
@@ -24706,7 +24705,7 @@
       "target_id": "e_000341",
       "properties": {
         "transport_protocol": "AMQP",
-        "latency_ms_avg": 24.0
+        "latency_ms_avg": 24
       },
       "rev": 0
     },

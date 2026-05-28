@@ -17,8 +17,8 @@ def _build_model_from_payload(
 ) -> Model:
     """Materialize a `Model` from snapshot/inline payload data.
 
-    Shared by `PUT /models/{name}/snapshot` and the inline branch of
-    `POST /models/{name}/validate` so both endpoints apply the same guards:
+    Shared by `POST /model`, `PUT /model/snapshot`, and the inline branch of
+    `POST /model/validate` so all three endpoints apply the same guards:
 
     - element/relationship type must exist in the metamodel
     - abstract types cannot be instantiated

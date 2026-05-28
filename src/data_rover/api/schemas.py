@@ -36,35 +36,17 @@ class RelationshipOut(BaseModel):
 
 
 class ModelOut(BaseModel):
-    name: str
-    metamodel: str
-    rev: int = 0
     elements: list[ElementOut]
     relationships: list[RelationshipOut]
 
     @classmethod
-    def from_core(
-        cls, name: str, metamodel_name: str, model: Model, rev: int = 0
-    ) -> "ModelOut":
+    def from_core(cls, model: Model) -> "ModelOut":
         return cls(
-            name=name,
-            metamodel=metamodel_name,
-            rev=rev,
             elements=[ElementOut.from_core(e) for e in model.elements.values()],
             relationships=[
                 RelationshipOut.from_core(r) for r in model.relationships.values()
             ],
         )
-
-
-class ModelRef(BaseModel):
-    name: str
-    metamodel: str
-
-
-class CreateModelRequest(BaseModel):
-    name: str
-    metamodel: str
 
 
 class CreateElementRequest(BaseModel):
@@ -88,13 +70,8 @@ class InlineModel(BaseModel):
 
 
 class SnapshotIn(BaseModel):
-    rev: int
     elements: list[ElementOut] = Field(default_factory=list)
     relationships: list[RelationshipOut] = Field(default_factory=list)
-
-
-class SnapshotOut(BaseModel):
-    rev: int
 
 
 class ValidateRequest(BaseModel):

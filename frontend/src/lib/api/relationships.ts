@@ -13,12 +13,11 @@ export interface RelationshipFilters {
 }
 
 export function listRelationships(
-	modelName: string,
 	filters?: RelationshipFilters,
 	cfg?: ClientConfig
 ): Promise<Relationship[]> {
 	return apiFetch(
-		`/models/${encodeURIComponent(modelName)}/relationships`,
+		'/model/relationships',
 		{
 			method: 'GET',
 			schema: RelationshipListSchema,
@@ -33,26 +32,19 @@ export function listRelationships(
 }
 
 export function createRelationship(
-	modelName: string,
 	payload: CreateRelationshipRequest,
 	cfg?: ClientConfig
 ): Promise<Relationship> {
 	return apiFetch(
-		`/models/${encodeURIComponent(modelName)}/relationships`,
+		'/model/relationships',
 		{ method: 'POST', body: payload, schema: RelationshipSchema },
 		cfg
 	);
 }
 
-export function deleteRelationship(
-	modelName: string,
-	relationshipId: string,
-	cfg?: ClientConfig
-): Promise<void> {
+export function deleteRelationship(relationshipId: string, cfg?: ClientConfig): Promise<void> {
 	return apiFetch(
-		`/models/${encodeURIComponent(modelName)}/relationships/${encodeURIComponent(
-			relationshipId
-		)}`,
+		`/model/relationships/${encodeURIComponent(relationshipId)}`,
 		{ method: 'DELETE' },
 		cfg
 	);

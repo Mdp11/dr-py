@@ -1,14 +1,14 @@
 <script lang="ts">
 	import {
-		getBaseline,
 		getDiff,
+		getFilename,
 		getIssues,
 		getWorkingModel,
 		indexIssues
 	} from '$lib/state';
 
 	const working = $derived(getWorkingModel());
-	const baseline = $derived(getBaseline());
+	const filename = $derived(getFilename());
 	const diff = $derived(getDiff());
 	const totalChanges = $derived(
 		diff.counts.added + diff.counts.modified + diff.counts.deleted
@@ -33,5 +33,5 @@
 		{warningCount} {warningCount === 1 ? 'warning' : 'warnings'}
 	</span>
 	<span class="text-zinc-700">·</span>
-	<span>rev {baseline?.rev ?? '—'}</span>
+	<span class="truncate">{filename ?? 'unsaved'}</span>
 </footer>

@@ -1,29 +1,32 @@
+
 <script lang="ts">
-	import { models as modelsApi } from '$lib/api';
 	import { Button } from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import {
 		clearIssues,
 		getBaseline,
 		getDiff,
+		getFileHandle,
+		getFilename,
 		getIssues,
 		getWorkingModel,
 		indexIssues,
 		resetOps,
-		setBaseline
+		setBaseline,
+		setFileHandle,
+		setFilename
 	} from '$lib/state';
+	import { saveJsonToFile } from '$lib/util/fileSave';
 	import { AlertTriangle } from '@lucide/svelte';
-	import { useQueryClient } from '@tanstack/svelte-query';
 	import { saveCurrentModel, type SaveResult } from '$lib/state/save';
 	import DiffRow from './DiffRow.svelte';
 
 	type Props = { open: boolean };
 	let { open = $bindable(false) }: Props = $props();
 
-	const queryClient = useQueryClient();
-
 	const diff = $derived(getDiff());
 	const baseline = $derived(getBaseline());
+	const filename = $derived(getFilename());
 	const total = $derived(diff.counts.added + diff.counts.modified + diff.counts.deleted);
 
 	const addedElements = $derived(diff.elements.filter((d) => d.status === 'added'));
@@ -67,43 +70,30 @@
 		}
 	}
 
-	async function refetchAndReset(name: string): Promise<void> {
-		const fresh = await queryClient.fetchQuery({
-			queryKey: ['models', name],
-			queryFn: () => modelsApi.getModel(name)
-		});
-		setBaseline(fresh);
-		resetOps();
-		clearIssues();
-	}
-
 	async function onSaveClick(): Promise<void> {
 		if (!baseline) return;
 		saving = true;
 		lastResult = null;
 		try {
-			const result = await saveCurrentModel(baseline, getWorkingModel());
+			const result = await saveCurrentModel(getWorkingModel());
 			lastResult = result;
-			if (result.ok) {
-				await refetchAndReset(baseline.name);
-				open = false;
-			}
-		} finally {
-			saving = false;
-		}
-	}
+			if (!result.ok) return;
 
-	async function onReloadFromServer(): Promise<void> {
-		if (!baseline) return;
-		const ok = window.confirm(
-			'Discard all local changes and reload the latest version from the server?'
-		);
-		if (!ok) return;
-		saving = true;
-		try {
-			await refetchAndReset(baseline.name);
-			lastResult = null;
+			const suggested = filename ?? 'model.json';
+			const saved = await saveJsonToFile(result.model, suggested, getFileHandle());
+			setBaseline(result.model);
+			setFilename(saved.filename);
+			setFileHandle(saved.handle);
+			resetOps();
+			clearIssues();
 			open = false;
+		} catch (err) {
+			if (err instanceof DOMException && err.name === 'AbortError') {
+				// User cancelled the save dialog; treat as no-op.
+				return;
+			}
+			const message = err instanceof Error ? err.message : String(err);
+			lastResult = { ok: false, kind: 'api', message };
 		} finally {
 			saving = false;
 		}
@@ -118,9 +108,8 @@
 				<span class="ml-2 font-mono text-xs font-normal text-zinc-400">({total})</span>
 			</Dialog.Title>
 			<Dialog.Description>
-				Review the changes that will be saved to{' '}
-				<span class="font-mono">{baseline?.name ?? '—'}</span>
-				(rev {baseline?.rev ?? '—'}).
+				Review the changes to be saved. The model will be written to{' '}
+				<span class="font-mono">{filename ?? 'a new file'}</span>.
 			</Dialog.Description>
 		</Dialog.Header>
 
@@ -171,25 +160,7 @@
 				class="flex flex-col gap-2 rounded border border-red-900 bg-red-950/40 px-3 py-2 text-xs text-red-200"
 				role="alert"
 			>
-				{#if lastResult.kind === 'conflict'}
-					<p>
-						The model was changed on the server (rev mismatch). Reload to discard your
-						local changes and pick up the server version, or close and keep editing
-						locally.
-					</p>
-					<div>
-						<Button
-							size="sm"
-							variant="outline"
-							onclick={onReloadFromServer}
-							disabled={saving}
-						>
-							Reload from server
-						</Button>
-					</div>
-				{:else}
-					<p>Save failed: {lastResult.message}</p>
-				{/if}
+				<p>Save failed: {lastResult.message}</p>
 			</div>
 		{/if}
 

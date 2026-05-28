@@ -28,13 +28,12 @@ describe('relationships client', () => {
 	it('listRelationships passes multiple filters as query params', async () => {
 		let url = '';
 		server.use(
-			http.get(`${BASE}/models/m/relationships`, ({ request }) => {
+			http.get(`${BASE}/model/relationships`, ({ request }) => {
 				url = request.url;
 				return HttpResponse.json([sampleRel]);
 			})
 		);
 		const result = await listRelationships(
-			'm',
 			{ type: 'Conn', source_id: 's1', target_id: 't1' },
 			cfg
 		);
@@ -47,12 +46,12 @@ describe('relationships client', () => {
 	it('listRelationships omits undefined filters from the query string', async () => {
 		let url = '';
 		server.use(
-			http.get(`${BASE}/models/m/relationships`, ({ request }) => {
+			http.get(`${BASE}/model/relationships`, ({ request }) => {
 				url = request.url;
 				return HttpResponse.json([]);
 			})
 		);
-		await listRelationships('m', { source_id: 's1' }, cfg);
+		await listRelationships({ source_id: 's1' }, cfg);
 		expect(url).toContain('source_id=s1');
 		expect(url).not.toContain('type=');
 		expect(url).not.toContain('target_id=');
@@ -61,13 +60,12 @@ describe('relationships client', () => {
 	it('createRelationship POSTs payload and parses Relationship', async () => {
 		let body: unknown;
 		server.use(
-			http.post(`${BASE}/models/m/relationships`, async ({ request }) => {
+			http.post(`${BASE}/model/relationships`, async ({ request }) => {
 				body = await request.json();
 				return HttpResponse.json(sampleRel, { status: 201 });
 			})
 		);
 		const result = await createRelationship(
-			'm',
 			{ type: 'Conn', source_id: 's1', target_id: 't1' },
 			cfg
 		);
@@ -78,12 +76,12 @@ describe('relationships client', () => {
 	it('deleteRelationship issues DELETE and resolves on 204', async () => {
 		let called = false;
 		server.use(
-			http.delete(`${BASE}/models/m/relationships/r1`, () => {
+			http.delete(`${BASE}/model/relationships/r1`, () => {
 				called = true;
 				return new HttpResponse(null, { status: 204 });
 			})
 		);
-		await expect(deleteRelationship('m', 'r1', cfg)).resolves.toBeUndefined();
+		await expect(deleteRelationship('r1', cfg)).resolves.toBeUndefined();
 		expect(called).toBe(true);
 	});
 });
