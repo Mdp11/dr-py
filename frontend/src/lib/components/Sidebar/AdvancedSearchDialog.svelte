@@ -57,7 +57,7 @@
 </script>
 
 <Dialog.Root bind:open {onOpenChange}>
-	<Dialog.Content class="max-w-2xl">
+	<Dialog.Content class="max-w-4xl">
 		<Dialog.Header>
 			<Dialog.Title>Advanced search</Dialog.Title>
 			<Dialog.Description>
