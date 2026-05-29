@@ -130,3 +130,163 @@ describe('isValidRegex', () => {
 		expect(isValidRegex('[')).toBe(false);
 	});
 });
+
+describe('runQuery — relation_count & orphan', () => {
+	// e1 -> e2 (Connects), e1 -> e3 (Owns), e4 isolated
+	const m = model(
+		[el('e1', 'Block'), el('e2', 'Port'), el('e3', 'Port'), el('e4', 'Block')],
+		[rel('r1', 'e1', 'e2', 'Connects'), rel('r2', 'e1', 'e3', 'Owns'), rel('r3', 'e2', 'e1', 'Connects')]
+	);
+	it('counts outgoing relations', () => {
+		expect(
+			ids(
+				{
+					target: 'element',
+					criteria: [
+						{ type: 'relation_count', op: 'at_least', count: 2, direction: 'outgoing', relTypes: [] }
+					]
+				},
+				m
+			)
+		).toEqual(['e1']);
+	});
+	it('counts incoming relations', () => {
+		expect(
+			ids(
+				{
+					target: 'element',
+					criteria: [
+						{ type: 'relation_count', op: 'exactly', count: 1, direction: 'incoming', relTypes: [] }
+					]
+				},
+				m
+			)
+		).toEqual(['e1', 'e2', 'e3']);
+	});
+	it('filters relation_count by relationship type', () => {
+		expect(
+			ids(
+				{
+					target: 'element',
+					criteria: [
+						{ type: 'relation_count', op: 'at_least', count: 1, direction: 'either', relTypes: ['Owns'] }
+					]
+				},
+				m
+			)
+		).toEqual(['e1', 'e3']);
+	});
+	it('orphan finds elements with no relations', () => {
+		expect(ids({ target: 'element', criteria: [{ type: 'orphan' }] }, m)).toEqual(['e4']);
+	});
+});
+
+describe('runQuery — connected_to_type', () => {
+	const m = model(
+		[el('e1', 'Block'), el('e2', 'Port'), el('e3', 'Block')],
+		[rel('r1', 'e1', 'e2', 'Connects'), rel('r2', 'e3', 'e1', 'Connects')]
+	);
+	it('matches elements connected (either direction) to a Port', () => {
+		expect(
+			ids(
+				{
+					target: 'element',
+					criteria: [{ type: 'connected_to_type', direction: 'either', names: ['Port'] }]
+				},
+				m
+			)
+		).toEqual(['e1']);
+	});
+});
+
+describe('runQuery — endpoint_type', () => {
+	const m = model(
+		[el('e1', 'Block'), el('e2', 'Port')],
+		[rel('r1', 'e1', 'e2', 'Connects'), rel('r2', 'e2', 'e1', 'Connects')]
+	);
+	it('matches relationships whose source element is a Block', () => {
+		expect(
+			runQuery(
+				{ target: 'relationship', criteria: [{ type: 'endpoint_type', endpoint: 'source', names: ['Block'] }] },
+				m
+			).map((r) => r.id)
+		).toEqual(['r1']);
+	});
+	it('matches relationships whose target element is a Block', () => {
+		expect(
+			runQuery(
+				{ target: 'relationship', criteria: [{ type: 'endpoint_type', endpoint: 'target', names: ['Block'] }] },
+				m
+			).map((r) => r.id)
+		).toEqual(['r2']);
+	});
+});
+
+describe('runQuery — multi-criterion AND', () => {
+	const m = model(
+		[el('e1', 'Block', { name: 'Alpha' }), el('e2', 'Block', { name: 'Beta' })],
+		[rel('r1', 'e1', 'e2', 'Connects')]
+	);
+	it('requires all criteria to pass', () => {
+		expect(
+			ids(
+				{
+					target: 'element',
+					criteria: [
+						{ type: 'entity_type', names: ['Block'] },
+						{ type: 'relation_count', op: 'at_least', count: 1, direction: 'outgoing', relTypes: [] }
+					]
+				},
+				m
+			)
+		).toEqual(['e1']);
+	});
+});
+
+describe('runQuery — remaining property ops', () => {
+	const m = model([
+		el('e1', 'Block', { name: 'Alpha', size: 5 }),
+		el('e2', 'Block', { name: 'Beta', size: 10 }),
+		el('e3', 'Block', { name: 'Beta', size: 15 })
+	]);
+	it('not_equals', () => {
+		expect(
+			ids({ target: 'element', criteria: [{ type: 'property', name: 'name', op: 'not_equals', value: 'Alpha' }] }, m)
+		).toEqual(['e2', 'e3']);
+	});
+	it('lt', () => {
+		expect(
+			ids({ target: 'element', criteria: [{ type: 'property', name: 'size', op: 'lt', value: '10' }] }, m)
+		).toEqual(['e1']);
+	});
+	it('gte', () => {
+		expect(
+			ids({ target: 'element', criteria: [{ type: 'property', name: 'size', op: 'gte', value: '10' }] }, m)
+		).toEqual(['e2', 'e3']);
+	});
+	it('lte', () => {
+		expect(
+			ids({ target: 'element', criteria: [{ type: 'property', name: 'size', op: 'lte', value: '10' }] }, m)
+		).toEqual(['e1', 'e2']);
+	});
+});
+
+describe('runQuery — cross-kind criteria are no-ops', () => {
+	const m = model([el('e1', 'Block'), el('e2', 'Port')], [rel('r1', 'e1', 'e2', 'Connects')]);
+	it('endpoint_type on an element query matches all elements', () => {
+		expect(
+			ids({ target: 'element', criteria: [{ type: 'endpoint_type', endpoint: 'source', names: ['Nope'] }] }, m)
+		).toEqual(['e1', 'e2']);
+	});
+	it('relation_count on a relationship query matches all relationships', () => {
+		expect(
+			runQuery(
+				{
+					target: 'relationship',
+					criteria: [{ type: 'relation_count', op: 'at_least', count: 99, direction: 'either', relTypes: [] }]
+				},
+				m
+			).map((r) => r.id)
+		).toEqual(['r1']);
+	});
+});
