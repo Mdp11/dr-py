@@ -10,6 +10,24 @@ describe('criteriaForKind', () => {
 		expect(criteriaForKind('relationship')).toContain('endpoint_type');
 		expect(criteriaForKind('relationship')).not.toContain('relation_count');
 	});
+	it('returns the full ordered element criteria array', () => {
+		expect(criteriaForKind('element')).toEqual([
+			'entity_type',
+			'property',
+			'name_id',
+			'relation_count',
+			'orphan',
+			'connected_to_type'
+		]);
+	});
+	it('returns the full ordered relationship criteria array', () => {
+		expect(criteriaForKind('relationship')).toEqual([
+			'entity_type',
+			'property',
+			'name_id',
+			'endpoint_type'
+		]);
+	});
 });
 
 describe('newCriterion', () => {
@@ -22,6 +40,17 @@ describe('newCriterion', () => {
 			relTypes: []
 		});
 	});
+	it('builds a name_id with defaults', () => {
+		expect(newCriterion('name_id')).toEqual({
+			type: 'name_id',
+			field: 'name',
+			op: 'contains',
+			value: ''
+		});
+	});
+	it('builds an orphan criterion', () => {
+		expect(newCriterion('orphan')).toEqual({ type: 'orphan' });
+	});
 });
 
 describe('pruneCriteria', () => {
@@ -32,5 +61,13 @@ describe('pruneCriteria', () => {
 		];
 		const pruned = pruneCriteria(criteria, 'relationship');
 		expect(pruned.map((c) => c.type)).toEqual(['name_id']);
+	});
+	it('returns the input array unchanged when all criteria are valid for the target', () => {
+		const criteria: Criterion[] = [
+			{ type: 'name_id', field: 'name', op: 'contains', value: 'foo' },
+			{ type: 'entity_type', names: ['Actor'] }
+		];
+		const pruned = pruneCriteria(criteria, 'element');
+		expect(pruned).toEqual(criteria);
 	});
 });
