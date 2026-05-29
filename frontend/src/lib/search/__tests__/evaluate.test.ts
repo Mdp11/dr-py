@@ -27,9 +27,9 @@ function ids(q: AdvancedQuery, m: SearchModel): string[] {
 describe('runQuery — entity_type', () => {
 	const m = model([el('e1', 'Block'), el('e2', 'Port'), el('e3', 'Block')]);
 	it('matches elements whose type is in the set', () => {
-		expect(ids({ target: 'element', criteria: [{ type: 'entity_type', names: ['Block'] }] }, m)).toEqual(
-			['e1', 'e3']
-		);
+		expect(
+			ids({ target: 'element', criteria: [{ type: 'entity_type', names: ['Block'] }] }, m)
+		).toEqual(['e1', 'e3']);
 	});
 	it('empty name set means no type constraint (all match)', () => {
 		expect(ids({ target: 'element', criteria: [{ type: 'entity_type', names: [] }] }, m)).toEqual([
@@ -48,47 +48,104 @@ describe('runQuery — property', () => {
 	]);
 	it('equals', () => {
 		expect(
-			ids({ target: 'element', criteria: [{ type: 'property', name: 'name', op: 'equals', value: 'Alpha' }] }, m)
+			ids(
+				{
+					target: 'element',
+					criteria: [{ type: 'property', name: 'name', op: 'equals', value: 'Alpha' }]
+				},
+				m
+			)
 		).toEqual(['e1']);
 	});
 	it('contains is case-insensitive', () => {
 		expect(
-			ids({ target: 'element', criteria: [{ type: 'property', name: 'name', op: 'contains', value: 'a' }] }, m)
+			ids(
+				{
+					target: 'element',
+					criteria: [{ type: 'property', name: 'name', op: 'contains', value: 'a' }]
+				},
+				m
+			)
 		).toEqual(['e1', 'e2']);
 	});
 	it('gt coerces to number, non-numeric fails', () => {
 		expect(
-			ids({ target: 'element', criteria: [{ type: 'property', name: 'size', op: 'gt', value: '10' }] }, m)
+			ids(
+				{
+					target: 'element',
+					criteria: [{ type: 'property', name: 'size', op: 'gt', value: '10' }]
+				},
+				m
+			)
 		).toEqual(['e2']);
 	});
 	it('exists vs is_empty', () => {
 		expect(
-			ids({ target: 'element', criteria: [{ type: 'property', name: 'name', op: 'exists', value: '' }] }, m)
+			ids(
+				{
+					target: 'element',
+					criteria: [{ type: 'property', name: 'name', op: 'exists', value: '' }]
+				},
+				m
+			)
 		).toEqual(['e1', 'e2']);
 		expect(
-			ids({ target: 'element', criteria: [{ type: 'property', name: 'name', op: 'is_empty', value: '' }] }, m)
+			ids(
+				{
+					target: 'element',
+					criteria: [{ type: 'property', name: 'name', op: 'is_empty', value: '' }]
+				},
+				m
+			)
 		).toEqual(['e3']);
 	});
 	it('matches uses regex; invalid regex matches nothing', () => {
 		expect(
-			ids({ target: 'element', criteria: [{ type: 'property', name: 'name', op: 'matches', value: '^A' }] }, m)
+			ids(
+				{
+					target: 'element',
+					criteria: [{ type: 'property', name: 'name', op: 'matches', value: '^A' }]
+				},
+				m
+			)
 		).toEqual(['e1']);
 		expect(
-			ids({ target: 'element', criteria: [{ type: 'property', name: 'name', op: 'matches', value: '[' }] }, m)
+			ids(
+				{
+					target: 'element',
+					criteria: [{ type: 'property', name: 'name', op: 'matches', value: '[' }]
+				},
+				m
+			)
 		).toEqual([]);
 	});
 });
 
 describe('runQuery — name_id', () => {
-	const m = model([el('block-1', 'Block', { name: 'Alpha' }), el('port-1', 'Port', { name: 'Beta' })]);
+	const m = model([
+		el('block-1', 'Block', { name: 'Alpha' }),
+		el('port-1', 'Port', { name: 'Beta' })
+	]);
 	it('matches on id contains', () => {
 		expect(
-			ids({ target: 'element', criteria: [{ type: 'name_id', field: 'id', op: 'contains', value: 'block' }] }, m)
+			ids(
+				{
+					target: 'element',
+					criteria: [{ type: 'name_id', field: 'id', op: 'contains', value: 'block' }]
+				},
+				m
+			)
 		).toEqual(['block-1']);
 	});
 	it('matches on name regex', () => {
 		expect(
-			ids({ target: 'element', criteria: [{ type: 'name_id', field: 'name', op: 'matches', value: '^Be' }] }, m)
+			ids(
+				{
+					target: 'element',
+					criteria: [{ type: 'name_id', field: 'name', op: 'matches', value: '^Be' }]
+				},
+				m
+			)
 		).toEqual(['port-1']);
 	});
 });
@@ -135,7 +192,11 @@ describe('runQuery — relation_count & orphan', () => {
 	// e1 -> e2 (Connects), e1 -> e3 (Owns), e4 isolated
 	const m = model(
 		[el('e1', 'Block'), el('e2', 'Port'), el('e3', 'Port'), el('e4', 'Block')],
-		[rel('r1', 'e1', 'e2', 'Connects'), rel('r2', 'e1', 'e3', 'Owns'), rel('r3', 'e2', 'e1', 'Connects')]
+		[
+			rel('r1', 'e1', 'e2', 'Connects'),
+			rel('r2', 'e1', 'e3', 'Owns'),
+			rel('r3', 'e2', 'e1', 'Connects')
+		]
 	);
 	it('counts outgoing relations', () => {
 		expect(
@@ -143,7 +204,13 @@ describe('runQuery — relation_count & orphan', () => {
 				{
 					target: 'element',
 					criteria: [
-						{ type: 'relation_count', op: 'at_least', count: 2, direction: 'outgoing', relTypes: [] }
+						{
+							type: 'relation_count',
+							op: 'at_least',
+							count: 2,
+							direction: 'outgoing',
+							relTypes: []
+						}
 					]
 				},
 				m
@@ -169,7 +236,13 @@ describe('runQuery — relation_count & orphan', () => {
 				{
 					target: 'element',
 					criteria: [
-						{ type: 'relation_count', op: 'at_least', count: 1, direction: 'either', relTypes: ['Owns'] }
+						{
+							type: 'relation_count',
+							op: 'at_least',
+							count: 1,
+							direction: 'either',
+							relTypes: ['Owns']
+						}
 					]
 				},
 				m
@@ -207,7 +280,10 @@ describe('runQuery — endpoint_type', () => {
 	it('matches relationships whose source element is a Block', () => {
 		expect(
 			runQuery(
-				{ target: 'relationship', criteria: [{ type: 'endpoint_type', endpoint: 'source', names: ['Block'] }] },
+				{
+					target: 'relationship',
+					criteria: [{ type: 'endpoint_type', endpoint: 'source', names: ['Block'] }]
+				},
 				m
 			).map((r) => r.id)
 		).toEqual(['r1']);
@@ -215,7 +291,10 @@ describe('runQuery — endpoint_type', () => {
 	it('matches relationships whose target element is a Block', () => {
 		expect(
 			runQuery(
-				{ target: 'relationship', criteria: [{ type: 'endpoint_type', endpoint: 'target', names: ['Block'] }] },
+				{
+					target: 'relationship',
+					criteria: [{ type: 'endpoint_type', endpoint: 'target', names: ['Block'] }]
+				},
 				m
 			).map((r) => r.id)
 		).toEqual(['r2']);
@@ -234,7 +313,13 @@ describe('runQuery — multi-criterion AND', () => {
 					target: 'element',
 					criteria: [
 						{ type: 'entity_type', names: ['Block'] },
-						{ type: 'relation_count', op: 'at_least', count: 1, direction: 'outgoing', relTypes: [] }
+						{
+							type: 'relation_count',
+							op: 'at_least',
+							count: 1,
+							direction: 'outgoing',
+							relTypes: []
+						}
 					]
 				},
 				m
@@ -251,22 +336,46 @@ describe('runQuery — remaining property ops', () => {
 	]);
 	it('not_equals', () => {
 		expect(
-			ids({ target: 'element', criteria: [{ type: 'property', name: 'name', op: 'not_equals', value: 'Alpha' }] }, m)
+			ids(
+				{
+					target: 'element',
+					criteria: [{ type: 'property', name: 'name', op: 'not_equals', value: 'Alpha' }]
+				},
+				m
+			)
 		).toEqual(['e2', 'e3']);
 	});
 	it('lt', () => {
 		expect(
-			ids({ target: 'element', criteria: [{ type: 'property', name: 'size', op: 'lt', value: '10' }] }, m)
+			ids(
+				{
+					target: 'element',
+					criteria: [{ type: 'property', name: 'size', op: 'lt', value: '10' }]
+				},
+				m
+			)
 		).toEqual(['e1']);
 	});
 	it('gte', () => {
 		expect(
-			ids({ target: 'element', criteria: [{ type: 'property', name: 'size', op: 'gte', value: '10' }] }, m)
+			ids(
+				{
+					target: 'element',
+					criteria: [{ type: 'property', name: 'size', op: 'gte', value: '10' }]
+				},
+				m
+			)
 		).toEqual(['e2', 'e3']);
 	});
 	it('lte', () => {
 		expect(
-			ids({ target: 'element', criteria: [{ type: 'property', name: 'size', op: 'lte', value: '10' }] }, m)
+			ids(
+				{
+					target: 'element',
+					criteria: [{ type: 'property', name: 'size', op: 'lte', value: '10' }]
+				},
+				m
+			)
 		).toEqual(['e1', 'e2']);
 	});
 });
@@ -275,7 +384,13 @@ describe('runQuery — cross-kind criteria are no-ops', () => {
 	const m = model([el('e1', 'Block'), el('e2', 'Port')], [rel('r1', 'e1', 'e2', 'Connects')]);
 	it('endpoint_type on an element query matches all elements', () => {
 		expect(
-			ids({ target: 'element', criteria: [{ type: 'endpoint_type', endpoint: 'source', names: ['Nope'] }] }, m)
+			ids(
+				{
+					target: 'element',
+					criteria: [{ type: 'endpoint_type', endpoint: 'source', names: ['Nope'] }]
+				},
+				m
+			)
 		).toEqual(['e1', 'e2']);
 	});
 	it('relation_count on a relationship query matches all relationships', () => {
@@ -283,7 +398,9 @@ describe('runQuery — cross-kind criteria are no-ops', () => {
 			runQuery(
 				{
 					target: 'relationship',
-					criteria: [{ type: 'relation_count', op: 'at_least', count: 99, direction: 'either', relTypes: [] }]
+					criteria: [
+						{ type: 'relation_count', op: 'at_least', count: 99, direction: 'either', relTypes: [] }
+					]
 				},
 				m
 			).map((r) => r.id)
