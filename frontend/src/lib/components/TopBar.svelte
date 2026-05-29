@@ -23,10 +23,12 @@
 	import { runValidation } from '$lib/state/validate-action';
 	import { saveJsonToFile } from '$lib/util/fileSave';
 	import { AlertCircle, AlertTriangle, RefreshCw } from '@lucide/svelte';
+	import ApplyCrDialog from './ApplyCrDialog.svelte';
 	import LoadMetamodelDialog from './LoadMetamodelDialog.svelte';
 	import LoadModelDialog from './LoadModelDialog.svelte';
 	import LoadViewDialog from './LoadViewDialog.svelte';
 
+	let applyCrOpen = $state(false);
 	let loadMetamodelOpen = $state(false);
 	let loadModelOpen = $state(false);
 	let loadViewOpen = $state(false);
@@ -164,6 +166,23 @@
 				Export view
 			</Button>
 		</div>
+
+		<div class="flex items-center gap-2">
+			<a
+				href="/compare"
+				class="inline-flex h-7 items-center rounded px-2 text-xs text-zinc-300 hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+			>
+				Compare
+			</a>
+			<Button
+				variant="ghost"
+				size="sm"
+				class="h-7 text-xs"
+				onclick={() => (applyCrOpen = true)}
+			>
+				Apply CR
+			</Button>
+		</div>
 	</div>
 
 	<div class="flex items-center gap-2">
@@ -229,6 +248,7 @@
 	</div>
 </header>
 
+<ApplyCrDialog bind:open={applyCrOpen} />
 <LoadMetamodelDialog bind:open={loadMetamodelOpen} onUploaded={onMetamodelUploaded} />
 <LoadModelDialog bind:open={loadModelOpen} onLoaded={onModelLoaded} />
 <LoadViewDialog bind:open={loadViewOpen} onLoaded={onViewLoaded} />
