@@ -1,4 +1,4 @@
-import type { Element, Relationship } from '$lib/api/types';
+import type { Snapshot } from '$lib/state/ops';
 
 export type TargetKind = 'element' | 'relationship';
 export type Direction = 'outgoing' | 'incoming' | 'either';
@@ -15,7 +15,7 @@ export type PropertyOp =
 	| 'exists'
 	| 'is_empty';
 
-export type TextOp = 'contains' | 'matches' | 'equals';
+export type TextOp = Extract<PropertyOp, 'contains' | 'matches' | 'equals'>;
 export type CountOp = 'at_least' | 'at_most' | 'exactly';
 
 export type Criterion =
@@ -39,11 +39,8 @@ export interface SearchResultItem {
 	id: string;
 }
 
-/** Re-exported for evaluator typing; mirrors lib/state/ops Snapshot. */
-export interface SearchModel {
-	elements: Element[];
-	relationships: Relationship[];
-}
+/** The working-model snapshot the evaluator runs against. */
+export type SearchModel = Snapshot;
 
 export const CRITERION_LABELS: Record<CriterionType, string> = {
 	entity_type: 'Has type',
