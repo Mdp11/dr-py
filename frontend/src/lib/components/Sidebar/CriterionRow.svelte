@@ -1,12 +1,18 @@
 <script lang="ts">
-	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
+	import { SvelteSet } from 'svelte/reactivity';
 	import { Trash2 } from '@lucide/svelte';
 	import { Input } from '$lib/components/ui/input';
 	import { getMetamodel, getWorkingModel } from '$lib/state';
 	import { isValidRegex } from '$lib/search/evaluate';
 	import { CRITERION_LABELS, type Criterion, type TargetKind } from '$lib/search/types';
-	import { compatibleOps, PROPERTY_OP_LABELS, resolvePropertyKind } from '$lib/search/property-ops';
+	import {
+		compatibleOps,
+		propertyItemsFor,
+		PROPERTY_OP_LABELS,
+		resolvePropertyKind
+	} from '$lib/search/property-ops';
 	import StereotypePicker from './StereotypePicker.svelte';
+	import PropertyPicker from './PropertyPicker.svelte';
 
 	type Props = {
 		criterion: Criterion;
@@ -22,24 +28,10 @@
 
 	const elementTypeNames = $derived([...(mm?.elements ?? []).map((e) => e.name)].sort());
 	const relTypeNames = $derived([...(mm?.relationships ?? []).map((r) => r.name)].sort());
-	const propertyNames = $derived.by(() => {
-		const set = new SvelteSet<string>();
-		const defs = target === 'element' ? (mm?.elements ?? []) : (mm?.relationships ?? []);
-		for (const t of defs) for (const p of t.properties ?? []) set.add(p.name);
-		const entities = target === 'element' ? working.elements : working.relationships;
-		for (const e of entities) for (const k of Object.keys(e.properties ?? {})) set.add(k);
-		return [...set].sort();
-	});
 
-	// Property name -> declared datatype, from the metamodel defs for this target.
-	// Used to restrict the operator list to ones that make sense for the type.
-	const propertyDatatypes = $derived.by(() => {
-		const defs = target === 'element' ? (mm?.elements ?? []) : (mm?.relationships ?? []);
-		const map = new SvelteMap<string, string>();
-		for (const t of defs)
-			for (const p of t.properties ?? []) if (!map.has(p.name)) map.set(p.name, p.datatype);
-		return map;
-	});
+	// Picker rows: every (name, datatype) pair for this target, plus instance-only
+	// keys as untyped. Same-named properties of different datatypes are distinct.
+	const propertyItems = $derived(propertyItemsFor(target, mm, working));
 
 	// Which inline picker popover is open (keyed by a string id within this row).
 	let openPicker = $state<string | null>(null);
@@ -48,14 +40,13 @@
 		onChange(index, { ...criterion, ...next } as Criterion);
 	}
 
-	// Pick a property: set its name and, if the current operator isn't valid for
-	// the new property's datatype, fall back to `equals` (valid for every kind).
-	function pickProperty(name: string): void {
+	// Pick a property: record its name and datatype, and if the current operator
+	// isn't valid for that datatype, fall back to `equals` (valid for every kind).
+	function pickProperty(name: string, datatype: string | null): void {
 		if (criterion.type !== 'property') return;
-		const datatype = propertyDatatypes.get(name) ?? null;
 		const ops = compatibleOps(resolvePropertyKind(datatype, mm));
 		const op = ops.includes(criterion.op) ? criterion.op : 'equals';
-		onChange(index, { ...criterion, name, op });
+		onChange(index, { ...criterion, name, datatype, op });
 	}
 
 	function toggleName(field: 'names' | 'relTypes', name: string): void {
@@ -114,25 +105,29 @@
 			</StereotypePicker>
 		{:else if criterion.type === 'property'}
 			{@const propCriterion = criterion}
-			{@const datatype = propCriterion.name
-				? (propertyDatatypes.get(propCriterion.name) ?? null)
-				: null}
+			{@const datatype = propCriterion.datatype ?? null}
 			{@const ops = compatibleOps(resolvePropertyKind(datatype, mm))}
 			{@const noProperty = propCriterion.name === ''}
-			<StereotypePicker
-				mode="create"
-				names={propertyNames}
-				onPick={(n) => pickProperty(n)}
+			<PropertyPicker
+				items={propertyItems}
+				onPick={(name, dt) => pickProperty(name, dt)}
 				open={openPicker === 'prop'}
 				onOpenChange={(o) => (openPicker = o ? 'prop' : null)}
 				searchPlaceholder="Filter properties…"
 			>
 				{#snippet trigger()}
-					<span class="rounded border border-zinc-700 px-2 py-1 text-zinc-200 hover:bg-zinc-800">
+					<span
+						class="flex items-center gap-1 rounded border border-zinc-700 px-2 py-1 text-zinc-200 hover:bg-zinc-800"
+					>
 						{propCriterion.name || 'property…'}
+						{#if !noProperty}
+							<span class="rounded bg-zinc-800 px-1 font-mono text-[10px] text-zinc-400">
+								{datatype ?? 'untyped'}
+							</span>
+						{/if}
 					</span>
 				{/snippet}
-			</StereotypePicker>
+			</PropertyPicker>
 			<select
 				class="rounded border border-zinc-700 bg-zinc-900 px-1 py-1 text-zinc-200 disabled:cursor-not-allowed disabled:opacity-50"
 				value={propCriterion.op}
