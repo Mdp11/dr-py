@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { Input } from '$lib/components/ui/input';
-	import { getSearchText, getWorkingModel, select, setSearchText } from '$lib/state';
+	import { getSearchText, getWorkingModel, select, setSearchDialogOpen, setSearchText } from '$lib/state';
 	import type { Element } from '$lib/api/types';
+	import { SlidersHorizontal } from '@lucide/svelte';
+	import AdvancedSearchDialog from './AdvancedSearchDialog.svelte';
 
 	type ScoredHit = { el: Element; score: number; displayName: string };
 
@@ -83,17 +85,28 @@
 
 <section class="relative flex flex-col gap-2 px-3 py-2">
 	<h2 class="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Search</h2>
-	<Input
-		bind:ref={inputEl}
-		type="text"
-		placeholder="Filter by name, type, id…"
-		value={searchText}
-		oninput={onInput}
-		onfocus={onFocusOrClick}
-		onclick={onFocusOrClick}
-		onkeydown={onKeydown}
-		class="h-7 border-zinc-800 bg-zinc-900 text-xs placeholder:text-zinc-600"
-	/>
+	<div class="flex items-center gap-1">
+		<Input
+			bind:ref={inputEl}
+			type="text"
+			placeholder="Filter by name, type, id…"
+			value={searchText}
+			oninput={onInput}
+			onfocus={onFocusOrClick}
+			onclick={onFocusOrClick}
+			onkeydown={onKeydown}
+			class="h-7 flex-1 border-zinc-800 bg-zinc-900 text-xs placeholder:text-zinc-600"
+		/>
+		<button
+			type="button"
+			data-testid="advanced-search-button"
+			aria-label="Advanced search"
+			class="flex h-7 w-7 shrink-0 items-center justify-center rounded border border-zinc-800 bg-zinc-900 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+			onclick={() => setSearchDialogOpen(true)}
+		>
+			<SlidersHorizontal class="h-3.5 w-3.5" />
+		</button>
+	</div>
 	{#if showDropdown}
 		<div
 			id="sidebar-search-dropdown"
@@ -124,4 +137,5 @@
 			</ul>
 		</div>
 	{/if}
+	<AdvancedSearchDialog />
 </section>
