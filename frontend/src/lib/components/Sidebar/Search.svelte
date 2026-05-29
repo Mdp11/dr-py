@@ -1,6 +1,12 @@
 <script lang="ts">
 	import { Input } from '$lib/components/ui/input';
-	import { getSearchText, getWorkingModel, select, setSearchDialogOpen, setSearchText } from '$lib/state';
+	import {
+		getSearchText,
+		getWorkingModel,
+		select,
+		setSearchDialogOpen,
+		setSearchText
+	} from '$lib/state';
 	import type { Element } from '$lib/api/types';
 	import { SlidersHorizontal } from '@lucide/svelte';
 	import AdvancedSearchDialog from './AdvancedSearchDialog.svelte';

@@ -60,7 +60,12 @@ const ELEMENT_CRITERIA: CriterionType[] = [
 	'orphan',
 	'connected_to_type'
 ];
-const RELATIONSHIP_CRITERIA: CriterionType[] = ['entity_type', 'property', 'name_id', 'endpoint_type'];
+const RELATIONSHIP_CRITERIA: CriterionType[] = [
+	'entity_type',
+	'property',
+	'name_id',
+	'endpoint_type'
+];
 
 /** Criterion types offered for a given target kind, in display order. */
 export function criteriaForKind(kind: TargetKind): CriterionType[] {

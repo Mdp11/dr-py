@@ -67,7 +67,10 @@ function matchEntityType(typeName: string, names: string[]): boolean {
 	return names.length === 0 ? true : names.includes(typeName);
 }
 
-function matchProperty(props: Record<string, unknown>, c: Extract<Criterion, { type: 'property' }>): boolean {
+function matchProperty(
+	props: Record<string, unknown>,
+	c: Extract<Criterion, { type: 'property' }>
+): boolean {
 	const raw = props ? props[c.name] : undefined;
 	switch (c.op) {
 		case 'exists':
@@ -129,7 +132,8 @@ function matchElement(e: Element, c: Criterion, ctx: Ctx): boolean {
 			return matchNameId(entityName(e.properties), e.id, c);
 		case 'relation_count': {
 			const rels = relationsFor(ctx.relIndex, e.id, c.direction);
-			const filtered = c.relTypes.length === 0 ? rels : rels.filter((r) => c.relTypes.includes(r.type_name));
+			const filtered =
+				c.relTypes.length === 0 ? rels : rels.filter((r) => c.relTypes.includes(r.type_name));
 			const n = filtered.length;
 			if (c.op === 'at_least') return n >= c.count;
 			if (c.op === 'at_most') return n <= c.count;

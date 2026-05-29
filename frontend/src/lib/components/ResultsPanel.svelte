@@ -86,7 +86,9 @@
 						>
 							{#if row.kind === 'element'}
 								<span class="truncate text-zinc-200">{elementName(row.el)}</span>
-								<span class="ml-auto shrink-0 rounded bg-zinc-800 px-1 font-mono text-[10px] text-zinc-400">
+								<span
+									class="ml-auto shrink-0 rounded bg-zinc-800 px-1 font-mono text-[10px] text-zinc-400"
+								>
 									{row.el.type_name}
 								</span>
 								<span class="shrink-0 font-mono text-[10px] text-zinc-600">{row.id}</span>

@@ -22,7 +22,7 @@
 	const elementTypeNames = $derived([...(mm?.elements ?? []).map((e) => e.name)].sort());
 	const relTypeNames = $derived([...(mm?.relationships ?? []).map((r) => r.name)].sort());
 	const propertyNames = $derived.by(() => {
-		const set = new Set<string>();
+		const set = new SvelteSet<string>();
 		const defs = target === 'element' ? (mm?.elements ?? []) : (mm?.relationships ?? []);
 		for (const t of defs) for (const p of t.properties ?? []) set.add(p.name);
 		const entities = target === 'element' ? working.elements : working.relationships;
@@ -44,7 +44,9 @@
 	}
 
 	const regexInvalid = $derived(
-		(criterion.type === 'property' && criterion.op === 'matches' && !isValidRegex(criterion.value)) ||
+		(criterion.type === 'property' &&
+			criterion.op === 'matches' &&
+			!isValidRegex(criterion.value)) ||
 			(criterion.type === 'name_id' && criterion.op === 'matches' && !isValidRegex(criterion.value))
 	);
 
@@ -210,7 +212,8 @@
 			<select
 				class="rounded border border-zinc-700 bg-zinc-900 px-1 py-1 text-zinc-200"
 				value={connCriterion.direction}
-				onchange={(e) => patch({ direction: e.currentTarget.value as typeof connCriterion.direction })}
+				onchange={(e) =>
+					patch({ direction: e.currentTarget.value as typeof connCriterion.direction })}
 			>
 				<option value="either">either</option>
 				<option value="outgoing">outgoing</option>
