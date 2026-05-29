@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
+from data_rover.core.model.change_request import (
+    ChangeRequest as CoreChangeRequest,
+    ModifiedElement as CoreModifiedElement,
+    ModifiedRelationship as CoreModifiedRelationship,
+)
 from data_rover.core.model.element import Element
 from data_rover.core.model.model import Model
 from data_rover.core.model.relationship import Relationship
@@ -141,3 +146,108 @@ class ViewSnapshotResponse(BaseModel):
 class ViewStateResponse(BaseModel):
     view: ViewOut | None = None
     warnings: list[IssueOut] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Change-request schemas
+# ---------------------------------------------------------------------------
+
+
+class ModifiedElementOut(BaseModel):
+    id: str
+    before: ElementOut
+    after: ElementOut
+
+
+class ModifiedRelationshipOut(BaseModel):
+    id: str
+    before: RelationshipOut
+    after: RelationshipOut
+
+
+class CrElementOps(BaseModel):
+    added: list[ElementOut] = Field(default_factory=list)
+    modified: list[ModifiedElementOut] = Field(default_factory=list)
+    deleted: list[ElementOut] = Field(default_factory=list)
+
+
+class CrRelationshipOps(BaseModel):
+    added: list[RelationshipOut] = Field(default_factory=list)
+    modified: list[ModifiedRelationshipOut] = Field(default_factory=list)
+    deleted: list[RelationshipOut] = Field(default_factory=list)
+
+
+class CrOps(BaseModel):
+    elements: CrElementOps = Field(default_factory=CrElementOps)
+    relationships: CrRelationshipOps = Field(default_factory=CrRelationshipOps)
+
+
+class CrBaseline(BaseModel):
+    filename: str | None = None
+    elementCount: int = 0
+    relationshipCount: int = 0
+
+
+def _el(e: ElementOut) -> Element:
+    return Element(
+        id=e.id,
+        type_name=e.type_name,
+        properties=dict(e.properties),
+        rev=e.rev,
+    )
+
+
+def _rel(r: RelationshipOut) -> Relationship:
+    return Relationship(
+        id=r.id,
+        type_name=r.type_name,
+        source_id=r.source_id,
+        target_id=r.target_id,
+        properties=dict(r.properties),
+        rev=r.rev,
+    )
+
+
+class ChangeRequestIn(BaseModel):
+    format: Literal["datarover.cr/v1"]
+    createdAt: str
+    baseline: CrBaseline = Field(default_factory=CrBaseline)
+    ops: CrOps = Field(default_factory=CrOps)
+
+    def to_core(self) -> CoreChangeRequest:
+        return CoreChangeRequest(
+            elements_added=[_el(e) for e in self.ops.elements.added],
+            elements_modified=[
+                CoreModifiedElement(
+                    id=m.id,
+                    before=_el(m.before),
+                    after=_el(m.after),
+                )
+                for m in self.ops.elements.modified
+            ],
+            elements_deleted=[_el(e) for e in self.ops.elements.deleted],
+            relationships_added=[_rel(r) for r in self.ops.relationships.added],
+            relationships_modified=[
+                CoreModifiedRelationship(
+                    id=m.id,
+                    before=_rel(m.before),
+                    after=_rel(m.after),
+                )
+                for m in self.ops.relationships.modified
+            ],
+            relationships_deleted=[_rel(r) for r in self.ops.relationships.deleted],
+        )
+
+
+class ApplyCrRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    model: InlineModel
+    cr: ChangeRequestIn
+
+
+class ApplyCrResponse(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    model: ModelOut
+    issues: list[IssueOut] = Field(default_factory=list)

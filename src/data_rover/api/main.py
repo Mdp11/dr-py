@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .errors import register_exception_handlers
 from .routes import (
+    change_request,
     elements,
     health,
     metamodel,
@@ -38,6 +39,7 @@ def create_app() -> FastAPI:
     prefix = "/api/v1"
     app.include_router(metamodel.router, prefix=prefix, tags=["metamodel"])
     app.include_router(model.router, prefix=prefix, tags=["model"])
+    app.include_router(change_request.router, prefix=prefix, tags=["change-request"])
     app.include_router(elements.router, prefix=prefix, tags=["elements"])
     app.include_router(relationships.router, prefix=prefix, tags=["relationships"])
     app.include_router(validation.router, prefix=prefix, tags=["validation"])
