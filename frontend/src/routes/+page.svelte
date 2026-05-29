@@ -50,7 +50,13 @@
 
 	const LS_PANEL = 'ui.resultsPanelHeight';
 	const DEFAULT_PANEL = 240;
-	let panelHeight = $state(readWidth(LS_PANEL, DEFAULT_PANEL));
+	const PANEL_MIN = 120;
+	const PANEL_MAX = 700;
+	// Clamp the persisted value to the handle's range, in case a stale/legacy
+	// localStorage entry falls outside [PANEL_MIN, PANEL_MAX].
+	let panelHeight = $state(
+		Math.min(PANEL_MAX, Math.max(PANEL_MIN, readWidth(LS_PANEL, DEFAULT_PANEL)))
+	);
 	const panelOpen = $derived(getResultsPanelOpen());
 
 	$effect(() => {
@@ -77,8 +83,8 @@
 			<ResizeHandle
 				value={panelHeight}
 				axis="y"
-				min={120}
-				max={700}
+				min={PANEL_MIN}
+				max={PANEL_MAX}
 				onchange={(n) => (panelHeight = n)}
 			/>
 		</div>
