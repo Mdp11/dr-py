@@ -142,3 +142,10 @@ export const ViewStateResponseSchema = z.object({
 	warnings: z.array(IssueSchema).default([])
 });
 export type ViewStateResponse = z.infer<typeof ViewStateResponseSchema>;
+
+export interface Conflict {
+	kind: 'id_exists' | 'missing' | 'before_mismatch';
+	entity: 'element' | 'relationship';
+	id: string;
+	reason: string;
+}
