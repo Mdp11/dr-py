@@ -123,7 +123,7 @@
 {#if isFolder}
 	<li>
 		<div
-			class="group flex items-center gap-1 rounded px-1 py-0.5 text-zinc-200"
+			class="group flex select-none items-center gap-1 rounded px-1 py-0.5 text-zinc-200"
 			class:ring-1={isFocused || isDropHover}
 			class:ring-indigo-500={isFocused && !isDropHover}
 			class:ring-emerald-500={isDropHover && dnd.hoverValid}
