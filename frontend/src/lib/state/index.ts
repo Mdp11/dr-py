@@ -55,6 +55,24 @@ export {
 	setDiffDrawerOpen
 } from './ui.svelte';
 export {
+	addSearchCriterion,
+	availableCriterionTypes,
+	clearSearchCriteria,
+	closeResultsPanel,
+	commitSearchResults,
+	getDraftQuery,
+	getResultsPanelOpen,
+	getSearchCriteria,
+	getSearchDialogOpen,
+	getSearchResults,
+	getSearchResultsTarget,
+	getSearchTarget,
+	removeSearchCriterion,
+	setSearchDialogOpen,
+	setSearchTarget,
+	updateSearchCriterion
+} from './advanced-search.svelte';
+export {
 	clearViewState,
 	cloneView,
 	createFolder,
