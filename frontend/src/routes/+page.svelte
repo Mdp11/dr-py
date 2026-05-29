@@ -8,8 +8,9 @@
 	import Inspector from '$lib/components/Inspector.svelte';
 	import DiffDrawer from '$lib/components/DiffDrawer.svelte';
 	import ResizeHandle from '$lib/components/ResizeHandle.svelte';
+	import ResultsPanel from '$lib/components/ResultsPanel.svelte';
 	import { maybeAutoload } from '$lib/autoload';
-	import { getDiffDrawerOpen, setDiffDrawerOpen } from '$lib/state';
+	import { getDiffDrawerOpen, setDiffDrawerOpen, getResultsPanelOpen } from '$lib/state';
 
 	onMount(() => {
 		void maybeAutoload();
@@ -47,12 +48,23 @@
 		if (browser) localStorage.setItem(LS_RIGHT, String(rightWidth));
 	});
 
+	const LS_PANEL = 'ui.resultsPanelHeight';
+	const DEFAULT_PANEL = 240;
+	let panelHeight = $state(readWidth(LS_PANEL, DEFAULT_PANEL));
+	const panelOpen = $derived(getResultsPanelOpen());
+
+	$effect(() => {
+		if (browser) localStorage.setItem(LS_PANEL, String(panelHeight));
+	});
+
 	const cols = $derived(`${leftWidth}px 4px 1fr 4px ${rightWidth}px`);
+	const rows = $derived(panelOpen ? `auto 1fr auto ${panelHeight}px auto` : 'auto 1fr auto');
 </script>
 
 <div
-	class="grid h-screen w-screen grid-rows-[auto_1fr_auto] overflow-hidden bg-zinc-950 text-zinc-100"
+	class="grid h-screen w-screen overflow-hidden bg-zinc-950 text-zinc-100"
 	style:grid-template-columns={cols}
+	style:grid-template-rows={rows}
 >
 	<TopBar />
 	<Sidebar />
@@ -60,6 +72,18 @@
 	<Workspace />
 	<ResizeHandle value={rightWidth} side="right" onchange={(n) => (rightWidth = n)} />
 	<Inspector />
+	{#if panelOpen}
+		<div class="col-span-5">
+			<ResizeHandle
+				value={panelHeight}
+				axis="y"
+				min={120}
+				max={700}
+				onchange={(n) => (panelHeight = n)}
+			/>
+		</div>
+		<ResultsPanel />
+	{/if}
 	<StatusBar />
 </div>
 
