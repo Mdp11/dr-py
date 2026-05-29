@@ -20,7 +20,7 @@ export type CountOp = 'at_least' | 'at_most' | 'exactly';
 
 export type Criterion =
 	| { type: 'entity_type'; names: string[] }
-	| { type: 'property'; name: string; op: PropertyOp; value: string }
+	| { type: 'property'; name: string; datatype?: string | null; op: PropertyOp; value: string }
 	| { type: 'name_id'; field: 'name' | 'id'; op: TextOp; value: string }
 	| { type: 'relation_count'; op: CountOp; count: number; direction: Direction; relTypes: string[] }
 	| { type: 'orphan' }
@@ -78,7 +78,7 @@ export function newCriterion(type: CriterionType): Criterion {
 		case 'entity_type':
 			return { type, names: [] };
 		case 'property':
-			return { type, name: '', op: 'equals', value: '' };
+			return { type, name: '', datatype: null, op: 'equals', value: '' };
 		case 'name_id':
 			return { type, field: 'name', op: 'contains', value: '' };
 		case 'relation_count':

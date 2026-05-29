@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { Metamodel } from '$lib/api/types';
-import { compatibleOps, resolvePropertyKind } from '../property-ops';
+import type { Element, Metamodel } from '$lib/api/types';
+import type { SearchModel } from '../types';
+import { compatibleOps, propertyItemsFor, resolvePropertyKind } from '../property-ops';
 
 const mm: Metamodel = {
 	enums: { Status: ['open', 'closed'] },
@@ -58,5 +59,82 @@ describe('compatibleOps', () => {
 		for (const kind of ['string', 'numeric', 'boolean', 'enum', 'element', 'unknown'] as const) {
 			expect(compatibleOps(kind)).toContain('equals');
 		}
+	});
+});
+
+describe('propertyItemsFor', () => {
+	function pdef(name: string, datatype: string) {
+		return {
+			name,
+			datatype,
+			multiplicity: '0..1',
+			min: null,
+			max: null,
+			pattern: null,
+			max_length: null
+		};
+	}
+	function etype(name: string, props: ReturnType<typeof pdef>[]) {
+		return { name, abstract: false, extends: null, properties: props, key: null };
+	}
+	function el(id: string, type_name: string, properties: Record<string, unknown>): Element {
+		return { id, type_name, properties, rev: 1 };
+	}
+	const model: SearchModel = { elements: [], relationships: [] };
+
+	it('lists a same-named property with differing datatypes as separate rows', () => {
+		const mm: Metamodel = {
+			enums: {},
+			elements: [
+				etype('Requirement', [pdef('priority', 'integer')]),
+				etype('Task', [pdef('priority', 'string')])
+			],
+			relationships: []
+		};
+		const items = propertyItemsFor('element', mm, model);
+		expect(items).toEqual([
+			{ name: 'priority', datatype: 'integer' },
+			{ name: 'priority', datatype: 'string' }
+		]);
+	});
+
+	it('dedupes a property declared identically on multiple types', () => {
+		const mm: Metamodel = {
+			enums: {},
+			elements: [etype('A', [pdef('name', 'string')]), etype('B', [pdef('name', 'string')])],
+			relationships: []
+		};
+		expect(propertyItemsFor('element', mm, model)).toEqual([{ name: 'name', datatype: 'string' }]);
+	});
+
+	it('adds instance-only property keys as untyped, sorted by name', () => {
+		const mm: Metamodel = {
+			enums: {},
+			elements: [etype('Block', [pdef('size', 'integer')])],
+			relationships: []
+		};
+		const withData: SearchModel = {
+			elements: [el('e1', 'Block', { size: 3, adhoc: 'x' })],
+			relationships: []
+		};
+		expect(propertyItemsFor('element', mm, withData)).toEqual([
+			{ name: 'adhoc', datatype: null },
+			{ name: 'size', datatype: 'integer' }
+		]);
+	});
+
+	it('does not add an untyped row when the name already has a typed definition', () => {
+		const mm: Metamodel = {
+			enums: {},
+			elements: [etype('Block', [pdef('size', 'integer')])],
+			relationships: []
+		};
+		const withData: SearchModel = {
+			elements: [el('e1', 'Block', { size: 3 })],
+			relationships: []
+		};
+		expect(propertyItemsFor('element', mm, withData)).toEqual([
+			{ name: 'size', datatype: 'integer' }
+		]);
 	});
 });
