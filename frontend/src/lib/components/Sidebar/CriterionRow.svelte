@@ -1,10 +1,11 @@
 <script lang="ts">
-	import { SvelteSet } from 'svelte/reactivity';
+	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import { Trash2 } from '@lucide/svelte';
 	import { Input } from '$lib/components/ui/input';
 	import { getMetamodel, getWorkingModel } from '$lib/state';
 	import { isValidRegex } from '$lib/search/evaluate';
 	import { CRITERION_LABELS, type Criterion, type TargetKind } from '$lib/search/types';
+	import { compatibleOps, PROPERTY_OP_LABELS, resolvePropertyKind } from '$lib/search/property-ops';
 	import StereotypePicker from './StereotypePicker.svelte';
 
 	type Props = {
@@ -30,11 +31,31 @@
 		return [...set].sort();
 	});
 
+	// Property name -> declared datatype, from the metamodel defs for this target.
+	// Used to restrict the operator list to ones that make sense for the type.
+	const propertyDatatypes = $derived.by(() => {
+		const defs = target === 'element' ? (mm?.elements ?? []) : (mm?.relationships ?? []);
+		const map = new SvelteMap<string, string>();
+		for (const t of defs)
+			for (const p of t.properties ?? []) if (!map.has(p.name)) map.set(p.name, p.datatype);
+		return map;
+	});
+
 	// Which inline picker popover is open (keyed by a string id within this row).
 	let openPicker = $state<string | null>(null);
 
 	function patch(next: Partial<Criterion>): void {
 		onChange(index, { ...criterion, ...next } as Criterion);
+	}
+
+	// Pick a property: set its name and, if the current operator isn't valid for
+	// the new property's datatype, fall back to `equals` (valid for every kind).
+	function pickProperty(name: string): void {
+		if (criterion.type !== 'property') return;
+		const datatype = propertyDatatypes.get(name) ?? null;
+		const ops = compatibleOps(resolvePropertyKind(datatype, mm));
+		const op = ops.includes(criterion.op) ? criterion.op : 'equals';
+		onChange(index, { ...criterion, name, op });
 	}
 
 	function toggleName(field: 'names' | 'relTypes', name: string): void {
@@ -93,10 +114,15 @@
 			</StereotypePicker>
 		{:else if criterion.type === 'property'}
 			{@const propCriterion = criterion}
+			{@const datatype = propCriterion.name
+				? (propertyDatatypes.get(propCriterion.name) ?? null)
+				: null}
+			{@const ops = compatibleOps(resolvePropertyKind(datatype, mm))}
+			{@const noProperty = propCriterion.name === ''}
 			<StereotypePicker
 				mode="create"
 				names={propertyNames}
-				onPick={(n) => patch({ name: n })}
+				onPick={(n) => pickProperty(n)}
 				open={openPicker === 'prop'}
 				onOpenChange={(o) => (openPicker = o ? 'prop' : null)}
 				searchPlaceholder="Filter properties…"
@@ -108,27 +134,23 @@
 				{/snippet}
 			</StereotypePicker>
 			<select
-				class="rounded border border-zinc-700 bg-zinc-900 px-1 py-1 text-zinc-200"
+				class="rounded border border-zinc-700 bg-zinc-900 px-1 py-1 text-zinc-200 disabled:cursor-not-allowed disabled:opacity-50"
 				value={propCriterion.op}
+				disabled={noProperty}
+				title={noProperty ? 'Select a property first' : undefined}
 				onchange={(e) => patch({ op: e.currentTarget.value as typeof propCriterion.op })}
 			>
-				<option value="equals">=</option>
-				<option value="not_equals">≠</option>
-				<option value="contains">contains</option>
-				<option value="matches">matches</option>
-				<option value="gt">&gt;</option>
-				<option value="lt">&lt;</option>
-				<option value="gte">≥</option>
-				<option value="lte">≤</option>
-				<option value="exists">exists</option>
-				<option value="is_empty">is empty</option>
+				{#each ops as op (op)}
+					<option value={op}>{PROPERTY_OP_LABELS[op]}</option>
+				{/each}
 			</select>
 			{#if propCriterion.op !== 'exists' && propCriterion.op !== 'is_empty'}
 				<Input
 					type="text"
 					value={propCriterion.value}
+					disabled={noProperty}
 					oninput={(e) => patch({ value: (e.currentTarget as HTMLInputElement).value })}
-					class="h-7 w-32 border-zinc-700 bg-zinc-900 text-xs"
+					class="h-7 w-32 border-zinc-700 bg-zinc-900 text-xs disabled:cursor-not-allowed disabled:opacity-50"
 					placeholder="value"
 				/>
 			{/if}
