@@ -11,6 +11,10 @@ interface Ctx {
 	elementsById: Map<string, Element>;
 }
 
+function assertNever(x: never): never {
+	throw new Error(`Unhandled case: ${String(x)}`);
+}
+
 export function isValidRegex(pattern: string): boolean {
 	try {
 		new RegExp(pattern);
@@ -92,6 +96,8 @@ function matchProperty(props: Record<string, unknown>, c: Extract<Criterion, { t
 			if (c.op === 'gte') return lhs >= rhs;
 			return lhs <= rhs;
 		}
+		default:
+			return assertNever(c.op);
 	}
 }
 
@@ -108,6 +114,8 @@ function matchNameId(
 			return subject === c.value;
 		case 'matches':
 			return safeRegexTest(c.value, subject);
+		default:
+			return assertNever(c.op);
 	}
 }
 
