@@ -44,9 +44,16 @@
 	// isn't valid for that datatype, fall back to `equals` (valid for every kind).
 	function pickProperty(name: string, datatype: string | null): void {
 		if (criterion.type !== 'property') return;
-		const ops = compatibleOps(resolvePropertyKind(datatype, mm));
+		const kind = resolvePropertyKind(datatype, mm);
+		const ops = compatibleOps(kind);
 		const op = ops.includes(criterion.op) ? criterion.op : 'equals';
-		onChange(index, { ...criterion, name, datatype, op });
+		// A boolean property's value is a true/false select; seed a valid default
+		// so the select doesn't show a blank/invalid state.
+		const value =
+			kind === 'boolean' && criterion.value !== 'true' && criterion.value !== 'false'
+				? 'true'
+				: criterion.value;
+		onChange(index, { ...criterion, name, datatype, op, value });
 	}
 
 	function toggleName(field: 'names' | 'relTypes', name: string): void {
@@ -106,7 +113,8 @@
 		{:else if criterion.type === 'property'}
 			{@const propCriterion = criterion}
 			{@const datatype = propCriterion.datatype ?? null}
-			{@const ops = compatibleOps(resolvePropertyKind(datatype, mm))}
+			{@const kind = resolvePropertyKind(datatype, mm)}
+			{@const ops = compatibleOps(kind)}
 			{@const noProperty = propCriterion.name === ''}
 			<PropertyPicker
 				items={propertyItems}
@@ -117,11 +125,13 @@
 			>
 				{#snippet trigger()}
 					<span
-						class="flex items-center gap-1 rounded border border-zinc-700 px-2 py-1 text-zinc-200 hover:bg-zinc-800"
+						class="flex max-w-[18rem] items-center gap-1 rounded border border-zinc-700 px-2 py-1 text-zinc-200 hover:bg-zinc-800"
 					>
-						{propCriterion.name || 'property…'}
+						<span class="truncate" title={propCriterion.name || undefined}>
+							{propCriterion.name || 'property…'}
+						</span>
 						{#if !noProperty}
-							<span class="rounded bg-zinc-800 px-1 font-mono text-[10px] text-zinc-400">
+							<span class="shrink-0 rounded bg-zinc-800 px-1 font-mono text-[10px] text-zinc-400">
 								{datatype ?? 'untyped'}
 							</span>
 						{/if}
@@ -140,14 +150,26 @@
 				{/each}
 			</select>
 			{#if propCriterion.op !== 'exists' && propCriterion.op !== 'is_empty'}
-				<Input
-					type="text"
-					value={propCriterion.value}
-					disabled={noProperty}
-					oninput={(e) => patch({ value: (e.currentTarget as HTMLInputElement).value })}
-					class="h-7 w-32 border-zinc-700 bg-zinc-900 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-					placeholder="value"
-				/>
+				{#if kind === 'boolean'}
+					<select
+						class="rounded border border-zinc-700 bg-zinc-900 px-1 py-1 text-zinc-200 disabled:cursor-not-allowed disabled:opacity-50"
+						value={propCriterion.value}
+						disabled={noProperty}
+						onchange={(e) => patch({ value: e.currentTarget.value })}
+					>
+						<option value="true">true</option>
+						<option value="false">false</option>
+					</select>
+				{:else}
+					<Input
+						type="text"
+						value={propCriterion.value}
+						disabled={noProperty}
+						oninput={(e) => patch({ value: (e.currentTarget as HTMLInputElement).value })}
+						class="h-7 w-32 border-zinc-700 bg-zinc-900 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+						placeholder="value"
+					/>
+				{/if}
 			{/if}
 		{:else if criterion.type === 'name_id'}
 			{@const nameIdCriterion = criterion}
