@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping as ABCMapping
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
@@ -250,6 +250,22 @@ class Metamodel(BaseModel):
             cache = _build_caches(self)
             self._cache = cache
         return cache
+
+    def model_copy(
+        self, *, update: ABCMapping[str, Any] | None = None, deep: bool = False
+    ) -> Metamodel:
+        """Return a copy with a reset cache so it lazily rebuilds from new data.
+
+        Pydantic's default ``model_copy`` shallow- or deep-copies private attrs
+        along with the model, meaning the copy either shares the old cache
+        (stale if ``update`` changes ``elements``/``relationships``) or carries
+        a duplicate deep-copied cache object. Resetting ``_cache`` to ``None``
+        on the copy ensures the first lookup rebuilds it from the copy's own
+        fields, maintaining correctness and object-identity guarantees.
+        """
+        copy = super().model_copy(update=update, deep=deep)
+        copy._cache = None
+        return copy
 
     def element_type(self, name: str) -> ElementType | None:
         return self._caches().types_by_name.get(name)
