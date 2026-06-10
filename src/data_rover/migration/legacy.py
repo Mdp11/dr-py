@@ -5,7 +5,7 @@ import re
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 import yaml
 
@@ -131,6 +131,11 @@ class MigrationResult:
     metamodel: Metamodel
     model: dict[str, Any]
     warnings: list[str] = field(default_factory=list)
+
+
+def _emit(progress: Callable[[str], None] | None, message: str) -> None:
+    if progress is not None:
+        progress(message)
 
 
 def _synth_id(rel_type: str, source_id: str, target_id: str) -> str:
@@ -276,10 +281,19 @@ def _build_model(
     typedby_name: str,
     emit_unmapped: bool,
     warnings: list[str],
+    progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
+    old_elements = old_model.get("elements") or {}
+    old_relationships = old_model.get("relationships") or {}
+    _emit(
+        progress,
+        f"Converting {len(old_elements)} elements and "
+        f"{len(old_relationships)} relationships to the new format...",
+    )
+
     elements_out: list[dict] = []
     stereotype_of: dict[str, str] = {}
-    for eid, el in (old_model.get("elements") or {}).items():
+    for i, (eid, el) in enumerate(old_elements.items(), start=1):
         node_id = el.get("id", eid)
         st = el["stereotype"]
         stereotype_of[node_id] = st
@@ -289,9 +303,11 @@ def _build_model(
         elements_out.append(
             {"id": node_id, "type_name": st, "properties": props, "rev": 0}
         )
+        if i % 10000 == 0:
+            _emit(progress, f"  ...converted {i}/{len(old_elements)} elements")
 
     relationships_out: list[dict] = []
-    for rid, rel in (old_model.get("relationships") or {}).items():
+    for rid, rel in old_relationships.items():
         relationships_out.append(
             {
                 "id": rel.get("id", rid),
@@ -341,7 +357,8 @@ def _build_model(
                 f"({source_st}->{target_st}): no allowed {rt_name} mapping"
             )
 
-    for eid, el in (old_model.get("elements") or {}).items():
+    synth_before = len(relationships_out)
+    for eid, el in old_elements.items():
         node_id = el.get("id", eid)
         st = el["stereotype"]
         owner = el.get("owner")
@@ -366,6 +383,13 @@ def _build_model(
                 stereotype_of.get(etype),
                 "element_type",
             )
+    synth_added = len(relationships_out) - synth_before
+    if synth_added or warnings:
+        _emit(
+            progress,
+            f"Synthesized {synth_added} owner/type relationship(s); "
+            f"{len(warnings)} link(s) skipped",
+        )
 
     return {"rev": 1, "elements": elements_out, "relationships": relationships_out}
 
@@ -377,13 +401,16 @@ def migrate(
     emit_unmapped_links: bool = False,
     owns_name: str = "Owns",
     typedby_name: str = "TypedBy",
+    progress: Callable[[str], None] | None = None,
 ) -> MigrationResult:
     """Migrate an old-format (metamodel, model) pair to the new format.
 
     Returns the new `Metamodel`, a new-format model dict, and any warnings
     (e.g. owner/element_type links skipped because no mapping permits them).
+    Pass `progress` to receive human-readable phase messages.
     """
     warnings: list[str] = []
+    _emit(progress, "Scanning model data to infer property datatypes...")
     elem_values = _grouped_property_values(old_model, "elements")
     rel_values = _grouped_property_values(old_model, "relationships")
 
@@ -394,11 +421,23 @@ def migrate(
     taken.add(owns_name)
     typedby_name = _unique_name(typedby_name, taken)
 
+    _emit(progress, "Building the new metamodel...")
     mm = _build_metamodel(
         old_metamodel, elem_values, rel_values, owns_name, typedby_name
     )
+    _emit(
+        progress,
+        f"Metamodel built: {len(mm.elements)} element type(s), "
+        f"{len(mm.relationships)} relationship type(s)",
+    )
     model = _build_model(
-        old_model, mm, owns_name, typedby_name, emit_unmapped_links, warnings
+        old_model,
+        mm,
+        owns_name,
+        typedby_name,
+        emit_unmapped_links,
+        warnings,
+        progress,
     )
     return MigrationResult(metamodel=mm, model=model, warnings=warnings)
 
@@ -424,9 +463,97 @@ def _materialize_model(result: MigrationResult) -> Model:
     return model
 
 
-def validate_model_issues(result: MigrationResult) -> list[Issue]:
+def validate_model_issues(
+    result: MigrationResult,
+    progress: Callable[[str], None] | None = None,
+) -> list[Issue]:
     """Run the default validation pipeline over a migration's model output."""
-    return default_pipeline().validate(_materialize_model(result))
+    model = _materialize_model(result)
+    on_validator: Callable[[str], None] | None = None
+    if progress is not None:
+        on_validator = lambda name: _emit(progress, f"  running {name}...")  # noqa: E731
+
+    return default_pipeline().validate(model, on_validator=on_validator)
+
+
+@dataclass
+class RemovedEntity:
+    kind: str  # "element" | "relationship"
+    id: str
+    type_name: str
+    reason: str
+    data: dict[str, Any]
+
+
+def prune_inconsistencies(
+    model: dict[str, Any], metamodel: Metamodel
+) -> tuple[dict[str, Any], list[RemovedEntity]]:
+    """Drop model entities that would block loading via ``POST /model``.
+
+    Mirrors the guards in the API's snapshot builder: elements with an unknown
+    or abstract type, duplicate element ids, relationships with an unknown type,
+    relationships whose source/target no longer resolves to a surviving element,
+    and duplicate relationship ids. Returns the cleaned model and the list of
+    removed entities (with reasons) for review.
+    """
+    removed: list[RemovedEntity] = []
+
+    kept_elements: list[dict] = []
+    surviving_ids: set[str] = set()
+    for e in model.get("elements", []):
+        et = metamodel.element_type(e["type_name"])
+        if et is None:
+            reason = f"unknown element type {e['type_name']!r}"
+        elif et.abstract:
+            reason = f"abstract element type {e['type_name']!r} cannot be instantiated"
+        elif e["id"] in surviving_ids:
+            reason = f"duplicate element id {e['id']!r}"
+        else:
+            surviving_ids.add(e["id"])
+            kept_elements.append(e)
+            continue
+        removed.append(RemovedEntity("element", e["id"], e["type_name"], reason, e))
+
+    kept_relationships: list[dict] = []
+    seen_rel_ids: set[str] = set()
+    for r in model.get("relationships", []):
+        if metamodel.relationship_type(r["type_name"]) is None:
+            reason = f"unknown relationship type {r['type_name']!r}"
+        elif r["source_id"] not in surviving_ids:
+            reason = f"source {r['source_id']!r} is not among the surviving elements"
+        elif r["target_id"] not in surviving_ids:
+            reason = f"target {r['target_id']!r} is not among the surviving elements"
+        elif r["id"] in seen_rel_ids:
+            reason = f"duplicate relationship id {r['id']!r}"
+        else:
+            seen_rel_ids.add(r["id"])
+            kept_relationships.append(r)
+            continue
+        removed.append(
+            RemovedEntity("relationship", r["id"], r["type_name"], reason, r)
+        )
+
+    cleaned = {
+        **model,
+        "elements": kept_elements,
+        "relationships": kept_relationships,
+    }
+    return cleaned, removed
+
+
+def format_removed(removed: list[RemovedEntity]) -> str:
+    """Render removed entities as a human-readable review report."""
+    lines = [
+        "# Entities removed during migration (--remove-inconsistencies)",
+        f"# {len(removed)} entit{'y' if len(removed) == 1 else 'ies'} removed",
+        "",
+    ]
+    for r in removed:
+        lines.append(f"[{r.kind}] id={r.id} type={r.type_name}")
+        lines.append(f"  reason: {r.reason}")
+        lines.append(f"  data:   {json.dumps(r.data, ensure_ascii=False)}")
+        lines.append("")
+    return "\n".join(lines)
 
 
 @dataclass
@@ -434,6 +561,13 @@ class MigrationReport:
     result: MigrationResult
     metamodel_errors: list[str]
     model_issues: list[Issue]
+    removed: list[RemovedEntity] = field(default_factory=list)
+    removed_report_path: str | None = None
+
+
+def _removed_report_path(out_model_path: str | Path) -> Path:
+    p = Path(out_model_path)
+    return p.with_name(f"{p.stem}.removed.txt")
 
 
 def migrate_files(
@@ -443,28 +577,71 @@ def migrate_files(
     out_model_path: str | Path,
     *,
     emit_unmapped_links: bool = False,
+    remove_inconsistencies: bool = False,
+    progress: Callable[[str], None] | None = None,
 ) -> MigrationReport:
     """Migrate a paired old metamodel + model and write the new-format outputs.
 
     Always writes both output files and returns a report (metamodel check
     errors + model validation issues). It does not raise on an invalid result,
     so referentially-incomplete inputs still produce inspectable output.
+
+    With `remove_inconsistencies`, model entities that would block loading in the
+    frontend (unknown/abstract element type, duplicate ids, relationships with an
+    unknown type or dangling endpoint) are removed and written to a sibling
+    ``<out_model>.removed.txt`` review file.
     """
+    _emit(progress, f"Reading old metamodel: {old_metamodel_path}")
     old_mm = json.loads(Path(old_metamodel_path).read_text(encoding="utf-8"))
+    _emit(progress, f"Reading old model: {old_model_path}")
     old_model = json.loads(Path(old_model_path).read_text(encoding="utf-8"))
 
-    result = migrate(old_mm, old_model, emit_unmapped_links=emit_unmapped_links)
+    result = migrate(
+        old_mm,
+        old_model,
+        emit_unmapped_links=emit_unmapped_links,
+        progress=progress,
+    )
 
+    removed: list[RemovedEntity] = []
+    removed_path: str | None = None
+    if remove_inconsistencies:
+        _emit(progress, "Removing entities that would block frontend loading...")
+        cleaned, removed = prune_inconsistencies(result.model, result.metamodel)
+        result = MigrationResult(
+            metamodel=result.metamodel,
+            model=cleaned,
+            warnings=result.warnings,
+        )
+        removed_path = str(_removed_report_path(out_model_path))
+        Path(removed_path).write_text(format_removed(removed), encoding="utf-8")
+        _emit(
+            progress,
+            f"Removed {len(removed)} inconsistent entit"
+            f"{'y' if len(removed) == 1 else 'ies'} -> {removed_path}",
+        )
+
+    _emit(progress, f"Writing metamodel -> {out_metamodel_path}")
     Path(out_metamodel_path).write_text(
         yaml.safe_dump(metamodel_to_yaml_dict(result.metamodel), sort_keys=False),
         encoding="utf-8",
     )
+    _emit(progress, f"Writing model -> {out_model_path}")
     Path(out_model_path).write_text(
         json.dumps(result.model, indent=2), encoding="utf-8"
     )
 
-    return MigrationReport(
+    _emit(
+        progress,
+        f"Validating output ({len(result.model['elements'])} elements, "
+        f"{len(result.model['relationships'])} relationships)...",
+    )
+    report = MigrationReport(
         result=result,
         metamodel_errors=check_metamodel(result.metamodel),
-        model_issues=validate_model_issues(result),
+        model_issues=validate_model_issues(result, progress),
+        removed=removed,
+        removed_report_path=removed_path,
     )
+    _emit(progress, "Done.")
+    return report

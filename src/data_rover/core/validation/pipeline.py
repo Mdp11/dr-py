@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Callable, Protocol
 
 from .issue import Issue
 from .scope import Scope
@@ -14,10 +14,17 @@ class ValidationPipeline:
     def __init__(self, validators: list[Validator]) -> None:
         self._validators = list(validators)
 
-    def validate(self, model, scope: Scope | None = None) -> list[Issue]:
+    def validate(
+        self,
+        model,
+        scope: Scope | None = None,
+        on_validator: Callable[[str], None] | None = None,
+    ) -> list[Issue]:
         scope = scope or Scope.all()
         issues: list[Issue] = []
         for validator in self._validators:
+            if on_validator is not None:
+                on_validator(type(validator).__name__)
             issues.extend(validator.validate(model, scope))
         return issues
 

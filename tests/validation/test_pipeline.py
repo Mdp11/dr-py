@@ -34,3 +34,11 @@ def test_pipeline_passes_through_explicit_scope():
     scope = Scope({"e1"})
     ValidationPipeline([v]).validate(model=None, scope=scope)
     assert v.last_scope is scope
+
+
+def test_pipeline_reports_each_validator_to_callback():
+    v1 = _StubValidator([])
+    v2 = _StubValidator([])
+    seen: list[str] = []
+    ValidationPipeline([v1, v2]).validate(model=None, on_validator=seen.append)
+    assert seen == ["_StubValidator", "_StubValidator"]

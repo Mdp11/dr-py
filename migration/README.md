@@ -10,15 +10,28 @@ PYTHONPATH=src python -m data_rover.migration \
   --old-model     old.model.json \
   --out-metamodel new.metamodel.yaml \
   --out-model     new.model.json \
-  [--emit-unmapped-links]
+  [--emit-unmapped-links] \
+  [--remove-inconsistencies]
 ```
 
-It always writes both outputs and prints a report (migration warnings,
-metamodel `check_metamodel` errors, model validation issues). It never raises on
-an invalid result, so referentially-incomplete inputs still produce inspectable
-output. The provided `*_sample.json` files are intentionally incomplete (the
-sample relationship maps endpoints that aren't declared element types), so the
-report flags those — that is expected for the samples, not the migration logic.
+It streams progress messages while running (reading inputs, building the
+metamodel/model, converting elements/relationships, writing, validating), then
+prints a report (migration warnings, metamodel `check_metamodel` errors, model
+validation issues). It never raises on an invalid result, so
+referentially-incomplete inputs still produce inspectable output. The provided
+`*_sample.json` files are intentionally incomplete (the sample relationship maps
+endpoints that aren't declared element types), so the report flags those — that
+is expected for the samples, not the migration logic.
+
+### `--remove-inconsistencies`
+
+Removes **model** entities that would block loading in the frontend (the
+`POST /model` guards): elements with an unknown or abstract type, duplicate
+element ids, and relationships with an unknown type or a source/target that
+doesn't resolve to a surviving element (removing an element cascades to its
+relationships). Removed entities — with their reason and full original data —
+are written to a sibling `<out-model>.removed.txt` review file. This prunes the
+model only; it does not modify the metamodel.
 
 ## Mapping rules
 

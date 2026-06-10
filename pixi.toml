@@ -92,6 +92,10 @@ depends-on = [
 [feature.frontend.dependencies]
 nodejs = "22.*"
 
+[feature.frontend.tasks._install-frontend-deps]
+cmd = "npm install"
+cwd = "frontend"
+
 [feature.frontend.tasks.start-frontend]
 args = [
     { arg = "metamodel", default = "examples/smart-city.metamodel.yaml" },
@@ -102,6 +106,9 @@ cmd = """
 AUTOLOAD_METAMODEL_PATH="{{ metamodel }}" AUTOLOAD_MODEL_PATH="{{ model }}" AUTOLOAD_VIEW_PATH="{{ view }}" npm run dev
 """
 cwd = "frontend"
+depends-on = [
+    { task = "_install-frontend-deps" }
+]
 
 [feature.frontend.tasks]
 frontend-build = { cmd = "npm run build", cwd = "frontend" }
