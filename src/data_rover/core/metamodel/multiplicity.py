@@ -25,7 +25,7 @@ class Multiplicity:
         return True
 
     @staticmethod
-    @lru_cache(maxsize=None)
+    @lru_cache(maxsize=4096)
     def parse(spec: str) -> Multiplicity:
         # Pure string -> value parser, called per entity during validation;
         # caching makes repeated parses of the same spec free. Multiplicity is

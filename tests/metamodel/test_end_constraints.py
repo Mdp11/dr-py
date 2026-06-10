@@ -159,3 +159,49 @@ def test_caches_do_not_affect_metamodel_equality():
     a, b = _mm(), _mm()
     a.end_constraints("Sensor")  # builds a's caches; b's stay cold
     assert a == b
+
+
+# ---------------------------------------------------------------------------
+# model_copy cache-reset tests
+# ---------------------------------------------------------------------------
+
+
+def test_model_copy_update_reflects_new_elements():
+    """model_copy with changed elements must reflect the new element list."""
+    mm = _mm()
+    # warm the cache on the original
+    _ = mm.element_type("Block")
+
+    new_elements = [
+        ElementType(name="Widget"),
+        ElementType(name="Gadget"),
+    ]
+    copy = mm.model_copy(update={"elements": new_elements})
+
+    # new types are visible
+    assert copy.element_type("Widget") is not None
+    assert copy.element_type("Gadget") is not None
+    # old types that aren't in the new list are gone
+    assert copy.element_type("Block") is None
+    assert copy.element_type("Sensor") is None
+    # the original is unaffected
+    assert mm.element_type("Block") is not None
+
+
+def test_model_copy_deep_identity_uses_copy_elements():
+    """After model_copy(deep=True), element_type() returns objects from the copy."""
+    mm = _mm()
+    # warm the cache
+    _ = mm.element_type("Block")
+
+    copy = mm.model_copy(deep=True)
+    result = copy.element_type("Block")
+    assert result is not None
+    # The returned object must be the copy's own ElementType, not the original's
+    assert result is copy.elements[
+        next(i for i, e in enumerate(copy.elements) if e.name == "Block")
+    ]
+    # And it must NOT be the original's object (deep copy → different instance)
+    orig = mm.element_type("Block")
+    assert orig is not None
+    assert result is not orig

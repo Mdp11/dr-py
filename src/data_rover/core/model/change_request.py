@@ -43,7 +43,7 @@ class ChangeRequest:
 
 @dataclass
 class CRConflict:
-    kind: str   # "id_exists" | "missing" | "before_mismatch"
+    kind: str  # "id_exists" | "missing" | "before_mismatch"
     entity: str  # "element" | "relationship"
     id: str
     reason: str
