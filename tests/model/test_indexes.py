@@ -78,6 +78,7 @@ def _assert_matches_rebuild(model: Model) -> None:
         "in_count",
         "elements_by_type",
         "containment_parents",
+        "_containment_rel_ids",
         "ref_targets",
         "uniq_groups",
         "uniq_key_of",
@@ -199,6 +200,48 @@ def test_multiple_containment_parents_keep_insertion_order():
     assert model.container_of(d.id) == f2.id
     # owner context changed -> group re-keyed to the new first parent
     assert model.indexes.uniq_key_of[d.id][1] == f2.id
+    _assert_matches_rebuild(model)
+
+
+def test_duplicate_parallel_containment_edges_remove_by_relationship():
+    # two parallel f1 -> d edges around an f2 -> d edge: removal must drop the
+    # entry contributed by the disconnected relationship, not the first parent
+    # entry matching by value, or the order diverges from rebuild()
+    model = Model(_mm())
+    f1 = model.create_element("Folder")
+    f2 = model.create_element("Folder")
+    d = model.create_element("Doc")
+    model.connect("Contains", f1.id, d.id)  # r1
+    model.connect("Contains", f2.id, d.id)  # r2
+    r3 = model.connect("Contains", f1.id, d.id)
+    assert model.indexes.containment_parents[d.id] == [f1.id, f2.id, f1.id]
+
+    # disconnecting the LATER f1 edge must keep the earlier one first
+    model.disconnect(r3.id)
+    assert model.indexes.containment_parents[d.id] == [f1.id, f2.id]
+    assert model.container_of(d.id) == f1.id
+    assert model.indexes.uniq_key_of[d.id][1] == f1.id
+    model.indexes.verify_consistent(model)
+    _assert_matches_rebuild(model)
+
+
+def test_duplicate_parallel_containment_edges_remove_earlier_edge():
+    # disconnecting the EARLIER f1 edge leaves r2, r3 in relationship
+    # insertion order, i.e. [f2, f1] — matching rebuild() semantics
+    model = Model(_mm())
+    f1 = model.create_element("Folder")
+    f2 = model.create_element("Folder")
+    d = model.create_element("Doc")
+    r1 = model.connect("Contains", f1.id, d.id)
+    model.connect("Contains", f2.id, d.id)  # r2
+    model.connect("Contains", f1.id, d.id)  # r3
+
+    model.disconnect(r1.id)
+    assert model.indexes.containment_parents[d.id] == [f2.id, f1.id]
+    assert model.container_of(d.id) == f2.id
+    # owner context changed -> uniqueness group re-keyed to the new first parent
+    assert model.indexes.uniq_key_of[d.id][1] == f2.id
+    model.indexes.verify_consistent(model)
     _assert_matches_rebuild(model)
 
 
