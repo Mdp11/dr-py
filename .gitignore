@@ -19,3 +19,6 @@ frontend/e2e/.data
 
 docs/
 .superpowers/
+
+# generated benchmark fixtures
+benchmarks/
