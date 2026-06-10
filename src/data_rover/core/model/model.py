@@ -48,6 +48,11 @@ class Model:
         return self.relationships[rel_id]
 
     def set_property(self, target: Element | Relationship, prop: str, value) -> None:
+        if (
+            self.elements.get(target.id) is not target
+            and self.relationships.get(target.id) is not target
+        ):
+            raise KeyError(f"Entity {target.id!r} is not part of this model")
         if isinstance(target, Element):
             defs = self.metamodel.effective_element_properties(target.type_name)
         else:

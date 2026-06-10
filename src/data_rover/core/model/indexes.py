@@ -24,7 +24,7 @@ or, when no key is declared, on all properties.
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Hashable
+from collections.abc import Hashable, Set, Sequence
 from typing import TYPE_CHECKING, Any
 
 from .element import Element
@@ -101,12 +101,18 @@ class IndexSet:
         self._is_containment: dict[str, bool] = {}
 
     # -- accessors (for query helpers and the validator rewrite) -----------
+    #
+    # Convention: every accessor returns a LIVE INTERNAL VIEW — do NOT mutate
+    # the returned object.  Return types are annotated as abstract read-only
+    # collections (Set / Sequence) to make this contract visible at call sites.
 
-    def outgoing_ids(self, element_id: str) -> set[str]:
-        return self.out_rels.get(element_id) or set()
+    def outgoing_ids(self, element_id: str) -> Set[str]:
+        """Live view of outgoing relationship ids — do NOT mutate."""
+        return self.out_rels.get(element_id) or frozenset()
 
-    def incoming_ids(self, element_id: str) -> set[str]:
-        return self.in_rels.get(element_id) or set()
+    def incoming_ids(self, element_id: str) -> Set[str]:
+        """Live view of incoming relationship ids — do NOT mutate."""
+        return self.in_rels.get(element_id) or frozenset()
 
     def count_out(self, element_id: str, rel_type_name: str) -> int:
         return self.out_count[(element_id, rel_type_name)]
@@ -114,15 +120,17 @@ class IndexSet:
     def count_in(self, element_id: str, rel_type_name: str) -> int:
         return self.in_count[(element_id, rel_type_name)]
 
-    def parents_of(self, element_id: str) -> list[str]:
-        return list(self.containment_parents.get(element_id) or ())
+    def parents_of(self, element_id: str) -> Sequence[str]:
+        """Live view of containment parent ids — do NOT mutate."""
+        return self.containment_parents.get(element_id) or ()
 
     def first_parent(self, element_id: str) -> str | None:
         parents = self.containment_parents.get(element_id)
         return parents[0] if parents else None
 
-    def referencers_of(self, element_id: str) -> set[str]:
-        return self.ref_targets.get(element_id) or set()
+    def referencers_of(self, element_id: str) -> Set[str]:
+        """Live view of entity ids that reference this element — do NOT mutate."""
+        return self.ref_targets.get(element_id) or frozenset()
 
     # -- mutation hooks (called from the Model mutation boundary) ----------
 
@@ -229,14 +237,20 @@ class IndexSet:
 
     # -- debugging ----------------------------------------------------------
 
-    def verify_consistent(self, model: Model | None = None) -> None:
+    def verify_consistent(self) -> None:
         """Recompute all indexes from scratch and assert they match.
 
         Test/debug helper only; never call this on production paths (it is a
         full O(model) pass).
         """
-        fresh = IndexSet(model if model is not None else self._model)
+        fresh = IndexSet(self._model)
         fresh.rebuild()
+
+        def _norm(name: str, obj: object) -> object:
+            # Counter.__eq__ ignores zero-count entries, so compare as plain
+            # dicts to catch spurious zeroes left in the live index.
+            return dict(obj) if isinstance(obj, Counter) else obj  # type: ignore[arg-type]
+
         mismatched = [
             name
             for name in (
@@ -253,7 +267,7 @@ class IndexSet:
                 "duplicate_keys",
                 "_refs_of",
             )
-            if getattr(self, name) != getattr(fresh, name)
+            if _norm(name, getattr(self, name)) != _norm(name, getattr(fresh, name))
         ]
         if mismatched:
             raise AssertionError(
@@ -398,6 +412,11 @@ class IndexSet:
 
     @staticmethod
     def _decrement(counter: Counter[tuple[str, str]], key: tuple[str, str]) -> None:
+        if key not in counter:
+            raise RuntimeError(
+                f"IndexSet count underflow for {key!r}: model dicts were mutated "
+                "without index hooks; call rebuild()"
+            )
         count = counter[key] - 1
         if count > 0:
             counter[key] = count
