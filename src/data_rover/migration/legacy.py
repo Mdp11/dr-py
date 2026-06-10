@@ -460,6 +460,8 @@ def _materialize_model(result: MigrationResult) -> Model:
             properties=dict(r["properties"]),
             rev=r["rev"],
         )
+    # dicts were populated directly, bypassing the mutation boundary
+    model.indexes.rebuild()
     return model
 
 
