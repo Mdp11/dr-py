@@ -24,3 +24,26 @@ def test_cli_writes_outputs_and_returns_zero(tmp_path, capsys):
     assert out_mm.exists() and out_model.exists()
     # a human-readable summary is printed
     assert "metamodel" in capsys.readouterr().out.lower()
+
+
+def test_cli_remove_inconsistencies_writes_review_file(tmp_path, capsys):
+    out_mm = tmp_path / "out.metamodel.yaml"
+    out_model = tmp_path / "out.model.json"
+    code = main(
+        [
+            "--old-metamodel",
+            str(SAMPLES / "old_metamodel_sample.json"),
+            "--old-model",
+            str(SAMPLES / "old_model_sample.json"),
+            "--out-metamodel",
+            str(out_mm),
+            "--out-model",
+            str(out_model),
+            "--remove-inconsistencies",
+        ]
+    )
+    assert code == 0
+    assert (tmp_path / "out.model.removed.txt").exists()
+    out = capsys.readouterr().out
+    assert "Removed" in out
+    assert "Reading old metamodel" in out  # progress was printed

@@ -26,6 +26,14 @@ def main(argv: list[str] | None = None) -> int:
         help="Emit owner/element_type links even when no metamodel mapping "
         "permits them (default: skip and warn).",
     )
+    parser.add_argument(
+        "--remove-inconsistencies",
+        action="store_true",
+        help="Remove model entities that would block frontend loading "
+        "(unknown/abstract element type, duplicate ids, relationships with an "
+        "unknown type or dangling source/target). Removed entities are written "
+        "to a sibling <out-model>.removed.txt for review.",
+    )
     args = parser.parse_args(argv)
 
     report = migrate_files(
@@ -34,15 +42,27 @@ def main(argv: list[str] | None = None) -> int:
         args.out_metamodel,
         args.out_model,
         emit_unmapped_links=args.emit_unmapped_links,
+        remove_inconsistencies=args.remove_inconsistencies,
+        progress=print,
     )
 
     result = report.result
+    print()
     print(f"Wrote metamodel -> {args.out_metamodel}")
     print(f"Wrote model     -> {args.out_model}")
     print(
         f"  elements: {len(result.model['elements'])}  "
         f"relationships: {len(result.model['relationships'])}"
     )
+
+    if report.removed:
+        print(
+            f"\nRemoved {len(report.removed)} inconsistent entit"
+            f"{'y' if len(report.removed) == 1 else 'ies'} "
+            f"(see {report.removed_report_path}):"
+        )
+        for r in report.removed:
+            print(f"  - [{r.kind}] {r.id} ({r.type_name}): {r.reason}")
 
     if result.warnings:
         print(f"\nMigration warnings ({len(result.warnings)}):")
