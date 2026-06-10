@@ -28,8 +28,10 @@ from data_rover.api.routes._snapshot import _build_model_from_payload  # noqa: E
 from data_rover.api.schemas import ElementOut, RelationshipOut  # noqa: E402
 from data_rover.core.metamodel.loader import load_metamodel_file  # noqa: E402
 from data_rover.core.model.model import Model  # noqa: E402
+from data_rover.core.validation.dirty import DirtyCollector  # noqa: E402
 from data_rover.core.validation.pipeline import default_pipeline  # noqa: E402
 from data_rover.core.validation.scope import Scope  # noqa: E402
+from data_rover.core.validation.state import ValidationState  # noqa: E402
 
 SEED = 20260610
 MUTATION_COUNT = 100
@@ -65,7 +67,7 @@ def bench_load(model_path: Path, metamodel_path: Path) -> Model:
     return model
 
 
-def bench_validation(model: Model, limit_seconds: float) -> None:
+def bench_validation(model: Model, limit_seconds: float) -> list:
     """(2) full validation via default_pipeline over Scope.all()."""
     t0 = time.perf_counter()
     issues = default_pipeline().validate(model, Scope.all())
@@ -77,14 +79,18 @@ def bench_validation(model: Model, limit_seconds: float) -> None:
             f"  warning: validation took {elapsed:.1f}s, exceeding "
             f"--limit-validation-seconds={limit_seconds:.0f}"
         )
+    return issues
 
 
-def bench_mutations(model: Model, rng: random.Random) -> None:
+def bench_mutations(
+    model: Model, rng: random.Random, base_issues: list | None
+) -> None:
     """(3) random single mutations through the Model mutation boundary.
 
-    Only the mutation itself is timed for now. Once scoped validation exists,
-    add a second timing here that validates the touched element after each
-    mutation (Phase B of the perf overhaul).
+    (3a) times the raw mutation; (3b) times the Phase-B incremental
+    validation loop per mutation: dirty-set collection + scoped validation +
+    ValidationState.replace (requires the full-validation issues from step 2
+    as the baseline, so it is skipped under --skip-validation).
     """
     element_ids = list(model.elements)
     targets = [rng.choice(element_ids) for _ in range(MUTATION_COUNT)]
@@ -95,9 +101,32 @@ def bench_mutations(model: Model, rng: random.Random) -> None:
         model.set_property(element, "name", f"bench-mutated-{n:04d}")
     elapsed = time.perf_counter() - t0
     _report(
-        f"(3)  {MUTATION_COUNT} random set_property mutations",
+        f"(3a) {MUTATION_COUNT} random set_property mutations",
         elapsed,
         f"{elapsed / MUTATION_COUNT * 1000:.3f} ms/mutation",
+    )
+
+    if base_issues is None:
+        print("  (3b) mutate + scoped revalidate: skipped (--skip-validation)")
+        return
+    pipeline = default_pipeline()
+    state = ValidationState()
+    state.set_full(base_issues)
+    targets = [rng.choice(element_ids) for _ in range(MUTATION_COUNT)]
+    t0 = time.perf_counter()
+    for n, element_id in enumerate(targets):
+        element = model.get_element(element_id)
+        collector = DirtyCollector()
+        collector.before_element_props_change(model, element_id)
+        model.set_property(element, "name", f"bench-scoped-{n:04d}")
+        collector.after_element_props_change(model, element_id)
+        issues = pipeline.validate(model, collector.to_scope())
+        state.replace(collector.ids, issues)
+    elapsed = time.perf_counter() - t0
+    _report(
+        f"(3b) {MUTATION_COUNT} x (mutate + dirty + scoped validate + replace)",
+        elapsed,
+        f"{elapsed / MUTATION_COUNT * 1000:.3f} ms/op",
     )
 
 
@@ -188,13 +217,14 @@ def main() -> None:
         f"{len(model.relationships)} relationships"
     )
 
+    base_issues: list | None = None
     if args.skip_validation:
         print("  (2)  full validation: skipped (--skip-validation)")
     else:
-        bench_validation(model, args.limit_validation_seconds)
+        base_issues = bench_validation(model, args.limit_validation_seconds)
 
     rng = random.Random(SEED)
-    bench_mutations(model, rng)
+    bench_mutations(model, rng, base_issues)
     bench_traversal(model, rng)
     bench_serialize(model)
 

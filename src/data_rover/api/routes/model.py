@@ -19,6 +19,7 @@ def upload_model(
         metamodel, payload.elements, payload.relationships
     )
     session.model = model
+    session.validation = None  # previous full-run baseline is now stale
     return ModelOut.from_core(model)
 
 
@@ -38,10 +39,12 @@ def snapshot_model(
         metamodel, payload.elements, payload.relationships
     )
     session.model = model
+    session.validation = None  # previous full-run baseline is now stale
     return ModelOut.from_core(model)
 
 
 @router.delete("/model", status_code=204)
 def clear_model(session: Session = Depends(get_session)) -> Response:
     session.model = None
+    session.validation = None
     return Response(status_code=204)
