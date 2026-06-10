@@ -77,6 +77,34 @@ def test_relationship_target_multiplicity_lower_bound():
     assert any("Owns" in i.message for i in issues)
 
 
+def test_relationship_target_multiplicity_checks_all_mapping_sources():
+    # R allows A->B and C->D; target_multiplicity 1 means each source needs
+    # exactly one outgoing R. A C with no outgoing R must be flagged even though
+    # C is only a *secondary* mapping source.
+    mm = Metamodel(
+        elements=[
+            ElementType(name="A"),
+            ElementType(name="B"),
+            ElementType(name="C"),
+            ElementType(name="D"),
+        ],
+        relationships=[
+            RelationshipType(
+                name="R",
+                mappings=[
+                    {"source": "A", "target": "B"},
+                    {"source": "C", "target": "D"},
+                ],
+                target_multiplicity="1",
+            )
+        ],
+    )
+    model = Model(mm)
+    c = model.create_element("C")  # no outgoing R
+    issues = MultiplicityValidator().validate(model, Scope.all())
+    assert any("R" in i.message and c.id in i.target_ids for i in issues)
+
+
 def _rel_prop_model():
     mm = Metamodel(
         elements=[ElementType(name="Block")],

@@ -54,10 +54,12 @@ class MultiplicityValidator:
                 continue
             target_mult = Multiplicity.parse(rt.target_multiplicity)
             source_mult = Multiplicity.parse(rt.source_multiplicity)
+            mapping_sources = {m.source for m in rt.mappings}
+            mapping_targets = {m.target for m in rt.mappings}
             for el in model.elements.values():
                 if not scope.includes(el.id):
                     continue
-                if mm.is_element_subtype(el.type_name, rt.source):
+                if any(mm.is_element_subtype(el.type_name, s) for s in mapping_sources):
                     out = len(
                         [
                             r
@@ -75,7 +77,7 @@ class MultiplicityValidator:
                                 [el.id],
                             )
                         )
-                if mm.is_element_subtype(el.type_name, rt.target):
+                if any(mm.is_element_subtype(el.type_name, t) for t in mapping_targets):
                     inc = len(
                         [
                             r

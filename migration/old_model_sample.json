@@ -1,0 +1,33 @@
+{
+  "metadata": {
+    "release": "",
+    "commit": ""
+  },
+  "elements": {
+    "some_uuidv5": {
+      "id": "some_uuidv5",
+      "stereotype": "SomeStereotype",
+      "owner": "uuidv5_of_owner_of_this",
+      "element_type": "uuidv5_of_element_who_is_the_type_of_this",
+      "properties": {
+        "id_prop1": "some_value",
+        "id_prop2": 12,
+        "id_prop3": "some_value",
+        "other_prop1": "some_value",
+        "other_prop2": "some_value",
+        "other_prop3": 44.44
+      }
+    }
+  },
+  "relationships": {
+    "some_rel_uuidv5": {
+      "id": "some_rel_uuidv5",
+      "stereotype": "SomeRelationship",
+      "source": "some_uuidv5",
+      "destination": "another_uuidv5",
+      "properties": {
+        "some_prop": "some_value"
+      }
+    }
+  }
+}

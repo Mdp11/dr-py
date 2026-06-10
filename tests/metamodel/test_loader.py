@@ -34,3 +34,27 @@ def test_load_invalid_raises_with_errors():
     with pytest.raises(MetamodelError) as exc:
         load_metamodel_str(bad)
     assert "Ghost" in str(exc.value)
+
+
+MULTI_MAPPING = """
+elements:
+  - name: Block
+  - name: System
+  - name: Requirement
+  - name: Document
+relationships:
+  - name: Refers
+    mappings:
+      - {source: Block, target: Requirement}
+      - {source: System, target: Document}
+"""
+
+
+def test_load_relationship_with_multiple_mappings():
+    mm = load_metamodel_str(MULTI_MAPPING)
+    rt = mm.relationship_type("Refers")
+    assert rt is not None
+    assert [(m.source, m.target) for m in rt.mappings] == [
+        ("Block", "Requirement"),
+        ("System", "Document"),
+    ]

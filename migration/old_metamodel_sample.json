@@ -1,0 +1,31 @@
+{
+  "elements": {
+    "SomeStereotype": {
+      "is_owned_by_one_of": [],
+      "is_typed_by_one_of": [],
+      "id_properties": [
+        "id_prop1",
+        "id_prop2",
+        "id_prop3"
+      ],
+      "other_properties": [
+        "other_prop1",
+        "other_prop2",
+        "other_prop3"
+      ]
+    }
+  },
+  "relationships": {
+    "SomeRelationship": {
+      "other_properties": [
+        "some_prop"
+      ],
+      "mappings": [
+        {
+          "source": "SourceStereotype",
+          "destination": "DestinationStereotype"
+        }
+      ]
+    }
+  }
+}

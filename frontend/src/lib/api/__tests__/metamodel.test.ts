@@ -40,6 +40,29 @@ describe('metamodel client', () => {
 		expect(result.enums.Status).toEqual(['Draft', 'Approved']);
 	});
 
+	it('getMetamodel parses relationship mappings', async () => {
+		const payload = {
+			elements: [{ name: 'Block' }, { name: 'System' }, { name: 'Doc' }],
+			relationships: [
+				{
+					name: 'Refers',
+					source: 'Block',
+					target: 'Doc',
+					mappings: [
+						{ source: 'Block', target: 'Doc' },
+						{ source: 'System', target: 'Doc' }
+					]
+				}
+			]
+		};
+		server.use(http.get(`${BASE}/metamodel`, () => HttpResponse.json(payload)));
+		const result = await getMetamodel(cfg);
+		expect(result.relationships[0].mappings).toEqual([
+			{ source: 'Block', target: 'Doc' },
+			{ source: 'System', target: 'Doc' }
+		]);
+	});
+
 	it('uploadMetamodel with object body sends application/json', async () => {
 		let receivedContentType: string | null = null;
 		let receivedBody: unknown;
