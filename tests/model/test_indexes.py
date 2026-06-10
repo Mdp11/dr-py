@@ -70,6 +70,8 @@ def _fresh(model: Model) -> IndexSet:
 
 
 def _assert_matches_rebuild(model: Model) -> None:
+    from collections import Counter
+
     fresh = _fresh(model)
     for name in (
         "out_rels",
@@ -84,8 +86,15 @@ def _assert_matches_rebuild(model: Model) -> None:
         "uniq_key_of",
         "duplicate_keys",
     ):
-        assert getattr(model.indexes, name) == getattr(fresh, name), name
-    model.indexes.verify_consistent(model)
+        live = getattr(model.indexes, name)
+        expected = getattr(fresh, name)
+        # Counter.__eq__ ignores zero-count entries; compare as plain dicts so
+        # spurious zeros in the live index are caught.
+        if isinstance(live, Counter):
+            live = dict(live)
+            expected = dict(expected)
+        assert live == expected, name
+    model.indexes.verify_consistent()
 
 
 # ---------------------------------------------------------------------------
@@ -221,7 +230,7 @@ def test_duplicate_parallel_containment_edges_remove_by_relationship():
     assert model.indexes.containment_parents[d.id] == [f1.id, f2.id]
     assert model.container_of(d.id) == f1.id
     assert model.indexes.uniq_key_of[d.id][1] == f1.id
-    model.indexes.verify_consistent(model)
+    model.indexes.verify_consistent()
     _assert_matches_rebuild(model)
 
 
@@ -241,7 +250,7 @@ def test_duplicate_parallel_containment_edges_remove_earlier_edge():
     assert model.container_of(d.id) == f2.id
     # owner context changed -> uniqueness group re-keyed to the new first parent
     assert model.indexes.uniq_key_of[d.id][1] == f2.id
-    model.indexes.verify_consistent(model)
+    model.indexes.verify_consistent()
     _assert_matches_rebuild(model)
 
 
@@ -254,8 +263,8 @@ def test_disconnect_clears_adjacency_and_counts():
 
     assert a.id not in model.indexes.out_rels
     assert b.id not in model.indexes.in_rels
-    assert model.indexes.out_count[(a.id, "Links")] == 0
-    assert model.indexes.in_count[(b.id, "Links")] == 0
+    assert (a.id, "Links") not in model.indexes.out_count
+    assert (b.id, "Links") not in model.indexes.in_count
     _assert_matches_rebuild(model)
 
 
@@ -405,7 +414,7 @@ def test_rebuild_after_direct_population():
     assert model.indexes.ref_targets["p"] == {"d"}
     assert model.indexes.uniq_key_of["d"][1] == "f"
     assert model.container_of("d") == "f"
-    model.indexes.verify_consistent(model)
+    model.indexes.verify_consistent()
 
 
 def test_apply_change_request_result_has_consistent_indexes():
@@ -425,7 +434,7 @@ def test_apply_change_request_result_has_consistent_indexes():
         ],
     )
     result = apply_change_request(model, cr)
-    result.indexes.verify_consistent(result)
+    result.indexes.verify_consistent()
     assert result.relationships_from(a.id) == []
     assert "new" in result.indexes.elements_by_type["Folder"]
 
@@ -437,7 +446,42 @@ def test_verify_consistent_detects_corruption():
     model.connect("Links", a.id, b.id)
     model.indexes.out_count[(a.id, "Links")] += 1  # corrupt
     with pytest.raises(AssertionError):
-        model.indexes.verify_consistent(model)
+        model.indexes.verify_consistent()
+
+
+# ---------------------------------------------------------------------------
+# mutation-boundary guard: detached entities
+# ---------------------------------------------------------------------------
+
+
+def test_set_property_on_detached_element_raises_and_leaves_indexes_intact():
+    """set_property must reject an Element not registered in the model and must
+    not mutate any index state in the process."""
+    model = Model(_mm())
+    owned = model.create_element("Doc")
+    model.set_property(owned, "name", "real")
+
+    # A detached Element that was never added to this model.
+    detached = Element(id="detached-id", type_name="Doc", properties={})
+
+    with pytest.raises(KeyError, match="not part of this model"):
+        model.set_property(detached, "name", "should-not-land")
+
+    # The detached element must not appear in any index.
+    assert "detached-id" not in model.indexes.uniq_key_of
+    assert "detached-id" not in model.indexes.elements_by_type.get("Doc", set())
+    # The owned element's indexes must be undisturbed.
+    _assert_matches_rebuild(model)
+
+
+def test_set_property_on_deleted_element_raises():
+    """An element removed from the model is detached; set_property must reject it."""
+    model = Model(_mm())
+    el = model.create_element("Person")
+    model.delete_element(el.id)
+
+    with pytest.raises(KeyError, match="not part of this model"):
+        model.set_property(el, "name", "ghost")
 
 
 # ---------------------------------------------------------------------------
