@@ -381,6 +381,53 @@ def test_validate_inline(client: TestClient) -> None:
     assert res.json() == []
 
 
+def test_validate_full_session_run_populates_validation_state(
+    client: TestClient,
+) -> None:
+    from data_rover.api.session import get_session
+
+    snapshot = _seed_example_model(client)
+    assert get_session().validation is None
+
+    # an inline validation must NOT seed the session state (different model)
+    res = client.post(
+        "/api/v1/model/validate",
+        json={
+            "inline": {
+                "elements": snapshot["elements"],
+                "relationships": snapshot["relationships"],
+            }
+        },
+    )
+    assert res.status_code == 200
+    assert get_session().validation is None
+
+    # a full run on the session model seeds it
+    res = client.post("/api/v1/model/validate")
+    assert res.status_code == 200, res.text
+    state = get_session().validation  # the request mutated the session
+    assert state is not None
+    got = sorted(
+        (i.severity.value, i.message, tuple(i.target_ids))
+        for i in state.all_issues()
+    )
+    expected = sorted(
+        (i["severity"], i["message"], tuple(i["target_ids"])) for i in res.json()
+    )
+    assert got == expected
+
+    # replacing the model invalidates the baseline
+    res = client.post(
+        "/api/v1/model",
+        json={
+            "elements": snapshot["elements"],
+            "relationships": snapshot["relationships"],
+        },
+    )
+    assert res.status_code == 200
+    assert get_session().validation is None
+
+
 def test_delete_metamodel_clears_model(client: TestClient) -> None:
     _upload_example_metamodel(client)
     _empty_model(client)

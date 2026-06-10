@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends
 
 from data_rover.core.validation.pipeline import default_pipeline
 from data_rover.core.validation.scope import Scope
+from data_rover.core.validation.state import ValidationState
 
 from ..deps import Session, get_session, require_model
 from ..schemas import IssueOut, ValidateRequest
@@ -30,4 +31,10 @@ def validate_model(
         Scope(payload.scope) if payload and payload.scope is not None else Scope.all()
     )
     issues = default_pipeline().validate(model, scope)
+    if model is current and scope.is_all:
+        # seed the session issue store so incremental paths (Phase C) can
+        # delta from this full run instead of re-validating the whole model
+        state = ValidationState()
+        state.set_full(issues)
+        session.validation = state
     return [IssueOut.from_core(i) for i in issues]
