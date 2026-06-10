@@ -4,7 +4,7 @@ import datetime
 
 from ...metamodel.schema import Metamodel
 from ..issue import Issue, Severity
-from ..scope import Scope
+from ..pipeline import EntityValidator
 
 
 def value_conforms(value, datatype: str, metamodel: Metamodel) -> bool:
@@ -33,25 +33,42 @@ def value_conforms(value, datatype: str, metamodel: Metamodel) -> bool:
     return False
 
 
-class TypeConformanceValidator:
-    def validate(self, model, scope: Scope) -> list[Issue]:
-        issues: list[Issue] = []
-        mm = model.metamodel
-        for el in model.elements.values():
-            if not scope.includes(el.id):
-                continue
-            defs = {p.name: p for p in mm.effective_element_properties(el.type_name)}
-            issues.extend(self._check(el.type_name, el.id, defs, el.properties, model))
-        for rel in model.relationships.values():
-            if not scope.includes(rel.id):
-                continue
-            defs = {
-                p.name: p for p in mm.effective_relationship_properties(rel.type_name)
-            }
-            issues.extend(
-                self._check(rel.type_name, rel.id, defs, rel.properties, model)
+class TypeConformanceValidator(EntityValidator):
+    def __init__(self) -> None:
+        # per-type memo of {prop name: (datatype, is element reference)},
+        # invalidated when a model with a different metamodel comes along;
+        # keeps the per-entity hot path free of metamodel lookups (which go
+        # through pydantic private-attribute access)
+        self._mm: Metamodel | None = None
+        self._element_defs: dict[str, dict[str, tuple[str, bool]]] = {}
+        self._relationship_defs: dict[str, dict[str, tuple[str, bool]]] = {}
+
+    def _defs(
+        self, mm: Metamodel, type_name: str, of_element: bool
+    ) -> dict[str, tuple[str, bool]]:
+        if mm is not self._mm:
+            self._mm = mm
+            self._element_defs = {}
+            self._relationship_defs = {}
+        cache = self._element_defs if of_element else self._relationship_defs
+        defs = cache.get(type_name)
+        if defs is None:
+            props = (
+                mm.effective_element_properties(type_name)
+                if of_element
+                else mm.effective_relationship_properties(type_name)
             )
-        return issues
+            defs = {p.name: (p.datatype, mm.is_element_type(p.datatype)) for p in props}
+            cache[type_name] = defs
+        return defs
+
+    def validate_element(self, model, el) -> list[Issue]:
+        defs = self._defs(model.metamodel, el.type_name, of_element=True)
+        return self._check(el.type_name, el.id, defs, el.properties, model)
+
+    def validate_relationship(self, model, rel) -> list[Issue]:
+        defs = self._defs(model.metamodel, rel.type_name, of_element=False)
+        return self._check(rel.type_name, rel.id, defs, rel.properties, model)
 
     def _check(self, type_name, owner_id, defs, properties, model) -> list[Issue]:
         out: list[Issue] = []
@@ -60,22 +77,23 @@ class TypeConformanceValidator:
             pdef = defs.get(name)
             if pdef is None or value is None:
                 continue
+            datatype, is_reference = pdef
             values = value if isinstance(value, list) else [value]
-            if mm.is_element_type(pdef.datatype):
+            if is_reference:
                 for item in values:
                     out.extend(
                         self._reference_issues(
-                            type_name, owner_id, name, item, pdef.datatype, model
+                            type_name, owner_id, name, item, datatype, model
                         )
                     )
             else:
                 for item in values:
-                    if not value_conforms(item, pdef.datatype, mm):
+                    if not value_conforms(item, datatype, mm):
                         out.append(
                             Issue(
                                 Severity.ERROR,
                                 f"{type_name}.{name}: value {item!r} is not a "
-                                f"valid {pdef.datatype}",
+                                f"valid {datatype}",
                                 [owner_id],
                             )
                         )

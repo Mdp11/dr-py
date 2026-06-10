@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from ...metamodel.multiplicity import Multiplicity
+from ...metamodel.schema import EndConstraint, Metamodel
 from ..issue import Issue, Severity
-from ..scope import Scope
+from ..pipeline import EntityValidator
+
+# (property name, raw multiplicity spec, parsed multiplicity)
+_PropMult = tuple[str, str, Multiplicity]
 
 
 def _count(value) -> int:
@@ -13,86 +17,114 @@ def _count(value) -> int:
     return 1
 
 
-class MultiplicityValidator:
-    def validate(self, model, scope: Scope) -> list[Issue]:
+class MultiplicityValidator(EntityValidator):
+    def __init__(self) -> None:
+        # per-type memos, invalidated when a model with a different metamodel
+        # comes along; they keep the per-entity hot path free of metamodel
+        # lookups (which go through pydantic private-attribute access)
+        self._mm: Metamodel | None = None
+        self._element_mults: dict[str, tuple[_PropMult, ...]] = {}
+        self._relationship_mults: dict[str, tuple[_PropMult, ...]] = {}
+        self._end_constraints: dict[str, tuple[EndConstraint, ...]] = {}
+
+    def _reset(self, mm: Metamodel) -> None:
+        if mm is not self._mm:
+            self._mm = mm
+            self._element_mults = {}
+            self._relationship_mults = {}
+            self._end_constraints = {}
+
+    def _prop_mults(
+        self, mm: Metamodel, type_name: str, of_element: bool
+    ) -> tuple[_PropMult, ...]:
+        cache = self._element_mults if of_element else self._relationship_mults
+        mults = cache.get(type_name)
+        if mults is None:
+            props = (
+                mm.effective_element_properties(type_name)
+                if of_element
+                else mm.effective_relationship_properties(type_name)
+            )
+            # "0..*" can never be violated; drop it from the hot path
+            mults = tuple(
+                (p.name, p.multiplicity, mult)
+                for p in props
+                if (mult := Multiplicity.parse(p.multiplicity)).lower > 0
+                or mult.upper is not None
+            )
+            cache[type_name] = mults
+        return mults
+
+    def validate_element(self, model, el) -> list[Issue]:
         issues: list[Issue] = []
         mm = model.metamodel
+        self._reset(mm)
         # property multiplicity
-        for el in model.elements.values():
-            if not scope.includes(el.id):
-                continue
-            for pdef in mm.effective_element_properties(el.type_name):
-                mult = Multiplicity.parse(pdef.multiplicity)
-                count = _count(el.properties.get(pdef.name))
-                if not mult.count_ok(count):
-                    issues.append(
-                        Issue(
-                            Severity.ERROR,
-                            f"{el.type_name}.{pdef.name}: {count} value(s) violates "
-                            f"multiplicity {pdef.multiplicity!r}",
-                            [el.id],
-                        )
+        properties = el.properties
+        for name, spec, mult in self._prop_mults(mm, el.type_name, of_element=True):
+            count = _count(properties.get(name))
+            if not mult.count_ok(count):
+                issues.append(
+                    Issue(
+                        Severity.ERROR,
+                        f"{el.type_name}.{name}: {count} value(s) violates "
+                        f"multiplicity {spec!r}",
+                        [el.id],
                     )
-        for rel in model.relationships.values():
-            if not scope.includes(rel.id):
-                continue
-            for pdef in mm.effective_relationship_properties(rel.type_name):
-                mult = Multiplicity.parse(pdef.multiplicity)
-                count = _count(rel.properties.get(pdef.name))
-                if not mult.count_ok(count):
-                    issues.append(
-                        Issue(
-                            Severity.ERROR,
-                            f"{rel.type_name}.{pdef.name}: {count} value(s) violates "
-                            f"multiplicity {pdef.multiplicity!r}",
-                            [rel.id],
-                        )
-                    )
-        # relationship-end multiplicity (target end: targets per source)
-        for rt in mm.relationships:
-            if rt.abstract:
-                continue
-            target_mult = Multiplicity.parse(rt.target_multiplicity)
-            source_mult = Multiplicity.parse(rt.source_multiplicity)
-            mapping_sources = {m.source for m in rt.mappings}
-            mapping_targets = {m.target for m in rt.mappings}
-            for el in model.elements.values():
-                if not scope.includes(el.id):
-                    continue
-                if any(mm.is_element_subtype(el.type_name, s) for s in mapping_sources):
-                    out = len(
-                        [
-                            r
-                            for r in model.relationships.values()
-                            if r.type_name == rt.name and r.source_id == el.id
-                        ]
-                    )
-                    if not target_mult.count_ok(out):
+                )
+        # relationship-end multiplicity, via precomputed per-type constraints
+        # and the model's incremental degree counters
+        constraints = self._end_constraints.get(el.type_name)
+        if constraints is None:
+            constraints = tuple(mm.end_constraints(el.type_name))
+            self._end_constraints[el.type_name] = constraints
+        if constraints:
+            indexes = model.indexes
+            for ec in constraints:
+                if ec.end == "target":
+                    out = indexes.count_out(el.id, ec.rel_type_name)
+                    if not ec.multiplicity.count_ok(out):
+                        rt = mm.relationship_type(ec.rel_type_name)
+                        assert rt is not None  # constraints come from the mm
                         issues.append(
                             Issue(
                                 Severity.ERROR,
-                                f"{rt.name}: element {el.id} has {out} target(s), "
-                                f"violates target multiplicity "
+                                f"{ec.rel_type_name}: element {el.id} has {out} "
+                                f"target(s), violates target multiplicity "
                                 f"{rt.target_multiplicity!r}",
                                 [el.id],
                             )
                         )
-                if any(mm.is_element_subtype(el.type_name, t) for t in mapping_targets):
-                    inc = len(
-                        [
-                            r
-                            for r in model.relationships.values()
-                            if r.type_name == rt.name and r.target_id == el.id
-                        ]
-                    )
-                    if not source_mult.count_ok(inc):
+                else:
+                    inc = indexes.count_in(el.id, ec.rel_type_name)
+                    if not ec.multiplicity.count_ok(inc):
+                        rt = mm.relationship_type(ec.rel_type_name)
+                        assert rt is not None
                         issues.append(
                             Issue(
                                 Severity.ERROR,
-                                f"{rt.name}: element {el.id} has {inc} source(s), "
-                                f"violates source multiplicity "
+                                f"{ec.rel_type_name}: element {el.id} has {inc} "
+                                f"source(s), violates source multiplicity "
                                 f"{rt.source_multiplicity!r}",
                                 [el.id],
                             )
                         )
+        return issues
+
+    def validate_relationship(self, model, rel) -> list[Issue]:
+        issues: list[Issue] = []
+        mm = model.metamodel
+        self._reset(mm)
+        properties = rel.properties
+        for name, spec, mult in self._prop_mults(mm, rel.type_name, of_element=False):
+            count = _count(properties.get(name))
+            if not mult.count_ok(count):
+                issues.append(
+                    Issue(
+                        Severity.ERROR,
+                        f"{rel.type_name}.{name}: {count} value(s) violates "
+                        f"multiplicity {spec!r}",
+                        [rel.id],
+                    )
+                )
         return issues

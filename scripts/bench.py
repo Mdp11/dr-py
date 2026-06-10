@@ -67,11 +67,6 @@ def bench_load(model_path: Path, metamodel_path: Path) -> Model:
 
 def bench_validation(model: Model, limit_seconds: float) -> None:
     """(2) full validation via default_pipeline over Scope.all()."""
-    print(
-        f"  note: full validation on the current unoptimized pipeline is "
-        f"O(n^2)-ish and may take far longer than {limit_seconds:.0f}s on "
-        f"large fixtures; pass --skip-validation to skip this step."
-    )
     t0 = time.perf_counter()
     issues = default_pipeline().validate(model, Scope.all())
     elapsed = time.perf_counter() - t0

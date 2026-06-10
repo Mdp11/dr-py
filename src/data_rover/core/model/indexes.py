@@ -39,11 +39,7 @@ UniqKey = tuple[str, "str | None", Hashable]
 
 
 def _frozen(value: Any) -> Hashable:
-    """Deep-freeze a JSON-ish property value into a hashable signature.
-
-    Moved here from the uniqueness validator (which keeps its own identical
-    copy until it is rewritten to consume the IndexSet).
-    """
+    """Deep-freeze a JSON-ish property value into a hashable signature."""
     if isinstance(value, dict):
         return tuple(sorted((k, _frozen(v)) for k, v in value.items()))
     if isinstance(value, list):

@@ -1,43 +1,73 @@
 from __future__ import annotations
 
-from ..containment_context import containment_parents
 from ..issue import Issue, Severity
+from ..pipeline import EntityValidator
 from ..scope import Scope
 
 
-class ContainmentValidator:
-    def validate(self, model, scope: Scope) -> list[Issue]:
+def _walk_reaches_cycle(indexes, start: str, safe: set[str]) -> bool:
+    """Walk the first-parent chain from `start`; True if it reaches a cycle.
+
+    `safe` memoizes nodes known to terminate, so a sweep over the whole model
+    stays O(elements) overall instead of O(elements * depth).
+    """
+    seen: set[str] = set()
+    node: str | None = start
+    while node is not None and node not in seen and node not in safe:
+        seen.add(node)
+        node = indexes.first_parent(node)
+    if node is None or node in safe:
+        safe.update(seen)
+        return False
+    return True
+
+
+class ContainmentValidator(EntityValidator):
+    def validate_element(self, model, el) -> list[Issue]:
+        # single-parent: each element contained at most once
+        parents = model.indexes.parents_of(el.id)
+        if len(parents) > 1:
+            return [
+                Issue(
+                    Severity.ERROR,
+                    f"Element {el.id} has {len(parents)} containment parents "
+                    "(must have at most one)",
+                    [el.id],
+                )
+            ]
+        return []
+
+    def validate_global(self, model, scope: Scope) -> list[Issue]:
         issues: list[Issue] = []
-        parents = containment_parents(model)
-
-        # single-parent: each target contained at most once
-        for target_id, srcs in parents.items():
-            if len(srcs) > 1 and scope.includes(target_id):
-                issues.append(
-                    Issue(
-                        Severity.ERROR,
-                        f"Element {target_id} has {len(srcs)} containment parents "
-                        "(must have at most one)",
-                        [target_id],
+        indexes = model.indexes
+        safe: set[str] = set()
+        if scope.ids is None:
+            # exhaustive sweep: report the first containment cycle reached from
+            # any contained element (one representative issue per run, matching
+            # the historical behaviour)
+            for start in indexes.containment_parents:
+                if _walk_reaches_cycle(indexes, start, safe):
+                    issues.append(
+                        Issue(
+                            Severity.ERROR,
+                            f"Containment cycle detected involving element {start}",
+                            [start],
+                        )
                     )
-                )
-
-        # acyclic: detect a cycle in child -> parent edges
-        parent_of = {t: s[0] for t, s in parents.items()}
-        for start in parent_of:
-            seen: set[str] = set()
-            node: str | None = start
-            while node is not None and node not in seen:
-                seen.add(node)
-                node = parent_of.get(node)
-            if node is not None and scope.includes(start):
-                issues.append(
-                    Issue(
-                        Severity.ERROR,
-                        f"Containment cycle detected involving element {start}",
-                        [start],
+                    break
+        else:
+            # scoped run: the per-entity parent-chain walk covers exactly the
+            # scoped elements (cycles entirely outside the scope are the full
+            # sweep's responsibility)
+            for entity_id in scope.ids:
+                if entity_id not in model.elements:
+                    continue
+                if _walk_reaches_cycle(indexes, entity_id, safe):
+                    issues.append(
+                        Issue(
+                            Severity.ERROR,
+                            f"Containment cycle detected involving element {entity_id}",
+                            [entity_id],
+                        )
                     )
-                )
-                break
-
         return issues

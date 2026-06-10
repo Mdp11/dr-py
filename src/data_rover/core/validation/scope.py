@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Set
 from typing import Iterable
 
 
@@ -20,6 +21,14 @@ class Scope:
     @property
     def is_all(self) -> bool:
         return self._ids is None
+
+    @property
+    def ids(self) -> Set[str] | None:
+        """The scoped entity ids, or None when the scope is the whole model.
+
+        Returns a live internal view — do NOT mutate.
+        """
+        return self._ids
 
     def includes(self, entity_id: str) -> bool:
         return self._ids is None or entity_id in self._ids
