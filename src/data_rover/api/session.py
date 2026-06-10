@@ -17,6 +17,19 @@ class Session:
     #: paths (Phase C) delta from it via ValidationState.replace
     validation: ValidationState | None = None
 
+    def set_model(self, model: Model | None) -> None:
+        """Replace (or clear) the model and invalidate model-derived state."""
+        self.model = model
+        # view is intentionally untouched on model replacement
+        self.validation = None  # previous full-run baseline is now stale
+
+    def set_metamodel(self, metamodel: Metamodel | None) -> None:
+        """Replace (or clear) the metamodel; the model conforms to it, so the
+        model and its validation baseline are cleared too."""
+        self.metamodel = metamodel
+        self.model = None
+        self.validation = None
+
 
 _session = Session()
 

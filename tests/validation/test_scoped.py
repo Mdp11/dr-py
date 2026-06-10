@@ -1,10 +1,12 @@
 """Differential check of incremental (dirty-set scoped) validation.
 
 THE key correctness gate for Phase B: seeded random op sequences run through
-the Model mutation boundary with a DirtyCollector around each op; after every
-op the dirty scope is re-validated and spliced into a ValidationState, which
-must then equal a from-scratch FULL validation of the current model. Any
-under-scoped dirty set shows up as a stale/missing issue here.
+DirtyCollector's mutate-and-collect wrappers (the reference consumer of that
+API; the raw hooks are exercised by the cycle test below and by test_dirty);
+after every op the dirty scope is re-validated and spliced into a
+ValidationState, which must then equal a from-scratch FULL validation of the
+current model. Any under-scoped dirty set shows up as a stale/missing issue
+here.
 
 Containment-cycle issues are excluded from the equality (and covered by
 dedicated tests below): a full run reports ONE cycle issue naming an
@@ -67,56 +69,49 @@ def _random_op(
     """Perform one random mutation, collecting its dirty contributions."""
     element_ids = list(model.elements)
     rel_ids = list(model.relationships)
+    # only Link relationships declare a property, so only they can host a
+    # set_rel_prop op that actually mutates
+    link_rel_ids = [
+        rid for rid in rel_ids if model.relationships[rid].type_name == "Link"
+    ]
     choices = ["create", "set_prop", "connect"]
     if element_ids:
         choices += ["set_prop", "connect", "delete"]
     if rel_ids:
-        choices += ["disconnect", "set_rel_prop"]
+        choices += ["disconnect"]
+    if link_rel_ids:
+        choices += ["set_rel_prop"]
     op = rng.choice(choices)
 
     if op == "create" or not element_ids:
-        el = model.create_element(rng.choice(_CONCRETE_TYPES))
-        collector.on_element_created(model, el.id)
+        el = collector.create_element(model, rng.choice(_CONCRETE_TYPES))
         if rng.random() < 0.8:  # usually name it (missing name otherwise)
-            collector.before_element_props_change(model, el.id)
-            model.set_property(el, "name" if el.type_name != "Doc" else "title",
-                               rng.choice(["A", "B", "C", "D"]))
-            collector.after_element_props_change(model, el.id)
+            collector.set_property(
+                model,
+                el,
+                "name" if el.type_name != "Doc" else "title",
+                rng.choice(["A", "B", "C", "D"]),
+            )
     elif op == "set_prop":
-        eid = rng.choice(element_ids)
-        el = model.get_element(eid)
+        el = model.get_element(rng.choice(element_ids))
         prop = rng.choice(_PROPS_BY_TYPE[el.type_name])
-        collector.before_element_props_change(model, eid)
-        model.set_property(el, prop, _value_pool(rng, model, prop))
-        collector.after_element_props_change(model, eid)
+        collector.set_property(model, el, prop, _value_pool(rng, model, prop))
     elif op == "connect":
         if len(element_ids) < 2:
             return
-        rel_type = rng.choice(_REL_TYPES)
-        source_id = rng.choice(element_ids)
-        target_id = rng.choice(element_ids)
-        collector.before_connect(model, rel_type, source_id, target_id)
-        rel = model.connect(rel_type, source_id, target_id)
-        collector.on_relationship_created(model, rel.id)
+        collector.connect(
+            model,
+            rng.choice(_REL_TYPES),
+            rng.choice(element_ids),
+            rng.choice(element_ids),
+        )
     elif op == "disconnect":
-        rid = rng.choice(rel_ids)
-        rel = model.get_relationship(rid)
-        rel_type, target_id = rel.type_name, rel.target_id
-        collector.before_disconnect(model, rid)
-        model.disconnect(rid)
-        collector.after_disconnect(model, rel_type, target_id)
+        collector.disconnect(model, rng.choice(rel_ids))
     elif op == "set_rel_prop":
-        rid = rng.choice(rel_ids)
-        rel = model.get_relationship(rid)
-        if rel.type_name == "Link":
-            collector.on_relationship_props_changed(rid)
-            model.set_property(rel, "label", rng.choice(["ok", None]))
-        else:
-            collector.on_relationship_props_changed(rid)  # still a valid set
+        rel = model.get_relationship(rng.choice(link_rel_ids))
+        collector.set_property(model, rel, "label", rng.choice(["ok", None]))
     else:  # delete
-        eid = rng.choice(element_ids)
-        collector.before_element_delete(model, eid)
-        model.delete_element(eid)
+        collector.delete_element(model, rng.choice(element_ids))
 
 
 def _normalized(issues, *, drop_cycles: bool):
@@ -183,11 +178,12 @@ def test_containment_cycle_via_connect_is_detected_by_scoped_revalidation():
     state.set_full(pipeline.validate(model, Scope.all()))
     assert not any("Containment cycle" in i.message for i in state.all_issues())
 
-    # close the loop: c contains a
+    # close the loop: c contains a (raw hooks on purpose — keeps the
+    # unwrapped hook protocol covered alongside the wrapper-based loop above)
     collector = DirtyCollector()
     collector.before_connect(model, "HasPart", c.id, a.id)
     rel = model.connect("HasPart", c.id, a.id)
-    collector.on_relationship_created(model, rel.id)
+    collector.after_connect(model, rel.id)
 
     dirty = list(collector.ids)
     scoped_issues = pipeline.validate(model, collector.to_scope())

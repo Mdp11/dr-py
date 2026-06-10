@@ -1,4 +1,5 @@
 """POST /model/apply-cr — apply a change request to an inline model snapshot."""
+
 from __future__ import annotations
 
 from dataclasses import asdict
@@ -30,8 +31,18 @@ from ._snapshot import _build_model_from_payload
 router = APIRouter()
 
 
-def _gate_cr_result(metamodel: Metamodel, base: Model, result: Model,
-                    cr: ChangeRequest) -> None:
+def _require_endpoint(result: Model, rid: str, role: str, element_id: str) -> None:
+    """422 unless *element_id* resolves in the result model."""
+    if element_id not in result.elements:
+        raise HTTPException(
+            status_code=422,
+            detail=(f"Relationship {rid!r} references unknown {role} {element_id!r}"),
+        )
+
+
+def _gate_cr_result(
+    metamodel: Metamodel, base: Model, result: Model, cr: ChangeRequest
+) -> None:
     """422 gate for entities the CR introduced or rewired.
 
     The inline payload was already gated by ``_build_model_from_payload``, so
@@ -41,6 +52,15 @@ def _gate_cr_result(metamodel: Metamodel, base: Model, result: Model,
     - added/modified elements: type must exist and not be abstract
     - added/modified relationships: type must exist, endpoints must resolve
     - deleted elements: no surviving relationship may still reference them
+
+    The last two checks interlock: a relationship rewired onto a deleted
+    element is already caught by the added/modified endpoint checks, so the
+    deleted-elements loop only needs to walk the relationships incident in
+    the BASE model. Note also that the added/modified checks run on every
+    listed ``after`` state, so a CR that modifies an entity invalidly AND
+    deletes it in the same request is now rejected — more correct than the
+    old full-rebuild gate, where the delete silently won and the invalid
+    modification went unchecked.
     """
     for el in (*cr.elements_added, *(m.after for m in cr.elements_modified)):
         et = metamodel.element_type(el.type_name)
@@ -66,22 +86,8 @@ def _gate_cr_result(metamodel: Metamodel, base: Model, result: Model,
                 status_code=422,
                 detail=f"Unknown relationship type {rel.type_name!r}",
             )
-        if rel.source_id not in result.elements:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    f"Relationship {rid!r} references unknown source "
-                    f"{rel.source_id!r}"
-                ),
-            )
-        if rel.target_id not in result.elements:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    f"Relationship {rid!r} references unknown target "
-                    f"{rel.target_id!r}"
-                ),
-            )
+        _require_endpoint(result, rid, "source", rel.source_id)
+        _require_endpoint(result, rid, "target", rel.target_id)
 
     # CR deletes do not cascade: every relationship that touched a deleted
     # element in the base must have been deleted/re-targeted by the CR too
@@ -91,22 +97,8 @@ def _gate_cr_result(metamodel: Metamodel, base: Model, result: Model,
             survivor = result.relationships.get(rid)
             if survivor is None:
                 continue
-            if survivor.source_id not in result.elements:
-                raise HTTPException(
-                    status_code=422,
-                    detail=(
-                        f"Relationship {rid!r} references unknown source "
-                        f"{survivor.source_id!r}"
-                    ),
-                )
-            if survivor.target_id not in result.elements:
-                raise HTTPException(
-                    status_code=422,
-                    detail=(
-                        f"Relationship {rid!r} references unknown target "
-                        f"{survivor.target_id!r}"
-                    ),
-                )
+            _require_endpoint(result, rid, "source", survivor.source_id)
+            _require_endpoint(result, rid, "target", survivor.target_id)
 
 
 @router.post("/model/apply-cr", response_model=None)

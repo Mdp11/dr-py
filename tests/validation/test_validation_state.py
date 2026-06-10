@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from data_rover.core.validation.issue import Issue, Severity
 from data_rover.core.validation.state import (
     IssuesDelta,
@@ -16,7 +18,10 @@ def _issue(owner: str, message: str, severity: Severity = Severity.ERROR) -> Iss
 
 def test_issue_owner_is_first_target_id():
     assert issue_owner(Issue(Severity.ERROR, "m", ["a", "b"])) == "a"
-    assert issue_owner(Issue(Severity.ERROR, "m", [])) == ""
+    # owner-less issues would be keyed under the "" sentinel, which never
+    # appears in a dirty set — the debug assert rejects them outright
+    with pytest.raises(AssertionError):
+        issue_owner(Issue(Severity.ERROR, "m", []))
 
 
 def test_set_full_groups_by_owner_preserving_order():
