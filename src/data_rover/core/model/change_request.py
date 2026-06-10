@@ -287,4 +287,6 @@ def apply_change_request(model: Model, cr: ChangeRequest) -> Model:
     result = Model(model.metamodel)
     result.elements = new_elements
     result.relationships = new_relationships
+    # dicts were populated directly, bypassing the mutation boundary
+    result.indexes.rebuild()
     return result

@@ -92,4 +92,6 @@ def _build_model_from_payload(
             rev=r.rev,
         )
 
+    # dicts were populated directly, bypassing the mutation boundary
+    model.indexes.rebuild()
     return model
