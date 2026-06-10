@@ -73,6 +73,12 @@ class IndexSet:
         self.elements_by_type: dict[str, set[str]] = {}
         #: child id -> containment parent ids, in relationship insertion order
         self.containment_parents: dict[str, list[str]] = {}
+        # child id -> containment relationship ids, aligned index-by-index with
+        # containment_parents[child id]; removal happens by relationship id so
+        # duplicate parallel edges to the same parent keep relative order (a
+        # remove-by-parent-value would always drop the FIRST matching entry and
+        # diverge from rebuild()'s relationship-insertion order)
+        self._containment_rel_ids: dict[str, list[str]] = {}
         #: element_id -> ids of entities (elements AND relationships) whose
         #: reference-typed property values point at it; entries survive the
         #: deletion of the target as long as a dangling reference is held
@@ -144,6 +150,7 @@ class IndexSet:
         self._update_refs(rel.id, self._relationship_refs(rel))
         if self._containment(rel.type_name):
             self.containment_parents.setdefault(rel.target_id, []).append(rel.source_id)
+            self._containment_rel_ids.setdefault(rel.target_id, []).append(rel.id)
             self._rekey_if_present(rel.target_id)
 
     def on_relationship_deleted(self, rel: Relationship) -> None:
@@ -161,14 +168,19 @@ class IndexSet:
         self._decrement(self.in_count, (rel.target_id, rel.type_name))
         self._update_refs(rel.id, set())
         if self._containment(rel.type_name):
-            parents = self.containment_parents.get(rel.target_id)
-            if parents is not None:
+            rel_ids = self._containment_rel_ids.get(rel.target_id)
+            if rel_ids is not None:
                 try:
-                    parents.remove(rel.source_id)
+                    index = rel_ids.index(rel.id)
                 except ValueError:
                     pass
-                if not parents:
-                    del self.containment_parents[rel.target_id]
+                else:
+                    del rel_ids[index]
+                    parents = self.containment_parents[rel.target_id]
+                    del parents[index]
+                    if not rel_ids:
+                        del self._containment_rel_ids[rel.target_id]
+                        del self.containment_parents[rel.target_id]
             self._rekey_if_present(rel.target_id)
 
     def on_properties_changed(self, entity: Element | Relationship) -> None:
@@ -191,6 +203,7 @@ class IndexSet:
         self.in_count.clear()
         self.elements_by_type.clear()
         self.containment_parents.clear()
+        self._containment_rel_ids.clear()
         self.ref_targets.clear()
         self.uniq_groups.clear()
         self.uniq_key_of.clear()
@@ -208,6 +221,7 @@ class IndexSet:
                 self.containment_parents.setdefault(rel.target_id, []).append(
                     rel.source_id
                 )
+                self._containment_rel_ids.setdefault(rel.target_id, []).append(rel.id)
         for element in self._model.elements.values():
             self.elements_by_type.setdefault(element.type_name, set()).add(element.id)
             self._add_to_group(element)
@@ -232,6 +246,7 @@ class IndexSet:
                 "in_count",
                 "elements_by_type",
                 "containment_parents",
+                "_containment_rel_ids",
                 "ref_targets",
                 "uniq_groups",
                 "uniq_key_of",
