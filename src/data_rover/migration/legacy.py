@@ -471,9 +471,13 @@ def validate_model_issues(
 ) -> list[Issue]:
     """Run the default validation pipeline over a migration's model output."""
     model = _materialize_model(result)
+    # `on_validator` announces the pipeline's roster up-front (one callback
+    # per validator BEFORE any validation work; the pipeline interleaves all
+    # validators over a single entity sweep), so print the roster as such —
+    # there is no per-validator "running" phase to report.
     on_validator: Callable[[str], None] | None = None
     if progress is not None:
-        on_validator = lambda name: _emit(progress, f"  running {name}...")  # noqa: E731
+        on_validator = lambda name: _emit(progress, f"  validator: {name}")  # noqa: E731
 
     return default_pipeline().validate(model, on_validator=on_validator)
 

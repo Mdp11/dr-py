@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from data_rover.core.model.model import Model
-from data_rover.core.validation.containment_context import containment_parents
 from data_rover.core.validation.issue import Issue, Severity
 
 from .schema import Folder, View
@@ -24,7 +23,7 @@ def validate_view(view: View, model: Model) -> list[Issue]:
     """
 
     issues: list[Issue] = []
-    parents = containment_parents(model)
+    indexes = model.indexes
     placed: dict[str, str] = {}
 
     def visit(folder: Folder, ancestor_names: list[str]) -> None:
@@ -62,7 +61,7 @@ def validate_view(view: View, model: Model) -> list[Issue]:
                     )
                 )
                 continue
-            if element_id in parents:
+            if indexes.parents_of(element_id):
                 issues.append(
                     Issue(
                         Severity.WARNING,

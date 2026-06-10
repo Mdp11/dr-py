@@ -84,6 +84,6 @@ def test_progress_messages_emitted(tmp_path):
     assert any("Building the new metamodel" in m for m in msgs)
     assert any("Converting" in m for m in msgs)
     assert any("Validating output" in m for m in msgs)
-    # each validator reports as it runs
-    assert any("running MultiplicityValidator" in m for m in msgs)
+    # the pipeline announces its validator roster up-front
+    assert any("validator: MultiplicityValidator" in m for m in msgs)
     assert msgs[-1] == "Done."

@@ -85,6 +85,26 @@ def test_scoped_run_resolves_only_scoped_entities():
     assert b.id not in v.element_ids
 
 
+def test_scoped_run_visits_entities_in_scope_insertion_order():
+    # Scope preserves caller insertion order (not hash order), so scoped
+    # issue output is deterministic across processes / PYTHONHASHSEED values.
+    model = _model()
+    ids = [model.create_element("Block").id for _ in range(8)]
+    v = _StubValidator("v")
+    issues = ValidationPipeline([v]).validate(model, Scope(ids))
+    assert [i.message for i in issues] == [
+        *(f"v:element:{eid}" for eid in ids),
+        "v:global",
+    ]
+    # a scope built in the reverse order replays that order, byte for byte
+    v2 = _StubValidator("v2")
+    issues2 = ValidationPipeline([v2]).validate(model, Scope(reversed(ids)))
+    assert [i.message for i in issues2] == [
+        *(f"v2:element:{eid}" for eid in reversed(ids)),
+        "v2:global",
+    ]
+
+
 def test_pipeline_reports_each_validator_to_callback():
     v1, v2 = _StubValidator("v1"), _StubValidator("v2")
     seen: list[str] = []

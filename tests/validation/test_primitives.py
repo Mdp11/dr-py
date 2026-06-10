@@ -19,3 +19,11 @@ def test_scope_subset_includes_only_listed():
     assert s.includes("a") is True
     assert s.includes("z") is False
     assert s.is_all is False
+
+
+def test_scope_ids_preserve_insertion_order():
+    # first occurrence wins, duplicates dropped; iteration replays the
+    # caller's order so scoped issue output is deterministic
+    s = Scope(["b", "a", "c", "a"])
+    assert s.ids is not None
+    assert list(s.ids) == ["b", "a", "c"]

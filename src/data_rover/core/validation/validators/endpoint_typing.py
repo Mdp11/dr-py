@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from ...metamodel.schema import Metamodel
 from ..issue import Issue, Severity
-from ..pipeline import EntityValidator
+from ..pipeline import EntityValidator, MetamodelMemo
 
 # (source ok, target ok, (source, target) pair matches one mapping)
 _Decision = tuple[bool, bool, bool]
@@ -12,16 +12,14 @@ class EndpointTypingValidator(EntityValidator):
     def __init__(self) -> None:
         # decision memo per (rel type, source type, target type) — the number
         # of distinct combinations is metamodel-sized, so per-relationship
-        # work collapses to a dict lookup; invalidated when a model with a
-        # different metamodel comes along
-        self._mm: Metamodel | None = None
+        # work collapses to a dict lookup; invalidation is handled by
+        # MetamodelMemo (see its docstring)
         self._decisions: dict[tuple[str, str | None, str | None], _Decision] = {}
+        self._memo = MetamodelMemo(self._decisions)
 
     def validate_relationship(self, model, rel) -> list[Issue]:
         mm = model.metamodel
-        if mm is not self._mm:
-            self._mm = mm
-            self._decisions = {}
+        self._memo.sync(mm)
         src = model.elements.get(rel.source_id)
         tgt = model.elements.get(rel.target_id)
         src_type = None if src is None else src.type_name

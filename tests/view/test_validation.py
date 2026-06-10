@@ -37,6 +37,8 @@ def _model_with(block_ids: list[str], part_ids: list[tuple[str, str]]) -> Model:
             source_id=parent_bid,
             target_id=pid,
         )
+    # dicts were populated directly, bypassing the mutation boundary
+    m.indexes.rebuild()
     return m
 
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from ...metamodel.multiplicity import Multiplicity
 from ...metamodel.schema import EndConstraint, Metamodel
 from ..issue import Issue, Severity
-from ..pipeline import EntityValidator
+from ..pipeline import EntityValidator, MetamodelMemo
 
 # (property name, raw multiplicity spec, parsed multiplicity)
 _PropMult = tuple[str, str, Multiplicity]
@@ -19,20 +19,15 @@ def _count(value) -> int:
 
 class MultiplicityValidator(EntityValidator):
     def __init__(self) -> None:
-        # per-type memos, invalidated when a model with a different metamodel
-        # comes along; they keep the per-entity hot path free of metamodel
-        # lookups (which go through pydantic private-attribute access)
-        self._mm: Metamodel | None = None
+        # per-type memos keeping the per-entity hot path free of metamodel
+        # lookups (which go through pydantic private-attribute access);
+        # invalidation is handled by MetamodelMemo (see its docstring)
         self._element_mults: dict[str, tuple[_PropMult, ...]] = {}
         self._relationship_mults: dict[str, tuple[_PropMult, ...]] = {}
         self._end_constraints: dict[str, tuple[EndConstraint, ...]] = {}
-
-    def _reset(self, mm: Metamodel) -> None:
-        if mm is not self._mm:
-            self._mm = mm
-            self._element_mults = {}
-            self._relationship_mults = {}
-            self._end_constraints = {}
+        self._memo = MetamodelMemo(
+            self._element_mults, self._relationship_mults, self._end_constraints
+        )
 
     def _prop_mults(
         self, mm: Metamodel, type_name: str, of_element: bool
@@ -58,7 +53,7 @@ class MultiplicityValidator(EntityValidator):
     def validate_element(self, model, el) -> list[Issue]:
         issues: list[Issue] = []
         mm = model.metamodel
-        self._reset(mm)
+        self._memo.sync(mm)
         # property multiplicity
         properties = el.properties
         for name, spec, mult in self._prop_mults(mm, el.type_name, of_element=True):
@@ -114,7 +109,7 @@ class MultiplicityValidator(EntityValidator):
     def validate_relationship(self, model, rel) -> list[Issue]:
         issues: list[Issue] = []
         mm = model.metamodel
-        self._reset(mm)
+        self._memo.sync(mm)
         properties = rel.properties
         for name, spec, mult in self._prop_mults(mm, rel.type_name, of_element=False):
             count = _count(properties.get(name))
