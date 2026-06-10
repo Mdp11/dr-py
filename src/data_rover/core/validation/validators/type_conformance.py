@@ -4,7 +4,7 @@ import datetime
 
 from ...metamodel.schema import Metamodel
 from ..issue import Issue, Severity
-from ..pipeline import EntityValidator
+from ..pipeline import EntityValidator, MetamodelMemo
 
 
 def value_conforms(value, datatype: str, metamodel: Metamodel) -> bool:
@@ -36,20 +36,17 @@ def value_conforms(value, datatype: str, metamodel: Metamodel) -> bool:
 class TypeConformanceValidator(EntityValidator):
     def __init__(self) -> None:
         # per-type memo of {prop name: (datatype, is element reference)},
-        # invalidated when a model with a different metamodel comes along;
-        # keeps the per-entity hot path free of metamodel lookups (which go
-        # through pydantic private-attribute access)
-        self._mm: Metamodel | None = None
+        # keeping the per-entity hot path free of metamodel lookups (which go
+        # through pydantic private-attribute access); invalidation is handled
+        # by MetamodelMemo (see its docstring)
         self._element_defs: dict[str, dict[str, tuple[str, bool]]] = {}
         self._relationship_defs: dict[str, dict[str, tuple[str, bool]]] = {}
+        self._memo = MetamodelMemo(self._element_defs, self._relationship_defs)
 
     def _defs(
         self, mm: Metamodel, type_name: str, of_element: bool
     ) -> dict[str, tuple[str, bool]]:
-        if mm is not self._mm:
-            self._mm = mm
-            self._element_defs = {}
-            self._relationship_defs = {}
+        self._memo.sync(mm)
         cache = self._element_defs if of_element else self._relationship_defs
         defs = cache.get(type_name)
         if defs is None:

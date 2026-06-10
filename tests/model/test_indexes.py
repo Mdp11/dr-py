@@ -194,6 +194,23 @@ def test_containment_connect_rekeys_target_group():
     _assert_matches_rebuild(model)
 
 
+def test_parents_of_reports_containment_parents_only():
+    # parents_of feeds containment-aware consumers (e.g. view validation):
+    # it must list containment parents, ignore non-containment relationships,
+    # and report nothing for uncontained elements
+    model = Model(_mm())
+    folder = model.create_element("Folder")
+    contained = model.create_element("Doc")
+    linked = model.create_element("Doc")
+    model.connect("Contains", folder.id, contained.id)
+    model.connect("Links", contained.id, linked.id)
+
+    assert list(model.indexes.parents_of(contained.id)) == [folder.id]
+    assert not model.indexes.parents_of(linked.id)  # Links is not containment
+    assert not model.indexes.parents_of(folder.id)  # uncontained
+    _assert_matches_rebuild(model)
+
+
 def test_multiple_containment_parents_keep_insertion_order():
     model = Model(_mm())
     f1 = model.create_element("Folder")

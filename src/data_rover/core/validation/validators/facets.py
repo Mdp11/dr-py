@@ -4,25 +4,22 @@ import re
 
 from ...metamodel.schema import Metamodel, PropertyDef
 from ..issue import Issue, Severity
-from ..pipeline import EntityValidator
+from ..pipeline import EntityValidator, MetamodelMemo
 
 
 class FacetsValidator(EntityValidator):
     def __init__(self) -> None:
         # per-type memo of the properties that actually carry a facet (most
         # carry none, so most entities are skipped with one dict lookup);
-        # invalidated when a model with a different metamodel comes along
-        self._mm: Metamodel | None = None
+        # invalidation is handled by MetamodelMemo (see its docstring)
         self._element_defs: dict[str, dict[str, PropertyDef]] = {}
         self._relationship_defs: dict[str, dict[str, PropertyDef]] = {}
+        self._memo = MetamodelMemo(self._element_defs, self._relationship_defs)
 
     def _defs(
         self, mm: Metamodel, type_name: str, of_element: bool
     ) -> dict[str, PropertyDef]:
-        if mm is not self._mm:
-            self._mm = mm
-            self._element_defs = {}
-            self._relationship_defs = {}
+        self._memo.sync(mm)
         cache = self._element_defs if of_element else self._relationship_defs
         defs = cache.get(type_name)
         if defs is None:

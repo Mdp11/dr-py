@@ -7,10 +7,13 @@ property multiplicity (element + relationship), relationship-end multiplicity
 endpoint typing, containment (single-parent + cycle), and uniqueness
 (keyed + keyless).
 
-The expected data was snapshotted from the pre-A3 per-validator pipeline and
-must stay byte-identical across the per-entity rewrite. Issue ORDER is not
-pinned (the rewrite interleaves validators per entity), so comparisons sort
-by (message, target_ids, severity).
+The expected data was snapshotted from the pre-A3 per-validator pipeline.
+If this test fails, treat it as a tripwire: an unintended behaviour change
+should be fixed in the validators, while a legitimate message/issue change
+means deliberately updating EXPECTED — review the diff issue by issue and
+call the change out in review. Issue ORDER is not pinned (the pipeline
+interleaves validators per entity), so comparisons sort by
+(message, target_ids, severity).
 """
 
 from __future__ import annotations
