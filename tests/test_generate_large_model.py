@@ -4,7 +4,11 @@ import json
 import sys
 from pathlib import Path
 
+from data_rover.api.routes._snapshot import _build_model_from_payload
+from data_rover.api.schemas import ElementOut, RelationshipOut
 from data_rover.core.metamodel.loader import load_metamodel_file
+from data_rover.core.validation.pipeline import default_pipeline
+from data_rover.core.validation.scope import Scope
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = REPO_ROOT / "examples"
@@ -56,3 +60,19 @@ def test_generator_is_deterministic(tmp_path):
     assert (tmp_path / "a.model.json").read_bytes() == (
         tmp_path / "b.model.json"
     ).read_bytes()
+
+
+def test_generated_model_is_validator_clean(tmp_path):
+    out = tmp_path / "fixture.model.json"
+    write_model(scale=2, out=out)
+
+    raw = json.loads(out.read_text(encoding="utf-8"))
+    metamodel = load_metamodel_file(METAMODEL_PATH)
+    elements = [ElementOut.model_validate(e) for e in raw.get("elements", [])]
+    relationships = [
+        RelationshipOut.model_validate(r) for r in raw.get("relationships", [])
+    ]
+    model = _build_model_from_payload(metamodel, elements, relationships)
+
+    issues = default_pipeline().validate(model, Scope.all())
+    assert issues == []
