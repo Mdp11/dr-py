@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 
 
 @dataclass(frozen=True)
@@ -24,7 +25,12 @@ class Multiplicity:
         return True
 
     @staticmethod
+    @lru_cache(maxsize=None)
     def parse(spec: str) -> Multiplicity:
+        # Pure string -> value parser, called per entity during validation;
+        # caching makes repeated parses of the same spec free. Multiplicity is
+        # frozen, so sharing the returned instance is safe. (Invalid specs
+        # raise and are therefore never cached.)
         spec = spec.strip()
         try:
             if ".." in spec:
