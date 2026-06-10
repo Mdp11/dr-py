@@ -252,3 +252,52 @@ def test_distinct_property_names_in_child_ok():
         ]
     )
     assert check_metamodel(mm) == []
+
+
+def test_multiple_valid_mappings_ok():
+    mm = Metamodel(
+        elements=[
+            ElementType(name="A"),
+            ElementType(name="B"),
+            ElementType(name="C"),
+            ElementType(name="D"),
+        ],
+        relationships=[
+            RelationshipType(
+                name="R",
+                mappings=[
+                    {"source": "A", "target": "B"},
+                    {"source": "C", "target": "D"},
+                ],
+            )
+        ],
+    )
+    assert check_metamodel(mm) == []
+
+
+def test_mapping_unknown_source_reported():
+    mm = Metamodel(
+        elements=[ElementType(name="A"), ElementType(name="B")],
+        relationships=[
+            RelationshipType(
+                name="R",
+                mappings=[
+                    {"source": "A", "target": "B"},
+                    {"source": "Ghost", "target": "B"},
+                ],
+            )
+        ],
+    )
+    errors = check_metamodel(mm)
+    assert any("Ghost" in e for e in errors)
+
+
+def test_mapping_unknown_target_reported():
+    mm = Metamodel(
+        elements=[ElementType(name="A")],
+        relationships=[
+            RelationshipType(name="R", mappings=[{"source": "A", "target": "Phantom"}])
+        ],
+    )
+    errors = check_metamodel(mm)
+    assert any("Phantom" in e for e in errors)

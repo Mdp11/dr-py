@@ -44,3 +44,43 @@ def test_wrong_target_type_is_error():
     issues = EndpointTypingValidator().validate(model, Scope.all())
     assert len(issues) == 1
     assert rel.id in issues[0].target_ids
+
+
+def _multi_mapping_model():
+    mm = Metamodel(
+        elements=[
+            ElementType(name="A"),
+            ElementType(name="B"),
+            ElementType(name="C"),
+            ElementType(name="D"),
+        ],
+        relationships=[
+            RelationshipType(
+                name="R",
+                mappings=[
+                    {"source": "A", "target": "B"},
+                    {"source": "C", "target": "D"},
+                ],
+            )
+        ],
+    )
+    return Model(mm)
+
+
+def test_any_declared_mapping_is_accepted():
+    model = _multi_mapping_model()
+    a, b = model.create_element("A"), model.create_element("B")
+    c, d = model.create_element("C"), model.create_element("D")
+    model.connect("R", a.id, b.id)
+    model.connect("R", c.id, d.id)
+    assert EndpointTypingValidator().validate(model, Scope.all()) == []
+
+
+def test_cross_pair_not_in_any_mapping_is_error():
+    model = _multi_mapping_model()
+    a = model.create_element("A")
+    d = model.create_element("D")  # A->D matches no declared mapping
+    rel = model.connect("R", a.id, d.id)
+    issues = EndpointTypingValidator().validate(model, Scope.all())
+    assert len(issues) == 1
+    assert rel.id in issues[0].target_ids

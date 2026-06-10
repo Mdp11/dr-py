@@ -42,6 +42,40 @@ def _empty_model(client: TestClient) -> None:
     assert res.status_code == 200, res.text
 
 
+MULTI_MAPPING_MM = """
+elements:
+  - name: Block
+  - name: System
+  - name: Requirement
+  - name: Document
+relationships:
+  - name: Refers
+    mappings:
+      - {source: Block, target: Requirement}
+      - {source: System, target: Document}
+"""
+
+
+def test_metamodel_multiple_mappings_roundtrip(client: TestClient) -> None:
+    res = client.post(
+        "/api/v1/metamodel",
+        content=MULTI_MAPPING_MM,
+        headers={"content-type": "application/x-yaml"},
+    )
+    assert res.status_code == 200, res.text
+
+    res = client.get("/api/v1/metamodel")
+    assert res.status_code == 200
+    refers = next(r for r in res.json()["relationships"] if r["name"] == "Refers")
+    assert [[m["source"], m["target"]] for m in refers["mappings"]] == [
+        ["Block", "Requirement"],
+        ["System", "Document"],
+    ]
+    # single-pair shorthand still exposed for backward-compatible consumers
+    assert refers["source"] == "Block"
+    assert refers["target"] == "Requirement"
+
+
 def test_full_lifecycle(client: TestClient) -> None:
     _upload_example_metamodel(client)
 

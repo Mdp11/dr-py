@@ -87,13 +87,23 @@ export const ElementTypeSchema = z.object({
 });
 export type ElementType = z.infer<typeof ElementTypeSchema>;
 
+export const MappingSchema = z.object({
+	source: z.string(),
+	target: z.string()
+});
+export type Mapping = z.infer<typeof MappingSchema>;
+
 export const RelationshipTypeSchema = z.object({
 	name: z.string(),
 	abstract: z.boolean().default(false),
 	extends: z.string().nullable().default(null),
 	containment: z.boolean().default(false),
+	// `source`/`target` mirror `mappings[0]` (backend keeps them in sync); they
+	// remain the single-pair shorthand the picker reads. `mappings` is the full
+	// set of allowed (source, target) endpoint pairs.
 	source: z.string(),
 	target: z.string(),
+	mappings: z.array(MappingSchema).default([]),
 	source_multiplicity: z.string().default('0..*'),
 	target_multiplicity: z.string().default('0..*'),
 	properties: z.array(PropertyDefSchema).default([])

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 PRIMITIVES = frozenset({"string", "integer", "float", "boolean", "date"})
 
@@ -16,6 +16,13 @@ class PropertyDef(BaseModel):
     max_length: int | None = None
 
 
+class Mapping(BaseModel):
+    """An allowed (source, target) element-type pair for a relationship type."""
+
+    source: str
+    target: str
+
+
 class ElementType(BaseModel):
     name: str
     abstract: bool = False
@@ -29,11 +36,26 @@ class RelationshipType(BaseModel):
     abstract: bool = False
     extends: str | None = None
     containment: bool = False
-    source: str
-    target: str
+    # `mappings` is the source of truth for allowed endpoint pairs. `source`/
+    # `target` are a single-pair shorthand kept for backward compatibility; after
+    # validation they always mirror `mappings[0]` (or are None when there are no
+    # mappings, e.g. an abstract base type).
+    source: str | None = None
+    target: str | None = None
+    mappings: list[Mapping] = Field(default_factory=list)
     source_multiplicity: str = "0..*"
     target_multiplicity: str = "0..*"
     properties: list[PropertyDef] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _normalize_endpoints(self) -> RelationshipType:
+        if not self.mappings and self.source is not None and self.target is not None:
+            self.mappings = [Mapping(source=self.source, target=self.target)]
+        if self.mappings:
+            # keep the shorthand fields in sync with the first declared mapping
+            self.source = self.mappings[0].source
+            self.target = self.mappings[0].target
+        return self
 
 
 class Metamodel(BaseModel):

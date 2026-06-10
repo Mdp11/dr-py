@@ -45,3 +45,22 @@ def test_relationship_defaults():
     assert r.containment is False
     assert r.source_multiplicity == "0..*"
     assert r.target_multiplicity == "0..*"
+
+
+def test_relationship_single_source_target_normalizes_to_mapping():
+    r = RelationshipType(name="R", source="A", target="B")
+    assert [(m.source, m.target) for m in r.mappings] == [("A", "B")]
+
+
+def test_relationship_multiple_mappings():
+    r = RelationshipType(
+        name="R",
+        mappings=[
+            {"source": "A", "target": "B"},
+            {"source": "C", "target": "D"},
+        ],
+    )
+    assert [(m.source, m.target) for m in r.mappings] == [("A", "B"), ("C", "D")]
+    # single source/target shorthand reflects the first mapping
+    assert r.source == "A"
+    assert r.target == "B"

@@ -108,14 +108,17 @@ def check_metamodel(mm: Metamodel) -> list[str]:
             errors.append(
                 f"Relationship {rt.name!r} extends unknown type {rt.extends!r}"
             )
-        if rt.source not in element_names:
-            errors.append(
-                f"Relationship {rt.name!r} source {rt.source!r} is not an element type"
-            )
-        if rt.target not in element_names:
-            errors.append(
-                f"Relationship {rt.name!r} target {rt.target!r} is not an element type"
-            )
+        for m in rt.mappings:
+            if m.source not in element_names:
+                errors.append(
+                    f"Relationship {rt.name!r} source {m.source!r} is not an "
+                    f"element type"
+                )
+            if m.target not in element_names:
+                errors.append(
+                    f"Relationship {rt.name!r} target {m.target!r} is not an "
+                    f"element type"
+                )
         for spec in (rt.source_multiplicity, rt.target_multiplicity):
             try:
                 Multiplicity.parse(spec)
