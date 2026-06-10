@@ -27,9 +27,7 @@ async def upload_metamodel(
     session: Session = Depends(get_session),
 ) -> Metamodel:
     metamodel = await _parse_metamodel(request)
-    session.metamodel = metamodel
-    session.model = None
-    session.validation = None
+    session.set_metamodel(metamodel)
     return metamodel
 
 
@@ -40,7 +38,5 @@ def get_metamodel(session: Session = Depends(get_session)) -> Metamodel:
 
 @router.delete("/metamodel", status_code=204)
 def clear_metamodel(session: Session = Depends(get_session)) -> Response:
-    session.metamodel = None
-    session.model = None
-    session.validation = None
+    session.set_metamodel(None)
     return Response(status_code=204)

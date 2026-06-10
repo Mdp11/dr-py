@@ -95,7 +95,7 @@ def test_create_element_dirties_group_and_dangling_referencers():
 
     collector = DirtyCollector()
     created = model.create_element("Part")  # n-3
-    collector.on_element_created(model, created.id)
+    collector.after_element_create(model, created.id)
 
     assert set(collector.ids) == {created.id, other.id, blk.id}
 
@@ -185,7 +185,7 @@ def test_connect_containment_dirties_endpoints_rel_and_both_groups():
     collector = DirtyCollector()
     collector.before_connect(model, "HasPart", p.id, e.id)
     rel = model.connect("HasPart", p.id, e.id)
-    collector.on_relationship_created(model, rel.id)
+    collector.after_connect(model, rel.id)
 
     assert set(collector.ids) == {p.id, e.id, e2.id, e3.id, rel.id}
     assert unrelated.id not in collector.ids
@@ -200,7 +200,7 @@ def test_connect_non_containment_dirties_endpoints_and_rel_only():
     collector = DirtyCollector()
     collector.before_connect(model, "Link", b.id, part.id)
     rel = model.connect("Link", b.id, part.id)
-    collector.on_relationship_created(model, rel.id)
+    collector.after_connect(model, rel.id)
 
     assert set(collector.ids) == {b.id, part.id, rel.id}
     assert b2.id not in collector.ids
@@ -230,7 +230,7 @@ def test_relationship_props_change_dirties_only_the_relationship():
     rel = model.connect("Link", b.id, part.id)
 
     collector = DirtyCollector()
-    collector.on_relationship_props_changed(rel.id)
+    collector.after_relationship_props_change(rel.id)
     model.set_property(rel, "label", "x")
 
     assert set(collector.ids) == {rel.id}

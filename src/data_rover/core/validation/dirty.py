@@ -9,12 +9,30 @@ a :class:`~data_rover.core.validation.state.ValidationState`.
 Two entry points:
 
 * :class:`DirtyCollector` — hook-style API for live mutations through the
-  Model mutation boundary (also the Phase-C ops endpoint). Call the matching
-  ``before_*`` hook immediately BEFORE the mutation (it captures
-  pre-mutation contributions such as the old uniqueness-group members) and
-  the matching ``after_*`` / ``on_*`` hook immediately AFTER. Hooks only
-  ever ADD ids and keep no pairing state, so they nest and interleave
-  freely; one collector can span a whole operation batch.
+  Model mutation boundary (also the Phase-C ops endpoint). Prefer the
+  mutate-and-collect WRAPPERS, which call the Model method with the correct
+  before/after hooks around it (snapshotting whatever the after-hook needs)
+  so hooks cannot be mispaired:
+
+  =========================  =========================================  ========================
+  Model method               (before hook, after hook)                  wrapper
+  =========================  =========================================  ========================
+  ``create_element``         (—, ``after_element_create``)              ``create_element``
+  ``set_property`` (elem)    (``before_element_props_change``,          ``set_property``
+                             ``after_element_props_change``)
+  ``set_property`` (rel)     (—, ``after_relationship_props_change``)   ``set_property``
+  ``connect``                (``before_connect``, ``after_connect``)    ``connect``
+  ``disconnect``             (``before_disconnect``,                    ``disconnect``
+                             ``after_disconnect``)
+  ``delete_element``         (``before_element_delete``, —)             ``delete_element``
+  =========================  =========================================  ========================
+
+  The raw hooks stay public (the CR diff path and callers that mutate
+  through other means use them): call the ``before_*`` hook immediately
+  BEFORE the mutation (it captures pre-mutation contributions such as the
+  old uniqueness-group members) and the ``after_*`` hook immediately AFTER.
+  Hooks only ever ADD ids and keep no pairing state, so they nest and
+  interleave freely; one collector can span a whole operation batch.
 
 * :func:`change_request_dirty_ids` — post-hoc diff for the CR-apply path:
   ``apply_change_request`` is pure (base untouched, result freshly indexed),
@@ -51,10 +69,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Iterable, KeysView
 
+from ..model.relationship import Relationship
 from .scope import Scope
 
 if TYPE_CHECKING:
     from ..model.change_request import ChangeRequest
+    from ..model.element import Element
     from ..model.model import Model
 
 
@@ -118,7 +138,7 @@ class DirtyCollector:
 
     # -- element hooks ------------------------------------------------------
 
-    def on_element_created(self, model: Model, element_id: str) -> None:
+    def after_element_create(self, model: Model, element_id: str) -> None:
         """AFTER an element was created/inserted (indexes already updated).
 
         Dirties the element, its uniqueness group (a new duplicate can flip
@@ -157,7 +177,9 @@ class DirtyCollector:
             for rid in sorted(indexes.incoming_ids(eid)):
                 self.add(rid, model.relationships[rid].source_id)
             self.update(sorted(indexes.referencers_of(eid)))
-            self.update(indexes.parents_of(eid))
+            # NOTE: containment parents need no separate contribution — they
+            # are sources of incoming relationships, i.e. a subset of the
+            # incoming-endpoint ids already added above.
             self.add_uniqueness_group_of(model, eid)
 
     # -- relationship hooks --------------------------------------------------
@@ -171,7 +193,7 @@ class DirtyCollector:
         if model.metamodel.is_containment(rel_type_name):
             self.add_uniqueness_group_of(model, target_id)
 
-    def on_relationship_created(self, model: Model, rel_id: str) -> None:
+    def after_connect(self, model: Model, rel_id: str) -> None:
         """AFTER ``Model.connect``: the relationship; for containment also the
         target's NEW uniqueness group."""
         self.add(rel_id)
@@ -195,9 +217,58 @@ class DirtyCollector:
         if model.metamodel.is_containment(rel_type_name):
             self.add_uniqueness_group_of(model, target_id)
 
-    def on_relationship_props_changed(self, rel_id: str) -> None:
+    def after_relationship_props_change(self, rel_id: str) -> None:
         """A relationship's properties changed: only its own verdict moves."""
         self.add(rel_id)
+
+    # -- mutate-and-collect wrappers ------------------------------------------
+    # Preferred entry points for live mutations: each calls the matching
+    # before-hook(s), the Model method, and the matching after-hook(s) in the
+    # right order (snapshotting what the after-hook needs before mutating),
+    # so callers cannot mispair hooks. See the module-docstring table.
+
+    def create_element(self, model: Model, type_name: str) -> Element:
+        """``Model.create_element`` + ``after_element_create``."""
+        element = model.create_element(type_name)
+        self.after_element_create(model, element.id)
+        return element
+
+    def set_property(
+        self, model: Model, target: Element | Relationship, prop: str, value: object
+    ) -> None:
+        """``Model.set_property`` + the matching props-change hook(s)."""
+        if isinstance(target, Relationship):
+            model.set_property(target, prop, value)
+            self.after_relationship_props_change(target.id)
+            return
+        self.before_element_props_change(model, target.id)
+        model.set_property(target, prop, value)
+        self.after_element_props_change(model, target.id)
+
+    def connect(
+        self, model: Model, rel_type: str, source_id: str, target_id: str
+    ) -> Relationship:
+        """``Model.connect`` between ``before_connect`` and ``after_connect``."""
+        self.before_connect(model, rel_type, source_id, target_id)
+        rel = model.connect(rel_type, source_id, target_id)
+        self.after_connect(model, rel.id)
+        return rel
+
+    def disconnect(self, model: Model, rel_id: str) -> None:
+        """``Model.disconnect`` between ``before_disconnect`` and
+        ``after_disconnect`` (the relationship's type/target are snapshotted
+        first — the after-hook needs them and the mutation destroys them)."""
+        rel = model.get_relationship(rel_id)
+        rel_type_name, target_id = rel.type_name, rel.target_id
+        self.before_disconnect(model, rel_id)
+        model.disconnect(rel_id)
+        self.after_disconnect(model, rel_type_name, target_id)
+
+    def delete_element(self, model: Model, element_id: str) -> None:
+        """``Model.delete_element`` after ``before_element_delete`` (which
+        captures the whole containment cascade's contributions)."""
+        self.before_element_delete(model, element_id)
+        model.delete_element(element_id)
 
 
 # ---------------------------------------------------------------------------

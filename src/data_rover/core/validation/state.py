@@ -27,7 +27,14 @@ from .issue import Issue
 
 
 def issue_owner(issue: Issue) -> str:
-    """The entity an issue is attributed to: its first target id."""
+    """The entity an issue is attributed to: its first target id.
+
+    WARNING: issues must have non-empty ``target_ids``. An owner-less issue
+    would be keyed under the ``""`` sentinel, which never appears in a dirty
+    set, so incremental replacement could never clean it up — it would stick
+    in the store until the next full run.
+    """
+    assert issue.target_ids, "validation issues must have non-empty target_ids"
     return issue.target_ids[0] if issue.target_ids else ""
 
 
