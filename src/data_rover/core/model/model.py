@@ -67,6 +67,12 @@ class Model:
         return self.relationships[rel_id]
 
     def set_property(self, target: Element | Relationship, prop: str, value) -> None:
+        """Set a property on an attached entity (mutation boundary).
+
+        Invariant: property values are replaced wholesale, never mutated in
+        place — op-log/inverse correctness in the API ops layer depends on
+        this (recorded inverse patches alias prior values by reference).
+        """
         if (
             self.elements.get(target.id) is not target
             and self.relationships.get(target.id) is not target

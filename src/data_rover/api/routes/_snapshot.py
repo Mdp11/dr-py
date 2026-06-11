@@ -8,6 +8,27 @@ from data_rover.core.model.model import Model
 from data_rover.core.model.relationship import Relationship
 
 from ..schemas import ElementOut, RelationshipOut
+from .ops import TEMP_ID_PREFIX
+
+
+def _reject_reserved_id(entity_id: str, *, element: bool) -> None:
+    """Reject ids carrying the ops-protocol temp-id prefix.
+
+    ``tmp_``-prefixed ids are reserved for client-generated provisional ids
+    in POST /model/ops; a loaded entity carrying one would be ambiguous in
+    the restore-mode applier (delete + undo would mint a fresh canonical id
+    instead of reinstating the original), so they are banned at load time.
+    """
+    if entity_id.startswith(TEMP_ID_PREFIX):
+        kind = "Element" if element else "Relationship"
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"{kind} id {entity_id!r} uses the reserved {TEMP_ID_PREFIX!r} "
+                f"prefix (client-side temporary ids of the ops protocol); "
+                f"loaded models must not contain such ids"
+            ),
+        )
 
 
 def _build_model_from_payload(
@@ -23,12 +44,14 @@ def _build_model_from_payload(
     - element/relationship type must exist in the metamodel
     - abstract types cannot be instantiated
     - element and relationship ids must be unique within the payload
+    - ids must not use the reserved ops-protocol temp-id prefix
     - relationship endpoints must resolve to elements in the payload
     """
     model = Model(metamodel)
 
     seen_element_ids: set[str] = set()
     for e in elements:
+        _reject_reserved_id(e.id, element=True)
         et = metamodel.element_type(e.type_name)
         if et is None:
             raise HTTPException(
@@ -58,6 +81,7 @@ def _build_model_from_payload(
 
     seen_relationship_ids: set[str] = set()
     for r in relationships:
+        _reject_reserved_id(r.id, element=False)
         if metamodel.relationship_type(r.type_name) is None:
             raise HTTPException(
                 status_code=422,

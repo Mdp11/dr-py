@@ -27,8 +27,13 @@ def create_element(
 ) -> ElementOut:
     _, model = require_model(session)
     element = model.create_element(payload.type)
-    for key, value in payload.properties.items():
-        model.set_property(element, key, value)
+    try:
+        for key, value in payload.properties.items():
+            model.set_property(element, key, value)
+    finally:
+        # legacy route mutates outside the ops protocol (even when a property
+        # fails after the element was created): invalidate rev/op-log state
+        session.touch_model()
     return ElementOut.from_core(element)
 
 
@@ -49,8 +54,12 @@ def update_element(
 ) -> ElementOut:
     _, model = require_model(session)
     element = model.get_element(element_id)
-    for key, value in payload.properties.items():
-        model.set_property(element, key, value)
+    try:
+        for key, value in payload.properties.items():
+            model.set_property(element, key, value)
+    finally:
+        # see create_element: mutation outside the ops protocol
+        session.touch_model()
     return ElementOut.from_core(element)
 
 
@@ -61,4 +70,5 @@ def delete_element(
 ) -> Response:
     _, model = require_model(session)
     model.delete_element(element_id)
+    session.touch_model()  # mutation outside the ops protocol
     return Response(status_code=204)

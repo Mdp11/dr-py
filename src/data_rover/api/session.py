@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import TYPE_CHECKING
 
 from data_rover.core.metamodel.schema import Metamodel
@@ -15,7 +15,10 @@ if TYPE_CHECKING:
 #: ops, their inverses, and snapshots of deleted entities' properties, so an
 #: unbounded log would grow without limit over a long editing session; 1000
 #: undo steps is far more history than any UI exposes. Oldest batches are
-#: dropped first.
+#: dropped first. Note the cap counts BATCHES, not bytes: a single batch's
+#: inverses can still be large (a cascade delete snapshots every removed
+#: entity), so memory is bounded per-entry only in the typical small-batch
+#: case — an accepted tradeoff for a trivial trimming rule.
 OP_LOG_MAX = 1000
 
 
@@ -60,6 +63,20 @@ class Session:
         self.op_log.clear()  # recorded inverses no longer apply to this model
         self.model_rev += 1
 
+    def touch_model(self) -> None:
+        """Call when the model is mutated outside the ops protocol.
+
+        Legacy mutation routes (POST/PATCH/DELETE on /model/elements and
+        /model/relationships) change the model without producing an op-log
+        entry, so every coherence artifact of the ops protocol is stale
+        afterwards: bump ``model_rev`` (in-flight batches with the old
+        ``base_rev`` get 409), clear ``op_log`` (recorded inverses would
+        replay against a diverged model), and drop the validation baseline.
+        """
+        self.model_rev += 1
+        self.op_log.clear()
+        self.validation = None
+
     def set_metamodel(self, metamodel: Metamodel | None) -> None:
         """Replace (or clear) the metamodel; the model conforms to it, so the
         model and its validation baseline are cleared too."""
@@ -82,9 +99,12 @@ def get_session() -> Session:
 
 
 def reset_session() -> None:
-    _session.metamodel = None
-    _session.model = None
-    _session.view = None
-    _session.validation = None
-    _session.model_rev = 0
-    _session.op_log.clear()
+    """Reset the process-wide session to a fresh default state.
+
+    Field-agnostic on purpose: every dataclass field is copied from a newly
+    constructed ``Session`` so adding a field can never silently leak state
+    across resets through a hand-maintained list here.
+    """
+    fresh = Session()
+    for f in fields(Session):
+        setattr(_session, f.name, getattr(fresh, f.name))
