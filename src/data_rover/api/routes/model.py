@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
+from contextlib import suppress
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -81,18 +84,17 @@ def _install_model(session: Session, metamodel: Metamodel, raw: Any) -> ModelSum
 
     Shared tail of POST /model/load and POST /model/upload: build the Model
     directly from the parsed dicts (same guards as the pydantic snapshot
-    routes, shared via _snapshot.py), replace the session model
-    (``set_model`` bumps ``model_rev`` and clears the op log, so
-    ``undo_depth`` is 0 afterwards), run ONE full validation to seed the
+    routes, shared via _snapshot.py), run ONE full validation to seed the
     session issue store — making the load the single O(model) validation
-    cost instead of the first ops batch — and return the same shape as
+    cost instead of the first ops batch — install model and seeded state
+    together via ``set_model`` (which bumps ``model_rev`` and clears the op
+    log, so ``undo_depth`` is 0 afterwards), and return the same shape as
     GET /model/summary.
     """
     model = build_model_from_dicts(metamodel, raw)
-    session.set_model(model)
     state = ValidationState()
     state.set_full(default_pipeline().validate(model, Scope.all()))
-    session.validation = state
+    session.set_model(model, validation=state)
     return model_summary(session)
 
 
@@ -178,22 +180,35 @@ def save_model(
     produced by the chunked writer in ``api/serialize.py`` and are identical
     to GET /model/download, byte-shape-compatible with what the frontend's
     ``saveJsonToFile`` writes today, so old save files and new ones are
-    interchangeable. ``path`` is required for now (422 when absent); a
-    default-path policy can come later.
+    interchangeable.
+
+    The write is atomic with respect to the destination: chunks go to a
+    temporary file in the destination's directory (same filesystem, so the
+    final rename cannot fail with EXDEV), which is fsynced and
+    ``os.replace``d onto the target only after a complete successful write.
+    A failure mid-write (full disk, serialization error) therefore leaves a
+    pre-existing save untouched, and the temp file is unlinked.
     """
     _, model = require_model(session)
-    if payload.path is None:
-        raise HTTPException(
-            status_code=422,
-            detail="'path' is required (no default save path policy yet)",
-        )
+    target = Path(payload.path)
     bytes_written = 0
     try:
-        with open(payload.path, "wb") as f:
-            for chunk in iter_model_json(model):
-                data = chunk.encode("utf-8")
-                f.write(data)
-                bytes_written += len(data)
+        fd, tmp_name = tempfile.mkstemp(
+            dir=target.parent, prefix=target.name + ".", suffix=".tmp"
+        )
+        try:
+            with os.fdopen(fd, "wb") as f:
+                for chunk in iter_model_json(model):
+                    data = chunk.encode("utf-8")
+                    f.write(data)
+                    bytes_written += len(data)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_name, target)
+        except BaseException:
+            with suppress(OSError):
+                os.unlink(tmp_name)
+            raise
     except OSError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return SaveModelResponse(
@@ -212,6 +227,12 @@ def download_model(session: Session = Depends(get_session)) -> StreamingResponse
     writable, so the browser never holds the serialized model as a string.
     Chunks come from the same generator as /model/save — the two outputs are
     byte-identical by construction.
+
+    The ``StreamingResponse`` consumes the generator AFTER this handler
+    returns, interleaved with other requests; ``iter_model_json`` snapshots
+    the entity sets at stream start so a concurrent ops batch cannot break
+    the stream mid-download (see its docstring for the exact staleness
+    semantics).
     """
     _, model = require_model(session)
 

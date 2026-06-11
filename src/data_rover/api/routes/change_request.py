@@ -47,6 +47,7 @@ from ..schemas import (
     RelationshipOut,
 )
 from ._snapshot import _build_model_from_payload
+from .ops import _ensure_validation_seeded
 
 router = APIRouter()
 
@@ -176,9 +177,11 @@ def _apply_cr_session(
 
     Validation is incremental (Phase B pattern): if the session has no
     full-run baseline yet, the BASE model is fully validated once to seed
-    it; then only the CR's dirty set is re-validated on the result and
-    spliced in, and the splice delta is returned. The spliced store is
-    re-attached after ``set_model`` (which clears ``session.validation``).
+    it (``_ensure_validation_seeded``, shared with the ops endpoints); then
+    only the CR's dirty set is re-validated on the result and spliced in,
+    and the splice delta is returned. The spliced store describes the
+    RESULT model, so it is installed together with it via
+    ``set_model(result, validation=state)``.
 
     Response delta: changed = CR adds + modifies in CR listing order,
     serialized in their result-model state; deleted = every base id missing
@@ -198,17 +201,12 @@ def _apply_cr_session(
 
     _gate_cr_result(metamodel, base, result, cr)
 
-    pipeline = default_pipeline()
-    if session.validation is None:
-        state = ValidationState()
-        state.set_full(pipeline.validate(base, Scope.all()))
-    else:
-        state = session.validation
+    state = _ensure_validation_seeded(session, base)
     dirty = change_request_dirty_ids(base, result, cr)
-    delta = state.replace(dirty, pipeline.validate(result, Scope(dirty)))
+    delta = state.replace(dirty, default_pipeline().validate(result, Scope(dirty)))
 
-    session.set_model(result)  # bumps rev, clears op log AND validation
-    session.validation = state  # ... so re-attach the spliced store
+    # bumps rev, clears the op log, installs the spliced store in one step
+    session.set_model(result, validation=state)
 
     # ordered-set idiom; filtered against the result so an entity the CR
     # adds/modifies AND deletes in one request counts as deleted only

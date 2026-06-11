@@ -438,9 +438,8 @@ class LoadModelRequest(BaseModel):
 
 
 class SaveModelRequest(BaseModel):
-    #: local filesystem path to write to; required for now (a default path
-    #: policy may come later), absent -> 422
-    path: str | None = None
+    #: local filesystem path to write to, resolved server-side
+    path: str
 
 
 class SaveModelResponse(BaseModel):

@@ -61,11 +61,20 @@ class Session:
     #: ``op_log`` (model replacement / out-of-protocol mutation).
     op_log_dropped: int = 0
 
-    def set_model(self, model: Model | None) -> None:
-        """Replace (or clear) the model and invalidate model-derived state."""
+    def set_model(
+        self, model: Model | None, *, validation: ValidationState | None = None
+    ) -> None:
+        """Replace (or clear) the model and invalidate model-derived state.
+
+        ``validation``: callers that already computed a fresh/spliced
+        ``ValidationState`` for the NEW model (the C3 load endpoints seed at
+        load time; session-mode apply-cr splices the CR's dirty set) pass it
+        here so it is installed in the same step instead of cleared.
+        """
         self.model = model
         # view is intentionally untouched on model replacement
-        self.validation = None  # previous full-run baseline is now stale
+        # previous full-run baseline is stale unless the caller replaced it
+        self.validation = validation
         self.op_log.clear()  # recorded inverses no longer apply to this model
         self.op_log_dropped = 0
         self.model_rev += 1

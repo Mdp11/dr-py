@@ -27,9 +27,11 @@ identical.
 from __future__ import annotations
 
 import json
-from typing import Any, Iterator
+from typing import Any, Iterable, Iterator
 
+from data_rover.core.model.element import Element
 from data_rover.core.model.model import Model
+from data_rover.core.model.relationship import Relationship
 
 #: entities sit two levels deep ({ -> "elements": [ -> entity), so their
 #: json.dumps text (indent level 0) is shifted right by two indent steps
@@ -40,7 +42,7 @@ def _entity_chunks(entities: Iterator[dict[str, Any]], key: str) -> Iterator[str
     """Yield ``"<key>": [...]`` (indented one level, no trailing comma)."""
     first = True
     for entity in entities:
-        text = json.dumps(entity, indent=2, ensure_ascii=False)
+        text = json.dumps(entity, indent=2, ensure_ascii=False, allow_nan=False)
         prefix = f'  "{key}": [\n{_ENTITY_PAD}' if first else f",\n{_ENTITY_PAD}"
         yield prefix + text.replace("\n", "\n" + _ENTITY_PAD)
         first = False
@@ -50,8 +52,8 @@ def _entity_chunks(entities: Iterator[dict[str, Any]], key: str) -> Iterator[str
         yield "\n  ]"
 
 
-def _element_dicts(model: Model) -> Iterator[dict[str, Any]]:
-    for e in model.elements.values():
+def _element_dicts(elements: Iterable[Element]) -> Iterator[dict[str, Any]]:
+    for e in elements:
         yield {
             "id": e.id,
             "type_name": e.type_name,
@@ -60,8 +62,10 @@ def _element_dicts(model: Model) -> Iterator[dict[str, Any]]:
         }
 
 
-def _relationship_dicts(model: Model) -> Iterator[dict[str, Any]]:
-    for r in model.relationships.values():
+def _relationship_dicts(
+    relationships: Iterable[Relationship],
+) -> Iterator[dict[str, Any]]:
+    for r in relationships:
         yield {
             "id": r.id,
             "type_name": r.type_name,
@@ -77,12 +81,29 @@ def iter_model_json(model: Model) -> Iterator[str]:
 
     ``"".join(iter_model_json(m))`` equals
     ``json.dumps({"elements": [...], "relationships": [...]}, indent=2,
-    ensure_ascii=False)`` — asserted by the byte-shape tests. The generator
-    reads the live model lazily; callers must not mutate the model while
-    consuming it (single-user session, sync handlers — not a concern today).
+    ensure_ascii=False)`` — asserted by the byte-shape tests.
+
+    Concurrency/staleness semantics: the entity SETS are snapshotted
+    (``list(...)`` of the model's entity dicts — entity references only,
+    O(model) pointers, no copies) when iteration starts, so a concurrent ops
+    batch adding or deleting entities mid-stream cannot blow up the
+    iteration with ``RuntimeError: dict changed size``; the download
+    reflects the model's entity population at stream start. What remains is
+    benign staleness: entity objects are read live, so an entity edited
+    mid-stream is emitted in its newer state if its chunk has not been
+    produced yet (each entity is dumped in a single generator step, and
+    property values are replaced wholesale, never mutated in place — the
+    documented invariant on ``Model.set_property`` — so a chunk is always a
+    coherent before-or-after state, never a torn one).
+
+    NaN/Infinity property values raise ``ValueError`` (``allow_nan=False``):
+    they have no JSON representation, so failing the save loudly beats
+    writing a file the frontend's ``JSON.parse`` can never read back.
     """
+    elements = list(model.elements.values())
+    relationships = list(model.relationships.values())
     yield "{\n"
-    yield from _entity_chunks(_element_dicts(model), "elements")
+    yield from _entity_chunks(_element_dicts(elements), "elements")
     yield ",\n"
-    yield from _entity_chunks(_relationship_dicts(model), "relationships")
+    yield from _entity_chunks(_relationship_dicts(relationships), "relationships")
     yield "\n}"
