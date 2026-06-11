@@ -159,3 +159,137 @@ export interface Conflict {
 	id: string;
 	reason: string;
 }
+
+// ---------------------------------------------------------------------------
+// Delta-protocol schemas (Phase D1) — mirror the backend pydantic models in
+// src/data_rover/api/schemas.py (OpsResponse, ModelSummary, the paged read
+// shapes, and the streaming load/save responses).
+// ---------------------------------------------------------------------------
+
+export const IssueCountsSchema = z.record(z.string(), z.number().int());
+export type IssueCounts = z.infer<typeof IssueCountsSchema>;
+
+/**
+ * Response of POST /model/ops, /model/undo, and session-mode /model/apply-cr.
+ * A delta over the session model: created/updated entities in their final
+ * post-batch state, deleted ids (including containment cascades), the temp-id
+ * resolution map, and the validation-issue splice the batch produced.
+ */
+export const OpsResponseSchema = z.object({
+	model_rev: z.number().int(),
+	id_map: z.record(z.string(), z.string()).default({}),
+	changed_elements: z.array(ElementSchema).default([]),
+	changed_relationships: z.array(RelationshipSchema).default([]),
+	deleted_element_ids: z.array(z.string()).default([]),
+	deleted_relationship_ids: z.array(z.string()).default([]),
+	issues_removed_owner_ids: z.array(z.string()).default([]),
+	issues_added: z.array(IssueSchema).default([]),
+	issue_counts: IssueCountsSchema.default({})
+});
+export type OpsResponse = z.infer<typeof OpsResponseSchema>;
+
+/**
+ * GET /model/summary. `issue_counts` is null until a full validation run has
+ * seeded the session issue store — "not validated" is distinct from "0".
+ */
+export const ModelSummarySchema = z.object({
+	model_rev: z.number().int(),
+	element_count: z.number().int(),
+	relationship_count: z.number().int(),
+	elements_by_type: z.record(z.string(), z.number().int()).default({}),
+	issue_counts: IssueCountsSchema.nullable().default(null),
+	undo_depth: z.number().int().default(0)
+});
+export type ModelSummary = z.infer<typeof ModelSummarySchema>;
+
+export const ElementPageSchema = z.object({
+	items: z.array(ElementSchema).default([]),
+	total: z.number().int().default(0)
+});
+export type ElementPage = z.infer<typeof ElementPageSchema>;
+
+export const NeighborhoodSchema = z.object({
+	nodes: z.array(ElementSchema).default([]),
+	edges: z.array(RelationshipSchema).default([]),
+	hops_by_id: z.record(z.string(), z.number().int()).default({}),
+	truncated: z.boolean().default(false)
+});
+export type Neighborhood = z.infer<typeof NeighborhoodSchema>;
+
+export const RelationshipPageSchema = z.object({
+	items: z.array(RelationshipSchema).default([]),
+	total: z.number().int().default(0)
+});
+export type RelationshipPage = z.infer<typeof RelationshipPageSchema>;
+
+export const ContainmentItemSchema = z.object({
+	element: ElementSchema,
+	child_count: z.number().int().default(0)
+});
+export type ContainmentItem = z.infer<typeof ContainmentItemSchema>;
+
+export const ContainmentPageSchema = z.object({
+	items: z.array(ContainmentItemSchema).default([]),
+	total: z.number().int().default(0)
+});
+export type ContainmentPage = z.infer<typeof ContainmentPageSchema>;
+
+const ModifiedElementSchema = z.object({
+	id: z.string(),
+	before: ElementSchema,
+	after: ElementSchema
+});
+
+const ModifiedRelationshipSchema = z.object({
+	id: z.string(),
+	before: RelationshipSchema,
+	after: RelationshipSchema
+});
+
+/**
+ * GET /model/changes: the session op log compacted into a `datarover.cr/v1`
+ * change request (the shape `buildChangeRequest` in `$lib/state/cr.ts`
+ * produces) plus `complete` — false when op-log truncation means the document
+ * only describes the retained history.
+ */
+export const ChangesDocSchema = z.object({
+	format: z.literal('datarover.cr/v1'),
+	createdAt: z.string(),
+	baseline: z.object({
+		filename: z.string().nullable().default(null),
+		elementCount: z.number().int().default(0),
+		relationshipCount: z.number().int().default(0)
+	}),
+	ops: z.object({
+		elements: z.object({
+			added: z.array(ElementSchema).default([]),
+			modified: z.array(ModifiedElementSchema).default([]),
+			deleted: z.array(ElementSchema).default([])
+		}),
+		relationships: z.object({
+			added: z.array(RelationshipSchema).default([]),
+			modified: z.array(ModifiedRelationshipSchema).default([]),
+			deleted: z.array(RelationshipSchema).default([])
+		})
+	}),
+	complete: z.boolean().default(true)
+});
+export type ChangesDoc = z.infer<typeof ChangesDocSchema>;
+
+export const ChangesSummarySchema = z.object({
+	batches: z.number().int().default(0),
+	ops: z.number().int().default(0),
+	adds: z.number().int().default(0),
+	modifies: z.number().int().default(0),
+	deletes: z.number().int().default(0),
+	complete: z.boolean().default(true)
+});
+export type ChangesSummary = z.infer<typeof ChangesSummarySchema>;
+
+export const SaveModelResponseSchema = z.object({
+	path: z.string(),
+	element_count: z.number().int(),
+	relationship_count: z.number().int(),
+	bytes_written: z.number().int()
+});
+export type SaveModelResponse = z.infer<typeof SaveModelResponseSchema>;

@@ -116,8 +116,11 @@ function applyOne(elements: Element[], relationships: Relationship[], op: Op): v
 /**
  * Shallow-merge `patch` into `base`. Keys set to `null` in the patch are
  * removed from the result. All other keys are overwritten.
+ *
+ * Exported for reuse by the delta-protocol store (`model.svelte.ts`), which
+ * applies the same merge-patch semantics optimistically.
  */
-function mergePatch(
+export function mergePatch(
 	base: Record<string, unknown>,
 	patch: Record<string, unknown>
 ): Record<string, unknown> {

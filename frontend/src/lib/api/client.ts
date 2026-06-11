@@ -51,11 +51,16 @@ function prepareBody(init: ApiFetchInit): { body: BodyInit | null | undefined; h
 	return { body: body as BodyInit | null | undefined, headers };
 }
 
-export async function apiFetch<T>(
+/**
+ * Like {@link apiFetch} but returns the raw `Response` instead of parsing the
+ * body — for streaming endpoints (e.g. GET /model/download). Non-2xx
+ * responses still raise the same typed `ApiError`s as `apiFetch`.
+ */
+export async function apiFetchRaw(
 	path: string,
 	init: ApiFetchInit = {},
 	config?: ClientConfig
-): Promise<T> {
+): Promise<Response> {
 	const baseUrl = config?.baseUrl ?? DEFAULT_BASE_URL;
 	const doFetch = config?.fetch ?? fetch;
 	const url = buildUrl(baseUrl, path, init.query);
@@ -76,6 +81,16 @@ export async function apiFetch<T>(
 		const message = messageFromBody(parsed, response.status);
 		throw errorForStatus(response.status, parsed, message);
 	}
+
+	return response;
+}
+
+export async function apiFetch<T>(
+	path: string,
+	init: ApiFetchInit = {},
+	config?: ClientConfig
+): Promise<T> {
+	const response = await apiFetchRaw(path, init, config);
 
 	if (response.status === 204) {
 		return undefined as T;
