@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -146,6 +146,90 @@ class ViewSnapshotResponse(BaseModel):
 class ViewStateResponse(BaseModel):
     view: ViewOut | None = None
     warnings: list[IssueOut] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Delta-protocol op schemas (POST /model/ops) — mirror frontend
+# `frontend/src/lib/state/ops.ts` exactly (THE FILE IS THE CONTRACT)
+# ---------------------------------------------------------------------------
+
+
+class CreateElementOp(BaseModel):
+    kind: Literal["create_element"]
+    temp_id: str
+    type_name: str
+    properties: dict[str, Any] = Field(default_factory=dict)
+
+
+class UpdateElementOp(BaseModel):
+    kind: Literal["update_element"]
+    id: str
+    #: JSON-merge-patch over the element's properties: a null value DELETES
+    #: the key, anything else replaces it; absent keys are untouched
+    properties_patch: dict[str, Any]
+
+
+class DeleteElementOp(BaseModel):
+    kind: Literal["delete_element"]
+    id: str
+
+
+class CreateRelationshipOp(BaseModel):
+    kind: Literal["create_relationship"]
+    temp_id: str
+    type_name: str
+    source_id: str
+    target_id: str
+    properties: dict[str, Any] = Field(default_factory=dict)
+
+
+class UpdateRelationshipOp(BaseModel):
+    kind: Literal["update_relationship"]
+    id: str
+    properties_patch: dict[str, Any]
+
+
+class DeleteRelationshipOp(BaseModel):
+    kind: Literal["delete_relationship"]
+    id: str
+
+
+OpIn = Annotated[
+    CreateElementOp
+    | UpdateElementOp
+    | DeleteElementOp
+    | CreateRelationshipOp
+    | UpdateRelationshipOp
+    | DeleteRelationshipOp,
+    Field(discriminator="kind"),
+]
+
+
+class OpsRequest(BaseModel):
+    #: the model revision the ops were computed against; mismatch -> 409
+    base_rev: int
+    ops: list[OpIn] = Field(default_factory=list)
+
+
+class OpsResponse(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    model_rev: int
+    #: temp id -> generated canonical id, for every create op in the batch
+    id_map: dict[str, str] = Field(default_factory=dict)
+    #: created + updated entities surviving the batch, in first-touch op
+    #: application order, serialized in their final (post-batch) state
+    changed_elements: list[ElementOut] = Field(default_factory=list)
+    changed_relationships: list[RelationshipOut] = Field(default_factory=list)
+    #: deleted ids in op application order, including containment-cascade
+    #: deletions (cascade order: containment closure walk / sorted rel ids)
+    deleted_element_ids: list[str] = Field(default_factory=list)
+    deleted_relationship_ids: list[str] = Field(default_factory=list)
+    #: issue-store delta of the scoped re-validation (see ValidationState)
+    issues_removed_owner_ids: list[str] = Field(default_factory=list)
+    issues_added: list[IssueOut] = Field(default_factory=list)
+    #: post-batch issue count per severity, over the WHOLE issue store
+    issue_counts: dict[str, int] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
