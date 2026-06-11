@@ -33,6 +33,7 @@ def create_relationship(
 ) -> RelationshipOut:
     _, model = require_model(session)
     rel = model.connect(payload.type, payload.source_id, payload.target_id)
+    session.touch_model()  # mutation outside the ops protocol
     return RelationshipOut.from_core(rel)
 
 
@@ -43,4 +44,5 @@ def delete_relationship(
 ) -> Response:
     _, model = require_model(session)
     model.disconnect(relationship_id)
+    session.touch_model()  # mutation outside the ops protocol
     return Response(status_code=204)

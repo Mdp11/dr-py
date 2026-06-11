@@ -9,6 +9,7 @@ import copy
 import pytest
 from fastapi.testclient import TestClient
 
+import data_rover.api.session as session_module
 from data_rover.api.main import create_app
 from data_rover.api.session import get_session, reset_session
 from data_rover.core.model.model import Model
@@ -436,6 +437,125 @@ def test_422_examples(seeded: TestClient) -> None:
         assert res.status_code == 422, (ops, res.text)
 
 
+def test_empty_ops_batch_is_a_no_op(seeded: TestClient) -> None:
+    # accepted (matching base_rev) but applies nothing: no rev bump, no
+    # op_log entry, empty delta fields
+    rev = _rev()
+    res = _post_ops(seeded, [])
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["model_rev"] == rev
+    assert _rev() == rev
+    assert get_session().op_log == []
+    assert body["id_map"] == {}
+    assert body["changed_elements"] == []
+    assert body["changed_relationships"] == []
+    assert body["deleted_element_ids"] == []
+    assert body["deleted_relationship_ids"] == []
+    assert body["issues_added"] == []
+    assert body["issues_removed_owner_ids"] == []
+    # no history was created, so there is nothing to undo
+    assert _undo(seeded).status_code == 409
+
+
+# --- legacy (non-ops) mutation routes -------------------------------------------
+
+
+def test_legacy_mutation_invalidates_ops_protocol_state(seeded: TestClient) -> None:
+    # build undo history through the ops protocol first
+    res = _post_ops(
+        seeded,
+        [{"kind": "update_element", "id": "a", "properties_patch": {"note": "x"}}],
+    )
+    assert res.status_code == 200, res.text
+    rev = _rev()
+    assert len(get_session().op_log) == 1
+    # legacy element create mutates outside the ops protocol
+    res = seeded.post(
+        "/api/v1/model/elements",
+        json={"type": "Item", "properties": {"name": "L"}},
+    )
+    assert res.status_code == 201, res.text
+    assert _rev() == rev + 1  # model_rev bumped
+    # a batch computed against the pre-legacy rev is now stale -> 409
+    res = _post_ops(
+        seeded, [{"kind": "delete_element", "id": "a"}], base_rev=rev
+    )
+    assert res.status_code == 409
+    # op_log was emptied: the recorded inverses no longer apply -> undo 409
+    assert get_session().op_log == []
+    assert _undo(seeded).status_code == 409
+    # validation baseline dropped too (re-seeded lazily by the next batch)
+    assert get_session().validation is None
+
+
+def test_every_legacy_mutating_handler_bumps_model_rev(seeded: TestClient) -> None:
+    rev = _rev()
+    res = seeded.post(
+        "/api/v1/model/elements",
+        json={"type": "Item", "properties": {"name": "L"}},
+    )
+    assert res.status_code == 201, res.text
+    eid = res.json()["id"]
+    assert _rev() == rev + 1
+    res = seeded.patch(
+        f"/api/v1/model/elements/{eid}", json={"properties": {"note": "n"}}
+    )
+    assert res.status_code == 200, res.text
+    assert _rev() == rev + 2
+    res = seeded.post(
+        "/api/v1/model/relationships",
+        json={"type": "Links", "source_id": eid, "target_id": "c"},
+    )
+    assert res.status_code == 201, res.text
+    rid = res.json()["id"]
+    assert _rev() == rev + 3
+    assert seeded.delete(f"/api/v1/model/relationships/{rid}").status_code == 204
+    assert _rev() == rev + 4
+    assert seeded.delete(f"/api/v1/model/elements/{eid}").status_code == 204
+    assert _rev() == rev + 5
+
+
+# --- reserved temp-id prefix at load time ----------------------------------------
+
+
+def test_model_payload_rejects_reserved_tmp_element_id(client: TestClient) -> None:
+    res = client.post(
+        "/api/v1/model",
+        json={
+            "elements": [
+                {"id": "tmp_weird", "type_name": "Item", "properties": {"name": "W"}}
+            ],
+            "relationships": [],
+        },
+    )
+    assert res.status_code == 422, res.text
+    assert "tmp_" in res.json()["detail"]
+    assert "reserved" in res.json()["detail"]
+
+
+def test_model_payload_rejects_reserved_tmp_relationship_id(client: TestClient) -> None:
+    res = client.post(
+        "/api/v1/model",
+        json={
+            "elements": [
+                {"id": "a", "type_name": "Item", "properties": {"name": "A"}},
+                {"id": "b", "type_name": "Item", "properties": {"name": "B"}},
+            ],
+            "relationships": [
+                {
+                    "id": "tmp_rel",
+                    "type_name": "Links",
+                    "source_id": "a",
+                    "target_id": "b",
+                }
+            ],
+        },
+    )
+    assert res.status_code == 422, res.text
+    assert "tmp_" in res.json()["detail"]
+
+
 # --- atomicity ----------------------------------------------------------------
 
 
@@ -500,6 +620,46 @@ def test_failed_batch_rolls_back_cascade_delete(seeded: TestClient) -> None:
     )
     assert res.status_code == 422, res.text
     assert _snapshot(model) == before
+    model.indexes.verify_consistent()
+
+
+def test_unexpected_exception_rolls_back_then_propagates(
+    seeded: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # not a KeyError/ValueError (the validated 422 path): an arbitrary bug
+    # mid-batch must still roll the model back before propagating as a 500
+    model = _model()
+    rev = _rev()
+    before = _snapshot(model)
+    orig = Model.set_property
+
+    def boom(self: Model, target, prop, value) -> None:  # type: ignore[no-untyped-def]
+        if prop == "note":
+            raise RuntimeError("boom")
+        orig(self, target, prop, value)
+
+    monkeypatch.setattr(Model, "set_property", boom)
+    with pytest.raises(RuntimeError, match="boom"):
+        _post_ops(
+            seeded,
+            [
+                # completes (records its inverse) ...
+                {
+                    "kind": "update_element",
+                    "id": "a",
+                    "properties_patch": {"name": "A2"},
+                },
+                # ... then the unexpected failure, before this op mutates
+                {
+                    "kind": "update_element",
+                    "id": "b",
+                    "properties_patch": {"note": "x"},
+                },
+            ],
+        )
+    assert _snapshot(model) == before  # first op rolled back
+    assert _rev() == rev  # no bump
+    assert get_session().op_log == []  # nothing recorded
     model.indexes.verify_consistent()
 
 
@@ -740,6 +900,41 @@ def test_differential_validation_matches_full_after_many_batches(
         assert res.status_code == 200, res.text
     _assert_state_matches_full(_model())
     _model().indexes.verify_consistent()
+
+
+def test_op_log_trims_oldest_and_undo_walks_remainder(
+    seeded: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(session_module, "OP_LOG_MAX", 2)
+    model = _model()
+    snaps = [_snapshot(model)]
+    for i in range(4):
+        res = _post_ops(
+            seeded,
+            [
+                {
+                    "kind": "update_element",
+                    "id": "a",
+                    "properties_patch": {"note": f"n{i}"},
+                }
+            ],
+        )
+        assert res.status_code == 200, res.text
+        snaps.append(_snapshot(model))
+    # only the newest OP_LOG_MAX batches are retained (oldest dropped first)
+    log = get_session().op_log
+    assert len(log) == 2
+    assert log[0].ops[0].properties_patch == {"note": "n2"}  # type: ignore[union-attr]
+    assert log[1].ops[0].properties_patch == {"note": "n3"}  # type: ignore[union-attr]
+    # undo walks back exactly through the retained remainder...
+    assert _undo(seeded).status_code == 200
+    assert _snapshot(model) == snaps[3]
+    assert _undo(seeded).status_code == 200
+    assert _snapshot(model) == snaps[2]
+    # ...and stops where history was trimmed
+    assert _undo(seeded).status_code == 409
+    assert _snapshot(model) == snaps[2]
+    model.indexes.verify_consistent()
 
 
 def test_op_log_records_batches_and_failed_undo_is_impossible(

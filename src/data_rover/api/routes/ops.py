@@ -40,6 +40,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+# typing.assert_never exists from 3.11, but pyright checks against the 3.10
+# floor pinned in pyrightconfig.json — typing_extensions works everywhere
+from typing_extensions import assert_never
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
@@ -348,7 +352,7 @@ def _apply_one(model: Model, op: OpIn, res: _BatchResult, *, restore: bool) -> N
         res.mark_relationship_deleted(rid)
         return
 
-    raise ValueError(f"Unsupported op kind {getattr(op, 'kind', op)!r}")
+    assert_never(op)  # a new OpIn variant without a branch fails type-checking
 
 
 def _rollback(model: Model, inverse_units: list[list[OpIn]]) -> None:
@@ -373,17 +377,22 @@ def _error_detail(exc: BaseException) -> str:
 def _apply_batch(model: Model, ops: list[OpIn], *, restore: bool) -> _BatchResult:
     """Apply *ops* atomically to the live model.
 
-    On any op failure the completed mutations are rolled back via their
-    recorded inverses and the request fails with 422 — the model, its
-    indexes, and the validation store are left exactly as before the batch.
+    On ANY op failure the completed mutations are rolled back via their
+    recorded inverses — the model, its indexes, and the validation store are
+    left exactly as before the batch. The expected validation failures
+    (KeyError/ValueError from the mutation boundary) become a 422; anything
+    else is a bug and propagates (as a 500) AFTER the rollback, so even an
+    unforeseen exception cannot leave the model half-mutated.
     """
     res = _BatchResult()
     try:
         for op in ops:
             _apply_one(model, op, res, restore=restore)
-    except (KeyError, ValueError) as exc:
+    except Exception as exc:
         _rollback(model, res.inverse_units)
-        raise HTTPException(status_code=422, detail=_error_detail(exc)) from exc
+        if isinstance(exc, (KeyError, ValueError)):
+            raise HTTPException(status_code=422, detail=_error_detail(exc)) from exc
+        raise
     return res
 
 
@@ -401,15 +410,17 @@ def _ensure_validation_seeded(session: Session, model: Model) -> ValidationState
     return session.validation
 
 
-def _finalize(session: Session, model: Model, res: _BatchResult) -> OpsResponse:
+def _finalize(
+    session: Session, state: ValidationState, model: Model, res: _BatchResult
+) -> OpsResponse:
     """Scoped re-validation + issue-store splice + response assembly.
 
-    ``session.model_rev`` must already be bumped. Deterministic ordering
-    throughout: changed/deleted ids in first-touch op application order,
-    issues in dirty-set / scoped-pipeline order.
+    ``state`` is the seeded issue store returned by
+    ``_ensure_validation_seeded`` (threaded through instead of re-read from
+    the session). ``session.model_rev`` must already be bumped.
+    Deterministic ordering throughout: changed/deleted ids in first-touch op
+    application order, issues in dirty-set / scoped-pipeline order.
     """
-    state = session.validation
-    assert state is not None  # seeded before the batch was applied
     scoped_issues = default_pipeline().validate(model, res.dirty.to_scope())
     delta = state.replace(res.dirty.ids, scoped_issues)
     return OpsResponse(
@@ -447,7 +458,12 @@ def apply_ops(
                 "model_rev": session.model_rev,
             },
         )
-    _ensure_validation_seeded(session, model)
+    state = _ensure_validation_seeded(session, model)
+    if not payload.ops:
+        # Empty batch: nothing to apply. Report the current state WITHOUT
+        # bumping model_rev or recording an op_log entry — an accidental
+        # empty POST must not invalidate clients or burn an undo step.
+        return OpsResponse(model_rev=session.model_rev, issue_counts=state.counts())
     res = _apply_batch(model, payload.ops, restore=False)
     session.model_rev += 1
     session.record_batch(
@@ -457,7 +473,7 @@ def apply_ops(
             id_map=dict(res.id_map),
         )
     )
-    return _finalize(session, model, res)
+    return _finalize(session, state, model, res)
 
 
 @router.post("/model/undo", response_model=None)
@@ -468,15 +484,15 @@ def undo(session: Session = Depends(get_session)) -> OpsResponse | JSONResponse:
             status_code=409,
             content={"detail": "Nothing to undo", "model_rev": session.model_rev},
         )
-    _ensure_validation_seeded(session, model)
+    state = _ensure_validation_seeded(session, model)
     batch = session.op_log.pop()
     try:
         res = _apply_batch(model, batch.inverse_ops, restore=True)
-    except HTTPException:
+    except Exception:
         # _apply_batch already rolled the model back; keep history intact
         session.op_log.append(batch)
         raise
     # NOT recorded in op_log: undo walks history backwards, it does not
     # create new history (no redo in C1)
     session.model_rev += 1
-    return _finalize(session, model, res)
+    return _finalize(session, state, model, res)
