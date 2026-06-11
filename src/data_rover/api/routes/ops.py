@@ -399,9 +399,11 @@ def _apply_batch(model: Model, ops: list[OpIn], *, restore: bool) -> _BatchResul
 def _ensure_validation_seeded(session: Session, model: Model) -> ValidationState:
     """Make sure a full-run issue baseline exists BEFORE mutating.
 
-    Transitional: once the C3 load endpoints seed the store at load time
-    this only ever runs for sessions populated through legacy snapshot
-    routes. Seeding pre-batch keeps the post-batch replace() delta exact.
+    Shared by the ops endpoints and session-mode apply-cr
+    (routes/change_request.py). The C3 load endpoints seed the store at
+    load time, so this only does work for sessions populated through the
+    legacy snapshot routes. Seeding pre-batch keeps the post-batch
+    replace() delta exact.
     """
     if session.validation is None:
         state = ValidationState()

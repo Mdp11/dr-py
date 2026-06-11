@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Container
 from typing import Any
 
 from fastapi import HTTPException
@@ -76,28 +77,34 @@ def _guard_element(
 
 def _guard_relationship(
     metamodel: Metamodel,
-    element_ids: dict[str, Element],
+    existing_element_ids: Container[str],
+    *,
     seen_ids: set[str],
     entity_id: str,
     type_name: str,
     source_id: str,
     target_id: str,
 ) -> None:
-    """Apply the relationship load guards; records *entity_id* in *seen_ids*."""
+    """Apply the relationship load guards; records *entity_id* in *seen_ids*.
+
+    Only membership of *existing_element_ids* is used, so callers may pass
+    any ``in``-capable container of element ids — in practice the model's
+    ``elements`` dict, whose keys are the already-loaded element ids.
+    """
     _reject_reserved_id(entity_id, element=False)
     if metamodel.relationship_type(type_name) is None:
         raise HTTPException(
             status_code=422,
             detail=f"Unknown relationship type {type_name!r}",
         )
-    if source_id not in element_ids:
+    if source_id not in existing_element_ids:
         raise HTTPException(
             status_code=422,
             detail=(
                 f"Relationship {entity_id!r} references unknown source {source_id!r}"
             ),
         )
-    if target_id not in element_ids:
+    if target_id not in existing_element_ids:
         raise HTTPException(
             status_code=422,
             detail=(
@@ -140,11 +147,11 @@ def _build_model_from_payload(
         _guard_relationship(
             metamodel,
             model.elements,
-            seen_relationship_ids,
-            r.id,
-            r.type_name,
-            r.source_id,
-            r.target_id,
+            seen_ids=seen_relationship_ids,
+            entity_id=r.id,
+            type_name=r.type_name,
+            source_id=r.source_id,
+            target_id=r.target_id,
         )
         model.relationships[r.id] = Relationship(
             id=r.id,
@@ -246,11 +253,11 @@ def build_model_from_dicts(metamodel: Metamodel, raw: Any) -> Model:
         _guard_relationship(
             metamodel,
             model.elements,
-            seen_relationship_ids,
-            rid,
-            type_name,
-            source_id,
-            target_id,
+            seen_ids=seen_relationship_ids,
+            entity_id=rid,
+            type_name=type_name,
+            source_id=source_id,
+            target_id=target_id,
         )
         model.relationships[rid] = Relationship(
             id=rid,
