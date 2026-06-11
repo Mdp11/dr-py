@@ -8,16 +8,9 @@ from ..schemas import CreateElementRequest, ElementOut, UpdateElementRequest
 router = APIRouter()
 
 
-@router.get("/model/elements")
-def list_elements(
-    type: str | None = None,
-    session: Session = Depends(get_session),
-) -> list[ElementOut]:
-    _, model = require_model(session)
-    items = list(model.elements.values())
-    if type is not None:
-        items = [e for e in items if e.type_name == type]
-    return [ElementOut.from_core(e) for e in items]
+# NOTE: GET /model/elements (paged listing + search) lives in routes/read.py
+# since Phase C2-read; this module keeps the legacy mutation endpoints and the
+# single-element GET.
 
 
 @router.post("/model/elements", status_code=201)

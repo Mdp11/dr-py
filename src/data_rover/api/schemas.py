@@ -323,6 +323,92 @@ class ChangeRequestIn(BaseModel):
         )
 
 
+# ---------------------------------------------------------------------------
+# Paged/on-demand read schemas (Phase C2-read; see routes/read.py)
+# ---------------------------------------------------------------------------
+
+
+class ModelSummary(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    model_rev: int
+    element_count: int
+    relationship_count: int
+    #: exact-type element counts (no inheritance roll-up), sorted by type name
+    elements_by_type: dict[str, int] = Field(default_factory=dict)
+    #: issue count per severity from the session issue store; ``None`` means
+    #: the model has not been validated yet (no full run seeded the store) —
+    #: clients should render "not validated" rather than zero issues
+    issue_counts: dict[str, int] | None = None
+    #: number of op batches available to POST /model/undo
+    undo_depth: int = 0
+
+
+class ElementPage(BaseModel):
+    items: list[ElementOut] = Field(default_factory=list)
+    #: number of matches BEFORE limit/offset paging
+    total: int = 0
+
+
+class NeighborhoodOut(BaseModel):
+    nodes: list[ElementOut] = Field(default_factory=list)
+    #: relationships whose BOTH endpoints are in ``nodes``, sorted by id
+    edges: list[RelationshipOut] = Field(default_factory=list)
+    #: BFS distance from the center element (0) for every node
+    hops_by_id: dict[str, int] = Field(default_factory=dict)
+    #: True if some neighbors were dropped because ``cap`` was reached
+    truncated: bool = False
+
+
+class RelationshipList(BaseModel):
+    items: list[RelationshipOut] = Field(default_factory=list)
+
+
+class ContainmentItem(BaseModel):
+    element: ElementOut
+    #: number of distinct containment children (elements whose FIRST
+    #: containment parent is this element) — lets tree clients draw expanders
+    #: without fetching the next level
+    child_count: int = 0
+
+
+class ContainmentPage(BaseModel):
+    items: list[ContainmentItem] = Field(default_factory=list)
+    #: number of items BEFORE limit/offset paging
+    total: int = 0
+
+
+class ChangesOut(BaseModel):
+    """``datarover.cr/v1`` change request derived from the session op log.
+
+    Shape-compatible with the frontend's ``buildChangeRequest`` export
+    (``frontend/src/lib/state/cr.ts``) plus one extra field, ``complete``,
+    which :class:`ChangeRequestIn` ignores on the apply path — so the
+    document round-trips through POST /model/apply-cr unchanged.
+    """
+
+    format: Literal["datarover.cr/v1"] = "datarover.cr/v1"
+    createdAt: str
+    baseline: CrBaseline = Field(default_factory=CrBaseline)
+    ops: CrOps = Field(default_factory=CrOps)
+    #: False when the op log was truncated (OP_LOG_MAX exceeded) since the
+    #: model was loaded: the CR then describes only the RETAINED history and
+    #: its baseline is the post-truncation state, not the loaded base model
+    complete: bool = True
+
+
+class ChangesSummaryOut(BaseModel):
+    #: batches currently retained in the op log
+    batches: int = 0
+    #: compacted CR op count (= adds + modifies + deletes)
+    ops: int = 0
+    adds: int = 0
+    modifies: int = 0
+    deletes: int = 0
+    #: see ChangesOut.complete
+    complete: bool = True
+
+
 class ApplyCrRequest(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
 

@@ -134,7 +134,8 @@ def test_full_lifecycle(client: TestClient) -> None:
 
     res = client.get("/api/v1/model/elements", params={"type": "Block"})
     assert res.status_code == 200
-    assert len(res.json()) == 1
+    assert res.json()["total"] == 1
+    assert len(res.json()["items"]) == 1
 
     res = client.post("/api/v1/model/validate")
     assert res.status_code == 200
