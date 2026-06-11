@@ -24,8 +24,12 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from data_rover.api.routes._snapshot import _build_model_from_payload  # noqa: E402
+from data_rover.api.routes._snapshot import (  # noqa: E402
+    _build_model_from_payload,
+    build_model_from_dicts,
+)
 from data_rover.api.schemas import ElementOut, RelationshipOut  # noqa: E402
+from data_rover.api.serialize import iter_model_json  # noqa: E402
 from data_rover.core.metamodel.loader import load_metamodel_file  # noqa: E402
 from data_rover.core.model.model import Model  # noqa: E402
 from data_rover.core.validation.dirty import DirtyCollector  # noqa: E402
@@ -45,7 +49,14 @@ def _report(label: str, seconds: float, detail: str = "") -> None:
 
 
 def bench_load(model_path: Path, metamodel_path: Path) -> Model:
-    """(1) json.load + payload parsing + Model construction (API code path)."""
+    """(1) json.load + Model construction, old vs new code path.
+
+    (1b) is the legacy pydantic path (POST /model snapshot route); (1c) is
+    the Phase C3 direct-dict path the load endpoints use
+    (``build_model_from_dicts``, no per-entity pydantic layer). The model
+    returned for the remaining steps is the (1c) one. Each path parses its
+    own fresh ``json.load`` so dict reuse cannot skew the comparison.
+    """
     metamodel = load_metamodel_file(metamodel_path)
 
     t0 = time.perf_counter()
@@ -58,12 +69,22 @@ def bench_load(model_path: Path, metamodel_path: Path) -> Model:
     relationships = [
         RelationshipOut.model_validate(r) for r in raw.get("relationships", [])
     ]
-    model = _build_model_from_payload(metamodel, elements, relationships)
-    t_build = time.perf_counter() - t0
+    _build_model_from_payload(metamodel, elements, relationships)
+    t_build_pydantic = time.perf_counter() - t0
+    del elements, relationships
+
+    # fresh parse for the direct path (same cost as 1a, not re-reported)
+    with model_path.open(encoding="utf-8") as f:
+        raw = json.load(f)
+    t0 = time.perf_counter()
+    model = build_model_from_dicts(metamodel, raw)
+    t_build_direct = time.perf_counter() - t0
 
     _report("(1a) json.load", t_parse)
-    _report("(1b) payload parse + _build_model_from_payload", t_build)
-    _report("(1)  load + build total", t_parse + t_build)
+    _report("(1b) OLD pydantic parse + _build_model_from_payload", t_build_pydantic)
+    _report("(1c) NEW direct build_model_from_dicts", t_build_direct)
+    _report("(1)  load + build total (json.load + direct build)",
+            t_parse + t_build_direct)
     return model
 
 
@@ -158,35 +179,24 @@ def bench_traversal(model: Model, rng: random.Random) -> None:
 
 
 def bench_serialize(model: Model) -> None:
-    """(5) serialize the model back to JSON and write it to a temp file."""
+    """(5) stream-serialize the model to a temp file (C3 save endpoint path).
+
+    Uses ``iter_model_json`` — the exact chunked writer behind POST
+    /model/save and GET /model/download (frontend save-file shape, 2-space
+    indent), so this measures the production write path.
+    """
     t0 = time.perf_counter()
-    data = {
-        "rev": 1,
-        "elements": [
-            {"id": e.id, "type_name": e.type_name, "properties": e.properties, "rev": e.rev}
-            for e in model.elements.values()
-        ],
-        "relationships": [
-            {
-                "id": r.id,
-                "type_name": r.type_name,
-                "source_id": r.source_id,
-                "target_id": r.target_id,
-                "properties": r.properties,
-                "rev": r.rev,
-            }
-            for r in model.relationships.values()
-        ],
-    }
     with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".model.json", delete=False, encoding="utf-8"
+        mode="wb", suffix=".model.json", delete=False
     ) as f:
-        json.dump(data, f, separators=(",", ":"))
+        for chunk in iter_model_json(model):
+            f.write(chunk.encode("utf-8"))
         tmp_path = Path(f.name)
     elapsed = time.perf_counter() - t0
     size_mib = tmp_path.stat().st_size / 1_048_576
     tmp_path.unlink()
-    _report("(5)  serialize model + write temp file", elapsed, f"{size_mib:.1f} MiB")
+    _report("(5)  stream-serialize model + write temp file", elapsed,
+            f"{size_mib:.1f} MiB")
 
 
 def main() -> None:
