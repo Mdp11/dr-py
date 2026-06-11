@@ -379,28 +379,79 @@ def test_relationships_direction_filters(graph_client: TestClient) -> None:
     out = graph_client.get(
         f"{API}/model/elements/c/relationships", params={"direction": "out"}
     ).json()
-    assert [r["id"] for r in out["items"]] == ["r1"]
+    assert ([r["id"] for r in out["items"]], out["total"]) == (["r1"], 1)
 
     inc = graph_client.get(
         f"{API}/model/elements/c/relationships", params={"direction": "in"}
     ).json()
-    assert [r["id"] for r in inc["items"]] == ["r2"]
+    assert ([r["id"] for r in inc["items"]], inc["total"]) == (["r2"], 1)
 
     both = graph_client.get(f"{API}/model/elements/c/relationships").json()
     assert [r["id"] for r in both["items"]] == ["r1", "r2"]  # sorted by rel id
+    assert both["total"] == 2
     assert both["items"][0]["source_id"] == "c"
 
     none = graph_client.get(f"{API}/model/elements/n5/relationships").json()
-    assert [r["id"] for r in none["items"]] == ["r5"]
+    assert ([r["id"] for r in none["items"]], none["total"]) == (["r5"], 1)
 
-    assert (
-        graph_client.get(f"{API}/model/elements/ghost/relationships").status_code
-        == 404
-    )
+    res = graph_client.get(f"{API}/model/elements/ghost/relationships")
+    assert res.status_code == 404
+    # same envelope as the rest of the /model/elements/{id} family (errors.py
+    # KeyError handler), not FastAPI's HTTPException {"detail": ...}
+    body = res.json()
+    assert set(body) == {"error"}
+    assert "ghost" in body["error"]
     res = graph_client.get(
         f"{API}/model/elements/c/relationships", params={"direction": "sideways"}
     )
     assert res.status_code == 422
+
+
+def test_relationships_paging(graph_client: TestClient) -> None:
+    # n2 has r2 (out) and r4 (in); page over the sorted incident set
+    body = graph_client.get(
+        f"{API}/model/elements/n2/relationships", params={"limit": 1}
+    ).json()
+    assert ([r["id"] for r in body["items"]], body["total"]) == (["r2"], 2)
+    body = graph_client.get(
+        f"{API}/model/elements/n2/relationships", params={"limit": 1, "offset": 1}
+    ).json()
+    assert ([r["id"] for r in body["items"]], body["total"]) == (["r4"], 2)
+    # offset beyond the incident set: empty page, total before paging
+    body = graph_client.get(
+        f"{API}/model/elements/n2/relationships", params={"offset": 9}
+    ).json()
+    assert body == {"items": [], "total": 2}
+
+    for params in ({"limit": 0}, {"limit": 501}, {"offset": -1}):
+        res = graph_client.get(
+            f"{API}/model/elements/n2/relationships", params=params
+        )
+        assert res.status_code == 422, params
+
+
+def test_relationships_self_loop_dedup(client: TestClient) -> None:
+    """A self-loop is in BOTH incidence indexes; direction=both lists it once."""
+    _load_model(
+        client,
+        [_item("s", "S"), _item("o", "O")],
+        [
+            _rel("r-loop", "Links", "s", "s"),
+            _rel("r-so", "Links", "s", "o"),
+        ],
+    )
+    both = client.get(f"{API}/model/elements/s/relationships").json()
+    assert [r["id"] for r in both["items"]] == ["r-loop", "r-so"]
+    assert both["total"] == 2
+
+    out = client.get(
+        f"{API}/model/elements/s/relationships", params={"direction": "out"}
+    ).json()
+    assert [r["id"] for r in out["items"]] == ["r-loop", "r-so"]
+    inc = client.get(
+        f"{API}/model/elements/s/relationships", params={"direction": "in"}
+    ).json()
+    assert ([r["id"] for r in inc["items"]], inc["total"]) == (["r-loop"], 1)
 
 
 # ---------------------------------------------------------------------------
@@ -733,6 +784,63 @@ def test_changes_compaction_modify_twice(client: TestClient) -> None:
     # FIRST before-state (note absent), LAST after-state
     assert mods[0]["before"]["properties"] == {"name": "A"}
     assert mods[0]["after"]["properties"] == {"name": "A", "note": "2nd"}
+
+
+def test_changes_relationship_modified_shape(client: TestClient) -> None:
+    """A surviving relationship update appears in relationships.modified with
+    the first before-state and last after-state (full before/after shape)."""
+    _load_model(
+        client,
+        [_item("a", "A"), _item("b", "B")],
+        [_rel("r-ab", "Links", "a", "b", weight=1)],
+    )
+    _post_ops(
+        client,
+        [
+            {
+                "kind": "update_relationship",
+                "id": "r-ab",
+                "properties_patch": {"weight": 5},
+            }
+        ],
+    )
+    _post_ops(
+        client,
+        [
+            {
+                "kind": "update_relationship",
+                "id": "r-ab",
+                "properties_patch": {"weight": 9},
+            }
+        ],
+    )
+    ops = client.get(f"{API}/model/changes").json()["ops"]
+    assert ops["elements"] == {"added": [], "modified": [], "deleted": []}
+    assert ops["relationships"]["added"] == []
+    assert ops["relationships"]["deleted"] == []
+    assert ops["relationships"]["modified"] == [
+        {
+            "id": "r-ab",
+            "before": {
+                "id": "r-ab",
+                "type_name": "Links",
+                "source_id": "a",
+                "target_id": "b",
+                "properties": {"weight": 1},  # FIRST before-state
+                "rev": 0,
+            },
+            "after": {
+                "id": "r-ab",
+                "type_name": "Links",
+                "source_id": "a",
+                "target_id": "b",
+                "properties": {"weight": 9},  # LAST after-state
+                "rev": 2,
+            },
+        }
+    ]
+    summary = client.get(f"{API}/model/changes/summary").json()
+    assert (summary["ops"], summary["modifies"]) == (1, 1)
 
 
 def test_changes_empty_after_undo(client: TestClient) -> None:

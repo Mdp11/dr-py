@@ -360,8 +360,10 @@ class NeighborhoodOut(BaseModel):
     truncated: bool = False
 
 
-class RelationshipList(BaseModel):
+class RelationshipPage(BaseModel):
     items: list[RelationshipOut] = Field(default_factory=list)
+    #: number of incident relationships BEFORE limit/offset paging
+    total: int = 0
 
 
 class ContainmentItem(BaseModel):
