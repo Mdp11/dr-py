@@ -11,6 +11,7 @@ from .routes import (
     metamodel,
     model,
     ops,
+    read,
     relationships,
     validation,
     view,
@@ -41,6 +42,7 @@ def create_app() -> FastAPI:
     app.include_router(metamodel.router, prefix=prefix, tags=["metamodel"])
     app.include_router(model.router, prefix=prefix, tags=["model"])
     app.include_router(ops.router, prefix=prefix, tags=["ops"])
+    app.include_router(read.router, prefix=prefix, tags=["read"])
     app.include_router(change_request.router, prefix=prefix, tags=["change-request"])
     app.include_router(elements.router, prefix=prefix, tags=["elements"])
     app.include_router(relationships.router, prefix=prefix, tags=["relationships"])

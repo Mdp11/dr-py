@@ -54,6 +54,12 @@ class Session:
     #: applied-batch history for POST /model/undo, newest last; cleared
     #: whenever the model is replaced, capped at OP_LOG_MAX
     op_log: "list[AppliedBatch]" = field(default_factory=list)
+    #: number of batches trimmed off ``op_log`` because OP_LOG_MAX was
+    #: exceeded since the current model was loaded. While this is non-zero
+    #: the retained log no longer reaches back to the loaded base state, so
+    #: GET /model/changes reports ``complete: false``. Reset together with
+    #: ``op_log`` (model replacement / out-of-protocol mutation).
+    op_log_dropped: int = 0
 
     def set_model(self, model: Model | None) -> None:
         """Replace (or clear) the model and invalidate model-derived state."""
@@ -61,6 +67,7 @@ class Session:
         # view is intentionally untouched on model replacement
         self.validation = None  # previous full-run baseline is now stale
         self.op_log.clear()  # recorded inverses no longer apply to this model
+        self.op_log_dropped = 0
         self.model_rev += 1
 
     def touch_model(self) -> None:
@@ -75,6 +82,7 @@ class Session:
         """
         self.model_rev += 1
         self.op_log.clear()
+        self.op_log_dropped = 0
         self.validation = None
 
     def set_metamodel(self, metamodel: Metamodel | None) -> None:
@@ -89,6 +97,7 @@ class Session:
         self.op_log.append(batch)
         if len(self.op_log) > OP_LOG_MAX:
             del self.op_log[0]
+            self.op_log_dropped += 1
 
 
 _session = Session()
