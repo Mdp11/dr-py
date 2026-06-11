@@ -414,7 +414,9 @@ class ChangesSummaryOut(BaseModel):
 class ApplyCrRequest(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
 
-    model: InlineModel
+    #: legacy inline mode when present; ``None`` selects session mode (the CR
+    #: is applied to the session model and an OpsResponse delta is returned)
+    model: InlineModel | None = None
     cr: ChangeRequestIn
 
 
@@ -423,3 +425,26 @@ class ApplyCrResponse(BaseModel):
 
     model: ModelOut
     issues: list[IssueOut] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Streaming load/save schemas (Phase C3; see routes/model.py)
+# ---------------------------------------------------------------------------
+
+
+class LoadModelRequest(BaseModel):
+    #: local filesystem path of the model JSON file, resolved server-side
+    path: str
+
+
+class SaveModelRequest(BaseModel):
+    #: local filesystem path to write to; required for now (a default path
+    #: policy may come later), absent -> 422
+    path: str | None = None
+
+
+class SaveModelResponse(BaseModel):
+    path: str
+    element_count: int
+    relationship_count: int
+    bytes_written: int

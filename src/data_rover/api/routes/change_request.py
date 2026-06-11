@@ -1,4 +1,20 @@
-"""POST /model/apply-cr — apply a change request to an inline model snapshot."""
+"""POST /model/apply-cr — apply a change request.
+
+Two request modes, selected by the OPTIONAL ``model`` field (Phase C3):
+
+- legacy/inline mode (``model`` present): the CR is applied to the inline
+  snapshot; the response carries the full result model + its issue list
+  (:class:`ApplyCrResponse`). The session model is never touched. Behavior
+  is byte-identical to the pre-C3 endpoint.
+- session mode (``model`` absent): the CR is applied to the SESSION model
+  (404 when none is loaded); on success the result REPLACES the session
+  model and the response is an :class:`OpsResponse`-shaped delta
+  (changed/deleted entities + validation-issue delta), so large-model
+  clients never receive a full model body.
+
+Conflict (409, ``{"conflicts": [...]}``) and 422-gate semantics are
+identical in both modes.
+"""
 
 from __future__ import annotations
 
@@ -19,12 +35,16 @@ from data_rover.core.validation.pipeline import default_pipeline
 from data_rover.core.validation.scope import Scope
 from data_rover.core.validation.state import ValidationState
 
-from ..deps import Session, get_session, require_metamodel
+from ..deps import Session, get_session, require_metamodel, require_model
 from ..schemas import (
     ApplyCrRequest,
     ApplyCrResponse,
+    ElementOut,
+    InlineModel,
     IssueOut,
     ModelOut,
+    OpsResponse,
+    RelationshipOut,
 )
 from ._snapshot import _build_model_from_payload
 
@@ -101,16 +121,15 @@ def _gate_cr_result(
             _require_endpoint(result, rid, "target", survivor.target_id)
 
 
-@router.post("/model/apply-cr", response_model=None)
-def apply_cr(
-    payload: ApplyCrRequest,
-    session: Session = Depends(get_session),
+def _apply_cr_inline(
+    session: Session, inline: InlineModel, payload: ApplyCrRequest
 ) -> ApplyCrResponse | JSONResponse:
+    """Legacy mode: apply the CR to an inline snapshot (session untouched)."""
     metamodel = require_metamodel(session)
     base = _build_model_from_payload(
         metamodel,
-        payload.model.elements,
-        payload.model.relationships,
+        inline.elements,
+        inline.relationships,
     )
     cr = payload.cr.to_core()
 
@@ -141,3 +160,103 @@ def apply_cr(
         model=ModelOut.from_core(result),
         issues=[IssueOut.from_core(i) for i in state.all_issues()],
     )
+
+
+def _apply_cr_session(
+    session: Session, payload: ApplyCrRequest
+) -> OpsResponse | JSONResponse:
+    """Session mode: apply the CR to the session model and return a delta.
+
+    ``apply_change_request`` is pure, so the CR is applied base → result and
+    on success the RESULT replaces the session model via ``set_model``. That
+    bumps ``model_rev`` and clears the op log — applying a CR resets undo
+    history (documented behavior: the recorded inverses describe a model
+    that no longer exists, and reconstructing them from the CR is not worth
+    the complexity for an action that semantically loads a new baseline).
+
+    Validation is incremental (Phase B pattern): if the session has no
+    full-run baseline yet, the BASE model is fully validated once to seed
+    it; then only the CR's dirty set is re-validated on the result and
+    spliced in, and the splice delta is returned. The spliced store is
+    re-attached after ``set_model`` (which clears ``session.validation``).
+
+    Response delta: changed = CR adds + modifies in CR listing order,
+    serialized in their result-model state; deleted = every base id missing
+    from the result (catches anything beyond the CR's explicit deletes, in
+    base insertion order). ``id_map`` is always empty — CRs carry final ids.
+    """
+    metamodel, base = require_model(session)
+    cr = payload.cr.to_core()
+
+    try:
+        result = apply_change_request(base, cr)
+    except CRConflictError as exc:
+        return JSONResponse(
+            status_code=409,
+            content={"conflicts": [asdict(c) for c in exc.conflicts]},
+        )
+
+    _gate_cr_result(metamodel, base, result, cr)
+
+    pipeline = default_pipeline()
+    if session.validation is None:
+        state = ValidationState()
+        state.set_full(pipeline.validate(base, Scope.all()))
+    else:
+        state = session.validation
+    dirty = change_request_dirty_ids(base, result, cr)
+    delta = state.replace(dirty, pipeline.validate(result, Scope(dirty)))
+
+    session.set_model(result)  # bumps rev, clears op log AND validation
+    session.validation = state  # ... so re-attach the spliced store
+
+    # ordered-set idiom; filtered against the result so an entity the CR
+    # adds/modifies AND deletes in one request counts as deleted only
+    changed_element_ids = dict.fromkeys(
+        eid
+        for eid in (
+            *(e.id for e in cr.elements_added),
+            *(m.id for m in cr.elements_modified),
+        )
+        if eid in result.elements
+    )
+    changed_relationship_ids = dict.fromkeys(
+        rid
+        for rid in (
+            *(r.id for r in cr.relationships_added),
+            *(m.id for m in cr.relationships_modified),
+        )
+        if rid in result.relationships
+    )
+
+    return OpsResponse(
+        model_rev=session.model_rev,
+        id_map={},
+        changed_elements=[
+            ElementOut.from_core(result.elements[eid]) for eid in changed_element_ids
+        ],
+        changed_relationships=[
+            RelationshipOut.from_core(result.relationships[rid])
+            for rid in changed_relationship_ids
+        ],
+        deleted_element_ids=[
+            eid for eid in base.elements if eid not in result.elements
+        ],
+        deleted_relationship_ids=[
+            rid for rid in base.relationships if rid not in result.relationships
+        ],
+        issues_removed_owner_ids=delta.removed_owner_ids,
+        issues_added=[IssueOut.from_core(i) for i in delta.added],
+        issue_counts=state.counts(),
+    )
+
+
+@router.post("/model/apply-cr", response_model=None)
+def apply_cr(
+    payload: ApplyCrRequest,
+    session: Session = Depends(get_session),
+) -> ApplyCrResponse | OpsResponse | JSONResponse:
+    """Apply a change request; see the module docstring for the mode split."""
+    if payload.model is not None:
+        return _apply_cr_inline(session, payload.model, payload)
+    return _apply_cr_session(session, payload)
