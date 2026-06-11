@@ -21,6 +21,9 @@ Two entry points:
   ``set_property`` (elem)    (``before_element_props_change``,          ``set_property``
                              ``after_element_props_change``)
   ``set_property`` (rel)     (—, ``after_relationship_props_change``)   ``set_property``
+  ``delete_property`` (elem) (``before_element_props_change``,          ``delete_property``
+                             ``after_element_props_change``)
+  ``delete_property`` (rel)  (—, ``after_relationship_props_change``)   ``delete_property``
   ``connect``                (``before_connect``, ``after_connect``)    ``connect``
   ``disconnect``             (``before_disconnect``,                    ``disconnect``
                              ``after_disconnect``)
@@ -243,6 +246,18 @@ class DirtyCollector:
             return
         self.before_element_props_change(model, target.id)
         model.set_property(target, prop, value)
+        self.after_element_props_change(model, target.id)
+
+    def delete_property(
+        self, model: Model, target: Element | Relationship, prop: str
+    ) -> None:
+        """``Model.delete_property`` + the matching props-change hook(s)."""
+        if isinstance(target, Relationship):
+            model.delete_property(target, prop)
+            self.after_relationship_props_change(target.id)
+            return
+        self.before_element_props_change(model, target.id)
+        model.delete_property(target, prop)
         self.after_element_props_change(model, target.id)
 
     def connect(

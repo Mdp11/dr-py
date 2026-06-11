@@ -36,6 +36,25 @@ class Model:
         self.indexes.on_element_created(element)
         return element
 
+    def restore_element(self, element_id: str, type_name: str) -> Element:
+        """Insert an element with a FIXED id (undo/restore path).
+
+        Same type guards as :meth:`create_element`, plus the id must not be
+        in use. Fires the same index hooks; properties are restored separately
+        through :meth:`set_property` so all property-driven indexes update.
+        """
+        et = self.metamodel.element_type(type_name)
+        if et is None:
+            raise KeyError(f"Unknown element type {type_name!r}")
+        if et.abstract:
+            raise ValueError(f"Cannot instantiate abstract type {type_name!r}")
+        if element_id in self.elements or element_id in self.relationships:
+            raise ValueError(f"Id {element_id!r} is already in use")
+        element = Element(id=element_id, type_name=type_name)
+        self.elements[element.id] = element
+        self.indexes.on_element_created(element)
+        return element
+
     # --- queries ---
     def get_element(self, element_id: str) -> Element:
         if element_id not in self.elements:
@@ -63,6 +82,31 @@ class Model:
         target.rev += 1
         self.indexes.on_properties_changed(target)
 
+    def delete_property(self, target: Element | Relationship, prop: str) -> None:
+        """Remove a property key from an attached entity (merge-patch null).
+
+        Same guards as :meth:`set_property` (entity must be attached, the
+        property must exist in the entity type's effective schema). Removing
+        a key that is not currently set is a no-op (no rev bump, no hooks),
+        matching JSON-merge-patch semantics.
+        """
+        if (
+            self.elements.get(target.id) is not target
+            and self.relationships.get(target.id) is not target
+        ):
+            raise KeyError(f"Entity {target.id!r} is not part of this model")
+        if isinstance(target, Element):
+            defs = self.metamodel.effective_element_properties(target.type_name)
+        else:
+            defs = self.metamodel.effective_relationship_properties(target.type_name)
+        if prop not in {p.name for p in defs}:
+            raise KeyError(f"{target.type_name!r} has no property {prop!r}")
+        if prop not in target.properties:
+            return
+        del target.properties[prop]
+        target.rev += 1
+        self.indexes.on_properties_changed(target)
+
     def connect(self, rel_type: str, source_id: str, target_id: str) -> Relationship:
         if self.metamodel.relationship_type(rel_type) is None:
             raise KeyError(f"Unknown relationship type {rel_type!r}")
@@ -72,6 +116,33 @@ class Model:
             raise KeyError(f"No target element {target_id!r}")
         rel = Relationship(
             id=self._ids.new_id(),
+            type_name=rel_type,
+            source_id=source_id,
+            target_id=target_id,
+        )
+        self.relationships[rel.id] = rel
+        self.indexes.on_relationship_created(rel)
+        return rel
+
+    def restore_relationship(
+        self, rel_id: str, rel_type: str, source_id: str, target_id: str
+    ) -> Relationship:
+        """Insert a relationship with a FIXED id (undo/restore path).
+
+        Same guards as :meth:`connect`, plus the id must not be in use.
+        Fires the same index hooks; properties are restored separately
+        through :meth:`set_property`.
+        """
+        if self.metamodel.relationship_type(rel_type) is None:
+            raise KeyError(f"Unknown relationship type {rel_type!r}")
+        if source_id not in self.elements:
+            raise KeyError(f"No source element {source_id!r}")
+        if target_id not in self.elements:
+            raise KeyError(f"No target element {target_id!r}")
+        if rel_id in self.relationships or rel_id in self.elements:
+            raise ValueError(f"Id {rel_id!r} is already in use")
+        rel = Relationship(
+            id=rel_id,
             type_name=rel_type,
             source_id=source_id,
             target_id=target_id,
