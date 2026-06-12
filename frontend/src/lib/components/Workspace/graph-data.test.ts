@@ -33,6 +33,7 @@ function rt(
 		containment,
 		source: 'Thing',
 		target: 'Thing',
+		mappings: [],
 		source_multiplicity: '0..*',
 		target_multiplicity: '0..*',
 		properties: []

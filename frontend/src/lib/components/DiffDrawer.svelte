@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { Button } from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
@@ -33,25 +34,37 @@
 
 	// On open: push any locally queued ops to the server, then fetch the
 	// server-computed change set (the session op log compacted into a CR doc).
+	// `open` is the ONLY tracked dependency: the body runs untracked because
+	// flushNow() synchronously reads store internals before its first await —
+	// tracking those would re-run the effect (duplicate getChanges fetches).
+	// The seq guard drops stale responses on rapid close/reopen.
+	let loadSeq = 0;
 	$effect(() => {
 		if (!open) return;
+		const seq = ++loadSeq;
 		loading = true;
 		loadError = null;
-		void (async () => {
-			try {
-				await flushNow();
-				const err = getModelError();
-				if (err !== null) {
-					loadError = err.message;
-					return;
+		untrack(() => {
+			void (async () => {
+				try {
+					await flushNow();
+					if (seq !== loadSeq) return;
+					const err = getModelError();
+					if (err !== null) {
+						loadError = err.message;
+						return;
+					}
+					const next = await getChanges();
+					if (seq !== loadSeq) return;
+					doc = next;
+				} catch (err) {
+					if (seq !== loadSeq) return;
+					loadError = err instanceof Error ? err.message : String(err);
+				} finally {
+					if (seq === loadSeq) loading = false;
 				}
-				doc = await getChanges();
-			} catch (err) {
-				loadError = err instanceof Error ? err.message : String(err);
-			} finally {
-				loading = false;
-			}
-		})();
+			})();
+		});
 	});
 
 	const diff = $derived<Diff>(
@@ -100,6 +113,7 @@
 	function onOpenChange(next: boolean): void {
 		open = next;
 		if (!next) {
+			loadSeq += 1; // invalidate any in-flight open-load
 			doc = null;
 			loadError = null;
 			saveError = null;

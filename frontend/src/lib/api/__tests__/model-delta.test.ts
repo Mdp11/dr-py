@@ -17,6 +17,7 @@ import {
 	getNeighborhood,
 	listContainmentChildren,
 	listContainmentRoots,
+	listContainmentRootsPaged,
 	listElementRelationships,
 	listElementsPage
 } from '../model-read';
@@ -235,6 +236,66 @@ describe('model-read client', () => {
 		expect(roots.items[0].child_count).toBe(2);
 		const children = await listContainmentChildren('e1', { limit: 5 }, cfg);
 		expect(children.total).toBe(0);
+	});
+
+	it('listContainmentRootsPaged pages past the 500 cap and survives a rev-bump refetch', async () => {
+		// Mirrors the backend contract: limit le=500 is REJECTED (422), not
+		// clamped — growing "Show more" past 500 must be assembled by offset
+		// paging, and every later refetch (rev bump) must stay under the cap.
+		const TOTAL = 700;
+		const calls: { limit: number; offset: number }[] = [];
+		server.use(
+			http.get(`${BASE}/model/containment/roots`, ({ request }) => {
+				const url = new URL(request.url);
+				const limit = Number(url.searchParams.get('limit') ?? '100');
+				const offset = Number(url.searchParams.get('offset') ?? '0');
+				calls.push({ limit, offset });
+				if (limit > 500) {
+					return HttpResponse.json({ detail: 'limit must be <= 500' }, { status: 422 });
+				}
+				const items = [];
+				for (let i = offset; i < Math.min(offset + limit, TOTAL); i++) {
+					items.push({ element: { ...element, id: `e${i}` }, child_count: 0 });
+				}
+				return HttpResponse.json({ items, total: TOTAL });
+			})
+		);
+
+		// "Show more" grew the requested window to 1000: two paged requests
+		const page = await listContainmentRootsPaged(1000, cfg);
+		expect(calls).toEqual([
+			{ limit: 500, offset: 0 },
+			{ limit: 500, offset: 500 }
+		]);
+		expect(page.items).toHaveLength(TOTAL);
+		expect(page.total).toBe(TOTAL);
+		expect(page.items[0].element.id).toBe('e0');
+		expect(page.items[TOTAL - 1].element.id).toBe(`e${TOTAL - 1}`);
+
+		// refetch after a rev bump keeps the grown window working (no 422)
+		calls.length = 0;
+		const refetch = await listContainmentRootsPaged(1000, cfg);
+		expect(calls.every((c) => c.limit <= 500)).toBe(true);
+		expect(calls.length).toBe(2);
+		expect(refetch.items).toHaveLength(TOTAL);
+	});
+
+	it('listContainmentRootsPaged issues a single request at or below the cap', async () => {
+		const calls: { limit: number; offset: number }[] = [];
+		server.use(
+			http.get(`${BASE}/model/containment/roots`, ({ request }) => {
+				const url = new URL(request.url);
+				calls.push({
+					limit: Number(url.searchParams.get('limit')),
+					offset: Number(url.searchParams.get('offset'))
+				});
+				return HttpResponse.json({ items: [{ element, child_count: 0 }], total: 1 });
+			})
+		);
+		const page = await listContainmentRootsPaged(500, cfg);
+		expect(calls).toEqual([{ limit: 500, offset: 0 }]);
+		expect(page.items).toHaveLength(1);
+		expect(page.total).toBe(1);
 	});
 
 	it('getChanges parses the datarover.cr/v1 document + complete flag', async () => {

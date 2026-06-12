@@ -26,6 +26,7 @@ export {
 	getModelGeneration,
 	getModelRev,
 	getModelSummary,
+	getStructureRev,
 	getUndoDepth,
 	hasPendingOps,
 	loadSummary,

@@ -52,7 +52,11 @@ export async function maybeAutoload(): Promise<void> {
 		setFilename(modelName);
 		setFileHandle(null);
 		clearIssues();
-		await refreshChangesBadge();
+		// best-effort, like every other badge refresh: a failure must not abort
+		// the view autoload below
+		refreshChangesBadge().catch((err) => {
+			console.error('[autoload] changes badge refresh failed:', err);
+		});
 
 		if (!viewName) return;
 

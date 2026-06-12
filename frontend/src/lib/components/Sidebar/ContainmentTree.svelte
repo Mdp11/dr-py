@@ -2,7 +2,8 @@
 	import { untrack } from 'svelte';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import type { ContainmentItem, Element } from '$lib/api/types';
-	import { listContainmentChildren, listContainmentRoots } from '$lib/api/model-read';
+	import { listContainmentChildren, listContainmentRootsPaged } from '$lib/api/model-read';
+	import { NotFoundError } from '$lib/api/errors';
 	import {
 		createFolder,
 		createTempId,
@@ -12,8 +13,8 @@
 		getCachedElements,
 		getMetamodel,
 		getModelGeneration,
-		getModelRev,
 		getModelSummary,
+		getStructureRev,
 		getSelection,
 		getTypeFilter,
 		getView,
@@ -83,12 +84,14 @@
 	//
 	// The tree holds only the FETCHED levels: the roots page plus the children
 	// of every EXPANDED element. Levels are (re)fetched by one effect that
-	// tracks `model_rev` + the expansion set, so the policy is: on every
-	// acknowledged ops batch (rev bump), and on every expand, the roots page
-	// and ALL currently expanded levels are refetched; levels whose parent
-	// disappeared are dropped and auto-collapsed. Each level is capped at
-	// PAGE_LIMIT entries (roots get a "Show more" button; deeper levels render
-	// the first page — flagged as a known limit).
+	// tracks `structureRev` + the expansion set, so the policy is: on every
+	// acknowledged STRUCTURAL delta (create/delete/relationship change —
+	// property-only acks while typing don't refetch), and on every expand, the
+	// roots page and ALL currently expanded levels are refetched; levels whose
+	// parent disappeared (404) are dropped and auto-collapsed. The backend caps
+	// each request at PAGE_LIMIT and 422s above it, so "Show more" growth past
+	// PAGE_LIMIT is assembled by offset paging (listContainmentRootsPaged);
+	// deeper levels render the first page — flagged as a known limit.
 	const PAGE_LIMIT = 500;
 
 	let roots: ContainmentItem[] = $state([]);
@@ -106,26 +109,34 @@
 
 	async function refreshLevels(seq: number, expanded: string[], limit: number): Promise<void> {
 		try {
-			const page = await listContainmentRoots({ limit });
+			const page = await listContainmentRootsPaged(limit);
 			if (seq !== loadSeq) return;
 			seedElements(page.items.map((i) => i.element));
 			roots = page.items;
 			rootsTotal = page.total;
-			for (const id of expanded) {
-				try {
-					const cp = await listContainmentChildren(id, { limit: PAGE_LIMIT });
-					if (seq !== loadSeq) return;
-					seedElements(cp.items.map((i) => i.element));
-					childLevels.set(id, cp.items);
-					childTotals.set(id, cp.total);
-				} catch {
-					if (seq !== loadSeq) return;
-					// parent gone (deleted) — drop and collapse its level
-					childLevels.delete(id);
-					childTotals.delete(id);
-					expandedElements.delete(id);
-				}
-			}
+			// expanded child levels are independent — fetch them in parallel
+			await Promise.all(
+				expanded.map(async (id) => {
+					try {
+						const cp = await listContainmentChildren(id, { limit: PAGE_LIMIT });
+						if (seq !== loadSeq) return;
+						seedElements(cp.items.map((i) => i.element));
+						childLevels.set(id, cp.items);
+						childTotals.set(id, cp.total);
+					} catch (err) {
+						if (seq !== loadSeq) return;
+						if (err instanceof NotFoundError) {
+							// parent gone (deleted) — drop and collapse its level
+							childLevels.delete(id);
+							childTotals.delete(id);
+							expandedElements.delete(id);
+						} else {
+							// transient failure — keep the stale level rather than collapsing
+							console.error(`Containment children load failed for ${id}`, err);
+						}
+					}
+				})
+			);
 		} catch (err) {
 			if (seq === loadSeq) console.error('Containment tree load failed', err);
 		}
@@ -136,8 +147,15 @@
 	// model is loaded — don't retrigger the fetch effect.
 	const hasModel = $derived(getModelSummary() !== null);
 
+	// Model swap: a different model starts from the default page size again.
+	// Declared before the fetch effect so the reset is visible to its run.
 	$effect(() => {
-		void getModelRev(); // tracked: refetch on every acked delta
+		void getModelGeneration();
+		rootsLimit = PAGE_LIMIT;
+	});
+
+	$effect(() => {
+		void getStructureRev(); // tracked: refetch on every STRUCTURAL acked delta
 		void getModelGeneration(); // tracked: refetch on model swap/reset
 		const loaded = hasModel;
 		const expanded = [...expandedElements]; // tracked: fetch on expand

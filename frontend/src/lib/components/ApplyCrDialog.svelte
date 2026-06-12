@@ -168,19 +168,10 @@
 		</div>
 
 		<Dialog.Footer>
-			<Button
-				type="button"
-				variant="ghost"
-				onclick={() => onOpenChange(false)}
-				disabled={busy}
-			>
+			<Button type="button" variant="ghost" onclick={() => onOpenChange(false)} disabled={busy}>
 				Close
 			</Button>
-			<Button
-				type="button"
-				onclick={onApply}
-				disabled={busy || !model || !cr}
-			>
+			<Button type="button" onclick={onApply} disabled={busy || !model || !cr}>
 				{busy ? 'Applying…' : 'Apply'}
 			</Button>
 		</Dialog.Footer>

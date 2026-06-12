@@ -8,8 +8,8 @@
 		getIssues,
 		getMetamodel,
 		getModelGeneration,
-		getModelRev,
 		getModelSummary,
+		getStructureRev,
 		getSelection,
 		indexIssues,
 		isTempId,
@@ -37,9 +37,10 @@
 	});
 
 	// Server-side BFS (GET /model/elements/{id}/neighborhood). Refresh policy:
-	// refetch whenever the center / hops / cap change AND on every acked ops
-	// batch (model_rev bump) while an element is selected — optimistic local
-	// edits appear once the flush (0 ms for structural ops) is acknowledged.
+	// refetch whenever the center / hops / cap change AND on every STRUCTURAL
+	// acked delta (structureRev bump; property-only acks while typing don't
+	// refetch) while an element is selected — optimistic structural edits
+	// appear once the flush (0 ms for structural ops) is acknowledged.
 	// An unflushed temp-id center is served from nothing (the server doesn't
 	// know it yet); the next rev bump re-points the selection and refetches.
 	let neighborhood: Neighborhood | null = $state(null);
@@ -50,7 +51,7 @@
 		const id = centerId;
 		const hops = maxHops;
 		const cap = nodeCap;
-		void getModelRev();
+		void getStructureRev();
 		void getModelGeneration(); // model swap with an equal rev still refetches
 		const seq = ++fetchSeq;
 		if (id === null || isTempId(id)) {

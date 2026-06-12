@@ -22,6 +22,9 @@
 	const CANDIDATE_CAP = 200;
 	let candidates: Element[] = $state([]);
 	let candidatesTotal = $state(0);
+	// false = subtype queries were skipped once the cap was hit, so the total
+	// is a lower bound ("N+")
+	let candidatesTotalExact = $state(true);
 	let fetchSeq = 0;
 
 	$effect(() => {
@@ -36,10 +39,12 @@
 				if (seq !== fetchSeq) return;
 				candidates = res.elements;
 				candidatesTotal = res.total;
+				candidatesTotalExact = res.totalIsExact;
 			} catch (err) {
 				if (seq !== fetchSeq) return;
 				candidates = [];
 				candidatesTotal = 0;
+				candidatesTotalExact = true;
 				console.error('Reference candidates fetch failed', err);
 			}
 		})();
@@ -117,9 +122,11 @@
 						</li>
 					{/each}
 				</ul>
-				{#if candidatesTotal > candidates.length}
+				{#if candidatesTotal > candidates.length || !candidatesTotalExact}
 					<p class="px-2 py-1 italic text-zinc-500">
-						Showing the first {candidates.length} of {candidatesTotal}.
+						Showing the first {candidates.length} of {candidatesTotal}{candidatesTotalExact
+							? ''
+							: '+'}.
 					</p>
 				{/if}
 			{/if}
