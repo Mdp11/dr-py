@@ -2,12 +2,13 @@
 	import type { Issue } from '$lib/api/types';
 	import { Button } from '$lib/components/ui/button';
 	import {
-		getBaseline,
+		getCachedElements,
+		getCachedRelationships,
 		getIssues,
 		getLastError,
 		getLastRunAt,
+		getModelSummary,
 		getViewWarnings,
-		getWorkingModel,
 		isRunning,
 		select
 	} from '$lib/state';
@@ -20,8 +21,9 @@
 	const lastRunAt = $derived(getLastRunAt());
 	const running = $derived(isRunning());
 	const lastError = $derived(getLastError());
-	const baseline = $derived(getBaseline());
-	const working = $derived(getWorkingModel());
+	const summary = $derived(getModelSummary());
+	const elements = $derived(getCachedElements());
+	const relationships = $derived(getCachedRelationships());
 
 	const errors = $derived(issues.filter((i) => i.severity === 'error'));
 	const warnings = $derived(issues.filter((i) => i.severity === 'warning'));
@@ -43,22 +45,22 @@
 		return `${hrs}h ago`;
 	}
 
-	const elementIds = $derived(new Set(working.elements.map((e) => e.id)));
-	const relationshipIds = $derived(new Set(working.relationships.map((r) => r.id)));
-
+	// Target kind/label resolution uses the cached subset; an uncached target
+	// falls back to "element" + raw id (clicking it triggers a cache-or-fetch
+	// in the detail/inspector views).
 	function kindFor(id: string): 'element' | 'relationship' {
-		if (!elementIds.has(id) && relationshipIds.has(id)) return 'relationship';
+		if (!elements.has(id) && relationships.has(id)) return 'relationship';
 		return 'element';
 	}
 
 	function targetLabel(id: string): string {
-		const el = working.elements.find((e) => e.id === id);
+		const el = elements.get(id);
 		if (el) {
 			const n = el.properties?.name;
 			if (typeof n === 'string' && n.length > 0) return n;
 			return el.id;
 		}
-		const rel = working.relationships.find((r) => r.id === id);
+		const rel = relationships.get(id);
 		if (rel) return `${rel.type_name}:${rel.id.slice(0, 6)}`;
 		return id;
 	}
@@ -128,7 +130,7 @@
 			size="sm"
 			class="h-7 gap-1 text-xs"
 			onclick={rerun}
-			disabled={running || baseline === null}
+			disabled={running || summary === null}
 		>
 			<RefreshCw class="h-3 w-3 {running ? 'animate-spin' : ''}" />
 			{running ? 'Running…' : 'Re-run'}

@@ -1,7 +1,20 @@
 <script lang="ts">
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
-	import type { Element, Relationship } from '$lib/api/types';
-	import { emit, getIssues, getWorkingModel, indexIssues, select } from '$lib/state';
+	import type { Element, Issue, Relationship } from '$lib/api/types';
+	import {
+		emit,
+		ensureElement,
+		getCachedElements,
+		getCachedRelationships,
+		getIssuesByOwner,
+		getModelGeneration,
+		getModelRev,
+		indexIssues,
+		seedElements,
+		seedRelationships,
+		select
+	} from '$lib/state';
+	import { listElementRelationships } from '$lib/api/model-read';
 	import { AlertCircle, AlertTriangle, Pencil, X } from '@lucide/svelte';
 
 	type Props = {
@@ -10,11 +23,56 @@
 
 	let { elementId }: Props = $props();
 
-	const working = $derived(getWorkingModel());
-	const issueIndex = $derived(indexIssues(getIssues()));
+	const elements = $derived(getCachedElements());
+	const relationships = $derived(getCachedRelationships());
 
-	const outgoing = $derived(working.relationships.filter((r) => r.source_id === elementId));
-	const incoming = $derived(working.relationships.filter((r) => r.target_id === elementId));
+	// Issues come from the store's issue mirror (kept exact by ops deltas and
+	// full validateAll runs), indexed over every target id like before.
+	const issueIndex = $derived.by(() => {
+		const all: Issue[] = [];
+		for (const issues of getIssuesByOwner().values()) all.push(...issues);
+		return indexIssues(all);
+	});
+
+	// Seed policy: fetch this element's incident-relationship page on mount and
+	// after every acked ops batch (rev bump); the LIST itself derives from the
+	// reactive cache so optimistic emits (new/deleted relationships) show
+	// instantly, before the server acks.
+	const PAGE_LIMIT = 500;
+	let fetchedTotal: number | null = $state(null);
+	let fetchSeq = 0;
+
+	$effect(() => {
+		const id = elementId;
+		void getModelRev();
+		void getModelGeneration(); // model swap with an equal rev still refetches
+		const seq = ++fetchSeq;
+		void (async () => {
+			try {
+				const page = await listElementRelationships(id, { direction: 'both', limit: PAGE_LIMIT });
+				if (seq !== fetchSeq) return;
+				seedRelationships(page.items);
+				fetchedTotal = page.total;
+				// other-endpoint display names: fetch the elements we don't have yet
+				const missing = new SvelteSet<string>();
+				for (const r of page.items) {
+					if (!elements.has(r.source_id)) missing.add(r.source_id);
+					if (!elements.has(r.target_id)) missing.add(r.target_id);
+				}
+				const fetched = await Promise.all([...missing].map((mid) => ensureElement(mid)));
+				if (seq !== fetchSeq) return;
+				seedElements(fetched.filter((e): e is Element => e !== null));
+			} catch {
+				if (seq === fetchSeq) fetchedTotal = null;
+			}
+		})();
+	});
+
+	const outgoing = $derived([...relationships.values()].filter((r) => r.source_id === elementId));
+	const incoming = $derived([...relationships.values()].filter((r) => r.target_id === elementId));
+	const truncated = $derived(
+		fetchedTotal !== null && fetchedTotal > PAGE_LIMIT ? fetchedTotal : null
+	);
 
 	type Group = { type_name: string; items: Relationship[] };
 
@@ -34,7 +92,7 @@
 	const incomingGroups = $derived(groupByType(incoming));
 
 	function findElement(id: string): Element | null {
-		return working.elements.find((e) => e.id === id) ?? null;
+		return elements.get(id) ?? null;
 	}
 
 	function displayName(el: Element | null, fallbackId: string): string {
@@ -139,6 +197,11 @@
 {/snippet}
 
 <div class="flex flex-col gap-2">
+	{#if truncated !== null}
+		<p class="text-[10px] italic text-zinc-500">
+			Showing the first {PAGE_LIMIT} of {truncated} relationships.
+		</p>
+	{/if}
 	<div class="flex flex-col">
 		<button
 			type="button"

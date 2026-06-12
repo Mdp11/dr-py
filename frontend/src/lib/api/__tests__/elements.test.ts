@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { http, HttpResponse } from 'msw';
 
-import { createElement, deleteElement, getElement, listElements, patchElement } from '../elements';
+import { createElement, deleteElement, getElement, patchElement } from '../elements';
 import { server } from './server';
 
 const BASE = 'http://api.test/api/v1';
@@ -18,32 +18,10 @@ const sampleElement = {
 	rev: 1
 };
 
+// NOTE: paged element listing (GET /model/elements) is covered by
+// model-delta.test.ts via `listElementsPage` in ../model-read.ts.
+
 describe('elements client', () => {
-	it('listElements forwards type filter as query param', async () => {
-		let url = '';
-		server.use(
-			http.get(`${BASE}/model/elements`, ({ request }) => {
-				url = request.url;
-				return HttpResponse.json([sampleElement]);
-			})
-		);
-		const result = await listElements({ type: 'Block' }, cfg);
-		expect(url).toContain('type=Block');
-		expect(result).toEqual([sampleElement]);
-	});
-
-	it('listElements without filters sends no query string', async () => {
-		let url = '';
-		server.use(
-			http.get(`${BASE}/model/elements`, ({ request }) => {
-				url = request.url;
-				return HttpResponse.json([]);
-			})
-		);
-		await listElements(undefined, cfg);
-		expect(url).not.toContain('?');
-	});
-
 	it('createElement POSTs the payload and returns parsed Element', async () => {
 		let body: unknown;
 		server.use(

@@ -1,19 +1,13 @@
 import { apiFetch, type ClientConfig } from './client';
 import {
-	ElementListSchema,
 	ElementSchema,
 	type CreateElementRequest,
 	type Element,
 	type UpdateElementRequest
 } from './types';
 
-export function listElements(filters?: { type?: string }, cfg?: ClientConfig): Promise<Element[]> {
-	return apiFetch(
-		'/model/elements',
-		{ method: 'GET', schema: ElementListSchema, query: { type: filters?.type } },
-		cfg
-	);
-}
+// NOTE: paged element listing lives in ./model-read.ts (`listElementsPage`);
+// GET /model/elements returns the `{items, total}` page shape since Phase C2.
 
 export function createElement(payload: CreateElementRequest, cfg?: ClientConfig): Promise<Element> {
 	return apiFetch('/model/elements', { method: 'POST', body: payload, schema: ElementSchema }, cfg);

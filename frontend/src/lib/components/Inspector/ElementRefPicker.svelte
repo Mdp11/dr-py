@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Element } from '$lib/api/types';
-	import { isSubtype } from '$lib/metamodel/helpers';
-	import { getMetamodel, getWorkingModel } from '$lib/state';
+	import { ensureElement, getCachedElements, getMetamodel } from '$lib/state';
+	import { fetchElementsOfType } from '$lib/state/element-queries';
 	import { X } from '@lucide/svelte';
 
 	type Props = {
@@ -15,19 +15,42 @@
 	let open = $state(false);
 
 	const mm = $derived(getMetamodel());
-	const working = $derived(getWorkingModel());
+	const elements = $derived(getCachedElements());
 
-	const candidates = $derived.by((): Element[] => {
-		if (mm === null) return [];
-		return working.elements
-			.filter((el) => isSubtype(mm, el.type_name, targetTypeName))
-			.slice()
-			.sort((a, b) => displayName(a).localeCompare(displayName(b)));
+	// Candidates are fetched on open (paged, capped) instead of scanning a
+	// whole-model snapshot.
+	const CANDIDATE_CAP = 200;
+	let candidates: Element[] = $state([]);
+	let candidatesTotal = $state(0);
+	let fetchSeq = 0;
+
+	$effect(() => {
+		const meta = mm;
+		const isOpen = open;
+		const typeName = targetTypeName;
+		const seq = ++fetchSeq;
+		if (!isOpen || meta === null) return;
+		void (async () => {
+			try {
+				const res = await fetchElementsOfType(meta, typeName, CANDIDATE_CAP);
+				if (seq !== fetchSeq) return;
+				candidates = res.elements;
+				candidatesTotal = res.total;
+			} catch (err) {
+				if (seq !== fetchSeq) return;
+				candidates = [];
+				candidatesTotal = 0;
+				console.error('Reference candidates fetch failed', err);
+			}
+		})();
 	});
 
-	const current = $derived(
-		valueId !== null ? (working.elements.find((el) => el.id === valueId) ?? null) : null
-	);
+	// resolve the current value's display name (cache-or-fetch)
+	$effect(() => {
+		if (valueId !== null) void ensureElement(valueId);
+	});
+
+	const current = $derived(valueId !== null ? (elements.get(valueId) ?? null) : null);
 
 	function displayName(el: Element): string {
 		const n = el.properties?.name;
@@ -94,6 +117,11 @@
 						</li>
 					{/each}
 				</ul>
+				{#if candidatesTotal > candidates.length}
+					<p class="px-2 py-1 italic text-zinc-500">
+						Showing the first {candidates.length} of {candidatesTotal}.
+					</p>
+				{/if}
 			{/if}
 		</div>
 	{/if}

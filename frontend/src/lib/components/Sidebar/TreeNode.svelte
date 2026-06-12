@@ -30,6 +30,9 @@
 		elementsById: Map<string, Element>;
 		visibility: Map<string, Visibility>;
 		collapsed: Set<string>;
+		/** Containment child counts (server-reported) — drives expanders for
+		 * element nodes whose children haven't been fetched yet. */
+		childCounts: Map<string, number>;
 		folderOptions: FolderOption[];
 		warningsByElementId: Set<string>;
 		selectedId: string | null;
@@ -48,6 +51,7 @@
 		elementsById,
 		visibility,
 		collapsed,
+		childCounts,
 		folderOptions,
 		warningsByElementId,
 		selectedId,
@@ -73,7 +77,13 @@
 	const visibleChildren = $derived(
 		myVisibility === 'full' ? allChildren.filter((c) => visibility.get(c) !== 'hidden') : []
 	);
-	const hasChildren = $derived(visibleChildren.length > 0);
+	// Element nodes can have an UNFETCHED containment level: the server-side
+	// child_count says there are children even though none are loaded yet.
+	// Show the expander so expanding can trigger the lazy fetch.
+	const hasUnloadedChildren = $derived(
+		!isFolder && allChildren.length === 0 && (childCounts.get(nodeKey) ?? 0) > 0
+	);
+	const hasChildren = $derived(visibleChildren.length > 0 || hasUnloadedChildren);
 	const isCollapsed = $derived(collapsed.has(nodeKey));
 	const isSelected = $derived(!isFolder && selectedId === nodeKey);
 	const isMultiSelected = $derived(!isFolder && multiSelectedIds.has(nodeKey));
@@ -192,6 +202,7 @@
 						{elementsById}
 						{visibility}
 						{collapsed}
+						{childCounts}
 						{folderOptions}
 						{warningsByElementId}
 						{selectedId}
@@ -290,6 +301,7 @@
 						{elementsById}
 						{visibility}
 						{collapsed}
+						{childCounts}
 						{folderOptions}
 						{warningsByElementId}
 						{selectedId}

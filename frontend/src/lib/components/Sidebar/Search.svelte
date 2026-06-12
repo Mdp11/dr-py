@@ -2,52 +2,60 @@
 	import { Input } from '$lib/components/ui/input';
 	import {
 		getSearchText,
-		getWorkingModel,
+		seedElements,
 		select,
 		setSearchDialogOpen,
 		setSearchText
 	} from '$lib/state';
+	import { listElementsPage } from '$lib/api/model-read';
 	import type { Element } from '$lib/api/types';
 	import { SlidersHorizontal } from '@lucide/svelte';
 	import AdvancedSearchDialog from './AdvancedSearchDialog.svelte';
 
-	type ScoredHit = { el: Element; score: number; displayName: string };
-
 	const MAX_RESULTS = 50;
+	const DEBOUNCE_MS = 250;
 
 	const searchText = $derived(getSearchText());
-	const working = $derived(getWorkingModel());
 
 	let isOpen = $state(false);
 	let inputEl = $state<HTMLElement | null>(null);
+
+	// Server-side search: GET /model/elements?q=... ranks by the same score
+	// the old client loop used. Debounced; out-of-order responses dropped.
+	let results: Element[] = $state([]);
+	let searching = $state(false);
+	let requestSeq = 0;
 
 	function elementDisplayName(el: Element): string {
 		const n = el.properties?.name;
 		return typeof n === 'string' && n.length > 0 ? n : el.id;
 	}
 
-	const results = $derived.by<ScoredHit[]>(() => {
-		const q = searchText.trim().toLowerCase();
-		if (q === '') return [];
-		const hits: ScoredHit[] = [];
-		for (const el of working.elements) {
-			let score = 0;
-			const nameVal = el.properties?.name;
-			const nameStr = typeof nameVal === 'string' ? nameVal : null;
-			if (nameStr && nameStr.toLowerCase().includes(q)) score += 2;
-			if (el.id.toLowerCase().includes(q)) score += 1;
-			if (el.type_name.toLowerCase().includes(q)) score += 1;
-			for (const [k, v] of Object.entries(el.properties ?? {})) {
-				if (k === 'name') continue;
-				if (typeof v === 'string' && v.toLowerCase().includes(q)) score += 0.5;
-			}
-			if (score > 0) hits.push({ el, score, displayName: elementDisplayName(el) });
+	$effect(() => {
+		const q = searchText.trim();
+		const seq = ++requestSeq;
+		if (q === '') {
+			results = [];
+			searching = false;
+			return;
 		}
-		hits.sort((a, b) => {
-			if (b.score !== a.score) return b.score - a.score;
-			return a.el.id.localeCompare(b.el.id);
-		});
-		return hits.slice(0, MAX_RESULTS);
+		searching = true;
+		const timer = setTimeout(() => {
+			void (async () => {
+				try {
+					const page = await listElementsPage({ q, limit: MAX_RESULTS });
+					if (seq !== requestSeq) return; // stale response
+					seedElements(page.items);
+					results = page.items;
+				} catch {
+					if (seq !== requestSeq) return;
+					results = [];
+				} finally {
+					if (seq === requestSeq) searching = false;
+				}
+			})();
+		}, DEBOUNCE_MS);
+		return () => clearTimeout(timer);
 	});
 
 	const showDropdown = $derived(isOpen && searchText.trim() !== '');
@@ -120,22 +128,24 @@
 		>
 			<ul class="flex flex-col gap-0.5 p-1 text-xs">
 				{#if results.length === 0}
-					<li class="px-1 py-0.5 text-zinc-600">No matches.</li>
+					<li class="px-1 py-0.5 text-zinc-600">
+						{searching ? 'Searching…' : 'No matches.'}
+					</li>
 				{:else}
-					{#each results as r (r.el.id)}
+					{#each results as el (el.id)}
 						<li>
 							<button
 								type="button"
 								class="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-								onclick={() => onPick(r.el.id)}
+								onclick={() => onPick(el.id)}
 							>
-								<span class="truncate text-zinc-200">{r.displayName}</span>
+								<span class="truncate text-zinc-200">{elementDisplayName(el)}</span>
 								<span
 									class="ml-auto shrink-0 rounded bg-zinc-800 px-1 font-mono text-[10px] text-zinc-400"
 								>
-									{r.el.type_name}
+									{el.type_name}
 								</span>
-								<span class="shrink-0 font-mono text-[10px] text-zinc-600">{r.el.id}</span>
+								<span class="shrink-0 font-mono text-[10px] text-zinc-600">{el.id}</span>
 							</button>
 						</li>
 					{/each}

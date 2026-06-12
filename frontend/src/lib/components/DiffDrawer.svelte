@@ -3,31 +3,62 @@
 	import { Button } from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import {
-		clearIssues,
-		getBaseline,
-		getDiff,
+		changesDocToDiff,
+		flushNow,
 		getFileHandle,
 		getFilename,
 		getIssues,
-		getWorkingModel,
+		getModelError,
 		indexIssues,
-		resetOps,
-		setBaseline,
+		refreshChangesBadge,
 		setFileHandle,
-		setFilename
+		setFilename,
+		type Diff
 	} from '$lib/state';
-	import { saveJsonToFile } from '$lib/util/fileSave';
+	import { downloadModel, getChanges } from '$lib/api/model-read';
+	import type { ChangesDoc } from '$lib/api/types';
+	import { saveJsonToFile, saveResponseToFile } from '$lib/util/fileSave';
 	import { AlertTriangle } from '@lucide/svelte';
-	import { saveCurrentModel, type SaveResult } from '$lib/state/save';
 	import { saveWithOptionalCr } from '$lib/state/cr';
 	import DiffRow from './DiffRow.svelte';
 
 	type Props = { open: boolean };
 	let { open = $bindable(false) }: Props = $props();
 
-	const diff = $derived(getDiff());
-	const baseline = $derived(getBaseline());
 	const filename = $derived(getFilename());
+
+	let doc: ChangesDoc | null = $state(null);
+	let loadError: string | null = $state(null);
+	let loading = $state(false);
+
+	// On open: push any locally queued ops to the server, then fetch the
+	// server-computed change set (the session op log compacted into a CR doc).
+	$effect(() => {
+		if (!open) return;
+		loading = true;
+		loadError = null;
+		void (async () => {
+			try {
+				await flushNow();
+				const err = getModelError();
+				if (err !== null) {
+					loadError = err.message;
+					return;
+				}
+				doc = await getChanges();
+			} catch (err) {
+				loadError = err instanceof Error ? err.message : String(err);
+			} finally {
+				loading = false;
+			}
+		})();
+	});
+
+	const diff = $derived<Diff>(
+		doc !== null
+			? changesDocToDiff(doc)
+			: { elements: [], relationships: [], counts: { added: 0, modified: 0, deleted: 0 } }
+	);
 	const total = $derived(diff.counts.added + diff.counts.modified + diff.counts.deleted);
 
 	const addedElements = $derived(diff.elements.filter((d) => d.status === 'added'));
@@ -42,7 +73,7 @@
 	const deletedCount = $derived(deletedElements.length + deletedRels.length);
 
 	let saving = $state(false);
-	let lastResult: SaveResult | null = $state(null);
+	let saveError: string | null = $state(null);
 	let exportCr = $state(false);
 	let crNotice: { kind: 'cancelled' | 'failed'; message: string } | null = $state(null);
 
@@ -69,41 +100,50 @@
 	function onOpenChange(next: boolean): void {
 		open = next;
 		if (!next) {
-			lastResult = null;
+			doc = null;
+			loadError = null;
+			saveError = null;
 			crNotice = null;
 			exportCr = false;
 		}
 	}
 
 	async function onSaveClick(): Promise<void> {
-		if (!baseline) return;
 		saving = true;
-		lastResult = null;
+		saveError = null;
 		crNotice = null;
-		const baselineAtSaveTime = baseline;
-		const filenameAtSaveTime = filename;
 		try {
+			// gate on a clean flush so the download reflects every local edit
+			await flushNow();
+			const storeError = getModelError();
+			if (storeError !== null) {
+				saveError = storeError.message;
+				return;
+			}
+
 			const outcome = await saveWithOptionalCr({
-				working: getWorkingModel(),
-				baseline: baselineAtSaveTime,
-				baselineFilename: filenameAtSaveTime,
+				filename,
 				fileHandle: getFileHandle(),
 				exportCr,
-				saveModel: saveCurrentModel,
+				download: () => downloadModel(),
+				fetchChanges: () => getChanges(),
+				saveResponseFile: saveResponseToFile,
 				saveFile: saveJsonToFile
 			});
 
 			if (outcome.kind === 'save-failed') {
-				lastResult = outcome.result;
+				saveError = outcome.message;
 				return;
 			}
 
-			// All non-save-failed branches mean the model was saved; apply state.
-			setBaseline(outcome.savedModel);
+			// All non-save-failed branches mean the model file was written.
 			setFilename(outcome.savedFilename);
 			setFileHandle(outcome.savedHandle);
-			resetOps();
-			clearIssues();
+			// NOTE: the server change set tracks changes since model LOAD, so it
+			// intentionally survives a file save (it is what a CR export needs).
+			refreshChangesBadge().catch(() => {
+				// best-effort
+			});
 
 			if (outcome.kind === 'saved') {
 				open = false;
@@ -125,8 +165,7 @@
 			// saveWithOptionalCr should not throw for the AbortError case
 			// (it's caught internally), but a non-Error throw or programmer
 			// error should still surface as a save failure.
-			const message = err instanceof Error ? err.message : String(err);
-			lastResult = { ok: false, kind: 'api', message };
+			saveError = err instanceof Error ? err.message : String(err);
 		} finally {
 			saving = false;
 		}
@@ -147,8 +186,19 @@
 		</Dialog.Header>
 
 		<div class="flex max-h-[60vh] flex-col gap-3 overflow-y-auto pr-1">
-			{#if total === 0}
+			{#if loading}
+				<p class="text-xs text-zinc-500">Loading changes…</p>
+			{:else if total === 0}
 				<p class="text-xs text-zinc-500">No pending changes.</p>
+			{/if}
+
+			{#if doc !== null && !doc.complete}
+				<div
+					class="flex items-center gap-1.5 rounded border border-amber-900 bg-amber-950/30 px-2 py-1 text-[11px] text-amber-200"
+				>
+					<AlertTriangle class="h-3 w-3" />
+					<span>Change history was truncated; this list covers the retained changes only.</span>
+				</div>
 			{/if}
 
 			{#if addedCount > 0}
@@ -188,12 +238,21 @@
 			{/if}
 		</div>
 
-		{#if lastResult && !lastResult.ok}
+		{#if loadError}
 			<div
 				class="flex flex-col gap-2 rounded border border-red-900 bg-red-950/40 px-3 py-2 text-xs text-red-200"
 				role="alert"
 			>
-				<p>Save failed: {lastResult.message}</p>
+				<p>Failed to load changes: {loadError}</p>
+			</div>
+		{/if}
+
+		{#if saveError}
+			<div
+				class="flex flex-col gap-2 rounded border border-red-900 bg-red-950/40 px-3 py-2 text-xs text-red-200"
+				role="alert"
+			>
+				<p>Save failed: {saveError}</p>
 			</div>
 		{/if}
 
@@ -236,7 +295,7 @@
 				type="button"
 				class="bg-red-600 text-white hover:bg-red-500"
 				onclick={onSaveClick}
-				disabled={saving || total === 0 || !baseline}
+				disabled={saving || loading || total === 0 || doc === null}
 			>
 				{saving ? 'Saving...' : `Save (${total})`}
 			</Button>

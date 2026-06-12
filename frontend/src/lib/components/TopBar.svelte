@@ -1,28 +1,37 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
+	import { resolve } from '$app/paths';
 	import { Button } from '$lib/components/ui/button';
 	import {
+		adoptSummary,
+		clearChangesBadge,
 		clearIssues,
-		getBaseline,
-		getDiff,
+		getChangesBadgeTotal,
 		getFilename,
 		getIssues,
 		getLastError,
 		getLastRunAt,
 		getMetamodel,
-		getPendingOps,
+		getModelGeneration,
+		getModelRev,
+		getModelSummary,
+		getUndoDepth,
+		hasPendingOps,
 		isRunning,
-		resetOps,
-		setBaseline,
+		refreshChangesBadge,
+		refreshSummary,
+		resetModelStore,
 		setDiffDrawerOpen,
 		setFileHandle,
 		setFilename,
-		setMetamodel
+		setMetamodel,
+		undo
 	} from '$lib/state';
-	import type { Metamodel, ModelOut } from '$lib/api/types';
+	import type { Metamodel, ModelSummary } from '$lib/api/types';
 	import { getView } from '$lib/state';
 	import { runValidation } from '$lib/state/validate-action';
 	import { saveJsonToFile } from '$lib/util/fileSave';
-	import { AlertCircle, AlertTriangle, RefreshCw } from '@lucide/svelte';
+	import { AlertCircle, AlertTriangle, RefreshCw, Undo2 } from '@lucide/svelte';
 	import ApplyCrDialog from './ApplyCrDialog.svelte';
 	import LoadMetamodelDialog from './LoadMetamodelDialog.svelte';
 	import LoadModelDialog from './LoadModelDialog.svelte';
@@ -37,21 +46,41 @@
 	const view = $derived(getView());
 
 	const metamodel = $derived(getMetamodel());
-	const baseline = $derived(getBaseline());
+	const summary = $derived(getModelSummary());
 	const modelFilename = $derived(getFilename());
-	const diff = $derived(getDiff());
-	const totalChanges = $derived(diff.counts.added + diff.counts.modified + diff.counts.deleted);
-	const saveDisabled = $derived(totalChanges === 0 || baseline === null);
+	const totalChanges = $derived(getChangesBadgeTotal());
+	const pending = $derived(hasPendingOps());
+	const saveDisabled = $derived(summary === null || (totalChanges === 0 && !pending));
 	const validating = $derived(isRunning());
-	const validateDisabled = $derived(validating || baseline === null);
+	const validateDisabled = $derived(validating || summary === null);
+	const undoDisabled = $derived(summary === null || getUndoDepth() === 0);
 	const issues = $derived(getIssues());
 	const lastRunAt = $derived(getLastRunAt());
 	const lastValidateError = $derived(getLastError());
 	const errorCount = $derived(issues.filter((i) => i.severity === 'error').length);
 	const warningCount = $derived(issues.length - errorCount);
 
+	// Post-flush refresh policy: every acked ops batch / undo / apply-cr bumps
+	// model_rev; on each bump re-fetch (a) the summary — element/relationship
+	// counts are NOT maintained incrementally by deltas — and (b) the server
+	// change-set badge. The summary presence check is untracked so the
+	// refreshed summary object (new identity, same rev) can't retrigger the
+	// effect.
+	$effect(() => {
+		void getModelRev();
+		void getModelGeneration();
+		const hasModel = untrack(() => getModelSummary() !== null);
+		if (!hasModel) return;
+		refreshSummary().catch(() => {
+			// best-effort; counts catch up on the next bump
+		});
+		refreshChangesBadge().catch(() => {
+			// best-effort badge; a failed refresh keeps the previous value
+		});
+	});
+
 	function confirmDiscardChanges(message: string): boolean {
-		if (getPendingOps().length === 0) return true;
+		if (totalChanges === 0 && !hasPendingOps()) return true;
 		return window.confirm(message);
 	}
 
@@ -74,21 +103,23 @@
 	}
 
 	function onMetamodelUploaded(mm: Metamodel, filename: string): void {
+		// uploading a metamodel clears the active model on the backend
 		setMetamodel(mm);
 		metamodelLabel = filename;
-		setBaseline(null);
+		resetModelStore();
 		setFilename(null);
 		setFileHandle(null);
-		resetOps();
 		clearIssues();
+		clearChangesBadge();
 	}
 
-	function onModelLoaded(loaded: ModelOut, filename: string): void {
-		setBaseline(loaded);
+	function onModelLoaded(loaded: ModelSummary, filename: string): void {
+		resetModelStore();
+		adoptSummary(loaded);
 		setFilename(filename);
 		setFileHandle(null);
-		resetOps();
 		clearIssues();
+		clearChangesBadge();
 	}
 
 	function onLoadViewClick(): void {
@@ -106,6 +137,20 @@
 			await saveJsonToFile(view, suggested);
 		} catch (err) {
 			console.error('Export view failed', err);
+		}
+	}
+
+	let undoing = $state(false);
+
+	async function onUndo(): Promise<void> {
+		if (undoing) return;
+		undoing = true;
+		try {
+			await undo();
+		} catch (err) {
+			console.error('Undo failed', err);
+		} finally {
+			undoing = false;
 		}
 	}
 </script>
@@ -129,7 +174,7 @@
 		<div class="flex items-center gap-2">
 			<span class="text-xs text-zinc-500">Model:</span>
 			<span class="font-mono text-xs text-zinc-300">
-				{modelFilename ?? (baseline ? 'loaded' : '—')}
+				{modelFilename ?? (summary ? 'loaded' : '—')}
 			</span>
 			<Button
 				variant="ghost"
@@ -151,7 +196,7 @@
 				variant="ghost"
 				size="sm"
 				class="h-7 text-xs"
-				disabled={baseline === null}
+				disabled={summary === null}
 				onclick={onLoadViewClick}
 			>
 				Load view...
@@ -169,23 +214,29 @@
 
 		<div class="flex items-center gap-2">
 			<a
-				href="/compare"
+				href={resolve('/compare')}
 				class="inline-flex h-7 items-center rounded px-2 text-xs text-zinc-300 hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
 			>
 				Compare
 			</a>
-			<Button
-				variant="ghost"
-				size="sm"
-				class="h-7 text-xs"
-				onclick={() => (applyCrOpen = true)}
-			>
+			<Button variant="ghost" size="sm" class="h-7 text-xs" onclick={() => (applyCrOpen = true)}>
 				Apply CR
 			</Button>
 		</div>
 	</div>
 
 	<div class="flex items-center gap-2">
+		<Button
+			variant="ghost"
+			size="sm"
+			class="h-7 gap-1 text-xs focus-visible:ring-2 focus-visible:ring-indigo-500"
+			disabled={undoDisabled || undoing}
+			aria-busy={undoing}
+			onclick={() => void onUndo()}
+		>
+			<Undo2 class="h-3 w-3" />
+			Undo
+		</Button>
 		<Button
 			variant="ghost"
 			size="sm"

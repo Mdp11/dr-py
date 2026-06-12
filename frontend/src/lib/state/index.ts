@@ -7,18 +7,43 @@ export {
 	type RelationshipOp,
 	type Snapshot
 } from './ops';
-export { ApplyError, apply } from './apply';
+export { mergePatch } from './apply';
 export { computeDiff, deepEqual, type Diff, type EntityDiff, type EntityStatus } from './diff';
+export { getFilename, setFilename, getFileHandle, setFileHandle } from './file.svelte';
 export {
-	getBaseline,
-	setBaseline,
-	getFilename,
-	setFilename,
-	getFileHandle,
-	setFileHandle
-} from './baseline.svelte';
-export { emit, getPendingOps, resetOps, undoLast } from './pending.svelte';
-export { getDiff, getWorkingModel } from './working.svelte';
+	adoptSummary,
+	applyDelta,
+	clearModelError,
+	emit,
+	ensureElement,
+	ensureRelationship,
+	flushNow,
+	getCachedElements,
+	getCachedRelationships,
+	getIssueCounts,
+	getIssuesByOwner,
+	getModelError,
+	getModelGeneration,
+	getModelRev,
+	getModelSummary,
+	getUndoDepth,
+	hasPendingOps,
+	loadSummary,
+	refreshSummary,
+	resetModelStore,
+	seedElements,
+	seedRelationships,
+	undo,
+	validateAll,
+	type ModelStoreError
+} from './model.svelte';
+export {
+	changesDocToDiff,
+	clearChangesBadge,
+	getChangesBadge,
+	getChangesBadgeTotal,
+	refreshChangesBadge
+} from './changes.svelte';
 export {
 	clearSelection,
 	getSelection,
@@ -65,6 +90,7 @@ export {
 	getSearchCriteria,
 	getSearchDialogOpen,
 	getSearchResults,
+	getSearchResultsNote,
 	getSearchResultsTarget,
 	getSearchTarget,
 	removeSearchCriterion,

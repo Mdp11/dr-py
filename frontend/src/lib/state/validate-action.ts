@@ -1,30 +1,23 @@
-import * as validationApi from '$lib/api/validation';
-import { getBaseline } from './baseline.svelte';
+import { getModelSummary, validateAll } from './model.svelte';
 import { setActiveTab } from './workspace.svelte';
 import { isRunning, setIssues, setLastError, setRunning } from './validation.svelte';
-import { getWorkingModel } from './working.svelte';
 
 /**
- * Run the inline-validation endpoint against the current working model.
- * No-op if no baseline is loaded or a run is already in flight.
+ * Run a full validation of the SESSION model via the store's `validateAll()`
+ * (which flushes pending ops first and reseeds the server-side issue store,
+ * so subsequent ops deltas carry exact issue splices).
+ * No-op if no model is loaded or a run is already in flight.
  *
  * On success: switches the workspace tab to "issues" and stores the result.
  * On error: stores the error message and logs to console.
  */
 export async function runValidation(): Promise<void> {
-	const baseline = getBaseline();
-	if (baseline === null) return;
+	if (getModelSummary() === null) return;
 	if (isRunning()) return;
 	setRunning(true);
 	setLastError(null);
 	try {
-		const working = getWorkingModel();
-		const issues = await validationApi.validateModel({
-			inline: {
-				elements: working.elements,
-				relationships: working.relationships
-			}
-		});
+		const issues = await validateAll();
 		setIssues(issues);
 		setActiveTab('issues');
 	} catch (err) {

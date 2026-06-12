@@ -1,24 +1,24 @@
 <script lang="ts">
 	import * as Command from '$lib/components/ui/command';
 	import type { Element } from '$lib/api/types';
+	import { listElementsPage } from '$lib/api/model-read';
 	import {
 		getCommandPaletteOpen,
-		getWorkingModel,
-		resetOps,
+		getModelSummary,
+		seedElements,
 		select,
 		setActiveTab,
 		setCommandPaletteOpen,
 		setDiffDrawerOpen,
+		undo,
 		type WorkspaceTab
 	} from '$lib/state';
 	import { runValidation } from '$lib/state/validate-action';
 
-	type ScoredHit = { el: Element; score: number; displayName: string };
-
 	const MAX_RESULTS = 50;
+	const DEBOUNCE_MS = 200;
 
 	const open = $derived(getCommandPaletteOpen());
-	const working = $derived(getWorkingModel());
 
 	let query = $state('');
 
@@ -27,31 +27,38 @@
 		return typeof n === 'string' && n.length > 0 ? n : el.id;
 	}
 
-	const entityHits = $derived.by<ScoredHit[]>(() => {
-		const q = query.trim().toLowerCase();
-		const hits: ScoredHit[] = [];
-		for (const el of working.elements) {
-			let score = 0;
-			if (q === '') {
-				score = 1;
-			} else {
-				const nameVal = el.properties?.name;
-				const nameStr = typeof nameVal === 'string' ? nameVal : null;
-				if (nameStr && nameStr.toLowerCase().includes(q)) score += 2;
-				if (el.id.toLowerCase().includes(q)) score += 1;
-				if (el.type_name.toLowerCase().includes(q)) score += 1;
-				for (const [k, v] of Object.entries(el.properties ?? {})) {
-					if (k === 'name') continue;
-					if (typeof v === 'string' && v.toLowerCase().includes(q)) score += 0.5;
-				}
-			}
-			if (score > 0) hits.push({ el, score, displayName: elementDisplayName(el) });
+	// Server-ranked entity search (same endpoint as the sidebar search). An
+	// empty query lists the first page in model order, like the old palette
+	// listed everything.
+	let entityHits: Element[] = $state([]);
+	let requestSeq = 0;
+
+	$effect(() => {
+		const isOpen = open;
+		const q = query.trim();
+		const hasModel = getModelSummary() !== null;
+		const seq = ++requestSeq;
+		if (!isOpen || !hasModel) {
+			entityHits = [];
+			return;
 		}
-		hits.sort((a, b) => {
-			if (b.score !== a.score) return b.score - a.score;
-			return a.el.id.localeCompare(b.el.id);
-		});
-		return hits.slice(0, MAX_RESULTS);
+		const timer = setTimeout(() => {
+			void (async () => {
+				try {
+					const page = await listElementsPage({
+						q: q === '' ? undefined : q,
+						limit: MAX_RESULTS
+					});
+					if (seq !== requestSeq) return;
+					seedElements(page.items);
+					entityHits = page.items;
+				} catch {
+					if (seq !== requestSeq) return;
+					entityHits = [];
+				}
+			})();
+		}, DEBOUNCE_MS);
+		return () => clearTimeout(timer);
 	});
 
 	function close(): void {
@@ -84,10 +91,9 @@
 		window.location.reload();
 	}
 
-	function actionDiscardChanges(): void {
+	function actionUndo(): void {
 		close();
-		const ok = window.confirm('Discard all unsaved changes? This cannot be undone.');
-		if (ok) resetOps();
+		void undo();
 	}
 
 	function onOpenChange(v: boolean): void {
@@ -126,8 +132,8 @@
 			<Command.Item value="action:reload" onSelect={actionReloadModel}>
 				<span>Reload model</span>
 			</Command.Item>
-			<Command.Item value="action:discard" onSelect={actionDiscardChanges}>
-				<span class="text-red-300">Discard all changes</span>
+			<Command.Item value="action:undo" onSelect={actionUndo}>
+				<span class="text-red-300">Undo last change</span>
 			</Command.Item>
 		</Command.Group>
 
@@ -148,15 +154,15 @@
 		{#if entityHits.length > 0}
 			<Command.Separator />
 			<Command.Group heading="Entities">
-				{#each entityHits as r (r.el.id)}
-					<Command.Item value={'entity:' + r.el.id} onSelect={() => pickEntity(r.el.id)}>
-						<span class="truncate">{r.displayName}</span>
+				{#each entityHits as el (el.id)}
+					<Command.Item value={'entity:' + el.id} onSelect={() => pickEntity(el.id)}>
+						<span class="truncate">{elementDisplayName(el)}</span>
 						<span
 							class="ml-auto shrink-0 rounded bg-zinc-800 px-1 font-mono text-[10px] text-zinc-400"
 						>
-							{r.el.type_name}
+							{el.type_name}
 						</span>
-						<span class="shrink-0 font-mono text-[10px] text-zinc-600">{r.el.id}</span>
+						<span class="shrink-0 font-mono text-[10px] text-zinc-600">{el.id}</span>
 					</Command.Item>
 				{/each}
 			</Command.Group>

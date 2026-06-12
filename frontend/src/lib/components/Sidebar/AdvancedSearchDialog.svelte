@@ -8,16 +8,20 @@
 		availableCriterionTypes,
 		clearSearchCriteria,
 		commitSearchResults,
+		getCachedElements,
+		getCachedRelationships,
 		getDraftQuery,
+		getModelSummary,
 		getSearchCriteria,
 		getSearchDialogOpen,
 		getSearchTarget,
-		getWorkingModel,
 		removeSearchCriterion,
+		seedElements,
 		setSearchDialogOpen,
 		setSearchTarget,
 		updateSearchCriterion
 	} from '$lib/state';
+	import { listElementsPage } from '$lib/api/model-read';
 	import { isValidRegex, runQuery } from '$lib/search/evaluate';
 	import { CRITERION_LABELS, type Criterion } from '$lib/search/types';
 	import CriterionRow from './CriterionRow.svelte';
@@ -47,12 +51,53 @@
 		open = next;
 	}
 
-	function onSearch(): void {
-		if (hasInvalidRegex) return;
-		const query = getDraftQuery();
-		const results = runQuery(query, getWorkingModel());
-		commitSearchResults(results, query.target);
-		setSearchDialogOpen(false);
+	let searching = $state(false);
+
+	// Client-side evaluation over the FETCHED SUBSET (a server-side query
+	// endpoint is a stated follow-up): element queries first pull up to
+	// SCAN_LIMIT elements into the cache so small/medium models are covered
+	// fully; anything beyond that — and all relationship coverage — is limited
+	// to what has been fetched, and the results panel says so.
+	const SCAN_LIMIT = 500;
+
+	async function onSearch(): Promise<void> {
+		if (hasInvalidRegex || searching) return;
+		searching = true;
+		try {
+			const query = getDraftQuery();
+			const summary = getModelSummary();
+
+			if (query.target === 'element') {
+				try {
+					const page = await listElementsPage({ limit: SCAN_LIMIT });
+					seedElements(page.items);
+				} catch {
+					// scan prefetch is best-effort; evaluate over whatever is cached
+				}
+			}
+
+			const elements = [...getCachedElements().values()];
+			const relationships = [...getCachedRelationships().values()];
+			const results = runQuery(query, { elements, relationships });
+
+			let note: string | null = null;
+			if (query.target === 'element') {
+				const total = summary?.element_count ?? elements.length;
+				if (total > elements.length) {
+					note = `searched ${elements.length} of ${total} elements (fetched subset)`;
+				}
+			} else {
+				const total = summary?.relationship_count ?? relationships.length;
+				if (total > relationships.length) {
+					note = `searched ${relationships.length} of ${total} relationships (fetched subset)`;
+				}
+			}
+
+			commitSearchResults(results, query.target, note);
+			setSearchDialogOpen(false);
+		} finally {
+			searching = false;
+		}
 	}
 </script>
 
@@ -126,10 +171,10 @@
 			<Button
 				type="button"
 				class="bg-indigo-600 text-white hover:bg-indigo-500"
-				onclick={onSearch}
-				disabled={hasInvalidRegex}
+				onclick={() => void onSearch()}
+				disabled={hasInvalidRegex || searching}
 			>
-				Search
+				{searching ? 'Searching…' : 'Search'}
 			</Button>
 		</Dialog.Footer>
 	</Dialog.Content>

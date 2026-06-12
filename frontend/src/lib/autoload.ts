@@ -1,16 +1,20 @@
 // Dev-time autoload: when `pixi run start-frontend <mm> <model> <view>` is used,
-// the Vite dev server serves the files at `/__autoload/metamodel`,
-// `/__autoload/model`, and `/__autoload/view` and exposes their basenames as
-// `VITE_AUTOLOAD_*` so we can detect the request and replay the dialog upload
-// paths.
+// the Vite dev server serves the metamodel/view files at `/__autoload/*` and
+// exposes their basenames as `VITE_AUTOLOAD_*_NAME`. The MODEL is no longer
+// fetched into the browser at all: `VITE_AUTOLOAD_MODEL_PATH` carries the
+// resolved path and the backend loads it from disk via POST /model/load
+// (backend and dev server share the filesystem — localhost trust model).
 
-import { metamodel as metamodelApi, model as modelApi } from '$lib/api';
+import { metamodel as metamodelApi } from '$lib/api';
+import { loadModelFromPath } from '$lib/api/model-ops';
 import { ViewSchema } from '$lib/api/types';
 import {
+	adoptSummary,
+	clearChangesBadge,
 	clearIssues,
 	pushView,
-	resetOps,
-	setBaseline,
+	refreshChangesBadge,
+	resetModelStore,
 	setFileHandle,
 	setFilename,
 	setMetamodel
@@ -24,6 +28,7 @@ export async function maybeAutoload(): Promise<void> {
 
 	const mmName = import.meta.env.VITE_AUTOLOAD_METAMODEL_NAME as string | undefined;
 	const modelName = import.meta.env.VITE_AUTOLOAD_MODEL_NAME as string | undefined;
+	const modelPath = import.meta.env.VITE_AUTOLOAD_MODEL_PATH as string | undefined;
 	const viewName = import.meta.env.VITE_AUTOLOAD_VIEW_NAME as string | undefined;
 	if (!mmName) return;
 
@@ -32,28 +37,22 @@ export async function maybeAutoload(): Promise<void> {
 		const mmBody = isYaml(mmName) ? mmText : JSON.parse(mmText);
 		const mm = await metamodelApi.uploadMetamodel(mmBody);
 		setMetamodel(mm);
-		setBaseline(null);
+		resetModelStore();
 		setFilename(null);
 		setFileHandle(null);
-		resetOps();
 		clearIssues();
+		clearChangesBadge();
 
-		if (!modelName) return;
+		if (!modelName || !modelPath) return;
 
-		const modelText = await fetchText('/__autoload/model');
-		const parsed = JSON.parse(modelText) as {
-			elements?: unknown[];
-			relationships?: unknown[];
-		};
-		const loaded = await modelApi.uploadModel({
-			elements: (parsed.elements ?? []) as never,
-			relationships: (parsed.relationships ?? []) as never
-		});
-		setBaseline(loaded);
+		// Server-side path load: the model JSON never transits the browser.
+		const summary = await loadModelFromPath(modelPath);
+		resetModelStore();
+		adoptSummary(summary);
 		setFilename(modelName);
 		setFileHandle(null);
-		resetOps();
 		clearIssues();
+		await refreshChangesBadge();
 
 		if (!viewName) return;
 

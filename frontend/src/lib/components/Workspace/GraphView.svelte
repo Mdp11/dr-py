@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { SvelteMap } from 'svelte/reactivity';
+	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import { SvelteFlow, Background, Controls, type Node, type Edge } from '@xyflow/svelte';
 	import '@xyflow/svelte/dist/style.css';
 	import { AlertTriangle } from '@lucide/svelte';
@@ -7,12 +7,20 @@
 	import {
 		getIssues,
 		getMetamodel,
+		getModelGeneration,
+		getModelRev,
+		getModelSummary,
 		getSelection,
-		getWorkingModel,
 		indexIssues,
+		isTempId,
+		seedElements,
+		seedRelationships,
 		select
 	} from '$lib/state';
-	import { buildGraph, type GraphData, type GraphNode } from './graph-data';
+	import { getNeighborhood } from '$lib/api/model-read';
+	import { NotFoundError } from '$lib/api/errors';
+	import type { Neighborhood } from '$lib/api/types';
+	import { containmentRelTypes } from '$lib/metamodel/helpers';
 
 	let maxHops = $state(2);
 	let nodeCap = $state(60);
@@ -20,38 +28,84 @@
 	const HOP_OPTIONS = [1, 2, 3, 4];
 
 	const selection = $derived(getSelection());
-	const working = $derived(getWorkingModel());
 	const metamodel = $derived(getMetamodel());
+	const summary = $derived(getModelSummary());
 
 	const centerId = $derived.by((): string | null => {
 		if (selection === null || selection.kind !== 'element') return null;
 		return selection.id;
 	});
 
-	const data: GraphData = $derived.by(() => {
-		if (centerId === null || metamodel === null) {
-			return { nodes: [], edges: [], truncated: false };
+	// Server-side BFS (GET /model/elements/{id}/neighborhood). Refresh policy:
+	// refetch whenever the center / hops / cap change AND on every acked ops
+	// batch (model_rev bump) while an element is selected — optimistic local
+	// edits appear once the flush (0 ms for structural ops) is acknowledged.
+	// An unflushed temp-id center is served from nothing (the server doesn't
+	// know it yet); the next rev bump re-points the selection and refetches.
+	let neighborhood: Neighborhood | null = $state(null);
+	let centerMissing = $state(false);
+	let fetchSeq = 0;
+
+	$effect(() => {
+		const id = centerId;
+		const hops = maxHops;
+		const cap = nodeCap;
+		void getModelRev();
+		void getModelGeneration(); // model swap with an equal rev still refetches
+		const seq = ++fetchSeq;
+		if (id === null || isTempId(id)) {
+			neighborhood = null;
+			centerMissing = false;
+			return;
 		}
-		return buildGraph({
-			metamodel,
-			working,
-			centerId,
-			maxHops,
-			nodeCap
-		});
+		void (async () => {
+			try {
+				const n = await getNeighborhood(id, { hops, cap });
+				if (seq !== fetchSeq) return;
+				seedElements(n.nodes);
+				seedRelationships(n.edges);
+				neighborhood = n;
+				centerMissing = false;
+			} catch (err) {
+				if (seq !== fetchSeq) return;
+				neighborhood = null;
+				centerMissing = err instanceof NotFoundError;
+				if (!(err instanceof NotFoundError)) {
+					console.error('Neighborhood fetch failed', err);
+				}
+			}
+		})();
 	});
 
-	const centerElement = $derived.by(() => {
-		if (centerId === null) return null;
-		return working.elements.find((e) => e.id === centerId) ?? null;
+	const containmentNames = $derived.by(() => {
+		if (metamodel === null) return new SvelteSet<string>();
+		return new SvelteSet(containmentRelTypes(metamodel).map((rt) => rt.name));
 	});
+
+	type GraphNode = { id: string; type_name: string; label: string; hops: number };
+
+	function labelFor(el: { id: string; properties: Record<string, unknown> }): string {
+		const n = el.properties?.name;
+		if (typeof n === 'string' && n.length > 0) return n;
+		if (el.id.length <= 8) return el.id;
+		return el.id.slice(0, 8) + '…';
+	}
+
+	const graphNodes = $derived.by((): GraphNode[] => {
+		if (neighborhood === null) return [];
+		return neighborhood.nodes.map((el) => ({
+			id: el.id,
+			type_name: el.type_name,
+			label: labelFor(el),
+			hops: neighborhood?.hops_by_id[el.id] ?? 0
+		}));
+	});
+
+	const truncated = $derived.by(() => neighborhood?.truncated ?? false);
 
 	const centerLabel = $derived.by((): string => {
-		const c = centerElement;
-		if (!c) return '';
-		const n = c.properties?.name;
-		if (typeof n === 'string' && n.length > 0) return n;
-		return c.id;
+		const c = graphNodes.find((n) => n.hops === 0);
+		return c?.label ?? centerId ?? '';
 	});
 
 	// Simple radial layout: hop 0 at origin, hop h placed on a ring of radius
@@ -104,8 +158,8 @@
 	}
 
 	const flowNodes: Node[] = $derived.by(() => {
-		const positions = radialLayout(data.nodes);
-		return data.nodes.map((n) => ({
+		const positions = radialLayout(graphNodes);
+		return graphNodes.map((n) => ({
 			id: n.id,
 			type: 'default',
 			data: { label: n.label, type_name: n.type_name, hops: n.hops },
@@ -115,24 +169,26 @@
 	});
 
 	const flowEdges: Edge[] = $derived.by(() =>
-		data.edges.map((e) => ({
+		(neighborhood?.edges ?? []).map((e) => ({
 			id: e.id,
-			source: e.source,
-			target: e.target,
+			source: e.source_id,
+			target: e.target_id,
 			type: 'default',
 			label: e.type_name,
 			labelStyle: 'fill:#a1a1aa; font-size:10px;',
 			labelBgStyle: 'fill:#09090b;',
-			data: { containment: e.containment },
-			style: e.containment ? 'stroke:#a5b4fc; stroke-width:2px;' : 'stroke:#71717a;',
+			data: { containment: containmentNames.has(e.type_name) },
+			style: containmentNames.has(e.type_name)
+				? 'stroke:#a5b4fc; stroke-width:2px;'
+				: 'stroke:#71717a;',
 			markerEnd: {
 				type: 'arrowclosed',
-				color: e.containment ? '#a5b4fc' : '#71717a'
+				color: containmentNames.has(e.type_name) ? '#a5b4fc' : '#71717a'
 			} as unknown as Edge['markerEnd']
 		}))
 	);
 
-	const totalElements = $derived(working.elements.length);
+	const totalElements = $derived(summary?.element_count ?? 0);
 
 	function handleNodeClick({ node }: { node: Node }): void {
 		select({ kind: 'element', id: node.id });
@@ -168,9 +224,9 @@
 
 			<div class="ml-auto flex items-center gap-2">
 				<span class="text-zinc-500">
-					Showing {data.nodes.length} of {totalElements} elements
+					Showing {graphNodes.length} of {totalElements} elements
 				</span>
-				{#if data.truncated}
+				{#if truncated}
 					<span
 						class="flex items-center gap-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[11px] text-amber-300"
 						title="Some neighbors were dropped because the node cap was reached. Increase nodeCap or reduce hops."
@@ -188,9 +244,11 @@
 			<div class="flex h-full items-center justify-center px-4 text-center text-xs text-zinc-500">
 				Select an element from the tree or search to see its neighborhood.
 			</div>
-		{:else if data.nodes.length === 0}
+		{:else if graphNodes.length === 0}
 			<div class="flex h-full items-center justify-center px-4 text-center text-xs text-zinc-500">
-				Selection no longer exists in the working model.
+				{centerMissing
+					? 'Selection no longer exists in the working model.'
+					: 'Loading neighborhood…'}
 			</div>
 		{:else}
 			<SvelteFlow
