@@ -11,6 +11,10 @@ const BETA = 'dnd-block-beta';
 type Folder = { name: string; folders: Folder[]; elements: string[] };
 
 async function bootstrap(page: Page): Promise<void> {
+	// The backend session persists across page loads; loading a metamodel/model
+	// over leftover unsaved changes pops a window.confirm that Playwright would
+	// auto-dismiss. Accept it so the load dialogs can open.
+	page.on('dialog', (dialog) => void dialog.accept());
 	await page.goto('/');
 
 	await page.getByRole('button', { name: 'Load metamodel...' }).click();

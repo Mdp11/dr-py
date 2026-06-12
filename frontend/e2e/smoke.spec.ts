@@ -8,6 +8,14 @@ const METAMODEL_PATH = join(__dirname, '..', '..', 'examples', 'example.metamode
 const RUN_ID = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 const ENGINE_NAME = `smoke-engine-${RUN_ID}`;
 
+// The backend keeps a single in-memory session across page loads, so a
+// previous test's pending changes survive into this one. Loading a new
+// metamodel/model then pops a window.confirm ("discards unsaved changes —
+// continue?"), which Playwright auto-DISMISSES by default; accept it instead.
+test.beforeEach(async ({ page }) => {
+	page.on('dialog', (dialog) => void dialog.accept());
+});
+
 test('load metamodel + empty model -> create element -> see in diff', async ({ page }) => {
 	test.setTimeout(90_000);
 

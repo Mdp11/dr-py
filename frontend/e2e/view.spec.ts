@@ -9,6 +9,10 @@ const BLOCK_ONE_ID = 'view-test-block-1';
 const BLOCK_TWO_ID = 'view-test-block-2';
 
 async function bootstrap(page: import('@playwright/test').Page): Promise<void> {
+	// The backend session persists across page loads; loading a metamodel/model
+	// over leftover unsaved changes pops a window.confirm that Playwright would
+	// auto-dismiss. Accept it so the load dialogs can open.
+	page.on('dialog', (dialog) => void dialog.accept());
 	await page.goto('/');
 
 	await page.getByRole('button', { name: 'Load metamodel...' }).click();
