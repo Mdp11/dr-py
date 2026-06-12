@@ -15,7 +15,13 @@ from data_rover.core.validation.pipeline import default_pipeline
 from data_rover.core.validation.scope import Scope
 from data_rover.core.validation.state import ValidationState
 
-from ..deps import Session, get_session, require_metamodel, require_model
+from ..deps import (
+    Session,
+    get_session,
+    require_allowed_origin,
+    require_metamodel,
+    require_model,
+)
 from ..schemas import (
     InlineModel,
     LoadModelRequest,
@@ -32,11 +38,17 @@ from .read import model_summary
 router = APIRouter()
 
 
-@router.post("/model")
+@router.post("/model", deprecated=True)
 def upload_model(
     payload: InlineModel,
     session: Session = Depends(get_session),
 ) -> ModelOut:
+    """Deprecated: set the session model from an inline JSON payload.
+
+    Superseded by the streaming loaders (POST /model/load for a server-side
+    path, POST /model/upload for a raw browser-streamed body), which avoid
+    pydantic-validating an O(model) payload and seed validation at load time.
+    """
     metamodel = require_metamodel(session)
     model = _build_model_from_payload(
         metamodel, payload.elements, payload.relationships
@@ -45,17 +57,30 @@ def upload_model(
     return ModelOut.from_core(model)
 
 
-@router.get("/model")
+@router.get("/model", deprecated=True)
 def get_model(session: Session = Depends(get_session)) -> ModelOut:
+    """Deprecated: return the FULL session model in one JSON body.
+
+    O(model) response — superseded by the paged/on-demand read endpoints
+    (/model/summary, /model/elements/page, /model/search, /model/tree/*,
+    /model/elements/{id}/neighborhood) and GET /model/download for export.
+    Still served for small-model consumers (e.g. the compare page).
+    """
     _, model = require_model(session)
     return ModelOut.from_core(model)
 
 
-@router.put("/model/snapshot")
+@router.put("/model/snapshot", deprecated=True)
 def snapshot_model(
     payload: SnapshotIn,
     session: Session = Depends(get_session),
 ) -> ModelOut:
+    """Deprecated: replace the session model with an inline snapshot.
+
+    Superseded by the delta protocol: edits flow through POST /model/ops and
+    loads through POST /model/load / /model/upload, so clients never ship an
+    O(model) snapshot.
+    """
     metamodel = require_metamodel(session)
     model = _build_model_from_payload(
         metamodel, payload.elements, payload.relationships
@@ -98,7 +123,7 @@ def _install_model(session: Session, metamodel: Metamodel, raw: Any) -> ModelSum
     return model_summary(session)
 
 
-@router.post("/model/load")
+@router.post("/model/load", dependencies=[Depends(require_allowed_origin)])
 def load_model(
     payload: LoadModelRequest,
     session: Session = Depends(get_session),
@@ -136,7 +161,7 @@ def load_model(
     return _install_model(session, metamodel, raw)
 
 
-@router.post("/model/upload")
+@router.post("/model/upload", dependencies=[Depends(require_allowed_origin)])
 async def upload_model_body(
     request: Request,
     session: Session = Depends(get_session),
@@ -168,7 +193,7 @@ async def upload_model_body(
     return _install_model(session, metamodel, raw)
 
 
-@router.post("/model/save")
+@router.post("/model/save", dependencies=[Depends(require_allowed_origin)])
 def save_model(
     payload: SaveModelRequest,
     session: Session = Depends(get_session),
@@ -219,7 +244,7 @@ def save_model(
     )
 
 
-@router.get("/model/download")
+@router.get("/model/download", dependencies=[Depends(require_allowed_origin)])
 def download_model(session: Session = Depends(get_session)) -> StreamingResponse:
     """Stream the session model as an attachment (same bytes as /model/save).
 

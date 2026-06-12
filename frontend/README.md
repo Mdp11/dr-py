@@ -1,8 +1,9 @@
 # data-rover-py — frontend
 
 A SvelteKit single-page UI for the `data-rover-py` MBSE engine. Browse a model,
-edit elements and relationships against a live metamodel, validate, and save
-snapshots back to the FastAPI backend.
+edit elements and relationships against a live metamodel, validate, and save —
+all against a FastAPI backend session that holds the model and streams deltas,
+pages, and files to the browser.
 
 The app is rendered statically (adapter-static) and proxies `/api/v1/*` to the
 backend in dev. It does not require Node at runtime — only at build time.
@@ -73,26 +74,38 @@ suppressed while typing.
 
 ## Architecture
 
-### State model
+### State model (delta protocol)
 
-The client never mutates the baseline model. Instead:
+The **backend session model is the source of truth**; the client never holds
+the whole model. The central store is `lib/state/model.svelte.ts`:
 
-1. A baseline `ModelOut` comes from uploading a model file to `POST /api/v1/model`
-   and is stored client-side.
+1. The store caches only the **fetched subset** of the model — entities
+   brought in by paged reads, searches, neighborhoods, and ops deltas — plus
+   model-wide counters (`/model/summary`) for headers and the status bar.
 2. The user's edits are emitted as **ops** (`create_element`,
    `update_element`, `delete_element`, and the matching three for
-   relationships) into a `pendingOps` array. Each op references either the
-   baseline id or a `tmp_*` temp id.
-3. A pure `apply(baseline, ops)` derives the **working model** — what the
-   user sees in the tree / detail / graph views.
-4. A pure `computeDiff(baseline, working)` produces the **diff** rendered in
-   the drawer and the status bar.
-5. On Save, temp ids are resolved, the snapshot is PUT to
-   `/api/v1/model/snapshot`, and the returned model is written to a file via
-   the File System Access API (or a browser download fallback).
-
-This keeps undo, diffing, and conflict detection trivial: at any moment the
-truth is `(baseline, ops)`.
+   relationships). Each op is applied to the local caches **optimistically**,
+   queued, and flushed to `POST /api/v1/model/ops` in batches: structural
+   ops on a 0 ms timeout, property updates debounced (coalescing successive
+   patches to the same entity). Flushes are strictly serialized, and each
+   batch echoes the server's `model_rev` as `base_rev`.
+3. On a 409 (rev conflict) the store enters a **conflict** state: the queue
+   is dropped, flushing is suspended, and recovery is a model reload. On a
+   422 (**rejected** op) or network error, the optimistic cache effects of
+   the failed batch are reverted from a per-op journal and the store stays
+   usable.
+4. Reads are **paged/on-demand**: element pages and fuzzy search
+   (`/model/elements`), containment tree roots/children
+   (`/model/containment/*`), and BFS neighborhoods for the graph view
+   (`/model/elements/{id}/neighborhood`).
+5. **Undo** replays the server op log (`POST /model/undo`); the "Save (n)"
+   badge and DiffDrawer come from the server-computed change set
+   (`GET /model/changes`, `/model/changes/summary`).
+6. Load and Save **stream**: a picked file goes up as a raw `fetch` body
+   (`POST /model/upload`, no JS-side parse) or by server path
+   (`POST /model/load`); Save pipes `GET /model/download` into a File System
+   Access writable (or writes server-side via `POST /model/save`), so the
+   browser never materializes the serialized model as a string.
 
 ### Where to find things
 
@@ -101,9 +114,12 @@ src/
   app.html              SvelteKit shell
   routes/+page.svelte   Single page; grids the four panels + diff drawer
   lib/
-    api/                Typed REST client, zod schemas, ApiError, MSW tests
-    state/              baseline / pendingOps / working / diff / selection
-                        ui / filters / metamodel / workspace / validation
+    api/                Typed REST client (client.ts), zod schemas, errors;
+                        model-ops / model-read wrap the delta endpoints
+    state/              model.svelte.ts (delta store) / changes (server
+                        change-set badge) / selection / ui / filters /
+                        metamodel / workspace / validation / file (filename
+                        + FS Access handle)
     metamodel/          Pure helpers (effective properties, multiplicity,
                         containment, subtype) mirroring the Python schema
     components/         TopBar, Sidebar, Workspace, Inspector, StatusBar,

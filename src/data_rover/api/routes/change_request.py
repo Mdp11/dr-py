@@ -12,8 +12,9 @@ Two request modes, selected by the OPTIONAL ``model`` field (Phase C3):
   (changed/deleted entities + validation-issue delta), so large-model
   clients never receive a full model body.
 
-Conflict (409, ``{"conflicts": [...]}``) and 422-gate semantics are
-identical in both modes.
+Conflict (409, ``{"conflicts": [...], "model_rev": ...}`` — same
+``model_rev`` field as the ops/undo 409 envelope) and 422-gate semantics
+are identical in both modes.
 """
 
 from __future__ import annotations
@@ -125,7 +126,13 @@ def _gate_cr_result(
 def _apply_cr_inline(
     session: Session, inline: InlineModel, payload: ApplyCrRequest
 ) -> ApplyCrResponse | JSONResponse:
-    """Legacy mode: apply the CR to an inline snapshot (session untouched)."""
+    """Legacy mode: apply the CR to an inline snapshot (session untouched).
+
+    Deprecated: superseded by session mode (omit ``model`` from the request)
+    — the delta path of the large-model overhaul — which applies the CR to
+    the session model and returns an OpsResponse-shaped delta instead of the
+    full result model.
+    """
     metamodel = require_metamodel(session)
     base = _build_model_from_payload(
         metamodel,
@@ -139,7 +146,10 @@ def _apply_cr_inline(
     except CRConflictError as exc:
         return JSONResponse(
             status_code=409,
-            content={"conflicts": [asdict(c) for c in exc.conflicts]},
+            content={
+                "conflicts": [asdict(c) for c in exc.conflicts],
+                "model_rev": session.model_rev,
+            },
         )
 
     # Same 422 gate as POST /model so that a CR adding an element/relationship
@@ -196,7 +206,10 @@ def _apply_cr_session(
     except CRConflictError as exc:
         return JSONResponse(
             status_code=409,
-            content={"conflicts": [asdict(c) for c in exc.conflicts]},
+            content={
+                "conflicts": [asdict(c) for c in exc.conflicts],
+                "model_rev": session.model_rev,
+            },
         )
 
     _gate_cr_result(metamodel, base, result, cr)
