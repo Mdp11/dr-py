@@ -17,6 +17,7 @@ import { validateModel } from '../api/validation';
 import { mergePatch } from './apply';
 import { isTempId, type Op } from './ops';
 import { remapProperties } from './remap';
+import { getSelection, select } from './selection.svelte';
 
 /**
  * Delta-protocol model store (Phase D1 of the large-model overhaul).
@@ -95,8 +96,11 @@ let _inFlight = $state(false);
 let _flushTimer: ReturnType<typeof setTimeout> | null = null;
 let _flushDeadline = Infinity;
 let _flushPromise: Promise<void> | null = null;
-/** Bumped by resetModelStore so in-flight responses of a dead store are dropped. */
-let _generation = 0;
+/** Bumped by resetModelStore so in-flight responses of a dead store are
+ * dropped. Reactive: consumers use it as the "a different model was
+ * installed" signal (model_rev alone is ambiguous — two freshly loaded
+ * models both start at the same rev). */
+let _generation = $state(0);
 
 /** Test/dev hook: ClientConfig forwarded to every API call this store makes. */
 let _clientConfig: ClientConfig | undefined;
@@ -131,6 +135,12 @@ export function getModelRev(): number {
 
 export function getUndoDepth(): number {
 	return _undoDepth;
+}
+
+/** Bumps on every {@link resetModelStore} — i.e. whenever a different model
+ * (or no model) is installed. Refresh effects track this + `getModelRev()`. */
+export function getModelGeneration(): number {
+	return _generation;
 }
 
 /** null = the model has not been validated yet (distinct from zero issues). */
@@ -286,7 +296,16 @@ function addIssueToOwner(issue: Issue): void {
  * complexity for a sub-flush-window flicker.
  */
 export function applyDelta(d: OpsResponse): void {
-	if (Object.keys(d.id_map).length > 0) remapCaches(d.id_map);
+	if (Object.keys(d.id_map).length > 0) {
+		remapCaches(d.id_map);
+		// keep the global selection pointing at the same entity across the
+		// temp-id -> canonical-id rename (the old architecture kept temp ids
+		// alive until file save; the delta protocol renames on first flush ack)
+		const sel = getSelection();
+		if (sel !== null && d.id_map[sel.id] !== undefined) {
+			select({ kind: sel.kind, id: d.id_map[sel.id] });
+		}
+	}
 
 	for (const e of d.changed_elements) _elements.set(e.id, e);
 	for (const r of d.changed_relationships) _relationships.set(r.id, r);
@@ -637,6 +656,59 @@ export async function refreshSummary(): Promise<ModelSummary> {
 /** Like {@link refreshSummary} but a no-op when a summary is already loaded. */
 export async function loadSummary(): Promise<ModelSummary> {
 	return _summary ?? refreshSummary();
+}
+
+/**
+ * Adopt a summary the caller already holds (load/upload responses return one)
+ * without an extra GET /model/summary round-trip. Load flows call
+ * `resetModelStore()` first, then this.
+ */
+export function adoptSummary(s: ModelSummary): void {
+	_summary = s;
+	_modelRev = s.model_rev;
+	_undoDepth = s.undo_depth;
+	_issueCounts = s.issue_counts;
+}
+
+/** True when any queued (unflushed) op targets `id` — such an entity's cache
+ * entry is optimistic local state that read results must not clobber. */
+function hasQueuedOpFor(id: string): boolean {
+	for (const q of _queue) {
+		const op = q.op;
+		if (op.kind === 'create_element' || op.kind === 'create_relationship') {
+			if (op.temp_id === id) return true;
+		} else if (op.id === id) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/**
+ * Upsert elements fetched by paged reads (search pages, containment levels,
+ * neighborhoods) into the cache so `getCachedElements()` consumers see them.
+ *
+ * Guards against clobbering newer local state: entities targeted by a queued
+ * op keep their optimistic value, and a cached entity with a HIGHER rev than
+ * the incoming one (a read raced an ops ack) is kept.
+ */
+export function seedElements(els: readonly Element[]): void {
+	for (const e of els) {
+		if (hasQueuedOpFor(e.id)) continue;
+		const cached = _elements.get(e.id);
+		if (cached !== undefined && cached.rev > e.rev) continue;
+		_elements.set(e.id, e);
+	}
+}
+
+/** Relationship counterpart of {@link seedElements}; same guards. */
+export function seedRelationships(rels: readonly Relationship[]): void {
+	for (const r of rels) {
+		if (hasQueuedOpFor(r.id)) continue;
+		const cached = _relationships.get(r.id);
+		if (cached !== undefined && cached.rev > r.rev) continue;
+		_relationships.set(r.id, r);
+	}
 }
 
 /**
