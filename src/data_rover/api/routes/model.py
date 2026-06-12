@@ -25,7 +25,7 @@ from ..schemas import (
     SaveModelResponse,
     SnapshotIn,
 )
-from ..serialize import iter_model_json
+from ..serialize import iter_buffered, iter_model_json
 from ._snapshot import _build_model_from_payload, build_model_from_dicts
 from .read import model_summary
 
@@ -226,7 +226,11 @@ def download_model(session: Session = Depends(get_session)) -> StreamingResponse
     The D2 frontend pipes ``response.body`` straight into a FileSystem
     writable, so the browser never holds the serialized model as a string.
     Chunks come from the same generator as /model/save — the two outputs are
-    byte-identical by construction.
+    byte-identical by construction. Unlike save (which writes in-process to a
+    buffered file handle), every chunk yielded here costs a full ASGI send
+    cycle, so the entity-sized chunks are re-chunked through ``iter_buffered``
+    into >=64 KiB pieces (measured: ~2 MB/s unbuffered vs. disk-speed
+    buffered on a 118 MB model; byte-identical output either way).
 
     The ``StreamingResponse`` consumes the generator AFTER this handler
     returns, interleaved with other requests; ``iter_model_json`` snapshots
@@ -237,7 +241,7 @@ def download_model(session: Session = Depends(get_session)) -> StreamingResponse
     _, model = require_model(session)
 
     def chunks() -> Iterator[bytes]:
-        for chunk in iter_model_json(model):
+        for chunk in iter_buffered(iter_model_json(model)):
             yield chunk.encode("utf-8")
 
     return StreamingResponse(
