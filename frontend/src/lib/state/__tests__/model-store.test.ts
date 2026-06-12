@@ -127,6 +127,32 @@ describe('applyDelta', () => {
 		expect(r?.target_id).toBe('e9');
 	});
 
+	it('preserves object identity of cached entities untouched by an id_map remap', () => {
+		applyDelta(
+			delta({
+				model_rev: 1,
+				changed_elements: [
+					el('tmp_a'),
+					el('touched', { ref: 'tmp_a' }),
+					el('untouched', { ref: 'e1', refs: ['e1', 'e2'] })
+				],
+				changed_relationships: [rel('r_untouched', 'untouched', 'e1')]
+			})
+		);
+		const untouchedBefore = getCachedElements().get('untouched');
+		const touchedBefore = getCachedElements().get('touched');
+		const relBefore = getCachedRelationships().get('r_untouched');
+
+		applyDelta(delta({ model_rev: 2, id_map: { tmp_a: 'E1' } }));
+
+		// entities that referenced no temp id keep their exact object (no
+		// subscription churn), while touched ones are rewritten
+		expect(getCachedElements().get('untouched')).toBe(untouchedBefore);
+		expect(getCachedRelationships().get('r_untouched')).toBe(relBefore);
+		expect(getCachedElements().get('touched')).not.toBe(touchedBefore);
+		expect(getCachedElements().get('touched')?.properties.ref).toBe('E1');
+	});
+
 	it('applies the issue-store delta keyed by owner (target_ids[0])', () => {
 		applyDelta(
 			delta({
@@ -331,6 +357,28 @@ describe('emit', () => {
 		expect(opsRequests).toBe(1);
 	});
 
+	it('drops emit() entirely in conflict state: queue stays empty, no request', async () => {
+		let opsRequests = 0;
+		server.use(
+			http.post(`${BASE}/model/ops`, () => {
+				opsRequests += 1;
+				return HttpResponse.json({ detail: 'rev conflict', model_rev: 9 }, { status: 409 });
+			}),
+			http.get(`${BASE}/model/summary`, () => HttpResponse.json({ ...summary, model_rev: 9 }))
+		);
+		applyDelta(delta({ model_rev: 0, changed_elements: [el('e1', { name: 'A' })] }));
+		emit({ kind: 'update_element', id: 'e1', properties_patch: { name: 'B' } });
+		await flushNow();
+		expect(getModelError()?.kind).toBe('conflict');
+		expect(opsRequests).toBe(1);
+
+		emit({ kind: 'delete_element', id: 'e1' });
+		expect(hasPendingOps()).toBe(false); // dropped, not queued
+		expect(getCachedElements().has('e1')).toBe(true); // not even applied optimistically
+		await flushNow();
+		expect(opsRequests).toBe(1); // never reached the server
+	});
+
 	it('reverts optimistic state exactly on 422 and surfaces a rejected error', async () => {
 		server.use(
 			http.post(`${BASE}/model/ops`, () =>
@@ -388,6 +436,34 @@ describe('reads and lifecycle', () => {
 
 		expect(await ensureElement('missing')).toBeNull();
 		expect(await ensureElement('tmp_unknown')).toBeNull(); // no server round-trip
+		expect(fetches).toBe(2);
+	});
+
+	it('ensureElement dedups concurrent fetches of the same id onto one request', async () => {
+		let fetches = 0;
+		const gates: Array<() => void> = [];
+		server.use(
+			http.get(`${BASE}/model/elements/:id`, async ({ params }) => {
+				fetches += 1;
+				await new Promise<void>((resolve) => gates.push(resolve));
+				return HttpResponse.json(el(String(params.id), { name: 'fetched' }, 1));
+			})
+		);
+		const p1 = ensureElement('e1');
+		const p2 = ensureElement('e1');
+		await vi.waitFor(() => expect(gates).toHaveLength(1));
+		gates[0]();
+		const [a, b] = await Promise.all([p1, p2]);
+		expect(fetches).toBe(1); // one request shared by both callers
+		expect(a).toBe(b);
+		expect(a?.properties.name).toBe('fetched');
+
+		// pending entry cleared on settle: a fresh (uncached) lookup fetches again
+		resetModelStore();
+		const p3 = ensureElement('e1');
+		await vi.waitFor(() => expect(gates).toHaveLength(2));
+		gates[1]();
+		expect((await p3)?.properties.name).toBe('fetched');
 		expect(fetches).toBe(2);
 	});
 
@@ -496,7 +572,9 @@ describe('reads and lifecycle', () => {
 		expect(getModelSummary()).toBeNull();
 		expect(getModelError()).toBeNull();
 		expect(hasPendingOps()).toBe(false);
-		// the cancelled queue never reaches the server
+		// the cancelled queue never reaches the server (an unhandled request
+		// would surface here as a flush error)
 		await vi.advanceTimersByTimeAsync(10);
+		expect(getModelError()).toBeNull();
 	});
 });
