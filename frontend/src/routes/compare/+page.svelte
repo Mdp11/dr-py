@@ -1,6 +1,8 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import type { ModelOut } from '$lib/api/types';
-	import { getBaseline, getFilename } from '$lib/state';
+	import { getModel } from '$lib/api/model';
+	import { getFilename } from '$lib/state';
 	import { computeDiff } from '$lib/state/diff';
 	import { comparePair } from '$lib/state/compare';
 	import { buildChangeRequest, composeCrFilename } from '$lib/state/cr';
@@ -8,8 +10,20 @@
 	import { Button } from '$lib/components/ui/button';
 	import CompareDiff from '$lib/components/CompareDiff.svelte';
 
-	const loaded = $derived(getBaseline());
+	// Comparing the session against a picked file is inherently whole-model,
+	// so this page (and only this page) pulls the full session model once.
+	let loaded: ModelOut | null = $state(null);
 	const loadedFilename = $derived(getFilename());
+
+	onMount(() => {
+		void (async () => {
+			try {
+				loaded = await getModel();
+			} catch {
+				loaded = null; // no session model — the page explains what to do
+			}
+		})();
+	});
 
 	let other: ModelOut | null = $state(null);
 	let otherFilename: string | null = $state(null);

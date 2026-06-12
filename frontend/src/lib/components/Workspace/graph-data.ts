@@ -4,6 +4,12 @@
 // element via BFS, capping the result at `nodeCap` nodes and `maxHops` hops.
 // Edges marked as "containment" if their relationship type (or one of its
 // ancestors) is containment in the supplied metamodel.
+//
+// DEPRECATED for app use (Phase D2): GraphView now fetches the server-side
+// port of this algorithm (GET /model/elements/{id}/neighborhood — see
+// api/routes/read.py, which was written from this file). Kept as the
+// executable reference implementation exercised by graph-data.test.ts; do
+// not wire it into components.
 
 import type { Metamodel } from '$lib/api/types';
 import type { Snapshot } from '$lib/state/ops';

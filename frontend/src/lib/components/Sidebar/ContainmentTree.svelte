@@ -1,22 +1,28 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
-	import type { Element } from '$lib/api/types';
-	import { containmentRelTypes } from '$lib/metamodel/helpers';
+	import type { ContainmentItem, Element } from '$lib/api/types';
+	import { listContainmentChildren, listContainmentRoots } from '$lib/api/model-read';
 	import {
 		createFolder,
 		createTempId,
 		emit,
+		ensureElement,
 		ensureTypeFilterInitialized,
+		getCachedElements,
 		getMetamodel,
+		getModelGeneration,
+		getModelRev,
+		getModelSummary,
 		getSelection,
 		getTypeFilter,
 		getView,
 		getViewWarnings,
-		getWorkingModel,
 		moveFolder,
 		placeElement,
 		placeElements,
 		removeElement,
+		seedElements,
 		select,
 		setTypeFilter,
 		toggleType
@@ -37,10 +43,10 @@
 	} from './view-tree';
 
 	const mm = $derived(getMetamodel());
-	const working = $derived(getWorkingModel());
 	const typeFilter = $derived(getTypeFilter());
 	const view = $derived(getView());
 	const viewWarnings = $derived(getViewWarnings());
+	const summary = $derived(getModelSummary());
 
 	const concreteTypeNames = $derived.by<string[]>(() => {
 		if (mm === null) return [];
@@ -73,77 +79,154 @@
 		select({ kind: 'element', id: tempId });
 	}
 
-	// SvelteSet is reactive on its own; mutate in place (no `$state` wrapper).
-	const collapsed = new SvelteSet<string>();
+	// ----- lazy containment levels (paged read endpoints) -----
+	//
+	// The tree holds only the FETCHED levels: the roots page plus the children
+	// of every EXPANDED element. Levels are (re)fetched by one effect that
+	// tracks `model_rev` + the expansion set, so the policy is: on every
+	// acknowledged ops batch (rev bump), and on every expand, the roots page
+	// and ALL currently expanded levels are refetched; levels whose parent
+	// disappeared are dropped and auto-collapsed. Each level is capped at
+	// PAGE_LIMIT entries (roots get a "Show more" button; deeper levels render
+	// the first page — flagged as a known limit).
+	const PAGE_LIMIT = 500;
 
-	function toggleCollapsed(key: string): void {
-		if (collapsed.has(key)) collapsed.delete(key);
-		else collapsed.add(key);
+	let roots: ContainmentItem[] = $state([]);
+	let rootsTotal = $state(0);
+	let rootsLimit = $state(PAGE_LIMIT);
+	const childLevels = new SvelteMap<string, ContainmentItem[]>();
+	const childTotals = new SvelteMap<string, number>();
+	/** Element ids the user expanded (folders are tracked by `collapsedFolders`). */
+	const expandedElements = new SvelteSet<string>();
+	/** Folder keys the user collapsed (folders default to expanded — they are
+	 * client-side view data, not paged). */
+	const collapsedFolders = new SvelteSet<string>();
+
+	let loadSeq = 0;
+
+	async function refreshLevels(seq: number, expanded: string[], limit: number): Promise<void> {
+		try {
+			const page = await listContainmentRoots({ limit });
+			if (seq !== loadSeq) return;
+			seedElements(page.items.map((i) => i.element));
+			roots = page.items;
+			rootsTotal = page.total;
+			for (const id of expanded) {
+				try {
+					const cp = await listContainmentChildren(id, { limit: PAGE_LIMIT });
+					if (seq !== loadSeq) return;
+					seedElements(cp.items.map((i) => i.element));
+					childLevels.set(id, cp.items);
+					childTotals.set(id, cp.total);
+				} catch {
+					if (seq !== loadSeq) return;
+					// parent gone (deleted) — drop and collapse its level
+					childLevels.delete(id);
+					childTotals.delete(id);
+					expandedElements.delete(id);
+				}
+			}
+		} catch (err) {
+			if (seq === loadSeq) console.error('Containment tree load failed', err);
+		}
 	}
 
-	function setCollapsed(key: string, value: boolean): void {
-		if (collapsed.has(key) === value) return;
-		if (value) collapsed.add(key);
-		else collapsed.delete(key);
-	}
+	// `hasModel` is a derived boolean (not the summary object) so the periodic
+	// summary refreshes — which replace the object but not the fact that a
+	// model is loaded — don't retrigger the fetch effect.
+	const hasModel = $derived(getModelSummary() !== null);
 
-	const elementsById = $derived.by(() => {
-		const m = new SvelteMap<string, Element>();
-		for (const el of working.elements) m.set(el.id, el);
-		return m;
+	$effect(() => {
+		void getModelRev(); // tracked: refetch on every acked delta
+		void getModelGeneration(); // tracked: refetch on model swap/reset
+		const loaded = hasModel;
+		const expanded = [...expandedElements]; // tracked: fetch on expand
+		const limit = rootsLimit; // tracked: "Show more" roots
+		const seq = ++loadSeq;
+		if (!loaded) {
+			untrack(() => {
+				roots = [];
+				rootsTotal = 0;
+				childLevels.clear();
+				childTotals.clear();
+				if (expandedElements.size > 0) expandedElements.clear();
+			});
+			return;
+		}
+		void refreshLevels(seq, expanded, limit);
 	});
 
-	const containmentRelTypeNames = $derived.by(() => {
-		if (mm === null) return new SvelteSet<string>();
-		return new SvelteSet(containmentRelTypes(mm).map((r) => r.name));
+	// Folder-placed elements aren't necessarily in any fetched level; pull
+	// them into the cache so the view section can render them.
+	$effect(() => {
+		if (view === null) return;
+		const ids: string[] = [];
+		const walk = (folders: typeof view.folders): void => {
+			for (const f of folders) {
+				ids.push(...f.elements);
+				walk(f.folders);
+			}
+		};
+		walk(view.folders);
+		for (const id of ids) void ensureElement(id);
 	});
+
+	// ----- unified tree over the fetched subset -----
+
+	const elementsById = $derived(getCachedElements() as Map<string, Element>);
 
 	function displayName(el: Element): string {
 		const n = el.properties?.name;
 		return typeof n === 'string' && n.length > 0 ? n : el.id;
 	}
 
-	const childrenByParent = $derived.by(() => {
+	const containmentChildren = $derived.by(() => {
 		const m = new SvelteMap<string, string[]>();
-		const containedIds = new SvelteSet<string>();
-		for (const rel of working.relationships) {
-			if (!containmentRelTypeNames.has(rel.type_name)) continue;
-			if (!elementsById.has(rel.source_id) || !elementsById.has(rel.target_id)) continue;
-			if (containedIds.has(rel.target_id)) continue; // first containment parent wins
-			containedIds.add(rel.target_id);
-			const arr = m.get(rel.source_id);
-			if (arr) arr.push(rel.target_id);
-			else m.set(rel.source_id, [rel.target_id]);
-		}
-		for (const [k, ids] of m) {
-			ids.sort((a, b) =>
-				displayName(elementsById.get(a)!).localeCompare(displayName(elementsById.get(b)!))
+		for (const [pid, items] of childLevels) {
+			m.set(
+				pid,
+				items.map((i) => i.element.id).filter((id) => elementsById.has(id))
 			);
-			m.set(k, ids);
 		}
-		return { children: m, containedIds };
+		return m;
 	});
 
-	const rootElements = $derived.by(() => {
-		const { containedIds } = childrenByParent;
-		const rs: string[] = [];
-		for (const el of working.elements) {
-			if (!containedIds.has(el.id)) rs.push(el.id);
+	const containedIds = $derived.by(() => {
+		const s = new SvelteSet<string>();
+		for (const ids of containmentChildren.values()) {
+			for (const id of ids) s.add(id);
 		}
-		return rs;
+		return s;
+	});
+
+	const rootElementIds = $derived(
+		roots.map((i) => i.element.id).filter((id) => elementsById.has(id))
+	);
+
+	/** child_count per element id (drives expanders for unfetched levels). */
+	const childCounts = $derived.by(() => {
+		const m = new SvelteMap<string, number>();
+		for (const i of roots) m.set(i.element.id, i.child_count);
+		for (const items of childLevels.values()) {
+			for (const i of items) m.set(i.element.id, i.child_count);
+		}
+		return m;
 	});
 
 	const tree = $derived.by(() =>
 		buildUnifiedTree(
 			view,
-			rootElements,
+			rootElementIds,
 			elementsById,
-			childrenByParent.children,
-			childrenByParent.containedIds,
+			containmentChildren,
+			containedIds,
 			displayName
 		)
 	);
 
+	// Visibility is computed over the LOADED subset only: an element whose own
+	// type is filtered out is hidden even if an UNFETCHED descendant would
+	// match (the old whole-model tree kept such ancestors visible).
 	const visibility = $derived.by(() => computeVisibility(tree, elementsById, typeFilter));
 
 	const warningsByElementId = $derived.by(() => {
@@ -155,6 +238,119 @@
 	});
 
 	const selection = $derived(getSelection());
+
+	// ----- expansion state (lazy levels) -----
+
+	function isExpandable(key: string): boolean {
+		if (isFolderKey(key)) return (tree.children.get(key) ?? []).length > 0;
+		return (tree.children.get(key) ?? []).length > 0 || (childCounts.get(key) ?? 0) > 0;
+	}
+
+	function isCollapsedKey(key: string): boolean {
+		if (isFolderKey(key)) return collapsedFolders.has(key);
+		return !expandedElements.has(key);
+	}
+
+	/** Set passed to TreeNode (its `collapsed.has(key)` contract is unchanged). */
+	const collapsedSet = $derived.by(() => {
+		const s = new SvelteSet<string>();
+		for (const key of tree.kind.keys()) {
+			if (isCollapsedKey(key)) s.add(key);
+		}
+		return s;
+	});
+
+	function toggleCollapsed(key: string): void {
+		setCollapsed(key, !isCollapsedKey(key));
+	}
+
+	function setCollapsed(key: string, value: boolean): void {
+		if (isFolderKey(key)) {
+			if (value) collapsedFolders.add(key);
+			else collapsedFolders.delete(key);
+			return;
+		}
+		if (value) expandedElements.delete(key);
+		else expandedElements.add(key);
+	}
+
+	type VisibleRow = { key: string; parent: string | null };
+	const visibleRows = $derived.by<VisibleRow[]>(() => {
+		const out: VisibleRow[] = [];
+		const walk = (key: string, parent: string | null): void => {
+			const vis = visibility.get(key);
+			if (vis === 'hidden' || vis === undefined) return;
+			out.push({ key, parent });
+			if (vis === 'stub') return;
+			if (collapsedSet.has(key)) return;
+			for (const c of tree.children.get(key) ?? []) walk(c, key);
+		};
+		for (const r of tree.roots) walk(r, null);
+		return out;
+	});
+
+	let focusedId: string | null = $state(null);
+
+	const focusedIndex = $derived.by(() => {
+		if (focusedId === null) return -1;
+		return visibleRows.findIndex((r) => r.key === focusedId);
+	});
+
+	function moveTo(idx: number): void {
+		if (idx < 0 || idx >= visibleRows.length) return;
+		focusedId = visibleRows[idx].key;
+	}
+
+	function onKeyDown(e: KeyboardEvent): void {
+		if (visibleRows.length === 0) return;
+		const cur = focusedIndex;
+		const k = e.key;
+		if (k === 'ArrowDown') {
+			e.preventDefault();
+			if (cur < 0) moveTo(0);
+			else moveTo(Math.min(visibleRows.length - 1, cur + 1));
+		} else if (k === 'ArrowUp') {
+			e.preventDefault();
+			if (cur < 0) moveTo(visibleRows.length - 1);
+			else moveTo(Math.max(0, cur - 1));
+		} else if (k === 'ArrowRight') {
+			if (cur < 0) return;
+			e.preventDefault();
+			const row = visibleRows[cur];
+			if (!isExpandable(row.key)) return;
+			if (isCollapsedKey(row.key)) {
+				setCollapsed(row.key, false);
+			} else {
+				const kids = tree.children.get(row.key) ?? [];
+				if (kids.some((c) => visibility.get(c) !== 'hidden')) moveTo(cur + 1);
+			}
+		} else if (k === 'ArrowLeft') {
+			if (cur < 0) return;
+			e.preventDefault();
+			const row = visibleRows[cur];
+			if (isExpandable(row.key) && !isCollapsedKey(row.key)) {
+				setCollapsed(row.key, true);
+			} else if (row.parent !== null) {
+				const pIdx = visibleRows.findIndex((r) => r.key === row.parent);
+				if (pIdx >= 0) moveTo(pIdx);
+			}
+		} else if (k === 'Enter' || k === ' ') {
+			if (cur < 0) return;
+			e.preventDefault();
+			const row = visibleRows[cur];
+			if (!isFolderKey(row.key)) {
+				replaceMultiSelected([row.key]);
+				anchorId = row.key;
+				select({ kind: 'element', id: row.key });
+			}
+		}
+	}
+
+	$effect(() => {
+		if (selection?.kind === 'element' && visibleRows.some((r) => r.key === selection.id)) {
+			focusedId = selection.id;
+		}
+	});
 
 	// ----- multi-selection (sidebar-local; the Inspector still tracks the single
 	// `selection`, which we keep pointed at the last-touched element) -----
@@ -195,86 +391,6 @@
 		}
 		select({ kind: 'element', id: key });
 	}
-
-	type VisibleRow = { key: string; parent: string | null };
-	const visibleRows = $derived.by<VisibleRow[]>(() => {
-		const out: VisibleRow[] = [];
-		const walk = (key: string, parent: string | null): void => {
-			const vis = visibility.get(key);
-			if (vis === 'hidden' || vis === undefined) return;
-			out.push({ key, parent });
-			if (vis === 'stub') return;
-			if (collapsed.has(key)) return;
-			for (const c of tree.children.get(key) ?? []) walk(c, key);
-		};
-		for (const r of tree.roots) walk(r, null);
-		return out;
-	});
-
-	let focusedId: string | null = $state(null);
-
-	const focusedIndex = $derived.by(() => {
-		if (focusedId === null) return -1;
-		return visibleRows.findIndex((r) => r.key === focusedId);
-	});
-
-	function moveTo(idx: number): void {
-		if (idx < 0 || idx >= visibleRows.length) return;
-		focusedId = visibleRows[idx].key;
-	}
-
-	function onKeyDown(e: KeyboardEvent): void {
-		if (visibleRows.length === 0) return;
-		const cur = focusedIndex;
-		const k = e.key;
-		if (k === 'ArrowDown') {
-			e.preventDefault();
-			if (cur < 0) moveTo(0);
-			else moveTo(Math.min(visibleRows.length - 1, cur + 1));
-		} else if (k === 'ArrowUp') {
-			e.preventDefault();
-			if (cur < 0) moveTo(visibleRows.length - 1);
-			else moveTo(Math.max(0, cur - 1));
-		} else if (k === 'ArrowRight') {
-			if (cur < 0) return;
-			e.preventDefault();
-			const row = visibleRows[cur];
-			const kids = tree.children.get(row.key) ?? [];
-			const hasVisibleChild = kids.some((c) => visibility.get(c) !== 'hidden');
-			if (hasVisibleChild && collapsed.has(row.key)) {
-				setCollapsed(row.key, false);
-			} else if (hasVisibleChild) {
-				moveTo(cur + 1);
-			}
-		} else if (k === 'ArrowLeft') {
-			if (cur < 0) return;
-			e.preventDefault();
-			const row = visibleRows[cur];
-			const kids = tree.children.get(row.key) ?? [];
-			const hasVisibleChild = kids.some((c) => visibility.get(c) !== 'hidden');
-			if (hasVisibleChild && !collapsed.has(row.key)) {
-				setCollapsed(row.key, true);
-			} else if (row.parent !== null) {
-				const pIdx = visibleRows.findIndex((r) => r.key === row.parent);
-				if (pIdx >= 0) moveTo(pIdx);
-			}
-		} else if (k === 'Enter' || k === ' ') {
-			if (cur < 0) return;
-			e.preventDefault();
-			const row = visibleRows[cur];
-			if (!isFolderKey(row.key)) {
-				replaceMultiSelected([row.key]);
-				anchorId = row.key;
-				select({ kind: 'element', id: row.key });
-			}
-		}
-	}
-
-	$effect(() => {
-		if (selection?.kind === 'element' && visibleRows.some((r) => r.key === selection.id)) {
-			focusedId = selection.id;
-		}
-	});
 
 	// Drop ids that no longer exist (model swap / element deletion).
 	$effect(() => {
@@ -558,7 +674,7 @@
 	>
 		{#if mm === null}
 			<p class="text-xs text-zinc-600">Load a metamodel and model to begin.</p>
-		{:else if working.elements.length === 0 && tree.roots.length === 0}
+		{:else if (summary?.element_count ?? 0) === 0 && tree.roots.length === 0}
 			<p class="text-xs text-zinc-600">Model is empty.</p>
 		{:else}
 			{#if view !== null && draggingPayload !== null}
@@ -585,7 +701,8 @@
 							{tree}
 							{elementsById}
 							{visibility}
-							{collapsed}
+							collapsed={collapsedSet}
+							{childCounts}
 							{folderOptions}
 							{warningsByElementId}
 							selectedId={selection?.kind === 'element' ? selection.id : null}
@@ -599,6 +716,15 @@
 					{/if}
 				{/each}
 			</ul>
+			{#if rootsTotal > roots.length}
+				<button
+					type="button"
+					class="mt-1 w-fit rounded border border-zinc-800 bg-zinc-900 px-2 py-0.5 text-[11px] text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+					onclick={() => (rootsLimit = rootsLimit + PAGE_LIMIT)}
+				>
+					Show more ({roots.length} of {rootsTotal})
+				</button>
+			{/if}
 		{/if}
 	</div>
 

@@ -1,20 +1,31 @@
 <script lang="ts">
 	import type { Element, Relationship } from '$lib/api/types';
 	import { Separator } from '$lib/components/ui/separator';
-	import { getSelection, getWorkingModel } from '$lib/state';
+	import {
+		ensureElement,
+		getCachedElements,
+		getCachedRelationships,
+		getSelection
+	} from '$lib/state';
 	import NewRelationshipPicker from './Inspector/NewRelationshipPicker.svelte';
 	import PropertyForm from './Inspector/PropertyForm.svelte';
 	import RelationshipsList from './Inspector/RelationshipsList.svelte';
 
 	const selection = $derived(getSelection());
-	const working = $derived(getWorkingModel());
+	const elements = $derived(getCachedElements());
+	const relationships = $derived(getCachedRelationships());
+
+	// cache-or-fetch on selection change (see DetailView for the same pattern)
+	$effect(() => {
+		if (selection?.kind === 'element') void ensureElement(selection.id);
+	});
 
 	const entity = $derived.by((): Element | Relationship | null => {
 		if (selection === null) return null;
 		if (selection.kind === 'element') {
-			return working.elements.find((e) => e.id === selection.id) ?? null;
+			return elements.get(selection.id) ?? null;
 		}
-		return working.relationships.find((r) => r.id === selection.id) ?? null;
+		return relationships.get(selection.id) ?? null;
 	});
 </script>
 

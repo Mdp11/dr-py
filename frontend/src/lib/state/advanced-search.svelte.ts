@@ -19,6 +19,8 @@ let _target: TargetKind = $state('element');
 let _criteria: Criterion[] = $state([]);
 let _results: SearchResultItem[] = $state([]);
 let _resultsTarget: TargetKind = $state('element');
+/** Coverage note (e.g. "searched N of M elements") shown in the results panel. */
+let _resultsNote: string | null = $state(null);
 
 export function getSearchDialogOpen(): boolean {
 	return _dialogOpen;
@@ -72,15 +74,25 @@ export function getSearchResultsTarget(): TargetKind {
 	return _resultsTarget;
 }
 
+export function getSearchResultsNote(): string | null {
+	return _resultsNote;
+}
+
 /** Store results and open the bottom panel. */
-export function commitSearchResults(results: SearchResultItem[], target: TargetKind): void {
+export function commitSearchResults(
+	results: SearchResultItem[],
+	target: TargetKind,
+	note: string | null = null
+): void {
 	_results = results;
 	_resultsTarget = target;
+	_resultsNote = note;
 	_panelOpen = true;
 }
 
 /** X button: clear results and close the panel. */
 export function closeResultsPanel(): void {
 	_results = [];
+	_resultsNote = null;
 	_panelOpen = false;
 }

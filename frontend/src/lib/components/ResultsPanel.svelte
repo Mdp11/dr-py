@@ -3,18 +3,19 @@
 	import type { Element, Relationship } from '$lib/api/types';
 	import {
 		closeResultsPanel,
+		getCachedElements,
+		getCachedRelationships,
 		getSearchResults,
+		getSearchResultsNote,
 		getSearchResultsTarget,
-		getWorkingModel,
 		select
 	} from '$lib/state';
 
 	const results = $derived(getSearchResults());
 	const target = $derived(getSearchResultsTarget());
-	const working = $derived(getWorkingModel());
-
-	const elementsById = $derived(new Map(working.elements.map((e) => [e.id, e])));
-	const relationshipsById = $derived(new Map(working.relationships.map((r) => [r.id, r])));
+	const note = $derived(getSearchResultsNote());
+	const elementsById = $derived(getCachedElements());
+	const relationshipsById = $derived(getCachedRelationships());
 
 	function elementName(e: Element): string {
 		const n = e.properties?.name;
@@ -25,7 +26,8 @@
 		| { kind: 'element'; id: string; el: Element }
 		| { kind: 'relationship'; id: string; rel: Relationship };
 
-	// Resolve display rows from the live model; drop stale ids.
+	// Resolve display rows from the cached entities (the search evaluated over
+	// exactly these); drop stale ids.
 	const rows = $derived.by<Row[]>(() => {
 		const out: Row[] = [];
 		for (const r of results) {
@@ -62,6 +64,9 @@
 		<span class="rounded bg-zinc-800 px-1.5 py-0.5 font-mono text-[10px] text-zinc-400">
 			{target}
 		</span>
+		{#if note}
+			<span class="text-[10px] italic text-amber-300/80">{note}</span>
+		{/if}
 		<button
 			type="button"
 			aria-label="Close results"

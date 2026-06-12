@@ -2,7 +2,7 @@
 	import { SvelteSet } from 'svelte/reactivity';
 	import { Trash2 } from '@lucide/svelte';
 	import { Input } from '$lib/components/ui/input';
-	import { getMetamodel, getWorkingModel } from '$lib/state';
+	import { getCachedElements, getCachedRelationships, getMetamodel } from '$lib/state';
 	import { isValidRegex } from '$lib/search/evaluate';
 	import { CRITERION_LABELS, type Criterion, type TargetKind } from '$lib/search/types';
 	import {
@@ -24,14 +24,20 @@
 	let { criterion, index, target, onChange, onRemove }: Props = $props();
 
 	const mm = $derived(getMetamodel());
-	const working = $derived(getWorkingModel());
 
 	const elementTypeNames = $derived([...(mm?.elements ?? []).map((e) => e.name)].sort());
 	const relTypeNames = $derived([...(mm?.relationships ?? []).map((r) => r.name)].sort());
 
 	// Picker rows: every (name, datatype) pair for this target, plus instance-only
 	// keys as untyped. Same-named properties of different datatypes are distinct.
-	const propertyItems = $derived(propertyItemsFor(target, mm, working));
+	// Instance-only keys are discovered from the FETCHED SUBSET (cached
+	// entities); metamodel-declared properties are always complete.
+	const propertyItems = $derived(
+		propertyItemsFor(target, mm, {
+			elements: [...getCachedElements().values()],
+			relationships: [...getCachedRelationships().values()]
+		})
+	);
 
 	// Which inline picker popover is open (keyed by a string id within this row).
 	let openPicker = $state<string | null>(null);

@@ -1,7 +1,8 @@
 <script lang="ts">
 	import type { Element, RelationshipType } from '$lib/api/types';
 	import { isSubtype } from '$lib/metamodel/helpers';
-	import { createTempId, emit, getMetamodel, getWorkingModel } from '$lib/state';
+	import { createTempId, emit, ensureElement, getCachedElements, getMetamodel } from '$lib/state';
+	import { fetchElementsOfType } from '$lib/state/element-queries';
 	import { Plus, X } from '@lucide/svelte';
 
 	type Props = {
@@ -11,9 +12,13 @@
 	let { sourceId }: Props = $props();
 
 	const mm = $derived(getMetamodel());
-	const working = $derived(getWorkingModel());
+	const elements = $derived(getCachedElements());
 
-	const source = $derived(working.elements.find((e) => e.id === sourceId) ?? null);
+	$effect(() => {
+		void ensureElement(sourceId);
+	});
+
+	const source = $derived(elements.get(sourceId) ?? null);
 
 	const availableTypes = $derived.by((): RelationshipType[] => {
 		if (mm === null || source === null) return [];
@@ -33,12 +38,35 @@
 		return mm.relationships.find((rt) => rt.name === selectedType) ?? null;
 	});
 
-	const candidateTargets = $derived.by((): Element[] => {
-		if (mm === null || chosenType === null) return [];
-		return working.elements
-			.filter((el) => isSubtype(mm, el.type_name, chosenType.target))
-			.slice()
-			.sort((a, b) => displayName(a).localeCompare(displayName(b)));
+	// Candidate targets are fetched server-side (paged, capped) per chosen
+	// relationship type — the client no longer scans a whole-model snapshot.
+	const TARGET_CAP = 200;
+	let candidateTargets: Element[] = $state([]);
+	let candidatesTotal = $state(0);
+	let fetchSeq = 0;
+
+	$effect(() => {
+		const meta = mm;
+		const t = chosenType;
+		const seq = ++fetchSeq;
+		if (meta === null || t === null) {
+			candidateTargets = [];
+			candidatesTotal = 0;
+			return;
+		}
+		void (async () => {
+			try {
+				const res = await fetchElementsOfType(meta, t.target, TARGET_CAP);
+				if (seq !== fetchSeq) return;
+				candidateTargets = res.elements;
+				candidatesTotal = res.total;
+			} catch (err) {
+				if (seq !== fetchSeq) return;
+				candidateTargets = [];
+				candidatesTotal = 0;
+				console.error('Target candidates fetch failed', err);
+			}
+		})();
 	});
 
 	function displayName(el: Element): string {
@@ -135,6 +163,10 @@
 					{#if candidateTargets.length === 0}
 						<span class="text-[10px] italic text-zinc-500">
 							No elements of type {chosenType.target} (or subtype) exist.
+						</span>
+					{:else if candidatesTotal > candidateTargets.length}
+						<span class="text-[10px] italic text-zinc-500">
+							Showing the first {candidateTargets.length} of {candidatesTotal} candidates.
 						</span>
 					{/if}
 				</label>

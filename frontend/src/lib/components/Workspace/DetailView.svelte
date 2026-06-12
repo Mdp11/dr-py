@@ -1,29 +1,52 @@
 <script lang="ts">
 	import type { Element, Relationship } from '$lib/api/types';
-	import { emit, getSelection, getWorkingModel, select } from '$lib/state';
+	import {
+		emit,
+		ensureElement,
+		getCachedElements,
+		getCachedRelationships,
+		getSelection,
+		select
+	} from '$lib/state';
 	import PropertyForm from '../Inspector/PropertyForm.svelte';
 
 	const selection = $derived(getSelection());
-	const working = $derived(getWorkingModel());
+	const elements = $derived(getCachedElements());
+	const relationships = $derived(getCachedRelationships());
+
+	// cache-or-fetch: selecting an uncached element (deep link, issue target)
+	// pulls it in on demand; the cached maps are reactive so the entity pops
+	// in as soon as the fetch lands or a delta upserts it.
+	$effect(() => {
+		if (selection?.kind === 'element') void ensureElement(selection.id);
+	});
 
 	const entity = $derived.by((): Element | Relationship | null => {
 		if (selection === null) return null;
 		if (selection.kind === 'element') {
-			return working.elements.find((e) => e.id === selection.id) ?? null;
+			return elements.get(selection.id) ?? null;
 		}
-		return working.relationships.find((r) => r.id === selection.id) ?? null;
+		return relationships.get(selection.id) ?? null;
+	});
+
+	$effect(() => {
+		if (entity !== null && selection?.kind === 'relationship') {
+			const rel = entity as Relationship;
+			void ensureElement(rel.source_id);
+			void ensureElement(rel.target_id);
+		}
 	});
 
 	const sourceEl = $derived.by((): Element | null => {
 		if (entity === null || selection?.kind !== 'relationship') return null;
 		const rel = entity as Relationship;
-		return working.elements.find((e) => e.id === rel.source_id) ?? null;
+		return elements.get(rel.source_id) ?? null;
 	});
 
 	const targetEl = $derived.by((): Element | null => {
 		if (entity === null || selection?.kind !== 'relationship') return null;
 		const rel = entity as Relationship;
-		return working.elements.find((e) => e.id === rel.target_id) ?? null;
+		return elements.get(rel.target_id) ?? null;
 	});
 
 	function displayName(el: Element | null, fallbackId: string): string {
