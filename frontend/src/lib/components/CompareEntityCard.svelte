@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { SvelteSet } from 'svelte/reactivity';
 	import type { Element, Relationship } from '$lib/api/types';
 	import type { EntityDiff } from '$lib/state/diff';
 
@@ -24,7 +25,7 @@
 
 	/** Unified list of row keys to render. For relationships, endpoint keys come first. */
 	function rowKeys(b: typeof before, a: typeof after): string[] {
-		const keys = new Set<string>();
+		const keys = new SvelteSet<string>();
 		if (b) for (const k of Object.keys(b.properties)) keys.add(k);
 		if (a) for (const k of Object.keys(a.properties)) keys.add(k);
 		const propRows = [...keys];
@@ -60,7 +61,8 @@
 	<div class="flex items-center gap-2 px-3 py-2 text-sm">
 		<span
 			class={`inline-flex h-5 w-5 items-center justify-center rounded font-mono font-bold ${badgeClass}`}
-		>{badge}</span>
+			>{badge}</span
+		>
 		<span class="font-semibold text-indigo-300">{entity.type_name}</span>
 		<span class="font-mono text-xs text-zinc-400">{diff.id}</span>
 	</div>

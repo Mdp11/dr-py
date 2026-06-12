@@ -20,13 +20,13 @@
 			<button
 				type="button"
 				class={`px-3 py-1 ${mode === 'split' ? 'bg-indigo-500 text-white' : 'text-zinc-300 hover:bg-zinc-700'}`}
-				onclick={() => (mode = 'split')}
-			>Split</button>
+				onclick={() => (mode = 'split')}>Split</button
+			>
 			<button
 				type="button"
 				class={`px-3 py-1 ${mode === 'unified' ? 'bg-indigo-500 text-white' : 'text-zinc-300 hover:bg-zinc-700'}`}
-				onclick={() => (mode = 'unified')}
-			>Unified</button>
+				onclick={() => (mode = 'unified')}>Unified</button
+			>
 		</div>
 	</div>
 

@@ -86,6 +86,9 @@ const _issuesByOwner = new SvelteMap<string, Issue[]>();
 
 let _summary: ModelSummary | null = $state(null);
 let _modelRev = $state(0);
+/** Bumped only by STRUCTURAL deltas (created/deleted entities, changed
+ * relationships) — see {@link getStructureRev}. */
+let _structureRev = $state(0);
 let _undoDepth = $state(0);
 let _issueCounts: IssueCounts | null = $state(null);
 let _error: ModelStoreError | null = $state(null);
@@ -131,6 +134,19 @@ export function getModelSummary(): ModelSummary | null {
 
 export function getModelRev(): number {
 	return _modelRev;
+}
+
+/**
+ * Structural-change counter for refetch effects (containment tree, incident
+ * relationships, neighborhood graph). Unlike `model_rev` — which bumps on
+ * EVERY acked batch, including debounced property-only updates while the user
+ * types — this bumps only when a delta creates or deletes entities or touches
+ * relationships, i.e. when paged read results can actually have changed
+ * shape. Track this (+ `getModelGeneration()`) instead of `getModelRev()` to
+ * avoid a refetch fan-out per keystroke ack.
+ */
+export function getStructureRev(): number {
+	return _structureRev;
 }
 
 export function getUndoDepth(): number {
@@ -296,6 +312,20 @@ function addIssueToOwner(issue: Issue): void {
  * complexity for a sub-flush-window flicker.
  */
 export function applyDelta(d: OpsResponse): void {
+	// Structural = anything that can change paged read results (containment
+	// levels, incident-relationship pages, neighborhoods): entity creation
+	// (acked creates always carry a temp-id -> canonical-id mapping), entity
+	// deletion, or any relationship change. Property-only element acks (the
+	// per-keystroke debounced updates) deliberately do NOT count. Computed
+	// BEFORE the cache upserts so "element we have never seen" still detects
+	// creations that arrive without an id_map (e.g. apply-cr deltas).
+	const structural =
+		Object.keys(d.id_map).length > 0 ||
+		d.changed_relationships.length > 0 ||
+		d.deleted_element_ids.length > 0 ||
+		d.deleted_relationship_ids.length > 0 ||
+		d.changed_elements.some((e) => !_elements.has(e.id));
+
 	if (Object.keys(d.id_map).length > 0) {
 		remapCaches(d.id_map);
 		// keep the global selection pointing at the same entity across the
@@ -316,6 +346,7 @@ export function applyDelta(d: OpsResponse): void {
 	for (const issue of d.issues_added) addIssueToOwner(issue);
 
 	_modelRev = d.model_rev;
+	if (structural) _structureRev += 1;
 	_issueCounts = d.issue_counts;
 	if (_summary !== null) {
 		// keep the coherent bits in sync; element/relationship counts are NOT
@@ -771,6 +802,7 @@ export function resetModelStore(): void {
 	_issuesByOwner.clear();
 	_summary = null;
 	_modelRev = 0;
+	_structureRev = 0;
 	_undoDepth = 0;
 	_issueCounts = null;
 	_error = null;

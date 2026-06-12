@@ -16,6 +16,7 @@ import {
 	getModelError,
 	getModelRev,
 	getModelSummary,
+	getStructureRev,
 	getUndoDepth,
 	hasPendingOps,
 	loadSummary,
@@ -102,6 +103,47 @@ describe('applyDelta', () => {
 		expect(getCachedElements().has('e2')).toBe(false);
 		expect(getCachedRelationships().has('r1')).toBe(false);
 		expect(getModelRev()).toBe(4);
+	});
+
+	it('does NOT bump structureRev for a property-only delta on cached elements', () => {
+		// seed e1 into the cache (this first delta is structural: a never-seen
+		// element counts as a creation)
+		applyDelta(delta({ model_rev: 1, changed_elements: [el('e1', { name: 'A' }, 1)] }));
+		const before = getStructureRev();
+
+		// per-keystroke property ack: same element, new properties, no creates/
+		// deletes/relationships — structural consumers must not refetch
+		applyDelta(delta({ model_rev: 2, changed_elements: [el('e1', { name: 'AB' }, 2)] }));
+		expect(getStructureRev()).toBe(before);
+		expect(getModelRev()).toBe(2); // model_rev still advances per ack
+
+		applyDelta(delta({ model_rev: 3, changed_elements: [el('e1', { name: 'ABC' }, 3)] }));
+		expect(getStructureRev()).toBe(before);
+	});
+
+	it('bumps structureRev on create (id_map / unseen element), delete, and relationship change', () => {
+		expect(getStructureRev()).toBe(0);
+
+		// creation seen as a never-cached changed element (e.g. apply-cr delta)
+		applyDelta(delta({ model_rev: 1, changed_elements: [el('e1', {}, 1)] }));
+		expect(getStructureRev()).toBe(1);
+
+		// acked create carrying a temp-id remap
+		applyDelta(delta({ model_rev: 2, id_map: { tmp_a: 'E9' } }));
+		expect(getStructureRev()).toBe(2);
+
+		// relationship change
+		applyDelta(delta({ model_rev: 3, changed_relationships: [rel('r1', 'e1', 'E9', 1)] }));
+		expect(getStructureRev()).toBe(3);
+
+		// deletions
+		applyDelta(delta({ model_rev: 4, deleted_relationship_ids: ['r1'] }));
+		expect(getStructureRev()).toBe(4);
+		applyDelta(delta({ model_rev: 5, deleted_element_ids: ['e1'] }));
+		expect(getStructureRev()).toBe(5);
+
+		resetModelStore();
+		expect(getStructureRev()).toBe(0);
 	});
 
 	it('remaps temp ids in cache keys, endpoints, and ref-shaped property values', () => {

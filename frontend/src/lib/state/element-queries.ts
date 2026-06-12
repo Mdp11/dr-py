@@ -11,9 +11,15 @@ import { seedElements } from './model.svelte';
 export interface ElementsOfTypeResult {
 	/** Fetched candidates (display-name sorted), at most `cap`. */
 	elements: Element[];
-	/** Total matching elements server-side (across all subtypes). */
+	/**
+	 * Matching elements server-side across the QUERIED subtypes. Once the cap
+	 * is reached, remaining subtypes are not queried at all (no request burst),
+	 * so this is only a LOWER BOUND unless `totalIsExact` ("N+" in UIs).
+	 */
 	total: number;
-	/** True when `total > elements.length` (the picker should say so). */
+	/** True when `total` covers every subtype (no query was skipped). */
+	totalIsExact: boolean;
+	/** True when more matches exist than were fetched (the picker should say so). */
 	truncated: boolean;
 }
 
@@ -37,16 +43,20 @@ export async function fetchElementsOfType(
 
 	const out: Element[] = [];
 	let total = 0;
+	let totalIsExact = true;
 	for (const typeName of typeNames) {
 		const remaining = cap - out.length;
-		const page = await listElementsPage({
-			type: typeName,
-			limit: Math.max(1, remaining)
-		});
+		if (remaining <= 0) {
+			// cap reached: stop issuing requests; the skipped subtypes' counts are
+			// unknown, so `total` degrades to a lower bound
+			totalIsExact = false;
+			break;
+		}
+		const page = await listElementsPage({ type: typeName, limit: remaining });
 		total += page.total;
-		if (remaining > 0) out.push(...page.items.slice(0, remaining));
+		out.push(...page.items.slice(0, remaining));
 	}
 	seedElements(out);
 	out.sort((a, b) => displayName(a).localeCompare(displayName(b)));
-	return { elements: out, total, truncated: total > out.length };
+	return { elements: out, total, totalIsExact, truncated: !totalIsExact || total > out.length };
 }

@@ -8,7 +8,7 @@
 		getCachedRelationships,
 		getIssuesByOwner,
 		getModelGeneration,
-		getModelRev,
+		getStructureRev,
 		indexIssues,
 		seedElements,
 		seedRelationships,
@@ -35,7 +35,8 @@
 	});
 
 	// Seed policy: fetch this element's incident-relationship page on mount and
-	// after every acked ops batch (rev bump); the LIST itself derives from the
+	// after every STRUCTURAL acked delta (structureRev bump — property-only
+	// acks while typing don't refetch); the LIST itself derives from the
 	// reactive cache so optimistic emits (new/deleted relationships) show
 	// instantly, before the server acks.
 	const PAGE_LIMIT = 500;
@@ -44,7 +45,7 @@
 
 	$effect(() => {
 		const id = elementId;
-		void getModelRev();
+		void getStructureRev();
 		void getModelGeneration(); // model swap with an equal rev still refetches
 		const seq = ++fetchSeq;
 		void (async () => {

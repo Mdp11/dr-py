@@ -43,6 +43,9 @@
 	const TARGET_CAP = 200;
 	let candidateTargets: Element[] = $state([]);
 	let candidatesTotal = $state(0);
+	// false = subtype queries were skipped once the cap was hit, so the total
+	// is a lower bound ("N+")
+	let candidatesTotalExact = $state(true);
 	let fetchSeq = 0;
 
 	$effect(() => {
@@ -52,6 +55,7 @@
 		if (meta === null || t === null) {
 			candidateTargets = [];
 			candidatesTotal = 0;
+			candidatesTotalExact = true;
 			return;
 		}
 		void (async () => {
@@ -60,10 +64,12 @@
 				if (seq !== fetchSeq) return;
 				candidateTargets = res.elements;
 				candidatesTotal = res.total;
+				candidatesTotalExact = res.totalIsExact;
 			} catch (err) {
 				if (seq !== fetchSeq) return;
 				candidateTargets = [];
 				candidatesTotal = 0;
+				candidatesTotalExact = true;
 				console.error('Target candidates fetch failed', err);
 			}
 		})();
@@ -164,9 +170,11 @@
 						<span class="text-[10px] italic text-zinc-500">
 							No elements of type {chosenType.target} (or subtype) exist.
 						</span>
-					{:else if candidatesTotal > candidateTargets.length}
+					{:else if candidatesTotal > candidateTargets.length || !candidatesTotalExact}
 						<span class="text-[10px] italic text-zinc-500">
-							Showing the first {candidateTargets.length} of {candidatesTotal} candidates.
+							Showing the first {candidateTargets.length} of {candidatesTotal}{candidatesTotalExact
+								? ''
+								: '+'} candidates.
 						</span>
 					{/if}
 				</label>

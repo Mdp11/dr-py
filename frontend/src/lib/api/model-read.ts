@@ -110,6 +110,36 @@ export function listContainmentRoots(
 	);
 }
 
+/** Backend cap on the `limit` query param of every paged read endpoint.
+ * Requests above it are REJECTED (422), not clamped. */
+export const READ_PAGE_LIMIT = 500;
+
+/**
+ * Fetch the first `limit` containment roots, issuing as many sequential
+ * `READ_PAGE_LIMIT`-sized page requests as needed (the backend rejects
+ * `limit > 500` with a 422 rather than clamping, so a "Show more" total
+ * beyond 500 MUST be assembled by offset paging). Stops early when the
+ * server runs out of roots. `total` is the server total from the last page.
+ */
+export async function listContainmentRootsPaged(
+	limit: number,
+	cfg?: ClientConfig
+): Promise<ContainmentPage> {
+	const items: ContainmentPage['items'] = [];
+	let total = 0;
+	while (items.length < limit) {
+		const page = await listContainmentRoots(
+			{ limit: Math.min(READ_PAGE_LIMIT, limit - items.length), offset: items.length },
+			cfg
+		);
+		items.push(...page.items);
+		total = page.total;
+		// stop on the last page (also guards against a zero-progress loop)
+		if (items.length >= total || page.items.length === 0) break;
+	}
+	return { items, total };
+}
+
 /** GET /model/elements/{id}/children — containment children, paged. */
 export function listContainmentChildren(
 	elementId: string,

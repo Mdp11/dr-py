@@ -92,6 +92,7 @@ const mm: Metamodel = {
 			containment: true,
 			source: 'NamedElement',
 			target: 'NamedElement',
+			mappings: [],
 			source_multiplicity: '0..*',
 			target_multiplicity: '0..*',
 			properties: [
@@ -113,6 +114,7 @@ const mm: Metamodel = {
 			containment: true,
 			source: 'Block',
 			target: 'Block',
+			mappings: [],
 			source_multiplicity: '0..*',
 			target_multiplicity: '0..*',
 			properties: []
@@ -124,6 +126,7 @@ const mm: Metamodel = {
 			containment: false,
 			source: 'Block',
 			target: 'Block',
+			mappings: [],
 			source_multiplicity: '0..*',
 			target_multiplicity: '0..*',
 			properties: [
@@ -145,6 +148,7 @@ const mm: Metamodel = {
 			containment: false,
 			source: 'Block',
 			target: 'Requirement',
+			mappings: [],
 			source_multiplicity: '0..*',
 			target_multiplicity: '0..*',
 			properties: []

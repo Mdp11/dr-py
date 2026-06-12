@@ -33,12 +33,18 @@
 	let entityHits: Element[] = $state([]);
 	let requestSeq = 0;
 
+	// Derived BOOLEAN (not the summary object — same pattern as the
+	// containment tree's hasModel): per-ack summary replacements swap the
+	// object identity without changing "a model is loaded", and tracking the
+	// object would refetch the palette page on every ack while it is open.
+	const hasModel = $derived(getModelSummary() !== null);
+
 	$effect(() => {
 		const isOpen = open;
 		const q = query.trim();
-		const hasModel = getModelSummary() !== null;
+		const loaded = hasModel;
 		const seq = ++requestSeq;
-		if (!isOpen || !hasModel) {
+		if (!isOpen || !loaded) {
 			entityHits = [];
 			return;
 		}

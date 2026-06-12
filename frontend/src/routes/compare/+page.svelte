@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { resolve } from '$app/paths';
 	import type { ModelOut } from '$lib/api/types';
 	import { getModel } from '$lib/api/model';
 	import { getFilename } from '$lib/state';
@@ -70,7 +71,7 @@
 
 <div class="mx-auto flex max-w-4xl flex-col gap-4 p-6">
 	<div class="flex items-center gap-2">
-		<a href="/" class="text-sm text-zinc-400 hover:text-zinc-200">← Back</a>
+		<a href={resolve('/')} class="text-sm text-zinc-400 hover:text-zinc-200">← Back</a>
 		<h1 class="text-lg font-semibold">Compare models</h1>
 	</div>
 
