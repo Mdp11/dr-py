@@ -76,3 +76,63 @@ export async function saveJsonToFile(
 	fallbackDownload(suggestedName, text);
 	return { filename: suggestedName, handle: null };
 }
+
+function fallbackDownloadBlob(filename: string, blob: Blob): void {
+	const url = URL.createObjectURL(blob);
+	const a = document.createElement('a');
+	a.href = url;
+	a.download = filename;
+	document.body.appendChild(a);
+	a.click();
+	document.body.removeChild(a);
+	URL.revokeObjectURL(url);
+}
+
+/**
+ * Stream an HTTP `Response` body to a file.
+ *
+ * Preferred path: `response.body.pipeTo(writable)` so the payload is never
+ * materialized as a string/blob in the page (the /model/download flow can be
+ * tens of MB). Falls back to `response.blob()` for browsers without
+ * `ReadableStream.pipeTo` or without the File System Access API (where the
+ * save happens via an <a download> object URL anyway).
+ *
+ * Same handle-reuse contract as {@link saveJsonToFile}.
+ */
+export async function saveResponseToFile(
+	response: Response,
+	suggestedName: string,
+	handle: FileSystemFileHandle | null = null
+): Promise<SaveResult> {
+	const showSaveFilePicker = getShowSaveFilePicker();
+
+	let target = handle;
+	if (target === null && showSaveFilePicker) {
+		target = await showSaveFilePicker({
+			suggestedName,
+			types: [
+				{
+					description: 'JSON model',
+					accept: { 'application/json': ['.json'] }
+				}
+			]
+		});
+	}
+
+	if (target !== null) {
+		const writable = await target.createWritable();
+		const body = response.body;
+		if (body !== null && typeof body.pipeTo === 'function') {
+			await body.pipeTo(writable); // pipeTo closes the writable on completion
+		} else {
+			const blob = await response.blob();
+			await writable.write(blob);
+			await writable.close();
+		}
+		return { filename: target.name, handle: target };
+	}
+
+	// No File System Access API: buffer to a Blob and trigger a download.
+	fallbackDownloadBlob(suggestedName, await response.blob());
+	return { filename: suggestedName, handle: null };
+}

@@ -23,6 +23,11 @@ if (AUTOLOAD_METAMODEL) {
 }
 if (AUTOLOAD_MODEL) {
 	process.env.VITE_AUTOLOAD_MODEL_NAME = basename(AUTOLOAD_MODEL);
+	// Full resolved path too: the model autoload goes through POST /model/load,
+	// which reads the file server-side. The Vite dev server and the backend run
+	// on the same machine as the same user (localhost trust model), so the path
+	// resolved here is exactly the path the backend can open.
+	process.env.VITE_AUTOLOAD_MODEL_PATH = AUTOLOAD_MODEL;
 }
 if (AUTOLOAD_VIEW) {
 	process.env.VITE_AUTOLOAD_VIEW_NAME = basename(AUTOLOAD_VIEW);
