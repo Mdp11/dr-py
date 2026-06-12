@@ -161,6 +161,8 @@ def test_apply_cr_conflict_id_exists(client: TestClient) -> None:
     conflict = body["conflicts"][0]
     assert conflict["kind"] == "id_exists"
     assert conflict["entity"] == "element"
+    # 409 envelope carries model_rev like the ops/undo conflict responses
+    assert isinstance(body["model_rev"], int)
 
 
 def test_apply_cr_unknown_type_in_cr_yields_422(client: TestClient) -> None:
@@ -570,6 +572,8 @@ def test_apply_cr_session_mode_conflict_409_shape(client: TestClient) -> None:
     assert conflict["kind"] == "id_exists"
     assert conflict["entity"] == "element"
     assert set(conflict) == {"kind", "entity", "id", "reason"}
+    # 409 envelope carries the (unchanged) session revision, like ops/undo
+    assert body["model_rev"] == base_rev
     assert client.get("/api/v1/model/summary").json()["model_rev"] == base_rev
 
 

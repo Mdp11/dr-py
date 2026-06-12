@@ -586,3 +586,104 @@ def test_serializer_snapshots_entities_at_stream_start(
     text = first + "".join(gen)  # must not raise RuntimeError
     streamed = json.loads(text)
     assert [e["id"] for e in streamed["elements"]] == ["b1", "b2"]
+
+
+# ---------------------------------------------------------------------------
+# Origin guard (require_allowed_origin) on the local-filesystem endpoints
+# ---------------------------------------------------------------------------
+
+
+def _load_simple_model(client: TestClient, tmp_path: Path) -> Path:
+    _upload_metamodel(client, EXAMPLE_MM)
+    f = tmp_path / "m.model.json"
+    f.write_text('{"elements": [], "relationships": []}', encoding="utf-8")
+    _load(client, f)
+    return f
+
+
+def test_origin_guard_allows_requests_without_origin(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """No Origin header == non-browser client (curl, scripts) — allowed.
+
+    The guard is a browser-CSRF defense only; it must not break local
+    tooling that never sends an Origin header.
+    """
+    f = _load_simple_model(client, tmp_path)
+    out = tmp_path / "out.model.json"
+    assert client.post("/api/v1/model/load", json={"path": str(f)}).status_code == 200
+    assert client.post("/api/v1/model/save", json={"path": str(out)}).status_code == 200
+    assert client.get("/api/v1/model/download").status_code == 200
+    assert (
+        client.post(
+            "/api/v1/model/upload",
+            content=b'{"elements": [], "relationships": []}',
+        ).status_code
+        == 200
+    )
+
+
+def test_origin_guard_allows_allowed_origin(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """An Origin in the CORS allowlist (default: the Vite dev/preview
+    origins) passes through to the handler."""
+    f = _load_simple_model(client, tmp_path)
+    headers = {"origin": "http://localhost:5173"}
+    res = client.post(
+        "/api/v1/model/load", json={"path": str(f)}, headers=headers
+    )
+    assert res.status_code == 200, res.text
+    out = tmp_path / "out.model.json"
+    res = client.post(
+        "/api/v1/model/save", json={"path": str(out)}, headers=headers
+    )
+    assert res.status_code == 200, res.text
+    assert out.is_file()
+
+
+def test_origin_guard_rejects_foreign_origin(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """A browser-attached foreign Origin gets 403 on every path/file endpoint
+    and the handler never runs (no file is written)."""
+    f = _load_simple_model(client, tmp_path)
+    headers = {"origin": "https://evil.example"}
+    out = tmp_path / "out.model.json"
+
+    res = client.post(
+        "/api/v1/model/load", json={"path": str(f)}, headers=headers
+    )
+    assert res.status_code == 403, res.text
+    res = client.post(
+        "/api/v1/model/save", json={"path": str(out)}, headers=headers
+    )
+    assert res.status_code == 403, res.text
+    assert not out.exists()  # handler never ran
+    assert client.get("/api/v1/model/download", headers=headers).status_code == 403
+    res = client.post(
+        "/api/v1/model/upload",
+        content=b'{"elements": [], "relationships": []}',
+        headers=headers,
+    )
+    assert res.status_code == 403, res.text
+
+
+def test_origin_guard_respects_env_override(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """DATA_ROVER_CORS_ORIGINS overrides the allowlist the guard checks."""
+    f = _load_simple_model(client, tmp_path)
+    monkeypatch.setenv("DATA_ROVER_CORS_ORIGINS", '["https://other.example"]')
+    headers = {"origin": "https://other.example"}
+    res = client.post(
+        "/api/v1/model/load", json={"path": str(f)}, headers=headers
+    )
+    assert res.status_code == 200, res.text
+    # ...and the defaults are gone once overridden
+    res = client.post(
+        "/api/v1/model/load",
+        json={"path": str(f)},
+        headers={"origin": "http://localhost:5173"},
+    )
+    assert res.status_code == 403, res.text
