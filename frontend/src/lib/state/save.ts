@@ -2,6 +2,7 @@ import type { Element, ModelOut, Relationship } from '$lib/api/types';
 import { ApiError } from '../api/errors';
 import * as model from '../api/model';
 import { isTempId, type Snapshot } from './ops';
+import { remapProperties } from './remap';
 
 export type SaveResult =
 	| { ok: true; model: ModelOut }
@@ -51,27 +52,6 @@ export function resolveTempIds(
 		resolved: { elements: resolvedElements, relationships: resolvedRelationships },
 		mapping
 	};
-}
-
-function remapProperties(
-	props: Record<string, unknown>,
-	mapping: Record<string, string>
-): Record<string, unknown> {
-	const out: Record<string, unknown> = {};
-	for (const [k, v] of Object.entries(props)) {
-		out[k] = remapValue(v, mapping);
-	}
-	return out;
-}
-
-function remapValue(value: unknown, mapping: Record<string, string>): unknown {
-	if (typeof value === 'string') {
-		return mapping[value] ?? value;
-	}
-	if (Array.isArray(value)) {
-		return value.map((v) => remapValue(v, mapping));
-	}
-	return value;
 }
 
 function defaultGenerateId(): string {

@@ -10,12 +10,13 @@ import type {
 	Relationship
 } from '$lib/api/types';
 import { getElement } from '../api/elements';
-import { ConflictError, NotFoundError } from '../api/errors';
+import { ConflictError, NotFoundError, ValidationError } from '../api/errors';
 import * as modelOpsApi from '../api/model-ops';
 import * as modelReadApi from '../api/model-read';
 import { validateModel } from '../api/validation';
 import { mergePatch } from './apply';
 import { isTempId, type Op } from './ops';
+import { remapProperties } from './remap';
 
 /**
  * Delta-protocol model store (Phase D1 of the large-model overhaul).
@@ -150,6 +151,9 @@ export function clearModelError(): void {
 /**
  * True while local edits have not been acknowledged by the server (queued
  * and/or in flight). Task 10 gates save flows on `flushNow()` + this.
+ *
+ * Never sticks at true in conflict state: the 409 handler drops the queue
+ * and {@link emit} discards ops while conflicted, so save gating cannot hang.
  */
 export function hasPendingOps(): boolean {
 	return _queue.length > 0 || _inFlight;
@@ -159,46 +163,44 @@ export function hasPendingOps(): boolean {
 // Delta application
 // ---------------------------------------------------------------------------
 
-/** Port of `remapValue` in `./save.ts`: ref-shaped property values. */
-function remapValue(value: unknown, idMap: Record<string, string>): unknown {
-	if (typeof value === 'string') return idMap[value] ?? value;
-	if (Array.isArray(value)) return value.map((v) => remapValue(v, idMap));
-	return value;
-}
-
-function remapProps(
-	props: Record<string, unknown>,
-	idMap: Record<string, string>
-): Record<string, unknown> {
-	const out: Record<string, unknown> = {};
-	for (const [k, v] of Object.entries(props)) out[k] = remapValue(v, idMap);
-	return out;
-}
-
+/**
+ * Change-tracking (like {@link remapProperties}): returns the ORIGINAL object
+ * when nothing referenced a mapped id, so callers can skip the cache write.
+ */
 function remapElement(e: Element, idMap: Record<string, string>): Element {
-	return { ...e, id: idMap[e.id] ?? e.id, properties: remapProps(e.properties, idMap) };
+	const id = idMap[e.id] ?? e.id;
+	const properties = remapProperties(e.properties, idMap);
+	if (id === e.id && properties === e.properties) return e;
+	return { ...e, id, properties };
 }
 
+/** Change-tracking; see {@link remapElement}. */
 function remapRelationship(r: Relationship, idMap: Record<string, string>): Relationship {
-	return {
-		...r,
-		id: idMap[r.id] ?? r.id,
-		source_id: idMap[r.source_id] ?? r.source_id,
-		target_id: idMap[r.target_id] ?? r.target_id,
-		properties: remapProps(r.properties, idMap)
-	};
+	const id = idMap[r.id] ?? r.id;
+	const source_id = idMap[r.source_id] ?? r.source_id;
+	const target_id = idMap[r.target_id] ?? r.target_id;
+	const properties = remapProperties(r.properties, idMap);
+	if (
+		id === r.id &&
+		source_id === r.source_id &&
+		target_id === r.target_id &&
+		properties === r.properties
+	) {
+		return r;
+	}
+	return { ...r, id, source_id, target_id, properties };
 }
 
 function remapOp(op: Op, idMap: Record<string, string>): Op {
 	switch (op.kind) {
 		case 'create_element':
-			return { ...op, properties: remapProps(op.properties, idMap) };
+			return { ...op, properties: remapProperties(op.properties, idMap) };
 		case 'update_element':
 		case 'update_relationship':
 			return {
 				...op,
 				id: idMap[op.id] ?? op.id,
-				properties_patch: remapProps(op.properties_patch, idMap)
+				properties_patch: remapProperties(op.properties_patch, idMap)
 			};
 		case 'delete_element':
 		case 'delete_relationship':
@@ -208,7 +210,7 @@ function remapOp(op: Op, idMap: Record<string, string>): Op {
 				...op,
 				source_id: idMap[op.source_id] ?? op.source_id,
 				target_id: idMap[op.target_id] ?? op.target_id,
-				properties: remapProps(op.properties, idMap)
+				properties: remapProperties(op.properties, idMap)
 			};
 	}
 }
@@ -227,9 +229,17 @@ function remapCaches(idMap: Record<string, string>): void {
 			_relationships.set(canonicalId, { ...r, id: canonicalId });
 		}
 	}
-	// 2. remap references held INSIDE cached entities (endpoints + ref props)
-	for (const [id, e] of _elements) _elements.set(id, remapElement(e, idMap));
-	for (const [id, r] of _relationships) _relationships.set(id, remapRelationship(r, idMap));
+	// 2. remap references held INSIDE cached entities (endpoints + ref props);
+	//    identity-preserving: entities that referenced no mapped id keep their
+	//    object and skip the Map.set, so subscriptions don't churn O(cache)
+	for (const [id, e] of _elements) {
+		const next = remapElement(e, idMap);
+		if (next !== e) _elements.set(id, next);
+	}
+	for (const [id, r] of _relationships) {
+		const next = remapRelationship(r, idMap);
+		if (next !== r) _relationships.set(id, next);
+	}
 	// 3. remap queued-but-unflushed ops and their revert journals: the server
 	//    resolves temp ids only WITHIN a batch, so later batches must carry
 	//    canonical ids
@@ -250,6 +260,14 @@ function remapCaches(idMap: Record<string, string>): void {
 			};
 		})
 	}));
+}
+
+/** Bucket an issue under its owner (= target_ids[0]), mirroring the backend ValidationState. */
+function addIssueToOwner(issue: Issue): void {
+	const owner = issue.target_ids[0] ?? '';
+	const existing = _issuesByOwner.get(owner);
+	if (existing !== undefined) _issuesByOwner.set(owner, [...existing, issue]);
+	else _issuesByOwner.set(owner, [issue]);
 }
 
 /**
@@ -276,12 +294,7 @@ export function applyDelta(d: OpsResponse): void {
 	for (const id of d.deleted_relationship_ids) _relationships.delete(id);
 
 	for (const owner of d.issues_removed_owner_ids) _issuesByOwner.delete(owner);
-	for (const issue of d.issues_added) {
-		const owner = issue.target_ids[0] ?? '';
-		const existing = _issuesByOwner.get(owner);
-		if (existing !== undefined) _issuesByOwner.set(owner, [...existing, issue]);
-		else _issuesByOwner.set(owner, [issue]);
-	}
+	for (const issue of d.issues_added) addIssueToOwner(issue);
 
 	_modelRev = d.model_rev;
 	_issueCounts = d.issue_counts;
@@ -409,8 +422,15 @@ function scheduleFlush(delayMs: number): void {
  * op before this returns. Structural ops flush on a 0 ms timeout; property
  * updates are debounced {@link PROPERTY_FLUSH_DELAY_MS} and coalesced into an
  * already-queued update of the same entity.
+ *
+ * In CONFLICT state the op is dropped entirely (not applied, not queued):
+ * the caches are already declared divergent and flushing is suspended, so
+ * queueing would only leave {@link hasPendingOps} true forever and hang
+ * save gating. Recovery is a full reload (resetModelStore + refetch).
  */
 export function emit(op: Op): void {
+	if (_error?.kind === 'conflict') return;
+
 	const revert = applyOptimistic(op);
 
 	if (isPropertyUpdate(op)) {
@@ -436,7 +456,15 @@ export function emit(op: Op): void {
 		return;
 	}
 
-	_queue.push({ op, revert });
+	// defensive copy: create ops carry a properties object the caller might
+	// keep mutating before the flush fires (mirrors the property-patch copy)
+	_queue.push({
+		op:
+			op.kind === 'create_element' || op.kind === 'create_relationship'
+				? { ...op, properties: { ...op.properties } }
+				: op,
+		revert
+	});
 	scheduleFlush(0);
 }
 
@@ -481,7 +509,7 @@ async function handleFlushError(err: unknown, batch: QueuedOp[]): Promise<void> 
 	_queue = [];
 	revertOptimistic([...batch, ...trailing]);
 	_error = {
-		kind: err instanceof Error && err.name === 'ValidationError' ? 'rejected' : 'error',
+		kind: err instanceof ValidationError ? 'rejected' : 'error',
 		message
 	};
 }
@@ -545,22 +573,39 @@ export async function flushNow(): Promise<void> {
 // Cache-or-fetch reads
 // ---------------------------------------------------------------------------
 
+/** In-flight {@link ensureElement} fetches, so concurrent callers of the same
+ * id share one request. Entries are cleared on settle and on resetModelStore.
+ * Internal bookkeeping, never read reactively — a plain Map is intentional. */
+// eslint-disable-next-line svelte/prefer-svelte-reactivity
+const _pendingElementFetches = new Map<string, Promise<Element | null>>();
+
 /**
  * Return the cached element or fetch it (GET /model/elements/{id}) and cache
  * it. Resolves null for unknown ids (404) and for unflushed temp ids that
- * are not in the cache (the server has never heard of those).
+ * are not in the cache (the server has never heard of those). Concurrent
+ * calls for the same uncached id are deduped onto a single request.
  */
 export async function ensureElement(id: string): Promise<Element | null> {
 	const cached = _elements.get(id);
 	if (cached !== undefined) return cached;
 	if (isTempId(id)) return null;
+	const pending = _pendingElementFetches.get(id);
+	if (pending !== undefined) return pending;
+	const fetchPromise = (async (): Promise<Element | null> => {
+		try {
+			const e = await getElement(id, _clientConfig);
+			_elements.set(e.id, e);
+			return e;
+		} catch (err) {
+			if (err instanceof NotFoundError) return null;
+			throw err;
+		}
+	})();
+	_pendingElementFetches.set(id, fetchPromise);
 	try {
-		const e = await getElement(id, _clientConfig);
-		_elements.set(e.id, e);
-		return e;
-	} catch (err) {
-		if (err instanceof NotFoundError) return null;
-		throw err;
+		return await fetchPromise;
+	} finally {
+		_pendingElementFetches.delete(id);
 	}
 }
 
@@ -632,10 +677,7 @@ export async function validateAll(): Promise<Issue[]> {
 	_issuesByOwner.clear();
 	const counts: IssueCounts = {};
 	for (const issue of issues) {
-		const owner = issue.target_ids[0] ?? '';
-		const existing = _issuesByOwner.get(owner);
-		if (existing !== undefined) _issuesByOwner.set(owner, [...existing, issue]);
-		else _issuesByOwner.set(owner, [issue]);
+		addIssueToOwner(issue);
 		counts[issue.severity] = (counts[issue.severity] ?? 0) + 1;
 	}
 	_issueCounts = counts;
@@ -651,6 +693,7 @@ export async function validateAll(): Promise<Issue[]> {
 export function resetModelStore(): void {
 	_generation += 1;
 	cancelFlushTimer();
+	_pendingElementFetches.clear();
 	_elements.clear();
 	_relationships.clear();
 	_issuesByOwner.clear();
