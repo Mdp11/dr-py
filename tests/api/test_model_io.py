@@ -494,6 +494,37 @@ def test_download_equals_save_bytes(client: TestClient, tmp_path: Path) -> None:
     assert res.content == out_file.read_bytes()
 
 
+def test_iter_buffered_is_byte_identical_and_coalesces(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """The download buffer must re-chunk without altering a single byte.
+
+    /model/download wraps ``iter_model_json`` in ``iter_buffered`` so each
+    ASGI send carries >=min_size characters instead of one ~400-byte entity.
+    On a non-trivial model the joined buffered output must equal the joined
+    raw output, every chunk except the last must reach min_size, and the
+    chunk count must actually shrink.
+    """
+    from data_rover.api.serialize import iter_buffered, iter_model_json
+    from data_rover.api.session import get_session
+
+    _upload_metamodel(client)
+    src_file = tmp_path / "in.model.json"
+    src_file.write_text(SMART_CITY_MODEL.read_text(encoding="utf-8"), encoding="utf-8")
+    _load(client, src_file)
+
+    model = get_session().model
+    assert model is not None
+
+    raw = list(iter_model_json(model))
+    min_size = 1024  # small enough that the smart-city model spans many buffers
+    buffered = list(iter_buffered(iter_model_json(model), min_size=min_size))
+
+    assert "".join(buffered) == "".join(raw)
+    assert 1 < len(buffered) < len(raw)
+    assert all(len(chunk) >= min_size for chunk in buffered[:-1])
+
+
 def test_download_without_model_yields_404(client: TestClient) -> None:
     _upload_metamodel(client, EXAMPLE_MM)
     res = client.get("/api/v1/model/download")

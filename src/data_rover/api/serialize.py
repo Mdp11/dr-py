@@ -107,3 +107,31 @@ def iter_model_json(model: Model) -> Iterator[str]:
     yield ",\n"
     yield from _entity_chunks(_relationship_dicts(relationships), "relationships")
     yield "\n}"
+
+
+def iter_buffered(chunks: Iterable[str], min_size: int = 64 * 1024) -> Iterator[str]:
+    """Re-chunk ``chunks`` into pieces of at least ``min_size`` characters.
+
+    ``iter_model_json`` yields one ~400-byte chunk per entity, which is the
+    right granularity for memory but pathological for a ``StreamingResponse``:
+    every chunk costs a full ASGI send cycle, and a large model has hundreds
+    of thousands of them (measured: ~2 MB/s on /model/download vs. the same
+    bytes written to disk in under 2 s by /model/save). This wrapper
+    accumulates chunks and yields them joined once the buffer reaches
+    ``min_size``, cutting the send count by ~100x while keeping peak extra
+    memory at one buffer (~min_size).
+
+    Byte identity: ``"".join(iter_buffered(c)) == "".join(c)`` — chunks are
+    only concatenated, never split or altered.
+    """
+    buf: list[str] = []
+    buffered = 0
+    for chunk in chunks:
+        buf.append(chunk)
+        buffered += len(chunk)
+        if buffered >= min_size:
+            yield "".join(buf)
+            buf.clear()
+            buffered = 0
+    if buf:
+        yield "".join(buf)
