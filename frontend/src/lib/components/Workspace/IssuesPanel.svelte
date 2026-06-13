@@ -13,6 +13,7 @@
 		select
 	} from '$lib/state';
 	import { runValidation } from '$lib/state/validate-action';
+	import { nameProp } from '$lib/util/element-name';
 	import { AlertCircle, AlertTriangle, RefreshCw } from '@lucide/svelte';
 
 	const modelIssues = $derived(getIssues());
@@ -55,11 +56,7 @@
 
 	function targetLabel(id: string): string {
 		const el = elements.get(id);
-		if (el) {
-			const n = el.properties?.name;
-			if (typeof n === 'string' && n.length > 0) return n;
-			return el.id;
-		}
+		if (el) return nameProp(el.properties) ?? el.id;
 		const rel = relationships.get(id);
 		if (rel) return `${rel.type_name}:${rel.id.slice(0, 6)}`;
 		return id;

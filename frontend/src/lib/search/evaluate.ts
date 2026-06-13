@@ -1,4 +1,5 @@
 import type { Element, Relationship } from '$lib/api/types';
+import { nameProp } from '../util/element-name';
 import type { AdvancedQuery, Criterion, Direction, SearchModel, SearchResultItem } from './types';
 
 interface RelIndex {
@@ -59,8 +60,7 @@ function otherEndpoint(r: Relationship, elementId: string): string {
 }
 
 function entityName(props: Record<string, unknown>): string {
-	const n = props?.name;
-	return typeof n === 'string' ? n : '';
+	return nameProp(props) ?? '';
 }
 
 function matchEntityType(typeName: string, names: string[]): boolean {

@@ -8,6 +8,7 @@
 		getSelection,
 		select
 	} from '$lib/state';
+	import { nameProp } from '$lib/util/element-name';
 	import PropertyForm from '../Inspector/PropertyForm.svelte';
 
 	const selection = $derived(getSelection());
@@ -51,8 +52,7 @@
 
 	function displayName(el: Element | null, fallbackId: string): string {
 		if (el === null) return fallbackId;
-		const n = el.properties?.name;
-		return typeof n === 'string' && n.length > 0 ? n : el.id;
+		return nameProp(el.properties) ?? el.id;
 	}
 
 	function onDeleteElement(): void {

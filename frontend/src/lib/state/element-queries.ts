@@ -6,6 +6,7 @@
 import type { Element, Metamodel } from '$lib/api/types';
 import { listElementsPage } from '../api/model-read';
 import { isSubtype } from '../metamodel/helpers';
+import { elementDisplayName as displayName } from '../util/element-name';
 import { seedElements } from './model.svelte';
 
 export interface ElementsOfTypeResult {
@@ -21,11 +22,6 @@ export interface ElementsOfTypeResult {
 	totalIsExact: boolean;
 	/** True when more matches exist than were fetched (the picker should say so). */
 	truncated: boolean;
-}
-
-function displayName(el: Element): string {
-	const n = el.properties?.name;
-	return typeof n === 'string' && n.length > 0 ? n : el.id;
 }
 
 /**

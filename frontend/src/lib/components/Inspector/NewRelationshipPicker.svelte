@@ -3,6 +3,7 @@
 	import { isSubtype } from '$lib/metamodel/helpers';
 	import { createTempId, emit, ensureElement, getCachedElements, getMetamodel } from '$lib/state';
 	import { fetchElementsOfType } from '$lib/state/element-queries';
+	import { elementDisplayName as displayName } from '$lib/util/element-name';
 	import { Plus, X } from '@lucide/svelte';
 
 	type Props = {
@@ -74,11 +75,6 @@
 			}
 		})();
 	});
-
-	function displayName(el: Element): string {
-		const n = el.properties?.name;
-		return typeof n === 'string' && n.length > 0 ? n : el.id;
-	}
 
 	function reset(): void {
 		selectedType = '';

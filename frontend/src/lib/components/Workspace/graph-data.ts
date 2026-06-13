@@ -14,6 +14,7 @@
 import type { Metamodel } from '$lib/api/types';
 import type { Snapshot } from '$lib/state/ops';
 import { containmentRelTypes } from '../../metamodel/helpers';
+import { nameProp } from '../../util/element-name';
 
 export interface GraphNode {
 	id: string;
@@ -49,8 +50,8 @@ export interface BuildGraphOpts {
 }
 
 function labelFor(el: { id: string; properties: Record<string, unknown> }): string {
-	const n = el.properties?.name;
-	if (typeof n === 'string' && n.length > 0) return n;
+	const n = nameProp(el.properties);
+	if (n !== undefined) return n;
 	if (el.id.length <= 8) return el.id;
 	return el.id.slice(0, 8) + '…';
 }

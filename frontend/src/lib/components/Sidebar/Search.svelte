@@ -10,6 +10,7 @@
 	import { listElementsPage } from '$lib/api/model-read';
 	import type { Element } from '$lib/api/types';
 	import { SlidersHorizontal } from '@lucide/svelte';
+	import { elementDisplayName } from '$lib/util/element-name';
 	import AdvancedSearchDialog from './AdvancedSearchDialog.svelte';
 
 	const MAX_RESULTS = 50;
@@ -25,11 +26,6 @@
 	let results: Element[] = $state([]);
 	let searching = $state(false);
 	let requestSeq = 0;
-
-	function elementDisplayName(el: Element): string {
-		const n = el.properties?.name;
-		return typeof n === 'string' && n.length > 0 ? n : el.id;
-	}
 
 	$effect(() => {
 		const q = searchText.trim();

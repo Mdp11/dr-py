@@ -10,17 +10,13 @@
 		getSearchResultsTarget,
 		select
 	} from '$lib/state';
+	import { elementDisplayName as elementName } from '$lib/util/element-name';
 
 	const results = $derived(getSearchResults());
 	const target = $derived(getSearchResultsTarget());
 	const note = $derived(getSearchResultsNote());
 	const elementsById = $derived(getCachedElements());
 	const relationshipsById = $derived(getCachedRelationships());
-
-	function elementName(e: Element): string {
-		const n = e.properties?.name;
-		return typeof n === 'string' && n.length > 0 ? n : e.id;
-	}
 
 	type Row =
 		| { kind: 'element'; id: string; el: Element }
