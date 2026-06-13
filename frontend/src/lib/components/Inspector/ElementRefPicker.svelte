@@ -2,6 +2,7 @@
 	import type { Element } from '$lib/api/types';
 	import { ensureElement, getCachedElements, getMetamodel } from '$lib/state';
 	import { fetchElementsOfType } from '$lib/state/element-queries';
+	import { elementDisplayName as displayName } from '$lib/util/element-name';
 	import { X } from '@lucide/svelte';
 
 	type Props = {
@@ -56,11 +57,6 @@
 	});
 
 	const current = $derived(valueId !== null ? (elements.get(valueId) ?? null) : null);
-
-	function displayName(el: Element): string {
-		const n = el.properties?.name;
-		return typeof n === 'string' && n.length > 0 ? n : el.id;
-	}
 
 	function pick(id: string): void {
 		open = false;

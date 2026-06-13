@@ -21,6 +21,7 @@
 	import { NotFoundError } from '$lib/api/errors';
 	import type { Neighborhood } from '$lib/api/types';
 	import { containmentRelTypes } from '$lib/metamodel/helpers';
+	import { nameProp } from '$lib/util/element-name';
 
 	let maxHops = $state(2);
 	let nodeCap = $state(60);
@@ -86,8 +87,8 @@
 	type GraphNode = { id: string; type_name: string; label: string; hops: number };
 
 	function labelFor(el: { id: string; properties: Record<string, unknown> }): string {
-		const n = el.properties?.name;
-		if (typeof n === 'string' && n.length > 0) return n;
+		const n = nameProp(el.properties);
+		if (n !== undefined) return n;
 		if (el.id.length <= 8) return el.id;
 		return el.id.slice(0, 8) + '…';
 	}

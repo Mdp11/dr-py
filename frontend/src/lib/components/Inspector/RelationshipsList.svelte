@@ -15,6 +15,7 @@
 		select
 	} from '$lib/state';
 	import { listElementRelationships } from '$lib/api/model-read';
+	import { nameProp } from '$lib/util/element-name';
 	import { AlertCircle, AlertTriangle, Pencil, X } from '@lucide/svelte';
 
 	type Props = {
@@ -98,8 +99,7 @@
 
 	function displayName(el: Element | null, fallbackId: string): string {
 		if (el === null) return fallbackId;
-		const n = el.properties?.name;
-		return typeof n === 'string' && n.length > 0 ? n : el.id;
+		return nameProp(el.properties) ?? el.id;
 	}
 
 	let outgoingOpen = $state(true);

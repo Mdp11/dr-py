@@ -29,6 +29,7 @@
 		toggleType
 	} from '$lib/state';
 	import { Filter, FolderPlus, Plus } from '@lucide/svelte';
+	import { elementDisplayName as displayName } from '$lib/util/element-name';
 	import StereotypePicker from './StereotypePicker.svelte';
 	import TreeNode from './TreeNode.svelte';
 	import {
@@ -192,11 +193,6 @@
 	// ----- unified tree over the fetched subset -----
 
 	const elementsById = $derived(getCachedElements() as Map<string, Element>);
-
-	function displayName(el: Element): string {
-		const n = el.properties?.name;
-		return typeof n === 'string' && n.length > 0 ? n : el.id;
-	}
 
 	const containmentChildren = $derived.by(() => {
 		const m = new SvelteMap<string, string[]>();

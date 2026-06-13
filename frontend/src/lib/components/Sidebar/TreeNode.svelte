@@ -19,6 +19,7 @@
 		type Visibility
 	} from './view-tree';
 	import { createFolder, deleteFolder, renameFolder } from '$lib/state';
+	import { elementDisplayName as displayName } from '$lib/util/element-name';
 	import Self from './TreeNode.svelte';
 
 	type FolderOption = { path: string[]; label: string };
@@ -93,11 +94,6 @@
 	const hasError = $derived(!isFolder && issueIndex.errorIds.has(nodeKey));
 	const hasModelWarning = $derived(!isFolder && !hasError && issueIndex.warningIds.has(nodeKey));
 	const hasViewWarning = $derived(!isFolder && warningsByElementId.has(nodeKey));
-
-	function displayName(e: Element): string {
-		const n = e.properties?.name;
-		return typeof n === 'string' && n.length > 0 ? n : e.id;
-	}
 
 	async function onNewFolder(): Promise<void> {
 		const name = window.prompt('New folder name');

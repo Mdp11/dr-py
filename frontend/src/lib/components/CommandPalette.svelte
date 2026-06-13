@@ -14,6 +14,7 @@
 		type WorkspaceTab
 	} from '$lib/state';
 	import { runValidation } from '$lib/state/validate-action';
+	import { elementDisplayName } from '$lib/util/element-name';
 
 	const MAX_RESULTS = 50;
 	const DEBOUNCE_MS = 200;
@@ -21,11 +22,6 @@
 	const open = $derived(getCommandPaletteOpen());
 
 	let query = $state('');
-
-	function elementDisplayName(el: Element): string {
-		const n = el.properties?.name;
-		return typeof n === 'string' && n.length > 0 ? n : el.id;
-	}
 
 	// Server-ranked entity search (same endpoint as the sidebar search). An
 	// empty query lists the first page in model order, like the old palette

@@ -1,4 +1,3 @@
-- Fix that frontend treats "name" specially, but that should be case insensitive (so also Name is detected)
 - New approach (load more) does not work well with view
 - When migrating, if a source has numeric values as strings (e.g. "2.5", "5") they should resolve to float and integer and also be transformed into the model itself (care for Infinity value for float)
 - Remove three separate loading buttons for metamodel, model and view. Only one button, in the popup I choose all 3 of them (view is optional)
