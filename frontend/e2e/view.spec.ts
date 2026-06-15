@@ -339,13 +339,10 @@ test('excluded pool: collapsed by default (no fetch), expands, and state persist
 	await bootstrap(page);
 	await loadView(page);
 
-	// Collapsed by default: header visible, body absent.
-	// NOTE: the current implementation fetches the excluded pool eagerly on view
-	// load (regardless of collapse state) so the body can show the count in the
-	// header. The pool BODY (the "Excluded elements" tree) is NOT rendered while
-	// collapsed — only the header button is shown.
+	// Collapsed by default: header visible, body absent, and NO excluded fetch fired.
 	await expect(poolHeader(page)).toBeVisible();
 	await expect(pool(page)).toHaveCount(0);
+	expect(excludedHits).toHaveLength(0);
 
 	// Expanding fetches (or reuses the already-fetched first page) and shows the pooled element.
 	await poolHeader(page).click();
