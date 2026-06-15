@@ -934,3 +934,71 @@ def test_elements_batch_404_without_model() -> None:
     )
     res = c.post(f"{API}/model/elements/batch", json={"ids": ["a"]})
     assert res.status_code == 404  # no model loaded
+
+
+# ---------------------------------------------------------------------------
+# GET /model/containment/roots/excluded
+# ---------------------------------------------------------------------------
+
+
+def _put_view(client: TestClient, folders: list[dict]) -> None:
+    res = client.put(f"{API}/view/snapshot", json={"name": "v", "folders": folders})
+    assert res.status_code == 200, res.text
+
+
+def test_excluded_roots_omits_placed(client: TestClient) -> None:
+    _load_model(
+        client, [_item("a", "A"), _item("b", "B"), _item("c", "C")], []
+    )
+    _put_view(client, [{"name": "F", "folders": [], "elements": ["b"]}])
+    res = client.get(f"{API}/model/containment/roots/excluded")
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert [i["element"]["id"] for i in body["items"]] == ["a", "c"]
+    assert body["total"] == 2
+
+
+def test_excluded_roots_nested_folder_placement(client: TestClient) -> None:
+    _load_model(client, [_item("a", "A"), _item("b", "B")], [])
+    _put_view(
+        client,
+        [
+            {
+                "name": "F",
+                "folders": [{"name": "G", "folders": [], "elements": ["a"]}],
+                "elements": [],
+            }
+        ],
+    )
+    res = client.get(f"{API}/model/containment/roots/excluded")
+    assert [i["element"]["id"] for i in res.json()["items"]] == ["b"]
+
+
+def test_excluded_roots_no_view_returns_all_roots(client: TestClient) -> None:
+    _load_model(client, [_item("a", "A"), _item("b", "B")], [])
+    res = client.get(f"{API}/model/containment/roots/excluded")
+    assert [i["element"]["id"] for i in res.json()["items"]] == ["a", "b"]
+    assert res.json()["total"] == 2
+
+
+def test_excluded_roots_paging(client: TestClient) -> None:
+    _load_model(client, [_item(f"i{n}", f"n{n}") for n in range(5)], [])
+    res = client.get(
+        f"{API}/model/containment/roots/excluded", params={"limit": 2, "offset": 2}
+    )
+    body = res.json()
+    assert [i["element"]["id"] for i in body["items"]] == ["i2", "i3"]
+    assert body["total"] == 5
+
+
+def test_excluded_roots_paging_over_filtered_subset(client: TestClient) -> None:
+    # Placed ids must be subtracted BEFORE paging: with i0 and i2 in the view,
+    # the excluded pool is [i1, i3, i4], so limit=2/offset=1 -> [i3, i4].
+    _load_model(client, [_item(f"i{n}", f"n{n}") for n in range(5)], [])
+    _put_view(client, [{"name": "F", "folders": [], "elements": ["i0", "i2"]}])
+    res = client.get(
+        f"{API}/model/containment/roots/excluded", params={"limit": 2, "offset": 1}
+    )
+    body = res.json()
+    assert [i["element"]["id"] for i in body["items"]] == ["i3", "i4"]
+    assert body["total"] == 3

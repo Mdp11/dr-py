@@ -33,6 +33,7 @@ from pydantic import BaseModel
 
 from data_rover.core.model.element import Element
 from data_rover.core.model.model import Model
+from data_rover.core.view.schema import Folder, View
 
 from ..changes import compact_changes
 from ..deps import Session, get_session, require_model
@@ -393,6 +394,47 @@ def list_containment_roots(
     return ContainmentPage(
         items=[
             _containment_item(model, eid) for eid in root_ids[offset : offset + limit]
+        ],
+        total=len(root_ids),
+    )
+
+
+def _placed_element_ids(view: View) -> set[str]:
+    """All element ids referenced anywhere in the view's folder tree."""
+    out: set[str] = set()
+
+    def walk(folders: list[Folder]) -> None:
+        for folder in folders:
+            out.update(folder.elements)
+            walk(folder.folders)
+
+    walk(view.folders)
+    return out
+
+
+@router.get("/model/containment/roots/excluded")
+def list_excluded_roots(
+    limit: int = Query(100, ge=1, le=MAX_PAGE_LIMIT),
+    offset: int = Query(0, ge=0),
+    session: Session = Depends(get_session),
+) -> ContainmentPage:
+    """Containment roots NOT placed in the active view (the 'excluded pool').
+    In model insertion order, like ``list_containment_roots``. With no active
+    view, every root is excluded (returns all roots)."""
+    _, model = require_model(session)
+    idx = model.indexes
+    placed = (
+        _placed_element_ids(session.view) if session.view is not None else set()
+    )
+    root_ids = [
+        eid
+        for eid in model.elements
+        if idx.first_parent(eid) is None and eid not in placed
+    ]
+    return ContainmentPage(
+        items=[
+            _containment_item(model, eid)
+            for eid in root_ids[offset : offset + limit]
         ],
         total=len(root_ids),
     )
