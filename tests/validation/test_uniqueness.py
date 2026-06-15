@@ -178,3 +178,81 @@ def test_out_of_scope_violations_skipped():
     _set_name(model, b, "Foo")
 
     assert UniquenessValidator().validate(model, Scope(set())) == []
+
+
+def _knows_mm(direction: str = "out"):
+    person = ElementType(
+        name="Person",
+        properties=[PropertyDef(name="name", datatype="string", multiplicity="1")],
+        key=["name", f"{direction}:Knows"],
+    )
+    return Metamodel(
+        elements=[person],
+        relationships=[
+            RelationshipType(name="Knows", source="Person", target="Person")
+        ],
+    )
+
+
+def _person(model: Model, name: str):
+    el = model.create_element("Person")
+    model.set_property(el, "name", name)
+    return el
+
+
+def test_rel_key_duplicate_reported_with_descriptor():
+    model = Model(_knows_mm())
+    a = _person(model, "Foo")
+    b = _person(model, "Foo")
+    c = _person(model, "C")
+    model.connect("Knows", a.id, c.id)
+    model.connect("Knows", b.id, c.id)
+
+    issues = UniquenessValidator().validate(model, Scope.all())
+    assert len(issues) == 1
+    assert "name='Foo'" in issues[0].message
+    assert "out:Knows" in issues[0].message
+
+
+def test_rel_key_differing_edges_not_duplicate():
+    model = Model(_knows_mm())
+    a = _person(model, "Foo")
+    _person(model, "Foo")
+    c = _person(model, "C")
+    model.connect("Knows", a.id, c.id)  # only a -> c
+
+    assert UniquenessValidator().validate(model, Scope.all()) == []
+
+
+def test_rel_key_in_direction_rendered_in_descriptor():
+    model = Model(_knows_mm("in"))
+    a = _person(model, "Foo")
+    b = _person(model, "Foo")
+    src = _person(model, "S")
+    model.connect("Knows", src.id, a.id)
+    model.connect("Knows", src.id, b.id)
+
+    issues = UniquenessValidator().validate(model, Scope.all())
+    assert len(issues) == 1
+    assert "in:Knows" in issues[0].message
+    assert src.id in issues[0].message
+
+
+def test_property_only_key_descriptor_renders_name():
+    # property-only key path of _issue: descriptor reads `name='Foo'`
+    mm = Metamodel(
+        elements=[
+            ElementType(
+                name="Person",
+                properties=[PropertyDef(name="name", datatype="string", multiplicity="1")],
+                key=["name"],
+            )
+        ],
+    )
+    model = Model(mm)
+    _person(model, "Foo")
+    _person(model, "Foo")
+
+    issues = UniquenessValidator().validate(model, Scope.all())
+    assert len(issues) == 1
+    assert "name='Foo'" in issues[0].message

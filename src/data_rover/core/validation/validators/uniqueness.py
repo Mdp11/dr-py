@@ -11,7 +11,9 @@ class UniquenessValidator(EntityValidator):
 
     Two elements are identical when they share `type_name`, their containment
     parent (or both are unowned), and either match on the type's effective
-    `key` properties or, when no key is declared, match on all `properties`.
+    `key` (properties and, for ``out:``/``in:`` key entries, the multiset of
+    connected element ids) or, when no key is declared, match on all
+    ``properties``.
 
     The grouping itself is maintained incrementally by the model's
     :class:`~data_rover.core.model.indexes.IndexSet`; this validator only
@@ -58,13 +60,19 @@ class UniquenessValidator(EntityValidator):
 
     def _issue(self, model, group_key: UniqKey, dup: str, primary: str) -> Issue:
         type_name = group_key[0]
-        key = model.metamodel.effective_element_key(type_name)
-        if key is not None:
-            values = group_key[2]
-            assert isinstance(values, tuple)  # keyed signature is a value tuple
-            descriptor = ", ".join(f"{k}={v!r}" for k, v in zip(key, values))
-        else:
+        spec = model.metamodel.effective_element_key_spec(type_name)
+        if spec is None:
             descriptor = "no key — all properties match"
+        else:
+            signature = group_key[2]
+            assert isinstance(signature, tuple)  # keyed: (prop_values, rel_values)
+            prop_values, rel_values = signature
+            parts = [f"{k}={v!r}" for k, v in zip(spec.properties, prop_values)]
+            for kr, endpoints in zip(spec.relationships, rel_values):
+                parts.append(
+                    f"{kr.direction}:{kr.rel_type}→[{', '.join(endpoints)}]"
+                )
+            descriptor = ", ".join(parts)
         return Issue(
             Severity.ERROR,
             f"Duplicate {type_name} element {dup}: matches {primary} ({descriptor})",
