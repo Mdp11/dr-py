@@ -229,20 +229,43 @@ def test_elements_insertion_order_and_paging(client: TestClient) -> None:
     assert body == {"items": [], "total": 4}
 
 
-def test_elements_search_scoring_matches_search_svelte(client: TestClient) -> None:
+def test_search_ranks_exact_name_above_substring(client: TestClient) -> None:
+    """An exact name match must top the results even when a junk substring
+    match also hits the id and another property (the old flat +2-per-name
+    scoring let such junk outrank the element the user actually wanted)."""
+    _load_model(
+        client,
+        [
+            # junk: name only CONTAINS the query, but it also matches on id and
+            # on a second property — three weak hits the old scoring summed past
+            # a single exact-name hit.
+            _item("some_name", "PRETEXTsome_name", note="also some_name here"),
+            _item("e-prefix", "some_name extended"),  # name prefix
+            _item("e-exact", "some_name"),  # name exact (case-insensitive)
+            _item("e-word", "left some_name right"),  # name word-boundary
+        ],
+        [],
+    )
+    body = client.get(f"{API}/model/elements", params={"q": "some_name"}).json()
+    ids = [e["id"] for e in body["items"]]
+    assert ids == ["e-exact", "e-prefix", "e-word", "some_name"]
+
+
+def test_elements_search_scoring_tiers(client: TestClient) -> None:
     _load_model(
         client,
         [
             _item("e-d", "unrelated"),  # no match -> excluded
-            _item("e-c", "Nope2", note="contains alpha here"),  # prop 0.5
-            _item("e-b", "Alpha One"),  # name +2 (case-insensitive)
-            _item("alpha-x", "Nope"),  # id +1
-            _item("e-a", "Alpha Two"),  # name +2, ties with e-b -> id order
+            _item("e-c", "Nope2", note="contains alpha here"),  # prop +0.5
+            _item("e-b", "Alpha One"),  # name prefix (case-insensitive)
+            _item("alpha-x", "Nope"),  # id substring +2
+            _item("e-a", "Alpha Two"),  # name prefix, equal len -> id order
         ],
         [],
     )
     body = client.get(f"{API}/model/elements", params={"q": "ALPHA"}).json()
     assert body["total"] == 4
+    # name-prefix tier (e-a, e-b; id tiebreak) >> id substring >> property hit
     assert [e["id"] for e in body["items"]] == ["e-a", "e-b", "alpha-x", "e-c"]
 
     # paging respects the scored order; total stays pre-paging
@@ -253,7 +276,7 @@ def test_elements_search_scoring_matches_search_svelte(client: TestClient) -> No
     ).json()
     assert [e["id"] for e in body["items"]] == ["alpha-x", "e-c"]
 
-    # type-name substring scores too (Search.svelte: +1)
+    # type-name substring scores too (+1)
     body = client.get(f"{API}/model/elements", params={"q": "item"}).json()
     assert body["total"] == 5
 

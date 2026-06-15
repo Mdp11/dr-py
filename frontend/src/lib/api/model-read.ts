@@ -8,6 +8,7 @@ import {
 	ModelSummarySchema,
 	NeighborhoodSchema,
 	RelationshipPageSchema,
+	SearchResultPageSchema,
 	type ChangesDoc,
 	type ChangesSummary,
 	type ContainmentPage,
@@ -16,8 +17,10 @@ import {
 	type ElementPage,
 	type ModelSummary,
 	type Neighborhood,
-	type RelationshipPage
+	type RelationshipPage,
+	type SearchResultPage
 } from './types';
+import type { AdvancedQuery } from '$lib/search/types';
 
 /**
  * Paged/on-demand read side of the delta protocol (Phase D1). All endpoints
@@ -67,6 +70,27 @@ export function listElementsPage(
 				limit: query?.limit,
 				offset: query?.offset
 			}
+		},
+		cfg
+	);
+}
+
+/**
+ * POST /model/search — server-side advanced search over the WHOLE model
+ * (not the client's fetched subset). Returns a hydrated, paged result set;
+ * `total` is the full match count before limit/offset paging.
+ */
+export function searchModel(
+	query: AdvancedQuery,
+	opts?: { limit?: number; offset?: number },
+	cfg?: ClientConfig
+): Promise<SearchResultPage> {
+	return apiFetch(
+		'/model/search',
+		{
+			method: 'POST',
+			body: { ...query, limit: opts?.limit, offset: opts?.offset },
+			schema: SearchResultPageSchema
 		},
 		cfg
 	);

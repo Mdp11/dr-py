@@ -226,6 +226,16 @@ export const RelationshipPageSchema = z.object({
 });
 export type RelationshipPage = z.infer<typeof RelationshipPageSchema>;
 
+// POST /model/search — exactly one of elements/relationships is populated,
+// selected by `target`; `total` is the match count before limit/offset paging.
+export const SearchResultPageSchema = z.object({
+	target: z.enum(['element', 'relationship']),
+	elements: z.array(ElementSchema).default([]),
+	relationships: z.array(RelationshipSchema).default([]),
+	total: z.number().int().default(0)
+});
+export type SearchResultPage = z.infer<typeof SearchResultPageSchema>;
+
 export const ContainmentItemSchema = z.object({
 	element: ElementSchema,
 	child_count: z.number().int().default(0)
