@@ -205,7 +205,7 @@
 		const loaded = hasModel;
 		const v = view; // tracked: fetch the excluded pool only in view mode
 		const expanded = [...expandedElements]; // tracked: fetch on expand
-		const limit = rootsLimit; // tracked: "Show more" roots
+		const limit = rootsLimit; // tracked: roots auto-load page size
 		const exLimit = excludedLimit; // tracked: auto-load growth of the pool
 		const seq = ++loadSeq;
 		if (!loaded) {
@@ -927,6 +927,7 @@
 					class:text-emerald-400={isViewRootHover && dragHoverValid}
 					class:border-red-500={isViewRootHover && !dragHoverValid}
 					data-drop-key={VIEW_ROOT_DROP_KEY}
+					data-drop-kind="section"
 					data-drop-path="null"
 				>
 					Drop here to move to top level
