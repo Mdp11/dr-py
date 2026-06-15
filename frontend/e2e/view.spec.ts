@@ -50,7 +50,9 @@ async function bootstrap(page: import('@playwright/test').Page): Promise<void> {
 	await expect(modelDialog).toBeHidden();
 }
 
-test('load a view: folders render, placed and unplaced elements appear', async ({ page }) => {
+test('load a view: folders render with their placed elements (curated scope)', async ({
+	page
+}) => {
 	test.setTimeout(120_000);
 	await bootstrap(page);
 
@@ -73,8 +75,13 @@ test('load a view: folders render, placed and unplaced elements appear', async (
 
 	const tree = page.getByRole('tree', { name: /containment tree/i });
 	await expect(tree.getByText('Grouped')).toBeVisible();
+	// Alpha is placed in the 'Grouped' folder -> shows under it.
 	await expect(tree.getByText('Alpha')).toBeVisible();
-	await expect(tree.getByText('Beta')).toBeVisible();
+	// Beta is unplaced. Under curated scope it is no longer interleaved at the
+	// view's top level; it belongs to the "excluded pool" section, which is
+	// rendered in Plan 2. TODO(plan-2): assert Beta appears in the excluded
+	// ("Not in view") section once that section exists.
+	await expect(tree.getByText('Beta')).toHaveCount(0);
 });
 
 test('view referencing a missing element produces a warning in the Issues panel', async ({
