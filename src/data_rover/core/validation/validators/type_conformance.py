@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import datetime
 
-from ...metamodel.schema import Metamodel
+from ...metamodel.schema import FLOAT_INFINITIES, Metamodel
 from ..issue import Issue, Severity
 from ..pipeline import EntityValidator, MetamodelMemo
 
@@ -17,7 +17,13 @@ def value_conforms(value, datatype: str, metamodel: Metamodel) -> bool:
     if datatype == "integer":
         return isinstance(value, int) and not isinstance(value, bool)
     if datatype == "float":
-        return isinstance(value, (int, float)) and not isinstance(value, bool)
+        if isinstance(value, bool):
+            return False
+        if isinstance(value, (int, float)):
+            return True
+        # the infinite floats travel as canonical string tokens (JSON has no
+        # infinity literal); accept those alongside real numbers
+        return value in FLOAT_INFINITIES
     if datatype == "date":
         if isinstance(value, datetime.date):
             return True

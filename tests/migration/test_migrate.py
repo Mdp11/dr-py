@@ -190,3 +190,117 @@ def test_unmapped_owner_link_emitted_when_forced():
     result = migrate(mm, model, emit_unmapped_links=True)
     owns = [r for r in result.model["relationships"] if r["type_name"] == "Owns"]
     assert len(owns) == 1
+
+
+# --- numeric string coercion -----------------------------------------------
+
+
+def _numeric_string_inputs():
+    mm = {
+        "elements": {
+            "Reading": {
+                "is_owned_by_one_of": [],
+                "is_typed_by_one_of": [],
+                "id_properties": ["code"],
+                "other_properties": [
+                    "amount",
+                    "count",
+                    "ratios",
+                    "label",
+                    "limit",
+                    "raw",
+                ],
+            },
+        },
+        "relationships": {
+            "Trend": {
+                "other_properties": ["slope"],
+                "mappings": [{"source": "Reading", "destination": "Reading"}],
+            }
+        },
+    }
+    model = {
+        "elements": {
+            "r1": {
+                "id": "r1",
+                "stereotype": "Reading",
+                "owner": None,
+                "element_type": None,
+                "properties": {
+                    "code": "abc",
+                    "amount": "2.5",  # float string
+                    "count": "5",  # integer string
+                    # list mixing float/int strings + an infinity token
+                    "ratios": ["1.5", "2", "Infinity"],
+                    "label": "hello",  # plain string, untouched
+                    "limit": "Infinity",  # special float value
+                    "raw": "inf",  # non-canonical, stays a plain string
+                },
+            },
+        },
+        "relationships": {
+            "t1": {
+                "id": "t1",
+                "stereotype": "Trend",
+                "source": "r1",
+                "destination": "r1",
+                "properties": {"slope": "0.5"},
+            }
+        },
+    }
+    return mm, model
+
+
+def test_numeric_string_datatypes_inferred():
+    mm, model = _numeric_string_inputs()
+    result = migrate(mm, model)
+    props = {p.name: p for p in result.metamodel.element_type("Reading").properties}
+    assert props["amount"].datatype == "float"
+    assert props["count"].datatype == "integer"
+    assert props["ratios"].datatype == "float"  # finite floats + Infinity token
+    assert props["label"].datatype == "string"
+    assert props["limit"].datatype == "float"  # "Infinity" is a special float
+    assert props["raw"].datatype == "string"  # "inf" is not a canonical token
+
+
+def test_numeric_strings_coerced_in_model():
+    mm, model = _numeric_string_inputs()
+    result = migrate(mm, model)
+    el = {e["id"]: e for e in result.model["elements"]}["r1"]
+    p = el["properties"]
+    assert p["amount"] == 2.5 and isinstance(p["amount"], float)
+    assert p["count"] == 5 and isinstance(p["count"], int)
+    assert p["ratios"] == [1.5, 2, "Infinity"]  # token kept as-is in the list
+    assert p["label"] == "hello"
+    assert p["limit"] == "Infinity"  # canonical special-float token preserved
+    assert p["raw"] == "inf"  # non-canonical, stays a plain string
+
+
+def test_numeric_relationship_property_coerced():
+    mm, model = _numeric_string_inputs()
+    result = migrate(mm, model)
+    rels = {r["id"]: r for r in result.model["relationships"]}
+    assert rels["t1"]["properties"]["slope"] == 0.5
+    assert isinstance(rels["t1"]["properties"]["slope"], float)
+
+
+def test_migrated_model_is_strict_json_serializable():
+    import json
+
+    mm, model = _numeric_string_inputs()
+    result = migrate(mm, model)
+    # allow_nan=False mirrors the API serializer; a leaked inf/nan would raise.
+    json.dumps(result.model, allow_nan=False)
+
+
+def test_native_infinity_normalized_to_token():
+    import json
+
+    mm, model = _numeric_string_inputs()
+    # a real float infinity (e.g. from json.loads of "Infinity") must be turned
+    # into the canonical string token so the output stays JSON-serializable.
+    model["elements"]["r1"]["properties"]["amount"] = float("-inf")
+    result = migrate(mm, model)
+    el = {e["id"]: e for e in result.model["elements"]}["r1"]
+    assert el["properties"]["amount"] == "-Infinity"
+    json.dumps(result.model, allow_nan=False)

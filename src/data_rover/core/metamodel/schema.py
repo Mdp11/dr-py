@@ -10,6 +10,12 @@ from .multiplicity import Multiplicity
 
 PRIMITIVES = frozenset({"string", "integer", "float", "boolean", "date"})
 
+#: Canonical string tokens for the two infinite ``float`` values. JSON has no
+#: infinity literal and models are serialized with ``allow_nan=False``, so
+#: infinities travel as these exact strings: a ``float`` property accepts either
+#: a finite number or one of these tokens.
+FLOAT_INFINITIES = frozenset({"Infinity", "-Infinity"})
+
 
 class PropertyDef(BaseModel):
     name: str
