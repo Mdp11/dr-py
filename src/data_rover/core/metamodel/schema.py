@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping as ABCMapping
+from collections.abc import Mapping as ABCMapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -33,6 +33,62 @@ class Mapping(BaseModel):
 
     source: str
     target: str
+
+
+@dataclass(frozen=True)
+class KeyRel:
+    """A relationship referenced by an element type's ``key``.
+
+    ``direction == "out"`` keys on the element's OUTGOING edges of
+    ``rel_type`` (the connected target ids); ``"in"`` keys on its INCOMING
+    edges (the connected source ids). Spelled ``out:<RelType>`` / ``in:<RelType>``
+    in the metamodel ``key`` list.
+    """
+
+    rel_type: str
+    direction: Literal["out", "in"]
+
+
+@dataclass(frozen=True)
+class KeySpec:
+    """An element type's effective key, split into property and relationship parts."""
+
+    properties: tuple[str, ...]
+    relationships: tuple[KeyRel, ...]
+
+
+def parse_key_entry(entry: str) -> str | KeyRel:
+    """Classify one raw ``key`` entry.
+
+    ``out:R`` / ``in:R`` are relationship keys; any other string is a property
+    name. Property names therefore must not begin with ``out:`` or ``in:`` —
+    that prefix is the DSL boundary. The suffix after the colon is taken
+    verbatim as the relationship type name; it must be a real, non-empty type,
+    which ``check_metamodel`` enforces (this parser stays lenient so an invalid
+    metamodel keeps loading for inspection).
+    """
+    if entry.startswith("out:"):
+        return KeyRel(rel_type=entry[len("out:") :], direction="out")
+    if entry.startswith("in:"):
+        return KeyRel(rel_type=entry[len("in:") :], direction="in")
+    return entry
+
+
+def parse_key(entries: Sequence[str]) -> KeySpec:
+    """Split a raw ``key`` list into its property and relationship parts.
+
+    Declaration order is preserved within each group, so the resulting
+    ``KeySpec`` is a stable, hashable description of the element type's key.
+    """
+    properties: list[str] = []
+    relationships: list[KeyRel] = []
+    for entry in entries:
+        parsed = parse_key_entry(entry)
+        if isinstance(parsed, KeyRel):
+            relationships.append(parsed)
+        else:
+            properties.append(parsed)
+    return KeySpec(properties=tuple(properties), relationships=tuple(relationships))
 
 
 class ElementType(BaseModel):
@@ -102,6 +158,7 @@ class _Caches:
     effective_element_props: dict[str, list[PropertyDef]]
     effective_relationship_props: dict[str, list[PropertyDef]]
     effective_element_keys: dict[str, tuple[str, ...] | None]
+    effective_element_key_specs: dict[str, KeySpec | None]
     containment: dict[str, bool]
     end_constraints: dict[str, list[EndConstraint]]
 
@@ -209,6 +266,11 @@ def _build_caches(mm: Metamodel) -> _Caches:
                 break
         effective_element_keys[name] = key
 
+    effective_element_key_specs: dict[str, KeySpec | None] = {
+        name: (None if raw is None else parse_key(raw))
+        for name, raw in effective_element_keys.items()
+    }
+
     return _Caches(
         types_by_name=types_by_name,
         rel_types_by_name=rel_types_by_name,
@@ -226,6 +288,7 @@ def _build_caches(mm: Metamodel) -> _Caches:
             for n, c in relationship_ancestors.items()
         },
         effective_element_keys=effective_element_keys,
+        effective_element_key_specs=effective_element_key_specs,
         containment={
             n: any(rel_types_by_name[a].containment for a in c)
             for n, c in relationship_ancestors.items()
@@ -308,6 +371,14 @@ class Metamodel(BaseModel):
         """
         key = self._caches().effective_element_keys.get(name)
         return None if key is None else list(key)
+
+    def effective_element_key_spec(self, name: str) -> KeySpec | None:
+        """Parsed effective key (properties + relationships) for ``name``.
+
+        Mirrors :meth:`effective_element_key`'s child-override-wins resolution,
+        but split into a :class:`KeySpec`. ``None`` when no key is declared.
+        """
+        return self._caches().effective_element_key_specs.get(name)
 
     def effective_relationship_properties(self, name: str) -> list[PropertyDef]:
         return list(self._caches().effective_relationship_props.get(name, ()))
