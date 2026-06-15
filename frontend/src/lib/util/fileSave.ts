@@ -69,6 +69,22 @@ export async function saveJsonToFile(
 	return { filename: suggestedName, handle: null };
 }
 
+/**
+ * Write a JSON-serializable value straight to the browser's download folder
+ * via an `<a download>` link — no save picker, no FileSystemFileHandle.
+ *
+ * Use this when the filename is caller-composed and the user has nothing to
+ * choose (e.g. the CR sidecar, whose name is auto-generated). Crucially this
+ * needs NO transient user activation, so it can run after another save dialog
+ * within the same click — unlike {@link saveJsonToFile}, whose
+ * `showSaveFilePicker` would throw "Must be handling a user gesture" when
+ * invoked as a second picker in one gesture.
+ */
+export function downloadJsonFile(value: unknown, filename: string): SaveResult {
+	fallbackDownload(filename, JSON.stringify(value, null, 2));
+	return { filename, handle: null };
+}
+
 function fallbackDownloadBlob(filename: string, blob: Blob): void {
 	const url = URL.createObjectURL(blob);
 	const a = document.createElement('a');
