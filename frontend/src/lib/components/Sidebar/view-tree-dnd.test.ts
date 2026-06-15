@@ -47,6 +47,7 @@ describe('folder payload', () => {
 function tree(partial: Partial<UnifiedTree>): UnifiedTree {
 	return {
 		roots: [],
+		excludedRoots: [],
 		children: new Map(),
 		kind: new Map(),
 		folderName: new Map(),

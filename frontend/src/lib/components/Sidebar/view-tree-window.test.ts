@@ -1,13 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { Element, View } from '$lib/api/types';
 import {
-	appendExcludedSection,
+	registerExcludedRoots,
 	buildUnifiedTree,
 	computeVisibility,
-	EXCLUDED_SECTION_KEY,
 	flattenVisibleRows,
 	folderKey,
-	isExcludedSectionKey,
 	resolveElementDrop
 } from './view-tree';
 
@@ -74,39 +72,36 @@ describe('computeVisibility treats unloaded element bodies as tentatively visibl
 	});
 });
 
-describe('appendExcludedSection', () => {
-	it('adds a section root whose children are the excluded ids, registering unloaded ids as element nodes', () => {
+describe('registerExcludedRoots', () => {
+	it('exposes the excluded ids as a separate root region, registering unloaded ids as element nodes', () => {
 		const view: View = { name: 'v', folders: [{ name: 'F', folders: [], elements: ['placed'] }] };
 		const byId = new Map([['placed', el('placed')]]); // excluded ids NOT loaded yet
 		const tree = buildUnifiedTree(view, [], byId, new Map(), new Set(), displayName);
-		appendExcludedSection(tree, ['x1', 'x2']);
+		registerExcludedRoots(tree, ['x1', 'x2']);
 
-		expect(tree.roots.at(-1)).toBe(EXCLUDED_SECTION_KEY);
-		expect(isExcludedSectionKey(EXCLUDED_SECTION_KEY)).toBe(true);
-		expect(tree.kind.get(EXCLUDED_SECTION_KEY)).toBe('folder');
-		expect(tree.children.get(EXCLUDED_SECTION_KEY)).toEqual(['x1', 'x2']);
+		expect(tree.excludedRoots).toEqual(['x1', 'x2']);
+		expect(tree.roots).not.toContain('x1'); // pool is NOT a tree root
 		expect(tree.kind.get('x1')).toBe('element');
 		expect(tree.children.get('x1')).toEqual([]);
 	});
 
-	it('does not include an id that is already placed in a folder (defensive complement)', () => {
+	it('drops an id already placed in a folder (defensive complement)', () => {
 		const view: View = { name: 'v', folders: [{ name: 'F', folders: [], elements: ['placed'] }] };
 		const byId = new Map([['placed', el('placed')]]);
 		const tree = buildUnifiedTree(view, [], byId, new Map(), new Set(), displayName);
-		appendExcludedSection(tree, ['placed', 'x1']);
-		expect(tree.children.get(EXCLUDED_SECTION_KEY)).toEqual(['x1']);
+		registerExcludedRoots(tree, ['placed', 'x1']);
+		expect(tree.excludedRoots).toEqual(['x1']);
 	});
 
-	it('renders folder-like (never hidden) with skeleton children visible under the type filter', () => {
+	it('excluded roots are visible (skeleton) under the type filter and flatten on their own roots', () => {
 		const view: View = { name: 'v', folders: [] };
 		const byId = new Map<string, Element>(); // nothing loaded
 		const tree = buildUnifiedTree(view, [], byId, new Map(), new Set(), displayName);
-		appendExcludedSection(tree, ['x1']);
+		registerExcludedRoots(tree, ['x1']);
 		const vis = computeVisibility(tree, byId, new Set(['Block']));
-		expect(vis.get(EXCLUDED_SECTION_KEY)).toBe('full'); // child tentatively visible
 		expect(vis.get('x1')).toBe('full'); // unloaded body -> tentatively visible
-		const rows = flattenVisibleRows(tree, vis, new Set());
-		expect(rows.map((r) => r.key)).toEqual([EXCLUDED_SECTION_KEY, 'x1']);
+		const rows = flattenVisibleRows(tree, vis, new Set(), tree.excludedRoots);
+		expect(rows.map((r) => r.key)).toEqual(['x1']);
 	});
 });
 
