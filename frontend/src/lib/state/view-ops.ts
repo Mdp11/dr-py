@@ -88,11 +88,9 @@ export function placeElementsInViewAt(
 
 /**
  * Append-at-end placement (backwards-compatible wrapper around
- * {@link placeElementsInViewAt}). Empty path = exclude from the view.
- *
- * Return a new view with every id in `ids` placed into the folder at `path`
- * (empty path = unplaced top level). Each id is first stripped from any folder
- * that currently holds it (single-folder rule), matching `placeElement`.
+ * {@link placeElementsInViewAt}). Each id is first stripped from any folder that
+ * currently holds it (single-folder rule) and then appended to the folder at
+ * `path`. An empty `path` strips only — i.e. excludes the ids from the view.
  */
 export function placeElementsInView(view: View, path: string[], ids: string[]): View {
 	return placeElementsInViewAt(view, path, ids, Number.MAX_SAFE_INTEGER);
