@@ -629,6 +629,12 @@ export async function flushNow(): Promise<void> {
 // eslint-disable-next-line svelte/prefer-svelte-reactivity
 const _pendingElementFetches = new Map<string, Promise<Element | null>>();
 
+/** Ids currently being fetched by an {@link ensureElements} batch, so
+ * overlapping windows do not double-request the same id. Cleared on settle
+ * and on resetModelStore. */
+// eslint-disable-next-line svelte/prefer-svelte-reactivity
+const _inFlightBatchIds = new Set<string>();
+
 /**
  * Return the cached element or fetch it (GET /model/elements/{id}) and cache
  * it. Resolves null for unknown ids (404) and for unflushed temp ids that
@@ -656,6 +662,45 @@ export async function ensureElement(id: string): Promise<Element | null> {
 		return await fetchPromise;
 	} finally {
 		_pendingElementFetches.delete(id);
+	}
+}
+
+/**
+ * Batched cache-or-fetch for many ids: fetches only the uncached, non-temp,
+ * not-already-in-flight ids via POST /model/elements/batch (chunked at
+ * READ_PAGE_LIMIT) and seeds the cache. The window renderer calls this with
+ * the on-screen id slice; unknown ids are omitted by the server and simply
+ * stay uncached. On a mid-chunk failure, earlier chunks stay seeded (a read
+ * fill-path never rolls back) and the in-flight marks are still released; a
+ * retry simply re-fetches whatever is still missing.
+ */
+export async function ensureElements(ids: readonly string[]): Promise<void> {
+	const want: string[] = [];
+	const seen = new Set<string>();
+	for (const id of ids) {
+		if (seen.has(id)) continue;
+		seen.add(id);
+		// skip ids already cached, temp (server never heard of them), or already
+		// in flight via either this batch path or a single-id ensureElement.
+		if (
+			_elements.has(id) ||
+			isTempId(id) ||
+			_inFlightBatchIds.has(id) ||
+			_pendingElementFetches.has(id)
+		)
+			continue;
+		want.push(id);
+	}
+	if (want.length === 0) return;
+	for (const id of want) _inFlightBatchIds.add(id);
+	try {
+		for (let i = 0; i < want.length; i += modelReadApi.READ_PAGE_LIMIT) {
+			const chunk = want.slice(i, i + modelReadApi.READ_PAGE_LIMIT);
+			const fetched = await modelReadApi.getElementsBatch(chunk, _clientConfig);
+			for (const e of fetched) _elements.set(e.id, e);
+		}
+	} finally {
+		for (const id of want) _inFlightBatchIds.delete(id);
 	}
 }
 
@@ -797,6 +842,7 @@ export function resetModelStore(): void {
 	_generation += 1;
 	cancelFlushTimer();
 	_pendingElementFetches.clear();
+	_inFlightBatchIds.clear();
 	_elements.clear();
 	_relationships.clear();
 	_issuesByOwner.clear();

@@ -7,6 +7,7 @@ import {
 	applyDelta,
 	emit,
 	ensureElement,
+	ensureElements,
 	ensureRelationship,
 	flushNow,
 	getCachedElements,
@@ -22,6 +23,7 @@ import {
 	loadSummary,
 	refreshSummary,
 	resetModelStore,
+	seedElements,
 	setModelApiConfig,
 	undo,
 	validateAll
@@ -618,5 +620,61 @@ describe('reads and lifecycle', () => {
 		// would surface here as a flush error)
 		await vi.advanceTimersByTimeAsync(10);
 		expect(getModelError()).toBeNull();
+	});
+});
+
+describe('ensureElements (batched)', () => {
+	it('fetches only uncached ids in one batch and seeds the cache', async () => {
+		seedElements([el('a', { name: 'cached' })]);
+		const bodies: string[][] = [];
+		server.use(
+			http.post(`${BASE}/model/elements/batch`, async ({ request }) => {
+				const { ids } = (await request.json()) as { ids: string[] };
+				bodies.push(ids);
+				return HttpResponse.json({ items: ids.map((id) => el(id, { name: id })) });
+			})
+		);
+
+		await ensureElements(['a', 'b', 'c']);
+
+		// 'a' was cached, so only b,c are requested, in one batch
+		expect(bodies).toEqual([['b', 'c']]);
+		const cache = getCachedElements();
+		expect(cache.get('b')?.properties.name).toBe('b');
+		expect(cache.get('c')?.properties.name).toBe('c');
+		// the pre-cached element is left untouched (not clobbered by the batch)
+		expect(cache.get('a')?.properties.name).toBe('cached');
+	});
+
+	it('dedups overlapping concurrent calls onto a single fetch per id', async () => {
+		const bodies: string[][] = [];
+		let resolveFirst: (() => void) | undefined;
+		const gate = new Promise<void>((r) => (resolveFirst = r));
+		server.use(
+			http.post(`${BASE}/model/elements/batch`, async ({ request }) => {
+				const { ids } = (await request.json()) as { ids: string[] };
+				bodies.push(ids);
+				await gate; // hold both requests open until released
+				return HttpResponse.json({ items: ids.map((id) => el(id, { name: id })) });
+			})
+		);
+
+		// B starts while A is still in flight and shares b,c — B should only fetch d.
+		const a = ensureElements(['b', 'c']);
+		const b = ensureElements(['c', 'd']);
+		resolveFirst!();
+		await Promise.all([a, b]);
+
+		expect(bodies).toEqual([['b', 'c'], ['d']]);
+	});
+
+	it('is a no-op when every id is cached or a temp id', async () => {
+		seedElements([el('a')]);
+		server.use(
+			http.post(`${BASE}/model/elements/batch`, () => {
+				throw new Error('should not fetch');
+			})
+		);
+		await expect(ensureElements(['a', 'tmp_1'])).resolves.toBeUndefined();
 	});
 });
