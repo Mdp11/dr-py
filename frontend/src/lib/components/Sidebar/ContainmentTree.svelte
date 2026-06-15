@@ -904,7 +904,7 @@
 	</div>
 	<div
 		bind:this={scrollEl}
-		class="flex min-h-0 flex-1 flex-col overflow-auto px-3 py-2 outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500"
+		class="min-h-0 flex-1 overflow-auto px-3 py-2 outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500"
 		tabindex="0"
 		role="tree"
 		aria-label="Containment tree"
