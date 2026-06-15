@@ -77,11 +77,9 @@ test('load a view: folders render with their placed elements (curated scope)', a
 	await expect(tree.getByText('Grouped')).toBeVisible();
 	// Alpha is placed in the 'Grouped' folder -> shows under it.
 	await expect(tree.getByText('Alpha')).toBeVisible();
-	// Beta is unplaced. Under curated scope it is no longer interleaved at the
-	// view's top level; it belongs to the "excluded pool" section, which is
-	// rendered in Plan 2. TODO(plan-2): assert Beta appears in the excluded
-	// ("Not in view") section once that section exists.
-	await expect(tree.getByText('Beta')).toHaveCount(0);
+	// Beta is unplaced -> it lives in the auto-loaded "Not in view" pool.
+	await expect(tree.getByText('Not in view')).toBeVisible();
+	await expect(tree.getByText('Beta')).toBeVisible();
 });
 
 test('view referencing a missing element produces a warning in the Issues panel', async ({

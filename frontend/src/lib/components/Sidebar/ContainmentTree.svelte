@@ -2,7 +2,11 @@
 	import { untrack } from 'svelte';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import type { ContainmentItem, Element } from '$lib/api/types';
-	import { listContainmentChildren, listContainmentRootsPaged } from '$lib/api/model-read';
+	import {
+		listContainmentChildren,
+		listContainmentRootsPaged,
+		listExcludedRootsPaged
+	} from '$lib/api/model-read';
 	import { NotFoundError } from '$lib/api/errors';
 	import {
 		createFolder,
@@ -34,8 +38,9 @@
 	import { elementDisplayName as displayName } from '$lib/util/element-name';
 	import StereotypePicker from './StereotypePicker.svelte';
 	import TreeRow from './TreeRow.svelte';
-	import { computeWindow } from './windowing';
+	import { computeWindow, shouldLoadMore } from './windowing';
 	import {
+		appendExcludedSection,
 		buildUnifiedTree,
 		canDropElement,
 		canDropFolder,
@@ -102,11 +107,13 @@
 	const PAGE_LIMIT = 500;
 
 	let roots: ContainmentItem[] = $state([]);
-	// TODO(A6): rootsTotal/childTotals feed scroll auto-load (shouldLoadMore).
-	// Until A6 wires it, the no-view roots cap at the first PAGE_LIMIT page
-	// (the "Show more" button was removed with the recursive renderer).
+	// rootsTotal/excludedTotal feed scroll auto-load (shouldLoadMore): nearing the
+	// last loaded row grows the page limit (no "Show more" button).
 	let rootsTotal = $state(0);
 	let rootsLimit = $state(PAGE_LIMIT);
+	let excludedRoots: ContainmentItem[] = $state([]);
+	let excludedTotal = $state(0);
+	let excludedLimit = $state(PAGE_LIMIT);
 	const childLevels = new SvelteMap<string, ContainmentItem[]>();
 	const childTotals = new SvelteMap<string, number>();
 	/** Element ids the user expanded (folders are tracked by `collapsedFolders`). */
@@ -152,6 +159,18 @@
 		}
 	}
 
+	async function refreshExcluded(seq: number, limit: number): Promise<void> {
+		try {
+			const page = await listExcludedRootsPaged(limit);
+			if (seq !== loadSeq) return;
+			seedElements(page.items.map((i) => i.element));
+			excludedRoots = page.items;
+			excludedTotal = page.total;
+		} catch (err) {
+			if (seq === loadSeq) console.error('Excluded pool load failed', err);
+		}
+	}
+
 	// `hasModel` is a derived boolean (not the summary object) so the periodic
 	// summary refreshes — which replace the object but not the fact that a
 	// model is loaded — don't retrigger the fetch effect.
@@ -164,17 +183,28 @@
 		rootsLimit = PAGE_LIMIT;
 	});
 
+	// Structural change or model swap resets the excluded pool to its first page.
+	$effect(() => {
+		void getStructureRev();
+		void getModelGeneration();
+		excludedLimit = PAGE_LIMIT;
+	});
+
 	$effect(() => {
 		void getStructureRev(); // tracked: refetch on every STRUCTURAL acked delta
 		void getModelGeneration(); // tracked: refetch on model swap/reset
 		const loaded = hasModel;
+		const v = view; // tracked: fetch the excluded pool only in view mode
 		const expanded = [...expandedElements]; // tracked: fetch on expand
 		const limit = rootsLimit; // tracked: "Show more" roots
+		const exLimit = excludedLimit; // tracked: auto-load growth of the pool
 		const seq = ++loadSeq;
 		if (!loaded) {
 			untrack(() => {
 				roots = [];
 				rootsTotal = 0;
+				excludedRoots = [];
+				excludedTotal = 0;
 				childLevels.clear();
 				childTotals.clear();
 				if (expandedElements.size > 0) expandedElements.clear();
@@ -182,6 +212,12 @@
 			return;
 		}
 		void refreshLevels(seq, expanded, limit);
+		if (v !== null) void refreshExcluded(seq, exLimit);
+		else
+			untrack(() => {
+				excludedRoots = [];
+				excludedTotal = 0;
+			});
 	});
 
 	// ----- unified tree over the fetched subset -----
@@ -215,22 +251,30 @@
 	const childCounts = $derived.by(() => {
 		const m = new SvelteMap<string, number>();
 		for (const i of roots) m.set(i.element.id, i.child_count);
+		for (const i of excludedRoots) m.set(i.element.id, i.child_count);
 		for (const items of childLevels.values()) {
 			for (const i of items) m.set(i.element.id, i.child_count);
 		}
 		return m;
 	});
 
-	const tree = $derived.by(() =>
-		buildUnifiedTree(
+	const tree = $derived.by(() => {
+		const t = buildUnifiedTree(
 			view,
 			rootElementIds,
 			elementsById,
 			containmentChildren,
 			containedIds,
 			displayName
-		)
-	);
+		);
+		if (view !== null) {
+			appendExcludedSection(
+				t,
+				excludedRoots.map((i) => i.element.id)
+			);
+		}
+		return t;
+	});
 
 	// Visibility is computed over the LOADED subset only: an element whose own
 	// type is filtered out is hidden even if an UNFETCHED descendant would
@@ -297,6 +341,40 @@
 		computeWindow({ scrollTop, viewportH, rowH: ROW_H, total: visibleRows.length, overscan: OVERSCAN })
 	);
 	const windowedRows = $derived(visibleRows.slice(windowSlice.start, windowSlice.end));
+
+	// Auto-load the next page when the mounted window nears the last loaded row.
+	// The window end is in `visibleRows` coordinates, so compare against the real
+	// loaded-row count (the pool's loaded rows sit at the tail of `visibleRows`),
+	// NOT against `excludedRoots.length` directly (different coordinate space).
+	$effect(() => {
+		const end = windowSlice.end;
+		const loaded = visibleRows.length;
+		if (view !== null) {
+			const remaining = excludedTotal - excludedRoots.length;
+			if (
+				shouldLoadMore({
+					windowEnd: end,
+					loadedCount: loaded,
+					total: loaded + remaining,
+					threshold: OVERSCAN * 2
+				})
+			) {
+				excludedLimit = excludedRoots.length + PAGE_LIMIT;
+			}
+		} else {
+			const remaining = rootsTotal - roots.length;
+			if (
+				shouldLoadMore({
+					windowEnd: end,
+					loadedCount: loaded,
+					total: loaded + remaining,
+					threshold: OVERSCAN * 2
+				})
+			) {
+				rootsLimit = roots.length + PAGE_LIMIT;
+			}
+		}
+	});
 
 	function onScroll(): void {
 		if (scrollEl) scrollTop = scrollEl.scrollTop;
@@ -752,7 +830,7 @@
 						{visibility}
 						collapsed={collapsedSet}
 						{childCounts}
-						excludedTotal={0}
+						{excludedTotal}
 						{folderOptions}
 						{warningsByElementId}
 						{issueIndex}
