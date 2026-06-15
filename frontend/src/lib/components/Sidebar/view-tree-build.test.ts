@@ -28,7 +28,10 @@ describe('buildUnifiedTree — curated scope', () => {
 		expect([...tree.placedElementIds]).toEqual(['a']);
 	});
 
-	it('without a view, roots are the (name-sorted) model roots (unchanged)', () => {
+	it('without a view, roots render in the given (server) order — no client re-sort', () => {
+		// The backend emits roots already display-name sorted; the client must NOT
+		// re-sort, so an accumulated prefix only ever grows by appending (no jump
+		// during scroll auto-load). Input order is therefore preserved verbatim.
 		const tree = buildUnifiedTree(
 			null,
 			['b', 'a'],
@@ -37,6 +40,6 @@ describe('buildUnifiedTree — curated scope', () => {
 			new Set(),
 			displayName
 		);
-		expect(tree.roots).toEqual(['a', 'b']);
+		expect(tree.roots).toEqual(['b', 'a']);
 	});
 });

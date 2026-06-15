@@ -103,16 +103,19 @@
 
 	// ----- lazy containment levels (paged read endpoints) -----
 	//
-	// The tree holds only the FETCHED levels: the roots page plus the children
-	// of every EXPANDED element. Levels are (re)fetched by one effect that
-	// tracks `structureRev` + the expansion set, so the policy is: on every
-	// acknowledged STRUCTURAL delta (create/delete/relationship change —
-	// property-only acks while typing don't refetch), and on every expand, the
-	// roots page and ALL currently expanded levels are refetched; levels whose
-	// parent disappeared (404) are dropped and auto-collapsed. The backend caps
-	// each request at PAGE_LIMIT and 422s above it, so "Show more" growth past
-	// PAGE_LIMIT is assembled by offset paging (listContainmentRootsPaged);
-	// deeper levels render the first page — flagged as a known limit.
+	// The tree holds only the FETCHED levels: the roots page plus the child
+	// levels the prefetch effect has pulled in. Roots and child levels are
+	// fetched by SEPARATE effects so expanding a row never pays for a roots
+	// refetch:
+	//   * roots — refetched on every acknowledged STRUCTURAL delta (create/
+	//     delete/relationship change; property-only acks while typing don't
+	//     refetch) and on model swap; grown past PAGE_LIMIT by the scroll
+	//     auto-load (offset paging — the backend caps each request at PAGE_LIMIT
+	//     and 422s above it).
+	//   * child levels — prefetched PREFETCH_DEPTH levels below the on-screen rows
+	//     (see the prefetch effect) so expansion is instant; invalidated wholesale
+	//     on a structural delta / model swap and refilled. Levels whose parent
+	//     disappeared (404) are dropped and auto-collapsed.
 	const PAGE_LIMIT = 500;
 
 	let roots: ContainmentItem[] = $state([]);
@@ -132,39 +135,53 @@
 	const collapsedFolders = new SvelteSet<string>();
 
 	let loadSeq = 0;
+	// Child levels are fetched independently of the roots page (see the prefetch
+	// effect): `childLoadSeq` bumps whenever a structural delta or model swap
+	// invalidates them, so an in-flight child fetch that lands afterwards is
+	// dropped instead of seeding stale rows.
+	let childLoadSeq = 0;
+	// Ids with a child-level fetch in flight, so overlapping prefetch passes do
+	// not double-request the same level. Plain Set: bookkeeping, never read
+	// reactively.
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity
+	const _childFetching = new Set<string>();
 
-	async function refreshLevels(seq: number, expanded: string[], limit: number): Promise<void> {
+	async function refreshRoots(seq: number, limit: number): Promise<void> {
 		try {
 			const page = await listContainmentRootsPaged(limit);
 			if (seq !== loadSeq) return;
 			seedElements(page.items.map((i) => i.element));
 			roots = page.items;
 			rootsTotal = page.total;
-			// expanded child levels are independent — fetch them in parallel
-			await Promise.all(
-				expanded.map(async (id) => {
-					try {
-						const cp = await listContainmentChildren(id, { limit: PAGE_LIMIT });
-						if (seq !== loadSeq) return;
-						seedElements(cp.items.map((i) => i.element));
-						childLevels.set(id, cp.items);
-						childTotals.set(id, cp.total);
-					} catch (err) {
-						if (seq !== loadSeq) return;
-						if (err instanceof NotFoundError) {
-							// parent gone (deleted) — drop and collapse its level
-							childLevels.delete(id);
-							childTotals.delete(id);
-							expandedElements.delete(id);
-						} else {
-							// transient failure — keep the stale level rather than collapsing
-							console.error(`Containment children load failed for ${id}`, err);
-						}
-					}
-				})
-			);
 		} catch (err) {
 			if (seq === loadSeq) console.error('Containment tree load failed', err);
+		}
+	}
+
+	// Fetch one element's containment children into `childLevels`. Called by the
+	// prefetch effect for levels not yet loaded; `seq` guards against a model
+	// swap / structural change landing mid-flight.
+	async function fetchChildLevel(seq: number, id: string): Promise<void> {
+		_childFetching.add(id);
+		try {
+			const cp = await listContainmentChildren(id, { limit: PAGE_LIMIT });
+			if (seq !== childLoadSeq) return;
+			seedElements(cp.items.map((i) => i.element));
+			childLevels.set(id, cp.items);
+			childTotals.set(id, cp.total);
+		} catch (err) {
+			if (seq !== childLoadSeq) return;
+			if (err instanceof NotFoundError) {
+				// parent gone (deleted) — drop and collapse its level
+				childLevels.delete(id);
+				childTotals.delete(id);
+				expandedElements.delete(id);
+			} else {
+				// transient failure — keep the stale level rather than collapsing
+				console.error(`Containment children load failed for ${id}`, err);
+			}
+		} finally {
+			_childFetching.delete(id);
 		}
 	}
 
@@ -204,7 +221,6 @@
 		void getModelGeneration(); // tracked: refetch on model swap/reset
 		const loaded = hasModel;
 		const v = view; // tracked: fetch the excluded pool only in view mode
-		const expanded = [...expandedElements]; // tracked: fetch on expand
 		const limit = rootsLimit; // tracked: roots auto-load page size
 		const exLimit = excludedLimit; // tracked: auto-load growth of the pool
 		const seq = ++loadSeq;
@@ -220,13 +236,29 @@
 			});
 			return;
 		}
-		void refreshLevels(seq, expanded, limit);
+		void refreshRoots(seq, limit);
 		if (v !== null) void refreshExcluded(seq, exLimit);
 		else
 			untrack(() => {
 				excludedRoots = [];
 				excludedTotal = 0;
 			});
+	});
+
+	// Child levels are no longer refetched by the roots effect (expanding a row
+	// must not pay for a full roots refetch). A structural delta or model swap
+	// instead invalidates every loaded child level here; the prefetch effect then
+	// refills them from the new structure. Bumping `childLoadSeq` drops any
+	// in-flight child fetch that lands after the invalidation.
+	$effect(() => {
+		void getStructureRev();
+		void getModelGeneration();
+		childLoadSeq++;
+		untrack(() => {
+			if (childLevels.size > 0) childLevels.clear();
+			if (childTotals.size > 0) childTotals.clear();
+			_childFetching.clear();
+		});
 	});
 
 	// ----- unified tree over the fetched subset -----
@@ -303,7 +335,8 @@
 	// ----- expansion state (lazy levels) -----
 
 	function isExpandable(key: string): boolean {
-		if (isFolderKey(key) || isExcludedSectionKey(key)) return (tree.children.get(key) ?? []).length > 0;
+		if (isFolderKey(key) || isExcludedSectionKey(key))
+			return (tree.children.get(key) ?? []).length > 0;
 		return (tree.children.get(key) ?? []).length > 0 || (childCounts.get(key) ?? 0) > 0;
 	}
 
@@ -347,7 +380,13 @@
 	let viewportH = $state(0);
 
 	const windowSlice = $derived(
-		computeWindow({ scrollTop, viewportH, rowH: ROW_H, total: visibleRows.length, overscan: OVERSCAN })
+		computeWindow({
+			scrollTop,
+			viewportH,
+			rowH: ROW_H,
+			total: visibleRows.length,
+			overscan: OVERSCAN
+		})
 	);
 	const windowedRows = $derived(visibleRows.slice(windowSlice.start, windowSlice.end));
 
@@ -355,9 +394,14 @@
 	// The window end is in `visibleRows` coordinates, so compare against the real
 	// loaded-row count (the pool's loaded rows sit at the tail of `visibleRows`),
 	// NOT against `excludedRoots.length` directly (different coordinate space).
+	//
+	// `loadAhead` is roughly one screenful of rows, so the fetch fires about a
+	// viewport BEFORE the user hits the bottom — the next page is usually already
+	// in by the time they reach it, keeping the lazy load invisible.
 	$effect(() => {
 		const end = windowSlice.end;
 		const loaded = visibleRows.length;
+		const loadAhead = Math.ceil(viewportH / ROW_H) + OVERSCAN * 2;
 		if (view !== null) {
 			const remaining = excludedTotal - excludedRoots.length;
 			if (
@@ -365,7 +409,7 @@
 					windowEnd: end,
 					loadedCount: loaded,
 					total: loaded + remaining,
-					threshold: OVERSCAN * 2
+					threshold: loadAhead
 				})
 			) {
 				excludedLimit = excludedRoots.length + PAGE_LIMIT;
@@ -377,7 +421,7 @@
 					windowEnd: end,
 					loadedCount: loaded,
 					total: loaded + remaining,
-					threshold: OVERSCAN * 2
+					threshold: loadAhead
 				})
 			) {
 				rootsLimit = roots.length + PAGE_LIMIT;
@@ -408,6 +452,50 @@
 			.map((r) => r.key)
 			.filter((k) => !isFolderKey(k) && !isExcludedSectionKey(k));
 		if (ids.length > 0) void ensureElements(ids);
+	});
+
+	// ----- child-level prefetch -----
+	//
+	// Children are prefetched PREFETCH_DEPTH levels below every on-screen element
+	// so expanding a row reveals its children instantly instead of waiting on a
+	// fetch. Seeding the walk from the WINDOWED (on-screen) rows keeps the work
+	// proportional to the viewport, not the model size; expanded elements are
+	// folded in too so an open level is still fetched when scrolled out of the
+	// window. The walk descends through already-loaded levels (`childLevels`), so
+	// each newly-arrived level extends the frontier and the next level is fetched
+	// on the following pass — capped at PREFETCH_DEPTH.
+	const PREFETCH_DEPTH = 1;
+	const childPrefetchIds = $derived.by<SvelteSet<string>>(() => {
+		const targets = new SvelteSet<string>();
+		let frontier: string[] = [
+			...windowedRows.map((r) => r.key).filter((k) => !isFolderKey(k) && !isExcludedSectionKey(k)),
+			...expandedElements
+		];
+		for (let depth = 0; depth < PREFETCH_DEPTH; depth++) {
+			const next: string[] = [];
+			for (const id of frontier) {
+				if (targets.has(id)) continue;
+				targets.add(id);
+				for (const c of childLevels.get(id) ?? []) next.push(c.element.id);
+			}
+			frontier = next;
+		}
+		return targets;
+	});
+
+	// Fetch the missing child levels for the prefetch frontier. Re-runs as new
+	// on-screen rows mount and as each fetched level extends `childPrefetchIds`,
+	// cascading down to PREFETCH_DEPTH; only not-yet-loaded, non-leaf, not-in-flight
+	// ids are requested, so it converges.
+	$effect(() => {
+		if (!hasModel) return;
+		const seq = childLoadSeq;
+		for (const id of childPrefetchIds) {
+			if (childLevels.has(id)) continue; // already loaded
+			if ((childCounts.get(id) ?? 0) === 0) continue; // leaf — nothing to fetch
+			if (_childFetching.has(id)) continue; // in flight
+			void fetchChildLevel(seq, id);
+		}
 	});
 
 	let focusedId: string | null = $state(null);

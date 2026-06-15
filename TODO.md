@@ -1,7 +1,4 @@
-- New approach (load more) does not work well with view
-- When migrating, if a source has numeric values as strings (e.g. "2.5", "5") they should resolve to float and integer and also be transformed into the model itself (care for Infinity value for float)
 - Remove three separate loading buttons for metamodel, model and view. Only one button, in the popup I choose all 3 of them (view is optional)
-- When validate uniqueness, ownership should be always included (e.g. if two elements are perfectly identical for the specified keys, but they have different owner, they are not the same)
-- When specifying keys, it should also be possible to specify relationships. In that case uniqueness hsould check that elements that have the same number of relationships (among those specified in keys) each from/to the same elements
 - In the search and tree view, name should always be fully visible, the thing to ellipsize should be the id
 - When clicking on an element, in the details where relationships are shown, there is a little arrow for the direction. Instead of the arrow I want a from/to label (styled like Stereotypes are styled, so with that sort of grey background)
+- Add loading spinner everywhere when there's loading (startup, metamodel/model/view loading, etc.)
