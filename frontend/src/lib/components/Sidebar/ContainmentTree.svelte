@@ -269,7 +269,12 @@
 			return;
 		}
 		void refreshRoots(seq, limit);
-		if (v !== null) void refreshExcluded(seq, exLimit);
+		// The excluded pool fetches ONLY while the panel is expanded — a collapsed
+		// pool renders nothing, so honoring "no fetch while collapsed" means not
+		// even loading the first page. Reading `poolCollapsed` here makes expanding
+		// the panel re-run this effect and trigger the load. Collapsing clears the
+		// loaded rows (the body is unmounted anyway); re-expanding refetches.
+		if (v !== null && !poolCollapsed) void refreshExcluded(seq, exLimit);
 		else
 			untrack(() => {
 				excludedRoots = [];
@@ -1153,7 +1158,9 @@
 				<ChevronDown class="h-3 w-3" />
 			{/if}
 			<span class="flex-1 text-left">Not in view</span>
-			<span class="font-mono text-[10px] normal-case text-zinc-500">{excludedTotal}</span>
+			{#if !poolCollapsed}
+				<span class="font-mono text-[10px] normal-case text-zinc-500">{excludedTotal}</span>
+			{/if}
 		</button>
 	{/snippet}
 
