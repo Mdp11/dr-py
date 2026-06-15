@@ -3,6 +3,7 @@ import {
 	ChangesDocSchema,
 	ChangesSummarySchema,
 	ContainmentPageSchema,
+	ElementListSchema,
 	ElementPageSchema,
 	ModelSummarySchema,
 	NeighborhoodSchema,
@@ -10,6 +11,8 @@ import {
 	type ChangesDoc,
 	type ChangesSummary,
 	type ContainmentPage,
+	type Element,
+	type ElementList,
 	type ElementPage,
 	type ModelSummary,
 	type Neighborhood,
@@ -24,6 +27,19 @@ import {
 /** GET /model/summary — cheap whole-model statistics. */
 export function getModelSummary(cfg?: ClientConfig): Promise<ModelSummary> {
 	return apiFetch('/model/summary', { method: 'GET', schema: ModelSummarySchema }, cfg);
+}
+
+/**
+ * POST /model/elements/batch — fetch many elements by id in one request.
+ * Ids come back in request order; unknown/deleted ids are omitted by the
+ * server. Caller must keep `ids.length <= READ_PAGE_LIMIT`.
+ */
+export function getElementsBatch(ids: string[], cfg?: ClientConfig): Promise<Element[]> {
+	return apiFetch<ElementList>(
+		'/model/elements/batch',
+		{ method: 'POST', body: { ids }, schema: ElementListSchema },
+		cfg
+	).then((r) => r.items);
 }
 
 export interface ElementsPageQuery {

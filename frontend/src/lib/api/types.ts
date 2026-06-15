@@ -117,7 +117,6 @@ export const MetamodelSchema = z.object({
 });
 export type Metamodel = z.infer<typeof MetamodelSchema>;
 
-export const ElementListSchema = z.array(ElementSchema);
 export const RelationshipListSchema = z.array(RelationshipSchema);
 export const IssueListSchema = z.array(IssueSchema);
 
@@ -207,6 +206,11 @@ export const ElementPageSchema = z.object({
 	total: z.number().int().default(0)
 });
 export type ElementPage = z.infer<typeof ElementPageSchema>;
+
+export const ElementListSchema = z.object({
+	items: z.array(ElementSchema).default([])
+});
+export type ElementList = z.infer<typeof ElementListSchema>;
 
 export const NeighborhoodSchema = z.object({
 	nodes: z.array(ElementSchema).default([]),
