@@ -17,8 +17,9 @@ Ordering contracts (deterministic paging)
 - neighborhood: nodes in BFS discovery order (per frontier node, incident
   relationship ids ascending), edges sorted by relationship id
 - per-element relationships: relationship id ascending
-- containment roots: model insertion order; children: display-name then id
-  ascending (the order ``Sidebar/ContainmentTree.svelte`` renders)
+- containment roots, excluded pool and children: display-name then id
+  ascending (the order ``Sidebar/ContainmentTree.svelte`` renders; a paged
+  client cannot re-sort a level, so the server emits render order)
 - /model/changes: entities in first-touch op-log order, partitioned into
   added/modified/deleted
 """
@@ -386,11 +387,18 @@ def list_containment_roots(
     offset: int = Query(0, ge=0),
     session: Session = Depends(get_session),
 ) -> ContainmentPage:
-    """Elements with no containment parent, in model insertion order
-    (ContainmentTree renders roots unsorted)."""
+    """Elements with no containment parent, sorted by display name then id.
+
+    Display-name order (not insertion order) on purpose, exactly like
+    ``list_containment_children``: it is the order ContainmentTree.svelte renders
+    the root level in, and a paged client cannot re-sort a level it only holds
+    one page of — re-sorting an accumulated prefix would make scroll auto-load
+    reshuffle rows above the viewport (a visible "jump").
+    """
     _, model = require_model(session)
     idx = model.indexes
     root_ids = [eid for eid in model.elements if idx.first_parent(eid) is None]
+    root_ids.sort(key=lambda eid: (_display_name(model.elements[eid]), eid))
     return ContainmentPage(
         items=[
             _containment_item(model, eid) for eid in root_ids[offset : offset + limit]
@@ -419,22 +427,21 @@ def list_excluded_roots(
     session: Session = Depends(get_session),
 ) -> ContainmentPage:
     """Containment roots NOT placed in the active view (the 'excluded pool').
-    In model insertion order, like ``list_containment_roots``. With no active
-    view, every root is excluded (returns all roots)."""
+    Sorted by display name then id, like ``list_containment_roots`` (so the
+    paged pool grows by appending, never reshuffling). With no active view,
+    every root is excluded (returns all roots)."""
     _, model = require_model(session)
     idx = model.indexes
-    placed = (
-        _placed_element_ids(session.view) if session.view is not None else set()
-    )
+    placed = _placed_element_ids(session.view) if session.view is not None else set()
     root_ids = [
         eid
         for eid in model.elements
         if idx.first_parent(eid) is None and eid not in placed
     ]
+    root_ids.sort(key=lambda eid: (_display_name(model.elements[eid]), eid))
     return ContainmentPage(
         items=[
-            _containment_item(model, eid)
-            for eid in root_ids[offset : offset + limit]
+            _containment_item(model, eid) for eid in root_ids[offset : offset + limit]
         ],
         total=len(root_ids),
     )

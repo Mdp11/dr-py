@@ -207,9 +207,7 @@ def test_elements_insertion_order_and_paging(client: TestClient) -> None:
     assert body["total"] == 4
     assert [e["id"] for e in body["items"]] == ["i1", "t1"]
 
-    body = client.get(
-        f"{API}/model/elements", params={"limit": 2, "offset": 3}
-    ).json()
+    body = client.get(f"{API}/model/elements", params={"limit": 2, "offset": 3}).json()
     assert body["total"] == 4
     assert [e["id"] for e in body["items"]] == ["i3"]
 
@@ -425,9 +423,7 @@ def test_relationships_paging(graph_client: TestClient) -> None:
     assert body == {"items": [], "total": 2}
 
     for params in ({"limit": 0}, {"limit": 501}, {"offset": -1}):
-        res = graph_client.get(
-            f"{API}/model/elements/n2/relationships", params=params
-        )
+        res = graph_client.get(f"{API}/model/elements/n2/relationships", params=params)
         assert res.status_code == 422, params
 
 
@@ -486,16 +482,18 @@ def tree_client(client: TestClient) -> TestClient:
 
 
 def test_containment_roots(tree_client: TestClient) -> None:
+    # display-name order, as ContainmentTree renders: Other (q) < Parent (p) < X
     body = tree_client.get(f"{API}/model/containment/roots").json()
     assert body["total"] == 3
-    assert [i["element"]["id"] for i in body["items"]] == ["p", "q", "x"]
-    assert [i["child_count"] for i in body["items"]] == [2, 0, 0]
+    assert [i["element"]["id"] for i in body["items"]] == ["q", "p", "x"]
+    assert [i["child_count"] for i in body["items"]] == [0, 2, 0]
 
+    # paging over the sorted level
     body = tree_client.get(
         f"{API}/model/containment/roots", params={"limit": 1, "offset": 1}
     ).json()
     assert body["total"] == 3
-    assert [i["element"]["id"] for i in body["items"]] == ["q"]
+    assert [i["element"]["id"] for i in body["items"]] == ["p"]
 
 
 def test_containment_children(tree_client: TestClient) -> None:
@@ -947,9 +945,7 @@ def _put_view(client: TestClient, folders: list[dict]) -> None:
 
 
 def test_excluded_roots_omits_placed(client: TestClient) -> None:
-    _load_model(
-        client, [_item("a", "A"), _item("b", "B"), _item("c", "C")], []
-    )
+    _load_model(client, [_item("a", "A"), _item("b", "B"), _item("c", "C")], [])
     _put_view(client, [{"name": "F", "folders": [], "elements": ["b"]}])
     res = client.get(f"{API}/model/containment/roots/excluded")
     assert res.status_code == 200, res.text
