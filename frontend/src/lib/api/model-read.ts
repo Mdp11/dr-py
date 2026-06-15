@@ -156,6 +156,42 @@ export async function listContainmentRootsPaged(
 	return { items, total };
 }
 
+/** GET /model/containment/roots/excluded — roots not placed in the active view. */
+export function listExcludedRoots(
+	opts?: { limit?: number; offset?: number },
+	cfg?: ClientConfig
+): Promise<ContainmentPage> {
+	return apiFetch(
+		'/model/containment/roots/excluded',
+		{
+			method: 'GET',
+			schema: ContainmentPageSchema,
+			query: { limit: opts?.limit, offset: opts?.offset }
+		},
+		cfg
+	);
+}
+
+/** Offset-paged assembly of the first `limit` excluded roots (mirrors
+ * {@link listContainmentRootsPaged}; backend caps a page at READ_PAGE_LIMIT). */
+export async function listExcludedRootsPaged(
+	limit: number,
+	cfg?: ClientConfig
+): Promise<ContainmentPage> {
+	const items: ContainmentPage['items'] = [];
+	let total = 0;
+	while (items.length < limit) {
+		const page = await listExcludedRoots(
+			{ limit: Math.min(READ_PAGE_LIMIT, limit - items.length), offset: items.length },
+			cfg
+		);
+		items.push(...page.items);
+		total = page.total;
+		if (items.length >= total || page.items.length === 0) break;
+	}
+	return { items, total };
+}
+
 /** GET /model/elements/{id}/children — containment children, paged. */
 export function listContainmentChildren(
 	elementId: string,
