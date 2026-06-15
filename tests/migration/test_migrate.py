@@ -124,6 +124,101 @@ def test_typedby_not_created_when_no_constraints():
     assert result.metamodel.relationship_type("TypedBy") is None
 
 
+# --- typed elements key on their type --------------------------------------
+
+
+def _typed_old_mm():
+    return {
+        "elements": {
+            "Device": {
+                "is_owned_by_one_of": [],
+                "is_typed_by_one_of": ["DeviceType"],
+                "id_properties": ["serial"],
+                "other_properties": [],
+            },
+            # an instance kind with no id properties of its own
+            "Reading": {
+                "is_owned_by_one_of": [],
+                "is_typed_by_one_of": ["DeviceType"],
+                "id_properties": [],
+                "other_properties": ["value"],
+            },
+            "DeviceType": {
+                "is_owned_by_one_of": [],
+                "is_typed_by_one_of": [],
+                "id_properties": ["name"],
+                "other_properties": [],
+            },
+        },
+        "relationships": {},
+    }
+
+
+def _typed_old_model():
+    return {
+        "metadata": {"release": "", "commit": ""},
+        "elements": {
+            "dt1": {
+                "id": "dt1",
+                "stereotype": "DeviceType",
+                "owner": None,
+                "element_type": None,
+                "properties": {"name": "Sensor"},
+            },
+            "d1": {
+                "id": "d1",
+                "stereotype": "Device",
+                "owner": None,
+                "element_type": "dt1",
+                "properties": {"serial": "S1"},
+            },
+        },
+        "relationships": {},
+    }
+
+
+def test_typed_element_key_appends_out_typedby():
+    result = migrate(_typed_old_mm(), _typed_old_model())
+    device = result.metamodel.element_type("Device")
+    assert device is not None
+    # the element that HAS a type is the source of TypedBy -> out:TypedBy
+    assert device.key == ["serial", "out:TypedBy"]
+
+
+def test_typed_element_without_id_props_keys_only_on_type():
+    result = migrate(_typed_old_mm(), _typed_old_model())
+    reading = result.metamodel.element_type("Reading")
+    assert reading is not None
+    assert reading.key == ["out:TypedBy"]
+
+
+def test_untyped_element_key_unchanged():
+    result = migrate(_typed_old_mm(), _typed_old_model())
+    device_type = result.metamodel.element_type("DeviceType")
+    assert device_type is not None
+    assert device_type.key == ["name"]
+
+
+def test_typed_key_metamodel_is_valid():
+    result = migrate(_typed_old_mm(), _typed_old_model())
+    assert check_metamodel(result.metamodel) == []
+
+
+def test_typed_key_uses_renamed_typedby_on_collision():
+    # a pre-existing "TypedBy" stereotype forces the synthesized relationship
+    # to be renamed; the key must reference the renamed type, not a literal.
+    old_mm = _typed_old_mm()
+    old_mm["relationships"]["TypedBy"] = {
+        "other_properties": [],
+        "mappings": [{"source": "Device", "destination": "Device"}],
+    }
+    result = migrate(old_mm, _typed_old_model())
+    device = result.metamodel.element_type("Device")
+    assert device is not None
+    assert device.key == ["serial", "out:TypedBy2"]
+    assert check_metamodel(result.metamodel) == []
+
+
 # --- model migration -------------------------------------------------------
 
 
