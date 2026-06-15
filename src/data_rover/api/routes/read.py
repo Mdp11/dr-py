@@ -28,7 +28,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 
 from data_rover.core.model.element import Element
 from data_rover.core.model.model import Model
@@ -53,6 +54,14 @@ router = APIRouter()
 
 #: hard cap on ``limit`` for every paged endpoint in this module
 MAX_PAGE_LIMIT = 500
+
+
+class BatchElementsIn(BaseModel):
+    ids: list[str]
+
+
+class BatchElementsOut(BaseModel):
+    items: list[ElementOut]
 
 
 def _require_element(model: Model, element_id: str) -> None:
@@ -194,6 +203,34 @@ def list_elements(
             if len(items) >= limit:
                 break
     return ElementPage(items=items, total=total)
+
+
+# ---------------------------------------------------------------------------
+# POST /model/elements/batch — fetch many elements by id in one request
+# ---------------------------------------------------------------------------
+
+
+@router.post("/model/elements/batch")
+def batch_elements(
+    payload: BatchElementsIn,
+    session: Session = Depends(get_session),
+) -> BatchElementsOut:
+    """Fetch many elements by id in one request. Ids are returned in request
+    order (duplicates produce duplicate results); unknown/deleted ids are
+    silently omitted (a stale window id must not fail the whole batch). Caps at
+    MAX_PAGE_LIMIT ids (422 above)."""
+    _, model = require_model(session)
+    if len(payload.ids) > MAX_PAGE_LIMIT:
+        raise HTTPException(
+            status_code=422,
+            detail=f"too many ids: {len(payload.ids)} (max {MAX_PAGE_LIMIT})",
+        )
+    items = [
+        ElementOut.from_core(model.elements[eid])
+        for eid in payload.ids
+        if eid in model.elements
+    ]
+    return BatchElementsOut(items=items)
 
 
 # ---------------------------------------------------------------------------
