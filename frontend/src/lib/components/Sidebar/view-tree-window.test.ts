@@ -7,7 +7,8 @@ import {
 	EXCLUDED_SECTION_KEY,
 	flattenVisibleRows,
 	folderKey,
-	isExcludedSectionKey
+	isExcludedSectionKey,
+	resolveElementDrop
 } from './view-tree';
 
 function el(id: string, type = 'Block', name = id): Element {
@@ -106,5 +107,28 @@ describe('appendExcludedSection', () => {
 		expect(vis.get('x1')).toBe('full'); // unloaded body -> tentatively visible
 		const rows = flattenVisibleRows(tree, vis, new Set());
 		expect(rows.map((r) => r.key)).toEqual([EXCLUDED_SECTION_KEY, 'x1']);
+	});
+});
+
+describe('resolveElementDrop', () => {
+	it('folder header drop -> append into that folder (index at end)', () => {
+		const r = resolveElementDrop({ targetKind: 'folder', folderPath: ['F'], folderLen: 3 });
+		expect(r).toEqual({ path: ['F'], index: 3 });
+	});
+	it('excluded-section drop -> exclude (empty path)', () => {
+		const r = resolveElementDrop({ targetKind: 'section' });
+		expect(r).toEqual({ path: [], index: 0 });
+	});
+	it('element-row drop, top half -> insert before the sibling', () => {
+		const r = resolveElementDrop({ targetKind: 'element', folderPath: ['F'], siblingIndex: 2, half: 'top' });
+		expect(r).toEqual({ path: ['F'], index: 2 });
+	});
+	it('element-row drop, bottom half -> insert after the sibling', () => {
+		const r = resolveElementDrop({ targetKind: 'element', folderPath: ['F'], siblingIndex: 2, half: 'bottom' });
+		expect(r).toEqual({ path: ['F'], index: 3 });
+	});
+	it('element-row drop in the excluded pool -> exclude (no reorder in the pool)', () => {
+		const r = resolveElementDrop({ targetKind: 'element', folderPath: null, siblingIndex: 0, half: 'top' });
+		expect(r).toEqual({ path: [], index: 0 });
 	});
 });
