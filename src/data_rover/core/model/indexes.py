@@ -29,12 +29,15 @@ from typing import TYPE_CHECKING, Any
 
 from .element import Element
 from .relationship import Relationship
+from ..metamodel.schema import KeyRel, KeySpec
 
 if TYPE_CHECKING:
     from .model import Model
 
-# (type_name, containment owner id or None, signature of effective-key
-#  property values — or of all properties when the type declares no key)
+# (type_name, containment owner id or None, signature). The signature is the
+# frozen all-properties value when the type declares no key; for a keyed type it
+# is a 2-tuple (property-value tuple, per-relationship endpoint-multiset tuple),
+# each relationship multiset rendered as tuple(sorted(endpoint_ids)).
 UniqKey = tuple[str, "str | None", Hashable]
 
 
@@ -93,7 +96,12 @@ class IndexSet:
         # per-entity hot paths
         self._element_ref_props: dict[str, tuple[str, ...]] = {}
         self._relationship_ref_props: dict[str, tuple[str, ...]] = {}
-        self._key_props: dict[str, tuple[str, ...] | None] = {}
+        self._key_specs: dict[str, KeySpec | None] = {}
+        # relationship-type names that appear with each direction in ANY element
+        # type's effective key; built once (metamodel is immutable). None until
+        # first built. Used to skip rekeying on edges that affect no key.
+        self._out_key_rel_types: set[str] | None = None
+        self._in_key_rel_types: set[str] | None = None
         self._is_containment: dict[str, bool] = {}
 
     # -- accessors (for query helpers and the validator rewrite) -----------
@@ -156,6 +164,7 @@ class IndexSet:
             self.containment_parents.setdefault(rel.target_id, []).append(rel.source_id)
             self._containment_rel_ids.setdefault(rel.target_id, []).append(rel.id)
             self._rekey_if_present(rel.target_id)
+        self._rekey_key_rel_endpoints(rel)
 
     def on_relationship_deleted(self, rel: Relationship) -> None:
         outs = self.out_rels.get(rel.source_id)
@@ -186,6 +195,7 @@ class IndexSet:
                         del self._containment_rel_ids[rel.target_id]
                         del self.containment_parents[rel.target_id]
             self._rekey_if_present(rel.target_id)
+        self._rekey_key_rel_endpoints(rel)
 
     def on_properties_changed(self, entity: Element | Relationship) -> None:
         """Re-derive property-driven indexes (references, uniqueness) for one
@@ -276,21 +286,46 @@ class IndexSet:
     def _uniq_key(self, element: Element) -> UniqKey:
         parents = self.containment_parents.get(element.id)
         owner = parents[0] if parents else None
-        key = self._effective_key(element.type_name)
-        if key is None:
+        spec = self._effective_key_spec(element.type_name)
+        if spec is None:
             signature: Hashable = _frozen(element.properties)
         else:
-            signature = tuple(_frozen(element.properties.get(k)) for k in key)
+            prop_values = tuple(
+                _frozen(element.properties.get(k)) for k in spec.properties
+            )
+            rel_values = tuple(
+                self._rel_endpoints(element.id, kr) for kr in spec.relationships
+            )
+            signature = (prop_values, rel_values)
         return (element.type_name, owner, signature)
 
-    def _effective_key(self, type_name: str) -> tuple[str, ...] | None:
+    def _effective_key_spec(self, type_name: str) -> KeySpec | None:
         try:
-            return self._key_props[type_name]
+            return self._key_specs[type_name]
         except KeyError:
-            key = self._model.metamodel.effective_element_key(type_name)
-            frozen_key = None if key is None else tuple(key)
-            self._key_props[type_name] = frozen_key
-            return frozen_key
+            spec = self._model.metamodel.effective_element_key_spec(type_name)
+            self._key_specs[type_name] = spec
+            return spec
+
+    def _rel_endpoints(self, element_id: str, kr: KeyRel) -> tuple[str, ...]:
+        """Endpoint-id multiset for one relationship key, as a sorted tuple.
+
+        Exact relationship-type match (subtypes of ``kr.rel_type`` do not
+        count). ``out`` -> target ids of outgoing edges; ``in`` -> source ids of
+        incoming edges.
+        """
+        rels = self._model.relationships
+        if kr.direction == "out":
+            rel_ids = self.out_rels.get(element_id) or ()
+            endpoints = [
+                rels[r].target_id for r in rel_ids if rels[r].type_name == kr.rel_type
+            ]
+        else:
+            rel_ids = self.in_rels.get(element_id) or ()
+            endpoints = [
+                rels[r].source_id for r in rel_ids if rels[r].type_name == kr.rel_type
+            ]
+        return tuple(sorted(endpoints))
 
     def _containment(self, rel_type_name: str) -> bool:
         try:
@@ -336,6 +371,36 @@ class IndexSet:
         element = self._model.elements.get(element_id)
         if element is not None:
             self._rekey(element)
+
+    def _ensure_key_rel_types(self) -> None:
+        if self._out_key_rel_types is not None:
+            return
+        out: set[str] = set()
+        inn: set[str] = set()
+        mm = self._model.metamodel
+        for et in mm.elements:
+            spec = mm.effective_element_key_spec(et.name)
+            if spec is None:
+                continue
+            for kr in spec.relationships:
+                (out if kr.direction == "out" else inn).add(kr.rel_type)
+        self._out_key_rel_types = out
+        self._in_key_rel_types = inn
+
+    def _rekey_key_rel_endpoints(self, rel: Relationship) -> None:
+        """Rekey an edge's endpoints when its type participates in a key.
+
+        Endpoint ids are stable, so only the edge's own source/target need
+        rekeying — no cascade. Call AFTER adjacency is updated so the signature
+        reflects the post-mutation graph.
+        """
+        self._ensure_key_rel_types()
+        assert self._out_key_rel_types is not None  # set by _ensure_key_rel_types
+        assert self._in_key_rel_types is not None
+        if rel.type_name in self._out_key_rel_types:
+            self._rekey_if_present(rel.source_id)
+        if rel.type_name in self._in_key_rel_types:
+            self._rekey_if_present(rel.target_id)
 
     # -- internals: references ----------------------------------------------
 

@@ -587,3 +587,137 @@ def test_randomized_ops_match_rebuild():
             _assert_matches_rebuild(model)
     _assert_matches_rebuild(model)
     assert len(model.elements) > 0  # the run actually built something
+
+
+# ---------------------------------------------------------------------------
+# relationship keys in uniqueness signature
+# ---------------------------------------------------------------------------
+
+
+def _rel_key_mm() -> Metamodel:
+    return Metamodel(
+        elements=[
+            ElementType(
+                name="Person",
+                key=["name", "out:Knows"],
+                properties=[PropertyDef(name="name", datatype="string")],
+            ),
+        ],
+        relationships=[
+            RelationshipType(name="Knows", source="Person", target="Person"),
+        ],
+    )
+
+
+def _person(model: Model, name: str) -> Element:
+    el = model.create_element("Person")
+    model.set_property(el, "name", name)
+    return el
+
+
+def test_rel_key_same_name_no_edges_is_duplicate():
+    model = Model(_rel_key_mm())
+    _person(model, "Foo")
+    _person(model, "Foo")
+    assert len(model.indexes.duplicate_keys) == 1
+    model.indexes.verify_consistent()
+
+
+def test_rel_key_differing_endpoints_not_duplicate():
+    model = Model(_rel_key_mm())
+    a = _person(model, "Foo")
+    b = _person(model, "Foo")
+    c = _person(model, "C")
+    model.connect("Knows", a.id, c.id)  # a -> c, b has no edge
+    assert model.indexes.duplicate_keys == set()
+    model.indexes.verify_consistent()
+
+    model.connect("Knows", b.id, c.id)  # now both -> c
+    assert len(model.indexes.duplicate_keys) == 1
+    model.indexes.verify_consistent()
+
+
+def test_rel_key_multiset_count_matters():
+    model = Model(_rel_key_mm())
+    a = _person(model, "Foo")
+    b = _person(model, "Foo")
+    c = _person(model, "C")
+    model.connect("Knows", a.id, c.id)
+    model.connect("Knows", a.id, c.id)  # a -> c twice
+    model.connect("Knows", b.id, c.id)  # b -> c once
+    assert model.indexes.duplicate_keys == set()  # [c, c] != [c]
+    model.indexes.verify_consistent()
+
+    model.connect("Knows", b.id, c.id)  # b -> c twice -> matches
+    assert len(model.indexes.duplicate_keys) == 1
+    model.indexes.verify_consistent()
+
+
+def test_rel_key_disconnect_restores_duplicate():
+    model = Model(_rel_key_mm())
+    a = _person(model, "Foo")
+    _person(model, "Foo")  # second Foo: a duplicate once a's edge is gone
+    c = _person(model, "C")
+    rel = model.connect("Knows", a.id, c.id)
+    assert model.indexes.duplicate_keys == set()
+    model.disconnect(rel.id)
+    assert len(model.indexes.duplicate_keys) == 1  # back to {a, b} both edgeless
+    model.indexes.verify_consistent()
+
+
+def test_in_direction_key_groups_by_incoming():
+    mm = Metamodel(
+        elements=[
+            ElementType(
+                name="Person",
+                key=["name", "in:Knows"],
+                properties=[PropertyDef(name="name", datatype="string")],
+            ),
+        ],
+        relationships=[RelationshipType(name="Knows", source="Person", target="Person")],
+    )
+    model = Model(mm)
+    a = _person(model, "Foo")
+    b = _person(model, "Foo")
+    src = _person(model, "S")
+    model.connect("Knows", src.id, a.id)  # a has incoming, b does not
+    assert model.indexes.duplicate_keys == set()
+    model.connect("Knows", src.id, b.id)
+    assert len(model.indexes.duplicate_keys) == 1
+    model.indexes.verify_consistent()
+
+
+def test_rel_key_exact_type_match_ignores_subtype_edges():
+    # An out:Knows key counts edges of EXACTLY type Knows; a KnowsWell edge
+    # (a subtype of Knows) does not contribute to the multiset.
+    mm = Metamodel(
+        elements=[
+            ElementType(
+                name="Person",
+                key=["name", "out:Knows"],
+                properties=[PropertyDef(name="name", datatype="string")],
+            ),
+        ],
+        relationships=[
+            RelationshipType(name="Knows", source="Person", target="Person"),
+            RelationshipType(
+                name="KnowsWell",
+                extends="Knows",
+                source="Person",
+                target="Person",
+            ),
+        ],
+    )
+    model = Model(mm)
+    a = _person(model, "Foo")
+    _person(model, "Foo")
+    c = _person(model, "C")
+    # subtype edge does not count -> a and b both have an empty Knows multiset
+    model.connect("KnowsWell", a.id, c.id)
+    assert len(model.indexes.duplicate_keys) == 1
+    model.indexes.verify_consistent()
+
+    # an exact Knows edge does count -> a now differs from b
+    model.connect("Knows", a.id, c.id)
+    assert model.indexes.duplicate_keys == set()
+    model.indexes.verify_consistent()
