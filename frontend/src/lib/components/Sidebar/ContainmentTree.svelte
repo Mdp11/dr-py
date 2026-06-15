@@ -166,7 +166,8 @@
 		if (browser) localStorage.setItem(LS_POOL_RATIO, String(poolRatio));
 	});
 
-	let loadSeq = 0;
+	let rootsSeq = 0;
+	let excludedSeq = 0;
 	// Child levels are fetched independently of the roots page (see the prefetch
 	// effect): `childLoadSeq` bumps whenever a structural delta or model swap
 	// invalidates them, so an in-flight child fetch that lands afterwards is
@@ -181,12 +182,12 @@
 	async function refreshRoots(seq: number, limit: number): Promise<void> {
 		try {
 			const page = await listContainmentRootsPaged(limit);
-			if (seq !== loadSeq) return;
+			if (seq !== rootsSeq) return;
 			seedElements(page.items.map((i) => i.element));
 			roots = page.items;
 			rootsTotal = page.total;
 		} catch (err) {
-			if (seq === loadSeq) console.error('Containment tree load failed', err);
+			if (seq === rootsSeq) console.error('Containment tree load failed', err);
 		}
 	}
 
@@ -220,12 +221,12 @@
 	async function refreshExcluded(seq: number, limit: number): Promise<void> {
 		try {
 			const page = await listExcludedRootsPaged(limit);
-			if (seq !== loadSeq) return;
+			if (seq !== excludedSeq) return;
 			seedElements(page.items.map((i) => i.element));
 			excludedRoots = page.items;
 			excludedTotal = page.total;
 		} catch (err) {
-			if (seq === loadSeq) console.error('Excluded pool load failed', err);
+			if (seq === excludedSeq) console.error('Excluded pool load failed', err);
 		}
 	}
 
@@ -248,20 +249,20 @@
 		excludedLimit = PAGE_LIMIT;
 	});
 
+	// Roots page: refetched on structural deltas / model swap and grown by the
+	// roots scroll auto-load. Deliberately does NOT depend on `poolCollapsed` — the
+	// excluded pool's collapse state must never cost an in-view roots refetch.
 	$effect(() => {
 		void getStructureRev(); // tracked: refetch on every STRUCTURAL acked delta
 		void getModelGeneration(); // tracked: refetch on model swap/reset
+		void view; // tracked: preserve refetch-on-view-change (prior behavior)
 		const loaded = hasModel;
-		const v = view; // tracked: fetch the excluded pool only in view mode
 		const limit = rootsLimit; // tracked: roots auto-load page size
-		const exLimit = excludedLimit; // tracked: auto-load growth of the pool
-		const seq = ++loadSeq;
+		const seq = ++rootsSeq;
 		if (!loaded) {
 			untrack(() => {
 				roots = [];
 				rootsTotal = 0;
-				excludedRoots = [];
-				excludedTotal = 0;
 				childLevels.clear();
 				childTotals.clear();
 				if (expandedElements.size > 0) expandedElements.clear();
@@ -269,17 +270,29 @@
 			return;
 		}
 		void refreshRoots(seq, limit);
-		// The excluded pool fetches ONLY while the panel is expanded — a collapsed
-		// pool renders nothing, so honoring "no fetch while collapsed" means not
-		// even loading the first page. Reading `poolCollapsed` here makes expanding
-		// the panel re-run this effect and trigger the load. Collapsing clears the
-		// loaded rows (the body is unmounted anyway); re-expanding refetches.
-		if (v !== null && !poolCollapsed) void refreshExcluded(seq, exLimit);
-		else
+	});
+
+	// Excluded pool: fetched ONLY in view mode AND while the panel is expanded — a
+	// collapsed pool renders nothing, so "no fetch while collapsed" means not even
+	// loading the first page. Reading `poolCollapsed` makes expanding the panel
+	// re-run this effect and trigger the load; collapsing clears the loaded rows
+	// (the body is unmounted anyway) and re-expanding refetches.
+	$effect(() => {
+		void getStructureRev();
+		void getModelGeneration();
+		const loaded = hasModel;
+		const v = view;
+		const exLimit = excludedLimit; // tracked: pool scroll auto-load growth
+		const collapsed = poolCollapsed; // tracked: expand triggers the fetch
+		const seq = ++excludedSeq;
+		if (!loaded || v === null || collapsed) {
 			untrack(() => {
 				excludedRoots = [];
 				excludedTotal = 0;
 			});
+			return;
+		}
+		void refreshExcluded(seq, exLimit);
 	});
 
 	// Child levels are no longer refetched by the roots effect (expanding a row
