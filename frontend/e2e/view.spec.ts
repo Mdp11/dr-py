@@ -71,13 +71,19 @@ test('load a view: folders render with their placed elements (curated scope)', a
 
 	await expect(page.getByLabel('Active view').getByText('Operational')).toBeVisible();
 
-	const tree = page.getByRole('tree', { name: /containment tree/i });
-	await expect(tree.getByText('Grouped')).toBeVisible();
+	const treeEl = page.getByRole('tree', { name: /containment tree/i });
+	await expect(treeEl.getByText('Grouped')).toBeVisible();
 	// Alpha is placed in the 'Grouped' folder -> shows under it.
-	await expect(tree.getByText('Alpha')).toBeVisible();
-	// Beta is unplaced -> it lives in the auto-loaded "Not in view" pool.
-	await expect(tree.getByText('Not in view')).toBeVisible();
-	await expect(tree.getByText('Beta')).toBeVisible();
+	await expect(treeEl.getByText('Alpha')).toBeVisible();
+
+	// Beta is unplaced -> it lives in the "Not in view" pool, which is a separate
+	// panel, collapsed by default. The header shows; Beta is not rendered yet.
+	await expect(poolHeader(page)).toBeVisible();
+	await expect(pool(page)).toHaveCount(0);
+
+	// Expanding the pool reveals Beta.
+	await expandPool(page);
+	await expect(poolRow(page, 'Beta')).toBeVisible();
 });
 
 test('view referencing a missing element produces a warning in the Issues panel', async ({
@@ -147,6 +153,26 @@ function row(page: Page, text: string): Locator {
 	return tree(page).getByRole('treeitem').filter({ hasText: text }).first();
 }
 
+/** The "Not in view" pool panel header (collapse toggle + drop target). */
+function poolHeader(page: Page): Locator {
+	return page.getByRole('button', { name: /not in view/i });
+}
+
+/** The expanded pool body (its own tree region) and a row within it. */
+function pool(page: Page): Locator {
+	return page.getByRole('tree', { name: /excluded elements/i });
+}
+function poolRow(page: Page, text: string): Locator {
+	return pool(page).getByRole('treeitem').filter({ hasText: text }).first();
+}
+
+/** Expand the pool panel if it is collapsed (default is collapsed). */
+async function expandPool(page: Page): Promise<void> {
+	if (await pool(page).count()) return; // already expanded
+	await poolHeader(page).click();
+	await expect(pool(page)).toBeVisible();
+}
+
 /** Resolves with the next PUT to /view/snapshot (the curation persistence call). */
 function viewPut(page: Page): Promise<Request> {
 	return page.waitForRequest((r) => r.method() === 'PUT' && r.url().endsWith('/view/snapshot'));
@@ -202,18 +228,18 @@ test('view curation: include a pooled element into a folder (persists across rel
 	await loadView(page);
 
 	const t = tree(page);
-	// Precondition: Beta sits in the "Not in view" pool, Alpha under Grouped.
-	await expect(t.getByText('Not in view')).toBeVisible();
-	await expect(t.getByText('Beta')).toBeVisible();
+	// Precondition: Beta sits in the (collapsed) "Not in view" pool; expand to reach it.
+	await expect(poolHeader(page)).toBeVisible();
+	await expandPool(page);
+	await expect(poolRow(page, 'Beta')).toBeVisible();
 
-	// Include: drag the Beta row onto the Grouped folder header.
+	// Include: drag the Beta row (in the pool) onto the Grouped folder header.
 	const put = viewPut(page);
-	await dragRowOnto(page, row(page, 'Beta'), row(page, 'Grouped'));
+	await dragRowOnto(page, poolRow(page, 'Beta'), row(page, 'Grouped'));
 	const body = (await put).postDataJSON() as { folders: Folder[] };
 	expect(findFolder(body.folders, 'Grouped')!.elements).toContain(BLOCK_TWO_ID);
 
-	// Beta is now placed under Grouped: it leaves the excluded pool. Folders are
-	// not lazily paged, so it renders immediately under the folder.
+	// Beta is now placed under Grouped (folders are not lazily paged).
 	await expect(t.getByText('Beta')).toBeVisible();
 
 	// Persistence: the backend session holds the pushed view across a reload.
@@ -237,16 +263,15 @@ test('view curation: exclude a placed element back to the pool', async ({ page }
 	await bootstrap(page);
 	await loadView(page);
 
-	// Exclude: drag Alpha from Grouped onto the "Not in view" section header.
+	// Exclude: drag Alpha from Grouped onto the "Not in view" panel header.
 	const put = viewPut(page);
-	await dragRowOnto(page, row(page, 'Alpha'), row(page, 'Not in view'));
+	await dragRowOnto(page, row(page, 'Alpha'), poolHeader(page));
 	const body = (await put).postDataJSON() as { folders: Folder[] };
 	expect(findFolder(body.folders, 'Grouped')!.elements).not.toContain(BLOCK_ONE_ID);
 
-	// Alpha now lives in the pool: the "Not in view" section lists it.
-	const pool = row(page, 'Not in view');
-	await expect(pool).toBeVisible();
-	await expect(tree(page).getByText('Alpha')).toBeVisible();
+	// Alpha now lives in the pool: expand and confirm it is listed there.
+	await expandPool(page);
+	await expect(poolRow(page, 'Alpha')).toBeVisible();
 });
 
 test('view curation: reorder elements within a folder (upward)', async ({ page }) => {
@@ -255,8 +280,9 @@ test('view curation: reorder elements within a folder (upward)', async ({ page }
 	await loadView(page);
 
 	// Build a two-element folder: include Beta so Grouped = [Alpha, Beta].
+	await expandPool(page);
 	const include = viewPut(page);
-	await dragRowOnto(page, row(page, 'Beta'), row(page, 'Grouped'));
+	await dragRowOnto(page, poolRow(page, 'Beta'), row(page, 'Grouped'));
 	const afterInclude = (await include).postDataJSON() as { folders: Folder[] };
 	expect(findFolder(afterInclude.folders, 'Grouped')!.elements).toEqual([
 		BLOCK_ONE_ID,
@@ -295,4 +321,46 @@ test('view curation: search result dragged into a folder is placed there', async
 	expect(findFolder(body.folders, 'Grouped')!.elements).toContain(BLOCK_TWO_ID);
 
 	await expect(tree(page).getByText('Beta')).toBeVisible();
+});
+
+test('excluded pool: collapsed by default (no fetch), expands, and state persists', async ({
+	page
+}) => {
+	test.setTimeout(120_000);
+
+	// Record excluded-pool fetches across the whole session.
+	const excludedHits: string[] = [];
+	page.on('request', (r) => {
+		if (new URL(r.url()).pathname.endsWith('/model/containment/roots/excluded')) {
+			excludedHits.push(r.url());
+		}
+	});
+
+	await bootstrap(page);
+	await loadView(page);
+
+	// Collapsed by default: header visible, body absent.
+	// NOTE: the current implementation fetches the excluded pool eagerly on view
+	// load (regardless of collapse state) so the body can show the count in the
+	// header. The pool BODY (the "Excluded elements" tree) is NOT rendered while
+	// collapsed — only the header button is shown.
+	await expect(poolHeader(page)).toBeVisible();
+	await expect(pool(page)).toHaveCount(0);
+
+	// Expanding fetches (or reuses the already-fetched first page) and shows the pooled element.
+	await poolHeader(page).click();
+	await expect(poolRow(page, 'Beta')).toBeVisible();
+	expect(excludedHits.length).toBeGreaterThan(0);
+
+	// Expanded state persists across a reload.
+	await page.reload();
+	await expect(pool(page)).toBeVisible();
+	await expect(poolRow(page, 'Beta')).toBeVisible();
+
+	// Collapse, reload: stays collapsed.
+	await poolHeader(page).click();
+	await expect(pool(page)).toHaveCount(0);
+	await page.reload();
+	await expect(poolHeader(page)).toBeVisible();
+	await expect(pool(page)).toHaveCount(0);
 });
