@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
+	import { browser } from '$app/environment';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 	import type { ContainmentItem, Element } from '$lib/api/types';
 	import {
@@ -34,11 +35,17 @@
 		setTypeFilter,
 		toggleType
 	} from '$lib/state';
-	import { Filter, FolderPlus, Plus } from '@lucide/svelte';
+	import { ChevronDown, ChevronRight, Filter, FolderPlus, Plus } from '@lucide/svelte';
 	import { elementDisplayName as displayName } from '$lib/util/element-name';
 	import StereotypePicker from './StereotypePicker.svelte';
 	import TreeRow from './TreeRow.svelte';
-	import { computeWindow, edgeScrollDelta, shouldLoadMore } from './windowing';
+	import VerticalSplit from './VerticalSplit.svelte';
+	import {
+		computeWindow,
+		edgeScrollDelta,
+		shouldLoadMore,
+		shouldLoadMoreExcluded
+	} from './windowing';
 	import {
 		beginDrag,
 		endDrag,
@@ -47,16 +54,17 @@
 		isMovableBypassed
 	} from '$lib/state/tree-drag.svelte';
 	import {
-		appendExcludedSection,
 		buildUnifiedTree,
 		canDropElement,
 		canDropFolder,
 		computeVisibility,
+		EXCLUDED_SECTION_KEY,
 		flattenVisibleRows,
 		folderPathFromKey,
 		isExcludedSectionKey,
 		isFolderKey,
 		movableElementIds,
+		registerExcludedRoots,
 		resolveElementDrop,
 		VIEW_ROOT_DROP_KEY,
 		type DndContext,
@@ -133,6 +141,30 @@
 	/** Folder keys the user collapsed (folders default to expanded — they are
 	 * client-side view data, not paged). */
 	const collapsedFolders = new SvelteSet<string>();
+
+	// ----- excluded-pool panel (collapsed-by-default, resizable) -----
+	const LS_POOL_COLLAPSED = 'ui.treePoolCollapsed';
+	const LS_POOL_RATIO = 'ui.treePoolRatio';
+
+	function readPoolCollapsed(): boolean {
+		if (!browser) return true; // default collapsed
+		return localStorage.getItem(LS_POOL_COLLAPSED) !== 'false';
+	}
+	function readPoolRatio(): number {
+		if (!browser) return 0.5;
+		const n = Number(localStorage.getItem(LS_POOL_RATIO));
+		return Number.isFinite(n) && n > 0 && n < 1 ? n : 0.5;
+	}
+
+	let poolCollapsed = $state(readPoolCollapsed());
+	let poolRatio = $state(readPoolRatio());
+
+	$effect(() => {
+		if (browser) localStorage.setItem(LS_POOL_COLLAPSED, String(poolCollapsed));
+	});
+	$effect(() => {
+		if (browser) localStorage.setItem(LS_POOL_RATIO, String(poolRatio));
+	});
 
 	let loadSeq = 0;
 	// Child levels are fetched independently of the roots page (see the prefetch
@@ -309,7 +341,7 @@
 			displayName
 		);
 		if (view !== null) {
-			appendExcludedSection(
+			registerExcludedRoots(
 				t,
 				excludedRoots.map((i) => i.element.id)
 			);
@@ -368,78 +400,114 @@
 		else expandedElements.add(key);
 	}
 
-	const visibleRows = $derived<FlatRow[]>(flattenVisibleRows(tree, visibility, collapsedSet));
+	const treeVisibleRows = $derived<FlatRow[]>(
+		flattenVisibleRows(tree, visibility, collapsedSet, tree.roots)
+	);
+	const poolVisibleRows = $derived<FlatRow[]>(
+		flattenVisibleRows(tree, visibility, collapsedSet, tree.excludedRoots)
+	);
 
 	// ----- virtualized windowing -----
 
 	const ROW_H = 24;
 	const OVERSCAN = 8;
 
-	let scrollEl: HTMLElement | null = $state(null);
-	let scrollTop = $state(0);
-	let viewportH = $state(0);
+	let treeScrollEl: HTMLElement | null = $state(null);
+	let treeScrollTop = $state(0);
+	let treeViewportH = $state(0);
+	let poolScrollEl: HTMLElement | null = $state(null);
+	let poolScrollTop = $state(0);
+	let poolViewportH = $state(0);
 
-	const windowSlice = $derived(
+	const treeWindow = $derived(
 		computeWindow({
-			scrollTop,
-			viewportH,
+			scrollTop: treeScrollTop,
+			viewportH: treeViewportH,
 			rowH: ROW_H,
-			total: visibleRows.length,
+			total: treeVisibleRows.length,
 			overscan: OVERSCAN
 		})
 	);
-	const windowedRows = $derived(visibleRows.slice(windowSlice.start, windowSlice.end));
+	const treeWindowedRows = $derived(treeVisibleRows.slice(treeWindow.start, treeWindow.end));
 
-	// Auto-load the next page when the mounted window nears the last loaded row.
-	// The window end is in `visibleRows` coordinates, so compare against the real
-	// loaded-row count (the pool's loaded rows sit at the tail of `visibleRows`),
-	// NOT against `excludedRoots.length` directly (different coordinate space).
+	const poolWindow = $derived(
+		computeWindow({
+			scrollTop: poolScrollTop,
+			viewportH: poolViewportH,
+			rowH: ROW_H,
+			total: poolVisibleRows.length,
+			overscan: OVERSCAN
+		})
+	);
+	const poolWindowedRows = $derived(poolVisibleRows.slice(poolWindow.start, poolWindow.end));
+
+	// Combined on-screen rows across both panels — drives the body fetch and child
+	// prefetch so either viewport's visible rows are hydrated.
+	const windowedRows = $derived([...treeWindowedRows, ...poolWindowedRows]);
+
+	// Auto-load the next page when a panel's mounted window nears its last loaded
+	// row. Each panel pages independently against its OWN window/visible-rows
+	// (tree roots use the tree window; the excluded pool uses the pool window).
 	//
 	// `loadAhead` is roughly one screenful of rows, so the fetch fires about a
 	// viewport BEFORE the user hits the bottom — the next page is usually already
 	// in by the time they reach it, keeping the lazy load invisible.
 	$effect(() => {
-		const end = windowSlice.end;
-		const loaded = visibleRows.length;
-		const loadAhead = Math.ceil(viewportH / ROW_H) + OVERSCAN * 2;
+		const loadAheadTree = Math.ceil(treeViewportH / ROW_H) + OVERSCAN * 2;
 		if (view !== null) {
+			// Pool paging: gate on the panel being expanded AND sized — a collapsed or
+			// zero-height pool can never have a row on screen, so it must not page.
+			const loadAheadPool = Math.ceil(poolViewportH / ROW_H) + OVERSCAN * 2;
 			const remaining = excludedTotal - excludedRoots.length;
 			if (
-				shouldLoadMore({
-					windowEnd: end,
-					loadedCount: loaded,
-					total: loaded + remaining,
-					threshold: loadAhead
+				shouldLoadMoreExcluded({
+					sectionCollapsed: poolCollapsed || poolViewportH === 0,
+					windowEnd: poolWindow.end,
+					loadedCount: poolVisibleRows.length,
+					total: poolVisibleRows.length + remaining,
+					threshold: loadAheadPool
 				})
 			) {
 				excludedLimit = excludedRoots.length + PAGE_LIMIT;
 			}
-		} else {
-			const remaining = rootsTotal - roots.length;
-			if (
-				shouldLoadMore({
-					windowEnd: end,
-					loadedCount: loaded,
-					total: loaded + remaining,
-					threshold: loadAhead
-				})
-			) {
-				rootsLimit = roots.length + PAGE_LIMIT;
-			}
+		}
+		// In-view roots paging (both view and no-view modes use the tree window).
+		const remainingRoots = rootsTotal - roots.length;
+		if (
+			shouldLoadMore({
+				windowEnd: treeWindow.end,
+				loadedCount: treeVisibleRows.length,
+				total: treeVisibleRows.length + remainingRoots,
+				threshold: loadAheadTree
+			})
+		) {
+			rootsLimit = roots.length + PAGE_LIMIT;
 		}
 	});
 
-	function onScroll(): void {
-		if (scrollEl) scrollTop = scrollEl.scrollTop;
+	function onTreeScroll(): void {
+		if (treeScrollEl) treeScrollTop = treeScrollEl.scrollTop;
+	}
+	function onPoolScroll(): void {
+		if (poolScrollEl) poolScrollTop = poolScrollEl.scrollTop;
 	}
 
 	$effect(() => {
-		if (!scrollEl) return;
-		viewportH = scrollEl.clientHeight;
+		if (!treeScrollEl) return;
+		treeViewportH = treeScrollEl.clientHeight;
 		const ro = new ResizeObserver(() => {
-			if (scrollEl) viewportH = scrollEl.clientHeight;
+			if (treeScrollEl) treeViewportH = treeScrollEl.clientHeight;
 		});
-		ro.observe(scrollEl);
+		ro.observe(treeScrollEl);
+		return () => ro.disconnect();
+	});
+	$effect(() => {
+		if (!poolScrollEl) return;
+		poolViewportH = poolScrollEl.clientHeight;
+		const ro = new ResizeObserver(() => {
+			if (poolScrollEl) poolViewportH = poolScrollEl.clientHeight;
+		});
+		ro.observe(poolScrollEl);
 		return () => ro.disconnect();
 	});
 
@@ -502,44 +570,44 @@
 
 	const focusedIndex = $derived.by(() => {
 		if (focusedId === null) return -1;
-		return visibleRows.findIndex((r) => r.key === focusedId);
+		return treeVisibleRows.findIndex((r) => r.key === focusedId);
 	});
 
 	function moveTo(idx: number): void {
-		if (idx < 0 || idx >= visibleRows.length) return;
-		focusedId = visibleRows[idx].key;
+		if (idx < 0 || idx >= treeVisibleRows.length) return;
+		focusedId = treeVisibleRows[idx].key;
 		scrollRowIntoView(idx);
 	}
 
 	// Under windowing the focused row may not be mounted; keep it in view so the
 	// focus ring stays visible and the row exists in the DOM for assistive tech.
 	function scrollRowIntoView(idx: number): void {
-		if (scrollEl === null) return;
+		if (treeScrollEl === null) return;
 		const top = idx * ROW_H;
 		const bottom = top + ROW_H;
-		if (top < scrollEl.scrollTop) scrollEl.scrollTop = top;
-		else if (bottom > scrollEl.scrollTop + scrollEl.clientHeight) {
-			scrollEl.scrollTop = bottom - scrollEl.clientHeight;
+		if (top < treeScrollEl.scrollTop) treeScrollEl.scrollTop = top;
+		else if (bottom > treeScrollEl.scrollTop + treeScrollEl.clientHeight) {
+			treeScrollEl.scrollTop = bottom - treeScrollEl.clientHeight;
 		}
-		scrollTop = scrollEl.scrollTop;
+		treeScrollTop = treeScrollEl.scrollTop;
 	}
 
 	function onKeyDown(e: KeyboardEvent): void {
-		if (visibleRows.length === 0) return;
+		if (treeVisibleRows.length === 0) return;
 		const cur = focusedIndex;
 		const k = e.key;
 		if (k === 'ArrowDown') {
 			e.preventDefault();
 			if (cur < 0) moveTo(0);
-			else moveTo(Math.min(visibleRows.length - 1, cur + 1));
+			else moveTo(Math.min(treeVisibleRows.length - 1, cur + 1));
 		} else if (k === 'ArrowUp') {
 			e.preventDefault();
-			if (cur < 0) moveTo(visibleRows.length - 1);
+			if (cur < 0) moveTo(treeVisibleRows.length - 1);
 			else moveTo(Math.max(0, cur - 1));
 		} else if (k === 'ArrowRight') {
 			if (cur < 0) return;
 			e.preventDefault();
-			const row = visibleRows[cur];
+			const row = treeVisibleRows[cur];
 			if (!isExpandable(row.key)) return;
 			if (isCollapsedKey(row.key)) {
 				setCollapsed(row.key, false);
@@ -550,17 +618,17 @@
 		} else if (k === 'ArrowLeft') {
 			if (cur < 0) return;
 			e.preventDefault();
-			const row = visibleRows[cur];
+			const row = treeVisibleRows[cur];
 			if (isExpandable(row.key) && !isCollapsedKey(row.key)) {
 				setCollapsed(row.key, true);
 			} else if (row.parent !== null) {
-				const pIdx = visibleRows.findIndex((r) => r.key === row.parent);
+				const pIdx = treeVisibleRows.findIndex((r) => r.key === row.parent);
 				if (pIdx >= 0) moveTo(pIdx);
 			}
 		} else if (k === 'Enter' || k === ' ') {
 			if (cur < 0) return;
 			e.preventDefault();
-			const row = visibleRows[cur];
+			const row = treeVisibleRows[cur];
 			if (!isFolderKey(row.key)) {
 				replaceMultiSelected([row.key]);
 				anchorId = row.key;
@@ -570,7 +638,7 @@
 	}
 
 	$effect(() => {
-		if (selection?.kind === 'element' && visibleRows.some((r) => r.key === selection.id)) {
+		if (selection?.kind === 'element' && treeVisibleRows.some((r) => r.key === selection.id)) {
 			focusedId = selection.id;
 		}
 	});
@@ -595,7 +663,7 @@
 			return;
 		}
 		if (e.shiftKey && anchorId !== null) {
-			const keys = visibleRows.map((r) => r.key);
+			const keys = treeVisibleRows.map((r) => r.key);
 			const a = keys.indexOf(anchorId);
 			const b = keys.indexOf(key);
 			if (a >= 0 && b >= 0) {
@@ -787,10 +855,21 @@
 		if (dragging && autoScrollRaf === 0) autoScrollRaf = requestAnimationFrame(tickAutoScroll);
 	}
 
+	function viewportUnder(y: number): HTMLElement | null {
+		for (const vp of [treeScrollEl, poolScrollEl]) {
+			if (!vp) continue;
+			const r = vp.getBoundingClientRect();
+			if (y >= r.top && y <= r.bottom) return vp;
+		}
+		return null;
+	}
+
 	function tickAutoScroll(): void {
 		autoScrollRaf = 0;
-		if (!dragging || scrollEl === null) return;
-		const rect = scrollEl.getBoundingClientRect();
+		if (!dragging) return;
+		const vp = viewportUnder(lastPointerY) ?? treeScrollEl;
+		if (vp === null) return;
+		const rect = vp.getBoundingClientRect();
 		const dy = edgeScrollDelta({
 			pointerY: lastPointerY,
 			top: rect.top,
@@ -799,8 +878,9 @@
 			maxSpeed: MAX_SCROLL_SPEED
 		});
 		if (dy !== 0) {
-			scrollEl.scrollTop += dy;
-			scrollTop = scrollEl.scrollTop;
+			vp.scrollTop += dy;
+			if (vp === treeScrollEl) treeScrollTop = vp.scrollTop;
+			else poolScrollTop = vp.scrollTop;
 			const t = dropTargetAt(lastPointerX, lastPointerY);
 			dragHoverKey = t?.key ?? null;
 			dragHoverValid = t !== null && dropAllowed(t.path);
@@ -930,7 +1010,7 @@
 	}
 </script>
 
-<div class="flex min-h-0 flex-1 flex-col">
+<div class="flex min-h-0 flex-1 flex-col" onclickcapture={onTreeClickCapture}>
 	<div class="flex items-center justify-between gap-2 px-3 pt-2">
 		<h2 class="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Tree</h2>
 		{#if mm !== null}
@@ -990,40 +1070,107 @@
 			</div>
 		{/if}
 	</div>
-	<div
-		bind:this={scrollEl}
-		class="min-h-0 flex-1 overflow-auto px-3 py-2 outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500"
-		tabindex="0"
-		role="tree"
-		aria-label="Containment tree"
-		onkeydown={onKeyDown}
-		onclickcapture={onTreeClickCapture}
-		onscroll={onScroll}
-	>
-		{#if mm === null}
-			<p class="text-xs text-zinc-600">Load a metamodel and model to begin.</p>
-		{:else if (summary?.element_count ?? 0) === 0 && tree.roots.length === 0}
-			<p class="text-xs text-zinc-600">Model is empty.</p>
-		{:else}
-			{#if view !== null && draggingPayload !== null}
-				<div
-					role="button"
-					tabindex="-1"
-					aria-label="Move to top level"
-					class="mb-1 rounded border border-dashed border-zinc-700 px-2 py-1 text-[10px] text-zinc-500"
-					class:border-emerald-500={isViewRootHover && dragHoverValid}
-					class:text-emerald-400={isViewRootHover && dragHoverValid}
-					class:border-red-500={isViewRootHover && !dragHoverValid}
-					data-drop-key={VIEW_ROOT_DROP_KEY}
-					data-drop-kind="section"
-					data-drop-path="null"
-				>
-					Drop here to move to top level
-				</div>
+	{#snippet treeViewport()}
+		<div
+			bind:this={treeScrollEl}
+			class="h-full min-h-0 overflow-auto px-3 py-2 outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500"
+			tabindex="0"
+			role="tree"
+			aria-label="Containment tree"
+			onkeydown={onKeyDown}
+			onscroll={onTreeScroll}
+		>
+			{#if mm === null}
+				<p class="text-xs text-zinc-600">Load a metamodel and model to begin.</p>
+			{:else if (summary?.element_count ?? 0) === 0 && tree.roots.length === 0}
+				<p class="text-xs text-zinc-600">Model is empty.</p>
+			{:else}
+				{#if view !== null && draggingPayload !== null}
+					<div
+						role="button"
+						tabindex="-1"
+						aria-label="Move to top level"
+						class="mb-1 rounded border border-dashed border-zinc-700 px-2 py-1 text-[10px] text-zinc-500"
+						class:border-emerald-500={isViewRootHover && dragHoverValid}
+						class:text-emerald-400={isViewRootHover && dragHoverValid}
+						class:border-red-500={isViewRootHover && !dragHoverValid}
+						data-drop-key={VIEW_ROOT_DROP_KEY}
+						data-drop-kind="section"
+						data-drop-path="null"
+					>
+						Drop here to move to top level
+					</div>
+				{/if}
+				<div style="height: {treeWindow.padTop}px"></div>
+				<ul class="flex flex-col text-xs" role="group">
+					{#each treeWindowedRows as row (row.key)}
+						<TreeRow
+							{row}
+							{tree}
+							{elementsById}
+							{visibility}
+							collapsed={collapsedSet}
+							{childCounts}
+							{excludedTotal}
+							{folderOptions}
+							{warningsByElementId}
+							{issueIndex}
+							selectedId={selection?.kind === 'element' ? selection.id : null}
+							multiSelectedIds={multiSelected}
+							{focusedId}
+							parentFolderPath={dropParentFolderPath(row)}
+							siblingIndex={dropSiblingIndex(row)}
+							folderLen={dropFolderLen(row)}
+							movable={movableIds.has(row.key)}
+							dnd={dndContext}
+							onToggle={toggleCollapsed}
+							{onPick}
+							{onMoveToFolder}
+						/>
+					{/each}
+				</ul>
+				<div style="height: {treeWindow.padBottom}px"></div>
 			{/if}
-			<div style="height: {windowSlice.padTop}px"></div>
+		</div>
+	{/snippet}
+
+	{#snippet poolHeader()}
+		<button
+			type="button"
+			class="flex h-full w-full select-none items-center gap-1 border-t border-zinc-800 px-3 text-[10px] font-semibold uppercase tracking-wider text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300"
+			class:bg-zinc-800={dragHoverKey === EXCLUDED_SECTION_KEY}
+			class:ring-1={dragHoverKey === EXCLUDED_SECTION_KEY}
+			class:ring-emerald-500={dragHoverKey === EXCLUDED_SECTION_KEY && dragHoverValid}
+			class:ring-red-500={dragHoverKey === EXCLUDED_SECTION_KEY && !dragHoverValid}
+			data-drop-key={EXCLUDED_SECTION_KEY}
+			data-drop-kind="section"
+			data-drop-path="null"
+			onclick={() => (poolCollapsed = !poolCollapsed)}
+		>
+			{#if poolCollapsed}
+				<ChevronRight class="h-3 w-3" />
+			{:else}
+				<ChevronDown class="h-3 w-3" />
+			{/if}
+			<span class="flex-1 text-left">Not in view</span>
+			<span class="font-mono text-[10px] normal-case text-zinc-500">{excludedTotal}</span>
+		</button>
+	{/snippet}
+
+	{#snippet poolBody()}
+		<div
+			bind:this={poolScrollEl}
+			class="h-full min-h-0 overflow-auto px-3 py-1"
+			role="tree"
+			aria-label="Excluded elements"
+			onscroll={onPoolScroll}
+			data-drop-key={EXCLUDED_SECTION_KEY}
+			data-drop-kind="section"
+			data-drop-path="null"
+		>
+			<div style="height: {poolWindow.padTop}px"></div>
 			<ul class="flex flex-col text-xs" role="group">
-				{#each windowedRows as row (row.key)}
+				{#each poolWindowedRows as row (row.key)}
 					<TreeRow
 						{row}
 						{tree}
@@ -1049,9 +1196,21 @@
 					/>
 				{/each}
 			</ul>
-			<div style="height: {windowSlice.padBottom}px"></div>
-		{/if}
-	</div>
+			<div style="height: {poolWindow.padBottom}px"></div>
+		</div>
+	{/snippet}
+
+	{#if view !== null}
+		<VerticalSplit
+			bind:collapsed={poolCollapsed}
+			bind:ratio={poolRatio}
+			top={treeViewport}
+			header={poolHeader}
+			body={poolBody}
+		/>
+	{:else}
+		{@render treeViewport()}
+	{/if}
 
 	{#if dragging && dragLabel !== ''}
 		<!-- Floating drag preview following the cursor (pointer-events DnD has no
