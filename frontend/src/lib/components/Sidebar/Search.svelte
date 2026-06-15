@@ -2,11 +2,13 @@
 	import { Input } from '$lib/components/ui/input';
 	import {
 		getSearchText,
+		getView,
 		seedElements,
 		select,
 		setSearchDialogOpen,
 		setSearchText
 	} from '$lib/state';
+	import { beginDrag } from '$lib/state/tree-drag.svelte';
 	import { listElementsPage } from '$lib/api/model-read';
 	import type { Element } from '$lib/api/types';
 	import { SlidersHorizontal } from '@lucide/svelte';
@@ -77,6 +79,31 @@
 		isOpen = false;
 	}
 
+	const DRAG_THRESHOLD_PX = 4;
+	function onResultPointerDown(e: PointerEvent, id: string): void {
+		if (e.button !== 0 || !e.isPrimary) return;
+		if (getView() === null) return; // no active view => nowhere to drop; plain click
+		const sx = e.clientX;
+		const sy = e.clientY;
+		let started = false;
+		const move = (ev: PointerEvent): void => {
+			if (started) return;
+			if (Math.hypot(ev.clientX - sx, ev.clientY - sy) < DRAG_THRESHOLD_PX) return;
+			started = true;
+			beginDrag({ kind: 'element', ids: [id] }, true); // bypassMovable: search element
+			cleanup();
+		};
+		const up = (): void => cleanup();
+		function cleanup(): void {
+			window.removeEventListener('pointermove', move);
+			window.removeEventListener('pointerup', up);
+			window.removeEventListener('pointercancel', up);
+		}
+		window.addEventListener('pointermove', move);
+		window.addEventListener('pointerup', up);
+		window.addEventListener('pointercancel', up);
+	}
+
 	function onDocPointerDown(e: PointerEvent): void {
 		if (!isOpen) return;
 		const target = e.target as Node | null;
@@ -133,6 +160,8 @@
 							<button
 								type="button"
 								class="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+								style="touch-action: none"
+								onpointerdown={(e) => onResultPointerDown(e, el.id)}
 								onclick={() => onPick(el.id)}
 							>
 								<span class="truncate text-zinc-200">{elementDisplayName(el)}</span>

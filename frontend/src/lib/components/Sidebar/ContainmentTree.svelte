@@ -40,6 +40,13 @@
 	import TreeRow from './TreeRow.svelte';
 	import { computeWindow, edgeScrollDelta, shouldLoadMore } from './windowing';
 	import {
+		beginDrag,
+		endDrag,
+		getDragPayload,
+		isDragActive,
+		isMovableBypassed
+	} from '$lib/state/tree-drag.svelte';
+	import {
 		appendExcludedSection,
 		buildUnifiedTree,
 		canDropElement,
@@ -559,7 +566,7 @@
 	}
 
 	type DragPayload = { kind: 'element'; ids: string[] } | { kind: 'folder'; path: string[] };
-	let draggingPayload: DragPayload | null = $state(null);
+	const draggingPayload = $derived(getDragPayload());
 	let dragHoverKey: string | null = $state(null);
 	let dragHoverValid = $state(false);
 
@@ -570,6 +577,7 @@
 	let startX = 0;
 	let startY = 0;
 	let dragging = $state(false);
+	let externalDrag = $state(false);
 	let dragX = $state(0);
 	let dragY = $state(0);
 	// Edge auto-scroll: while dragging near a viewport edge, scroll the list so a
@@ -600,6 +608,12 @@
 	function dropAllowed(destPath: string[] | null): boolean {
 		if (draggingPayload === null) return false;
 		if (draggingPayload.kind === 'element') {
+			if (isMovableBypassed()) {
+				// search-originated: a KNOWN, uncontained element may be placed.
+				// Reject already-contained elements — placing one would persist a
+				// placement the render layer then skips (it would silently vanish).
+				return draggingPayload.ids.every((id) => knownIds.has(id) && !containedIds.has(id));
+			}
 			return canDropElement({ elementIds: draggingPayload.ids, movableIds, knownIds }).ok;
 		}
 		return canDropFolder({ sourcePath: draggingPayload.path, destParentPath: destPath ?? [] }).ok;
@@ -667,13 +681,14 @@
 	}
 
 	function onWindowPointerMove(e: PointerEvent): void {
-		if (pendingPayload === null || e.pointerId !== activePointerId) return;
+		if (!externalDrag && (pendingPayload === null || e.pointerId !== activePointerId)) return;
 		dragX = e.clientX;
 		dragY = e.clientY;
 		if (!dragging) {
+			if (pendingPayload === null) return; // in-tree threshold needs a pending payload
 			if (Math.hypot(e.clientX - startX, e.clientY - startY) < DRAG_THRESHOLD_PX) return;
 			dragging = true;
-			draggingPayload = pendingPayload;
+			beginDrag(pendingPayload);
 			document.body.style.userSelect = 'none'; // no text selection mid-drag
 		}
 		const target = dropTargetAt(e.clientX, e.clientY);
@@ -706,7 +721,7 @@
 	}
 
 	async function onWindowPointerUp(e: PointerEvent): Promise<void> {
-		if (e.pointerId !== activePointerId) return;
+		if (!externalDrag && e.pointerId !== activePointerId) return;
 		if (!dragging) {
 			endGesture();
 			return; // a plain click — let it select/toggle normally
@@ -739,6 +754,20 @@
 		if (e.key === 'Escape') endGesture();
 	}
 
+	// A drag started outside the tree (e.g. from Search) flips isDragActive without
+	// going through our onPointerDown. Adopt it so the tree's pointer handlers drive
+	// hover, edge auto-scroll and drop for it.
+	$effect(() => {
+		if (isDragActive() && pendingPayload === null && !dragging) {
+			externalDrag = true;
+			dragging = true;
+			window.addEventListener('pointermove', onWindowPointerMove);
+			window.addEventListener('pointerup', onWindowPointerUp);
+			window.addEventListener('pointercancel', onWindowPointerUp);
+			window.addEventListener('keydown', onWindowKeyDown);
+		}
+	});
+
 	function endGesture(): void {
 		if (autoScrollRaf !== 0) {
 			cancelAnimationFrame(autoScrollRaf);
@@ -747,7 +776,8 @@
 		pendingPayload = null;
 		activePointerId = null;
 		dragging = false;
-		draggingPayload = null;
+		externalDrag = false;
+		endDrag();
 		dragHoverKey = null;
 		dragHoverValid = false;
 		document.body.style.userSelect = '';
