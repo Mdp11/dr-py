@@ -37,6 +37,24 @@ def test_conforming_values_produce_no_issues():
     assert TypeConformanceValidator().validate(model, Scope.all()) == []
 
 
+def test_float_accepts_infinity_tokens():
+    model = _model()
+    el = model.create_element("Block")
+    model.set_property(el, "mass", "Infinity")
+    assert TypeConformanceValidator().validate(model, Scope.all()) == []
+    model.set_property(el, "mass", "-Infinity")
+    assert TypeConformanceValidator().validate(model, Scope.all()) == []
+
+
+def test_float_rejects_non_canonical_infinity_string():
+    model = _model()
+    el = model.create_element("Block")
+    model.set_property(el, "mass", "inf")
+    issues = TypeConformanceValidator().validate(model, Scope.all())
+    assert len(issues) == 1
+    assert el.id in issues[0].target_ids
+
+
 def test_wrong_primitive_type_is_error():
     model = _model()
     el = model.create_element("Block")

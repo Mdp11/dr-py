@@ -35,3 +35,38 @@ def test_no_values_defaults_to_string():
 
 def test_nulls_ignored():
     assert infer_datatype([None, 1, None]) == "integer"
+
+
+def test_integer_strings():
+    assert infer_datatype(["5", "10", "-3"]) == "integer"
+
+
+def test_float_strings():
+    assert infer_datatype(["2.5", "3.0", "-0.25"]) == "float"
+
+
+def test_mixed_int_and_float_strings_is_float():
+    assert infer_datatype(["5", "2.5"]) == "float"
+
+
+def test_mixed_native_and_string_numbers_is_float():
+    assert infer_datatype([5, "2.5"]) == "float"
+
+
+def test_numeric_and_plain_string_falls_back_to_string():
+    assert infer_datatype(["5", "abc"]) == "string"
+
+
+def test_infinity_tokens_are_float():
+    # "Infinity"/"-Infinity" are the canonical special float values.
+    assert infer_datatype(["Infinity", "-Infinity"]) == "float"
+    assert infer_datatype(["2.5", "Infinity"]) == "float"
+
+
+def test_non_canonical_infinity_and_nan_stay_string():
+    # only the exact "Infinity"/"-Infinity" tokens are special float values;
+    # other non-finite spellings cannot be represented in JSON, so they stay
+    # plain strings.
+    assert infer_datatype(["inf", "-inf"]) == "string"
+    assert infer_datatype(["nan", "NaN"]) == "string"
+    assert infer_datatype(["Infinity", "inf"]) == "string"  # mix -> string

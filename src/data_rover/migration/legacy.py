@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import uuid
 from dataclasses import dataclass, field
@@ -11,6 +12,7 @@ import yaml
 
 from data_rover.core.metamodel.check import check_metamodel
 from data_rover.core.metamodel.schema import (
+    FLOAT_INFINITIES,
     ElementType,
     Mapping,
     Metamodel,
@@ -32,12 +34,36 @@ DROP_PROPS = frozenset({"SourceDatabase", "debug_data"})
 _SYNTH_NS = uuid.uuid5(uuid.NAMESPACE_URL, "data-rover/migration/legacy")
 
 
+def _parse_number(text: str) -> int | float | None:
+    """Parse a numeric string to its natural Python number, or ``None``.
+
+    Integer-looking strings (``"5"``, ``"-3"``) yield ``int``; other finite
+    numeric strings (``"2.5"``) yield ``float``. Returns ``None`` for anything
+    non-numeric. Non-finite floats (``inf``/``nan``, however spelled) also
+    return ``None`` so such strings are left untouched: JSON has no infinity or
+    NaN literal and the API serializes models with ``allow_nan=False``, so a
+    leaked non-finite value would make the model unloadable.
+    """
+    try:
+        return int(text)
+    except (TypeError, ValueError):
+        pass
+    try:
+        value = float(text)
+    except (TypeError, ValueError):
+        return None
+    return value if math.isfinite(value) else None
+
+
 def infer_datatype(values: Iterable[Any]) -> str:
     """Infer a new-metamodel primitive datatype from observed scalar values.
 
     `None` values are ignored. Booleans are checked before integers (in Python
-    ``bool`` is a subclass of ``int``). A mix of int and float reads as float;
-    any other mix, or no values at all, falls back to ``string``.
+    ``bool`` is a subclass of ``int``). Numeric strings are read as the number
+    they represent (``"5"`` -> integer, ``"2.5"`` -> float), and the canonical
+    infinity tokens ``"Infinity"``/``"-Infinity"`` count as float. A mix of int
+    and float reads as float; any other mix, or no values at all, falls back to
+    ``string``.
     """
     observed: set[str] = set()
     for v in values:
@@ -50,7 +76,15 @@ def infer_datatype(values: Iterable[Any]) -> str:
         elif isinstance(v, float):
             observed.add("float")
         elif isinstance(v, str):
-            observed.add("date" if _ISO_DATE.match(v) else "string")
+            num = _parse_number(v)
+            if num is not None:
+                observed.add("integer" if isinstance(num, int) else "float")
+            elif v in FLOAT_INFINITIES:
+                observed.add("float")
+            elif _ISO_DATE.match(v):
+                observed.add("date")
+            else:
+                observed.add("string")
         else:
             observed.add("string")
 
@@ -274,6 +308,55 @@ def _pair_allowed(
     return any(m.source == source_st and m.target == target_st for m in rt.mappings)
 
 
+def _coerce_scalar(value: Any, datatype: str) -> Any:
+    """Coerce a single value to the number (or float token) its property expects.
+
+    Only ``integer``/``float`` properties are touched. For ``float``: a real
+    infinity is normalized to its canonical string token (``"Infinity"`` /
+    ``"-Infinity"``) so the model stays JSON-serializable, an existing token is
+    kept as-is, and finite numeric strings parse to numbers. For ``integer``: a
+    numeric string parses to ``int``. Anything else (including ``inf``/``nan``
+    spellings other than the canonical tokens) is returned unchanged.
+    """
+    if datatype == "float":
+        if isinstance(value, float) and math.isinf(value):
+            return "Infinity" if value > 0 else "-Infinity"
+        if value in FLOAT_INFINITIES:
+            return value  # already a canonical token
+    if not isinstance(value, str):
+        return value
+    num = _parse_number(value)
+    if num is None:
+        return value
+    if datatype == "integer":
+        return num if isinstance(num, int) else value
+    return num  # float: int- and float-valued numbers both conform
+
+
+def _coerce_properties(
+    props: dict[str, Any], datatypes: dict[str, str]
+) -> dict[str, Any]:
+    """Coerce numeric-string property values per the inferred metamodel types."""
+    out: dict[str, Any] = {}
+    for name, value in props.items():
+        datatype = datatypes.get(name)
+        if datatype not in ("integer", "float"):
+            out[name] = value
+        elif isinstance(value, list):
+            out[name] = [_coerce_scalar(item, datatype) for item in value]
+        else:
+            out[name] = _coerce_scalar(value, datatype)
+    return out
+
+
+def _datatypes_of(
+    type_def: ElementType | RelationshipType | None,
+) -> dict[str, str]:
+    if type_def is None:
+        return {}
+    return {p.name: p.datatype for p in type_def.properties}
+
+
 def _build_model(
     old_model: dict,
     mm: Metamodel,
@@ -291,15 +374,26 @@ def _build_model(
         f"{len(old_relationships)} relationships to the new format...",
     )
 
+    elem_datatypes: dict[str, dict[str, str]] = {}
+    rel_datatypes: dict[str, dict[str, str]] = {}
+
     elements_out: list[dict] = []
     stereotype_of: dict[str, str] = {}
     for i, (eid, el) in enumerate(old_elements.items(), start=1):
         node_id = el.get("id", eid)
         st = el["stereotype"]
         stereotype_of[node_id] = st
-        props = {
-            k: v for k, v in (el.get("properties") or {}).items() if k not in DROP_PROPS
-        }
+        datatypes = elem_datatypes.get(st)
+        if datatypes is None:
+            datatypes = elem_datatypes[st] = _datatypes_of(mm.element_type(st))
+        props = _coerce_properties(
+            {
+                k: v
+                for k, v in (el.get("properties") or {}).items()
+                if k not in DROP_PROPS
+            },
+            datatypes,
+        )
         elements_out.append(
             {"id": node_id, "type_name": st, "properties": props, "rev": 0}
         )
@@ -308,17 +402,24 @@ def _build_model(
 
     relationships_out: list[dict] = []
     for rid, rel in old_relationships.items():
+        rst = rel["stereotype"]
+        datatypes = rel_datatypes.get(rst)
+        if datatypes is None:
+            datatypes = rel_datatypes[rst] = _datatypes_of(mm.relationship_type(rst))
         relationships_out.append(
             {
                 "id": rel.get("id", rid),
-                "type_name": rel["stereotype"],
+                "type_name": rst,
                 "source_id": rel["source"],
                 "target_id": rel["destination"],
-                "properties": {
-                    k: v
-                    for k, v in (rel.get("properties") or {}).items()
-                    if k not in DROP_PROPS
-                },
+                "properties": _coerce_properties(
+                    {
+                        k: v
+                        for k, v in (rel.get("properties") or {}).items()
+                        if k not in DROP_PROPS
+                    },
+                    datatypes,
+                ),
                 "rev": 0,
             }
         )
