@@ -50,6 +50,11 @@ model only; it does not modify the metamodel.
 - Each stereotype → an element type. `id_properties` → `key` (and those properties
   get multiplicity `1`). Properties are the union of `id_properties`,
   `other_properties`, and any property observed in the model data.
+- A stereotype with `is_typed_by_one_of` also gets its type folded into the `key` as
+  `out:<TypedBy>` (the element is the source/"from" of the `TypedBy` edge). Two
+  instances matching on every id property but typed by different elements are then
+  distinct. The entry uses the synthesized relationship's resolved name, so a
+  rename on a name collision (e.g. `TypedBy2`) is reflected in the key.
 - Property **datatypes** are inferred from the real model values
   (int→integer, float→float, bool→boolean, ISO `YYYY-MM-DD`→date, else string).
 - Property **multiplicity**: id properties `1`; list-valued in data `0..*`; else `0..1`.

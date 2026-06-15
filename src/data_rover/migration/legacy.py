@@ -259,10 +259,17 @@ def _build_metamodel(
         other_props = list(spec.get("other_properties") or [])
         declared = id_props + [p for p in other_props if p not in id_props]
         props = _property_defs(declared, elem_values.get(st, {}), set(id_props))
-        elements.append(ElementType(name=st, properties=props, key=id_props or None))
+        typed_by = list(spec.get("is_typed_by_one_of") or [])
+        # An element that has a type is the SOURCE ("from") of a TypedBy edge,
+        # so its type is part of its identity: two instances that match on every
+        # id property but point at different types are distinct. Fold that into
+        # the key as `out:<TypedBy>` (the synthesized type may be renamed on a
+        # name collision, so use the resolved name, not a literal).
+        key = id_props + ([f"out:{typedby_name}"] if typed_by else [])
+        elements.append(ElementType(name=st, properties=props, key=key or None))
         for owner_st in spec.get("is_owned_by_one_of") or []:
             owns_pairs.append((owner_st, st))  # container -> contained
-        for type_st in spec.get("is_typed_by_one_of") or []:
+        for type_st in typed_by:
             typedby_pairs.append((st, type_st))  # instance -> type
 
     relationships: list[RelationshipType] = []
