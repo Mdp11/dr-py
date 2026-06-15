@@ -1,5 +1,6 @@
 from data_rover.core.metamodel.schema import (
     ElementType,
+    KeyRel,
     Metamodel,
     PropertyDef,
     RelationshipType,
@@ -112,3 +113,46 @@ def test_effective_element_key_child_overrides_ancestor():
         ]
     )
     assert mm.effective_element_key("Document") == ["isbn"]
+
+
+def _keyed_mm():
+    return Metamodel(
+        elements=[
+            ElementType(
+                name="Person",
+                properties=[PropertyDef(name="name", datatype="string")],
+                key=["name", "out:Parent", "in:School"],
+            ),
+            ElementType(
+                name="Plain",
+                properties=[PropertyDef(name="name", datatype="string")],
+                key=["name"],
+            ),
+            ElementType(name="NoKey"),
+        ],
+        relationships=[
+            RelationshipType(name="Parent", source="Person", target="Person"),
+            RelationshipType(name="School", source="Person", target="Person"),
+        ],
+    )
+
+
+def test_key_spec_splits_properties_and_relationships():
+    spec = _keyed_mm().effective_element_key_spec("Person")
+    assert spec is not None
+    assert spec.properties == ("name",)
+    assert spec.relationships == (
+        KeyRel(rel_type="Parent", direction="out"),
+        KeyRel(rel_type="School", direction="in"),
+    )
+
+
+def test_key_spec_property_only():
+    spec = _keyed_mm().effective_element_key_spec("Plain")
+    assert spec is not None
+    assert spec.properties == ("name",)
+    assert spec.relationships == ()
+
+
+def test_key_spec_none_when_no_key():
+    assert _keyed_mm().effective_element_key_spec("NoKey") is None
