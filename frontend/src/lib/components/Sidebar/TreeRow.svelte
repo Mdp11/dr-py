@@ -44,6 +44,14 @@
 		selectedId: string | null;
 		multiSelectedIds: Set<string>;
 		focusedId?: string | null;
+		/** The containing folder path for an element row, or null (top-level / under section). */
+		parentFolderPath: string[] | null;
+		/** This element's index within its folder's elements (for reorder). */
+		siblingIndex: number;
+		/** A folder row's element count (for append index). */
+		folderLen: number;
+		/** Whether this row is a draggable/movable element. */
+		movable: boolean;
 		dnd: DndContext;
 		onToggle: (key: string) => void;
 		onPick: (key: string, e: MouseEvent) => void;
@@ -64,6 +72,10 @@
 		selectedId,
 		multiSelectedIds,
 		focusedId = null,
+		parentFolderPath,
+		siblingIndex,
+		folderLen,
+		movable,
 		dnd,
 		onToggle,
 		onPick,
@@ -81,9 +93,7 @@
 		isExcludedSection || isFolder ? (tree.folderName.get(key) ?? '') : ''
 	);
 	const placedInFolder = $derived(!isFolder && !isExcludedSection && tree.placedElementIds.has(key));
-	const isMovable = $derived(
-		!isFolder && !isExcludedSection && (tree.roots.includes(key) || tree.placedElementIds.has(key))
-	);
+	const isMovable = $derived(movable);
 
 	const el = $derived(isFolder || isExcludedSection ? undefined : elementsById.get(key));
 	const allChildren = $derived(tree.children.get(key) ?? []);
@@ -154,6 +164,7 @@
 		aria-level={depth + 1}
 		style="padding-left: {depth * 12 + 4}px"
 		data-drop-key={EXCLUDED_SECTION_KEY}
+		data-drop-kind="section"
 		data-drop-path="null"
 	>
 		{#if hasChildren}
@@ -198,7 +209,9 @@
 		aria-level={depth + 1}
 		style="padding-left: {depth * 12 + 4}px; touch-action: none"
 		data-drop-key={key}
+		data-drop-kind="folder"
 		data-drop-path={JSON.stringify(folderPath)}
+		data-folder-len={folderLen}
 		onpointerdown={(e) => dnd.onPointerDown(e, key, 'folder', folderPath)}
 	>
 		{#if hasChildren}
@@ -256,6 +269,10 @@
 		aria-selected={isSelected}
 		aria-level={depth + 1}
 		style="padding-left: {depth * 12 + 4}px; touch-action: {isMovable ? 'none' : 'auto'}"
+		data-drop-key={key}
+		data-drop-kind="element"
+		data-drop-path={JSON.stringify(parentFolderPath)}
+		data-sibling-index={siblingIndex}
 		onpointerdown={(e) => dnd.onPointerDown(e, key, 'element', [])}
 	>
 		{#if hasChildren}
@@ -327,6 +344,10 @@
 		aria-selected={false}
 		aria-level={depth + 1}
 		style="padding-left: {depth * 12 + 4}px"
+		data-drop-key={key}
+		data-drop-kind="element"
+		data-drop-path={JSON.stringify(parentFolderPath)}
+		data-sibling-index={siblingIndex}
 	>
 		<span class="flex h-4 w-4 shrink-0 items-center justify-center text-zinc-700">•</span>
 		<span class="h-3 w-24 animate-pulse rounded bg-zinc-800"></span>

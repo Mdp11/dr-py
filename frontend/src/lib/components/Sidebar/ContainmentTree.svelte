@@ -27,7 +27,7 @@
 		indexIssues,
 		moveFolder,
 		placeElement,
-		placeElements,
+		placeElementsAt,
 		removeElement,
 		seedElements,
 		select,
@@ -38,7 +38,7 @@
 	import { elementDisplayName as displayName } from '$lib/util/element-name';
 	import StereotypePicker from './StereotypePicker.svelte';
 	import TreeRow from './TreeRow.svelte';
-	import { computeWindow, shouldLoadMore } from './windowing';
+	import { computeWindow, edgeScrollDelta, shouldLoadMore } from './windowing';
 	import {
 		appendExcludedSection,
 		buildUnifiedTree,
@@ -50,10 +50,12 @@
 		isExcludedSectionKey,
 		isFolderKey,
 		movableElementIds,
+		resolveElementDrop,
 		VIEW_ROOT_DROP_KEY,
 		type DndContext,
 		type FlatRow
 	} from './view-tree';
+	import { findFolderByPath } from '../../state/view-ops';
 
 	const mm = $derived(getMetamodel());
 	const typeFilter = $derived(getTypeFilter());
@@ -537,6 +539,25 @@
 	const movableIds = $derived(movableElementIds(tree));
 	const knownIds = $derived(new SvelteSet(elementsById.keys()));
 
+	// Per-row drop metadata passed to TreeRow so the controller can resolve a
+	// positional element drop (append/reorder/exclude) from the hovered row.
+	function dropParentFolderPath(row: FlatRow): string[] | null {
+		if (row.parent !== null && isFolderKey(row.parent)) return folderPathFromKey(row.parent);
+		return null; // top-level, under the excluded section, or under an element
+	}
+	function dropSiblingIndex(row: FlatRow): number {
+		if (view === null) return 0;
+		const p = dropParentFolderPath(row);
+		if (p === null) return 0;
+		const folder = findFolderByPath(view, p);
+		return folder ? folder.elements.indexOf(row.key) : 0;
+	}
+	function dropFolderLen(row: FlatRow): number {
+		if (view === null || !isFolderKey(row.key)) return 0;
+		const folder = findFolderByPath(view, folderPathFromKey(row.key));
+		return folder ? folder.elements.length : 0;
+	}
+
 	type DragPayload = { kind: 'element'; ids: string[] } | { kind: 'folder'; path: string[] };
 	let draggingPayload: DragPayload | null = $state(null);
 	let dragHoverKey: string | null = $state(null);
@@ -551,6 +572,13 @@
 	let dragging = $state(false);
 	let dragX = $state(0);
 	let dragY = $state(0);
+	// Edge auto-scroll: while dragging near a viewport edge, scroll the list so a
+	// drag can reach off-window targets. Driven by requestAnimationFrame.
+	const EDGE_PX = 36;
+	const MAX_SCROLL_SPEED = 18;
+	let autoScrollRaf = 0;
+	let lastPointerX = 0;
+	let lastPointerY = 0;
 	// Set on pointerup after a real drag so the click it synthesizes doesn't also
 	// select/toggle the row; cleared on the next pointerdown so it never goes stale.
 	let suppressClick = false;
@@ -578,13 +606,32 @@
 	}
 
 	/** Resolve the drop target under a viewport point to its key + destination path. */
-	function dropTargetAt(x: number, y: number): { key: string; path: string[] | null } | null {
+	function dropTargetAt(
+		x: number,
+		y: number
+	): {
+		key: string;
+		kind: 'folder' | 'element' | 'section';
+		path: string[] | null;
+		folderLen: number;
+		siblingIndex: number;
+		half: 'top' | 'bottom';
+	} | null {
 		const hit = document.elementFromPoint(x, y);
 		const el = hit?.closest<HTMLElement>('[data-drop-key]') ?? null;
 		if (el === null) return null;
 		const raw = el.dataset.dropPath ?? 'null';
 		const path = raw === 'null' ? null : (JSON.parse(raw) as string[]);
-		return { key: el.dataset.dropKey ?? '', path };
+		const rect = el.getBoundingClientRect();
+		const half: 'top' | 'bottom' = y < rect.top + rect.height / 2 ? 'top' : 'bottom';
+		return {
+			key: el.dataset.dropKey ?? '',
+			kind: (el.dataset.dropKind as 'folder' | 'element' | 'section') ?? 'folder',
+			path,
+			folderLen: Number(el.dataset.folderLen ?? '0'),
+			siblingIndex: Number(el.dataset.siblingIndex ?? '0'),
+			half
+		};
 	}
 
 	function buildPayload(
@@ -632,6 +679,30 @@
 		const target = dropTargetAt(e.clientX, e.clientY);
 		dragHoverKey = target?.key ?? null;
 		dragHoverValid = target !== null && dropAllowed(target.path);
+		lastPointerX = e.clientX;
+		lastPointerY = e.clientY;
+		if (dragging && autoScrollRaf === 0) autoScrollRaf = requestAnimationFrame(tickAutoScroll);
+	}
+
+	function tickAutoScroll(): void {
+		autoScrollRaf = 0;
+		if (!dragging || scrollEl === null) return;
+		const rect = scrollEl.getBoundingClientRect();
+		const dy = edgeScrollDelta({
+			pointerY: lastPointerY,
+			top: rect.top,
+			bottom: rect.bottom,
+			edge: EDGE_PX,
+			maxSpeed: MAX_SCROLL_SPEED
+		});
+		if (dy !== 0) {
+			scrollEl.scrollTop += dy;
+			scrollTop = scrollEl.scrollTop;
+			const t = dropTargetAt(lastPointerX, lastPointerY);
+			dragHoverKey = t?.key ?? null;
+			dragHoverValid = t !== null && dropAllowed(t.path);
+		}
+		autoScrollRaf = requestAnimationFrame(tickAutoScroll);
 	}
 
 	async function onWindowPointerUp(e: PointerEvent): Promise<void> {
@@ -648,7 +719,14 @@
 		if (!valid || payload === null || target === null) return;
 		try {
 			if (payload.kind === 'element') {
-				await placeElements(target.path ?? [], payload.ids);
+				const res = resolveElementDrop({
+					targetKind: target.kind,
+					folderPath: target.path,
+					folderLen: target.folderLen,
+					siblingIndex: target.siblingIndex,
+					half: target.half
+				});
+				await placeElementsAt(res.path, payload.ids, res.index);
 			} else {
 				await moveFolder(payload.path, target.path ?? []);
 			}
@@ -662,6 +740,10 @@
 	}
 
 	function endGesture(): void {
+		if (autoScrollRaf !== 0) {
+			cancelAnimationFrame(autoScrollRaf);
+			autoScrollRaf = 0;
+		}
 		pendingPayload = null;
 		activePointerId = null;
 		dragging = false;
@@ -837,6 +919,10 @@
 						selectedId={selection?.kind === 'element' ? selection.id : null}
 						multiSelectedIds={multiSelected}
 						{focusedId}
+						parentFolderPath={dropParentFolderPath(row)}
+						siblingIndex={dropSiblingIndex(row)}
+						folderLen={dropFolderLen(row)}
+						movable={movableIds.has(row.key)}
 						dnd={dndContext}
 						onToggle={toggleCollapsed}
 						{onPick}
