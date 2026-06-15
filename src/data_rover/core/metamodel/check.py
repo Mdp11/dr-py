@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 
 from .multiplicity import Multiplicity
-from .schema import PRIMITIVES, Metamodel, PropertyDef
+from .schema import PRIMITIVES, KeyRel, Metamodel, PropertyDef, parse_key_entry
 
 
 def _valid_datatype(mm: Metamodel, datatype: str) -> bool:
@@ -53,6 +53,18 @@ def _check_extend_cycles(objects, types) -> list[str]:
     return errors
 
 
+def _on_end(mm: Metamodel, type_name: str, endpoint_types: set[str]) -> bool:
+    """True if ``type_name`` is subtype-or-supertype-compatible with any endpoint.
+
+    Tolerates a key declared on an abstract supertype whose relationship
+    endpoint is a concrete subtype (and vice-versa).
+    """
+    return any(
+        mm.is_element_subtype(type_name, e) or mm.is_element_subtype(e, type_name)
+        for e in endpoint_types
+    )
+
+
 def check_metamodel(mm: Metamodel) -> list[str]:
     """Return a list of human-readable error strings; empty means valid."""
     errors: list[str] = []
@@ -74,18 +86,39 @@ def check_metamodel(mm: Metamodel) -> list[str]:
     errors.extend(_check_extend_cycles(mm.relationships, mm.relationship_type))
 
     for et in mm.elements:
-        if et.key is not None:
-            if len(et.key) == 0:
+        if et.key is None:
+            continue
+        if len(et.key) == 0:
+            errors.append(
+                f"Element {et.name!r}: key must be non-empty (omit to mean 'no key')"
+            )
+            continue
+        effective = {p.name for p in mm.effective_element_properties(et.name)}
+        for k in et.key:
+            parsed = parse_key_entry(k)
+            if isinstance(parsed, KeyRel):
+                rt = mm.relationship_type(parsed.rel_type)
+                if rt is None:
+                    errors.append(
+                        f"Element {et.name!r}: key references unknown relationship "
+                        f"{parsed.rel_type!r}"
+                    )
+                    continue
+                if parsed.direction == "out":
+                    endpoints = {m.source for m in rt.mappings}
+                    side = "source"
+                else:
+                    endpoints = {m.target for m in rt.mappings}
+                    side = "target"
+                if not _on_end(mm, et.name, endpoints):
+                    errors.append(
+                        f"Element {et.name!r}: key relationship {k!r} is invalid — "
+                        f"{et.name!r} is not on the {side} end of {parsed.rel_type!r}"
+                    )
+            elif parsed not in effective:
                 errors.append(
-                    f"Element {et.name!r}: key must be non-empty (omit to mean 'no key')"
+                    f"Element {et.name!r}: key references unknown property {parsed!r}"
                 )
-            else:
-                effective = {p.name for p in mm.effective_element_properties(et.name)}
-                for k in et.key:
-                    if k not in effective:
-                        errors.append(
-                            f"Element {et.name!r}: key references unknown property {k!r}"
-                        )
 
     for et in mm.elements:
         e_ancestor_props: dict[str, str] = {}

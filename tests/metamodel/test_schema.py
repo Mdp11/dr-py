@@ -1,3 +1,4 @@
+from data_rover.core.metamodel.check import check_metamodel
 from data_rover.core.metamodel.schema import (
     ElementType,
     Metamodel,
@@ -64,3 +65,55 @@ def test_relationship_multiple_mappings():
     # single source/target shorthand reflects the first mapping
     assert r.source == "A"
     assert r.target == "B"
+
+
+def _rel_key_mm(person_key):
+    return Metamodel(
+        elements=[
+            ElementType(
+                name="Person",
+                properties=[PropertyDef(name="name", datatype="string")],
+                key=person_key,
+            ),
+        ],
+        relationships=[
+            RelationshipType(name="Parent", source="Person", target="Person"),
+        ],
+    )
+
+
+def test_relationship_key_valid_has_no_errors():
+    assert check_metamodel(_rel_key_mm(["name", "out:Parent", "in:Parent"])) == []
+
+
+def test_relationship_key_unknown_relationship_errors():
+    errors = check_metamodel(_rel_key_mm(["out:Ghost"]))
+    assert any("unknown relationship 'Ghost'" in e for e in errors)
+
+
+def test_relationship_key_wrong_end_errors():
+    # Parent maps Person(source) -> Widget(target); a key 'in:Parent' on Person
+    # is invalid because Person is not on the target end.
+    mm = Metamodel(
+        elements=[
+            ElementType(name="Person", key=["in:Parent"]),
+            ElementType(name="Widget"),
+        ],
+        relationships=[
+            RelationshipType(name="Parent", source="Person", target="Widget"),
+        ],
+    )
+    errors = check_metamodel(mm)
+    assert any("not on the target end of 'Parent'" in e for e in errors)
+
+
+def test_relationship_key_inherited_on_supertype_ok():
+    # Key declared on abstract Base, relationship endpoint is concrete Sub.
+    mm = Metamodel(
+        elements=[
+            ElementType(name="Base", abstract=True, key=["out:Link"]),
+            ElementType(name="Sub", extends="Base"),
+        ],
+        relationships=[RelationshipType(name="Link", source="Sub", target="Sub")],
+    )
+    assert check_metamodel(mm) == []
