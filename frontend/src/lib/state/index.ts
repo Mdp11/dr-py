@@ -16,6 +16,7 @@ export {
 	clearModelError,
 	emit,
 	ensureElement,
+	ensureElements,
 	ensureRelationship,
 	flushNow,
 	getCachedElements,

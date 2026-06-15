@@ -8,9 +8,10 @@
 		createFolder,
 		createTempId,
 		emit,
-		ensureElement,
+		ensureElements,
 		ensureTypeFilterInitialized,
 		getCachedElements,
+		getIssues,
 		getMetamodel,
 		getModelGeneration,
 		getModelSummary,
@@ -19,6 +20,7 @@
 		getTypeFilter,
 		getView,
 		getViewWarnings,
+		indexIssues,
 		moveFolder,
 		placeElement,
 		placeElements,
@@ -31,17 +33,21 @@
 	import { Filter, FolderPlus, Plus } from '@lucide/svelte';
 	import { elementDisplayName as displayName } from '$lib/util/element-name';
 	import StereotypePicker from './StereotypePicker.svelte';
-	import TreeNode from './TreeNode.svelte';
+	import TreeRow from './TreeRow.svelte';
+	import { computeWindow } from './windowing';
 	import {
 		buildUnifiedTree,
 		canDropElement,
 		canDropFolder,
 		computeVisibility,
+		flattenVisibleRows,
 		folderPathFromKey,
+		isExcludedSectionKey,
 		isFolderKey,
 		movableElementIds,
 		VIEW_ROOT_DROP_KEY,
-		type DndContext
+		type DndContext,
+		type FlatRow
 	} from './view-tree';
 
 	const mm = $derived(getMetamodel());
@@ -96,6 +102,9 @@
 	const PAGE_LIMIT = 500;
 
 	let roots: ContainmentItem[] = $state([]);
+	// TODO(A6): rootsTotal/childTotals feed scroll auto-load (shouldLoadMore).
+	// Until A6 wires it, the no-view roots cap at the first PAGE_LIMIT page
+	// (the "Show more" button was removed with the recursive renderer).
 	let rootsTotal = $state(0);
 	let rootsLimit = $state(PAGE_LIMIT);
 	const childLevels = new SvelteMap<string, ContainmentItem[]>();
@@ -175,21 +184,6 @@
 		void refreshLevels(seq, expanded, limit);
 	});
 
-	// Folder-placed elements aren't necessarily in any fetched level; pull
-	// them into the cache so the view section can render them.
-	$effect(() => {
-		if (view === null) return;
-		const ids: string[] = [];
-		const walk = (folders: typeof view.folders): void => {
-			for (const f of folders) {
-				ids.push(...f.elements);
-				walk(f.folders);
-			}
-		};
-		walk(view.folders);
-		for (const id of ids) void ensureElement(id);
-	});
-
 	// ----- unified tree over the fetched subset -----
 
 	const elementsById = $derived(getCachedElements() as Map<string, Element>);
@@ -256,16 +250,16 @@
 	// ----- expansion state (lazy levels) -----
 
 	function isExpandable(key: string): boolean {
-		if (isFolderKey(key)) return (tree.children.get(key) ?? []).length > 0;
+		if (isFolderKey(key) || isExcludedSectionKey(key)) return (tree.children.get(key) ?? []).length > 0;
 		return (tree.children.get(key) ?? []).length > 0 || (childCounts.get(key) ?? 0) > 0;
 	}
 
 	function isCollapsedKey(key: string): boolean {
-		if (isFolderKey(key)) return collapsedFolders.has(key);
+		if (isFolderKey(key) || isExcludedSectionKey(key)) return collapsedFolders.has(key);
 		return !expandedElements.has(key);
 	}
 
-	/** Set passed to TreeNode (its `collapsed.has(key)` contract is unchanged). */
+	/** Set passed to TreeRow (its `collapsed.has(key)` contract is unchanged). */
 	const collapsedSet = $derived.by(() => {
 		const s = new SvelteSet<string>();
 		for (const key of tree.kind.keys()) {
@@ -279,7 +273,7 @@
 	}
 
 	function setCollapsed(key: string, value: boolean): void {
-		if (isFolderKey(key)) {
+		if (isFolderKey(key) || isExcludedSectionKey(key)) {
 			if (value) collapsedFolders.add(key);
 			else collapsedFolders.delete(key);
 			return;
@@ -288,19 +282,45 @@
 		else expandedElements.add(key);
 	}
 
-	type VisibleRow = { key: string; parent: string | null };
-	const visibleRows = $derived.by<VisibleRow[]>(() => {
-		const out: VisibleRow[] = [];
-		const walk = (key: string, parent: string | null): void => {
-			const vis = visibility.get(key);
-			if (vis === 'hidden' || vis === undefined) return;
-			out.push({ key, parent });
-			if (vis === 'stub') return;
-			if (collapsedSet.has(key)) return;
-			for (const c of tree.children.get(key) ?? []) walk(c, key);
-		};
-		for (const r of tree.roots) walk(r, null);
-		return out;
+	const visibleRows = $derived<FlatRow[]>(flattenVisibleRows(tree, visibility, collapsedSet));
+
+	// ----- virtualized windowing -----
+
+	const ROW_H = 24;
+	const OVERSCAN = 8;
+
+	let scrollEl: HTMLElement | null = $state(null);
+	let scrollTop = $state(0);
+	let viewportH = $state(0);
+
+	const windowSlice = $derived(
+		computeWindow({ scrollTop, viewportH, rowH: ROW_H, total: visibleRows.length, overscan: OVERSCAN })
+	);
+	const windowedRows = $derived(visibleRows.slice(windowSlice.start, windowSlice.end));
+
+	function onScroll(): void {
+		if (scrollEl) scrollTop = scrollEl.scrollTop;
+	}
+
+	$effect(() => {
+		if (!scrollEl) return;
+		viewportH = scrollEl.clientHeight;
+		const ro = new ResizeObserver(() => {
+			if (scrollEl) viewportH = scrollEl.clientHeight;
+		});
+		ro.observe(scrollEl);
+		return () => ro.disconnect();
+	});
+
+	// Prebuilt issue index, hoisted so TreeRow rows share one build per render.
+	const issueIndex = $derived(indexIssues(getIssues()));
+
+	// Windowed body fetch: pull only the on-screen element bodies into cache.
+	$effect(() => {
+		const ids = windowedRows
+			.map((r) => r.key)
+			.filter((k) => !isFolderKey(k) && !isExcludedSectionKey(k));
+		if (ids.length > 0) void ensureElements(ids);
 	});
 
 	let focusedId: string | null = $state(null);
@@ -313,6 +333,20 @@
 	function moveTo(idx: number): void {
 		if (idx < 0 || idx >= visibleRows.length) return;
 		focusedId = visibleRows[idx].key;
+		scrollRowIntoView(idx);
+	}
+
+	// Under windowing the focused row may not be mounted; keep it in view so the
+	// focus ring stays visible and the row exists in the DOM for assistive tech.
+	function scrollRowIntoView(idx: number): void {
+		if (scrollEl === null) return;
+		const top = idx * ROW_H;
+		const bottom = top + ROW_H;
+		if (top < scrollEl.scrollTop) scrollEl.scrollTop = top;
+		else if (bottom > scrollEl.scrollTop + scrollEl.clientHeight) {
+			scrollEl.scrollTop = bottom - scrollEl.clientHeight;
+		}
+		scrollTop = scrollEl.scrollTop;
 	}
 
 	function onKeyDown(e: KeyboardEvent): void {
@@ -679,12 +713,14 @@
 		{/if}
 	</div>
 	<div
-		class="flex min-h-0 flex-1 flex-col gap-1 overflow-auto px-3 py-2 outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500"
+		bind:this={scrollEl}
+		class="flex min-h-0 flex-1 flex-col overflow-auto px-3 py-2 outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500"
 		tabindex="0"
 		role="tree"
 		aria-label="Containment tree"
 		onkeydown={onKeyDown}
 		onclickcapture={onTreeClickCapture}
+		onscroll={onScroll}
 	>
 		{#if mm === null}
 			<p class="text-xs text-zinc-600">Load a metamodel and model to begin.</p>
@@ -706,39 +742,31 @@
 					Drop here to move to top level
 				</div>
 			{/if}
+			<div style="height: {windowSlice.padTop}px"></div>
 			<ul class="flex flex-col text-xs" role="group">
-				{#each tree.roots as rootKey (rootKey)}
-					{#if visibility.get(rootKey) !== 'hidden'}
-						<TreeNode
-							nodeKey={rootKey}
-							depth={0}
-							{tree}
-							{elementsById}
-							{visibility}
-							collapsed={collapsedSet}
-							{childCounts}
-							{folderOptions}
-							{warningsByElementId}
-							selectedId={selection?.kind === 'element' ? selection.id : null}
-							multiSelectedIds={multiSelected}
-							{focusedId}
-							dnd={dndContext}
-							onToggle={toggleCollapsed}
-							{onPick}
-							{onMoveToFolder}
-						/>
-					{/if}
+				{#each windowedRows as row (row.key)}
+					<TreeRow
+						{row}
+						{tree}
+						{elementsById}
+						{visibility}
+						collapsed={collapsedSet}
+						{childCounts}
+						excludedTotal={0}
+						{folderOptions}
+						{warningsByElementId}
+						{issueIndex}
+						selectedId={selection?.kind === 'element' ? selection.id : null}
+						multiSelectedIds={multiSelected}
+						{focusedId}
+						dnd={dndContext}
+						onToggle={toggleCollapsed}
+						{onPick}
+						{onMoveToFolder}
+					/>
 				{/each}
 			</ul>
-			{#if rootsTotal > roots.length}
-				<button
-					type="button"
-					class="mt-1 w-fit rounded border border-zinc-800 bg-zinc-900 px-2 py-0.5 text-[11px] text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
-					onclick={() => (rootsLimit = rootsLimit + PAGE_LIMIT)}
-				>
-					Show more ({roots.length} of {rootsTotal})
-				</button>
-			{/if}
+			<div style="height: {windowSlice.padBottom}px"></div>
 		{/if}
 	</div>
 
