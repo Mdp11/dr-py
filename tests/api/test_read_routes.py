@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 import data_rover.api.session as session_module
 from data_rover.api.main import create_app
+from data_rover.api.routes.read import MAX_PAGE_LIMIT
 from data_rover.api.session import get_session, reset_session
 
 READ_MM = """
@@ -887,3 +888,49 @@ def test_changes_incomplete_after_op_log_cap(
 def test_changes_404_without_model(client: TestClient) -> None:
     assert client.get(f"{API}/model/changes").status_code == 404
     assert client.get(f"{API}/model/changes/summary").status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# POST /model/elements/batch
+# ---------------------------------------------------------------------------
+
+
+def test_elements_batch_returns_known_in_request_order_omits_unknown(
+    client: TestClient,
+) -> None:
+    _load_model(client, [_item("a", "A"), _item("b", "B"), _item("c", "C")], [])
+    res = client.post(
+        f"{API}/model/elements/batch", json={"ids": ["c", "missing", "a"]}
+    )
+    assert res.status_code == 200, res.text
+    ids = [e["id"] for e in res.json()["items"]]
+    assert ids == ["c", "a"]  # request order preserved; unknown id dropped
+
+
+def test_elements_batch_empty_ids_returns_empty(client: TestClient) -> None:
+    _load_model(client, [_item("a", "A")], [])
+    res = client.post(f"{API}/model/elements/batch", json={"ids": []})
+    assert res.status_code == 200
+    assert res.json()["items"] == []
+
+
+def test_elements_batch_rejects_oversized(client: TestClient) -> None:
+    _load_model(client, [_item("a", "A")], [])
+    res = client.post(
+        f"{API}/model/elements/batch",
+        json={"ids": [str(n) for n in range(MAX_PAGE_LIMIT + 1)]},
+    )
+    assert res.status_code == 422
+    assert str(MAX_PAGE_LIMIT) in res.json()["detail"]
+
+
+def test_elements_batch_404_without_model() -> None:
+    reset_session()
+    c = TestClient(create_app())
+    c.post(
+        f"{API}/metamodel",
+        content=READ_MM,
+        headers={"content-type": "application/x-yaml"},
+    )
+    res = c.post(f"{API}/model/elements/batch", json={"ids": ["a"]})
+    assert res.status_code == 404  # no model loaded
