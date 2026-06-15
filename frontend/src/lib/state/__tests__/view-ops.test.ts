@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { Folder, View } from '$lib/api/types';
-import { isFolderPathAncestor, moveFolderInView, placeElementsInView } from '../view-ops';
+import {
+	isFolderPathAncestor,
+	moveFolderInView,
+	placeElementsInView,
+	placeElementsInViewAt
+} from '../view-ops';
 
 function folder(name: string, elements: string[] = [], folders: Folder[] = []): Folder {
 	return { name, folders, elements };
@@ -72,6 +77,52 @@ describe('placeElementsInView', () => {
 		const v = view(folder('Group'));
 		placeElementsInView(v, ['Group'], ['e1']);
 		expect(v.folders[0].elements).toEqual([]);
+	});
+});
+
+describe('placeElementsInViewAt', () => {
+	it('inserts at the given index in the target folder', () => {
+		const v = view(folder('F', ['a', 'b', 'c']));
+		const out = placeElementsInViewAt(v, ['F'], ['x'], 1);
+		expect(out.folders[0].elements).toEqual(['a', 'x', 'b', 'c']);
+	});
+
+	it('reorders within a folder (strip then insert at new index)', () => {
+		const v = view(folder('F', ['a', 'b', 'c']));
+		// move 'c' to the front: after stripping -> [a,b], insert at 0
+		const out = placeElementsInViewAt(v, ['F'], ['c'], 0);
+		expect(out.folders[0].elements).toEqual(['c', 'a', 'b']);
+	});
+
+	it('moves an element from one folder to a position in another', () => {
+		const v = view(folder('F', ['a', 'b']), folder('G', ['x', 'y']));
+		const out = placeElementsInViewAt(v, ['G'], ['a'], 1);
+		expect(out.folders[0].elements).toEqual(['b']);
+		expect(out.folders[1].elements).toEqual(['x', 'a', 'y']);
+	});
+
+	it('clamps an out-of-range index to the end', () => {
+		const v = view(folder('F', ['a', 'b']));
+		const out = placeElementsInViewAt(v, ['F'], ['x'], 999);
+		expect(out.folders[0].elements).toEqual(['a', 'b', 'x']);
+	});
+
+	it('empty path strips from all folders (exclude from view)', () => {
+		const v = view(folder('F', ['a', 'b']));
+		const out = placeElementsInViewAt(v, [], ['a'], 0);
+		expect(out.folders[0].elements).toEqual(['b']);
+	});
+
+	it('does not mutate the input view', () => {
+		const v = view(folder('F', ['a', 'b']));
+		placeElementsInViewAt(v, ['F'], ['b'], 0);
+		expect(v.folders[0].elements).toEqual(['a', 'b']);
+	});
+
+	it('inserts multiple ids in order, de-duping the selection', () => {
+		const v = view(folder('F', ['a', 'b']));
+		const out = placeElementsInViewAt(v, ['F'], ['y', 'x', 'y'], 1);
+		expect(out.folders[0].elements).toEqual(['a', 'y', 'x', 'b']);
 	});
 });
 

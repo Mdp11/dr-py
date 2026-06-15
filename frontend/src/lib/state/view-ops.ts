@@ -53,11 +53,19 @@ export function isFolderPathAncestor(ancestor: string[], descendant: string[]): 
 }
 
 /**
- * Return a new view with every id in `ids` placed into the folder at `path`
- * (empty path = unplaced top level). Each id is first stripped from any folder
- * that currently holds it (single-folder rule), matching `placeElement`.
+ * Return a new view with `ids` placed into the folder at `path`, inserted at
+ * `index` among that folder's existing elements. Each id is first stripped from
+ * every folder that holds it (single-folder rule), so this also covers
+ * intra-folder reorder (strip then re-insert at the new index) and cross-folder
+ * moves. An empty `path` strips the ids and re-adds them nowhere (exclude from
+ * the view). `index` is clamped to `[0, target.length]`.
  */
-export function placeElementsInView(view: View, path: string[], ids: string[]): View {
+export function placeElementsInViewAt(
+	view: View,
+	path: string[],
+	ids: string[],
+	index: number
+): View {
 	const next = cloneView(view);
 	const idSet = new Set(ids);
 
@@ -70,11 +78,24 @@ export function placeElementsInView(view: View, path: string[], ids: string[]): 
 	if (path.length > 0) {
 		const target = findFolderByPath(next, path);
 		if (target === null) throw new Error(`Folder not found: ${path.join('/')}`);
-		for (const id of ids) {
-			if (!target.elements.includes(id)) target.elements.push(id);
-		}
+		// preserve given order, drop duplicates within the incoming selection
+		const insertion = ids.filter((id, i) => ids.indexOf(id) === i);
+		const at = Math.max(0, Math.min(index, target.elements.length));
+		target.elements.splice(at, 0, ...insertion);
 	}
 	return next;
+}
+
+/**
+ * Append-at-end placement (backwards-compatible wrapper around
+ * {@link placeElementsInViewAt}). Empty path = exclude from the view.
+ *
+ * Return a new view with every id in `ids` placed into the folder at `path`
+ * (empty path = unplaced top level). Each id is first stripped from any folder
+ * that currently holds it (single-folder rule), matching `placeElement`.
+ */
+export function placeElementsInView(view: View, path: string[], ids: string[]): View {
+	return placeElementsInViewAt(view, path, ids, Number.MAX_SAFE_INTEGER);
 }
 
 /**
