@@ -57,6 +57,29 @@ export function shouldLoadMore(args: {
 }
 
 /**
+ * Auto-load gate for the "Not in view" excluded pool.
+ *
+ * The pool's loaded rows sit at the TAIL of `visibleRows`, so {@link shouldLoadMore}'s
+ * window-vs-loaded-count math only holds while the section is EXPANDED. When it is
+ * collapsed those rows leave `visibleRows`, the short list always reads as "at the
+ * bottom", and — since the server still has more — an ungated check would bump the
+ * page limit on every pass, paging the entire pool into memory while nothing is even
+ * on screen. A collapsed section can never have a pool row in the window, so it must
+ * never auto-load.
+ */
+export function shouldLoadMoreExcluded(args: {
+	sectionCollapsed: boolean;
+	windowEnd: number;
+	loadedCount: number;
+	total: number;
+	threshold: number;
+}): boolean {
+	if (args.sectionCollapsed) return false;
+	const { windowEnd, loadedCount, total, threshold } = args;
+	return shouldLoadMore({ windowEnd, loadedCount, total, threshold });
+}
+
+/**
  * Per-frame scroll delta (px) for edge auto-scroll while dragging. Returns a
  * negative value near the top edge (scroll up), positive near the bottom,
  * scaled linearly with how deep into the `edge` band the pointer sits. Zero in
