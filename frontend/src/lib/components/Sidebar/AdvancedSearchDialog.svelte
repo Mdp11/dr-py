@@ -9,21 +9,20 @@
 		clearSearchCriteria,
 		commitSearchResults,
 		getCachedElements,
-		getCachedRelationships,
 		getDraftQuery,
-		getModelSummary,
 		getSearchCriteria,
 		getSearchDialogOpen,
 		getSearchTarget,
 		removeSearchCriterion,
 		seedElements,
+		seedRelationships,
 		setSearchDialogOpen,
 		setSearchTarget,
 		updateSearchCriterion
 	} from '$lib/state';
-	import { listElementsPage } from '$lib/api/model-read';
-	import { isValidRegex, runQuery } from '$lib/search/evaluate';
-	import { CRITERION_LABELS, type Criterion } from '$lib/search/types';
+	import { getElementsBatch, READ_PAGE_LIMIT, searchModel } from '$lib/api/model-read';
+	import { isValidRegex } from '$lib/search/evaluate';
+	import { CRITERION_LABELS, type Criterion, type SearchResultItem } from '$lib/search/types';
 	import CriterionRow from './CriterionRow.svelte';
 
 	// Writable $derived mirror of the global search-dialog store, matching the
@@ -53,50 +52,55 @@
 
 	let searching = $state(false);
 
-	// Client-side evaluation over the FETCHED SUBSET (a server-side query
-	// endpoint is a stated follow-up): element queries first pull up to
-	// SCAN_LIMIT elements into the cache so small/medium models are covered
-	// fully; anything beyond that — and all relationship coverage — is limited
-	// to what has been fetched, and the results panel says so.
-	const SCAN_LIMIT = 500;
-
+	// Server-side evaluation over the WHOLE model (POST /model/search). The
+	// matched entities come back hydrated and are seeded into the cache the
+	// results panel renders from; `total` lets us flag when the match set was
+	// capped to a single page.
 	async function onSearch(): Promise<void> {
 		if (hasInvalidRegex || searching) return;
 		searching = true;
 		try {
-			const query = getDraftQuery();
-			const summary = getModelSummary();
+			const page = await searchModel(getDraftQuery());
 
-			if (query.target === 'element') {
-				try {
-					const page = await listElementsPage({ limit: SCAN_LIMIT });
-					seedElements(page.items);
-				} catch {
-					// scan prefetch is best-effort; evaluate over whatever is cached
-				}
-			}
-
-			const elements = [...getCachedElements().values()];
-			const relationships = [...getCachedRelationships().values()];
-			const results = runQuery(query, { elements, relationships });
-
-			let note: string | null = null;
-			if (query.target === 'element') {
-				const total = summary?.element_count ?? elements.length;
-				if (total > elements.length) {
-					note = `searched ${elements.length} of ${total} elements (fetched subset)`;
-				}
+			let results: SearchResultItem[];
+			if (page.target === 'element') {
+				seedElements(page.elements);
+				results = page.elements.map((e) => ({ kind: 'element', id: e.id }));
 			} else {
-				const total = summary?.relationship_count ?? relationships.length;
-				if (total > relationships.length) {
-					note = `searched ${relationships.length} of ${total} relationships (fetched subset)`;
-				}
+				seedRelationships(page.relationships);
+				await hydrateEndpoints(page.relationships);
+				results = page.relationships.map((r) => ({ kind: 'relationship', id: r.id }));
 			}
 
-			commitSearchResults(results, query.target, note);
+			const note =
+				page.total > results.length ? `showing ${results.length} of ${page.total} matches` : null;
+			commitSearchResults(results, page.target, note);
 			setSearchDialogOpen(false);
+		} catch {
+			// transport/validation failure: keep the dialog open so the user can
+			// retry or amend criteria rather than committing an empty result set.
 		} finally {
 			searching = false;
+		}
+	}
+
+	// Relationship rows label their source → target by display name, which the
+	// results panel resolves from the element cache; seed any endpoint elements
+	// not already cached so the labels render (best-effort — they fall back to
+	// raw ids on failure).
+	async function hydrateEndpoints(
+		relationships: { source_id: string; target_id: string }[]
+	): Promise<void> {
+		const cached = getCachedElements();
+		const missing = [...new Set(relationships.flatMap((r) => [r.source_id, r.target_id]))].filter(
+			(id) => !cached.has(id)
+		);
+		try {
+			for (let i = 0; i < missing.length; i += READ_PAGE_LIMIT) {
+				seedElements(await getElementsBatch(missing.slice(i, i + READ_PAGE_LIMIT)));
+			}
+		} catch {
+			// endpoint labels fall back to ids
 		}
 	}
 </script>

@@ -12,8 +12,8 @@ mutated, ``model_rev`` does not move, no op-log entry is produced.
 Ordering contracts (deterministic paging)
 -----------------------------------------
 - element listing: model insertion order; with ``q`` score-descending then
-  id ascending (ports ``Sidebar/Search.svelte`` scoring; plain string
-  comparison stands in for ``localeCompare``)
+  id ascending (see ``_search_score`` for the tiered relevance scheme; plain
+  string comparison stands in for ``localeCompare``)
 - neighborhood: nodes in BFS discovery order (per frontier node, incident
   relationship ids ascending), edges sorted by relationship id
 - per-element relationships: relationship id ascending
@@ -26,6 +26,7 @@ Ordering contracts (deterministic paging)
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from typing import Literal
 
@@ -38,6 +39,7 @@ from data_rover.core.view.schema import Folder, View
 
 from ..changes import compact_changes
 from ..deps import Session, get_session, require_model
+from ..search import SearchQueryIn, SearchResultPage, run_query
 from ..schemas import (
     ChangesOut,
     ChangesSummaryOut,
@@ -119,22 +121,54 @@ def get_model_summary(session: Session = Depends(get_session)) -> ModelSummary:
 # ---------------------------------------------------------------------------
 
 
-def _search_score(element: Element, q: str, type_matches: bool) -> float:
-    """Port of the scoring loop in ``Sidebar/Search.svelte``.
+def _name_score(name_lower: str, q: str) -> float:
+    """Tiered match quality of ``q`` against a (lowercased) name.
 
-    ``q`` must already be trimmed + lowercased and non-empty. Substring
-    matches score: name property +2, id +1, type name +1, every other
-    string-valued property +0.5; an element with score 0 is not a hit.
+    The tiers are spaced far apart so a better name match always outranks a
+    worse one regardless of how many weaker id/type/property hits an element
+    accumulates: exact 1000, prefix 100, word-boundary 30, plain substring 10,
+    no match 0. ``q`` is already trimmed + lowercased and non-empty. Within a
+    tier, the caller's length bias breaks ties toward shorter names.
+
+    A "word-boundary" hit is ``q`` appearing delimited by string start/end or
+    any non-alphanumeric char (so ``some_name`` matches in ``left some_name
+    right`` and ``a_some_name`` but not inside ``pretextsome_name``).
+    """
+    if name_lower == q:
+        return 1000.0
+    if name_lower.startswith(q):
+        return 100.0
+    if q in name_lower:
+        pattern = r"(?:^|[^a-z0-9])" + re.escape(q) + r"(?:[^a-z0-9]|$)"
+        return 30.0 if re.search(pattern, name_lower) else 10.0
+    return 0.0
+
+
+def _search_score(element: Element, q: str, type_matches: bool) -> float:
+    """Relevance of ``element`` to query ``q`` (trimmed, lowercased, non-empty).
+
+    Name match dominates via :func:`_name_score`'s widely-spaced tiers; id
+    (exact +5 / substring +2), type-name (+1) and every other string-valued
+    property (+0.5 each) are weak signals that order elements *within* a name
+    tier but can never lift a worse name match above a better one. A small
+    ``len(q)/len(name)`` bias favors shorter names so an exact short name beats
+    a longer name that merely starts with the query. Score 0 is not a hit.
     ``type_matches`` is the type-name check, hoisted out so the caller can
     memoize it per distinct type instead of re-lowercasing per element.
     """
     score = 0.0
     props = element.properties
     name = props.get("name")
-    if isinstance(name, str) and q in name.lower():
+    if isinstance(name, str):
+        name_lower = name.lower()
+        ns = _name_score(name_lower, q)
+        if ns > 0.0:
+            score += ns + len(q) / len(name_lower)
+    id_lower = element.id.lower()
+    if id_lower == q:
+        score += 5.0
+    elif q in id_lower:
         score += 2.0
-    if q in element.id.lower():
-        score += 1.0
     if type_matches:
         score += 1.0
     for key, value in props.items():
@@ -156,8 +190,8 @@ def list_elements(
     """Paged element listing with optional exact-type filter and search.
 
     Without ``q`` items come in model insertion order; with ``q`` they are
-    ranked by the Search.svelte score (descending) with id-ascending
-    tiebreak. ``total`` counts all matches BEFORE paging. A blank ``q``
+    ranked by ``_search_score`` (descending) with id-ascending tiebreak.
+    ``total`` counts all matches BEFORE paging. A blank ``q``
     (empty/whitespace) is treated as absent, mirroring the frontend.
     """
     _, model = require_model(session)
@@ -205,6 +239,38 @@ def list_elements(
             if len(items) >= limit:
                 break
     return ElementPage(items=items, total=total)
+
+
+# ---------------------------------------------------------------------------
+# POST /model/search — server-side advanced search over the WHOLE model
+# ---------------------------------------------------------------------------
+
+
+@router.post("/model/search")
+def search_model(
+    payload: SearchQueryIn,
+    session: Session = Depends(get_session),
+) -> SearchResultPage:
+    """Advanced search evaluated over the entire model (not the client's
+    fetched subset). Ports ``frontend/src/lib/search/evaluate.ts``; results come
+    back in model insertion order, hydrated and paged (``total`` is the full
+    match count before paging). See :mod:`data_rover.api.search`."""
+    _, model = require_model(session)
+    ids = run_query(model, payload)
+    page_ids = ids[payload.offset : payload.offset + payload.limit]
+    if payload.target == "element":
+        return SearchResultPage(
+            target="element",
+            elements=[ElementOut.from_core(model.elements[i]) for i in page_ids],
+            total=len(ids),
+        )
+    return SearchResultPage(
+        target="relationship",
+        relationships=[
+            RelationshipOut.from_core(model.relationships[i]) for i in page_ids
+        ],
+        total=len(ids),
+    )
 
 
 # ---------------------------------------------------------------------------
