@@ -111,6 +111,7 @@ export {
 	moveFolder,
 	placeElement,
 	placeElements,
+	placeElementsAt,
 	pushView,
 	refreshView,
 	removeElement,

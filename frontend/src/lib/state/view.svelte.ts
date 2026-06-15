@@ -1,6 +1,12 @@
 import * as viewApi from '$lib/api/view';
 import type { Issue, View } from '$lib/api/types';
-import { cloneView, findFolderByPath, moveFolderInView, placeElementsInView } from './view-ops';
+import {
+	cloneView,
+	findFolderByPath,
+	moveFolderInView,
+	placeElementsInView,
+	placeElementsInViewAt
+} from './view-ops';
 
 export { cloneView } from './view-ops';
 
@@ -128,6 +134,16 @@ export async function placeElement(path: string[], elementId: string): Promise<v
 export async function placeElements(path: string[], ids: string[]): Promise<void> {
 	if (_view === null) throw new Error('No active view');
 	await pushView(placeElementsInView(_view, path, ids));
+}
+
+/**
+ * Positional variant of {@link placeElements}: move every id in `ids` into the
+ * folder at `path`, inserted at `index` among that folder's elements (used by
+ * drag-to-reorder and include-at-drop-index). Empty `path` excludes the ids.
+ */
+export async function placeElementsAt(path: string[], ids: string[], index: number): Promise<void> {
+	if (_view === null) throw new Error('No active view');
+	await pushView(placeElementsInViewAt(_view, path, ids, index));
 }
 
 export async function removeElement(elementId: string): Promise<void> {
