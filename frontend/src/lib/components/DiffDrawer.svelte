@@ -18,7 +18,7 @@
 	} from '$lib/state';
 	import { downloadModel, getChanges } from '$lib/api/model-read';
 	import type { ChangesDoc } from '$lib/api/types';
-	import { saveJsonToFile, saveResponseToFile } from '$lib/util/fileSave';
+	import { downloadJsonFile, saveResponseToFile } from '$lib/util/fileSave';
 	import { AlertTriangle } from '@lucide/svelte';
 	import { saveWithOptionalCr } from '$lib/state/cr';
 	import DiffRow from './DiffRow.svelte';
@@ -142,7 +142,11 @@
 				download: () => downloadModel(),
 				fetchChanges: () => getChanges(),
 				saveResponseFile: saveResponseToFile,
-				saveFile: saveJsonToFile
+				// The CR sidecar downloads straight to the browser's download folder
+				// (auto-composed name, no picker). A second showSaveFilePicker in the
+				// same click would throw — the model save above already consumed this
+				// gesture's transient user activation.
+				saveFile: (value, name) => Promise.resolve(downloadJsonFile(value, name))
 			});
 
 			if (outcome.kind === 'save-failed') {

@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { saveResponseToFile } from '../fileSave';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { downloadJsonFile, saveResponseToFile } from '../fileSave';
 
 /** Fake FileSystemFileHandle whose writable collects everything written. */
 function makeHandle(name: string): {
@@ -50,6 +50,35 @@ function makeHandle(name: string): {
 		closed: () => closedFlag
 	};
 }
+
+describe('downloadJsonFile', () => {
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	it('writes JSON via an <a download> link with no save picker', async () => {
+		// Capture the blob handed to createObjectURL so we can read it back, and
+		// neutralise the anchor click (no real navigation in the test DOM).
+		let captured: Blob | null = null;
+		const createUrl = vi
+			.spyOn(URL, 'createObjectURL')
+			.mockImplementation((blob: Blob | MediaSource) => {
+				captured = blob as Blob;
+				return 'blob:mock';
+			});
+		const revokeUrl = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+		const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+
+		const result = downloadJsonFile({ a: 1 }, 'changes.cr.json');
+
+		expect(result).toEqual({ filename: 'changes.cr.json', handle: null });
+		expect(click).toHaveBeenCalledTimes(1);
+		expect(captured).not.toBeNull();
+		expect(JSON.parse(await (captured as unknown as Blob).text())).toEqual({ a: 1 });
+		createUrl.mockRestore();
+		revokeUrl.mockRestore();
+	});
+});
 
 describe('saveResponseToFile', () => {
 	it('pipes the response body into the handle writable (streaming path)', async () => {
