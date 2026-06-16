@@ -305,11 +305,11 @@ function addIssueToOwner(issue: Issue): void {
  * adjust it (+1 per accepted batch, -1 per undo, 0 after apply-cr) or
  * refresh the summary.
  *
- * Known (accepted) artifact: an acked delta upserts the SERVER state of a
- * changed entity, transiently overwriting optimistic effects of ops still
- * queued for that same entity; the next flush re-acks them within the
- * debounce window. Exact queue-aware splicing was judged not worth the
- * complexity for a sub-flush-window flicker.
+ * Queue-aware upsert: a changed entity that still has a queued op is NOT
+ * overwritten with the (now-stale) server state — see the comment at the
+ * upsert loop. This prevents an in-flight batch's ack from reverting newer
+ * optimistic edits the user is still typing; the queued op re-acks the final
+ * value on the next flush.
  */
 export function applyDelta(d: OpsResponse): void {
 	// Structural = anything that can change paged read results (containment
@@ -337,8 +337,22 @@ export function applyDelta(d: OpsResponse): void {
 		}
 	}
 
-	for (const e of d.changed_elements) _elements.set(e.id, e);
-	for (const r of d.changed_relationships) _relationships.set(r.id, r);
+	// Upsert the server's authoritative version of changed entities — UNLESS the
+	// entity still has a queued op. While the user types fast, a batch carrying
+	// an earlier value can be in flight while newer keystrokes are already
+	// queued; clobbering with the now-stale server value reverts the input
+	// mid-typing (the "text jumps back then forward" flicker, and the
+	// controlled-input reset that makes typing feel sluggish). Skipping the
+	// upsert keeps the optimistic value; the queued op flushes and re-acks the
+	// final value once the user pauses. Mirrors the guard in seedElements().
+	for (const e of d.changed_elements) {
+		if (hasQueuedOpFor(e.id)) continue;
+		_elements.set(e.id, e);
+	}
+	for (const r of d.changed_relationships) {
+		if (hasQueuedOpFor(r.id)) continue;
+		_relationships.set(r.id, r);
+	}
 	for (const id of d.deleted_element_ids) _elements.delete(id);
 	for (const id of d.deleted_relationship_ids) _relationships.delete(id);
 

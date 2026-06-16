@@ -372,6 +372,49 @@ describe('emit', () => {
 		expect(hasPendingOps()).toBe(false);
 	});
 
+	it('does not clobber a newer queued optimistic edit when an in-flight batch acks', async () => {
+		// Reproduces the "text reverts then jumps forward" flicker while typing
+		// fast: a batch carrying an earlier value is in flight while the user
+		// keeps typing; its ack must NOT overwrite the newer optimistic value
+		// that is still queued for the same entity.
+		const gates: Array<() => void> = [];
+		server.use(
+			http.post(`${BASE}/model/ops`, async ({ request }) => {
+				const body = (await request.json()) as {
+					ops: Array<{ properties_patch?: Record<string, unknown> }>;
+				};
+				// the server echoes back the state of THIS batch (the value that
+				// was current when the batch was flushed)
+				const name = body.ops[0].properties_patch?.name ?? 'A';
+				await new Promise<void>((resolve) => gates.push(resolve));
+				return HttpResponse.json(
+					delta({ model_rev: getModelRev() + 1, changed_elements: [el('e1', { name }, 9)] })
+				);
+			})
+		);
+		applyDelta(delta({ model_rev: 1, changed_elements: [el('e1', { name: 'A' }, 1)] }));
+
+		emit({ kind: 'update_element', id: 'e1', properties_patch: { name: 'B' } });
+		const done = flushNow();
+		await vi.waitFor(() => expect(gates).toHaveLength(1));
+		// batch {name:'B'} is in flight; the user keeps typing -> 'C'
+		emit({ kind: 'update_element', id: 'e1', properties_patch: { name: 'C' } });
+		expect(getCachedElements().get('e1')?.properties.name).toBe('C');
+
+		// the stale 'B' ack lands while 'C' is still queued
+		gates[0]();
+		await vi.waitFor(() => expect(gates).toHaveLength(2));
+		// must still read 'C' — no revert flicker
+		expect(getCachedElements().get('e1')?.properties.name).toBe('C');
+
+		// batch {name:'C'} acks (queue now empty) and the value is confirmed
+		gates[1]();
+		await done;
+		await flushNow();
+		expect(getCachedElements().get('e1')?.properties.name).toBe('C');
+		expect(hasPendingOps()).toBe(false);
+	});
+
 	it('enters conflict state on 409: error surfaced, summary refetched, flushing frozen', async () => {
 		let opsRequests = 0;
 		server.use(
