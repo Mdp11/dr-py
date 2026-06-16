@@ -13,7 +13,7 @@ Production uses Postgres (psycopg v3); the schema there is owned by Alembic, so
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Generator
 
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
@@ -84,8 +84,12 @@ def drop_all() -> None:
     Base.metadata.drop_all(get_engine())
 
 
-def get_db() -> Iterator[Session]:
-    """FastAPI dependency: yield a DB session, closing it afterwards."""
+def get_db() -> Generator[Session, None, None]:
+    """FastAPI dependency: yield a DB session, closing it afterwards.
+
+    Annotated ``Generator`` (not ``Iterator``) because tests drive it manually
+    via ``next()``/``.close()`` — ``.close()`` lives on ``Generator``.
+    """
     if _SessionLocal is None:
         raise RuntimeError("engine not initialised; call init_engine() first")
     session = _SessionLocal()

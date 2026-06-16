@@ -11,6 +11,7 @@ os.environ.setdefault("DATA_ROVER_DATABASE_URL", "sqlite://")
 os.environ.setdefault("DATA_ROVER_DEV_SEED", "false")
 
 from data_rover.api import db  # noqa: E402
+from data_rover.api import db_models  # noqa: E402,F401  (registers ORM tables)
 from data_rover.api.session import reset_session  # noqa: E402
 
 
