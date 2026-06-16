@@ -15,6 +15,7 @@
 		getModelRev,
 		getModelSummary,
 		getUndoDepth,
+		getViewChangesCount,
 		hasPendingOps,
 		isRunning,
 		refreshChangesBadge,
@@ -24,7 +25,6 @@
 	} from '$lib/state';
 	import { getView } from '$lib/state';
 	import { runValidation } from '$lib/state/validate-action';
-	import { saveJsonToFile } from '$lib/util/fileSave';
 	import { AlertCircle, AlertTriangle, FolderOpen, Info, RefreshCw, Undo2 } from '@lucide/svelte';
 	import ApplyCrDialog from './ApplyCrDialog.svelte';
 	import LoadFilesDialog from './LoadFilesDialog.svelte';
@@ -39,8 +39,10 @@
 	const metamodelFilename = $derived(getMetamodelFilename());
 	const viewFilename = $derived(getViewFilename());
 	const totalChanges = $derived(getChangesBadgeTotal());
+	const viewChanges = $derived(getViewChangesCount());
+	const combinedChanges = $derived(totalChanges + viewChanges);
 	const pending = $derived(hasPendingOps());
-	const saveDisabled = $derived(summary === null || (totalChanges === 0 && !pending));
+	const saveDisabled = $derived(summary === null || (combinedChanges === 0 && !pending));
 	const validating = $derived(isRunning());
 	const validateDisabled = $derived(validating || summary === null);
 	const undoDisabled = $derived(summary === null || getUndoDepth() === 0);
@@ -85,16 +87,6 @@
 		loadOpen = true;
 	}
 
-	async function onExportView(): Promise<void> {
-		if (view === null) return;
-		try {
-			const suggested = viewFilename ?? `${view.name || 'view'}.view.json`;
-			await saveJsonToFile(view, suggested);
-		} catch (err) {
-			console.error('Export view failed', err);
-		}
-	}
-
 	let undoing = $state(false);
 
 	async function onUndo(): Promise<void> {
@@ -130,7 +122,9 @@
 			>
 				<dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
 					<dt class="text-zinc-500">Metamodel</dt>
-					<dd class="font-mono text-zinc-200">{metamodelFilename ?? (metamodel ? 'loaded' : '—')}</dd>
+					<dd class="font-mono text-zinc-200">
+						{metamodelFilename ?? (metamodel ? 'loaded' : '—')}
+					</dd>
 					<dt class="text-zinc-500">Model</dt>
 					<dd class="font-mono text-zinc-200">{modelFilename ?? (summary ? 'loaded' : '—')}</dd>
 					<dt class="text-zinc-500">View</dt>
@@ -142,16 +136,6 @@
 		<Button variant="ghost" size="sm" class="h-7 gap-1 text-xs" onclick={onLoadClick}>
 			<FolderOpen class="h-3 w-3" />
 			Load Model
-		</Button>
-
-		<Button
-			variant="ghost"
-			size="sm"
-			class="h-7 text-xs"
-			disabled={view === null}
-			onclick={onExportView}
-		>
-			Export view
 		</Button>
 
 		<div class="flex items-center gap-2">
@@ -232,12 +216,25 @@
 			disabled={saveDisabled}
 			onclick={() => setDiffDrawerOpen(true)}
 		>
-			{totalChanges > 0 ? `Save (${totalChanges})` : 'Save'}
+			Save
 		</Button>
-		<span class="font-mono text-xs {totalChanges > 0 ? 'text-red-400' : 'text-zinc-500'}">
-			● {totalChanges}
-			{totalChanges === 1 ? 'change' : 'changes'}
-		</span>
+		<div class="group relative flex items-center">
+			<span class="font-mono text-xs {combinedChanges > 0 ? 'text-red-400' : 'text-zinc-500'}">
+				● {combinedChanges}
+				{combinedChanges === 1 ? 'change' : 'changes'}
+			</span>
+			<div
+				role="tooltip"
+				class="pointer-events-none absolute right-0 top-full z-30 hidden w-max rounded border border-zinc-800 bg-zinc-900 p-2 shadow-lg group-hover:block group-focus-within:block"
+			>
+				<dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+					<dt class="text-zinc-500">Model</dt>
+					<dd class="text-right font-mono text-zinc-200">{totalChanges}</dd>
+					<dt class="text-zinc-500">View</dt>
+					<dd class="text-right font-mono text-zinc-200">{viewChanges}</dd>
+				</dl>
+			</div>
+		</div>
 	</div>
 </header>
 
