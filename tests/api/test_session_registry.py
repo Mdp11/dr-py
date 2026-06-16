@@ -47,7 +47,7 @@ def test_reset_drops_all_sessions() -> None:
     assert reg.get("p1") is not first
 
 
-def test_default_project_id_is_a_nonempty_str() -> None:
+def test_default_project_id_is_default() -> None:
     assert DEFAULT_PROJECT_ID == "default"
 
 

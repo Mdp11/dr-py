@@ -194,5 +194,11 @@ def reset_session() -> None:
 
     A fresh ``Session`` is created on the next ``get`` for any id, so this is
     field-agnostic — adding a ``Session`` field can never leak across resets.
+
+    Unlike the former in-place field-copy reset, this replaces sessions by
+    identity: a caller holding a reference to a pre-reset ``Session`` keeps
+    seeing the old object and must call ``get_session()`` again for the live
+    one. All current callers (request-scoped ``Depends``; tests that reset then
+    re-fetch) already re-fetch, so this is safe.
     """
     _registry.reset()
