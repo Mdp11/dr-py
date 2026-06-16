@@ -17,7 +17,9 @@ export {
 	getViewFilename,
 	setViewFilename,
 	getFileHandle,
-	setFileHandle
+	setFileHandle,
+	getViewFileHandle,
+	setViewFileHandle
 } from './file.svelte';
 export {
 	adoptSummary,

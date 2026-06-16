@@ -6,6 +6,7 @@
 	import * as Tabs from '$lib/components/ui/tabs';
 	import {
 		changesDocToDiff,
+		ensureElement,
 		flushNow,
 		getFileHandle,
 		getFilename,
@@ -17,20 +18,20 @@
 		setFilename,
 		getView,
 		getViewChanges,
-		getViewChangesCount,
+		getViewFileHandle,
 		getViewFilename,
+		setViewFileHandle,
 		setViewFilename,
 		setViewBaseline,
 		getCachedElements,
 		formatViewChange,
-		type Diff
+		type Diff,
+		type ViewChange
 	} from '$lib/state';
-	import type { ViewChange } from '$lib/state';
 	import { downloadModel, getChanges } from '$lib/api/model-read';
 	import type { ChangesDoc } from '$lib/api/types';
 	import { downloadJsonFile, saveJsonToFile, saveResponseToFile } from '$lib/util/fileSave';
 	import { elementDisplayName } from '$lib/util/element-name';
-	import { getElement } from '$lib/api/elements';
 	import { AlertTriangle } from '@lucide/svelte';
 	import { saveWithOptionalCr } from '$lib/state/cr';
 	import DiffRow from './DiffRow.svelte';
@@ -78,7 +79,7 @@
 					}
 					const cache = getCachedElements();
 					for (const id of ids) {
-						if (!cache.has(id)) void getElement(id).catch(() => undefined);
+						if (!cache.has(id)) void ensureElement(id);
 					}
 				} catch (err) {
 					if (seq !== loadSeq) return;
@@ -134,15 +135,15 @@
 
 	const view = $derived(getView());
 	const viewChangeList = $derived(getViewChanges());
-	const viewChangeCount = $derived(getViewChangesCount());
+	const viewChangeCount = $derived(viewChangeList.length);
 	const viewFilename = $derived(getViewFilename());
 
 	// Resolve element display names for the view preview from the model cache,
 	// falling back to the raw id. Uncached ids are best-effort fetched on open.
-	const resolveName = $derived((id: string): string => {
+	const resolveName = (id: string): string => {
 		const el = getCachedElements().get(id);
 		return el ? elementDisplayName(el) : id;
-	});
+	};
 
 	function changeKey(c: ViewChange): string {
 		if (c.kind === 'folder-added' || c.kind === 'folder-removed') {
@@ -166,9 +167,9 @@
 		viewSaveError = null;
 		try {
 			const suggested = viewFilename ?? `${current.name || 'view'}.view.json`;
-			const res = await saveJsonToFile(current, suggested, getFileHandle());
+			const res = await saveJsonToFile(current, suggested, getViewFileHandle());
 			setViewFilename(res.filename);
-			if (res.handle) setFileHandle(res.handle);
+			if (res.handle) setViewFileHandle(res.handle);
 			// Rebaseline: the file now matches the live view, so the count drops to 0.
 			setViewBaseline(current);
 		} catch (err) {
