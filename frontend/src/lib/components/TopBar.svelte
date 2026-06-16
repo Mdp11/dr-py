@@ -3,15 +3,14 @@
 	import { resolve } from '$app/paths';
 	import { Button } from '$lib/components/ui/button';
 	import {
-		adoptSummary,
-		clearChangesBadge,
-		clearIssues,
 		getChangesBadgeTotal,
 		getFilename,
 		getIssues,
 		getLastError,
 		getLastRunAt,
 		getMetamodel,
+		getMetamodelFilename,
+		getViewFilename,
 		getModelGeneration,
 		getModelRev,
 		getModelSummary,
@@ -20,34 +19,25 @@
 		isRunning,
 		refreshChangesBadge,
 		refreshSummary,
-		resetModelStore,
 		setDiffDrawerOpen,
-		setFileHandle,
-		setFilename,
-		setMetamodel,
 		undo
 	} from '$lib/state';
-	import type { Metamodel, ModelSummary } from '$lib/api/types';
 	import { getView } from '$lib/state';
 	import { runValidation } from '$lib/state/validate-action';
 	import { saveJsonToFile } from '$lib/util/fileSave';
-	import { AlertCircle, AlertTriangle, RefreshCw, Undo2 } from '@lucide/svelte';
+	import { AlertCircle, AlertTriangle, FolderOpen, Info, RefreshCw, Undo2 } from '@lucide/svelte';
 	import ApplyCrDialog from './ApplyCrDialog.svelte';
-	import LoadMetamodelDialog from './LoadMetamodelDialog.svelte';
-	import LoadModelDialog from './LoadModelDialog.svelte';
-	import LoadViewDialog from './LoadViewDialog.svelte';
+	import LoadFilesDialog from './LoadFilesDialog.svelte';
 
 	let applyCrOpen = $state(false);
-	let loadMetamodelOpen = $state(false);
-	let loadModelOpen = $state(false);
-	let loadViewOpen = $state(false);
-	let metamodelLabel: string | null = $state(null);
-	let viewFilename: string | null = $state(null);
+	let loadOpen = $state(false);
 	const view = $derived(getView());
 
 	const metamodel = $derived(getMetamodel());
 	const summary = $derived(getModelSummary());
 	const modelFilename = $derived(getFilename());
+	const metamodelFilename = $derived(getMetamodelFilename());
+	const viewFilename = $derived(getViewFilename());
 	const totalChanges = $derived(getChangesBadgeTotal());
 	const pending = $derived(hasPendingOps());
 	const saveDisabled = $derived(summary === null || (totalChanges === 0 && !pending));
@@ -84,50 +74,15 @@
 		return window.confirm(message);
 	}
 
-	function onLoadMetamodelClick(): void {
+	function onLoadClick(): void {
 		if (
 			!confirmDiscardChanges(
-				'Loading a new metamodel discards the current model and unsaved changes. Continue?'
+				'Loading new files discards the current model and unsaved changes. Continue?'
 			)
 		) {
 			return;
 		}
-		loadMetamodelOpen = true;
-	}
-
-	function onLoadModelClick(): void {
-		if (!confirmDiscardChanges('Loading a new model discards your unsaved changes. Continue?')) {
-			return;
-		}
-		loadModelOpen = true;
-	}
-
-	function onMetamodelUploaded(mm: Metamodel, filename: string): void {
-		// uploading a metamodel clears the active model on the backend
-		setMetamodel(mm);
-		metamodelLabel = filename;
-		resetModelStore();
-		setFilename(null);
-		setFileHandle(null);
-		clearIssues();
-		clearChangesBadge();
-	}
-
-	function onModelLoaded(loaded: ModelSummary, filename: string): void {
-		resetModelStore();
-		adoptSummary(loaded);
-		setFilename(filename);
-		setFileHandle(null);
-		clearIssues();
-		clearChangesBadge();
-	}
-
-	function onLoadViewClick(): void {
-		loadViewOpen = true;
-	}
-
-	function onViewLoaded(_view: unknown, filename: string): void {
-		viewFilename = filename;
+		loadOpen = true;
 	}
 
 	async function onExportView(): Promise<void> {
@@ -161,56 +116,43 @@
 	<div class="flex items-center gap-3">
 		<span class="font-semibold tracking-tight text-zinc-100">Data Rover</span>
 
-		<div class="flex items-center gap-2">
-			<span class="text-xs text-zinc-500">Metamodel:</span>
-			<span class="font-mono text-xs text-zinc-300">
-				{metamodelLabel ?? (metamodel ? 'loaded' : '—')}
-			</span>
-			<Button variant="ghost" size="sm" class="h-7 text-xs" onclick={onLoadMetamodelClick}>
-				Load metamodel...
-			</Button>
+		<div class="group relative flex items-center">
+			<button
+				type="button"
+				class="flex h-7 w-7 items-center justify-center rounded text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+				aria-label="Loaded files"
+			>
+				<Info class="h-4 w-4" />
+			</button>
+			<div
+				role="tooltip"
+				class="pointer-events-none absolute left-0 top-full z-30 hidden w-max rounded border border-zinc-800 bg-zinc-900 p-2 shadow-lg group-hover:block group-focus-within:block"
+			>
+				<dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+					<dt class="text-zinc-500">Metamodel</dt>
+					<dd class="font-mono text-zinc-200">{metamodelFilename ?? (metamodel ? 'loaded' : '—')}</dd>
+					<dt class="text-zinc-500">Model</dt>
+					<dd class="font-mono text-zinc-200">{modelFilename ?? (summary ? 'loaded' : '—')}</dd>
+					<dt class="text-zinc-500">View</dt>
+					<dd class="font-mono text-zinc-200">{view ? (viewFilename ?? view.name) : '—'}</dd>
+				</dl>
+			</div>
 		</div>
 
-		<div class="flex items-center gap-2">
-			<span class="text-xs text-zinc-500">Model:</span>
-			<span class="font-mono text-xs text-zinc-300">
-				{modelFilename ?? (summary ? 'loaded' : '—')}
-			</span>
-			<Button
-				variant="ghost"
-				size="sm"
-				class="h-7 text-xs"
-				disabled={metamodel === null}
-				onclick={onLoadModelClick}
-			>
-				Load model...
-			</Button>
-		</div>
+		<Button variant="ghost" size="sm" class="h-7 gap-1 text-xs" onclick={onLoadClick}>
+			<FolderOpen class="h-3 w-3" />
+			Load Model
+		</Button>
 
-		<div class="flex items-center gap-2">
-			<span class="text-xs text-zinc-500">View:</span>
-			<span class="font-mono text-xs text-zinc-300">
-				{view ? (viewFilename ?? view.name) : '—'}
-			</span>
-			<Button
-				variant="ghost"
-				size="sm"
-				class="h-7 text-xs"
-				disabled={summary === null}
-				onclick={onLoadViewClick}
-			>
-				Load view...
-			</Button>
-			<Button
-				variant="ghost"
-				size="sm"
-				class="h-7 text-xs"
-				disabled={view === null}
-				onclick={onExportView}
-			>
-				Export view
-			</Button>
-		</div>
+		<Button
+			variant="ghost"
+			size="sm"
+			class="h-7 text-xs"
+			disabled={view === null}
+			onclick={onExportView}
+		>
+			Export view
+		</Button>
 
 		<div class="flex items-center gap-2">
 			<a
@@ -300,6 +242,4 @@
 </header>
 
 <ApplyCrDialog bind:open={applyCrOpen} />
-<LoadMetamodelDialog bind:open={loadMetamodelOpen} onUploaded={onMetamodelUploaded} />
-<LoadModelDialog bind:open={loadModelOpen} onLoaded={onModelLoaded} />
-<LoadViewDialog bind:open={loadViewOpen} onLoaded={onViewLoaded} />
+<LoadFilesDialog bind:open={loadOpen} />

@@ -135,7 +135,7 @@
 </script>
 
 {#snippet groupBlock(direction: 'out' | 'in', group: Group)}
-	{@const arrow = direction === 'out' ? '→' : '←'}
+	{@const roleLabel = direction === 'out' ? 'to' : 'from'}
 	{@const open = isGroupOpen(direction, group.type_name)}
 	<div class="flex flex-col">
 		<button
@@ -153,7 +153,9 @@
 					{@const otherId = direction === 'out' ? rel.target_id : rel.source_id}
 					{@const other = findElement(otherId)}
 					<li class="group/row flex items-center gap-1 py-0.5 pl-3 pr-1 hover:bg-zinc-900">
-						<span class="font-mono text-[10px] text-zinc-500">{arrow}</span>
+						<span class="shrink-0 rounded bg-zinc-800 px-1 font-mono text-[10px] text-zinc-400"
+							>{roleLabel}</span
+						>
 						<button
 							type="button"
 							class="flex flex-1 items-center gap-1 truncate rounded text-left text-[11px] text-zinc-200 hover:text-blue-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"

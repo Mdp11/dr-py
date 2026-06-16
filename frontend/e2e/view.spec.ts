@@ -1,6 +1,7 @@
 import { test, expect, type Locator, type Page, type Request } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { loadFiles } from './helpers/load';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const METAMODEL_PATH = join(__dirname, '..', '..', 'examples', 'example.metamodel.yaml');
@@ -8,66 +9,55 @@ const METAMODEL_PATH = join(__dirname, '..', '..', 'examples', 'example.metamode
 const BLOCK_ONE_ID = 'view-test-block-1';
 const BLOCK_TWO_ID = 'view-test-block-2';
 
-async function bootstrap(page: import('@playwright/test').Page): Promise<void> {
+const MODEL = {
+	elements: [
+		{ id: BLOCK_ONE_ID, type_name: 'Block', properties: { name: 'Alpha', mass: 1.0 }, rev: 0 },
+		{ id: BLOCK_TWO_ID, type_name: 'Block', properties: { name: 'Beta', mass: 2.0 }, rev: 0 }
+	],
+	relationships: []
+};
+
+/** The view used by the curation tests: "Grouped" holds Alpha; Beta stays pooled. */
+const OPERATIONAL_VIEW = {
+	name: 'Operational',
+	folders: [{ name: 'Grouped', folders: [], elements: [BLOCK_ONE_ID] }]
+};
+
+/**
+ * Load metamodel + the two-Block model (and an optional view) in a single pass
+ * through the load dialog.
+ */
+async function bootstrap(page: Page, view?: object): Promise<void> {
 	// The backend session persists across page loads; loading a metamodel/model
 	// over leftover unsaved changes pops a window.confirm that Playwright would
-	// auto-dismiss. Accept it so the load dialogs can open.
+	// auto-dismiss. Accept it so the load dialog can open.
 	page.on('dialog', (dialog) => void dialog.accept());
 	await page.goto('/');
 
-	await page.getByRole('button', { name: 'Load metamodel...' }).click();
-	const mmDialog = page.getByRole('dialog', { name: /load metamodel/i });
-	await mmDialog.locator('input[type="file"]').setInputFiles(METAMODEL_PATH);
-	await mmDialog.getByRole('button', { name: 'Load', exact: true }).click();
-	await expect(mmDialog).toBeHidden();
-
-	const model = {
-		elements: [
-			{
-				id: BLOCK_ONE_ID,
-				type_name: 'Block',
-				properties: { name: 'Alpha', mass: 1.0 },
-				rev: 0
-			},
-			{
-				id: BLOCK_TWO_ID,
-				type_name: 'Block',
-				properties: { name: 'Beta', mass: 2.0 },
-				rev: 0
-			}
-		],
-		relationships: []
-	};
-
-	await page.getByRole('button', { name: 'Load model...' }).click();
-	const modelDialog = page.getByRole('dialog', { name: /load model/i });
-	await modelDialog.locator('input[type="file"]').setInputFiles({
-		name: 'view-spec.json',
-		mimeType: 'application/json',
-		buffer: Buffer.from(JSON.stringify(model))
+	await loadFiles(page, {
+		metamodel: METAMODEL_PATH,
+		model: {
+			name: 'view-spec.json',
+			mimeType: 'application/json',
+			buffer: Buffer.from(JSON.stringify(MODEL))
+		},
+		view:
+			view === undefined
+				? undefined
+				: {
+						name: 'spec.view.json',
+						mimeType: 'application/json',
+						buffer: Buffer.from(JSON.stringify(view))
+					}
 	});
-	await modelDialog.getByRole('button', { name: 'Load', exact: true }).click();
-	await expect(modelDialog).toBeHidden();
 }
 
 test('load a view: folders render with their placed elements (curated scope)', async ({ page }) => {
 	test.setTimeout(120_000);
-	await bootstrap(page);
-
-	const view = {
+	await bootstrap(page, {
 		name: 'Operational',
 		folders: [{ name: 'Grouped', folders: [], elements: [BLOCK_ONE_ID] }]
-	};
-
-	await page.getByRole('button', { name: 'Load view...' }).click();
-	const dialog = page.getByRole('dialog', { name: /load view/i });
-	await dialog.locator('input[type="file"]').setInputFiles({
-		name: 'operational.view.json',
-		mimeType: 'application/json',
-		buffer: Buffer.from(JSON.stringify(view))
 	});
-	await dialog.getByRole('button', { name: 'Load', exact: true }).click();
-	await expect(dialog).toBeHidden();
 
 	await expect(page.getByLabel('Active view').getByText('Operational')).toBeVisible();
 
@@ -90,22 +80,10 @@ test('view referencing a missing element produces a warning in the Issues panel'
 	page
 }) => {
 	test.setTimeout(120_000);
-	await bootstrap(page);
-
-	const view = {
+	await bootstrap(page, {
 		name: 'BrokenRefs',
 		folders: [{ name: 'Group', folders: [], elements: ['does-not-exist'] }]
-	};
-
-	await page.getByRole('button', { name: 'Load view...' }).click();
-	const dialog = page.getByRole('dialog', { name: /load view/i });
-	await dialog.locator('input[type="file"]').setInputFiles({
-		name: 'broken.view.json',
-		mimeType: 'application/json',
-		buffer: Buffer.from(JSON.stringify(view))
 	});
-	await dialog.getByRole('button', { name: 'Load', exact: true }).click();
-	await expect(dialog).toBeHidden();
 
 	await page.getByRole('button', { name: 'Validate' }).click();
 	await page.getByRole('tab', { name: 'Issues' }).click();
@@ -124,21 +102,12 @@ test('view referencing a missing element produces a warning in the Issues panel'
 
 type Folder = { name: string; folders: Folder[]; elements: string[] };
 
-/** Load a view: "Grouped" holds Alpha (BLOCK_ONE_ID); Beta stays in the pool. */
+/**
+ * Bootstrap with the curation view loaded: "Grouped" holds Alpha (BLOCK_ONE_ID);
+ * Beta stays in the pool.
+ */
 async function loadView(page: Page): Promise<void> {
-	const view = {
-		name: 'Operational',
-		folders: [{ name: 'Grouped', folders: [], elements: [BLOCK_ONE_ID] }]
-	};
-	await page.getByRole('button', { name: 'Load view...' }).click();
-	const dialog = page.getByRole('dialog', { name: /load view/i });
-	await dialog.locator('input[type="file"]').setInputFiles({
-		name: 'operational.view.json',
-		mimeType: 'application/json',
-		buffer: Buffer.from(JSON.stringify(view))
-	});
-	await dialog.getByRole('button', { name: 'Load', exact: true }).click();
-	await expect(dialog).toBeHidden();
+	await bootstrap(page, OPERATIONAL_VIEW);
 	await expect(
 		page.getByRole('tree', { name: /containment tree/i }).getByText('Grouped')
 	).toBeVisible();
@@ -224,7 +193,6 @@ test('view curation: include a pooled element into a folder (persists across rel
 	page
 }) => {
 	test.setTimeout(120_000);
-	await bootstrap(page);
 	await loadView(page);
 
 	const t = tree(page);
@@ -260,7 +228,6 @@ test('view curation: include a pooled element into a folder (persists across rel
 
 test('view curation: exclude a placed element back to the pool', async ({ page }) => {
 	test.setTimeout(120_000);
-	await bootstrap(page);
 	await loadView(page);
 
 	// Exclude: drag Alpha from Grouped onto the "Not in view" panel header.
@@ -276,7 +243,6 @@ test('view curation: exclude a placed element back to the pool', async ({ page }
 
 test('view curation: reorder elements within a folder (upward)', async ({ page }) => {
 	test.setTimeout(120_000);
-	await bootstrap(page);
 	await loadView(page);
 
 	// Build a two-element folder: include Beta so Grouped = [Alpha, Beta].
@@ -304,7 +270,6 @@ test('view curation: reorder elements within a folder (upward)', async ({ page }
 
 test('view curation: search result dragged into a folder is placed there', async ({ page }) => {
 	test.setTimeout(120_000);
-	await bootstrap(page);
 	await loadView(page);
 
 	// Type a known element's name; wait for its row in the search dropdown.
@@ -336,7 +301,6 @@ test('excluded pool: collapsed by default (no fetch), expands, and state persist
 		}
 	});
 
-	await bootstrap(page);
 	await loadView(page);
 
 	// Collapsed by default: header visible, body absent, and NO excluded fetch fired.

@@ -17,7 +17,9 @@ import {
 	resetModelStore,
 	setFileHandle,
 	setFilename,
-	setMetamodel
+	setMetamodel,
+	setMetamodelFilename,
+	setViewFilename
 } from '$lib/state';
 
 let started = false;
@@ -37,6 +39,8 @@ export async function maybeAutoload(): Promise<void> {
 		const mmBody = isYaml(mmName) ? mmText : JSON.parse(mmText);
 		const mm = await metamodelApi.uploadMetamodel(mmBody);
 		setMetamodel(mm);
+		setMetamodelFilename(mmName);
+		setViewFilename(null);
 		resetModelStore();
 		setFilename(null);
 		setFileHandle(null);
@@ -66,6 +70,7 @@ export async function maybeAutoload(): Promise<void> {
 		const viewText = await fetchText('/__autoload/view');
 		const view = ViewSchema.parse(JSON.parse(viewText));
 		await pushView(view);
+		setViewFilename(viewName);
 	} catch (err) {
 		console.error('[autoload] failed:', err);
 	}

@@ -9,7 +9,16 @@ export {
 } from './ops';
 export { mergePatch } from './apply';
 export { computeDiff, deepEqual, type Diff, type EntityDiff, type EntityStatus } from './diff';
-export { getFilename, setFilename, getFileHandle, setFileHandle } from './file.svelte';
+export {
+	getFilename,
+	setFilename,
+	getMetamodelFilename,
+	setMetamodelFilename,
+	getViewFilename,
+	setViewFilename,
+	getFileHandle,
+	setFileHandle
+} from './file.svelte';
 export {
 	adoptSummary,
 	applyDelta,

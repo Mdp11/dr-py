@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { loadFiles } from './helpers/load';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const METAMODEL_PATH = join(__dirname, '..', '..', 'examples', 'example.metamodel.yaml');
@@ -11,31 +12,18 @@ const MODEL = JSON.stringify({
 	relationships: []
 });
 
-/** Load the example metamodel + the one-Block model via the file pickers. */
+/** Load the example metamodel + the one-Block model via the single load dialog. */
 async function loadExample(page: Page): Promise<void> {
 	// The backend session persists across page loads; loading a metamodel/model
 	// over leftover unsaved changes pops a window.confirm that Playwright would
-	// auto-dismiss. Accept it so the load dialogs can open.
+	// auto-dismiss. Accept it so the load dialog can open.
 	page.on('dialog', (dialog) => void dialog.accept());
 	await page.goto('/');
 
-	await page.getByRole('button', { name: 'Load metamodel...' }).click();
-	const mmDialog = page.getByRole('dialog', { name: /load metamodel/i });
-	await expect(mmDialog).toBeVisible();
-	await mmDialog.locator('input[type="file"]').setInputFiles(METAMODEL_PATH);
-	await mmDialog.getByRole('button', { name: 'Load', exact: true }).click();
-	await expect(mmDialog).toBeHidden();
-
-	await page.getByRole('button', { name: 'Load model...' }).click();
-	const modelDialog = page.getByRole('dialog', { name: /load model/i });
-	await expect(modelDialog).toBeVisible();
-	await modelDialog.locator('input[type="file"]').setInputFiles({
-		name: 'model.json',
-		mimeType: 'application/json',
-		buffer: Buffer.from(MODEL)
+	await loadFiles(page, {
+		metamodel: METAMODEL_PATH,
+		model: { name: 'model.json', mimeType: 'application/json', buffer: Buffer.from(MODEL) }
 	});
-	await modelDialog.getByRole('button', { name: 'Load', exact: true }).click();
-	await expect(modelDialog).toBeHidden();
 }
 
 test('advanced search finds an element and opens its detail', async ({ page }) => {

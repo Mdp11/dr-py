@@ -1,9 +1,16 @@
 import { test, expect, type Download } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { loadFiles } from './helpers/load';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const METAMODEL_PATH = join(__dirname, '..', '..', 'examples', 'example.metamodel.yaml');
+
+const EMPTY_MODEL = {
+	name: 'empty.json',
+	mimeType: 'application/json',
+	buffer: Buffer.from('{"elements": [], "relationships": []}')
+};
 
 const RUN_ID = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 const ENGINE_NAME = `smoke-engine-${RUN_ID}`;
@@ -21,25 +28,8 @@ test('load metamodel + empty model -> create element -> see in diff', async ({ p
 
 	await page.goto('/');
 
-	// --- 1. Load metamodel via file picker -----------------------------------
-	await page.getByRole('button', { name: 'Load metamodel...' }).click();
-	const mmDialog = page.getByRole('dialog', { name: /load metamodel/i });
-	await expect(mmDialog).toBeVisible();
-	await mmDialog.locator('input[type="file"]').setInputFiles(METAMODEL_PATH);
-	await mmDialog.getByRole('button', { name: 'Load', exact: true }).click();
-	await expect(mmDialog).toBeHidden();
-
-	// --- 2. Load an empty model file ----------------------------------------
-	await page.getByRole('button', { name: 'Load model...' }).click();
-	const modelDialog = page.getByRole('dialog', { name: /load model/i });
-	await expect(modelDialog).toBeVisible();
-	await modelDialog.locator('input[type="file"]').setInputFiles({
-		name: 'empty.json',
-		mimeType: 'application/json',
-		buffer: Buffer.from('{"elements": [], "relationships": []}')
-	});
-	await modelDialog.getByRole('button', { name: 'Load', exact: true }).click();
-	await expect(modelDialog).toBeHidden();
+	// --- 1. Load the metamodel + an empty model via the single load dialog ---
+	await loadFiles(page, { metamodel: METAMODEL_PATH, model: EMPTY_MODEL });
 
 	// --- 3. Create a Block element via the Tree "New element" popover --------
 	await page.getByRole('button', { name: 'New element' }).click();
@@ -74,21 +64,14 @@ test('Export CR checkbox produces a second .cr.json download', async ({ page }) 
 	await page.goto('/');
 
 	// Same setup as the first smoke test.
-	await page.getByRole('button', { name: 'Load metamodel...' }).click();
-	const mmDialog = page.getByRole('dialog', { name: /load metamodel/i });
-	await mmDialog.locator('input[type="file"]').setInputFiles(METAMODEL_PATH);
-	await mmDialog.getByRole('button', { name: 'Load', exact: true }).click();
-	await expect(mmDialog).toBeHidden();
-
-	await page.getByRole('button', { name: 'Load model...' }).click();
-	const modelDialog = page.getByRole('dialog', { name: /load model/i });
-	await modelDialog.locator('input[type="file"]').setInputFiles({
-		name: 'cr-smoke.json',
-		mimeType: 'application/json',
-		buffer: Buffer.from('{"elements": [], "relationships": []}')
+	await loadFiles(page, {
+		metamodel: METAMODEL_PATH,
+		model: {
+			name: 'cr-smoke.json',
+			mimeType: 'application/json',
+			buffer: Buffer.from('{"elements": [], "relationships": []}')
+		}
 	});
-	await modelDialog.getByRole('button', { name: 'Load', exact: true }).click();
-	await expect(modelDialog).toBeHidden();
 
 	// Create an element so there's something to save.
 	await page.getByRole('button', { name: 'New element' }).click();

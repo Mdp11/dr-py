@@ -4,6 +4,10 @@
 // client mirror is `model.svelte.ts`.)
 
 let _filename: string | null = $state(null);
+// Filenames of the loaded metamodel/view files. Display-only (shown in the
+// TopBar info tooltip); the model filename above doubles as the Save name.
+let _metamodelFilename: string | null = $state(null);
+let _viewFilename: string | null = $state(null);
 // File System Access API handle (Chromium-only). When set, Save reuses it so
 // subsequent saves don't re-prompt for a location.
 let _fileHandle: FileSystemFileHandle | null = $state(null);
@@ -14,6 +18,22 @@ export function getFilename(): string | null {
 
 export function setFilename(name: string | null): void {
 	_filename = name;
+}
+
+export function getMetamodelFilename(): string | null {
+	return _metamodelFilename;
+}
+
+export function setMetamodelFilename(name: string | null): void {
+	_metamodelFilename = name;
+}
+
+export function getViewFilename(): string | null {
+	return _viewFilename;
+}
+
+export function setViewFilename(name: string | null): void {
+	_viewFilename = name;
 }
 
 export function getFileHandle(): FileSystemFileHandle | null {

@@ -1,6 +1,7 @@
 import { test, expect, type Locator, type Page, type Request } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { loadFiles } from './helpers/load';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const METAMODEL_PATH = join(__dirname, '..', '..', 'examples', 'example.metamodel.yaml');
@@ -10,18 +11,16 @@ const BETA = 'dnd-block-beta';
 
 type Folder = { name: string; folders: Folder[]; elements: string[] };
 
+/**
+ * Load metamodel + a two-Block model + a view ("Grouped" holds Alpha, "Target"
+ * is empty) in a single pass through the load dialog.
+ */
 async function bootstrap(page: Page): Promise<void> {
 	// The backend session persists across page loads; loading a metamodel/model
 	// over leftover unsaved changes pops a window.confirm that Playwright would
-	// auto-dismiss. Accept it so the load dialogs can open.
+	// auto-dismiss. Accept it so the load dialog can open.
 	page.on('dialog', (dialog) => void dialog.accept());
 	await page.goto('/');
-
-	await page.getByRole('button', { name: 'Load metamodel...' }).click();
-	const mmDialog = page.getByRole('dialog', { name: /load metamodel/i });
-	await mmDialog.locator('input[type="file"]').setInputFiles(METAMODEL_PATH);
-	await mmDialog.getByRole('button', { name: 'Load', exact: true }).click();
-	await expect(mmDialog).toBeHidden();
 
 	const model = {
 		elements: [
@@ -30,20 +29,6 @@ async function bootstrap(page: Page): Promise<void> {
 		],
 		relationships: []
 	};
-
-	await page.getByRole('button', { name: 'Load model...' }).click();
-	const modelDialog = page.getByRole('dialog', { name: /load model/i });
-	await modelDialog.locator('input[type="file"]').setInputFiles({
-		name: 'dnd-spec.json',
-		mimeType: 'application/json',
-		buffer: Buffer.from(JSON.stringify(model))
-	});
-	await modelDialog.getByRole('button', { name: 'Load', exact: true }).click();
-	await expect(modelDialog).toBeHidden();
-}
-
-/** Load a view: "Grouped" holds Alpha, "Target" is empty. */
-async function loadView(page: Page): Promise<void> {
 	const view = {
 		name: 'Operational',
 		folders: [
@@ -51,15 +36,20 @@ async function loadView(page: Page): Promise<void> {
 			{ name: 'Target', folders: [], elements: [] }
 		]
 	};
-	await page.getByRole('button', { name: 'Load view...' }).click();
-	const dialog = page.getByRole('dialog', { name: /load view/i });
-	await dialog.locator('input[type="file"]').setInputFiles({
-		name: 'operational.view.json',
-		mimeType: 'application/json',
-		buffer: Buffer.from(JSON.stringify(view))
+
+	await loadFiles(page, {
+		metamodel: METAMODEL_PATH,
+		model: {
+			name: 'dnd-spec.json',
+			mimeType: 'application/json',
+			buffer: Buffer.from(JSON.stringify(model))
+		},
+		view: {
+			name: 'operational.view.json',
+			mimeType: 'application/json',
+			buffer: Buffer.from(JSON.stringify(view))
+		}
 	});
-	await dialog.getByRole('button', { name: 'Load', exact: true }).click();
-	await expect(dialog).toBeHidden();
 	await expect(
 		page.getByRole('tree', { name: /containment tree/i }).getByText('Grouped')
 	).toBeVisible();
@@ -114,7 +104,6 @@ function findFolder(folders: Folder[], name: string): Folder | undefined {
 test.beforeEach(async ({ page }) => {
 	test.setTimeout(120_000);
 	await bootstrap(page);
-	await loadView(page);
 });
 
 test('drag an element into a folder places it there', async ({ page }) => {
