@@ -109,6 +109,44 @@ class Session:
             self.op_log_dropped += 1
 
 
+#: Project id used when a request carries no ``X-Project-Id`` header. Phase 1
+#: keeps a single implicit project so existing single-project clients and the
+#: whole test-suite behave exactly as before the registry was introduced.
+DEFAULT_PROJECT_ID = "default"
+
+
+class SessionRegistry:
+    """Holds one live :class:`Session` per project id, created on first access.
+
+    Replaces the former process-wide singleton. Each project gets an
+    independent in-memory ``Session`` (metamodel + model + view + validation
+    baseline + op_log + model_rev), so mutating one project never affects
+    another. Sessions are created lazily by :meth:`get`; :meth:`evict` drops a
+    single project; :meth:`reset` drops them all (test isolation). Later phases
+    add durable hydration-on-miss and idle eviction here without changing
+    callers.
+    """
+
+    def __init__(self) -> None:
+        self._sessions: dict[str, Session] = {}
+
+    def get(self, project_id: str) -> Session:
+        session = self._sessions.get(project_id)
+        if session is None:
+            session = Session()
+            self._sessions[project_id] = session
+        return session
+
+    def evict(self, project_id: str) -> None:
+        self._sessions.pop(project_id, None)
+
+    def reset(self) -> None:
+        self._sessions.clear()
+
+    def project_ids(self) -> list[str]:
+        return list(self._sessions)
+
+
 _session = Session()
 
 
