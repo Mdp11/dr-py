@@ -30,14 +30,17 @@ function elementPaths(view: View | null): Map<string, string[]> {
 	return out;
 }
 
-/** All folder paths, keyed by a join (space) for set ops, mapped to the path array. */
+/** All folder paths, keyed by a NUL-joined string for set ops, mapped to the path array.
+ *  NUL ('\0') is used instead of a visible separator so folder names containing spaces
+ *  cannot collide (e.g. ["A B"] vs ["A","B"]).
+ */
 function folderPaths(view: View | null): Map<string, string[]> {
 	const out = new Map<string, string[]>();
 	if (view === null) return out;
 	const walk = (folders: Folder[], prefix: string[]): void => {
 		for (const folder of folders) {
 			const path = [...prefix, folder.name];
-			out.set(path.join(' '), path);
+			out.set(path.join('\0'), path);
 			walk(folder.folders, path);
 		}
 	};
@@ -48,7 +51,7 @@ function folderPaths(view: View | null): Map<string, string[]> {
 /** True when `path`'s immediate parent is itself in `keys` (so `path` is implied). */
 function parentIn(path: string[], keys: Set<string>): boolean {
 	if (path.length <= 1) return false;
-	return keys.has(path.slice(0, -1).join(' '));
+	return keys.has(path.slice(0, -1).join('\0'));
 }
 
 export function diffViews(baseline: View | null, current: View | null): ViewChange[] {
@@ -78,7 +81,7 @@ export function diffViews(baseline: View | null, current: View | null): ViewChan
 		const from = basePlace.get(id);
 		const to = curPlace.get(id);
 		if (from && to) {
-			if (from.join(' ') !== to.join(' ')) {
+			if (from.join('\0') !== to.join('\0')) {
 				changes.push({ kind: 'element-moved', id, from, to });
 			}
 		} else if (to) {
