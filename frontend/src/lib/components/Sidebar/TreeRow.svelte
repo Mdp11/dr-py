@@ -293,12 +293,12 @@
 		{/if}
 		<button
 			type="button"
-			class="flex flex-1 items-center gap-2 truncate rounded text-left text-zinc-200 hover:text-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+			class="flex flex-1 items-center gap-2 rounded text-left text-zinc-200 hover:text-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
 			class:font-medium={isSelected}
 			onclick={(e) => onPick(key, e)}
 			title={key}
 		>
-			<span class="truncate">{displayName(el)}</span>
+			<span class="whitespace-nowrap">{displayName(el)}</span>
 			<span class="ml-auto shrink-0 rounded bg-zinc-800 px-1 font-mono text-[10px] text-zinc-400">
 				{el.type_name}
 			</span>
