@@ -43,7 +43,7 @@ test('load metamodel + empty model -> create element -> see in diff', async ({ p
 	await nameInput.blur();
 
 	// --- 5. Open the diff drawer and confirm the change is listed ------------
-	const saveButton = page.getByRole('button', { name: /save \(\d+\)/i });
+	const saveButton = page.getByRole('button', { name: 'Save', exact: true });
 	await expect(saveButton).toBeVisible();
 	await saveButton.click();
 
@@ -82,7 +82,7 @@ test('Export CR checkbox produces a second .cr.json download', async ({ page }) 
 	await nameInput.blur();
 
 	// Open the drawer.
-	await page.getByRole('button', { name: /save \(\d+\)/i }).click();
+	await page.getByRole('button', { name: 'Save', exact: true }).click();
 	const drawer = page.getByRole('dialog', { name: /pending changes/i });
 	await expect(drawer).toBeVisible();
 
