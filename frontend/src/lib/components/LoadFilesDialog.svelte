@@ -14,6 +14,7 @@
 		setFilename,
 		setMetamodel,
 		setMetamodelFilename,
+		setViewBaseline,
 		setViewFilename
 	} from '$lib/state';
 	import { createMutation } from '@tanstack/svelte-query';
@@ -73,10 +74,15 @@
 			clearIssues();
 			clearChangesBadge();
 
-			// 3. view (optional) — validated against the active model
+			// 3. view (optional) — validated against the active model. Baseline
+			// from the SERVER-echoed view so the view-change count starts at 0
+			// even if the backend normalizes the snapshot.
 			if (vars.viewBody) {
-				await pushView(vars.viewBody);
+				const { view: storedView } = await pushView(vars.viewBody);
 				setViewFilename(viewFilename);
+				setViewBaseline(storedView);
+			} else {
+				setViewBaseline(null);
 			}
 		},
 		onSuccess: () => {
