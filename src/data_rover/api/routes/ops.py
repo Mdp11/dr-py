@@ -53,7 +53,7 @@ from data_rover.core.validation.pipeline import default_pipeline
 from data_rover.core.validation.scope import Scope
 from data_rover.core.validation.state import ValidationState
 
-from ..deps import Session, get_session, require_model
+from ..deps import Session, get_request_session, require_model
 from ..schemas import (
     CreateElementOp,
     CreateRelationshipOp,
@@ -446,7 +446,7 @@ def _finalize(
 @router.post("/model/ops", response_model=None)
 def apply_ops(
     payload: OpsRequest,
-    session: Session = Depends(get_session),
+    session: Session = Depends(get_request_session),
 ) -> OpsResponse | JSONResponse:
     _, model = require_model(session)
     if payload.base_rev != session.model_rev:
@@ -479,7 +479,7 @@ def apply_ops(
 
 
 @router.post("/model/undo", response_model=None)
-def undo(session: Session = Depends(get_session)) -> OpsResponse | JSONResponse:
+def undo(session: Session = Depends(get_request_session)) -> OpsResponse | JSONResponse:
     _, model = require_model(session)
     if not session.op_log:
         return JSONResponse(
