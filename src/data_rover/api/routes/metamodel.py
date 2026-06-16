@@ -7,7 +7,7 @@ import yaml
 from data_rover.core.metamodel.loader import load_metamodel_str
 from data_rover.core.metamodel.schema import Metamodel
 
-from ..deps import Session, get_session, require_metamodel
+from ..deps import Session, get_request_session, require_metamodel
 
 router = APIRouter()
 
@@ -24,7 +24,7 @@ async def _parse_metamodel(request: Request) -> Metamodel:
 @router.post("/metamodel")
 async def upload_metamodel(
     request: Request,
-    session: Session = Depends(get_session),
+    session: Session = Depends(get_request_session),
 ) -> Metamodel:
     metamodel = await _parse_metamodel(request)
     session.set_metamodel(metamodel)
@@ -32,11 +32,11 @@ async def upload_metamodel(
 
 
 @router.get("/metamodel")
-def get_metamodel(session: Session = Depends(get_session)) -> Metamodel:
+def get_metamodel(session: Session = Depends(get_request_session)) -> Metamodel:
     return require_metamodel(session)
 
 
 @router.delete("/metamodel", status_code=204)
-def clear_metamodel(session: Session = Depends(get_session)) -> Response:
+def clear_metamodel(session: Session = Depends(get_request_session)) -> Response:
     session.set_metamodel(None)
     return Response(status_code=204)

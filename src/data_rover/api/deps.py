@@ -5,16 +5,37 @@ from fastapi import HTTPException, Request
 from data_rover.core.metamodel.schema import Metamodel
 from data_rover.core.model.model import Model
 
-from .session import Session, get_session
+from .session import DEFAULT_PROJECT_ID, Session, get_registry, get_session
 from .settings import get_settings
 
 __all__ = [
     "Session",
+    "get_request_session",
     "get_session",
     "require_allowed_origin",
     "require_metamodel",
     "require_model",
 ]
+
+
+def get_request_session(request: Request) -> Session:
+    """Resolve the active project's :class:`Session` from the request.
+
+    Phase 1: the project id is taken from the ``X-Project-Id`` header,
+    defaulting to ``DEFAULT_PROJECT_ID`` when absent — this preserves the
+    behavior of every existing single-project client and the test-suite while
+    making the backend able to hold multiple isolated projects at once. Later
+    phases replace the header with a ``/projects/{id}`` path segment guarded by
+    membership authorization.
+
+    An unknown project id lazily creates a fresh empty session for it (the
+    registry's create-on-miss); Phase 2 will gate this on project membership so
+    arbitrary header values can no longer spin up sessions. Phase 1 performs no
+    eviction, so the registry is bounded only by process lifetime — acceptable
+    until membership gating and idle eviction land in later phases.
+    """
+    project_id = request.headers.get("x-project-id", DEFAULT_PROJECT_ID)
+    return get_registry().get(project_id)
 
 
 def require_allowed_origin(request: Request) -> None:

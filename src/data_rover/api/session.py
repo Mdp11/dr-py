@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from data_rover.core.metamodel.schema import Metamodel
@@ -109,20 +109,96 @@ class Session:
             self.op_log_dropped += 1
 
 
-_session = Session()
+#: Project id used when a request carries no ``X-Project-Id`` header. Phase 1
+#: keeps a single implicit project so existing single-project clients and the
+#: whole test-suite behave exactly as before the registry was introduced.
+DEFAULT_PROJECT_ID = "default"
+
+
+class SessionRegistry:
+    """Holds one live :class:`Session` per project id, created on first access.
+
+    Replaces the former process-wide singleton. Each project gets an
+    independent in-memory ``Session`` (metamodel + model + view + validation
+    baseline + op_log + model_rev), so mutating one project never affects
+    another. Sessions are created lazily by :meth:`get`; :meth:`evict` drops a
+    single project; :meth:`reset` drops them all (test isolation). Later phases
+    add durable hydration-on-miss and idle eviction here without changing
+    callers.
+    """
+
+    def __init__(self) -> None:
+        self._sessions: dict[str, Session] = {}
+
+    def get(self, project_id: str) -> Session:
+        """Return the live session for *project_id*, creating one on first access.
+
+        Subsequent calls with the same id return the exact same ``Session``
+        instance; callers must not cache the return value across evictions.
+        This is the seam where later phases will hydrate a persisted session
+        from durable storage on a cache-miss, without callers needing to change.
+        """
+        session = self._sessions.get(project_id)
+        if session is None:
+            session = Session()
+            self._sessions[project_id] = session
+        return session
+
+    def evict(self, project_id: str) -> None:
+        """Drop the session for *project_id*, if one exists.
+
+        Idempotent: silently ignores unknown ids so callers need not guard
+        against double-eviction (e.g. explicit eviction followed by an idle
+        eviction that runs concurrently).
+        """
+        self._sessions.pop(project_id, None)
+
+    def reset(self) -> None:
+        """Drop all live sessions.
+
+        Intended for test isolation: each test that needs a clean registry
+        calls this on teardown (or constructs a fresh ``SessionRegistry``)
+        rather than managing individual evictions.
+        """
+        self._sessions.clear()
+
+    def project_ids(self) -> list[str]:
+        """Return the ids of currently-live sessions, in insertion order.
+
+        Insertion order matches dict iteration order (guaranteed since
+        Python 3.7). Sessions that were evicted are not included.
+        """
+        return list(self._sessions)
+
+
+_registry = SessionRegistry()
+
+
+def get_registry() -> SessionRegistry:
+    """Return the process-wide session registry."""
+    return _registry
 
 
 def get_session() -> Session:
-    return _session
+    """Return the DEFAULT project's session.
+
+    Kept no-arg for internal callers and tests that have no request context.
+    Request-scoped routes resolve the active project via
+    ``deps.get_request_session`` instead.
+    """
+    return _registry.get(DEFAULT_PROJECT_ID)
 
 
 def reset_session() -> None:
-    """Reset the process-wide session to a fresh default state.
+    """Drop all per-project sessions (test isolation).
 
-    Field-agnostic on purpose: every dataclass field is copied from a newly
-    constructed ``Session`` so adding a field can never silently leak state
-    across resets through a hand-maintained list here.
+    A fresh ``Session`` is created on the next ``get`` for any id, so this is
+    field-agnostic — adding a ``Session`` field can never leak across resets.
+
+    Unlike the former in-place field-copy reset, this replaces sessions by
+    identity: a caller holding a reference to a pre-reset ``Session`` keeps
+    seeing the old object and must call ``get_session()`` again for the live
+    one. All current callers (request-scoped ``Depends``; tests that reset then
+    re-fetch) already re-fetch, so this is safe.
     """
-    fresh = Session()
-    for f in fields(Session):
-        setattr(_session, f.name, getattr(fresh, f.name))
+    _registry.reset()
