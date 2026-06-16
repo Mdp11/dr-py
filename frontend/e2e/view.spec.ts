@@ -288,6 +288,47 @@ test('view curation: search result dragged into a folder is placed there', async
 	await expect(tree(page).getByText('Beta')).toBeVisible();
 });
 
+test('change badge increments on view edit, tooltip shows View row, Save dialog opens View tab', async ({
+	page
+}) => {
+	test.setTimeout(120_000);
+	await loadView(page);
+
+	// The badge is the span containing the bullet + count in the top-right of the
+	// header.  Its text nodes are "● ", the count, and "change(s)" — locate it by
+	// the bullet character so we're robust to exact whitespace between nodes.
+	const badge = page.locator('header span').filter({ hasText: /●/ }).first();
+	await expect(badge).toBeVisible();
+
+	// Make a view edit: drag Alpha (placed in Grouped) onto the pool header to
+	// exclude it.  This is the same mechanism used by the "exclude" curation test.
+	const put = viewPut(page);
+	await dragRowOnto(page, row(page, 'Alpha'), poolHeader(page));
+	await put; // wait for the PUT /view/snapshot to complete
+
+	// The badge should now reflect at least 1 change (the view edit itself).
+	// After the drag the view has 1 change, so the combined count is ≥ 1.
+	await expect(badge).toContainText(/[1-9]/);
+
+	// Hovering the badge reveals the tooltip with a "View" row.
+	await badge.hover();
+	const tooltip = page.getByRole('tooltip').filter({ hasText: /View/ }).first();
+	await expect(tooltip).toBeVisible();
+
+	// Ctrl+S opens the Save dialog (DiffDrawer).
+	await page.keyboard.press('Control+s');
+	const drawer = page.getByRole('dialog', { name: /pending changes/i });
+	await expect(drawer).toBeVisible();
+
+	// Click the View tab and assert that at least one human-readable view-change
+	// line is shown (Alpha was moved out of Grouped so it is "removed from view"
+	// or "moved from '...' to '...'").
+	await drawer.getByRole('tab', { name: /View/i }).click();
+	await expect(
+		drawer.getByText(/moved from|added to|removed from view|Folder '/)
+	).toBeVisible();
+});
+
 test('excluded pool: collapsed by default (no fetch), expands, and state persists', async ({
 	page
 }) => {
