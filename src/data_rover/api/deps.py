@@ -27,6 +27,10 @@ def get_request_session(request: Request) -> Session:
     making the backend able to hold multiple isolated projects at once. Later
     phases replace the header with a ``/projects/{id}`` path segment guarded by
     membership authorization.
+
+    An unknown project id lazily creates a fresh empty session for it (the
+    registry's create-on-miss); Phase 2 will gate this on project membership so
+    arbitrary header values can no longer spin up sessions.
     """
     project_id = request.headers.get("x-project-id", DEFAULT_PROJECT_ID)
     return get_registry().get(project_id)
