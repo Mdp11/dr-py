@@ -30,7 +30,9 @@ def get_request_session(request: Request) -> Session:
 
     An unknown project id lazily creates a fresh empty session for it (the
     registry's create-on-miss); Phase 2 will gate this on project membership so
-    arbitrary header values can no longer spin up sessions.
+    arbitrary header values can no longer spin up sessions. Phase 1 performs no
+    eviction, so the registry is bounded only by process lifetime — acceptable
+    until membership gating and idle eviction land in later phases.
     """
     project_id = request.headers.get("x-project-id", DEFAULT_PROJECT_ID)
     return get_registry().get(project_id)
