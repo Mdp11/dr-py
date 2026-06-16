@@ -99,7 +99,10 @@ def test_get_request_session_uses_header_project() -> None:
     reset_session()
 
     def make_request(headers: list[tuple[bytes, bytes]]) -> Request:
-        return Request({"type": "http", "headers": headers})
+        # ASGI servers (uvicorn, hypercorn) always lowercase header names before
+        # populating scope["headers"]; mirror that so raw wire-form names like
+        # b"X-Project-Id" behave as they would in production.
+        return Request({"type": "http", "headers": [(k.lower(), v) for k, v in headers]})
 
     s_a = get_request_session(make_request([(b"x-project-id", b"proj-a")]))
     s_b = get_request_session(make_request([(b"x-project-id", b"proj-b")]))
@@ -109,3 +112,7 @@ def test_get_request_session_uses_header_project() -> None:
     assert s_b is get_registry().get("proj-b")
     assert s_a is not s_b
     assert s_default is get_registry().get("default")
+
+    # Header name matching is case-insensitive (Starlette normalizes names).
+    s_upper = get_request_session(make_request([(b"X-Project-Id", b"proj-a")]))
+    assert s_upper is s_a
