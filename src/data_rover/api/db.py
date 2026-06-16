@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Generator
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -50,6 +50,16 @@ def init_engine(database_url: str, *, force: bool = False) -> Engine:
             # default pool instead (the else branch below).
             poolclass=StaticPool,
         )
+        # SQLite ignores FK constraints (incl. ON DELETE CASCADE) unless asked
+        # per-connection. Turn them on so test behaviour matches Postgres —
+        # otherwise ``passive_deletes=True`` relationships would orphan children.
+        # The listener target is the engine just assigned above; keep this
+        # decorator after that assignment.
+        @event.listens_for(_engine, "connect")
+        def _enable_sqlite_fks(dbapi_conn: object, _record: object) -> None:
+            cursor = dbapi_conn.cursor()  # type: ignore[attr-defined]
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
     else:
         _engine = create_engine(database_url, pool_pre_ping=True)
     _engine_url = database_url
