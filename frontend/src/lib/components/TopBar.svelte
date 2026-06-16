@@ -42,6 +42,8 @@
 	const viewChanges = $derived(getViewChangesCount());
 	const combinedChanges = $derived(totalChanges + viewChanges);
 	const pending = $derived(hasPendingOps());
+	// Enabled when the model OR the view has unsaved changes; the view-save path
+	// lives in the Save dialog's View tab (DiffDrawer).
 	const saveDisabled = $derived(summary === null || (combinedChanges === 0 && !pending));
 	const validating = $derived(isRunning());
 	const validateDisabled = $derived(validating || summary === null);
@@ -72,7 +74,7 @@
 	});
 
 	function confirmDiscardChanges(message: string): boolean {
-		if (totalChanges === 0 && !hasPendingOps()) return true;
+		if (combinedChanges === 0 && !hasPendingOps()) return true;
 		return window.confirm(message);
 	}
 
@@ -225,7 +227,7 @@
 			</span>
 			<div
 				role="tooltip"
-				class="pointer-events-none absolute right-0 top-full z-30 hidden w-max rounded border border-zinc-800 bg-zinc-900 p-2 shadow-lg group-hover:block group-focus-within:block"
+				class="absolute right-0 top-full z-30 hidden w-max rounded border border-zinc-800 bg-zinc-900 p-2 shadow-lg group-hover:block group-focus-within:block"
 			>
 				<dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
 					<dt class="text-zinc-500">Model</dt>
