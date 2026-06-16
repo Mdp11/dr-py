@@ -58,3 +58,33 @@ def test_project_ids_lists_live_sessions() -> None:
     assert reg.project_ids() == ["a", "b"]
     reg.evict("a")
     assert reg.project_ids() == ["b"]
+
+
+def test_get_session_returns_default_project_session() -> None:
+    from data_rover.api.session import (
+        DEFAULT_PROJECT_ID,
+        get_registry,
+        get_session,
+        reset_session,
+    )
+
+    reset_session()
+    assert get_session() is get_registry().get(DEFAULT_PROJECT_ID)
+
+
+def test_get_session_is_stable_across_calls() -> None:
+    from data_rover.api.session import get_session, reset_session
+
+    reset_session()
+    assert get_session() is get_session()
+
+
+def test_reset_session_clears_all_projects() -> None:
+    from data_rover.api.session import get_registry, get_session, reset_session
+
+    reset_session()
+    before = get_session()
+    get_registry().get("other").model_rev = 9
+    reset_session()
+    assert get_session() is not before
+    assert get_registry().get("other").model_rev == 0
