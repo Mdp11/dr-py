@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from .db import init_engine
 from .errors import register_exception_handlers
 from .routes import (
     change_request,
@@ -11,6 +12,7 @@ from .routes import (
     metamodel,
     model,
     ops,
+    projects,
     read,
     relationships,
     validation,
@@ -21,6 +23,7 @@ from .settings import get_settings
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    init_engine(settings.database_url)
     app = FastAPI(
         title="data-rover API",
         version="0.1.0",
@@ -38,6 +41,7 @@ def create_app() -> FastAPI:
     register_exception_handlers(app)
 
     app.include_router(health.router)
+    app.include_router(projects.router, prefix="/api/v1", tags=["projects"])
     prefix = "/api/v1"
     app.include_router(metamodel.router, prefix=prefix, tags=["metamodel"])
     app.include_router(model.router, prefix=prefix, tags=["model"])

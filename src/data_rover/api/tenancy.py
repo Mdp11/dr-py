@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from .db_models import Membership, Project, Role, User
 
@@ -65,10 +65,16 @@ def list_projects_for_user(db: Session, user_id: str) -> list[tuple[Project, Rol
 
 
 def list_members(db: Session, project_id: str) -> list[Membership]:
-    """All memberships of *project_id* (any role)."""
+    """All memberships of *project_id* (any role), each with its ``user`` loaded.
+
+    ``selectinload(Membership.user)`` eager-loads the users in one extra query
+    so callers reading ``m.user`` don't trigger N+1 lazy loads per member.
+    """
     return list(
         db.execute(
-            select(Membership).where(Membership.project_id == project_id)
+            select(Membership)
+            .where(Membership.project_id == project_id)
+            .options(selectinload(Membership.user))
         ).scalars()
     )
 
