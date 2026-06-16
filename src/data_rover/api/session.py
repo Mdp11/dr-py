@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from data_rover.core.metamodel.schema import Metamodel
@@ -171,20 +171,28 @@ class SessionRegistry:
         return list(self._sessions)
 
 
-_session = Session()
+_registry = SessionRegistry()
+
+
+def get_registry() -> SessionRegistry:
+    """Return the process-wide session registry."""
+    return _registry
 
 
 def get_session() -> Session:
-    return _session
+    """Return the DEFAULT project's session.
+
+    Kept no-arg for internal callers and tests that have no request context.
+    Request-scoped routes resolve the active project via
+    ``deps.get_request_session`` instead.
+    """
+    return _registry.get(DEFAULT_PROJECT_ID)
 
 
 def reset_session() -> None:
-    """Reset the process-wide session to a fresh default state.
+    """Drop all per-project sessions (test isolation).
 
-    Field-agnostic on purpose: every dataclass field is copied from a newly
-    constructed ``Session`` so adding a field can never silently leak state
-    across resets through a hand-maintained list here.
+    A fresh ``Session`` is created on the next ``get`` for any id, so this is
+    field-agnostic — adding a ``Session`` field can never leak across resets.
     """
-    fresh = Session()
-    for f in fields(Session):
-        setattr(_session, f.name, getattr(fresh, f.name))
+    _registry.reset()
