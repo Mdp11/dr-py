@@ -116,6 +116,8 @@ export {
 	deleteFolder,
 	dropView,
 	getView,
+	getViewChanges,
+	getViewChangesCount,
 	getViewWarnings,
 	moveFolder,
 	placeElement,
@@ -124,5 +126,8 @@ export {
 	pushView,
 	refreshView,
 	removeElement,
-	renameFolder
+	renameFolder,
+	setViewBaseline
 } from './view.svelte';
+export type { ViewChange } from './view-diff';
+export { formatViewChange } from './view-change-format';
