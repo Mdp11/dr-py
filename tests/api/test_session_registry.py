@@ -88,3 +88,24 @@ def test_reset_session_clears_all_projects() -> None:
     reset_session()
     assert get_session() is not before
     assert get_registry().get("other").model_rev == 0
+
+
+def test_get_request_session_uses_header_project() -> None:
+    from starlette.requests import Request
+
+    from data_rover.api.deps import get_request_session
+    from data_rover.api.session import get_registry, reset_session
+
+    reset_session()
+
+    def make_request(headers: list[tuple[bytes, bytes]]) -> Request:
+        return Request({"type": "http", "headers": headers})
+
+    s_a = get_request_session(make_request([(b"x-project-id", b"proj-a")]))
+    s_b = get_request_session(make_request([(b"x-project-id", b"proj-b")]))
+    s_default = get_request_session(make_request([]))
+
+    assert s_a is get_registry().get("proj-a")
+    assert s_b is get_registry().get("proj-b")
+    assert s_a is not s_b
+    assert s_default is get_registry().get("default")

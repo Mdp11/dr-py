@@ -36,7 +36,7 @@ from data_rover.core.validation.pipeline import default_pipeline
 from data_rover.core.validation.scope import Scope
 from data_rover.core.validation.state import ValidationState
 
-from ..deps import Session, get_session, require_metamodel, require_model
+from ..deps import Session, get_request_session, require_metamodel, require_model
 from ..schemas import (
     ApplyCrRequest,
     ApplyCrResponse,
@@ -265,7 +265,7 @@ def _apply_cr_session(
 @router.post("/model/apply-cr", response_model=None)
 def apply_cr(
     payload: ApplyCrRequest,
-    session: Session = Depends(get_session),
+    session: Session = Depends(get_request_session),
 ) -> ApplyCrResponse | OpsResponse | JSONResponse:
     """Apply a change request; see the module docstring for the mode split."""
     if payload.model is not None:

@@ -6,7 +6,7 @@ from data_rover.core.validation.pipeline import default_pipeline
 from data_rover.core.validation.scope import Scope
 from data_rover.core.validation.state import ValidationState
 
-from ..deps import Session, get_session, require_model
+from ..deps import Session, get_request_session, require_model
 from ..schemas import IssueOut, ValidateRequest
 from ._snapshot import _build_model_from_payload
 
@@ -16,7 +16,7 @@ router = APIRouter()
 @router.post("/model/validate")
 def validate_model(
     payload: ValidateRequest | None = None,
-    session: Session = Depends(get_session),
+    session: Session = Depends(get_request_session),
 ) -> list[IssueOut]:
     metamodel, current = require_model(session)
     if payload is not None and payload.inline is not None:

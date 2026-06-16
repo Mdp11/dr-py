@@ -38,7 +38,7 @@ from data_rover.core.model.model import Model
 from data_rover.core.view.schema import Folder, View
 
 from ..changes import compact_changes
-from ..deps import Session, get_session, require_model
+from ..deps import Session, get_request_session, require_model
 from ..search import SearchQueryIn, SearchResultPage, run_query
 from ..schemas import (
     ChangesOut,
@@ -105,7 +105,7 @@ def model_summary(session: Session) -> ModelSummary:
 
 
 @router.get("/model/summary")
-def get_model_summary(session: Session = Depends(get_session)) -> ModelSummary:
+def get_model_summary(session: Session = Depends(get_request_session)) -> ModelSummary:
     """Cheap whole-model statistics for headers/status bars.
 
     ``issue_counts`` is ``None`` until a full validation run has seeded the
@@ -185,7 +185,7 @@ def list_elements(
     q: str | None = None,
     limit: int = Query(100, ge=1, le=MAX_PAGE_LIMIT),
     offset: int = Query(0, ge=0),
-    session: Session = Depends(get_session),
+    session: Session = Depends(get_request_session),
 ) -> ElementPage:
     """Paged element listing with optional exact-type filter and search.
 
@@ -249,7 +249,7 @@ def list_elements(
 @router.post("/model/search")
 def search_model(
     payload: SearchQueryIn,
-    session: Session = Depends(get_session),
+    session: Session = Depends(get_request_session),
 ) -> SearchResultPage:
     """Advanced search evaluated over the entire model (not the client's
     fetched subset). Ports ``frontend/src/lib/search/evaluate.ts``; results come
@@ -281,7 +281,7 @@ def search_model(
 @router.post("/model/elements/batch")
 def batch_elements(
     payload: BatchElementsIn,
-    session: Session = Depends(get_session),
+    session: Session = Depends(get_request_session),
 ) -> BatchElementsOut:
     """Fetch many elements by id in one request. Ids are returned in request
     order (duplicates produce duplicate results); unknown/deleted ids are
@@ -311,7 +311,7 @@ def get_neighborhood(
     element_id: str,
     hops: int = Query(2, ge=1, le=5),
     cap: int = Query(60, ge=1, le=MAX_PAGE_LIMIT),
-    session: Session = Depends(get_session),
+    session: Session = Depends(get_request_session),
 ) -> NeighborhoodOut:
     """Port of ``buildGraph`` in ``Workspace/graph-data.ts`` over the IndexSet.
 
@@ -381,7 +381,7 @@ def list_element_relationships(
     direction: Literal["both", "in", "out"] = "both",
     limit: int = Query(100, ge=1, le=MAX_PAGE_LIMIT),
     offset: int = Query(0, ge=0),
-    session: Session = Depends(get_session),
+    session: Session = Depends(get_request_session),
 ) -> RelationshipPage:
     """Relationships incident to one element, sorted by relationship id,
     paged (a hub element can have an arbitrarily large incident set).
@@ -451,7 +451,7 @@ def _containment_item(model: Model, element_id: str) -> ContainmentItem:
 def list_containment_roots(
     limit: int = Query(100, ge=1, le=MAX_PAGE_LIMIT),
     offset: int = Query(0, ge=0),
-    session: Session = Depends(get_session),
+    session: Session = Depends(get_request_session),
 ) -> ContainmentPage:
     """Elements with no containment parent, sorted by display name then id.
 
@@ -490,7 +490,7 @@ def _placed_element_ids(view: View) -> set[str]:
 def list_excluded_roots(
     limit: int = Query(100, ge=1, le=MAX_PAGE_LIMIT),
     offset: int = Query(0, ge=0),
-    session: Session = Depends(get_session),
+    session: Session = Depends(get_request_session),
 ) -> ContainmentPage:
     """Containment roots NOT placed in the active view (the 'excluded pool').
     Sorted by display name then id, like ``list_containment_roots`` (so the
@@ -518,7 +518,7 @@ def list_containment_children(
     element_id: str,
     limit: int = Query(100, ge=1, le=MAX_PAGE_LIMIT),
     offset: int = Query(0, ge=0),
-    session: Session = Depends(get_session),
+    session: Session = Depends(get_request_session),
 ) -> ContainmentPage:
     """Containment children of one element, sorted by display name then id.
 
@@ -554,7 +554,7 @@ def _now_iso() -> str:
 
 
 @router.get("/model/changes")
-def get_changes(session: Session = Depends(get_session)) -> ChangesOut:
+def get_changes(session: Session = Depends(get_request_session)) -> ChangesOut:
     """The pending change set as a ``datarover.cr/v1`` change request.
 
     Same JSON shape as the frontend's ``buildChangeRequest`` export (plus
@@ -585,7 +585,7 @@ def get_changes(session: Session = Depends(get_session)) -> ChangesOut:
 
 @router.get("/model/changes/summary")
 def get_changes_summary(
-    session: Session = Depends(get_session),
+    session: Session = Depends(get_request_session),
 ) -> ChangesSummaryOut:
     """Counts over the COMPACTED change set (same compaction as
     /model/changes, so e.g. create-then-delete histories count zero ops)."""
