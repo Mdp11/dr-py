@@ -60,4 +60,23 @@ describe('diffViews', () => {
 			{ kind: 'element-added', id: 'e1', to: ['A'] }
 		]);
 	});
+
+	it('handles folder names containing spaces (no separator collision)', () => {
+		const before = v([f('A B', ['e1'])]);
+		const after = v([f('A', [], [f('B', ['e1'])])]);
+		expect(diffViews(before, after)).toEqual([
+			{ kind: 'folder-removed', path: ['A B'] },
+			{ kind: 'folder-added', path: ['A'] },
+			{ kind: 'element-moved', id: 'e1', from: ['A B'], to: ['A', 'B'] }
+		]);
+	});
+
+	it('collapses a deep subtree add/remove to the shallowest path', () => {
+		const before = v([f('Old', [], [f('Mid', [], [f('Leaf')])])]);
+		const after = v([f('New', [], [f('Mid', [], [f('Leaf')])])]);
+		expect(diffViews(before, after)).toEqual([
+			{ kind: 'folder-removed', path: ['Old'] },
+			{ kind: 'folder-added', path: ['New'] }
+		]);
+	});
 });
