@@ -43,3 +43,15 @@ export function getFileHandle(): FileSystemFileHandle | null {
 export function setFileHandle(handle: FileSystemFileHandle | null): void {
 	_fileHandle = handle;
 }
+
+// File System Access handle for the VIEW file (kept separate from the model's
+// handle above so a "Save view" never overwrites the model file, or vice-versa).
+let _viewFileHandle: FileSystemFileHandle | null = $state(null);
+
+export function getViewFileHandle(): FileSystemFileHandle | null {
+	return _viewFileHandle;
+}
+
+export function setViewFileHandle(handle: FileSystemFileHandle | null): void {
+	_viewFileHandle = handle;
+}
