@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Response
 
-from ..deps import Session, get_session, require_model
+from ..deps import Session, get_request_session, require_model
 from ..schemas import CreateRelationshipRequest, RelationshipOut
 
 router = APIRouter()
@@ -13,7 +13,7 @@ def list_relationships(
     type: str | None = None,
     source_id: str | None = None,
     target_id: str | None = None,
-    session: Session = Depends(get_session),
+    session: Session = Depends(get_request_session),
 ) -> list[RelationshipOut]:
     _, model = require_model(session)
     items = list(model.relationships.values())
@@ -29,7 +29,7 @@ def list_relationships(
 @router.post("/model/relationships", status_code=201)
 def create_relationship(
     payload: CreateRelationshipRequest,
-    session: Session = Depends(get_session),
+    session: Session = Depends(get_request_session),
 ) -> RelationshipOut:
     _, model = require_model(session)
     rel = model.connect(payload.type, payload.source_id, payload.target_id)
@@ -40,7 +40,7 @@ def create_relationship(
 @router.delete("/model/relationships/{relationship_id}", status_code=204)
 def delete_relationship(
     relationship_id: str,
-    session: Session = Depends(get_session),
+    session: Session = Depends(get_request_session),
 ) -> Response:
     _, model = require_model(session)
     model.disconnect(relationship_id)

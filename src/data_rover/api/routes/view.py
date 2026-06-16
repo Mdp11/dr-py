@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 
 from data_rover.core.view.validation import validate_view
 
-from ..deps import Session, get_session, require_model
+from ..deps import Session, get_request_session, require_model
 from ..schemas import (
     IssueOut,
     ViewIn,
@@ -19,7 +19,7 @@ router = APIRouter()
 @router.put("/view/snapshot")
 def snapshot_view(
     payload: ViewIn,
-    session: Session = Depends(get_session),
+    session: Session = Depends(get_request_session),
 ) -> ViewSnapshotResponse:
     _, model = require_model(session)
     try:
@@ -32,7 +32,7 @@ def snapshot_view(
 
 
 @router.get("/view")
-def get_view(session: Session = Depends(get_session)) -> ViewStateResponse:
+def get_view(session: Session = Depends(get_request_session)) -> ViewStateResponse:
     view = session.view
     if view is None:
         return ViewStateResponse(view=None, warnings=[])
@@ -42,6 +42,6 @@ def get_view(session: Session = Depends(get_session)) -> ViewStateResponse:
 
 
 @router.delete("/view", status_code=204)
-def clear_view(session: Session = Depends(get_session)) -> Response:
+def clear_view(session: Session = Depends(get_request_session)) -> Response:
     session.view = None
     return Response(status_code=204)

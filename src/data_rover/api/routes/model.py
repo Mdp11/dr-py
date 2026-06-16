@@ -17,7 +17,7 @@ from data_rover.core.validation.state import ValidationState
 
 from ..deps import (
     Session,
-    get_session,
+    get_request_session,
     require_allowed_origin,
     require_metamodel,
     require_model,
@@ -41,7 +41,7 @@ router = APIRouter()
 @router.post("/model", deprecated=True)
 def upload_model(
     payload: InlineModel,
-    session: Session = Depends(get_session),
+    session: Session = Depends(get_request_session),
 ) -> ModelOut:
     """Deprecated: set the session model from an inline JSON payload.
 
@@ -58,7 +58,7 @@ def upload_model(
 
 
 @router.get("/model", deprecated=True)
-def get_model(session: Session = Depends(get_session)) -> ModelOut:
+def get_model(session: Session = Depends(get_request_session)) -> ModelOut:
     """Deprecated: return the FULL session model in one JSON body.
 
     O(model) response — superseded by the paged/on-demand read endpoints
@@ -73,7 +73,7 @@ def get_model(session: Session = Depends(get_session)) -> ModelOut:
 @router.put("/model/snapshot", deprecated=True)
 def snapshot_model(
     payload: SnapshotIn,
-    session: Session = Depends(get_session),
+    session: Session = Depends(get_request_session),
 ) -> ModelOut:
     """Deprecated: replace the session model with an inline snapshot.
 
@@ -90,7 +90,7 @@ def snapshot_model(
 
 
 @router.delete("/model", status_code=204)
-def clear_model(session: Session = Depends(get_session)) -> Response:
+def clear_model(session: Session = Depends(get_request_session)) -> Response:
     session.set_model(None)
     return Response(status_code=204)
 
@@ -126,7 +126,7 @@ def _install_model(session: Session, metamodel: Metamodel, raw: Any) -> ModelSum
 @router.post("/model/load", dependencies=[Depends(require_allowed_origin)])
 def load_model(
     payload: LoadModelRequest,
-    session: Session = Depends(get_session),
+    session: Session = Depends(get_request_session),
 ) -> ModelSummary:
     """Load a model JSON file from the SERVER's local filesystem.
 
@@ -164,7 +164,7 @@ def load_model(
 @router.post("/model/upload", dependencies=[Depends(require_allowed_origin)])
 async def upload_model_body(
     request: Request,
-    session: Session = Depends(get_session),
+    session: Session = Depends(get_request_session),
 ) -> ModelSummary:
     """Load a model from the raw request body (browser-streamed file).
 
@@ -196,7 +196,7 @@ async def upload_model_body(
 @router.post("/model/save", dependencies=[Depends(require_allowed_origin)])
 def save_model(
     payload: SaveModelRequest,
-    session: Session = Depends(get_session),
+    session: Session = Depends(get_request_session),
 ) -> SaveModelResponse:
     """Write the session model to a local file in the frontend save shape.
 
@@ -245,7 +245,7 @@ def save_model(
 
 
 @router.get("/model/download", dependencies=[Depends(require_allowed_origin)])
-def download_model(session: Session = Depends(get_session)) -> StreamingResponse:
+def download_model(session: Session = Depends(get_request_session)) -> StreamingResponse:
     """Stream the session model as an attachment (same bytes as /model/save).
 
     The D2 frontend pipes ``response.body`` straight into a FileSystem
