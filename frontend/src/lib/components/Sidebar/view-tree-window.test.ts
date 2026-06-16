@@ -115,15 +115,30 @@ describe('resolveElementDrop', () => {
 		expect(r).toEqual({ path: [], index: 0 });
 	});
 	it('element-row drop, top half -> insert before the sibling', () => {
-		const r = resolveElementDrop({ targetKind: 'element', folderPath: ['F'], siblingIndex: 2, half: 'top' });
+		const r = resolveElementDrop({
+			targetKind: 'element',
+			folderPath: ['F'],
+			siblingIndex: 2,
+			half: 'top'
+		});
 		expect(r).toEqual({ path: ['F'], index: 2 });
 	});
 	it('element-row drop, bottom half -> insert after the sibling', () => {
-		const r = resolveElementDrop({ targetKind: 'element', folderPath: ['F'], siblingIndex: 2, half: 'bottom' });
+		const r = resolveElementDrop({
+			targetKind: 'element',
+			folderPath: ['F'],
+			siblingIndex: 2,
+			half: 'bottom'
+		});
 		expect(r).toEqual({ path: ['F'], index: 3 });
 	});
 	it('element-row drop in the excluded pool -> exclude (no reorder in the pool)', () => {
-		const r = resolveElementDrop({ targetKind: 'element', folderPath: null, siblingIndex: 0, half: 'top' });
+		const r = resolveElementDrop({
+			targetKind: 'element',
+			folderPath: null,
+			siblingIndex: 0,
+			half: 'top'
+		});
 		expect(r).toEqual({ path: [], index: 0 });
 	});
 });
