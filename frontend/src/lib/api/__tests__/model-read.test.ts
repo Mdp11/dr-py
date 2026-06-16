@@ -32,9 +32,7 @@ describe('getElementsBatch', () => {
 
 	it('rejects on a schema mismatch', async () => {
 		server.use(
-			http.post(`${BASE}/model/elements/batch`, () =>
-				HttpResponse.json({ items: 'nope' })
-			)
+			http.post(`${BASE}/model/elements/batch`, () => HttpResponse.json({ items: 'nope' }))
 		);
 		await expect(getElementsBatch(['a'], cfg)).rejects.toThrow();
 	});

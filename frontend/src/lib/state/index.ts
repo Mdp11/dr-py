@@ -132,4 +132,9 @@ export {
 	setViewBaseline
 } from './view.svelte';
 export type { ViewChange } from './view-diff';
-export { formatViewChange } from './view-change-format';
+export {
+	formatViewChange,
+	viewChangeSegments,
+	type ViewChangeSegment,
+	type ViewChangeSegmentKind
+} from './view-change-format';

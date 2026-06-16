@@ -24,9 +24,10 @@
 		setViewFilename,
 		setViewBaseline,
 		getCachedElements,
-		formatViewChange,
+		viewChangeSegments,
 		type Diff,
-		type ViewChange
+		type ViewChange,
+		type ViewChangeSegmentKind
 	} from '$lib/state';
 	import { downloadModel, getChanges } from '$lib/api/model-read';
 	import type { ChangesDoc } from '$lib/api/types';
@@ -153,8 +154,17 @@
 	}
 
 	const viewLines = $derived(
-		viewChangeList.map((c) => ({ key: changeKey(c), text: formatViewChange(c, resolveName) }))
+		viewChangeList.map((c) => ({ key: changeKey(c), segments: viewChangeSegments(c, resolveName) }))
 	);
+
+	// Tailwind colour per segment role, so each component of a change line stands
+	// out: element name, folder, and the from/to prepositions.
+	const SEGMENT_CLASS: Record<ViewChangeSegmentKind, string> = {
+		element: 'text-emerald-300',
+		folder: 'text-amber-300',
+		prep: 'text-sky-300',
+		plain: 'text-zinc-400'
+	};
 
 	// Save-view state and handler
 	let savingView = $state(false);
@@ -272,7 +282,6 @@
 		<Dialog.Header>
 			<Dialog.Title>
 				Pending changes
-				<span class="ml-2 font-mono text-xs font-normal text-zinc-400">({total})</span>
 			</Dialog.Title>
 			<Dialog.Description>
 				Review the changes to be saved. The model will be written to
@@ -402,8 +411,9 @@
 						<p class="text-xs text-zinc-500">No view changes.</p>
 					{:else}
 						{#each viewLines as line (line.key)}
-							<p class="rounded bg-zinc-900 px-2 py-1 font-mono text-[11px] text-zinc-200">
-								{line.text}
+							<p class="rounded bg-zinc-900 px-2 py-1 font-mono text-[11px]">
+								{#each line.segments as seg}<span class={SEGMENT_CLASS[seg.kind]}>{seg.text}</span
+									>{/each}
 							</p>
 						{/each}
 					{/if}

@@ -92,7 +92,9 @@
 	const folderName = $derived(
 		isExcludedSection || isFolder ? (tree.folderName.get(key) ?? '') : ''
 	);
-	const placedInFolder = $derived(!isFolder && !isExcludedSection && tree.placedElementIds.has(key));
+	const placedInFolder = $derived(
+		!isFolder && !isExcludedSection && tree.placedElementIds.has(key)
+	);
 	const isMovable = $derived(movable);
 
 	const el = $derived(isFolder || isExcludedSection ? undefined : elementsById.get(key));
@@ -115,9 +117,7 @@
 	const hasModelWarning = $derived(
 		!isFolder && !isExcludedSection && !hasError && issueIndex.warningIds.has(key)
 	);
-	const hasViewWarning = $derived(
-		!isFolder && !isExcludedSection && warningsByElementId.has(key)
-	);
+	const hasViewWarning = $derived(!isFolder && !isExcludedSection && warningsByElementId.has(key));
 
 	async function onNewFolder(): Promise<void> {
 		const name = window.prompt('New folder name');

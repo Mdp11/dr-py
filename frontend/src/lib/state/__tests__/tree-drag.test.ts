@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { beginDrag, endDrag, getDragPayload, isDragActive, isMovableBypassed } from '../tree-drag.svelte';
+import {
+	beginDrag,
+	endDrag,
+	getDragPayload,
+	isDragActive,
+	isMovableBypassed
+} from '../tree-drag.svelte';
 
 describe('tree-drag controller', () => {
 	it('begins and ends an element drag', () => {
