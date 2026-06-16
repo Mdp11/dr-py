@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+import pytest
+
 from data_rover.api.settings import Settings
 
 
-def test_defaults_present() -> None:
+def test_defaults_present(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The API test conftest sets these env vars process-wide via setdefault so
+    # that all other API tests run on SQLite.  This test validates the *code*
+    # defaults (what the class returns without any env), so we must clear the
+    # injected values for the duration of this single test.
+    monkeypatch.delenv("DATA_ROVER_DATABASE_URL", raising=False)
+    monkeypatch.delenv("DATA_ROVER_DEV_SEED", raising=False)
     s = Settings()
     assert s.database_url.startswith("postgresql+psycopg://")
     assert s.identity_user_header == "x-user-id"
