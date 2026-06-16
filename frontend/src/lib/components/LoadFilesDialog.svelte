@@ -8,6 +8,7 @@
 		adoptSummary,
 		clearChangesBadge,
 		clearIssues,
+		clearViewState,
 		pushView,
 		resetModelStore,
 		setFileHandle,
@@ -82,7 +83,9 @@
 				setViewFilename(viewFilename);
 				setViewBaseline(storedView);
 			} else {
-				setViewBaseline(null);
+				// No view in this load: clear any view carried over from a prior
+				// session so the badge/View tab don't report a stale view as changes.
+				clearViewState();
 			}
 		},
 		onSuccess: () => {

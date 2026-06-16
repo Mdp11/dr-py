@@ -12,6 +12,7 @@ import {
 	adoptSummary,
 	clearChangesBadge,
 	clearIssues,
+	clearViewState,
 	pushView,
 	refreshChangesBadge,
 	resetModelStore,
@@ -42,6 +43,9 @@ export async function maybeAutoload(): Promise<void> {
 		setMetamodel(mm);
 		setMetamodelFilename(mmName);
 		setViewFilename(null);
+		// Drop any view carried over from a prior session; a fresh view (if the
+		// autoload specifies one) is pushed and baselined below.
+		clearViewState();
 		resetModelStore();
 		setFilename(null);
 		setFileHandle(null);
