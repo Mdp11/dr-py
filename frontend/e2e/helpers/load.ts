@@ -12,7 +12,7 @@ export async function loadFiles(
 	page: Page,
 	files: { metamodel: FileArg; model: FileArg; view?: FileArg }
 ): Promise<void> {
-	await page.getByRole('button', { name: 'Load...', exact: true }).click();
+	await page.getByRole('button', { name: 'Load Model', exact: true }).click();
 	const dialog = page.getByRole('dialog', { name: /load files/i });
 	await expect(dialog).toBeVisible();
 	await dialog.getByTestId('metamodel-file-input').setInputFiles(files.metamodel);
