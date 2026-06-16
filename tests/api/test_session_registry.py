@@ -48,4 +48,13 @@ def test_reset_drops_all_sessions() -> None:
 
 
 def test_default_project_id_is_a_nonempty_str() -> None:
-    assert isinstance(DEFAULT_PROJECT_ID, str) and DEFAULT_PROJECT_ID
+    assert DEFAULT_PROJECT_ID == "default"
+
+
+def test_project_ids_lists_live_sessions() -> None:
+    reg = SessionRegistry()
+    reg.get("a")
+    reg.get("b")
+    assert reg.project_ids() == ["a", "b"]
+    reg.evict("a")
+    assert reg.project_ids() == ["b"]

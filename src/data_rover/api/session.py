@@ -131,6 +131,13 @@ class SessionRegistry:
         self._sessions: dict[str, Session] = {}
 
     def get(self, project_id: str) -> Session:
+        """Return the live session for *project_id*, creating one on first access.
+
+        Subsequent calls with the same id return the exact same ``Session``
+        instance; callers must not cache the return value across evictions.
+        This is the seam where later phases will hydrate a persisted session
+        from durable storage on a cache-miss, without callers needing to change.
+        """
         session = self._sessions.get(project_id)
         if session is None:
             session = Session()
@@ -138,12 +145,29 @@ class SessionRegistry:
         return session
 
     def evict(self, project_id: str) -> None:
+        """Drop the session for *project_id*, if one exists.
+
+        Idempotent: silently ignores unknown ids so callers need not guard
+        against double-eviction (e.g. explicit eviction followed by an idle
+        eviction that runs concurrently).
+        """
         self._sessions.pop(project_id, None)
 
     def reset(self) -> None:
+        """Drop all live sessions.
+
+        Intended for test isolation: each test that needs a clean registry
+        calls this on teardown (or constructs a fresh ``SessionRegistry``)
+        rather than managing individual evictions.
+        """
         self._sessions.clear()
 
     def project_ids(self) -> list[str]:
+        """Return the ids of currently-live sessions, in insertion order.
+
+        Insertion order matches dict iteration order (guaranteed since
+        Python 3.7). Sessions that were evicted are not included.
+        """
         return list(self._sessions)
 
 
