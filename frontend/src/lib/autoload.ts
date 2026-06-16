@@ -19,6 +19,7 @@ import {
 	setFilename,
 	setMetamodel,
 	setMetamodelFilename,
+	setViewBaseline,
 	setViewFilename
 } from '$lib/state';
 
@@ -69,8 +70,11 @@ export async function maybeAutoload(): Promise<void> {
 		// against ViewSchema, then push.
 		const viewText = await fetchText('/__autoload/view');
 		const view = ViewSchema.parse(JSON.parse(viewText));
-		await pushView(view);
+		// Baseline from the SERVER-echoed view so the view-change count starts at
+		// 0 even if the backend normalizes the snapshot.
+		const { view: storedView } = await pushView(view);
 		setViewFilename(viewName);
+		setViewBaseline(storedView);
 	} catch (err) {
 		console.error('[autoload] failed:', err);
 	}
