@@ -12,8 +12,9 @@ os.environ.setdefault("DATA_ROVER_DEV_SEED", "false")
 
 from data_rover.api import db  # noqa: E402
 from data_rover.api import db_models  # noqa: E402,F401  (registers ORM tables)
+from data_rover.api.db_models import Membership, Project, Role, User  # noqa: E402
 from data_rover.api.identity import set_identity_provider  # noqa: E402
-from data_rover.api.session import reset_session  # noqa: E402
+from data_rover.api.session import DEFAULT_PROJECT_ID, reset_session  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -29,3 +30,40 @@ def _fresh_db() -> Iterator[None]:
         db.drop_all()
         reset_session()
         set_identity_provider(None)
+
+
+#: identity header the data-test client authenticates as
+TEST_USER_ID = "test-user"
+#: data tests target the DEFAULT project so HTTP requests resolve the SAME
+#: in-memory Session that ``get_session()`` returns.
+AUTH_HEADERS = {"x-user-id": TEST_USER_ID, "x-user-email": "test@example.com"}
+
+
+def seed_default_project() -> None:
+    """Create the 'default' project owned by TEST_USER_ID (idempotent).
+
+    Data-test client fixtures call this so the authenticated test user is an
+    owner of the project their requests target.
+    """
+    gen = db.get_db()
+    s = next(gen)
+    try:
+        if s.get(Project, DEFAULT_PROJECT_ID) is None:
+            s.add(User(id=TEST_USER_ID, email="test@example.com"))
+            s.add(Project(id=DEFAULT_PROJECT_ID, name="Default Project"))
+            s.add(
+                Membership(
+                    user_id=TEST_USER_ID,
+                    project_id=DEFAULT_PROJECT_ID,
+                    role=Role.owner,
+                )
+            )
+            s.commit()
+    finally:
+        gen.close()
+
+
+def papi(path: str) -> str:
+    """Build a default-project-scoped data URL. papi('/metamodel') ->
+    '/api/v1/projects/default/metamodel'."""
+    return f"/api/v1/projects/{DEFAULT_PROJECT_ID}{path}"

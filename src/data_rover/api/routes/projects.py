@@ -10,14 +10,14 @@ the Phase 2 scope).
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from .. import tenancy
 from ..authz import require_membership, require_owner
 from ..db import get_db
-from ..db_models import Membership, Role, User
+from ..db_models import Membership, Project, Role, User
 from ..identity import get_current_user
 from ..session import get_registry
 
@@ -69,11 +69,16 @@ def list_projects(
 
 @router.get("/projects/{project_id}", response_model=ProjectOut)
 def get_project(
+    project_id: str,
     membership: Membership = Depends(require_membership),
+    db: Session = Depends(get_db),
 ) -> ProjectOut:
-    # require_membership already proved the project exists and loaded the row;
-    # read it off the relationship instead of re-fetching.
-    project = membership.project
+    # require_membership already loaded this Project into the session's identity
+    # map, so db.get is a cache hit (no extra query) and avoids depending on
+    # lazy-load timing of membership.project.
+    project = db.get(Project, project_id)
+    if project is None:  # require_membership already proved existence
+        raise HTTPException(status_code=404, detail="project not found")
     return ProjectOut(id=project.id, name=project.name, role=membership.role)
 
 

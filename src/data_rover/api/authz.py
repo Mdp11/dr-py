@@ -34,6 +34,9 @@ _WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 #: Deliberately NOT included: ``POST /model/save`` — it writes to the SERVER's
 #: filesystem (a privileged side effect), so it stays a "write" even though it
 #: doesn't mutate the in-memory model. Viewers cannot export to server disk.
+#: Also NOT included: ``POST /model/apply-cr`` — it is dual-mode (inline =
+#: read, session = mutate) and a path suffix can't tell the modes apart, so it
+#: is conservatively treated as a write; viewers can't use the CR tool.
 _READ_ONLY_POST_SUFFIXES = (
     "/model/search",
     "/model/elements/batch",
