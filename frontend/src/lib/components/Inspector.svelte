@@ -56,14 +56,20 @@
 				<PropertyForm {entity} kind={selection.kind} />
 			</section>
 			{#if selection.kind === 'element'}
+				<!-- Pass the id from `selection` (stable across edits), NOT `entity.id`:
+				     props are live getters, so binding to `entity.id` would make these
+				     children's fetch effects depend on the `entity` derived, whose object
+				     identity churns on every optimistic property edit — refetching this
+				     element's relationships on every keystroke. `selection.id` only
+				     changes on re-selection (mirrors GraphView's `centerId`). -->
 				<Separator class="bg-zinc-800" />
 				<section class="px-3 py-2">
 					<h2 class="mb-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
 						Relationships
 					</h2>
-					<RelationshipsList elementId={entity.id} />
+					<RelationshipsList elementId={selection.id} />
 					<div class="mt-3">
-						<NewRelationshipPicker sourceId={entity.id} />
+						<NewRelationshipPicker sourceId={selection.id} />
 					</div>
 				</section>
 			{/if}

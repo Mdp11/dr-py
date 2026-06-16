@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { defaultClientConditions } from 'vite';
 import { defineConfig } from 'vitest/config';
@@ -10,7 +11,13 @@ export default defineConfig({
 	// (a bare `conditions` array REPLACES the defaults).
 	plugins: [svelte()],
 	resolve: {
-		conditions: ['browser', ...defaultClientConditions]
+		conditions: ['browser', ...defaultClientConditions],
+		// SvelteKit provides the `$lib` alias at build/dev time, but the bare
+		// svelte() plugin used here does not — wire it up so component tests can
+		// mount components that import via `$lib/...` at runtime.
+		alias: {
+			$lib: fileURLToPath(new URL('./src/lib', import.meta.url))
+		}
 	},
 	test: {
 		environment: 'happy-dom',
