@@ -7,11 +7,16 @@ import {
 	placeElementsInView,
 	placeElementsInViewAt
 } from './view-ops';
+import { diffViews, type ViewChange } from './view-diff';
 
 export { cloneView } from './view-ops';
 
 let _view: View | null = $state(null);
 let _warnings: Issue[] = $state([]);
+// Deep clone of the view as last LOADED or SAVED. The view-change count and the
+// Save dialog's View tab diff `_view` against this. Set only at load/save
+// points (never on a mid-session edit), so edits accumulate against it.
+let _baseline: View | null = $state(null);
 
 export function getView(): View | null {
 	return _view;
@@ -28,6 +33,26 @@ function setState(view: View | null, warnings: Issue[]): void {
 
 export function clearViewState(): void {
 	setState(null, []);
+	_baseline = null;
+}
+
+/**
+ * Capture the current view as the saved/loaded baseline (deep clone). Call this
+ * at load points (boot, reload, autoload, Load-files dialog) and after a
+ * successful view file save, so the view-change count resets to 0 there.
+ */
+export function setViewBaseline(view: View | null): void {
+	_baseline = view === null ? null : cloneView(view);
+}
+
+/** Structured diff of the live view against the saved/loaded baseline. */
+export function getViewChanges(): ViewChange[] {
+	return diffViews(_baseline, _view);
+}
+
+/** Number of view changes since load/save (drives the TopBar `View: y`). */
+export function getViewChangesCount(): number {
+	return getViewChanges().length;
 }
 
 /**
@@ -46,8 +71,10 @@ export async function refreshView(): Promise<void> {
 	try {
 		const res = await viewApi.getView();
 		setState(res.view, res.warnings);
+		setViewBaseline(res.view);
 	} catch {
 		setState(null, []);
+		_baseline = null;
 	}
 }
 
