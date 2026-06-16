@@ -300,20 +300,27 @@ test('change badge increments on view edit, tooltip shows View row, Save dialog 
 	const badge = page.locator('header span').filter({ hasText: /●/ }).first();
 	await expect(badge).toBeVisible();
 
+	// A fresh loadView bootstraps with zero pending changes.
+	await expect(badge).toContainText('0 change');
+
 	// Make a view edit: drag Alpha (placed in Grouped) onto the pool header to
 	// exclude it.  This is the same mechanism used by the "exclude" curation test.
 	const put = viewPut(page);
 	await dragRowOnto(page, row(page, 'Alpha'), poolHeader(page));
 	await put; // wait for the PUT /view/snapshot to complete
 
-	// The badge should now reflect at least 1 change (the view edit itself).
-	// After the drag the view has 1 change, so the combined count is ≥ 1.
-	await expect(badge).toContainText(/[1-9]/);
+	// Excluding one element is exactly 1 view change; combined count must be 1.
+	await expect(badge).toContainText('1 change');
 
-	// Hovering the badge reveals the tooltip with a "View" row.
+	// Hovering the badge reveals the tooltip with both a "Model" and a "View" row.
+	// Scope to the badge's own group wrapper (the LAST div.group in the header) so
+	// we cannot accidentally match the Info/loaded-files tooltip in the first group.
 	await badge.hover();
-	const tooltip = page.getByRole('tooltip').filter({ hasText: /View/ }).first();
+	const badgeGroup = page.locator('header div.group').last();
+	const tooltip = badgeGroup.getByRole('tooltip');
 	await expect(tooltip).toBeVisible();
+	await expect(tooltip).toContainText('View');
+	await expect(tooltip).toContainText('Model');
 
 	// Ctrl+S opens the Save dialog (DiffDrawer).
 	await page.keyboard.press('Control+s');
