@@ -11,6 +11,7 @@ os.environ.setdefault("DATA_ROVER_DATABASE_URL", "sqlite://")
 os.environ.setdefault("DATA_ROVER_DEV_SEED", "false")
 os.environ.setdefault("DATA_ROVER_SNAPSHOT_STORE", "memory")
 os.environ.setdefault("DATA_ROVER_IDLE_EVICT_SECONDS", "0")
+os.environ.setdefault("DATA_ROVER_LOCK_SWEEP_SECONDS", "0")
 
 from data_rover.api import db  # noqa: E402
 from data_rover.api import db_models  # noqa: E402,F401  (registers ORM tables)
