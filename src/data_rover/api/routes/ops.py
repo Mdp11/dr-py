@@ -28,11 +28,14 @@ Undo and rev counters
 Undo pops the last batch and applies its ``inverse_ops`` through the same
 machinery (in restore mode, so original entity ids are reinstated exactly
 via ``Model.restore_element`` / ``restore_relationship``). The undo itself
-is NOT pushed to the op log, so repeated undos walk further back through
-history. Undo restores entity STATE (ids, types, endpoints, properties) but
-per-entity ``rev`` counters continue forward: nothing uses ``rev`` for
-conflict detection (CR matching explicitly ignores it, see
-``core/model/change_request.py``), it is only a change ticker.
+is popped from the in-memory op_log (so repeated undos walk back through
+in-memory history), but with durable persistence each undo ALSO appends a
+compensating forward commit to the journal (append-only; ``model_rev`` moves
+forward) so hydration replays to the post-undo state. Undo restores entity
+STATE (ids, types, endpoints, properties) but per-entity ``rev`` counters
+continue forward: nothing uses ``rev`` for conflict detection (CR matching
+explicitly ignores it, see ``core/model/change_request.py``), it is only a
+change ticker.
 """
 
 from __future__ import annotations
@@ -59,8 +62,9 @@ from .. import content
 from ..db import get_db
 from ..db_models import User
 from ..deps import Session, get_request_session, require_model
-from ..hydration import serialize_ops
+from ..hydration import serialize_ops, write_snapshot
 from ..identity import get_current_user
+from ..settings import get_settings
 from ..schemas import (
     CreateElementOp,
     CreateRelationshipOp,
@@ -457,15 +461,18 @@ def _persist_commit(
     rev: int,
     author_id: str | None,
     res: "_BatchResult",
-) -> None:
+) -> bool:
     """Append the accepted batch to the durable journal and advance model_rev.
 
     Only persists when the project actually has a durable model row (the
     interactive/legacy in-memory-only flows have none yet — they persist a
     baseline via the load/upload routes in Task 9). Keeps DB model_rev in
-    lockstep with the just-bumped session.model_rev."""
+    lockstep with the just-bumped session.model_rev.
+
+    Returns True if a durable row existed and the commit was persisted,
+    False when the project has no model row (in-memory-only legacy flow)."""
     if content.get_model_row(db, project_id) is None:
-        return
+        return False
     content.append_commit(
         db,
         project_id,
@@ -478,6 +485,7 @@ def _persist_commit(
     )
     content.set_model_rev(db, project_id, rev)
     db.commit()
+    return True
 
 
 def _persist_undo_commit(
@@ -487,14 +495,17 @@ def _persist_undo_commit(
     rev: int,
     author_id: str | None,
     applied: "_BatchResult",
-) -> None:
+) -> bool:
     """Record an undo as a forward compensating commit (append-only journal).
 
     ``applied`` is the result of applying the inverse batch: its canonical_ops
     ARE the ops that reproduce the undo on replay, and its inverse_ops redo the
-    original change."""
+    original change.
+
+    Returns True if a durable row existed and the commit was persisted,
+    False when the project has no model row (in-memory-only legacy flow)."""
     if content.get_model_row(db, project_id) is None:
-        return
+        return False
     content.append_commit(
         db,
         project_id,
@@ -507,6 +518,18 @@ def _persist_undo_commit(
     )
     content.set_model_rev(db, project_id, rev)
     db.commit()
+    return True
+
+
+def _maybe_periodic_snapshot(
+    db: DbSession, project_id: str, session: Session, rev: int
+) -> None:
+    """Write a full-model snapshot every settings.snapshot_every commits so the
+    hydration replay tail stays bounded for a hot, never-evicted session
+    (on-evict + baseline snapshots otherwise leave it unbounded)."""
+    every = get_settings().snapshot_every
+    if every > 0 and rev % every == 0:
+        write_snapshot(project_id, session, rev)
 
 
 @router.post("/model/ops", response_model=None)
@@ -545,9 +568,20 @@ def apply_ops(
                 id_map=dict(res.id_map),
             )
         )
-        _persist_commit(
-            db, project_id, rev=session.model_rev, author_id=user.id, res=res
-        )
+        try:
+            persisted = _persist_commit(
+                db, project_id, rev=session.model_rev, author_id=user.id, res=res
+            )
+        except Exception as exc:
+            _rollback(model, res.inverse_units)  # undo the in-memory mutation
+            session.model_rev -= 1
+            session.op_log.pop()  # drop the batch we just recorded
+            db.rollback()
+            raise HTTPException(
+                status_code=500, detail="failed to persist commit"
+            ) from exc
+        if persisted:
+            _maybe_periodic_snapshot(db, project_id, session, session.model_rev)
         return _finalize(session, state, model, res)
 
 
@@ -576,7 +610,18 @@ def undo(
         # append-only journal: the undo is a NEW forward commit whose ops are
         # the inverse batch, so hydration replays to the post-undo state and
         # model_rev moves up (Phase 8 revert reuses this shape).
-        _persist_undo_commit(
-            db, project_id, rev=session.model_rev, author_id=user.id, applied=res
-        )
+        try:
+            persisted = _persist_undo_commit(
+                db, project_id, rev=session.model_rev, author_id=user.id, applied=res
+            )
+        except Exception as exc:
+            _rollback(model, res.inverse_units)  # undo the in-memory mutation
+            session.model_rev -= 1
+            session.op_log.append(batch)  # re-push the batch so undo history is intact
+            db.rollback()
+            raise HTTPException(
+                status_code=500, detail="failed to persist commit"
+            ) from exc
+        if persisted:
+            _maybe_periodic_snapshot(db, project_id, session, session.model_rev)
         return _finalize(session, state, model, res)
