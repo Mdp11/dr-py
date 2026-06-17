@@ -31,7 +31,11 @@ def test_env_override(monkeypatch) -> None:
     assert s.identity_email_header == "x-sso-email"
 
 
-def test_phase3_storage_defaults() -> None:
+def test_phase3_storage_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    # conftest sets DATA_ROVER_SNAPSHOT_STORE=memory + DATA_ROVER_IDLE_EVICT_SECONDS=0
+    # process-wide; clear them so we can observe the code defaults.
+    monkeypatch.delenv("DATA_ROVER_SNAPSHOT_STORE", raising=False)
+    monkeypatch.delenv("DATA_ROVER_IDLE_EVICT_SECONDS", raising=False)
     s = Settings()
     assert s.snapshot_store == "gcs"
     assert s.gcs_bucket == "data-rover-snapshots"

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import threading
+import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -60,6 +63,14 @@ class Session:
     #: GET /model/changes reports ``complete: false``. Reset together with
     #: ``op_log`` (model replacement / out-of-protocol mutation).
     op_log_dropped: int = 0
+    #: serializes commit-persist and eviction for THIS project (spec §11
+    #: write-mutex). An RLock so the ops path can take it around a block that
+    #: also calls helpers which assume it is held. Phase 4 widens its role
+    #: (preview/commit); Phase 3 only guards "apply+persist" vs "evict".
+    write_mutex: threading.RLock = field(default_factory=threading.RLock, repr=False)
+    #: monotonic timestamp of the last registry access; the idle sweeper
+    #: (Task 11) evicts sessions whose last_access is older than the TTL.
+    last_access: float = field(default_factory=time.monotonic, repr=False)
 
     def set_model(
         self, model: Model | None, *, validation: ValidationState | None = None
@@ -117,59 +128,84 @@ DEFAULT_PROJECT_ID = "default"
 
 
 class SessionRegistry:
-    """Holds one live :class:`Session` per project id, created on first access.
+    """Holds one live :class:`Session` per project id, hydrated on first access.
 
-    Replaces the former process-wide singleton. Each project gets an
-    independent in-memory ``Session`` (metamodel + model + view + validation
-    baseline + op_log + model_rev), so mutating one project never affects
-    another. Sessions are created lazily by :meth:`get`; :meth:`evict` drops a
-    single project; :meth:`reset` drops them all (test isolation). Later phases
-    add durable hydration-on-miss and idle eviction here without changing
-    callers.
-    """
+    On a cache-miss ``get`` calls the injected ``loader`` (Phase 3:
+    ``hydration.hydrate_session``) under a per-project init-once lock so two
+    concurrent requests for a cold project hydrate exactly once. ``evict`` runs
+    the injected ``evict_hook`` (Phase 3: snapshot-then-drop) before removing the
+    session. With no loader installed the registry falls back to an empty
+    ``Session`` — the pre-Phase-3 behaviour used by unit tests that don't need
+    persistence."""
 
     def __init__(self) -> None:
         self._sessions: dict[str, Session] = {}
+        self._loader: Callable[[str], Session] | None = None
+        self._evict_hook: Callable[[str, Session], None] | None = None
+        self._guard = threading.Lock()  # protects _sessions + per-key locks
+        self._key_locks: dict[str, threading.Lock] = {}
+
+    def set_loader(self, loader: Callable[[str], Session] | None) -> None:
+        self._loader = loader
+
+    def set_evict_hook(self, hook: Callable[[str, Session], None] | None) -> None:
+        self._evict_hook = hook
 
     def get(self, project_id: str) -> Session:
-        """Return the live session for *project_id*, creating one on first access.
-
-        Subsequent calls with the same id return the exact same ``Session``
-        instance; callers must not cache the return value across evictions.
-        This is the seam where later phases will hydrate a persisted session
-        from durable storage on a cache-miss, without callers needing to change.
-        """
-        session = self._sessions.get(project_id)
-        if session is None:
-            session = Session()
-            self._sessions[project_id] = session
-        return session
+        # fast path: already warm
+        with self._guard:
+            session = self._sessions.get(project_id)
+            if session is not None:
+                session.last_access = time.monotonic()
+                return session
+            key_lock = self._key_locks.setdefault(project_id, threading.Lock())
+        # hydrate outside the global guard, but serialized per project id so a
+        # cold project is built exactly once (init-once guard, spec §11).
+        with key_lock:
+            with self._guard:
+                session = self._sessions.get(project_id)
+                if session is not None:
+                    session.last_access = time.monotonic()
+                    return session
+            session = self._loader(project_id) if self._loader else Session()
+            session.last_access = time.monotonic()
+            with self._guard:
+                self._sessions[project_id] = session
+            return session
 
     def evict(self, project_id: str) -> None:
-        """Drop the session for *project_id*, if one exists.
+        with self._guard:
+            session = self._sessions.pop(project_id, None)
+        if session is None:
+            return
+        # snapshot under the session's write-mutex so eviction can't race an
+        # in-flight commit (spec §11 evict-during-commit guard).
+        with session.write_mutex:
+            if self._evict_hook is not None:
+                self._evict_hook(project_id, session)
 
-        Idempotent: silently ignores unknown ids so callers need not guard
-        against double-eviction (e.g. explicit eviction followed by an idle
-        eviction that runs concurrently).
-        """
-        self._sessions.pop(project_id, None)
+    def touch(self, project_id: str) -> None:
+        with self._guard:
+            session = self._sessions.get(project_id)
+            if session is not None:
+                session.last_access = time.monotonic()
+
+    def idle(self, now: float, ttl: float) -> list[str]:
+        with self._guard:
+            return [
+                pid
+                for pid, s in self._sessions.items()
+                if now - s.last_access >= ttl
+            ]
 
     def reset(self) -> None:
-        """Drop all live sessions.
-
-        Intended for test isolation: each test that needs a clean registry
-        calls this on teardown (or constructs a fresh ``SessionRegistry``)
-        rather than managing individual evictions.
-        """
-        self._sessions.clear()
+        with self._guard:
+            self._sessions.clear()
+            self._key_locks.clear()
 
     def project_ids(self) -> list[str]:
-        """Return the ids of currently-live sessions, in insertion order.
-
-        Insertion order matches dict iteration order (guaranteed since
-        Python 3.7). Sessions that were evicted are not included.
-        """
-        return list(self._sessions)
+        with self._guard:
+            return list(self._sessions)
 
 
 _registry = SessionRegistry()
@@ -203,3 +239,20 @@ def reset_session() -> None:
     re-fetch) already re-fetch, so this is safe.
     """
     _registry.reset()
+
+
+def install_persistent_registry() -> None:
+    """Wire the process-global registry to durable hydration + snapshot-evict.
+
+    Called at app startup (and by the API test conftest). Kept here — not at
+    import time — so importing ``session`` never pulls in the storage/DB stack
+    (``hydration`` imports both); unit tests that want the empty-Session
+    fallback simply don't call this."""
+    from .hydration import hydrate_session, write_snapshot
+
+    def _evict(project_id: str, sess: Session) -> None:
+        if sess.model is not None:
+            write_snapshot(project_id, sess, sess.model_rev)
+
+    _registry.set_loader(hydrate_session)
+    _registry.set_evict_hook(_evict)

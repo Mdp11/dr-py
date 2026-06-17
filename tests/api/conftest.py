@@ -9,12 +9,19 @@ import pytest
 # BEFORE any app/settings import reads the environment.
 os.environ.setdefault("DATA_ROVER_DATABASE_URL", "sqlite://")
 os.environ.setdefault("DATA_ROVER_DEV_SEED", "false")
+os.environ.setdefault("DATA_ROVER_SNAPSHOT_STORE", "memory")
+os.environ.setdefault("DATA_ROVER_IDLE_EVICT_SECONDS", "0")
 
 from data_rover.api import db  # noqa: E402
 from data_rover.api import db_models  # noqa: E402,F401  (registers ORM tables)
 from data_rover.api.db_models import Membership, Project, Role, User  # noqa: E402
 from data_rover.api.identity import set_identity_provider  # noqa: E402
-from data_rover.api.session import DEFAULT_PROJECT_ID, reset_session  # noqa: E402
+from data_rover.api.session import (  # noqa: E402
+    DEFAULT_PROJECT_ID,
+    install_persistent_registry,
+    reset_session,
+)
+from data_rover.api.storage import MemorySnapshotStore, set_snapshot_store  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -23,12 +30,15 @@ def _fresh_db() -> Iterator[None]:
     db.init_engine("sqlite://")
     db.create_all()
     reset_session()
+    set_snapshot_store(MemorySnapshotStore())
+    install_persistent_registry()  # get() now hydrates from the (empty) DB
     set_identity_provider(None)  # forget any provider a test swapped in
     try:
         yield
     finally:
         db.drop_all()
         reset_session()
+        set_snapshot_store(None)
         set_identity_provider(None)
 
 
