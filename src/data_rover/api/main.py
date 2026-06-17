@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from . import importer
 from .db import create_all, init_engine
 from .errors import register_exception_handlers
+from .feed import lock_event
 from .routes import (
     change_request,
     commits,
@@ -85,11 +86,25 @@ def _sweep_expired_locks(now: float) -> int:
 
     Iterates warm_items() so the sweeper neither refreshes last_access
     (which would defeat the idle-evict sweeper) nor hydrates cold/evicted
-    projects (which would undo the eviction)."""
+    projects (which would undo the eviction).
+
+    Broadcasts lock{expired} for each session whose leases were swept,
+    outside the write_mutex (enqueue is non-blocking; no mutex needed)."""
     released = 0
     for _pid, session in get_registry().warm_items():
         with session.write_mutex:
-            released += len(session.lock_table.sweep_expired(now))
+            expired = session.lock_table.sweep_expired(now)
+        if expired:
+            session.hub.broadcast(
+                lock_event(
+                    "expired",
+                    [
+                        {"resource_id": le.resource_id, "mode": le.mode.value, "holder_id": le.holder}
+                        for le in expired
+                    ],
+                )
+            )
+        released += len(expired)
     return released
 
 

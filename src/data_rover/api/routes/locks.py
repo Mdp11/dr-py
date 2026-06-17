@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
 from ..deps import Session, get_request_session, require_model
+from ..feed import lock_event
 from ..identity import get_current_user
 from ..db_models import User
 from ..locking import Lease, LockIntent, LockMode, expand_targets
@@ -27,6 +28,13 @@ from ..schemas import (
 from ..settings import get_settings
 
 router = APIRouter()
+
+
+def _lease_event_dicts(leases: list[Lease]) -> list[dict]:  # type: ignore[type-arg]
+    return [
+        {"resource_id": le.resource_id, "mode": le.mode.value, "holder_id": le.holder}
+        for le in leases
+    ]
 
 
 def _lease_out(le: Lease) -> LeaseOut:
@@ -70,6 +78,7 @@ def acquire_locks(
                 ],
             },
         )
+    session.hub.broadcast(lock_event("acquired", _lease_event_dicts(leases)))
     return LockResponse(token=token, leases=[_lease_out(le) for le in leases])
 
 
@@ -81,6 +90,8 @@ def release_locks(
 ) -> dict[str, int]:
     with session.write_mutex:
         released = session.lock_table.release(user.id, payload.token)
+    if released:
+        session.hub.broadcast(lock_event("released", _lease_event_dicts(released)))
     return {"released": len(released)}
 
 

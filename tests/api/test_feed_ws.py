@@ -91,6 +91,33 @@ def _lock(client: TestClient, rid: str) -> str:
     return res.json()["token"]
 
 
+def test_lock_acquire_broadcasts(client: TestClient) -> None:
+    create = client.post(
+        papi("/model/ops"),
+        json={
+            "base_rev": client.get(papi("/open")).json()["model_rev"],
+            "ops": [
+                {"kind": "create_element", "temp_id": "tmp_1", "type_name": "Node", "properties": {}}
+            ],
+        },
+    )
+    assert create.status_code == 200, create.text
+    eid = create.json()["id_map"]["tmp_1"]
+    with client.websocket_connect(_feed_url()) as ws:
+        ws.receive_json()  # snapshot
+        token = _lock(client, eid)
+        evt = ws.receive_json()
+        while evt["type"] != "lock":
+            evt = ws.receive_json()
+        assert evt["action"] == "acquired"
+        assert evt["leases"][0]["resource_id"] == eid
+        client.post(papi("/locks/release"), json={"token": token})
+        rel = ws.receive_json()
+        while rel["type"] != "lock":
+            rel = ws.receive_json()
+        assert rel["action"] == "released"
+
+
 def test_commit_broadcasts_delta_to_feed(client: TestClient) -> None:
     # seed one element so we have something to lock+update
     create = client.post(
