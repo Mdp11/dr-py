@@ -1,5 +1,6 @@
 from data_rover.core.metamodel.schema import (
     ElementType,
+    Mapping,
     Metamodel,
     PropertyDef,
     RelationshipType,
@@ -92,8 +93,8 @@ def test_relationship_target_multiplicity_checks_all_mapping_sources():
             RelationshipType(
                 name="R",
                 mappings=[
-                    {"source": "A", "target": "B"},
-                    {"source": "C", "target": "D"},
+                    Mapping(source="A", target="B"),
+                    Mapping(source="C", target="D"),
                 ],
                 target_multiplicity="1",
             )

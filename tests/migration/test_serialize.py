@@ -27,8 +27,10 @@ def test_roundtrip_preserves_relationship_mappings():
     mm = migrate(_old_mm(), _old_model()).metamodel
     back = _roundtrip(mm)
     knows = back.relationship_type("Knows")
+    assert knows is not None
     assert [(m.source, m.target) for m in knows.mappings] == [("Person", "Person")]
     owns = back.relationship_type("Owns")
+    assert owns is not None
     assert owns.containment is True
     assert [(m.source, m.target) for m in owns.mappings] == [("Org", "Person")]
 

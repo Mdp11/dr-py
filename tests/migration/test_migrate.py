@@ -82,7 +82,9 @@ def test_id_properties_become_key():
 
 def test_property_datatypes_inferred_from_data():
     result = migrate(_old_mm(), _old_model())
-    props = {p.name: p for p in result.metamodel.element_type("Person").properties}
+    person = result.metamodel.element_type("Person")
+    assert person is not None
+    props = {p.name: p for p in person.properties}
     assert props["email"].datatype == "string"
     assert props["age"].datatype == "integer"
     assert props["tags"].datatype == "string"
@@ -90,7 +92,9 @@ def test_property_datatypes_inferred_from_data():
 
 def test_property_multiplicities():
     result = migrate(_old_mm(), _old_model())
-    props = {p.name: p for p in result.metamodel.element_type("Person").properties}
+    person = result.metamodel.element_type("Person")
+    assert person is not None
+    props = {p.name: p for p in person.properties}
     assert props["email"].multiplicity == "1"  # id property
     assert props["age"].multiplicity == "0..1"  # plain scalar
     assert props["tags"].multiplicity == "0..*"  # list-valued in data
@@ -98,7 +102,9 @@ def test_property_multiplicities():
 
 def test_dropped_properties_absent_from_metamodel():
     result = migrate(_old_mm(), _old_model())
-    names = {p.name for p in result.metamodel.element_type("Person").properties}
+    person = result.metamodel.element_type("Person")
+    assert person is not None
+    names = {p.name for p in person.properties}
     assert "SourceDatabase" not in names
     assert "debug_data" not in names
 
@@ -349,7 +355,9 @@ def _numeric_string_inputs():
 def test_numeric_string_datatypes_inferred():
     mm, model = _numeric_string_inputs()
     result = migrate(mm, model)
-    props = {p.name: p for p in result.metamodel.element_type("Reading").properties}
+    reading = result.metamodel.element_type("Reading")
+    assert reading is not None
+    props = {p.name: p for p in reading.properties}
     assert props["amount"].datatype == "float"
     assert props["count"].datatype == "integer"
     assert props["ratios"].datatype == "float"  # finite floats + Infinity token

@@ -60,6 +60,7 @@ def test_remove_inconsistencies_on_samples(tmp_path):
     assert any(r.id == "some_rel_uuidv5" for r in report.removed)
 
     # the removed entities are written to a sibling review file
+    assert report.removed_report_path is not None
     removed_path = Path(report.removed_report_path)
     assert removed_path.exists()
     assert removed_path.name == "m.removed.txt"
