@@ -59,7 +59,8 @@ def test_ops_batch_persists_a_commit_and_bumps_db_rev() -> None:
     assert r.status_code == 200
     new_rev = r.json()["model_rev"]
     with db.db_session() as s:
-        assert content.get_model_row(s, "default").model_rev == new_rev
+        model_row = content.get_model_row(s, "default")
+        assert model_row is not None and model_row.model_rev == new_rev
         tail = content.commits_after(s, "default", base)
         assert len(tail) == 1 and tail[0].ops[0]["kind"] == "create_element"
 

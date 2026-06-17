@@ -467,7 +467,11 @@ def _persist_commit(
     if content.get_model_row(db, project_id) is None:
         return
     content.append_commit(
-        db, project_id, rev=rev, commit_id=uuid.uuid4().hex, author_id=author_id,
+        db,
+        project_id,
+        rev=rev,
+        commit_id=uuid.uuid4().hex,
+        author_id=author_id,
         ops=serialize_ops(res.canonical_ops),
         inverse_ops=serialize_ops(res.inverse_ops()),
         id_map=dict(res.id_map),
@@ -477,7 +481,11 @@ def _persist_commit(
 
 
 def _persist_undo_commit(
-    db: DbSession, project_id: str, *, rev: int, author_id: str | None,
+    db: DbSession,
+    project_id: str,
+    *,
+    rev: int,
+    author_id: str | None,
     applied: "_BatchResult",
 ) -> None:
     """Record an undo as a forward compensating commit (append-only journal).
@@ -488,7 +496,11 @@ def _persist_undo_commit(
     if content.get_model_row(db, project_id) is None:
         return
     content.append_commit(
-        db, project_id, rev=rev, commit_id=uuid.uuid4().hex, author_id=author_id,
+        db,
+        project_id,
+        rev=rev,
+        commit_id=uuid.uuid4().hex,
+        author_id=author_id,
         ops=serialize_ops(applied.canonical_ops),
         inverse_ops=serialize_ops(applied.inverse_ops()),
         id_map=dict(applied.id_map),
@@ -564,6 +576,7 @@ def undo(
         # append-only journal: the undo is a NEW forward commit whose ops are
         # the inverse batch, so hydration replays to the post-undo state and
         # model_rev moves up (Phase 8 revert reuses this shape).
-        _persist_undo_commit(db, project_id, rev=session.model_rev,
-                             author_id=user.id, applied=res)
+        _persist_undo_commit(
+            db, project_id, rev=session.model_rev, author_id=user.id, applied=res
+        )
         return _finalize(session, state, model, res)

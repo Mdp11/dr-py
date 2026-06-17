@@ -60,6 +60,7 @@ def init_engine(database_url: str, *, force: bool = False) -> Engine:
             connect_args={"check_same_thread": False},
             **({"poolclass": StaticPool} if is_memory else {}),
         )
+
         # SQLite ignores FK constraints (incl. ON DELETE CASCADE) unless asked
         # per-connection. Turn them on so test behaviour matches Postgres —
         # otherwise ``passive_deletes=True`` relationships would orphan children.
@@ -73,9 +74,7 @@ def init_engine(database_url: str, *, force: bool = False) -> Engine:
     else:
         _engine = create_engine(database_url, pool_pre_ping=True)
     _engine_url = database_url
-    _SessionLocal = sessionmaker(
-        bind=_engine, autoflush=False, expire_on_commit=False
-    )
+    _SessionLocal = sessionmaker(bind=_engine, autoflush=False, expire_on_commit=False)
     return _engine
 
 

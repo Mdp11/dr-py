@@ -27,8 +27,10 @@ def test_import_creates_project_baseline_and_hydrates() -> None:
         with db.db_session() as s:
             assert s.get(Project, "proj") is not None
             assert s.get(User, "u1") is not None
-            assert content.get_model_row(s, "proj").model_rev == 0
-            assert content.latest_snapshot(s, "proj").rev == 0
+            model_row = content.get_model_row(s, "proj")
+            assert model_row is not None and model_row.model_rev == 0
+            snap = content.latest_snapshot(s, "proj")
+            assert snap is not None and snap.rev == 0
         sess = hydration.hydrate_session("proj")
         assert sess.model is not None and len(sess.model.elements) > 0
         assert sess.view is not None
@@ -48,6 +50,7 @@ def test_import_is_idempotent_noop_when_project_exists() -> None:
             metamodel_yaml=MM, model_json=MODEL,
         )
         with db.db_session() as s:
-            assert content.get_model_row(s, "proj").model_rev == 0
+            row2 = content.get_model_row(s, "proj")
+            assert row2 is not None and row2.model_rev == 0
     finally:
         set_snapshot_store(None)

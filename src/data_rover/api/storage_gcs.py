@@ -22,19 +22,18 @@ class GcsSnapshotStore:
         endpoint: str | None = None,
         create_bucket: bool = False,
     ) -> None:
-        if client is None:
-            client = _make_client(endpoint)
-        self._client = client
+        _client: Any = _make_client(endpoint) if client is None else client
+        self._client = _client
         self._bucket_name = bucket
         if create_bucket:
             # emulator convenience; ignore "already exists"
             from google.cloud.exceptions import Conflict
 
             try:
-                client.create_bucket(bucket)
+                _client.create_bucket(bucket)
             except Conflict:
                 pass
-        self._bucket = client.bucket(bucket)
+        self._bucket = _client.bucket(bucket)
 
     def put(self, key: str, chunks: Iterable[bytes]) -> None:
         # buffer the chunks then upload: the google client's resumable upload
@@ -64,7 +63,7 @@ class GcsSnapshotStore:
 
 def _make_client(endpoint: str | None) -> Any:
     from google.auth.credentials import AnonymousCredentials
-    from google.cloud import storage
+    from google.cloud import storage  # type: ignore[attr-defined]
 
     if endpoint:
         # emulator: anonymous creds + endpoint override

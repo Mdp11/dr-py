@@ -67,8 +67,14 @@ def persist_baseline(
     with db_session() as s:
         content.clear_history(s, project_id)
         content.append_commit(
-            s, project_id, rev=rev, commit_id=uuid.uuid4().hex,
-            author_id=author_id, ops=[], inverse_ops=[], id_map={},
+            s,
+            project_id,
+            rev=rev,
+            commit_id=uuid.uuid4().hex,
+            author_id=author_id,
+            ops=[],
+            inverse_ops=[],
+            id_map={},
         )
         content.set_model_rev(s, project_id, rev)
     write_snapshot(project_id, session, rev)

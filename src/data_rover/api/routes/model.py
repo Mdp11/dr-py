@@ -180,7 +180,9 @@ def load_model(
             status_code=422,
             detail=f"Invalid JSON in {payload.path!r}: {exc}",
         ) from exc
-    return _install_model(session, metamodel, raw, db=db, project_id=project_id, author_id=user.id)
+    return _install_model(
+        session, metamodel, raw, db=db, project_id=project_id, author_id=user.id
+    )
 
 
 @router.post("/model/upload", dependencies=[Depends(require_allowed_origin)])
@@ -215,7 +217,9 @@ async def upload_model_body(
             status_code=422,
             detail=f"Request body is not valid JSON: {exc}",
         ) from exc
-    return _install_model(session, metamodel, raw, db=db, project_id=project_id, author_id=user.id)
+    return _install_model(
+        session, metamodel, raw, db=db, project_id=project_id, author_id=user.id
+    )
 
 
 @router.post("/model/save", dependencies=[Depends(require_allowed_origin)])
@@ -270,7 +274,9 @@ def save_model(
 
 
 @router.get("/model/download", dependencies=[Depends(require_allowed_origin)])
-def download_model(session: Session = Depends(get_request_session)) -> StreamingResponse:
+def download_model(
+    session: Session = Depends(get_request_session),
+) -> StreamingResponse:
     """Stream the session model as an attachment (same bytes as /model/save).
 
     The D2 frontend pipes ``response.body`` straight into a FileSystem

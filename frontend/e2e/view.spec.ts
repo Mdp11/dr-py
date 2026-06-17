@@ -331,9 +331,7 @@ test('change badge increments on view edit, tooltip shows View row, Save dialog 
 	// line is shown (Alpha was moved out of Grouped so it is "removed from view"
 	// or "moved from '...' to '...'").
 	await drawer.getByRole('tab', { name: /View/i }).click();
-	await expect(
-		drawer.getByText(/moved from|added to|removed from view|Folder '/)
-	).toBeVisible();
+	await expect(drawer.getByText(/moved from|added to|removed from view|Folder '/)).toBeVisible();
 });
 
 test('excluded pool: collapsed by default (no fetch), expands, and state persists', async ({
