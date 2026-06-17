@@ -109,9 +109,10 @@ class Session:
             self.op_log_dropped += 1
 
 
-#: Project id used when a request carries no ``X-Project-Id`` header. Phase 1
-#: keeps a single implicit project so existing single-project clients and the
-#: whole test-suite behave exactly as before the registry was introduced.
+#: Project id for the no-request-context ``get_session()`` (internal/test
+#: callers, and the dev seed). Request-scoped routes resolve ``project_id`` from
+#: the ``/api/v1/projects/{project_id}`` URL path instead — there is no implicit
+#: header fallback (Phase 1's ``X-Project-Id`` mechanism was replaced in Phase 2).
 DEFAULT_PROJECT_ID = "default"
 
 

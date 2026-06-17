@@ -90,29 +90,14 @@ def test_reset_session_clears_all_projects() -> None:
     assert get_registry().get("other").model_rev == 0
 
 
-def test_get_request_session_uses_header_project() -> None:
-    from starlette.requests import Request
-
+def test_get_request_session_resolves_path_project() -> None:
+    from data_rover.api.db_models import Membership, Role
     from data_rover.api.deps import get_request_session
     from data_rover.api.session import get_registry, reset_session
 
     reset_session()
-
-    def make_request(headers: list[tuple[bytes, bytes]]) -> Request:
-        # ASGI servers (uvicorn, hypercorn) always lowercase header names before
-        # populating scope["headers"]; mirror that so raw wire-form names like
-        # b"X-Project-Id" behave as they would in production.
-        return Request({"type": "http", "headers": [(k.lower(), v) for k, v in headers]})
-
-    s_a = get_request_session(make_request([(b"x-project-id", b"proj-a")]))
-    s_b = get_request_session(make_request([(b"x-project-id", b"proj-b")]))
-    s_default = get_request_session(make_request([]))
-
-    assert s_a is get_registry().get("proj-a")
-    assert s_b is get_registry().get("proj-b")
-    assert s_a is not s_b
-    assert s_default is get_registry().get("default")
-
-    # Header name matching is case-insensitive (Starlette normalizes names).
-    s_upper = get_request_session(make_request([(b"X-Project-Id", b"proj-a")]))
-    assert s_upper is s_a
+    # require_membership is the auth gate (Depends-injected); calling
+    # get_request_session directly with a stub membership exercises only the
+    # registry resolution (full auth is covered by test_authz.py).
+    stub = Membership(user_id="u", project_id="proj-a", role=Role.owner)
+    assert get_request_session("proj-a", stub) is get_registry().get("proj-a")

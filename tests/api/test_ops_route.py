@@ -11,10 +11,17 @@ from fastapi.testclient import TestClient
 
 import data_rover.api.session as session_module
 from data_rover.api.main import create_app
-from data_rover.api.session import get_session, reset_session
+# get_session() returns the DEFAULT project's session; the client fixture seeds
+# and targets that same project (DEFAULT_PROJECT_ID), so these assertions
+# inspect the very session the HTTP requests mutate.
+from data_rover.api.session import get_session
 from data_rover.core.model.model import Model
 from data_rover.core.validation.pipeline import default_pipeline
 from data_rover.core.validation.scope import Scope
+
+from .conftest import AUTH_HEADERS, seed_default_project
+
+API = "/api/v1/projects/default"
 
 # Item.name is required (multiplicity 1) and the uniqueness key; `ref` is a
 # single-valued reference property, `refs` a list reference. Contains is the
@@ -47,11 +54,11 @@ relationships:
 
 @pytest.fixture
 def client() -> TestClient:
-    reset_session()
-    app = create_app()
-    c = TestClient(app)
+    seed_default_project()
+    c = TestClient(create_app())
+    c.headers.update(AUTH_HEADERS)
     res = c.post(
-        "/api/v1/metamodel",
+        f"{API}/metamodel",
         content=OPS_MM,
         headers={"content-type": "application/x-yaml"},
     )
@@ -63,7 +70,7 @@ def client() -> TestClient:
 def seeded(client: TestClient) -> TestClient:
     """Model with items a, b, c; a Contains b; a Links c (weight 2)."""
     res = client.post(
-        "/api/v1/model",
+        f"{API}/model",
         json={
             "elements": [
                 {"id": "a", "type_name": "Item", "properties": {"name": "A"}},
@@ -104,11 +111,11 @@ def _model() -> Model:
 def _post_ops(client: TestClient, ops: list[dict], base_rev: int | None = None):
     if base_rev is None:
         base_rev = _rev()
-    return client.post("/api/v1/model/ops", json={"base_rev": base_rev, "ops": ops})
+    return client.post(f"{API}/model/ops", json={"base_rev": base_rev, "ops": ops})
 
 
 def _undo(client: TestClient):
-    return client.post("/api/v1/model/undo")
+    return client.post(f"{API}/model/undo")
 
 
 def _snapshot(model: Model):
@@ -472,7 +479,7 @@ def test_legacy_mutation_invalidates_ops_protocol_state(seeded: TestClient) -> N
     assert len(get_session().op_log) == 1
     # legacy element create mutates outside the ops protocol
     res = seeded.post(
-        "/api/v1/model/elements",
+        f"{API}/model/elements",
         json={"type": "Item", "properties": {"name": "L"}},
     )
     assert res.status_code == 201, res.text
@@ -492,27 +499,27 @@ def test_legacy_mutation_invalidates_ops_protocol_state(seeded: TestClient) -> N
 def test_every_legacy_mutating_handler_bumps_model_rev(seeded: TestClient) -> None:
     rev = _rev()
     res = seeded.post(
-        "/api/v1/model/elements",
+        f"{API}/model/elements",
         json={"type": "Item", "properties": {"name": "L"}},
     )
     assert res.status_code == 201, res.text
     eid = res.json()["id"]
     assert _rev() == rev + 1
     res = seeded.patch(
-        f"/api/v1/model/elements/{eid}", json={"properties": {"note": "n"}}
+        f"{API}/model/elements/{eid}", json={"properties": {"note": "n"}}
     )
     assert res.status_code == 200, res.text
     assert _rev() == rev + 2
     res = seeded.post(
-        "/api/v1/model/relationships",
+        f"{API}/model/relationships",
         json={"type": "Links", "source_id": eid, "target_id": "c"},
     )
     assert res.status_code == 201, res.text
     rid = res.json()["id"]
     assert _rev() == rev + 3
-    assert seeded.delete(f"/api/v1/model/relationships/{rid}").status_code == 204
+    assert seeded.delete(f"{API}/model/relationships/{rid}").status_code == 204
     assert _rev() == rev + 4
-    assert seeded.delete(f"/api/v1/model/elements/{eid}").status_code == 204
+    assert seeded.delete(f"{API}/model/elements/{eid}").status_code == 204
     assert _rev() == rev + 5
 
 
@@ -521,7 +528,7 @@ def test_every_legacy_mutating_handler_bumps_model_rev(seeded: TestClient) -> No
 
 def test_model_payload_rejects_reserved_tmp_element_id(client: TestClient) -> None:
     res = client.post(
-        "/api/v1/model",
+        f"{API}/model",
         json={
             "elements": [
                 {"id": "tmp_weird", "type_name": "Item", "properties": {"name": "W"}}
@@ -536,7 +543,7 @@ def test_model_payload_rejects_reserved_tmp_element_id(client: TestClient) -> No
 
 def test_model_payload_rejects_reserved_tmp_relationship_id(client: TestClient) -> None:
     res = client.post(
-        "/api/v1/model",
+        f"{API}/model",
         json={
             "elements": [
                 {"id": "a", "type_name": "Item", "properties": {"name": "A"}},
