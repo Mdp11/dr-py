@@ -9,12 +9,16 @@ from typing import Any, Iterator
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session as DbSession
 
 from data_rover.core.metamodel.schema import Metamodel
 from data_rover.core.validation.pipeline import default_pipeline
 from data_rover.core.validation.scope import Scope
 from data_rover.core.validation.state import ValidationState
 
+from .. import content
+from ..db import get_db
+from ..db_models import User
 from ..deps import (
     Session,
     get_request_session,
@@ -22,6 +26,8 @@ from ..deps import (
     require_metamodel,
     require_model,
 )
+from ..hydration import persist_baseline
+from ..identity import get_current_user
 from ..schemas import (
     InlineModel,
     LoadModelRequest,
@@ -104,7 +110,15 @@ def clear_model(session: Session = Depends(get_request_session)) -> Response:
 # ---------------------------------------------------------------------------
 
 
-def _install_model(session: Session, metamodel: Metamodel, raw: Any) -> ModelSummary:
+def _install_model(
+    session: Session,
+    metamodel: Metamodel,
+    raw: Any,
+    *,
+    db: DbSession,
+    project_id: str,
+    author_id: str | None,
+) -> ModelSummary:
     """Guard-check *raw*, install it as the session model, seed validation.
 
     Shared tail of POST /model/load and POST /model/upload: build the Model
@@ -120,13 +134,21 @@ def _install_model(session: Session, metamodel: Metamodel, raw: Any) -> ModelSum
     state = ValidationState()
     state.set_full(default_pipeline().validate(model, Scope.all()))
     session.set_model(model, validation=state)
+    # make this uploaded model the durable baseline, but only if the project
+    # has a model row (i.e. its metamodel was persisted) — pure in-memory unit
+    # tests that skip the metamodel route keep working with no persistence.
+    if content.get_model_row(db, project_id) is not None:
+        persist_baseline(project_id, session, author_id=author_id)
     return model_summary(session)
 
 
 @router.post("/model/load", dependencies=[Depends(require_allowed_origin)])
 def load_model(
     payload: LoadModelRequest,
+    project_id: str,
     session: Session = Depends(get_request_session),
+    db: DbSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> ModelSummary:
     """Load a model JSON file from the SERVER's local filesystem.
 
@@ -158,13 +180,16 @@ def load_model(
             status_code=422,
             detail=f"Invalid JSON in {payload.path!r}: {exc}",
         ) from exc
-    return _install_model(session, metamodel, raw)
+    return _install_model(session, metamodel, raw, db=db, project_id=project_id, author_id=user.id)
 
 
 @router.post("/model/upload", dependencies=[Depends(require_allowed_origin)])
 async def upload_model_body(
     request: Request,
+    project_id: str,
     session: Session = Depends(get_request_session),
+    db: DbSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> ModelSummary:
     """Load a model from the raw request body (browser-streamed file).
 
@@ -190,7 +215,7 @@ async def upload_model_body(
             status_code=422,
             detail=f"Request body is not valid JSON: {exc}",
         ) from exc
-    return _install_model(session, metamodel, raw)
+    return _install_model(session, metamodel, raw, db=db, project_id=project_id, author_id=user.id)
 
 
 @router.post("/model/save", dependencies=[Depends(require_allowed_origin)])
