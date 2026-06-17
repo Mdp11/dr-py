@@ -66,3 +66,21 @@ def test_clear_history_removes_commits_and_snapshots() -> None:
     with db.db_session() as s:
         assert content.commits_after(s, "p1", 0) == []
         assert content.latest_snapshot(s, "p1") is None
+
+
+def test_append_commit_persists_metadata() -> None:
+    _setup()
+    with db.db_session() as s:
+        mm = content.create_metamodel(s, name="MM", version=1, blob="x: 1")
+        content.upsert_model_row(s, "p1", metamodel_id=mm.id)
+        content.append_commit(
+            s, "p1", rev=1, commit_id="c1", author_id=None,
+            ops=[], inverse_ops=[], id_map={},
+            message="rename node", validation_error_count=3,
+            issues=[{"severity": "error", "message": "m", "category": "conformance"}],
+        )
+    with db.db_session() as s:
+        c = content.commits_after(s, "p1", 0)[0]
+        assert c.message == "rename node"
+        assert c.validation_error_count == 3
+        assert c.issues[0]["category"] == "conformance"

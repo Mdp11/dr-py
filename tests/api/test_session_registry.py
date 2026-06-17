@@ -172,3 +172,26 @@ def test_idle_lists_stale_projects() -> None:
     reg.get("p1")
     reg.touch("p1")
     assert reg.idle(now=1000.0, ttl=10.0) == []  # just touched (last_access ~ monotonic)
+
+
+def test_evict_skips_session_with_live_locks() -> None:
+    import time as _time
+
+    from data_rover.api.locking import LockIntent, LockMode, RequiredLock
+    from data_rover.api.session import Session, SessionRegistry
+
+    evicted: list[str] = []
+    reg = SessionRegistry()
+    reg.set_loader(lambda pid: Session())
+    reg.set_evict_hook(lambda pid, s: evicted.append(pid))
+
+    sess = reg.get("p1")
+    sess.lock_table.acquire(
+        "u1",
+        [RequiredLock(resource_id="e1", mode=LockMode.EXCLUSIVE, intent=LockIntent.EDIT)],
+        now=_time.monotonic(),
+        ttl=300.0,
+    )
+    reg.evict("p1")
+    assert evicted == []  # refused: live lease held
+    assert "p1" in reg.project_ids()

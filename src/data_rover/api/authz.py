@@ -41,6 +41,7 @@ _READ_ONLY_POST_SUFFIXES = (
     "/model/search",
     "/model/elements/batch",
     "/model/validate",
+    "/commits/preview",
 )
 
 
