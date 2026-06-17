@@ -11,6 +11,8 @@ from data_rover.core.model.model import Model
 from data_rover.core.validation.state import ValidationState
 from data_rover.core.view.schema import View
 
+from .locking import LockTable
+
 if TYPE_CHECKING:
     from .schemas import OpIn
 
@@ -71,6 +73,11 @@ class Session:
     #: monotonic timestamp of the last registry access; the idle sweeper
     #: (Task 11) evicts sessions whose last_access is older than the TTL.
     last_access: float = field(default_factory=time.monotonic, repr=False)
+    #: per-project resource leases (Phase 4 check-out/commit). In-session only
+    #: this phase (Redis mirroring is Phase 7). Sweept of expired leases by the
+    #: lifespan sweeper; consulted by the commit route (lock verification) and
+    #: by ``SessionRegistry.evict`` (never evict a session with live leases).
+    lock_table: LockTable = field(default_factory=LockTable, repr=False)
 
     def set_model(
         self, model: Model | None, *, validation: ValidationState | None = None
@@ -181,6 +188,11 @@ class SessionRegistry:
         # snapshot under the session's write-mutex so eviction can't race an
         # in-flight commit (spec §11 evict-during-commit guard).
         with session.write_mutex:
+            if session.lock_table.active_leases(time.monotonic()):
+                # a holder still has a check-out open; re-register and skip.
+                with self._guard:
+                    self._sessions[project_id] = session
+                return
             if self._evict_hook is not None:
                 self._evict_hook(project_id, session)
 
