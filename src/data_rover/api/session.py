@@ -11,6 +11,7 @@ from data_rover.core.model.model import Model
 from data_rover.core.validation.state import ValidationState
 from data_rover.core.view.schema import View
 
+from .feed import FeedHub
 from .locking import LockTable
 
 if TYPE_CHECKING:
@@ -78,6 +79,10 @@ class Session:
     #: lifespan sweeper; consulted by the commit route (lock verification) and
     #: by ``SessionRegistry.evict`` (never evict a session with live leases).
     lock_table: LockTable = field(default_factory=LockTable, repr=False)
+    #: per-project realtime feed subscribers (Phase 5). Populated by the WS
+    #: endpoint; broadcast to at the commit/lock sites. The eviction guard
+    #: refuses to drop a session while it has connected clients.
+    hub: FeedHub = field(default_factory=FeedHub, repr=False)
 
     def set_model(
         self, model: Model | None, *, validation: ValidationState | None = None
@@ -191,9 +196,13 @@ class SessionRegistry:
             return
         # Serialise vs an in-flight commit (spec §11 evict-during-commit guard).
         with session.write_mutex:
-            if session.lock_table.active_leases(time.monotonic()):
-                # A holder still has a check-out open. The session was never
-                # removed, so it simply stays registered — no re-insert needed.
+            if (
+                session.lock_table.active_leases(time.monotonic())
+                or session.hub.has_clients()
+            ):
+                # A holder still has a check-out open, or a feed client is
+                # connected. The session was never removed, so it stays
+                # registered — no re-insert needed.
                 return
             if self._evict_hook is not None:
                 self._evict_hook(project_id, session)
