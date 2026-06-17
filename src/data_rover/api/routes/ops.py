@@ -37,6 +37,7 @@ conflict detection (CR matching explicitly ignores it, see
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -46,6 +47,7 @@ from typing_extensions import assert_never
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
+from sqlalchemy.orm import Session as DbSession
 
 from data_rover.core.model.model import Model
 from data_rover.core.validation.dirty import DirtyCollector, containment_closure
@@ -53,7 +55,12 @@ from data_rover.core.validation.pipeline import default_pipeline
 from data_rover.core.validation.scope import Scope
 from data_rover.core.validation.state import ValidationState
 
+from .. import content
+from ..db import get_db
+from ..db_models import User
 from ..deps import Session, get_request_session, require_model
+from ..hydration import serialize_ops
+from ..identity import get_current_user
 from ..schemas import (
     CreateElementOp,
     CreateRelationshipOp,
@@ -443,10 +450,60 @@ def _finalize(
     )
 
 
+def _persist_commit(
+    db: DbSession,
+    project_id: str,
+    *,
+    rev: int,
+    author_id: str | None,
+    res: "_BatchResult",
+) -> None:
+    """Append the accepted batch to the durable journal and advance model_rev.
+
+    Only persists when the project actually has a durable model row (the
+    interactive/legacy in-memory-only flows have none yet — they persist a
+    baseline via the load/upload routes in Task 9). Keeps DB model_rev in
+    lockstep with the just-bumped session.model_rev."""
+    if content.get_model_row(db, project_id) is None:
+        return
+    content.append_commit(
+        db, project_id, rev=rev, commit_id=uuid.uuid4().hex, author_id=author_id,
+        ops=serialize_ops(res.canonical_ops),
+        inverse_ops=serialize_ops(res.inverse_ops()),
+        id_map=dict(res.id_map),
+    )
+    content.set_model_rev(db, project_id, rev)
+    db.commit()
+
+
+def _persist_undo_commit(
+    db: DbSession, project_id: str, *, rev: int, author_id: str | None,
+    applied: "_BatchResult",
+) -> None:
+    """Record an undo as a forward compensating commit (append-only journal).
+
+    ``applied`` is the result of applying the inverse batch: its canonical_ops
+    ARE the ops that reproduce the undo on replay, and its inverse_ops redo the
+    original change."""
+    if content.get_model_row(db, project_id) is None:
+        return
+    content.append_commit(
+        db, project_id, rev=rev, commit_id=uuid.uuid4().hex, author_id=author_id,
+        ops=serialize_ops(applied.canonical_ops),
+        inverse_ops=serialize_ops(applied.inverse_ops()),
+        id_map=dict(applied.id_map),
+    )
+    content.set_model_rev(db, project_id, rev)
+    db.commit()
+
+
 @router.post("/model/ops", response_model=None)
 def apply_ops(
     payload: OpsRequest,
+    project_id: str,
     session: Session = Depends(get_request_session),
+    db: DbSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> OpsResponse | JSONResponse:
     _, model = require_model(session)
     if payload.base_rev != session.model_rev:
@@ -466,20 +523,29 @@ def apply_ops(
         # bumping model_rev or recording an op_log entry — an accidental
         # empty POST must not invalidate clients or burn an undo step.
         return OpsResponse(model_rev=session.model_rev, issue_counts=state.counts())
-    res = _apply_batch(model, payload.ops, restore=False)
-    session.model_rev += 1
-    session.record_batch(
-        AppliedBatch(
-            ops=res.canonical_ops,
-            inverse_ops=res.inverse_ops(),
-            id_map=dict(res.id_map),
+    with session.write_mutex:
+        res = _apply_batch(model, payload.ops, restore=False)
+        session.model_rev += 1
+        session.record_batch(
+            AppliedBatch(
+                ops=res.canonical_ops,
+                inverse_ops=res.inverse_ops(),
+                id_map=dict(res.id_map),
+            )
         )
-    )
-    return _finalize(session, state, model, res)
+        _persist_commit(
+            db, project_id, rev=session.model_rev, author_id=user.id, res=res
+        )
+        return _finalize(session, state, model, res)
 
 
 @router.post("/model/undo", response_model=None)
-def undo(session: Session = Depends(get_request_session)) -> OpsResponse | JSONResponse:
+def undo(
+    project_id: str,
+    session: Session = Depends(get_request_session),
+    db: DbSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> OpsResponse | JSONResponse:
     _, model = require_model(session)
     if not session.op_log:
         return JSONResponse(
@@ -487,14 +553,17 @@ def undo(session: Session = Depends(get_request_session)) -> OpsResponse | JSONR
             content={"detail": "Nothing to undo", "model_rev": session.model_rev},
         )
     state = _ensure_validation_seeded(session, model)
-    batch = session.op_log.pop()
-    try:
-        res = _apply_batch(model, batch.inverse_ops, restore=True)
-    except Exception:
-        # _apply_batch already rolled the model back; keep history intact
-        session.op_log.append(batch)
-        raise
-    # NOT recorded in op_log: undo walks history backwards, it does not
-    # create new history (no redo in C1)
-    session.model_rev += 1
-    return _finalize(session, state, model, res)
+    with session.write_mutex:
+        batch = session.op_log.pop()
+        try:
+            res = _apply_batch(model, batch.inverse_ops, restore=True)
+        except Exception:
+            session.op_log.append(batch)  # _apply_batch already rolled back
+            raise
+        session.model_rev += 1
+        # append-only journal: the undo is a NEW forward commit whose ops are
+        # the inverse batch, so hydration replays to the post-undo state and
+        # model_rev moves up (Phase 8 revert reuses this shape).
+        _persist_undo_commit(db, project_id, rev=session.model_rev,
+                             author_id=user.id, applied=res)
+        return _finalize(session, state, model, res)
