@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 from ..deps import Session, get_request_session, require_model
 from ..identity import get_current_user
 from ..db_models import User
-from ..locking import LockIntent, LockMode, expand_targets
+from ..locking import Lease, LockIntent, LockMode, expand_targets
 from ..schemas import (
     LeaseOut,
     LockRequest,
@@ -29,7 +29,7 @@ from ..settings import get_settings
 router = APIRouter()
 
 
-def _lease_out(le) -> LeaseOut:
+def _lease_out(le: Lease) -> LeaseOut:
     return LeaseOut(
         resource_id=le.resource_id,
         mode=le.mode.value,
