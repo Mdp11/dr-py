@@ -16,6 +16,7 @@ from .routes import (
     change_request,
     elements,
     health,
+    locks,
     metamodel,
     model,
     ops,
@@ -124,6 +125,7 @@ def create_app() -> FastAPI:
     app.include_router(relationships.router, prefix=proj, tags=["relationships"])
     app.include_router(validation.router, prefix=proj, tags=["validation"])
     app.include_router(view.router, prefix=proj, tags=["view"])
+    app.include_router(locks.router, prefix=proj, tags=["locks"])
     return app
 
 

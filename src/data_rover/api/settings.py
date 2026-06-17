@@ -54,6 +54,11 @@ class Settings(BaseSettings):
     #: Idle sessions (no request for this many seconds) are snapshotted and
     #: evicted by the background sweeper. 0 disables the sweeper (tests).
     idle_evict_seconds: int = 1800
+    #: lease lifetime; renewed by client heartbeat (spec §8). Must be well
+    #: under idle_evict_seconds so an idle session has no live leases to strand.
+    lock_ttl_seconds: int = 300
+    #: lifespan sweeper interval for auto-releasing expired leases. 0 disables.
+    lock_sweep_seconds: int = 60
 
 
 def get_settings() -> Settings:
