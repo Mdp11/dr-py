@@ -96,3 +96,115 @@ def test_preview_base_rev_mismatch_409(client: TestClient) -> None:
         json={"base_rev": 9999, "ops": []},
     )
     assert r.status_code == 409
+
+
+# ---------------------------------------------------------------------------
+# POST /commits tests (Phase 4 Task 9)
+# ---------------------------------------------------------------------------
+
+
+def _lock(client: TestClient, rid: str, mode: str = "exclusive", intent: str = "edit") -> str:
+    """Acquire a lock on *rid* and return the token."""
+    r = client.post(
+        papi("/locks"),
+        headers=AUTH_HEADERS,
+        json={"targets": [{"resource_id": rid, "mode": mode}], "intent": intent},
+    )
+    assert r.status_code == 200, r.text
+    return r.json()["token"]
+
+
+def test_commit_requires_held_lock_409(client: TestClient) -> None:
+    # create an element to edit (via ops, which is the unlocked legacy path)
+    rev = _rev(client)
+    cr = client.post(
+        papi("/model/ops"),
+        headers=AUTH_HEADERS,
+        json={
+            "base_rev": rev,
+            "ops": [
+                {
+                    "kind": "create_element",
+                    "temp_id": "tmp_e",
+                    "type_name": _etype(client),
+                    "properties": {},
+                }
+            ],
+        },
+    )
+    assert cr.status_code == 200, cr.text
+    eid = cr.json()["id_map"]["tmp_e"]
+    # commit an edit to eid WITHOUT holding its lock -> 409
+    r = client.post(
+        papi("/commits"),
+        headers=AUTH_HEADERS,
+        json={
+            "base_rev": _rev(client),
+            "ops": [{"kind": "update_element", "id": eid, "properties_patch": {}}],
+            "lock_tokens": [],
+            "message": "edit",
+        },
+    )
+    assert r.status_code == 409, r.text
+
+
+def test_commit_with_lock_succeeds_and_records_message(client: TestClient) -> None:
+    rev = _rev(client)
+    cr = client.post(
+        papi("/model/ops"),
+        headers=AUTH_HEADERS,
+        json={
+            "base_rev": rev,
+            "ops": [
+                {
+                    "kind": "create_element",
+                    "temp_id": "tmp_e",
+                    "type_name": _etype(client),
+                    "properties": {},
+                }
+            ],
+        },
+    )
+    assert cr.status_code == 200, cr.text
+    eid = cr.json()["id_map"]["tmp_e"]
+    token = _lock(client, eid)
+    r = client.post(
+        papi("/commits"),
+        headers=AUTH_HEADERS,
+        json={
+            "base_rev": _rev(client),
+            "ops": [{"kind": "update_element", "id": eid, "properties_patch": {}}],
+            "lock_tokens": [token],
+            "message": "tweak",
+        },
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["message"] == "tweak"
+    assert "commit_id" in body
+    # commit must have released the lock
+    leases = client.get(papi("/locks"), headers=AUTH_HEADERS).json()["leases"]
+    assert leases == []
+
+
+def test_commit_creates_freefloating_without_lock(client: TestClient) -> None:
+    # a free-floating create needs no lock (no existing resource id to lock)
+    r = client.post(
+        papi("/commits"),
+        headers=AUTH_HEADERS,
+        json={
+            "base_rev": _rev(client),
+            "ops": [
+                {
+                    "kind": "create_element",
+                    "temp_id": "tmp_n",
+                    "type_name": _etype(client),
+                    "properties": {},
+                }
+            ],
+            "lock_tokens": [],
+            "message": "new",
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["id_map"]["tmp_n"]
