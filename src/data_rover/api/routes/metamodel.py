@@ -25,10 +25,8 @@ async def upload_metamodel(
     body = (await request.body()).decode("utf-8")
     content_type = request.headers.get("content-type", "")
     if "json" in content_type:
-        import yaml as _yaml  # local: keep top-level import set unchanged
-
         data = await request.json() if body else {}
-        blob = _yaml.safe_dump(data)
+        blob = yaml.safe_dump(data)
     else:
         blob = body
     metamodel = load_metamodel_str(blob)
