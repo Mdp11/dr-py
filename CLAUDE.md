@@ -21,7 +21,9 @@ Everything runs through **pixi** (conda-based). There is no global `python` or `
 pixi run test-core                       # pytest (pythonpath=src, testpaths=tests)
 pixi run -e core-dev pytest tests/model/test_model.py::test_name   # a single test
 pixi run -e core-dev pytest -k uniqueness                          # by keyword
-pixi run start-backend                   # uvicorn on 127.0.0.1:8000
+pixi run start-backend                   # uvicorn on 127.0.0.1:8000 (needs Postgres + DATA_ROVER_DATABASE_URL, or DATA_ROVER_DEV_SEED with a sqlite DSN)
+pixi run db-upgrade                      # alembic upgrade head (Postgres tenancy schema)
+# API tests need NO database service: tests/api/conftest.py runs in-memory SQLite.
 
 # Lint / format / typecheck (ruff --fix, mypy, AND pyright — all three must pass)
 pixi run tidy                            # format + lint across frontend, core, backend
@@ -53,7 +55,19 @@ The runtime is **Python 3.14**, but `pyrightconfig.json` pins the check floor to
 
 This is the central design and the thing most likely to surprise you. The model can be **~80 MB**, so the architecture is built to avoid copying it (this is the focus of the `perf/large-model-overhaul` work).
 
-- **`session.py`** holds a process-wide `SessionRegistry` (one independent `Session` per project id, created lazily on first access). Each `Session` carries the metamodel, model, view, validation baseline, `model_rev`, and `op_log` for its project. Routes resolve the active `Session` per-request via the `X-Project-Id` header (defaulting to `"default"`) through `deps.get_request_session`; the no-arg `get_session()` returns the default project's session for internal/test callers. The **backend session is the source of truth; the client never holds the whole model.**
+- **`session.py`** holds a process-wide `SessionRegistry` (one independent in-memory `Session` per project id, created lazily on first access). Each `Session` carries the metamodel, model, view, validation baseline, `model_rev`, and `op_log` for its project. Routes resolve the active `Session` per-request from the **`/api/v1/projects/{project_id}` path segment** via `deps.get_request_session`, which depends on `authz.require_membership` so the request is **authorized before the session is touched** (see Tenancy below); the no-arg `get_session()` returns the default project's session for internal/test callers. The **backend session is the source of truth; the client never holds the whole model.**
+
+### Tenancy & auth (`src/data_rover/api/`, Phase 2)
+
+User/project/membership data lives in a **SQLAlchemy + Postgres** layer, separate from the in-memory model `Session` (the model itself is still in-memory; durable model persistence is a later phase). Tests run hermetic **in-memory SQLite** (`tests/api/conftest.py`); production runs Postgres with the schema owned by **Alembic** (`alembic/`, `pixi run db-upgrade`).
+
+- **`db.py`** — SQLAlchemy 2.0 (sync) engine lifecycle: `Base`, idempotent `init_engine` (in-memory SQLite → `StaticPool`; file SQLite/Postgres → default pool; SQLite gets `PRAGMA foreign_keys=ON`), `get_db` request dependency, `create_all`/`drop_all` (SQLite/dev + tests only — Postgres uses Alembic).
+- **`db_models.py`** — `User`, `Project`, `Membership` + `Role` (`owner`/`editor`/`viewer`). FKs cascade (DB `ON DELETE CASCADE` + ORM `passive_deletes`); `role` is `native_enum=False` (VARCHAR+CHECK, portable across SQLite/Postgres). `User.id` is the external identity subject.
+- **`tenancy.py`** — service functions over the ORM (create/list/get/delete project, member CRUD, `upsert_user`); the single place queries live.
+- **`identity.py`** — the **auth seam**: `IdentityProvider.identify(request) -> Identity`. Ships a `DevHeaderIdentityProvider` (trusts `X-User-Id`/`X-User-Email` — dev/gateway only) swappable via `set_identity_provider` for real SSO later. `get_current_user` auto-provisions the user.
+- **`authz.py`** — `require_membership` (404 unknown project / 403 non-member / 403 viewer-attempting-write) and `require_owner` (membership management). Writes are detected by HTTP method with a small allowlist of read-only POSTs (search/batch/validate); `/model/save` and `/model/apply-cr` are deliberately treated as writes (see comments).
+- **`routes/projects.py`** — project + membership CRUD at `/api/v1/projects` (the only non-project-scoped data routes). All other data routers mount under `/api/v1/projects/{project_id}`.
+- **Dev seed** — `main._ensure_dev_seed` (gated by `settings.dev_seed`, SQLite-only `create_all`) provisions a `default` user+project so the single-user frontend works against `/api/v1/projects/default` with dev identity headers, no project picker. Set `DATA_ROVER_DEV_SEED=false` in production.
 - **`routes/ops.py` (`POST /model/ops`)** is the mutation path: clients send small op batches (mirroring `frontend/src/lib/state/ops.ts`). Ops are applied **in place** to the live model while inverse ops are collected; a mid-batch failure rolls back by applying inverses in reverse and returns **422**. Each accepted batch bumps `model_rev` once and is appended to `op_log` for undo.
 - **Rev conflicts**: clients echo `model_rev` as `base_rev`; a stale batch gets **409** and the client must reload.
 - **Undo** (`POST /model/undo`) replays an op-log batch's inverses in restore mode (`Model.restore_element/restore_relationship` reinstate exact ids). `op_log` is capped at `OP_LOG_MAX` (1000 batches); past that, `GET /model/changes` reports `complete: false`.
@@ -71,3 +85,4 @@ The frontend mirrors all of this client-side (optimistic ops, serialized flushes
 - Tests live in `tests/<area>/` mirroring the source packages (`model`, `metamodel`, `validation`, `view`, `api`, `migration`). `pythonpath=src` is set in `pytest.ini`, so import as `from data_rover.core...`.
 - Code in this repo carries dense docstrings explaining *why* invariants exist (immutability, mutation boundary, in-place rollback). Preserve and extend that style when changing those areas — the invariants are load-bearing.
 - `docs/superpowers/{plans,specs}/` hold dated design docs (gitignored) that capture the rationale behind major features; consult the matching spec before reworking ops, validation, or the view tree.
+- API tests that hit data routes use the `client` fixture + `seed_default_project`/`AUTH_HEADERS`/`papi` helpers from `tests/api/conftest.py`: every project-scoped request needs an identity header and a seeded project (the helpers seed/​target the `default` project so `get_session()`-based setup lines up with the HTTP path).
