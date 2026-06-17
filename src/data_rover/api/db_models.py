@@ -187,6 +187,16 @@ class Commit(Base):
     ops: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     inverse_ops: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     id_map: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    #: optional human commit message (spec §7). Empty for the legacy
+    #: /model/ops + /model/undo paths (they pass no message).
+    message: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    #: number of CONFORMANCE-tier issues over the dirty set at commit time
+    #: (structural issues are hard-rejected, so this counts only soft ones).
+    validation_error_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
+    #: the conformance issue list recorded at commit (IssueOut dicts).
+    issues: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
 
     #: Declared so the ORM unit-of-work can order INSERTs correctly.
     project: Mapped[Project] = relationship()
