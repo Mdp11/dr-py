@@ -13,8 +13,17 @@ from . import importer
 from .db import create_all, init_engine
 from .errors import register_exception_handlers
 from .routes import (
-    change_request, elements, health, metamodel, model, ops, projects,
-    read, relationships, validation, view,
+    change_request,
+    elements,
+    health,
+    metamodel,
+    model,
+    ops,
+    projects,
+    read,
+    relationships,
+    validation,
+    view,
 )
 from .session import get_registry, install_persistent_registry
 from .settings import get_settings

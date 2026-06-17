@@ -74,6 +74,7 @@
 
 					// Best-effort: fetch display names for any view-change element ids
 					// not already cached, so the View tab shows names rather than ids.
+					// eslint-disable-next-line svelte/prefer-svelte-reactivity
 					const ids = new Set<string>();
 					for (const c of getViewChanges()) {
 						if (c.kind !== 'folder-added' && c.kind !== 'folder-removed') ids.add(c.id);
@@ -280,9 +281,7 @@
 <Dialog.Root bind:open {onOpenChange}>
 	<Dialog.Content class="max-w-2xl">
 		<Dialog.Header>
-			<Dialog.Title>
-				Pending changes
-			</Dialog.Title>
+			<Dialog.Title>Pending changes</Dialog.Title>
 			<Dialog.Description>
 				Review the changes to be saved. The model will be written to
 				<span class="font-mono">{filename ?? 'a new file'}</span>.
@@ -412,7 +411,8 @@
 					{:else}
 						{#each viewLines as line (line.key)}
 							<p class="rounded bg-zinc-900 px-2 py-1 font-mono text-[11px]">
-								{#each line.segments as seg}<span class={SEGMENT_CLASS[seg.kind]}>{seg.text}</span
+								{#each line.segments as seg, i (i)}<span class={SEGMENT_CLASS[seg.kind]}
+										>{seg.text}</span
 									>{/each}
 							</p>
 						{/each}

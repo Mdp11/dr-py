@@ -77,9 +77,7 @@ def set_identity_provider(provider: IdentityProvider | None) -> None:
     _provider = provider
 
 
-def get_current_user(
-    request: Request, db: Session = Depends(get_db)
-) -> User:
+def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
     """Resolve and auto-provision the requesting user.
 
     Auto-provision on first sight keeps the dev/gateway flow zero-setup; a

@@ -71,11 +71,12 @@ def test_hydrate_replays_commit_tail_on_top_of_snapshot() -> None:
         content.set_model_rev(s, "p1", 1)
     h = hydration.hydrate_session("p1")
     assert h.model_rev == 1
-    assert "e1" in h.model.elements
+    assert h.model is not None and "e1" in h.model.elements
 
 
 def _first_concrete_element_type(sess: Session) -> str:
     # Metamodel.elements is the public list[ElementType]; each has .name/.abstract
+    assert sess.metamodel is not None, "session must have a metamodel"
     for et in sess.metamodel.elements:
         if not et.abstract:
             return et.name

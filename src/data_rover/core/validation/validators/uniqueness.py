@@ -69,9 +69,7 @@ class UniquenessValidator(EntityValidator):
             prop_values, rel_values = signature
             parts = [f"{k}={v!r}" for k, v in zip(spec.properties, prop_values)]
             for kr, endpoints in zip(spec.relationships, rel_values):
-                parts.append(
-                    f"{kr.direction}:{kr.rel_type}→[{', '.join(endpoints)}]"
-                )
+                parts.append(f"{kr.direction}:{kr.rel_type}→[{', '.join(endpoints)}]")
             descriptor = ", ".join(parts)
         return Issue(
             Severity.ERROR,

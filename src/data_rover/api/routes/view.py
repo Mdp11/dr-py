@@ -33,7 +33,9 @@ def snapshot_view(
         raise HTTPException(status_code=422, detail=f"Invalid view: {exc}") from exc
     session.view = view
     if content.get_model_row(db, project_id) is not None:
-        content.upsert_single_view(db, project_id, name=view.name, blob=view.model_dump_json())
+        content.upsert_single_view(
+            db, project_id, name=view.name, blob=view.model_dump_json()
+        )
         db.commit()
     warnings = [IssueOut.from_core(i) for i in validate_view(view, model)]
     return ViewSnapshotResponse(view=ViewOut.from_core(view), warnings=warnings)

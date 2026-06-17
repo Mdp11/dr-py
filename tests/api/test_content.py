@@ -36,7 +36,8 @@ def test_commit_append_and_read_tail() -> None:
     with db.db_session() as s:
         tail = content.commits_after(s, "p1", 1)
         assert [c.rev for c in tail] == [2, 3]
-        assert content.get_model_row(s, "p1").model_rev == 3
+        row = content.get_model_row(s, "p1")
+        assert row is not None and row.model_rev == 3
 
 
 def test_snapshot_record_and_latest() -> None:
@@ -45,8 +46,10 @@ def test_snapshot_record_and_latest() -> None:
         content.record_snapshot(s, "p1", rev=0, key="k0")
         content.record_snapshot(s, "p1", rev=5, key="k5")
     with db.db_session() as s:
-        assert content.latest_snapshot(s, "p1").rev == 5
-        assert content.latest_snapshot(s, "p1", max_rev=3).rev == 0
+        snap5 = content.latest_snapshot(s, "p1")
+        assert snap5 is not None and snap5.rev == 5
+        snap0 = content.latest_snapshot(s, "p1", max_rev=3)
+        assert snap0 is not None and snap0.rev == 0
         assert content.latest_snapshot(s, "p1", max_rev=-1) is None
 
 

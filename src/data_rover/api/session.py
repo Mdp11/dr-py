@@ -193,9 +193,7 @@ class SessionRegistry:
     def idle(self, now: float, ttl: float) -> list[str]:
         with self._guard:
             return [
-                pid
-                for pid, s in self._sessions.items()
-                if now - s.last_access >= ttl
+                pid for pid, s in self._sessions.items() if now - s.last_access >= ttl
             ]
 
     def reset(self) -> None:

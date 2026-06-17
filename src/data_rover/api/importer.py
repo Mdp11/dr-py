@@ -41,13 +41,17 @@ def import_project(
         tenancy.upsert_user(s, owner_id, "")
         s.add(Project(id=project_id, name=name))
         s.add(Membership(user_id=owner_id, project_id=project_id, role=Role.owner))
-        mm_row = content.create_metamodel(
-            s, name=name, version=1, blob=metamodel_yaml
-        )
+        mm_row = content.create_metamodel(s, name=name, version=1, blob=metamodel_yaml)
         content.upsert_model_row(s, project_id, metamodel_id=mm_row.id)
         content.append_commit(
-            s, project_id, rev=0, commit_id="import", author_id=owner_id,
-            ops=[], inverse_ops=[], id_map={},
+            s,
+            project_id,
+            rev=0,
+            commit_id="import",
+            author_id=owner_id,
+            ops=[],
+            inverse_ops=[],
+            id_map={},
         )
         content.set_model_rev(s, project_id, 0)
         if view_json is not None:

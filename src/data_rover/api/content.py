@@ -110,9 +110,7 @@ def latest_snapshot(
     stmt = select(Snapshot).where(Snapshot.project_id == project_id)
     if max_rev is not None:
         stmt = stmt.where(Snapshot.rev <= max_rev)
-    return db.execute(
-        stmt.order_by(Snapshot.rev.desc()).limit(1)
-    ).scalar_one_or_none()
+    return db.execute(stmt.order_by(Snapshot.rev.desc()).limit(1)).scalar_one_or_none()
 
 
 def clear_history(db: Session, project_id: str) -> None:
@@ -139,6 +137,10 @@ def upsert_single_view(
 
 
 def get_single_view(db: Session, project_id: str) -> ViewRow | None:
-    return db.execute(
-        select(ViewRow).where(ViewRow.project_id == project_id).order_by(ViewRow.id)
-    ).scalars().first()
+    return (
+        db.execute(
+            select(ViewRow).where(ViewRow.project_id == project_id).order_by(ViewRow.id)
+        )
+        .scalars()
+        .first()
+    )

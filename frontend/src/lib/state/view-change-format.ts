@@ -14,7 +14,10 @@ export interface ViewChangeSegment {
 }
 
 const el = (text: string): ViewChangeSegment => ({ text, kind: 'element' });
-const folder = (path: string[]): ViewChangeSegment => ({ text: `'${joinPath(path)}'`, kind: 'folder' });
+const folder = (path: string[]): ViewChangeSegment => ({
+	text: `'${joinPath(path)}'`,
+	kind: 'folder'
+});
 const prep = (text: string): ViewChangeSegment => ({ text, kind: 'prep' });
 const plain = (text: string): ViewChangeSegment => ({ text, kind: 'plain' });
 
@@ -43,7 +46,13 @@ export function viewChangeSegments(
 		case 'element-removed':
 			return [el(resolveName(change.id)), plain(' removed from view')];
 		case 'element-added':
-			return [el(resolveName(change.id)), plain(' added '), prep('to'), plain(' '), folder(change.to)];
+			return [
+				el(resolveName(change.id)),
+				plain(' added '),
+				prep('to'),
+				plain(' '),
+				folder(change.to)
+			];
 		case 'folder-added':
 			return [plain('Folder '), folder(change.path), plain(' created')];
 		case 'folder-removed':
