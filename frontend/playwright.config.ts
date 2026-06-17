@@ -31,6 +31,9 @@ export default defineConfig({
 		{
 			// Unix absolute-path SQLite DSN (sqlite:/// + /tmp/...). On Windows CI
 			// this would need a drive-letter form (sqlite:///C:/...).
+			// The file persists across runs; dev-seed is idempotent so that's fine
+			// today, but a schema change (Phase 3) will need the file removed first
+			// since create_all only adds missing tables, never alters existing ones.
 			command:
 				'DATA_ROVER_DATABASE_URL=sqlite:////tmp/data-rover-e2e.db DATA_ROVER_DEV_SEED=true pixi run -e api start-backend',
 			cwd: '..',
