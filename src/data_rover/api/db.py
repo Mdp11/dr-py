@@ -14,6 +14,7 @@ Production uses Postgres (psycopg v3); the schema there is owned by Alembic, so
 from __future__ import annotations
 
 from collections.abc import Generator
+from contextlib import contextmanager
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
@@ -114,5 +115,26 @@ def get_db() -> Generator[Session, None, None]:
     session = _SessionLocal()
     try:
         yield session
+    finally:
+        session.close()
+
+
+@contextmanager
+def db_session() -> Generator[Session, None, None]:
+    """A DB session for non-request callers (hydration, eviction, importer).
+
+    Commits on clean exit, rolls back on exception, always closes. Distinct
+    from ``get_db`` (the FastAPI generator dependency) so background/CLI code
+    isn't tied to the request lifecycle.
+    """
+    if _SessionLocal is None:
+        raise RuntimeError("engine not initialised; call init_engine() first")
+    session = _SessionLocal()
+    try:
+        yield session
+        session.commit()
+    except BaseException:
+        session.rollback()
+        raise
     finally:
         session.close()

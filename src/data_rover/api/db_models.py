@@ -10,9 +10,10 @@ SSO swap reuses the same primary key space.
 from __future__ import annotations
 
 import enum
+from datetime import datetime, timezone
 
+from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy import Enum as SAEnum
-from sqlalchemy import ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -95,3 +96,105 @@ class Membership(Base):
 
     user: Mapped[User] = relationship(back_populates="memberships")
     project: Mapped[Project] = relationship(back_populates="memberships")
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+class MetamodelRow(Base):
+    """A versioned, shareable metamodel. ``blob`` is the YAML source text
+    (re-parsed via ``load_metamodel_str`` on hydrate). Immutable per version:
+    a new metamodel is a new row, never an in-place mutation (Phase 6)."""
+
+    __tablename__ = "metamodels"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False, default="")
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    blob: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+
+
+class ModelRow(Base):
+    """One project's model. 1:1 with ``Project`` (unique project_id). Carries
+    the DB-authoritative ``model_rev`` and the swappable ``metamodel_id``."""
+
+    __tablename__ = "models"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    metamodel_id: Mapped[str] = mapped_column(
+        ForeignKey("metamodels.id"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String, nullable=False, default="model")
+    model_rev: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    #: Declared so SQLAlchemy's unit-of-work can order INSERTs correctly (it
+    #: resolves FK dependencies via relationship edges, not FK columns alone).
+    metamodel: Mapped[MetamodelRow] = relationship()
+    project: Mapped[Project] = relationship()
+
+
+class ViewRow(Base):
+    """A user-defined folder overlay. ``blob`` is the view JSON
+    (``View.model_dump_json``). N per project (Phase 3 frontend uses one)."""
+
+    __tablename__ = "views"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String, nullable=False, default="")
+    blob: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class Commit(Base):
+    """One accepted ops batch == one revision == one journal row (spec §7).
+
+    ``ops``/``inverse_ops`` are the canonical op lists in the same format as
+    ``frontend/.../ops.ts`` (serialized via ``schemas.OPS_ADAPTER``);
+    ``inverse_ops`` are stored in execution order so undo/replay is "apply
+    front-to-back". ``author_id`` is SET NULL on user delete so history
+    survives the author leaving."""
+
+    __tablename__ = "commits"
+
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True
+    )
+    rev: Mapped[int] = mapped_column(Integer, primary_key=True)
+    commit_id: Mapped[str] = mapped_column(String, nullable=False)
+    author_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    ts: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    ops: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    inverse_ops: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    id_map: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+
+    #: Declared so the ORM unit-of-work can order INSERTs correctly.
+    project: Mapped[Project] = relationship()
+
+
+class Snapshot(Base):
+    """A full-model snapshot in the SnapshotStore. Hydration loads the
+    nearest snapshot with ``rev <= model_rev`` then replays later commits."""
+
+    __tablename__ = "snapshots"
+
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True
+    )
+    rev: Mapped[int] = mapped_column(Integer, primary_key=True)
+    key: Mapped[str] = mapped_column(String, nullable=False)
+    ts: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
