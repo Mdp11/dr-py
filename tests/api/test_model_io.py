@@ -15,24 +15,27 @@ import pytest
 from fastapi.testclient import TestClient
 
 from data_rover.api.main import create_app
-from data_rover.api.session import reset_session
+
+from .conftest import AUTH_HEADERS, seed_default_project
 
 EXAMPLES = Path(__file__).resolve().parents[2] / "examples"
 EXAMPLE_MM = EXAMPLES / "example.metamodel.yaml"
 SMART_CITY_MM = EXAMPLES / "smart-city.metamodel.yaml"
 SMART_CITY_MODEL = EXAMPLES / "smart-city.model.json"
+API = "/api/v1/projects/default"
 
 
 @pytest.fixture
 def client() -> TestClient:
-    reset_session()
-    app = create_app()
-    return TestClient(app)
+    seed_default_project()
+    c = TestClient(create_app())
+    c.headers.update(AUTH_HEADERS)
+    return c
 
 
 def _upload_metamodel(client: TestClient, path: Path = SMART_CITY_MM) -> None:
     res = client.post(
-        "/api/v1/metamodel",
+        f"{API}/metamodel",
         content=path.read_text(encoding="utf-8"),
         headers={"content-type": "application/x-yaml"},
     )
@@ -40,7 +43,7 @@ def _upload_metamodel(client: TestClient, path: Path = SMART_CITY_MM) -> None:
 
 
 def _load(client: TestClient, path: Path) -> dict:
-    res = client.post("/api/v1/model/load", json={"path": str(path)})
+    res = client.post(f"{API}/model/load", json={"path": str(path)})
     assert res.status_code == 200, res.text
     return res.json()
 
@@ -69,13 +72,13 @@ def test_load_happy_path(client: TestClient, tmp_path: Path) -> None:
     assert summary["issue_counts"] is not None
 
     # the load response IS the current summary
-    res = client.get("/api/v1/model/summary")
+    res = client.get(f"{API}/model/summary")
     assert res.status_code == 200
     assert res.json() == summary
 
     # spot-check entities landed in the session model
     first = source["elements"][0]
-    res = client.get(f"/api/v1/model/elements/{first['id']}")
+    res = client.get(f"{API}/model/elements/{first['id']}")
     assert res.status_code == 200
     got = res.json()
     assert got["type_name"] == first["type_name"]
@@ -85,11 +88,11 @@ def test_load_happy_path(client: TestClient, tmp_path: Path) -> None:
 def test_load_missing_file_yields_422(client: TestClient, tmp_path: Path) -> None:
     _upload_metamodel(client)
     res = client.post(
-        "/api/v1/model/load", json={"path": str(tmp_path / "nope.json")}
+        f"{API}/model/load", json={"path": str(tmp_path / "nope.json")}
     )
     assert res.status_code == 422, res.text
     # a directory is not a file either
-    res = client.post("/api/v1/model/load", json={"path": str(tmp_path)})
+    res = client.post(f"{API}/model/load", json={"path": str(tmp_path)})
     assert res.status_code == 422, res.text
 
 
@@ -97,7 +100,7 @@ def test_load_non_json_yields_422(client: TestClient, tmp_path: Path) -> None:
     _upload_metamodel(client)
     bad = tmp_path / "bad.model.json"
     bad.write_text("this is not json {", encoding="utf-8")
-    res = client.post("/api/v1/model/load", json={"path": str(bad)})
+    res = client.post(f"{API}/model/load", json={"path": str(bad)})
     assert res.status_code == 422, res.text
     assert "Invalid JSON" in res.json()["detail"]
 
@@ -107,7 +110,7 @@ def test_load_without_metamodel_yields_404(
 ) -> None:
     f = tmp_path / "m.json"
     f.write_text('{"elements": [], "relationships": []}', encoding="utf-8")
-    res = client.post("/api/v1/model/load", json={"path": str(f)})
+    res = client.post(f"{API}/model/load", json={"path": str(f)})
     assert res.status_code == 404
 
 
@@ -117,7 +120,7 @@ def _load_payload_expecting_422(
     """Write *payload*, load it, assert 422, return the error detail."""
     f = tmp_path / "guard.model.json"
     f.write_text(json.dumps(payload), encoding="utf-8")
-    res = client.post("/api/v1/model/load", json={"path": str(f)})
+    res = client.post(f"{API}/model/load", json={"path": str(f)})
     assert res.status_code == 422, res.text
     return res.json()["detail"]
 
@@ -279,7 +282,7 @@ def test_load_defaults_missing_properties_and_rev(
         encoding="utf-8",
     )
     _load(client, f)
-    res = client.get("/api/v1/model/elements/b1")
+    res = client.get(f"{API}/model/elements/b1")
     assert res.status_code == 200
     assert res.json() == {
         "id": "b1",
@@ -312,7 +315,7 @@ def test_load_resets_undo_history(client: TestClient, tmp_path: Path) -> None:
 
     # build some undo history through the ops protocol
     res = client.post(
-        "/api/v1/model/ops",
+        f"{API}/model/ops",
         json={
             "base_rev": summary["model_rev"],
             "ops": [
@@ -326,7 +329,7 @@ def test_load_resets_undo_history(client: TestClient, tmp_path: Path) -> None:
         },
     )
     assert res.status_code == 200, res.text
-    assert client.get("/api/v1/model/summary").json()["undo_depth"] == 1
+    assert client.get(f"{API}/model/summary").json()["undo_depth"] == 1
 
     reloaded = _load(client, f)
     assert reloaded["undo_depth"] == 0
@@ -344,7 +347,7 @@ def test_upload_happy_path_octet_stream(client: TestClient) -> None:
     _upload_metamodel(client)
     body = SMART_CITY_MODEL.read_bytes()
     res = client.post(
-        "/api/v1/model/upload",
+        f"{API}/model/upload",
         content=body,
         headers={"content-type": "application/octet-stream"},
     )
@@ -355,13 +358,13 @@ def test_upload_happy_path_octet_stream(client: TestClient) -> None:
     assert summary["relationship_count"] == len(source["relationships"])
     assert summary["issue_counts"] is not None
     assert summary["undo_depth"] == 0
-    assert client.get("/api/v1/model/summary").json() == summary
+    assert client.get(f"{API}/model/summary").json() == summary
 
 
 def test_upload_invalid_json_yields_422(client: TestClient) -> None:
     _upload_metamodel(client, EXAMPLE_MM)
     res = client.post(
-        "/api/v1/model/upload",
+        f"{API}/model/upload",
         content=b"\x00\x01 not json",
         headers={"content-type": "application/json"},
     )
@@ -382,7 +385,7 @@ def test_save_round_trips_and_matches_frontend_shape(
     _load(client, src_file)
 
     out_file = tmp_path / "out.model.json"
-    res = client.post("/api/v1/model/save", json={"path": str(out_file)})
+    res = client.post(f"{API}/model/save", json={"path": str(out_file)})
     assert res.status_code == 200, res.text
     body = res.json()
     source = json.loads(src_file.read_text(encoding="utf-8"))
@@ -414,7 +417,7 @@ def test_save_without_path_yields_422(client: TestClient, tmp_path: Path) -> Non
     f = tmp_path / "m.model.json"
     f.write_text('{"elements": [], "relationships": []}', encoding="utf-8")
     _load(client, f)
-    res = client.post("/api/v1/model/save", json={})
+    res = client.post(f"{API}/model/save", json={})
     assert res.status_code == 422, res.text
     detail = res.json()["detail"]
     assert any(
@@ -449,7 +452,7 @@ def test_save_failure_keeps_previous_file_and_no_temp_remains(
     monkeypatch.setattr(model_routes, "iter_model_json", exploding_chunks)
 
     with pytest.raises(RuntimeError, match="simulated mid-write failure"):
-        client.post("/api/v1/model/save", json={"path": str(dest)})
+        client.post(f"{API}/model/save", json={"path": str(dest)})
 
     assert dest.read_text(encoding="utf-8") == previous_save
     leftovers = {p.name for p in tmp_path.iterdir()} - {f.name, dest.name}
@@ -464,7 +467,7 @@ def test_save_unwritable_path_yields_422(
     f.write_text('{"elements": [], "relationships": []}', encoding="utf-8")
     _load(client, f)
     res = client.post(
-        "/api/v1/model/save",
+        f"{API}/model/save",
         json={"path": str(tmp_path / "no" / "such" / "dir" / "x.json")},
     )
     assert res.status_code == 422, res.text
@@ -473,7 +476,7 @@ def test_save_unwritable_path_yields_422(
 def test_save_without_model_yields_404(client: TestClient, tmp_path: Path) -> None:
     _upload_metamodel(client, EXAMPLE_MM)
     res = client.post(
-        "/api/v1/model/save", json={"path": str(tmp_path / "x.json")}
+        f"{API}/model/save", json={"path": str(tmp_path / "x.json")}
     )
     assert res.status_code == 404
 
@@ -485,10 +488,10 @@ def test_download_equals_save_bytes(client: TestClient, tmp_path: Path) -> None:
     _load(client, src_file)
 
     out_file = tmp_path / "out.model.json"
-    res = client.post("/api/v1/model/save", json={"path": str(out_file)})
+    res = client.post(f"{API}/model/save", json={"path": str(out_file)})
     assert res.status_code == 200, res.text
 
-    res = client.get("/api/v1/model/download")
+    res = client.get(f"{API}/model/download")
     assert res.status_code == 200
     assert res.headers["content-disposition"] == 'attachment; filename="model.json"'
     assert res.content == out_file.read_bytes()
@@ -527,7 +530,7 @@ def test_iter_buffered_is_byte_identical_and_coalesces(
 
 def test_download_without_model_yields_404(client: TestClient) -> None:
     _upload_metamodel(client, EXAMPLE_MM)
-    res = client.get("/api/v1/model/download")
+    res = client.get(f"{API}/model/download")
     assert res.status_code == 404
 
 
@@ -568,7 +571,7 @@ def test_serializer_snapshots_entities_at_stream_start(
 
     # concurrent mutation: an ops batch adds an element mid-stream
     res = client.post(
-        "/api/v1/model/ops",
+        f"{API}/model/ops",
         json={
             "base_rev": summary["model_rev"],
             "ops": [
@@ -611,12 +614,12 @@ def test_origin_guard_allows_requests_without_origin(
     """
     f = _load_simple_model(client, tmp_path)
     out = tmp_path / "out.model.json"
-    assert client.post("/api/v1/model/load", json={"path": str(f)}).status_code == 200
-    assert client.post("/api/v1/model/save", json={"path": str(out)}).status_code == 200
-    assert client.get("/api/v1/model/download").status_code == 200
+    assert client.post(f"{API}/model/load", json={"path": str(f)}).status_code == 200
+    assert client.post(f"{API}/model/save", json={"path": str(out)}).status_code == 200
+    assert client.get(f"{API}/model/download").status_code == 200
     assert (
         client.post(
-            "/api/v1/model/upload",
+            f"{API}/model/upload",
             content=b'{"elements": [], "relationships": []}',
         ).status_code
         == 200
@@ -631,12 +634,12 @@ def test_origin_guard_allows_allowed_origin(
     f = _load_simple_model(client, tmp_path)
     headers = {"origin": "http://localhost:5173"}
     res = client.post(
-        "/api/v1/model/load", json={"path": str(f)}, headers=headers
+        f"{API}/model/load", json={"path": str(f)}, headers=headers
     )
     assert res.status_code == 200, res.text
     out = tmp_path / "out.model.json"
     res = client.post(
-        "/api/v1/model/save", json={"path": str(out)}, headers=headers
+        f"{API}/model/save", json={"path": str(out)}, headers=headers
     )
     assert res.status_code == 200, res.text
     assert out.is_file()
@@ -652,17 +655,17 @@ def test_origin_guard_rejects_foreign_origin(
     out = tmp_path / "out.model.json"
 
     res = client.post(
-        "/api/v1/model/load", json={"path": str(f)}, headers=headers
+        f"{API}/model/load", json={"path": str(f)}, headers=headers
     )
     assert res.status_code == 403, res.text
     res = client.post(
-        "/api/v1/model/save", json={"path": str(out)}, headers=headers
+        f"{API}/model/save", json={"path": str(out)}, headers=headers
     )
     assert res.status_code == 403, res.text
     assert not out.exists()  # handler never ran
-    assert client.get("/api/v1/model/download", headers=headers).status_code == 403
+    assert client.get(f"{API}/model/download", headers=headers).status_code == 403
     res = client.post(
-        "/api/v1/model/upload",
+        f"{API}/model/upload",
         content=b'{"elements": [], "relationships": []}',
         headers=headers,
     )
@@ -677,12 +680,12 @@ def test_origin_guard_respects_env_override(
     monkeypatch.setenv("DATA_ROVER_CORS_ORIGINS", '["https://other.example"]')
     headers = {"origin": "https://other.example"}
     res = client.post(
-        "/api/v1/model/load", json={"path": str(f)}, headers=headers
+        f"{API}/model/load", json={"path": str(f)}, headers=headers
     )
     assert res.status_code == 200, res.text
     # ...and the defaults are gone once overridden
     res = client.post(
-        "/api/v1/model/load",
+        f"{API}/model/load",
         json={"path": str(f)},
         headers={"origin": "http://localhost:5173"},
     )

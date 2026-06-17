@@ -13,7 +13,12 @@ from fastapi.testclient import TestClient
 import data_rover.api.session as session_module
 from data_rover.api.main import create_app
 from data_rover.api.routes.read import MAX_PAGE_LIMIT
-from data_rover.api.session import get_session, reset_session
+# get_session() returns the DEFAULT project's session; the client fixture seeds
+# and targets that same project (DEFAULT_PROJECT_ID), so these assertions
+# inspect the very session the HTTP requests mutate.
+from data_rover.api.session import get_session
+
+from .conftest import AUTH_HEADERS, seed_default_project
 
 READ_MM = """
 elements:
@@ -38,14 +43,14 @@ relationships:
       - {name: weight, datatype: integer}
 """
 
-API = "/api/v1"
+API = "/api/v1/projects/default"
 
 
 @pytest.fixture
 def client() -> TestClient:
-    reset_session()
-    app = create_app()
-    c = TestClient(app)
+    seed_default_project()
+    c = TestClient(create_app())
+    c.headers.update(AUTH_HEADERS)
     res = c.post(
         f"{API}/metamodel",
         content=READ_MM,
@@ -107,8 +112,9 @@ def _entity_state(model_json: dict) -> tuple[dict, dict]:
 
 
 def test_summary_404_without_model() -> None:
-    reset_session()
+    seed_default_project()
     c = TestClient(create_app())
+    c.headers.update(AUTH_HEADERS)
     assert c.get(f"{API}/model/summary").status_code == 404  # no metamodel
     res = c.post(
         f"{API}/metamodel",
@@ -946,8 +952,9 @@ def test_elements_batch_rejects_oversized(client: TestClient) -> None:
 
 
 def test_elements_batch_404_without_model() -> None:
-    reset_session()
+    seed_default_project()
     c = TestClient(create_app())
+    c.headers.update(AUTH_HEADERS)
     c.post(
         f"{API}/metamodel",
         content=READ_MM,

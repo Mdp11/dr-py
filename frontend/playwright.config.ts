@@ -4,9 +4,9 @@ import { defineConfig, devices } from '@playwright/test';
  * Playwright config for the data-rover frontend smoke suite.
  *
  * Two webServers are launched:
- *   1. The FastAPI backend (`pixi run -e api serve`) on :8000. The backend
- *      keeps a single in-memory session — there is no persistent storage to
- *      isolate between runs.
+ *   1. The FastAPI backend (`pixi run -e api start-backend`) on :8000. Uses a
+ *      throwaway SQLite file at /tmp/data-rover-e2e.db with dev-seed enabled so
+ *      the default user+project exist before any test runs.
  *   2. The Vite dev server (`npm run dev`) on :5173.
  *
  * Both are reused if already running locally to keep the iteration loop fast.
@@ -29,7 +29,13 @@ export default defineConfig({
 	],
 	webServer: [
 		{
-			command: 'pixi run -e api start-backend',
+			// Unix absolute-path SQLite DSN (sqlite:/// + /tmp/...). On Windows CI
+			// this would need a drive-letter form (sqlite:///C:/...).
+			// The file persists across runs; dev-seed is idempotent so that's fine
+			// today, but a schema change (Phase 3) will need the file removed first
+			// since create_all only adds missing tables, never alters existing ones.
+			command:
+				'DATA_ROVER_DATABASE_URL=sqlite:////tmp/data-rover-e2e.db DATA_ROVER_DEV_SEED=true pixi run -e api start-backend',
 			cwd: '..',
 			url: 'http://127.0.0.1:8000/healthz',
 			timeout: 60_000,

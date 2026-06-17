@@ -13,9 +13,9 @@ from fastapi.testclient import TestClient
 
 from data_rover.api.main import create_app
 from data_rover.api.routes.read import MAX_PAGE_LIMIT
-from data_rover.api.session import reset_session
+from .conftest import AUTH_HEADERS, seed_default_project
 
-API = "/api/v1"
+API = "/api/v1/projects/default"
 
 SEARCH_MM = """\
 metamodel: people
@@ -42,8 +42,9 @@ relationships:
 
 @pytest.fixture
 def client() -> TestClient:
-    reset_session()
+    seed_default_project()
     c = TestClient(create_app())
+    c.headers.update(AUTH_HEADERS)
     res = c.post(
         f"{API}/metamodel",
         content=SEARCH_MM,
@@ -256,8 +257,9 @@ def test_search_paging(client: TestClient) -> None:
 
 
 def test_search_404_without_model() -> None:
-    reset_session()
+    seed_default_project()
     c = TestClient(create_app())
+    c.headers.update(AUTH_HEADERS)
     res = c.post(
         f"{API}/model/search", json={"target": "element", "criteria": []}
     )

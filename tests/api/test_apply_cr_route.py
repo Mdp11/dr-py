@@ -9,26 +9,29 @@ from fastapi.testclient import TestClient
 from data_rover.api.main import create_app
 from data_rover.api.routes._snapshot import _build_model_from_payload
 from data_rover.api.schemas import ChangeRequestIn, ElementOut, RelationshipOut
-from data_rover.api.session import reset_session
 from data_rover.core.metamodel.loader import load_metamodel_file
 from data_rover.core.model.change_request import apply_change_request
 from data_rover.core.validation.pipeline import default_pipeline
 from data_rover.core.validation.scope import Scope
 
+from .conftest import AUTH_HEADERS, seed_default_project
+
 EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "example.metamodel.yaml"
+API = "/api/v1/projects/default"
 
 
 @pytest.fixture
 def client() -> TestClient:
-    reset_session()
-    app = create_app()
-    return TestClient(app)
+    seed_default_project()
+    c = TestClient(create_app())
+    c.headers.update(AUTH_HEADERS)
+    return c
 
 
 def _upload_metamodel(client: TestClient) -> None:
     yaml_text = EXAMPLE.read_text(encoding="utf-8")
     res = client.post(
-        "/api/v1/metamodel",
+        f"{API}/metamodel",
         content=yaml_text,
         headers={"content-type": "application/x-yaml"},
     )
@@ -83,7 +86,7 @@ def test_apply_cr_happy_path(client: TestClient) -> None:
         },
     )
 
-    res = client.post("/api/v1/model/apply-cr", json=payload)
+    res = client.post(f"{API}/model/apply-cr", json=payload)
     assert res.status_code == 200, res.text
 
     body = res.json()
@@ -122,11 +125,11 @@ def test_apply_cr_does_not_set_session_model(client: TestClient) -> None:
         },
     )
 
-    res = client.post("/api/v1/model/apply-cr", json=payload)
+    res = client.post(f"{API}/model/apply-cr", json=payload)
     assert res.status_code == 200, res.text
 
     # Session model must not have been set
-    get_res = client.get("/api/v1/model")
+    get_res = client.get(f"{API}/model")
     assert get_res.status_code == 404
 
 
@@ -152,7 +155,7 @@ def test_apply_cr_conflict_id_exists(client: TestClient) -> None:
         },
     )
 
-    res = client.post("/api/v1/model/apply-cr", json=payload)
+    res = client.post(f"{API}/model/apply-cr", json=payload)
     assert res.status_code == 409, res.text
 
     body = res.json()
@@ -194,7 +197,7 @@ def test_apply_cr_unknown_type_in_cr_yields_422(client: TestClient) -> None:
         },
     )
 
-    res = client.post("/api/v1/model/apply-cr", json=payload)
+    res = client.post(f"{API}/model/apply-cr", json=payload)
     assert res.status_code == 422, res.text
 
 
@@ -227,7 +230,7 @@ def test_apply_cr_dangling_relationship_after_delete_yields_422(
             },
         },
     }
-    res = client.post("/api/v1/model/apply-cr", json=payload)
+    res = client.post(f"{API}/model/apply-cr", json=payload)
     assert res.status_code == 422, res.text
     assert "unknown target" in res.json()["detail"]
 
@@ -376,7 +379,7 @@ def test_apply_cr_issues_equal_full_validation_of_result(
     }
 
     res = client.post(
-        "/api/v1/model/apply-cr", json={"model": {"elements": elements,
+        f"{API}/model/apply-cr", json={"model": {"elements": elements,
                                                   "relationships": relationships},
                                         "cr": cr},
     )
@@ -424,11 +427,11 @@ def _set_session_model(
     client: TestClient, elements: list[dict], relationships: list[dict]
 ) -> int:
     res = client.post(
-        "/api/v1/model",
+        f"{API}/model",
         json={"elements": elements, "relationships": relationships},
     )
     assert res.status_code == 200, res.text
-    return client.get("/api/v1/model/summary").json()["model_rev"]
+    return client.get(f"{API}/model/summary").json()["model_rev"]
 
 
 def test_apply_cr_session_mode_requires_model(client: TestClient) -> None:
@@ -439,7 +442,7 @@ def test_apply_cr_session_mode_requires_model(client: TestClient) -> None:
             "relationships": {"added": [], "modified": [], "deleted": []},
         }
     )
-    res = client.post("/api/v1/model/apply-cr", json=payload)
+    res = client.post(f"{API}/model/apply-cr", json=payload)
     assert res.status_code == 404
 
 
@@ -527,7 +530,7 @@ def test_apply_cr_session_mode_delta(client: TestClient) -> None:
             },
         }
     )
-    res = client.post("/api/v1/model/apply-cr", json=payload)
+    res = client.post(f"{API}/model/apply-cr", json=payload)
     assert res.status_code == 200, res.text
     body = res.json()
 
@@ -546,7 +549,7 @@ def test_apply_cr_session_mode_delta(client: TestClient) -> None:
     assert body["issue_counts"] == {}
 
     # the session model WAS replaced (unlike legacy mode)
-    model = client.get("/api/v1/model").json()
+    model = client.get(f"{API}/model").json()
     assert {e["id"] for e in model["elements"]} == {"b1", "b4"}
     assert model["relationships"] == []
 
@@ -564,7 +567,7 @@ def test_apply_cr_session_mode_conflict_409_shape(client: TestClient) -> None:
             "relationships": {"added": [], "modified": [], "deleted": []},
         }
     )
-    res = client.post("/api/v1/model/apply-cr", json=payload)
+    res = client.post(f"{API}/model/apply-cr", json=payload)
     assert res.status_code == 409, res.text
     body = res.json()
     assert "conflicts" in body
@@ -574,7 +577,7 @@ def test_apply_cr_session_mode_conflict_409_shape(client: TestClient) -> None:
     assert set(conflict) == {"kind", "entity", "id", "reason"}
     # 409 envelope carries the (unchanged) session revision, like ops/undo
     assert body["model_rev"] == base_rev
-    assert client.get("/api/v1/model/summary").json()["model_rev"] == base_rev
+    assert client.get(f"{API}/model/summary").json()["model_rev"] == base_rev
 
 
 def test_apply_cr_session_mode_422_gate(client: TestClient) -> None:
@@ -599,11 +602,11 @@ def test_apply_cr_session_mode_422_gate(client: TestClient) -> None:
             "relationships": {"added": [], "modified": [], "deleted": []},
         }
     )
-    res = client.post("/api/v1/model/apply-cr", json=payload)
+    res = client.post(f"{API}/model/apply-cr", json=payload)
     assert res.status_code == 422, res.text
     assert "unknown target" in res.json()["detail"]
-    assert client.get("/api/v1/model/summary").json()["model_rev"] == base_rev
-    assert {e["id"] for e in client.get("/api/v1/model").json()["elements"]} == {
+    assert client.get(f"{API}/model/summary").json()["model_rev"] == base_rev
+    assert {e["id"] for e in client.get(f"{API}/model").json()["elements"]} == {
         "b1",
         "b2",
     }
@@ -618,7 +621,7 @@ def test_apply_cr_session_mode_resets_undo_history(client: TestClient) -> None:
 
     # one ops batch -> one undo step
     res = client.post(
-        "/api/v1/model/ops",
+        f"{API}/model/ops",
         json={
             "base_rev": base_rev,
             "ops": [
@@ -633,7 +636,7 @@ def test_apply_cr_session_mode_resets_undo_history(client: TestClient) -> None:
     )
     assert res.status_code == 200, res.text
     new_id = res.json()["id_map"]["tmp_1"]
-    assert client.get("/api/v1/model/summary").json()["undo_depth"] == 1
+    assert client.get(f"{API}/model/summary").json()["undo_depth"] == 1
 
     payload = _session_cr_payload(
         {
@@ -652,13 +655,13 @@ def test_apply_cr_session_mode_resets_undo_history(client: TestClient) -> None:
             "relationships": {"added": [], "modified": [], "deleted": []},
         }
     )
-    res = client.post("/api/v1/model/apply-cr", json=payload)
+    res = client.post(f"{API}/model/apply-cr", json=payload)
     assert res.status_code == 200, res.text
-    summary = client.get("/api/v1/model/summary").json()
+    summary = client.get(f"{API}/model/summary").json()
     assert summary["undo_depth"] == 0
     assert summary["model_rev"] == res.json()["model_rev"]
     # nothing to undo anymore
-    assert client.post("/api/v1/model/undo").status_code == 409
+    assert client.post(f"{API}/model/undo").status_code == 409
 
 
 def test_apply_cr_session_issues_delta_equals_full_validation(
@@ -734,7 +737,7 @@ def test_apply_cr_session_issues_delta_equals_full_validation(
         "relationships": {"added": [], "modified": [], "deleted": []},
     }
 
-    res = client.post("/api/v1/model/apply-cr", json=_session_cr_payload(cr_ops))
+    res = client.post(f"{API}/model/apply-cr", json=_session_cr_payload(cr_ops))
     assert res.status_code == 200, res.text
     body = res.json()
 
