@@ -80,3 +80,51 @@ def test_missing_identity_closes_4401(client: TestClient) -> None:
         with bare.websocket_connect(papi("/feed")) as ws:
             ws.receive_json()
     assert exc.value.code == 4401
+
+
+def _lock(client: TestClient, rid: str) -> str:
+    res = client.post(
+        papi("/locks"),
+        json={"targets": [{"resource_id": rid, "mode": "exclusive"}], "intent": "edit"},
+    )
+    assert res.status_code == 200, res.text
+    return res.json()["token"]
+
+
+def test_commit_broadcasts_delta_to_feed(client: TestClient) -> None:
+    # seed one element so we have something to lock+update
+    create = client.post(
+        papi("/model/ops"),
+        json={
+            "base_rev": client.get(papi("/open")).json()["model_rev"],
+            "ops": [
+                {"kind": "create_element", "temp_id": "tmp_1", "type_name": "Node", "properties": {}}
+            ],
+        },
+    )
+    assert create.status_code == 200, create.text
+    eid = create.json()["id_map"]["tmp_1"]
+
+    with client.websocket_connect(_feed_url()) as ws:
+        ws.receive_json()  # snapshot
+        rev = client.get(papi("/open")).json()["model_rev"]
+        token = _lock(client, eid)
+        # Task 6 wires the lock-acquired broadcast; drain any intervening events
+        # so the while-loop below also handles the lock event if already present.
+        commit = client.post(
+            papi("/commits"),
+            json={
+                "base_rev": rev,
+                "ops": [{"kind": "update_element", "id": eid, "properties_patch": {}}],
+                "message": "rename",
+                "lock_tokens": [token],
+            },
+        )
+        assert commit.status_code == 200, commit.text
+        # the committed delta arrives on the feed
+        seen = ws.receive_json()
+        while seen["type"] != "commit":
+            seen = ws.receive_json()
+        assert seen["message"] == "rename"
+        assert any(e["id"] == eid for e in seen["changed_elements"])
+        assert seen["rev"] == commit.json()["model_rev"]
