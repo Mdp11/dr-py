@@ -93,6 +93,14 @@ export {
 	setDiffDrawerOpen
 } from './ui.svelte';
 export {
+	getFeedConnected,
+	getLockFor,
+	getLockState,
+	getPresence,
+	startRealtime,
+	stopRealtime
+} from './realtime.svelte';
+export {
 	addSearchCriterion,
 	availableCriterionTypes,
 	clearSearchCriteria,
