@@ -12,7 +12,14 @@ export interface ApiFetchInit extends Omit<RequestInit, 'body'> {
 	query?: Record<string, string | number | boolean | undefined | null>;
 }
 
-const DEFAULT_BASE_URL = '/api/v1';
+// Single-user dev/default routing. A real project picker + auth (later phase)
+// will make the project id dynamic and drop the dev identity headers (a
+// gateway will inject the real identity in production).
+const DEFAULT_BASE_URL = '/api/v1/projects/default';
+const DEV_IDENTITY_HEADERS: Record<string, string> = {
+	'x-user-id': 'default-user',
+	'x-user-email': 'dev@example.com'
+};
 
 function buildUrl(baseUrl: string, path: string, query?: ApiFetchInit['query']): string {
 	const normalizedBase = baseUrl.replace(/\/$/, '');
@@ -65,6 +72,9 @@ export async function apiFetchRaw(
 	const doFetch = config?.fetch ?? fetch;
 	const url = buildUrl(baseUrl, path, init.query);
 	const { body, headers } = prepareBody(init);
+	for (const [k, v] of Object.entries(DEV_IDENTITY_HEADERS)) {
+		if (!headers.has(k)) headers.set(k, v);
+	}
 
 	const response = await doFetch(url, { ...init, body, headers });
 

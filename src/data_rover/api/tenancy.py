@@ -9,19 +9,34 @@ from __future__ import annotations
 import uuid
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from .db_models import Membership, Project, Role, User
 
 
 def upsert_user(db: Session, user_id: str, email: str) -> User:
-    """Return the user for *user_id*, creating it (or refreshing its email)."""
+    """Return the user for *user_id*, creating it (or refreshing its email).
+
+    The check-then-insert is not atomic: under concurrent requests two callers
+    can both see "user not found" and both attempt an INSERT. We catch the
+    resulting ``IntegrityError`` (UNIQUE violation on ``users.id``), roll back
+    the failed insert, and re-fetch the row the winner committed.
+    """
     user = db.get(User, user_id)
     if user is None:
-        user = User(id=user_id, email=email)
-        db.add(user)
-        db.commit()
-    elif email and user.email != email:
+        try:
+            user = User(id=user_id, email=email)
+            db.add(user)
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            user = db.get(User, user_id)
+            if user is None:
+                raise  # should never happen; re-raise if it does
+    if email and user.email != email:
+        # no concurrency guard needed here: the row exists and email carries no
+        # unique constraint, so this UPDATE can't raise IntegrityError.
         user.email = email
         db.commit()
     return user

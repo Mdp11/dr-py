@@ -35,20 +35,29 @@ def init_engine(database_url: str, *, force: bool = False) -> Engine:
 
     Reuses the existing engine when called again with the same URL so repeated
     ``create_app`` calls in one test process keep the same in-memory SQLite db.
+
+    SQLite pooling strategy:
+    - ``sqlite://`` (in-memory): ``StaticPool`` is required — all connections
+      must share the *same* underlying DBAPI connection so the schema created by
+      one checkout is visible to later checkouts. Safe only for the sync,
+      single-threaded ``TestClient``; concurrent access would corrupt it.
+    - ``sqlite:///path`` (file-based): use the default pool (``QueuePool``)
+      with ``check_same_thread=False``. Each request gets its own connection
+      from the pool, avoiding the ``InterfaceError: bad parameter or other API
+      misuse`` that ``StaticPool`` causes when async uvicorn routes interleave
+      multiple queries on the single shared connection.
     """
     global _engine, _engine_url, _SessionLocal
     if _engine is not None and not force and database_url == _engine_url:
         return _engine
     if database_url.startswith("sqlite"):
+        # in-memory iff the DSN has no file path: the bare "sqlite://"/"sqlite:///"
+        # forms and the explicit ":memory:" alias.
+        is_memory = database_url in ("sqlite://", "sqlite:///", "sqlite:///:memory:")
         _engine = create_engine(
             database_url,
             connect_args={"check_same_thread": False},
-            # one shared connection for the whole process: required so an
-            # in-memory db's schema survives across checkouts. Safe only for
-            # the sync, single-threaded TestClient — would corrupt under
-            # concurrent access (e.g. pytest-xdist / async). Postgres uses the
-            # default pool instead (the else branch below).
-            poolclass=StaticPool,
+            **({"poolclass": StaticPool} if is_memory else {}),
         )
         # SQLite ignores FK constraints (incl. ON DELETE CASCADE) unless asked
         # per-connection. Turn them on so test behaviour matches Postgres —
