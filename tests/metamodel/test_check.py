@@ -1,6 +1,7 @@
 from data_rover.core.metamodel.check import check_metamodel
 from data_rover.core.metamodel.schema import (
     ElementType,
+    Mapping,
     Metamodel,
     PropertyDef,
     RelationshipType,
@@ -266,8 +267,8 @@ def test_multiple_valid_mappings_ok():
             RelationshipType(
                 name="R",
                 mappings=[
-                    {"source": "A", "target": "B"},
-                    {"source": "C", "target": "D"},
+                    Mapping(source="A", target="B"),
+                    Mapping(source="C", target="D"),
                 ],
             )
         ],
@@ -282,8 +283,8 @@ def test_mapping_unknown_source_reported():
             RelationshipType(
                 name="R",
                 mappings=[
-                    {"source": "A", "target": "B"},
-                    {"source": "Ghost", "target": "B"},
+                    Mapping(source="A", target="B"),
+                    Mapping(source="Ghost", target="B"),
                 ],
             )
         ],
@@ -296,7 +297,7 @@ def test_mapping_unknown_target_reported():
     mm = Metamodel(
         elements=[ElementType(name="A")],
         relationships=[
-            RelationshipType(name="R", mappings=[{"source": "A", "target": "Phantom"}])
+            RelationshipType(name="R", mappings=[Mapping(source="A", target="Phantom")])
         ],
     )
     errors = check_metamodel(mm)

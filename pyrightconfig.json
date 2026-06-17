@@ -1,5 +1,5 @@
 {
-  "extraPaths": ["src"],
+  "extraPaths": ["src", "examples"],
   "include": ["src", "tests"],
   "pythonVersion": "3.10"
 }

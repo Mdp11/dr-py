@@ -1,4 +1,9 @@
-from data_rover.core.metamodel.schema import ElementType, Metamodel, RelationshipType
+from data_rover.core.metamodel.schema import (
+    ElementType,
+    Mapping,
+    Metamodel,
+    RelationshipType,
+)
 from data_rover.core.model.model import Model
 from data_rover.core.validation.scope import Scope
 from data_rover.core.validation.validators.endpoint_typing import (
@@ -58,8 +63,8 @@ def _multi_mapping_model():
             RelationshipType(
                 name="R",
                 mappings=[
-                    {"source": "A", "target": "B"},
-                    {"source": "C", "target": "D"},
+                    Mapping(source="A", target="B"),
+                    Mapping(source="C", target="D"),
                 ],
             )
         ],

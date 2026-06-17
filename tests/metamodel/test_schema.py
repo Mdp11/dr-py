@@ -1,6 +1,7 @@
 from data_rover.core.metamodel.check import check_metamodel
 from data_rover.core.metamodel.schema import (
     ElementType,
+    Mapping,
     Metamodel,
     PropertyDef,
     RelationshipType,
@@ -57,8 +58,8 @@ def test_relationship_multiple_mappings():
     r = RelationshipType(
         name="R",
         mappings=[
-            {"source": "A", "target": "B"},
-            {"source": "C", "target": "D"},
+            Mapping(source="A", target="B"),
+            Mapping(source="C", target="D"),
         ],
     )
     assert [(m.source, m.target) for m in r.mappings] == [("A", "B"), ("C", "D")]
