@@ -690,6 +690,7 @@ export async function ensureElement(id: string): Promise<Element | null> {
  */
 export async function ensureElements(ids: readonly string[]): Promise<void> {
 	const want: string[] = [];
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity
 	const seen = new Set<string>();
 	for (const id of ids) {
 		if (seen.has(id)) continue;

@@ -26,7 +26,7 @@
 	type FolderOption = { path: string[]; label: string };
 
 	type Props = {
-		row: { key: string; parent: string | null; depth: number };
+		row: { key: string; depth: number };
 		tree: UnifiedTree;
 		elementsById: Map<string, Element>;
 		visibility: Map<string, Visibility>;
