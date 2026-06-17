@@ -26,6 +26,7 @@ sqlalchemy = "2.0.*"
 alembic = "1.14.*"
 psycopg = "3.2.*"
 google-cloud-storage = "2.*"
+websockets = "15.*"
 
 [feature.api.tasks.start-backend]
 cmd = "uvicorn data_rover.api.main:app --reload --reload-dir src --host 127.0.0.1 --port 8000 --app-dir src"
