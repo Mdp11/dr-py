@@ -80,13 +80,13 @@ def _start_idle_sweeper(ttl: float) -> tuple[threading.Thread, threading.Event]:
 
 
 def _sweep_expired_locks(now: float) -> int:
-    """Drop expired leases from every warm session. Returns count released."""
-    from .session import get_registry
+    """Drop expired leases from every warm session. Returns count released.
 
-    registry = get_registry()
+    Iterates warm_items() so the sweeper neither refreshes last_access
+    (which would defeat the idle-evict sweeper) nor hydrates cold/evicted
+    projects (which would undo the eviction)."""
     released = 0
-    for pid in registry.project_ids():
-        session = registry.get(pid)
+    for _pid, session in get_registry().warm_items():
         with session.write_mutex:
             released += len(session.lock_table.sweep_expired(now))
     return released

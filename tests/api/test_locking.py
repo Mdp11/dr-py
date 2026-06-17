@@ -102,3 +102,28 @@ def test_release_drops_token_leases() -> None:
     released = t.release("u1", token)
     assert {r.resource_id for r in released} == {"e1", "e2"}
     assert t.active_leases(now=1.0) == []
+
+
+def test_active_leases_is_pure_read_leaves_expired_in_by_resource() -> None:
+    """active_leases must NOT compact _by_resource — it is a pure filter.
+
+    Acquire a lease with ttl=0 (already expired at now=0). Then call
+    active_leases(now=1) and assert it returns [] (correct: lease is expired)
+    WITHOUT removing the internal _by_resource entry (compaction belongs to
+    sweep_expired, not active_leases, so concurrent mutation paths are safe).
+    A subsequent sweep_expired must still find and remove it."""
+    t = LockTable()
+    t.acquire("u1", [_ex("e1")], now=0.0, ttl=0.0)  # expires immediately at t=0
+
+    # active_leases is a pure read: expired lease is filtered out of the
+    # result, but _by_resource is NOT compacted.
+    result = t.active_leases(now=1.0)
+    assert result == [], f"expected no active leases, got {result}"
+    assert "e1" in t._by_resource, (
+        "active_leases compacted _by_resource — it must be a pure read"
+    )
+
+    # sweep_expired is the legitimate compaction path.
+    expired = t.sweep_expired(now=1.0)
+    assert [le.resource_id for le in expired] == ["e1"]
+    assert "e1" not in t._by_resource

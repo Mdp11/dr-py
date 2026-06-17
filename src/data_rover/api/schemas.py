@@ -458,6 +458,7 @@ class SaveModelResponse(BaseModel):
 
 # --- Phase 4: check-out / commit + locking --------------------------------
 
+
 class LockTargetIn(BaseModel):
     resource_id: str
     mode: Literal["exclusive", "shared"]

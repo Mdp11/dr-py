@@ -41,6 +41,7 @@ from ..session import AppliedBatch
 from .ops import (
     _apply_batch,
     _ensure_validation_seeded,
+    _maybe_periodic_snapshot,
     _persist_commit,
     _rollback,
 )
@@ -169,7 +170,7 @@ def create_commit(
         commit_id = uuid.uuid4().hex
         issues_json = [IssueOut.from_core(i).model_dump() for i in conformance]
         try:
-            _persist_commit(
+            persisted = _persist_commit(
                 db,
                 project_id,
                 rev=session.model_rev,
@@ -188,7 +189,11 @@ def create_commit(
             raise HTTPException(
                 status_code=500, detail="failed to persist commit"
             ) from exc
-        # f. release the caller's locks (explicit loop — no helper)
+        # f. periodic snapshot: mirrors apply_ops so a hot commit-only project
+        #    doesn't accumulate an unbounded replay tail.
+        if persisted:
+            _maybe_periodic_snapshot(db, project_id, session, session.model_rev)
+        # g. release the caller's locks (explicit loop — no helper)
         for tok in payload.lock_tokens:
             session.lock_table.release(user.id, tok)
     return CommitResponse(
