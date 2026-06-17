@@ -59,6 +59,9 @@ class Settings(BaseSettings):
     lock_ttl_seconds: int = 300
     #: lifespan sweeper interval for auto-releasing expired leases. 0 disables.
     lock_sweep_seconds: int = 60
+    #: bounded per-client feed queue. A client whose queue overflows is dropped
+    #: and reconnects (Phase 5). Large enough to absorb a burst of commits.
+    feed_queue_max: int = 256
 
 
 def get_settings() -> Settings:
