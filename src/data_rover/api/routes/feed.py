@@ -11,6 +11,7 @@ receive loop exists only to observe the client closing.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 
 from fastapi import APIRouter, WebSocket
@@ -99,9 +100,16 @@ async def feed_ws(websocket: WebSocket, project_id: str) -> None:
 
 async def _pump(websocket: WebSocket, conn: ClientConn) -> None:
     """Drain the client's queue to the socket; close on the drop sentinel."""
-    while True:
-        event = await conn.queue.get()
-        if event is CLOSE_SENTINEL:
-            await websocket.close(code=4408)
-            return
-        await websocket.send_json(event)
+    try:
+        while True:
+            event = await conn.queue.get()
+            if event is CLOSE_SENTINEL:
+                await websocket.close(code=4408)
+                return
+            await websocket.send_json(event)
+    except Exception:
+        # A send failure (peer gone mid-send, or a bad event) must not leave a
+        # dead pump with a live, blocked connection. Best-effort close so the
+        # receive loop unblocks and the endpoint's finally cleans up.
+        with contextlib.suppress(Exception):
+            await websocket.close()
