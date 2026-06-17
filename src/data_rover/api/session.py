@@ -11,6 +11,8 @@ from data_rover.core.model.model import Model
 from data_rover.core.validation.state import ValidationState
 from data_rover.core.view.schema import View
 
+from .locking import LockTable
+
 if TYPE_CHECKING:
     from .schemas import OpIn
 
@@ -71,6 +73,11 @@ class Session:
     #: monotonic timestamp of the last registry access; the idle sweeper
     #: (Task 11) evicts sessions whose last_access is older than the TTL.
     last_access: float = field(default_factory=time.monotonic, repr=False)
+    #: per-project resource leases (Phase 4 check-out/commit). In-session only
+    #: this phase (Redis mirroring is Phase 7). Swept of expired leases by the
+    #: lifespan sweeper; consulted by the commit route (lock verification) and
+    #: by ``SessionRegistry.evict`` (never evict a session with live leases).
+    lock_table: LockTable = field(default_factory=LockTable, repr=False)
 
     def set_model(
         self, model: Model | None, *, validation: ValidationState | None = None
@@ -174,15 +181,29 @@ class SessionRegistry:
             return session
 
     def evict(self, project_id: str) -> None:
+        # Peek (do NOT pop) under the guard so the session stays registered
+        # while we inspect it. Popping first opened a window where a concurrent
+        # get() could hydrate a second session and then lose either the new or
+        # the re-registered live-leased session when we re-inserted.
         with self._guard:
-            session = self._sessions.pop(project_id, None)
+            session = self._sessions.get(project_id)
         if session is None:
             return
-        # snapshot under the session's write-mutex so eviction can't race an
-        # in-flight commit (spec §11 evict-during-commit guard).
+        # Serialise vs an in-flight commit (spec §11 evict-during-commit guard).
         with session.write_mutex:
+            if session.lock_table.active_leases(time.monotonic()):
+                # A holder still has a check-out open. The session was never
+                # removed, so it simply stays registered — no re-insert needed.
+                return
             if self._evict_hook is not None:
                 self._evict_hook(project_id, session)
+            # Remove only after the snapshot hook completes, and only when we
+            # are certain no live leases exist. Taking _guard here (after
+            # write_mutex) never conflicts: get() takes _guard only (never
+            # write_mutex), so there is no nested lock ordering that can
+            # deadlock with the get() path.
+            with self._guard:
+                self._sessions.pop(project_id, None)
 
     def touch(self, project_id: str) -> None:
         with self._guard:
@@ -204,6 +225,13 @@ class SessionRegistry:
     def project_ids(self) -> list[str]:
         with self._guard:
             return list(self._sessions)
+
+    def warm_items(self) -> list[tuple[str, Session]]:
+        """Snapshot of currently-warm (project_id, session) pairs WITHOUT
+        refreshing last_access or hydrating cold projects — for the lock
+        sweeper, which must not keep sessions alive or resurrect evicted ones."""
+        with self._guard:
+            return list(self._sessions.items())
 
 
 _registry = SessionRegistry()

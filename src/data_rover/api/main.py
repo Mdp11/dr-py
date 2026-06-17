@@ -14,8 +14,10 @@ from .db import create_all, init_engine
 from .errors import register_exception_handlers
 from .routes import (
     change_request,
+    commits,
     elements,
     health,
+    locks,
     metamodel,
     model,
     ops,
@@ -77,6 +79,32 @@ def _start_idle_sweeper(ttl: float) -> tuple[threading.Thread, threading.Event]:
     return t, stop
 
 
+def _sweep_expired_locks(now: float) -> int:
+    """Drop expired leases from every warm session. Returns count released.
+
+    Iterates warm_items() so the sweeper neither refreshes last_access
+    (which would defeat the idle-evict sweeper) nor hydrates cold/evicted
+    projects (which would undo the eviction)."""
+    released = 0
+    for _pid, session in get_registry().warm_items():
+        with session.write_mutex:
+            released += len(session.lock_table.sweep_expired(now))
+    return released
+
+
+def _start_lock_sweeper(interval: float) -> tuple[threading.Thread, threading.Event]:
+    stop = threading.Event()
+
+    def _loop() -> None:
+        while not stop.wait(interval):
+            with suppress(Exception):  # a sweep failure must not kill the loop
+                _sweep_expired_locks(time.monotonic())
+
+    t = threading.Thread(target=_loop, name="lock-sweeper", daemon=True)
+    t.start()
+    return t, stop
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
     init_engine(settings.database_url)
@@ -87,16 +115,23 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        thread = stop = None
+        idle_thread = idle_stop = None
         if settings.idle_evict_seconds > 0:
-            thread, stop = _start_idle_sweeper(float(settings.idle_evict_seconds))
+            idle_thread, idle_stop = _start_idle_sweeper(float(settings.idle_evict_seconds))
+        lock_thread = lock_stop = None
+        if settings.lock_sweep_seconds > 0:
+            lock_thread, lock_stop = _start_lock_sweeper(float(settings.lock_sweep_seconds))
         try:
             yield
         finally:
-            if stop is not None:
-                stop.set()
-            if thread is not None:
-                thread.join(timeout=2.0)
+            if idle_stop is not None:
+                idle_stop.set()
+            if idle_thread is not None:
+                idle_thread.join(timeout=2.0)
+            if lock_stop is not None:
+                lock_stop.set()
+            if lock_thread is not None:
+                lock_thread.join(timeout=2.0)
 
     app = FastAPI(
         title="data-rover API",
@@ -124,6 +159,8 @@ def create_app() -> FastAPI:
     app.include_router(relationships.router, prefix=proj, tags=["relationships"])
     app.include_router(validation.router, prefix=proj, tags=["validation"])
     app.include_router(view.router, prefix=proj, tags=["view"])
+    app.include_router(locks.router, prefix=proj, tags=["locks"])
+    app.include_router(commits.router, prefix=proj, tags=["commits"])
     return app
 
 

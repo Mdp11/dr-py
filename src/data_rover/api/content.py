@@ -68,6 +68,9 @@ def append_commit(
     ops: list[Any],
     inverse_ops: list[Any],
     id_map: dict[str, str],
+    message: str = "",
+    validation_error_count: int = 0,
+    issues: list[Any] | None = None,
 ) -> Commit:
     row = Commit(
         project_id=project_id,
@@ -77,6 +80,9 @@ def append_commit(
         ops=ops,
         inverse_ops=inverse_ops,
         id_map=id_map,
+        message=message,
+        validation_error_count=validation_error_count,
+        issues=issues or [],
     )
     db.add(row)
     db.flush()

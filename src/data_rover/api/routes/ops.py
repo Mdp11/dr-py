@@ -461,6 +461,10 @@ def _persist_commit(
     rev: int,
     author_id: str | None,
     res: "_BatchResult",
+    _commit_id: str | None = None,
+    _message: str = "",
+    _validation_error_count: int = 0,
+    _issues: list | None = None,
 ) -> bool:
     """Append the accepted batch to the durable journal and advance model_rev.
 
@@ -468,6 +472,11 @@ def _persist_commit(
     interactive/legacy in-memory-only flows have none yet — they persist a
     baseline via the load/upload routes in Task 9). Keeps DB model_rev in
     lockstep with the just-bumped session.model_rev.
+
+    The keyword-only ``_commit_id``/``_message``/``_validation_error_count``/
+    ``_issues`` parameters are optional metadata carried by the structured
+    commit endpoint (``POST /commits``); the plain ``/model/ops`` path omits
+    them and gets the same defaults as before (append-only, no message/issues).
 
     Returns True if a durable row existed and the commit was persisted,
     False when the project has no model row (in-memory-only legacy flow)."""
@@ -477,11 +486,14 @@ def _persist_commit(
         db,
         project_id,
         rev=rev,
-        commit_id=uuid.uuid4().hex,
+        commit_id=_commit_id or uuid.uuid4().hex,
         author_id=author_id,
         ops=serialize_ops(res.canonical_ops),
         inverse_ops=serialize_ops(res.inverse_ops()),
         id_map=dict(res.id_map),
+        message=_message,
+        validation_error_count=_validation_error_count,
+        issues=_issues or [],
     )
     content.set_model_rev(db, project_id, rev)
     db.commit()
