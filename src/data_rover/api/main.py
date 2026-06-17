@@ -16,6 +16,7 @@ from .routes import (
     change_request,
     commits,
     elements,
+    feed,
     health,
     locks,
     metamodel,
@@ -161,6 +162,7 @@ def create_app() -> FastAPI:
     app.include_router(view.router, prefix=proj, tags=["view"])
     app.include_router(locks.router, prefix=proj, tags=["locks"])
     app.include_router(commits.router, prefix=proj, tags=["commits"])
+    app.include_router(feed.router, prefix=proj, tags=["feed"])
     return app
 
 
