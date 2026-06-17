@@ -407,7 +407,7 @@ def test_404_without_model(client: TestClient) -> None:
 
 
 def test_422_examples(seeded: TestClient) -> None:
-    cases = [
+    cases: list[list[dict]] = [
         # unknown element type
         [
             {
@@ -876,7 +876,7 @@ def test_issue_delta_violation_then_fix(seeded: TestClient) -> None:
 def test_differential_validation_matches_full_after_many_batches(
     seeded: TestClient,
 ) -> None:
-    batches = [
+    batches: list[list[dict]] = [
         [
             {
                 "kind": "create_element",
