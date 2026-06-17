@@ -10,8 +10,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import importer
-from .db import create_all, get_db, init_engine
-from .db_models import Membership, Project, Role, User
+from .db import create_all, init_engine
 from .errors import register_exception_handlers
 from .routes import (
     change_request, elements, health, metamodel, model, ops, projects,
