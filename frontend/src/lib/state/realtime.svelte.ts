@@ -7,6 +7,7 @@
  * RENDERING and the lock->edit->commit UI land in Spec B.
  */
 
+import { SvelteMap } from 'svelte/reactivity';
 import {
 	connectFeed,
 	type FeedConfig,
@@ -19,7 +20,7 @@ import type { OpsResponse } from '$lib/api/types';
 
 let _connected = $state(false);
 let _presence = $state<string[]>([]);
-let _lockState = $state<Map<string, LeaseLite>>(new Map());
+const _lockState = new SvelteMap<string, LeaseLite>();
 let _conn: FeedConnection | null = null;
 
 export function getFeedConnected(): boolean {
@@ -30,7 +31,7 @@ export function getPresence(): string[] {
 	return _presence;
 }
 
-export function getLockState(): Map<string, LeaseLite> {
+export function getLockState(): SvelteMap<string, LeaseLite> {
 	return _lockState;
 }
 
@@ -39,15 +40,11 @@ export function getLockFor(id: string): LeaseLite | undefined {
 }
 
 function setLeases(leases: LeaseLite[]): void {
-	const next = new Map(_lockState);
-	for (const le of leases) next.set(le.resource_id, le);
-	_lockState = next;
+	for (const le of leases) _lockState.set(le.resource_id, le);
 }
 
 function clearLeases(leases: LeaseLite[]): void {
-	const next = new Map(_lockState);
-	for (const le of leases) next.delete(le.resource_id);
-	_lockState = next;
+	for (const le of leases) _lockState.delete(le.resource_id);
 }
 
 /** Exported for unit tests; also the single dispatch point for `connectFeed`. */
@@ -55,7 +52,8 @@ export function handleFeedEvent(e: FeedEvent): void {
 	switch (e.type) {
 		case 'snapshot': {
 			_presence = e.connected;
-			_lockState = new Map(e.locks.map((le) => [le.resource_id, le] as const));
+			_lockState.clear();
+			for (const le of e.locks) _lockState.set(le.resource_id, le);
 			// If we are behind the server's rev, our cached subset may be stale.
 			// Spec A keeps this light: refresh the model-wide summary counters.
 			// (Spec B wires a full reload of the affected subset.)
@@ -108,5 +106,5 @@ export function stopRealtime(): void {
 export function resetRealtime(): void {
 	stopRealtime();
 	_presence = [];
-	_lockState = new Map();
+	_lockState.clear();
 }
