@@ -83,7 +83,9 @@ class LockTable:
             self._by_resource.pop(resource_id, None)
         return leases
 
-    def _conflict(self, req: RequiredLock, holder: str, now: float) -> LockConflict | None:
+    def _conflict(
+        self, req: RequiredLock, holder: str, now: float
+    ) -> LockConflict | None:
         for le in self._live(req.resource_id, now):
             if le.holder == holder:
                 continue
@@ -198,11 +200,7 @@ class LockTable:
         return expired
 
     def active_leases(self, now: float) -> list[Lease]:
-        return [
-            le
-            for rid in list(self._by_resource)
-            for le in self._live(rid, now)
-        ]
+        return [le for rid in list(self._by_resource) for le in self._live(rid, now)]
 
 
 # --- lock-scope expansion (spec §8 rules) ---------------------------------
