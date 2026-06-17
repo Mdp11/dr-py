@@ -200,7 +200,17 @@ class LockTable:
         return expired
 
     def active_leases(self, now: float) -> list[Lease]:
-        return [le for rid in list(self._by_resource) for le in self._live(rid, now)]
+        """Return all non-expired leases as a pure read — never mutates
+        ``_by_resource``. Compaction is left to ``sweep_expired`` (which runs
+        under the write_mutex); this method is called from ``evict`` (which
+        also holds the mutex) and from the GET /locks route (no mutex needed
+        because it no longer writes back)."""
+        return [
+            le
+            for leases in self._by_resource.values()
+            for le in leases
+            if le.expires_at > now
+        ]
 
 
 # --- lock-scope expansion (spec §8 rules) ---------------------------------

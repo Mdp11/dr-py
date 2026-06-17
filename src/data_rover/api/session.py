@@ -226,6 +226,13 @@ class SessionRegistry:
         with self._guard:
             return list(self._sessions)
 
+    def warm_items(self) -> list[tuple[str, Session]]:
+        """Snapshot of currently-warm (project_id, session) pairs WITHOUT
+        refreshing last_access or hydrating cold projects — for the lock
+        sweeper, which must not keep sessions alive or resurrect evicted ones."""
+        with self._guard:
+            return list(self._sessions.items())
+
 
 _registry = SessionRegistry()
 

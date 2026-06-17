@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
+from data_rover.api import content, db
 from data_rover.api.main import create_app
 
 from .conftest import AUTH_HEADERS, papi, seed_default_project
@@ -208,3 +211,69 @@ def test_commit_creates_freefloating_without_lock(client: TestClient) -> None:
     )
     assert r.status_code == 200, r.text
     assert r.json()["id_map"]["tmp_n"]
+
+
+# ---------------------------------------------------------------------------
+# Minor #3: commit path must call _maybe_periodic_snapshot
+# ---------------------------------------------------------------------------
+
+_MM_SNAP = Path("examples/smart-city.metamodel.yaml").read_text(encoding="utf-8")
+
+
+def _client_with_model() -> TestClient:
+    """Build a test client with a live in-memory session AND a DB model row via
+    the HTTP upload routes, matching the pattern in test_ops_persistence.py."""
+    seed_default_project()
+    c = TestClient(create_app())
+    r = c.post(papi("/metamodel"), content=_MM_SNAP, headers=AUTH_HEADERS)
+    assert r.status_code == 200, r.text
+    r = c.post(
+        papi("/model/upload"),
+        content=b'{"elements":[],"relationships":[]}',
+        headers=AUTH_HEADERS,
+    )
+    assert r.status_code == 200, r.text
+    return c
+
+
+def _concrete_type_snap(c: TestClient) -> str:
+    mm = c.get(papi("/metamodel"), headers=AUTH_HEADERS).json()
+    for et in mm["elements"]:
+        if not et.get("abstract"):
+            return et["name"]
+    raise AssertionError("no concrete element type found")
+
+
+def test_commit_writes_periodic_snapshot_when_snapshot_every_1(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With snapshot_every=1 every accepted commit triggers a snapshot — this
+    verifies the commit path (POST /commits) calls _maybe_periodic_snapshot,
+    mirroring the equivalent behaviour in POST /model/ops."""
+    monkeypatch.setenv("DATA_ROVER_SNAPSHOT_EVERY", "1")
+    c = _client_with_model()
+    t = _concrete_type_snap(c)
+    base = c.get(papi("/model/summary"), headers=AUTH_HEADERS).json()["model_rev"]
+    r = c.post(
+        papi("/commits"),
+        headers=AUTH_HEADERS,
+        json={
+            "base_rev": base,
+            "ops": [
+                {
+                    "kind": "create_element",
+                    "temp_id": "tmp_snap",
+                    "type_name": t,
+                    "properties": {},
+                }
+            ],
+            "lock_tokens": [],
+            "message": "snapshot test",
+        },
+    )
+    assert r.status_code == 200, r.text
+    new_rev = r.json()["model_rev"]
+    with db.db_session() as s:
+        snap = content.latest_snapshot(s, "default")
+        assert snap is not None, "no snapshot row was written by POST /commits"
+        assert snap.rev == new_rev
