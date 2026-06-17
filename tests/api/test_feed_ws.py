@@ -68,6 +68,23 @@ def test_unknown_project_closes_4404(client: TestClient) -> None:
     assert exc.value.code == 4404
 
 
+def test_non_member_closes_4403(client: TestClient) -> None:
+    from starlette.websockets import WebSocketDisconnect
+
+    # "stranger" is auto-provisioned as a User but has no Membership in the
+    # default project (which is owned by test-user), so get_membership → None → 4403.
+    # Use a fresh bare client so no AUTH_HEADERS (which carry test-user's identity)
+    # bleed in — the WS endpoint reads identity from the query params instead.
+    reset_loop()
+    bare = TestClient(create_app())
+    bare.headers.update({"x-user-id": "stranger", "x-user-email": "stranger@example.com"})
+    url = papi("/feed")
+    with pytest.raises(WebSocketDisconnect) as exc:
+        with bare.websocket_connect(url) as ws:
+            ws.receive_json()
+    assert exc.value.code == 4403
+
+
 def test_missing_identity_closes_4401(client: TestClient) -> None:
     from starlette.websockets import WebSocketDisconnect
 

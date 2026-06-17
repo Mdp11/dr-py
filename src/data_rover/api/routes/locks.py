@@ -30,7 +30,7 @@ from ..settings import get_settings
 router = APIRouter()
 
 
-def _lease_event_dicts(leases: list[Lease]) -> list[dict]:  # type: ignore[type-arg]
+def _lease_event_dicts(leases: list[Lease]) -> list[dict[str, str]]:
     return [
         {"resource_id": le.resource_id, "mode": le.mode.value, "holder_id": le.holder}
         for le in leases

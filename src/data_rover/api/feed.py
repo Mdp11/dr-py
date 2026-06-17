@@ -14,6 +14,7 @@ persistence stack.
 from __future__ import annotations
 
 import asyncio
+import threading
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -57,18 +58,23 @@ class FeedHub:
     """Per-session set of connected clients with sync, thread-safe broadcast."""
 
     _conns: set[ClientConn] = field(default_factory=set)
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def register(self, conn: ClientConn) -> None:
-        self._conns.add(conn)
+        with self._lock:
+            self._conns.add(conn)
 
     def unregister(self, conn: ClientConn) -> None:
-        self._conns.discard(conn)
+        with self._lock:
+            self._conns.discard(conn)
 
     def connected_user_ids(self) -> list[str]:
-        return sorted({c.user_id for c in self._conns})
+        with self._lock:
+            return sorted({c.user_id for c in self._conns})
 
     def has_clients(self) -> bool:
-        return bool(self._conns)
+        with self._lock:
+            return bool(self._conns)
 
     def broadcast(self, event: dict[str, Any]) -> None:
         """Enqueue ``event`` for every connected client. Safe to call from any
@@ -77,7 +83,9 @@ class FeedHub:
         loop = get_loop()
         if loop is None:
             return  # no client has ever connected -> nothing to deliver
-        for conn in list(self._conns):
+        with self._lock:
+            conns = tuple(self._conns)
+        for conn in conns:
             loop.call_soon_threadsafe(self._deliver, conn, event)
 
     def _deliver(self, conn: ClientConn, event: dict[str, Any]) -> None:
