@@ -203,3 +203,110 @@ class LockTable:
             for rid in list(self._by_resource)
             for le in self._live(rid, now)
         ]
+
+
+# --- lock-scope expansion (spec §8 rules) ---------------------------------
+# Imported lazily-ish at module scope: Model is a core type (no cycle), the op
+# union lives in schemas (no cycle back to locking).
+from typing import TYPE_CHECKING  # noqa: E402
+
+from .schemas import (  # noqa: E402
+    CreateElementOp,
+    CreateRelationshipOp,
+    DeleteElementOp,
+    DeleteRelationshipOp,
+    UpdateElementOp,
+    UpdateRelationshipOp,
+)
+
+if TYPE_CHECKING:
+    from data_rover.core.model.model import Model
+
+    from .schemas import OpIn
+
+_TEMP_ID_PREFIX = "tmp_"
+
+
+def containment_subtree(model: "Model", root_id: str) -> list[str]:
+    """``root_id`` + all transitive containment descendants (DFS, dedup)."""
+    out: list[str] = []
+    seen: set[str] = set()
+    stack = [root_id]
+    while stack:
+        cur = stack.pop()
+        if cur in seen:
+            continue
+        seen.add(cur)
+        out.append(cur)
+        for rel in model._containment_children(cur):
+            stack.append(rel.target_id)
+    return out
+
+
+def expand_targets(
+    model: "Model",
+    targets: list[tuple[str, LockMode]],
+    intent: LockIntent,
+) -> list[RequiredLock]:
+    """A lock request -> concrete RequiredLocks.
+
+    A DELETE-intent exclusive target additionally locks its whole containment
+    subtree (so the cascade can't delete a descendant another editor holds)."""
+    reqs: list[RequiredLock] = []
+    seen: set[tuple[str, LockMode]] = set()
+
+    def add(rid: str, mode: LockMode) -> None:
+        if (rid, mode) not in seen:
+            seen.add((rid, mode))
+            reqs.append(RequiredLock(resource_id=rid, mode=mode, intent=intent))
+
+    for rid, mode in targets:
+        if intent is LockIntent.DELETE and mode is LockMode.EXCLUSIVE:
+            for member in containment_subtree(model, rid):
+                add(member, LockMode.EXCLUSIVE)
+        else:
+            add(rid, mode)
+    return reqs
+
+
+def required_locks(model: "Model", ops: list["OpIn"]) -> list[RequiredLock]:
+    """The locks an op batch needs, computed against the PRE-apply model.
+
+    Ids created earlier in the same batch (temp ids) are not yet shared, so
+    they require no lock; relationships are locked via their source element."""
+    reqs: list[RequiredLock] = []
+    seen: set[tuple[str, LockMode]] = set()
+    created: set[str] = set()
+
+    def add(rid: str, mode: LockMode, intent: LockIntent) -> None:
+        if rid.startswith(_TEMP_ID_PREFIX) or rid in created:
+            return
+        if (rid, mode) not in seen:
+            seen.add((rid, mode))
+            reqs.append(RequiredLock(resource_id=rid, mode=mode, intent=intent))
+
+    def rel_source(rel_id: str) -> str | None:
+        rel = model.relationships.get(rel_id)
+        return rel.source_id if rel is not None else None
+
+    for op in ops:
+        if isinstance(op, CreateElementOp):
+            created.add(op.temp_id)
+        elif isinstance(op, CreateRelationshipOp):
+            created.add(op.temp_id)
+            add(op.source_id, LockMode.EXCLUSIVE, LockIntent.CONNECT)
+            add(op.target_id, LockMode.SHARED, LockIntent.CONNECT)
+        elif isinstance(op, UpdateElementOp):
+            add(op.id, LockMode.EXCLUSIVE, LockIntent.EDIT)
+        elif isinstance(op, DeleteElementOp):
+            for member in containment_subtree(model, op.id):
+                add(member, LockMode.EXCLUSIVE, LockIntent.DELETE)
+        elif isinstance(op, UpdateRelationshipOp):
+            src = rel_source(op.id)
+            if src is not None:
+                add(src, LockMode.EXCLUSIVE, LockIntent.EDIT)
+        elif isinstance(op, DeleteRelationshipOp):
+            src = rel_source(op.id)
+            if src is not None:
+                add(src, LockMode.EXCLUSIVE, LockIntent.DELETE)
+    return reqs
