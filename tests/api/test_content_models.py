@@ -7,7 +7,6 @@ from data_rover.api.db_models import (
     ModelRow,
     Project,
     Snapshot,
-    ViewRow,
 )
 
 
