@@ -15,7 +15,7 @@ from data_rover.api.identity import (
 
 
 def _request(headers: list[tuple[bytes, bytes]]) -> Request:
-    return Request({"type": "http", "headers": headers})
+    return Request({"type": "http", "headers": headers, "query_string": b""})
 
 
 def test_dev_provider_reads_headers() -> None:

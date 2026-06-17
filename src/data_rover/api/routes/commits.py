@@ -22,6 +22,7 @@ from data_rover.core.validation.issue import IssueCategory
 from data_rover.core.validation.pipeline import default_pipeline
 
 from ..authz import require_membership
+from ..feed import commit_event, lock_event
 from ..db import get_db
 from ..db_models import Membership, User
 from ..deps import Session, get_request_session, require_model
@@ -112,7 +113,10 @@ def create_commit(
        c. Hard-reject structural blockers (422; rolls back).
        d. Splice conformance issues into the issue store, bump rev, record batch.
        e. Persist to the durable journal (500 + full rollback on failure).
-       f. Release the caller's locks (explicit loop).
+       f. Periodic snapshot (mirrors apply_ops to bound replay tail).
+       g. Release the caller's locks (explicit loop).
+       h. Broadcast commit delta + lock-release events (inside mutex for
+          enqueue-order == rev-order guarantee; broadcast is non-blocking).
     4. Return CommitResponse with full delta + commit metadata.
     """
     _, model = require_model(session)
@@ -194,8 +198,42 @@ def create_commit(
         if persisted:
             _maybe_periodic_snapshot(db, project_id, session, session.model_rev)
         # g. release the caller's locks (explicit loop — no helper)
+        released = []
         for tok in payload.lock_tokens:
-            session.lock_table.release(user.id, tok)
+            released.extend(session.lock_table.release(user.id, tok))
+        # h. broadcast commit delta + lock-release events (inside the mutex so
+        #    enqueue order == rev order across concurrent commits).
+        changed_elements = [
+            ElementOut.from_core(model.elements[eid]).model_dump()
+            for eid in res.changed_element_ids
+        ]
+        changed_relationships = [
+            RelationshipOut.from_core(model.relationships[rid]).model_dump()
+            for rid in res.changed_relationship_ids
+        ]
+        session.hub.broadcast(
+            commit_event(
+                rev=session.model_rev,
+                commit_id=commit_id,
+                author_id=user.id,
+                message=payload.message,
+                validation_error_count=len(conformance),
+                changed_elements=changed_elements,
+                changed_relationships=changed_relationships,
+                deleted_element_ids=list(res.deleted_element_ids),
+                deleted_relationship_ids=list(res.deleted_relationship_ids),
+            )
+        )
+        if released:
+            session.hub.broadcast(
+                lock_event(
+                    "released",
+                    [
+                        {"resource_id": le.resource_id, "mode": le.mode.value, "holder_id": le.holder}
+                        for le in released
+                    ],
+                )
+            )
     return CommitResponse(
         model_rev=session.model_rev,
         id_map=dict(res.id_map),

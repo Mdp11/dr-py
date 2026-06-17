@@ -115,11 +115,19 @@ src/
   routes/+page.svelte   Single page; grids the four panels + diff drawer
   lib/
     api/                Typed REST client (client.ts), zod schemas, errors;
-                        model-ops / model-read wrap the delta endpoints
+                        model-ops / model-read wrap the delta endpoints;
+                        feed.ts — WebSocket wrapper (auto-reconnect with
+                        exponential backoff, injectable socketFactory for
+                        tests; pure transport, no app state)
     state/              model.svelte.ts (delta store) / changes (server
                         change-set badge) / selection / ui / filters /
                         metamodel / workspace / validation / file (filename
-                        + FS Access handle)
+                        + FS Access handle); realtime.svelte.ts — feed
+                        transport store: connection status, presence
+                        (string[]), lock state (SvelteMap resource_id →
+                        LeaseLite), applies remote commit deltas via
+                        applyDelta; lock-badge rendering and the commit UI
+                        land in Spec B
     metamodel/          Pure helpers (effective properties, multiplicity,
                         containment, subtype) mirroring the Python schema
     components/         TopBar, Sidebar, Workspace, Inspector, StatusBar,
