@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime
 
 from ...metamodel.schema import FLOAT_INFINITIES, Metamodel
-from ..issue import Issue, Severity
+from ..issue import Issue, IssueCategory, Severity
 from ..pipeline import EntityValidator, MetamodelMemo
 
 
@@ -121,6 +121,7 @@ class TypeConformanceValidator(EntityValidator):
                     Severity.ERROR,
                     f"{type_name}.{prop_name}: reference {item!r} points to no element",
                     [owner_id],
+                    IssueCategory.STRUCTURAL,
                 )
             ]
         mm = model.metamodel

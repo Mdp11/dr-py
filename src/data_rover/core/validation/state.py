@@ -23,7 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Iterable
 
-from .issue import Issue
+from .issue import Issue, IssueCategory
 
 
 def issue_owner(issue: Issue) -> str:
@@ -91,3 +91,21 @@ class ValidationState:
                 name = issue.severity.value
                 counts[name] = counts.get(name, 0) + 1
         return counts
+
+    def category_counts(self) -> dict[str, int]:
+        """Issue count per category name (e.g. ``"structural"``)."""
+        counts: dict[str, int] = {}
+        for issues in self.issues_by_owner.values():
+            for issue in issues:
+                name = issue.category.value
+                counts[name] = counts.get(name, 0) + 1
+        return counts
+
+    def structural_issues(self) -> list[Issue]:
+        """All stored issues in the STRUCTURAL tier (commit-time blockers)."""
+        return [
+            i
+            for issues in self.issues_by_owner.values()
+            for i in issues
+            if i.category is IssueCategory.STRUCTURAL
+        ]
