@@ -47,9 +47,7 @@ _READ_ONLY_POST_SUFFIXES = (
 def _is_write(request: Request) -> bool:
     if request.method not in _WRITE_METHODS:
         return False
-    if request.method == "POST" and request.url.path.endswith(
-        _READ_ONLY_POST_SUFFIXES
-    ):
+    if request.method == "POST" and request.url.path.endswith(_READ_ONLY_POST_SUFFIXES):
         return False
     return True
 

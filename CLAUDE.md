@@ -76,6 +76,39 @@ User/project/membership data lives in a **SQLAlchemy + Postgres** layer, separat
 
 The frontend mirrors all of this client-side (optimistic ops, serialized flushes, conflict recovery). **`frontend/README.md` documents the frontend architecture in depth — read it before touching `frontend/src/lib/state/`.**
 
+### Durable persistence (`src/data_rover/api/`, Phase 3)
+
+Model content is now durable: the in-memory per-project `Session` is a **cache
+over a durable journal**, hydrated on cache-miss and snapshotted on eviction.
+
+- **`db_models.py`** adds content tables: `MetamodelRow` (versioned YAML blob),
+  `ModelRow` (1:1 with `Project`; carries DB-authoritative `model_rev` + the
+  swappable `metamodel_id`), `ViewRow`, `Commit` (PK `(project_id, rev)`; the
+  durable op-journal — `ops`/`inverse_ops`/`id_map` as JSON, `author_id` SET
+  NULL on user delete), `Snapshot` (PK `(project_id, rev)`; blob `key`).
+- **`storage.py` / `storage_gcs.py`** — the `SnapshotStore` seam. `GcsSnapshotStore`
+  (real `google-cloud-storage`) is used in dev (pointed at `fake-gcs-server` via
+  `DATA_ROVER_STORAGE_EMULATOR_HOST`) and prod; `MemorySnapshotStore` backs the
+  hermetic test suite. One opt-in `integration`-marked test hits the emulator.
+- **`content.py`** — service functions over the content tables (the `tenancy.py`
+  of model content). **`hydration.py`** — `hydrate_session` (nearest snapshot +
+  replay commit tail through the restore-mode applier) and `persist_baseline`/
+  `write_snapshot`. The op journal is (de)serialized via `schemas.OPS_ADAPTER`.
+- **`SessionRegistry.get`** hydrates cold projects via an injected loader under a
+  per-project init-once lock; **`evict`** snapshots-then-drops under the session's
+  `write_mutex`. A contentless project still hydrates to an empty `Session`
+  (pre-Phase-3 behaviour). A lifespan idle-sweeper evicts stale sessions
+  (`DATA_ROVER_IDLE_EVICT_SECONDS`, 0 disables).
+- **`POST /model/ops`** appends a `Commit` and bumps `models.model_rev` in
+  lockstep with `session.model_rev`, under the write-mutex. **`POST /model/undo`**
+  appends a *compensating* commit (journal stays append-only; `model_rev` moves
+  forward). Upload routes (`metamodel`/`model`/`view`) persist their content so a
+  project survives eviction; `/model/save` + `/model/download` remain read-only
+  **export** conveniences.
+- **`importer.py`** (`python -m data_rover.api.importer`) turns
+  `(metamodel.yaml + model.json + view.json)` into a project's rev-0 baseline;
+  the dev-seed reuses it to load `examples/smart-city.*` into `default`.
+
 ### Migration CLI (`src/data_rover/migration/`, `migration/README.md`)
 
 `python -m data_rover.migration` converts the old JSON metamodel+model format to the new one (stereotype→element type, `owner`→`Owns` containment, `element_type`→`TypedBy`, datatypes inferred from real values). It never raises on invalid output so incomplete inputs stay inspectable; `--remove-inconsistencies` prunes model entities that would block frontend load.

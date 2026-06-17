@@ -1,0 +1,68 @@
+from __future__ import annotations
+
+from data_rover.api import content, db
+from data_rover.api.db_models import Project
+
+
+def _setup() -> None:
+    db.init_engine("sqlite://", force=True)
+    db.create_all()
+    with db.db_session() as s:
+        s.add(Project(id="p1", name="P1"))
+
+
+def test_metamodel_and_model_upsert() -> None:
+    _setup()
+    with db.db_session() as s:
+        mm = content.create_metamodel(s, name="MM", version=1, blob="x: 1")
+        m = content.upsert_model_row(s, "p1", metamodel_id=mm.id)
+        assert m.model_rev == 0
+        # upsert again rebinds without a second row
+        m2 = content.upsert_model_row(s, "p1", metamodel_id=mm.id)
+        assert m2.id == m.id
+
+
+def test_commit_append_and_read_tail() -> None:
+    _setup()
+    with db.db_session() as s:
+        mm = content.create_metamodel(s, name="MM", version=1, blob="x: 1")
+        content.upsert_model_row(s, "p1", metamodel_id=mm.id)
+        for rev in (1, 2, 3):
+            content.append_commit(
+                s, "p1", rev=rev, commit_id=f"c{rev}", author_id=None,
+                ops=[{"kind": "noop"}], inverse_ops=[], id_map={},
+            )
+        content.set_model_rev(s, "p1", 3)
+    with db.db_session() as s:
+        tail = content.commits_after(s, "p1", 1)
+        assert [c.rev for c in tail] == [2, 3]
+        row = content.get_model_row(s, "p1")
+        assert row is not None and row.model_rev == 3
+
+
+def test_snapshot_record_and_latest() -> None:
+    _setup()
+    with db.db_session() as s:
+        content.record_snapshot(s, "p1", rev=0, key="k0")
+        content.record_snapshot(s, "p1", rev=5, key="k5")
+    with db.db_session() as s:
+        snap5 = content.latest_snapshot(s, "p1")
+        assert snap5 is not None and snap5.rev == 5
+        snap0 = content.latest_snapshot(s, "p1", max_rev=3)
+        assert snap0 is not None and snap0.rev == 0
+        assert content.latest_snapshot(s, "p1", max_rev=-1) is None
+
+
+def test_clear_history_removes_commits_and_snapshots() -> None:
+    _setup()
+    with db.db_session() as s:
+        content.append_commit(
+            s, "p1", rev=1, commit_id="c1", author_id=None,
+            ops=[], inverse_ops=[], id_map={},
+        )
+        content.record_snapshot(s, "p1", rev=1, key="k1")
+    with db.db_session() as s:
+        content.clear_history(s, "p1")
+    with db.db_session() as s:
+        assert content.commits_after(s, "p1", 0) == []
+        assert content.latest_snapshot(s, "p1") is None

@@ -25,6 +25,7 @@ httpx = "0.27.*"
 sqlalchemy = "2.0.*"
 alembic = "1.14.*"
 psycopg = "3.2.*"
+google-cloud-storage = "2.*"
 
 [feature.api.tasks.start-backend]
 cmd = "uvicorn data_rover.api.main:app --reload --reload-dir src --host 127.0.0.1 --port 8000 --app-dir src"
@@ -40,6 +41,12 @@ default-environment = "api"
 [feature.api.tasks.db-revision]
 args = [{ arg = "message", default = "migration" }]
 cmd = "alembic revision --autogenerate -m \"{{ message }}\""
+default-environment = "api"
+
+# Local GCS emulator for dev + the opt-in storage integration test.
+# Requires Docker; not needed for the (hermetic) unit test suite.
+[feature.api.tasks.fake-gcs]
+cmd = "docker run --rm -p 4443:4443 fsouza/fake-gcs-server -scheme http -port 4443 -public-host localhost:4443"
 default-environment = "api"
 
 [feature.core-dev.tasks.test-core]

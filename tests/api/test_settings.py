@@ -29,3 +29,26 @@ def test_env_override(monkeypatch) -> None:
     assert s.dev_seed is False
     assert s.identity_user_header == "x-sso-subject"
     assert s.identity_email_header == "x-sso-email"
+
+
+def test_phase3_storage_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    # conftest sets DATA_ROVER_SNAPSHOT_STORE=memory + DATA_ROVER_IDLE_EVICT_SECONDS=0
+    # process-wide; clear them so we can observe the code defaults.
+    monkeypatch.delenv("DATA_ROVER_SNAPSHOT_STORE", raising=False)
+    monkeypatch.delenv("DATA_ROVER_IDLE_EVICT_SECONDS", raising=False)
+    s = Settings()
+    assert s.snapshot_store == "gcs"
+    assert s.gcs_bucket == "data-rover-snapshots"
+    assert s.storage_emulator_host == ""
+    assert s.snapshot_every == 200
+    assert s.idle_evict_seconds == 1800
+
+
+def test_phase3_storage_env_override(monkeypatch) -> None:
+    monkeypatch.setenv("DATA_ROVER_SNAPSHOT_STORE", "memory")
+    monkeypatch.setenv("DATA_ROVER_SNAPSHOT_EVERY", "10")
+    monkeypatch.setenv("DATA_ROVER_IDLE_EVICT_SECONDS", "0")
+    s = Settings()
+    assert s.snapshot_store == "memory"
+    assert s.snapshot_every == 10
+    assert s.idle_evict_seconds == 0

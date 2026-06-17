@@ -25,3 +25,20 @@ def test_migration_creates_all_tables(tmp_path: Path) -> None:
     # downgrade round-trips cleanly (guards future downgrade-ordering regressions)
     command.downgrade(cfg, "base")
     assert not tables & set(inspect(engine).get_table_names())
+
+
+def test_migration_creates_content_tables(tmp_path: Path) -> None:
+    db_path = tmp_path / "t2.db"
+    url = f"sqlite:///{db_path}"
+    cfg = Config(str(REPO_ROOT / "alembic.ini"))
+    cfg.set_main_option("script_location", str(REPO_ROOT / "alembic"))
+    cfg.set_main_option("sqlalchemy.url", url)
+
+    command.upgrade(cfg, "head")
+
+    engine = create_engine(url)
+    content = {"metamodels", "models", "views", "commits", "snapshots"}
+    assert content <= set(inspect(engine).get_table_names())
+
+    command.downgrade(cfg, "base")
+    assert not content & set(inspect(engine).get_table_names())
