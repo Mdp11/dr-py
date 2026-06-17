@@ -89,6 +89,7 @@ class IssueOut(BaseModel):
     severity: str
     message: str
     target_ids: list[str] = Field(default_factory=list)
+    category: str = "conformance"
 
     @classmethod
     def from_core(cls, issue: Issue) -> "IssueOut":
@@ -96,6 +97,7 @@ class IssueOut(BaseModel):
             severity=issue.severity.value,
             message=issue.message,
             target_ids=list(issue.target_ids),
+            category=issue.category.value,
         )
 
 
@@ -452,3 +454,85 @@ class SaveModelResponse(BaseModel):
     element_count: int
     relationship_count: int
     bytes_written: int
+
+
+# --- Phase 4: check-out / commit + locking --------------------------------
+
+class LockTargetIn(BaseModel):
+    resource_id: str
+    mode: Literal["exclusive", "shared"]
+
+
+class LockRequest(BaseModel):
+    targets: list[LockTargetIn]
+    intent: Literal["edit", "create_child", "connect", "delete"]
+    #: peer/admin override — evict a conflicting holder's leases (spec §8).
+    steal: bool = False
+
+
+class LeaseOut(BaseModel):
+    resource_id: str
+    mode: str
+    holder: str
+    token: str
+    intent: str
+    expires_at: float
+
+
+class LockConflictOut(BaseModel):
+    resource_id: str
+    held_by: str
+    held_mode: str
+
+
+class LockResponse(BaseModel):
+    token: str
+    leases: list[LeaseOut] = Field(default_factory=list)
+
+
+class ReleaseRequest(BaseModel):
+    token: str
+
+
+class RenewRequest(BaseModel):
+    token: str
+
+
+class RenewResponse(BaseModel):
+    ok: bool
+
+
+class OpenResponse(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    model_rev: int
+    role: str
+    element_count: int
+    relationship_count: int
+    issue_counts: dict[str, int] = Field(default_factory=dict)
+
+
+class PreviewRequest(BaseModel):
+    base_rev: int
+    ops: list[OpIn] = Field(default_factory=list)
+
+
+class PreviewResponse(BaseModel):
+    conformance_error_count: int
+    structural_blockers: list[IssueOut] = Field(default_factory=list)
+    issues: list[IssueOut] = Field(default_factory=list)
+
+
+class CommitRequest(BaseModel):
+    base_rev: int
+    ops: list[OpIn] = Field(default_factory=list)
+    message: str = ""
+    lock_tokens: list[str] = Field(default_factory=list)
+    #: client acknowledges the surfaced conformance-error count (UI gate).
+    ack_errors: bool = False
+
+
+class CommitResponse(OpsResponse):
+    commit_id: str
+    message: str = ""
+    validation_error_count: int = 0
