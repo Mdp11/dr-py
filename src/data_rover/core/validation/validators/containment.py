@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ..issue import Issue, Severity
+from ..issue import Issue, IssueCategory, Severity
 from ..pipeline import EntityValidator
 from ..scope import Scope
 
@@ -33,6 +33,7 @@ class ContainmentValidator(EntityValidator):
                     f"Element {el.id} has {len(parents)} containment parents "
                     "(must have at most one)",
                     [el.id],
+                    IssueCategory.STRUCTURAL,
                 )
             ]
         return []
@@ -52,6 +53,7 @@ class ContainmentValidator(EntityValidator):
                             Severity.ERROR,
                             f"Containment cycle detected involving element {start}",
                             [start],
+                            IssueCategory.STRUCTURAL,
                         )
                     )
                     break
@@ -68,6 +70,7 @@ class ContainmentValidator(EntityValidator):
                             Severity.ERROR,
                             f"Containment cycle detected involving element {entity_id}",
                             [entity_id],
+                            IssueCategory.STRUCTURAL,
                         )
                     )
         return issues
