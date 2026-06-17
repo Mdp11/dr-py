@@ -14,6 +14,7 @@ from .db import create_all, init_engine
 from .errors import register_exception_handlers
 from .routes import (
     change_request,
+    commits,
     elements,
     health,
     locks,
@@ -126,6 +127,7 @@ def create_app() -> FastAPI:
     app.include_router(validation.router, prefix=proj, tags=["validation"])
     app.include_router(view.router, prefix=proj, tags=["view"])
     app.include_router(locks.router, prefix=proj, tags=["locks"])
+    app.include_router(commits.router, prefix=proj, tags=["commits"])
     return app
 
 
