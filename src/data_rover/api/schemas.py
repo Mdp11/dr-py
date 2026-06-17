@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from data_rover.core.model.change_request import (
     ChangeRequest as CoreChangeRequest,
@@ -203,6 +203,11 @@ OpIn = Annotated[
     | DeleteRelationshipOp,
     Field(discriminator="kind"),
 ]
+
+#: (de)serializes a list of ops to/from plain JSON for the durable commit
+#: journal (Commit.ops / inverse_ops). Mode "json" keeps Literal "kind" tags
+#: so the discriminated union round-trips.
+OPS_ADAPTER: TypeAdapter[list[OpIn]] = TypeAdapter(list[OpIn])
 
 
 class OpsRequest(BaseModel):
