@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+
 from data_rover.api.session import (
     DEFAULT_PROJECT_ID,
     Session,
@@ -101,3 +103,72 @@ def test_get_request_session_resolves_path_project() -> None:
     # registry resolution (full auth is covered by test_authz.py).
     stub = Membership(user_id="u", project_id="proj-a", role=Role.owner)
     assert get_request_session("proj-a", stub) is get_registry().get("proj-a")
+
+
+def test_get_uses_loader_once_per_project() -> None:
+    calls: list[str] = []
+
+    def loader(pid: str) -> Session:
+        calls.append(pid)
+        return Session(model_rev=42)
+
+    reg = SessionRegistry()
+    reg.set_loader(loader)
+    a = reg.get("p1")
+    b = reg.get("p1")
+    assert a is b and a.model_rev == 42
+    assert calls == ["p1"]  # loaded once, then cached
+
+
+def test_loader_init_once_under_concurrency() -> None:
+    # The barrier is in the WORKER (not the loader) so all 8 threads race into
+    # reg.get() simultaneously. The key-lock inside get() serialises them: only
+    # 1 thread can call the loader; the other 7 re-check _sessions after
+    # acquiring the lock and find the cached session, so calls==1.
+    calls: list[str] = []
+    barrier = threading.Barrier(8)
+
+    def loader(pid: str) -> Session:
+        calls.append(pid)
+        return Session()
+
+    reg = SessionRegistry()
+    reg.set_loader(loader)
+    out: list[Session] = []
+
+    def worker() -> None:
+        barrier.wait()  # sync all 8 threads before the first get()
+        out.append(reg.get("p1"))
+
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(calls) == 1  # init-once guard held
+    assert all(s is out[0] for s in out)
+
+
+def test_evict_runs_snapshot_hook_then_drops() -> None:
+    evicted: list[str] = []
+    reg = SessionRegistry()
+    reg.set_loader(lambda pid: Session(model_rev=1))
+    reg.set_evict_hook(lambda pid, sess: evicted.append(pid))
+    reg.get("p1")
+    reg.evict("p1")
+    assert evicted == ["p1"]
+    assert reg.project_ids() == []
+
+
+def test_evict_hook_skipped_when_nothing_to_persist() -> None:
+    reg = SessionRegistry()
+    reg.set_evict_hook(lambda pid, sess: (_ for _ in ()).throw(AssertionError("called")))
+    reg.evict("absent")  # no session -> hook not called, no error
+
+
+def test_idle_lists_stale_projects() -> None:
+    reg = SessionRegistry()
+    reg.set_loader(lambda pid: Session())
+    reg.get("p1")
+    reg.touch("p1")
+    assert reg.idle(now=1000.0, ttl=10.0) == []  # just touched (last_access ~ monotonic)
