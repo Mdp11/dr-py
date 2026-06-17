@@ -15,8 +15,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import Depends, HTTPException
 from sqlalchemy.orm import Session
+from starlette.requests import HTTPConnection, Request
 
 from .db import get_db
 from .db_models import User
@@ -33,22 +34,27 @@ class Identity:
 
 
 class IdentityProvider(Protocol):
-    def identify(self, request: Request) -> Identity: ...
+    def identify(self, conn: HTTPConnection) -> Identity: ...
 
 
 class DevHeaderIdentityProvider:
-    """Trusts identity headers. Dev/gateway use only — never trust these
-    headers on an endpoint reachable directly by untrusted clients."""
+    """Trusts identity headers (HTTP) or query params (WebSocket handshakes,
+    which browsers cannot attach custom headers to). Dev/gateway use only —
+    never trust these on an endpoint reachable directly by untrusted clients."""
 
     def __init__(self, user_header: str, email_header: str) -> None:
         self._user_header = user_header
         self._email_header = email_header
 
-    def identify(self, request: Request) -> Identity:
-        user_id = request.headers.get(self._user_header)
+    def identify(self, conn: HTTPConnection) -> Identity:
+        user_id = conn.headers.get(self._user_header) or conn.query_params.get(
+            self._user_header
+        )
         if not user_id:
             raise HTTPException(status_code=401, detail="missing identity")
-        email = request.headers.get(self._email_header, "")
+        email = conn.headers.get(self._email_header) or conn.query_params.get(
+            self._email_header, ""
+        )
         return Identity(user_id=user_id, email=email)
 
 

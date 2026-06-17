@@ -5,6 +5,8 @@
 		getIssueCounts,
 		getModelSummary,
 		getTypeFilter,
+		getFeedConnected,
+		getPresence,
 		hasPendingOps
 	} from '$lib/state';
 
@@ -19,6 +21,8 @@
 	const warningCount = $derived(issueCounts?.warning ?? 0);
 
 	const typeFilter = $derived(getTypeFilter());
+	const feedConnected = $derived(getFeedConnected());
+	const presenceCount = $derived(getPresence().length);
 	const totalElements = $derived(summary?.element_count ?? 0);
 	// shown/total now comes from the summary's per-type counts (the client no
 	// longer holds the whole model to count it directly)
@@ -53,4 +57,15 @@
 	</span>
 	<span class="text-zinc-700">·</span>
 	<span class="truncate">{filename ?? 'unsaved'}</span>
+	<span class="text-zinc-700">·</span>
+	<span
+		class={feedConnected ? 'text-emerald-400' : 'text-zinc-600'}
+		title={feedConnected ? 'Live feed connected' : 'Live feed disconnected'}
+	>
+		● {feedConnected ? 'live' : 'offline'}
+	</span>
+	{#if presenceCount > 0}
+		<span class="text-zinc-700">·</span>
+		<span title="People connected to this project">{presenceCount} here</span>
+	{/if}
 </footer>

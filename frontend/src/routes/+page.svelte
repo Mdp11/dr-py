@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import TopBar from '$lib/components/TopBar.svelte';
 	import StatusBar from '$lib/components/StatusBar.svelte';
 	import Sidebar from '$lib/components/Sidebar.svelte';
@@ -21,12 +21,16 @@
 		refreshView,
 		resetModelStore,
 		setDiffDrawerOpen,
-		setMetamodel
+		setMetamodel,
+		startRealtime,
+		stopRealtime
 	} from '$lib/state';
 
+	onMount(() => startRealtime());
 	onMount(() => {
 		void boot();
 	});
+	onDestroy(() => stopRealtime());
 
 	// App boot: dev autoload first (it installs metamodel + model when
 	// configured), then adopt whatever session the backend already holds — a

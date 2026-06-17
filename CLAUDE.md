@@ -123,6 +123,16 @@ Pessimistic leases gate every durable mutation; the legacy unlocked path remains
 - **Evict-with-live-locks guard** — `SessionRegistry.evict` checks `lock_table.active_leases` under the `write_mutex` before removing the session; if any lease is live, eviction is skipped and the session stays registered.
 - **`/model/ops` + `/model/undo`** remain the **legacy unlocked** path until the frontend migrates to the check-out/commit flow (separate follow-up plan, pairs with Phase 5 realtime).
 
+### Realtime feed (`src/data_rover/api/`, Phase 5)
+
+Server-to-client WebSocket feed; the lock→edit→commit editing UI is a later phase (Spec B).
+
+- **`feed.py` — `FeedHub`** holds a per-`Session` set of `ClientConn`s (each with a bounded `asyncio.Queue`). `broadcast` is sync and thread-safe: it schedules enqueues on the event-loop thread via `loop.call_soon_threadsafe` so it is safe to call while holding the `write_mutex`. A client that falls behind has its queue drained, receives `CLOSE_SENTINEL`, and is dropped; its sender pump closes the socket with 4408 and the client reconnects. The event loop is captured lazily on the first WebSocket connect via `set_loop_if_unset`; `reset_loop` provides test isolation. Four event builders (`snapshot_event`, `commit_event`, `lock_event`, `presence_event`) return plain dicts serialized by `ws.send_json`.
+- **`routes/feed.py` — `@router.websocket("/feed")`** mounts under the `/{project_id}` prefix. Authentication uses the `IdentityProvider` seam (now typed to `HTTPConnection`, the shared base of `Request`/`WebSocket`); `DevHeaderIdentityProvider` falls back to `?x-user-id=`/`?x-user-email=` query params so browsers can authenticate without setting WebSocket headers. Close codes: 4401 (no identity), 4403 (non-member), 4404 (unknown project), 4408 (dropped-behind). On connect: capture the event loop, auth+authz over a short-lived DB session, register `ClientConn`, broadcast a presence-join, send an initial snapshot (current `model_rev` + active leases + connected users), then run a sender pump (`_pump`) alongside a receive loop that only observes disconnect. On disconnect: unregister and broadcast a presence-leave.
+- **Broadcast hook sites** — commit delta + lock release after `POST /commits` (in `routes/commits.py`); lock acquire in `POST /locks` and release in `POST /locks/release` (in `routes/locks.py`); lock expiry in the lifespan lock-sweeper (`main.py`). `POST /locks/renew` is silent (heartbeat only, no peer-visible state change).
+- **`identity.py`** — `IdentityProvider.identify` is now typed `(HTTPConnection) -> Identity`; `DevHeaderIdentityProvider` reads the same header names from `conn.headers` (HTTP) or `conn.query_params` (WebSocket).
+- **Evict guard extension** — `SessionRegistry.evict` skips eviction while `session.hub.has_clients()` returns true (mirrors the live-leases guard); `feed_queue_max` setting controls per-client queue depth.
+
 ### Migration CLI (`src/data_rover/migration/`, `migration/README.md`)
 
 `python -m data_rover.migration` converts the old JSON metamodel+model format to the new one (stereotype→element type, `owner`→`Owns` containment, `element_type`→`TypedBy`, datatypes inferred from real values). It never raises on invalid output so incomplete inputs stay inspectable; `--remove-inconsistencies` prunes model entities that would block frontend load.
