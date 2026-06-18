@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
 	ensureCheckout, setProjectInfo, resetCheckout, loadProjectInfo,
-	handleRemoteLockEvent, getStaleResources, isCheckedOutByMe
+	handleRemoteLockEvent, getStaleResources, isCheckedOutByMe, getRole, canEdit
 } from '../index';
 import * as api from '$lib/api/checkout';
 
@@ -16,10 +16,8 @@ describe('project open + own-lock expiry', () => {
 			model_rev: 5, role: 'owner', element_count: 0, relationship_count: 0, issue_counts: {}, lock_ttl_seconds: 120
 		});
 		await loadProjectInfo();
-		// role adopted; a viewer-guard now passes (owner can edit)
-		const res = await ensureCheckout([{ resource_id: 'e1', mode: 'exclusive' }], 'edit')
-			.catch(() => ({ ok: false }));
-		expect(res).toBeDefined();
+		expect(getRole()).toBe('owner');
+		expect(canEdit()).toBe(true); // owner can edit
 	});
 
 	it('marks my resource stale on a remote expired event for my holder id', async () => {

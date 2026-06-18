@@ -198,6 +198,7 @@ export function handleRemoteLockEvent(
 
 /** Replace the Task 6 expiry stub: a renew-detected expiry also marks stale. */
 function _onTokenExpired(token: string): void {
+	// Caller (_renewAll / handleRemoteLockEvent) drops the token; this only stale-marks.
 	for (const [rid, lease] of _registry) {
 		if (lease.token === token) _stale.set(rid, true);
 	}
