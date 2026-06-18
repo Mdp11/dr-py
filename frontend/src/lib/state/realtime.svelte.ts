@@ -23,6 +23,18 @@ let _presence = $state<string[]>([]);
 const _lockState = new SvelteMap<string, LeaseLite>();
 let _conn: FeedConnection | null = null;
 
+type LockTap = (action: 'acquired' | 'released' | 'expired', leases: LeaseLite[]) => void;
+// subscriber registry, iterated to fire taps — never read reactively
+// eslint-disable-next-line svelte/prefer-svelte-reactivity
+const _lockTaps = new Set<LockTap>();
+
+/** Register a tap fired on every lock feed event (the checkout store uses this
+ * to detect expiry of its OWN locks). Returns an unsubscribe fn. */
+export function onLockEvent(cb: LockTap): () => void {
+	_lockTaps.add(cb);
+	return () => _lockTaps.delete(cb);
+}
+
 export function getFeedConnected(): boolean {
 	return _connected;
 }
@@ -66,6 +78,7 @@ export function handleFeedEvent(e: FeedEvent): void {
 		case 'lock':
 			if (e.action === 'acquired') setLeases(e.leases);
 			else clearLeases(e.leases);
+			for (const tap of _lockTaps) tap(e.action, e.leases);
 			break;
 		case 'commit': {
 			const delta: OpsResponse = {
@@ -107,4 +120,5 @@ export function resetRealtime(): void {
 	stopRealtime();
 	_presence = [];
 	_lockState.clear();
+	_lockTaps.clear();
 }

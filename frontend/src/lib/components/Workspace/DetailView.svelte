@@ -8,6 +8,7 @@
 		getSelection,
 		select
 	} from '$lib/state';
+	import { deleteLock } from '$lib/state/edit-gate';
 	import { nameProp } from '$lib/util/element-name';
 	import PropertyForm from '../Inspector/PropertyForm.svelte';
 
@@ -55,18 +56,22 @@
 		return nameProp(el.properties) ?? el.id;
 	}
 
-	function onDeleteElement(): void {
+	async function onDeleteElement(): Promise<void> {
 		if (entity === null || selection?.kind !== 'element') return;
 		const confirmed = window.confirm(
 			'Delete this element? Related relationships will also be removed.'
 		);
 		if (!confirmed) return;
+		if (!(await deleteLock(entity.id))) return;
 		emit({ kind: 'delete_element', id: entity.id });
 		select(null);
 	}
 
-	function onDisconnectRelationship(): void {
+	async function onDisconnectRelationship(): Promise<void> {
 		if (entity === null || selection?.kind !== 'relationship') return;
+		// a relationship is locked via its SOURCE element (backend rule)
+		const rel = entity as Relationship;
+		if (!(await deleteLock(rel.source_id))) return;
 		emit({ kind: 'delete_relationship', id: entity.id });
 		select(null);
 	}

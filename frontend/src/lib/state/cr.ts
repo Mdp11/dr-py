@@ -198,8 +198,9 @@ export type SaveWithCrResult =
  * Stream the SESSION model (GET /model/download) to a file and optionally
  * write the server-computed Change Request (GET /model/changes) beside it.
  *
- * Callers must `flushNow()` the model store BEFORE calling this so the
- * download reflects every local edit.
+ * This is an EXPORT convenience: it streams the SESSION model as it stands
+ * server-side. Local staged edits are not part of the session until committed,
+ * so the download reflects the last committed state, not the staged buffer.
  *
  * Pure orchestration: no state reads, no direct I/O — all four seams are
  * injected. Failure semantics (unchanged from the pre-delta flow):

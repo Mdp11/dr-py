@@ -4,13 +4,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vite
 
 import type { Element, OpsResponse } from '$lib/api/types';
 import { server } from '../../api/__tests__/server';
-import {
-	applyDelta,
-	emit,
-	flushNow,
-	resetModelStore,
-	setModelApiConfig
-} from '../../state/model.svelte';
+import { applyDelta, emit, resetModelStore, setModelApiConfig } from '../../state/model.svelte';
 import { clearSelection, select } from '../../state/selection.svelte';
 import Inspector from '../Inspector.svelte';
 
@@ -64,20 +58,6 @@ it('does not refetch the selected element relationships on every property keystr
 		http.get(`*/model/elements/:id/relationships`, () => {
 			relFetches += 1;
 			return HttpResponse.json({ items: [], total: 0 });
-		}),
-		// the debounced property flush; echoes the patched element back
-		http.post(`*/model/ops`, async ({ request }) => {
-			const body = (await request.json()) as {
-				ops: Array<{ properties_patch?: Record<string, unknown> }>;
-			};
-			return HttpResponse.json(
-				delta({
-					model_rev: 2,
-					changed_elements: [
-						el('e1', { description: body.ops[0].properties_patch?.description }, 2)
-					]
-				})
-			);
 		})
 	);
 
@@ -93,10 +73,9 @@ it('does not refetch the selected element relationships on every property keystr
 
 		// type a letter into the description: an optimistic update_element op.
 		// This replaces e1's cached object (new identity) — the regression is
-		// that this churn made the relationships fetch effect re-run.
+		// that this churn made the relationships fetch effect re-run. Spec B
+		// stages the edit locally; there is no flush ack.
 		emit({ kind: 'update_element', id: 'e1', properties_patch: { description: 'a' } });
-		flushSync();
-		await flushNow(); // server ack re-upserts e1 (another identity change)
 		flushSync();
 		await settle();
 

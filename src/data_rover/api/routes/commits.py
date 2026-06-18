@@ -28,6 +28,7 @@ from ..db_models import Membership, User
 from ..deps import Session, get_request_session, require_model
 from ..identity import get_current_user
 from ..locking import required_locks
+from ..settings import get_settings
 from ..schemas import (
     CommitRequest,
     CommitResponse,
@@ -63,6 +64,7 @@ def open_project(
         element_count=len(model.elements),
         relationship_count=len(model.relationships),
         issue_counts=state.counts(),
+        lock_ttl_seconds=get_settings().lock_ttl_seconds,
     )
 
 
