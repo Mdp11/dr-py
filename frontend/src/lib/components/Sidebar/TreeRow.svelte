@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Element } from '$lib/api/types';
-	import { indexIssues } from '$lib/state';
+	import { indexIssues, lockBadgeFor } from '$lib/state';
 	import {
 		AlertCircle,
 		AlertTriangle,
@@ -8,6 +8,7 @@
 		ChevronRight,
 		Folder as FolderIcon,
 		FolderOpen,
+		Lock,
 		MoreHorizontal
 	} from '@lucide/svelte';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
@@ -118,6 +119,7 @@
 		!isFolder && !isExcludedSection && !hasError && issueIndex.warningIds.has(key)
 	);
 	const hasViewWarning = $derived(!isFolder && !isExcludedSection && warningsByElementId.has(key));
+	const badge = $derived(lockBadgeFor(key));
 
 	async function onNewFolder(): Promise<void> {
 		const name = window.prompt('New folder name');
@@ -308,6 +310,11 @@
 				<AlertTriangle class="h-3 w-3 shrink-0 text-amber-400" aria-label="has warnings" />
 			{/if}
 		</button>
+		{#if badge.state === 'theirs'}
+			<Lock class="h-3 w-3 shrink-0 text-amber-400" title={`Locked by ${badge.holder}`} />
+		{:else if badge.state === 'mine'}
+			<Lock class="h-3 w-3 shrink-0 text-emerald-400" title="Checked out by you" />
+		{/if}
 		{#if isMovable && (folderOptions.length > 0 || placedInFolder)}
 			<DropdownMenu.Root>
 				<DropdownMenu.Trigger
