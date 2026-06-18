@@ -35,7 +35,7 @@ export default defineConfig({
 			// today, but a schema change (Phase 3) will need the file removed first
 			// since create_all only adds missing tables, never alters existing ones.
 			command:
-				'DATA_ROVER_DATABASE_URL=sqlite:////tmp/data-rover-e2e.db DATA_ROVER_DEV_SEED=true pixi run -e api start-backend',
+				'DATA_ROVER_DATABASE_URL=sqlite:////tmp/data-rover-e2e.db DATA_ROVER_DEV_SEED=true DATA_ROVER_SNAPSHOT_STORE=memory pixi run -e api start-backend',
 			cwd: '..',
 			url: 'http://127.0.0.1:8000/healthz',
 			timeout: 60_000,
