@@ -114,6 +114,7 @@ export {
 export {
 	setCheckoutApiConfig, setProjectInfo, getRole, canEdit, ensureCheckout,
 	getHeldToken, getHeldTokens, isCheckedOutByMe, resetCheckout,
+	previewStaged, commitStaged, discardElement, discardAll,
 	type CheckoutResult, type LockConflictLite
 } from './checkout.svelte';
 export {
