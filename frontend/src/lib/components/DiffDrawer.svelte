@@ -5,17 +5,14 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Tabs from '$lib/components/ui/tabs';
 	import {
-		changesDocToDiff,
 		ensureElement,
-		flushNow,
-		getFileHandle,
-		getFilename,
+		getStagedDiff,
+		previewStaged,
+		commitStaged,
+		discardAll,
+		discardElement,
 		getIssues,
-		getModelError,
 		indexIssues,
-		refreshChangesBadge,
-		setFileHandle,
-		setFilename,
 		getView,
 		getViewChanges,
 		getViewFileHandle,
@@ -29,63 +26,54 @@
 		type ViewChange,
 		type ViewChangeSegmentKind
 	} from '$lib/state';
-	import { downloadModel, getChanges } from '$lib/api/model-read';
-	import type { ChangesDoc } from '$lib/api/types';
-	import { downloadJsonFile, saveJsonToFile, saveResponseToFile } from '$lib/util/fileSave';
+	import type { PreviewResponse } from '$lib/api/types';
+	import { saveJsonToFile } from '$lib/util/fileSave';
 	import { elementDisplayName } from '$lib/util/element-name';
 	import { AlertTriangle } from '@lucide/svelte';
-	import { saveWithOptionalCr } from '$lib/state/cr';
 	import DiffRow from './DiffRow.svelte';
 
 	type Props = { open: boolean };
 	let { open = $bindable(false) }: Props = $props();
 
-	const filename = $derived(getFilename());
-
-	let doc: ChangesDoc | null = $state(null);
-	let loadError: string | null = $state(null);
 	let loading = $state(false);
 
-	// On open: push any locally queued ops to the server, then fetch the
-	// server-computed change set (the session op log compacted into a CR doc).
-	// `open` is the ONLY tracked dependency: the body runs untracked because
-	// flushNow() synchronously reads store internals before its first await —
-	// tracking those would re-run the effect (duplicate getChanges fetches).
-	// The seq guard drops stale responses on rapid close/reopen.
+	// On open: validate the staged batch against the live rev so the footer can
+	// gate Commit on conformance errors / structural blockers. The diff itself
+	// is computed locally from the staged buffer (no server round-trip), but the
+	// preview's issue counts come from the server. The body runs untracked so
+	// reading store internals before the first await does not re-trigger the
+	// effect; the seq guard drops stale responses on rapid close/reopen.
+	// We still best-effort prefetch view-change element names for the View tab.
 	let loadSeq = 0;
+	let preview = $state<PreviewResponse | null>(null);
+	let previewError: string | null = $state(null);
+
 	$effect(() => {
 		if (!open) return;
 		const seq = ++loadSeq;
 		loading = true;
-		loadError = null;
+		preview = null;
+		previewError = null;
 		untrack(() => {
+			// Best-effort: fetch display names for any view-change element ids
+			// not already cached, so the View tab shows names rather than ids.
+			// eslint-disable-next-line svelte/prefer-svelte-reactivity
+			const ids = new Set<string>();
+			for (const c of getViewChanges()) {
+				if (c.kind !== 'folder-added' && c.kind !== 'folder-removed') ids.add(c.id);
+			}
+			const cache = getCachedElements();
+			for (const id of ids) {
+				if (!cache.has(id)) void ensureElement(id);
+			}
 			void (async () => {
 				try {
-					await flushNow();
+					const p = await previewStaged();
 					if (seq !== loadSeq) return;
-					const err = getModelError();
-					if (err !== null) {
-						loadError = err.message;
-						return;
-					}
-					const next = await getChanges();
-					if (seq !== loadSeq) return;
-					doc = next;
-
-					// Best-effort: fetch display names for any view-change element ids
-					// not already cached, so the View tab shows names rather than ids.
-					// eslint-disable-next-line svelte/prefer-svelte-reactivity
-					const ids = new Set<string>();
-					for (const c of getViewChanges()) {
-						if (c.kind !== 'folder-added' && c.kind !== 'folder-removed') ids.add(c.id);
-					}
-					const cache = getCachedElements();
-					for (const id of ids) {
-						if (!cache.has(id)) void ensureElement(id);
-					}
+					preview = p;
 				} catch (err) {
 					if (seq !== loadSeq) return;
-					loadError = err instanceof Error ? err.message : String(err);
+					previewError = err instanceof Error ? err.message : String(err);
 				} finally {
 					if (seq === loadSeq) loading = false;
 				}
@@ -93,11 +81,7 @@
 		});
 	});
 
-	const diff = $derived<Diff>(
-		doc !== null
-			? changesDocToDiff(doc)
-			: { elements: [], relationships: [], counts: { added: 0, modified: 0, deleted: 0 } }
-	);
+	const diff = $derived<Diff>(getStagedDiff());
 	const total = $derived(diff.counts.added + diff.counts.modified + diff.counts.deleted);
 
 	const addedElements = $derived(diff.elements.filter((d) => d.status === 'added'));
@@ -111,10 +95,12 @@
 	const modifiedCount = $derived(modifiedElements.length + modifiedRels.length);
 	const deletedCount = $derived(deletedElements.length + deletedRels.length);
 
-	let saving = $state(false);
-	let saveError: string | null = $state(null);
-	let exportCr = $state(false);
-	let crNotice: { kind: 'cancelled' | 'failed'; message: string } | null = $state(null);
+	let message = $state('');
+	let committing = $state(false);
+	let commitError: string | null = $state(null);
+	const errorCount = $derived(preview?.conformance_error_count ?? 0);
+	const structuralBlockers = $derived(preview?.structural_blockers ?? []);
+	const commitBlocked = $derived(structuralBlockers.length > 0);
 
 	const issueIndex = $derived(indexIssues(getIssues()));
 	const pendingEntityIds = $derived.by(() => {
@@ -200,92 +186,40 @@
 		open = next;
 		if (!next) {
 			loadSeq += 1; // invalidate any in-flight open-load
-			doc = null;
-			loadError = null;
-			saveError = null;
-			crNotice = null;
-			exportCr = false;
+			preview = null;
+			previewError = null;
+			commitError = null;
 			viewSaveError = null;
 			activeTab = 'model';
 		}
 	}
 
-	async function onSaveClick(): Promise<void> {
-		saving = true;
-		saveError = null;
-		crNotice = null;
+	async function onCommitClick(): Promise<void> {
+		committing = true;
+		commitError = null;
 		try {
-			// gate on a clean flush so the download reflects every local edit
-			await flushNow();
-			const storeError = getModelError();
-			if (storeError !== null) {
-				saveError = storeError.message;
-				return;
-			}
-
-			const outcome = await saveWithOptionalCr({
-				filename,
-				fileHandle: getFileHandle(),
-				exportCr,
-				download: () => downloadModel(),
-				fetchChanges: () => getChanges(),
-				saveResponseFile: saveResponseToFile,
-				// The CR sidecar downloads straight to the browser's download folder
-				// (auto-composed name, no picker). A second showSaveFilePicker in the
-				// same click would throw — the model save above already consumed this
-				// gesture's transient user activation.
-				saveFile: (value, name) => Promise.resolve(downloadJsonFile(value, name))
-			});
-
-			if (outcome.kind === 'save-failed') {
-				saveError = outcome.message;
-				return;
-			}
-
-			// All non-save-failed branches mean the model file was written.
-			setFilename(outcome.savedFilename);
-			setFileHandle(outcome.savedHandle);
-			// NOTE: the server change set tracks changes since model LOAD, so it
-			// intentionally survives a file save (it is what a CR export needs).
-			refreshChangesBadge().catch(() => {
-				// best-effort
-			});
-
-			if (outcome.kind === 'saved') {
-				open = false;
-				return;
-			}
-			if (outcome.kind === 'saved-cr-cancelled') {
-				crNotice = {
-					kind: 'cancelled',
-					message: 'Model saved. CR export cancelled.'
-				};
-				return;
-			}
-			// saved-cr-failed
-			crNotice = {
-				kind: 'failed',
-				message: `Model saved. CR export failed: ${outcome.message}`
-			};
+			// errorCount > 0 ⇒ ack_errors (the user clicked Commit anyway)
+			await commitStaged(message, errorCount > 0);
+			message = '';
+			open = false;
 		} catch (err) {
-			// saveWithOptionalCr should not throw for the AbortError case
-			// (it's caught internally), but a non-Error throw or programmer
-			// error should still surface as a save failure.
-			saveError = err instanceof Error ? err.message : String(err);
+			commitError = err instanceof Error ? err.message : String(err);
 		} finally {
-			saving = false;
+			committing = false;
 		}
+	}
+
+	async function onDiscardAll(): Promise<void> {
+		await discardAll();
+		open = false;
 	}
 </script>
 
 <Dialog.Root bind:open {onOpenChange}>
 	<Dialog.Content class="max-w-2xl">
 		<Dialog.Header>
-			<Dialog.Title>Pending changes</Dialog.Title>
-			<Dialog.Description>
-				Review the changes to be saved. The model will be written to
-				<span class="font-mono">{filename ?? 'a new file'}</span>.
-			</Dialog.Description>
+			<Dialog.Title>Commit changes</Dialog.Title>
+			<Dialog.Description>Review and commit your local edits.</Dialog.Description>
 		</Dialog.Header>
 
 		<Tabs.Root bind:value={activeTab} class="flex flex-col gap-3">
@@ -304,20 +238,11 @@
 						<p class="text-xs text-zinc-500">No pending changes.</p>
 					{/if}
 
-					{#if doc !== null && !doc.complete}
-						<div
-							class="flex items-center gap-1.5 rounded border border-amber-900 bg-amber-950/30 px-2 py-1 text-[11px] text-amber-200"
-						>
-							<AlertTriangle class="h-3 w-3" />
-							<span>Change history was truncated; this list covers the retained changes only.</span>
-						</div>
-					{/if}
-
 					{#if addedCount > 0}
 						<section class="flex flex-col gap-1">
 							<h3 class="text-xs font-semibold text-emerald-300">Added ({addedCount})</h3>
 							{#each addedElements as d (d.id)}
-								<DiffRow diff={d} kind="element" />
+								<DiffRow diff={d} kind="element" onDiscard={(id) => void discardElement(id)} />
 							{/each}
 							{#each addedRels as d (d.id)}
 								<DiffRow diff={d} kind="relationship" />
@@ -329,7 +254,7 @@
 						<section class="flex flex-col gap-1">
 							<h3 class="text-xs font-semibold text-amber-300">Modified ({modifiedCount})</h3>
 							{#each modifiedElements as d (d.id)}
-								<DiffRow diff={d} kind="element" />
+								<DiffRow diff={d} kind="element" onDiscard={(id) => void discardElement(id)} />
 							{/each}
 							{#each modifiedRels as d (d.id)}
 								<DiffRow diff={d} kind="relationship" />
@@ -341,7 +266,7 @@
 						<section class="flex flex-col gap-1">
 							<h3 class="text-xs font-semibold text-red-300">Deleted ({deletedCount})</h3>
 							{#each deletedElements as d (d.id)}
-								<DiffRow diff={d} kind="element" />
+								<DiffRow diff={d} kind="element" onDiscard={(id) => void discardElement(id)} />
 							{/each}
 							{#each deletedRels as d (d.id)}
 								<DiffRow diff={d} kind="relationship" />
@@ -350,21 +275,21 @@
 					{/if}
 				</div>
 
-				{#if loadError}
+				{#if previewError}
 					<div
 						class="flex flex-col gap-2 rounded border border-red-900 bg-red-950/40 px-3 py-2 text-xs text-red-200"
 						role="alert"
 					>
-						<p>Failed to load changes: {loadError}</p>
+						<p>Failed to preview changes: {previewError}</p>
 					</div>
 				{/if}
 
-				{#if saveError}
+				{#if commitError}
 					<div
 						class="flex flex-col gap-2 rounded border border-red-900 bg-red-950/40 px-3 py-2 text-xs text-red-200"
 						role="alert"
 					>
-						<p>Save failed: {saveError}</p>
+						<p>Commit failed: {commitError}</p>
 					</div>
 				{/if}
 
@@ -380,25 +305,33 @@
 					</div>
 				{/if}
 
-				{#if crNotice}
+				{#if errorCount > 0}
 					<div
-						class="rounded border px-3 py-2 text-xs {crNotice.kind === 'failed'
-							? 'border-red-900 bg-red-950/40 text-red-200'
-							: 'border-zinc-800 bg-zinc-900 text-zinc-200'}"
-						role={crNotice.kind === 'failed' ? 'alert' : 'status'}
+						class="flex items-center gap-1.5 rounded border border-amber-900 bg-amber-950/30 px-2 py-1 text-[11px] text-amber-200"
 					>
-						{crNotice.message}
+						<AlertTriangle class="h-3 w-3" />
+						<span
+							>{errorCount} validation {errorCount === 1 ? 'issue' : 'issues'} — you can commit anyway
+							or review on the Issues tab.</span
+						>
 					</div>
 				{/if}
-
-				<label class="flex items-center gap-2 text-xs text-zinc-300">
+				{#if commitBlocked}
+					<div
+						class="rounded border border-red-900 bg-red-950/40 px-2 py-1 text-[11px] text-red-200"
+						role="alert"
+					>
+						Commit blocked: {structuralBlockers.length} structural problem(s) must be fixed first.
+					</div>
+				{/if}
+				<label class="flex flex-col gap-1 text-xs text-zinc-300">
+					Commit message
 					<input
-						type="checkbox"
-						class="h-3.5 w-3.5 rounded border-zinc-700 bg-zinc-900 text-indigo-500 focus:ring-2 focus:ring-indigo-500"
-						bind:checked={exportCr}
-						disabled={saving}
+						class="h-7 rounded border border-zinc-800 bg-zinc-900 px-2 text-xs text-zinc-100 outline-none focus:border-zinc-600"
+						bind:value={message}
+						placeholder="(optional)"
+						disabled={committing}
 					/>
-					Export CR
 				</label>
 			</Tabs.Content>
 
@@ -430,7 +363,7 @@
 		</Tabs.Root>
 
 		<Dialog.Footer>
-			<Button type="button" variant="ghost" onclick={close} disabled={saving || savingView}>
+			<Button type="button" variant="ghost" onclick={close} disabled={committing || savingView}>
 				Cancel
 			</Button>
 			{#if activeTab === 'view'}
@@ -445,11 +378,23 @@
 			{:else}
 				<Button
 					type="button"
-					class="bg-red-600 text-white hover:bg-red-500"
-					onclick={onSaveClick}
-					disabled={saving || loading || total === 0 || doc === null}
+					variant="ghost"
+					onclick={() => void onDiscardAll()}
+					disabled={committing || total === 0}
 				>
-					{saving ? 'Saving...' : `Save (${total})`}
+					Discard all
+				</Button>
+				<Button
+					type="button"
+					class="bg-red-600 text-white hover:bg-red-500"
+					onclick={() => void onCommitClick()}
+					disabled={committing || total === 0 || commitBlocked || loading || preview === null}
+				>
+					{committing
+						? 'Committing…'
+						: errorCount > 0
+							? `Commit anyway (${total})`
+							: `Commit (${total})`}
 				</Button>
 			{/if}
 		</Dialog.Footer>

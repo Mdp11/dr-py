@@ -5,9 +5,10 @@
 	type Props = {
 		diff: EntityDiff;
 		kind: 'element' | 'relationship';
+		onDiscard?: (id: string) => void;
 	};
 
-	const { diff, kind }: Props = $props();
+	const { diff, kind, onDiscard }: Props = $props();
 
 	const status = $derived(diff.status as Exclude<EntityStatus, 'unchanged'>);
 	const entity = $derived((diff.after ?? diff.before) as Element | Relationship | undefined);
@@ -74,6 +75,15 @@
 			</span>
 		{/if}
 		<span class="ml-auto font-mono text-[10px] text-zinc-500">{diff.id}</span>
+		{#if onDiscard}
+			<button
+				type="button"
+				class="rounded border border-zinc-700 px-1.5 py-0.5 text-[10px] text-zinc-400 hover:border-zinc-500 hover:text-zinc-200"
+				onclick={() => onDiscard?.(diff.id)}
+			>
+				Discard
+			</button>
+		{/if}
 	</div>
 
 	{#if kind === 'relationship' && status === 'added'}

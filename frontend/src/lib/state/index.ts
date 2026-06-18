@@ -29,7 +29,6 @@ export {
 	ensureElement,
 	ensureElements,
 	ensureRelationship,
-	flushNow,
 	getCachedElements,
 	getCachedRelationships,
 	getIssueCounts,
@@ -39,15 +38,23 @@ export {
 	getModelRev,
 	getModelSummary,
 	getStructureRev,
-	getUndoDepth,
-	hasPendingOps,
 	loadSummary,
 	refreshSummary,
 	resetModelStore,
 	seedElements,
 	seedRelationships,
-	undo,
 	validateAll,
+	getStagedOps,
+	getStagedOpsFor,
+	getStagedDepth,
+	hasStagedOps,
+	getStagedDiff,
+	getStagedChangeCount,
+	revertStagedFor,
+	revertAllStaged,
+	popLastStaged,
+	clearStaged,
+	setModelError,
 	type ModelStoreError
 } from './model.svelte';
 export {
@@ -97,9 +104,34 @@ export {
 	getLockFor,
 	getLockState,
 	getPresence,
+	onLockEvent,
 	startRealtime,
 	stopRealtime
 } from './realtime.svelte';
+export {
+	setCheckoutApiConfig,
+	setProjectInfo,
+	getRole,
+	canEdit,
+	ensureCheckout,
+	getHeldToken,
+	getHeldTokens,
+	isCheckedOutByMe,
+	resetCheckout,
+	loadProjectInfo,
+	getStaleResources,
+	clearStaleResource,
+	handleRemoteLockEvent,
+	previewStaged,
+	commitStaged,
+	discardElement,
+	discardAll,
+	type CheckoutResult,
+	type LockConflictLite
+} from './checkout.svelte';
+export { editLock, connectLock, deleteLock } from './edit-gate';
+export { lockBadgeFor, type LockBadge } from './lock-badge';
+export { getLockNotice, setLockNotice } from './lock-notice.svelte';
 export {
 	addSearchCriterion,
 	availableCriterionTypes,

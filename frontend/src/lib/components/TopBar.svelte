@@ -3,7 +3,6 @@
 	import { resolve } from '$app/paths';
 	import { Button } from '$lib/components/ui/button';
 	import {
-		getChangesBadgeTotal,
 		getFilename,
 		getIssues,
 		getLastError,
@@ -14,15 +13,16 @@
 		getModelGeneration,
 		getModelRev,
 		getModelSummary,
-		getUndoDepth,
+		getStagedChangeCount,
+		getStagedDepth,
 		getViewChangesCount,
-		hasPendingOps,
 		isRunning,
-		refreshChangesBadge,
+		popLastStaged,
 		refreshSummary,
-		setDiffDrawerOpen,
-		undo
+		setDiffDrawerOpen
 	} from '$lib/state';
+	import { downloadModel } from '$lib/api/model-read';
+	import { saveResponseToFile } from '$lib/util/fileSave';
 	import { getView } from '$lib/state';
 	import { runValidation } from '$lib/state/validate-action';
 	import { AlertCircle, AlertTriangle, FolderOpen, Info, RefreshCw, Undo2 } from '@lucide/svelte';
@@ -38,28 +38,26 @@
 	const modelFilename = $derived(getFilename());
 	const metamodelFilename = $derived(getMetamodelFilename());
 	const viewFilename = $derived(getViewFilename());
-	const totalChanges = $derived(getChangesBadgeTotal());
+	const totalChanges = $derived(getStagedChangeCount());
 	const viewChanges = $derived(getViewChangesCount());
 	const combinedChanges = $derived(totalChanges + viewChanges);
-	const pending = $derived(hasPendingOps());
-	// Enabled when the model OR the view has unsaved changes; the view-save path
-	// lives in the Save dialog's View tab (DiffDrawer).
-	const saveDisabled = $derived(summary === null || (combinedChanges === 0 && !pending));
+	// Enabled when the model OR the view has uncommitted/unsaved changes.
+	const saveDisabled = $derived(summary === null || combinedChanges === 0);
 	const validating = $derived(isRunning());
 	const validateDisabled = $derived(validating || summary === null);
-	const undoDisabled = $derived(summary === null || getUndoDepth() === 0);
+	const undoDisabled = $derived(summary === null || getStagedDepth() === 0);
 	const issues = $derived(getIssues());
 	const lastRunAt = $derived(getLastRunAt());
 	const lastValidateError = $derived(getLastError());
 	const errorCount = $derived(issues.filter((i) => i.severity === 'error').length);
 	const warningCount = $derived(issues.length - errorCount);
 
-	// Post-flush refresh policy: every acked ops batch / undo / apply-cr bumps
-	// model_rev; on each bump re-fetch (a) the summary — element/relationship
-	// counts are NOT maintained incrementally by deltas — and (b) the server
-	// change-set badge. The summary presence check is untracked so the
-	// refreshed summary object (new identity, same rev) can't retrigger the
-	// effect.
+	// Post-commit refresh policy: every commit / apply-cr bumps model_rev; on
+	// each bump re-fetch the summary — element/relationship counts are NOT
+	// maintained incrementally by deltas. The staged badge is client-derived
+	// and reactive via getStagedChangeCount(), so no server refresh is needed.
+	// The summary presence check is untracked so the refreshed summary object
+	// (new identity, same rev) can't retrigger the effect.
 	$effect(() => {
 		void getModelRev();
 		void getModelGeneration();
@@ -68,13 +66,10 @@
 		refreshSummary().catch(() => {
 			// best-effort; counts catch up on the next bump
 		});
-		refreshChangesBadge().catch(() => {
-			// best-effort badge; a failed refresh keeps the previous value
-		});
 	});
 
 	function confirmDiscardChanges(message: string): boolean {
-		if (combinedChanges === 0 && !hasPendingOps()) return true;
+		if (combinedChanges === 0) return true;
 		return window.confirm(message);
 	}
 
@@ -89,17 +84,17 @@
 		loadOpen = true;
 	}
 
-	let undoing = $state(false);
+	function onUndo(): void {
+		popLastStaged();
+	}
 
-	async function onUndo(): Promise<void> {
-		if (undoing) return;
-		undoing = true;
+	async function onExport(): Promise<void> {
 		try {
-			await undo();
+			const resp = await downloadModel();
+			await saveResponseToFile(resp, modelFilename ?? 'model.json');
 		} catch (err) {
-			console.error('Undo failed', err);
-		} finally {
-			undoing = false;
+			if (err instanceof DOMException && err.name === 'AbortError') return;
+			console.error('Export failed', err);
 		}
 	}
 </script>
@@ -158,9 +153,8 @@
 			variant="ghost"
 			size="sm"
 			class="h-7 gap-1 text-xs focus-visible:ring-2 focus-visible:ring-indigo-500"
-			disabled={undoDisabled || undoing}
-			aria-busy={undoing}
-			onclick={() => void onUndo()}
+			disabled={undoDisabled}
+			onclick={onUndo}
 		>
 			<Undo2 class="h-3 w-3" />
 			Undo
@@ -215,10 +209,19 @@
 			variant="ghost"
 			size="sm"
 			class="h-7 text-xs focus-visible:ring-2 focus-visible:ring-indigo-500"
+			disabled={summary === null}
+			onclick={() => void onExport()}
+		>
+			Export
+		</Button>
+		<Button
+			variant="ghost"
+			size="sm"
+			class="h-7 text-xs focus-visible:ring-2 focus-visible:ring-indigo-500"
 			disabled={saveDisabled}
 			onclick={() => setDiffDrawerOpen(true)}
 		>
-			Save
+			Commit
 		</Button>
 		<div class="group relative flex items-center">
 			<span class="font-mono text-xs {combinedChanges > 0 ? 'text-red-400' : 'text-zinc-500'}">
@@ -230,9 +233,9 @@
 				class="absolute right-0 top-full z-30 hidden w-max rounded border border-zinc-800 bg-zinc-900 p-2 shadow-lg group-hover:block group-focus-within:block"
 			>
 				<dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
-					<dt class="text-zinc-500">Model</dt>
+					<dt class="text-zinc-500">Uncommitted (model)</dt>
 					<dd class="text-right font-mono text-zinc-200">{totalChanges}</dd>
-					<dt class="text-zinc-500">View</dt>
+					<dt class="text-zinc-500">Unsaved (view)</dt>
 					<dd class="text-right font-mono text-zinc-200">{viewChanges}</dd>
 				</dl>
 			</div>

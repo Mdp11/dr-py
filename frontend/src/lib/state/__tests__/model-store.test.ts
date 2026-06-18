@@ -9,7 +9,6 @@ import {
 	ensureElement,
 	ensureElements,
 	ensureRelationship,
-	flushNow,
 	getCachedElements,
 	getCachedRelationships,
 	getIssueCounts,
@@ -18,14 +17,17 @@ import {
 	getModelRev,
 	getModelSummary,
 	getStructureRev,
-	getUndoDepth,
-	hasPendingOps,
+	getStagedDepth,
+	getStagedOps,
+	hasStagedOps,
 	loadSummary,
+	popLastStaged,
 	refreshSummary,
 	resetModelStore,
+	revertAllStaged,
 	seedElements,
 	setModelApiConfig,
-	undo,
+	setModelError,
 	validateAll
 } from '../model.svelte';
 
@@ -230,7 +232,7 @@ describe('emit', () => {
 		vi.useFakeTimers();
 		emit({ kind: 'create_element', temp_id: 'tmp_a', type_name: 'Block', properties: { n: 1 } });
 		expect(getCachedElements().get('tmp_a')?.properties.n).toBe(1);
-		expect(hasPendingOps()).toBe(true);
+		expect(hasStagedOps()).toBe(true);
 
 		emit({ kind: 'update_element', id: 'tmp_a', properties_patch: { n: 2, gone: null } });
 		expect(getCachedElements().get('tmp_a')?.properties.n).toBe(2);
@@ -253,22 +255,14 @@ describe('emit', () => {
 		expect(getCachedRelationships().has('r3')).toBe(true);
 	});
 
-	it('flushes structural ops immediately as one batch', async () => {
+	// Converted from 'flushes structural ops immediately as one batch': Spec B
+	// stages edits in the buffer with NO auto-flush. Assert both structural ops
+	// are staged (queue depth 2, both visible in getStagedOps), caches reflect
+	// them optimistically with their TEMP ids (no ack ⇒ no remap), and NO
+	// network request is fired (onUnhandledRequest:'error' would throw if one
+	// escaped — no handler is registered here).
+	it('stages structural ops without flushing', async () => {
 		vi.useFakeTimers();
-		const bodies: Array<{ base_rev: number; ops: unknown[] }> = [];
-		server.use(
-			http.post(`${BASE}/model/ops`, async ({ request }) => {
-				bodies.push((await request.json()) as (typeof bodies)[number]);
-				return HttpResponse.json(
-					delta({
-						model_rev: 1,
-						id_map: { tmp_a: 'E1', tmp_r: 'R1' },
-						changed_elements: [el('E1', {}, 1)],
-						changed_relationships: [rel('R1', 'E1', 'e9', 1)]
-					})
-				);
-			})
-		);
 		emit({ kind: 'create_element', temp_id: 'tmp_a', type_name: 'Block', properties: {} });
 		emit({
 			kind: 'create_relationship',
@@ -278,200 +272,109 @@ describe('emit', () => {
 			target_id: 'e9',
 			properties: {}
 		});
-		expect(bodies).toHaveLength(0); // not sent synchronously
-		await vi.advanceTimersByTimeAsync(0);
-		await flushNow();
-		expect(bodies).toHaveLength(1); // ONE batch with both ops
-		expect(bodies[0].base_rev).toBe(0);
-		expect(bodies[0].ops).toHaveLength(2);
-		// temp ids remapped after ack
-		expect(getCachedElements().has('tmp_a')).toBe(false);
-		expect(getCachedElements().has('E1')).toBe(true);
-		expect(getCachedRelationships().get('R1')?.source_id).toBe('E1');
-		expect(getModelRev()).toBe(1);
-		expect(getUndoDepth()).toBe(1);
-		expect(hasPendingOps()).toBe(false);
+		// both staged, no flush ever scheduled
+		expect(getStagedDepth()).toBe(2);
+		expect(getStagedOps()).toHaveLength(2);
+		await vi.advanceTimersByTimeAsync(50); // no timer fires a flush
+		// caches hold the optimistic temp-id entries; never remapped (no ack)
+		expect(getCachedElements().has('tmp_a')).toBe(true);
+		expect(getCachedRelationships().get('tmp_r')?.source_id).toBe('tmp_a');
+		expect(getModelRev()).toBe(0); // unchanged — nothing committed
+		expect(hasStagedOps()).toBe(true); // staged edits still pending commit
 	});
 
-	it('debounces property updates and coalesces patches to the same entity', async () => {
+	// Converted from 'debounces property updates and coalesces patches...': the
+	// coalescing logic is preserved but there is no debounce/flush. Assert two
+	// successive patches to the same entity collapse into ONE staged op (later
+	// keys win, nulls survive), the optimistic merge is visible immediately, and
+	// no network request fires.
+	it('coalesces property patches into one staged op without flushing', async () => {
 		vi.useFakeTimers();
 		applyDelta(delta({ model_rev: 2, changed_elements: [el('e1', { name: 'A' }, 1)] }));
-		const bodies: Array<{ base_rev: number; ops: Array<Record<string, unknown>> }> = [];
-		server.use(
-			http.post(`${BASE}/model/ops`, async ({ request }) => {
-				bodies.push((await request.json()) as (typeof bodies)[number]);
-				return HttpResponse.json(
-					delta({ model_rev: 3, changed_elements: [el('e1', { name: 'C' }, 2)] })
-				);
-			})
-		);
 		emit({ kind: 'update_element', id: 'e1', properties_patch: { name: 'B' } });
 		emit({ kind: 'update_element', id: 'e1', properties_patch: { name: 'C', x: null } });
 		// optimistic merge visible immediately
 		expect(getCachedElements().get('e1')?.properties.name).toBe('C');
 
-		await vi.advanceTimersByTimeAsync(299);
-		expect(bodies).toHaveLength(0); // still inside the debounce window
-		await vi.advanceTimersByTimeAsync(2);
-		await flushNow();
-		expect(bodies).toHaveLength(1);
-		expect(bodies[0].ops).toHaveLength(1); // coalesced into one op
-		expect(bodies[0].ops[0]).toEqual({
+		await vi.advanceTimersByTimeAsync(400); // no debounce timer to fire
+		const staged = getStagedOps();
+		expect(staged).toHaveLength(1); // coalesced into one op
+		expect(staged[0]).toEqual({
 			kind: 'update_element',
 			id: 'e1',
 			properties_patch: { name: 'C', x: null } // later keys win, nulls survive
 		});
+		expect(getModelRev()).toBe(2); // unchanged — nothing committed
 	});
 
-	it('serializes flushes (single in-flight batch) and remaps queued temp ids', async () => {
-		const bodies: Array<{ base_rev: number; ops: Array<Record<string, unknown>> }> = [];
-		let active = 0;
-		let maxActive = 0;
-		const gates: Array<() => void> = [];
-		server.use(
-			http.post(`${BASE}/model/ops`, async ({ request }) => {
-				active += 1;
-				maxActive = Math.max(maxActive, active);
-				const body = (await request.json()) as (typeof bodies)[number];
-				bodies.push(body);
-				await new Promise<void>((resolve) => gates.push(resolve));
-				active -= 1;
-				const isCreate = body.ops[0].kind === 'create_element';
-				return HttpResponse.json(
-					delta({
-						model_rev: isCreate ? 1 : 2,
-						id_map: isCreate ? { tmp_a: 'E1' } : {},
-						changed_elements: isCreate ? [el('E1', {}, 1)] : [el('E1', { name: 'B' }, 2)]
-					})
-				);
-			})
-		);
+	// Converted from 'serializes flushes (single in-flight batch) and remaps
+	// queued temp ids': flush serialization no longer exists (no auto-flush, no
+	// in-flight batch). The staging analogue: a create followed by an update of
+	// the same temp id stays staged as two distinct ops (a create then a
+	// property update — they do NOT coalesce, only updates of the same id do),
+	// applied optimistically, with no network request.
+	it('stages a create then an update of the same temp id (no flush)', async () => {
 		emit({ kind: 'create_element', temp_id: 'tmp_a', type_name: 'Block', properties: {} });
-		const done = flushNow();
-		await vi.waitFor(() => expect(gates).toHaveLength(1));
-		// batch 1 is in flight; emit an op referencing its temp id
 		emit({ kind: 'update_element', id: 'tmp_a', properties_patch: { name: 'B' } });
-		expect(hasPendingOps()).toBe(true);
-		gates[0]();
-		await vi.waitFor(() => expect(gates).toHaveLength(2));
-		gates[1]();
-		await done;
-		await flushNow();
-
-		expect(maxActive).toBe(1); // never two concurrent batches
-		expect(bodies).toHaveLength(2);
-		expect(bodies[0].base_rev).toBe(0);
-		expect(bodies[1].base_rev).toBe(1); // second batch built on the acked rev
-		// the queued update was remapped tmp_a -> E1 before being sent
-		expect(bodies[1].ops[0]).toEqual({
+		expect(hasStagedOps()).toBe(true);
+		// no remap (no ack): the temp id is still the cache key
+		expect(getCachedElements().get('tmp_a')?.properties.name).toBe('B');
+		const staged = getStagedOps();
+		expect(staged).toHaveLength(2);
+		expect(staged[0].kind).toBe('create_element');
+		expect(staged[1]).toEqual({
 			kind: 'update_element',
-			id: 'E1',
+			id: 'tmp_a',
 			properties_patch: { name: 'B' }
 		});
-		expect(getCachedElements().get('E1')?.properties.name).toBe('B');
-		expect(hasPendingOps()).toBe(false);
+		expect(getStagedDepth()).toBe(2); // both ops remain staged until commit
 	});
 
-	it('does not clobber a newer queued optimistic edit when an in-flight batch acks', async () => {
-		// Reproduces the "text reverts then jumps forward" flicker while typing
-		// fast: a batch carrying an earlier value is in flight while the user
-		// keeps typing; its ack must NOT overwrite the newer optimistic value
-		// that is still queued for the same entity.
-		const gates: Array<() => void> = [];
-		server.use(
-			http.post(`${BASE}/model/ops`, async ({ request }) => {
-				const body = (await request.json()) as {
-					ops: Array<{ properties_patch?: Record<string, unknown> }>;
-				};
-				// the server echoes back the state of THIS batch (the value that
-				// was current when the batch was flushed)
-				const name = body.ops[0].properties_patch?.name ?? 'A';
-				await new Promise<void>((resolve) => gates.push(resolve));
-				return HttpResponse.json(
-					delta({ model_rev: getModelRev() + 1, changed_elements: [el('e1', { name }, 9)] })
-				);
-			})
-		);
+	// Converted from 'does not clobber a newer queued optimistic edit when an
+	// in-flight batch acks': there is no in-flight batch anymore, but the
+	// applyDelta queue-guard (hasQueuedOpFor) is preserved and still load-bearing
+	// for peer deltas arriving over the realtime feed while the user has staged
+	// edits. Assert an incoming delta carrying a stale value does NOT clobber a
+	// staged optimistic edit for the same entity.
+	it('applyDelta does not clobber a staged optimistic edit for the same entity', () => {
 		applyDelta(delta({ model_rev: 1, changed_elements: [el('e1', { name: 'A' }, 1)] }));
-
-		emit({ kind: 'update_element', id: 'e1', properties_patch: { name: 'B' } });
-		const done = flushNow();
-		await vi.waitFor(() => expect(gates).toHaveLength(1));
-		// batch {name:'B'} is in flight; the user keeps typing -> 'C'
+		// user stages an edit -> optimistic 'C'
 		emit({ kind: 'update_element', id: 'e1', properties_patch: { name: 'C' } });
 		expect(getCachedElements().get('e1')?.properties.name).toBe('C');
-
-		// the stale 'B' ack lands while 'C' is still queued
-		gates[0]();
-		await vi.waitFor(() => expect(gates).toHaveLength(2));
-		// must still read 'C' — no revert flicker
+		// a delta arrives carrying a stale 'B' for the same (still-staged) entity
+		applyDelta(delta({ model_rev: 2, changed_elements: [el('e1', { name: 'B' }, 9)] }));
+		// the staged optimistic value is preserved — no revert flicker
 		expect(getCachedElements().get('e1')?.properties.name).toBe('C');
-
-		// batch {name:'C'} acks (queue now empty) and the value is confirmed
-		gates[1]();
-		await done;
-		await flushNow();
-		expect(getCachedElements().get('e1')?.properties.name).toBe('C');
-		expect(hasPendingOps()).toBe(false);
+		expect(hasStagedOps()).toBe(true);
 	});
 
-	it('enters conflict state on 409: error surfaced, summary refetched, flushing frozen', async () => {
-		let opsRequests = 0;
-		server.use(
-			http.post(`${BASE}/model/ops`, () => {
-				opsRequests += 1;
-				return HttpResponse.json(
-					{ detail: 'base_rev 0 does not match current model_rev 9', model_rev: 9 },
-					{ status: 409 }
-				);
-			}),
-			http.get(`${BASE}/model/summary`, () => HttpResponse.json({ ...summary, model_rev: 9 }))
-		);
+	// Converted from 'enters conflict state on 409...': the 409/flush networking
+	// path is gone (the conflict state is now driven by the realtime feed via
+	// setModelError, not by a flush response). The load-bearing behavior that
+	// survives is the emit conflict-DROP guard. Assert that, once conflicted,
+	// emit drops ops entirely — not applied, not staged — so the staged buffer
+	// cannot diverge while the model is known-stale.
+	it('drops emit() entirely in conflict state: buffer stays empty, no apply', () => {
 		applyDelta(delta({ model_rev: 0, changed_elements: [el('e1', { name: 'A' })] }));
-		emit({ kind: 'update_element', id: 'e1', properties_patch: { name: 'B' } });
-		await flushNow();
-
+		setModelError({ kind: 'conflict', message: 'rev conflict' });
 		expect(getModelError()?.kind).toBe('conflict');
-		expect(getModelRev()).toBe(9); // resynced from the summary refetch
-		expect(hasPendingOps()).toBe(false); // queue dropped
-		// cache not corrupted by half-applied state: optimistic value retained,
-		// caches are declared divergent until reload
-		expect(getCachedElements().get('e1')?.properties.name).toBe('B');
 
-		// further emits do not hit the server while conflicted
-		emit({ kind: 'delete_element', id: 'e1' });
-		await flushNow();
-		expect(opsRequests).toBe(1);
-	});
-
-	it('drops emit() entirely in conflict state: queue stays empty, no request', async () => {
-		let opsRequests = 0;
-		server.use(
-			http.post(`${BASE}/model/ops`, () => {
-				opsRequests += 1;
-				return HttpResponse.json({ detail: 'rev conflict', model_rev: 9 }, { status: 409 });
-			}),
-			http.get(`${BASE}/model/summary`, () => HttpResponse.json({ ...summary, model_rev: 9 }))
-		);
-		applyDelta(delta({ model_rev: 0, changed_elements: [el('e1', { name: 'A' })] }));
 		emit({ kind: 'update_element', id: 'e1', properties_patch: { name: 'B' } });
-		await flushNow();
-		expect(getModelError()?.kind).toBe('conflict');
-		expect(opsRequests).toBe(1);
+		expect(hasStagedOps()).toBe(false); // dropped, not staged
+		// not even applied optimistically — the cache keeps its pre-conflict value
+		expect(getCachedElements().get('e1')?.properties.name).toBe('A');
 
 		emit({ kind: 'delete_element', id: 'e1' });
-		expect(hasPendingOps()).toBe(false); // dropped, not queued
-		expect(getCachedElements().has('e1')).toBe(true); // not even applied optimistically
-		await flushNow();
-		expect(opsRequests).toBe(1); // never reached the server
+		expect(hasStagedOps()).toBe(false);
+		expect(getCachedElements().has('e1')).toBe(true); // delete not applied either
 	});
 
-	it('reverts optimistic state exactly on 422 and surfaces a rejected error', async () => {
-		server.use(
-			http.post(`${BASE}/model/ops`, () =>
-				HttpResponse.json({ detail: "'Block' has no property 'bogus'" }, { status: 422 })
-			)
-		);
+	// Converted from 'reverts optimistic state exactly on 422...': the 422/flush
+	// rejection path is gone, but the journal-driven exact revert it exercised is
+	// preserved and now surfaced as the client-side revertAllStaged (the
+	// "discard all staged edits" action). Assert a mixed batch (update / create /
+	// cascading delete) reverts the caches exactly to the pre-staging state.
+	it('revertAllStaged restores the caches exactly across a mixed batch', () => {
 		applyDelta(
 			delta({
 				model_rev: 1,
@@ -484,17 +387,16 @@ describe('emit', () => {
 		emit({ kind: 'delete_element', id: 'e2' }); // cascades r1 optimistically
 		expect(getCachedElements().get('e1')?.properties.bogus).toBe('x');
 		expect(getCachedRelationships().has('r1')).toBe(false);
-		await flushNow();
 
-		expect(getModelError()?.kind).toBe('rejected');
-		expect(getModelError()?.message).toContain('bogus');
-		// everything restored to the pre-batch state
+		revertAllStaged();
+
+		// everything restored to the pre-staging state
 		expect(getCachedElements().get('e1')?.properties).toEqual({ name: 'A' });
 		expect(getCachedElements().has('tmp_n')).toBe(false);
 		expect(getCachedElements().has('e2')).toBe(true);
 		expect(getCachedRelationships().get('r1')?.source_id).toBe('e1');
-		expect(hasPendingOps()).toBe(false);
-		expect(getModelRev()).toBe(1); // rev untouched — the batch never applied
+		expect(hasStagedOps()).toBe(false);
+		expect(getModelRev()).toBe(1); // rev untouched — nothing committed
 	});
 });
 
@@ -560,7 +462,7 @@ describe('reads and lifecycle', () => {
 		expect(await ensureRelationship('nope')).toBeNull();
 	});
 
-	it('refreshSummary adopts rev, undo depth, and issue counts; loadSummary memoizes', async () => {
+	it('refreshSummary adopts rev and issue counts; loadSummary memoizes', async () => {
 		let fetches = 0;
 		server.use(
 			http.get(`${BASE}/model/summary`, () => {
@@ -572,7 +474,9 @@ describe('reads and lifecycle', () => {
 		await loadSummary();
 		expect(getModelSummary()?.element_count).toBe(10);
 		expect(getModelRev()).toBe(4);
-		expect(getUndoDepth()).toBe(1);
+		// Spec B: the staged buffer (not the server's undo_depth) drives Undo;
+		// no edits staged here.
+		expect(getStagedDepth()).toBe(0);
 		expect(getIssueCounts()).toEqual({ warning: 2 });
 		await loadSummary(); // already loaded
 		expect(fetches).toBe(1);
@@ -580,37 +484,24 @@ describe('reads and lifecycle', () => {
 		expect(fetches).toBe(2);
 	});
 
-	it('undo applies the inverse delta and decrements undo depth', async () => {
-		server.use(
-			http.get(`${BASE}/model/summary`, () => HttpResponse.json(summary)),
-			http.post(`${BASE}/model/undo`, () =>
-				HttpResponse.json(
-					delta({
-						model_rev: 5,
-						deleted_element_ids: ['e1'],
-						issue_counts: {}
-					})
-				)
-			)
-		);
-		await refreshSummary(); // undo_depth = 1
-		applyDelta(delta({ model_rev: 4, changed_elements: [el('e1')] }));
+	// Spec B client-side undo: popLastStaged reverts the LAST STAGED op (there is
+	// no server-undo). Assert it reverts the staged create, drops it from the
+	// buffer, and reports success; no network request is involved.
+	it('popLastStaged reverts the last staged op client-side', () => {
+		seedElements([el('e0', { name: 'kept' }, 1)]);
+		emit({ kind: 'create_element', temp_id: 'e1', type_name: 'Block', properties: {} });
+		expect(getCachedElements().has('e1')).toBe(true);
+		expect(getStagedDepth()).toBe(1);
 
-		expect(await undo()).toBe(true);
-		expect(getCachedElements().has('e1')).toBe(false);
-		expect(getModelRev()).toBe(5);
-		expect(getUndoDepth()).toBe(0);
+		expect(popLastStaged()).toBe(true);
+		expect(getCachedElements().has('e1')).toBe(false); // staged create reverted
+		expect(getCachedElements().has('e0')).toBe(true); // untouched
+		expect(getStagedDepth()).toBe(0);
 	});
 
-	it('undo resolves false when the history is empty (409)', async () => {
-		server.use(
-			http.post(`${BASE}/model/undo`, () =>
-				HttpResponse.json({ detail: 'Nothing to undo', model_rev: 4 }, { status: 409 })
-			),
-			http.get(`${BASE}/model/summary`, () => HttpResponse.json({ ...summary, undo_depth: 0 }))
-		);
-		expect(await undo()).toBe(false);
-		expect(getUndoDepth()).toBe(0);
+	it('popLastStaged returns false when the staged buffer is empty', () => {
+		expect(popLastStaged()).toBe(false);
+		expect(getStagedDepth()).toBe(0);
 	});
 
 	it('validateAll resets issuesByOwner and counts from the full run', async () => {
@@ -654,11 +545,11 @@ describe('reads and lifecycle', () => {
 		expect(getCachedRelationships().size).toBe(0);
 		expect(getIssuesByOwner().size).toBe(0);
 		expect(getModelRev()).toBe(0);
-		expect(getUndoDepth()).toBe(0);
+		expect(getStagedDepth()).toBe(0);
 		expect(getIssueCounts()).toBeNull();
 		expect(getModelSummary()).toBeNull();
 		expect(getModelError()).toBeNull();
-		expect(hasPendingOps()).toBe(false);
+		expect(hasStagedOps()).toBe(false);
 		// the cancelled queue never reaches the server (an unhandled request
 		// would surface here as a flush error)
 		await vi.advanceTimersByTimeAsync(10);

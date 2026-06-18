@@ -5,12 +5,12 @@
 	import {
 		getCommandPaletteOpen,
 		getModelSummary,
+		popLastStaged,
 		seedElements,
 		select,
 		setActiveTab,
 		setCommandPaletteOpen,
 		setDiffDrawerOpen,
-		undo,
 		type WorkspaceTab
 	} from '$lib/state';
 	import { runValidation } from '$lib/state/validate-action';
@@ -95,7 +95,7 @@
 
 	function actionUndo(): void {
 		close();
-		void undo();
+		popLastStaged();
 	}
 
 	function onOpenChange(v: boolean): void {

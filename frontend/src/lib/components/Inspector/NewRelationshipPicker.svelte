@@ -2,6 +2,7 @@
 	import type { Element, RelationshipType } from '$lib/api/types';
 	import { isSubtype } from '$lib/metamodel/helpers';
 	import { createTempId, emit, ensureElement, getCachedElements, getMetamodel } from '$lib/state';
+	import { connectLock } from '$lib/state/edit-gate';
 	import { fetchElementsOfType } from '$lib/state/element-queries';
 	import { elementDisplayName as displayName } from '$lib/util/element-name';
 	import { Plus, X } from '@lucide/svelte';
@@ -90,8 +91,9 @@
 		selectedTarget = (e.target as HTMLSelectElement).value;
 	}
 
-	function create(): void {
+	async function create(): Promise<void> {
 		if (selectedType === '' || selectedTarget === '') return;
+		if (!(await connectLock(sourceId, selectedTarget))) return;
 		emit({
 			kind: 'create_relationship',
 			temp_id: createTempId(),

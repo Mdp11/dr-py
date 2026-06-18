@@ -187,6 +187,75 @@ export const OpsResponseSchema = z.object({
 });
 export type OpsResponse = z.infer<typeof OpsResponseSchema>;
 
+// --- Phase 4 check-out / commit (Spec B) -----------------------------------
+
+export const LockTargetInSchema = z.object({
+	resource_id: z.string(),
+	mode: z.enum(['exclusive', 'shared'])
+});
+export type LockTargetIn = z.infer<typeof LockTargetInSchema>;
+
+export const LockIntentSchema = z.enum(['edit', 'create_child', 'connect', 'delete']);
+export type LockIntent = z.infer<typeof LockIntentSchema>;
+
+export const LockRequestSchema = z.object({
+	targets: z.array(LockTargetInSchema),
+	intent: LockIntentSchema,
+	steal: z.boolean().default(false)
+});
+export type LockRequest = z.infer<typeof LockRequestSchema>;
+
+export const LeaseOutSchema = z.object({
+	resource_id: z.string(),
+	mode: z.string(),
+	holder: z.string(),
+	token: z.string(),
+	intent: z.string(),
+	expires_at: z.number()
+});
+export type LeaseOut = z.infer<typeof LeaseOutSchema>;
+
+export const LockResponseSchema = z.object({
+	token: z.string(),
+	leases: z.array(LeaseOutSchema).default([])
+});
+export type LockResponse = z.infer<typeof LockResponseSchema>;
+
+export const RenewResponseSchema = z.object({ ok: z.boolean() });
+export type RenewResponse = z.infer<typeof RenewResponseSchema>;
+
+export const OpenResponseSchema = z.object({
+	model_rev: z.number().int(),
+	role: z.string(),
+	element_count: z.number().int(),
+	relationship_count: z.number().int(),
+	issue_counts: z.record(z.string(), z.number()).default({}),
+	lock_ttl_seconds: z.number().int().default(0)
+});
+export type OpenResponse = z.infer<typeof OpenResponseSchema>;
+
+export const IssueOutSchema = z.object({
+	severity: z.string(),
+	message: z.string(),
+	target_ids: z.array(z.string()).default([]),
+	category: z.string().default('conformance')
+});
+export type IssueOut = z.infer<typeof IssueOutSchema>;
+
+export const PreviewResponseSchema = z.object({
+	conformance_error_count: z.number().int(),
+	structural_blockers: z.array(IssueOutSchema).default([]),
+	issues: z.array(IssueOutSchema).default([])
+});
+export type PreviewResponse = z.infer<typeof PreviewResponseSchema>;
+
+export const CommitResponseSchema = OpsResponseSchema.extend({
+	commit_id: z.string(),
+	message: z.string().default(''),
+	validation_error_count: z.number().int().default(0)
+});
+export type CommitResponse = z.infer<typeof CommitResponseSchema>;
+
 /**
  * GET /model/summary. `issue_counts` is null until a full validation run has
  * seeded the session issue store — "not validated" is distinct from "0".

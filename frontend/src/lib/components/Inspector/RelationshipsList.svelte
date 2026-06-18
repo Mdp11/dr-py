@@ -14,6 +14,7 @@
 		seedRelationships,
 		select
 	} from '$lib/state';
+	import { deleteLock } from '$lib/state/edit-gate';
 	import { listElementRelationships } from '$lib/api/model-read';
 	import { nameProp } from '$lib/util/element-name';
 	import { AlertCircle, AlertTriangle, Pencil, X } from '@lucide/svelte';
@@ -129,7 +130,8 @@
 		select({ kind: 'relationship', id });
 	}
 
-	function disconnect(id: string): void {
+	async function disconnect(id: string, sourceId: string): Promise<void> {
+		if (!(await deleteLock(sourceId))) return;
 		emit({ kind: 'delete_relationship', id });
 	}
 </script>
@@ -186,7 +188,7 @@
 						<button
 							type="button"
 							class="rounded p-0.5 text-zinc-500 opacity-0 hover:text-red-400 group-hover/row:opacity-100"
-							onclick={() => disconnect(rel.id)}
+							onclick={() => void disconnect(rel.id, rel.source_id)}
 							aria-label="Disconnect relationship"
 							title="Disconnect"
 						>
