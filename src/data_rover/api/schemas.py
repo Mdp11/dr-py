@@ -511,6 +511,10 @@ class OpenResponse(BaseModel):
     element_count: int
     relationship_count: int
     issue_counts: dict[str, int] = Field(default_factory=dict)
+    #: per-lease TTL (seconds). The client heartbeat renews at ttl/2. Sourced
+    #: from settings.lock_ttl_seconds; lease expires_at is a server monotonic
+    #: value, meaningless to the client clock, so the client needs the TTL.
+    lock_ttl_seconds: int = 0
 
 
 class PreviewRequest(BaseModel):
