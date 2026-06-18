@@ -2,6 +2,7 @@
 	import type { Element, PropertyDef, Relationship } from '$lib/api/types';
 	import { effectiveProperties, effectiveRelationshipProperties } from '$lib/metamodel/helpers';
 	import { emit, getMetamodel } from '$lib/state';
+	import { editLock } from '$lib/state/edit-gate';
 	import PropertyField from './PropertyField.svelte';
 
 	type Props = {
@@ -20,7 +21,8 @@
 			: effectiveRelationshipProperties(mm, entity.type_name);
 	});
 
-	function onPropChange(name: string, next: unknown): void {
+	async function onPropChange(name: string, next: unknown): Promise<void> {
+		if (!(await editLock(entity.id))) return; // locked by someone / viewer
 		if (kind === 'element') {
 			emit({
 				kind: 'update_element',
