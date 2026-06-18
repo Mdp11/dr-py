@@ -48,6 +48,17 @@ export {
 	seedRelationships,
 	undo,
 	validateAll,
+	getStagedOps,
+	getStagedOpsFor,
+	getStagedDepth,
+	hasStagedOps,
+	getStagedDiff,
+	getStagedChangeCount,
+	revertStagedFor,
+	revertAllStaged,
+	popLastStaged,
+	clearStaged,
+	setModelError,
 	type ModelStoreError
 } from './model.svelte';
 export {

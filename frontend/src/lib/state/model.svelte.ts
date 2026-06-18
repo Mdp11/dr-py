@@ -15,6 +15,7 @@ import * as modelOpsApi from '../api/model-ops';
 import * as modelReadApi from '../api/model-read';
 import { validateModel } from '../api/validation';
 import { mergePatch } from './apply';
+import { computeDiff, type Diff } from './diff';
 import { isTempId, type Op } from './ops';
 import { remapProperties } from './remap';
 import { getSelection, select } from './selection.svelte';
@@ -149,8 +150,10 @@ export function getStructureRev(): number {
 	return _structureRev;
 }
 
+/** @deprecated Spec B: staged depth drives the Undo-enabled check. Removed in
+ * Task 15. */
 export function getUndoDepth(): number {
-	return _undoDepth;
+	return _queue.length;
 }
 
 /** Bumps on every {@link resetModelStore} — i.e. whenever a different model
@@ -174,15 +177,9 @@ export function clearModelError(): void {
 	if (_error !== null && _error.kind !== 'conflict') _error = null;
 }
 
-/**
- * True while local edits have not been acknowledged by the server (queued
- * and/or in flight). Task 10 gates save flows on `flushNow()` + this.
- *
- * Never sticks at true in conflict state: the 409 handler drops the queue
- * and {@link emit} discards ops while conflicted, so save gating cannot hang.
- */
+/** @deprecated Spec B: maps to the staged buffer. Removed in Task 15. */
 export function hasPendingOps(): boolean {
-	return _queue.length > 0 || _inFlight;
+	return hasStagedOps();
 }
 
 // ---------------------------------------------------------------------------
@@ -480,17 +477,18 @@ function scheduleFlush(delayMs: number): void {
 }
 
 /**
- * Apply `op` optimistically and queue it for the server.
+ * Apply `op` optimistically and append it to the STAGED-EDITS buffer.
  *
- * Synchronous, like the old `pending.svelte.ts` emit: the caches reflect the
- * op before this returns. Structural ops flush on a 0 ms timeout; property
- * updates are debounced {@link PROPERTY_FLUSH_DELAY_MS} and coalesced into an
- * already-queued update of the same entity.
+ * Spec B: edits no longer auto-flush. `emit` applies the op to the local
+ * caches synchronously (they reflect it before this returns), records the
+ * journal entries that restore the pre-op state, and pushes the op onto the
+ * staged buffer (`_queue`) where it is held until an explicit commit. Property
+ * updates still coalesce into an already-queued update of the same entity.
  *
- * In CONFLICT state the op is dropped entirely (not applied, not queued):
- * the caches are already declared divergent and flushing is suspended, so
- * queueing would only leave {@link hasPendingOps} true forever and hang
- * save gating. Recovery is a full reload (resetModelStore + refetch).
+ * In CONFLICT state the op is dropped entirely (not applied, not staged):
+ * the caches are already declared divergent, so staging would only leave the
+ * buffer in a divergent state. Recovery is a full reload (resetModelStore +
+ * refetch).
  */
 export function emit(op: Op): void {
 	if (_error?.kind === 'conflict') return;
@@ -512,11 +510,9 @@ export function emit(op: Op): void {
 				...op.properties_patch
 			};
 			if (existing.revert.length === 0) existing.revert.push(...revert);
-			scheduleFlush(PROPERTY_FLUSH_DELAY_MS);
 			return;
 		}
 		_queue.push({ op: { ...op, properties_patch: { ...op.properties_patch } }, revert });
-		scheduleFlush(PROPERTY_FLUSH_DELAY_MS);
 		return;
 	}
 
@@ -529,7 +525,6 @@ export function emit(op: Op): void {
 				: op,
 		revert
 	});
-	scheduleFlush(0);
 }
 
 function revertOptimistic(failed: QueuedOp[]): void {
@@ -547,6 +542,108 @@ function revertOptimistic(failed: QueuedOp[]): void {
 			}
 		}
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Staged-edits surface (Spec B): the queue is the local-edit buffer held until
+// commit. No auto-flush. Discard/undo replay the per-op journal recorded at
+// emit time; commit drops the buffer (clearStaged) after applyDelta installs
+// the server's canonical post-commit state.
+// ---------------------------------------------------------------------------
+
+function queuedTargetId(q: QueuedOp): string {
+	const op = q.op;
+	return op.kind === 'create_element' || op.kind === 'create_relationship' ? op.temp_id : op.id;
+}
+
+export function getStagedOps(): Op[] {
+	return _queue.map((q) => q.op);
+}
+
+export function getStagedOpsFor(id: string): Op[] {
+	return _queue.filter((q) => queuedTargetId(q) === id).map((q) => q.op);
+}
+
+export function getStagedDepth(): number {
+	return _queue.length;
+}
+
+export function hasStagedOps(): boolean {
+	return _queue.length > 0;
+}
+
+/** Revert and remove every staged op targeting `id` (per-element discard).
+ * Reverts newest-first across the whole buffer slice for `id` so cascades
+ * (e.g. a delete_element that also removed incident relationships) restore. */
+export function revertStagedFor(id: string): void {
+	const remove = _queue.filter((q) => queuedTargetId(q) === id);
+	if (remove.length === 0) return;
+	revertOptimistic(remove);
+	_queue = _queue.filter((q) => queuedTargetId(q) !== id);
+}
+
+export function revertAllStaged(): void {
+	if (_queue.length === 0) return;
+	revertOptimistic(_queue);
+	_queue = [];
+}
+
+/** Client-side undo: revert the last staged op. Returns false if empty. */
+export function popLastStaged(): boolean {
+	const last = _queue[_queue.length - 1];
+	if (last === undefined) return false;
+	revertOptimistic([last]);
+	_queue = _queue.slice(0, -1);
+	return true;
+}
+
+/** Drop the buffer WITHOUT reverting caches — after a successful commit the
+ * caches already hold the committed state (applyDelta installed it). */
+export function clearStaged(): void {
+	_queue = [];
+}
+
+/** A diff of the staged edits, for the commit-review panel and badge. Baseline
+ * = each touched entity's earliest journaled `before` (absent ⇒ created);
+ * working = its current cache value (absent ⇒ deleted). Reuses computeDiff. */
+export function getStagedDiff(): Diff {
+	const baseElements = new Map<string, Element>();
+	const baseRels = new Map<string, Relationship>();
+	for (const q of _queue) {
+		for (const r of q.revert) {
+			if (r.before === null) continue;
+			if (r.entity === 'element') {
+				if (!baseElements.has(r.id)) baseElements.set(r.id, r.before);
+			} else if (!baseRels.has(r.id)) baseRels.set(r.id, r.before);
+		}
+	}
+	const touched = new Set<string>();
+	for (const q of _queue) touched.add(queuedTargetId(q));
+	// include ids that only appear as journal targets (cascade-deleted rels)
+	for (const id of baseElements.keys()) touched.add(id);
+	for (const id of baseRels.keys()) touched.add(id);
+
+	const workingElements: Element[] = [];
+	const workingRels: Relationship[] = [];
+	for (const id of touched) {
+		const e = _elements.get(id);
+		if (e !== undefined) workingElements.push(e);
+		const r = _relationships.get(id);
+		if (r !== undefined) workingRels.push(r);
+	}
+	return computeDiff(
+		{ elements: [...baseElements.values()], relationships: [...baseRels.values()] } as never,
+		{ elements: workingElements, relationships: workingRels }
+	);
+}
+
+export function getStagedChangeCount(): number {
+	const c = getStagedDiff().counts;
+	return c.added + c.modified + c.deleted;
+}
+
+export function setModelError(e: ModelStoreError | null): void {
+	_error = e;
 }
 
 async function handleFlushError(err: unknown, batch: QueuedOp[]): Promise<void> {
@@ -617,20 +714,10 @@ function startFlush(): Promise<void> {
 	return _flushPromise;
 }
 
-/**
- * Force every queued op to the server now (cancelling debounce timers) and
- * resolve when the queue is fully drained, a flush error was surfaced, or
- * the store is in conflict state. Save flows await this before serializing.
- */
+/** @deprecated Spec B: edits no longer flush continuously. No-op kept so
+ * legacy save-gating callers resolve cleanly. Removed in Task 15. */
 export async function flushNow(): Promise<void> {
-	for (;;) {
-		cancelFlushTimer();
-		await startFlush();
-		// flush errors clear the queue and conflict suspends flushing, so this
-		// terminates; a STALE (pre-existing) error must not stop the drain
-		if (_queue.length === 0 || _error?.kind === 'conflict') return;
-		// ops were emitted while the loop was draining; go around again
-	}
+	return;
 }
 
 // ---------------------------------------------------------------------------
@@ -802,31 +889,10 @@ export function seedRelationships(rels: readonly Relationship[]): void {
 	}
 }
 
-/**
- * Undo the last accepted op batch (after flushing local edits, so "undo"
- * always targets what the user just did). Resolves false when there is
- * nothing to undo (server 409) or the store is in conflict state.
- */
+/** @deprecated Spec B: client-side undo of the last staged op. Removed in
+ * Task 15 (callers move to popLastStaged). */
 export async function undo(): Promise<boolean> {
-	await flushNow();
-	if (_error?.kind === 'conflict') return false;
-	try {
-		const delta = await modelOpsApi.undoOps(_clientConfig);
-		applyDelta(delta);
-		_undoDepth = Math.max(0, _undoDepth - 1);
-		return true;
-	} catch (err) {
-		if (err instanceof ConflictError) {
-			// empty history — resync counters and report "nothing to undo"
-			try {
-				await refreshSummary();
-			} catch {
-				// best-effort
-			}
-			return false;
-		}
-		throw err;
-	}
+	return popLastStaged();
 }
 
 /**
