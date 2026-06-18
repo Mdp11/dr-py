@@ -1,19 +1,19 @@
 <script lang="ts">
 	import {
-		getChangesBadgeTotal,
 		getFilename,
 		getIssueCounts,
 		getModelSummary,
 		getTypeFilter,
 		getFeedConnected,
 		getPresence,
-		hasPendingOps
+		getStagedChangeCount,
+		getLockNotice
 	} from '$lib/state';
 
 	const summary = $derived(getModelSummary());
 	const filename = $derived(getFilename());
-	const totalChanges = $derived(getChangesBadgeTotal());
-	const pending = $derived(hasPendingOps());
+	const totalChanges = $derived(getStagedChangeCount());
+	const lockNotice = $derived(getLockNotice());
 
 	// null = not validated yet; render zeros, matching the pre-validation UX.
 	const issueCounts = $derived(getIssueCounts());
@@ -41,9 +41,10 @@
 >
 	<span>Showing {shownCount}/{totalElements} elements</span>
 	<span class="text-zinc-700">·</span>
-	<span>{totalChanges} unsaved</span>
-	{#if pending}
-		<span class="text-amber-400" title="Local edits are being sent to the backend">syncing…</span>
+	<span>{totalChanges} uncommitted</span>
+	{#if lockNotice}
+		<span class="text-zinc-700">·</span>
+		<span class="text-amber-400" title="Lock status">{lockNotice}</span>
 	{/if}
 	<span class="text-zinc-700">·</span>
 	<span class={errorCount > 0 ? 'text-red-400' : ''}>
