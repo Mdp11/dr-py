@@ -21,6 +21,13 @@ const DEV_IDENTITY_HEADERS: Record<string, string> = {
 	'x-user-email': 'dev@example.com'
 };
 
+/** The current user's id as seen by the backend. Dev build: the static
+ * x-user-id header value. (A real auth integration will replace this seam.)
+ * Used by the checkout store to recognize its OWN lock events in the feed. */
+export function getCurrentUserId(): string {
+	return DEV_IDENTITY_HEADERS['x-user-id'];
+}
+
 function buildUrl(baseUrl: string, path: string, query?: ApiFetchInit['query']): string {
 	const normalizedBase = baseUrl.replace(/\/$/, '');
 	const normalizedPath = path.startsWith('/') ? path : `/${path}`;
