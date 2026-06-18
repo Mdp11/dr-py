@@ -2,9 +2,10 @@ import { SvelteMap } from 'svelte/reactivity';
 
 import type { ClientConfig } from '$lib/api/client';
 import { getCurrentUserId } from '$lib/api/client';
-import { acquireLocks, commitChanges, previewCommit, releaseLock, renewLock } from '$lib/api/checkout';
+import { acquireLocks, commitChanges, openProject, previewCommit, releaseLock, renewLock } from '$lib/api/checkout';
 import { ConflictError } from '$lib/api/errors';
 import type { CommitResponse, LeaseOut, LockIntent, LockTargetIn, PreviewResponse } from '$lib/api/types';
+import type { LeaseLite } from '$lib/api/feed';
 import { applyDelta, clearStaged, getModelRev, getStagedOps, revertAllStaged, revertStagedFor } from './model.svelte';
 
 /**
@@ -28,6 +29,10 @@ interface HeldLease {
 /** resource_id -> the lease I hold on it. Multiple resources can share a token
  * (e.g. a delete subtree); release-by-token drops them together. */
 const _registry = new SvelteMap<string, HeldLease>();
+
+/** Resources whose server-held lock expired while I held them. Their staged
+ * edits are uncommittable until the user re-checks-out or discards. */
+const _stale = new SvelteMap<string, true>();
 
 let _role = $state('viewer');
 let _lockTtlSeconds = 300;
@@ -117,6 +122,7 @@ export async function ensureCheckout(
 
 export function resetCheckout(): void {
 	_registry.clear();
+	_stale.clear();
 	_role = 'viewer';
 	_lockTtlSeconds = 300;
 	_stopHeartbeat(); // defined in Task 6
@@ -155,8 +161,47 @@ async function _renewAll(): Promise<void> {
 	if (_registry.size === 0) _stopHeartbeat();
 }
 
-// --- expiry hook (Task 8) --------------------------------------------------
-function _onTokenExpired(_token: string): void {}
+// --- project open + expiry (Task 8) ----------------------------------------
+
+/** Fetch role + lock TTL from /open and adopt them. */
+export async function loadProjectInfo(cfg?: ClientConfig): Promise<void> {
+	const info = await openProject(cfg ?? _clientConfig);
+	setProjectInfo({ role: info.role, lockTtlSeconds: info.lock_ttl_seconds });
+}
+
+export function getStaleResources(): string[] {
+	return [..._stale.keys()];
+}
+
+export function clearStaleResource(id: string): void {
+	_stale.delete(id);
+}
+
+/** Feed lock-event handler: if one of MY held resources is released/expired by
+ * the server (TTL lapse), mark it stale (its staged edits are now
+ * uncommittable) and drop my token for it. */
+export function handleRemoteLockEvent(
+	action: 'acquired' | 'released' | 'expired',
+	leases: LeaseLite[]
+): void {
+	if (action === 'acquired') return;
+	const me = getCurrentUserId();
+	for (const le of leases) {
+		if (le.holder_id !== me) continue;
+		if (!_registry.has(le.resource_id)) continue;
+		const token = _registry.get(le.resource_id)?.token;
+		if (action === 'expired') _stale.set(le.resource_id, true);
+		if (token) _dropToken(token);
+	}
+	if (_registry.size === 0) _stopHeartbeat();
+}
+
+/** Replace the Task 6 expiry stub: a renew-detected expiry also marks stale. */
+function _onTokenExpired(token: string): void {
+	for (const [rid, lease] of _registry) {
+		if (lease.token === token) _stale.set(rid, true);
+	}
+}
 
 // --- preview / commit / discard --------------------------------------------
 

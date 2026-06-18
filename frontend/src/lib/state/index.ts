@@ -108,12 +108,14 @@ export {
 	getLockFor,
 	getLockState,
 	getPresence,
+	onLockEvent,
 	startRealtime,
 	stopRealtime
 } from './realtime.svelte';
 export {
 	setCheckoutApiConfig, setProjectInfo, getRole, canEdit, ensureCheckout,
 	getHeldToken, getHeldTokens, isCheckedOutByMe, resetCheckout,
+	loadProjectInfo, getStaleResources, clearStaleResource, handleRemoteLockEvent,
 	previewStaged, commitStaged, discardElement, discardAll,
 	type CheckoutResult, type LockConflictLite
 } from './checkout.svelte';
