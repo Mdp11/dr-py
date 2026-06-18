@@ -388,7 +388,7 @@
 					type="button"
 					class="bg-red-600 text-white hover:bg-red-500"
 					onclick={() => void onCommitClick()}
-					disabled={committing || total === 0 || commitBlocked}
+					disabled={committing || total === 0 || commitBlocked || loading || preview === null}
 				>
 					{committing ? 'Committing…' : errorCount > 0 ? `Commit anyway (${total})` : `Commit (${total})`}
 				</Button>
