@@ -312,19 +312,21 @@ test('change badge increments on view edit, tooltip shows View row, Save dialog 
 	// Excluding one element is exactly 1 view change; combined count must be 1.
 	await expect(badge).toContainText('1 change');
 
-	// Hovering the badge reveals the tooltip with both a "Model" and a "View" row.
+	// Hovering the badge reveals the tooltip with both a "model" and a "view" row.
+	// Spec B renamed the labels from "Model"/"View" to "Uncommitted (model)"/"Unsaved (view)".
 	// Scope to the badge's own group wrapper (the LAST div.group in the header) so
 	// we cannot accidentally match the Info/loaded-files tooltip in the first group.
 	await badge.hover();
 	const badgeGroup = page.locator('header div.group').last();
 	const tooltip = badgeGroup.getByRole('tooltip');
 	await expect(tooltip).toBeVisible();
-	await expect(tooltip).toContainText('View');
-	await expect(tooltip).toContainText('Model');
+	await expect(tooltip).toContainText('Unsaved (view)');
+	await expect(tooltip).toContainText('Uncommitted (model)');
 
-	// Ctrl+S opens the Save dialog (DiffDrawer).
+	// Ctrl+S opens the Commit dialog (DiffDrawer). Spec B: dialog was renamed
+	// from "pending changes" to "Commit changes".
 	await page.keyboard.press('Control+s');
-	const drawer = page.getByRole('dialog', { name: /pending changes/i });
+	const drawer = page.getByRole('dialog', { name: /commit changes/i });
 	await expect(drawer).toBeVisible();
 
 	// Click the View tab and assert that at least one human-readable view-change
