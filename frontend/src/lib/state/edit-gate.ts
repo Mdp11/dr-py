@@ -25,7 +25,10 @@ export function editLock(id: string): Promise<boolean> {
 
 export function connectLock(sourceId: string, targetId: string): Promise<boolean> {
 	return gate(
-		[{ resource_id: sourceId, mode: 'exclusive' }, { resource_id: targetId, mode: 'shared' }],
+		[
+			{ resource_id: sourceId, mode: 'exclusive' },
+			{ resource_id: targetId, mode: 'shared' }
+		],
 		'connect'
 	);
 }

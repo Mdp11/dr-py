@@ -32,7 +32,11 @@ export function releaseLock(token: string, cfg?: ClientConfig): Promise<void> {
 
 /** POST /locks/renew — heartbeat-extend all leases under `token`. */
 export function renewLock(token: string, cfg?: ClientConfig): Promise<RenewResponse> {
-	return apiFetch('/locks/renew', { method: 'POST', body: { token }, schema: RenewResponseSchema }, cfg);
+	return apiFetch(
+		'/locks/renew',
+		{ method: 'POST', body: { token }, schema: RenewResponseSchema },
+		cfg
+	);
 }
 
 /** POST /commits/preview — apply→validate→rollback. Throws ConflictError on
@@ -53,7 +57,13 @@ export function previewCommit(
  * ConflictError (409: stale rev or missing lock) / ValidationError (422:
  * structural blocker). */
 export function commitChanges(
-	req: { baseRev: number; ops: readonly Op[]; message: string; lockTokens: string[]; ackErrors: boolean },
+	req: {
+		baseRev: number;
+		ops: readonly Op[];
+		message: string;
+		lockTokens: string[];
+		ackErrors: boolean;
+	},
 	cfg?: ClientConfig
 ): Promise<CommitResponse> {
 	return apiFetch(

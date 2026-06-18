@@ -390,7 +390,11 @@
 					onclick={() => void onCommitClick()}
 					disabled={committing || total === 0 || commitBlocked || loading || preview === null}
 				>
-					{committing ? 'Committing…' : errorCount > 0 ? `Commit anyway (${total})` : `Commit (${total})`}
+					{committing
+						? 'Committing…'
+						: errorCount > 0
+							? `Commit anyway (${total})`
+							: `Commit (${total})`}
 				</Button>
 			{/if}
 		</Dialog.Footer>

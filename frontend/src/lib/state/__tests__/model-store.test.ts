@@ -9,7 +9,6 @@ import {
 	ensureElement,
 	ensureElements,
 	ensureRelationship,
-	flushNow,
 	getCachedElements,
 	getCachedRelationships,
 	getIssueCounts,
@@ -20,8 +19,6 @@ import {
 	getStructureRev,
 	getStagedDepth,
 	getStagedOps,
-	getUndoDepth,
-	hasPendingOps,
 	hasStagedOps,
 	loadSummary,
 	popLastStaged,
@@ -31,7 +28,6 @@ import {
 	seedElements,
 	setModelApiConfig,
 	setModelError,
-	undo,
 	validateAll
 } from '../model.svelte';
 
@@ -236,7 +232,7 @@ describe('emit', () => {
 		vi.useFakeTimers();
 		emit({ kind: 'create_element', temp_id: 'tmp_a', type_name: 'Block', properties: { n: 1 } });
 		expect(getCachedElements().get('tmp_a')?.properties.n).toBe(1);
-		expect(hasPendingOps()).toBe(true);
+		expect(hasStagedOps()).toBe(true);
 
 		emit({ kind: 'update_element', id: 'tmp_a', properties_patch: { n: 2, gone: null } });
 		expect(getCachedElements().get('tmp_a')?.properties.n).toBe(2);
@@ -280,12 +276,11 @@ describe('emit', () => {
 		expect(getStagedDepth()).toBe(2);
 		expect(getStagedOps()).toHaveLength(2);
 		await vi.advanceTimersByTimeAsync(50); // no timer fires a flush
-		await flushNow(); // shim no-op
 		// caches hold the optimistic temp-id entries; never remapped (no ack)
 		expect(getCachedElements().has('tmp_a')).toBe(true);
 		expect(getCachedRelationships().get('tmp_r')?.source_id).toBe('tmp_a');
 		expect(getModelRev()).toBe(0); // unchanged — nothing committed
-		expect(hasPendingOps()).toBe(true); // staged edits still pending commit
+		expect(hasStagedOps()).toBe(true); // staged edits still pending commit
 	});
 
 	// Converted from 'debounces property updates and coalesces patches...': the
@@ -302,7 +297,6 @@ describe('emit', () => {
 		expect(getCachedElements().get('e1')?.properties.name).toBe('C');
 
 		await vi.advanceTimersByTimeAsync(400); // no debounce timer to fire
-		await flushNow(); // shim no-op
 		const staged = getStagedOps();
 		expect(staged).toHaveLength(1); // coalesced into one op
 		expect(staged[0]).toEqual({
@@ -322,7 +316,7 @@ describe('emit', () => {
 	it('stages a create then an update of the same temp id (no flush)', async () => {
 		emit({ kind: 'create_element', temp_id: 'tmp_a', type_name: 'Block', properties: {} });
 		emit({ kind: 'update_element', id: 'tmp_a', properties_patch: { name: 'B' } });
-		expect(hasPendingOps()).toBe(true);
+		expect(hasStagedOps()).toBe(true);
 		// no remap (no ack): the temp id is still the cache key
 		expect(getCachedElements().get('tmp_a')?.properties.name).toBe('B');
 		const staged = getStagedOps();
@@ -333,8 +327,7 @@ describe('emit', () => {
 			id: 'tmp_a',
 			properties_patch: { name: 'B' }
 		});
-		await flushNow(); // shim no-op
-		expect(getStagedDepth()).toBe(2); // still staged
+		expect(getStagedDepth()).toBe(2); // both ops remain staged until commit
 	});
 
 	// Converted from 'does not clobber a newer queued optimistic edit when an
@@ -372,7 +365,7 @@ describe('emit', () => {
 		expect(getCachedElements().get('e1')?.properties.name).toBe('A');
 
 		emit({ kind: 'delete_element', id: 'e1' });
-		expect(hasPendingOps()).toBe(false);
+		expect(hasStagedOps()).toBe(false);
 		expect(getCachedElements().has('e1')).toBe(true); // delete not applied either
 	});
 
@@ -402,7 +395,7 @@ describe('emit', () => {
 		expect(getCachedElements().has('tmp_n')).toBe(false);
 		expect(getCachedElements().has('e2')).toBe(true);
 		expect(getCachedRelationships().get('r1')?.source_id).toBe('e1');
-		expect(hasPendingOps()).toBe(false);
+		expect(hasStagedOps()).toBe(false);
 		expect(getModelRev()).toBe(1); // rev untouched — nothing committed
 	});
 });
@@ -469,7 +462,7 @@ describe('reads and lifecycle', () => {
 		expect(await ensureRelationship('nope')).toBeNull();
 	});
 
-	it('refreshSummary adopts rev, undo depth, and issue counts; loadSummary memoizes', async () => {
+	it('refreshSummary adopts rev and issue counts; loadSummary memoizes', async () => {
 		let fetches = 0;
 		server.use(
 			http.get(`${BASE}/model/summary`, () => {
@@ -481,9 +474,9 @@ describe('reads and lifecycle', () => {
 		await loadSummary();
 		expect(getModelSummary()?.element_count).toBe(10);
 		expect(getModelRev()).toBe(4);
-		// Converted: getUndoDepth now reports the STAGED-buffer depth (Spec B
-		// shim), not the server's undo_depth from the summary — no edits staged.
-		expect(getUndoDepth()).toBe(0);
+		// Spec B: the staged buffer (not the server's undo_depth) drives Undo;
+		// no edits staged here.
+		expect(getStagedDepth()).toBe(0);
 		expect(getIssueCounts()).toEqual({ warning: 2 });
 		await loadSummary(); // already loaded
 		expect(fetches).toBe(1);
@@ -491,30 +484,24 @@ describe('reads and lifecycle', () => {
 		expect(fetches).toBe(2);
 	});
 
-	// Converted from 'undo applies the inverse delta and decrements undo depth':
-	// server-undo no longer exists. `undo` is now a shim over the client-side
-	// popLastStaged — it reverts the LAST STAGED op (not a committed batch).
-	// Assert it reverts the staged create, drops it from the buffer, and reports
-	// success; no network request is involved.
-	it('undo (shim) reverts the last staged op client-side', async () => {
+	// Spec B client-side undo: popLastStaged reverts the LAST STAGED op (there is
+	// no server-undo). Assert it reverts the staged create, drops it from the
+	// buffer, and reports success; no network request is involved.
+	it('popLastStaged reverts the last staged op client-side', () => {
 		seedElements([el('e0', { name: 'kept' }, 1)]);
 		emit({ kind: 'create_element', temp_id: 'e1', type_name: 'Block', properties: {} });
 		expect(getCachedElements().has('e1')).toBe(true);
 		expect(getStagedDepth()).toBe(1);
 
-		expect(await undo()).toBe(true);
+		expect(popLastStaged()).toBe(true);
 		expect(getCachedElements().has('e1')).toBe(false); // staged create reverted
 		expect(getCachedElements().has('e0')).toBe(true); // untouched
 		expect(getStagedDepth()).toBe(0);
-		expect(getUndoDepth()).toBe(0);
 	});
 
-	// Converted from 'undo resolves false when the history is empty (409)': maps
-	// to popLastStaged returning false when the staged buffer is empty.
-	it('undo (shim) resolves false when the staged buffer is empty', async () => {
-		expect(await undo()).toBe(false);
-		expect(getUndoDepth()).toBe(0);
-		expect(popLastStaged()).toBe(false); // direct equivalent
+	it('popLastStaged returns false when the staged buffer is empty', () => {
+		expect(popLastStaged()).toBe(false);
+		expect(getStagedDepth()).toBe(0);
 	});
 
 	it('validateAll resets issuesByOwner and counts from the full run', async () => {
@@ -558,11 +545,11 @@ describe('reads and lifecycle', () => {
 		expect(getCachedRelationships().size).toBe(0);
 		expect(getIssuesByOwner().size).toBe(0);
 		expect(getModelRev()).toBe(0);
-		expect(getUndoDepth()).toBe(0);
+		expect(getStagedDepth()).toBe(0);
 		expect(getIssueCounts()).toBeNull();
 		expect(getModelSummary()).toBeNull();
 		expect(getModelError()).toBeNull();
-		expect(hasPendingOps()).toBe(false);
+		expect(hasStagedOps()).toBe(false);
 		// the cancelled queue never reaches the server (an unhandled request
 		// would surface here as a flush error)
 		await vi.advanceTimersByTimeAsync(10);

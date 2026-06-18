@@ -10,8 +10,7 @@ import type {
 	Relationship
 } from '$lib/api/types';
 import { getElement } from '../api/elements';
-import { ConflictError, NotFoundError, ValidationError } from '../api/errors';
-import * as modelOpsApi from '../api/model-ops';
+import { NotFoundError } from '../api/errors';
 import * as modelReadApi from '../api/model-read';
 import { validateModel } from '../api/validation';
 import { mergePatch } from './apply';
@@ -21,39 +20,36 @@ import { remapProperties } from './remap';
 import { getSelection, select } from './selection.svelte';
 
 /**
- * Delta-protocol model store (Phase D1 of the large-model overhaul).
+ * Staged-commit model store (Spec B).
  *
  * The backend session model is the source of truth; this store holds only
  * the FETCHED SUBSET of it (entities brought in by paged reads, searches,
- * neighborhoods, and ops deltas — never the whole model) plus the model-wide
- * counters that drive headers/status bars.
+ * neighborhoods, and commit deltas — never the whole model) plus the
+ * model-wide counters that drive headers/status bars.
  *
- * Mutations keep the synchronous-optimistic `emit(op)` contract of the old
- * `pending.svelte.ts` store: the op is applied to the local caches
- * immediately, queued, and flushed to POST /model/ops in batches —
- * structural ops (create/delete/connect) on a 0 ms timeout, property updates
- * debounced (coalescing successive patches to the same entity). Flushes are
- * strictly serialized: never two in-flight batches.
+ * Mutations keep the synchronous-optimistic `emit(op)` contract: the op is
+ * applied to the local caches immediately, then pushed onto the STAGED-EDITS
+ * buffer (`_queue`) where it is held until an explicit commit. The frontend
+ * no longer auto-flushes to POST /model/ops; the staged buffer is reviewed in
+ * the commit panel, sent through preview → commit (see `checkout.svelte.ts`),
+ * and cleared once the server's canonical post-commit delta is installed.
+ * Property updates still coalesce into an already-staged update of the same
+ * entity.
  *
- * Error policy:
- * - 409 (rev conflict): the store enters a CONFLICT state — the queue is
- *   dropped, further flushing is suspended, the summary is refetched so the
- *   UI can report the server's revision, and `getModelError()` returns a
- *   `kind: 'conflict'` error. Recovery = reload the model (resetModelStore +
- *   re-fetch); local caches may be divergent until then.
- * - 422 (invalid op) and network/server errors: the batch did not apply
- *   server-side, so the optimistic cache effects of the failed batch AND of
- *   everything still queued behind it are reverted exactly from a per-op
- *   journal recorded at emit time (no refetch needed — the journal restores
- *   the precise pre-batch cache state). The queue is cleared and a
- *   `kind: 'rejected'` / `kind: 'error'` error is surfaced; the store stays
- *   usable.
+ * Undo/discard are CLIENT-SIDE: `popLastStaged` / `revertStagedFor` /
+ * `revertAllStaged` replay the per-op journal recorded at emit time to restore
+ * the exact pre-op cache state, no server round-trip.
+ *
+ * The CONFLICT state (`_error.kind === 'conflict'`) is reachable when the
+ * caller declares the caches divergent (a stale-rev recovery path): `emit`
+ * drops ops while in conflict, and recovery is a full reload (resetModelStore
+ * + refetch).
  *
  * Cache policy for deltas: ALL changed entities in a delta are upserted into
  * the caches (deltas are small — O(batch + cascade), not O(model)), so
  * anything the user just touched is guaranteed fresh; deleted ids are
  * dropped; temp ids are remapped to canonical ids everywhere (cache keys,
- * relationship endpoints, ref-shaped property values, queued ops and their
+ * relationship endpoints, ref-shaped property values, staged ops and their
  * revert journals).
  */
 
@@ -76,9 +72,6 @@ interface QueuedOp {
 	revert: RevertEntry[];
 }
 
-/** Debounce window for property-update flushes. Structural ops flush at 0 ms. */
-export const PROPERTY_FLUSH_DELAY_MS = 300;
-
 const _elements = new SvelteMap<string, Element>();
 const _relationships = new SvelteMap<string, Relationship>();
 /** Issues keyed by OWNER (= issue.target_ids[0]), mirroring the backend
@@ -90,16 +83,11 @@ let _modelRev = $state(0);
 /** Bumped only by STRUCTURAL deltas (created/deleted entities, changed
  * relationships) — see {@link getStructureRev}. */
 let _structureRev = $state(0);
-let _undoDepth = $state(0);
 let _issueCounts: IssueCounts | null = $state(null);
 let _error: ModelStoreError | null = $state(null);
 
 let _queue: QueuedOp[] = $state([]);
-let _inFlight = $state(false);
 
-let _flushTimer: ReturnType<typeof setTimeout> | null = null;
-let _flushDeadline = Infinity;
-let _flushPromise: Promise<void> | null = null;
 /** Bumped by resetModelStore so in-flight responses of a dead store are
  * dropped. Reactive: consumers use it as the "a different model was
  * installed" signal (model_rev alone is ambiguous — two freshly loaded
@@ -150,12 +138,6 @@ export function getStructureRev(): number {
 	return _structureRev;
 }
 
-/** @deprecated Spec B: staged depth drives the Undo-enabled check. Removed in
- * Task 15. */
-export function getUndoDepth(): number {
-	return _queue.length;
-}
-
 /** Bumps on every {@link resetModelStore} — i.e. whenever a different model
  * (or no model) is installed. Refresh effects track this + `getModelRev()`. */
 export function getModelGeneration(): number {
@@ -175,11 +157,6 @@ export function clearModelError(): void {
 	// conflict errors are NOT clearable this way: the store is divergent and
 	// only a reload (resetModelStore + refetch) makes it trustworthy again
 	if (_error !== null && _error.kind !== 'conflict') _error = null;
-}
-
-/** @deprecated Spec B: maps to the staged buffer. Removed in Task 15. */
-export function hasPendingOps(): boolean {
-	return hasStagedOps();
 }
 
 // ---------------------------------------------------------------------------
@@ -297,10 +274,6 @@ function addIssueToOwner(issue: Issue): void {
  * Splice an {@link OpsResponse} delta into the store: remap temp ids, upsert
  * changed entities, drop deleted ids, apply the issue-store delta, and adopt
  * the server's revision/issue counts.
- *
- * Does NOT touch `undoDepth` (an OpsResponse does not carry it): callers
- * adjust it (+1 per accepted batch, -1 per undo, 0 after apply-cr) or
- * refresh the summary.
  *
  * Queue-aware upsert: a changed entity that still has a queued op is NOT
  * overwritten with the (now-stale) server state — see the comment at the
@@ -453,29 +426,6 @@ function isPropertyUpdate(
 	return op.kind === 'update_element' || op.kind === 'update_relationship';
 }
 
-function cancelFlushTimer(): void {
-	if (_flushTimer !== null) {
-		clearTimeout(_flushTimer);
-		_flushTimer = null;
-		_flushDeadline = Infinity;
-	}
-}
-
-function scheduleFlush(delayMs: number): void {
-	if (_error?.kind === 'conflict') return; // flushing is suspended until reload
-	const deadline = Date.now() + delayMs;
-	if (_flushTimer !== null) {
-		if (deadline >= _flushDeadline) return; // an earlier-or-equal flush is already due
-		cancelFlushTimer();
-	}
-	_flushDeadline = deadline;
-	_flushTimer = setTimeout(() => {
-		_flushTimer = null;
-		_flushDeadline = Infinity;
-		void startFlush();
-	}, delayMs);
-}
-
 /**
  * Apply `op` optimistically and append it to the STAGED-EDITS buffer.
  *
@@ -597,8 +547,9 @@ export function popLastStaged(): boolean {
 	return true;
 }
 
-/** Drop the buffer WITHOUT reverting caches — after a successful commit the
- * caches already hold the committed state (applyDelta installed it). */
+/** Drop the buffer WITHOUT reverting caches — the commit flow calls this first
+ * and then applyDelta installs the server's canonical post-commit state over
+ * the optimistic caches. */
 export function clearStaged(): void {
 	_queue = [];
 }
@@ -607,7 +558,11 @@ export function clearStaged(): void {
  * = each touched entity's earliest journaled `before` (absent ⇒ created);
  * working = its current cache value (absent ⇒ deleted). Reuses computeDiff. */
 export function getStagedDiff(): Diff {
+	// Ephemeral computation scratch, rebuilt on every call and never read
+	// reactively — plain Map/Set are intentional (not reactive store state).
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity
 	const baseElements = new Map<string, Element>();
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity
 	const baseRels = new Map<string, Relationship>();
 	for (const q of _queue) {
 		for (const r of q.revert) {
@@ -617,6 +572,7 @@ export function getStagedDiff(): Diff {
 			} else if (!baseRels.has(r.id)) baseRels.set(r.id, r.before);
 		}
 	}
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity
 	const touched = new Set<string>();
 	for (const q of _queue) touched.add(queuedTargetId(q));
 	// include ids that only appear as journal targets (cascade-deleted rels)
@@ -644,80 +600,6 @@ export function getStagedChangeCount(): number {
 
 export function setModelError(e: ModelStoreError | null): void {
 	_error = e;
-}
-
-async function handleFlushError(err: unknown, batch: QueuedOp[]): Promise<void> {
-	const message = err instanceof Error ? err.message : String(err);
-	if (err instanceof ConflictError) {
-		// rev mismatch: someone/something else moved the session model. The
-		// optimistic caches can no longer be trusted; freeze mutations and let
-		// the UI offer a reload. (resetModelStore is the recovery entry point.)
-		cancelFlushTimer();
-		_queue = [];
-		_error = { kind: 'conflict', message };
-		try {
-			await refreshSummary();
-		} catch {
-			// summary refetch is best-effort; the conflict error stands either way
-		}
-		return;
-	}
-	// 422 (and network/server errors): the batch did not apply server-side.
-	// Roll the caches back to the pre-batch state — including ops queued
-	// behind the failed batch, whose optimistic effects may depend on it.
-	cancelFlushTimer();
-	const trailing = _queue;
-	_queue = [];
-	revertOptimistic([...batch, ...trailing]);
-	_error = {
-		kind: err instanceof ValidationError ? 'rejected' : 'error',
-		message
-	};
-}
-
-async function flushLoop(): Promise<void> {
-	const generation = _generation;
-	_inFlight = true;
-	try {
-		// drain until empty — but stop when a debounce timer is pending (ops
-		// emitted while a batch was in flight keep their debounce window) or
-		// the store entered conflict state
-		while (_queue.length > 0 && _flushTimer === null && _error?.kind !== 'conflict') {
-			const batch = _queue;
-			_queue = [];
-			try {
-				const delta = await modelOpsApi.applyOps(
-					_modelRev,
-					batch.map((q) => q.op),
-					_clientConfig
-				);
-				if (generation !== _generation) return; // store was reset mid-flight
-				applyDelta(delta);
-				_undoDepth += 1;
-			} catch (err) {
-				if (generation !== _generation) return;
-				await handleFlushError(err, batch);
-				return;
-			}
-		}
-	} finally {
-		if (generation === _generation) _inFlight = false;
-	}
-}
-
-function startFlush(): Promise<void> {
-	if (_flushPromise === null) {
-		_flushPromise = flushLoop().finally(() => {
-			_flushPromise = null;
-		});
-	}
-	return _flushPromise;
-}
-
-/** @deprecated Spec B: edits no longer flush continuously. No-op kept so
- * legacy save-gating callers resolve cleanly. Removed in Task 15. */
-export async function flushNow(): Promise<void> {
-	return;
 }
 
 // ---------------------------------------------------------------------------
@@ -818,15 +700,14 @@ export async function ensureRelationship(id: string): Promise<Relationship | nul
 }
 
 // ---------------------------------------------------------------------------
-// Summary / undo / validation / lifecycle
+// Summary / validation / lifecycle
 // ---------------------------------------------------------------------------
 
-/** Fetch GET /model/summary and adopt rev / undo depth / issue counts. */
+/** Fetch GET /model/summary and adopt rev / issue counts. */
 export async function refreshSummary(): Promise<ModelSummary> {
 	const s = await modelReadApi.getModelSummary(_clientConfig);
 	_summary = s;
 	_modelRev = s.model_rev;
-	_undoDepth = s.undo_depth;
 	_issueCounts = s.issue_counts;
 	return s;
 }
@@ -844,7 +725,6 @@ export async function loadSummary(): Promise<ModelSummary> {
 export function adoptSummary(s: ModelSummary): void {
 	_summary = s;
 	_modelRev = s.model_rev;
-	_undoDepth = s.undo_depth;
 	_issueCounts = s.issue_counts;
 }
 
@@ -889,19 +769,15 @@ export function seedRelationships(rels: readonly Relationship[]): void {
 	}
 }
 
-/** @deprecated Spec B: client-side undo of the last staged op. Removed in
- * Task 15 (callers move to popLastStaged). */
-export async function undo(): Promise<boolean> {
-	return popLastStaged();
-}
-
 /**
  * Full validation run over the SESSION model (POST /model/validate with no
- * body — which also seeds the server-side issue store so subsequent ops
+ * body — which also seeds the server-side issue store so subsequent commit
  * deltas are exact). Resets `issuesByOwner` and the counts from the result.
+ *
+ * Validates the last committed session state; staged-but-uncommitted edits are
+ * not visible to the server until commit (the commit preview validates those).
  */
 export async function validateAll(): Promise<Issue[]> {
-	await flushNow();
 	const issues = await validateModel(undefined, _clientConfig);
 	_issuesByOwner.clear();
 	const counts: IssueCounts = {};
@@ -921,7 +797,6 @@ export async function validateAll(): Promise<Issue[]> {
  */
 export function resetModelStore(): void {
 	_generation += 1;
-	cancelFlushTimer();
 	_pendingElementFetches.clear();
 	_inFlightBatchIds.clear();
 	_elements.clear();
@@ -930,9 +805,7 @@ export function resetModelStore(): void {
 	_summary = null;
 	_modelRev = 0;
 	_structureRev = 0;
-	_undoDepth = 0;
 	_issueCounts = null;
 	_error = null;
 	_queue = [];
-	_inFlight = false;
 }
