@@ -112,6 +112,11 @@ export {
 	stopRealtime
 } from './realtime.svelte';
 export {
+	setCheckoutApiConfig, setProjectInfo, getRole, canEdit, ensureCheckout,
+	getHeldToken, getHeldTokens, isCheckedOutByMe, resetCheckout,
+	type CheckoutResult, type LockConflictLite
+} from './checkout.svelte';
+export {
 	addSearchCriterion,
 	availableCriterionTypes,
 	clearSearchCriteria,
