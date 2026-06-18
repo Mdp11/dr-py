@@ -1,3 +1,4 @@
+export * as checkout from './checkout';
 export * as metamodel from './metamodel';
 export * as model from './model';
 export * as modelOps from './model-ops';
@@ -9,4 +10,4 @@ export * as view from './view';
 export * from './errors';
 export * from './types';
 export type { ClientConfig, ApiFetchInit } from './client';
-export { apiFetch } from './client';
+export { apiFetch, getCurrentUserId } from './client';
