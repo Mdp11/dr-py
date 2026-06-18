@@ -8,7 +8,8 @@ import {
 	getStaleResources,
 	isCheckedOutByMe,
 	getRole,
-	canEdit
+	canEdit,
+	discardElement
 } from '../index';
 import * as api from '$lib/api/checkout';
 
@@ -52,6 +53,55 @@ describe('project open + own-lock expiry', () => {
 		]);
 		expect(getStaleResources()).toContain('e1');
 		expect(isCheckedOutByMe('e1')).toBe(false); // token dropped
+	});
+
+	it('re-acquiring a stale resource clears it from getStaleResources', async () => {
+		vi.spyOn(api, 'acquireLocks').mockResolvedValue({
+			token: 't1',
+			leases: [
+				{
+					resource_id: 'e1',
+					mode: 'exclusive',
+					holder: 'default-user',
+					token: 't1',
+					intent: 'edit',
+					expires_at: 1
+				}
+			]
+		});
+		await ensureCheckout([{ resource_id: 'e1', mode: 'exclusive' }], 'edit');
+		handleRemoteLockEvent('expired', [
+			{ resource_id: 'e1', mode: 'exclusive', holder_id: 'default-user' }
+		]);
+		expect(getStaleResources()).toContain('e1');
+		// re-acquire (the token was dropped by the expiry, so this hits the network)
+		await ensureCheckout([{ resource_id: 'e1', mode: 'exclusive' }], 'edit');
+		expect(getStaleResources()).not.toContain('e1');
+		expect(isCheckedOutByMe('e1')).toBe(true);
+	});
+
+	it('discardElement clears a stale resource', async () => {
+		vi.spyOn(api, 'acquireLocks').mockResolvedValue({
+			token: 't1',
+			leases: [
+				{
+					resource_id: 'e1',
+					mode: 'exclusive',
+					holder: 'default-user',
+					token: 't1',
+					intent: 'edit',
+					expires_at: 1
+				}
+			]
+		});
+		vi.spyOn(api, 'releaseLock').mockResolvedValue(undefined);
+		await ensureCheckout([{ resource_id: 'e1', mode: 'exclusive' }], 'edit');
+		handleRemoteLockEvent('expired', [
+			{ resource_id: 'e1', mode: 'exclusive', holder_id: 'default-user' }
+		]);
+		expect(getStaleResources()).toContain('e1');
+		await discardElement('e1');
+		expect(getStaleResources()).not.toContain('e1');
 	});
 
 	it('ignores expiry events for other users', async () => {

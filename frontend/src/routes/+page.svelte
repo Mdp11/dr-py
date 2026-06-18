@@ -76,6 +76,15 @@
 			resetCheckout();
 			clearSelection();
 			await refreshSummary();
+			try {
+				// resetCheckout() reset the role to 'viewer'; re-adopt role + lock TTL
+				// from /open (mirrors boot()'s placement after refreshSummary), best-
+				// effort so a failure doesn't break the reload. Without this, an in-app
+				// reload leaves the user stuck view-only until a full browser refresh.
+				await loadProjectInfo();
+			} catch {
+				// role/ttl best-effort; editing stays gated as viewer until it loads
+			}
 			await refreshView();
 		} catch (err) {
 			console.error('Model reload failed', err);
