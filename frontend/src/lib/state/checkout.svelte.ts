@@ -2,9 +2,10 @@ import { SvelteMap } from 'svelte/reactivity';
 
 import type { ClientConfig } from '$lib/api/client';
 import { getCurrentUserId } from '$lib/api/client';
-import { acquireLocks, releaseLock, renewLock } from '$lib/api/checkout';
+import { acquireLocks, commitChanges, previewCommit, releaseLock, renewLock } from '$lib/api/checkout';
 import { ConflictError } from '$lib/api/errors';
-import type { LeaseOut, LockIntent, LockTargetIn } from '$lib/api/types';
+import type { CommitResponse, LeaseOut, LockIntent, LockTargetIn, PreviewResponse } from '$lib/api/types';
+import { applyDelta, clearStaged, getModelRev, getStagedOps, revertAllStaged, revertStagedFor } from './model.svelte';
 
 /**
  * Checkout store (Spec B): the editing-session state layered over the model
@@ -156,5 +157,49 @@ async function _renewAll(): Promise<void> {
 
 // --- expiry hook (Task 8) --------------------------------------------------
 function _onTokenExpired(_token: string): void {}
+
+// --- preview / commit / discard --------------------------------------------
+
+/** Preview the staged batch at the live rev (kept current by the feed). */
+export function previewStaged(): Promise<PreviewResponse> {
+	return previewCommit(getModelRev(), getStagedOps(), _clientConfig);
+}
+
+/** Commit all staged edits. On success the server releases the passed tokens,
+ * so we apply the delta and clear the buffer + registry locally. */
+export async function commitStaged(message: string, ackErrors: boolean): Promise<CommitResponse> {
+	const res = await commitChanges(
+		{ baseRev: getModelRev(), ops: getStagedOps(), message, lockTokens: getHeldTokens(), ackErrors },
+		_clientConfig
+	);
+	// Clear the staged buffer first so applyDelta's hasQueuedOpFor guard does
+	// not skip the committed elements — the server's canonical rev is the truth.
+	clearStaged();
+	applyDelta(res);
+	_registry.clear();
+	_stopHeartbeat();
+	return res;
+}
+
+/** Per-element abandon: revert the element's staged edits and release its
+ * token (which also frees any co-acquired resources, e.g. a delete subtree). */
+export async function discardElement(id: string): Promise<void> {
+	const token = getHeldToken(id);
+	revertStagedFor(id);
+	if (token !== undefined) {
+		_dropToken(token);
+		await releaseLock(token, _clientConfig);
+	}
+	if (_registry.size === 0) _stopHeartbeat();
+}
+
+/** Abandon everything: revert all staged edits and release every token. */
+export async function discardAll(): Promise<void> {
+	revertAllStaged();
+	const tokens = getHeldTokens();
+	_registry.clear();
+	_stopHeartbeat();
+	await Promise.all(tokens.map((t) => releaseLock(t, _clientConfig).catch(() => {})));
+}
 
 export const __ttlForTests = () => _lockTtlSeconds;
