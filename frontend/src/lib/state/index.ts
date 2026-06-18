@@ -120,6 +120,7 @@ export {
 	type CheckoutResult, type LockConflictLite
 } from './checkout.svelte';
 export { editLock, connectLock, deleteLock } from './edit-gate';
+export { lockBadgeFor, type LockBadge } from './lock-badge';
 export { getLockNotice, setLockNotice } from './lock-notice.svelte';
 export {
 	addSearchCriterion,
