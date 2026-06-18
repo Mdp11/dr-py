@@ -7,6 +7,7 @@ import {
 	previewStaged,
 	discardElement,
 	getHeldTokens,
+	getStagedOps,
 	isCheckedOutByMe,
 	emit,
 	seedElements,
@@ -109,5 +110,74 @@ describe('commit lifecycle', () => {
 		expect(getCachedElements().get('e1')?.properties.name).toBe('a'); // reverted
 		expect(isCheckedOutByMe('e1')).toBe(false);
 		expect(hasStagedOps()).toBe(false);
+	});
+
+	it('discardElement keeps a lock a remaining co-acquired staged op still needs', async () => {
+		// Scenario: edit-lock source (token T1), then connect source->target. The
+		// connect's ensureCheckout is idempotent — source is already held under T1,
+		// so it only acquires the target (token T2). It stages a create_relationship
+		// keyed by its temp_id whose commit needs the SOURCE's exclusive lock.
+		// Discarding the source must NOT release T1, or the relationship op would
+		// be orphaned into a 409 "missing lock" at commit.
+		vi.spyOn(api, 'acquireLocks').mockImplementation(async (req) => {
+			// return one lease per requested target, token by source membership
+			const token = req.targets.some((t) => t.resource_id === 'src') ? 't_src' : 't_tgt';
+			return {
+				token,
+				leases: req.targets.map((t) => ({
+					resource_id: t.resource_id,
+					mode: t.mode,
+					holder: 'default-user',
+					token,
+					intent: req.intent,
+					expires_at: 1
+				}))
+			};
+		});
+		const rel = vi.spyOn(api, 'releaseLock').mockResolvedValue(undefined);
+
+		seedElements([
+			{ id: 'src', type_name: 'T', properties: { name: 'a' }, rev: 1 },
+			{ id: 'tgt', type_name: 'T', properties: { name: 'b' }, rev: 1 }
+		]);
+
+		// 1. edit-lock the source and stage a property edit on it (token t_src)
+		await ensureCheckout([{ resource_id: 'src', mode: 'exclusive' }], 'edit');
+		emit({ kind: 'update_element', id: 'src', properties_patch: { name: 'a2' } });
+
+		// 2. connect source->target: source already held (idempotent), so this only
+		//    acquires the target under t_tgt, and stages a create_relationship.
+		await ensureCheckout(
+			[
+				{ resource_id: 'src', mode: 'exclusive' },
+				{ resource_id: 'tgt', mode: 'shared' }
+			],
+			'edit'
+		);
+		emit({
+			kind: 'create_relationship',
+			temp_id: 'tmp_rel1',
+			type_name: 'R',
+			source_id: 'src',
+			target_id: 'tgt',
+			properties: {}
+		});
+
+		expect(getHeldTokens().sort()).toEqual(['t_src', 't_tgt']);
+
+		// 3. discard the source: its property edit reverts, but the source token
+		//    (t_src) is the lock the staged create_relationship still needs.
+		await discardElement('src');
+
+		// t_src is NOT released (the relationship op still needs the source lock)
+		expect(rel).not.toHaveBeenCalledWith('t_src', undefined);
+		// the relationship op is still staged
+		expect(getStagedOps()).toEqual([
+			expect.objectContaining({ kind: 'create_relationship', temp_id: 'tmp_rel1' })
+		]);
+		// the source's own property edit was reverted
+		expect(getCachedElements().get('src')?.properties.name).toBe('a');
+		// invariant: a lock a remaining staged op needs is still held
+		expect(getHeldTokens()).toContain('t_src');
 	});
 });

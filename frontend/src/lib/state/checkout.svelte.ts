@@ -19,6 +19,7 @@ import type {
 	PreviewResponse
 } from '$lib/api/types';
 import type { LeaseLite } from '$lib/api/feed';
+import type { Op } from './ops';
 import {
 	applyDelta,
 	clearStaged,
@@ -131,6 +132,10 @@ export async function ensureCheckout(
 	try {
 		const res = await acquireLocks({ targets: needed, intent, steal: false }, _clientConfig);
 		_recordLeases(res.leases);
+		// Re-acquiring a resource that had gone stale (server-side TTL lapse)
+		// makes its staged edits committable again — clear the stale mark so the
+		// StatusBar warning is not sticky.
+		for (const le of res.leases) _stale.delete(le.resource_id);
 		_maybeStartHeartbeat(); // defined in Task 6
 		return { ok: true };
 	} catch (err) {
@@ -255,15 +260,64 @@ export async function commitStaged(message: string, ackErrors: boolean): Promise
 	return res;
 }
 
+/**
+ * The set of resource_ids that `ops` need a lock on at commit time:
+ *   - update/delete element|relationship -> the op's `id`
+ *   - create_relationship -> its `source_id` AND `target_id`
+ *   - create_element -> its `temp_id`
+ * Used by {@link discardElement} to avoid releasing a token that a REMAINING
+ * staged op still depends on (e.g. a connect's create_relationship needs the
+ * source's exclusive lock even after the source's own property edit is
+ * discarded).
+ */
+function lockedResourcesNeededBy(ops: Op[]): Set<string> {
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity
+	const needed = new Set<string>();
+	for (const op of ops) {
+		switch (op.kind) {
+			case 'create_element':
+				needed.add(op.temp_id);
+				break;
+			case 'create_relationship':
+				needed.add(op.source_id);
+				needed.add(op.target_id);
+				break;
+			case 'update_element':
+			case 'delete_element':
+			case 'update_relationship':
+			case 'delete_relationship':
+				needed.add(op.id);
+				break;
+		}
+	}
+	return needed;
+}
+
 /** Per-element abandon: revert the element's staged edits and release its
- * token (which also frees any co-acquired resources, e.g. a delete subtree). */
+ * token. The token is released ONLY when no REMAINING staged op still needs a
+ * lock on any resource the token covers (a connect holds the source under one
+ * token but stages a create_relationship that still needs that source lock to
+ * commit; releasing it here would orphan that op into a 409 at commit). When a
+ * remaining op still needs it, keep the token (and its registry entries) intact
+ * so the lock is still reported held and sent at commit. */
 export async function discardElement(id: string): Promise<void> {
 	const token = getHeldToken(id);
 	revertStagedFor(id);
 	if (token !== undefined) {
-		_dropToken(token);
-		await releaseLock(token, _clientConfig);
+		const stillNeeded = lockedResourcesNeededBy(getStagedOps());
+		const tokenResources = [..._registry].filter(([, l]) => l.token === token).map(([rid]) => rid);
+		const tokenStillNeeded = tokenResources.some((rid) => stillNeeded.has(rid));
+		if (!tokenStillNeeded) {
+			// No remaining staged op needs any resource this token covers — safe to
+			// release the whole token (frees co-acquired resources, e.g. a subtree).
+			_dropToken(token);
+			await releaseLock(token, _clientConfig);
+		}
+		// else: a remaining op still needs a resource this token covers — keep the
+		// lease and its registry entries so the lock stays held and is sent at commit.
 	}
+	// Its staged edits were abandoned; the resource is no longer stale-blocked.
+	_stale.delete(id);
 	if (_registry.size === 0) _stopHeartbeat();
 }
 
@@ -272,6 +326,7 @@ export async function discardAll(): Promise<void> {
 	revertAllStaged();
 	const tokens = getHeldTokens();
 	_registry.clear();
+	_stale.clear();
 	_stopHeartbeat();
 	await Promise.all(tokens.map((t) => releaseLock(t, _clientConfig).catch(() => {})));
 }
