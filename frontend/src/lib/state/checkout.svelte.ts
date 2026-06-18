@@ -2,7 +2,7 @@ import { SvelteMap } from 'svelte/reactivity';
 
 import type { ClientConfig } from '$lib/api/client';
 import { getCurrentUserId } from '$lib/api/client';
-import { acquireLocks, releaseLock } from '$lib/api/checkout';
+import { acquireLocks, releaseLock, renewLock } from '$lib/api/checkout';
 import { ConflictError } from '$lib/api/errors';
 import type { LeaseOut, LockIntent, LockTargetIn } from '$lib/api/types';
 
@@ -121,8 +121,40 @@ export function resetCheckout(): void {
 	_stopHeartbeat(); // defined in Task 6
 }
 
-// --- heartbeat (Task 6) ----------------------------------------------------
-// Stubs so this task compiles standalone; Task 6 fills them in.
-function _maybeStartHeartbeat(): void {}
-function _stopHeartbeat(): void {}
+// --- heartbeat -------------------------------------------------------------
+
+let _heartbeat: ReturnType<typeof setInterval> | null = null;
+
+function _maybeStartHeartbeat(): void {
+	if (_heartbeat !== null) return;
+	if (_registry.size === 0) return;
+	const intervalMs = Math.max(1, Math.floor((_lockTtlSeconds / 2) * 1000));
+	_heartbeat = setInterval(() => void _renewAll(), intervalMs);
+}
+
+function _stopHeartbeat(): void {
+	if (_heartbeat !== null) {
+		clearInterval(_heartbeat);
+		_heartbeat = null;
+	}
+}
+
+async function _renewAll(): Promise<void> {
+	for (const token of getHeldTokens()) {
+		try {
+			const res = await renewLock(token, _clientConfig);
+			if (!res.ok) {
+				_dropToken(token);
+				_onTokenExpired(token);
+			}
+		} catch {
+			// transient renew failure: keep the token; next tick retries
+		}
+	}
+	if (_registry.size === 0) _stopHeartbeat();
+}
+
+// --- expiry hook (Task 8) --------------------------------------------------
+function _onTokenExpired(_token: string): void {}
+
 export const __ttlForTests = () => _lockTtlSeconds;
