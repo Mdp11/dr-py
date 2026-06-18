@@ -2,11 +2,31 @@ import { SvelteMap } from 'svelte/reactivity';
 
 import type { ClientConfig } from '$lib/api/client';
 import { getCurrentUserId } from '$lib/api/client';
-import { acquireLocks, commitChanges, openProject, previewCommit, releaseLock, renewLock } from '$lib/api/checkout';
+import {
+	acquireLocks,
+	commitChanges,
+	openProject,
+	previewCommit,
+	releaseLock,
+	renewLock
+} from '$lib/api/checkout';
 import { ConflictError } from '$lib/api/errors';
-import type { CommitResponse, LeaseOut, LockIntent, LockTargetIn, PreviewResponse } from '$lib/api/types';
+import type {
+	CommitResponse,
+	LeaseOut,
+	LockIntent,
+	LockTargetIn,
+	PreviewResponse
+} from '$lib/api/types';
 import type { LeaseLite } from '$lib/api/feed';
-import { applyDelta, clearStaged, getModelRev, getStagedOps, revertAllStaged, revertStagedFor } from './model.svelte';
+import {
+	applyDelta,
+	clearStaged,
+	getModelRev,
+	getStagedOps,
+	revertAllStaged,
+	revertStagedFor
+} from './model.svelte';
 
 /**
  * Checkout store (Spec B): the editing-session state layered over the model
@@ -60,6 +80,8 @@ export function getHeldToken(resourceId: string): string | undefined {
 }
 
 export function getHeldTokens(): string[] {
+	// ephemeral dedup of token strings, not reactive state
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity
 	return [...new Set([..._registry.values()].map((l) => l.token))];
 }
 
@@ -215,7 +237,13 @@ export function previewStaged(): Promise<PreviewResponse> {
  * so we apply the delta and clear the buffer + registry locally. */
 export async function commitStaged(message: string, ackErrors: boolean): Promise<CommitResponse> {
 	const res = await commitChanges(
-		{ baseRev: getModelRev(), ops: getStagedOps(), message, lockTokens: getHeldTokens(), ackErrors },
+		{
+			baseRev: getModelRev(),
+			ops: getStagedOps(),
+			message,
+			lockTokens: getHeldTokens(),
+			ackErrors
+		},
 		_clientConfig
 	);
 	// Clear the staged buffer first so applyDelta's hasQueuedOpFor guard does

@@ -1,9 +1,18 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
-	emit, resetModelStore, seedElements, getCachedElements,
-	getStagedOps, getStagedOpsFor, getStagedDepth, hasStagedOps,
-	getStagedDiff, getStagedChangeCount, revertStagedFor, revertAllStaged,
-	popLastStaged, clearStaged
+	emit,
+	resetModelStore,
+	seedElements,
+	getCachedElements,
+	getStagedOpsFor,
+	getStagedDepth,
+	hasStagedOps,
+	getStagedDiff,
+	getStagedChangeCount,
+	revertStagedFor,
+	revertAllStaged,
+	popLastStaged,
+	clearStaged
 } from '../index';
 
 beforeEach(() => resetModelStore());
