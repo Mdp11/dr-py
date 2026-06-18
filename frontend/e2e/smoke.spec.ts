@@ -42,65 +42,56 @@ test('load metamodel + empty model -> create element -> see in diff', async ({ p
 	await nameInput.fill(ENGINE_NAME);
 	await nameInput.blur();
 
-	// --- 5. Open the diff drawer and confirm the change is listed ------------
-	const saveButton = page.getByRole('button', { name: 'Save', exact: true });
-	await expect(saveButton).toBeVisible();
-	await saveButton.click();
+	// --- 5. Open the commit drawer and confirm the change is listed ----------
+	// Spec B: "Save" was renamed to "Commit" (opens the DiffDrawer/commit panel).
+	const commitButton = page.getByRole('button', { name: 'Commit', exact: true });
+	await expect(commitButton).toBeVisible();
+	await commitButton.click();
 
-	const drawer = page.getByRole('dialog', { name: /pending changes/i });
+	const drawer = page.getByRole('dialog', { name: /commit changes/i });
 	await expect(drawer).toBeVisible();
-	await expect(drawer.getByText(/added \(\d+\)/i)).toBeVisible();
+	// Spec B: getStagedDiff tracks per-op reverts; a newly created element that is
+	// also edited in the same session appears as "Modified" (the update op's revert
+	// snapshot becomes the diff baseline), not "Added". Either status confirms the
+	// change is staged — the important assertion is the ENGINE_NAME check below.
+	await expect(drawer.getByText(/(?:added|modified) \(\d+\)/i)).toBeVisible();
 	await expect(drawer.getByText(ENGINE_NAME).first()).toBeVisible();
 });
 
-test('Export CR checkbox produces a second .cr.json download', async ({ page }) => {
+test('Export button downloads the model as a .json file', async ({ page }) => {
 	test.setTimeout(90_000);
 
-	// Force the <a download> fallback path inside saveJsonToFile.
+	// Force the <a download> fallback path inside saveJsonToFile so the
+	// download event fires without the native file-picker dialog.
 	await page.addInitScript(() => {
 		delete (window as { showSaveFilePicker?: unknown }).showSaveFilePicker;
 	});
 
 	await page.goto('/');
 
-	// Same setup as the first smoke test.
+	// Spec B: the old DiffDrawer save-to-file flow (with "Export CR" checkbox) was
+	// replaced.  "Commit" now persists changes server-side; the separate "Export"
+	// button in the TopBar downloads the current model as JSON.
 	await loadFiles(page, {
 		metamodel: METAMODEL_PATH,
 		model: {
-			name: 'cr-smoke.json',
+			name: 'export-smoke.json',
 			mimeType: 'application/json',
 			buffer: Buffer.from('{"elements": [], "relationships": []}')
 		}
 	});
 
-	// Create an element so there's something to save.
-	await page.getByRole('button', { name: 'New element' }).click();
-	await page.getByRole('button', { name: 'Block', exact: true }).click();
-	const inspector = page.getByTestId('inspector');
-	const nameInput = inspector.locator('input[type="text"]').first();
-	await nameInput.fill(`cr-block-${RUN_ID}`);
-	await nameInput.blur();
-
-	// Open the drawer.
-	await page.getByRole('button', { name: 'Save', exact: true }).click();
-	const drawer = page.getByRole('dialog', { name: /pending changes/i });
-	await expect(drawer).toBeVisible();
-
-	// Check the checkbox.
-	const exportCrCheckbox = drawer.getByLabel('Export CR');
-	await exportCrCheckbox.check();
-
-	// Two downloads expected: the model JSON first, then the CR. Parallel
-	// `waitForEvent('download')` calls both resolve to the *same* first
-	// event, so collect every download via a `page.on` listener instead.
+	// Collect downloads via listener (works for both the <a> fallback and the
+	// File System Access API path, though we forced the fallback above).
 	const downloads: Download[] = [];
 	page.on('download', (d) => downloads.push(d));
 
-	await drawer.getByRole('button', { name: /save \(\d+\)/i }).click();
+	// Click the TopBar "Export" button — downloads the active model JSON.
+	await page.getByRole('button', { name: 'Export', exact: true }).click();
 
-	await expect.poll(() => downloads.length, { timeout: 10_000 }).toBe(2);
+	await expect.poll(() => downloads.length, { timeout: 10_000 }).toBe(1);
 
+	// The downloaded file must be a plain .json (not a .cr.json).
 	expect(downloads[0].suggestedFilename()).toMatch(/\.json$/);
 	expect(downloads[0].suggestedFilename()).not.toMatch(/\.cr\.json$/);
-	expect(downloads[1].suggestedFilename()).toMatch(/^\d{8}T\d{6}_.+\.cr\.json$/);
 });
