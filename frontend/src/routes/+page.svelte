@@ -17,8 +17,12 @@
 		getDiffDrawerOpen,
 		getModelError,
 		getResultsPanelOpen,
+		handleRemoteLockEvent,
+		loadProjectInfo,
+		onLockEvent,
 		refreshSummary,
 		refreshView,
+		resetCheckout,
 		resetModelStore,
 		setDiffDrawerOpen,
 		setMetamodel,
@@ -27,6 +31,7 @@
 	} from '$lib/state';
 
 	onMount(() => startRealtime());
+	onMount(() => onLockEvent((action, leases) => handleRemoteLockEvent(action, leases)));
 	onMount(() => {
 		void boot();
 	});
@@ -48,6 +53,11 @@
 		} catch {
 			return; // metamodel but no model
 		}
+		try {
+			await loadProjectInfo();
+		} catch {
+			// role/ttl best-effort; editing stays gated as viewer until it loads
+		}
 		await refreshView();
 	}
 
@@ -63,6 +73,7 @@
 		reloading = true;
 		try {
 			resetModelStore();
+			resetCheckout();
 			clearSelection();
 			await refreshSummary();
 			await refreshView();
