@@ -1,9 +1,18 @@
 <script lang="ts">
-	import type { Element, RelationshipType } from '$lib/api/types';
-	import { isSubtype } from '$lib/metamodel/helpers';
-	import { createTempId, emit, ensureElement, getCachedElements, getMetamodel } from '$lib/state';
+	import type { Element } from '$lib/api/types';
+	import { buildPickerTypeOptions, outCountsByType } from '$lib/metamodel/connection-rules';
+	import {
+		createTempId,
+		emit,
+		ensureElement,
+		getCachedElements,
+		getCachedRelationships,
+		getMetamodel,
+		seedRelationships
+	} from '$lib/state';
 	import { connectLock } from '$lib/state/edit-gate';
 	import { fetchElementsOfType } from '$lib/state/element-queries';
+	import { listElementRelationships } from '$lib/api/model-read';
 	import { elementDisplayName as displayName } from '$lib/util/element-name';
 	import { Plus, X } from '@lucide/svelte';
 
@@ -15,6 +24,7 @@
 
 	const mm = $derived(getMetamodel());
 	const elements = $derived(getCachedElements());
+	const relationships = $derived(getCachedRelationships());
 
 	$effect(() => {
 		void ensureElement(sourceId);
@@ -22,39 +32,52 @@
 
 	const source = $derived(elements.get(sourceId) ?? null);
 
-	const availableTypes = $derived.by((): RelationshipType[] => {
-		if (mm === null || source === null) return [];
-		return mm.relationships
-			.filter((rt) => !rt.abstract)
-			.filter((rt) => isSubtype(mm, source.type_name, rt.source))
-			.slice()
-			.sort((a, b) => a.name.localeCompare(b.name));
-	});
-
 	let expanded = $state(false);
+	let showAll = $state(false);
 	let selectedType = $state<string>('');
 	let selectedTarget = $state<string>('');
 
-	const chosenType = $derived.by((): RelationshipType | null => {
-		if (mm === null || selectedType === '') return null;
-		return mm.relationships.find((rt) => rt.name === selectedType) ?? null;
+	// Seed this source's outgoing relationships once expanded, so out-counts
+	// (and thus the multiplicity gray-out) are available. The list itself is
+	// derived from the reactive cache, so optimistic emits update counts live.
+	const SEED_LIMIT = 500;
+	$effect(() => {
+		if (!expanded) return;
+		const id = sourceId;
+		void (async () => {
+			try {
+				const page = await listElementRelationships(id, { direction: 'out', limit: SEED_LIMIT });
+				seedRelationships(page.items);
+			} catch (err) {
+				console.error('Failed to seed source relationships', err);
+			}
+		})();
 	});
 
-	// Candidate targets are fetched server-side (paged, capped) per chosen
-	// relationship type — the client no longer scans a whole-model snapshot.
+	const outCounts = $derived(outCountsByType(relationships.values(), sourceId));
+
+	const typeOptions = $derived.by(() => {
+		if (mm === null || source === null) return [];
+		return buildPickerTypeOptions(mm, source.type_name, outCounts, showAll);
+	});
+
+	const chosenOption = $derived(
+		selectedType === '' ? null : (typeOptions.find((o) => o.rt.name === selectedType) ?? null)
+	);
+
+	// Candidate targets are fetched server-side per chosen type, across the
+	// UNION of its allowed target types (a type can map to several).
 	const TARGET_CAP = 200;
 	let candidateTargets: Element[] = $state([]);
 	let candidatesTotal = $state(0);
-	// false = subtype queries were skipped once the cap was hit, so the total
-	// is a lower bound ("N+")
 	let candidatesTotalExact = $state(true);
 	let fetchSeq = 0;
 
 	$effect(() => {
 		const meta = mm;
-		const t = chosenType;
+		const opt = chosenOption;
 		const seq = ++fetchSeq;
-		if (meta === null || t === null) {
+		if (meta === null || opt === null) {
 			candidateTargets = [];
 			candidatesTotal = 0;
 			candidatesTotalExact = true;
@@ -62,11 +85,27 @@
 		}
 		void (async () => {
 			try {
-				const res = await fetchElementsOfType(meta, t.target, TARGET_CAP);
+				const byId = new Map<string, Element>();
+				let total = 0;
+				let exact = true;
+				for (const targetType of opt.targetTypes) {
+					const remaining = TARGET_CAP - byId.size;
+					if (remaining <= 0) {
+						exact = false;
+						break;
+					}
+					const res = await fetchElementsOfType(meta, targetType, remaining);
+					if (seq !== fetchSeq) return;
+					for (const el of res.elements) byId.set(el.id, el);
+					total += res.total;
+					if (!res.totalIsExact) exact = false;
+				}
 				if (seq !== fetchSeq) return;
-				candidateTargets = res.elements;
-				candidatesTotal = res.total;
-				candidatesTotalExact = res.totalIsExact;
+				candidateTargets = [...byId.values()].sort((a, b) =>
+					displayName(a).localeCompare(displayName(b))
+				);
+				candidatesTotal = total;
+				candidatesTotalExact = exact;
 			} catch (err) {
 				if (seq !== fetchSeq) return;
 				candidateTargets = [];
@@ -107,7 +146,15 @@
 
 	function cancel(): void {
 		reset();
+		showAll = false;
 		expanded = false;
+	}
+
+	function optionLabel(o: (typeof typeOptions)[number]): string {
+		const targets = o.targetTypes.join(' | ');
+		const base = `${o.rt.name} → ${targets}`;
+		if (o.disabled) return `${base}  (max ${o.outCount}/${o.max})`;
+		return base;
 	}
 
 	const selectCls =
@@ -116,8 +163,8 @@
 
 <div class="flex flex-col">
 	{#if !expanded}
-		{#if availableTypes.length === 0}
-			<p class="text-[11px] italic text-zinc-500">(no valid relationships from this type)</p>
+		{#if mm === null || source === null}
+			<p class="text-[11px] italic text-zinc-500">(loading…)</p>
 		{:else}
 			<button
 				type="button"
@@ -143,19 +190,47 @@
 				</button>
 			</div>
 
+			<label class="flex items-center gap-1 text-[10px] text-zinc-400">
+				<input
+					type="checkbox"
+					checked={showAll}
+					onchange={(e) => {
+						showAll = (e.target as HTMLInputElement).checked;
+						selectedType = '';
+						selectedTarget = '';
+					}}
+				/>
+				Show all types
+			</label>
+
 			<label class="flex flex-col gap-1">
 				<span class="text-[10px] text-zinc-500">Type</span>
 				<select class={selectCls} value={selectedType} onchange={onTypeChange}>
 					<option value="">(choose type)</option>
-					{#each availableTypes as rt (rt.name)}
-						<option value={rt.name}>{rt.name} → {rt.target}</option>
+					{#each typeOptions as o (o.rt.name)}
+						<option
+							value={o.rt.name}
+							disabled={o.disabled}
+							title={o.disabled
+								? `${source?.type_name} already has ${o.outCount}/${o.max} ${o.rt.name} target(s)`
+								: o.allowed
+									? undefined
+									: 'Not allowed by the metamodel from this source type'}
+						>
+							{optionLabel(o)}{o.allowed ? '' : '  (off-metamodel)'}
+						</option>
 					{/each}
 				</select>
+				{#if typeOptions.length === 0}
+					<span class="text-[10px] italic text-zinc-500">
+						(no valid relationships from this type)
+					</span>
+				{/if}
 			</label>
 
-			{#if chosenType !== null}
+			{#if chosenOption !== null}
 				<label class="flex flex-col gap-1">
-					<span class="text-[10px] text-zinc-500">Target ({chosenType.target})</span>
+					<span class="text-[10px] text-zinc-500">Target ({chosenOption.targetTypes.join(' | ')})</span>
 					<select class={selectCls} value={selectedTarget} onchange={onTargetChange}>
 						<option value="">(choose target)</option>
 						{#each candidateTargets as el (el.id)}
@@ -166,7 +241,7 @@
 					</select>
 					{#if candidateTargets.length === 0}
 						<span class="text-[10px] italic text-zinc-500">
-							No elements of type {chosenType.target} (or subtype) exist.
+							No elements of type {chosenOption.targetTypes.join(' | ')} (or subtype) exist.
 						</span>
 					{:else if candidatesTotal > candidateTargets.length || !candidatesTotalExact}
 						<span class="text-[10px] italic text-zinc-500">
