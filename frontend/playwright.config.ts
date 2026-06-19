@@ -31,11 +31,19 @@ export default defineConfig({
 		{
 			// Unix absolute-path SQLite DSN (sqlite:/// + /tmp/...). On Windows CI
 			// this would need a drive-letter form (sqlite:///C:/...).
-			// The file persists across runs; dev-seed is idempotent so that's fine
-			// today, but a schema change (Phase 3) will need the file removed first
-			// since create_all only adds missing tables, never alters existing ones.
+			//
+			// The DB file is REMOVED before each fresh backend start. It must share
+			// the snapshot store's lifecycle: DATA_ROVER_SNAPSHOT_STORE=memory is
+			// ephemeral (blobs live only in this process), but the SQLite file would
+			// otherwise persist across runs. A stale DB then carries snapshot rows
+			// whose blobs are gone from the new process's empty memory store, and
+			// hydration fails (KeyError on the missing blob key). Removing the file
+			// keeps DB and snapshot store in sync; dev-seed rebuilds rev-0 fresh.
+			// `reuseExistingServer` means this command (and the rm) only runs when no
+			// backend is already up, so it never clears the DB out from under a live
+			// server.
 			command:
-				'DATA_ROVER_DATABASE_URL=sqlite:////tmp/data-rover-e2e.db DATA_ROVER_DEV_SEED=true DATA_ROVER_SNAPSHOT_STORE=memory pixi run -e api start-backend',
+				'rm -f /tmp/data-rover-e2e.db && DATA_ROVER_DATABASE_URL=sqlite:////tmp/data-rover-e2e.db DATA_ROVER_DEV_SEED=true DATA_ROVER_SNAPSHOT_STORE=memory pixi run -e api start-backend',
 			cwd: '..',
 			url: 'http://127.0.0.1:8000/healthz',
 			timeout: 60_000,
