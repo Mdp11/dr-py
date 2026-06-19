@@ -130,8 +130,16 @@ test('relationship picker filters by metamodel and reveals all via escape hatch'
 	await expect(createButton).toBeEnabled({ timeout: 5_000 });
 	await createButton.click();
 
-	// After creation, the picker resets (collapses back to "New relationship" button).
-	// The new outgoing relationship should appear in the inspector's RelationshipsList.
-	// We wait for the inspector to reflect the new relationship (type name "AtoB" visible).
-	await expect(inspector.getByText(/AtoB/).first()).toBeVisible({ timeout: 15_000 });
+	// After creation the picker stays open (create() calls reset() but NOT cancel(), so
+	// expanded remains true and the dropdown option "AtoB → B" stays in the DOM).
+	// The weak getByText(/AtoB/) would match that option and give a false-positive.
+	// Instead assert that the RelationshipsList group-toggle button for type "AtoB" is
+	// visible — that button only exists once a relationship of this type has been created
+	// and rendered in the list (RelationshipsList.svelte renders it as a <button> with
+	// text "{type_name} ({count})", e.g. "AtoB (1)").  No other permanent button in the
+	// inspector matches /AtoB/ — the expand control reads "New relationship" and the
+	// dropdown is a <select>.
+	await expect(inspector.getByRole('button', { name: /AtoB/ })).toBeVisible({
+		timeout: 15_000
+	});
 });
