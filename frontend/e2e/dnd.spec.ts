@@ -97,6 +97,18 @@ function viewPut(page: Page): Promise<Request> {
 	return page.waitForRequest((r) => r.method() === 'PUT' && r.url().endsWith('/view/snapshot'));
 }
 
+/**
+ * Expand the "Not in view" excluded-pool panel (collapsed by default; no fetch
+ * while collapsed) and wait for its element tree to render. Idempotent enough
+ * for tests: only clicks when currently collapsed.
+ */
+async function expandExcludedPool(page: Page): Promise<void> {
+	const pool = page.getByRole('tree', { name: /excluded elements/i });
+	if (await pool.isVisible().catch(() => false)) return;
+	await page.getByRole('button', { name: /not in view/i }).click();
+	await expect(pool).toBeVisible();
+}
+
 function findFolder(folders: Folder[], name: string): Folder | undefined {
 	return folders.find((f) => f.name === name);
 }
@@ -107,6 +119,10 @@ test.beforeEach(async ({ page }) => {
 });
 
 test('drag an element into a folder places it there', async ({ page }) => {
+	// Beta is not placed in any folder, so it lives in the "Not in view" excluded
+	// pool — a separate panel that is collapsed by default (and unfetched while
+	// collapsed). Expand it so Beta renders as a draggable row.
+	await expandExcludedPool(page);
 	const put = viewPut(page);
 	await pointerDragDrop(page, row(page, 'Beta'), row(page, 'Target'));
 	const body = (await put).postDataJSON() as { folders: Folder[] };
@@ -134,9 +150,14 @@ test('drag a folder onto another folder reparents it', async ({ page }) => {
 });
 
 test('multi-selected elements all move on a single drag', async ({ page }) => {
-	const tree = page.getByRole('tree', { name: /containment tree/i });
-	await tree.getByText('Alpha').click({ modifiers: ['ControlOrMeta'] });
-	await tree.getByText('Beta').click({ modifiers: ['ControlOrMeta'] });
+	// Alpha is placed (in "Grouped", in the in-view tree); Beta is unplaced, so it
+	// lives in the collapsed "Not in view" pool. Expand the pool, then ctrl-select
+	// one row from each section before dragging.
+	await expandExcludedPool(page);
+	const mainTree = page.getByRole('tree', { name: /containment tree/i });
+	const pool = page.getByRole('tree', { name: /excluded elements/i });
+	await mainTree.getByText('Alpha').click({ modifiers: ['ControlOrMeta'] });
+	await pool.getByText('Beta').click({ modifiers: ['ControlOrMeta'] });
 
 	const put = viewPut(page);
 	await pointerDragDrop(page, row(page, 'Beta'), row(page, 'Target'));
