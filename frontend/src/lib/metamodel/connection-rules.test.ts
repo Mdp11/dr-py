@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import type { Metamodel, RelationshipType } from '$lib/api/types';
+import type { Metamodel, Relationship, RelationshipType } from '$lib/api/types';
 import {
 	allowedTargetTypes,
+	buildPickerTypeOptions,
+	outCountsByType,
 	relationshipTypesFromSource,
 	targetMultiplicityExceeded
 } from './connection-rules';
@@ -102,5 +104,63 @@ describe('targetMultiplicityExceeded', () => {
 		expect(targetMultiplicityExceeded(rel({ name: 'X', target_multiplicity: 'garbage' }), 5)).toBe(
 			false
 		);
+	});
+});
+
+function relInstance(p: Partial<Relationship> & { id: string; type_name: string }): Relationship {
+	return {
+		id: p.id,
+		type_name: p.type_name,
+		source_id: p.source_id ?? '',
+		target_id: p.target_id ?? '',
+		properties: p.properties ?? {},
+		rev: p.rev ?? 0
+	};
+}
+
+describe('outCountsByType', () => {
+	it('counts only outgoing edges of the given source, grouped by type', () => {
+		const rels = [
+			relInstance({ id: 'r1', type_name: 'OwnsOne', source_id: 'a', target_id: 'd1' }),
+			relInstance({ id: 'r2', type_name: 'Multi', source_id: 'a', target_id: 'q1' }),
+			relInstance({ id: 'r3', type_name: 'Multi', source_id: 'a', target_id: 'q2' }),
+			relInstance({ id: 'r4', type_name: 'Multi', source_id: 'OTHER', target_id: 'q3' })
+		];
+		const counts = outCountsByType(rels, 'a');
+		expect(counts.get('OwnsOne')).toBe(1);
+		expect(counts.get('Multi')).toBe(2);
+		expect(counts.has('OTHER')).toBe(false);
+	});
+});
+
+describe('buildPickerTypeOptions', () => {
+	it('filtered mode: only allowed types; disables a maxed type', () => {
+		const counts = new Map([['OwnsOne', 1]]);
+		const opts = buildPickerTypeOptions(mm, 'Component', counts, false);
+		expect(opts.map((o) => o.rt.name)).toEqual(['Multi', 'OwnsOne']);
+		const ownsOne = opts.find((o) => o.rt.name === 'OwnsOne')!;
+		expect(ownsOne.allowed).toBe(true);
+		expect(ownsOne.atMax).toBe(true);
+		expect(ownsOne.disabled).toBe(true);
+		expect(ownsOne.outCount).toBe(1);
+		expect(ownsOne.max).toBe(1);
+		const multi = opts.find((o) => o.rt.name === 'Multi')!;
+		expect(multi.atMax).toBe(false);
+		expect(multi.disabled).toBe(false);
+	});
+
+	it('show-all mode: includes disallowed types and downgrades the maxed disable', () => {
+		const counts = new Map([['OwnsOne', 1]]);
+		const opts = buildPickerTypeOptions(mm, 'Component', counts, true);
+		// Shorthand (Requirement->Requirement) is NOT allowed from Component but shows in show-all.
+		const shorthand = opts.find((o) => o.rt.name === 'Shorthand')!;
+		expect(shorthand.allowed).toBe(false);
+		expect(shorthand.targetTypes).toEqual(['Requirement']);
+		// Abstract types are excluded even in show-all.
+		expect(opts.find((o) => o.rt.name === 'Abstract')).toBeUndefined();
+		// Maxed type still flagged atMax but NOT disabled (escape hatch overrides).
+		const ownsOne = opts.find((o) => o.rt.name === 'OwnsOne')!;
+		expect(ownsOne.atMax).toBe(true);
+		expect(ownsOne.disabled).toBe(false);
 	});
 });
