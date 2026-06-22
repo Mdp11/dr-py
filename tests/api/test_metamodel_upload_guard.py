@@ -36,8 +36,9 @@ def test_upload_on_nonempty_model_409(client: TestClient) -> None:
     assert client.post(papi("/metamodel"), content=_MM,
                        headers={"content-type": "application/x-yaml"}).status_code == 200
     assert client.post(papi("/model"), json={"elements": [], "relationships": []}).status_code == 200
-    client.post(papi("/model/ops"), json={"base_rev": _rev(client), "ops": [
+    r_op = client.post(papi("/model/ops"), json={"base_rev": _rev(client), "ops": [
         {"kind": "create_element", "temp_id": "tmp_n", "type_name": "Node"}]})
+    assert r_op.status_code == 200, r_op.text
     r = client.post(papi("/metamodel"), content=_MM,
                     headers={"content-type": "application/x-yaml"})
     assert r.status_code == 409

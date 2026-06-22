@@ -40,8 +40,9 @@ async def upload_metamodel(
     metamodel = load_metamodel_str(blob)
     session.set_metamodel(metamodel)  # clears the in-memory model (core semantics)
     # persist the metamodel + (re)bind the project's model row; changing the
-    # metamodel clears the model, so drop durable history too (Phase 6 will
-    # replace this destructive swap with a non-destructive rebind).
+    # metamodel clears the model, so drop durable history too (Phase 6B added
+    # the non-destructive POST /metamodel/rebind for non-empty models; this
+    # path is now initial-bind only).
     # Metamodel has no name field (only enums/elements/relationships); the row
     # name is cosmetic, leave it "".
     mm_row = content.create_metamodel(db, name="", version=1, blob=blob)
