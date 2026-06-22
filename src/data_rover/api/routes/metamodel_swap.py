@@ -9,6 +9,7 @@ model's metamodel binding as a journaled commit. Both run under the per-project
 
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 
@@ -33,6 +34,8 @@ from ..hydration import write_snapshot
 from ..identity import get_current_user
 from ..schemas import IssueOut, MetamodelDiffResponse, RebindResponse
 from .ops import _ensure_validation_seeded
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -182,7 +185,21 @@ async def rebind_metamodel(
             session.validation = None  # force a re-seed on next read
             raise HTTPException(status_code=500, detail="failed to persist rebind") from exc
 
-        write_snapshot(project_id, session, session.model_rev)
+        # The durable commit has already landed (db.commit above). Forcing a
+        # snapshot here keeps the replay tail from spanning a rebind boundary,
+        # but a failure is recoverable — hydration rebuilds the snapshot on the
+        # next cache-miss. Log and proceed rather than raising a 500 that would
+        # mislead the client into thinking the rebind failed.
+        try:
+            write_snapshot(project_id, session, session.model_rev)
+        except Exception:
+            logger.warning(
+                "post-rebind snapshot failed for project %s at rev %s; "
+                "rebind is durable, hydration will rebuild",
+                project_id,
+                session.model_rev,
+                exc_info=True,
+            )
         session.hub.broadcast(
             rebind_event(
                 rev=session.model_rev,

@@ -150,6 +150,27 @@ def test_rebind_db_failure_rolls_back_in_memory(
     assert _rev(client) == before
 
 
+def test_rebind_survives_post_commit_snapshot_failure(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import data_rover.api.routes.metamodel_swap as swap_mod
+
+    def _boom(*a: object, **k: object) -> None:
+        raise RuntimeError("snapshot store down")
+
+    monkeypatch.setattr(swap_mod, "write_snapshot", _boom)
+
+    before = _rev(client)
+    r = client.post(
+        papi("/metamodel/rebind") + f"?base_rev={before}&message=swap",
+        content=_MM_RENAMED,
+        headers={"content-type": "application/x-yaml"},
+    )
+    # the rebind is durable and rev advanced despite the snapshot failure
+    assert r.status_code == 200, r.text
+    assert r.json()["model_rev"] == before + 1
+
+
 def test_rebind_survives_eviction(client: TestClient) -> None:
     # The fixture creates a Node element under _MM.  _MM_RENAMED defines Widget
     # (no Node).  We rebind WITHOUT clearing the model so a Node instance is
