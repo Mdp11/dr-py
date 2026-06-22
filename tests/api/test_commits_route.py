@@ -277,3 +277,36 @@ def test_commit_writes_periodic_snapshot_when_snapshot_every_1(
         snap = content.latest_snapshot(s, "default")
         assert snap is not None, "no snapshot row was written by POST /commits"
         assert snap.rev == new_rev
+
+
+def test_commit_survives_post_commit_snapshot_failure(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import data_rover.api.routes.commits as commits_mod
+
+    def _boom(*a, **k):
+        raise RuntimeError("snapshot store down")
+
+    monkeypatch.setattr(commits_mod, "_maybe_periodic_snapshot", _boom)
+
+    before = _rev(client)
+    r = client.post(
+        papi("/commits"),
+        headers=AUTH_HEADERS,
+        json={
+            "base_rev": before,
+            "ops": [
+                {
+                    "kind": "create_element",
+                    "temp_id": "tmp_n",
+                    "type_name": _etype(client),
+                    "properties": {},
+                }
+            ],
+            "lock_tokens": [],
+            "message": "new",
+        },
+    )
+    # the durable commit landed and rev advanced despite the snapshot failure
+    assert r.status_code == 200, r.text
+    assert r.json()["model_rev"] == before + 1
