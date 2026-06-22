@@ -71,6 +71,8 @@ def append_commit(
     message: str = "",
     validation_error_count: int = 0,
     issues: list[Any] | None = None,
+    from_metamodel_id: str | None = None,
+    to_metamodel_id: str | None = None,
 ) -> Commit:
     row = Commit(
         project_id=project_id,
@@ -83,6 +85,8 @@ def append_commit(
         message=message,
         validation_error_count=validation_error_count,
         issues=issues or [],
+        from_metamodel_id=from_metamodel_id,
+        to_metamodel_id=to_metamodel_id,
     )
     db.add(row)
     db.flush()
