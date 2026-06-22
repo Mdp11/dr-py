@@ -11,6 +11,7 @@ surface, shared with this sibling.
 
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 
@@ -47,6 +48,8 @@ from .ops import (
     _persist_commit,
     _rollback,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -196,9 +199,22 @@ def create_commit(
                 status_code=500, detail="failed to persist commit"
             ) from exc
         # f. periodic snapshot: mirrors apply_ops so a hot commit-only project
-        #    doesn't accumulate an unbounded replay tail.
+        #    doesn't accumulate an unbounded replay tail. The durable commit has
+        #    already landed; a snapshot failure here is recoverable (hydration
+        #    rebuilds the snapshot on the next cache-miss), so we log and proceed
+        #    rather than returning a 500 that would mislead the client into
+        #    thinking the commit failed.
         if persisted:
-            _maybe_periodic_snapshot(db, project_id, session, session.model_rev)
+            try:
+                _maybe_periodic_snapshot(db, project_id, session, session.model_rev)
+            except Exception:
+                logger.warning(
+                    "post-commit snapshot failed for project %s at rev %s; "
+                    "commit is durable, hydration will rebuild",
+                    project_id,
+                    session.model_rev,
+                    exc_info=True,
+                )
         # g. release the caller's locks (explicit loop — no helper)
         released = []
         for tok in payload.lock_tokens:
