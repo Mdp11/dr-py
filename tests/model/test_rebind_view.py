@@ -22,7 +22,7 @@ relationships:
 """
 
 
-def _model_with_contains() -> Model:
+def _model_with_contains() -> tuple[Model, str, str]:
     m = Model(load_metamodel_str(_MM_A))
     a = m.create_element("Node")
     b = m.create_element("Node")
