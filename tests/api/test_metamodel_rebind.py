@@ -114,3 +114,60 @@ def test_rebind_refuses_when_lock_active(client: TestClient) -> None:
     r = client.post(papi("/metamodel/rebind") + f"?base_rev={_rev(client)}",
                     content=_MM_RENAMED, headers={"content-type": "application/x-yaml"})
     assert r.status_code == 409
+
+
+def test_rebind_db_failure_rolls_back_in_memory(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    before = _rev(client)
+
+    def boom(*a: object, **k: object) -> None:
+        raise RuntimeError("simulated DB failure")
+
+    # The route uses `from .. import content` and calls content.append_commit(...)
+    # so we patch the symbol on the module, not on the route's local namespace.
+    monkeypatch.setattr("data_rover.api.content.append_commit", boom)
+    r = client.post(
+        papi("/metamodel/rebind") + f"?base_rev={before}",
+        content=_MM_RENAMED,
+        headers={"content-type": "application/x-yaml"},
+    )
+    assert r.status_code == 500, r.text
+    # in-memory state fully restored
+    from data_rover.api.session import get_session
+
+    sess = get_session()
+    assert sess.metamodel is not None
+    assert sess.model_rev == before
+    assert sess.metamodel.element_type("Node") is not None   # old type still live
+    assert sess.metamodel.element_type("Widget") is None     # new type NOT applied
+    # the live metamodel served to clients is still the old one
+    mm = client.get(papi("/metamodel"), headers=AUTH_HEADERS).json()
+    assert any(e["name"] == "Node" for e in mm["elements"])
+    assert not any(e["name"] == "Widget" for e in mm["elements"])
+    # model_rev via the summary endpoint is unchanged
+    assert _rev(client) == before
+
+
+def test_rebind_survives_eviction(client: TestClient) -> None:
+    # Re-upload an empty model so no Node elements remain before rebind; the
+    # snapshot loader enforces type conformance, so a Node element in a Widget
+    # metamodel would make re-hydration fail with 422.
+    assert client.post(papi("/model"), json={"elements": [], "relationships": []}).status_code == 200
+    before = _rev(client)
+    r = client.post(
+        papi("/metamodel/rebind") + f"?base_rev={before}",
+        content=_MM_RENAMED,
+        headers={"content-type": "application/x-yaml"},
+    )
+    assert r.status_code == 200, r.text
+    from data_rover.api.session import get_registry
+
+    get_registry().evict(DEFAULT_PROJECT_ID)
+    assert DEFAULT_PROJECT_ID not in get_registry().project_ids()
+    # next request re-hydrates from the snapshot; the rebound metamodel persists
+    mm_resp = client.get(papi("/metamodel"), headers=AUTH_HEADERS)
+    assert mm_resp.status_code == 200, f"expected 200, got {mm_resp.status_code}: {mm_resp.text}"
+    mm = mm_resp.json()
+    assert any(e["name"] == "Widget" for e in mm["elements"])
+    assert not any(e["name"] == "Node" for e in mm["elements"])
