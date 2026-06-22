@@ -242,6 +242,24 @@ export const IssueOutSchema = z.object({
 });
 export type IssueOut = z.infer<typeof IssueOutSchema>;
 
+export const MetamodelDiffSchema = z.object({
+	now_failing: z.array(IssueOutSchema).default([]),
+	now_passing: z.array(IssueOutSchema).default([]),
+	unchanged_count: z.number().int(),
+	current_error_count: z.number().int(),
+	candidate_error_count: z.number().int()
+});
+export type MetamodelDiff = z.infer<typeof MetamodelDiffSchema>;
+
+export const RebindSchema = z.object({
+	model_rev: z.number().int(),
+	metamodel_id: z.string(),
+	validation_error_count: z.number().int(),
+	issue_counts: z.record(z.string(), z.number()).default({}),
+	issues: z.array(IssueOutSchema).default([])
+});
+export type Rebind = z.infer<typeof RebindSchema>;
+
 export const PreviewResponseSchema = z.object({
 	conformance_error_count: z.number().int(),
 	structural_blockers: z.array(IssueOutSchema).default([]),
