@@ -50,23 +50,40 @@ def _reject_reserved_id(entity_id: str, *, element: bool) -> None:
 
 
 def _guard_element(
-    metamodel: Metamodel, seen_ids: set[str], entity_id: str, type_name: str
+    metamodel: Metamodel,
+    seen_ids: set[str],
+    entity_id: str,
+    type_name: str,
+    *,
+    strict: bool = True,
 ) -> None:
-    """Apply the element load guards; records *entity_id* in *seen_ids*."""
+    """Apply the element load guards; records *entity_id* in *seen_ids*.
+
+    When *strict* is ``True`` (the default), an unknown element type raises 422.
+    When *strict* is ``False``, unknown types are silently accepted so that a
+    snapshot whose metamodel has since had types removed can still be loaded —
+    the validation pipeline will report the conformance issues later.  The
+    abstract-type guard is skipped when the type is unknown (``et is None``).
+    The duplicate-id and reserved-id guards always apply regardless of *strict*.
+    """
     _reject_reserved_id(entity_id, element=True)
     et = metamodel.element_type(type_name)
     if et is None:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Unknown element type {type_name!r}",
-        )
-    if et.abstract:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"Element type {type_name!r} is abstract and cannot be instantiated"
-            ),
-        )
+        if strict:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Unknown element type {type_name!r}",
+            )
+        # non-strict: skip unknown-type and abstract checks (et is None);
+        # fall through to duplicate-id check below.
+    else:
+        if et.abstract:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Element type {type_name!r} is abstract and cannot be instantiated"
+                ),
+            )
     if entity_id in seen_ids:
         raise HTTPException(
             status_code=422,
@@ -84,19 +101,28 @@ def _guard_relationship(
     type_name: str,
     source_id: str,
     target_id: str,
+    strict: bool = True,
 ) -> None:
     """Apply the relationship load guards; records *entity_id* in *seen_ids*.
 
     Only membership of *existing_element_ids* is used, so callers may pass
     any ``in``-capable container of element ids — in practice the model's
     ``elements`` dict, whose keys are the already-loaded element ids.
+
+    When *strict* is ``True`` (the default), an unknown relationship type raises
+    422.  When *strict* is ``False``, unknown types are silently accepted.  The
+    source/target existence guards always apply (endpoint-existence is structural
+    and always enforced), as does the duplicate-id guard.
     """
     _reject_reserved_id(entity_id, element=False)
     if metamodel.relationship_type(type_name) is None:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Unknown relationship type {type_name!r}",
-        )
+        if strict:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Unknown relationship type {type_name!r}",
+            )
+        # non-strict: silently accept the unknown type; source/target guards below
+        # still apply — endpoint-existence is structural and always enforced.
     if source_id not in existing_element_ids:
         raise HTTPException(
             status_code=422,
@@ -206,7 +232,7 @@ def _entity_list(raw: dict[str, Any], key: str) -> list[Any]:
     return items
 
 
-def build_model_from_dicts(metamodel: Metamodel, raw: Any) -> Model:
+def build_model_from_dicts(metamodel: Metamodel, raw: Any, *, strict: bool = True) -> Model:
     """Materialize a `Model` directly from a parsed save-file JSON object.
 
     Same guard semantics as `_build_model_from_payload` (shared checker
@@ -221,6 +247,13 @@ def build_model_from_dicts(metamodel: Metamodel, raw: Any) -> Model:
     (``{"elements": [...], "relationships": [...]}``) and tolerates extra
     top-level keys (e.g. the ``rev`` key the benchmark fixtures carry).
     Missing ``elements``/``relationships`` keys mean empty lists.
+
+    *strict* (default ``True``) controls whether unknown element/relationship
+    TYPES raise 422.  Pass ``strict=False`` during snapshot hydration so that a
+    project rebound onto a type-removing metamodel (Phase 6B) can still be
+    loaded after eviction — the validation pipeline will report the conformance
+    issues.  Reserved-id, duplicate-id, abstract-type, and endpoint-existence
+    guards still apply in both modes.
     """
     if not isinstance(raw, dict):
         raise _shape_error("Model payload must be a JSON object")
@@ -233,7 +266,7 @@ def build_model_from_dicts(metamodel: Metamodel, raw: Any) -> Model:
             raise _shape_error(f"{where}: must be an object")
         eid = _require_str(e, "id", where)
         type_name = _require_str(e, "type_name", where)
-        _guard_element(metamodel, seen_element_ids, eid, type_name)
+        _guard_element(metamodel, seen_element_ids, eid, type_name, strict=strict)
         model.elements[eid] = Element(
             id=eid,
             type_name=type_name,
@@ -258,6 +291,7 @@ def build_model_from_dicts(metamodel: Metamodel, raw: Any) -> Model:
             type_name=type_name,
             source_id=source_id,
             target_id=target_id,
+            strict=strict,
         )
         model.relationships[rid] = Relationship(
             id=rid,

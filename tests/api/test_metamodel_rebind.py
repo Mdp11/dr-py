@@ -150,10 +150,19 @@ def test_rebind_db_failure_rolls_back_in_memory(
 
 
 def test_rebind_survives_eviction(client: TestClient) -> None:
-    # Re-upload an empty model so no Node elements remain before rebind; the
-    # snapshot loader enforces type conformance, so a Node element in a Widget
-    # metamodel would make re-hydration fail with 422.
-    assert client.post(papi("/model"), json={"elements": [], "relationships": []}).status_code == 200
+    # The fixture creates a Node element under _MM.  _MM_RENAMED defines Widget
+    # (no Node).  We rebind WITHOUT clearing the model so a Node instance is
+    # present in the snapshot.  Before this fix, snapshot hydration would 422
+    # on the unknown "Node" type; now strict=False lets it through so the
+    # element survives and is reported as a CONFORMANCE issue instead.
+
+    # Capture the Node element id before rebind so we can assert it survived.
+    elements_before = client.get(
+        papi("/model/elements"), params={"limit": 1}, headers=AUTH_HEADERS
+    ).json()["items"]
+    assert elements_before, "fixture must have created a Node element"
+    node_id = elements_before[0]["id"]
+
     before = _rev(client)
     r = client.post(
         papi("/metamodel/rebind") + f"?base_rev={before}",
@@ -161,13 +170,25 @@ def test_rebind_survives_eviction(client: TestClient) -> None:
         headers={"content-type": "application/x-yaml"},
     )
     assert r.status_code == 200, r.text
+
     from data_rover.api.session import get_registry
 
     get_registry().evict(DEFAULT_PROJECT_ID)
     assert DEFAULT_PROJECT_ID not in get_registry().project_ids()
-    # next request re-hydrates from the snapshot; the rebound metamodel persists
+
+    # (a) the rebound metamodel is live after re-hydration
     mm_resp = client.get(papi("/metamodel"), headers=AUTH_HEADERS)
     assert mm_resp.status_code == 200, f"expected 200, got {mm_resp.status_code}: {mm_resp.text}"
     mm = mm_resp.json()
     assert any(e["name"] == "Widget" for e in mm["elements"])
     assert not any(e["name"] == "Node" for e in mm["elements"])
+
+    # (b) the pre-existing Node element survived re-hydration
+    items_after = client.get(
+        papi("/model/elements"), params={"limit": 100}, headers=AUTH_HEADERS
+    ).json()["items"]
+    ids_after = {item["id"] for item in items_after}
+    assert node_id in ids_after, (
+        f"Node element {node_id!r} was lost after eviction+rehydration; "
+        f"elements present: {ids_after}"
+    )
