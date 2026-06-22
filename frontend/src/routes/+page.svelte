@@ -74,6 +74,9 @@
 	// this session was open. The user must reload to pick up the new metamodel.
 	const pendingRebind = $derived(getPendingRebind());
 
+	// Rebind is non-destructive: only the metamodel pointer and conformance issues change;
+	// element ids and properties are untouched, so the cached element subset stays valid.
+	// Unlike onReloadModel, we do NOT reset the model store — only the metamodel, issues, and rev.
 	async function onReloadRebind(): Promise<void> {
 		const mm = await fetchMetamodel();
 		setMetamodel(mm);
