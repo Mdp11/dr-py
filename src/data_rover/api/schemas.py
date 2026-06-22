@@ -101,6 +101,27 @@ class IssueOut(BaseModel):
         )
 
 
+class MetamodelDiffResponse(BaseModel):
+    """Read-only sandbox conformance diff (Phase 6B). now_failing = issues the
+    candidate metamodel introduces; now_passing = issues it resolves."""
+
+    now_failing: list[IssueOut]
+    now_passing: list[IssueOut]
+    unchanged_count: int
+    current_error_count: int
+    candidate_error_count: int
+
+
+class RebindResponse(BaseModel):
+    """Result of a non-destructive metamodel rebind (Phase 6B)."""
+
+    model_rev: int
+    metamodel_id: str
+    validation_error_count: int
+    issue_counts: dict[str, int]
+    issues: list[IssueOut]
+
+
 class FolderOut(BaseModel):
     name: str
     folders: list["FolderOut"] = Field(default_factory=list)
