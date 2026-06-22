@@ -1,13 +1,32 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import SwapMetamodelDrawer from '../SwapMetamodelDrawer.svelte';
+import { ApiError } from '$lib/api';
 
 // Mock the API client so no network is needed.
 vi.mock('$lib/api/metamodel', () => ({
 	diffMetamodel: vi.fn(),
-	rebindMetamodel: vi.fn()
+	rebindMetamodel: vi.fn(),
+	getMetamodel: vi.fn()
 }));
-import { diffMetamodel } from '$lib/api/metamodel';
+import { diffMetamodel, rebindMetamodel, getMetamodel as fetchMetamodel } from '$lib/api/metamodel';
+
+vi.mock('$lib/state', async (orig) => {
+	const actual = await orig<typeof import('$lib/state')>();
+	return {
+		...actual,
+		getRole: vi.fn(() => 'owner'),
+		getModelRev: vi.fn(() => 7),
+		getStagedDepth: vi.fn(() => 0),
+		getLockState: vi.fn(() => new Map()),
+		setIssues: vi.fn(),
+		setMetamodel: vi.fn(),
+		setMetamodelFilename: vi.fn(),
+		refreshSummary: vi.fn(async () => {})
+	};
+});
+
+import { getRole, getStagedDepth, getLockState, setIssues, refreshSummary } from '$lib/state';
 
 afterEach(() => {
 	document.body.innerHTML = '';
@@ -107,6 +126,150 @@ describe('SwapMetamodelDrawer read path', () => {
 			await triggerFilePick(file('nope'));
 			await waitFor(() => /couldn.t read the candidate/i.test(bodyText()));
 			expect(/couldn.t read the candidate/i.test(bodyText())).toBe(true);
+		} finally {
+			unmount(component);
+		}
+	});
+});
+
+describe('SwapMetamodelDrawer rebind path', () => {
+	/** Reach the review step with a diff already rendered. */
+	async function pickAndDiff(): Promise<void> {
+		(diffMetamodel as ReturnType<typeof vi.fn>).mockResolvedValue({
+			now_failing: [],
+			now_passing: [],
+			unchanged_count: 2,
+			current_error_count: 2,
+			candidate_error_count: 2
+		});
+		await triggerFilePick(file('elements: []\n'));
+		await waitFor(() => /2 unchanged/i.test(bodyText()));
+	}
+
+	it('hides the rebind button for non-owners', async () => {
+		(getRole as ReturnType<typeof vi.fn>).mockReturnValue('editor');
+		const component = mount(SwapMetamodelDrawer, {
+			target: document.body,
+			props: { open: true }
+		});
+		try {
+			flushSync();
+			await pickAndDiff();
+			// Non-owners see a read-only message, not a rebind button
+			expect(/read-only for your role/i.test(bodyText())).toBe(true);
+			const btn = document.querySelector('button[aria-busy]') as HTMLButtonElement | null;
+			expect(btn).toBeNull();
+		} finally {
+			unmount(component);
+		}
+	});
+
+	it('blocks rebind when staged edits exist (quiet-project)', async () => {
+		(getRole as ReturnType<typeof vi.fn>).mockReturnValue('owner');
+		(getStagedDepth as ReturnType<typeof vi.fn>).mockReturnValue(3);
+		const component = mount(SwapMetamodelDrawer, {
+			target: document.body,
+			props: { open: true }
+		});
+		try {
+			flushSync();
+			await pickAndDiff();
+			expect(/needs a quiet project/i.test(bodyText())).toBe(true);
+			// The rebind button should be disabled when not quiet
+			const btn = Array.from(document.querySelectorAll('button')).find((b) =>
+				/rebind/i.test(b.textContent ?? '')
+			) as HTMLButtonElement | undefined;
+			expect(btn).toBeTruthy();
+			expect(btn!.disabled).toBe(true);
+		} finally {
+			unmount(component);
+		}
+	});
+
+	it('blocks rebind when a lease is live', async () => {
+		(getRole as ReturnType<typeof vi.fn>).mockReturnValue('owner');
+		(getStagedDepth as ReturnType<typeof vi.fn>).mockReturnValue(0);
+		(getLockState as ReturnType<typeof vi.fn>).mockReturnValue(new Map([['e1', {}]]));
+		const component = mount(SwapMetamodelDrawer, {
+			target: document.body,
+			props: { open: true }
+		});
+		try {
+			flushSync();
+			await pickAndDiff();
+			const btn = Array.from(document.querySelectorAll('button')).find((b) =>
+				/rebind/i.test(b.textContent ?? '')
+			) as HTMLButtonElement | undefined;
+			expect(btn).toBeTruthy();
+			expect(btn!.disabled).toBe(true);
+		} finally {
+			unmount(component);
+		}
+	});
+
+	it('on success refreshes metamodel, issues, summary and closes', async () => {
+		(getRole as ReturnType<typeof vi.fn>).mockReturnValue('owner');
+		(getStagedDepth as ReturnType<typeof vi.fn>).mockReturnValue(0);
+		(getLockState as ReturnType<typeof vi.fn>).mockReturnValue(new Map());
+		(rebindMetamodel as ReturnType<typeof vi.fn>).mockResolvedValue({
+			model_rev: 8,
+			metamodel_id: 'mm-2',
+			validation_error_count: 1,
+			issue_counts: { conformance: 1 },
+			issues: [
+				{ severity: 'error', message: 'x unknown', target_ids: ['x'], category: 'conformance' }
+			]
+		});
+		(fetchMetamodel as ReturnType<typeof vi.fn>).mockResolvedValue({
+			elements: [],
+			relationships: []
+		});
+		const component = mount(SwapMetamodelDrawer, {
+			target: document.body,
+			props: { open: true }
+		});
+		try {
+			flushSync();
+			await pickAndDiff();
+			const btn = Array.from(document.querySelectorAll('button')).find((b) =>
+				/rebind/i.test(b.textContent ?? '')
+			) as HTMLButtonElement | undefined;
+			expect(btn).toBeTruthy();
+			btn!.click();
+			await waitFor(() => (rebindMetamodel as ReturnType<typeof vi.fn>).mock.calls.length > 0);
+			expect(rebindMetamodel).toHaveBeenCalledWith('elements: []\n', { baseRev: 7, message: '' });
+			await waitFor(() => (fetchMetamodel as ReturnType<typeof vi.fn>).mock.calls.length > 0);
+			expect(fetchMetamodel).toHaveBeenCalled();
+			await waitFor(() => (setIssues as ReturnType<typeof vi.fn>).mock.calls.length > 0);
+			expect(setIssues).toHaveBeenCalled();
+			await waitFor(() => (refreshSummary as ReturnType<typeof vi.fn>).mock.calls.length > 0);
+			expect(refreshSummary).toHaveBeenCalled();
+		} finally {
+			unmount(component);
+		}
+	});
+
+	it('shows a stale-rev message on 409 base_rev', async () => {
+		(getRole as ReturnType<typeof vi.fn>).mockReturnValue('owner');
+		(getStagedDepth as ReturnType<typeof vi.fn>).mockReturnValue(0);
+		(getLockState as ReturnType<typeof vi.fn>).mockReturnValue(new Map());
+		// Fabricate a real ApiError (status 409) so instanceof check in the component works
+		const err = new ApiError(409, { detail: 'stale base_rev' }, 'stale base_rev');
+		(rebindMetamodel as ReturnType<typeof vi.fn>).mockRejectedValue(err);
+		const component = mount(SwapMetamodelDrawer, {
+			target: document.body,
+			props: { open: true }
+		});
+		try {
+			flushSync();
+			await pickAndDiff();
+			const btn = Array.from(document.querySelectorAll('button')).find((b) =>
+				/rebind/i.test(b.textContent ?? '')
+			) as HTMLButtonElement | undefined;
+			expect(btn).toBeTruthy();
+			btn!.click();
+			await waitFor(() => /re-run the diff/i.test(bodyText()));
+			expect(/re-run the diff/i.test(bodyText())).toBe(true);
 		} finally {
 			unmount(component);
 		}
