@@ -197,6 +197,15 @@ class Commit(Base):
     )
     #: the conformance issue list recorded at commit (IssueOut dicts).
     issues: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    #: metamodel rebind (Phase 6B): the model's metamodel_id before/after this
+    #: commit. Both NULL for ordinary edit commits; set only by /metamodel/rebind.
+    #: SET NULL on metamodel delete so history survives a retired metamodel.
+    from_metamodel_id: Mapped[str | None] = mapped_column(
+        ForeignKey("metamodels.id", ondelete="SET NULL"), nullable=True
+    )
+    to_metamodel_id: Mapped[str | None] = mapped_column(
+        ForeignKey("metamodels.id", ondelete="SET NULL"), nullable=True
+    )
 
     #: Declared so the ORM unit-of-work can order INSERTs correctly.
     project: Mapped[Project] = relationship()
