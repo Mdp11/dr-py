@@ -1,5 +1,5 @@
 from data_rover.api import content, db
-from data_rover.api.db_models import Commit, MetamodelRow, Project
+from data_rover.api.db_models import Commit, Project
 
 
 def test_append_commit_records_rebind_metamodel_ids() -> None:
