@@ -26,7 +26,14 @@ export type FeedEvent =
 			deleted_relationship_ids: string[];
 	  }
 	| { type: 'lock'; action: 'acquired' | 'released' | 'expired'; leases: LeaseLite[] }
-	| { type: 'presence'; action: 'join' | 'leave'; user_id: string; connected: string[] };
+	| { type: 'presence'; action: 'join' | 'leave'; user_id: string; connected: string[] }
+	| {
+			type: 'rebind';
+			rev: number;
+			from_metamodel_id: string | null;
+			to_metamodel_id: string;
+			validation_error_count: number;
+	  };
 
 export interface WebSocketLike {
 	readyState: number;
