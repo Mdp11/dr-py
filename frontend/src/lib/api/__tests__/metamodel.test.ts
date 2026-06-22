@@ -1,7 +1,13 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { http, HttpResponse } from 'msw';
 
-import { clearMetamodel, diffMetamodel, getMetamodel, rebindMetamodel, uploadMetamodel } from '../metamodel';
+import {
+	clearMetamodel,
+	diffMetamodel,
+	getMetamodel,
+	rebindMetamodel,
+	uploadMetamodel
+} from '../metamodel';
 import { server } from './server';
 
 const BASE = 'http://api.test/api/v1';
@@ -109,7 +115,14 @@ describe('metamodel client', () => {
 });
 
 const diffPayload = {
-	now_failing: [{ severity: 'error', message: 'x is an instance of unknown type', target_ids: ['x'], category: 'conformance' }],
+	now_failing: [
+		{
+			severity: 'error',
+			message: 'x is an instance of unknown type',
+			target_ids: ['x'],
+			category: 'conformance'
+		}
+	],
 	now_passing: [],
 	unchanged_count: 3,
 	current_error_count: 3,
@@ -121,7 +134,14 @@ const rebindPayload = {
 	metamodel_id: 'mm-2',
 	validation_error_count: 1,
 	issue_counts: { conformance: 1 },
-	issues: [{ severity: 'error', message: 'x is an instance of unknown type', target_ids: ['x'], category: 'conformance' }]
+	issues: [
+		{
+			severity: 'error',
+			message: 'x is an instance of unknown type',
+			target_ids: ['x'],
+			category: 'conformance'
+		}
+	]
 };
 
 describe('metamodel swap client', () => {
