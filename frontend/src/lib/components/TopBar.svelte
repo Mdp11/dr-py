@@ -28,9 +28,11 @@
 	import { AlertCircle, AlertTriangle, FolderOpen, Info, RefreshCw, Undo2 } from '@lucide/svelte';
 	import ApplyCrDialog from './ApplyCrDialog.svelte';
 	import LoadFilesDialog from './LoadFilesDialog.svelte';
+	import SwapMetamodelDrawer from './SwapMetamodelDrawer.svelte';
 
 	let applyCrOpen = $state(false);
 	let loadOpen = $state(false);
+	let swapOpen = $state(false);
 	const view = $derived(getView());
 
 	const metamodel = $derived(getMetamodel());
@@ -133,6 +135,16 @@
 		<Button variant="ghost" size="sm" class="h-7 gap-1 text-xs" onclick={onLoadClick}>
 			<FolderOpen class="h-3 w-3" />
 			Load Model
+		</Button>
+
+		<Button
+			variant="ghost"
+			size="sm"
+			class="h-7 gap-1 text-xs"
+			disabled={metamodel === null}
+			onclick={() => (swapOpen = true)}
+		>
+			Swap Metamodel
 		</Button>
 
 		<div class="flex items-center gap-2">
@@ -245,3 +257,4 @@
 
 <ApplyCrDialog bind:open={applyCrOpen} />
 <LoadFilesDialog bind:open={loadOpen} />
+<SwapMetamodelDrawer bind:open={swapOpen} />

@@ -11,6 +11,10 @@
 	import ResultsPanel from '$lib/components/ResultsPanel.svelte';
 	import { maybeAutoload } from '$lib/autoload';
 	import { metamodel as metamodelApi } from '$lib/api';
+	import { Button } from '$lib/components/ui/button';
+	import { getPendingRebind, clearPendingRebind } from '$lib/state/realtime.svelte';
+	import { getMetamodel as fetchMetamodel } from '$lib/api/metamodel';
+	import { runValidation } from '$lib/state/validate-action';
 	import {
 		clearModelError,
 		clearSelection,
@@ -65,6 +69,18 @@
 	// divergent from the session model; the only safe recovery is a reload
 	// (reset + refetch). Rejected/transport errors are dismissable.
 	const modelError = $derived(getModelError());
+
+	// Peer-rebind banner: shown when another user swapped the metamodel while
+	// this session was open. The user must reload to pick up the new metamodel.
+	const pendingRebind = $derived(getPendingRebind());
+
+	async function onReloadRebind(): Promise<void> {
+		const mm = await fetchMetamodel();
+		setMetamodel(mm);
+		await refreshSummary();
+		await runValidation();
+		clearPendingRebind();
+	}
 
 	let reloading = $state(false);
 
@@ -141,10 +157,13 @@
 	});
 
 	const cols = $derived(`${leftWidth}px 4px 1fr 4px ${rightWidth}px`);
-	// extra `auto` row when the error banner is shown (it spans all columns)
+	// extra `auto` rows when error/rebind banners are shown (each spans all columns)
 	const rows = $derived.by(() => {
-		const banner = modelError !== null ? 'auto ' : '';
-		return panelOpen ? `auto ${banner}1fr auto ${panelHeight}px auto` : `auto ${banner}1fr auto`;
+		const errorBanner = modelError !== null ? 'auto ' : '';
+		const rebindBanner = pendingRebind !== null ? 'auto ' : '';
+		return panelOpen
+			? `auto ${errorBanner}${rebindBanner}1fr auto ${panelHeight}px auto`
+			: `auto ${errorBanner}${rebindBanner}1fr auto`;
 	});
 </script>
 
@@ -183,6 +202,20 @@
 					</button>
 				{/if}
 			</div>
+		</div>
+	{/if}
+	{#if pendingRebind}
+		<div
+			class="col-span-5 flex items-center justify-between gap-3 bg-amber-950/60 px-3 py-1.5 text-xs text-amber-100"
+			role="alert"
+		>
+			<span>
+				The metamodel was changed to rev {pendingRebind.rev} ({pendingRebind.count} conformance issues).
+				Reload to continue.
+			</span>
+			<Button size="sm" variant="ghost" class="h-6 text-xs" onclick={() => void onReloadRebind()}>
+				Reload
+			</Button>
 		</div>
 	{/if}
 	<Sidebar />
