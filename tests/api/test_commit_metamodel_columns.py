@@ -19,6 +19,7 @@ def test_append_commit_records_rebind_metamodel_ids() -> None:
         )
         s.commit()
         row = s.get(Commit, ("p1", 1))
+        assert row is not None
         assert row.from_metamodel_id == old.id
         assert row.to_metamodel_id == new.id
     finally:
