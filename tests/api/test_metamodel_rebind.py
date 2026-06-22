@@ -139,6 +139,7 @@ def test_rebind_db_failure_rolls_back_in_memory(
     sess = get_session()
     assert sess.metamodel is not None
     assert sess.model_rev == before
+    assert sess.validation is None
     assert sess.metamodel.element_type("Node") is not None   # old type still live
     assert sess.metamodel.element_type("Widget") is None     # new type NOT applied
     # the live metamodel served to clients is still the old one

@@ -168,3 +168,12 @@ def test_nonstrict_relationship_absent_target_still_raises(mm) -> None:
         build_model_from_dicts(mm, raw, strict=False)
     assert exc_info.value.status_code == 422
     assert "missing" in exc_info.value.detail
+
+
+def test_nonstrict_reserved_id_still_raises(mm) -> None:
+    """Reserved (tmp_-prefixed) element id is always rejected, even with strict=False."""
+    raw = {"elements": [{"id": "tmp_x", "type_name": "Node"}], "relationships": []}
+    with pytest.raises(HTTPException) as exc_info:
+        build_model_from_dicts(mm, raw, strict=False)
+    assert exc_info.value.status_code == 422
+    assert "tmp_" in exc_info.value.detail
