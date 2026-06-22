@@ -154,3 +154,20 @@ def presence_event(
         "user_id": user_id,
         "connected": connected,
     }
+
+
+def rebind_event(
+    *,
+    rev: int,
+    from_metamodel_id: str | None,
+    to_metamodel_id: str,
+    validation_error_count: int,
+) -> dict[str, Any]:
+    """Whole-model metamodel rebind (Phase 6B): peers should reload."""
+    return {
+        "type": "rebind",
+        "rev": rev,
+        "from_metamodel_id": from_metamodel_id,
+        "to_metamodel_id": to_metamodel_id,
+        "validation_error_count": validation_error_count,
+    }
