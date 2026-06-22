@@ -110,6 +110,11 @@ async def rebind_metamodel(
 
     Correction A applied: persists the original request blob rather than a
     pydantic re-serialization, avoiding any round-trip mismatch on hydration.
+
+    Note: rebind bumps ``model_rev`` and journals a ``Commit`` row but
+    intentionally does NOT append to the in-memory ``session.op_log`` (the
+    legacy undo stack) — rebind revert is deferred to Phase 8 via the
+    ``from_metamodel_id``/``to_metamodel_id`` commit columns.
     """
     _, model = require_model(session)
     if base_rev != session.model_rev:
