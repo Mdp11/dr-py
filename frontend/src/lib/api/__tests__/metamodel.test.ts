@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { http, HttpResponse } from 'msw';
 
-import { clearMetamodel, getMetamodel, uploadMetamodel } from '../metamodel';
+import { clearMetamodel, diffMetamodel, getMetamodel, rebindMetamodel, uploadMetamodel } from '../metamodel';
 import { server } from './server';
 
 const BASE = 'http://api.test/api/v1';
@@ -105,5 +105,60 @@ describe('metamodel client', () => {
 		const result = await clearMetamodel(cfg);
 		expect(called).toBe(true);
 		expect(result).toBeUndefined();
+	});
+});
+
+const diffPayload = {
+	now_failing: [{ severity: 'error', message: 'x is an instance of unknown type', target_ids: ['x'], category: 'conformance' }],
+	now_passing: [],
+	unchanged_count: 3,
+	current_error_count: 3,
+	candidate_error_count: 4
+};
+
+const rebindPayload = {
+	model_rev: 8,
+	metamodel_id: 'mm-2',
+	validation_error_count: 1,
+	issue_counts: { conformance: 1 },
+	issues: [{ severity: 'error', message: 'x is an instance of unknown type', target_ids: ['x'], category: 'conformance' }]
+};
+
+describe('metamodel swap client', () => {
+	it('diffMetamodel posts the blob as YAML and parses the diff', async () => {
+		let ct: string | null = null;
+		let text = '';
+		server.use(
+			http.post(`${BASE}/metamodel/diff`, async ({ request }) => {
+				ct = request.headers.get('content-type');
+				text = await request.text();
+				return HttpResponse.json(diffPayload);
+			})
+		);
+		const result = await diffMetamodel('elements: []\n', cfg);
+		expect(ct).toContain('yaml');
+		expect(text).toBe('elements: []\n');
+		expect(result.now_failing[0].target_ids).toEqual(['x']);
+		expect(result.unchanged_count).toBe(3);
+		expect(result.candidate_error_count).toBe(4);
+	});
+
+	it('rebindMetamodel sends base_rev + message as query params', async () => {
+		let url: URL | null = null;
+		let text = '';
+		server.use(
+			http.post(`${BASE}/metamodel/rebind`, async ({ request }) => {
+				url = new URL(request.url);
+				text = await request.text();
+				return HttpResponse.json(rebindPayload);
+			})
+		);
+		const result = await rebindMetamodel('elements: []\n', { baseRev: 7, message: 'swap' }, cfg);
+		expect(url!.searchParams.get('base_rev')).toBe('7');
+		expect(url!.searchParams.get('message')).toBe('swap');
+		expect(text).toBe('elements: []\n');
+		expect(result.model_rev).toBe(8);
+		expect(result.metamodel_id).toBe('mm-2');
+		expect(result.issues[0].category).toBe('conformance');
 	});
 });
