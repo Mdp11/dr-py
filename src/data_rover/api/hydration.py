@@ -122,7 +122,10 @@ def hydrate_session(project_id: str) -> Session:
         from .routes._snapshot import build_model_from_dicts
 
         raw = json.loads(get_snapshot_store().get(snap_key))
-        model = build_model_from_dicts(metamodel, raw)
+        # strict=False: hydration tolerates unknown types so a project rebound
+        # onto a type-removing metamodel (Phase 6B) survives eviction; the
+        # validation pipeline reports the conformance issues.
+        model = build_model_from_dicts(metamodel, raw, strict=False)
 
     session = Session(metamodel=metamodel, model=model)
     session.model_rev = model_rev

@@ -205,3 +205,25 @@ class Model:
             self.disconnect(rel_id)
         element = self.elements.pop(element_id)
         self.indexes.on_element_deleted(element)
+
+
+def build_rebind_view(live_model: Model, candidate: Metamodel) -> Model:
+    """A READ-ONLY ``Model`` bound to ``candidate`` over ``live_model``'s data.
+
+    Shares ``elements``/``relationships`` BY REFERENCE — the (potentially
+    ~80 MB) instance payload is never copied — and rebuilds a fresh
+    ``IndexSet`` against ``candidate``. The index is rebuilt, never shared,
+    because containment classification and uniqueness grouping are
+    metamodel-derived: sharing the live index would give wrong containment /
+    uniqueness results under a candidate that changes them.
+
+    The returned view ALIASES the live model's dicts, so mutating it would
+    corrupt the live model. Use it only for read-only validation (the sandbox
+    metamodel diff).
+    """
+    view = Model(candidate)
+    view.elements = live_model.elements
+    view.relationships = live_model.relationships
+    view.indexes = IndexSet(view)
+    view.indexes.rebuild()
+    return view

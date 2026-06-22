@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session as DbSession
 
 import yaml
@@ -22,6 +22,14 @@ async def upload_metamodel(
     session: Session = Depends(get_request_session),
     db: DbSession = Depends(get_db),
 ) -> Metamodel:
+    # Phase 6B: this destructive path is initial-bind only. Once a model has
+    # content, a metamodel change must go through the non-destructive,
+    # journaled POST /metamodel/rebind (this one clears the model + history).
+    if session.model is not None and session.model.elements:
+        raise HTTPException(
+            status_code=409,
+            detail="model not empty; use POST /metamodel/rebind",
+        )
     body = (await request.body()).decode("utf-8")
     content_type = request.headers.get("content-type", "")
     if "json" in content_type:
@@ -32,8 +40,9 @@ async def upload_metamodel(
     metamodel = load_metamodel_str(blob)
     session.set_metamodel(metamodel)  # clears the in-memory model (core semantics)
     # persist the metamodel + (re)bind the project's model row; changing the
-    # metamodel clears the model, so drop durable history too (Phase 6 will
-    # replace this destructive swap with a non-destructive rebind).
+    # metamodel clears the model, so drop durable history too (Phase 6B added
+    # the non-destructive POST /metamodel/rebind for non-empty models; this
+    # path is now initial-bind only).
     # Metamodel has no name field (only enums/elements/relationships); the row
     # name is cosmetic, leave it "".
     mm_row = content.create_metamodel(db, name="", version=1, blob=blob)
