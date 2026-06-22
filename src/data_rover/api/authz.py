@@ -42,6 +42,7 @@ _READ_ONLY_POST_SUFFIXES = (
     "/model/elements/batch",
     "/model/validate",
     "/commits/preview",
+    "/metamodel/diff",
 )
 
 
