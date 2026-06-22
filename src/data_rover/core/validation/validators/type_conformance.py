@@ -66,10 +66,28 @@ class TypeConformanceValidator(EntityValidator):
         return defs
 
     def validate_element(self, model, el) -> list[Issue]:
+        if model.metamodel.element_type(el.type_name) is None:
+            return [
+                Issue(
+                    Severity.ERROR,
+                    f"{el.id} is an instance of unknown type {el.type_name!r}",
+                    [el.id],
+                    IssueCategory.CONFORMANCE,
+                )
+            ]
         defs = self._defs(model.metamodel, el.type_name, of_element=True)
         return self._check(el.type_name, el.id, defs, el.properties, model)
 
     def validate_relationship(self, model, rel) -> list[Issue]:
+        if model.metamodel.relationship_type(rel.type_name) is None:
+            return [
+                Issue(
+                    Severity.ERROR,
+                    f"{rel.id} is an instance of unknown type {rel.type_name!r}",
+                    [rel.id],
+                    IssueCategory.CONFORMANCE,
+                )
+            ]
         defs = self._defs(model.metamodel, rel.type_name, of_element=False)
         return self._check(rel.type_name, rel.id, defs, rel.properties, model)
 
