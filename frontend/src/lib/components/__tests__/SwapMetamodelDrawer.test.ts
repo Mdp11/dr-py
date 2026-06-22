@@ -274,4 +274,34 @@ describe('SwapMetamodelDrawer rebind path', () => {
 			unmount(component);
 		}
 	});
+
+	it('shows an active-locks message on 409 with lock detail', async () => {
+		(getRole as ReturnType<typeof vi.fn>).mockReturnValue('owner');
+		(getStagedDepth as ReturnType<typeof vi.fn>).mockReturnValue(0);
+		(getLockState as ReturnType<typeof vi.fn>).mockReturnValue(new Map());
+		// detail contains "lock" → component shows the active-locks message, not stale-rev
+		const err = new ApiError(
+			409,
+			{ detail: 'active locks; rebind requires a quiet project' },
+			'active locks; rebind requires a quiet project'
+		);
+		(rebindMetamodel as ReturnType<typeof vi.fn>).mockRejectedValue(err);
+		const component = mount(SwapMetamodelDrawer, {
+			target: document.body,
+			props: { open: true }
+		});
+		try {
+			flushSync();
+			await pickAndDiff();
+			const btn = Array.from(document.querySelectorAll('button')).find((b) =>
+				/rebind/i.test(b.textContent ?? '')
+			) as HTMLButtonElement | undefined;
+			expect(btn).toBeTruthy();
+			btn!.click();
+			await waitFor(() => /not quiet|lock is active/i.test(bodyText()));
+			expect(/not quiet|lock is active/i.test(bodyText())).toBe(true);
+		} finally {
+			unmount(component);
+		}
+	});
 });
