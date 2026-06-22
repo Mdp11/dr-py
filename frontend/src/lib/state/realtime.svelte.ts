@@ -22,6 +22,7 @@ let _connected = $state(false);
 let _presence = $state<string[]>([]);
 const _lockState = new SvelteMap<string, LeaseLite>();
 let _conn: FeedConnection | null = null;
+let _pendingRebind = $state<{ rev: number; count: number } | null>(null);
 
 type LockTap = (action: 'acquired' | 'released' | 'expired', leases: LeaseLite[]) => void;
 // subscriber registry, iterated to fire taps — never read reactively
@@ -49,6 +50,14 @@ export function getLockState(): SvelteMap<string, LeaseLite> {
 
 export function getLockFor(id: string): LeaseLite | undefined {
 	return _lockState.get(id);
+}
+
+export function getPendingRebind(): { rev: number; count: number } | null {
+	return _pendingRebind;
+}
+
+export function clearPendingRebind(): void {
+	_pendingRebind = null;
 }
 
 function setLeases(leases: LeaseLite[]): void {
@@ -95,6 +104,9 @@ export function handleFeedEvent(e: FeedEvent): void {
 			applyDelta(delta);
 			break;
 		}
+		case 'rebind':
+			_pendingRebind = { rev: e.rev, count: e.validation_error_count };
+			break;
 	}
 }
 
@@ -121,4 +133,5 @@ export function resetRealtime(): void {
 	_presence = [];
 	_lockState.clear();
 	_lockTaps.clear();
+	_pendingRebind = null;
 }

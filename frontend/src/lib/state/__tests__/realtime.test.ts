@@ -1,8 +1,10 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+	clearPendingRebind,
 	getLockFor,
 	getLockState,
 	getPresence,
+	getPendingRebind,
 	handleFeedEvent,
 	resetRealtime
 } from '../realtime.svelte';
@@ -51,5 +53,33 @@ describe('realtime store reducers', () => {
 			deleted_relationship_ids: []
 		});
 		expect(getCachedElements().get('e1')?.properties.name).toBe('new');
+	});
+});
+
+describe('rebind event', () => {
+	afterEach(() => resetRealtime());
+
+	it('a rebind event sets pending reload state', () => {
+		expect(getPendingRebind()).toBeNull();
+		handleFeedEvent({
+			type: 'rebind',
+			rev: 12,
+			from_metamodel_id: 'mm-1',
+			to_metamodel_id: 'mm-2',
+			validation_error_count: 4
+		});
+		expect(getPendingRebind()).toEqual({ rev: 12, count: 4 });
+	});
+
+	it('clearPendingRebind resets it', () => {
+		handleFeedEvent({
+			type: 'rebind',
+			rev: 12,
+			from_metamodel_id: null,
+			to_metamodel_id: 'mm-2',
+			validation_error_count: 0
+		});
+		clearPendingRebind();
+		expect(getPendingRebind()).toBeNull();
 	});
 });
