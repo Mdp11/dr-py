@@ -172,7 +172,7 @@ def test_upload_model_requires_metamodel(client: TestClient) -> None:
     assert res.status_code == 404
 
 
-def test_upload_metamodel_clears_model(client: TestClient) -> None:
+def test_reupload_metamodel_on_nonempty_model_rejected(client: TestClient) -> None:
     _upload_example_metamodel(client)
     _empty_model(client)
     res = client.post(
@@ -180,10 +180,20 @@ def test_upload_metamodel_clears_model(client: TestClient) -> None:
         json={"type": "Block", "properties": {"name": "X", "mass": 1.0}},
     )
     assert res.status_code == 201
-    # Re-upload metamodel; model should be cleared.
-    _upload_example_metamodel(client)
+    block_id = res.json()["id"]
+    # Re-upload metamodel on non-empty model; should be rejected with 409.
+    yaml_text = EXAMPLE.read_text(encoding="utf-8")
+    res = client.post(
+        f"{API}/metamodel",
+        content=yaml_text,
+        headers={"content-type": "application/x-yaml"},
+    )
+    assert res.status_code == 409
+    # Model should be preserved.
     res = client.get(f"{API}/model")
-    assert res.status_code == 404
+    assert res.status_code == 200
+    elements = res.json()["elements"]
+    assert any(e["id"] == block_id for e in elements)
 
 
 def test_422_on_bad_metamodel(client: TestClient) -> None:
