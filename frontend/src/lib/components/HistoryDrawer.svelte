@@ -15,6 +15,9 @@
 	import { GitCommitVertical, RefreshCw, AlertTriangle, ArrowLeft } from '@lucide/svelte';
 	import CompareDiff from './CompareDiff.svelte';
 	import { computeDiff, type Diff } from '$lib/state/diff';
+	import { revertToCommit } from '$lib/api/history';
+	import { getRole, getModelRev, getStagedDepth, getLockState, applyDelta } from '$lib/state';
+	import { ConflictError, ValidationError } from '$lib/api';
 
 	type Props = { open: boolean };
 	let { open = $bindable(false) }: Props = $props();
@@ -65,6 +68,57 @@
 		diff = null;
 		compareFrom = null;
 		spanRebind = false;
+		confirmRev = null;
+		revertError = null;
+	}
+
+	const canWrite = $derived(getRole() === 'owner' || getRole() === 'editor');
+	const quiet = $derived(getStagedDepth() === 0 && getLockState().size === 0);
+
+	let confirmRev = $state<number | null>(null);
+	let revertMsg = $state('');
+	let reverting = $state(false);
+	let revertError = $state<string | null>(null);
+
+	function askRevert(rev: number): void {
+		revertError = null;
+		if (!quiet) {
+			revertError = 'Commit or discard your changes first.';
+			confirmRev = rev; // still surface the notice in the dialog
+			return;
+		}
+		confirmRev = rev;
+		revertMsg = `Revert to rev ${rev}`;
+	}
+
+	async function doRevert(): Promise<void> {
+		if (confirmRev === null || !quiet) return;
+		reverting = true;
+		revertError = null;
+		try {
+			const res = await revertToCommit({
+				targetRev: confirmRev,
+				baseRev: getModelRev(),
+				message: revertMsg || undefined
+			});
+			applyDelta(res);
+			confirmRev = null;
+			backToList();
+		} catch (e) {
+			if (e instanceof ConflictError) {
+				const body = e.body as { detail?: string; rebind_rev?: number; conflicts?: unknown[] };
+				if (body?.rebind_rev !== undefined)
+					revertError = `Can't revert across a metamodel swap (rev ${body.rebind_rev}).`;
+				else if (body?.conflicts) revertError = 'A peer holds a lock on an affected resource.';
+				else revertError = 'History moved — reload and retry.';
+			} else if (e instanceof ValidationError) {
+				revertError = 'Revert would leave a structural error and was rejected.';
+			} else {
+				revertError = e instanceof Error ? e.message : 'Revert failed.';
+			}
+		} finally {
+			reverting = false;
+		}
 	}
 
 	// Load the first page whenever the drawer opens; subscribe to commit feed
@@ -168,7 +222,46 @@
 											? 'Selected'
 											: 'Compare'}
 								</button>
+								{#if canWrite}
+									<button
+										class="rounded px-1 py-0.5 text-[10px] text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+										onclick={() => askRevert(c.rev)}
+									>
+										Revert to here
+									</button>
+								{/if}
 							</div>
+							{#if confirmRev === c.rev}
+								<div class="mt-2 rounded border border-zinc-700 bg-zinc-900/60 p-3 text-sm">
+									<p class="text-zinc-200">
+										Revert to rev {confirmRev}? Revisions after r{confirmRev} are discarded as state
+										(history is preserved).
+									</p>
+									{#if revertError}
+										<p class="mt-1 text-xs text-red-300">{revertError}</p>
+									{/if}
+									{#if quiet}
+										<input
+											class="mt-2 w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs"
+											bind:value={revertMsg}
+											placeholder="Commit message"
+										/>
+									{/if}
+									<div class="mt-2 flex justify-end gap-2">
+										<Button variant="ghost" size="sm" class="h-7 text-xs" onclick={() => (confirmRev = null)}>
+											Cancel
+										</Button>
+										<Button
+											size="sm"
+											class="h-7 text-xs"
+											disabled={!quiet || reverting}
+											onclick={() => doRevert()}
+										>
+											Revert
+										</Button>
+									</div>
+								</div>
+							{/if}
 						</div>
 					</li>
 				{/each}
