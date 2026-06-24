@@ -57,19 +57,35 @@ const _stale = new SvelteMap<string, true>();
 
 let _role = $state('viewer');
 let _lockTtlSeconds = 300;
+let _strictMode = $state(false);
 let _clientConfig: ClientConfig | undefined;
 
 export function setCheckoutApiConfig(cfg: ClientConfig | undefined): void {
 	_clientConfig = cfg;
 }
 
-export function setProjectInfo(info: { role: string; lockTtlSeconds: number }): void {
+export function setProjectInfo(info: {
+	role: string;
+	lockTtlSeconds: number;
+	strictMode?: boolean;
+}): void {
 	_role = info.role;
 	_lockTtlSeconds = info.lockTtlSeconds > 0 ? info.lockTtlSeconds : _lockTtlSeconds;
+	if (info.strictMode !== undefined) _strictMode = info.strictMode;
 }
 
 export function getRole(): string {
 	return _role;
+}
+
+export function getStrictMode(): boolean {
+	return _strictMode;
+}
+
+/** Direct setter used by the owner Settings toggle (Task 8) after a successful
+ * PATCH /settings, so the DiffDrawer gate reflects the new policy immediately. */
+export function setStrictMode(v: boolean): void {
+	_strictMode = v;
 }
 
 export function canEdit(): boolean {
@@ -152,6 +168,7 @@ export function resetCheckout(): void {
 	_stale.clear();
 	_role = 'viewer';
 	_lockTtlSeconds = 300;
+	_strictMode = false;
 	_stopHeartbeat(); // defined in Task 6
 }
 
@@ -193,7 +210,7 @@ async function _renewAll(): Promise<void> {
 /** Fetch role + lock TTL from /open and adopt them. */
 export async function loadProjectInfo(cfg?: ClientConfig): Promise<void> {
 	const info = await openProject(cfg ?? _clientConfig);
-	setProjectInfo({ role: info.role, lockTtlSeconds: info.lock_ttl_seconds });
+	setProjectInfo({ role: info.role, lockTtlSeconds: info.lock_ttl_seconds, strictMode: info.strict_mode });
 }
 
 export function getStaleResources(): string[] {

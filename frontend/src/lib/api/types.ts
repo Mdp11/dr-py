@@ -230,7 +230,8 @@ export const OpenResponseSchema = z.object({
 	element_count: z.number().int(),
 	relationship_count: z.number().int(),
 	issue_counts: z.record(z.string(), z.number()).default({}),
-	lock_ttl_seconds: z.number().int().default(0)
+	lock_ttl_seconds: z.number().int().default(0),
+	strict_mode: z.boolean().default(false)
 });
 export type OpenResponse = z.infer<typeof OpenResponseSchema>;
 
@@ -263,7 +264,8 @@ export type Rebind = z.infer<typeof RebindSchema>;
 export const PreviewResponseSchema = z.object({
 	conformance_error_count: z.number().int(),
 	structural_blockers: z.array(IssueOutSchema).default([]),
-	issues: z.array(IssueOutSchema).default([])
+	issues: z.array(IssueOutSchema).default([]),
+	would_block: z.boolean().default(false)
 });
 export type PreviewResponse = z.infer<typeof PreviewResponseSchema>;
 
@@ -412,3 +414,8 @@ export const CommitHistoryResponseSchema = z.object({
 	has_more: z.boolean()
 });
 export type CommitHistoryResponse = z.infer<typeof CommitHistoryResponseSchema>;
+
+export const ProjectSettingsSchema = z.object({
+	strict_mode: z.boolean()
+});
+export type ProjectSettings = z.infer<typeof ProjectSettingsSchema>;

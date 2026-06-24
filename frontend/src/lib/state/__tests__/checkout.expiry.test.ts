@@ -26,7 +26,8 @@ describe('project open + own-lock expiry', () => {
 			element_count: 0,
 			relationship_count: 0,
 			issue_counts: {},
-			lock_ttl_seconds: 120
+			lock_ttl_seconds: 120,
+			strict_mode: false
 		});
 		await loadProjectInfo();
 		expect(getRole()).toBe('owner');
