@@ -161,6 +161,7 @@ def hydrate_session(project_id: str) -> Session:
         mm_row = content.get_metamodel_row(s, model_row.metamodel_id)
         assert mm_row is not None  # FK guarantees it
         model_rev = model_row.model_rev
+        strict_mode = bool((model_row.validation_policy or {}).get("strict", False))
         snap = content.latest_snapshot(s, project_id, max_rev=model_rev)
         tail = (
             content.commits_after(s, project_id, snap.rev) if snap is not None else []
@@ -191,4 +192,5 @@ def hydrate_session(project_id: str) -> Session:
     state = ValidationState()
     state.set_full(default_pipeline().validate(model, Scope.all()))
     session.validation = state
+    session.strict_mode = strict_mode
     return session
