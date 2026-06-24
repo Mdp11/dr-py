@@ -224,3 +224,30 @@ def test_revert_across_rebind_409(client: TestClient) -> None:
     )
     assert r.status_code == 409
     assert r.json()["rebind_rev"] == rebind_rev
+
+
+def test_revert_refuses_when_peer_holds_lock(client: TestClient) -> None:
+    a = _commit_create(client, "A")        # rev 1
+    _commit_create(client, "B")            # rev 2 (will be reverted)
+    # lock element A (touched by the rev-1 commit, which revert-to-0 would undo)
+    lk = client.post(
+        papi("/locks"), headers=AUTH_HEADERS,
+        json={"targets": [{"resource_id": a, "mode": "exclusive"}],
+              "intent": "edit"},
+    )
+    assert lk.status_code == 200, lk.text
+    token = lk.json()["token"]
+    r = client.post(
+        papi("/commits/revert"), headers=AUTH_HEADERS,
+        json={"target_rev": 0, "base_rev": _rev(client)},
+    )
+    assert r.status_code == 409
+    assert any(cf["resource_id"] == a for cf in r.json()["conflicts"])
+    # releasing the lock lets the revert through
+    assert client.post(
+        papi("/locks/release"), headers=AUTH_HEADERS, json={"token": token}
+    ).status_code == 200
+    assert client.post(
+        papi("/commits/revert"), headers=AUTH_HEADERS,
+        json={"target_rev": 0, "base_rev": _rev(client)},
+    ).status_code == 200
