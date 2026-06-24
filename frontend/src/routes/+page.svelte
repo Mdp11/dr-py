@@ -7,6 +7,7 @@
 	import Workspace from '$lib/components/Workspace.svelte';
 	import Inspector from '$lib/components/Inspector.svelte';
 	import DiffDrawer from '$lib/components/DiffDrawer.svelte';
+	import HistoryDrawer from '$lib/components/HistoryDrawer.svelte';
 	import ResizeHandle from '$lib/components/ResizeHandle.svelte';
 	import ResultsPanel from '$lib/components/ResultsPanel.svelte';
 	import { maybeAutoload } from '$lib/autoload';
@@ -19,6 +20,7 @@
 		clearModelError,
 		clearSelection,
 		getDiffDrawerOpen,
+		getHistoryDrawerOpen,
 		getModelError,
 		getResultsPanelOpen,
 		handleRemoteLockEvent,
@@ -29,6 +31,7 @@
 		resetCheckout,
 		resetModelStore,
 		setDiffDrawerOpen,
+		setHistoryDrawerOpen,
 		setMetamodel,
 		startRealtime,
 		stopRealtime
@@ -120,6 +123,12 @@
 
 	$effect(() => {
 		if (drawerOpen !== getDiffDrawerOpen()) setDiffDrawerOpen(drawerOpen);
+	});
+
+	let historyOpen = $derived(getHistoryDrawerOpen());
+
+	$effect(() => {
+		if (historyOpen !== getHistoryDrawerOpen()) setHistoryDrawerOpen(historyOpen);
 	});
 
 	const LS_LEFT = 'ui.sidebarWidth';
@@ -242,3 +251,4 @@
 </div>
 
 <DiffDrawer bind:open={drawerOpen} />
+<HistoryDrawer bind:open={historyOpen} />

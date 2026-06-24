@@ -19,7 +19,8 @@
 		isRunning,
 		popLastStaged,
 		refreshSummary,
-		setDiffDrawerOpen
+		setDiffDrawerOpen,
+		setHistoryDrawerOpen
 	} from '$lib/state';
 	import { downloadModel } from '$lib/api/model-read';
 	import { saveResponseToFile } from '$lib/util/fileSave';
@@ -234,6 +235,14 @@
 			onclick={() => setDiffDrawerOpen(true)}
 		>
 			Commit
+		</Button>
+		<Button
+			variant="ghost"
+			size="sm"
+			class="h-7 text-xs focus-visible:ring-2 focus-visible:ring-indigo-500"
+			onclick={() => setHistoryDrawerOpen(true)}
+		>
+			History
 		</Button>
 		<div class="group relative flex items-center">
 			<span class="font-mono text-xs {combinedChanges > 0 ? 'text-red-400' : 'text-zinc-500'}">
