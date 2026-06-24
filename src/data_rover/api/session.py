@@ -83,6 +83,12 @@ class Session:
     #: endpoint; broadcast to at the commit/lock sites. The eviction guard
     #: refuses to drop a session while it has connected clients.
     hub: FeedHub = field(default_factory=FeedHub, repr=False)
+    #: per-project strict-mode policy (strict-mode feature). When True the
+    #: commit path promotes scoped CONFORMANCE issues to a hard 422 reject.
+    #: Loaded from ModelRow.validation_policy during hydration; flipped by the
+    #: owner-gated PATCH /settings route under the write-mutex. Default False
+    #: keeps the engine's inspectable behaviour for every untouched project.
+    strict_mode: bool = False
 
     def set_model(
         self, model: Model | None, *, validation: ValidationState | None = None
