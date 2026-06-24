@@ -42,3 +42,20 @@ def test_migration_creates_content_tables(tmp_path: Path) -> None:
 
     command.downgrade(cfg, "base")
     assert not content & set(inspect(engine).get_table_names())
+
+
+def test_migration_adds_validation_policy_column(tmp_path: Path) -> None:
+    db_path = tmp_path / "t.db"
+    url = f"sqlite:///{db_path}"
+    cfg = Config(str(REPO_ROOT / "alembic.ini"))
+    cfg.set_main_option("script_location", str(REPO_ROOT / "alembic"))
+    cfg.set_main_option("sqlalchemy.url", url)
+
+    command.upgrade(cfg, "head")
+    engine = create_engine(url)
+    cols = {c["name"] for c in inspect(engine).get_columns("models")}
+    assert "validation_policy" in cols
+
+    command.downgrade(cfg, "0004")
+    cols = {c["name"] for c in inspect(engine).get_columns("models")}
+    assert "validation_policy" not in cols

@@ -141,6 +141,11 @@ class ModelRow(Base):
     )
     name: Mapped[str] = mapped_column(String, nullable=False, default="model")
     model_rev: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    #: Per-project validation policy (strict-mode feature). JSON so it can grow
+    #: into per-category promotion flags without a schema migration. v1 shape:
+    #: ``{"strict": bool}``. NULL / missing key reads as strict=false (the
+    #: inspectable default).
+    validation_policy: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     #: Declared so SQLAlchemy's unit-of-work can order INSERTs correctly (it
     #: resolves FK dependencies via relationship edges, not FK columns alone).

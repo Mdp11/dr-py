@@ -58,6 +58,28 @@ def set_model_rev(db: Session, project_id: str, rev: int) -> None:
         row.model_rev = rev
 
 
+def get_strict_mode(db: Session, project_id: str) -> bool:
+    """Read the project's strict-mode flag. False if no model row or NULL
+    policy (the inspectable default)."""
+    row = get_model_row(db, project_id)
+    if row is None or row.validation_policy is None:
+        return False
+    return bool(row.validation_policy.get("strict", False))
+
+
+def set_strict_mode(db: Session, project_id: str, strict: bool) -> None:
+    """Set the project's strict-mode flag. Reassigns a fresh dict so
+    SQLAlchemy's JSON change-tracking fires (in-place mutation is not
+    detected). Raises LookupError if the project has no model row."""
+    row = get_model_row(db, project_id)
+    if row is None:
+        raise LookupError(f"project {project_id!r} has no model row")
+    policy = dict(row.validation_policy or {})
+    policy["strict"] = strict
+    row.validation_policy = policy
+    db.commit()
+
+
 def append_commit(
     db: Session,
     project_id: str,
