@@ -100,7 +100,8 @@
 	let commitError: string | null = $state(null);
 	const errorCount = $derived(preview?.conformance_error_count ?? 0);
 	const structuralBlockers = $derived(preview?.structural_blockers ?? []);
-	const commitBlocked = $derived(structuralBlockers.length > 0);
+	const wouldBlock = $derived(preview?.would_block ?? false);
+	const commitBlocked = $derived(structuralBlockers.length > 0 || wouldBlock);
 
 	const issueIndex = $derived(indexIssues(getIssues()));
 	const pendingEntityIds = $derived.by(() => {
@@ -305,7 +306,7 @@
 					</div>
 				{/if}
 
-				{#if errorCount > 0}
+				{#if errorCount > 0 && !wouldBlock}
 					<div
 						class="flex items-center gap-1.5 rounded border border-amber-900 bg-amber-950/30 px-2 py-1 text-[11px] text-amber-200"
 					>
@@ -316,7 +317,16 @@
 						>
 					</div>
 				{/if}
-				{#if commitBlocked}
+				{#if wouldBlock}
+					<div
+						class="rounded border border-red-900 bg-red-950/40 px-2 py-1 text-[11px] text-red-200"
+						role="alert"
+					>
+						Strict mode is on: {errorCount} validation {errorCount === 1 ? 'issue' : 'issues'} must be
+						resolved before committing.
+					</div>
+				{/if}
+				{#if structuralBlockers.length > 0}
 					<div
 						class="rounded border border-red-900 bg-red-950/40 px-2 py-1 text-[11px] text-red-200"
 						role="alert"
@@ -392,7 +402,7 @@
 				>
 					{committing
 						? 'Committing…'
-						: errorCount > 0
+						: errorCount > 0 && !commitBlocked
 							? `Commit anyway (${total})`
 							: `Commit (${total})`}
 				</Button>
