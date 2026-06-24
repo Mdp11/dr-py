@@ -262,6 +262,21 @@ def create_commit(
             )
         # d. commit accepted: splice issues, bump rev, record batch
         conformance = [i for i in scoped if i.category is IssueCategory.CONFORMANCE]
+        # strict-mode gate: an owner-enabled project promotes scoped conformance
+        # issues to a hard reject (spec: strict mode). Scoped to res.dirty only —
+        # pre-existing issues elsewhere never trip this. Rebind has its own route
+        # and does not pass through here, so it stays exempt by construction.
+        if session.strict_mode and conformance:
+            _rollback(model, res.inverse_units)
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "detail": "strict-mode conformance blocker",
+                    "conformance_blockers": [
+                        IssueOut.from_core(i).model_dump() for i in conformance
+                    ],
+                },
+            )
         delta = state.replace(res.dirty.ids, scoped)
         session.model_rev += 1
         session.record_batch(
