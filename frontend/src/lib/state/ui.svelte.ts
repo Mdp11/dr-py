@@ -33,3 +33,13 @@ export function getHistoryDrawerOpen(): boolean {
 export function setHistoryDrawerOpen(open: boolean): void {
 	_historyDrawerOpen = open;
 }
+
+let _settingsOpen: boolean = $state(false);
+
+export function getSettingsOpen(): boolean {
+	return _settingsOpen;
+}
+
+export function setSettingsOpen(open: boolean): void {
+	_settingsOpen = open;
+}
