@@ -28,7 +28,7 @@ from .. import content
 from ..db import get_db
 from ..db_models import Commit, Membership, User
 from ..deps import Session, get_request_session, require_model
-from ..hydration import deserialize_ops
+from ..hydration import deserialize_ops, reconstruct_model_at
 from ..identity import get_current_user
 from ..locking import required_locks
 from ..settings import get_settings
@@ -39,6 +39,7 @@ from ..schemas import (
     CommitSummaryOut,
     ElementOut,
     IssueOut,
+    ModelOut,
     OpenResponse,
     PreviewRequest,
     PreviewResponse,
@@ -165,6 +166,33 @@ def list_commits(
         ],
         has_more=has_more,
     )
+
+
+@router.get("/commits/{rev}/model", response_model=None)
+def model_at_rev(
+    rev: int,
+    project_id: str,
+    session: Session = Depends(get_request_session),
+    db: DbSession = Depends(get_db),
+) -> ModelOut | JSONResponse:
+    """Reconstruct the FULL model as it existed at ``rev`` (Phase 8 diffs).
+
+    Read endpoint — any member (history is readable by viewers). O(model)
+    response, like GET /model and the /compare page; the client diffs two of
+    these with ``computeDiff``. Reconstruction reads durable content directly,
+    so it is correct for cold/evicted projects.
+    """
+    model_row = content.get_model_row(db, project_id)
+    head = model_row.model_rev if model_row is not None else 0
+    if rev < 0 or rev > head:
+        return JSONResponse(
+            status_code=422,
+            content={"detail": "rev out of range", "model_rev": head},
+        )
+    model = reconstruct_model_at(project_id, rev)
+    if model is None:
+        return ModelOut(elements=[], relationships=[])
+    return ModelOut.from_core(model)
 
 
 @router.post("/commits", response_model=None)
