@@ -139,6 +139,27 @@ def test_settings_get_defaults_false(client) -> None:
     assert r.json() == {"strict_mode": False}
 
 
+def test_viewer_can_read_settings(client) -> None:
+    _make_owner_with_model(client)
+    from data_rover.api import db
+    from data_rover.api.db_models import Role, User
+    from data_rover.api.session import DEFAULT_PROJECT_ID
+    from data_rover.api.tenancy import add_member
+
+    gen = db.get_db()
+    s = next(gen)
+    try:
+        s.add(User(id="vw", email="vw@example.com"))
+        add_member(s, DEFAULT_PROJECT_ID, "vw", Role.viewer)
+        s.commit()
+    finally:
+        gen.close()
+    vw = {"x-user-id": "vw", "x-user-email": "vw@example.com"}
+    r = client.get(papi("/settings"), headers=vw)
+    assert r.status_code == 200
+    assert r.json() == {"strict_mode": False}
+
+
 def test_owner_can_enable_strict_mode(client) -> None:
     _make_owner_with_model(client)
     r = client.patch(papi("/settings"), headers=AUTH_HEADERS, json={"strict_mode": True})
