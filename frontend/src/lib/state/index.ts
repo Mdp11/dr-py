@@ -114,6 +114,8 @@ export {
 	setCheckoutApiConfig,
 	setProjectInfo,
 	getRole,
+	getStrictMode,
+	setStrictMode,
 	canEdit,
 	ensureCheckout,
 	getHeldToken,
