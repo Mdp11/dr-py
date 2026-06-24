@@ -94,6 +94,57 @@ def replay_commits_into(session: Session, commits: list[Commit]) -> None:
             _apply_batch(session.model, ops, restore=True)
 
 
+def reconstruct_model_at(project_id: str, rev: int) -> Model | None:
+    """Build the model as it existed at ``rev`` (Phase 8 history diffs).
+
+    Mirrors ``hydrate_session`` but bounded to ``rev`` and returning a
+    THROWAWAY core ``Model`` — it never touches the registry session or any
+    snapshot writes. The base snapshot is built ``strict=False`` under the
+    metamodel effective at ``rev`` (see ``first_rebind_after``), so a snapshot
+    from a different metamodel era across a rebind still loads; ``computeDiff``
+    on the client is purely structural, so the diff stays well-defined.
+
+    Returns ``None`` for a contentless project (no ``ModelRow``).
+    """
+    with db_session() as s:
+        model_row = content.get_model_row(s, project_id)
+        if model_row is None:
+            return None
+        # metamodel effective AT rev: the from-side of the first rebind after
+        # rev, else the current binding.
+        rebind = content.first_rebind_after(s, project_id, rev)
+        mm_id = (
+            rebind.from_metamodel_id
+            if rebind is not None and rebind.from_metamodel_id is not None
+            else model_row.metamodel_id
+        )
+        mm_row = content.get_metamodel_row(s, mm_id)
+        assert mm_row is not None
+        snap = content.latest_snapshot(s, project_id, max_rev=rev)
+        tail = content.commits_between(
+            s,
+            project_id,
+            after_rev=snap.rev if snap is not None else 0,
+            max_rev=rev,
+        )
+        snap_key = snap.key if snap is not None else None
+
+    metamodel = load_metamodel_str(mm_row.blob)
+    if snap_key is None:
+        model = Model(metamodel)
+    else:
+        from .routes._snapshot import build_model_from_dicts
+
+        raw = json.loads(get_snapshot_store().get(snap_key))
+        model = build_model_from_dicts(metamodel, raw, strict=False)
+
+    throwaway = Session(metamodel=metamodel, model=model)
+    throwaway.model_rev = rev
+    replay_commits_into(throwaway, tail)
+    assert throwaway.model is not None
+    return throwaway.model
+
+
 def hydrate_session(project_id: str) -> Session:
     """Build the live ``Session`` for a project from durable storage.
 
