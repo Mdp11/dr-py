@@ -64,7 +64,9 @@ def test_hydrate_session_loads_strict_mode() -> None:
     finally:
         gen.close()
 
-    session = hydration.hydrate_session("p1")
-    assert session.strict_mode is True
-    set_snapshot_store(None)
-    db.drop_all()
+    try:
+        session = hydration.hydrate_session("p1")
+        assert session.strict_mode is True
+    finally:
+        set_snapshot_store(None)
+        db.drop_all()
