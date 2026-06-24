@@ -160,3 +160,39 @@ def test_revert_db_failure_rolls_back_in_memory(
     assert r.status_code == 500
     assert _rev(client) == before_rev       # model_rev unchanged
     assert _count(client) == before_count   # in-memory model intact
+
+
+def test_revert_stale_base_rev_409(client: TestClient) -> None:
+    _commit_create(client, "A")
+    r = client.post(
+        papi("/commits/revert"), headers=AUTH_HEADERS,
+        json={"target_rev": 0, "base_rev": 999},
+    )
+    assert r.status_code == 409
+    assert r.json()["model_rev"] == _rev(client)
+
+
+def test_revert_target_out_of_range_422(client: TestClient) -> None:
+    _commit_create(client, "A")
+    r = client.post(
+        papi("/commits/revert"), headers=AUTH_HEADERS,
+        json={"target_rev": 999, "base_rev": _rev(client)},
+    )
+    assert r.status_code == 422
+
+
+def test_revert_noop_at_head_records_no_commit(client: TestClient) -> None:
+    _commit_create(client, "A")
+    head = _rev(client)
+    r = client.post(
+        papi("/commits/revert"), headers=AUTH_HEADERS,
+        json={"target_rev": head, "base_rev": head},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["model_rev"] == head        # unchanged — no new commit
+    assert body["changed_elements"] == []
+    assert body["deleted_element_ids"] == []
+    # history length unchanged
+    hist = client.get(papi("/commits"), headers=AUTH_HEADERS).json()
+    assert hist["commits"][0]["rev"] == head
