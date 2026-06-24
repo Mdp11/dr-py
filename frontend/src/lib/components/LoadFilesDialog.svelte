@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { metamodel as metamodelApi, ApiError } from '$lib/api';
+	import { metamodel as metamodelApi, ApiError, ConflictError } from '$lib/api';
 	import { uploadModelBody } from '$lib/api/model-ops';
 	import { ViewSchema, type View } from '$lib/api/types';
 	import { Button } from '$lib/components/ui/button';
@@ -55,8 +55,23 @@
 			modelFilename: string;
 			viewBody: View | null;
 		}) => {
-			// 1. metamodel — uploading clears the active model on the backend
-			const mm = await metamodelApi.uploadMetamodel(vars.metamodelBody);
+			// 1. metamodel — uploading clears the active model on the backend.
+			// If the model is non-empty the backend returns 409 (initial-bind
+			// only guard). In that case clear the existing metamodel+model first
+			// (DELETE /metamodel resets both) and then retry the upload. This
+			// matches the dialog's stated intent: "Loading discards the current
+			// model and unsaved changes."
+			let mm: Awaited<ReturnType<typeof metamodelApi.uploadMetamodel>>;
+			try {
+				mm = await metamodelApi.uploadMetamodel(vars.metamodelBody);
+			} catch (e) {
+				if (e instanceof ConflictError) {
+					await metamodelApi.clearMetamodel();
+					mm = await metamodelApi.uploadMetamodel(vars.metamodelBody);
+				} else {
+					throw e;
+				}
+			}
 			setMetamodel(mm);
 			setMetamodelFilename(metamodelFilename);
 			setViewFilename(null);
