@@ -2,12 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import TopBar from '../TopBar.svelte';
 
-// $app/paths is a SvelteKit runtime module aliased to a stub in vitest.config.ts.
-vi.mock('$app/paths', () => ({
-	resolve: vi.fn((p: string) => p),
-	base: '',
-	assets: ''
-}));
+// $app/paths (SvelteKit runtime module) is resolved for tests by the filesystem
+// alias in vitest.config.ts -> src/__mocks__/app-paths.ts; no inline mock needed.
 
 // Svelte 5 components are compiled to functions (anchor, props) => void.
 // Provide a minimal no-op stub for each dialog/drawer child of TopBar so we
