@@ -137,6 +137,10 @@ exposes project-level configuration:
   Commit button (`commitBlocked = structuralBlockers.length > 0 || wouldBlock`).
   When strict mode is off the same batch shows "Commit anyway (N)" and the
   button is enabled — conformance issues are surfaced but do not block.
+- **Scoped to the dirty set** — the gate inspects only the elements and
+  relationships the commit batch touched (no whole-model re-validation), so it
+  is safe to enable on an already-non-conforming project: pre-existing issues
+  elsewhere do not block a commit.
 - **Rebind is exempt** — `POST /commits/metamodel-swap` (rebind) never passes
   through the strict gate; swapping the metamodel always succeeds regardless of
   the setting.
