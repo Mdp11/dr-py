@@ -26,7 +26,7 @@ from ..authz import require_membership
 from ..feed import commit_event, lock_event
 from .. import content
 from ..db import get_db
-from ..db_models import Membership, User
+from ..db_models import Commit, Membership, User
 from ..deps import Session, get_request_session, require_model
 from ..identity import get_current_user
 from ..locking import required_locks
@@ -55,6 +55,28 @@ from .ops import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+#: op-dict keys that carry a resource id. In CANONICAL stored ops every one of
+#: these holds a real id — a create op's ``temp_id`` was rewritten to the
+#: assigned canonical id at apply time (see session.py / _apply_one).
+_ID_KEYS = ("id", "temp_id", "source_id", "target_id")
+
+
+def _affected_ids(commits: list[Commit]) -> set[str]:
+    """Resource ids touched by the forward ops of these commits.
+
+    Used by revert's peer-lock guard: any active lease over one of these ids
+    means a peer is mid-edit on something the revert would change, so the
+    revert is refused (409) rather than stomping their uncommitted work.
+    """
+    ids: set[str] = set()
+    for c in commits:
+        for op in c.ops:
+            for key in _ID_KEYS:
+                v = op.get(key)
+                if isinstance(v, str):
+                    ids.add(v)
+    return ids
 
 
 @router.get("/open", response_model=None)
