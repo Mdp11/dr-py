@@ -20,6 +20,14 @@ export async function loadFiles(
 	if (files.view !== undefined) {
 		await dialog.getByTestId('view-file-input').setInputFiles(files.view);
 	}
-	await dialog.getByRole('button', { name: 'Load', exact: true }).click();
-	await expect(dialog).toBeHidden();
+	// The metamodel onchange handler is async (calls file.text()); wait for the
+	// Load button to become enabled (canSubmit derived from metamodelBody + modelFile)
+	// before clicking so we don't click while the button is still disabled.
+	const loadBtn = dialog.getByRole('button', { name: 'Load', exact: true });
+	await expect(loadBtn).toBeEnabled({ timeout: 10_000 });
+	await loadBtn.click();
+	// The backend processes three sequential uploads (metamodel → model → view);
+	// on a cold dev environment this can take well over 5 s. Use a generous
+	// timeout so transient slowness does not flake the caller.
+	await expect(dialog).toBeHidden({ timeout: 60_000 });
 }

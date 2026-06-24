@@ -182,7 +182,7 @@
 		{:else}
 			<ul class="max-h-[60vh] divide-y divide-zinc-800 overflow-y-auto">
 				{#each getCommits() as c (c.rev)}
-					<li class="flex items-start gap-3 px-1 py-2 text-sm">
+					<li data-testid="commit-row" class="flex items-start gap-3 px-1 py-2 text-sm">
 						<GitCommitVertical class="mt-0.5 h-4 w-4 shrink-0 text-zinc-500" />
 						<div class="min-w-0 flex-1">
 							<div class="flex items-center gap-2">

@@ -46,7 +46,8 @@ The UI is a fixed grid:
 ```
 
 - **TopBar** — load a metamodel from file, load a model from file, Undo the
-  last staged edit, trigger validation, open the Commit review (`DiffDrawer`).
+  last staged edit, trigger validation, open the Commit review (`DiffDrawer`),
+  and browse the durable commit history (`HistoryDrawer`).
 - **Sidebar** — fuzzy search, type filter (each concrete type has a `+` button
   to create a new element of that type), containment tree with keyboard nav and
   per-row lock badges.
@@ -118,6 +119,32 @@ follows a pessimistic **check-out → stage → commit** loop (Spec B):
    `POST /model/save`), so the browser never materializes the serialized model
    as a string. Export reflects the committed model, not the staged buffer.
 
+### Commit history browser (History drawer)
+
+The **History** button in the TopBar opens `HistoryDrawer.svelte`, which
+browses the project's durable commit journal:
+
+- **List view** — fetches `GET /commits` (paged, newest-first) via
+  `state/history.svelte.ts` and renders one row per commit with its rev label,
+  message, author, timestamp, and op count. Live-refreshes via the realtime
+  feed (commit events trigger a page reload while the drawer is open).
+- **Per-commit diff** — clicking a row's "Diff" button reconstructs the model
+  at `rev - 1` and at `rev` using `GET /commits/{rev}/model` (results are
+  cached in a rev → `ModelOut` map to avoid re-fetching on rapid navigation),
+  then passes both snapshots to `computeDiff`/`CompareDiff` which render
+  element-level added / modified / deleted counts and per-element property
+  changes.
+- **Two-commit compare** — the "Compare" toggle lets the user select any two
+  revisions A and B; the same `computeDiff` path reconstructs both models and
+  renders the range diff. A warning banner is shown when the range spans a
+  metamodel-swap (rebind) commit.
+- **Revert-to-commit** (`POST /commits/revert`) — gated on a clean staged
+  buffer (`getStagedDepth() === 0 && getLockState().size === 0`). Selecting
+  "Revert to here" on a row shows an inline confirm panel with an optional
+  message; submitting applies the compensating inverse ops as a new durable
+  commit (history stays append-only, `model_rev` advances), broadcasts the
+  delta via the feed, and reloads the history list.
+
 ### Where to find things
 
 ```
@@ -130,6 +157,10 @@ src/
                         feed.ts — WebSocket wrapper (auto-reconnect with
                         exponential backoff, injectable socketFactory for
                         tests; pure transport, no app state)
+    api/history.ts      REST client for the commit-history endpoints:
+                        getCommitHistory (GET /commits, paged) and
+                        getModelAtRev (GET /commits/{rev}/model);
+                        revertToCommit (POST /commits/revert)
     state/              model.svelte.ts (staged-edit store) / changes (server
                         change-set badge) / selection / ui / filters /
                         metamodel / workspace / validation / file (filename
@@ -143,12 +174,16 @@ src/
                         required locks and gates the mutation; lock-badge.ts —
                         per-row lock badge derivation; lock-notice.svelte.ts —
                         transient lock-conflict notice; api/checkout.ts — the
-                        locks + commits REST client
+                        locks + commits REST client; history.svelte.ts —
+                        commit-list store (paged GET /commits), rev→ModelOut
+                        reconstruction cache, resetHistory/loadFirstPage/
+                        loadMore/modelAt
     metamodel/          Pure helpers (effective properties, multiplicity,
                         containment, subtype) mirroring the Python schema
     components/         TopBar, Sidebar, Workspace, Inspector, StatusBar,
-                        DiffDrawer, CommandPalette, dialogs, and ui/ shadcn
-                        primitives (button, dialog, dropdown-menu, …)
+                        DiffDrawer, HistoryDrawer, CommandPalette, dialogs,
+                        and ui/ shadcn primitives (button, dialog,
+                        dropdown-menu, …)
     keyboard.ts         Pure shortcut matcher
     keyboard.svelte.ts  Global window listener + dispatch to state
 ```
@@ -165,8 +200,16 @@ pixi run -e frontend bash -c 'cd frontend && npx playwright install chromium && 
 
 The Playwright config (`playwright.config.ts`) boots both the backend
 (`pixi run -e api serve`) and the Vite dev server, and reuses them if already
-up. The smoke covers load metamodel from file → load an empty model → add
-element → edit → confirm the change appears in the Commit review.
+up. The suites cover: load metamodel → load model → create element → edit →
+confirm the Commit review; check-out → edit → commit with the smart-city
+example; relationship picker; drag-and-drop view curation; advanced search;
+and History: open drawer → list commits → diff → revert with compensating
+commit.
+
+**Known infra note**: `rm -f /tmp/data-rover-e2e.db` before each fresh run
+clears the SQLite journal so the in-memory snapshot store stays in sync. When
+`reuseExistingServer: true` keeps an existing backend alive, the rm is skipped
+automatically (the db and store are already in sync for the live process).
 
 ## Type-checking & lint
 
