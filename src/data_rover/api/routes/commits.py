@@ -402,6 +402,24 @@ def revert_commit(
                         "rebind_rev": c.rev,
                     },
                 )
+        affected = _affected_ids(commits)
+        held = [
+            le
+            for le in session.lock_table.active_leases(time.monotonic())
+            if le.resource_id in affected
+        ]
+        if held:
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "detail": "resource locked by a peer",
+                    "conflicts": [
+                        {"resource_id": le.resource_id, "mode": le.mode.value,
+                         "holder_id": le.holder}
+                        for le in held
+                    ],
+                },
+            )
         # apply inverse_ops newest-first; deserialize the stored JSON op dicts
         combined = deserialize_ops(
             [op for c in reversed(commits) for op in c.inverse_ops]
