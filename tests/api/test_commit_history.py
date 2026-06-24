@@ -7,7 +7,13 @@ from fastapi.testclient import TestClient
 
 from data_rover.api.main import create_app
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import (
+    AUTH_HEADERS,
+    commit_create,
+    model_rev,
+    papi,
+    seed_default_project,
+)
 
 _MM = """
 elements:
@@ -33,34 +39,15 @@ def client() -> TestClient:
     return c
 
 
-def _rev(c: TestClient) -> int:
-    return c.get(papi("/model/summary"), headers=AUTH_HEADERS).json()["model_rev"]
-
-
-def _commit_create(c: TestClient) -> None:
-    """Append a commit via the legacy ops path (also writes a Commit row)."""
-    r = c.post(
-        papi("/model/ops"),
-        json={
-            "base_rev": _rev(c),
-            "ops": [
-                {"kind": "create_element", "temp_id": "tmp_n",
-                 "type_name": "Node", "properties": {}}
-            ],
-        },
-    )
-    assert r.status_code == 200, r.text
-
-
 def test_history_lists_commits_newest_first(client: TestClient) -> None:
-    _commit_create(client)
-    _commit_create(client)
+    commit_create(client)
+    commit_create(client)
     r = client.get(papi("/commits"), headers=AUTH_HEADERS)
     assert r.status_code == 200, r.text
     body = r.json()
     revs = [c["rev"] for c in body["commits"]]
     assert revs == sorted(revs, reverse=True)
-    assert revs[0] == _rev(client)
+    assert revs[0] == model_rev(client)
     top = body["commits"][0]
     assert top["op_count"] == 1
     assert top["is_rebind"] is False
@@ -69,7 +56,7 @@ def test_history_lists_commits_newest_first(client: TestClient) -> None:
 
 def test_history_pagination_has_more(client: TestClient) -> None:
     for _ in range(3):
-        _commit_create(client)
+        commit_create(client)
     page1 = client.get(papi("/commits"), params={"limit": 2}, headers=AUTH_HEADERS).json()
     assert len(page1["commits"]) == 2
     assert page1["has_more"] is True
@@ -92,9 +79,9 @@ relationships:
 
 
 def test_history_marks_rebind_commit(client: TestClient) -> None:
-    _commit_create(client)
+    commit_create(client)
     r = client.post(
-        papi("/metamodel/rebind") + f"?base_rev={_rev(client)}&message=swap",
+        papi("/metamodel/rebind") + f"?base_rev={model_rev(client)}&message=swap",
         content=_MM_RENAMED, headers={"content-type": "application/x-yaml"},
     )
     assert r.status_code == 200, r.text
