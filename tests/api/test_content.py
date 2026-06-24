@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from data_rover.api import content, db
-from data_rover.api.db_models import Project
+from data_rover.api.db_models import Commit, Project
 
 
 def _setup() -> None:
@@ -84,3 +84,37 @@ def test_append_commit_persists_metadata() -> None:
         assert c.message == "rename node"
         assert c.validation_error_count == 3
         assert c.issues[0]["category"] == "conformance"
+
+
+def _seed_project_with_commits(n: int) -> None:
+    db.init_engine("sqlite://", force=True)
+    db.create_all()
+    with db.db_session() as s:
+        s.add(Project(id="p1", name="P1"))
+        for rev in range(1, n + 1):
+            s.add(
+                Commit(
+                    project_id="p1",
+                    rev=rev,
+                    commit_id=f"c{rev}",
+                    author_id=None,
+                    ops=[{"kind": "delete_element", "id": f"e{rev}"}],
+                    inverse_ops=[],
+                    id_map={},
+                    message=f"commit {rev}",
+                )
+            )
+
+
+def test_list_commits_is_rev_descending_and_limited() -> None:
+    _seed_project_with_commits(5)
+    with db.db_session() as s:
+        rows = content.list_commits(s, "p1", before_rev=None, limit=3)
+    assert [r.rev for r in rows] == [5, 4, 3]
+
+
+def test_list_commits_before_rev_cursor() -> None:
+    _seed_project_with_commits(5)
+    with db.db_session() as s:
+        rows = content.list_commits(s, "p1", before_rev=3, limit=10)
+    assert [r.rev for r in rows] == [2, 1]
