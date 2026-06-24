@@ -186,3 +186,73 @@ def test_editor_cannot_toggle_strict_mode(client) -> None:
     ed = {"x-user-id": "ed", "x-user-email": "ed@example.com"}
     r = client.patch(papi("/settings"), headers=ed, json={"strict_mode": True})
     assert r.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Task 4 — strict-mode enforcement in the commit handler
+# ---------------------------------------------------------------------------
+
+
+def test_strict_mode_blocks_conformance_commit(client) -> None:
+    _make_owner_with_model(client)
+    # sanity: without strict mode the SAME batch is allowed (counted, not blocked)
+    ok = client.post(papi("/commits"), headers=AUTH_HEADERS, json={
+        "base_rev": _rev(client), "ops": VIOLATING_OPS, "message": "soft", "lock_tokens": [],
+    })
+    assert ok.status_code == 200, ok.text  # default (non-strict) path
+
+    client.patch(papi("/settings"), headers=AUTH_HEADERS, json={"strict_mode": True})
+    rev_before = _rev(client)
+    r = client.post(papi("/commits"), headers=AUTH_HEADERS, json={
+        "base_rev": rev_before, "ops": VIOLATING_OPS, "message": "x", "lock_tokens": [],
+    })
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"] == "strict-mode conformance blocker"
+    assert len(r.json()["conformance_blockers"]) >= 1
+    assert _rev(client) == rev_before  # rolled back, no rev bump
+
+
+def test_strict_mode_allows_clean_commit(client) -> None:
+    _make_owner_with_model(client)
+    client.patch(papi("/settings"), headers=AUTH_HEADERS, json={"strict_mode": True})
+    r = client.post(papi("/commits"), headers=AUTH_HEADERS, json={
+        "base_rev": _rev(client), "ops": CLEAN_OPS, "message": "ok", "lock_tokens": [],
+    })
+    assert r.status_code == 200, r.text
+
+
+def test_strict_mode_ignores_preexisting_issues_outside_dirty_set(client) -> None:
+    # Land a non-conforming element AND a valid element while NON-strict,
+    # then turn strict on and update the valid element. The update's dirty set
+    # contains only the valid element (and its uniqueness group, which does NOT
+    # include the violating element — different property values).
+    # Scoped enforcement => the second commit succeeds even though the model
+    # still holds the first element's issue.
+    _make_owner_with_model(client)
+    client.post(papi("/commits"), headers=AUTH_HEADERS, json={
+        "base_rev": _rev(client), "ops": VIOLATING_OPS, "message": "soft", "lock_tokens": [],
+    })
+    valid_r = client.post(papi("/commits"), headers=AUTH_HEADERS, json={
+        "base_rev": _rev(client), "ops": CLEAN_OPS, "message": "valid-create", "lock_tokens": [],
+    })
+    valid_id = valid_r.json()["id_map"]["tmp_ok"]
+
+    client.patch(papi("/settings"), headers=AUTH_HEADERS, json={"strict_mode": True})
+
+    # Acquire an exclusive lock on the valid element before committing the update.
+    lock_r = client.post(papi("/locks"), headers=AUTH_HEADERS, json={
+        "targets": [{"resource_id": valid_id, "mode": "exclusive"}],
+        "intent": "edit",
+    })
+    assert lock_r.status_code == 200, lock_r.text
+    lock_token = lock_r.json()["token"]
+
+    # update_element: dirty set = the valid element + its uniqueness group.
+    # The violating element (no name) is in a different group → stays outside scope.
+    r = client.post(papi("/commits"), headers=AUTH_HEADERS, json={
+        "base_rev": _rev(client),
+        "ops": [{"kind": "update_element", "id": valid_id, "properties_patch": {"name": "renamed"}}],
+        "message": "update-valid",
+        "lock_tokens": [lock_token],
+    })
+    assert r.status_code == 200, r.text  # pre-existing violating element is outside dirty set
