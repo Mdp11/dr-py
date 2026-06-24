@@ -96,6 +96,7 @@ def open_project(
         relationship_count=len(model.relationships),
         issue_counts=state.counts(),
         lock_ttl_seconds=get_settings().lock_ttl_seconds,
+        strict_mode=session.strict_mode,
     )
 
 
@@ -124,6 +125,7 @@ def preview_commit(
         conformance_error_count=len(conformance),
         structural_blockers=[IssueOut.from_core(i) for i in structural],
         issues=[IssueOut.from_core(i) for i in scoped],
+        would_block=session.strict_mode and len(conformance) > 0,
     )
 
 
