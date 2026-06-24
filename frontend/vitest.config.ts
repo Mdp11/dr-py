@@ -16,7 +16,11 @@ export default defineConfig({
 		// svelte() plugin used here does not — wire it up so component tests can
 		// mount components that import via `$lib/...` at runtime.
 		alias: {
-			$lib: fileURLToPath(new URL('./src/lib', import.meta.url))
+			$lib: fileURLToPath(new URL('./src/lib', import.meta.url)),
+			// SvelteKit runtime modules are not available in vitest (no Kit
+			// plugin here); stub them so component tests can import components
+			// that use $app/* without a real SvelteKit server.
+			'$app/paths': fileURLToPath(new URL('./src/__mocks__/app-paths.ts', import.meta.url))
 		}
 	},
 	test: {
