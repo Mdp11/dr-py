@@ -36,6 +36,16 @@ export function onLockEvent(cb: LockTap): () => void {
 	return () => _lockTaps.delete(cb);
 }
 
+// eslint-disable-next-line svelte/prefer-svelte-reactivity
+const _commitTaps = new Set<() => void>();
+
+/** Register a tap fired after every commit/rebind feed event (the history
+ * drawer uses this to refetch the first page while open). Returns unsubscribe. */
+export function onCommitEvent(cb: () => void): () => void {
+	_commitTaps.add(cb);
+	return () => _commitTaps.delete(cb);
+}
+
 export function getFeedConnected(): boolean {
 	return _connected;
 }
@@ -102,10 +112,12 @@ export function handleFeedEvent(e: FeedEvent): void {
 				issue_counts: getIssueCounts() ?? {}
 			};
 			applyDelta(delta);
+			for (const tap of _commitTaps) tap();
 			break;
 		}
 		case 'rebind':
 			_pendingRebind = { rev: e.rev, count: e.validation_error_count };
+			for (const tap of _commitTaps) tap();
 			break;
 	}
 }
@@ -133,5 +145,6 @@ export function resetRealtime(): void {
 	_presence = [];
 	_lockState.clear();
 	_lockTaps.clear();
+	_commitTaps.clear();
 	_pendingRebind = null;
 }

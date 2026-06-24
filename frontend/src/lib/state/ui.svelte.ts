@@ -23,3 +23,13 @@ export function getCommandPaletteOpen(): boolean {
 export function setCommandPaletteOpen(open: boolean): void {
 	_commandPaletteOpen = open;
 }
+
+let _historyDrawerOpen: boolean = $state(false);
+
+export function getHistoryDrawerOpen(): boolean {
+	return _historyDrawerOpen;
+}
+
+export function setHistoryDrawerOpen(open: boolean): void {
+	_historyDrawerOpen = open;
+}
