@@ -7,13 +7,65 @@
 		getCommits,
 		getHasMore,
 		getLoading,
-		resetHistory
+		resetHistory,
+		modelAt,
+		getCommits as _allCommits
 	} from '$lib/state/history.svelte';
 	import { onCommitEvent } from '$lib/state/realtime.svelte';
-	import { GitCommitVertical, RefreshCw, AlertTriangle } from '@lucide/svelte';
+	import { GitCommitVertical, RefreshCw, AlertTriangle, ArrowLeft } from '@lucide/svelte';
+	import CompareDiff from './CompareDiff.svelte';
+	import { computeDiff, type Diff } from '$lib/state/diff';
 
 	type Props = { open: boolean };
 	let { open = $bindable(false) }: Props = $props();
+
+	type Mode = 'list' | 'diff';
+	let mode = $state<Mode>('list');
+	let diff = $state<Diff | null>(null);
+	let diffTitle = $state('');
+	let diffError = $state<string | null>(null);
+	let spanRebind = $state(false); // does the current diff span a rebind commit?
+	let compareFrom = $state<number | null>(null); // selected first rev for 2-commit compare
+
+	function spanCrossesRebind(lo: number, hi: number): boolean {
+		return _allCommits().some((c) => c.is_rebind && c.rev > lo && c.rev <= hi);
+	}
+
+	async function showDiff(fromRev: number, toRev: number, title: string): Promise<void> {
+		mode = 'diff';
+		diff = null;
+		diffError = null;
+		diffTitle = title;
+		spanRebind = spanCrossesRebind(fromRev, toRev);
+		try {
+			const [from, to] = await Promise.all([modelAt(fromRev), modelAt(toRev)]);
+			diff = computeDiff(from, to);
+		} catch (e) {
+			diffError = e instanceof Error ? e.message : 'Failed to load diff';
+		}
+	}
+
+	function diffCommit(rev: number): void {
+		showDiff(rev - 1, rev, `Changes in r${rev}`);
+	}
+
+	function pickCompare(rev: number): void {
+		if (compareFrom === null) {
+			compareFrom = rev;
+		} else {
+			const lo = Math.min(compareFrom, rev);
+			const hi = Math.max(compareFrom, rev);
+			compareFrom = null;
+			showDiff(lo, hi, `r${lo} → r${hi}`);
+		}
+	}
+
+	function backToList(): void {
+		mode = 'list';
+		diff = null;
+		compareFrom = null;
+		spanRebind = false;
+	}
 
 	// Load the first page whenever the drawer opens; subscribe to commit feed
 	// events for live refresh while open.
@@ -45,7 +97,31 @@
 			<Dialog.Title>Commit history</Dialog.Title>
 		</Dialog.Header>
 
-		{#if getLoading() && getCommits().length === 0}
+		{#if mode === 'diff'}
+			<div class="space-y-2">
+				<button
+					class="flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-200"
+					onclick={backToList}
+				>
+					<ArrowLeft class="h-3 w-3" /> Back
+				</button>
+				<h3 class="text-sm text-zinc-200">{diffTitle}</h3>
+				{#if spanRebind}
+					<div
+						class="rounded border border-amber-700 bg-amber-900/30 px-2 py-1 text-[11px] text-amber-200"
+					>
+						These revisions use different metamodels; the diff is structural.
+					</div>
+				{/if}
+				{#if diffError}
+					<p class="text-sm text-red-300">{diffError}</p>
+				{:else if diff === null}
+					<p class="text-sm text-zinc-400">Computing diff…</p>
+				{:else}
+					<CompareDiff {diff} unchangedHidden={0} />
+				{/if}
+			</div>
+		{:else if getLoading() && getCommits().length === 0}
 			<p class="py-6 text-center text-sm text-zinc-400">Loading…</p>
 		{:else if getCommits().length === 0}
 			<p class="py-6 text-center text-sm text-zinc-400">No commits yet.</p>
@@ -71,9 +147,27 @@
 									</span>
 								{/if}
 							</div>
-							<div class="text-[11px] text-zinc-500">
+							<div class="flex items-center gap-2 text-[11px] text-zinc-500">
 								{c.author_id ?? 'unknown'} · {fmtTs(c.ts)} · {c.op_count}
 								{c.op_count === 1 ? 'op' : 'ops'}
+								<button
+									class="rounded px-1 py-0.5 text-[10px] text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+									onclick={() => diffCommit(c.rev)}
+								>
+									Diff
+								</button>
+								<button
+									class="rounded px-1 py-0.5 text-[10px] hover:bg-zinc-800 {compareFrom === c.rev
+										? 'text-indigo-300'
+										: 'text-zinc-400 hover:text-zinc-200'}"
+									onclick={() => pickCompare(c.rev)}
+								>
+									{compareFrom !== null && compareFrom !== c.rev
+										? 'Select B'
+										: compareFrom === c.rev
+											? 'Selected'
+											: 'Compare'}
+								</button>
 							</div>
 						</div>
 					</li>
