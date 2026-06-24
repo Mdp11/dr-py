@@ -581,7 +581,7 @@ class CommitSummaryOut(BaseModel):
 
     rev: int
     commit_id: str
-    author_id: str | None
+    author_id: str | None = None
     ts: datetime
     message: str
     validation_error_count: int

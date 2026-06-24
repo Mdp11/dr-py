@@ -4,6 +4,7 @@ import os
 from collections.abc import Iterator
 
 import pytest
+from fastapi.testclient import TestClient
 
 # Force every API test onto an in-memory SQLite db and disable the dev seed
 # BEFORE any app/settings import reads the environment.
@@ -78,3 +79,45 @@ def papi(path: str) -> str:
     """Build a default-project-scoped data URL. papi('/metamodel') ->
     '/api/v1/projects/default/metamodel'."""
     return f"/api/v1/projects/{DEFAULT_PROJECT_ID}{path}"
+
+
+# --- shared data-route test helpers ---------------------------------------
+# These mirror the HTTP-based helpers the Phase-8 commit tests grew locally.
+# They assume a default project seeded with a metamodel that defines a ``Node``
+# element type (the commit-history / revert suites both use such a metamodel).
+
+
+def model_rev(c: TestClient) -> int:
+    """Current ``model_rev`` from GET /model/summary."""
+    return c.get(papi("/model/summary"), headers=AUTH_HEADERS).json()["model_rev"]
+
+
+def element_count(c: TestClient) -> int:
+    """Current ``element_count`` from GET /model/summary."""
+    return c.get(papi("/model/summary"), headers=AUTH_HEADERS).json()["element_count"]
+
+
+def commit_create(c: TestClient, label: str | None = None) -> str:
+    """Create a ``Node`` via the legacy ops path; return its canonical id.
+
+    ``label`` is injected as a ``label`` property only when supplied — the
+    history suite's ``Node`` defines no properties, so its callers pass none.
+    """
+    props = {} if label is None else {"label": label}
+    r = c.post(
+        papi("/model/ops"),
+        json={
+            "base_rev": model_rev(c),
+            "ops": [
+                {"kind": "create_element", "temp_id": "tmp_n",
+                 "type_name": "Node", "properties": props}
+            ],
+        },
+    )
+    assert r.status_code == 200, r.text
+    return r.json()["id_map"]["tmp_n"]
+
+
+def feed_url(user: str = TEST_USER_ID) -> str:
+    """WebSocket feed URL with dev-identity query params for ``user``."""
+    return papi(f"/feed?x-user-id={user}&x-user-email={user}@example.com")

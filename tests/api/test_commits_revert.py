@@ -9,7 +9,15 @@ from data_rover.api.db_models import Commit
 from data_rover.api.feed import reset_loop
 from data_rover.api.main import create_app
 from data_rover.api.routes.commits import _affected_ids
-from tests.api.conftest import AUTH_HEADERS, papi, seed_default_project
+from tests.api.conftest import (
+    AUTH_HEADERS,
+    commit_create,
+    element_count,
+    feed_url,
+    model_rev,
+    papi,
+    seed_default_project,
+)
 
 _MM = """
 elements:
@@ -39,30 +47,6 @@ def client() -> TestClient:
     return c
 
 
-def _rev(c: TestClient) -> int:
-    return c.get(papi("/model/summary"), headers=AUTH_HEADERS).json()["model_rev"]
-
-
-def _count(c: TestClient) -> int:
-    return c.get(papi("/model/summary"), headers=AUTH_HEADERS).json()["element_count"]
-
-
-def _commit_create(c: TestClient, label: str) -> str:
-    """Create a Node via the legacy ops path; return its canonical id."""
-    r = c.post(
-        papi("/model/ops"),
-        json={
-            "base_rev": _rev(c),
-            "ops": [
-                {"kind": "create_element", "temp_id": "tmp_n",
-                 "type_name": "Node", "properties": {"label": label}}
-            ],
-        },
-    )
-    assert r.status_code == 200, r.text
-    return r.json()["id_map"]["tmp_n"]
-
-
 def test_affected_ids_collects_real_ids_from_forward_ops() -> None:
     commits = [
         Commit(
@@ -84,11 +68,11 @@ def test_affected_ids_collects_real_ids_from_forward_ops() -> None:
 
 
 def test_revert_restores_earlier_state(client: TestClient) -> None:
-    a = _commit_create(client, "A")        # rev fixture+1
-    target = _rev(client)                  # after A
-    b = _commit_create(client, "B")        # rev fixture+2
-    assert _count(client) == 2
-    before_rev = _rev(client)
+    a = commit_create(client, "A")        # rev fixture+1
+    target = model_rev(client)                  # after A
+    b = commit_create(client, "B")        # rev fixture+2
+    assert element_count(client) == 2
+    before_rev = model_rev(client)
     r = client.post(
         papi("/commits/revert"),
         headers=AUTH_HEADERS,
@@ -97,47 +81,47 @@ def test_revert_restores_earlier_state(client: TestClient) -> None:
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["model_rev"] == before_rev + 1  # revert is itself a new commit
-    assert _count(client) == 1             # B removed, A kept
+    assert element_count(client) == 1             # B removed, A kept
     assert b in body["deleted_element_ids"]
     assert a not in body["deleted_element_ids"]
 
 
 def test_revert_the_revert_returns_to_head(client: TestClient) -> None:
-    _commit_create(client, "A")            # rev fixture+1
-    target = _rev(client)                  # after A
-    _commit_create(client, "B")            # rev fixture+2
-    head_count = _count(client)            # 2
-    before_revert = _rev(client)
+    commit_create(client, "A")            # rev fixture+1
+    target = model_rev(client)                  # after A
+    commit_create(client, "B")            # rev fixture+2
+    head_count = element_count(client)            # 2
+    before_revert = model_rev(client)
     revert = client.post(
         papi("/commits/revert"), headers=AUTH_HEADERS,
         json={"target_rev": target, "base_rev": before_revert},
     )
     assert revert.status_code == 200, revert.text
-    assert _count(client) == 1
+    assert element_count(client) == 1
     # revert the revert: pass target_rev = the rev after B was created
     # (the state we just reverted away from), which is before_revert.
     r2 = client.post(
         papi("/commits/revert"), headers=AUTH_HEADERS,
-        json={"target_rev": before_revert, "base_rev": _rev(client)},
+        json={"target_rev": before_revert, "base_rev": model_rev(client)},
     )
     assert r2.status_code == 200, r2.text
-    assert _count(client) == head_count    # back to 2 elements
+    assert element_count(client) == head_count    # back to 2 elements
 
 
 def test_revert_survives_eviction(client: TestClient) -> None:
     from data_rover.api.session import get_registry
     from data_rover.api.session import DEFAULT_PROJECT_ID
 
-    _commit_create(client, "A")            # rev fixture+1
-    target = _rev(client)
-    _commit_create(client, "B")            # rev fixture+2
+    commit_create(client, "A")            # rev fixture+1
+    target = model_rev(client)
+    commit_create(client, "B")            # rev fixture+2
     assert client.post(
         papi("/commits/revert"), headers=AUTH_HEADERS,
-        json={"target_rev": target, "base_rev": _rev(client)},
+        json={"target_rev": target, "base_rev": model_rev(client)},
     ).status_code == 200
-    assert _count(client) == 1
+    assert element_count(client) == 1
     get_registry().evict(DEFAULT_PROJECT_ID)        # snapshot-then-drop
-    assert _count(client) == 1                       # re-hydrate from journal
+    assert element_count(client) == 1                       # re-hydrate from journal
 
 
 def test_revert_db_failure_rolls_back_in_memory(
@@ -145,11 +129,11 @@ def test_revert_db_failure_rolls_back_in_memory(
 ) -> None:
     import data_rover.api.routes.commits as commits_mod
 
-    _commit_create(client, "A")            # rev fixture+1
-    target = _rev(client)
-    _commit_create(client, "B")            # rev fixture+2
-    before_rev = _rev(client)
-    before_count = _count(client)
+    commit_create(client, "A")            # rev fixture+1
+    target = model_rev(client)
+    commit_create(client, "B")            # rev fixture+2
+    before_rev = model_rev(client)
+    before_count = element_count(client)
 
     def _boom(*a: object, **k: object) -> None:
         raise RuntimeError("db down")
@@ -160,32 +144,47 @@ def test_revert_db_failure_rolls_back_in_memory(
         json={"target_rev": target, "base_rev": before_rev},
     )
     assert r.status_code == 500
-    assert _rev(client) == before_rev       # model_rev unchanged
-    assert _count(client) == before_count   # in-memory model intact
+    assert model_rev(client) == before_rev       # model_rev unchanged
+    assert element_count(client) == before_count   # in-memory model intact
 
 
 def test_revert_stale_base_rev_409(client: TestClient) -> None:
-    _commit_create(client, "A")
+    commit_create(client, "A")
     r = client.post(
         papi("/commits/revert"), headers=AUTH_HEADERS,
         json={"target_rev": 0, "base_rev": 999},
     )
     assert r.status_code == 409
-    assert r.json()["model_rev"] == _rev(client)
+    assert r.json()["model_rev"] == model_rev(client)
 
 
 def test_revert_target_out_of_range_422(client: TestClient) -> None:
-    _commit_create(client, "A")
+    commit_create(client, "A")
     r = client.post(
         papi("/commits/revert"), headers=AUTH_HEADERS,
-        json={"target_rev": 999, "base_rev": _rev(client)},
+        json={"target_rev": 999, "base_rev": model_rev(client)},
     )
     assert r.status_code == 422
+    body = r.json()
+    assert body["detail"] == "target_rev out of range"
+    assert body["model_rev"] == model_rev(client)
+
+
+def test_revert_negative_target_422(client: TestClient) -> None:
+    commit_create(client, "A")
+    r = client.post(
+        papi("/commits/revert"), headers=AUTH_HEADERS,
+        json={"target_rev": -1, "base_rev": model_rev(client)},
+    )
+    assert r.status_code == 422
+    body = r.json()
+    assert body["detail"] == "target_rev out of range"
+    assert body["model_rev"] == model_rev(client)
 
 
 def test_revert_noop_at_head_records_no_commit(client: TestClient) -> None:
-    _commit_create(client, "A")
-    head = _rev(client)
+    commit_create(client, "A")
+    head = model_rev(client)
     r = client.post(
         papi("/commits/revert"), headers=AUTH_HEADERS,
         json={"target_rev": head, "base_rev": head},
@@ -212,25 +211,25 @@ relationships:
 
 
 def test_revert_across_rebind_409(client: TestClient) -> None:
-    _commit_create(client, "A")            # rev 1
-    target = _rev(client)                  # 1
+    commit_create(client, "A")            # rev 1
+    target = model_rev(client)                  # 1
     rebind = client.post(
-        papi("/metamodel/rebind") + f"?base_rev={_rev(client)}&message=swap",
+        papi("/metamodel/rebind") + f"?base_rev={model_rev(client)}&message=swap",
         content=_MM_RENAMED, headers={"content-type": "application/x-yaml"},
     )
     assert rebind.status_code == 200, rebind.text
-    rebind_rev = _rev(client)              # 2
+    rebind_rev = model_rev(client)              # 2
     r = client.post(
         papi("/commits/revert"), headers=AUTH_HEADERS,
-        json={"target_rev": target, "base_rev": _rev(client)},
+        json={"target_rev": target, "base_rev": model_rev(client)},
     )
     assert r.status_code == 409
     assert r.json()["rebind_rev"] == rebind_rev
 
 
 def test_revert_refuses_when_peer_holds_lock(client: TestClient) -> None:
-    a = _commit_create(client, "A")        # rev 1
-    _commit_create(client, "B")            # rev 2 (will be reverted)
+    a = commit_create(client, "A")        # rev 1
+    commit_create(client, "B")            # rev 2 (will be reverted)
     # lock element A (touched by the rev-1 commit, which revert-to-0 would undo)
     lk = client.post(
         papi("/locks"), headers=AUTH_HEADERS,
@@ -241,7 +240,7 @@ def test_revert_refuses_when_peer_holds_lock(client: TestClient) -> None:
     token = lk.json()["token"]
     r = client.post(
         papi("/commits/revert"), headers=AUTH_HEADERS,
-        json={"target_rev": 0, "base_rev": _rev(client)},
+        json={"target_rev": 0, "base_rev": model_rev(client)},
     )
     assert r.status_code == 409
     assert any(cf["resource_id"] == a for cf in r.json()["conflicts"])
@@ -251,28 +250,24 @@ def test_revert_refuses_when_peer_holds_lock(client: TestClient) -> None:
     ).status_code == 200
     assert client.post(
         papi("/commits/revert"), headers=AUTH_HEADERS,
-        json={"target_rev": 0, "base_rev": _rev(client)},
+        json={"target_rev": 0, "base_rev": model_rev(client)},
     ).status_code == 200
 
 
-def _feed_url(user: str = "test-user") -> str:
-    return papi(f"/feed?x-user-id={user}&x-user-email={user}@example.com")
-
-
 def test_revert_broadcasts_commit_event(client: TestClient) -> None:
-    _commit_create(client, "A")            # rev 1
-    target = _rev(client)
-    _commit_create(client, "B")            # rev 2
-    with client.websocket_connect(_feed_url()) as ws:
+    commit_create(client, "A")            # rev 1
+    target = model_rev(client)
+    commit_create(client, "B")            # rev 2
+    with client.websocket_connect(feed_url()) as ws:
         ws.receive_json()                  # initial snapshot
         assert client.post(
             papi("/commits/revert"), headers=AUTH_HEADERS,
-            json={"target_rev": target, "base_rev": _rev(client)},
+            json={"target_rev": target, "base_rev": model_rev(client)},
         ).status_code == 200
         evt = ws.receive_json()
         while evt["type"] != "commit":
             evt = ws.receive_json()
-        assert evt["rev"] == _rev(client)
+        assert evt["rev"] == model_rev(client)
 
 
 def test_revert_forbidden_for_viewer(client: TestClient) -> None:
@@ -281,7 +276,7 @@ def test_revert_forbidden_for_viewer(client: TestClient) -> None:
     from data_rover.api.session import DEFAULT_PROJECT_ID
     from data_rover.api.tenancy import add_member
 
-    _commit_create(client, "A")
+    commit_create(client, "A")
     gen = db.get_db()
     s = next(gen)
     try:
@@ -293,7 +288,7 @@ def test_revert_forbidden_for_viewer(client: TestClient) -> None:
     r = client.post(
         papi("/commits/revert"),
         headers={"x-user-id": "vw", "x-user-email": "vw@example.com"},
-        json={"target_rev": 0, "base_rev": _rev(client)},
+        json={"target_rev": 0, "base_rev": model_rev(client)},
     )
     assert r.status_code == 403
 
@@ -303,12 +298,12 @@ def test_revert_records_conformance_count(client: TestClient) -> None:
     # state that contains it lands a conformance issue. Simpler: rely on a
     # revert that reconstructs a clean state -> count 0; assert the field is
     # present and an int on the new commit row.
-    _commit_create(client, "A")
-    target = _rev(client)
-    _commit_create(client, "B")
+    commit_create(client, "A")
+    target = model_rev(client)
+    commit_create(client, "B")
     r = client.post(
         papi("/commits/revert"), headers=AUTH_HEADERS,
-        json={"target_rev": target, "base_rev": _rev(client)},
+        json={"target_rev": target, "base_rev": model_rev(client)},
     )
     assert r.status_code == 200, r.text
     assert isinstance(r.json()["validation_error_count"], int)
