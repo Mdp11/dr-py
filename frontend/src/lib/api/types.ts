@@ -394,3 +394,21 @@ export const SaveModelResponseSchema = z.object({
 	bytes_written: z.number().int()
 });
 export type SaveModelResponse = z.infer<typeof SaveModelResponseSchema>;
+
+export const CommitSummarySchema = z.object({
+	rev: z.number(),
+	commit_id: z.string(),
+	author_id: z.string().nullable(),
+	ts: z.string(),
+	message: z.string(),
+	validation_error_count: z.number(),
+	op_count: z.number(),
+	is_rebind: z.boolean()
+});
+export type CommitSummary = z.infer<typeof CommitSummarySchema>;
+
+export const CommitHistoryResponseSchema = z.object({
+	commits: z.array(CommitSummarySchema),
+	has_more: z.boolean()
+});
+export type CommitHistoryResponse = z.infer<typeof CommitHistoryResponseSchema>;
