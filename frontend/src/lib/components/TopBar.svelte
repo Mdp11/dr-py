@@ -15,6 +15,7 @@
 		getModelSummary,
 		getStagedChangeCount,
 		getStagedDepth,
+		getStrictMode,
 		getViewChangesCount,
 		isRunning,
 		popLastStaged,
@@ -54,6 +55,7 @@
 	const issues = $derived(getIssues());
 	const lastRunAt = $derived(getLastRunAt());
 	const lastValidateError = $derived(getLastError());
+	const strictOn = $derived(getStrictMode());
 	const errorCount = $derived(issues.filter((i) => i.severity === 'error').length);
 	const warningCount = $derived(issues.length - errorCount);
 
@@ -246,6 +248,14 @@
 		>
 			History
 		</Button>
+		{#if strictOn}
+			<span
+				class="rounded bg-amber-500/15 px-1.5 py-0.5 font-mono text-[10px] text-amber-300"
+				title="Strict mode on: commits with validation errors are blocked."
+			>
+				Strict
+			</span>
+		{/if}
 		<Button
 			variant="ghost"
 			size="sm"
