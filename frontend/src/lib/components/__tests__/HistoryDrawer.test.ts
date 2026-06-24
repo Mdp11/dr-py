@@ -23,7 +23,7 @@ vi.mock('$lib/state', async (orig) => {
 		getStagedDepth: vi.fn(() => 0), getLockState: vi.fn(() => new Map()) };
 });
 
-import { loadFirstPage } from '$lib/state/history.svelte';
+import { loadFirstPage, modelAt } from '$lib/state/history.svelte';
 
 afterEach(() => {
 	document.body.innerHTML = '';
@@ -40,6 +40,37 @@ describe('HistoryDrawer list', () => {
 		expect(document.body.textContent).toContain('second');
 		expect(document.body.textContent).toContain('first');
 		expect(document.body.textContent?.toLowerCase()).toContain('rebind');
+		unmount(c);
+	});
+});
+
+describe('HistoryDrawer diff', () => {
+	it('shows a per-commit diff when a row is clicked', async () => {
+		vi.mocked(modelAt).mockImplementation(async (rev: number) =>
+			rev <= 1
+				? { elements: [], relationships: [] }
+				: {
+						elements: [
+							{ id: 'e1', type_name: 'Node', properties: { label: 'A' }, rev: 2 }
+						],
+						relationships: []
+					}
+		);
+		const c = mount(HistoryDrawer, { target: document.body, props: { open: true } });
+		flushSync();
+		await Promise.resolve();
+		flushSync();
+		// click the "Diff" action on the rev-2 row
+		const btn = Array.from(document.querySelectorAll('button')).find((b) =>
+			b.textContent?.includes('Diff')
+		)!;
+		btn.click();
+		// drain microtask queue: showDiff is async (Promise.all + state update)
+		await new Promise((r) => setTimeout(r, 0));
+		flushSync();
+		expect(modelAt).toHaveBeenCalledWith(2);
+		expect(modelAt).toHaveBeenCalledWith(1);
+		expect(document.body.textContent).toContain('added');
 		unmount(c);
 	});
 });
