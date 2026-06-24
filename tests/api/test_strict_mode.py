@@ -221,6 +221,53 @@ def test_strict_mode_allows_clean_commit(client) -> None:
     assert r.status_code == 200, r.text
 
 
+# rebind target: renames Node -> Widget so the existing element no longer conforms
+_MM_RENAMED = """
+elements:
+  - name: Widget
+relationships:
+  - name: Contains
+    containment: true
+    source: Widget
+    target: Widget
+"""
+
+
+def test_open_reports_strict_mode(client) -> None:
+    _make_owner_with_model(client)
+    assert client.get(papi("/open"), headers=AUTH_HEADERS).json()["strict_mode"] is False
+    client.patch(papi("/settings"), headers=AUTH_HEADERS, json={"strict_mode": True})
+    assert client.get(papi("/open"), headers=AUTH_HEADERS).json()["strict_mode"] is True
+
+
+def test_preview_reports_would_block(client) -> None:
+    _make_owner_with_model(client)
+    client.patch(papi("/settings"), headers=AUTH_HEADERS, json={"strict_mode": True})
+    r = client.post(papi("/commits/preview"), headers=AUTH_HEADERS, json={
+        "base_rev": _rev(client), "ops": VIOLATING_OPS,
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["conformance_error_count"] >= 1
+    assert body["would_block"] is True
+
+
+def test_rebind_exempt_from_strict_mode(client) -> None:
+    _make_owner_with_model(client)
+    # land an element so the rename produces a conformance issue post-rebind
+    client.post(papi("/commits"), headers=AUTH_HEADERS, json={
+        "base_rev": _rev(client), "ops": CLEAN_OPS, "message": "n", "lock_tokens": [],
+    })
+    client.patch(papi("/settings"), headers=AUTH_HEADERS, json={"strict_mode": True})
+    before = _rev(client)
+    r = client.post(
+        papi("/metamodel/rebind") + f"?base_rev={before}&message=swap",
+        content=_MM_RENAMED, headers={"content-type": "application/x-yaml"},
+    )
+    assert r.status_code == 200, r.text  # rebind exempt even under strict mode
+    assert r.json()["validation_error_count"] >= 1
+
+
 def test_strict_mode_ignores_preexisting_issues_outside_dirty_set(client) -> None:
     # Land a non-conforming element AND a valid element while NON-strict,
     # then turn strict on and update the valid element. The update's dirty set

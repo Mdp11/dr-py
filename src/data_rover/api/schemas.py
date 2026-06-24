@@ -537,6 +537,8 @@ class OpenResponse(BaseModel):
     #: from settings.lock_ttl_seconds; lease expires_at is a server monotonic
     #: value, meaningless to the client clock, so the client needs the TTL.
     lock_ttl_seconds: int = 0
+    #: project strict-mode policy; clients disable "commit anyway" when on.
+    strict_mode: bool = False
 
 
 class PreviewRequest(BaseModel):
@@ -548,6 +550,10 @@ class PreviewResponse(BaseModel):
     conformance_error_count: int
     structural_blockers: list[IssueOut] = Field(default_factory=list)
     issues: list[IssueOut] = Field(default_factory=list)
+    #: true when strict mode is on AND there are conformance errors — i.e. this
+    #: batch would be hard-rejected by the commit strict gate. Lets the client
+    #: gate the commit button without re-deriving policy.
+    would_block: bool = False
 
 
 class CommitRequest(BaseModel):
