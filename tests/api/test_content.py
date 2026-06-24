@@ -118,3 +118,52 @@ def test_list_commits_before_rev_cursor() -> None:
     with db.db_session() as s:
         rows = content.list_commits(s, "p1", before_rev=3, limit=10)
     assert [r.rev for r in rows] == [2, 1]
+
+
+def test_commits_between_is_bounded_and_ascending() -> None:
+    from data_rover.api import content
+    from data_rover.api.db import get_db
+    from data_rover.api.db_models import Commit, Project
+    from data_rover.api.session import DEFAULT_PROJECT_ID
+
+    gen = get_db(); s = next(gen)
+    try:
+        s.add(Project(id=DEFAULT_PROJECT_ID, name="p"))
+        for r in (1, 2, 3, 4):
+            s.add(Commit(project_id=DEFAULT_PROJECT_ID, rev=r, commit_id=f"c{r}",
+                         author_id=None, ops=[], inverse_ops=[], id_map={}, message=""))
+        s.commit()
+        out = content.commits_between(s, DEFAULT_PROJECT_ID, after_rev=1, max_rev=3)
+        assert [c.rev for c in out] == [2, 3]
+    finally:
+        gen.close()
+
+
+def test_first_rebind_after_finds_earliest_rebind() -> None:
+    from data_rover.api import content
+    from data_rover.api.db import get_db
+    from data_rover.api.db_models import Commit, MetamodelRow, Project
+    from data_rover.api.session import DEFAULT_PROJECT_ID
+
+    gen = get_db(); s = next(gen)
+    try:
+        s.add(Project(id=DEFAULT_PROJECT_ID, name="p"))
+        s.add(MetamodelRow(id="m1", name="M1", version=1, blob="x: 1"))
+        s.add(MetamodelRow(id="m2", name="M2", version=1, blob="x: 2"))
+        s.add(MetamodelRow(id="m3", name="M3", version=1, blob="x: 3"))
+        s.add(Commit(project_id=DEFAULT_PROJECT_ID, rev=1, commit_id="c1", author_id=None,
+                     ops=[], inverse_ops=[], id_map={}, message=""))
+        s.add(Commit(project_id=DEFAULT_PROJECT_ID, rev=2, commit_id="c2", author_id=None,
+                     ops=[], inverse_ops=[], id_map={}, message="",
+                     from_metamodel_id="m1", to_metamodel_id="m2"))
+        s.add(Commit(project_id=DEFAULT_PROJECT_ID, rev=3, commit_id="c3", author_id=None,
+                     ops=[], inverse_ops=[], id_map={}, message="",
+                     from_metamodel_id="m2", to_metamodel_id="m3"))
+        s.commit()
+        r0 = content.first_rebind_after(s, DEFAULT_PROJECT_ID, 0)
+        assert r0 is not None and r0.rev == 2
+        r2 = content.first_rebind_after(s, DEFAULT_PROJECT_ID, 2)
+        assert r2 is not None and r2.rev == 3
+        assert content.first_rebind_after(s, DEFAULT_PROJECT_ID, 3) is None
+    finally:
+        gen.close()

@@ -103,6 +103,46 @@ def commits_after(db: Session, project_id: str, rev: int) -> list[Commit]:
     )
 
 
+def commits_between(
+    db: Session, project_id: str, *, after_rev: int, max_rev: int
+) -> list[Commit]:
+    """Commits with ``after_rev < rev <= max_rev``, ascending (replay order).
+
+    Bounded variant of ``commits_after`` for historical reconstruction: replay
+    only the tail from the chosen snapshot up to (and including) a target rev.
+    """
+    return list(
+        db.execute(
+            select(Commit)
+            .where(
+                Commit.project_id == project_id,
+                Commit.rev > after_rev,
+                Commit.rev <= max_rev,
+            )
+            .order_by(Commit.rev)
+        ).scalars()
+    )
+
+
+def first_rebind_after(db: Session, project_id: str, rev: int) -> Commit | None:
+    """Earliest rebind commit with ``rev > given`` (or None).
+
+    A rebind commit carries a non-null ``from_metamodel_id``/``to_metamodel_id``.
+    Used to resolve the metamodel effective AT ``rev``: the pre-swap
+    ``from_metamodel_id`` of the first rebind after ``rev``.
+    """
+    return db.execute(
+        select(Commit)
+        .where(
+            Commit.project_id == project_id,
+            Commit.rev > rev,
+            Commit.from_metamodel_id.is_not(None),
+        )
+        .order_by(Commit.rev)
+        .limit(1)
+    ).scalar_one_or_none()
+
+
 def list_commits(
     db: Session, project_id: str, *, before_rev: int | None, limit: int
 ) -> list[Commit]:
