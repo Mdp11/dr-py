@@ -361,7 +361,35 @@ def revert_commit(
     Guards (Tasks 5–7) are layered on top of this core; broadcast is Task 8.
     """
     _, model = require_model(session)
+    if payload.base_rev != session.model_rev:
+        return JSONResponse(
+            status_code=409,
+            content={"detail": "stale base_rev", "model_rev": session.model_rev},
+        )
     state = _ensure_validation_seeded(session, model)
+    if payload.target_rev < 0 or payload.target_rev > session.model_rev:
+        return JSONResponse(
+            status_code=422,
+            content={"detail": "target_rev out of range",
+                     "model_rev": session.model_rev},
+        )
+    if payload.target_rev == session.model_rev:
+        # no-op: nothing to revert. Mirror the empty-batch path in apply_ops —
+        # return current state WITHOUT bumping model_rev or recording a commit.
+        return CommitResponse(
+            model_rev=session.model_rev,
+            id_map={},
+            changed_elements=[],
+            changed_relationships=[],
+            deleted_element_ids=[],
+            deleted_relationship_ids=[],
+            issues_removed_owner_ids=[],
+            issues_added=[],
+            issue_counts=state.counts(),
+            commit_id="",
+            message="",
+            validation_error_count=0,
+        )
     with session.write_mutex:
         commits = content.commits_after(db, project_id, payload.target_rev)
         # apply inverse_ops newest-first; deserialize the stored JSON op dicts
