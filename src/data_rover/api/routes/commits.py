@@ -474,6 +474,29 @@ def revert_commit(
                     "commit is durable, hydration will rebuild",
                     project_id, session.model_rev, exc_info=True,
                 )
+        # broadcast commit delta (mirrors create_commit steps g/h, minus lock
+        # release — revert holds no locks and therefore releases none).
+        changed_elements = [
+            ElementOut.from_core(model.elements[eid]).model_dump()
+            for eid in res.changed_element_ids
+        ]
+        changed_relationships = [
+            RelationshipOut.from_core(model.relationships[rid]).model_dump()
+            for rid in res.changed_relationship_ids
+        ]
+        session.hub.broadcast(
+            commit_event(
+                rev=session.model_rev,
+                commit_id=commit_id,
+                author_id=user.id,
+                message=message,
+                validation_error_count=len(conformance),
+                changed_elements=changed_elements,
+                changed_relationships=changed_relationships,
+                deleted_element_ids=list(res.deleted_element_ids),
+                deleted_relationship_ids=list(res.deleted_relationship_ids),
+            )
+        )
     return CommitResponse(
         model_rev=session.model_rev,
         id_map=dict(res.id_map),
