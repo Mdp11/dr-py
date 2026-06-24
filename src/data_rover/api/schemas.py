@@ -599,3 +599,15 @@ class CommitHistoryResponse(BaseModel):
 
     commits: list[CommitSummaryOut]
     has_more: bool
+
+
+class RevertRequest(BaseModel):
+    """Revert the model to the state at ``target_rev`` (Phase 8).
+
+    ``base_rev`` is the client's last-seen ``model_rev`` for optimistic-
+    concurrency (409 on mismatch). ``target_rev`` must be in ``[0, model_rev]``.
+    """
+
+    target_rev: int
+    base_rev: int
+    message: str | None = None
