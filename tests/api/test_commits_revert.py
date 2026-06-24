@@ -196,3 +196,31 @@ def test_revert_noop_at_head_records_no_commit(client: TestClient) -> None:
     # history length unchanged
     hist = client.get(papi("/commits"), headers=AUTH_HEADERS).json()
     assert hist["commits"][0]["rev"] == head
+
+
+_MM_RENAMED = """
+elements:
+  - name: Widget
+relationships:
+  - name: Contains
+    containment: true
+    source: Widget
+    target: Widget
+"""
+
+
+def test_revert_across_rebind_409(client: TestClient) -> None:
+    _commit_create(client, "A")            # rev 1
+    target = _rev(client)                  # 1
+    rebind = client.post(
+        papi("/metamodel/rebind") + f"?base_rev={_rev(client)}&message=swap",
+        content=_MM_RENAMED, headers={"content-type": "application/x-yaml"},
+    )
+    assert rebind.status_code == 200, rebind.text
+    rebind_rev = _rev(client)              # 2
+    r = client.post(
+        papi("/commits/revert"), headers=AUTH_HEADERS,
+        json={"target_rev": target, "base_rev": _rev(client)},
+    )
+    assert r.status_code == 409
+    assert r.json()["rebind_rev"] == rebind_rev
