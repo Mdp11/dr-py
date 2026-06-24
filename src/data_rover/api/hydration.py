@@ -121,6 +121,11 @@ def reconstruct_model_at(project_id: str, rev: int) -> Model | None:
         mm_row = content.get_metamodel_row(s, mm_id)
         assert mm_row is not None
         snap = content.latest_snapshot(s, project_id, max_rev=rev)
+        # With a snapshot, replay only the tail above it; with none (e.g. a
+        # project built purely via the unlocked /model/ops path, which writes
+        # no eager baseline snapshot), replay the whole journal from rev 0 so
+        # the reconstructed state is complete. (hydrate_session uses ``else []``
+        # because a missing snapshot is an anomaly there; here it is normal.)
         tail = content.commits_between(
             s,
             project_id,

@@ -49,17 +49,21 @@
 	}
 
 	function diffCommit(rev: number): void {
-		showDiff(rev - 1, rev, `Changes in r${rev}`);
+		void showDiff(rev - 1, rev, `Changes in r${rev}`);
 	}
 
 	function pickCompare(rev: number): void {
 		if (compareFrom === null) {
 			compareFrom = rev;
+		} else if (compareFrom === rev) {
+			// Clicking the already-selected row again deselects it (rather than
+			// diffing a rev against itself, which would render an empty diff).
+			compareFrom = null;
 		} else {
 			const lo = Math.min(compareFrom, rev);
 			const hi = Math.max(compareFrom, rev);
 			compareFrom = null;
-			showDiff(lo, hi, `r${lo} → r${hi}`);
+			void showDiff(lo, hi, `r${lo} → r${hi}`);
 		}
 	}
 
