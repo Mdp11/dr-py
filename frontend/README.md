@@ -47,7 +47,8 @@ The UI is a fixed grid:
 
 - **TopBar** — load a metamodel from file, load a model from file, Undo the
   last staged edit, trigger validation, open the Commit review (`DiffDrawer`),
-  and browse the durable commit history (`HistoryDrawer`).
+  browse the durable commit history (`HistoryDrawer`), and open **Settings**
+  (`SettingsDialog`) where an owner can toggle **strict mode**.
 - **Sidebar** — fuzzy search, type filter (each concrete type has a `+` button
   to create a new element of that type), containment tree with keyboard nav and
   per-row lock badges.
@@ -119,6 +120,27 @@ follows a pessimistic **check-out → stage → commit** loop (Spec B):
    `POST /model/save`), so the browser never materializes the serialized model
    as a string. Export reflects the committed model, not the staged buffer.
 
+### Settings dialog + strict-mode toggle
+
+The **Settings** button in the TopBar opens `SettingsDialog.svelte`, which
+exposes project-level configuration:
+
+- **Strict mode** toggle — owner-gated (`role === 'owner'`). Reads the current
+  value via `GET /api/v1/projects/{id}/settings` and writes changes via
+  `PATCH /api/v1/projects/{id}/settings` (implemented in `lib/api/settings.ts`).
+  Non-owners see the toggle but it is disabled.
+- **Effect on commits** — when strict mode is on, `POST /commits/preview`
+  returns `would_block: true` if the scoped dirty set has any conformance
+  errors (multiplicity, facets, endpoint typing, uniqueness). The `DiffDrawer`
+  reads `preview.would_block` and: (1) shows a "Strict mode is on: N validation
+  issue(s) must be resolved before committing" alert, and (2) disables the
+  Commit button (`commitBlocked = structuralBlockers.length > 0 || wouldBlock`).
+  When strict mode is off the same batch shows "Commit anyway (N)" and the
+  button is enabled — conformance issues are surfaced but do not block.
+- **Rebind is exempt** — `POST /commits/metamodel-swap` (rebind) never passes
+  through the strict gate; swapping the metamodel always succeeds regardless of
+  the setting.
+
 ### Commit history browser (History drawer)
 
 The **History** button in the TopBar opens `HistoryDrawer.svelte`, which
@@ -161,6 +183,9 @@ src/
                         getCommitHistory (GET /commits, paged) and
                         getModelAtRev (GET /commits/{rev}/model);
                         revertToCommit (POST /commits/revert)
+    api/settings.ts     REST client for project settings:
+                        getSettings (GET /settings) and
+                        updateSettings (PATCH /settings → strict_mode bool)
     state/              model.svelte.ts (staged-edit store) / changes (server
                         change-set badge) / selection / ui / filters /
                         metamodel / workspace / validation / file (filename
@@ -181,9 +206,9 @@ src/
     metamodel/          Pure helpers (effective properties, multiplicity,
                         containment, subtype) mirroring the Python schema
     components/         TopBar, Sidebar, Workspace, Inspector, StatusBar,
-                        DiffDrawer, HistoryDrawer, CommandPalette, dialogs,
-                        and ui/ shadcn primitives (button, dialog,
-                        dropdown-menu, …)
+                        DiffDrawer, HistoryDrawer, SettingsDialog,
+                        CommandPalette, dialogs, and ui/ shadcn primitives
+                        (button, dialog, dropdown-menu, …)
     keyboard.ts         Pure shortcut matcher
     keyboard.svelte.ts  Global window listener + dispatch to state
 ```
@@ -203,8 +228,10 @@ The Playwright config (`playwright.config.ts`) boots both the backend
 up. The suites cover: load metamodel → load model → create element → edit →
 confirm the Commit review; check-out → edit → commit with the smart-city
 example; relationship picker; drag-and-drop view curation; advanced search;
-and History: open drawer → list commits → diff → revert with compensating
-commit.
+History: open drawer → list commits → diff → revert with compensating commit;
+and Strict mode: enable via Settings → create a conformance-violating element
+→ assert the Commit button is disabled with the strict-mode alert → disable
+strict mode → assert the same batch can now commit.
 
 **Known infra note**: `rm -f /tmp/data-rover-e2e.db` before each fresh run
 clears the SQLite journal so the in-memory snapshot store stays in sync. When
