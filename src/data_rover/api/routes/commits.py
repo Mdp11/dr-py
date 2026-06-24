@@ -392,6 +392,16 @@ def revert_commit(
         )
     with session.write_mutex:
         commits = content.commits_after(db, project_id, payload.target_rev)
+        for c in commits:
+            if c.from_metamodel_id is not None or c.to_metamodel_id is not None:
+                return JSONResponse(
+                    status_code=409,
+                    content={
+                        "detail": "revert across a metamodel swap is not yet "
+                                  "supported",
+                        "rebind_rev": c.rev,
+                    },
+                )
         # apply inverse_ops newest-first; deserialize the stored JSON op dicts
         combined = deserialize_ops(
             [op for c in reversed(commits) for op in c.inverse_ops]
