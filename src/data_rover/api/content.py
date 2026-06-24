@@ -103,6 +103,23 @@ def commits_after(db: Session, project_id: str, rev: int) -> list[Commit]:
     )
 
 
+def list_commits(
+    db: Session, project_id: str, *, before_rev: int | None, limit: int
+) -> list[Commit]:
+    """Durable commit history for a project, newest-first.
+
+    The page-by cursor is ``before_rev`` (exclusive): pass the smallest ``rev``
+    of the previous page to fetch the next, older page. Distinct from
+    ``commits_after`` (ascending replay tail used by hydration) — this is the
+    descending read for a history browser.
+    """
+    q = select(Commit).where(Commit.project_id == project_id)
+    if before_rev is not None:
+        q = q.where(Commit.rev < before_rev)
+    q = q.order_by(Commit.rev.desc()).limit(limit)
+    return list(db.execute(q).scalars())
+
+
 def record_snapshot(db: Session, project_id: str, *, rev: int, key: str) -> Snapshot:
     row = db.get(Snapshot, (project_id, rev))
     if row is None:
