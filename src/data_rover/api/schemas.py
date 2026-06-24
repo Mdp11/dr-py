@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
@@ -562,3 +563,39 @@ class CommitResponse(OpsResponse):
     commit_id: str
     message: str = ""
     validation_error_count: int = 0
+
+
+# ---------------------------------------------------------------------------
+# Durable commit-history schemas (Phase 8: GET /commits)
+# ---------------------------------------------------------------------------
+
+
+class CommitSummaryOut(BaseModel):
+    """One row in the durable commit-history list (GET /commits).
+
+    ``op_count`` is derived from the stored ops list length rather than being
+    stored separately — it avoids a denormalisation bug where the count and list
+    could diverge. ``is_rebind`` is true when either metamodel FK is set,
+    covering both the from-old and to-new sides of a rebind commit.
+    """
+
+    rev: int
+    commit_id: str
+    author_id: str | None
+    ts: datetime
+    message: str
+    validation_error_count: int
+    op_count: int
+    is_rebind: bool
+
+
+class CommitHistoryResponse(BaseModel):
+    """Paginated durable commit history (GET /commits).
+
+    ``has_more`` is true when there are older commits beyond the current page
+    (determined by fetching limit+1 rows and trimming the last). Clients page
+    forward by passing ``before_rev=commits[-1].rev`` to the next request.
+    """
+
+    commits: list[CommitSummaryOut]
+    has_more: bool
