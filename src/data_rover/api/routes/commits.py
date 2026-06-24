@@ -24,6 +24,7 @@ from data_rover.core.validation.pipeline import default_pipeline
 
 from ..authz import require_membership
 from ..feed import commit_event, lock_event
+from .. import content
 from ..db import get_db
 from ..db_models import Membership, User
 from ..deps import Session, get_request_session, require_model
@@ -31,8 +32,10 @@ from ..identity import get_current_user
 from ..locking import required_locks
 from ..settings import get_settings
 from ..schemas import (
+    CommitHistoryResponse,
     CommitRequest,
     CommitResponse,
+    CommitSummaryOut,
     ElementOut,
     IssueOut,
     OpenResponse,
@@ -96,6 +99,47 @@ def preview_commit(
         conformance_error_count=len(conformance),
         structural_blockers=[IssueOut.from_core(i) for i in structural],
         issues=[IssueOut.from_core(i) for i in scoped],
+    )
+
+
+@router.get("/commits", response_model=None)
+def list_commits(
+    project_id: str,
+    limit: int = 50,
+    before_rev: int | None = None,
+    session: Session = Depends(get_request_session),
+    db: DbSession = Depends(get_db),
+) -> CommitHistoryResponse:
+    """Durable commit history, newest-first (distinct from GET /model/changes,
+    which reports the capped in-memory op_log). Read endpoint — any member.
+
+    The ``session`` dependency ensures the caller is an authenticated project
+    member (``get_request_session`` depends on ``require_membership``). No
+    write-allowlist entry is needed because reads are open to all roles.
+
+    Pagination: pass ``before_rev=<last_rev_on_page>`` to fetch older commits.
+    ``limit`` is clamped to [1, 200] to bound response sizes.
+    """
+    limit = max(1, min(limit, 200))
+    rows = content.list_commits(db, project_id, before_rev=before_rev, limit=limit + 1)
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    return CommitHistoryResponse(
+        commits=[
+            CommitSummaryOut(
+                rev=r.rev,
+                commit_id=r.commit_id,
+                author_id=r.author_id,
+                ts=r.ts,
+                message=r.message,
+                validation_error_count=r.validation_error_count,
+                op_count=len(r.ops),
+                is_rebind=(r.from_metamodel_id is not None
+                           or r.to_metamodel_id is not None),
+            )
+            for r in rows
+        ],
+        has_more=has_more,
     )
 
 
