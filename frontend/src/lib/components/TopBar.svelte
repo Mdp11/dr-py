@@ -30,10 +30,12 @@
 	import ApplyCrDialog from './ApplyCrDialog.svelte';
 	import LoadFilesDialog from './LoadFilesDialog.svelte';
 	import SwapMetamodelDrawer from './SwapMetamodelDrawer.svelte';
+	import SettingsDialog from './SettingsDialog.svelte';
 
 	let applyCrOpen = $state(false);
 	let loadOpen = $state(false);
 	let swapOpen = $state(false);
+	let settingsOpen = $state(false);
 	const view = $derived(getView());
 
 	const metamodel = $derived(getMetamodel());
@@ -244,6 +246,14 @@
 		>
 			History
 		</Button>
+		<Button
+			variant="ghost"
+			size="sm"
+			class="h-7 text-xs focus-visible:ring-2 focus-visible:ring-indigo-500"
+			onclick={() => (settingsOpen = true)}
+		>
+			Settings
+		</Button>
 		<div class="group relative flex items-center">
 			<span class="font-mono text-xs {combinedChanges > 0 ? 'text-red-400' : 'text-zinc-500'}">
 				● {combinedChanges}
@@ -267,3 +277,4 @@
 <ApplyCrDialog bind:open={applyCrOpen} />
 <LoadFilesDialog bind:open={loadOpen} />
 <SwapMetamodelDrawer bind:open={swapOpen} />
+<SettingsDialog bind:open={settingsOpen} />

@@ -97,9 +97,11 @@ export {
 	getCommandPaletteOpen,
 	getDiffDrawerOpen,
 	getHistoryDrawerOpen,
+	getSettingsOpen,
 	setCommandPaletteOpen,
 	setDiffDrawerOpen,
-	setHistoryDrawerOpen
+	setHistoryDrawerOpen,
+	setSettingsOpen
 } from './ui.svelte';
 export {
 	getFeedConnected,
