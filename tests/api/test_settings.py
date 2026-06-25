@@ -38,7 +38,7 @@ def test_phase3_storage_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("DATA_ROVER_IDLE_EVICT_SECONDS", raising=False)
     # _env_file=None so a developer's local .env (e.g. copied from .env.example
     # with a fake-gcs emulator host) can't mask the code defaults under test.
-    s = Settings(_env_file=None)
+    s = Settings(_env_file=None)  # pyright: ignore[reportCallIssue]  # pydantic-settings init kwarg
     assert s.snapshot_store == "gcs"
     assert s.gcs_bucket == "data-rover-snapshots"
     assert s.storage_emulator_host == ""
