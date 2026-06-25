@@ -135,10 +135,12 @@
 	<header class="flex items-center justify-between border-b border-zinc-800 px-3 py-2 text-xs">
 		<div class="flex flex-col gap-0.5">
 			<div class="flex items-center gap-2 text-zinc-300">
-				{#if issues.length === 0 && lastRunAt === null}
+				{#if lastRunAt === null}
 					<span class="text-zinc-500">Not validated yet.</span>
-				{:else if issues.length === 0}
-					<span class="text-emerald-400">No issues</span>
+				{:else if errors.length === 0 && warnings.length === 0}
+					<span class="text-emerald-400"
+						>No issues{resolved.length > 0 ? ` · ${resolved.length} fixed` : ''}</span
+					>
 				{:else}
 					<span class="text-red-400"
 						>{errors.length} {errors.length === 1 ? 'error' : 'errors'}</span

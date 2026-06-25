@@ -67,4 +67,29 @@ describe('IssuesPanel origin', () => {
 
 		unmount(c);
 	});
+
+	it('shows all-clear header when only resolved issues remain (staged edits fixed everything)', () => {
+		adoptSummary({
+			model_rev: 1,
+			element_count: 0,
+			relationship_count: 0,
+			elements_by_type: {},
+			issue_counts: {},
+			undo_depth: 0
+		});
+		setIssues([
+			{ severity: 'error', message: 'was broken', target_ids: ['x'], origin: 'resolved' },
+			{ severity: 'warning', message: 'also fixed', target_ids: ['y'], origin: 'resolved' }
+		]);
+		const c = mount(IssuesPanel, { target: document.body });
+		flushSync();
+
+		const text = document.body.textContent ?? '';
+		// should show all-clear with fixed hint, not the error/warning count line
+		expect(/No issues/i.test(text)).toBe(true);
+		expect(/fixed/i.test(text)).toBe(true);
+		expect(/0 errors/i.test(text)).toBe(false);
+
+		unmount(c);
+	});
 });
