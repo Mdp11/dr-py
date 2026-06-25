@@ -26,8 +26,32 @@
 	const elements = $derived(getCachedElements());
 	const relationships = $derived(getCachedRelationships());
 
-	const errors = $derived(issues.filter((i) => i.severity === 'error'));
-	const warnings = $derived(issues.filter((i) => i.severity === 'warning'));
+	type OriginFilter = 'all' | 'uncommitted' | 'on_server' | 'resolved';
+	let filter = $state<OriginFilter>('all');
+
+	function originBadge(o: Issue['origin']): { label: string; cls: string } {
+		if (o === 'uncommitted') return { label: 'new', cls: 'bg-sky-900 text-sky-200' };
+		if (o === 'resolved') return { label: 'fixed', cls: 'bg-emerald-950 text-emerald-300' };
+		return { label: 'on server', cls: 'bg-zinc-800 text-zinc-400' };
+	}
+
+	const filtered = $derived(filter === 'all' ? issues : issues.filter((i) => i.origin === filter));
+	// Active = not resolved. Resolved rows are shown (when in view) but never
+	// counted as problems and render struck-through.
+	// Header counts always reflect ALL active issues regardless of the filter.
+	const errors = $derived(issues.filter((i) => i.severity === 'error' && i.origin !== 'resolved'));
+	const warnings = $derived(
+		issues.filter((i) => i.severity === 'warning' && i.origin !== 'resolved')
+	);
+	// Body sections use the filtered subset.
+	const filteredErrors = $derived(
+		filtered.filter((i) => i.severity === 'error' && i.origin !== 'resolved')
+	);
+	const filteredWarnings = $derived(
+		filtered.filter((i) => i.severity === 'warning' && i.origin !== 'resolved')
+	);
+	const resolved = $derived(filtered.filter((i) => i.origin === 'resolved'));
+	const hasResolved = $derived(issues.some((i) => i.origin === 'resolved'));
 
 	let now = $state(Date.now());
 	$effect(() => {
@@ -72,14 +96,22 @@
 </script>
 
 {#snippet issueRow(it: Issue, idx: number)}
-	<li class="flex flex-col gap-1 rounded border border-zinc-800 bg-zinc-900/40 px-2 py-1.5">
+	<li
+		class="flex flex-col gap-1 rounded border border-zinc-800 bg-zinc-900/40 px-2 py-1.5"
+		class:opacity-60={it.origin === 'resolved'}
+	>
 		<div class="flex items-start gap-1.5">
 			{#if it.severity === 'error'}
 				<AlertCircle class="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-400" />
 			{:else}
 				<AlertTriangle class="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-400" />
 			{/if}
-			<span class="flex-1 text-zinc-200">{it.message}</span>
+			<span class="flex-1 text-zinc-200" class:line-through={it.origin === 'resolved'}>
+				{it.message}
+			</span>
+			<span class="rounded px-1 py-0.5 text-[9px] uppercase {originBadge(it.origin).cls}">
+				{originBadge(it.origin).label}
+			</span>
 			<span class="font-mono text-[10px] text-zinc-600">#{idx + 1}</span>
 		</div>
 		{#if it.target_ids.length > 0}
@@ -146,32 +178,64 @@
 		{:else if issues.length === 0}
 			<p class="text-emerald-400">No issues (validated {relativeTime(lastRunAt)}).</p>
 		{:else}
-			<div class="flex flex-col gap-3">
-				{#if errors.length > 0}
-					<section class="flex flex-col gap-1">
-						<h3 class="text-[10px] font-semibold uppercase tracking-wider text-red-300">
-							Errors ({errors.length})
-						</h3>
-						<ul class="flex flex-col gap-1">
-							{#each errors as it, i (i)}
-								{@render issueRow(it, i)}
-							{/each}
-						</ul>
-					</section>
-				{/if}
-				{#if warnings.length > 0}
-					<section class="flex flex-col gap-1">
-						<h3 class="text-[10px] font-semibold uppercase tracking-wider text-amber-300">
-							Warnings ({warnings.length})
-						</h3>
-						<ul class="flex flex-col gap-1">
-							{#each warnings as it, i (i)}
-								{@render issueRow(it, i)}
-							{/each}
-						</ul>
-					</section>
-				{/if}
-			</div>
+			{#if lastRunAt !== null && issues.length > 0}
+				<div class="mb-2 flex flex-wrap gap-1">
+					{#each [['all', 'All'], ['uncommitted', 'New'], ['on_server', 'On server'], ['resolved', 'Fixed']] as [val, label] (val)}
+						<button
+							type="button"
+							class="rounded px-2 py-0.5 text-[10px] {filter === val
+								? 'bg-zinc-200 text-zinc-900'
+								: 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}"
+							disabled={val === 'resolved' && !hasResolved}
+							onclick={() => (filter = val as OriginFilter)}
+						>
+							{label}
+						</button>
+					{/each}
+				</div>
+			{/if}
+			{#if filtered.length === 0}
+				<p class="text-zinc-500">No issues match this filter.</p>
+			{:else}
+				<div class="flex flex-col gap-3">
+					{#if filteredErrors.length > 0}
+						<section class="flex flex-col gap-1">
+							<h3 class="text-[10px] font-semibold uppercase tracking-wider text-red-300">
+								Errors ({filteredErrors.length})
+							</h3>
+							<ul class="flex flex-col gap-1">
+								{#each filteredErrors as it, i (i)}
+									{@render issueRow(it, i)}
+								{/each}
+							</ul>
+						</section>
+					{/if}
+					{#if filteredWarnings.length > 0}
+						<section class="flex flex-col gap-1">
+							<h3 class="text-[10px] font-semibold uppercase tracking-wider text-amber-300">
+								Warnings ({filteredWarnings.length})
+							</h3>
+							<ul class="flex flex-col gap-1">
+								{#each filteredWarnings as it, i (i)}
+									{@render issueRow(it, i)}
+								{/each}
+							</ul>
+						</section>
+					{/if}
+					{#if resolved.length > 0}
+						<section class="flex flex-col gap-1">
+							<h3 class="text-[10px] font-semibold uppercase tracking-wider text-emerald-300">
+								Resolved by your edits ({resolved.length})
+							</h3>
+							<ul class="flex flex-col gap-1">
+								{#each resolved as it, i (i)}
+									{@render issueRow(it, i)}
+								{/each}
+							</ul>
+						</section>
+					{/if}
+				</div>
+			{/if}
 		{/if}
 	</div>
 </div>
