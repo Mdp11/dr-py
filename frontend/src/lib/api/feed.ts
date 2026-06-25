@@ -5,6 +5,8 @@
  * (`socketFactory`) so tests can drive it without a real server.
  */
 
+import { DEV_USER_ID, DEV_USER_EMAIL } from './identity';
+
 export interface LeaseLite {
 	resource_id: string;
 	mode: string;
@@ -53,13 +55,12 @@ export interface FeedConnection {
 	close(): void;
 }
 
-// Single-user dev identity, mirroring api/client.ts DEV_IDENTITY_HEADERS.
-const DEV_USER = 'default-user';
-const DEV_EMAIL = 'dev@example.com';
-
+// The feed authenticates over query params because browsers can't set
+// WebSocket headers. Identity is overridable per browser session via `?user=`
+// (see api/identity.ts).
 export function defaultFeedUrl(): string {
 	const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-	const q = `x-user-id=${encodeURIComponent(DEV_USER)}&x-user-email=${encodeURIComponent(DEV_EMAIL)}`;
+	const q = `x-user-id=${encodeURIComponent(DEV_USER_ID)}&x-user-email=${encodeURIComponent(DEV_USER_EMAIL)}`;
 	return `${proto}//${location.host}/api/v1/projects/default/feed?${q}`;
 }
 
