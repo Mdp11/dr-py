@@ -776,6 +776,10 @@ export function seedRelationships(rels: readonly Relationship[]): void {
  * rolls back, and tags each issue's origin (on_server / uncommitted / resolved).
  * With an empty buffer it is a plain committed-model validation (all on_server).
  * Resets `issuesByOwner` and the counts from the result.
+ *
+ * Resolved issues are returned in the result array but intentionally excluded
+ * from `_issuesByOwner` and the counts (they are not active problems); IssuesPanel
+ * reads the full returned array via `getIssues()`, so it still renders them.
  */
 export async function validateAll(): Promise<Issue[]> {
 	const staged = getStagedOps();

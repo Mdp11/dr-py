@@ -40,6 +40,9 @@ def classify_issue_origins(
     Every ``working`` issue is tagged ``on_server`` if it has a matching
     committed counterpart (consumed one-for-one) else ``uncommitted``; every
     committed issue with no working counterpart is appended as ``resolved``.
+
+    Output ordering: working-state issues come first (in ``working`` order),
+    then ``resolved`` issues are appended (in ``committed`` order).
     """
     committed_counts: Counter[tuple[str, str, tuple[str, ...], str]] = Counter(
         _issue_key(i) for i in committed
