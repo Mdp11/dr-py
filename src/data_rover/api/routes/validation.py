@@ -3,15 +3,17 @@ from __future__ import annotations
 from collections import Counter
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
 
 from data_rover.core.validation.issue import Issue
 from data_rover.core.validation.pipeline import default_pipeline
 from data_rover.core.validation.scope import Scope
-from data_rover.core.validation.state import ValidationState
+from data_rover.core.validation.state import ValidationState, issue_owner
 
 from ..deps import Session, get_request_session, require_model
 from ..schemas import IssueOut, ValidateRequest
 from ._snapshot import _build_model_from_payload
+from .ops import _apply_batch, _ensure_validation_seeded, _rollback
 
 router = APIRouter()
 
@@ -58,27 +60,58 @@ def classify_issue_origins(
     return out
 
 
-@router.post("/model/validate")
+@router.post("/model/validate", response_model=None)
 def validate_model(
     payload: ValidateRequest | None = None,
     session: Session = Depends(get_request_session),
-) -> list[IssueOut]:
+) -> list[IssueOut] | JSONResponse:
     metamodel, current = require_model(session)
+
+    # 1. Inline-snapshot path (unchanged): validate a client-provided model.
     if payload is not None and payload.inline is not None:
         model = _build_model_from_payload(
             metamodel,
             payload.inline.elements,
             payload.inline.relationships,
         )
-    else:
-        model = current
+        scope = Scope(payload.scope) if payload.scope is not None else Scope.all()
+        issues = default_pipeline().validate(model, scope)
+        return [IssueOut.from_core(i) for i in issues]
+
+    # 2. Staged path: validate the committed model WITH the client's uncommitted
+    #    ops applied, then tag each issue's origin against the committed baseline.
+    if payload is not None and payload.ops:
+        if payload.base_rev is not None and payload.base_rev != session.model_rev:
+            return JSONResponse(
+                status_code=409,
+                content={"detail": "stale base_rev", "model_rev": session.model_rev},
+            )
+        # committed baseline = the session's maintained issue store (seeded on first
+        # use). Reused, not recomputed: avoids a full O(model) pass per Validate and
+        # avoids a racy session.validation reassignment outside the write mutex.
+        state = _ensure_validation_seeded(session, current)
+        committed = state.all_issues()
+        # apply -> scoped re-validate -> roll back, under the write mutex. On a
+        # mutation-boundary error _apply_batch self-rolls-back and raises 422.
+        with session.write_mutex:
+            res = _apply_batch(current, payload.ops, restore=False)
+            try:
+                scoped = default_pipeline().validate(current, res.dirty.to_scope())
+            finally:
+                _rollback(current, res.inverse_units)
+        dirty_ids = set(res.dirty.ids)
+        # working full set = committed issues OUTSIDE the dirty scope ∪ the fresh
+        # dirty-scope issues (what state.replace would yield, computed purely).
+        working = [i for i in committed if issue_owner(i) not in dirty_ids]
+        working.extend(scoped)
+        return classify_issue_origins(committed, working)
+
+    # 3. No ops, no inline: full validation of the committed session model.
     scope = (
         Scope(payload.scope) if payload and payload.scope is not None else Scope.all()
     )
-    issues = default_pipeline().validate(model, scope)
-    if model is current and scope.is_all:
-        # seed the session issue store so incremental paths (Phase C) can
-        # delta from this full run instead of re-validating the whole model
+    issues = default_pipeline().validate(current, scope)
+    if scope.is_all:
         state = ValidationState()
         state.set_full(issues)
         session.validation = state
