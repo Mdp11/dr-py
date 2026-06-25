@@ -40,6 +40,20 @@ class Settings(BaseSettings):
     #: works without a project picker. MUST be false in production (Postgres
     #: schema is owned by Alembic): set ``DATA_ROVER_DEV_SEED=false``.
     dev_seed: bool = True
+    #: Dev-seed source artifacts for the ``default`` project. Empty ⇒ the
+    #: bundled ``examples/smart-city.*`` (preserves default behaviour). Set to
+    #: seed a different model. Relative paths resolve from the process CWD
+    #: (the repo root for pixi tasks). ``seed_view`` may be empty / point at a
+    #: missing file to seed no view.
+    seed_metamodel: str = ""
+    seed_model: str = ""
+    seed_view: str = ""
+    #: Optional path to a JSON file of extra dev users to provision as members
+    #: of the seeded ``default`` project (so local multi-user testing needs no
+    #: manual member calls). Empty ⇒ none. Applied on every dev seed (idempotent
+    #: upsert), so adding a user and restarting picks it up. Dev-only.
+    #: Shape: ``{"users": [{"id": "alice", "email": "a@x", "role": "editor"}]}``
+    dev_users_file: str = ""
     #: Snapshot blob backend: "gcs" (real client; points at GCS in prod or a
     #: fake-gcs-server emulator in dev) or "memory" (in-process; tests only).
     snapshot_store: str = "gcs"

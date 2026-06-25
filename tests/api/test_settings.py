@@ -36,7 +36,9 @@ def test_phase3_storage_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     # process-wide; clear them so we can observe the code defaults.
     monkeypatch.delenv("DATA_ROVER_SNAPSHOT_STORE", raising=False)
     monkeypatch.delenv("DATA_ROVER_IDLE_EVICT_SECONDS", raising=False)
-    s = Settings()
+    # _env_file=None so a developer's local .env (e.g. copied from .env.example
+    # with a fake-gcs emulator host) can't mask the code defaults under test.
+    s = Settings(_env_file=None)
     assert s.snapshot_store == "gcs"
     assert s.gcs_bucket == "data-rover-snapshots"
     assert s.storage_emulator_host == ""
