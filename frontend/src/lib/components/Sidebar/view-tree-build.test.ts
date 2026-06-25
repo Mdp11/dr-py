@@ -28,6 +28,45 @@ describe('buildUnifiedTree — curated scope', () => {
 		expect([...tree.placedElementIds]).toEqual(['a']);
 	});
 
+	it('includes placed elements in placement order even when their bodies are NOT cached', () => {
+		// Regression: folder contents must NOT be gated on the element body already
+		// being in the local cache. Gating on `elementsById.has` made placed rows
+		// materialize one-by-one as the global roots page streamed them in (in
+		// display-name order), inserting them mid-folder. Rows must be present and
+		// in placement order from the first build so bodies fill in place.
+		const view: View = {
+			name: 'v',
+			folders: [{ name: 'F', folders: [], elements: ['c', 'a', 'b'] }]
+		};
+		const tree = buildUnifiedTree(
+			view,
+			[],
+			new Map(), // nothing cached yet
+			new Map(),
+			new Set(),
+			displayName
+		);
+		expect(tree.children.get(folderKey(['F']))).toEqual(['c', 'a', 'b']);
+		expect([...tree.placedElementIds]).toEqual(['c', 'a', 'b']);
+	});
+
+	it('drops a placed id the server has confirmed missing (not merely unfetched)', () => {
+		const view: View = {
+			name: 'v',
+			folders: [{ name: 'F', folders: [], elements: ['a', 'gone', 'b'] }]
+		};
+		const tree = buildUnifiedTree(
+			view,
+			[],
+			new Map(),
+			new Map(),
+			new Set(),
+			displayName,
+			new Set(['gone']) // confirmed missing
+		);
+		expect(tree.children.get(folderKey(['F']))).toEqual(['a', 'b']);
+	});
+
 	it('without a view, roots render in the given (server) order — no client re-sort', () => {
 		// The backend emits roots already display-name sorted; the client must NOT
 		// re-sort, so an accumulated prefix only ever grows by appending (no jump

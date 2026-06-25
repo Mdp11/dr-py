@@ -1,4 +1,4 @@
-import { SvelteMap } from 'svelte/reactivity';
+import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
 import type { ClientConfig } from '$lib/api/client';
 import type {
@@ -74,6 +74,13 @@ interface QueuedOp {
 
 const _elements = new SvelteMap<string, Element>();
 const _relationships = new SvelteMap<string, Relationship>();
+/** Element ids the server has confirmed do not exist: requested in a
+ * {@link ensureElements} batch but omitted from the response (the batch
+ * endpoint drops unknown/deleted ids). Reactive so the view tree can drop a
+ * dangling folder placement once it is *known* missing — as opposed to merely
+ * not fetched yet, which must keep rendering a skeleton. Cleared on store reset
+ * and un-marked whenever the id reappears (seed / delta / single fetch). */
+const _missingElementIds = new SvelteSet<string>();
 /** Issues keyed by OWNER (= issue.target_ids[0]), mirroring the backend
  * ValidationState; fed by ops deltas and full validateAll() runs. */
 const _issuesByOwner = new SvelteMap<string, Issue[]>();
@@ -107,6 +114,11 @@ export function setModelApiConfig(cfg: ClientConfig | undefined): void {
 
 export function getCachedElements(): ReadonlyMap<string, Element> {
 	return _elements;
+}
+
+/** Ids a by-id batch fetch confirmed missing (see {@link _missingElementIds}). */
+export function getMissingElementIds(): ReadonlySet<string> {
+	return _missingElementIds;
 }
 
 export function getCachedRelationships(): ReadonlyMap<string, Relationship> {
@@ -318,6 +330,7 @@ export function applyDelta(d: OpsResponse): void {
 	for (const e of d.changed_elements) {
 		if (hasQueuedOpFor(e.id)) continue;
 		_elements.set(e.id, e);
+		_missingElementIds.delete(e.id); // a (re)created/restored id is no longer missing
 	}
 	for (const r of d.changed_relationships) {
 		if (hasQueuedOpFor(r.id)) continue;
@@ -634,6 +647,7 @@ export async function ensureElement(id: string): Promise<Element | null> {
 		try {
 			const e = await getElement(id, _clientConfig);
 			_elements.set(e.id, e);
+			_missingElementIds.delete(e.id);
 			return e;
 		} catch (err) {
 			if (err instanceof NotFoundError) return null;
@@ -664,11 +678,13 @@ export async function ensureElements(ids: readonly string[]): Promise<void> {
 	for (const id of ids) {
 		if (seen.has(id)) continue;
 		seen.add(id);
-		// skip ids already cached, temp (server never heard of them), or already
-		// in flight via either this batch path or a single-id ensureElement.
+		// skip ids already cached, temp (server never heard of them), already in
+		// flight via either fetch path, or already confirmed missing (re-requesting
+		// a dangling placement on every window recompute would hammer the endpoint).
 		if (
 			_elements.has(id) ||
 			isTempId(id) ||
+			_missingElementIds.has(id) ||
 			_inFlightBatchIds.has(id) ||
 			_pendingElementFetches.has(id)
 		)
@@ -682,6 +698,13 @@ export async function ensureElements(ids: readonly string[]): Promise<void> {
 			const chunk = want.slice(i, i + modelReadApi.READ_PAGE_LIMIT);
 			const fetched = await modelReadApi.getElementsBatch(chunk, _clientConfig);
 			for (const e of fetched) _elements.set(e.id, e);
+			// Ids the server omitted from this chunk do not exist (deleted/unknown):
+			// record them so the view tree drops the dangling placement instead of
+			// holding a skeleton row forever. A later create/restore of the same id
+			// un-marks it (seedElements / applyDelta).
+			// eslint-disable-next-line svelte/prefer-svelte-reactivity
+			const returned = new Set(fetched.map((e) => e.id)); // ephemeral membership check
+			for (const id of chunk) if (!returned.has(id)) _missingElementIds.add(id);
 		}
 	} finally {
 		for (const id of want) _inFlightBatchIds.delete(id);
@@ -756,6 +779,7 @@ export function seedElements(els: readonly Element[]): void {
 		const cached = _elements.get(e.id);
 		if (cached !== undefined && cached.rev > e.rev) continue;
 		_elements.set(e.id, e);
+		_missingElementIds.delete(e.id); // it exists after all
 	}
 }
 
@@ -807,6 +831,7 @@ export function resetModelStore(): void {
 	_generation += 1;
 	_pendingElementFetches.clear();
 	_inFlightBatchIds.clear();
+	_missingElementIds.clear();
 	_elements.clear();
 	_relationships.clear();
 	_issuesByOwner.clear();

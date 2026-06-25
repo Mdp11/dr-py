@@ -59,6 +59,12 @@ function row(page: Page, text: string): Locator {
 	return page.getByRole('treeitem').filter({ hasText: text }).first();
 }
 
+/** Expand a folder row by name (folders default COLLAPSED). No-op if already open. */
+async function expandFolder(page: Page, name: string): Promise<void> {
+	const expander = row(page, name).getByRole('button', { name: 'Expand' });
+	if (await expander.count()) await expander.click();
+}
+
 /**
  * Drive the pointer-events drag-and-drop the app actually uses. The tree no
  * longer relies on native HTML5 DnD (which failed to initiate in some Chromium
@@ -130,6 +136,7 @@ test('drag an element into a folder places it there', async ({ page }) => {
 });
 
 test('drag a placed element to the view root unplaces it', async ({ page }) => {
+	await expandFolder(page, 'Grouped'); // folders default collapsed; reveal Alpha to drag it
 	const put = viewPut(page);
 	await pointerDragDrop(
 		page,
@@ -154,6 +161,7 @@ test('multi-selected elements all move on a single drag', async ({ page }) => {
 	// lives in the collapsed "Not in view" pool. Expand the pool, then ctrl-select
 	// one row from each section before dragging.
 	await expandExcludedPool(page);
+	await expandFolder(page, 'Grouped'); // reveal placed Alpha in the in-view tree
 	const mainTree = page.getByRole('tree', { name: /containment tree/i });
 	const pool = page.getByRole('tree', { name: /excluded elements/i });
 	await mainTree.getByText('Alpha').click({ modifiers: ['ControlOrMeta'] });

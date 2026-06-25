@@ -18,6 +18,7 @@
 		getCachedElements,
 		getIssues,
 		getMetamodel,
+		getMissingElementIds,
 		getModelGeneration,
 		getModelSummary,
 		getStructureRev,
@@ -136,11 +137,14 @@
 	let excludedLimit = $state(PAGE_LIMIT);
 	const childLevels = new SvelteMap<string, ContainmentItem[]>();
 	const childTotals = new SvelteMap<string, number>();
-	/** Element ids the user expanded (folders are tracked by `collapsedFolders`). */
+	/** Element ids the user expanded (folders are tracked by `expandedFolders`). */
 	const expandedElements = new SvelteSet<string>();
-	/** Folder keys the user collapsed (folders default to expanded — they are
-	 * client-side view data, not paged). */
-	const collapsedFolders = new SvelteSet<string>();
+	/** Folder keys the user expanded. Folders default to COLLAPSED (mirroring
+	 * elements): on a large model + view, defaulting them open flattened every
+	 * placed element across every folder at once, so loading one folder visibly
+	 * churned the whole tree. Collapsed-by-default keeps a fresh view to just its
+	 * top-level folders until the user opens one. */
+	const expandedFolders = new SvelteSet<string>();
 
 	// ----- excluded-pool panel (collapsed-by-default, resizable) -----
 	const LS_POOL_COLLAPSED = 'ui.treePoolCollapsed';
@@ -349,6 +353,8 @@
 		return m;
 	});
 
+	const missingElementIds = $derived(getMissingElementIds());
+
 	const tree = $derived.by(() => {
 		const t = buildUnifiedTree(
 			view,
@@ -356,7 +362,8 @@
 			elementsById,
 			containmentChildren,
 			containedIds,
-			displayName
+			displayName,
+			missingElementIds
 		);
 		if (view !== null) {
 			registerExcludedRoots(
@@ -391,7 +398,7 @@
 	}
 
 	function isCollapsedKey(key: string): boolean {
-		if (isFolderKey(key) || isExcludedSectionKey(key)) return collapsedFolders.has(key);
+		if (isFolderKey(key) || isExcludedSectionKey(key)) return !expandedFolders.has(key);
 		return !expandedElements.has(key);
 	}
 
@@ -410,8 +417,8 @@
 
 	function setCollapsed(key: string, value: boolean): void {
 		if (isFolderKey(key) || isExcludedSectionKey(key)) {
-			if (value) collapsedFolders.add(key);
-			else collapsedFolders.delete(key);
+			if (value) expandedFolders.delete(key);
+			else expandedFolders.add(key);
 			return;
 		}
 		if (value) expandedElements.delete(key);
