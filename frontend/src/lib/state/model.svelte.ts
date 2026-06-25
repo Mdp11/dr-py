@@ -770,18 +770,26 @@ export function seedRelationships(rels: readonly Relationship[]): void {
 }
 
 /**
- * Full validation run over the SESSION model (POST /model/validate with no
- * body — which also seeds the server-side issue store so subsequent commit
- * deltas are exact). Resets `issuesByOwner` and the counts from the result.
+ * Full validation run that INCLUDES staged (uncommitted) edits. When the staged
+ * buffer is non-empty, the staged ops + current rev are sent to POST
+ * /model/validate, which applies them against the committed model, validates,
+ * rolls back, and tags each issue's origin (on_server / uncommitted / resolved).
+ * With an empty buffer it is a plain committed-model validation (all on_server).
+ * Resets `issuesByOwner` and the counts from the result.
  *
- * Validates the last committed session state; staged-but-uncommitted edits are
- * not visible to the server until commit (the commit preview validates those).
+ * Resolved issues are returned in the result array but intentionally excluded
+ * from `_issuesByOwner` and the counts (they are not active problems); IssuesPanel
+ * reads the full returned array via `getIssues()`, so it still renders them.
  */
 export async function validateAll(): Promise<Issue[]> {
-	const issues = await validateModel(undefined, _clientConfig);
+	const staged = getStagedOps();
+	const options = staged.length > 0 ? { ops: staged, baseRev: _modelRev } : undefined;
+	const issues = await validateModel(options, _clientConfig);
 	_issuesByOwner.clear();
 	const counts: IssueCounts = {};
 	for (const issue of issues) {
+		// resolved issues are not active problems — keep them out of the counts
+		if (issue.origin === 'resolved') continue;
 		addIssueToOwner(issue);
 		counts[issue.severity] = (counts[issue.severity] ?? 0) + 1;
 	}

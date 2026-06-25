@@ -3,7 +3,7 @@ import type { Issue } from '$lib/api/types';
 import { indexIssues, worstSeverityFor } from '../validation-index';
 
 function issue(severity: 'error' | 'warning', message: string, target_ids: string[]): Issue {
-	return { severity, message, target_ids };
+	return { severity, message, target_ids, origin: 'on_server' };
 }
 
 describe('indexIssues', () => {

@@ -27,7 +27,8 @@ export type ModelOut = z.infer<typeof ModelOutSchema>;
 export const IssueSchema = z.object({
 	severity: z.enum(['error', 'warning']),
 	message: z.string(),
-	target_ids: z.array(z.string())
+	target_ids: z.array(z.string()),
+	origin: z.enum(['on_server', 'uncommitted', 'resolved']).default('on_server')
 });
 export type Issue = z.infer<typeof IssueSchema>;
 
