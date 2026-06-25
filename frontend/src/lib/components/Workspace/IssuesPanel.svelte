@@ -37,20 +37,15 @@
 
 	const filtered = $derived(filter === 'all' ? issues : issues.filter((i) => i.origin === filter));
 	// Active = not resolved. Resolved rows are shown (when in view) but never
-	// counted as problems and render struck-through.
-	// Header counts always reflect ALL active issues regardless of the filter.
-	const errors = $derived(issues.filter((i) => i.severity === 'error' && i.origin !== 'resolved'));
+	// counted as problems and render struck-through. A single errors/warnings
+	// pair scoped to `filtered` feeds BOTH the header summary and the body
+	// sections, so the two always agree under any active filter.
+	const errors = $derived(filtered.filter((i) => i.severity === 'error' && i.origin !== 'resolved'));
 	const warnings = $derived(
-		issues.filter((i) => i.severity === 'warning' && i.origin !== 'resolved')
-	);
-	// Body sections use the filtered subset.
-	const filteredErrors = $derived(
-		filtered.filter((i) => i.severity === 'error' && i.origin !== 'resolved')
-	);
-	const filteredWarnings = $derived(
 		filtered.filter((i) => i.severity === 'warning' && i.origin !== 'resolved')
 	);
 	const resolved = $derived(filtered.filter((i) => i.origin === 'resolved'));
+	// Global (not filter-scoped): gates the "Fixed" filter button.
 	const hasResolved = $derived(issues.some((i) => i.origin === 'resolved'));
 
 	let now = $state(Date.now());
@@ -91,6 +86,9 @@
 	}
 
 	async function rerun(): Promise<void> {
+		// Reset the filter so a re-run never strands the user on an empty view
+		// (e.g. sitting on "Fixed" when this run has no resolved issues).
+		filter = 'all';
 		await runValidation();
 	}
 </script>
@@ -178,45 +176,43 @@
 		{:else if issues.length === 0}
 			<p class="text-emerald-400">No issues (validated {relativeTime(lastRunAt)}).</p>
 		{:else}
-			{#if lastRunAt !== null && issues.length > 0}
-				<div class="mb-2 flex flex-wrap gap-1">
-					{#each [['all', 'All'], ['uncommitted', 'New'], ['on_server', 'On server'], ['resolved', 'Fixed']] as [val, label] (val)}
-						<button
-							type="button"
-							class="rounded px-2 py-0.5 text-[10px] {filter === val
-								? 'bg-zinc-200 text-zinc-900'
-								: 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}"
-							disabled={val === 'resolved' && !hasResolved}
-							onclick={() => (filter = val as OriginFilter)}
-						>
-							{label}
-						</button>
-					{/each}
-				</div>
-			{/if}
+			<div class="mb-2 flex flex-wrap gap-1">
+				{#each [['all', 'All'], ['uncommitted', 'New'], ['on_server', 'On server'], ['resolved', 'Fixed']] as [val, label] (val)}
+					<button
+						type="button"
+						class="rounded px-2 py-0.5 text-[10px] {filter === val
+							? 'bg-zinc-200 text-zinc-900'
+							: 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}"
+						disabled={val === 'resolved' && !hasResolved}
+						onclick={() => (filter = val as OriginFilter)}
+					>
+						{label}
+					</button>
+				{/each}
+			</div>
 			{#if filtered.length === 0}
 				<p class="text-zinc-500">No issues match this filter.</p>
 			{:else}
 				<div class="flex flex-col gap-3">
-					{#if filteredErrors.length > 0}
+					{#if errors.length > 0}
 						<section class="flex flex-col gap-1">
 							<h3 class="text-[10px] font-semibold uppercase tracking-wider text-red-300">
-								Errors ({filteredErrors.length})
+								Errors ({errors.length})
 							</h3>
 							<ul class="flex flex-col gap-1">
-								{#each filteredErrors as it, i (i)}
+								{#each errors as it, i (i)}
 									{@render issueRow(it, i)}
 								{/each}
 							</ul>
 						</section>
 					{/if}
-					{#if filteredWarnings.length > 0}
+					{#if warnings.length > 0}
 						<section class="flex flex-col gap-1">
 							<h3 class="text-[10px] font-semibold uppercase tracking-wider text-amber-300">
-								Warnings ({filteredWarnings.length})
+								Warnings ({warnings.length})
 							</h3>
 							<ul class="flex flex-col gap-1">
-								{#each filteredWarnings as it, i (i)}
+								{#each warnings as it, i (i)}
 									{@render issueRow(it, i)}
 								{/each}
 							</ul>
