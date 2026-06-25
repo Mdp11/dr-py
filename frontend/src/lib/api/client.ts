@@ -1,5 +1,11 @@
 import type { z } from 'zod';
 import { errorForStatus, messageFromBody } from './errors';
+import { DEV_IDENTITY_HEADERS, getCurrentUserId } from './identity';
+
+// Re-exported so existing `import { getCurrentUserId } from '$lib/api/client'`
+// call sites keep working; the value now comes from the dev identity seam
+// (overridable per browser session via `?user=` — see api/identity.ts).
+export { getCurrentUserId };
 
 export interface ClientConfig {
 	baseUrl?: string;
@@ -16,17 +22,6 @@ export interface ApiFetchInit extends Omit<RequestInit, 'body'> {
 // will make the project id dynamic and drop the dev identity headers (a
 // gateway will inject the real identity in production).
 const DEFAULT_BASE_URL = '/api/v1/projects/default';
-const DEV_IDENTITY_HEADERS: Record<string, string> = {
-	'x-user-id': 'default-user',
-	'x-user-email': 'dev@example.com'
-};
-
-/** The current user's id as seen by the backend. Dev build: the static
- * x-user-id header value. (A real auth integration will replace this seam.)
- * Used by the checkout store to recognize its OWN lock events in the feed. */
-export function getCurrentUserId(): string {
-	return DEV_IDENTITY_HEADERS['x-user-id'];
-}
 
 function buildUrl(baseUrl: string, path: string, query?: ApiFetchInit['query']): string {
 	const normalizedBase = baseUrl.replace(/\/$/, '');
