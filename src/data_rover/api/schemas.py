@@ -84,6 +84,11 @@ class SnapshotIn(BaseModel):
 class ValidateRequest(BaseModel):
     scope: list[str] | None = None
     inline: InlineModel | None = None
+    #: staged (uncommitted) op batch to validate against the committed model;
+    #: when present, the response tags each issue's origin. Mirrors PreviewRequest.
+    ops: "list[OpIn] | None" = None
+    #: model_rev the ops were computed against; mismatch -> 409 (like preview).
+    base_rev: int | None = None
 
 
 class IssueOut(BaseModel):
@@ -91,14 +96,18 @@ class IssueOut(BaseModel):
     message: str
     target_ids: list[str] = Field(default_factory=list)
     category: str = "conformance"
+    #: relationship to the committed model: "on_server" (pre-existing),
+    #: "uncommitted" (introduced by staged edits), or "resolved" (fixed by them).
+    origin: str = "on_server"
 
     @classmethod
-    def from_core(cls, issue: Issue) -> "IssueOut":
+    def from_core(cls, issue: Issue, origin: str = "on_server") -> "IssueOut":
         return cls(
             severity=issue.severity.value,
             message=issue.message,
             target_ids=list(issue.target_ids),
             category=issue.category.value,
+            origin=origin,
         )
 
 
