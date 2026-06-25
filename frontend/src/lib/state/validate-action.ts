@@ -22,7 +22,10 @@ export async function runValidation(): Promise<void> {
 		setActiveTab('issues');
 	} catch (err) {
 		if (err instanceof ConflictError) {
-			setModelError({ kind: 'conflict', message: 'Model changed on the server. Reload to continue.' });
+			setModelError({
+				kind: 'conflict',
+				message: 'Model changed on the server. Reload to continue.'
+			});
 			setLastError('Model changed on the server — reload to validate.');
 		} else {
 			const message = err instanceof Error ? err.message : String(err);

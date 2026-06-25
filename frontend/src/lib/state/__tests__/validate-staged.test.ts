@@ -3,7 +3,13 @@ import { http, HttpResponse } from 'msw';
 
 import { server } from '$lib/api/__tests__/server';
 import { emit } from '../model.svelte';
-import { validateAll, resetModelStore, adoptSummary, setModelApiConfig, getModelError } from '../model.svelte';
+import {
+	validateAll,
+	resetModelStore,
+	adoptSummary,
+	setModelApiConfig,
+	getModelError
+} from '../model.svelte';
 import { getLastError } from '../validation.svelte';
 import { runValidation } from '../validate-action';
 
@@ -60,11 +66,13 @@ describe('runValidation — 409 conflict path', () => {
 		emit({ kind: 'create_element', temp_id: 'tmp2', type_name: 'Block', properties: {} });
 
 		server.use(
-			http.post(`${BASE}/model/validate`, () =>
-				new HttpResponse(JSON.stringify({ detail: 'stale base_rev', model_rev: 9 }), {
-					status: 409,
-					headers: { 'content-type': 'application/json' }
-				})
+			http.post(
+				`${BASE}/model/validate`,
+				() =>
+					new HttpResponse(JSON.stringify({ detail: 'stale base_rev', model_rev: 9 }), {
+						status: 409,
+						headers: { 'content-type': 'application/json' }
+					})
 			)
 		);
 

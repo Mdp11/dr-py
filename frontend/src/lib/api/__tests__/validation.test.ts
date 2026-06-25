@@ -26,7 +26,9 @@ describe('validateModel', () => {
 		};
 		const result = await validateModel({ inline }, cfg);
 		expect(body).toEqual({ inline, scope: undefined });
-		expect(result).toEqual([{ severity: 'error', message: 'oops', target_ids: ['e1'], origin: 'on_server' }]);
+		expect(result).toEqual([
+			{ severity: 'error', message: 'oops', target_ids: ['e1'], origin: 'on_server' }
+		]);
 	});
 
 	it('POSTs with scope only and parses warnings', async () => {
