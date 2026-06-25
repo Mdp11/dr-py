@@ -40,7 +40,9 @@
 	// counted as problems and render struck-through. A single errors/warnings
 	// pair scoped to `filtered` feeds BOTH the header summary and the body
 	// sections, so the two always agree under any active filter.
-	const errors = $derived(filtered.filter((i) => i.severity === 'error' && i.origin !== 'resolved'));
+	const errors = $derived(
+		filtered.filter((i) => i.severity === 'error' && i.origin !== 'resolved')
+	);
 	const warnings = $derived(
 		filtered.filter((i) => i.severity === 'warning' && i.origin !== 'resolved')
 	);
