@@ -14,6 +14,7 @@
 	import { fetchElementsOfType } from '$lib/state/element-queries';
 	import { listElementRelationships } from '$lib/api/model-read';
 	import { elementDisplayName as displayName } from '$lib/util/element-name';
+	import { SvelteMap } from 'svelte/reactivity';
 	import { Plus, X } from '@lucide/svelte';
 
 	type Props = {
@@ -85,7 +86,7 @@
 		}
 		void (async () => {
 			try {
-				const byId = new Map<string, Element>();
+				const byId = new SvelteMap<string, Element>();
 				let total = 0;
 				let exact = true;
 				for (const targetType of opt.targetTypes) {

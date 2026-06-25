@@ -26,3 +26,4 @@ docs/
 
 # generated benchmark fixtures
 benchmarks/
+dev.db

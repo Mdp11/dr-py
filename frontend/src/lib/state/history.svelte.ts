@@ -3,6 +3,7 @@
  * commit page(s), the paging cursor, and a rev->ModelOut reconstruction cache
  * so flipping between diffs does not refetch a rev already materialized.
  */
+import { SvelteMap } from 'svelte/reactivity';
 import { getCommitHistory, getModelAtRev } from '$lib/api/history';
 import type { CommitSummary, ModelOut } from '$lib/api/types';
 
@@ -11,7 +12,7 @@ const PAGE = 50;
 let _commits: CommitSummary[] = $state([]);
 let _hasMore = $state(false);
 let _loading = $state(false);
-const _modelCache = new Map<number, ModelOut>();
+const _modelCache = new SvelteMap<number, ModelOut>();
 
 export function getCommits(): CommitSummary[] {
 	return _commits;

@@ -70,7 +70,8 @@ def test_model_at_negative_rev_422(client: TestClient) -> None:
 def test_model_at_rev_readable_by_viewer(client: TestClient) -> None:
     commit_create(client, "A")
     r1 = model_rev(client)
-    gen = db.get_db(); s = next(gen)
+    gen = db.get_db()
+    s = next(gen)
     try:
         s.add(User(id="vw", email="vw@example.com"))
         add_member(s, DEFAULT_PROJECT_ID, "vw", Role.viewer)
