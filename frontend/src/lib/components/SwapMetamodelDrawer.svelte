@@ -74,7 +74,8 @@
 		return {
 			severity: o.severity === 'warning' ? 'warning' : 'error',
 			message: o.message,
-			target_ids: o.target_ids
+			target_ids: o.target_ids,
+			origin: 'on_server'
 		};
 	}
 
