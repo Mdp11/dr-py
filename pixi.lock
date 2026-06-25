@@ -87,7 +87,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/google-api-core-2.31.0-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/google-auth-2.55.0-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/google-cloud-core-2.6.0-pyhcf101f3_1.conda
-      - conda: https://conda.anaconda.org/conda-forge/noarch/google-cloud-storage-2.3.0-pyh6c4a22f_0.tar.bz2
+      - conda: https://conda.anaconda.org/conda-forge/noarch/google-cloud-storage-3.12.0-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/google-resumable-media-2.8.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/googleapis-common-protos-1.75.0-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/grpcio-status-1.81.1-pyhcf101f3_0.conda
@@ -263,7 +263,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/google-api-core-2.31.0-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/google-auth-2.55.0-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/google-cloud-core-2.6.0-pyhcf101f3_1.conda
-      - conda: https://conda.anaconda.org/conda-forge/noarch/google-cloud-storage-2.3.0-pyh6c4a22f_0.tar.bz2
+      - conda: https://conda.anaconda.org/conda-forge/noarch/google-cloud-storage-3.12.0-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/google-resumable-media-2.8.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/googleapis-common-protos-1.75.0-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/grpcio-status-1.81.1-pyhcf101f3_0.conda
@@ -1476,22 +1476,24 @@ packages:
   run_exports: {}
   size: 33255
   timestamp: 1780580616158
-- conda: https://conda.anaconda.org/conda-forge/noarch/google-cloud-storage-2.3.0-pyh6c4a22f_0.tar.bz2
-  sha256: 5c66820938450169634855577ad16a6ef7b49b43ebb20d77ee487d9c4dfb8cf3
-  md5: daa8cc6429346733c111dc1871652fec
+- conda: https://conda.anaconda.org/conda-forge/noarch/google-cloud-storage-3.12.0-pyhcf101f3_0.conda
+  sha256: dada8ff546b62c9247c355dfd949d8aaaa39ac33615eb7ad977af62e9f7704ec
+  md5: 9d08e3e18b2bc07d93d6cbe988c1a28d
   depends:
-  - google-api-core >=1.31.5,<3.0.0dev,!=2.0.*,!=2.1.*,!=2.2.*,!=2.3.0
-  - google-auth >=1.25.0,<3.0dev
-  - google-cloud-core >=2.3.0,<3.0dev
-  - google-resumable-media >=2.3.2
-  - protobuf
-  - python >=3.6
-  - requests >=2.18.0,<3.0.0dev
+  - python >=3.10
+  - google-auth >=2.26.1,<3.0.0
+  - google-api-core >=2.27.0,<3.0.0
+  - google-cloud-core >=2.4.2,<3.0.0
+  - google-resumable-media >=2.7.2,<3.0.0
+  - requests >=2.22.0,<3.0.0
+  - google-crc32c >=1.6.0,<2.0.0
+  - protobuf >=3.20.2,<7.0.0
+  - python
   license: Apache-2.0
   license_family: APACHE
   run_exports: {}
-  size: 75665
-  timestamp: 1654279532105
+  size: 212501
+  timestamp: 1781344615309
 - conda: https://conda.anaconda.org/conda-forge/noarch/google-resumable-media-2.8.0-pyhd8ed1ab_0.conda
   sha256: 23d825ed0664a8089c7958bffd819d26e1aba7579695c40dfbdb25a4864d8be6
   md5: ba7f04ba62be69f9c9fef0c4487c210b
