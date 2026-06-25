@@ -56,6 +56,11 @@ The UI is a fixed grid:
   selection.
 - **Inspector** — property form + relationships list + new-relationship
   picker for the selected entity (gated when the resource is locked by a peer).
+  For elements it also carries a **lock/unlock control** (`Inspector/LockControl`)
+  in the Properties header: **Lock** checks the element out without editing it
+  (`editLock`); **Unlock** releases my lease (`discardElement`), confirming first
+  when the element has staged edits (they are discarded); a peer's lock shows as
+  a disabled "Locked by …" badge.
 - **StatusBar** — model size, staged-change counter, validation summary,
   live/presence indicator, current model filename.
 

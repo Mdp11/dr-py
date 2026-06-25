@@ -7,6 +7,7 @@
 		getCachedRelationships,
 		getSelection
 	} from '$lib/state';
+	import LockControl from './Inspector/LockControl.svelte';
 	import NewRelationshipPicker from './Inspector/NewRelationshipPicker.svelte';
 	import PropertyForm from './Inspector/PropertyForm.svelte';
 	import RelationshipsList from './Inspector/RelationshipsList.svelte';
@@ -50,9 +51,14 @@
 	{:else}
 		<div class="flex-1 overflow-auto">
 			<section class="px-3 py-2">
-				<h2 class="mb-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-					Properties
-				</h2>
+				<div class="mb-2 flex items-center justify-between gap-2">
+					<h2 class="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+						Properties
+					</h2>
+					{#if selection.kind === 'element'}
+						<LockControl elementId={selection.id} />
+					{/if}
+				</div>
 				<PropertyForm {entity} kind={selection.kind} />
 			</section>
 			{#if selection.kind === 'element'}
