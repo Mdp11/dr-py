@@ -119,9 +119,9 @@ test('History: list, diff, and revert a commit', async ({ page }) => {
 
 	// CompareDiff renders count labels: "+N added", "~N modified", "−N deleted".
 	// Use first() to avoid strict-mode failure when all three labels are rendered.
-	await expect(
-		historyDrawer.getByText(/added|modified|deleted/i).first()
-	).toBeVisible({ timeout: 20_000 });
+	await expect(historyDrawer.getByText(/added|modified|deleted/i).first()).toBeVisible({
+		timeout: 20_000
+	});
 
 	// 6. Go back to the list.
 	// The Back button is a plain <button> with text "Back" in the diff header.

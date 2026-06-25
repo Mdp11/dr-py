@@ -45,7 +45,11 @@ const mm: Metamodel = {
 		}),
 		// single-pair via shorthand only (mappings empty -> fall back)
 		rel({ name: 'Shorthand', source: 'Requirement', target: 'Requirement' }),
-		rel({ name: 'Abstract', abstract: true, mappings: [{ source: 'Component', target: 'Database' }] }),
+		rel({
+			name: 'Abstract',
+			abstract: true,
+			mappings: [{ source: 'Component', target: 'Database' }]
+		}),
 		// bounded out-degree
 		rel({
 			name: 'OwnsOne',

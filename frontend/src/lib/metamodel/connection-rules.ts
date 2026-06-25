@@ -17,7 +17,8 @@ export function allowedTargetTypes(
 	sourceType: string,
 	rt: RelationshipType
 ): string[] {
-	const mappings = rt.mappings.length > 0 ? rt.mappings : [{ source: rt.source, target: rt.target }];
+	const mappings =
+		rt.mappings.length > 0 ? rt.mappings : [{ source: rt.source, target: rt.target }];
 	const targets: string[] = [];
 	for (const m of mappings) {
 		if (isSubtype(mm, sourceType, m.source) && !targets.includes(m.target)) {

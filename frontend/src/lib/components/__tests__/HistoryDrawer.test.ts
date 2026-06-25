@@ -6,10 +6,26 @@ vi.mock('$lib/state/history.svelte', () => ({
 	loadFirstPage: vi.fn(async () => {}),
 	loadMore: vi.fn(async () => {}),
 	getCommits: vi.fn(() => [
-		{ rev: 2, commit_id: 'c2', author_id: 'u', ts: '2026-01-01T00:00:00Z',
-		  message: 'second', validation_error_count: 0, op_count: 1, is_rebind: false },
-		{ rev: 1, commit_id: 'c1', author_id: 'u', ts: '2026-01-01T00:00:00Z',
-		  message: 'first', validation_error_count: 2, op_count: 3, is_rebind: true }
+		{
+			rev: 2,
+			commit_id: 'c2',
+			author_id: 'u',
+			ts: '2026-01-01T00:00:00Z',
+			message: 'second',
+			validation_error_count: 0,
+			op_count: 1,
+			is_rebind: false
+		},
+		{
+			rev: 1,
+			commit_id: 'c1',
+			author_id: 'u',
+			ts: '2026-01-01T00:00:00Z',
+			message: 'first',
+			validation_error_count: 2,
+			op_count: 3,
+			is_rebind: true
+		}
 	]),
 	getHasMore: vi.fn(() => false),
 	getLoading: vi.fn(() => false),
@@ -19,9 +35,14 @@ vi.mock('$lib/state/history.svelte', () => ({
 vi.mock('$lib/state/realtime.svelte', () => ({ onCommitEvent: vi.fn(() => () => {}) }));
 vi.mock('$lib/state', async (orig) => {
 	const actual = await orig<typeof import('$lib/state')>();
-	return { ...actual, getRole: vi.fn(() => 'owner'), getModelRev: vi.fn(() => 2),
-		getStagedDepth: vi.fn(() => 0), getLockState: vi.fn(() => new Map()),
-		applyDelta: vi.fn() };
+	return {
+		...actual,
+		getRole: vi.fn(() => 'owner'),
+		getModelRev: vi.fn(() => 2),
+		getStagedDepth: vi.fn(() => 0),
+		getLockState: vi.fn(() => new Map()),
+		applyDelta: vi.fn()
+	};
 });
 vi.mock('$lib/api/history', async (orig) => {
 	const actual = await orig<typeof import('$lib/api/history')>();
@@ -58,9 +79,7 @@ describe('HistoryDrawer diff', () => {
 			rev <= 1
 				? { elements: [], relationships: [] }
 				: {
-						elements: [
-							{ id: 'e1', type_name: 'Node', properties: { label: 'A' }, rev: 2 }
-						],
+						elements: [{ id: 'e1', type_name: 'Node', properties: { label: 'A' }, rev: 2 }],
 						relationships: []
 					}
 		);
@@ -87,21 +106,36 @@ describe('HistoryDrawer revert', () => {
 	it('reverts to a rev, applies the delta, returns to list', async () => {
 		vi.mocked(getStagedDepth).mockReturnValue(0);
 		vi.mocked(revertToCommit).mockResolvedValue({
-			model_rev: 3, id_map: {}, changed_elements: [], changed_relationships: [],
-			deleted_element_ids: [], deleted_relationship_ids: [],
-			issues_removed_owner_ids: [], issues_added: [], issue_counts: {},
-			commit_id: 'c3', message: 'Revert to rev 1', validation_error_count: 0
+			model_rev: 3,
+			id_map: {},
+			changed_elements: [],
+			changed_relationships: [],
+			deleted_element_ids: [],
+			deleted_relationship_ids: [],
+			issues_removed_owner_ids: [],
+			issues_added: [],
+			issue_counts: {},
+			commit_id: 'c3',
+			message: 'Revert to rev 1',
+			validation_error_count: 0
 		});
 		const c = mount(HistoryDrawer, { target: document.body, props: { open: true } });
-		flushSync(); await Promise.resolve(); flushSync();
+		flushSync();
+		await Promise.resolve();
+		flushSync();
 		// open revert confirm on the rev-1 row, then confirm
 		const revertBtn = Array.from(document.querySelectorAll('button')).find((b) =>
-			b.textContent?.includes('Revert'))!;
-		revertBtn.click(); flushSync();
-		const confirmBtn = Array.from(document.querySelectorAll('button')).find((b) =>
-			b.textContent?.trim() === 'Revert' || b.textContent?.includes('Confirm'))!;
+			b.textContent?.includes('Revert')
+		)!;
+		revertBtn.click();
+		flushSync();
+		const confirmBtn = Array.from(document.querySelectorAll('button')).find(
+			(b) => b.textContent?.trim() === 'Revert' || b.textContent?.includes('Confirm')
+		)!;
 		confirmBtn.click();
-		await Promise.resolve(); await Promise.resolve(); flushSync();
+		await Promise.resolve();
+		await Promise.resolve();
+		flushSync();
 		expect(revertToCommit).toHaveBeenCalled();
 		expect(applyDelta).toHaveBeenCalled();
 		// confirm panel should have closed (confirmRev reset → "Revert to rev" text gone)
@@ -112,17 +146,29 @@ describe('HistoryDrawer revert', () => {
 	it('shows mapped error for 409 rebind/metamodel-swap and does not call applyDelta', async () => {
 		vi.mocked(getStagedDepth).mockReturnValue(0);
 		vi.mocked(revertToCommit).mockRejectedValue(
-			new ConflictError(409, { detail: 'revert across a metamodel swap is not yet supported', rebind_rev: 1 }, 'conflict')
+			new ConflictError(
+				409,
+				{ detail: 'revert across a metamodel swap is not yet supported', rebind_rev: 1 },
+				'conflict'
+			)
 		);
 		const c = mount(HistoryDrawer, { target: document.body, props: { open: true } });
-		flushSync(); await Promise.resolve(); flushSync();
+		flushSync();
+		await Promise.resolve();
+		flushSync();
 		const revertBtn = Array.from(document.querySelectorAll('button')).find((b) =>
-			b.textContent?.includes('Revert to here'))!;
-		revertBtn.click(); flushSync();
-		const confirmBtn = Array.from(document.querySelectorAll('button')).find((b) =>
-			b.textContent?.trim() === 'Revert' || b.textContent?.includes('Confirm'))!;
+			b.textContent?.includes('Revert to here')
+		)!;
+		revertBtn.click();
+		flushSync();
+		const confirmBtn = Array.from(document.querySelectorAll('button')).find(
+			(b) => b.textContent?.trim() === 'Revert' || b.textContent?.includes('Confirm')
+		)!;
 		confirmBtn.click();
-		await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); flushSync();
+		await Promise.resolve();
+		await Promise.resolve();
+		await Promise.resolve();
+		flushSync();
 		expect(document.body.textContent).toContain("Can't revert across a metamodel swap (rev 1).");
 		expect(applyDelta).not.toHaveBeenCalled();
 		unmount(c);
@@ -134,15 +180,25 @@ describe('HistoryDrawer revert', () => {
 			new ValidationError(422, { detail: 'structural validation blocker' }, 'invalid')
 		);
 		const c = mount(HistoryDrawer, { target: document.body, props: { open: true } });
-		flushSync(); await Promise.resolve(); flushSync();
+		flushSync();
+		await Promise.resolve();
+		flushSync();
 		const revertBtn = Array.from(document.querySelectorAll('button')).find((b) =>
-			b.textContent?.includes('Revert to here'))!;
-		revertBtn.click(); flushSync();
-		const confirmBtn = Array.from(document.querySelectorAll('button')).find((b) =>
-			b.textContent?.trim() === 'Revert' || b.textContent?.includes('Confirm'))!;
+			b.textContent?.includes('Revert to here')
+		)!;
+		revertBtn.click();
+		flushSync();
+		const confirmBtn = Array.from(document.querySelectorAll('button')).find(
+			(b) => b.textContent?.trim() === 'Revert' || b.textContent?.includes('Confirm')
+		)!;
 		confirmBtn.click();
-		await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); flushSync();
-		expect(document.body.textContent).toContain('Revert would leave a structural error and was rejected.');
+		await Promise.resolve();
+		await Promise.resolve();
+		await Promise.resolve();
+		flushSync();
+		expect(document.body.textContent).toContain(
+			'Revert would leave a structural error and was rejected.'
+		);
 		expect(applyDelta).not.toHaveBeenCalled();
 		unmount(c);
 	});
@@ -150,10 +206,14 @@ describe('HistoryDrawer revert', () => {
 	it('blocks revert when there are staged edits', async () => {
 		vi.mocked(getStagedDepth).mockReturnValue(2);
 		const c = mount(HistoryDrawer, { target: document.body, props: { open: true } });
-		flushSync(); await Promise.resolve(); flushSync();
+		flushSync();
+		await Promise.resolve();
+		flushSync();
 		const revertBtn = Array.from(document.querySelectorAll('button')).find((b) =>
-			b.textContent?.includes('Revert'))!;
-		revertBtn.click(); flushSync();
+			b.textContent?.includes('Revert')
+		)!;
+		revertBtn.click();
+		flushSync();
 		expect(document.body.textContent?.toLowerCase()).toContain('commit or discard');
 		expect(revertToCommit).not.toHaveBeenCalled();
 		unmount(c);

@@ -238,8 +238,8 @@
 							{#if confirmRev === c.rev}
 								<div class="mt-2 rounded border border-zinc-700 bg-zinc-900/60 p-3 text-sm">
 									<p class="text-zinc-200">
-										Revert to rev {confirmRev}? Revisions after r{confirmRev} are discarded as state
-										(history is preserved).
+										Revert to rev {confirmRev}? Revisions after r{confirmRev} are discarded as state (history
+										is preserved).
 									</p>
 									{#if revertError}
 										<p class="mt-1 text-xs text-red-300">{revertError}</p>
@@ -252,7 +252,12 @@
 										/>
 									{/if}
 									<div class="mt-2 flex justify-end gap-2">
-										<Button variant="ghost" size="sm" class="h-7 text-xs" onclick={() => (confirmRev = null)}>
+										<Button
+											variant="ghost"
+											size="sm"
+											class="h-7 text-xs"
+											onclick={() => (confirmRev = null)}
+										>
 											Cancel
 										</Button>
 										<Button

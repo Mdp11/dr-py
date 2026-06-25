@@ -231,7 +231,9 @@
 
 			{#if chosenOption !== null}
 				<label class="flex flex-col gap-1">
-					<span class="text-[10px] text-zinc-500">Target ({chosenOption.targetTypes.join(' | ')})</span>
+					<span class="text-[10px] text-zinc-500"
+						>Target ({chosenOption.targetTypes.join(' | ')})</span
+					>
 					<select class={selectCls} value={selectedTarget} onchange={onTargetChange}>
 						<option value="">(choose target)</option>
 						{#each candidateTargets as el (el.id)}

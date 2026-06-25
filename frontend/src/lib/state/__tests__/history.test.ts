@@ -16,8 +16,14 @@ import {
 
 function summary(rev: number) {
 	return {
-		rev, commit_id: `c${rev}`, author_id: null, ts: '2026-01-01T00:00:00Z',
-		message: `m${rev}`, validation_error_count: 0, op_count: 1, is_rebind: false
+		rev,
+		commit_id: `c${rev}`,
+		author_id: null,
+		ts: '2026-01-01T00:00:00Z',
+		message: `m${rev}`,
+		validation_error_count: 0,
+		op_count: 1,
+		is_rebind: false
 	};
 }
 
@@ -29,7 +35,8 @@ beforeEach(() => {
 describe('history store', () => {
 	it('loadFirstPage populates commits + has_more', async () => {
 		vi.mocked(getCommitHistory).mockResolvedValue({
-			commits: [summary(3), summary(2)], has_more: true
+			commits: [summary(3), summary(2)],
+			has_more: true
 		});
 		await loadFirstPage();
 		expect(getCommits().map((c) => c.rev)).toEqual([3, 2]);

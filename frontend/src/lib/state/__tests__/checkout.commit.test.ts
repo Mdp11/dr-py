@@ -45,9 +45,12 @@ async function checkoutAndEdit() {
 describe('commit lifecycle', () => {
 	it('previewStaged sends the live rev + staged ops', async () => {
 		await checkoutAndEdit();
-		const spy = vi
-			.spyOn(api, 'previewCommit')
-			.mockResolvedValue({ conformance_error_count: 0, structural_blockers: [], issues: [], would_block: false });
+		const spy = vi.spyOn(api, 'previewCommit').mockResolvedValue({
+			conformance_error_count: 0,
+			structural_blockers: [],
+			issues: [],
+			would_block: false
+		});
 		await previewStaged();
 		expect(spy).toHaveBeenCalledOnce();
 		const [rev, ops] = spy.mock.calls[0];
