@@ -40,10 +40,18 @@ describe('history api', () => {
 			{ targetRev: 2, baseRev: 7, message: 'undo' },
 			{
 				fetch: jsonFetch(cap, {
-					model_rev: 8, id_map: {}, changed_elements: [], changed_relationships: [],
-					deleted_element_ids: [], deleted_relationship_ids: [],
-					issues_removed_owner_ids: [], issues_added: [], issue_counts: {},
-					commit_id: 'c', message: 'undo', validation_error_count: 0
+					model_rev: 8,
+					id_map: {},
+					changed_elements: [],
+					changed_relationships: [],
+					deleted_element_ids: [],
+					deleted_relationship_ids: [],
+					issues_removed_owner_ids: [],
+					issues_added: [],
+					issue_counts: {},
+					commit_id: 'c',
+					message: 'undo',
+					validation_error_count: 0
 				})
 			}
 		);

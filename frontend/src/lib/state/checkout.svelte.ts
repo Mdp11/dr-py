@@ -210,7 +210,11 @@ async function _renewAll(): Promise<void> {
 /** Fetch role + lock TTL from /open and adopt them. */
 export async function loadProjectInfo(cfg?: ClientConfig): Promise<void> {
 	const info = await openProject(cfg ?? _clientConfig);
-	setProjectInfo({ role: info.role, lockTtlSeconds: info.lock_ttl_seconds, strictMode: info.strict_mode });
+	setProjectInfo({
+		role: info.role,
+		lockTtlSeconds: info.lock_ttl_seconds,
+		strictMode: info.strict_mode
+	});
 }
 
 export function getStaleResources(): string[] {

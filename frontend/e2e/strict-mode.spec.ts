@@ -95,9 +95,7 @@ test('Strict mode: commit is blocked when on, enabled when off', async ({ page }
 	await expect(diffDrawer.getByText(/loading changes/i)).toBeHidden({ timeout: 30_000 });
 
 	// Assert the strict-mode alert is shown.
-	await expect(
-		diffDrawer.getByText(/strict mode is on/i)
-	).toBeVisible({ timeout: 20_000 });
+	await expect(diffDrawer.getByText(/strict mode is on/i)).toBeVisible({ timeout: 20_000 });
 
 	// Assert the Commit button is disabled (commitBlocked = true when wouldBlock).
 	const commitBtn = diffDrawer.getByRole('button', { name: /^Commit/ });

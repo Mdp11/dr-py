@@ -8,7 +8,15 @@ vi.mock('$lib/state', async (orig) => {
 	return {
 		...actual,
 		getStagedDiff: vi.fn(() => ({
-			elements: [{ id: 'e1', type_name: 'Node', status: 'added', before: null, after: { id: 'e1', type_name: 'Node', properties: {}, rev: 1 } }],
+			elements: [
+				{
+					id: 'e1',
+					type_name: 'Node',
+					status: 'added',
+					before: null,
+					after: { id: 'e1', type_name: 'Node', properties: {}, rev: 1 }
+				}
+			],
 			relationships: [],
 			counts: { added: 1, modified: 0, deleted: 0 }
 		})),
