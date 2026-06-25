@@ -1,0 +1,78 @@
+# Local infrastructure for the production-faithful stack: Postgres (tenancy +
+# content + commit journal, schema owned by Alembic) and a GCS-protocol blob
+# store (fake-gcs-server) for model snapshots. The backend and frontend run via
+# pixi (`pixi run start-backend` / `start-frontend`) against these services.
+#
+#   pixi run services-up      # start + wait for healthy, create the bucket
+#   pixi run services-down    # stop (keeps data volumes)
+#   pixi run services-reset   # stop + wipe data volumes
+#
+# Both services match the app defaults: Postgres at the default DATA_ROVER_
+# DATABASE_URL, fake-gcs reachable at http://localhost:4443 with the
+# `data-rover-snapshots` bucket. Data persists in named volumes across restarts.
+name: data-rover
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: data-rover-pg
+    environment:
+      POSTGRES_USER: data_rover
+      POSTGRES_PASSWORD: data_rover
+      POSTGRES_DB: data_rover
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U data_rover -d data_rover"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  # fake-gcs-server with the filesystem backend so snapshot blobs survive a
+  # container restart (mirrors real GCS durability). Buckets/objects live in the
+  # gcsdata volume under /storage.
+  fake-gcs:
+    image: fsouza/fake-gcs-server
+    container_name: data-rover-fakegcs
+    command:
+      - "-scheme"
+      - "http"
+      - "-port"
+      - "4443"
+      - "-public-host"
+      - "localhost:4443"
+      - "-backend"
+      - "filesystem"
+      - "-data"
+      - "/storage"
+    ports:
+      - "4443:4443"
+    volumes:
+      - gcsdata:/storage
+
+  # One-shot: wait for fake-gcs, then create the snapshot bucket (idempotent —
+  # a 409 if it already exists from the persisted volume is harmless). The store
+  # does NOT auto-create the bucket, so this must run before the backend writes.
+  gcs-init:
+    image: curlimages/curl:latest
+    container_name: data-rover-gcs-init
+    depends_on:
+      - fake-gcs
+    restart: "no"
+    entrypoint:
+      - "sh"
+      - "-c"
+      - |
+        until curl -s -o /dev/null http://fake-gcs:4443/storage/v1/b?project=data-rover; do
+          echo "waiting for fake-gcs..."; sleep 1;
+        done
+        curl -s -X POST 'http://fake-gcs:4443/storage/v1/b?project=data-rover' \
+          -H 'Content-Type: application/json' \
+          -d '{"name":"data-rover-snapshots"}'
+        echo "bucket ready"
+
+volumes:
+  pgdata:
+  gcsdata:
