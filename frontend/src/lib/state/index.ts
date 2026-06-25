@@ -34,6 +34,7 @@ export {
 	getIssueCounts,
 	getIssuesByOwner,
 	getModelError,
+	getMissingElementIds,
 	getModelGeneration,
 	getModelRev,
 	getModelSummary,

@@ -13,6 +13,7 @@ import {
 	getCachedRelationships,
 	getIssueCounts,
 	getIssuesByOwner,
+	getMissingElementIds,
 	getModelError,
 	getModelRev,
 	getModelSummary,
@@ -616,5 +617,40 @@ describe('ensureElements (batched)', () => {
 			})
 		);
 		await expect(ensureElements(['a', 'tmp_1'])).resolves.toBeUndefined();
+	});
+
+	it('records ids the server omits as confirmed-missing and never re-requests them', async () => {
+		const bodies: string[][] = [];
+		server.use(
+			http.post(`${BASE}/model/elements/batch`, async ({ request }) => {
+				const { ids } = (await request.json()) as { ids: string[] };
+				bodies.push(ids);
+				// 'gone' does not exist -> server omits it from the response.
+				return HttpResponse.json({ items: ids.filter((id) => id !== 'gone').map((id) => el(id)) });
+			})
+		);
+
+		await ensureElements(['a', 'gone']);
+		expect([...getMissingElementIds()]).toEqual(['gone']);
+		expect(getCachedElements().has('a')).toBe(true);
+
+		// A second pass must NOT re-request the known-missing id (only the still-
+		// uncached 'b' goes out).
+		await ensureElements(['gone', 'b']);
+		expect(bodies).toEqual([['a', 'gone'], ['b']]);
+	});
+
+	it('un-marks a missing id once it reappears via a delta (restore/create)', async () => {
+		server.use(
+			http.post(`${BASE}/model/elements/batch`, async ({ request }) => {
+				const { ids } = (await request.json()) as { ids: string[] };
+				return HttpResponse.json({ items: ids.filter((id) => id !== 'gone').map((id) => el(id)) });
+			})
+		);
+		await ensureElements(['gone']);
+		expect(getMissingElementIds().has('gone')).toBe(true);
+
+		applyDelta(delta({ model_rev: 1, changed_elements: [el('gone')] }));
+		expect(getMissingElementIds().has('gone')).toBe(false);
 	});
 });

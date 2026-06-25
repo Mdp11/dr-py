@@ -60,13 +60,37 @@ describe('flattenVisibleRows', () => {
 });
 
 describe('computeVisibility treats unloaded element bodies as tentatively visible', () => {
-	it('keeps a folder with only an unknown placed id as a (visible) stub', () => {
+	it('keeps a folder with an unfetched placed id full (the id renders as a skeleton child)', () => {
+		// An uncached placed id is NOT yet known to be missing — it is just not
+		// fetched. The folder must stay full and show the id as a skeleton row so
+		// the windowed body fetch can hydrate it in place (was: dropped -> stub).
+		const view: View = {
+			name: 'v',
+			folders: [{ name: 'F', folders: [], elements: ['pending'] }]
+		};
+		const byId = new Map<string, Element>();
+		const tree = buildUnifiedTree(view, [], byId, new Map(), new Set(), displayName);
+		expect(tree.children.get(folderKey(['F']))).toEqual(['pending']);
+		const vis = computeVisibility(tree, byId, new Set(['Block']));
+		expect(vis.get(folderKey(['F']))).toBe('full');
+		expect(vis.get('pending')).toBe('full'); // skeleton, tentatively visible
+	});
+
+	it('collapses to a stub once the only placed id is confirmed missing', () => {
 		const view: View = {
 			name: 'v',
 			folders: [{ name: 'F', folders: [], elements: ['ghost'] }]
 		};
 		const byId = new Map<string, Element>();
-		const tree = buildUnifiedTree(view, [], byId, new Map(), new Set(), displayName);
+		const tree = buildUnifiedTree(
+			view,
+			[],
+			byId,
+			new Map(),
+			new Set(),
+			displayName,
+			new Set(['ghost'])
+		);
 		const vis = computeVisibility(tree, byId, new Set(['Block']));
 		expect(vis.get(folderKey(['F']))).toBe('stub');
 	});

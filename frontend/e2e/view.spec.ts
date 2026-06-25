@@ -63,7 +63,10 @@ test('load a view: folders render with their placed elements (curated scope)', a
 
 	const treeEl = page.getByRole('tree', { name: /containment tree/i });
 	await expect(treeEl.getByText('Grouped')).toBeVisible();
-	// Alpha is placed in the 'Grouped' folder -> shows under it.
+	// Folders default collapsed: Alpha is not shown until 'Grouped' is expanded.
+	await expect(treeEl.getByText('Alpha')).toHaveCount(0);
+	await expandFolder(page, 'Grouped');
+	// Alpha is placed in the 'Grouped' folder -> shows under it once expanded.
 	await expect(treeEl.getByText('Alpha')).toBeVisible();
 
 	// Beta is unplaced -> it lives in the "Not in view" pool, which is a separate
@@ -142,6 +145,12 @@ async function expandPool(page: Page): Promise<void> {
 	await expect(pool(page)).toBeVisible();
 }
 
+/** Expand a folder row by name (folders default COLLAPSED). No-op if already open. */
+async function expandFolder(page: Page, name: string): Promise<void> {
+	const expander = row(page, name).getByRole('button', { name: 'Expand' });
+	if (await expander.count()) await expander.click();
+}
+
 /** Resolves with the next PUT to /view/snapshot (the curation persistence call). */
 function viewPut(page: Page): Promise<Request> {
 	return page.waitForRequest((r) => r.method() === 'PUT' && r.url().endsWith('/view/snapshot'));
@@ -207,7 +216,8 @@ test('view curation: include a pooled element into a folder (persists across rel
 	const body = (await put).postDataJSON() as { folders: Folder[] };
 	expect(findFolder(body.folders, 'Grouped')!.elements).toContain(BLOCK_TWO_ID);
 
-	// Beta is now placed under Grouped (folders are not lazily paged).
+	// Beta is now placed under Grouped (folders are not lazily paged); expand to see it.
+	await expandFolder(page, 'Grouped');
 	await expect(t.getByText('Beta')).toBeVisible();
 
 	// Persistence: the backend session holds the pushed view across a reload.
@@ -223,12 +233,14 @@ test('view curation: include a pooled element into a folder (persists across rel
 
 	const t2 = tree(page);
 	await expect(t2.getByText('Grouped')).toBeVisible();
+	await expandFolder(page, 'Grouped');
 	await expect(t2.getByText('Beta')).toBeVisible();
 });
 
 test('view curation: exclude a placed element back to the pool', async ({ page }) => {
 	test.setTimeout(120_000);
 	await loadView(page);
+	await expandFolder(page, 'Grouped'); // folders default collapsed; reveal Alpha to drag it
 
 	// Exclude: drag Alpha from Grouped onto the "Not in view" panel header.
 	const put = viewPut(page);
@@ -254,6 +266,7 @@ test('view curation: reorder elements within a folder (upward)', async ({ page }
 		BLOCK_ONE_ID,
 		BLOCK_TWO_ID
 	]);
+	await expandFolder(page, 'Grouped'); // reveal Alpha + Beta rows for the reorder drag
 	await expect(tree(page).getByText('Beta')).toBeVisible();
 
 	// Reorder UP: drag the SECOND element (Beta) onto the TOP half of the FIRST
@@ -285,6 +298,7 @@ test('view curation: search result dragged into a folder is placed there', async
 	const body = (await put).postDataJSON() as { folders: Folder[] };
 	expect(findFolder(body.folders, 'Grouped')!.elements).toContain(BLOCK_TWO_ID);
 
+	await expandFolder(page, 'Grouped');
 	await expect(tree(page).getByText('Beta')).toBeVisible();
 });
 
@@ -305,6 +319,7 @@ test('change badge increments on view edit, tooltip shows View row, Save dialog 
 
 	// Make a view edit: drag Alpha (placed in Grouped) onto the pool header to
 	// exclude it.  This is the same mechanism used by the "exclude" curation test.
+	await expandFolder(page, 'Grouped'); // folders default collapsed; reveal Alpha to drag it
 	const put = viewPut(page);
 	await dragRowOnto(page, row(page, 'Alpha'), poolHeader(page));
 	await put; // wait for the PUT /view/snapshot to complete
