@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import threading
 import time
 from contextlib import asynccontextmanager, suppress
@@ -9,8 +10,9 @@ from typing import AsyncIterator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from . import importer
-from .db import create_all, init_engine
+from . import importer, tenancy
+from .db import create_all, db_session, init_engine
+from .db_models import Role
 from .errors import register_exception_handlers
 from .feed import lock_event
 from .routes import (
@@ -32,7 +34,7 @@ from .routes import (
     view,
 )
 from .session import get_registry, install_persistent_registry
-from .settings import get_settings
+from .settings import Settings, get_settings
 from .storage import build_store_from_settings, set_snapshot_store
 
 DEV_USER_ID = "default-user"
@@ -40,22 +42,67 @@ DEV_PROJECT_ID = "default"
 _EXAMPLES = Path(__file__).resolve().parents[3] / "examples"
 
 
-def _ensure_dev_seed(database_url: str) -> None:
-    """SQLite/dev only: create the schema and import the smart-city example as
-    the ``default`` project so the single-user frontend opens a real model.
+def _seed_artifact(configured: str, default_name: str) -> Path:
+    """Resolve a dev-seed artifact path: the configured path (CWD-relative) if
+    set, else the bundled ``examples/smart-city.*`` fallback."""
+    return Path(configured) if configured else (_EXAMPLES / default_name)
 
-    Idempotent (the importer no-ops if the project exists). Gated by
+
+def _provision_dev_users(users_file: str) -> None:
+    """Provision extra dev users as members of the seeded ``default`` project
+    from a JSON file (``DATA_ROVER_DEV_USERS_FILE``), so local multi-user
+    testing needs no manual member calls. Idempotent (upserts users +
+    memberships); runs even when the project already exists. Skips silently if
+    no path is configured or the file is absent. Dev-only — the caller is gated
+    by ``settings.dev_seed``.
+
+    File shape: ``{"users": [{"id": "alice", "email": "a@x", "role": "editor"}]}``
+    (a bare list of user objects is also accepted). ``role`` defaults to
+    ``editor``; ``email`` defaults to ``<id>@example.com``."""
+    if not users_file:
+        return
+    path = Path(users_file)
+    if not path.exists():
+        return
+    data = json.loads(path.read_text("utf-8"))
+    users = data.get("users", []) if isinstance(data, dict) else data
+    if not users:
+        return
+    with db_session() as s:
+        for entry in users:
+            uid = entry["id"]
+            email = entry.get("email") or f"{uid}@example.com"
+            role = Role(entry.get("role", "editor"))
+            tenancy.upsert_user(s, uid, email)
+            tenancy.add_member(s, DEV_PROJECT_ID, uid, role)
+    print(f"[dev-seed] provisioned {len(users)} user(s) from {path}")
+
+
+def _ensure_dev_seed(settings: Settings) -> None:
+    """Dev/SQLite only: create the schema, import the configured seed model as
+    the ``default`` project, and provision any extra dev users so the frontend
+    opens a real model and local multi-user testing works out of the box.
+
+    The seed model defaults to the bundled smart-city example but is overridable
+    via ``DATA_ROVER_SEED_METAMODEL`` / ``_MODEL`` / ``_VIEW``. Idempotent (the
+    importer no-ops if the project exists; user provisioning upserts). Gated by
     ``settings.dev_seed`` — MUST be false in production."""
-    if database_url.startswith("sqlite"):
+    if settings.database_url.startswith("sqlite"):
         create_all()
+    view_path = _seed_artifact(settings.seed_view, "smart-city.view.json")
     importer.import_project(
         project_id=DEV_PROJECT_ID,
         name="Smart City",
         owner_id=DEV_USER_ID,
-        metamodel_yaml=(_EXAMPLES / "smart-city.metamodel.yaml").read_text("utf-8"),
-        model_json=(_EXAMPLES / "smart-city.model.json").read_text("utf-8"),
-        view_json=(_EXAMPLES / "smart-city.view.json").read_text("utf-8"),
+        metamodel_yaml=_seed_artifact(
+            settings.seed_metamodel, "smart-city.metamodel.yaml"
+        ).read_text("utf-8"),
+        model_json=_seed_artifact(
+            settings.seed_model, "smart-city.model.json"
+        ).read_text("utf-8"),
+        view_json=view_path.read_text("utf-8") if view_path.exists() else None,
     )
+    _provision_dev_users(settings.dev_users_file)
 
 
 def _idle_sweep_once(now: float, ttl: float) -> list[str]:
@@ -101,7 +148,11 @@ def _sweep_expired_locks(now: float) -> int:
                 lock_event(
                     "expired",
                     [
-                        {"resource_id": le.resource_id, "mode": le.mode.value, "holder_id": le.holder}
+                        {
+                            "resource_id": le.resource_id,
+                            "mode": le.mode.value,
+                            "holder_id": le.holder,
+                        }
                         for le in expired
                     ],
                 )
@@ -129,16 +180,20 @@ def create_app() -> FastAPI:
     set_snapshot_store(build_store_from_settings(settings))
     install_persistent_registry()
     if settings.dev_seed:
-        _ensure_dev_seed(settings.database_url)
+        _ensure_dev_seed(settings)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         idle_thread = idle_stop = None
         if settings.idle_evict_seconds > 0:
-            idle_thread, idle_stop = _start_idle_sweeper(float(settings.idle_evict_seconds))
+            idle_thread, idle_stop = _start_idle_sweeper(
+                float(settings.idle_evict_seconds)
+            )
         lock_thread = lock_stop = None
         if settings.lock_sweep_seconds > 0:
-            lock_thread, lock_stop = _start_lock_sweeper(float(settings.lock_sweep_seconds))
+            lock_thread, lock_stop = _start_lock_sweeper(
+                float(settings.lock_sweep_seconds)
+            )
         try:
             yield
         finally:
