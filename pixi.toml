@@ -50,6 +50,26 @@ default-environment = "api"
 cmd = "docker run --rm -p 4443:4443 fsouza/fake-gcs-server -scheme http -port 4443 -public-host localhost:4443"
 default-environment = "api"
 
+# Local infra stack (Postgres + GCS emulator) via docker-compose.yml. Requires
+# Docker. `services-up` blocks until Postgres is healthy and the snapshot bucket
+# exists, so `db-upgrade` and `start-backend` can run straight after.
+[feature.api.tasks.services-up]
+cmd = "docker compose up -d --wait"
+default-environment = "api"
+
+[feature.api.tasks.services-down]
+cmd = "docker compose down"
+default-environment = "api"
+
+# Stop and wipe the Postgres + snapshot data volumes for a clean slate.
+[feature.api.tasks.services-reset]
+cmd = "docker compose down -v"
+default-environment = "api"
+
+[feature.api.tasks.services-logs]
+cmd = "docker compose logs -f"
+default-environment = "api"
+
 [feature.core-dev.tasks.test-core]
 cmd = "pytest"
 default-environment = "core-dev"
