@@ -20,6 +20,7 @@ import { test, expect } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { loadFiles } from './helpers/load';
+import { openDefaultProject } from './helpers/auth';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const METAMODEL_PATH = join(__dirname, '..', '..', 'examples', 'example.metamodel.yaml');
@@ -39,7 +40,7 @@ test.beforeEach(async ({ page }) => {
 test('Strict mode: commit is blocked when on, enabled when off', async ({ page }) => {
 	test.setTimeout(240_000);
 
-	await page.goto('/');
+	await openDefaultProject(page);
 
 	// Wait for the live feed before interacting.
 	await expect(page.getByText('live')).toBeVisible({ timeout: 120_000 });

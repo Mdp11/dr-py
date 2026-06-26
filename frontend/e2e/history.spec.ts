@@ -20,6 +20,7 @@ import { test, expect } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { loadFiles } from './helpers/load';
+import { openDefaultProject } from './helpers/auth';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const METAMODEL_PATH = join(__dirname, '..', '..', 'examples', 'example.metamodel.yaml');
@@ -39,7 +40,7 @@ test.beforeEach(async ({ page }) => {
 test('History: list, diff, and revert a commit', async ({ page }) => {
 	test.setTimeout(240_000);
 
-	await page.goto('/');
+	await openDefaultProject(page);
 
 	// Wait for the live feed before interacting — the dev-seeded smart-city model
 	// hydrates on first access and the frontend eagerly loads the containment tree.

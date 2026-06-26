@@ -18,12 +18,15 @@ export interface ApiFetchInit extends Omit<RequestInit, 'body'> {
 	query?: Record<string, string | number | boolean | undefined | null>;
 }
 
-// Project-scoped default base URL, set once per workspace from the [projectId]
-// route param (see state/active-project.svelte.ts). Non-project-scoped calls
-// (auth/admin/projects-list) pass an explicit { baseUrl: '/api/v1' }. The
-// hardcoded fallback only matters before any project is active (e.g. the very
-// first boot before routing resolves).
-const FALLBACK_BASE_URL = '/api/v1/projects/default';
+// Project-scoped base URL, set once per workspace from the [projectId] route
+// param (see state/active-project.svelte.ts). Non-project-scoped calls
+// (auth/admin/projects-list) pass an explicit { baseUrl: '/api/v1' }. Under the
+// auth flow the active project is always selected (via the picker →
+// /p/[projectId]) before any project-scoped call fires. The fallback is the
+// non-project API root, NOT a hardcoded "default" project: if a project-scoped
+// call ever fires before a project is active it 404s loudly instead of being
+// silently routed at a phantom default project (no dev-identity coupling).
+const FALLBACK_BASE_URL = '/api/v1';
 let _activeBaseUrl: string | null = null;
 
 /** Set the project-scoped base URL used by calls that pass no per-call baseUrl. */
