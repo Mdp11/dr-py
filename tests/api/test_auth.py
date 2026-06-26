@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
-
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -9,8 +7,10 @@ from starlette.requests import HTTPConnection
 
 from data_rover.api import auth, db, tenancy
 from data_rover.api.db_models import User
-from data_rover.api.identity import CookieIdentityProvider, Identity, set_identity_provider
+from data_rover.api.identity import CookieIdentityProvider, Identity
 from data_rover.api.main import create_app
+
+pytestmark = pytest.mark.usefixtures("cookie_provider")
 
 
 def test_user_has_auth_columns() -> None:
@@ -73,23 +73,9 @@ def test_cookie_provider_rejects_missing_cookie() -> None:
 
 # ---------------------------------------------------------------------------
 # Route tests — use an in-process TestClient per test (no external server).
-# The _cookie_provider autouse fixture pins the identity provider to cookie
-# mode for every test in this module and restores it afterwards.
+# The module-level pytestmark applies the conftest ``cookie_provider`` fixture
+# to every test in this module (cookie identity mode, real JWT secret).
 # ---------------------------------------------------------------------------
-
-
-@pytest.fixture(autouse=True)
-def _cookie_provider(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    monkeypatch.setenv("DATA_ROVER_IDENTITY_PROVIDER", "cookie")
-    # a real secret so create_app()'s cookie provider works without the
-    # insecure-default guard tripping (tests run with dev_seed=false).
-    monkeypatch.setenv("DATA_ROVER_JWT_SECRET", "test-secret-not-the-default")
-    # TestClient uses plain HTTP; Secure cookies are dropped unless we disable
-    # the flag so the httpx client sends the session cookie on every request.
-    monkeypatch.setenv("DATA_ROVER_AUTH_COOKIE_SECURE", "false")
-    set_identity_provider(None)  # rebuild from the patched setting
-    yield
-    set_identity_provider(None)
 
 
 def _client() -> TestClient:

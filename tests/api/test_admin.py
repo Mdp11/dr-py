@@ -6,9 +6,10 @@ from fastapi.testclient import TestClient
 
 from data_rover.api import auth, db, tenancy
 from data_rover.api.authz import require_admin
-from data_rover.api.db_models import User as UserModel
-from data_rover.api.identity import set_identity_provider
+from data_rover.api.db_models import Role, User as UserModel
 from data_rover.api.main import create_app
+
+pytestmark = pytest.mark.usefixtures("cookie_provider")
 
 
 def _session():
@@ -58,20 +59,10 @@ def test_require_admin_allows_admin_and_blocks_others() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Route tests (cookie auth)
+# Route tests (cookie auth — cookie_provider fixture applied module-wide via pytestmark)
 # ---------------------------------------------------------------------------
 
 CSRF = {"x-requested-with": "data-rover"}
-
-
-@pytest.fixture(autouse=True)
-def _cookie_provider(monkeypatch):
-    monkeypatch.setenv("DATA_ROVER_IDENTITY_PROVIDER", "cookie")
-    monkeypatch.setenv("DATA_ROVER_JWT_SECRET", "test-secret-not-the-default")
-    monkeypatch.setenv("DATA_ROVER_AUTH_COOKIE_SECURE", "false")
-    set_identity_provider(None)
-    yield
-    set_identity_provider(None)
 
 
 def _seed_admin(email="admin@x", pw="pw"):
@@ -127,3 +118,101 @@ def test_non_admin_blocked_403() -> None:
     c = TestClient(create_app())
     c.post("/api/v1/auth/login", json={"email": "joe@x", "password": "pw123456"})
     assert c.get("/api/v1/admin/users").status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Membership route tests
+# ---------------------------------------------------------------------------
+
+
+def _setup_project() -> tuple[str, str]:
+    """Create a project owned by admin@x (call after _as_admin seeds the user).
+    Returns (project_id, admin_user_id).
+    """
+    gen = db.get_db()
+    s = next(gen)
+    try:
+        admin = tenancy.get_user_by_email(s, "admin@x")
+        assert admin is not None
+        project = tenancy.create_project(s, "P1", admin.id)
+        return project.id, admin.id
+    finally:
+        gen.close()
+
+
+def test_list_members_returns_owner() -> None:
+    """GET /admin/projects/{pid}/members returns the seeded project owner."""
+    c = _as_admin()
+    pid, admin_id = _setup_project()
+    r = c.get(f"/api/v1/admin/projects/{pid}/members")
+    assert r.status_code == 200
+    members = r.json()
+    assert len(members) == 1
+    assert members[0]["user_id"] == admin_id
+    assert members[0]["role"] == "owner"
+
+
+def test_add_member_201_and_unknown_user_404() -> None:
+    """POST adds a member (201) and returns 404 for an unknown user_id."""
+    c = _as_admin()
+    pid, _ = _setup_project()
+
+    # unknown user → 404
+    assert (
+        c.post(
+            f"/api/v1/admin/projects/{pid}/members",
+            json={"user_id": "no-such-user", "role": "viewer"},
+            headers=CSRF,
+        ).status_code
+        == 404
+    )
+
+    # seed a viewer and add them to the project → 201
+    gen = db.get_db()
+    s = next(gen)
+    try:
+        viewer = tenancy.create_user(s, "viewer@x", "pw", is_admin=False)
+        viewer_id = viewer.id
+    finally:
+        gen.close()
+
+    r = c.post(
+        f"/api/v1/admin/projects/{pid}/members",
+        json={"user_id": viewer_id, "role": "viewer"},
+        headers=CSRF,
+    )
+    assert r.status_code == 201
+    assert r.json()["role"] == "viewer"
+    assert r.json()["user_id"] == viewer_id
+
+
+def test_remove_member_204_and_last_owner_422() -> None:
+    """DELETE removes a member (204); removing the sole owner returns 422."""
+    c = _as_admin()
+    pid, admin_id = _setup_project()
+
+    # add a viewer so there is someone to remove first
+    gen = db.get_db()
+    s = next(gen)
+    try:
+        viewer = tenancy.create_user(s, "viewer@x", "pw", is_admin=False)
+        viewer_id = viewer.id
+        tenancy.add_member(s, pid, viewer_id, Role.viewer)
+    finally:
+        gen.close()
+
+    # remove the viewer → 204
+    assert (
+        c.delete(
+            f"/api/v1/admin/projects/{pid}/members/{viewer_id}", headers=CSRF
+        ).status_code
+        == 204
+    )
+
+    # attempt to remove the sole remaining owner → 422
+    assert (
+        c.delete(
+            f"/api/v1/admin/projects/{pid}/members/{admin_id}", headers=CSRF
+        ).status_code
+        == 422
+    )
