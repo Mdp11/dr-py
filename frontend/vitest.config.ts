@@ -20,7 +20,10 @@ export default defineConfig({
 			// SvelteKit runtime modules are not available in vitest (no Kit
 			// plugin here); stub them so component tests can import components
 			// that use $app/* without a real SvelteKit server.
-			'$app/paths': fileURLToPath(new URL('./src/__mocks__/app-paths.ts', import.meta.url))
+			'$app/paths': fileURLToPath(new URL('./src/__mocks__/app-paths.ts', import.meta.url)),
+			'$app/navigation': fileURLToPath(
+				new URL('./src/__mocks__/app-navigation.ts', import.meta.url)
+			)
 		}
 	},
 	test: {
