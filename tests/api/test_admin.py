@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import pytest
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 
 from data_rover.api import auth, db, tenancy
 from data_rover.api.authz import require_admin
 from data_rover.api.db_models import User as UserModel
+from data_rover.api.identity import set_identity_provider
+from data_rover.api.main import create_app
 
 
 def _session():
@@ -52,3 +55,75 @@ def test_require_admin_allows_admin_and_blocks_others() -> None:
     with pytest.raises(HTTPException) as ei:
         require_admin(user=normal)
     assert ei.value.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Route tests (cookie auth)
+# ---------------------------------------------------------------------------
+
+CSRF = {"x-requested-with": "data-rover"}
+
+
+@pytest.fixture(autouse=True)
+def _cookie_provider(monkeypatch):
+    monkeypatch.setenv("DATA_ROVER_IDENTITY_PROVIDER", "cookie")
+    monkeypatch.setenv("DATA_ROVER_JWT_SECRET", "test-secret-not-the-default")
+    monkeypatch.setenv("DATA_ROVER_AUTH_COOKIE_SECURE", "false")
+    set_identity_provider(None)
+    yield
+    set_identity_provider(None)
+
+
+def _seed_admin(email="admin@x", pw="pw"):
+    gen = db.get_db()
+    s = next(gen)
+    try:
+        tenancy.create_user(s, email, pw, is_admin=True)
+    finally:
+        gen.close()
+
+
+def _as_admin() -> TestClient:
+    _seed_admin()
+    c = TestClient(create_app())
+    c.post("/api/v1/auth/login", json={"email": "admin@x", "password": "pw"})
+    return c
+
+
+def test_admin_can_create_list_patch_delete_user() -> None:
+    c = _as_admin()
+    r = c.post(
+        "/api/v1/admin/users",
+        json={"email": "bob@x", "password": "secret12", "is_admin": False},
+        headers=CSRF,
+    )
+    assert r.status_code == 201, r.text
+    uid = r.json()["id"]
+    assert any(u["email"] == "bob@x" for u in c.get("/api/v1/admin/users").json())
+    assert (
+        c.patch(
+            f"/api/v1/admin/users/{uid}", json={"is_admin": True}, headers=CSRF
+        ).status_code
+        == 200
+    )
+    assert c.delete(f"/api/v1/admin/users/{uid}", headers=CSRF).status_code == 204
+
+
+def test_create_user_duplicate_email_409() -> None:
+    c = _as_admin()
+    body = {"email": "bob@x", "password": "secret12", "is_admin": False}
+    assert c.post("/api/v1/admin/users", json=body, headers=CSRF).status_code == 201
+    assert c.post("/api/v1/admin/users", json=body, headers=CSRF).status_code == 409
+
+
+def test_non_admin_blocked_403() -> None:
+    _seed_admin()
+    gen = db.get_db()
+    s = next(gen)
+    try:
+        tenancy.create_user(s, "joe@x", "pw123456", is_admin=False)
+    finally:
+        gen.close()
+    c = TestClient(create_app())
+    c.post("/api/v1/auth/login", json={"email": "joe@x", "password": "pw123456"})
+    assert c.get("/api/v1/admin/users").status_code == 403
