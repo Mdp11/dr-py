@@ -1,31 +1,48 @@
-"""Project + membership CRUD.
+"""Project CRUD.
 
 These are the only non-project-scoped data routes: they live at ``/api/v1``
 (not under ``/projects/{project_id}``) because creating/listing projects can't
-require an existing project. Member-management ops are owner-only
-(``require_owner``); reads require any membership (``require_membership``).
-Role updates are an upsert via ``POST .../members`` (a PATCH endpoint is not in
-the Phase 2 scope).
+require an existing project.
+
+Project creation, deletion, and membership management are all centralized under
+the global admin role (``require_admin``); per-project member routes no longer
+live here — membership management lives in ``routes/admin.py``. Reads of a single
+project still require membership (``require_membership``); listing is
+admin-sees-all, otherwise scoped to the caller's own projects.
 """
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+import json
+import uuid
+
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Response,
+    UploadFile,
+)
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from .. import tenancy
-from ..authz import require_membership, require_owner
+from data_rover.core.metamodel.loader import load_metamodel_str
+
+from .. import importer, tenancy
+from ..authz import require_admin, require_membership
 from ..db import get_db
 from ..db_models import Membership, Project, Role, User
 from ..identity import get_current_user
 from ..session import get_registry
+from ._snapshot import build_model_from_dicts
 
 router = APIRouter()
 
-
-class ProjectCreate(BaseModel):
-    name: str
+#: model JSON for a project created with no uploaded model (conforms to any
+#: metamodel — no entities to guard). build_model_from_dicts reads these as lists.
+EMPTY_MODEL_JSON = '{"elements": [], "relationships": []}'
 
 
 class ProjectOut(BaseModel):
@@ -34,37 +51,56 @@ class ProjectOut(BaseModel):
     role: Role
 
 
-class MemberIn(BaseModel):
-    user_id: str
-    email: str = ""
-    role: Role
-
-
-class MemberOut(BaseModel):
-    user_id: str
-    email: str
-    role: Role
-
-
-@router.post("/projects", response_model=ProjectOut, status_code=201)
-def create_project(
-    body: ProjectCreate,
-    user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-) -> ProjectOut:
-    project = tenancy.create_project(db, body.name, user.id)
-    return ProjectOut(id=project.id, name=project.name, role=Role.owner)
-
-
 @router.get("/projects", response_model=list[ProjectOut])
 def list_projects(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[ProjectOut]:
+    if user.is_admin:
+        return [
+            ProjectOut(id=p.id, name=p.name, role=Role.owner)
+            for p in tenancy.list_all_projects(db)
+        ]
     return [
         ProjectOut(id=p.id, name=p.name, role=role)
         for p, role in tenancy.list_projects_for_user(db, user.id)
     ]
+
+
+@router.post("/projects", response_model=ProjectOut, status_code=201)
+def create_project(
+    name: str = Form(...),
+    metamodel: UploadFile = File(...),
+    model: UploadFile | None = File(default=None),
+    view: UploadFile | None = File(default=None),
+    admin: User = Depends(require_admin),
+) -> ProjectOut:
+    metamodel_yaml = metamodel.file.read().decode("utf-8")
+    model_json = (
+        model.file.read().decode("utf-8") if model is not None else EMPTY_MODEL_JSON
+    )
+    view_json = view.file.read().decode("utf-8") if view is not None else None
+
+    # Pre-validate BEFORE import_project (which commits rows before it parses):
+    # a bad metamodel/model must 422 without leaving an orphan project.
+    try:
+        mm = load_metamodel_str(metamodel_yaml)
+        build_model_from_dicts(mm, json.loads(model_json))
+    except HTTPException:
+        raise  # build_model_from_dicts already raises 422 with a precise detail
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"invalid upload: {exc}") from exc
+
+    project_id = uuid.uuid4().hex
+    importer.import_project(
+        project_id=project_id,
+        name=name,
+        owner_id=admin.id,
+        metamodel_yaml=metamodel_yaml,
+        model_json=model_json,
+        view_json=view_json,
+    )
+    return ProjectOut(id=project_id, name=name, role=Role.owner)
 
 
 @router.get("/projects/{project_id}", response_model=ProjectOut)
@@ -85,48 +121,9 @@ def get_project(
 @router.delete("/projects/{project_id}", status_code=204)
 def delete_project(
     project_id: str,
-    _owner: Membership = Depends(require_owner),
+    _admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ) -> Response:
     tenancy.delete_project(db, project_id)
     get_registry().evict(project_id)  # drop the in-memory session, if any
-    return Response(status_code=204)
-
-
-@router.get("/projects/{project_id}/members", response_model=list[MemberOut])
-def list_members(
-    project_id: str,
-    _m: Membership = Depends(require_membership),
-    db: Session = Depends(get_db),
-) -> list[MemberOut]:
-    return [
-        MemberOut(user_id=m.user_id, email=m.user.email, role=m.role)
-        for m in tenancy.list_members(db, project_id)
-    ]
-
-
-@router.post(
-    "/projects/{project_id}/members", response_model=MemberOut, status_code=201
-)
-def add_member(
-    project_id: str,
-    body: MemberIn,
-    _owner: Membership = Depends(require_owner),
-    db: Session = Depends(get_db),
-) -> MemberOut:
-    user = tenancy.upsert_user(db, body.user_id, body.email)
-    m = tenancy.add_member(db, project_id, body.user_id, body.role)
-    # source email from the stored user row, so this matches what list_members
-    # returns (body.email may be "" or stale for an already-known user).
-    return MemberOut(user_id=m.user_id, email=user.email, role=m.role)
-
-
-@router.delete("/projects/{project_id}/members/{user_id}", status_code=204)
-def remove_member(
-    project_id: str,
-    user_id: str,
-    _owner: Membership = Depends(require_owner),
-    db: Session = Depends(get_db),
-) -> Response:
-    tenancy.remove_member(db, project_id, user_id)  # raises ValueError -> 422
     return Response(status_code=204)

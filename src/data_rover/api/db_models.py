@@ -15,11 +15,13 @@ from datetime import datetime, timezone
 from sqlalchemy import (
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     JSON,
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -45,6 +47,18 @@ class User(Base):
     """
 
     __tablename__ = "users"
+    __table_args__ = (
+        # Login email must be unique, but many users carry the "" sentinel
+        # (header/importer/dev users with no email claim) — so uniqueness is
+        # PARTIAL, enforced only for non-empty emails.
+        Index(
+            "uq_users_email_nonempty",
+            "email",
+            unique=True,
+            sqlite_where=text("email != ''"),
+            postgresql_where=text("email != ''"),
+        ),
+    )
 
     #: external identity subject id (stable across logins)
     id: Mapped[str] = mapped_column(String, primary_key=True)
@@ -52,6 +66,16 @@ class User(Base):
     #: rather than NULL to keep queries null-free. The default is ORM-level
     #: only — raw-SQL inserts must supply "" themselves (no server_default).
     email: Mapped[str] = mapped_column(String, default="", nullable=False)
+    #: Argon2id hash of the local password. NULL for users that authenticate
+    #: only via a future SSO provider (no local credential). The cookie auth
+    #: path rejects a NULL-hash user at login.
+    password_hash: Mapped[str | None] = mapped_column(String, nullable=True)
+    #: Global role. The single system-level permission (see authz.require_admin):
+    #: admins manage users, all project memberships, and create projects.
+    is_admin: Mapped[bool] = mapped_column(default=False, nullable=False)
+    #: Deactivation = revocation. An inactive user is rejected 401 on the next
+    #: request even with a still-valid JWT (identity layer re-checks per request).
+    is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
 
     memberships: Mapped[list[Membership]] = relationship(
         back_populates="user",

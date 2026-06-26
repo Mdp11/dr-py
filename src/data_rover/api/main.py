@@ -11,11 +11,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import importer, tenancy
+from .csrf import CSRFMiddleware
 from .db import create_all, db_session, init_engine
 from .db_models import Role
 from .errors import register_exception_handlers
 from .feed import lock_event
 from .routes import (
+    admin,
+    auth,
     change_request,
     commits,
     elements,
@@ -103,6 +106,45 @@ def _ensure_dev_seed(settings: Settings) -> None:
         view_json=view_path.read_text("utf-8") if view_path.exists() else None,
     )
     _provision_dev_users(settings.dev_users_file)
+    # dev convenience: a known admin login (overridden by BOOTSTRAP_ADMIN_* if set)
+    if not settings.bootstrap_admin_email:
+        with db_session() as s:
+            if tenancy.get_user_by_email(s, "admin@example.com") is None:
+                tenancy.create_user(s, "admin@example.com", "admin12345", is_admin=True)
+
+
+def _ensure_bootstrap_admin(settings: Settings) -> None:
+    """Idempotently ensure an admin exists (from DATA_ROVER_BOOTSTRAP_ADMIN_*),
+    so a fresh deploy has a first admin to log in as (admin-only provisioning
+    means no self-signup). Independent of dev_seed. No-op if email is unset."""
+    if not settings.bootstrap_admin_email:
+        return
+    with db_session() as s:
+        existing = tenancy.get_user_by_email(s, settings.bootstrap_admin_email)
+        if existing is None:
+            tenancy.create_user(
+                s,
+                settings.bootstrap_admin_email,
+                settings.bootstrap_admin_password,
+                is_admin=True,
+            )
+        elif not existing.is_admin:
+            tenancy.set_user_fields(s, existing.id, is_admin=True)
+
+
+def _guard_prod_secret(settings: Settings) -> None:
+    """Refuse to boot the cookie provider in a non-dev deploy still using the
+    insecure default JWT secret."""
+    insecure_default = "dev-insecure-secret-change-me"
+    if (
+        settings.identity_provider == "cookie"
+        and not settings.dev_seed
+        and settings.jwt_secret == insecure_default
+    ):
+        raise RuntimeError(
+            "DATA_ROVER_JWT_SECRET must be set when identity_provider=cookie "
+            "and dev_seed=false (refusing to sign tokens with the dev default)"
+        )
 
 
 def _idle_sweep_once(now: float, ttl: float) -> list[str]:
@@ -179,8 +221,10 @@ def create_app() -> FastAPI:
     init_engine(settings.database_url)
     set_snapshot_store(build_store_from_settings(settings))
     install_persistent_registry()
+    _guard_prod_secret(settings)
     if settings.dev_seed:
         _ensure_dev_seed(settings)
+    _ensure_bootstrap_admin(settings)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -219,7 +263,10 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(CSRFMiddleware)
     register_exception_handlers(app)
+    app.include_router(auth.router, prefix="/api/v1", tags=["auth"])
+    app.include_router(admin.router, prefix="/api/v1", tags=["admin"])
     app.include_router(health.router)
     app.include_router(projects.router, prefix="/api/v1", tags=["projects"])
     proj = "/api/v1/projects/{project_id}"

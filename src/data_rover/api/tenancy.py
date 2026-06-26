@@ -9,9 +9,10 @@ from __future__ import annotations
 import uuid
 
 from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, MultipleResultsFound
 from sqlalchemy.orm import Session, selectinload
 
+from .auth import hash_password
 from .db_models import Membership, Project, Role, User
 
 
@@ -40,6 +41,105 @@ def upsert_user(db: Session, user_id: str, email: str) -> User:
         user.email = email
         db.commit()
     return user
+
+
+def get_user_by_email(db: Session, email: str) -> User | None:
+    # email has no DB unique constraint yet (a unique index is a deferred
+    # follow-up). If two rows share an email, scalar_one_or_none() raises
+    # MultipleResultsFound; treat ambiguity as no-match so login degrades
+    # gracefully to 401 rather than 500.
+    try:
+        return db.execute(
+            select(User).where(User.email == email)
+        ).scalar_one_or_none()
+    except MultipleResultsFound:
+        return None
+
+
+def create_user(db: Session, email: str, password: str, is_admin: bool) -> User:
+    """Create an admin-provisioned local user. Raises ValueError on duplicate
+    email (the route maps it to 409). The id is a fresh uuid (decoupled from the
+    email so the email can change without breaking membership rows)."""
+    if get_user_by_email(db, email) is not None:
+        raise ValueError("email already in use")
+    user = User(
+        id=uuid.uuid4().hex,
+        email=email,
+        password_hash=hash_password(password),
+        is_admin=is_admin,
+    )
+    db.add(user)
+    db.commit()
+    return user
+
+
+def list_users(db: Session, q: str = "") -> list[User]:
+    stmt = select(User).order_by(User.email)
+    if q:
+        stmt = stmt.where(User.email.ilike(f"%{q}%"))
+    return list(db.execute(stmt).scalars())
+
+
+def _active_admin_count(db: Session) -> int:
+    """Count of users who are currently both admin and active."""
+    return db.execute(
+        select(func.count()).where(
+            User.is_admin.is_(True),
+            User.is_active.is_(True),
+        )
+    ).scalar_one()
+
+
+def set_user_fields(
+    db: Session,
+    user_id: str,
+    *,
+    is_admin: bool | None = None,
+    is_active: bool | None = None,
+    password: str | None = None,
+) -> User:
+    """Patch any subset of admin-editable fields.
+
+    Raises ``ValueError("unknown user")`` if the user does not exist (→ 404 in
+    the route), or ``ValueError("cannot demote or deactivate the last active
+    admin")`` if the patch would remove the sole active admin (→ 409).
+    """
+    user = db.get(User, user_id)
+    if user is None:
+        raise ValueError("unknown user")
+    # Guard: refuse to demote or deactivate the last active admin.  Check BEFORE
+    # mutating so the row is unchanged on failure.
+    currently_active_admin = bool(user.is_admin and user.is_active)
+    removing_admin_status = (is_admin is not None and not is_admin) or (
+        is_active is not None and not is_active
+    )
+    if currently_active_admin and removing_admin_status and _active_admin_count(db) <= 1:
+        raise ValueError("cannot demote or deactivate the last active admin")
+    if is_admin is not None:
+        user.is_admin = is_admin
+    if is_active is not None:
+        user.is_active = is_active
+    if password is not None:
+        user.password_hash = hash_password(password)
+    db.commit()
+    return user
+
+
+def delete_user(db: Session, user_id: str) -> None:
+    """Delete a user. Memberships cascade (DB FK); commits keep author_id via
+    SET NULL so model history survives the author leaving.
+
+    Raises ``ValueError("cannot delete the last active admin")`` if the target
+    is the sole remaining active admin (→ 409 in the route).
+    """
+    user = db.get(User, user_id)
+    if user is None:
+        return
+    # Guard: refuse to delete the last active admin (mirrors last-owner guard).
+    if user.is_admin and user.is_active and _active_admin_count(db) <= 1:
+        raise ValueError("cannot delete the last active admin")
+    db.delete(user)
+    db.commit()
 
 
 def create_project(db: Session, name: str, owner_id: str) -> Project:
@@ -77,6 +177,11 @@ def list_projects_for_user(db: Session, user_id: str) -> list[tuple[Project, Rol
         .where(Membership.user_id == user_id)
     ).all()
     return [(project, role) for project, role in rows]
+
+
+def list_all_projects(db: Session) -> list[Project]:
+    """Every project (admin view). Role is synthesized as owner by the caller."""
+    return list(db.execute(select(Project).order_by(Project.name)).scalars())
 
 
 def list_members(db: Session, project_id: str) -> list[Membership]:
