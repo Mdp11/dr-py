@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from data_rover.api import db
+import pytest
+
+from data_rover.api import auth, db
 from data_rover.api.db_models import User
 
 
@@ -19,3 +21,22 @@ def test_user_has_auth_columns() -> None:
         assert u.is_active is True  # default
     finally:
         gen.close()
+
+
+def test_password_hash_roundtrip() -> None:
+    h = auth.hash_password("hunter2")
+    assert h != "hunter2"
+    assert auth.verify_password("hunter2", h) is True
+    assert auth.verify_password("wrong", h) is False
+
+
+def test_token_roundtrip() -> None:
+    tok = auth.mint_token("u1", is_admin=True)
+    payload = auth.decode_token(tok)
+    assert payload["sub"] == "u1"
+    assert payload["is_admin"] is True
+
+
+def test_decode_rejects_garbage() -> None:
+    with pytest.raises(auth.TokenError):
+        auth.decode_token("not-a-jwt")
