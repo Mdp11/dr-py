@@ -10,11 +10,13 @@
 import { SvelteMap } from 'svelte/reactivity';
 import {
 	connectFeed,
+	defaultFeedUrl,
 	type FeedConfig,
 	type FeedConnection,
 	type FeedEvent,
 	type LeaseLite
 } from '$lib/api/feed';
+import { getActiveProjectId } from '$lib/state/active-project.svelte';
 import { applyDelta, getIssueCounts, getModelRev, refreshSummary } from './model.svelte';
 import type { OpsResponse } from '$lib/api/types';
 
@@ -124,7 +126,10 @@ export function handleFeedEvent(e: FeedEvent): void {
 
 export function startRealtime(config?: Partial<FeedConfig>): void {
 	if (_conn) return;
+	const pid = getActiveProjectId();
+	if (!pid) return; // no active project ⇒ no feed
 	_conn = connectFeed({
+		url: defaultFeedUrl(pid),
 		onEvent: handleFeedEvent,
 		onStatus: (c) => {
 			_connected = c;
