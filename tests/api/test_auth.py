@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import pytest
+from fastapi import HTTPException
+from starlette.requests import HTTPConnection
 
 from data_rover.api import auth, db
 from data_rover.api.db_models import User
+from data_rover.api.identity import CookieIdentityProvider, Identity
 
 
 def test_user_has_auth_columns() -> None:
@@ -42,11 +45,6 @@ def test_decode_rejects_garbage() -> None:
         auth.decode_token("not-a-jwt")
 
 
-from starlette.requests import HTTPConnection
-
-from data_rover.api.identity import CookieIdentityProvider, Identity
-
-
 def _conn_with_cookie(token: str) -> HTTPConnection:
     scope = {
         "type": "http",
@@ -64,5 +62,6 @@ def test_cookie_provider_identifies_valid_token() -> None:
 
 def test_cookie_provider_rejects_missing_cookie() -> None:
     conn = HTTPConnection({"type": "http", "headers": [], "query_string": b""})
-    with pytest.raises(Exception):  # HTTPException 401
+    with pytest.raises(HTTPException) as ei:
         CookieIdentityProvider("session").identify(conn)
+    assert ei.value.status_code == 401
