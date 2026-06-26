@@ -53,16 +53,17 @@ export interface FeedConnection {
 	close(): void;
 }
 
-// The feed authenticates via the session cookie set by the login flow.
-// The active project URL will be injected by the project store (Task 12);
-// this fallback is only used before routing resolves.
-export function defaultFeedUrl(): string {
+/** Same-origin WebSocket feed URL for a project. Identity travels on the
+ * httpOnly session cookie (browsers send it on the same-origin upgrade), so no
+ * query params are needed. */
+export function defaultFeedUrl(projectId: string): string {
 	const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-	return `${proto}//${location.host}/api/v1/projects/default/feed`;
+	return `${proto}//${location.host}/api/v1/projects/${projectId}/feed`;
 }
 
 export function connectFeed(config: FeedConfig): FeedConnection {
-	const url = config.url ?? defaultFeedUrl();
+	if (!config.url) throw new Error('connectFeed requires config.url');
+	const url: string = config.url;
 	const factory = config.socketFactory ?? ((u: string) => new WebSocket(u) as WebSocketLike);
 	const base = config.reconnect?.baseMs ?? 500;
 	const max = config.reconnect?.maxMs ?? 10_000;

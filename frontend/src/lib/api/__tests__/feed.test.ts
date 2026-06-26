@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { connectFeed, type FeedEvent, type WebSocketLike } from '../feed';
+import { connectFeed, defaultFeedUrl, type FeedEvent, type WebSocketLike } from '../feed';
+
+describe('defaultFeedUrl', () => {
+	it('is project-scoped and carries no identity query params', () => {
+		const url = defaultFeedUrl('proj-7');
+		expect(url).toContain('/api/v1/projects/proj-7/feed');
+		expect(url).not.toContain('x-user-id');
+	});
+});
 
 class FakeSocket implements WebSocketLike {
 	readyState = 0;
