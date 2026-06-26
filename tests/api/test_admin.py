@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import pytest
+from fastapi import HTTPException
 
 from data_rover.api import auth, db, tenancy
+from data_rover.api.authz import require_admin
+from data_rover.api.db_models import User as UserModel
 
 
 def _session():
@@ -40,3 +43,12 @@ def test_set_user_fields_and_list_and_delete() -> None:
     assert len(tenancy.list_users(s, q="zzz")) == 0
     tenancy.delete_user(s, u.id)
     assert tenancy.get_user_by_email(s, "a@x.com") is None
+
+
+def test_require_admin_allows_admin_and_blocks_others() -> None:
+    admin = UserModel(id="a", email="a@x", is_admin=True)
+    assert require_admin(user=admin) is admin
+    normal = UserModel(id="n", email="n@x", is_admin=False)
+    with pytest.raises(HTTPException) as ei:
+        require_admin(user=normal)
+    assert ei.value.status_code == 403
