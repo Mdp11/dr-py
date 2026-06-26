@@ -19,6 +19,7 @@ from fastapi import Depends, HTTPException
 from sqlalchemy.orm import Session
 from starlette.requests import HTTPConnection, Request
 
+from .auth import TokenError, decode_token
 from .db import get_db
 from .db_models import User
 from .settings import get_settings
@@ -58,17 +59,42 @@ class DevHeaderIdentityProvider:
         return Identity(user_id=user_id, email=email)
 
 
+class CookieIdentityProvider:
+    """Trusts a signed session JWT in an httpOnly cookie (local email+password
+    auth). Verification (signature + expiry) happens in ``auth.decode_token``;
+    the email claim is intentionally absent from the token (looked up from the
+    User row by ``get_current_user``), so Identity.email is "" here."""
+
+    def __init__(self, cookie_name: str) -> None:
+        self._cookie_name = cookie_name
+
+    def identify(self, conn: HTTPConnection) -> Identity:
+        token = conn.cookies.get(self._cookie_name)
+        if not token:
+            raise HTTPException(status_code=401, detail="missing session")
+        try:
+            payload = decode_token(token)
+        except TokenError as exc:
+            raise HTTPException(status_code=401, detail="invalid session") from exc
+        return Identity(user_id=str(payload["sub"]), email="")
+
+
 _provider: IdentityProvider | None = None
 
 
 def get_identity_provider() -> IdentityProvider:
-    """Return the process-wide provider, building the dev default on first use."""
+    """Return the process-wide provider, building the configured default on
+    first use. ``identity_provider`` selects cookie (local auth, default) or
+    header (gateway/tests)."""
     global _provider
     if _provider is None:
         settings = get_settings()
-        _provider = DevHeaderIdentityProvider(
-            settings.identity_user_header, settings.identity_email_header
-        )
+        if settings.identity_provider == "header":
+            _provider = DevHeaderIdentityProvider(
+                settings.identity_user_header, settings.identity_email_header
+            )
+        else:
+            _provider = CookieIdentityProvider(settings.auth_cookie_name)
     return _provider
 
 
@@ -84,10 +110,18 @@ def set_identity_provider(provider: IdentityProvider | None) -> None:
 
 
 def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
-    """Resolve and auto-provision the requesting user.
+    """Resolve the requesting user.
 
-    Auto-provision on first sight keeps the dev/gateway flow zero-setup; a
-    later SSO integration can pre-create users instead without changing this.
+    Header provider (gateway/dev/tests): auto-provision on first sight, keeping
+    that flow zero-setup. Cookie provider (local auth): the user MUST already
+    exist and be active — admin-only provisioning means there is no self-signup,
+    and ``is_active`` is the per-request revocation check.
     """
-    identity = get_identity_provider().identify(request)
+    provider = get_identity_provider()
+    identity = provider.identify(request)
+    if isinstance(provider, CookieIdentityProvider):
+        user = db.get(User, identity.user_id)
+        if user is None or not user.is_active:
+            raise HTTPException(status_code=401, detail="unknown or inactive user")
+        return user
     return upsert_user(db, identity.user_id, identity.email)

@@ -13,6 +13,9 @@ os.environ.setdefault("DATA_ROVER_DEV_SEED", "false")
 os.environ.setdefault("DATA_ROVER_SNAPSHOT_STORE", "memory")
 os.environ.setdefault("DATA_ROVER_IDLE_EVICT_SECONDS", "0")
 os.environ.setdefault("DATA_ROVER_LOCK_SWEEP_SECONDS", "0")
+# Pin all existing data tests to the header provider so they keep working after
+# the default flips to "cookie" in settings.py.
+os.environ.setdefault("DATA_ROVER_IDENTITY_PROVIDER", "header")
 
 from data_rover.api import db  # noqa: E402
 from data_rover.api import db_models  # noqa: E402,F401  (registers ORM tables)
@@ -42,6 +45,18 @@ def _fresh_db() -> Iterator[None]:
         reset_session()
         set_snapshot_store(None)
         set_identity_provider(None)
+
+
+@pytest.fixture
+def cookie_provider(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Opt-in: switch the app to cookie identity for a test module.
+    Modules opt in with `pytestmark = pytest.mark.usefixtures("cookie_provider")`."""
+    monkeypatch.setenv("DATA_ROVER_IDENTITY_PROVIDER", "cookie")
+    monkeypatch.setenv("DATA_ROVER_JWT_SECRET", "test-secret-not-the-default")
+    monkeypatch.setenv("DATA_ROVER_AUTH_COOKIE_SECURE", "false")
+    set_identity_provider(None)  # rebuild provider from patched settings
+    yield
+    set_identity_provider(None)
 
 
 #: identity header the data-test client authenticates as
@@ -79,6 +94,16 @@ def papi(path: str) -> str:
     """Build a default-project-scoped data URL. papi('/metamodel') ->
     '/api/v1/projects/default/metamodel'."""
     return f"/api/v1/projects/{DEFAULT_PROJECT_ID}{path}"
+
+
+def login(c: TestClient, email: str, password: str) -> None:
+    """Log a TestClient in via cookie auth; the cookie persists on the client."""
+    r = c.post("/api/v1/auth/login", json={"email": email, "password": password})
+    assert r.status_code == 200, r.text
+
+
+#: CSRF header the SPA (and cookie-authed tests) send on unsafe requests.
+CSRF_HEADERS = {"x-requested-with": "data-rover"}
 
 
 # --- shared data-route test helpers ---------------------------------------
