@@ -11,13 +11,23 @@
 	let projects = $state<ProjectSummary[]>([]);
 	let query = $state('');
 	let wizardOpen = $state(false);
+	let loading = $state(true);
+	let error = $state<string | null>(null);
 
 	const filtered = $derived(
 		projects.filter((p) => p.name.toLowerCase().includes(query.toLowerCase()))
 	);
 
 	async function refresh(): Promise<void> {
-		projects = await listProjects();
+		loading = true;
+		error = null;
+		try {
+			projects = await listProjects();
+		} catch {
+			error = 'Failed to load projects.';
+		} finally {
+			loading = false;
+		}
 	}
 	onMount(refresh);
 
@@ -41,11 +51,18 @@
 	</div>
 	<Input type="search" placeholder="Search projects…" bind:value={query} />
 	<div class="flex flex-col gap-2">
-		{#each filtered as p (p.id)}
-			<ProjectCard project={p} onOpen={open} />
+		{#if loading}
+			<p class="text-sm text-zinc-400">Loading…</p>
+		{:else if error}
+			<p class="text-sm text-red-400">{error}</p>
+			<Button size="sm" variant="outline" onclick={refresh}>Retry</Button>
 		{:else}
-			<p class="text-sm text-zinc-500">No projects.</p>
-		{/each}
+			{#each filtered as p (p.id)}
+				<ProjectCard project={p} onOpen={open} />
+			{:else}
+				<p class="text-sm text-zinc-500">No projects.</p>
+			{/each}
+		{/if}
 	</div>
 </div>
 
