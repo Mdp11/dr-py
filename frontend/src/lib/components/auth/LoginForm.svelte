@@ -15,23 +15,32 @@
 		pending = true;
 		try {
 			await signIn(email, password);
-			// eslint-disable-next-line svelte/no-navigation-without-resolve
-			await goto('/projects');
 		} catch {
 			error = 'Invalid email or password.';
+			return;
 		} finally {
 			pending = false;
 		}
+		// eslint-disable-next-line svelte/no-navigation-without-resolve
+		await goto('/projects');
 	}
 </script>
 
 <form onsubmit={onSubmit} class="flex w-72 flex-col gap-3">
 	<h1 class="text-base font-semibold text-zinc-100">Sign in</h1>
-	<Input type="email" placeholder="Email" autocomplete="username" bind:value={email} required />
+	<Input
+		type="email"
+		placeholder="Email"
+		autocomplete="username"
+		aria-label="Email"
+		bind:value={email}
+		required
+	/>
 	<Input
 		type="password"
 		placeholder="Password"
 		autocomplete="current-password"
+		aria-label="Password"
 		bind:value={password}
 		required
 	/>
