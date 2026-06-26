@@ -1,8 +1,25 @@
+"""Project listing + single-project read + delete gating.
+
+Project *creation* (admin-only multipart wizard) is covered in
+test_projects_wizard.py; *membership* management (now under /admin) is covered
+in test_admin.py. This module covers what remains in routes/projects.py:
+- GET /projects/{id} requires membership (member 200, non-member 403)
+- GET /projects is admin-sees-all, otherwise own-projects-only
+- DELETE /projects/{id} is admin-only
+
+Projects are seeded directly via tenancy (the wizard is exercised elsewhere).
+Non-admin callers use header auth (the conftest default provider); admin callers
+seed an admin User row and authenticate with that id (header upsert preserves
+is_admin on an already-seeded user).
+"""
+
 from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
 
+from data_rover.api import db, tenancy
+from data_rover.api.db_models import User
 from data_rover.api.main import create_app
 
 
@@ -11,108 +28,63 @@ def client() -> TestClient:
     return TestClient(create_app())
 
 
-def _h(uid: str, email: str = "") -> dict[str, str]:
-    h = {"x-user-id": uid}
-    if email:
-        h["x-user-email"] = email
-    return h
+def _h(uid: str) -> dict[str, str]:
+    return {"x-user-id": uid}
 
 
-def test_create_project_makes_caller_owner(client: TestClient) -> None:
-    r = client.post("/api/v1/projects", json={"name": "P"}, headers=_h("u1"))
-    assert r.status_code == 201, r.text
-    body = r.json()
-    assert body["name"] == "P"
-    assert body["role"] == "owner"
-    assert body["id"]
+def _seed_user(uid: str, *, is_admin: bool = False) -> None:
+    gen = db.get_db()
+    s = next(gen)
+    try:
+        if s.get(User, uid) is None:
+            s.add(User(id=uid, email="", is_admin=is_admin))
+            s.commit()
+    finally:
+        gen.close()
 
 
-def test_list_projects_only_mine(client: TestClient) -> None:
-    client.post("/api/v1/projects", json={"name": "A"}, headers=_h("u1"))
-    client.post("/api/v1/projects", json={"name": "B"}, headers=_h("u2"))
-    r = client.get("/api/v1/projects", headers=_h("u1"))
-    assert [p["name"] for p in r.json()] == ["A"]
+def _seed_project(name: str, owner_id: str) -> str:
+    """Create a project owned by *owner_id* (seeding the owner if needed)."""
+    _seed_user(owner_id)
+    gen = db.get_db()
+    s = next(gen)
+    try:
+        return tenancy.create_project(s, name, owner_id).id
+    finally:
+        gen.close()
 
 
 def test_get_project_requires_membership(client: TestClient) -> None:
-    pid = client.post(
-        "/api/v1/projects", json={"name": "P"}, headers=_h("u1")
-    ).json()["id"]
+    pid = _seed_project("P", "u1")
     assert client.get(f"/api/v1/projects/{pid}", headers=_h("u1")).status_code == 200
     assert client.get(f"/api/v1/projects/{pid}", headers=_h("u2")).status_code == 403
 
 
-def test_add_and_list_members(client: TestClient) -> None:
-    pid = client.post(
-        "/api/v1/projects", json={"name": "P"}, headers=_h("u1")
-    ).json()["id"]
-    r = client.post(
-        f"/api/v1/projects/{pid}/members",
-        json={"user_id": "u2", "email": "u2@x.com", "role": "editor"},
-        headers=_h("u1"),
+def test_non_admin_lists_only_own_projects(client: TestClient) -> None:
+    _seed_project("A", "u1")
+    _seed_project("B", "u2")
+    r = client.get("/api/v1/projects", headers=_h("u1"))
+    assert r.status_code == 200
+    assert [p["name"] for p in r.json()] == ["A"]
+
+
+def test_admin_lists_all_projects(client: TestClient) -> None:
+    _seed_project("A", "u1")
+    _seed_project("B", "u2")
+    _seed_user("boss", is_admin=True)
+    r = client.get("/api/v1/projects", headers=_h("boss"))
+    assert r.status_code == 200
+    # admin sees every project even those it isn't a member of; role synthesized
+    assert {p["name"] for p in r.json()} == {"A", "B"}
+    assert all(p["role"] == "owner" for p in r.json())
+
+
+def test_delete_project_is_admin_only(client: TestClient) -> None:
+    pid = _seed_project("P", "u1")
+    # the project owner is NOT a global admin -> forbidden
+    assert client.delete(f"/api/v1/projects/{pid}", headers=_h("u1")).status_code == 403
+    _seed_user("boss", is_admin=True)
+    assert (
+        client.delete(f"/api/v1/projects/{pid}", headers=_h("boss")).status_code == 204
     )
-    assert r.status_code == 201, r.text
-    # the add response echoes the stored email, consistent with list_members
-    assert r.json() == {"user_id": "u2", "email": "u2@x.com", "role": "editor"}
-    members = client.get(
-        f"/api/v1/projects/{pid}/members", headers=_h("u1")
-    ).json()
-    assert {m["user_id"]: m["role"] for m in members} == {
-        "u1": "owner",
-        "u2": "editor",
-    }
-
-
-def test_only_owner_can_add_members(client: TestClient) -> None:
-    pid = client.post(
-        "/api/v1/projects", json={"name": "P"}, headers=_h("u1")
-    ).json()["id"]
-    client.post(
-        f"/api/v1/projects/{pid}/members",
-        json={"user_id": "u2", "role": "editor"},
-        headers=_h("u1"),
-    )
-    r = client.post(
-        f"/api/v1/projects/{pid}/members",
-        json={"user_id": "u3", "role": "viewer"},
-        headers=_h("u2"),
-    )
-    assert r.status_code == 403
-
-
-def test_remove_member(client: TestClient) -> None:
-    pid = client.post(
-        "/api/v1/projects", json={"name": "P"}, headers=_h("u1")
-    ).json()["id"]
-    client.post(
-        f"/api/v1/projects/{pid}/members",
-        json={"user_id": "u2", "role": "editor"},
-        headers=_h("u1"),
-    )
-    r = client.delete(
-        f"/api/v1/projects/{pid}/members/u2", headers=_h("u1")
-    )
-    assert r.status_code == 204
-    members = client.get(
-        f"/api/v1/projects/{pid}/members", headers=_h("u1")
-    ).json()
-    assert [m["user_id"] for m in members] == ["u1"]
-
-
-def test_delete_project(client: TestClient) -> None:
-    pid = client.post(
-        "/api/v1/projects", json={"name": "P"}, headers=_h("u1")
-    ).json()["id"]
-    assert client.delete(
-        f"/api/v1/projects/{pid}", headers=_h("u1")
-    ).status_code == 204
     assert client.get(f"/api/v1/projects/{pid}", headers=_h("u1")).status_code == 404
-
-
-def test_remove_last_owner_is_422(client: TestClient) -> None:
-    pid = client.post(
-        "/api/v1/projects", json={"name": "P"}, headers=_h("u1")
-    ).json()["id"]
-    # u1 is the only owner — removing them is refused (ValueError -> 422)
-    r = client.delete(f"/api/v1/projects/{pid}/members/u1", headers=_h("u1"))
-    assert r.status_code == 422, r.text

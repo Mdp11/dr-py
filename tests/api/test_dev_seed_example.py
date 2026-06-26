@@ -4,7 +4,7 @@ import json
 
 from fastapi.testclient import TestClient
 
-from data_rover.api import db
+from data_rover.api import db, tenancy
 from data_rover.api.main import create_app
 from data_rover.api.storage import MemorySnapshotStore, set_snapshot_store
 
@@ -62,13 +62,17 @@ def test_dev_seed_provisions_users_from_file(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("DATA_ROVER_DEV_USERS_FILE", str(users_file))
     try:
         c = _seed_app(monkeypatch)
-        members = {
-            m["user_id"]: m
-            for m in c.get("/api/v1/projects/default/members", headers=OWNER).json()
-        }
-        assert members["alice"]["role"] == "editor"
-        assert members["bob"]["role"] == "viewer"
-        assert members["bob"]["email"] == "bob@example.com"  # defaulted
+        # The per-project /members route was removed (membership lives under
+        # /admin now); assert the dev-seed provisioning directly against the DB.
+        gen = db.get_db()
+        s = next(gen)
+        try:
+            members = {m.user_id: m for m in tenancy.list_members(s, "default")}
+        finally:
+            gen.close()
+        assert members["alice"].role.value == "editor"
+        assert members["bob"].role.value == "viewer"
+        assert members["bob"].user.email == "bob@example.com"  # defaulted
         # the provisioned users can actually open the project with their role
         for uid, role in (("alice", "editor"), ("bob", "viewer")):
             r = c.get(
