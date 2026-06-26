@@ -129,12 +129,13 @@ export function startRealtime(config?: Partial<FeedConfig>): void {
 	const pid = getActiveProjectId();
 	if (!pid) return; // no active project ⇒ no feed
 	_conn = connectFeed({
-		url: defaultFeedUrl(pid),
+		...config,
+		url: config?.url ?? defaultFeedUrl(pid),
+		// handlers are intentionally set after the spread so store logic is always authoritative
 		onEvent: handleFeedEvent,
 		onStatus: (c) => {
 			_connected = c;
-		},
-		...config
+		}
 	});
 }
 
