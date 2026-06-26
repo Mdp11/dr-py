@@ -142,6 +142,11 @@ def list_projects_for_user(db: Session, user_id: str) -> list[tuple[Project, Rol
     return [(project, role) for project, role in rows]
 
 
+def list_all_projects(db: Session) -> list[Project]:
+    """Every project (admin view). Role is synthesized as owner by the caller."""
+    return list(db.execute(select(Project).order_by(Project.name)).scalars())
+
+
 def list_members(db: Session, project_id: str) -> list[Membership]:
     """All memberships of *project_id* (any role), each with its ``user`` loaded.
 
