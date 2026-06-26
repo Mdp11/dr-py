@@ -35,6 +35,24 @@ class Settings(BaseSettings):
     #: these names.
     identity_user_header: str = "x-user-id"
     identity_email_header: str = "x-user-email"
+    #: Which IdentityProvider get_identity_provider() builds: "cookie" (local
+    #: email+password auth, the default) or "header" (trust gateway headers /
+    #: tests). A real SSO provider is a third option installed via code.
+    identity_provider: str = "cookie"
+    #: HMAC secret for signing session JWTs. The default is INSECURE and only
+    #: tolerated in dev; create_app refuses to boot the cookie provider in a
+    #: non-dev deploy that still uses it.
+    jwt_secret: str = "dev-insecure-secret-change-me"
+    #: Session token lifetime (seconds). Default 8h.
+    jwt_ttl_seconds: int = 28800
+    #: Session cookie name.
+    auth_cookie_name: str = "session"
+    #: Set the cookie Secure flag (HTTPS only). False for localhost dev.
+    auth_cookie_secure: bool = True
+    #: Idempotently ensure an admin user exists on startup (independent of
+    #: dev_seed, so prod can seed its first admin). Empty email ⇒ no bootstrap.
+    bootstrap_admin_email: str = ""
+    bootstrap_admin_password: str = ""
     #: When true, ``create_app`` creates the schema (SQLite/dev convenience)
     #: and ensures a ``default`` user+project exist so the single-user frontend
     #: works without a project picker. MUST be false in production (Postgres
