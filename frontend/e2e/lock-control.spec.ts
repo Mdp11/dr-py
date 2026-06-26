@@ -20,6 +20,7 @@ import { test, expect } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { loadFiles } from './helpers/load';
+import { openDefaultProject } from './helpers/auth';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const METAMODEL_PATH = join(__dirname, '..', '..', 'examples', 'smart-city.metamodel.yaml');
@@ -39,7 +40,7 @@ test('lock without editing, then unlock-with-confirm discards staged edits', asy
 	});
 	const discardPrompts = () => dialogMessages.filter((m) => /will be discarded/i.test(m));
 
-	await page.goto('/');
+	await openDefaultProject(page);
 	await loadFiles(page, { metamodel: METAMODEL_PATH, model: MODEL_PATH, view: VIEW_PATH });
 	await expect(page.getByText('live')).toBeVisible({ timeout: 60_000 });
 

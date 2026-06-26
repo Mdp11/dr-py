@@ -5,7 +5,9 @@ describe('defaultFeedUrl', () => {
 	it('is project-scoped and carries no identity query params', () => {
 		const url = defaultFeedUrl('proj-7');
 		expect(url).toContain('/api/v1/projects/proj-7/feed');
-		expect(url).not.toContain('x-user-id');
+		// Identity rides the httpOnly session cookie on the same-origin upgrade,
+		// so the URL must carry no query string (no identity params) at all.
+		expect(url).not.toContain('?');
 	});
 });
 

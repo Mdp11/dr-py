@@ -2,6 +2,7 @@ import { test, expect, type Locator, type Page, type Request } from '@playwright
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { loadFiles } from './helpers/load';
+import { openDefaultProject } from './helpers/auth';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const METAMODEL_PATH = join(__dirname, '..', '..', 'examples', 'example.metamodel.yaml');
@@ -20,7 +21,7 @@ async function bootstrap(page: Page): Promise<void> {
 	// over leftover unsaved changes pops a window.confirm that Playwright would
 	// auto-dismiss. Accept it so the load dialog can open.
 	page.on('dialog', (dialog) => void dialog.accept());
-	await page.goto('/');
+	await openDefaultProject(page);
 
 	const model = {
 		elements: [
