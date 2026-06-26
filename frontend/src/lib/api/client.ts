@@ -1,10 +1,10 @@
 import type { z } from 'zod';
 import { errorForStatus, messageFromBody } from './errors';
-import { DEV_IDENTITY_HEADERS, getCurrentUserId } from './identity';
+import { getCurrentUserId } from './identity';
 
 // Re-exported so existing `import { getCurrentUserId } from '$lib/api/client'`
-// call sites keep working; the value now comes from the dev identity seam
-// (overridable per browser session via `?user=` — see api/identity.ts).
+// call sites keep working; the value now comes from the authenticated user
+// (set by the auth store after GET /auth/me — see api/identity.ts).
 export { getCurrentUserId };
 
 export interface ClientConfig {
@@ -18,10 +18,22 @@ export interface ApiFetchInit extends Omit<RequestInit, 'body'> {
 	query?: Record<string, string | number | boolean | undefined | null>;
 }
 
-// Single-user dev/default routing. A real project picker + auth (later phase)
-// will make the project id dynamic and drop the dev identity headers (a
-// gateway will inject the real identity in production).
-const DEFAULT_BASE_URL = '/api/v1/projects/default';
+// Project-scoped default base URL, set once per workspace from the [projectId]
+// route param (see state/active-project.svelte.ts). Non-project-scoped calls
+// (auth/admin/projects-list) pass an explicit { baseUrl: '/api/v1' }. The
+// hardcoded fallback only matters before any project is active (e.g. the very
+// first boot before routing resolves).
+const FALLBACK_BASE_URL = '/api/v1/projects/default';
+let _activeBaseUrl: string | null = null;
+
+/** Set the project-scoped base URL used by calls that pass no per-call baseUrl. */
+export function setActiveBaseUrl(url: string | null): void {
+	_activeBaseUrl = url;
+}
+
+const _SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS', 'TRACE']);
+const CSRF_HEADER = 'X-Requested-With';
+const CSRF_VALUE = 'data-rover';
 
 function buildUrl(baseUrl: string, path: string, query?: ApiFetchInit['query']): string {
 	const normalizedBase = baseUrl.replace(/\/$/, '');
@@ -70,15 +82,16 @@ export async function apiFetchRaw(
 	init: ApiFetchInit = {},
 	config?: ClientConfig
 ): Promise<Response> {
-	const baseUrl = config?.baseUrl ?? DEFAULT_BASE_URL;
+	const baseUrl = config?.baseUrl ?? _activeBaseUrl ?? FALLBACK_BASE_URL;
 	const doFetch = config?.fetch ?? fetch;
 	const url = buildUrl(baseUrl, path, init.query);
 	const { body, headers } = prepareBody(init);
-	for (const [k, v] of Object.entries(DEV_IDENTITY_HEADERS)) {
-		if (!headers.has(k)) headers.set(k, v);
+	const method = (init.method ?? 'GET').toUpperCase();
+	if (!_SAFE_METHODS.has(method) && !headers.has(CSRF_HEADER)) {
+		headers.set(CSRF_HEADER, CSRF_VALUE);
 	}
 
-	const response = await doFetch(url, { ...init, body, headers });
+	const response = await doFetch(url, { ...init, body, headers, credentials: 'include' });
 
 	if (!response.ok) {
 		let parsed: unknown = undefined;
