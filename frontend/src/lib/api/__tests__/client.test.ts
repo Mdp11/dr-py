@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { z } from 'zod';
 
-import { apiFetch } from '../client';
+import { apiFetch, setActiveBaseUrl } from '../client';
 import { ApiError, ConflictError, NotFoundError, ValidationError } from '../errors';
 import { server } from './server';
 
@@ -129,5 +129,40 @@ describe('apiFetch', () => {
 		expect(receivedUrl).toContain('type=Block');
 		expect(receivedUrl).toContain('target_id=x');
 		expect(receivedUrl).not.toContain('source_id');
+	});
+});
+
+describe('cookie-auth client behavior', () => {
+	it('adds the CSRF header on unsafe methods and omits it on GET', async () => {
+		let postHadCsrf: string | null = null;
+		let getHadCsrf: string | null = null;
+		server.use(
+			http.post('http://t/api/v1/x', ({ request }) => {
+				postHadCsrf = request.headers.get('x-requested-with');
+				return HttpResponse.json({ ok: true });
+			}),
+			http.get('http://t/api/v1/x', ({ request }) => {
+				getHadCsrf = request.headers.get('x-requested-with');
+				return HttpResponse.json({ ok: true });
+			})
+		);
+		await apiFetch('/x', { method: 'POST', body: {} }, { baseUrl: 'http://t/api/v1' });
+		await apiFetch('/x', { method: 'GET' }, { baseUrl: 'http://t/api/v1' });
+		expect(postHadCsrf).toBe('data-rover');
+		expect(getHadCsrf).toBeNull();
+	});
+
+	it('uses the active base URL when no per-call baseUrl is given', async () => {
+		setActiveBaseUrl('http://active/api/v1/projects/p1');
+		let hit = false;
+		server.use(
+			http.get('http://active/api/v1/projects/p1/y', () => {
+				hit = true;
+				return HttpResponse.json({ ok: true });
+			})
+		);
+		await apiFetch('/y', { method: 'GET' });
+		expect(hit).toBe(true);
+		setActiveBaseUrl(null);
 	});
 });

@@ -77,7 +77,7 @@ describe('checkout api', () => {
 		expect(res.role).toBe('editor');
 	});
 
-	it('getCurrentUserId returns the dev identity', () => {
-		expect(getCurrentUserId()).toBe('default-user');
+	it('getCurrentUserId returns empty string until auth store sets it', () => {
+		expect(getCurrentUserId()).toBe('');
 	});
 });

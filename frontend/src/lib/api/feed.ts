@@ -5,8 +5,6 @@
  * (`socketFactory`) so tests can drive it without a real server.
  */
 
-import { DEV_USER_ID, DEV_USER_EMAIL } from './identity';
-
 export interface LeaseLite {
 	resource_id: string;
 	mode: string;
@@ -55,13 +53,12 @@ export interface FeedConnection {
 	close(): void;
 }
 
-// The feed authenticates over query params because browsers can't set
-// WebSocket headers. Identity is overridable per browser session via `?user=`
-// (see api/identity.ts).
+// The feed authenticates via the session cookie set by the login flow.
+// The active project URL will be injected by the project store (Task 12);
+// this fallback is only used before routing resolves.
 export function defaultFeedUrl(): string {
 	const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-	const q = `x-user-id=${encodeURIComponent(DEV_USER_ID)}&x-user-email=${encodeURIComponent(DEV_USER_EMAIL)}`;
-	return `${proto}//${location.host}/api/v1/projects/default/feed?${q}`;
+	return `${proto}//${location.host}/api/v1/projects/default/feed`;
 }
 
 export function connectFeed(config: FeedConfig): FeedConnection {
