@@ -79,13 +79,20 @@ def patch_user(
             password=body.password,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        # "unknown user" → 404 (user not found);
+        # last-admin guard message contains "last active admin" → 409 conflict.
+        status = 409 if "last active admin" in str(exc) else 404
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
     return _out(u)
 
 
 @router.delete("/admin/users/{user_id}", status_code=204)
 def delete_user(user_id: str, db: Session = Depends(get_db)) -> Response:
-    tenancy.delete_user(db, user_id)
+    try:
+        tenancy.delete_user(db, user_id)
+    except ValueError as exc:
+        # last-admin guard → 409 conflict
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return Response(status_code=204)
 
 

@@ -74,7 +74,6 @@ def create_project(
     model: UploadFile | None = File(default=None),
     view: UploadFile | None = File(default=None),
     admin: User = Depends(require_admin),
-    db: Session = Depends(get_db),
 ) -> ProjectOut:
     metamodel_yaml = metamodel.file.read().decode("utf-8")
     model_json = (
