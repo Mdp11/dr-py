@@ -8,6 +8,7 @@ from data_rover.api import auth, db, tenancy
 from data_rover.api.authz import require_admin
 from data_rover.api.db_models import Role, User as UserModel
 from data_rover.api.main import create_app
+from data_rover.api.db_models import User
 
 pytestmark = pytest.mark.usefixtures("cookie_provider")
 
@@ -216,3 +217,99 @@ def test_remove_member_204_and_last_owner_422() -> None:
         ).status_code
         == 422
     )
+
+
+# ---------------------------------------------------------------------------
+# Last-admin lockout guard tests
+# ---------------------------------------------------------------------------
+
+
+def test_demote_sole_admin_via_patch_returns_409() -> None:
+    """PATCH is_admin=False on the only active admin must return 409; user stays admin."""
+    c = _as_admin()
+    # find the seeded admin's id
+    users = c.get("/api/v1/admin/users").json()
+    admin_id = next(u["id"] for u in users if u["email"] == "admin@x")
+
+    r = c.patch(
+        f"/api/v1/admin/users/{admin_id}", json={"is_admin": False}, headers=CSRF
+    )
+    assert r.status_code == 409, r.text
+
+    # user must still be admin
+    users_after = c.get("/api/v1/admin/users").json()
+    admin_after = next(u for u in users_after if u["id"] == admin_id)
+    assert admin_after["is_admin"] is True
+
+
+def test_deactivate_sole_admin_via_patch_returns_409() -> None:
+    """PATCH is_active=False on the only active admin must return 409."""
+    c = _as_admin()
+    users = c.get("/api/v1/admin/users").json()
+    admin_id = next(u["id"] for u in users if u["email"] == "admin@x")
+
+    r = c.patch(
+        f"/api/v1/admin/users/{admin_id}", json={"is_active": False}, headers=CSRF
+    )
+    assert r.status_code == 409, r.text
+
+    users_after = c.get("/api/v1/admin/users").json()
+    admin_after = next(u for u in users_after if u["id"] == admin_id)
+    assert admin_after["is_active"] is True
+
+
+def test_delete_sole_admin_returns_409() -> None:
+    """DELETE on the only active admin must return 409."""
+    c = _as_admin()
+    users = c.get("/api/v1/admin/users").json()
+    admin_id = next(u["id"] for u in users if u["email"] == "admin@x")
+
+    r = c.delete(f"/api/v1/admin/users/{admin_id}", headers=CSRF)
+    assert r.status_code == 409, r.text
+
+    # user must still exist
+    users_after = c.get("/api/v1/admin/users").json()
+    assert any(u["id"] == admin_id for u in users_after)
+
+
+def test_demote_and_delete_one_of_two_admins_succeeds() -> None:
+    """With two active admins, demoting and then deleting one of them is allowed."""
+    c = _as_admin()
+    # create a second admin
+    r = c.post(
+        "/api/v1/admin/users",
+        json={"email": "admin2@x", "password": "pw", "is_admin": True},
+        headers=CSRF,
+    )
+    assert r.status_code == 201, r.text
+    admin2_id = r.json()["id"]
+
+    # demote the second admin → should succeed (200)
+    r = c.patch(
+        f"/api/v1/admin/users/{admin2_id}", json={"is_admin": False}, headers=CSRF
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["is_admin"] is False
+
+    # delete the now-non-admin second user → should succeed (204)
+    r = c.delete(f"/api/v1/admin/users/{admin2_id}", headers=CSRF)
+    assert r.status_code == 204, r.text
+
+
+# ---------------------------------------------------------------------------
+# Fix 2: get_user_by_email graceful duplicate-email handling
+# ---------------------------------------------------------------------------
+
+
+def test_get_user_by_email_returns_none_on_duplicate_emails() -> None:
+    """If two users share an email (no DB unique constraint), get_user_by_email
+    returns None rather than raising MultipleResultsFound."""
+    s = _session()
+    # Insert two rows with the same email directly via ORM (bypassing create_user
+    # which would block on the duplicate-email guard).
+    s.add(User(id="dup1", email="dup@x.com", is_admin=False))
+    s.add(User(id="dup2", email="dup@x.com", is_admin=False))
+    s.commit()
+
+    result = tenancy.get_user_by_email(s, "dup@x.com")
+    assert result is None, "expected None, not a row or an exception"

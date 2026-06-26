@@ -12,7 +12,6 @@ from __future__ import annotations
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
-from starlette.types import ASGIApp
 
 from .settings import get_settings
 
@@ -22,9 +21,6 @@ _CSRF_VALUE = "data-rover"
 
 
 class CSRFMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app: ASGIApp) -> None:
-        super().__init__(app)
-
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         if request.method not in _SAFE_METHODS:
             cookie_name = get_settings().auth_cookie_name

@@ -71,6 +71,13 @@ def set_session_cookie(response: Response, token: str) -> None:
 
 
 def clear_session_cookie(response: Response) -> None:
+    settings = get_settings()
+    # Mirror all attributes of set_session_cookie so the browser matches the
+    # deletion cookie to the original on SameSite/Secure-strict browsers.
     response.delete_cookie(
-        key=get_settings().auth_cookie_name, path="/", samesite="strict"
+        key=settings.auth_cookie_name,
+        path="/",
+        httponly=True,
+        secure=settings.auth_cookie_secure,
+        samesite="strict",
     )

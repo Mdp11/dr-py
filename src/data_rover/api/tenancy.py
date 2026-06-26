@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 
 from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, MultipleResultsFound
 from sqlalchemy.orm import Session, selectinload
 
 from .auth import hash_password
@@ -44,9 +44,16 @@ def upsert_user(db: Session, user_id: str, email: str) -> User:
 
 
 def get_user_by_email(db: Session, email: str) -> User | None:
-    return db.execute(
-        select(User).where(User.email == email)
-    ).scalar_one_or_none()
+    # email has no DB unique constraint yet (a unique index is a deferred
+    # follow-up). If two rows share an email, scalar_one_or_none() raises
+    # MultipleResultsFound; treat ambiguity as no-match so login degrades
+    # gracefully to 401 rather than 500.
+    try:
+        return db.execute(
+            select(User).where(User.email == email)
+        ).scalar_one_or_none()
+    except MultipleResultsFound:
+        return None
 
 
 def create_user(db: Session, email: str, password: str, is_admin: bool) -> User:
@@ -73,6 +80,16 @@ def list_users(db: Session, q: str = "") -> list[User]:
     return list(db.execute(stmt).scalars())
 
 
+def _active_admin_count(db: Session) -> int:
+    """Count of users who are currently both admin and active."""
+    return db.execute(
+        select(func.count()).where(
+            User.is_admin.is_(True),
+            User.is_active.is_(True),
+        )
+    ).scalar_one()
+
+
 def set_user_fields(
     db: Session,
     user_id: str,
@@ -81,10 +98,23 @@ def set_user_fields(
     is_active: bool | None = None,
     password: str | None = None,
 ) -> User:
-    """Patch any subset of admin-editable fields. Raises ValueError if unknown."""
+    """Patch any subset of admin-editable fields.
+
+    Raises ``ValueError("unknown user")`` if the user does not exist (→ 404 in
+    the route), or ``ValueError("cannot demote or deactivate the last active
+    admin")`` if the patch would remove the sole active admin (→ 409).
+    """
     user = db.get(User, user_id)
     if user is None:
         raise ValueError("unknown user")
+    # Guard: refuse to demote or deactivate the last active admin.  Check BEFORE
+    # mutating so the row is unchanged on failure.
+    currently_active_admin = bool(user.is_admin and user.is_active)
+    removing_admin_status = (is_admin is not None and not is_admin) or (
+        is_active is not None and not is_active
+    )
+    if currently_active_admin and removing_admin_status and _active_admin_count(db) <= 1:
+        raise ValueError("cannot demote or deactivate the last active admin")
     if is_admin is not None:
         user.is_admin = is_admin
     if is_active is not None:
@@ -97,10 +127,17 @@ def set_user_fields(
 
 def delete_user(db: Session, user_id: str) -> None:
     """Delete a user. Memberships cascade (DB FK); commits keep author_id via
-    SET NULL so model history survives the author leaving."""
+    SET NULL so model history survives the author leaving.
+
+    Raises ``ValueError("cannot delete the last active admin")`` if the target
+    is the sole remaining active admin (→ 409 in the route).
+    """
     user = db.get(User, user_id)
     if user is None:
         return
+    # Guard: refuse to delete the last active admin (mirrors last-owner guard).
+    if user.is_admin and user.is_active and _active_admin_count(db) <= 1:
+        raise ValueError("cannot delete the last active admin")
     db.delete(user)
     db.commit()
 
