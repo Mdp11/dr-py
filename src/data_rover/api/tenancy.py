@@ -12,6 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
+from .auth import hash_password
 from .db_models import Membership, Project, Role, User
 
 
@@ -40,6 +41,68 @@ def upsert_user(db: Session, user_id: str, email: str) -> User:
         user.email = email
         db.commit()
     return user
+
+
+def get_user_by_email(db: Session, email: str) -> User | None:
+    return db.execute(
+        select(User).where(User.email == email)
+    ).scalar_one_or_none()
+
+
+def create_user(db: Session, email: str, password: str, is_admin: bool) -> User:
+    """Create an admin-provisioned local user. Raises ValueError on duplicate
+    email (the route maps it to 409). The id is a fresh uuid (decoupled from the
+    email so the email can change without breaking membership rows)."""
+    if get_user_by_email(db, email) is not None:
+        raise ValueError("email already in use")
+    user = User(
+        id=uuid.uuid4().hex,
+        email=email,
+        password_hash=hash_password(password),
+        is_admin=is_admin,
+    )
+    db.add(user)
+    db.commit()
+    return user
+
+
+def list_users(db: Session, q: str = "") -> list[User]:
+    stmt = select(User).order_by(User.email)
+    if q:
+        stmt = stmt.where(User.email.ilike(f"%{q}%"))
+    return list(db.execute(stmt).scalars())
+
+
+def set_user_fields(
+    db: Session,
+    user_id: str,
+    *,
+    is_admin: bool | None = None,
+    is_active: bool | None = None,
+    password: str | None = None,
+) -> User:
+    """Patch any subset of admin-editable fields. Raises ValueError if unknown."""
+    user = db.get(User, user_id)
+    if user is None:
+        raise ValueError("unknown user")
+    if is_admin is not None:
+        user.is_admin = is_admin
+    if is_active is not None:
+        user.is_active = is_active
+    if password is not None:
+        user.password_hash = hash_password(password)
+    db.commit()
+    return user
+
+
+def delete_user(db: Session, user_id: str) -> None:
+    """Delete a user. Memberships cascade (DB FK); commits keep author_id via
+    SET NULL so model history survives the author leaving."""
+    user = db.get(User, user_id)
+    if user is None:
+        return
+    db.delete(user)
+    db.commit()
 
 
 def create_project(db: Session, name: str, owner_id: str) -> Project:
