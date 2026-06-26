@@ -178,6 +178,7 @@ export {
 } from './view.svelte';
 export type { ViewChange } from './view-diff';
 export { getCurrentUser, isAdmin, fetchMe, signIn, signOut } from './auth.svelte';
+export { getActiveProjectId, setActiveProject, clearActiveProject } from './active-project.svelte';
 export {
 	formatViewChange,
 	viewChangeSegments,
