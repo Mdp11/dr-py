@@ -44,7 +44,7 @@ export interface WebSocketLike {
 export interface FeedConfig {
 	onEvent: (e: FeedEvent) => void;
 	onStatus: (connected: boolean) => void;
-	url?: string;
+	url: string;
 	socketFactory?: (url: string) => WebSocketLike;
 	reconnect?: { baseMs: number; maxMs: number };
 }
