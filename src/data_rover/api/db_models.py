@@ -52,6 +52,16 @@ class User(Base):
     #: rather than NULL to keep queries null-free. The default is ORM-level
     #: only — raw-SQL inserts must supply "" themselves (no server_default).
     email: Mapped[str] = mapped_column(String, default="", nullable=False)
+    #: Argon2id hash of the local password. NULL for users that authenticate
+    #: only via a future SSO provider (no local credential). The cookie auth
+    #: path rejects a NULL-hash user at login.
+    password_hash: Mapped[str | None] = mapped_column(String, nullable=True)
+    #: Global role. The single system-level permission (see authz.require_admin):
+    #: admins manage users, all project memberships, and create projects.
+    is_admin: Mapped[bool] = mapped_column(default=False, nullable=False)
+    #: Deactivation = revocation. An inactive user is rejected 401 on the next
+    #: request even with a still-valid JWT (identity layer re-checks per request).
+    is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
 
     memberships: Mapped[list[Membership]] = relationship(
         back_populates="user",
