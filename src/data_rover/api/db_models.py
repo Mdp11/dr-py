@@ -15,11 +15,13 @@ from datetime import datetime, timezone
 from sqlalchemy import (
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     JSON,
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -45,6 +47,18 @@ class User(Base):
     """
 
     __tablename__ = "users"
+    __table_args__ = (
+        # Login email must be unique, but many users carry the "" sentinel
+        # (header/importer/dev users with no email claim) — so uniqueness is
+        # PARTIAL, enforced only for non-empty emails.
+        Index(
+            "uq_users_email_nonempty",
+            "email",
+            unique=True,
+            sqlite_where=text("email != ''"),
+            postgresql_where=text("email != ''"),
+        ),
+    )
 
     #: external identity subject id (stable across logins)
     id: Mapped[str] = mapped_column(String, primary_key=True)

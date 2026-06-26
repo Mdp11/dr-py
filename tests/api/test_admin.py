@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import IntegrityError
 
 from data_rover.api import auth, db, tenancy
 from data_rover.api.authz import require_admin
@@ -301,15 +302,33 @@ def test_demote_and_delete_one_of_two_admins_succeeds() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_get_user_by_email_returns_none_on_duplicate_emails() -> None:
-    """If two users share an email (no DB unique constraint), get_user_by_email
-    returns None rather than raising MultipleResultsFound."""
-    s = _session()
-    # Insert two rows with the same email directly via ORM (bypassing create_user
-    # which would block on the duplicate-email guard).
-    s.add(User(id="dup1", email="dup@x.com", is_admin=False))
-    s.add(User(id="dup2", email="dup@x.com", is_admin=False))
-    s.commit()
+def test_duplicate_nonempty_email_raises_integrity_error() -> None:
+    """The partial unique index rejects two rows with the same non-empty email.
 
-    result = tenancy.get_user_by_email(s, "dup@x.com")
-    assert result is None, "expected None, not a row or an exception"
+    get_user_by_email's MultipleResultsFound catch is now a defensive dead-code
+    path (the index prevents the duplicate from ever reaching the DB), but we
+    keep it for belt-and-braces safety.
+    """
+    s = _session()
+    s.add(User(id="dup1", email="dup@x.com", is_admin=False))
+    s.flush()  # assign id without committing the transaction
+    s.add(User(id="dup2", email="dup@x.com", is_admin=False))
+    with pytest.raises(IntegrityError):
+        s.commit()
+    s.rollback()
+
+
+def test_duplicate_empty_email_allowed() -> None:
+    """Two users with email="" are both permitted — the partial index only
+    covers non-empty values, so sentinel rows do not collide."""
+    s = _session()
+    s.add(User(id="sentinel1", email="", is_admin=False))
+    s.add(User(id="sentinel2", email="", is_admin=False))
+    s.commit()  # must not raise
+
+    from sqlalchemy import select
+
+    rows = s.execute(
+        select(User).where(User.email == "")  # type: ignore[arg-type]
+    ).scalars().all()
+    assert len(rows) == 2, f"expected 2 sentinel rows, got {len(rows)}"
