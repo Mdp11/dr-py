@@ -7,8 +7,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from starlette.requests import HTTPConnection
 
-from data_rover.api import auth, db
-from data_rover.api import tenancy, db as _db
+from data_rover.api import auth, db, tenancy
 from data_rover.api.db_models import User
 from data_rover.api.identity import CookieIdentityProvider, Identity, set_identity_provider
 from data_rover.api.main import create_app
@@ -98,7 +97,7 @@ def _client() -> TestClient:
 
 
 def _make_user(email: str, pw: str, *, admin: bool = False, active: bool = True) -> None:
-    gen = _db.get_db()
+    gen = db.get_db()
     s = next(gen)
     try:
         u = tenancy.create_user(s, email, pw, is_admin=admin)
@@ -132,3 +131,62 @@ def test_login_inactive_user_401() -> None:
     c = _client()
     assert c.post("/api/v1/auth/login",
                   json={"email": "a@x.com", "password": "pw"}).status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# change-password route tests
+# ---------------------------------------------------------------------------
+
+_CSRF = {"x-requested-with": "data-rover"}
+
+
+def test_change_password_happy_path() -> None:
+    """Change password succeeds; new password works, old password is rejected."""
+    _make_user("b@x.com", "oldpassword")
+    c = _client()
+    # Login to get session cookie.
+    assert c.post("/api/v1/auth/login",
+                  json={"email": "b@x.com", "password": "oldpassword"}).status_code == 200
+    # Change the password.
+    r = c.post(
+        "/api/v1/auth/change-password",
+        json={"old_password": "oldpassword", "new_password": "newpassword"},
+        headers=_CSRF,
+    )
+    assert r.status_code == 204
+    # New password now works.
+    c2 = _client()
+    assert c2.post("/api/v1/auth/login",
+                   json={"email": "b@x.com", "password": "newpassword"}).status_code == 200
+    # Old password is rejected.
+    c3 = _client()
+    assert c3.post("/api/v1/auth/login",
+                   json={"email": "b@x.com", "password": "oldpassword"}).status_code == 401
+
+
+def test_change_password_wrong_old_password_401() -> None:
+    """Supplying the wrong current password returns 401."""
+    _make_user("c@x.com", "correctpassword")
+    c = _client()
+    assert c.post("/api/v1/auth/login",
+                  json={"email": "c@x.com", "password": "correctpassword"}).status_code == 200
+    r = c.post(
+        "/api/v1/auth/change-password",
+        json={"old_password": "wrongpassword", "new_password": "newpassword"},
+        headers=_CSRF,
+    )
+    assert r.status_code == 401
+
+
+def test_change_password_too_short_new_password_422() -> None:
+    """New password shorter than 8 chars returns 422."""
+    _make_user("d@x.com", "somepassword")
+    c = _client()
+    assert c.post("/api/v1/auth/login",
+                  json={"email": "d@x.com", "password": "somepassword"}).status_code == 200
+    r = c.post(
+        "/api/v1/auth/change-password",
+        json={"old_password": "somepassword", "new_password": "short"},
+        headers=_CSRF,
+    )
+    assert r.status_code == 422
