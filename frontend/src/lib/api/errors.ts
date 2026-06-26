@@ -37,6 +37,10 @@ export function errorForStatus(status: number, body: unknown, message: string): 
 	return new ApiError(status, body, message);
 }
 
+export function isUnauthorized(err: unknown): boolean {
+	return err instanceof ApiError && err.status === 401;
+}
+
 export function messageFromBody(body: unknown, status: number): string {
 	if (body && typeof body === 'object') {
 		const b = body as Record<string, unknown>;
