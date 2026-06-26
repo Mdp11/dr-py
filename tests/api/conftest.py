@@ -47,6 +47,18 @@ def _fresh_db() -> Iterator[None]:
         set_identity_provider(None)
 
 
+@pytest.fixture
+def cookie_provider(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Opt-in: switch the app to cookie identity for a test module.
+    Modules opt in with `pytestmark = pytest.mark.usefixtures("cookie_provider")`."""
+    monkeypatch.setenv("DATA_ROVER_IDENTITY_PROVIDER", "cookie")
+    monkeypatch.setenv("DATA_ROVER_JWT_SECRET", "test-secret-not-the-default")
+    monkeypatch.setenv("DATA_ROVER_AUTH_COOKIE_SECURE", "false")
+    set_identity_provider(None)  # rebuild provider from patched settings
+    yield
+    set_identity_provider(None)
+
+
 #: identity header the data-test client authenticates as
 TEST_USER_ID = "test-user"
 #: data tests target the DEFAULT project so HTTP requests resolve the SAME
