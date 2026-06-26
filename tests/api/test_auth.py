@@ -40,3 +40,29 @@ def test_token_roundtrip() -> None:
 def test_decode_rejects_garbage() -> None:
     with pytest.raises(auth.TokenError):
         auth.decode_token("not-a-jwt")
+
+
+from starlette.requests import HTTPConnection
+
+from data_rover.api.identity import CookieIdentityProvider, Identity
+
+
+def _conn_with_cookie(token: str) -> HTTPConnection:
+    scope = {
+        "type": "http",
+        "headers": [(b"cookie", f"session={token}".encode())],
+        "query_string": b"",
+    }
+    return HTTPConnection(scope)
+
+
+def test_cookie_provider_identifies_valid_token() -> None:
+    token = auth.mint_token("u1", is_admin=False)
+    ident = CookieIdentityProvider("session").identify(_conn_with_cookie(token))
+    assert ident == Identity(user_id="u1", email="")
+
+
+def test_cookie_provider_rejects_missing_cookie() -> None:
+    conn = HTTPConnection({"type": "http", "headers": [], "query_string": b""})
+    with pytest.raises(Exception):  # HTTPException 401
+        CookieIdentityProvider("session").identify(conn)
