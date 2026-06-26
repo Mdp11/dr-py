@@ -36,15 +36,21 @@ class ChangePasswordIn(BaseModel):
 
 _MIN_PW_LEN = 8
 
+# Precomputed at import time so the argon2 cost is paid once; used by the login
+# handler to equalise timing for unknown / inactive / password-less accounts
+# (prevents a timing side-channel that would partially undermine the uniform 401).
+_DUMMY_HASH: str = auth.hash_password("data-rover-dummy-password")
+
 
 @router.post("/auth/login", response_model=MeOut)
 def login(body: LoginIn, response: Response, db: Session = Depends(get_db)) -> MeOut:
     user = tenancy.get_user_by_email(db, body.email)
-    if (
-        user is None
-        or not user.is_active
-        or not auth.verify_password(body.password, user.password_hash)
-    ):
+    if user is None or not user.is_active or user.password_hash is None:
+        # Always run the argon2 work to prevent a timing oracle (response time
+        # must not reveal whether the email is known / the account is active).
+        auth.verify_password(body.password, _DUMMY_HASH)
+        raise HTTPException(status_code=401, detail="invalid credentials")
+    if not auth.verify_password(body.password, user.password_hash):
         raise HTTPException(status_code=401, detail="invalid credentials")
     auth.set_session_cookie(response, auth.mint_token(user.id, user.is_admin))
     return MeOut(user_id=user.id, email=user.email, is_admin=user.is_admin)
