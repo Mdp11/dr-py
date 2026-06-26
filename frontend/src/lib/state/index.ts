@@ -177,6 +177,7 @@ export {
 	setViewBaseline
 } from './view.svelte';
 export type { ViewChange } from './view-diff';
+export { getCurrentUser, isAdmin, fetchMe, signIn, signOut } from './auth.svelte';
 export {
 	formatViewChange,
 	viewChangeSegments,
