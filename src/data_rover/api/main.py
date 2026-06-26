@@ -17,6 +17,7 @@ from .db_models import Role
 from .errors import register_exception_handlers
 from .feed import lock_event
 from .routes import (
+    admin,
     auth,
     change_request,
     commits,
@@ -224,6 +225,7 @@ def create_app() -> FastAPI:
     app.add_middleware(CSRFMiddleware)
     register_exception_handlers(app)
     app.include_router(auth.router, prefix="/api/v1", tags=["auth"])
+    app.include_router(admin.router, prefix="/api/v1", tags=["admin"])
     app.include_router(health.router)
     app.include_router(projects.router, prefix="/api/v1", tags=["projects"])
     proj = "/api/v1/projects/{project_id}"
