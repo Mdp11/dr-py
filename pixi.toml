@@ -27,6 +27,8 @@ alembic = "1.14.*"
 psycopg = "3.2.*"
 google-cloud-storage = "3.*"
 websockets = "15.*"
+pyjwt = "2.*"
+argon2-cffi = "23.*"
 
 [feature.api.tasks.start-backend]
 cmd = "uvicorn data_rover.api.main:app --reload --reload-dir src --host 127.0.0.1 --port 8000 --app-dir src"
