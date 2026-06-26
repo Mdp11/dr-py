@@ -176,3 +176,37 @@ def test_change_password_too_short_new_password_422() -> None:
         headers=_CSRF,
     )
     assert r.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Bootstrap admin + prod secret guard
+# ---------------------------------------------------------------------------
+
+
+def test_bootstrap_admin_created_idempotently(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DATA_ROVER_BOOTSTRAP_ADMIN_EMAIL", "root@x")
+    monkeypatch.setenv("DATA_ROVER_BOOTSTRAP_ADMIN_PASSWORD", "rootpw123")
+    monkeypatch.setenv("DATA_ROVER_IDENTITY_PROVIDER", "cookie")
+    from data_rover.api.main import _ensure_bootstrap_admin
+    from data_rover.api.settings import get_settings
+    _ensure_bootstrap_admin(get_settings())
+    _ensure_bootstrap_admin(get_settings())  # idempotent: no duplicate / no error
+    gen = db.get_db()
+    s = next(gen)
+    try:
+        u = tenancy.get_user_by_email(s, "root@x")
+        assert u is not None and u.is_admin is True
+    finally:
+        gen.close()
+
+
+def test_guard_refuses_insecure_secret_in_prod() -> None:
+    from data_rover.api.main import _guard_prod_secret
+    from data_rover.api.settings import Settings
+    s = Settings(
+        identity_provider="cookie",
+        dev_seed=False,
+        jwt_secret="dev-insecure-secret-change-me",
+    )
+    with pytest.raises(RuntimeError):
+        _guard_prod_secret(s)
