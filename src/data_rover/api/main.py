@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import importer, tenancy
+from .csrf import CSRFMiddleware
 from .db import create_all, db_session, init_engine
 from .db_models import Role
 from .errors import register_exception_handlers
@@ -219,6 +220,7 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(CSRFMiddleware)
     register_exception_handlers(app)
     app.include_router(health.router)
     app.include_router(projects.router, prefix="/api/v1", tags=["projects"])
