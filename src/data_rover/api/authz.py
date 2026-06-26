@@ -78,3 +78,12 @@ def require_owner(
     if membership.role is not Role.owner:
         raise HTTPException(status_code=403, detail="owner role required")
     return membership
+
+
+def require_admin(user: User = Depends(get_current_user)) -> User:
+    """Gate a route on the global ``is_admin`` flag (system-level permission:
+    user management, all-project membership management, project creation).
+    Distinct from ``require_owner``, which is a per-project role check."""
+    if not user.is_admin:
+        raise HTTPException(status_code=403, detail="admin privileges required")
+    return user
