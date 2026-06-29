@@ -1,14 +1,34 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { FeedConfig } from '$lib/api/feed';
+
+// Capture the config startRealtime hands connectFeed so a test can drive the
+// onTerminal callback the way the transport would on a permanent close. The rest
+// of the real feed module (defaultFeedUrl, types) is preserved.
+let lastConfig: FeedConfig | null = null;
+vi.mock('$lib/api/feed', async (orig) => {
+	const real = (await orig()) as typeof import('$lib/api/feed');
+	return {
+		...real,
+		connectFeed: (cfg: FeedConfig) => {
+			lastConfig = cfg;
+			return { close: () => {} };
+		}
+	};
+});
+
 import {
 	clearPendingRebind,
+	getFeedTermination,
 	getLockFor,
 	getLockState,
 	getPresence,
 	getPendingRebind,
 	handleFeedEvent,
-	resetRealtime
+	resetRealtime,
+	startRealtime
 } from '../realtime.svelte';
 import { getCachedElements, resetModelStore, seedElements } from '../model.svelte';
+import { setActiveProject } from '../active-project.svelte';
 
 beforeEach(() => {
 	resetRealtime();
@@ -81,5 +101,30 @@ describe('rebind event', () => {
 		});
 		clearPendingRebind();
 		expect(getPendingRebind()).toBeNull();
+	});
+});
+
+describe('feed termination state', () => {
+	beforeEach(() => {
+		lastConfig = null;
+		setActiveProject('proj-x');
+	});
+	afterEach(() => resetRealtime());
+
+	it('is null initially and set via the onTerminal callback startRealtime wires (after the spread)', () => {
+		expect(getFeedTermination()).toBeNull();
+		startRealtime();
+		// The store must own onTerminal even if a caller tries to pass one.
+		expect(lastConfig?.onTerminal).toBeTypeOf('function');
+		lastConfig?.onTerminal?.(4403);
+		expect(getFeedTermination()).toEqual({ code: 4403 });
+	});
+
+	it('resetRealtime clears termination', () => {
+		startRealtime();
+		lastConfig?.onTerminal?.(4404);
+		expect(getFeedTermination()).toEqual({ code: 4404 });
+		resetRealtime();
+		expect(getFeedTermination()).toBeNull();
 	});
 });

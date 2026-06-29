@@ -3,10 +3,16 @@
 	import { goto } from '$app/navigation';
 	import { Input } from '$lib/components/ui/input';
 	import { Button } from '$lib/components/ui/button';
-	import { isAdmin } from '$lib/state';
+	import { clearAccessNotice, getAccessNotice, isAdmin } from '$lib/state';
 	import { listProjects, type ProjectSummary } from '$lib/api/projects';
 	import ProjectCard from '$lib/components/projects/ProjectCard.svelte';
 	import NewProjectWizard from '$lib/components/projects/NewProjectWizard.svelte';
+
+	// One-shot access-denied notice carried across a workspace → /projects bounce
+	// (e.g. opening a project you are not a member of). Read once on mount and
+	// cleared so a later refresh/navigation doesn't resurface a stale message.
+	const accessNotice = getAccessNotice();
+	onMount(() => clearAccessNotice());
 
 	let projects = $state<ProjectSummary[]>([]);
 	let query = $state('');
@@ -49,6 +55,9 @@
 			<Button size="sm" onclick={() => (wizardOpen = true)}>New project</Button>
 		{/if}
 	</div>
+	{#if accessNotice}
+		<p class="text-sm text-red-400" role="alert">{accessNotice}</p>
+	{/if}
 	<Input type="search" placeholder="Search projects…" bind:value={query} />
 	<div class="flex flex-col gap-2">
 		{#if loading}

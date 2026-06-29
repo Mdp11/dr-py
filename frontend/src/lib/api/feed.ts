@@ -47,6 +47,31 @@ export interface FeedConfig {
 	url: string;
 	socketFactory?: (url: string) => WebSocketLike;
 	reconnect?: { baseMs: number; maxMs: number };
+	/** Invoked once when the feed hits a TERMINAL close (see {@link isTerminalClose})
+	 * and stops reconnecting. The store surfaces this as a banner; this layer stays
+	 * pure transport and does not act on it itself. */
+	onTerminal?: (code: number) => void;
+}
+
+/** Server close codes that are PERMANENT — reconnecting can never succeed:
+ * 4401 (no/expired identity), 4403 (non-member), 4404 (unknown project). The
+ * backend closes with these in routes/feed.py. Reconnecting on them is an
+ * infinite storm, so they terminate the feed immediately. */
+const PERMANENT_CLOSE_CODES = new Set([4401, 4403, 4404]);
+
+/** 4408 ("dropped behind") is the NORMAL catch-up path: the server dropped a
+ * client whose queue overflowed, and reconnecting re-syncs it. But a client that
+ * keeps falling behind would reconnect-storm, so we treat 4408 as terminal only
+ * after this many CONSECUTIVE failed retries. `attempt` resets to 0 on every
+ * successful open, so a high count means the reconnects themselves keep failing. */
+const DROPPED_BEHIND_RETRY_LIMIT = 5;
+
+/** Decide whether a close should terminate the feed (stop reconnecting). Pure so
+ * the policy is unit-testable in isolation. */
+export function isTerminalClose(code: number, attempt: number): boolean {
+	if (PERMANENT_CLOSE_CODES.has(code)) return true;
+	if (code === 4408 && attempt >= DROPPED_BEHIND_RETRY_LIMIT) return true;
+	return false;
 }
 
 export interface FeedConnection {
@@ -89,9 +114,19 @@ export function connectFeed(config: FeedConfig): FeedConnection {
 				/* ignore malformed frames */
 			}
 		});
-		s.addEventListener('close', () => {
+		s.addEventListener('close', (e) => {
 			config.onStatus(false);
 			if (stopped) return;
+			// The CloseEvent carries the server's close code; some terminal codes
+			// must NOT trigger a reconnect (see isTerminalClose). `?? 0` keeps a
+			// codeless close (e.g. a test fake or an abrupt drop) on the normal
+			// reconnect path.
+			const code = (e as { code?: number }).code ?? 0;
+			if (isTerminalClose(code, attempt)) {
+				stopped = true; // also makes onTerminal fire-once: a later close early-returns above
+				config.onTerminal?.(code);
+				return;
+			}
 			const delay = Math.min(max, base * 2 ** attempt);
 			attempt += 1;
 			timer = setTimeout(open, delay);

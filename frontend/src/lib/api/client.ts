@@ -34,6 +34,20 @@ export function setActiveBaseUrl(url: string | null): void {
 	_activeBaseUrl = url;
 }
 
+// Global 401 hook. The api layer must NOT import lib/state (no upward
+// dependency), so a mid-session-expiry bounce is injected as a callback: the
+// app registers a handler once on load (see lib/state/session-recovery). It is
+// invoked on EVERY 401 right before the ApiError is thrown — the handler itself
+// decides whether to act (it no-ops when no user is logged in, so login/boot
+// 401s keep their local handling). The ApiError is always still thrown so local
+// catch blocks (LoginForm, fetchMe) work unchanged.
+let _unauthorizedHandler: (() => void) | null = null;
+
+/** Register (or clear, with null) the global 401 handler. */
+export function setUnauthorizedHandler(fn: (() => void) | null): void {
+	_unauthorizedHandler = fn;
+}
+
 const _SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS', 'TRACE']);
 const CSRF_HEADER = 'X-Requested-With';
 const CSRF_VALUE = 'data-rover';
@@ -107,6 +121,10 @@ export async function apiFetchRaw(
 			}
 		}
 		const message = messageFromBody(parsed, response.status);
+		// Fire the global 401 hook before throwing (the handler self-gates on a
+		// logged-in user, so this is a no-op during login/boot). The error is still
+		// thrown so local catch blocks keep working.
+		if (response.status === 401) _unauthorizedHandler?.();
 		throw errorForStatus(response.status, parsed, message);
 	}
 
