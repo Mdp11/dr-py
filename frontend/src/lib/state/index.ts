@@ -104,6 +104,7 @@ export {
 } from './ui.svelte';
 export {
 	getFeedConnected,
+	getFeedTermination,
 	getLockFor,
 	getLockState,
 	getPresence,
@@ -179,6 +180,13 @@ export {
 export type { ViewChange } from './view-diff';
 export { getCurrentUser, isAdmin, fetchMe, signIn, signOut } from './auth.svelte';
 export { getActiveProjectId, setActiveProject, clearActiveProject } from './active-project.svelte';
+export { installSessionRecovery, recoverFromUnauthorized } from './session-recovery';
+export {
+	getAccessNotice,
+	setAccessNotice,
+	clearAccessNotice,
+	reactToBootError
+} from './access-notice.svelte';
 export {
 	formatViewChange,
 	viewChangeSegments,

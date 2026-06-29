@@ -5,8 +5,14 @@
 	import AppHeader from '$lib/components/AppHeader.svelte';
 	import CommandPalette from '$lib/components/CommandPalette.svelte';
 	import { installKeyboardShortcuts } from '$lib/keyboard.svelte';
+	import { installSessionRecovery } from '$lib/state/session-recovery';
 
 	let { children } = $props();
+
+	// Register the global mid-session 401 handler once for the whole app. The root
+	// layout mounts exactly once in this SPA, so this runs a single time; the
+	// handler self-gates on a logged-in user (no-op otherwise).
+	installSessionRecovery();
 
 	const queryClient = new QueryClient({
 		defaultOptions: {

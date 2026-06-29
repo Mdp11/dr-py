@@ -25,6 +25,10 @@ let _presence = $state<string[]>([]);
 const _lockState = new SvelteMap<string, LeaseLite>();
 let _conn: FeedConnection | null = null;
 let _pendingRebind = $state<{ rev: number; count: number } | null>(null);
+// Terminal feed close (4401/4403/4404, or 4408 after repeated failed retries).
+// Reactive so the workspace can render a context-appropriate banner; the feed
+// transport itself stays pure and only signals via the onTerminal callback.
+let _feedTermination = $state<{ code: number } | null>(null);
 
 type LockTap = (action: 'acquired' | 'released' | 'expired', leases: LeaseLite[]) => void;
 // subscriber registry, iterated to fire taps — never read reactively
@@ -66,6 +70,12 @@ export function getLockFor(id: string): LeaseLite | undefined {
 
 export function getPendingRebind(): { rev: number; count: number } | null {
 	return _pendingRebind;
+}
+
+/** The terminal close code that ended the feed (and stopped reconnection), or
+ * null while the feed is healthy/reconnecting. */
+export function getFeedTermination(): { code: number } | null {
+	return _feedTermination;
 }
 
 export function clearPendingRebind(): void {
@@ -135,6 +145,9 @@ export function startRealtime(config?: Partial<FeedConfig>): void {
 		onEvent: handleFeedEvent,
 		onStatus: (c) => {
 			_connected = c;
+		},
+		onTerminal: (code) => {
+			_feedTermination = { code };
 		}
 	});
 }
@@ -143,6 +156,7 @@ export function stopRealtime(): void {
 	_conn?.close();
 	_conn = null;
 	_connected = false;
+	_feedTermination = null;
 }
 
 /** Test isolation. */
