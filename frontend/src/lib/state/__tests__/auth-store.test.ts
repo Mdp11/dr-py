@@ -1,8 +1,9 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { server } from '../../api/__tests__/server';
-import { fetchMe, getCurrentUser, isAdmin } from '../auth.svelte';
+import { fetchMe, getCurrentUser, isAdmin, signOut } from '../auth.svelte';
 import { getCurrentUserId } from '../../api/identity';
+import { getActiveProjectId, setActiveProject } from '../active-project.svelte';
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => server.resetHandlers());
@@ -26,5 +27,34 @@ describe('auth store', () => {
 		server.use(http.get('/api/v1/auth/me', () => new HttpResponse(null, { status: 401 })));
 		expect(await fetchMe()).toBeNull();
 		expect(getCurrentUser()).toBeNull();
+	});
+});
+
+describe('signOut', () => {
+	afterEach(() => {
+		// Clean up active-project state set by these tests.
+		vi.clearAllMocks();
+	});
+
+	it('clears the active project in the finally block (even on network success)', async () => {
+		server.use(http.post('/api/v1/auth/logout', () => new HttpResponse(null, { status: 204 })));
+		setActiveProject('test-project');
+		expect(getActiveProjectId()).toBe('test-project');
+
+		await signOut();
+
+		// clearActiveProject() must have run in the finally block
+		expect(getActiveProjectId()).toBeNull();
+	});
+
+	it('still clears the active project when logout network call rejects', async () => {
+		server.use(http.post('/api/v1/auth/logout', () => HttpResponse.error()));
+		setActiveProject('test-project');
+
+		// signOut swallows the network error in its finally and clears state
+		await expect(signOut()).rejects.toThrow();
+
+		// Despite the throw, active project must be cleared
+		expect(getActiveProjectId()).toBeNull();
 	});
 });

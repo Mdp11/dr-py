@@ -67,14 +67,13 @@
 			// notice and bounce to /projects rather than silently showing a blank
 			// workspace. A 404 ("No metamodel loaded") for a legitimately empty
 			// project — or any other error — keeps the best-effort return below.
-			if (
-				reactToBootError(err, {
-					setNotice: setAccessNotice,
-					navigate: () => void goto(resolve('/projects'))
-				})
-			)
-				return;
-			return; // no metamodel session-side: nothing else can be loaded
+			// A 403 bounces to /projects (sets access notice + navigates); any other
+			// error means an empty/uninitialised project — nothing else can be loaded.
+			reactToBootError(err, {
+				setNotice: setAccessNotice,
+				navigate: () => void goto(resolve('/projects'))
+			});
+			return;
 		}
 		try {
 			await refreshSummary();
@@ -122,6 +121,14 @@
 				message: 'This project no longer exists.',
 				label: 'Go to projects',
 				action: () => void goto(resolve('/projects'))
+			};
+		// Any other terminal code (e.g. 4408 dropped-behind after repeated retries)
+		// → generic "connection lost" banner with a page-reload affordance.
+		if (code !== undefined)
+			return {
+				message: 'Realtime connection lost.',
+				label: 'Reload',
+				action: () => location.reload()
 			};
 		return null;
 	});

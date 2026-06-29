@@ -2,6 +2,8 @@ import * as authApi from '$lib/api/auth';
 import type { Me } from '$lib/api/auth';
 import { setCurrentUserId } from '$lib/api/identity';
 import { isUnauthorized } from '$lib/api/errors';
+import { clearActiveProject } from './active-project.svelte';
+import { stopRealtime } from './realtime.svelte';
 
 let current = $state<Me | null>(null);
 
@@ -44,5 +46,11 @@ export async function signOut(): Promise<void> {
 		await authApi.logout();
 	} finally {
 		adopt(null);
+		// Tidy up in-browser session state so the feed and project context are
+		// cleared even if the caller didn't (e.g. an explicit sign-out button).
+		// session-recovery.ts also calls these before signOut — that becomes
+		// idempotent (both paths are safe to call in succession).
+		clearActiveProject();
+		stopRealtime();
 	}
 }

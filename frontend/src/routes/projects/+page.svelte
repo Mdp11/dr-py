@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { Input } from '$lib/components/ui/input';
 	import { Button } from '$lib/components/ui/button';
 	import { clearAccessNotice, getAccessNotice, isAdmin } from '$lib/state';
@@ -38,8 +39,7 @@
 	onMount(refresh);
 
 	function open(id: string): void {
-		// eslint-disable-next-line svelte/no-navigation-without-resolve
-		void goto(`/p/${id}`);
+		void goto(resolve(`/p/${id}`));
 	}
 	async function onCreated(id: string): Promise<void> {
 		wizardOpen = false;

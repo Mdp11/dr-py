@@ -37,6 +37,15 @@ describe('ProjectMembersTab', () => {
 		unmount(c);
 	});
 
+	it('shows error message when the initial listProjects fetch fails', async () => {
+		listProjects.mockRejectedValue(new ApiError(500, { detail: 'Server error' }, 'Server error'));
+		const c = mount(ProjectMembersTab, { target: document.body });
+		await new Promise((r) => setTimeout(r, 0));
+		flushSync();
+		expect(document.body.textContent).toContain('Server error');
+		unmount(c);
+	});
+
 	it('shows error message when addMember returns 404 (unknown user)', async () => {
 		listProjects.mockResolvedValue([{ id: 'p1', name: 'Alpha', role: 'owner' }]);
 		listMembers.mockResolvedValue([{ user_id: 'u1', email: 'owner@x', role: 'owner' }]);
