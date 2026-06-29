@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
+	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { onDestroy, onMount } from 'svelte';
 	import TopBar from '$lib/components/TopBar.svelte';
 	import StatusBar from '$lib/components/StatusBar.svelte';
@@ -13,12 +15,19 @@
 	import { maybeAutoload } from '$lib/autoload';
 	import { metamodel as metamodelApi } from '$lib/api';
 	import { Button } from '$lib/components/ui/button';
-	import { getPendingRebind, clearPendingRebind } from '$lib/state/realtime.svelte';
+	import {
+		getFeedTermination,
+		getPendingRebind,
+		clearPendingRebind
+	} from '$lib/state/realtime.svelte';
+	import { recoverFromUnauthorized } from '$lib/state/session-recovery';
 	import { getMetamodel as fetchMetamodel } from '$lib/api/metamodel';
 	import { runValidation } from '$lib/state/validate-action';
 	import {
 		clearModelError,
 		clearSelection,
+		reactToBootError,
+		setAccessNotice,
 		getDiffDrawerOpen,
 		getHistoryDrawerOpen,
 		getModelError,
@@ -52,8 +61,18 @@
 		await maybeAutoload();
 		try {
 			setMetamodel(await metamodelApi.getMetamodel());
-		} catch {
-			return; // no metamodel session-side: nothing else can be loaded
+		} catch (err) {
+			// A 403 means we are NOT a member of this project (an admin sees every
+			// project in the picker, but require_membership 403s on open): set an
+			// access notice and bounce to /projects rather than silently showing a
+			// blank workspace. A 404 ("No metamodel loaded") for a legitimately empty
+			// project — or any other error — falls through to the best-effort return
+			// below (nothing else can be loaded yet).
+			reactToBootError(err, {
+				setNotice: setAccessNotice,
+				navigate: () => void goto(resolve('/projects'))
+			});
+			return;
 		}
 		try {
 			await refreshSummary();
@@ -76,6 +95,42 @@
 	// Peer-rebind banner: shown when another user swapped the metamodel while
 	// this session was open. The user must reload to pick up the new metamodel.
 	const pendingRebind = $derived(getPendingRebind());
+
+	// Feed-termination banner: the realtime feed was permanently closed by the
+	// server (the transport stopped reconnecting). Each terminal code gets a
+	// context-appropriate message + action. 4401 reuses the mid-session 401
+	// recovery (clear session → /login); 4403/4404 bounce to the project picker.
+	const feedTermination = $derived(getFeedTermination());
+	const feedTerminationView = $derived.by(() => {
+		const code = feedTermination?.code;
+		if (code === 4401)
+			return {
+				message: 'Your session expired.',
+				label: 'Sign in',
+				action: () => void recoverFromUnauthorized()
+			};
+		if (code === 4403)
+			return {
+				message: 'You are no longer a member of this project.',
+				label: 'Go to projects',
+				action: () => void goto(resolve('/projects'))
+			};
+		if (code === 4404)
+			return {
+				message: 'This project no longer exists.',
+				label: 'Go to projects',
+				action: () => void goto(resolve('/projects'))
+			};
+		// Any other terminal code (e.g. 4408 dropped-behind after repeated retries)
+		// → generic "connection lost" banner with a page-reload affordance.
+		if (code !== undefined)
+			return {
+				message: 'Realtime connection lost.',
+				label: 'Reload',
+				action: () => location.reload()
+			};
+		return null;
+	});
 
 	// Rebind is non-destructive: only the metamodel pointer and conformance issues change;
 	// element ids and properties are untouched, so the cached element subset stays valid.
@@ -173,9 +228,10 @@
 	const rows = $derived.by(() => {
 		const errorBanner = modelError !== null ? 'auto ' : '';
 		const rebindBanner = pendingRebind !== null ? 'auto ' : '';
+		const feedBanner = feedTerminationView !== null ? 'auto ' : '';
 		return panelOpen
-			? `auto ${errorBanner}${rebindBanner}1fr auto ${panelHeight}px auto`
-			: `auto ${errorBanner}${rebindBanner}1fr auto`;
+			? `auto ${errorBanner}${rebindBanner}${feedBanner}1fr auto ${panelHeight}px auto`
+			: `auto ${errorBanner}${rebindBanner}${feedBanner}1fr auto`;
 	});
 </script>
 
@@ -228,6 +284,24 @@
 			<Button size="sm" variant="ghost" class="h-6 text-xs" onclick={() => void onReloadRebind()}>
 				Reload
 			</Button>
+		</div>
+	{/if}
+	{#if feedTerminationView}
+		<div
+			class="col-span-5 flex items-center gap-3 border-b border-red-900 bg-red-950/60 px-3 py-1.5 text-xs text-red-200"
+			role="alert"
+		>
+			<span class="font-semibold uppercase tracking-wide">Disconnected</span>
+			<span class="truncate">{feedTerminationView.message}</span>
+			<div class="ml-auto flex items-center gap-2">
+				<button
+					type="button"
+					class="rounded border border-red-700 bg-red-900/60 px-2 py-0.5 hover:bg-red-900"
+					onclick={feedTerminationView.action}
+				>
+					{feedTerminationView.label}
+				</button>
+			</div>
 		</div>
 	{/if}
 	<Sidebar />

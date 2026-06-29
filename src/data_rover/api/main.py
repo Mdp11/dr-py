@@ -106,11 +106,20 @@ def _ensure_dev_seed(settings: Settings) -> None:
         view_json=view_path.read_text("utf-8") if view_path.exists() else None,
     )
     _provision_dev_users(settings.dev_users_file)
-    # dev convenience: a known admin login (overridden by BOOTSTRAP_ADMIN_* if set)
+    # dev convenience: a known admin login (overridden by BOOTSTRAP_ADMIN_* if set),
+    # made an OWNER of the seeded ``default`` project so the single dev admin can
+    # actually open and edit it. ``is_admin`` (admin-sees-all) grants picker
+    # VISIBILITY of every project but NOT membership, and the project data/feed
+    # routes still require membership — so without this the dev admin would see
+    # "Smart City" yet 403 on opening it. add_member upserts (idempotent).
     if not settings.bootstrap_admin_email:
         with db_session() as s:
-            if tenancy.get_user_by_email(s, "admin@example.com") is None:
-                tenancy.create_user(s, "admin@example.com", "admin12345", is_admin=True)
+            admin = tenancy.get_user_by_email(s, "admin@example.com")
+            if admin is None:
+                admin = tenancy.create_user(
+                    s, "admin@example.com", "admin12345", is_admin=True
+                )
+            tenancy.add_member(s, DEV_PROJECT_ID, admin.id, Role.owner)
 
 
 def _ensure_bootstrap_admin(settings: Settings) -> None:

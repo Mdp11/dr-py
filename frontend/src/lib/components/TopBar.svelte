@@ -3,6 +3,7 @@
 	import { resolve } from '$app/paths';
 	import { Button } from '$lib/components/ui/button';
 	import {
+		getActiveProjectId,
 		getFilename,
 		getIssues,
 		getLastError,
@@ -154,7 +155,7 @@
 
 		<div class="flex items-center gap-2">
 			<a
-				href={resolve('/compare')}
+				href={resolve(`/p/${getActiveProjectId()}/compare`)}
 				class="inline-flex h-7 items-center rounded px-2 text-xs text-zinc-300 hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
 			>
 				Compare

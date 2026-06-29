@@ -10,11 +10,13 @@
 import { SvelteMap } from 'svelte/reactivity';
 import {
 	connectFeed,
+	defaultFeedUrl,
 	type FeedConfig,
 	type FeedConnection,
 	type FeedEvent,
 	type LeaseLite
 } from '$lib/api/feed';
+import { getActiveProjectId } from '$lib/state/active-project.svelte';
 import { applyDelta, getIssueCounts, getModelRev, refreshSummary } from './model.svelte';
 import type { OpsResponse } from '$lib/api/types';
 
@@ -23,6 +25,10 @@ let _presence = $state<string[]>([]);
 const _lockState = new SvelteMap<string, LeaseLite>();
 let _conn: FeedConnection | null = null;
 let _pendingRebind = $state<{ rev: number; count: number } | null>(null);
+// Terminal feed close (4401/4403/4404, or 4408 after repeated failed retries).
+// Reactive so the workspace can render a context-appropriate banner; the feed
+// transport itself stays pure and only signals via the onTerminal callback.
+let _feedTermination = $state<{ code: number } | null>(null);
 
 type LockTap = (action: 'acquired' | 'released' | 'expired', leases: LeaseLite[]) => void;
 // subscriber registry, iterated to fire taps — never read reactively
@@ -64,6 +70,12 @@ export function getLockFor(id: string): LeaseLite | undefined {
 
 export function getPendingRebind(): { rev: number; count: number } | null {
 	return _pendingRebind;
+}
+
+/** The terminal close code that ended the feed (and stopped reconnection), or
+ * null while the feed is healthy/reconnecting. */
+export function getFeedTermination(): { code: number } | null {
+	return _feedTermination;
 }
 
 export function clearPendingRebind(): void {
@@ -124,12 +136,19 @@ export function handleFeedEvent(e: FeedEvent): void {
 
 export function startRealtime(config?: Partial<FeedConfig>): void {
 	if (_conn) return;
+	const pid = getActiveProjectId();
+	if (!pid) return; // no active project ⇒ no feed
 	_conn = connectFeed({
+		...config,
+		url: config?.url ?? defaultFeedUrl(pid),
+		// handlers are intentionally set after the spread so store logic is always authoritative
 		onEvent: handleFeedEvent,
 		onStatus: (c) => {
 			_connected = c;
 		},
-		...config
+		onTerminal: (code) => {
+			_feedTermination = { code };
+		}
 	});
 }
 
@@ -137,6 +156,7 @@ export function stopRealtime(): void {
 	_conn?.close();
 	_conn = null;
 	_connected = false;
+	_feedTermination = null;
 }
 
 /** Test isolation. */

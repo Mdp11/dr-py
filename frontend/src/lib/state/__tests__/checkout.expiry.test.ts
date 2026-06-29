@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import {
 	ensureCheckout,
 	setProjectInfo,
@@ -12,11 +12,15 @@ import {
 	discardElement
 } from '../index';
 import * as api from '$lib/api/checkout';
+import { setCurrentUserId } from '$lib/api/identity';
 
 beforeEach(() => {
 	resetCheckout();
 	setProjectInfo({ role: 'editor', lockTtlSeconds: 300 });
+	setCurrentUserId('default-user');
 });
+
+afterEach(() => setCurrentUserId(''));
 
 describe('project open + own-lock expiry', () => {
 	it('loadProjectInfo adopts role + ttl from /open', async () => {

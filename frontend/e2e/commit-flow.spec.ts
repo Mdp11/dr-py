@@ -28,6 +28,7 @@ import { test, expect } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { loadFiles } from './helpers/load';
+import { openDefaultProject } from './helpers/auth';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const METAMODEL_PATH = join(__dirname, '..', '..', 'examples', 'smart-city.metamodel.yaml');
@@ -41,7 +42,7 @@ test('check out, edit, and commit a property', async ({ page }) => {
 	// when loading new files over an existing session state.
 	page.on('dialog', (dialog) => void dialog.accept());
 
-	await page.goto('/');
+	await openDefaultProject(page);
 
 	// Load the smart-city example files via the load dialog to ensure a clean,
 	// known starting state regardless of what prior tests left in the session.

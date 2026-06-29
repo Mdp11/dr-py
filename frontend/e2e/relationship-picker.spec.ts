@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { loadFiles } from './helpers/load';
+import { openDefaultProject } from './helpers/auth';
 
 // Self-contained fixtures (mirrors how smoke.spec.ts builds inline buffers).
 // From an `A` element: AtoB is metamodel-allowed; BtoB is not (B-source only).
@@ -50,7 +51,7 @@ test('relationship picker filters by metamodel and reveals all via escape hatch'
 	page
 }) => {
 	test.setTimeout(90_000);
-	await page.goto('/');
+	await openDefaultProject(page);
 	await loadFiles(page, { metamodel: METAMODEL, model: MODEL });
 
 	// Wait for the live feed to connect (model is fully loaded and WebSocket is up).
