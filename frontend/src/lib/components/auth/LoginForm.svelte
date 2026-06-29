@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { signIn } from '$lib/state';
@@ -21,8 +22,7 @@
 		} finally {
 			pending = false;
 		}
-		// eslint-disable-next-line svelte/no-navigation-without-resolve
-		await goto('/projects');
+		await goto(resolve('/projects'));
 	}
 </script>
 

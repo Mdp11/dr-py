@@ -17,10 +17,36 @@
 		return err instanceof ApiError ? err.message : 'Something went wrong.';
 	}
 
+	// Stale-response guard: each call to refresh() increments the counter and
+	// captures the value at dispatch time; a response is discarded if a newer
+	// request has already been dispatched.
+	let _seq = 0;
+
 	async function refresh(): Promise<void> {
-		users = await listUsers(query);
+		const seq = ++_seq;
+		try {
+			const result = await listUsers(query);
+			if (seq !== _seq) return; // stale — a newer request supersedes this one
+			users = result;
+			error = null;
+		} catch (err) {
+			if (seq !== _seq) return;
+			error = errMsg(err);
+		}
 	}
 	onMount(refresh);
+
+	// Debounce timer for search-driven refreshes. Mutations (create/toggle/
+	// delete) call refresh() directly and are intentionally not debounced.
+	let _searchTimer: ReturnType<typeof setTimeout> | null = null;
+
+	function onSearchInput(): void {
+		if (_searchTimer !== null) clearTimeout(_searchTimer);
+		_searchTimer = setTimeout(() => {
+			_searchTimer = null;
+			void refresh();
+		}, 250);
+	}
 
 	async function onCreate(e: SubmitEvent): Promise<void> {
 		e.preventDefault();
@@ -95,7 +121,7 @@
 	</form>
 	{#if error}<p class="text-xs text-red-400">{error}</p>{/if}
 
-	<Input type="search" placeholder="Search users…" bind:value={query} oninput={refresh} />
+	<Input type="search" placeholder="Search users…" bind:value={query} oninput={onSearchInput} />
 
 	<ul class="flex w-full flex-col text-sm">
 		{#each users as u (u.id)}

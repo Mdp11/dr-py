@@ -19,8 +19,12 @@
 	}
 
 	onMount(async () => {
-		projects = await listProjects();
-		if (projects.length) await select(projects[0].id);
+		try {
+			projects = await listProjects();
+			if (projects.length) await select(projects[0].id);
+		} catch (err) {
+			error = errMsg(err);
+		}
 	});
 
 	async function select(id: string): Promise<void> {

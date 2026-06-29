@@ -15,6 +15,7 @@ vi.mock('$lib/api/admin', () => ({
 }));
 
 afterEach(() => {
+	vi.useRealTimers(); // restore if a test left fake timers active
 	document.body.innerHTML = '';
 	vi.clearAllMocks();
 });
@@ -52,6 +53,101 @@ describe('UsersTab', () => {
 			password: 'secret12',
 			is_admin: false
 		});
+		unmount(c);
+	});
+
+	it('debounces search input: rapid keystrokes coalesce into a single refresh', async () => {
+		// onMount refresh
+		listUsers.mockResolvedValue([{ id: 'u1', email: 'a@x', is_admin: false, is_active: true }]);
+		const c = mount(UsersTab, { target: document.body });
+		await new Promise((r) => setTimeout(r, 0));
+		flushSync();
+		const callsAfterMount = listUsers.mock.calls.length; // should be 1
+
+		vi.useFakeTimers();
+		const searchInput = document.querySelector('input[type="search"]') as HTMLInputElement;
+
+		// Three rapid keystrokes — each clears the previous debounce timer
+		for (const val of ['a', 'ab', 'abc']) {
+			searchInput.value = val;
+			searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+		}
+		flushSync();
+
+		// No search refresh has fired yet (timer not elapsed)
+		expect(listUsers).toHaveBeenCalledTimes(callsAfterMount);
+
+		// Fire the debounce; provide a result for the coalesced search
+		listUsers.mockResolvedValue([{ id: 'u2', email: 'ab@x', is_admin: false, is_active: true }]);
+		vi.advanceTimersByTime(250);
+
+		vi.useRealTimers();
+		await new Promise((r) => setTimeout(r, 0));
+		flushSync();
+
+		// Exactly one additional call — for the final query 'abc'
+		expect(listUsers).toHaveBeenCalledTimes(callsAfterMount + 1);
+		expect(listUsers).toHaveBeenLastCalledWith('abc');
+		unmount(c);
+	});
+
+	it('stale-response guard: a slow earlier result does not overwrite a newer one', async () => {
+		let resolveSlowSearch!: (
+			v: { id: string; email: string; is_admin: boolean; is_active: boolean }[]
+		) => void;
+		const slowPromise = new Promise<
+			{ id: string; email: string; is_admin: boolean; is_active: boolean }[]
+		>((r) => {
+			resolveSlowSearch = r;
+		});
+
+		listUsers
+			.mockResolvedValueOnce([]) // onMount
+			.mockReturnValueOnce(slowPromise) // search 'a' (slow)
+			.mockResolvedValueOnce([{ id: 'u2', email: 'fast@x', is_admin: false, is_active: true }]); // search 'ab'
+
+		const c = mount(UsersTab, { target: document.body });
+		await new Promise((r) => setTimeout(r, 0));
+		flushSync();
+
+		vi.useFakeTimers();
+		const searchInput = document.querySelector('input[type="search"]') as HTMLInputElement;
+
+		// Fire search for 'a'
+		searchInput.value = 'a';
+		searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+		vi.advanceTimersByTime(250);
+
+		// Fire search for 'ab' before 'a' resolves
+		searchInput.value = 'ab';
+		searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+		vi.advanceTimersByTime(250);
+
+		vi.useRealTimers();
+		await new Promise((r) => setTimeout(r, 0));
+		flushSync();
+
+		// 'ab' results are visible
+		expect(document.body.textContent).toContain('fast@x');
+
+		// Resolve the stale 'a' search — its results must NOT overwrite 'ab'
+		resolveSlowSearch([{ id: 'u1', email: 'slow@x', is_admin: false, is_active: true }]);
+		await new Promise((r) => setTimeout(r, 0));
+		flushSync();
+
+		expect(document.body.textContent).toContain('fast@x');
+		expect(document.body.textContent).not.toContain('slow@x');
+		unmount(c);
+	});
+
+	it('shows error message when the initial listUsers fetch fails', async () => {
+		listUsers.mockRejectedValue(
+			new ApiError(500, { detail: 'Internal server error' }, 'Internal server error')
+		);
+		const c = mount(UsersTab, { target: document.body });
+		await new Promise((r) => setTimeout(r, 0));
+		flushSync();
+		expect(document.body.textContent).toContain('Internal server error');
 		unmount(c);
 	});
 

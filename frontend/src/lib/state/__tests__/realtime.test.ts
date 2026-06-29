@@ -113,11 +113,15 @@ describe('feed termination state', () => {
 
 	it('is null initially and set via the onTerminal callback startRealtime wires (after the spread)', () => {
 		expect(getFeedTermination()).toBeNull();
-		startRealtime();
-		// The store must own onTerminal even if a caller tries to pass one.
+		const callerOnTerminal = vi.fn();
+		// Pass a caller-supplied onTerminal in the config — the store must override it.
+		startRealtime({ onTerminal: callerOnTerminal });
+		// Handlers are set after the spread, so the store's version overwrites the caller's.
 		expect(lastConfig?.onTerminal).toBeTypeOf('function');
+		expect(lastConfig?.onTerminal).not.toBe(callerOnTerminal);
 		lastConfig?.onTerminal?.(4403);
 		expect(getFeedTermination()).toEqual({ code: 4403 });
+		expect(callerOnTerminal).not.toHaveBeenCalled();
 	});
 
 	it('resetRealtime clears termination', () => {

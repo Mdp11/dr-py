@@ -23,6 +23,9 @@ export default defineConfig({
 			'$app/paths': fileURLToPath(new URL('./src/__mocks__/app-paths.ts', import.meta.url)),
 			'$app/navigation': fileURLToPath(
 				new URL('./src/__mocks__/app-navigation.ts', import.meta.url)
+			),
+			'$app/environment': fileURLToPath(
+				new URL('./src/__mocks__/app-environment.ts', import.meta.url)
 			)
 		}
 	},
