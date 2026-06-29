@@ -60,10 +60,16 @@ export interface FeedConfig {
 const PERMANENT_CLOSE_CODES = new Set([4401, 4403, 4404]);
 
 /** 4408 ("dropped behind") is the NORMAL catch-up path: the server dropped a
- * client whose queue overflowed, and reconnecting re-syncs it. But a client that
- * keeps falling behind would reconnect-storm, so we treat 4408 as terminal only
- * after this many CONSECUTIVE failed retries. `attempt` resets to 0 on every
- * successful open, so a high count means the reconnects themselves keep failing. */
+ * client whose queue overflowed, and reconnecting re-syncs it — so by design we
+ * keep reconnecting on it. The cap below is a backstop for the case where the
+ * reconnect itself never establishes (e.g. the server returns 4408 on the
+ * upgrade without the socket reaching `open`, so `attempt` is not reset): after
+ * this many such consecutive attempts we give up rather than retry forever.
+ * NOTE: a client that connects, syncs, then repeatedly falls behind resets
+ * `attempt` on each successful open, so it stays on the reconnect path and the
+ * cap does not engage — that is intended (each reconnect makes progress), but it
+ * means this limit only catches the never-establishes case. A dedicated
+ * consecutive-4408 counter would close that gap (tracked follow-up). */
 const DROPPED_BEHIND_RETRY_LIMIT = 5;
 
 /** Decide whether a close should terminate the feed (stop reconnecting). Pure so

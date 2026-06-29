@@ -63,12 +63,11 @@
 			setMetamodel(await metamodelApi.getMetamodel());
 		} catch (err) {
 			// A 403 means we are NOT a member of this project (an admin sees every
-			// project in the picker, but require_membership 403s on open). Surface a
-			// notice and bounce to /projects rather than silently showing a blank
-			// workspace. A 404 ("No metamodel loaded") for a legitimately empty
-			// project — or any other error — keeps the best-effort return below.
-			// A 403 bounces to /projects (sets access notice + navigates); any other
-			// error means an empty/uninitialised project — nothing else can be loaded.
+			// project in the picker, but require_membership 403s on open): set an
+			// access notice and bounce to /projects rather than silently showing a
+			// blank workspace. A 404 ("No metamodel loaded") for a legitimately empty
+			// project — or any other error — falls through to the best-effort return
+			// below (nothing else can be loaded yet).
 			reactToBootError(err, {
 				setNotice: setAccessNotice,
 				navigate: () => void goto(resolve('/projects'))
