@@ -2,6 +2,7 @@ import { test, expect, type Download } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { loadFiles } from './helpers/load';
+import { openDefaultProject } from './helpers/auth';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const METAMODEL_PATH = join(__dirname, '..', '..', 'examples', 'example.metamodel.yaml');
@@ -26,7 +27,7 @@ test.beforeEach(async ({ page }) => {
 test('load metamodel + empty model -> create element -> see in diff', async ({ page }) => {
 	test.setTimeout(90_000);
 
-	await page.goto('/');
+	await openDefaultProject(page);
 
 	// --- 1. Load the metamodel + an empty model via the single load dialog ---
 	await loadFiles(page, { metamodel: METAMODEL_PATH, model: EMPTY_MODEL });
@@ -67,7 +68,7 @@ test('Export button downloads the model as a .json file', async ({ page }) => {
 		delete (window as { showSaveFilePicker?: unknown }).showSaveFilePicker;
 	});
 
-	await page.goto('/');
+	await openDefaultProject(page);
 
 	// Spec B: the old DiffDrawer save-to-file flow (with "Export CR" checkbox) was
 	// replaced.  "Commit" now persists changes server-side; the separate "Export"

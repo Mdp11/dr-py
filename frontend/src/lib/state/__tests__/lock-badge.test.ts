@@ -1,14 +1,17 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import { lockBadgeFor } from '../lock-badge';
 import { handleFeedEvent, resetRealtime } from '../realtime.svelte';
+import { setCurrentUserId } from '$lib/api/identity';
 
 beforeEach(() => resetRealtime());
+afterEach(() => setCurrentUserId(''));
 
 describe('lockBadgeFor', () => {
 	it('none when unlocked', () => {
 		expect(lockBadgeFor('e1').state).toBe('none');
 	});
 	it('mine for my holder id', () => {
+		setCurrentUserId('default-user');
 		handleFeedEvent({
 			type: 'lock',
 			action: 'acquired',

@@ -1,8 +1,8 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { z } from 'zod';
 
-import { apiFetch } from '../client';
+import { apiFetch, setActiveBaseUrl, setUnauthorizedHandler } from '../client';
 import { ApiError, ConflictError, NotFoundError, ValidationError } from '../errors';
 import { server } from './server';
 
@@ -129,5 +129,70 @@ describe('apiFetch', () => {
 		expect(receivedUrl).toContain('type=Block');
 		expect(receivedUrl).toContain('target_id=x');
 		expect(receivedUrl).not.toContain('source_id');
+	});
+});
+
+describe('cookie-auth client behavior', () => {
+	it('adds the CSRF header on unsafe methods and omits it on GET', async () => {
+		let postHadCsrf: string | null = null;
+		let getHadCsrf: string | null = null;
+		server.use(
+			http.post('http://t/api/v1/x', ({ request }) => {
+				postHadCsrf = request.headers.get('x-requested-with');
+				return HttpResponse.json({ ok: true });
+			}),
+			http.get('http://t/api/v1/x', ({ request }) => {
+				getHadCsrf = request.headers.get('x-requested-with');
+				return HttpResponse.json({ ok: true });
+			})
+		);
+		await apiFetch('/x', { method: 'POST', body: {} }, { baseUrl: 'http://t/api/v1' });
+		await apiFetch('/x', { method: 'GET' }, { baseUrl: 'http://t/api/v1' });
+		expect(postHadCsrf).toBe('data-rover');
+		expect(getHadCsrf).toBeNull();
+	});
+
+	it('invokes the registered unauthorized handler on a 401 and STILL throws', async () => {
+		const handler = vi.fn();
+		setUnauthorizedHandler(handler);
+		server.use(
+			http.get(`${BASE}/secure`, () => HttpResponse.json({ detail: 'expired' }, { status: 401 }))
+		);
+		await expect(apiFetch('/secure', { method: 'GET' }, cfg)).rejects.toBeInstanceOf(ApiError);
+		expect(handler).toHaveBeenCalledTimes(1);
+		setUnauthorizedHandler(null);
+	});
+
+	it('does not require a handler: a 401 with none set just throws', async () => {
+		setUnauthorizedHandler(null);
+		server.use(http.get(`${BASE}/secure2`, () => new HttpResponse(null, { status: 401 })));
+		await expect(apiFetch('/secure2', { method: 'GET' }, cfg)).rejects.toMatchObject({
+			status: 401
+		});
+	});
+
+	it('only fires the handler on 401, not other statuses', async () => {
+		const handler = vi.fn();
+		setUnauthorizedHandler(handler);
+		server.use(http.get(`${BASE}/secure3`, () => new HttpResponse(null, { status: 403 })));
+		await expect(apiFetch('/secure3', { method: 'GET' }, cfg)).rejects.toMatchObject({
+			status: 403
+		});
+		expect(handler).not.toHaveBeenCalled();
+		setUnauthorizedHandler(null);
+	});
+
+	it('uses the active base URL when no per-call baseUrl is given', async () => {
+		setActiveBaseUrl('http://active/api/v1/projects/p1');
+		let hit = false;
+		server.use(
+			http.get('http://active/api/v1/projects/p1/y', () => {
+				hit = true;
+				return HttpResponse.json({ ok: true });
+			})
+		);
+		await apiFetch('/y', { method: 'GET' });
+		expect(hit).toBe(true);
+		setActiveBaseUrl(null);
 	});
 });

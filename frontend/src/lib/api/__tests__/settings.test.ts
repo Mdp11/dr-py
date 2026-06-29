@@ -3,7 +3,7 @@ import { http, HttpResponse } from 'msw';
 import { getSettings, updateSettings } from '../settings';
 import { server } from './server';
 
-const BASE = 'http://api.test/api/v1/projects/default';
+const BASE = 'http://api.test/api/v1/projects/proj-settings';
 const cfg = { baseUrl: BASE };
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));

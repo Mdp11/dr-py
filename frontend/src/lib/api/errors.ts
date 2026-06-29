@@ -37,6 +37,19 @@ export function errorForStatus(status: number, body: unknown, message: string): 
 	return new ApiError(status, body, message);
 }
 
+export function isUnauthorized(err: unknown): boolean {
+	return err instanceof ApiError && err.status === 401;
+}
+
+/** True for a 403 — the backend's `require_membership` returns 403 for an
+ * authenticated NON-member of a project (404 is reserved for unknown projects,
+ * but also for "no metamodel loaded" in an empty-but-mine project, so 403 is the
+ * only status that reliably means "you are not a member"). Callers use this to
+ * distinguish a denied-access bounce from a legitimately empty project. */
+export function isForbidden(err: unknown): boolean {
+	return err instanceof ApiError && err.status === 403;
+}
+
 export function messageFromBody(body: unknown, status: number): string {
 	if (body && typeof body === 'object') {
 		const b = body as Record<string, unknown>;

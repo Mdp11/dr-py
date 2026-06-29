@@ -1,10 +1,10 @@
 import type { z } from 'zod';
 import { errorForStatus, messageFromBody } from './errors';
-import { DEV_IDENTITY_HEADERS, getCurrentUserId } from './identity';
+import { getCurrentUserId } from './identity';
 
 // Re-exported so existing `import { getCurrentUserId } from '$lib/api/client'`
-// call sites keep working; the value now comes from the dev identity seam
-// (overridable per browser session via `?user=` — see api/identity.ts).
+// call sites keep working; the value now comes from the authenticated user
+// (set by the auth store after GET /auth/me — see api/identity.ts).
 export { getCurrentUserId };
 
 export interface ClientConfig {
@@ -18,10 +18,39 @@ export interface ApiFetchInit extends Omit<RequestInit, 'body'> {
 	query?: Record<string, string | number | boolean | undefined | null>;
 }
 
-// Single-user dev/default routing. A real project picker + auth (later phase)
-// will make the project id dynamic and drop the dev identity headers (a
-// gateway will inject the real identity in production).
-const DEFAULT_BASE_URL = '/api/v1/projects/default';
+// Project-scoped base URL, set once per workspace from the [projectId] route
+// param (see state/active-project.svelte.ts). Non-project-scoped calls
+// (auth/admin/projects-list) pass an explicit { baseUrl: '/api/v1' }. Under the
+// auth flow the active project is always selected (via the picker →
+// /p/[projectId]) before any project-scoped call fires. The fallback is the
+// non-project API root, NOT a hardcoded "default" project: if a project-scoped
+// call ever fires before a project is active it 404s loudly instead of being
+// silently routed at a phantom default project (no dev-identity coupling).
+const FALLBACK_BASE_URL = '/api/v1';
+let _activeBaseUrl: string | null = null;
+
+/** Set the project-scoped base URL used by calls that pass no per-call baseUrl. */
+export function setActiveBaseUrl(url: string | null): void {
+	_activeBaseUrl = url;
+}
+
+// Global 401 hook. The api layer must NOT import lib/state (no upward
+// dependency), so a mid-session-expiry bounce is injected as a callback: the
+// app registers a handler once on load (see lib/state/session-recovery). It is
+// invoked on EVERY 401 right before the ApiError is thrown — the handler itself
+// decides whether to act (it no-ops when no user is logged in, so login/boot
+// 401s keep their local handling). The ApiError is always still thrown so local
+// catch blocks (LoginForm, fetchMe) work unchanged.
+let _unauthorizedHandler: (() => void) | null = null;
+
+/** Register (or clear, with null) the global 401 handler. */
+export function setUnauthorizedHandler(fn: (() => void) | null): void {
+	_unauthorizedHandler = fn;
+}
+
+const _SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS', 'TRACE']);
+const CSRF_HEADER = 'X-Requested-With';
+const CSRF_VALUE = 'data-rover';
 
 function buildUrl(baseUrl: string, path: string, query?: ApiFetchInit['query']): string {
 	const normalizedBase = baseUrl.replace(/\/$/, '');
@@ -70,15 +99,16 @@ export async function apiFetchRaw(
 	init: ApiFetchInit = {},
 	config?: ClientConfig
 ): Promise<Response> {
-	const baseUrl = config?.baseUrl ?? DEFAULT_BASE_URL;
+	const baseUrl = config?.baseUrl ?? _activeBaseUrl ?? FALLBACK_BASE_URL;
 	const doFetch = config?.fetch ?? fetch;
 	const url = buildUrl(baseUrl, path, init.query);
 	const { body, headers } = prepareBody(init);
-	for (const [k, v] of Object.entries(DEV_IDENTITY_HEADERS)) {
-		if (!headers.has(k)) headers.set(k, v);
+	const method = (init.method ?? 'GET').toUpperCase();
+	if (!_SAFE_METHODS.has(method) && !headers.has(CSRF_HEADER)) {
+		headers.set(CSRF_HEADER, CSRF_VALUE);
 	}
 
-	const response = await doFetch(url, { ...init, body, headers });
+	const response = await doFetch(url, { ...init, body, headers, credentials: 'include' });
 
 	if (!response.ok) {
 		let parsed: unknown = undefined;
@@ -91,6 +121,10 @@ export async function apiFetchRaw(
 			}
 		}
 		const message = messageFromBody(parsed, response.status);
+		// Fire the global 401 hook before throwing (the handler self-gates on a
+		// logged-in user, so this is a no-op during login/boot). The error is still
+		// thrown so local catch blocks keep working.
+		if (response.status === 401) _unauthorizedHandler?.();
 		throw errorForStatus(response.status, parsed, message);
 	}
 
