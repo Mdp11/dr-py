@@ -4,6 +4,14 @@ import { server } from '../../api/__tests__/server';
 import { fetchMe, getCurrentUser, isAdmin, signOut } from '../auth.svelte';
 import { getCurrentUserId } from '../../api/identity';
 import { getActiveProjectId, setActiveProject } from '../active-project.svelte';
+import { stopRealtime } from '../realtime.svelte';
+
+// Partial-mock realtime so we can assert signOut() stops the feed, while
+// leaving every other realtime export at its real implementation.
+vi.mock('../realtime.svelte', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('../realtime.svelte')>();
+	return { ...actual, stopRealtime: vi.fn() };
+});
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => server.resetHandlers());
@@ -43,18 +51,21 @@ describe('signOut', () => {
 
 		await signOut();
 
-		// clearActiveProject() must have run in the finally block
+		// clearActiveProject() + stopRealtime() must have run in the finally block
 		expect(getActiveProjectId()).toBeNull();
+		expect(stopRealtime).toHaveBeenCalled();
 	});
 
 	it('still clears the active project when logout network call rejects', async () => {
 		server.use(http.post('/api/v1/auth/logout', () => HttpResponse.error()));
 		setActiveProject('test-project');
 
-		// signOut swallows the network error in its finally and clears state
+		// try/finally re-throws the network error, but the finally block still
+		// runs first — so state is torn down despite the throw.
 		await expect(signOut()).rejects.toThrow();
 
-		// Despite the throw, active project must be cleared
+		// Despite the throw, active project must be cleared + realtime stopped
 		expect(getActiveProjectId()).toBeNull();
+		expect(stopRealtime).toHaveBeenCalled();
 	});
 });
