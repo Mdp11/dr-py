@@ -37,7 +37,7 @@ pixi run -e frontend npm run test:e2e    # playwright (boots backend + dev serve
 pixi run -e frontend npm run check       # svelte-check
 ```
 
-`start-frontend` accepts `metamodel=`, `model=`, `view=` args that autoload files on boot (defaults to the smart-city example).
+`start-frontend` runs the SvelteKit dev server (`npm run dev`). Project content comes from the backend session — the seeded `default` project (dev-seed) or a project created via the New Project wizard — not from any client-side file autoload.
 
 ### Python version gotcha
 
