@@ -38,7 +38,7 @@ export function clearViewState(): void {
 
 /**
  * Capture the current view as the saved/loaded baseline (deep clone). Call this
- * at load points (boot, reload, autoload, Load-files dialog) and after a
+ * at load points (boot, reload, Load-files dialog) and after a
  * successful view file save, so the view-change count resets to 0 there.
  */
 export function setViewBaseline(view: View | null): void {
