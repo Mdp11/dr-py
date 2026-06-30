@@ -30,11 +30,13 @@ pixi run tidy                            # format + lint across frontend, core, 
 pixi run lint-core                       # core only; lint-backend for the API package
 pixi run -e core-dev pytest .            # run pytest directly when you need flags
 
-# Frontend (run inside the frontend env; there are no pixi wrappers for its tests)
+# Frontend (no pixi wrappers for its npm scripts — they MUST run from inside
+# frontend/; the bare `pixi run -e frontend npm test` fails with "Missing script"
+# because pixi runs it from the repo root)
 pixi run start-frontend                  # vite dev on :5173, proxies /api/v1 -> :8000
-pixi run -e frontend npm test            # vitest (happy-dom + MSW)
-pixi run -e frontend npm run test:e2e    # playwright (boots backend + dev server itself)
-pixi run -e frontend npm run check       # svelte-check
+pixi run -e frontend bash -c 'cd frontend && npm test'            # vitest (happy-dom + MSW)
+pixi run -e frontend bash -c 'cd frontend && npm run test:e2e'    # playwright (boots backend + dev server itself)
+pixi run -e frontend bash -c 'cd frontend && npm run check'       # svelte-check
 ```
 
 `start-frontend` runs the SvelteKit dev server (`npm run dev`). Project content comes from the backend session — the seeded `default` project (dev-seed) or a project created via the New Project wizard — not from any client-side file autoload.
