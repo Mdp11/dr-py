@@ -12,7 +12,6 @@
 	import HistoryDrawer from '$lib/components/HistoryDrawer.svelte';
 	import ResizeHandle from '$lib/components/ResizeHandle.svelte';
 	import ResultsPanel from '$lib/components/ResultsPanel.svelte';
-	import { maybeAutoload } from '$lib/autoload';
 	import { metamodel as metamodelApi } from '$lib/api';
 	import { Button } from '$lib/components/ui/button';
 	import {
@@ -53,12 +52,12 @@
 	});
 	onDestroy(() => stopRealtime());
 
-	// App boot: dev autoload first (it installs metamodel + model when
-	// configured), then adopt whatever session the backend already holds — a
-	// page reload mid-session should come back with the model, not a blank
-	// workspace.
+	// App boot: adopt whatever session the backend already holds for this
+	// project — a page reload mid-session should come back with the model, not a
+	// blank workspace. Project content is established server-side (the seeded
+	// `default` project or a project created via the New Project wizard), not by
+	// any client-side file autoload.
 	async function boot(): Promise<void> {
-		await maybeAutoload();
 		try {
 			setMetamodel(await metamodelApi.getMetamodel());
 		} catch (err) {

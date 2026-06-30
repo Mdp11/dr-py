@@ -143,14 +143,7 @@ cmd = "npm install"
 cwd = "frontend"
 
 [feature.frontend.tasks.start-frontend]
-args = [
-    { arg = "metamodel", default = "examples/smart-city.metamodel.yaml" },
-    { arg = "model", default = "examples/smart-city.model.json" },
-    { arg = "view", default = "examples/smart-city.view.json" },
-]
-cmd = """
-AUTOLOAD_METAMODEL_PATH="{{ metamodel }}" AUTOLOAD_MODEL_PATH="{{ model }}" AUTOLOAD_VIEW_PATH="{{ view }}" npm run dev
-"""
+cmd = "npm run dev"
 cwd = "frontend"
 depends-on = [
     { task = "_install-frontend-deps" }
