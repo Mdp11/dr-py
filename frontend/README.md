@@ -1,10 +1,13 @@
 # data-rover-py — frontend
 
-A SvelteKit single-page UI for the `data-rover-py` MBSE engine. Browse a model,
-edit elements and relationships against a live metamodel, validate, and commit —
-all against a FastAPI backend session that holds the model and streams deltas,
-pages, and files to the browser. Edits are staged locally and committed under a
-lock; see the staged-commit flow below.
+A SvelteKit single-page app (client-side routed; login, project picker, admin
+console, and the workspace) for the `data-rover-py` MBSE engine. Users **log in**
+(cookie-based email + password), pick a **project**, then browse a model, edit
+elements and relationships against a live metamodel, validate, and commit — all
+against a FastAPI backend session that holds the model and streams deltas, pages,
+and files to the browser. Edits are staged locally and committed under a lock;
+see the staged-commit flow below. Admins get an **Admin console** to manage users
+and project membership.
 
 The app is rendered statically (adapter-static) and proxies `/api/v1/*` to the
 backend in dev. It does not require Node at runtime — only at build time.
@@ -18,14 +21,17 @@ All tasks are wired through `pixi` so you don't need a global `node`.
 pixi run frontend-install
 
 # dev server on http://127.0.0.1:5173 (proxies /api/v1 -> :8000)
-pixi run frontend-dev
+pixi run start-frontend
 
 # production build into frontend/build (static, hashed assets)
 pixi run frontend-build
 ```
 
-In a separate terminal, start the backend (`pixi run -e api serve`) before
-opening the dev server so the API calls succeed.
+In a separate terminal, start the backend (`pixi run start-backend`) before
+opening the dev server so the API calls succeed. See the **root `README.md`** for
+the full local stack (Postgres + GCS emulator), dev-seed, and how to log in — on
+first boot the dev seed provisions an admin (`admin@example.com` / `admin12345`)
+and the `default` project; the app opens the **login** page.
 
 ## Layout
 
@@ -82,6 +88,41 @@ The UI is a fixed grid:
 suppressed while typing.
 
 ## Architecture
+
+### Auth, projects & routing
+
+Access is **cookie-based** and project-scoped. The shape:
+
+- **Routing & guard** — `routes/+layout.ts` (`ssr=false`) runs on every
+  navigation: it calls `fetchMe()` (`GET /api/v1/auth/me`) and feeds the result
+  to the pure `routes/guard.ts` `guardDecision(pathname, me)` — unauthenticated →
+  `/login`; authed on `/login` → `/projects`; non-admin on `/admin*` → `/projects`.
+  `routes/+page.ts` redirects `/` → `/projects`. The routes are: `/login`,
+  `/projects` (picker), `/admin` (console, admin-only), and
+  `/p/[projectId]` (the workspace) + `/p/[projectId]/compare`.
+- **App chrome** — `routes/+layout.svelte` renders `AppHeader` (email, Sign out,
+  Projects, Admin-if-admin) on the picker/admin routes, but **not** inside the
+  workspace (`/p/…`) or on `/login`.
+- **Active project** — `routes/p/[projectId]/+layout.ts` calls
+  `setActiveProject(params.projectId)` before the page boots, which points the
+  project-scoped API base URL at `/api/v1/projects/{id}` (see
+  `lib/state/active-project.svelte.ts` → `lib/api/client.ts`). Non-project-scoped
+  calls (auth/admin/projects-list) pass an explicit `{ baseUrl: '/api/v1' }`.
+- **Cookie + CSRF client** — every REST call funnels through
+  `lib/api/client.ts` (`apiFetchRaw`): `credentials:'include'` always, and an
+  `X-Requested-With: data-rover` header on unsafe methods (the CSRF token the
+  backend `CSRFMiddleware` checks). The authenticated user id comes from
+  `lib/state/auth.svelte.ts` (`fetchMe`/`signIn` adopt the `Me`, set it on the
+  `lib/api/identity.ts` seam, and clear it on `signOut`).
+- **Graceful denied-access** — the UI handles loss of access instead of blanking:
+  a **403** on workspace boot (an admin opened a project they're visible-but-not-a-
+  member of) sets an access notice and bounces to `/projects`
+  (`routes/p/[projectId]/+page.svelte` + `lib/state/access-notice.svelte.ts`); the
+  realtime feed treats close codes **4401/4403/4404** as terminal (no reconnect
+  storm) and surfaces a banner; and a global **401** from any REST call triggers
+  `lib/state/session-recovery.ts`, which clears auth + active project, stops the
+  feed, and redirects to `/login` (a no-op when already logged out, so login's own
+  401 still shows "invalid credentials" rather than looping).
 
 ### State model (staged-commit flow)
 
@@ -181,13 +222,27 @@ browses the project's durable commit journal:
 ```
 src/
   app.html              SvelteKit shell
-  routes/+page.svelte   Single page; grids the four panels + diff drawer
+  routes/
+    +layout.ts          Client-side load: fetchMe() + guardDecision (auth guard)
+    +layout.svelte      App chrome (AppHeader) on picker/admin routes
+    +page.ts            Redirect / → /projects
+    guard.ts            Pure guardDecision(pathname, me) — no redirect loops
+    login/+page.svelte  Login page (LoginForm)
+    projects/+page.svelte           Project picker (list + search + New Project)
+    admin/+page.svelte              Admin console (Users + Members tabs)
+    p/[projectId]/+layout.ts        setActiveProject → project-scoped base URL
+    p/[projectId]/+page.svelte      The workspace; grids the four panels + drawers
+    p/[projectId]/compare/+page.svelte  Two-model compare screen
   lib/
-    api/                Typed REST client (client.ts), zod schemas, errors;
+    api/                Typed REST client (client.ts: cookie creds + CSRF
+                        header, dynamic project base URL), zod schemas, errors;
                         model-ops / model-read wrap the delta endpoints;
+                        auth.ts (login/logout/me/changePassword), projects.ts
+                        (list/create), admin.ts (user + member CRUD),
+                        identity.ts (current-user-id seam);
                         feed.ts — WebSocket wrapper (auto-reconnect with
-                        exponential backoff, injectable socketFactory for
-                        tests; pure transport, no app state)
+                        exponential backoff, TERMINAL on close 4401/4403/4404,
+                        injectable socketFactory for tests; pure transport)
     api/history.ts      REST client for the commit-history endpoints:
                         getCommitHistory (GET /commits, paged) and
                         getModelAtRev (GET /commits/{rev}/model);
@@ -198,49 +253,63 @@ src/
     state/              model.svelte.ts (staged-edit store) / changes (server
                         change-set badge) / selection / ui / filters /
                         metamodel / workspace / validation / file (filename
-                        + FS Access handle); realtime.svelte.ts — feed
-                        transport store: connection status, presence
+                        + FS Access handle); auth.svelte.ts — current user +
+                        signIn/signOut; active-project.svelte.ts — active id +
+                        base-URL wiring; access-notice.svelte.ts — denied-access
+                        message for the picker; session-recovery.ts — global
+                        401 → clear + bounce to /login; realtime.svelte.ts —
+                        feed transport store: connection status, presence
                         (string[]), lock state (SvelteMap resource_id →
-                        LeaseLite), applies remote commit deltas via
-                        applyDelta; checkout.svelte.ts — lock registry,
-                        ensureCheckout/heartbeat, preview/commit, discard,
-                        role gating; edit-gate.ts — maps an edit intent to its
-                        required locks and gates the mutation; lock-badge.ts —
-                        per-row lock badge derivation; lock-notice.svelte.ts —
-                        transient lock-conflict notice; api/checkout.ts — the
-                        locks + commits REST client; history.svelte.ts —
-                        commit-list store (paged GET /commits), rev→ModelOut
-                        reconstruction cache, resetHistory/loadFirstPage/
-                        loadMore/modelAt
+                        LeaseLite), feed-termination state, applies remote
+                        commit deltas via applyDelta; checkout.svelte.ts — lock
+                        registry, ensureCheckout/heartbeat, preview/commit,
+                        discard, role gating; edit-gate.ts — maps an edit intent
+                        to its required locks and gates the mutation;
+                        lock-badge.ts — per-row lock badge derivation;
+                        lock-notice.svelte.ts — transient lock-conflict notice;
+                        api/checkout.ts — the locks + commits REST client;
+                        history.svelte.ts — commit-list store (paged
+                        GET /commits), rev→ModelOut reconstruction cache,
+                        resetHistory/loadFirstPage/loadMore/modelAt
     metamodel/          Pure helpers (effective properties, multiplicity,
                         containment, subtype) mirroring the Python schema
     components/         TopBar, Sidebar, Workspace, Inspector, StatusBar,
                         DiffDrawer, HistoryDrawer, SettingsDialog,
-                        CommandPalette, dialogs, and ui/ shadcn primitives
-                        (button, dialog, dropdown-menu, …)
+                        CommandPalette, AppHeader, dialogs, and ui/ shadcn
+                        primitives (button, dialog, dropdown-menu, …);
+                        auth/LoginForm, projects/{ProjectCard,NewProjectWizard},
+                        admin/{UsersTab,ProjectMembersTab}
     keyboard.ts         Pure shortcut matcher
     keyboard.svelte.ts  Global window listener + dispatch to state
 ```
 
 ## Tests
 
+npm scripts have no pixi wrappers, so they must run **inside `frontend/`** — the
+bare `pixi run -e frontend npm test` fails ("Missing script") because pixi runs
+it from the repo root. Use the `cd frontend` form:
+
 ```sh
 # Unit tests (vitest + happy-dom + MSW)
-pixi run -e frontend npm test
+pixi run -e frontend bash -c 'cd frontend && npm test'
 
 # End-to-end smoke (Playwright + chromium, headless)
 pixi run -e frontend bash -c 'cd frontend && npx playwright install chromium && npm run test:e2e'
 ```
 
 The Playwright config (`playwright.config.ts`) boots both the backend
-(`pixi run -e api serve`) and the Vite dev server, and reuses them if already
-up. The suites cover: load metamodel → load model → create element → edit →
-confirm the Commit review; check-out → edit → commit with the smart-city
-example; relationship picker; drag-and-drop view curation; advanced search;
-History: open drawer → list commits → diff → revert with compensating commit;
-and Strict mode: enable via Settings → create a conformance-violating element
-→ assert the Commit button is disabled with the strict-mode alert → disable
-strict mode → assert the same batch can now commit.
+(`pixi run -e api start-backend` against an ephemeral SQLite DB +
+`DATA_ROVER_IDENTITY_PROVIDER=cookie`) and the Vite dev server, and reuses them
+if already up. Because auth is cookie-based, the specs **log in first** (see
+`e2e/helpers/auth.ts`, which signs in as the seeded admin and opens the `default`
+project). The suites cover: login + project picker + admin console
+(`auth.spec.ts`); then, in the workspace — load metamodel → load model → create
+element → edit → confirm the Commit review; check-out → edit → commit with the
+smart-city example; relationship picker; drag-and-drop view curation; advanced
+search; History: open drawer → list commits → diff → revert with compensating
+commit; and Strict mode: enable via Settings → create a conformance-violating
+element → assert the Commit button is disabled with the strict-mode alert →
+disable strict mode → assert the same batch can now commit.
 
 **Known infra note**: `rm -f /tmp/data-rover-e2e.db` before each fresh run
 clears the SQLite journal so the in-memory snapshot store stays in sync. When
@@ -249,8 +318,10 @@ automatically (the db and store are already in sync for the live process).
 
 ## Type-checking & lint
 
+Same rule — run these inside `frontend/`:
+
 ```sh
-pixi run -e frontend npm run check    # svelte-check
-pixi run -e frontend npm run lint     # prettier + eslint
-pixi run -e frontend npm run format   # prettier --write
+pixi run -e frontend bash -c 'cd frontend && npm run check'    # svelte-check
+pixi run -e frontend bash -c 'cd frontend && npm run lint'     # prettier + eslint
+pixi run -e frontend bash -c 'cd frontend && npm run format'   # prettier --write
 ```
