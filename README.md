@@ -55,9 +55,57 @@ pixi run start-frontend   # http://localhost:5173  (separate terminal)
 ```
 
 Open <http://localhost:5173>. On first boot the backend seeds project `default`
-from the configured model and provisions your users.
+from the configured model and ensures an admin user exists. The frontend opens
+the **login** page — sign in, pick a project, and you land in the workspace.
 
-### Editing the default **users**
+### Logging in & seeding the first admin
+
+Auth is **cookie-based email + password** (`DATA_ROVER_IDENTITY_PROVIDER=cookie`,
+the default). There is **no self-signup**: admins create every other user from
+the in-app **Admin console**, so a deployment needs a *first* admin to bootstrap
+from. The backend seeds one on startup:
+
+- **Dev (the default here):** with `DATA_ROVER_DEV_SEED=true` and no bootstrap
+  email set, a default admin is seeded:
+
+  ```
+  email:    admin@example.com
+  password: admin12345
+  ```
+
+  It is also made an owner of the `default` project, so you can open and edit it
+  immediately. Log in with these on first boot.
+
+- **Production / a real first admin:** set the bootstrap pair in `.env` (or real
+  env vars):
+
+  ```sh
+  DATA_ROVER_BOOTSTRAP_ADMIN_EMAIL=you@example.com
+  DATA_ROVER_BOOTSTRAP_ADMIN_PASSWORD=<a-strong-password>
+  ```
+
+  On **every** startup the backend ensures this user exists and is an admin
+  (creates it, or promotes an existing user) — independent of `DATA_ROVER_DEV_SEED`,
+  so it works in a no-seed prod deploy. When a bootstrap email is set, the
+  `admin@example.com` dev default is **not** seeded. Set a strong password up
+  front (the `POST /api/v1/auth/change-password` endpoint exists for rotation;
+  there is no change-password screen in the UI yet).
+
+> Production also requires a real `DATA_ROVER_JWT_SECRET` (used to sign session
+> cookies). The backend **refuses to boot** with the insecure default when
+> `identity_provider=cookie` and `dev_seed=false`.
+
+Once logged in as an admin, open **Admin** in the header to create more users
+(each with a password) and manage project membership.
+
+### Pre-provisioning dev **members** (`dev-users.json`)
+
+`dev-users.json` pre-provisions extra users as **members** of `default` (with a
+role), so local setups don't need manual member calls. These users get **no
+password**, so they cannot use the cookie login — they exist for the legacy
+header provider (`?user=…`, below) or to pre-wire a membership you later attach a
+password to in the admin console. For users who should actually log in, create
+them in the **Admin console** instead.
 
 Edit `dev-users.json`:
 
@@ -78,8 +126,8 @@ Edit `dev-users.json`:
 provisioning is idempotent and runs **even on an existing project**, so added
 users and role changes are picked up — no DB reset needed.
 
-> Removing a user from the file does not delete them. To remove a member:
-> `curl -s -H 'x-user-id: default-user' -X DELETE http://127.0.0.1:8000/api/v1/projects/default/members/<id>`
+> Removing a user from the file does not delete them — manage membership in the
+> Admin console (**Members** tab), which adds/removes members on a live project.
 
 The file path is set in `.env` via `DATA_ROVER_DEV_USERS_FILE`.
 
@@ -124,16 +172,23 @@ PYTHONPATH=src pixi run -e core python -m data_rover.migration \
 
 ### Testing multiple users in the browser
 
-The frontend picks its identity from a `?user=` query param (persisted to
-localStorage, default `default-user`). Use **separate browser profiles** (or one
-normal + one Incognito — not two tabs in one profile, which share localStorage):
+Cookie login is per-browser-session, so use **separate browser profiles** (or
+one normal + one Incognito — not two tabs in one profile, which share cookies):
 
-- Profile A → <http://localhost:5173/?user=alice>
-- Profile B → <http://localhost:5173/?user=bob>
+1. Log in as the admin and, in the **Admin console**, create the test users
+   (each with a password) and add them to a project with the role you want to
+   test (editor / viewer).
+2. Profile A → log in as user A; Profile B → log in as user B.
 
-You'll see live presence, locking (alice checks out an element → bob sees it
-locked), commits broadcasting, and viewer write-blocks. Each user must be in
-`dev-users.json` (or be `default-user`).
+You'll see live presence, locking (A checks out an element → B sees it locked),
+commits broadcasting, and viewer write-blocks.
+
+> **Legacy header mode (API/automation only).** Setting
+> `DATA_ROVER_IDENTITY_PROVIDER=header` trusts an `X-User-Id` header (and the
+> `?user=` query param) with no password — handy for `curl`/scripted multi-user
+> testing against the API, where `dev-users.json` members work directly. The
+> browser SPA no longer sends identity headers, so it always uses cookie login
+> regardless of this setting.
 
 ### Reference
 
@@ -143,9 +198,13 @@ locked), commits broadcasting, and viewer write-blocks. Each user must be in
 | `DATA_ROVER_SNAPSHOT_STORE` | `gcs` | Blob store (`gcs` / `memory`) |
 | `DATA_ROVER_GCS_BUCKET` | `data-rover-snapshots` | Snapshot bucket |
 | `DATA_ROVER_STORAGE_EMULATOR_HOST` | `http://localhost:4443` | fake-gcs endpoint (drop in real prod) |
-| `DATA_ROVER_DEV_SEED` | `true` | Auto-seed on startup (`false` in prod) |
+| `DATA_ROVER_DEV_SEED` | `true` | Auto-seed model + dev admin on startup (`false` in prod) |
 | `DATA_ROVER_SEED_METAMODEL` / `_MODEL` / `_VIEW` | smart-city example | Seed artifacts |
-| `DATA_ROVER_DEV_USERS_FILE` | `dev-users.json` | Extra users to provision |
+| `DATA_ROVER_DEV_USERS_FILE` | `dev-users.json` | Extra members to pre-provision (no password) |
+| `DATA_ROVER_IDENTITY_PROVIDER` | `cookie` | Auth mode: `cookie` (login) or `header` (API/legacy) |
+| `DATA_ROVER_JWT_SECRET` | insecure dev default | Session-cookie signing key; **must set in prod** |
+| `DATA_ROVER_BOOTSTRAP_ADMIN_EMAIL` | _(empty)_ | First-admin email; create-or-promote each startup |
+| `DATA_ROVER_BOOTSTRAP_ADMIN_PASSWORD` | _(empty)_ | Password for the bootstrap admin |
 
 | pixi command | Action |
 |---|---|
@@ -168,7 +227,9 @@ pixi run services-down     # or: pixi run services-reset  (also wipes data)
 
 | Change | What to do |
 |---|---|
-| Add user / change role | Edit `dev-users.json` → restart backend |
+| Add a login-capable user / change role | Create + manage in the in-app **Admin console** (no restart) |
+| Pre-wire dev members (no password) | Edit `dev-users.json` → restart backend |
+| Seed the first admin | Set `DATA_ROVER_BOOTSTRAP_ADMIN_*` in `.env` → restart backend (create-or-promote) |
 | Change seeded model | Edit `.env` `SEED_*` (or the files) → `services-reset` + up + `db-upgrade` + start-backend |
 | Change ports / DB / storage config | Edit `.env` → restart backend (some need `services-reset`) |
 

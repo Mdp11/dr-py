@@ -43,7 +43,6 @@ vi.mock('@tanstack/svelte-query', () => ({
 vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
 vi.mock('$app/paths', () => ({ resolve: (p: string) => p }));
 vi.mock('$app/environment', () => ({ browser: false }));
-vi.mock('$lib/autoload', () => ({ maybeAutoload: () => Promise.resolve() }));
 // Boot calls metamodelApi.getMetamodel(); reject so boot() exits early from the catch.
 vi.mock('$lib/api', () => ({
 	metamodel: { getMetamodel: () => Promise.reject(new Error('no mm')) }
