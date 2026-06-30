@@ -5,7 +5,7 @@ Migrates an old-format metamodel + model pair to the new format.
 ## Usage
 
 ```bash
-PYTHONPATH=src python -m data_rover.migration \
+PYTHONPATH=src pixi run -e core python -m data_rover.migration \
   --old-metamodel old.metamodel.json \
   --old-model     old.model.json \
   --out-metamodel new.metamodel.yaml \

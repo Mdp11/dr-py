@@ -1,4 +1,3 @@
-- Remove three separate loading buttons for metamodel, model and view. Only one button, in the popup I choose all 3 of them (view is optional)
 - In the search and tree view, name should always be fully visible, the thing to ellipsize should be the id
 - When clicking on an element, in the details where relationships are shown, there is a little arrow for the direction. Instead of the arrow I want a from/to label (styled like Stereotypes are styled, so with that sort of grey background)
 - Add loading spinner everywhere when there's loading (startup, metamodel/model/view loading, etc.)

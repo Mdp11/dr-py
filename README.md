@@ -20,7 +20,9 @@ global `python` or `node`. Example artifacts live in `examples/`
 
 This brings up the real production code paths — **Postgres** (schema via
 Alembic) + **GCS-protocol snapshots** (a `fake-gcs-server` emulator) + backend +
-frontend. The only dev-only seam is identity (header-based instead of SSO).
+frontend. Auth is the same **cookie-based local login** as production (local
+email + password, no external SSO); the dev-only seams are the GCS emulator and
+the dev seed (auto-provisioned admin + `default` project).
 
 ### 0. Prerequisites (once)
 
