@@ -29,6 +29,24 @@ class ElementOut(BaseModel):
         return cls(**asdict(element))
 
 
+class TreeItem(BaseModel):
+    """Lightweight tree-row projection: everything Sidebar/TreeRow.svelte
+    renders for a row (display name, type, expand caret) WITHOUT the element's
+    full ``properties`` bag. A ~1k-row folder ships as tens of KB instead of
+    many MB, and the payload cost no longer scales with property size."""
+
+    id: str
+    type_name: str
+    display_name: str
+    child_count: int = 0
+
+
+class TreeItemPage(BaseModel):
+    items: list["TreeItem"] = Field(default_factory=list)
+    #: number of items BEFORE limit/offset paging
+    total: int = 0
+
+
 class RelationshipOut(BaseModel):
     id: str
     type_name: str

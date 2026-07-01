@@ -52,6 +52,7 @@ from ..schemas import (
     NeighborhoodOut,
     RelationshipOut,
     RelationshipPage,
+    TreeItem,
 )
 
 router = APIRouter()
@@ -414,9 +415,19 @@ def list_element_relationships(
 
 
 def _display_name(element: Element) -> str:
-    """``displayName`` in ContainmentTree.svelte: non-empty name prop or id."""
-    name = element.properties.get("name")
-    return name if isinstance(name, str) and name else element.id
+    """``elementDisplayName`` in lib/util/element-name.ts: the case-insensitive
+    non-empty ``name`` property, else the id. An exact lowercase ``name`` wins
+    over other casings (``Name``/``NAME``) — kept in lock-step with the client
+    so a row's label is identical whether it comes from the lite (server) or
+    full (client) source."""
+    props = element.properties
+    exact = props.get("name")
+    if isinstance(exact, str) and exact:
+        return exact
+    for key, value in props.items():
+        if key != "name" and key.lower() == "name" and isinstance(value, str) and value:
+            return value
+    return element.id
 
 
 def _containment_child_ids(model: Model, element_id: str) -> list[str]:
@@ -443,6 +454,16 @@ def _containment_child_ids(model: Model, element_id: str) -> list[str]:
 def _containment_item(model: Model, element_id: str) -> ContainmentItem:
     return ContainmentItem(
         element=ElementOut.from_core(model.elements[element_id]),
+        child_count=len(_containment_child_ids(model, element_id)),
+    )
+
+
+def _tree_item(model: Model, element_id: str) -> TreeItem:
+    el = model.elements[element_id]
+    return TreeItem(
+        id=el.id,
+        type_name=el.type_name,
+        display_name=_display_name(el),
         child_count=len(_containment_child_ids(model, element_id)),
     )
 
