@@ -1,7 +1,0 @@
-{
-  "_comment": "Extra dev users provisioned as members of the seeded `default` project. Copy to dev-users.json and point DATA_ROVER_DEV_USERS_FILE at it. role: owner | editor | viewer. Applied on every dev seed (idempotent). The `default-user` owner is always seeded regardless of this file.",
-  "users": [
-    { "id": "alice", "email": "alice@example.com", "role": "editor" },
-    { "id": "bob", "email": "bob@example.com", "role": "viewer" }
-  ]
-}
