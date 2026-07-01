@@ -43,8 +43,6 @@ from ..search import SearchQueryIn, SearchResultPage, run_query
 from ..schemas import (
     ChangesOut,
     ChangesSummaryOut,
-    ContainmentItem,
-    ContainmentPage,
     CrBaseline,
     ElementOut,
     ElementPage,
@@ -53,6 +51,7 @@ from ..schemas import (
     RelationshipOut,
     RelationshipPage,
     TreeItem,
+    TreeItemPage,
 )
 
 router = APIRouter()
@@ -482,13 +481,6 @@ def _containment_child_ids(model: Model, element_id: str) -> list[str]:
     return list(out)
 
 
-def _containment_item(model: Model, element_id: str) -> ContainmentItem:
-    return ContainmentItem(
-        element=ElementOut.from_core(model.elements[element_id]),
-        child_count=len(_containment_child_ids(model, element_id)),
-    )
-
-
 def _tree_item(model: Model, element_id: str) -> TreeItem:
     el = model.elements[element_id]
     return TreeItem(
@@ -504,23 +496,22 @@ def list_containment_roots(
     limit: int = Query(100, ge=1, le=MAX_PAGE_LIMIT),
     offset: int = Query(0, ge=0),
     session: Session = Depends(get_request_session),
-) -> ContainmentPage:
+) -> TreeItemPage:
     """Elements with no containment parent, sorted by display name then id.
 
     Display-name order (not insertion order) on purpose, exactly like
     ``list_containment_children``: it is the order ContainmentTree.svelte renders
     the root level in, and a paged client cannot re-sort a level it only holds
     one page of — re-sorting an accumulated prefix would make scroll auto-load
-    reshuffle rows above the viewport (a visible "jump").
+    reshuffle rows above the viewport (a visible "jump"). Rows are the lite
+    :class:`TreeItem` projection.
     """
     _, model = require_model(session)
     idx = model.indexes
     root_ids = [eid for eid in model.elements if idx.first_parent(eid) is None]
     root_ids.sort(key=lambda eid: (_display_name(model.elements[eid]), eid))
-    return ContainmentPage(
-        items=[
-            _containment_item(model, eid) for eid in root_ids[offset : offset + limit]
-        ],
+    return TreeItemPage(
+        items=[_tree_item(model, eid) for eid in root_ids[offset : offset + limit]],
         total=len(root_ids),
     )
 
@@ -543,11 +534,12 @@ def list_excluded_roots(
     limit: int = Query(100, ge=1, le=MAX_PAGE_LIMIT),
     offset: int = Query(0, ge=0),
     session: Session = Depends(get_request_session),
-) -> ContainmentPage:
+) -> TreeItemPage:
     """Containment roots NOT placed in the active view (the 'excluded pool').
     Sorted by display name then id, like ``list_containment_roots`` (so the
     paged pool grows by appending, never reshuffling). With no active view,
-    every root is excluded (returns all roots)."""
+    every root is excluded (returns all roots). Rows are the lite
+    :class:`TreeItem` projection."""
     _, model = require_model(session)
     idx = model.indexes
     placed = _placed_element_ids(session.view) if session.view is not None else set()
@@ -557,10 +549,8 @@ def list_excluded_roots(
         if idx.first_parent(eid) is None and eid not in placed
     ]
     root_ids.sort(key=lambda eid: (_display_name(model.elements[eid]), eid))
-    return ContainmentPage(
-        items=[
-            _containment_item(model, eid) for eid in root_ids[offset : offset + limit]
-        ],
+    return TreeItemPage(
+        items=[_tree_item(model, eid) for eid in root_ids[offset : offset + limit]],
         total=len(root_ids),
     )
 
@@ -571,21 +561,20 @@ def list_containment_children(
     limit: int = Query(100, ge=1, le=MAX_PAGE_LIMIT),
     offset: int = Query(0, ge=0),
     session: Session = Depends(get_request_session),
-) -> ContainmentPage:
+) -> TreeItemPage:
     """Containment children of one element, sorted by display name then id.
 
     Display-name order (not insertion order) on purpose: it is the order
     ContainmentTree.svelte renders a level in, and a paged client cannot
-    re-sort a level it only holds one page of.
+    re-sort a level it only holds one page of. Rows are the lite
+    :class:`TreeItem` projection.
     """
     _, model = require_model(session)
     _require_element(model, element_id)
     child_ids = _containment_child_ids(model, element_id)
     child_ids.sort(key=lambda cid: (_display_name(model.elements[cid]), cid))
-    return ContainmentPage(
-        items=[
-            _containment_item(model, cid) for cid in child_ids[offset : offset + limit]
-        ],
+    return TreeItemPage(
+        items=[_tree_item(model, cid) for cid in child_ids[offset : offset + limit]],
         total=len(child_ids),
     )
 
