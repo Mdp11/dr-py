@@ -29,6 +29,6 @@ export async function openDefaultProject(page: Page): Promise<void> {
 	await login(page);
 	// Guard against racing the picker's projects fetch before clicking.
 	await expect(page.getByText('Smart City')).toBeVisible();
-	await page.getByText('Smart City').click(); // the dev-seeded default project
+	await page.getByText('Smart City').click(); // seeded by seed.setup.ts
 	await page.waitForURL('**/p/**');
 }
