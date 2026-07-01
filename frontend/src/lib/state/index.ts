@@ -25,6 +25,7 @@ export {
 	adoptSummary,
 	applyDelta,
 	clearModelError,
+	dropTreeItems,
 	emit,
 	ensureElement,
 	ensureElements,

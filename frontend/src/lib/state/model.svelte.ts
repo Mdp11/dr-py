@@ -162,6 +162,15 @@ export function seedTreeItems(items: readonly TreeItem[]): void {
 	}
 }
 
+/** Evict lite rows so a subsequent ensureTreeItems refetches them (used after a
+ * structural change that may have altered display_name / child_count). */
+export function dropTreeItems(ids: readonly string[]): void {
+	for (const id of ids) {
+		_treeItems.delete(id);
+		_missingElementIds.delete(id);
+	}
+}
+
 export function getCachedRelationships(): ReadonlyMap<string, Relationship> {
 	return _relationships;
 }
