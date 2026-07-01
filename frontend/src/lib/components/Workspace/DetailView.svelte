@@ -9,6 +9,7 @@
 		select
 	} from '$lib/state';
 	import { deleteLock } from '$lib/state/edit-gate';
+	import { lockBadgeFor } from '$lib/state';
 	import { nameProp } from '$lib/util/element-name';
 	import PropertyForm from '../Inspector/PropertyForm.svelte';
 
@@ -49,6 +50,16 @@
 		if (entity === null || selection?.kind !== 'relationship') return null;
 		const rel = entity as Relationship;
 		return elements.get(rel.target_id) ?? null;
+	});
+
+	// The delete/disconnect action locks the element itself (delete) or the
+	// relationship's SOURCE element (disconnect); if a peer holds that lock the
+	// action can't succeed, so disable the button instead of failing on click.
+	const deleteLockedByOther = $derived.by((): boolean => {
+		if (entity === null) return false;
+		const lockId =
+			selection?.kind === 'relationship' ? (entity as Relationship).source_id : entity.id;
+		return lockBadgeFor(lockId).state === 'theirs';
 	});
 
 	function displayName(el: Element | null, fallbackId: string): string {
@@ -98,7 +109,9 @@
 			</div>
 			<button
 				type="button"
-				class="text-xs text-red-400 underline-offset-2 hover:underline"
+				class="text-xs text-red-400 underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline"
+				disabled={deleteLockedByOther}
+				title={deleteLockedByOther ? 'Locked by another user' : undefined}
 				onclick={onDeleteElement}
 			>
 				Delete
@@ -117,7 +130,9 @@
 				</div>
 				<button
 					type="button"
-					class="text-xs text-red-400 underline-offset-2 hover:underline"
+					class="text-xs text-red-400 underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline"
+					disabled={deleteLockedByOther}
+					title={deleteLockedByOther ? 'Locked by another user' : undefined}
 					onclick={onDisconnectRelationship}
 				>
 					Disconnect

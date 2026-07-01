@@ -37,7 +37,12 @@ import {
  * this store is the authoritative source for my own tokens.
  */
 
-export type LockConflictLite = { resource_id: string; held_by: string; held_mode: string };
+export type LockConflictLite = {
+	resource_id: string;
+	held_by: string;
+	held_by_email?: string;
+	held_mode: string;
+};
 export type CheckoutResult =
 	| { ok: true }
 	| { ok: false; reason: 'viewer' | 'conflict'; conflicts?: LockConflictLite[] };

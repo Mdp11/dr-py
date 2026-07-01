@@ -210,6 +210,7 @@ export const LeaseOutSchema = z.object({
 	resource_id: z.string(),
 	mode: z.string(),
 	holder: z.string(),
+	holder_email: z.string().optional(),
 	token: z.string(),
 	intent: z.string(),
 	expires_at: z.number()

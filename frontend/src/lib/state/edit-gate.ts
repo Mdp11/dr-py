@@ -6,7 +6,8 @@ import type { LockTargetIn, LockIntent } from '$lib/api/types';
 function explain(res: Extract<CheckoutResult, { ok: false }>): string {
 	if (res.reason === 'viewer') return 'You have view-only access to this project.';
 	const c = res.conflicts?.[0];
-	return c ? `Locked by ${c.held_by}.` : 'Could not acquire a lock (held by someone else).';
+	if (!c) return 'Could not acquire a lock (held by someone else).';
+	return `Locked by ${c.held_by_email || c.held_by}.`;
 }
 
 async function gate(targets: LockTargetIn[], intent: LockIntent): Promise<boolean> {

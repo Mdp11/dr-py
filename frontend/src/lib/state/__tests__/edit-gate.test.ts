@@ -1,11 +1,13 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { editLock, connectLock, deleteLock } from '../edit-gate';
 import { setProjectInfo, resetCheckout } from '../index';
+import { getLockNotice, setLockNotice } from '../lock-notice.svelte';
 import * as api from '$lib/api/checkout';
 
 beforeEach(() => {
 	resetCheckout();
 	setProjectInfo({ role: 'editor', lockTtlSeconds: 300 });
+	setLockNotice(null);
 });
 
 describe('edit-gate', () => {
@@ -17,6 +19,7 @@ describe('edit-gate', () => {
 					resource_id: 'e1',
 					mode: 'exclusive',
 					holder: 'default-user',
+					holder_email: 'me@x.io',
 					token: 't',
 					intent: 'edit',
 					expires_at: 1
@@ -61,5 +64,27 @@ describe('edit-gate', () => {
 			)
 		);
 		expect(await editLock('e1')).toBe(false);
+	});
+
+	it('names the conflict holder by email in the notice when available', async () => {
+		const { ConflictError } = await import('$lib/api/errors');
+		vi.spyOn(api, 'acquireLocks').mockRejectedValue(
+			new ConflictError(
+				409,
+				{
+					conflicts: [
+						{
+							resource_id: 'e1',
+							held_by: 'bob-uuid',
+							held_by_email: 'bob@x.io',
+							held_mode: 'exclusive'
+						}
+					]
+				},
+				'lock conflict'
+			)
+		);
+		expect(await editLock('e1')).toBe(false);
+		expect(getLockNotice()).toBe('Locked by bob@x.io.');
 	});
 });

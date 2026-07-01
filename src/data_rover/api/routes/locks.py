@@ -32,7 +32,12 @@ router = APIRouter()
 
 def _lease_event_dicts(leases: list[Lease]) -> list[dict[str, str]]:
     return [
-        {"resource_id": le.resource_id, "mode": le.mode.value, "holder_id": le.holder}
+        {
+            "resource_id": le.resource_id,
+            "mode": le.mode.value,
+            "holder_id": le.holder,
+            "holder_email": le.holder_email,
+        }
         for le in leases
     ]
 
@@ -42,6 +47,7 @@ def _lease_out(le: Lease) -> LeaseOut:
         resource_id=le.resource_id,
         mode=le.mode.value,
         holder=le.holder,
+        holder_email=le.holder_email,
         token=le.token,
         intent=le.intent.value,
         expires_at=le.expires_at,
@@ -61,7 +67,7 @@ def acquire_locks(
     ttl = float(get_settings().lock_ttl_seconds)
     with session.write_mutex:
         token, leases, conflicts = session.lock_table.acquire(
-            user.id, reqs, now=now, ttl=ttl, steal=payload.steal
+            user.id, reqs, now=now, ttl=ttl, steal=payload.steal, holder_email=user.email
         )
     if conflicts:
         return JSONResponse(
@@ -72,6 +78,7 @@ def acquire_locks(
                     {
                         "resource_id": c.resource_id,
                         "held_by": c.held_by,
+                        "held_by_email": c.held_by_email,
                         "held_mode": c.held_mode.value,
                     }
                     for c in conflicts
