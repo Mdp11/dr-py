@@ -1,7 +1,8 @@
 """Authorization: gate project-scoped requests on membership + role.
 
 ``require_membership`` resolves the ``project_id`` path param, confirms the
-project exists (404) and the current user is a member (403), and rejects writes
+project exists (404) and the current user is a member (403 — except global
+admins, who get implicit owner access to every project), and rejects writes
 by viewers (403). ``require_owner`` further restricts to owners (membership
 management). These are wired into every project-scoped route transitively via
 ``deps.get_request_session`` (Task 8), so route handlers need no changes.
@@ -64,6 +65,15 @@ def require_membership(
         raise HTTPException(status_code=404, detail="project not found")
     membership = get_membership(db, user.id, project_id)
     if membership is None:
+        # Global admins have implicit owner access to EVERY project so they can
+        # open/manage any project without an explicit membership row. This is a
+        # transient in-memory Membership (never added to the DB session); it
+        # carries the owner role through the request so the viewer-write guard
+        # below is naturally satisfied.
+        if user.is_admin:
+            return Membership(
+                user_id=user.id, project_id=project_id, role=Role.owner
+            )
         raise HTTPException(status_code=403, detail="not a project member")
     if _is_write(request) and membership.role is Role.viewer:
         raise HTTPException(
