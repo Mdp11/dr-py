@@ -210,3 +210,17 @@ def test_guard_refuses_insecure_secret_in_prod() -> None:
     )
     with pytest.raises(RuntimeError):
         _guard_prod_secret(s)
+
+
+def test_guard_refuses_insecure_admin_password_in_prod() -> None:
+    from data_rover.api.main import _guard_prod_secret
+    from data_rover.api.settings import Settings
+    s = Settings(
+        identity_provider="cookie",
+        dev_seed=False,
+        jwt_secret="a-real-secret-value-here",  # real secret: isolate the admin-pw guard
+        bootstrap_admin_email="admin@example.com",
+        bootstrap_admin_password="admin12345",
+    )
+    with pytest.raises(RuntimeError):
+        _guard_prod_secret(s)
