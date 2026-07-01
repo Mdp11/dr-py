@@ -39,7 +39,7 @@ pixi run -e frontend bash -c 'cd frontend && npm run test:e2e'    # playwright (
 pixi run -e frontend bash -c 'cd frontend && npm run check'       # svelte-check
 ```
 
-`start-frontend` runs the SvelteKit dev server (`npm run dev`). Project content comes from the backend session — the seeded `default` project (dev-seed) or a project created via the New Project wizard — not from any client-side file autoload.
+`start-frontend` runs the SvelteKit dev server (`npm run dev`). Project content comes from the backend session — a project created via the New Project wizard (or imported via the importer CLI) — not from any client-side file autoload.
 
 ### Python version gotcha
 
@@ -72,7 +72,7 @@ User/project/membership data lives in a **SQLAlchemy + Postgres** layer, separat
 - **Local auth (`auth.py` + `routes/auth.py`)** — `auth.py` holds the primitives: argon2 (`argon2-cffi`) `hash_password`/`verify_password`, PyJWT session-token `mint_token`/`decode_token` (carries `user_id` + `is_admin`), and `set_session_cookie`/`clear_session_cookie` (HttpOnly, SameSite=Strict, `Secure` per `auth_cookie_secure`). `routes/auth.py` mounts `/api/v1/auth/{login,logout,me,change-password}`; login is timing-equalized against user enumeration. No change-password UI exists yet — the endpoint is the only path.
 - **`routes/admin.py`** — router-level `require_admin`; `/api/v1/admin/users` CRUD + `/api/v1/admin/projects/{id}/members` management. This is the only way to create login-capable users under cookie auth (last-admin/last-owner lockout guards live in `tenancy.py`).
 - **`csrf.py` (`CSRFMiddleware`)** — defense-in-depth wired after CORS: on an unsafe method, **if** the session cookie is present, require the `X-Requested-With: data-rover` header (else 403). Cookie-less header-auth requests and login (no cookie yet) are exempt.
-- **Dev seed & first admin** — `main._ensure_dev_seed` (gated by `settings.dev_seed`, SQLite-only `create_all`) imports the seed model as the `default` project, provisions extra **members** from `dev_users_file` (passwordless — header-mode / pre-wiring only), and — when no bootstrap email is set — seeds a dev admin (`admin@example.com` / `admin12345`) made an **owner** of `default` so admin-sees-all visibility is backed by real membership. `_ensure_bootstrap_admin` runs **always** (independent of `dev_seed`): it create-or-promotes `DATA_ROVER_BOOTSTRAP_ADMIN_EMAIL`/`_PASSWORD` as a global admin — the first admin a fresh deploy logs in as. `_guard_prod_secret` refuses to boot the cookie provider with the insecure default `DATA_ROVER_JWT_SECRET` when `dev_seed=false`. The frontend is a real **login + project picker + admin console** (not single-user). Set `DATA_ROVER_DEV_SEED=false` in production.
+- **Dev seed & first admin** — `main._ensure_dev_seed` (gated by `settings.dev_seed`, SQLite-only) **only creates the schema** (`create_all`) — no model or user seeding. `_ensure_bootstrap_admin` is the **sole** user-seed path and runs **always** (independent of `dev_seed`): it create-or-promotes `DATA_ROVER_BOOTSTRAP_ADMIN_EMAIL`/`_PASSWORD` as a global admin — the first admin a fresh deploy logs in as. `_guard_prod_secret` refuses to boot the cookie provider with the insecure default `DATA_ROVER_JWT_SECRET` when `dev_seed=false`. The frontend is a real **login + project picker + admin console** (not single-user). Set `DATA_ROVER_DEV_SEED=false` in production.
 - **`routes/ops.py` (`POST /model/ops`)** is the mutation path: clients send small op batches (mirroring `frontend/src/lib/state/ops.ts`). Ops are applied **in place** to the live model while inverse ops are collected; a mid-batch failure rolls back by applying inverses in reverse and returns **422**. Each accepted batch bumps `model_rev` once and is appended to `op_log` for undo.
 - **Rev conflicts**: clients echo `model_rev` as `base_rev`; a stale batch gets **409** and the client must reload.
 - **Undo** (`POST /model/undo`) replays an op-log batch's inverses in restore mode (`Model.restore_element/restore_relationship` reinstate exact ids). `op_log` is capped at `OP_LOG_MAX` (1000 batches); past that, `GET /model/changes` reports `complete: false`.
@@ -112,7 +112,7 @@ over a durable journal**, hydrated on cache-miss and snapshotted on eviction.
   **export** conveniences.
 - **`importer.py`** (`python -m data_rover.api.importer`) turns
   `(metamodel.yaml + model.json + view.json)` into a project's rev-0 baseline;
-  the dev-seed reuses it to load `examples/smart-city.*` into `default`.
+  the importer CLI / New Project wizard load `examples/smart-city.*` on demand (no autoload).
 
 ### Check-out/commit + locking (`src/data_rover/api/`, Phase 4)
 
