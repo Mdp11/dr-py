@@ -30,11 +30,12 @@ from sqlalchemy.orm import Session
 
 from data_rover.core.metamodel.loader import load_metamodel_str
 
-from .. import importer, tenancy
+from .. import content, importer, tenancy
 from ..authz import require_admin, require_membership
 from ..db import get_db
 from ..db_models import Membership, Project, Role, User
 from ..identity import get_current_user
+from ..serialize import iter_model_json
 from ..session import get_registry
 from ._snapshot import build_model_from_dicts
 
@@ -49,6 +50,10 @@ class ProjectOut(BaseModel):
     id: str
     name: str
     role: Role
+
+
+class CloneIn(BaseModel):
+    name: str | None = None
 
 
 @router.get("/projects", response_model=list[ProjectOut])
@@ -116,6 +121,48 @@ def get_project(
     if project is None:  # require_membership already proved existence
         raise HTTPException(status_code=404, detail="project not found")
     return ProjectOut(id=project.id, name=project.name, role=membership.role)
+
+
+@router.post("/projects/{project_id}/clone", response_model=ProjectOut, status_code=201)
+def clone_project(
+    project_id: str,
+    body: CloneIn | None = None,
+    membership: Membership = Depends(require_membership),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ProjectOut:
+    """Clone the CURRENT state of a project into a brand-new project owned by
+    the caller. Any member may clone (``require_membership``). The clone copies
+    metamodel + current model + view as a fresh rev-0 baseline via the importer;
+    commit history is NOT carried over."""
+    src = db.get(Project, project_id)
+    if src is None:  # require_membership already proved existence
+        raise HTTPException(status_code=404, detail="project not found")
+    model_row = content.get_model_row(db, project_id)
+    if model_row is None:
+        raise HTTPException(status_code=409, detail="project has no content to clone")
+    mm_row = content.get_metamodel_row(db, model_row.metamodel_id)
+    if mm_row is None:
+        raise HTTPException(status_code=409, detail="project metamodel missing")
+    view_row = content.get_single_view(db, project_id)
+
+    # Materialize the source's CURRENT model as save-file JSON from the live
+    # session (hydrates on cache-miss); iter_model_json streams entity-by-entity.
+    session = get_registry().get(project_id)
+    assert session.model is not None  # model_row above proves content was persisted
+    model_json = "".join(iter_model_json(session.model))
+
+    new_name = (body.name if body and body.name else f"{src.name} (copy)")
+    new_id = uuid.uuid4().hex
+    importer.import_project(
+        project_id=new_id,
+        name=new_name,
+        owner_id=user.id,
+        metamodel_yaml=mm_row.blob,
+        model_json=model_json,
+        view_json=view_row.blob if view_row is not None else None,
+    )
+    return ProjectOut(id=new_id, name=new_name, role=Role.owner)
 
 
 @router.delete("/projects/{project_id}", status_code=204)
