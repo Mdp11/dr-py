@@ -91,6 +91,7 @@
 		}
 	}
 	async function remove(u: AdminUser): Promise<void> {
+		if (!window.confirm(`Delete user "${u.email}"? This cannot be undone.`)) return;
 		error = null;
 		busy = true;
 		try {
