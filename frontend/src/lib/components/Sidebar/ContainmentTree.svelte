@@ -2,7 +2,7 @@
 	import { untrack } from 'svelte';
 	import { browser } from '$app/environment';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
-	import type { ContainmentItem, Element } from '$lib/api/types';
+	import type { TreeItem, Element } from '$lib/api/types';
 	import {
 		listContainmentChildren,
 		listContainmentRootsPaged,
@@ -13,9 +13,9 @@
 		createFolder,
 		createTempId,
 		emit,
-		ensureElements,
+		ensureTreeItems,
 		ensureTypeFilterInitialized,
-		getCachedElements,
+		getTreeElements,
 		getIssues,
 		getMetamodel,
 		getMissingElementIds,
@@ -31,7 +31,7 @@
 		placeElement,
 		placeElementsAt,
 		removeElement,
-		seedElements,
+		seedTreeItems,
 		select,
 		setTypeFilter,
 		toggleType
@@ -127,15 +127,15 @@
 	//     disappeared (404) are dropped and auto-collapsed.
 	const PAGE_LIMIT = 500;
 
-	let roots: ContainmentItem[] = $state([]);
+	let roots: TreeItem[] = $state([]);
 	// rootsTotal/excludedTotal feed scroll auto-load (shouldLoadMore): nearing the
 	// last loaded row grows the page limit (no "Show more" button).
 	let rootsTotal = $state(0);
 	let rootsLimit = $state(PAGE_LIMIT);
-	let excludedRoots: ContainmentItem[] = $state([]);
+	let excludedRoots: TreeItem[] = $state([]);
 	let excludedTotal = $state(0);
 	let excludedLimit = $state(PAGE_LIMIT);
-	const childLevels = new SvelteMap<string, ContainmentItem[]>();
+	const childLevels = new SvelteMap<string, TreeItem[]>();
 	const childTotals = new SvelteMap<string, number>();
 	/** Element ids the user expanded (folders are tracked by `expandedFolders`). */
 	const expandedElements = new SvelteSet<string>();
@@ -187,7 +187,7 @@
 		try {
 			const page = await listContainmentRootsPaged(limit);
 			if (seq !== rootsSeq) return;
-			seedElements(page.items.map((i) => i.element));
+			seedTreeItems(page.items);
 			roots = page.items;
 			rootsTotal = page.total;
 		} catch (err) {
@@ -203,7 +203,7 @@
 		try {
 			const cp = await listContainmentChildren(id, { limit: PAGE_LIMIT });
 			if (seq !== childLoadSeq) return;
-			seedElements(cp.items.map((i) => i.element));
+			seedTreeItems(cp.items);
 			childLevels.set(id, cp.items);
 			childTotals.set(id, cp.total);
 		} catch (err) {
@@ -226,7 +226,7 @@
 		try {
 			const page = await listExcludedRootsPaged(limit);
 			if (seq !== excludedSeq) return;
-			seedElements(page.items.map((i) => i.element));
+			seedTreeItems(page.items);
 			excludedRoots = page.items;
 			excludedTotal = page.total;
 		} catch (err) {
@@ -317,14 +317,14 @@
 
 	// ----- unified tree over the fetched subset -----
 
-	const elementsById = $derived(getCachedElements() as Map<string, Element>);
+	const elementsById = $derived(getTreeElements());
 
 	const containmentChildren = $derived.by(() => {
 		const m = new SvelteMap<string, string[]>();
 		for (const [pid, items] of childLevels) {
 			m.set(
 				pid,
-				items.map((i) => i.element.id).filter((id) => elementsById.has(id))
+				items.map((i) => i.id).filter((id) => elementsById.has(id))
 			);
 		}
 		return m;
@@ -338,17 +338,15 @@
 		return s;
 	});
 
-	const rootElementIds = $derived(
-		roots.map((i) => i.element.id).filter((id) => elementsById.has(id))
-	);
+	const rootElementIds = $derived(roots.map((i) => i.id).filter((id) => elementsById.has(id)));
 
 	/** child_count per element id (drives expanders for unfetched levels). */
 	const childCounts = $derived.by(() => {
 		const m = new SvelteMap<string, number>();
-		for (const i of roots) m.set(i.element.id, i.child_count);
-		for (const i of excludedRoots) m.set(i.element.id, i.child_count);
+		for (const i of roots) m.set(i.id, i.child_count);
+		for (const i of excludedRoots) m.set(i.id, i.child_count);
 		for (const items of childLevels.values()) {
-			for (const i of items) m.set(i.element.id, i.child_count);
+			for (const i of items) m.set(i.id, i.child_count);
 		}
 		return m;
 	});
@@ -368,7 +366,7 @@
 		if (view !== null) {
 			registerExcludedRoots(
 				t,
-				excludedRoots.map((i) => i.element.id)
+				excludedRoots.map((i) => i.id)
 			);
 		}
 		return t;
@@ -544,7 +542,7 @@
 		const ids = windowedRows
 			.map((r) => r.key)
 			.filter((k) => !isFolderKey(k) && !isExcludedSectionKey(k));
-		if (ids.length > 0) void ensureElements(ids);
+		if (ids.length > 0) void ensureTreeItems(ids);
 	});
 
 	// ----- child-level prefetch -----
@@ -569,7 +567,7 @@
 			for (const id of frontier) {
 				if (targets.has(id)) continue;
 				targets.add(id);
-				for (const c of childLevels.get(id) ?? []) next.push(c.element.id);
+				for (const c of childLevels.get(id) ?? []) next.push(c.id);
 			}
 			frontier = next;
 		}
