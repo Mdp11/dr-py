@@ -31,3 +31,15 @@ export function createProject(input: CreateProjectInput): Promise<ProjectSummary
 	// browser sets the multipart Content-Type + boundary itself.
 	return apiFetch('/projects', { method: 'POST', body: form, schema: ProjectSummarySchema }, API);
 }
+
+export function deleteProject(id: string): Promise<void> {
+	return apiFetch(`/projects/${id}`, { method: 'DELETE' }, API);
+}
+
+export function cloneProject(id: string, name?: string): Promise<ProjectSummary> {
+	return apiFetch(
+		`/projects/${id}/clone`,
+		{ method: 'POST', body: name ? { name } : {}, schema: ProjectSummarySchema },
+		API
+	);
+}
