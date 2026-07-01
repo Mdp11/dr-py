@@ -57,6 +57,10 @@ class Lease:
     token: str
     intent: LockIntent
     expires_at: float
+    #: Display name of the holder (their email). Carried alongside ``holder``
+    #: purely so peers can render "Locked by <email>" without a user lookup;
+    #: never participates in the conflict matrix (which keys on ``holder``).
+    holder_email: str = ""
 
 
 @dataclass
@@ -64,6 +68,8 @@ class LockConflict:
     resource_id: str
     held_by: str
     held_mode: LockMode
+    #: Email of the current holder (see ``Lease.holder_email``); "" if unknown.
+    held_by_email: str = ""
 
 
 class LockTable:
@@ -93,9 +99,9 @@ class LockTable:
                 continue  # shared pins never conflict on acquire
             if req.intent is LockIntent.DELETE:
                 # delete needs the resource clear of everyone else (incl. pins)
-                return LockConflict(req.resource_id, le.holder, le.mode)
+                return LockConflict(req.resource_id, le.holder, le.mode, le.holder_email)
             if le.mode is LockMode.EXCLUSIVE:
-                return LockConflict(req.resource_id, le.holder, le.mode)
+                return LockConflict(req.resource_id, le.holder, le.mode, le.holder_email)
         return None
 
     # ---- public API -------------------------------------------------------
@@ -109,6 +115,7 @@ class LockTable:
         ttl: float,
         token: str | None = None,
         steal: bool = False,
+        holder_email: str = "",
     ) -> tuple[str, list[Lease], list[LockConflict]]:
         conflicts: list[LockConflict] = []
         for req in reqs:
@@ -135,6 +142,7 @@ class LockTable:
                 token=token,
                 intent=req.intent,
                 expires_at=now + ttl,
+                holder_email=holder_email,
             )
             self._by_resource.setdefault(req.resource_id, []).append(lease)
             granted.append(lease)

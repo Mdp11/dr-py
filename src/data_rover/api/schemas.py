@@ -506,6 +506,7 @@ class LeaseOut(BaseModel):
     resource_id: str
     mode: str
     holder: str
+    holder_email: str = ""
     token: str
     intent: str
     expires_at: float
@@ -514,6 +515,7 @@ class LeaseOut(BaseModel):
 class LockConflictOut(BaseModel):
     resource_id: str
     held_by: str
+    held_by_email: str = ""
     held_mode: str
 
 

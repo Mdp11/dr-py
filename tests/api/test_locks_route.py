@@ -94,6 +94,44 @@ def test_lock_then_release(client: TestClient) -> None:
     assert rel.status_code == 200 and rel.json()["released"] >= 1
 
 
+def test_acquire_and_list_leases_carry_holder_email(client: TestClient) -> None:
+    """Every lease surfaced to the client must carry the holder's email so the UI
+    can render "Locked by <email>" instead of the opaque user id."""
+    a, _b = _seed_two_elements(client)
+    r = client.post(
+        papi("/locks"),
+        headers=AUTH_HEADERS,
+        json={"targets": [{"resource_id": a, "mode": "exclusive"}], "intent": "edit"},
+    )
+    assert r.status_code == 200, r.text
+    leases = r.json()["leases"]
+    assert leases and all(le["holder_email"] == "test@example.com" for le in leases)
+
+    lst = client.get(papi("/locks"), headers=AUTH_HEADERS)
+    assert lst.status_code == 200, lst.text
+    by_id = {le["resource_id"]: le for le in lst.json()["leases"]}
+    assert by_id[a]["holder_email"] == "test@example.com"
+
+
+def test_conflict_reports_holder_email(client: TestClient) -> None:
+    """A 409 lock conflict must name the current holder by email, not just id."""
+    U2_ID = "u2"
+    U2_EMAIL = "u2@example.com"
+    U2_HEADERS = {"X-User-Id": U2_ID, "X-User-Email": U2_EMAIL}
+    _seed_second_member(U2_ID, U2_EMAIL)
+
+    a, _b = _seed_two_elements(client)
+    body = {"targets": [{"resource_id": a, "mode": "exclusive"}], "intent": "edit"}
+
+    first = client.post(papi("/locks"), headers=AUTH_HEADERS, json=body)
+    assert first.status_code == 200, first.text
+
+    second = client.post(papi("/locks"), headers=U2_HEADERS, json=body)
+    assert second.status_code == 409, second.text
+    conflicts = second.json()["conflicts"]
+    assert conflicts and conflicts[0]["held_by_email"] == "test@example.com"
+
+
 def test_lock_conflict_returns_403_for_non_member(client: TestClient) -> None:
     """A non-member trying to acquire a lock must get 403 from authz.
 

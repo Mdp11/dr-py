@@ -7,5 +7,7 @@ export function lockBadgeFor(resourceId: string): { state: LockBadge; holder?: s
 	const lease = getLockFor(resourceId);
 	if (lease === undefined) return { state: 'none' };
 	if (lease.holder_id === getCurrentUserId()) return { state: 'mine' };
-	return { state: 'theirs', holder: lease.holder_id };
+	// Prefer the human-readable email; fall back to the opaque id if the feed
+	// payload predates holder_email (or it is somehow blank).
+	return { state: 'theirs', holder: lease.holder_email || lease.holder_id };
 }

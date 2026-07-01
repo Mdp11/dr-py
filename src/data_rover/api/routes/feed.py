@@ -33,7 +33,12 @@ def _lease_dicts(session: "object", now: float) -> list[dict]:
 
     assert isinstance(session, Session)
     return [
-        {"resource_id": le.resource_id, "mode": le.mode.value, "holder_id": le.holder}
+        {
+            "resource_id": le.resource_id,
+            "mode": le.mode.value,
+            "holder_id": le.holder,
+            "holder_email": le.holder_email,
+        }
         for le in session.lock_table.active_leases(now)
     ]
 

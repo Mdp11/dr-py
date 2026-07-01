@@ -137,6 +137,7 @@ def _sweep_expired_locks(now: float) -> int:
                             "resource_id": le.resource_id,
                             "mode": le.mode.value,
                             "holder_id": le.holder,
+                            "holder_email": le.holder_email,
                         }
                         for le in expired
                     ],

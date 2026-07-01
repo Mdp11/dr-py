@@ -9,6 +9,9 @@ export interface LeaseLite {
 	resource_id: string;
 	mode: string;
 	holder_id: string;
+	/** Holder's email, for "Locked by <email>" display. Optional so older
+	 * payloads (and tests) that only carry `holder_id` still typecheck. */
+	holder_email?: string;
 }
 
 export type FeedEvent =
