@@ -67,7 +67,7 @@
 			<Button size="sm" variant="outline" onclick={refresh}>Retry</Button>
 		{:else}
 			{#each filtered as p (p.id)}
-				<ProjectCard project={p} onOpen={open} />
+				<ProjectCard project={p} onOpen={open} onChanged={refresh} />
 			{:else}
 				<p class="text-sm text-zinc-500">No projects.</p>
 			{/each}

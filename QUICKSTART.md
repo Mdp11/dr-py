@@ -31,7 +31,24 @@ admin@example.com / admin12345
 Create a project via **New Project** (header). Upload a metamodel — the bundled
 `examples/smart-city.*` give you sample content (metamodel + model + view).
 
-Teardown: `pixi run services-down` (keep data) or `pixi run services-reset` (wipe data).
+Teardown: `pixi run services-down` (stop, **keep** data) or `pixi run services-reset`
+(stop + **wipe** the Postgres and fake-gcs volumes).
+
+### Reset to a clean slate
+
+`services-reset` (`docker compose down -v`) drops both data volumes — the
+Postgres database and the fake-gcs snapshot store — so everything (users,
+projects, models, snapshots) is gone. To rebuild from empty:
+
+```sh
+pixi run services-reset     # wipe Postgres + fake-gcs volumes
+pixi run services-up        # recreate them (waits until ready)
+pixi run db-upgrade         # re-apply the Alembic schema
+pixi run start-backend      # re-creates the bootstrap admin on boot
+```
+
+You're back to a fresh DB with only the `DATA_ROVER_BOOTSTRAP_ADMIN_EMAIL`
+admin — log in and recreate projects via **New Project**.
 
 ## Production (from scratch)
 
