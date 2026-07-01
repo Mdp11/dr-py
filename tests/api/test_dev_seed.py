@@ -1,23 +1,29 @@
 from __future__ import annotations
 
-import pytest
-from fastapi.testclient import TestClient
-
 from data_rover.api import db
+from data_rover.api.db_models import Project
 from data_rover.api.main import create_app
+from data_rover.api.storage import MemorySnapshotStore, set_snapshot_store
 
 
-@pytest.fixture
-def dev_client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+def test_dev_seed_creates_schema_without_seeding_a_project(monkeypatch) -> None:
+    """dev_seed on SQLite creates the tenancy+content schema but seeds NO
+    default project and NO users. The single admin is provisioned only by
+    _ensure_bootstrap_admin; projects are created via the wizard / importer."""
+    monkeypatch.setenv("DATA_ROVER_DATABASE_URL", "sqlite://")
     monkeypatch.setenv("DATA_ROVER_DEV_SEED", "true")
-    db.init_engine("sqlite://")  # self-contained: ensure an engine exists
-    db.drop_all()  # start clean; create_app will create_all + seed
-    return TestClient(create_app())
-
-
-def test_dev_seed_creates_default_project(dev_client: TestClient) -> None:
-    detail = dev_client.get(
-        "/api/v1/projects/default", headers={"x-user-id": "default-user"}
-    )
-    assert detail.status_code == 200, detail.text
-    assert detail.json()["id"] == "default"
+    monkeypatch.setenv("DATA_ROVER_SNAPSHOT_STORE", "memory")
+    monkeypatch.setenv("DATA_ROVER_IDLE_EVICT_SECONDS", "0")
+    db.init_engine("sqlite://", force=True)
+    set_snapshot_store(MemorySnapshotStore())
+    try:
+        create_app()  # builds the app + runs dev-seed
+        gen = db.get_db()
+        s = next(gen)
+        try:
+            # schema exists (the query does not raise) and no default project
+            assert s.get(Project, "default") is None
+        finally:
+            gen.close()
+    finally:
+        set_snapshot_store(None)
