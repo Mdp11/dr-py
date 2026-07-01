@@ -1,7 +1,12 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { http, HttpResponse } from 'msw';
 
-import { getElementsBatch, listExcludedRoots, listExcludedRootsPaged } from '../model-read';
+import {
+	getElementsBatch,
+	getTreeItemsBatch,
+	listExcludedRoots,
+	listExcludedRootsPaged
+} from '../model-read';
 import { server } from './server';
 
 const BASE = 'http://api.test/api/v1';
@@ -38,8 +43,29 @@ describe('getElementsBatch', () => {
 	});
 });
 
+describe('getTreeItemsBatch', () => {
+	it('posts ids and returns lite items', async () => {
+		let received: unknown;
+		server.use(
+			http.post(`${BASE}/model/elements/tree-items`, async ({ request }) => {
+				received = await request.json();
+				return HttpResponse.json({
+					items: [
+						{ id: 'a', type_name: 'T', display_name: 'A', child_count: 0 },
+						{ id: 'b', type_name: 'T', display_name: 'B', child_count: 2 }
+					]
+				});
+			})
+		);
+		const items = await getTreeItemsBatch(['a', 'b'], cfg);
+		expect(received).toEqual({ ids: ['a', 'b'] });
+		expect(items.map((i) => i.id)).toEqual(['a', 'b']);
+		expect(items[0]).toMatchObject({ display_name: 'A', child_count: 0 });
+	});
+});
+
 function item(id: string) {
-	return { element: { id, type_name: 'Block', properties: {}, rev: 1 }, child_count: 0 };
+	return { id, type_name: 'Block', display_name: id, child_count: 0 };
 }
 
 describe('listExcludedRoots', () => {
@@ -54,7 +80,7 @@ describe('listExcludedRoots', () => {
 		const page = await listExcludedRoots({ limit: 1, offset: 0 }, cfg);
 		expect(url?.searchParams.get('limit')).toBe('1');
 		expect(page.total).toBe(3);
-		expect(page.items[0].element.id).toBe('a');
+		expect(page.items[0].id).toBe('a');
 	});
 
 	it('listExcludedRootsPaged assembles multiple pages up to the limit', async () => {
@@ -71,7 +97,7 @@ describe('listExcludedRoots', () => {
 			})
 		);
 		const page = await listExcludedRootsPaged(3, cfg);
-		expect(page.items.map((i) => i.element.id)).toEqual(['a', 'b', 'c']);
+		expect(page.items.map((i) => i.id)).toEqual(['a', 'b', 'c']);
 		expect(page.total).toBe(3);
 	});
 });

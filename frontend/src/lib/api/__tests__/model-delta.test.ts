@@ -226,7 +226,12 @@ describe('model-read client', () => {
 	it('listContainmentRoots and listContainmentChildren parse containment pages', async () => {
 		server.use(
 			http.get(`${BASE}/model/containment/roots`, () =>
-				HttpResponse.json({ items: [{ element, child_count: 2 }], total: 1 })
+				HttpResponse.json({
+					items: [
+						{ id: element.id, type_name: element.type_name, display_name: 'A', child_count: 2 }
+					],
+					total: 1
+				})
 			),
 			http.get(`${BASE}/model/elements/e1/children`, () =>
 				HttpResponse.json({ items: [], total: 0 })
@@ -255,7 +260,12 @@ describe('model-read client', () => {
 				}
 				const items = [];
 				for (let i = offset; i < Math.min(offset + limit, TOTAL); i++) {
-					items.push({ element: { ...element, id: `e${i}` }, child_count: 0 });
+					items.push({
+						id: `e${i}`,
+						type_name: element.type_name,
+						display_name: `e${i}`,
+						child_count: 0
+					});
 				}
 				return HttpResponse.json({ items, total: TOTAL });
 			})
@@ -269,8 +279,8 @@ describe('model-read client', () => {
 		]);
 		expect(page.items).toHaveLength(TOTAL);
 		expect(page.total).toBe(TOTAL);
-		expect(page.items[0].element.id).toBe('e0');
-		expect(page.items[TOTAL - 1].element.id).toBe(`e${TOTAL - 1}`);
+		expect(page.items[0].id).toBe('e0');
+		expect(page.items[TOTAL - 1].id).toBe(`e${TOTAL - 1}`);
 
 		// refetch after a rev bump keeps the grown window working (no 422)
 		calls.length = 0;
@@ -289,7 +299,12 @@ describe('model-read client', () => {
 					limit: Number(url.searchParams.get('limit')),
 					offset: Number(url.searchParams.get('offset'))
 				});
-				return HttpResponse.json({ items: [{ element, child_count: 0 }], total: 1 });
+				return HttpResponse.json({
+					items: [
+						{ id: element.id, type_name: element.type_name, display_name: 'A', child_count: 0 }
+					],
+					total: 1
+				});
 			})
 		);
 		const page = await listContainmentRootsPaged(500, cfg);

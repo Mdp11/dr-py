@@ -339,6 +339,20 @@ export const ContainmentPageSchema = z.object({
 });
 export type ContainmentPage = z.infer<typeof ContainmentPageSchema>;
 
+export const TreeItemSchema = z.object({
+	id: z.string(),
+	type_name: z.string(),
+	display_name: z.string(),
+	child_count: z.number().default(0)
+});
+export type TreeItem = z.infer<typeof TreeItemSchema>;
+
+export const TreeItemPageSchema = z.object({
+	items: z.array(TreeItemSchema).default([]),
+	total: z.number().default(0)
+});
+export type TreeItemPage = z.infer<typeof TreeItemPageSchema>;
+
 const ModifiedElementSchema = z.object({
 	id: z.string(),
 	before: ElementSchema,
