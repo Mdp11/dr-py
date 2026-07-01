@@ -144,6 +144,7 @@ export function getCachedTreeItems(): ReadonlyMap<string, TreeItem> {
  * sees genuinely-loaded full elements).
  */
 export function getTreeElements(): Map<string, Element> {
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity
 	const out = new Map<string, Element>();
 	for (const [id, t] of _treeItems) {
 		const properties = t.display_name && t.display_name !== id ? { name: t.display_name } : {};

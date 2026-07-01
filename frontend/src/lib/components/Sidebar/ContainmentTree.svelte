@@ -2,7 +2,7 @@
 	import { untrack } from 'svelte';
 	import { browser } from '$app/environment';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
-	import type { TreeItem, Element } from '$lib/api/types';
+	import type { TreeItem } from '$lib/api/types';
 	import {
 		listContainmentChildren,
 		listContainmentRootsPaged,
