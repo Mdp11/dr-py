@@ -25,6 +25,10 @@ def app() -> FastAPI:
     def search(m: Membership = Depends(require_membership)) -> dict[str, str]:
         return {"role": m.role.value}
 
+    @app.post("/projects/{project_id}/model/elements/tree-items")
+    def tree_items(m: Membership = Depends(require_membership)) -> dict[str, str]:
+        return {"role": m.role.value}
+
     @app.delete("/projects/{project_id}/owned", status_code=204, response_model=None)
     def owned(m: Membership = Depends(require_owner)) -> None:
         return None
@@ -88,6 +92,12 @@ def test_editor_can_write(client: TestClient) -> None:
 def test_viewer_can_call_readonly_post(client: TestClient) -> None:
     pid = _seed()
     r = client.post(f"/projects/{pid}/model/search", headers=_h("viewer"))
+    assert r.status_code == 200
+
+
+def test_viewer_can_call_readonly_post_tree_items(client: TestClient) -> None:
+    pid = _seed()
+    r = client.post(f"/projects/{pid}/model/elements/tree-items", headers=_h("viewer"))
     assert r.status_code == 200
 
 
