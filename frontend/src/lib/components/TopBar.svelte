@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { resolve } from '$app/paths';
+	import { goto } from '$app/navigation';
 	import { Button } from '$lib/components/ui/button';
 	import {
 		getActiveProjectId,
@@ -28,14 +29,12 @@
 	import { saveResponseToFile } from '$lib/util/fileSave';
 	import { getView } from '$lib/state';
 	import { runValidation } from '$lib/state/validate-action';
-	import { AlertCircle, AlertTriangle, FolderOpen, Info, RefreshCw, Undo2 } from '@lucide/svelte';
+	import { AlertCircle, AlertTriangle, Info, RefreshCw, Undo2 } from '@lucide/svelte';
 	import ApplyCrDialog from './ApplyCrDialog.svelte';
-	import LoadFilesDialog from './LoadFilesDialog.svelte';
 	import SwapMetamodelDrawer from './SwapMetamodelDrawer.svelte';
 	import SettingsDialog from './SettingsDialog.svelte';
 
 	let applyCrOpen = $state(false);
-	let loadOpen = $state(false);
 	let swapOpen = $state(false);
 	let settingsOpen = $state(false);
 	const view = $derived(getView());
@@ -81,15 +80,9 @@
 		return window.confirm(message);
 	}
 
-	function onLoadClick(): void {
-		if (
-			!confirmDiscardChanges(
-				'Loading new files discards the current model and unsaved changes. Continue?'
-			)
-		) {
-			return;
-		}
-		loadOpen = true;
+	function goHome(): void {
+		if (!confirmDiscardChanges('Leave this project? Unsaved changes may be lost.')) return;
+		void goto(resolve('/projects'));
 	}
 
 	function onUndo(): void {
@@ -111,7 +104,13 @@
 	class="sticky top-0 z-20 col-span-5 flex h-10 items-center justify-between border-b border-zinc-800 bg-zinc-950 px-3 text-sm"
 >
 	<div class="flex items-center gap-3">
-		<span class="font-semibold tracking-tight text-zinc-100">Data Rover</span>
+		<button
+			type="button"
+			class="font-semibold tracking-tight text-zinc-100 hover:text-white"
+			onclick={goHome}
+		>
+			Data Rover
+		</button>
 
 		<div class="group relative flex items-center">
 			<button
@@ -137,11 +136,6 @@
 				</dl>
 			</div>
 		</div>
-
-		<Button variant="ghost" size="sm" class="h-7 gap-1 text-xs" onclick={onLoadClick}>
-			<FolderOpen class="h-3 w-3" />
-			Load Model
-		</Button>
 
 		<Button
 			variant="ghost"
@@ -286,6 +280,5 @@
 </header>
 
 <ApplyCrDialog bind:open={applyCrOpen} />
-<LoadFilesDialog bind:open={loadOpen} />
 <SwapMetamodelDrawer bind:open={swapOpen} />
 <SettingsDialog bind:open={settingsOpen} />
