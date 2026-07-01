@@ -422,20 +422,6 @@ class RelationshipPage(BaseModel):
     total: int = 0
 
 
-class ContainmentItem(BaseModel):
-    element: ElementOut
-    #: number of distinct containment children (elements whose FIRST
-    #: containment parent is this element) — lets tree clients draw expanders
-    #: without fetching the next level
-    child_count: int = 0
-
-
-class ContainmentPage(BaseModel):
-    items: list[ContainmentItem] = Field(default_factory=list)
-    #: number of items BEFORE limit/offset paging
-    total: int = 0
-
-
 class ChangesOut(BaseModel):
     """``datarover.cr/v1`` change request derived from the session op log.
 

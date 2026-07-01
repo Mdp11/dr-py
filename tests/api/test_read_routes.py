@@ -514,29 +514,31 @@ def test_containment_roots(tree_client: TestClient) -> None:
     # display-name order, as ContainmentTree renders: Other (q) < Parent (p) < X
     body = tree_client.get(f"{API}/model/containment/roots").json()
     assert body["total"] == 3
-    assert [i["element"]["id"] for i in body["items"]] == ["q", "p", "x"]
+    assert [i["id"] for i in body["items"]] == ["q", "p", "x"]
     assert [i["child_count"] for i in body["items"]] == [0, 2, 0]
+    assert [i["display_name"] for i in body["items"]] == ["Other", "Parent", "X"]
 
     # paging over the sorted level
     body = tree_client.get(
         f"{API}/model/containment/roots", params={"limit": 1, "offset": 1}
     ).json()
     assert body["total"] == 3
-    assert [i["element"]["id"] for i in body["items"]] == ["p"]
+    assert [i["id"] for i in body["items"]] == ["p"]
 
 
 def test_containment_children(tree_client: TestClient) -> None:
     # display-name order, as ContainmentTree renders: Alpha (c2) before Beta (c1)
     body = tree_client.get(f"{API}/model/elements/p/children").json()
     assert body["total"] == 2
-    assert [i["element"]["id"] for i in body["items"]] == ["c2", "c1"]
+    assert [i["id"] for i in body["items"]] == ["c2", "c1"]
     assert [i["child_count"] for i in body["items"]] == [0, 1]
+    assert [i["display_name"] for i in body["items"]] == ["Alpha", "Beta"]
 
     # paging over the sorted level
     body = tree_client.get(
         f"{API}/model/elements/p/children", params={"limit": 1, "offset": 1}
     ).json()
-    assert (body["total"], [i["element"]["id"] for i in body["items"]]) == (2, ["c1"])
+    assert (body["total"], [i["id"] for i in body["items"]]) == (2, ["c1"])
 
     # q's containment edge to c2 lost (first parent wins) -> no children
     body = tree_client.get(f"{API}/model/elements/q/children").json()
@@ -544,7 +546,7 @@ def test_containment_children(tree_client: TestClient) -> None:
 
     # nameless child sorts by its id fallback
     body = tree_client.get(f"{API}/model/elements/c1/children").json()
-    assert [i["element"]["id"] for i in body["items"]] == ["c3"]
+    assert [i["id"] for i in body["items"]] == ["c3"]
 
     assert tree_client.get(f"{API}/model/elements/ghost/children").status_code == 404
     res = tree_client.get(f"{API}/model/elements/p/children", params={"limit": 0})
@@ -558,7 +560,7 @@ def test_containment_non_containment_rels_ignored(client: TestClient) -> None:
         [_rel("r-ab", "Links", "a", "b")],
     )
     body = client.get(f"{API}/model/containment/roots").json()
-    assert [i["element"]["id"] for i in body["items"]] == ["a", "b"]
+    assert [i["id"] for i in body["items"]] == ["a", "b"]
     body = client.get(f"{API}/model/elements/a/children").json()
     assert body == {"items": [], "total": 0}
 
@@ -1006,7 +1008,7 @@ def test_excluded_roots_omits_placed(client: TestClient) -> None:
     res = client.get(f"{API}/model/containment/roots/excluded")
     assert res.status_code == 200, res.text
     body = res.json()
-    assert [i["element"]["id"] for i in body["items"]] == ["a", "c"]
+    assert [i["id"] for i in body["items"]] == ["a", "c"]
     assert body["total"] == 2
 
 
@@ -1023,13 +1025,13 @@ def test_excluded_roots_nested_folder_placement(client: TestClient) -> None:
         ],
     )
     res = client.get(f"{API}/model/containment/roots/excluded")
-    assert [i["element"]["id"] for i in res.json()["items"]] == ["b"]
+    assert [i["id"] for i in res.json()["items"]] == ["b"]
 
 
 def test_excluded_roots_no_view_returns_all_roots(client: TestClient) -> None:
     _load_model(client, [_item("a", "A"), _item("b", "B")], [])
     res = client.get(f"{API}/model/containment/roots/excluded")
-    assert [i["element"]["id"] for i in res.json()["items"]] == ["a", "b"]
+    assert [i["id"] for i in res.json()["items"]] == ["a", "b"]
     assert res.json()["total"] == 2
 
 
@@ -1039,7 +1041,7 @@ def test_excluded_roots_paging(client: TestClient) -> None:
         f"{API}/model/containment/roots/excluded", params={"limit": 2, "offset": 2}
     )
     body = res.json()
-    assert [i["element"]["id"] for i in body["items"]] == ["i2", "i3"]
+    assert [i["id"] for i in body["items"]] == ["i2", "i3"]
     assert body["total"] == 5
 
 
@@ -1052,5 +1054,5 @@ def test_excluded_roots_paging_over_filtered_subset(client: TestClient) -> None:
         f"{API}/model/containment/roots/excluded", params={"limit": 2, "offset": 1}
     )
     body = res.json()
-    assert [i["element"]["id"] for i in body["items"]] == ["i3", "i4"]
+    assert [i["id"] for i in body["items"]] == ["i3", "i4"]
     assert body["total"] == 3
