@@ -53,25 +53,13 @@ class Settings(BaseSettings):
     #: dev_seed, so prod can seed its first admin). Empty email ⇒ no bootstrap.
     bootstrap_admin_email: str = ""
     bootstrap_admin_password: str = ""
-    #: When true, ``create_app`` creates the schema (SQLite/dev convenience)
-    #: and ensures a ``default`` user+project exist so the single-user frontend
-    #: works without a project picker. MUST be false in production (Postgres
-    #: schema is owned by Alembic): set ``DATA_ROVER_DEV_SEED=false``.
+    #: Dev/SQLite convenience: when true, ``create_app`` creates the schema
+    #: (so local dev needs no Alembic). It seeds NO users or model — the single
+    #: admin comes from ``bootstrap_admin_*`` and projects are made via the
+    #: wizard. MUST be false in production (Postgres schema is Alembic-owned):
+    #: set ``DATA_ROVER_DEV_SEED=false``. Also the prod signal for
+    #: ``_guard_prod_secret``.
     dev_seed: bool = True
-    #: Dev-seed source artifacts for the ``default`` project. Empty ⇒ the
-    #: bundled ``examples/smart-city.*`` (preserves default behaviour). Set to
-    #: seed a different model. Relative paths resolve from the process CWD
-    #: (the repo root for pixi tasks). ``seed_view`` may be empty / point at a
-    #: missing file to seed no view.
-    seed_metamodel: str = ""
-    seed_model: str = ""
-    seed_view: str = ""
-    #: Optional path to a JSON file of extra dev users to provision as members
-    #: of the seeded ``default`` project (so local multi-user testing needs no
-    #: manual member calls). Empty ⇒ none. Applied on every dev seed (idempotent
-    #: upsert), so adding a user and restarting picks it up. Dev-only.
-    #: Shape: ``{"users": [{"id": "alice", "email": "a@x", "role": "editor"}]}``
-    dev_users_file: str = ""
     #: Snapshot blob backend: "gcs" (real client; points at GCS in prod or a
     #: fake-gcs-server emulator in dev) or "memory" (in-process; tests only).
     snapshot_store: str = "gcs"
