@@ -41,6 +41,7 @@ export {
 	getModelRev,
 	getModelSummary,
 	getStructureRev,
+	getTreeElements,
 	loadSummary,
 	refreshSummary,
 	resetModelStore,

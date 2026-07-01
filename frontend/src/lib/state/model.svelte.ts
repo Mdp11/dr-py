@@ -134,6 +134,25 @@ export function getCachedTreeItems(): ReadonlyMap<string, TreeItem> {
 	return _treeItems;
 }
 
+/**
+ * The map the sidebar tree renders from: full `_elements` (loaded on selection
+ * / arrived via deltas) take precedence; every other cached row appears as a
+ * MINIMAL element synthesized from its lite `_treeItems` entry — just enough
+ * for `elementDisplayName` (name prop or id), the type filter (`type_name`),
+ * and presence checks (`map.has(id)`). The lite cache thus accelerates display
+ * without ever masquerading in `_elements` itself (the Inspector still only
+ * sees genuinely-loaded full elements).
+ */
+export function getTreeElements(): Map<string, Element> {
+	const out = new Map<string, Element>();
+	for (const [id, t] of _treeItems) {
+		const properties = t.display_name && t.display_name !== id ? { name: t.display_name } : {};
+		out.set(id, { id, type_name: t.type_name, properties, rev: 0 });
+	}
+	for (const [id, e] of _elements) out.set(id, e); // full wins
+	return out;
+}
+
 /** Upsert lite rows (from containment pages / by-id batch) and un-mark any
  * that were previously recorded missing. */
 export function seedTreeItems(items: readonly TreeItem[]): void {
@@ -257,6 +276,10 @@ function remapCaches(idMap: Record<string, string>): void {
 			_elements.delete(tempId);
 			_elements.set(canonicalId, { ...e, id: canonicalId });
 		}
+		// A just-created id may have a stale lite skeleton from before it existed
+		// as a full element; the canonical id is seeded as FULL by this same
+		// delta, so drop the temp id's lite entry unconditionally.
+		_treeItems.delete(tempId);
 		const r = _relationships.get(tempId);
 		if (r !== undefined) {
 			_relationships.delete(tempId);
@@ -358,7 +381,10 @@ export function applyDelta(d: OpsResponse): void {
 		if (hasQueuedOpFor(r.id)) continue;
 		_relationships.set(r.id, r);
 	}
-	for (const id of d.deleted_element_ids) _elements.delete(id);
+	for (const id of d.deleted_element_ids) {
+		_elements.delete(id);
+		_treeItems.delete(id);
+	}
 	for (const id of d.deleted_relationship_ids) _relationships.delete(id);
 
 	for (const owner of d.issues_removed_owner_ids) _issuesByOwner.delete(owner);
