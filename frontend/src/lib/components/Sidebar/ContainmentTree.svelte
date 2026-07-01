@@ -12,6 +12,7 @@
 	import {
 		createFolder,
 		createTempId,
+		dropTreeItems,
 		emit,
 		ensureTreeItems,
 		ensureTypeFilterInitialized,
@@ -312,6 +313,17 @@
 			if (childLevels.size > 0) childLevels.clear();
 			if (childTotals.size > 0) childTotals.clear();
 			_childFetching.clear();
+			// also drop lite rows for expanded folders so their display_name/child_count
+			// refetch fresh after a structural change (edited elements are full entries in
+			// _elements and unaffected; only view-only rows are dropped).
+			const v = getView();
+			if (v !== null) {
+				for (const key of expandedFolders) {
+					if (!isFolderKey(key)) continue;
+					const folder = findFolderByPath(v, folderPathFromKey(key));
+					if (folder) dropTreeItems(folder.elements);
+				}
+			}
 		});
 	});
 
@@ -542,6 +554,23 @@
 		const ids = windowedRows
 			.map((r) => r.key)
 			.filter((k) => !isFolderKey(k) && !isExcludedSectionKey(k));
+		if (ids.length > 0) void ensureTreeItems(ids);
+	});
+
+	// Whole-folder prefetch: when a view folder is expanded, pull the lite rows for
+	// ALL of its placed elements in one request (a folder is <=1k, so this is a
+	// single small batch) instead of letting the scroll window fetch them piecemeal
+	// — that piecemeal fetch is what flashes skeletons. Full elements still arrive
+	// only on selection; this only warms the display cache.
+	$effect(() => {
+		const v = getView();
+		if (v === null) return;
+		const ids: string[] = [];
+		for (const key of expandedFolders) {
+			if (!isFolderKey(key)) continue;
+			const folder = findFolderByPath(v, folderPathFromKey(key));
+			if (folder) ids.push(...folder.elements);
+		}
 		if (ids.length > 0) void ensureTreeItems(ids);
 	});
 

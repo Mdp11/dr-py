@@ -5,6 +5,7 @@ import type { OpsResponse } from '$lib/api/types';
 import { server } from '../../api/__tests__/server';
 import {
 	applyDelta,
+	dropTreeItems,
 	ensureTreeItems,
 	getCachedTreeItems,
 	getModelRev,
@@ -101,6 +102,30 @@ describe('tree-items cache', () => {
 
 		expect(requested).toEqual(['x']);
 		expect(getCachedTreeItems().has('full')).toBe(false);
+	});
+
+	it('dropTreeItems evicts lite rows and clears their missing marks so they refetch', async () => {
+		seedTreeItems([{ id: 'a', type_name: 'T', display_name: 'A', child_count: 0 }]);
+		expect(getCachedTreeItems().has('a')).toBe(true);
+
+		server.use(
+			http.post(`${BASE}/model/elements/tree-items`, async ({ request }) => {
+				const { ids } = (await request.json()) as { ids: string[] };
+				// omit 'gone' -> server drops it (does not exist), marking it missing
+				return HttpResponse.json({
+					items: ids
+						.filter((id) => id !== 'gone')
+						.map((id) => ({ id, type_name: 'T', display_name: id, child_count: 0 }))
+				});
+			})
+		);
+		await ensureTreeItems(['gone']);
+		expect(getMissingElementIds().has('gone')).toBe(true);
+
+		dropTreeItems(['a', 'gone']);
+
+		expect(getCachedTreeItems().has('a')).toBe(false);
+		expect(getMissingElementIds().has('gone')).toBe(false);
 	});
 });
 
