@@ -22,7 +22,8 @@ This brings up the real production code paths — **Postgres** (schema via
 Alembic) + **GCS-protocol snapshots** (a `fake-gcs-server` emulator) + backend +
 frontend. Auth is the same **cookie-based local login** as production (local
 email + password, no external SSO); the dev-only seams are the GCS emulator and
-the dev seed (auto-provisioned admin + `default` project).
+the dev seed (creates the SQLite/dev schema; the single admin comes from
+DATA_ROVER_BOOTSTRAP_ADMIN_*).
 
 ### 0. Prerequisites (once)
 
@@ -40,12 +41,11 @@ pixi install -e frontend
 ### 1. Configure (once)
 
 ```sh
-cp .env.example .env                       # backend config (Postgres + GCS + seed)
-cp dev-users.example.json dev-users.json   # extra local users
+cp .env.example .env                       # backend config (Postgres + GCS + admin)
 ```
 
-`.env` and `dev-users.json` are gitignored — they are your local config. The
-defaults already match `docker-compose.yml`, so you can run as-is.
+`.env` is gitignored — it is your local config. The defaults already match
+`docker-compose.yml`, so you can run as-is.
 
 ### 2. Start everything
 
@@ -56,114 +56,52 @@ pixi run start-backend    # http://127.0.0.1:8000  (reads .env)
 pixi run start-frontend   # http://localhost:5173  (separate terminal)
 ```
 
-Open <http://localhost:5173>. On first boot the backend seeds project `default`
-from the configured model and ensures an admin user exists. The frontend opens
-the **login** page — sign in, pick a project, and you land in the workspace.
+Open <http://localhost:5173>. On first boot the backend creates the schema and
+ensures the bootstrap admin exists — it does **not** seed any project. The
+frontend opens the **login** page — sign in, then create a project with the
+**New Project** wizard.
 
-### Logging in & seeding the first admin
+### Logging in & the first admin
 
 Auth is **cookie-based email + password** (`DATA_ROVER_IDENTITY_PROVIDER=cookie`,
 the default). There is **no self-signup**: admins create every other user from
-the in-app **Admin console**, so a deployment needs a *first* admin to bootstrap
-from. The backend seeds one on startup:
+the in-app **Admin console**, so a deployment needs a *first* admin. The backend
+ensures exactly one on **every** startup from `.env` (create-or-promote,
+independent of `DATA_ROVER_DEV_SEED`):
 
-- **Dev (the default here):** with `DATA_ROVER_DEV_SEED=true` and no bootstrap
-  email set, a default admin is seeded:
+```sh
+DATA_ROVER_BOOTSTRAP_ADMIN_EMAIL=admin@example.com   # dev default in .env.example
+DATA_ROVER_BOOTSTRAP_ADMIN_PASSWORD=admin12345
+```
 
-  ```
-  email:    admin@example.com
-  password: admin12345
-  ```
-
-  It is also made an owner of the `default` project, so you can open and edit it
-  immediately. Log in with these on first boot.
-
-- **Production / a real first admin:** set the bootstrap pair in `.env` (or real
-  env vars):
-
-  ```sh
-  DATA_ROVER_BOOTSTRAP_ADMIN_EMAIL=you@example.com
-  DATA_ROVER_BOOTSTRAP_ADMIN_PASSWORD=<a-strong-password>
-  ```
-
-  On **every** startup the backend ensures this user exists and is an admin
-  (creates it, or promotes an existing user) — independent of `DATA_ROVER_DEV_SEED`,
-  so it works in a no-seed prod deploy. When a bootstrap email is set, the
-  `admin@example.com` dev default is **not** seeded. Set a strong password up
-  front (the `POST /api/v1/auth/change-password` endpoint exists for rotation;
-  there is no change-password screen in the UI yet).
-
-> Production also requires a real `DATA_ROVER_JWT_SECRET` (used to sign session
-> cookies). The backend **refuses to boot** with the insecure default when
-> `identity_provider=cookie` and `dev_seed=false`.
+Log in with these on first boot. For production set a real pair and a strong
+`DATA_ROVER_JWT_SECRET` (the backend **refuses to boot** with the insecure
+default when `identity_provider=cookie` and `dev_seed=false`). Password rotation
+is via `POST /api/v1/auth/change-password` (no UI yet).
 
 Once logged in as an admin, open **Admin** in the header to create more users
 (each with a password) and manage project membership.
 
-### Pre-provisioning dev **members** (`dev-users.json`)
+### Creating a project
 
-`dev-users.json` pre-provisions extra users as **members** of `default` (with a
-role), so local setups don't need manual member calls. These users get **no
-password**, so they cannot use the cookie login — they exist for the legacy
-header provider (`?user=…`, below) or to pre-wire a membership you later attach a
-password to in the admin console. For users who should actually log in, create
-them in the **Admin console** instead.
+There is no autoloaded project. Log in as an admin and use the **New Project**
+wizard (header → New Project) to create one, uploading a metamodel (and
+optionally a model + view). The bundled `examples/smart-city.*` are a ready-made
+set to upload.
 
-Edit `dev-users.json`:
-
-```json
-{
-  "users": [
-    { "id": "alice", "email": "alice@example.com", "role": "editor" },
-    { "id": "bob",   "role": "viewer" }
-  ]
-}
-```
-
-- `role` is one of `owner` / `editor` / `viewer` (`editor` if omitted);
-  `email` defaults to `<id>@example.com`.
-- The owner `default-user` is always seeded regardless of this file.
-
-**Apply:** restart the backend (`Ctrl-C`, then `pixi run start-backend`). User
-provisioning is idempotent and runs **even on an existing project**, so added
-users and role changes are picked up — no DB reset needed.
-
-> Removing a user from the file does not delete them — manage membership in the
-> Admin console (**Members** tab), which adds/removes members on a live project.
-
-The file path is set in `.env` via `DATA_ROVER_DEV_USERS_FILE`.
-
-### Editing the seeded **model**
-
-The seed artifacts are set in `.env`:
+To import a project straight into the database instead (e.g. seeding a shared
+Postgres deployment), use the importer CLI:
 
 ```sh
-DATA_ROVER_SEED_METAMODEL=examples/smart-city.metamodel.yaml
-DATA_ROVER_SEED_MODEL=examples/smart-city.model.json
-DATA_ROVER_SEED_VIEW=examples/smart-city.view.json
+PYTHONPATH=src pixi run -e api python -m data_rover.api.importer \
+  --project-id smart-city --name "Smart City" --owner-id <admin-user-id> \
+  --metamodel examples/smart-city.metamodel.yaml \
+  --model examples/smart-city.model.json \
+  --view examples/smart-city.view.json
 ```
 
-Point these at your own files (paths relative to the repo root; leave
-`SEED_VIEW` empty to seed no view).
-
-**Apply — important:** unlike users, the model import is idempotent and
-**no-ops if project `default` already exists**, so changing the model requires a
-fresh DB:
-
-```sh
-# Ctrl-C the backend first
-pixi run services-reset   # wipe Postgres + snapshot volumes
-pixi run services-up
-pixi run db-upgrade
-pixi run start-backend    # re-seeds from the new SEED_* paths + re-provisions users
-```
-
-> Editing the example files in place counts as changing the model too — same
-> reset required, because the existing `default` project still holds the old
-> content.
-
-To convert a legacy metamodel+model into the new format, use the migration CLI
-and point `SEED_*` at its output:
+To convert a legacy metamodel+model into the new format first, use the migration
+CLI and upload / import its output:
 
 ```sh
 PYTHONPATH=src pixi run -e core python -m data_rover.migration \
@@ -188,9 +126,8 @@ commits broadcasting, and viewer write-blocks.
 > **Legacy header mode (API/automation only).** Setting
 > `DATA_ROVER_IDENTITY_PROVIDER=header` trusts an `X-User-Id` header (and the
 > `?user=` query param) with no password — handy for `curl`/scripted multi-user
-> testing against the API, where `dev-users.json` members work directly. The
-> browser SPA no longer sends identity headers, so it always uses cookie login
-> regardless of this setting.
+> testing against the API. The browser SPA no longer sends identity headers, so
+> it always uses cookie login regardless of this setting.
 
 ### Reference
 
@@ -200,9 +137,7 @@ commits broadcasting, and viewer write-blocks.
 | `DATA_ROVER_SNAPSHOT_STORE` | `gcs` | Blob store (`gcs` / `memory`) |
 | `DATA_ROVER_GCS_BUCKET` | `data-rover-snapshots` | Snapshot bucket |
 | `DATA_ROVER_STORAGE_EMULATOR_HOST` | `http://localhost:4443` | fake-gcs endpoint (drop in real prod) |
-| `DATA_ROVER_DEV_SEED` | `true` | Auto-seed model + dev admin on startup (`false` in prod) |
-| `DATA_ROVER_SEED_METAMODEL` / `_MODEL` / `_VIEW` | smart-city example | Seed artifacts |
-| `DATA_ROVER_DEV_USERS_FILE` | `dev-users.json` | Extra members to pre-provision (no password) |
+| `DATA_ROVER_DEV_SEED` | `true` | Create the SQLite schema on startup (`false` in prod) |
 | `DATA_ROVER_IDENTITY_PROVIDER` | `cookie` | Auth mode: `cookie` (login) or `header` (API/legacy) |
 | `DATA_ROVER_JWT_SECRET` | insecure dev default | Session-cookie signing key; **must set in prod** |
 | `DATA_ROVER_BOOTSTRAP_ADMIN_EMAIL` | _(empty)_ | First-admin email; create-or-promote each startup |
@@ -212,7 +147,7 @@ commits broadcasting, and viewer write-blocks.
 |---|---|
 | `pixi run services-up` | Start Postgres + fake-gcs (+ bucket), wait until ready |
 | `pixi run services-down` | Stop containers, keep data |
-| `pixi run services-reset` | Stop + wipe data volumes (needed to re-seed the model) |
+| `pixi run services-reset` | Stop + wipe data volumes |
 | `pixi run services-logs` | Tail infra logs |
 | `pixi run db-upgrade` | Apply Postgres schema (Alembic) |
 | `pixi run start-backend` | Run the API (reads `.env`) |
@@ -229,11 +164,7 @@ pixi run services-down     # or: pixi run services-reset  (also wipes data)
 
 | Change | What to do |
 |---|---|
-| Add a login-capable user / change role | Create + manage in the in-app **Admin console** (no restart) |
-| Pre-wire dev members (no password) | Edit `dev-users.json` → restart backend |
-| Seed the first admin | Set `DATA_ROVER_BOOTSTRAP_ADMIN_*` in `.env` → restart backend (create-or-promote) |
-| Change seeded model | Edit `.env` `SEED_*` (or the files) → `services-reset` + up + `db-upgrade` + start-backend |
+| Add a user / change role | Create + manage in the in-app **Admin console** (no restart) |
+| Change the first admin | Set `DATA_ROVER_BOOTSTRAP_ADMIN_*` in `.env` → restart (create-or-promote) |
+| Add a project | **New Project** wizard (or the importer CLI) — no restart |
 | Change ports / DB / storage config | Edit `.env` → restart backend (some need `services-reset`) |
-
-The asymmetry is the one thing to remember: **users re-provision on restart; the
-model only re-seeds on a fresh DB.**

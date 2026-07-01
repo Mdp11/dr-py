@@ -5,8 +5,10 @@ import { defineConfig, devices } from '@playwright/test';
  *
  * Two webServers are launched:
  *   1. The FastAPI backend (`pixi run -e api start-backend`) on :8000. Uses a
- *      throwaway SQLite file at /tmp/data-rover-e2e.db with dev-seed enabled so
- *      the default user+project exist before any test runs.
+ *      throwaway SQLite file at /tmp/data-rover-e2e.db; dev-seed creates the
+ *      schema and the bootstrap admin (admin@example.com/admin12345). The
+ *      "Smart City" project is created by the `setup` project (seed.setup.ts),
+ *      not autoloaded.
  *   2. The Vite dev server (`npm run dev`) on :5173.
  *
  * Both are reused if already running locally to keep the iteration loop fast.
@@ -22,9 +24,11 @@ export default defineConfig({
 		trace: 'retain-on-failure'
 	},
 	projects: [
+		{ name: 'setup', testMatch: /seed\.setup\.ts/ },
 		{
 			name: 'chromium',
-			use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 1000 } }
+			use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 1000 } },
+			dependencies: ['setup']
 		}
 	],
 	webServer: [
@@ -43,7 +47,7 @@ export default defineConfig({
 			// backend is already up, so it never clears the DB out from under a live
 			// server.
 			command:
-				'rm -f /tmp/data-rover-e2e.db && DATA_ROVER_DATABASE_URL=sqlite:////tmp/data-rover-e2e.db DATA_ROVER_DEV_SEED=true DATA_ROVER_SNAPSHOT_STORE=memory DATA_ROVER_IDENTITY_PROVIDER=cookie DATA_ROVER_AUTH_COOKIE_SECURE=false pixi run -e api start-backend',
+				'rm -f /tmp/data-rover-e2e.db && DATA_ROVER_DATABASE_URL=sqlite:////tmp/data-rover-e2e.db DATA_ROVER_DEV_SEED=true DATA_ROVER_SNAPSHOT_STORE=memory DATA_ROVER_IDENTITY_PROVIDER=cookie DATA_ROVER_AUTH_COOKIE_SECURE=false DATA_ROVER_BOOTSTRAP_ADMIN_EMAIL=admin@example.com DATA_ROVER_BOOTSTRAP_ADMIN_PASSWORD=admin12345 pixi run -e api start-backend',
 			cwd: '..',
 			url: 'http://127.0.0.1:8000/healthz',
 			timeout: 60_000,

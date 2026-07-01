@@ -30,8 +30,9 @@ pixi run frontend-build
 In a separate terminal, start the backend (`pixi run start-backend`) before
 opening the dev server so the API calls succeed. See the **root `README.md`** for
 the full local stack (Postgres + GCS emulator), dev-seed, and how to log in — on
-first boot the dev seed provisions an admin (`admin@example.com` / `admin12345`)
-and the `default` project; the app opens the **login** page.
+first boot the backend ensures the bootstrap admin (`admin@example.com` /
+`admin12345`) exists — no project is autoloaded; the app opens the **login**
+page and projects are created via the New Project wizard.
 
 ## Layout
 

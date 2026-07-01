@@ -10,8 +10,6 @@ venv/
 .idea/
 # local secrets / settings (Settings reads .env via pydantic-settings)
 .env
-# local dev users (copy of dev-users.example.json)
-dev-users.json
 # frontend
 frontend/node_modules
 frontend/.svelte-kit
