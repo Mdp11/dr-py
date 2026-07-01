@@ -2,23 +2,24 @@ import { apiFetch, apiFetchRaw, type ClientConfig } from './client';
 import {
 	ChangesDocSchema,
 	ChangesSummarySchema,
-	ContainmentPageSchema,
 	ElementListSchema,
 	ElementPageSchema,
 	ModelSummarySchema,
 	NeighborhoodSchema,
 	RelationshipPageSchema,
 	SearchResultPageSchema,
+	TreeItemPageSchema,
 	type ChangesDoc,
 	type ChangesSummary,
-	type ContainmentPage,
 	type Element,
 	type ElementList,
 	type ElementPage,
 	type ModelSummary,
 	type Neighborhood,
 	type RelationshipPage,
-	type SearchResultPage
+	type SearchResultPage,
+	type TreeItem,
+	type TreeItemPage
 } from './types';
 import type { AdvancedQuery } from '$lib/search/types';
 
@@ -41,6 +42,19 @@ export function getElementsBatch(ids: string[], cfg?: ClientConfig): Promise<Ele
 	return apiFetch<ElementList>(
 		'/model/elements/batch',
 		{ method: 'POST', body: { ids }, schema: ElementListSchema },
+		cfg
+	).then((r) => r.items);
+}
+
+/**
+ * POST /model/elements/tree-items — lite by-id projection for tree rows
+ * (id, type_name, display_name, child_count). Ids come back in request order;
+ * unknown/deleted ids are omitted. Caller must keep `ids.length <= READ_PAGE_LIMIT`.
+ */
+export function getTreeItemsBatch(ids: string[], cfg?: ClientConfig): Promise<TreeItem[]> {
+	return apiFetch<TreeItemPage>(
+		'/model/elements/tree-items',
+		{ method: 'POST', body: { ids }, schema: TreeItemPageSchema },
 		cfg
 	).then((r) => r.items);
 }
@@ -138,12 +152,12 @@ export function listElementRelationships(
 export function listContainmentRoots(
 	opts?: { limit?: number; offset?: number },
 	cfg?: ClientConfig
-): Promise<ContainmentPage> {
+): Promise<TreeItemPage> {
 	return apiFetch(
 		'/model/containment/roots',
 		{
 			method: 'GET',
-			schema: ContainmentPageSchema,
+			schema: TreeItemPageSchema,
 			query: { limit: opts?.limit, offset: opts?.offset }
 		},
 		cfg
@@ -164,8 +178,8 @@ export const READ_PAGE_LIMIT = 500;
 export async function listContainmentRootsPaged(
 	limit: number,
 	cfg?: ClientConfig
-): Promise<ContainmentPage> {
-	const items: ContainmentPage['items'] = [];
+): Promise<TreeItemPage> {
+	const items: TreeItemPage['items'] = [];
 	let total = 0;
 	while (items.length < limit) {
 		const page = await listContainmentRoots(
@@ -184,12 +198,12 @@ export async function listContainmentRootsPaged(
 export function listExcludedRoots(
 	opts?: { limit?: number; offset?: number },
 	cfg?: ClientConfig
-): Promise<ContainmentPage> {
+): Promise<TreeItemPage> {
 	return apiFetch(
 		'/model/containment/roots/excluded',
 		{
 			method: 'GET',
-			schema: ContainmentPageSchema,
+			schema: TreeItemPageSchema,
 			query: { limit: opts?.limit, offset: opts?.offset }
 		},
 		cfg
@@ -201,8 +215,8 @@ export function listExcludedRoots(
 export async function listExcludedRootsPaged(
 	limit: number,
 	cfg?: ClientConfig
-): Promise<ContainmentPage> {
-	const items: ContainmentPage['items'] = [];
+): Promise<TreeItemPage> {
+	const items: TreeItemPage['items'] = [];
 	let total = 0;
 	while (items.length < limit) {
 		const page = await listExcludedRoots(
@@ -221,12 +235,12 @@ export function listContainmentChildren(
 	elementId: string,
 	opts?: { limit?: number; offset?: number },
 	cfg?: ClientConfig
-): Promise<ContainmentPage> {
+): Promise<TreeItemPage> {
 	return apiFetch(
 		`/model/elements/${encodeURIComponent(elementId)}/children`,
 		{
 			method: 'GET',
-			schema: ContainmentPageSchema,
+			schema: TreeItemPageSchema,
 			query: { limit: opts?.limit, offset: opts?.offset }
 		},
 		cfg
