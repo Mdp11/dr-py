@@ -38,12 +38,17 @@ _WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 #: Also NOT included: ``POST /model/apply-cr`` — it is dual-mode (inline =
 #: read, session = mutate) and a path suffix can't tell the modes apart, so it
 #: is conservatively treated as a write; viewers can't use the CR tool.
+#:
+#: ``/clone`` (``POST /projects/{id}/clone``) only READS the source project —
+#: it creates a brand-new project owned by the caller and never mutates the
+#: source, so a viewer of the source may clone it.
 _READ_ONLY_POST_SUFFIXES = (
     "/model/search",
     "/model/elements/batch",
     "/model/validate",
     "/commits/preview",
     "/metamodel/diff",
+    "/clone",
 )
 
 
