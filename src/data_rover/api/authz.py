@@ -45,6 +45,7 @@ _WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 _READ_ONLY_POST_SUFFIXES = (
     "/model/search",
     "/model/elements/batch",
+    "/model/elements/tree-items",
     "/model/validate",
     "/commits/preview",
     "/metamodel/diff",

@@ -302,6 +302,37 @@ def batch_elements(
     return BatchElementsOut(items=items)
 
 
+class TreeItemsIn(BaseModel):
+    ids: list[str]
+
+
+class TreeItemsOut(BaseModel):
+    items: list[TreeItem]
+
+
+@router.post("/model/elements/tree-items")
+def batch_tree_items(
+    payload: TreeItemsIn,
+    session: Session = Depends(get_request_session),
+) -> TreeItemsOut:
+    """Lightweight by-id projection for tree rows (see :class:`TreeItem`).
+
+    Same contract as ``POST /model/elements/batch`` — ids returned in request
+    order (duplicates duplicated), unknown/deleted ids silently omitted (a
+    stale window id must not fail the whole batch), capped at MAX_PAGE_LIMIT
+    (422 above) — but ships ~4 short fields per row instead of the full
+    ``properties`` bag."""
+    _, model = require_model(session)
+    if len(payload.ids) > MAX_PAGE_LIMIT:
+        raise HTTPException(
+            status_code=422,
+            detail=f"too many ids: {len(payload.ids)} (max {MAX_PAGE_LIMIT})",
+        )
+    return TreeItemsOut(
+        items=[_tree_item(model, eid) for eid in payload.ids if eid in model.elements]
+    )
+
+
 # ---------------------------------------------------------------------------
 # GET /model/elements/{id}/neighborhood — BFS graph extraction
 # ---------------------------------------------------------------------------

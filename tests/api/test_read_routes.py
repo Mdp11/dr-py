@@ -965,6 +965,32 @@ def test_elements_batch_404_without_model() -> None:
 
 
 # ---------------------------------------------------------------------------
+# POST /model/elements/tree-items
+# ---------------------------------------------------------------------------
+
+
+def test_tree_items_endpoint_projects_and_omits_unknown(client: TestClient) -> None:
+    _load_model(client, [_item("a", "Apple"), _item("b")], [])
+    res = client.post(f"{API}/model/elements/tree-items", json={"ids": ["a", "b", "nope"]})
+    assert res.status_code == 200, res.text
+    items = res.json()["items"]
+    assert [i["id"] for i in items] == ["a", "b"]  # unknown "nope" omitted, order preserved
+    assert items[0]["display_name"] == "Apple"
+    assert items[1]["display_name"] == "b"  # no name -> id
+    assert set(items[0].keys()) == {"id", "type_name", "display_name", "child_count"}
+
+
+def test_tree_items_endpoint_rejects_oversized_batch(client: TestClient) -> None:
+    _load_model(client, [_item("a", "Apple")], [])
+    res = client.post(
+        f"{API}/model/elements/tree-items",
+        json={"ids": [str(n) for n in range(MAX_PAGE_LIMIT + 1)]},
+    )
+    assert res.status_code == 422
+    assert str(MAX_PAGE_LIMIT) in res.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
 # GET /model/containment/roots/excluded
 # ---------------------------------------------------------------------------
 
