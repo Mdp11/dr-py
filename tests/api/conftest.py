@@ -16,6 +16,11 @@ os.environ.setdefault("DATA_ROVER_LOCK_SWEEP_SECONDS", "0")
 # Pin all existing data tests to the header provider so they keep working after
 # the default flips to "cookie" in settings.py.
 os.environ.setdefault("DATA_ROVER_IDENTITY_PROVIDER", "header")
+# Neutralize any local .env bootstrap admin so the import-time create_app()
+# does not query the (not-yet-created) users table. An empty env value
+# overrides the .env file for pydantic-settings.
+os.environ.setdefault("DATA_ROVER_BOOTSTRAP_ADMIN_EMAIL", "")
+os.environ.setdefault("DATA_ROVER_BOOTSTRAP_ADMIN_PASSWORD", "")
 
 from data_rover.api import db  # noqa: E402
 from data_rover.api import db_models  # noqa: E402,F401  (registers ORM tables)
