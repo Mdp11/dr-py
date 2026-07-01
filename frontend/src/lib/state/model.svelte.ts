@@ -7,7 +7,8 @@ import type {
 	IssueCounts,
 	ModelSummary,
 	OpsResponse,
-	Relationship
+	Relationship,
+	TreeItem
 } from '$lib/api/types';
 import { getElement } from '../api/elements';
 import { NotFoundError } from '../api/errors';
@@ -81,6 +82,14 @@ const _relationships = new SvelteMap<string, Relationship>();
  * not fetched yet, which must keep rendering a skeleton. Cleared on store reset
  * and un-marked whenever the id reappears (seed / delta / single fetch). */
 const _missingElementIds = new SvelteSet<string>();
+/** Lite display cache for tree rows the user is only VIEWING (id →
+ * {type_name, display_name, child_count}). Fed by the by-id tree-items batch
+ * and by containment-level pages. Deliberately separate from `_elements`: the
+ * moment an element is edited/created/arrives in a delta its FULL entry lands
+ * in `_elements`, which `getTreeElements()` prefers — so this cache never needs
+ * per-field patching, only eviction on delete and child_count refresh on a
+ * structural change. */
+const _treeItems = new SvelteMap<string, TreeItem>();
 /** Issues keyed by OWNER (= issue.target_ids[0]), mirroring the backend
  * ValidationState; fed by ops deltas and full validateAll() runs. */
 const _issuesByOwner = new SvelteMap<string, Issue[]>();
@@ -119,6 +128,19 @@ export function getCachedElements(): ReadonlyMap<string, Element> {
 /** Ids a by-id batch fetch confirmed missing (see {@link _missingElementIds}). */
 export function getMissingElementIds(): ReadonlySet<string> {
 	return _missingElementIds;
+}
+
+export function getCachedTreeItems(): ReadonlyMap<string, TreeItem> {
+	return _treeItems;
+}
+
+/** Upsert lite rows (from containment pages / by-id batch) and un-mark any
+ * that were previously recorded missing. */
+export function seedTreeItems(items: readonly TreeItem[]): void {
+	for (const t of items) {
+		_treeItems.set(t.id, t);
+		_missingElementIds.delete(t.id);
+	}
 }
 
 export function getCachedRelationships(): ReadonlyMap<string, Relationship> {
@@ -712,6 +734,48 @@ export async function ensureElements(ids: readonly string[]): Promise<void> {
 }
 
 /**
+ * Fetch the lite tree-row projection for `ids` (POST /model/elements/tree-items,
+ * chunked at READ_PAGE_LIMIT) into `_treeItems`. Mirrors {@link ensureElements}:
+ * dedups against both caches, temp ids, the shared in-flight set, and the
+ * confirmed-missing set; ids the server omits are recorded missing so the tree
+ * drops a dangling placement instead of holding a skeleton forever. Skips ids
+ * already in `_elements` (a full entry already renders that row).
+ */
+export async function ensureTreeItems(ids: readonly string[]): Promise<void> {
+	const want: string[] = [];
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity
+	const seen = new Set<string>();
+	for (const id of ids) {
+		if (seen.has(id)) continue;
+		seen.add(id);
+		if (
+			_elements.has(id) ||
+			_treeItems.has(id) ||
+			isTempId(id) ||
+			_missingElementIds.has(id) ||
+			_inFlightBatchIds.has(id) ||
+			_pendingElementFetches.has(id)
+		)
+			continue;
+		want.push(id);
+	}
+	if (want.length === 0) return;
+	for (const id of want) _inFlightBatchIds.add(id);
+	try {
+		for (let i = 0; i < want.length; i += modelReadApi.READ_PAGE_LIMIT) {
+			const chunk = want.slice(i, i + modelReadApi.READ_PAGE_LIMIT);
+			const fetched = await modelReadApi.getTreeItemsBatch(chunk, _clientConfig);
+			seedTreeItems(fetched);
+			// eslint-disable-next-line svelte/prefer-svelte-reactivity
+			const returned = new Set(fetched.map((t) => t.id));
+			for (const id of chunk) if (!returned.has(id)) _missingElementIds.add(id);
+		}
+	} finally {
+		for (const id of want) _inFlightBatchIds.delete(id);
+	}
+}
+
+/**
  * Cache-only lookup: the backend has no single-relationship GET endpoint
  * (verified against routes/relationships.py), so relationships enter the
  * cache via ops deltas, neighborhoods, and per-element relationship pages.
@@ -833,6 +897,7 @@ export function resetModelStore(): void {
 	_inFlightBatchIds.clear();
 	_missingElementIds.clear();
 	_elements.clear();
+	_treeItems.clear();
 	_relationships.clear();
 	_issuesByOwner.clear();
 	_summary = null;
