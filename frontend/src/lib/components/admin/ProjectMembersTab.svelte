@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { listProjects, type ProjectSummary } from '$lib/api/projects';
@@ -55,6 +55,10 @@
 		} catch (err) {
 			error = errMsg(err);
 		}
+	});
+
+	onDestroy(() => {
+		if (_searchTimer !== null) clearTimeout(_searchTimer);
 	});
 
 	async function select(id: string): Promise<void> {

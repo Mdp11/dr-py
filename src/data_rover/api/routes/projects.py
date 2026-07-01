@@ -149,7 +149,8 @@ def clone_project(
     # Materialize the source's CURRENT model as save-file JSON from the live
     # session (hydrates on cache-miss); iter_model_json streams entity-by-entity.
     session = get_registry().get(project_id)
-    assert session.model is not None  # model_row above proves content was persisted
+    if session.model is None:  # model_row above proves content was persisted
+        raise HTTPException(status_code=409, detail="project has no content to clone")
     model_json = "".join(iter_model_json(session.model))
 
     new_name = (body.name if body and body.name else f"{src.name} (copy)")

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import ProjectCard from '../projects/ProjectCard.svelte';
+import { ApiError } from '$lib/api/errors';
 
 // Mutable flag so individual tests can flip admin on/off without re-mocking
 // (mirrors ProjectsPage.test.ts's convention for $lib/state).
@@ -65,6 +66,25 @@ describe('ProjectCard', () => {
 		await settle();
 		expect(cloneProject).toHaveBeenCalledWith('p1');
 		expect(onChanged).toHaveBeenCalled();
+		unmount(c);
+	});
+
+	it('surfaces clone failures and does not call onChanged', async () => {
+		cloneProject.mockRejectedValueOnce(
+			new ApiError(409, { detail: 'project has no content to clone' }, 'project has no content to clone')
+		);
+		const onChanged = vi.fn();
+		const c = mount(ProjectCard, {
+			target: document.body,
+			props: { project, onOpen: vi.fn(), onChanged }
+		});
+		flushSync();
+		const cloneBtn = findButton(/clone/i)!;
+		cloneBtn.click();
+		await settle();
+		expect(cloneProject).toHaveBeenCalledWith('p1');
+		expect(onChanged).not.toHaveBeenCalled();
+		expect(document.body.textContent).toContain('project has no content to clone');
 		unmount(c);
 	});
 
