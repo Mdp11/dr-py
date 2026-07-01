@@ -69,17 +69,24 @@ def _ensure_bootstrap_admin(settings: Settings) -> None:
 
 
 def _guard_prod_secret(settings: Settings) -> None:
-    """Refuse to boot the cookie provider in a non-dev deploy still using the
-    insecure default JWT secret."""
-    insecure_default = "dev-insecure-secret-change-me"
+    """Refuse to boot a non-dev deploy (``dev_seed=false``) that still carries a
+    known-insecure default: the dev JWT secret (cookie provider only) or the dev
+    bootstrap-admin password. Both ship in ``.env.example`` for local
+    convenience and MUST be replaced in production."""
     if (
         settings.identity_provider == "cookie"
         and not settings.dev_seed
-        and settings.jwt_secret == insecure_default
+        and settings.jwt_secret == "dev-insecure-secret-change-me"
     ):
         raise RuntimeError(
             "DATA_ROVER_JWT_SECRET must be set when identity_provider=cookie "
             "and dev_seed=false (refusing to sign tokens with the dev default)"
+        )
+    if not settings.dev_seed and settings.bootstrap_admin_password == "admin12345":
+        raise RuntimeError(
+            "DATA_ROVER_BOOTSTRAP_ADMIN_PASSWORD must be changed when "
+            "dev_seed=false (refusing to seed the well-known dev admin password "
+            "in production)"
         )
 
 
