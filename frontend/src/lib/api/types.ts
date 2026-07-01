@@ -327,18 +327,6 @@ export const SearchResultPageSchema = z.object({
 });
 export type SearchResultPage = z.infer<typeof SearchResultPageSchema>;
 
-export const ContainmentItemSchema = z.object({
-	element: ElementSchema,
-	child_count: z.number().int().default(0)
-});
-export type ContainmentItem = z.infer<typeof ContainmentItemSchema>;
-
-export const ContainmentPageSchema = z.object({
-	items: z.array(ContainmentItemSchema).default([]),
-	total: z.number().int().default(0)
-});
-export type ContainmentPage = z.infer<typeof ContainmentPageSchema>;
-
 export const TreeItemSchema = z.object({
 	id: z.string(),
 	type_name: z.string(),
