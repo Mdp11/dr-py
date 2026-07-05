@@ -71,9 +71,14 @@ def evaluate(
     limits: EvalLimits = EvalLimits(),
 ) -> ChainResult:
     """Evaluate a ref-free definition (run `resolve_refs` first)."""
-    if isinstance(defn, SetExpression):
-        raise NotImplementedError  # Task 6
     budget = _Budget(max_visited=limits.max_visited)
+    if isinstance(defn, SetExpression):
+        members, truncated = _evaluate_set(metamodel, model, defn, limits, budget)
+        return ChainResult(
+            step_types=[],
+            chains=[(i,) for i in sorted(members)],
+            truncated=truncated or budget.exhausted,
+        )
     start_ids = _start_ids(metamodel, model, defn, limits, budget)
     chains: list[tuple[str, ...]] = []
     truncated = _walk(
@@ -94,7 +99,12 @@ def _start_ids(
     budget: _Budget,
 ) -> list[str]:
     if isinstance(defn.start, SetExpression):
-        raise NotImplementedError  # Task 6
+        members, truncated = _evaluate_set(
+            metamodel, model, defn.start, limits, budget
+        )
+        if truncated:
+            budget.exhausted = True
+        return sorted(members)
     return _scope_ids(metamodel, model, defn.start)
 
 
@@ -182,3 +192,64 @@ def _walk(
         if _walk(metamodel, model, steps, nxt, chain, chains, limits, budget):
             return True
     return False
+
+
+def _evaluate_set(
+    metamodel: Metamodel,
+    model: Model,
+    expr: SetExpression,
+    limits: EvalLimits,
+    budget: _Budget,
+) -> tuple[set[str], bool]:
+    """(member ids, any-operand-truncated). `difference` folds left-to-right
+    over the operand list; the other ops are order-insensitive.
+
+    Each operand's inner path is evaluated with a FRESH `_Budget` (see
+    `_operand_members`) — limits are per-navigation, so one operand hitting
+    `max_visited`/`max_chains` never starves a sibling operand's budget.
+    Truncation on any operand still propagates into this call's return value
+    (and from there into the outer `ChainResult.truncated`)."""
+    truncated = False
+    result: set[str] | None = None
+    for operand in expr.operands:
+        assert operand.definition is not None  # resolver inlined every ref
+        members, op_truncated = _operand_members(
+            metamodel, model, operand.definition, operand.step_index, limits, budget
+        )
+        truncated = truncated or op_truncated
+        if result is None:
+            result = members
+        elif expr.op == "union":
+            result |= members
+        elif expr.op == "intersection":
+            result &= members
+        elif expr.op == "difference":
+            result -= members
+        else:  # symmetric_difference
+            result ^= members
+    return result or set(), truncated
+
+
+def _operand_members(
+    metamodel: Metamodel,
+    model: Model,
+    defn: NavigationDefinition,
+    step_index: int | None,
+    limits: EvalLimits,
+    budget: _Budget,
+) -> tuple[set[str], bool]:
+    if isinstance(defn, SetExpression):
+        # a set has no steps; any explicit index other than 0 is an error
+        if step_index not in (None, 0):
+            raise ValueError(
+                f"step_index {step_index} out of range for a set operand"
+            )
+        return _evaluate_set(metamodel, model, defn, limits, budget)
+    inner = evaluate(metamodel, model, defn, limits)
+    n_steps = len(inner.step_types)
+    index = n_steps if step_index is None else step_index
+    if index > n_steps:
+        raise ValueError(
+            f"step_index {step_index} out of range: path has {n_steps} steps"
+        )
+    return {chain[index] for chain in inner.chains}, inner.truncated
