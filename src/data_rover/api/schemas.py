@@ -632,3 +632,34 @@ class RevertRequest(BaseModel):
     target_rev: int
     base_rev: int
     message: str | None = None
+
+
+class ArtifactHeaderOut(BaseModel):
+    """Artifact list row: everything the sidebar renders, payload omitted."""
+
+    id: str
+    kind: str
+    name: str
+    artifact_rev: int
+    updated_at: datetime
+    updated_by: str | None = None
+
+
+class ArtifactOut(ArtifactHeaderOut):
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class ArtifactListOut(BaseModel):
+    items: list[ArtifactHeaderOut] = Field(default_factory=list)
+
+
+class ArtifactCreateIn(BaseModel):
+    kind: Literal["navigation", "table", "diagram", "diagram_kind"]
+    name: str = Field(min_length=1)
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class ArtifactUpdateIn(BaseModel):
+    artifact_rev: int
+    name: str | None = Field(default=None, min_length=1)
+    payload: dict[str, Any] | None = None

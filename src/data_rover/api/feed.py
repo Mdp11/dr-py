@@ -171,3 +171,10 @@ def rebind_event(
         "to_metamodel_id": to_metamodel_id,
         "validation_error_count": validation_error_count,
     }
+
+
+def artifact_event(action: str, artifact: dict[str, Any]) -> dict[str, Any]:
+    """Artifact library change (action: created|updated|deleted). Carries the
+    HEADER only (no payload): clients refresh their artifact list; an open
+    editor refetches the payload itself if it cares."""
+    return {"type": "artifact", "action": action, "artifact": artifact}
