@@ -214,7 +214,7 @@ def test_artifact_update_bumps_rev_and_rejects_stale() -> None:
         assert exc.value.current_rev == 2
 
 
-def test_artifact_delete_and_project_cascade() -> None:
+def test_artifact_delete() -> None:
     _setup()
     with db.db_session() as s:
         row = content.create_artifact(
@@ -224,3 +224,17 @@ def test_artifact_delete_and_project_cascade() -> None:
         aid = row.id
         content.delete_artifact(s, row)
         assert content.get_artifact(s, aid) is None
+
+
+def test_artifact_project_cascade_delete() -> None:
+    _setup()
+    with db.db_session() as s:
+        row = content.create_artifact(
+            s, "p1", kind=ArtifactKind.navigation, name="N",
+            payload={}, updated_by=None,
+        )
+        aid = row.id
+    with db.db_session() as s:
+        s.delete(s.get(Project, "p1"))
+    with db.db_session() as s:
+        assert content.get_artifact(s, aid) is None  # FK ON DELETE CASCADE
