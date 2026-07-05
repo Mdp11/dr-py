@@ -87,7 +87,11 @@ export function initWorkspaceTabs(projectId: string): void {
 	_projectId = projectId;
 	try {
 		const raw = localStorage.getItem(`ui.workspace.tabs.${projectId}`);
-		if (!raw) return;
+		if (!raw) {
+			_tabs = [];
+			_activeTab = 'detail';
+			return;
+		}
 		const parsed = JSON.parse(raw) as { active?: string; tabs?: DynamicTab[] };
 		_tabs = (parsed.tabs ?? []).filter((t) => t.artifactId !== null);
 		const active = parsed.active ?? 'detail';

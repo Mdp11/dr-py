@@ -58,4 +58,14 @@ describe('dynamic workspace tabs', () => {
 		initWorkspaceTabs('p1');
 		expect(getDynamicTabs()[0].artifactId).toBe('a9');
 	});
+
+	it('switching to a project with no persisted tabs clears the prior project state', () => {
+		initWorkspaceTabs('p1');
+		openNavigationTab({ artifactId: 'a1', title: 'Sensors' });
+		// Simulate client-side project navigation (no resetWorkspaceTabs in between):
+		// module-level state must not leak from p1 into p2.
+		initWorkspaceTabs('p2');
+		expect(getDynamicTabs()).toEqual([]);
+		expect(getActiveTab()).toBe('detail');
+	});
 });
