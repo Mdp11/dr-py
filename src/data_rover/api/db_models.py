@@ -254,3 +254,49 @@ class Snapshot(Base):
     ts: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )
+
+
+class ArtifactKind(str, enum.Enum):
+    """Kinds of project artifacts. All four mega-plan kinds are declared up
+    front (the column is VARCHAR+CHECK, so this costs nothing); Stage 1 only
+    accepts `navigation` payloads at the route layer."""
+
+    navigation = "navigation"
+    table = "table"
+    diagram = "diagram"
+    diagram_kind = "diagram_kind"
+
+
+class ArtifactRow(Base):
+    """A project-shared, model-external artifact (saved navigation, table,
+    diagram...). `payload` is the kind-specific JSON document, validated at
+    the route layer; it is NEVER part of the model or the op journal.
+    `artifact_rev` is the optimistic-concurrency counter: writers echo the
+    rev they loaded and a mismatch is a 409 (no leases — artifact edits never
+    touch the model)."""
+
+    __tablename__ = "project_artifacts"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id", "kind", "name", name="uq_artifact_project_kind_name"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    kind: Mapped[ArtifactKind] = mapped_column(
+        SAEnum(ArtifactKind, name="artifact_kind", native_enum=False),
+        nullable=False,
+    )
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    artifact_rev: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+    )
+    #: SET NULL so artifacts survive their last editor's account deletion.
+    updated_by: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )

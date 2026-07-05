@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import pytest
+
 from data_rover.api import content, db
-from data_rover.api.db_models import Commit, Project
+from data_rover.api.db_models import ArtifactKind, Commit, Project
 
 
 def _setup() -> None:
@@ -169,3 +171,56 @@ def test_first_rebind_after_finds_earliest_rebind() -> None:
         assert content.first_rebind_after(s, DEFAULT_PROJECT_ID, 3) is None
     finally:
         gen.close()
+
+
+def test_artifact_crud_roundtrip() -> None:
+    _setup()
+    with db.db_session() as s:
+        row = content.create_artifact(
+            s, "p1", kind=ArtifactKind.navigation, name="Sensors",
+            payload={"kind": "path"}, updated_by=None,
+        )
+        aid = row.id
+        assert row.artifact_rev == 1
+    with db.db_session() as s:
+        row = content.get_artifact(s, aid)
+        assert row is not None and row.name == "Sensors"
+        assert content.find_artifact(s, "p1", ArtifactKind.navigation, "Sensors") is not None
+        assert [r.id for r in content.list_artifacts(s, "p1")] == [aid]
+        assert content.list_artifacts(s, "p1", ArtifactKind.table) == []
+
+
+def test_artifact_update_bumps_rev_and_rejects_stale() -> None:
+    _setup()
+    with db.db_session() as s:
+        row = content.create_artifact(
+            s, "p1", kind=ArtifactKind.navigation, name="N",
+            payload={}, updated_by=None,
+        )
+        aid = row.id
+    with db.db_session() as s:
+        row = content.get_artifact(s, aid)
+        assert row is not None
+        # updated_by=None: this test seeds no User row and updated_by is an FK
+        # (SQLite runs with PRAGMA foreign_keys=ON); route tests cover the id.
+        content.update_artifact(s, row, expected_rev=1, name="N2", updated_by=None)
+        assert row.artifact_rev == 2
+    with db.db_session() as s:
+        row = content.get_artifact(s, aid)
+        assert row is not None
+        with pytest.raises(content.StaleArtifactError) as exc:
+            content.update_artifact(s, row, expected_rev=1, payload={"x": 1},
+                                    updated_by=None)
+        assert exc.value.current_rev == 2
+
+
+def test_artifact_delete_and_project_cascade() -> None:
+    _setup()
+    with db.db_session() as s:
+        row = content.create_artifact(
+            s, "p1", kind=ArtifactKind.navigation, name="N",
+            payload={}, updated_by=None,
+        )
+        aid = row.id
+        content.delete_artifact(s, row)
+        assert content.get_artifact(s, aid) is None

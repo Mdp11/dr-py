@@ -12,7 +12,15 @@ from typing import Any
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from .db_models import Commit, MetamodelRow, ModelRow, Snapshot, ViewRow
+from .db_models import (
+    ArtifactKind,
+    ArtifactRow,
+    Commit,
+    MetamodelRow,
+    ModelRow,
+    Snapshot,
+    ViewRow,
+)
 
 
 def create_metamodel(
@@ -233,3 +241,88 @@ def get_single_view(db: Session, project_id: str) -> ViewRow | None:
         .scalars()
         .first()
     )
+
+
+class StaleArtifactError(Exception):
+    """Optimistic-concurrency failure: the caller's expected_rev is behind."""
+
+    def __init__(self, current_rev: int) -> None:
+        super().__init__(f"artifact is at rev {current_rev}")
+        self.current_rev = current_rev
+
+
+def create_artifact(
+    db: Session,
+    project_id: str,
+    *,
+    kind: ArtifactKind,
+    name: str,
+    payload: dict,
+    updated_by: str | None,
+) -> ArtifactRow:
+    row = ArtifactRow(
+        id=uuid.uuid4().hex,
+        project_id=project_id,
+        kind=kind,
+        name=name,
+        payload=payload,
+        updated_by=updated_by,
+    )
+    db.add(row)
+    db.flush()
+    return row
+
+
+def get_artifact(db: Session, artifact_id: str) -> ArtifactRow | None:
+    return db.get(ArtifactRow, artifact_id)
+
+
+def find_artifact(
+    db: Session, project_id: str, kind: ArtifactKind, name: str
+) -> ArtifactRow | None:
+    return db.execute(
+        select(ArtifactRow).where(
+            ArtifactRow.project_id == project_id,
+            ArtifactRow.kind == kind,
+            ArtifactRow.name == name,
+        )
+    ).scalar_one_or_none()
+
+
+def list_artifacts(
+    db: Session, project_id: str, kind: ArtifactKind | None = None
+) -> list[ArtifactRow]:
+    q = select(ArtifactRow).where(ArtifactRow.project_id == project_id)
+    if kind is not None:
+        q = q.where(ArtifactRow.kind == kind)
+    q = q.order_by(ArtifactRow.kind, ArtifactRow.name)
+    return list(db.execute(q).scalars())
+
+
+def update_artifact(
+    db: Session,
+    row: ArtifactRow,
+    *,
+    expected_rev: int,
+    name: str | None = None,
+    payload: dict | None = None,
+    updated_by: str | None,
+) -> ArtifactRow:
+    """Rev-checked update. `payload` is reassigned wholesale (never mutated in
+    place) so SQLAlchemy's JSON change-tracking fires — same rule as
+    `set_strict_mode` above."""
+    if row.artifact_rev != expected_rev:
+        raise StaleArtifactError(row.artifact_rev)
+    if name is not None:
+        row.name = name
+    if payload is not None:
+        row.payload = payload
+    row.artifact_rev = expected_rev + 1
+    row.updated_by = updated_by
+    db.flush()
+    return row
+
+
+def delete_artifact(db: Session, row: ArtifactRow) -> None:
+    db.delete(row)
+    db.flush()
