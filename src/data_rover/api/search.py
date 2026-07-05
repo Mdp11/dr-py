@@ -84,8 +84,16 @@ def run_query(model: Model, query: SearchQueryIn) -> list[str]:
 
 
 __all__ = [
-    "ConnectedToTypeCriterion", "Criterion", "Direction",
-    "EndpointTypeCriterion", "EntityTypeCriterion", "NameIdCriterion",
-    "OrphanCriterion", "PropertyCriterion", "RelationCountCriterion",
-    "SearchQueryIn", "SearchResultPage", "run_query",
+    "ConnectedToTypeCriterion",
+    "Criterion",
+    "Direction",
+    "EndpointTypeCriterion",
+    "EntityTypeCriterion",
+    "NameIdCriterion",
+    "OrphanCriterion",
+    "PropertyCriterion",
+    "RelationCountCriterion",
+    "SearchQueryIn",
+    "SearchResultPage",
+    "run_query",
 ]

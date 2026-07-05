@@ -76,9 +76,7 @@ def _validate_payload(kind: ArtifactKind, payload: dict[str, Any]) -> None:
         ) from exc
 
 
-def _require_artifact(
-    db: DbSession, project_id: str, artifact_id: str
-) -> ArtifactRow:
+def _require_artifact(db: DbSession, project_id: str, artifact_id: str) -> ArtifactRow:
     row = content.get_artifact(db, artifact_id)
     if row is None or row.project_id != project_id:
         raise HTTPException(status_code=404, detail="artifact not found")
@@ -122,8 +120,12 @@ def create_artifact(
             detail=f"a {kind.value} named {payload.name!r} already exists",
         )
     row = content.create_artifact(
-        db, project_id, kind=kind, name=payload.name,
-        payload=payload.payload, updated_by=user.id,
+        db,
+        project_id,
+        kind=kind,
+        name=payload.name,
+        payload=payload.payload,
+        updated_by=user.id,
     )
     db.commit()
     session.hub.broadcast(
@@ -153,14 +155,20 @@ def update_artifact(
             )
     try:
         content.update_artifact(
-            db, row, expected_rev=payload.artifact_rev,
-            name=payload.name, payload=payload.payload, updated_by=user.id,
+            db,
+            row,
+            expected_rev=payload.artifact_rev,
+            name=payload.name,
+            payload=payload.payload,
+            updated_by=user.id,
         )
     except content.StaleArtifactError as exc:
         raise HTTPException(
             status_code=409,
-            detail={"message": "artifact was modified by someone else",
-                    "current_rev": exc.current_rev},
+            detail={
+                "message": "artifact was modified by someone else",
+                "current_rev": exc.current_rev,
+            },
         ) from exc
     db.commit()
     session.hub.broadcast(

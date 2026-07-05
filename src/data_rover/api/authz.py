@@ -78,9 +78,7 @@ def require_membership(
         # carries the owner role through the request so the viewer-write guard
         # below is naturally satisfied.
         if user.is_admin:
-            return Membership(
-                user_id=user.id, project_id=project_id, role=Role.owner
-            )
+            return Membership(user_id=user.id, project_id=project_id, role=Role.owner)
         raise HTTPException(status_code=403, detail="not a project member")
     if _is_write(request) and membership.role is Role.viewer:
         raise HTTPException(

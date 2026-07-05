@@ -168,9 +168,7 @@ class FolderOut(BaseModel):
             name=folder.name,
             folders=[FolderOut.from_core(f) for f in folder.folders],
             elements=list(folder.elements),
-            artifacts=[
-                ArtifactRefOut(id=a.id, kind=a.kind) for a in folder.artifacts
-            ],
+            artifacts=[ArtifactRefOut(id=a.id, kind=a.kind) for a in folder.artifacts],
         )
 
 
@@ -691,9 +689,7 @@ class EvaluateNavigationIn(BaseModel):
     @model_validator(mode="after")
     def _exactly_one(self) -> "EvaluateNavigationIn":
         if (self.definition is None) == (self.artifact_id is None):
-            raise ValueError(
-                "provide exactly one of `definition` / `artifact_id`"
-            )
+            raise ValueError("provide exactly one of `definition` / `artifact_id`")
         return self
 
 

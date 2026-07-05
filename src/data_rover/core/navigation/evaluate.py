@@ -99,9 +99,7 @@ def _start_ids(
     budget: _Budget,
 ) -> list[str]:
     if isinstance(defn.start, SetExpression):
-        members, truncated = _evaluate_set(
-            metamodel, model, defn.start, limits, budget
-        )
+        members, truncated = _evaluate_set(metamodel, model, defn.start, limits, budget)
         if truncated:
             budget.exhausted = True
         return sorted(members)
@@ -116,9 +114,7 @@ def _scope_ids(metamodel: Metamodel, model: Model, scope: Scope) -> list[str]:
                 ids |= model.indexes.elements_by_type.get(concrete, set())
     else:
         ids = set(model.elements.keys())
-    return sorted(
-        i for i in ids if _matches_criteria(model, model.elements[i], scope)
-    )
+    return sorted(i for i in ids if _matches_criteria(model, model.elements[i], scope))
 
 
 def _matches_criteria(model: Model, element: Element, scope: Scope) -> bool:
@@ -154,9 +150,7 @@ def _next_ids(
     nxt: set[str] = set()
     for rid in rel_ids:
         rel = model.relationships[rid]
-        if not metamodel.is_relationship_subtype(
-            rel.type_name, step.relationship_type
-        ):
+        if not metamodel.is_relationship_subtype(rel.type_name, step.relationship_type):
             continue
         other = rel.target_id if rel.source_id == element_id else rel.source_id
         el = model.elements.get(other)
@@ -241,9 +235,7 @@ def _operand_members(
     if isinstance(defn, SetExpression):
         # a set has no steps; any explicit index other than 0 is an error
         if step_index not in (None, 0):
-            raise ValueError(
-                f"step_index {step_index} out of range for a set operand"
-            )
+            raise ValueError(f"step_index {step_index} out of range for a set operand")
         return _evaluate_set(metamodel, model, defn, limits, budget)
     inner = evaluate(metamodel, model, defn, limits)
     n_steps = len(inner.step_types)

@@ -145,9 +145,7 @@ def lock_event(action: str, leases: list[dict[str, Any]]) -> dict[str, Any]:
     return {"type": "lock", "action": action, "leases": leases}
 
 
-def presence_event(
-    action: str, user_id: str, connected: list[str]
-) -> dict[str, Any]:
+def presence_event(action: str, user_id: str, connected: list[str]) -> dict[str, Any]:
     return {
         "type": "presence",
         "action": action,

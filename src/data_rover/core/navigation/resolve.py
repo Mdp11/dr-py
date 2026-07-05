@@ -70,9 +70,7 @@ def _resolve_expr(
             except LookupError:
                 raise RefNotFoundError(op.ref) from None
             inner = resolve_refs(fetched, fetch, seen | {op.ref})
-            operands.append(
-                Operand(definition=inner, step_index=op.step_index)
-            )
+            operands.append(Operand(definition=inner, step_index=op.step_index))
         else:
             assert op.definition is not None  # schema: exactly one source
             inner = resolve_refs(op.definition, fetch, seen)
