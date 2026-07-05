@@ -4,7 +4,7 @@ from dataclasses import asdict
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
 from data_rover.core.model.change_request import (
     ChangeRequest as CoreChangeRequest,
@@ -14,6 +14,7 @@ from data_rover.core.model.change_request import (
 from data_rover.core.model.element import Element
 from data_rover.core.model.model import Model
 from data_rover.core.model.relationship import Relationship
+from data_rover.core.navigation.schema import NavigationDefinition
 from data_rover.core.validation.issue import Issue
 from data_rover.core.view.schema import Folder, View
 
@@ -663,3 +664,36 @@ class ArtifactUpdateIn(BaseModel):
     artifact_rev: int
     name: str | None = Field(default=None, min_length=1)
     payload: dict[str, Any] | None = None
+
+
+# ---------------------------------------------------------------------------
+# Navigation evaluation (Stage 1: POST /navigations/evaluate)
+# ---------------------------------------------------------------------------
+
+
+class EvaluateNavigationIn(BaseModel):
+    """Exactly one of `definition` (inline) / `artifact_id` (saved)."""
+
+    definition: NavigationDefinition | None = None
+    artifact_id: str | None = None
+    limit: int = Field(100, ge=1, le=500)
+    offset: int = Field(0, ge=0)
+
+    @model_validator(mode="after")
+    def _exactly_one(self) -> "EvaluateNavigationIn":
+        if (self.definition is None) == (self.artifact_id is None):
+            raise ValueError(
+                "provide exactly one of `definition` / `artifact_id`"
+            )
+        return self
+
+
+class ChainPageOut(BaseModel):
+    """One page of navigation chains, each element as a TreeItem projection.
+    `total` counts chains found WITHIN the evaluation caps; `truncated` means
+    the caps stopped enumeration (there may be more matches than `total`)."""
+
+    step_types: list[str] = Field(default_factory=list)
+    chains: list[list[TreeItem]] = Field(default_factory=list)
+    total: int = 0
+    truncated: bool = False

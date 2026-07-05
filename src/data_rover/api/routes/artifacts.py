@@ -18,12 +18,14 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import ValidationError
 from sqlalchemy.orm import Session as DbSession
 
-from data_rover.core.navigation.schema import NAVIGATION_ADAPTER
+from data_rover.core.navigation.evaluate import evaluate
+from data_rover.core.navigation.resolve import NavigationResolveError, resolve_refs
+from data_rover.core.navigation.schema import NAVIGATION_ADAPTER, NavigationDefinition
 
 from .. import content
 from ..db import get_db
 from ..db_models import ArtifactKind, ArtifactRow, User
-from ..deps import Session, get_request_session
+from ..deps import Session, get_request_session, require_model
 from ..feed import artifact_event
 from ..identity import get_current_user
 from ..schemas import (
@@ -32,7 +34,10 @@ from ..schemas import (
     ArtifactListOut,
     ArtifactOut,
     ArtifactUpdateIn,
+    ChainPageOut,
+    EvaluateNavigationIn,
 )
+from .read import _tree_item  # shared lite projection
 
 router = APIRouter()
 
@@ -177,3 +182,52 @@ def delete_artifact(
     db.commit()
     session.hub.broadcast(artifact_event("deleted", header))
     return Response(status_code=204)
+
+
+@router.post("/navigations/evaluate")
+def evaluate_navigation(
+    payload: EvaluateNavigationIn,
+    project_id: str,
+    session: Session = Depends(get_request_session),
+    db: DbSession = Depends(get_db),
+) -> ChainPageOut:
+    """Read-only (viewer-callable; listed in authz._READ_ONLY_POST_SUFFIXES).
+    Stateless offset paging: the evaluator's deterministic chain order makes
+    re-evaluating per page sound. No write_mutex — same benign-race stance as
+    routes/read.py."""
+    metamodel, model = require_model(session)
+
+    def _fetch(artifact_id: str) -> NavigationDefinition:
+        row = content.get_artifact(db, artifact_id)
+        if (
+            row is None
+            or row.project_id != project_id
+            or row.kind is not ArtifactKind.navigation
+        ):
+            raise LookupError(artifact_id)
+        return NAVIGATION_ADAPTER.validate_python(row.payload)
+
+    try:
+        if payload.artifact_id is not None:
+            defn = _fetch(payload.artifact_id)
+            defn = resolve_refs(defn, _fetch, frozenset({payload.artifact_id}))
+        else:
+            assert payload.definition is not None  # schema: exactly one
+            defn = resolve_refs(payload.definition, _fetch)
+        result = evaluate(metamodel, model, defn)
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=422, detail=f"unknown navigation artifact {exc}"
+        ) from exc
+    except NavigationResolveError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    window = result.chains[payload.offset : payload.offset + payload.limit]
+    return ChainPageOut(
+        step_types=result.step_types,
+        chains=[[_tree_item(model, eid) for eid in chain] for chain in window],
+        total=len(result.chains),
+        truncated=result.truncated,
+    )

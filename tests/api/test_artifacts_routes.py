@@ -3,6 +3,8 @@ guarded, payload-validated per kind (Stage 1: navigation only)."""
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -118,3 +120,140 @@ def test_writes_broadcast_artifact_events(client: TestClient) -> None:
     assert kinds == [("artifact", "created"), ("artifact", "updated"),
                      ("artifact", "deleted")]
     assert events[0]["artifact"]["name"] == "My nav"
+
+
+# ---------------------------------------------------------------------------
+# POST /navigations/evaluate
+# ---------------------------------------------------------------------------
+
+EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "example.metamodel.yaml"
+
+
+def _bootstrap_model(client: TestClient) -> dict[str, str]:
+    """example.metamodel.yaml: Block (mass), BlockHasPart (containment,
+    Block->Block), Satisfies (Block->Requirement). Build: root -has-> p1, p2."""
+    client.post(
+        f"{API}/metamodel",
+        content=EXAMPLE.read_text(encoding="utf-8"),
+        headers={"content-type": "application/x-yaml"},
+    )
+    client.post(f"{API}/model", json={"elements": [], "relationships": []})
+    ids: dict[str, str] = {}
+    for name in ["root", "p1", "p2"]:
+        res = client.post(
+            f"{API}/model/elements",
+            json={"type": "Block", "properties": {"name": name, "mass": 1.0}},
+        )
+        ids[name] = res.json()["id"]
+    for child in ["p1", "p2"]:
+        client.post(
+            f"{API}/model/relationships",
+            json={"type": "BlockHasPart", "source_id": ids["root"],
+                  "target_id": ids[child]},
+        )
+    return ids
+
+
+def test_evaluate_inline_definition(client: TestClient) -> None:
+    ids = _bootstrap_model(client)
+    res = client.post(
+        f"{API}/navigations/evaluate",
+        json={"definition": {
+            "kind": "path",
+            "start": {"kind": "scope", "types": ["Block"],
+                      "criteria": [{"type": "name_id", "field": "name",
+                                    "op": "equals", "value": "root"}]},
+            "steps": [{"relationship_type": "BlockHasPart"}],
+        }},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["step_types"] == ["BlockHasPart"]
+    assert body["total"] == 2 and body["truncated"] is False
+    chains = body["chains"]
+    assert all(len(c) == 2 for c in chains)
+    assert {c[1]["id"] for c in chains} == {ids["p1"], ids["p2"]}
+    assert chains[0][0]["display_name"] == "root"  # TreeItem projection
+
+
+def test_evaluate_saved_artifact_and_paging(client: TestClient) -> None:
+    _bootstrap_model(client)
+    nav = {
+        "kind": "path",
+        "start": {"kind": "scope", "types": ["Block"]},
+        "steps": [],
+    }
+    created = client.post(
+        f"{API}/artifacts",
+        json={"kind": "navigation", "name": "all blocks", "payload": nav},
+    ).json()
+    page = client.post(
+        f"{API}/navigations/evaluate",
+        json={"artifact_id": created["id"], "limit": 2, "offset": 2},
+    ).json()
+    assert page["total"] == 3
+    assert len(page["chains"]) == 1  # 3 chains, offset 2
+
+
+def test_evaluate_requires_exactly_one_source(client: TestClient) -> None:
+    _bootstrap_model(client)
+    assert client.post(f"{API}/navigations/evaluate", json={}).status_code == 422
+
+
+def test_evaluate_unknown_artifact_422(client: TestClient) -> None:
+    _bootstrap_model(client)
+    res = client.post(
+        f"{API}/navigations/evaluate", json={"artifact_id": "ghost"}
+    )
+    assert res.status_code == 422
+
+
+def test_evaluate_ref_cycle_422(client: TestClient) -> None:
+    _bootstrap_model(client)
+    a = client.post(
+        f"{API}/artifacts",
+        json={"kind": "navigation", "name": "a",
+              "payload": {"kind": "set_op", "op": "union",
+                          "operands": [{"ref": "placeholder"}]}},
+    ).json()
+    # point a at itself
+    client.put(
+        f"{API}/artifacts/{a['id']}",
+        json={"artifact_rev": 1,
+              "payload": {"kind": "set_op", "op": "union",
+                          "operands": [{"ref": a["id"]}]}},
+    )
+    res = client.post(
+        f"{API}/navigations/evaluate", json={"artifact_id": a["id"]}
+    )
+    assert res.status_code == 422
+    assert "cycle" in res.text
+
+
+def test_viewer_can_evaluate_but_not_create(client: TestClient) -> None:
+    """/navigations/evaluate must be on the read-only POST allowlist."""
+    _bootstrap_model(client)
+    from data_rover.api import tenancy
+    from data_rover.api.db import db_session
+    from data_rover.api.db_models import Role
+
+    with db_session() as s:
+        tenancy.upsert_user(s, user_id="viewer-1", email="v@example.com")
+        tenancy.add_member(s, project_id="default", user_id="viewer-1",
+                           role=Role.viewer)
+    viewer = TestClient(create_app())
+    viewer.headers.update({"x-user-id": "viewer-1", "x-user-email": "v@example.com"})
+    ok = viewer.post(
+        f"{API}/navigations/evaluate",
+        json={"definition": {"kind": "path",
+                             "start": {"kind": "scope", "types": ["Block"]},
+                             "steps": []}},
+    )
+    assert ok.status_code == 200
+    denied = viewer.post(
+        f"{API}/artifacts",
+        json={"kind": "navigation", "name": "x",
+              "payload": {"kind": "path",
+                          "start": {"kind": "scope"}, "steps": []}},
+    )
+    assert denied.status_code == 403

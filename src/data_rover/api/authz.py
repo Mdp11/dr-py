@@ -50,6 +50,7 @@ _READ_ONLY_POST_SUFFIXES = (
     "/commits/preview",
     "/metamodel/diff",
     "/clone",
+    "/navigations/evaluate",
 )
 
 
