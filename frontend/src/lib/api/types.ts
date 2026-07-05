@@ -341,6 +341,98 @@ export const TreeItemPageSchema = z.object({
 });
 export type TreeItemPage = z.infer<typeof TreeItemPageSchema>;
 
+// ---------------------------------------------------------------------------
+// Project artifacts (Stage 1: saved navigations; tables/diagrams later)
+// ---------------------------------------------------------------------------
+
+export const ArtifactHeaderSchema = z.object({
+	id: z.string(),
+	kind: z.string(),
+	name: z.string(),
+	artifact_rev: z.number().int(),
+	updated_at: z.string(),
+	updated_by: z.string().nullable().default(null)
+});
+export type ArtifactHeader = z.infer<typeof ArtifactHeaderSchema>;
+
+export const ArtifactListSchema = z.object({
+	items: z.array(ArtifactHeaderSchema).default([])
+});
+export type ArtifactList = z.infer<typeof ArtifactListSchema>;
+
+// Navigation definition — mirrors core/navigation/schema.py. Criteria reuse
+// the advanced-search criterion wire shape (lib/search/types.ts Criterion).
+export type NavDirection = 'out' | 'in' | 'either';
+
+export interface NavScope {
+	kind: 'scope';
+	types: string[];
+	criteria: unknown[]; // search Criterion objects; typed at the editor layer
+}
+
+export interface NavStep {
+	relationship_type: string;
+	direction: NavDirection;
+	target: NavScope;
+	children: NavStep[];
+}
+
+export interface PathNavigation {
+	kind: 'path';
+	schema_version: number;
+	start: NavScope | SetExpression;
+	steps: NavStep[];
+}
+
+export interface NavOperand {
+	ref?: string | null;
+	definition?: NavigationDefinition | null;
+	step_index?: number | null;
+}
+
+export interface SetExpression {
+	kind: 'set_op';
+	schema_version: number;
+	op: 'union' | 'intersection' | 'difference' | 'symmetric_difference';
+	operands: NavOperand[];
+}
+
+export type NavigationDefinition = PathNavigation | SetExpression;
+
+// The schema only guards transport shape (the editor constructs/consumes
+// NavigationDefinition values directly); `start`/nested definitions are typed
+// loosely here rather than fighting zod's recursive-union inference, while the
+// exported TS interfaces above stay strict for app code.
+export const NavigationDefinitionSchema: z.ZodType<NavigationDefinition> = z.lazy(() =>
+	z.union([
+		z.object({
+			kind: z.literal('path'),
+			schema_version: z.number().int().default(1),
+			start: z.unknown(),
+			steps: z.array(z.unknown()).default([])
+		}),
+		z.object({
+			kind: z.literal('set_op'),
+			schema_version: z.number().int().default(1),
+			op: z.enum(['union', 'intersection', 'difference', 'symmetric_difference']),
+			operands: z.array(z.unknown()).default([])
+		})
+	])
+) as z.ZodType<NavigationDefinition>;
+
+export const ArtifactSchema = ArtifactHeaderSchema.extend({
+	payload: z.record(z.string(), z.unknown()).default({})
+});
+export type Artifact = z.infer<typeof ArtifactSchema>;
+
+export const ChainPageSchema = z.object({
+	step_types: z.array(z.string()).default([]),
+	chains: z.array(z.array(TreeItemSchema)).default([]),
+	total: z.number().int().default(0),
+	truncated: z.boolean().default(false)
+});
+export type ChainPage = z.infer<typeof ChainPageSchema>;
+
 const ModifiedElementSchema = z.object({
 	id: z.string(),
 	before: ElementSchema,

@@ -1,3 +1,4 @@
+export * as artifacts from './artifacts';
 export * as checkout from './checkout';
 export * as metamodel from './metamodel';
 export * as model from './model';
