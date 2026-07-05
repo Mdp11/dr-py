@@ -805,6 +805,11 @@
 			const p = draggingPayload.path;
 			return p.length > 0 ? p[p.length - 1] : 'folder';
 		}
+		if (draggingPayload.kind === 'artifact') {
+			// Task 6 teaches the tree to complete artifact drops; for now the tree
+			// only needs a label so a drag started elsewhere renders sensibly.
+			return draggingPayload.artifactKind;
+		}
 		const ids = draggingPayload.ids;
 		if (ids.length === 1) {
 			const el = elementsById.get(ids[0]);
@@ -823,6 +828,11 @@
 				return draggingPayload.ids.every((id) => knownIds.has(id) && !containedIds.has(id));
 			}
 			return canDropElement({ elementIds: draggingPayload.ids, movableIds, knownIds }).ok;
+		}
+		if (draggingPayload.kind === 'artifact') {
+			// No drop target implemented yet (Task 6); reject so drags started from
+			// the artifacts section render as invalid rather than silently no-op.
+			return false;
 		}
 		return canDropFolder({ sourcePath: draggingPayload.path, destParentPath: destPath ?? [] }).ok;
 	}
@@ -962,9 +972,12 @@
 					half: target.half
 				});
 				await placeElementsAt(res.path, payload.ids, res.index);
-			} else {
+			} else if (payload.kind === 'folder') {
 				await moveFolder(payload.path, target.path ?? []);
 			}
+			// 'artifact': no drop target yet (Task 6); dropAllowed() already rejects
+			// it above, so `valid` is false and this branch is unreachable — kept
+			// exhaustive so a future payload variant fails to compile here, not silently.
 		} catch (err) {
 			console.error('Drop failed', err);
 		}

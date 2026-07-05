@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Separator } from '$lib/components/ui/separator';
 	import { getMetamodel, getModelSummary } from '$lib/state';
+	import ArtifactsSection from './Sidebar/ArtifactsSection.svelte';
 	import ContainmentTree from './Sidebar/ContainmentTree.svelte';
 	import Search from './Sidebar/Search.svelte';
 	import ViewSelector from './Sidebar/ViewSelector.svelte';
@@ -20,6 +21,7 @@
 		<Search />
 		<Separator class="bg-zinc-800" />
 		<ViewSelector />
+		<ArtifactsSection />
 		<ContainmentTree />
 	{/if}
 </aside>

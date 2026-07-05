@@ -6,7 +6,10 @@
 // tree (one sidebar). Two concurrently-mounted trees would both adopt the same
 // drag — not a supported layout.
 
-export type DragPayload = { kind: 'element'; ids: string[] } | { kind: 'folder'; path: string[] };
+export type DragPayload =
+	| { kind: 'element'; ids: string[] }
+	| { kind: 'folder'; path: string[] }
+	| { kind: 'artifact'; id: string; artifactKind: string };
 
 let _payload = $state<DragPayload | null>(null);
 let _active = $state(false);
