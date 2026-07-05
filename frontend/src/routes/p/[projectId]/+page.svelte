@@ -25,6 +25,7 @@
 	import {
 		clearModelError,
 		clearSelection,
+		getActiveProjectId,
 		reactToBootError,
 		setAccessNotice,
 		getDiffDrawerOpen,
@@ -32,6 +33,7 @@
 		getModelError,
 		getResultsPanelOpen,
 		handleRemoteLockEvent,
+		initWorkspaceTabs,
 		loadArtifacts,
 		loadProjectInfo,
 		onLockEvent,
@@ -49,6 +51,12 @@
 
 	onMount(() => startRealtime());
 	onMount(() => onLockEvent((action, leases) => handleRemoteLockEvent(action, leases)));
+	onMount(() => {
+		// setActiveProject(params.projectId) already ran in +layout.ts's load,
+		// so the active id is set before this mount fires.
+		const pid = getActiveProjectId();
+		if (pid) initWorkspaceTabs(pid);
+	});
 	onMount(() => {
 		void boot();
 	});

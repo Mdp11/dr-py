@@ -1,0 +1,61 @@
+import { beforeEach, describe, expect, it } from 'vitest';
+import {
+	bindTabToArtifact,
+	closeTab,
+	getActiveTab,
+	getDynamicTabs,
+	initWorkspaceTabs,
+	openNavigationTab,
+	resetWorkspaceTabs,
+	setActiveTab
+} from '../workspace.svelte';
+
+beforeEach(() => {
+	localStorage.clear();
+	resetWorkspaceTabs();
+});
+
+describe('dynamic workspace tabs', () => {
+	it('defaults to detail with no dynamic tabs', () => {
+		expect(getActiveTab()).toBe('detail');
+		expect(getDynamicTabs()).toEqual([]);
+	});
+
+	it('opens, activates, and dedupes navigation tabs by artifact', () => {
+		initWorkspaceTabs('p1');
+		const id = openNavigationTab({ artifactId: 'a1', title: 'Sensors' });
+		expect(getActiveTab()).toBe(id);
+		const again = openNavigationTab({ artifactId: 'a1', title: 'Sensors' });
+		expect(again).toBe(id);
+		expect(getDynamicTabs()).toHaveLength(1);
+	});
+
+	it('closing the active tab falls back to detail', () => {
+		initWorkspaceTabs('p1');
+		const id = openNavigationTab({ artifactId: null, title: 'New navigation' });
+		closeTab(id);
+		expect(getActiveTab()).toBe('detail');
+		expect(getDynamicTabs()).toEqual([]);
+	});
+
+	it('persists saved tabs per project, not drafts', () => {
+		initWorkspaceTabs('p1');
+		openNavigationTab({ artifactId: 'a1', title: 'Sensors' });
+		openNavigationTab({ artifactId: null, title: 'New navigation' });
+		resetWorkspaceTabs();
+		initWorkspaceTabs('p1');
+		const tabs = getDynamicTabs();
+		expect(tabs).toHaveLength(1);
+		expect(tabs[0].artifactId).toBe('a1');
+	});
+
+	it('bindTabToArtifact converts a draft into a persisted saved tab', () => {
+		initWorkspaceTabs('p1');
+		const id = openNavigationTab({ artifactId: null, title: 'New navigation' });
+		bindTabToArtifact(id, 'a9');
+		setActiveTab(getDynamicTabs()[0].id);
+		resetWorkspaceTabs();
+		initWorkspaceTabs('p1');
+		expect(getDynamicTabs()[0].artifactId).toBe('a9');
+	});
+});

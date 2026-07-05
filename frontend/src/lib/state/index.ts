@@ -88,7 +88,20 @@ export {
 	setRunning
 } from './validation.svelte';
 export { indexIssues, worstSeverityFor, type IssueIndex } from './validation-index';
-export { getActiveTab, setActiveTab, type WorkspaceTab } from './workspace.svelte';
+export {
+	BUILTIN_TABS,
+	bindTabToArtifact,
+	closeTab,
+	getActiveTab,
+	getDynamicTabs,
+	initWorkspaceTabs,
+	openNavigationTab,
+	resetWorkspaceTabs,
+	retitleTab,
+	setActiveTab,
+	type DynamicTab,
+	type WorkspaceTab
+} from './workspace.svelte';
 export { clearMetamodel, getMetamodel, setMetamodel } from './metamodel.svelte';
 export {
 	clearFilters,
