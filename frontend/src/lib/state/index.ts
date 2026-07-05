@@ -183,6 +183,16 @@ export {
 	setViewBaseline
 } from './view.svelte';
 export type { ViewChange } from './view-diff';
+export {
+	artifactHeaderById,
+	createNavigationArtifact,
+	getArtifactHeaders,
+	getArtifactsLoading,
+	loadArtifacts,
+	removeArtifact,
+	renameArtifact,
+	resetArtifacts
+} from './artifacts.svelte';
 export { getCurrentUser, isAdmin, fetchMe, signIn, signOut } from './auth.svelte';
 export { getActiveProjectId, setActiveProject, clearActiveProject } from './active-project.svelte';
 export { installSessionRecovery, recoverFromUnauthorized } from './session-recovery';

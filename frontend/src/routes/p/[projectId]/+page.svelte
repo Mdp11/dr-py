@@ -32,10 +32,12 @@
 		getModelError,
 		getResultsPanelOpen,
 		handleRemoteLockEvent,
+		loadArtifacts,
 		loadProjectInfo,
 		onLockEvent,
 		refreshSummary,
 		refreshView,
+		resetArtifacts,
 		resetCheckout,
 		resetModelStore,
 		setDiffDrawerOpen,
@@ -84,6 +86,7 @@
 			// role/ttl best-effort; editing stays gated as viewer until it loads
 		}
 		await refreshView();
+		await loadArtifacts().catch(() => {}); // artifact library is best-effort
 	}
 
 	// Conflict / flush-error banner. A conflict means the local caches are
@@ -150,6 +153,7 @@
 		try {
 			resetModelStore();
 			resetCheckout();
+			resetArtifacts();
 			clearSelection();
 			await refreshSummary();
 			try {
@@ -162,6 +166,7 @@
 				// role/ttl best-effort; editing stays gated as viewer until it loads
 			}
 			await refreshView();
+			await loadArtifacts().catch(() => {}); // artifact library is best-effort
 		} catch (err) {
 			console.error('Model reload failed', err);
 		} finally {

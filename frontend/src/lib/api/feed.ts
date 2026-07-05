@@ -36,6 +36,11 @@ export type FeedEvent =
 			from_metamodel_id: string | null;
 			to_metamodel_id: string;
 			validation_error_count: number;
+	  }
+	| {
+			type: 'artifact';
+			action: 'created' | 'updated' | 'deleted';
+			artifact: { id: string; kind: string; name: string; artifact_rev: number };
 	  };
 
 export interface WebSocketLike {

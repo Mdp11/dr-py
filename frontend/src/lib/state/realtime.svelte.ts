@@ -18,6 +18,7 @@ import {
 } from '$lib/api/feed';
 import { getActiveProjectId } from '$lib/state/active-project.svelte';
 import { applyDelta, getIssueCounts, getModelRev, refreshSummary } from './model.svelte';
+import { handleArtifactFeedEvent } from './artifacts.svelte';
 import type { OpsResponse } from '$lib/api/types';
 
 let _connected = $state(false);
@@ -130,6 +131,9 @@ export function handleFeedEvent(e: FeedEvent): void {
 		case 'rebind':
 			_pendingRebind = { rev: e.rev, count: e.validation_error_count };
 			for (const tap of _commitTaps) tap();
+			break;
+		case 'artifact':
+			handleArtifactFeedEvent();
 			break;
 	}
 }
