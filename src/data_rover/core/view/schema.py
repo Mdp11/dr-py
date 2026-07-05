@@ -3,6 +3,17 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 
+class ArtifactRef(BaseModel):
+    """A reference to a project artifact (saved navigation/table/diagram)
+    placed in this folder. Like element refs, the view does not OWN the
+    artifact: deleting the artifact leaves the ref dangling and renderers
+    skip ids they cannot resolve (the same tolerate-don't-prune stance as
+    element refs — see validate_view)."""
+
+    id: str
+    kind: str
+
+
 class Folder(BaseModel):
     """A named container that lists child folders and element ids.
 
@@ -14,6 +25,7 @@ class Folder(BaseModel):
     name: str
     folders: list["Folder"] = Field(default_factory=list)
     elements: list[str] = Field(default_factory=list)
+    artifacts: list[ArtifactRef] = Field(default_factory=list)
 
 
 class View(BaseModel):

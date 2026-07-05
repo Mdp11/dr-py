@@ -104,3 +104,22 @@ def test_put_view_rejects_invalid_payload(client: TestClient) -> None:
     _bootstrap(client)
     res = client.put(f"{API}/view/snapshot", json={"folders": []})
     assert res.status_code == 422
+
+
+def test_view_snapshot_round_trips_artifact_refs(client: TestClient) -> None:
+    _bootstrap(client)
+    res = client.put(
+        f"{API}/view/snapshot",
+        json={"name": "V", "folders": [{
+            "name": "F", "folders": [], "elements": [],
+            "artifacts": [{"id": "a1", "kind": "navigation"}],
+        }]},
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["view"]["folders"][0]["artifacts"] == [
+        {"id": "a1", "kind": "navigation"}
+    ]
+    got = client.get(f"{API}/view")
+    assert got.json()["view"]["folders"][0]["artifacts"] == [
+        {"id": "a1", "kind": "navigation"}
+    ]

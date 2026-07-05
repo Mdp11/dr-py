@@ -151,10 +151,16 @@ class RebindResponse(BaseModel):
     issues: list[IssueOut]
 
 
+class ArtifactRefOut(BaseModel):
+    id: str
+    kind: str
+
+
 class FolderOut(BaseModel):
     name: str
     folders: list["FolderOut"] = Field(default_factory=list)
     elements: list[str] = Field(default_factory=list)
+    artifacts: list[ArtifactRefOut] = Field(default_factory=list)
 
     @classmethod
     def from_core(cls, folder: Folder) -> "FolderOut":
@@ -162,6 +168,9 @@ class FolderOut(BaseModel):
             name=folder.name,
             folders=[FolderOut.from_core(f) for f in folder.folders],
             elements=list(folder.elements),
+            artifacts=[
+                ArtifactRefOut(id=a.id, kind=a.kind) for a in folder.artifacts
+            ],
         )
 
 
