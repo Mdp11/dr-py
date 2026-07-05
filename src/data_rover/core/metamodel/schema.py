@@ -161,6 +161,9 @@ class _Caches:
     effective_element_key_specs: dict[str, KeySpec | None]
     containment: dict[str, bool]
     end_constraints: dict[str, list[EndConstraint]]
+    element_descendants: dict[str, frozenset[str]]
+    rel_types_from: dict[str, tuple[str, ...]]
+    rel_types_to: dict[str, tuple[str, ...]]
 
     def __eq__(self, other: object) -> bool:
         # Caches are derived state, fully determined by the Metamodel fields.
@@ -271,6 +274,28 @@ def _build_caches(mm: Metamodel) -> _Caches:
         for name, raw in effective_element_keys.items()
     }
 
+    # downward closure: invert the ancestor sets (self included on both sides)
+    descendants: dict[str, set[str]] = {n: set() for n in types_by_name}
+    for name, ancestors in element_ancestor_sets.items():
+        for ancestor in ancestors:
+            descendants[ancestor].add(name)
+
+    # relationship types attachable to each element type, by end. Mirrors
+    # _build_end_constraints' ancestor-set membership test but without the
+    # multiplicity gating: this answers "what CAN attach", not "what binds".
+    rel_types_from: dict[str, list[str]] = {n: [] for n in types_by_name}
+    rel_types_to: dict[str, list[str]] = {n: [] for n in types_by_name}
+    for rt in mm.relationships:
+        if rt.abstract or not rt.mappings:
+            continue
+        mapping_sources = {m.source for m in rt.mappings}
+        mapping_targets = {m.target for m in rt.mappings}
+        for type_name, ancestors in element_ancestor_sets.items():
+            if not mapping_sources.isdisjoint(ancestors):
+                rel_types_from[type_name].append(rt.name)
+            if not mapping_targets.isdisjoint(ancestors):
+                rel_types_to[type_name].append(rt.name)
+
     return _Caches(
         types_by_name=types_by_name,
         rel_types_by_name=rel_types_by_name,
@@ -294,6 +319,9 @@ def _build_caches(mm: Metamodel) -> _Caches:
             for n, c in relationship_ancestors.items()
         },
         end_constraints=_build_end_constraints(mm.relationships, element_ancestor_sets),
+        element_descendants={n: frozenset(s) for n, s in descendants.items()},
+        rel_types_from={n: tuple(v) for n, v in rel_types_from.items()},
+        rel_types_to={n: tuple(v) for n, v in rel_types_to.items()},
     )
 
 
@@ -396,3 +424,22 @@ class Metamodel(BaseModel):
         `EndConstraint` for the direction semantics.
         """
         return list(self._caches().end_constraints.get(type_name, ()))
+
+    def element_descendants(self, name: str) -> frozenset[str]:
+        """`name` plus every transitive subtype (empty for unknown names).
+
+        The downward complement of `element_ancestors`; used to expand a
+        navigation scope's type list over `IndexSet.elements_by_type`, which
+        is exact-type keyed.
+        """
+        return self._caches().element_descendants.get(name, frozenset())
+
+    def relationship_types_from(self, name: str) -> list[str]:
+        """Non-abstract relationship types that accept `name` (or an
+        ancestor) as a mapping SOURCE — i.e. valid outgoing hop types."""
+        return list(self._caches().rel_types_from.get(name, ()))
+
+    def relationship_types_to(self, name: str) -> list[str]:
+        """Non-abstract relationship types that accept `name` (or an
+        ancestor) as a mapping TARGET — i.e. valid incoming hop types."""
+        return list(self._caches().rel_types_to.get(name, ()))
