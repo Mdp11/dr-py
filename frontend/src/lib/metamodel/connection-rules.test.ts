@@ -59,6 +59,15 @@ const mm: Metamodel = {
 			target: 'Database',
 			mappings: [{ source: 'Component', target: 'Database' }],
 			target_multiplicity: '0..1'
+		}),
+		// sourced ONLY from a strict descendant of Component — mirrors
+		// smart-city's UsesDatabase, whose sole mapping is Microservice-sourced.
+		// Under creation semantics its NAME is invisible from Component; under
+		// scope semantics it must appear (the reported symptom was whole names
+		// vanishing from the hop picker).
+		rel({
+			name: 'UsesDb',
+			mappings: [{ source: 'Microservice', target: 'Database' }]
 		})
 	]
 };
@@ -120,7 +129,7 @@ describe('relationshipTypesFromScope', () => {
 		// from scope Component even though no plain Component instance could
 		// have created that edge under CREATION semantics.
 		const fromComponent = relationshipTypesFromScope(mm, 'Component');
-		expect(fromComponent.map((e) => e.rt.name)).toEqual(['Multi', 'OwnsOne']);
+		expect(fromComponent.map((e) => e.rt.name)).toEqual(['Multi', 'OwnsOne', 'UsesDb']);
 
 		// Pin that the creation-semantics helper deliberately still excludes it:
 		// relationshipTypesFromSource only walks ancestors of the concrete type,
@@ -130,6 +139,21 @@ describe('relationshipTypesFromScope', () => {
 		const multiEntry = creationFromComponent.find((e) => e.rt.name === 'Multi')!;
 		expect(multiEntry.targetTypes).toEqual(['Requirement']);
 		expect(multiEntry.targetTypes).not.toContain('Database');
+	});
+
+	it('restores a whole NAME sourced only from a strict descendant (the reported symptom)', () => {
+		// UsesDb's only mapping is Microservice->Database. Under creation
+		// semantics its name never appears from Component (targetTypes is empty,
+		// so the entry.targetTypes.length > 0 filter drops it) — exactly how
+		// smart-city's UsesDatabase vanished from the hop picker for scope
+		// Component. Scope semantics must surface the name.
+		const creationNames = relationshipTypesFromSource(mm, 'Component').map((e) => e.rt.name);
+		expect(creationNames).not.toContain('UsesDb');
+
+		const scopeEntries = relationshipTypesFromScope(mm, 'Component');
+		const scopeNames = scopeEntries.map((e) => e.rt.name);
+		expect(scopeNames).toContain('UsesDb');
+		expect(scopeEntries.find((e) => e.rt.name === 'UsesDb')!.targetTypes).toEqual(['Database']);
 	});
 
 	it('shorthand fallback still works from scope Requirement', () => {
