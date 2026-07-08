@@ -225,3 +225,20 @@ export function readElementStart(scope: NavScope): string | null {
 	const c = scope.criteria[0] as { type?: string; field?: string; op?: string; value?: string };
 	return c.type === 'name_id' && c.field === 'id' && c.op === 'equals' ? (c.value ?? '') : null;
 }
+
+/**
+ * Types flowing into `steps[index]` — the nearest PRECEDING relationship
+ * step's `target_types`, scanning `steps[0..index-1]` backward; if no
+ * relationship step precedes it, the path's own start types (`[]` for a
+ * combine start or an element-start scope, meaning "any type"). Shared by a
+ * relationship step's rel-type/target-type pickers (types flowing IN) and a
+ * filter step's property-picker scope (types already REACHED at that point —
+ * the same set, since a filter step never changes the frontier's type).
+ */
+export function precedingTargetTypes(node: PathNavigation, index: number): string[] {
+	for (let i = index - 1; i >= 0; i--) {
+		const step = node.steps[i];
+		if (step.kind === 'relationship') return step.target_types;
+	}
+	return node.start.kind === 'scope' ? node.start.types : [];
+}

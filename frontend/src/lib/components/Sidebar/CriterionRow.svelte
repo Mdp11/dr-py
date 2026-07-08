@@ -20,8 +20,13 @@
 		target: TargetKind;
 		onChange: (index: number, next: Criterion) => void;
 		onRemove: (index: number) => void;
+		/** When non-null, scope the property picker to these names (a navigation
+		 * filter step's reachable-type property union). `null` (default, all
+		 * existing/search callers) leaves the picker unscoped — unchanged
+		 * behaviour. */
+		propertyNames?: string[] | null;
 	};
-	let { criterion, index, target, onChange, onRemove }: Props = $props();
+	let { criterion, index, target, onChange, onRemove, propertyNames = null }: Props = $props();
 
 	const mm = $derived(getMetamodel());
 
@@ -37,6 +42,13 @@
 			elements: [...getCachedElements().values()],
 			relationships: [...getCachedRelationships().values()]
 		})
+	);
+
+	// Scoped subset for a navigation filter step: only properties reachable at
+	// that point in the chain. `propertyNames === null` (every non-navigation
+	// caller) leaves the picker unscoped.
+	const scopedItems = $derived(
+		propertyNames === null ? propertyItems : propertyItems.filter((it) => propertyNames!.includes(it.name))
 	);
 
 	// Which inline picker popover is open (keyed by a string id within this row).
@@ -123,7 +135,7 @@
 			{@const ops = compatibleOps(kind)}
 			{@const noProperty = propCriterion.name === ''}
 			<PropertyPicker
-				items={propertyItems}
+				items={scopedItems}
 				onPick={(name, dt) => pickProperty(name, dt)}
 				open={openPicker === 'prop'}
 				onOpenChange={(o) => (openPicker = o ? 'prop' : null)}
