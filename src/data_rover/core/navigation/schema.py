@@ -78,9 +78,7 @@ class FilterStep(BaseModel):
     criteria: list[Criterion] = Field(default_factory=list)
 
 
-StepItem = Annotated[
-    Union[RelationshipStep, FilterStep], Field(discriminator="kind")
-]
+StepItem = Annotated[Union[RelationshipStep, FilterStep], Field(discriminator="kind")]
 
 
 class PathNavigation(BaseModel):

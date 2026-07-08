@@ -87,15 +87,21 @@ def evaluate(
     truncated = False
     for start_id in start_ids:
         if _walk(
-            metamodel, model, defn.steps, 0, (start_id,), chains, limits,
-            budget, defn.exclude_visited,
+            metamodel,
+            model,
+            defn.steps,
+            0,
+            (start_id,),
+            chains,
+            limits,
+            budget,
+            defn.exclude_visited,
         ):
             truncated = True
             break
     return ChainResult(
         step_types=[
-            s.relationship_type for s in defn.steps
-            if isinstance(s, RelationshipStep)
+            s.relationship_type for s in defn.steps if isinstance(s, RelationshipStep)
         ],
         chains=chains,
         truncated=truncated or budget.exhausted,
@@ -156,9 +162,7 @@ def _matches_target_types(
 ) -> bool:
     if not target_types:
         return True
-    return any(
-        metamodel.is_element_subtype(element.type_name, t) for t in target_types
-    )
+    return any(metamodel.is_element_subtype(element.type_name, t) for t in target_types)
 
 
 def _hop(
@@ -180,9 +184,7 @@ def _hop(
     nxt: set[str] = set()
     for rid in rel_ids:
         rel = model.relationships[rid]
-        if not metamodel.is_relationship_subtype(
-            rel.type_name, step.relationship_type
-        ):
+        if not metamodel.is_relationship_subtype(rel.type_name, step.relationship_type):
             continue
         other = rel.target_id if rel.source_id == element_id else rel.source_id
         el = model.elements.get(other)
@@ -216,8 +218,15 @@ def _walk(
     if isinstance(step, FilterStep):
         if _matches_filter(model, model.elements[current], step):
             return _walk(
-                metamodel, model, steps, item_idx + 1, chain, chains, limits,
-                budget, exclude_visited,
+                metamodel,
+                model,
+                steps,
+                item_idx + 1,
+                chain,
+                chains,
+                limits,
+                budget,
+                exclude_visited,
             )
         return False
     nxt = _hop(metamodel, model, current, step, budget)
@@ -227,8 +236,15 @@ def _walk(
         if exclude_visited and other in chain:
             continue  # cycle guard: a chain never revisits its own elements
         if _walk(
-            metamodel, model, steps, item_idx + 1, chain + (other,), chains,
-            limits, budget, exclude_visited,
+            metamodel,
+            model,
+            steps,
+            item_idx + 1,
+            chain + (other,),
+            chains,
+            limits,
+            budget,
+            exclude_visited,
         ):
             return True
     return False
