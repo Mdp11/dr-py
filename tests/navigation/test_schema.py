@@ -30,10 +30,19 @@ def test_minimal_path_parses_with_defaults() -> None:
     nav = NAVIGATION_ADAPTER.validate_python(_path())
     assert isinstance(nav, PathNavigation)
     assert nav.schema_version == 1
+    assert nav.exclude_visited is True
     step = nav.steps[0]
     assert step.direction == "out"
     assert step.target == Scope()
     assert step.children == []
+
+
+def test_exclude_visited_may_be_set_false() -> None:
+    doc = _path()
+    doc["exclude_visited"] = False
+    nav = NAVIGATION_ADAPTER.validate_python(doc)
+    assert isinstance(nav, PathNavigation)
+    assert nav.exclude_visited is False
 
 
 def test_children_rejected_in_v1() -> None:

@@ -137,6 +137,74 @@ def test_chain_cycle_guard() -> None:
     assert result.chains == []
 
 
+def test_exclude_visited_false_allows_round_trip() -> None:
+    model = Model(_mm())
+    a = model.create_element("Building")
+    b = model.create_element("Sensor")
+    model.connect("Owns", a.id, b.id)
+    nav = _path(
+        start={"kind": "scope", "types": ["Building"]},
+        steps=[{"relationship_type": "Owns", "direction": "out"},
+               {"relationship_type": "Owns", "direction": "in"}],
+        exclude_visited=False,
+    )
+    result = evaluate(model.metamodel, model, nav)
+    assert result.chains == [(a.id, b.id, a.id)]
+
+
+def test_exclude_visited_true_or_default_forbids_round_trip() -> None:
+    model = Model(_mm())
+    a = model.create_element("Building")
+    b = model.create_element("Sensor")
+    model.connect("Owns", a.id, b.id)
+    steps = [{"relationship_type": "Owns", "direction": "out"},
+             {"relationship_type": "Owns", "direction": "in"}]
+    nav_default = _path(start={"kind": "scope", "types": ["Building"]}, steps=steps)
+    nav_explicit_true = _path(
+        start={"kind": "scope", "types": ["Building"]}, steps=steps,
+        exclude_visited=True,
+    )
+    assert evaluate(model.metamodel, model, nav_default).chains == []
+    assert evaluate(model.metamodel, model, nav_explicit_true).chains == []
+
+
+def _two_source_nav(exclude_visited: bool):
+    return _path(
+        start={"kind": "scope", "types": ["Building"],
+               "criteria": [{"type": "property", "name": "name",
+                             "op": "equals", "value": "A1"}]},
+        steps=[{"relationship_type": "Owns", "direction": "out"},
+               {"relationship_type": "Owns", "direction": "in"}],
+        exclude_visited=exclude_visited,
+    )
+
+
+def test_exclude_visited_false_keeps_revisit_and_sibling_chains() -> None:
+    model = Model(_mm())
+    a1 = model.create_element("Building")
+    model.set_property(a1, "name", "A1")
+    a2 = model.create_element("Building")
+    model.set_property(a2, "name", "A2")
+    b = model.create_element("Sensor")
+    model.connect("Owns", a1.id, b.id)
+    model.connect("Owns", a2.id, b.id)
+    result = evaluate(model.metamodel, model, _two_source_nav(False))
+    assert result.chains == sorted([(a1.id, b.id, a1.id), (a1.id, b.id, a2.id)])
+
+
+def test_exclude_visited_true_keeps_only_sibling_chain() -> None:
+    model = Model(_mm())
+    a1 = model.create_element("Building")
+    model.set_property(a1, "name", "A1")
+    a2 = model.create_element("Building")
+    model.set_property(a2, "name", "A2")
+    b = model.create_element("Sensor")
+    model.connect("Owns", a1.id, b.id)
+    model.connect("Owns", a2.id, b.id)
+    result = evaluate(model.metamodel, model, _two_source_nav(True))
+    assert result.chains == [(a1.id, b.id, a2.id)]
+
+
 def test_max_chains_truncates() -> None:
     model, _ids = _fixture()
     limits = EvalLimits(max_chains=2)

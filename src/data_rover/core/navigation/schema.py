@@ -66,6 +66,10 @@ class PathNavigation(BaseModel):
     schema_version: int = SCHEMA_VERSION
     start: "StartNode"
     steps: list[Step] = Field(default_factory=list)
+    #: cycle guard: when True (default, prior behavior), a chain skips any
+    #: element already in its own prefix; when False, chains may revisit
+    #: elements (still terminates — chain length is capped at len(steps)+1).
+    exclude_visited: bool = True
 
     @model_validator(mode="after")
     def _cap_steps(self) -> "PathNavigation":

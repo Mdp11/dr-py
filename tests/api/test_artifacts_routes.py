@@ -176,6 +176,32 @@ def test_evaluate_inline_definition(client: TestClient) -> None:
     assert chains[0][0]["display_name"] == "root"  # TreeItem projection
 
 
+def test_evaluate_inline_definition_exclude_visited_false_allows_revisit(
+    client: TestClient,
+) -> None:
+    ids = _bootstrap_model(client)
+    res = client.post(
+        f"{API}/navigations/evaluate",
+        json={"definition": {
+            "kind": "path",
+            "start": {"kind": "scope", "types": ["Block"],
+                      "criteria": [{"type": "name_id", "field": "name",
+                                    "op": "equals", "value": "root"}]},
+            "steps": [{"relationship_type": "BlockHasPart", "direction": "out"},
+                      {"relationship_type": "BlockHasPart", "direction": "in"}],
+            "exclude_visited": False,
+        }},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["total"] == 2 and body["truncated"] is False
+    revisit_chains = {tuple(el["id"] for el in chain) for chain in body["chains"]}
+    assert revisit_chains == {
+        (ids["root"], ids["p1"], ids["root"]),
+        (ids["root"], ids["p2"], ids["root"]),
+    }
+
+
 def test_evaluate_saved_artifact_and_paging(client: TestClient) -> None:
     _bootstrap_model(client)
     nav = {

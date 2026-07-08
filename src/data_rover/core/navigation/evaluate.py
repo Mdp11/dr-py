@@ -82,7 +82,8 @@ def evaluate(
     start_ids = _start_ids(metamodel, model, defn, limits, budget)
     chains: list[tuple[str, ...]] = []
     truncated = _walk(
-        metamodel, model, defn.steps, start_ids, (), chains, limits, budget
+        metamodel, model, defn.steps, start_ids, (), chains, limits, budget,
+        defn.exclude_visited,
     )
     return ChainResult(
         step_types=[s.relationship_type for s in defn.steps],
@@ -168,10 +169,17 @@ def _walk(
     chains: list[tuple[str, ...]],
     limits: EvalLimits,
     budget: _Budget,
+    exclude_visited: bool,
 ) -> bool:
-    """DFS continuation; returns True when enumeration stopped early."""
+    """DFS continuation; returns True when enumeration stopped early.
+
+    `exclude_visited` is per-navigation (`PathNavigation.exclude_visited`):
+    when True, a chain never revisits its own elements (the historical,
+    still-default behavior); when False, revisits are allowed and
+    termination still holds because chain length is capped at
+    `len(steps) + 1` regardless."""
     for element_id in frontier:
-        if element_id in prefix:
+        if exclude_visited and element_id in prefix:
             continue  # cycle guard: a chain never revisits its own elements
         chain = prefix + (element_id,)
         if len(chain) == len(steps) + 1:
@@ -183,7 +191,10 @@ def _walk(
         nxt = _next_ids(metamodel, model, element_id, step, budget)
         if budget.exhausted:
             return True
-        if _walk(metamodel, model, steps, nxt, chain, chains, limits, budget):
+        if _walk(
+            metamodel, model, steps, nxt, chain, chains, limits, budget,
+            exclude_visited,
+        ):
             return True
     return False
 

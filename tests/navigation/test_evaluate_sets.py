@@ -103,6 +103,37 @@ def test_nested_expression_and_left_fold_difference() -> None:
     assert result.chains == [(ids["s1"],)]
 
 
+def test_operand_honors_its_own_exclude_visited_flag() -> None:
+    # Each operand's `exclude_visited` travels with its own PathNavigation,
+    # so an operand with the flag off can surface a round-trip element that
+    # a sibling operand (flag on, the default) cycle-guards away.
+    mm = Metamodel(
+        elements=[ElementType(name="Node")],
+        relationships=[RelationshipType(name="Rel", source="Node", target="Node")],
+    )
+    model = Model(mm)
+    a = model.create_element("Node")
+    b = model.create_element("Node")
+    model.connect("Rel", a.id, b.id)
+    round_trip = {
+        "kind": "path",
+        "start": {"kind": "scope", "types": ["Node"]},
+        "steps": [{"relationship_type": "Rel", "direction": "out"},
+                  {"relationship_type": "Rel", "direction": "in"}],
+    }
+    expr = NAVIGATION_ADAPTER.validate_python({
+        "kind": "set_op", "op": "union",
+        "operands": [
+            {"definition": {**round_trip, "exclude_visited": False}},
+            {"definition": {**round_trip, "exclude_visited": True}},
+        ],
+    })
+    result = evaluate(mm, model, expr)
+    # terminal step_index (default None): only the exclude_visited=False
+    # operand reaches a 3-element chain (a, b, a); the other yields none.
+    assert result.chains == [(a.id,)]
+
+
 def test_truncation_propagates_from_operand() -> None:
     model, _ids = _model()
     result = evaluate(model.metamodel, model,
