@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+	canDropArtifact,
 	canDropElement,
 	canDropFolder,
 	decodeElementPayload,
@@ -52,6 +53,7 @@ function tree(partial: Partial<UnifiedTree>): UnifiedTree {
 		kind: new Map(),
 		folderName: new Map(),
 		placedElementIds: new Set(),
+		artifactRef: new Map(),
 		...partial
 	};
 }
@@ -112,5 +114,19 @@ describe('canDropFolder', () => {
 
 	it('rejects moving the view root', () => {
 		expect(canDropFolder({ sourcePath: [], destParentPath: ['A'] }).ok).toBe(false);
+	});
+});
+
+describe('canDropArtifact', () => {
+	it('accepts a folder drop target', () => {
+		expect(canDropArtifact('folder')).toBe(true);
+	});
+
+	it('rejects an element drop target', () => {
+		expect(canDropArtifact('element')).toBe(false);
+	});
+
+	it('rejects a section drop target (excluded pool / view-root sentinel)', () => {
+		expect(canDropArtifact('section')).toBe(false);
 	});
 });

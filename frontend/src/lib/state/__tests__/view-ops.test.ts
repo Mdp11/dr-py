@@ -8,7 +8,7 @@ import {
 } from '../view-ops';
 
 function folder(name: string, elements: string[] = [], folders: Folder[] = []): Folder {
-	return { name, folders, elements };
+	return { name, folders, elements, artifacts: [] };
 }
 
 function view(...folders: Folder[]): View {

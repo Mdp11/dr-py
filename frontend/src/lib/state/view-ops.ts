@@ -1,4 +1,4 @@
-import type { Folder, View } from '$lib/api/types';
+import type { ArtifactRef, Folder, View } from '$lib/api/types';
 
 // ----- pure view-structure helpers -----
 //
@@ -10,7 +10,8 @@ export function cloneFolder(f: Folder): Folder {
 	return {
 		name: f.name,
 		folders: f.folders.map(cloneFolder),
-		elements: [...f.elements]
+		elements: [...f.elements],
+		artifacts: f.artifacts.map((a) => ({ ...a }))
 	};
 }
 
@@ -27,7 +28,7 @@ export function cloneView(v: View): View {
 export function findFolderByPath(view: View, path: string[]): Folder | null {
 	if (path.length === 0) {
 		// virtual root — we wrap it inline; mutate via separate branch
-		return { name: '', folders: view.folders, elements: [] };
+		return { name: '', folders: view.folders, elements: [], artifacts: [] };
 	}
 	let folders = view.folders;
 	let found: Folder | null = null;
@@ -94,6 +95,65 @@ export function placeElementsInViewAt(
  */
 export function placeElementsInView(view: View, path: string[], ids: string[]): View {
 	return placeElementsInViewAt(view, path, ids, Number.MAX_SAFE_INTEGER);
+}
+
+/**
+ * Return a new view with `ref` placed into the folder at `folderPath`. A no-op
+ * when that folder already holds the id — an artifact may sit in several
+ * folders at once (unlike elements, which follow the single-folder rule), so
+ * placing into a second folder does not strip it from the first.
+ */
+export function placeArtifactInFolder(view: View, folderPath: string[], ref: ArtifactRef): View {
+	const next = cloneView(view);
+	const folder = findFolderByPath(next, folderPath);
+	if (!folder || folderPath.length === 0) {
+		throw new Error(`Folder not found: ${folderPath.join('/')}`);
+	}
+	if (!folder.artifacts.some((a) => a.id === ref.id)) {
+		folder.artifacts.push({ ...ref });
+	}
+	return next;
+}
+
+/**
+ * Return a new view with the artifact at `fromPath` moved to `toPath`: removed
+ * from the source folder only (not every folder that holds it — see
+ * {@link placeArtifactInFolder}), then placed into the destination. A no-op
+ * when source and destination are the same folder (mirrors
+ * {@link moveFolderInView}'s same-parent no-op).
+ */
+export function moveArtifactInView(
+	view: View,
+	fromPath: string[],
+	toPath: string[],
+	ref: ArtifactRef
+): View {
+	if (fromPath.length === toPath.length && fromPath.every((n, i) => n === toPath[i])) {
+		return cloneView(view);
+	}
+	const next = cloneView(view);
+	const from = findFolderByPath(next, fromPath);
+	if (from) from.artifacts = from.artifacts.filter((a) => a.id !== ref.id);
+	const to = findFolderByPath(next, toPath);
+	if (!to || toPath.length === 0) throw new Error(`Folder not found: ${toPath.join('/')}`);
+	if (!to.artifacts.some((a) => a.id === ref.id)) to.artifacts.push({ ...ref });
+	return next;
+}
+
+/**
+ * Return a new view with every placement of `artifactId` removed, across all
+ * folders (an artifact may sit in several — this drops it from each).
+ */
+export function removeArtifactFromView(view: View, artifactId: string): View {
+	const next = cloneView(view);
+	const scrub = (folders: Folder[]): void => {
+		for (const f of folders) {
+			f.artifacts = f.artifacts.filter((a) => a.id !== artifactId);
+			scrub(f.folders);
+		}
+	};
+	scrub(next.folders);
+	return next;
 }
 
 /**

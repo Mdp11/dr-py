@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Element } from '$lib/api/types';
-	import { indexIssues, lockBadgeFor } from '$lib/state';
+	import { artifactHeaderById, indexIssues, lockBadgeFor, openNavigationTab } from '$lib/state';
 	import {
 		AlertCircle,
 		AlertTriangle,
@@ -9,19 +9,23 @@
 		Folder as FolderIcon,
 		FolderOpen,
 		Lock,
-		MoreHorizontal
+		MoreHorizontal,
+		Route,
+		X
 	} from '@lucide/svelte';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import {
+		artifactIdFromKey,
 		EXCLUDED_SECTION_KEY,
 		folderPathFromKey,
+		isArtifactKey,
 		isExcludedSectionKey,
 		isFolderKey,
 		type DndContext,
 		type UnifiedTree,
 		type Visibility
 	} from './view-tree';
-	import { createFolder, deleteFolder, renameFolder } from '$lib/state';
+	import { createFolder, deleteFolder, removeArtifactFromFolder, renameFolder } from '$lib/state';
 	import { elementDisplayName as displayName } from '$lib/util/element-name';
 
 	type FolderOption = { path: string[]; label: string };
@@ -88,8 +92,14 @@
 
 	const isExcludedSection = $derived(isExcludedSectionKey(key));
 	const isFolder = $derived(isFolderKey(key));
+	const isArtifact = $derived(isArtifactKey(key));
 	// folderPathFromKey throws for non-folder keys, so guard it.
 	const folderPath = $derived(isFolder ? folderPathFromKey(key) : []);
+	const artifactId = $derived(isArtifact ? artifactIdFromKey(key) : '');
+	// Tolerate-dangling rule: an artifact id the library doesn't know about
+	// (deleted elsewhere, or not yet loaded) renders nothing rather than an
+	// error or skeleton — see the `{#if artifactHeader}` guard below.
+	const artifactHeader = $derived(isArtifact ? artifactHeaderById(artifactId) : undefined);
 	const folderName = $derived(
 		isExcludedSection || isFolder ? (tree.folderName.get(key) ?? '') : ''
 	);
@@ -98,7 +108,9 @@
 	);
 	const isMovable = $derived(movable);
 
-	const el = $derived(isFolder || isExcludedSection ? undefined : elementsById.get(key));
+	const el = $derived(
+		isFolder || isExcludedSection || isArtifact ? undefined : elementsById.get(key)
+	);
 	const allChildren = $derived(tree.children.get(key) ?? []);
 	const myVisibility = $derived(visibility.get(key));
 	// Folder/section: show the chevron when there are children to expand into.
@@ -148,6 +160,21 @@
 			await deleteFolder(folderPath);
 		} catch (err) {
 			alert(err instanceof Error ? err.message : 'Failed to delete folder');
+		}
+	}
+
+	function onOpenArtifact(): void {
+		if (!artifactHeader) return;
+		openNavigationTab({ artifactId, title: artifactHeader.name });
+	}
+
+	async function onRemoveArtifact(e: MouseEvent): Promise<void> {
+		e.stopPropagation(); // don't also fire the row's dblclick-to-open
+		if (parentFolderPath === null) return;
+		try {
+			await removeArtifactFromFolder(parentFolderPath, artifactId);
+		} catch (err) {
+			console.error('Remove artifact failed', err);
 		}
 	}
 </script>
@@ -260,6 +287,38 @@
 			</DropdownMenu.Content>
 		</DropdownMenu.Root>
 	</div>
+{:else if isArtifact}
+	{#if artifactHeader}
+		<div
+			class="group flex h-6 select-none items-center gap-1 rounded px-1 py-0.5 text-zinc-200"
+			class:ring-1={isFocused}
+			class:ring-indigo-500={isFocused}
+			role="treeitem"
+			tabindex={-1}
+			aria-selected={false}
+			aria-level={depth + 1}
+			style="padding-left: {depth * 12 + 4}px; touch-action: none"
+			ondblclick={onOpenArtifact}
+			onpointerdown={(e) => dnd.onPointerDown(e, key, 'artifact', parentFolderPath ?? [])}
+		>
+			<span class="flex h-4 w-4 shrink-0 items-center justify-center text-zinc-700">·</span>
+			<span class="flex h-4 w-4 shrink-0 items-center justify-center text-sky-500">
+				<Route class="h-3 w-3" />
+			</span>
+			<span class="flex-1 truncate" title={artifactHeader.name}>
+				{artifactHeader.name}
+			</span>
+			<button
+				type="button"
+				class="hidden h-4 w-4 shrink-0 items-center justify-center rounded text-zinc-600 opacity-0 hover:text-red-400 group-hover:flex group-hover:opacity-100"
+				aria-label="Remove from folder"
+				title="Remove from folder"
+				onclick={onRemoveArtifact}
+			>
+				<X class="h-3 w-3" />
+			</button>
+		</div>
+	{/if}
 {:else if el}
 	<div
 		class="group flex h-6 items-center gap-1 rounded px-1 py-0.5"

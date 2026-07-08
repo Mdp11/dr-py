@@ -10,6 +10,7 @@
 	} from '$lib/api/model-read';
 	import { NotFoundError } from '$lib/api/errors';
 	import {
+		artifactHeaderById,
 		createFolder,
 		createTempId,
 		dropTreeItems,
@@ -28,7 +29,10 @@
 		getView,
 		getViewWarnings,
 		indexIssues,
+		moveArtifact,
 		moveFolder,
+		openNavigationTab,
+		placeArtifact,
 		placeElement,
 		placeElementsAt,
 		removeElement,
@@ -53,16 +57,19 @@
 		endDrag,
 		getDragPayload,
 		isDragActive,
-		isMovableBypassed
+		isMovableBypassed,
+		type DragPayload
 	} from '$lib/state/tree-drag.svelte';
 	import {
 		buildUnifiedTree,
+		canDropArtifact,
 		canDropElement,
 		canDropFolder,
 		computeVisibility,
 		EXCLUDED_SECTION_KEY,
 		flattenVisibleRows,
 		folderPathFromKey,
+		isArtifactKey,
 		isExcludedSectionKey,
 		isFolderKey,
 		movableElementIds,
@@ -70,7 +77,8 @@
 		resolveElementDrop,
 		VIEW_ROOT_DROP_KEY,
 		type DndContext,
-		type FlatRow
+		type FlatRow,
+		type NodeKind
 	} from './view-tree';
 	import { findFolderByPath } from '../../state/view-ops';
 
@@ -681,7 +689,13 @@
 			if (cur < 0) return;
 			e.preventDefault();
 			const row = treeVisibleRows[cur];
-			if (!isFolderKey(row.key)) {
+			if (isArtifactKey(row.key)) {
+				// Keyboard equivalent of the artifact row's dblclick-to-open; not a
+				// model element, so it must not flow into `select()` below.
+				const ref = tree.artifactRef.get(row.key);
+				const header = ref ? artifactHeaderById(ref.id) : undefined;
+				if (header) openNavigationTab({ artifactId: header.id, title: header.name });
+			} else if (!isFolderKey(row.key)) {
 				replaceMultiSelected([row.key]);
 				anchorId = row.key;
 				select({ kind: 'element', id: row.key });
@@ -773,7 +787,6 @@
 		return folder ? folder.elements.length : 0;
 	}
 
-	type DragPayload = { kind: 'element'; ids: string[] } | { kind: 'folder'; path: string[] };
 	const draggingPayload = $derived(getDragPayload());
 	let dragHoverKey: string | null = $state(null);
 	let dragHoverValid = $state(false);
@@ -784,6 +797,12 @@
 	let activePointerId: number | null = null;
 	let startX = 0;
 	let startY = 0;
+	// Set alongside `pendingPayload` when the drag is an artifact picked up from
+	// a tree row (its containing folder path); left null for an artifact drag
+	// that began outside the tree (the ArtifactsSection sidebar). At drop time
+	// this distinguishes "reparent" (strip from the source folder first) from
+	// "place" (the sidebar has no source folder to strip from).
+	let dragSourceFolderPath: string[] | null = null;
 	let dragging = $state(false);
 	let externalDrag = $state(false);
 	let dragX = $state(0);
@@ -806,9 +825,7 @@
 			return p.length > 0 ? p[p.length - 1] : 'folder';
 		}
 		if (draggingPayload.kind === 'artifact') {
-			// Task 6 teaches the tree to complete artifact drops; for now the tree
-			// only needs a label so a drag started elsewhere renders sensibly.
-			return draggingPayload.artifactKind;
+			return artifactHeaderById(draggingPayload.id)?.name ?? draggingPayload.artifactKind;
 		}
 		const ids = draggingPayload.ids;
 		if (ids.length === 1) {
@@ -818,7 +835,10 @@
 		return `${ids.length} elements`;
 	});
 
-	function dropAllowed(destPath: string[] | null): boolean {
+	function dropAllowed(
+		destPath: string[] | null,
+		destKind: 'folder' | 'element' | 'section'
+	): boolean {
 		if (draggingPayload === null) return false;
 		if (draggingPayload.kind === 'element') {
 			if (isMovableBypassed()) {
@@ -830,9 +850,7 @@
 			return canDropElement({ elementIds: draggingPayload.ids, movableIds, knownIds }).ok;
 		}
 		if (draggingPayload.kind === 'artifact') {
-			// No drop target implemented yet (Task 6); reject so drags started from
-			// the artifacts section render as invalid rather than silently no-op.
-			return false;
+			return canDropArtifact(destKind);
 		}
 		return canDropFolder({ sourcePath: draggingPayload.path, destParentPath: destPath ?? [] }).ok;
 	}
@@ -866,29 +884,29 @@
 		};
 	}
 
-	function buildPayload(
-		key: string,
-		kind: 'element' | 'folder',
-		folderPath: string[]
-	): DragPayload | null {
+	function buildPayload(key: string, kind: NodeKind, folderPath: string[]): DragPayload | null {
 		if (kind === 'folder') return { kind: 'folder', path: folderPath };
+		if (kind === 'artifact') {
+			const ref = tree.artifactRef.get(key);
+			if (!ref) return null;
+			return { kind: 'artifact', id: ref.id, artifactKind: ref.kind };
+		}
 		const base = multiSelected.has(key) && multiSelected.size > 1 ? [...multiSelected] : [key];
 		const ids = base.filter((id) => movableIds.has(id));
 		if (ids.length === 0) return null;
 		return { kind: 'element', ids };
 	}
 
-	function onPointerDown(
-		e: PointerEvent,
-		key: string,
-		kind: 'element' | 'folder',
-		folderPath: string[]
-	): void {
+	function onPointerDown(e: PointerEvent, key: string, kind: NodeKind, folderPath: string[]): void {
 		if (e.button !== 0 || !e.isPrimary) return;
 		suppressClick = false;
 		const payload = buildPayload(key, kind, folderPath);
 		if (payload === null) return; // nothing movable under this press
 		pendingPayload = payload;
+		// Only an artifact row picked up FROM the tree carries a source folder path
+		// (see `dragSourceFolderPath`'s doc comment) — the ArtifactsSection sidebar
+		// begins its drag via `beginDrag` directly, bypassing this handler.
+		dragSourceFolderPath = payload.kind === 'artifact' ? folderPath : null;
 		activePointerId = e.pointerId;
 		startX = e.clientX;
 		startY = e.clientY;
@@ -911,7 +929,7 @@
 		}
 		const target = dropTargetAt(e.clientX, e.clientY);
 		dragHoverKey = target?.key ?? null;
-		dragHoverValid = target !== null && dropAllowed(target.path);
+		dragHoverValid = target !== null && dropAllowed(target.path, target.kind);
 		lastPointerX = e.clientX;
 		lastPointerY = e.clientY;
 		if (dragging && autoScrollRaf === 0) autoScrollRaf = requestAnimationFrame(tickAutoScroll);
@@ -945,7 +963,7 @@
 			else poolScrollTop = vp.scrollTop;
 			const t = dropTargetAt(lastPointerX, lastPointerY);
 			dragHoverKey = t?.key ?? null;
-			dragHoverValid = t !== null && dropAllowed(t.path);
+			dragHoverValid = t !== null && dropAllowed(t.path, t.kind);
 		}
 		autoScrollRaf = requestAnimationFrame(tickAutoScroll);
 	}
@@ -958,7 +976,8 @@
 		}
 		const target = dropTargetAt(e.clientX, e.clientY);
 		const payload = draggingPayload;
-		const valid = target !== null && dropAllowed(target.path);
+		const valid = target !== null && dropAllowed(target.path, target.kind);
+		const sourceFolderPath = dragSourceFolderPath;
 		suppressClick = true;
 		endGesture();
 		if (!valid || payload === null || target === null) return;
@@ -974,10 +993,19 @@
 				await placeElementsAt(res.path, payload.ids, res.index);
 			} else if (payload.kind === 'folder') {
 				await moveFolder(payload.path, target.path ?? []);
+			} else {
+				// 'artifact': dropAllowed() already restricted the target to a folder
+				// row, so `target.path` is a real folder path here. A row picked up
+				// from a tree folder (`sourceFolderPath` set) reparents; one picked up
+				// from the ArtifactsSection sidebar (no source folder) places anew.
+				const destPath = target.path ?? [];
+				const ref = { id: payload.id, kind: payload.artifactKind };
+				if (sourceFolderPath !== null) {
+					await moveArtifact(sourceFolderPath, destPath, ref);
+				} else {
+					await placeArtifact(destPath, ref);
+				}
 			}
-			// 'artifact': no drop target yet (Task 6); dropAllowed() already rejects
-			// it above, so `valid` is false and this branch is unreachable — kept
-			// exhaustive so a future payload variant fails to compile here, not silently.
 		} catch (err) {
 			console.error('Drop failed', err);
 		}
@@ -1008,6 +1036,7 @@
 		}
 		pendingPayload = null;
 		activePointerId = null;
+		dragSourceFolderPath = null;
 		dragging = false;
 		externalDrag = false;
 		endDrag();

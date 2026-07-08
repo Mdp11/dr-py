@@ -121,17 +121,24 @@ export type Metamodel = z.infer<typeof MetamodelSchema>;
 export const RelationshipListSchema = z.array(RelationshipSchema);
 export const IssueListSchema = z.array(IssueSchema);
 
+export interface ArtifactRef {
+	id: string;
+	kind: string;
+}
+
 export interface Folder {
 	name: string;
 	folders: Folder[];
 	elements: string[];
+	artifacts: ArtifactRef[];
 }
 
 export const FolderSchema: z.ZodType<Folder> = z.lazy(() =>
 	z.object({
 		name: z.string(),
 		folders: z.array(FolderSchema).default([]),
-		elements: z.array(z.string()).default([])
+		elements: z.array(z.string()).default([]),
+		artifacts: z.array(z.object({ id: z.string(), kind: z.string() })).default([])
 	})
 );
 

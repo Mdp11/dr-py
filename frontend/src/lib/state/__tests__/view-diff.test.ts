@@ -6,7 +6,8 @@ const v = (folders: View['folders']): View => ({ name: 'V', folders });
 const f = (name: string, elements: string[] = [], folders: View['folders'] = []) => ({
 	name,
 	elements,
-	folders
+	folders,
+	artifacts: []
 });
 
 describe('diffViews', () => {

@@ -1,9 +1,11 @@
 import * as viewApi from '$lib/api/view';
-import type { Issue, View } from '$lib/api/types';
+import type { ArtifactRef, Issue, View } from '$lib/api/types';
 import {
 	cloneView,
 	findFolderByPath,
+	moveArtifactInView,
 	moveFolderInView,
+	placeArtifactInFolder,
 	placeElementsInView,
 	placeElementsInViewAt
 } from './view-ops';
@@ -102,7 +104,7 @@ export async function createFolder(parentPath: string[], name: string): Promise<
 	if (collection.some((f) => f.name === name)) {
 		throw new Error(`Folder "${name}" already exists at this level`);
 	}
-	collection.push({ name, folders: [], elements: [] });
+	collection.push({ name, folders: [], elements: [], artifacts: [] });
 	await pushView(next);
 }
 
@@ -185,4 +187,44 @@ export async function removeElement(elementId: string): Promise<void> {
 export async function moveFolder(sourcePath: string[], destParentPath: string[]): Promise<void> {
 	if (_view === null) throw new Error('No active view');
 	await pushView(moveFolderInView(_view, sourcePath, destParentPath));
+}
+
+/**
+ * Place an artifact into the folder at `folderPath`. A no-op if that folder
+ * already holds it; an artifact may sit in several folders at once (unlike
+ * elements).
+ */
+export async function placeArtifact(folderPath: string[], ref: ArtifactRef): Promise<void> {
+	if (_view === null) throw new Error('No active view');
+	await pushView(placeArtifactInFolder(_view, folderPath, ref));
+}
+
+/**
+ * Move an artifact from one folder to another (removes only from `fromPath`,
+ * not every folder that holds it — see {@link moveArtifactInView}).
+ */
+export async function moveArtifact(
+	fromPath: string[],
+	toPath: string[],
+	ref: ArtifactRef
+): Promise<void> {
+	if (_view === null) throw new Error('No active view');
+	await pushView(moveArtifactInView(_view, fromPath, toPath, ref));
+}
+
+/**
+ * Remove an artifact from a single folder (unlike {@link removeArtifact} in
+ * `artifacts.svelte.ts`, which deletes the artifact itself — this name is
+ * deliberately distinct to avoid colliding with that existing export).
+ */
+export async function removeArtifactFromFolder(
+	folderPath: string[],
+	artifactId: string
+): Promise<void> {
+	if (_view === null) throw new Error('No active view');
+	const next = cloneView(_view);
+	const folder = findFolderByPath(next, folderPath);
+	if (!folder) throw new Error(`Folder not found: ${folderPath.join('/')}`);
+	folder.artifacts = folder.artifacts.filter((a) => a.id !== artifactId);
+	await pushView(next);
 }
