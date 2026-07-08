@@ -29,9 +29,28 @@
 	async function del(id: string, name: string): Promise<void> {
 		if (window.confirm(`Delete navigation "${name}"?`)) await removeArtifact(id);
 	}
+	const DRAG_THRESHOLD_PX = 4;
 	function onPointerDown(e: PointerEvent, id: string): void {
-		if (e.button !== 0) return;
-		beginDrag({ kind: 'artifact', id, artifactKind: 'navigation' }, true);
+		if (e.button !== 0 || !e.isPrimary) return;
+		const sx = e.clientX;
+		const sy = e.clientY;
+		let started = false;
+		const move = (ev: PointerEvent): void => {
+			if (started) return;
+			if (Math.hypot(ev.clientX - sx, ev.clientY - sy) < DRAG_THRESHOLD_PX) return;
+			started = true;
+			beginDrag({ kind: 'artifact', id, artifactKind: 'navigation' }, true);
+			cleanup();
+		};
+		const up = (): void => cleanup();
+		function cleanup(): void {
+			window.removeEventListener('pointermove', move);
+			window.removeEventListener('pointerup', up);
+			window.removeEventListener('pointercancel', up);
+		}
+		window.addEventListener('pointermove', move);
+		window.addEventListener('pointerup', up);
+		window.addEventListener('pointercancel', up);
 	}
 </script>
 
