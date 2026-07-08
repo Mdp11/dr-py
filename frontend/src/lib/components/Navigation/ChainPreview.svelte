@@ -1,5 +1,12 @@
 <script lang="ts">
-	import { getDraft, getPreview, isRunnable, loadMorePreview, select } from '$lib/state';
+	import {
+		getDraft,
+		getEvalError,
+		getPreview,
+		isRunnable,
+		loadMorePreview,
+		select
+	} from '$lib/state';
 
 	let { tabId }: { tabId: string } = $props();
 	const draft = $derived(getDraft(tabId));
@@ -7,8 +14,11 @@
 	// The preview re-runs automatically on every definition edit (see
 	// navigation-editor.svelte.ts) — there is no manual Run button. When
 	// there's no preview yet because the definition isn't complete enough to
-	// evaluate, show a hint instead of an empty panel.
+	// evaluate, show a hint instead of an empty panel; when the last run
+	// FAILED (preview cleared, definition runnable), show the error line —
+	// otherwise a failed evaluate would be indistinguishable from pending.
 	const runnable = $derived(draft ? isRunnable(draft.definition) : false);
+	const errored = $derived(getEvalError(tabId));
 </script>
 
 <div class="flex min-h-0 flex-1 flex-col border-t border-zinc-800">
@@ -18,6 +28,8 @@
 				{preview.chains.length} of {preview.total} chains
 				{#if preview.truncated}(results capped){/if}
 			</span>
+		{:else if !preview && errored}
+			<p class="text-xs text-red-400">Evaluation failed — edit the definition to retry</p>
 		{:else if !preview && !runnable}
 			<p class="text-xs text-zinc-500">Complete the steps to see results</p>
 		{/if}

@@ -55,6 +55,18 @@ const _previews = new SvelteMap<string, NavPreview>();
 const _conflicts = new SvelteMap<string, number>(); // tabId -> server rev
 
 /**
+ * Tabs whose LAST evaluate attempt failed. With no manual Run button the
+ * auto-run callers are fire-and-forget (they swallow the rejection), so this
+ * flag IS the surfacing: ChainPreview renders it as a muted error line when
+ * the definition is runnable but no preview exists. Set only when the failure
+ * is still current (same `isCurrent` discipline as the preview catch path);
+ * cleared by any edit (`updateDefinition`), a new run starting (`runPreview`),
+ * `closeDraft`, `reloadDraft`, and reset — an error must never outlive the
+ * definition it belongs to.
+ */
+const _evalErrors = new SvelteMap<string, true>();
+
+/**
  * Per-tab preview generation. Anything that makes an in-flight evaluate
  * response stale — a definition edit, a newer runPreview, closeDraft/reset —
  * bumps the counter; the async preview functions capture it before their
@@ -104,10 +116,10 @@ function scheduleAutoRun(tabId: string): void {
 		const draft = _drafts.get(tabId);
 		if (draft && isRunnable(draft.definition)) {
 			void runPreview(tabId).catch(() => {
-				// Auto-run is fire-and-forget; runPreview already clears the
-				// preview on failure (if still current), so there's nothing
-				// further to do here. There is no manual Run button anymore
-				// to surface a retry/error affordance from.
+				// Auto-run is fire-and-forget: swallow the rethrow. runPreview's
+				// own catch already cleared the preview AND set the per-tab
+				// eval-error flag (when still current) — that flag is what
+				// ChainPreview surfaces to the user.
 			});
 		}
 	}, AUTO_RUN_DEBOUNCE_MS);
@@ -160,6 +172,10 @@ export function getPreview(tabId: string): NavPreview | undefined {
 export function getSaveConflict(tabId: string): number | undefined {
 	return _conflicts.get(tabId);
 }
+/** True when the tab's last evaluate attempt failed (see `_evalErrors`). */
+export function getEvalError(tabId: string): boolean {
+	return _evalErrors.has(tabId);
+}
 
 export async function ensureDraft(tabId: string): Promise<NavDraft> {
 	const existing = _drafts.get(tabId);
@@ -187,8 +203,9 @@ export async function ensureDraft(tabId: string): Promise<NavDraft> {
 		// Show results without requiring an edit first. Immediate (no
 		// debounce — there's no rapid-fire editing to coalesce here), and
 		// awaited so the preview is in place by the time the caller's
-		// `ensureDraft` resolves. Errors are swallowed the same way the
-		// debounced auto-run swallows them (see scheduleAutoRun).
+		// `ensureDraft` resolves. The rethrow is swallowed the same way the
+		// debounced auto-run swallows it (see scheduleAutoRun) — a failure
+		// is surfaced through the eval-error flag, not the promise.
 		if (isRunnable(draft.definition)) {
 			await runPreview(tabId).catch(() => {});
 		}
@@ -203,6 +220,7 @@ export function updateDefinition(tabId: string, defn: NavigationDefinition): voi
 	if (!draft) return;
 	_drafts.set(tabId, { ...draft, definition: defn, dirty: true });
 	_previews.delete(tabId); // stale: preview must match what's on screen
+	_evalErrors.delete(tabId); // an old failure belongs to an old definition
 	bumpGeneration(tabId); // and any in-flight evaluate response is stale too
 	scheduleAutoRun(tabId);
 }
@@ -281,6 +299,7 @@ export async function reloadDraft(tabId: string): Promise<void> {
 	_drafts.delete(tabId);
 	_previews.delete(tabId);
 	_conflicts.delete(tabId);
+	_evalErrors.delete(tabId); // any failure belonged to the discarded draft
 	bumpGeneration(tabId); // the definition is about to change
 	await ensureDraft(tabId);
 }
@@ -289,6 +308,7 @@ export async function runPreview(tabId: string): Promise<void> {
 	const draft = _drafts.get(tabId);
 	if (!draft) return;
 	const gen = bumpGeneration(tabId); // supersede any older in-flight evaluate
+	_evalErrors.delete(tabId); // a fresh attempt starts clean
 	_previews.set(tabId, {
 		stepTypes: [],
 		chains: [],
@@ -311,7 +331,13 @@ export async function runPreview(tabId: string): Promise<void> {
 			loading: false
 		});
 	} catch (err) {
-		if (isCurrent(tabId, gen)) _previews.delete(tabId);
+		if (isCurrent(tabId, gen)) {
+			_previews.delete(tabId);
+			// Surface the failure (the auto-run callers swallow the rethrow):
+			// only for a CURRENT failure — a stale one belongs to a definition
+			// that is no longer on screen and must not tag the newer one.
+			_evalErrors.set(tabId, true);
+		}
 		throw err;
 	}
 }
@@ -349,6 +375,7 @@ export function closeDraft(tabId: string): void {
 	_drafts.delete(tabId);
 	_previews.delete(tabId);
 	_conflicts.delete(tabId);
+	_evalErrors.delete(tabId);
 	bumpGeneration(tabId); // orphan any in-flight evaluate for this tab
 }
 
@@ -358,6 +385,7 @@ export function resetNavigationEditors(): void {
 	_drafts.clear();
 	_previews.clear();
 	_conflicts.clear();
+	_evalErrors.clear();
 	// Bump (not clear) so in-flight responses from before the reset stay stale
 	// even if the same tab id is immediately re-opened.
 	for (const tabId of _generations.keys()) bumpGeneration(tabId);

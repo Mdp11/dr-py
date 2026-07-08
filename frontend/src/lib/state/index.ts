@@ -214,6 +214,7 @@ export {
 	emptyPath,
 	ensureDraft,
 	getDraft,
+	getEvalError,
 	getPreview,
 	getSaveConflict,
 	isRunnable,

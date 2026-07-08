@@ -5,6 +5,7 @@ import {
 	closeDraft,
 	ensureDraft,
 	getDraft,
+	getEvalError,
 	getPreview,
 	getSaveConflict,
 	isRunnable,
@@ -560,5 +561,67 @@ describe('exclude_visited', () => {
 		const updated = getDraft('nav:draft:1')!;
 		expect((updated.definition as { exclude_visited: boolean }).exclude_visited).toBe(false);
 		expect(updated.dirty).toBe(true);
+	});
+});
+
+describe('evaluation error surfacing', () => {
+	function runnableDef(types: string[] = ['B']) {
+		return {
+			kind: 'path' as const,
+			schema_version: 1,
+			start: { kind: 'scope' as const, types, criteria: [] },
+			steps: [],
+			exclude_visited: true
+		};
+	}
+
+	it('a failed auto-run sets the eval-error state', async () => {
+		vi.useFakeTimers();
+		await ensureDraft('nav:draft:1');
+		vi.spyOn(artifactsApi, 'evaluateNavigation').mockRejectedValue(new Error('boom'));
+		updateDefinition('nav:draft:1', runnableDef());
+		expect(getEvalError('nav:draft:1')).toBe(false); // not before the run fires
+		await vi.advanceTimersByTimeAsync(400);
+		expect(getEvalError('nav:draft:1')).toBe(true);
+		expect(getPreview('nav:draft:1')).toBeUndefined();
+	});
+
+	it('a subsequent successful edit + run clears the eval-error state', async () => {
+		vi.useFakeTimers();
+		await ensureDraft('nav:draft:1');
+		vi.spyOn(artifactsApi, 'evaluateNavigation')
+			.mockRejectedValueOnce(new Error('boom'))
+			.mockResolvedValueOnce(CHAIN_PAGE);
+		updateDefinition('nav:draft:1', runnableDef());
+		await vi.advanceTimersByTimeAsync(400);
+		expect(getEvalError('nav:draft:1')).toBe(true);
+		updateDefinition('nav:draft:1', runnableDef(['C']));
+		// The edit itself clears the stale error immediately (the preview slot
+		// must always match what's on screen — same rule as the preview).
+		expect(getEvalError('nav:draft:1')).toBe(false);
+		await vi.advanceTimersByTimeAsync(400);
+		expect(getEvalError('nav:draft:1')).toBe(false);
+		expect(getPreview('nav:draft:1')?.total).toBe(1);
+	});
+
+	it('an error response arriving after a newer edit does NOT set the eval-error state', async () => {
+		await ensureDraft('nav:draft:1');
+		const d = deferred<typeof CHAIN_PAGE>();
+		vi.spyOn(artifactsApi, 'evaluateNavigation').mockImplementation(() => d.promise);
+		const inflight = runPreview('nav:draft:1').catch(() => {});
+		updateDefinition('nav:draft:1', runnableDef()); // bumps the generation
+		d.reject(new Error('boom'));
+		await inflight;
+		// Stale failure: it belongs to a definition that is no longer on screen.
+		expect(getEvalError('nav:draft:1')).toBe(false);
+	});
+
+	it('closeDraft clears the eval-error state', async () => {
+		await ensureDraft('nav:draft:1');
+		vi.spyOn(artifactsApi, 'evaluateNavigation').mockRejectedValue(new Error('boom'));
+		await runPreview('nav:draft:1').catch(() => {});
+		expect(getEvalError('nav:draft:1')).toBe(true);
+		closeDraft('nav:draft:1');
+		expect(getEvalError('nav:draft:1')).toBe(false);
 	});
 });
