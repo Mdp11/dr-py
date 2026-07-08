@@ -52,10 +52,16 @@ function render(tabId: string) {
 	return component;
 }
 
-function buttonByText(text: string): HTMLButtonElement {
-	const btn = [...document.querySelectorAll('button')].find(
+/** The ROOT combine's own compose-toolbar button, disambiguated from every
+ * operand's OWN "+ insert navigation"/"+ group" button (each bare-Path
+ * operand renders the same trio for recursive nesting — see
+ * PathLeafEditor.svelte). The root's toolbar is rendered last in document
+ * order (after the `<ul>` of operands), so the last match is the root's. */
+function rootButtonByText(text: string): HTMLButtonElement {
+	const matches = [...document.querySelectorAll('button')].filter(
 		(b) => b.textContent?.trim() === text
 	);
+	const btn = matches.at(-1);
 	if (!btn) throw new Error(`button "${text}" not found`);
 	return btn as HTMLButtonElement;
 }
@@ -76,7 +82,7 @@ it('insert navigation appends an operand', async () => {
 	const c = render(tabId);
 	try {
 		const before = (getDraft(tabId)?.definition as SetExpression).operands.length;
-		buttonByText('+ insert navigation').click();
+		rootButtonByText('+ insert navigation').click();
 		flushSync();
 		const after = (getDraft(tabId)?.definition as SetExpression).operands.length;
 		expect(after).toBe(before + 1);

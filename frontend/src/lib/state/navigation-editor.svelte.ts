@@ -184,6 +184,9 @@ function markExpanded(tabId: string, path: NodePath): void {
  */
 function clearTabKeys(tabId: string): void {
 	const prefix = `${tabId}::`;
+	// Ephemeral scratch set: built and drained within this function call —
+	// never stored or read reactively.
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity
 	const keys = new Set<string>();
 	const expanded = _expanded.get(tabId);
 	if (expanded) for (const pk of expanded) keys.add(prefix + pk);
@@ -463,6 +466,12 @@ export async function saveAsDraft(tabId: string, name: string): Promise<void> {
 	const created = await api.createArtifact({ kind: 'navigation', name, payload });
 	bindTabToArtifact(tabId, created.id);
 	const newTab = `nav:${created.id}`;
+	// bindTabToArtifact only re-keys the tab id — the visible tab title still
+	// shows the OLD name (setDraftName is what normally keeps it in sync, but
+	// there was no such edit here: `name` is a fresh argument, not something
+	// the user typed into the draft-name input). Retitle explicitly so the
+	// tab label matches the new library entry, same as the sidebar/name input.
+	retitleTab(newTab, name);
 	_drafts.delete(tabId);
 	_conflicts.delete(tabId);
 	_drafts.set(newTab, {

@@ -1,8 +1,19 @@
 <script lang="ts">
-	import { canEdit, getDraft, getMetamodel, isExpanded, toggleExpanded, updateDefinition } from '$lib/state';
+	import {
+		canEdit,
+		getArtifactHeaders,
+		getDraft,
+		getMetamodel,
+		isExpanded,
+		toggleExpanded,
+		updateDefinition
+	} from '$lib/state';
 	import {
 		elementStartScope,
 		emptyCombine,
+		insertGroup,
+		insertNavigation,
+		insertRef,
 		precedingTargetTypes,
 		readElementStart,
 		updateNodeAt
@@ -11,6 +22,7 @@
 	import { effectivePropertiesForTypes } from '$lib/metamodel/helpers';
 	import type {
 		NavFilterStep,
+		NavigationDefinition,
 		NavRelationshipStep,
 		NavScope,
 		NavStepItem,
@@ -22,17 +34,28 @@
 	import RelationshipStepRow from './RelationshipStepRow.svelte';
 	import FilterStepRow from './FilterStepRow.svelte';
 	import ChainPreview from './ChainPreview.svelte';
+	import StereotypePicker from '../Sidebar/StereotypePicker.svelte';
 
 	let { tabId, path, node }: { tabId: string; path: NodePath; node: PathNavigation } = $props();
 	const editable = $derived(canEdit());
 	const draft = $derived(getDraft(tabId));
 	const mm = $derived(getMetamodel());
+	const navHeaders = $derived(getArtifactHeaders().filter((a) => a.kind === 'navigation'));
+	let addOpen = $state(false);
 	function patch(next: Partial<PathNavigation>) {
 		if (!draft) return;
 		updateDefinition(
 			tabId,
 			updateNodeAt(draft.definition, path, (n) => ({ ...(n as PathNavigation), ...next }))
 		);
+	}
+	// Composing an alternative-branch set out of THIS path (bare-path
+	// auto-wrap): mutates the whole tree at `path`, not just this node's own
+	// fields, so it goes through `updateDefinition` directly rather than
+	// `patch` (which only ever replaces PathNavigation fields in place).
+	function mutate(next: (root: NavigationDefinition) => NavigationDefinition) {
+		if (!draft) return;
+		updateDefinition(tabId, next(draft.definition));
 	}
 
 	// Types flowing into relationship step `i` (rel-type/target-type picker
@@ -125,7 +148,11 @@
 				onPick={(id) => patch({ start: elementStartScope(id) })}
 			/>
 		{:else}
-			<ScopeEditor scope={node.start} label="Start" onChange={(s: NavScope) => patch({ start: s })} />
+			<ScopeEditor
+				scope={node.start}
+				label="Start"
+				onChange={(s: NavScope) => patch({ start: s })}
+			/>
 		{/if}
 	{:else if node.start.kind === 'set_op'}
 		<NavigationNode {tabId} path={[...path, 'start']} />
@@ -157,6 +184,35 @@
 			>+ filter step</button
 		>
 	</div>
+	{#if editable}
+		<div class="flex items-center gap-3 border-t border-zinc-800 pt-2 text-xs">
+			<button
+				type="button"
+				class="text-sky-500 hover:text-sky-300"
+				onclick={() => mutate((r) => insertNavigation(r, path))}>+ insert navigation</button
+			>
+			<button
+				type="button"
+				class="text-sky-500 hover:text-sky-300"
+				onclick={() => mutate((r) => insertGroup(r, path))}>+ group</button
+			>
+			<StereotypePicker
+				mode="create"
+				names={navHeaders.map((h) => h.name)}
+				onPick={(name) => {
+					const h = navHeaders.find((x) => x.name === name);
+					if (h) mutate((r) => insertRef(r, path, h.id));
+				}}
+				open={addOpen}
+				onOpenChange={(v) => (addOpen = v)}
+				searchPlaceholder="Add saved navigation…"
+			>
+				{#snippet trigger()}<span class="cursor-pointer text-sky-500 hover:text-sky-300"
+						>+ from library</span
+					>{/snippet}
+			</StereotypePicker>
+		</div>
+	{/if}
 	{#if isExpanded(tabId, path)}
 		<ChainPreview {tabId} {path} />
 	{/if}

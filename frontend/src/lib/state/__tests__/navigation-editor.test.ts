@@ -272,6 +272,9 @@ describe('saveAsDraft', () => {
 		// The old tab is gone; a new tab bound to the created artifact exists.
 		expect(getDraft('nav:a1')).toBeUndefined();
 		expect(getDynamicTabs()[0].artifactId).toBe('a9');
+		// The visible tab title must follow the new name too — bindTabToArtifact
+		// only re-keys the tab id, it does not retitle it.
+		expect(getDynamicTabs()[0].title).toBe('Copy');
 		const newDraft = getDraft('nav:a9')!;
 		expect(newDraft.name).toBe('Copy');
 		expect(newDraft.artifactId).toBe('a9');
