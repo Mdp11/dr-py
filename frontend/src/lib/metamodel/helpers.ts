@@ -147,10 +147,7 @@ export function parseMultiplicity(spec: string): {
  * at that point — offered as a union because navigation property matching is
  * existence-gated (an element lacking a picked property simply drops out).
  */
-export function effectivePropertiesForTypes(
-	mm: Metamodel,
-	typeNames: string[]
-): PropertyDef[] {
+export function effectivePropertiesForTypes(mm: Metamodel, typeNames: string[]): PropertyDef[] {
 	const roots = typeNames.length === 0 ? mm.elements.map((e) => e.name) : typeNames;
 	// Expand each requested type to itself + all its subtypes.
 	const reachable = new Set<string>();

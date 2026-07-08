@@ -22,7 +22,9 @@ describe('node addressing', () => {
 	it('nodeAt descends operands', () => {
 		const inner = emptyPath();
 		const root: SetExpression = {
-			kind: 'set_op', schema_version: 2, op: 'union',
+			kind: 'set_op',
+			schema_version: 2,
+			op: 'union',
 			operands: [{ definition: inner, step_index: null }]
 		};
 		expect(nodeAt(root, [])).toBe(root);
@@ -101,7 +103,10 @@ describe('composition mutators', () => {
 
 	it('updateNodeAt rebuilds immutably along the path', () => {
 		const c = emptyCombine();
-		const next = updateNodeAt(c, [0], (n) => ({ ...(n as PathNavigation), exclude_visited: false }));
+		const next = updateNodeAt(c, [0], (n) => ({
+			...(n as PathNavigation),
+			exclude_visited: false
+		}));
 		expect((next as SetExpression).operands[0].definition).not.toBe(c.operands[0].definition);
 		expect(c).toEqual(emptyCombine()); // original untouched
 	});

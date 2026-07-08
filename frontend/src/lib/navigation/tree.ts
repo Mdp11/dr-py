@@ -74,8 +74,8 @@ export function updateNodeAt(
 	if (root.kind !== 'set_op') return root;
 	const child = root.operands[seg]?.definition;
 	if (!child) return root;
-	const operands = root.operands.map((op, i): NavOperand =>
-		i === seg ? { ...op, definition: updateNodeAt(child, rest, fn) } : op
+	const operands = root.operands.map(
+		(op, i): NavOperand => (i === seg ? { ...op, definition: updateNodeAt(child, rest, fn) } : op)
 	);
 	return { ...root, operands };
 }
@@ -127,7 +127,11 @@ export function insertGroup(root: NavigationDefinition, path: NodePath): Navigat
 }
 
 /** Add a ref operand at `path` (auto-wrap on a bare Path). */
-export function insertRef(root: NavigationDefinition, path: NodePath, ref: string): NavigationDefinition {
+export function insertRef(
+	root: NavigationDefinition,
+	path: NodePath,
+	ref: string
+): NavigationDefinition {
 	return updateNodeAt(root, path, (n) => {
 		if (n.kind === 'path') {
 			return {
@@ -143,7 +147,11 @@ export function insertRef(root: NavigationDefinition, path: NodePath, ref: strin
 }
 
 /** Remove operand `i` from the combine at `path`; auto-unwrap to one child. */
-export function removeOperand(root: NavigationDefinition, path: NodePath, i: number): NavigationDefinition {
+export function removeOperand(
+	root: NavigationDefinition,
+	path: NodePath,
+	i: number
+): NavigationDefinition {
 	return updateNodeAt(root, path, (n) => {
 		if (n.kind !== 'set_op') return n;
 		const operands = n.operands.filter((_, idx) => idx !== i);

@@ -1,6 +1,13 @@
 <script lang="ts">
 	import { Trash2, ChevronUp, ChevronDown } from '@lucide/svelte';
-	import { canEdit, getArtifactHeaders, isExpanded, toggleExpanded, updateDefinition, getDraft } from '$lib/state';
+	import {
+		canEdit,
+		getArtifactHeaders,
+		isExpanded,
+		toggleExpanded,
+		updateDefinition,
+		getDraft
+	} from '$lib/state';
 	import {
 		insertGroup,
 		insertNavigation,
@@ -33,8 +40,9 @@
 		mutate((root) =>
 			updateNodeAtLocal(root, path, (n) => {
 				const s = n as SetExpression;
-				const operands = s.operands.map((op, idx): NavOperand =>
-					idx === i ? { ...op, step_index: raw === '' ? null : Number(raw) } : op
+				const operands = s.operands.map(
+					(op, idx): NavOperand =>
+						idx === i ? { ...op, step_index: raw === '' ? null : Number(raw) } : op
 				);
 				return { ...s, operands };
 			})
@@ -104,7 +112,8 @@
 						type="button"
 						aria-label="Remove operand"
 						class="hover:text-red-400"
-						onclick={() => mutate((r) => removeOperand(r, path, i))}><Trash2 class="size-3" /></button
+						onclick={() => mutate((r) => removeOperand(r, path, i))}
+						><Trash2 class="size-3" /></button
 					>
 				</div>
 				{#if op.definition}

@@ -109,7 +109,9 @@ it('switching to Element mode and picking a result writes elementStartScope(id)'
 		(resultButton as HTMLButtonElement).click();
 		flushSync();
 
-		expect((getDraft(tabId)?.definition as PathNavigation).start).toEqual(elementStartScope('el-7'));
+		expect((getDraft(tabId)?.definition as PathNavigation).start).toEqual(
+			elementStartScope('el-7')
+		);
 
 		// The chip resolves the display name via getElementsBatch.
 		await waitForDebounce();

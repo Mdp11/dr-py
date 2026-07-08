@@ -186,7 +186,7 @@ per tab:
 - **Auto-run + staleness are per node.** There is no Run button:
   `updateDefinition` reschedules a **debounced** run for **every expanded node**
   (`AUTO_RUN_DEBOUNCE_MS`), re-reading `nodeAt(currentDraft, path)` at fire time
-  (a later edit resets that node's timer *and* supplies the node sent); a node
+  (a later edit resets that node's timer _and_ supplies the node sent); a node
   whose address no longer resolves is dropped from the expanded set. Each node
   carries its own **generation counter**: any edit / newer run / collapse /
   `closeDraft` / reset bumps it, and the async preview functions capture it

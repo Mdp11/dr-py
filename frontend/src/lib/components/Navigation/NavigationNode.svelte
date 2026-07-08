@@ -11,7 +11,7 @@
 </script>
 
 {#if node?.kind === 'set_op'}
-	<CombineEditor {tabId} {path} node={node} />
+	<CombineEditor {tabId} {path} {node} />
 {:else if node?.kind === 'path'}
-	<PathLeafEditor {tabId} {path} node={node} />
+	<PathLeafEditor {tabId} {path} {node} />
 {/if}

@@ -48,7 +48,9 @@
 	// that point in the chain. `propertyNames === null` (every non-navigation
 	// caller) leaves the picker unscoped.
 	const scopedItems = $derived(
-		propertyNames === null ? propertyItems : propertyItems.filter((it) => propertyNames!.includes(it.name))
+		propertyNames === null
+			? propertyItems
+			: propertyItems.filter((it) => propertyNames!.includes(it.name))
 	);
 
 	// Which inline picker popover is open (keyed by a string id within this row).

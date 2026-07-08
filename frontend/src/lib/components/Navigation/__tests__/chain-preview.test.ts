@@ -122,9 +122,7 @@ it('shows an error line when the node evaluate failed', async () => {
 	await flushEvaluate();
 	const c = render(tabId);
 	try {
-		expect(document.body.textContent).toContain(
-			'Evaluation failed — edit the definition to retry'
-		);
+		expect(document.body.textContent).toContain('Evaluation failed — edit the definition to retry');
 	} finally {
 		unmount(c);
 	}

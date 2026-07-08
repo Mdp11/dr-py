@@ -25,11 +25,17 @@
 		onChange(index, { ...step, criteria: step.criteria.filter((_, j) => j !== i) });
 	}
 	function addCriterion(): void {
-		onChange(index, { ...step, criteria: [...(step.criteria as Criterion[]), newCriterion('property')] });
+		onChange(index, {
+			...step,
+			criteria: [...(step.criteria as Criterion[]), newCriterion('property')]
+		});
 	}
 </script>
 
-<div class="space-y-1.5 rounded border border-zinc-800 bg-zinc-900/40 p-2" data-testid="filter-step">
+<div
+	class="space-y-1.5 rounded border border-zinc-800 bg-zinc-900/40 p-2"
+	data-testid="filter-step"
+>
 	<div class="flex items-center gap-2 text-xs">
 		<span class="text-zinc-500">Step {index + 1}</span>
 		<span class="text-zinc-400">Filter</span>

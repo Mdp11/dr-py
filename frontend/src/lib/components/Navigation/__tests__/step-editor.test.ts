@@ -113,9 +113,7 @@ function render(tabId: string) {
 }
 
 function buttonByText(text: string): HTMLButtonElement {
-	const btn = [...document.querySelectorAll('button')].find(
-		(b) => b.textContent?.trim() === text
-	);
+	const btn = [...document.querySelectorAll('button')].find((b) => b.textContent?.trim() === text);
 	if (!btn) throw new Error(`button "${text}" not found`);
 	return btn as HTMLButtonElement;
 }
@@ -141,7 +139,9 @@ function openPropertyPickerItems(nth = 0): string[] {
 	const steps = [...document.querySelectorAll('[data-testid="filter-step"]')];
 	const step = steps[nth];
 	if (!step) throw new Error(`filter step #${nth} not found`);
-	const btn = [...step.querySelectorAll('button')].find((b) => b.textContent?.includes('property…'));
+	const btn = [...step.querySelectorAll('button')].find((b) =>
+		b.textContent?.includes('property…')
+	);
 	if (!btn) throw new Error(`property picker trigger not found in filter step #${nth}`);
 	(btn as HTMLButtonElement).click();
 	flushSync();
@@ -242,7 +242,7 @@ it('reached types come from the nearest preceding relationship step target_types
 	}
 });
 
-it('adding a condition uses newCriterion(\'property\')', async () => {
+it("adding a condition uses newCriterion('property')", async () => {
 	const tabId = 'nav:draft:new-criterion-shape';
 	const filterStep: NavFilterStep = { kind: 'filter', criteria: [] };
 	await seed(tabId, { ...emptyStart(), steps: [filterStep] });
