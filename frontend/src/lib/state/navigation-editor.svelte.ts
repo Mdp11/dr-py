@@ -43,6 +43,7 @@ const _conflicts = new SvelteMap<string, number>(); // tabId -> server rev
  * slow round-trip can never revive a cleared preview or clobber a fresher
  * one. Plain Map: generations are control state, never read from templates.
  */
+// eslint-disable-next-line svelte/prefer-svelte-reactivity
 const _generations = new Map<string, number>();
 
 function bumpGeneration(tabId: string): number {

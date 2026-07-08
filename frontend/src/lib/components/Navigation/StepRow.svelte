@@ -30,6 +30,10 @@
 				.map((r) => r.name)
 				.sort();
 		}
+		// Ephemeral scratch set: built and drained into the returned array within
+		// this derivation — never stored or read reactively itself (the $derived
+		// wrapper tracks the resulting array).
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity
 		const names = new Set<string>();
 		for (const t of sourceTypes) {
 			for (const entry of relationshipTypesFromSource(mm, t)) names.add(entry.rt.name);
@@ -42,6 +46,10 @@
 		if (!mm || step.direction !== 'out' || sourceTypes.length === 0) return null;
 		const rt = mm.relationships.find((r) => r.name === step.relationship_type);
 		if (!rt) return null;
+		// Ephemeral scratch set: built and drained into the returned array within
+		// this derivation — never stored or read reactively itself (the $derived
+		// wrapper tracks the resulting array).
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity
 		const out = new Set<string>();
 		for (const t of sourceTypes) for (const n of allowedTargetTypes(mm, t, rt)) out.add(n);
 		return out.size > 0 ? [...out].sort() : null;

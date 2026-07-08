@@ -22,6 +22,9 @@
 	let pickerOpen = $state(false);
 
 	function toggleType(name: string): void {
+		// Ephemeral scratch set: built, mutated, and spread into the onChange
+		// payload within this call — never stored or read reactively.
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity
 		const next = new Set(scope.types);
 		if (next.has(name)) next.delete(name);
 		else next.add(name);
