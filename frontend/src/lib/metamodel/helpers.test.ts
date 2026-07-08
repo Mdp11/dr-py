@@ -4,6 +4,7 @@ import type { Metamodel } from '$lib/api/types';
 import {
 	containmentRelTypes,
 	effectiveProperties,
+	effectivePropertiesForTypes,
 	effectiveRelationshipProperties,
 	elementAncestors,
 	elementType,
@@ -77,6 +78,40 @@ const mm: Metamodel = {
 					multiplicity: '1',
 					min: 0,
 					max: 1000,
+					pattern: null,
+					max_length: null
+				}
+			],
+			key: null
+		},
+		{
+			name: 'Component',
+			abstract: true,
+			extends: null,
+			properties: [
+				{
+					name: 'cost',
+					datatype: 'float',
+					multiplicity: '0..1',
+					min: 0,
+					max: null,
+					pattern: null,
+					max_length: null
+				}
+			],
+			key: null
+		},
+		{
+			name: 'Service',
+			abstract: false,
+			extends: 'Component',
+			properties: [
+				{
+					name: 'sla',
+					datatype: 'string',
+					multiplicity: '0..1',
+					min: null,
+					max: null,
 					pattern: null,
 					max_length: null
 				}
@@ -262,5 +297,16 @@ describe('parseMultiplicity', () => {
 		expect(parseMultiplicity('garbage')).toEqual({ lower: 0, upper: null });
 		expect(parseMultiplicity('5..2')).toEqual({ lower: 0, upper: null });
 		expect(parseMultiplicity('-1')).toEqual({ lower: 0, upper: null });
+	});
+});
+
+describe('effectivePropertiesForTypes', () => {
+	it('effectivePropertiesForTypes unions props over subtypes; [] = all', () => {
+		// mm: Component (abstract) with prop `cost`; Service extends Component adds `sla`.
+		const named = effectivePropertiesForTypes(mm, ['Component']).map((p) => p.name);
+		expect(named).toContain('cost'); // own
+		expect(named).toContain('sla'); // subtype-only, unioned
+		const all = effectivePropertiesForTypes(mm, []).map((p) => p.name);
+		expect(all).toContain('cost');
 	});
 });

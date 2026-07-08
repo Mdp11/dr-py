@@ -138,3 +138,30 @@ export function parseMultiplicity(spec: string): {
 	if (!Number.isFinite(up) || up < lo || String(up) !== upStr) return fallback;
 	return { lower: lo, upper: up };
 }
+
+/**
+ * Union of effective (inherited) properties across `typeNames` AND their
+ * subtypes. `[]` means "any type" → union over every element type. Deduped by
+ * name (first occurrence wins; order is stable for form rendering). Used to
+ * scope a navigation filter step's property picker to the properties reachable
+ * at that point — offered as a union because navigation property matching is
+ * existence-gated (an element lacking a picked property simply drops out).
+ */
+export function effectivePropertiesForTypes(
+	mm: Metamodel,
+	typeNames: string[]
+): PropertyDef[] {
+	const roots = typeNames.length === 0 ? mm.elements.map((e) => e.name) : typeNames;
+	// Expand each requested type to itself + all its subtypes.
+	const reachable = new Set<string>();
+	for (const t of mm.elements) {
+		if (roots.some((r) => isSubtype(mm, t.name, r))) reachable.add(t.name);
+	}
+	const byName = new Map<string, PropertyDef>();
+	for (const name of reachable) {
+		for (const p of effectiveProperties(mm, name)) {
+			if (!byName.has(p.name)) byName.set(p.name, p);
+		}
+	}
+	return [...byName.values()];
+}

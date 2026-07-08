@@ -377,18 +377,26 @@ export interface NavScope {
 	criteria: unknown[]; // search Criterion objects; typed at the editor layer
 }
 
-export interface NavStep {
+export interface NavRelationshipStep {
+	kind: 'relationship';
 	relationship_type: string;
 	direction: NavDirection;
-	target: NavScope;
-	children: NavStep[];
+	target_types: string[];
+	children: NavStepItem[];
 }
+
+export interface NavFilterStep {
+	kind: 'filter';
+	criteria: unknown[]; // search Criterion objects; typed at the editor layer
+}
+
+export type NavStepItem = NavRelationshipStep | NavFilterStep;
 
 export interface PathNavigation {
 	kind: 'path';
 	schema_version: number;
 	start: NavScope | SetExpression;
-	steps: NavStep[];
+	steps: NavStepItem[];
 	// Cycle guard: when true (default), a chain never revisits an element
 	// already in its own prefix; when false, revisits are allowed. Part of
 	// the saved definition — mirrors core/navigation/schema.py.
@@ -418,7 +426,7 @@ export const NavigationDefinitionSchema: z.ZodType<NavigationDefinition> = z.laz
 	z.union([
 		z.object({
 			kind: z.literal('path'),
-			schema_version: z.number().int().default(1),
+			schema_version: z.number().int().default(2),
 			start: z.unknown(),
 			steps: z.array(z.unknown()).default([]),
 			// Old saved payloads predate this field; default matches the
@@ -427,7 +435,7 @@ export const NavigationDefinitionSchema: z.ZodType<NavigationDefinition> = z.laz
 		}),
 		z.object({
 			kind: z.literal('set_op'),
-			schema_version: z.number().int().default(1),
+			schema_version: z.number().int().default(2),
 			op: z.enum(['union', 'intersection', 'difference', 'symmetric_difference']),
 			operands: z.array(z.unknown()).default([])
 		})
