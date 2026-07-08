@@ -6,6 +6,7 @@
  */
 import * as api from '$lib/api/artifacts';
 import type { Artifact, ArtifactHeader, NavigationDefinition } from '$lib/api/types';
+import { scrubArtifactFromView } from './view.svelte';
 
 let _items = $state<ArtifactHeader[]>([]);
 let _loading = $state(false);
@@ -67,6 +68,12 @@ export async function renameArtifact(id: string, name: string): Promise<void> {
 export async function removeArtifact(id: string): Promise<void> {
 	await api.deleteArtifact(id);
 	_items = _items.filter((a) => a.id !== id);
+	// Scrub this client's own view of any now-dangling placements of the
+	// deleted artifact (a no-op when no view is loaded or it never placed this
+	// id). Other clients still see the ghost ref until their view refreshes —
+	// tolerated and rendered removably by TreeRow (see view-tree.ts); the
+	// backend never scrubs on delete because a view owns nothing server-side.
+	await scrubArtifactFromView(id);
 }
 
 /** Feed reducer hook: an `artifact` event means the library changed somewhere. */

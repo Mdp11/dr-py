@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as api from '$lib/api/artifacts';
+import * as viewApi from '$lib/api/view';
+import type { View } from '$lib/api/types';
 import {
 	getArtifactHeaders,
 	loadArtifacts,
@@ -7,6 +9,7 @@ import {
 	renameArtifact,
 	resetArtifacts
 } from '../artifacts.svelte';
+import { clearViewState, getView, pushView } from '../view.svelte';
 
 const HEADER = {
 	id: 'a1',
@@ -17,7 +20,10 @@ const HEADER = {
 	updated_by: null
 };
 
-beforeEach(() => resetArtifacts());
+beforeEach(() => {
+	resetArtifacts();
+	clearViewState();
+});
 afterEach(() => vi.restoreAllMocks());
 
 describe('artifacts store', () => {
@@ -44,5 +50,66 @@ describe('artifacts store', () => {
 		vi.spyOn(api, 'deleteArtifact').mockResolvedValue(undefined);
 		await removeArtifact('a1');
 		expect(getArtifactHeaders()).toEqual([]);
+	});
+
+	it('remove scrubs every placement of the artifact from the active view', async () => {
+		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [HEADER] });
+		await loadArtifacts();
+		vi.spyOn(api, 'deleteArtifact').mockResolvedValue(undefined);
+		const seedView: View = {
+			name: 'v',
+			folders: [
+				{
+					name: 'F',
+					folders: [
+						{
+							name: 'G',
+							folders: [],
+							elements: [],
+							artifacts: [{ id: 'a1', kind: 'navigation' }]
+						}
+					],
+					elements: [],
+					artifacts: [{ id: 'a1', kind: 'navigation' }]
+				}
+			]
+		};
+		const put = vi
+			.spyOn(viewApi, 'putViewSnapshot')
+			.mockImplementation(async (v) => ({ view: v, warnings: [] }));
+		await pushView(seedView); // seed the "current view" the same way a load would
+		await removeArtifact('a1');
+		expect(put).toHaveBeenCalledTimes(2); // the seed push + the scrub push
+		const pushed = getView()!;
+		expect(pushed.folders[0].artifacts).toEqual([]);
+		expect(pushed.folders[0].folders[0].artifacts).toEqual([]);
+	});
+
+	it('remove is a no-op push when no view is loaded', async () => {
+		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [HEADER] });
+		await loadArtifacts();
+		vi.spyOn(api, 'deleteArtifact').mockResolvedValue(undefined);
+		const put = vi.spyOn(viewApi, 'putViewSnapshot');
+		expect(getView()).toBeNull();
+		await removeArtifact('a1');
+		expect(put).not.toHaveBeenCalled();
+	});
+
+	it('remove is a no-op push when the loaded view has no placement of the artifact', async () => {
+		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [HEADER] });
+		await loadArtifacts();
+		vi.spyOn(api, 'deleteArtifact').mockResolvedValue(undefined);
+		const seedView: View = {
+			name: 'v',
+			folders: [{ name: 'F', folders: [], elements: [], artifacts: [] }]
+		};
+		vi.spyOn(viewApi, 'putViewSnapshot').mockImplementation(async (v) => ({
+			view: v,
+			warnings: []
+		}));
+		await pushView(seedView);
+		const put = vi.spyOn(viewApi, 'putViewSnapshot');
+		await removeArtifact('a1');
+		expect(put).not.toHaveBeenCalled();
 	});
 });

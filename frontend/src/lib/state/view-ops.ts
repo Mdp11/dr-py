@@ -157,6 +157,17 @@ export function removeArtifactFromView(view: View, artifactId: string): View {
 }
 
 /**
+ * True if `view` places `artifactId` in at least one folder. Used to skip a
+ * needless snapshot push when scrubbing an artifact's placements on delete —
+ * see `scrubArtifactFromView` in `view.svelte.ts`.
+ */
+export function viewHasArtifactPlacement(view: View, artifactId: string): boolean {
+	const check = (folders: Folder[]): boolean =>
+		folders.some((f) => f.artifacts.some((a) => a.id === artifactId) || check(f.folders));
+	return check(view.folders);
+}
+
+/**
  * Return a new view with the folder at `sourcePath` reparented under
  * `destParentPath` (empty array = top level). The folder keeps its subtree and
  * elements; sibling order is irrelevant (folders render alphabetically), so

@@ -318,6 +318,39 @@
 				<X class="h-3 w-3" />
 			</button>
 		</div>
+	{:else}
+		<!-- Dangling ref: the artifact library doesn't know this id (deleted
+		     elsewhere, or the library hasn't loaded yet). Tolerate-don't-prune —
+		     never auto-removed on load — but still visible (not a blank windowing
+		     slot) and still removable so a user can clean it up. No dblclick-open
+		     (nothing to open) and not draggable (no onpointerdown wiring). -->
+		<div
+			class="group flex h-6 select-none items-center gap-1 rounded px-1 py-0.5 text-zinc-600"
+			class:ring-1={isFocused}
+			class:ring-indigo-500={isFocused}
+			role="treeitem"
+			tabindex={-1}
+			aria-selected={false}
+			aria-level={depth + 1}
+			style="padding-left: {depth * 12 + 4}px"
+		>
+			<span class="flex h-4 w-4 shrink-0 items-center justify-center text-zinc-700">·</span>
+			<span class="flex h-4 w-4 shrink-0 items-center justify-center text-zinc-700">
+				<Route class="h-3 w-3" />
+			</span>
+			<span class="flex-1 truncate italic" title={artifactId}>
+				(missing artifact) {artifactId}
+			</span>
+			<button
+				type="button"
+				class="hidden h-4 w-4 shrink-0 items-center justify-center rounded text-zinc-600 opacity-0 hover:text-red-400 group-hover:flex group-hover:opacity-100"
+				aria-label="Remove from folder"
+				title="Remove from folder"
+				onclick={onRemoveArtifact}
+			>
+				<X class="h-3 w-3" />
+			</button>
+		</div>
 	{/if}
 {:else if el}
 	<div

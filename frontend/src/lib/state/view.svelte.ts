@@ -7,7 +7,9 @@ import {
 	moveFolderInView,
 	placeArtifactInFolder,
 	placeElementsInView,
-	placeElementsInViewAt
+	placeElementsInViewAt,
+	removeArtifactFromView,
+	viewHasArtifactPlacement
 } from './view-ops';
 import { diffViews, type ViewChange } from './view-diff';
 
@@ -227,4 +229,19 @@ export async function removeArtifactFromFolder(
 	if (!folder) throw new Error(`Folder not found: ${folderPath.join('/')}`);
 	folder.artifacts = folder.artifacts.filter((a) => a.id !== artifactId);
 	await pushView(next);
+}
+
+/**
+ * Scrub every placement of `artifactId` from the active view. Called by
+ * `removeArtifact` in `artifacts.svelte.ts` right after the artifact itself is
+ * deleted, so this client's own tree doesn't keep showing a now-dangling ref
+ * in every folder that held it (other clients still see it until their view
+ * refreshes — deletion doesn't reach across sessions here; see TreeRow's
+ * tolerate-dangling rendering for that side). A no-op — no snapshot push —
+ * when there is no active view or it holds no placement of the id.
+ */
+export async function scrubArtifactFromView(artifactId: string): Promise<void> {
+	if (_view === null) return;
+	if (!viewHasArtifactPlacement(_view, artifactId)) return;
+	await pushView(removeArtifactFromView(_view, artifactId));
 }
