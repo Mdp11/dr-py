@@ -464,6 +464,7 @@ export async function saveAsDraft(tabId: string, name: string): Promise<void> {
 	bindTabToArtifact(tabId, created.id);
 	const newTab = `nav:${created.id}`;
 	_drafts.delete(tabId);
+	_conflicts.delete(tabId);
 	_drafts.set(newTab, {
 		...draft,
 		name,

@@ -352,6 +352,54 @@ describe('saveAsDraft', () => {
 		expect(getDraft('nav:a1')).toBeDefined();
 		expect(getDraft('nav:a1')?.artifactId).toBe('a1');
 	});
+
+	it('clears a stale rev-conflict recorded against the retired tab id', async () => {
+		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue({
+			id: 'a1',
+			kind: 'navigation',
+			name: 'Sensors',
+			artifact_rev: 4,
+			updated_at: '',
+			updated_by: null,
+			payload: {
+				kind: 'path',
+				schema_version: 1,
+				start: { kind: 'scope', types: [], criteria: [] },
+				steps: []
+			}
+		});
+		await ensureDraft('nav:a1');
+		// Induce a rev-conflict on nav:a1, same as the saveDraft conflict test.
+		vi.spyOn(artifactsApi, 'updateArtifact').mockRejectedValue(
+			new ConflictError(
+				409,
+				{ detail: { message: 'artifact was modified by someone else', current_rev: 7 } },
+				'HTTP 409'
+			)
+		);
+		await expect(saveDraft('nav:a1')).rejects.toBeInstanceOf(ConflictError);
+		expect(getSaveConflict('nav:a1')).toBe(7);
+
+		// Now fork the still-conflicted tab via Save as… — this must clear the
+		// stale conflict on the retired tab id, or a later reopen of a1 (which
+		// deterministically re-mints tab id nav:a1) inherits a false-positive
+		// conflict banner for a fresh, non-conflicted tab.
+		vi.spyOn(artifactsApi, 'createArtifact').mockResolvedValue({
+			id: 'a9',
+			kind: 'navigation',
+			name: 'Copy',
+			artifact_rev: 1,
+			updated_at: '',
+			updated_by: null,
+			payload: {}
+		});
+		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({ items: [] });
+
+		await saveAsDraft('nav:a1', 'Copy');
+
+		expect(getSaveConflict('nav:a1')).toBeUndefined();
+		expect(getSaveConflict('nav:a9')).toBeUndefined();
+	});
 });
 
 describe('navigation preview staleness + pagination', () => {
