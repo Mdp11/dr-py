@@ -37,7 +37,7 @@ def test_migration_creates_content_tables(tmp_path: Path) -> None:
     command.upgrade(cfg, "head")
 
     engine = create_engine(url)
-    content = {"metamodels", "models", "views", "commits", "snapshots"}
+    content = {"metamodels", "models", "views", "commits", "snapshots", "project_artifacts"}
     assert content <= set(inspect(engine).get_table_names())
 
     command.downgrade(cfg, "base")
