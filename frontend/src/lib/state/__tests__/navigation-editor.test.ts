@@ -157,6 +157,31 @@ describe('navigation editor store', () => {
 		await expect(saveDraft('nav:a1')).rejects.toBeInstanceOf(ConflictError);
 		expect(getSaveConflict('nav:a1')).toBe(7);
 	});
+
+	it('a name-clash 409 on create does NOT enter rev-conflict state', async () => {
+		const tabId = openNavigationTab({ artifactId: null, title: 'New navigation' });
+		const draft = await ensureDraft(tabId);
+		draft.name = 'Taken';
+		// Mirror what the real client throws for the create-path 409:
+		// routes/artifacts.py raises HTTPException(409, detail=f"a navigation
+		// named {name!r} already exists") — a plain STRING detail, unlike the
+		// update-path's {message, current_rev} object. err.body is the whole
+		// parsed body: {"detail": "..."}.
+		vi.spyOn(artifactsApi, 'createArtifact').mockRejectedValue(
+			new ConflictError(
+				409,
+				{ detail: "a navigation named 'Taken' already exists" },
+				"a navigation named 'Taken' already exists"
+			)
+		);
+		await expect(saveDraft(tabId)).rejects.toBeInstanceOf(ConflictError);
+		// No numeric current_rev in the body -> must NOT set a conflict, or the
+		// UI's "Reload their version" recovery would wipe this brand-new draft.
+		expect(getSaveConflict(tabId)).toBeUndefined();
+		// The draft itself must be untouched (name-clash isn't a rev conflict).
+		expect(getDraft(tabId)?.name).toBe('Taken');
+		expect(getDraft(tabId)?.artifactId).toBeNull();
+	});
 });
 
 describe('navigation preview staleness + pagination', () => {

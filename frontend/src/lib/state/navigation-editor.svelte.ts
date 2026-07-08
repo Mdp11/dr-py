@@ -152,13 +152,29 @@ export async function saveDraft(tabId: string): Promise<void> {
 		await loadArtifacts().catch(() => {});
 	} catch (err) {
 		if (err instanceof ConflictError) {
-			// Stale rev. The route raises HTTPException(409, detail={...,
-			// "current_rev": N}) (routes/artifacts.py), which FastAPI serializes
-			// as {"detail": {..., "current_rev": N}} — and err.body is that whole
-			// parsed body (client.ts). Remember the server rev so the UI can
-			// offer reload-and-retry; -1 only if the body is malformed.
-			const body = err.body as { detail?: { current_rev?: number } } | undefined;
-			_conflicts.set(tabId, body?.detail?.current_rev ?? -1);
+			// Two distinct 409 shapes share this status code (routes/artifacts.py):
+			// the update-path rev conflict raises detail={message, current_rev: N}
+			// (an OBJECT), while the create/rename-path name clash raises a plain
+			// STRING detail. Only the former is a rev conflict — entering conflict
+			// state for a name clash would route the user to "Reload their
+			// version" (NavigationBuilder.svelte), which on a draft tab
+			// (ensureDraft on a nav:draft:* id) fabricates a fresh empty
+			// definition and wipes their unsaved work, and on a saved tab
+			// discards local edits over what is really just a name collision.
+			// Detect it structurally: only enter conflict state when detail is an
+			// object carrying a numeric current_rev. Anything else (including the
+			// string-detail name clash) is left to the generic saveError path in
+			// NavigationBuilder.svelte, whose message text (via messageFromBody)
+			// is already the correct, user-facing one.
+			const body = err.body as { detail?: unknown } | undefined;
+			const detail = body?.detail;
+			if (
+				detail !== null &&
+				typeof detail === 'object' &&
+				typeof (detail as { current_rev?: unknown }).current_rev === 'number'
+			) {
+				_conflicts.set(tabId, (detail as { current_rev: number }).current_rev);
+			}
 		}
 		throw err;
 	}
