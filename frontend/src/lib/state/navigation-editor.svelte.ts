@@ -35,6 +35,27 @@ const _drafts = new SvelteMap<string, NavDraft>();
 const _previews = new SvelteMap<string, NavPreview>();
 const _conflicts = new SvelteMap<string, number>(); // tabId -> server rev
 
+/**
+ * Per-tab preview generation. Anything that makes an in-flight evaluate
+ * response stale — a definition edit, a newer runPreview, closeDraft/reset —
+ * bumps the counter; the async preview functions capture it before their
+ * await and drop the response on mismatch (or when the draft is gone), so a
+ * slow round-trip can never revive a cleared preview or clobber a fresher
+ * one. Plain Map: generations are control state, never read from templates.
+ */
+const _generations = new Map<string, number>();
+
+function bumpGeneration(tabId: string): number {
+	const next = (_generations.get(tabId) ?? 0) + 1;
+	_generations.set(tabId, next);
+	return next;
+}
+
+/** True while `gen` is still current for `tabId` and the draft still exists. */
+function isCurrent(tabId: string, gen: number): boolean {
+	return _generations.get(tabId) === gen && _drafts.has(tabId);
+}
+
 export function emptyPath(): NavigationDefinition {
 	return {
 		kind: 'path',
@@ -86,6 +107,7 @@ export function updateDefinition(tabId: string, defn: NavigationDefinition): voi
 	if (!draft) return;
 	_drafts.set(tabId, { ...draft, definition: defn, dirty: true });
 	_previews.delete(tabId); // stale: preview must match what's on screen
+	bumpGeneration(tabId); // and any in-flight evaluate response is stale too
 }
 
 export function setDraftName(tabId: string, name: string): void {
@@ -129,10 +151,13 @@ export async function saveDraft(tabId: string): Promise<void> {
 		await loadArtifacts().catch(() => {});
 	} catch (err) {
 		if (err instanceof ConflictError) {
-			// Stale rev — the backend's 409 body carries `current_rev` (see
-			// routes/artifacts.py); remember it so the UI can offer reload-and-retry.
-			const body = err.body as { current_rev?: number } | undefined;
-			_conflicts.set(tabId, body?.current_rev ?? -1);
+			// Stale rev. The route raises HTTPException(409, detail={...,
+			// "current_rev": N}) (routes/artifacts.py), which FastAPI serializes
+			// as {"detail": {..., "current_rev": N}} — and err.body is that whole
+			// parsed body (client.ts). Remember the server rev so the UI can
+			// offer reload-and-retry; -1 only if the body is malformed.
+			const body = err.body as { detail?: { current_rev?: number } } | undefined;
+			_conflicts.set(tabId, body?.detail?.current_rev ?? -1);
 		}
 		throw err;
 	}
@@ -143,12 +168,14 @@ export async function reloadDraft(tabId: string): Promise<void> {
 	_drafts.delete(tabId);
 	_previews.delete(tabId);
 	_conflicts.delete(tabId);
+	bumpGeneration(tabId); // the definition is about to change
 	await ensureDraft(tabId);
 }
 
 export async function runPreview(tabId: string): Promise<void> {
 	const draft = _drafts.get(tabId);
 	if (!draft) return;
+	const gen = bumpGeneration(tabId); // supersede any older in-flight evaluate
 	_previews.set(tabId, {
 		stepTypes: [],
 		chains: [],
@@ -162,6 +189,7 @@ export async function runPreview(tabId: string): Promise<void> {
 			limit: PAGE,
 			offset: 0
 		});
+		if (!isCurrent(tabId, gen)) return; // stale: edited/closed mid-flight
 		_previews.set(tabId, {
 			stepTypes: page.step_types,
 			chains: page.chains,
@@ -170,7 +198,7 @@ export async function runPreview(tabId: string): Promise<void> {
 			loading: false
 		});
 	} catch (err) {
-		_previews.delete(tabId);
+		if (isCurrent(tabId, gen)) _previews.delete(tabId);
 		throw err;
 	}
 }
@@ -180,29 +208,41 @@ export async function loadMorePreview(tabId: string): Promise<void> {
 	const preview = _previews.get(tabId);
 	if (!draft || !preview || preview.loading) return;
 	if (preview.chains.length >= preview.total) return;
+	const gen = _generations.get(tabId) ?? 0; // extend the CURRENT preview only
 	_previews.set(tabId, { ...preview, loading: true });
-	const page = await api.evaluateNavigation({
-		definition: draft.definition,
-		limit: PAGE,
-		offset: preview.chains.length
-	});
-	_previews.set(tabId, {
-		...preview,
-		chains: [...preview.chains, ...page.chains],
-		total: page.total,
-		truncated: page.truncated,
-		loading: false
-	});
+	try {
+		const page = await api.evaluateNavigation({
+			definition: draft.definition,
+			limit: PAGE,
+			offset: preview.chains.length
+		});
+		if (!isCurrent(tabId, gen)) return; // stale: edited/re-run/closed mid-flight
+		_previews.set(tabId, {
+			...preview,
+			chains: [...preview.chains, ...page.chains],
+			total: page.total,
+			truncated: page.truncated,
+			loading: false
+		});
+	} catch {
+		// Swallow: the caller fires this with `void` (no catch), and losing one
+		// page is recoverable — restore loading so Load more can be retried.
+		if (isCurrent(tabId, gen)) _previews.set(tabId, { ...preview, loading: false });
+	}
 }
 
 export function closeDraft(tabId: string): void {
 	_drafts.delete(tabId);
 	_previews.delete(tabId);
 	_conflicts.delete(tabId);
+	bumpGeneration(tabId); // orphan any in-flight evaluate for this tab
 }
 
 export function resetNavigationEditors(): void {
 	_drafts.clear();
 	_previews.clear();
 	_conflicts.clear();
+	// Bump (not clear) so in-flight responses from before the reset stay stale
+	// even if the same tab id is immediately re-opened.
+	for (const tabId of _generations.keys()) bumpGeneration(tabId);
 }
