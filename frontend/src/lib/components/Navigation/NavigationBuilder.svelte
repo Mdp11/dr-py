@@ -1,19 +1,6 @@
 <script lang="ts">
-	import {
-		canEdit,
-		ensureDraft,
-		getDraft,
-		getSaveConflict,
-		reloadDraft,
-		saveDraft,
-		setDraftName,
-		updateDefinition
-	} from '$lib/state';
-	import type { NavScope, NavStep, PathNavigation, SetExpression } from '$lib/api/types';
-	import ScopeEditor from './ScopeEditor.svelte';
-	import StepRow from './StepRow.svelte';
-	import SetExpressionEditor from './SetExpressionEditor.svelte';
-	import ChainPreview from './ChainPreview.svelte';
+	import { canEdit, ensureDraft, getDraft, getSaveConflict, reloadDraft, saveDraft, setDraftName } from '$lib/state';
+	import NavigationNode from './NavigationNode.svelte';
 
 	let { tabId }: { tabId: string } = $props();
 	$effect(() => {
@@ -24,67 +11,6 @@
 	const editable = $derived(canEdit());
 	let saveError = $state<string | null>(null);
 
-	const path = $derived(
-		draft?.definition.kind === 'path' ? (draft.definition as PathNavigation) : null
-	);
-	const setExpr = $derived(
-		draft?.definition.kind === 'set_op' ? (draft.definition as SetExpression) : null
-	);
-	// Types flowing into step i: previous step's target types, or the start
-	// scope's types for step 0 ([] = unconstrained).
-	function sourceTypesFor(i: number): string[] {
-		if (!path) return [];
-		if (i === 0) return path.start.kind === 'scope' ? path.start.types : [];
-		return path.steps[i - 1].target.types;
-	}
-
-	function patchPath(next: Partial<PathNavigation>): void {
-		if (!path) return;
-		updateDefinition(tabId, { ...path, ...next });
-	}
-	function setStep(i: number, next: NavStep): void {
-		if (!path) return;
-		patchPath({ steps: path.steps.map((s, idx) => (idx === i ? next : s)) });
-	}
-	function removeStep(i: number): void {
-		if (!path) return;
-		patchPath({ steps: path.steps.filter((_, idx) => idx !== i) });
-	}
-	function addStep(): void {
-		if (!path) return;
-		patchPath({
-			steps: [
-				...path.steps,
-				{
-					relationship_type: '',
-					direction: 'out',
-					target: { kind: 'scope', types: [], criteria: [] },
-					children: []
-				}
-			]
-		});
-	}
-	function toSetExpression(): void {
-		if (!draft) return;
-		// Seed operand[0] with the current path INLINE (spec: "current draft
-		// inline"), so switching modes loses nothing.
-		const operands = path ? [{ definition: path, step_index: null }] : [];
-		updateDefinition(tabId, {
-			kind: 'set_op',
-			schema_version: 1,
-			op: 'union',
-			operands
-		} as SetExpression);
-	}
-	function toPath(): void {
-		updateDefinition(tabId, {
-			kind: 'path',
-			schema_version: 1,
-			start: { kind: 'scope', types: [], criteria: [] },
-			steps: [],
-			exclude_visited: true
-		} as PathNavigation);
-	}
 	async function save(): Promise<void> {
 		saveError = null;
 		try {
@@ -92,6 +18,12 @@
 		} catch (e) {
 			saveError = e instanceof Error ? e.message : 'Save failed';
 		}
+	}
+
+	// Save-as (a distinct saved copy under a new name) is wired in Task 7; for
+	// now it just saves in place so the button is functional.
+	async function saveAs(): Promise<void> {
+		await save();
 	}
 </script>
 
@@ -106,32 +38,8 @@
 				disabled={!editable}
 				oninput={(e) => setDraftName(tabId, e.currentTarget.value)}
 			/>
-			<div class="flex rounded border border-zinc-700 text-xs">
-				<button type="button" class="px-2 py-0.5 {path ? 'bg-zinc-700' : ''}" onclick={toPath}
-					>Path</button
-				>
-				<button
-					type="button"
-					class="px-2 py-0.5 {setExpr ? 'bg-zinc-700' : ''}"
-					onclick={toSetExpression}>Set op</button
-				>
-			</div>
-			<div class="ml-auto flex items-center gap-3">
-				{#if path}
-					<label
-						class="flex items-center gap-1.5 text-xs text-zinc-400"
-						title="When on, a chain never revisits an element it already contains"
-					>
-						<input
-							type="checkbox"
-							checked={path.exclude_visited}
-							disabled={!editable}
-							onchange={(e) => patchPath({ exclude_visited: e.currentTarget.checked })}
-						/>
-						Exclude visited elements
-					</label>
-				{/if}
-				{#if editable}
+			{#if editable}
+				<div class="ml-auto flex items-center gap-2">
 					<button
 						type="button"
 						class="rounded bg-emerald-700 px-2 py-1 text-xs text-white hover:bg-emerald-600 disabled:opacity-40"
@@ -140,8 +48,15 @@
 					>
 						Save{draft.dirty ? ' *' : ''}
 					</button>
-				{/if}
-			</div>
+					<button
+						type="button"
+						class="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
+						onclick={() => void saveAs()}
+					>
+						Save as…
+					</button>
+				</div>
+			{/if}
 		</div>
 		{#if conflict !== undefined}
 			<div class="flex items-center gap-2 bg-amber-950/60 px-3 py-1.5 text-xs text-amber-300">
@@ -154,33 +69,8 @@
 		{#if saveError}
 			<p class="px-3 py-1 text-xs text-red-400">{saveError}</p>
 		{/if}
-		<div class="min-h-0 flex-1 space-y-2 overflow-auto p-3">
-			{#if path}
-				{#if path.start.kind === 'scope'}
-					<ScopeEditor
-						scope={path.start}
-						label="Start"
-						onChange={(next: NavScope) => patchPath({ start: next })}
-					/>
-				{:else}
-					<SetExpressionEditor expr={path.start} onChange={(next) => patchPath({ start: next })} />
-				{/if}
-				{#each path.steps as step, i (i)}
-					<StepRow
-						{step}
-						index={i}
-						sourceTypes={sourceTypesFor(i)}
-						onChange={setStep}
-						onRemove={removeStep}
-					/>
-				{/each}
-				<button type="button" class="text-xs text-sky-500 hover:text-sky-300" onclick={addStep}
-					>+ add step</button
-				>
-			{:else if setExpr}
-				<SetExpressionEditor expr={setExpr} onChange={(next) => updateDefinition(tabId, next)} />
-			{/if}
+		<div class="min-h-0 flex-1 overflow-auto p-3">
+			<NavigationNode {tabId} path={[]} />
 		</div>
-		<ChainPreview {tabId} />
 	</div>
 {/if}

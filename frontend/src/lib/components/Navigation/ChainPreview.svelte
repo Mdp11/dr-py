@@ -7,18 +7,25 @@
 		loadMorePreview,
 		select
 	} from '$lib/state';
+	import { nodeAt } from '$lib/navigation/tree';
+	import type { NodePath } from '$lib/navigation/tree';
 
-	let { tabId }: { tabId: string } = $props();
+	// `path` addresses the NODE this preview belongs to (default: the root of
+	// the definition) — a set-op's own operands render their own nested
+	// ChainPreview, each keyed by its own path (see navigation-editor.svelte.ts
+	// per-node preview state).
+	let { tabId, path = [] }: { tabId: string; path?: NodePath } = $props();
 	const draft = $derived(getDraft(tabId));
-	const preview = $derived(getPreview(tabId));
+	const preview = $derived(getPreview(tabId, path));
+	const node = $derived(draft ? nodeAt(draft.definition, path) : null);
 	// The preview re-runs automatically on every definition edit (see
 	// navigation-editor.svelte.ts) — there is no manual Run button. When
 	// there's no preview yet because the definition isn't complete enough to
 	// evaluate, show a hint instead of an empty panel; when the last run
 	// FAILED (preview cleared, definition runnable), show the error line —
 	// otherwise a failed evaluate would be indistinguishable from pending.
-	const runnable = $derived(draft ? isRunnable(draft.definition) : false);
-	const errored = $derived(getEvalError(tabId));
+	const runnable = $derived(node ? isRunnable(node) : false);
+	const errored = $derived(getEvalError(tabId, path));
 </script>
 
 <div class="flex min-h-0 flex-1 flex-col border-t border-zinc-800">
@@ -68,7 +75,7 @@
 				<button
 					type="button"
 					class="mt-1 text-xs text-sky-500 hover:text-sky-300"
-					onclick={() => void loadMorePreview(tabId)}>Load more</button
+					onclick={() => void loadMorePreview(tabId, path)}>Load more</button
 				>
 			{/if}
 			{#if preview.loading}<p class="py-2 text-xs text-zinc-500">Evaluating…</p>{/if}
