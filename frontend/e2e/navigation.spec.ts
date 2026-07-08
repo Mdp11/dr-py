@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { openDefaultProject } from './helpers/auth';
 
-test('build, run, save, and place a navigation', async ({ page }) => {
+test('build, auto-run, save, and place a navigation', async ({ page }) => {
 	test.setTimeout(90_000);
 	await openDefaultProject(page);
 
@@ -12,7 +12,8 @@ test('build, run, save, and place a navigation', async ({ page }) => {
 	await page.getByRole('button', { name: 'New navigation' }).click();
 	await expect(page.getByText('New navigation', { exact: true })).toBeVisible();
 	const tabpanel = page.getByRole('tabpanel');
-	await expect(tabpanel.getByRole('button', { name: 'Run' })).toBeVisible();
+	// No manual Run button — the preview re-runs automatically on every edit.
+	await expect(tabpanel.getByRole('button', { name: 'Run' })).toHaveCount(0);
 
 	// Pick a start type (smart-city metamodel has no "Building" type — use the
 	// concrete SoftwareSystem type, which has instances in the seeded model).
@@ -23,8 +24,16 @@ test('build, run, save, and place a navigation', async ({ page }) => {
 	await page.getByRole('checkbox', { name: 'SoftwareSystem' }).click();
 	await page.keyboard.press('Escape');
 
-	// Run the (0-step) navigation and expect chains.
-	await tabpanel.getByRole('button', { name: 'Run' }).click();
+	// The (0-step) navigation auto-runs after the debounced edit — no Run
+	// click needed — and shows chains.
+	await expect(tabpanel.getByText(/of \d+ chains/)).toBeVisible();
+
+	// Toggle "Exclude visited elements" off: the preview refreshes (smart-city
+	// has no 1-step revisit difference for this flow, so just assert it stays
+	// populated rather than asserting a different count).
+	const excludeVisited = tabpanel.getByRole('checkbox', { name: 'Exclude visited elements' });
+	await expect(excludeVisited).toBeChecked();
+	await excludeVisited.uncheck();
 	await expect(tabpanel.getByText(/of \d+ chains/)).toBeVisible();
 
 	// Save under a name. The draft-name input has no placeholder/label/role
@@ -41,5 +50,7 @@ test('build, run, save, and place a navigation', async ({ page }) => {
 	// accessible name follows the tab's live title ("Close <title>").
 	await page.getByRole('button', { name: 'Close Buildings nav' }).click();
 	await page.locator('[data-artifact-id]', { hasText: 'Buildings nav' }).dblclick();
-	await expect(page.getByRole('tabpanel').getByRole('button', { name: 'Run' })).toBeVisible();
+	// Reopening a saved navigation auto-runs once immediately, showing chains
+	// without any interaction.
+	await expect(page.getByRole('tabpanel').getByText(/of \d+ chains/)).toBeVisible();
 });

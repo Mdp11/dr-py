@@ -389,6 +389,10 @@ export interface PathNavigation {
 	schema_version: number;
 	start: NavScope | SetExpression;
 	steps: NavStep[];
+	// Cycle guard: when true (default), a chain never revisits an element
+	// already in its own prefix; when false, revisits are allowed. Part of
+	// the saved definition — mirrors core/navigation/schema.py.
+	exclude_visited: boolean;
 }
 
 export interface NavOperand {
@@ -416,7 +420,10 @@ export const NavigationDefinitionSchema: z.ZodType<NavigationDefinition> = z.laz
 			kind: z.literal('path'),
 			schema_version: z.number().int().default(1),
 			start: z.unknown(),
-			steps: z.array(z.unknown()).default([])
+			steps: z.array(z.unknown()).default([]),
+			// Old saved payloads predate this field; default matches the
+			// backend's prior (and still-default) behavior.
+			exclude_visited: z.boolean().default(true)
 		}),
 		z.object({
 			kind: z.literal('set_op'),

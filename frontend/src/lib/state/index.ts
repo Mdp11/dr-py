@@ -216,6 +216,7 @@ export {
 	getDraft,
 	getPreview,
 	getSaveConflict,
+	isRunnable,
 	loadMorePreview,
 	reloadDraft,
 	resetNavigationEditors,

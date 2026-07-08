@@ -7,6 +7,7 @@ import {
 	getDraft,
 	getPreview,
 	getSaveConflict,
+	isRunnable,
 	loadMorePreview,
 	resetNavigationEditors,
 	runPreview,
@@ -57,7 +58,15 @@ beforeEach(() => {
 	resetWorkspaceTabs();
 	resetArtifacts();
 });
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+	// Belt-and-suspenders: a debounce timer left pending by a test (real or
+	// fake) must never fire into the NEXT test's store state. Real time in a
+	// unit test always advances far slower than 400ms between tests, but this
+	// makes the guarantee explicit rather than incidental.
+	resetNavigationEditors();
+	vi.useRealTimers();
+	vi.restoreAllMocks();
+});
 
 describe('navigation editor store', () => {
 	it('creates an empty path draft for draft tabs', async () => {
@@ -66,7 +75,8 @@ describe('navigation editor store', () => {
 			kind: 'path',
 			schema_version: 1,
 			start: { kind: 'scope', types: [], criteria: [] },
-			steps: []
+			steps: [],
+			exclude_visited: true
 		});
 		expect(draft.artifactId).toBeNull();
 		expect(draft.dirty).toBe(false);
@@ -87,9 +97,15 @@ describe('navigation editor store', () => {
 				steps: []
 			}
 		});
+		// This payload is runnable (a start type is set), so ensureDraft's
+		// load-a-saved-artifact auto-run fires; without a mock this would hit
+		// the real fetch layer.
+		vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
 		const draft = await ensureDraft('nav:a1');
 		expect(draft.name).toBe('Sensors');
 		expect(draft.artifactRev).toBe(4);
+		// Legacy payload predates exclude_visited: defaulted on load.
+		expect(draft.definition).toMatchObject({ exclude_visited: true });
 	});
 
 	it('updateDefinition marks dirty and clears the preview', async () => {
@@ -101,7 +117,8 @@ describe('navigation editor store', () => {
 			kind: 'path',
 			schema_version: 1,
 			start: { kind: 'scope', types: ['B'], criteria: [] },
-			steps: []
+			steps: [],
+			exclude_visited: true
 		});
 		expect(getDraft('nav:draft:1')?.dirty).toBe(true);
 		expect(getPreview('nav:draft:1')).toBeUndefined();
@@ -194,7 +211,8 @@ describe('navigation preview staleness + pagination', () => {
 			kind: 'path',
 			schema_version: 1,
 			start: { kind: 'scope', types: ['B'], criteria: [] },
-			steps: []
+			steps: [],
+			exclude_visited: true
 		});
 		expect(getPreview('nav:draft:1')).toBeUndefined();
 		d.resolve(CHAIN_PAGE);
@@ -227,7 +245,8 @@ describe('navigation preview staleness + pagination', () => {
 			kind: 'path',
 			schema_version: 1,
 			start: { kind: 'scope', types: ['B'], criteria: [] },
-			steps: []
+			steps: [],
+			exclude_visited: true
 		});
 		d.resolve(PAGE_2);
 		await inflight;
@@ -264,5 +283,282 @@ describe('navigation preview staleness + pagination', () => {
 		const preview = getPreview('nav:draft:1')!;
 		expect(preview.loading).toBe(false);
 		expect(preview.chains).toHaveLength(1);
+	});
+});
+
+describe('isRunnable', () => {
+	it('a pristine empty path draft is not runnable', () => {
+		expect(
+			isRunnable({
+				kind: 'path',
+				schema_version: 1,
+				start: { kind: 'scope', types: [], criteria: [] },
+				steps: [],
+				exclude_visited: true
+			})
+		).toBe(false);
+	});
+
+	it('a path with a start type but no steps is runnable', () => {
+		expect(
+			isRunnable({
+				kind: 'path',
+				schema_version: 1,
+				start: { kind: 'scope', types: ['B'], criteria: [] },
+				steps: [],
+				exclude_visited: true
+			})
+		).toBe(true);
+	});
+
+	it('a path with an incomplete step (empty relationship_type) is not runnable', () => {
+		expect(
+			isRunnable({
+				kind: 'path',
+				schema_version: 1,
+				start: { kind: 'scope', types: [], criteria: [] },
+				steps: [
+					{
+						relationship_type: '',
+						direction: 'out',
+						target: { kind: 'scope', types: [], criteria: [] },
+						children: []
+					}
+				],
+				exclude_visited: true
+			})
+		).toBe(false);
+	});
+
+	it('a set expression with no operands is not runnable', () => {
+		expect(isRunnable({ kind: 'set_op', schema_version: 1, op: 'union', operands: [] })).toBe(
+			false
+		);
+	});
+
+	it('a set expression with at least one operand is runnable', () => {
+		expect(
+			isRunnable({
+				kind: 'set_op',
+				schema_version: 1,
+				op: 'union',
+				operands: [{ ref: 'a1' }]
+			})
+		).toBe(true);
+	});
+});
+
+describe('debounced auto-run', () => {
+	it('schedules a run 400ms after an edit', async () => {
+		vi.useFakeTimers();
+		await ensureDraft('nav:draft:1');
+		const evaluate = vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		updateDefinition('nav:draft:1', {
+			kind: 'path',
+			schema_version: 1,
+			start: { kind: 'scope', types: ['B'], criteria: [] },
+			steps: [],
+			exclude_visited: true
+		});
+		expect(evaluate).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(399);
+		expect(evaluate).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(1);
+		expect(evaluate).toHaveBeenCalledTimes(1);
+		expect(getPreview('nav:draft:1')?.total).toBe(1);
+	});
+
+	it('collapses two edits within the debounce window into one run with the latest definition', async () => {
+		vi.useFakeTimers();
+		await ensureDraft('nav:draft:1');
+		const evaluate = vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		updateDefinition('nav:draft:1', {
+			kind: 'path',
+			schema_version: 1,
+			start: { kind: 'scope', types: ['B'], criteria: [] },
+			steps: [],
+			exclude_visited: true
+		});
+		await vi.advanceTimersByTimeAsync(200); // still within the window
+		updateDefinition('nav:draft:1', {
+			kind: 'path',
+			schema_version: 1,
+			start: { kind: 'scope', types: ['C'], criteria: [] },
+			steps: [],
+			exclude_visited: true
+		});
+		await vi.advanceTimersByTimeAsync(200); // 400ms since edit 1, but the timer was reset
+		expect(evaluate).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(200); // 400ms since edit 2
+		expect(evaluate).toHaveBeenCalledTimes(1);
+		expect(evaluate).toHaveBeenCalledWith(
+			expect.objectContaining({
+				definition: expect.objectContaining({
+					start: { kind: 'scope', types: ['C'], criteria: [] }
+				})
+			})
+		);
+	});
+
+	it('does not run when a step has an empty relationship_type', async () => {
+		vi.useFakeTimers();
+		await ensureDraft('nav:draft:1');
+		const evaluate = vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		updateDefinition('nav:draft:1', {
+			kind: 'path',
+			schema_version: 1,
+			start: { kind: 'scope', types: ['B'], criteria: [] },
+			steps: [
+				{
+					relationship_type: '',
+					direction: 'out',
+					target: { kind: 'scope', types: [], criteria: [] },
+					children: []
+				}
+			],
+			exclude_visited: true
+		});
+		await vi.advanceTimersByTimeAsync(400);
+		expect(evaluate).not.toHaveBeenCalled();
+		expect(getPreview('nav:draft:1')).toBeUndefined();
+	});
+
+	it('does not run for a pristine empty draft', async () => {
+		vi.useFakeTimers();
+		await ensureDraft('nav:draft:1');
+		const evaluate = vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		// An edit that leaves the definition pristine (e.g. a no-op re-set).
+		updateDefinition('nav:draft:1', {
+			kind: 'path',
+			schema_version: 1,
+			start: { kind: 'scope', types: [], criteria: [] },
+			steps: [],
+			exclude_visited: false // toggling only the flag doesn't make it non-pristine
+		});
+		await vi.advanceTimersByTimeAsync(400);
+		expect(evaluate).not.toHaveBeenCalled();
+		expect(getPreview('nav:draft:1')).toBeUndefined();
+	});
+
+	it('closeDraft cancels a pending debounce timer', async () => {
+		vi.useFakeTimers();
+		await ensureDraft('nav:draft:1');
+		const evaluate = vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		updateDefinition('nav:draft:1', {
+			kind: 'path',
+			schema_version: 1,
+			start: { kind: 'scope', types: ['B'], criteria: [] },
+			steps: [],
+			exclude_visited: true
+		});
+		closeDraft('nav:draft:1');
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(evaluate).not.toHaveBeenCalled();
+	});
+
+	it('resetNavigationEditors cancels a pending debounce timer', async () => {
+		vi.useFakeTimers();
+		await ensureDraft('nav:draft:1');
+		const evaluate = vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		updateDefinition('nav:draft:1', {
+			kind: 'path',
+			schema_version: 1,
+			start: { kind: 'scope', types: ['B'], criteria: [] },
+			steps: [],
+			exclude_visited: true
+		});
+		resetNavigationEditors();
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(evaluate).not.toHaveBeenCalled();
+	});
+
+	it('a debounce fired after a later edit uses the CURRENT definition, not the one at schedule time', async () => {
+		vi.useFakeTimers();
+		await ensureDraft('nav:draft:1');
+		const evaluate = vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		updateDefinition('nav:draft:1', {
+			kind: 'path',
+			schema_version: 1,
+			start: { kind: 'scope', types: ['B'], criteria: [] },
+			steps: [],
+			exclude_visited: true
+		});
+		// Advance almost to firing, then edit again right before it fires. The
+		// second edit resets the timer AND is the definition that must be sent.
+		await vi.advanceTimersByTimeAsync(399);
+		updateDefinition('nav:draft:1', {
+			kind: 'path',
+			schema_version: 1,
+			start: { kind: 'scope', types: ['D'], criteria: [] },
+			steps: [],
+			exclude_visited: true
+		});
+		await vi.advanceTimersByTimeAsync(400);
+		expect(evaluate).toHaveBeenCalledTimes(1);
+		expect(evaluate).toHaveBeenCalledWith(
+			expect.objectContaining({
+				definition: expect.objectContaining({
+					start: { kind: 'scope', types: ['D'], criteria: [] }
+				})
+			})
+		);
+	});
+
+	it('ensureDraft on a saved artifact triggers an immediate run (no debounce)', async () => {
+		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue({
+			id: 'a1',
+			kind: 'navigation',
+			name: 'Sensors',
+			artifact_rev: 4,
+			updated_at: '',
+			updated_by: null,
+			payload: {
+				kind: 'path',
+				schema_version: 1,
+				start: { kind: 'scope', types: ['B'], criteria: [] },
+				steps: [],
+				exclude_visited: true
+			}
+		});
+		const evaluate = vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		await ensureDraft('nav:a1');
+		expect(evaluate).toHaveBeenCalledTimes(1);
+		expect(getPreview('nav:a1')?.total).toBe(1);
+	});
+
+	it('ensureDraft on a saved artifact with a pristine definition does not auto-run', async () => {
+		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue({
+			id: 'a1',
+			kind: 'navigation',
+			name: 'Sensors',
+			artifact_rev: 4,
+			updated_at: '',
+			updated_by: null,
+			payload: {
+				kind: 'path',
+				schema_version: 1,
+				start: { kind: 'scope', types: [], criteria: [] },
+				steps: [],
+				exclude_visited: true
+			}
+		});
+		const evaluate = vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		await ensureDraft('nav:a1');
+		expect(evaluate).not.toHaveBeenCalled();
+	});
+});
+
+describe('exclude_visited', () => {
+	it('the empty path draft defaults exclude_visited to true', async () => {
+		const draft = await ensureDraft('nav:draft:1');
+		expect((draft.definition as { exclude_visited: boolean }).exclude_visited).toBe(true);
+	});
+
+	it('is togglable via updateDefinition, marking the draft dirty', async () => {
+		const draft = await ensureDraft('nav:draft:1');
+		updateDefinition('nav:draft:1', { ...draft.definition, exclude_visited: false } as never);
+		const updated = getDraft('nav:draft:1')!;
+		expect((updated.definition as { exclude_visited: boolean }).exclude_visited).toBe(false);
+		expect(updated.dirty).toBe(true);
 	});
 });

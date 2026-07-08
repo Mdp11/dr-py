@@ -81,7 +81,8 @@
 			kind: 'path',
 			schema_version: 1,
 			start: { kind: 'scope', types: [], criteria: [] },
-			steps: []
+			steps: [],
+			exclude_visited: true
 		} as PathNavigation);
 	}
 	async function save(): Promise<void> {
@@ -115,16 +116,32 @@
 					onclick={toSetExpression}>Set op</button
 				>
 			</div>
-			{#if editable}
-				<button
-					type="button"
-					class="ml-auto rounded bg-emerald-700 px-2 py-1 text-xs text-white hover:bg-emerald-600 disabled:opacity-40"
-					disabled={!draft.dirty && draft.artifactId !== null}
-					onclick={() => void save()}
-				>
-					Save{draft.dirty ? ' *' : ''}
-				</button>
-			{/if}
+			<div class="ml-auto flex items-center gap-3">
+				{#if path}
+					<label
+						class="flex items-center gap-1.5 text-xs text-zinc-400"
+						title="When on, a chain never revisits an element it already contains"
+					>
+						<input
+							type="checkbox"
+							checked={path.exclude_visited}
+							disabled={!editable}
+							onchange={(e) => patchPath({ exclude_visited: e.currentTarget.checked })}
+						/>
+						Exclude visited elements
+					</label>
+				{/if}
+				{#if editable}
+					<button
+						type="button"
+						class="rounded bg-emerald-700 px-2 py-1 text-xs text-white hover:bg-emerald-600 disabled:opacity-40"
+						disabled={!draft.dirty && draft.artifactId !== null}
+						onclick={() => void save()}
+					>
+						Save{draft.dirty ? ' *' : ''}
+					</button>
+				{/if}
+			</div>
 		</div>
 		{#if conflict !== undefined}
 			<div class="flex items-center gap-2 bg-amber-950/60 px-3 py-1.5 text-xs text-amber-300">

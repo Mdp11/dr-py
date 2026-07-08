@@ -1,34 +1,26 @@
 <script lang="ts">
-	import { getPreview, loadMorePreview, runPreview, select } from '$lib/state';
+	import { getDraft, getPreview, isRunnable, loadMorePreview, select } from '$lib/state';
 
 	let { tabId }: { tabId: string } = $props();
+	const draft = $derived(getDraft(tabId));
 	const preview = $derived(getPreview(tabId));
-	let error = $state<string | null>(null);
-
-	async function run(): Promise<void> {
-		error = null;
-		try {
-			await runPreview(tabId);
-		} catch (e) {
-			error = e instanceof Error ? e.message : 'Evaluation failed';
-		}
-	}
+	// The preview re-runs automatically on every definition edit (see
+	// navigation-editor.svelte.ts) — there is no manual Run button. When
+	// there's no preview yet because the definition isn't complete enough to
+	// evaluate, show a hint instead of an empty panel.
+	const runnable = $derived(draft ? isRunnable(draft.definition) : false);
 </script>
 
 <div class="flex min-h-0 flex-1 flex-col border-t border-zinc-800">
 	<div class="flex items-center gap-2 px-2 py-1.5">
-		<button
-			type="button"
-			class="rounded bg-sky-700 px-2 py-0.5 text-xs text-white hover:bg-sky-600"
-			onclick={() => void run()}>Run</button
-		>
 		{#if preview && !preview.loading}
 			<span class="text-xs text-zinc-500">
 				{preview.chains.length} of {preview.total} chains
 				{#if preview.truncated}(results capped){/if}
 			</span>
+		{:else if !preview && !runnable}
+			<p class="text-xs text-zinc-500">Complete the steps to see results</p>
 		{/if}
-		{#if error}<span class="text-xs text-red-400">{error}</span>{/if}
 	</div>
 	{#if preview}
 		<div class="min-h-0 flex-1 overflow-auto px-2 pb-2">
