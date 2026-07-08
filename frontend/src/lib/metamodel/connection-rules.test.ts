@@ -5,7 +5,9 @@ import {
 	allowedTargetTypes,
 	buildPickerTypeOptions,
 	outCountsByType,
+	relationshipTypesFromScope,
 	relationshipTypesFromSource,
+	scopeAllowedTargetTypes,
 	targetMultiplicityExceeded
 } from './connection-rules';
 
@@ -86,6 +88,57 @@ describe('relationshipTypesFromSource', () => {
 		const fromComponent = relationshipTypesFromSource(mm, 'Component');
 		expect(fromComponent.map((e) => e.rt.name)).toEqual(['Multi', 'OwnsOne']);
 		// Abstract excluded even though its mapping matches Component.
+		expect(fromComponent.find((e) => e.rt.name === 'Abstract')).toBeUndefined();
+	});
+});
+
+describe('scopeAllowedTargetTypes', () => {
+	it('matches mappings whose source is an ancestor OR a descendant of the scope type', () => {
+		const multi = mm.relationships.find((r) => r.name === 'Multi')!;
+		// Component is an ancestor of Microservice's mapping source (Component->Requirement
+		// matches directly) AND an ancestor of Microservice itself, so the descendant
+		// mapping (Microservice->Database) also matches under scope semantics.
+		expect(scopeAllowedTargetTypes(mm, 'Component', multi).sort()).toEqual(
+			['Database', 'Requirement'].sort()
+		);
+		// Requirement is on an unrelated inheritance line from both mapping sources.
+		expect(scopeAllowedTargetTypes(mm, 'Requirement', multi)).toEqual([]);
+	});
+
+	it('falls back to source/target shorthand when mappings is empty', () => {
+		const sh = mm.relationships.find((r) => r.name === 'Shorthand')!;
+		expect(scopeAllowedTargetTypes(mm, 'Requirement', sh)).toEqual(['Requirement']);
+	});
+});
+
+describe('relationshipTypesFromScope', () => {
+	it('includes Multi for scope Component via the descendant-sourced mapping', () => {
+		// This is the reported bug: the backend evaluator matches a scope type
+		// against instances of the scope type AND ALL ITS DESCENDANTS (see
+		// evaluate.py's element_descendants usage), so a mapping sourced from a
+		// descendant of the scope type (Microservice->Database) is a valid hop
+		// from scope Component even though no plain Component instance could
+		// have created that edge under CREATION semantics.
+		const fromComponent = relationshipTypesFromScope(mm, 'Component');
+		expect(fromComponent.map((e) => e.rt.name)).toEqual(['Multi', 'OwnsOne']);
+
+		// Pin that the creation-semantics helper deliberately still excludes it:
+		// relationshipTypesFromSource only walks ancestors of the concrete type,
+		// so it never sees the Microservice->Database mapping from Component.
+		const creationFromComponent = relationshipTypesFromSource(mm, 'Component');
+		expect(creationFromComponent.map((e) => e.rt.name)).toEqual(['Multi', 'OwnsOne']);
+		const multiEntry = creationFromComponent.find((e) => e.rt.name === 'Multi')!;
+		expect(multiEntry.targetTypes).toEqual(['Requirement']);
+		expect(multiEntry.targetTypes).not.toContain('Database');
+	});
+
+	it('shorthand fallback still works from scope Requirement', () => {
+		const fromRequirement = relationshipTypesFromScope(mm, 'Requirement');
+		expect(fromRequirement.map((e) => e.rt.name)).toEqual(['Shorthand']);
+	});
+
+	it('excludes abstract relationship types', () => {
+		const fromComponent = relationshipTypesFromScope(mm, 'Component');
 		expect(fromComponent.find((e) => e.rt.name === 'Abstract')).toBeUndefined();
 	});
 });

@@ -1,7 +1,10 @@
 <script lang="ts">
 	import { Trash2 } from '@lucide/svelte';
 	import { getMetamodel } from '$lib/state';
-	import { allowedTargetTypes, relationshipTypesFromSource } from '$lib/metamodel/connection-rules';
+	import {
+		relationshipTypesFromScope,
+		scopeAllowedTargetTypes
+	} from '$lib/metamodel/connection-rules';
 	import type { NavDirection, NavScope, NavStep } from '$lib/api/types';
 	import ScopeEditor from './ScopeEditor.svelte';
 	import StereotypePicker from '../Sidebar/StereotypePicker.svelte';
@@ -36,7 +39,7 @@
 		// eslint-disable-next-line svelte/prefer-svelte-reactivity
 		const names = new Set<string>();
 		for (const t of sourceTypes) {
-			for (const entry of relationshipTypesFromSource(mm, t)) names.add(entry.rt.name);
+			for (const entry of relationshipTypesFromScope(mm, t)) names.add(entry.rt.name);
 		}
 		return [...names].sort();
 	});
@@ -51,7 +54,7 @@
 		// wrapper tracks the resulting array).
 		// eslint-disable-next-line svelte/prefer-svelte-reactivity
 		const out = new Set<string>();
-		for (const t of sourceTypes) for (const n of allowedTargetTypes(mm, t, rt)) out.add(n);
+		for (const t of sourceTypes) for (const n of scopeAllowedTargetTypes(mm, t, rt)) out.add(n);
 		return out.size > 0 ? [...out].sort() : null;
 	});
 

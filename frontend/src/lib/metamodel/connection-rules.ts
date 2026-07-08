@@ -50,6 +50,60 @@ export function relationshipTypesFromSource(
 }
 
 /**
+ * Distinct target types reachable from a navigation SCOPE of `scopeType`
+ * through `rt`'s mappings: every `mapping.target` whose `mapping.source` is
+ * on the same inheritance line as `scopeType`, in EITHER direction —
+ * `isSubtype(mm, scopeType, m.source) || isSubtype(mm, m.source, scopeType)`.
+ * Falls back to the single-pair `rt.source`/`rt.target` shorthand when
+ * `rt.mappings` is empty, same as `allowedTargetTypes`.
+ *
+ * This differs from `allowedTargetTypes`'s CREATION-semantics predicate
+ * (`isSubtype(mm, sourceType, m.source)` only — mapping.source must be an
+ * ancestor-or-equal of the concrete element's type) because the backend
+ * navigation evaluator matches a scope type against instances of that type
+ * AND ALL ITS DESCENDANTS (see `element_descendants` in
+ * `src/data_rover/core/navigation/evaluate.py`), not just instances whose
+ * type is exactly `scopeType` or one of its ancestors. So a mapping whose
+ * source is a DESCENDANT of the scope type is also a relationship the
+ * evaluator will traverse when walking that scope, even though no plain
+ * `scopeType` instance could itself have created an edge via that mapping.
+ */
+export function scopeAllowedTargetTypes(
+	mm: Metamodel,
+	scopeType: string,
+	rt: RelationshipType
+): string[] {
+	const mappings =
+		rt.mappings.length > 0 ? rt.mappings : [{ source: rt.source, target: rt.target }];
+	const targets: string[] = [];
+	for (const m of mappings) {
+		if (
+			(isSubtype(mm, scopeType, m.source) || isSubtype(mm, m.source, scopeType)) &&
+			!targets.includes(m.target)
+		) {
+			targets.push(m.target);
+		}
+	}
+	return targets;
+}
+
+/**
+ * Non-abstract relationship types traversable as a navigation hop from a
+ * scope of `scopeType`, each paired with its allowed target types. Mirrors
+ * `relationshipTypesFromSource` but built on `scopeAllowedTargetTypes` — see
+ * that function's docstring for why scope semantics differ from creation
+ * semantics. Excludes types with no matching mapping. Sorted by
+ * relationship-type name.
+ */
+export function relationshipTypesFromScope(mm: Metamodel, scopeType: string): RelTypeFromSource[] {
+	return mm.relationships
+		.filter((rt) => !rt.abstract)
+		.map((rt) => ({ rt, targetTypes: scopeAllowedTargetTypes(mm, scopeType, rt) }))
+		.filter((entry) => entry.targetTypes.length > 0)
+		.sort((a, b) => a.rt.name.localeCompare(b.rt.name));
+}
+
+/**
  * True when `rt`'s `target_multiplicity` has a finite upper bound and the
  * source already has >= upper outgoing edges of this type. Matches the
  * MultiplicityValidator target-end check (target_multiplicity bounds
