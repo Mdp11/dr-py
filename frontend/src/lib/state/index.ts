@@ -223,6 +223,7 @@ export {
 	reloadDraft,
 	resetNavigationEditors,
 	runPreview,
+	saveAsDraft,
 	saveDraft,
 	setDraftName,
 	toggleExpanded,

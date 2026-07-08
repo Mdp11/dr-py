@@ -439,6 +439,44 @@ export async function saveDraft(tabId: string): Promise<void> {
 	}
 }
 
+/**
+ * Fork the current draft into a NEW library artifact under `name`, rebind
+ * `tabId` to the copy, and leave any original artifact completely untouched
+ * (no update/delete call against it — this is always a create, never a
+ * rename-in-place). Mirrors `saveDraft`'s create branch: the tab is re-keyed
+ * from its old id to `nav:<created.id>` via `bindTabToArtifact` +
+ * `rekeyTab`, carrying the tab's per-node preview/expanded state across so
+ * nothing leaks or is orphaned.
+ *
+ * A name-clash 409 here is always the create-path shape (a plain string
+ * `detail`, never `{message, current_rev}` — there is no update branch to
+ * produce the rev-conflict shape), so it is left to propagate as a plain
+ * error for the caller to catch, exactly like `saveDraft`'s create branch.
+ * Entering conflict state would be wrong here regardless: it would point the
+ * "Reload their version" recovery at the still-open ORIGINAL draft, wiping
+ * unrelated unsaved edits.
+ */
+export async function saveAsDraft(tabId: string, name: string): Promise<void> {
+	const draft = _drafts.get(tabId);
+	if (!draft) return;
+	const payload = draft.definition as unknown as Record<string, unknown>;
+	const created = await api.createArtifact({ kind: 'navigation', name, payload });
+	bindTabToArtifact(tabId, created.id);
+	const newTab = `nav:${created.id}`;
+	_drafts.delete(tabId);
+	_drafts.set(newTab, {
+		...draft,
+		name,
+		artifactId: created.id,
+		artifactRev: created.artifact_rev,
+		dirty: false
+	});
+	// Carry the tab's per-node previews/expanded set to the new tab key, same
+	// as saveDraft's first-save path.
+	rekeyTab(tabId, newTab);
+	await loadArtifacts().catch(() => {});
+}
+
 /** Discard the local draft and re-fetch the server copy (409 recovery). */
 export async function reloadDraft(tabId: string): Promise<void> {
 	clearTabKeys(tabId); // the definition is about to change: orphan in-flight runs

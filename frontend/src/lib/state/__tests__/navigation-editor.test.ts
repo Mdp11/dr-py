@@ -13,6 +13,7 @@ import {
 	loadMorePreview,
 	resetNavigationEditors,
 	runPreview,
+	saveAsDraft,
 	saveDraft,
 	toggleExpanded,
 	updateDefinition
@@ -225,6 +226,131 @@ describe('navigation editor store', () => {
 		// The draft itself must be untouched (name-clash isn't a rev conflict).
 		expect(getDraft(tabId)?.name).toBe('Taken');
 		expect(getDraft(tabId)?.artifactId).toBeNull();
+	});
+});
+
+describe('saveAsDraft', () => {
+	it('creates a new artifact and rebinds the tab, leaving original untouched', async () => {
+		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue({
+			id: 'a1',
+			kind: 'navigation',
+			name: 'Sensors',
+			artifact_rev: 4,
+			updated_at: '',
+			updated_by: null,
+			payload: {
+				kind: 'path',
+				schema_version: 1,
+				start: { kind: 'scope', types: ['Building'], criteria: [] },
+				steps: []
+			}
+		});
+		vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		openNavigationTab({ artifactId: 'a1', title: 'Sensors' });
+		const draft = await ensureDraft('nav:a1');
+		const create = vi.spyOn(artifactsApi, 'createArtifact').mockResolvedValue({
+			id: 'a9',
+			kind: 'navigation',
+			name: 'Copy',
+			artifact_rev: 1,
+			updated_at: '',
+			updated_by: null,
+			payload: draft.definition as unknown as Record<string, unknown>
+		});
+		const update = vi.spyOn(artifactsApi, 'updateArtifact');
+		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({ items: [] });
+
+		await saveAsDraft('nav:a1', 'Copy');
+
+		expect(create).toHaveBeenCalledWith({
+			kind: 'navigation',
+			name: 'Copy',
+			payload: draft.definition
+		});
+		// The original artifact is never mutated by save-as.
+		expect(update).not.toHaveBeenCalled();
+		// The old tab is gone; a new tab bound to the created artifact exists.
+		expect(getDraft('nav:a1')).toBeUndefined();
+		expect(getDynamicTabs()[0].artifactId).toBe('a9');
+		const newDraft = getDraft('nav:a9')!;
+		expect(newDraft.name).toBe('Copy');
+		expect(newDraft.artifactId).toBe('a9');
+		expect(newDraft.artifactRev).toBe(1);
+		expect(newDraft.dirty).toBe(false);
+	});
+
+	it('carries the previous tab’s expanded/preview node-keys to the new tab key', async () => {
+		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue({
+			id: 'a1',
+			kind: 'navigation',
+			name: 'Sensors',
+			artifact_rev: 4,
+			updated_at: '',
+			updated_by: null,
+			payload: {
+				kind: 'path',
+				schema_version: 1,
+				start: { kind: 'scope', types: ['Building'], criteria: [] },
+				steps: []
+			}
+		});
+		vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		openNavigationTab({ artifactId: 'a1', title: 'Sensors' });
+		await ensureDraft('nav:a1'); // root expanded by default + auto-runs
+		expect(getPreview('nav:a1', [])?.total).toBe(1);
+		expect(isExpanded('nav:a1', [])).toBe(true);
+
+		vi.spyOn(artifactsApi, 'createArtifact').mockResolvedValue({
+			id: 'a9',
+			kind: 'navigation',
+			name: 'Copy',
+			artifact_rev: 1,
+			updated_at: '',
+			updated_by: null,
+			payload: {}
+		});
+		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({ items: [] });
+
+		await saveAsDraft('nav:a1', 'Copy');
+
+		// The old tab's per-node preview/expanded state must not leak.
+		expect(getPreview('nav:a1', [])).toBeUndefined();
+		expect(isExpanded('nav:a1', [])).toBe(false);
+		// The new tab key inherits the root's preview + expanded state.
+		expect(getPreview('nav:a9', [])?.total).toBe(1);
+		expect(isExpanded('nav:a9', [])).toBe(true);
+	});
+
+	it('a name-clash 409 on save-as surfaces as an error, not a rev conflict', async () => {
+		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue({
+			id: 'a1',
+			kind: 'navigation',
+			name: 'Sensors',
+			artifact_rev: 4,
+			updated_at: '',
+			updated_by: null,
+			payload: {
+				kind: 'path',
+				schema_version: 1,
+				start: { kind: 'scope', types: [], criteria: [] },
+				steps: []
+			}
+		});
+		await ensureDraft('nav:a1');
+		vi.spyOn(artifactsApi, 'createArtifact').mockRejectedValue(
+			new ConflictError(
+				409,
+				{ detail: "a navigation named 'Taken' already exists" },
+				"a navigation named 'Taken' already exists"
+			)
+		);
+		await expect(saveAsDraft('nav:a1', 'Taken')).rejects.toBeInstanceOf(ConflictError);
+		// No rev-conflict must be recorded for either the old or a new tab key.
+		expect(getSaveConflict('nav:a1')).toBeUndefined();
+		expect(getSaveConflict('nav:a9')).toBeUndefined();
+		// The original tab/draft is left exactly as it was (untouched).
+		expect(getDraft('nav:a1')).toBeDefined();
+		expect(getDraft('nav:a1')?.artifactId).toBe('a1');
 	});
 });
 

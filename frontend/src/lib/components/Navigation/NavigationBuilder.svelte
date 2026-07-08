@@ -1,5 +1,14 @@
 <script lang="ts">
-	import { canEdit, ensureDraft, getDraft, getSaveConflict, reloadDraft, saveDraft, setDraftName } from '$lib/state';
+	import {
+		canEdit,
+		ensureDraft,
+		getDraft,
+		getSaveConflict,
+		reloadDraft,
+		saveAsDraft,
+		saveDraft,
+		setDraftName
+	} from '$lib/state';
 	import NavigationNode from './NavigationNode.svelte';
 
 	let { tabId }: { tabId: string } = $props();
@@ -20,10 +29,16 @@
 		}
 	}
 
-	// Save-as (a distinct saved copy under a new name) is wired in Task 7; for
-	// now it just saves in place so the button is functional.
 	async function saveAs(): Promise<void> {
-		await save();
+		if (!draft) return;
+		const name = window.prompt('Save as', draft.name);
+		if (!name) return; // cancelled, or an empty name
+		saveError = null;
+		try {
+			await saveAsDraft(tabId, name);
+		} catch (e) {
+			saveError = e instanceof Error ? e.message : 'Save failed';
+		}
 	}
 </script>
 
