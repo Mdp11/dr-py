@@ -206,6 +206,23 @@ export {
 	renameArtifact,
 	resetArtifacts
 } from './artifacts.svelte';
+export {
+	closeDraft,
+	emptyPath,
+	ensureDraft,
+	getDraft,
+	getPreview,
+	getSaveConflict,
+	loadMorePreview,
+	reloadDraft,
+	resetNavigationEditors,
+	runPreview,
+	saveDraft,
+	setDraftName,
+	updateDefinition,
+	type NavDraft,
+	type NavPreview
+} from './navigation-editor.svelte';
 export { getCurrentUser, isAdmin, fetchMe, signIn, signOut } from './auth.svelte';
 export { getActiveProjectId, setActiveProject, clearActiveProject } from './active-project.svelte';
 export { installSessionRecovery, recoverFromUnauthorized } from './session-recovery';

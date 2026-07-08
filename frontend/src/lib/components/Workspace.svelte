@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { X } from '@lucide/svelte';
 	import * as Tabs from '$lib/components/ui/tabs';
-	import { closeTab, getActiveTab, getDynamicTabs, setActiveTab } from '$lib/state';
+	import { closeDraft, closeTab, getActiveTab, getDynamicTabs, setActiveTab } from '$lib/state';
 	import DetailView from './Workspace/DetailView.svelte';
 	import GraphView from './Workspace/GraphView.svelte';
 	import IssuesPanel from './Workspace/IssuesPanel.svelte';
@@ -32,6 +32,7 @@
 						class="rounded p-0.5 opacity-50 hover:bg-zinc-700 hover:opacity-100"
 						onclick={(e) => {
 							e.stopPropagation();
+							closeDraft(tab.id);
 							closeTab(tab.id);
 						}}
 					>
