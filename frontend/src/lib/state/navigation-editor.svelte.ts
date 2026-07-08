@@ -39,7 +39,7 @@ import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import * as api from '$lib/api/artifacts';
 import { ConflictError } from '$lib/api/errors';
 import type { NavigationDefinition, TreeItem } from '$lib/api/types';
-import { isRunnable, nodeAt, pathKey, type NodePath } from '$lib/navigation/tree';
+import { emptyPath, isRunnable, nodeAt, pathKey, type NodePath } from '$lib/navigation/tree';
 import { loadArtifacts } from './artifacts.svelte';
 import { bindTabToArtifact, retitleTab } from './workspace.svelte';
 
@@ -242,16 +242,6 @@ function normalizeDefinition(defn: NavigationDefinition): NavigationDefinition {
 		return { ...defn, exclude_visited: true };
 	}
 	return defn;
-}
-
-export function emptyPath(): NavigationDefinition {
-	return {
-		kind: 'path',
-		schema_version: 1,
-		start: { kind: 'scope', types: [], criteria: [] },
-		steps: [],
-		exclude_visited: true
-	};
 }
 
 export function getDraft(tabId: string): NavDraft | undefined {

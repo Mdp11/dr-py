@@ -101,13 +101,20 @@ describe('navigation editor store', () => {
 		const draft = await ensureDraft('nav:draft:1');
 		expect(draft.definition).toEqual({
 			kind: 'path',
-			schema_version: 1,
+			schema_version: 2,
 			start: { kind: 'scope', types: [], criteria: [] },
 			steps: [],
 			exclude_visited: true
 		});
 		expect(draft.artifactId).toBeNull();
 		expect(draft.dirty).toBe(false);
+	});
+
+	it('stamps a brand-new draft schema_version 2 (no v1 seed)', async () => {
+		await ensureDraft('nav:draft:vtest');
+		const definition = getDraft('nav:draft:vtest')?.definition;
+		expect(definition?.schema_version).toBe(2);
+		expect(definition?.kind).toBe('path');
 	});
 
 	it('loads the artifact payload for saved tabs', async () => {

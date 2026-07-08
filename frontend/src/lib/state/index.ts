@@ -211,7 +211,6 @@ export {
 } from './artifacts.svelte';
 export {
 	closeDraft,
-	emptyPath,
 	ensureDraft,
 	getDraft,
 	getEvalError,
