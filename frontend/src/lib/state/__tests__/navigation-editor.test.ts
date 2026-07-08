@@ -8,11 +8,13 @@ import {
 	getEvalError,
 	getPreview,
 	getSaveConflict,
+	isExpanded,
 	isRunnable,
 	loadMorePreview,
 	resetNavigationEditors,
 	runPreview,
 	saveDraft,
+	toggleExpanded,
 	updateDefinition
 } from '../navigation-editor.svelte';
 import { resetWorkspaceTabs, openNavigationTab, getDynamicTabs } from '../workspace.svelte';
@@ -53,6 +55,30 @@ function deferred<T>(): {
 	});
 	return { promise, resolve, reject };
 }
+
+/** A runnable path node: a start type plus one complete relationship step.
+ * Used by the node-scoped preview tests (new NavStepItem shape). */
+function runnablePath(startType = 'Component') {
+	return {
+		kind: 'path' as const,
+		schema_version: 1,
+		start: { kind: 'scope' as const, types: [startType], criteria: [] },
+		steps: [
+			{
+				kind: 'relationship' as const,
+				relationship_type: 'Uses',
+				direction: 'out' as const,
+				target_types: [],
+				children: []
+			}
+		],
+		exclude_visited: true
+	};
+}
+
+/** Flush the microtask/macrotask that a fire-and-forget preview run (via
+ * `toggleExpanded`) needs to settle its mocked (immediately-resolved) evaluate. */
+const flushEvaluate = () => new Promise<void>((r) => setTimeout(r, 0));
 
 beforeEach(() => {
 	resetNavigationEditors();
@@ -287,6 +313,49 @@ describe('navigation preview staleness + pagination', () => {
 	});
 });
 
+describe('node-scoped previews', () => {
+	it('runs a preview for the root node and stores it under the root key', async () => {
+		const tabId = 'nav:draft:1';
+		await ensureDraft(tabId);
+		vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		updateDefinition(tabId, runnablePath());
+		expect(isExpanded(tabId, [])).toBe(true); // root expanded by default
+		toggleExpanded(tabId, []); // collapse
+		toggleExpanded(tabId, []); // re-expand → immediate run
+		await flushEvaluate();
+		expect(getPreview(tabId, [])).toBeDefined();
+		expect(getPreview(tabId, [])?.total).toBe(1);
+	});
+
+	it('collapsing a node drops its preview and cancels its timer', async () => {
+		const tabId = 'nav:draft:2';
+		await ensureDraft(tabId);
+		vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		updateDefinition(tabId, runnablePath());
+		await runPreview(tabId, []);
+		expect(getPreview(tabId, [])).toBeDefined();
+		toggleExpanded(tabId, []); // collapse the root
+		expect(getPreview(tabId, [])).toBeUndefined();
+		expect(isExpanded(tabId, [])).toBe(false);
+	});
+
+	it('a stale evaluate response for an edited node is dropped', async () => {
+		const tabId = 'nav:draft:3';
+		await ensureDraft(tabId);
+		updateDefinition(tabId, runnablePath()); // root is expanded + runnable
+		const d = deferred<typeof CHAIN_PAGE>();
+		vi.spyOn(artifactsApi, 'evaluateNavigation').mockImplementation(() => d.promise);
+		const inflight = runPreview(tabId, []);
+		// Edit the same node: bumps the root key's generation, clears its preview.
+		updateDefinition(tabId, runnablePath('Service'));
+		expect(getPreview(tabId, [])).toBeUndefined();
+		d.resolve(CHAIN_PAGE); // the old, now-stale response arrives
+		await inflight;
+		// The stale payload must NOT revive the preview for the edited node.
+		expect(getPreview(tabId, [])).toBeUndefined();
+	});
+});
+
 describe('isRunnable', () => {
 	it('a pristine empty path draft is not runnable', () => {
 		expect(
@@ -320,9 +389,10 @@ describe('isRunnable', () => {
 				start: { kind: 'scope', types: [], criteria: [] },
 				steps: [
 					{
+						kind: 'relationship',
 						relationship_type: '',
 						direction: 'out',
-						target: { kind: 'scope', types: [], criteria: [] },
+						target_types: [],
 						children: []
 					}
 				],
@@ -411,9 +481,10 @@ describe('debounced auto-run', () => {
 			start: { kind: 'scope', types: ['B'], criteria: [] },
 			steps: [
 				{
+					kind: 'relationship',
 					relationship_type: '',
 					direction: 'out',
-					target: { kind: 'scope', types: [], criteria: [] },
+					target_types: [],
 					children: []
 				}
 			],

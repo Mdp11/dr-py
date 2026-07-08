@@ -217,6 +217,7 @@ export {
 	getEvalError,
 	getPreview,
 	getSaveConflict,
+	isExpanded,
 	isRunnable,
 	loadMorePreview,
 	reloadDraft,
@@ -224,6 +225,7 @@ export {
 	runPreview,
 	saveDraft,
 	setDraftName,
+	toggleExpanded,
 	updateDefinition,
 	type NavDraft,
 	type NavPreview

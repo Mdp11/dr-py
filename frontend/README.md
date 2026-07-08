@@ -167,6 +167,41 @@ follows a pessimistic **check-out → stage → commit** loop (Spec B):
    `POST /model/save`), so the browser never materializes the serialized model
    as a string. Export reflects the committed model, not the staged buffer.
 
+### Navigation editor state (per-node previews)
+
+`lib/state/navigation-editor.svelte.ts` holds the per-tab navigation drafts
+(one draft + one save-conflict marker per `tabId`) and drives the live chain
+preview. A navigation is a **tree** — a Path, or a set expression over nested
+definitions addressed by positional `NodePath` (`lib/navigation/tree.ts`:
+`pathKey`, `nodeAt`, `isRunnable`) — so preview state is keyed **per node**, not
+per tab:
+
+- **`previewKey(tabId, path) = ${tabId}::${pathKey(path)}`** keys `_previews`,
+  `_evalErrors`, `_generations`, and `_debounceTimers`; `path === []` is the
+  **root** node. `_expanded` maps a `tabId` to the set of expanded node
+  pathKeys. A node is previewed **only while expanded** — the root is expanded
+  by default (so a bare navigation still shows results), and `toggleExpanded`
+  runs a node's preview immediately on expand and **drops it on collapse**
+  (cancel timer, delete preview/eval-error, bump generation).
+- **Auto-run + staleness are per node.** There is no Run button:
+  `updateDefinition` reschedules a **debounced** run for **every expanded node**
+  (`AUTO_RUN_DEBOUNCE_MS`), re-reading `nodeAt(currentDraft, path)` at fire time
+  (a later edit resets that node's timer *and* supplies the node sent); a node
+  whose address no longer resolves is dropped from the expanded set. Each node
+  carries its own **generation counter**: any edit / newer run / collapse /
+  `closeDraft` / reset bumps it, and the async preview functions capture it
+  before their await and drop a stale response (or one whose draft is gone), so
+  a slow round-trip can never revive a cleared node preview or clobber a fresher
+  one. A **still-current** failure sets that node's `_evalError` flag, which
+  `ChainPreview` surfaces. `nodeAt` returns null for a **ref** operand — refs
+  get no per-node preview this iteration and are skipped.
+- **Accessors are node-scoped** (`getPreview`/`getEvalError`/`isExpanded`/
+  `runPreview`/`loadMorePreview` all take `(tabId, path)`, `path` defaulting to
+  the root `[]`); `getDraft`/`getSaveConflict`/`updateDefinition`/`saveDraft`
+  stay per-tab. `closeDraft` and `resetNavigationEditors` clear **every** node
+  key for the tab (expanded set plus any lingering keys), cancel all timers, and
+  bump generations so nothing leaks.
+
 ### Settings dialog + strict-mode toggle
 
 The **Settings** button in the TopBar opens `SettingsDialog.svelte`, which
