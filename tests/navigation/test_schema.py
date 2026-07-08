@@ -1,7 +1,7 @@
-"""NavigationDefinition schema-shape tests: the format is branch-READY
-(steps carry a `children` slot) but v1 is strictly LINEAR (children must be
-empty), capped at MAX_STEPS, and set-operation operands carry exactly one of
-`ref` (artifact id) / `definition` (inline)."""
+"""NavigationDefinition schema-shape tests (schema v2): each step is a
+relationship hop (`kind="relationship"`) or a filter (`kind="filter"`).
+Relationship steps carry a reserved-empty `children` slot (branch-ready;
+non-empty rejected); a definition is capped at MAX_STEPS total items."""
 
 import pytest
 from pydantic import ValidationError
@@ -9,32 +9,83 @@ from pydantic import ValidationError
 from data_rover.core.navigation.schema import (
     MAX_STEPS,
     NAVIGATION_ADAPTER,
+    FilterStep,
     Operand,
     PathNavigation,
+    RelationshipStep,
     Scope,
     SetExpression,
-    Step,
 )
 from data_rover.core.search.criteria import PropertyCriterion
+
+
+def _rel(rt: str = "Owns") -> dict:
+    return {"kind": "relationship", "relationship_type": rt}
 
 
 def _path(n_steps: int = 1) -> dict:
     return {
         "kind": "path",
         "start": {"kind": "scope", "types": ["Block"]},
-        "steps": [{"relationship_type": "Owns"} for _ in range(n_steps)],
+        "steps": [_rel() for _ in range(n_steps)],
     }
 
 
-def test_minimal_path_parses_with_defaults() -> None:
+def test_relationship_step_parses_with_defaults() -> None:
     nav = NAVIGATION_ADAPTER.validate_python(_path())
     assert isinstance(nav, PathNavigation)
-    assert nav.schema_version == 1
-    assert nav.exclude_visited is True
+    assert nav.schema_version == 2
     step = nav.steps[0]
+    assert isinstance(step, RelationshipStep)
     assert step.direction == "out"
-    assert step.target == Scope()
+    assert step.target_types == []
     assert step.children == []
+
+
+def test_relationship_step_carries_target_types() -> None:
+    nav = NAVIGATION_ADAPTER.validate_python(
+        {"kind": "path", "start": {"kind": "scope"},
+         "steps": [{"kind": "relationship", "relationship_type": "Owns",
+                    "target_types": ["Service", "Database"]}]}
+    )
+    assert isinstance(nav, PathNavigation)
+    step = nav.steps[0]
+    assert isinstance(step, RelationshipStep)
+    assert step.target_types == ["Service", "Database"]
+
+
+def test_filter_step_holds_criteria() -> None:
+    nav = NAVIGATION_ADAPTER.validate_python(
+        {"kind": "path", "start": {"kind": "scope"},
+         "steps": [{"kind": "filter",
+                    "criteria": [{"type": "property", "name": "cost",
+                                  "op": "gt", "value": "100"}]}]}
+    )
+    assert isinstance(nav, PathNavigation)
+    step = nav.steps[0]
+    assert isinstance(step, FilterStep)
+    assert isinstance(step.criteria[0], PropertyCriterion)
+
+
+def test_interleaved_steps_preserve_order() -> None:
+    nav = NAVIGATION_ADAPTER.validate_python(
+        {"kind": "path", "start": {"kind": "scope"},
+         "steps": [_rel("Owns"), {"kind": "filter", "criteria": []}, _rel("Uses")]}
+    )
+    assert isinstance(nav, PathNavigation)
+    kinds = [s.kind for s in nav.steps]
+    assert kinds == ["relationship", "filter", "relationship"]
+
+
+def test_relationship_children_rejected() -> None:
+    with pytest.raises(ValidationError):
+        RelationshipStep(relationship_type="Owns",
+                         children=[RelationshipStep(relationship_type="Uses")])
+
+
+def test_step_cap_counts_all_items() -> None:
+    with pytest.raises(ValidationError):
+        NAVIGATION_ADAPTER.validate_python(_path(MAX_STEPS + 1))
 
 
 def test_exclude_visited_may_be_set_false() -> None:
@@ -43,19 +94,6 @@ def test_exclude_visited_may_be_set_false() -> None:
     nav = NAVIGATION_ADAPTER.validate_python(doc)
     assert isinstance(nav, PathNavigation)
     assert nav.exclude_visited is False
-
-
-def test_children_rejected_in_v1() -> None:
-    doc = _path()
-    doc["steps"][0]["children"] = [{"relationship_type": "Feeds"}]
-    with pytest.raises(ValidationError, match="branching"):
-        NAVIGATION_ADAPTER.validate_python(doc)
-
-
-def test_step_cap() -> None:
-    with pytest.raises(ValidationError, match="at most"):
-        NAVIGATION_ADAPTER.validate_python(_path(MAX_STEPS + 1))
-    NAVIGATION_ADAPTER.validate_python(_path(MAX_STEPS))  # boundary OK
 
 
 def test_set_expression_parses_and_nests() -> None:

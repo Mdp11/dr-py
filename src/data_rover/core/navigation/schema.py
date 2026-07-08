@@ -3,17 +3,19 @@ start set, or combine navigation results with set operations.
 
 Format contract (Stage 1 of the navigation/tables/diagrams mega-plan):
 
-- The document is VERSIONED (`schema_version`) and branch-READY: every step
-  carries a `children` slot so branching can be added later without migrating
-  saved artifacts — but v1 validation rejects non-empty `children` (linear
-  chains only) and caps chains at MAX_STEPS.
+- The document is VERSIONED (`schema_version`) and branch-READY: every
+  relationship step carries a `children` slot so branching can be added later
+  without migrating saved artifacts — but v2 validation rejects non-empty
+  `children` (linear chains only) and caps a definition's total step items at
+  MAX_STEPS.
 - Filters reuse the advanced-search criterion vocabulary
   (`core.search.criteria`) verbatim, so a navigation filter and a search
   criterion are the same wire object.
 - CHAIN CONVENTION: an evaluated chain includes its start element at index 0
-  (a path with N steps yields chains of length N+1). `Operand.step_index`
-  addresses that tuple directly: 0 = start elements, k = elements after step
-  k, None = terminal step.
+  (a path with N *relationship* steps yields chains of length N+1 — a
+  `FilterStep` prunes the frontier in place and adds no column).
+  `Operand.step_index` addresses that tuple directly: 0 = start elements,
+  k = elements after relationship-step k, None = terminal step.
 - Set operations act on ELEMENT SETS (the elements a navigation reaches at
   one step), never on chain tuples; `difference` is a left fold over the
   operand list.
@@ -31,7 +33,7 @@ from pydantic import BaseModel, Field, TypeAdapter, model_validator
 
 from data_rover.core.search.criteria import Criterion
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 #: hard ceiling on chain length; also the recursion depth of the evaluator.
 MAX_STEPS = 10
 
@@ -45,27 +47,47 @@ class Scope(BaseModel):
     criteria: list[Criterion] = Field(default_factory=list)
 
 
-class Step(BaseModel):
+class RelationshipStep(BaseModel):
+    """A hop: traverse `relationship_type` (subtype-inclusive) in `direction`,
+    landing on `target_types` (subtype-inclusive; empty = any). Carries NO
+    criteria — filtering lives in `FilterStep`. `children` is reserved for
+    post-Stage-1 branching and MUST be empty in schema v2."""
+
+    kind: Literal["relationship"] = "relationship"
     relationship_type: str
     direction: Literal["out", "in", "either"] = "out"
-    target: Scope = Field(default_factory=Scope)
-    #: reserved for post-Stage-1 branching; MUST be empty in schema v1.
-    children: list["Step"] = Field(default_factory=list)
+    target_types: list[str] = Field(default_factory=list)
+    children: list["StepItem"] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _v1_is_linear(self) -> "Step":
+    def _v2_is_linear(self) -> "RelationshipStep":
         if self.children:
             raise ValueError(
-                "branching steps (`children`) are not supported in schema v1"
+                "branching steps (`children`) are not supported in schema v2"
             )
         return self
+
+
+class FilterStep(BaseModel):
+    """Prunes the current frontier in place: keep an element iff it matches
+    ALL criteria. Adds no chain column (see the evaluator). Criteria reuse the
+    shared search vocabulary; property criteria are existence-gated at
+    evaluation time."""
+
+    kind: Literal["filter"] = "filter"
+    criteria: list[Criterion] = Field(default_factory=list)
+
+
+StepItem = Annotated[
+    Union[RelationshipStep, FilterStep], Field(discriminator="kind")
+]
 
 
 class PathNavigation(BaseModel):
     kind: Literal["path"]
     schema_version: int = SCHEMA_VERSION
     start: "StartNode"
-    steps: list[Step] = Field(default_factory=list)
+    steps: list[StepItem] = Field(default_factory=list)
     #: cycle guard: when True (default, prior behavior), a chain skips any
     #: element already in its own prefix; when False, chains may revisit
     #: elements (still terminates — chain length is capped at len(steps)+1).
@@ -106,7 +128,8 @@ NavigationDefinition = Annotated[
     Union[PathNavigation, SetExpression], Field(discriminator="kind")
 ]
 
-Step.model_rebuild()
+RelationshipStep.model_rebuild()
+FilterStep.model_rebuild()
 PathNavigation.model_rebuild()
 Operand.model_rebuild()
 SetExpression.model_rebuild()

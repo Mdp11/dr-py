@@ -18,7 +18,7 @@ API = "/api/v1/projects/default"
 NAV_PAYLOAD = {
     "kind": "path",
     "start": {"kind": "scope", "types": ["Block"]},
-    "steps": [{"relationship_type": "BlockHasPart"}],
+    "steps": [{"kind": "relationship", "relationship_type": "BlockHasPart"}],
 }
 
 
@@ -163,7 +163,7 @@ def test_evaluate_inline_definition(client: TestClient) -> None:
             "start": {"kind": "scope", "types": ["Block"],
                       "criteria": [{"type": "name_id", "field": "name",
                                     "op": "equals", "value": "root"}]},
-            "steps": [{"relationship_type": "BlockHasPart"}],
+            "steps": [{"kind": "relationship", "relationship_type": "BlockHasPart"}],
         }},
     )
     assert res.status_code == 200, res.text
@@ -187,8 +187,10 @@ def test_evaluate_inline_definition_exclude_visited_false_allows_revisit(
             "start": {"kind": "scope", "types": ["Block"],
                       "criteria": [{"type": "name_id", "field": "name",
                                     "op": "equals", "value": "root"}]},
-            "steps": [{"relationship_type": "BlockHasPart", "direction": "out"},
-                      {"relationship_type": "BlockHasPart", "direction": "in"}],
+            "steps": [{"kind": "relationship", "relationship_type": "BlockHasPart",
+                       "direction": "out"},
+                      {"kind": "relationship", "relationship_type": "BlockHasPart",
+                       "direction": "in"}],
             "exclude_visited": False,
         }},
     )

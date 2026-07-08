@@ -19,19 +19,22 @@ enumeration and flags the result `truncated`.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from data_rover.core.metamodel.schema import Metamodel
 from data_rover.core.model.element import Element
 from data_rover.core.model.model import Model
-from data_rover.core.search.criteria import match_element
+from data_rover.core.search.criteria import PropertyCriterion, match_element
 
 from .schema import (
+    FilterStep,
     NavigationDefinition,
     PathNavigation,
+    RelationshipStep,
     Scope,
     SetExpression,
-    Step,
+    StepItem,
 )
 
 
@@ -81,12 +84,19 @@ def evaluate(
         )
     start_ids = _start_ids(metamodel, model, defn, limits, budget)
     chains: list[tuple[str, ...]] = []
-    truncated = _walk(
-        metamodel, model, defn.steps, start_ids, (), chains, limits, budget,
-        defn.exclude_visited,
-    )
+    truncated = False
+    for start_id in start_ids:
+        if _walk(
+            metamodel, model, defn.steps, 0, (start_id,), chains, limits,
+            budget, defn.exclude_visited,
+        ):
+            truncated = True
+            break
     return ChainResult(
-        step_types=[s.relationship_type for s in defn.steps],
+        step_types=[
+            s.relationship_type for s in defn.steps
+            if isinstance(s, RelationshipStep)
+        ],
         chains=chains,
         truncated=truncated or budget.exhausted,
     )
@@ -118,25 +128,44 @@ def _scope_ids(metamodel: Metamodel, model: Model, scope: Scope) -> list[str]:
     return sorted(i for i in ids if _matches_criteria(model, model.elements[i], scope))
 
 
-def _matches_criteria(model: Model, element: Element, scope: Scope) -> bool:
-    return all(match_element(model, element, c) for c in scope.criteria)
-
-
-def _matches_target(
-    metamodel: Metamodel, model: Model, element: Element, scope: Scope
-) -> bool:
-    if scope.types and not any(
-        metamodel.is_element_subtype(element.type_name, t) for t in scope.types
+def _match_nav_criterion(model: Model, element: Element, criterion) -> bool:
+    """Navigation criterion match. Property criteria are EXISTENCE-GATED: the
+    element must actually carry the property (except `exists`/`is_empty`, which
+    handle absence explicitly). This intentionally diverges from the shared
+    search matcher's coerce-missing-to-'' semantics — `core/search` is
+    untouched, so `/model/search` stays byte-identical."""
+    if isinstance(criterion, PropertyCriterion) and criterion.op not in (
+        "exists",
+        "is_empty",
     ):
-        return False
-    return _matches_criteria(model, element, scope)
+        if criterion.name not in element.properties:
+            return False
+    return match_element(model, element, criterion)
 
 
-def _next_ids(
+def _matches_criteria(model: Model, element: Element, scope: Scope) -> bool:
+    return all(_match_nav_criterion(model, element, c) for c in scope.criteria)
+
+
+def _matches_filter(model: Model, element: Element, step: FilterStep) -> bool:
+    return all(_match_nav_criterion(model, element, c) for c in step.criteria)
+
+
+def _matches_target_types(
+    metamodel: Metamodel, element: Element, target_types: list[str]
+) -> bool:
+    if not target_types:
+        return True
+    return any(
+        metamodel.is_element_subtype(element.type_name, t) for t in target_types
+    )
+
+
+def _hop(
     metamodel: Metamodel,
     model: Model,
     element_id: str,
-    step: Step,
+    step: RelationshipStep,
     budget: _Budget,
 ) -> list[str]:
     idx = model.indexes
@@ -151,11 +180,13 @@ def _next_ids(
     nxt: set[str] = set()
     for rid in rel_ids:
         rel = model.relationships[rid]
-        if not metamodel.is_relationship_subtype(rel.type_name, step.relationship_type):
+        if not metamodel.is_relationship_subtype(
+            rel.type_name, step.relationship_type
+        ):
             continue
         other = rel.target_id if rel.source_id == element_id else rel.source_id
         el = model.elements.get(other)
-        if el is not None and _matches_target(metamodel, model, el, step.target):
+        if el is not None and _matches_target_types(metamodel, el, step.target_types):
             nxt.add(other)
     return sorted(nxt)
 
@@ -163,37 +194,41 @@ def _next_ids(
 def _walk(
     metamodel: Metamodel,
     model: Model,
-    steps: list[Step],
-    frontier: list[str],
-    prefix: tuple[str, ...],
+    steps: Sequence[StepItem],
+    item_idx: int,
+    chain: tuple[str, ...],
     chains: list[tuple[str, ...]],
     limits: EvalLimits,
     budget: _Budget,
     exclude_visited: bool,
 ) -> bool:
-    """DFS continuation; returns True when enumeration stopped early.
-
-    `exclude_visited` is per-navigation (`PathNavigation.exclude_visited`):
-    when True, a chain never revisits its own elements (the historical,
-    still-default behavior); when False, revisits are allowed and
-    termination still holds because chain length is capped at
-    `len(steps) + 1` regardless."""
-    for element_id in frontier:
-        if exclude_visited and element_id in prefix:
-            continue  # cycle guard: a chain never revisits its own elements
-        chain = prefix + (element_id,)
-        if len(chain) == len(steps) + 1:
-            if len(chains) >= limits.max_chains:
-                return True
-            chains.append(chain)
-            continue
-        step = steps[len(chain) - 1]
-        nxt = _next_ids(metamodel, model, element_id, step, budget)
-        if budget.exhausted:
+    """DFS over the interleaved step-item list. A RelationshipStep extends the
+    chain by one hop (deterministic, sorted-id); a FilterStep keeps the chain
+    iff its current endpoint matches all criteria, adding no column. Returns
+    True when enumeration stopped early (chain cap or budget)."""
+    if item_idx == len(steps):
+        if len(chains) >= limits.max_chains:
             return True
+        chains.append(chain)
+        return False
+    step = steps[item_idx]
+    current = chain[-1]
+    if isinstance(step, FilterStep):
+        if _matches_filter(model, model.elements[current], step):
+            return _walk(
+                metamodel, model, steps, item_idx + 1, chain, chains, limits,
+                budget, exclude_visited,
+            )
+        return False
+    nxt = _hop(metamodel, model, current, step, budget)
+    if budget.exhausted:
+        return True
+    for other in nxt:
+        if exclude_visited and other in chain:
+            continue  # cycle guard: a chain never revisits its own elements
         if _walk(
-            metamodel, model, steps, nxt, chain, chains, limits, budget,
-            exclude_visited,
+            metamodel, model, steps, item_idx + 1, chain + (other,), chains,
+            limits, budget, exclude_visited,
         ):
             return True
     return False

@@ -21,7 +21,7 @@ def _nav(doc: dict):
 
 
 PATH = {"kind": "path", "start": {"kind": "scope", "types": ["Block"]},
-        "steps": [{"relationship_type": "Owns"}]}
+        "steps": [{"kind": "relationship", "relationship_type": "Owns"}]}
 
 
 def test_path_without_refs_is_returned_as_is() -> None:

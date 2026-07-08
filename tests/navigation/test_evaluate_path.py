@@ -18,7 +18,14 @@ from data_rover.core.metamodel.schema import (
 )
 from data_rover.core.model.model import Model
 from data_rover.core.navigation.evaluate import ChainResult, EvalLimits, evaluate
-from data_rover.core.navigation.schema import NAVIGATION_ADAPTER
+from data_rover.core.navigation.schema import (
+    NAVIGATION_ADAPTER,
+    FilterStep,
+    PathNavigation,
+    RelationshipStep,
+    Scope,
+)
+from data_rover.core.search.criteria import PropertyCriterion
 
 
 def _mm() -> Metamodel:
@@ -60,11 +67,15 @@ def _fixture() -> tuple[Model, dict[str, str]]:
     return model, ids
 
 
+def _rel(rt: str = "Owns", **kwargs) -> dict:
+    return {"kind": "relationship", "relationship_type": rt, **kwargs}
+
+
 def _path(**overrides):
     doc = {
         "kind": "path",
         "start": {"kind": "scope", "types": ["Building"]},
-        "steps": [{"relationship_type": "Owns"}],
+        "steps": [_rel("Owns")],
     }
     doc.update(overrides)
     return NAVIGATION_ADAPTER.validate_python(doc)
@@ -84,7 +95,7 @@ def test_linear_hop_dedupes_parallel_edges_and_sorts() -> None:
 def test_rel_type_match_is_subtype_inclusive() -> None:
     model, ids = _fixture()
     result = evaluate(model.metamodel, model,
-                      _path(steps=[{"relationship_type": "Rel"}]))
+                      _path(steps=[_rel("Rel")]))
     # Owns extends Rel, so all four distinct edges match
     assert (ids["b1"], ids["s3"]) in result.chains
     assert (ids["b1"], ids["s1"]) in result.chains
@@ -103,20 +114,21 @@ def test_start_scope_is_subtype_inclusive_and_filtered() -> None:
 def test_incoming_and_either_directions() -> None:
     model, ids = _fixture()
     nav = _path(start={"kind": "scope", "types": ["Sensor"]},
-                steps=[{"relationship_type": "Owns", "direction": "in"}])
+                steps=[_rel("Owns", direction="in")])
     result = evaluate(model.metamodel, model, nav)
     assert (ids["s1"], ids["b1"]) in result.chains
     nav = _path(start={"kind": "scope", "types": ["Sensor"]},
-                steps=[{"relationship_type": "Owns", "direction": "either"}])
+                steps=[_rel("Owns", direction="either")])
     assert (ids["s1"], ids["b1"]) in evaluate(model.metamodel, model, nav).chains
 
 
 def test_target_scope_filters_hop() -> None:
     model, ids = _fixture()
-    nav = _path(steps=[{"relationship_type": "Owns",
-                        "target": {"kind": "scope",
-                                   "criteria": [{"type": "property", "name": "name",
-                                                 "op": "equals", "value": "T-2"}]}}])
+    nav = _path(steps=[
+        _rel("Owns"),
+        {"kind": "filter", "criteria": [{"type": "property", "name": "name",
+                                          "op": "equals", "value": "T-2"}]},
+    ])
     result = evaluate(model.metamodel, model, nav)
     assert result.chains == [(ids["b1"], ids["s2"])]
 
@@ -129,8 +141,8 @@ def test_chain_cycle_guard() -> None:
     model.connect("Rel", a.id, b.id)
     model.connect("Rel", b.id, a.id)
     nav = _path(start={"kind": "scope", "types": ["Node"]},
-                steps=[{"relationship_type": "Rel", "direction": "either"},
-                       {"relationship_type": "Rel", "direction": "either"}])
+                steps=[_rel("Rel", direction="either"),
+                       _rel("Rel", direction="either")])
     result = evaluate(mm, model, nav)
     # a->b->a and b->a->b are forbidden; with only two nodes there is no
     # 3-element chain at all.
@@ -144,8 +156,7 @@ def test_exclude_visited_false_allows_round_trip() -> None:
     model.connect("Owns", a.id, b.id)
     nav = _path(
         start={"kind": "scope", "types": ["Building"]},
-        steps=[{"relationship_type": "Owns", "direction": "out"},
-               {"relationship_type": "Owns", "direction": "in"}],
+        steps=[_rel("Owns", direction="out"), _rel("Owns", direction="in")],
         exclude_visited=False,
     )
     result = evaluate(model.metamodel, model, nav)
@@ -157,8 +168,7 @@ def test_exclude_visited_true_or_default_forbids_round_trip() -> None:
     a = model.create_element("Building")
     b = model.create_element("Sensor")
     model.connect("Owns", a.id, b.id)
-    steps = [{"relationship_type": "Owns", "direction": "out"},
-             {"relationship_type": "Owns", "direction": "in"}]
+    steps = [_rel("Owns", direction="out"), _rel("Owns", direction="in")]
     nav_default = _path(start={"kind": "scope", "types": ["Building"]}, steps=steps)
     nav_explicit_true = _path(
         start={"kind": "scope", "types": ["Building"]}, steps=steps,
@@ -173,8 +183,7 @@ def _two_source_nav(exclude_visited: bool):
         start={"kind": "scope", "types": ["Building"],
                "criteria": [{"type": "property", "name": "name",
                              "op": "equals", "value": "A1"}]},
-        steps=[{"relationship_type": "Owns", "direction": "out"},
-               {"relationship_type": "Owns", "direction": "in"}],
+        steps=[_rel("Owns", direction="out"), _rel("Owns", direction="in")],
         exclude_visited=exclude_visited,
     )
 
@@ -232,3 +241,87 @@ def test_determinism() -> None:
     r1 = evaluate(model.metamodel, model, _path())
     r2 = evaluate(model.metamodel, model, _path())
     assert r1 == r2 == ChainResult(r1.step_types, r1.chains, r1.truncated)
+
+
+def _cost_mm() -> Metamodel:
+    # `cost` is DECLARED on Component (inherited by its subtypes) but only
+    # SET on some elements — the fixture for existence-gating tests.
+    return Metamodel(
+        elements=[
+            ElementType(
+                name="Component",
+                properties=[PropertyDef(name="cost", datatype="string")],
+            ),
+            ElementType(name="Service", extends="Component"),
+            ElementType(name="Database", extends="Component"),
+        ],
+        relationships=[
+            RelationshipType(name="Uses", source="Component", target="Component"),
+        ],
+    )
+
+
+def test_filter_step_prunes_without_adding_column() -> None:
+    # A relationship step lands on mixed types; a filter step keeps only those
+    # with cost > 100. The chain width stays start + 1 (the filter adds no col).
+    mm = _cost_mm()
+    model = Model(mm)
+    root = model.create_element("Component")
+    cheap = model.create_element("Service")
+    model.set_property(cheap, "cost", "50")
+    pricey = model.create_element("Database")
+    model.set_property(pricey, "cost", "150")
+    model.connect("Uses", root.id, cheap.id)
+    model.connect("Uses", root.id, pricey.id)
+    defn = PathNavigation(
+        kind="path",
+        start=Scope(types=["Component"]),
+        steps=[
+            RelationshipStep(relationship_type="Uses"),
+            FilterStep(criteria=[PropertyCriterion(
+                type="property", name="cost", op="gt", value="100")]),
+        ],
+    )
+    result = evaluate(mm, model, defn)
+    assert result.step_types == ["Uses"]          # filter contributes no header
+    assert all(len(chain) == 2 for chain in result.chains)
+    assert result.chains == [(root.id, pricey.id)]
+
+
+def test_property_criterion_is_existence_gated() -> None:
+    # An element lacking `cost` must be dropped, not coerced to "".
+    mm = _cost_mm()
+    model = Model(mm)
+    priced = model.create_element("Service")
+    model.set_property(priced, "cost", "50")
+    unpriced = model.create_element("Database")  # never sets `cost`
+    defn = PathNavigation(
+        kind="path",
+        start=Scope(criteria=[PropertyCriterion(
+            type="property", name="cost", op="gte", value="0")]),
+        steps=[],
+    )
+    ids = {c[0] for c in evaluate(mm, model, defn).chains}
+    assert all("cost" in model.elements[i].properties for i in ids)
+    assert priced.id in ids
+    assert unpriced.id not in ids
+
+
+def test_target_types_filter_landing() -> None:
+    mm = _cost_mm()
+    model = Model(mm)
+    root = model.create_element("Component")
+    svc = model.create_element("Service")
+    db = model.create_element("Database")
+    model.connect("Uses", root.id, svc.id)
+    model.connect("Uses", root.id, db.id)
+    defn = PathNavigation(
+        kind="path",
+        start=Scope(types=["Component"]),
+        steps=[RelationshipStep(relationship_type="Uses",
+                                target_types=["Database"])],
+    )
+    result = evaluate(mm, model, defn)
+    assert result.chains == [(root.id, db.id)]
+    for chain in result.chains:
+        assert mm.is_element_subtype(model.elements[chain[1]].type_name, "Database")

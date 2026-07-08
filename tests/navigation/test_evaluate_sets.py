@@ -32,12 +32,12 @@ def _model() -> tuple[Model, dict[str, str]]:
 
 def _owns():
     return {"kind": "path", "start": {"kind": "scope", "types": ["B"]},
-            "steps": [{"relationship_type": "Owns"}]}
+            "steps": [{"kind": "relationship", "relationship_type": "Owns"}]}
 
 
 def _watches():
     return {"kind": "path", "start": {"kind": "scope", "types": ["B"]},
-            "steps": [{"relationship_type": "Watches"}]}
+            "steps": [{"kind": "relationship", "relationship_type": "Watches"}]}
 
 
 def _expr(op, *operands):
@@ -86,7 +86,7 @@ def test_path_with_set_expression_start() -> None:
            "start": {"kind": "set_op", "op": "intersection",
                      "operands": [{"definition": _owns()},
                                   {"definition": _watches()}]},
-           "steps": [{"relationship_type": "Watches", "direction": "in"}]}
+           "steps": [{"kind": "relationship", "relationship_type": "Watches", "direction": "in"}]}
     result = evaluate(model.metamodel, model, NAVIGATION_ADAPTER.validate_python(doc))
     # start set = {s2}; incoming Watches -> b2
     assert result.chains == [(ids["s2"], ids["b2"])]
@@ -118,8 +118,8 @@ def test_operand_honors_its_own_exclude_visited_flag() -> None:
     round_trip = {
         "kind": "path",
         "start": {"kind": "scope", "types": ["Node"]},
-        "steps": [{"relationship_type": "Rel", "direction": "out"},
-                  {"relationship_type": "Rel", "direction": "in"}],
+        "steps": [{"kind": "relationship", "relationship_type": "Rel", "direction": "out"},
+                  {"kind": "relationship", "relationship_type": "Rel", "direction": "in"}],
     }
     expr = NAVIGATION_ADAPTER.validate_python({
         "kind": "set_op", "op": "union",
