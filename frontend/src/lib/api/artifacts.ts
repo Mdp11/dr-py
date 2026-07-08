@@ -10,7 +10,11 @@ import {
 } from './types';
 
 export function listArtifacts(kind?: string, cfg?: ClientConfig): Promise<ArtifactList> {
-	return apiFetch('/artifacts', { method: 'GET', schema: ArtifactListSchema, query: { kind } }, cfg);
+	return apiFetch(
+		'/artifacts',
+		{ method: 'GET', schema: ArtifactListSchema, query: { kind } },
+		cfg
+	);
 }
 
 export function getArtifact(id: string, cfg?: ClientConfig): Promise<Artifact> {

@@ -1,12 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { server } from './server';
-import {
-	createArtifact,
-	evaluateNavigation,
-	listArtifacts,
-	updateArtifact
-} from '../artifacts';
+import { createArtifact, evaluateNavigation, listArtifacts, updateArtifact } from '../artifacts';
 import { ConflictError } from '../errors';
 
 const BASE = 'http://api.test/api/v1/projects/p1';
@@ -59,15 +54,12 @@ describe('artifacts api', () => {
 	it('surfaces a stale-rev PUT as ConflictError', async () => {
 		server.use(
 			http.put(`${BASE}/artifacts/a1`, () =>
-				HttpResponse.json(
-					{ detail: { message: 'stale', current_rev: 3 } },
-					{ status: 409 }
-				)
+				HttpResponse.json({ detail: { message: 'stale', current_rev: 3 } }, { status: 409 })
 			)
 		);
-		await expect(
-			updateArtifact('a1', { artifact_rev: 1, name: 'x' }, CFG)
-		).rejects.toBeInstanceOf(ConflictError);
+		await expect(updateArtifact('a1', { artifact_rev: 1, name: 'x' }, CFG)).rejects.toBeInstanceOf(
+			ConflictError
+		);
 	});
 
 	it('evaluates and parses a chain page', async () => {
