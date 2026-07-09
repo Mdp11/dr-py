@@ -18,6 +18,8 @@ import {
 	toggleExpanded,
 	updateDefinition
 } from '../navigation-editor.svelte';
+import { applyStructuralEdit } from '../navigation-editor.svelte';
+import { insertNavigationEdit, moveOperandEdit, removeOperandEdit } from '$lib/navigation/tree';
 import { resetWorkspaceTabs, openNavigationTab, getDynamicTabs } from '../workspace.svelte';
 import { resetArtifacts } from '../artifacts.svelte';
 
@@ -878,5 +880,171 @@ describe('evaluation error surfacing', () => {
 		expect(getEvalError('nav:draft:1')).toBe(true);
 		closeDraft('nav:draft:1');
 		expect(getEvalError('nav:draft:1')).toBe(false);
+	});
+});
+
+describe('structural edits keep expansion attached to nodes', () => {
+	/** union of `paths` as a runnable root combine. */
+	function combineOf(...types: string[]) {
+		return {
+			kind: 'set_op' as const,
+			schema_version: 2,
+			op: 'union' as const,
+			operands: types.map((t) => ({ definition: runnablePath(t), step_index: null }))
+		};
+	}
+
+	it('an expanded operand keeps auto-running after an earlier sibling is removed', async () => {
+		vi.useFakeTimers();
+		const tabId = 'nav:draft:1';
+		await ensureDraft(tabId);
+		const evaluate = vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		updateDefinition(tabId, combineOf('A', 'B', 'C'));
+		await vi.advanceTimersByTimeAsync(400);
+		toggleExpanded(tabId, [2]); // expand operand C → immediate run
+		await vi.advanceTimersByTimeAsync(0);
+		expect(getPreview(tabId, [2])).toBeDefined();
+		evaluate.mockClear();
+
+		// Remove operand 0 (A): C moves from index 2 to index 1. Its expansion —
+		// and thus its auto-run — must follow the NODE, not the position.
+		const draft = getDraft(tabId)!;
+		applyStructuralEdit(tabId, removeOperandEdit(draft.definition, [], 0));
+		expect(isExpanded(tabId, [1])).toBe(true);
+		expect(isExpanded(tabId, [2])).toBe(false);
+		await vi.advanceTimersByTimeAsync(400);
+		// Root (still expanded) + moved operand C both re-ran.
+		expect(
+			evaluate.mock.calls.some(
+				([req]) =>
+					(req as { definition: { kind: string; start?: { types?: string[] } } }).definition.start
+						?.types?.[0] === 'C'
+			)
+		).toBe(true);
+		expect(getPreview(tabId, [1])).toBeDefined();
+	});
+
+	it('expansion follows the moved operand on reorder', async () => {
+		vi.useFakeTimers();
+		const tabId = 'nav:draft:1';
+		await ensureDraft(tabId);
+		vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		updateDefinition(tabId, combineOf('A', 'B'));
+		await vi.advanceTimersByTimeAsync(400);
+		toggleExpanded(tabId, [0]); // expand operand A
+		await vi.advanceTimersByTimeAsync(0);
+
+		const draft = getDraft(tabId)!;
+		applyStructuralEdit(tabId, moveOperandEdit(draft.definition, [], 0, 'down'));
+		expect(isExpanded(tabId, [1])).toBe(true); // A moved down — expansion followed
+		expect(isExpanded(tabId, [0])).toBe(false);
+	});
+
+	it('auto-wrap moves the root expansion (and its preview) to operand 0', async () => {
+		vi.useFakeTimers();
+		const tabId = 'nav:draft:1';
+		await ensureDraft(tabId); // root expanded by default
+		const evaluate = vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		updateDefinition(tabId, runnablePath('A'));
+		await vi.advanceTimersByTimeAsync(400);
+		expect(getPreview(tabId, [])).toBeDefined();
+		evaluate.mockClear();
+
+		const draft = getDraft(tabId)!;
+		applyStructuralEdit(tabId, insertNavigationEdit(draft.definition, []));
+		// The built path travelled to operand 0 — its expansion travels with it;
+		// the new root Combine starts collapsed (no giant union auto-run).
+		expect(isExpanded(tabId, [0])).toBe(true);
+		expect(isExpanded(tabId, [])).toBe(false);
+		await vi.advanceTimersByTimeAsync(400);
+		expect(evaluate).toHaveBeenCalledTimes(1);
+		expect(evaluate).toHaveBeenCalledWith(
+			expect.objectContaining({
+				definition: expect.objectContaining({ kind: 'path' })
+			})
+		);
+		expect(getPreview(tabId, [0])).toBeDefined();
+		expect(getPreview(tabId, [])).toBeUndefined();
+	});
+
+	it('unwrap lifts the surviving operand’s expansion onto the parent', async () => {
+		vi.useFakeTimers();
+		const tabId = 'nav:draft:1';
+		await ensureDraft(tabId);
+		vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		updateDefinition(tabId, combineOf('A', 'B'));
+		await vi.advanceTimersByTimeAsync(400);
+		toggleExpanded(tabId, []); // collapse the root combine
+		toggleExpanded(tabId, [1]); // expand operand B only
+		await vi.advanceTimersByTimeAsync(0);
+
+		// Remove operand A: the combine unwraps and B becomes the root. B was
+		// expanded, so the root must now be expanded and keep auto-running.
+		const draft = getDraft(tabId)!;
+		applyStructuralEdit(tabId, removeOperandEdit(draft.definition, [], 0));
+		expect(isExpanded(tabId, [])).toBe(true);
+		await vi.advanceTimersByTimeAsync(400);
+		expect(getPreview(tabId, [])).toBeDefined();
+	});
+});
+
+describe('auto-run survives the first-save tab rebind', () => {
+	function runnableDef() {
+		return {
+			kind: 'path' as const,
+			schema_version: 2,
+			start: { kind: 'scope' as const, types: ['B'], criteria: [] },
+			steps: [],
+			exclude_visited: true
+		};
+	}
+	const CREATED = {
+		id: 'a9',
+		kind: 'navigation',
+		name: 'Mine',
+		artifact_rev: 1,
+		updated_at: '',
+		updated_by: null,
+		payload: {}
+	};
+
+	it('a pending debounced run is rescheduled under the rebound tab id', async () => {
+		vi.useFakeTimers();
+		const tabId = openNavigationTab({ artifactId: null, title: 'New navigation' });
+		await ensureDraft(tabId);
+		const evaluate = vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		vi.spyOn(artifactsApi, 'createArtifact').mockResolvedValue(CREATED);
+		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({ items: [] });
+		updateDefinition(tabId, runnableDef());
+		// Save lands INSIDE the debounce window: the run must not be lost.
+		await saveDraft(tabId);
+		expect(getPreview('nav:a9')).toBeUndefined(); // not yet — still debounced
+		await vi.advanceTimersByTimeAsync(400);
+		expect(evaluate).toHaveBeenCalledTimes(1);
+		expect(getPreview('nav:a9')?.total).toBe(1);
+		expect(getPreview('nav:a9')?.loading).toBe(false);
+	});
+
+	it('an in-flight run is re-issued under the rebound tab id (no stuck loading)', async () => {
+		vi.useFakeTimers();
+		const tabId = openNavigationTab({ artifactId: null, title: 'New navigation' });
+		await ensureDraft(tabId);
+		const first = deferred<typeof CHAIN_PAGE>();
+		const evaluate = vi
+			.spyOn(artifactsApi, 'evaluateNavigation')
+			.mockImplementationOnce(() => first.promise)
+			.mockResolvedValue(CHAIN_PAGE);
+		vi.spyOn(artifactsApi, 'createArtifact').mockResolvedValue(CREATED);
+		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({ items: [] });
+		updateDefinition(tabId, runnableDef());
+		await vi.advanceTimersByTimeAsync(400); // debounce fires → run in flight
+		expect(getPreview(tabId)?.loading).toBe(true);
+		await saveDraft(tabId); // rebind while the evaluate is still in flight
+		first.resolve(CHAIN_PAGE); // the old response is orphaned by the rebind
+		await vi.advanceTimersByTimeAsync(0);
+		// The preview must settle via a re-issued run, not hang on loading.
+		expect(evaluate).toHaveBeenCalledTimes(2);
+		expect(getPreview('nav:a9')?.loading).toBe(false);
+		expect(getPreview('nav:a9')?.total).toBe(1);
 	});
 });

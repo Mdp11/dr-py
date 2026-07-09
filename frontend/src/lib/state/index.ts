@@ -210,6 +210,7 @@ export {
 	resetArtifacts
 } from './artifacts.svelte';
 export {
+	applyStructuralEdit,
 	closeDraft,
 	ensureDraft,
 	getDraft,

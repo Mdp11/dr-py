@@ -1,5 +1,6 @@
 <script lang="ts">
 	import {
+		applyStructuralEdit,
 		canEdit,
 		getArtifactHeaders,
 		getDraft,
@@ -11,12 +12,13 @@
 	import {
 		elementStartScope,
 		emptyCombine,
-		insertGroup,
-		insertNavigation,
-		insertRef,
+		insertGroupEdit,
+		insertNavigationEdit,
+		insertRefEdit,
 		precedingTargetTypes,
 		readElementStart,
-		updateNodeAt
+		updateNodeAt,
+		type StructuralEdit
 	} from '$lib/navigation/tree';
 	import type { NodePath } from '$lib/navigation/tree';
 	import { effectivePropertiesForTypes } from '$lib/metamodel/helpers';
@@ -50,12 +52,13 @@
 		);
 	}
 	// Composing an alternative-branch set out of THIS path (bare-path
-	// auto-wrap): mutates the whole tree at `path`, not just this node's own
-	// fields, so it goes through `updateDefinition` directly rather than
-	// `patch` (which only ever replaces PathNavigation fields in place).
-	function mutate(next: (root: NavigationDefinition) => NavigationDefinition) {
+	// auto-wrap): a STRUCTURAL edit that moves nodes, so it goes through
+	// `applyStructuralEdit` (which carries expanded/preview state along with
+	// the moved nodes) rather than `patch` (which only ever replaces
+	// PathNavigation fields in place, moving nothing).
+	function structural(make: (root: NavigationDefinition) => StructuralEdit) {
 		if (!draft) return;
-		updateDefinition(tabId, next(draft.definition));
+		applyStructuralEdit(tabId, make(draft.definition));
 	}
 
 	// Types flowing into relationship step `i` (rel-type/target-type picker
@@ -189,19 +192,19 @@
 			<button
 				type="button"
 				class="text-sky-500 hover:text-sky-300"
-				onclick={() => mutate((r) => insertNavigation(r, path))}>+ insert navigation</button
+				onclick={() => structural((r) => insertNavigationEdit(r, path))}>+ insert navigation</button
 			>
 			<button
 				type="button"
 				class="text-sky-500 hover:text-sky-300"
-				onclick={() => mutate((r) => insertGroup(r, path))}>+ group</button
+				onclick={() => structural((r) => insertGroupEdit(r, path))}>+ group</button
 			>
 			<StereotypePicker
 				mode="create"
 				names={navHeaders.map((h) => h.name)}
 				onPick={(name) => {
 					const h = navHeaders.find((x) => x.name === name);
-					if (h) mutate((r) => insertRef(r, path, h.id));
+					if (h) structural((r) => insertRefEdit(r, path, h.id));
 				}}
 				open={addOpen}
 				onOpenChange={(v) => (addOpen = v)}

@@ -39,7 +39,14 @@ import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import * as api from '$lib/api/artifacts';
 import { ConflictError } from '$lib/api/errors';
 import type { NavigationDefinition, TreeItem } from '$lib/api/types';
-import { emptyPath, isRunnable, nodeAt, pathKey, type NodePath } from '$lib/navigation/tree';
+import {
+	emptyPath,
+	isRunnable,
+	nodeAt,
+	pathKey,
+	type NodePath,
+	type StructuralEdit
+} from '$lib/navigation/tree';
 import { loadArtifacts } from './artifacts.svelte';
 import { bindTabToArtifact, retitleTab } from './workspace.svelte';
 
@@ -206,8 +213,18 @@ function clearTabKeys(tabId: string): void {
  * Move every per-node key (previews, eval-errors, generations, expanded set)
  * from `oldTab` to `newTab`, preserving each node's pathKey suffix. Used by the
  * first-save path, where a `nav:draft:*` tab is rebound to `nav:<id>` and its
- * previews must follow. Pending timers under the old tab are cancelled (they
- * would fire into the now-deleted old-tab draft and no-op anyway).
+ * previews must follow.
+ *
+ * Auto-run must SURVIVE the rebind, not just its results: a save landing
+ * inside the debounce window would otherwise silently swallow the pending run
+ * (the edit already cleared the node's preview, so the node would sit blank —
+ * runnable, no error, no run coming — until the next edit), and an evaluate
+ * still in flight would have its response orphaned (its generation entry moved
+ * to the new key, so the old-key `isCurrent` check fails) leaving the moved
+ * preview stuck on `loading: true`. So: pending timers are rescheduled under
+ * the new tab id, and moved previews still marked loading are re-issued
+ * immediately. Callers must have `_drafts.set(newTab, ...)` in place first —
+ * both re-runs read the draft under the NEW id.
  */
 function rekeyTab(oldTab: string, newTab: string): void {
 	const oldPrefix = `${oldTab}::`;
@@ -219,10 +236,12 @@ function rekeyTab(oldTab: string, newTab: string): void {
 			}
 		}
 	};
+	const pendingPks: string[] = [];
 	for (const [k, t] of [..._debounceTimers]) {
 		if (k.startsWith(oldPrefix)) {
 			clearTimeout(t);
 			_debounceTimers.delete(k);
+			pendingPks.push(k.slice(oldPrefix.length));
 		}
 	}
 	move(_previews);
@@ -232,6 +251,13 @@ function rekeyTab(oldTab: string, newTab: string): void {
 	if (set) {
 		_expanded.delete(oldTab);
 		_expanded.set(newTab, set);
+	}
+	for (const pk of pendingPks) scheduleAutoRun(newTab, parsePathKey(pk));
+	const newPrefix = `${newTab}::`;
+	for (const [k, preview] of [..._previews]) {
+		if (k.startsWith(newPrefix) && preview.loading && !_debounceTimers.has(k)) {
+			void runPreview(newTab, parsePathKey(k.slice(newPrefix.length))).catch(() => {});
+		}
 	}
 }
 
@@ -327,6 +353,47 @@ export function updateDefinition(tabId: string, defn: NavigationDefinition): voi
 			cancelAutoRun(key);
 		}
 	}
+}
+
+/**
+ * Apply a STRUCTURAL edit (auto-wrap insert, operand removal, reorder) and
+ * carry each expanded node's key to the node's NEW position via the edit's
+ * `remapPath` before the ordinary `updateDefinition` invalidation runs.
+ * Without this, per-node state keyed by the old position silently detaches
+ * from the node the user is looking at: an expanded operand stops auto-running
+ * after a sibling above it is removed (its index shifted), a wrapped root's
+ * open preview vanishes (the node moved to operand 0), and reordering swaps
+ * which nodes are expanded. Field edits inside one node never move nodes and
+ * keep calling `updateDefinition` directly.
+ */
+export function applyStructuralEdit(tabId: string, edit: StructuralEdit): void {
+	const draft = _drafts.get(tabId);
+	if (!draft) return;
+	const expanded = _expanded.get(tabId);
+	if (expanded) {
+		const oldPks = [...expanded];
+		const nextPks: string[] = [];
+		for (const pk of oldPks) {
+			const np = edit.remapPath(parsePathKey(pk));
+			if (np !== null) nextPks.push(pathKey(np));
+		}
+		// Retire every OLD key whose node moved away or was removed: its
+		// preview/error/timer belong to a position that now shows a different
+		// node (or nothing). Keys that remap onto themselves — and old keys that
+		// another node moved ONTO — are left for updateDefinition's sweep below.
+		for (const pk of oldPks) {
+			if (!nextPks.includes(pk)) {
+				const key = `${tabId}::${pk}`;
+				cancelAutoRun(key);
+				_previews.delete(key);
+				_evalErrors.delete(key);
+				bumpGeneration(key);
+				expanded.delete(pk);
+			}
+		}
+		for (const pk of nextPks) expanded.add(pk);
+	}
+	updateDefinition(tabId, edit.defn);
 }
 
 /**

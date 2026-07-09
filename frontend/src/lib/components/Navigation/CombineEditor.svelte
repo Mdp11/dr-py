@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Trash2, ChevronUp, ChevronDown } from '@lucide/svelte';
 	import {
+		applyStructuralEdit,
 		canEdit,
 		getArtifactHeaders,
 		isExpanded,
@@ -9,13 +10,14 @@
 		getDraft
 	} from '$lib/state';
 	import {
-		insertGroup,
-		insertNavigation,
-		insertRef,
-		moveOperand,
+		insertGroupEdit,
+		insertNavigationEdit,
+		insertRefEdit,
+		moveOperandEdit,
 		operandLabel,
-		removeOperand,
-		updateNodeAt as updateNodeAtLocal
+		removeOperandEdit,
+		updateNodeAt as updateNodeAtLocal,
+		type StructuralEdit
 	} from '$lib/navigation/tree';
 	import type { NodePath } from '$lib/navigation/tree';
 	import type { NavOperand, NavigationDefinition, SetExpression } from '$lib/api/types';
@@ -29,9 +31,16 @@
 	const draft = $derived(getDraft(tabId));
 	let addOpen = $state(false);
 
+	// Field edits (operator, step_index) move no nodes → plain updateDefinition;
+	// operand insert/remove/reorder are STRUCTURAL and must carry each expanded
+	// node's state to its new position (see applyStructuralEdit).
 	function mutate(next: (root: NavigationDefinition) => NavigationDefinition) {
 		if (!draft) return;
 		updateDefinition(tabId, next(draft.definition));
+	}
+	function structural(make: (root: NavigationDefinition) => StructuralEdit) {
+		if (!draft) return;
+		applyStructuralEdit(tabId, make(draft.definition));
 	}
 	function setOp(op: SetExpression['op']) {
 		mutate((root) => updateNodeAtLocal(root, path, (n) => ({ ...(n as SetExpression), op })));
@@ -98,21 +107,21 @@
 						type="button"
 						aria-label="Move up"
 						disabled={i === 0}
-						onclick={() => mutate((r) => moveOperand(r, path, i, 'up'))}
+						onclick={() => structural((r) => moveOperandEdit(r, path, i, 'up'))}
 						><ChevronUp class="size-3" /></button
 					>
 					<button
 						type="button"
 						aria-label="Move down"
 						disabled={i === node.operands.length - 1}
-						onclick={() => mutate((r) => moveOperand(r, path, i, 'down'))}
+						onclick={() => structural((r) => moveOperandEdit(r, path, i, 'down'))}
 						><ChevronDown class="size-3" /></button
 					>
 					<button
 						type="button"
 						aria-label="Remove operand"
 						class="hover:text-red-400"
-						onclick={() => mutate((r) => removeOperand(r, path, i))}
+						onclick={() => structural((r) => removeOperandEdit(r, path, i))}
 						><Trash2 class="size-3" /></button
 					>
 				</div>
@@ -127,19 +136,19 @@
 			<button
 				type="button"
 				class="text-sky-500 hover:text-sky-300"
-				onclick={() => mutate((r) => insertNavigation(r, path))}>+ insert navigation</button
+				onclick={() => structural((r) => insertNavigationEdit(r, path))}>+ insert navigation</button
 			>
 			<button
 				type="button"
 				class="text-sky-500 hover:text-sky-300"
-				onclick={() => mutate((r) => insertGroup(r, path))}>+ group</button
+				onclick={() => structural((r) => insertGroupEdit(r, path))}>+ group</button
 			>
 			<StereotypePicker
 				mode="create"
 				names={navHeaders.map((h) => h.name)}
 				onPick={(name) => {
 					const h = navHeaders.find((x) => x.name === name);
-					if (h) mutate((r) => insertRef(r, path, h.id));
+					if (h) structural((r) => insertRefEdit(r, path, h.id));
 				}}
 				open={addOpen}
 				onOpenChange={(v) => (addOpen = v)}

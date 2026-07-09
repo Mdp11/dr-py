@@ -159,6 +159,106 @@ export function removeOperand(
 	});
 }
 
+/**
+ * A structural mutation bundled with its path translation. The editor keys
+ * per-node UI state (expansion, previews) by POSITIONAL NodePath; a mutation
+ * that MOVES nodes (auto-wrap, operand removal/reorder) would silently orphan
+ * that state — an expanded operand would stop auto-running because its key
+ * still points at the old position. `remapPath` maps every pre-edit node path
+ * to its post-edit location (null = the node was removed) so the store can
+ * carry expansion along with the node (see `applyStructuralEdit`).
+ */
+export interface StructuralEdit {
+	defn: NavigationDefinition;
+	remapPath: (p: NodePath) => NodePath | null;
+}
+
+const identityRemap = (p: NodePath): NodePath => p;
+
+function isPathPrefix(prefix: NodePath, p: NodePath): boolean {
+	return p.length >= prefix.length && prefix.every((seg, i) => p[i] === seg);
+}
+
+/** Auto-wrap at `at`: the node formerly AT `at` becomes operand 0 there. */
+function wrapRemap(at: NodePath): (p: NodePath) => NodePath {
+	return (p) => (isPathPrefix(at, p) ? [...at, 0, ...p.slice(at.length)] : p);
+}
+
+export function insertNavigationEdit(root: NavigationDefinition, path: NodePath): StructuralEdit {
+	const target = nodeAt(root, path);
+	const defn = insertNavigation(root, path);
+	// A bare Path auto-wraps (the node moves to operand 0); a set_op appends
+	// (no node moves).
+	return { defn, remapPath: target?.kind === 'path' ? wrapRemap(path) : identityRemap };
+}
+
+export function insertGroupEdit(root: NavigationDefinition, path: NodePath): StructuralEdit {
+	const target = nodeAt(root, path);
+	const defn = insertGroup(root, path);
+	return { defn, remapPath: target?.kind === 'path' ? wrapRemap(path) : identityRemap };
+}
+
+export function insertRefEdit(
+	root: NavigationDefinition,
+	path: NodePath,
+	ref: string
+): StructuralEdit {
+	const target = nodeAt(root, path);
+	const defn = insertRef(root, path, ref);
+	return { defn, remapPath: target?.kind === 'path' ? wrapRemap(path) : identityRemap };
+}
+
+export function removeOperandEdit(
+	root: NavigationDefinition,
+	path: NodePath,
+	i: number
+): StructuralEdit {
+	const target = nodeAt(root, path);
+	const defn = removeOperand(root, path, i);
+	if (target?.kind !== 'set_op') return { defn, remapPath: identityRemap };
+	const survivors = target.operands.filter((_, idx) => idx !== i);
+	// unwrapSingleton lifted the lone surviving DEFINITION operand into `path`
+	// itself (a lone ref stays as a 1-operand set — a bare ref is not a node).
+	const unwrapped = survivors.length === 1 && survivors[0].definition !== undefined;
+	return {
+		defn,
+		remapPath: (p) => {
+			if (!isPathPrefix(path, p) || p.length === path.length) return p;
+			const seg = p[path.length];
+			if (typeof seg !== 'number') return p; // set_op children are indexed
+			if (seg === i) return null; // the removed subtree
+			const rest = p.slice(path.length + 1);
+			if (unwrapped) return [...path, ...rest]; // survivor lifted into `path`
+			return [...path, seg > i ? seg - 1 : seg, ...rest];
+		}
+	};
+}
+
+export function moveOperandEdit(
+	root: NavigationDefinition,
+	path: NodePath,
+	i: number,
+	dir: 'up' | 'down'
+): StructuralEdit {
+	const target = nodeAt(root, path);
+	const defn = moveOperand(root, path, i, dir);
+	const j = dir === 'up' ? i - 1 : i + 1;
+	if (target?.kind !== 'set_op' || j < 0 || j >= target.operands.length) {
+		return { defn, remapPath: identityRemap };
+	}
+	return {
+		defn,
+		remapPath: (p) => {
+			if (!isPathPrefix(path, p) || p.length === path.length) return p;
+			const seg = p[path.length];
+			const rest = p.slice(path.length + 1);
+			if (seg === i) return [...path, j, ...rest];
+			if (seg === j) return [...path, i, ...rest];
+			return p;
+		}
+	};
+}
+
 /** Move operand `i` up/down within the combine at `path`. */
 export function moveOperand(
 	root: NavigationDefinition,

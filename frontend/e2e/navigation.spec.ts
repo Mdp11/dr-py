@@ -89,24 +89,22 @@ test('build, compose into a combine, save, save-as, and reopen round-trips the s
 	await expect(tabpanel.locator('[data-testid="relationship-step"]')).toHaveCount(1);
 	await expect(tabpanel.locator('[data-testid="filter-step"]')).toHaveCount(1);
 
-	// --- 4. Expand previews ------------------------------------------------
-	// The root node is expanded by default (see navigation-editor.svelte.ts)
-	// and auto-runs on every edit — no manual Run button, no explicit expand
-	// click needed here. Assert the combined preview settles into either
-	// rendered chains or the "definition not complete" hint.
-	await expect(
-		tabpanel.getByText(/of \d+ chains/).or(tabpanel.getByText('Complete the steps to see results'))
-	).toBeVisible({ timeout: 15_000 });
-
-	// Now expand operand 0's OWN nested preview (not auto-expanded — only the
-	// root is). Scope to the operand `<li>` that holds the relationship step
-	// (its nearest `<li>` ancestor), so we hit its PathLeafEditor's own
-	// "Toggle preview" button, not the root Combine's.
+	// --- 4. Previews ---------------------------------------------------------
+	// The root Path was expanded by default (see navigation-editor.svelte.ts);
+	// "+ insert navigation" auto-wrapped it into operand 0 and its EXPANSION
+	// FOLLOWED the moved node (applyStructuralEdit remap), so operand 0's
+	// preview is already open — no toggle click — while the new root Combine
+	// starts collapsed. language=python Microservices reached via
+	// SystemContainsComponent from a SoftwareSystem exist in the fixture, so
+	// operand 0 settles on real chains.
 	const operand0 = relStep.locator('xpath=ancestor::li[1]');
-	await operand0.getByRole('button', { name: 'Toggle preview' }).click();
-	// language=python Microservices reached via SystemContainsComponent from a
-	// SoftwareSystem exist in the fixture, so this settles on real chains.
 	await expect(operand0.getByText(/of \d+ chains/)).toBeVisible({ timeout: 15_000 });
+
+	// Expand the root Combine's own preview too (its toggle is the first in
+	// DOM order — the combine header renders above its operand list). The
+	// union settles on real member chains, so TWO previews are now open.
+	await tabpanel.getByRole('button', { name: 'Toggle preview' }).first().click();
+	await expect(tabpanel.getByText(/of \d+ chains/)).toHaveCount(2, { timeout: 15_000 });
 
 	// --- 5. Save, then Save as… -------------------------------------------
 	const nameInput = tabpanel.locator('input.w-56');

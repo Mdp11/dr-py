@@ -3,11 +3,15 @@ import {
 	emptyPath,
 	emptyCombine,
 	insertNavigation,
+	insertNavigationEdit,
 	insertRef,
+	insertRefEdit,
 	moveOperand,
+	moveOperandEdit,
 	nodeAt,
 	pathKey,
 	removeOperand,
+	removeOperandEdit,
 	updateNodeAt,
 	wrapRoot
 } from '../tree';
@@ -124,5 +128,106 @@ describe('composition mutators', () => {
 		const next = insertRef(c, [], 'nav-xyz') as SetExpression;
 		expect(next.operands).toHaveLength(originalLength + 1);
 		expect(next.operands[next.operands.length - 1].ref).toBe('nav-xyz');
+	});
+});
+
+describe('structural edits (mutator + path remap)', () => {
+	/** A 3-operand union for shift/swap tests. */
+	function combine3(): SetExpression {
+		return {
+			kind: 'set_op',
+			schema_version: 2,
+			op: 'union',
+			operands: [
+				{ definition: emptyPath(), step_index: null },
+				{ definition: emptyPath(), step_index: null },
+				{ definition: emptyPath(), step_index: null }
+			]
+		};
+	}
+
+	it('insertNavigationEdit on a bare path remaps the wrapped node to operand 0', () => {
+		const { defn, remapPath } = insertNavigationEdit(emptyPath(), []);
+		expect(defn.kind).toBe('set_op');
+		expect(remapPath([])).toEqual([0]);
+		expect(remapPath(['start'])).toEqual([0, 'start']);
+	});
+
+	it('insertNavigationEdit on a combine is an identity remap (append)', () => {
+		const { defn, remapPath } = insertNavigationEdit(emptyCombine(), []);
+		expect((defn as SetExpression).operands).toHaveLength(3);
+		expect(remapPath([1])).toEqual([1]);
+		expect(remapPath([])).toEqual([]);
+	});
+
+	it('insertRefEdit auto-wrap remaps like insertNavigationEdit', () => {
+		const { remapPath } = insertRefEdit(emptyPath(), [], 'nav-1');
+		expect(remapPath([])).toEqual([0]);
+	});
+
+	it('removeOperandEdit shifts later siblings down and drops the removed subtree', () => {
+		const { defn, remapPath } = removeOperandEdit(combine3(), [], 0);
+		expect((defn as SetExpression).operands).toHaveLength(2);
+		expect(remapPath([0])).toBeNull();
+		expect(remapPath([0, 'start'])).toBeNull();
+		expect(remapPath([1])).toEqual([0]);
+		expect(remapPath([2])).toEqual([1]);
+		expect(remapPath([2, 'start', 0])).toEqual([1, 'start', 0]);
+		expect(remapPath([])).toEqual([]);
+	});
+
+	it('removeOperandEdit lifts the lone survivor’s subtree on unwrap', () => {
+		const { defn, remapPath } = removeOperandEdit(emptyCombine(), [], 0);
+		expect(defn.kind).toBe('path'); // unwrapped
+		expect(remapPath([1])).toEqual([]);
+		expect(remapPath([1, 'start'])).toEqual(['start']);
+		expect(remapPath([0])).toBeNull();
+	});
+
+	it('removeOperandEdit does NOT lift when the survivor is a ref (1-op set stays)', () => {
+		const c: SetExpression = {
+			kind: 'set_op',
+			schema_version: 2,
+			op: 'union',
+			operands: [
+				{ definition: emptyPath(), step_index: null },
+				{ ref: 'nav-1', step_index: null }
+			]
+		};
+		const { defn, remapPath } = removeOperandEdit(c, [], 0);
+		expect(defn.kind).toBe('set_op');
+		expect(remapPath([1])).toEqual([0]);
+	});
+
+	it('moveOperandEdit swaps the two positions and everything under them', () => {
+		const { defn, remapPath } = moveOperandEdit(combine3(), [], 0, 'down');
+		expect(defn.kind).toBe('set_op');
+		expect(remapPath([0])).toEqual([1]);
+		expect(remapPath([1])).toEqual([0]);
+		expect(remapPath([2])).toEqual([2]);
+		expect(remapPath([0, 'start'])).toEqual([1, 'start']);
+	});
+
+	it('moveOperandEdit out of range is an identity remap', () => {
+		const { remapPath } = moveOperandEdit(combine3(), [], 0, 'up');
+		expect(remapPath([0])).toEqual([0]);
+	});
+
+	it('edits at a NESTED path only remap keys under that path', () => {
+		// root combine whose operand 1 is itself a combine — remove ITS operand 0.
+		const nested: SetExpression = {
+			kind: 'set_op',
+			schema_version: 2,
+			op: 'union',
+			operands: [
+				{ definition: emptyPath(), step_index: null },
+				{ definition: combine3(), step_index: null }
+			]
+		};
+		const { remapPath } = removeOperandEdit(nested, [1], 0);
+		expect(remapPath([0])).toEqual([0]); // sibling branch untouched
+		expect(remapPath([1])).toEqual([1]); // the edited combine itself
+		expect(remapPath([1, 0])).toBeNull();
+		expect(remapPath([1, 2])).toEqual([1, 1]);
 	});
 });
