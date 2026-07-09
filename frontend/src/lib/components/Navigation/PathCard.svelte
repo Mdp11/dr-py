@@ -165,9 +165,17 @@
 	// Only the card CHROME (the click target itself, not something it
 	// bubbled up from) selects this node — a click landing on any inner
 	// control (button/select/input/label/summary/a) is that control's own
-	// business.
+	// business, and a click landing on (or inside) a NESTED selectable card
+	// (a combination used as this path's `start`) is that nested card's own
+	// business too — otherwise it would bubble here and stomp the deeper
+	// selection the nested card just made.
 	function onCardClick(e: MouseEvent): void {
-		if ((e.target as HTMLElement).closest('button, select, input, label, summary, a')) return;
+		const target = e.target as HTMLElement;
+		if (target.closest('button, select, input, label, summary, a')) return;
+		const nearestCard = target.closest(
+			'[data-testid="path-card"], [data-testid="combine-frame"], [data-testid="ref-card"]'
+		);
+		if (nearestCard && nearestCard !== (e.currentTarget as HTMLElement)) return;
 		selectNode(tabId, path);
 	}
 	function onCardKeydown(e: KeyboardEvent): void {
@@ -199,8 +207,9 @@
 		<span class="font-medium text-zinc-300">{title || 'Path'}</span>
 		<StatusChip {tabId} {path} />
 		{#if chrome?.isBase}
-			<span class="rounded bg-amber-900/30 px-1.5 py-0.5 font-mono text-[10px] text-amber-400"
-				>base</span
+			<span
+				data-testid="base-badge"
+				class="rounded bg-amber-500/10 px-1 font-mono text-[10px] text-amber-400">base</span
 			>
 		{/if}
 		{#if chrome}
