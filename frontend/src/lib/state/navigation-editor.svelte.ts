@@ -106,9 +106,9 @@ const _visibleCounts = new Map<string, number>();
 /**
  * NODES whose LAST evaluate attempt failed, keyed by previewKey. With no manual
  * Run button the auto-run callers are fire-and-forget (they swallow the
- * rejection), so this flag IS the surfacing: ChainPreview renders it as a muted
- * error line when the node is runnable but no preview exists. Set only when the
- * failure is still current (same `isCurrent` discipline as the preview catch
+ * rejection), so this flag IS the surfacing: StatusChip and ResultsDock render
+ * it as a muted error line when the node is runnable but no preview exists.
+ * Set only when the failure is still current (same `isCurrent` discipline as the preview catch
  * path); cleared by any edit to the node (`updateDefinition`), a new run
  * starting (`runPreview`), the last visible reference going away
  * (`unregisterVisibleNode`), `closeDraft`, `reloadDraft`, and reset — an error
@@ -187,7 +187,7 @@ function scheduleAutoRun(tabId: string, path: NodePath): void {
 				// Auto-run is fire-and-forget: swallow the rethrow. runPreview's
 				// own catch already cleared the preview AND set the per-node
 				// eval-error flag (when still current) — that flag is what
-				// ChainPreview surfaces to the user.
+				// ResultsDock surfaces to the user.
 			});
 		}
 	}, AUTO_RUN_DEBOUNCE_MS);

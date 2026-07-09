@@ -10,6 +10,8 @@
 		setDraftName
 	} from '$lib/state';
 	import NavigationNode from './NavigationNode.svelte';
+	import ResultsDock from './ResultsDock.svelte';
+	import ResizeHandle from '$lib/components/ResizeHandle.svelte';
 
 	let { tabId }: { tabId: string } = $props();
 	$effect(() => {
@@ -19,6 +21,7 @@
 	const conflict = $derived(getSaveConflict(tabId));
 	const editable = $derived(canEdit());
 	let saveError = $state<string | null>(null);
+	let dockHeight = $state(280);
 
 	async function save(): Promise<void> {
 		saveError = null;
@@ -48,13 +51,18 @@
 	<div class="flex h-full flex-col">
 		<div class="flex items-center gap-2 border-b border-zinc-800 px-3 py-2">
 			<input
+				data-testid="nav-name"
 				class="w-56 rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs"
 				value={draft.name}
 				disabled={!editable}
 				oninput={(e) => setDraftName(tabId, e.currentTarget.value)}
 			/>
+			{#if draft.dirty}
+				<span title="Unsaved changes" class="text-amber-400">●</span>
+			{/if}
+			<span class="flex-1"></span>
 			{#if editable}
-				<div class="ml-auto flex items-center gap-2">
+				<div class="flex items-center gap-2">
 					<button
 						type="button"
 						class="rounded bg-emerald-700 px-2 py-1 text-xs text-white hover:bg-emerald-600 disabled:opacity-40"
@@ -84,8 +92,22 @@
 		{#if saveError}
 			<p class="px-3 py-1 text-xs text-red-400">{saveError}</p>
 		{/if}
-		<div class="min-h-0 flex-1 overflow-auto p-3">
-			<NavigationNode {tabId} path={[]} />
+		<div class="flex min-h-0 flex-1 flex-col">
+			<div class="min-h-0 flex-1 overflow-auto p-4">
+				<div class="mx-auto max-w-[820px]">
+					<NavigationNode {tabId} path={[]} />
+				</div>
+			</div>
+			<ResizeHandle
+				axis="y"
+				value={dockHeight}
+				min={120}
+				max={640}
+				onchange={(v) => (dockHeight = v)}
+			/>
+			<div class="flex-none" style="height:{dockHeight}px">
+				<ResultsDock {tabId} />
+			</div>
 		</div>
 	</div>
 {/if}
