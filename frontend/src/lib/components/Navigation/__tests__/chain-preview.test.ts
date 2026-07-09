@@ -7,8 +7,8 @@ import {
 	resetArtifacts,
 	resetCheckout,
 	resetNavigationEditors,
+	runPreview,
 	setProjectInfo,
-	toggleExpanded,
 	updateDefinition
 } from '$lib/state';
 import ChainPreview from '../ChainPreview.svelte';
@@ -66,7 +66,7 @@ function filterNarrowedPath(startType = 'Component') {
 }
 
 /** Flush the microtask/macrotask that a fire-and-forget preview run (via
- * `toggleExpanded`) needs to settle its mocked evaluate (mirrors
+ * `runPreview`) needs to settle its mocked evaluate (mirrors
  * navigation-editor.test.ts's flushEvaluate). */
 const flushEvaluate = () => new Promise<void>((r) => setTimeout(r, 0));
 
@@ -94,9 +94,7 @@ it('shows the node preview table when expanded and evaluated', async () => {
 	await ensureDraft(tabId);
 	vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
 	updateDefinition(tabId, runnablePath());
-	// root is expanded by default: collapse + re-expand to force an immediate run.
-	toggleExpanded(tabId, []);
-	toggleExpanded(tabId, []);
+	await runPreview(tabId, []).catch(() => {});
 	await flushEvaluate();
 	const c = render(tabId);
 	try {
@@ -117,8 +115,7 @@ it('shows an error line when the node evaluate failed', async () => {
 	await ensureDraft(tabId);
 	vi.spyOn(artifactsApi, 'evaluateNavigation').mockRejectedValue(new Error('boom'));
 	updateDefinition(tabId, runnablePath());
-	toggleExpanded(tabId, []);
-	toggleExpanded(tabId, []);
+	await runPreview(tabId, []).catch(() => {});
 	await flushEvaluate();
 	const c = render(tabId);
 	try {
@@ -133,8 +130,7 @@ it('renders no column for a filter-only narrowing (columns = rel steps)', async 
 	await ensureDraft(tabId);
 	vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
 	updateDefinition(tabId, filterNarrowedPath());
-	toggleExpanded(tabId, []);
-	toggleExpanded(tabId, []);
+	await runPreview(tabId, []).catch(() => {});
 	await flushEvaluate();
 	const c = render(tabId);
 	try {

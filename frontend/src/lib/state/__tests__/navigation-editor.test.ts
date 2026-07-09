@@ -8,18 +8,27 @@ import {
 	getEvalError,
 	getPreview,
 	getSaveConflict,
-	isExpanded,
+	getSelectedPath,
+	isNodeVisible,
 	isRunnable,
 	loadMorePreview,
+	registerVisibleNode,
 	resetNavigationEditors,
 	runPreview,
 	saveAsDraft,
 	saveDraft,
-	toggleExpanded,
+	selectNode,
+	unregisterVisibleNode,
 	updateDefinition
 } from '../navigation-editor.svelte';
 import { applyStructuralEdit } from '../navigation-editor.svelte';
-import { insertNavigationEdit, moveOperandEdit, removeOperandEdit } from '$lib/navigation/tree';
+import {
+	emptyCombine,
+	insertNavigationEdit,
+	moveOperandEdit,
+	pathKey,
+	removeOperandEdit
+} from '$lib/navigation/tree';
 import { resetWorkspaceTabs, openNavigationTab, getDynamicTabs } from '../workspace.svelte';
 import { resetArtifacts } from '../artifacts.svelte';
 
@@ -80,7 +89,7 @@ function runnablePath(startType = 'Component') {
 }
 
 /** Flush the microtask/macrotask that a fire-and-forget preview run (via
- * `toggleExpanded`) needs to settle its mocked (immediately-resolved) evaluate. */
+ * `registerVisibleNode`) needs to settle its mocked (immediately-resolved) evaluate. */
 const flushEvaluate = () => new Promise<void>((r) => setTimeout(r, 0));
 
 beforeEach(() => {
@@ -291,7 +300,7 @@ describe('saveAsDraft', () => {
 		expect(newDraft.dirty).toBe(false);
 	});
 
-	it('carries the previous tab’s expanded/preview node-keys to the new tab key', async () => {
+	it('carries the previous tab’s visible/preview node-keys to the new tab key', async () => {
 		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue({
 			id: 'a1',
 			kind: 'navigation',
@@ -310,7 +319,7 @@ describe('saveAsDraft', () => {
 		openNavigationTab({ artifactId: 'a1', title: 'Sensors' });
 		await ensureDraft('nav:a1'); // root expanded by default + auto-runs
 		expect(getPreview('nav:a1', [])?.total).toBe(1);
-		expect(isExpanded('nav:a1', [])).toBe(true);
+		expect(isNodeVisible('nav:a1', [])).toBe(true);
 
 		vi.spyOn(artifactsApi, 'createArtifact').mockResolvedValue({
 			id: 'a9',
@@ -327,10 +336,10 @@ describe('saveAsDraft', () => {
 
 		// The old tab's per-node preview/expanded state must not leak.
 		expect(getPreview('nav:a1', [])).toBeUndefined();
-		expect(isExpanded('nav:a1', [])).toBe(false);
+		expect(isNodeVisible('nav:a1', [])).toBe(false);
 		// The new tab key inherits the root's preview + expanded state.
 		expect(getPreview('nav:a9', [])?.total).toBe(1);
-		expect(isExpanded('nav:a9', [])).toBe(true);
+		expect(isNodeVisible('nav:a9', [])).toBe(true);
 	});
 
 	it('a name-clash 409 on save-as surfaces as an error, not a rev conflict', async () => {
@@ -505,24 +514,24 @@ describe('node-scoped previews', () => {
 		await ensureDraft(tabId);
 		vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
 		updateDefinition(tabId, runnablePath());
-		expect(isExpanded(tabId, [])).toBe(true); // root expanded by default
-		toggleExpanded(tabId, []); // collapse
-		toggleExpanded(tabId, []); // re-expand → immediate run
+		expect(isNodeVisible(tabId, [])).toBe(true); // root pinned by ensureDraft
+		unregisterVisibleNode(tabId, []); // release the pin
+		registerVisibleNode(tabId, []); // re-register → immediate run
 		await flushEvaluate();
 		expect(getPreview(tabId, [])).toBeDefined();
 		expect(getPreview(tabId, [])?.total).toBe(1);
 	});
 
-	it('collapsing a node drops its preview and cancels its timer', async () => {
+	it('unregistering the last reference to a node drops its preview', async () => {
 		const tabId = 'nav:draft:2';
 		await ensureDraft(tabId);
 		vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
 		updateDefinition(tabId, runnablePath());
 		await runPreview(tabId, []);
 		expect(getPreview(tabId, [])).toBeDefined();
-		toggleExpanded(tabId, []); // collapse the root
+		unregisterVisibleNode(tabId, []); // release the last reference to the root
 		expect(getPreview(tabId, [])).toBeUndefined();
-		expect(isExpanded(tabId, [])).toBe(false);
+		expect(isNodeVisible(tabId, [])).toBe(false);
 	});
 
 	it('a stale evaluate response for an edited node is dropped', async () => {
@@ -883,7 +892,7 @@ describe('evaluation error surfacing', () => {
 	});
 });
 
-describe('structural edits keep expansion attached to nodes', () => {
+describe('structural edits keep per-node state attached to nodes', () => {
 	/** union of `paths` as a runnable root combine. */
 	function combineOf(...types: string[]) {
 		return {
@@ -901,7 +910,7 @@ describe('structural edits keep expansion attached to nodes', () => {
 		const evaluate = vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
 		updateDefinition(tabId, combineOf('A', 'B', 'C'));
 		await vi.advanceTimersByTimeAsync(400);
-		toggleExpanded(tabId, [2]); // expand operand C → immediate run
+		registerVisibleNode(tabId, [2]); // expand operand C → immediate run
 		await vi.advanceTimersByTimeAsync(0);
 		expect(getPreview(tabId, [2])).toBeDefined();
 		evaluate.mockClear();
@@ -910,8 +919,8 @@ describe('structural edits keep expansion attached to nodes', () => {
 		// and thus its auto-run — must follow the NODE, not the position.
 		const draft = getDraft(tabId)!;
 		applyStructuralEdit(tabId, removeOperandEdit(draft.definition, [], 0));
-		expect(isExpanded(tabId, [1])).toBe(true);
-		expect(isExpanded(tabId, [2])).toBe(false);
+		expect(isNodeVisible(tabId, [1])).toBe(true);
+		expect(isNodeVisible(tabId, [2])).toBe(false);
 		await vi.advanceTimersByTimeAsync(400);
 		// Root (still expanded) + moved operand C both re-ran.
 		expect(
@@ -931,13 +940,13 @@ describe('structural edits keep expansion attached to nodes', () => {
 		vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
 		updateDefinition(tabId, combineOf('A', 'B'));
 		await vi.advanceTimersByTimeAsync(400);
-		toggleExpanded(tabId, [0]); // expand operand A
+		registerVisibleNode(tabId, [0]); // expand operand A
 		await vi.advanceTimersByTimeAsync(0);
 
 		const draft = getDraft(tabId)!;
 		applyStructuralEdit(tabId, moveOperandEdit(draft.definition, [], 0, 'down'));
-		expect(isExpanded(tabId, [1])).toBe(true); // A moved down — expansion followed
-		expect(isExpanded(tabId, [0])).toBe(false);
+		expect(isNodeVisible(tabId, [1])).toBe(true); // A moved down — expansion followed
+		expect(isNodeVisible(tabId, [0])).toBe(false);
 	});
 
 	it('auto-wrap moves the root expansion (and its preview) to operand 0', async () => {
@@ -952,19 +961,21 @@ describe('structural edits keep expansion attached to nodes', () => {
 
 		const draft = getDraft(tabId)!;
 		applyStructuralEdit(tabId, insertNavigationEdit(draft.definition, []));
-		// The built path travelled to operand 0 — its expansion travels with it;
-		// the new root Combine starts collapsed (no giant union auto-run).
-		expect(isExpanded(tabId, [0])).toBe(true);
-		expect(isExpanded(tabId, [])).toBe(false);
+		// The built path travelled to operand 0 — its visibility + selection follow it.
+		expect(isNodeVisible(tabId, [0])).toBe(true);
+		expect(pathKey(getSelectedPath(tabId))).toBe('0');
+		expect(getPreview(tabId, [])).toBeUndefined(); // invalidated by the edit
 		await vi.advanceTimersByTimeAsync(400);
-		expect(evaluate).toHaveBeenCalledTimes(1);
-		expect(evaluate).toHaveBeenCalledWith(
-			expect.objectContaining({
-				definition: expect.objectContaining({ kind: 'path' })
-			})
-		);
+		// Operand 0 (the moved path) re-ran with its own definition…
 		expect(getPreview(tabId, [0])).toBeDefined();
-		expect(getPreview(tabId, [])).toBeUndefined();
+		expect(evaluate).toHaveBeenCalledWith(
+			expect.objectContaining({ definition: expect.objectContaining({ kind: 'path' }) })
+		);
+		// …and the pinned root (now the Combine) re-ran too — accepted cost of
+		// every VISIBLE node keeping a live status chip.
+		expect(evaluate).toHaveBeenCalledWith(
+			expect.objectContaining({ definition: expect.objectContaining({ kind: 'set_op' }) })
+		);
 	});
 
 	it('unwrap lifts the surviving operand’s expansion onto the parent', async () => {
@@ -974,15 +985,15 @@ describe('structural edits keep expansion attached to nodes', () => {
 		vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
 		updateDefinition(tabId, combineOf('A', 'B'));
 		await vi.advanceTimersByTimeAsync(400);
-		toggleExpanded(tabId, []); // collapse the root combine
-		toggleExpanded(tabId, [1]); // expand operand B only
+		registerVisibleNode(tabId, [1]); // expand operand B only
 		await vi.advanceTimersByTimeAsync(0);
 
 		// Remove operand A: the combine unwraps and B becomes the root. B was
-		// expanded, so the root must now be expanded and keep auto-running.
+		// visible, and the root pin keeps the root visible regardless, so the
+		// root must stay visible and keep auto-running.
 		const draft = getDraft(tabId)!;
 		applyStructuralEdit(tabId, removeOperandEdit(draft.definition, [], 0));
-		expect(isExpanded(tabId, [])).toBe(true);
+		expect(isNodeVisible(tabId, [])).toBe(true);
 		await vi.advanceTimersByTimeAsync(400);
 		expect(getPreview(tabId, [])).toBeDefined();
 	});
@@ -1046,5 +1057,173 @@ describe('auto-run survives the first-save tab rebind', () => {
 		expect(evaluate).toHaveBeenCalledTimes(2);
 		expect(getPreview('nav:a9')?.loading).toBe(false);
 		expect(getPreview('nav:a9')?.total).toBe(1);
+	});
+});
+
+describe('visible-node registration', () => {
+	it('registering a runnable node runs it immediately (fire-and-forget)', async () => {
+		const tabId = 'nav:draft:vis1';
+		await ensureDraft(tabId);
+		const evaluate = vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		updateDefinition(tabId, {
+			kind: 'set_op',
+			schema_version: 2,
+			op: 'union',
+			operands: [{ definition: runnablePath('A'), step_index: null }]
+		});
+		evaluate.mockClear();
+		registerVisibleNode(tabId, [0]);
+		await flushEvaluate();
+		expect(evaluate).toHaveBeenCalledTimes(1);
+		expect(getPreview(tabId, [0])?.total).toBe(1);
+	});
+
+	it('registering does NOT double-fire a run that is already scheduled', async () => {
+		vi.useFakeTimers();
+		const tabId = 'nav:draft:vis2';
+		await ensureDraft(tabId);
+		const evaluate = vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		registerVisibleNode(tabId, []); // count 2 (root pinned by ensureDraft)
+		updateDefinition(tabId, runnablePath('A')); // schedules the debounced run
+		registerVisibleNode(tabId, []); // count 3 — must not fire immediately
+		expect(evaluate).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(400);
+		expect(evaluate).toHaveBeenCalledTimes(1);
+	});
+
+	it('is refcounted: a node stays live while another reference holds it', async () => {
+		vi.useFakeTimers();
+		const tabId = 'nav:draft:vis3';
+		await ensureDraft(tabId);
+		vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		updateDefinition(tabId, runnablePath('A'));
+		await vi.advanceTimersByTimeAsync(400);
+		registerVisibleNode(tabId, []); // a second holder (the card component)
+		unregisterVisibleNode(tabId, []); // that holder goes away…
+		expect(isNodeVisible(tabId, [])).toBe(true); // …the pin keeps it live
+		expect(getPreview(tabId, [])).toBeDefined();
+		unregisterVisibleNode(tabId, []); // release the pin too
+		expect(isNodeVisible(tabId, [])).toBe(false);
+		expect(getPreview(tabId, [])).toBeUndefined();
+	});
+
+	it('unregistering the last reference orphans an in-flight evaluate', async () => {
+		const tabId = 'nav:draft:vis4';
+		await ensureDraft(tabId);
+		const d = deferred<typeof CHAIN_PAGE>();
+		vi.spyOn(artifactsApi, 'evaluateNavigation').mockImplementation(() => d.promise);
+		updateDefinition(tabId, runnablePath('A'));
+		const inflight = runPreview(tabId, []);
+		unregisterVisibleNode(tabId, []); // releases the root pin
+		d.resolve(CHAIN_PAGE);
+		await inflight;
+		expect(getPreview(tabId, [])).toBeUndefined();
+	});
+});
+
+describe('node selection', () => {
+	function combine2() {
+		return {
+			kind: 'set_op' as const,
+			schema_version: 2,
+			op: 'union' as const,
+			operands: [
+				{ definition: runnablePath('A'), step_index: null },
+				{ definition: runnablePath('B'), step_index: null }
+			]
+		};
+	}
+
+	it('defaults to the root node', async () => {
+		await ensureDraft('nav:draft:sel1');
+		expect(getSelectedPath('nav:draft:sel1')).toEqual([]);
+	});
+
+	it('selectNode stores the node path', async () => {
+		const tabId = 'nav:draft:sel2';
+		await ensureDraft(tabId);
+		updateDefinition(tabId, combine2());
+		selectNode(tabId, [1]);
+		expect(getSelectedPath(tabId)).toEqual([1]);
+	});
+
+	it('a structural edit remaps the selection through remapPath', async () => {
+		const tabId = 'nav:draft:sel3';
+		await ensureDraft(tabId);
+		vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		updateDefinition(tabId, {
+			kind: 'set_op',
+			schema_version: 2,
+			op: 'union',
+			operands: [
+				{ definition: runnablePath('A'), step_index: null },
+				{ definition: runnablePath('B'), step_index: null },
+				{ definition: runnablePath('C'), step_index: null }
+			]
+		});
+		selectNode(tabId, [2]); // C
+		applyStructuralEdit(tabId, removeOperandEdit(getDraft(tabId)!.definition, [], 0));
+		expect(getSelectedPath(tabId)).toEqual([1]); // C followed its node
+	});
+
+	it('a removed selected node falls back to the root', async () => {
+		const tabId = 'nav:draft:sel4';
+		await ensureDraft(tabId);
+		vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		updateDefinition(tabId, combine2());
+		selectNode(tabId, [0]);
+		applyStructuralEdit(tabId, removeOperandEdit(getDraft(tabId)!.definition, [], 0));
+		expect(getSelectedPath(tabId)).toEqual([]);
+	});
+
+	it('auto-wrap carries the selection onto operand 0', async () => {
+		const tabId = 'nav:draft:sel5';
+		await ensureDraft(tabId);
+		vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		updateDefinition(tabId, runnablePath('A'));
+		applyStructuralEdit(tabId, insertNavigationEdit(getDraft(tabId)!.definition, []));
+		expect(getSelectedPath(tabId)).toEqual([0]);
+	});
+
+	it('a field edit that deletes the selected node falls back to the root', async () => {
+		const tabId = 'nav:draft:sel6';
+		await ensureDraft(tabId);
+		vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		// A path whose START is a combination; select the start's operand 0…
+		updateDefinition(tabId, { ...runnablePath('A'), start: emptyCombine() });
+		selectNode(tabId, ['start', 0]);
+		// …then replace the start with a plain scope: the selected node is gone.
+		updateDefinition(tabId, runnablePath('A'));
+		expect(getSelectedPath(tabId)).toEqual([]);
+	});
+
+	it('rekeyTab carries the selection across the first-save rebind', async () => {
+		const tabId = openNavigationTab({ artifactId: null, title: 'New navigation' });
+		await ensureDraft(tabId);
+		vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		vi.spyOn(artifactsApi, 'createArtifact').mockResolvedValue({
+			id: 'a9',
+			kind: 'navigation',
+			name: 'Mine',
+			artifact_rev: 1,
+			updated_at: '',
+			updated_by: null,
+			payload: {}
+		});
+		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({ items: [] });
+		updateDefinition(tabId, combine2());
+		selectNode(tabId, [1]);
+		await saveDraft(tabId);
+		expect(getSelectedPath('nav:a9')).toEqual([1]);
+		expect(getSelectedPath(tabId)).toEqual([]); // the retired tab keeps nothing
+	});
+
+	it('closeDraft clears the selection', async () => {
+		const tabId = 'nav:draft:sel8';
+		await ensureDraft(tabId);
+		updateDefinition(tabId, combine2());
+		selectNode(tabId, [1]);
+		closeDraft(tabId);
+		expect(getSelectedPath(tabId)).toEqual([]);
 	});
 });

@@ -1,11 +1,12 @@
 <script lang="ts">
 	import { Trash2, ChevronUp, ChevronDown } from '@lucide/svelte';
+	import { untrack } from 'svelte';
 	import {
 		applyStructuralEdit,
 		canEdit,
 		getArtifactHeaders,
-		isExpanded,
-		toggleExpanded,
+		registerVisibleNode,
+		unregisterVisibleNode,
 		updateDefinition,
 		getDraft
 	} from '$lib/state';
@@ -29,6 +30,16 @@
 	const editable = $derived(canEdit());
 	const navHeaders = $derived(getArtifactHeaders().filter((a) => a.kind === 'navigation'));
 	const draft = $derived(getDraft(tabId));
+	// Registers/unregisters this frame's node on mount/unmount only — the store
+	// mutation runs untracked so the reactive reads it performs (draft/preview
+	// lookups) before an immediate run's first await don't get picked up as
+	// dependencies of THIS effect (which would re-trigger it the moment the
+	// run it just kicked off writes back into the store, looping forever).
+	$effect(() => {
+		const p = path;
+		untrack(() => registerVisibleNode(tabId, p));
+		return () => untrack(() => unregisterVisibleNode(tabId, p));
+	});
 	let addOpen = $state(false);
 
 	// Field edits (operator, step_index) move no nodes → plain updateDefinition;
@@ -64,9 +75,6 @@
 
 <div class="space-y-1.5 rounded border border-zinc-800 p-2 text-xs">
 	<div class="flex items-center gap-2">
-		<button type="button" onclick={() => toggleExpanded(tabId, path)} aria-label="Toggle preview">
-			{isExpanded(tabId, path) ? '▾' : '▸'}
-		</button>
 		<span class="text-zinc-400">Combine</span>
 		<select
 			disabled={!editable}
@@ -160,7 +168,5 @@
 			</StereotypePicker>
 		</div>
 	{/if}
-	{#if isExpanded(tabId, path)}
-		<ChainPreview {tabId} {path} />
-	{/if}
+	<ChainPreview {tabId} {path} />
 </div>

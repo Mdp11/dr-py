@@ -1,12 +1,13 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import {
 		applyStructuralEdit,
 		canEdit,
 		getArtifactHeaders,
 		getDraft,
 		getMetamodel,
-		isExpanded,
-		toggleExpanded,
+		registerVisibleNode,
+		unregisterVisibleNode,
 		updateDefinition
 	} from '$lib/state';
 	import {
@@ -41,6 +42,16 @@
 	let { tabId, path, node }: { tabId: string; path: NodePath; node: PathNavigation } = $props();
 	const editable = $derived(canEdit());
 	const draft = $derived(getDraft(tabId));
+	// Registers/unregisters this card's node on mount/unmount only — the store
+	// mutation runs untracked so the reactive reads it performs (draft/preview
+	// lookups) before an immediate run's first await don't get picked up as
+	// dependencies of THIS effect (which would re-trigger it the moment the
+	// run it just kicked off writes back into the store, looping forever).
+	$effect(() => {
+		const p = path;
+		untrack(() => registerVisibleNode(tabId, p));
+		return () => untrack(() => unregisterVisibleNode(tabId, p));
+	});
 	const mm = $derived(getMetamodel());
 	const navHeaders = $derived(getArtifactHeaders().filter((a) => a.kind === 'navigation'));
 	let addOpen = $state(false);
@@ -113,9 +124,6 @@
 
 <div class="space-y-2 rounded border border-zinc-800 p-2">
 	<div class="flex items-center gap-2 text-xs">
-		<button type="button" onclick={() => toggleExpanded(tabId, path)} aria-label="Toggle preview"
-			>{isExpanded(tabId, path) ? '▾' : '▸'}</button
-		>
 		<span class="text-zinc-400">Navigation</span>
 		<label
 			class="ml-auto flex items-center gap-1.5 text-zinc-400"
@@ -216,7 +224,5 @@
 			</StereotypePicker>
 		</div>
 	{/if}
-	{#if isExpanded(tabId, path)}
-		<ChainPreview {tabId} {path} />
-	{/if}
+	<ChainPreview {tabId} {path} />
 </div>

@@ -1,6 +1,7 @@
 import { flushSync, mount, unmount } from 'svelte';
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
+import * as artifactsApi from '$lib/api/artifacts';
 import type { SetExpression } from '$lib/api/types';
 import {
 	ensureDraft,
@@ -18,11 +19,22 @@ beforeEach(() => {
 	resetArtifacts();
 	resetCheckout();
 	setProjectInfo({ role: 'editor', lockTtlSeconds: 300 });
+	// Every rendered card now registers itself visible on mount (see
+	// PathLeafEditor/CombineEditor's `$effect`), which fires an immediate
+	// preview run for any runnable operand — mock the evaluate call so these
+	// structural-edit tests never hit the network.
+	vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue({
+		step_types: [],
+		chains: [],
+		total: 0,
+		truncated: false
+	});
 });
 afterEach(() => {
 	resetNavigationEditors();
 	resetArtifacts();
 	resetCheckout();
+	vi.restoreAllMocks();
 });
 
 /** A combine node whose N operands are inline bare paths, one per given start

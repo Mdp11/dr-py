@@ -14,9 +14,9 @@
  * by `tabId` alone (there is one draft and one save per tab), but `_previews`,
  * `_evalErrors`, `_generations`, and `_debounceTimers` are all keyed by
  * previewKey, and `_expanded` maps a tabId to the set of expanded node
- * pathKeys. A node is only previewed while it is EXPANDED (collapsing drops
- * its preview); the root is expanded by default so a bare navigation still
- * shows results.
+ * pathKeys. A node is previewed while it is VISIBLE — card components
+ * register/unregister it on mount/unmount, and `ensureDraft` pins the root —
+ * there is no user-facing collapse toggle.
  *
  * Auto-run: there is no manual Run button. `updateDefinition` reschedules a
  * DEBOUNCED preview run (`AUTO_RUN_DEBOUNCE_MS`, per NODE — a newer edit resets
@@ -43,6 +43,7 @@ import {
 	emptyPath,
 	isRunnable,
 	nodeAt,
+	nodeExistsAt,
 	pathKey,
 	type NodePath,
 	type StructuralEdit
@@ -82,6 +83,26 @@ const _conflicts = new SvelteMap<string, number>(); // tabId -> server rev (per-
  * expanded; the root pathKey (`''`) is expanded by default. */
 const _expanded = new SvelteMap<string, SvelteSet<string>>();
 
+/** tabId -> the pathKey of the ONE selected node (`''` = root). The dock
+ * renders this node's chains; a card click sets it. Selection is per-node
+ * state like previews, so `applyStructuralEdit` remaps it and `rekeyTab`
+ * carries it. */
+const _selected = new SvelteMap<string, string>();
+
+/**
+ * previewKey -> how many live references hold this node visible. Card
+ * components register on mount and unregister on unmount; `ensureDraft` pins
+ * the ROOT with one reference for the lifetime of the draft. Refcounted
+ * because Svelte gives no ordering guarantee between the unmount of a card
+ * and the mount of its replacement at the same path (a Path auto-wrapping
+ * into a Combination swaps components at path `[]`): a plain add/delete pair
+ * would let the late unregister tear down a node that is on screen, cancelling
+ * its debounce timer and silently killing auto-run. Control state, never read
+ * from templates.
+ */
+// eslint-disable-next-line svelte/prefer-svelte-reactivity
+const _visibleCounts = new Map<string, number>();
+
 /**
  * NODES whose LAST evaluate attempt failed, keyed by previewKey. With no manual
  * Run button the auto-run callers are fire-and-forget (they swallow the
@@ -89,8 +110,9 @@ const _expanded = new SvelteMap<string, SvelteSet<string>>();
  * error line when the node is runnable but no preview exists. Set only when the
  * failure is still current (same `isCurrent` discipline as the preview catch
  * path); cleared by any edit to the node (`updateDefinition`), a new run
- * starting (`runPreview`), collapse (`toggleExpanded`), `closeDraft`,
- * `reloadDraft`, and reset — an error must never outlive the node it belongs to.
+ * starting (`runPreview`), the last visible reference going away
+ * (`unregisterVisibleNode`), `closeDraft`, `reloadDraft`, and reset — an error
+ * must never outlive the node it belongs to.
  */
 const _evalErrors = new SvelteMap<string, true>();
 
@@ -182,6 +204,20 @@ function markExpanded(tabId: string, path: NodePath): void {
 	set.add(pathKey(path));
 }
 
+/** Pin the ROOT node visible for the draft's lifetime. The root is always
+ * rendered, and the pin keeps its preview alive across the PathCard ->
+ * CombineFrame component swap that an auto-wrap performs at path `[]`.
+ * Released only by closeDraft/reloadDraft/reset. Also seeds the tab's
+ * selection at the root (unless one is already present) so a structural edit
+ * fired before the user ever clicks a card still has a selection to carry
+ * through `remapPath` — mirroring the expanded-set seed above. */
+function pinRoot(tabId: string): void {
+	markExpanded(tabId, []);
+	const key = previewKey(tabId, []);
+	_visibleCounts.set(key, (_visibleCounts.get(key) ?? 0) + 1);
+	if (!_selected.has(tabId)) _selected.set(tabId, '');
+}
+
 /**
  * Clear EVERY per-node key belonging to `tabId`: cancel its timers, delete its
  * previews + eval-errors, and bump its generations so any in-flight evaluate
@@ -201,10 +237,12 @@ function clearTabKeys(tabId: string): void {
 	for (const k of _evalErrors.keys()) if (k.startsWith(prefix)) keys.add(k);
 	for (const k of _debounceTimers.keys()) if (k.startsWith(prefix)) keys.add(k);
 	for (const k of _generations.keys()) if (k.startsWith(prefix)) keys.add(k);
+	for (const k of _visibleCounts.keys()) if (k.startsWith(prefix)) keys.add(k);
 	for (const key of keys) {
 		cancelAutoRun(key);
 		_previews.delete(key);
 		_evalErrors.delete(key);
+		_visibleCounts.delete(key);
 		bumpGeneration(key); // orphan any in-flight evaluate for this node
 	}
 }
@@ -247,10 +285,16 @@ function rekeyTab(oldTab: string, newTab: string): void {
 	move(_previews);
 	move(_evalErrors);
 	move(_generations);
+	move(_visibleCounts);
 	const set = _expanded.get(oldTab);
 	if (set) {
 		_expanded.delete(oldTab);
 		_expanded.set(newTab, set);
+	}
+	const sel = _selected.get(oldTab);
+	if (sel !== undefined) {
+		_selected.delete(oldTab);
+		_selected.set(newTab, sel);
 	}
 	for (const pk of pendingPks) scheduleAutoRun(newTab, parsePathKey(pk));
 	const newPrefix = `${newTab}::`;
@@ -284,9 +328,62 @@ export function getSaveConflict(tabId: string): number | undefined {
 export function getEvalError(tabId: string, path: NodePath = []): boolean {
 	return _evalErrors.has(previewKey(tabId, path));
 }
-/** True when the node at `path` is expanded (and thus previewed). */
-export function isExpanded(tabId: string, path: NodePath = []): boolean {
+/** True when the node at `path` is rendered somewhere (and thus previewed). */
+export function isNodeVisible(tabId: string, path: NodePath = []): boolean {
 	return _expanded.get(tabId)?.has(pathKey(path)) ?? false;
+}
+
+/**
+ * Take a reference on the node at `path`: it becomes VISIBLE (its preview
+ * auto-runs on every edit, keeping its status chip live). Called by each card
+ * component on mount, and once by `ensureDraft` to pin the always-rendered
+ * root. Only the 0 -> 1 transition may kick a run, and only when nothing is
+ * already pending for the node — an `applyStructuralEdit` that has just
+ * scheduled the debounced run must not be double-fired. Fire-and-forget, like
+ * the saved-artifact open: the eval-error flag is the failure surface.
+ */
+export function registerVisibleNode(tabId: string, path: NodePath): void {
+	const draft = _drafts.get(tabId);
+	if (!draft) return;
+	const key = previewKey(tabId, path);
+	const next = (_visibleCounts.get(key) ?? 0) + 1;
+	_visibleCounts.set(key, next);
+	markExpanded(tabId, path);
+	if (next > 1) return;
+	if (_previews.has(key) || _debounceTimers.has(key)) return;
+	const node = nodeAt(draft.definition, path);
+	if (node && isRunnable(node)) void runPreview(tabId, path).catch(() => {});
+}
+
+/**
+ * Release a reference. On the LAST one the node stops being visible: cancel
+ * its pending timer, delete its preview + eval-error, and bump its generation
+ * so any in-flight evaluate response is orphaned (exactly what collapsing used
+ * to do). Earlier references keep it alive.
+ */
+export function unregisterVisibleNode(tabId: string, path: NodePath): void {
+	const key = previewKey(tabId, path);
+	const next = (_visibleCounts.get(key) ?? 0) - 1;
+	if (next > 0) {
+		_visibleCounts.set(key, next);
+		return;
+	}
+	_visibleCounts.delete(key);
+	_expanded.get(tabId)?.delete(pathKey(path));
+	cancelAutoRun(key);
+	_previews.delete(key);
+	_evalErrors.delete(key);
+	bumpGeneration(key);
+}
+
+/** The tab's selected node path (`[]` = root, the default). */
+export function getSelectedPath(tabId: string): NodePath {
+	return parsePathKey(_selected.get(tabId) ?? '');
+}
+
+/** Select the node the results dock shows. Exactly one per tab. */
+export function selectNode(tabId: string, path: NodePath): void {
+	_selected.set(tabId, pathKey(path));
 }
 
 export async function ensureDraft(tabId: string): Promise<NavDraft> {
@@ -302,7 +399,7 @@ export async function ensureDraft(tabId: string): Promise<NavDraft> {
 			dirty: false
 		};
 		_drafts.set(tabId, draft);
-		markExpanded(tabId, []); // root expanded by default (empty draft: no run)
+		pinRoot(tabId); // root pinned visible by default (empty draft: no run)
 		return draft;
 	} else {
 		const id = tabId.slice('nav:'.length);
@@ -315,7 +412,7 @@ export async function ensureDraft(tabId: string): Promise<NavDraft> {
 			dirty: false
 		};
 		_drafts.set(tabId, draft);
-		markExpanded(tabId, []); // root expanded by default
+		pinRoot(tabId); // root pinned visible by default
 		// Show results without requiring an edit first. Immediate (no
 		// debounce — there's no rapid-fire editing to coalesce here), and
 		// awaited so the preview is in place by the time the caller's
@@ -334,24 +431,32 @@ export function updateDefinition(tabId: string, defn: NavigationDefinition): voi
 	if (!draft) return;
 	_drafts.set(tabId, { ...draft, definition: defn, dirty: true });
 	const expanded = _expanded.get(tabId);
-	if (!expanded) return;
-	// Every expanded node's preview must match what's on screen. For each one:
-	// if its node still exists, invalidate + reschedule its debounced run; if
-	// the edit removed it (a deleted operand, or it became a ref), drop it from
-	// the expanded set and clear its keys.
-	for (const pk of [...expanded]) {
-		const path = parsePathKey(pk);
-		const key = `${tabId}::${pk}`;
-		const node = nodeAt(defn, path);
-		bumpGeneration(key); // any in-flight evaluate for this node is now stale
-		_previews.delete(key); // stale: preview must match what's on screen
-		_evalErrors.delete(key); // an old failure belongs to an old definition
-		if (node) {
-			scheduleAutoRun(tabId, path);
-		} else {
-			expanded.delete(pk); // node no longer exists — stop tracking it
-			cancelAutoRun(key);
+	if (expanded) {
+		// Every expanded node's preview must match what's on screen. For each one:
+		// if its node still exists, invalidate + reschedule its debounced run; if
+		// the edit removed it (a deleted operand, or it became a ref), drop it from
+		// the expanded set and clear its keys.
+		for (const pk of [...expanded]) {
+			const path = parsePathKey(pk);
+			const key = `${tabId}::${pk}`;
+			const node = nodeAt(defn, path);
+			bumpGeneration(key); // any in-flight evaluate for this node is now stale
+			_previews.delete(key); // stale: preview must match what's on screen
+			_evalErrors.delete(key); // an old failure belongs to an old definition
+			if (node) {
+				scheduleAutoRun(tabId, path);
+			} else {
+				expanded.delete(pk); // node no longer exists — stop tracking it
+				cancelAutoRun(key);
+			}
 		}
+	}
+	// A field edit can delete the selected node (e.g. replacing a combination
+	// start with a plain scope). Selection must never dangle: fall back to the
+	// root, which always exists.
+	const selPk = _selected.get(tabId);
+	if (selPk !== undefined && selPk !== '' && !nodeExistsAt(defn, parsePathKey(selPk))) {
+		_selected.set(tabId, '');
 	}
 }
 
@@ -392,40 +497,23 @@ export function applyStructuralEdit(tabId: string, edit: StructuralEdit): void {
 			}
 		}
 		for (const pk of nextPks) expanded.add(pk);
+		// The root position is permanently pinned (`pinRoot`, called once by
+		// `ensureDraft`): it stays visible for the whole draft's lifetime, even
+		// when the edit moves its old node away entirely and a BRAND-NEW node
+		// now occupies `[]` (the auto-wrap's Combine is the case in point — the
+		// retire loop above just cleared its predecessor's stale preview). Force
+		// it back into the expanded set so updateDefinition's sweep below picks
+		// it up and reschedules its run against whatever now sits at the root.
+		expanded.add('');
+	}
+	// Selection is per-node state too: it must follow the node through the
+	// mutation (a removed selected node falls back to the root).
+	const selPk = _selected.get(tabId);
+	if (selPk !== undefined) {
+		const np = edit.remapPath(parsePathKey(selPk));
+		_selected.set(tabId, np === null ? '' : pathKey(np));
 	}
 	updateDefinition(tabId, edit.defn);
-}
-
-/**
- * Expand/collapse the node at `path`. On EXPAND, mark it and — if the node is
- * runnable — kick off an immediate preview run (fire-and-forget, like the
- * saved-artifact open). On COLLAPSE, cancel its pending timer, delete its
- * preview + eval-error, and bump its generation so any in-flight response is
- * orphaned (a collapsed node shows nothing).
- */
-export function toggleExpanded(tabId: string, path: NodePath): void {
-	const draft = _drafts.get(tabId);
-	if (!draft) return;
-	const pk = pathKey(path);
-	const key = previewKey(tabId, path);
-	let set = _expanded.get(tabId);
-	if (!set) {
-		set = new SvelteSet<string>();
-		_expanded.set(tabId, set);
-	}
-	if (set.has(pk)) {
-		set.delete(pk);
-		cancelAutoRun(key);
-		_previews.delete(key);
-		_evalErrors.delete(key);
-		bumpGeneration(key); // orphan any in-flight evaluate for the collapsed node
-	} else {
-		set.add(pk);
-		const node = nodeAt(draft.definition, path);
-		if (node && isRunnable(node)) {
-			void runPreview(tabId, path).catch(() => {});
-		}
-	}
 }
 
 export function setDraftName(tabId: string, name: string): void {
@@ -550,6 +638,7 @@ export async function reloadDraft(tabId: string): Promise<void> {
 	_drafts.delete(tabId);
 	_conflicts.delete(tabId);
 	_expanded.delete(tabId);
+	_selected.delete(tabId);
 	await ensureDraft(tabId);
 }
 
@@ -633,6 +722,7 @@ export function closeDraft(tabId: string): void {
 	_drafts.delete(tabId);
 	_conflicts.delete(tabId);
 	_expanded.delete(tabId);
+	_selected.delete(tabId);
 }
 
 export function resetNavigationEditors(): void {
@@ -643,6 +733,8 @@ export function resetNavigationEditors(): void {
 	_conflicts.clear();
 	_evalErrors.clear();
 	_expanded.clear();
+	_visibleCounts.clear();
+	_selected.clear();
 	// Bump (not clear) so in-flight responses from before the reset stay stale
 	// even if the same node key is immediately re-created.
 	for (const key of _generations.keys()) bumpGeneration(key);
