@@ -253,7 +253,7 @@ describe('chainColumns', () => {
 	});
 
 	it('a bare start scope is a single column labelled Start', () => {
-		const cols = chainColumns(path({ kind: 'scope', types: [], criteria: [] }, []));
+		const cols: ChainColumn[] = chainColumns(path({ kind: 'scope', types: [], criteria: [] }, []));
 		expect(cols).toEqual([{ index: 0, label: 'Start', sub: undefined }]);
 	});
 
