@@ -14,7 +14,7 @@
 	// definition is `[]`) — a set-op's own operands render their own nested
 	// ChainPreview, each keyed by its own path (see navigation-editor.svelte.ts
 	// per-node preview state). Required, not defaulted: every caller
-	// (CombineEditor, PathLeafEditor) is itself rendering at a known node path
+	// (CombineFrame, PathCard) is itself rendering at a known node path
 	// and must be explicit about which node's preview this is — this
 	// component only ever appears inside a parent's `isExpanded(tabId, path)`
 	// guard, never as a bare root-only preview.

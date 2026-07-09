@@ -171,7 +171,7 @@ it('add relationship step appends a relationship item', async () => {
 	await seed(tabId, emptyStart());
 	const c = render(tabId);
 	try {
-		buttonByText('+ relationship step').click();
+		buttonByText('+ Follow a relationship').click();
 		flushSync();
 		const steps = (getDraft(tabId)?.definition as PathNavigation).steps;
 		expect(steps.at(-1)?.kind).toBe('relationship');
@@ -185,7 +185,7 @@ it('add filter step appends a filter item', async () => {
 	await seed(tabId, emptyStart());
 	const c = render(tabId);
 	try {
-		buttonByText('+ filter step').click();
+		buttonByText('+ Keep only…').click();
 		flushSync();
 		const steps = (getDraft(tabId)?.definition as PathNavigation).steps;
 		expect(steps.at(-1)?.kind).toBe('filter');

@@ -1,9 +1,9 @@
 <script lang="ts">
-	import { Trash2 } from '@lucide/svelte';
 	import type { NavFilterStep } from '$lib/api/types';
 	import type { Criterion } from '$lib/search/types';
 	import { newCriterion } from '$lib/search/types';
 	import CriterionRow from '../Sidebar/CriterionRow.svelte';
+	import ChainBadge from './ChainBadge.svelte';
 
 	type Props = {
 		step: NavFilterStep;
@@ -32,33 +32,35 @@
 	}
 </script>
 
-<div
-	class="space-y-1.5 rounded border border-zinc-800 bg-zinc-900/40 p-2"
-	data-testid="filter-step"
->
-	<div class="flex items-center gap-2 text-xs">
-		<span class="text-zinc-500">Step {index + 1}</span>
-		<span class="text-zinc-400">Filter</span>
-		<button
-			type="button"
-			aria-label="Remove step"
-			class="ml-auto text-zinc-500 hover:text-red-400"
-			onclick={() => onRemove(index)}
-		>
-			<Trash2 class="size-3.5" />
-		</button>
+<div class="group relative flex items-baseline gap-2.5 py-0.5" data-testid="filter-step">
+	<ChainBadge value={null} />
+	<div class="flex min-h-[22px] flex-1 flex-col gap-1">
+		<div class="flex flex-wrap items-center gap-1.5">
+			<span class="text-zinc-400">Keep only</span>
+			<button
+				type="button"
+				aria-label="Remove step"
+				title="Remove filter"
+				class="ml-auto text-zinc-500 hover:text-red-400"
+				onclick={() => onRemove(index)}
+			>
+				✕
+			</button>
+		</div>
+		<div class="space-y-1 pl-7">
+			{#each step.criteria as criterion, i (i)}
+				<CriterionRow
+					criterion={criterion as Criterion}
+					index={i}
+					target="element"
+					{propertyNames}
+					onChange={setCriterion}
+					onRemove={removeCriterion}
+				/>
+			{/each}
+			<button type="button" class="text-xs text-sky-500 hover:text-sky-300" onclick={addCriterion}
+				>+ condition</button
+			>
+		</div>
 	</div>
-	{#each step.criteria as criterion, i (i)}
-		<CriterionRow
-			criterion={criterion as Criterion}
-			index={i}
-			target="element"
-			{propertyNames}
-			onChange={setCriterion}
-			onRemove={removeCriterion}
-		/>
-	{/each}
-	<button type="button" class="text-xs text-sky-500 hover:text-sky-300" onclick={addCriterion}
-		>+ condition</button
-	>
 </div>

@@ -8,16 +8,20 @@
 	} from '$lib/metamodel/connection-rules';
 	import type { NavDirection, NavRelationshipStep } from '$lib/api/types';
 	import StereotypePicker from '../Sidebar/StereotypePicker.svelte';
+	import ChainBadge from './ChainBadge.svelte';
 
 	type Props = {
 		step: NavRelationshipStep;
 		index: number;
+		/** The rail's column number for this hop (1 + preceding relationship
+		 * steps) — see PathCard's `columnFor`. */
+		column: number;
 		/** Types flowing INTO this step (previous scope's types; [] = any). */
 		sourceTypes: string[];
 		onChange: (index: number, next: NavRelationshipStep) => void;
 		onRemove: (index: number) => void;
 	};
-	let { step, index, sourceTypes, onChange, onRemove }: Props = $props();
+	let { step, index, column, sourceTypes, onChange, onRemove }: Props = $props();
 
 	const mm = $derived(getMetamodel());
 	let relPickerOpen = $state(false);
@@ -81,9 +85,10 @@
 	}
 </script>
 
-<div class="space-y-1.5 rounded border border-zinc-800 p-2" data-testid="relationship-step">
-	<div class="flex items-center gap-2 text-xs">
-		<span class="text-zinc-500">Step {index + 1}</span>
+<div class="group relative flex items-baseline gap-2.5 py-0.5" data-testid="relationship-step">
+	<ChainBadge value={column} />
+	<div class="flex min-h-[22px] flex-1 flex-wrap items-center gap-1.5">
+		<span class="text-zinc-400">Follow</span>
 		<StereotypePicker
 			mode="create"
 			names={relTypeNames}
@@ -93,8 +98,13 @@
 			searchPlaceholder="Relationship type…"
 		>
 			{#snippet trigger()}
-				<span class="cursor-pointer rounded border border-zinc-700 px-1.5 py-0.5">
-					{step.relationship_type || 'pick relationship'}
+				<span
+					class="cursor-pointer rounded border px-1.5 py-0.5 font-mono text-[11px]
+						{step.relationship_type
+						? 'border-zinc-700 bg-zinc-900'
+						: 'border-dashed border-zinc-700 text-zinc-500'}"
+				>
+					{step.relationship_type || 'pick a relationship…'}
 				</span>
 			{/snippet}
 		</StereotypePicker>
@@ -107,17 +117,7 @@
 			<option value="in">incoming</option>
 			<option value="either">either</option>
 		</select>
-		<button
-			type="button"
-			aria-label="Remove step"
-			class="ml-auto text-zinc-500 hover:text-red-400"
-			onclick={() => onRemove(index)}
-		>
-			<Trash2 class="size-3.5" />
-		</button>
-	</div>
-	<div class="flex items-center gap-2 text-xs">
-		<span class="text-zinc-400">Target types</span>
+		<span class="text-zinc-400">to</span>
 		<StereotypePicker
 			mode="filter"
 			names={targetTypeNames}
@@ -130,10 +130,23 @@
 			searchPlaceholder="Filter types…"
 		>
 			{#snippet trigger()}
-				<span class="cursor-pointer rounded border border-zinc-700 px-1.5 py-0.5">
-					{step.target_types.length === 0 ? 'Any type' : step.target_types.join(', ')}
+				<span
+					class="cursor-pointer rounded border px-1.5 py-0.5 font-mono text-[11px]
+						{step.target_types.length
+						? 'border-zinc-700 bg-zinc-900'
+						: 'border-dashed border-zinc-700 text-zinc-500'}"
+				>
+					{step.target_types.length === 0 ? 'any type' : step.target_types.join(', ')}
 				</span>
 			{/snippet}
 		</StereotypePicker>
+		<button
+			type="button"
+			aria-label="Remove step"
+			class="ml-auto text-zinc-500 hover:text-red-400"
+			onclick={() => onRemove(index)}
+		>
+			<Trash2 class="size-3.5" />
+		</button>
 	</div>
 </div>

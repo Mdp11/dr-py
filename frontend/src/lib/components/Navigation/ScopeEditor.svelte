@@ -11,10 +11,12 @@
 		scope: NavScope;
 		/** When set, only these type names are offered (hop targets). */
 		allowedTypes?: string[] | null;
-		label: string;
+		/** Trigger-pill text when no type is picked (the sentence's verb supplies
+		 * the rest — "Start from ⟨unsetLabel⟩" / "…to ⟨unsetLabel⟩"). */
+		unsetLabel?: string;
 		onChange: (next: NavScope) => void;
 	};
-	let { scope, allowedTypes = null, label, onChange }: Props = $props();
+	let { scope, allowedTypes = null, unsetLabel = 'any element', onChange }: Props = $props();
 
 	const mm = $derived(getMetamodel());
 	const typeNames = $derived(allowedTypes ?? [...(mm?.elements ?? []).map((e) => e.name)].sort());
@@ -46,9 +48,8 @@
 	}
 </script>
 
-<div class="space-y-1.5 rounded border border-zinc-800 bg-zinc-900/40 p-2">
-	<div class="flex items-center gap-2">
-		<span class="text-xs font-medium text-zinc-400">{label}</span>
+<div class="space-y-1.5">
+	<div class="flex flex-wrap items-center gap-2">
 		<StereotypePicker
 			mode="filter"
 			names={typeNames}
@@ -61,11 +62,19 @@
 			searchPlaceholder="Filter types…"
 		>
 			{#snippet trigger()}
-				<span class="cursor-pointer rounded border border-zinc-700 px-1.5 py-0.5 text-xs">
-					{scope.types.length === 0 ? 'Any type' : scope.types.join(', ')}
+				<span
+					class="cursor-pointer rounded border px-1.5 py-0.5 font-mono text-[11px]
+						{scope.types.length === 0
+						? 'border-dashed border-zinc-700 text-zinc-500'
+						: 'border-zinc-700 bg-zinc-900'}"
+				>
+					{scope.types.length === 0 ? unsetLabel : scope.types.join(', ')}
 				</span>
 			{/snippet}
 		</StereotypePicker>
+		<button type="button" class="text-xs text-sky-500 hover:text-sky-300" onclick={addCriterion}
+			>+ condition</button
+		>
 	</div>
 	{#each scope.criteria as criterion, i (i)}
 		<CriterionRow
@@ -76,7 +85,4 @@
 			onRemove={removeCriterion}
 		/>
 	{/each}
-	<button type="button" class="text-xs text-sky-500 hover:text-sky-300" onclick={addCriterion}
-		>+ condition</button
-	>
 </div>

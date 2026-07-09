@@ -1,4 +1,10 @@
 <script lang="ts">
+	// A minimal port of the pre-Task-5 CombineEditor onto the CombineFrame
+	// name/props signature NavigationNode now dispatches to. Accepts `chrome`
+	// (the chrome ITS OWN parent handed it) so the module resolves against
+	// NavigationNode's uniform props shape, but does not yet forward chrome
+	// down to its own operands — that per-operand wiring (feeds chip, base
+	// badge, move/remove toolbar on each PathCard/RefCard) is Task 5's job.
 	import { Trash2, ChevronUp, ChevronDown } from '@lucide/svelte';
 	import { untrack } from 'svelte';
 	import {
@@ -25,8 +31,22 @@
 	import NavigationNode from './NavigationNode.svelte';
 	import ChainPreview from './ChainPreview.svelte';
 	import StereotypePicker from '../Sidebar/StereotypePicker.svelte';
+	import type { OperandChrome } from './chrome';
 
-	let { tabId, path, node }: { tabId: string; path: NodePath; node: SetExpression } = $props();
+	let {
+		tabId,
+		path,
+		node,
+		// Accepted only to match NavigationNode's uniform dispatch signature —
+		// not yet forwarded to operands, see the module comment above.
+		// eslint-disable-next-line @typescript-eslint/no-unused-vars
+		chrome = null
+	}: {
+		tabId: string;
+		path: NodePath;
+		node: SetExpression;
+		chrome?: OperandChrome | null;
+	} = $props();
 	const editable = $derived(canEdit());
 	const navHeaders = $derived(getArtifactHeaders().filter((a) => a.kind === 'navigation'));
 	const draft = $derived(getDraft(tabId));
