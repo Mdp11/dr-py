@@ -6,7 +6,6 @@
  * into operands[i].definition, 'start' descends into a Path's start.
  */
 import type {
-	ChainColumn,
 	NavOperand,
 	NavigationDefinition,
 	NavScope,
@@ -375,6 +374,22 @@ export const OP_NOTE: Record<SetExpression['op'], string> = {
 	difference: "(first part's fed step minus the others)",
 	symmetric_difference: "(in exactly one of the parts' fed steps)"
 };
+
+/**
+ * One numbered column of the CHAINS a path evaluates to. Column 0 is the
+ * start; each RELATIONSHIP step adds one column; filter steps add none (they
+ * narrow the frontier, they don't advance it). This is the single source of
+ * truth for the three places the circled-number badge appears: the editor
+ * rail, the results-table headers, and the `→ feeds` popover.
+ */
+export interface ChainColumn {
+	index: number;
+	/** 'Start' for column 0; the relationship type for a hop. */
+	label: string;
+	/** Start types / 'one element' / 'combination' for column 0; the hop's
+	 * target types otherwise. Undefined means "any type" (nothing to show). */
+	sub?: string;
+}
 
 export function chainColumns(node: PathNavigation): ChainColumn[] {
 	const { start } = node;

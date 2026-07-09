@@ -20,9 +20,10 @@ import {
 	setOperandStepIndex,
 	titleForPath,
 	updateNodeAt,
-	wrapRoot
+	wrapRoot,
+	type ChainColumn
 } from '../tree';
-import type { ChainColumn, PathNavigation, SetExpression } from '$lib/api/types';
+import type { PathNavigation, SetExpression } from '$lib/api/types';
 
 describe('node addressing', () => {
 	it('pathKey stringifies positional paths', () => {

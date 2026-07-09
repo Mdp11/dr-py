@@ -418,16 +418,6 @@ export interface SetExpression {
 
 export type NavigationDefinition = PathNavigation | SetExpression;
 
-/** One numbered column of the CHAINS a path evaluates to. */
-export interface ChainColumn {
-	index: number;
-	/** 'Start' for column 0; the relationship type for a hop. */
-	label: string;
-	/** Start types / 'one element' / 'combination' for column 0; the hop's
-	 * target types otherwise. Undefined means "any type" (nothing to show). */
-	sub?: string;
-}
-
 // The schema only guards transport shape (the editor constructs/consumes
 // NavigationDefinition values directly); `start`/nested definitions are typed
 // loosely here rather than fighting zod's recursive-union inference, while the
