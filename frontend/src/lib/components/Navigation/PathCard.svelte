@@ -305,7 +305,7 @@
 						class="flex flex-col items-start gap-0.5 py-1.5"
 						onSelect={() => structural((r) => insertNavigationEdit(r, path))}
 					>
-						<button type="button" class="pointer-events-none text-left text-zinc-100"
+						<button type="button" tabindex="-1" class="pointer-events-none text-left text-zinc-100"
 							>A new path</button
 						>
 						<span class="block text-[11px] text-zinc-500">
@@ -316,7 +316,7 @@
 						class="flex flex-col items-start gap-0.5 py-1.5"
 						onSelect={() => (libraryOpen = true)}
 					>
-						<button type="button" class="pointer-events-none text-left text-zinc-100"
+						<button type="button" tabindex="-1" class="pointer-events-none text-left text-zinc-100"
 							>A saved navigation…</button
 						>
 						<span class="block text-[11px] text-zinc-500">
@@ -327,7 +327,7 @@
 						class="flex flex-col items-start gap-0.5 py-1.5"
 						onSelect={() => structural((r) => insertGroupEdit(r, path))}
 					>
-						<button type="button" class="pointer-events-none text-left text-zinc-100"
+						<button type="button" tabindex="-1" class="pointer-events-none text-left text-zinc-100"
 							>A nested combination</button
 						>
 						<span class="block text-[11px] text-zinc-500">
