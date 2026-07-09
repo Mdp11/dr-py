@@ -21,7 +21,7 @@
 	const runnable = $derived(node ? isRunnable(node) : false);
 </script>
 
-<span data-testid="status-chip" class="text-[11px]">
+<span data-testid="status-chip" aria-live="polite" class="text-[11px]">
 	{#if kind === 'ref'}
 		<span class="font-mono text-zinc-500">linked</span>
 	{:else if preview?.loading}

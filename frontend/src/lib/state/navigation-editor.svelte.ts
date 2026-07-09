@@ -16,7 +16,9 @@
  * previewKey, and `_expanded` maps a tabId to the set of expanded node
  * pathKeys. A node is previewed while it is VISIBLE — card components
  * register/unregister it on mount/unmount, and `ensureDraft` pins the root —
- * there is no user-facing collapse toggle.
+ * there is no user-facing collapse toggle. `_selected` maps a tabId to the
+ * one selected node's pathKey; the dock renders it and structural edits
+ * remap it.
  *
  * Auto-run: there is no manual Run button. `updateDefinition` reschedules a
  * DEBOUNCED preview run (`AUTO_RUN_DEBOUNCE_MS`, per NODE — a newer edit resets
@@ -98,7 +100,10 @@ const _selected = new SvelteMap<string, string>();
  * into a Combination swaps components at path `[]`): a plain add/delete pair
  * would let the late unregister tear down a node that is on screen, cancelling
  * its debounce timer and silently killing auto-run. Control state, never read
- * from templates.
+ * from templates. Counts are POSITION-anchored and deliberately NOT remapped
+ * by `applyStructuralEdit` — only `_expanded` keys are remapped; card
+ * `$effect`s re-register on path change and the root pin is anchored at `''`,
+ * so remapping counts would break the root pin.
  */
 // eslint-disable-next-line svelte/prefer-svelte-reactivity
 const _visibleCounts = new Map<string, number>();

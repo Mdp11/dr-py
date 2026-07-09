@@ -213,15 +213,22 @@
 			>
 		{/if}
 		{#if chrome}
-			<FeedsChip columns={chainColumns(node)} value={chrome.stepIndex} onPick={setFeeds} />
-			<OperandToolbar
-				canMoveUp={chrome.index > 0}
-				canMoveDown={chrome.index < chrome.total - 1}
-				onUp={() => structural((r) => moveOperandEdit(r, chrome.parentPath, chrome.index, 'up'))}
-				onDown={() =>
-					structural((r) => moveOperandEdit(r, chrome.parentPath, chrome.index, 'down'))}
-				onRemove={() => structural((r) => removeOperandEdit(r, chrome.parentPath, chrome.index))}
+			<FeedsChip
+				columns={chainColumns(node)}
+				value={chrome.stepIndex}
+				onPick={setFeeds}
+				disabled={!editable}
 			/>
+			{#if editable}
+				<OperandToolbar
+					canMoveUp={chrome.index > 0}
+					canMoveDown={chrome.index < chrome.total - 1}
+					onUp={() => structural((r) => moveOperandEdit(r, chrome.parentPath, chrome.index, 'up'))}
+					onDown={() =>
+						structural((r) => moveOperandEdit(r, chrome.parentPath, chrome.index, 'down'))}
+					onRemove={() => structural((r) => removeOperandEdit(r, chrome.parentPath, chrome.index))}
+				/>
+			{/if}
 		{/if}
 	</div>
 

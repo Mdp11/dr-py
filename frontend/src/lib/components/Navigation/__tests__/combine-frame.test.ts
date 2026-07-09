@@ -263,6 +263,14 @@ it('a ref operand renders a compact ref card with the artifact name', async () =
 it('the feeds chip writes step_index for the operand it belongs to', async () => {
 	const tabId = 'nav:draft:feeds-write';
 	await seedCombine(tabId, ['A', 'B']);
+	// Seed the target operand with a non-null step_index so the pick below is
+	// an observable write, not a null -> null no-op.
+	const seeded = getDraft(tabId)!.definition as SetExpression;
+	updateDefinition(tabId, {
+		...seeded,
+		operands: seeded.operands.map((o, i) => (i === 1 ? { ...o, step_index: 2 } : o))
+	});
+	flushSync();
 	const c = render(tabId);
 	try {
 		const chips = [...document.querySelectorAll('[data-testid="feeds-chip"]')] as HTMLElement[];

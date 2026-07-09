@@ -167,7 +167,7 @@
 			>
 		{/if}
 		<span class="flex-1"></span>
-		{#if chrome}
+		{#if chrome && editable}
 			<OperandToolbar
 				canMoveUp={chrome.index > 0}
 				canMoveDown={chrome.index < chrome.total - 1}

@@ -41,6 +41,7 @@
 	<Popover.Trigger
 		{disabled}
 		data-testid="feeds-chip"
+		aria-label={'Feeds the combination with ' + shownLabel}
 		title="Which elements this path contributes to the combination"
 		class="inline-flex items-center gap-1.5 rounded-full border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-[11px] text-zinc-400 hover:border-zinc-600 hover:text-zinc-200 disabled:opacity-40"
 	>
