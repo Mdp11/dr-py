@@ -6,6 +6,7 @@
  * into operands[i].definition, 'start' descends into a Path's start.
  */
 import type {
+	ChainColumn,
 	NavOperand,
 	NavigationDefinition,
 	NavScope,
@@ -349,4 +350,169 @@ export function precedingTargetTypes(node: PathNavigation, index: number): strin
 		if (step.kind === 'relationship') return step.target_types;
 	}
 	return node.start.kind === 'scope' ? node.start.types : [];
+}
+
+/** Plain-language operator labels for the combination frame's `<select>`. */
+export const OP_LABEL: Record<SetExpression['op'], string> = {
+	union: 'Union — keeps elements found in ANY part',
+	intersection: 'Intersection — keeps elements found in EVERY part',
+	difference: 'Difference — first part minus all the others',
+	symmetric_difference: 'Symmetric difference — in exactly one part'
+};
+
+/** Glyph + word shown on the dashed divider between consecutive parts. */
+export const OP_DIVIDER: Record<SetExpression['op'], string> = {
+	union: '∪ union',
+	intersection: '∩ intersection',
+	difference: '− minus',
+	symmetric_difference: '⊕ symmetric difference'
+};
+
+/** The dock's muted note under a combination node's single column header. */
+export const OP_NOTE: Record<SetExpression['op'], string> = {
+	union: "(union of the parts' fed steps)",
+	intersection: "(intersection of the parts' fed steps)",
+	difference: "(first part's fed step minus the others)",
+	symmetric_difference: "(in exactly one of the parts' fed steps)"
+};
+
+export function chainColumns(node: PathNavigation): ChainColumn[] {
+	const { start } = node;
+	let sub: string | undefined;
+	if (start.kind === 'set_op') sub = 'combination';
+	else if (readElementStart(start) !== null) sub = 'one element';
+	else if (start.types.length > 0) sub = [...start.types].sort().join(', ');
+	const cols: ChainColumn[] = [{ index: 0, label: 'Start', sub }];
+	for (const step of node.steps) {
+		if (step.kind !== 'relationship') continue;
+		cols.push({
+			index: cols.length,
+			label: step.relationship_type || 'unset step',
+			sub: step.target_types.length > 0 ? [...step.target_types].sort().join(', ') : undefined
+		});
+	}
+	return cols;
+}
+
+/** Spreadsheet lettering: 0 -> A … 25 -> Z, 26 -> AA. */
+function pathLetter(i: number): string {
+	let n = i;
+	let out = '';
+	do {
+		out = String.fromCharCode(65 + (n % 26)) + out;
+		n = Math.floor(n / 26) - 1;
+	} while (n >= 0);
+	return out;
+}
+
+/**
+ * One selectable node of the definition tree, depth-first. Paths are lettered
+ * `Path A`, `Path B`, … in visit order (a lone root path is just `Path`); a
+ * set_op is emitted AFTER its children (`Whole combination` at the root,
+ * `Combination` when nested) so the dock picker reads exactly like the mock;
+ * ref operands are emitted in place (they carry no definition, so `nodeAt`
+ * cannot address them — that's what `kind: 'ref'` is for).
+ */
+export interface NodeEntry {
+	path: NodePath;
+	kind: 'path' | 'set_op' | 'ref';
+	title: string;
+	depth: number;
+	ref?: string;
+}
+
+export function nodeEntries(
+	root: NavigationDefinition,
+	refName?: (id: string) => string | undefined
+): NodeEntry[] {
+	const entries: NodeEntry[] = [];
+	const lettered = root.kind === 'set_op' || root.start.kind === 'set_op';
+	let letter = 0;
+
+	function visit(node: NavigationDefinition, path: NodePath, depth: number): void {
+		if (node.kind === 'path') {
+			if (node.start.kind === 'set_op') visit(node.start, [...path, 'start'], depth + 1);
+			entries.push({
+				path,
+				kind: 'path',
+				title: lettered ? `Path ${pathLetter(letter++)}` : 'Path',
+				depth
+			});
+			return;
+		}
+		node.operands.forEach((op, i) => {
+			const childPath = [...path, i];
+			if (op.definition) visit(op.definition, childPath, depth + 1);
+			else if (op.ref)
+				entries.push({
+					path: childPath,
+					kind: 'ref',
+					title: refName?.(op.ref) ?? op.ref,
+					depth: depth + 1,
+					ref: op.ref
+				});
+		});
+		entries.push({
+			path,
+			kind: 'set_op',
+			title: path.length === 0 ? 'Whole combination' : 'Combination',
+			depth
+		});
+	}
+
+	visit(root, [], 0);
+	return entries;
+}
+
+/** The `nodeEntries` title of the node at `path` (`''` when it has none). */
+export function titleForPath(
+	root: NavigationDefinition,
+	path: NodePath,
+	refName?: (id: string) => string | undefined
+): string {
+	const key = pathKey(path);
+	return nodeEntries(root, refName).find((e) => pathKey(e.path) === key)?.title ?? '';
+}
+
+/**
+ * True when `path` addresses something that EXISTS in the tree — a definition
+ * node (like `nodeAt`) or a REF operand (which `nodeAt` reports as null
+ * because it has no definition to return). Selection may land on a ref, so it
+ * needs this laxer existence check, not `nodeAt(...) !== null`.
+ */
+export function nodeExistsAt(root: NavigationDefinition, path: NodePath): boolean {
+	let node: NavigationDefinition = root;
+	for (let i = 0; i < path.length; i++) {
+		const seg = path[i];
+		if (seg === 'start') {
+			if (node.kind !== 'path' || node.start.kind !== 'set_op') return false;
+			node = node.start;
+			continue;
+		}
+		if (node.kind !== 'set_op') return false;
+		const op = node.operands[seg];
+		if (!op) return false;
+		if (!op.definition) return op.ref !== undefined && i === path.length - 1; // a ref is a leaf
+		node = op.definition;
+	}
+	return true;
+}
+
+/** Set operand `i`'s `step_index` on the combine at `parentPath` (null = the
+ * path's last step; 0 = its start; k = chain column k). Field edit — moves no
+ * nodes, so callers route it through `updateDefinition`, not
+ * `applyStructuralEdit`. */
+export function setOperandStepIndex(
+	root: NavigationDefinition,
+	parentPath: NodePath,
+	i: number,
+	stepIndex: number | null
+): NavigationDefinition {
+	return updateNodeAt(root, parentPath, (n) => {
+		if (n.kind !== 'set_op') return n;
+		const operands = n.operands.map(
+			(op, idx): NavOperand => (idx === i ? { ...op, step_index: stepIndex } : op)
+		);
+		return { ...n, operands };
+	});
 }

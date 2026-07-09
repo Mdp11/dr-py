@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+	chainColumns,
+	elementStartScope,
 	emptyPath,
 	emptyCombine,
 	insertNavigation,
@@ -9,13 +11,18 @@ import {
 	moveOperand,
 	moveOperandEdit,
 	nodeAt,
+	nodeEntries,
+	nodeExistsAt,
+	OP_DIVIDER,
 	pathKey,
 	removeOperand,
 	removeOperandEdit,
+	setOperandStepIndex,
+	titleForPath,
 	updateNodeAt,
 	wrapRoot
 } from '../tree';
-import type { PathNavigation, SetExpression } from '$lib/api/types';
+import type { ChainColumn, PathNavigation, SetExpression } from '$lib/api/types';
 
 describe('node addressing', () => {
 	it('pathKey stringifies positional paths', () => {
@@ -229,5 +236,234 @@ describe('structural edits (mutator + path remap)', () => {
 		expect(remapPath([1])).toEqual([1]); // the edited combine itself
 		expect(remapPath([1, 0])).toBeNull();
 		expect(remapPath([1, 2])).toEqual([1, 1]);
+	});
+});
+
+describe('chainColumns', () => {
+	function path(start: PathNavigation['start'], steps: PathNavigation['steps']): PathNavigation {
+		return { kind: 'path', schema_version: 2, start, steps, exclude_visited: true };
+	}
+	const hop = (rt: string, targets: string[] = []) => ({
+		kind: 'relationship' as const,
+		relationship_type: rt,
+		direction: 'out' as const,
+		target_types: targets,
+		children: []
+	});
+
+	it('a bare start scope is a single column labelled Start', () => {
+		const cols = chainColumns(path({ kind: 'scope', types: [], criteria: [] }, []));
+		expect(cols).toEqual([{ index: 0, label: 'Start', sub: undefined }]);
+	});
+
+	it('the start column sub-label lists the start types', () => {
+		const cols = chainColumns(path({ kind: 'scope', types: ['B', 'A'], criteria: [] }, []));
+		expect(cols[0].sub).toBe('A, B');
+	});
+
+	it('an element start sub-labels as "one element"', () => {
+		const cols = chainColumns(path(elementStartScope('e1'), []));
+		expect(cols[0].sub).toBe('one element');
+	});
+
+	it('a combination start sub-labels as "combination"', () => {
+		const cols = chainColumns(path(emptyCombine(), []));
+		expect(cols[0].sub).toBe('combination');
+	});
+
+	it('each relationship step adds one numbered column; filter steps add none', () => {
+		const cols = chainColumns(
+			path({ kind: 'scope', types: ['SoftwareSystem'], criteria: [] }, [
+				hop('SystemContainsComponent', ['Component']),
+				{ kind: 'filter', criteria: [] },
+				hop('DependsOn')
+			])
+		);
+		expect(cols.map((c) => c.index)).toEqual([0, 1, 2]);
+		expect(cols.map((c) => c.label)).toEqual(['Start', 'SystemContainsComponent', 'DependsOn']);
+		expect(cols[1].sub).toBe('Component');
+		expect(cols[2].sub).toBeUndefined(); // "any type"
+	});
+
+	it('an unset relationship type is labelled "unset step"', () => {
+		const cols = chainColumns(path({ kind: 'scope', types: [], criteria: [] }, [hop('')]));
+		expect(cols[1].label).toBe('unset step');
+	});
+});
+
+describe('nodeEntries', () => {
+	it('a bare root path is a single entry titled "Path"', () => {
+		const entries = nodeEntries(emptyPath());
+		expect(entries).toEqual([{ path: [], kind: 'path', title: 'Path', depth: 0 }]);
+	});
+
+	it('letters paths depth-first and puts the root combination last', () => {
+		const root: SetExpression = {
+			kind: 'set_op',
+			schema_version: 2,
+			op: 'union',
+			operands: [
+				{ definition: emptyPath(), step_index: null },
+				{ definition: emptyPath(), step_index: null }
+			]
+		};
+		const entries = nodeEntries(root);
+		expect(entries.map((e) => e.title)).toEqual(['Path A', 'Path B', 'Whole combination']);
+		expect(entries.map((e) => pathKey(e.path))).toEqual(['0', '1', '']);
+		expect(entries.map((e) => e.depth)).toEqual([1, 1, 0]);
+	});
+
+	it('nested combinations deepen the entries and are titled "Combination"', () => {
+		const root: SetExpression = {
+			kind: 'set_op',
+			schema_version: 2,
+			op: 'union',
+			operands: [
+				{ definition: emptyPath(), step_index: null },
+				{
+					definition: {
+						kind: 'set_op',
+						schema_version: 2,
+						op: 'intersection',
+						operands: [
+							{ definition: emptyPath(), step_index: null },
+							{ definition: emptyPath(), step_index: null }
+						]
+					},
+					step_index: null
+				}
+			]
+		};
+		const entries = nodeEntries(root);
+		expect(entries.map((e) => e.title)).toEqual([
+			'Path A',
+			'Path B',
+			'Path C',
+			'Combination',
+			'Whole combination'
+		]);
+		expect(entries.map((e) => pathKey(e.path))).toEqual(['0', '1.0', '1.1', '1', '']);
+		expect(entries.find((e) => e.title === 'Path B')?.depth).toBe(2);
+	});
+
+	it('a ref operand becomes a ref entry whose title resolves through refName', () => {
+		const root: SetExpression = {
+			kind: 'set_op',
+			schema_version: 2,
+			op: 'union',
+			operands: [
+				{ definition: emptyPath(), step_index: null },
+				{ ref: 'nav-1', step_index: null }
+			]
+		};
+		const entries = nodeEntries(root, (id) => (id === 'nav-1' ? 'Sensors network' : undefined));
+		expect(entries[1]).toEqual({
+			path: [1],
+			kind: 'ref',
+			title: 'Sensors network',
+			depth: 1,
+			ref: 'nav-1'
+		});
+		// unresolved refs fall back to the id
+		expect(nodeEntries(root)[1].title).toBe('nav-1');
+	});
+
+	it('a combination start is walked through the "start" segment', () => {
+		const root: PathNavigation = { ...emptyPath(), start: emptyCombine() };
+		const entries = nodeEntries(root);
+		expect(entries.map((e) => pathKey(e.path))).toEqual(['start.0', 'start.1', 'start', '']);
+	});
+
+	it('lettering continues past Z as AA', () => {
+		const operands = Array.from({ length: 27 }, () => ({
+			definition: emptyPath(),
+			step_index: null
+		}));
+		const entries = nodeEntries({ kind: 'set_op', schema_version: 2, op: 'union', operands });
+		expect(entries[25].title).toBe('Path Z');
+		expect(entries[26].title).toBe('Path AA');
+	});
+});
+
+describe('titleForPath', () => {
+	it('returns the entry title for a node path, else an empty string', () => {
+		const root: SetExpression = {
+			kind: 'set_op',
+			schema_version: 2,
+			op: 'union',
+			operands: [
+				{ definition: emptyPath(), step_index: null },
+				{ definition: emptyPath(), step_index: null }
+			]
+		};
+		expect(titleForPath(root, [1])).toBe('Path B');
+		expect(titleForPath(root, [])).toBe('Whole combination');
+		expect(titleForPath(root, [9])).toBe('');
+	});
+});
+
+describe('nodeExistsAt', () => {
+	const root: SetExpression = {
+		kind: 'set_op',
+		schema_version: 2,
+		op: 'union',
+		operands: [
+			{ definition: emptyPath(), step_index: null },
+			{ ref: 'nav-1', step_index: null }
+		]
+	};
+
+	it('is true for the root and for definition operands', () => {
+		expect(nodeExistsAt(root, [])).toBe(true);
+		expect(nodeExistsAt(root, [0])).toBe(true);
+	});
+
+	it('is true for a REF operand (which nodeAt cannot address)', () => {
+		expect(nodeExistsAt(root, [1])).toBe(true);
+		expect(nodeAt(root, [1])).toBeNull();
+	});
+
+	it('is false past a ref, out of range, or through a scope start', () => {
+		expect(nodeExistsAt(root, [1, 0])).toBe(false);
+		expect(nodeExistsAt(root, [5])).toBe(false);
+		expect(nodeExistsAt(root, [0, 'start'])).toBe(false);
+	});
+});
+
+describe('setOperandStepIndex', () => {
+	const root: SetExpression = {
+		kind: 'set_op',
+		schema_version: 2,
+		op: 'union',
+		operands: [
+			{ definition: emptyPath(), step_index: null },
+			{ definition: emptyPath(), step_index: 2 }
+		]
+	};
+
+	it('writes null (last step), 0 (start) and k (column k)', () => {
+		expect((setOperandStepIndex(root, [], 0, 0) as SetExpression).operands[0].step_index).toBe(0);
+		expect((setOperandStepIndex(root, [], 0, 3) as SetExpression).operands[0].step_index).toBe(3);
+		expect((setOperandStepIndex(root, [], 1, null) as SetExpression).operands[1].step_index).toBe(
+			null
+		);
+	});
+
+	it('leaves the sibling operands untouched', () => {
+		const next = setOperandStepIndex(root, [], 0, 1) as SetExpression;
+		expect(next.operands[1].step_index).toBe(2);
+	});
+
+	it('is a no-op on a non-set_op parent path', () => {
+		expect(setOperandStepIndex(emptyPath(), [], 0, 1)).toEqual(emptyPath());
+	});
+});
+
+describe('OP_DIVIDER', () => {
+	it('carries the glyph + word for every operator', () => {
+		expect(OP_DIVIDER.union).toBe('∪ union');
+		expect(OP_DIVIDER.intersection).toBe('∩ intersection');
+		expect(OP_DIVIDER.difference).toBe('− minus');
+		expect(OP_DIVIDER.symmetric_difference).toBe('⊕ symmetric difference');
 	});
 });
