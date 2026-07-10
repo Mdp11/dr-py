@@ -31,6 +31,7 @@ or, when no key is declared, on all properties.
 
 from __future__ import annotations
 
+import sys
 from collections import Counter
 from collections.abc import Hashable, Iterator, Set, Sequence
 from typing import TYPE_CHECKING, Any
@@ -49,6 +50,14 @@ if TYPE_CHECKING:
 # is a 2-tuple (property-value tuple, per-relationship endpoint-multiset tuple),
 # each relationship multiset rendered as tuple(sorted(endpoint_ids)).
 UniqKey = tuple[str, "str | None", Hashable]
+
+#: ``search_candidates`` gives up (returns None -> the caller scans) when the
+#: SMALLEST posting set for the query is this large: intersecting and scoring
+#: ~everything costs more than the plain scan it would replace (measured 5.6x
+#: slower at 500k for a query matching every element). Fraction-of-model rule
+#: with an absolute floor so small models never trip it.
+_SEARCH_FALLBACK_FLOOR = 10_000
+_SEARCH_FALLBACK_FRACTION = 4
 
 
 def _frozen(value: Any) -> Hashable:
@@ -116,8 +125,12 @@ class IndexSet:
         # element id -> its current merged trigram set (reverse map; needed
         # to diff on property change and to drop postings on delete — by hook
         # time the old text is gone — mirroring _refs_of). No entry when the
-        # set would be empty (sparse).
-        self._trigrams_of: dict[str, frozenset[str]] = {}
+        # set would be empty (sparse). Stored as a SORTED TUPLE of
+        # sys.intern-ed trigrams — a tuple is ~4x smaller than a frozenset,
+        # and interning collapses the per-element ``s[i:i+3]`` slice copies to
+        # one canonical string object per distinct trigram process-wide (the
+        # copies were the dominant index memory cost at 500k).
+        self._trigrams_of: dict[str, tuple[str, ...]] = {}
         # entity id -> reference-target ids currently held in its properties
         # (reverse of ref_targets; needed to diff on property changes)
         self._refs_of: dict[str, set[str]] = {}
@@ -180,10 +193,11 @@ class IndexSet:
 
     def search_candidates(self, q: str) -> Set[str] | None:
         """Ids of elements that MAY fuzzy-match ``q`` — a guaranteed superset
-        of the true hits — or ``None`` when the index cannot answer
-        (``len(q) < 3``; the caller falls back to a scan). ``q`` must already
-        be trimmed and lowercased. May return a live internal set — do NOT
-        mutate.
+        of the true hits — or ``None`` when the index cannot answer OR cannot
+        beat a scan (``len(q) < 3``, or the query's rarest trigram is
+        ubiquitous); the caller falls back to a scan either way. ``q`` must
+        already be trimmed and lowercased. May return a live internal set —
+        do NOT mutate.
 
         Superset argument: any string containing ``q`` contains every trigram
         of ``q``, so a matching element sits in ALL those posting sets and
@@ -201,6 +215,13 @@ class IndexSet:
                 return frozenset()
             postings.append(ids)
         postings.sort(key=len)
+        if len(postings[0]) >= max(
+            _SEARCH_FALLBACK_FLOOR,
+            len(self._model.elements) // _SEARCH_FALLBACK_FRACTION,
+        ):
+            # even the rarest trigram of ``q`` matches a large fraction of the
+            # model: the scan is cheaper than intersecting + scoring it all
+            return None
         result: Set[str] = postings[0]
         for ids in postings[1:]:
             result = result & ids
@@ -333,7 +354,7 @@ class IndexSet:
             self._add_refs(element.id, self._element_refs(element))
             trigs = self._element_trigrams(element)
             if trigs:
-                self._trigrams_of[element.id] = trigs
+                self._trigrams_of[element.id] = tuple(sorted(trigs))
                 for t in trigs:
                     self.search_postings.setdefault(t, set()).add(element.id)
             if element.id not in self.containment_parents:
@@ -618,14 +639,14 @@ class IndexSet:
         for text in texts:
             s = text.lower()
             for i in range(len(s) - 2):
-                trigs.add(s[i : i + 3])
+                trigs.add(sys.intern(s[i : i + 3]))
         return frozenset(trigs)
 
     def _update_trigrams(self, element_id: str, new: frozenset[str]) -> None:
         """Diff-apply an element's trigram set (mirrors _update_refs).
         Posting sets hold references to the id strings the model dicts own —
         no string duplication; empty posting sets are deleted (sparse)."""
-        old = self._trigrams_of.get(element_id) or frozenset()
+        old = frozenset(self._trigrams_of.get(element_id) or ())
         if new == old:
             return
         for t in old - new:
@@ -637,7 +658,7 @@ class IndexSet:
         for t in new - old:
             self.search_postings.setdefault(t, set()).add(element_id)
         if new:
-            self._trigrams_of[element_id] = new
+            self._trigrams_of[element_id] = tuple(sorted(new))
         else:
             self._trigrams_of.pop(element_id, None)
 

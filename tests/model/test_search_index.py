@@ -5,6 +5,8 @@ Trigram keys asserted below ("pum", "coo", ...) contain non-hex letters, so
 they can never collide with trigrams of UUIDv7 element ids (hex + dashes).
 """
 
+import pytest
+
 from data_rover.core.metamodel.loader import load_metamodel_str
 from data_rover.core.model.model import Model
 
@@ -160,3 +162,19 @@ def test_candidates_single_trigram_query() -> None:
     a = _named(m, "Pump")
     b = _named(m, "Pumice")
     assert m.indexes.search_candidates("pum") == {a.id, b.id}
+
+
+def test_candidates_degenerate_falls_back_to_scan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from data_rover.core.model import indexes as indexes_module
+
+    monkeypatch.setattr(indexes_module, "_SEARCH_FALLBACK_FLOOR", 2)
+    m = _model()
+    for i in range(8):
+        _named(m, f"Pump {i}")
+    # smallest posting for "pump" holds all 8 elements >= max(2, 8 // 4) -> scan
+    assert m.indexes.search_candidates("pump") is None
+    # a selective query stays on the index
+    valve = _named(m, "Valve")
+    assert m.indexes.search_candidates("valve") == {valve.id}
