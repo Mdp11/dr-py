@@ -22,6 +22,23 @@ let _warnings: Issue[] = $state([]);
 // points (never on a mid-session edit), so edits accumulate against it.
 let _baseline: View | null = $state(null);
 
+/**
+ * Whether the active project's view question has been ANSWERED this session
+ * (loaded, or confirmed absent/failed). The containment tree must not paint
+ * its first rows until this is true — painting with view=null and collapsing
+ * later is the "flash of all elements" bug. Reset via markViewUnresolved()
+ * at the top of boot() on every project (re)entry.
+ */
+let _viewResolved = $state(false);
+
+export function isViewResolved(): boolean {
+	return _viewResolved;
+}
+
+export function markViewUnresolved(): void {
+	_viewResolved = false;
+}
+
 export function getView(): View | null {
 	return _view;
 }
@@ -79,6 +96,8 @@ export async function refreshView(): Promise<void> {
 	} catch {
 		setState(null, []);
 		_baseline = null;
+	} finally {
+		_viewResolved = true;
 	}
 }
 

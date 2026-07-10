@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { apiFetch } from './client';
+import { apiFetch, apiUpload } from './client';
 
 const API = { baseUrl: '/api/v1' };
 
@@ -21,15 +21,19 @@ export interface CreateProjectInput {
 	view?: File | null;
 }
 
-export function createProject(input: CreateProjectInput): Promise<ProjectSummary> {
+export function createProject(
+	input: CreateProjectInput,
+	onProgress?: (loaded: number, total: number | null) => void
+): Promise<ProjectSummary> {
 	const form = new FormData();
 	form.set('name', input.name);
 	form.set('metamodel', input.metamodel);
 	if (input.model) form.set('model', input.model);
 	if (input.view) form.set('view', input.view);
-	// FormData body: apiFetch leaves it as-is (not JSON-stringified) and the
-	// browser sets the multipart Content-Type + boundary itself.
-	return apiFetch('/projects', { method: 'POST', body: form, schema: ProjectSummarySchema }, API);
+	// FormData body, uploaded via XHR (apiUpload) so upload progress can drive
+	// the overlay; the browser still sets the multipart Content-Type + boundary
+	// itself.
+	return apiUpload('/projects', { body: form, schema: ProjectSummarySchema, onProgress }, API);
 }
 
 export function deleteProject(id: string): Promise<void> {

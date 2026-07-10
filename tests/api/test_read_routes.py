@@ -526,6 +526,19 @@ def test_containment_roots(tree_client: TestClient) -> None:
     assert [i["id"] for i in body["items"]] == ["p"]
 
 
+def test_roots_order_follows_mutation_boundary(tree_client: TestClient) -> None:
+    """The roots endpoints read the maintained order index, so a rename
+    through the core mutation boundary must reorder the next page — without
+    any per-request re-sort."""
+    session = get_session()
+    assert session.model is not None
+    # rename free root "x" (display "X", sorts last) to sort first
+    session.model.set_property(session.model.elements["x"], "name", "AAA")
+    body = tree_client.get(f"{API}/model/containment/roots").json()
+    assert [i["id"] for i in body["items"]][0] == "x"
+    assert body["total"] == 3
+
+
 def test_containment_children(tree_client: TestClient) -> None:
     # display-name order, as ContainmentTree renders: Alpha (c2) before Beta (c1)
     body = tree_client.get(f"{API}/model/elements/p/children").json()

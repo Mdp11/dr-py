@@ -3,6 +3,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { createProject } from '$lib/api/projects';
+	import { endProgress, startProgress, updateProgress } from '$lib/state';
 
 	let { open = $bindable(false), onCreated }: { open?: boolean; onCreated: (id: string) => void } =
 		$props();
@@ -25,12 +26,16 @@
 		if (!canSubmit || !metamodel) return;
 		error = null;
 		pending = true;
+		const token = startProgress('Uploading project files…');
 		try {
-			const created = await createProject({ name, metamodel, model, view });
+			const created = await createProject({ name, metamodel, model, view }, (loaded, total) => {
+				if (total !== null && total > 0) updateProgress(token, loaded, total);
+			});
 			onCreated(created.id);
 		} catch {
 			error = 'Could not create the project. Check the metamodel file.';
 		} finally {
+			endProgress(token);
 			pending = false;
 		}
 	}

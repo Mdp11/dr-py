@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timezone
+from itertools import islice
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -35,6 +36,7 @@ from pydantic import BaseModel
 
 from data_rover.core.model.element import Element
 from data_rover.core.model.model import Model
+from data_rover.core.model.naming import display_name as _display_name
 from data_rover.core.view.schema import Folder, View
 
 from ..changes import compact_changes
@@ -228,16 +230,22 @@ def list_elements(
         total = len(model.elements)
     items: list[ElementOut] = []
     if offset < total:
-        skipped = 0
-        for element in model.elements.values():
-            if type is not None and element.type_name != type:
-                continue
-            if skipped < offset:
-                skipped += 1
-                continue
-            items.append(ElementOut.from_core(element))
-            if len(items) >= limit:
-                break
+        if type is None:
+            items = [
+                ElementOut.from_core(element)
+                for element in islice(model.elements.values(), offset, offset + limit)
+            ]
+        else:
+            skipped = 0
+            for element in model.elements.values():
+                if element.type_name != type:
+                    continue
+                if skipped < offset:
+                    skipped += 1
+                    continue
+                items.append(ElementOut.from_core(element))
+                if len(items) >= limit:
+                    break
     return ElementPage(items=items, total=total)
 
 
@@ -444,22 +452,6 @@ def list_element_relationships(
 # ---------------------------------------------------------------------------
 
 
-def _display_name(element: Element) -> str:
-    """``elementDisplayName`` in lib/util/element-name.ts: the case-insensitive
-    non-empty ``name`` property, else the id. An exact lowercase ``name`` wins
-    over other casings (``Name``/``NAME``) — kept in lock-step with the client
-    so a row's label is identical whether it comes from the lite (server) or
-    full (client) source."""
-    props = element.properties
-    exact = props.get("name")
-    if isinstance(exact, str) and exact:
-        return exact
-    for key, value in props.items():
-        if key != "name" and key.lower() == "name" and isinstance(value, str) and value:
-            return value
-    return element.id
-
-
 def _containment_child_ids(model: Model, element_id: str) -> list[str]:
     """Distinct elements whose FIRST containment parent is *element_id*.
 
@@ -505,14 +497,15 @@ def list_containment_roots(
     one page of — re-sorting an accumulated prefix would make scroll auto-load
     reshuffle rows above the viewport (a visible "jump"). Rows are the lite
     :class:`TreeItem` projection.
+
+    Served from the IndexSet's maintained roots order — O(page + log n), no
+    per-request scan or sort.
     """
     _, model = require_model(session)
     idx = model.indexes
-    root_ids = [eid for eid in model.elements if idx.first_parent(eid) is None]
-    root_ids.sort(key=lambda eid: (_display_name(model.elements[eid]), eid))
     return TreeItemPage(
-        items=[_tree_item(model, eid) for eid in root_ids[offset : offset + limit]],
-        total=len(root_ids),
+        items=[_tree_item(model, eid) for eid in idx.roots_page(offset, limit)],
+        total=idx.roots_count(),
     )
 
 
@@ -539,20 +532,23 @@ def list_excluded_roots(
     Sorted by display name then id, like ``list_containment_roots`` (so the
     paged pool grows by appending, never reshuffling). With no active view,
     every root is excluded (returns all roots). Rows are the lite
-    :class:`TreeItem` projection."""
+    :class:`TreeItem` projection.
+
+    Walks the maintained roots order filtering view-placed ids — O(roots)
+    worst case but with no display-name computation or sort, which were the
+    dominant cost."""
     _, model = require_model(session)
     idx = model.indexes
     placed = _placed_element_ids(session.view) if session.view is not None else set()
-    root_ids = [
-        eid
-        for eid in model.elements
-        if idx.first_parent(eid) is None and eid not in placed
-    ]
-    root_ids.sort(key=lambda eid: (_display_name(model.elements[eid]), eid))
-    return TreeItemPage(
-        items=[_tree_item(model, eid) for eid in root_ids[offset : offset + limit]],
-        total=len(root_ids),
-    )
+    items: list[TreeItem] = []
+    total = 0
+    for eid in idx.iter_roots():
+        if eid in placed:
+            continue
+        if total >= offset and len(items) < limit:
+            items.append(_tree_item(model, eid))
+        total += 1
+    return TreeItemPage(items=items, total=total)
 
 
 @router.get("/model/elements/{element_id}/children")

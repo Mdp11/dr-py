@@ -26,8 +26,7 @@
 		nodeAt,
 		nodeEntries,
 		pathKey,
-		titleForPath,
-		type NodePath
+		titleForPath
 	} from '$lib/navigation/tree';
 	import ChainBadge from './ChainBadge.svelte';
 

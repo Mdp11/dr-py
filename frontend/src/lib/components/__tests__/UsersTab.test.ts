@@ -176,9 +176,7 @@ describe('UsersTab', () => {
 
 describe('UsersTab delete confirmation', () => {
 	it('confirms before deleting and aborts on cancel', async () => {
-		listUsers.mockResolvedValue([
-			{ id: 'u1', email: 'a@b.c', is_admin: false, is_active: true }
-		]);
+		listUsers.mockResolvedValue([{ id: 'u1', email: 'a@b.c', is_admin: false, is_active: true }]);
 		const confirmSpy = vi.spyOn(window, 'confirm');
 		const c = mount(UsersTab, { target: document.body });
 		await new Promise((r) => setTimeout(r, 0));

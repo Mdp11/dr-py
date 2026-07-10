@@ -78,6 +78,7 @@ User/project/membership data lives in a **SQLAlchemy + Postgres** layer, separat
 - **Undo** (`POST /model/undo`) replays an op-log batch's inverses in restore mode (`Model.restore_element/restore_relationship` reinstate exact ids). `op_log` is capped at `OP_LOG_MAX` (1000 batches); past that, `GET /model/changes` reports `complete: false`.
 - **Legacy direct-mutation routes** (`routes/elements.py`, `relationships.py`) bypass the op protocol, so they call `session.touch_model()` to invalidate `op_log`/validation and bump `model_rev`.
 - Reads are **paged/on-demand** (element pages, fuzzy search, containment tree children, BFS neighborhoods); load/save **stream** rather than materializing the serialized model as a string.
+- **Full-model validation is a background sweep** (`api/validation_sweep.py`): load/upload/hydrate install an empty issue store and stream issues in chunk-by-chunk under the write-mutex; `GET /model/status` (non-hydrating — `SessionRegistry.peek`) reports hydration/sweep progress and the frontend polls it during project open. Containment roots are served from a maintained order index (`IndexSet.roots_order`) — never re-sort roots per request.
 
 The frontend mirrors all of this client-side (optimistic ops, serialized flushes, conflict recovery). **`frontend/README.md` documents the frontend architecture in depth — read it before touching `frontend/src/lib/state/`.**
 

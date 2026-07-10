@@ -71,7 +71,11 @@ describe('ProjectCard', () => {
 
 	it('surfaces clone failures and does not call onChanged', async () => {
 		cloneProject.mockRejectedValueOnce(
-			new ApiError(409, { detail: 'project has no content to clone' }, 'project has no content to clone')
+			new ApiError(
+				409,
+				{ detail: 'project has no content to clone' },
+				'project has no content to clone'
+			)
 		);
 		const onChanged = vi.fn();
 		const c = mount(ProjectCard, {

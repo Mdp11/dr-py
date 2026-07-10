@@ -36,7 +36,8 @@ describe('NewProjectWizard', () => {
 		await Promise.resolve();
 		await Promise.resolve();
 		expect(createProject).toHaveBeenCalledWith(
-			expect.objectContaining({ name: 'W', metamodel: expect.any(File) })
+			expect.objectContaining({ name: 'W', metamodel: expect.any(File) }),
+			expect.any(Function)
 		);
 		expect(onCreated).toHaveBeenCalledWith('pX');
 		unmount(c);

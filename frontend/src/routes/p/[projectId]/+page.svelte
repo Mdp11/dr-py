@@ -23,6 +23,7 @@
 	import { getMetamodel as fetchMetamodel } from '$lib/api/metamodel';
 	import { runValidation } from '$lib/state/validate-action';
 	import {
+		cancelOpenProgress,
 		clearModelError,
 		clearSelection,
 		getActiveProjectId,
@@ -36,6 +37,7 @@
 		initWorkspaceTabs,
 		loadArtifacts,
 		loadProjectInfo,
+		markViewUnresolved,
 		onLockEvent,
 		refreshSummary,
 		refreshView,
@@ -46,7 +48,8 @@
 		setHistoryDrawerOpen,
 		setMetamodel,
 		startRealtime,
-		stopRealtime
+		stopRealtime,
+		trackOpenProgress
 	} from '$lib/state';
 
 	onMount(() => startRealtime());
@@ -61,13 +64,19 @@
 		void boot();
 	});
 	onDestroy(() => stopRealtime());
+	onDestroy(() => cancelOpenProgress());
 
 	// App boot: adopt whatever session the backend already holds for this
 	// project — a page reload mid-session should come back with the model, not a
 	// blank workspace. Project content is established server-side (the seeded
 	// `default` project or a project created via the New Project wizard), not by
-	// any client-side file autoload.
+	// any client-side file autoload. The view must resolve BEFORE the summary
+	// (which flips the containment tree's `hasModel` gate) so the tree's first
+	// paint is already view-shaped instead of flashing all elements and then
+	// collapsing to the view a beat later.
 	async function boot(): Promise<void> {
+		void trackOpenProgress(); // fire-and-forget: overlay while the requests below hydrate the session
+		markViewUnresolved(); // reset the view-answered gate on every project (re)entry
 		try {
 			setMetamodel(await metamodelApi.getMetamodel());
 		} catch (err) {
@@ -81,8 +90,10 @@
 				setNotice: setAccessNotice,
 				navigate: () => void goto(resolve('/projects'))
 			});
+			cancelOpenProgress(); // a failed boot must tear the open-progress overlay down
 			return;
 		}
+		await refreshView();
 		try {
 			await refreshSummary();
 		} catch {
@@ -93,7 +104,6 @@
 		} catch {
 			// role/ttl best-effort; editing stays gated as viewer until it loads
 		}
-		await refreshView();
 		await loadArtifacts().catch(() => {}); // artifact library is best-effort
 	}
 
@@ -163,6 +173,16 @@
 			resetCheckout();
 			resetArtifacts();
 			clearSelection();
+			// refreshView() runs before refreshSummary() (mirroring boot()'s order)
+			// so the tree's first paint after a reload is view-shaped rather than
+			// briefly rendering against the stale pre-reload view. We deliberately
+			// do NOT call markViewUnresolved() here: unresolving is unnecessary on
+			// reload — the prior session's view is still the active view, and
+			// because refreshView() is awaited before refreshSummary() below, the
+			// first repaint is already view-shaped. Only boot() (a fresh project
+			// entry, where the view may legitimately change) needs to re-arm the
+			// unresolved gate.
+			await refreshView();
 			await refreshSummary();
 			try {
 				// resetCheckout() reset the role to 'viewer'; re-adopt role + lock TTL
@@ -173,7 +193,6 @@
 			} catch {
 				// role/ttl best-effort; editing stays gated as viewer until it loads
 			}
-			await refreshView();
 			await loadArtifacts().catch(() => {}); // artifact library is best-effort
 		} catch (err) {
 			console.error('Model reload failed', err);

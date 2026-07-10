@@ -82,6 +82,10 @@ class Settings(BaseSettings):
     #: bounded per-client feed queue. A client whose queue overflows is dropped
     #: and reconnects (Phase 5). Large enough to absorb a burst of commits.
     feed_queue_max: int = 256
+    #: run the background validation sweep inline (synchronously) on the
+    #: load/upload/hydrate paths. False in production; the API test conftest
+    #: pins it true so tests keep deterministic "seeded after load" semantics.
+    validation_sweep_sync: bool = False
 
 
 def get_settings() -> Settings:

@@ -153,7 +153,7 @@ def clone_project(
         raise HTTPException(status_code=409, detail="project has no content to clone")
     model_json = "".join(iter_model_json(session.model))
 
-    new_name = (body.name if body and body.name else f"{src.name} (copy)")
+    new_name = body.name if body and body.name else f"{src.name} (copy)"
     new_id = uuid.uuid4().hex
     importer.import_project(
         project_id=new_id,

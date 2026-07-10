@@ -16,12 +16,11 @@ from __future__ import annotations
 
 import json
 import uuid
+from dataclasses import dataclass
 from typing import Any
 
 from data_rover.core.metamodel.loader import load_metamodel_str
 from data_rover.core.model.model import Model
-from data_rover.core.validation.pipeline import default_pipeline
-from data_rover.core.validation.scope import Scope
 from data_rover.core.validation.state import ValidationState
 from data_rover.core.view.schema import View
 
@@ -32,6 +31,30 @@ from .schemas import OPS_ADAPTER, OpIn
 from .serialize import iter_model_json
 from .session import Session
 from .storage import get_snapshot_store, snapshot_key
+from .validation_sweep import start_validation_sweep
+
+
+@dataclass
+class HydrationProgress:
+    """Live progress of one in-flight hydration, keyed by project id.
+
+    Registered for exactly the duration of ``hydrate_session`` so the status
+    endpoint can report an open that has not produced a Session yet. ``total``
+    is 0 until the build phase knows its entity count (indeterminate)."""
+
+    phase: str = "download"  # download | parse | build | replay
+    done: int = 0
+    total: int = 0
+
+
+#: project id -> in-flight hydration progress (single mutating writer — the
+#: hydrating thread under the registry's per-project init-once lock; readers
+#: are GET /model/status requests, which only read primitive fields)
+_hydration_progress: dict[str, HydrationProgress] = {}
+
+
+def hydration_progress(project_id: str) -> HydrationProgress | None:
+    return _hydration_progress.get(project_id)
 
 
 def serialize_ops(ops: list[OpIn]) -> list[Any]:
@@ -153,7 +176,18 @@ def reconstruct_model_at(project_id: str, rev: int) -> Model | None:
 def hydrate_session(project_id: str) -> Session:
     """Build the live ``Session`` for a project from durable storage.
 
-    No ``ModelRow`` -> empty ``Session`` (pre-Phase-3 behaviour)."""
+    No ``ModelRow`` -> empty ``Session`` (pre-Phase-3 behaviour). Progress is
+    published in ``_hydration_progress`` for GET /model/status while this
+    runs (the registry's init-once lock guarantees one hydration per id)."""
+    progress = HydrationProgress()
+    _hydration_progress[project_id] = progress
+    try:
+        return _hydrate_session(project_id, progress)
+    finally:
+        _hydration_progress.pop(project_id, None)
+
+
+def _hydrate_session(project_id: str, progress: HydrationProgress) -> Session:
     with db_session() as s:
         model_row = content.get_model_row(s, project_id)
         if model_row is None:
@@ -178,19 +212,29 @@ def hydrate_session(project_id: str) -> Session:
     else:
         from .routes._snapshot import build_model_from_dicts
 
-        raw = json.loads(get_snapshot_store().get(snap_key))
+        progress.phase = "download"
+        blob = get_snapshot_store().get(snap_key)
+        progress.phase = "parse"
+        raw = json.loads(blob)
+        progress.phase = "build"
+
+        def _on_build(done: int, total: int) -> None:
+            progress.done, progress.total = done, total
+
         # strict=False: hydration tolerates unknown types so a project rebound
         # onto a type-removing metamodel (Phase 6B) survives eviction; the
         # validation pipeline reports the conformance issues.
-        model = build_model_from_dicts(metamodel, raw, strict=False)
+        model = build_model_from_dicts(
+            metamodel, raw, strict=False, on_progress=_on_build
+        )
 
     session = Session(metamodel=metamodel, model=model)
     session.model_rev = model_rev
+    progress.phase = "replay"
     replay_commits_into(session, tail)
     if view_blob is not None:
         session.view = View.model_validate_json(view_blob)
-    state = ValidationState()
-    state.set_full(default_pipeline().validate(model, Scope.all()))
-    session.validation = state
+    session.validation = ValidationState()
     session.strict_mode = strict_mode
+    start_validation_sweep(session)
     return session

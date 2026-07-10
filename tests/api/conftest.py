@@ -13,6 +13,9 @@ os.environ.setdefault("DATA_ROVER_DEV_SEED", "false")
 os.environ.setdefault("DATA_ROVER_SNAPSHOT_STORE", "memory")
 os.environ.setdefault("DATA_ROVER_IDLE_EVICT_SECONDS", "0")
 os.environ.setdefault("DATA_ROVER_LOCK_SWEEP_SECONDS", "0")
+# Chunked background validation sweep (Task 5) runs inline so the existing
+# suite's "validation seeded after load" assumption keeps holding.
+os.environ.setdefault("DATA_ROVER_VALIDATION_SWEEP_SYNC", "true")
 # Pin all existing data tests to the header provider so they keep working after
 # the default flips to "cookie" in settings.py.
 os.environ.setdefault("DATA_ROVER_IDENTITY_PROVIDER", "header")

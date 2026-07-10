@@ -17,7 +17,13 @@ import time
 from fastapi import APIRouter, WebSocket
 from starlette.websockets import WebSocketDisconnect
 
-from ..feed import CLOSE_SENTINEL, ClientConn, presence_event, set_loop_if_unset, snapshot_event
+from ..feed import (
+    CLOSE_SENTINEL,
+    ClientConn,
+    presence_event,
+    set_loop_if_unset,
+    snapshot_event,
+)
 from ..db import get_db
 from ..db_models import Project
 from ..identity import get_identity_provider

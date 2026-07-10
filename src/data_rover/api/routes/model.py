@@ -5,20 +5,20 @@ import os
 import tempfile
 from contextlib import suppress
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterator, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy.orm import Session as DbSession
 
 from data_rover.core.metamodel.schema import Metamodel
-from data_rover.core.validation.pipeline import default_pipeline
-from data_rover.core.validation.scope import Scope
 from data_rover.core.validation.state import ValidationState
 
 from .. import content
+from ..authz import require_membership
 from ..db import get_db
-from ..db_models import User
+from ..db_models import Membership, User
 from ..deps import (
     Session,
     get_request_session,
@@ -26,7 +26,7 @@ from ..deps import (
     require_metamodel,
     require_model,
 )
-from ..hydration import persist_baseline
+from ..hydration import hydration_progress, persist_baseline
 from ..identity import get_current_user
 from ..schemas import (
     InlineModel,
@@ -38,10 +38,67 @@ from ..schemas import (
     SnapshotIn,
 )
 from ..serialize import iter_buffered, iter_model_json
+from ..session import get_registry
+from ..validation_sweep import start_validation_sweep
 from ._snapshot import _build_model_from_payload, build_model_from_dicts
 from .read import model_summary
 
 router = APIRouter()
+
+
+class ValidationStatusOut(BaseModel):
+    running: bool
+    done: int
+    total: int
+
+
+class HydrationStatusOut(BaseModel):
+    phase: str
+    done: int
+    total: int
+
+
+class ModelStatusOut(BaseModel):
+    state: Literal["cold", "hydrating", "empty", "validating", "ready"]
+    model_rev: int | None = None
+    validation: ValidationStatusOut | None = None
+    hydration: HydrationStatusOut | None = None
+
+
+@router.get("/model/status")
+def model_status(
+    project_id: str,
+    _membership: Membership = Depends(require_membership),
+) -> ModelStatusOut:
+    """Open/validation progress WITHOUT touching the session registry's
+    hydrating ``get`` — the poller must never block on (or trigger) the very
+    hydration it is reporting on. Membership is still enforced (the status
+    leaks model_rev/entity progress). ``cold`` means "no warm session and no
+    hydration in flight": for the poller it is indistinguishable from
+    hydrating-not-yet-started, so clients keep polling through it."""
+    session = get_registry().peek(project_id)
+    if session is None:
+        hp = hydration_progress(project_id)
+        if hp is not None:
+            return ModelStatusOut(
+                state="hydrating",
+                hydration=HydrationStatusOut(
+                    phase=hp.phase, done=hp.done, total=hp.total
+                ),
+            )
+        return ModelStatusOut(state="cold")
+    if session.model is None:
+        return ModelStatusOut(state="empty")
+    sweep = session.validation_sweep
+    if sweep is not None and sweep.running:
+        return ModelStatusOut(
+            state="validating",
+            model_rev=session.model_rev,
+            validation=ValidationStatusOut(
+                running=True, done=sweep.done, total=sweep.total
+            ),
+        )
+    return ModelStatusOut(state="ready", model_rev=session.model_rev)
 
 
 @router.post("/model", deprecated=True)
@@ -119,26 +176,29 @@ def _install_model(
     project_id: str,
     author_id: str | None,
 ) -> ModelSummary:
-    """Guard-check *raw*, install it as the session model, seed validation.
+    """Guard-check *raw*, install it as the session model, start validation.
 
     Shared tail of POST /model/load and POST /model/upload: build the Model
     directly from the parsed dicts (same guards as the pydantic snapshot
-    routes, shared via _snapshot.py), run ONE full validation to seed the
-    session issue store — making the load the single O(model) validation
-    cost instead of the first ops batch — install model and seeded state
-    together via ``set_model`` (which bumps ``model_rev`` and clears the op
-    log, so ``undo_depth`` is 0 afterwards), and return the same shape as
-    GET /model/summary.
+    routes, shared via _snapshot.py), install it with a PRESENT-but-EMPTY
+    issue store via ``set_model`` (which bumps ``model_rev`` and clears the
+    op log, so ``undo_depth`` is 0 afterwards) so ops batches can splice into
+    it immediately, then start the chunked background validation sweep — the
+    load is no longer the single O(model) validation cost; validation now
+    streams in via ``validation_sweep`` and the returned summary's
+    ``issue_counts`` starts at zero and grows as chunks land. Returns the same
+    shape as GET /model/summary.
     """
     model = build_model_from_dicts(metamodel, raw)
-    state = ValidationState()
-    state.set_full(default_pipeline().validate(model, Scope.all()))
-    session.set_model(model, validation=state)
+    # install with a PRESENT-but-EMPTY issue store: ops batches splice into it
+    # immediately (no synchronous re-seed) while the background sweep fills it
+    session.set_model(model, validation=ValidationState())
     # make this uploaded model the durable baseline, but only if the project
     # has a model row (i.e. its metamodel was persisted) — pure in-memory unit
     # tests that skip the metamodel route keep working with no persistence.
     if content.get_model_row(db, project_id) is not None:
         persist_baseline(project_id, session, author_id=author_id)
+    start_validation_sweep(session)
     return model_summary(session)
 
 

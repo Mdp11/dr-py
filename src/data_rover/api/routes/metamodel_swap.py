@@ -168,12 +168,19 @@ async def rebind_metamodel(
             content.upsert_model_row(db, project_id, metamodel_id=mm_row.id)
             content.set_model_rev(db, project_id, session.model_rev)
             content.append_commit(
-                db, project_id,
-                rev=session.model_rev, commit_id=commit_id, author_id=user.id,
-                ops=[], inverse_ops=[], id_map={},
-                message=message, validation_error_count=len(issues),
+                db,
+                project_id,
+                rev=session.model_rev,
+                commit_id=commit_id,
+                author_id=user.id,
+                ops=[],
+                inverse_ops=[],
+                id_map={},
+                message=message,
+                validation_error_count=len(issues),
                 issues=issues_json,
-                from_metamodel_id=from_id, to_metamodel_id=mm_row.id,
+                from_metamodel_id=from_id,
+                to_metamodel_id=mm_row.id,
             )
             db.commit()
         except Exception as exc:
@@ -183,7 +190,9 @@ async def rebind_metamodel(
             model.indexes.rebuild()
             session.model_rev = old_rev
             session.validation = None  # force a re-seed on next read
-            raise HTTPException(status_code=500, detail="failed to persist rebind") from exc
+            raise HTTPException(
+                status_code=500, detail="failed to persist rebind"
+            ) from exc
 
         # The durable commit has already landed (db.commit above). Forcing a
         # snapshot here keeps the replay tail from spanning a rebind boundary,

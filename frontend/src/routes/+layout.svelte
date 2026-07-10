@@ -4,6 +4,7 @@
 	import { QueryClient, QueryClientProvider } from '@tanstack/svelte-query';
 	import AppHeader from '$lib/components/AppHeader.svelte';
 	import CommandPalette from '$lib/components/CommandPalette.svelte';
+	import ProgressOverlay from '$lib/components/ProgressOverlay.svelte';
 	import { installKeyboardShortcuts } from '$lib/keyboard.svelte';
 	import { installSessionRecovery } from '$lib/state/session-recovery';
 
@@ -38,4 +39,5 @@
 	{/if}
 	{@render children()}
 	<CommandPalette />
+	<ProgressOverlay />
 </QueryClientProvider>
