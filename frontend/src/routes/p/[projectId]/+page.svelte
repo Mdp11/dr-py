@@ -47,6 +47,7 @@
 		setDiffDrawerOpen,
 		setHistoryDrawerOpen,
 		setMetamodel,
+		setProjectOpening,
 		startRealtime,
 		stopRealtime,
 		trackOpenProgress
@@ -75,36 +76,44 @@
 	// paint is already view-shaped instead of flashing all elements and then
 	// collapsing to the view a beat later.
 	async function boot(): Promise<void> {
-		void trackOpenProgress(); // fire-and-forget: overlay while the requests below hydrate the session
-		markViewUnresolved(); // reset the view-answered gate on every project (re)entry
+		// Warm opens never show the open-progress overlay (status is 'ready'
+		// immediately), so this flag is what keeps the containment tree on a
+		// skeleton instead of flashing its empty states while the loads below run.
+		setProjectOpening(true);
 		try {
-			setMetamodel(await metamodelApi.getMetamodel());
-		} catch (err) {
-			// A 403 means we are NOT a member of this project (an admin sees every
-			// project in the picker, but require_membership 403s on open): set an
-			// access notice and bounce to /projects rather than silently showing a
-			// blank workspace. A 404 ("No metamodel loaded") for a legitimately empty
-			// project — or any other error — falls through to the best-effort return
-			// below (nothing else can be loaded yet).
-			reactToBootError(err, {
-				setNotice: setAccessNotice,
-				navigate: () => void goto(resolve('/projects'))
-			});
-			cancelOpenProgress(); // a failed boot must tear the open-progress overlay down
-			return;
+			void trackOpenProgress(); // fire-and-forget: overlay while the requests below hydrate the session
+			markViewUnresolved(); // reset the view-answered gate on every project (re)entry
+			try {
+				setMetamodel(await metamodelApi.getMetamodel());
+			} catch (err) {
+				// A 403 means we are NOT a member of this project (an admin sees every
+				// project in the picker, but require_membership 403s on open): set an
+				// access notice and bounce to /projects rather than silently showing a
+				// blank workspace. A 404 ("No metamodel loaded") for a legitimately empty
+				// project — or any other error — falls through to the best-effort return
+				// below (nothing else can be loaded yet).
+				reactToBootError(err, {
+					setNotice: setAccessNotice,
+					navigate: () => void goto(resolve('/projects'))
+				});
+				cancelOpenProgress(); // a failed boot must tear the open-progress overlay down
+				return;
+			}
+			await refreshView();
+			try {
+				await refreshSummary();
+			} catch {
+				return; // metamodel but no model
+			}
+			try {
+				await loadProjectInfo();
+			} catch {
+				// role/ttl best-effort; editing stays gated as viewer until it loads
+			}
+			await loadArtifacts().catch(() => {}); // artifact library is best-effort
+		} finally {
+			setProjectOpening(false);
 		}
-		await refreshView();
-		try {
-			await refreshSummary();
-		} catch {
-			return; // metamodel but no model
-		}
-		try {
-			await loadProjectInfo();
-		} catch {
-			// role/ttl best-effort; editing stays gated as viewer until it loads
-		}
-		await loadArtifacts().catch(() => {}); // artifact library is best-effort
 	}
 
 	// Conflict / flush-error banner. A conflict means the local caches are
@@ -168,6 +177,7 @@
 	async function onReloadModel(): Promise<void> {
 		if (reloading) return;
 		reloading = true;
+		setProjectOpening(true); // same tree-skeleton gate as boot(): the resets below blank the tree
 		try {
 			resetModelStore();
 			resetCheckout();
@@ -198,6 +208,7 @@
 			console.error('Model reload failed', err);
 		} finally {
 			reloading = false;
+			setProjectOpening(false);
 		}
 	}
 

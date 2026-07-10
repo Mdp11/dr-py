@@ -29,6 +29,7 @@
 		getView,
 		getViewWarnings,
 		indexIssues,
+		isProjectOpening,
 		isViewResolved,
 		moveArtifact,
 		moveFolder,
@@ -53,6 +54,7 @@
 		shouldLoadMore,
 		shouldLoadMoreExcluded
 	} from './windowing';
+	import { treeBodyState } from './tree-empty-state';
 	import {
 		beginDrag,
 		endDrag,
@@ -138,6 +140,10 @@
 	const PAGE_LIMIT = 500;
 
 	let roots: TreeItem[] = $state([]);
+	// First roots page for the current model has landed (vs. "roots is empty
+	// because the fetch is still in flight") — feeds treeBodyState so the body
+	// shows a skeleton, not a blank list, while that first page loads.
+	let rootsLoaded = $state(false);
 	// rootsTotal/excludedTotal feed scroll auto-load (shouldLoadMore): nearing the
 	// last loaded row grows the page limit (no "Show more" button).
 	let rootsTotal = $state(0);
@@ -200,6 +206,7 @@
 			seedTreeItems(page.items);
 			roots = page.items;
 			rootsTotal = page.total;
+			rootsLoaded = true;
 		} catch (err) {
 			if (seq === rootsSeq) console.error('Containment tree load failed', err);
 		}
@@ -281,6 +288,7 @@
 		if (!loaded) {
 			untrack(() => {
 				roots = [];
+				rootsLoaded = false;
 				rootsTotal = 0;
 				childLevels.clear();
 				childTotals.clear();
@@ -397,6 +405,19 @@
 		}
 		return t;
 	});
+
+	// What the tree body paints: skeleton during a project open/reload (the
+	// warm-open path has no global overlay), the two empty-state messages, or
+	// the rows area. Pure decision table in tree-empty-state.ts.
+	const bodyState = $derived(
+		treeBodyState({
+			opening: isProjectOpening(),
+			hasMetamodel: mm !== null,
+			summaryCount: summary === null ? null : summary.element_count,
+			rootsLoaded,
+			rootCount: tree.roots.length
+		})
+	);
 
 	// Visibility is computed over the LOADED subset only: an element whose own
 	// type is filtered out is hidden even if an UNFETCHED descendant would
@@ -1180,9 +1201,15 @@
 			onkeydown={onKeyDown}
 			onscroll={onTreeScroll}
 		>
-			{#if mm === null}
+			{#if bodyState === 'onboarding'}
 				<p class="text-xs text-zinc-600">Load a metamodel and model to begin.</p>
-			{:else if (summary?.element_count ?? 0) === 0 && tree.roots.length === 0}
+			{:else if bodyState === 'skeleton'}
+				<div class="flex flex-col gap-2 py-1" role="status" aria-label="Loading model tree">
+					{#each [70, 45, 60, 35, 55, 40, 65, 50] as width (width)}
+						<div class="h-3.5 animate-pulse rounded bg-zinc-800" style="width: {width}%"></div>
+					{/each}
+				</div>
+			{:else if bodyState === 'empty'}
 				<p class="text-xs text-zinc-600">Model is empty.</p>
 			{:else}
 				{#if view !== null && draggingPayload !== null}

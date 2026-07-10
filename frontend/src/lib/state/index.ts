@@ -200,6 +200,7 @@ export {
 	renameFolder,
 	setViewBaseline
 } from './view.svelte';
+export { isProjectOpening, setProjectOpening } from './project-open.svelte';
 export type { ViewChange } from './view-diff';
 export {
 	artifactHeaderById,
