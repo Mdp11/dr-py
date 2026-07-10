@@ -12,8 +12,6 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session as DbSession
 
 from data_rover.core.metamodel.schema import Metamodel
-from data_rover.core.validation.pipeline import default_pipeline
-from data_rover.core.validation.scope import Scope
 from data_rover.core.validation.state import ValidationState
 
 from .. import content
@@ -38,6 +36,7 @@ from ..schemas import (
     SnapshotIn,
 )
 from ..serialize import iter_buffered, iter_model_json
+from ..validation_sweep import start_validation_sweep
 from ._snapshot import _build_model_from_payload, build_model_from_dicts
 from .read import model_summary
 
@@ -119,26 +118,29 @@ def _install_model(
     project_id: str,
     author_id: str | None,
 ) -> ModelSummary:
-    """Guard-check *raw*, install it as the session model, seed validation.
+    """Guard-check *raw*, install it as the session model, start validation.
 
     Shared tail of POST /model/load and POST /model/upload: build the Model
     directly from the parsed dicts (same guards as the pydantic snapshot
-    routes, shared via _snapshot.py), run ONE full validation to seed the
-    session issue store — making the load the single O(model) validation
-    cost instead of the first ops batch — install model and seeded state
-    together via ``set_model`` (which bumps ``model_rev`` and clears the op
-    log, so ``undo_depth`` is 0 afterwards), and return the same shape as
-    GET /model/summary.
+    routes, shared via _snapshot.py), install it with a PRESENT-but-EMPTY
+    issue store via ``set_model`` (which bumps ``model_rev`` and clears the
+    op log, so ``undo_depth`` is 0 afterwards) so ops batches can splice into
+    it immediately, then start the chunked background validation sweep — the
+    load is no longer the single O(model) validation cost; validation now
+    streams in via ``validation_sweep`` and the returned summary's
+    ``issue_counts`` starts at zero and grows as chunks land. Returns the same
+    shape as GET /model/summary.
     """
     model = build_model_from_dicts(metamodel, raw)
-    state = ValidationState()
-    state.set_full(default_pipeline().validate(model, Scope.all()))
-    session.set_model(model, validation=state)
+    # install with a PRESENT-but-EMPTY issue store: ops batches splice into it
+    # immediately (no synchronous re-seed) while the background sweep fills it
+    session.set_model(model, validation=ValidationState())
     # make this uploaded model the durable baseline, but only if the project
     # has a model row (i.e. its metamodel was persisted) — pure in-memory unit
     # tests that skip the metamodel route keep working with no persistence.
     if content.get_model_row(db, project_id) is not None:
         persist_baseline(project_id, session, author_id=author_id)
+    start_validation_sweep(session)
     return model_summary(session)
 
 

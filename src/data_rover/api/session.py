@@ -16,6 +16,7 @@ from .locking import LockTable
 
 if TYPE_CHECKING:
     from .schemas import OpIn
+    from .validation_sweep import SweepProgress
 
 #: Maximum number of applied batches retained for undo. Each batch holds the
 #: ops, their inverses, and snapshots of deleted entities' properties, so an
@@ -89,6 +90,11 @@ class Session:
     #: owner-gated PATCH /settings route under the write-mutex. Default False
     #: keeps the engine's inspectable behaviour for every untouched project.
     strict_mode: bool = False
+    #: progress of the in-flight background validation sweep (spec: interactive
+    #: -path hardening §3), installed by validation_sweep.start_validation_sweep;
+    #: stays set after completion (running=False) so /model/status can report
+    #: "ready". Replaced wholesale by the next sweep.
+    validation_sweep: "SweepProgress | None" = field(default=None, repr=False)
 
     def set_model(
         self, model: Model | None, *, validation: ValidationState | None = None
@@ -205,10 +211,17 @@ class SessionRegistry:
             if (
                 session.lock_table.active_leases(time.monotonic())
                 or session.hub.has_clients()
+                or (
+                    session.validation_sweep is not None
+                    and session.validation_sweep.running
+                )
             ):
                 # A holder still has a check-out open, or a feed client is
                 # connected. The session was never removed, so it stays
-                # registered — no re-insert needed.
+                # registered — no re-insert needed. A running validation
+                # sweep also blocks eviction — evicting would snapshot fine
+                # but waste the sweep; sweeps finish in seconds and the idle
+                # sweeper retries.
                 return
             if self._evict_hook is not None:
                 self._evict_hook(project_id, session)

@@ -20,8 +20,6 @@ from typing import Any
 
 from data_rover.core.metamodel.loader import load_metamodel_str
 from data_rover.core.model.model import Model
-from data_rover.core.validation.pipeline import default_pipeline
-from data_rover.core.validation.scope import Scope
 from data_rover.core.validation.state import ValidationState
 from data_rover.core.view.schema import View
 
@@ -32,6 +30,7 @@ from .schemas import OPS_ADAPTER, OpIn
 from .serialize import iter_model_json
 from .session import Session
 from .storage import get_snapshot_store, snapshot_key
+from .validation_sweep import start_validation_sweep
 
 
 def serialize_ops(ops: list[OpIn]) -> list[Any]:
@@ -189,8 +188,7 @@ def hydrate_session(project_id: str) -> Session:
     replay_commits_into(session, tail)
     if view_blob is not None:
         session.view = View.model_validate_json(view_blob)
-    state = ValidationState()
-    state.set_full(default_pipeline().validate(model, Scope.all()))
-    session.validation = state
+    session.validation = ValidationState()
     session.strict_mode = strict_mode
+    start_validation_sweep(session)
     return session
