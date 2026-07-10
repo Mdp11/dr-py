@@ -84,3 +84,8 @@ def test_perf_probe() -> None:
     _timed_get(client, "children of e0", f"{API}/model/elements/e0/children", {"limit": 100})
     _timed_get(client, "elements, deep page (insertion order)", f"{API}/model/elements", {"limit": 100, "offset": max(n - 200, 0)})
     _timed_get(client, "summary", f"{API}/model/summary")
+
+    sel = f"{n // 2:07d}"  # zero-padded name fragment of exactly one element
+    _timed_get(client, f"fuzzy search, selective (q={sel})", f"{API}/model/elements", {"q": sel, "limit": 50})
+    _timed_get(client, "fuzzy search, degenerate (q=element)", f"{API}/model/elements", {"q": "element", "limit": 50})
+    _timed_get(client, "fuzzy search, short fallback (q=el)", f"{API}/model/elements", {"q": "el", "limit": 50})
