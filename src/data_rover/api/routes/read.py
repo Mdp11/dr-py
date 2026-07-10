@@ -35,6 +35,7 @@ from pydantic import BaseModel
 
 from data_rover.core.model.element import Element
 from data_rover.core.model.model import Model
+from data_rover.core.model.naming import display_name as _display_name
 from data_rover.core.view.schema import Folder, View
 
 from ..changes import compact_changes
@@ -442,22 +443,6 @@ def list_element_relationships(
 # ---------------------------------------------------------------------------
 # Containment tree levels (Sidebar/ContainmentTree.svelte semantics)
 # ---------------------------------------------------------------------------
-
-
-def _display_name(element: Element) -> str:
-    """``elementDisplayName`` in lib/util/element-name.ts: the case-insensitive
-    non-empty ``name`` property, else the id. An exact lowercase ``name`` wins
-    over other casings (``Name``/``NAME``) — kept in lock-step with the client
-    so a row's label is identical whether it comes from the lite (server) or
-    full (client) source."""
-    props = element.properties
-    exact = props.get("name")
-    if isinstance(exact, str) and exact:
-        return exact
-    for key, value in props.items():
-        if key != "name" and key.lower() == "name" and isinstance(value, str) and value:
-            return value
-    return element.id
 
 
 def _containment_child_ids(model: Model, element_id: str) -> list[str]:
