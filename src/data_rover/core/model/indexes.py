@@ -31,7 +31,6 @@ or, when no key is declared, on all properties.
 
 from __future__ import annotations
 
-import sys
 from collections import Counter
 from collections.abc import Hashable, Iterator, Set, Sequence
 from typing import TYPE_CHECKING, Any
@@ -125,11 +124,12 @@ class IndexSet:
         # element id -> its current merged trigram set (reverse map; needed
         # to diff on property change and to drop postings on delete — by hook
         # time the old text is gone — mirroring _refs_of). No entry when the
-        # set would be empty (sparse). Stored as a SORTED TUPLE of
-        # sys.intern-ed trigrams — a tuple is ~4x smaller than a frozenset,
-        # and interning collapses the per-element ``s[i:i+3]`` slice copies to
-        # one canonical string object per distinct trigram process-wide (the
-        # copies were the dominant index memory cost at 500k).
+        # set would be empty (sparse). Stored as a SORTED TUPLE of trigrams
+        # canonicalized through ``_canon_trigrams`` — a tuple is ~4x smaller
+        # than a frozenset, and canonicalization collapses the per-element
+        # ``s[i:i+3]`` slice copies to one string object per distinct trigram
+        # for this model's lifetime (the copies were the dominant index
+        # memory cost at 500k).
         self._trigrams_of: dict[str, tuple[str, ...]] = {}
         # entity id -> reference-target ids currently held in its properties
         # (reverse of ref_targets; needed to diff on property changes)
@@ -140,6 +140,13 @@ class IndexSet:
         self._element_ref_props: dict[str, tuple[str, ...]] = {}
         self._relationship_ref_props: dict[str, tuple[str, ...]] = {}
         self._key_specs: dict[str, KeySpec | None] = {}
+        # trigram -> the SAME trigram (canonical object). Dedups the per-element
+        # s[i:i+3] slice copies (the dominant index memory cost at 500k) without
+        # sys.intern's process-lifetime retention: this table dies with the
+        # IndexSet. Grows with every trigram ever seen in THIS model (never
+        # pruned on removal — entries are 3-char strings, negligible next to
+        # the postings they canonicalize).
+        self._canon_trigrams: dict[str, str] = {}
         # relationship-type names that appear with each direction in ANY element
         # type's effective key; built once (metamodel is immutable). None until
         # first built. Used to skip rekeying on edges that affect no key.
@@ -625,8 +632,7 @@ class IndexSet:
 
     # -- internals: search trigrams -------------------------------------------
 
-    @staticmethod
-    def _element_trigrams(element: Element) -> frozenset[str]:
+    def _element_trigrams(self, element: Element) -> frozenset[str]:
         """Merged lowercased trigram set of the element's searchable text —
         exactly the fields the fuzzy search scores: id, type name, and every
         top-level string property value. Fields shorter than 3 chars
@@ -639,7 +645,8 @@ class IndexSet:
         for text in texts:
             s = text.lower()
             for i in range(len(s) - 2):
-                trigs.add(sys.intern(s[i : i + 3]))
+                t = s[i : i + 3]
+                trigs.add(self._canon_trigrams.setdefault(t, t))
         return frozenset(trigs)
 
     def _update_trigrams(self, element_id: str, new: frozenset[str]) -> None:
