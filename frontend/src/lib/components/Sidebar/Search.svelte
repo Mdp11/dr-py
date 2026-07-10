@@ -121,7 +121,7 @@
 </script>
 
 <section class="relative flex flex-col gap-2 px-3 py-2">
-	<h2 class="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Search</h2>
+	<h2 class="microlabel">Search</h2>
 	<div class="flex items-center gap-1">
 		<Input
 			bind:ref={inputEl}
@@ -132,13 +132,13 @@
 			onfocus={onFocusOrClick}
 			onclick={onFocusOrClick}
 			onkeydown={onKeydown}
-			class="h-7 flex-1 border-zinc-800 bg-zinc-900 text-xs placeholder:text-zinc-600"
+			class="h-7 flex-1 border-border bg-card text-xs placeholder:text-muted-foreground/70"
 		/>
 		<button
 			type="button"
 			data-testid="advanced-search-button"
 			aria-label="Advanced search"
-			class="flex h-7 w-7 shrink-0 items-center justify-center rounded border border-zinc-800 bg-zinc-900 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+			class="flex h-7 w-7 shrink-0 items-center justify-center rounded border border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground"
 			onclick={() => setSearchDialogOpen(true)}
 		>
 			<SlidersHorizontal class="h-3.5 w-3.5" />
@@ -147,11 +147,11 @@
 	{#if showDropdown}
 		<div
 			id="sidebar-search-dropdown"
-			class="absolute left-3 right-3 top-full z-20 mt-1 max-h-72 overflow-y-auto rounded border border-zinc-800 bg-zinc-950 shadow-lg"
+			class="absolute left-3 right-3 top-full z-20 mt-1 max-h-72 overflow-y-auto rounded border border-border bg-popover shadow-lg"
 		>
 			<ul class="flex flex-col gap-0.5 p-1 text-xs">
 				{#if results.length === 0}
-					<li class="px-1 py-0.5 text-zinc-600">
+					<li class="px-1 py-0.5 text-muted-foreground/50">
 						{searching ? 'Searching…' : 'No matches.'}
 					</li>
 				{:else}
@@ -159,18 +159,18 @@
 						<li>
 							<button
 								type="button"
-								class="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+								class="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 								style="touch-action: none"
 								onpointerdown={(e) => onResultPointerDown(e, el.id)}
 								onclick={() => onPick(el.id)}
 							>
-								<span class="truncate text-zinc-200">{elementDisplayName(el)}</span>
+								<span class="truncate text-foreground/90">{elementDisplayName(el)}</span>
 								<span
-									class="ml-auto shrink-0 rounded bg-zinc-800 px-1 font-mono text-[10px] text-zinc-400"
+									class="ml-auto shrink-0 rounded bg-muted px-1 font-mono text-[10px] text-muted-foreground"
 								>
 									{el.type_name}
 								</span>
-								<span class="shrink-0 font-mono text-[10px] text-zinc-600">{el.id}</span>
+								<span class="shrink-0 font-mono text-[10px] text-muted-foreground/50">{el.id}</span>
 							</button>
 						</li>
 					{/each}

@@ -1133,7 +1133,7 @@
 
 <div class="flex min-h-0 flex-1 flex-col" onclickcapture={onTreeClickCapture}>
 	<div class="flex items-center justify-between gap-2 px-3 pt-2">
-		<h2 class="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Tree</h2>
+		<h2 class="microlabel">Tree</h2>
 		{#if mm !== null}
 			<div class="flex items-center gap-0.5">
 				<StereotypePicker
@@ -1150,7 +1150,7 @@
 				>
 					{#snippet trigger()}
 						<span
-							class="inline-flex h-5 w-5 items-center justify-center rounded text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+							class="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
 							aria-label="Filter stereotypes"
 							title="Filter stereotypes"
 						>
@@ -1161,7 +1161,7 @@
 				{#if view !== null}
 					<button
 						type="button"
-						class="inline-flex h-5 w-5 items-center justify-center rounded text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+						class="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
 						aria-label="New top-level folder"
 						title="New top-level folder"
 						onclick={onNewRootFolder}
@@ -1180,7 +1180,7 @@
 				>
 					{#snippet trigger()}
 						<span
-							class="inline-flex h-5 w-5 items-center justify-center rounded text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+							class="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
 							aria-label="New element"
 							title="New element"
 						>
@@ -1194,7 +1194,7 @@
 	{#snippet treeViewport()}
 		<div
 			bind:this={treeScrollEl}
-			class="h-full min-h-0 overflow-auto px-3 py-2 outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500"
+			class="h-full min-h-0 overflow-auto px-3 py-2 outline-none focus:ring-2 focus:ring-inset focus:ring-ring"
 			tabindex="0"
 			role="tree"
 			aria-label="Containment tree"
@@ -1202,25 +1202,31 @@
 			onscroll={onTreeScroll}
 		>
 			{#if bodyState === 'onboarding'}
-				<p class="text-xs text-zinc-600">Load a metamodel and model to begin.</p>
+				<div class="flex flex-col items-center gap-1 py-6 text-center">
+					<p class="font-display text-base font-light text-muted-foreground">Nothing loaded</p>
+					<p class="text-xs text-muted-foreground/70">Load a metamodel and model to begin.</p>
+				</div>
 			{:else if bodyState === 'skeleton'}
 				<div class="flex flex-col gap-2 py-1" role="status" aria-label="Loading model tree">
 					{#each [70, 45, 60, 35, 55, 40, 65, 50] as width (width)}
-						<div class="h-3.5 animate-pulse rounded bg-zinc-800" style="width: {width}%"></div>
+						<div class="h-3.5 animate-pulse rounded bg-muted" style="width: {width}%"></div>
 					{/each}
 				</div>
 			{:else if bodyState === 'empty'}
-				<p class="text-xs text-zinc-600">Model is empty.</p>
+				<div class="flex flex-col items-center gap-1 py-6 text-center">
+					<p class="font-display text-base font-light text-muted-foreground">Model is empty</p>
+					<p class="text-xs text-muted-foreground/70">Create an element to populate the tree.</p>
+				</div>
 			{:else}
 				{#if view !== null && draggingPayload !== null}
 					<div
 						role="button"
 						tabindex="-1"
 						aria-label="Move to top level"
-						class="mb-1 rounded border border-dashed border-zinc-700 px-2 py-1 text-[10px] text-zinc-500"
-						class:border-emerald-500={isViewRootHover && dragHoverValid}
-						class:text-emerald-400={isViewRootHover && dragHoverValid}
-						class:border-red-500={isViewRootHover && !dragHoverValid}
+						class="mb-1 rounded border border-dashed border-input px-2 py-1 text-[10px] text-muted-foreground"
+						class:border-success={isViewRootHover && dragHoverValid}
+						class:text-success={isViewRootHover && dragHoverValid}
+						class:border-destructive={isViewRootHover && !dragHoverValid}
 						data-drop-key={VIEW_ROOT_DROP_KEY}
 						data-drop-kind="section"
 						data-drop-path="null"
@@ -1264,11 +1270,11 @@
 	{#snippet poolHeader()}
 		<button
 			type="button"
-			class="flex h-full w-full select-none items-center gap-1 border-t border-zinc-800 px-3 text-[10px] font-semibold uppercase tracking-wider text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300"
-			class:bg-zinc-800={dragHoverKey === EXCLUDED_SECTION_KEY}
+			class="microlabel flex h-full w-full select-none items-center gap-1 border-t border-border px-3 hover:bg-card hover:text-foreground/80"
+			class:bg-muted={dragHoverKey === EXCLUDED_SECTION_KEY}
 			class:ring-1={dragHoverKey === EXCLUDED_SECTION_KEY}
-			class:ring-emerald-500={dragHoverKey === EXCLUDED_SECTION_KEY && dragHoverValid}
-			class:ring-red-500={dragHoverKey === EXCLUDED_SECTION_KEY && !dragHoverValid}
+			class:ring-success={dragHoverKey === EXCLUDED_SECTION_KEY && dragHoverValid}
+			class:ring-destructive={dragHoverKey === EXCLUDED_SECTION_KEY && !dragHoverValid}
 			data-drop-key={EXCLUDED_SECTION_KEY}
 			data-drop-kind="section"
 			data-drop-path="null"
@@ -1281,7 +1287,7 @@
 			{/if}
 			<span class="flex-1 text-left">Not in view</span>
 			{#if !poolCollapsed}
-				<span class="font-mono text-[10px] normal-case text-zinc-500">{excludedTotal}</span>
+				<span class="font-mono text-[10px] normal-case text-muted-foreground">{excludedTotal}</span>
 			{/if}
 		</button>
 	{/snippet}
@@ -1345,7 +1351,7 @@
 		<!-- Floating drag preview following the cursor (pointer-events DnD has no
 		     native drag image). pointer-events:none so it never blocks hit-testing. -->
 		<div
-			class="pointer-events-none fixed z-50 truncate rounded border border-indigo-500/60 bg-zinc-900 px-2 py-0.5 text-xs text-zinc-100 shadow-lg"
+			class="pointer-events-none fixed z-50 truncate rounded border border-primary/60 bg-card px-2 py-0.5 text-xs text-foreground shadow-lg"
 			style="left: {dragX + 12}px; top: {dragY + 8}px; max-width: 220px"
 		>
 			{dragLabel}

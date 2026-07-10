@@ -181,12 +181,12 @@
 
 {#if isExcludedSection}
 	<div
-		class="group flex h-6 select-none items-center gap-1 rounded px-1 py-0.5 text-zinc-200"
+		class="group flex h-6 select-none items-center gap-1 rounded px-1 py-0.5 text-foreground/90"
 		class:ring-1={isFocused || isDropHover}
-		class:ring-indigo-500={isFocused && !isDropHover}
-		class:ring-emerald-500={isDropHover && dnd.hoverValid}
-		class:ring-red-500={isDropHover && !dnd.hoverValid}
-		class:bg-zinc-800={isDropHover}
+		class:ring-ring={isFocused && !isDropHover}
+		class:ring-success={isDropHover && dnd.hoverValid}
+		class:ring-destructive={isDropHover && !dnd.hoverValid}
+		class:bg-muted={isDropHover}
 		role="treeitem"
 		tabindex={-1}
 		aria-selected={false}
@@ -199,7 +199,7 @@
 		{#if hasChildren}
 			<button
 				type="button"
-				class="flex h-4 w-4 shrink-0 items-center justify-center text-zinc-500 hover:text-zinc-200"
+				class="flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground/70 hover:text-foreground"
 				onclick={() => onToggle(key)}
 				aria-label={isCollapsed ? 'Expand' : 'Collapse'}
 			>
@@ -210,9 +210,11 @@
 				{/if}
 			</button>
 		{:else}
-			<span class="flex h-4 w-4 shrink-0 items-center justify-center text-zinc-700">·</span>
+			<span class="flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground/40"
+				>·</span
+			>
 		{/if}
-		<span class="flex h-4 w-4 shrink-0 items-center justify-center text-amber-300/80">
+		<span class="flex h-4 w-4 shrink-0 items-center justify-center text-warning/80">
 			{#if hasChildren && !isCollapsed}
 				<FolderOpen class="h-3 w-3" />
 			{:else}
@@ -222,16 +224,16 @@
 		<span class="flex-1 truncate font-medium" title={folderName}>
 			{folderName}
 		</span>
-		<span class="font-mono text-[10px] text-zinc-500">{excludedTotal}</span>
+		<span class="font-mono text-[10px] text-muted-foreground/70">{excludedTotal}</span>
 	</div>
 {:else if isFolder}
 	<div
-		class="group flex h-6 select-none items-center gap-1 rounded px-1 py-0.5 text-zinc-200"
+		class="group flex h-6 select-none items-center gap-1 rounded px-1 py-0.5 text-foreground/90"
 		class:ring-1={isFocused || isDropHover}
-		class:ring-indigo-500={isFocused && !isDropHover}
-		class:ring-emerald-500={isDropHover && dnd.hoverValid}
-		class:ring-red-500={isDropHover && !dnd.hoverValid}
-		class:bg-zinc-800={isDropHover}
+		class:ring-ring={isFocused && !isDropHover}
+		class:ring-success={isDropHover && dnd.hoverValid}
+		class:ring-destructive={isDropHover && !dnd.hoverValid}
+		class:bg-muted={isDropHover}
 		role="treeitem"
 		tabindex={-1}
 		aria-selected={false}
@@ -246,7 +248,7 @@
 		{#if hasChildren}
 			<button
 				type="button"
-				class="flex h-4 w-4 shrink-0 items-center justify-center text-zinc-500 hover:text-zinc-200"
+				class="flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground/70 hover:text-foreground"
 				onclick={() => onToggle(key)}
 				aria-label={isCollapsed ? 'Expand' : 'Collapse'}
 			>
@@ -257,9 +259,11 @@
 				{/if}
 			</button>
 		{:else}
-			<span class="flex h-4 w-4 shrink-0 items-center justify-center text-zinc-700">·</span>
+			<span class="flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground/40"
+				>·</span
+			>
 		{/if}
-		<span class="flex h-4 w-4 shrink-0 items-center justify-center text-amber-300/80">
+		<span class="flex h-4 w-4 shrink-0 items-center justify-center text-warning/80">
 			{#if hasChildren && !isCollapsed}
 				<FolderOpen class="h-3 w-3" />
 			{:else}
@@ -270,11 +274,11 @@
 			{folderName}
 		</span>
 		{#if myVisibility === 'stub'}
-			<span class="font-mono text-[10px] text-zinc-500">empty</span>
+			<span class="font-mono text-[10px] text-muted-foreground/70">empty</span>
 		{/if}
 		<DropdownMenu.Root>
 			<DropdownMenu.Trigger
-				class="flex h-4 w-4 shrink-0 items-center justify-center rounded text-zinc-600 opacity-0 group-hover:opacity-100 hover:text-zinc-200"
+				class="flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground/50 opacity-0 group-hover:opacity-100 hover:text-foreground"
 				aria-label="Folder actions"
 			>
 				<MoreHorizontal class="h-3 w-3" />
@@ -290,9 +294,9 @@
 {:else if isArtifact}
 	{#if artifactHeader}
 		<div
-			class="group flex h-6 select-none items-center gap-1 rounded px-1 py-0.5 text-zinc-200"
+			class="group flex h-6 select-none items-center gap-1 rounded px-1 py-0.5 text-foreground/90"
 			class:ring-1={isFocused}
-			class:ring-indigo-500={isFocused}
+			class:ring-ring={isFocused}
 			role="treeitem"
 			tabindex={-1}
 			aria-selected={false}
@@ -301,8 +305,10 @@
 			ondblclick={onOpenArtifact}
 			onpointerdown={(e) => dnd.onPointerDown(e, key, 'artifact', parentFolderPath ?? [])}
 		>
-			<span class="flex h-4 w-4 shrink-0 items-center justify-center text-zinc-700">·</span>
-			<span class="flex h-4 w-4 shrink-0 items-center justify-center text-sky-500">
+			<span class="flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground/40"
+				>·</span
+			>
+			<span class="flex h-4 w-4 shrink-0 items-center justify-center text-info">
 				<Route class="h-3 w-3" />
 			</span>
 			<span class="flex-1 truncate" title={artifactHeader.name}>
@@ -310,7 +316,7 @@
 			</span>
 			<button
 				type="button"
-				class="hidden h-4 w-4 shrink-0 items-center justify-center rounded text-zinc-600 opacity-0 hover:text-red-400 group-hover:flex group-hover:opacity-100"
+				class="hidden h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground/50 opacity-0 hover:text-destructive group-hover:flex group-hover:opacity-100"
 				aria-label="Remove from folder"
 				title="Remove from folder"
 				onclick={onRemoveArtifact}
@@ -325,17 +331,19 @@
 		     slot) and still removable so a user can clean it up. No dblclick-open
 		     (nothing to open) and not draggable (no onpointerdown wiring). -->
 		<div
-			class="group flex h-6 select-none items-center gap-1 rounded px-1 py-0.5 text-zinc-600"
+			class="group flex h-6 select-none items-center gap-1 rounded px-1 py-0.5 text-muted-foreground/50"
 			class:ring-1={isFocused}
-			class:ring-indigo-500={isFocused}
+			class:ring-ring={isFocused}
 			role="treeitem"
 			tabindex={-1}
 			aria-selected={false}
 			aria-level={depth + 1}
 			style="padding-left: {depth * 12 + 4}px"
 		>
-			<span class="flex h-4 w-4 shrink-0 items-center justify-center text-zinc-700">·</span>
-			<span class="flex h-4 w-4 shrink-0 items-center justify-center text-zinc-700">
+			<span class="flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground/40"
+				>·</span
+			>
+			<span class="flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground/40">
 				<Route class="h-3 w-3" />
 			</span>
 			<span class="flex-1 truncate italic" title={artifactId}>
@@ -343,7 +351,7 @@
 			</span>
 			<button
 				type="button"
-				class="hidden h-4 w-4 shrink-0 items-center justify-center rounded text-zinc-600 opacity-0 hover:text-red-400 group-hover:flex group-hover:opacity-100"
+				class="hidden h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground/50 opacity-0 hover:text-destructive group-hover:flex group-hover:opacity-100"
 				aria-label="Remove from folder"
 				title="Remove from folder"
 				onclick={onRemoveArtifact}
@@ -354,10 +362,11 @@
 	{/if}
 {:else if el}
 	<div
-		class="group flex h-6 items-center gap-1 rounded px-1 py-0.5"
-		class:bg-zinc-800={isSelected || isMultiSelected}
+		class="group flex h-6 items-center gap-1 rounded px-1 py-0.5 {isSelected || isMultiSelected
+			? 'bg-primary/15'
+			: ''}"
 		class:ring-1={isFocused}
-		class:ring-indigo-500={isFocused}
+		class:ring-ring={isFocused}
 		role="treeitem"
 		tabindex={-1}
 		aria-selected={isSelected}
@@ -372,7 +381,7 @@
 		{#if hasChildren}
 			<button
 				type="button"
-				class="flex h-4 w-4 shrink-0 items-center justify-center text-zinc-500 hover:text-zinc-200"
+				class="flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground/70 hover:text-foreground"
 				onclick={() => onToggle(key)}
 				aria-label={isCollapsed ? 'Expand' : 'Collapse'}
 			>
@@ -383,34 +392,39 @@
 				{/if}
 			</button>
 		{:else}
-			<span class="flex h-4 w-4 shrink-0 items-center justify-center text-zinc-700">•</span>
+			<span class="flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground/40"
+				>•</span
+			>
 		{/if}
 		<button
 			type="button"
-			class="flex flex-1 items-center gap-2 rounded text-left text-zinc-200 hover:text-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+			class="flex flex-1 items-center gap-2 rounded text-left text-foreground/90 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 			class:font-medium={isSelected}
+			class:text-foreground={isSelected}
 			onclick={(e) => onPick(key, e)}
 			title={key}
 		>
 			<span class="whitespace-nowrap">{displayName(el)}</span>
-			<span class="ml-auto shrink-0 rounded bg-zinc-800 px-1 font-mono text-[10px] text-zinc-400">
+			<span
+				class="ml-auto shrink-0 rounded bg-muted px-1 font-mono text-[10px] text-muted-foreground"
+			>
 				{el.type_name}
 			</span>
 			{#if hasError}
-				<AlertCircle class="h-3 w-3 shrink-0 text-red-400" aria-label="has errors" />
+				<AlertCircle class="h-3 w-3 shrink-0 text-destructive" aria-label="has errors" />
 			{:else if hasModelWarning || hasViewWarning}
-				<AlertTriangle class="h-3 w-3 shrink-0 text-amber-400" aria-label="has warnings" />
+				<AlertTriangle class="h-3 w-3 shrink-0 text-warning" aria-label="has warnings" />
 			{/if}
 		</button>
 		{#if badge.state === 'theirs'}
-			<Lock class="h-3 w-3 shrink-0 text-amber-400" title={`Locked by ${badge.holder}`} />
+			<Lock class="h-3 w-3 shrink-0 text-warning" title={`Locked by ${badge.holder}`} />
 		{:else if badge.state === 'mine'}
-			<Lock class="h-3 w-3 shrink-0 text-emerald-400" title="Checked out by you" />
+			<Lock class="h-3 w-3 shrink-0 text-success" title="Checked out by you" />
 		{/if}
 		{#if isMovable && (folderOptions.length > 0 || placedInFolder)}
 			<DropdownMenu.Root>
 				<DropdownMenu.Trigger
-					class="flex h-4 w-4 shrink-0 items-center justify-center rounded text-zinc-600 opacity-0 group-hover:opacity-100 hover:text-zinc-200"
+					class="flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground/50 opacity-0 group-hover:opacity-100 hover:text-foreground"
 					aria-label="Element actions"
 				>
 					<MoreHorizontal class="h-3 w-3" />
@@ -448,7 +462,8 @@
 		data-drop-path={JSON.stringify(parentFolderPath)}
 		data-sibling-index={siblingIndex}
 	>
-		<span class="flex h-4 w-4 shrink-0 items-center justify-center text-zinc-700">•</span>
-		<span class="h-3 w-24 animate-pulse rounded bg-zinc-800"></span>
+		<span class="flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground/40">•</span
+		>
+		<span class="h-3 w-24 animate-pulse rounded bg-muted"></span>
 	</div>
 {/if}

@@ -11,15 +11,16 @@
 </script>
 
 <aside
-	class="flex h-full flex-col overflow-hidden border-r border-zinc-800 bg-zinc-950 text-sm text-zinc-300"
+	class="flex h-full flex-col overflow-hidden border-r border-border bg-background text-sm text-foreground/80"
 >
 	{#if mm === null || summary === null}
-		<section class="px-3 py-3">
-			<p class="text-xs text-zinc-500">Load a metamodel and model to begin.</p>
+		<section class="flex flex-col items-center gap-1 px-3 py-6 text-center">
+			<p class="font-display text-base font-light text-muted-foreground">Nothing loaded</p>
+			<p class="text-xs text-muted-foreground/70">Load a metamodel and model to begin.</p>
 		</section>
 	{:else}
 		<Search />
-		<Separator class="bg-zinc-800" />
+		<Separator class="bg-border" />
 		<ViewSelector />
 		<ArtifactsSection />
 		<ContainmentTree />

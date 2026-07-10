@@ -50,23 +50,23 @@
 
 <section
 	data-testid="results-panel"
-	class="col-span-5 flex h-full flex-col overflow-hidden border-t border-zinc-800 bg-zinc-950"
+	class="col-span-5 flex h-full flex-col overflow-hidden border-t border-border bg-background"
 >
-	<header class="flex shrink-0 items-center gap-2 border-b border-zinc-800 px-3 py-1.5">
-		<h2 class="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+	<header class="flex shrink-0 items-center gap-2 border-b border-border px-3 py-1.5">
+		<h2 class="microlabel">
 			Results
-			<span class="ml-1 font-mono text-zinc-500">({rows.length})</span>
+			<span class="ml-1 font-mono text-muted-foreground/70">({rows.length})</span>
 		</h2>
-		<span class="rounded bg-zinc-800 px-1.5 py-0.5 font-mono text-[10px] text-zinc-400">
+		<span class="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
 			{target}
 		</span>
 		{#if note}
-			<span class="text-[10px] italic text-amber-300/80">{note}</span>
+			<span class="text-[10px] italic text-warning/80">{note}</span>
 		{/if}
 		<button
 			type="button"
 			aria-label="Close results"
-			class="ml-auto flex h-5 w-5 items-center justify-center rounded text-zinc-500 hover:bg-zinc-800 hover:text-zinc-100"
+			class="ml-auto flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
 			onclick={() => closeResultsPanel()}
 		>
 			<X class="h-3.5 w-3.5" />
@@ -75,32 +75,42 @@
 
 	<div class="flex-1 overflow-y-auto">
 		{#if rows.length === 0}
-			<p class="px-3 py-2 text-xs text-zinc-600">No results.</p>
+			<div class="flex flex-col items-center gap-1 px-3 py-6 text-center">
+				<p class="font-display text-base font-light text-muted-foreground">No results</p>
+				<p class="text-xs text-muted-foreground/70">Run a search to populate this panel.</p>
+			</div>
 		{:else}
 			<ul class="flex flex-col p-1 text-xs">
 				{#each rows as row (row.id)}
 					<li>
 						<button
 							type="button"
-							class="flex w-full items-center gap-2 rounded px-2 py-1 text-left hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+							class="flex w-full items-center gap-2 rounded px-2 py-1 text-left hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 							onclick={() => onPick(row)}
 						>
 							{#if row.kind === 'element'}
-								<span class="shrink-0 text-zinc-200">{elementName(row.el)}</span>
-								<span class="shrink-0 rounded bg-zinc-800 px-1 font-mono text-[10px] text-zinc-400">
+								<span class="shrink-0 text-foreground/90">{elementName(row.el)}</span>
+								<span
+									class="shrink-0 rounded bg-muted px-1 font-mono text-[10px] text-muted-foreground"
+								>
 									{row.el.type_name}
 								</span>
-								<span class="ml-auto min-w-0 truncate font-mono text-[10px] text-zinc-600"
+								<span
+									class="ml-auto min-w-0 truncate font-mono text-[10px] text-muted-foreground/50"
 									>{row.id}</span
 								>
 							{:else}
-								<span class="shrink-0 rounded bg-zinc-800 px-1 font-mono text-[10px] text-zinc-400">
+								<span
+									class="shrink-0 rounded bg-muted px-1 font-mono text-[10px] text-muted-foreground"
+								>
 									{row.rel.type_name}
 								</span>
-								<span class="truncate text-zinc-300">
+								<span class="truncate text-foreground/80">
 									{endpointLabel(row.rel.source_id)} → {endpointLabel(row.rel.target_id)}
 								</span>
-								<span class="ml-auto shrink-0 font-mono text-[10px] text-zinc-600">{row.id}</span>
+								<span class="ml-auto shrink-0 font-mono text-[10px] text-muted-foreground/50"
+									>{row.id}</span
+								>
 							{/if}
 						</button>
 					</li>

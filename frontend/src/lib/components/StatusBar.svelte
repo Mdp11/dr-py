@@ -41,43 +41,43 @@
 </script>
 
 <footer
-	class="col-span-5 flex h-6 items-center gap-3 border-t border-zinc-800 bg-zinc-950 px-3 font-mono text-xs text-zinc-400"
+	class="col-span-5 flex h-6 items-center gap-3 border-t border-border bg-background px-3 font-mono text-xs text-muted-foreground"
 >
 	<span>Showing {shownCount}/{totalElements} elements</span>
-	<span class="text-zinc-700">·</span>
+	<span class="text-muted-foreground/40">·</span>
 	<span>{totalChanges} uncommitted</span>
 	{#if lockNotice}
-		<span class="text-zinc-700">·</span>
-		<span class="text-amber-400" title="Lock status">{lockNotice}</span>
+		<span class="text-muted-foreground/40">·</span>
+		<span class="text-warning" title="Lock status">{lockNotice}</span>
 	{/if}
 	{#if staleResources.length > 0}
-		<span class="text-zinc-700">·</span>
-		<span class="text-amber-400" title="One or more of your locks expired">
+		<span class="text-muted-foreground/40">·</span>
+		<span class="text-warning" title="One or more of your locks expired">
 			⚠ {staleResources.length} lock{staleResources.length === 1 ? '' : 's'} expired — re-edit or discard
 			to continue
 		</span>
 	{/if}
-	<span class="text-zinc-700">·</span>
-	<span class={errorCount > 0 ? 'text-red-400' : ''}>
+	<span class="text-muted-foreground/40">·</span>
+	<span class={errorCount > 0 ? 'text-destructive' : ''}>
 		{errorCount}
 		{errorCount === 1 ? 'error' : 'errors'}
 	</span>
-	<span class="text-zinc-700">·</span>
-	<span class={warningCount > 0 ? 'text-amber-400' : ''}>
+	<span class="text-muted-foreground/40">·</span>
+	<span class={warningCount > 0 ? 'text-warning' : ''}>
 		{warningCount}
 		{warningCount === 1 ? 'warning' : 'warnings'}
 	</span>
-	<span class="text-zinc-700">·</span>
+	<span class="text-muted-foreground/40">·</span>
 	<span class="truncate">{filename ?? 'unsaved'}</span>
-	<span class="text-zinc-700">·</span>
+	<span class="text-muted-foreground/40">·</span>
 	<span
-		class={feedConnected ? 'text-emerald-400' : 'text-zinc-600'}
+		class={feedConnected ? 'text-success' : 'text-muted-foreground/50'}
 		title={feedConnected ? 'Live feed connected' : 'Live feed disconnected'}
 	>
 		● {feedConnected ? 'live' : 'offline'}
 	</span>
 	{#if presenceCount > 0}
-		<span class="text-zinc-700">·</span>
+		<span class="text-muted-foreground/40">·</span>
 		<span title="People connected to this project">{presenceCount} here</span>
 	{/if}
 </footer>

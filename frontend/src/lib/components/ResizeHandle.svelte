@@ -51,14 +51,14 @@
 	role="separator"
 	aria-orientation={axis === 'y' ? 'horizontal' : 'vertical'}
 	tabindex="-1"
-	class="group relative select-none bg-zinc-800 hover:bg-zinc-700"
+	class="group relative select-none bg-border hover:bg-primary/50"
 	class:h-full={axis === 'x'}
 	class:w-1={axis === 'x'}
 	class:cursor-col-resize={axis === 'x'}
 	class:w-full={axis === 'y'}
 	class:h-1={axis === 'y'}
 	class:cursor-row-resize={axis === 'y'}
-	class:bg-sky-600={dragging}
+	class:bg-primary={dragging}
 	onpointerdown={onPointerDown}
 	onpointermove={onPointerMove}
 	onpointerup={onPointerUp}

@@ -159,31 +159,31 @@
 	}
 
 	const selectCls =
-		'h-7 w-full rounded border border-zinc-800 bg-zinc-900 px-1 text-xs text-zinc-100 outline-none focus:border-zinc-600';
+		'h-7 w-full rounded border border-border bg-card px-1 text-xs text-foreground outline-none focus:border-ring';
 </script>
 
 <div class="flex flex-col">
 	{#if !expanded}
 		{#if mm === null || source === null}
-			<p class="text-[11px] italic text-zinc-500">(loading…)</p>
+			<p class="text-[11px] italic text-muted-foreground/70">(loading…)</p>
 		{:else}
 			<button
 				type="button"
-				class="inline-flex w-fit items-center gap-1 rounded border border-zinc-800 bg-zinc-900 px-2 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800"
+				class="inline-flex w-fit items-center gap-1 rounded border border-border bg-card px-2 py-0.5 text-[11px] text-foreground/80 hover:bg-muted"
 				onclick={() => (expanded = true)}
 			>
 				<Plus class="h-3 w-3" /> New relationship
 			</button>
 		{/if}
 	{:else}
-		<div class="flex flex-col gap-2 rounded border border-zinc-800 bg-zinc-950 p-2">
+		<div class="flex flex-col gap-2 rounded border border-border bg-popover p-2">
 			<div class="flex items-center justify-between">
-				<span class="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+				<span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
 					New relationship
 				</span>
 				<button
 					type="button"
-					class="rounded p-0.5 text-zinc-500 hover:text-zinc-200"
+					class="rounded p-0.5 text-muted-foreground hover:text-foreground"
 					onclick={cancel}
 					aria-label="Cancel"
 				>
@@ -191,7 +191,7 @@
 				</button>
 			</div>
 
-			<label class="flex items-center gap-1 text-[10px] text-zinc-400">
+			<label class="flex items-center gap-1 text-[10px] text-muted-foreground">
 				<input
 					type="checkbox"
 					checked={showAll}
@@ -205,7 +205,7 @@
 			</label>
 
 			<label class="flex flex-col gap-1">
-				<span class="text-[10px] text-zinc-500">Type</span>
+				<span class="text-[10px] text-muted-foreground/70">Type</span>
 				<select class={selectCls} value={selectedType} onchange={onTypeChange}>
 					<option value="">(choose type)</option>
 					{#each typeOptions as o (o.rt.name)}
@@ -223,7 +223,7 @@
 					{/each}
 				</select>
 				{#if typeOptions.length === 0}
-					<span class="text-[10px] italic text-zinc-500">
+					<span class="text-[10px] italic text-muted-foreground/70">
 						(no valid relationships from this type)
 					</span>
 				{/if}
@@ -231,7 +231,7 @@
 
 			{#if chosenOption !== null}
 				<label class="flex flex-col gap-1">
-					<span class="text-[10px] text-zinc-500"
+					<span class="text-[10px] text-muted-foreground/70"
 						>Target ({chosenOption.targetTypes.join(' | ')})</span
 					>
 					<select class={selectCls} value={selectedTarget} onchange={onTargetChange}>
@@ -243,11 +243,11 @@
 						{/each}
 					</select>
 					{#if candidateTargets.length === 0}
-						<span class="text-[10px] italic text-zinc-500">
+						<span class="text-[10px] italic text-muted-foreground/70">
 							No elements of type {chosenOption.targetTypes.join(' | ')} (or subtype) exist.
 						</span>
 					{:else if candidatesTotal > candidateTargets.length || !candidatesTotalExact}
-						<span class="text-[10px] italic text-zinc-500">
+						<span class="text-[10px] italic text-muted-foreground/70">
 							Showing the first {candidateTargets.length} of {candidatesTotal}{candidatesTotalExact
 								? ''
 								: '+'} candidates.
@@ -259,14 +259,14 @@
 			<div class="flex justify-end gap-1">
 				<button
 					type="button"
-					class="rounded border border-zinc-800 bg-zinc-900 px-2 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800"
+					class="rounded border border-border bg-card px-2 py-0.5 text-[11px] text-foreground/80 hover:bg-muted"
 					onclick={cancel}
 				>
 					Cancel
 				</button>
 				<button
 					type="button"
-					class="rounded border border-zinc-700 bg-blue-900/40 px-2 py-0.5 text-[11px] text-zinc-100 hover:bg-blue-900/60 disabled:cursor-not-allowed disabled:opacity-50"
+					class="rounded border border-primary/40 bg-primary/20 px-2 py-0.5 text-[11px] text-foreground hover:bg-primary/30 disabled:cursor-not-allowed disabled:opacity-50"
 					disabled={selectedType === '' || selectedTarget === ''}
 					onclick={create}
 				>

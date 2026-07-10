@@ -93,23 +93,27 @@
 </script>
 
 {#if selection === null}
-	<div class="flex h-full items-center justify-center px-4 text-xs text-zinc-500">
-		Select an entity from the tree or use search…
+	<div class="flex h-full flex-col items-center justify-center gap-1 px-4 text-center">
+		<p class="font-display text-base font-light text-muted-foreground">No element selected</p>
+		<p class="text-xs text-muted-foreground/70">Select an entity from the tree or use search.</p>
 	</div>
 {:else if entity === null}
-	<div class="flex h-full items-center justify-center px-4 text-xs text-zinc-500">
-		Selection no longer exists.
+	<div class="flex h-full flex-col items-center justify-center gap-1 px-4 text-center">
+		<p class="font-display text-base font-light text-muted-foreground">Selection not found</p>
+		<p class="text-xs text-muted-foreground/70">This selection no longer exists.</p>
 	</div>
 {:else if selection.kind === 'element'}
 	<div class="flex flex-col gap-3 p-4">
-		<header class="flex items-baseline justify-between gap-2 border-b border-zinc-800 pb-2">
+		<header class="flex items-baseline justify-between gap-2 border-b border-border pb-2">
 			<div class="flex flex-col gap-0.5">
-				<span class="text-xs uppercase tracking-wide text-zinc-500">Element</span>
-				<h2 class="font-mono text-sm text-zinc-100">{entity.type_name}</h2>
+				<span class="microlabel">Element</span>
+				<h2 class="font-display text-base font-light tracking-wide text-foreground">
+					{entity.type_name}
+				</h2>
 			</div>
 			<button
 				type="button"
-				class="text-xs text-red-400 underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline"
+				class="text-xs text-destructive underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline"
 				disabled={deleteLockedByOther}
 				title={deleteLockedByOther ? 'Locked by another user' : undefined}
 				onclick={onDeleteElement}
@@ -122,15 +126,17 @@
 {:else}
 	{@const rel = entity as Relationship}
 	<div class="flex flex-col gap-3 p-4">
-		<header class="flex flex-col gap-2 border-b border-zinc-800 pb-2">
+		<header class="flex flex-col gap-2 border-b border-border pb-2">
 			<div class="flex items-baseline justify-between gap-2">
 				<div class="flex flex-col gap-0.5">
-					<span class="text-xs uppercase tracking-wide text-zinc-500">Relationship</span>
-					<h2 class="font-mono text-sm text-zinc-100">{rel.type_name}</h2>
+					<span class="microlabel">Relationship</span>
+					<h2 class="font-display text-base font-light tracking-wide text-foreground">
+						{rel.type_name}
+					</h2>
 				</div>
 				<button
 					type="button"
-					class="text-xs text-red-400 underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline"
+					class="text-xs text-destructive underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:opacity-50 disabled:no-underline"
 					disabled={deleteLockedByOther}
 					title={deleteLockedByOther ? 'Locked by another user' : undefined}
 					onclick={onDisconnectRelationship}
@@ -138,19 +144,19 @@
 					Disconnect
 				</button>
 			</div>
-			<div class="flex items-center gap-2 text-xs text-zinc-300">
+			<div class="flex items-center gap-2 text-xs text-foreground/80">
 				<button
 					type="button"
-					class="rounded bg-zinc-900 px-1.5 py-0.5 font-mono text-[11px] text-zinc-200 hover:bg-zinc-800"
+					class="rounded bg-card px-1.5 py-0.5 font-mono text-[11px] text-foreground/90 hover:bg-muted"
 					onclick={() => gotoElement(rel.source_id)}
 					title={rel.source_id}
 				>
 					{displayName(sourceEl, rel.source_id)}
 				</button>
-				<span class="text-zinc-500">→</span>
+				<span class="text-muted-foreground/70">→</span>
 				<button
 					type="button"
-					class="rounded bg-zinc-900 px-1.5 py-0.5 font-mono text-[11px] text-zinc-200 hover:bg-zinc-800"
+					class="rounded bg-card px-1.5 py-0.5 font-mono text-[11px] text-foreground/90 hover:bg-muted"
 					onclick={() => gotoElement(rel.target_id)}
 					title={rel.target_id}
 				>

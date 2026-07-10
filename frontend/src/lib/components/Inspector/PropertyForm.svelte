@@ -49,19 +49,19 @@
 <div class="flex flex-col gap-3">
 	<div>
 		<span
-			class="inline-block rounded bg-zinc-900 px-1.5 py-0.5 font-mono text-[10px] text-zinc-400"
+			class="inline-block rounded bg-card px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
 			title={entity.id}
 		>
 			{entity.id}
 		</span>
 	</div>
 	{#if lockedByOther}
-		<p data-testid="readonly-notice" class="text-[10px] text-amber-500/80">
+		<p data-testid="readonly-notice" class="text-[10px] text-warning/80">
 			Locked by {peerLock.holder ?? 'another user'} — read-only
 		</p>
 	{/if}
 	{#if propDefs.length === 0}
-		<p class="text-xs italic text-zinc-500">(no properties defined)</p>
+		<p class="text-xs italic text-muted-foreground/70">(no properties defined)</p>
 	{:else}
 		<!-- `disabled` on the fieldset natively disables every descendant form
 		     control (inputs, selects, textareas, and the pickers' buttons), so a

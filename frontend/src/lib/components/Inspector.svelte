@@ -32,29 +32,27 @@
 
 <aside
 	data-testid="inspector"
-	class="flex h-full flex-col overflow-hidden border-l border-zinc-800 bg-zinc-950 text-sm text-zinc-300"
+	class="flex h-full flex-col overflow-hidden border-l border-border bg-background text-sm text-foreground/80"
 >
 	{#if selection === null}
-		<section class="flex-1 overflow-auto px-3 py-2">
-			<h2 class="mb-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-				Properties
-			</h2>
-			<p class="text-xs text-zinc-500">Select an entity from the tree…</p>
+		<section
+			class="flex flex-1 flex-col items-center justify-center gap-1 overflow-auto px-3 py-6 text-center"
+		>
+			<p class="font-display text-base font-light text-muted-foreground">No element selected</p>
+			<p class="text-xs text-muted-foreground/70">Select an entity from the tree to inspect it.</p>
 		</section>
 	{:else if entity === null}
-		<section class="flex-1 overflow-auto px-3 py-2">
-			<h2 class="mb-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-				Properties
-			</h2>
-			<p class="text-xs text-zinc-500">Selection no longer exists.</p>
+		<section
+			class="flex flex-1 flex-col items-center justify-center gap-1 overflow-auto px-3 py-6 text-center"
+		>
+			<p class="font-display text-base font-light text-muted-foreground">Selection not found</p>
+			<p class="text-xs text-muted-foreground/70">This selection no longer exists.</p>
 		</section>
 	{:else}
 		<div class="flex-1 overflow-auto">
 			<section class="px-3 py-2">
 				<div class="mb-2 flex items-center justify-between gap-2">
-					<h2 class="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-						Properties
-					</h2>
+					<h2 class="microlabel">Properties</h2>
 					{#if selection.kind === 'element'}
 						<LockControl elementId={selection.id} />
 					{/if}
@@ -68,11 +66,9 @@
 				     identity churns on every optimistic property edit — refetching this
 				     element's relationships on every keystroke. `selection.id` only
 				     changes on re-selection (mirrors GraphView's `centerId`). -->
-				<Separator class="bg-zinc-800" />
+				<Separator class="bg-border" />
 				<section class="px-3 py-2">
-					<h2 class="mb-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-						Relationships
-					</h2>
+					<h2 class="mb-2 microlabel">Relationships</h2>
 					<RelationshipsList elementId={selection.id} />
 					<div class="mt-3">
 						<NewRelationshipPicker sourceId={selection.id} />

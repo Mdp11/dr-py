@@ -57,7 +57,7 @@
 	<button
 		type="button"
 		data-testid="lock-control"
-		class="rounded border border-zinc-700 px-1.5 py-0.5 text-[10px] text-zinc-400 hover:border-zinc-500 hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-50"
+		class="rounded border border-input px-1.5 py-0.5 text-[10px] text-muted-foreground hover:border-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
 		disabled={busy}
 		onclick={onUnlock}
 	>
@@ -66,7 +66,7 @@
 {:else if badge.state === 'theirs'}
 	<span
 		data-testid="lock-control"
-		class="rounded border border-zinc-800 px-1.5 py-0.5 text-[10px] text-amber-500/80"
+		class="rounded border border-border px-1.5 py-0.5 text-[10px] text-warning/80"
 		title={`Locked by ${badge.holder ?? 'another user'}`}
 	>
 		Locked by {badge.holder ?? 'another user'}
@@ -75,7 +75,7 @@
 	<button
 		type="button"
 		data-testid="lock-control"
-		class="rounded border border-zinc-700 px-1.5 py-0.5 text-[10px] text-zinc-400 hover:border-zinc-500 hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-50"
+		class="rounded border border-input px-1.5 py-0.5 text-[10px] text-muted-foreground hover:border-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
 		disabled={busy || !editable}
 		title={editable ? 'Check out this element without editing' : 'You have view-only access'}
 		onclick={onLock}

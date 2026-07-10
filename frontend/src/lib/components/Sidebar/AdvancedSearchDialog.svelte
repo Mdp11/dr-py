@@ -115,13 +115,13 @@
 		</Dialog.Header>
 
 		<div class="flex items-center gap-2">
-			<span class="text-xs text-zinc-400">Search for:</span>
-			<div class="inline-flex overflow-hidden rounded border border-zinc-700">
+			<span class="text-xs text-muted-foreground">Search for:</span>
+			<div class="inline-flex overflow-hidden rounded border border-input">
 				<button
 					type="button"
 					class="px-3 py-1 text-xs {target === 'element'
-						? 'bg-indigo-600 text-white'
-						: 'bg-zinc-900 text-zinc-300 hover:bg-zinc-800'}"
+						? 'bg-primary text-primary-foreground'
+						: 'bg-card text-muted-foreground hover:bg-muted'}"
 					onclick={() => setSearchTarget('element')}
 				>
 					Elements
@@ -129,8 +129,8 @@
 				<button
 					type="button"
 					class="px-3 py-1 text-xs {target === 'relationship'
-						? 'bg-indigo-600 text-white'
-						: 'bg-zinc-900 text-zinc-300 hover:bg-zinc-800'}"
+						? 'bg-primary text-primary-foreground'
+						: 'bg-card text-muted-foreground hover:bg-muted'}"
 					onclick={() => setSearchTarget('relationship')}
 				>
 					Relationships
@@ -140,7 +140,7 @@
 
 		<div class="flex max-h-[55vh] flex-col gap-2 overflow-y-auto pr-1">
 			{#if criteria.length === 0}
-				<p class="text-xs text-zinc-500">
+				<p class="text-xs text-muted-foreground/70">
 					No criteria — search will list every {target === 'element' ? 'element' : 'relationship'}.
 				</p>
 			{/if}
@@ -157,7 +157,7 @@
 
 		<DropdownMenu.Root>
 			<DropdownMenu.Trigger
-				class="inline-flex w-fit items-center gap-1 rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-200 hover:bg-zinc-800"
+				class="inline-flex w-fit items-center gap-1 rounded border border-input px-2 py-1 text-xs text-foreground/90 hover:bg-muted"
 			>
 				<Plus class="h-3 w-3" /> Add criterion
 			</DropdownMenu.Trigger>
@@ -174,7 +174,7 @@
 			<Button type="button" variant="ghost" onclick={() => clearSearchCriteria()}>Clear</Button>
 			<Button
 				type="button"
-				class="bg-indigo-600 text-white hover:bg-indigo-500"
+				class="bg-primary text-primary-foreground hover:bg-primary/80"
 				onclick={() => void onSearch()}
 				disabled={hasInvalidRegex || searching}
 			>

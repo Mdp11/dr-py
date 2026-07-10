@@ -172,17 +172,17 @@
 	);
 
 	const inputCls =
-		'h-7 w-full rounded border border-zinc-800 bg-zinc-900 px-2 py-0.5 text-xs text-zinc-100 outline-none focus:border-zinc-600';
+		'h-7 w-full rounded border border-border bg-card px-2 py-0.5 text-xs text-foreground outline-none focus:border-ring';
 	const selectCls =
-		'h-7 w-full rounded border border-zinc-800 bg-zinc-900 px-1 text-xs text-zinc-100 outline-none focus:border-zinc-600';
+		'h-7 w-full rounded border border-border bg-card px-1 text-xs text-foreground outline-none focus:border-ring';
 	const textareaCls =
-		'w-full rounded border border-zinc-800 bg-zinc-900 px-2 py-1 text-xs text-zinc-100 outline-none focus:border-zinc-600';
+		'w-full rounded border border-border bg-card px-2 py-1 text-xs text-foreground outline-none focus:border-ring';
 </script>
 
 <div class="flex flex-col gap-1">
 	<div class="flex items-baseline gap-2">
-		<span class="text-xs font-medium text-zinc-200">{propDef.name}</span>
-		<span class="font-mono text-[10px] text-zinc-500">{annotation}</span>
+		<span class="text-xs font-medium text-foreground/90">{propDef.name}</span>
+		<span class="font-mono text-[10px] text-muted-foreground/70">{annotation}</span>
 	</div>
 
 	{#if kind === 'unknown'}
@@ -192,7 +192,7 @@
 			disabled
 			value={value === undefined || value === null ? '' : String(value)}
 		/>
-		<span class="text-[10px] text-amber-400">unknown datatype: {propDef.datatype}</span>
+		<span class="text-[10px] text-warning">unknown datatype: {propDef.datatype}</span>
 	{:else if !isMany}
 		{#if kind === 'string'}
 			{#if useTextarea}
@@ -227,7 +227,7 @@
 				oninput={onNumberInput}
 			/>
 		{:else if kind === 'boolean'}
-			<label class="flex items-center gap-2 text-xs text-zinc-300">
+			<label class="flex items-center gap-2 text-xs text-foreground/80">
 				<input type="checkbox" checked={value === true} onchange={onBooleanChange} />
 				<span>{value === true ? 'true' : 'false'}</span>
 			</label>
@@ -262,7 +262,7 @@
 		<!-- Multi-valued field -->
 		{#if kind === 'enum'}
 			<select
-				class="min-h-[80px] w-full rounded border border-zinc-800 bg-zinc-900 px-1 py-1 text-xs text-zinc-100 outline-none focus:border-zinc-600"
+				class="min-h-[80px] w-full rounded border border-border bg-card px-1 py-1 text-xs text-foreground outline-none focus:border-ring"
 				multiple
 				onchange={onMultiEnumChange}
 			>
@@ -313,7 +313,7 @@
 									}}
 								/>
 							{:else if kind === 'boolean'}
-								<label class="flex items-center gap-2 text-xs text-zinc-300">
+								<label class="flex items-center gap-2 text-xs text-foreground/80">
 									<input
 										type="checkbox"
 										checked={item === true}
@@ -338,7 +338,7 @@
 						</div>
 						<button
 							type="button"
-							class="text-zinc-500 hover:text-red-400"
+							class="text-muted-foreground hover:text-destructive"
 							onclick={() => removeAt(i)}
 							aria-label="Remove"
 						>
@@ -349,7 +349,7 @@
 			</ul>
 			<button
 				type="button"
-				class="mt-1 inline-flex w-fit items-center gap-1 rounded border border-zinc-800 bg-zinc-900 px-2 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800"
+				class="mt-1 inline-flex w-fit items-center gap-1 rounded border border-border bg-card px-2 py-0.5 text-[11px] text-foreground/80 hover:bg-muted"
 				onclick={addOne}
 			>
 				<Plus class="h-3 w-3" /> Add
@@ -358,9 +358,9 @@
 	{/if}
 
 	{#if multiplicityWarning !== null}
-		<span class="text-[10px] text-red-400">{multiplicityWarning}</span>
+		<span class="text-[10px] text-destructive">{multiplicityWarning}</span>
 	{/if}
 	{#if facetWarning !== null}
-		<span class="text-[10px] text-red-400">{facetWarning}</span>
+		<span class="text-[10px] text-destructive">{facetWarning}</span>
 	{/if}
 </div>

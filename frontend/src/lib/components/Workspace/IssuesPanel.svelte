@@ -30,9 +30,9 @@
 	let filter = $state<OriginFilter>('all');
 
 	function originBadge(o: Issue['origin']): { label: string; cls: string } {
-		if (o === 'uncommitted') return { label: 'new', cls: 'bg-sky-900 text-sky-200' };
-		if (o === 'resolved') return { label: 'fixed', cls: 'bg-emerald-950 text-emerald-300' };
-		return { label: 'on server', cls: 'bg-zinc-800 text-zinc-400' };
+		if (o === 'uncommitted') return { label: 'new', cls: 'bg-info/15 text-info' };
+		if (o === 'resolved') return { label: 'fixed', cls: 'bg-success/15 text-success' };
+		return { label: 'on server', cls: 'bg-muted text-muted-foreground' };
 	}
 
 	const filtered = $derived(filter === 'all' ? issues : issues.filter((i) => i.origin === filter));
@@ -97,29 +97,29 @@
 
 {#snippet issueRow(it: Issue, idx: number)}
 	<li
-		class="flex flex-col gap-1 rounded border border-zinc-800 bg-zinc-900/40 px-2 py-1.5"
+		class="flex flex-col gap-1 rounded border border-border bg-muted/40 px-2 py-1.5"
 		class:opacity-60={it.origin === 'resolved'}
 	>
 		<div class="flex items-start gap-1.5">
 			{#if it.severity === 'error'}
-				<AlertCircle class="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-400" />
+				<AlertCircle class="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
 			{:else}
-				<AlertTriangle class="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-400" />
+				<AlertTriangle class="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
 			{/if}
-			<span class="flex-1 text-zinc-200" class:line-through={it.origin === 'resolved'}>
+			<span class="flex-1 text-foreground/90" class:line-through={it.origin === 'resolved'}>
 				{it.message}
 			</span>
 			<span class="rounded px-1 py-0.5 text-[9px] uppercase {originBadge(it.origin).cls}">
 				{originBadge(it.origin).label}
 			</span>
-			<span class="font-mono text-[10px] text-zinc-600">#{idx + 1}</span>
+			<span class="font-mono text-[10px] text-muted-foreground/50">#{idx + 1}</span>
 		</div>
 		{#if it.target_ids.length > 0}
 			<div class="flex flex-wrap items-center gap-1 pl-5">
 				{#each it.target_ids as tid (tid)}
 					<button
 						type="button"
-						class="rounded bg-zinc-800 px-1.5 py-0.5 font-mono text-[10px] text-zinc-300 hover:bg-zinc-700 hover:text-zinc-50"
+						class="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground/80 hover:bg-accent hover:text-accent-foreground"
 						onclick={() => onTargetClick(tid)}
 						title={tid}
 					>
@@ -132,28 +132,28 @@
 {/snippet}
 
 <div class="flex h-full flex-col">
-	<header class="flex items-center justify-between border-b border-zinc-800 px-3 py-2 text-xs">
+	<header class="flex items-center justify-between border-b border-border px-3 py-2 text-xs">
 		<div class="flex flex-col gap-0.5">
-			<div class="flex items-center gap-2 text-zinc-300">
+			<div class="flex items-center gap-2 text-foreground/80">
 				{#if lastRunAt === null}
-					<span class="text-zinc-500">Not validated yet.</span>
+					<span class="text-muted-foreground/70">Not validated yet.</span>
 				{:else if errors.length === 0 && warnings.length === 0}
-					<span class="text-emerald-400"
+					<span class="text-success"
 						>No issues{resolved.length > 0 ? ` · ${resolved.length} fixed` : ''}</span
 					>
 				{:else}
-					<span class="text-red-400"
+					<span class="text-destructive"
 						>{errors.length} {errors.length === 1 ? 'error' : 'errors'}</span
 					>
-					<span class="text-zinc-700">·</span>
-					<span class="text-amber-400">
+					<span class="text-muted-foreground/40">·</span>
+					<span class="text-warning">
 						{warnings.length}
 						{warnings.length === 1 ? 'warning' : 'warnings'}
 					</span>
 				{/if}
 			</div>
 			{#if lastRunAt !== null}
-				<span class="text-[10px] text-zinc-500">last run {relativeTime(lastRunAt)}</span>
+				<span class="text-[10px] text-muted-foreground/70">last run {relativeTime(lastRunAt)}</span>
 			{/if}
 		</div>
 		<Button
@@ -169,24 +169,29 @@
 	</header>
 
 	{#if lastError !== null}
-		<div class="border-b border-red-900 bg-red-950/40 px-3 py-2 text-xs text-red-200">
+		<div
+			class="border-b border-destructive/40 bg-destructive/15 px-3 py-2 text-xs text-destructive"
+		>
 			Validation failed: {lastError}
 		</div>
 	{/if}
 
 	<div class="flex-1 overflow-auto px-3 py-2 text-xs">
 		{#if lastRunAt === null}
-			<p class="text-zinc-500">Run Validate to check for issues.</p>
+			<div class="flex flex-col items-center gap-1 py-6 text-center">
+				<p class="font-display text-base font-light text-muted-foreground">Not yet validated</p>
+				<p class="text-xs text-muted-foreground/70">Run Validate to check for issues.</p>
+			</div>
 		{:else if issues.length === 0}
-			<p class="text-emerald-400">No issues (validated {relativeTime(lastRunAt)}).</p>
+			<p class="text-success">No issues (validated {relativeTime(lastRunAt)}).</p>
 		{:else}
 			<div class="mb-2 flex flex-wrap gap-1">
 				{#each [['all', 'All'], ['uncommitted', 'New'], ['on_server', 'On server'], ['resolved', 'Fixed']] as [val, label] (val)}
 					<button
 						type="button"
 						class="rounded px-2 py-0.5 text-[10px] {filter === val
-							? 'bg-zinc-200 text-zinc-900'
-							: 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}"
+							? 'bg-primary text-primary-foreground'
+							: 'bg-muted text-muted-foreground hover:bg-accent hover:text-accent-foreground'}"
 						disabled={val === 'resolved' && !hasResolved}
 						onclick={() => (filter = val as OriginFilter)}
 					>
@@ -195,12 +200,12 @@
 				{/each}
 			</div>
 			{#if filtered.length === 0}
-				<p class="text-zinc-500">No issues match this filter.</p>
+				<p class="text-muted-foreground/70">No issues match this filter.</p>
 			{:else}
 				<div class="flex flex-col gap-3">
 					{#if errors.length > 0}
 						<section class="flex flex-col gap-1">
-							<h3 class="text-[10px] font-semibold uppercase tracking-wider text-red-300">
+							<h3 class="text-[10px] font-semibold uppercase tracking-wider text-destructive">
 								Errors ({errors.length})
 							</h3>
 							<ul class="flex flex-col gap-1">
@@ -212,7 +217,7 @@
 					{/if}
 					{#if warnings.length > 0}
 						<section class="flex flex-col gap-1">
-							<h3 class="text-[10px] font-semibold uppercase tracking-wider text-amber-300">
+							<h3 class="text-[10px] font-semibold uppercase tracking-wider text-warning">
 								Warnings ({warnings.length})
 							</h3>
 							<ul class="flex flex-col gap-1">
@@ -224,7 +229,7 @@
 					{/if}
 					{#if resolved.length > 0}
 						<section class="flex flex-col gap-1">
-							<h3 class="text-[10px] font-semibold uppercase tracking-wider text-emerald-300">
+							<h3 class="text-[10px] font-semibold uppercase tracking-wider text-success">
 								Resolved by your edits ({resolved.length})
 							</h3>
 							<ul class="flex flex-col gap-1">

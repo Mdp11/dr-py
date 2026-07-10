@@ -71,14 +71,14 @@
 <div class="relative flex items-center gap-2">
 	{#if valueId !== null}
 		<span
-			class="inline-flex items-center gap-1 rounded bg-zinc-800 px-1.5 py-0.5 font-mono text-[11px] text-zinc-200"
+			class="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-foreground/90"
 		>
 			<span class="truncate max-w-[160px]" title={valueId}>
 				{current ? displayName(current) : valueId}
 			</span>
 			<button
 				type="button"
-				class="text-zinc-500 hover:text-zinc-200"
+				class="text-muted-foreground hover:text-foreground"
 				onclick={clear}
 				aria-label="Clear reference"
 			>
@@ -86,32 +86,34 @@
 			</button>
 		</span>
 	{:else}
-		<span class="text-xs italic text-zinc-500">unset</span>
+		<span class="text-xs italic text-muted-foreground/70">unset</span>
 	{/if}
 	<button
 		type="button"
-		class="rounded border border-zinc-700 bg-zinc-900 px-1.5 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800"
+		class="rounded border border-input bg-card px-1.5 py-0.5 text-[11px] text-foreground/80 hover:bg-muted"
 		onclick={() => (open = !open)}
 	>
 		Browse...
 	</button>
 	{#if open}
 		<div
-			class="absolute left-0 top-full z-10 mt-1 max-h-56 w-64 overflow-auto rounded border border-zinc-800 bg-zinc-950 text-xs shadow-lg"
+			class="absolute left-0 top-full z-10 mt-1 max-h-56 w-64 overflow-auto rounded border border-border bg-popover text-xs shadow-lg"
 		>
 			{#if candidates.length === 0}
-				<p class="px-2 py-1 text-zinc-500">No matching elements.</p>
+				<p class="px-2 py-1 text-muted-foreground/70">No matching elements.</p>
 			{:else}
 				<ul class="flex flex-col">
 					{#each candidates as el (el.id)}
 						<li>
 							<button
 								type="button"
-								class="flex w-full items-center justify-between gap-2 px-2 py-1 text-left hover:bg-zinc-800"
+								class="flex w-full items-center justify-between gap-2 px-2 py-1 text-left hover:bg-muted"
 								onclick={() => pick(el.id)}
 							>
 								<span class="truncate">{displayName(el)}</span>
-								<span class="shrink-0 rounded bg-zinc-800 px-1 font-mono text-[10px] text-zinc-400">
+								<span
+									class="shrink-0 rounded bg-muted px-1 font-mono text-[10px] text-muted-foreground"
+								>
 									{el.type_name}
 								</span>
 							</button>
@@ -119,7 +121,7 @@
 					{/each}
 				</ul>
 				{#if candidatesTotal > candidates.length || !candidatesTotalExact}
-					<p class="px-2 py-1 italic text-zinc-500">
+					<p class="px-2 py-1 italic text-muted-foreground/70">
 						Showing the first {candidates.length} of {candidatesTotal}{candidatesTotalExact
 							? ''
 							: '+'}.

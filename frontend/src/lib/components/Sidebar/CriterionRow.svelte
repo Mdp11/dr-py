@@ -94,14 +94,14 @@
 	}
 </script>
 
-<div class="flex flex-col gap-1 rounded border border-zinc-800 bg-zinc-900/50 p-2">
+<div class="flex flex-col gap-1 rounded border border-border bg-muted/50 p-2">
 	<div class="flex items-center gap-2">
-		<span class="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+		<span class="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
 			{CRITERION_LABELS[criterion.type]}
 		</span>
 		<button
 			type="button"
-			class="ml-auto flex h-5 w-5 items-center justify-center rounded text-zinc-500 hover:bg-zinc-800 hover:text-red-300"
+			class="ml-auto flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-destructive"
 			aria-label="Remove criterion"
 			onclick={() => onRemove(index)}
 		>
@@ -125,7 +125,7 @@
 				searchPlaceholder="Filter types…"
 			>
 				{#snippet trigger()}
-					<span class="rounded border border-zinc-700 px-2 py-1 text-zinc-200 hover:bg-zinc-800">
+					<span class="rounded border border-input px-2 py-1 text-foreground/90 hover:bg-muted">
 						Type: {summary(entityCriterion.names)}
 					</span>
 				{/snippet}
@@ -145,13 +145,15 @@
 			>
 				{#snippet trigger()}
 					<span
-						class="flex max-w-[18rem] items-center gap-1 rounded border border-zinc-700 px-2 py-1 text-zinc-200 hover:bg-zinc-800"
+						class="flex max-w-[18rem] items-center gap-1 rounded border border-input px-2 py-1 text-foreground/90 hover:bg-muted"
 					>
 						<span class="truncate" title={propCriterion.name || undefined}>
 							{propCriterion.name || 'property…'}
 						</span>
 						{#if !noProperty}
-							<span class="shrink-0 rounded bg-zinc-800 px-1 font-mono text-[10px] text-zinc-400">
+							<span
+								class="shrink-0 rounded bg-muted px-1 font-mono text-[10px] text-muted-foreground"
+							>
 								{datatype ?? 'untyped'}
 							</span>
 						{/if}
@@ -159,7 +161,7 @@
 				{/snippet}
 			</PropertyPicker>
 			<select
-				class="rounded border border-zinc-700 bg-zinc-900 px-1 py-1 text-zinc-200 disabled:cursor-not-allowed disabled:opacity-50"
+				class="rounded border border-input bg-card px-1 py-1 text-foreground/90 disabled:cursor-not-allowed disabled:opacity-50"
 				value={propCriterion.op}
 				disabled={noProperty}
 				title={noProperty ? 'Select a property first' : undefined}
@@ -172,7 +174,7 @@
 			{#if propCriterion.op !== 'exists' && propCriterion.op !== 'is_empty'}
 				{#if kind === 'boolean'}
 					<select
-						class="rounded border border-zinc-700 bg-zinc-900 px-1 py-1 text-zinc-200 disabled:cursor-not-allowed disabled:opacity-50"
+						class="rounded border border-input bg-card px-1 py-1 text-foreground/90 disabled:cursor-not-allowed disabled:opacity-50"
 						value={propCriterion.value}
 						disabled={noProperty}
 						onchange={(e) => patch({ value: e.currentTarget.value })}
@@ -186,7 +188,7 @@
 						value={propCriterion.value}
 						disabled={noProperty}
 						oninput={(e) => patch({ value: (e.currentTarget as HTMLInputElement).value })}
-						class="h-7 w-32 border-zinc-700 bg-zinc-900 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+						class="h-7 w-32 border-input bg-card text-xs disabled:cursor-not-allowed disabled:opacity-50"
 						placeholder="value"
 					/>
 				{/if}
@@ -194,7 +196,7 @@
 		{:else if criterion.type === 'name_id'}
 			{@const nameIdCriterion = criterion}
 			<select
-				class="rounded border border-zinc-700 bg-zinc-900 px-1 py-1 text-zinc-200"
+				class="rounded border border-input bg-card px-1 py-1 text-foreground/90"
 				value={nameIdCriterion.field}
 				onchange={(e) => patch({ field: e.currentTarget.value as 'name' | 'id' })}
 			>
@@ -202,7 +204,7 @@
 				<option value="id">id</option>
 			</select>
 			<select
-				class="rounded border border-zinc-700 bg-zinc-900 px-1 py-1 text-zinc-200"
+				class="rounded border border-input bg-card px-1 py-1 text-foreground/90"
 				value={nameIdCriterion.op}
 				onchange={(e) => patch({ op: e.currentTarget.value as typeof nameIdCriterion.op })}
 			>
@@ -214,14 +216,14 @@
 				type="text"
 				value={nameIdCriterion.value}
 				oninput={(e) => patch({ value: (e.currentTarget as HTMLInputElement).value })}
-				class="h-7 w-32 border-zinc-700 bg-zinc-900 text-xs"
+				class="h-7 w-32 border-input bg-card text-xs"
 				placeholder="value"
 			/>
 		{:else if criterion.type === 'relation_count'}
 			{@const relCountCriterion = criterion}
 			<span>has</span>
 			<select
-				class="rounded border border-zinc-700 bg-zinc-900 px-1 py-1 text-zinc-200"
+				class="rounded border border-input bg-card px-1 py-1 text-foreground/90"
 				value={relCountCriterion.op}
 				onchange={(e) => patch({ op: e.currentTarget.value as typeof relCountCriterion.op })}
 			>
@@ -233,11 +235,11 @@
 				type="number"
 				value={String(relCountCriterion.count)}
 				oninput={(e) => patch({ count: Number((e.currentTarget as HTMLInputElement).value) || 0 })}
-				class="h-7 w-16 border-zinc-700 bg-zinc-900 text-xs"
+				class="h-7 w-16 border-input bg-card text-xs"
 			/>
 			<span>relations</span>
 			<select
-				class="rounded border border-zinc-700 bg-zinc-900 px-1 py-1 text-zinc-200"
+				class="rounded border border-input bg-card px-1 py-1 text-foreground/90"
 				value={relCountCriterion.direction}
 				onchange={(e) =>
 					patch({ direction: e.currentTarget.value as typeof relCountCriterion.direction })}
@@ -258,18 +260,18 @@
 				searchPlaceholder="Filter rel types…"
 			>
 				{#snippet trigger()}
-					<span class="rounded border border-zinc-700 px-2 py-1 text-zinc-200 hover:bg-zinc-800">
+					<span class="rounded border border-input px-2 py-1 text-foreground/90 hover:bg-muted">
 						of type: {summary(relCountCriterion.relTypes)}
 					</span>
 				{/snippet}
 			</StereotypePicker>
 		{:else if criterion.type === 'orphan'}
-			<span class="text-zinc-400">No relations (orphan element).</span>
+			<span class="text-muted-foreground">No relations (orphan element).</span>
 		{:else if criterion.type === 'connected_to_type'}
 			{@const connCriterion = criterion}
 			<span>connected</span>
 			<select
-				class="rounded border border-zinc-700 bg-zinc-900 px-1 py-1 text-zinc-200"
+				class="rounded border border-input bg-card px-1 py-1 text-foreground/90"
 				value={connCriterion.direction}
 				onchange={(e) =>
 					patch({ direction: e.currentTarget.value as typeof connCriterion.direction })}
@@ -291,7 +293,7 @@
 				searchPlaceholder="Filter types…"
 			>
 				{#snippet trigger()}
-					<span class="rounded border border-zinc-700 px-2 py-1 text-zinc-200 hover:bg-zinc-800">
+					<span class="rounded border border-input px-2 py-1 text-foreground/90 hover:bg-muted">
 						{summary(connCriterion.names)}
 					</span>
 				{/snippet}
@@ -299,7 +301,7 @@
 		{:else if criterion.type === 'endpoint_type'}
 			{@const endpointCriterion = criterion}
 			<select
-				class="rounded border border-zinc-700 bg-zinc-900 px-1 py-1 text-zinc-200"
+				class="rounded border border-input bg-card px-1 py-1 text-foreground/90"
 				value={endpointCriterion.endpoint}
 				onchange={(e) => patch({ endpoint: e.currentTarget.value as 'source' | 'target' })}
 			>
@@ -319,7 +321,7 @@
 				searchPlaceholder="Filter types…"
 			>
 				{#snippet trigger()}
-					<span class="rounded border border-zinc-700 px-2 py-1 text-zinc-200 hover:bg-zinc-800">
+					<span class="rounded border border-input px-2 py-1 text-foreground/90 hover:bg-muted">
 						{summary(endpointCriterion.names)}
 					</span>
 				{/snippet}
@@ -328,6 +330,6 @@
 	</div>
 
 	{#if regexInvalid}
-		<p class="text-[11px] text-red-400">Invalid regular expression.</p>
+		<p class="text-[11px] text-destructive">Invalid regular expression.</p>
 	{/if}
 </div>

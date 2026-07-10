@@ -278,14 +278,14 @@
 </script>
 
 <div
-	class="grid h-screen w-screen overflow-hidden bg-zinc-950 text-zinc-100"
+	class="grid h-screen w-screen overflow-hidden bg-background text-foreground"
 	style:grid-template-columns={cols}
 	style:grid-template-rows={rows}
 >
 	<TopBar />
 	{#if modelError !== null}
 		<div
-			class="col-span-5 flex items-center gap-3 border-b border-red-900 bg-red-950/60 px-3 py-1.5 text-xs text-red-200"
+			class="col-span-5 flex items-center gap-3 border-b border-destructive/40 bg-destructive/15 px-3 py-1.5 text-xs text-destructive"
 			role="alert"
 		>
 			<span class="font-semibold uppercase tracking-wide">
@@ -296,7 +296,7 @@
 				{#if modelError.kind === 'conflict'}
 					<button
 						type="button"
-						class="rounded border border-red-700 bg-red-900/60 px-2 py-0.5 hover:bg-red-900"
+						class="rounded border border-destructive/40 bg-destructive/15 px-2 py-0.5 hover:bg-destructive/25"
 						disabled={reloading}
 						onclick={() => void onReloadModel()}
 					>
@@ -305,7 +305,7 @@
 				{:else}
 					<button
 						type="button"
-						class="rounded border border-red-700 bg-red-900/60 px-2 py-0.5 hover:bg-red-900"
+						class="rounded border border-destructive/40 bg-destructive/15 px-2 py-0.5 hover:bg-destructive/25"
 						onclick={() => clearModelError()}
 					>
 						Dismiss
@@ -316,7 +316,7 @@
 	{/if}
 	{#if pendingRebind}
 		<div
-			class="col-span-5 flex items-center justify-between gap-3 bg-amber-950/60 px-3 py-1.5 text-xs text-amber-100"
+			class="col-span-5 flex items-center justify-between gap-3 bg-warning/15 px-3 py-1.5 text-xs text-warning"
 			role="alert"
 		>
 			<span>
@@ -330,7 +330,7 @@
 	{/if}
 	{#if feedTerminationView}
 		<div
-			class="col-span-5 flex items-center gap-3 border-b border-red-900 bg-red-950/60 px-3 py-1.5 text-xs text-red-200"
+			class="col-span-5 flex items-center gap-3 border-b border-destructive/40 bg-destructive/15 px-3 py-1.5 text-xs text-destructive"
 			role="alert"
 		>
 			<span class="font-semibold uppercase tracking-wide">Disconnected</span>
@@ -338,7 +338,7 @@
 			<div class="ml-auto flex items-center gap-2">
 				<button
 					type="button"
-					class="rounded border border-red-700 bg-red-900/60 px-2 py-0.5 hover:bg-red-900"
+					class="rounded border border-destructive/40 bg-destructive/15 px-2 py-0.5 hover:bg-destructive/25"
 					onclick={feedTerminationView.action}
 				>
 					{feedTerminationView.label}

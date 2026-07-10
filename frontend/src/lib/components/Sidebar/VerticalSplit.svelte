@@ -86,7 +86,7 @@
 	</div>
 	{#if !collapsed}
 		<div
-			class="shrink-0 cursor-row-resize bg-zinc-800 transition-colors hover:bg-indigo-500/50"
+			class="shrink-0 cursor-row-resize bg-border transition-colors hover:bg-primary/50"
 			style="height: {dividerH}px"
 			role="separator"
 			aria-orientation="horizontal"

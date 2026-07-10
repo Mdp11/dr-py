@@ -49,32 +49,32 @@
 		<Popover.Content
 			align={align ?? 'start'}
 			sideOffset={4}
-			class="z-50 w-72 rounded-md border border-zinc-800 bg-zinc-950 p-0 text-sm text-zinc-200 shadow-xl outline-none"
+			class="z-50 w-72 rounded-md border border-border bg-popover p-0 text-sm text-popover-foreground shadow-xl outline-none"
 		>
-			<div class="border-b border-zinc-800 p-2">
+			<div class="border-b border-border p-2">
 				<Input
 					type="text"
 					autofocus
 					placeholder={searchPlaceholder ?? 'Filter properties…'}
 					value={query}
 					oninput={(e) => (query = (e.currentTarget as HTMLInputElement).value)}
-					class="h-7 border-zinc-800 bg-zinc-900 text-xs placeholder:text-zinc-600"
+					class="h-7 border-border bg-card text-xs placeholder:text-muted-foreground/50"
 				/>
 			</div>
 			<ul class="max-h-64 overflow-auto py-1 text-xs">
 				{#if filtered.length === 0}
-					<li class="px-3 py-2 text-zinc-600">No matches.</li>
+					<li class="px-3 py-2 text-muted-foreground/50">No matches.</li>
 				{:else}
 					{#each filtered as it (`${it.name} ${it.datatype ?? ''}`)}
 						<li>
 							<button
 								type="button"
-								class="flex w-full items-center gap-2 px-3 py-1 text-left hover:bg-zinc-800"
+								class="flex w-full items-center gap-2 px-3 py-1 text-left hover:bg-muted"
 								onclick={() => pick(it)}
 							>
-								<span class="truncate text-zinc-200">{it.name}</span>
+								<span class="truncate text-foreground/90">{it.name}</span>
 								<span
-									class="ml-auto shrink-0 rounded bg-zinc-800 px-1 font-mono text-[10px] text-zinc-400"
+									class="ml-auto shrink-0 rounded bg-muted px-1 font-mono text-[10px] text-muted-foreground"
 								>
 									{it.datatype ?? 'untyped'}
 								</span>

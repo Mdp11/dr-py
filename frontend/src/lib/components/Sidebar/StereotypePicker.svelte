@@ -60,47 +60,47 @@
 		<Popover.Content
 			align={props.align ?? 'end'}
 			sideOffset={4}
-			class="z-50 w-64 rounded-md border border-zinc-800 bg-zinc-950 p-0 text-sm text-zinc-200 shadow-xl outline-none"
+			class="z-50 w-64 rounded-md border border-border bg-popover p-0 text-sm text-popover-foreground shadow-xl outline-none"
 		>
 			{#if props.mode === 'filter'}
-				<div class="flex items-center justify-between gap-2 border-b border-zinc-800 px-2 py-1.5">
+				<div class="flex items-center justify-between gap-2 border-b border-border px-2 py-1.5">
 					<button
 						type="button"
-						class="rounded px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800"
+						class="rounded px-2 py-0.5 text-xs text-foreground/80 hover:bg-muted"
 						onclick={() => props.onSelectAll()}
 					>
 						Select all
 					</button>
 					<button
 						type="button"
-						class="rounded px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800"
+						class="rounded px-2 py-0.5 text-xs text-foreground/80 hover:bg-muted"
 						onclick={() => props.onDeselectAll()}
 					>
 						Deselect all
 					</button>
 				</div>
 			{/if}
-			<div class="border-b border-zinc-800 p-2">
+			<div class="border-b border-border p-2">
 				<Input
 					type="text"
 					autofocus
 					placeholder={props.searchPlaceholder ?? 'Filter…'}
 					value={query}
 					oninput={(e) => (query = (e.currentTarget as HTMLInputElement).value)}
-					class="h-7 border-zinc-800 bg-zinc-900 text-xs placeholder:text-zinc-600"
+					class="h-7 border-border bg-card text-xs placeholder:text-muted-foreground/50"
 				/>
 			</div>
 			<ul class="max-h-64 overflow-auto py-1 text-xs">
 				{#if filtered.length === 0}
-					<li class="px-3 py-2 text-zinc-600">{props.emptyLabel ?? 'No matches.'}</li>
+					<li class="px-3 py-2 text-muted-foreground/50">{props.emptyLabel ?? 'No matches.'}</li>
 				{:else}
 					{#each filtered as name (name)}
 						{#if props.mode === 'filter'}
 							<li>
-								<label class="flex cursor-pointer items-center gap-2 px-3 py-1 hover:bg-zinc-800">
+								<label class="flex cursor-pointer items-center gap-2 px-3 py-1 hover:bg-muted">
 									<input
 										type="checkbox"
-										class="h-3 w-3 shrink-0 accent-zinc-300"
+										class="h-3 w-3 shrink-0 accent-primary"
 										checked={props.checked.has(name)}
 										onchange={() => handlePick(name)}
 									/>
@@ -111,7 +111,7 @@
 							<li>
 								<button
 									type="button"
-									class="flex w-full items-center gap-2 px-3 py-1 text-left hover:bg-zinc-800"
+									class="flex w-full items-center gap-2 px-3 py-1 text-left hover:bg-muted"
 									onclick={() => handlePick(name)}
 								>
 									<span class="truncate">{name}</span>

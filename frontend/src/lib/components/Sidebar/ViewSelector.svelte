@@ -20,13 +20,13 @@
 
 {#if view !== null}
 	<div
-		class="flex items-center gap-2 border-b border-zinc-800 px-3 py-1.5 text-xs"
+		class="flex items-center gap-2 border-b border-border px-3 py-1.5 text-xs"
 		aria-label="Active view"
 	>
-		<span class="text-[10px] uppercase tracking-wider text-zinc-500">View</span>
-		<span class="truncate font-medium text-zinc-200" title={view.name}>{view.name}</span>
+		<span class="microlabel">View</span>
+		<span class="truncate font-medium text-foreground/90" title={view.name}>{view.name}</span>
 		{#if warnings.length > 0}
-			<span class="flex items-center gap-0.5 text-amber-400" title="View has warnings">
+			<span class="flex items-center gap-0.5 text-warning" title="View has warnings">
 				<AlertTriangle class="h-3 w-3" />
 				<span class="font-mono text-[10px]">{warnings.length}</span>
 			</span>
@@ -34,7 +34,7 @@
 		<Button
 			variant="ghost"
 			size="sm"
-			class="ml-auto h-6 gap-1 px-2 text-[10px] uppercase tracking-wider text-zinc-500 hover:text-zinc-200"
+			class="ml-auto h-6 gap-1 px-2 text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
 			onclick={onClear}
 			aria-label="Clear active view"
 			title="Clear active view"
