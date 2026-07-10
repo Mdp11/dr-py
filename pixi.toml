@@ -11,6 +11,7 @@ python = "3.14.*"
 pydantic = "2.13.*"
 pyyaml = "6.0.*"
 types-pyyaml = "6.0.*"
+sortedcontainers = "2.4.*"
 
 [feature.core-dev.dependencies]
 pytest = "9.0.*"

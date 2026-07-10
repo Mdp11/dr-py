@@ -13,7 +13,11 @@ maintained incrementally at the mutation boundary (``create_element``,
 ``connect``, ``disconnect``, ``set_property``, ``delete_element``). Bulk
 loaders that populate the model dicts directly must call :meth:`IndexSet.
 rebuild` afterwards; code that writes ``entity.properties`` directly must call
-:meth:`IndexSet.on_properties_changed`.
+:meth:`IndexSet.on_properties_changed`. The containment-roots order index
+(``roots_order`` / ``_root_key_of``) is maintained at that same boundary and
+carries the same obligations: ``rebuild()`` recomputes it from scratch, and
+any direct writer of ``entity.properties`` must go through
+``on_properties_changed`` so a root's display-name reposition is not missed.
 
 Uniqueness grouping mirrors the UniquenessValidator exactly: two elements are
 identical when they share ``type_name``, their first containment parent (or
@@ -24,10 +28,12 @@ or, when no key is declared, on all properties.
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Hashable, Set, Sequence
+from collections.abc import Hashable, Iterator, Set, Sequence
 from typing import TYPE_CHECKING, Any
 
+from ._sorted import Pair, SortedPairs
 from .element import Element
+from .naming import display_name
 from .relationship import Relationship
 from ..metamodel.schema import KeyRel, KeySpec
 
@@ -88,6 +94,14 @@ class IndexSet:
         self.uniq_key_of: dict[str, UniqKey] = {}
         #: uniqueness keys whose group has >= 2 members
         self.duplicate_keys: set[UniqKey] = set()
+        #: containment roots (elements with NO containment parent) as
+        #: (display_name, id) pairs in ascending order — the exact order the
+        #: containment-roots endpoints page in. Maintained by the same mutation
+        #: hooks as containment_parents; rebuilt by rebuild().
+        self.roots_order: SortedPairs = SortedPairs()
+        # element id -> its CURRENT key in roots_order (needed to remove/reposition
+        # after a rename, since the old display name is gone from the element)
+        self._root_key_of: dict[str, Pair] = {}
         # entity id -> reference-target ids currently held in its properties
         # (reverse of ref_targets; needed to diff on property changes)
         self._refs_of: dict[str, set[str]] = {}
@@ -136,12 +150,26 @@ class IndexSet:
         """Live view of entity ids that reference this element — do NOT mutate."""
         return self.ref_targets.get(element_id) or frozenset()
 
+    def roots_count(self) -> int:
+        """Number of containment roots — O(1)."""
+        return len(self.roots_order)
+
+    def roots_page(self, offset: int, limit: int) -> list[str]:
+        """Root element ids in (display_name, id) order — O(log n + limit)."""
+        return [eid for _, eid in self.roots_order.page(offset, limit)]
+
+    def iter_roots(self) -> Iterator[str]:
+        """All root ids in (display_name, id) order — lazily, O(1) per step."""
+        return (eid for _, eid in self.roots_order.iter_all())
+
     # -- mutation hooks (called from the Model mutation boundary) ----------
 
     def on_element_created(self, element: Element) -> None:
         self.elements_by_type.setdefault(element.type_name, set()).add(element.id)
         self._add_to_group(element)
         self._update_refs(element.id, self._element_refs(element))
+        # a fresh element has no containment parent -> it is a root
+        self._roots_add(element)
 
     def on_element_deleted(self, element: Element) -> None:
         """Called after the element's relationships are gone and it has been
@@ -153,6 +181,7 @@ class IndexSet:
                 del self.elements_by_type[element.type_name]
         self._remove_from_group(element.id)
         self._update_refs(element.id, set())
+        self._roots_remove(element.id)
 
     def on_relationship_created(self, rel: Relationship) -> None:
         self.out_rels.setdefault(rel.source_id, set()).add(rel.id)
@@ -163,6 +192,9 @@ class IndexSet:
         if self._containment(rel.type_name):
             self.containment_parents.setdefault(rel.target_id, []).append(rel.source_id)
             self._containment_rel_ids.setdefault(rel.target_id, []).append(rel.id)
+            if len(self.containment_parents[rel.target_id]) == 1:
+                # first containment parent: the target stops being a root
+                self._roots_remove(rel.target_id)
             self._rekey_if_present(rel.target_id)
         self._rekey_key_rel_endpoints(rel)
 
@@ -194,6 +226,11 @@ class IndexSet:
                     if not rel_ids:
                         del self._containment_rel_ids[rel.target_id]
                         del self.containment_parents[rel.target_id]
+                        target = self._model.elements.get(rel.target_id)
+                        if target is not None:
+                            # last containment parent gone: the target is a
+                            # root again
+                            self._roots_add(target)
             self._rekey_if_present(rel.target_id)
         self._rekey_key_rel_endpoints(rel)
 
@@ -204,6 +241,7 @@ class IndexSet:
         if isinstance(entity, Element):
             self._update_refs(entity.id, self._element_refs(entity))
             self._rekey(entity)
+            self._roots_reposition(entity)
         else:
             self._update_refs(entity.id, self._relationship_refs(entity))
 
@@ -222,6 +260,8 @@ class IndexSet:
         self.uniq_groups.clear()
         self.uniq_key_of.clear()
         self.duplicate_keys.clear()
+        self.roots_order.clear()
+        self._root_key_of.clear()
         self._refs_of.clear()
 
         # relationships first so containment parents are known before grouping
@@ -240,6 +280,10 @@ class IndexSet:
             self.elements_by_type.setdefault(element.type_name, set()).add(element.id)
             self._add_to_group(element)
             self._add_refs(element.id, self._element_refs(element))
+            if element.id not in self.containment_parents:
+                self._root_key_of[element.id] = (display_name(element), element.id)
+        # bulk-construct in one O(n log n) pass instead of n incremental adds
+        self.roots_order = SortedPairs(self._root_key_of.values())
 
     # -- debugging ----------------------------------------------------------
 
@@ -255,7 +299,11 @@ class IndexSet:
         def _norm(name: str, obj: object) -> object:
             # Counter.__eq__ ignores zero-count entries, so compare as plain
             # dicts to catch spurious zeroes left in the live index.
-            return dict(obj) if isinstance(obj, Counter) else obj  # type: ignore[arg-type]
+            if isinstance(obj, Counter):
+                return dict(obj)
+            if isinstance(obj, SortedPairs):
+                return obj.as_list()
+            return obj
 
         mismatched = [
             name
@@ -271,6 +319,8 @@ class IndexSet:
                 "uniq_groups",
                 "uniq_key_of",
                 "duplicate_keys",
+                "_root_key_of",
+                "roots_order",
                 "_refs_of",
             )
             if _norm(name, getattr(self, name)) != _norm(name, getattr(fresh, name))
@@ -386,6 +436,31 @@ class IndexSet:
                 (out if kr.direction == "out" else inn).add(kr.rel_type)
         self._out_key_rel_types = out
         self._in_key_rel_types = inn
+
+    # -- internals: roots order ----------------------------------------------
+
+    def _roots_add(self, element: Element) -> None:
+        key = (display_name(element), element.id)
+        self._root_key_of[element.id] = key
+        self.roots_order.add(key)
+
+    def _roots_remove(self, element_id: str) -> None:
+        key = self._root_key_of.pop(element_id, None)
+        if key is not None:
+            self.roots_order.remove(key)
+
+    def _roots_reposition(self, element: Element) -> None:
+        """Re-key a root after a property change (its display name may have
+        moved). No-op for non-roots."""
+        old = self._root_key_of.get(element.id)
+        if old is None:
+            return
+        new = (display_name(element), element.id)
+        if new == old:
+            return
+        self.roots_order.remove(old)
+        self.roots_order.add(new)
+        self._root_key_of[element.id] = new
 
     def _rekey_key_rel_endpoints(self, rel: Relationship) -> None:
         """Rekey an edge's endpoints when its type participates in a key.
