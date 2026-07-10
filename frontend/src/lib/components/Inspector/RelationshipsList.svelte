@@ -182,7 +182,7 @@
 						</button>
 						<button
 							type="button"
-							class="rounded p-0.5 text-muted-foreground opacity-0 transition-colors hover:text-foreground group-hover/row:opacity-100"
+							class="rounded p-0.5 text-muted-foreground opacity-0 transition-[color,background-color,border-color,opacity] hover:text-foreground group-hover/row:opacity-100"
 							onclick={() => editRelationship(rel.id)}
 							aria-label="Edit relationship"
 							title="Edit relationship properties"
@@ -191,7 +191,7 @@
 						</button>
 						<button
 							type="button"
-							class="rounded p-0.5 text-muted-foreground opacity-0 transition-colors hover:text-destructive group-hover/row:opacity-100"
+							class="rounded p-0.5 text-muted-foreground opacity-0 transition-[color,background-color,border-color,opacity] hover:text-destructive group-hover/row:opacity-100"
 							onclick={() => void disconnect(rel.id, rel.source_id)}
 							aria-label="Disconnect relationship"
 							title="Disconnect"

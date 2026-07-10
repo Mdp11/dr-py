@@ -278,7 +278,7 @@
 		{/if}
 		<DropdownMenu.Root>
 			<DropdownMenu.Trigger
-				class="flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground/50 opacity-0 transition-colors group-hover:opacity-100 hover:text-foreground"
+				class="flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground/50 opacity-0 transition-[color,background-color,border-color,opacity] group-hover:opacity-100 hover:text-foreground"
 				aria-label="Folder actions"
 			>
 				<MoreHorizontal class="h-3 w-3" />
@@ -316,7 +316,7 @@
 			</span>
 			<button
 				type="button"
-				class="hidden h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground/50 opacity-0 transition-colors hover:text-destructive group-hover:flex group-hover:opacity-100"
+				class="hidden h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground/50 opacity-0 transition-[color,background-color,border-color,opacity] hover:text-destructive group-hover:flex group-hover:opacity-100"
 				aria-label="Remove from folder"
 				title="Remove from folder"
 				onclick={onRemoveArtifact}
@@ -351,7 +351,7 @@
 			</span>
 			<button
 				type="button"
-				class="hidden h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground/50 opacity-0 transition-colors hover:text-destructive group-hover:flex group-hover:opacity-100"
+				class="hidden h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground/50 opacity-0 transition-[color,background-color,border-color,opacity] hover:text-destructive group-hover:flex group-hover:opacity-100"
 				aria-label="Remove from folder"
 				title="Remove from folder"
 				onclick={onRemoveArtifact}
@@ -424,7 +424,7 @@
 		{#if isMovable && (folderOptions.length > 0 || placedInFolder)}
 			<DropdownMenu.Root>
 				<DropdownMenu.Trigger
-					class="flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground/50 opacity-0 transition-colors group-hover:opacity-100 hover:text-foreground"
+					class="flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground/50 opacity-0 transition-[color,background-color,border-color,opacity] group-hover:opacity-100 hover:text-foreground"
 					aria-label="Element actions"
 				>
 					<MoreHorizontal class="h-3 w-3" />

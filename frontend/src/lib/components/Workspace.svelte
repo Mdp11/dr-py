@@ -29,7 +29,7 @@
 					<button
 						type="button"
 						aria-label="Close {tab.title}"
-						class="rounded p-0.5 opacity-50 transition-colors hover:bg-muted hover:opacity-100"
+						class="rounded p-0.5 opacity-50 transition-[color,background-color,border-color,opacity] hover:bg-muted hover:opacity-100"
 						onclick={(e) => {
 							e.stopPropagation();
 							closeDraft(tab.id);
