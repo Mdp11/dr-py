@@ -1,5 +1,5 @@
 <script lang="ts">
-	// The indigo-accented frame for a combination (`SetExpression`) node: a
+	// The primary-accented frame for a combination (`SetExpression`) node: a
 	// plain-language operator picker, a dashed divider (glyph + word) between
 	// consecutive parts, and — when this frame is ITSELF a combination's
 	// operand (`chrome` set) — its own header sprouts the same feeds-note /
@@ -63,11 +63,7 @@
 	// "inside" its parent frame.
 	const depth = $derived(path.length);
 	const tint = $derived(
-		depth === 0
-			? 'bg-indigo-400/[0.035]'
-			: depth === 1
-				? 'bg-indigo-400/[0.05]'
-				: 'bg-indigo-400/[0.07]'
+		depth === 0 ? 'bg-primary/[0.035]' : depth === 1 ? 'bg-primary/[0.05]' : 'bg-primary/[0.07]'
 	);
 
 	// Registers/unregisters this frame's node on mount/unmount only — the store
@@ -134,22 +130,20 @@
 	data-node-path={pathKey(path)}
 	data-selected={isSelected}
 	aria-label={title}
-	class="space-y-2 rounded-lg border border-indigo-400/35 {tint} p-3 text-xs"
+	class="space-y-2 rounded-lg border border-primary/35 {tint} p-3 text-xs"
 	class:ring-1={isSelected}
-	class:ring-sky-500={isSelected}
+	class:ring-ring={isSelected}
 	onclick={onCardClick}
 	onkeydown={onCardKeydown}
 >
 	<div class="flex flex-wrap items-center gap-2">
-		<span class="font-mono text-[10px] text-indigo-400 uppercase tracking-[0.14em]"
-			>Combination</span
-		>
+		<span class="font-mono text-[10px] text-primary uppercase tracking-[0.14em]">Combination</span>
 		<select
 			aria-label="Combination operator"
 			disabled={!editable}
 			value={node.op}
 			onchange={(e) => setOp(e.currentTarget.value as SetExpression['op'])}
-			class="rounded border border-zinc-700 bg-zinc-900 px-1 py-0.5 text-xs"
+			class="rounded border border-input bg-card px-1 py-0.5 text-xs"
 		>
 			{#each Object.entries(OP_LABEL) as [value, label] (value)}
 				<option {value}>{label}</option>
@@ -158,11 +152,11 @@
 		{#if chrome?.isBase}
 			<span
 				data-testid="base-badge"
-				class="rounded bg-amber-500/10 px-1 font-mono text-[10px] text-amber-400">base</span
+				class="rounded bg-warning/15 px-1 font-mono text-[10px] text-warning">base</span
 			>
 		{/if}
 		{#if chrome}
-			<span class="text-[11px] text-zinc-500 italic"
+			<span class="text-[11px] text-muted-foreground/70 italic"
 				>contributes its members — no steps to feed</span
 			>
 		{/if}
@@ -182,13 +176,10 @@
 	<div class="space-y-1.5">
 		{#each node.operands as op, i (i)}
 			{#if i > 0}
-				<div
-					data-testid="op-divider"
-					class="flex items-center gap-2 text-[10px] text-indigo-300/70"
-				>
-					<span class="h-px flex-1 bg-indigo-400/20"></span>
+				<div data-testid="op-divider" class="flex items-center gap-2 text-[10px] text-primary/70">
+					<span class="h-px flex-1 bg-primary/20"></span>
 					{OP_DIVIDER[node.op]}
-					<span class="h-px flex-1 bg-indigo-400/20"></span>
+					<span class="h-px flex-1 bg-primary/20"></span>
 				</div>
 			{/if}
 			{#if op.definition}
@@ -200,9 +191,9 @@
 	</div>
 
 	{#if editable}
-		<div class="flex items-center gap-3 border-t border-indigo-400/20 pt-2">
+		<div class="flex items-center gap-3 border-t border-primary/20 pt-2">
 			<DropdownMenu.Root>
-				<DropdownMenu.Trigger class="text-sky-500 hover:text-sky-300">
+				<DropdownMenu.Trigger class="text-info hover:text-info/80">
 					+ Add another part ▾
 				</DropdownMenu.Trigger>
 				<DropdownMenu.Content align="start" class="w-72">
@@ -210,10 +201,12 @@
 						class="flex flex-col items-start gap-0.5 py-1.5"
 						onSelect={() => structural((r) => insertNavigationEdit(r, path))}
 					>
-						<button type="button" tabindex="-1" class="pointer-events-none text-left text-zinc-100"
-							>A new path</button
+						<button
+							type="button"
+							tabindex="-1"
+							class="pointer-events-none text-left text-foreground">A new path</button
 						>
-						<span class="block text-[11px] text-zinc-500">
+						<span class="block text-[11px] text-muted-foreground/70">
 							An empty path — build it with Start / Follow / Keep only
 						</span>
 					</DropdownMenu.Item>
@@ -221,10 +214,12 @@
 						class="flex flex-col items-start gap-0.5 py-1.5"
 						onSelect={() => (libraryOpen = true)}
 					>
-						<button type="button" tabindex="-1" class="pointer-events-none text-left text-zinc-100"
-							>A saved navigation…</button
+						<button
+							type="button"
+							tabindex="-1"
+							class="pointer-events-none text-left text-foreground">A saved navigation…</button
 						>
-						<span class="block text-[11px] text-zinc-500">
+						<span class="block text-[11px] text-muted-foreground/70">
 							Pick one from the library; it stays linked, not copied
 						</span>
 					</DropdownMenu.Item>
@@ -232,10 +227,12 @@
 						class="flex flex-col items-start gap-0.5 py-1.5"
 						onSelect={() => structural((r) => insertGroupEdit(r, path))}
 					>
-						<button type="button" tabindex="-1" class="pointer-events-none text-left text-zinc-100"
-							>A nested combination</button
+						<button
+							type="button"
+							tabindex="-1"
+							class="pointer-events-none text-left text-foreground">A nested combination</button
 						>
-						<span class="block text-[11px] text-zinc-500">
+						<span class="block text-[11px] text-muted-foreground/70">
 							A combination inside this one, with its own operator
 						</span>
 					</DropdownMenu.Item>

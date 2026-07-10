@@ -197,19 +197,19 @@
 	data-testid="path-card"
 	data-node-path={pathKey(path)}
 	data-selected={isSelected}
-	class="space-y-2 rounded border border-zinc-800 bg-zinc-900/40 p-2 text-xs"
+	class="space-y-2 rounded border border-border bg-card/40 p-2 text-xs"
 	class:ring-1={isSelected}
-	class:ring-sky-500={isSelected}
+	class:ring-ring={isSelected}
 	onclick={onCardClick}
 	onkeydown={onCardKeydown}
 >
 	<div class="flex flex-wrap items-center gap-2">
-		<span class="font-medium text-zinc-300">{title || 'Path'}</span>
+		<span class="font-medium text-foreground/80">{title || 'Path'}</span>
 		<StatusChip {tabId} {path} />
 		{#if chrome?.isBase}
 			<span
 				data-testid="base-badge"
-				class="rounded bg-amber-500/10 px-1 font-mono text-[10px] text-amber-400">base</span
+				class="rounded bg-warning/15 px-1 font-mono text-[10px] text-warning">base</span
 			>
 		{/if}
 		{#if chrome}
@@ -233,17 +233,17 @@
 	</div>
 
 	<div class="relative space-y-1">
-		<span class="pointer-events-none absolute top-2 bottom-2 left-[9px] w-px bg-zinc-800"></span>
+		<span class="pointer-events-none absolute top-2 bottom-2 left-[9px] w-px bg-border"></span>
 		<div class="relative flex items-baseline gap-2.5 py-0.5">
 			<ChainBadge value={0} tone="start" />
 			<div class="flex min-h-[22px] flex-1 flex-wrap items-center gap-1.5">
-				<span class="text-zinc-400">Start from</span>
+				<span class="text-muted-foreground">Start from</span>
 				<select
 					aria-label="Start mode"
 					disabled={!editable}
 					value={startMode}
 					onchange={(e) => setStartMode(e.currentTarget.value as StartMode)}
-					class="rounded border border-zinc-700 bg-zinc-900 px-1 py-0.5"
+					class="rounded border border-input bg-card px-1 py-0.5"
 				>
 					<option value="scope">all matching</option>
 					<option value="element">one element</option>
@@ -295,14 +295,14 @@
 		<div class="flex items-center gap-2 pl-7">
 			<button
 				type="button"
-				class="rounded border border-dashed border-zinc-700 px-2 py-1 text-sky-500 hover:border-zinc-600 hover:text-sky-300"
+				class="rounded border border-dashed border-input px-2 py-1 text-info hover:border-border hover:text-info/80"
 				onclick={addRelationshipStep}
 			>
 				+ Follow a relationship
 			</button>
 			<button
 				type="button"
-				class="rounded border border-dashed border-zinc-700 px-2 py-1 text-sky-500 hover:border-zinc-600 hover:text-sky-300"
+				class="rounded border border-dashed border-input px-2 py-1 text-info hover:border-border hover:text-info/80"
 				onclick={addFilterStep}
 			>
 				+ Keep only…
@@ -311,9 +311,9 @@
 	{/if}
 
 	{#if editable}
-		<div class="flex items-center gap-3 border-t border-zinc-800 pt-2">
+		<div class="flex items-center gap-3 border-t border-border pt-2">
 			<DropdownMenu.Root>
-				<DropdownMenu.Trigger class="text-sky-500 hover:text-sky-300">
+				<DropdownMenu.Trigger class="text-info hover:text-info/80">
 					Combine with… ▾
 				</DropdownMenu.Trigger>
 				<DropdownMenu.Content align="start" class="w-72">
@@ -321,10 +321,12 @@
 						class="flex flex-col items-start gap-0.5 py-1.5"
 						onSelect={() => structural((r) => insertNavigationEdit(r, path))}
 					>
-						<button type="button" tabindex="-1" class="pointer-events-none text-left text-zinc-100"
-							>A new path</button
+						<button
+							type="button"
+							tabindex="-1"
+							class="pointer-events-none text-left text-foreground">A new path</button
 						>
-						<span class="block text-[11px] text-zinc-500">
+						<span class="block text-[11px] text-muted-foreground/70">
 							Turns this into a Union of this path + a new empty one
 						</span>
 					</DropdownMenu.Item>
@@ -332,10 +334,12 @@
 						class="flex flex-col items-start gap-0.5 py-1.5"
 						onSelect={() => (libraryOpen = true)}
 					>
-						<button type="button" tabindex="-1" class="pointer-events-none text-left text-zinc-100"
-							>A saved navigation…</button
+						<button
+							type="button"
+							tabindex="-1"
+							class="pointer-events-none text-left text-foreground">A saved navigation…</button
 						>
-						<span class="block text-[11px] text-zinc-500">
+						<span class="block text-[11px] text-muted-foreground/70">
 							Turns this into a Union of this path + a link to a saved navigation
 						</span>
 					</DropdownMenu.Item>
@@ -343,10 +347,12 @@
 						class="flex flex-col items-start gap-0.5 py-1.5"
 						onSelect={() => structural((r) => insertGroupEdit(r, path))}
 					>
-						<button type="button" tabindex="-1" class="pointer-events-none text-left text-zinc-100"
-							>A nested combination</button
+						<button
+							type="button"
+							tabindex="-1"
+							class="pointer-events-none text-left text-foreground">A nested combination</button
 						>
-						<span class="block text-[11px] text-zinc-500">
+						<span class="block text-[11px] text-muted-foreground/70">
 							Turns this into a Union of this path + a nested combination
 						</span>
 					</DropdownMenu.Item>
@@ -369,9 +375,11 @@
 	{/if}
 
 	<details>
-		<summary class="cursor-pointer text-zinc-500 select-none hover:text-zinc-300">Options</summary>
+		<summary class="cursor-pointer text-muted-foreground/70 select-none hover:text-muted-foreground"
+			>Options</summary
+		>
 		<label
-			class="mt-1.5 flex items-center gap-1.5 pl-2 text-zinc-400"
+			class="mt-1.5 flex items-center gap-1.5 pl-2 text-muted-foreground"
 			title="When on, a chain never revisits an element it already contains"
 		>
 			<input

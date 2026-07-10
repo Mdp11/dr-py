@@ -43,7 +43,7 @@
 		data-testid="feeds-chip"
 		aria-label={'Feeds the combination with ' + shownLabel}
 		title="Which elements this path contributes to the combination"
-		class="inline-flex items-center gap-1.5 rounded-full border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-[11px] text-zinc-400 hover:border-zinc-600 hover:text-zinc-200 disabled:opacity-40"
+		class="inline-flex items-center gap-1.5 rounded-full border border-input bg-muted px-2 py-0.5 text-[11px] text-muted-foreground hover:border-border hover:text-foreground/90 disabled:opacity-40"
 	>
 		→ feeds <ChainBadge value={shownIndex} tone="combine" size="sm" />
 		{shownLabel} ▾
@@ -52,9 +52,9 @@
 		<Popover.Content
 			align="end"
 			sideOffset={4}
-			class="z-50 w-[300px] rounded-md border border-zinc-700 bg-zinc-900 p-1.5 text-xs shadow-xl"
+			class="z-50 w-[300px] rounded-md border border-input bg-popover p-1.5 text-xs shadow-xl"
 		>
-			<p class="px-1.5 pt-0.5 pb-1.5 text-zinc-500">
+			<p class="px-1.5 pt-0.5 pb-1.5 text-muted-foreground/70">
 				Feed the combination with the elements reached at…
 			</p>
 			{#each columns as col (col.index)}
@@ -62,18 +62,18 @@
 				<button
 					type="button"
 					data-testid="feeds-option"
-					class="flex w-full items-baseline gap-2 rounded px-1.5 py-1 text-left hover:bg-zinc-800"
+					class="flex w-full items-baseline gap-2 rounded px-1.5 py-1 text-left hover:bg-muted"
 					onclick={() => pick(isLast ? null : col.index)}
 				>
 					<ChainBadge value={col.index} tone="combine" size="sm" />
-					<span class="text-zinc-200">
+					<span class="text-foreground/90">
 						{col.index === 0 && !isLast
 							? 'the start'
 							: isLast
 								? 'the last step'
 								: `after ${col.label}`}
 					</span>
-					<span class="ml-auto text-[10px] text-zinc-500">
+					<span class="ml-auto text-[10px] text-muted-foreground/70">
 						{isLast ? 'default' : (col.sub ?? '')}
 					</span>
 				</button>

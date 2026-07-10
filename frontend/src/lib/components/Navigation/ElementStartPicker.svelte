@@ -80,20 +80,22 @@
 	}
 </script>
 
-<div class="space-y-1.5 rounded border border-zinc-800 bg-zinc-900/40 p-2">
-	<span class="text-xs font-medium text-zinc-400">Start element</span>
+<div class="space-y-1.5 rounded border border-border bg-card/40 p-2">
+	<span class="text-xs font-medium text-muted-foreground">Start element</span>
 	{#if value}
 		<div class="flex items-center gap-2 text-xs">
-			<span class="truncate text-zinc-200">{resolved ? elementDisplayName(resolved) : value}</span>
+			<span class="truncate text-foreground/90"
+				>{resolved ? elementDisplayName(resolved) : value}</span
+			>
 			{#if resolved}
-				<span class="shrink-0 rounded bg-zinc-800 px-1 font-mono text-[10px] text-zinc-400"
+				<span class="shrink-0 rounded bg-muted px-1 font-mono text-[10px] text-muted-foreground"
 					>{resolved.type_name}</span
 				>
 			{/if}
-			<span class="shrink-0 font-mono text-[10px] text-zinc-600">{value}</span>
+			<span class="shrink-0 font-mono text-[10px] text-muted-foreground/50">{value}</span>
 			<button
 				type="button"
-				class="ml-auto shrink-0 text-sky-500 hover:text-sky-300"
+				class="ml-auto shrink-0 text-info hover:text-info/80"
 				onclick={changeElement}>change</button
 			>
 		</div>
@@ -103,26 +105,28 @@
 			placeholder="Search elements…"
 			value={query}
 			oninput={(e) => (query = (e.currentTarget as HTMLInputElement).value)}
-			class="w-full rounded border border-zinc-700 bg-zinc-900 px-1.5 py-0.5 text-xs"
+			class="w-full rounded border border-input bg-card px-1.5 py-0.5 text-xs"
 		/>
 		{#if query.trim() !== ''}
 			<ul class="max-h-40 space-y-0.5 overflow-y-auto text-xs">
 				{#if results.length === 0}
-					<li class="px-1 py-0.5 text-zinc-600">{searching ? 'Searching…' : 'No matches.'}</li>
+					<li class="px-1 py-0.5 text-muted-foreground/50">
+						{searching ? 'Searching…' : 'No matches.'}
+					</li>
 				{:else}
 					{#each results as el (el.id)}
 						<li>
 							<button
 								type="button"
-								class="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left hover:bg-zinc-800"
+								class="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left hover:bg-muted"
 								onclick={() => pick(el)}
 							>
-								<span class="truncate text-zinc-200">{elementDisplayName(el)}</span>
+								<span class="truncate text-foreground/90">{elementDisplayName(el)}</span>
 								<span
-									class="ml-auto shrink-0 rounded bg-zinc-800 px-1 font-mono text-[10px] text-zinc-400"
+									class="ml-auto shrink-0 rounded bg-muted px-1 font-mono text-[10px] text-muted-foreground"
 									>{el.type_name}</span
 								>
-								<span class="shrink-0 font-mono text-[10px] text-zinc-600">{el.id}</span>
+								<span class="shrink-0 font-mono text-[10px] text-muted-foreground/50">{el.id}</span>
 							</button>
 						</li>
 					{/each}

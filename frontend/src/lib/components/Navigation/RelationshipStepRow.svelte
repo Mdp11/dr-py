@@ -88,7 +88,7 @@
 <div class="group relative flex items-baseline gap-2.5 py-0.5" data-testid="relationship-step">
 	<ChainBadge value={column} />
 	<div class="flex min-h-[22px] flex-1 flex-wrap items-center gap-1.5">
-		<span class="text-zinc-400">Follow</span>
+		<span class="text-muted-foreground">Follow</span>
 		<StereotypePicker
 			mode="create"
 			names={relTypeNames}
@@ -101,15 +101,15 @@
 				<span
 					class="cursor-pointer rounded border px-1.5 py-0.5 font-mono text-[11px]
 						{step.relationship_type
-						? 'border-zinc-700 bg-zinc-900'
-						: 'border-dashed border-zinc-700 text-zinc-500'}"
+						? 'border-input bg-card'
+						: 'border-dashed border-input text-muted-foreground/70'}"
 				>
 					{step.relationship_type || 'pick a relationship…'}
 				</span>
 			{/snippet}
 		</StereotypePicker>
 		<select
-			class="rounded border border-zinc-700 bg-zinc-900 px-1 py-0.5 text-xs"
+			class="rounded border border-input bg-card px-1 py-0.5 text-xs"
 			value={step.direction}
 			onchange={(e) => patch({ direction: e.currentTarget.value as NavDirection })}
 		>
@@ -117,7 +117,7 @@
 			<option value="in">incoming</option>
 			<option value="either">either</option>
 		</select>
-		<span class="text-zinc-400">to</span>
+		<span class="text-muted-foreground">to</span>
 		<StereotypePicker
 			mode="filter"
 			names={targetTypeNames}
@@ -133,8 +133,8 @@
 				<span
 					class="cursor-pointer rounded border px-1.5 py-0.5 font-mono text-[11px]
 						{step.target_types.length
-						? 'border-zinc-700 bg-zinc-900'
-						: 'border-dashed border-zinc-700 text-zinc-500'}"
+						? 'border-input bg-card'
+						: 'border-dashed border-input text-muted-foreground/70'}"
 				>
 					{step.target_types.length === 0 ? 'any type' : step.target_types.join(', ')}
 				</span>
@@ -143,7 +143,7 @@
 		<button
 			type="button"
 			aria-label="Remove step"
-			class="ml-auto text-zinc-500 hover:text-red-400"
+			class="ml-auto text-muted-foreground/70 hover:text-destructive"
 			onclick={() => onRemove(index)}
 		>
 			<Trash2 class="size-3.5" />

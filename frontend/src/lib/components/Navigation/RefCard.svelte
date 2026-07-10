@@ -91,19 +91,19 @@
 	data-testid="ref-card"
 	data-node-path={pathKey(path)}
 	data-selected={isSelected}
-	class="flex flex-wrap items-center gap-2 rounded border border-zinc-800 bg-zinc-900/40 px-2 py-1.5 text-xs"
+	class="flex flex-wrap items-center gap-2 rounded border border-border bg-card/40 px-2 py-1.5 text-xs"
 	class:ring-1={isSelected}
-	class:ring-sky-500={isSelected}
+	class:ring-ring={isSelected}
 	onclick={onCardClick}
 	onkeydown={onCardKeydown}
 >
-	<span class="font-medium text-sky-400">⧉ {name}</span>
-	<span class="text-zinc-500">saved navigation</span>
+	<span class="font-medium text-info">⧉ {name}</span>
+	<span class="text-muted-foreground/70">saved navigation</span>
 	<StatusChip {tabId} {path} kind="ref" />
 	{#if chrome.isBase}
 		<span
 			data-testid="base-badge"
-			class="rounded bg-amber-500/10 px-1 font-mono text-[10px] text-amber-400">base</span
+			class="rounded bg-warning/15 px-1 font-mono text-[10px] text-warning">base</span
 		>
 	{/if}
 	<span class="flex-1"></span>
@@ -111,7 +111,7 @@
 	<button
 		type="button"
 		aria-label="Open saved navigation"
-		class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-sky-400 hover:bg-zinc-800 hover:text-sky-300"
+		class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-info hover:bg-muted hover:text-info/80"
 		onclick={() => openNavigationTab({ artifactId: refId, title: name })}
 	>
 		<ExternalLink class="size-3" />

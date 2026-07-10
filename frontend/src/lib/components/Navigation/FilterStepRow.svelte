@@ -36,12 +36,12 @@
 	<ChainBadge value={null} />
 	<div class="flex min-h-[22px] flex-1 flex-col gap-1">
 		<div class="flex flex-wrap items-center gap-1.5">
-			<span class="text-zinc-400">Keep only</span>
+			<span class="text-muted-foreground">Keep only</span>
 			<button
 				type="button"
 				aria-label="Remove step"
 				title="Remove filter"
-				class="ml-auto text-zinc-500 hover:text-red-400"
+				class="ml-auto text-muted-foreground/70 hover:text-destructive"
 				onclick={() => onRemove(index)}
 			>
 				✕
@@ -58,7 +58,7 @@
 					onRemove={removeCriterion}
 				/>
 			{/each}
-			<button type="button" class="text-xs text-sky-500 hover:text-sky-300" onclick={addCriterion}
+			<button type="button" class="text-xs text-info hover:text-info/80" onclick={addCriterion}
 				>+ condition</button
 			>
 		</div>

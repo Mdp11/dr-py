@@ -23,14 +23,14 @@
 
 <span data-testid="status-chip" aria-live="polite" class="text-[11px]">
 	{#if kind === 'ref'}
-		<span class="font-mono text-zinc-500">linked</span>
+		<span class="font-mono text-muted-foreground/70">linked</span>
 	{:else if preview?.loading}
-		<span class="text-zinc-500">…</span>
+		<span class="text-muted-foreground/70">…</span>
 	{:else if preview}
-		<span class="font-mono text-emerald-400">✓ {preview.total} chains</span>
+		<span class="font-mono text-success">✓ {preview.total} chains</span>
 	{:else if errored}
-		<span class="font-mono text-red-400">⚠ failed</span>
+		<span class="font-mono text-destructive">⚠ failed</span>
 	{:else if !runnable}
-		<span class="text-zinc-500 italic">incomplete — pick a start or add a step</span>
+		<span class="text-muted-foreground/70 italic">incomplete — pick a start or add a step</span>
 	{/if}
 </span>

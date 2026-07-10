@@ -21,12 +21,12 @@
 	class="inline-flex flex-none items-center justify-center rounded-full border font-mono
 		{size === 'sm' ? 'size-[15px] text-[9px]' : 'size-5 text-[10px]'}
 		{value === null
-		? 'border-transparent bg-transparent text-zinc-500'
+		? 'border-transparent bg-transparent text-muted-foreground/70'
 		: tone === 'start'
-			? 'border-emerald-800 bg-zinc-900 text-emerald-400'
+			? 'border-success/40 bg-card text-success'
 			: tone === 'combine'
-				? 'border-indigo-400/35 bg-zinc-950 text-indigo-400'
-				: 'border-zinc-700 bg-zinc-900 text-zinc-400'}"
+				? 'border-primary/35 bg-background text-primary'
+				: 'border-input bg-card text-muted-foreground'}"
 >
 	{value === null ? '·' : value}
 </span>

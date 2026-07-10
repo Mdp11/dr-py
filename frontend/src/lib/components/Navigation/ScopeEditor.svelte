@@ -65,14 +65,14 @@
 				<span
 					class="cursor-pointer rounded border px-1.5 py-0.5 font-mono text-[11px]
 						{scope.types.length === 0
-						? 'border-dashed border-zinc-700 text-zinc-500'
-						: 'border-zinc-700 bg-zinc-900'}"
+						? 'border-dashed border-input text-muted-foreground/70'
+						: 'border-input bg-card'}"
 				>
 					{scope.types.length === 0 ? unsetLabel : scope.types.join(', ')}
 				</span>
 			{/snippet}
 		</StereotypePicker>
-		<button type="button" class="text-xs text-sky-500 hover:text-sky-300" onclick={addCriterion}
+		<button type="button" class="text-xs text-info hover:text-info/80" onclick={addCriterion}
 			>+ condition</button
 		>
 	</div>

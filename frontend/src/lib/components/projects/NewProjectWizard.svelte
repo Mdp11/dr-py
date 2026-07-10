@@ -52,7 +52,7 @@
 		</Dialog.Header>
 		<form onsubmit={onSubmit} class="flex flex-col gap-3">
 			<Input name="project-name" placeholder="Project name" bind:value={name} required />
-			<label class="text-xs text-zinc-400">
+			<label class="text-xs text-muted-foreground">
 				Metamodel (.yaml, required)
 				<input
 					data-testid="mm-input"
@@ -62,7 +62,7 @@
 					onchange={pick((f) => (metamodel = f))}
 				/>
 			</label>
-			<label class="text-xs text-zinc-400">
+			<label class="text-xs text-muted-foreground">
 				Model (.json, optional)
 				<input
 					data-testid="model-input"
@@ -72,7 +72,7 @@
 					onchange={pick((f) => (model = f))}
 				/>
 			</label>
-			<label class="text-xs text-zinc-400">
+			<label class="text-xs text-muted-foreground">
 				View (.json, optional)
 				<input
 					type="file"
@@ -82,7 +82,7 @@
 				/>
 			</label>
 			{#if error}
-				<p class="text-xs text-red-400">{error}</p>
+				<p class="text-xs text-destructive">{error}</p>
 			{/if}
 			<div class="flex justify-end gap-2">
 				<Button type="submit" disabled={!canSubmit || pending}>

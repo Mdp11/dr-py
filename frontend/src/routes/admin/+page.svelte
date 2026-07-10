@@ -5,7 +5,7 @@
 </script>
 
 <div class="mx-auto flex max-w-3xl flex-col gap-4 p-6">
-	<h1 class="text-lg font-semibold text-zinc-100">Administration</h1>
+	<h1 class="font-display text-xl font-light tracking-wide text-foreground">Administration</h1>
 	<Tabs.Root value="users">
 		<Tabs.List>
 			<Tabs.Trigger value="users">Users</Tabs.Trigger>

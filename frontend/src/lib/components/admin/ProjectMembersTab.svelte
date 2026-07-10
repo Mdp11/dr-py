@@ -110,7 +110,7 @@
 
 <div class="flex flex-col gap-3">
 	<select
-		class="rounded bg-zinc-900 px-2 py-1 text-sm text-zinc-100"
+		class="rounded bg-card px-2 py-1 text-sm text-foreground"
 		bind:value={selected}
 		onchange={() => select(selected)}
 	>
@@ -124,12 +124,12 @@
 			<div class="relative flex-1">
 				<Input placeholder="Search user by email…" bind:value={userQuery} oninput={onUserSearch} />
 				{#if userResults.length}
-					<ul class="absolute z-10 mt-1 w-full rounded border border-zinc-800 bg-zinc-900">
+					<ul class="absolute z-10 mt-1 w-full rounded border border-border bg-popover">
 						{#each userResults as u (u.id)}
 							<li>
 								<button
 									type="button"
-									class="block w-full px-2 py-1 text-left text-sm text-zinc-100 hover:bg-zinc-800"
+									class="block w-full px-2 py-1 text-left text-sm text-foreground hover:bg-muted"
 									onclick={() => pickUser(u)}
 								>
 									{u.email}
@@ -139,7 +139,7 @@
 					</ul>
 				{/if}
 			</div>
-			<select class="rounded bg-zinc-900 px-2 py-1 text-sm text-zinc-100" bind:value={newRole}>
+			<select class="rounded bg-card px-2 py-1 text-sm text-foreground" bind:value={newRole}>
 				<option value="owner">owner</option>
 				<option value="editor">editor</option>
 				<option value="viewer">viewer</option>
@@ -148,13 +148,15 @@
 		</div>
 	</form>
 
-	{#if error}<p class="text-xs text-red-400">{error}</p>{/if}
+	{#if error}<p class="text-xs text-destructive">{error}</p>{/if}
 
 	<ul class="flex flex-col gap-1">
 		{#each members as m (m.user_id)}
 			<li class="flex items-center justify-between text-sm">
-				<span class="text-zinc-100">{m.email} <span class="text-zinc-500">({m.role})</span></span>
-				<button class="text-xs text-red-400" onclick={() => remove(m.user_id)} disabled={busy}
+				<span class="text-foreground"
+					>{m.email} <span class="text-muted-foreground/70">({m.role})</span></span
+				>
+				<button class="text-xs text-destructive" onclick={() => remove(m.user_id)} disabled={busy}
 					>remove</button
 				>
 			</li>

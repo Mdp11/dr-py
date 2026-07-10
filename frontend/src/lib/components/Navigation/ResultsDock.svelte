@@ -64,15 +64,15 @@
 	}
 </script>
 
-<div data-testid="results-dock" class="flex h-full flex-col border-t border-zinc-800 bg-zinc-950">
-	<div class="flex items-center gap-2 border-b border-zinc-900 px-3 py-1.5">
-		<span class="font-mono text-[10px] tracking-[0.14em] text-zinc-500 uppercase">Results</span>
+<div data-testid="results-dock" class="flex h-full flex-col border-t border-border bg-background">
+	<div class="flex items-center gap-2 border-b border-border px-3 py-1.5">
+		<span class="microlabel">Results</span>
 		<select
 			data-testid="node-picker"
 			aria-label="Results node"
 			value={pathKey(selected)}
 			onchange={(e) => onPickerChange(e.currentTarget.value)}
-			class="rounded border border-zinc-700 bg-zinc-900 px-1 py-0.5 text-xs text-zinc-200"
+			class="rounded border border-input bg-card px-1 py-0.5 text-xs text-foreground/90"
 		>
 			{#each entries as e (pathKey(e.path))}
 				<option value={pathKey(e.path)}>
@@ -82,25 +82,27 @@
 		</select>
 		<span data-testid="results-status" class="ml-auto font-mono text-[11px]">
 			{#if errored && !preview}
-				<span class="text-red-400">Evaluation failed — edit the definition to retry</span>
+				<span class="text-destructive">Evaluation failed — edit the definition to retry</span>
 			{:else if preview?.loading}
-				<span class="text-zinc-500">auto-runs as you edit · evaluating…</span>
+				<span class="text-muted-foreground/70">auto-runs as you edit · evaluating…</span>
 			{:else if preview}
-				<span class="text-emerald-400">auto-runs as you edit · ✓ {preview.total} chains</span>
+				<span class="text-success">auto-runs as you edit · ✓ {preview.total} chains</span>
 			{:else}
-				<span class="text-zinc-500">auto-runs as you edit · waiting for a runnable path</span>
+				<span class="text-muted-foreground/70"
+					>auto-runs as you edit · waiting for a runnable path</span
+				>
 			{/if}
 		</span>
 	</div>
 	<div class="min-h-0 flex-1 overflow-auto px-3 py-2">
 		{#if selectedEntry?.kind === 'ref'}
-			<p class="text-xs text-zinc-500">
+			<p class="text-xs text-muted-foreground/70">
 				Linked saved navigation — open it in its own tab to see its results.
 			</p>
 		{:else if errored && !preview}
-			<p class="text-xs text-red-400">Evaluation failed — edit the definition to retry</p>
+			<p class="text-xs text-destructive">Evaluation failed — edit the definition to retry</p>
 		{:else if !preview && !runnable}
-			<p class="text-xs text-zinc-500">
+			<p class="text-xs text-muted-foreground/70">
 				{#if isPristineRoot}
 					Pick what to start from — results appear here automatically as you build.
 				{:else}
@@ -110,10 +112,10 @@
 		{:else if preview}
 			<table class="w-full text-xs">
 				<thead>
-					<tr class="text-left text-zinc-500">
+					<tr class="text-left text-muted-foreground/70">
 						{#if node?.kind === 'set_op'}
-							<th class="py-1 pr-2 font-normal text-zinc-300">
-								Combined elements <span class="text-zinc-500">{OP_NOTE[node.op]}</span>
+							<th class="py-1 pr-2 font-normal text-foreground/80">
+								Combined elements <span class="text-muted-foreground/70">{OP_NOTE[node.op]}</span>
 							</th>
 						{:else}
 							{#each columns as col (col.index)}
@@ -129,12 +131,12 @@
 				</thead>
 				<tbody>
 					{#each preview.chains as chain, ci (ci)}
-						<tr class="border-t border-zinc-900">
+						<tr class="border-t border-border">
 							{#each chain as item (item.id)}
 								<td class="py-0.5 pr-2">
 									<button
 										type="button"
-										class="rounded bg-zinc-800 px-1.5 py-0.5 hover:bg-zinc-700"
+										class="rounded bg-muted px-1.5 py-0.5 hover:bg-muted/70"
 										title={item.type_name}
 										onclick={() => select({ kind: 'element', id: item.id })}
 									>
@@ -147,16 +149,16 @@
 				</tbody>
 			</table>
 			{#if preview.truncated}
-				<p class="mt-1 text-[10px] text-zinc-500">(results capped)</p>
+				<p class="mt-1 text-[10px] text-muted-foreground/70">(results capped)</p>
 			{/if}
 			{#if !preview.loading && preview.chains.length < preview.total}
 				<button
 					type="button"
-					class="mt-1 text-xs text-sky-500 hover:text-sky-300"
+					class="mt-1 text-xs text-info hover:text-info/80"
 					onclick={() => void loadMorePreview(tabId, selected)}>Load more</button
 				>
 			{/if}
-			{#if preview.loading}<p class="py-2 text-xs text-zinc-500">Evaluating…</p>{/if}
+			{#if preview.loading}<p class="py-2 text-xs text-muted-foreground/70">Evaluating…</p>{/if}
 		{/if}
 	</div>
 </div>

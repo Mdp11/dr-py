@@ -50,26 +50,26 @@
 
 <div class="mx-auto flex max-w-2xl flex-col gap-4 p-6">
 	<div class="flex items-center justify-between">
-		<h1 class="text-lg font-semibold text-zinc-100">Projects</h1>
+		<h1 class="font-display text-xl font-light tracking-wide text-foreground">Projects</h1>
 		{#if isAdmin()}
 			<Button size="sm" onclick={() => (wizardOpen = true)}>New project</Button>
 		{/if}
 	</div>
 	{#if accessNotice}
-		<p class="text-sm text-red-400" role="alert">{accessNotice}</p>
+		<p class="text-sm text-destructive" role="alert">{accessNotice}</p>
 	{/if}
 	<Input type="search" placeholder="Search projects…" bind:value={query} />
 	<div class="flex flex-col gap-2">
 		{#if loading}
-			<p class="text-sm text-zinc-400">Loading…</p>
+			<p class="text-sm text-muted-foreground">Loading…</p>
 		{:else if error}
-			<p class="text-sm text-red-400">{error}</p>
+			<p class="text-sm text-destructive">{error}</p>
 			<Button size="sm" variant="outline" onclick={refresh}>Retry</Button>
 		{:else}
 			{#each filtered as p (p.id)}
 				<ProjectCard project={p} onOpen={open} onChanged={refresh} />
 			{:else}
-				<p class="text-sm text-zinc-500">No projects.</p>
+				<p class="text-sm text-muted-foreground/70">No projects.</p>
 			{/each}
 		{/if}
 	</div>

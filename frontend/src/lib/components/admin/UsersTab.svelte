@@ -115,26 +115,34 @@
 			bind:value={password}
 			required
 		/>
-		<label class="flex items-center gap-1 text-xs text-zinc-400">
+		<label class="flex items-center gap-1 text-xs text-muted-foreground">
 			<input type="checkbox" bind:checked={makeAdmin} /> admin
 		</label>
 		<Button type="submit" size="sm" disabled={busy}>Add user</Button>
 	</form>
-	{#if error}<p class="text-xs text-red-400">{error}</p>{/if}
+	{#if error}<p class="text-xs text-destructive">{error}</p>{/if}
 
 	<Input type="search" placeholder="Search users…" bind:value={query} oninput={onSearchInput} />
 
 	<ul class="flex w-full flex-col text-sm">
 		{#each users as u (u.id)}
-			<li class="flex items-center gap-2 border-b border-zinc-800 py-1">
-				<span class="flex-1 text-zinc-100">{u.email}</span>
-				<button class="text-xs text-zinc-400" onclick={() => toggleAdmin(u)} disabled={busy}>
+			<li class="flex items-center gap-2 border-b border-border py-1">
+				<span class="flex-1 text-foreground">{u.email}</span>
+				<button
+					class="text-xs text-muted-foreground"
+					onclick={() => toggleAdmin(u)}
+					disabled={busy}
+				>
 					{u.is_admin ? 'admin' : 'user'}
 				</button>
-				<button class="text-xs text-zinc-400" onclick={() => toggleActive(u)} disabled={busy}>
+				<button
+					class="text-xs text-muted-foreground"
+					onclick={() => toggleActive(u)}
+					disabled={busy}
+				>
 					{u.is_active ? 'active' : 'disabled'}
 				</button>
-				<button class="text-xs text-red-400" onclick={() => remove(u)} disabled={busy}
+				<button class="text-xs text-destructive" onclick={() => remove(u)} disabled={busy}
 					>delete</button
 				>
 			</li>

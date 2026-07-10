@@ -46,7 +46,7 @@
 </script>
 
 <div
-	class="flex w-full flex-col rounded border border-zinc-800 bg-zinc-900 px-3 py-2 hover:border-zinc-700"
+	class="flex w-full flex-col rounded border border-border bg-card px-3 py-2 transition-colors hover:border-input"
 >
 	<div class="flex w-full items-center justify-between">
 		<button
@@ -54,19 +54,27 @@
 			onclick={() => onOpen(project.id)}
 			disabled={busy}
 		>
-			<span class="text-sm text-zinc-100">{project.name}</span>
-			<span class="ml-2 text-xs text-zinc-400">{project.role}</span>
+			<span class="font-display text-base font-light text-foreground">{project.name}</span>
+			<span class="ml-2 text-xs text-muted-foreground">{project.role}</span>
 		</button>
 		<div class="ml-3 flex items-center gap-2">
-			<button class="text-xs text-zinc-400 hover:text-zinc-100" onclick={onClone} disabled={busy}>
+			<button
+				class="text-xs text-muted-foreground hover:text-foreground"
+				onclick={onClone}
+				disabled={busy}
+			>
 				Clone
 			</button>
 			{#if isAdmin()}
-				<button class="text-xs text-red-400 hover:text-red-300" onclick={onDelete} disabled={busy}>
+				<button
+					class="text-xs text-destructive hover:text-destructive/80"
+					onclick={onDelete}
+					disabled={busy}
+				>
 					Delete
 				</button>
 			{/if}
 		</div>
 	</div>
-	{#if error}<p class="text-xs text-red-400">{error}</p>{/if}
+	{#if error}<p class="text-xs text-destructive">{error}</p>{/if}
 </div>

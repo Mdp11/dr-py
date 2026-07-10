@@ -46,26 +46,26 @@
 </script>
 
 {#if !draft}
-	<p class="p-4 text-xs text-zinc-500">Loading…</p>
+	<p class="p-4 text-xs text-muted-foreground/70">Loading…</p>
 {:else}
 	<div class="flex h-full flex-col">
-		<div class="flex items-center gap-2 border-b border-zinc-800 px-3 py-2">
+		<div class="flex items-center gap-2 border-b border-border px-3 py-2">
 			<input
 				data-testid="nav-name"
-				class="w-56 rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs"
+				class="w-56 rounded border border-input bg-card px-2 py-1 text-xs"
 				value={draft.name}
 				disabled={!editable}
 				oninput={(e) => setDraftName(tabId, e.currentTarget.value)}
 			/>
 			{#if draft.dirty}
-				<span title="Unsaved changes" class="text-amber-400">●</span>
+				<span title="Unsaved changes" class="text-warning">●</span>
 			{/if}
 			<span class="flex-1"></span>
 			{#if editable}
 				<div class="flex items-center gap-2">
 					<button
 						type="button"
-						class="rounded bg-emerald-700 px-2 py-1 text-xs text-white hover:bg-emerald-600 disabled:opacity-40"
+						class="rounded bg-primary px-2 py-1 text-xs text-primary-foreground hover:bg-primary/80 disabled:opacity-40"
 						disabled={!draft.dirty && draft.artifactId !== null}
 						onclick={() => void save()}
 					>
@@ -73,7 +73,7 @@
 					</button>
 					<button
 						type="button"
-						class="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
+						class="rounded border border-input px-2 py-1 text-xs text-foreground/80 hover:bg-muted"
 						onclick={() => void saveAs()}
 					>
 						Save as…
@@ -82,7 +82,7 @@
 			{/if}
 		</div>
 		{#if conflict !== undefined}
-			<div class="flex items-center gap-2 bg-amber-950/60 px-3 py-1.5 text-xs text-amber-300">
+			<div class="flex items-center gap-2 bg-warning/15 px-3 py-1.5 text-xs text-warning">
 				Someone else modified this navigation.
 				<button type="button" class="underline" onclick={() => void reloadDraft(tabId)}>
 					Reload their version
@@ -90,7 +90,7 @@
 			</div>
 		{/if}
 		{#if saveError}
-			<p class="px-3 py-1 text-xs text-red-400">{saveError}</p>
+			<p class="px-3 py-1 text-xs text-destructive">{saveError}</p>
 		{/if}
 		<div class="flex min-h-0 flex-1 flex-col">
 			<div class="min-h-0 flex-1 overflow-auto p-4">
