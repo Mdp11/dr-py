@@ -148,10 +148,10 @@
 	// Tailwind colour per segment role, so each component of a change line stands
 	// out: element name, folder, and the from/to prepositions.
 	const SEGMENT_CLASS: Record<ViewChangeSegmentKind, string> = {
-		element: 'text-emerald-300',
-		folder: 'text-amber-300',
-		prep: 'text-sky-300',
-		plain: 'text-zinc-400'
+		element: 'text-success',
+		folder: 'text-warning',
+		prep: 'text-info',
+		plain: 'text-muted-foreground'
 	};
 
 	// Save-view state and handler
@@ -219,7 +219,9 @@
 <Dialog.Root bind:open {onOpenChange}>
 	<Dialog.Content class="max-w-2xl">
 		<Dialog.Header>
-			<Dialog.Title>Commit changes</Dialog.Title>
+			<Dialog.Title class="font-display text-lg font-light tracking-wide"
+				>Commit changes</Dialog.Title
+			>
 			<Dialog.Description>Review and commit your local edits.</Dialog.Description>
 		</Dialog.Header>
 
@@ -234,14 +236,14 @@
 			<Tabs.Content value="model" class="flex flex-col gap-3">
 				<div class="flex max-h-[60vh] flex-col gap-3 overflow-y-auto pr-1">
 					{#if loading}
-						<p class="text-xs text-zinc-500">Loading changes…</p>
+						<p class="text-xs text-muted-foreground/70">Loading changes…</p>
 					{:else if total === 0}
-						<p class="text-xs text-zinc-500">No pending changes.</p>
+						<p class="text-xs text-muted-foreground/70">No pending changes.</p>
 					{/if}
 
 					{#if addedCount > 0}
 						<section class="flex flex-col gap-1">
-							<h3 class="text-xs font-semibold text-emerald-300">Added ({addedCount})</h3>
+							<h3 class="text-xs font-semibold text-success">Added ({addedCount})</h3>
 							{#each addedElements as d (d.id)}
 								<DiffRow diff={d} kind="element" onDiscard={(id) => void discardElement(id)} />
 							{/each}
@@ -253,7 +255,7 @@
 
 					{#if modifiedCount > 0}
 						<section class="flex flex-col gap-1">
-							<h3 class="text-xs font-semibold text-amber-300">Modified ({modifiedCount})</h3>
+							<h3 class="text-xs font-semibold text-warning">Modified ({modifiedCount})</h3>
 							{#each modifiedElements as d (d.id)}
 								<DiffRow diff={d} kind="element" onDiscard={(id) => void discardElement(id)} />
 							{/each}
@@ -265,7 +267,7 @@
 
 					{#if deletedCount > 0}
 						<section class="flex flex-col gap-1">
-							<h3 class="text-xs font-semibold text-red-300">Deleted ({deletedCount})</h3>
+							<h3 class="text-xs font-semibold text-destructive">Deleted ({deletedCount})</h3>
 							{#each deletedElements as d (d.id)}
 								<DiffRow diff={d} kind="element" onDiscard={(id) => void discardElement(id)} />
 							{/each}
@@ -278,7 +280,7 @@
 
 				{#if previewError}
 					<div
-						class="flex flex-col gap-2 rounded border border-red-900 bg-red-950/40 px-3 py-2 text-xs text-red-200"
+						class="flex flex-col gap-2 rounded border border-destructive/40 bg-destructive/15 px-3 py-2 text-xs text-destructive"
 						role="alert"
 					>
 						<p>Failed to preview changes: {previewError}</p>
@@ -287,7 +289,7 @@
 
 				{#if commitError}
 					<div
-						class="flex flex-col gap-2 rounded border border-red-900 bg-red-950/40 px-3 py-2 text-xs text-red-200"
+						class="flex flex-col gap-2 rounded border border-destructive/40 bg-destructive/15 px-3 py-2 text-xs text-destructive"
 						role="alert"
 					>
 						<p>Commit failed: {commitError}</p>
@@ -296,7 +298,7 @@
 
 				{#if pendingIssueCount > 0}
 					<div
-						class="flex items-center gap-1.5 rounded border border-amber-900 bg-amber-950/30 px-2 py-1 text-[11px] text-amber-200"
+						class="flex items-center gap-1.5 rounded border border-warning/40 bg-warning/15 px-2 py-1 text-[11px] text-warning"
 					>
 						<AlertTriangle class="h-3 w-3" />
 						<span>
@@ -308,7 +310,7 @@
 
 				{#if errorCount > 0 && !wouldBlock}
 					<div
-						class="flex items-center gap-1.5 rounded border border-amber-900 bg-amber-950/30 px-2 py-1 text-[11px] text-amber-200"
+						class="flex items-center gap-1.5 rounded border border-warning/40 bg-warning/15 px-2 py-1 text-[11px] text-warning"
 					>
 						<AlertTriangle class="h-3 w-3" />
 						<span
@@ -319,7 +321,7 @@
 				{/if}
 				{#if wouldBlock}
 					<div
-						class="rounded border border-red-900 bg-red-950/40 px-2 py-1 text-[11px] text-red-200"
+						class="rounded border border-destructive/40 bg-destructive/15 px-2 py-1 text-[11px] text-destructive"
 						role="alert"
 					>
 						Strict mode is on: {errorCount} validation {errorCount === 1 ? 'issue' : 'issues'} must be
@@ -328,16 +330,16 @@
 				{/if}
 				{#if structuralBlockers.length > 0}
 					<div
-						class="rounded border border-red-900 bg-red-950/40 px-2 py-1 text-[11px] text-red-200"
+						class="rounded border border-destructive/40 bg-destructive/15 px-2 py-1 text-[11px] text-destructive"
 						role="alert"
 					>
 						Commit blocked: {structuralBlockers.length} structural problem(s) must be fixed first.
 					</div>
 				{/if}
-				<label class="flex flex-col gap-1 text-xs text-zinc-300">
+				<label class="flex flex-col gap-1 text-xs text-foreground/80">
 					Commit message
 					<input
-						class="h-7 rounded border border-zinc-800 bg-zinc-900 px-2 text-xs text-zinc-100 outline-none focus:border-zinc-600"
+						class="h-7 rounded border border-border bg-card px-2 text-xs text-foreground outline-none focus:border-ring"
 						bind:value={message}
 						placeholder="(optional)"
 						disabled={committing}
@@ -348,12 +350,12 @@
 			<Tabs.Content value="view">
 				<div class="flex max-h-[60vh] flex-col gap-1 overflow-y-auto pr-1">
 					{#if view === null}
-						<p class="text-xs text-zinc-500">No view loaded.</p>
+						<p class="text-xs text-muted-foreground/70">No view loaded.</p>
 					{:else if viewLines.length === 0}
-						<p class="text-xs text-zinc-500">No view changes.</p>
+						<p class="text-xs text-muted-foreground/70">No view changes.</p>
 					{:else}
 						{#each viewLines as line (line.key)}
-							<p class="rounded bg-zinc-900 px-2 py-1 font-mono text-[11px]">
+							<p class="rounded bg-card px-2 py-1 font-mono text-[11px]">
 								{#each line.segments as seg, i (i)}<span class={SEGMENT_CLASS[seg.kind]}
 										>{seg.text}</span
 									>{/each}
@@ -362,7 +364,7 @@
 					{/if}
 					{#if viewSaveError}
 						<div
-							class="mt-1 rounded border border-red-900 bg-red-950/40 px-3 py-2 text-xs text-red-200"
+							class="mt-1 rounded border border-destructive/40 bg-destructive/15 px-3 py-2 text-xs text-destructive"
 							role="alert"
 						>
 							Save view failed: {viewSaveError}
@@ -379,7 +381,6 @@
 			{#if activeTab === 'view'}
 				<Button
 					type="button"
-					class="bg-red-600 text-white hover:bg-red-500"
 					onclick={onSaveViewClick}
 					disabled={savingView || view === null || viewChangeCount === 0}
 				>
@@ -396,7 +397,6 @@
 				</Button>
 				<Button
 					type="button"
-					class="bg-red-600 text-white hover:bg-red-500"
 					onclick={() => void onCommitClick()}
 					disabled={committing || total === 0 || commitBlocked || loading || preview === null}
 				>

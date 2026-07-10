@@ -9,10 +9,10 @@
 	const badge = $derived(diff.status === 'added' ? '+' : diff.status === 'deleted' ? '-' : '~');
 	const badgeClass = $derived(
 		diff.status === 'added'
-			? 'bg-green-500/20 text-green-300'
+			? 'bg-success/15 text-success'
 			: diff.status === 'deleted'
-				? 'bg-red-500/20 text-red-300'
-				: 'bg-yellow-500/20 text-yellow-200'
+				? 'bg-destructive/15 text-destructive'
+				: 'bg-warning/15 text-warning'
 	);
 
 	const before = $derived(diff.before ?? null);
@@ -57,44 +57,44 @@
 	}
 </script>
 
-<div class="border-t border-zinc-700">
+<div class="border-t border-input">
 	<div class="flex items-center gap-2 px-3 py-2 text-sm">
 		<span
 			class={`inline-flex h-5 w-5 items-center justify-center rounded font-mono font-bold ${badgeClass}`}
 			>{badge}</span
 		>
-		<span class="font-semibold text-indigo-300">{entity.type_name}</span>
-		<span class="font-mono text-xs text-zinc-400">{diff.id}</span>
+		<span class="font-semibold text-primary">{entity.type_name}</span>
+		<span class="font-mono text-xs text-muted-foreground">{diff.id}</span>
 	</div>
 
 	{#if mode === 'split'}
 		<div class="grid grid-cols-2 font-mono text-xs">
-			<div class="border-r border-zinc-700 px-3 pb-3">
-				<div class="mb-1 text-[10px] uppercase text-zinc-500">Before</div>
+			<div class="border-r border-input px-3 pb-3">
+				<div class="mb-1 text-[10px] uppercase text-muted-foreground/70">Before</div>
 				{#if before}
 					{#each rowKeys(before, after) as key (key)}
 						<div
-							class={`rounded px-1.5 py-0.5 ${changed(key) ? 'bg-red-500/15 text-red-300' : 'text-zinc-400'}`}
+							class={`rounded px-1.5 py-0.5 ${changed(key) ? 'bg-destructive/15 text-destructive' : 'text-muted-foreground'}`}
 						>
 							{key}: {fmt(getValue(before, key))}
 						</div>
 					{/each}
 				{:else}
-					<div class="italic text-zinc-600">— not present —</div>
+					<div class="italic text-muted-foreground/50">— not present —</div>
 				{/if}
 			</div>
 			<div class="px-3 pb-3">
-				<div class="mb-1 text-[10px] uppercase text-zinc-500">After</div>
+				<div class="mb-1 text-[10px] uppercase text-muted-foreground/70">After</div>
 				{#if after}
 					{#each rowKeys(before, after) as key (key)}
 						<div
-							class={`rounded px-1.5 py-0.5 ${changed(key) ? 'bg-green-500/15 text-green-300' : 'text-zinc-400'}`}
+							class={`rounded px-1.5 py-0.5 ${changed(key) ? 'bg-success/15 text-success' : 'text-muted-foreground'}`}
 						>
 							{key}: {fmt(getValue(after, key))}
 						</div>
 					{/each}
 				{:else}
-					<div class="italic text-zinc-600">— removed —</div>
+					<div class="italic text-muted-foreground/50">— removed —</div>
 				{/if}
 			</div>
 		</div>
@@ -103,17 +103,17 @@
 			{#each rowKeys(before, after) as key (key)}
 				{#if changed(key)}
 					{#if before}
-						<div class="rounded bg-red-500/15 px-1.5 py-0.5 text-red-300">
+						<div class="rounded bg-destructive/15 px-1.5 py-0.5 text-destructive">
 							- {key}: {fmt(getValue(before, key))}
 						</div>
 					{/if}
 					{#if after}
-						<div class="rounded bg-green-500/15 px-1.5 py-0.5 text-green-300">
+						<div class="rounded bg-success/15 px-1.5 py-0.5 text-success">
 							+ {key}: {fmt(getValue(after, key))}
 						</div>
 					{/if}
 				{:else}
-					<div class="px-1.5 py-0.5 text-zinc-400">
+					<div class="px-1.5 py-0.5 text-muted-foreground">
 						{key}: {fmt(getValue(after ?? before, key))}
 					</div>
 				{/if}

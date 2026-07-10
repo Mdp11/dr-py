@@ -96,7 +96,9 @@
 <Dialog.Root bind:open {onOpenChange}>
 	<Dialog.Content class="max-w-lg">
 		<Dialog.Header>
-			<Dialog.Title>Apply change request</Dialog.Title>
+			<Dialog.Title class="font-display text-lg font-light tracking-wide"
+				>Apply change request</Dialog.Title
+			>
 			<Dialog.Description>
 				Pick a model file and a CR file. The CR will be applied and the result saved as a new file.
 			</Dialog.Description>
@@ -107,7 +109,7 @@
 				<Button type="button" variant="outline" size="sm" onclick={() => modelInputRef?.click()}>
 					Model file…
 				</Button>
-				<span class="truncate font-mono text-xs text-zinc-400">
+				<span class="truncate font-mono text-xs text-muted-foreground">
 					{modelFilename ?? 'No file selected'}
 				</span>
 				<input
@@ -123,7 +125,7 @@
 				<Button type="button" variant="outline" size="sm" onclick={() => crInputRef?.click()}>
 					CR file…
 				</Button>
-				<span class="truncate font-mono text-xs text-zinc-400">
+				<span class="truncate font-mono text-xs text-muted-foreground">
 					{crFilename ?? 'No file selected'}
 				</span>
 				<input
@@ -136,12 +138,12 @@
 			</div>
 
 			{#if errorMessage}
-				<p class="text-xs text-red-400">{errorMessage}</p>
+				<p class="text-xs text-destructive">{errorMessage}</p>
 			{/if}
 
 			{#if result && !result.ok}
 				<div
-					class="flex flex-col gap-1 rounded border border-red-900 bg-red-950/40 px-3 py-2 text-xs text-red-200"
+					class="flex flex-col gap-1 rounded border border-destructive/40 bg-destructive/15 px-3 py-2 text-xs text-destructive"
 					role="alert"
 				>
 					<p class="font-semibold">{result.conflicts.length} conflict(s) — nothing applied</p>
@@ -153,14 +155,14 @@
 
 			{#if result && result.ok}
 				<div
-					class="rounded border border-emerald-900 bg-emerald-950/30 px-3 py-2 text-xs text-emerald-200"
+					class="rounded border border-success/40 bg-success/15 px-3 py-2 text-xs text-success"
 					role="status"
 				>
 					<p>Applied successfully. Saved to file.</p>
 					{#if result.issues.length > 0}
 						<p class="mt-1">{result.issues.length} validation issue(s):</p>
 						{#each result.issues as issue (issue.message)}
-							<p class="font-mono text-amber-300">{issue.severity}: {issue.message}</p>
+							<p class="font-mono text-warning">{issue.severity}: {issue.message}</p>
 						{/each}
 					{/if}
 				</div>

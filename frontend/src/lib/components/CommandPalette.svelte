@@ -135,7 +135,7 @@
 				<span>Reload model</span>
 			</Command.Item>
 			<Command.Item value="action:undo" onSelect={actionUndo}>
-				<span class="text-red-300">Undo last change</span>
+				<span class="text-destructive">Undo last change</span>
 			</Command.Item>
 		</Command.Group>
 
@@ -160,11 +160,11 @@
 					<Command.Item value={'entity:' + el.id} onSelect={() => pickEntity(el.id)}>
 						<span class="truncate">{elementDisplayName(el)}</span>
 						<span
-							class="ml-auto shrink-0 rounded bg-zinc-800 px-1 font-mono text-[10px] text-zinc-400"
+							class="ml-auto shrink-0 rounded bg-muted px-1 font-mono text-[10px] text-muted-foreground"
 						>
 							{el.type_name}
 						</span>
-						<span class="shrink-0 font-mono text-[10px] text-zinc-600">{el.id}</span>
+						<span class="shrink-0 font-mono text-[10px] text-muted-foreground/50">{el.id}</span>
 					</Command.Item>
 				{/each}
 			</Command.Group>

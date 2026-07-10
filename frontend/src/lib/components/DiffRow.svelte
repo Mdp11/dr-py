@@ -56,29 +56,29 @@
 	const glyphChar = $derived(status === 'added' ? '+' : status === 'modified' ? '~' : '-');
 	const glyphClass = $derived(
 		status === 'added'
-			? 'text-emerald-400'
+			? 'text-success'
 			: status === 'modified'
-				? 'text-amber-400'
-				: 'text-red-400'
+				? 'text-warning'
+				: 'text-destructive'
 	);
 </script>
 
-<div class="flex flex-col gap-1 rounded border border-zinc-800 bg-zinc-900/40 px-2 py-1.5 text-xs">
+<div class="flex flex-col gap-1 rounded border border-border bg-muted/40 px-2 py-1.5 text-xs">
 	<div class="flex items-center gap-2">
 		<span class="w-3 font-mono {glyphClass}" aria-label={status}>{glyphChar}</span>
-		<span class="font-mono text-zinc-100">{label}</span>
+		<span class="font-mono text-foreground">{label}</span>
 		{#if typeName}
 			<span
-				class="rounded border border-zinc-700 bg-zinc-800 px-1.5 py-0.5 font-mono text-[10px] text-zinc-300"
+				class="rounded border border-input bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground/80"
 			>
 				{typeName}
 			</span>
 		{/if}
-		<span class="ml-auto font-mono text-[10px] text-zinc-500">{diff.id}</span>
+		<span class="ml-auto font-mono text-[10px] text-muted-foreground/70">{diff.id}</span>
 		{#if onDiscard}
 			<button
 				type="button"
-				class="rounded border border-zinc-700 px-1.5 py-0.5 text-[10px] text-zinc-400 hover:border-zinc-500 hover:text-zinc-200"
+				class="rounded border border-input px-1.5 py-0.5 text-[10px] text-muted-foreground hover:border-ring hover:text-foreground"
 				onclick={() => onDiscard?.(diff.id)}
 			>
 				Discard
@@ -89,18 +89,18 @@
 	{#if kind === 'relationship' && status === 'added'}
 		{@const eps = endpoints(diff.after)}
 		{#if eps}
-			<div class="pl-5 font-mono text-[11px] text-zinc-400">{eps}</div>
+			<div class="pl-5 font-mono text-[11px] text-muted-foreground">{eps}</div>
 		{/if}
 	{/if}
 
 	{#if status === 'modified' && diff.modifiedFields && diff.modifiedFields.length > 0}
 		<ul class="flex flex-col gap-0.5 pl-5">
 			{#each diff.modifiedFields as field (field)}
-				<li class="font-mono text-[11px] text-zinc-400">
-					<span class="text-zinc-500">{field}:</span>
-					<span class="text-red-300/80 line-through">{formatValue(beforeValue(field))}</span>
-					<span class="text-zinc-500"> → </span>
-					<span class="text-emerald-300">{formatValue(afterValue(field))}</span>
+				<li class="font-mono text-[11px] text-muted-foreground">
+					<span class="text-muted-foreground/70">{field}:</span>
+					<span class="text-destructive/80 line-through">{formatValue(beforeValue(field))}</span>
+					<span class="text-muted-foreground/70"> → </span>
+					<span class="text-success">{formatValue(afterValue(field))}</span>
 				</li>
 			{/each}
 		</ul>

@@ -73,23 +73,25 @@
 	<div class="flex items-center gap-2">
 		<a
 			href={resolve(`/p/${getActiveProjectId()}`)}
-			class="text-sm text-zinc-400 hover:text-zinc-200">← Back</a
+			class="text-sm text-muted-foreground hover:text-foreground">← Back</a
 		>
-		<h1 class="text-lg font-semibold">Compare models</h1>
+		<h1 class="font-display text-lg font-light tracking-wide">Compare models</h1>
 	</div>
 
 	{#if !loaded}
-		<p class="text-sm text-zinc-400">
+		<p class="text-sm text-muted-foreground">
 			Load a model first (from the main workspace), then return here to compare.
 		</p>
 	{:else}
 		<div class="flex flex-wrap items-center gap-2 text-sm">
-			<span class="text-zinc-500">Loaded:</span>
-			<span class="font-mono text-xs text-zinc-300">{loadedFilename ?? 'model'}</span>
+			<span class="text-muted-foreground/70">Loaded:</span>
+			<span class="font-mono text-xs text-foreground/80">{loadedFilename ?? 'model'}</span>
 			<Button type="button" variant="outline" size="sm" onclick={() => fileInputRef?.click()}>
 				Choose other model…
 			</Button>
-			<span class="font-mono text-xs text-zinc-400">{otherFilename ?? 'No file selected'}</span>
+			<span class="font-mono text-xs text-muted-foreground"
+				>{otherFilename ?? 'No file selected'}</span
+			>
 			<input
 				bind:this={fileInputRef}
 				type="file"
@@ -111,19 +113,19 @@
 		</div>
 
 		{#if errorMessage}
-			<p class="text-xs text-red-400">{errorMessage}</p>
+			<p class="text-xs text-destructive">{errorMessage}</p>
 		{/if}
 
 		{#if pair && diff}
-			<div class="flex items-center gap-2 text-xs text-zinc-400">
+			<div class="flex items-center gap-2 text-xs text-muted-foreground">
 				<span>
-					From: <span class="font-mono text-zinc-300"
+					From: <span class="font-mono text-foreground/80"
 						>{swapped ? (otherFilename ?? 'other') : (loadedFilename ?? 'model')}</span
 					>
 				</span>
 				<span>→</span>
 				<span>
-					To: <span class="font-mono text-zinc-300"
+					To: <span class="font-mono text-foreground/80"
 						>{swapped ? (loadedFilename ?? 'model') : (otherFilename ?? 'other')}</span
 					>
 				</span>

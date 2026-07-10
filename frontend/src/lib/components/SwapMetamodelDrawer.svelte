@@ -119,12 +119,14 @@
 >
 	<Dialog.Content class="max-w-2xl">
 		<Dialog.Header>
-			<Dialog.Title>Swap metamodel</Dialog.Title>
+			<Dialog.Title class="font-display text-lg font-light tracking-wide"
+				>Swap metamodel</Dialog.Title
+			>
 		</Dialog.Header>
 
 		<div class="flex flex-col gap-3 text-sm">
 			<label class="flex flex-col gap-1">
-				<span class="text-xs text-zinc-400">Candidate metamodel</span>
+				<span class="text-xs text-muted-foreground">Candidate metamodel</span>
 				<input
 					id="swap-metamodel-file"
 					type="file"
@@ -135,21 +137,23 @@
 			</label>
 
 			{#if step === 'diffing'}
-				<p class="text-zinc-400">Running diff…</p>
+				<p class="text-muted-foreground">Running diff…</p>
 			{/if}
 
 			{#if step === 'error' && errorMsg}
-				<p class="rounded border border-red-900 bg-red-950/40 px-2 py-1.5 text-red-200">
+				<p
+					class="rounded border border-destructive/40 bg-destructive/15 px-2 py-1.5 text-destructive"
+				>
 					{errorMsg}
 				</p>
 			{/if}
 
 			{#if step === 'review' && diff}
 				<div class="flex flex-wrap items-center gap-3 text-xs">
-					<span class="text-red-300">{diff.now_failing.length} now failing</span>
-					<span class="text-emerald-300">{diff.now_passing.length} now passing</span>
-					<span class="text-zinc-400">{diff.unchanged_count} unchanged</span>
-					<span class="text-zinc-500">
+					<span class="text-destructive">{diff.now_failing.length} now failing</span>
+					<span class="text-success">{diff.now_passing.length} now passing</span>
+					<span class="text-muted-foreground">{diff.unchanged_count} unchanged</span>
+					<span class="text-muted-foreground/70">
 						errors {diff.current_error_count} → {diff.candidate_error_count}
 					</span>
 				</div>
@@ -157,32 +161,32 @@
 				{@render section('Now failing', diff.now_failing, 'fail')}
 				{@render section('Now passing', diff.now_passing, 'pass')}
 
-				<div class="mt-2 flex flex-col gap-2 border-t border-zinc-800 pt-2">
+				<div class="mt-2 flex flex-col gap-2 border-t border-border pt-2">
 					{#if !isOwner}
-						<p class="text-xs text-zinc-500">
+						<p class="text-xs text-muted-foreground/70">
 							The diff is read-only for your role. Only an owner can rebind.
 						</p>
 					{:else}
 						{#if !quiet}
-							<p class="text-xs text-amber-300">
+							<p class="text-xs text-warning">
 								Commit or discard your staged edits first — rebind needs a quiet project (no active
 								locks).
 							</p>
 						{/if}
 						<label class="flex flex-col gap-1">
-							<span class="text-xs text-zinc-400">Commit message (optional)</span>
+							<span class="text-xs text-muted-foreground">Commit message (optional)</span>
 							<input
-								class="rounded bg-zinc-900 px-2 py-1 text-xs text-zinc-100"
+								class="rounded bg-card px-2 py-1 text-xs text-foreground"
 								bind:value={message}
 								placeholder="Adopt candidate metamodel"
 							/>
 						</label>
-						<p class="text-[10px] text-zinc-500">
+						<p class="text-[10px] text-muted-foreground/70">
 							A rebind may land with conformance issues and is journaled (revertible later).
 						</p>
 						{#if rebindError}
 							<p
-								class="rounded border border-red-900 bg-red-950/40 px-2 py-1.5 text-xs text-red-200"
+								class="rounded border border-destructive/40 bg-destructive/15 px-2 py-1.5 text-xs text-destructive"
 							>
 								{rebindError}
 							</p>
@@ -212,29 +216,29 @@
 		<section class="flex flex-col gap-1">
 			<h3
 				class="text-[10px] font-semibold uppercase tracking-wider {kind === 'fail'
-					? 'text-red-300'
-					: 'text-emerald-300'}"
+					? 'text-destructive'
+					: 'text-success'}"
 			>
 				{title} ({issues.length})
 			</h3>
 			<ul class="flex max-h-48 flex-col gap-1 overflow-auto">
 				{#each issues.slice(0, CAP) as it (it.message + it.target_ids.join(','))}
 					<li
-						class="flex flex-col gap-1 rounded border border-zinc-800 bg-zinc-900/40 px-2 py-1.5 text-xs"
+						class="flex flex-col gap-1 rounded border border-border bg-muted/40 px-2 py-1.5 text-xs"
 					>
 						<div class="flex items-start gap-1.5">
 							{#if it.severity === 'error'}
-								<AlertCircle class="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-400" />
+								<AlertCircle class="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
 							{:else}
-								<AlertTriangle class="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-400" />
+								<AlertTriangle class="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
 							{/if}
-							<span class="flex-1 text-zinc-200">{it.message}</span>
+							<span class="flex-1 text-foreground/90">{it.message}</span>
 						</div>
 						{#if it.target_ids.length > 0}
 							<div class="flex flex-wrap gap-1 pl-5">
 								{#each it.target_ids as tid (tid)}
 									<span
-										class="rounded bg-zinc-800 px-1.5 py-0.5 font-mono text-[10px] text-zinc-300"
+										class="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground/80"
 										title={tid}
 									>
 										{tid}
@@ -246,7 +250,7 @@
 				{/each}
 			</ul>
 			{#if issues.length > CAP}
-				<p class="text-[10px] text-zinc-500">…and {issues.length - CAP} more</p>
+				<p class="text-[10px] text-muted-foreground/70">…and {issues.length - CAP} more</p>
 			{/if}
 		</section>
 	{/if}

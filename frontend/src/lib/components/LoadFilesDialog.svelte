@@ -211,7 +211,7 @@
 <Dialog.Root bind:open {onOpenChange}>
 	<Dialog.Content class="max-w-lg">
 		<Dialog.Header>
-			<Dialog.Title>Load files</Dialog.Title>
+			<Dialog.Title class="font-display text-lg font-light tracking-wide">Load files</Dialog.Title>
 			<Dialog.Description>
 				Pick a metamodel and a model; a view is optional. Loading discards the current model and
 				unsaved changes.
@@ -219,8 +219,8 @@
 		</Dialog.Header>
 		<form onsubmit={onSubmit} class="flex flex-col gap-4">
 			<div class="flex flex-col gap-1.5">
-				<span class="text-xs font-medium text-zinc-300"
-					>Metamodel <span class="text-zinc-500">(required)</span></span
+				<span class="text-xs font-medium text-foreground/80"
+					>Metamodel <span class="text-muted-foreground/70">(required)</span></span
 				>
 				<div class="flex items-center gap-2">
 					<Button
@@ -231,7 +231,7 @@
 					>
 						Choose file...
 					</Button>
-					<span class="truncate font-mono text-xs text-zinc-400">
+					<span class="truncate font-mono text-xs text-muted-foreground">
 						{metamodelFilename ?? 'No file selected'}
 					</span>
 					<input
@@ -246,14 +246,14 @@
 			</div>
 
 			<div class="flex flex-col gap-1.5">
-				<span class="text-xs font-medium text-zinc-300"
-					>Model <span class="text-zinc-500">(required)</span></span
+				<span class="text-xs font-medium text-foreground/80"
+					>Model <span class="text-muted-foreground/70">(required)</span></span
 				>
 				<div class="flex items-center gap-2">
 					<Button type="button" variant="outline" size="sm" onclick={() => modelInputRef?.click()}>
 						Choose file...
 					</Button>
-					<span class="truncate font-mono text-xs text-zinc-400">
+					<span class="truncate font-mono text-xs text-muted-foreground">
 						{modelFilename ?? 'No file selected'}
 					</span>
 					<input
@@ -268,14 +268,14 @@
 			</div>
 
 			<div class="flex flex-col gap-1.5">
-				<span class="text-xs font-medium text-zinc-300"
-					>View <span class="text-zinc-500">(optional)</span></span
+				<span class="text-xs font-medium text-foreground/80"
+					>View <span class="text-muted-foreground/70">(optional)</span></span
 				>
 				<div class="flex items-center gap-2">
 					<Button type="button" variant="outline" size="sm" onclick={() => viewInputRef?.click()}>
 						Choose file...
 					</Button>
-					<span class="truncate font-mono text-xs text-zinc-400">
+					<span class="truncate font-mono text-xs text-muted-foreground">
 						{viewFilename ?? 'No file selected'}
 					</span>
 					{#if viewFilename}
@@ -293,7 +293,7 @@
 			</div>
 
 			{#if errorMessage}
-				<p class="text-xs text-red-400">{errorMessage}</p>
+				<p class="text-xs text-destructive">{errorMessage}</p>
 			{/if}
 			<Dialog.Footer>
 				<Button

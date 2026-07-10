@@ -152,72 +152,74 @@
 <Dialog.Root bind:open>
 	<Dialog.Content class="max-w-2xl">
 		<Dialog.Header>
-			<Dialog.Title>Commit history</Dialog.Title>
+			<Dialog.Title class="font-display text-lg font-light tracking-wide"
+				>Commit history</Dialog.Title
+			>
 		</Dialog.Header>
 
 		{#if mode === 'diff'}
 			<div class="space-y-2">
 				<button
-					class="flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-200"
+					class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
 					onclick={backToList}
 				>
 					<ArrowLeft class="h-3 w-3" /> Back
 				</button>
-				<h3 class="text-sm text-zinc-200">{diffTitle}</h3>
+				<h3 class="text-sm text-foreground/90">{diffTitle}</h3>
 				{#if spanRebind}
 					<div
-						class="rounded border border-amber-700 bg-amber-900/30 px-2 py-1 text-[11px] text-amber-200"
+						class="rounded border border-warning/40 bg-warning/15 px-2 py-1 text-[11px] text-warning"
 					>
 						These revisions use different metamodels; the diff is structural.
 					</div>
 				{/if}
 				{#if diffError}
-					<p class="text-sm text-red-300">{diffError}</p>
+					<p class="text-sm text-destructive">{diffError}</p>
 				{:else if diff === null}
-					<p class="text-sm text-zinc-400">Computing diff…</p>
+					<p class="text-sm text-muted-foreground">Computing diff…</p>
 				{:else}
 					<CompareDiff {diff} unchangedHidden={0} />
 				{/if}
 			</div>
 		{:else if getLoading() && getCommits().length === 0}
-			<p class="py-6 text-center text-sm text-zinc-400">Loading…</p>
+			<p class="py-6 text-center text-sm text-muted-foreground">Loading…</p>
 		{:else if getCommits().length === 0}
-			<p class="py-6 text-center text-sm text-zinc-400">No commits yet.</p>
+			<p class="py-6 text-center text-sm text-muted-foreground">No commits yet.</p>
 		{:else}
-			<ul class="max-h-[60vh] divide-y divide-zinc-800 overflow-y-auto">
+			<ul class="max-h-[60vh] divide-y divide-border overflow-y-auto">
 				{#each getCommits() as c (c.rev)}
 					<li data-testid="commit-row" class="flex items-start gap-3 px-1 py-2 text-sm">
-						<GitCommitVertical class="mt-0.5 h-4 w-4 shrink-0 text-zinc-500" />
+						<GitCommitVertical class="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground/70" />
 						<div class="min-w-0 flex-1">
 							<div class="flex items-center gap-2">
-								<span class="font-mono text-xs text-zinc-500">r{c.rev}</span>
-								<span class="truncate text-zinc-200">{c.message || '(no message)'}</span>
+								<span class="font-mono text-xs text-muted-foreground/70">r{c.rev}</span>
+								<span class="truncate text-foreground/90">{c.message || '(no message)'}</span>
 								{#if c.is_rebind}
-									<span class="rounded bg-amber-900/50 px-1.5 py-0.5 text-[10px] text-amber-200"
+									<span class="rounded bg-warning/15 px-1.5 py-0.5 text-[10px] text-warning"
 										>rebind</span
 									>
 								{/if}
 								{#if c.validation_error_count > 0}
 									<span
-										class="flex items-center gap-1 rounded bg-yellow-900/40 px-1.5 py-0.5 text-[10px] text-yellow-200"
+										class="flex items-center gap-1 rounded bg-warning/15 px-1.5 py-0.5 text-[10px] text-warning"
 									>
 										<AlertTriangle class="h-3 w-3" />{c.validation_error_count}
 									</span>
 								{/if}
 							</div>
-							<div class="flex items-center gap-2 text-[11px] text-zinc-500">
+							<div class="flex items-center gap-2 text-[11px] text-muted-foreground/70">
 								{c.author_id ?? 'unknown'} · {fmtTs(c.ts)} · {c.op_count}
 								{c.op_count === 1 ? 'op' : 'ops'}
 								<button
-									class="rounded px-1 py-0.5 text-[10px] text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+									class="rounded px-1 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
 									onclick={() => diffCommit(c.rev)}
 								>
 									Diff
 								</button>
 								<button
-									class="rounded px-1 py-0.5 text-[10px] hover:bg-zinc-800 {compareFrom === c.rev
-										? 'text-indigo-300'
-										: 'text-zinc-400 hover:text-zinc-200'}"
+									class="rounded px-1 py-0.5 text-[10px] hover:bg-muted {compareFrom === c.rev
+										? 'text-primary'
+										: 'text-muted-foreground hover:text-foreground'}"
 									onclick={() => pickCompare(c.rev)}
 								>
 									{compareFrom !== null && compareFrom !== c.rev
@@ -228,7 +230,7 @@
 								</button>
 								{#if canWrite}
 									<button
-										class="rounded px-1 py-0.5 text-[10px] text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+										class="rounded px-1 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
 										onclick={() => askRevert(c.rev)}
 									>
 										Revert to here
@@ -236,17 +238,17 @@
 								{/if}
 							</div>
 							{#if confirmRev === c.rev}
-								<div class="mt-2 rounded border border-zinc-700 bg-zinc-900/60 p-3 text-sm">
-									<p class="text-zinc-200">
+								<div class="mt-2 rounded border border-input bg-card p-3 text-sm">
+									<p class="text-foreground/90">
 										Revert to rev {confirmRev}? Revisions after r{confirmRev} are discarded as state (history
 										is preserved).
 									</p>
 									{#if revertError}
-										<p class="mt-1 text-xs text-red-300">{revertError}</p>
+										<p class="mt-1 text-xs text-destructive">{revertError}</p>
 									{/if}
 									{#if quiet}
 										<input
-											class="mt-2 w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs"
+											class="mt-2 w-full rounded border border-input bg-background px-2 py-1 text-xs"
 											bind:value={revertMsg}
 											placeholder="Commit message"
 										/>

@@ -51,41 +51,43 @@
 <Dialog.Root bind:open>
 	<Dialog.Content class="max-w-md">
 		<Dialog.Header>
-			<Dialog.Title>Settings</Dialog.Title>
+			<Dialog.Title class="font-display text-lg font-light tracking-wide">Settings</Dialog.Title>
 		</Dialog.Header>
 
 		<div class="flex flex-col gap-4 text-sm">
 			{#if loading}
-				<p class="text-zinc-400">Loading…</p>
+				<p class="text-muted-foreground">Loading…</p>
 			{:else}
 				<div class="flex flex-col gap-2">
 					<div class="flex items-center justify-between gap-4">
-						<span class="text-zinc-200">Strict mode</span>
+						<span class="text-foreground/90">Strict mode</span>
 						<button
 							role="switch"
 							aria-checked={strictMode}
 							aria-label="Strict mode"
 							disabled={!isOwner || toggling}
 							onclick={() => void onToggle()}
-							class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-50 {strictMode
-								? 'bg-indigo-600'
-								: 'bg-zinc-700'}"
+							class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 {strictMode
+								? 'bg-primary'
+								: 'bg-input'}"
 						>
 							<span
-								class="pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow-lg ring-0 transition-transform {strictMode
+								class="pointer-events-none inline-block h-4 w-4 rounded-full bg-background shadow-lg ring-0 transition-transform {strictMode
 									? 'translate-x-5'
 									: 'translate-x-0.5'}"
 							></span>
 						</button>
 					</div>
-					<p class="text-xs text-zinc-400">
+					<p class="text-xs text-muted-foreground">
 						When on, commits with validation errors are blocked (rebind is exempt).
 					</p>
 					{#if !isOwner}
-						<p class="text-xs text-zinc-500">Only an owner can change this.</p>
+						<p class="text-xs text-muted-foreground/70">Only an owner can change this.</p>
 					{/if}
 					{#if error}
-						<p class="rounded border border-red-900 bg-red-950/40 px-2 py-1.5 text-xs text-red-200">
+						<p
+							class="rounded border border-destructive/40 bg-destructive/15 px-2 py-1.5 text-xs text-destructive"
+						>
 							{error}
 						</p>
 					{/if}
