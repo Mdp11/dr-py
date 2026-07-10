@@ -46,7 +46,8 @@
 		setHistoryDrawerOpen,
 		setMetamodel,
 		startRealtime,
-		stopRealtime
+		stopRealtime,
+		trackOpenProgress
 	} from '$lib/state';
 
 	onMount(() => startRealtime());
@@ -68,6 +69,7 @@
 	// `default` project or a project created via the New Project wizard), not by
 	// any client-side file autoload.
 	async function boot(): Promise<void> {
+		void trackOpenProgress(); // fire-and-forget: overlay while the requests below hydrate the session
 		try {
 			setMetamodel(await metamodelApi.getMetamodel());
 		} catch (err) {

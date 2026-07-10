@@ -258,3 +258,4 @@ export {
 	resetProgress,
 	type ProgressEntry
 } from './progress.svelte';
+export { trackOpenProgress } from './open-progress.svelte';
