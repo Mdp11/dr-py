@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Container
-from typing import Any
+from typing import Any, Callable
 
 from fastapi import HTTPException
 
@@ -232,7 +232,13 @@ def _entity_list(raw: dict[str, Any], key: str) -> list[Any]:
     return items
 
 
-def build_model_from_dicts(metamodel: Metamodel, raw: Any, *, strict: bool = True) -> Model:
+def build_model_from_dicts(
+    metamodel: Metamodel,
+    raw: Any,
+    *,
+    strict: bool = True,
+    on_progress: Callable[[int, int], None] | None = None,
+) -> Model:
     """Materialize a `Model` directly from a parsed save-file JSON object.
 
     Same guard semantics as `_build_model_from_payload` (shared checker
@@ -254,13 +260,22 @@ def build_model_from_dicts(metamodel: Metamodel, raw: Any, *, strict: bool = Tru
     loaded after eviction — the validation pipeline will report the conformance
     issues.  Reserved-id, duplicate-id, abstract-type, and endpoint-existence
     guards still apply in both modes.
+
+    ``on_progress(built, total)`` fires every 5000 entities and once at the
+    end (hydration progress reporting); it must be cheap and must not touch
+    the model.
     """
     if not isinstance(raw, dict):
         raise _shape_error("Model payload must be a JSON object")
     model = Model(metamodel)
 
+    element_items = _entity_list(raw, "elements")
+    relationship_items = _entity_list(raw, "relationships")
+    total = len(element_items) + len(relationship_items)
+    built = 0
+
     seen_element_ids: set[str] = set()
-    for n, e in enumerate(_entity_list(raw, "elements")):
+    for n, e in enumerate(element_items):
         where = f"elements[{n}]"
         if not isinstance(e, dict):
             raise _shape_error(f"{where}: must be an object")
@@ -273,9 +288,12 @@ def build_model_from_dicts(metamodel: Metamodel, raw: Any, *, strict: bool = Tru
             properties=_optional_props(e, where),
             rev=_optional_rev(e, where),
         )
+        built += 1
+        if on_progress is not None and built % 5000 == 0:
+            on_progress(built, total)
 
     seen_relationship_ids: set[str] = set()
-    for n, r in enumerate(_entity_list(raw, "relationships")):
+    for n, r in enumerate(relationship_items):
         where = f"relationships[{n}]"
         if not isinstance(r, dict):
             raise _shape_error(f"{where}: must be an object")
@@ -301,6 +319,12 @@ def build_model_from_dicts(metamodel: Metamodel, raw: Any, *, strict: bool = Tru
             properties=_optional_props(r, where),
             rev=_optional_rev(r, where),
         )
+        built += 1
+        if on_progress is not None and built % 5000 == 0:
+            on_progress(built, total)
+
+    if on_progress is not None:
+        on_progress(built, total)
 
     # dicts were populated directly, bypassing the mutation boundary
     model.indexes.rebuild()

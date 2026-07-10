@@ -197,6 +197,13 @@ class SessionRegistry:
                 self._sessions[project_id] = session
             return session
 
+    def peek(self, project_id: str) -> Session | None:
+        """The warm session, or None — NEVER hydrates and does not refresh
+        ``last_access`` (the status poller must not keep a session alive nor
+        trigger a hydration the caller isn't prepared to wait for)."""
+        with self._guard:
+            return self._sessions.get(project_id)
+
     def evict(self, project_id: str) -> None:
         # Peek (do NOT pop) under the guard so the session stays registered
         # while we inspect it. Popping first opened a window where a concurrent

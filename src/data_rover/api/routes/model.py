@@ -5,18 +5,20 @@ import os
 import tempfile
 from contextlib import suppress
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterator, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy.orm import Session as DbSession
 
 from data_rover.core.metamodel.schema import Metamodel
 from data_rover.core.validation.state import ValidationState
 
 from .. import content
+from ..authz import require_membership
 from ..db import get_db
-from ..db_models import User
+from ..db_models import Membership, User
 from ..deps import (
     Session,
     get_request_session,
@@ -24,7 +26,7 @@ from ..deps import (
     require_metamodel,
     require_model,
 )
-from ..hydration import persist_baseline
+from ..hydration import hydration_progress, persist_baseline
 from ..identity import get_current_user
 from ..schemas import (
     InlineModel,
@@ -36,11 +38,63 @@ from ..schemas import (
     SnapshotIn,
 )
 from ..serialize import iter_buffered, iter_model_json
+from ..session import get_registry
 from ..validation_sweep import start_validation_sweep
 from ._snapshot import _build_model_from_payload, build_model_from_dicts
 from .read import model_summary
 
 router = APIRouter()
+
+
+class ValidationStatusOut(BaseModel):
+    running: bool
+    done: int
+    total: int
+
+
+class HydrationStatusOut(BaseModel):
+    phase: str
+    done: int
+    total: int
+
+
+class ModelStatusOut(BaseModel):
+    state: Literal["cold", "hydrating", "empty", "validating", "ready"]
+    model_rev: int | None = None
+    validation: ValidationStatusOut | None = None
+    hydration: HydrationStatusOut | None = None
+
+
+@router.get("/model/status")
+def model_status(
+    project_id: str,
+    _membership: Membership = Depends(require_membership),
+) -> ModelStatusOut:
+    """Open/validation progress WITHOUT touching the session registry's
+    hydrating ``get`` — the poller must never block on (or trigger) the very
+    hydration it is reporting on. Membership is still enforced (the status
+    leaks model_rev/entity progress). ``cold`` means "no warm session and no
+    hydration in flight": for the poller it is indistinguishable from
+    hydrating-not-yet-started, so clients keep polling through it."""
+    session = get_registry().peek(project_id)
+    if session is None:
+        hp = hydration_progress(project_id)
+        if hp is not None:
+            return ModelStatusOut(
+                state="hydrating",
+                hydration=HydrationStatusOut(phase=hp.phase, done=hp.done, total=hp.total),
+            )
+        return ModelStatusOut(state="cold")
+    if session.model is None:
+        return ModelStatusOut(state="empty")
+    sweep = session.validation_sweep
+    if sweep is not None and sweep.running:
+        return ModelStatusOut(
+            state="validating",
+            model_rev=session.model_rev,
+            validation=ValidationStatusOut(running=True, done=sweep.done, total=sweep.total),
+        )
+    return ModelStatusOut(state="ready", model_rev=session.model_rev)
 
 
 @router.post("/model", deprecated=True)
