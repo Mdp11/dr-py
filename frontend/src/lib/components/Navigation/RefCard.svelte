@@ -111,7 +111,7 @@
 	<button
 		type="button"
 		aria-label="Open saved navigation"
-		class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-info hover:bg-muted hover:text-info/80"
+		class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-info/90 hover:bg-muted hover:text-info"
 		onclick={() => openNavigationTab({ artifactId: refId, title: name })}
 	>
 		<ExternalLink class="size-3" />

@@ -43,7 +43,7 @@
 		data-testid="feeds-chip"
 		aria-label={'Feeds the combination with ' + shownLabel}
 		title="Which elements this path contributes to the combination"
-		class="inline-flex items-center gap-1.5 rounded-full border border-input bg-muted px-2 py-0.5 text-[11px] text-muted-foreground hover:border-border hover:text-foreground/90 disabled:opacity-40"
+		class="inline-flex items-center gap-1.5 rounded-full border border-input bg-muted px-2 py-0.5 text-[11px] text-muted-foreground hover:border-ring hover:text-foreground/90 disabled:opacity-40"
 	>
 		→ feeds <ChainBadge value={shownIndex} tone="combine" size="sm" />
 		{shownLabel} ▾

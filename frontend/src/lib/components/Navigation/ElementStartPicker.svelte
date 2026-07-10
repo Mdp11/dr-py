@@ -95,7 +95,7 @@
 			<span class="shrink-0 font-mono text-[10px] text-muted-foreground/50">{value}</span>
 			<button
 				type="button"
-				class="ml-auto shrink-0 text-info hover:text-info/80"
+				class="ml-auto shrink-0 text-info/90 hover:text-info"
 				onclick={changeElement}>change</button
 			>
 		</div>

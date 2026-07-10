@@ -58,7 +58,7 @@
 					onRemove={removeCriterion}
 				/>
 			{/each}
-			<button type="button" class="text-xs text-info hover:text-info/80" onclick={addCriterion}
+			<button type="button" class="text-xs text-info/90 hover:text-info" onclick={addCriterion}
 				>+ condition</button
 			>
 		</div>

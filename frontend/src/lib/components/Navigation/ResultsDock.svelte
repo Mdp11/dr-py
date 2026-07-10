@@ -136,7 +136,7 @@
 								<td class="py-0.5 pr-2">
 									<button
 										type="button"
-										class="rounded bg-muted px-1.5 py-0.5 hover:bg-muted/70"
+										class="rounded bg-card px-1.5 py-0.5 hover:bg-muted"
 										title={item.type_name}
 										onclick={() => select({ kind: 'element', id: item.id })}
 									>
@@ -154,7 +154,7 @@
 			{#if !preview.loading && preview.chains.length < preview.total}
 				<button
 					type="button"
-					class="mt-1 text-xs text-info hover:text-info/80"
+					class="mt-1 text-xs text-info/90 hover:text-info"
 					onclick={() => void loadMorePreview(tabId, selected)}>Load more</button
 				>
 			{/if}
