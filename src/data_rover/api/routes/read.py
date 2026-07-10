@@ -27,6 +27,7 @@ Ordering contracts (deterministic paging)
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from itertools import islice
 from typing import Literal
@@ -195,6 +196,9 @@ def list_elements(
     ranked by ``_search_score`` (descending) with id-ascending tiebreak.
     ``total`` counts all matches BEFORE paging. A blank ``q``
     (empty/whitespace) is treated as absent, mirroring the frontend.
+    With ``q`` of 3+ chars the scan is replaced by trigram candidates from
+    ``IndexSet.search_candidates`` (byte-identical results); shorter queries
+    fall back to the full scan.
     """
     _, model = require_model(session)
     query = (q or "").strip().lower()
@@ -204,7 +208,17 @@ def list_elements(
         #: per-request memo: does ``query`` match this type name? (saves one
         #: lowercase + substring scan per element on large models)
         type_matches: dict[str, bool] = {}
-        for element in model.elements.values():
+        # trigram candidate generation: a SUPERSET of the true hits, or None
+        # when the index can't answer (len < 3) and the full scan runs. The
+        # score check below stays the sole arbiter of matching and order, so
+        # results are byte-identical either way.
+        candidate_ids = model.indexes.search_candidates(query)
+        elements: Iterable[Element] = (
+            model.elements.values()
+            if candidate_ids is None
+            else (model.elements[eid] for eid in candidate_ids)
+        )
+        for element in elements:
             if type is not None and element.type_name != type:
                 continue
             tn = element.type_name

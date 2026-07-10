@@ -305,6 +305,57 @@ def test_elements_search_is_deterministic(client: TestClient) -> None:
     assert first == second
 
 
+def test_search_uses_index_candidates(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The q-branch must consume IndexSet.search_candidates: an empty
+    candidate set yields zero hits even though a scan would match."""
+    from data_rover.core.model.indexes import IndexSet
+
+    _load_model(client, [_item("e1", "Pump")], [])
+    monkeypatch.setattr(IndexSet, "search_candidates", lambda self, q: frozenset())
+    res = client.get(f"{API}/model/elements", params={"q": "pump"})
+    assert res.status_code == 200
+    assert res.json()["total"] == 0
+
+
+def test_search_short_query_falls_back_to_scan(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """len(q) < 3 => the accessor answers None and the scan still runs."""
+    from data_rover.core.model.indexes import IndexSet
+
+    _load_model(client, [_item("e1", "Pump"), _item("e2", "Pi")], [])
+    calls: list[str] = []
+    orig = IndexSet.search_candidates
+
+    def spy(self: IndexSet, q: str):
+        calls.append(q)
+        return orig(self, q)
+
+    monkeypatch.setattr(IndexSet, "search_candidates", spy)
+    res = client.get(f"{API}/model/elements", params={"q": "pu"})
+    assert res.status_code == 200
+    assert res.json()["total"] == 1  # 'Pump' matched by the fallback scan
+    assert calls == ["pu"]  # the route consulted the index exactly once
+
+
+def test_search_with_type_filter_over_candidates(client: TestClient) -> None:
+    """type= filtering still applies on top of index candidates."""
+    _load_model(
+        client,
+        [
+            _item("e1", "Pump"),
+            {"id": "e2", "type_name": "Tag", "properties": {"name": "Pump Tag"}},
+        ],
+        [],
+    )
+    res = client.get(f"{API}/model/elements", params={"q": "pump", "type": "Tag"})
+    body = res.json()
+    assert body["total"] == 1
+    assert body["items"][0]["id"] == "e2"
+
+
 def test_elements_paging_validation(client: TestClient) -> None:
     _load_model(client, [_item("a", "A")], [])
     for params in (
