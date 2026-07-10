@@ -71,10 +71,16 @@ describe('trackOpenProgress', () => {
 	});
 
 	it('gives up after MAX_COLD_POLLS consecutive cold polls instead of hanging forever', async () => {
+		let calls = 0;
 		server.use(
-			http.get(`${BASE}/model/status`, () => HttpResponse.json({ state: 'cold', model_rev: null }))
+			http.get(`${BASE}/model/status`, () => {
+				calls++;
+				return HttpResponse.json({ state: 'cold', model_rev: null });
+			})
 		);
 		await trackOpenProgress(1);
+		// gives up on the poll that EXCEEDS the cap, so exactly cap + 1 requests
+		expect(calls).toBe(MAX_COLD_POLLS + 1);
 		expect(getActiveProgress()).toBeNull();
 	});
 });

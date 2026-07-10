@@ -210,6 +210,11 @@ export function apiUpload<T = unknown>(
 			}
 		});
 		xhr.addEventListener('error', () => reject(new Error(`Upload failed: network error (${url})`)));
+		// Without these the promise would never settle on an aborted or timed-out
+		// XHR (no caller sets xhr.timeout or calls abort() today, but a hung
+		// promise is the failure mode if one ever does).
+		xhr.addEventListener('abort', () => reject(new Error(`Upload aborted (${url})`)));
+		xhr.addEventListener('timeout', () => reject(new Error(`Upload timed out (${url})`)));
 		xhr.send(init.body instanceof ArrayBuffer ? new Blob([init.body]) : init.body);
 	});
 }
