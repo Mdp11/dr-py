@@ -59,6 +59,20 @@ def test_containment_edge_removes_and_restores_root() -> None:
     m.indexes.verify_consistent()
 
 
+def test_self_containment_edge_removes_and_restores_root() -> None:
+    """`a contains a`: the element becomes its own containment parent, so it
+    stops being a root — exactly what rebuild() computes (a cycle issue is
+    validation's job; the index just tracks parents)."""
+    m = _model()
+    a = _named(m, "A")
+    rel = m.connect("Contains", a.id, a.id)
+    assert m.indexes.roots_count() == 0
+    m.indexes.verify_consistent()
+    m.disconnect(rel.id)
+    assert m.indexes.roots_page(0, 10) == [a.id]
+    m.indexes.verify_consistent()
+
+
 def test_second_parent_does_not_double_remove() -> None:
     m = _model()
     p1, p2, child = _named(m, "P1"), _named(m, "P2"), _named(m, "C")

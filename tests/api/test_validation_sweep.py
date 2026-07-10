@@ -8,10 +8,13 @@ from __future__ import annotations
 
 import time
 
+import pytest
+
 from data_rover.core.metamodel.loader import load_metamodel_str
 from data_rover.core.model.model import Model
 from data_rover.core.validation.state import ValidationState
 from data_rover.api.session import Session
+from data_rover.api import validation_sweep
 from data_rover.api.validation_sweep import start_validation_sweep
 
 MM = """
@@ -60,6 +63,21 @@ def test_async_sweep_completes() -> None:
     assert progress.running is False
     assert session.validation is not None
     assert len(session.validation.all_issues()) == _expected_issue_count(50)
+
+
+def test_multi_chunk_sweep_covers_all_entities(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Force several chunks (production CHUNK_SIZE dwarfs test fixtures, so
+    the multi-chunk path — including uniqueness groups spanning chunk
+    boundaries — is otherwise never exercised)."""
+    monkeypatch.setattr(validation_sweep, "CHUNK_SIZE", 7)
+    session = _session(20)  # 7 + 7 + 6: two full chunks plus a partial tail
+    progress = start_validation_sweep(session, sync=True)
+    assert progress.running is False
+    assert (progress.done, progress.total) == (20, 20)
+    assert session.validation is not None
+    assert len(session.validation.all_issues()) == _expected_issue_count(20)
 
 
 def test_sweep_aborts_when_model_replaced() -> None:
