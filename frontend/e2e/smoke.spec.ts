@@ -87,8 +87,10 @@ test('Export button downloads the model as a .json file', async ({ page }) => {
 	const downloads: Download[] = [];
 	page.on('download', (d) => downloads.push(d));
 
-	// Click the TopBar "Export" button — downloads the active model JSON.
-	await page.getByRole('button', { name: 'Export', exact: true }).click();
+	// Click the TopBar "Export" action, now folded into the overflow menu —
+	// downloads the active model JSON.
+	await page.getByRole('button', { name: 'More actions' }).click();
+	await page.getByRole('menuitem', { name: 'Export', exact: true }).click();
 
 	await expect.poll(() => downloads.length, { timeout: 10_000 }).toBe(1);
 

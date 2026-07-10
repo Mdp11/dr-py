@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { resolve } from '$app/paths';
+	import { assets } from '$app/paths';
 	import { goto } from '$app/navigation';
 	import { Button } from '$lib/components/ui/button';
+	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import {
 		getActiveProjectId,
 		getFilename,
@@ -29,7 +31,7 @@
 	import { saveResponseToFile } from '$lib/util/fileSave';
 	import { getView } from '$lib/state';
 	import { runValidation } from '$lib/state/validate-action';
-	import { AlertCircle, AlertTriangle, Info, RefreshCw, Undo2 } from '@lucide/svelte';
+	import { Ellipsis, AlertCircle, AlertTriangle, Info, RefreshCw, Undo2 } from '@lucide/svelte';
 	import ApplyCrDialog from './ApplyCrDialog.svelte';
 	import SwapMetamodelDrawer from './SwapMetamodelDrawer.svelte';
 	import SettingsDialog from './SettingsDialog.svelte';
@@ -101,114 +103,76 @@
 </script>
 
 <header
-	class="sticky top-0 z-20 col-span-5 flex h-10 items-center justify-between border-b border-zinc-800 bg-zinc-950 px-3 text-sm"
+	class="sticky top-0 z-20 col-span-5 flex h-11 items-center justify-between border-b border-border bg-background px-4 text-sm"
 >
 	<div class="flex items-center gap-3">
 		<button
 			type="button"
-			class="font-semibold tracking-tight text-zinc-100 hover:text-white"
+			class="flex items-center focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+			aria-label="Data Rover"
 			onclick={goHome}
 		>
-			Data Rover
+			<img src={`${assets}/dr-mark.png`} alt="" class="h-6 w-auto" />
 		</button>
 
 		<div class="group relative flex items-center">
 			<button
 				type="button"
-				class="flex h-7 w-7 items-center justify-center rounded text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+				class="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
 				aria-label="Loaded files"
 			>
 				<Info class="h-4 w-4" />
 			</button>
 			<div
 				role="tooltip"
-				class="pointer-events-none absolute left-0 top-full z-30 hidden w-max rounded border border-zinc-800 bg-zinc-900 p-2 shadow-lg group-hover:block group-focus-within:block"
+				class="pointer-events-none absolute top-full left-0 z-30 hidden w-max rounded border border-border bg-popover p-2 shadow-lg group-focus-within:block group-hover:block"
 			>
 				<dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
-					<dt class="text-zinc-500">Metamodel</dt>
-					<dd class="font-mono text-zinc-200">
+					<dt class="text-muted-foreground/70">Metamodel</dt>
+					<dd class="font-mono text-foreground/90">
 						{metamodelFilename ?? (metamodel ? 'loaded' : '—')}
 					</dd>
-					<dt class="text-zinc-500">Model</dt>
-					<dd class="font-mono text-zinc-200">{modelFilename ?? (summary ? 'loaded' : '—')}</dd>
-					<dt class="text-zinc-500">View</dt>
-					<dd class="font-mono text-zinc-200">{view ? (viewFilename ?? view.name) : '—'}</dd>
+					<dt class="text-muted-foreground/70">Model</dt>
+					<dd class="font-mono text-foreground/90">
+						{modelFilename ?? (summary ? 'loaded' : '—')}
+					</dd>
+					<dt class="text-muted-foreground/70">View</dt>
+					<dd class="font-mono text-foreground/90">{view ? (viewFilename ?? view.name) : '—'}</dd>
 				</dl>
 			</div>
-		</div>
-
-		<Button
-			variant="ghost"
-			size="sm"
-			class="h-7 gap-1 text-xs"
-			disabled={metamodel === null}
-			onclick={() => (swapOpen = true)}
-		>
-			Swap Metamodel
-		</Button>
-
-		<div class="flex items-center gap-2">
-			<a
-				href={resolve(`/p/${getActiveProjectId()}/compare`)}
-				class="inline-flex h-7 items-center rounded px-2 text-xs text-zinc-300 hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-			>
-				Compare
-			</a>
-			<Button variant="ghost" size="sm" class="h-7 text-xs" onclick={() => (applyCrOpen = true)}>
-				Apply CR
-			</Button>
 		</div>
 	</div>
 
 	<div class="flex items-center gap-2">
-		<Button
-			variant="ghost"
-			size="sm"
-			class="h-7 gap-1 text-xs focus-visible:ring-2 focus-visible:ring-indigo-500"
-			disabled={undoDisabled}
-			onclick={onUndo}
-		>
-			<Undo2 class="h-3 w-3" />
-			Undo
-		</Button>
-		<Button
-			variant="ghost"
-			size="sm"
-			class="h-7 gap-1 text-xs focus-visible:ring-2 focus-visible:ring-indigo-500"
-			disabled={validateDisabled}
-			aria-busy={validating}
-			onclick={() => void runValidation()}
-		>
-			<RefreshCw class="h-3 w-3 {validating ? 'animate-spin' : ''}" />
-			Validate
-		</Button>
 		<span class="contents" aria-live="polite">
 			{#if validating}
-				<span class="rounded bg-zinc-900 px-1.5 py-0.5 font-mono text-[10px] text-zinc-300">
+				<span class="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground/80">
 					Running validation…
 				</span>
 			{:else if lastValidateError !== null}
-				<span class="rounded bg-red-950/60 px-1.5 py-0.5 font-mono text-[10px] text-red-300">
+				<span
+					class="rounded bg-destructive/15 px-1.5 py-0.5 font-mono text-[10px] text-destructive"
+				>
 					Validation failed
 				</span>
 			{:else if lastRunAt !== null}
 				{#if issues.length === 0}
-					<span
-						class="rounded bg-emerald-500/15 px-1.5 py-0.5 font-mono text-[10px] text-emerald-300"
-					>
+					<span class="rounded bg-success/15 px-1.5 py-0.5 font-mono text-[10px] text-success">
 						✓ no issues
 					</span>
 				{:else}
 					<span
-						class="flex items-center gap-1 rounded bg-zinc-900 px-1.5 py-0.5 font-mono text-[10px]"
+						class="flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 font-mono text-[10px]"
 					>
 						{#if errorCount > 0}
-							<AlertCircle class="h-3 w-3 text-red-400" />
-							<span class="text-red-300">{errorCount} {errorCount === 1 ? 'error' : 'errors'}</span>
+							<AlertCircle class="h-3 w-3 text-destructive" />
+							<span class="text-destructive"
+								>{errorCount} {errorCount === 1 ? 'error' : 'errors'}</span
+							>
 						{/if}
 						{#if warningCount > 0}
-							<AlertTriangle class="h-3 w-3 text-amber-400" />
-							<span class="text-amber-300">
+							<AlertTriangle class="h-3 w-3 text-warning" />
+							<span class="text-warning">
 								{warningCount}
 								{warningCount === 1 ? 'warning' : 'warnings'}
 							</span>
@@ -220,62 +184,86 @@
 		<Button
 			variant="ghost"
 			size="sm"
-			class="h-7 text-xs focus-visible:ring-2 focus-visible:ring-indigo-500"
-			disabled={summary === null}
-			onclick={() => void onExport()}
+			class="h-7 gap-1 text-xs"
+			disabled={undoDisabled}
+			onclick={onUndo}
 		>
-			Export
+			<Undo2 class="h-3 w-3" />
+			Undo
 		</Button>
 		<Button
 			variant="ghost"
 			size="sm"
-			class="h-7 text-xs focus-visible:ring-2 focus-visible:ring-indigo-500"
+			class="h-7 gap-1 text-xs"
+			disabled={validateDisabled}
+			aria-busy={validating}
+			onclick={() => void runValidation()}
+		>
+			<RefreshCw class="h-3 w-3 {validating ? 'animate-spin' : ''}" />
+			Validate
+		</Button>
+		<Button
+			variant="outline"
+			size="sm"
+			class="h-7 text-xs"
 			disabled={saveDisabled}
 			onclick={() => setDiffDrawerOpen(true)}
 		>
 			Commit
 		</Button>
-		<Button
-			variant="ghost"
-			size="sm"
-			class="h-7 text-xs focus-visible:ring-2 focus-visible:ring-indigo-500"
-			onclick={() => setHistoryDrawerOpen(true)}
-		>
-			History
-		</Button>
 		{#if strictOn}
 			<span
-				class="rounded bg-amber-500/15 px-1.5 py-0.5 font-mono text-[10px] text-amber-300"
+				class="rounded bg-warning/15 px-1.5 py-0.5 font-mono text-[10px] text-warning"
 				title="Strict mode on: commits with validation errors are blocked."
 			>
 				Strict
 			</span>
 		{/if}
-		<Button
-			variant="ghost"
-			size="sm"
-			class="h-7 text-xs focus-visible:ring-2 focus-visible:ring-indigo-500"
-			onclick={() => (settingsOpen = true)}
-		>
-			Settings
-		</Button>
 		<div class="group relative flex items-center">
-			<span class="font-mono text-xs {combinedChanges > 0 ? 'text-red-400' : 'text-zinc-500'}">
+			<span
+				class="font-mono text-xs {combinedChanges > 0
+					? 'text-destructive'
+					: 'text-muted-foreground/70'}"
+			>
 				● {combinedChanges}
 				{combinedChanges === 1 ? 'change' : 'changes'}
 			</span>
 			<div
 				role="tooltip"
-				class="absolute right-0 top-full z-30 hidden w-max rounded border border-zinc-800 bg-zinc-900 p-2 shadow-lg group-hover:block group-focus-within:block"
+				class="absolute top-full right-0 z-30 hidden w-max rounded border border-border bg-popover p-2 shadow-lg group-focus-within:block group-hover:block"
 			>
 				<dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
-					<dt class="text-zinc-500">Uncommitted (model)</dt>
-					<dd class="text-right font-mono text-zinc-200">{totalChanges}</dd>
-					<dt class="text-zinc-500">Unsaved (view)</dt>
-					<dd class="text-right font-mono text-zinc-200">{viewChanges}</dd>
+					<dt class="text-muted-foreground/70">Uncommitted (model)</dt>
+					<dd class="text-right font-mono text-foreground/90">{totalChanges}</dd>
+					<dt class="text-muted-foreground/70">Unsaved (view)</dt>
+					<dd class="text-right font-mono text-foreground/90">{viewChanges}</dd>
 				</dl>
 			</div>
 		</div>
+		<DropdownMenu.Root>
+			<DropdownMenu.Trigger
+				class="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+				aria-label="More actions"
+			>
+				<Ellipsis class="h-4 w-4" />
+			</DropdownMenu.Trigger>
+			<DropdownMenu.Content align="end" class="w-48">
+				<DropdownMenu.Item onclick={() => void goto(resolve(`/p/${getActiveProjectId()}/compare`))}>
+					Compare
+				</DropdownMenu.Item>
+				<DropdownMenu.Item onclick={() => (applyCrOpen = true)}>Apply CR</DropdownMenu.Item>
+				<DropdownMenu.Item disabled={metamodel === null} onclick={() => (swapOpen = true)}>
+					Swap Metamodel
+				</DropdownMenu.Item>
+				<DropdownMenu.Separator />
+				<DropdownMenu.Item disabled={summary === null} onclick={() => void onExport()}>
+					Export
+				</DropdownMenu.Item>
+				<DropdownMenu.Item onclick={() => setHistoryDrawerOpen(true)}>History</DropdownMenu.Item>
+				<DropdownMenu.Separator />
+				<DropdownMenu.Item onclick={() => (settingsOpen = true)}>Settings</DropdownMenu.Item>
+			</DropdownMenu.Content>
+		</DropdownMenu.Root>
 	</div>
 </header>
 

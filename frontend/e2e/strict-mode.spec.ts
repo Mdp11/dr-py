@@ -56,8 +56,9 @@ test('Strict mode: commit is blocked when on, enabled when off', async ({ page }
 	await expect(uncommittedBadge).toBeVisible({ timeout: 15_000 });
 	await expect(uncommittedBadge).toContainText('0 uncommitted');
 
-	// 2. Open Settings and enable strict mode.
-	await page.getByRole('button', { name: 'Settings', exact: true }).click();
+	// 2. Open Settings (now in the overflow menu) and enable strict mode.
+	await page.getByRole('button', { name: 'More actions' }).click();
+	await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
 	const settingsDialog = page.getByRole('dialog', { name: /settings/i });
 	await expect(settingsDialog).toBeVisible({ timeout: 10_000 });
 
@@ -106,7 +107,8 @@ test('Strict mode: commit is blocked when on, enabled when off', async ({ page }
 	await page.keyboard.press('Escape');
 	await expect(diffDrawer).toBeHidden({ timeout: 10_000 });
 
-	await page.getByRole('button', { name: 'Settings', exact: true }).click();
+	await page.getByRole('button', { name: 'More actions' }).click();
+	await page.getByRole('menuitem', { name: 'Settings', exact: true }).click();
 	await expect(settingsDialog).toBeVisible({ timeout: 10_000 });
 	await expect(settingsDialog.getByText('Loading')).toBeHidden({ timeout: 10_000 });
 

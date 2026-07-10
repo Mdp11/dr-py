@@ -73,7 +73,8 @@ describe('TopBar', () => {
 		const c = mount(TopBar, { target: document.body });
 		flushSync();
 
-		findButton(/data rover/i)!.click();
+		const homeButton = document.querySelector<HTMLButtonElement>('[aria-label="Data Rover"]');
+		homeButton!.click();
 
 		expect(goto).toHaveBeenCalledWith('/projects');
 

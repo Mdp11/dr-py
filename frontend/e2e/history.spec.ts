@@ -99,8 +99,9 @@ test('History: list, diff, and revert a commit', async ({ page }) => {
 	await commitStaged();
 	// commit B is now at model_rev N
 
-	// 4. Open the History drawer via the TopBar "History" button.
-	await page.getByRole('button', { name: 'History', exact: true }).click();
+	// 4. Open the History drawer via the TopBar overflow menu's "History" item.
+	await page.getByRole('button', { name: 'More actions' }).click();
+	await page.getByRole('menuitem', { name: 'History', exact: true }).click();
 
 	const historyDrawer = page.getByRole('dialog', { name: /commit history/i });
 	await expect(historyDrawer).toBeVisible({ timeout: 10_000 });
