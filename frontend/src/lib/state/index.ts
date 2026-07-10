@@ -249,3 +249,12 @@ export {
 	type ViewChangeSegment,
 	type ViewChangeSegmentKind
 } from './view-change-format';
+export {
+	startProgress,
+	updateProgress,
+	setProgressLabel,
+	endProgress,
+	getActiveProgress,
+	resetProgress,
+	type ProgressEntry
+} from './progress.svelte';
