@@ -72,8 +72,10 @@
 				</span>
 			{/snippet}
 		</StereotypePicker>
-		<button type="button" class="text-xs text-info/90 hover:text-info" onclick={addCriterion}
-			>+ condition</button
+		<button
+			type="button"
+			class="text-xs text-info/90 transition-colors hover:text-info"
+			onclick={addCriterion}>+ condition</button
 		>
 	</div>
 	{#each scope.criteria as criterion, i (i)}

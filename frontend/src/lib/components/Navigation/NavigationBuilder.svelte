@@ -65,7 +65,7 @@
 				<div class="flex items-center gap-2">
 					<button
 						type="button"
-						class="rounded bg-primary px-2 py-1 text-xs text-primary-foreground hover:bg-primary/80 disabled:opacity-40"
+						class="rounded bg-primary px-2 py-1 text-xs text-primary-foreground transition-colors hover:bg-primary/80 disabled:opacity-40"
 						disabled={!draft.dirty && draft.artifactId !== null}
 						onclick={() => void save()}
 					>
@@ -73,7 +73,7 @@
 					</button>
 					<button
 						type="button"
-						class="rounded border border-input px-2 py-1 text-xs text-foreground/80 hover:bg-muted"
+						class="rounded border border-input px-2 py-1 text-xs text-foreground/80 transition-colors hover:bg-muted"
 						onclick={() => void saveAs()}
 					>
 						Save as…

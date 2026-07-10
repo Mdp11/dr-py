@@ -3,6 +3,8 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { onDestroy, onMount } from 'svelte';
+	import { slide } from 'svelte/transition';
+	import { dur, PANEL } from '$lib/util/motion';
 	import TopBar from '$lib/components/TopBar.svelte';
 	import StatusBar from '$lib/components/StatusBar.svelte';
 	import Sidebar from '$lib/components/Sidebar.svelte';
@@ -287,6 +289,7 @@
 		<div
 			class="col-span-5 flex items-center gap-3 border-b border-destructive/40 bg-destructive/15 px-3 py-1.5 text-xs text-destructive"
 			role="alert"
+			transition:slide={{ duration: dur(PANEL) }}
 		>
 			<span class="font-semibold uppercase tracking-wide">
 				{modelError.kind === 'conflict' ? 'Model out of sync' : 'Edit rejected'}
@@ -296,7 +299,7 @@
 				{#if modelError.kind === 'conflict'}
 					<button
 						type="button"
-						class="rounded border border-destructive/40 bg-destructive/15 px-2 py-0.5 hover:bg-destructive/25"
+						class="rounded border border-destructive/40 bg-destructive/15 px-2 py-0.5 transition-colors hover:bg-destructive/25"
 						disabled={reloading}
 						onclick={() => void onReloadModel()}
 					>
@@ -305,7 +308,7 @@
 				{:else}
 					<button
 						type="button"
-						class="rounded border border-destructive/40 bg-destructive/15 px-2 py-0.5 hover:bg-destructive/25"
+						class="rounded border border-destructive/40 bg-destructive/15 px-2 py-0.5 transition-colors hover:bg-destructive/25"
 						onclick={() => clearModelError()}
 					>
 						Dismiss
@@ -318,6 +321,7 @@
 		<div
 			class="col-span-5 flex items-center justify-between gap-3 bg-warning/15 px-3 py-1.5 text-xs text-warning"
 			role="alert"
+			transition:slide={{ duration: dur(PANEL) }}
 		>
 			<span>
 				The metamodel was changed to rev {pendingRebind.rev} ({pendingRebind.count} conformance issues).
@@ -332,13 +336,14 @@
 		<div
 			class="col-span-5 flex items-center gap-3 border-b border-destructive/40 bg-destructive/15 px-3 py-1.5 text-xs text-destructive"
 			role="alert"
+			transition:slide={{ duration: dur(PANEL) }}
 		>
 			<span class="font-semibold uppercase tracking-wide">Disconnected</span>
 			<span class="truncate">{feedTerminationView.message}</span>
 			<div class="ml-auto flex items-center gap-2">
 				<button
 					type="button"
-					class="rounded border border-destructive/40 bg-destructive/15 px-2 py-0.5 hover:bg-destructive/25"
+					class="rounded border border-destructive/40 bg-destructive/15 px-2 py-0.5 transition-colors hover:bg-destructive/25"
 					onclick={feedTerminationView.action}
 				>
 					{feedTerminationView.label}

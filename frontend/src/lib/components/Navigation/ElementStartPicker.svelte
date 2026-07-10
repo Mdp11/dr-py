@@ -95,7 +95,7 @@
 			<span class="shrink-0 font-mono text-[10px] text-muted-foreground/50">{value}</span>
 			<button
 				type="button"
-				class="ml-auto shrink-0 text-info/90 hover:text-info"
+				class="ml-auto shrink-0 text-info/90 transition-colors hover:text-info"
 				onclick={changeElement}>change</button
 			>
 		</div>
@@ -118,7 +118,7 @@
 						<li>
 							<button
 								type="button"
-								class="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left hover:bg-muted"
+								class="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left transition-colors hover:bg-muted"
 								onclick={() => pick(el)}
 							>
 								<span class="truncate text-foreground/90">{elementDisplayName(el)}</span>

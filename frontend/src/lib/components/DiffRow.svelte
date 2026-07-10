@@ -78,7 +78,7 @@
 		{#if onDiscard}
 			<button
 				type="button"
-				class="rounded border border-input px-1.5 py-0.5 text-[10px] text-muted-foreground hover:border-ring hover:text-foreground"
+				class="rounded border border-input px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:border-ring hover:text-foreground"
 				onclick={() => onDiscard?.(diff.id)}
 			>
 				Discard

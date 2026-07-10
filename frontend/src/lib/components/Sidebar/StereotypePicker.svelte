@@ -66,14 +66,14 @@
 				<div class="flex items-center justify-between gap-2 border-b border-border px-2 py-1.5">
 					<button
 						type="button"
-						class="rounded px-2 py-0.5 text-xs text-foreground/80 hover:bg-muted"
+						class="rounded px-2 py-0.5 text-xs text-foreground/80 transition-colors hover:bg-muted"
 						onclick={() => props.onSelectAll()}
 					>
 						Select all
 					</button>
 					<button
 						type="button"
-						class="rounded px-2 py-0.5 text-xs text-foreground/80 hover:bg-muted"
+						class="rounded px-2 py-0.5 text-xs text-foreground/80 transition-colors hover:bg-muted"
 						onclick={() => props.onDeselectAll()}
 					>
 						Deselect all
@@ -97,7 +97,9 @@
 					{#each filtered as name (name)}
 						{#if props.mode === 'filter'}
 							<li>
-								<label class="flex cursor-pointer items-center gap-2 px-3 py-1 hover:bg-muted">
+								<label
+									class="flex cursor-pointer items-center gap-2 px-3 py-1 transition-colors hover:bg-muted"
+								>
 									<input
 										type="checkbox"
 										class="h-3 w-3 shrink-0 accent-primary"
@@ -111,7 +113,7 @@
 							<li>
 								<button
 									type="button"
-									class="flex w-full items-center gap-2 px-3 py-1 text-left hover:bg-muted"
+									class="flex w-full items-center gap-2 px-3 py-1 text-left transition-colors hover:bg-muted"
 									onclick={() => handlePick(name)}
 								>
 									<span class="truncate">{name}</span>

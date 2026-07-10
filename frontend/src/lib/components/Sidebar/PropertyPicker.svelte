@@ -69,7 +69,7 @@
 						<li>
 							<button
 								type="button"
-								class="flex w-full items-center gap-2 px-3 py-1 text-left hover:bg-muted"
+								class="flex w-full items-center gap-2 px-3 py-1 text-left transition-colors hover:bg-muted"
 								onclick={() => pick(it)}
 							>
 								<span class="truncate text-foreground/90">{it.name}</span>

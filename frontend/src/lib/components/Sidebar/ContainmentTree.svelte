@@ -1150,7 +1150,7 @@
 				>
 					{#snippet trigger()}
 						<span
-							class="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+							class="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 							aria-label="Filter stereotypes"
 							title="Filter stereotypes"
 						>
@@ -1161,7 +1161,7 @@
 				{#if view !== null}
 					<button
 						type="button"
-						class="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+						class="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 						aria-label="New top-level folder"
 						title="New top-level folder"
 						onclick={onNewRootFolder}
@@ -1180,7 +1180,7 @@
 				>
 					{#snippet trigger()}
 						<span
-							class="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+							class="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 							aria-label="New element"
 							title="New element"
 						>
@@ -1270,7 +1270,7 @@
 	{#snippet poolHeader()}
 		<button
 			type="button"
-			class="microlabel flex h-full w-full select-none items-center gap-1 border-t border-border px-3 hover:bg-card hover:text-foreground/80"
+			class="microlabel flex h-full w-full select-none items-center gap-1 border-t border-border px-3 transition-colors hover:bg-card hover:text-foreground/80"
 			class:bg-muted={dragHoverKey === EXCLUDED_SECTION_KEY}
 			class:ring-1={dragHoverKey === EXCLUDED_SECTION_KEY}
 			class:ring-success={dragHoverKey === EXCLUDED_SECTION_KEY && dragHoverValid}

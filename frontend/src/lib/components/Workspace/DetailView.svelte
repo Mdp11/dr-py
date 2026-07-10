@@ -147,7 +147,7 @@
 			<div class="flex items-center gap-2 text-xs text-foreground/80">
 				<button
 					type="button"
-					class="rounded bg-card px-1.5 py-0.5 font-mono text-[11px] text-foreground/90 hover:bg-muted"
+					class="rounded bg-card px-1.5 py-0.5 font-mono text-[11px] text-foreground/90 transition-colors hover:bg-muted"
 					onclick={() => gotoElement(rel.source_id)}
 					title={rel.source_id}
 				>
@@ -156,7 +156,7 @@
 				<span class="text-muted-foreground/70">→</span>
 				<button
 					type="button"
-					class="rounded bg-card px-1.5 py-0.5 font-mono text-[11px] text-foreground/90 hover:bg-muted"
+					class="rounded bg-card px-1.5 py-0.5 font-mono text-[11px] text-foreground/90 transition-colors hover:bg-muted"
 					onclick={() => gotoElement(rel.target_id)}
 					title={rel.target_id}
 				>

@@ -129,7 +129,7 @@
 							<li>
 								<button
 									type="button"
-									class="block w-full px-2 py-1 text-left text-sm text-foreground hover:bg-muted"
+									class="block w-full px-2 py-1 text-left text-sm text-foreground transition-colors hover:bg-muted"
 									onclick={() => pickUser(u)}
 								>
 									{u.email}

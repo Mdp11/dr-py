@@ -101,7 +101,7 @@
 		</span>
 		<button
 			type="button"
-			class="ml-auto flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-destructive"
+			class="ml-auto flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-destructive"
 			aria-label="Remove criterion"
 			onclick={() => onRemove(index)}
 		>
@@ -125,7 +125,9 @@
 				searchPlaceholder="Filter types…"
 			>
 				{#snippet trigger()}
-					<span class="rounded border border-input px-2 py-1 text-foreground/90 hover:bg-muted">
+					<span
+						class="rounded border border-input px-2 py-1 text-foreground/90 transition-colors hover:bg-muted"
+					>
 						Type: {summary(entityCriterion.names)}
 					</span>
 				{/snippet}
@@ -145,7 +147,7 @@
 			>
 				{#snippet trigger()}
 					<span
-						class="flex max-w-[18rem] items-center gap-1 rounded border border-input px-2 py-1 text-foreground/90 hover:bg-muted"
+						class="flex max-w-[18rem] items-center gap-1 rounded border border-input px-2 py-1 text-foreground/90 transition-colors hover:bg-muted"
 					>
 						<span class="truncate" title={propCriterion.name || undefined}>
 							{propCriterion.name || 'property…'}
@@ -260,7 +262,9 @@
 				searchPlaceholder="Filter rel types…"
 			>
 				{#snippet trigger()}
-					<span class="rounded border border-input px-2 py-1 text-foreground/90 hover:bg-muted">
+					<span
+						class="rounded border border-input px-2 py-1 text-foreground/90 transition-colors hover:bg-muted"
+					>
 						of type: {summary(relCountCriterion.relTypes)}
 					</span>
 				{/snippet}
@@ -293,7 +297,9 @@
 				searchPlaceholder="Filter types…"
 			>
 				{#snippet trigger()}
-					<span class="rounded border border-input px-2 py-1 text-foreground/90 hover:bg-muted">
+					<span
+						class="rounded border border-input px-2 py-1 text-foreground/90 transition-colors hover:bg-muted"
+					>
 						{summary(connCriterion.names)}
 					</span>
 				{/snippet}
@@ -321,7 +327,9 @@
 				searchPlaceholder="Filter types…"
 			>
 				{#snippet trigger()}
-					<span class="rounded border border-input px-2 py-1 text-foreground/90 hover:bg-muted">
+					<span
+						class="rounded border border-input px-2 py-1 text-foreground/90 transition-colors hover:bg-muted"
+					>
 						{summary(endpointCriterion.names)}
 					</span>
 				{/snippet}

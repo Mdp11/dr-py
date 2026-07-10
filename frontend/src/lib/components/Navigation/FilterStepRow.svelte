@@ -41,7 +41,7 @@
 				type="button"
 				aria-label="Remove step"
 				title="Remove filter"
-				class="ml-auto text-muted-foreground/70 hover:text-destructive"
+				class="ml-auto text-muted-foreground/70 transition-colors hover:text-destructive"
 				onclick={() => onRemove(index)}
 			>
 				✕
@@ -58,8 +58,10 @@
 					onRemove={removeCriterion}
 				/>
 			{/each}
-			<button type="button" class="text-xs text-info/90 hover:text-info" onclick={addCriterion}
-				>+ condition</button
+			<button
+				type="button"
+				class="text-xs text-info/90 transition-colors hover:text-info"
+				onclick={addCriterion}>+ condition</button
 			>
 		</div>
 	</div>

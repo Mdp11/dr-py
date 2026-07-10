@@ -19,12 +19,12 @@
 		<div class="ml-auto flex overflow-hidden rounded border border-input">
 			<button
 				type="button"
-				class={`px-3 py-1 ${mode === 'split' ? 'bg-primary text-primary-foreground' : 'text-foreground/80 hover:bg-muted'}`}
+				class={`px-3 py-1 transition-colors ${mode === 'split' ? 'bg-primary text-primary-foreground' : 'text-foreground/80 hover:bg-muted'}`}
 				onclick={() => (mode = 'split')}>Split</button
 			>
 			<button
 				type="button"
-				class={`px-3 py-1 ${mode === 'unified' ? 'bg-primary text-primary-foreground' : 'text-foreground/80 hover:bg-muted'}`}
+				class={`px-3 py-1 transition-colors ${mode === 'unified' ? 'bg-primary text-primary-foreground' : 'text-foreground/80 hover:bg-muted'}`}
 				onclick={() => (mode = 'unified')}>Unified</button
 			>
 		</div>

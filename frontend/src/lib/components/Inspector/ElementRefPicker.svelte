@@ -78,7 +78,7 @@
 			</span>
 			<button
 				type="button"
-				class="text-muted-foreground hover:text-foreground"
+				class="text-muted-foreground transition-colors hover:text-foreground"
 				onclick={clear}
 				aria-label="Clear reference"
 			>
@@ -90,7 +90,7 @@
 	{/if}
 	<button
 		type="button"
-		class="rounded border border-input bg-card px-1.5 py-0.5 text-[11px] text-foreground/80 hover:bg-muted"
+		class="rounded border border-input bg-card px-1.5 py-0.5 text-[11px] text-foreground/80 transition-colors hover:bg-muted"
 		onclick={() => (open = !open)}
 	>
 		Browse...
@@ -107,7 +107,7 @@
 						<li>
 							<button
 								type="button"
-								class="flex w-full items-center justify-between gap-2 px-2 py-1 text-left hover:bg-muted"
+								class="flex w-full items-center justify-between gap-2 px-2 py-1 text-left transition-colors hover:bg-muted"
 								onclick={() => pick(el.id)}
 							>
 								<span class="truncate">{displayName(el)}</span>

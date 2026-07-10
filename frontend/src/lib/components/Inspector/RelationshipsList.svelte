@@ -142,7 +142,7 @@
 	<div class="flex flex-col">
 		<button
 			type="button"
-			class="flex items-center gap-1 py-0.5 text-left text-[11px] font-medium text-foreground/80 hover:text-foreground"
+			class="flex items-center gap-1 py-0.5 text-left text-[11px] font-medium text-foreground/80 transition-colors hover:text-foreground"
 			onclick={() => toggleGroup(direction, group.type_name)}
 		>
 			<span class="font-mono text-[10px] text-muted-foreground/70">{open ? '▾' : '▸'}</span>
@@ -154,13 +154,15 @@
 				{#each group.items as rel (rel.id)}
 					{@const otherId = direction === 'out' ? rel.target_id : rel.source_id}
 					{@const other = findElement(otherId)}
-					<li class="group/row flex items-center gap-1 py-0.5 pl-3 pr-1 hover:bg-muted">
+					<li
+						class="group/row flex items-center gap-1 py-0.5 pl-3 pr-1 transition-colors hover:bg-muted"
+					>
 						<span class="shrink-0 rounded bg-muted px-1 font-mono text-[10px] text-muted-foreground"
 							>{roleLabel}</span
 						>
 						<button
 							type="button"
-							class="flex flex-1 items-center gap-1 truncate rounded text-left text-[11px] text-foreground/90 hover:text-info focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+							class="flex flex-1 items-center gap-1 truncate rounded text-left text-[11px] text-foreground/90 transition-colors hover:text-info focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 							onclick={() => navigateTo(otherId)}
 							title={otherId}
 						>
@@ -180,7 +182,7 @@
 						</button>
 						<button
 							type="button"
-							class="rounded p-0.5 text-muted-foreground opacity-0 hover:text-foreground group-hover/row:opacity-100"
+							class="rounded p-0.5 text-muted-foreground opacity-0 transition-colors hover:text-foreground group-hover/row:opacity-100"
 							onclick={() => editRelationship(rel.id)}
 							aria-label="Edit relationship"
 							title="Edit relationship properties"
@@ -189,7 +191,7 @@
 						</button>
 						<button
 							type="button"
-							class="rounded p-0.5 text-muted-foreground opacity-0 hover:text-destructive group-hover/row:opacity-100"
+							class="rounded p-0.5 text-muted-foreground opacity-0 transition-colors hover:text-destructive group-hover/row:opacity-100"
 							onclick={() => void disconnect(rel.id, rel.source_id)}
 							aria-label="Disconnect relationship"
 							title="Disconnect"
@@ -212,7 +214,7 @@
 	<div class="flex flex-col">
 		<button
 			type="button"
-			class="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground"
+			class="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
 			onclick={() => (outgoingOpen = !outgoingOpen)}
 		>
 			<span class="font-mono">{outgoingOpen ? '▾' : '▸'}</span>
@@ -235,7 +237,7 @@
 	<div class="flex flex-col">
 		<button
 			type="button"
-			class="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground"
+			class="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
 			onclick={() => (incomingOpen = !incomingOpen)}
 		>
 			<span class="font-mono">{incomingOpen ? '▾' : '▸'}</span>

@@ -160,7 +160,7 @@
 		{#if mode === 'diff'}
 			<div class="space-y-2">
 				<button
-					class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+					class="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
 					onclick={backToList}
 				>
 					<ArrowLeft class="h-3 w-3" /> Back
@@ -211,13 +211,14 @@
 								{c.author_id ?? 'unknown'} · {fmtTs(c.ts)} · {c.op_count}
 								{c.op_count === 1 ? 'op' : 'ops'}
 								<button
-									class="rounded px-1 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
+									class="rounded px-1 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 									onclick={() => diffCommit(c.rev)}
 								>
 									Diff
 								</button>
 								<button
-									class="rounded px-1 py-0.5 text-[10px] hover:bg-muted {compareFrom === c.rev
+									class="rounded px-1 py-0.5 text-[10px] transition-colors hover:bg-muted {compareFrom ===
+									c.rev
 										? 'text-primary'
 										: 'text-muted-foreground hover:text-foreground'}"
 									onclick={() => pickCompare(c.rev)}
@@ -230,7 +231,7 @@
 								</button>
 								{#if canWrite}
 									<button
-										class="rounded px-1 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
+										class="rounded px-1 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 										onclick={() => askRevert(c.rev)}
 									>
 										Revert to here

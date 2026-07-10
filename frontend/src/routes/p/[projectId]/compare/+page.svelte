@@ -73,7 +73,7 @@
 	<div class="flex items-center gap-2">
 		<a
 			href={resolve(`/p/${getActiveProjectId()}`)}
-			class="text-sm text-muted-foreground hover:text-foreground">← Back</a
+			class="text-sm text-muted-foreground transition-colors hover:text-foreground">← Back</a
 		>
 		<h1 class="font-display text-lg font-light tracking-wide">Compare models</h1>
 	</div>

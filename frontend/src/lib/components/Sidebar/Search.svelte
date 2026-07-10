@@ -138,7 +138,7 @@
 			type="button"
 			data-testid="advanced-search-button"
 			aria-label="Advanced search"
-			class="flex h-7 w-7 shrink-0 items-center justify-center rounded border border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground"
+			class="flex h-7 w-7 shrink-0 items-center justify-center rounded border border-border bg-card text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 			onclick={() => setSearchDialogOpen(true)}
 		>
 			<SlidersHorizontal class="h-3.5 w-3.5" />
@@ -159,7 +159,7 @@
 						<li>
 							<button
 								type="button"
-								class="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+								class="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 								style="touch-action: none"
 								onpointerdown={(e) => onResultPointerDown(e, el.id)}
 								onclick={() => onPick(el.id)}

@@ -193,7 +193,7 @@
 	{#if editable}
 		<div class="flex items-center gap-3 border-t border-primary/20 pt-2">
 			<DropdownMenu.Root>
-				<DropdownMenu.Trigger class="text-info/90 hover:text-info">
+				<DropdownMenu.Trigger class="text-info/90 transition-colors hover:text-info">
 					+ Add another part ▾
 				</DropdownMenu.Trigger>
 				<DropdownMenu.Content align="start" class="w-72">

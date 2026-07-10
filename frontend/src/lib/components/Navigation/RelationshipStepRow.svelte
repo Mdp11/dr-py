@@ -143,7 +143,7 @@
 		<button
 			type="button"
 			aria-label="Remove step"
-			class="ml-auto text-muted-foreground/70 hover:text-destructive"
+			class="ml-auto text-muted-foreground/70 transition-colors hover:text-destructive"
 			onclick={() => onRemove(index)}
 		>
 			<Trash2 class="size-3.5" />

@@ -59,7 +59,7 @@
 		</button>
 		<div class="ml-3 flex items-center gap-2">
 			<button
-				class="text-xs text-muted-foreground hover:text-foreground"
+				class="text-xs text-muted-foreground transition-colors hover:text-foreground"
 				onclick={onClone}
 				disabled={busy}
 			>
@@ -67,7 +67,7 @@
 			</button>
 			{#if isAdmin()}
 				<button
-					class="text-xs text-destructive hover:text-destructive/80"
+					class="text-xs text-destructive transition-colors hover:text-destructive/80"
 					onclick={onDelete}
 					disabled={busy}
 				>

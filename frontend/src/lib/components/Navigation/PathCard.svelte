@@ -295,14 +295,14 @@
 		<div class="flex items-center gap-2 pl-7">
 			<button
 				type="button"
-				class="rounded border border-dashed border-input px-2 py-1 text-info/90 hover:border-ring hover:text-info"
+				class="rounded border border-dashed border-input px-2 py-1 text-info/90 transition-colors hover:border-ring hover:text-info"
 				onclick={addRelationshipStep}
 			>
 				+ Follow a relationship
 			</button>
 			<button
 				type="button"
-				class="rounded border border-dashed border-input px-2 py-1 text-info/90 hover:border-ring hover:text-info"
+				class="rounded border border-dashed border-input px-2 py-1 text-info/90 transition-colors hover:border-ring hover:text-info"
 				onclick={addFilterStep}
 			>
 				+ Keep only…
@@ -313,7 +313,7 @@
 	{#if editable}
 		<div class="flex items-center gap-3 border-t border-border pt-2">
 			<DropdownMenu.Root>
-				<DropdownMenu.Trigger class="text-info/90 hover:text-info">
+				<DropdownMenu.Trigger class="text-info/90 transition-colors hover:text-info">
 					Combine with… ▾
 				</DropdownMenu.Trigger>
 				<DropdownMenu.Content align="start" class="w-72">
@@ -375,7 +375,8 @@
 	{/if}
 
 	<details>
-		<summary class="cursor-pointer text-muted-foreground/70 select-none hover:text-muted-foreground"
+		<summary
+			class="cursor-pointer text-muted-foreground/70 select-none transition-colors hover:text-muted-foreground"
 			>Options</summary
 		>
 		<label

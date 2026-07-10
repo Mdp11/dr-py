@@ -338,7 +338,7 @@
 						</div>
 						<button
 							type="button"
-							class="text-muted-foreground hover:text-destructive"
+							class="text-muted-foreground transition-colors hover:text-destructive"
 							onclick={() => removeAt(i)}
 							aria-label="Remove"
 						>
@@ -349,7 +349,7 @@
 			</ul>
 			<button
 				type="button"
-				class="mt-1 inline-flex w-fit items-center gap-1 rounded border border-border bg-card px-2 py-0.5 text-[11px] text-foreground/80 hover:bg-muted"
+				class="mt-1 inline-flex w-fit items-center gap-1 rounded border border-border bg-card px-2 py-0.5 text-[11px] text-foreground/80 transition-colors hover:bg-muted"
 				onclick={addOne}
 			>
 				<Plus class="h-3 w-3" /> Add

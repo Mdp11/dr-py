@@ -199,7 +199,7 @@
 		{#if hasChildren}
 			<button
 				type="button"
-				class="flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground/70 hover:text-foreground"
+				class="flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground/70 transition-colors hover:text-foreground"
 				onclick={() => onToggle(key)}
 				aria-label={isCollapsed ? 'Expand' : 'Collapse'}
 			>
@@ -248,7 +248,7 @@
 		{#if hasChildren}
 			<button
 				type="button"
-				class="flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground/70 hover:text-foreground"
+				class="flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground/70 transition-colors hover:text-foreground"
 				onclick={() => onToggle(key)}
 				aria-label={isCollapsed ? 'Expand' : 'Collapse'}
 			>
@@ -278,7 +278,7 @@
 		{/if}
 		<DropdownMenu.Root>
 			<DropdownMenu.Trigger
-				class="flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground/50 opacity-0 group-hover:opacity-100 hover:text-foreground"
+				class="flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground/50 opacity-0 transition-colors group-hover:opacity-100 hover:text-foreground"
 				aria-label="Folder actions"
 			>
 				<MoreHorizontal class="h-3 w-3" />
@@ -316,7 +316,7 @@
 			</span>
 			<button
 				type="button"
-				class="hidden h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground/50 opacity-0 hover:text-destructive group-hover:flex group-hover:opacity-100"
+				class="hidden h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground/50 opacity-0 transition-colors hover:text-destructive group-hover:flex group-hover:opacity-100"
 				aria-label="Remove from folder"
 				title="Remove from folder"
 				onclick={onRemoveArtifact}
@@ -351,7 +351,7 @@
 			</span>
 			<button
 				type="button"
-				class="hidden h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground/50 opacity-0 hover:text-destructive group-hover:flex group-hover:opacity-100"
+				class="hidden h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground/50 opacity-0 transition-colors hover:text-destructive group-hover:flex group-hover:opacity-100"
 				aria-label="Remove from folder"
 				title="Remove from folder"
 				onclick={onRemoveArtifact}
@@ -381,7 +381,7 @@
 		{#if hasChildren}
 			<button
 				type="button"
-				class="flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground/70 hover:text-foreground"
+				class="flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground/70 transition-colors hover:text-foreground"
 				onclick={() => onToggle(key)}
 				aria-label={isCollapsed ? 'Expand' : 'Collapse'}
 			>
@@ -398,7 +398,7 @@
 		{/if}
 		<button
 			type="button"
-			class="flex flex-1 items-center gap-2 rounded text-left text-foreground/90 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+			class="flex flex-1 items-center gap-2 rounded text-left text-foreground/90 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 			class:font-medium={isSelected}
 			class:text-foreground={isSelected}
 			onclick={(e) => onPick(key, e)}
@@ -424,7 +424,7 @@
 		{#if isMovable && (folderOptions.length > 0 || placedInFolder)}
 			<DropdownMenu.Root>
 				<DropdownMenu.Trigger
-					class="flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground/50 opacity-0 group-hover:opacity-100 hover:text-foreground"
+					class="flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground/50 opacity-0 transition-colors group-hover:opacity-100 hover:text-foreground"
 					aria-label="Element actions"
 				>
 					<MoreHorizontal class="h-3 w-3" />

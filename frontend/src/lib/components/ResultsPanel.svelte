@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { X } from '@lucide/svelte';
+	import { slide } from 'svelte/transition';
 	import type { Element, Relationship } from '$lib/api/types';
 	import {
 		closeResultsPanel,
@@ -11,6 +12,7 @@
 		select
 	} from '$lib/state';
 	import { elementDisplayName as elementName } from '$lib/util/element-name';
+	import { dur, PANEL } from '$lib/util/motion';
 
 	const results = $derived(getSearchResults());
 	const target = $derived(getSearchResultsTarget());
@@ -51,6 +53,7 @@
 <section
 	data-testid="results-panel"
 	class="col-span-5 flex h-full flex-col overflow-hidden border-t border-border bg-background"
+	transition:slide={{ duration: dur(PANEL) }}
 >
 	<header class="flex shrink-0 items-center gap-2 border-b border-border px-3 py-1.5">
 		<h2 class="microlabel">
@@ -66,7 +69,7 @@
 		<button
 			type="button"
 			aria-label="Close results"
-			class="ml-auto flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+			class="ml-auto flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 			onclick={() => closeResultsPanel()}
 		>
 			<X class="h-3.5 w-3.5" />
@@ -85,7 +88,7 @@
 					<li>
 						<button
 							type="button"
-							class="flex w-full items-center gap-2 rounded px-2 py-1 text-left hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+							class="flex w-full items-center gap-2 rounded px-2 py-1 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 							onclick={() => onPick(row)}
 						>
 							{#if row.kind === 'element'}

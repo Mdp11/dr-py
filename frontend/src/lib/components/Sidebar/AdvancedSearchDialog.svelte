@@ -119,7 +119,7 @@
 			<div class="inline-flex overflow-hidden rounded border border-input">
 				<button
 					type="button"
-					class="px-3 py-1 text-xs {target === 'element'
+					class="px-3 py-1 text-xs transition-colors {target === 'element'
 						? 'bg-primary text-primary-foreground'
 						: 'bg-card text-muted-foreground hover:bg-muted'}"
 					onclick={() => setSearchTarget('element')}
@@ -128,7 +128,7 @@
 				</button>
 				<button
 					type="button"
-					class="px-3 py-1 text-xs {target === 'relationship'
+					class="px-3 py-1 text-xs transition-colors {target === 'relationship'
 						? 'bg-primary text-primary-foreground'
 						: 'bg-card text-muted-foreground hover:bg-muted'}"
 					onclick={() => setSearchTarget('relationship')}
@@ -157,7 +157,7 @@
 
 		<DropdownMenu.Root>
 			<DropdownMenu.Trigger
-				class="inline-flex w-fit items-center gap-1 rounded border border-input px-2 py-1 text-xs text-foreground/90 hover:bg-muted"
+				class="inline-flex w-fit items-center gap-1 rounded border border-input px-2 py-1 text-xs text-foreground/90 transition-colors hover:bg-muted"
 			>
 				<Plus class="h-3 w-3" /> Add criterion
 			</DropdownMenu.Trigger>

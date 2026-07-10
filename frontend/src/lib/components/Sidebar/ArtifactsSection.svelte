@@ -58,7 +58,7 @@
 	<div class="flex items-center justify-between">
 		<button
 			type="button"
-			class="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+			class="flex items-center gap-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
 			onclick={() => (collapsed = !collapsed)}
 		>
 			{#if collapsed}<ChevronRight class="size-3" />{:else}<ChevronDown class="size-3" />{/if}
@@ -69,7 +69,7 @@
 			<button
 				type="button"
 				aria-label="New navigation"
-				class="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+				class="rounded p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 				onclick={openNew}
 			>
 				<Plus class="size-3.5" />
@@ -81,7 +81,7 @@
 			{#each navigations as nav (nav.id)}
 				<li
 					data-artifact-id={nav.id}
-					class="group flex cursor-default items-center gap-1.5 rounded px-1.5 py-0.5 text-xs text-foreground/80 hover:bg-muted"
+					class="group flex cursor-default items-center gap-1.5 rounded px-1.5 py-0.5 text-xs text-foreground/80 transition-colors hover:bg-muted"
 					onpointerdown={(e) => onPointerDown(e, nav.id)}
 					ondblclick={() => openExisting(nav.id, nav.name)}
 				>
@@ -90,12 +90,12 @@
 					{#if editable}
 						<button
 							type="button"
-							class="hidden text-muted-foreground hover:text-foreground group-hover:inline"
+							class="hidden text-muted-foreground transition-colors hover:text-foreground group-hover:inline"
 							onclick={() => void rename(nav.id, nav.name)}>Rename</button
 						>
 						<button
 							type="button"
-							class="hidden text-muted-foreground hover:text-destructive group-hover:inline"
+							class="hidden text-muted-foreground transition-colors hover:text-destructive group-hover:inline"
 							onclick={() => void del(nav.id, nav.name)}>Delete</button
 						>
 					{/if}

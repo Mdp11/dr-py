@@ -169,7 +169,7 @@
 		{:else}
 			<button
 				type="button"
-				class="inline-flex w-fit items-center gap-1 rounded border border-border bg-card px-2 py-0.5 text-[11px] text-foreground/80 hover:bg-muted"
+				class="inline-flex w-fit items-center gap-1 rounded border border-border bg-card px-2 py-0.5 text-[11px] text-foreground/80 transition-colors hover:bg-muted"
 				onclick={() => (expanded = true)}
 			>
 				<Plus class="h-3 w-3" /> New relationship
@@ -183,7 +183,7 @@
 				</span>
 				<button
 					type="button"
-					class="rounded p-0.5 text-muted-foreground hover:text-foreground"
+					class="rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
 					onclick={cancel}
 					aria-label="Cancel"
 				>
@@ -259,14 +259,14 @@
 			<div class="flex justify-end gap-1">
 				<button
 					type="button"
-					class="rounded border border-border bg-card px-2 py-0.5 text-[11px] text-foreground/80 hover:bg-muted"
+					class="rounded border border-border bg-card px-2 py-0.5 text-[11px] text-foreground/80 transition-colors hover:bg-muted"
 					onclick={cancel}
 				>
 					Cancel
 				</button>
 				<button
 					type="button"
-					class="rounded border border-primary/40 bg-primary/20 px-2 py-0.5 text-[11px] text-foreground hover:bg-primary/30 disabled:cursor-not-allowed disabled:opacity-50"
+					class="rounded border border-primary/40 bg-primary/20 px-2 py-0.5 text-[11px] text-foreground transition-colors hover:bg-primary/30 disabled:cursor-not-allowed disabled:opacity-50"
 					disabled={selectedType === '' || selectedTarget === ''}
 					onclick={create}
 				>
