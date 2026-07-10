@@ -1,4 +1,4 @@
-import { apiFetch, type ClientConfig } from './client';
+import { apiFetch, apiUpload, type ClientConfig } from './client';
 import {
 	ModelSummarySchema,
 	OpsResponseSchema,
@@ -76,12 +76,15 @@ export function loadModelFromPath(path: string, cfg?: ClientConfig): Promise<Mod
 /**
  * POST /model/upload — stream a model file as the raw request body (no
  * client-side JSON.parse). Pass the picked `File`/`Blob` straight through.
+ * Uploaded via XHR (apiUpload) so callers can drive a progress overlay off
+ * upload byte counts.
  */
 export function uploadModelBody(
 	body: Blob | ArrayBuffer | string,
-	cfg?: ClientConfig
+	cfg?: ClientConfig,
+	onProgress?: (loaded: number, total: number | null) => void
 ): Promise<ModelSummary> {
-	return apiFetch('/model/upload', { method: 'POST', body, schema: ModelSummarySchema }, cfg);
+	return apiUpload('/model/upload', { body, schema: ModelSummarySchema, onProgress }, cfg);
 }
 
 /**

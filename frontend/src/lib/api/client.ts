@@ -90,6 +90,29 @@ function prepareBody(init: ApiFetchInit): { body: BodyInit | null | undefined; h
 }
 
 /**
+ * Build the typed error for a non-2xx response body: parse-if-JSON, derive
+ * the message, fire the global 401 hook, construct the typed `ApiError`
+ * subtype from `./errors`. Shared by {@link apiFetchRaw} and {@link apiUpload}
+ * so the fetch and XHR paths cannot drift in their error semantics.
+ */
+function buildApiError(status: number, text: string): Error {
+	let parsed: unknown = undefined;
+	if (text) {
+		try {
+			parsed = JSON.parse(text);
+		} catch {
+			parsed = text;
+		}
+	}
+	const message = messageFromBody(parsed, status);
+	// Fire the global 401 hook before throwing (the handler self-gates on a
+	// logged-in user, so this is a no-op during login/boot). The error is still
+	// thrown so local catch blocks keep working.
+	if (status === 401) _unauthorizedHandler?.();
+	return errorForStatus(status, parsed, message);
+}
+
+/**
  * Like {@link apiFetch} but returns the raw `Response` instead of parsing the
  * body — for streaming endpoints (e.g. GET /model/download). Non-2xx
  * responses still raise the same typed `ApiError`s as `apiFetch`.
@@ -111,21 +134,8 @@ export async function apiFetchRaw(
 	const response = await doFetch(url, { ...init, body, headers, credentials: 'include' });
 
 	if (!response.ok) {
-		let parsed: unknown = undefined;
 		const text = await response.text();
-		if (text) {
-			try {
-				parsed = JSON.parse(text);
-			} catch {
-				parsed = text;
-			}
-		}
-		const message = messageFromBody(parsed, response.status);
-		// Fire the global 401 hook before throwing (the handler self-gates on a
-		// logged-in user, so this is a no-op during login/boot). The error is still
-		// thrown so local catch blocks keep working.
-		if (response.status === 401) _unauthorizedHandler?.();
-		throw errorForStatus(response.status, parsed, message);
+		throw buildApiError(response.status, text);
 	}
 
 	return response;
@@ -151,4 +161,55 @@ export async function apiFetch<T>(
 		return init.schema.parse(json) as T;
 	}
 	return json as T;
+}
+
+export interface ApiUploadInit<T> {
+	body: Blob | ArrayBuffer | FormData | string;
+	schema?: z.ZodType<T>;
+	/** Fires on XHR upload progress; total is null when not computable. */
+	onProgress?: (loaded: number, total: number | null) => void;
+}
+
+/**
+ * XHR-based POST for request bodies whose UPLOAD progress matters (fetch has
+ * no upload progress events). Mirrors apiFetch's semantics exactly: same
+ * base-URL resolution, credentials, X-Requested-With CSRF header, Zod schema
+ * parse, typed non-2xx errors (via the shared {@link buildApiError}), and
+ * global 401 handling.
+ */
+export function apiUpload<T = unknown>(
+	path: string,
+	init: ApiUploadInit<T>,
+	config?: ClientConfig
+): Promise<T> {
+	const baseUrl = config?.baseUrl ?? _activeBaseUrl ?? FALLBACK_BASE_URL;
+	const url = buildUrl(baseUrl, path);
+	return new Promise<T>((resolve, reject) => {
+		const xhr = new XMLHttpRequest();
+		xhr.open('POST', url);
+		xhr.withCredentials = true;
+		xhr.setRequestHeader(CSRF_HEADER, CSRF_VALUE);
+		xhr.upload.addEventListener('progress', (e) => {
+			init.onProgress?.(e.loaded, e.lengthComputable ? e.total : null);
+		});
+		xhr.addEventListener('load', () => {
+			const text = xhr.responseText;
+			if (xhr.status < 200 || xhr.status >= 300) {
+				reject(buildApiError(xhr.status, text));
+				return;
+			}
+			if (!text) {
+				resolve(undefined as T);
+				return;
+			}
+			try {
+				const json: unknown = JSON.parse(text);
+				resolve((init.schema ? init.schema.parse(json) : json) as T);
+			} catch (err) {
+				reject(err);
+			}
+		});
+		xhr.addEventListener('error', () => reject(new Error(`Upload failed: network error (${url})`)));
+		xhr.send(init.body instanceof ArrayBuffer ? new Blob([init.body]) : init.body);
+	});
 }
