@@ -36,6 +36,7 @@
 		initWorkspaceTabs,
 		loadArtifacts,
 		loadProjectInfo,
+		markViewUnresolved,
 		onLockEvent,
 		refreshSummary,
 		refreshView,
@@ -67,9 +68,13 @@
 	// project — a page reload mid-session should come back with the model, not a
 	// blank workspace. Project content is established server-side (the seeded
 	// `default` project or a project created via the New Project wizard), not by
-	// any client-side file autoload.
+	// any client-side file autoload. The view must resolve BEFORE the summary
+	// (which flips the containment tree's `hasModel` gate) so the tree's first
+	// paint is already view-shaped instead of flashing all elements and then
+	// collapsing to the view a beat later.
 	async function boot(): Promise<void> {
 		void trackOpenProgress(); // fire-and-forget: overlay while the requests below hydrate the session
+		markViewUnresolved(); // reset the view-answered gate on every project (re)entry
 		try {
 			setMetamodel(await metamodelApi.getMetamodel());
 		} catch (err) {
@@ -85,6 +90,7 @@
 			});
 			return;
 		}
+		await refreshView();
 		try {
 			await refreshSummary();
 		} catch {
@@ -95,7 +101,6 @@
 		} catch {
 			// role/ttl best-effort; editing stays gated as viewer until it loads
 		}
-		await refreshView();
 		await loadArtifacts().catch(() => {}); // artifact library is best-effort
 	}
 

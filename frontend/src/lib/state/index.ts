@@ -185,6 +185,8 @@ export {
 	getViewChanges,
 	getViewChangesCount,
 	getViewWarnings,
+	isViewResolved,
+	markViewUnresolved,
 	moveArtifact,
 	moveFolder,
 	placeArtifact,

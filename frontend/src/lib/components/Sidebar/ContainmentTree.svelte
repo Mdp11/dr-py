@@ -29,6 +29,7 @@
 		getView,
 		getViewWarnings,
 		indexIssues,
+		isViewResolved,
 		moveArtifact,
 		moveFolder,
 		openNavigationTab,
@@ -248,6 +249,11 @@
 	// model is loaded — don't retrigger the fetch effect.
 	const hasModel = $derived(getModelSummary() !== null);
 
+	// View gate: never paint (or fetch) the first roots page until the view
+	// question is answered — painting raw roots and collapsing to the view a
+	// beat later is the "flash of all elements" bug (spec §5).
+	const viewResolved = $derived(isViewResolved());
+
 	// Model swap: a different model starts from the default page size again.
 	// Declared before the fetch effect so the reset is visible to its run.
 	$effect(() => {
@@ -269,7 +275,7 @@
 		void getStructureRev(); // tracked: refetch on every STRUCTURAL acked delta
 		void getModelGeneration(); // tracked: refetch on model swap/reset
 		void view; // tracked: preserve refetch-on-view-change (prior behavior)
-		const loaded = hasModel;
+		const loaded = hasModel && viewResolved;
 		const limit = rootsLimit; // tracked: roots auto-load page size
 		const seq = ++rootsSeq;
 		if (!loaded) {
