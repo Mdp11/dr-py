@@ -21,7 +21,7 @@
 			aria-label="Data Rover"
 			onclick={() => goto(resolve('/projects'))}
 		>
-			<img src={`${assets}/dr-mark.png`} alt="" class="h-6 w-auto" />
+			<img src={`${assets}/dr-mark.png`} alt="" class="h-7 w-auto" />
 		</button>
 		{#if isAdmin()}
 			<Button variant="ghost" size="sm" class="h-7 text-xs" onclick={() => goto(resolve('/admin'))}>

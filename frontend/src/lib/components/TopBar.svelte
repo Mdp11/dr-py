@@ -112,7 +112,7 @@
 			aria-label="Data Rover"
 			onclick={goHome}
 		>
-			<img src={`${assets}/dr-mark.png`} alt="" class="h-6 w-auto" />
+			<img src={`${assets}/dr-mark.png`} alt="" class="h-7 w-auto" />
 		</button>
 
 		<div class="group relative flex items-center">

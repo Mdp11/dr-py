@@ -207,17 +207,19 @@
 									</span>
 								{/if}
 							</div>
-							<div class="flex items-center gap-2 text-[11px] text-muted-foreground/70">
+							<div
+								class="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground/70"
+							>
 								{c.author_id ?? 'unknown'} · {fmtTs(c.ts)} · {c.op_count}
 								{c.op_count === 1 ? 'op' : 'ops'}
 								<button
-									class="rounded px-1 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+									class="whitespace-nowrap rounded px-1 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 									onclick={() => diffCommit(c.rev)}
 								>
 									Diff
 								</button>
 								<button
-									class="rounded px-1 py-0.5 text-[10px] transition-colors hover:bg-muted {compareFrom ===
+									class="whitespace-nowrap rounded px-1 py-0.5 text-[10px] transition-colors hover:bg-muted {compareFrom ===
 									c.rev
 										? 'text-primary'
 										: 'text-muted-foreground hover:text-foreground'}"
@@ -231,7 +233,7 @@
 								</button>
 								{#if canWrite}
 									<button
-										class="rounded px-1 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+										class="whitespace-nowrap rounded px-1 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 										onclick={() => askRevert(c.rev)}
 									>
 										Revert to here
