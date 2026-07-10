@@ -130,3 +130,33 @@ def test_mixed_mutation_sequence_stays_consistent() -> None:
     m.set_property(a, "name", "Compressor")
     m.delete_element(b.id)
     m.indexes.verify_consistent()
+
+
+def test_candidates_superset_with_cross_field_false_positive() -> None:
+    m = _model()
+    hit = _named(m, "Hydraulic Pump")
+    fp = _named(m, "pumX")  # 'pum' in name ...
+    m.set_property(fp, "note", "Yump")  # ... 'ump' in another field
+    miss = _named(m, "Valve")
+    cands = m.indexes.search_candidates("pump")
+    assert cands is not None
+    assert hit.id in cands  # a true hit always survives (superset guarantee)
+    assert fp.id in cands  # cross-field FP allowed; the score check filters
+    assert miss.id not in cands
+
+
+def test_candidates_short_query_none_unknown_trigram_empty() -> None:
+    m = _model()
+    _named(m, "Pump")
+    assert m.indexes.search_candidates("pu") is None
+    assert m.indexes.search_candidates("") is None
+    assert m.indexes.search_candidates("zzz") == frozenset()
+    # one absent trigram kills the whole intersection
+    assert m.indexes.search_candidates("pumzzz") == frozenset()
+
+
+def test_candidates_single_trigram_query() -> None:
+    m = _model()
+    a = _named(m, "Pump")
+    b = _named(m, "Pumice")
+    assert m.indexes.search_candidates("pum") == {a.id, b.id}

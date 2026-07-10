@@ -178,6 +178,36 @@ class IndexSet:
         """All root ids in (display_name, id) order — lazily, O(1) per step."""
         return (eid for _, eid in self.roots_order.iter_all())
 
+    def search_candidates(self, q: str) -> Set[str] | None:
+        """Ids of elements that MAY fuzzy-match ``q`` — a guaranteed superset
+        of the true hits — or ``None`` when the index cannot answer
+        (``len(q) < 3``; the caller falls back to a scan). ``q`` must already
+        be trimmed and lowercased. May return a live internal set — do NOT
+        mutate.
+
+        Superset argument: any string containing ``q`` contains every trigram
+        of ``q``, so a matching element sits in ALL those posting sets and
+        survives the intersection. Intersection starts from the smallest set,
+        so cost is O(smallest posting); a degenerate all-common query
+        approaches the scan it replaces, never exceeds it asymptotically.
+        """
+        if len(q) < 3:
+            return None
+        postings: list[set[str]] = []
+        for i in range(len(q) - 2):
+            ids = self.search_postings.get(q[i : i + 3])
+            if not ids:
+                # a true hit would contain ALL trigrams; one absent => none
+                return frozenset()
+            postings.append(ids)
+        postings.sort(key=len)
+        result: Set[str] = postings[0]
+        for ids in postings[1:]:
+            result = result & ids
+            if not result:
+                break
+        return result
+
     # -- mutation hooks (called from the Model mutation boundary) ----------
 
     def on_element_created(self, element: Element) -> None:
