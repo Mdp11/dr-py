@@ -9,6 +9,7 @@
 		clearChangesBadge,
 		clearIssues,
 		clearViewState,
+		endProgress,
 		pushView,
 		resetModelStore,
 		setFileHandle,
@@ -16,7 +17,9 @@
 		setMetamodel,
 		setMetamodelFilename,
 		setViewBaseline,
-		setViewFilename
+		setViewFilename,
+		startProgress,
+		updateProgress
 	} from '$lib/state';
 	import { createMutation } from '@tanstack/svelte-query';
 
@@ -81,26 +84,35 @@
 			clearIssues();
 			clearChangesBadge();
 
-			// 2. model — streamed as the raw body, parsed against the new metamodel
-			const summary = await uploadModelBody(vars.modelFile);
-			resetModelStore();
-			adoptSummary(summary);
-			setFilename(vars.modelFilename);
-			setFileHandle(null);
-			clearIssues();
-			clearChangesBadge();
+			// 2. model — streamed as the raw body, parsed against the new metamodel.
+			// Determinate byte progress (spec §4), mirroring NewProjectWizard's
+			// upload-progress wiring.
+			const token = startProgress('Uploading model…');
+			try {
+				const summary = await uploadModelBody(vars.modelFile, undefined, (loaded, total) => {
+					if (total !== null && total > 0) updateProgress(token, loaded, total);
+				});
+				resetModelStore();
+				adoptSummary(summary);
+				setFilename(vars.modelFilename);
+				setFileHandle(null);
+				clearIssues();
+				clearChangesBadge();
 
-			// 3. view (optional) — validated against the active model. Baseline
-			// from the SERVER-echoed view so the view-change count starts at 0
-			// even if the backend normalizes the snapshot.
-			if (vars.viewBody) {
-				const { view: storedView } = await pushView(vars.viewBody);
-				setViewFilename(viewFilename);
-				setViewBaseline(storedView);
-			} else {
-				// No view in this load: clear any view carried over from a prior
-				// session so the badge/View tab don't report a stale view as changes.
-				clearViewState();
+				// 3. view (optional) — validated against the active model. Baseline
+				// from the SERVER-echoed view so the view-change count starts at 0
+				// even if the backend normalizes the snapshot.
+				if (vars.viewBody) {
+					const { view: storedView } = await pushView(vars.viewBody);
+					setViewFilename(viewFilename);
+					setViewBaseline(storedView);
+				} else {
+					// No view in this load: clear any view carried over from a prior
+					// session so the badge/View tab don't report a stale view as changes.
+					clearViewState();
+				}
+			} finally {
+				endProgress(token);
 			}
 		},
 		onSuccess: () => {
