@@ -26,8 +26,11 @@
 	}
 </script>
 
-<form onsubmit={onSubmit} class="flex w-72 flex-col gap-3">
-	<h1 class="text-base font-semibold text-zinc-100">Sign in</h1>
+<form
+	onsubmit={onSubmit}
+	class="flex w-80 flex-col gap-4 rounded-lg border border-border bg-card/70 p-8"
+>
+	<h1 class="font-display text-lg font-light tracking-wide text-foreground">Sign in</h1>
 	<Input
 		type="email"
 		placeholder="Email"
@@ -45,7 +48,7 @@
 		required
 	/>
 	{#if error}
-		<p class="text-xs text-red-400">{error}</p>
+		<p class="text-xs text-destructive">{error}</p>
 	{/if}
 	<Button type="submit" disabled={pending}>{pending ? 'Signing in…' : 'Sign in'}</Button>
 </form>
