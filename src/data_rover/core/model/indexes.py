@@ -18,6 +18,10 @@ rebuild` afterwards; code that writes ``entity.properties`` directly must call
 carries the same obligations: ``rebuild()`` recomputes it from scratch, and
 any direct writer of ``entity.properties`` must go through
 ``on_properties_changed`` so a root's display-name reposition is not missed.
+The trigram search index (``search_postings`` / ``_trigrams_of``) is
+maintained at that same boundary with the same obligations; it feeds
+``search_candidates`` (the fuzzy-search candidate generator) and, like the
+reference index, is diffed on ``on_properties_changed``.
 
 Uniqueness grouping mirrors the UniquenessValidator exactly: two elements are
 identical when they share ``type_name``, their first containment parent (or
@@ -102,6 +106,18 @@ class IndexSet:
         # element id -> its CURRENT key in roots_order (needed to remove/reposition
         # after a rename, since the old display name is gone from the element)
         self._root_key_of: dict[str, Pair] = {}
+        #: lowercased trigram -> ids of elements whose searchable text
+        #: contains it. The searchable text is exactly the fields the fuzzy
+        #: element search scores (routes/read.py _search_score): the id, the
+        #: type name, and every top-level string property value. Candidate
+        #: index only: a query's true hits are always a SUBSET of the
+        #: intersection of its trigrams' postings (see search_candidates).
+        self.search_postings: dict[str, set[str]] = {}
+        # element id -> its current merged trigram set (reverse map; needed
+        # to diff on property change and to drop postings on delete — by hook
+        # time the old text is gone — mirroring _refs_of). No entry when the
+        # set would be empty (sparse).
+        self._trigrams_of: dict[str, frozenset[str]] = {}
         # entity id -> reference-target ids currently held in its properties
         # (reverse of ref_targets; needed to diff on property changes)
         self._refs_of: dict[str, set[str]] = {}
@@ -170,6 +186,7 @@ class IndexSet:
         self._update_refs(element.id, self._element_refs(element))
         # a fresh element has no containment parent -> it is a root
         self._roots_add(element)
+        self._update_trigrams(element.id, self._element_trigrams(element))
 
     def on_element_deleted(self, element: Element) -> None:
         """Called after the element's relationships are gone and it has been
@@ -182,6 +199,7 @@ class IndexSet:
         self._remove_from_group(element.id)
         self._update_refs(element.id, set())
         self._roots_remove(element.id)
+        self._update_trigrams(element.id, frozenset())
 
     def on_relationship_created(self, rel: Relationship) -> None:
         self.out_rels.setdefault(rel.source_id, set()).add(rel.id)
@@ -242,6 +260,7 @@ class IndexSet:
             self._update_refs(entity.id, self._element_refs(entity))
             self._rekey(entity)
             self._roots_reposition(entity)
+            self._update_trigrams(entity.id, self._element_trigrams(entity))
         else:
             self._update_refs(entity.id, self._relationship_refs(entity))
 
@@ -262,6 +281,8 @@ class IndexSet:
         self.duplicate_keys.clear()
         self.roots_order.clear()
         self._root_key_of.clear()
+        self.search_postings.clear()
+        self._trigrams_of.clear()
         self._refs_of.clear()
 
         # relationships first so containment parents are known before grouping
@@ -280,6 +301,11 @@ class IndexSet:
             self.elements_by_type.setdefault(element.type_name, set()).add(element.id)
             self._add_to_group(element)
             self._add_refs(element.id, self._element_refs(element))
+            trigs = self._element_trigrams(element)
+            if trigs:
+                self._trigrams_of[element.id] = trigs
+                for t in trigs:
+                    self.search_postings.setdefault(t, set()).add(element.id)
             if element.id not in self.containment_parents:
                 self._root_key_of[element.id] = (display_name(element), element.id)
         # bulk-construct in one O(n log n) pass instead of n incremental adds
@@ -322,6 +348,8 @@ class IndexSet:
                 "_root_key_of",
                 "roots_order",
                 "_refs_of",
+                "search_postings",
+                "_trigrams_of",
             )
             if _norm(name, getattr(self, name)) != _norm(name, getattr(fresh, name))
         ]
@@ -543,6 +571,45 @@ class IndexSet:
             self._refs_of[entity_id] = new_refs
         else:
             self._refs_of.pop(entity_id, None)
+
+    # -- internals: search trigrams -------------------------------------------
+
+    @staticmethod
+    def _element_trigrams(element: Element) -> frozenset[str]:
+        """Merged lowercased trigram set of the element's searchable text —
+        exactly the fields the fuzzy search scores: id, type name, and every
+        top-level string property value. Fields shorter than 3 chars
+        contribute nothing (they cannot contain a >=3-char query), and
+        merging across fields is sound because candidates are score-verified
+        by the caller (cross-field false positives are filtered there)."""
+        trigs: set[str] = set()
+        texts = [element.id, element.type_name]
+        texts.extend(v for v in element.properties.values() if isinstance(v, str))
+        for text in texts:
+            s = text.lower()
+            for i in range(len(s) - 2):
+                trigs.add(s[i : i + 3])
+        return frozenset(trigs)
+
+    def _update_trigrams(self, element_id: str, new: frozenset[str]) -> None:
+        """Diff-apply an element's trigram set (mirrors _update_refs).
+        Posting sets hold references to the id strings the model dicts own —
+        no string duplication; empty posting sets are deleted (sparse)."""
+        old = self._trigrams_of.get(element_id) or frozenset()
+        if new == old:
+            return
+        for t in old - new:
+            ids = self.search_postings.get(t)
+            if ids is not None:
+                ids.discard(element_id)
+                if not ids:
+                    del self.search_postings[t]
+        for t in new - old:
+            self.search_postings.setdefault(t, set()).add(element_id)
+        if new:
+            self._trigrams_of[element_id] = new
+        else:
+            self._trigrams_of.pop(element_id, None)
 
     # -- internals: counters --------------------------------------------------
 
