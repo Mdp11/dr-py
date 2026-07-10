@@ -57,7 +57,7 @@
 	}
 </script>
 
-<div class="border-t border-input">
+<div class="border-t border-border">
 	<div class="flex items-center gap-2 px-3 py-2 text-sm">
 		<span
 			class={`inline-flex h-5 w-5 items-center justify-center rounded font-mono font-bold ${badgeClass}`}

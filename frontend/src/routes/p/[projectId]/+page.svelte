@@ -289,7 +289,7 @@
 		<div
 			class="col-span-5 flex items-center gap-3 border-b border-destructive/40 bg-destructive/15 px-3 py-1.5 text-xs text-destructive"
 			role="alert"
-			transition:slide={{ duration: dur(PANEL) }}
+			in:slide={{ duration: dur(PANEL) }}
 		>
 			<span class="font-semibold uppercase tracking-wide">
 				{modelError.kind === 'conflict' ? 'Model out of sync' : 'Edit rejected'}
@@ -321,7 +321,7 @@
 		<div
 			class="col-span-5 flex items-center justify-between gap-3 bg-warning/15 px-3 py-1.5 text-xs text-warning"
 			role="alert"
-			transition:slide={{ duration: dur(PANEL) }}
+			in:slide={{ duration: dur(PANEL) }}
 		>
 			<span>
 				The metamodel was changed to rev {pendingRebind.rev} ({pendingRebind.count} conformance issues).
@@ -336,7 +336,7 @@
 		<div
 			class="col-span-5 flex items-center gap-3 border-b border-destructive/40 bg-destructive/15 px-3 py-1.5 text-xs text-destructive"
 			role="alert"
-			transition:slide={{ duration: dur(PANEL) }}
+			in:slide={{ duration: dur(PANEL) }}
 		>
 			<span class="font-semibold uppercase tracking-wide">Disconnected</span>
 			<span class="truncate">{feedTerminationView.message}</span>

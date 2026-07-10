@@ -52,7 +52,7 @@
 		<Popover.Content
 			align="end"
 			sideOffset={4}
-			class="z-50 w-[300px] rounded-md border border-input bg-popover p-1.5 text-xs shadow-xl"
+			class="z-50 w-[300px] rounded-md border border-border bg-popover p-1.5 text-xs shadow-xl"
 		>
 			<p class="px-1.5 pt-0.5 pb-1.5 text-muted-foreground/70">
 				Feed the combination with the elements reached at…

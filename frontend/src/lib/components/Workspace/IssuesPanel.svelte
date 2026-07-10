@@ -119,7 +119,7 @@
 				{#each it.target_ids as tid (tid)}
 					<button
 						type="button"
-						class="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground/80 transition-colors hover:bg-accent hover:text-accent-foreground"
+						class="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground/80 transition-colors hover:bg-muted"
 						onclick={() => onTargetClick(tid)}
 						title={tid}
 					>
@@ -191,7 +191,7 @@
 						type="button"
 						class="rounded px-2 py-0.5 text-[10px] transition-colors {filter === val
 							? 'bg-primary text-primary-foreground'
-							: 'bg-muted text-muted-foreground hover:bg-accent hover:text-accent-foreground'}"
+							: 'bg-muted text-muted-foreground hover:bg-muted'}"
 						disabled={val === 'resolved' && !hasResolved}
 						onclick={() => (filter = val as OriginFilter)}
 					>

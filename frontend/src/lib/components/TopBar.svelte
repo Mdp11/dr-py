@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { resolve } from '$app/paths';
-	import { assets } from '$app/paths';
+	import { resolve, assets } from '$app/paths';
 	import { goto } from '$app/navigation';
 	import { Button } from '$lib/components/ui/button';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
@@ -240,6 +239,10 @@
 				</dl>
 			</div>
 		</div>
+		<kbd
+			class="rounded border border-border px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/70"
+			title="Command palette">⌘K</kbd
+		>
 		<DropdownMenu.Root>
 			<DropdownMenu.Trigger
 				class="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
@@ -248,8 +251,10 @@
 				<Ellipsis class="h-4 w-4" />
 			</DropdownMenu.Trigger>
 			<DropdownMenu.Content align="end" class="w-48">
-				<DropdownMenu.Item onclick={() => void goto(resolve(`/p/${getActiveProjectId()}/compare`))}>
-					Compare
+				<DropdownMenu.Item>
+					{#snippet child({ props })}
+						<a {...props} href={resolve(`/p/${getActiveProjectId()}/compare`)}>Compare</a>
+					{/snippet}
 				</DropdownMenu.Item>
 				<DropdownMenu.Item onclick={() => (applyCrOpen = true)}>Apply CR</DropdownMenu.Item>
 				<DropdownMenu.Item disabled={metamodel === null} onclick={() => (swapOpen = true)}>

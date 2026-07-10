@@ -266,7 +266,7 @@
 				</button>
 				<button
 					type="button"
-					class="rounded border border-primary/40 bg-primary/20 px-2 py-0.5 text-[11px] text-foreground transition-colors hover:bg-primary/30 disabled:cursor-not-allowed disabled:opacity-50"
+					class="rounded border border-primary bg-primary px-2 py-0.5 text-[11px] text-primary-foreground transition-colors hover:bg-primary/80 disabled:cursor-not-allowed disabled:opacity-50"
 					disabled={selectedType === '' || selectedTarget === ''}
 					onclick={create}
 				>

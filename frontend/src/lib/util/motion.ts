@@ -4,6 +4,7 @@
  * CSS animations are neutralized under prefers-reduced-motion by a global
  * media query in app.css; JS-driven transitions must opt in through dur().
  */
+// Keep in sync with the --motion-* tokens in app.css and the dialog primitives' duration-200.
 export const MICRO = 120;
 export const PANEL = 200;
 

@@ -219,7 +219,7 @@
 					<button
 						type="button"
 						class="rounded px-2 py-0.5 text-[11px] {maxHops === h
-							? 'bg-primary/30 text-primary'
+							? 'bg-primary text-primary-foreground'
 							: 'text-muted-foreground hover:text-foreground'}"
 						onclick={() => (maxHops = h)}
 					>

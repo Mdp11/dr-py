@@ -1270,7 +1270,7 @@
 	{#snippet poolHeader()}
 		<button
 			type="button"
-			class="microlabel flex h-full w-full select-none items-center gap-1 border-t border-border px-3 transition-colors hover:bg-card hover:text-foreground/80"
+			class="microlabel flex h-full w-full select-none items-center gap-1 border-t border-border px-3 transition-colors hover:bg-muted hover:text-foreground/80"
 			class:bg-muted={dragHoverKey === EXCLUDED_SECTION_KEY}
 			class:ring-1={dragHoverKey === EXCLUDED_SECTION_KEY}
 			class:ring-success={dragHoverKey === EXCLUDED_SECTION_KEY && dragHoverValid}

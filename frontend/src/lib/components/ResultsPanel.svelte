@@ -53,7 +53,7 @@
 <section
 	data-testid="results-panel"
 	class="col-span-5 flex h-full flex-col overflow-hidden border-t border-border bg-background"
-	transition:slide={{ duration: dur(PANEL) }}
+	in:slide={{ duration: dur(PANEL) }}
 >
 	<header class="flex shrink-0 items-center gap-2 border-b border-border px-3 py-1.5">
 		<h2 class="microlabel">

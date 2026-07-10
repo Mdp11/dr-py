@@ -10,7 +10,7 @@
 
 <div>
 	<div
-		class="flex items-center gap-3 rounded-t-lg border border-input bg-muted/40 px-3 py-2 text-xs"
+		class="flex items-center gap-3 rounded-t-lg border border-border bg-muted/40 px-3 py-2 text-xs"
 	>
 		<span class="text-success">+{diff.counts.added} added</span>
 		<span class="text-warning">~{diff.counts.modified} modified</span>
@@ -30,7 +30,7 @@
 		</div>
 	</div>
 
-	<div class="rounded-b-lg border border-t-0 border-input">
+	<div class="rounded-b-lg border border-t-0 border-border">
 		{#if diff.elements.length > 0}
 			<div class="microlabel px-3 pt-2">Elements</div>
 			{#each diff.elements as d (d.id)}

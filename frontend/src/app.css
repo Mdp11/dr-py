@@ -43,6 +43,7 @@
 	--success: oklch(0.55 0.12 155);
 	--warning: oklch(0.65 0.13 85);
 	--info: oklch(0.55 0.09 240);
+	/* Reference values; runtime motion reads $lib/util/motion (keep in sync). */
 	--motion-micro: 120ms;
 	--motion-panel: 200ms;
 	--ease-standard: cubic-bezier(0.2, 0, 0, 1);
