@@ -140,22 +140,33 @@
 
 	const issueIndex = $derived(indexIssues(getIssues()));
 
+	// Palette mirrors the app tokens in app.css (canvas/SVG can't read CSS vars).
+	const GRAPH_BACKGROUND = '#101311';
+	const GRAPH_SURFACE = '#191d1a';
+	const GRAPH_TEXT = '#f2f4f2';
+	const GRAPH_MUTED_TEXT = '#a8b0aa';
+	const GRAPH_BORDER_HAIRLINE = 'rgba(255,255,255,0.08)';
+	const GRAPH_SAGE = '#a9c4ae';
+	const GRAPH_SAGE_RING = 'rgba(169,196,174,0.35)';
+	const GRAPH_ERROR = '#d98d84';
+	const GRAPH_WARNING = '#dcb878';
+
 	function nodeStyle(n: GraphNode): string {
 		const isCenter = n.hops === 0;
 		const hasError = issueIndex.errorIds.has(n.id);
 		const hasWarning = !hasError && issueIndex.warningIds.has(n.id);
-		const bg = isCenter ? '#1e293b' : '#18181b';
-		const color = isCenter ? '#f1f5f9' : '#e4e4e7';
-		let border = isCenter ? '#818cf8' : '#3f3f46';
+		const bg = GRAPH_SURFACE;
+		const color = GRAPH_TEXT;
+		let border = isCenter ? GRAPH_SAGE : GRAPH_BORDER_HAIRLINE;
 		let borderWidth = '1px';
 		if (hasError) {
-			border = '#f87171';
+			border = GRAPH_ERROR;
 			borderWidth = '2px';
 		} else if (hasWarning) {
-			border = '#fbbf24';
+			border = GRAPH_WARNING;
 			borderWidth = '2px';
 		}
-		const ring = isCenter ? ' box-shadow: 0 0 0 2px rgba(129,140,248,0.35) inset;' : '';
+		const ring = isCenter ? ` box-shadow: 0 0 0 2px ${GRAPH_SAGE_RING} inset;` : '';
 		return `background:${bg}; color:${color}; border:${borderWidth} solid ${border}; border-radius:6px; padding:6px 10px; font-size:11px;${ring}`;
 	}
 
@@ -177,15 +188,15 @@
 			target: e.target_id,
 			type: 'default',
 			label: e.type_name,
-			labelStyle: 'fill:#a1a1aa; font-size:10px;',
-			labelBgStyle: 'fill:#09090b;',
+			labelStyle: `fill:${GRAPH_MUTED_TEXT}; font-size:10px;`,
+			labelBgStyle: `fill:${GRAPH_BACKGROUND};`,
 			data: { containment: containmentNames.has(e.type_name) },
 			style: containmentNames.has(e.type_name)
-				? 'stroke:#a5b4fc; stroke-width:2px;'
-				: 'stroke:#71717a;',
+				? `stroke:${GRAPH_SAGE}; stroke-width:2px;`
+				: `stroke:${GRAPH_MUTED_TEXT};`,
 			markerEnd: {
 				type: 'arrowclosed',
-				color: containmentNames.has(e.type_name) ? '#a5b4fc' : '#71717a'
+				color: containmentNames.has(e.type_name) ? GRAPH_SAGE : GRAPH_MUTED_TEXT
 			} as unknown as Edge['markerEnd']
 		}))
 	);
@@ -197,17 +208,19 @@
 	}
 </script>
 
-<div class="flex h-full w-full flex-col bg-zinc-950">
-	<div class="flex items-center gap-3 border-b border-zinc-800 px-3 py-2 text-xs text-zinc-300">
+<div class="flex h-full w-full flex-col bg-background">
+	<div
+		class="flex items-center gap-3 border-b border-border px-3 py-2 text-xs text-muted-foreground"
+	>
 		<div class="flex items-center gap-1">
-			<span class="text-zinc-500">Hops:</span>
-			<div class="flex items-center gap-0.5 rounded border border-zinc-800 bg-zinc-900 p-0.5">
+			<span class="text-muted-foreground">Hops:</span>
+			<div class="flex items-center gap-0.5 rounded border border-border bg-card p-0.5">
 				{#each HOP_OPTIONS as h (h)}
 					<button
 						type="button"
 						class="rounded px-2 py-0.5 text-[11px] {maxHops === h
-							? 'bg-indigo-500/30 text-indigo-100'
-							: 'text-zinc-400 hover:text-zinc-200'}"
+							? 'bg-primary/30 text-primary'
+							: 'text-muted-foreground hover:text-foreground'}"
 						onclick={() => (maxHops = h)}
 					>
 						{h}
@@ -218,19 +231,19 @@
 
 		{#if centerId !== null}
 			<div class="flex items-center gap-1">
-				<span class="text-zinc-500">Center:</span>
-				<span class="rounded bg-zinc-900 px-1.5 py-0.5 font-mono text-[11px] text-zinc-100">
+				<span class="text-muted-foreground">Center:</span>
+				<span class="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-foreground">
 					{centerLabel}
 				</span>
 			</div>
 
 			<div class="ml-auto flex items-center gap-2">
-				<span class="text-zinc-500">
+				<span class="text-muted-foreground">
 					Showing {graphNodes.length} of {totalElements} elements
 				</span>
 				{#if truncated}
 					<span
-						class="flex items-center gap-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[11px] text-amber-300"
+						class="flex items-center gap-1 rounded bg-warning/15 px-1.5 py-0.5 text-[11px] text-warning"
 						title="Some neighbors were dropped because the node cap was reached. Increase nodeCap or reduce hops."
 					>
 						<AlertTriangle class="h-3 w-3" />
@@ -243,11 +256,15 @@
 
 	<div class="relative flex-1">
 		{#if centerId === null}
-			<div class="flex h-full items-center justify-center px-4 text-center text-xs text-zinc-500">
+			<div
+				class="flex h-full items-center justify-center px-4 text-center text-xs text-muted-foreground"
+			>
 				Select an element from the tree or search to see its neighborhood.
 			</div>
 		{:else if graphNodes.length === 0}
-			<div class="flex h-full items-center justify-center px-4 text-center text-xs text-zinc-500">
+			<div
+				class="flex h-full items-center justify-center px-4 text-center text-xs text-muted-foreground"
+			>
 				{centerMissing
 					? 'Selection no longer exists in the working model.'
 					: 'Loading neighborhood…'}
@@ -263,7 +280,7 @@
 				elementsSelectable
 				panOnDrag
 				onnodeclick={handleNodeClick}
-				style="background:#09090b;"
+				style="background:{GRAPH_BACKGROUND};"
 			>
 				<Background />
 				<Controls />
