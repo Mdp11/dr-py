@@ -176,7 +176,7 @@
 			</button>
 		{/if}
 	{:else}
-		<div class="flex flex-col gap-2 rounded border border-border bg-popover p-2">
+		<div class="flex flex-col gap-2 rounded border border-border bg-card p-2">
 			<div class="flex items-center justify-between">
 				<span class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
 					New relationship

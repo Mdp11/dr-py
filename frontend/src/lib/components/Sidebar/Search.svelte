@@ -132,7 +132,7 @@
 			onfocus={onFocusOrClick}
 			onclick={onFocusOrClick}
 			onkeydown={onKeydown}
-			class="h-7 flex-1 border-border bg-card text-xs placeholder:text-muted-foreground/70"
+			class="h-7 flex-1 border-border bg-card text-xs placeholder:text-muted-foreground/50"
 		/>
 		<button
 			type="button"
