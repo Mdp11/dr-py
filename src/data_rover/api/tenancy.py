@@ -49,9 +49,7 @@ def get_user_by_email(db: Session, email: str) -> User | None:
     # MultipleResultsFound; treat ambiguity as no-match so login degrades
     # gracefully to 401 rather than 500.
     try:
-        return db.execute(
-            select(User).where(User.email == email)
-        ).scalar_one_or_none()
+        return db.execute(select(User).where(User.email == email)).scalar_one_or_none()
     except MultipleResultsFound:
         return None
 
@@ -113,7 +111,11 @@ def set_user_fields(
     removing_admin_status = (is_admin is not None and not is_admin) or (
         is_active is not None and not is_active
     )
-    if currently_active_admin and removing_admin_status and _active_admin_count(db) <= 1:
+    if (
+        currently_active_admin
+        and removing_admin_status
+        and _active_admin_count(db) <= 1
+    ):
         raise ValueError("cannot demote or deactivate the last active admin")
     if is_admin is not None:
         user.is_admin = is_admin

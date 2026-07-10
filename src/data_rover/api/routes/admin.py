@@ -117,9 +117,7 @@ def add_member(
     return MemberOut(user_id=m.user_id, email=user.email, role=m.role)
 
 
-@router.delete(
-    "/admin/projects/{project_id}/members/{user_id}", status_code=204
-)
+@router.delete("/admin/projects/{project_id}/members/{user_id}", status_code=204)
 def remove_member(
     project_id: str, user_id: str, db: Session = Depends(get_db)
 ) -> Response:

@@ -67,7 +67,12 @@ def acquire_locks(
     ttl = float(get_settings().lock_ttl_seconds)
     with session.write_mutex:
         token, leases, conflicts = session.lock_table.acquire(
-            user.id, reqs, now=now, ttl=ttl, steal=payload.steal, holder_email=user.email
+            user.id,
+            reqs,
+            now=now,
+            ttl=ttl,
+            steal=payload.steal,
+            holder_email=user.email,
         )
     if conflicts:
         return JSONResponse(

@@ -161,8 +161,9 @@ def list_commits(
                 message=r.message,
                 validation_error_count=r.validation_error_count,
                 op_count=len(r.ops),
-                is_rebind=(r.from_metamodel_id is not None
-                           or r.to_metamodel_id is not None),
+                is_rebind=(
+                    r.from_metamodel_id is not None or r.to_metamodel_id is not None
+                ),
             )
             for r in rows
         ],
@@ -360,7 +361,11 @@ def create_commit(
                 lock_event(
                     "released",
                     [
-                        {"resource_id": le.resource_id, "mode": le.mode.value, "holder_id": le.holder}
+                        {
+                            "resource_id": le.resource_id,
+                            "mode": le.mode.value,
+                            "holder_id": le.holder,
+                        }
                         for le in released
                     ],
                 )
@@ -369,8 +374,7 @@ def create_commit(
         model_rev=session.model_rev,
         id_map=dict(res.id_map),
         changed_elements=[
-            ElementOut.from_core(model.elements[eid])
-            for eid in res.changed_element_ids
+            ElementOut.from_core(model.elements[eid]) for eid in res.changed_element_ids
         ],
         changed_relationships=[
             RelationshipOut.from_core(model.relationships[rid])
@@ -415,8 +419,10 @@ def revert_commit(
     if payload.target_rev < 0 or payload.target_rev > session.model_rev:
         return JSONResponse(
             status_code=422,
-            content={"detail": "target_rev out of range",
-                     "model_rev": session.model_rev},
+            content={
+                "detail": "target_rev out of range",
+                "model_rev": session.model_rev,
+            },
         )
     if payload.target_rev == session.model_rev:
         # no-op: nothing to revert. Mirror the empty-batch path in apply_ops —
@@ -442,8 +448,7 @@ def revert_commit(
                 return JSONResponse(
                     status_code=409,
                     content={
-                        "detail": "revert across a metamodel swap is not yet "
-                                  "supported",
+                        "detail": "revert across a metamodel swap is not yet supported",
                         "rebind_rev": c.rev,
                     },
                 )
@@ -459,8 +464,11 @@ def revert_commit(
                 content={
                     "detail": "resource locked by a peer",
                     "conflicts": [
-                        {"resource_id": le.resource_id, "mode": le.mode.value,
-                         "holder_id": le.holder}
+                        {
+                            "resource_id": le.resource_id,
+                            "mode": le.mode.value,
+                            "holder_id": le.holder,
+                        }
                         for le in held
                     ],
                 },
@@ -498,9 +506,15 @@ def revert_commit(
         issues_json = [IssueOut.from_core(i).model_dump() for i in conformance]
         try:
             persisted = _persist_commit(
-                db, project_id, rev=session.model_rev, author_id=user.id, res=res,
-                _commit_id=commit_id, _message=message,
-                _validation_error_count=len(conformance), _issues=issues_json,
+                db,
+                project_id,
+                rev=session.model_rev,
+                author_id=user.id,
+                res=res,
+                _commit_id=commit_id,
+                _message=message,
+                _validation_error_count=len(conformance),
+                _issues=issues_json,
             )
         except Exception as exc:
             _rollback(model, res.inverse_units)
@@ -517,7 +531,9 @@ def revert_commit(
                 logger.warning(
                     "post-revert snapshot failed for project %s at rev %s; "
                     "commit is durable, hydration will rebuild",
-                    project_id, session.model_rev, exc_info=True,
+                    project_id,
+                    session.model_rev,
+                    exc_info=True,
                 )
         # broadcast commit delta (mirrors create_commit steps g/h, minus lock
         # release — revert holds no locks and therefore releases none).
@@ -546,8 +562,7 @@ def revert_commit(
         model_rev=session.model_rev,
         id_map=dict(res.id_map),
         changed_elements=[
-            ElementOut.from_core(model.elements[eid])
-            for eid in res.changed_element_ids
+            ElementOut.from_core(model.elements[eid]) for eid in res.changed_element_ids
         ],
         changed_relationships=[
             RelationshipOut.from_core(model.relationships[rid])

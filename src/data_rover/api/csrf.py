@@ -21,7 +21,9 @@ _CSRF_VALUE = "data-rover"
 
 
 class CSRFMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+    async def dispatch(
+        self, request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
         if request.method not in _SAFE_METHODS:
             cookie_name = get_settings().auth_cookie_name
             if cookie_name in request.cookies:

@@ -99,9 +99,13 @@ class LockTable:
                 continue  # shared pins never conflict on acquire
             if req.intent is LockIntent.DELETE:
                 # delete needs the resource clear of everyone else (incl. pins)
-                return LockConflict(req.resource_id, le.holder, le.mode, le.holder_email)
+                return LockConflict(
+                    req.resource_id, le.holder, le.mode, le.holder_email
+                )
             if le.mode is LockMode.EXCLUSIVE:
-                return LockConflict(req.resource_id, le.holder, le.mode, le.holder_email)
+                return LockConflict(
+                    req.resource_id, le.holder, le.mode, le.holder_email
+                )
         return None
 
     # ---- public API -------------------------------------------------------
