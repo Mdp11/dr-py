@@ -32,6 +32,9 @@ export default defineConfig({
 	test: {
 		environment: 'happy-dom',
 		include: ['src/**/*.{test,spec}.{ts,js}'],
-		globals: false
+		globals: false,
+		// Per-file teardown flush for bits-ui's scroll-lock timer (see the
+		// afterAll hook in the setup file).
+		setupFiles: ['./src/vitest-setup.ts']
 	}
 });
