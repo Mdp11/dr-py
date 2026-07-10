@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { resolve } from '$app/paths';
+	import { assets, resolve } from '$app/paths';
 	import { Button } from '$lib/components/ui/button';
 	import { getCurrentUser, isAdmin, signOut } from '$lib/state';
 
@@ -13,14 +13,15 @@
 </script>
 
 <header
-	class="flex h-10 items-center justify-between border-b border-zinc-800 bg-zinc-950 px-3 text-sm"
+	class="flex h-11 items-center justify-between border-b border-border bg-background px-4 text-sm"
 >
-	<div class="flex items-center gap-3">
+	<div class="flex items-center gap-4">
 		<button
-			class="font-semibold tracking-tight text-zinc-100"
+			class="flex items-center focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+			aria-label="Data Rover"
 			onclick={() => goto(resolve('/projects'))}
 		>
-			Data Rover
+			<img src={`${assets}/dr-mark.png`} alt="" class="h-6 w-auto" />
 		</button>
 		{#if isAdmin()}
 			<Button variant="ghost" size="sm" class="h-7 text-xs" onclick={() => goto(resolve('/admin'))}>
@@ -28,8 +29,12 @@
 			</Button>
 		{/if}
 	</div>
-	<div class="flex items-center gap-2">
-		<span class="text-xs text-zinc-400">{user?.email}</span>
+	<div class="flex items-center gap-3">
+		<kbd
+			class="rounded border border-border px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/70"
+			title="Command palette">⌘K</kbd
+		>
+		<span class="text-xs text-muted-foreground">{user?.email}</span>
 		<Button variant="ghost" size="sm" class="h-7 text-xs" onclick={onLogout}>Sign out</Button>
 	</div>
 </header>
