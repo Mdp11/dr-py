@@ -170,6 +170,14 @@
 			resetCheckout();
 			resetArtifacts();
 			clearSelection();
+			// refreshView() runs before refreshSummary() (mirroring boot()'s order)
+			// so the tree's first paint after a reload is view-shaped rather than
+			// briefly rendering against the stale pre-reload view. We deliberately
+			// do NOT call markViewUnresolved() here: that would flip the
+			// ContainmentTree's `loaded` gate false and wipe the user's expansion
+			// state (roots/childLevels/expandedElements). The view stays resolved
+			// across a mid-session reload; only boot() re-arms the gate.
+			await refreshView();
 			await refreshSummary();
 			try {
 				// resetCheckout() reset the role to 'viewer'; re-adopt role + lock TTL
@@ -180,7 +188,6 @@
 			} catch {
 				// role/ttl best-effort; editing stays gated as viewer until it loads
 			}
-			await refreshView();
 			await loadArtifacts().catch(() => {}); // artifact library is best-effort
 		} catch (err) {
 			console.error('Model reload failed', err);
