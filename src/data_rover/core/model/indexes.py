@@ -630,7 +630,7 @@ class IndexSet:
         else:
             self._refs_of.pop(entity_id, None)
 
-    # -- internals: search trigrams -------------------------------------------
+    # -- internals: search trigrams -----------------------------------------
 
     def _element_trigrams(self, element: Element) -> frozenset[str]:
         """Merged lowercased trigram set of the element's searchable text —

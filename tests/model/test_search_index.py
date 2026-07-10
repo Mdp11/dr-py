@@ -178,3 +178,13 @@ def test_candidates_degenerate_falls_back_to_scan(
     # a selective query stays on the index
     valve = _named(m, "Valve")
     assert m.indexes.search_candidates("valve") == {valve.id}
+
+
+def test_delete_property_removes_postings() -> None:
+    m = _model()
+    el = _named(m, "Pump")
+    m.set_property(el, "note", "cooling")
+    assert el.id in _posting_ids(m, "coo")
+    m.delete_property(el, "note")
+    assert "coo" not in m.indexes.search_postings
+    m.indexes.verify_consistent()

@@ -38,7 +38,7 @@ relationships:
 """
 
 #: small vocabulary => heavy substring/trigram collisions on purpose
-WORDS = ["pump", "pipe", "alpha", "beta", "valve", "grid", "hydro", "ab", "x"]
+WORDS = ["pump", "pipe", "alpha", "beta", "valve", "grid", "hydro", "ab", "x", "straße"]
 
 QUERIES = [
     "pump", "PUMP", "  pump  ",  # case/trim normalization
@@ -49,6 +49,7 @@ QUERIES = [
     "pu", "x",  # short: scan fallback
     "zzz",  # zero hits
     "grid alpha zzz",  # known trigrams + absent trigram
+    "straße",  # unicode: lowering-parity insurance
 ]
 
 
@@ -136,4 +137,13 @@ def test_index_search_matches_reference_scan(seed: int) -> None:
             want_ids, want_total = _reference(norm, type_)
             got_ids = [e["id"] for e in body["items"]]
             assert got_ids == want_ids[:500], f"q={q!r} type={type_!r} seed={seed}"
+            assert body["total"] == want_total, f"q={q!r} type={type_!r} seed={seed}"
+
+            res = client.get(
+                f"{API}/model/elements", params={**params, "limit": 20, "offset": 10}
+            )
+            assert res.status_code == 200, res.text
+            body = res.json()
+            got_ids = [e["id"] for e in body["items"]]
+            assert got_ids == want_ids[10:30], f"q={q!r} type={type_!r} seed={seed}"
             assert body["total"] == want_total, f"q={q!r} type={type_!r} seed={seed}"
