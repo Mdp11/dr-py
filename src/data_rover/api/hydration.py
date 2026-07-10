@@ -224,7 +224,9 @@ def _hydrate_session(project_id: str, progress: HydrationProgress) -> Session:
         # strict=False: hydration tolerates unknown types so a project rebound
         # onto a type-removing metamodel (Phase 6B) survives eviction; the
         # validation pipeline reports the conformance issues.
-        model = build_model_from_dicts(metamodel, raw, strict=False, on_progress=_on_build)
+        model = build_model_from_dicts(
+            metamodel, raw, strict=False, on_progress=_on_build
+        )
 
     session = Session(metamodel=metamodel, model=model)
     session.model_rev = model_rev

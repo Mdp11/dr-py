@@ -82,7 +82,9 @@ def model_status(
         if hp is not None:
             return ModelStatusOut(
                 state="hydrating",
-                hydration=HydrationStatusOut(phase=hp.phase, done=hp.done, total=hp.total),
+                hydration=HydrationStatusOut(
+                    phase=hp.phase, done=hp.done, total=hp.total
+                ),
             )
         return ModelStatusOut(state="cold")
     if session.model is None:
@@ -92,7 +94,9 @@ def model_status(
         return ModelStatusOut(
             state="validating",
             model_rev=session.model_rev,
-            validation=ValidationStatusOut(running=True, done=sweep.done, total=sweep.total),
+            validation=ValidationStatusOut(
+                running=True, done=sweep.done, total=sweep.total
+            ),
         )
     return ModelStatusOut(state="ready", model_rev=session.model_rev)
 
