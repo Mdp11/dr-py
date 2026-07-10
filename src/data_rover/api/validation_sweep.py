@@ -12,7 +12,10 @@ Locking: each chunk (validate + splice) runs under ``session.write_mutex``,
 released between chunks, so an ops batch is never starved for longer than one
 chunk. Abort conditions checked per chunk under the mutex: the session's model
 was replaced (``session.model is not model``), the validation state was
-cleared, or ``progress.cancel`` was set (eviction path).
+cleared, or ``progress.cancel`` was set (today exercised by tests only; the
+eviction path currently SKIPS eviction while a sweep is running — see the
+``SessionRegistry.evict`` guard in ``session.py`` — so ``cancel`` is reserved
+for future eviction wiring, not yet driven by it).
 
 Because a PRESENT ``ValidationState`` is installed up front,
 ``_ensure_validation_seeded`` (routes/ops.py) never re-runs a synchronous
@@ -26,6 +29,7 @@ deltas; cycles are pathological structural blockers).
 
 from __future__ import annotations
 
+import logging
 import threading
 from dataclasses import dataclass, field
 
@@ -35,6 +39,8 @@ from data_rover.core.validation.scope import Scope
 
 from .session import Session
 from .settings import get_settings
+
+logger = logging.getLogger(__name__)
 
 #: entities validated (and spliced) per write_mutex acquisition. Large enough
 #: to amortize lock/pipeline overhead, small enough that an interleaved ops
@@ -50,6 +56,10 @@ class SweepProgress:
     done: int = 0
     running: bool = True
     cancel: threading.Event = field(default_factory=threading.Event)
+    #: set True if the sweep died on an unexpected exception (see `_run`'s
+    #: catch-all). Not yet surfaced by GET /model/status; observable here for
+    #: future UI wiring.
+    error: bool = False
 
 
 def start_validation_sweep(
@@ -79,6 +89,9 @@ def start_validation_sweep(
 
 def _run(session: Session, model: Model, progress: SweepProgress) -> None:
     try:
+        # Taken without session.write_mutex; safe because each list(dict) call
+        # is a single C-level operation, atomic under the CPython GIL (would
+        # need the mutex on a free-threaded build).
         ids = list(model.elements.keys()) + list(model.relationships.keys())
         progress.total = len(ids)
         # one pipeline per sweep thread (validators carry mutable memo caches)
@@ -96,5 +109,15 @@ def _run(session: Session, model: Model, progress: SweepProgress) -> None:
                 issues = pipeline.validate(model, Scope(chunk))
                 state.replace(chunk, issues)
             progress.done = min(start + CHUNK_SIZE, len(ids))
+    except Exception:
+        # Pre-branch a raising validator failed the load request loudly (the
+        # sweep ran inline). Now it runs on a background daemon thread, so an
+        # uncaught exception here would die silently and leave the issue
+        # store permanently partial with zero signal. Log loudly and flag it.
+        logger.exception(
+            "validation sweep failed for project session; issue store left partial"
+        )
+        progress.error = True
+        return
     finally:
         progress.running = False
