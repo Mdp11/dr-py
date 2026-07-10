@@ -11,12 +11,14 @@ printed, not asserted — this is a measurement harness, not a regression gate.
 from __future__ import annotations
 
 import os
+import sys
 import time
 
 import pytest
 from fastapi.testclient import TestClient
 
 from data_rover.api.main import create_app
+from data_rover.api.session import get_session
 
 from .conftest import AUTH_HEADERS, seed_default_project
 
@@ -77,6 +79,23 @@ def test_perf_probe() -> None:
     )
     assert res.status_code == 200, res.text
     print(f"\nupload+install ({n} elements)              {(time.perf_counter() - t0) * 1000:8.1f} ms")
+
+    model = get_session().model
+    assert model is not None
+    idx = model.indexes
+    postings = idx.search_postings
+    entries = sum(len(v) for v in postings.values())
+    # measurement harness only: reaches into _trigrams_of for the size figure
+    approx_mb = (
+        sys.getsizeof(postings)
+        + sum(sys.getsizeof(k) + sys.getsizeof(v) for k, v in postings.items())
+        + sys.getsizeof(idx._trigrams_of)
+        + sum(sys.getsizeof(k) + sys.getsizeof(v) for k, v in idx._trigrams_of.items())
+    ) / 1e6
+    print(
+        f"trigram index: {len(postings)} trigrams, {entries} posting entries, "
+        f"~{approx_mb:.0f} MB (excl. shared id strings)"
+    )
 
     _timed_get(client, "containment roots, first page", f"{API}/model/containment/roots", {"limit": 100})
     _timed_get(client, "containment roots, deep page", f"{API}/model/containment/roots", {"limit": 100, "offset": max(half - 200, 0)})
