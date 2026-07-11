@@ -11,6 +11,7 @@ import {
 	getTableLoading,
 	getTablePage,
 	getTableSort,
+	handleTableModelRevChanged,
 	loadTablePage,
 	reloadTableDraft,
 	resetTableEditors,
@@ -302,6 +303,22 @@ describe('table-editor', () => {
 		// A fresh evaluate was issued under the new tab (the orphaned one + the
 		// re-issue = at least two calls).
 		expect(evaluate.mock.calls.length).toBeGreaterThanOrEqual(2);
+	});
+
+	it('handleTableModelRevChanged re-runs evaluateTable for every open table tab at its current offset', async () => {
+		const spy = vi
+			.spyOn(tablesApi, 'evaluateTable')
+			.mockResolvedValue({ ...EMPTY_PAGE, offset: 40 });
+		await ensureTableDraft('tbl:draft:10');
+		await loadTablePage('tbl:draft:10', 40);
+		spy.mockClear();
+
+		handleTableModelRevChanged();
+		await flush();
+
+		expect(spy).toHaveBeenCalledTimes(1);
+		const lastCall = spy.mock.calls.at(-1)![0];
+		expect(lastCall.offset ?? 0).toBe(40);
 	});
 
 	it('save-as landing while a load is in flight also re-issues under the new tab', async () => {

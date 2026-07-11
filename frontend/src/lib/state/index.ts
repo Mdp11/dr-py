@@ -206,6 +206,7 @@ export type { ViewChange } from './view-diff';
 export {
 	artifactHeaderById,
 	createNavigationArtifact,
+	createTableArtifact,
 	getArtifactHeaders,
 	getArtifactsLoading,
 	loadArtifacts,

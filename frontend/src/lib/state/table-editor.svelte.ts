@@ -29,6 +29,7 @@ import {
 	type TableSort
 } from '$lib/api/types';
 import { loadArtifacts } from './artifacts.svelte';
+import { onCommitEvent } from './realtime.svelte';
 import { bindTabToArtifact, retitleTab } from './workspace.svelte';
 
 const PAGE = 100;
@@ -333,6 +334,26 @@ export async function downloadTable(tabId: string): Promise<void> {
 	a.click();
 	URL.revokeObjectURL(url);
 }
+
+/**
+ * Feed reducer hook: fired after every commit/rebind feed event (a cell edit
+ * committed anywhere may have changed data any open table reads). Re-runs
+ * every OPEN table tab's page load at its current offset, fire-and-forget —
+ * `loadTablePage`'s own per-tab generation guard drops stale responses, so
+ * there is no need to await or serialize these. Drafts are refetched too:
+ * their `row_source`/columns may read model data that just changed even
+ * though the draft's definition itself is unsaved.
+ */
+export function handleTableModelRevChanged(): void {
+	for (const [tabId] of _drafts) {
+		void loadTablePage(tabId, _pages.get(tabId)?.offset ?? 0);
+	}
+}
+
+// Register once at module load: the realtime store taps every commit/rebind
+// feed event and fans it out to registered listeners. This is a one-way
+// import (realtime.svelte.ts does not import table-editor), so no cycle.
+onCommitEvent(() => handleTableModelRevChanged());
 
 export function resetTableEditors(): void {
 	_drafts.clear();

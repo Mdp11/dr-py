@@ -1,8 +1,9 @@
 <script lang="ts">
-	import { ChevronDown, ChevronRight, Plus, Route } from '@lucide/svelte';
+	import { ChevronDown, ChevronRight, Plus, Route, Table } from '@lucide/svelte';
 	import {
 		canEdit,
 		getArtifactHeaders,
+		openArtifactTab,
 		openNavigationTab,
 		removeArtifact,
 		renameArtifact
@@ -12,25 +13,59 @@
 	// same way (direct module path), so this mirrors the existing convention.
 	import { beginDrag } from '$lib/state/tree-drag.svelte';
 
-	let collapsed = $state(false);
-	const navigations = $derived(getArtifactHeaders().filter((a) => a.kind === 'navigation'));
+	type ArtifactKind = 'navigation' | 'table';
+
+	type SectionConfig = {
+		kind: ArtifactKind;
+		title: string;
+		/** Lowercase noun used in prompts/labels ("navigation" / "table"). */
+		singular: string;
+		icon: typeof Route;
+		open: (opts: { artifactId: string | null; title: string }) => string;
+	};
+
+	// Drives both sidebar sections from one place: New / open (dblclick) /
+	// rename / delete / drag all read `kind`/`title`/`singular`/`icon`/`open`
+	// off the matching entry rather than being duplicated per section.
+	const SECTIONS: SectionConfig[] = [
+		{
+			kind: 'navigation',
+			title: 'Navigations',
+			singular: 'navigation',
+			icon: Route,
+			open: (o) => openNavigationTab(o)
+		},
+		{
+			kind: 'table',
+			title: 'Tables',
+			singular: 'table',
+			icon: Table,
+			open: (o) => openArtifactTab('table', o)
+		}
+	];
+
+	let collapsed = $state<Record<ArtifactKind, boolean>>({ navigation: false, table: false });
 	const editable = $derived(canEdit());
 
-	function openNew(): void {
-		openNavigationTab({ artifactId: null, title: 'New navigation' });
+	function itemsFor(kind: ArtifactKind) {
+		return getArtifactHeaders().filter((a) => a.kind === kind);
 	}
-	function openExisting(id: string, name: string): void {
-		openNavigationTab({ artifactId: id, title: name });
+
+	function openNew(cfg: SectionConfig): void {
+		cfg.open({ artifactId: null, title: `New ${cfg.singular}` });
 	}
-	async function rename(id: string, current: string): Promise<void> {
-		const name = window.prompt('Rename navigation', current);
+	function openExisting(cfg: SectionConfig, id: string, name: string): void {
+		cfg.open({ artifactId: id, title: name });
+	}
+	async function rename(cfg: SectionConfig, id: string, current: string): Promise<void> {
+		const name = window.prompt(`Rename ${cfg.singular}`, current);
 		if (name && name !== current) await renameArtifact(id, name);
 	}
-	async function del(id: string, name: string): Promise<void> {
-		if (window.confirm(`Delete navigation "${name}"?`)) await removeArtifact(id);
+	async function del(cfg: SectionConfig, id: string, name: string): Promise<void> {
+		if (window.confirm(`Delete ${cfg.singular} "${name}"?`)) await removeArtifact(id);
 	}
 	const DRAG_THRESHOLD_PX = 4;
-	function onPointerDown(e: PointerEvent, id: string): void {
+	function onPointerDown(e: PointerEvent, cfg: SectionConfig, id: string): void {
 		if (e.button !== 0 || !e.isPrimary) return;
 		const sx = e.clientX;
 		const sy = e.clientY;
@@ -39,7 +74,7 @@
 			if (started) return;
 			if (Math.hypot(ev.clientX - sx, ev.clientY - sy) < DRAG_THRESHOLD_PX) return;
 			started = true;
-			beginDrag({ kind: 'artifact', id, artifactKind: 'navigation' }, true);
+			beginDrag({ kind: 'artifact', id, artifactKind: cfg.kind }, true);
 			cleanup();
 		};
 		const up = (): void => cleanup();
@@ -54,53 +89,63 @@
 	}
 </script>
 
-<section class="border-b border-border px-2 py-1.5">
-	<div class="flex items-center justify-between">
-		<button
-			type="button"
-			class="flex items-center gap-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-			onclick={() => (collapsed = !collapsed)}
-		>
-			{#if collapsed}<ChevronRight class="size-3" />{:else}<ChevronDown class="size-3" />{/if}
-			Navigations
-			<span class="text-muted-foreground/50">({navigations.length})</span>
-		</button>
-		{#if editable}
+{#snippet section(cfg: SectionConfig)}
+	{@const Icon = cfg.icon}
+	{@const items = itemsFor(cfg.kind)}
+	<section class="border-b border-border px-2 py-1.5">
+		<div class="flex items-center justify-between">
 			<button
 				type="button"
-				aria-label="New navigation"
-				class="rounded p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-				onclick={openNew}
+				class="flex items-center gap-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+				onclick={() => (collapsed = { ...collapsed, [cfg.kind]: !collapsed[cfg.kind] })}
 			>
-				<Plus class="size-3.5" />
+				{#if collapsed[cfg.kind]}<ChevronRight class="size-3" />{:else}<ChevronDown
+						class="size-3"
+					/>{/if}
+				{cfg.title}
+				<span class="text-muted-foreground/50">({items.length})</span>
 			</button>
-		{/if}
-	</div>
-	{#if !collapsed}
-		<ul class="mt-1 space-y-0.5">
-			{#each navigations as nav (nav.id)}
-				<li
-					data-artifact-id={nav.id}
-					class="group flex cursor-default items-center gap-1.5 rounded px-1.5 py-0.5 text-xs text-foreground/80 transition-colors hover:bg-muted"
-					onpointerdown={(e) => onPointerDown(e, nav.id)}
-					ondblclick={() => openExisting(nav.id, nav.name)}
+			{#if editable}
+				<button
+					type="button"
+					aria-label={`New ${cfg.singular}`}
+					class="rounded p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+					onclick={() => openNew(cfg)}
 				>
-					<Route class="size-3.5 shrink-0 text-info" />
-					<span class="flex-1 truncate">{nav.name}</span>
-					{#if editable}
-						<button
-							type="button"
-							class="hidden text-muted-foreground transition-colors hover:text-foreground group-hover:inline"
-							onclick={() => void rename(nav.id, nav.name)}>Rename</button
-						>
-						<button
-							type="button"
-							class="hidden text-muted-foreground transition-colors hover:text-destructive group-hover:inline"
-							onclick={() => void del(nav.id, nav.name)}>Delete</button
-						>
-					{/if}
-				</li>
-			{/each}
-		</ul>
-	{/if}
-</section>
+					<Plus class="size-3.5" />
+				</button>
+			{/if}
+		</div>
+		{#if !collapsed[cfg.kind]}
+			<ul class="mt-1 space-y-0.5">
+				{#each items as item (item.id)}
+					<li
+						data-artifact-id={item.id}
+						class="group flex cursor-default items-center gap-1.5 rounded px-1.5 py-0.5 text-xs text-foreground/80 transition-colors hover:bg-muted"
+						onpointerdown={(e) => onPointerDown(e, cfg, item.id)}
+						ondblclick={() => openExisting(cfg, item.id, item.name)}
+					>
+						<Icon class="size-3.5 shrink-0 text-info" />
+						<span class="flex-1 truncate">{item.name}</span>
+						{#if editable}
+							<button
+								type="button"
+								class="hidden text-muted-foreground transition-colors hover:text-foreground group-hover:inline"
+								onclick={() => void rename(cfg, item.id, item.name)}>Rename</button
+							>
+							<button
+								type="button"
+								class="hidden text-muted-foreground transition-colors hover:text-destructive group-hover:inline"
+								onclick={() => void del(cfg, item.id, item.name)}>Delete</button
+							>
+						{/if}
+					</li>
+				{/each}
+			</ul>
+		{/if}
+	</section>
+{/snippet}
+
+{#each SECTIONS as cfg (cfg.kind)}
+	{@render section(cfg)}
+{/each}

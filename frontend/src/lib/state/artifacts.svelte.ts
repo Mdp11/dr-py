@@ -5,7 +5,12 @@
  * refetch: the list is small and headers are cheap.
  */
 import * as api from '$lib/api/artifacts';
-import type { Artifact, ArtifactHeader, NavigationDefinition } from '$lib/api/types';
+import type {
+	Artifact,
+	ArtifactHeader,
+	NavigationDefinition,
+	TableDefinition
+} from '$lib/api/types';
 import { scrubArtifactFromView } from './view.svelte';
 
 let _items = $state<ArtifactHeader[]>([]);
@@ -36,6 +41,19 @@ export async function createNavigationArtifact(
 ): Promise<Artifact> {
 	const created = await api.createArtifact({
 		kind: 'navigation',
+		name,
+		payload: payload as unknown as Record<string, unknown>
+	});
+	await loadArtifacts();
+	return created;
+}
+
+export async function createTableArtifact(
+	name: string,
+	payload: TableDefinition
+): Promise<Artifact> {
+	const created = await api.createArtifact({
+		kind: 'table',
 		name,
 		payload: payload as unknown as Record<string, unknown>
 	});
