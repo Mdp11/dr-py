@@ -4,7 +4,7 @@ list per session. No write_mutex — same benign-race stance as routes/read.py."
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session as DbSession
 
 from data_rover.core.model.model import Model
@@ -23,6 +23,7 @@ from data_rover.core.table.evaluate import (
     SortTooLargeError,
     TableLimits,
     build_rows,
+    iter_export_rows,
     order_rows,
 )
 from data_rover.core.table.resolve import _resolve_table_navigation_refs
@@ -40,6 +41,7 @@ from ..schemas import (
     TableRowOut,
 )
 from ..table_cache import table_fingerprint
+from ..table_export import build_workbook
 from .read import _tree_item
 
 router = APIRouter()
@@ -178,4 +180,71 @@ def evaluate_table(
         truncated=truncated,
         offset=payload.offset,
         model_rev=session.model_rev,
+    )
+
+
+@router.post("/tables/export")
+def export_table(
+    payload: EvaluateTableIn,
+    project_id: str,
+    session: Session = Depends(get_request_session),
+    db: DbSession = Depends(get_db),
+) -> Response:
+    """Read-only (viewer-callable; listed in authz._READ_ONLY_POST_SUFFIXES).
+    Exports the WHOLE table (every row `build_rows`/`order_rows` produce,
+    honoring `max_rows` and the requested sort) as a single-sheet `.xlsx` —
+    unlike `/tables/evaluate`, there is no `offset`/`limit` windowing here.
+
+    Cells are evaluated with `max_cell_elements` overridden to effectively
+    unbounded (10**9): the interactive page route caps a navigation cell's
+    element list at `cell_cap` purely for on-screen display, but an export
+    must contain the COMPLETE reached set for every navigation cell — capping
+    it here would silently drop data the user asked to export. Row count is
+    still governed by `TableLimits.max_rows`; `X-Table-Truncated` is set only
+    when `build_rows` reports that limit was hit, never for cell-level
+    capping (which cannot happen with this override)."""
+    metamodel, model = require_model(session)
+    try:
+        defn = _resolve_table(payload, project_id, db)
+        sort = (
+            SortSpec(column=payload.sort.column, direction=payload.sort.direction)
+            if payload.sort is not None
+            else None
+        )
+        if sort is not None and not (0 <= sort.column < len(defn.columns)):
+            raise ValueError(
+                f"sort column {sort.column} out of range "
+                f"(table has {len(defn.columns)} columns)"
+            )
+        limits = TableLimits(max_cell_elements=10**9)  # export never caps cells
+        keys, truncated = build_rows(metamodel, model, defn, limits)
+        ordered = order_rows(metamodel, model, defn, keys, sort, limits)
+    except LookupError as exc:
+        raise HTTPException(status_code=422, detail=f"unknown artifact {exc}") from exc
+    except (NavigationResolveError, SortTooLargeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    name = "table"
+    if payload.artifact_id is not None:
+        row = content.get_artifact(db, payload.artifact_id)
+        if row is not None:
+            name = row.name
+    headers = [c.header or c.kind for c in defn.columns]
+    widths = [c.width_px for c in defn.columns]
+    blob = build_workbook(
+        model,
+        headers,
+        widths,
+        name,
+        iter_export_rows(metamodel, model, defn, ordered, limits),
+    )
+    resp_headers = {"Content-Disposition": f'attachment; filename="{name}.xlsx"'}
+    if truncated:
+        resp_headers["X-Table-Truncated"] = "true"
+    return Response(
+        content=blob,
+        media_type=(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ),
+        headers=resp_headers,
     )

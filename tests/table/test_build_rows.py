@@ -144,3 +144,27 @@ def test_column_sourced_from_expand_column_binds_that_rows_element():
     src = defn.columns[2].source
     resolved = resolve_source_elements(mm, model, defn, a_row, src, base_slots, TableLimits())
     assert resolved == [a_row[1]]
+
+
+def test_iter_export_rows_matches_evaluate_cells_regardless_of_chunk_size():
+    # Chunking is purely a memory-bounding detail (Task 10) — it must not
+    # change which rows are produced or their order, so a chunk smaller than
+    # the row count must agree byte-for-byte with one unchunked evaluate_cells
+    # call over the same keys.
+    from data_rover.core.table.cells import evaluate_cells
+    from data_rover.core.table.evaluate import iter_export_rows
+
+    mm = _mm(); model, ids = _fixture()
+    defn = TABLE_ADAPTER.validate_python({
+        "row_source": {"kind": "scope", "types": ["Block"]},
+        "columns": [
+            {"kind": "element", "source": {"kind": "row"}},
+            {"kind": "property", "source": {"kind": "row"}, "name": "name"},
+        ],
+    })
+    keys, _ = build_rows(mm, model, defn)
+    limits = TableLimits()
+    expected = evaluate_cells(mm, model, defn, keys, limits)
+    chunked = list(iter_export_rows(mm, model, defn, keys, limits, chunk=1))
+    assert chunked == expected
+    assert len(chunked) == len(keys)

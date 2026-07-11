@@ -9,8 +9,12 @@ runs per page. See core/table/schema.py for the binding model.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import Any, Literal, Union
+from typing import TYPE_CHECKING, Any, Literal, Union
+
+if TYPE_CHECKING:
+    from .cells import Cell
 
 from data_rover.core.metamodel.schema import Metamodel
 from data_rover.core.model.model import Model
@@ -391,3 +395,34 @@ def order_rows(
     empty = [d for d in decorated if d[0] == 1]
     non_empty.sort(key=lambda d: d[1], reverse=(sort.direction == "desc"))
     return [d[2] for d in non_empty] + [d[2] for d in empty]
+
+
+# ---- export (Task 10) --------------------------------------------------------
+#
+# The interactive route (`/tables/evaluate`) evaluates one PAGE of `keys` at a
+# time; export needs the WHOLE (already built+ordered) row set, which can be up
+# to `max_rows` long. `iter_export_rows` re-slices `keys` into `chunk`-sized
+# windows and evaluates each through the SAME `evaluate_cells` the page route
+# uses, so export cells agree with interactive cells bit-for-bit (module-local
+# import of `.cells`, matching the existing `_expand_values` pattern in this
+# file: `cells.py` imports FROM `evaluate.py`, so a module-level import here
+# would cycle). This is a generator purely to bound peak memory for a large
+# export — it does NOT change what gets exported (the caller still owns the
+# full, uncapped `TableLimits` used for every chunk). Core stays xlsx-free:
+# this function only orchestrates cell evaluation, never touches openpyxl —
+# the writer lives in `api/table_export.py`.
+
+
+def iter_export_rows(
+    mm: Metamodel,
+    model: Model,
+    defn: TableDefinition,
+    keys: list[RowKey],
+    limits: TableLimits = TableLimits(),
+    chunk: int = 1000,
+) -> Iterator[list["Cell"]]:
+    """Yield evaluated cell rows for `keys`, in order, `chunk` rows at a time."""
+    from .cells import evaluate_cells
+
+    for i in range(0, len(keys), chunk):
+        yield from evaluate_cells(mm, model, defn, keys[i : i + chunk], limits)
