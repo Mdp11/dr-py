@@ -15,6 +15,7 @@
 		saveTableDraft,
 		setTableName
 	} from '$lib/state';
+	import ColumnManager from './ColumnManager.svelte';
 	import TableGrid from './TableGrid.svelte';
 
 	let { tabId }: { tabId: string } = $props();
@@ -110,6 +111,9 @@
 		{/if}
 		{#if saveError}
 			<p class="px-3 py-1 text-xs text-destructive">{saveError}</p>
+		{/if}
+		{#if editable}
+			<ColumnManager {tabId} />
 		{/if}
 		<div class="min-h-0 flex-1">
 			<TableGrid {tabId} />
