@@ -10,7 +10,8 @@
  * pointing at or past its own new position (columns may only source columns
  * that precede them — a forward or self reference is not evaluable).
  */
-import type { Column, ColumnSource, TableDefinition } from '$lib/api/types';
+import type { Column, ColumnSource, NavigationDefinition, TableDefinition } from '$lib/api/types';
+import { chainColumns } from '$lib/navigation/tree';
 
 export class ColumnInUseError extends Error {}
 
@@ -97,6 +98,48 @@ export function setColumnMode(
 	const c = next.columns[index];
 	if (c.kind !== 'element') c.mode = mode;
 	return next;
+}
+
+/**
+ * Build a transient TableDefinition ("Open as table") from a navigation
+ * draft. `chainColumns` only accepts a `PathNavigation` — a `set_op`
+ * definition has no single chain to project columns from, so it falls back
+ * to one `Start` column sourced from chain_index 0, keeping `columns`
+ * non-empty (the schema's minimum) until the table editor lets the user pick
+ * real columns.
+ */
+export function navigationAsTableDefinition({
+	artifactId,
+	definition
+}: {
+	artifactId: string | null;
+	definition: NavigationDefinition;
+}): TableDefinition {
+	const columns: Column[] =
+		definition.kind === 'path'
+			? chainColumns(definition).map((col) => ({
+					kind: 'element',
+					source: { kind: 'row', chain_index: col.index },
+					header: col.label,
+					width_px: null
+				}))
+			: [
+					{
+						kind: 'element',
+						source: { kind: 'row', chain_index: 0 },
+						header: 'Start',
+						width_px: null
+					}
+				];
+	return {
+		schema_version: 1,
+		row_source: {
+			kind: 'chains',
+			navigation: artifactId ? { ref: artifactId } : { definition }
+		},
+		columns,
+		default_cell_mode: 'collapse'
+	};
 }
 
 export function columnLabel(col: Column): string {

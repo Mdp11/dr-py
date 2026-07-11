@@ -1,6 +1,12 @@
 <script lang="ts">
 	import type { Element } from '$lib/api/types';
-	import { artifactHeaderById, indexIssues, lockBadgeFor, openNavigationTab } from '$lib/state';
+	import {
+		artifactHeaderById,
+		indexIssues,
+		lockBadgeFor,
+		openArtifactTab,
+		openNavigationTab
+	} from '$lib/state';
 	import {
 		AlertCircle,
 		AlertTriangle,
@@ -11,6 +17,7 @@
 		Lock,
 		MoreHorizontal,
 		Route,
+		Table,
 		X
 	} from '@lucide/svelte';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
@@ -165,7 +172,11 @@
 
 	function onOpenArtifact(): void {
 		if (!artifactHeader) return;
-		openNavigationTab({ artifactId, title: artifactHeader.name });
+		if (artifactHeader.kind === 'table') {
+			openArtifactTab('table', { artifactId, title: artifactHeader.name });
+		} else {
+			openNavigationTab({ artifactId, title: artifactHeader.name });
+		}
 	}
 
 	async function onRemoveArtifact(e: MouseEvent): Promise<void> {
@@ -309,7 +320,11 @@
 				>·</span
 			>
 			<span class="flex h-4 w-4 shrink-0 items-center justify-center text-info">
-				<Route class="h-3 w-3" />
+				{#if artifactHeader.kind === 'table'}
+					<Table class="h-3 w-3" />
+				{:else}
+					<Route class="h-3 w-3" />
+				{/if}
 			</span>
 			<span class="flex-1 truncate" title={artifactHeader.name}>
 				{artifactHeader.name}
