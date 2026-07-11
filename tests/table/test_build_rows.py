@@ -1,0 +1,146 @@
+"""Row-builder tests: scope/navigation/chain row sources, expand columns
+producing a cross product, keep_empty semantics, max_rows truncation, and the
+critical base_slots/partial-key invariant for a column sourced from an expand
+column (see evaluate.py's `resolve_source_elements` docstring)."""
+
+from data_rover.core.metamodel.schema import ElementType, Metamodel, PropertyDef, RelationshipType
+from data_rover.core.model.model import Model
+from data_rover.core.table.evaluate import TableLimits, build_rows
+from data_rover.core.table.schema import TABLE_ADAPTER
+
+
+def _mm() -> Metamodel:
+    return Metamodel(
+        elements=[
+            ElementType(
+                name="Block",
+                properties=[
+                    PropertyDef(name="name", datatype="string"),
+                    PropertyDef(name="mass", datatype="integer", multiplicity="0..*"),
+                ],
+            ),
+        ],
+        relationships=[
+            RelationshipType(name="BlockHasPart", source="Block", target="Block"),
+        ],
+    )
+
+
+def _fixture() -> tuple[Model, dict[str, str]]:
+    """root: a Block owning 2 parts (part1, part2); leaf: a Block with no parts."""
+    model = Model(_mm())
+    ids: dict[str, str] = {}
+    for key, name in [("root", "Root"), ("part1", "Part 1"), ("part2", "Part 2"), ("leaf", "Leaf")]:
+        el = model.create_element("Block")
+        model.set_property(el, "name", name)
+        ids[key] = el.id
+    model.connect("BlockHasPart", ids["root"], ids["part1"])
+    model.connect("BlockHasPart", ids["root"], ids["part2"])
+    return model, ids
+
+
+def test_scope_rows_one_binding_per_element():
+    mm = _mm(); model, ids = _fixture()
+    defn = TABLE_ADAPTER.validate_python({
+        "row_source": {"kind": "scope", "types": ["Block"]},
+        "columns": [{"kind": "element", "source": {"kind": "row"}}],
+    })
+    keys, truncated = build_rows(mm, model, defn)
+    assert not truncated
+    assert sorted(keys) == sorted((eid,) for eid in ids.values())
+
+
+def test_expand_navigation_column_cross_product():
+    mm = _mm(); model, ids = _fixture()
+    defn = TABLE_ADAPTER.validate_python({
+        "row_source": {"kind": "scope", "types": ["Block"]},
+        "columns": [
+            {"kind": "element", "source": {"kind": "row"}},
+            {"kind": "navigation", "source": {"kind": "row"}, "mode": "expand",
+             "navigation": {"definition": {"kind": "path", "start": {"kind": "row"},
+                 "steps": [{"kind": "relationship",
+                            "relationship_type": "BlockHasPart", "direction": "out"}]}}},
+        ],
+    })
+    keys, _ = build_rows(mm, model, defn)
+    # every key is (block_id, part_id); the parent appears once per owned part
+    parent = ids["root"]
+    part_keys = [k for k in keys if k[0] == parent]
+    assert len(part_keys) == 2  # root owns 2 parts in the fixture
+    assert all(len(k) == 2 for k in part_keys)
+
+
+def test_expand_keep_empty_true_keeps_barren_row():
+    mm = _mm(); model, ids = _fixture()
+    leaf = ids["leaf"]  # a Block with no outgoing BlockHasPart
+    defn = TABLE_ADAPTER.validate_python({
+        "row_source": {"kind": "scope", "types": ["Block"]},
+        "columns": [
+            {"kind": "element", "source": {"kind": "row"}},
+            {"kind": "navigation", "source": {"kind": "row"}, "mode": "expand",
+             "keep_empty": True,
+             "navigation": {"definition": {"kind": "path", "start": {"kind": "row"},
+                 "steps": [{"kind": "relationship",
+                            "relationship_type": "BlockHasPart", "direction": "out"}]}}},
+        ],
+    })
+    keys, _ = build_rows(mm, model, defn)
+    assert (leaf, None) in keys
+
+
+def test_expand_keep_empty_false_drops_barren_row():
+    mm = _mm(); model, ids = _fixture()
+    leaf = ids["leaf"]
+    defn = TABLE_ADAPTER.validate_python({
+        "row_source": {"kind": "scope", "types": ["Block"]},
+        "columns": [
+            {"kind": "element", "source": {"kind": "row"}},
+            {"kind": "navigation", "source": {"kind": "row"}, "mode": "expand",
+             "keep_empty": False,
+             "navigation": {"definition": {"kind": "path", "start": {"kind": "row"},
+                 "steps": [{"kind": "relationship",
+                            "relationship_type": "BlockHasPart", "direction": "out"}]}}},
+        ],
+    })
+    keys, _ = build_rows(mm, model, defn)
+    assert all(k[0] != leaf for k in keys)
+
+
+def test_max_rows_truncates():
+    mm = _mm(); model, ids = _fixture()
+    defn = TABLE_ADAPTER.validate_python({
+        "row_source": {"kind": "scope", "types": ["Block"]},
+        "columns": [{"kind": "element", "source": {"kind": "row"}}],
+    })
+    keys, truncated = build_rows(mm, model, defn, TableLimits(max_rows=1))
+    assert truncated and len(keys) == 1
+
+
+def test_column_sourced_from_expand_column_binds_that_rows_element():
+    # col0 expands owned parts (one row per part); col1 navigates FROM col0.
+    # Each row's col1 must root at THAT row's part, not the parent's whole set.
+    mm = _mm(); model, ids = _fixture()
+    from data_rover.core.table.evaluate import resolve_source_elements
+
+    defn = TABLE_ADAPTER.validate_python({
+        "row_source": {"kind": "scope", "types": ["Block"]},
+        "columns": [
+            {"kind": "element", "source": {"kind": "row"}},
+            {"kind": "navigation", "source": {"kind": "row"}, "mode": "expand",
+             "navigation": {"definition": {"kind": "path", "start": {"kind": "row"},
+                 "steps": [{"kind": "relationship",
+                            "relationship_type": "BlockHasPart", "direction": "out"}]}}},
+            {"kind": "navigation", "source": {"kind": "column", "index": 1},
+             "mode": "collapse",
+             "navigation": {"definition": {"kind": "path", "start": {"kind": "row"},
+                 "steps": []}}},  # identity nav: returns the source element itself
+        ],
+    })
+    keys, _ = build_rows(mm, model, defn)
+    base_slots = 1
+    # for a row whose expand slot is a specific part, col2's source resolves to
+    # exactly that part (length-1), never the parent's full part set.
+    a_row = next(k for k in keys if k[0] == ids["root"] and k[1] is not None)
+    src = defn.columns[2].source
+    resolved = resolve_source_elements(mm, model, defn, a_row, src, base_slots, TableLimits())
+    assert resolved == [a_row[1]]
