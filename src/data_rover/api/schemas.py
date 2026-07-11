@@ -683,6 +683,7 @@ class EvaluateNavigationIn(BaseModel):
 
     definition: NavigationDefinition | None = None
     artifact_id: str | None = None
+    row_element_id: str | None = None
     limit: int = Field(100, ge=1, le=500)
     offset: int = Field(0, ge=0)
 

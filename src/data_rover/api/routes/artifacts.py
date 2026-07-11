@@ -222,7 +222,10 @@ def evaluate_navigation(
         else:
             assert payload.definition is not None  # schema: exactly one
             defn = resolve_refs(payload.definition, _fetch)
-        result = evaluate(metamodel, model, defn)
+        row_elements = (
+            [payload.row_element_id] if payload.row_element_id is not None else None
+        )
+        result = evaluate(metamodel, model, defn, row_elements=row_elements)
     except LookupError as exc:
         raise HTTPException(
             status_code=422, detail=f"unknown navigation artifact {exc}"
