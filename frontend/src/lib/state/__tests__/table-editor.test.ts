@@ -8,6 +8,7 @@ import {
 	getTableConflict,
 	getTableDraft,
 	getTableError,
+	getTableLoading,
 	getTablePage,
 	getTableSort,
 	loadTablePage,
@@ -19,7 +20,7 @@ import {
 	setTableSort,
 	updateTableDefinition
 } from '../table-editor.svelte';
-import { getDynamicTabs, resetWorkspaceTabs } from '../workspace.svelte';
+import { resetWorkspaceTabs } from '../workspace.svelte';
 import { resetArtifacts } from '../artifacts.svelte';
 
 /** Flush the microtask/macrotask queue so a fire-and-forget `loadTablePage`
@@ -126,6 +127,8 @@ describe('table-editor', () => {
 		setTableName('tbl:draft:5', 'Mine');
 		await saveTableDraft('tbl:draft:5');
 		expect(create).toHaveBeenCalled();
+		// The old draft-tab key must not leak after the rebind.
+		expect(getTableDraft('tbl:draft:5')).toBeUndefined();
 		expect(getTableDraft('tbl:a9')?.artifactRev).toBe(1);
 		expect(getTableDraft('tbl:a9')?.dirty).toBe(false);
 	});
@@ -240,9 +243,13 @@ describe('table-editor', () => {
 		setTableSort('tbl:draft:7', { column: 0, direction: 'asc' });
 		await flush();
 		closeTableDraft('tbl:draft:7');
+		// closeTableDraft touches all six per-tab maps — every one must be cleared.
 		expect(getTableDraft('tbl:draft:7')).toBeUndefined();
 		expect(getTablePage('tbl:draft:7')).toBeUndefined();
 		expect(getTableSort('tbl:draft:7')).toBeUndefined();
+		expect(getTableLoading('tbl:draft:7')).toBe(false);
+		expect(getTableError('tbl:draft:7')).toBeUndefined();
+		expect(getTableConflict('tbl:draft:7')).toBeUndefined();
 	});
 
 	it('a stale evaluate response after a newer definition edit is dropped', async () => {
@@ -261,7 +268,81 @@ describe('table-editor', () => {
 		expect(getTablePage('tbl:draft:8')?.total).not.toBe(1);
 	});
 
-	it('unaffected by workspace tab registry (no tab required to hold state)', () => {
-		expect(getDynamicTabs()).toEqual([]);
+	it('a save landing while a load is in flight does not strand the new tab on loading', async () => {
+		// Hold the first evaluate open, resolve the re-issued one immediately.
+		let resolveInflight!: (v: typeof EMPTY_PAGE) => void;
+		const inflightPage = new Promise<typeof EMPTY_PAGE>((res) => (resolveInflight = res));
+		const evaluate = vi
+			.spyOn(tablesApi, 'evaluateTable')
+			.mockImplementationOnce(() => inflightPage)
+			.mockResolvedValue(EMPTY_PAGE);
+		vi.spyOn(artifactsApi, 'createArtifact').mockResolvedValue({
+			id: 'a9',
+			kind: 'table',
+			name: 'Mine',
+			artifact_rev: 1,
+			updated_at: '',
+			updated_by: null,
+			payload: {}
+		});
+		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({ items: [] });
+
+		const draft = await ensureTableDraft('tbl:draft:9');
+		// Kick a load and leave it unresolved (updateTableDefinition fires it).
+		updateTableDefinition('tbl:draft:9', { ...draft.definition });
+		expect(getTableLoading('tbl:draft:9')).toBe(true);
+		// Save before that load resolves: the draft key is retired mid-flight.
+		await saveTableDraft('tbl:draft:9');
+		// The orphaned request finally resolves — but its generation is stale now.
+		resolveInflight(EMPTY_PAGE);
+		await flush();
+		// The re-issued load under the new tab id must have settled it.
+		expect(getTableLoading('tbl:a9')).toBe(false);
+		expect(getTablePage('tbl:a9')).toBeDefined();
+		// A fresh evaluate was issued under the new tab (the orphaned one + the
+		// re-issue = at least two calls).
+		expect(evaluate.mock.calls.length).toBeGreaterThanOrEqual(2);
+	});
+
+	it('save-as landing while a load is in flight also re-issues under the new tab', async () => {
+		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue({
+			id: 'a1',
+			kind: 'table',
+			name: 'Sensors',
+			artifact_rev: 4,
+			updated_at: '',
+			updated_by: null,
+			payload: {
+				schema_version: 1,
+				default_cell_mode: 'collapse',
+				row_source: { kind: 'scope', types: [], criteria: [] },
+				columns: [{ kind: 'element', source: { kind: 'row', chain_index: 0 }, header: '' }]
+			}
+		});
+		let resolveInflight!: (v: typeof EMPTY_PAGE) => void;
+		const inflightPage = new Promise<typeof EMPTY_PAGE>((res) => (resolveInflight = res));
+		vi.spyOn(tablesApi, 'evaluateTable')
+			.mockResolvedValueOnce(EMPTY_PAGE) // ensureTableDraft's first page
+			.mockImplementationOnce(() => inflightPage) // the edit's in-flight load
+			.mockResolvedValue(EMPTY_PAGE); // the re-issued load
+		vi.spyOn(artifactsApi, 'createArtifact').mockResolvedValue({
+			id: 'a9',
+			kind: 'table',
+			name: 'Copy',
+			artifact_rev: 1,
+			updated_at: '',
+			updated_by: null,
+			payload: {}
+		});
+		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({ items: [] });
+
+		const draft = await ensureTableDraft('tbl:a1');
+		updateTableDefinition('tbl:a1', { ...draft.definition });
+		expect(getTableLoading('tbl:a1')).toBe(true);
+		await saveAsTableDraft('tbl:a1', 'Copy');
+		resolveInflight(EMPTY_PAGE);
+		await flush();
+		expect(getTableLoading('tbl:a9')).toBe(false);
+		expect(getTablePage('tbl:a9')).toBeDefined();
 	});
 });

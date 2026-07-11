@@ -81,9 +81,20 @@ function isCurrent(tabId: string, gen: number): boolean {
 
 /**
  * Move every per-tab entry (page, sort, loading, error, generation) from
- * `oldTab` to `newTab`. Used by the first-save path, where a `tbl:draft:*`
- * tab is rebound to `tbl:<id>`. The draft itself is moved separately by the
- * caller (it also gets new artifact fields, not a plain carry-over).
+ * `oldTab` to `newTab`. Used by the first-save/fork paths, where a
+ * `tbl:draft:*` tab is rebound to `tbl:<id>`. The draft itself is moved
+ * separately by the caller (it also gets new artifact fields, not a plain
+ * carry-over), and MUST already be `_drafts.set(newTab, …)` in place before
+ * this runs.
+ *
+ * A load in flight when the save lands is closed over `oldTab`: once `oldTab`'s
+ * draft is deleted its `isCurrent(oldTab, gen)` check fails, so its response is
+ * orphaned and never clears `_loading`. Moving a `loading: true` marker to
+ * `newTab` without a fresh request would therefore strand the new tab on
+ * "loading forever". So: after moving, if the marker is still `true`, re-issue
+ * the load under `newTab` (which supersedes the orphaned generation and lands a
+ * real page). Mirrors navigation-editor.svelte.ts's `rekeyTab` safeguard
+ * ("moved previews still marked loading are re-issued immediately").
  */
 function moveTabState(oldTab: string, newTab: string): void {
 	const page = _pages.get(oldTab);
@@ -105,6 +116,11 @@ function moveTabState(oldTab: string, newTab: string): void {
 	const gen = _generations.get(oldTab);
 	_generations.delete(oldTab);
 	if (gen !== undefined) _generations.set(newTab, gen);
+
+	// The orphaned in-flight load will never settle under `newTab`; re-issue it
+	// so the new tab does not hang on `loading: true`. Reads the draft under the
+	// NEW id (the caller has already set it), same as nav's rekeyTab re-run.
+	if (loading === true) void loadTablePage(newTab, _pages.get(newTab)?.offset ?? 0);
 }
 
 export function getTableDraft(tabId: string): TableDraft | undefined {
