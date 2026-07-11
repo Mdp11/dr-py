@@ -35,10 +35,16 @@ class View(BaseModel):
     are not referenced by any folder render at the root, alongside top-level
     folders. Only root-level elements (no containment parent) may be placed;
     placements of contained elements are reported as warnings and ignored.
+
+    `artifacts` mirrors `Folder.artifacts` but at the root: an artifact placed
+    here renders alongside top-level folders/elements instead of inside a
+    folder. Additive field — old view documents without it parse unchanged
+    with an empty list (see test_old_view_without_artifacts_still_valid).
     """
 
     name: str
     folders: list[Folder] = Field(default_factory=list)
+    artifacts: list[ArtifactRef] = Field(default_factory=list)
 
 
 Folder.model_rebuild()
