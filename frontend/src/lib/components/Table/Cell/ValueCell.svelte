@@ -47,23 +47,31 @@
 
 	// Staged-overlay: an in-flight (uncommitted) edit to this property should
 	// win over the last-loaded page value so the cell reflects the edit
-	// immediately. Newest-first so the most recent staged patch for this
-	// column applies if there happens to be more than one in the queue.
-	const stagedPatch = $derived.by(() => {
+	// immediately. `stagedValue` is computed only inside the `columnName`
+	// truthy guard, so the lookup key is a plain `string` (no cross-derivation
+	// cast). It's wrapped in `{ value }` so a legitimately-staged `undefined`
+	// (a property cleared to null/undefined) is distinguishable from "no
+	// staged edit". Newest-first so the most recent staged patch wins if more
+	// than one is queued for this column.
+	const stagedValue = $derived.by((): { value: unknown } | undefined => {
 		if (cell.element_id === null || !columnName) return undefined;
 		const ops = getStagedOpsFor(cell.element_id);
 		for (let i = ops.length - 1; i >= 0; i--) {
 			const o = ops[i];
-			if (isPropertyPatchOp(o) && columnName in o.properties_patch) return o;
+			if (isPropertyPatchOp(o) && columnName in o.properties_patch) {
+				return { value: o.properties_patch[columnName] };
+			}
 		}
 		return undefined;
 	});
 
-	const shown = $derived(
-		stagedPatch !== undefined ? stagedPatch.properties_patch[columnName as string] : cell.value
-	);
+	const shown = $derived(stagedValue !== undefined ? stagedValue.value : cell.value);
 
-	const text = $derived(cell.present || stagedPatch !== undefined ? String(shown ?? '') : '');
+	// Read-only text: the `cell.present` gate is exact per the brief (a
+	// not-present cell renders empty, never a leftover staged value), while
+	// `shown` stays staged-aware so a present, editable cell's fallback text
+	// still reflects an in-flight edit.
+	const text = $derived(cell.present ? String(shown ?? '') : '');
 
 	async function commitEdit(next: unknown): Promise<void> {
 		if (!cell.element_id || !columnName) return;

@@ -82,4 +82,26 @@ describe('ValueCell editing', () => {
 			unmount(c);
 		}
 	});
+
+	it('renders empty text for a not-present cell even if a staged patch exists', () => {
+		// Guards the `cell.present` read-only gate: a leftover staged edit for
+		// this column must NOT leak a value into a cell the evaluate response
+		// marked not-present (which is styled greyed/muted).
+		vi.spyOn(modelStore, 'getStagedOpsFor').mockReturnValue([
+			{ kind: 'update_element', id: 'e1', properties_patch: { mass: 42 } }
+		]);
+		const c = render({
+			tabId: 't',
+			columnName: 'mass',
+			cell: valueCell({ present: false, value: null, editable: false })
+		});
+		try {
+			const span = document.body.querySelector('span');
+			if (!span) throw new Error('read-only span not rendered');
+			expect(span.textContent).toBe('');
+			expect(document.body.textContent).not.toContain('42');
+		} finally {
+			unmount(c);
+		}
+	});
 });
