@@ -18,11 +18,11 @@ from data_rover.core.navigation.evaluate import EvalLimits, evaluate
 
 from .schema import (
     ChainRows,
-    Column,
     ColumnSource,
     ElementColumn,
     NavigationColumn,
     NavigationRows,
+    PropertyColumn,
     RowSlot,
     ScopeRows,
     TableDefinition,
@@ -178,7 +178,7 @@ def build_rows(
             roots = resolve_source_elements(
                 mm, model, defn, key, col.source, base_slots, limits
             )
-            reached = _expand_values(mm, model, defn, col, key, roots, limits)
+            reached = _expand_values(mm, model, col, roots, limits)
             if not reached:
                 if col.keep_empty:
                     new_keys.append((*key, None))
@@ -201,16 +201,16 @@ def build_rows(
 def _expand_values(
     mm: Metamodel,
     model: Model,
-    defn: TableDefinition,
-    col: Column,
-    key: RowKey,
+    col: NavigationColumn | PropertyColumn,
     roots: list[str],
     limits: TableLimits,
 ) -> list[Binding]:
     if isinstance(col, NavigationColumn):
         return list(_navigation_reached(mm, model, col, roots, limits))
     # PropertyColumn expand: one row per property value. Single-binding source
-    # guaranteed by schema; missing/scalar handled in Task 5's helper.
-    from .cells import expand_property_values  # type: ignore[import-not-found]  # Task 5
+    # guaranteed by schema; missing/scalar handled by cells.expand_property_values.
+    # Function-local import: cells.py imports FROM evaluate.py (resolve_source_
+    # elements, _expand_slot_of, ...), so a module-level import here would cycle.
+    from .cells import expand_property_values
 
     return expand_property_values(mm, model, col, roots)
