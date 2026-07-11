@@ -1,4 +1,5 @@
-"""Project-artifact CRUD (saved navigations; tables/diagrams in later stages).
+"""Project-artifact CRUD (saved navigations and tables; diagrams in a later
+stage).
 
 Artifacts are DB rows, NOT model content: no leases, no commits, no op-log.
 Concurrency is optimistic via `artifact_rev` (PUT echoes the loaded rev;
@@ -6,8 +7,10 @@ mismatch -> 409 carrying `current_rev`). Every successful write broadcasts an
 `artifact_event` on the session's FeedHub — safe without the write_mutex
 because artifact writes never touch the in-memory model.
 
-Payloads are validated per kind on write; Stage 1 only `navigation`
-(`NAVIGATION_ADAPTER`) is accepted — other kinds 422 until their stage lands.
+Payloads are validated per kind on write via `_PAYLOAD_ADAPTERS`; Stage 1
+added `navigation` (`NAVIGATION_ADAPTER`), Stage 2 added `table`
+(`TABLE_ADAPTER`) — `diagram`/`diagram_kind` still 422 until their stage
+lands.
 """
 
 from __future__ import annotations
@@ -15,12 +18,13 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 from sqlalchemy.orm import Session as DbSession
 
 from data_rover.core.navigation.evaluate import evaluate
 from data_rover.core.navigation.resolve import NavigationResolveError, resolve_refs
 from data_rover.core.navigation.schema import NAVIGATION_ADAPTER, NavigationDefinition
+from data_rover.core.table.schema import TABLE_ADAPTER
 
 from .. import content
 from ..db import get_db
@@ -43,7 +47,10 @@ router = APIRouter()
 
 #: kind -> payload validator. The route 422s on kinds absent here, so adding
 #: a stage's kind means adding one entry (and its schema) — nothing else.
-_PAYLOAD_ADAPTERS = {ArtifactKind.navigation: NAVIGATION_ADAPTER}
+_PAYLOAD_ADAPTERS: dict[ArtifactKind, TypeAdapter[Any]] = {
+    ArtifactKind.navigation: NAVIGATION_ADAPTER,
+    ArtifactKind.table: TABLE_ADAPTER,
+}
 
 
 def _header(row: ArtifactRow) -> ArtifactHeaderOut:

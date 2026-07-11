@@ -15,6 +15,7 @@ from data_rover.core.model.element import Element
 from data_rover.core.model.model import Model
 from data_rover.core.model.relationship import Relationship
 from data_rover.core.navigation.schema import NavigationDefinition
+from data_rover.core.table.schema import TableDefinition
 from data_rover.core.validation.issue import Issue
 from data_rover.core.view.schema import Folder, View
 
@@ -703,3 +704,65 @@ class ChainPageOut(BaseModel):
     chains: list[list[TreeItem]] = Field(default_factory=list)
     total: int = 0
     truncated: bool = False
+
+
+# ---------------------------------------------------------------------------
+# Table evaluation (Stage 2: POST /tables/evaluate)
+# ---------------------------------------------------------------------------
+
+
+class TableSortIn(BaseModel):
+    column: int = Field(ge=0)
+    direction: Literal["asc", "desc"] = "asc"
+
+
+class EvaluateTableIn(BaseModel):
+    """Exactly one of `definition` (inline) / `artifact_id` (saved)."""
+
+    definition: TableDefinition | None = None
+    artifact_id: str | None = None
+    offset: int = Field(0, ge=0)
+    limit: int = Field(100, ge=1, le=500)
+    sort: TableSortIn | None = None
+
+    @model_validator(mode="after")
+    def _exactly_one(self) -> "EvaluateTableIn":
+        if (self.definition is None) == (self.artifact_id is None):
+            raise ValueError("provide exactly one of `definition` / `artifact_id`")
+        return self
+
+
+class TableColumnOut(BaseModel):
+    kind: str
+    header: str
+    width_px: int | None = None
+
+
+class TableCellOut(BaseModel):
+    kind: Literal["element", "value", "values", "elements"]
+    # element
+    item: TreeItem | None = None
+    # value
+    present: bool | None = None
+    value: object | None = None
+    element_id: str | None = None
+    editable: bool | None = None
+    # values / elements
+    items: list[TreeItem] | None = None
+    values: list[object] | None = None
+    total: int | None = None
+    truncated: bool | None = None
+
+
+class TableRowOut(BaseModel):
+    key: list[object]
+    cells: list[TableCellOut]
+
+
+class TablePageOut(BaseModel):
+    columns: list[TableColumnOut]
+    rows: list[TableRowOut]
+    total: int
+    truncated: bool
+    offset: int
+    model_rev: int
