@@ -16,6 +16,7 @@ from .schema import (
     NavigationDefinition,
     Operand,
     PathNavigation,
+    RowStart,
     Scope,
     SetExpression,
 )
@@ -49,8 +50,8 @@ def resolve_refs(
     recursively-resolved definition. `fetch` raises LookupError for unknown
     ids. Never mutates its input."""
     if isinstance(defn, PathNavigation):
-        if isinstance(defn.start, Scope):
-            return defn
+        if isinstance(defn.start, (Scope, RowStart)):
+            return defn  # neither carries a ref to resolve
         return defn.model_copy(
             update={"start": _resolve_expr(defn.start, fetch, _seen)}
         )

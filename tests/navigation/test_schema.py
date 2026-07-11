@@ -34,7 +34,7 @@ def _path(n_steps: int = 1) -> dict:
 def test_relationship_step_parses_with_defaults() -> None:
     nav = NAVIGATION_ADAPTER.validate_python(_path())
     assert isinstance(nav, PathNavigation)
-    assert nav.schema_version == 2
+    assert nav.schema_version == 3
     step = nav.steps[0]
     assert isinstance(step, RelationshipStep)
     assert step.direction == "out"
@@ -155,3 +155,26 @@ def test_round_trip_preserves_document() -> None:
     nav = NAVIGATION_ADAPTER.validate_python(doc)
     dumped = NAVIGATION_ADAPTER.dump_python(nav, mode="json")
     assert NAVIGATION_ADAPTER.validate_python(dumped) == nav
+
+
+def test_row_start_parses_and_is_discriminated():
+    from data_rover.core.navigation.schema import NAVIGATION_ADAPTER, RowStart
+    defn = NAVIGATION_ADAPTER.validate_python(
+        {"kind": "path", "start": {"kind": "row"}, "steps": []}
+    )
+    assert isinstance(defn, PathNavigation)
+    assert defn.start == RowStart()
+
+
+def test_schema_version_is_3():
+    from data_rover.core.navigation.schema import SCHEMA_VERSION
+    assert SCHEMA_VERSION == 3
+
+
+def test_old_v2_payload_still_valid():
+    from data_rover.core.navigation.schema import NAVIGATION_ADAPTER
+    defn = NAVIGATION_ADAPTER.validate_python(
+        {"kind": "path", "schema_version": 2,
+         "start": {"kind": "scope", "types": ["Block"]}, "steps": []}
+    )
+    assert defn.kind == "path"

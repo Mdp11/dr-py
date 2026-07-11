@@ -10,6 +10,8 @@
 - caps: max_chains / max_visited stop enumeration and set truncated=True.
 """
 
+import pytest
+
 from data_rover.core.metamodel.schema import (
     ElementType,
     Metamodel,
@@ -305,6 +307,22 @@ def test_property_criterion_is_existence_gated() -> None:
     assert all("cost" in model.elements[i].properties for i in ids)
     assert priced.id in ids
     assert unpriced.id not in ids
+
+
+def test_row_start_binds_to_given_elements() -> None:
+    model, ids = _fixture()
+    d = _path(start={"kind": "row"}, steps=[])
+    res = evaluate(model.metamodel, model, d, row_elements=[ids["b1"]])
+    assert res.chains == [(ids["b1"],)]
+
+
+def test_row_start_without_binding_raises() -> None:
+    model, _ids = _fixture()
+    d = NAVIGATION_ADAPTER.validate_python(
+        {"kind": "path", "start": {"kind": "row"}, "steps": []}
+    )
+    with pytest.raises(ValueError):
+        evaluate(model.metamodel, model, d)
 
 
 def test_target_types_filter_landing() -> None:
