@@ -144,7 +144,10 @@ export const FolderSchema: z.ZodType<Folder> = z.lazy(() =>
 
 export const ViewSchema = z.object({
 	name: z.string(),
-	folders: z.array(FolderSchema).default([])
+	folders: z.array(FolderSchema).default([]),
+	// Same shape as `FolderSchema.artifacts` — an artifact ref may sit directly
+	// at the view root, alongside top-level folders.
+	artifacts: z.array(z.object({ id: z.string(), kind: z.string() })).default([])
 });
 export type View = z.infer<typeof ViewSchema>;
 

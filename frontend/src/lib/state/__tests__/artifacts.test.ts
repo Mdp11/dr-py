@@ -82,7 +82,8 @@ describe('artifacts store', () => {
 					elements: [],
 					artifacts: [{ id: 'a1', kind: 'navigation' }]
 				}
-			]
+			],
+			artifacts: []
 		};
 		const put = vi
 			.spyOn(viewApi, 'putViewSnapshot')
@@ -147,7 +148,8 @@ describe('artifacts store', () => {
 		vi.spyOn(api, 'deleteArtifact').mockResolvedValue(undefined);
 		const seedView: View = {
 			name: 'v',
-			folders: [{ name: 'F', folders: [], elements: [], artifacts: [] }]
+			folders: [{ name: 'F', folders: [], elements: [], artifacts: [] }],
+			artifacts: []
 		};
 		vi.spyOn(viewApi, 'putViewSnapshot').mockImplementation(async (v) => ({
 			view: v,

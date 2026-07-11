@@ -244,6 +244,14 @@ export async function removeArtifactFromFolder(
 ): Promise<void> {
 	if (_view === null) throw new Error('No active view');
 	const next = cloneView(_view);
+	if (folderPath.length === 0) {
+		// Root case: `findFolderByPath(next, [])` returns a detached virtual root
+		// (see its docstring in view-ops.ts) — a write there is silently dropped.
+		// Operate on `next.artifacts` directly instead.
+		next.artifacts = next.artifacts.filter((a) => a.id !== artifactId);
+		await pushView(next);
+		return;
+	}
 	const folder = findFolderByPath(next, folderPath);
 	if (!folder) throw new Error(`Folder not found: ${folderPath.join('/')}`);
 	folder.artifacts = folder.artifacts.filter((a) => a.id !== artifactId);

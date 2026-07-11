@@ -110,7 +110,8 @@ describe('TreeRow — dangling artifact refs', () => {
 						{ id: 'kept', kind: 'navigation' }
 					]
 				}
-			]
+			],
+			artifacts: []
 		};
 		vi.spyOn(viewApi, 'putViewSnapshot').mockImplementation(async (v) => ({
 			view: v,

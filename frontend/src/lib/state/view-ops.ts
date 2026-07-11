@@ -16,7 +16,14 @@ export function cloneFolder(f: Folder): Folder {
 }
 
 export function cloneView(v: View): View {
-	return { name: v.name, folders: v.folders.map(cloneFolder) };
+	return {
+		name: v.name,
+		folders: v.folders.map(cloneFolder),
+		// `?? []` guards a pre-Task-10 snapshot that lacks the field (the zod
+		// default already fills it on parse, but this keeps the clone safe even
+		// for a hand-built object bypassing the schema).
+		artifacts: (v.artifacts ?? []).map((a) => ({ ...a }))
+	};
 }
 
 /**
@@ -98,15 +105,27 @@ export function placeElementsInView(view: View, path: string[], ids: string[]): 
 }
 
 /**
- * Return a new view with `ref` placed into the folder at `folderPath`. A no-op
- * when that folder already holds the id — an artifact may sit in several
- * folders at once (unlike elements, which follow the single-folder rule), so
- * placing into a second folder does not strip it from the first.
+ * Return a new view with `ref` placed into the folder at `folderPath`, or at
+ * the view root when `folderPath` is empty. A no-op when the destination
+ * already holds the id — an artifact may sit in several folders (and/or the
+ * root) at once (unlike elements, which follow the single-folder rule), so
+ * placing into a second location does not strip it from the first.
+ *
+ * The root case is handled explicitly against `next.artifacts` rather than
+ * routed through `findFolderByPath(next, [])`: that helper's empty-path
+ * branch returns a DETACHED virtual root (a throwaway wrapper object, not a
+ * reference into `next`), so writes to it would be silently dropped.
  */
 export function placeArtifactInFolder(view: View, folderPath: string[], ref: ArtifactRef): View {
 	const next = cloneView(view);
+	if (folderPath.length === 0) {
+		if (!next.artifacts.some((a) => a.id === ref.id)) {
+			next.artifacts.push({ ...ref });
+		}
+		return next;
+	}
 	const folder = findFolderByPath(next, folderPath);
-	if (!folder || folderPath.length === 0) {
+	if (!folder) {
 		throw new Error(`Folder not found: ${folderPath.join('/')}`);
 	}
 	if (!folder.artifacts.some((a) => a.id === ref.id)) {
@@ -117,10 +136,16 @@ export function placeArtifactInFolder(view: View, folderPath: string[], ref: Art
 
 /**
  * Return a new view with the artifact at `fromPath` moved to `toPath`: removed
- * from the source folder only (not every folder that holds it — see
- * {@link placeArtifactInFolder}), then placed into the destination. A no-op
- * when source and destination are the same folder (mirrors
- * {@link moveFolderInView}'s same-parent no-op).
+ * from the source folder (or the root) only — not every location that holds
+ * it, see {@link placeArtifactInFolder} — then placed into the destination. A
+ * no-op when source and destination are the same location (mirrors
+ * {@link moveFolderInView}'s same-parent no-op; this also covers root-to-root
+ * since `[]` equals `[]` under the same comparison).
+ *
+ * `fromPath`/`toPath` of `[]` mean the view root; both branches operate on
+ * `next.artifacts` directly rather than through `findFolderByPath(next, [])`,
+ * whose empty-path branch is a detached virtual root (see
+ * {@link placeArtifactInFolder}'s docstring).
  */
 export function moveArtifactInView(
 	view: View,
@@ -132,20 +157,30 @@ export function moveArtifactInView(
 		return cloneView(view);
 	}
 	const next = cloneView(view);
-	const from = findFolderByPath(next, fromPath);
-	if (from) from.artifacts = from.artifacts.filter((a) => a.id !== ref.id);
-	const to = findFolderByPath(next, toPath);
-	if (!to || toPath.length === 0) throw new Error(`Folder not found: ${toPath.join('/')}`);
-	if (!to.artifacts.some((a) => a.id === ref.id)) to.artifacts.push({ ...ref });
+	if (fromPath.length === 0) {
+		next.artifacts = next.artifacts.filter((a) => a.id !== ref.id);
+	} else {
+		const from = findFolderByPath(next, fromPath);
+		if (from) from.artifacts = from.artifacts.filter((a) => a.id !== ref.id);
+	}
+	if (toPath.length === 0) {
+		if (!next.artifacts.some((a) => a.id === ref.id)) next.artifacts.push({ ...ref });
+	} else {
+		const to = findFolderByPath(next, toPath);
+		if (!to) throw new Error(`Folder not found: ${toPath.join('/')}`);
+		if (!to.artifacts.some((a) => a.id === ref.id)) to.artifacts.push({ ...ref });
+	}
 	return next;
 }
 
 /**
  * Return a new view with every placement of `artifactId` removed, across all
- * folders (an artifact may sit in several — this drops it from each).
+ * folders and the view root (an artifact may sit in several — this drops it
+ * from each).
  */
 export function removeArtifactFromView(view: View, artifactId: string): View {
 	const next = cloneView(view);
+	next.artifacts = next.artifacts.filter((a) => a.id !== artifactId);
 	const scrub = (folders: Folder[]): void => {
 		for (const f of folders) {
 			f.artifacts = f.artifacts.filter((a) => a.id !== artifactId);
@@ -157,11 +192,12 @@ export function removeArtifactFromView(view: View, artifactId: string): View {
 }
 
 /**
- * True if `view` places `artifactId` in at least one folder. Used to skip a
- * needless snapshot push when scrubbing an artifact's placements on delete —
- * see `scrubArtifactFromView` in `view.svelte.ts`.
+ * True if `view` places `artifactId` in at least one folder or at the view
+ * root. Used to skip a needless snapshot push when scrubbing an artifact's
+ * placements on delete — see `scrubArtifactFromView` in `view.svelte.ts`.
  */
 export function viewHasArtifactPlacement(view: View, artifactId: string): boolean {
+	if (view.artifacts.some((a) => a.id === artifactId)) return true;
 	const check = (folders: Folder[]): boolean =>
 		folders.some((f) => f.artifacts.some((a) => a.id === artifactId) || check(f.folders));
 	return check(view.folders);
