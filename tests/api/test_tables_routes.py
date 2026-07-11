@@ -217,6 +217,89 @@ def test_sort_column_out_of_range_422(client: TestClient) -> None:
     assert "out of range" in r.json()["detail"]
 
 
+def test_table_reflects_referenced_navigation_edit(client: TestClient) -> None:
+    """A navigation column referencing a saved navigation artifact (`ref`)
+    must reflect edits to that artifact on the very next evaluate, with no
+    model_rev bump in between — because /tables/evaluate fingerprints the
+    RESOLVED definition (refs inlined), not the raw request body, so editing
+    the referenced navigation changes the fingerprint and misses the cache."""
+    names = _bootstrap_model(client)
+    nav = {
+        "kind": "navigation",
+        "name": "parts",
+        "payload": {
+            "kind": "path",
+            "start": {"kind": "row"},
+            "steps": [
+                {
+                    "kind": "relationship",
+                    "relationship_type": "BlockHasPart",
+                    "direction": "out",
+                }
+            ],
+        },
+    }
+    nr = client.post(papi("/artifacts"), json=nav, headers=AUTH_HEADERS)
+    assert nr.status_code == 201, nr.text
+    nav_id, nav_rev = nr.json()["id"], nr.json()["artifact_rev"]
+
+    table = {
+        "row_source": {"kind": "scope", "types": ["Block"]},
+        "columns": [
+            {"kind": "element", "source": {"kind": "row"}},
+            {
+                "kind": "navigation",
+                "source": {"kind": "row"},
+                "navigation": {"ref": nav_id},
+            },
+        ],
+    }
+    r1 = client.post(
+        papi("/tables/evaluate"), json={"definition": table}, headers=AUTH_HEADERS
+    )
+    assert r1.status_code == 200, r1.text
+    model_rev_before = r1.json()["model_rev"]
+    root_row_1 = next(
+        row
+        for row in r1.json()["rows"]
+        if row["cells"][0]["item"]["id"] == names["root"]
+    )
+    nav_cell_1 = root_row_1["cells"][1]
+    assert nav_cell_1["kind"] == "elements"
+    assert nav_cell_1["total"] == 2  # root -BlockHasPart-> p1, p2
+
+    # Edit the referenced navigation to follow NO relationship (empty steps):
+    # its terminal set becomes just the row element itself.
+    put = client.put(
+        papi(f"/artifacts/{nav_id}"),
+        json={
+            "artifact_rev": nav_rev,
+            "payload": {
+                "kind": "path",
+                "start": {"kind": "row"},
+                "steps": [],
+            },
+        },
+        headers=AUTH_HEADERS,
+    )
+    assert put.status_code == 200, put.text
+
+    r2 = client.post(
+        papi("/tables/evaluate"), json={"definition": table}, headers=AUTH_HEADERS
+    )
+    assert r2.status_code == 200, r2.text
+    # No model_rev bump: editing a navigation artifact does not touch the model.
+    assert r2.json()["model_rev"] == model_rev_before
+    root_row_2 = next(
+        row
+        for row in r2.json()["rows"]
+        if row["cells"][0]["item"]["id"] == names["root"]
+    )
+    nav_cell_2 = root_row_2["cells"][1]
+    assert nav_cell_2["kind"] == "elements"
+    assert nav_cell_2["total"] == 1  # only the row element itself, no parts
+
+
 def test_truncated_flag_survives_cache_hit(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
