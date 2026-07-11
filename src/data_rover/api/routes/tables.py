@@ -130,6 +130,15 @@ def evaluate_table(
             if payload.sort is not None
             else None
         )
+        # `TableSortIn` only enforces `column >= 0`; guard the upper bound here
+        # (against the RESOLVED column count) so an out-of-range index raises a
+        # clear ValueError->422 rather than an IndexError inside `order_rows`
+        # that the LookupError clause below would mislabel "unknown artifact".
+        if sort is not None and not (0 <= sort.column < len(defn.columns)):
+            raise ValueError(
+                f"sort column {sort.column} out of range "
+                f"(table has {len(defn.columns)} columns)"
+            )
         limits = TableLimits()
         # Fingerprint the RESOLVED definition (not the raw request body): two
         # requests that reach the same resolved shape via different refs (or
@@ -139,13 +148,13 @@ def evaluate_table(
         sort_key = "none" if sort is None else f"{sort.column}:{sort.direction}"
         cached = session.table_order_cache.get(fp, sort_key, session.model_rev)
         if cached is not None:
-            ordered = list(cached)
-            truncated = False
+            cached_rows, truncated = cached
+            ordered = list(cached_rows)
         else:
             keys, truncated = build_rows(metamodel, model, defn, limits)
             ordered = order_rows(metamodel, model, defn, keys, sort, limits)
             session.table_order_cache.put(
-                fp, sort_key, session.model_rev, tuple(ordered)
+                fp, sort_key, session.model_rev, tuple(ordered), truncated
             )
         window = ordered[payload.offset : payload.offset + payload.limit]
         cells = evaluate_cells(metamodel, model, defn, window, limits)

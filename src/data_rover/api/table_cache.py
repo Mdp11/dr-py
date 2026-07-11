@@ -1,8 +1,11 @@
 """Per-session LRU of ordered table row keys, keyed by (resolved-definition
-fingerprint, sort). A stored entry also records the model_rev it was computed
-at; a lookup at a different rev is a miss. Session.touch_model()/set_model clear
-the whole cache. Guards dict ops with a Lock; evaluation runs OUTSIDE the lock
-(a lost race merely recomputes)."""
+fingerprint, sort). A stored entry records the model_rev it was computed at AND
+the `truncated` flag `build_rows` produced (so a cached page reports the same
+completeness as the miss page that filled it — `len(rows) >= max_rows` is NOT a
+safe recompute, since a table of EXACTLY max_rows is not truncated). A lookup at
+a different rev is a miss. Session.touch_model()/set_model clear the whole cache.
+Guards dict ops with a Lock; evaluation runs OUTSIDE the lock (a lost race merely
+recomputes)."""
 
 from __future__ import annotations
 
@@ -29,24 +32,25 @@ class TableOrderCache:
     def __init__(self, cap: int = 16) -> None:
         self._cap = cap
         self._lock = threading.Lock()
-        self._d: "OrderedDict[tuple[str, str], tuple[int, tuple[RowKey, ...]]]" = (
-            OrderedDict()
-        )
+        self._d: (
+            "OrderedDict[tuple[str, str], tuple[int, tuple[RowKey, ...], bool]]"
+        ) = OrderedDict()
 
     def get(
         self, fingerprint: str, sort_key: str, model_rev: int
-    ) -> "tuple[RowKey, ...] | None":
+    ) -> "tuple[tuple[RowKey, ...], bool] | None":
+        """`(rows, truncated)` on a fresh hit; `None` on a miss or stale rev."""
         key = (fingerprint, sort_key)
         with self._lock:
             hit = self._d.get(key)
             if hit is None:
                 return None
-            rev, rows = hit
+            rev, rows, truncated = hit
             if rev != model_rev:
                 del self._d[key]
                 return None
             self._d.move_to_end(key)
-            return rows
+            return rows, truncated
 
     def put(
         self,
@@ -54,10 +58,11 @@ class TableOrderCache:
         sort_key: str,
         model_rev: int,
         rows: "tuple[RowKey, ...]",
+        truncated: bool,
     ) -> None:
         key = (fingerprint, sort_key)
         with self._lock:
-            self._d[key] = (model_rev, rows)
+            self._d[key] = (model_rev, rows, truncated)
             self._d.move_to_end(key)
             while len(self._d) > self._cap:
                 self._d.popitem(last=False)

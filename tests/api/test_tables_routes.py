@@ -195,3 +195,50 @@ def test_evaluate_requires_exactly_one_of_definition_or_artifact_id(
         headers=AUTH_HEADERS,
     )
     assert r.status_code == 422
+
+
+def test_sort_column_out_of_range_422(client: TestClient) -> None:
+    """An out-of-range sort column is a clear ValueError->422, NOT an
+    IndexError inside order_rows mislabeled as an 'unknown artifact'."""
+    _bootstrap_model(client)
+    r = client.post(
+        papi("/tables/evaluate"),
+        json={
+            "definition": {
+                "row_source": {"kind": "scope", "types": ["Block"]},
+                "columns": [{"kind": "element", "source": {"kind": "row"}}],
+            },
+            "sort": {"column": 5, "direction": "asc"},
+        },
+        headers=AUTH_HEADERS,
+    )
+    assert r.status_code == 422
+    assert "unknown artifact" not in r.json()["detail"]
+    assert "out of range" in r.json()["detail"]
+
+
+def test_truncated_flag_survives_cache_hit(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The `truncated` flag build_rows computed must be reported identically on
+    the miss page AND every subsequent cached page (it is stored in the order
+    cache, not recomputed). Force truncation via monkeypatch so we needn't seed
+    50k rows; omit `sort` so order_rows is a no-op."""
+    _bootstrap_model(client)
+    import data_rover.api.routes.tables as tmod
+
+    orig = tmod.build_rows
+    monkeypatch.setattr(
+        tmod, "build_rows", lambda *a, **k: (orig(*a, **k)[0], True)
+    )
+    body = {
+        "definition": {
+            "row_source": {"kind": "scope", "types": ["Block"]},
+            "columns": [{"kind": "element", "source": {"kind": "row"}}],
+        }
+    }
+    r1 = client.post(papi("/tables/evaluate"), json=body, headers=AUTH_HEADERS)
+    r2 = client.post(papi("/tables/evaluate"), json=body, headers=AUTH_HEADERS)
+    assert r1.status_code == r2.status_code == 200
+    assert r1.json()["truncated"] is True
+    assert r2.json()["truncated"] is True
