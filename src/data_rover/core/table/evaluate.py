@@ -10,7 +10,7 @@ runs per page. See core/table/schema.py for the binding model.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Union
+from typing import Any, Literal, Union
 
 from data_rover.core.metamodel.schema import Metamodel
 from data_rover.core.model.model import Model
@@ -18,6 +18,7 @@ from data_rover.core.navigation.evaluate import EvalLimits, evaluate
 
 from .schema import (
     ChainRows,
+    Column,
     ColumnSource,
     ElementColumn,
     NavigationColumn,
@@ -214,3 +215,179 @@ def _expand_values(
     from .cells import expand_property_values
 
     return expand_property_values(mm, model, col, roots)
+
+
+# ---- sorting (Task 6) --------------------------------------------------------
+#
+# Missing/empty values ALWAYS sort last, in BOTH directions — not the usual
+# nulls-first-on-desc SQL behaviour. `_sort_value` returns an `(is_empty,
+# comparable)` pair; `order_rows` partitions decorated rows into non-empty vs
+# empty, sorts (with `reverse=`) only the non-empty partition, then appends the
+# empty partition unsorted (in `build_rows`' own deterministic order, since
+# Python's sort is stable and we never touch that partition). This is simpler
+# and cheaper than sentinel-value tricks that have to fight `reverse=True`.
+#
+# A binding column (the element column, or ANY `expand` column) already has its
+# value sitting in the RowKey — sorting it is O(n log n) with no extra model
+# work. A COLLAPSE navigation/property column has no such slot: sorting it means
+# re-resolving + re-navigating/re-reading a property for every row, so it is
+# guarded by `TableLimits.max_sort_rows` and raises `SortTooLargeError` (a
+# `ValueError` subclass, so the API route's blanket `except ValueError` maps it
+# to 422) rather than silently doing unbounded work.
+
+
+class SortTooLargeError(ValueError):
+    """A COLLAPSE navigation/property sort column would need a full extra
+    evaluation pass over more rows than `TableLimits.max_sort_rows` allows.
+    Never raised for a binding column (element / any `expand` column) — those
+    sort straight off the already-built `RowKey` regardless of row count."""
+
+
+@dataclass(frozen=True)
+class SortSpec:
+    column: int
+    direction: Literal["asc", "desc"]
+
+
+def _display_name(model: Model, eid: str) -> str:
+    """The label used to order elements: their `name` property if set, else
+    their id (so ordering is still total and deterministic)."""
+    el = model.elements[eid]
+    name = el.properties.get("name")
+    return str(name) if name is not None else el.id
+
+
+def _property_is_numeric(mm: Metamodel, defn: TableDefinition, col: PropertyColumn) -> bool:
+    """True only if EVERY scoped type declaring `col.name` gives it an
+    integer/float datatype — a single conflicting type falls back to casefold
+    string sort so mixed-type tables never silently misorder.
+
+    Only meaningful for a `scope` row source, where the candidate type set is
+    known upfront; a navigation/chain row source has no such fixed set (the
+    reached elements can be of any type), so property sort there is always
+    string, per spec."""
+    if defn.row_source.kind != "scope":
+        return False
+    declaring = [
+        pd.datatype
+        for t in defn.row_source.types
+        for pd in mm.effective_element_properties(t)
+        if pd.name == col.name
+    ]
+    return bool(declaring) and all(dt in ("integer", "float") for dt in declaring)
+
+
+def _needs_full_eval(col: Column) -> bool:
+    """A COLLAPSE navigation/property column has no value already sitting in
+    the RowKey, so sorting it means a full extra evaluation pass (guarded by
+    `max_sort_rows`). An element column, or any `expand` column (its value was
+    already promoted into a key slot by `build_rows`), is a cheap binding sort."""
+    return col.kind != "element" and getattr(col, "mode", "collapse") != "expand"
+
+
+def _sort_value(
+    mm: Metamodel,
+    model: Model,
+    defn: TableDefinition,
+    key: RowKey,
+    col: Column,
+    col_index: int,
+    base_slots: int,
+    limits: TableLimits,
+) -> tuple[int, Any]:
+    """`(is_empty, comparable)` for one row's sort column. `is_empty=1` always
+    sorts last (see `order_rows`); the comparable half is only ever compared
+    within its own empty/non-empty partition (and always against another row's
+    SAME column, so its concrete shape — str/int/tuple — is consistent within
+    one `order_rows` call even though it varies across column kinds; typed
+    `Any` here rather than a comparable-union so `list.sort` accepts the key).
+
+    An `expand` property/navigation column reads its value straight back out of
+    the RowKey slot `build_rows` already promoted it into (same trick as
+    `cells.py`'s `_expand_slot_of` use) — re-deriving it via
+    resolve_source_elements/re-navigation would collapse every row sharing the
+    same root back onto that root's WHOLE reached set, losing the per-row value
+    that made it a binding column in the first place."""
+    if isinstance(col, ElementColumn):
+        els = resolve_source_elements(mm, model, defn, key, col.source, base_slots, limits)
+        if not els:
+            return (1, "")
+        return (0, (_display_name(model, els[0]).casefold(), els[0]))
+    if isinstance(col, PropertyColumn):
+        numeric = _property_is_numeric(mm, defn, col)
+        if col.mode == "expand":
+            v = key[_expand_slot_of(defn, base_slots, col_index)]
+            if v is None:
+                return (1, ())
+            return (0, (float(v),)) if numeric else (0, (str(v).casefold(),))  # type: ignore[arg-type]
+        els = resolve_source_elements(mm, model, defn, key, col.source, base_slots, limits)
+        vals: list[Binding] = []
+        for eid in els:
+            v = model.elements[eid].properties.get(col.name)
+            if v is None:
+                continue
+            vals.extend(v if isinstance(v, list) else [v])
+        if not vals:
+            return (1, ())
+        if numeric:
+            return (0, tuple(float(v) for v in vals))  # type: ignore[arg-type]
+        return (0, tuple(str(v).casefold() for v in vals))
+    # NavigationColumn. `expand` already put ONE reached element per row into
+    # the RowKey (read it straight back); COLLAPSE needs a full re-navigation.
+    # `value` sorts on the tuple of reached display names (name-sorted, so two
+    # rows with the same multiset of reached names compare equal regardless of
+    # discovery order); `count` sorts on cardinality.
+    if col.mode == "expand":
+        b = key[_expand_slot_of(defn, base_slots, col_index)]
+        if not isinstance(b, str):
+            return (1, "")
+        return (0, (_display_name(model, b).casefold(), b))
+    roots = resolve_source_elements(mm, model, defn, key, col.source, base_slots, limits)
+    reached = _navigation_reached(mm, model, col, roots, limits)
+    if not reached:
+        return (1, 0 if col.sort_mode == "count" else ())
+    if col.sort_mode == "count":
+        return (0, len(reached))
+    return (0, tuple(sorted(_display_name(model, e).casefold() for e in reached)))
+
+
+def order_rows(
+    mm: Metamodel,
+    model: Model,
+    defn: TableDefinition,
+    keys: list[RowKey],
+    sort: SortSpec | None,
+    limits: TableLimits = TableLimits(),
+) -> list[RowKey]:
+    """Stable-sort `keys` by one column; `sort=None` returns a new list in the
+    input order. Missing/empty values sort last in BOTH directions (see the
+    module docstring above `_sort_value`). Ties fall back to `build_rows`' own
+    deterministic order, since Python's sort is stable — giving a total order
+    without needing every value to be independently unique.
+
+    `base_slots` is derived from the FULL key set exactly as in
+    `evaluate_cells` (Task 5): `keys` here is always the complete, already-built
+    row set (never a partial key mid-`build_rows`), so `len(keys[0])` minus one
+    slot per `expand` column recovers the row-source's own slot count."""
+    if sort is None:
+        return list(keys)
+    col = defn.columns[sort.column]
+    if _needs_full_eval(col) and len(keys) > limits.max_sort_rows:
+        raise SortTooLargeError(
+            f"sorting {len(keys)} rows by a computed column exceeds "
+            f"max_sort_rows={limits.max_sort_rows}"
+        )
+    expand_count = sum(
+        1 for c in defn.columns if getattr(c, "mode", "collapse") == "expand"
+    )
+    base_slots = (len(keys[0]) - expand_count) if keys else 1
+    decorated: list[tuple[int, Any, RowKey]] = [
+        (*_sort_value(mm, model, defn, k, col, sort.column, base_slots, limits), k)
+        for k in keys
+    ]
+    # empties always last, in BOTH directions: partition first, sort (with
+    # `reverse=`) only the non-empty half, then append the empty half untouched.
+    non_empty = [d for d in decorated if d[0] == 0]
+    empty = [d for d in decorated if d[0] == 1]
+    non_empty.sort(key=lambda d: d[1], reverse=(sort.direction == "desc"))
+    return [d[2] for d in non_empty] + [d[2] for d in empty]
