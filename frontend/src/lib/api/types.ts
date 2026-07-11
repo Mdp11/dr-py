@@ -537,3 +537,133 @@ export const ProjectSettingsSchema = z.object({
 	strict_mode: z.boolean()
 });
 export type ProjectSettings = z.infer<typeof ProjectSettingsSchema>;
+
+// ---------------------------------------------------------------------------
+// Table definition (Stage 2) — mirrors core/table/schema.py. Navigation
+// sources reuse NavigationDefinitionSchema (above); row/column criteria reuse
+// the loose `unknown[]` convention NavScope/NavFilterStep already use for
+// search Criterion objects (typed at the editor layer, not here).
+// ---------------------------------------------------------------------------
+
+export const NavigationSourceSchema = z.object({
+	ref: z.string().nullish(),
+	definition: NavigationDefinitionSchema.nullish()
+});
+
+const RowSlotSchema = z.object({
+	kind: z.literal('row'),
+	chain_index: z.number().int().default(0)
+});
+const ColumnRefSchema = z.object({ kind: z.literal('column'), index: z.number().int() });
+export const ColumnSourceSchema = z.discriminatedUnion('kind', [RowSlotSchema, ColumnRefSchema]);
+
+export const ScopeRowsSchema = z.object({
+	kind: z.literal('scope'),
+	types: z.array(z.string()).default([]),
+	criteria: z.array(z.unknown()).default([])
+});
+export const NavigationRowsSchema = z.object({
+	kind: z.literal('navigation'),
+	navigation: NavigationSourceSchema,
+	step_index: z.number().int().nullish()
+});
+export const ChainRowsSchema = z.object({
+	kind: z.literal('chains'),
+	navigation: NavigationSourceSchema
+});
+export const RowSourceSchema = z.discriminatedUnion('kind', [
+	ScopeRowsSchema,
+	NavigationRowsSchema,
+	ChainRowsSchema
+]);
+
+const ElementColumnSchema = z.object({
+	kind: z.literal('element'),
+	source: ColumnSourceSchema.default({ kind: 'row', chain_index: 0 }),
+	header: z.string().default(''),
+	width_px: z.number().int().nullish()
+});
+const PropertyColumnSchema = z.object({
+	kind: z.literal('property'),
+	source: ColumnSourceSchema.default({ kind: 'row', chain_index: 0 }),
+	name: z.string(),
+	mode: z.enum(['collapse', 'expand']).default('collapse'),
+	keep_empty: z.boolean().default(true),
+	header: z.string().default(''),
+	width_px: z.number().int().nullish()
+});
+const NavigationColumnSchema = z.object({
+	kind: z.literal('navigation'),
+	source: ColumnSourceSchema.default({ kind: 'row', chain_index: 0 }),
+	navigation: NavigationSourceSchema,
+	step_index: z.number().int().nullish(),
+	mode: z.enum(['collapse', 'expand']).default('collapse'),
+	keep_empty: z.boolean().default(true),
+	sort_mode: z.enum(['value', 'count']).default('value'),
+	cell_cap: z.number().int().default(20),
+	header: z.string().default(''),
+	width_px: z.number().int().nullish()
+});
+export const ColumnSchema = z.discriminatedUnion('kind', [
+	ElementColumnSchema,
+	PropertyColumnSchema,
+	NavigationColumnSchema
+]);
+
+export const TableDefinitionSchema = z.object({
+	schema_version: z.number().int().default(1),
+	row_source: RowSourceSchema,
+	columns: z.array(ColumnSchema).min(1),
+	default_cell_mode: z.enum(['collapse', 'expand']).default('collapse')
+});
+export type TableDefinition = z.infer<typeof TableDefinitionSchema>;
+export type Column = z.infer<typeof ColumnSchema>;
+export type RowSource = z.infer<typeof RowSourceSchema>;
+export type ColumnSource = z.infer<typeof ColumnSourceSchema>;
+
+// ---- Table page (evaluate response) ----------------------------------------
+export const TableColumnSchema = z.object({
+	kind: z.string(),
+	header: z.string(),
+	width_px: z.number().int().nullish()
+});
+export const TableCellSchema = z.discriminatedUnion('kind', [
+	z.object({ kind: z.literal('element'), item: TreeItemSchema.nullable() }),
+	z.object({
+		kind: z.literal('value'),
+		present: z.boolean(),
+		value: z.unknown().nullable(),
+		element_id: z.string().nullable(),
+		editable: z.boolean()
+	}),
+	z.object({
+		kind: z.literal('values'),
+		present: z.boolean(),
+		values: z.array(z.unknown()),
+		total: z.number().int(),
+		truncated: z.boolean()
+	}),
+	z.object({
+		kind: z.literal('elements'),
+		items: z.array(TreeItemSchema),
+		total: z.number().int(),
+		truncated: z.boolean()
+	})
+]);
+export const TableRowSchema = z.object({
+	key: z.array(z.unknown()),
+	cells: z.array(TableCellSchema)
+});
+export const TablePageSchema = z.object({
+	columns: z.array(TableColumnSchema),
+	rows: z.array(TableRowSchema),
+	total: z.number().int(),
+	truncated: z.boolean(),
+	offset: z.number().int(),
+	model_rev: z.number().int()
+});
+export type TablePage = z.infer<typeof TablePageSchema>;
+export type TableCell = z.infer<typeof TableCellSchema>;
+export type TableColumn = z.infer<typeof TableColumnSchema>;
+export type TableRow = z.infer<typeof TableRowSchema>;
+export type TableSort = { column: number; direction: 'asc' | 'desc' };
