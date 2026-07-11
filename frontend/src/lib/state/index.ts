@@ -237,6 +237,26 @@ export {
 	type NavDraft,
 	type NavPreview
 } from './navigation-editor.svelte';
+export {
+	closeTableDraft,
+	downloadTable,
+	ensureTableDraft,
+	getTableConflict,
+	getTableDraft,
+	getTableError,
+	getTableLoading,
+	getTablePage,
+	getTableSort,
+	loadTablePage,
+	reloadTableDraft,
+	resetTableEditors,
+	saveAsTableDraft,
+	saveTableDraft,
+	setTableName,
+	setTableSort,
+	updateTableDefinition,
+	type TableDraft
+} from './table-editor.svelte';
 export { getCurrentUser, isAdmin, fetchMe, signIn, signOut } from './auth.svelte';
 export { getActiveProjectId, setActiveProject, clearActiveProject } from './active-project.svelte';
 export { installSessionRecovery, recoverFromUnauthorized } from './session-recovery';
