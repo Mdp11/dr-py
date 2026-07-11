@@ -95,6 +95,7 @@ export {
 	getActiveTab,
 	getDynamicTabs,
 	initWorkspaceTabs,
+	openArtifactTab,
 	openNavigationTab,
 	resetWorkspaceTabs,
 	retitleTab,
