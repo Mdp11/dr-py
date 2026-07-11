@@ -100,6 +100,15 @@
 		const direction = sort?.column === index && sort.direction === 'asc' ? 'desc' : 'asc';
 		setTableSort(tabId, { column: index, direction });
 	}
+
+	// The evaluate response's column-out (`page.columns[i]`) carries no
+	// property name — only the definition's `property` column does. The two
+	// arrays align 1:1 in definition order, so index across into the draft's
+	// definition to recover the name a `ValueCell` needs to build its patch key.
+	function columnNameFor(index: number): string | undefined {
+		const col = getTableDraft(tabId)?.definition.columns[index];
+		return col?.kind === 'property' ? col.name : undefined;
+	}
 </script>
 
 <div
@@ -163,7 +172,7 @@
 						{#if cell.kind === 'element'}
 							<ElementCell {cell} />
 						{:else if cell.kind === 'value'}
-							<ValueCell {cell} {tabId} />
+							<ValueCell {cell} {tabId} columnName={columnNameFor(ci)} />
 						{:else if cell.kind === 'values'}
 							<ValuesCell {cell} />
 						{:else}
