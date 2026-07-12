@@ -2,13 +2,18 @@
 	import {
 		canEdit,
 		ensureDraft,
+		ensureTableDraft,
 		getDraft,
 		getSaveConflict,
+		isRunnable,
+		openArtifactTab,
 		reloadDraft,
 		saveAsDraft,
 		saveDraft,
-		setDraftName
+		setDraftName,
+		updateTableDefinition
 	} from '$lib/state';
+	import { navigationAsTableDefinition } from '$lib/table/columns';
 	import NavigationNode from './NavigationNode.svelte';
 	import ResultsDock from './ResultsDock.svelte';
 	import ResizeHandle from '$lib/components/ResizeHandle.svelte';
@@ -43,6 +48,19 @@
 			saveError = e instanceof Error ? e.message : 'Save failed';
 		}
 	}
+
+	async function openAsTable(): Promise<void> {
+		if (!draft) return;
+		const id = openArtifactTab('table', {
+			artifactId: null,
+			title: draft.name ? `${draft.name} (table)` : 'Table'
+		});
+		await ensureTableDraft(id);
+		updateTableDefinition(
+			id,
+			navigationAsTableDefinition({ artifactId: draft.artifactId, definition: draft.definition })
+		);
+	}
 </script>
 
 {#if !draft}
@@ -61,6 +79,14 @@
 				<span title="Unsaved changes" class="text-warning">●</span>
 			{/if}
 			<span class="flex-1"></span>
+			<button
+				type="button"
+				class="rounded border border-input px-2 py-1 text-xs text-foreground/80 transition-colors hover:bg-muted disabled:opacity-40"
+				disabled={!isRunnable(draft.definition)}
+				onclick={() => void openAsTable()}
+			>
+				Open as table
+			</button>
 			{#if editable}
 				<div class="flex items-center gap-2">
 					<button

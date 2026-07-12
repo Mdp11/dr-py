@@ -29,6 +29,11 @@ def test_path_without_refs_is_returned_as_is() -> None:
     assert resolve_refs(nav, fetch=lambda _id: (_ for _ in ()).throw(LookupError())) == nav
 
 
+def test_row_start_is_returned_as_is() -> None:
+    nav = _nav({"kind": "path", "start": {"kind": "row"}, "steps": []})
+    assert resolve_refs(nav, fetch=lambda _id: (_ for _ in ()).throw(LookupError())) == nav
+
+
 def test_ref_operand_is_inlined() -> None:
     expr = _nav({"kind": "set_op", "op": "union",
                  "operands": [{"ref": "a", "step_index": 0}]})

@@ -32,6 +32,7 @@ from .schema import (
     NavigationDefinition,
     PathNavigation,
     RelationshipStep,
+    RowStart,
     Scope,
     SetExpression,
     StepItem,
@@ -72,17 +73,28 @@ def evaluate(
     model: Model,
     defn: NavigationDefinition,
     limits: EvalLimits = EvalLimits(),
+    *,
+    row_elements: Sequence[str] | None = None,
 ) -> ChainResult:
-    """Evaluate a ref-free definition (run `resolve_refs` first)."""
+    """Evaluate a ref-free definition (run `resolve_refs` first).
+
+    `row_elements`, when given, binds any `RowStart` sentinel encountered
+    (top-level or nested inside a `set_op` operand) to those element ids —
+    table columns supply their row's element(s) here. A `RowStart` reached
+    with no binding raises `ValueError` (see `RowStart`'s docstring)."""
     budget = _Budget(max_visited=limits.max_visited)
     if isinstance(defn, SetExpression):
-        members, truncated = _evaluate_set(metamodel, model, defn, limits, budget)
+        members, truncated = _evaluate_set(
+            metamodel, model, defn, limits, budget, row_elements=row_elements
+        )
         return ChainResult(
             step_types=[],
             chains=[(i,) for i in sorted(members)],
             truncated=truncated or budget.exhausted,
         )
-    start_ids = _start_ids(metamodel, model, defn, limits, budget)
+    start_ids = _start_ids(
+        metamodel, model, defn, limits, budget, row_elements=row_elements
+    )
     chains: list[tuple[str, ...]] = []
     truncated = False
     for start_id in start_ids:
@@ -114,9 +126,19 @@ def _start_ids(
     defn: PathNavigation,
     limits: EvalLimits,
     budget: _Budget,
+    *,
+    row_elements: Sequence[str] | None = None,
 ) -> list[str]:
+    if isinstance(defn.start, RowStart):
+        if row_elements is None:
+            raise ValueError(
+                "navigation is row-rooted; no row element bound"
+            )
+        return sorted(dict.fromkeys(row_elements))
     if isinstance(defn.start, SetExpression):
-        members, truncated = _evaluate_set(metamodel, model, defn.start, limits, budget)
+        members, truncated = _evaluate_set(
+            metamodel, model, defn.start, limits, budget, row_elements=row_elements
+        )
         if truncated:
             budget.exhausted = True
         return sorted(members)
@@ -256,6 +278,8 @@ def _evaluate_set(
     expr: SetExpression,
     limits: EvalLimits,
     budget: _Budget,
+    *,
+    row_elements: Sequence[str] | None = None,
 ) -> tuple[set[str], bool]:
     """(member ids, any-operand-truncated). `difference` folds left-to-right
     over the operand list; the other ops are order-insensitive.
@@ -264,13 +288,22 @@ def _evaluate_set(
     `_operand_members`) — limits are per-navigation, so one operand hitting
     `max_visited`/`max_chains` never starves a sibling operand's budget.
     Truncation on any operand still propagates into this call's return value
-    (and from there into the outer `ChainResult.truncated`)."""
+    (and from there into the outer `ChainResult.truncated`).
+
+    `row_elements` passes through to every operand so a `RowStart` nested
+    inside a set operand also binds (see `evaluate`)."""
     truncated = False
     result: set[str] | None = None
     for operand in expr.operands:
         assert operand.definition is not None  # resolver inlined every ref
         members, op_truncated = _operand_members(
-            metamodel, model, operand.definition, operand.step_index, limits, budget
+            metamodel,
+            model,
+            operand.definition,
+            operand.step_index,
+            limits,
+            budget,
+            row_elements=row_elements,
         )
         truncated = truncated or op_truncated
         if result is None:
@@ -293,13 +326,17 @@ def _operand_members(
     step_index: int | None,
     limits: EvalLimits,
     budget: _Budget,
+    *,
+    row_elements: Sequence[str] | None = None,
 ) -> tuple[set[str], bool]:
     if isinstance(defn, SetExpression):
         # a set has no steps; any explicit index other than 0 is an error
         if step_index not in (None, 0):
             raise ValueError(f"step_index {step_index} out of range for a set operand")
-        return _evaluate_set(metamodel, model, defn, limits, budget)
-    inner = evaluate(metamodel, model, defn, limits)
+        return _evaluate_set(
+            metamodel, model, defn, limits, budget, row_elements=row_elements
+        )
+    inner = evaluate(metamodel, model, defn, limits, row_elements=row_elements)
     n_steps = len(inner.step_types)
     index = n_steps if step_index is None else step_index
     if index > n_steps:

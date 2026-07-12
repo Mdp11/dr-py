@@ -1,6 +1,6 @@
 /**
  * Workspace tab strip: three fixed built-ins (detail/graph/issues) plus
- * dynamic closable tabs (Stage 1: navigation editors; tables/diagrams later).
+ * dynamic closable tabs (navigation and table editors; diagrams later).
  * The active id is either a built-in literal or a dynamic tab id, so existing
  * `setActiveTab('detail')` call sites are untouched. Saved-artifact tabs are
  * persisted per project under `ui.workspace.tabs.<projectId>`; DRAFT tabs
@@ -12,10 +12,12 @@ export const BUILTIN_TABS = ['detail', 'graph', 'issues'] as const;
 
 export interface DynamicTab {
 	id: string;
-	kind: 'navigation';
+	kind: 'navigation' | 'table';
 	artifactId: string | null;
 	title: string;
 }
+
+const PREFIX = { navigation: 'nav', table: 'tbl' } as const;
 
 let _activeTab: string = $state('detail');
 let _tabs = $state<DynamicTab[]>([]);
@@ -33,20 +35,28 @@ export function getDynamicTabs(): DynamicTab[] {
 	return _tabs;
 }
 
-export function openNavigationTab(opts: { artifactId: string | null; title: string }): string {
+export function openArtifactTab(
+	kind: 'navigation' | 'table',
+	opts: { artifactId: string | null; title: string }
+): string {
+	const p = PREFIX[kind];
 	if (opts.artifactId !== null) {
-		const existing = _tabs.find((t) => t.artifactId === opts.artifactId);
+		const existing = _tabs.find((t) => t.artifactId === opts.artifactId && t.kind === kind);
 		if (existing) {
 			_activeTab = existing.id;
 			persist();
 			return existing.id;
 		}
 	}
-	const id = opts.artifactId === null ? `nav:draft:${++_draftSeq}` : `nav:${opts.artifactId}`;
-	_tabs = [..._tabs, { id, kind: 'navigation', artifactId: opts.artifactId, title: opts.title }];
+	const id = opts.artifactId === null ? `${p}:draft:${++_draftSeq}` : `${p}:${opts.artifactId}`;
+	_tabs = [..._tabs, { id, kind, artifactId: opts.artifactId, title: opts.title }];
 	_activeTab = id;
 	persist();
 	return id;
+}
+
+export function openNavigationTab(opts: { artifactId: string | null; title: string }): string {
+	return openArtifactTab('navigation', opts);
 }
 
 export function closeTab(id: string): void {
@@ -62,9 +72,11 @@ export function retitleTab(id: string, title: string): void {
 
 /** After the first save of a draft: bind it to its new artifact id (re-keyed). */
 export function bindTabToArtifact(id: string, artifactId: string): void {
-	const newId = `nav:${artifactId}`;
-	_tabs = _tabs.map((t) => (t.id === id ? { ...t, id: newId, artifactId } : t));
-	if (_activeTab === id) _activeTab = newId;
+	_tabs = _tabs.map((t) =>
+		t.id === id ? { ...t, id: `${PREFIX[t.kind]}:${artifactId}`, artifactId } : t
+	);
+	const bound = _tabs.find((t) => t.artifactId === artifactId);
+	if (_activeTab === id && bound) _activeTab = bound.id;
 	persist();
 }
 
@@ -93,7 +105,9 @@ export function initWorkspaceTabs(projectId: string): void {
 			return;
 		}
 		const parsed = JSON.parse(raw) as { active?: string; tabs?: DynamicTab[] };
-		_tabs = (parsed.tabs ?? []).filter((t) => t.artifactId !== null);
+		_tabs = (parsed.tabs ?? [])
+			.filter((t) => t.artifactId !== null)
+			.map((t) => ({ ...t, kind: t.kind ?? 'navigation' }));
 		const active = parsed.active ?? 'detail';
 		_activeTab =
 			(BUILTIN_TABS as readonly string[]).includes(active) || _tabs.some((t) => t.id === active)

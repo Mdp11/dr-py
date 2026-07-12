@@ -258,6 +258,31 @@ def test_evaluate_ref_cycle_422(client: TestClient) -> None:
     assert "cycle" in res.text
 
 
+def test_evaluate_row_rooted_navigation_binds_row_element(client: TestClient) -> None:
+    ids = _bootstrap_model(client)
+    root_id = ids["root"]  # has outgoing BlockHasPart to p1, p2
+    body = {
+        "definition": {
+            "kind": "path",
+            "start": {"kind": "row"},
+            "steps": [{"kind": "relationship",
+                       "relationship_type": "BlockHasPart", "direction": "out"}],
+        },
+        "row_element_id": root_id,
+    }
+    res = client.post(f"{API}/navigations/evaluate", json=body)
+    assert res.status_code == 200, res.text
+    chains = res.json()["chains"]
+    assert all(chain[0]["id"] == root_id for chain in chains)
+
+
+def test_evaluate_row_rooted_without_binding_422(client: TestClient) -> None:
+    _bootstrap_model(client)
+    body = {"definition": {"kind": "path", "start": {"kind": "row"}, "steps": []}}
+    res = client.post(f"{API}/navigations/evaluate", json=body)
+    assert res.status_code == 422
+
+
 def test_viewer_can_evaluate_but_not_create(client: TestClient) -> None:
     """/navigations/evaluate must be on the read-only POST allowlist."""
     _bootstrap_model(client)

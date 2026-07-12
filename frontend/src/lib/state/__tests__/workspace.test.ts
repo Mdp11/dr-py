@@ -5,6 +5,7 @@ import {
 	getActiveTab,
 	getDynamicTabs,
 	initWorkspaceTabs,
+	openArtifactTab,
 	openNavigationTab,
 	resetWorkspaceTabs,
 	setActiveTab
@@ -24,10 +25,24 @@ describe('dynamic workspace tabs', () => {
 	it('opens, activates, and dedupes navigation tabs by artifact', () => {
 		initWorkspaceTabs('p1');
 		const id = openNavigationTab({ artifactId: 'a1', title: 'Sensors' });
+		expect(id).toBe('nav:a1');
 		expect(getActiveTab()).toBe(id);
 		const again = openNavigationTab({ artifactId: 'a1', title: 'Sensors' });
 		expect(again).toBe(id);
 		expect(getDynamicTabs()).toHaveLength(1);
+	});
+
+	it('openArtifactTab creates a tbl: tab for a table', () => {
+		const id = openArtifactTab('table', { artifactId: 'abc', title: 'T' });
+		expect(id).toBe('tbl:abc');
+		expect(getDynamicTabs().find((t) => t.id === id)?.kind).toBe('table');
+	});
+
+	it('bindTabToArtifact keeps the table prefix', () => {
+		const id = openArtifactTab('table', { artifactId: null, title: 'draft' });
+		expect(id.startsWith('tbl:draft:')).toBe(true);
+		bindTabToArtifact(id, 'saved1');
+		expect(getDynamicTabs().find((t) => t.artifactId === 'saved1')?.id).toBe('tbl:saved1');
 	});
 
 	it('closing the active tab falls back to detail', () => {

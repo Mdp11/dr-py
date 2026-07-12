@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as api from '$lib/api/artifacts';
 import * as viewApi from '$lib/api/view';
-import type { View } from '$lib/api/types';
+import type { TableDefinition, View } from '$lib/api/types';
 import {
+	createTableArtifact,
 	getArtifactHeaders,
 	loadArtifacts,
 	removeArtifact,
@@ -16,6 +17,15 @@ const HEADER = {
 	kind: 'navigation',
 	name: 'Sensors',
 	artifact_rev: 2,
+	updated_at: '2026-07-05T00:00:00Z',
+	updated_by: null
+};
+
+const TABLE_HEADER = {
+	id: 't1',
+	kind: 'table',
+	name: 'Buildings table',
+	artifact_rev: 1,
 	updated_at: '2026-07-05T00:00:00Z',
 	updated_by: null
 };
@@ -72,7 +82,8 @@ describe('artifacts store', () => {
 					elements: [],
 					artifacts: [{ id: 'a1', kind: 'navigation' }]
 				}
-			]
+			],
+			artifacts: []
 		};
 		const put = vi
 			.spyOn(viewApi, 'putViewSnapshot')
@@ -95,13 +106,50 @@ describe('artifacts store', () => {
 		expect(put).not.toHaveBeenCalled();
 	});
 
+	it('createTableArtifact creates a table-kind artifact and refreshes the list', async () => {
+		const payload: TableDefinition = {
+			schema_version: 1,
+			default_cell_mode: 'collapse',
+			row_source: { kind: 'scope', types: [], criteria: [] },
+			columns: [{ kind: 'element', source: { kind: 'row', chain_index: 0 }, header: '' }]
+		};
+		const create = vi.spyOn(api, 'createArtifact').mockResolvedValue({
+			id: 't1',
+			kind: 'table',
+			name: 'Buildings table',
+			artifact_rev: 1,
+			updated_at: '2026-07-05T00:00:00Z',
+			updated_by: null,
+			payload: payload as unknown as Record<string, unknown>
+		});
+		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [TABLE_HEADER] });
+		const created = await createTableArtifact('Buildings table', payload);
+		expect(create).toHaveBeenCalledWith({
+			kind: 'table',
+			name: 'Buildings table',
+			payload: payload as unknown as Record<string, unknown>
+		});
+		expect(created.id).toBe('t1');
+		expect(getArtifactHeaders()).toEqual([TABLE_HEADER]);
+	});
+
+	it('getArtifactHeaders separates table headers from navigation headers by kind', async () => {
+		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [HEADER, TABLE_HEADER] });
+		await loadArtifacts();
+		const navigations = getArtifactHeaders().filter((a) => a.kind === 'navigation');
+		const tables = getArtifactHeaders().filter((a) => a.kind === 'table');
+		expect(navigations).toEqual([HEADER]);
+		expect(tables).toEqual([TABLE_HEADER]);
+	});
+
 	it('remove is a no-op push when the loaded view has no placement of the artifact', async () => {
 		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [HEADER] });
 		await loadArtifacts();
 		vi.spyOn(api, 'deleteArtifact').mockResolvedValue(undefined);
 		const seedView: View = {
 			name: 'v',
-			folders: [{ name: 'F', folders: [], elements: [], artifacts: [] }]
+			folders: [{ name: 'F', folders: [], elements: [], artifacts: [] }],
+			artifacts: []
 		};
 		vi.spyOn(viewApi, 'putViewSnapshot').mockImplementation(async (v) => ({
 			view: v,

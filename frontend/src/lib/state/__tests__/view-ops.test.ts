@@ -12,7 +12,7 @@ function folder(name: string, elements: string[] = [], folders: Folder[] = []): 
 }
 
 function view(...folders: Folder[]): View {
-	return { name: 'v', folders };
+	return { name: 'v', folders, artifacts: [] };
 }
 
 describe('isFolderPathAncestor', () => {

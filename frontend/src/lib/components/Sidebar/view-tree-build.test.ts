@@ -14,7 +14,8 @@ describe('buildUnifiedTree — curated scope', () => {
 	it('with a view, top-level roots are folders only (no unplaced roots)', () => {
 		const view: View = {
 			name: 'v',
-			folders: [{ name: 'F', folders: [], elements: ['a'], artifacts: [] }]
+			folders: [{ name: 'F', folders: [], elements: ['a'], artifacts: [] }],
+			artifacts: []
 		};
 		const tree = buildUnifiedTree(
 			view,
@@ -39,7 +40,8 @@ describe('buildUnifiedTree — curated scope', () => {
 		// in placement order from the first build so bodies fill in place.
 		const view: View = {
 			name: 'v',
-			folders: [{ name: 'F', folders: [], elements: ['c', 'a', 'b'], artifacts: [] }]
+			folders: [{ name: 'F', folders: [], elements: ['c', 'a', 'b'], artifacts: [] }],
+			artifacts: []
 		};
 		const tree = buildUnifiedTree(
 			view,
@@ -56,7 +58,8 @@ describe('buildUnifiedTree — curated scope', () => {
 	it('drops a placed id the server has confirmed missing (not merely unfetched)', () => {
 		const view: View = {
 			name: 'v',
-			folders: [{ name: 'F', folders: [], elements: ['a', 'gone', 'b'], artifacts: [] }]
+			folders: [{ name: 'F', folders: [], elements: ['a', 'gone', 'b'], artifacts: [] }],
+			artifacts: []
 		};
 		const tree = buildUnifiedTree(
 			view,
@@ -89,11 +92,26 @@ describe('buildUnifiedTree — curated scope', () => {
 		const ref = { id: 'a1', kind: 'navigation' };
 		const view: View = {
 			name: 'v',
-			folders: [{ name: 'F', folders: [], elements: [], artifacts: [ref] }]
+			folders: [{ name: 'F', folders: [], elements: [], artifacts: [ref] }],
+			artifacts: []
 		};
 		const tree = buildUnifiedTree(view, [], new Map(), new Map(), new Set(), displayName);
 		const key = artifactKey('a1');
 		expect(tree.children.get(folderKey(['F']))).toEqual([key]);
+		expect(tree.kind.get(key)).toBe('artifact');
+		expect(tree.artifactRef.get(key)).toEqual(ref);
+	});
+
+	it('a root artifact produces a root-level artifact node after the folder keys', () => {
+		const ref = { id: 'tbl1', kind: 'table' };
+		const view: View = {
+			name: 'v',
+			folders: [{ name: 'F', folders: [], elements: [], artifacts: [] }],
+			artifacts: [ref]
+		};
+		const tree = buildUnifiedTree(view, [], new Map(), new Map(), new Set(), displayName);
+		const key = artifactKey('tbl1');
+		expect(tree.roots).toEqual([folderKey(['F']), key]);
 		expect(tree.kind.get(key)).toBe('artifact');
 		expect(tree.artifactRef.get(key)).toEqual(ref);
 	});

@@ -31,6 +31,7 @@ from .routes import (
     read,
     relationships,
     settings as settings_routes,
+    tables,
     validation,
     view,
 )
@@ -228,6 +229,7 @@ def create_app() -> FastAPI:
     app.include_router(locks.router, prefix=proj, tags=["locks"])
     app.include_router(commits.router, prefix=proj, tags=["commits"])
     app.include_router(artifacts.router, prefix=proj, tags=["artifacts"])
+    app.include_router(tables.router, prefix=proj, tags=["tables"])
     app.include_router(settings_routes.router, prefix=proj, tags=["settings"])
     app.include_router(feed.router, prefix=proj, tags=["feed"])
     return app

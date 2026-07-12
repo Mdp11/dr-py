@@ -13,6 +13,7 @@ from data_rover.core.view.schema import View
 
 from .feed import FeedHub
 from .locking import LockTable
+from .table_cache import TableOrderCache
 
 if TYPE_CHECKING:
     from .schemas import OpIn
@@ -95,6 +96,14 @@ class Session:
     #: stays set after completion (running=False) so /model/status can report
     #: "ready". Replaced wholesale by the next sweep.
     validation_sweep: "SweepProgress | None" = field(default=None, repr=False)
+    #: per-session cache of ordered table row keys (Task 7), keyed by
+    #: (resolved-definition fingerprint, sort). A stored entry's model_rev
+    #: pins it to the model state it was computed against; both model
+    #: replacement and out-of-protocol mutation invalidate the whole cache
+    #: since any prior ordering may no longer reflect the current model.
+    table_order_cache: "TableOrderCache" = field(
+        default_factory=TableOrderCache, repr=False
+    )
 
     def set_model(
         self, model: Model | None, *, validation: ValidationState | None = None
@@ -113,6 +122,7 @@ class Session:
         self.op_log.clear()  # recorded inverses no longer apply to this model
         self.op_log_dropped = 0
         self.model_rev += 1
+        self.table_order_cache.clear()
 
     def touch_model(self) -> None:
         """Call when the model is mutated outside the ops protocol.
@@ -122,12 +132,19 @@ class Session:
         entry, so every coherence artifact of the ops protocol is stale
         afterwards: bump ``model_rev`` (in-flight batches with the old
         ``base_rev`` get 409), clear ``op_log`` (recorded inverses would
-        replay against a diverged model), and drop the validation baseline.
+        replay against a diverged model), drop the validation baseline, and
+        clear ``table_order_cache`` (any cached row order was computed
+        against the pre-mutation model and the new ``model_rev`` alone
+        wouldn't evict it, since a cache miss is keyed on rev *mismatch* —
+        bumping rev already makes stale entries unreachable, but clearing
+        also reclaims their memory immediately rather than leaving them for
+        the LRU to age out).
         """
         self.model_rev += 1
         self.op_log.clear()
         self.op_log_dropped = 0
         self.validation = None
+        self.table_order_cache.clear()
 
     def set_metamodel(self, metamodel: Metamodel | None) -> None:
         """Replace (or clear) the metamodel; the model conforms to it, so the

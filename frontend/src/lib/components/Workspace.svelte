@@ -1,11 +1,19 @@
 <script lang="ts">
 	import { X } from '@lucide/svelte';
 	import * as Tabs from '$lib/components/ui/tabs';
-	import { closeDraft, closeTab, getActiveTab, getDynamicTabs, setActiveTab } from '$lib/state';
+	import {
+		closeDraft,
+		closeTab,
+		closeTableDraft,
+		getActiveTab,
+		getDynamicTabs,
+		setActiveTab
+	} from '$lib/state';
 	import DetailView from './Workspace/DetailView.svelte';
 	import GraphView from './Workspace/GraphView.svelte';
 	import IssuesPanel from './Workspace/IssuesPanel.svelte';
 	import NavigationBuilder from './Navigation/NavigationBuilder.svelte';
+	import TableView from './Table/TableView.svelte';
 
 	const activeTab = $derived(getActiveTab());
 	const dynamicTabs = $derived(getDynamicTabs());
@@ -32,7 +40,11 @@
 						class="rounded p-0.5 opacity-50 transition-[color,background-color,border-color,opacity] hover:bg-muted hover:opacity-100"
 						onclick={(e) => {
 							e.stopPropagation();
-							closeDraft(tab.id);
+							if (tab.kind === 'table') {
+								closeTableDraft(tab.id);
+							} else {
+								closeDraft(tab.id);
+							}
 							closeTab(tab.id);
 						}}
 					>
@@ -52,7 +64,11 @@
 		</Tabs.Content>
 		{#each dynamicTabs as tab (tab.id)}
 			<Tabs.Content value={tab.id} class="flex-1 overflow-hidden">
-				<NavigationBuilder tabId={tab.id} />
+				{#if tab.kind === 'table'}
+					<TableView tabId={tab.id} />
+				{:else}
+					<NavigationBuilder tabId={tab.id} />
+				{/if}
 			</Tabs.Content>
 		{/each}
 	</Tabs.Root>

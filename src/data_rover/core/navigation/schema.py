@@ -33,7 +33,7 @@ from pydantic import BaseModel, Field, TypeAdapter, model_validator
 
 from data_rover.core.search.criteria import Criterion
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 #: hard ceiling on chain length; also the recursion depth of the evaluator.
 MAX_STEPS = 10
 
@@ -121,7 +121,19 @@ class SetExpression(BaseModel):
     operands: list[Operand] = Field(min_length=1)
 
 
-StartNode = Annotated[Union[Scope, SetExpression], Field(discriminator="kind")]
+class RowStart(BaseModel):
+    """Start = the element(s) this navigation is rooted at by its caller.
+
+    Only meaningful when `evaluate()` is given a row binding (table columns
+    supply one per row). Reaching a RowStart with no binding is a ValueError:
+    a row-rooted definition is not evaluable on its own."""
+
+    kind: Literal["row"] = "row"
+
+
+StartNode = Annotated[
+    Union[Scope, SetExpression, RowStart], Field(discriminator="kind")
+]
 NavigationDefinition = Annotated[
     Union[PathNavigation, SetExpression], Field(discriminator="kind")
 ]

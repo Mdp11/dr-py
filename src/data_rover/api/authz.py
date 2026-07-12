@@ -51,6 +51,8 @@ _READ_ONLY_POST_SUFFIXES = (
     "/metamodel/diff",
     "/clone",
     "/navigations/evaluate",
+    "/tables/evaluate",
+    "/tables/export",
 )
 
 

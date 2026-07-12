@@ -18,7 +18,8 @@ describe('in-folder order follows folder.elements (no name-sort)', () => {
 	it('keeps placement order even when names sort the other way', () => {
 		const view: View = {
 			name: 'v',
-			folders: [{ name: 'F', folders: [], elements: ['z', 'a'], artifacts: [] }]
+			folders: [{ name: 'F', folders: [], elements: ['z', 'a'], artifacts: [] }],
+			artifacts: []
 		};
 		const byId = new Map([
 			['z', el('z', 'Block', 'Zebra')],
@@ -33,7 +34,8 @@ describe('flattenVisibleRows', () => {
 	it('emits a depth-carrying pre-order walk, skipping hidden and not descending stubs/collapsed', () => {
 		const view: View = {
 			name: 'v',
-			folders: [{ name: 'F', folders: [], elements: ['a'], artifacts: [] }]
+			folders: [{ name: 'F', folders: [], elements: ['a'], artifacts: [] }],
+			artifacts: []
 		};
 		const byId = new Map([['a', el('a')]]);
 		const tree = buildUnifiedTree(view, [], byId, new Map(), new Set(), displayName);
@@ -49,7 +51,8 @@ describe('flattenVisibleRows', () => {
 	it('does not descend into a collapsed folder', () => {
 		const view: View = {
 			name: 'v',
-			folders: [{ name: 'F', folders: [], elements: ['a'], artifacts: [] }]
+			folders: [{ name: 'F', folders: [], elements: ['a'], artifacts: [] }],
+			artifacts: []
 		};
 		const byId = new Map([['a', el('a')]]);
 		const tree = buildUnifiedTree(view, [], byId, new Map(), new Set(), displayName);
@@ -66,7 +69,8 @@ describe('computeVisibility treats unloaded element bodies as tentatively visibl
 		// the windowed body fetch can hydrate it in place (was: dropped -> stub).
 		const view: View = {
 			name: 'v',
-			folders: [{ name: 'F', folders: [], elements: ['pending'], artifacts: [] }]
+			folders: [{ name: 'F', folders: [], elements: ['pending'], artifacts: [] }],
+			artifacts: []
 		};
 		const byId = new Map<string, Element>();
 		const tree = buildUnifiedTree(view, [], byId, new Map(), new Set(), displayName);
@@ -79,7 +83,8 @@ describe('computeVisibility treats unloaded element bodies as tentatively visibl
 	it('collapses to a stub once the only placed id is confirmed missing', () => {
 		const view: View = {
 			name: 'v',
-			folders: [{ name: 'F', folders: [], elements: ['ghost'], artifacts: [] }]
+			folders: [{ name: 'F', folders: [], elements: ['ghost'], artifacts: [] }],
+			artifacts: []
 		};
 		const byId = new Map<string, Element>();
 		const tree = buildUnifiedTree(
@@ -100,7 +105,8 @@ describe('registerExcludedRoots', () => {
 	it('exposes the excluded ids as a separate root region, registering unloaded ids as element nodes', () => {
 		const view: View = {
 			name: 'v',
-			folders: [{ name: 'F', folders: [], elements: ['placed'], artifacts: [] }]
+			folders: [{ name: 'F', folders: [], elements: ['placed'], artifacts: [] }],
+			artifacts: []
 		};
 		const byId = new Map([['placed', el('placed')]]); // excluded ids NOT loaded yet
 		const tree = buildUnifiedTree(view, [], byId, new Map(), new Set(), displayName);
@@ -115,7 +121,8 @@ describe('registerExcludedRoots', () => {
 	it('drops an id already placed in a folder (defensive complement)', () => {
 		const view: View = {
 			name: 'v',
-			folders: [{ name: 'F', folders: [], elements: ['placed'], artifacts: [] }]
+			folders: [{ name: 'F', folders: [], elements: ['placed'], artifacts: [] }],
+			artifacts: []
 		};
 		const byId = new Map([['placed', el('placed')]]);
 		const tree = buildUnifiedTree(view, [], byId, new Map(), new Set(), displayName);
@@ -124,7 +131,7 @@ describe('registerExcludedRoots', () => {
 	});
 
 	it('excluded roots are visible (skeleton) under the type filter and flatten on their own roots', () => {
-		const view: View = { name: 'v', folders: [] };
+		const view: View = { name: 'v', folders: [], artifacts: [] };
 		const byId = new Map<string, Element>(); // nothing loaded
 		const tree = buildUnifiedTree(view, [], byId, new Map(), new Set(), displayName);
 		registerExcludedRoots(tree, ['x1']);
