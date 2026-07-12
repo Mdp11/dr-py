@@ -11,7 +11,7 @@
 	// A missing/empty `columnName` keeps the cell read-only defensively (no
 	// patch key to write to).
 	import type { TableCell } from '$lib/api/types';
-	import { canEdit, lockBadgeFor, type Op } from '$lib/state';
+	import { canEdit, ensureElement, lockBadgeFor, type Op } from '$lib/state';
 	import { editLock } from '$lib/state/edit-gate';
 	import { emit, getStagedOpsFor } from '$lib/state/model.svelte';
 
@@ -75,6 +75,14 @@
 
 	async function commitEdit(next: unknown): Promise<void> {
 		if (!cell.element_id || !columnName) return;
+		// The grid renders purely from the evaluate response and never seeds
+		// `_elements` (unlike the Inspector/tree), so an uncommitted edit here
+		// can target an element `applyOptimistic` has never cached. Loading it
+		// first guarantees the revert journal is populated and the edit flows
+		// into the staged diff/Commit badge instead of vanishing silently
+		// (final-review A2).
+		const loaded = await ensureElement(cell.element_id);
+		if (loaded === null) return; // element unknown/deleted
 		if (!(await editLock(cell.element_id))) return;
 		emit({ kind: 'update_element', id: cell.element_id, properties_patch: { [columnName]: next } });
 	}

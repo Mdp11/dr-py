@@ -58,6 +58,29 @@ def test_chain_index_nonzero_requires_chains_source():
         _table(columns=[{"kind": "element", "source": {"kind": "row", "chain_index": 2}}])
 
 
+def test_element_column_source_must_be_element_producing():
+    # A2 hazard: a ColumnRef to an EXPAND property column is single-binding
+    # (one value per row) but does NOT produce elements — it produces the
+    # property's scalar value. An element column sourced from it must be
+    # rejected at schema validation, not crash at eval time (final-review A3).
+    with pytest.raises(ValidationError):
+        _table(columns=[
+            {"kind": "property", "source": {"kind": "row"}, "name": "mass",
+             "mode": "expand"},
+            {"kind": "element", "source": {"kind": "column", "index": 0}},
+        ])
+
+
+def test_element_column_source_from_element_producing_column_ok():
+    # A legitimate ColumnRef chain: an element column sourced from an earlier
+    # element column must still validate.
+    t = _table(columns=[
+        {"kind": "element", "source": {"kind": "row"}},
+        {"kind": "element", "source": {"kind": "column", "index": 0}},
+    ])
+    assert len(t.columns) == 2
+
+
 def test_chain_index_nonzero_ok_with_chains_source():
     t = _table(
         row_source={"kind": "chains",

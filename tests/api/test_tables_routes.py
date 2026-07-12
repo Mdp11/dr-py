@@ -325,3 +325,61 @@ def test_truncated_flag_survives_cache_hit(
     assert r1.status_code == r2.status_code == 200
     assert r1.json()["truncated"] is True
     assert r2.json()["truncated"] is True
+
+
+def test_preview_rollback_invalidates_table_order_cache(client: TestClient) -> None:
+    """A1: /commits/preview applies ops in place and then ALWAYS rolls back
+    without bumping model_rev (routes/commits.py:preview_commit). A cache
+    entry populated at that unchanged rev must not survive the rollback —
+    otherwise a later /tables/evaluate at the same rev could serve rows that
+    reflect the rolled-back, never-committed mutation (final-review A1)."""
+    from data_rover.api.session import get_session
+    from data_rover.api.table_cache import table_fingerprint
+    from data_rover.core.table.schema import TABLE_ADAPTER
+
+    ids = _bootstrap_model(client)
+    definition = {
+        "row_source": {"kind": "scope", "types": ["Block"]},
+        "columns": [
+            {"kind": "element", "source": {"kind": "row"}},
+            {"kind": "property", "source": {"kind": "row"}, "name": "mass"},
+        ],
+    }
+    r1 = client.post(
+        papi("/tables/evaluate"), json={"definition": definition}, headers=AUTH_HEADERS
+    )
+    assert r1.status_code == 200, r1.text
+    rev = r1.json()["model_rev"]
+
+    # Same fingerprint/sort_key the route computes (routes/tables.py:149-150)
+    # for this inline, ref-free definition.
+    resolved = TABLE_ADAPTER.validate_python(definition)
+    fp = table_fingerprint(TABLE_ADAPTER.dump_json(resolved).decode(), None)
+    session = get_session()
+    assert session.table_order_cache.get(fp, "none", rev) is not None  # primed
+
+    preview = client.post(
+        papi("/commits/preview"),
+        headers=AUTH_HEADERS,
+        json={
+            "base_rev": rev,
+            "ops": [
+                {
+                    "kind": "update_element",
+                    "id": ids["root"],
+                    "properties_patch": {"mass": 999.0},
+                }
+            ],
+        },
+    )
+    assert preview.status_code == 200, preview.text
+    # preview rolls back in place; model_rev is unchanged
+    assert (
+        client.get(papi("/model/summary"), headers=AUTH_HEADERS).json()["model_rev"]
+        == rev
+    )
+
+    # The bug: the entry cached at `rev` before the preview must be gone, or a
+    # later evaluate at the same (still-unchanged) rev would HIT and could
+    # serve rows computed mid-preview instead of recomputing.
+    assert session.table_order_cache.get(fp, "none", rev) is None
