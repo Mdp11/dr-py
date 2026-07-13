@@ -4,6 +4,7 @@ import { ConflictError } from '$lib/api/errors';
 import {
 	closeDraft,
 	ensureDraft,
+	ensureEmbeddedDraft,
 	getDraft,
 	getEvalError,
 	getPreview,
@@ -18,12 +19,14 @@ import {
 	saveAsDraft,
 	saveDraft,
 	selectNode,
+	setEmbeddedRowElement,
 	unregisterVisibleNode,
 	updateDefinition
 } from '../navigation-editor.svelte';
 import { applyStructuralEdit } from '../navigation-editor.svelte';
 import {
 	emptyCombine,
+	emptyRowPath,
 	insertNavigationEdit,
 	moveOperandEdit,
 	pathKey,
@@ -1225,5 +1228,52 @@ describe('node selection', () => {
 		selectNode(tabId, [1]);
 		closeDraft(tabId);
 		expect(getSelectedPath(tabId)).toEqual([]);
+	});
+});
+
+describe('embedded drafts', () => {
+	it('creates a pinned draft and runs the root preview with the row binding', async () => {
+		const evalSpy = vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		const draft = ensureEmbeddedDraft('navemb:t1', emptyRowPath(), {
+			rowContext: true,
+			rowElementId: 'e1'
+		});
+		expect(draft.embedded).toEqual({ rowContext: true, rowElementId: 'e1' });
+		await vi.waitFor(() => expect(getPreview('navemb:t1')?.loading).toBe(false));
+		expect(evalSpy).toHaveBeenCalledWith(
+			expect.objectContaining({ row_element_id: 'e1' })
+		);
+	});
+
+	it('skips previews for a row-rooted draft with no bound row (no 422 surfacing)', async () => {
+		const evalSpy = vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		ensureEmbeddedDraft('navemb:t2', emptyRowPath(), { rowContext: true, rowElementId: null });
+		await Promise.resolve();
+		expect(evalSpy).not.toHaveBeenCalled();
+		expect(getPreview('navemb:t2')).toBeUndefined();
+		expect(getEvalError('navemb:t2')).toBe(false);
+	});
+
+	it('setEmbeddedRowElement re-runs expanded previews under the new binding', async () => {
+		const evalSpy = vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		ensureEmbeddedDraft('navemb:t3', emptyRowPath(), { rowContext: true, rowElementId: null });
+		setEmbeddedRowElement('navemb:t3', 'e9');
+		await vi.waitFor(
+			() => expect(evalSpy).toHaveBeenCalledWith(expect.objectContaining({ row_element_id: 'e9' })),
+			{ timeout: 2000 } // updateDefinition's sweep debounces (AUTO_RUN_DEBOUNCE_MS)
+		);
+		expect(getDraft('navemb:t3')?.embedded?.rowElementId).toBe('e9');
+	});
+
+	it('rejects saveDraft/saveAsDraft on an embedded draft', async () => {
+		ensureEmbeddedDraft('navemb:t4', emptyRowPath(), { rowContext: true, rowElementId: null });
+		await expect(saveDraft('navemb:t4')).rejects.toThrow(/cannot be saved/);
+		await expect(saveAsDraft('navemb:t4', 'x')).rejects.toThrow(/cannot be saved/);
+	});
+
+	it('rejects a non-navemb id', () => {
+		expect(() =>
+			ensureEmbeddedDraft('nav:draft:x', emptyRowPath(), { rowContext: true, rowElementId: null })
+		).toThrow(/navemb/);
 	});
 });

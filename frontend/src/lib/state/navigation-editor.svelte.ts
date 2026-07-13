@@ -42,6 +42,7 @@ import * as api from '$lib/api/artifacts';
 import { ConflictError } from '$lib/api/errors';
 import type { NavigationDefinition, TreeItem } from '$lib/api/types';
 import {
+	containsRowStart,
 	emptyPath,
 	isRunnable,
 	nodeAt,
@@ -61,13 +62,29 @@ export { isRunnable };
 const PAGE = 100;
 const AUTO_RUN_DEBOUNCE_MS = 400;
 
+export interface EmbeddedContext {
+	/** True when the hosting surface roots the navigation at a table row —
+	 * PathCard offers the "the row's element" start mode only then. */
+	rowContext: boolean;
+	/** Sample element row-rooted previews are bound to (the hosting table's
+	 * first row); null = no rows, so row-rooted previews are skipped. */
+	rowElementId: string | null;
+}
+
 export interface NavDraft {
 	name: string;
 	artifactId: string | null;
 	artifactRev: number | null;
 	definition: NavigationDefinition;
 	dirty: boolean;
+	/** Present only on EMBEDDED drafts (`navemb:*` ids): drafts hosted by a
+	 * table column / row-source editor rather than a workspace tab. Their
+	 * definition is mirrored into the hosting table definition by the editor
+	 * component; they are never saved and never appear in the tab strip. */
+	embedded?: EmbeddedContext;
 }
+
+const EMBEDDED_PREFIX = 'navemb:';
 
 export interface NavPreview {
 	stepTypes: string[];
@@ -431,6 +448,54 @@ export async function ensureDraft(tabId: string): Promise<NavDraft> {
 	}
 }
 
+/**
+ * Create (or return) an EMBEDDED draft: the navigation-builder components are
+ * store-coupled through a tabId string, so a table column editor hosts its
+ * inline definition here under a synthetic id and renders NavigationNode
+ * unchanged. Sync (no artifact fetch): the seed definition comes from the
+ * hosting column. Mirrors ensureDraft's saved-artifact open: pin the root and
+ * show results immediately — runPreview itself skips a row-rooted node with
+ * no bound row element.
+ */
+export function ensureEmbeddedDraft(
+	id: string,
+	definition: NavigationDefinition,
+	ctx: EmbeddedContext
+): NavDraft {
+	if (!id.startsWith(EMBEDDED_PREFIX)) {
+		throw new Error(`embedded draft ids must start with "${EMBEDDED_PREFIX}"`);
+	}
+	const existing = _drafts.get(id);
+	if (existing) return existing;
+	const draft: NavDraft = {
+		name: '',
+		artifactId: null,
+		artifactRev: null,
+		definition: normalizeDefinition(definition),
+		dirty: false,
+		embedded: ctx
+	};
+	_drafts.set(id, draft);
+	pinRoot(id);
+	if (isRunnable(draft.definition)) void runPreview(id, []).catch(() => {});
+	return draft;
+}
+
+/**
+ * Update an embedded draft's sample-row binding (the hosting table's first
+ * row changed). The definition is unchanged, but every preview was evaluated
+ * against the OLD binding — reuse updateDefinition's invalidation sweep
+ * (bump generations, clear previews, reschedule debounced runs) rather than
+ * duplicating it. The `dirty: true` it sets is meaningless on an embedded
+ * draft (nothing reads it), so not worth a parallel code path.
+ */
+export function setEmbeddedRowElement(id: string, rowElementId: string | null): void {
+	const draft = _drafts.get(id);
+	if (!draft?.embedded || draft.embedded.rowElementId === rowElementId) return;
+	_drafts.set(id, { ...draft, embedded: { ...draft.embedded, rowElementId } });
+	updateDefinition(id, draft.definition);
+}
+
 export function updateDefinition(tabId: string, defn: NavigationDefinition): void {
 	const draft = _drafts.get(tabId);
 	if (!draft) return;
@@ -531,6 +596,9 @@ export function setDraftName(tabId: string, name: string): void {
 export async function saveDraft(tabId: string): Promise<void> {
 	const draft = _drafts.get(tabId);
 	if (!draft) return;
+	if (tabId.startsWith(EMBEDDED_PREFIX)) {
+		throw new Error('embedded navigation drafts cannot be saved');
+	}
 	const payload = draft.definition as unknown as Record<string, unknown>;
 	try {
 		if (draft.artifactId === null) {
@@ -612,6 +680,9 @@ export async function saveDraft(tabId: string): Promise<void> {
 export async function saveAsDraft(tabId: string, name: string): Promise<void> {
 	const draft = _drafts.get(tabId);
 	if (!draft) return;
+	if (tabId.startsWith(EMBEDDED_PREFIX)) {
+		throw new Error('embedded navigation drafts cannot be saved');
+	}
 	const payload = draft.definition as unknown as Record<string, unknown>;
 	const created = await api.createArtifact({ kind: 'navigation', name, payload });
 	bindTabToArtifact(tabId, created.id);
@@ -655,7 +726,18 @@ export async function runPreview(tabId: string, path: NodePath = []): Promise<vo
 	// preview this iteration, so guard and skip.
 	const node = nodeAt(draft.definition, path);
 	if (!node) return;
+	const emb = draft.embedded;
 	const key = previewKey(tabId, path);
+	// A row-rooted node with no bound row element is not evaluable (the
+	// backend 422s on an unbound RowStart). Skip QUIETLY — no preview, no
+	// eval-error: StatusChip derives the "no row to preview against" hint
+	// from this same predicate, and a red "failed" would be a lie.
+	if (emb && emb.rowElementId === null && containsRowStart(node)) {
+		bumpGeneration(key); // orphan any in-flight run for the old binding
+		_previews.delete(key);
+		_evalErrors.delete(key);
+		return;
+	}
 	const gen = bumpGeneration(key); // supersede any older in-flight evaluate
 	_evalErrors.delete(key); // a fresh attempt starts clean
 	_previews.set(key, {
@@ -669,7 +751,8 @@ export async function runPreview(tabId: string, path: NodePath = []): Promise<vo
 		const page = await api.evaluateNavigation({
 			definition: node,
 			limit: PAGE,
-			offset: 0
+			offset: 0,
+			row_element_id: emb?.rowElementId ?? undefined
 		});
 		if (!isCurrent(tabId, key, gen)) return; // stale: edited/collapsed/closed mid-flight
 		_previews.set(key, {
@@ -699,13 +782,15 @@ export async function loadMorePreview(tabId: string, path: NodePath = []): Promi
 	if (preview.chains.length >= preview.total) return;
 	const node = nodeAt(draft.definition, path);
 	if (!node) return;
+	const emb = draft.embedded;
 	const gen = _generations.get(key) ?? 0; // extend the CURRENT preview only
 	_previews.set(key, { ...preview, loading: true });
 	try {
 		const page = await api.evaluateNavigation({
 			definition: node,
 			limit: PAGE,
-			offset: preview.chains.length
+			offset: preview.chains.length,
+			row_element_id: emb?.rowElementId ?? undefined
 		});
 		if (!isCurrent(tabId, key, gen)) return; // stale: edited/re-run/collapsed/closed mid-flight
 		_previews.set(key, {
