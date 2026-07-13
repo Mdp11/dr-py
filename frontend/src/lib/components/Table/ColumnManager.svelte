@@ -19,6 +19,7 @@
 	} from '$lib/table/columns';
 	import type { Column, TableDefinition } from '$lib/api/types';
 	import NavigationColumnEditor from './NavigationColumnEditor.svelte';
+	import PropertyColumnEditor from './PropertyColumnEditor.svelte';
 	import RowSourceEditor from './RowSourceEditor.svelte';
 
 	let { tabId }: { tabId: string } = $props();
@@ -37,9 +38,6 @@
 	});
 
 	let error = $state<string | null>(null);
-	// Free-text property name (Stage 2 sanctioned shortcut — no metamodel
-	// effective-properties fetch here; see task report for the rationale).
-	let newPropertyName = $state('');
 
 	function apply(next: TableDefinition): void {
 		error = null;
@@ -96,14 +94,13 @@
 			addColumn(defn, {
 				kind: 'property',
 				source: { kind: 'row', chain_index: 0 },
-				name: newPropertyName.trim(),
+				name: '',
 				mode: 'collapse',
 				keep_empty: true,
 				header: '',
 				width_px: null
 			})
 		);
-		newPropertyName = '';
 	}
 
 	function addNavigationColumn(): void {
@@ -209,6 +206,14 @@
 							{sampleRowElementId}
 							onChange={(next) => onColumnChange(i, next)}
 						/>
+					{:else if col.kind === 'property'}
+						<PropertyColumnEditor
+							column={col}
+							columnIndex={i}
+							columns={defn.columns}
+							rowSource={defn.row_source}
+							onChange={(next) => onColumnChange(i, next)}
+						/>
 					{/if}
 				</div>
 			{/each}
@@ -223,11 +228,6 @@
 			>
 				+ Element column
 			</button>
-			<input
-				class="w-32 rounded border border-input bg-card px-1.5 py-0.5 text-[11px]"
-				placeholder="property name"
-				bind:value={newPropertyName}
-			/>
 			<button
 				type="button"
 				data-testid="add-property-column"
