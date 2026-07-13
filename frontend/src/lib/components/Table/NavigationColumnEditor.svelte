@@ -1,15 +1,27 @@
 <script lang="ts">
 	// Per-column editor for a `navigation`-kind column: the column's `source`
-	// (a row slot / an earlier column's output), the saved-navigation REF
-	// picker (see RowSourceEditor's doc comment for why a ref picker rather
-	// than an embedded `NavigationNode` — same reasoning applies here;
-	// inline nav-definition editing inside a column is a Stage-2.1
-	// deferral), `step_index`, `sort_mode`, `cell_cap`, `mode`, `keep_empty`.
-	// A fully controlled component: emits a whole new column via `onChange`,
-	// no store access of its own beyond the artifact-header list.
-	import { getArtifactHeaders } from '$lib/state';
+	// (a row slot / an earlier column's output), the navigation itself —
+	// either a saved-artifact REF or an INLINE definition edited with the
+	// real navigation builder — plus `step_index`, `sort_mode`, `cell_cap`,
+	// `mode`, `keep_empty`. A fully controlled component: emits a whole new
+	// column via `onChange`. Inline mode hosts an EMBEDDED draft in the
+	// navigation-editor store (see ensureEmbeddedDraft) and renders
+	// NavigationNode against it; the column's stored definition stays the
+	// source of truth — the draft is only the editing surface, so a remount
+	// (column reorder/remove) simply re-seeds from the column.
+	import { onDestroy } from 'svelte';
+	import * as api from '$lib/api/artifacts';
+	import {
+		closeDraft,
+		ensureEmbeddedDraft,
+		getArtifactHeaders,
+		getDraft,
+		setEmbeddedRowElement
+	} from '$lib/state';
 	import { columnLabel } from '$lib/table/columns';
-	import type { Column } from '$lib/api/types';
+	import { emptyRowPath } from '$lib/navigation/tree';
+	import type { Column, NavigationDefinition } from '$lib/api/types';
+	import NavigationNode from '../Navigation/NavigationNode.svelte';
 
 	type NavColumn = Extract<Column, { kind: 'navigation' }>;
 
@@ -17,16 +29,97 @@
 		column,
 		columnIndex,
 		columns,
+		sampleRowElementId = null,
 		onChange
 	}: {
 		column: NavColumn;
 		columnIndex: number;
 		columns: Column[];
+		/** The hosting table's first row element — binds row-rooted previews.
+		 * Null (no rows) shows the "no row to preview against" hint. */
+		sampleRowElementId?: string | null;
 		onChange: (next: NavColumn) => void;
 	} = $props();
 
 	const navHeaders = $derived(getArtifactHeaders().filter((a) => a.kind === 'navigation'));
 	const priorColumns = $derived(columns.slice(0, columnIndex));
+
+	// One embedded-draft id per mounted editor instance (never persisted).
+	const embId = `navemb:${crypto.randomUUID()}`;
+
+	const inline = $derived(column.navigation.definition != null);
+	const embDraft = $derived(getDraft(embId));
+
+	// The last inline definition, kept while in ref mode so toggling
+	// saved -> inline -> saved within one mount doesn't lose work. Only the
+	// active mode is ever written to the column.
+	let lastInline = $state<NavigationDefinition | null>(null);
+	let seeding = $state(false);
+
+	// Lifecycle: an inline column needs its embedded draft (e.g. a saved
+	// table reopened with an inline definition already in the payload); a
+	// ref-mode column must not leave one behind.
+	$effect(() => {
+		if (inline && !getDraft(embId)) {
+			ensureEmbeddedDraft(embId, column.navigation.definition!, {
+				rowContext: true,
+				rowElementId: sampleRowElementId
+			});
+		} else if (!inline && getDraft(embId)) {
+			closeDraft(embId);
+		}
+	});
+
+	// Mirror embedded-draft edits back into the column. Reference equality is
+	// the loop guard: ColumnManager's whole-column swap preserves the
+	// definition object it was handed, so after a round-trip
+	// column.navigation.definition IS embDraft.definition and this no-ops.
+	$effect(() => {
+		if (!inline || !embDraft) return;
+		if (embDraft.definition !== column.navigation.definition) {
+			onChange({ ...column, navigation: { definition: embDraft.definition } });
+		}
+	});
+
+	// Keep the preview row binding in sync with the hosting table's rows.
+	$effect(() => {
+		if (getDraft(embId)) setEmbeddedRowElement(embId, sampleRowElementId);
+	});
+
+	onDestroy(() => closeDraft(embId));
+
+	async function switchToInline(): Promise<void> {
+		if (inline || seeding) return;
+		// Seed preference: the in-memory definition from an earlier toggle, a
+		// COPY of the currently selected saved navigation ("customize this
+		// one"), then a fresh row-rooted path.
+		let seed: NavigationDefinition | null = lastInline;
+		if (!seed && column.navigation.ref) {
+			seeding = true;
+			try {
+				const artifact = await api.getArtifact(column.navigation.ref);
+				seed = artifact.payload as unknown as NavigationDefinition;
+			} catch {
+				seed = null; // unknown/foreign ref: fall through to a fresh path
+			} finally {
+				seeding = false;
+			}
+		}
+		const draft = ensureEmbeddedDraft(embId, seed ?? emptyRowPath(), {
+			rowContext: true,
+			rowElementId: sampleRowElementId
+		});
+		// Write the draft's (normalized) definition so the mirror effect's
+		// reference-equality guard holds from the first render.
+		onChange({ ...column, navigation: { definition: draft.definition } });
+	}
+
+	function switchToRef(): void {
+		if (!inline) return;
+		lastInline = column.navigation.definition ?? null;
+		closeDraft(embId);
+		onChange({ ...column, navigation: {} });
+	}
 
 	function setSourceKind(e: Event): void {
 		const kind = (e.currentTarget as HTMLSelectElement).value;
@@ -109,17 +202,41 @@
 	</div>
 	<div class="flex flex-wrap items-center gap-2">
 		<span class="text-muted-foreground/70">navigation</span>
-		<select
-			aria-label="Saved navigation for column"
-			value={column.navigation.ref ?? ''}
-			onchange={setRef}
-			class="rounded border border-input bg-card px-1 py-0.5"
-		>
-			<option value="">Select a saved navigation…</option>
-			{#each navHeaders as h (h.id)}
-				<option value={h.id}>{h.name}</option>
-			{/each}
-		</select>
+		<div class="flex overflow-hidden rounded border border-input">
+			<button
+				type="button"
+				data-testid="nav-mode-ref"
+				class="px-1.5 py-0.5 {inline ? 'hover:bg-muted' : 'bg-muted font-medium'}"
+				disabled={seeding}
+				onclick={switchToRef}
+			>
+				saved
+			</button>
+			<button
+				type="button"
+				data-testid="nav-mode-inline"
+				class="border-l border-input px-1.5 py-0.5 {inline
+					? 'bg-muted font-medium'
+					: 'hover:bg-muted'}"
+				disabled={seeding}
+				onclick={switchToInline}
+			>
+				inline
+			</button>
+		</div>
+		{#if !inline}
+			<select
+				aria-label="Saved navigation for column"
+				value={column.navigation.ref ?? ''}
+				onchange={setRef}
+				class="rounded border border-input bg-card px-1 py-0.5"
+			>
+				<option value="">Select a saved navigation…</option>
+				{#each navHeaders as h (h.id)}
+					<option value={h.id}>{h.name}</option>
+				{/each}
+			</select>
+		{/if}
 		<label class="flex items-center gap-1">
 			step
 			<input
@@ -130,6 +247,11 @@
 			/>
 		</label>
 	</div>
+	{#if inline && embDraft}
+		<div data-testid="inline-nav-editor" class="mt-1">
+			<NavigationNode tabId={embId} path={[]} />
+		</div>
+	{/if}
 	<div class="flex flex-wrap items-center gap-2">
 		<label class="flex items-center gap-1">
 			sort
