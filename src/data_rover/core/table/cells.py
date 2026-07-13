@@ -151,7 +151,9 @@ def _property_cell(
         slot = _expand_slot_of(defn, base_slots, col_index)
         val = key[slot]
         eid = els[0] if els else None
-        present = eid is not None and _prop_present(mm, model.elements[eid].type_name, col.name)
+        present = eid is not None and _prop_present(
+            mm, model.elements[eid].type_name, col.name
+        )
         return ValueCell(present=present, value=val, element_id=eid, editable=False)
     if not els:
         return ValueCell(present=False, value=None, element_id=None, editable=False)
@@ -190,7 +192,9 @@ def _navigation_cell(
         slot = _expand_slot_of(defn, base_slots, col_index)
         b = key[slot]
         return ElementCell(element_id=b if isinstance(b, str) else None)
-    roots = resolve_source_elements(mm, model, defn, key, col.source, base_slots, limits)
+    roots = resolve_source_elements(
+        mm, model, defn, key, col.source, base_slots, limits
+    )
     reached = _navigation_reached(mm, model, col, roots, limits)
     # `cell_cap` is a per-column display preference; `max_cell_elements` is the
     # server-wide ceiling, so the effective cap is whichever is stricter.

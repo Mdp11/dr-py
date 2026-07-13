@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import * as artifactsApi from '$lib/api/artifacts';
 import {
 	ensureDraft,
+	ensureEmbeddedDraft,
 	resetArtifacts,
 	resetCheckout,
 	resetNavigationEditors,
@@ -10,6 +11,7 @@ import {
 	setProjectInfo,
 	updateDefinition
 } from '$lib/state';
+import { emptyRowPath } from '$lib/navigation/tree';
 import StatusChip from '../StatusChip.svelte';
 
 const CHAIN_PAGE = {
@@ -108,6 +110,18 @@ it('a ref node shows the muted linked marker', async () => {
 	const c = render(tabId, 'ref');
 	try {
 		expect(document.body.textContent).toContain('linked');
+	} finally {
+		unmount(c);
+	}
+});
+
+it('shows the no-row hint for a row-rooted embedded draft with no binding', () => {
+	const evalSpy = vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+	ensureEmbeddedDraft('navemb:chip1', emptyRowPath(), { rowContext: true, rowElementId: null });
+	const c = render('navemb:chip1');
+	try {
+		expect(document.body.textContent).toContain('no row to preview against');
+		expect(evalSpy).not.toHaveBeenCalled();
 	} finally {
 		unmount(c);
 	}

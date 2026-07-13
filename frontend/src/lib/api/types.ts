@@ -395,10 +395,18 @@ export interface NavFilterStep {
 
 export type NavStepItem = NavRelationshipStep | NavFilterStep;
 
+/** Start = the element(s) the caller roots this navigation at — a table
+ * column supplies its row's element(s). Mirrors core/navigation/schema.py's
+ * RowStart; only valid where a row binding exists (embedded column editors),
+ * never in a standalone saved navigation. */
+export interface NavRowStart {
+	kind: 'row';
+}
+
 export interface PathNavigation {
 	kind: 'path';
 	schema_version: number;
-	start: NavScope | SetExpression;
+	start: NavScope | SetExpression | NavRowStart;
 	steps: NavStepItem[];
 	// Cycle guard: when true (default), a chain never revisits an element
 	// already in its own prefix; when false, revisits are allowed. Part of

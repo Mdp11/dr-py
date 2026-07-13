@@ -29,6 +29,28 @@ export function emptyPath(): PathNavigation {
 	};
 }
 
+/** A fresh path rooted at the caller-supplied row element (RowStart). The
+ * embedded column editor's seed — a standalone builder never creates one. */
+export function emptyRowPath(): PathNavigation {
+	return {
+		kind: 'path',
+		schema_version: 2,
+		start: { kind: 'row' },
+		steps: [],
+		exclude_visited: true
+	};
+}
+
+/** True when any path in the tree is row-rooted — such a definition is only
+ * evaluable with a row binding (previews skip / hint without one). */
+export function containsRowStart(defn: NavigationDefinition): boolean {
+	if (defn.kind === 'path') {
+		if (defn.start.kind === 'row') return true;
+		return defn.start.kind === 'set_op' ? containsRowStart(defn.start) : false;
+	}
+	return defn.operands.some((op) => (op.definition ? containsRowStart(op.definition) : false));
+}
+
 export function emptyCombine(): SetExpression {
 	return {
 		kind: 'set_op',
@@ -290,9 +312,11 @@ export function nodeLabel(defn: NavigationDefinition): string {
 	const head =
 		defn.start.kind === 'set_op'
 			? '(combination)'
-			: startTypes.length
-				? startTypes.join('/')
-				: 'Any';
+			: defn.start.kind === 'row'
+				? 'Row'
+				: startTypes.length
+					? startTypes.join('/')
+					: 'Any';
 	const hops = defn.steps
 		.filter((s): s is Extract<typeof s, { kind: 'relationship' }> => s.kind === 'relationship')
 		.map((s) => s.relationship_type || '?');
@@ -395,6 +419,7 @@ export function chainColumns(node: PathNavigation): ChainColumn[] {
 	const { start } = node;
 	let sub: string | undefined;
 	if (start.kind === 'set_op') sub = 'combination';
+	else if (start.kind === 'row') sub = 'row element';
 	else if (readElementStart(start) !== null) sub = 'one element';
 	else if (start.types.length > 0) sub = [...start.types].sort().join(', ');
 	const cols: ChainColumn[] = [{ index: 0, label: 'Start', sub }];

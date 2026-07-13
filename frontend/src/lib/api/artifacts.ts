@@ -46,6 +46,8 @@ export function evaluateNavigation(
 		artifact_id?: string;
 		limit?: number;
 		offset?: number;
+		/** Binds any RowStart in `definition` (embedded column previews). */
+		row_element_id?: string | null;
 	},
 	cfg?: ClientConfig
 ): Promise<ChainPage> {

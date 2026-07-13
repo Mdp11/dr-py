@@ -6,7 +6,7 @@
 	// A REF part has no evaluable definition (`nodeAt` returns null for it),
 	// so it reports only that it is linked.
 	import { getDraft, getEvalError, getPreview, isRunnable } from '$lib/state';
-	import { nodeAt, type NodePath } from '$lib/navigation/tree';
+	import { containsRowStart, nodeAt, type NodePath } from '$lib/navigation/tree';
 
 	let {
 		tabId,
@@ -19,6 +19,15 @@
 	const preview = $derived(getPreview(tabId, path));
 	const errored = $derived(getEvalError(tabId, path));
 	const runnable = $derived(node ? isRunnable(node) : false);
+	// Mirrors runPreview's skip predicate exactly: an embedded draft with no
+	// bound row and a row-rooted node gets no preview AND no error — this
+	// hint is the only surface telling the user why.
+	const needsRow = $derived(
+		draft?.embedded !== undefined &&
+			draft.embedded.rowElementId === null &&
+			node !== null &&
+			containsRowStart(node)
+	);
 </script>
 
 <span data-testid="status-chip" aria-live="polite" class="text-[11px]">
@@ -28,6 +37,8 @@
 		<span class="text-muted-foreground/70">…</span>
 	{:else if preview}
 		<span class="font-mono text-success">✓ {preview.total} chains</span>
+	{:else if needsRow}
+		<span class="text-muted-foreground/70 italic">no row to preview against</span>
 	{:else if errored}
 		<span class="font-mono text-destructive">⚠ failed</span>
 	{:else if !runnable}

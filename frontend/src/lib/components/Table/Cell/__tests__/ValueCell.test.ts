@@ -47,9 +47,7 @@ afterEach(() => {
 
 describe('ValueCell editing', () => {
 	it('acquires a lock then stages a typed set_property on edit', async () => {
-		const ensureElement = vi
-			.spyOn(modelStore, 'ensureElement')
-			.mockResolvedValue(fakeElement());
+		const ensureElement = vi.spyOn(modelStore, 'ensureElement').mockResolvedValue(fakeElement());
 		vi.spyOn(gate, 'editLock').mockResolvedValue(true);
 		const emit = vi.spyOn(modelStore, 'emit').mockImplementation(() => {});
 
@@ -83,9 +81,7 @@ describe('ValueCell editing', () => {
 		// `ensureElement` it — otherwise `applyOptimistic`'s `update_element`
 		// branch is a silent no-op (empty revert journal, no `_elements` write)
 		// and the edit is unreachable from the staged diff/Commit button.
-		const ensureElement = vi
-			.spyOn(modelStore, 'ensureElement')
-			.mockResolvedValue(fakeElement());
+		const ensureElement = vi.spyOn(modelStore, 'ensureElement').mockResolvedValue(fakeElement());
 		vi.spyOn(gate, 'editLock').mockResolvedValue(true);
 		const emit = vi.spyOn(modelStore, 'emit').mockImplementation(() => {});
 

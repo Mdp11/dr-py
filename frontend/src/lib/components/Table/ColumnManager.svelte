@@ -7,7 +7,7 @@
 	// (`ColumnInUseError` / a forward-ref error) when the edit would leave a
 	// dangling `ColumnRef` — both are caught here and surfaced as an inline
 	// message instead of propagating.
-	import { getTableDraft, updateTableDefinition } from '$lib/state';
+	import { getTableDraft, getTablePage, updateTableDefinition } from '$lib/state';
 	import {
 		ColumnInUseError,
 		addColumn,
@@ -19,6 +19,7 @@
 	} from '$lib/table/columns';
 	import type { Column, TableDefinition } from '$lib/api/types';
 	import NavigationColumnEditor from './NavigationColumnEditor.svelte';
+	import PropertyColumnEditor from './PropertyColumnEditor.svelte';
 	import RowSourceEditor from './RowSourceEditor.svelte';
 
 	let { tabId }: { tabId: string } = $props();
@@ -26,10 +27,17 @@
 	const draft = $derived(getTableDraft(tabId));
 	const defn = $derived(draft?.definition);
 
+	// The table's first row element binds row-rooted inline-navigation
+	// previews (RowStart needs a sample). key[0] is the base row element id
+	// for every row-source kind; non-string (missing page / null slot) means
+	// "no row" and the embedded editors show a hint instead of previewing.
+	const page = $derived(getTablePage(tabId));
+	const sampleRowElementId = $derived.by(() => {
+		const k = page?.rows?.[0]?.key?.[0];
+		return typeof k === 'string' ? k : null;
+	});
+
 	let error = $state<string | null>(null);
-	// Free-text property name (Stage 2 sanctioned shortcut — no metamodel
-	// effective-properties fetch here; see task report for the rationale).
-	let newPropertyName = $state('');
 
 	function apply(next: TableDefinition): void {
 		error = null;
@@ -86,14 +94,13 @@
 			addColumn(defn, {
 				kind: 'property',
 				source: { kind: 'row', chain_index: 0 },
-				name: newPropertyName.trim(),
+				name: '',
 				mode: 'collapse',
 				keep_empty: true,
 				header: '',
 				width_px: null
 			})
 		);
-		newPropertyName = '';
 	}
 
 	function addNavigationColumn(): void {
@@ -114,14 +121,14 @@
 		);
 	}
 
-	// Whole-column field replacement for the nav-column editor: none of the
+	// Whole-column field replacement for the per-column editors: none of the
 	// existing columns.ts mutators fit (those guard structural ref integrity
 	// on add/remove/move; a same-shape field patch — sort_mode, cell_cap,
 	// mode, keep_empty, source, navigation ref/step_index — has none of those
 	// concerns), so this clones the definition and swaps the one column in
 	// place before routing through the same `updateTableDefinition` as every
 	// other edit here.
-	function onNavColumnChange(index: number, next: Column): void {
+	function onColumnChange(index: number, next: Column): void {
 		if (!defn) return;
 		const clone = structuredClone(defn);
 		clone.columns[index] = next;
@@ -196,7 +203,16 @@
 							column={col}
 							columnIndex={i}
 							columns={defn.columns}
-							onChange={(next) => onNavColumnChange(i, next)}
+							{sampleRowElementId}
+							onChange={(next) => onColumnChange(i, next)}
+						/>
+					{:else if col.kind === 'property'}
+						<PropertyColumnEditor
+							column={col}
+							columnIndex={i}
+							columns={defn.columns}
+							rowSource={defn.row_source}
+							onChange={(next) => onColumnChange(i, next)}
 						/>
 					{/if}
 				</div>
@@ -212,11 +228,6 @@
 			>
 				+ Element column
 			</button>
-			<input
-				class="w-32 rounded border border-input bg-card px-1.5 py-0.5 text-[11px]"
-				placeholder="property name"
-				bind:value={newPropertyName}
-			/>
 			<button
 				type="button"
 				data-testid="add-property-column"

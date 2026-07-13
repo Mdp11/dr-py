@@ -140,16 +140,25 @@
 		patch({ steps: [...node.steps, step] });
 	}
 
-	type StartMode = 'scope' | 'element' | 'combine';
+	type StartMode = 'scope' | 'element' | 'combine' | 'row';
 	const startMode = $derived<StartMode>(
 		node.start.kind === 'set_op'
 			? 'combine'
-			: readElementStart(node.start) !== null
-				? 'element'
-				: 'scope'
+			: node.start.kind === 'row'
+				? 'row'
+				: readElementStart(node.start) !== null
+					? 'element'
+					: 'scope'
 	);
+	// Row-rooting is only meaningful where a caller supplies a row binding —
+	// an embedded table-column editor. A standalone tab must never author a
+	// RowStart (an unbound one is unevaluable), so the option is gated on the
+	// draft's context; `startMode === 'row'` keeps an already-row-rooted
+	// payload renderable wherever it appears.
+	const rowStartAvailable = $derived(draft?.embedded?.rowContext === true);
 	function setStartMode(mode: StartMode): void {
-		if (mode === 'scope') patch({ start: { kind: 'scope', types: [], criteria: [] } });
+		if (mode === 'row') patch({ start: { kind: 'row' } });
+		else if (mode === 'scope') patch({ start: { kind: 'scope', types: [], criteria: [] } });
 		else if (mode === 'element') patch({ start: elementStartScope('') });
 		else patch({ start: emptyCombine() });
 	}
@@ -248,10 +257,17 @@
 					<option value="scope">all matching</option>
 					<option value="element">one element</option>
 					<option value="combine">a combination</option>
+					{#if rowStartAvailable || startMode === 'row'}
+						<option value="row">the row's element</option>
+					{/if}
 				</select>
 			</div>
 		</div>
-		{#if node.start.kind === 'scope'}
+		{#if node.start.kind === 'row'}
+			<div class="relative pl-7">
+				<span class="text-muted-foreground italic">each row's element</span>
+			</div>
+		{:else if node.start.kind === 'scope'}
 			{#if startMode === 'element'}
 				<div class="relative pl-7">
 					<ElementStartPicker

@@ -32,9 +32,7 @@ class TableOrderCache:
     def __init__(self, cap: int = 16) -> None:
         self._cap = cap
         self._lock = threading.Lock()
-        self._d: (
-            "OrderedDict[tuple[str, str], tuple[int, tuple[RowKey, ...], bool]]"
-        ) = OrderedDict()
+        self._d: "OrderedDict[tuple[str, str], tuple[int, tuple[RowKey, ...], bool]]" = OrderedDict()
 
     def get(
         self, fingerprint: str, sort_key: str, model_rev: int

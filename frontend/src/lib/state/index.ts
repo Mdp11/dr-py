@@ -218,6 +218,7 @@ export {
 	applyStructuralEdit,
 	closeDraft,
 	ensureDraft,
+	ensureEmbeddedDraft,
 	getDraft,
 	getEvalError,
 	getPreview,
@@ -234,8 +235,10 @@ export {
 	saveDraft,
 	selectNode,
 	setDraftName,
+	setEmbeddedRowElement,
 	unregisterVisibleNode,
 	updateDefinition,
+	type EmbeddedContext,
 	type NavDraft,
 	type NavPreview
 } from './navigation-editor.svelte';

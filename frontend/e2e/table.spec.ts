@@ -35,10 +35,13 @@ const VIEW_PATH = join(__dirname, '..', '..', 'examples', 'smart-city.view.json'
  *    NavigationBuilder.svelte's `openAsTable` and table/columns.ts's
  *    `navigationAsTableDefinition`.
  *  - ColumnManager's "+ Property column" button (data-testid="add-property-column")
- *    reads the property name from a `placeholder="property name"` input
- *    (`newPropertyName`), defaulting the new column's row source to
- *    `chain_index: 0` (the Start column) — so adding "name" lands editable
- *    ValueCells sourced from the SoftwareSystem elements.
+ *    creates the column EMPTY (row source defaulted to `chain_index: 0`, the
+ *    Start column; no name yet) and opens its per-column PropertyColumnEditor
+ *    — the property name is picked/typed there via a free-text input
+ *    (`aria-label="Property name"`), not at creation time. This is the
+ *    add-then-edit flow (Stage 2 Task 6): property columns stay editable at
+ *    any time, not just immediately after adding. Typing "name" lands
+ *    editable ValueCells sourced from the SoftwareSystem elements.
  *  - ValueCell (Table/Cell/ValueCell.svelte) renders a plain
  *    `<input type="text">` for string properties, committing via `onchange`
  *    (not `oninput`) through the SAME `editLock` -> `emit` checkout path the
@@ -119,11 +122,19 @@ test('open navigation as table, add a column, edit a cell, commit, save, and reo
 	const header = tabpanel.getByTestId('table-header');
 	await expect(tabpanel.getByTestId('table-row').first()).toBeVisible({ timeout: 15_000 });
 
-	// --- 2. Add a property column via the ColumnManager ----------------------
+	// --- 2. Add a property column via the ColumnManager (add-then-edit:
+	// the column is created empty and the property is picked/typed in the
+	// per-column editor — editable at any time, not just at creation) -------
 	const columnCountBefore = await header.locator('> div').count();
-	await tabpanel.getByPlaceholder('property name').fill('name');
 	await tabpanel.getByTestId('add-property-column').click();
 	await expect(header.locator('> div')).toHaveCount(columnCountBefore + 1, { timeout: 10_000 });
+	await tabpanel.getByLabel('Property name').fill('name');
+	// The grid re-evaluates with the edited definition; the new column now
+	// carries values (any non-empty cell text will do — seeded elements all
+	// have a `name`).
+	await expect(tabpanel.getByTestId('table-row').first()).toContainText(/\w/, {
+		timeout: 10_000
+	});
 
 	// --- 3. Edit a value cell, then stage -> commit through the DiffDrawer ---
 	// (this reuses the Inspector's exact checkout/commit path — see
@@ -192,4 +203,85 @@ test('open navigation as table, add a column, edit a cell, commit, save, and reo
 	const reopened = page.getByRole('tabpanel');
 	await expect(reopened.getByTestId('table-grid')).toBeVisible({ timeout: 15_000 });
 	await expect(reopened.getByTestId('table-name')).toHaveValue('My Table');
+});
+
+/**
+ * E2E for inline navigation/row-source definitions (Stage 2 Tasks 4–5):
+ * a navigation column or a chains row source can carry its OWN navigation
+ * definition — edited in place with the real navigation builder (PathCard /
+ * StatusChip), embedded in the column panel via an embedded draft — instead
+ * of only referencing a saved navigation artifact.
+ */
+test('inline navigation column and inline row source', async ({ page }) => {
+	test.setTimeout(120_000);
+	// Reload the fixtures: the suite shares one backend project across spec
+	// files/tests (workers: 1), so state from the previous test must not be
+	// assumed (same rationale as the first test's header comment).
+	page.on('dialog', (dialog) => void dialog.accept());
+	await openDefaultProject(page);
+	await loadFiles(page, { metamodel: METAMODEL_PATH, model: MODEL_PATH, view: VIEW_PATH });
+	await expect(page.getByText('live')).toBeVisible({ timeout: 60_000 });
+
+	// --- Build a minimal navigation, then "Open as table" (mirrors test 1) ---
+	await page.getByRole('button', { name: 'New navigation' }).click();
+	const tabpanel = page.getByRole('tabpanel');
+	const dock = tabpanel.getByTestId('results-dock');
+	await expect(dock).toContainText('Pick what to start from');
+	await tabpanel.getByText('any element', { exact: true }).click();
+	await page.getByPlaceholder('Filter types…').fill('SoftwareSystem');
+	await page.getByRole('checkbox', { name: 'SoftwareSystem', exact: true }).click();
+	await page.keyboard.press('Escape');
+	await expect(tabpanel.getByText('SoftwareSystem', { exact: true })).toBeVisible();
+	await expect(dock).toContainText(/✓ \d+ chains/, { timeout: 15_000 });
+	const openAsTableButton = tabpanel.getByRole('button', { name: 'Open as table' });
+	await expect(openAsTableButton).toBeEnabled();
+	await openAsTableButton.click();
+	await expect(tabpanel.getByTestId('table-grid')).toBeVisible({ timeout: 15_000 });
+	await expect(tabpanel.getByTestId('table-row').first()).toBeVisible({ timeout: 15_000 });
+	const header = tabpanel.getByTestId('table-header');
+
+	// --- Inline navigation column ------------------------------------------
+	// A freshly added navigation column defaults to REF mode with no ref
+	// selected (`navigation: {}`), which the backend rejects (422) — the
+	// evaluate that add-navigation-column triggers is superseded by the one
+	// switching to inline triggers (loadTablePage's generation counter), so
+	// switch to inline BEFORE asserting on the (evaluate-derived) header —
+	// asserting the header count right after the add click alone would wait
+	// on a 422'd load that never produces a 2nd header column.
+	const columnCountBefore = await header.locator('> div').count();
+	await tabpanel.getByTestId('add-navigation-column').click();
+	await tabpanel.getByTestId('nav-mode-inline').click();
+
+	// The embedded builder appears with a row-rooted path ("each row's
+	// element"); add a relationship step exactly like the standalone builder
+	// (same locator sequence as section 1 above, scoped to the inline editor).
+	const inlineEditor = tabpanel.getByTestId('inline-nav-editor');
+	await expect(inlineEditor).toBeVisible();
+	await expect(inlineEditor).toContainText("each row's element");
+	await expect(header.locator('> div')).toHaveCount(columnCountBefore + 1, { timeout: 10_000 });
+	await inlineEditor.getByRole('button', { name: '+ Follow a relationship', exact: true }).click();
+	const inlineRelStep = inlineEditor.getByTestId('relationship-step');
+	await expect(inlineRelStep).toHaveCount(1);
+	await inlineRelStep.getByText('pick a relationship…', { exact: true }).click();
+	await page.getByPlaceholder('Relationship type…').fill('SystemContainsComponent');
+	await page.getByRole('button', { name: 'SystemContainsComponent', exact: true }).click();
+	await expect(inlineRelStep.getByText('SystemContainsComponent', { exact: true })).toBeVisible();
+
+	// The embedded status chip previews against the table's first row.
+	await expect(inlineEditor.getByTestId('status-chip')).toContainText(/✓ \d+ chains/, {
+		timeout: 15_000
+	});
+	// And the grid itself re-evaluated with the inline definition.
+	await expect(tabpanel.getByTestId('table-row').first()).toBeVisible({ timeout: 15_000 });
+
+	// --- Inline row source ---------------------------------------------------
+	// Switch the rows to an inline chains navigation: the seed is an empty
+	// scope-started path, which evaluates to one chain per element — rows
+	// appear without further editing. This drops the earlier columns'
+	// meaning (chains of length 1); that's fine — the assertion here is only
+	// that rows render against the new row source.
+	await tabpanel.getByLabel('Row source kind').selectOption('chains');
+	await tabpanel.getByTestId('rowsource-mode-inline').click();
+	await expect(tabpanel.getByTestId('inline-rowsource-editor')).toBeVisible();
+	await expect(tabpanel.getByTestId('table-row').first()).toBeVisible({ timeout: 15_000 });
 });
