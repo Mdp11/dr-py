@@ -4,6 +4,7 @@ import * as artifactsApi from '$lib/api/artifacts';
 import type { PathNavigation, SetExpression } from '$lib/api/types';
 import {
 	ensureDraft,
+	ensureEmbeddedDraft,
 	getDraft,
 	getSelectedPath,
 	resetArtifacts,
@@ -12,8 +13,16 @@ import {
 	setProjectInfo,
 	updateDefinition
 } from '$lib/state';
-import { pathKey } from '$lib/navigation/tree';
+import { emptyRowPath, pathKey } from '$lib/navigation/tree';
 import NavigationNode from '../NavigationNode.svelte';
+import PathCard from '../PathCard.svelte';
+
+const CHAIN_PAGE = {
+	step_types: ['Uses'],
+	chains: [[{ id: 'b1', type_name: 'B', display_name: 'b1', child_count: 0 }]],
+	total: 1,
+	truncated: false
+};
 
 beforeEach(() => {
 	resetNavigationEditors();
@@ -151,6 +160,42 @@ it('the Options expander toggles exclude_visited', async () => {
 		cb.click();
 		flushSync();
 		expect((getDraft(tabId)!.definition as PathNavigation).exclude_visited).toBe(false);
+	} finally {
+		unmount(c);
+	}
+});
+
+it('offers the row start mode only on a row-context embedded draft', async () => {
+	vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+	ensureEmbeddedDraft('navemb:pc1', emptyRowPath(), { rowContext: true, rowElementId: null });
+	const node = getDraft('navemb:pc1')!.definition;
+	const c = mount(PathCard, {
+		target: document.body,
+		props: { tabId: 'navemb:pc1', path: [], node: node as PathNavigation }
+	});
+	flushSync();
+	try {
+		const select = document.querySelector('select[aria-label="Start mode"]')!;
+		expect([...select.querySelectorAll('option')].map((o) => o.value)).toContain('row');
+		expect((select as HTMLSelectElement).value).toBe('row');
+		expect(document.body.textContent).toContain("each row's element");
+	} finally {
+		unmount(c);
+	}
+});
+
+it('does not offer the row start mode on an ordinary tab draft', async () => {
+	const tabId = 'nav:draft:pc2';
+	await ensureDraft(tabId);
+	const node = getDraft(tabId)!.definition;
+	const c = mount(PathCard, {
+		target: document.body,
+		props: { tabId, path: [], node: node as PathNavigation }
+	});
+	flushSync();
+	try {
+		const select = document.querySelector('select[aria-label="Start mode"]')!;
+		expect([...select.querySelectorAll('option')].map((o) => o.value)).not.toContain('row');
 	} finally {
 		unmount(c);
 	}
