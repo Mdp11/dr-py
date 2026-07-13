@@ -131,9 +131,7 @@ def _start_ids(
 ) -> list[str]:
     if isinstance(defn.start, RowStart):
         if row_elements is None:
-            raise ValueError(
-                "navigation is row-rooted; no row element bound"
-            )
+            raise ValueError("navigation is row-rooted; no row element bound")
         return sorted(dict.fromkeys(row_elements))
     if isinstance(defn.start, SetExpression):
         members, truncated = _evaluate_set(

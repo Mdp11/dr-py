@@ -136,18 +136,18 @@ class TableDefinition(BaseModel):
             # is the source element-producing, and is it single-binding?
             producing, single = self._source_arity(src)
             if col.kind == "navigation" and not producing:
-                raise ValueError(f"column {i}: navigation source is not element-producing")
+                raise ValueError(
+                    f"column {i}: navigation source is not element-producing"
+                )
             if col.kind == "element" and not producing:
                 raise ValueError(
                     f"column {i}: element column needs an element-producing source"
                 )
             if col.kind == "element" and not single:
-                raise ValueError(f"column {i}: element column needs a single-binding source")
-            if (
-                col.kind == "property"
-                and col.mode == "expand"
-                and not single
-            ):
+                raise ValueError(
+                    f"column {i}: element column needs a single-binding source"
+                )
+            if col.kind == "property" and col.mode == "expand" and not single:
                 raise ValueError(
                     f"column {i}: expanded property needs a single-binding source"
                 )

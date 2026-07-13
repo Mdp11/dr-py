@@ -506,7 +506,18 @@ describe('RowStart', () => {
 	it('nodeLabel heads a row-rooted path with Row', () => {
 		expect(nodeLabel(emptyRowPath())).toBe('Row');
 		expect(
-			nodeLabel({ ...emptyRowPath(), steps: [{ kind: 'relationship', relationship_type: 'Owns', direction: 'out', target_types: [], children: [] }] })
+			nodeLabel({
+				...emptyRowPath(),
+				steps: [
+					{
+						kind: 'relationship',
+						relationship_type: 'Owns',
+						direction: 'out',
+						target_types: [],
+						children: []
+					}
+				]
+			})
 		).toBe('Row → Owns');
 	});
 });

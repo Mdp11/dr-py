@@ -5,12 +5,7 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as artifactsApi from '$lib/api/artifacts';
-import {
-	resetArtifacts,
-	resetCheckout,
-	resetNavigationEditors,
-	setProjectInfo
-} from '$lib/state';
+import { resetArtifacts, resetCheckout, resetNavigationEditors, setProjectInfo } from '$lib/state';
 import type { Column } from '$lib/api/types';
 import NavigationColumnEditor from '../NavigationColumnEditor.svelte';
 

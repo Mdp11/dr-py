@@ -49,14 +49,10 @@ def _resolve_table_navigation_refs(
     definition's own operands)."""
     rs = defn.row_source
     if isinstance(rs, (NavigationRows, ChainRows)):
-        rs = rs.model_copy(
-            update={"navigation": _resolve_source(rs.navigation, fetch)}
-        )
+        rs = rs.model_copy(update={"navigation": _resolve_source(rs.navigation, fetch)})
 
     columns = [
-        col.model_copy(
-            update={"navigation": _resolve_source(col.navigation, fetch)}
-        )
+        col.model_copy(update={"navigation": _resolve_source(col.navigation, fetch)})
         if isinstance(col, NavigationColumn)
         else col
         for col in defn.columns

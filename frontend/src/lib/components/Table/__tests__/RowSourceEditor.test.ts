@@ -6,12 +6,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as artifactsApi from '$lib/api/artifacts';
 import * as tableStore from '$lib/state/table-editor.svelte';
-import {
-	resetArtifacts,
-	resetCheckout,
-	resetNavigationEditors,
-	setProjectInfo
-} from '$lib/state';
+import { resetArtifacts, resetCheckout, resetNavigationEditors, setProjectInfo } from '$lib/state';
 import type { TableDefinition } from '$lib/api/types';
 import RowSourceEditor from '../RowSourceEditor.svelte';
 
@@ -103,7 +98,9 @@ describe('RowSourceEditor inline mode', () => {
 			steps: [],
 			exclude_visited: true
 		};
-		const c = render(defnWith({ kind: 'navigation', navigation: { definition: inline }, step_index: null }));
+		const c = render(
+			defnWith({ kind: 'navigation', navigation: { definition: inline }, step_index: null })
+		);
 		try {
 			await vi.waitFor(() =>
 				expect(document.querySelector('[data-testid="inline-rowsource-editor"]')).toBeTruthy()

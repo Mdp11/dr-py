@@ -1240,9 +1240,7 @@ describe('embedded drafts', () => {
 		});
 		expect(draft.embedded).toEqual({ rowContext: true, rowElementId: 'e1' });
 		await vi.waitFor(() => expect(getPreview('navemb:t1')?.loading).toBe(false));
-		expect(evalSpy).toHaveBeenCalledWith(
-			expect.objectContaining({ row_element_id: 'e1' })
-		);
+		expect(evalSpy).toHaveBeenCalledWith(expect.objectContaining({ row_element_id: 'e1' }));
 	});
 
 	it('skips previews for a row-rooted draft with no bound row (no 422 surfacing)', async () => {

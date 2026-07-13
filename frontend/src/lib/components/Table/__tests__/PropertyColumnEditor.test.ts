@@ -12,8 +12,20 @@ type PropColumn = Extract<Column, { kind: 'property' }>;
 const MM = {
 	name: 'mm',
 	elements: [
-		{ name: 'Block', extends: null, abstract: false, properties: [{ name: 'mass', datatype: 'real' }], keys: [] },
-		{ name: 'Other', extends: null, abstract: false, properties: [{ name: 'color', datatype: 'string' }], keys: [] }
+		{
+			name: 'Block',
+			extends: null,
+			abstract: false,
+			properties: [{ name: 'mass', datatype: 'real' }],
+			keys: []
+		},
+		{
+			name: 'Other',
+			extends: null,
+			abstract: false,
+			properties: [{ name: 'color', datatype: 'string' }],
+			keys: []
+		}
 	],
 	relationships: []
 };

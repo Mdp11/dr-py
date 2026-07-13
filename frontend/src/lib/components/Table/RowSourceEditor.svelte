@@ -26,9 +26,7 @@
 	const navHeaders = $derived(getArtifactHeaders().filter((a) => a.kind === 'navigation'));
 
 	const embId = `navemb:${crypto.randomUUID()}`;
-	const inline = $derived(
-		rowSource.kind !== 'scope' && rowSource.navigation.definition != null
-	);
+	const inline = $derived(rowSource.kind !== 'scope' && rowSource.navigation.definition != null);
 	const embDraft = $derived(getDraft(embId));
 
 	// Kept while in ref mode so toggling doesn't lose an inline definition

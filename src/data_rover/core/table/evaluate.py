@@ -261,7 +261,9 @@ def _display_name(model: Model, eid: str) -> str:
     return str(name) if name is not None else el.id
 
 
-def _property_is_numeric(mm: Metamodel, defn: TableDefinition, col: PropertyColumn) -> bool:
+def _property_is_numeric(
+    mm: Metamodel, defn: TableDefinition, col: PropertyColumn
+) -> bool:
     """True only if EVERY scoped type declaring `col.name` gives it an
     integer/float datatype — a single conflicting type falls back to casefold
     string sort so mixed-type tables never silently misorder.
@@ -313,7 +315,9 @@ def _sort_value(
     same root back onto that root's WHOLE reached set, losing the per-row value
     that made it a binding column in the first place."""
     if isinstance(col, ElementColumn):
-        els = resolve_source_elements(mm, model, defn, key, col.source, base_slots, limits)
+        els = resolve_source_elements(
+            mm, model, defn, key, col.source, base_slots, limits
+        )
         if not els:
             return (1, "")
         return (0, (_display_name(model, els[0]).casefold(), els[0]))
@@ -324,7 +328,9 @@ def _sort_value(
             if v is None:
                 return (1, ())
             return (0, (float(v),)) if numeric else (0, (str(v).casefold(),))  # type: ignore[arg-type]
-        els = resolve_source_elements(mm, model, defn, key, col.source, base_slots, limits)
+        els = resolve_source_elements(
+            mm, model, defn, key, col.source, base_slots, limits
+        )
         vals: list[Binding] = []
         for eid in els:
             v = model.elements[eid].properties.get(col.name)
@@ -346,7 +352,9 @@ def _sort_value(
         if not isinstance(b, str):
             return (1, "")
         return (0, (_display_name(model, b).casefold(), b))
-    roots = resolve_source_elements(mm, model, defn, key, col.source, base_slots, limits)
+    roots = resolve_source_elements(
+        mm, model, defn, key, col.source, base_slots, limits
+    )
     reached = _navigation_reached(mm, model, col, roots, limits)
     if not reached:
         return (1, 0 if col.sort_mode == "count" else ())
