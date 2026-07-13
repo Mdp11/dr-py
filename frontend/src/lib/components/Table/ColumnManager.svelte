@@ -137,7 +137,7 @@
 </script>
 
 {#if defn}
-	<div data-testid="column-manager" class="space-y-3 border-b border-border p-3 text-xs">
+	<div data-testid="column-manager" class="space-y-3 text-xs">
 		<RowSourceEditor {tabId} {defn} />
 
 		{#if error}

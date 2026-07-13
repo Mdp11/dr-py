@@ -122,19 +122,28 @@ test('open navigation as table, add a column, edit a cell, commit, save, and reo
 	const header = tabpanel.getByTestId('table-header');
 	await expect(tabpanel.getByTestId('table-row').first()).toBeVisible({ timeout: 15_000 });
 
-	// --- 2. Add a property column via the ColumnManager (add-then-edit:
-	// the column is created empty and the property is picked/typed in the
-	// per-column editor — editable at any time, not just at creation) -------
+	// --- 2. Add a property column via the ColumnManager, now behind the
+	// ⚙ Settings popup (add-then-edit: the column is created empty and the
+	// property is picked/typed in the per-column editor). The popup is portaled
+	// to the body, so its controls are scoped to the dialog, not the tabpanel;
+	// the grid keeps rendering live underneath. -----------------------------
+	await tabpanel.getByTestId('table-settings-button').click();
+	const settings = page.getByRole('dialog', { name: 'Table settings' });
+	await expect(settings).toBeVisible();
 	const columnCountBefore = await header.locator('> div').count();
-	await tabpanel.getByTestId('add-property-column').click();
+	await settings.getByTestId('add-property-column').click();
 	await expect(header.locator('> div')).toHaveCount(columnCountBefore + 1, { timeout: 10_000 });
-	await tabpanel.getByLabel('Property name').fill('name');
+	await settings.getByLabel('Property name').fill('name');
 	// The grid re-evaluates with the edited definition; the new column now
 	// carries values (any non-empty cell text will do — seeded elements all
 	// have a `name`).
 	await expect(tabpanel.getByTestId('table-row').first()).toContainText(/\w/, {
 		timeout: 10_000
 	});
+	// Close the popup so its overlay stops intercepting clicks on the grid for
+	// the value-cell edit in section 3.
+	await page.keyboard.press('Escape');
+	await expect(settings).toBeHidden();
 
 	// --- 3. Edit a value cell, then stage -> commit through the DiffDrawer ---
 	// (this reuses the Inspector's exact checkout/commit path — see
@@ -248,14 +257,22 @@ test('inline navigation column and inline row source', async ({ page }) => {
 	// switch to inline BEFORE asserting on the (evaluate-derived) header —
 	// asserting the header count right after the add click alone would wait
 	// on a 422'd load that never produces a 2nd header column.
+	// The ColumnManager now lives behind the ⚙ Settings popup (portaled to the
+	// body); open it and scope column edits to the dialog. Grid/header
+	// assertions below still read from the tabpanel — it renders live behind
+	// the overlay — and there are no grid *clicks* in this test, so the popup
+	// can stay open through to the end.
+	await tabpanel.getByTestId('table-settings-button').click();
+	const settings = page.getByRole('dialog', { name: 'Table settings' });
+	await expect(settings).toBeVisible();
 	const columnCountBefore = await header.locator('> div').count();
-	await tabpanel.getByTestId('add-navigation-column').click();
-	await tabpanel.getByTestId('nav-mode-inline').click();
+	await settings.getByTestId('add-navigation-column').click();
+	await settings.getByTestId('nav-mode-inline').click();
 
 	// The embedded builder appears with a row-rooted path ("each row's
 	// element"); add a relationship step exactly like the standalone builder
 	// (same locator sequence as section 1 above, scoped to the inline editor).
-	const inlineEditor = tabpanel.getByTestId('inline-nav-editor');
+	const inlineEditor = settings.getByTestId('inline-nav-editor');
 	await expect(inlineEditor).toBeVisible();
 	await expect(inlineEditor).toContainText("each row's element");
 	await expect(header.locator('> div')).toHaveCount(columnCountBefore + 1, { timeout: 10_000 });
@@ -280,8 +297,8 @@ test('inline navigation column and inline row source', async ({ page }) => {
 	// appear without further editing. This drops the earlier columns'
 	// meaning (chains of length 1); that's fine — the assertion here is only
 	// that rows render against the new row source.
-	await tabpanel.getByLabel('Row source kind').selectOption('chains');
-	await tabpanel.getByTestId('rowsource-mode-inline').click();
-	await expect(tabpanel.getByTestId('inline-rowsource-editor')).toBeVisible();
+	await settings.getByLabel('Row source kind').selectOption('chains');
+	await settings.getByTestId('rowsource-mode-inline').click();
+	await expect(settings.getByTestId('inline-rowsource-editor')).toBeVisible();
 	await expect(tabpanel.getByTestId('table-row').first()).toBeVisible({ timeout: 15_000 });
 });

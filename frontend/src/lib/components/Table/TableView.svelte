@@ -1,9 +1,9 @@
 <script lang="ts">
-	// The table tab root. Mirrors NavigationBuilder.svelte's shape (name input,
-	// dirty dot, Save/Save as…, conflict banner) plus an Export button that
-	// streams the current definition/artifact to an .xlsx download. Editing
-	// (inline value cells, column manager) lands in later tasks — this is the
-	// read-only surface: name/save/export chrome around `TableGrid`.
+	// The table tab root: a slim chrome bar (name input, dirty dot, Settings,
+	// Export, Save/Save as…, conflict banner) above a full-height `TableGrid`.
+	// Definition editing (row source + columns) lives in a modal opened by the
+	// ⚙ Settings button so the grid gets the whole area — see
+	// docs/superpowers/specs/2026-07-13-table-settings-popup-design.md.
 	import {
 		canEdit,
 		downloadTable,
@@ -15,6 +15,8 @@
 		saveTableDraft,
 		setTableName
 	} from '$lib/state';
+	import { Settings } from '@lucide/svelte';
+	import * as Dialog from '$lib/components/ui/dialog';
 	import ColumnManager from './ColumnManager.svelte';
 	import TableGrid from './TableGrid.svelte';
 
@@ -26,6 +28,7 @@
 	const conflict = $derived(getTableConflict(tabId));
 	const editable = $derived(canEdit());
 	let saveError = $state<string | null>(null);
+	let settingsOpen = $state(false);
 
 	async function save(): Promise<void> {
 		saveError = null;
@@ -75,6 +78,16 @@
 			{/if}
 			<span class="flex-1"></span>
 			<div class="flex items-center gap-2">
+				{#if editable}
+					<button
+						type="button"
+						data-testid="table-settings-button"
+						class="flex items-center gap-1 rounded border border-input px-2 py-1 text-xs text-foreground/80 transition-colors hover:bg-muted"
+						onclick={() => (settingsOpen = true)}
+					>
+						<Settings class="h-3.5 w-3.5" /> Settings
+					</button>
+				{/if}
 				<button
 					type="button"
 					class="rounded border border-input px-2 py-1 text-xs text-foreground/80 transition-colors hover:bg-muted"
@@ -112,11 +125,19 @@
 		{#if saveError}
 			<p class="px-3 py-1 text-xs text-destructive">{saveError}</p>
 		{/if}
-		{#if editable}
-			<ColumnManager {tabId} />
-		{/if}
 		<div class="min-h-0 flex-1">
 			<TableGrid {tabId} />
 		</div>
 	</div>
+
+	{#if editable}
+		<Dialog.Root bind:open={settingsOpen}>
+			<Dialog.Content class="max-h-[85vh] max-w-3xl overflow-y-auto">
+				<Dialog.Title class="font-display text-lg font-light tracking-wide">
+					Table settings
+				</Dialog.Title>
+				<ColumnManager {tabId} />
+			</Dialog.Content>
+		</Dialog.Root>
+	{/if}
 {/if}
