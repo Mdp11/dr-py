@@ -1,18 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import {
 	chainColumns,
+	containsRowStart,
 	elementStartScope,
 	emptyPath,
+	emptyRowPath,
 	emptyCombine,
 	insertNavigation,
 	insertNavigationEdit,
 	insertRef,
 	insertRefEdit,
+	isRunnable,
 	moveOperand,
 	moveOperandEdit,
 	nodeAt,
 	nodeEntries,
 	nodeExistsAt,
+	nodeLabel,
 	OP_DIVIDER,
 	pathKey,
 	removeOperand,
@@ -23,7 +27,7 @@ import {
 	wrapRoot,
 	type ChainColumn
 } from '../tree';
-import type { PathNavigation, SetExpression } from '$lib/api/types';
+import type { NavigationDefinition, PathNavigation, SetExpression } from '$lib/api/types';
 
 describe('node addressing', () => {
 	it('pathKey stringifies positional paths', () => {
@@ -466,5 +470,43 @@ describe('OP_DIVIDER', () => {
 		expect(OP_DIVIDER.intersection).toBe('∩ intersection');
 		expect(OP_DIVIDER.difference).toBe('− minus');
 		expect(OP_DIVIDER.symmetric_difference).toBe('⊕ symmetric difference');
+	});
+});
+
+describe('RowStart', () => {
+	it('emptyRowPath is a runnable row-rooted path', () => {
+		const p = emptyRowPath();
+		expect(p.start).toEqual({ kind: 'row' });
+		expect(isRunnable(p)).toBe(true); // "the row element itself" is a valid column
+		expect(containsRowStart(p)).toBe(true);
+	});
+
+	it('containsRowStart finds a row start nested inside a set-op operand', () => {
+		const defn: NavigationDefinition = {
+			kind: 'set_op',
+			schema_version: 2,
+			op: 'union',
+			operands: [
+				{ definition: emptyPath(), step_index: null },
+				{ definition: emptyRowPath(), step_index: null }
+			]
+		};
+		expect(containsRowStart(defn)).toBe(true);
+		expect(containsRowStart(emptyPath())).toBe(false);
+	});
+
+	it('chainColumns labels a row start without touching scope fields', () => {
+		expect(chainColumns(emptyRowPath())[0]).toEqual({
+			index: 0,
+			label: 'Start',
+			sub: 'row element'
+		});
+	});
+
+	it('nodeLabel heads a row-rooted path with Row', () => {
+		expect(nodeLabel(emptyRowPath())).toBe('Row');
+		expect(
+			nodeLabel({ ...emptyRowPath(), steps: [{ kind: 'relationship', relationship_type: 'Owns', direction: 'out', target_types: [], children: [] }] })
+		).toBe('Row → Owns');
 	});
 });
