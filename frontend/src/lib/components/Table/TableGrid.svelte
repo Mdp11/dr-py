@@ -1,12 +1,14 @@
 <script lang="ts">
 	// The read-only table body: a sticky header row (labels, sort carets,
-	// drag-resize handles) plus a windowed body over the store's currently
-	// loaded page. The store REPLACES `page.rows` wholesale on every
-	// `loadTablePage` (offset paging, not append), so this windows over
-	// exactly what's loaded — it never merges pages across loads (mirrors the
-	// module doc in `table-editor.svelte.ts`).
+	// drag-resize handles) plus a windowed body over the store's SPARSE row
+	// cache. The body is sized for the table's full `total`, so the scrollbar
+	// reflects the whole result set; rows the cache hasn't fetched yet render
+	// as pulse placeholders, and the range effect below asks the store to fill
+	// the window (plus a prefetch margin) whenever it moves — normal scrolling
+	// should land on already-prefetched rows and never show a placeholder.
 	import type { TableColumn } from '$lib/api/types';
 	import {
+		ensureTableRange,
 		getTableDraft,
 		getTableError,
 		getTableLoading,
@@ -15,7 +17,7 @@
 		setTableSort,
 		updateTableDefinition
 	} from '$lib/state';
-	import { setColumnWidth } from '$lib/table/columns';
+	import { columnKindLabel, setColumnWidth } from '$lib/table/columns';
 	import { computeWindow } from '$lib/components/Sidebar/windowing';
 	import ElementCell from './Cell/ElementCell.svelte';
 	import ElementsCell from './Cell/ElementsCell.svelte';
@@ -26,6 +28,10 @@
 
 	const ROW_H = 28;
 	const OVERSCAN = 8;
+	// Rows to request beyond the window in each direction: large enough that
+	// wheel/keyboard scrolling stays ahead of the fetches, small enough that a
+	// scrollbar jump doesn't fan out needless requests.
+	const PREFETCH = 100;
 	const DEFAULT_WIDTH = 180;
 	const MIN_WIDTH = 80;
 
@@ -43,6 +49,15 @@
 		computeWindow({ scrollTop, viewportH, rowH: ROW_H, total: rows.length, overscan: OVERSCAN })
 	);
 	const windowedRows = $derived(rows.slice(win.start, win.end));
+
+	// Keep the sparse cache filled around the window. Runs on every window
+	// move and whenever the cache changes (a reset drops loaded rows — this
+	// re-requests the visible ones); `ensureTableRange` itself is cheap and
+	// dedupes in-flight chunks, so eager re-runs cost one array scan.
+	$effect(() => {
+		if (!page) return;
+		ensureTableRange(tabId, Math.max(0, win.start - PREFETCH), win.end + PREFETCH);
+	});
 
 	function onScroll(): void {
 		if (scrollEl) scrollTop = scrollEl.scrollTop;
@@ -127,11 +142,11 @@
 				class="relative flex shrink-0 items-center gap-1 border-r border-border px-2 py-1.5"
 				style="width:{widthFor(col, i)}px"
 			>
-				<span class="truncate">{col.header || col.kind}</span>
+				<span class="truncate">{col.header || columnKindLabel(col.kind)}</span>
 				<button
 					type="button"
 					class="ml-auto shrink-0 text-[10px] text-muted-foreground/70 transition-colors hover:text-foreground"
-					aria-label="Sort by {col.header || col.kind}"
+					aria-label="Sort by {col.header || columnKindLabel(col.kind)}"
 					onclick={() => toggleSort(i)}
 				>
 					{#if sort?.column === i}{sort.direction === 'asc' ? '▲' : '▼'}{:else}↕{/if}
@@ -157,30 +172,50 @@
 		<p class="p-4 text-xs text-muted-foreground/70">Loading…</p>
 	{:else if page}
 		<div style="height:{win.padTop}px"></div>
-		{#each windowedRows as row (JSON.stringify(row.key))}
-			<div
-				role="row"
-				data-testid="table-row"
-				class="flex border-b border-border/60"
-				style="height:{ROW_H}px"
-			>
-				{#each row.cells as cell, ci (ci)}
-					<div
-						class="flex shrink-0 items-center overflow-hidden border-r border-border/40 px-2 text-xs"
-						style="width:{widthFor(page.columns[ci], ci)}px"
-					>
-						{#if cell.kind === 'element'}
-							<ElementCell {cell} />
-						{:else if cell.kind === 'value'}
-							<ValueCell {cell} {tabId} columnName={columnNameFor(ci)} />
-						{:else if cell.kind === 'values'}
-							<ValuesCell {cell} />
-						{:else}
-							<ElementsCell {cell} />
-						{/if}
-					</div>
-				{/each}
-			</div>
+		{#each windowedRows as row, i (win.start + i)}
+			{#if row}
+				<div
+					role="row"
+					data-testid="table-row"
+					class="flex border-b border-border/60"
+					style="height:{ROW_H}px"
+				>
+					{#each row.cells as cell, ci (ci)}
+						<div
+							class="flex shrink-0 items-center overflow-hidden border-r border-border/40 px-2 text-xs"
+							style="width:{widthFor(page.columns[ci], ci)}px"
+						>
+							{#if cell.kind === 'element'}
+								<ElementCell {cell} />
+							{:else if cell.kind === 'value'}
+								<ValueCell {cell} {tabId} columnName={columnNameFor(ci)} />
+							{:else if cell.kind === 'values'}
+								<ValuesCell {cell} />
+							{:else}
+								<ElementsCell {cell} />
+							{/if}
+						</div>
+					{/each}
+				</div>
+			{:else}
+				<!-- A row the sparse cache hasn't fetched yet (the range effect
+				     has already requested it): same geometry, pulsing bars. -->
+				<div
+					role="row"
+					data-testid="table-row-placeholder"
+					class="flex border-b border-border/60"
+					style="height:{ROW_H}px"
+				>
+					{#each page.columns as col, ci (ci)}
+						<div
+							class="flex shrink-0 items-center border-r border-border/40 px-2"
+							style="width:{widthFor(col, ci)}px"
+						>
+							<div class="h-3 w-3/5 animate-pulse rounded bg-muted"></div>
+						</div>
+					{/each}
+				</div>
+			{/if}
 		{/each}
 		<div style="height:{win.padBottom}px"></div>
 		{#if rows.length === 0}

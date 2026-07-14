@@ -65,9 +65,7 @@ describe('TableView settings popup', () => {
 		h.editable = true;
 		const c = render('tbl:draft:1');
 		try {
-			expect(
-				document.querySelector('[data-testid="table-settings-button"]')
-			).not.toBeNull();
+			expect(document.querySelector('[data-testid="table-settings-button"]')).not.toBeNull();
 			// The definition editor is behind the popup — absent until opened.
 			expect(document.querySelector('[data-testid="column-manager"]')).toBeNull();
 		} finally {
@@ -79,9 +77,7 @@ describe('TableView settings popup', () => {
 		h.editable = false;
 		const c = render('tbl:draft:1');
 		try {
-			expect(
-				document.querySelector('[data-testid="table-settings-button"]')
-			).toBeNull();
+			expect(document.querySelector('[data-testid="table-settings-button"]')).toBeNull();
 		} finally {
 			unmount(c);
 		}

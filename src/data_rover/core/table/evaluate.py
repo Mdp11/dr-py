@@ -40,9 +40,22 @@ RowKey = tuple[Binding, ...]
 @dataclass(frozen=True)
 class TableLimits:
     max_rows: int = 50_000
-    max_sort_rows: int = 20_000
     max_cell_elements: int = 20
+    #: Export-only: ignore each navigation column's per-column `cell_cap`
+    #: display preference so a cell carries its COMPLETE reached set (bounded
+    #: only by `max_cell_elements`). The interactive page path leaves this off.
+    ignore_cell_caps: bool = False
     nav_limits: EvalLimits = field(default_factory=EvalLimits)
+
+
+def _check_step_index(idx: int, chain_len: int) -> None:
+    """Reject an out-of-range step index with a ValueError (the API maps it to
+    422) instead of letting a raw IndexError escape as a 500. Python-style
+    negative indexing is deliberate — the default is -1, "the last step"."""
+    if not -chain_len <= idx < chain_len:
+        raise ValueError(
+            f"step_index {idx} out of range for a chain of {chain_len} steps"
+        )
 
 
 def _scope_row_keys(mm: Metamodel, model: Model, rs: ScopeRows) -> list[RowKey]:
@@ -55,32 +68,37 @@ def _scope_row_keys(mm: Metamodel, model: Model, rs: ScopeRows) -> list[RowKey]:
 
 def _navigation_row_keys(
     mm: Metamodel, model: Model, rs: NavigationRows, limits: TableLimits
-) -> list[RowKey]:
+) -> tuple[list[RowKey], bool]:
+    """(row keys, navigation-truncated). The second half matters: a navigation
+    that hit its own `max_chains`/`max_visited` budget yields an INCOMPLETE row
+    set even though `build_rows`' `max_rows` check never fires — swallowing it
+    would let the API report `truncated: false` over missing rows."""
     defn = rs.navigation.definition
     assert defn is not None
     result = evaluate(mm, model, defn, limits.nav_limits)
     idx = rs.step_index if rs.step_index is not None else -1
     seen: dict[str, None] = {}
     for chain in result.chains:
+        _check_step_index(idx, len(chain))
         seen[chain[idx]] = None
-    return [(eid,) for eid in seen]
+    return [(eid,) for eid in seen], result.truncated
 
 
 def _chain_row_keys(
     mm: Metamodel, model: Model, rs: ChainRows, limits: TableLimits
-) -> list[RowKey]:
+) -> tuple[list[RowKey], bool]:
     defn = rs.navigation.definition
     assert defn is not None
     result = evaluate(mm, model, defn, limits.nav_limits)
-    return [tuple(chain) for chain in result.chains]
+    return [tuple(chain) for chain in result.chains], result.truncated
 
 
 def _base_row_keys(
     mm: Metamodel, model: Model, defn: TableDefinition, limits: TableLimits
-) -> list[RowKey]:
+) -> tuple[list[RowKey], bool]:
     rs = defn.row_source
     if isinstance(rs, ScopeRows):
-        return _scope_row_keys(mm, model, rs)
+        return _scope_row_keys(mm, model, rs), False
     if isinstance(rs, NavigationRows):
         return _navigation_row_keys(mm, model, rs, limits)
     return _chain_row_keys(mm, model, rs, limits)
@@ -121,6 +139,14 @@ def resolve_source_elements(
     row-correct); a COLLAPSE navigation column is re-evaluated from its source.
     """
     if isinstance(source, RowSlot):
+        # Static validation only pins chain_index for NON-chains row sources;
+        # against a chains source the upper bound is the resolved chain length,
+        # only knowable here. ValueError (not IndexError) so the API 422s.
+        if source.chain_index >= base_slots:
+            raise ValueError(
+                f"chain_index {source.chain_index} out of range "
+                f"(row source has {base_slots} slots)"
+            )
         b = key[source.chain_index]
         return [b] if isinstance(b, str) else []
     ref_col = defn.columns[source.index]
@@ -139,6 +165,28 @@ def resolve_source_elements(
     return []  # property columns are not element-producing (schema rejects this)
 
 
+def _navigation_reached_ex(
+    mm: Metamodel,
+    model: Model,
+    col: NavigationColumn,
+    roots: list[str],
+    limits: TableLimits,
+) -> tuple[list[str], bool]:
+    """(reached ids, navigation-truncated) — the flag is consumed by
+    `build_rows`' expand loop; display-only callers use `_navigation_reached`."""
+    defn = col.navigation.definition
+    assert defn is not None
+    if not roots:
+        return [], False
+    result = evaluate(mm, model, defn, limits.nav_limits, row_elements=roots)
+    idx = col.step_index if col.step_index is not None else -1
+    seen: dict[str, None] = {}
+    for chain in result.chains:
+        _check_step_index(idx, len(chain))
+        seen[chain[idx]] = None
+    return list(seen), result.truncated
+
+
 def _navigation_reached(
     mm: Metamodel,
     model: Model,
@@ -146,16 +194,7 @@ def _navigation_reached(
     roots: list[str],
     limits: TableLimits,
 ) -> list[str]:
-    defn = col.navigation.definition
-    assert defn is not None
-    if not roots:
-        return []
-    result = evaluate(mm, model, defn, limits.nav_limits, row_elements=roots)
-    idx = col.step_index if col.step_index is not None else -1
-    seen: dict[str, None] = {}
-    for chain in result.chains:
-        seen[chain[idx]] = None
-    return list(seen)
+    return _navigation_reached_ex(mm, model, col, roots, limits)[0]
 
 
 def _row_source_base_slots(defn: TableDefinition, base_keys: list[RowKey]) -> int:
@@ -171,19 +210,25 @@ def build_rows(
     defn: TableDefinition,
     limits: TableLimits = TableLimits(),
 ) -> tuple[list[RowKey], bool]:
-    keys = _base_row_keys(mm, model, defn, limits)
+    """(row keys, truncated). `truncated` is set when the row set is
+    INCOMPLETE for any reason: `max_rows` was hit, OR an underlying navigation
+    (row source / expand column) hit its own `max_chains`/`max_visited` budget
+    and silently produced fewer chains than exist."""
+    keys, truncated = _base_row_keys(mm, model, defn, limits)
     base_slots = _row_source_base_slots(defn, keys)
-    truncated = False
     # apply each expand column in declaration order, extending the key tuple
     for col in defn.columns:
         if isinstance(col, ElementColumn) or col.mode != "expand":
             continue
+        capped = False
         new_keys: list[RowKey] = []
         for key in keys:
             roots = resolve_source_elements(
                 mm, model, defn, key, col.source, base_slots, limits
             )
-            reached = _expand_values(mm, model, col, roots, limits)
+            reached, nav_truncated = _expand_values(mm, model, col, roots, limits)
+            if nav_truncated:
+                truncated = True
             if not reached:
                 if col.keep_empty:
                     new_keys.append((*key, None))
@@ -192,10 +237,11 @@ def build_rows(
                     new_keys.append((*key, v))
             if len(new_keys) > limits.max_rows:
                 truncated = True
+                capped = True
                 new_keys = new_keys[: limits.max_rows]
                 break
         keys = new_keys
-        if truncated:
+        if capped:
             break
     if len(keys) > limits.max_rows:
         keys = keys[: limits.max_rows]
@@ -209,16 +255,18 @@ def _expand_values(
     col: NavigationColumn | PropertyColumn,
     roots: list[str],
     limits: TableLimits,
-) -> list[Binding]:
+) -> tuple[list[Binding], bool]:
+    """(values, navigation-truncated) an expand column contributes for one row."""
     if isinstance(col, NavigationColumn):
-        return list(_navigation_reached(mm, model, col, roots, limits))
+        reached, truncated = _navigation_reached_ex(mm, model, col, roots, limits)
+        return list(reached), truncated
     # PropertyColumn expand: one row per property value. Single-binding source
     # guaranteed by schema; missing/scalar handled by cells.expand_property_values.
     # Function-local import: cells.py imports FROM evaluate.py (resolve_source_
     # elements, _expand_slot_of, ...), so a module-level import here would cycle.
     from .cells import expand_property_values
 
-    return expand_property_values(mm, model, col, roots)
+    return expand_property_values(mm, model, col, roots), False
 
 
 # ---- sorting (Task 6) --------------------------------------------------------
@@ -234,17 +282,11 @@ def _expand_values(
 # A binding column (the element column, or ANY `expand` column) already has its
 # value sitting in the RowKey — sorting it is O(n log n) with no extra model
 # work. A COLLAPSE navigation/property column has no such slot: sorting it means
-# re-resolving + re-navigating/re-reading a property for every row, so it is
-# guarded by `TableLimits.max_sort_rows` and raises `SortTooLargeError` (a
-# `ValueError` subclass, so the API route's blanket `except ValueError` maps it
-# to 422) rather than silently doing unbounded work.
-
-
-class SortTooLargeError(ValueError):
-    """A COLLAPSE navigation/property sort column would need a full extra
-    evaluation pass over more rows than `TableLimits.max_sort_rows` allows.
-    Never raised for a binding column (element / any `expand` column) — those
-    sort straight off the already-built `RowKey` regardless of row count."""
+# re-resolving + re-navigating/re-reading a property for every row. That extra
+# pass is deliberately unbounded — no row cap: `build_rows`' own `max_rows`
+# already bounds the key set, and the API layer caches the ordered row list per
+# (definition, sort, model_rev), so the expensive pass runs once per sort
+# request, not once per page.
 
 
 @dataclass(frozen=True)
@@ -281,14 +323,6 @@ def _property_is_numeric(
         if pd.name == col.name
     ]
     return bool(declaring) and all(dt in ("integer", "float") for dt in declaring)
-
-
-def _needs_full_eval(col: Column) -> bool:
-    """A COLLAPSE navigation/property column has no value already sitting in
-    the RowKey, so sorting it means a full extra evaluation pass (guarded by
-    `max_sort_rows`). An element column, or any `expand` column (its value was
-    already promoted into a key slot by `build_rows`), is a cheap binding sort."""
-    return col.kind != "element" and getattr(col, "mode", "collapse") != "expand"
 
 
 def _sort_value(
@@ -384,11 +418,6 @@ def order_rows(
     if sort is None:
         return list(keys)
     col = defn.columns[sort.column]
-    if _needs_full_eval(col) and len(keys) > limits.max_sort_rows:
-        raise SortTooLargeError(
-            f"sorting {len(keys)} rows by a computed column exceeds "
-            f"max_sort_rows={limits.max_sort_rows}"
-        )
     expand_count = sum(
         1 for c in defn.columns if getattr(c, "mode", "collapse") == "expand"
     )

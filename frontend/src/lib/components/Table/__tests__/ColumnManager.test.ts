@@ -61,19 +61,73 @@ describe('ColumnManager', () => {
 		}
 	});
 
-	it('adds an element column via updateTableDefinition', () => {
+	it('offers no "+ Element column" button (the scope column is the only element column)', () => {
 		vi.spyOn(store, 'getTableDraft').mockReturnValue(
 			scopeDraft([
+				{ kind: 'element', source: { kind: 'row', chain_index: 0 }, header: '', width_px: null }
+			])
+		);
+		const c = render('t');
+		try {
+			expect(document.querySelector('[data-testid="add-element-column"]')).toBeNull();
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('labels the element column "Scope" and disables removing the last one', () => {
+		vi.spyOn(store, 'getTableDraft').mockReturnValue(
+			scopeDraft([
+				{ kind: 'element', source: { kind: 'row', chain_index: 0 }, header: '', width_px: null },
+				{
+					kind: 'property',
+					source: { kind: 'row', chain_index: 0 },
+					name: 'mass',
+					mode: 'collapse',
+					keep_empty: true,
+					header: '',
+					width_px: null
+				}
+			])
+		);
+		const upd = vi.spyOn(store, 'updateTableDefinition').mockImplementation(() => {});
+		const c = render('t');
+		try {
+			expect(document.querySelector('[data-testid="column-manager"]')?.textContent).toContain(
+				'Scope'
+			);
+			const removeScope = document.querySelector(
+				'[data-testid="remove-column-0"]'
+			) as HTMLButtonElement;
+			expect(removeScope.disabled).toBe(true);
+			click(removeScope);
+			expect(upd).not.toHaveBeenCalled();
+			// Non-element columns stay removable.
+			const removeProp = document.querySelector(
+				'[data-testid="remove-column-1"]'
+			) as HTMLButtonElement;
+			expect(removeProp.disabled).toBe(false);
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('keeps extra element columns removable (chains-derived tables)', () => {
+		vi.spyOn(store, 'getTableDraft').mockReturnValue(
+			scopeDraft([
+				{ kind: 'element', source: { kind: 'row', chain_index: 0 }, header: '', width_px: null },
 				{ kind: 'element', source: { kind: 'row', chain_index: 0 }, header: '', width_px: null }
 			])
 		);
 		const upd = vi.spyOn(store, 'updateTableDefinition').mockImplementation(() => {});
 		const c = render('t');
 		try {
-			click(document.querySelector('[data-testid="add-element-column"]'));
+			const remove = document.querySelector('[data-testid="remove-column-1"]') as HTMLButtonElement;
+			expect(remove.disabled).toBe(false);
+			click(remove);
 			expect(upd).toHaveBeenCalled();
 			const defn = upd.mock.calls.at(-1)![1];
-			expect(defn.columns.filter((col) => col.kind === 'element')).toHaveLength(2);
+			expect(defn.columns).toHaveLength(1);
 		} finally {
 			unmount(c);
 		}
@@ -98,9 +152,13 @@ describe('ColumnManager', () => {
 	});
 
 	it('catches ColumnInUseError on remove and shows a message without calling updateTableDefinition', () => {
+		// Two element columns so column 0's remove button is ENABLED (the
+		// sole-scope-column guard doesn't apply) and the error path is what's
+		// exercised.
 		vi.spyOn(store, 'getTableDraft').mockReturnValue(
 			scopeDraft([
 				{ kind: 'element', source: { kind: 'row', chain_index: 0 }, header: '', width_px: null },
+				{ kind: 'element', source: { kind: 'column', index: 0 }, header: '', width_px: null },
 				{
 					kind: 'navigation',
 					source: { kind: 'column', index: 0 },

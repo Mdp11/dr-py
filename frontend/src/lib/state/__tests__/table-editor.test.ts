@@ -5,6 +5,7 @@ import * as tablesApi from '$lib/api/tables';
 import {
 	closeTableDraft,
 	ensureTableDraft,
+	ensureTableRange,
 	getTableConflict,
 	getTableDraft,
 	getTableError,
@@ -37,6 +38,21 @@ const EMPTY_PAGE = {
 	model_rev: 1
 };
 
+/** A page of `count` synthetic rows at `offset` out of `total`. */
+function pageAt(offset: number, count: number, total: number, model_rev = 1) {
+	return {
+		columns: [{ kind: 'element', header: '', width_px: null }],
+		rows: Array.from({ length: count }, (_, i) => ({
+			key: [`e${offset + i}`],
+			cells: []
+		})),
+		total,
+		truncated: false,
+		offset,
+		model_rev
+	};
+}
+
 beforeEach(() => {
 	resetTableEditors();
 	resetWorkspaceTabs();
@@ -48,11 +64,17 @@ afterEach(() => {
 });
 
 describe('table-editor', () => {
-	it('ensureTableDraft creates an empty draft for a draft tab', async () => {
+	it('ensureTableDraft creates an empty draft for a draft tab and kicks its first load', async () => {
+		const spy = vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
 		await ensureTableDraft('tbl:draft:1');
 		const d = getTableDraft('tbl:draft:1');
 		expect(d?.artifactId).toBeNull();
 		expect(d?.definition.columns.length).toBeGreaterThanOrEqual(1);
+		// A brand-new table must not sit on an empty grid: the default (untyped
+		// scope) definition is evaluated immediately.
+		await flush();
+		expect(spy).toHaveBeenCalled();
+		expect(getTablePage('tbl:draft:1')).toBeDefined();
 	});
 
 	it('setTableSort resets the loaded page offset', async () => {
@@ -91,6 +113,7 @@ describe('table-editor', () => {
 
 	it('updateTableDefinition marks dirty, resets to offset 0, and reloads', async () => {
 		vi.spyOn(tablesApi, 'evaluateTable')
+			.mockResolvedValueOnce(EMPTY_PAGE) // ensureTableDraft's initial load
 			.mockResolvedValueOnce({ ...EMPTY_PAGE, total: 5 })
 			.mockResolvedValueOnce({ ...EMPTY_PAGE, total: 9 });
 		const draft = await ensureTableDraft('tbl:draft:3');
@@ -114,6 +137,7 @@ describe('table-editor', () => {
 	});
 
 	it('first save creates the artifact and rebinds the draft under tbl:<id>', async () => {
+		vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
 		const create = vi.spyOn(artifactsApi, 'createArtifact').mockResolvedValue({
 			id: 'a9',
 			kind: 'table',
@@ -163,6 +187,7 @@ describe('table-editor', () => {
 	});
 
 	it('a name-clash 409 on create does NOT enter rev-conflict state', async () => {
+		vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
 		await ensureTableDraft('tbl:draft:6');
 		setTableName('tbl:draft:6', 'Taken');
 		vi.spyOn(artifactsApi, 'createArtifact').mockRejectedValue(
@@ -257,6 +282,7 @@ describe('table-editor', () => {
 		let resolveFirst!: (v: typeof EMPTY_PAGE) => void;
 		const first = new Promise<typeof EMPTY_PAGE>((res) => (resolveFirst = res));
 		vi.spyOn(tablesApi, 'evaluateTable')
+			.mockResolvedValueOnce(EMPTY_PAGE) // ensureTableDraft's initial load
 			.mockImplementationOnce(() => first)
 			.mockResolvedValueOnce({ ...EMPTY_PAGE, total: 2 });
 		const draft = await ensureTableDraft('tbl:draft:8');
@@ -275,6 +301,7 @@ describe('table-editor', () => {
 		const inflightPage = new Promise<typeof EMPTY_PAGE>((res) => (resolveInflight = res));
 		const evaluate = vi
 			.spyOn(tablesApi, 'evaluateTable')
+			.mockResolvedValueOnce(EMPTY_PAGE) // ensureTableDraft's initial load
 			.mockImplementationOnce(() => inflightPage)
 			.mockResolvedValue(EMPTY_PAGE);
 		vi.spyOn(artifactsApi, 'createArtifact').mockResolvedValue({
@@ -289,6 +316,7 @@ describe('table-editor', () => {
 		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({ items: [] });
 
 		const draft = await ensureTableDraft('tbl:draft:9');
+		await flush(); // let the initial load settle before holding the next one open
 		// Kick a load and leave it unresolved (updateTableDefinition fires it).
 		updateTableDefinition('tbl:draft:9', { ...draft.definition });
 		expect(getTableLoading('tbl:draft:9')).toBe(true);
@@ -305,12 +333,15 @@ describe('table-editor', () => {
 		expect(evaluate.mock.calls.length).toBeGreaterThanOrEqual(2);
 	});
 
-	it('handleTableModelRevChanged re-runs evaluateTable for every open table tab at its current offset', async () => {
+	it('handleTableModelRevChanged re-runs evaluateTable over the range the grid last asked for', async () => {
 		const spy = vi
 			.spyOn(tablesApi, 'evaluateTable')
-			.mockResolvedValue({ ...EMPTY_PAGE, offset: 40 });
+			.mockImplementation(async (args) => pageAt(args.offset ?? 0, args.limit ?? 100, 1000));
 		await ensureTableDraft('tbl:draft:10');
-		await loadTablePage('tbl:draft:10', 40);
+		await loadTablePage('tbl:draft:10', 0);
+		// The grid reported the user looking at rows 250..320.
+		ensureTableRange('tbl:draft:10', 250, 320);
+		await flush();
 		spy.mockClear();
 
 		handleTableModelRevChanged();
@@ -318,7 +349,102 @@ describe('table-editor', () => {
 
 		expect(spy).toHaveBeenCalledTimes(1);
 		const lastCall = spy.mock.calls.at(-1)![0];
-		expect(lastCall.offset ?? 0).toBe(40);
+		// Chunk-aligned start covering [250, 320): offset 200, limit 200.
+		expect(lastCall.offset ?? 0).toBe(200);
+		expect(lastCall.limit).toBe(200);
+	});
+
+	describe('lazy range loading', () => {
+		it('loadTablePage installs a sparse row cache sized to the full total', async () => {
+			vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(pageAt(0, 100, 250));
+			await ensureTableDraft('tbl:draft:20');
+			await loadTablePage('tbl:draft:20', 0);
+			const data = getTablePage('tbl:draft:20')!;
+			expect(data.total).toBe(250);
+			expect(data.rows).toHaveLength(250);
+			expect(data.rows[0]?.key).toEqual(['e0']);
+			expect(data.rows[99]?.key).toEqual(['e99']);
+			expect(data.rows[100]).toBeUndefined();
+		});
+
+		it('ensureTableRange fetches only the missing chunks and splices them in', async () => {
+			const spy = vi
+				.spyOn(tablesApi, 'evaluateTable')
+				.mockImplementation(async (args) => pageAt(args.offset ?? 0, args.limit ?? 100, 250));
+			await ensureTableDraft('tbl:draft:21');
+			await loadTablePage('tbl:draft:21', 0);
+			spy.mockClear();
+
+			ensureTableRange('tbl:draft:21', 80, 220);
+			await flush();
+
+			// Chunks 0 (loaded) is skipped; 100 and 200 are fetched.
+			const offsets = spy.mock.calls.map((c) => c[0].offset ?? 0).sort((a, b) => a - b);
+			expect(offsets).toEqual([100, 200]);
+			const data = getTablePage('tbl:draft:21')!;
+			expect(data.rows[150]?.key).toEqual(['e150']);
+			expect(data.rows[249]?.key).toEqual(['e249']);
+			// Everything loaded: a repeat call fetches nothing.
+			spy.mockClear();
+			ensureTableRange('tbl:draft:21', 0, 250);
+			await flush();
+			expect(spy).not.toHaveBeenCalled();
+		});
+
+		it('does not double-request a chunk already in flight', async () => {
+			let resolveChunk!: (v: ReturnType<typeof pageAt>) => void;
+			const pending = new Promise<ReturnType<typeof pageAt>>((res) => (resolveChunk = res));
+			const spy = vi
+				.spyOn(tablesApi, 'evaluateTable')
+				.mockResolvedValueOnce(pageAt(0, 100, 250)) // ensureTableDraft's initial load
+				.mockResolvedValueOnce(pageAt(0, 100, 250)) // the reset load
+				.mockImplementation(() => pending);
+			await ensureTableDraft('tbl:draft:22');
+			await loadTablePage('tbl:draft:22', 0);
+			spy.mockClear();
+
+			ensureTableRange('tbl:draft:22', 100, 150);
+			ensureTableRange('tbl:draft:22', 100, 180); // same chunk, still in flight
+			expect(spy).toHaveBeenCalledTimes(1);
+			resolveChunk(pageAt(100, 100, 250));
+			await flush();
+			expect(getTablePage('tbl:draft:22')!.rows[120]?.key).toEqual(['e120']);
+		});
+
+		it('a chunk landing after a definition edit is dropped (stale generation)', async () => {
+			let resolveChunk!: (v: ReturnType<typeof pageAt>) => void;
+			const pending = new Promise<ReturnType<typeof pageAt>>((res) => (resolveChunk = res));
+			vi.spyOn(tablesApi, 'evaluateTable')
+				.mockResolvedValueOnce(pageAt(0, 100, 250)) // ensureTableDraft's initial load
+				.mockResolvedValueOnce(pageAt(0, 100, 250)) // the reset load
+				.mockImplementationOnce(() => pending) // the chunk fill
+				.mockResolvedValue(pageAt(0, 100, 300)); // the edit's fresh load
+			const draft = await ensureTableDraft('tbl:draft:23');
+			await loadTablePage('tbl:draft:23', 0);
+			ensureTableRange('tbl:draft:23', 100, 150);
+			updateTableDefinition('tbl:draft:23', { ...draft.definition });
+			await flush();
+			resolveChunk(pageAt(100, 100, 250)); // stale: sized for the OLD total
+			await flush();
+			const data = getTablePage('tbl:draft:23')!;
+			expect(data.total).toBe(300);
+			expect(data.rows[120]).toBeUndefined(); // the stale chunk must not splice in
+		});
+
+		it('a chunk from a different model rev replaces the cache instead of splicing', async () => {
+			vi.spyOn(tablesApi, 'evaluateTable')
+				.mockResolvedValueOnce(pageAt(0, 100, 250, 1)) // ensureTableDraft's initial load
+				.mockResolvedValueOnce(pageAt(0, 100, 250, 1))
+				.mockResolvedValueOnce(pageAt(100, 100, 250, 2)); // rev moved between requests
+			await ensureTableDraft('tbl:draft:24');
+			await loadTablePage('tbl:draft:24', 0);
+			ensureTableRange('tbl:draft:24', 100, 150);
+			await flush();
+			const data = getTablePage('tbl:draft:24')!;
+			expect(data.model_rev).toBe(2);
+			expect(data.rows[120]?.key).toEqual(['e120']);
+			expect(data.rows[0]).toBeUndefined(); // rev-1 rows were dropped, not mixed
+		});
 	});
 
 	it('save-as landing while a load is in flight also re-issues under the new tab', async () => {

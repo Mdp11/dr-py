@@ -1,6 +1,7 @@
-// The property-column editor: name (picker + free text), source, keep_empty —
-// all editable after creation. Controlled component like
-// NavigationColumnEditor; the metamodel store is mocked for picker scoping.
+// The property-column editor: name (a single combobox — free text whose
+// focus/typing opens a filtered suggestion list), source, split-into-rows,
+// keep_empty — all editable after creation. Controlled component like
+// NavigationColumnEditor; the metamodel store is mocked for suggestion scoping.
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as metamodelState from '$lib/state/metamodel.svelte';
@@ -73,15 +74,23 @@ describe('PropertyColumnEditor', () => {
 		}
 	});
 
-	it('scopes picker suggestions to the scope row types for a row-slot source', () => {
+	function focusNameInput(): HTMLInputElement {
+		const input = document.querySelector('[data-testid="property-name-input"]') as HTMLInputElement;
+		input.dispatchEvent(new FocusEvent('focus'));
+		flushSync();
+		return input;
+	}
+
+	it('focusing the name input opens suggestions scoped to the scope row types', () => {
 		vi.spyOn(metamodelState, 'getMetamodel').mockReturnValue(MM as never);
 		const onChange = vi.fn();
 		const c = render(propColumn(), { kind: 'scope', types: ['Block'], criteria: [] }, onChange);
 		try {
-			(document.querySelector('[data-testid="property-pick-trigger"]') as HTMLElement).click();
-			flushSync();
-			expect(document.body.textContent).toContain('mass');
-			expect(document.body.textContent).not.toContain('color');
+			expect(document.querySelector('[data-testid="property-suggestions"]')).toBeNull();
+			focusNameInput();
+			const list = document.querySelector('[data-testid="property-suggestions"]');
+			expect(list?.textContent).toContain('mass');
+			expect(list?.textContent).not.toContain('color');
 		} finally {
 			unmount(c);
 		}
@@ -92,23 +101,65 @@ describe('PropertyColumnEditor', () => {
 		const onChange = vi.fn();
 		const c = render(propColumn(), { kind: 'chains', navigation: {} }, onChange);
 		try {
-			(document.querySelector('[data-testid="property-pick-trigger"]') as HTMLElement).click();
-			flushSync();
-			expect(document.body.textContent).toContain('mass');
-			expect(document.body.textContent).toContain('color');
+			focusNameInput();
+			const list = document.querySelector('[data-testid="property-suggestions"]');
+			expect(list?.textContent).toContain('mass');
+			expect(list?.textContent).toContain('color');
 		} finally {
 			unmount(c);
 		}
 	});
 
-	it('toggles keep_empty', () => {
+	it('typed text filters the suggestions; picking one sets the name', () => {
+		vi.spyOn(metamodelState, 'getMetamodel').mockReturnValue(MM as never);
+		const onChange = vi.fn();
+		// name 'col' filters the union down to 'color'
+		const c = render(propColumn('col'), { kind: 'chains', navigation: {} }, onChange);
+		try {
+			focusNameInput();
+			const list = document.querySelector('[data-testid="property-suggestions"]');
+			expect(list?.textContent).toContain('color');
+			expect(list?.textContent).not.toContain('mass');
+			(list?.querySelector('button') as HTMLElement).click();
+			flushSync();
+			expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ name: 'color' }));
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('toggles mode via the split checkbox; keep_empty only shows while splitting', () => {
 		vi.spyOn(metamodelState, 'getMetamodel').mockReturnValue(null);
 		const onChange = vi.fn();
 		const c = render(propColumn(), { kind: 'scope', types: [], criteria: [] }, onChange);
 		try {
-			const box = document.querySelector(
-				'[data-testid="property-column-editor"] input[type="checkbox"]'
+			// collapse mode: keep_empty is hidden (it has no effect there)
+			expect(document.querySelector('input[aria-label="Keep rows with no value"]')).toBeNull();
+			const split = document.querySelector(
+				'input[aria-label="Split multiple values in multiple rows"]'
 			) as HTMLInputElement;
+			expect(split.checked).toBe(false);
+			split.click();
+			flushSync();
+			expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ mode: 'expand' }));
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('toggles keep_empty for a splitting column', () => {
+		vi.spyOn(metamodelState, 'getMetamodel').mockReturnValue(null);
+		const onChange = vi.fn();
+		const c = render(
+			{ ...propColumn('mass'), mode: 'expand' },
+			{ kind: 'scope', types: [], criteria: [] },
+			onChange
+		);
+		try {
+			const box = document.querySelector(
+				'input[aria-label="Keep rows with no value"]'
+			) as HTMLInputElement;
+			expect(box.checked).toBe(true);
 			box.click();
 			flushSync();
 			expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ keep_empty: false }));

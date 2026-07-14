@@ -1,20 +1,16 @@
 """Sorting tests: property numeric sort with empties-last in BOTH directions,
 navigation count sort, binding-column sort reading straight off the RowKey,
-and the collapse-column sort budget guard.
+and the unbounded collapse-column sort (no row cap, by design).
 
 Fixture: root/mid/leaf Blocks; root's `mass`=10, mid's `mass`=2, leaf's `mass`
 unset (so leaf is the empty partition in the property-sort tests); root owns
 both mid and leaf via `BlockHasPart` (so root has the most parts for the
 navigation-count test)."""
 
-import pytest
-
 from data_rover.core.metamodel.schema import ElementType, Metamodel, PropertyDef, RelationshipType
 from data_rover.core.model.model import Model
 from data_rover.core.table.evaluate import (
     SortSpec,
-    SortTooLargeError,
-    TableLimits,
     build_rows,
     order_rows,
 )
@@ -104,23 +100,28 @@ def test_binding_column_sort_uses_row_key():
     assert names == sorted(names, key=str.casefold)
 
 
-def test_collapse_sort_over_budget_raises():
+def test_collapse_sort_is_unbounded():
+    # The sort row cap (`max_sort_rows` / `SortTooLargeError`) was removed by
+    # design: sorting by a computed COLLAPSE column must succeed at ANY row
+    # count — here more rows than the old 20k cap — and still order correctly.
     mm = _mm()
-    model, ids = _fixture(mm)
+    model = Model(mm)
+    n = 20_001
+    for i in range(n):
+        el = model.create_element("Block")
+        model.set_property(el, "mass", (i * 7919) % n)  # scrambled, unique
     defn = TABLE_ADAPTER.validate_python({
         "row_source": {"kind": "scope", "types": ["Block"]},
         "columns": [
             {"kind": "element", "source": {"kind": "row"}},
-            {"kind": "navigation", "source": {"kind": "row"},
-             "navigation": {"definition": {"kind": "path", "start": {"kind": "row"},
-                 "steps": [{"kind": "relationship",
-                            "relationship_type": "BlockHasPart", "direction": "out"}]}}},
+            {"kind": "property", "source": {"kind": "row"}, "name": "mass"},
         ],
     })
     keys, _ = build_rows(mm, model, defn)
-    with pytest.raises(SortTooLargeError):
-        order_rows(mm, model, defn, keys, SortSpec(column=1, direction="asc"),
-                   TableLimits(max_sort_rows=0))
+    asc = order_rows(mm, model, defn, keys, SortSpec(column=1, direction="asc"))
+    assert len(asc) == n
+    masses = [model.elements[str(k[0])].properties["mass"] for k in asc]
+    assert masses == sorted(masses)
 
 
 def test_expand_navigation_column_sorts_per_row_own_value():

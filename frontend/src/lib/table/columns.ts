@@ -4,19 +4,35 @@
  * Svelte, no store, no I/O — fully unit-testable, mirroring
  * `lib/navigation/tree.ts`.
  *
- * The one subtlety worth flagging: `moveColumn` must remap every
- * `ColumnSource` of kind 'column' (a `ColumnRef`) to its source column's NEW
- * position after the reorder, and reject a move that would leave a ref
- * pointing at or past its own new position (columns may only source columns
- * that precede them — a forward or self reference is not evaluable).
+ * Two subtleties worth flagging:
+ *
+ * 1. `moveColumn` must remap every `ColumnSource` of kind 'column' (a
+ *    `ColumnRef`) to its source column's NEW position after the reorder, and
+ *    reject a move that would leave a ref pointing at or past its own new
+ *    position (columns may only source columns that precede them — a forward
+ *    or self reference is not evaluable).
+ *
+ * 2. Every mutator is COPY-ON-WRITE at column granularity: untouched columns
+ *    keep their object identity across the edit (only the definition object,
+ *    the columns array, and the specific column(s) actually changed are new).
+ *    NavigationColumnEditor's draft-mirror loop guard compares
+ *    `columns[i].navigation.definition` BY REFERENCE to tell "the user edited
+ *    the embedded draft" apart from "this index-keyed editor instance was
+ *    handed a different column" — a deep clone here would break every mounted
+ *    inline-navigation column's identity on every unrelated edit, blanking
+ *    and re-running its live preview each time. (Deep cloning was also how a
+ *    leaked `$state` proxy once bricked tables via `structuredClone` —
+ *    reference-preserving copies sidestep that entire class of failure.)
  */
 import type { Column, ColumnSource, NavigationDefinition, TableDefinition } from '$lib/api/types';
 import { chainColumns } from '$lib/navigation/tree';
 
 export class ColumnInUseError extends Error {}
 
+/** Shallow copy-on-write shell: fresh definition + fresh columns array,
+ * every column kept by reference (see module doc, subtlety 2). */
 function clone(defn: TableDefinition): TableDefinition {
-	return structuredClone(defn);
+	return { ...defn, columns: defn.columns.slice() };
 }
 
 function sourcesColumn(source: ColumnSource, index: number): boolean {
@@ -25,7 +41,21 @@ function sourcesColumn(source: ColumnSource, index: number): boolean {
 
 export function addColumn(defn: TableDefinition, col: Column): TableDefinition {
 	const next = clone(defn);
-	next.columns.push(structuredClone(col));
+	next.columns.push(col);
+	return next;
+}
+
+/**
+ * Replace one column wholesale (the per-column editors' same-shape field
+ * patches: sort_mode, cell_cap, mode, keep_empty, source, navigation). The
+ * replacement is kept BY REFERENCE, not cloned: NavigationColumnEditor's
+ * draft-mirror loop guard relies on `columns[index].navigation.definition`
+ * keeping reference-identity with the embedded draft's definition across this
+ * round-trip.
+ */
+export function replaceColumn(defn: TableDefinition, index: number, col: Column): TableDefinition {
+	const next = clone(defn);
+	next.columns[index] = col;
 	return next;
 }
 
@@ -38,9 +68,12 @@ export function removeColumn(defn: TableDefinition, index: number): TableDefinit
 	const next = clone(defn);
 	next.columns.splice(index, 1);
 	// shift down any ColumnRef.index that pointed past the removed column
-	for (const c of next.columns) {
-		if (c.source.kind === 'column' && c.source.index > index) c.source.index -= 1;
-	}
+	// (copy-on-write: only the columns whose ref actually shifts are re-made)
+	next.columns = next.columns.map((c) =>
+		c.source.kind === 'column' && c.source.index > index
+			? { ...c, source: { ...c.source, index: c.source.index - 1 } }
+			: c
+	);
 	return next;
 }
 
@@ -54,17 +87,17 @@ export function moveColumn(defn: TableDefinition, from: number, to: number): Tab
 	order.forEach((oldIdx, newIdx) => oldToNew.set(oldIdx, newIdx));
 
 	const next = clone(defn);
-	next.columns = order.map((oldIdx) => structuredClone(defn.columns[oldIdx]));
 	// remap every ColumnRef to its source's new position, and validate backward
-	next.columns.forEach((c, newIdx) => {
-		if (c.source.kind === 'column') {
-			const remapped = oldToNew.get(c.source.index);
-			if (remapped === undefined) throw new Error('dangling column source');
-			if (remapped >= newIdx) {
-				throw new Error(`move makes column ${newIdx} source column ${remapped} (forward)`);
-			}
-			c.source.index = remapped;
+	// (copy-on-write: only ref-carrying columns are re-made)
+	next.columns = order.map((oldIdx, newIdx) => {
+		const c = defn.columns[oldIdx];
+		if (c.source.kind !== 'column') return c;
+		const remapped = oldToNew.get(c.source.index);
+		if (remapped === undefined) throw new Error('dangling column source');
+		if (remapped >= newIdx) {
+			throw new Error(`move makes column ${newIdx} source column ${remapped} (forward)`);
 		}
+		return { ...c, source: { ...c.source, index: remapped } };
 	});
 	return next;
 }
@@ -75,7 +108,7 @@ export function renameColumn(
 	header: string
 ): TableDefinition {
 	const next = clone(defn);
-	next.columns[index].header = header;
+	next.columns[index] = { ...defn.columns[index], header };
 	return next;
 }
 
@@ -85,7 +118,7 @@ export function setColumnWidth(
 	width_px: number | null
 ): TableDefinition {
 	const next = clone(defn);
-	next.columns[index].width_px = width_px;
+	next.columns[index] = { ...defn.columns[index], width_px };
 	return next;
 }
 
@@ -95,8 +128,8 @@ export function setColumnMode(
 	mode: 'collapse' | 'expand'
 ): TableDefinition {
 	const next = clone(defn);
-	const c = next.columns[index];
-	if (c.kind !== 'element') c.mode = mode;
+	const c = defn.columns[index];
+	if (c.kind !== 'element') next.columns[index] = { ...c, mode };
 	return next;
 }
 
@@ -145,6 +178,18 @@ export function navigationAsTableDefinition({
 export function columnLabel(col: Column): string {
 	if (col.header) return col.header;
 	if (col.kind === 'property') return col.name;
-	if (col.kind === 'element') return 'Element';
+	if (col.kind === 'element') return 'Scope';
 	return 'Navigation';
+}
+
+/**
+ * Display label for a column KIND (definition column or evaluate-response
+ * column-out, whose `kind` is a plain string). The element column is the row's
+ * own binding — the user-facing name for it is "Scope".
+ */
+export function columnKindLabel(kind: string): string {
+	if (kind === 'element') return 'Scope';
+	if (kind === 'property') return 'Property';
+	if (kind === 'navigation') return 'Navigation';
+	return kind;
 }

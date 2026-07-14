@@ -73,4 +73,24 @@ describe('TableGrid', () => {
 			unmount(c);
 		}
 	});
+
+	it('renders placeholder rows for un-fetched sparse slots and asks the store to fill them', () => {
+		const sparseRows = [PAGE.rows[0], undefined, undefined];
+		vi.spyOn(store, 'getTablePage').mockReturnValue({ ...PAGE, rows: sparseRows, total: 3 });
+		vi.spyOn(store, 'getTableLoading').mockReturnValue(false);
+		const ensure = vi.spyOn(store, 'ensureTableRange').mockImplementation(() => {});
+		const c = render('tbl:draft:3');
+		try {
+			expect(document.querySelectorAll('[data-testid="table-row"]')).toHaveLength(1);
+			const placeholders = document.querySelectorAll('[data-testid="table-row-placeholder"]');
+			expect(placeholders).toHaveLength(2);
+			// One placeholder cell per column, same as a real row.
+			expect(placeholders[0].children).toHaveLength(PAGE.columns.length);
+			// The range effect requested the window (start clamped to 0).
+			expect(ensure).toHaveBeenCalled();
+			expect(ensure.mock.calls.at(-1)![1]).toBe(0);
+		} finally {
+			unmount(c);
+		}
+	});
 });

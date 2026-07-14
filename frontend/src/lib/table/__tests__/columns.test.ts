@@ -4,8 +4,10 @@ import {
 	removeColumn,
 	moveColumn,
 	renameColumn,
+	replaceColumn,
 	setColumnWidth,
 	setColumnMode,
+	columnKindLabel,
 	columnLabel,
 	ColumnInUseError
 } from '$lib/table/columns';
@@ -205,6 +207,104 @@ describe('columns', () => {
 		if (original.kind === 'property') expect(original.mode).toBe('collapse');
 	});
 
+	it('replaceColumn swaps one column, keeping it BY REFERENCE, without mutating the input', () => {
+		const replacement = {
+			kind: 'property' as const,
+			source: { kind: 'row' as const, chain_index: 0 },
+			name: 'mass',
+			mode: 'collapse' as const,
+			keep_empty: true,
+			header: '',
+			width_px: null
+		};
+		const next = replaceColumn(base, 0, replacement);
+		expect(next.columns[0]).toBe(replacement); // reference-preserving (mirror-loop guard)
+		expect(base.columns[0].kind).toBe('element');
+	});
+
+	it('helpers tolerate definitions that embed reactive-state proxies', () => {
+		// Regression: a Svelte $state proxy leaked into an inline navigation
+		// definition made every structuredClone-based edit throw DataCloneError
+		// ("#<Object> could not be cloned"), permanently bricking the table.
+		// The copy-on-write helpers never deep-clone, so they must keep working
+		// even when a proxy is present.
+		const proxied = new Proxy(
+			{
+				kind: 'path',
+				schema_version: 2,
+				start: { kind: 'row' },
+				steps: [],
+				exclude_visited: true
+			},
+			{}
+		);
+		const withNav: TableDefinition = {
+			...base,
+			columns: [
+				...base.columns,
+				{
+					kind: 'navigation',
+					source: { kind: 'row', chain_index: 0 },
+					mode: 'collapse',
+					keep_empty: true,
+					sort_mode: 'value',
+					cell_cap: 20,
+					header: '',
+					width_px: null,
+					navigation: { definition: proxied as never }
+				}
+			]
+		};
+		expect(() => structuredClone(withNav)).toThrow(); // the proxy really is uncloneable
+		const renamed = renameColumn(withNav, 1, 'Nav');
+		expect(renamed.columns[1].header).toBe('Nav');
+		expect(() => moveColumn(withNav, 1, 0)).not.toThrow();
+		expect(() => removeColumn(withNav, 0)).not.toThrow();
+		expect(() => setColumnWidth(withNav, 1, 200)).not.toThrow();
+	});
+
+	it('mutators are copy-on-write: untouched columns keep their identity', () => {
+		// NavigationColumnEditor's mirror-loop guard compares
+		// columns[i].navigation.definition by REFERENCE; an unrelated edit must
+		// not mint new objects for columns it didn't touch (that would blank
+		// and re-run every inline-navigation preview on every keystroke).
+		const nav: TableDefinition['columns'][number] = {
+			kind: 'navigation',
+			source: { kind: 'row', chain_index: 0 },
+			mode: 'collapse',
+			keep_empty: true,
+			sort_mode: 'value',
+			cell_cap: 20,
+			header: 'Nav',
+			width_px: null,
+			navigation: {
+				definition: {
+					kind: 'path',
+					schema_version: 2,
+					start: { kind: 'row' },
+					steps: [],
+					exclude_visited: true
+				}
+			}
+		};
+		const defn: TableDefinition = { ...base, columns: [...base.columns, nav] };
+		expect(renameColumn(defn, 0, 'X').columns[1]).toBe(nav);
+		expect(setColumnWidth(defn, 0, 120).columns[1]).toBe(nav);
+		expect(replaceColumn(defn, 0, defn.columns[0]).columns[1]).toBe(nav);
+		expect(addColumn(defn, defn.columns[0]).columns[1]).toBe(nav);
+		// A reorder keeps a ref-free column's identity too (only ColumnRef
+		// carriers are re-made, to remap their index).
+		expect(moveColumn(defn, 1, 0).columns[0]).toBe(nav);
+		expect(removeColumn(defn, 0).columns[0]).toBe(nav);
+	});
+
+	it('columnKindLabel maps element to Scope and passes unknown kinds through', () => {
+		expect(columnKindLabel('element')).toBe('Scope');
+		expect(columnKindLabel('property')).toBe('Property');
+		expect(columnKindLabel('navigation')).toBe('Navigation');
+		expect(columnKindLabel('mystery')).toBe('mystery');
+	});
+
 	it('columnLabel prefers header, then property name, then kind fallback', () => {
 		expect(
 			columnLabel({
@@ -232,7 +332,7 @@ describe('columns', () => {
 				header: '',
 				width_px: null
 			})
-		).toBe('Element');
+		).toBe('Scope');
 		expect(
 			columnLabel({
 				kind: 'navigation',

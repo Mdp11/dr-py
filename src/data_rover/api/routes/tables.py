@@ -20,7 +20,6 @@ from data_rover.core.table.cells import (
 )
 from data_rover.core.table.evaluate import (
     SortSpec,
-    SortTooLargeError,
     TableLimits,
     build_rows,
     iter_export_rows,
@@ -148,21 +147,25 @@ def evaluate_table(
         # navigation artifact changes this fingerprint on the next request.
         fp = table_fingerprint(TABLE_ADAPTER.dump_json(defn).decode(), sort)
         sort_key = "none" if sort is None else f"{sort.column}:{sort.direction}"
-        cached = session.table_order_cache.get(fp, sort_key, session.model_rev)
+        # Sample the rev ONCE and reuse it for the cache probe, the store, and
+        # the response. Re-reading `session.model_rev` after the (unlocked)
+        # build+sort would let a commit that lands mid-computation store rows
+        # built against the OLD model under the NEW rev's key — poisoning the
+        # cache for every subsequent request instead of merely missing it.
+        rev = session.model_rev
+        cached = session.table_order_cache.get(fp, sort_key, rev)
         if cached is not None:
             cached_rows, truncated = cached
             ordered = list(cached_rows)
         else:
             keys, truncated = build_rows(metamodel, model, defn, limits)
             ordered = order_rows(metamodel, model, defn, keys, sort, limits)
-            session.table_order_cache.put(
-                fp, sort_key, session.model_rev, tuple(ordered), truncated
-            )
+            session.table_order_cache.put(fp, sort_key, rev, tuple(ordered), truncated)
         window = ordered[payload.offset : payload.offset + payload.limit]
         cells = evaluate_cells(metamodel, model, defn, window, limits)
     except LookupError as exc:
         raise HTTPException(status_code=422, detail=f"unknown artifact {exc}") from exc
-    except (NavigationResolveError, SortTooLargeError, ValueError) as exc:
+    except (NavigationResolveError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     columns = [
@@ -179,7 +182,7 @@ def evaluate_table(
         total=len(ordered),
         truncated=truncated,
         offset=payload.offset,
-        model_rev=session.model_rev,
+        model_rev=rev,
     )
 
 
@@ -200,9 +203,10 @@ def export_table(
     element list at `cell_cap` purely for on-screen display, but an export
     must contain the COMPLETE reached set for every navigation cell — capping
     it here would silently drop data the user asked to export. Row count is
-    still governed by `TableLimits.max_rows`; `X-Table-Truncated` is set only
-    when `build_rows` reports that limit was hit, never for cell-level
-    capping (which cannot happen with this override)."""
+    still governed by `TableLimits.max_rows`; `X-Table-Truncated` is set when
+    `build_rows` reports an incomplete row set (its own `max_rows` cap, or an
+    underlying navigation that hit its `max_chains`/`max_visited` budget),
+    never for cell-level capping (which cannot happen with this override)."""
     metamodel, model = require_model(session)
     try:
         defn = _resolve_table(payload, project_id, db)
@@ -216,12 +220,14 @@ def export_table(
                 f"sort column {sort.column} out of range "
                 f"(table has {len(defn.columns)} columns)"
             )
-        limits = TableLimits(max_cell_elements=10**9)  # export never caps cells
+        # Export never caps cells: lift the server-wide ceiling AND drop each
+        # navigation column's per-column `cell_cap` display preference.
+        limits = TableLimits(max_cell_elements=10**9, ignore_cell_caps=True)
         keys, truncated = build_rows(metamodel, model, defn, limits)
         ordered = order_rows(metamodel, model, defn, keys, sort, limits)
     except LookupError as exc:
         raise HTTPException(status_code=422, detail=f"unknown artifact {exc}") from exc
-    except (NavigationResolveError, SortTooLargeError, ValueError) as exc:
+    except (NavigationResolveError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     name = "table"

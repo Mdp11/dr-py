@@ -168,3 +168,62 @@ def test_iter_export_rows_matches_evaluate_cells_regardless_of_chunk_size():
     chunked = list(iter_export_rows(mm, model, defn, keys, limits, chunk=1))
     assert chunked == expected
     assert len(chunked) == len(keys)
+
+
+def test_navigation_row_source_truncation_propagates():
+    # A navigation row source that hits its own max_chains budget yields an
+    # INCOMPLETE row set even though max_rows never fires — build_rows must
+    # still report truncated=True (previously swallowed: the API said
+    # `truncated: false` over silently missing rows).
+    from data_rover.core.navigation.evaluate import EvalLimits
+
+    mm = _mm(); model, ids = _fixture()
+    defn = TABLE_ADAPTER.validate_python({
+        "row_source": {"kind": "chains", "navigation": {"definition": {
+            "kind": "path", "start": {"kind": "scope", "types": ["Block"]},
+            "steps": []}}},
+        "columns": [{"kind": "element", "source": {"kind": "row"}}],
+    })
+    limits = TableLimits(nav_limits=EvalLimits(max_chains=2))
+    keys, truncated = build_rows(mm, model, defn, limits)
+    assert truncated is True
+    assert len(keys) == 2  # 4 Blocks in the fixture, capped by max_chains
+
+
+def test_expand_column_navigation_truncation_propagates():
+    # Same rule for an expand column's per-row navigation: hitting max_chains
+    # drops reached elements (rows), so the table must be flagged truncated.
+    from data_rover.core.navigation.evaluate import EvalLimits
+
+    mm = _mm(); model, ids = _fixture()
+    defn = TABLE_ADAPTER.validate_python({
+        "row_source": {"kind": "scope", "types": ["Block"]},
+        "columns": [
+            {"kind": "element", "source": {"kind": "row"}},
+            {"kind": "navigation", "source": {"kind": "row"}, "mode": "expand",
+             "navigation": {"definition": {"kind": "path", "start": {"kind": "row"},
+                 "steps": [{"kind": "relationship",
+                            "relationship_type": "BlockHasPart", "direction": "out"}]}}},
+        ],
+    })
+    limits = TableLimits(nav_limits=EvalLimits(max_chains=1))
+    keys, truncated = build_rows(mm, model, defn, limits)
+    assert truncated is True  # root reaches 2 parts; max_chains=1 dropped one
+
+
+def test_step_index_out_of_range_raises_value_error():
+    # An out-of-range step_index must surface as a ValueError (the API maps it
+    # to 422), not an IndexError escaping as a 500.
+    import pytest
+
+    mm = _mm(); model, _ = _fixture()
+    defn = TABLE_ADAPTER.validate_python({
+        "row_source": {"kind": "navigation", "step_index": 5,
+                       "navigation": {"definition": {
+                           "kind": "path",
+                           "start": {"kind": "scope", "types": ["Block"]},
+                           "steps": []}}},
+        "columns": [{"kind": "element", "source": {"kind": "row"}}],
+    })
+    with pytest.raises(ValueError, match="step_index 5 out of range"):
+        build_rows(mm, model, defn)

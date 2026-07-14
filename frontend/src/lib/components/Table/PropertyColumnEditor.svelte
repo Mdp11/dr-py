@@ -1,15 +1,15 @@
 <script lang="ts">
 	// Per-column editor for a `property`-kind column: the property `name`
-	// (searchable metamodel-aware picker + free text — free text covers
-	// instance-only keys the metamodel doesn't declare), the column `source`
-	// (mirrors NavigationColumnEditor), and `keep_empty`. Fully controlled:
-	// emits a whole new column via `onChange`.
+	// (a single combobox — free text with a metamodel-aware suggestion list,
+	// so instance-only keys the metamodel doesn't declare still work), the
+	// column `source` (mirrors NavigationColumnEditor), the split-into-rows
+	// toggle (`mode`), and `keep_empty` (only meaningful while splitting).
+	// Fully controlled: emits a whole new column via `onChange`.
 	import { getMetamodel } from '$lib/state/metamodel.svelte';
 	import { effectivePropertiesForTypes } from '$lib/metamodel/helpers';
 	import { columnLabel } from '$lib/table/columns';
 	import type { Column, RowSource } from '$lib/api/types';
 	import type { PropertyItem } from '$lib/search/property-ops';
-	import PropertyPicker from '../Sidebar/PropertyPicker.svelte';
 
 	type PropColumn = Extract<Column, { kind: 'property' }>;
 
@@ -46,7 +46,30 @@
 			: []
 	);
 
-	let pickerOpen = $state(false);
+	// The name field is a COMBOBOX: the input's text is the column's name, and
+	// focusing/typing opens a suggestion list filtered by that text. Picking a
+	// suggestion just sets the name — free text that matches nothing stays valid.
+	let suggestOpen = $state(false);
+	let comboEl: HTMLElement | null = $state(null);
+
+	const filtered = $derived.by(() => {
+		const q = column.name.trim().toLowerCase();
+		if (q === '') return items;
+		return items.filter(
+			(it) => it.name.toLowerCase().includes(q) || (it.datatype ?? '').toLowerCase().includes(q)
+		);
+	});
+
+	function pickName(name: string): void {
+		suggestOpen = false;
+		onChange({ ...column, name });
+	}
+
+	function onComboFocusOut(e: FocusEvent): void {
+		// Close only when focus truly left the combobox (an option click moves
+		// focus within it first).
+		if (!comboEl?.contains(e.relatedTarget as Node)) suggestOpen = false;
+	}
 
 	function setSourceKind(e: Event): void {
 		const kind = (e.currentTarget as HTMLSelectElement).value;
@@ -65,7 +88,12 @@
 		onChange({ ...column, source: { kind: 'column', index: v } });
 	}
 	function setName(e: Event): void {
+		suggestOpen = true;
 		onChange({ ...column, name: (e.currentTarget as HTMLInputElement).value });
+	}
+	function setSplit(e: Event): void {
+		const checked = (e.currentTarget as HTMLInputElement).checked;
+		onChange({ ...column, mode: checked ? 'expand' : 'collapse' });
 	}
 	function setKeepEmpty(e: Event): void {
 		onChange({ ...column, keep_empty: (e.currentTarget as HTMLInputElement).checked });
@@ -112,32 +140,69 @@
 	</div>
 	<div class="flex flex-wrap items-center gap-2">
 		<span class="text-muted-foreground/70">property</span>
-		<PropertyPicker
-			{items}
-			open={pickerOpen}
-			onOpenChange={(o) => (pickerOpen = o)}
-			onPick={(name) => onChange({ ...column, name })}
-			searchPlaceholder="Filter properties…"
-		>
-			{#snippet trigger()}
-				<span
-					data-testid="property-pick-trigger"
-					class="rounded border border-input px-1.5 py-0.5 hover:bg-muted"
+		<div class="relative" bind:this={comboEl} onfocusout={onComboFocusOut}>
+			<input
+				data-testid="property-name-input"
+				aria-label="Property name"
+				autocomplete="off"
+				class="w-40 rounded border border-input bg-card px-1.5 py-0.5"
+				placeholder="property name"
+				value={column.name}
+				oninput={setName}
+				onfocus={() => (suggestOpen = true)}
+				onkeydown={(e) => {
+					if (e.key === 'Escape') suggestOpen = false;
+				}}
+			/>
+			{#if suggestOpen && filtered.length > 0}
+				<ul
+					data-testid="property-suggestions"
+					class="absolute top-full left-0 z-50 mt-1 max-h-48 w-64 overflow-auto rounded border border-border bg-popover py-1 shadow-xl"
 				>
-					pick…
-				</span>
-			{/snippet}
-		</PropertyPicker>
-		<input
-			aria-label="Property name"
-			class="w-32 rounded border border-input bg-card px-1.5 py-0.5"
-			placeholder="property name"
-			value={column.name}
-			oninput={setName}
-		/>
-		<label class="flex items-center gap-1">
-			<input type="checkbox" checked={column.keep_empty} onchange={setKeepEmpty} />
-			keep empty
+					{#each filtered as it (`${it.name} ${it.datatype ?? ''}`)}
+						<li>
+							<button
+								type="button"
+								class="flex w-full items-center gap-2 px-2 py-1 text-left transition-colors hover:bg-muted"
+								onclick={() => pickName(it.name)}
+							>
+								<span class="truncate text-foreground/90">{it.name}</span>
+								<span
+									class="ml-auto shrink-0 rounded bg-muted px-1 font-mono text-[10px] text-muted-foreground"
+								>
+									{it.datatype ?? 'untyped'}
+								</span>
+							</button>
+						</li>
+					{/each}
+				</ul>
+			{/if}
+		</div>
+		<label
+			class="flex items-center gap-1"
+			title="One row per property value instead of listing them all in one cell"
+		>
+			<input
+				type="checkbox"
+				aria-label="Split multiple values in multiple rows"
+				checked={column.mode === 'expand'}
+				onchange={setSplit}
+			/>
+			Split multiple values in multiple rows
 		</label>
+		{#if column.mode === 'expand'}
+			<label
+				class="flex items-center gap-1"
+				title="When splitting, keep a row with an empty cell when the property has no value (unchecked drops those rows)"
+			>
+				<input
+					type="checkbox"
+					aria-label="Keep rows with no value"
+					checked={column.keep_empty}
+					onchange={setKeepEmpty}
+				/>
+				Keep rows with no value
+			</label>
+		{/if}
 	</div>
 </div>

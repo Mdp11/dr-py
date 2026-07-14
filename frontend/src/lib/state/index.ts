@@ -246,6 +246,7 @@ export {
 	closeTableDraft,
 	downloadTable,
 	ensureTableDraft,
+	ensureTableRange,
 	getTableConflict,
 	getTableDraft,
 	getTableError,
@@ -260,6 +261,7 @@ export {
 	setTableName,
 	setTableSort,
 	updateTableDefinition,
+	type TableData,
 	type TableDraft
 } from './table-editor.svelte';
 export { getCurrentUser, isAdmin, fetchMe, signIn, signOut } from './auth.svelte';

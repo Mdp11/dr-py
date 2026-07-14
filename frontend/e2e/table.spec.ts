@@ -215,6 +215,41 @@ test('open navigation as table, add a column, edit a cell, commit, save, and reo
 });
 
 /**
+ * E2E for lazy row loading: a NEW table defaults to a scope row source with
+ * no type filter, so every element in the model (1000+ in smart-city) is a
+ * row — far more than the first fetched chunk (100). The grid must (a) size
+ * its scrollbar for the FULL row set immediately and (b) fill a deep scroll
+ * position with lazily fetched rows, rendering placeholders only while the
+ * chunk is in flight.
+ */
+test('lazy loads rows while scrolling a large scope table', async ({ page }) => {
+	test.setTimeout(120_000);
+	page.on('dialog', (dialog) => void dialog.accept());
+	await openDefaultProject(page);
+	await loadFiles(page, { metamodel: METAMODEL_PATH, model: MODEL_PATH, view: VIEW_PATH });
+	await expect(page.getByText('live')).toBeVisible({ timeout: 60_000 });
+
+	await page.getByRole('button', { name: 'New table' }).click();
+	const tabpanel = page.getByRole('tabpanel');
+	const grid = tabpanel.getByTestId('table-grid');
+	await expect(grid).toBeVisible({ timeout: 15_000 });
+	await expect(tabpanel.getByTestId('table-row').first()).toBeVisible({ timeout: 15_000 });
+
+	// Sized for the whole table although only the first chunk is loaded
+	// (smart-city has ~1000 elements at 28px per row; one chunk is 100 rows).
+	const scrollHeight = await grid.evaluate((el) => el.scrollHeight);
+	expect(scrollHeight).toBeGreaterThan(500 * 28);
+
+	// Jump deep into the table: rows there were never fetched. The window
+	// fills with real rows once the chunk lands; no placeholder sticks around.
+	await grid.evaluate((el) => el.scrollTo({ top: 500 * 28 }));
+	await expect(tabpanel.getByTestId('table-row').first()).toBeVisible({ timeout: 15_000 });
+	await expect(tabpanel.getByTestId('table-row-placeholder')).toHaveCount(0, {
+		timeout: 15_000
+	});
+});
+
+/**
  * E2E for inline navigation/row-source definitions (Stage 2 Tasks 4–5):
  * a navigation column or a chains row source can carry its OWN navigation
  * definition — edited in place with the real navigation builder (PathCard /

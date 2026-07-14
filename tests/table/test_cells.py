@@ -156,3 +156,49 @@ def test_many_element_collapse_property_yields_values_cell():
     assert set(cell.values) == {"Part 1", "Part 2"}
     assert cell.total == 2
     assert cell.truncated is False
+
+
+def test_chain_index_out_of_range_raises_value_error():
+    # A chains-source table whose column points at a slot beyond the chain
+    # length must fail with a ValueError (API: 422), not an IndexError (500).
+    import pytest
+
+    from data_rover.core.table.evaluate import build_rows as _build
+
+    mm = _mm()
+    model, _ = _fixture(mm)
+    defn = TABLE_ADAPTER.validate_python({
+        "row_source": {"kind": "chains", "navigation": {"definition": {
+            "kind": "path", "start": {"kind": "scope", "types": ["Block"]},
+            "steps": []}}},
+        "columns": [{"kind": "element", "source": {"kind": "row", "chain_index": 3}}],
+    })
+    keys, _ = _build(mm, model, defn)
+    with pytest.raises(ValueError, match="chain_index 3 out of range"):
+        evaluate_cells(mm, model, defn, keys)
+
+
+def test_export_limits_ignore_per_column_cell_cap():
+    # The export path must carry the COMPLETE reached set: `ignore_cell_caps`
+    # bypasses the per-column display cap (previously min(cell_cap, ...) kept
+    # truncating exports to 20 elements no matter the max_cell_elements
+    # override).
+    from data_rover.core.table.evaluate import TableLimits
+
+    mm = _mm()
+    model, ids = _fixture(mm)
+    defn, keys, _ = _eval(mm, model, {
+        "row_source": {"kind": "scope", "types": ["Block"]},
+        "columns": [{"kind": "navigation", "source": {"kind": "row"}, "mode": "collapse",
+            "cell_cap": 1,
+            "navigation": {"definition": {"kind": "path", "start": {"kind": "row"},
+                "steps": [{"kind": "relationship",
+                           "relationship_type": "BlockHasPart", "direction": "out"}]}}}],
+    })
+    export_limits = TableLimits(max_cell_elements=10**9, ignore_cell_caps=True)
+    cells = evaluate_cells(mm, model, defn, keys, export_limits)
+    root_row = next(i for i, k in enumerate(keys) if k[0] == ids["root"])
+    cell = cells[root_row][0]
+    assert isinstance(cell, ElementsCell)
+    assert len(cell.element_ids) == 2  # BOTH parts, despite cell_cap=1
+    assert cell.truncated is False

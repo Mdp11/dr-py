@@ -197,8 +197,14 @@ def _navigation_cell(
     )
     reached = _navigation_reached(mm, model, col, roots, limits)
     # `cell_cap` is a per-column display preference; `max_cell_elements` is the
-    # server-wide ceiling, so the effective cap is whichever is stricter.
-    cap = min(col.cell_cap, limits.max_cell_elements)
+    # server-wide ceiling, so the effective cap is whichever is stricter. An
+    # export sets `ignore_cell_caps` so the workbook carries the COMPLETE
+    # reached set — a display preference must not drop exported data.
+    cap = (
+        limits.max_cell_elements
+        if limits.ignore_cell_caps
+        else min(col.cell_cap, limits.max_cell_elements)
+    )
     return ElementsCell(
         element_ids=reached[:cap], total=len(reached), truncated=len(reached) > cap
     )

@@ -60,3 +60,41 @@ def test_export_truncation_header(client):
     }
     r = client.post(papi("/tables/export"), json=body, headers=AUTH_HEADERS)
     assert "x-table-truncated" not in {k.lower() for k in r.headers}
+
+
+def test_export_includes_full_navigation_cell_beyond_cell_cap(client):
+    # Regression: export used min(cell_cap, max_cell_elements), so a
+    # navigation column's per-column display cap silently truncated exported
+    # cells. The workbook must carry the COMPLETE reached set.
+    _bootstrap_model(client)
+    body = {
+        "definition": {
+            "row_source": {"kind": "scope", "types": ["Block"]},
+            "columns": [
+                {"kind": "element", "source": {"kind": "row"}, "header": "Block"},
+                {
+                    "kind": "navigation",
+                    "source": {"kind": "row"},
+                    "mode": "collapse",
+                    "cell_cap": 1,
+                    "header": "Parts",
+                    "navigation": {"definition": {
+                        "kind": "path",
+                        "start": {"kind": "row"},
+                        "steps": [{"kind": "relationship",
+                                   "relationship_type": "BlockHasPart",
+                                   "direction": "out"}],
+                    }},
+                },
+            ],
+        }
+    }
+    r = client.post(papi("/tables/export"), json=body, headers=AUTH_HEADERS)
+    assert r.status_code == 200, r.text
+    wb = load_workbook(io.BytesIO(r.content))
+    ws = wb.active
+    assert ws is not None
+    root_cell = str(
+        next(row[1].value for row in ws.iter_rows(min_row=2) if row[0].value == "root")
+    )
+    assert "p1" in root_cell and "p2" in root_cell  # both parts, despite cell_cap=1

@@ -31,7 +31,10 @@
 
 	// Kept while in ref mode so toggling doesn't lose an inline definition
 	// within one mount. Only the active mode is written to the definition.
-	let lastInline = $state<NavigationDefinition | null>(null);
+	// `$state.raw` for the same reason as NavigationColumnEditor's lastInline:
+	// a deep `$state` returns a PROXY that would leak into the table
+	// definition and break every later `structuredClone` of it.
+	let lastInline = $state.raw<NavigationDefinition | null>(null);
 
 	function apply(next: RowSource): void {
 		updateTableDefinition(tabId, { ...defn, row_source: next });
@@ -103,7 +106,7 @@
 >
 	<div class="flex flex-wrap items-center gap-2">
 		<span class="font-mono text-[10px] tracking-wide text-muted-foreground/70 uppercase">
-			Rows
+			Scope
 		</span>
 		<select
 			aria-label="Row source kind"
@@ -111,7 +114,7 @@
 			onchange={onKindChange}
 			class="rounded border border-input bg-card px-1 py-0.5 text-xs"
 		>
-			<option value="scope">Scope</option>
+			<option value="scope">Elements</option>
 			<option value="navigation">Navigation (per step)</option>
 			<option value="chains">Navigation (chains)</option>
 		</select>

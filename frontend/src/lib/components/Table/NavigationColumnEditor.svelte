@@ -58,7 +58,14 @@
 	// The last inline definition, kept while in ref mode so toggling
 	// saved -> inline -> saved within one mount doesn't lose work. Only the
 	// active mode is ever written to the column.
-	let lastInline = $state<NavigationDefinition | null>(null);
+	//
+	// `$state.raw`, NOT `$state`: the definition is stored and read back WHOLE
+	// (never deep-mutated), and a deep `$state` would hand back a PROXY of it.
+	// That proxy would be seeded into the embedded draft and mirrored into the
+	// table definition, where the next `structuredClone` dies with
+	// DataCloneError ("#<Object> could not be cloned") — permanently bricking
+	// every subsequent edit of the table.
+	let lastInline = $state.raw<NavigationDefinition | null>(null);
 	let seeding = $state(false);
 
 	// The definition object last agreed between this editor's embedded draft and
@@ -196,9 +203,9 @@
 		const v = Number((e.currentTarget as HTMLInputElement).value);
 		onChange({ ...column, cell_cap: Number.isFinite(v) ? v : column.cell_cap });
 	}
-	function setMode(e: Event): void {
-		const v = (e.currentTarget as HTMLSelectElement).value as NavColumn['mode'];
-		onChange({ ...column, mode: v });
+	function setSplit(e: Event): void {
+		const checked = (e.currentTarget as HTMLInputElement).checked;
+		onChange({ ...column, mode: checked ? 'expand' : 'collapse' });
 	}
 	function setKeepEmpty(e: Event): void {
 		onChange({ ...column, keep_empty: (e.currentTarget as HTMLInputElement).checked });
@@ -317,21 +324,31 @@
 				oninput={setCellCap}
 			/>
 		</label>
-		<label class="flex items-center gap-1">
-			mode
-			<select
-				aria-label="Cell mode"
-				value={column.mode}
-				onchange={setMode}
-				class="rounded border border-input bg-card px-1 py-0.5"
+		<label
+			class="flex items-center gap-1"
+			title="One row per reached element instead of listing them all in one cell"
+		>
+			<input
+				type="checkbox"
+				aria-label="Split multiple values in multiple rows"
+				checked={column.mode === 'expand'}
+				onchange={setSplit}
+			/>
+			Split multiple values in multiple rows
+		</label>
+		{#if column.mode === 'expand'}
+			<label
+				class="flex items-center gap-1"
+				title="When splitting, keep a row with an empty cell when nothing is reached (unchecked drops those rows)"
 			>
-				<option value="collapse">collapse</option>
-				<option value="expand">expand</option>
-			</select>
-		</label>
-		<label class="flex items-center gap-1">
-			<input type="checkbox" checked={column.keep_empty} onchange={setKeepEmpty} />
-			keep empty
-		</label>
+				<input
+					type="checkbox"
+					aria-label="Keep rows with no value"
+					checked={column.keep_empty}
+					onchange={setKeepEmpty}
+				/>
+				Keep rows with no value
+			</label>
+		{/if}
 	</div>
 </div>

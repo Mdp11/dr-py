@@ -1,22 +1,32 @@
 /**
  * Per-tab table drafts. Keyed by the workspace tab id so several table
  * editors can be open at once. This is the SIMPLER sibling of
- * `navigation-editor.svelte.ts`: a table has exactly ONE page per tab (no
- * per-node previews, no expand/collapse tree, no debounced auto-run), so all
- * state here is keyed by `tabId` alone.
+ * `navigation-editor.svelte.ts` (no per-node previews, no expand/collapse
+ * tree, no debounced auto-run), so all state here is keyed by `tabId` alone.
  *
  * Definitions are edited as plain JSON objects (the backend's
  * `TableDefinitionSchema` is the source of truth for validity; `columns.ts`
  * keeps definitions structurally correct by construction). Editing invalidates
- * the loaded page: `updateTableDefinition` and `setTableSort` both reset to
- * offset 0 and re-request the page. There is no auto-run debounce — the caller
- * (the table editor UI) decides when to call `updateTableDefinition`.
+ * the loaded rows: `updateTableDefinition` and `setTableSort` both reset to
+ * offset 0 and re-request. There is no auto-run debounce — the caller (the
+ * table editor UI) decides when to call `updateTableDefinition`.
+ *
+ * ROWS ARE A SPARSE CACHE, not a single page: `_data` holds, per tab, a
+ * `TableData` whose `rows` array is `total` long with un-fetched slots left
+ * `undefined` (the grid renders those as placeholders). `loadTablePage`
+ * RESETS the cache from one response (definition/sort edits, external model
+ * change); `ensureTableRange` lazily fills PAGE-aligned chunks around
+ * whatever window the grid reports as visible, so scrolling streams rows in
+ * without ever discarding what is already loaded. The backend caches the
+ * ordered row set per (definition, sort, model_rev), so chunk requests are
+ * cheap page reads, not re-evaluations.
  *
  * Staleness is guarded by a per-TAB generation counter (mirrors nav-editor's
  * `_generations`, just without the per-node keying): anything that makes an
  * in-flight `evaluateTable` response stale — a new `loadTablePage` call, a
- * reload, a close, a reset — bumps the tab's generation, and the async loader
- * drops the response on mismatch (or when the draft is gone).
+ * reload, a close, a reset — bumps the tab's generation, and the async
+ * loaders (full load AND chunk fills) drop the response on mismatch (or when
+ * the draft is gone).
  */
 import { SvelteMap } from 'svelte/reactivity';
 import * as api from '$lib/api/artifacts';
@@ -24,15 +34,20 @@ import { ConflictError } from '$lib/api/errors';
 import { evaluateTable, exportTable } from '$lib/api/tables';
 import {
 	TableDefinitionSchema,
+	type TableColumn,
 	type TableDefinition,
 	type TablePage,
+	type TableRow,
 	type TableSort
 } from '$lib/api/types';
 import { loadArtifacts } from './artifacts.svelte';
 import { onCommitEvent } from './realtime.svelte';
 import { bindTabToArtifact, retitleTab } from './workspace.svelte';
 
+/** Chunk size for both full loads and lazy range fills. */
 const PAGE = 100;
+/** The backend's `EvaluateTableIn.limit` upper bound (`le=500`). */
+const MAX_LIMIT = 500;
 
 export interface TableDraft {
 	name: string;
@@ -53,9 +68,24 @@ function emptyDefinition(): TableDefinition {
 	};
 }
 
+/**
+ * The per-tab row cache the grid renders. Same fields as a `TablePage`, but
+ * `rows` is SPARSE: `total` long, with un-fetched slots `undefined`. `offset`
+ * is the offset of the last full (reset) load — kept so a rebound tab's
+ * re-issued load lands where the user was.
+ */
+export interface TableData {
+	columns: TableColumn[];
+	rows: (TableRow | undefined)[];
+	total: number;
+	truncated: boolean;
+	offset: number;
+	model_rev: number;
+}
+
 const _drafts = new SvelteMap<string, TableDraft>();
-/** tabId -> the one loaded page. */
-const _pages = new SvelteMap<string, TablePage>();
+/** tabId -> the sparse row cache. */
+const _pages = new SvelteMap<string, TableData>();
 /** tabId -> the active sort (undefined = no sort). */
 const _sorts = new SvelteMap<string, TableSort>();
 const _loading = new SvelteMap<string, boolean>();
@@ -69,9 +99,42 @@ const _conflicts = new SvelteMap<string, number>(); // tabId -> server rev
 // eslint-disable-next-line svelte/prefer-svelte-reactivity
 const _generations = new Map<string, number>();
 
+/**
+ * In-flight chunk fills: tabId -> chunk offset -> the generation the fetch was
+ * issued under, so `ensureTableRange` doesn't double-request a chunk. Control
+ * state, never read from templates.
+ */
+// eslint-disable-next-line svelte/prefer-svelte-reactivity
+const _inflightChunks = new Map<string, Map<number, number>>();
+
+/**
+ * Failed-chunk retry counters: tabId -> chunk offset -> attempts so far.
+ * A failed background fill would otherwise leave its rows as placeholders
+ * forever unless the user happens to scroll again (the grid's range effect
+ * only re-runs on window/cache changes) — so each failure schedules a
+ * bounded, delayed re-request. Cleared on every generation bump (a reset
+ * starts the count over). Control state, never read from templates.
+ */
+// eslint-disable-next-line svelte/prefer-svelte-reactivity
+const _chunkRetries = new Map<string, Map<number, number>>();
+const CHUNK_RETRY_DELAY_MS = 2_000;
+const CHUNK_RETRY_MAX = 3;
+
+/**
+ * The row range the grid last asked for (`ensureTableRange`) — where the user
+ * is looking. `handleTableModelRevChanged` refreshes THIS range after an
+ * external commit, not row 0. Control state, never read from templates.
+ */
+// eslint-disable-next-line svelte/prefer-svelte-reactivity
+const _viewRanges = new Map<string, { start: number; end: number }>();
+
 function bumpGeneration(tabId: string): number {
 	const next = (_generations.get(tabId) ?? 0) + 1;
 	_generations.set(tabId, next);
+	// Chunk fetches issued under older generations will be dropped on landing;
+	// clear their bookkeeping so the new generation can re-request those chunks.
+	_inflightChunks.delete(tabId);
+	_chunkRetries.delete(tabId);
 	return next;
 }
 
@@ -81,8 +144,8 @@ function isCurrent(tabId: string, gen: number): boolean {
 }
 
 /**
- * Move every per-tab entry (page, sort, loading, error, generation) from
- * `oldTab` to `newTab`. Used by the first-save/fork paths, where a
+ * Move every per-tab entry (page, sort, loading, error, generation, view
+ * range) from `oldTab` to `newTab`. Used by the first-save/fork paths, where a
  * `tbl:draft:*` tab is rebound to `tbl:<id>`. The draft itself is moved
  * separately by the caller (it also gets new artifact fields, not a plain
  * carry-over), and MUST already be `_drafts.set(newTab, …)` in place before
@@ -118,6 +181,15 @@ function moveTabState(oldTab: string, newTab: string): void {
 	_generations.delete(oldTab);
 	if (gen !== undefined) _generations.set(newTab, gen);
 
+	const view = _viewRanges.get(oldTab);
+	_viewRanges.delete(oldTab);
+	if (view !== undefined) _viewRanges.set(newTab, view);
+
+	// Chunk fetches in flight are closed over `oldTab`, whose draft is gone —
+	// they will be dropped on landing. Drop their bookkeeping with them; the
+	// grid re-requests any still-missing chunks under the new tab id.
+	_inflightChunks.delete(oldTab);
+
 	// The orphaned in-flight load will never settle under `newTab`; re-issue it
 	// so the new tab does not hang on `loading: true`. Reads the draft under the
 	// NEW id (the caller has already set it), same as nav's rekeyTab re-run.
@@ -127,7 +199,7 @@ function moveTabState(oldTab: string, newTab: string): void {
 export function getTableDraft(tabId: string): TableDraft | undefined {
 	return _drafts.get(tabId);
 }
-export function getTablePage(tabId: string): TablePage | undefined {
+export function getTablePage(tabId: string): TableData | undefined {
 	return _pages.get(tabId);
 }
 export function getTableSort(tabId: string): TableSort | undefined {
@@ -155,6 +227,10 @@ export async function ensureTableDraft(tabId: string): Promise<TableDraft> {
 			dirty: false
 		};
 		_drafts.set(tabId, draft);
+		// Kick the first load right away: the default definition (an untyped
+		// scope) is evaluable, so a brand-new table shows every element instead
+		// of an empty grid that only fills after the first settings edit.
+		void loadTablePage(tabId, 0);
 		return draft;
 	}
 	const id = tabId.slice('tbl:'.length);
@@ -171,12 +247,55 @@ export async function ensureTableDraft(tabId: string): Promise<TableDraft> {
 	return draft;
 }
 
+/** Install `page` as a FRESH sparse cache (drops any previously loaded rows). */
+function installPage(tabId: string, page: TablePage): void {
+	const rows: (TableRow | undefined)[] = new Array<TableRow | undefined>(page.total);
+	for (let i = 0; i < page.rows.length && page.offset + i < page.total; i++) {
+		rows[page.offset + i] = page.rows[i];
+	}
+	_pages.set(tabId, {
+		columns: page.columns,
+		rows,
+		total: page.total,
+		truncated: page.truncated,
+		offset: page.offset,
+		model_rev: page.model_rev
+	});
+}
+
 /**
- * (Re)fetch the table's page at `offset`, guarded by the per-tab generation
- * counter. A fresh call always clears any stale error first — the error slot
- * must match what's on screen, same rule as nav-editor's eval-error flag.
+ * Splice `page`'s rows into the existing sparse cache. A response from a
+ * different model rev (or a changed row count — same rev but a different
+ * definition landed a reset in between) cannot be spliced into the current
+ * cache; install it fresh instead and let the grid re-request whatever else
+ * its window needs.
  */
-export async function loadTablePage(tabId: string, offset: number): Promise<void> {
+function mergePage(tabId: string, page: TablePage): void {
+	const data = _pages.get(tabId);
+	if (!data || data.model_rev !== page.model_rev || data.total !== page.total) {
+		installPage(tabId, page);
+		return;
+	}
+	const rows = data.rows.slice();
+	for (let i = 0; i < page.rows.length && page.offset + i < data.total; i++) {
+		rows[page.offset + i] = page.rows[i];
+	}
+	_pages.set(tabId, { ...data, rows });
+}
+
+/**
+ * (Re)fetch the table's page at `offset` and RESET the row cache from it,
+ * guarded by the per-tab generation counter. A fresh call always clears any
+ * stale error first — the error slot must match what's on screen, same rule
+ * as nav-editor's eval-error flag. `limit` defaults to one chunk; the
+ * commit-refresh path passes more to re-cover the user's visible range in one
+ * request.
+ */
+export async function loadTablePage(
+	tabId: string,
+	offset: number,
+	limit: number = PAGE
+): Promise<void> {
 	const draft = _drafts.get(tabId);
 	if (!draft) return;
 	const gen = bumpGeneration(tabId); // supersede any older in-flight load
@@ -185,18 +304,97 @@ export async function loadTablePage(tabId: string, offset: number): Promise<void
 	const sort = _sorts.get(tabId);
 	const args =
 		draft.artifactId === null
-			? { definition: draft.definition, offset, limit: PAGE, sort }
-			: { artifactId: draft.artifactId, offset, limit: PAGE, sort };
+			? { definition: draft.definition, offset, limit, sort }
+			: { artifactId: draft.artifactId, offset, limit, sort };
 	try {
 		const page = await evaluateTable(args);
 		if (!isCurrent(tabId, gen)) return; // stale: edited/reloaded/closed mid-flight
-		_pages.set(tabId, page);
+		installPage(tabId, page);
 		_loading.set(tabId, false);
 	} catch (err) {
 		if (isCurrent(tabId, gen)) {
 			_errors.set(tabId, err instanceof Error ? err.message : String(err));
 			_loading.set(tabId, false);
 		}
+	}
+}
+
+/**
+ * Lazily fill the row cache around `[start, end)` — the window (plus prefetch
+ * margin) the grid currently shows. Missing PAGE-aligned chunks that aren't
+ * already in flight are fetched concurrently and spliced in as they land, so
+ * the user scrolls over placeholders that resolve, never a blank reload.
+ * Cheap when everything is already loaded (one pass over the range), so the
+ * grid may call it on every window change.
+ */
+export function ensureTableRange(tabId: string, start: number, end: number): void {
+	const draft = _drafts.get(tabId);
+	const data = _pages.get(tabId);
+	if (!draft || !data) return;
+	const lo = Math.max(0, start);
+	const hi = Math.min(end, data.total);
+	_viewRanges.set(tabId, { start: lo, end: Math.max(lo, hi) });
+	if (lo >= hi) return;
+	const gen = _generations.get(tabId) ?? 0;
+	let chunks = _inflightChunks.get(tabId);
+	for (let c = Math.floor(lo / PAGE) * PAGE; c < hi; c += PAGE) {
+		if (chunks?.has(c)) continue;
+		let missing = false;
+		const chunkEnd = Math.min(c + PAGE, data.total);
+		for (let i = c; i < chunkEnd; i++) {
+			if (data.rows[i] === undefined) {
+				missing = true;
+				break;
+			}
+		}
+		if (!missing) continue;
+		if (!chunks) {
+			// eslint-disable-next-line svelte/prefer-svelte-reactivity -- control state, never read from templates
+			chunks = new Map();
+			_inflightChunks.set(tabId, chunks);
+		}
+		chunks.set(c, gen);
+		void fetchChunk(tabId, c, gen);
+	}
+}
+
+async function fetchChunk(tabId: string, offset: number, gen: number): Promise<void> {
+	const draft = _drafts.get(tabId);
+	if (!draft) return;
+	const sort = _sorts.get(tabId);
+	const args =
+		draft.artifactId === null
+			? { definition: draft.definition, offset, limit: PAGE, sort }
+			: { artifactId: draft.artifactId, offset, limit: PAGE, sort };
+	try {
+		const page = await evaluateTable(args);
+		if (!isCurrent(tabId, gen)) return; // superseded by a reset/close mid-flight
+		_chunkRetries.get(tabId)?.delete(offset);
+		mergePage(tabId, page);
+	} catch {
+		// A background chunk fill failing is non-fatal: its slots stay
+		// placeholders. Errors that matter (bad definition/sort) also fail the
+		// offset-0 reset load, which owns the visible error slot. Transient
+		// failures get a bounded delayed retry — without one, a lone failed
+		// chunk would pulse forever unless the user happened to scroll again.
+		if (isCurrent(tabId, gen)) {
+			let retries = _chunkRetries.get(tabId);
+			if (!retries) {
+				// eslint-disable-next-line svelte/prefer-svelte-reactivity -- control state, never read from templates
+				retries = new Map();
+				_chunkRetries.set(tabId, retries);
+			}
+			const attempt = (retries.get(offset) ?? 0) + 1;
+			retries.set(offset, attempt);
+			if (attempt <= CHUNK_RETRY_MAX) {
+				setTimeout(() => {
+					if (isCurrent(tabId, gen)) ensureTableRange(tabId, offset, offset + PAGE);
+				}, CHUNK_RETRY_DELAY_MS * attempt);
+			}
+		}
+	} finally {
+		const chunks = _inflightChunks.get(tabId);
+		if (chunks?.get(offset) === gen) chunks.delete(offset);
 	}
 }
 
@@ -302,6 +500,7 @@ export async function reloadTableDraft(tabId: string): Promise<void> {
 	_loading.delete(tabId);
 	_errors.delete(tabId);
 	_conflicts.delete(tabId);
+	_viewRanges.delete(tabId);
 	bumpGeneration(tabId); // orphan any in-flight load for the old draft
 	await ensureTableDraft(tabId);
 }
@@ -313,6 +512,7 @@ export function closeTableDraft(tabId: string): void {
 	_loading.delete(tabId);
 	_errors.delete(tabId);
 	_conflicts.delete(tabId);
+	_viewRanges.delete(tabId);
 	bumpGeneration(tabId); // orphan any in-flight load
 }
 
@@ -338,15 +538,21 @@ export async function downloadTable(tabId: string): Promise<void> {
 /**
  * Feed reducer hook: fired after every commit/rebind feed event (a cell edit
  * committed anywhere may have changed data any open table reads). Re-runs
- * every OPEN table tab's page load at its current offset, fire-and-forget —
- * `loadTablePage`'s own per-tab generation guard drops stale responses, so
- * there is no need to await or serialize these. Drafts are refetched too:
- * their `row_source`/columns may read model data that just changed even
- * though the draft's definition itself is unsaved.
+ * every OPEN table tab's load over the range the user is LOOKING at (the last
+ * `ensureTableRange` window, chunk-aligned, capped at the backend's limit
+ * bound), fire-and-forget — `loadTablePage`'s own per-tab generation guard
+ * drops stale responses, so there is no need to await or serialize these.
+ * Drafts are refetched too: their `row_source`/columns may read model data
+ * that just changed even though the draft's definition itself is unsaved.
  */
 export function handleTableModelRevChanged(): void {
 	for (const [tabId] of _drafts) {
-		void loadTablePage(tabId, _pages.get(tabId)?.offset ?? 0);
+		const view = _viewRanges.get(tabId);
+		const start = view ? Math.floor(view.start / PAGE) * PAGE : 0;
+		const limit = view
+			? Math.min(MAX_LIMIT, Math.max(PAGE, Math.ceil((view.end - start) / PAGE) * PAGE))
+			: PAGE;
+		void loadTablePage(tabId, start, limit);
 	}
 }
 
@@ -362,7 +568,9 @@ export function resetTableEditors(): void {
 	_loading.clear();
 	_errors.clear();
 	_conflicts.clear();
+	_viewRanges.clear();
 	// Bump (not clear) so in-flight responses from before the reset stay stale
-	// even if the same tab id is immediately re-created.
+	// even if the same tab id is immediately re-created. (bumpGeneration also
+	// drops the tab's in-flight chunk bookkeeping.)
 	for (const key of _generations.keys()) bumpGeneration(key);
 }
