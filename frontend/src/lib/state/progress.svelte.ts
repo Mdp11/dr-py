@@ -31,6 +31,15 @@ export function setProgressLabel(id: number, label: string): void {
 	_entries = _entries.map((e) => (e.id === id ? { ...e, label } : e));
 }
 
+/**
+ * Drop an entry back to the indeterminate spinner — for a phase whose duration
+ * is unknown after a determinate one (e.g. server-side processing once the
+ * upload bytes have all been sent).
+ */
+export function setProgressIndeterminate(id: number): void {
+	_entries = _entries.map((e) => (e.id === id ? { ...e, done: null, total: null } : e));
+}
+
 export function endProgress(id: number): void {
 	_entries = _entries.filter((e) => e.id !== id);
 }

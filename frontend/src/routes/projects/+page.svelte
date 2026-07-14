@@ -42,9 +42,11 @@
 		void goto(resolve(`/p/${id}`));
 	}
 	async function onCreated(id: string): Promise<void> {
+		// Navigate straight into the new project — no list refresh in between.
+		// The wizard keeps the global progress overlay up until this resolves,
+		// so the projects page never flashes before the workspace opens.
 		wizardOpen = false;
-		await refresh();
-		open(id);
+		await goto(resolve(`/p/${id}`));
 	}
 </script>
 

@@ -3,10 +3,20 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { createProject } from '$lib/api/projects';
-	import { endProgress, startProgress, updateProgress } from '$lib/state';
+	import { ApiError } from '$lib/api/errors';
+	import {
+		endProgress,
+		setProgressIndeterminate,
+		setProgressLabel,
+		startProgress,
+		updateProgress
+	} from '$lib/state';
+	import FileSlot from './FileSlot.svelte';
 
-	let { open = $bindable(false), onCreated }: { open?: boolean; onCreated: (id: string) => void } =
-		$props();
+	let {
+		open = $bindable(false),
+		onCreated
+	}: { open?: boolean; onCreated: (id: string) => void | Promise<void> } = $props();
 
 	let name = $state('');
 	let metamodel = $state<File | null>(null);
@@ -17,10 +27,6 @@
 
 	const canSubmit = $derived(name.trim().length > 0 && metamodel !== null);
 
-	function pick(setter: (f: File | null) => void) {
-		return (e: Event) => setter((e.target as HTMLInputElement).files?.[0] ?? null);
-	}
-
 	async function onSubmit(e: SubmitEvent): Promise<void> {
 		e.preventDefault();
 		if (!canSubmit || !metamodel) return;
@@ -29,11 +35,25 @@
 		const token = startProgress('Uploading project files…');
 		try {
 			const created = await createProject({ name, metamodel, model, view }, (loaded, total) => {
-				if (total !== null && total > 0) updateProgress(token, loaded, total);
+				if (total === null || total <= 0) return;
+				if (loaded >= total) {
+					// All bytes are on the wire; for a large model the server-side
+					// parse/persist dominates from here, so switch to an
+					// indeterminate phase instead of sitting at 100%.
+					setProgressLabel(token, 'Processing files…');
+					setProgressIndeterminate(token);
+				} else {
+					updateProgress(token, loaded, total);
+				}
 			});
-			onCreated(created.id);
-		} catch {
-			error = 'Could not create the project. Check the metamodel file.';
+			// Keep the overlay up until navigation into the new project has
+			// completed, so the projects list never flashes in between.
+			setProgressLabel(token, 'Opening project…');
+			setProgressIndeterminate(token);
+			await onCreated(created.id);
+		} catch (err) {
+			error =
+				err instanceof ApiError ? err.message : 'Could not create the project. Check the files.';
 		} finally {
 			endProgress(token);
 			pending = false;
@@ -42,53 +62,59 @@
 </script>
 
 <Dialog.Root bind:open>
-	<Dialog.Content class="max-w-lg">
-		<Dialog.Header>
-			<Dialog.Title>New project</Dialog.Title>
+	<Dialog.Content class="gap-0 p-0 sm:max-w-lg">
+		<Dialog.Header class="px-6 pt-6">
+			<Dialog.Title class="font-display text-lg font-light tracking-wide">New project</Dialog.Title>
 			<Dialog.Description>
-				Name the project and upload a metamodel. The model and view are optional — an empty model is
-				created if you skip it.
+				A project starts from a metamodel. Add a model and view to import existing data, or skip
+				them to start empty.
 			</Dialog.Description>
 		</Dialog.Header>
-		<form onsubmit={onSubmit} class="flex flex-col gap-3">
-			<Input name="project-name" placeholder="Project name" bind:value={name} required />
-			<label class="text-xs text-muted-foreground">
-				Metamodel (.yaml, required)
-				<input
-					data-testid="mm-input"
-					type="file"
-					accept=".yaml,.yml"
-					class="mt-1 block text-xs"
-					onchange={pick((f) => (metamodel = f))}
-				/>
-			</label>
-			<label class="text-xs text-muted-foreground">
-				Model (.json, optional)
-				<input
-					data-testid="model-input"
-					type="file"
-					accept=".json"
-					class="mt-1 block text-xs"
-					onchange={pick((f) => (model = f))}
-				/>
-			</label>
-			<label class="text-xs text-muted-foreground">
-				View (.json, optional)
-				<input
-					type="file"
-					accept=".json"
-					class="mt-1 block text-xs"
-					onchange={pick((f) => (view = f))}
-				/>
-			</label>
-			{#if error}
-				<p class="text-xs text-destructive">{error}</p>
-			{/if}
-			<div class="flex justify-end gap-2">
-				<Button type="submit" disabled={!canSubmit || pending}>
-					{pending ? 'Creating…' : 'Create'}
-				</Button>
+		<form onsubmit={onSubmit} class="flex flex-col">
+			<div class="flex flex-col gap-5 px-6 py-5">
+				<label class="flex flex-col gap-1.5">
+					<span class="microlabel text-foreground/80">Project name</span>
+					<Input name="project-name" placeholder="e.g. Smart City" bind:value={name} required />
+				</label>
+				<div class="flex flex-col gap-2">
+					<FileSlot
+						label="Metamodel"
+						hint=".metamodel.yaml"
+						accept=".yaml,.yml"
+						required
+						disabled={pending}
+						testid="mm-input"
+						bind:file={metamodel}
+					/>
+					<FileSlot
+						label="Model"
+						hint=".model.json"
+						accept=".model.json"
+						disabled={pending}
+						testid="model-input"
+						bind:file={model}
+					/>
+					<FileSlot
+						label="View"
+						hint=".view.json"
+						accept=".view.json"
+						disabled={pending}
+						testid="view-input"
+						bind:file={view}
+					/>
+				</div>
+				{#if error}
+					<p class="text-xs text-destructive" role="alert">{error}</p>
+				{/if}
 			</div>
+			<Dialog.Footer class="border-t border-border bg-muted/30 px-6 py-4">
+				<Button type="button" variant="ghost" onclick={() => (open = false)} disabled={pending}>
+					Cancel
+				</Button>
+				<Button type="submit" disabled={!canSubmit || pending}>
+					{pending ? 'Creating…' : 'Create project'}
+				</Button>
+			</Dialog.Footer>
 		</form>
 	</Dialog.Content>
 </Dialog.Root>

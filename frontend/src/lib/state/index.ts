@@ -283,6 +283,7 @@ export {
 	startProgress,
 	updateProgress,
 	setProgressLabel,
+	setProgressIndeterminate,
 	endProgress,
 	getActiveProgress,
 	resetProgress,
