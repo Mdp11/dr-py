@@ -2,7 +2,7 @@
 	import { untrack } from 'svelte';
 	import { browser } from '$app/environment';
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
-	import type { TreeItem } from '$lib/api/types';
+	import type { TreeItem, View } from '$lib/api/types';
 	import {
 		listContainmentChildren,
 		listContainmentRootsPaged,
@@ -51,8 +51,8 @@
 	import {
 		computeWindow,
 		edgeScrollDelta,
-		shouldLoadMore,
-		shouldLoadMoreExcluded
+		shouldLoadMoreExcluded,
+		shouldLoadMoreRoots
 	} from './windowing';
 	import { treeBodyState } from './tree-empty-state';
 	import {
@@ -128,11 +128,14 @@
 	// levels the prefetch effect has pulled in. Roots and child levels are
 	// fetched by SEPARATE effects so expanding a row never pays for a roots
 	// refetch:
-	//   * roots — refetched on every acknowledged STRUCTURAL delta (create/
-	//     delete/relationship change; property-only acks while typing don't
-	//     refetch) and on model swap; grown past PAGE_LIMIT by the scroll
-	//     auto-load (offset paging — the backend caps each request at PAGE_LIMIT
-	//     and 422s above it).
+	//   * roots — refetched from offset 0 on every acknowledged STRUCTURAL delta
+	//     (create/delete/relationship change; property-only acks while typing
+	//     don't refetch) and on model swap. In NO-VIEW mode the scroll auto-load
+	//     grows the page past PAGE_LIMIT by APPENDING just the missing tail
+	//     pages (the backend caps each request at PAGE_LIMIT and 422s above it;
+	//     refetching 0..limit on every bump was O(n²) in requests). In view mode
+	//     raw roots are never tree rows, so the page never auto-grows — see
+	//     shouldLoadMoreRoots.
 	//   * child levels — prefetched PREFETCH_DEPTH levels below the on-screen rows
 	//     (see the prefetch effect) so expansion is instant; invalidated wholesale
 	//     on a structural delta / model swap and refilled. Levels whose parent
@@ -199,7 +202,27 @@
 	// eslint-disable-next-line svelte/prefer-svelte-reactivity
 	const _childFetching = new Set<string>();
 
-	async function refreshRoots(seq: number, limit: number): Promise<void> {
+	// Snapshot (structure rev / model generation / view identity) the loaded
+	// roots and excluded pages were last fetched against. A mismatch in the
+	// fetch effect means the loaded prefix is stale and must be refetched from
+	// offset 0; a match means only the page limit grew, so the fetch APPENDS
+	// just the missing tail pages instead of re-downloading the prefix (that
+	// refetch-from-zero growth was O(n²) in requests on large models). Plain
+	// vars: bookkeeping, never read reactively.
+	let rootsFetchedRev = -1;
+	let rootsFetchedGen = -1;
+	let rootsFetchedView: View | null = null;
+	let excludedFetchedRev = -1;
+	let excludedFetchedGen = -1;
+	let excludedFetchedView: View | null = null;
+
+	async function refreshRoots(
+		seq: number,
+		limit: number,
+		rev: number,
+		gen: number,
+		v: View | null
+	): Promise<void> {
 		try {
 			const page = await listContainmentRootsPaged(limit);
 			if (seq !== rootsSeq) return;
@@ -207,6 +230,31 @@
 			roots = page.items;
 			rootsTotal = page.total;
 			rootsLoaded = true;
+			rootsFetchedRev = rev;
+			rootsFetchedGen = gen;
+			rootsFetchedView = v;
+		} catch (err) {
+			if (seq === rootsSeq) console.error('Containment tree load failed', err);
+		}
+	}
+
+	// Append-only growth: the loaded prefix is still valid (fetch snapshot
+	// unchanged), so only the tail pages between `roots.length` and `limit` are
+	// fetched. Only called after a completed refresh, so `rootsTotal` is the
+	// authoritative server total for the prefix — the `have >= rootsTotal`
+	// guard stops growth at the end of the root set (and keeps a zero-root
+	// model from refetching an empty page forever).
+	async function growRoots(seq: number, limit: number): Promise<void> {
+		const have = roots.length;
+		if (have >= limit || have >= rootsTotal) return;
+		try {
+			const page = await listContainmentRootsPaged(limit - have, undefined, have);
+			if (seq !== rootsSeq) return;
+			if (page.items.length > 0) {
+				seedTreeItems(page.items);
+				roots = [...roots, ...page.items];
+			}
+			rootsTotal = page.total;
 		} catch (err) {
 			if (seq === rootsSeq) console.error('Containment tree load failed', err);
 		}
@@ -239,12 +287,38 @@
 		}
 	}
 
-	async function refreshExcluded(seq: number, limit: number): Promise<void> {
+	async function refreshExcluded(
+		seq: number,
+		limit: number,
+		rev: number,
+		gen: number,
+		v: View | null
+	): Promise<void> {
 		try {
 			const page = await listExcludedRootsPaged(limit);
 			if (seq !== excludedSeq) return;
 			seedTreeItems(page.items);
 			excludedRoots = page.items;
+			excludedTotal = page.total;
+			excludedFetchedRev = rev;
+			excludedFetchedGen = gen;
+			excludedFetchedView = v;
+		} catch (err) {
+			if (seq === excludedSeq) console.error('Excluded pool load failed', err);
+		}
+	}
+
+	/** Append-only growth for the excluded pool (mirrors {@link growRoots}). */
+	async function growExcluded(seq: number, limit: number): Promise<void> {
+		const have = excludedRoots.length;
+		if (have >= limit || have >= excludedTotal) return;
+		try {
+			const page = await listExcludedRootsPaged(limit - have, undefined, have);
+			if (seq !== excludedSeq) return;
+			if (page.items.length > 0) {
+				seedTreeItems(page.items);
+				excludedRoots = [...excludedRoots, ...page.items];
+			}
 			excludedTotal = page.total;
 		} catch (err) {
 			if (seq === excludedSeq) console.error('Excluded pool load failed', err);
@@ -278,10 +352,14 @@
 	// Roots page: refetched on structural deltas / model swap and grown by the
 	// roots scroll auto-load. Deliberately does NOT depend on `poolCollapsed` — the
 	// excluded pool's collapse state must never cost an in-view roots refetch.
+	// Refresh vs grow: when only `rootsLimit` changed since the last completed
+	// fetch (snapshot markers match), the loaded prefix is still valid and the
+	// fetch appends the missing tail; any structural/model/view change refetches
+	// the whole prefix from offset 0.
 	$effect(() => {
-		void getStructureRev(); // tracked: refetch on every STRUCTURAL acked delta
-		void getModelGeneration(); // tracked: refetch on model swap/reset
-		void view; // tracked: preserve refetch-on-view-change (prior behavior)
+		const rev = getStructureRev(); // tracked: refetch on every STRUCTURAL acked delta
+		const gen = getModelGeneration(); // tracked: refetch on model swap/reset
+		const v = view; // tracked: preserve refetch-on-view-change (prior behavior)
 		const loaded = hasModel && viewResolved;
 		const limit = rootsLimit; // tracked: roots auto-load page size
 		const seq = ++rootsSeq;
@@ -294,9 +372,14 @@
 				childTotals.clear();
 				if (expandedElements.size > 0) expandedElements.clear();
 			});
+			rootsFetchedRev = -1;
+			rootsFetchedGen = -1;
+			rootsFetchedView = null;
 			return;
 		}
-		void refreshRoots(seq, limit);
+		const fresh = rootsFetchedRev === rev && rootsFetchedGen === gen && rootsFetchedView === v;
+		if (fresh) untrack(() => void growRoots(seq, limit));
+		else void refreshRoots(seq, limit, rev, gen, v);
 	});
 
 	// Excluded pool: fetched ONLY in view mode AND while the panel is expanded — a
@@ -305,8 +388,8 @@
 	// re-run this effect and trigger the load; collapsing clears the loaded rows
 	// (the body is unmounted anyway) and re-expanding refetches.
 	$effect(() => {
-		void getStructureRev();
-		void getModelGeneration();
+		const rev = getStructureRev();
+		const gen = getModelGeneration();
 		const loaded = hasModel;
 		const v = view;
 		const exLimit = excludedLimit; // tracked: pool scroll auto-load growth
@@ -317,9 +400,18 @@
 				excludedRoots = [];
 				excludedTotal = 0;
 			});
+			// Collapsing clears the loaded rows, so the snapshot must go stale
+			// too — re-expanding refetches from offset 0 rather than "growing"
+			// an empty prefix.
+			excludedFetchedRev = -1;
+			excludedFetchedGen = -1;
+			excludedFetchedView = null;
 			return;
 		}
-		void refreshExcluded(seq, exLimit);
+		const fresh =
+			excludedFetchedRev === rev && excludedFetchedGen === gen && excludedFetchedView === v;
+		if (fresh) untrack(() => void growExcluded(seq, exLimit));
+		else void refreshExcluded(seq, exLimit, rev, gen, v);
 	});
 
 	// Child levels are no longer refetched by the roots effect (expanding a row
@@ -541,10 +633,13 @@
 				excludedLimit = excludedRoots.length + PAGE_LIMIT;
 			}
 		}
-		// In-view roots paging (both view and no-view modes use the tree window).
+		// In-view roots paging (no-view mode only — see shouldLoadMoreRoots: in
+		// view mode raw roots are never tree rows, so growing the page cannot
+		// fill the window and an ungated check pages the entire root set).
 		const remainingRoots = rootsTotal - roots.length;
 		if (
-			shouldLoadMore({
+			shouldLoadMoreRoots({
+				inViewMode: view !== null,
 				windowEnd: treeWindow.end,
 				loadedCount: treeVisibleRows.length,
 				total: treeVisibleRows.length + remainingRoots,

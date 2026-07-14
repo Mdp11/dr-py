@@ -169,27 +169,33 @@ export function listContainmentRoots(
 export const READ_PAGE_LIMIT = 500;
 
 /**
- * Fetch the first `limit` containment roots, issuing as many sequential
- * `READ_PAGE_LIMIT`-sized page requests as needed (the backend rejects
- * `limit > 500` with a 422 rather than clamping, so a "Show more" total
- * beyond 500 MUST be assembled by offset paging). Stops early when the
- * server runs out of roots. `total` is the server total from the last page.
+ * Fetch `limit` containment roots starting at `offset` (default 0), issuing as
+ * many sequential `READ_PAGE_LIMIT`-sized page requests as needed (the backend
+ * rejects `limit > 500` with a 422 rather than clamping, so a total beyond 500
+ * MUST be assembled by offset paging). Stops early when the server runs out of
+ * roots. `total` is the server total from the last page.
+ *
+ * `offset` exists so scroll auto-load growth can APPEND: growing an already
+ * loaded prefix by one page fetches just the missing tail instead of
+ * re-downloading offsets 0..N — on a large model that refetch-from-zero
+ * pattern made growth O(n²) in requests.
  */
 export async function listContainmentRootsPaged(
 	limit: number,
-	cfg?: ClientConfig
+	cfg?: ClientConfig,
+	offset = 0
 ): Promise<TreeItemPage> {
 	const items: TreeItemPage['items'] = [];
 	let total = 0;
 	while (items.length < limit) {
 		const page = await listContainmentRoots(
-			{ limit: Math.min(READ_PAGE_LIMIT, limit - items.length), offset: items.length },
+			{ limit: Math.min(READ_PAGE_LIMIT, limit - items.length), offset: offset + items.length },
 			cfg
 		);
 		items.push(...page.items);
 		total = page.total;
 		// stop on the last page (also guards against a zero-progress loop)
-		if (items.length >= total || page.items.length === 0) break;
+		if (offset + items.length >= total || page.items.length === 0) break;
 	}
 	return { items, total };
 }
@@ -210,22 +216,24 @@ export function listExcludedRoots(
 	);
 }
 
-/** Offset-paged assembly of the first `limit` excluded roots (mirrors
- * {@link listContainmentRootsPaged}; backend caps a page at READ_PAGE_LIMIT). */
+/** Offset-paged assembly of `limit` excluded roots starting at `offset`
+ * (mirrors {@link listContainmentRootsPaged}, including the append-only-growth
+ * rationale for `offset`; backend caps a page at READ_PAGE_LIMIT). */
 export async function listExcludedRootsPaged(
 	limit: number,
-	cfg?: ClientConfig
+	cfg?: ClientConfig,
+	offset = 0
 ): Promise<TreeItemPage> {
 	const items: TreeItemPage['items'] = [];
 	let total = 0;
 	while (items.length < limit) {
 		const page = await listExcludedRoots(
-			{ limit: Math.min(READ_PAGE_LIMIT, limit - items.length), offset: items.length },
+			{ limit: Math.min(READ_PAGE_LIMIT, limit - items.length), offset: offset + items.length },
 			cfg
 		);
 		items.push(...page.items);
 		total = page.total;
-		if (items.length >= total || page.items.length === 0) break;
+		if (offset + items.length >= total || page.items.length === 0) break;
 	}
 	return { items, total };
 }

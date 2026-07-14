@@ -4,6 +4,7 @@ import { http, HttpResponse } from 'msw';
 import {
 	getElementsBatch,
 	getTreeItemsBatch,
+	listContainmentRootsPaged,
 	listExcludedRoots,
 	listExcludedRootsPaged
 } from '../model-read';
@@ -68,6 +69,47 @@ function item(id: string) {
 	return { id, type_name: 'Block', display_name: id, child_count: 0 };
 }
 
+describe('listContainmentRootsPaged', () => {
+	it('assembles pages starting at the given offset and stops at the server total', async () => {
+		const all = Array.from({ length: 600 }, (_, i) => `r${i}`);
+		const offsets: number[] = [];
+		server.use(
+			http.get(`${BASE}/model/containment/roots`, ({ request }) => {
+				const u = new URL(request.url);
+				const offset = Number(u.searchParams.get('offset') ?? '0');
+				const limit = Number(u.searchParams.get('limit') ?? '500');
+				offsets.push(offset);
+				return HttpResponse.json({
+					items: all.slice(offset, offset + limit).map(item),
+					total: all.length
+				});
+			})
+		);
+		const page = await listContainmentRootsPaged(500, cfg, 400);
+		expect(offsets).toEqual([400]);
+		expect(page.items.map((i) => i.id)).toEqual(all.slice(400, 600));
+		expect(page.total).toBe(600);
+	});
+
+	it('defaults to offset 0 (full prefix assembly)', async () => {
+		const all = ['a', 'b', 'c'];
+		server.use(
+			http.get(`${BASE}/model/containment/roots`, ({ request }) => {
+				const u = new URL(request.url);
+				const offset = Number(u.searchParams.get('offset') ?? '0');
+				const limit = Number(u.searchParams.get('limit') ?? '500');
+				return HttpResponse.json({
+					items: all.slice(offset, offset + limit).map(item),
+					total: all.length
+				});
+			})
+		);
+		const page = await listContainmentRootsPaged(3, cfg);
+		expect(page.items.map((i) => i.id)).toEqual(['a', 'b', 'c']);
+		expect(page.total).toBe(3);
+	});
+});
+
 describe('listExcludedRoots', () => {
 	it('passes limit/offset and parses the page', async () => {
 		let url: URL | undefined;
@@ -81,6 +123,30 @@ describe('listExcludedRoots', () => {
 		expect(url?.searchParams.get('limit')).toBe('1');
 		expect(page.total).toBe(3);
 		expect(page.items[0].id).toBe('a');
+	});
+
+	it('listExcludedRootsPaged fetches only the tail pages when given a start offset', async () => {
+		// Scroll auto-load growth appends: growing an N-item list by one page must
+		// request just the missing tail, not re-download offsets 0..N (that
+		// refetch-from-zero pattern made growth O(n²) in requests on large models).
+		const all = Array.from({ length: 1200 }, (_, i) => `e${i}`);
+		const offsets: number[] = [];
+		server.use(
+			http.get(`${BASE}/model/containment/roots/excluded`, ({ request }) => {
+				const u = new URL(request.url);
+				const offset = Number(u.searchParams.get('offset') ?? '0');
+				const limit = Number(u.searchParams.get('limit') ?? '500');
+				offsets.push(offset);
+				return HttpResponse.json({
+					items: all.slice(offset, offset + limit).map(item),
+					total: all.length
+				});
+			})
+		);
+		const page = await listExcludedRootsPaged(700, cfg, 500);
+		expect(offsets).toEqual([500, 1000]);
+		expect(page.items.map((i) => i.id)).toEqual(all.slice(500, 1200));
+		expect(page.total).toBe(1200);
 	});
 
 	it('listExcludedRootsPaged assembles multiple pages up to the limit', async () => {

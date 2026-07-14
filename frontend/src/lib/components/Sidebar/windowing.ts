@@ -80,6 +80,30 @@ export function shouldLoadMoreExcluded(args: {
 }
 
 /**
+ * Auto-load gate for the in-view containment ROOTS page.
+ *
+ * In view mode the tree section renders view folders and artifacts only — raw
+ * containment roots are never tree rows (unplaced roots render in the excluded
+ * pool, which pages itself via {@link shouldLoadMoreExcluded}). The
+ * window-vs-loaded-count math would then compare visible ROWS against remaining
+ * raw ROOTS: a handful of collapsed folders always reads as "at the bottom"
+ * while the server still has more, so an ungated check bumps the page limit on
+ * every pass and pages the entire root set of a large model into memory with
+ * nothing on screen. In view mode the roots page therefore never auto-grows.
+ */
+export function shouldLoadMoreRoots(args: {
+	inViewMode: boolean;
+	windowEnd: number;
+	loadedCount: number;
+	total: number;
+	threshold: number;
+}): boolean {
+	if (args.inViewMode) return false;
+	const { windowEnd, loadedCount, total, threshold } = args;
+	return shouldLoadMore({ windowEnd, loadedCount, total, threshold });
+}
+
+/**
  * Per-frame scroll delta (px) for edge auto-scroll while dragging. Returns a
  * negative value near the top edge (scroll up), positive near the bottom,
  * scaled linearly with how deep into the `edge` band the pointer sits. Zero in

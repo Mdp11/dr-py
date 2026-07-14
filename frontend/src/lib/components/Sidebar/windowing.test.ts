@@ -3,6 +3,7 @@ import {
 	computeWindow,
 	shouldLoadMore,
 	shouldLoadMoreExcluded,
+	shouldLoadMoreRoots,
 	edgeScrollDelta
 } from './windowing';
 
@@ -90,6 +91,47 @@ describe('shouldLoadMoreExcluded', () => {
 		expect(
 			shouldLoadMoreExcluded({
 				sectionCollapsed: false,
+				windowEnd: 40,
+				loadedCount: 100,
+				total: 500,
+				threshold: 10
+			})
+		).toBe(false);
+	});
+});
+
+describe('shouldLoadMoreRoots', () => {
+	// In view mode the tree renders view folders/artifacts only — raw containment
+	// roots are never tree rows (unplaced roots live in the excluded pool). The
+	// window-vs-loaded-count math then compares visible ROWS against remaining
+	// raw ROOTS: a handful of collapsed folders always reads as "at the bottom",
+	// so an ungated check bumps the page limit on every pass and pages the
+	// entire root set of a large model into memory with nothing on screen.
+	it('never loads more in view mode, even at the apparent bottom', () => {
+		expect(
+			shouldLoadMoreRoots({
+				inViewMode: true,
+				windowEnd: 5,
+				loadedCount: 5,
+				total: 50000,
+				threshold: 40
+			})
+		).toBe(false);
+	});
+
+	it('delegates to shouldLoadMore in no-view mode', () => {
+		expect(
+			shouldLoadMoreRoots({
+				inViewMode: false,
+				windowEnd: 95,
+				loadedCount: 100,
+				total: 500,
+				threshold: 10
+			})
+		).toBe(true);
+		expect(
+			shouldLoadMoreRoots({
+				inViewMode: false,
 				windowEnd: 40,
 				loadedCount: 100,
 				total: 500,
