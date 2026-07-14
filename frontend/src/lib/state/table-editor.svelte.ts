@@ -265,6 +265,49 @@ function _evaluateSource(
 		: { artifactId: draft.artifactId };
 }
 
+/**
+ * The sort to send with a request, validated against the CURRENT definition.
+ * `_sorts` outlives definition edits, so a sort can point past the last column
+ * after an external definition swap (reload, rebind) — the backend hard-422s
+ * an out-of-range sort on EVERY request, which would brick the whole tab. The
+ * structural edits that shift indices (remove/move) remap the sort precisely
+ * (see `remapTableSortForRemove`/`ForMove`); this is the belt-and-braces net
+ * for any path that doesn't.
+ */
+function _sortFor(tabId: string, draft: TableDraft): TableSort | undefined {
+	const sort = _sorts.get(tabId);
+	if (sort === undefined) return undefined;
+	if (sort.column >= draft.definition.columns.length) {
+		_sorts.delete(tabId);
+		return undefined;
+	}
+	return sort;
+}
+
+/**
+ * Keep the active sort pointing at the SAME column across a column removal
+ * (mirrors `removeColumn`'s ColumnRef shifting): sort on the removed column is
+ * cleared; a sort past it shifts down one. Call before the definition edit is
+ * applied so the reload it triggers already uses the remapped sort.
+ */
+export function remapTableSortForRemove(tabId: string, index: number): void {
+	const sort = _sorts.get(tabId);
+	if (sort === undefined) return;
+	if (sort.column === index) _sorts.delete(tabId);
+	else if (sort.column > index) _sorts.set(tabId, { ...sort, column: sort.column - 1 });
+}
+
+/** Same contract as `remapTableSortForRemove`, for `moveColumn(from, to)`. */
+export function remapTableSortForMove(tabId: string, from: number, to: number): void {
+	const sort = _sorts.get(tabId);
+	if (sort === undefined) return;
+	let column = sort.column;
+	if (column === from) column = to;
+	else if (from < column && column <= to) column -= 1;
+	else if (to <= column && column < from) column += 1;
+	if (column !== sort.column) _sorts.set(tabId, { ...sort, column });
+}
+
 /** Install `page` as a FRESH sparse cache (drops any previously loaded rows). */
 function installPage(tabId: string, page: TablePage): void {
 	const rows: (TableRow | undefined)[] = new Array<TableRow | undefined>(page.total);
@@ -319,7 +362,7 @@ export async function loadTablePage(
 	const gen = bumpGeneration(tabId); // supersede any older in-flight load
 	_errors.delete(tabId);
 	_loading.set(tabId, true);
-	const sort = _sorts.get(tabId);
+	const sort = _sortFor(tabId, draft);
 	const args = { ..._evaluateSource(draft), offset, limit, sort };
 	try {
 		const page = await evaluateTable(args);
@@ -376,7 +419,7 @@ export function ensureTableRange(tabId: string, start: number, end: number): voi
 async function fetchChunk(tabId: string, offset: number, gen: number): Promise<void> {
 	const draft = _drafts.get(tabId);
 	if (!draft) return;
-	const sort = _sorts.get(tabId);
+	const sort = _sortFor(tabId, draft);
 	const args = { ..._evaluateSource(draft), offset, limit: PAGE, sort };
 	try {
 		const page = await evaluateTable(args);
@@ -533,7 +576,7 @@ export function closeTableDraft(tabId: string): void {
 export async function downloadTable(tabId: string): Promise<void> {
 	const draft = _drafts.get(tabId);
 	if (!draft) return;
-	const sort = _sorts.get(tabId);
+	const sort = _sortFor(tabId, draft);
 	const { blob, filename } = await exportTable({ ..._evaluateSource(draft), sort });
 	const url = URL.createObjectURL(blob);
 	const a = document.createElement('a');

@@ -8,7 +8,23 @@
 import { getModelStatus } from '$lib/api/model-status';
 import { getActiveProjectId } from './active-project.svelte';
 import { refreshSummary } from './model.svelte';
-import { endProgress, setProgressLabel, startProgress, updateProgress } from './progress.svelte';
+import {
+	endProgress,
+	setProgressIndeterminate,
+	setProgressLabel,
+	startProgress,
+	updateProgress
+} from './progress.svelte';
+
+/** User-facing label per backend hydration phase. Only the `build` phase
+ * reports done/total counts; the others show as an indeterminate spinner, so
+ * the label is the sole sign of life — keep each phase distinct. */
+const HYDRATION_LABELS: Record<string, string> = {
+	download: 'Downloading model…',
+	parse: 'Parsing model…',
+	build: 'Loading model…',
+	replay: 'Replaying changes…'
+};
 
 // Consecutive 'cold' polls tolerated before giving up (~20s at the default
 // 400ms pollMs). A project whose server-side hydration failed reports 'cold'
@@ -55,9 +71,16 @@ export async function trackOpenProgress(pollMs = 400): Promise<void> {
 			if (status.state === 'validating' && status.validation) {
 				setProgressLabel(token, 'Validating model…');
 				updateProgress(token, status.validation.done, status.validation.total);
-			} else if (status.state === 'hydrating' && status.hydration && status.hydration.total > 0) {
-				setProgressLabel(token, 'Loading model…');
-				updateProgress(token, status.hydration.done, status.hydration.total);
+			} else if (status.state === 'hydrating' && status.hydration) {
+				// Only the build phase carries done/total; the others must fall
+				// BACK to indeterminate (a stale percentage from an earlier phase
+				// would read as stuck progress).
+				setProgressLabel(token, HYDRATION_LABELS[status.hydration.phase] ?? 'Loading model…');
+				if (status.hydration.total > 0) {
+					updateProgress(token, status.hydration.done, status.hydration.total);
+				} else {
+					setProgressIndeterminate(token);
+				}
 			}
 			await new Promise((resolve) => setTimeout(resolve, pollMs));
 		}

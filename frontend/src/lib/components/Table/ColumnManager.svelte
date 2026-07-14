@@ -8,7 +8,13 @@
 	// dangling `ColumnRef` — both are caught here and surfaced as an inline
 	// message instead of propagating.
 	import { onDestroy } from 'svelte';
-	import { getTableDraft, getTablePage, updateTableDefinition } from '$lib/state';
+	import {
+		getTableDraft,
+		getTablePage,
+		remapTableSortForMove,
+		remapTableSortForRemove,
+		updateTableDefinition
+	} from '$lib/state';
 	import {
 		ColumnInUseError,
 		addColumn,
@@ -93,10 +99,17 @@
 		for (const t of renameTimers.values()) clearTimeout(t);
 	});
 
+	// remove/move shift column indices, so the active sort must be remapped in
+	// the same breath (the remap runs only after the mutator succeeds — a
+	// ColumnInUseError/forward-ref throw leaves definition AND sort untouched).
 	function onRemove(index: number): void {
 		if (!defn) return;
 		const current = defn;
-		tryApply(() => removeColumn(current, index));
+		tryApply(() => {
+			const next = removeColumn(current, index);
+			remapTableSortForRemove(tabId, index);
+			return next;
+		});
 	}
 
 	function onMove(index: number, dir: 'up' | 'down'): void {
@@ -104,7 +117,11 @@
 		const to = dir === 'up' ? index - 1 : index + 1;
 		if (to < 0 || to >= defn.columns.length) return;
 		const current = defn;
-		tryApply(() => moveColumn(current, index, to));
+		tryApply(() => {
+			const next = moveColumn(current, index, to);
+			remapTableSortForMove(tabId, index, to);
+			return next;
+		});
 	}
 
 	function addPropertyColumn(): void {

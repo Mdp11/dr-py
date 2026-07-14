@@ -2,8 +2,8 @@
 
 The table core evaluator (`build_rows`/`order_rows`/`evaluate_cells`, Tasks
 4-6) is deliberately ref-free: it assumes every `NavigationSource` it sees
-already carries a resolved `.definition` with no `Operand.ref` anywhere in
-its tree. This module produces that shape from a possibly-ref-bearing
+either carries a resolved `.definition` with no `Operand.ref` anywhere in
+its tree, or is EMPTY (unconfigured — evaluates to nothing). This module produces that shape from a possibly-ref-bearing
 `TableDefinition`, via an injected `fetch` callable that loads + parses a
 stored navigation artifact's payload (raising `LookupError` for an
 unknown/foreign/non-navigation artifact — the API layer maps that to 422).
@@ -33,10 +33,12 @@ from .schema import (
 
 
 def _resolve_source(ns: NavigationSource, fetch: Fetch) -> NavigationSource:
+    if ns.is_empty:
+        return ns  # unconfigured: stays empty; evaluation reaches nothing
     if ns.ref is not None:
         base_def = fetch(ns.ref)  # LookupError propagates: unknown artifact
     else:
-        assert ns.definition is not None  # schema: exactly one of ref/definition
+        assert ns.definition is not None  # schema: at most one of ref/definition
         base_def = ns.definition
     return NavigationSource(definition=resolve_refs(base_def, fetch))
 

@@ -15,6 +15,8 @@ import {
 	handleTableModelRevChanged,
 	loadTablePage,
 	reloadTableDraft,
+	remapTableSortForMove,
+	remapTableSortForRemove,
 	resetTableEditors,
 	saveAsTableDraft,
 	saveTableDraft,
@@ -96,6 +98,55 @@ describe('table-editor', () => {
 		const lastCall = spy.mock.calls.at(-1)![0];
 		expect(lastCall.offset ?? 0).toBe(0);
 		expect(lastCall.sort).toEqual({ column: 0, direction: 'asc' });
+	});
+
+	/** Widen a fresh draft to `n` element columns so a sort on a later column
+	 * survives `_sortFor`'s out-of-range net during these remap tests. */
+	function widenDraft(tabId: string, n: number): void {
+		const d = getTableDraft(tabId)!;
+		const col = d.definition.columns[0];
+		updateTableDefinition(tabId, {
+			...d.definition,
+			columns: Array.from({ length: n }, () => ({ ...col }))
+		});
+	}
+
+	it('remapTableSortForRemove clears a sort on the removed column and shifts later ones', async () => {
+		vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
+		await ensureTableDraft('tbl:draft:sortrm');
+		widenDraft('tbl:draft:sortrm', 4);
+		setTableSort('tbl:draft:sortrm', { column: 2, direction: 'asc' });
+		remapTableSortForRemove('tbl:draft:sortrm', 1); // earlier column removed → shift down
+		expect(getTableSort('tbl:draft:sortrm')).toEqual({ column: 1, direction: 'asc' });
+		remapTableSortForRemove('tbl:draft:sortrm', 1); // the sorted column itself → cleared
+		expect(getTableSort('tbl:draft:sortrm')).toBeUndefined();
+	});
+
+	it('remapTableSortForMove follows the sorted column across a reorder', async () => {
+		vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
+		await ensureTableDraft('tbl:draft:sortmv');
+		widenDraft('tbl:draft:sortmv', 4);
+		setTableSort('tbl:draft:sortmv', { column: 1, direction: 'desc' });
+		remapTableSortForMove('tbl:draft:sortmv', 1, 3); // the sorted column moved
+		expect(getTableSort('tbl:draft:sortmv')).toEqual({ column: 3, direction: 'desc' });
+		remapTableSortForMove('tbl:draft:sortmv', 0, 3); // another column hopped over it
+		expect(getTableSort('tbl:draft:sortmv')).toEqual({ column: 2, direction: 'desc' });
+		remapTableSortForMove('tbl:draft:sortmv', 3, 0); // and hopped back
+		expect(getTableSort('tbl:draft:sortmv')).toEqual({ column: 3, direction: 'desc' });
+	});
+
+	it('drops an out-of-range sort instead of sending it (defensive net)', async () => {
+		const spy = vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
+		await ensureTableDraft('tbl:draft:sortoor');
+		const d = getTableDraft('tbl:draft:sortoor')!;
+		// the empty draft has ONE column; a sort on column 5 must never reach the
+		// backend (it would 422 every request for the whole tab)
+		setTableSort('tbl:draft:sortoor', { column: 5, direction: 'asc' });
+		await flush();
+		const lastCall = spy.mock.calls.at(-1)![0];
+		expect(lastCall.sort).toBeUndefined();
+		expect(getTableSort('tbl:draft:sortoor')).toBeUndefined();
+		expect(d.definition.columns.length).toBe(1);
 	});
 
 	it('loads a saved artifact payload and its first page', async () => {

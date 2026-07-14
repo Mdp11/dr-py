@@ -27,12 +27,17 @@
 			{/if}
 		</p>
 
-		<div class="h-0.5 w-56 overflow-hidden rounded-full bg-muted">
+		{#if percent === null}
+			<!-- Indeterminate: a generic spinner. A partial bar here would read as
+			     stuck progress — there is no percentage to show. -->
 			<div
-				class="h-full bg-primary transition-[width]"
-				style:width={percent === null ? '30%' : `${percent}%`}
-				class:animate-pulse={percent === null}
+				data-testid="progress-spinner"
+				class="h-5 w-5 animate-spin rounded-full border-2 border-muted border-t-primary"
 			></div>
-		</div>
+		{:else}
+			<div class="h-0.5 w-56 overflow-hidden rounded-full bg-muted">
+				<div class="h-full bg-primary transition-[width]" style:width={`${percent}%`}></div>
+			</div>
+		{/if}
 	</div>
 {/if}

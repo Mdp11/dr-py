@@ -75,7 +75,8 @@ def _navigation_row_keys(
     set even though `build_rows`' `max_rows` check never fires — swallowing it
     would let the API report `truncated: false` over missing rows."""
     defn = rs.navigation.definition
-    assert defn is not None
+    if defn is None:  # unconfigured ({}) source: no rows, nothing truncated
+        return [], False
     result = evaluate(mm, model, defn, limits.nav_limits)
     idx = rs.step_index if rs.step_index is not None else -1
     seen: dict[str, None] = {}
@@ -89,7 +90,8 @@ def _chain_row_keys(
     mm: Metamodel, model: Model, rs: ChainRows, limits: TableLimits
 ) -> tuple[list[RowKey], bool]:
     defn = rs.navigation.definition
-    assert defn is not None
+    if defn is None:  # unconfigured ({}) source: no rows, nothing truncated
+        return [], False
     result = evaluate(mm, model, defn, limits.nav_limits)
     return [tuple(chain) for chain in result.chains], result.truncated
 
@@ -176,7 +178,8 @@ def _navigation_reached_ex(
     """(reached ids, navigation-truncated) — the flag is consumed by
     `build_rows`' expand loop; display-only callers use `_navigation_reached`."""
     defn = col.navigation.definition
-    assert defn is not None
+    if defn is None:  # unconfigured ({}) column: reaches nothing
+        return [], False
     if not roots:
         return [], False
     result = evaluate(mm, model, defn, limits.nav_limits, row_elements=roots)

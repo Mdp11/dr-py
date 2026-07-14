@@ -204,8 +204,10 @@
 		onChange({ ...column, sort_mode: v });
 	}
 	function setCellCap(e: Event): void {
-		const v = Number((e.currentTarget as HTMLInputElement).value);
-		onChange({ ...column, cell_cap: Number.isFinite(v) ? v : column.cell_cap });
+		// The schema requires cell_cap >= 1 — a cleared/zero/negative input must
+		// not reach the definition (it would 422 every evaluate of the table).
+		const v = Math.floor(Number((e.currentTarget as HTMLInputElement).value));
+		onChange({ ...column, cell_cap: Number.isFinite(v) && v >= 1 ? v : column.cell_cap });
 	}
 	function setSplit(e: Event): void {
 		const checked = (e.currentTarget as HTMLInputElement).checked;

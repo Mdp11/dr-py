@@ -234,6 +234,52 @@ def test_expand_column_navigation_truncation_propagates():
     assert truncated is True  # root reaches 2 parts; max_chains=1 dropped one
 
 
+def test_empty_navigation_row_source_yields_no_rows():
+    # An unconfigured ({}) navigation/chains row source evaluates to an EMPTY
+    # table, not a 422 — the editor creates the row source before the user
+    # picks a navigation, and the table must keep rendering meanwhile.
+    mm = _mm(); model, _ = _fixture()
+    for kind in ("navigation", "chains"):
+        defn = TABLE_ADAPTER.validate_python({
+            "row_source": {"kind": kind, "navigation": {}},
+            "columns": [{"kind": "element", "source": {"kind": "row"}}],
+        })
+        keys, truncated = build_rows(mm, model, defn)
+        assert keys == [] and truncated is False
+
+
+def test_empty_navigation_column_reaches_nothing():
+    # Same tolerance for an unconfigured navigation COLUMN: collapse yields an
+    # empty cell for every row; expand follows keep_empty like a barren nav.
+    from data_rover.core.table.cells import ElementsCell, evaluate_cells
+
+    mm = _mm(); model, ids = _fixture()
+    defn = TABLE_ADAPTER.validate_python({
+        "row_source": {"kind": "scope", "types": ["Block"]},
+        "columns": [
+            {"kind": "element", "source": {"kind": "row"}},
+            {"kind": "navigation", "source": {"kind": "row"}, "navigation": {}},
+        ],
+    })
+    keys, _ = build_rows(mm, model, defn)
+    assert len(keys) == len(ids)
+    rows = evaluate_cells(mm, model, defn, keys)
+    for row in rows:
+        cell = row[1]
+        assert isinstance(cell, ElementsCell) and cell.element_ids == []
+
+    defn = TABLE_ADAPTER.validate_python({
+        "row_source": {"kind": "scope", "types": ["Block"]},
+        "columns": [
+            {"kind": "element", "source": {"kind": "row"}},
+            {"kind": "navigation", "source": {"kind": "row"}, "navigation": {},
+             "mode": "expand", "keep_empty": True},
+        ],
+    })
+    keys, _ = build_rows(mm, model, defn)
+    assert sorted(keys) == sorted((eid, None) for eid in ids.values())
+
+
 def test_step_index_out_of_range_raises_value_error():
     # An out-of-range step_index must surface as a ValueError (the API maps it
     # to 422), not an IndexError escaping as a 500.

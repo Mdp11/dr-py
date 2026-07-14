@@ -28,16 +28,30 @@ MAX_COLUMNS = 50
 
 
 class NavigationSource(BaseModel):
-    """Exactly one of `ref` (saved artifact id) / `definition` (inline)."""
+    """At most one of `ref` (saved artifact id) / `definition` (inline).
+
+    NEITHER set (`{}`) is a legal, UNCONFIGURED source: the table editor
+    creates a navigation column / row source before the user picks its
+    navigation, and rejecting that transient state here would 422 every
+    evaluate/save of the WHOLE table until it is configured. Evaluation
+    treats an unconfigured source as reaching nothing (empty cell / no rows)
+    — same tolerant-evaluation stance as `cells.expand_property_values`.
+    BOTH set stays rejected: the request is ambiguous, not incomplete.
+    """
 
     ref: str | None = None
     definition: NavigationDefinition | None = None
 
     @model_validator(mode="after")
-    def _exactly_one(self) -> "NavigationSource":
-        if (self.ref is None) == (self.definition is None):
-            raise ValueError("provide exactly one of `ref` / `definition`")
+    def _at_most_one(self) -> "NavigationSource":
+        if self.ref is not None and self.definition is not None:
+            raise ValueError("provide at most one of `ref` / `definition`")
         return self
+
+    @property
+    def is_empty(self) -> bool:
+        """True for the unconfigured (`{}`) source."""
+        return self.ref is None and self.definition is None
 
 
 # ---- row source -------------------------------------------------------------

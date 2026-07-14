@@ -1,6 +1,12 @@
 import pytest
 from pydantic import ValidationError
-from data_rover.core.table.schema import TABLE_ADAPTER, SCHEMA_VERSION, RowSlot
+from data_rover.core.table.schema import (
+    TABLE_ADAPTER,
+    SCHEMA_VERSION,
+    ChainRows,
+    NavigationColumn,
+    RowSlot,
+)
 
 
 def _table(**kw):
@@ -79,6 +85,37 @@ def test_element_column_source_from_element_producing_column_ok():
         {"kind": "element", "source": {"kind": "column", "index": 0}},
     ])
     assert len(t.columns) == 2
+
+
+def test_empty_navigation_source_allowed():
+    # An UNCONFIGURED navigation source ({} — no ref, no definition) is a legal
+    # transient UI state (the editor creates the column before the user picks a
+    # navigation). It must parse — evaluation treats it as reaching nothing —
+    # instead of 422-ing every request for the whole table until configured.
+    t = _table(columns=[
+        {"kind": "element", "source": {"kind": "row"}},
+        {"kind": "navigation", "source": {"kind": "row"}, "navigation": {}},
+    ])
+    col = t.columns[1]
+    assert isinstance(col, NavigationColumn)
+    assert col.navigation.ref is None and col.navigation.definition is None
+    # same for the row source's navigation
+    t = _table(
+        row_source={"kind": "chains", "navigation": {}},
+        columns=[{"kind": "element", "source": {"kind": "row"}}],
+    )
+    assert isinstance(t.row_source, ChainRows)
+    assert t.row_source.navigation.ref is None
+
+
+def test_navigation_source_rejects_both_ref_and_definition():
+    with pytest.raises(ValidationError, match="at most one"):
+        _table(columns=[
+            {"kind": "element", "source": {"kind": "row"}},
+            {"kind": "navigation", "source": {"kind": "row"},
+             "navigation": {"ref": "abc", "definition": {"kind": "path",
+                            "start": {"kind": "row"}, "steps": []}}},
+        ])
 
 
 def test_chain_index_nonzero_ok_with_chains_source():

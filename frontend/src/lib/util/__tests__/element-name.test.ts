@@ -27,6 +27,13 @@ describe('nameProp', () => {
 		expect(nameProp({ name: '', Name: 'Engine' })).toBe('Engine');
 	});
 
+	it('uses the first non-empty string of a list-valued name (multiplicity-many)', () => {
+		expect(nameProp({ name: ['Alpha', 'Beta'] })).toBe('Alpha');
+		expect(nameProp({ Name: ['', 'Gamma'] })).toBe('Gamma');
+		expect(nameProp({ name: [] })).toBeUndefined();
+		expect(nameProp({ name: [7, null] })).toBeUndefined();
+	});
+
 	it('returns undefined when no name-like property exists', () => {
 		expect(nameProp({ title: 'Engine' })).toBeUndefined();
 		expect(nameProp({})).toBeUndefined();

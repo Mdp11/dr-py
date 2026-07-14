@@ -54,6 +54,22 @@ export function messageFromBody(body: unknown, status: number): string {
 	if (body && typeof body === 'object') {
 		const b = body as Record<string, unknown>;
 		if (typeof b.detail === 'string') return b.detail;
+		// FastAPI request-parse failures carry `detail` as a LIST of
+		// {loc, msg, ...} items — surface the first few instead of a bare
+		// "HTTP 422" the user can do nothing with.
+		if (Array.isArray(b.detail)) {
+			const parts = b.detail
+				.filter(
+					(d): d is { msg: string; loc?: unknown[] } =>
+						!!d && typeof d === 'object' && typeof (d as { msg?: unknown }).msg === 'string'
+				)
+				.slice(0, 3)
+				.map((d) => {
+					const loc = Array.isArray(d.loc) ? d.loc.filter((p) => p !== 'body').join('.') : '';
+					return loc ? `${loc}: ${d.msg}` : d.msg;
+				});
+			if (parts.length > 0) return parts.join('; ');
+		}
 		if (typeof b.error === 'string') return b.error;
 		if (typeof b.message === 'string') return b.message;
 	}

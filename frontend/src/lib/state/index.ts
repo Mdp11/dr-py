@@ -255,6 +255,8 @@ export {
 	getTableSort,
 	loadTablePage,
 	reloadTableDraft,
+	remapTableSortForMove,
+	remapTableSortForRemove,
 	resetTableEditors,
 	saveAsTableDraft,
 	saveTableDraft,

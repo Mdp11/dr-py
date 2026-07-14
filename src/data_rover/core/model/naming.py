@@ -12,16 +12,33 @@ from __future__ import annotations
 from .element import Element
 
 
+def _name_str(value: object) -> str | None:
+    """A usable name out of a property value: the string itself, or — for a
+    multiplicity-many ``name`` (a list, e.g. from a migrated legacy model) —
+    the first non-empty string entry."""
+    if isinstance(value, str) and value:
+        return value
+    if isinstance(value, (list, tuple)):
+        for v in value:
+            if isinstance(v, str) and v:
+                return v
+    return None
+
+
 def display_name(element: Element) -> str:
     """The case-insensitive non-empty ``name`` property, else the id.
 
     An exact lowercase ``name`` wins over other casings (``Name``/``NAME``).
+    List values (multiplicity-many names) contribute their first non-empty
+    string entry.
     """
     props = element.properties
-    exact = props.get("name")
-    if isinstance(exact, str) and exact:
+    exact = _name_str(props.get("name"))
+    if exact is not None:
         return exact
     for key, value in props.items():
-        if key != "name" and key.lower() == "name" and isinstance(value, str) and value:
-            return value
+        if key != "name" and key.lower() == "name":
+            found = _name_str(value)
+            if found is not None:
+                return found
     return element.id

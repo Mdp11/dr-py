@@ -38,4 +38,17 @@ describe('ProgressOverlay', () => {
 		flushSync();
 		expect(document.querySelector('[data-testid="progress-overlay"]')).toBeNull();
 	});
+
+	it('renders a spinner (not a bar) while indeterminate — a partial bar reads as stuck', () => {
+		const id = startProgress('Opening project…');
+		flushSync();
+		expect(document.querySelector('[data-testid="progress-spinner"]')).not.toBeNull();
+		updateProgress(id, 1, 4);
+		flushSync();
+		// determinate: the spinner yields to the percentage bar
+		expect(document.querySelector('[data-testid="progress-spinner"]')).toBeNull();
+		expect(document.querySelector('[data-testid="progress-percent"]')?.textContent).toBe('25%');
+		endProgress(id);
+		flushSync();
+	});
 });
