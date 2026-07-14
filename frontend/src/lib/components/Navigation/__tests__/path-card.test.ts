@@ -165,6 +165,89 @@ it('the Options expander toggles exclude_visited', async () => {
 	}
 });
 
+it('the collapse toggle hides the editing body but keeps the header', async () => {
+	const tabId = 'nav:draft:pc-collapse';
+	await seed(tabId, pathWith());
+	const c = render(tabId);
+	try {
+		expect(document.body.textContent).toContain('Start from');
+		(document.querySelector('[data-testid="path-collapse-toggle"]') as HTMLElement).click();
+		flushSync();
+		expect(document.body.textContent).not.toContain('Start from');
+		expect(document.body.textContent).not.toContain('Combine with');
+		// the header (title + collapsed one-line summary) stays
+		expect(document.body.textContent).toContain('Path');
+		expect(document.body.textContent).toContain('A'); // nodeLabel: start types
+		(document.querySelector('[data-testid="path-collapse-toggle"]') as HTMLElement).click();
+		flushSync();
+		expect(document.body.textContent).toContain('Start from');
+	} finally {
+		unmount(c);
+	}
+});
+
+it('renaming a path writes `name` into the definition; clearing restores the auto title', async () => {
+	const tabId = 'nav:draft:pc-rename';
+	await seed(tabId, pathWith());
+	const c = render(tabId);
+	try {
+		(document.querySelector('[data-testid="path-rename-button"]') as HTMLElement).click();
+		flushSync();
+		const input = document.querySelector('[data-testid="path-name-input"]') as HTMLInputElement;
+		input.value = 'Buildings sweep';
+		input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+		flushSync();
+		expect((getDraft(tabId)!.definition as PathNavigation).name).toBe('Buildings sweep');
+		expect(document.body.textContent).toContain('Buildings sweep');
+
+		// clearing the name restores the automatic title
+		(document.querySelector('[data-testid="path-rename-button"]') as HTMLElement).click();
+		flushSync();
+		const again = document.querySelector('[data-testid="path-name-input"]') as HTMLInputElement;
+		again.value = '';
+		again.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+		flushSync();
+		expect((getDraft(tabId)!.definition as PathNavigation).name).toBeNull();
+		expect(document.body.textContent).toContain('Path');
+	} finally {
+		unmount(c);
+	}
+});
+
+it('a step note can be added, is displayed, and lands in the definition', async () => {
+	const tabId = 'nav:draft:pc-comment';
+	await seed(
+		tabId,
+		pathWith([
+			{
+				kind: 'relationship',
+				relationship_type: 'Uses',
+				direction: 'out',
+				target_types: [],
+				children: []
+			}
+		])
+	);
+	const c = render(tabId);
+	try {
+		(document.querySelector('button[aria-label="Add step note"]') as HTMLElement).click();
+		flushSync();
+		const input = document.querySelector('[data-testid="step-comment-input"]') as HTMLInputElement;
+		input.value = 'hop to the systems this block uses';
+		input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+		flushSync();
+		const defn = getDraft(tabId)!.definition as PathNavigation;
+		expect(
+			(defn.steps[0] as Extract<(typeof defn.steps)[0], { kind: 'relationship' }>).comment
+		).toBe('hop to the systems this block uses');
+		expect(document.querySelector('[data-testid="step-comment"]')?.textContent).toContain(
+			'hop to the systems this block uses'
+		);
+	} finally {
+		unmount(c);
+	}
+});
+
 it('offers the row start mode only on a row-context embedded draft', async () => {
 	vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
 	ensureEmbeddedDraft('navemb:pc1', emptyRowPath(), { rowContext: true, rowElementId: null });

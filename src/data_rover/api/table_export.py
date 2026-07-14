@@ -19,6 +19,7 @@ from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
 
 from data_rover.core.model.model import Model
+from data_rover.core.model.naming import display_name
 from data_rover.core.table.cells import (
     Cell,
     ElementCell,
@@ -29,9 +30,8 @@ from data_rover.core.table.cells import (
 
 
 def _display(model: Model, eid: str) -> str:
-    el = model.elements[eid]
-    n = el.properties.get("name")
-    return str(n) if n is not None else el.id
+    # shared case-insensitive `name` lookup — same label the grid displays
+    return display_name(model.elements[eid])
 
 
 def _cell_text(model: Model, cell: Cell) -> object:

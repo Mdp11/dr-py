@@ -318,6 +318,34 @@ describe('nodeEntries', () => {
 		expect(entries.map((e) => e.depth)).toEqual([1, 1, 0]);
 	});
 
+	it('a user-chosen path name overrides its letter without shifting the siblings', () => {
+		const root: SetExpression = {
+			kind: 'set_op',
+			schema_version: 2,
+			op: 'union',
+			operands: [
+				{ definition: { ...emptyPath(), name: 'Buildings' }, step_index: null },
+				{ definition: emptyPath(), step_index: null }
+			]
+		};
+		const entries = nodeEntries(root);
+		// the renamed path consumed letter A: its sibling stays "Path B"
+		expect(entries.map((e) => e.title)).toEqual(['Buildings', 'Path B', 'Whole combination']);
+		// a whitespace-only name falls back to the letter
+		const blank: SetExpression = {
+			...root,
+			operands: [
+				{ definition: { ...emptyPath(), name: '   ' }, step_index: null },
+				root.operands[1]
+			]
+		};
+		expect(nodeEntries(blank).map((e) => e.title)).toEqual([
+			'Path A',
+			'Path B',
+			'Whole combination'
+		]);
+	});
+
 	it('nested combinations deepen the entries and are titled "Combination"', () => {
 		const root: SetExpression = {
 			kind: 'set_op',

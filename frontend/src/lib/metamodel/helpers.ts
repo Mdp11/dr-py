@@ -147,6 +147,41 @@ export function parseMultiplicity(spec: string): {
  * at that point — offered as a union because navigation property matching is
  * existence-gated (an element lacking a picked property simply drops out).
  */
+/**
+ * True when at least one type reachable from `typeNames` (themselves + all
+ * subtypes; `[]` = every element type) declares `propName` with an upper bound
+ * other than 1. Unlike {@link effectivePropertiesForTypes} this looks at EVERY
+ * declaration of the name (that helper dedupes first-wins, losing multiplicity
+ * variance across types). Used to grey out "split into rows" when splitting
+ * provably has nothing to split; callers should treat an undeclared property
+ * as splittable (instance data may still hold lists).
+ */
+export function propertyDeclaredMany(
+	mm: Metamodel,
+	typeNames: string[],
+	propName: string
+): boolean {
+	const roots = typeNames.length === 0 ? mm.elements.map((e) => e.name) : typeNames;
+	for (const t of mm.elements) {
+		if (!roots.some((r) => isSubtype(mm, t.name, r))) continue;
+		for (const p of effectiveProperties(mm, t.name)) {
+			if (p.name === propName && parseMultiplicity(p.multiplicity).upper !== 1) return true;
+		}
+	}
+	return false;
+}
+
+/** True when `propName` is declared on ANY type reachable from `typeNames`
+ * (same reachability as {@link propertyDeclaredMany}). */
+export function propertyDeclared(mm: Metamodel, typeNames: string[], propName: string): boolean {
+	const roots = typeNames.length === 0 ? mm.elements.map((e) => e.name) : typeNames;
+	for (const t of mm.elements) {
+		if (!roots.some((r) => isSubtype(mm, t.name, r))) continue;
+		if (effectiveProperties(mm, t.name).some((p) => p.name === propName)) return true;
+	}
+	return false;
+}
+
 export function effectivePropertiesForTypes(mm: Metamodel, typeNames: string[]): PropertyDef[] {
 	const roots = typeNames.length === 0 ? mm.elements.map((e) => e.name) : typeNames;
 	// Expand each requested type to itself + all its subtypes.

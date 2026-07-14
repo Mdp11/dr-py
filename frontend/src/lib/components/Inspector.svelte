@@ -5,7 +5,9 @@
 		ensureElement,
 		getCachedElements,
 		getCachedRelationships,
-		getSelection
+		getMissingElementIds,
+		getSelection,
+		isTempId
 	} from '$lib/state';
 	import LockControl from './Inspector/LockControl.svelte';
 	import NewRelationshipPicker from './Inspector/NewRelationshipPicker.svelte';
@@ -28,6 +30,16 @@
 		}
 		return relationships.get(selection.id) ?? null;
 	});
+
+	// An uncached element selection is LOADING until the cache-or-fetch settles:
+	// only a confirmed miss (404 / deleted — tracked in the missing-ids set) or
+	// an uncached temp id (the server never heard of it) is truly "not found".
+	const loading = $derived(
+		entity === null &&
+			selection?.kind === 'element' &&
+			!getMissingElementIds().has(selection.id) &&
+			!isTempId(selection.id)
+	);
 </script>
 
 <aside
@@ -40,6 +52,18 @@
 		>
 			<p class="font-display text-base font-light text-muted-foreground">No element selected</p>
 			<p class="text-xs text-muted-foreground/70">Select an entity from the tree to inspect it.</p>
+		</section>
+	{:else if loading}
+		<section
+			data-testid="inspector-loading"
+			class="flex flex-1 flex-col gap-3 overflow-hidden px-3 py-3"
+			aria-busy="true"
+		>
+			<span class="h-3 w-20 animate-pulse rounded bg-muted"></span>
+			<span class="h-6 w-40 animate-pulse rounded bg-muted"></span>
+			<span class="h-4 w-full animate-pulse rounded bg-muted"></span>
+			<span class="h-4 w-3/4 animate-pulse rounded bg-muted"></span>
+			<span class="h-4 w-5/6 animate-pulse rounded bg-muted"></span>
 		</section>
 	{:else if entity === null}
 		<section

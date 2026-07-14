@@ -394,6 +394,10 @@ export function applyDelta(d: OpsResponse): void {
 	for (const id of d.deleted_element_ids) {
 		_elements.delete(id);
 		_treeItems.delete(id);
+		// A deleted id is confirmed-missing: a selection still pointing at it must
+		// render "not found" (not a loading state), and the view tree can drop
+		// dangling placements. Re-create/restore un-marks it (upsert loop above).
+		_missingElementIds.add(id);
 	}
 	for (const id of d.deleted_relationship_ids) _relationships.delete(id);
 
@@ -708,7 +712,13 @@ export async function ensureElement(id: string): Promise<Element | null> {
 			_missingElementIds.delete(e.id);
 			return e;
 		} catch (err) {
-			if (err instanceof NotFoundError) return null;
+			if (err instanceof NotFoundError) {
+				// Record the confirmed miss so consumers (Inspector/DetailView) can
+				// distinguish "fetch in flight" (show loading) from "the server said
+				// this id does not exist" (show not-found).
+				_missingElementIds.add(id);
+				return null;
+			}
 			throw err;
 		}
 	})();

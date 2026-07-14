@@ -6,7 +6,11 @@
 	// toggle (`mode`), and `keep_empty` (only meaningful while splitting).
 	// Fully controlled: emits a whole new column via `onChange`.
 	import { getMetamodel } from '$lib/state/metamodel.svelte';
-	import { effectivePropertiesForTypes } from '$lib/metamodel/helpers';
+	import {
+		effectivePropertiesForTypes,
+		propertyDeclared,
+		propertyDeclaredMany
+	} from '$lib/metamodel/helpers';
 	import { columnLabel } from '$lib/table/columns';
 	import type { Column, RowSource } from '$lib/api/types';
 	import type { PropertyItem } from '$lib/search/property-ops';
@@ -91,6 +95,23 @@
 		suggestOpen = true;
 		onChange({ ...column, name: (e.currentTarget as HTMLInputElement).value });
 	}
+	// Splitting is provably a no-op when every scoped type declares the property
+	// single-valued: grey the toggle out then (with an explaining tooltip). Only
+	// a PROVABLE "no" disables — an unknowable source (navigation/chains rows,
+	// earlier-column sources: any type may arrive) or an undeclared property
+	// (instance data may still hold lists) keeps it enabled, and the backend
+	// expands scalars to one row rather than erroring either way. An already-
+	// checked stale config also stays enabled so the user can still uncheck it.
+	const splitDisabled = $derived.by(() => {
+		if (column.mode === 'expand') return false;
+		if (mm === null) return false;
+		if (column.source.kind !== 'row' || rowSource.kind !== 'scope') return false;
+		const name = column.name.trim();
+		if (name === '') return false;
+		if (!propertyDeclared(mm, rowSource.types, name)) return false;
+		return !propertyDeclaredMany(mm, rowSource.types, name);
+	});
+
 	function setSplit(e: Event): void {
 		const checked = (e.currentTarget as HTMLInputElement).checked;
 		onChange({ ...column, mode: checked ? 'expand' : 'collapse' });
@@ -116,15 +137,24 @@
 			<option value="column" disabled={priorColumns.length === 0}>Earlier column</option>
 		</select>
 		{#if column.source.kind === 'row'}
-			<label class="flex items-center gap-1">
-				chain
-				<input
-					type="number"
-					class="w-12 rounded border border-input bg-card px-1 py-0.5"
-					value={column.source.chain_index}
-					oninput={setSourceChainIndex}
-				/>
-			</label>
+			<!-- chain_index only means something for a `chains` row source (it picks
+			     which chain step the column reads); the schema rejects != 0 for any
+			     other row source, so don't offer it there. -->
+			{#if rowSource.kind === 'chains'}
+				<label
+					class="flex items-center gap-1"
+					title="Which step of the row's chain this column reads (0 = the chain's first element)"
+				>
+					chain step
+					<input
+						type="number"
+						min="0"
+						class="w-12 rounded border border-input bg-card px-1 py-0.5"
+						value={column.source.chain_index}
+						oninput={setSourceChainIndex}
+					/>
+				</label>
+			{/if}
 		{:else}
 			<select
 				aria-label="Source column"
@@ -179,13 +209,16 @@
 			{/if}
 		</div>
 		<label
-			class="flex items-center gap-1"
-			title="One row per property value instead of listing them all in one cell"
+			class="flex items-center gap-1 {splitDisabled ? 'opacity-50' : ''}"
+			title={splitDisabled
+				? 'This property is single-valued for the scoped types — there are no multiple values to split'
+				: 'One row per property value instead of listing them all in one cell'}
 		>
 			<input
 				type="checkbox"
 				aria-label="Split multiple values in multiple rows"
 				checked={column.mode === 'expand'}
+				disabled={splitDisabled}
 				onchange={setSplit}
 			/>
 			Split multiple values in multiple rows

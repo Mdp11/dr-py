@@ -5,7 +5,9 @@
 		ensureElement,
 		getCachedElements,
 		getCachedRelationships,
+		getMissingElementIds,
 		getSelection,
+		isTempId,
 		select
 	} from '$lib/state';
 	import { deleteLock } from '$lib/state/edit-gate';
@@ -31,6 +33,16 @@
 		}
 		return relationships.get(selection.id) ?? null;
 	});
+
+	// An uncached element selection is LOADING until the cache-or-fetch settles:
+	// only a confirmed miss (404 / deleted — tracked in the missing-ids set) or
+	// an uncached temp id (the server never heard of it) is truly "not found".
+	const loading = $derived(
+		entity === null &&
+			selection?.kind === 'element' &&
+			!getMissingElementIds().has(selection.id) &&
+			!isTempId(selection.id)
+	);
 
 	$effect(() => {
 		if (entity !== null && selection?.kind === 'relationship') {
@@ -96,6 +108,14 @@
 	<div class="flex h-full flex-col items-center justify-center gap-1 px-4 text-center">
 		<p class="font-display text-base font-light text-muted-foreground">No element selected</p>
 		<p class="text-xs text-muted-foreground/70">Select an entity from the tree or use search.</p>
+	</div>
+{:else if loading}
+	<div data-testid="detail-loading" class="flex flex-col gap-3 p-4" aria-busy="true">
+		<span class="h-3 w-20 animate-pulse rounded bg-muted"></span>
+		<span class="h-6 w-48 animate-pulse rounded bg-muted"></span>
+		<span class="h-4 w-full animate-pulse rounded bg-muted"></span>
+		<span class="h-4 w-3/4 animate-pulse rounded bg-muted"></span>
+		<span class="h-4 w-5/6 animate-pulse rounded bg-muted"></span>
 	</div>
 {:else if entity === null}
 	<div class="flex h-full flex-col items-center justify-center gap-1 px-4 text-center">

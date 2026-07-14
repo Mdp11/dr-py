@@ -233,6 +233,18 @@ test('lazy loads rows while scrolling a large scope table', async ({ page }) => 
 	const tabpanel = page.getByRole('tabpanel');
 	const grid = tabpanel.getByTestId('table-grid');
 	await expect(grid).toBeVisible({ timeout: 15_000 });
+
+	// A new table opens EMPTY (no scope yet): pick "all elements" explicitly via
+	// the settings popup's scope picker (Select all types) to get the large scope.
+	await expect(tabpanel.getByTestId('table-empty-hint')).toBeVisible();
+	await tabpanel.getByTestId('table-settings-button').click();
+	const settings = page.getByRole('dialog', { name: 'Table settings' });
+	await expect(settings).toBeVisible();
+	await settings.getByText('any element', { exact: true }).click();
+	await page.getByRole('button', { name: 'Select all', exact: true }).click();
+	await page.keyboard.press('Escape'); // close the type picker popover
+	await page.keyboard.press('Escape'); // close the settings dialog
+	await expect(settings).toBeHidden();
 	await expect(tabpanel.getByTestId('table-row').first()).toBeVisible({ timeout: 15_000 });
 
 	// Sized for the whole table although only the first chunk is loaded

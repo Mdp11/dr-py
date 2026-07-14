@@ -58,6 +58,9 @@ class RelationshipStep(BaseModel):
     direction: Literal["out", "in", "either"] = "out"
     target_types: list[str] = Field(default_factory=list)
     children: list["StepItem"] = Field(default_factory=list)
+    #: free-form user note explaining the step's intent (UI-only; the
+    #: evaluator ignores it).
+    comment: Optional[str] = None
 
     @model_validator(mode="after")
     def _v2_is_linear(self) -> "RelationshipStep":
@@ -76,6 +79,9 @@ class FilterStep(BaseModel):
 
     kind: Literal["filter"] = "filter"
     criteria: list[Criterion] = Field(default_factory=list)
+    #: free-form user note explaining the step's intent (UI-only; the
+    #: evaluator ignores it).
+    comment: Optional[str] = None
 
 
 StepItem = Annotated[Union[RelationshipStep, FilterStep], Field(discriminator="kind")]
@@ -84,6 +90,9 @@ StepItem = Annotated[Union[RelationshipStep, FilterStep], Field(discriminator="k
 class PathNavigation(BaseModel):
     kind: Literal["path"]
     schema_version: int = SCHEMA_VERSION
+    #: user-chosen display name; None keeps the UI's automatic lettering
+    #: ("Path A", "Path B", ...). UI-only — the evaluator ignores it.
+    name: Optional[str] = None
     start: "StartNode"
     steps: list[StepItem] = Field(default_factory=list)
     #: cycle guard: when True (default, prior behavior), a chain skips any

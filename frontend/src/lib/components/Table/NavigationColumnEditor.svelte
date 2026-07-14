@@ -25,7 +25,7 @@
 	} from '$lib/state';
 	import { columnLabel } from '$lib/table/columns';
 	import { emptyRowPath } from '$lib/navigation/tree';
-	import type { Column, NavigationDefinition } from '$lib/api/types';
+	import type { Column, NavigationDefinition, RowSource } from '$lib/api/types';
 	import NavigationNode from '../Navigation/NavigationNode.svelte';
 
 	type NavColumn = Extract<Column, { kind: 'navigation' }>;
@@ -34,12 +34,16 @@
 		column,
 		columnIndex,
 		columns,
+		rowSource = null,
 		sampleRowElementId = null,
 		onChange
 	}: {
 		column: NavColumn;
 		columnIndex: number;
 		columns: Column[];
+		/** The hosting table's row source — gates the chain-step input (only a
+		 * `chains` row source has chain slots to pick from). */
+		rowSource?: RowSource | null;
 		/** The hosting table's first row element — binds row-rooted previews.
 		 * Null (no rows) shows the "no row to preview against" hint. */
 		sampleRowElementId?: string | null;
@@ -228,15 +232,24 @@
 			<option value="column" disabled={priorColumns.length === 0}>Earlier column</option>
 		</select>
 		{#if column.source.kind === 'row'}
-			<label class="flex items-center gap-1">
-				chain
-				<input
-					type="number"
-					class="w-12 rounded border border-input bg-card px-1 py-0.5"
-					value={column.source.chain_index}
-					oninput={setSourceChainIndex}
-				/>
-			</label>
+			<!-- chain_index only means something for a `chains` row source (it picks
+			     which chain step the column reads); the schema rejects != 0 for any
+			     other row source, so don't offer it there. -->
+			{#if rowSource?.kind === 'chains'}
+				<label
+					class="flex items-center gap-1"
+					title="Which step of the row's chain this column reads (0 = the chain's first element)"
+				>
+					chain step
+					<input
+						type="number"
+						min="0"
+						class="w-12 rounded border border-input bg-card px-1 py-0.5"
+						value={column.source.chain_index}
+						oninput={setSourceChainIndex}
+					/>
+				</label>
+			{/if}
 		{:else}
 			<select
 				aria-label="Source column"

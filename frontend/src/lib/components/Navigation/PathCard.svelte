@@ -5,6 +5,7 @@
 	// and — only when this path is a combination's operand — the feeds chip
 	// and move/remove toolbar the parent hands down via `chrome`).
 	import { untrack } from 'svelte';
+	import { ChevronDown, ChevronRight, Pencil } from '@lucide/svelte';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import {
 		applyStructuralEdit,
@@ -26,6 +27,7 @@
 		insertNavigationEdit,
 		insertRefEdit,
 		moveOperandEdit,
+		nodeLabel,
 		pathKey,
 		precedingTargetTypes,
 		readElementStart,
@@ -88,6 +90,28 @@
 	});
 
 	let libraryOpen = $state(false);
+
+	// UI-only disclosure: a collapsed card keeps its header (title, status,
+	// chips) plus a one-line summary and hides the editing body. Local state —
+	// deliberately NOT the store's `_expanded` set, which tracks node
+	// VISIBILITY for preview auto-runs (see navigation-editor.svelte.ts), so
+	// previews/status stay live while collapsed.
+	let collapsed = $state(false);
+
+	// Inline rename: the user-chosen name overrides the automatic "Path A"
+	// lettering (clearing it restores the letter — `name: null`).
+	let renaming = $state(false);
+	let renameEl = $state<HTMLInputElement | null>(null);
+	$effect(() => {
+		if (renaming) renameEl?.focus();
+	});
+	function commitRename(value: string): void {
+		if (!renaming) return; // Escape already cancelled; ignore the trailing blur
+		renaming = false;
+		const trimmed = value.trim();
+		if ((node.name ?? '') === trimmed || (!node.name && trimmed === '')) return;
+		patch({ name: trimmed === '' ? null : trimmed });
+	}
 
 	function patch(next: Partial<PathNavigation>) {
 		if (!draft) return;
@@ -213,8 +237,51 @@
 	onkeydown={onCardKeydown}
 >
 	<div class="flex flex-wrap items-center gap-2">
-		<span class="font-medium text-foreground/80">{title || 'Path'}</span>
+		<button
+			type="button"
+			data-testid="path-collapse-toggle"
+			aria-label={collapsed ? 'Expand path' : 'Collapse path'}
+			aria-expanded={!collapsed}
+			class="shrink-0 text-muted-foreground/70 transition-colors hover:text-foreground"
+			onclick={() => (collapsed = !collapsed)}
+		>
+			{#if collapsed}<ChevronRight class="size-3.5" />{:else}<ChevronDown class="size-3.5" />{/if}
+		</button>
+		{#if renaming}
+			<input
+				bind:this={renameEl}
+				data-testid="path-name-input"
+				aria-label="Path name"
+				class="w-40 rounded border border-input bg-card px-1.5 py-0.5 text-xs"
+				placeholder={title || 'Path'}
+				value={node.name ?? ''}
+				onblur={(e) => commitRename(e.currentTarget.value)}
+				onkeydown={(e) => {
+					if (e.key === 'Enter') commitRename(e.currentTarget.value);
+					else if (e.key === 'Escape') renaming = false;
+				}}
+			/>
+		{:else}
+			<span class="font-medium text-foreground/80">{title || 'Path'}</span>
+			{#if editable}
+				<button
+					type="button"
+					data-testid="path-rename-button"
+					aria-label="Rename path"
+					title="Rename this path (empty restores the automatic name)"
+					class="shrink-0 text-muted-foreground/50 transition-colors hover:text-foreground"
+					onclick={() => (renaming = true)}
+				>
+					<Pencil class="size-3" />
+				</button>
+			{/if}
+		{/if}
 		<StatusChip {tabId} {path} />
+		{#if collapsed}
+			<span class="min-w-0 truncate text-muted-foreground/70" title={nodeLabel(node)}>
+				{nodeLabel(node)}
+			</span>
+		{/if}
 		{#if chrome?.isBase}
 			<span
 				data-testid="base-badge"
@@ -241,171 +308,173 @@
 		{/if}
 	</div>
 
-	<div class="relative space-y-1">
-		<span class="pointer-events-none absolute top-2 bottom-2 left-[9px] w-px bg-border"></span>
-		<div class="relative flex items-baseline gap-2.5 py-0.5">
-			<ChainBadge value={0} tone="start" />
-			<div class="flex min-h-[22px] flex-1 flex-wrap items-center gap-1.5">
-				<span class="text-muted-foreground">Start from</span>
-				<select
-					aria-label="Start mode"
-					disabled={!editable}
-					value={startMode}
-					onchange={(e) => setStartMode(e.currentTarget.value as StartMode)}
-					class="rounded border border-input bg-card px-1 py-0.5"
-				>
-					<option value="scope">all matching</option>
-					<option value="element">one element</option>
-					<option value="combine">a combination</option>
-					{#if rowStartAvailable || startMode === 'row'}
-						<option value="row">the row's element</option>
-					{/if}
-				</select>
-			</div>
-		</div>
-		{#if node.start.kind === 'row'}
-			<div class="relative pl-7">
-				<span class="text-muted-foreground italic">each row's element</span>
-			</div>
-		{:else if node.start.kind === 'scope'}
-			{#if startMode === 'element'}
-				<div class="relative pl-7">
-					<ElementStartPicker
-						value={readElementStart(node.start)}
-						onPick={(id) => patch({ start: elementStartScope(id) })}
-					/>
+	{#if !collapsed}
+		<div class="relative space-y-1">
+			<span class="pointer-events-none absolute top-2 bottom-2 left-[9px] w-px bg-border"></span>
+			<div class="relative flex items-baseline gap-2.5 py-0.5">
+				<ChainBadge value={0} tone="start" />
+				<div class="flex min-h-[22px] flex-1 flex-wrap items-center gap-1.5">
+					<span class="text-muted-foreground">Start from</span>
+					<select
+						aria-label="Start mode"
+						disabled={!editable}
+						value={startMode}
+						onchange={(e) => setStartMode(e.currentTarget.value as StartMode)}
+						class="rounded border border-input bg-card px-1 py-0.5"
+					>
+						<option value="scope">all matching</option>
+						<option value="element">one element</option>
+						<option value="combine">a combination</option>
+						{#if rowStartAvailable || startMode === 'row'}
+							<option value="row">the row's element</option>
+						{/if}
+					</select>
 				</div>
-			{:else}
+			</div>
+			{#if node.start.kind === 'row'}
 				<div class="relative pl-7">
-					<ScopeEditor scope={node.start} onChange={(s: NavScope) => patch({ start: s })} />
+					<span class="text-muted-foreground italic">each row's element</span>
+				</div>
+			{:else if node.start.kind === 'scope'}
+				{#if startMode === 'element'}
+					<div class="relative pl-7">
+						<ElementStartPicker
+							value={readElementStart(node.start)}
+							onPick={(id) => patch({ start: elementStartScope(id) })}
+						/>
+					</div>
+				{:else}
+					<div class="relative pl-7">
+						<ScopeEditor scope={node.start} onChange={(s: NavScope) => patch({ start: s })} />
+					</div>
+				{/if}
+			{:else if node.start.kind === 'set_op'}
+				<div class="relative pl-7">
+					<NavigationNode {tabId} path={[...path, 'start']} />
 				</div>
 			{/if}
-		{:else if node.start.kind === 'set_op'}
-			<div class="relative pl-7">
-				<NavigationNode {tabId} path={[...path, 'start']} />
+			{#each node.steps as step, i (i)}
+				{#if step.kind === 'relationship'}
+					<RelationshipStepRow
+						step={step as NavRelationshipStep}
+						index={i}
+						column={columnFor(i)}
+						sourceTypes={sourceTypesFor(i)}
+						onChange={setStep}
+						onRemove={removeStep}
+					/>
+				{:else}
+					<FilterStepRow
+						step={step as NavFilterStep}
+						index={i}
+						propertyNames={propertyNamesFor(i)}
+						onChange={setStep}
+						onRemove={removeStep}
+					/>
+				{/if}
+			{/each}
+		</div>
+
+		{#if editable}
+			<div class="flex items-center gap-2 pl-7">
+				<button
+					type="button"
+					class="rounded border border-dashed border-input px-2 py-1 text-info/90 transition-colors hover:border-ring hover:text-info"
+					onclick={addRelationshipStep}
+				>
+					+ Follow a relationship
+				</button>
+				<button
+					type="button"
+					class="rounded border border-dashed border-input px-2 py-1 text-info/90 transition-colors hover:border-ring hover:text-info"
+					onclick={addFilterStep}
+				>
+					+ Keep only…
+				</button>
 			</div>
 		{/if}
-		{#each node.steps as step, i (i)}
-			{#if step.kind === 'relationship'}
-				<RelationshipStepRow
-					step={step as NavRelationshipStep}
-					index={i}
-					column={columnFor(i)}
-					sourceTypes={sourceTypesFor(i)}
-					onChange={setStep}
-					onRemove={removeStep}
+
+		{#if editable}
+			<div class="flex items-center gap-3 border-t border-border pt-2">
+				<DropdownMenu.Root>
+					<DropdownMenu.Trigger class="text-info/90 transition-colors hover:text-info">
+						Combine with… ▾
+					</DropdownMenu.Trigger>
+					<DropdownMenu.Content align="start" class="w-72">
+						<DropdownMenu.Item
+							class="flex flex-col items-start gap-0.5 py-1.5"
+							onSelect={() => structural((r) => insertNavigationEdit(r, path))}
+						>
+							<button
+								type="button"
+								tabindex="-1"
+								class="pointer-events-none text-left text-foreground">A new path</button
+							>
+							<span class="block text-[11px] text-muted-foreground/70">
+								Turns this into a Union of this path + a new empty one
+							</span>
+						</DropdownMenu.Item>
+						<DropdownMenu.Item
+							class="flex flex-col items-start gap-0.5 py-1.5"
+							onSelect={() => (libraryOpen = true)}
+						>
+							<button
+								type="button"
+								tabindex="-1"
+								class="pointer-events-none text-left text-foreground">A saved navigation…</button
+							>
+							<span class="block text-[11px] text-muted-foreground/70">
+								Turns this into a Union of this path + a link to a saved navigation
+							</span>
+						</DropdownMenu.Item>
+						<DropdownMenu.Item
+							class="flex flex-col items-start gap-0.5 py-1.5"
+							onSelect={() => structural((r) => insertGroupEdit(r, path))}
+						>
+							<button
+								type="button"
+								tabindex="-1"
+								class="pointer-events-none text-left text-foreground">A nested combination</button
+							>
+							<span class="block text-[11px] text-muted-foreground/70">
+								Turns this into a Union of this path + a nested combination
+							</span>
+						</DropdownMenu.Item>
+					</DropdownMenu.Content>
+				</DropdownMenu.Root>
+				<StereotypePicker
+					mode="create"
+					names={navHeaders.map((h) => h.name)}
+					onPick={(name) => {
+						const h = navHeaders.find((x) => x.name === name);
+						if (h) structural((r) => insertRefEdit(r, path, h.id));
+					}}
+					open={libraryOpen}
+					onOpenChange={(v) => (libraryOpen = v)}
+					searchPlaceholder="Add saved navigation…"
+				>
+					{#snippet trigger()}<span class="inline-block h-0 w-0"></span>{/snippet}
+				</StereotypePicker>
+			</div>
+		{/if}
+
+		<details>
+			<summary
+				class="cursor-pointer text-muted-foreground/70 select-none transition-colors hover:text-muted-foreground"
+				>Options</summary
+			>
+			<label
+				class="mt-1.5 flex items-center gap-1.5 pl-2 text-muted-foreground"
+				title="When on, a chain never revisits an element it already contains"
+			>
+				<input
+					type="checkbox"
+					checked={node.exclude_visited}
+					disabled={!editable}
+					onchange={(e) => patch({ exclude_visited: e.currentTarget.checked })}
 				/>
-			{:else}
-				<FilterStepRow
-					step={step as NavFilterStep}
-					index={i}
-					propertyNames={propertyNamesFor(i)}
-					onChange={setStep}
-					onRemove={removeStep}
-				/>
-			{/if}
-		{/each}
-	</div>
-
-	{#if editable}
-		<div class="flex items-center gap-2 pl-7">
-			<button
-				type="button"
-				class="rounded border border-dashed border-input px-2 py-1 text-info/90 transition-colors hover:border-ring hover:text-info"
-				onclick={addRelationshipStep}
-			>
-				+ Follow a relationship
-			</button>
-			<button
-				type="button"
-				class="rounded border border-dashed border-input px-2 py-1 text-info/90 transition-colors hover:border-ring hover:text-info"
-				onclick={addFilterStep}
-			>
-				+ Keep only…
-			</button>
-		</div>
+				Exclude visited elements
+			</label>
+		</details>
 	{/if}
-
-	{#if editable}
-		<div class="flex items-center gap-3 border-t border-border pt-2">
-			<DropdownMenu.Root>
-				<DropdownMenu.Trigger class="text-info/90 transition-colors hover:text-info">
-					Combine with… ▾
-				</DropdownMenu.Trigger>
-				<DropdownMenu.Content align="start" class="w-72">
-					<DropdownMenu.Item
-						class="flex flex-col items-start gap-0.5 py-1.5"
-						onSelect={() => structural((r) => insertNavigationEdit(r, path))}
-					>
-						<button
-							type="button"
-							tabindex="-1"
-							class="pointer-events-none text-left text-foreground">A new path</button
-						>
-						<span class="block text-[11px] text-muted-foreground/70">
-							Turns this into a Union of this path + a new empty one
-						</span>
-					</DropdownMenu.Item>
-					<DropdownMenu.Item
-						class="flex flex-col items-start gap-0.5 py-1.5"
-						onSelect={() => (libraryOpen = true)}
-					>
-						<button
-							type="button"
-							tabindex="-1"
-							class="pointer-events-none text-left text-foreground">A saved navigation…</button
-						>
-						<span class="block text-[11px] text-muted-foreground/70">
-							Turns this into a Union of this path + a link to a saved navigation
-						</span>
-					</DropdownMenu.Item>
-					<DropdownMenu.Item
-						class="flex flex-col items-start gap-0.5 py-1.5"
-						onSelect={() => structural((r) => insertGroupEdit(r, path))}
-					>
-						<button
-							type="button"
-							tabindex="-1"
-							class="pointer-events-none text-left text-foreground">A nested combination</button
-						>
-						<span class="block text-[11px] text-muted-foreground/70">
-							Turns this into a Union of this path + a nested combination
-						</span>
-					</DropdownMenu.Item>
-				</DropdownMenu.Content>
-			</DropdownMenu.Root>
-			<StereotypePicker
-				mode="create"
-				names={navHeaders.map((h) => h.name)}
-				onPick={(name) => {
-					const h = navHeaders.find((x) => x.name === name);
-					if (h) structural((r) => insertRefEdit(r, path, h.id));
-				}}
-				open={libraryOpen}
-				onOpenChange={(v) => (libraryOpen = v)}
-				searchPlaceholder="Add saved navigation…"
-			>
-				{#snippet trigger()}<span class="inline-block h-0 w-0"></span>{/snippet}
-			</StereotypePicker>
-		</div>
-	{/if}
-
-	<details>
-		<summary
-			class="cursor-pointer text-muted-foreground/70 select-none transition-colors hover:text-muted-foreground"
-			>Options</summary
-		>
-		<label
-			class="mt-1.5 flex items-center gap-1.5 pl-2 text-muted-foreground"
-			title="When on, a chain never revisits an element it already contains"
-		>
-			<input
-				type="checkbox"
-				checked={node.exclude_visited}
-				disabled={!editable}
-				onchange={(e) => patch({ exclude_visited: e.currentTarget.checked })}
-			/>
-			Exclude visited elements
-		</label>
-	</details>
 </div>

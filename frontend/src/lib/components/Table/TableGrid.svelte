@@ -224,5 +224,12 @@
 		{#if loading}
 			<p class="p-2 text-xs text-muted-foreground/70">Loading…</p>
 		{/if}
+	{:else}
+		<!-- A brand-new table: never evaluated (see ensureTableDraft — the untyped
+		     default scope would show EVERY element, so it opens empty instead). -->
+		<p data-testid="table-empty-hint" class="p-4 text-xs text-muted-foreground/70">
+			This table is empty. Open <span class="font-medium">Settings</span> to choose its scope — the elements
+			(or navigation) its rows come from.
+		</p>
 	{/if}
 </div>

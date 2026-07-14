@@ -386,11 +386,15 @@ export interface NavRelationshipStep {
 	direction: NavDirection;
 	target_types: string[];
 	children: NavStepItem[];
+	/** Free-form user note explaining the step's intent (evaluator ignores it). */
+	comment?: string | null;
 }
 
 export interface NavFilterStep {
 	kind: 'filter';
 	criteria: unknown[]; // search Criterion objects; typed at the editor layer
+	/** Free-form user note explaining the step's intent (evaluator ignores it). */
+	comment?: string | null;
 }
 
 export type NavStepItem = NavRelationshipStep | NavFilterStep;
@@ -406,6 +410,9 @@ export interface NavRowStart {
 export interface PathNavigation {
 	kind: 'path';
 	schema_version: number;
+	/** User-chosen display name; null/absent keeps the automatic lettering
+	 * ("Path A", "Path B", ...). */
+	name?: string | null;
 	start: NavScope | SetExpression | NavRowStart;
 	steps: NavStepItem[];
 	// Cycle guard: when true (default), a chain never revisits an element
@@ -438,6 +445,9 @@ export const NavigationDefinitionSchema: z.ZodType<NavigationDefinition> = z.laz
 		z.object({
 			kind: z.literal('path'),
 			schema_version: z.number().int().default(2),
+			// z.object STRIPS undeclared keys — the user-chosen path name must be
+			// declared here or reopening a saved navigation would silently drop it.
+			name: z.string().nullable().optional(),
 			start: z.unknown(),
 			steps: z.array(z.unknown()).default([]),
 			// Old saved payloads predate this field; default matches the

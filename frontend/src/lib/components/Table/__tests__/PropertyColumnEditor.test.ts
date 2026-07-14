@@ -17,7 +17,11 @@ const MM = {
 			name: 'Block',
 			extends: null,
 			abstract: false,
-			properties: [{ name: 'mass', datatype: 'real' }],
+			properties: [
+				// zod-parsed metamodels always carry multiplicity (default '0..1')
+				{ name: 'mass', datatype: 'real', multiplicity: '0..1' },
+				{ name: 'tags', datatype: 'string', multiplicity: '0..*' }
+			],
 			keys: []
 		},
 		{
@@ -142,6 +146,82 @@ describe('PropertyColumnEditor', () => {
 			split.click();
 			flushSync();
 			expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ mode: 'expand' }));
+		} finally {
+			unmount(c);
+		}
+	});
+
+	function splitCheckbox(): HTMLInputElement {
+		return document.querySelector(
+			'input[aria-label="Split multiple values in multiple rows"]'
+		) as HTMLInputElement;
+	}
+
+	it('disables the split toggle when every scoped type declares the property single-valued', () => {
+		vi.spyOn(metamodelState, 'getMetamodel').mockReturnValue(MM as never);
+		const c = render(
+			propColumn('mass'),
+			{ kind: 'scope', types: ['Block'], criteria: [] },
+			vi.fn()
+		);
+		try {
+			expect(splitCheckbox().disabled).toBe(true);
+			expect(splitCheckbox().closest('label')?.title).toContain('single-valued');
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('keeps the split toggle enabled for a multi-valued property', () => {
+		vi.spyOn(metamodelState, 'getMetamodel').mockReturnValue(MM as never);
+		const c = render(
+			propColumn('tags'),
+			{ kind: 'scope', types: ['Block'], criteria: [] },
+			vi.fn()
+		);
+		try {
+			expect(splitCheckbox().disabled).toBe(false);
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('keeps the split toggle enabled when the source types are unknowable or the property is undeclared', () => {
+		vi.spyOn(metamodelState, 'getMetamodel').mockReturnValue(MM as never);
+		// chains row source: any element type can arrive → cannot prove single
+		const c1 = render(propColumn('mass'), { kind: 'chains', navigation: {} }, vi.fn());
+		try {
+			expect(splitCheckbox().disabled).toBe(false);
+		} finally {
+			unmount(c1);
+		}
+		document.body.innerHTML = '';
+		// undeclared property: instance data may still hold lists
+		const c2 = render(
+			propColumn('freeform'),
+			{ kind: 'scope', types: ['Block'], criteria: [] },
+			vi.fn()
+		);
+		try {
+			expect(splitCheckbox().disabled).toBe(false);
+		} finally {
+			unmount(c2);
+		}
+	});
+
+	it('an already-splitting single-valued column stays uncheckable (not locked on)', () => {
+		vi.spyOn(metamodelState, 'getMetamodel').mockReturnValue(MM as never);
+		const onChange = vi.fn();
+		const c = render(
+			{ ...propColumn('mass'), mode: 'expand' },
+			{ kind: 'scope', types: ['Block'], criteria: [] },
+			onChange
+		);
+		try {
+			expect(splitCheckbox().disabled).toBe(false);
+			splitCheckbox().click();
+			flushSync();
+			expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ mode: 'collapse' }));
 		} finally {
 			unmount(c);
 		}

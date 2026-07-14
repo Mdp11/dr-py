@@ -42,6 +42,34 @@ def test_relationship_step_parses_with_defaults() -> None:
     assert step.children == []
 
 
+def test_path_name_and_step_comments_round_trip() -> None:
+    # UI-only annotations (a user-chosen path name, per-step notes) must
+    # survive validate -> dump -> validate so saved artifacts keep them.
+    doc = {
+        "kind": "path",
+        "name": "Buildings sweep",
+        "start": {"kind": "scope", "types": ["Block"]},
+        "steps": [
+            {**_rel(), "comment": "hop to owned parts"},
+            {"kind": "filter", "criteria": [], "comment": "keep the active ones"},
+        ],
+    }
+    nav = NAVIGATION_ADAPTER.validate_python(doc)
+    assert isinstance(nav, PathNavigation)
+    assert nav.name == "Buildings sweep"
+    assert isinstance(nav.steps[0], RelationshipStep)
+    assert nav.steps[0].comment == "hop to owned parts"
+    assert isinstance(nav.steps[1], FilterStep)
+    assert nav.steps[1].comment == "keep the active ones"
+    again = NAVIGATION_ADAPTER.validate_json(NAVIGATION_ADAPTER.dump_json(nav))
+    assert again == nav
+    # old payloads (no name/comment) still parse, defaulting to None
+    bare = NAVIGATION_ADAPTER.validate_python(_path())
+    assert isinstance(bare, PathNavigation)
+    assert bare.name is None
+    assert bare.steps[0].comment is None
+
+
 def test_relationship_step_carries_target_types() -> None:
     nav = NAVIGATION_ADAPTER.validate_python(
         {"kind": "path", "start": {"kind": "scope"},

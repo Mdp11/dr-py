@@ -36,7 +36,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from data_rover.core.metamodel.multiplicity import Multiplicity
 from data_rover.core.metamodel.schema import Metamodel
 from data_rover.core.model.model import Model
 
@@ -82,38 +81,28 @@ class ElementsCell:
 Cell = ElementCell | ValueCell | ValuesCell | ElementsCell
 
 
-def property_multiplicity_is_many(mm: Metamodel, type_name: str, prop: str) -> bool:
-    """True iff `type_name` declares `prop` with an upper bound != 1.
-
-    Undeclared properties are treated as "not many" (single-arity default) —
-    callers that care about declaration at all use `_prop_present` first.
-    """
-    for pd in mm.effective_element_properties(type_name):
-        if pd.name == prop:
-            return not Multiplicity.parse(pd.multiplicity).is_single
-    return False
-
-
 def _prop_present(mm: Metamodel, type_name: str, prop: str) -> bool:
     return any(pd.name == prop for pd in mm.effective_element_properties(type_name))
 
 
 def expand_property_values(
-    mm: Metamodel, model: Model, col: PropertyColumn, roots: list[str]
+    model: Model, col: PropertyColumn, roots: list[str]
 ) -> list[Binding]:
     """Values an `expand` property column contributes for ONE row's roots.
 
     The schema guarantees an expand property column has a single-binding
     source, so `roots` holds at most one element id here.
+
+    A single-valued (or undeclared) property is NOT an error: its scalar value
+    expands to exactly one row, so mixed scopes (some types multi-valued, some
+    single) and stale configs keep evaluating instead of 422-ing the whole
+    table. The UI additionally greys the split toggle out when it can prove no
+    scoped type is multi-valued — this is the tolerant evaluation half.
     """
     if not roots:
         return []
     eid = roots[0]
     el = model.elements[eid]
-    if not property_multiplicity_is_many(mm, el.type_name, col.name):
-        raise ValueError(
-            f"property {col.name!r} on {el.type_name} is not multi-valued; cannot expand"
-        )
     raw = el.properties.get(col.name)
     if raw is None:
         return []

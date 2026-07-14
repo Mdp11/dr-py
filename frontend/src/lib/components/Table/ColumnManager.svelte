@@ -215,6 +215,7 @@
 							column={col}
 							columnIndex={i}
 							columns={defn.columns}
+							rowSource={defn.row_source}
 							{sampleRowElementId}
 							onChange={(next) => onColumnChange(i, next)}
 						/>

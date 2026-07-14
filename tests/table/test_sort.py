@@ -150,6 +150,34 @@ def test_expand_navigation_column_sorts_per_row_own_value():
     assert root_rows == [(ids["root"], ids["leaf"]), (ids["root"], ids["mid"])]
 
 
+def test_element_column_sort_uses_case_insensitive_name_property():
+    # Regression: models whose name property is cased `Name` (importer output,
+    # legacy metamodels) displayed names in the grid (the frontend lookup is
+    # case-insensitive) but SORTED by element id — the comparator must use the
+    # shared `core.model.naming.display_name` lookup, not a literal `"name"`.
+    mm = Metamodel(
+        elements=[
+            ElementType(
+                name="Block",
+                properties=[PropertyDef(name="Name", datatype="string")],
+            ),
+        ],
+        relationships=[],
+    )
+    model = Model(mm)
+    for label in ["Zulu", "alpha", "Mike"]:
+        el = model.create_element("Block")
+        model.set_property(el, "Name", label)
+    defn = TABLE_ADAPTER.validate_python({
+        "row_source": {"kind": "scope", "types": ["Block"]},
+        "columns": [{"kind": "element", "source": {"kind": "row"}}],
+    })
+    keys, _ = build_rows(mm, model, defn)
+    asc = order_rows(mm, model, defn, keys, SortSpec(column=0, direction="asc"))
+    names = [model.elements[str(k[0])].properties["Name"] for k in asc]
+    assert names == ["alpha", "Mike", "Zulu"]  # casefolded Name order, not id order
+
+
 def test_sort_none_returns_input_order_unchanged():
     mm = _mm()
     model, ids = _fixture(mm)

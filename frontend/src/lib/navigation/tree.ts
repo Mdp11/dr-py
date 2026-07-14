@@ -452,6 +452,10 @@ function pathLetter(i: number): string {
  * `Combination` when nested) so the dock picker reads exactly like the mock;
  * ref operands are emitted in place (they carry no definition, so `nodeAt`
  * cannot address them — that's what `kind: 'ref'` is for).
+ *
+ * A path's user-chosen `name` overrides its automatic letter, but the letter
+ * counter still advances past it — renaming Path A must not shift every later
+ * sibling's letter (Path B stays Path B).
  */
 export interface NodeEntry {
 	path: NodePath;
@@ -472,10 +476,11 @@ export function nodeEntries(
 	function visit(node: NavigationDefinition, path: NodePath, depth: number): void {
 		if (node.kind === 'path') {
 			if (node.start.kind === 'set_op') visit(node.start, [...path, 'start'], depth + 1);
+			const auto = lettered ? `Path ${pathLetter(letter++)}` : 'Path';
 			entries.push({
 				path,
 				kind: 'path',
-				title: lettered ? `Path ${pathLetter(letter++)}` : 'Path',
+				title: node.name?.trim() ? node.name.trim() : auto,
 				depth
 			});
 			return;

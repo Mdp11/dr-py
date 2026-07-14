@@ -70,6 +70,29 @@ def test_expand_navigation_column_cross_product():
     assert all(len(k) == 2 for k in part_keys)
 
 
+def test_expand_single_valued_property_yields_one_row_per_element():
+    # Regression: enabling "split into rows" on a single-valued property used to
+    # raise ("not multi-valued; cannot expand") and 422 the whole table. A
+    # scalar value now expands to exactly one row; elements without the value
+    # follow keep_empty as usual.
+    mm = _mm(); model, ids = _fixture()
+    defn = TABLE_ADAPTER.validate_python({
+        "row_source": {"kind": "scope", "types": ["Block"]},
+        "columns": [
+            {"kind": "element", "source": {"kind": "row"}},
+            # `name` is declared single-valued (default multiplicity) in _mm()
+            {"kind": "property", "source": {"kind": "row"}, "name": "name",
+             "mode": "expand"},
+        ],
+    })
+    keys, truncated = build_rows(mm, model, defn)
+    assert not truncated
+    assert len(keys) == len(ids)  # one row per element, not zero, not an error
+    by_root = {k[0]: k for k in keys}
+    for key, eid in ids.items():
+        assert by_root[eid][1] == model.elements[eid].properties["name"], key
+
+
 def test_expand_keep_empty_true_keeps_barren_row():
     mm = _mm(); model, ids = _fixture()
     leaf = ids["leaf"]  # a Block with no outgoing BlockHasPart

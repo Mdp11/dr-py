@@ -227,10 +227,12 @@ export async function ensureTableDraft(tabId: string): Promise<TableDraft> {
 			dirty: false
 		};
 		_drafts.set(tabId, draft);
-		// Kick the first load right away: the default definition (an untyped
-		// scope) is evaluable, so a brand-new table shows every element instead
-		// of an empty grid that only fills after the first settings edit.
-		void loadTablePage(tabId, 0);
+		// Deliberately NO first load: the default definition is an untyped scope,
+		// which evaluates to EVERY element — a brand-new table must open EMPTY
+		// instead (the grid shows a "choose a scope in Settings" hint). The first
+		// definition edit (updateTableDefinition) triggers the first evaluation;
+		// an explicit all-elements table stays reachable via the scope picker's
+		// "Select all"/"Deselect all".
 		return draft;
 	}
 	const id = tabId.slice('tbl:'.length);
@@ -245,6 +247,22 @@ export async function ensureTableDraft(tabId: string): Promise<TableDraft> {
 	_drafts.set(tabId, draft);
 	await loadTablePage(tabId, 0);
 	return draft;
+}
+
+/**
+ * What evaluate/export requests should evaluate: the artifact id ONLY while
+ * the draft is pristine (letting the backend reuse its per-artifact order
+ * cache), the INLINE definition otherwise. A dirty saved table MUST send its
+ * edited definition — evaluating by artifactId re-reads the SAVED payload, so
+ * every unsaved settings edit (scope change, new column, restored config)
+ * would be silently ignored and the grid would appear frozen until Save.
+ */
+function _evaluateSource(
+	draft: TableDraft
+): { definition: TableDefinition } | { artifactId: string } {
+	return draft.artifactId === null || draft.dirty
+		? { definition: draft.definition }
+		: { artifactId: draft.artifactId };
 }
 
 /** Install `page` as a FRESH sparse cache (drops any previously loaded rows). */
@@ -302,10 +320,7 @@ export async function loadTablePage(
 	_errors.delete(tabId);
 	_loading.set(tabId, true);
 	const sort = _sorts.get(tabId);
-	const args =
-		draft.artifactId === null
-			? { definition: draft.definition, offset, limit, sort }
-			: { artifactId: draft.artifactId, offset, limit, sort };
+	const args = { ..._evaluateSource(draft), offset, limit, sort };
 	try {
 		const page = await evaluateTable(args);
 		if (!isCurrent(tabId, gen)) return; // stale: edited/reloaded/closed mid-flight
@@ -362,10 +377,7 @@ async function fetchChunk(tabId: string, offset: number, gen: number): Promise<v
 	const draft = _drafts.get(tabId);
 	if (!draft) return;
 	const sort = _sorts.get(tabId);
-	const args =
-		draft.artifactId === null
-			? { definition: draft.definition, offset, limit: PAGE, sort }
-			: { artifactId: draft.artifactId, offset, limit: PAGE, sort };
+	const args = { ..._evaluateSource(draft), offset, limit: PAGE, sort };
 	try {
 		const page = await evaluateTable(args);
 		if (!isCurrent(tabId, gen)) return; // superseded by a reset/close mid-flight
@@ -522,11 +534,7 @@ export async function downloadTable(tabId: string): Promise<void> {
 	const draft = _drafts.get(tabId);
 	if (!draft) return;
 	const sort = _sorts.get(tabId);
-	const args =
-		draft.artifactId === null
-			? { definition: draft.definition, sort }
-			: { artifactId: draft.artifactId, sort };
-	const { blob, filename } = await exportTable(args);
+	const { blob, filename } = await exportTable({ ..._evaluateSource(draft), sort });
 	const url = URL.createObjectURL(blob);
 	const a = document.createElement('a');
 	a.href = url;
@@ -547,6 +555,10 @@ export async function downloadTable(tabId: string): Promise<void> {
  */
 export function handleTableModelRevChanged(): void {
 	for (const [tabId] of _drafts) {
+		// A tab that has never evaluated (no page, no error, no load in flight) is
+		// a brand-new table still waiting for its scope — a peer's commit must not
+		// surprise-fill it with every element.
+		if (!_pages.has(tabId) && !_errors.has(tabId) && !(_loading.get(tabId) ?? false)) continue;
 		const view = _viewRanges.get(tabId);
 		const start = view ? Math.floor(view.start / PAGE) * PAGE : 0;
 		const limit = view

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { SvelteSet } from 'svelte/reactivity';
-	import { Trash2 } from '@lucide/svelte';
+	import { MessageSquarePlus, MessageSquareText, Trash2 } from '@lucide/svelte';
 	import { getMetamodel } from '$lib/state';
 	import {
 		relationshipTypesFromScope,
@@ -74,6 +74,21 @@
 		onChange(index, { ...step, ...next });
 	}
 
+	// Per-step note: a free-form comment explaining the step's intent (part of
+	// the saved definition; the evaluator ignores it). Empty commits remove it.
+	let editingComment = $state(false);
+	let commentEl = $state<HTMLInputElement | null>(null);
+	$effect(() => {
+		if (editingComment) commentEl?.focus();
+	});
+	function commitComment(value: string): void {
+		if (!editingComment) return; // Escape already cancelled; ignore the trailing blur
+		editingComment = false;
+		const trimmed = value.trim();
+		if ((step.comment ?? '') === trimmed || (!step.comment && trimmed === '')) return;
+		patch({ comment: trimmed === '' ? null : trimmed });
+	}
+
 	function toggleTargetType(name: string): void {
 		// Ephemeral scratch set: built, mutated, and spread into the onChange
 		// payload within this call — never stored or read reactively.
@@ -140,13 +155,51 @@
 				</span>
 			{/snippet}
 		</StereotypePicker>
+		{#if !step.comment && !editingComment}
+			<button
+				type="button"
+				aria-label="Add step note"
+				title="Add a note explaining this step"
+				class="ml-auto text-muted-foreground/40 transition-colors hover:text-info"
+				onclick={() => (editingComment = true)}
+			>
+				<MessageSquarePlus class="size-3.5" />
+			</button>
+		{/if}
 		<button
 			type="button"
 			aria-label="Remove step"
-			class="ml-auto text-muted-foreground/70 transition-colors hover:text-destructive"
+			class="text-muted-foreground/70 transition-colors hover:text-destructive"
+			class:ml-auto={Boolean(step.comment) || editingComment}
 			onclick={() => onRemove(index)}
 		>
 			<Trash2 class="size-3.5" />
 		</button>
+		{#if editingComment}
+			<input
+				bind:this={commentEl}
+				data-testid="step-comment-input"
+				aria-label="Step note"
+				class="w-full rounded border border-input bg-card px-1.5 py-0.5 text-[11px]"
+				placeholder="Why this step? (Enter to save, empty to remove)"
+				value={step.comment ?? ''}
+				onblur={(e) => commitComment(e.currentTarget.value)}
+				onkeydown={(e) => {
+					if (e.key === 'Enter') commitComment(e.currentTarget.value);
+					else if (e.key === 'Escape') editingComment = false;
+				}}
+			/>
+		{:else if step.comment}
+			<button
+				type="button"
+				data-testid="step-comment"
+				title="Edit this note"
+				class="flex w-full items-start gap-1.5 text-left text-[11px] text-muted-foreground/80 italic transition-colors hover:text-foreground"
+				onclick={() => (editingComment = true)}
+			>
+				<MessageSquareText class="mt-0.5 size-3 shrink-0 text-info/70" />
+				<span class="min-w-0 break-words">{step.comment}</span>
+			</button>
+		{/if}
 	</div>
 </div>

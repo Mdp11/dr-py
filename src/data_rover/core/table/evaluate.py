@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 
 from data_rover.core.metamodel.schema import Metamodel
 from data_rover.core.model.model import Model
+from data_rover.core.model.naming import display_name
 from data_rover.core.navigation.evaluate import EvalLimits, evaluate
 
 from .schema import (
@@ -266,7 +267,7 @@ def _expand_values(
     # elements, _expand_slot_of, ...), so a module-level import here would cycle.
     from .cells import expand_property_values
 
-    return expand_property_values(mm, model, col, roots), False
+    return expand_property_values(model, col, roots), False
 
 
 # ---- sorting (Task 6) --------------------------------------------------------
@@ -296,11 +297,12 @@ class SortSpec:
 
 
 def _display_name(model: Model, eid: str) -> str:
-    """The label used to order elements: their `name` property if set, else
-    their id (so ordering is still total and deterministic)."""
-    el = model.elements[eid]
-    name = el.properties.get("name")
-    return str(name) if name is not None else el.id
+    """The label used to order elements: the shared case-insensitive `name`
+    property lookup (``core.model.naming.display_name``), else their id (so
+    ordering is still total and deterministic). Must stay in lock-step with the
+    frontend's ``elementDisplayName`` — sorting by a label the grid does not
+    display reads as a broken sort."""
+    return display_name(model.elements[eid])
 
 
 def _property_is_numeric(

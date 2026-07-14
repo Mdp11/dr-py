@@ -92,7 +92,10 @@ def test_evaluate_inline_with_sort(client: TestClient) -> None:
     assert r.status_code == 200, r.text
 
 
-def test_bad_expand_on_scalar_property_422(client: TestClient) -> None:
+def test_expand_on_scalar_property_yields_one_row_each(client: TestClient) -> None:
+    # Splitting a single-valued property is tolerated (one row per element),
+    # not a 422 — the whole table must keep evaluating (see cells.py's
+    # expand_property_values docstring).
     _bootstrap_model(client)
     r = client.post(
         papi("/tables/evaluate"),
@@ -111,7 +114,11 @@ def test_bad_expand_on_scalar_property_422(client: TestClient) -> None:
         },
         headers=AUTH_HEADERS,
     )
-    assert r.status_code == 422
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["total"] == 3  # root, p1, p2 — one row each, scalar mass
+    values = [row["cells"][0]["value"] for row in body["rows"]]
+    assert values == [1.0, 1.0, 1.0]
 
 
 def test_cache_hit_second_page(client: TestClient) -> None:
