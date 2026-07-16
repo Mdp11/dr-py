@@ -216,6 +216,137 @@ describe('TableView header edit / add-column focus', () => {
 	});
 });
 
+describe('TableView settings dialog sizing', () => {
+	// Opening the dialog unfocused mounts RowSourceEditor -> ScopeEditor for
+	// real (see seedTwoColumnPage above), which needs `types`/`criteria`
+	// present on a scope row source.
+	// dlgW/dlgH are seeded from window.innerWidth/innerHeight when TableView is
+	// created, so the viewport must be sized before mount, not before the
+	// click that opens the dialog.
+	function renderWithSettingsOpen(tabId: string): ReturnType<typeof render> {
+		window.innerWidth = 1920;
+		window.innerHeight = 1080;
+		(h.draft as { definition: { row_source: unknown; columns: unknown[] } }).definition = {
+			row_source: { kind: 'scope', types: [], criteria: [] },
+			columns: []
+		};
+		const c = render(tabId);
+		const settingsBtn = document.querySelector(
+			'[data-testid="table-settings-button"]'
+		) as HTMLElement;
+		settingsBtn.click();
+		flushSync();
+		return c;
+	}
+
+	// Use a roomy viewport so the max-width/max-height caps (98%/95% of the
+	// viewport) don't clip the deltas this suite asserts on — the happy-dom
+	// default (1024x768) leaves too little headroom above the capped initial
+	// size (min(1280, 92vw) x 85vh).
+	const origInnerWidth = window.innerWidth;
+	const origInnerHeight = window.innerHeight;
+
+	afterEach(() => {
+		(h.draft as { definition: { row_source: unknown; columns: unknown[] } }).definition = {
+			row_source: { kind: 'scope', scope: {} },
+			columns: []
+		};
+		window.innerWidth = origInnerWidth;
+		window.innerHeight = origInnerHeight;
+	});
+
+	it('opens with an inline width/height style and a resize handle on the dialog frame', () => {
+		const c = renderWithSettingsOpen('tbl:draft:1');
+		try {
+			const dialog = document.querySelector('[data-testid="table-settings-dialog"]') as HTMLElement;
+			expect(dialog).not.toBeNull();
+			expect(dialog.style.width).not.toBe('');
+			expect(dialog.style.height).not.toBe('');
+			const handle = document.querySelector(
+				'[data-testid="settings-resize-handle"]'
+			) as HTMLElement;
+			expect(handle).not.toBeNull();
+			// The grip must sit on the dialog frame, not inside the scrollable
+			// body — it's a sibling of the scroll container, not nested in it.
+			expect(handle.closest('.overflow-y-auto')).toBeNull();
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('dragging the resize handle grows width/height by 2x the pointer delta', () => {
+		const c = renderWithSettingsOpen('tbl:draft:1');
+		try {
+			const dialog = document.querySelector('[data-testid="table-settings-dialog"]') as HTMLElement;
+			const handle = document.querySelector(
+				'[data-testid="settings-resize-handle"]'
+			) as HTMLElement;
+			const startW = parseFloat(dialog.style.width);
+			const startH = parseFloat(dialog.style.height);
+			handle.dispatchEvent(
+				new PointerEvent('pointerdown', {
+					bubbles: true,
+					button: 0,
+					pointerId: 1,
+					clientX: 0,
+					clientY: 0
+				})
+			);
+			flushSync();
+			handle.dispatchEvent(
+				new PointerEvent('pointermove', {
+					bubbles: true,
+					pointerId: 1,
+					clientX: 50,
+					clientY: 40
+				})
+			);
+			flushSync();
+			expect(parseFloat(dialog.style.width)).toBeCloseTo(startW + 100);
+			expect(parseFloat(dialog.style.height)).toBeCloseTo(startH + 80);
+			handle.dispatchEvent(
+				new PointerEvent('pointerup', { bubbles: true, pointerId: 1, clientX: 50, clientY: 40 })
+			);
+			flushSync();
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('clamps the dialog to a minimum width/height', () => {
+		const c = renderWithSettingsOpen('tbl:draft:1');
+		try {
+			const dialog = document.querySelector('[data-testid="table-settings-dialog"]') as HTMLElement;
+			const handle = document.querySelector(
+				'[data-testid="settings-resize-handle"]'
+			) as HTMLElement;
+			handle.dispatchEvent(
+				new PointerEvent('pointerdown', {
+					bubbles: true,
+					button: 0,
+					pointerId: 1,
+					clientX: 0,
+					clientY: 0
+				})
+			);
+			flushSync();
+			handle.dispatchEvent(
+				new PointerEvent('pointermove', {
+					bubbles: true,
+					pointerId: 1,
+					clientX: -5000,
+					clientY: -5000
+				})
+			);
+			flushSync();
+			expect(parseFloat(dialog.style.width)).toBe(640);
+			expect(parseFloat(dialog.style.height)).toBe(400);
+		} finally {
+			unmount(c);
+		}
+	});
+});
+
 describe('TableView row count', () => {
 	afterEach(() => {
 		h.page = undefined;

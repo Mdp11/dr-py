@@ -43,6 +43,38 @@
 	// only that column's card (see ColumnManager's focusIndex).
 	let settingsFocus = $state<number | null>(null);
 
+	// The settings dialog is a working surface, not an alert: open big
+	// (most of the viewport) and let the user resize from the corner. The
+	// Dialog primitive centers via translate(-50%,-50%), so width/height are
+	// controlled here and deltas are doubled to keep the grip under the cursor.
+	const DLG_MIN_W = 640;
+	const DLG_MIN_H = 400;
+	let dlgW = $state(
+		Math.min(1280, (typeof window === 'undefined' ? 1280 : window.innerWidth) * 0.92)
+	);
+	let dlgH = $state((typeof window === 'undefined' ? 720 : window.innerHeight) * 0.85);
+	let dlgResize: { x: number; y: number; w: number; h: number } | null = null;
+	function onDlgResizeStart(e: PointerEvent): void {
+		if (e.button !== 0) return;
+		dlgResize = { x: e.clientX, y: e.clientY, w: dlgW, h: dlgH };
+		(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+		e.preventDefault();
+	}
+	function onDlgResizeMove(e: PointerEvent): void {
+		if (!dlgResize) return;
+		dlgW = Math.min(
+			Math.max(DLG_MIN_W, dlgResize.w + 2 * (e.clientX - dlgResize.x)),
+			window.innerWidth * 0.98
+		);
+		dlgH = Math.min(
+			Math.max(DLG_MIN_H, dlgResize.h + 2 * (e.clientY - dlgResize.y)),
+			window.innerHeight * 0.95
+		);
+	}
+	function onDlgResizeEnd(): void {
+		dlgResize = null;
+	}
+
 	function editColumn(index: number): void {
 		settingsFocus = index;
 		settingsOpen = true;
@@ -190,11 +222,28 @@
 				if (!o) settingsFocus = null;
 			}}
 		>
-			<Dialog.Content class="max-h-[85vh] max-w-3xl overflow-y-auto">
+			<Dialog.Content
+				data-testid="table-settings-dialog"
+				class="flex max-w-none flex-col overflow-hidden sm:max-w-none"
+				style="width:{dlgW}px;height:{dlgH}px"
+			>
 				<Dialog.Title class="font-display text-lg font-light tracking-wide">
 					{settingsFocus === null ? 'Table settings' : 'Column settings'}
 				</Dialog.Title>
-				<ColumnManager {tabId} focusIndex={settingsFocus} />
+				<div class="min-h-0 flex-1 overflow-y-auto pr-1">
+					<ColumnManager {tabId} focusIndex={settingsFocus} />
+				</div>
+				<div
+					role="separator"
+					aria-orientation="horizontal"
+					tabindex="-1"
+					data-testid="settings-resize-handle"
+					class="absolute right-0 bottom-0 h-4 w-4 cursor-nwse-resize touch-none select-none"
+					onpointerdown={onDlgResizeStart}
+					onpointermove={onDlgResizeMove}
+					onpointerup={onDlgResizeEnd}
+					onpointercancel={onDlgResizeEnd}
+				></div>
 			</Dialog.Content>
 		</Dialog.Root>
 	{/if}
