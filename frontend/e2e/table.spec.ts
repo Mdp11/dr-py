@@ -321,6 +321,11 @@ test('inline navigation column and inline row source', async ({ page }) => {
 	// (same locator sequence as section 1 above, scoped to the inline editor).
 	const inlineEditor = settings.getByTestId('inline-nav-editor');
 	await expect(inlineEditor).toBeVisible();
+	// PathCards start collapsed inside Table settings — expand this one so its
+	// editing body (start row, step rows, "+ Follow a relationship") renders.
+	const inlineCollapseToggle = inlineEditor.getByTestId('path-collapse-toggle').first();
+	await inlineCollapseToggle.click();
+	await expect(inlineCollapseToggle).toHaveAttribute('aria-expanded', 'true');
 	await expect(inlineEditor).toContainText("each row's element");
 	await expect(header.locator('> div')).toHaveCount(columnCountBefore + 1, { timeout: 10_000 });
 	await inlineEditor.getByRole('button', { name: '+ Follow a relationship', exact: true }).click();
