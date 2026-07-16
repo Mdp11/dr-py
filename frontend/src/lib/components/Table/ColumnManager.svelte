@@ -28,6 +28,7 @@
 		replaceColumn
 	} from '$lib/table/columns';
 	import type { Column, TableDefinition } from '$lib/api/types';
+	import { Eye, EyeOff } from '@lucide/svelte';
 	import NavigationColumnEditor from './NavigationColumnEditor.svelte';
 	import PropertyColumnEditor from './PropertyColumnEditor.svelte';
 	import RowSourceEditor from './RowSourceEditor.svelte';
@@ -159,7 +160,7 @@
 		<div class="space-y-1.5">
 			{#each defn.columns as col, i (i)}
 				<div class="rounded border border-border/70 p-1.5">
-					<div class="flex flex-wrap items-center gap-1.5">
+					<div class="flex flex-wrap items-center gap-1.5" class:opacity-60={col.hidden}>
 						<span class="w-4 shrink-0 text-center font-mono text-[10px] text-muted-foreground/70">
 							{i}
 						</span>
@@ -192,6 +193,20 @@
 							onclick={() => onMove(i, 'down')}
 						>
 							&darr;
+						</button>
+						<button
+							type="button"
+							data-testid="toggle-hidden-{i}"
+							class="rounded border border-input px-1 py-0.5 text-[10px] hover:bg-muted"
+							aria-label={col.hidden ? 'Show column' : 'Hide column'}
+							title={col.hidden
+								? 'Show this column in the table and exports again'
+								: 'Hide from the table and exports — still computed and usable as an "Earlier column" source'}
+							onclick={() => onColumnChange(i, { ...col, hidden: !col.hidden })}
+						>
+							{#if col.hidden}<EyeOff class="size-3" data-testid="eye-off-icon" />{:else}<Eye
+									class="size-3"
+								/>{/if}
 						</button>
 						<button
 							type="button"

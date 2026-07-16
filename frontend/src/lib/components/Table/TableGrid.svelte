@@ -45,6 +45,15 @@
 	const error = $derived(getTableError(tabId));
 	const rows = $derived(page?.rows ?? []);
 
+	// Hidden columns are evaluated server-side (ColumnRefs may target them)
+	// but never rendered. Pairs keep the DEFINITION index i — sort, resize and
+	// width all speak definition indices; only DOM order is compacted.
+	const visibleCols = $derived.by(() => {
+		const cols = page?.columns ?? [];
+		const defCols = getTableDraft(tabId)?.definition.columns;
+		return cols.map((col, i) => ({ col, i })).filter(({ i }) => !defCols?.[i]?.hidden);
+	});
+
 	let scrollEl: HTMLElement | null = $state(null);
 	let scrollTop = $state(0);
 	let viewportH = $state(0);
@@ -58,11 +67,14 @@
 		return 1;
 	}
 	const offsets = $derived.by(() => {
+		const cols = visibleCols;
 		const out = new Array<number>(rows.length + 1);
 		out[0] = 0;
 		for (let i = 0; i < rows.length; i++) {
 			const r = rows[i];
-			const lines = r ? Math.max(1, ...r.cells.map(cellLines)) : 1;
+			const lines = r
+				? Math.max(1, ...cols.map(({ i: ci }) => r.cells[ci]).filter((c) => c !== undefined).map(cellLines))
+				: 1;
 			out[i + 1] = out[i] + lines * ROW_H;
 		}
 		return out;
@@ -138,22 +150,25 @@
 	// row cache means off-screen rows can't be measured). Cell wrappers are
 	// overflow-hidden, so the inner content's scrollWidth is the full,
 	// unclipped content width even when it is currently truncated.
-	function autoFitColumn(index: number): void {
+	// `defIndex` is the definition index (what sort/resize/width speak);
+	// `domIndex` is the compacted on-screen position hidden columns leave
+	// behind — DOM lookups use it, `setColumnWidth` uses `defIndex`.
+	function autoFitColumn(defIndex: number, domIndex: number): void {
 		if (!scrollEl) return;
 		let max = MIN_WIDTH;
-		const headerCell = scrollEl.querySelectorAll('[data-testid="table-header"] > div')[index];
+		const headerCell = scrollEl.querySelectorAll('[data-testid="table-header"] > div')[domIndex];
 		const label = headerCell?.querySelector('span');
 		// label + sort caret + flex gaps + horizontal padding
 		if (label) max = Math.max(max, Math.ceil(label.scrollWidth) + 44);
 		for (const row of scrollEl.querySelectorAll('[data-testid="table-row"]')) {
-			const content = row.children[index]?.firstElementChild;
+			const content = row.children[domIndex]?.firstElementChild;
 			// px-2 padding (16) + right border + a rounding safety px
 			if (content) max = Math.max(max, Math.ceil(content.scrollWidth) + 18);
 		}
 		const draft = getTableDraft(tabId);
 		if (!draft) return;
 		const width = Math.min(max, MAX_AUTO_WIDTH);
-		updateTableDefinition(tabId, setColumnWidth(draft.definition, index, width));
+		updateTableDefinition(tabId, setColumnWidth(draft.definition, defIndex, width));
 	}
 
 	// The lock badge for the element a cell belongs to (element/value cells
@@ -195,31 +210,31 @@
 		role="row"
 		class="sticky top-0 z-10 flex border-b border-border bg-card text-xs font-medium text-muted-foreground"
 	>
-		{#each page?.columns ?? [] as col, i (i)}
+		{#each visibleCols as v (v.i)}
 			<div
 				class="relative flex shrink-0 items-center gap-1 border-r border-border px-2 py-1.5"
-				style="width:{widthFor(col, i)}px"
+				style="width:{widthFor(v.col, v.i)}px"
 			>
-				<span class="truncate">{col.header || columnKindLabel(col.kind)}</span>
+				<span class="truncate">{v.col.header || columnKindLabel(v.col.kind)}</span>
 				<button
 					type="button"
 					class="ml-auto shrink-0 text-[10px] text-muted-foreground/70 transition-colors hover:text-foreground"
-					aria-label="Sort by {col.header || columnKindLabel(col.kind)}"
-					onclick={() => toggleSort(i)}
+					aria-label="Sort by {v.col.header || columnKindLabel(v.col.kind)}"
+					onclick={() => toggleSort(v.i)}
 				>
-					{#if sort?.column === i}{sort.direction === 'asc' ? '▲' : '▼'}{:else}↕{/if}
+					{#if sort?.column === v.i}{sort.direction === 'asc' ? '▲' : '▼'}{:else}↕{/if}
 				</button>
 				<div
 					role="separator"
 					aria-orientation="vertical"
 					tabindex="-1"
 					class="absolute top-0 right-0 h-full w-1 cursor-col-resize touch-none select-none hover:bg-primary/50"
-					class:bg-primary={resizing?.index === i}
-					onpointerdown={(e) => onResizeStart(e, i, widthFor(col, i))}
+					class:bg-primary={resizing?.index === v.i}
+					onpointerdown={(e) => onResizeStart(e, v.i, widthFor(v.col, v.i))}
 					onpointermove={onResizeMove}
 					onpointerup={onResizeEnd}
 					onpointercancel={onResizeEnd}
-					ondblclick={() => autoFitColumn(i)}
+					ondblclick={() => autoFitColumn(v.i, visibleCols.findIndex((vv) => vv.i === v.i))}
 				></div>
 			</div>
 		{/each}
@@ -239,37 +254,45 @@
 					class="flex border-b border-border/60"
 					style="height:{offsets[win.start + i + 1] - offsets[win.start + i]}px"
 				>
-					{#each row.cells as cell, ci (ci)}
-						{@const lock = cellLockBadge(cell)}
-						<div
-							class="flex shrink-0 items-start overflow-hidden border-r border-border/40 px-2 text-xs {lock.state ===
-							'mine'
-								? 'bg-warning/20'
-								: lock.state === 'theirs'
-									? 'bg-destructive/15'
-									: ''}"
-							data-lock={lock.state === 'none' ? undefined : lock.state}
-							title={lock.state === 'mine'
-								? 'Locked by you'
-								: lock.state === 'theirs'
-									? `Locked by ${lock.holder}`
-									: undefined}
-							style="width:{widthFor(page.columns[ci], ci)}px"
-						>
-							{#if cell.kind === 'element'}
-								<div class="flex h-7 max-w-full min-w-0 items-center">
-									<ElementCell {cell} />
-								</div>
-							{:else if cell.kind === 'value'}
-								<div class="flex h-7 max-w-full min-w-0 items-center">
-									<ValueCell {cell} {tabId} columnName={columnNameFor(ci)} />
-								</div>
-							{:else if cell.kind === 'values'}
-								<ValuesCell {cell} />
-							{:else}
-								<ElementsCell {cell} />
-							{/if}
-						</div>
+					{#each visibleCols as v (v.i)}
+						{@const cell = row.cells[v.i]}
+						{#if cell}
+							{@const lock = cellLockBadge(cell)}
+							<div
+								class="flex shrink-0 items-start overflow-hidden border-r border-border/40 px-2 text-xs {lock.state ===
+								'mine'
+									? 'bg-warning/20'
+									: lock.state === 'theirs'
+										? 'bg-destructive/15'
+										: ''}"
+								data-lock={lock.state === 'none' ? undefined : lock.state}
+								title={lock.state === 'mine'
+									? 'Locked by you'
+									: lock.state === 'theirs'
+										? `Locked by ${lock.holder}`
+										: undefined}
+								style="width:{widthFor(v.col, v.i)}px"
+							>
+								{#if cell.kind === 'element'}
+									<div class="flex h-7 max-w-full min-w-0 items-center">
+										<ElementCell {cell} />
+									</div>
+								{:else if cell.kind === 'value'}
+									<div class="flex h-7 max-w-full min-w-0 items-center">
+										<ValueCell {cell} {tabId} columnName={columnNameFor(v.i)} />
+									</div>
+								{:else if cell.kind === 'values'}
+									<ValuesCell {cell} />
+								{:else}
+									<ElementsCell {cell} />
+								{/if}
+							</div>
+						{:else}
+							<div
+								class="shrink-0 border-r border-border/40 px-2"
+								style="width:{widthFor(v.col, v.i)}px"
+							></div>
+						{/if}
 					{/each}
 				</div>
 			{:else}
@@ -281,10 +304,10 @@
 					class="flex border-b border-border/60"
 					style="height:{ROW_H}px"
 				>
-					{#each page.columns as col, ci (ci)}
+					{#each visibleCols as v (v.i)}
 						<div
 							class="flex shrink-0 items-center border-r border-border/40 px-2"
-							style="width:{widthFor(col, ci)}px"
+							style="width:{widthFor(v.col, v.i)}px"
 						>
 							<div class="h-3 w-3/5 animate-pulse rounded bg-muted"></div>
 						</div>

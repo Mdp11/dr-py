@@ -222,6 +222,146 @@ describe('TableGrid', () => {
 		}
 	});
 
+	it('skips hidden columns in the header and rows, keeping definition-index pairing for the rest', () => {
+		const page: TablePage = {
+			...PAGE,
+			columns: [
+				{ kind: 'element', header: 'Block', width_px: null },
+				{ kind: 'property', header: 'Mass', width_px: null },
+				{ kind: 'property', header: 'Volume', width_px: null }
+			],
+			rows: [
+				{
+					key: ['e1'],
+					cells: [
+						{
+							kind: 'element',
+							item: { id: 'e1', type_name: 'Block', display_name: 'B', child_count: 0 }
+						},
+						{ kind: 'value', present: true, value: 10, element_id: 'e1', editable: true },
+						{ kind: 'value', present: true, value: 99, element_id: 'e1', editable: true }
+					]
+				}
+			]
+		};
+		const draft: store.TableDraft = {
+			...DRAFT,
+			definition: {
+				...DRAFT.definition,
+				columns: [
+					DRAFT.definition.columns[0],
+					{ ...DRAFT.definition.columns[1], hidden: true },
+					{
+						kind: 'property',
+						source: { kind: 'row', chain_index: 0 },
+						name: 'Volume',
+						mode: 'collapse',
+						keep_empty: true,
+						header: 'Volume',
+						width_px: null,
+						hidden: false
+					}
+				]
+			}
+		};
+		vi.spyOn(store, 'getTablePage').mockReturnValue(page);
+		vi.spyOn(store, 'getTableLoading').mockReturnValue(false);
+		vi.spyOn(store, 'getTableDraft').mockReturnValue(draft);
+		const c = render('tbl:draft:hidden');
+		try {
+			const header = document.querySelector('[data-testid="table-header"]') as HTMLElement;
+			expect(header.children).toHaveLength(2);
+			expect(header.textContent).toContain('Block');
+			expect(header.textContent).not.toContain('Mass');
+			expect(header.textContent).toContain('Volume');
+
+			const row = document.querySelector('[data-testid="table-row"]') as HTMLElement;
+			expect(row.children).toHaveLength(2);
+			expect(row.textContent).toContain('B');
+			expect(row.textContent).not.toContain('10');
+			expect(row.textContent).toContain('99');
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('excludes a hidden column from placeholder rows too', () => {
+		const page: store.TableData = {
+			...PAGE,
+			columns: [
+				{ kind: 'element', header: 'Block', width_px: null },
+				{ kind: 'property', header: 'Mass', width_px: null }
+			],
+			rows: [undefined],
+			total: 1
+		};
+		const draft: store.TableDraft = {
+			...DRAFT,
+			definition: {
+				...DRAFT.definition,
+				columns: [DRAFT.definition.columns[0], { ...DRAFT.definition.columns[1], hidden: true }]
+			}
+		};
+		vi.spyOn(store, 'getTablePage').mockReturnValue(page);
+		vi.spyOn(store, 'getTableLoading').mockReturnValue(false);
+		vi.spyOn(store, 'getTableDraft').mockReturnValue(draft);
+		vi.spyOn(store, 'ensureTableRange').mockImplementation(() => {});
+		const c = render('tbl:draft:hidden-placeholder');
+		try {
+			const placeholder = document.querySelector(
+				'[data-testid="table-row-placeholder"]'
+			) as HTMLElement;
+			expect(placeholder.children).toHaveLength(1);
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('ignores hidden cells when computing row height (a tall hidden cell does not stretch the row)', () => {
+		const page: TablePage = {
+			...PAGE,
+			columns: [
+				{ kind: 'element', header: 'Block', width_px: null },
+				{ kind: 'property', header: 'Tags', width_px: null }
+			],
+			rows: [
+				{
+					key: ['e1'],
+					cells: [
+						{
+							kind: 'element',
+							item: { id: 'e1', type_name: 'Block', display_name: 'B', child_count: 0 }
+						},
+						{
+							kind: 'values',
+							present: true,
+							values: ['a', 'b', 'c', 'd', 'e'],
+							total: 5,
+							truncated: false
+						}
+					]
+				}
+			]
+		};
+		const draft: store.TableDraft = {
+			...DRAFT,
+			definition: {
+				...DRAFT.definition,
+				columns: [DRAFT.definition.columns[0], { ...DRAFT.definition.columns[1], hidden: true }]
+			}
+		};
+		vi.spyOn(store, 'getTablePage').mockReturnValue(page);
+		vi.spyOn(store, 'getTableLoading').mockReturnValue(false);
+		vi.spyOn(store, 'getTableDraft').mockReturnValue(draft);
+		const c = render('tbl:draft:hidden-height');
+		try {
+			const row = document.querySelector('[data-testid="table-row"]') as HTMLElement;
+			expect(row.style.height).toBe('28px'); // 1 line * 28 — the hidden 5-value cell is ignored
+		} finally {
+			unmount(c);
+		}
+	});
+
 	it('tints cells of a locked element: orange for my lock, red for a peer lock', () => {
 		vi.spyOn(store, 'getTablePage').mockReturnValue(PAGE);
 		vi.spyOn(store, 'getTableLoading').mockReturnValue(false);

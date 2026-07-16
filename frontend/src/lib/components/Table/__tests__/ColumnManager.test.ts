@@ -152,6 +152,64 @@ describe('ColumnManager', () => {
 		}
 	});
 
+	it('toggles a column\'s hidden flag via the eye button, flipping aria-label and icon', () => {
+		vi.spyOn(store, 'getTableDraft').mockReturnValue(
+			scopeDraft([
+				{ kind: 'element', source: { kind: 'row', chain_index: 0 }, header: '', width_px: null, hidden: false },
+				{
+					kind: 'property',
+					source: { kind: 'row', chain_index: 0 },
+					name: 'mass',
+					mode: 'collapse',
+					keep_empty: true,
+					header: '',
+					width_px: null,
+					hidden: false
+				}
+			])
+		);
+		const upd = vi.spyOn(store, 'updateTableDefinition').mockImplementation(() => {});
+		const c = render('t');
+		try {
+			const toggle = document.querySelector('[data-testid="toggle-hidden-1"]') as HTMLButtonElement;
+			expect(toggle.getAttribute('aria-label')).toBe('Hide column');
+			expect(toggle.querySelector('[data-testid="eye-off-icon"]')).toBeNull();
+
+			click(toggle);
+			expect(upd).toHaveBeenCalledTimes(1);
+			const defn = upd.mock.calls.at(-1)![1];
+			expect(defn.columns[1].hidden).toBe(true);
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('shows "Show column" and the eye-off icon once a column is hidden', () => {
+		vi.spyOn(store, 'getTableDraft').mockReturnValue(
+			scopeDraft([
+				{ kind: 'element', source: { kind: 'row', chain_index: 0 }, header: '', width_px: null, hidden: false },
+				{
+					kind: 'property',
+					source: { kind: 'row', chain_index: 0 },
+					name: 'mass',
+					mode: 'collapse',
+					keep_empty: true,
+					header: '',
+					width_px: null,
+					hidden: true
+				}
+			])
+		);
+		const c = render('t');
+		try {
+			const toggle = document.querySelector('[data-testid="toggle-hidden-1"]') as HTMLButtonElement;
+			expect(toggle.getAttribute('aria-label')).toBe('Show column');
+			expect(toggle.querySelector('[data-testid="eye-off-icon"]')).not.toBeNull();
+		} finally {
+			unmount(c);
+		}
+	});
+
 	it('catches ColumnInUseError on remove and shows a message without calling updateTableDefinition', () => {
 		// Two element columns so column 0's remove button is ENABLED (the
 		// sole-scope-column guard doesn't apply) and the error path is what's
