@@ -240,14 +240,18 @@ def export_table(
         row = content.get_artifact(db, payload.artifact_id)
         if row is not None:
             name = row.name
-    headers = [c.header or c.kind for c in defn.columns]
-    widths = [c.width_px for c in defn.columns]
+    # Hidden columns are evaluated (a visible column may reference them) but
+    # never exported: filter headers/widths AND each row's cells by position.
+    visible = [i for i, c in enumerate(defn.columns) if not c.hidden]
+    headers = [defn.columns[i].header or defn.columns[i].kind for i in visible]
+    widths = [defn.columns[i].width_px for i in visible]
+    all_rows = iter_export_rows(metamodel, model, defn, ordered, limits)
     blob = build_workbook(
         model,
         headers,
         widths,
         name,
-        iter_export_rows(metamodel, model, defn, ordered, limits),
+        ([row[i] for i in visible] for row in all_rows),
     )
     resp_headers = {"Content-Disposition": f'attachment; filename="{name}.xlsx"'}
     if truncated:

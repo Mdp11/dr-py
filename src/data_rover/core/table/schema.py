@@ -97,6 +97,11 @@ class ElementColumn(BaseModel):
     source: ColumnSource = Field(default_factory=RowSlot)
     header: str = ""
     width_px: int | None = None
+    #: Presentation-only: a hidden column is still evaluated (later columns
+    #: may reference it via ColumnRef) but is omitted from the grid and the
+    #: xlsx export. Never feed this into evaluation — dropping the column
+    #: would shift ColumnRef indices and the expand-slot arithmetic.
+    hidden: bool = False
 
 
 class PropertyColumn(BaseModel):
@@ -107,6 +112,11 @@ class PropertyColumn(BaseModel):
     keep_empty: bool = True
     header: str = ""
     width_px: int | None = None
+    #: Presentation-only: a hidden column is still evaluated (later columns
+    #: may reference it via ColumnRef) but is omitted from the grid and the
+    #: xlsx export. Never feed this into evaluation — dropping the column
+    #: would shift ColumnRef indices and the expand-slot arithmetic.
+    hidden: bool = False
 
 
 class NavigationColumn(BaseModel):
@@ -120,6 +130,11 @@ class NavigationColumn(BaseModel):
     cell_cap: int = Field(default=20, ge=1)
     header: str = ""
     width_px: int | None = None
+    #: Presentation-only: a hidden column is still evaluated (later columns
+    #: may reference it via ColumnRef) but is omitted from the grid and the
+    #: xlsx export. Never feed this into evaluation — dropping the column
+    #: would shift ColumnRef indices and the expand-slot arithmetic.
+    hidden: bool = False
 
 
 Column = Annotated[

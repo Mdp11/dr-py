@@ -118,6 +118,20 @@ def test_navigation_source_rejects_both_ref_and_definition():
         ])
 
 
+def test_hidden_defaults_false_and_parses():
+    defn = TABLE_ADAPTER.validate_python(
+        {
+            "row_source": {"kind": "scope", "types": []},
+            "columns": [
+                {"kind": "element", "source": {"kind": "row"}},
+                {"kind": "property", "name": "p", "hidden": True},
+            ],
+        }
+    )
+    assert defn.columns[0].hidden is False
+    assert defn.columns[1].hidden is True
+
+
 def test_chain_index_nonzero_ok_with_chains_source():
     t = _table(
         row_source={"kind": "chains",

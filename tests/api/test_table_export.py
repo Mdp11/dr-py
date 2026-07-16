@@ -98,3 +98,59 @@ def test_export_includes_full_navigation_cell_beyond_cell_cap(client):
         next(row[1].value for row in ws.iter_rows(min_row=2) if row[0].value == "root")
     )
     assert "p1" in root_cell and "p2" in root_cell  # both parts, despite cell_cap=1
+
+
+def test_export_skips_hidden_columns(client):
+    # The middle column (navigation, hidden) is still EVALUATED — the third
+    # column references it by index and reads a property off the elements it
+    # reaches — but it must be omitted from the exported header/body.
+    _bootstrap_model(client)
+    body = {
+        "definition": {
+            "row_source": {
+                "kind": "scope",
+                "types": ["Block"],
+                "criteria": [
+                    {"type": "name_id", "field": "name", "op": "equals", "value": "root"}
+                ],
+            },
+            "columns": [
+                {"kind": "element", "source": {"kind": "row"}, "header": "Block"},
+                {
+                    "kind": "navigation",
+                    "source": {"kind": "row"},
+                    "mode": "expand",
+                    "hidden": True,
+                    "header": "Navigation",
+                    "navigation": {"definition": {
+                        "kind": "path",
+                        "start": {"kind": "row"},
+                        "steps": [{"kind": "relationship",
+                                   "relationship_type": "BlockHasPart",
+                                   "direction": "out"}],
+                    }},
+                },
+                {
+                    "kind": "property",
+                    "source": {"kind": "column", "index": 1},
+                    "name": "mass",
+                    "header": "Mass",
+                },
+            ],
+        }
+    }
+    r = client.post(papi("/tables/export"), json=body, headers=AUTH_HEADERS)
+    assert r.status_code == 200, r.text
+    wb = load_workbook(io.BytesIO(r.content))
+    ws = wb.active
+    assert ws is not None
+    header = [c.value for c in ws[1]]
+    assert len(header) == 2  # hidden column absent
+    assert "Navigation" not in header
+    assert header == ["Block", "Mass"]
+    # the hidden navigation column still evaluated: two rows (p1, p2), and the
+    # dependent visible property column correctly read mass off the reached
+    # elements rather than blowing up or reading the wrong binding.
+    body_rows = [[c.value for c in row] for row in ws.iter_rows(min_row=2)]
+    assert len(body_rows) == 2
+    assert all(row == ["root", 1.0] for row in body_rows)
