@@ -75,6 +75,14 @@ function excl(col: Column): boolean {
 	return d.exclude_visited;
 }
 
+/** The embedded definition object itself (by reference) — used to prove a
+ * column kept its OWN definition across a reorder rather than trading with a
+ * screen-position neighbor. */
+function ownDef(col: Column): NavigationDefinition | null | undefined {
+	if (col.kind !== 'navigation') throw new Error('expected a navigation column');
+	return col.navigation.definition;
+}
+
 async function seed(columns: NavColumn[]): Promise<void> {
 	await ensureTableDraft(TAB);
 	const defn: TableDefinition = {
@@ -132,6 +140,59 @@ describe('ColumnManager inline-navigation reorder/remove', () => {
 			// left behind by screen position.
 			expect(excl(cols[0])).toBe(false); // B's own definition
 			expect(excl(cols[1])).toBe(true); // A's own definition
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it("dragging column C (index 2) onto column A (index 0) reorders and keeps each column's OWN definition", async () => {
+		const defA = navDef(true);
+		const defB = navDef(false);
+		const defC = navDef(true); // same boolean as A, on purpose — this test
+		// distinguishes columns by definition OBJECT REFERENCE, not the flag.
+		await seed([navColumn('A', defA), navColumn('B', defB), navColumn('C', defC)]);
+		const c = mount(ColumnManager, { target: document.body, props: { tabId: TAB } });
+		flushSync();
+		try {
+			await vi.waitFor(() =>
+				expect(document.querySelectorAll('[data-testid="inline-nav-editor"]').length).toBe(3)
+			);
+
+			// happy-dom has no real layout; stub elementFromPoint to resolve straight
+			// to column A's card (the drop target under the cursor).
+			if (!('elementFromPoint' in document)) {
+				(document as unknown as { elementFromPoint: () => null }).elementFromPoint = () => null;
+			}
+			const dropTarget = document.querySelector('[data-col-drop="0"]') as HTMLElement;
+			expect(dropTarget).not.toBeNull();
+			vi.spyOn(document, 'elementFromPoint').mockReturnValue(dropTarget);
+
+			const grip = document.querySelector('[data-testid="drag-column-2"]') as HTMLElement;
+			expect(grip).not.toBeNull();
+			grip.dispatchEvent(
+				new PointerEvent('pointerdown', {
+					bubbles: true,
+					button: 0,
+					pointerId: 1,
+					clientX: 0,
+					clientY: 0
+				})
+			);
+			flushSync();
+			grip.dispatchEvent(
+				new PointerEvent('pointermove', { bubbles: true, pointerId: 1, clientX: 100, clientY: 0 })
+			);
+			flushSync();
+			grip.dispatchEvent(
+				new PointerEvent('pointerup', { bubbles: true, pointerId: 1, clientX: 100, clientY: 0 })
+			);
+			flushSync();
+
+			const cols = getTableDraft(TAB)!.definition.columns;
+			expect(cols.map((col) => col.header)).toEqual(['C', 'A', 'B']);
+			expect(ownDef(cols.find((col) => col.header === 'A')!)).toBe(defA);
+			expect(ownDef(cols.find((col) => col.header === 'B')!)).toBe(defB);
+			expect(ownDef(cols.find((col) => col.header === 'C')!)).toBe(defC);
 		} finally {
 			unmount(c);
 		}

@@ -15,10 +15,12 @@
 		getTablePage,
 		getTableSort,
 		lockBadgeFor,
+		remapTableSortForMove,
 		setTableSort,
 		updateTableDefinition
 	} from '$lib/state';
-	import { columnKindLabel, setColumnWidth } from '$lib/table/columns';
+	import { columnKindLabel, moveColumn, setColumnWidth } from '$lib/table/columns';
+	import { createColumnDrag } from '$lib/table/column-dnd.svelte';
 	import { computeWindowVariable } from '$lib/components/Sidebar/windowing';
 	import { Pencil, Plus } from '@lucide/svelte';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
@@ -213,6 +215,35 @@
 		const col = getTableDraft(tabId)?.definition.columns[index];
 		return col?.kind === 'property' ? col.name : undefined;
 	}
+
+	// Header-cell drag-to-reorder (Task 10): the same pointer-driven controller
+	// as ColumnManager's grip, hit-testing DEFINITION indices via
+	// `data-col-hdr-drop` so a drop onto a visible header still resolves to the
+	// right column even with hidden columns compacting the DOM order.
+	const hdrDrag = createColumnDrag({
+		attr: 'data-col-hdr-drop',
+		getDefinition: () => getTableDraft(tabId)?.definition,
+		onDrop: (fromIdx, toIdx) => {
+			const draft = getTableDraft(tabId);
+			if (!draft) return;
+			try {
+				const next = moveColumn(draft.definition, fromIdx, toIdx);
+				remapTableSortForMove(tabId, fromIdx, toIdx);
+				updateTableDefinition(tabId, next);
+			} catch {
+				/* forward-ref move: the hover highlight already showed invalid */
+			}
+		}
+	});
+
+	// The header cell's own pointerdown starts the reorder drag, EXCEPT when the
+	// press originates on the sort/edit buttons or the resize handle — those own
+	// their own pointer gestures and must not also arm a column drag.
+	function onHeaderPointerDown(e: PointerEvent, index: number): void {
+		const t = e.target as HTMLElement;
+		if (t.closest('button, [role="separator"]')) return;
+		hdrDrag.onPointerDown(e, index);
+	}
 </script>
 
 <div
@@ -228,8 +259,19 @@
 	>
 		{#each visibleCols as v (v.i)}
 			<div
-				class="relative flex shrink-0 items-center gap-1 border-r border-border px-2 py-1.5"
+				role="columnheader"
+				tabindex="-1"
+				class="relative flex shrink-0 cursor-grab items-center gap-1 border-r border-border px-2 py-1.5 touch-none select-none"
 				style="width:{widthFor(v.col, v.i)}px"
+				data-col-hdr-drop={v.i}
+				class:ring-1={hdrDrag.over === v.i && hdrDrag.from !== null}
+				class:ring-primary={hdrDrag.over === v.i && hdrDrag.from !== null && hdrDrag.valid}
+				class:ring-destructive={hdrDrag.over === v.i && hdrDrag.from !== null && !hdrDrag.valid}
+				class:opacity-50={hdrDrag.from === v.i}
+				onpointerdown={(e) => onHeaderPointerDown(e, v.i)}
+				onpointermove={(e) => hdrDrag.onPointerMove(e)}
+				onpointerup={(e) => hdrDrag.onPointerUp(e)}
+				onpointercancel={(e) => hdrDrag.onPointerUp(e)}
 			>
 				<span class="truncate">{v.col.header || columnKindLabel(v.col.kind)}</span>
 				<button

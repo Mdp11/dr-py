@@ -27,6 +27,7 @@
 		renameColumn,
 		replaceColumn
 	} from '$lib/table/columns';
+	import { createColumnDrag } from '$lib/table/column-dnd.svelte';
 	import type { Column, TableDefinition } from '$lib/api/types';
 	import { Eye, EyeOff } from '@lucide/svelte';
 	import NavigationColumnEditor from './NavigationColumnEditor.svelte';
@@ -127,6 +128,25 @@
 		});
 	}
 
+	// Pointer-driven grip drag (mouse/touch/pen), alongside the ↑/↓ buttons kept
+	// as the keyboard/screen-reader-reachable fallback. `getDefinition` reads
+	// the CURRENT `defn` on every move (not a snapshot at drag-start) so the
+	// forward-ref validity check stays correct even if the definition changes
+	// underneath the drag.
+	const drag = createColumnDrag({
+		attr: 'data-col-drop',
+		getDefinition: () => defn,
+		onDrop: (fromIdx, toIdx) => {
+			const current = defn;
+			if (!current) return;
+			tryApply(() => {
+				const next = moveColumn(current, fromIdx, toIdx);
+				remapTableSortForMove(tabId, fromIdx, toIdx);
+				return next;
+			});
+		}
+	});
+
 	function addPropertyColumn(): void {
 		if (!defn) return;
 		apply(addColumn(defn, newPropertyColumn()));
@@ -162,8 +182,29 @@
 		<div class="space-y-1.5">
 			{#each defn.columns as col, i (i)}
 				{#if focusIndex === null || focusIndex === i}
-					<div class="rounded border border-border/70 p-1.5">
+					<div
+						class="rounded border border-border/70 p-1.5"
+						data-col-drop={i}
+						class:ring-1={drag.over === i && drag.from !== null}
+						class:ring-primary={drag.over === i && drag.from !== null && drag.valid}
+						class:ring-destructive={drag.over === i && drag.from !== null && !drag.valid}
+						class:opacity-50={drag.from === i}
+					>
 						<div class="flex flex-wrap items-center gap-1.5" class:opacity-60={col.hidden}>
+							{#if focusIndex === null}
+								<span
+									role="button"
+									tabindex="-1"
+									data-testid="drag-column-{i}"
+									aria-label="Drag to reorder"
+									title="Drag to reorder"
+									class="shrink-0 cursor-grab touch-none select-none text-muted-foreground/50"
+									onpointerdown={(e) => drag.onPointerDown(e, i)}
+									onpointermove={(e) => drag.onPointerMove(e)}
+									onpointerup={(e) => drag.onPointerUp(e)}
+									onpointercancel={(e) => drag.onPointerUp(e)}>⠿</span
+								>
+							{/if}
 							<span class="w-4 shrink-0 text-center font-mono text-[10px] text-muted-foreground/70">
 								{i}
 							</span>

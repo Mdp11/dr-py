@@ -150,6 +150,86 @@ describe('TableGrid', () => {
 		}
 	});
 
+	it('dragging header 1 onto header 0 reorders the definition through updateTableDefinition', () => {
+		vi.spyOn(store, 'getTablePage').mockReturnValue(PAGE);
+		vi.spyOn(store, 'getTableLoading').mockReturnValue(false);
+		vi.spyOn(store, 'getTableDraft').mockReturnValue(DRAFT);
+		const update = vi.spyOn(store, 'updateTableDefinition').mockImplementation(() => {});
+		const c = render('tbl:draft:hdrdrag');
+		try {
+			// happy-dom has no real layout: stub elementFromPoint to resolve
+			// straight to header 0's drop target, whatever the pointer coordinates.
+			if (!('elementFromPoint' in document)) {
+				(document as unknown as { elementFromPoint: () => null }).elementFromPoint = () => null;
+			}
+			const target = document.querySelector('[data-col-hdr-drop="0"]') as HTMLElement;
+			const source = document.querySelector('[data-col-hdr-drop="1"]') as HTMLElement;
+			expect(target).not.toBeNull();
+			expect(source).not.toBeNull();
+			vi.spyOn(document, 'elementFromPoint').mockReturnValue(target);
+
+			source.dispatchEvent(
+				new PointerEvent('pointerdown', {
+					bubbles: true,
+					button: 0,
+					pointerId: 1,
+					clientX: 0,
+					clientY: 0
+				})
+			);
+			flushSync();
+			source.dispatchEvent(
+				new PointerEvent('pointermove', { bubbles: true, pointerId: 1, clientX: 100, clientY: 0 })
+			);
+			flushSync();
+			source.dispatchEvent(
+				new PointerEvent('pointerup', { bubbles: true, pointerId: 1, clientX: 100, clientY: 0 })
+			);
+			flushSync();
+
+			expect(update).toHaveBeenCalledTimes(1);
+			const defn = update.mock.calls[0][1] as TableDefinition;
+			expect(defn.columns.map((col) => col.header)).toEqual(['Mass', 'Block']);
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('a press-release on the sort button with no move past threshold still sorts (the header drag never arms)', () => {
+		vi.spyOn(store, 'getTablePage').mockReturnValue(PAGE);
+		vi.spyOn(store, 'getTableLoading').mockReturnValue(false);
+		vi.spyOn(store, 'getTableDraft').mockReturnValue(DRAFT);
+		const update = vi.spyOn(store, 'updateTableDefinition').mockImplementation(() => {});
+		const setSort = vi.spyOn(store, 'setTableSort').mockImplementation(() => {});
+		const c = render('tbl:draft:hdrsort');
+		try {
+			const btn = document.querySelector('[aria-label^="Sort by"]') as HTMLElement;
+			expect(btn).not.toBeNull();
+			btn.dispatchEvent(
+				new PointerEvent('pointerdown', {
+					bubbles: true,
+					button: 0,
+					pointerId: 1,
+					clientX: 5,
+					clientY: 5
+				})
+			);
+			flushSync();
+			btn.dispatchEvent(
+				new PointerEvent('pointerup', { bubbles: true, pointerId: 1, clientX: 5, clientY: 5 })
+			);
+			flushSync();
+			// No drag was ever armed by the press/release on the button.
+			expect(update).not.toHaveBeenCalled();
+
+			btn.click();
+			flushSync();
+			expect(setSort).toHaveBeenCalledWith('tbl:draft:hdrsort', { column: 0, direction: 'asc' });
+		} finally {
+			unmount(c);
+		}
+	});
+
 	it('gives a row one line per value in its tallest cell', () => {
 		const page: TablePage = {
 			...PAGE,
