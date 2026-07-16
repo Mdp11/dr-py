@@ -416,11 +416,15 @@ test('navMaxStepIndex counts chain columns', () => {
 				direction: 'out',
 				target_types: [],
 				children: []
-			}
+			},
+			{ kind: 'property', property_name: 'building' }
 		],
 		exclude_visited: true
 	} as NavigationDefinition;
-	expect(navMaxStepIndex(path)).toBe(2); // start + 2 relationship hops → max index 2
+	// start + 2 relationship hops + 1 property hop → max index 3 (filter steps
+	// add no chain column; property steps do — post-merge invariant with the
+	// navigation property-step feature)
+	expect(navMaxStepIndex(path)).toBe(3);
 	expect(
 		navMaxStepIndex({
 			kind: 'set_op',
