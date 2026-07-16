@@ -19,6 +19,7 @@ import {
 	nodeLabel,
 	OP_DIVIDER,
 	pathKey,
+	precedingTargetTypes,
 	removeOperand,
 	removeOperandEdit,
 	setOperandStepIndex,
@@ -27,7 +28,12 @@ import {
 	wrapRoot,
 	type ChainColumn
 } from '../tree';
-import type { NavigationDefinition, PathNavigation, SetExpression } from '$lib/api/types';
+import type {
+	NavigationDefinition,
+	NavStepItem,
+	PathNavigation,
+	SetExpression
+} from '$lib/api/types';
 
 describe('node addressing', () => {
 	it('pathKey stringifies positional paths', () => {
@@ -547,5 +553,48 @@ describe('RowStart', () => {
 				]
 			})
 		).toBe('Row → Owns');
+	});
+});
+
+describe('property steps', () => {
+	const propStep = (name: string): NavStepItem => ({ kind: 'property', property_name: name });
+
+	it('chainColumns counts property steps as columns', () => {
+		const node: PathNavigation = {
+			...emptyPath(),
+			start: { kind: 'scope', types: ['Sensor'], criteria: [] },
+			steps: [propStep('building'), { kind: 'filter', criteria: [] }, propStep('')]
+		};
+		const cols = chainColumns(node);
+		expect(cols.map((c) => c.label)).toEqual(['Start', 'building', 'unset step']);
+		expect(cols[1].sub).toBe('property');
+		expect(cols.map((c) => c.index)).toEqual([0, 1, 2]);
+	});
+
+	it('isRunnable requires property steps to have a property_name', () => {
+		const node: PathNavigation = {
+			...emptyPath(),
+			start: { kind: 'scope', types: ['Sensor'], criteria: [] }
+		};
+		expect(isRunnable({ ...node, steps: [propStep('')] })).toBe(false);
+		expect(isRunnable({ ...node, steps: [propStep('building')] })).toBe(true);
+	});
+
+	it('nodeLabel includes property hops', () => {
+		const node: PathNavigation = {
+			...emptyPath(),
+			start: { kind: 'scope', types: ['Sensor'], criteria: [] },
+			steps: [propStep('building')]
+		};
+		expect(nodeLabel(node)).toBe('Sensor → .building');
+	});
+
+	it('precedingTargetTypes falls back to any-type past a property step', () => {
+		const node: PathNavigation = {
+			...emptyPath(),
+			start: { kind: 'scope', types: ['Sensor'], criteria: [] },
+			steps: [propStep('building'), { kind: 'filter', criteria: [] }]
+		};
+		expect(precedingTargetTypes(node, 1)).toEqual([]);
 	});
 });

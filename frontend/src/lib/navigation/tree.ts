@@ -318,8 +318,10 @@ export function nodeLabel(defn: NavigationDefinition): string {
 					? startTypes.join('/')
 					: 'Any';
 	const hops = defn.steps
-		.filter((s): s is Extract<typeof s, { kind: 'relationship' }> => s.kind === 'relationship')
-		.map((s) => s.relationship_type || '?');
+		.filter((s) => s.kind !== 'filter')
+		.map((s) =>
+			s.kind === 'relationship' ? s.relationship_type || '?' : `.${s.property_name || '?'}`
+		);
 	return [head, ...hops].join(' → ');
 }
 
@@ -334,7 +336,14 @@ export function operandLabel(op: NavOperand, refName?: string): string {
  * must not be a pristine empty draft. */
 export function isRunnable(defn: NavigationDefinition): boolean {
 	if (defn.kind === 'set_op') return defn.operands.length > 0;
-	if (defn.steps.some((s) => s.kind === 'relationship' && !s.relationship_type)) return false;
+	if (
+		defn.steps.some(
+			(s) =>
+				(s.kind === 'relationship' && !s.relationship_type) ||
+				(s.kind === 'property' && !s.property_name)
+		)
+	)
+		return false;
 	const { start } = defn;
 	const pristine =
 		start.kind === 'scope' && start.types.length === 0 && start.criteria.length === 0;
@@ -365,11 +374,15 @@ export function readElementStart(scope: NavScope): string | null {
  * combine start or an element-start scope, meaning "any type"). Shared by a
  * relationship step's rel-type/target-type pickers (types flowing IN) and a
  * filter step's property-picker scope (types already REACHED at that point —
- * the same set, since a filter step never changes the frontier's type).
+ * the same set, since a filter step never changes the frontier's type). A
+ * property step also stops the scan short with `[]`: this pure helper has no
+ * metamodel to resolve the property's target type with (`frontierTypesAt` is
+ * the precise, metamodel-aware version).
  */
 export function precedingTargetTypes(node: PathNavigation, index: number): string[] {
 	for (let i = index - 1; i >= 0; i--) {
 		const step = node.steps[i];
+		if (step.kind === 'property') return []; // metamodel-free fallback: "any type" (frontierTypesAt is the precise version)
 		if (step.kind === 'relationship') return step.target_types;
 	}
 	return node.start.kind === 'scope' ? node.start.types : [];
@@ -401,10 +414,10 @@ export const OP_NOTE: Record<SetExpression['op'], string> = {
 
 /**
  * One numbered column of the CHAINS a path evaluates to. Column 0 is the
- * start; each RELATIONSHIP step adds one column; filter steps add none (they
- * narrow the frontier, they don't advance it). This is the single source of
- * truth for the three places the circled-number badge appears: the editor
- * rail, the results-table headers, and the `→ feeds` popover.
+ * start; each RELATIONSHIP or PROPERTY step adds one column; filter steps add
+ * none (they narrow the frontier, they don't advance it). This is the single
+ * source of truth for the three places the circled-number badge appears: the
+ * editor rail, the results-table headers, and the `→ feeds` popover.
  */
 export interface ChainColumn {
 	index: number;
@@ -424,12 +437,19 @@ export function chainColumns(node: PathNavigation): ChainColumn[] {
 	else if (start.types.length > 0) sub = [...start.types].sort().join(', ');
 	const cols: ChainColumn[] = [{ index: 0, label: 'Start', sub }];
 	for (const step of node.steps) {
-		if (step.kind !== 'relationship') continue;
-		cols.push({
-			index: cols.length,
-			label: step.relationship_type || 'unset step',
-			sub: step.target_types.length > 0 ? [...step.target_types].sort().join(', ') : undefined
-		});
+		if (step.kind === 'filter') continue;
+		if (step.kind === 'relationship') {
+			cols.push({
+				index: cols.length,
+				label: step.relationship_type || 'unset step',
+				sub: step.target_types.length > 0 ? [...step.target_types].sort().join(', ') : undefined
+			});
+		} else {
+			// A property hop advances the chain exactly like a relationship hop.
+			// `sub: 'property'` (not a type list): the pure helper has no
+			// metamodel to resolve the datatype with.
+			cols.push({ index: cols.length, label: step.property_name || 'unset step', sub: 'property' });
+		}
 	}
 	return cols;
 }
