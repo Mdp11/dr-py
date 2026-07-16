@@ -24,7 +24,7 @@
 		updateDefinition
 	} from '$lib/state';
 	import { columnLabel } from '$lib/table/columns';
-	import { emptyRowPath } from '$lib/navigation/tree';
+	import { chainColumns, emptyRowPath } from '$lib/navigation/tree';
 	import type { Column, NavigationDefinition, RowSource } from '$lib/api/types';
 	import NavigationNode from '../Navigation/NavigationNode.svelte';
 
@@ -86,6 +86,40 @@
 	// defeating the swap detection. `.raw` stores the reference untouched.
 	let lastSynced = $state.raw<NavigationDefinition | null>(null);
 
+	// The saved-ref navigation's payload, fetched to size the step field.
+	// $state.raw for the same DataCloneError reason as lastInline.
+	let refPayload = $state.raw<NavigationDefinition | null>(null);
+	let refLoadedFor: string | null = null;
+	$effect(() => {
+		const ref = !inline ? (column.navigation.ref ?? null) : null;
+		if (!ref) {
+			refPayload = null;
+			refLoadedFor = null;
+			return;
+		}
+		if (refLoadedFor === ref) return;
+		refLoadedFor = ref;
+		api
+			.getArtifact(ref)
+			.then((a) => {
+				if (refLoadedFor === ref) refPayload = a.payload as unknown as NavigationDefinition;
+			})
+			.catch(() => {
+				if (refLoadedFor === ref) refPayload = null; // unknown ref: unconstrained
+			});
+	});
+	const effectiveDefn = $derived(inline ? column.navigation.definition! : refPayload);
+	// Backend contract (table/evaluate.py::_check_step_index): valid
+	// non-negative indices are 0..chain_len-1; a set_op yields 1-element
+	// chains, so its only valid index is 0. null = unknown → unconstrained.
+	const maxStepIndex = $derived(
+		effectiveDefn == null
+			? null
+			: effectiveDefn.kind === 'path'
+				? chainColumns(effectiveDefn).length - 1
+				: 0
+	);
+
 	// Lifecycle: an inline column needs its embedded draft (e.g. a saved
 	// table reopened with an inline definition already in the payload); a
 	// ref-mode column must not leave one behind.
@@ -137,6 +171,14 @@
 	// Keep the preview row binding in sync with the hosting table's rows.
 	$effect(() => {
 		if (getDraft(embId)) setEmbeddedRowElement(embId, sampleRowElementId);
+	});
+
+	// Re-clamp on chain shrink (converges: after the clamped write the
+	// condition is false).
+	$effect(() => {
+		if (maxStepIndex != null && column.step_index != null && column.step_index > maxStepIndex) {
+			onChange({ ...column, step_index: maxStepIndex });
+		}
 	});
 
 	onDestroy(() => closeDraft(embId));
@@ -197,7 +239,14 @@
 	}
 	function setStepIndex(e: Event): void {
 		const raw = (e.currentTarget as HTMLInputElement).value.trim();
-		onChange({ ...column, step_index: raw === '' ? null : Number(raw) });
+		if (raw === '') {
+			onChange({ ...column, step_index: null }); // null = end of chain
+			return;
+		}
+		const n = Math.floor(Number(raw));
+		if (!Number.isFinite(n)) return;
+		const clamped = Math.max(0, maxStepIndex == null ? n : Math.min(n, maxStepIndex));
+		onChange({ ...column, step_index: clamped });
 	}
 	function setSortMode(e: Event): void {
 		const v = (e.currentTarget as HTMLSelectElement).value as NavColumn['sort_mode'];
@@ -303,10 +352,13 @@
 			</select>
 		{/if}
 		<label class="flex items-center gap-1">
-			step
+			Return elements from step
 			<input
 				type="number"
-				class="w-12 rounded border border-input bg-card px-1 py-0.5"
+				min="0"
+				max={maxStepIndex ?? undefined}
+				placeholder="End of chain"
+				class="w-24 rounded border border-input bg-card px-1 py-0.5"
 				value={column.step_index ?? ''}
 				oninput={setStepIndex}
 			/>
