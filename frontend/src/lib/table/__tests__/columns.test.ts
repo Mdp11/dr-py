@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, test } from 'vitest';
 import {
 	addColumn,
 	removeColumn,
@@ -9,16 +9,26 @@ import {
 	setColumnMode,
 	columnKindLabel,
 	columnLabel,
-	ColumnInUseError
+	ColumnInUseError,
+	navMaxStepIndex,
+	newNavigationColumn,
+	newPropertyColumn
 } from '$lib/table/columns';
-import type { TableDefinition } from '$lib/api/types';
+import { ColumnSchema, TableDefinitionSchema } from '$lib/api/types';
+import type { NavigationDefinition, TableDefinition } from '$lib/api/types';
 
 const base: TableDefinition = {
 	schema_version: 1,
 	default_cell_mode: 'collapse',
 	row_source: { kind: 'scope', types: ['Block'], criteria: [] },
 	columns: [
-		{ kind: 'element', source: { kind: 'row', chain_index: 0 }, header: '', width_px: null }
+		{
+			kind: 'element',
+			source: { kind: 'row', chain_index: 0 },
+			header: '',
+			width_px: null,
+			hidden: false
+		}
 	]
 };
 
@@ -31,7 +41,8 @@ describe('columns', () => {
 			mode: 'collapse',
 			keep_empty: true,
 			header: '',
-			width_px: null
+			width_px: null,
+			hidden: false
 		});
 		expect(d.columns).toHaveLength(2);
 		expect(base.columns).toHaveLength(1); // immutable
@@ -47,6 +58,7 @@ describe('columns', () => {
 			cell_cap: 20,
 			header: '',
 			width_px: null,
+			hidden: false,
 			navigation: {
 				definition: {
 					kind: 'path',
@@ -69,7 +81,8 @@ describe('columns', () => {
 			mode: 'collapse',
 			keep_empty: true,
 			header: '',
-			width_px: null
+			width_px: null,
+			hidden: false
 		});
 		d = addColumn(d, {
 			kind: 'navigation',
@@ -80,6 +93,7 @@ describe('columns', () => {
 			cell_cap: 20,
 			header: '',
 			width_px: null,
+			hidden: false,
 			navigation: {
 				definition: {
 					kind: 'path',
@@ -105,7 +119,8 @@ describe('columns', () => {
 			mode: 'collapse',
 			keep_empty: true,
 			header: '',
-			width_px: null
+			width_px: null,
+			hidden: false
 		});
 		d = addColumn(d, {
 			kind: 'navigation',
@@ -116,6 +131,7 @@ describe('columns', () => {
 			cell_cap: 20,
 			header: '',
 			width_px: null,
+			hidden: false,
 			navigation: {
 				definition: {
 					kind: 'path',
@@ -140,7 +156,8 @@ describe('columns', () => {
 			mode: 'collapse',
 			keep_empty: true,
 			header: '',
-			width_px: null
+			width_px: null,
+			hidden: false
 		});
 		d = addColumn(d, {
 			kind: 'navigation',
@@ -151,6 +168,7 @@ describe('columns', () => {
 			cell_cap: 20,
 			header: '',
 			width_px: null,
+			hidden: false,
 			navigation: {
 				definition: {
 					kind: 'path',
@@ -204,7 +222,8 @@ describe('columns', () => {
 			mode: 'collapse',
 			keep_empty: true,
 			header: '',
-			width_px: null
+			width_px: null,
+			hidden: false
 		});
 		const next = setColumnMode(withProp, 1, 'expand');
 		const col = next.columns[1];
@@ -223,7 +242,8 @@ describe('columns', () => {
 			mode: 'collapse' as const,
 			keep_empty: true,
 			header: '',
-			width_px: null
+			width_px: null,
+			hidden: false
 		};
 		const next = replaceColumn(base, 0, replacement);
 		expect(next.columns[0]).toBe(replacement); // reference-preserving (mirror-loop guard)
@@ -259,6 +279,7 @@ describe('columns', () => {
 					cell_cap: 20,
 					header: '',
 					width_px: null,
+					hidden: false,
 					navigation: { definition: proxied as never }
 				}
 			]
@@ -285,6 +306,7 @@ describe('columns', () => {
 			cell_cap: 20,
 			header: 'Nav',
 			width_px: null,
+			hidden: false,
 			navigation: {
 				definition: {
 					kind: 'path',
@@ -319,7 +341,8 @@ describe('columns', () => {
 				kind: 'element',
 				source: { kind: 'row', chain_index: 0 },
 				header: 'Custom',
-				width_px: null
+				width_px: null,
+				hidden: false
 			})
 		).toBe('Custom');
 		expect(
@@ -330,7 +353,8 @@ describe('columns', () => {
 				mode: 'collapse',
 				keep_empty: true,
 				header: '',
-				width_px: null
+				width_px: null,
+				hidden: false
 			})
 		).toBe('mass');
 		expect(
@@ -338,7 +362,8 @@ describe('columns', () => {
 				kind: 'element',
 				source: { kind: 'row', chain_index: 0 },
 				header: '',
-				width_px: null
+				width_px: null,
+				hidden: false
 			})
 		).toBe('Scope');
 		expect(
@@ -351,6 +376,7 @@ describe('columns', () => {
 				cell_cap: 20,
 				header: '',
 				width_px: null,
+				hidden: false,
 				navigation: {
 					definition: {
 						kind: 'path',
@@ -363,4 +389,57 @@ describe('columns', () => {
 			})
 		).toBe('Navigation');
 	});
+});
+
+test('factories produce schema-valid defaults', () => {
+	expect(ColumnSchema.parse(newPropertyColumn())).toMatchObject({ hidden: false, name: '' });
+	expect(ColumnSchema.parse(newNavigationColumn())).toMatchObject({ hidden: false, cell_cap: 20 });
+});
+
+test('navMaxStepIndex counts chain columns', () => {
+	const path = {
+		kind: 'path',
+		schema_version: 2,
+		start: { kind: 'scope', types: [], criteria: [] },
+		steps: [
+			{
+				kind: 'relationship',
+				relationship_type: 'r',
+				direction: 'out',
+				target_types: [],
+				children: []
+			},
+			{ kind: 'filter', criteria: [] },
+			{
+				kind: 'relationship',
+				relationship_type: 's',
+				direction: 'out',
+				target_types: [],
+				children: []
+			}
+		],
+		exclude_visited: true
+	} as NavigationDefinition;
+	expect(navMaxStepIndex(path)).toBe(2); // start + 2 relationship hops → max index 2
+	expect(
+		navMaxStepIndex({
+			kind: 'set_op',
+			schema_version: 2,
+			op: 'union',
+			operands: []
+		} as NavigationDefinition)
+	).toBe(0);
+});
+
+test('hidden and source step_index round-trip through the definition schema', () => {
+	const defn = TableDefinitionSchema.parse({
+		row_source: { kind: 'scope', types: [] },
+		columns: [
+			{ kind: 'element', source: { kind: 'row' } },
+			{ kind: 'navigation', navigation: {}, hidden: true },
+			{ kind: 'property', name: 'p', source: { kind: 'column', index: 1, step_index: 1 } }
+		]
+	});
+	expect(defn.columns[1].hidden).toBe(true);
+	expect((defn.columns[2].source as { step_index?: number | null }).step_index).toBe(1);
 });

@@ -21,6 +21,8 @@
 		columnKindLabel,
 		columnLabel,
 		moveColumn,
+		newNavigationColumn,
+		newPropertyColumn,
 		removeColumn,
 		renameColumn,
 		replaceColumn
@@ -126,35 +128,12 @@
 
 	function addPropertyColumn(): void {
 		if (!defn) return;
-		apply(
-			addColumn(defn, {
-				kind: 'property',
-				source: { kind: 'row', chain_index: 0 },
-				name: '',
-				mode: 'collapse',
-				keep_empty: true,
-				header: '',
-				width_px: null
-			})
-		);
+		apply(addColumn(defn, newPropertyColumn()));
 	}
 
 	function addNavigationColumn(): void {
 		if (!defn) return;
-		apply(
-			addColumn(defn, {
-				kind: 'navigation',
-				source: { kind: 'row', chain_index: 0 },
-				navigation: {},
-				step_index: null,
-				mode: 'collapse',
-				keep_empty: true,
-				sort_mode: 'value',
-				cell_cap: 20,
-				header: '',
-				width_px: null
-			})
-		);
+		apply(addColumn(defn, newNavigationColumn()));
 	}
 
 	// Whole-column field replacement for the per-column editors: a same-shape

@@ -575,7 +575,13 @@ const RowSlotSchema = z.object({
 	kind: z.literal('row'),
 	chain_index: z.number().int().default(0)
 });
-const ColumnRefSchema = z.object({ kind: z.literal('column'), index: z.number().int() });
+const ColumnRefSchema = z.object({
+	kind: z.literal('column'),
+	index: z.number().int(),
+	// only meaningful when the referenced column is a navigation column: the
+	// chain step this reference reads (null = the column's own projection)
+	step_index: z.number().int().nullish()
+});
 export const ColumnSourceSchema = z.discriminatedUnion('kind', [RowSlotSchema, ColumnRefSchema]);
 
 export const ScopeRowsSchema = z.object({
@@ -602,7 +608,8 @@ const ElementColumnSchema = z.object({
 	kind: z.literal('element'),
 	source: ColumnSourceSchema.default({ kind: 'row', chain_index: 0 }),
 	header: z.string().default(''),
-	width_px: z.number().int().nullish()
+	width_px: z.number().int().nullish(),
+	hidden: z.boolean().default(false)
 });
 const PropertyColumnSchema = z.object({
 	kind: z.literal('property'),
@@ -611,7 +618,8 @@ const PropertyColumnSchema = z.object({
 	mode: z.enum(['collapse', 'expand']).default('collapse'),
 	keep_empty: z.boolean().default(true),
 	header: z.string().default(''),
-	width_px: z.number().int().nullish()
+	width_px: z.number().int().nullish(),
+	hidden: z.boolean().default(false)
 });
 const NavigationColumnSchema = z.object({
 	kind: z.literal('navigation'),
@@ -623,7 +631,8 @@ const NavigationColumnSchema = z.object({
 	sort_mode: z.enum(['value', 'count']).default('value'),
 	cell_cap: z.number().int().default(20),
 	header: z.string().default(''),
-	width_px: z.number().int().nullish()
+	width_px: z.number().int().nullish(),
+	hidden: z.boolean().default(false)
 });
 export const ColumnSchema = z.discriminatedUnion('kind', [
 	ElementColumnSchema,

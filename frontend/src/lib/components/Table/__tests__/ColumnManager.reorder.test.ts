@@ -62,7 +62,8 @@ function navColumn(header: string, definition: NavigationDefinition): NavColumn 
 		sort_mode: 'value',
 		cell_cap: 20,
 		header,
-		width_px: null
+		width_px: null,
+		hidden: false
 	};
 }
 

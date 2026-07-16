@@ -43,7 +43,8 @@ function propColumn(name = ''): PropColumn {
 		mode: 'collapse',
 		keep_empty: true,
 		header: '',
-		width_px: null
+		width_px: null,
+		hidden: false
 	};
 }
 

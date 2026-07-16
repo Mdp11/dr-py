@@ -46,7 +46,13 @@ const DRAFT: store.TableDraft = {
 		default_cell_mode: 'collapse',
 		row_source: { kind: 'scope', types: ['Block'], criteria: [] },
 		columns: [
-			{ kind: 'element', source: { kind: 'row', chain_index: 0 }, header: 'Block', width_px: null },
+			{
+				kind: 'element',
+				source: { kind: 'row', chain_index: 0 },
+				header: 'Block',
+				width_px: null,
+				hidden: false
+			},
 			{
 				kind: 'property',
 				source: { kind: 'row', chain_index: 0 },
@@ -54,7 +60,8 @@ const DRAFT: store.TableDraft = {
 				mode: 'collapse',
 				keep_empty: true,
 				header: 'Mass',
-				width_px: null
+				width_px: null,
+				hidden: false
 			}
 		]
 	}

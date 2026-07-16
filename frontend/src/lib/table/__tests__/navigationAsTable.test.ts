@@ -51,7 +51,8 @@ describe('navigationAsTableDefinition', () => {
 			kind: 'element',
 			source: { kind: 'row', chain_index: 0 },
 			header: 'Start',
-			width_px: null
+			width_px: null,
+			hidden: false
 		});
 	});
 });

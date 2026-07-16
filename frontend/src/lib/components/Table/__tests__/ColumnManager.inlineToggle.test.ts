@@ -59,7 +59,8 @@ function navColumn(navigation: NavColumn['navigation']): NavColumn {
 		sort_mode: 'value',
 		cell_cap: 20,
 		header: 'Nav',
-		width_px: null
+		width_px: null,
+		hidden: false
 	};
 }
 

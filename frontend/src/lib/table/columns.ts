@@ -39,6 +39,44 @@ function sourcesColumn(source: ColumnSource, index: number): boolean {
 	return source.kind === 'column' && source.index === index;
 }
 
+/** Fresh default columns for the two addable kinds — shared by ColumnManager's
+ * add buttons and the grid header's "+" menu. */
+export function newPropertyColumn(): Column {
+	return {
+		kind: 'property',
+		source: { kind: 'row', chain_index: 0 },
+		name: '',
+		mode: 'collapse',
+		keep_empty: true,
+		header: '',
+		width_px: null,
+		hidden: false
+	};
+}
+
+export function newNavigationColumn(): Column {
+	return {
+		kind: 'navigation',
+		source: { kind: 'row', chain_index: 0 },
+		navigation: {},
+		step_index: null,
+		mode: 'collapse',
+		keep_empty: true,
+		sort_mode: 'value',
+		cell_cap: 20,
+		header: '',
+		width_px: null,
+		hidden: false
+	};
+}
+
+/** Highest addressable chain step of a navigation definition: a path has one
+ * column per relationship/property hop plus the start (index 0); a set_op
+ * root exposes a single implicit column. */
+export function navMaxStepIndex(defn: NavigationDefinition): number {
+	return defn.kind === 'path' ? Math.max(0, chainColumns(defn).length - 1) : 0;
+}
+
 export function addColumn(defn: TableDefinition, col: Column): TableDefinition {
 	const next = clone(defn);
 	next.columns.push(col);
@@ -160,14 +198,16 @@ export function navigationAsTableDefinition({
 					kind: 'element',
 					source: { kind: 'row', chain_index: col.index },
 					header: col.label,
-					width_px: null
+					width_px: null,
+					hidden: false
 				}))
 			: [
 					{
 						kind: 'element',
 						source: { kind: 'row', chain_index: 0 },
 						header: 'Start',
-						width_px: null
+						width_px: null,
+						hidden: false
 					}
 				];
 	return {

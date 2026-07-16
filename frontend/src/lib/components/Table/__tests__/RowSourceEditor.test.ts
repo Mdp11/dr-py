@@ -18,7 +18,13 @@ function defnWith(rowSource: TableDefinition['row_source']): TableDefinition {
 		default_cell_mode: 'collapse',
 		row_source: rowSource,
 		columns: [
-			{ kind: 'element', source: { kind: 'row', chain_index: 0 }, header: '', width_px: null }
+			{
+				kind: 'element',
+				source: { kind: 'row', chain_index: 0 },
+				header: '',
+				width_px: null,
+				hidden: false
+			}
 		]
 	};
 }

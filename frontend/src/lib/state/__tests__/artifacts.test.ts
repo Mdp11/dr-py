@@ -111,7 +111,15 @@ describe('artifacts store', () => {
 			schema_version: 1,
 			default_cell_mode: 'collapse',
 			row_source: { kind: 'scope', types: [], criteria: [] },
-			columns: [{ kind: 'element', source: { kind: 'row', chain_index: 0 }, header: '' }]
+			columns: [
+				{
+					kind: 'element',
+					source: { kind: 'row', chain_index: 0 },
+					header: '',
+					width_px: null,
+					hidden: false
+				}
+			]
 		};
 		const create = vi.spyOn(api, 'createArtifact').mockResolvedValue({
 			id: 't1',
