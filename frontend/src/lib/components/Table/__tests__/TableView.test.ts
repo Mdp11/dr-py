@@ -32,6 +32,7 @@ const h = vi.hoisted(() => ({
 // so any export TableGrid imports must be present or the mount throws.
 vi.mock('$lib/state', () => ({
 	canEdit: () => h.editable,
+	getMetamodel: () => null,
 	ensureTableDraft: vi.fn(async () => {}),
 	getTableDraft: () => h.draft,
 	getTableConflict: () => undefined,
@@ -48,13 +49,31 @@ vi.mock('$lib/state', () => ({
 	setTableSort: vi.fn(),
 	updateTableDefinition: vi.fn(),
 	ensureTableRange: vi.fn(),
-	lockBadgeFor: () => ({ state: 'none' })
+	lockBadgeFor: () => ({ state: 'none' }),
+	// RowSourceEditor's dependencies (mounted once the settings dialog opens
+	// unfocused — the "shows every column" path renders it for real).
+	closeDraft: vi.fn(),
+	ensureEmbeddedDraft: vi.fn(),
+	getArtifactHeaders: () => [],
+	getDraft: () => undefined
 }));
 
 function render(tabId: string) {
 	const c = mount(TableView, { target: document.body, props: { tabId } });
 	flushSync();
 	return c;
+}
+
+/** Wait up to ms for predicate to be truthy, polling every 10 ms — bits-ui's
+ * Dialog defers unmounting Content until its close "animation" resolves via
+ * requestAnimationFrame, which flushSync() alone does not drive. */
+async function waitFor(pred: () => boolean, ms = 2000): Promise<void> {
+	const deadline = Date.now() + ms;
+	while (!pred()) {
+		if (Date.now() > deadline) throw new Error('waitFor timed out');
+		await new Promise((r) => setTimeout(r, 10));
+		flushSync();
+	}
 }
 
 afterEach(() => {
@@ -81,6 +100,116 @@ describe('TableView settings popup', () => {
 		const c = render('tbl:draft:1');
 		try {
 			expect(document.querySelector('[data-testid="table-settings-button"]')).toBeNull();
+		} finally {
+			unmount(c);
+		}
+	});
+});
+
+describe('TableView header edit / add-column focus', () => {
+	afterEach(() => {
+		h.page = undefined;
+		(h.draft as { definition: { row_source: unknown; columns: unknown[] } }).definition = {
+			row_source: { kind: 'scope', scope: {} },
+			columns: []
+		};
+	});
+
+	function seedTwoColumnPage(): void {
+		h.page = {
+			columns: [
+				{ kind: 'element', header: 'Scope', width_px: null },
+				{ kind: 'property', header: 'Mass', width_px: null }
+			],
+			rows: [],
+			total: 0,
+			truncated: false,
+			offset: 0,
+			model_rev: 1
+		};
+		(h.draft as { definition: { row_source: unknown; columns: unknown[] } }).definition = {
+			// A real scope row source — the unfocused path renders RowSourceEditor
+			// → ScopeEditor for real, which needs `types`/`criteria` present.
+			row_source: { kind: 'scope', types: ['Block'], criteria: [] },
+			columns: [
+				{
+					kind: 'element',
+					source: { kind: 'row', chain_index: 0 },
+					header: '',
+					width_px: null,
+					hidden: false
+				},
+				{
+					kind: 'property',
+					source: { kind: 'row', chain_index: 0 },
+					name: 'mass',
+					mode: 'collapse',
+					keep_empty: true,
+					header: '',
+					width_px: null,
+					hidden: false
+				}
+			]
+		};
+	}
+
+	it('clicking a header edit button opens the dialog focused on just that column', () => {
+		seedTwoColumnPage();
+		const c = render('tbl:draft:1');
+		try {
+			const editBtn = document.querySelector('[data-testid="header-edit-1"]') as HTMLElement;
+			expect(editBtn).not.toBeNull();
+			editBtn.click();
+			flushSync();
+			const manager = document.querySelector('[data-testid="column-manager"]') as HTMLElement;
+			expect(manager).not.toBeNull();
+			expect(manager.querySelectorAll('[data-testid^="toggle-hidden-"]').length).toBe(1);
+			expect(manager.querySelector('[data-testid="toggle-hidden-1"]')).not.toBeNull();
+			expect(document.body.textContent).toContain('Column settings');
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('the Settings button path still shows every column', () => {
+		seedTwoColumnPage();
+		const c = render('tbl:draft:1');
+		try {
+			const settingsBtn = document.querySelector(
+				'[data-testid="table-settings-button"]'
+			) as HTMLElement;
+			settingsBtn.click();
+			flushSync();
+			const manager = document.querySelector('[data-testid="column-manager"]') as HTMLElement;
+			expect(manager).not.toBeNull();
+			expect(manager.querySelectorAll('[data-testid^="toggle-hidden-"]').length).toBe(2);
+			expect(document.body.textContent).toContain('Table settings');
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('resets the focused column back to null once the dialog closes and reopens via Settings', async () => {
+		seedTwoColumnPage();
+		const c = render('tbl:draft:1');
+		try {
+			const editBtn = document.querySelector('[data-testid="header-edit-1"]') as HTMLElement;
+			editBtn.click();
+			flushSync();
+			// Close the dialog via its built-in close button (bits-ui fires
+			// onOpenChange(false), which is where the focus reset lives). Content
+			// unmount is deferred until bits-ui's close "animation" resolves.
+			const closeBtn = document.querySelector('[data-slot="dialog-close"]') as HTMLElement;
+			expect(closeBtn).not.toBeNull();
+			closeBtn.click();
+			await waitFor(() => document.querySelector('[data-testid="column-manager"]') === null);
+			const settingsBtn = document.querySelector(
+				'[data-testid="table-settings-button"]'
+			) as HTMLElement;
+			settingsBtn.click();
+			flushSync();
+			const manager = document.querySelector('[data-testid="column-manager"]') as HTMLElement;
+			expect(manager.querySelectorAll('[data-testid^="toggle-hidden-"]').length).toBe(2);
 		} finally {
 			unmount(c);
 		}

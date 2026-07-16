@@ -362,6 +362,98 @@ describe('TableGrid', () => {
 		}
 	});
 
+	it('renders no per-column edit button and no add-column control without handlers', () => {
+		vi.spyOn(store, 'getTablePage').mockReturnValue(PAGE);
+		vi.spyOn(store, 'getTableLoading').mockReturnValue(false);
+		const c = render('tbl:draft:noedit');
+		try {
+			expect(document.querySelector('[data-testid^="header-edit-"]')).toBeNull();
+			expect(document.querySelector('[data-testid="header-add-column"]')).toBeNull();
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('reports the DEFINITION index to onEditColumn, even when an earlier column is hidden', () => {
+		const page: TablePage = {
+			...PAGE,
+			columns: [
+				{ kind: 'element', header: 'Block', width_px: null },
+				{ kind: 'property', header: 'Mass', width_px: null },
+				{ kind: 'property', header: 'Volume', width_px: null }
+			],
+			rows: []
+		};
+		const draft: store.TableDraft = {
+			...DRAFT,
+			definition: {
+				...DRAFT.definition,
+				columns: [
+					DRAFT.definition.columns[0],
+					{ ...DRAFT.definition.columns[1], hidden: true },
+					{
+						kind: 'property',
+						source: { kind: 'row', chain_index: 0 },
+						name: 'Volume',
+						mode: 'collapse',
+						keep_empty: true,
+						header: 'Volume',
+						width_px: null,
+						hidden: false
+					}
+				]
+			}
+		};
+		vi.spyOn(store, 'getTablePage').mockReturnValue(page);
+		vi.spyOn(store, 'getTableLoading').mockReturnValue(false);
+		vi.spyOn(store, 'getTableDraft').mockReturnValue(draft);
+		const onEditColumn = vi.fn();
+		const c = mount(TableGrid, {
+			target: document.body,
+			props: { tabId: 'tbl:draft:edithidden', onEditColumn }
+		});
+		flushSync();
+		try {
+			// column 1 (def index) is hidden — no DOM node for it at all.
+			expect(document.querySelector('[data-testid="header-edit-1"]')).toBeNull();
+			expect(document.querySelector('[data-testid="header-edit-0"]')).not.toBeNull();
+			const btn2 = document.querySelector('[data-testid="header-edit-2"]') as HTMLElement;
+			expect(btn2).not.toBeNull();
+			btn2.click();
+			flushSync();
+			expect(onEditColumn).toHaveBeenCalledWith(2);
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('shows an add-column control that opens a menu of column kinds', () => {
+		vi.spyOn(store, 'getTablePage').mockReturnValue(PAGE);
+		vi.spyOn(store, 'getTableLoading').mockReturnValue(false);
+		const onAddColumn = vi.fn();
+		const c = mount(TableGrid, {
+			target: document.body,
+			props: { tabId: 'tbl:draft:addcol', onAddColumn }
+		});
+		flushSync();
+		try {
+			const trigger = document.querySelector('[data-testid="header-add-column"]') as HTMLElement;
+			expect(trigger).not.toBeNull();
+			trigger.click();
+			flushSync();
+			const items = [...document.querySelectorAll('[role="menuitem"]')];
+			const propertyItem = items.find((el) => el.textContent?.includes('Property column'));
+			const navItem = items.find((el) => el.textContent?.includes('Navigation column'));
+			expect(propertyItem).toBeDefined();
+			expect(navItem).toBeDefined();
+			(propertyItem as HTMLElement).click();
+			flushSync();
+			expect(onAddColumn).toHaveBeenCalledWith('property');
+		} finally {
+			unmount(c);
+		}
+	});
+
 	it('tints cells of a locked element: orange for my lock, red for a peer lock', () => {
 		vi.spyOn(store, 'getTablePage').mockReturnValue(PAGE);
 		vi.spyOn(store, 'getTableLoading').mockReturnValue(false);

@@ -33,7 +33,7 @@
 	import PropertyColumnEditor from './PropertyColumnEditor.svelte';
 	import RowSourceEditor from './RowSourceEditor.svelte';
 
-	let { tabId }: { tabId: string } = $props();
+	let { tabId, focusIndex = null }: { tabId: string; focusIndex?: number | null } = $props();
 
 	const draft = $derived(getTableDraft(tabId));
 	const defn = $derived(draft?.definition);
@@ -151,7 +151,9 @@
 
 {#if defn}
 	<div data-testid="column-manager" class="space-y-3 text-xs">
-		<RowSourceEditor {tabId} {defn} />
+		{#if focusIndex === null}
+			<RowSourceEditor {tabId} {defn} />
+		{/if}
 
 		{#if error}
 			<p data-testid="column-manager-error" class="text-destructive">{error}</p>
@@ -159,107 +161,115 @@
 
 		<div class="space-y-1.5">
 			{#each defn.columns as col, i (i)}
-				<div class="rounded border border-border/70 p-1.5">
-					<div class="flex flex-wrap items-center gap-1.5" class:opacity-60={col.hidden}>
-						<span class="w-4 shrink-0 text-center font-mono text-[10px] text-muted-foreground/70">
-							{i}
-						</span>
-						<span
-							class="rounded bg-muted px-1 py-0.5 font-mono text-[10px] text-muted-foreground uppercase"
-						>
-							{columnKindLabel(col.kind)}
-						</span>
-						<input
-							class="min-w-0 flex-1 rounded border border-input bg-card px-1.5 py-0.5"
-							placeholder={columnLabel(col)}
-							value={col.header}
-							oninput={(e) => onRenameInput(i, (e.currentTarget as HTMLInputElement).value)}
-							onchange={(e) => onRenameCommit(i, (e.currentTarget as HTMLInputElement).value)}
-						/>
-						<button
-							type="button"
-							data-testid="move-up-{i}"
-							class="rounded border border-input px-1 py-0.5 text-[10px] hover:bg-muted disabled:opacity-30"
-							disabled={i === 0}
-							onclick={() => onMove(i, 'up')}
-						>
-							&uarr;
-						</button>
-						<button
-							type="button"
-							data-testid="move-down-{i}"
-							class="rounded border border-input px-1 py-0.5 text-[10px] hover:bg-muted disabled:opacity-30"
-							disabled={i === defn.columns.length - 1}
-							onclick={() => onMove(i, 'down')}
-						>
-							&darr;
-						</button>
-						<button
-							type="button"
-							data-testid="toggle-hidden-{i}"
-							class="rounded border border-input px-1 py-0.5 text-[10px] hover:bg-muted"
-							aria-label={col.hidden ? 'Show column' : 'Hide column'}
-							title={col.hidden
-								? 'Show this column in the table and exports again'
-								: 'Hide from the table and exports — still computed and usable as an "Earlier column" source'}
-							onclick={() => onColumnChange(i, { ...col, hidden: !col.hidden })}
-						>
-							{#if col.hidden}<EyeOff class="size-3" data-testid="eye-off-icon" />{:else}<Eye
-									class="size-3"
-								/>{/if}
-						</button>
-						<button
-							type="button"
-							data-testid="remove-column-{i}"
-							class="rounded border border-destructive/40 px-1.5 py-0.5 text-[10px] text-destructive hover:bg-destructive/10 disabled:opacity-30"
-							disabled={col.kind === 'element' && elementColumnCount <= 1}
-							title={col.kind === 'element' && elementColumnCount <= 1
-								? 'The scope column cannot be removed'
-								: 'Remove this column'}
-							onclick={() => onRemove(i)}
-						>
-							remove
-						</button>
+				{#if focusIndex === null || focusIndex === i}
+					<div class="rounded border border-border/70 p-1.5">
+						<div class="flex flex-wrap items-center gap-1.5" class:opacity-60={col.hidden}>
+							<span class="w-4 shrink-0 text-center font-mono text-[10px] text-muted-foreground/70">
+								{i}
+							</span>
+							<span
+								class="rounded bg-muted px-1 py-0.5 font-mono text-[10px] text-muted-foreground uppercase"
+							>
+								{columnKindLabel(col.kind)}
+							</span>
+							<input
+								class="min-w-0 flex-1 rounded border border-input bg-card px-1.5 py-0.5"
+								placeholder={columnLabel(col)}
+								value={col.header}
+								oninput={(e) => onRenameInput(i, (e.currentTarget as HTMLInputElement).value)}
+								onchange={(e) => onRenameCommit(i, (e.currentTarget as HTMLInputElement).value)}
+							/>
+							{#if focusIndex === null}
+								<button
+									type="button"
+									data-testid="move-up-{i}"
+									class="rounded border border-input px-1 py-0.5 text-[10px] hover:bg-muted disabled:opacity-30"
+									disabled={i === 0}
+									onclick={() => onMove(i, 'up')}
+								>
+									&uarr;
+								</button>
+								<button
+									type="button"
+									data-testid="move-down-{i}"
+									class="rounded border border-input px-1 py-0.5 text-[10px] hover:bg-muted disabled:opacity-30"
+									disabled={i === defn.columns.length - 1}
+									onclick={() => onMove(i, 'down')}
+								>
+									&darr;
+								</button>
+							{/if}
+							<button
+								type="button"
+								data-testid="toggle-hidden-{i}"
+								class="rounded border border-input px-1 py-0.5 text-[10px] hover:bg-muted"
+								aria-label={col.hidden ? 'Show column' : 'Hide column'}
+								title={col.hidden
+									? 'Show this column in the table and exports again'
+									: 'Hide from the table and exports — still computed and usable as an "Earlier column" source'}
+								onclick={() => onColumnChange(i, { ...col, hidden: !col.hidden })}
+							>
+								{#if col.hidden}<EyeOff class="size-3" data-testid="eye-off-icon" />{:else}<Eye
+										class="size-3"
+									/>{/if}
+							</button>
+							{#if focusIndex === null}
+								<button
+									type="button"
+									data-testid="remove-column-{i}"
+									class="rounded border border-destructive/40 px-1.5 py-0.5 text-[10px] text-destructive hover:bg-destructive/10 disabled:opacity-30"
+									disabled={col.kind === 'element' && elementColumnCount <= 1}
+									title={col.kind === 'element' && elementColumnCount <= 1
+										? 'The scope column cannot be removed'
+										: 'Remove this column'}
+									onclick={() => onRemove(i)}
+								>
+									remove
+								</button>
+							{/if}
+						</div>
+						{#if col.kind === 'navigation'}
+							<NavigationColumnEditor
+								column={col}
+								columnIndex={i}
+								columns={defn.columns}
+								rowSource={defn.row_source}
+								{sampleRowElementId}
+								onChange={(next) => onColumnChange(i, next)}
+							/>
+						{:else if col.kind === 'property'}
+							<PropertyColumnEditor
+								column={col}
+								columnIndex={i}
+								columns={defn.columns}
+								rowSource={defn.row_source}
+								onChange={(next) => onColumnChange(i, next)}
+							/>
+						{/if}
 					</div>
-					{#if col.kind === 'navigation'}
-						<NavigationColumnEditor
-							column={col}
-							columnIndex={i}
-							columns={defn.columns}
-							rowSource={defn.row_source}
-							{sampleRowElementId}
-							onChange={(next) => onColumnChange(i, next)}
-						/>
-					{:else if col.kind === 'property'}
-						<PropertyColumnEditor
-							column={col}
-							columnIndex={i}
-							columns={defn.columns}
-							rowSource={defn.row_source}
-							onChange={(next) => onColumnChange(i, next)}
-						/>
-					{/if}
-				</div>
+				{/if}
 			{/each}
 		</div>
 
-		<div class="flex flex-wrap items-center gap-2 border-t border-border pt-2">
-			<button
-				type="button"
-				data-testid="add-property-column"
-				class="rounded border border-input px-2 py-1 text-[11px] hover:bg-muted"
-				onclick={addPropertyColumn}
-			>
-				+ Property column
-			</button>
-			<button
-				type="button"
-				data-testid="add-navigation-column"
-				class="rounded border border-input px-2 py-1 text-[11px] hover:bg-muted"
-				onclick={addNavigationColumn}
-			>
-				+ Navigation column
-			</button>
-		</div>
+		{#if focusIndex === null}
+			<div class="flex flex-wrap items-center gap-2 border-t border-border pt-2">
+				<button
+					type="button"
+					data-testid="add-property-column"
+					class="rounded border border-input px-2 py-1 text-[11px] hover:bg-muted"
+					onclick={addPropertyColumn}
+				>
+					+ Property column
+				</button>
+				<button
+					type="button"
+					data-testid="add-navigation-column"
+					class="rounded border border-input px-2 py-1 text-[11px] hover:bg-muted"
+					onclick={addNavigationColumn}
+				>
+					+ Navigation column
+				</button>
+			</div>
+		{/if}
 	</div>
 {/if}

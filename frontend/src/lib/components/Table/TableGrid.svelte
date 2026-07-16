@@ -20,12 +20,22 @@
 	} from '$lib/state';
 	import { columnKindLabel, setColumnWidth } from '$lib/table/columns';
 	import { computeWindowVariable } from '$lib/components/Sidebar/windowing';
+	import { Pencil, Plus } from '@lucide/svelte';
+	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import ElementCell from './Cell/ElementCell.svelte';
 	import ElementsCell from './Cell/ElementsCell.svelte';
 	import ValueCell from './Cell/ValueCell.svelte';
 	import ValuesCell from './Cell/ValuesCell.svelte';
 
-	let { tabId }: { tabId: string } = $props();
+	let {
+		tabId,
+		onEditColumn,
+		onAddColumn
+	}: {
+		tabId: string;
+		onEditColumn?: (index: number) => void;
+		onAddColumn?: (kind: 'property' | 'navigation') => void;
+	} = $props();
 
 	const ROW_H = 28;
 	const OVERSCAN = 8;
@@ -230,6 +240,18 @@
 				>
 					{#if sort?.column === v.i}{sort.direction === 'asc' ? '▲' : '▼'}{:else}↕{/if}
 				</button>
+				{#if onEditColumn}
+					<button
+						type="button"
+						data-testid="header-edit-{v.i}"
+						aria-label="Edit column {v.col.header || columnKindLabel(v.col.kind)}"
+						title="Edit this column's settings"
+						class="shrink-0 text-muted-foreground/50 transition-colors hover:text-foreground"
+						onclick={() => onEditColumn?.(v.i)}
+					>
+						<Pencil class="size-3" />
+					</button>
+				{/if}
 				<div
 					role="separator"
 					aria-orientation="vertical"
@@ -248,6 +270,28 @@
 				></div>
 			</div>
 		{/each}
+		{#if onAddColumn}
+			<div class="flex shrink-0 items-center px-1">
+				<DropdownMenu.Root>
+					<DropdownMenu.Trigger
+						data-testid="header-add-column"
+						aria-label="Add a column"
+						title="Add a column"
+						class="rounded border border-dashed border-input px-1.5 py-0.5 text-muted-foreground/70 transition-colors hover:text-foreground"
+					>
+						<Plus class="size-3" />
+					</DropdownMenu.Trigger>
+					<DropdownMenu.Content align="start">
+						<DropdownMenu.Item onSelect={() => onAddColumn?.('property')}>
+							Property column
+						</DropdownMenu.Item>
+						<DropdownMenu.Item onSelect={() => onAddColumn?.('navigation')}>
+							Navigation column
+						</DropdownMenu.Item>
+					</DropdownMenu.Content>
+				</DropdownMenu.Root>
+			</div>
+		{/if}
 	</div>
 
 	{#if error}

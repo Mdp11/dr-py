@@ -14,10 +14,12 @@
 		reloadTableDraft,
 		saveAsTableDraft,
 		saveTableDraft,
-		setTableName
+		setTableName,
+		updateTableDefinition
 	} from '$lib/state';
 	import { Settings } from '@lucide/svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
+	import { addColumn, newNavigationColumn, newPropertyColumn } from '$lib/table/columns';
 	import ColumnManager from './ColumnManager.svelte';
 	import TableGrid from './TableGrid.svelte';
 
@@ -36,6 +38,29 @@
 	);
 	let saveError = $state<string | null>(null);
 	let settingsOpen = $state(false);
+	// Which column the settings dialog is scoped to — null shows the whole
+	// definition editor (row source + every column); a definition index shows
+	// only that column's card (see ColumnManager's focusIndex).
+	let settingsFocus = $state<number | null>(null);
+
+	function editColumn(index: number): void {
+		settingsFocus = index;
+		settingsOpen = true;
+	}
+
+	// The header "+" menu appends a fresh column, then focuses the dialog on
+	// it — the new column's definition index is always `length - 1` regardless
+	// of any hidden columns (addColumn only ever pushes).
+	function addColumnFromHeader(kind: 'property' | 'navigation'): void {
+		const d = getTableDraft(tabId);
+		if (!d) return;
+		updateTableDefinition(
+			tabId,
+			addColumn(d.definition, kind === 'property' ? newPropertyColumn() : newNavigationColumn())
+		);
+		settingsFocus = getTableDraft(tabId)!.definition.columns.length - 1;
+		settingsOpen = true;
+	}
 
 	async function save(): Promise<void> {
 		saveError = null;
@@ -104,7 +129,10 @@
 						type="button"
 						data-testid="table-settings-button"
 						class="flex items-center gap-1 rounded border border-input px-2 py-1 text-xs text-foreground/80 transition-colors hover:bg-muted"
-						onclick={() => (settingsOpen = true)}
+						onclick={() => {
+							settingsFocus = null;
+							settingsOpen = true;
+						}}
 					>
 						<Settings class="h-3.5 w-3.5" /> Settings
 					</button>
@@ -147,17 +175,26 @@
 			<p class="px-3 py-1 text-xs text-destructive">{saveError}</p>
 		{/if}
 		<div class="min-h-0 flex-1">
-			<TableGrid {tabId} />
+			<TableGrid
+				{tabId}
+				onEditColumn={editable ? editColumn : undefined}
+				onAddColumn={editable ? addColumnFromHeader : undefined}
+			/>
 		</div>
 	</div>
 
 	{#if editable}
-		<Dialog.Root bind:open={settingsOpen}>
+		<Dialog.Root
+			bind:open={settingsOpen}
+			onOpenChange={(o) => {
+				if (!o) settingsFocus = null;
+			}}
+		>
 			<Dialog.Content class="max-h-[85vh] max-w-3xl overflow-y-auto">
 				<Dialog.Title class="font-display text-lg font-light tracking-wide">
-					Table settings
+					{settingsFocus === null ? 'Table settings' : 'Column settings'}
 				</Dialog.Title>
-				<ColumnManager {tabId} />
+				<ColumnManager {tabId} focusIndex={settingsFocus} />
 			</Dialog.Content>
 		</Dialog.Root>
 	{/if}

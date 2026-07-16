@@ -258,6 +258,55 @@ describe('ColumnManager', () => {
 		}
 	});
 
+	it('focusIndex renders only that column: no row source, no add buttons, no move/remove — rename, eye and kind editor stay', () => {
+		vi.spyOn(store, 'getTableDraft').mockReturnValue(
+			scopeDraft([
+				{
+					kind: 'element',
+					source: { kind: 'row', chain_index: 0 },
+					header: '',
+					width_px: null,
+					hidden: false
+				},
+				{
+					kind: 'property',
+					source: { kind: 'row', chain_index: 0 },
+					name: 'mass',
+					mode: 'collapse',
+					keep_empty: true,
+					header: '',
+					width_px: null,
+					hidden: false
+				}
+			])
+		);
+		const component = mount(ColumnManager, {
+			target: document.body,
+			props: { tabId: 't', focusIndex: 1 }
+		});
+		flushSync();
+		try {
+			expect(document.querySelector('[data-testid="row-source-editor"]')).toBeNull();
+			expect(document.querySelector('[data-testid="add-property-column"]')).toBeNull();
+			expect(document.querySelector('[data-testid="add-navigation-column"]')).toBeNull();
+			expect(document.querySelector('[data-testid="move-up-1"]')).toBeNull();
+			expect(document.querySelector('[data-testid="move-down-1"]')).toBeNull();
+			expect(document.querySelector('[data-testid="remove-column-1"]')).toBeNull();
+			// column 0 is not the focused index — its card does not render at all.
+			expect(document.querySelector('[data-testid="toggle-hidden-0"]')).toBeNull();
+			// column 1 is focused — rename input, eye toggle and kind editor stay.
+			expect(document.querySelector('[data-testid="toggle-hidden-1"]')).not.toBeNull();
+			const manager = document.querySelector('[data-testid="column-manager"]') as HTMLElement;
+			// The rename input (placeholder falls back to columnLabel — the
+			// column's name, "mass") stays…
+			expect(manager.querySelector('input[placeholder="mass"]')).not.toBeNull();
+			// …and so does the kind editor (PropertyColumnEditor's own field).
+			expect(manager.querySelector('input[placeholder="property name"]')).not.toBeNull();
+		} finally {
+			unmount(component);
+		}
+	});
+
 	it('catches ColumnInUseError on remove and shows a message without calling updateTableDefinition', () => {
 		// Two element columns so column 0's remove button is ENABLED (the
 		// sole-scope-column guard doesn't apply) and the error path is what's
