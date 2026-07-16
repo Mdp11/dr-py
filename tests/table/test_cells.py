@@ -178,6 +178,45 @@ def test_chain_index_out_of_range_raises_value_error():
         evaluate_cells(mm, model, defn, keys)
 
 
+def test_property_step_navigation_column_resolves_referenced_element():
+    # Regression: a `property`-kind navigation step (Task 1/2) must flow
+    # through the table layer unchanged — one chain column per hop, terminal
+    # step_index=None resolving to the referenced element. Distinct metamodel
+    # (Building/Sensor) from the module fixture since it needs an
+    # element-reference property, which _mm() doesn't have.
+    mm = Metamodel(
+        elements=[
+            ElementType(
+                name="Building",
+                properties=[PropertyDef(name="name", datatype="string")],
+            ),
+            ElementType(
+                name="Sensor",
+                properties=[PropertyDef(name="building", datatype="Building")],
+            ),
+        ],
+    )
+    model = Model(mm)
+    building = model.create_element("Building")
+    model.set_property(building, "name", "B1")
+    sensor = model.create_element("Sensor")
+    model.set_property(sensor, "building", building.id)
+
+    _, keys, cells = _eval(mm, model, {
+        "row_source": {"kind": "scope", "types": ["Sensor"]},
+        "columns": [{"kind": "navigation", "source": {"kind": "row"},
+            "navigation": {"definition": {"kind": "path", "start": {"kind": "row"},
+                "steps": [{"kind": "property", "property_name": "building"}],
+                "exclude_visited": True}}}],
+    })
+    assert len(keys) == 1
+    cell = cells[0][0]
+    assert isinstance(cell, ElementsCell)
+    assert cell.element_ids == [building.id]
+    assert cell.total == 1
+    assert cell.truncated is False
+
+
 def test_export_limits_ignore_per_column_cell_cap():
     # The export path must carry the COMPLETE reached set: `ignore_cell_caps`
     # bypasses the per-column display cap (previously min(cell_cap, ...) kept

@@ -276,6 +276,41 @@ def test_evaluate_row_rooted_navigation_binds_row_element(client: TestClient) ->
     assert all(chain[0]["id"] == root_id for chain in chains)
 
 
+def test_evaluate_property_step_hops_through_reference_property(
+    client: TestClient,
+) -> None:
+    # Regression: a `property`-kind navigation step (Task 1/2) must flow
+    # through the route unchanged. example.metamodel.yaml's
+    # Requirement.refines (datatype=Requirement, multiplicity 0..*) is an
+    # existing element-reference property, so no metamodel upload is needed.
+    _bootstrap_model(client)
+    r1 = client.post(
+        f"{API}/model/elements",
+        json={"type": "Requirement", "properties": {"name": "R1"}},
+    ).json()
+    r2 = client.post(
+        f"{API}/model/elements",
+        json={"type": "Requirement",
+              "properties": {"name": "R2", "refines": [r1["id"]]}},
+    ).json()
+    res = client.post(
+        f"{API}/navigations/evaluate",
+        json={"definition": {
+            "kind": "path",
+            "start": {"kind": "scope", "types": ["Requirement"],
+                      "criteria": [{"type": "name_id", "field": "name",
+                                    "op": "equals", "value": "R2"}]},
+            "steps": [{"kind": "property", "property_name": "refines"}],
+        }},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["step_types"] == ["refines"]
+    chains = body["chains"]
+    assert len(chains) == 1
+    assert [el["id"] for el in chains[0]] == [r2["id"], r1["id"]]
+
+
 def test_evaluate_row_rooted_without_binding_422(client: TestClient) -> None:
     _bootstrap_model(client)
     body = {"definition": {"kind": "path", "start": {"kind": "row"}, "steps": []}}
