@@ -306,7 +306,10 @@ src/
                         api/checkout.ts — the locks + commits REST client;
                         history.svelte.ts — commit-list store (paged
                         GET /commits), rev→ModelOut reconstruction cache,
-                        resetHistory/loadFirstPage/loadMore/modelAt
+                        resetHistory/loadFirstPage/loadMore/modelAt;
+                        unsaved.ts — hasUnsavedWork() (staged ops + dirty
+                        table/navigation drafts), input to the workspace
+                        unload guard (beforeNavigate in p/[projectId]/+page)
     metamodel/          Pure helpers (effective properties, multiplicity,
                         containment, subtype) mirroring the Python schema
     components/         TopBar, Sidebar, Workspace, Inspector, StatusBar,

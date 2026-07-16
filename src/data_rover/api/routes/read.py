@@ -38,6 +38,7 @@ from pydantic import BaseModel
 from data_rover.core.model.element import Element
 from data_rover.core.model.model import Model
 from data_rover.core.model.naming import display_name as _display_name
+from data_rover.core.model.naming import name_of as _name_of
 from data_rover.core.view.schema import Folder, View
 
 from ..changes import compact_changes
@@ -158,11 +159,16 @@ def _search_score(element: Element, q: str, type_matches: bool) -> float:
     a longer name that merely starts with the query. Score 0 is not a hit.
     ``type_matches`` is the type-name check, hoisted out so the caller can
     memoize it per distinct type instead of re-lowercasing per element.
+
+    The name is resolved through :func:`name_of` — the SAME rules the display
+    path uses (case-insensitive key, exact lowercase wins, list values
+    contribute their first non-empty entry) — so whatever label a row shows is
+    searchable as a name. Every ``name``-cased key is excluded from the weak
+    per-property signal so the chosen name is never double-counted.
     """
     score = 0.0
-    props = element.properties
-    name = props.get("name")
-    if isinstance(name, str):
+    name = _name_of(element)
+    if name is not None:
         name_lower = name.lower()
         ns = _name_score(name_lower, q)
         if ns > 0.0:
@@ -174,8 +180,8 @@ def _search_score(element: Element, q: str, type_matches: bool) -> float:
         score += 2.0
     if type_matches:
         score += 1.0
-    for key, value in props.items():
-        if key == "name":
+    for key, value in element.properties.items():
+        if key.lower() == "name":
             continue
         if isinstance(value, str) and q in value.lower():
             score += 0.5

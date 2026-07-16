@@ -157,14 +157,15 @@
 			<Command.Separator />
 			<Command.Group heading="Entities">
 				{#each entityHits as el (el.id)}
-					<Command.Item value={'entity:' + el.id} onSelect={() => pickEntity(el.id)}>
+					<Command.Item value={'entity:' + el.id} onSelect={() => pickEntity(el.id)} title={el.id}>
+						<!-- "<name> <stereotype>"; displayName falls back to the id when the
+						     element has no usable name property (id stays in the tooltip). -->
 						<span class="truncate">{elementDisplayName(el)}</span>
 						<span
 							class="ml-auto shrink-0 rounded bg-muted px-1 font-mono text-[10px] text-muted-foreground"
 						>
 							{el.type_name}
 						</span>
-						<span class="shrink-0 font-mono text-[10px] text-muted-foreground/50">{el.id}</span>
 					</Command.Item>
 				{/each}
 			</Command.Group>

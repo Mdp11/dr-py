@@ -224,6 +224,7 @@ export {
 	getPreview,
 	getSaveConflict,
 	getSelectedPath,
+	hasDirtyNavDrafts,
 	isNodeVisible,
 	isRunnable,
 	loadMorePreview,
@@ -253,6 +254,7 @@ export {
 	getTableLoading,
 	getTablePage,
 	getTableSort,
+	hasDirtyTableDrafts,
 	loadTablePage,
 	reloadTableDraft,
 	remapTableSortForMove,
@@ -266,6 +268,7 @@ export {
 	type TableData,
 	type TableDraft
 } from './table-editor.svelte';
+export { hasUnsavedWork } from './unsaved';
 export { getCurrentUser, isAdmin, fetchMe, signIn, signOut } from './auth.svelte';
 export { getActiveProjectId, setActiveProject, clearActiveProject } from './active-project.svelte';
 export { installSessionRecovery, recoverFromUnauthorized } from './session-recovery';

@@ -25,12 +25,15 @@ def _name_str(value: object) -> str | None:
     return None
 
 
-def display_name(element: Element) -> str:
-    """The case-insensitive non-empty ``name`` property, else the id.
+def name_of(element: Element) -> str | None:
+    """The case-insensitive non-empty ``name`` property, or ``None``.
 
     An exact lowercase ``name`` wins over other casings (``Name``/``NAME``).
     List values (multiplicity-many names) contribute their first non-empty
-    string entry.
+    string entry. This is :func:`display_name` without the id fallback — the
+    fuzzy-search scorer uses it so any name casing ranks in the name tiers,
+    and the IndexSet trigram builder uses it so list-valued names are
+    candidates for the queries the scorer would match.
     """
     props = element.properties
     exact = _name_str(props.get("name"))
@@ -41,4 +44,13 @@ def display_name(element: Element) -> str:
             found = _name_str(value)
             if found is not None:
                 return found
-    return element.id
+    return None
+
+
+def display_name(element: Element) -> str:
+    """The case-insensitive non-empty ``name`` property, else the id.
+
+    See :func:`name_of` for the resolution rules.
+    """
+    name = name_of(element)
+    return name if name is not None else element.id

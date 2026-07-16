@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from data_rover.api.main import create_app
 from data_rover.api.routes.read import _search_score
 from data_rover.api.session import get_session
+from data_rover.core.model.naming import name_of
 
 from .conftest import AUTH_HEADERS, seed_default_project
 
@@ -71,7 +72,17 @@ def _client_with_random_model(seed: int, n: int = 200) -> TestClient:
         type_name = rng.choice(["Pump", "Pipe"])
         props: dict = {}
         if rng.random() < 0.8:
-            props["name"] = _text(rng)
+            # name key casing + shape vary like real (migrated) models:
+            # lowercase str, capitalized str, or a multiplicity-many list —
+            # all three must be index candidates for the queries the scorer
+            # matches (the list shape only reaches trigrams via name_of).
+            roll = rng.random()
+            if roll < 0.6:
+                props["name"] = _text(rng)
+            elif roll < 0.8:
+                props["Name"] = _text(rng)
+            else:
+                props["Name"] = ["", _text(rng)]
         if rng.random() < 0.5:
             props["note"] = _text(rng)
         if type_name == "Pump" and rng.random() < 0.3:
@@ -115,12 +126,12 @@ def test_index_search_matches_reference_scan(seed: int) -> None:
     model = get_session().model
     assert model is not None
     # add a real element name to the battery so the exact-match tier is hit
+    # (resolved via name_of so any casing/shape the generator emits qualifies)
     real_name = next(
         (
-            e.properties["name"]
+            name
             for e in model.elements.values()
-            if isinstance(e.properties.get("name"), str)
-            and len(e.properties["name"]) >= 3
+            if (name := name_of(e)) is not None and len(name) >= 3
         ),
         None,
     )

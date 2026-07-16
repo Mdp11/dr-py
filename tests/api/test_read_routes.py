@@ -257,6 +257,37 @@ def test_search_ranks_exact_name_above_substring(client: TestClient) -> None:
     assert ids == ["e-exact", "e-prefix", "e-word", "some_name"]
 
 
+def test_search_treats_name_property_case_insensitively(client: TestClient) -> None:
+    """`Name`/`NAME` properties ARE the element's name (migrated legacy models
+    use those casings, and the display path resolves them case-insensitively) —
+    a query hitting one must rank in the name tiers, not as a +0.5 generic
+    property hit. List-valued names (multiplicity-many) contribute their first
+    non-empty entry, exactly like `display_name`. The query is 3+ chars so the
+    trigram candidate path runs: these elements must also be index candidates."""
+    _load_model(
+        client,
+        [
+            # weak matches only: exact id (+5) and a name plain-substring (10)
+            {
+                "id": "pumpx",
+                "type_name": "Item",
+                "properties": {"name": "XPRETEXTpumpxY"},
+            },
+            # capital-N Name, exact value -> exact-name tier (1000)
+            {"id": "e-upper", "type_name": "Item", "properties": {"Name": "pumpx"}},
+            # list-valued NAME -> first non-empty entry, prefix tier (100)
+            {
+                "id": "e-list",
+                "type_name": "Item",
+                "properties": {"NAME": ["", "pumpx station"]},
+            },
+        ],
+        [],
+    )
+    body = client.get(f"{API}/model/elements", params={"q": "pumpx"}).json()
+    assert [e["id"] for e in body["items"]] == ["e-upper", "e-list", "pumpx"]
+
+
 def test_elements_search_scoring_tiers(client: TestClient) -> None:
     _load_model(
         client,

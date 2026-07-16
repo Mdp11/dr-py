@@ -163,14 +163,17 @@
 								style="touch-action: none"
 								onpointerdown={(e) => onResultPointerDown(e, el.id)}
 								onclick={() => onPick(el.id)}
+								title={el.id}
 							>
+								<!-- "<name> <stereotype>"; displayName falls back to the id when
+								     the element has no usable name property. The raw id stays
+								     reachable via the row's title tooltip. -->
 								<span class="truncate text-foreground/90">{elementDisplayName(el)}</span>
 								<span
 									class="ml-auto shrink-0 rounded bg-muted px-1 font-mono text-[10px] text-muted-foreground"
 								>
 									{el.type_name}
 								</span>
-								<span class="shrink-0 font-mono text-[10px] text-muted-foreground/50">{el.id}</span>
 							</button>
 						</li>
 					{/each}

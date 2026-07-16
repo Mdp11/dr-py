@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
-	import { goto } from '$app/navigation';
+	import { beforeNavigate, goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { onDestroy, onMount } from 'svelte';
 	import { slide } from 'svelte/transition';
@@ -23,6 +23,7 @@
 	} from '$lib/state/realtime.svelte';
 	import { recoverFromUnauthorized } from '$lib/state/session-recovery';
 	import { getMetamodel as fetchMetamodel } from '$lib/api/metamodel';
+	import { hasUnsavedWork } from '$lib/state/unsaved';
 	import { runValidation } from '$lib/state/validate-action';
 	import {
 		cancelOpenProgress,
@@ -68,6 +69,23 @@
 	});
 	onDestroy(() => stopRealtime());
 	onDestroy(() => cancelOpenProgress());
+
+	// Unload guard: staged (uncommitted) edits and unsaved table/navigation
+	// drafts live only in this page's memory — losing the document loses them.
+	// A `leave` navigation (reload / tab close) cancels into the browser's
+	// native "leave site?" dialog; an in-app navigation asks via confirm().
+	beforeNavigate((nav) => {
+		if (!hasUnsavedWork()) return;
+		if (nav.type === 'leave') {
+			nav.cancel();
+			return;
+		}
+		if (
+			!confirm('You have unsaved changes (tables, navigations, or edits). Leave and lose them?')
+		) {
+			nav.cancel();
+		}
+	});
 
 	// App boot: adopt whatever session the backend already holds for this
 	// project — a page reload mid-session should come back with the model, not a

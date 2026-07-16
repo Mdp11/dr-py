@@ -217,6 +217,15 @@ export function getTableConflict(tabId: string): number | undefined {
 	return _conflicts.get(tabId);
 }
 
+/** True when ANY open table draft holds unsaved definition/name edits —
+ * closing or reloading the page would lose them (the unload guard's input). */
+export function hasDirtyTableDrafts(): boolean {
+	for (const draft of _drafts.values()) {
+		if (draft.dirty) return true;
+	}
+	return false;
+}
+
 export async function ensureTableDraft(tabId: string): Promise<TableDraft> {
 	const existing = _drafts.get(tabId);
 	if (existing) return existing;

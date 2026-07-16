@@ -40,7 +40,7 @@ vi.mock('@tanstack/svelte-query', () => ({
 	useQueryClient: () => ({})
 }));
 
-vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
+vi.mock('$app/navigation', () => ({ goto: vi.fn(), beforeNavigate: vi.fn() }));
 vi.mock('$app/paths', () => ({ resolve: (p: string) => p, assets: '' }));
 vi.mock('$app/environment', () => ({ browser: false }));
 // Boot calls metamodelApi.getMetamodel(); reject so boot() exits early from the catch.

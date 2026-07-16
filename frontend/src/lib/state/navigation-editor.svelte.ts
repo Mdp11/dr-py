@@ -339,6 +339,17 @@ function normalizeDefinition(defn: NavigationDefinition): NavigationDefinition {
 export function getDraft(tabId: string): NavDraft | undefined {
 	return _drafts.get(tabId);
 }
+
+/** True when ANY open navigation TAB draft holds unsaved edits — closing or
+ * reloading the page would lose them (the unload guard's input). Embedded
+ * drafts (`navemb:*`) are excluded: their definition mirrors into the hosting
+ * table definition, whose own dirty flag is the source of truth. */
+export function hasDirtyNavDrafts(): boolean {
+	for (const draft of _drafts.values()) {
+		if (draft.dirty && draft.embedded === undefined) return true;
+	}
+	return false;
+}
 /** The preview for the node at `path` (defaults to the root node). */
 export function getPreview(tabId: string, path: NodePath = []): NavPreview | undefined {
 	return _previews.get(previewKey(tabId, path));

@@ -74,6 +74,19 @@
 		</section>
 	{:else}
 		<div class="flex-1 overflow-auto">
+			<!-- Stereotype header. Mirrors the DetailView's "Element/Relationship +
+			     type_name" header, but deliberately NOT a heading element: the
+			     DetailView already exposes the type as a heading, and a second one
+			     with the same accessible name would be ambiguous for AT and tests. -->
+			<header class="flex flex-col gap-0.5 border-b border-border px-3 py-2">
+				<span class="microlabel">{selection.kind === 'element' ? 'Element' : 'Relationship'}</span>
+				<p
+					data-testid="inspector-stereotype"
+					class="font-display text-base font-light tracking-wide text-foreground"
+				>
+					{entity.type_name}
+				</p>
+			</header>
 			<section class="px-3 py-2">
 				<div class="mb-2 flex items-center justify-between gap-2">
 					<h2 class="microlabel">Properties</h2>

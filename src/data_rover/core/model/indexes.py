@@ -37,7 +37,7 @@ from typing import TYPE_CHECKING, Any
 
 from ._sorted import Pair, SortedPairs
 from .element import Element
-from .naming import display_name
+from .naming import display_name, name_of
 from .relationship import Relationship
 from ..metamodel.schema import KeyRel, KeySpec
 
@@ -634,14 +634,20 @@ class IndexSet:
 
     def _element_trigrams(self, element: Element) -> frozenset[str]:
         """Merged lowercased trigram set of the element's searchable text —
-        exactly the fields the fuzzy search scores: id, type name, and every
-        top-level string property value. Fields shorter than 3 chars
+        exactly the fields the fuzzy search scores: id, type name, every
+        top-level string property value, and the resolved ``name_of`` name
+        (which can live inside a LIST value the string sweep misses — without
+        it a list-named element would be scoreable but never a candidate,
+        breaking the superset guarantee). Fields shorter than 3 chars
         contribute nothing (they cannot contain a >=3-char query), and
         merging across fields is sound because candidates are score-verified
         by the caller (cross-field false positives are filtered there)."""
         trigs: set[str] = set()
         texts = [element.id, element.type_name]
         texts.extend(v for v in element.properties.values() if isinstance(v, str))
+        name = name_of(element)
+        if name is not None:
+            texts.append(name)  # dedup via the set; only list-valued names are new
         for text in texts:
             s = text.lower()
             for i in range(len(s) - 2):
