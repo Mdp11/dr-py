@@ -428,7 +428,7 @@ def test_property_hop_prunes_absent_property() -> None:
 
 
 def test_property_hop_prunes_non_element_datatype() -> None:
-    model, ids = _ref_fixture()
+    model, _ids = _ref_fixture()
     result = evaluate(model.metamodel, model, _prop_path(steps=[_prop("tags")]))
     assert result.chains == []
     assert result.step_types == ["tags"]

@@ -473,3 +473,66 @@ it('an element-typed property step leaves the add affordances in place', async (
 		unmount(c);
 	}
 });
+
+it('a relationship step followed by an element-typed property step advances the chain column count', async () => {
+	setMetamodel(PROPERTY_MM);
+	const tabId = 'nav:draft:pc-property-column';
+	await seed(
+		tabId,
+		pathWith([
+			{
+				kind: 'relationship',
+				relationship_type: 'Uses',
+				direction: 'out',
+				target_types: [],
+				children: []
+			},
+			{ kind: 'property', property_name: 'owner' }
+		])
+	);
+	const c = render(tabId);
+	try {
+		// Column badges: 0 (start), 1 (after the relationship hop), 2 (after the
+		// property hop) — the property step advances the column count just like
+		// a relationship step does.
+		const badges = [...document.querySelectorAll('[data-testid="chain-badge"]')].map(
+			(b) => b.textContent?.trim() ?? ''
+		);
+		expect(badges).toEqual(['0', '1', '2']);
+	} finally {
+		unmount(c);
+	}
+});
+
+it('an empty property_name step does not block navigation (unlike a configured non-element property step)', async () => {
+	setMetamodel(PROPERTY_MM);
+	const tabId = 'nav:draft:pc-property-empty-name';
+	await seed(
+		tabId,
+		pathWith([
+			{ kind: 'property', property_name: '' },
+			{
+				kind: 'relationship',
+				relationship_type: 'Uses',
+				direction: 'out',
+				target_types: [],
+				children: []
+			}
+		])
+	);
+	const c = render(tabId);
+	try {
+		expect(document.body.textContent).not.toContain(
+			'Navigation is blocked above — remove or change the non-element property step to continue.'
+		);
+		expect(
+			[...document.querySelectorAll('button')].some(
+				(b) => b.textContent?.trim() === '+ Go to property…'
+			)
+		).toBe(true);
+		const relRow = document.querySelector('[data-testid="relationship-step"]');
+		expect(relRow?.parentElement?.className ?? '').not.toContain('opacity-50');
+	} finally {
+		unmount(c);
+	}
+});

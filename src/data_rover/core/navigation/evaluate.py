@@ -232,7 +232,11 @@ def _hop_property(
     def being element-typed — a string that merely looks like an id must not
     navigate. Absent/non-reference/dangling cases prune the chain silently
     (never raise): navigation stays inspectable on odd models, mirroring
-    FilterStep's existence-gating."""
+    FilterStep's existence-gating. Deliberately NOT checked: the RESOLVED
+    element's own type against `prop.datatype` — a dangling-conformance id
+    still navigates, since conformance is the validation pipeline's job, so
+    the UI's frontier typing (frontierTypesAt) may be narrower than the
+    actual frontier."""
     element = model.elements[element_id]
     prop = next(
         (
