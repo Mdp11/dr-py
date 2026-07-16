@@ -31,6 +31,7 @@ from .schema import (
     FilterStep,
     NavigationDefinition,
     PathNavigation,
+    PropertyStep,
     RelationshipStep,
     RowStart,
     Scope,
@@ -225,9 +226,11 @@ def _walk(
     exclude_visited: bool,
 ) -> bool:
     """DFS over the interleaved step-item list. A RelationshipStep extends the
-    chain by one hop (deterministic, sorted-id); a FilterStep keeps the chain
-    iff its current endpoint matches all criteria, adding no column. Returns
-    True when enumeration stopped early (chain cap or budget)."""
+    chain by one hop (deterministic, sorted-id); a PropertyStep follows
+    element-reference properties (evaluation deferred to a later phase); a
+    FilterStep keeps the chain iff its current endpoint matches all criteria,
+    adding no column. Returns True when enumeration stopped early (chain cap or
+    budget)."""
     if item_idx == len(steps):
         if len(chains) >= limits.max_chains:
             return True
@@ -249,6 +252,8 @@ def _walk(
                 exclude_visited,
             )
         return False
+    if isinstance(step, PropertyStep):
+        raise NotImplementedError("PropertyStep evaluation is not yet implemented")
     nxt = _hop(metamodel, model, current, step, budget)
     if budget.exhausted:
         return True
