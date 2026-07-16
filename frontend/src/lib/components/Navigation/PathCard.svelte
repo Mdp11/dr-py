@@ -149,19 +149,25 @@
 	function removeStep(i: number): void {
 		patch({ steps: node.steps.filter((_, idx) => idx !== i) });
 	}
-	function addRelationshipStep(): void {
-		const step: NavRelationshipStep = {
+	function emptyRelationshipStep(): NavRelationshipStep {
+		return {
 			kind: 'relationship',
 			relationship_type: '',
 			direction: 'out',
 			target_types: [],
 			children: []
 		};
-		patch({ steps: [...node.steps, step] });
+	}
+	/** Splice a fresh step in BEFORE step `i` — the between-steps insert zones;
+	 * `i === steps.length` is the plain append the trailing buttons use. */
+	function insertStep(i: number, step: NavStepItem): void {
+		patch({ steps: [...node.steps.slice(0, i), step, ...node.steps.slice(i)] });
+	}
+	function addRelationshipStep(): void {
+		insertStep(node.steps.length, emptyRelationshipStep());
 	}
 	function addFilterStep(): void {
-		const step: NavFilterStep = { kind: 'filter', criteria: [] };
-		patch({ steps: [...node.steps, step] });
+		insertStep(node.steps.length, { kind: 'filter', criteria: [] });
 	}
 
 	type StartMode = 'scope' | 'element' | 'combine' | 'row';
@@ -354,6 +360,36 @@
 				</div>
 			{/if}
 			{#each node.steps as step, i (i)}
+				{#if editable}
+					<!-- Hover-revealed insert zone BEFORE step i, so a forgotten step
+					     (say, a property check) can be added in place instead of
+					     deleting and re-adding everything after it. Constant height:
+					     the buttons fade in via opacity, so nothing shifts on hover;
+					     keyboard focus reveals them too. -->
+					<div
+						data-testid="insert-step-zone"
+						class="group/insert relative flex h-3.5 items-center gap-1.5 pl-7"
+					>
+						<button
+							type="button"
+							aria-label="Insert relationship step here"
+							title="Insert a 'Follow a relationship' step here"
+							class="rounded border border-dashed border-input px-1.5 text-[10px] leading-3 text-info/90 opacity-0 transition-opacity group-hover/insert:opacity-100 hover:border-ring hover:text-info focus-visible:opacity-100"
+							onclick={() => insertStep(i, emptyRelationshipStep())}
+						>
+							+ relationship
+						</button>
+						<button
+							type="button"
+							aria-label="Insert condition step here"
+							title="Insert a 'Keep only…' step here"
+							class="rounded border border-dashed border-input px-1.5 text-[10px] leading-3 text-info/90 opacity-0 transition-opacity group-hover/insert:opacity-100 hover:border-ring hover:text-info focus-visible:opacity-100"
+							onclick={() => insertStep(i, { kind: 'filter', criteria: [] })}
+						>
+							+ condition
+						</button>
+					</div>
+				{/if}
 				{#if step.kind === 'relationship'}
 					<RelationshipStepRow
 						step={step as NavRelationshipStep}

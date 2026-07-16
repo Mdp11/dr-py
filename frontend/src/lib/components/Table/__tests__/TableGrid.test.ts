@@ -7,8 +7,10 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { TablePage } from '$lib/api/types';
+import type { TableDefinition, TablePage } from '$lib/api/types';
+import { setCurrentUserId } from '$lib/api/identity';
 import * as store from '$lib/state/table-editor.svelte';
+import { handleFeedEvent, resetRealtime } from '$lib/state/realtime.svelte';
 import TableGrid from '../TableGrid.svelte';
 
 const PAGE: TablePage = {
@@ -34,6 +36,30 @@ const PAGE: TablePage = {
 	model_rev: 1
 };
 
+const DRAFT: store.TableDraft = {
+	name: 't',
+	artifactId: null,
+	artifactRev: null,
+	dirty: false,
+	definition: {
+		schema_version: 1,
+		default_cell_mode: 'collapse',
+		row_source: { kind: 'scope', types: ['Block'], criteria: [] },
+		columns: [
+			{ kind: 'element', source: { kind: 'row', chain_index: 0 }, header: 'Block', width_px: null },
+			{
+				kind: 'property',
+				source: { kind: 'row', chain_index: 0 },
+				name: 'Mass',
+				mode: 'collapse',
+				keep_empty: true,
+				header: 'Mass',
+				width_px: null
+			}
+		]
+	}
+};
+
 function render(tabId: string) {
 	const component = mount(TableGrid, { target: document.body, props: { tabId } });
 	flushSync();
@@ -43,6 +69,8 @@ function render(tabId: string) {
 afterEach(() => {
 	document.body.innerHTML = '';
 	vi.restoreAllMocks();
+	resetRealtime();
+	setCurrentUserId('');
 });
 
 describe('TableGrid', () => {
@@ -91,6 +119,59 @@ describe('TableGrid', () => {
 			expect(ensure.mock.calls.at(-1)![1]).toBe(0);
 		} finally {
 			unmount(c);
+		}
+	});
+
+	it('double-clicking a resize handle auto-fits the column to an integer width', () => {
+		vi.spyOn(store, 'getTablePage').mockReturnValue(PAGE);
+		vi.spyOn(store, 'getTableLoading').mockReturnValue(false);
+		vi.spyOn(store, 'getTableDraft').mockReturnValue(DRAFT);
+		const update = vi.spyOn(store, 'updateTableDefinition').mockImplementation(() => {});
+		const c = render('tbl:draft:fit');
+		try {
+			const seps = document.querySelectorAll('[data-testid="table-header"] [role="separator"]');
+			expect(seps.length).toBe(2);
+			seps[1].dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+			flushSync();
+			expect(update).toHaveBeenCalledTimes(1);
+			const defn = update.mock.calls[0][1] as TableDefinition;
+			const w = defn.columns[1].width_px;
+			expect(Number.isInteger(w)).toBe(true);
+			expect(w).toBeGreaterThanOrEqual(80);
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('tints cells of a locked element: orange for my lock, red for a peer lock', () => {
+		vi.spyOn(store, 'getTablePage').mockReturnValue(PAGE);
+		vi.spyOn(store, 'getTableLoading').mockReturnValue(false);
+		setCurrentUserId('me');
+		handleFeedEvent({
+			type: 'lock',
+			action: 'acquired',
+			leases: [{ resource_id: 'e1', mode: 'exclusive', holder_id: 'me' }]
+		});
+		const c = render('tbl:draft:lockmine');
+		try {
+			// both the element (scope) cell and the value cell target e1
+			expect(document.querySelectorAll('[data-lock="mine"]').length).toBe(2);
+			expect(document.querySelectorAll('[data-lock="theirs"]').length).toBe(0);
+		} finally {
+			unmount(c);
+		}
+		handleFeedEvent({
+			type: 'lock',
+			action: 'acquired',
+			leases: [{ resource_id: 'e1', mode: 'exclusive', holder_id: 'bob', holder_email: 'b@x.io' }]
+		});
+		const c2 = render('tbl:draft:locktheirs');
+		try {
+			const theirs = document.querySelectorAll('[data-lock="theirs"]');
+			expect(theirs.length).toBe(2);
+			expect((theirs[0] as HTMLElement).title).toContain('b@x.io');
+		} finally {
+			unmount(c2);
 		}
 	});
 });

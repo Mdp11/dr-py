@@ -32,23 +32,24 @@ class TableOrderCache:
     def __init__(self, cap: int = 16) -> None:
         self._cap = cap
         self._lock = threading.Lock()
-        self._d: "OrderedDict[tuple[str, str], tuple[int, tuple[RowKey, ...], bool]]" = OrderedDict()
+        self._d: "OrderedDict[tuple[str, str], tuple[int, tuple[RowKey, ...], bool, int]]" = OrderedDict()
 
     def get(
         self, fingerprint: str, sort_key: str, model_rev: int
-    ) -> "tuple[tuple[RowKey, ...], bool] | None":
-        """`(rows, truncated)` on a fresh hit; `None` on a miss or stale rev."""
+    ) -> "tuple[tuple[RowKey, ...], bool, int] | None":
+        """`(rows, truncated, base_total)` on a fresh hit; `None` on a miss or
+        stale rev."""
         key = (fingerprint, sort_key)
         with self._lock:
             hit = self._d.get(key)
             if hit is None:
                 return None
-            rev, rows, truncated = hit
+            rev, rows, truncated, base_total = hit
             if rev != model_rev:
                 del self._d[key]
                 return None
             self._d.move_to_end(key)
-            return rows, truncated
+            return rows, truncated, base_total
 
     def put(
         self,
@@ -57,10 +58,11 @@ class TableOrderCache:
         model_rev: int,
         rows: "tuple[RowKey, ...]",
         truncated: bool,
+        base_total: int,
     ) -> None:
         key = (fingerprint, sort_key)
         with self._lock:
-            self._d[key] = (model_rev, rows, truncated)
+            self._d[key] = (model_rev, rows, truncated, base_total)
             self._d.move_to_end(key)
             while len(self._d) > self._cap:
                 self._d.popitem(last=False)

@@ -78,6 +78,8 @@ export interface TableData {
 	columns: TableColumn[];
 	rows: (TableRow | undefined)[];
 	total: number;
+	/** Rows before expand columns split them — see TablePageSchema.base_total. */
+	base_total?: number | null;
 	truncated: boolean;
 	offset: number;
 	model_rev: number;
@@ -318,6 +320,7 @@ function installPage(tabId: string, page: TablePage): void {
 		columns: page.columns,
 		rows,
 		total: page.total,
+		base_total: page.base_total,
 		truncated: page.truncated,
 		offset: page.offset,
 		model_rev: page.model_rev

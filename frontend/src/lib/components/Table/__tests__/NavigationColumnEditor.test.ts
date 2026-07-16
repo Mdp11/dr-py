@@ -165,4 +165,20 @@ describe('NavigationColumnEditor inline mode', () => {
 			unmount(c);
 		}
 	});
+
+	it('keep_empty is available without the split toggle (collapse mode)', () => {
+		const onChange = vi.fn();
+		const c = render(navColumn({}), onChange);
+		try {
+			const keep = document.querySelector(
+				'input[aria-label="Keep rows with no value"]'
+			) as HTMLInputElement;
+			expect(keep).not.toBeNull();
+			expect(keep.checked).toBe(true);
+			click(keep);
+			expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ keep_empty: false }));
+		} finally {
+			unmount(c);
+		}
+	});
 });

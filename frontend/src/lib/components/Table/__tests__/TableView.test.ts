@@ -14,6 +14,7 @@ import TableView from '../TableView.svelte';
 // so each test can flip `editable` before mounting.
 const h = vi.hoisted(() => ({
 	editable: true,
+	page: undefined as unknown,
 	draft: {
 		tabId: 'tbl:draft:1',
 		name: 'My Table',
@@ -40,12 +41,14 @@ vi.mock('$lib/state', () => ({
 	reloadTableDraft: vi.fn(),
 	setTableName: vi.fn(),
 	// TableGrid's dependencies (always mounted below the chrome bar).
-	getTablePage: () => undefined,
+	getTablePage: () => h.page,
 	getTableLoading: () => false,
 	getTableSort: () => undefined,
 	getTableError: () => undefined,
 	setTableSort: vi.fn(),
-	updateTableDefinition: vi.fn()
+	updateTableDefinition: vi.fn(),
+	ensureTableRange: vi.fn(),
+	lockBadgeFor: () => ({ state: 'none' })
 }));
 
 function render(tabId: string) {
@@ -78,6 +81,85 @@ describe('TableView settings popup', () => {
 		const c = render('tbl:draft:1');
 		try {
 			expect(document.querySelector('[data-testid="table-settings-button"]')).toBeNull();
+		} finally {
+			unmount(c);
+		}
+	});
+});
+
+describe('TableView row count', () => {
+	afterEach(() => {
+		h.page = undefined;
+		(h.draft as { definition: { columns: unknown[] } }).definition.columns = [];
+	});
+
+	it('shows the total row count when no column splits rows', () => {
+		h.page = {
+			columns: [],
+			rows: [],
+			total: 12,
+			base_total: 12,
+			truncated: false,
+			offset: 0,
+			model_rev: 1
+		};
+		const c = render('tbl:draft:1');
+		try {
+			const count = document.querySelector('[data-testid="table-row-count"]');
+			expect(count?.textContent).toContain('12 rows');
+			expect(count?.textContent).not.toContain('→');
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('shows the pre-split element count AND the row count when a column splits rows', () => {
+		h.page = {
+			columns: [],
+			rows: [],
+			total: 12,
+			base_total: 5,
+			truncated: false,
+			offset: 0,
+			model_rev: 1
+		};
+		(h.draft as { definition: { columns: unknown[] } }).definition.columns = [
+			{ kind: 'element', source: { kind: 'row', chain_index: 0 }, header: '', width_px: null },
+			{
+				kind: 'property',
+				source: { kind: 'row', chain_index: 0 },
+				name: 'mass',
+				mode: 'expand',
+				keep_empty: true,
+				header: '',
+				width_px: null
+			}
+		];
+		const c = render('tbl:draft:1');
+		try {
+			const count = document.querySelector('[data-testid="table-row-count"]');
+			expect(count?.textContent).toContain('5 elements');
+			expect(count?.textContent).toContain('12 rows');
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('marks a truncated row count', () => {
+		h.page = {
+			columns: [],
+			rows: [],
+			total: 50,
+			base_total: 50,
+			truncated: true,
+			offset: 0,
+			model_rev: 1
+		};
+		const c = render('tbl:draft:1');
+		try {
+			expect(document.querySelector('[data-testid="table-row-count"]')?.textContent).toContain(
+				'50+'
+			);
 		} finally {
 			unmount(c);
 		}

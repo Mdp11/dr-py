@@ -679,6 +679,9 @@ export const TablePageSchema = z.object({
 	columns: z.array(TableColumnSchema),
 	rows: z.array(TableRowSchema),
 	total: z.number().int(),
+	// rows the row source produced BEFORE expand columns split them (for a
+	// scope source: the scope size); nullish-tolerant for older responses
+	base_total: z.number().int().nullish(),
 	truncated: z.boolean(),
 	offset: z.number().int(),
 	model_rev: z.number().int()

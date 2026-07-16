@@ -6,11 +6,18 @@
 	// then one chip per element; hover shows the full name list via `title`.
 	import type { TableCell } from '$lib/api/types';
 	import { select } from '$lib/state';
+	import { getStagedNameOverride } from '$lib/state/model.svelte';
 
 	let { cell }: { cell: Extract<TableCell, { kind: 'elements' }> } = $props();
 
+	// Staged overlay: an uncommitted rename wins over the page's display_name
+	// (same rule as ElementCell/ValueCell), chip and tooltip alike.
+	function nameFor(item: { id: string; display_name: string }): string {
+		return getStagedNameOverride(item.id) ?? item.display_name;
+	}
+
 	const tooltip = $derived(
-		cell.items.map((i) => i.display_name).join(', ') +
+		cell.items.map((i) => nameFor(i)).join(', ') +
 			(cell.truncated ? ` … (${cell.total} total)` : '')
 	);
 </script>
@@ -37,7 +44,7 @@
 				title={item.type_name}
 				onclick={() => select({ kind: 'element', id: item.id })}
 			>
-				{item.display_name}
+				{nameFor(item)}
 			</button>
 		{/each}
 		{#if cell.truncated}

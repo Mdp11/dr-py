@@ -118,7 +118,13 @@ export function setColumnWidth(
 	width_px: number | null
 ): TableDefinition {
 	const next = clone(defn);
-	next.columns[index] = { ...defn.columns[index], width_px };
+	// Round here (the single write point) — drag deltas come from
+	// PointerEvent.clientX, fractional under zoom/HiDPI, and the backend
+	// schema requires an int (a float width_px 422s every evaluate).
+	next.columns[index] = {
+		...defn.columns[index],
+		width_px: width_px === null ? null : Math.round(width_px)
+	};
 	return next;
 }
 

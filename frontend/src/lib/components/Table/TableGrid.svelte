@@ -6,7 +6,7 @@
 	// as pulse placeholders, and the range effect below asks the store to fill
 	// the window (plus a prefetch margin) whenever it moves — normal scrolling
 	// should land on already-prefetched rows and never show a placeholder.
-	import type { TableColumn } from '$lib/api/types';
+	import type { TableCell, TableColumn } from '$lib/api/types';
 	import {
 		ensureTableRange,
 		getTableDraft,
@@ -14,6 +14,7 @@
 		getTableLoading,
 		getTablePage,
 		getTableSort,
+		lockBadgeFor,
 		setTableSort,
 		updateTableDefinition
 	} from '$lib/state';
@@ -34,6 +35,9 @@
 	const PREFETCH = 100;
 	const DEFAULT_WIDTH = 180;
 	const MIN_WIDTH = 80;
+	/** Upper bound for double-click auto-fit, so one huge cell can't blow the
+	 * column out to an unusable width. */
+	const MAX_AUTO_WIDTH = 640;
 
 	const page = $derived(getTablePage(tabId));
 	const loading = $derived(getTableLoading(tabId));
@@ -111,6 +115,42 @@
 		if (draft) updateTableDefinition(tabId, setColumnWidth(draft.definition, index, width));
 	}
 
+	// Double-click auto-fit: size the column to its widest RENDERED content —
+	// the header label plus the cells the window currently shows (the sparse
+	// row cache means off-screen rows can't be measured). Cell wrappers are
+	// overflow-hidden, so the inner content's scrollWidth is the full,
+	// unclipped content width even when it is currently truncated.
+	function autoFitColumn(index: number): void {
+		if (!scrollEl) return;
+		let max = MIN_WIDTH;
+		const headerCell = scrollEl.querySelectorAll('[data-testid="table-header"] > div')[index];
+		const label = headerCell?.querySelector('span');
+		// label + sort caret + flex gaps + horizontal padding
+		if (label) max = Math.max(max, Math.ceil(label.scrollWidth) + 44);
+		for (const row of scrollEl.querySelectorAll('[data-testid="table-row"]')) {
+			const content = row.children[index]?.firstElementChild;
+			// px-2 padding (16) + right border + a rounding safety px
+			if (content) max = Math.max(max, Math.ceil(content.scrollWidth) + 18);
+		}
+		const draft = getTableDraft(tabId);
+		if (!draft) return;
+		const width = Math.min(max, MAX_AUTO_WIDTH);
+		updateTableDefinition(tabId, setColumnWidth(draft.definition, index, width));
+	}
+
+	// The lock badge for the element a cell belongs to (element/value cells
+	// carry one; values/elements cells are aggregates with no single owner).
+	// 'mine' tints the cell orange, 'theirs' red — see the row markup.
+	function cellLockBadge(cell: TableCell): { state: 'none' | 'mine' | 'theirs'; holder?: string } {
+		const id =
+			cell.kind === 'element'
+				? (cell.item?.id ?? null)
+				: cell.kind === 'value'
+					? cell.element_id
+					: null;
+		return id === null ? { state: 'none' } : lockBadgeFor(id);
+	}
+
 	function toggleSort(index: number): void {
 		const direction = sort?.column === index && sort.direction === 'asc' ? 'desc' : 'asc';
 		setTableSort(tabId, { column: index, direction });
@@ -161,6 +201,7 @@
 					onpointermove={onResizeMove}
 					onpointerup={onResizeEnd}
 					onpointercancel={onResizeEnd}
+					ondblclick={() => autoFitColumn(i)}
 				></div>
 			</div>
 		{/each}
@@ -181,8 +222,20 @@
 					style="height:{ROW_H}px"
 				>
 					{#each row.cells as cell, ci (ci)}
+						{@const lock = cellLockBadge(cell)}
 						<div
-							class="flex shrink-0 items-center overflow-hidden border-r border-border/40 px-2 text-xs"
+							class="flex shrink-0 items-center overflow-hidden border-r border-border/40 px-2 text-xs {lock.state ===
+							'mine'
+								? 'bg-warning/20'
+								: lock.state === 'theirs'
+									? 'bg-destructive/15'
+									: ''}"
+							data-lock={lock.state === 'none' ? undefined : lock.state}
+							title={lock.state === 'mine'
+								? 'Locked by you'
+								: lock.state === 'theirs'
+									? `Locked by ${lock.holder}`
+									: undefined}
 							style="width:{widthFor(page.columns[ci], ci)}px"
 						>
 							{#if cell.kind === 'element'}

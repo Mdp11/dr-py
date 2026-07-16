@@ -351,19 +351,17 @@
 			/>
 			Split multiple values in multiple rows
 		</label>
-		{#if column.mode === 'expand'}
-			<label
-				class="flex items-center gap-1"
-				title="When splitting, keep a row with an empty cell when nothing is reached (unchecked drops those rows)"
-			>
-				<input
-					type="checkbox"
-					aria-label="Keep rows with no value"
-					checked={column.keep_empty}
-					onchange={setKeepEmpty}
-				/>
-				Keep rows with no value
-			</label>
-		{/if}
+		<label
+			class="flex items-center gap-1"
+			title="Keep a row with an empty cell when nothing is reached (unchecked drops those rows — with or without splitting)"
+		>
+			<input
+				type="checkbox"
+				aria-label="Keep rows with no value"
+				checked={column.keep_empty}
+				onchange={setKeepEmpty}
+			/>
+			Keep rows with no value
+		</label>
 	</div>
 </div>

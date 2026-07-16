@@ -763,6 +763,9 @@ class TablePageOut(BaseModel):
     columns: list[TableColumnOut]
     rows: list[TableRowOut]
     total: int
+    #: Rows the row source produced BEFORE expand columns split them (for a
+    #: scope source: the scope size) — see `evaluate.RowBuild.base_total`.
+    base_total: int
     truncated: bool
     offset: int
     model_rev: int

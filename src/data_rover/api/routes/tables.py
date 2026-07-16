@@ -22,6 +22,7 @@ from data_rover.core.table.evaluate import (
     SortSpec,
     TableLimits,
     build_rows,
+    build_rows_ex,
     iter_export_rows,
     order_rows,
 )
@@ -155,12 +156,15 @@ def evaluate_table(
         rev = session.model_rev
         cached = session.table_order_cache.get(fp, sort_key, rev)
         if cached is not None:
-            cached_rows, truncated = cached
+            cached_rows, truncated, base_total = cached
             ordered = list(cached_rows)
         else:
-            keys, truncated = build_rows(metamodel, model, defn, limits)
-            ordered = order_rows(metamodel, model, defn, keys, sort, limits)
-            session.table_order_cache.put(fp, sort_key, rev, tuple(ordered), truncated)
+            built = build_rows_ex(metamodel, model, defn, limits)
+            truncated, base_total = built.truncated, built.base_total
+            ordered = order_rows(metamodel, model, defn, built.keys, sort, limits)
+            session.table_order_cache.put(
+                fp, sort_key, rev, tuple(ordered), truncated, base_total
+            )
         window = ordered[payload.offset : payload.offset + payload.limit]
         cells = evaluate_cells(metamodel, model, defn, window, limits)
     except LookupError as exc:
@@ -180,6 +184,7 @@ def evaluate_table(
         columns=columns,
         rows=rows,
         total=len(ordered),
+        base_total=base_total,
         truncated=truncated,
         offset=payload.offset,
         model_rev=rev,

@@ -317,9 +317,11 @@ def test_truncated_flag_survives_cache_hit(
     _bootstrap_model(client)
     import data_rover.api.routes.tables as tmod
 
-    orig = tmod.build_rows
+    from dataclasses import replace
+
+    orig = tmod.build_rows_ex
     monkeypatch.setattr(
-        tmod, "build_rows", lambda *a, **k: (orig(*a, **k)[0], True)
+        tmod, "build_rows_ex", lambda *a, **k: replace(orig(*a, **k), truncated=True)
     )
     body = {
         "definition": {
@@ -390,3 +392,45 @@ def test_preview_rollback_invalidates_table_order_cache(client: TestClient) -> N
     # later evaluate at the same (still-unchanged) rev would HIT and could
     # serve rows computed mid-preview instead of recomputing.
     assert session.table_order_cache.get(fp, "none", rev) is None
+
+
+def test_evaluate_reports_base_total(client: TestClient) -> None:
+    # `base_total` = rows produced by the row source BEFORE expand columns
+    # split them (for a scope source: the scope size). The cached second
+    # request must report the same value.
+    _bootstrap_model(client)
+    defn = {
+        "row_source": {"kind": "scope", "types": ["Block"]},
+        "columns": [
+            {"kind": "element", "source": {"kind": "row"}},
+            {
+                "kind": "navigation",
+                "source": {"kind": "row"},
+                "mode": "expand",
+                "keep_empty": True,
+                "navigation": {
+                    "definition": {
+                        "kind": "path",
+                        "start": {"kind": "row"},
+                        "steps": [
+                            {
+                                "kind": "relationship",
+                                "relationship_type": "BlockHasPart",
+                                "direction": "out",
+                            }
+                        ],
+                    }
+                },
+            },
+        ],
+    }
+    for _ in range(2):  # second request hits the order cache
+        r = client.post(
+            papi("/tables/evaluate"),
+            json={"definition": defn, "offset": 0, "limit": 50},
+            headers=AUTH_HEADERS,
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["base_total"] == 3  # root, p1, p2
+        assert body["total"] == 4  # root x 2 parts + p1/p2 keep-empty rows

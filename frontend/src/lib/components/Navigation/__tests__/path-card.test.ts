@@ -283,3 +283,60 @@ it('does not offer the row start mode on an ordinary tab draft', async () => {
 		unmount(c);
 	}
 });
+
+it('inserting a step between existing steps splices it at that position', async () => {
+	const tabId = 'nav:draft:pc-insert';
+	await seed(
+		tabId,
+		pathWith([
+			{
+				kind: 'relationship',
+				relationship_type: 'Uses',
+				direction: 'out',
+				target_types: [],
+				children: []
+			},
+			{
+				kind: 'relationship',
+				relationship_type: 'Owns',
+				direction: 'out',
+				target_types: [],
+				children: []
+			}
+		])
+	);
+	const c = render(tabId);
+	try {
+		// one insert zone per existing step (insert BEFORE step i); appending
+		// stays covered by the existing "+ Follow a relationship" buttons.
+		const zones = [...document.querySelectorAll('[data-testid="insert-step-zone"]')];
+		expect(zones).toHaveLength(2);
+		// insert a filter between the two hops (zone index 1 = before step 1)
+		const addFilter = zones[1].querySelector('button[aria-label="Insert condition step here"]');
+		if (!addFilter) throw new Error('insert condition button not found');
+		(addFilter as HTMLButtonElement).click();
+		flushSync();
+		let steps = (getDraft(tabId)!.definition as PathNavigation).steps;
+		expect(steps.map((s) => s.kind)).toEqual(['relationship', 'filter', 'relationship']);
+		// insert a relationship at the very top (zone 0 = before step 0)
+		const zonesAfter = [...document.querySelectorAll('[data-testid="insert-step-zone"]')];
+		expect(zonesAfter).toHaveLength(3);
+		const addRel = zonesAfter[0].querySelector(
+			'button[aria-label="Insert relationship step here"]'
+		);
+		if (!addRel) throw new Error('insert relationship button not found');
+		(addRel as HTMLButtonElement).click();
+		flushSync();
+		steps = (getDraft(tabId)!.definition as PathNavigation).steps;
+		expect(steps.map((s) => s.kind)).toEqual([
+			'relationship',
+			'relationship',
+			'filter',
+			'relationship'
+		]);
+		expect((steps[0] as { relationship_type: string }).relationship_type).toBe('');
+		expect((steps[1] as { relationship_type: string }).relationship_type).toBe('Uses');
+	} finally {
+		unmount(c);
+	}
+});

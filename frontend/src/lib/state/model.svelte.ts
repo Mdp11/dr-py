@@ -17,6 +17,7 @@ import { validateModel } from '../api/validation';
 import { mergePatch } from './apply';
 import { computeDiff, type Diff } from './diff';
 import { isTempId, type Op } from './ops';
+import { nameProp } from '$lib/util/element-name';
 import { remapProperties } from './remap';
 import { getSelection, select } from './selection.svelte';
 
@@ -587,6 +588,33 @@ export function getStagedOps(): Op[] {
 
 export function getStagedOpsFor(id: string): Op[] {
 	return _queue.filter((q) => queuedTargetId(q) === id).map((q) => q.op);
+}
+
+/**
+ * The display name a STAGED (uncommitted) edit gives `id`, or `undefined`
+ * when no staged op touches its name. Cells that render a server-provided
+ * `display_name` (table scope/element cells) overlay this so a staged rename
+ * shows up everywhere at once, not only in value cells. Newest-first, same
+ * rule as ValueCell's staged overlay; a staged edit that CLEARS the name
+ * returns the id itself (matching `elementDisplayName`'s fallback).
+ */
+export function getStagedNameOverride(id: string): string | undefined {
+	for (let i = _queue.length - 1; i >= 0; i--) {
+		const q = _queue[i];
+		if (queuedTargetId(q) !== id) continue;
+		const op = q.op;
+		const bag =
+			op.kind === 'update_element' || op.kind === 'update_relationship'
+				? op.properties_patch
+				: op.kind === 'create_element' || op.kind === 'create_relationship'
+					? op.properties
+					: undefined;
+		if (bag === undefined) continue;
+		const key = 'name' in bag ? 'name' : Object.keys(bag).find((k) => k.toLowerCase() === 'name');
+		if (key === undefined) continue;
+		return nameProp({ name: bag[key] }) ?? id;
+	}
+	return undefined;
 }
 
 export function getStagedDepth(): number {

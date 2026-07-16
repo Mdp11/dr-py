@@ -296,3 +296,83 @@ def test_step_index_out_of_range_raises_value_error():
     })
     with pytest.raises(ValueError, match="step_index 5 out of range"):
         build_rows(mm, model, defn)
+
+
+def test_collapse_keep_empty_false_drops_row_with_no_property_value():
+    # "Keep rows with no value" must also work WITHOUT splitting: a COLLAPSE
+    # property column with keep_empty=False filters out rows whose cell would
+    # be empty, leaving the surviving rows un-split (one row per element).
+    mm = _mm(); model, ids = _fixture()
+    model.set_property(model.elements[ids["root"]], "mass", [1, 2])
+    defn = TABLE_ADAPTER.validate_python({
+        "row_source": {"kind": "scope", "types": ["Block"]},
+        "columns": [
+            {"kind": "element", "source": {"kind": "row"}},
+            {"kind": "property", "source": {"kind": "row"}, "name": "mass",
+             "mode": "collapse", "keep_empty": False},
+        ],
+    })
+    keys, truncated = build_rows(mm, model, defn)
+    assert not truncated
+    assert keys == [(ids["root"],)]  # un-split: ONE row, not one per value
+
+
+def test_collapse_keep_empty_false_drops_row_with_empty_navigation():
+    # Same rule for a COLLAPSE navigation column: keep_empty=False drops rows
+    # whose reached set is empty (only root has outgoing BlockHasPart).
+    mm = _mm(); model, ids = _fixture()
+    defn = TABLE_ADAPTER.validate_python({
+        "row_source": {"kind": "scope", "types": ["Block"]},
+        "columns": [
+            {"kind": "element", "source": {"kind": "row"}},
+            {"kind": "navigation", "source": {"kind": "row"}, "mode": "collapse",
+             "keep_empty": False,
+             "navigation": {"definition": {"kind": "path", "start": {"kind": "row"},
+                 "steps": [{"kind": "relationship",
+                            "relationship_type": "BlockHasPart", "direction": "out"}]}}},
+        ],
+    })
+    keys, _ = build_rows(mm, model, defn)
+    assert keys == [(ids["root"],)]
+
+
+def test_collapse_keep_empty_true_keeps_all_rows():
+    # The default (keep_empty=True) must keep collapse behaviour unchanged:
+    # every scope element keeps its row even when the cell is empty.
+    mm = _mm(); model, ids = _fixture()
+    defn = TABLE_ADAPTER.validate_python({
+        "row_source": {"kind": "scope", "types": ["Block"]},
+        "columns": [
+            {"kind": "element", "source": {"kind": "row"}},
+            {"kind": "property", "source": {"kind": "row"}, "name": "mass",
+             "mode": "collapse", "keep_empty": True},
+        ],
+    })
+    keys, _ = build_rows(mm, model, defn)
+    assert len(keys) == len(ids)
+
+
+def test_build_rows_ex_reports_base_total():
+    # `base_total` is the row count BEFORE expand columns multiply rows and
+    # before keep_empty filtering — for a scope source, the scope size.
+    from data_rover.core.table.evaluate import build_rows_ex
+
+    mm = _mm(); model, ids = _fixture()
+    defn = TABLE_ADAPTER.validate_python({
+        "row_source": {"kind": "scope", "types": ["Block"]},
+        "columns": [
+            {"kind": "element", "source": {"kind": "row"}},
+            {"kind": "navigation", "source": {"kind": "row"}, "mode": "expand",
+             "keep_empty": True,
+             "navigation": {"definition": {"kind": "path", "start": {"kind": "row"},
+                 "steps": [{"kind": "relationship",
+                            "relationship_type": "BlockHasPart", "direction": "out"}]}}},
+        ],
+    })
+    result = build_rows_ex(mm, model, defn)
+    assert result.base_total == 4          # root, part1, part2, leaf
+    assert len(result.keys) == 5           # root x 2 parts + 3 keep-empty rows
+    assert result.truncated is False
+    # the 2-tuple wrapper stays intact for existing callers
+    keys, truncated = build_rows(mm, model, defn)
+    assert keys == result.keys and truncated is result.truncated

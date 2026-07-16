@@ -183,6 +183,14 @@ describe('columns', () => {
 		expect(base.columns[0].width_px).toBeNull();
 	});
 
+	it('setColumnWidth rounds fractional widths to an integer (the backend schema requires int)', () => {
+		// Drag deltas come from PointerEvent.clientX, which is fractional under
+		// browser zoom / HiDPI — a float width_px 422s every evaluate of the table.
+		expect(setColumnWidth(base, 0, 123.4).columns[0].width_px).toBe(123);
+		expect(setColumnWidth(base, 0, 123.6).columns[0].width_px).toBe(124);
+		expect(setColumnWidth(base, 0, null).columns[0].width_px).toBeNull();
+	});
+
 	it('setColumnMode is a no-op on element columns', () => {
 		const next = setColumnMode(base, 0, 'expand');
 		expect(next.columns[0]).toEqual(base.columns[0]);

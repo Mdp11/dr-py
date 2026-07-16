@@ -132,13 +132,21 @@ describe('PropertyColumnEditor', () => {
 		}
 	});
 
-	it('toggles mode via the split checkbox; keep_empty only shows while splitting', () => {
+	it('toggles mode via the split checkbox; keep_empty is available in BOTH modes', () => {
 		vi.spyOn(metamodelState, 'getMetamodel').mockReturnValue(null);
 		const onChange = vi.fn();
 		const c = render(propColumn(), { kind: 'scope', types: [], criteria: [] }, onChange);
 		try {
-			// collapse mode: keep_empty is hidden (it has no effect there)
-			expect(document.querySelector('input[aria-label="Keep rows with no value"]')).toBeNull();
+			// collapse mode: keep_empty stays available (unchecked drops rows whose
+			// cell is empty, without splitting anything)
+			const keep = document.querySelector(
+				'input[aria-label="Keep rows with no value"]'
+			) as HTMLInputElement;
+			expect(keep).not.toBeNull();
+			expect(keep.checked).toBe(true);
+			keep.click();
+			flushSync();
+			expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ keep_empty: false }));
 			const split = document.querySelector(
 				'input[aria-label="Split multiple values in multiple rows"]'
 			) as HTMLInputElement;

@@ -10,6 +10,7 @@
 		ensureTableDraft,
 		getTableConflict,
 		getTableDraft,
+		getTablePage,
 		reloadTableDraft,
 		saveAsTableDraft,
 		saveTableDraft,
@@ -27,6 +28,12 @@
 	const draft = $derived(getTableDraft(tabId));
 	const conflict = $derived(getTableConflict(tabId));
 	const editable = $derived(canEdit());
+	const page = $derived(getTablePage(tabId));
+	// Any expand column multiplies rows — then the count reads
+	// "N elements → M rows" (the pre-split base vs the split result).
+	const hasSplit = $derived(
+		draft?.definition.columns.some((c) => c.kind !== 'element' && c.mode === 'expand') ?? false
+	);
 	let saveError = $state<string | null>(null);
 	let settingsOpen = $state(false);
 
@@ -75,6 +82,20 @@
 			/>
 			{#if draft.dirty}
 				<span title="Unsaved changes" class="text-warning">●</span>
+			{/if}
+			{#if page}
+				<span
+					data-testid="table-row-count"
+					class="whitespace-nowrap text-[11px] tabular-nums text-muted-foreground"
+					title={page.truncated ? 'The row set is incomplete (row limit reached)' : undefined}
+				>
+					{#if hasSplit && page.base_total != null}
+						{page.base_total} element{page.base_total === 1 ? '' : 's'} →
+						{page.total}{page.truncated ? '+' : ''} row{page.total === 1 ? '' : 's'}
+					{:else}
+						{page.total}{page.truncated ? '+' : ''} row{page.total === 1 ? '' : 's'}
+					{/if}
+				</span>
 			{/if}
 			<span class="flex-1"></span>
 			<div class="flex items-center gap-2">

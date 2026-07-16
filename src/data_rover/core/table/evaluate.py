@@ -208,21 +208,68 @@ def _row_source_base_slots(defn: TableDefinition, base_keys: list[RowKey]) -> in
     return len(base_keys[0]) if base_keys else 1
 
 
+@dataclass(frozen=True)
+class RowBuild:
+    keys: list[RowKey]
+    truncated: bool
+    #: Rows the row source produced BEFORE expand columns multiplied them and
+    #: before collapse keep_empty filtering dropped any — for a scope source,
+    #: the scope size. The UI shows it next to `len(keys)` so a split table
+    #: reads "N elements -> M rows".
+    base_total: int
+
+
 def build_rows(
     mm: Metamodel,
     model: Model,
     defn: TableDefinition,
     limits: TableLimits = TableLimits(),
 ) -> tuple[list[RowKey], bool]:
-    """(row keys, truncated). `truncated` is set when the row set is
-    INCOMPLETE for any reason: `max_rows` was hit, OR an underlying navigation
-    (row source / expand column) hit its own `max_chains`/`max_visited` budget
-    and silently produced fewer chains than exist."""
+    """(row keys, truncated) — thin compatibility wrapper over `build_rows_ex`
+    for callers that don't need `base_total`."""
+    result = build_rows_ex(mm, model, defn, limits)
+    return result.keys, result.truncated
+
+
+def build_rows_ex(
+    mm: Metamodel,
+    model: Model,
+    defn: TableDefinition,
+    limits: TableLimits = TableLimits(),
+) -> RowBuild:
+    """Full row build. `truncated` is set when the row set is INCOMPLETE for
+    any reason: `max_rows` was hit, OR an underlying navigation (row source /
+    expand column) hit its own `max_chains`/`max_visited` budget and silently
+    produced fewer chains than exist.
+
+    Columns are applied in declaration order: an `expand` column multiplies
+    rows (extending the key tuple; empty reached sets follow `keep_empty`),
+    and a COLLAPSE column with `keep_empty=False` filters rows whose cell
+    would be empty without splitting anything ("Keep rows with no value"
+    works with or without the split)."""
     keys, truncated = _base_row_keys(mm, model, defn, limits)
+    base_total = len(keys)
     base_slots = _row_source_base_slots(defn, keys)
-    # apply each expand column in declaration order, extending the key tuple
     for col in defn.columns:
-        if isinstance(col, ElementColumn) or col.mode != "expand":
+        if isinstance(col, ElementColumn):
+            continue
+        if col.mode != "expand":
+            if col.keep_empty:
+                continue
+            # collapse + keep_empty=False: drop rows whose cell is empty.
+            kept: list[RowKey] = []
+            for key in keys:
+                roots = resolve_source_elements(
+                    mm, model, defn, key, col.source, base_slots, limits
+                )
+                has_value, nav_truncated = _collapse_has_value(
+                    mm, model, col, roots, limits
+                )
+                if nav_truncated:
+                    truncated = True
+                if has_value:
+                    kept.append(key)
+            keys = kept
             continue
         capped = False
         new_keys: list[RowKey] = []
@@ -250,7 +297,34 @@ def build_rows(
     if len(keys) > limits.max_rows:
         keys = keys[: limits.max_rows]
         truncated = True
-    return keys, truncated
+    return RowBuild(keys=keys, truncated=truncated, base_total=base_total)
+
+
+def _collapse_has_value(
+    mm: Metamodel,
+    model: Model,
+    col: NavigationColumn | PropertyColumn,
+    roots: list[str],
+    limits: TableLimits,
+) -> tuple[bool, bool]:
+    """(cell would be non-empty, navigation-truncated) for one row of a
+    COLLAPSE column — the `keep_empty=False` filter in `build_rows_ex`.
+    Mirrors what `cells.py` renders: a navigation cell is empty when nothing
+    is reached; a property cell is empty when no source element carries a
+    non-None (and, for lists, non-empty) value."""
+    if isinstance(col, NavigationColumn):
+        reached, truncated = _navigation_reached_ex(mm, model, col, roots, limits)
+        return bool(reached), truncated
+    for eid in roots:
+        raw = model.elements[eid].properties.get(col.name)
+        if raw is None:
+            continue
+        if isinstance(raw, (list, tuple)):
+            if len(raw) > 0:
+                return True, False
+        else:
+            return True, False
+    return False, False
 
 
 def _expand_values(
