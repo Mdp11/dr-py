@@ -132,6 +132,42 @@ def test_hidden_defaults_false_and_parses():
     assert defn.columns[1].hidden is True
 
 
+def test_source_step_index_requires_navigation_ref():
+    with pytest.raises(ValidationError, match="navigation column"):
+        TABLE_ADAPTER.validate_python(
+            {
+                "row_source": {"kind": "scope", "types": []},
+                "columns": [
+                    {"kind": "element", "source": {"kind": "row"}},
+                    {
+                        "kind": "property",
+                        "name": "p",
+                        "source": {"kind": "column", "index": 0, "step_index": 1},
+                    },
+                ],
+            }
+        )
+
+
+def test_source_step_index_on_expand_nav_is_multi_binding():
+    # an element column needs a single-binding source; a step-index override
+    # on an expand nav ref returns the (possibly many) step elements
+    with pytest.raises(ValidationError, match="single-binding"):
+        TABLE_ADAPTER.validate_python(
+            {
+                "row_source": {"kind": "scope", "types": []},
+                "columns": [
+                    {"kind": "element", "source": {"kind": "row"}},
+                    {"kind": "navigation", "navigation": {}, "mode": "expand"},
+                    {
+                        "kind": "element",
+                        "source": {"kind": "column", "index": 1, "step_index": 1},
+                    },
+                ],
+            }
+        )
+
+
 def test_chain_index_nonzero_ok_with_chains_source():
     t = _table(
         row_source={"kind": "chains",

@@ -140,6 +140,14 @@ def resolve_source_elements(
     EXPAND column (navigation or property) already put one binding per row, so we
     read that row's key slot directly (this is what makes source-from-another-cell
     row-correct); a COLLAPSE navigation column is re-evaluated from its source.
+
+    A ColumnRef with `step_index` set overrides ALL of the above for a
+    navigation-column reference: instead of the referenced column's own
+    projected step, it re-navigates from the referenced column's OWN source
+    and reads the requested chain step. Off an `expand` navigation column this
+    row is pinned to one projected element (read back from the expand slot),
+    so only chains whose projection matches it contribute — otherwise a
+    step-index cell would mix in other rows' chains.
     """
     if isinstance(source, RowSlot):
         # Static validation only pins chain_index for NON-chains row sources;
@@ -153,6 +161,23 @@ def resolve_source_elements(
         b = key[source.chain_index]
         return [b] if isinstance(b, str) else []
     ref_col = defn.columns[source.index]
+    if ref_col.kind == "navigation" and source.step_index is not None:
+        # Step-override reference: re-evaluate the navigation and read the
+        # requested chain step. Off an EXPAND column the row is pinned to one
+        # projected element, so only chains projecting to it count.
+        roots = resolve_source_elements(
+            mm, model, defn, key, ref_col.source, base_slots, limits
+        )
+        match: str | None = None
+        if ref_col.mode == "expand":
+            b = key[_expand_slot_of(defn, base_slots, source.index)]
+            if not isinstance(b, str):
+                return []
+            match = b
+        return _navigation_step_elements(
+            mm, model, ref_col, roots, limits,
+            step=source.step_index, match_projected=match,
+        )
     if getattr(ref_col, "mode", "collapse") == "expand":
         b = key[_expand_slot_of(defn, base_slots, source.index)]
         return [b] if isinstance(b, str) else []
@@ -199,6 +224,37 @@ def _navigation_reached(
     limits: TableLimits,
 ) -> list[str]:
     return _navigation_reached_ex(mm, model, col, roots, limits)[0]
+
+
+def _navigation_step_elements(
+    mm: Metamodel,
+    model: Model,
+    col: NavigationColumn,
+    roots: list[str],
+    limits: TableLimits,
+    *,
+    step: int,
+    match_projected: str | None,
+) -> list[str]:
+    """Elements at chain step `step` of `col`'s navigation, evaluated from
+    `roots`. With `match_projected` set (the expand-column case) only chains
+    whose OWN projection — the column's `step_index` — equals it contribute,
+    keeping the reference row-correct. Mirrors `_navigation_reached_ex`'s
+    dedup-preserving-order and its ValueError-on-out-of-range (API → 422)."""
+    defn = col.navigation.definition
+    if defn is None or not roots:
+        return []
+    result = evaluate(mm, model, defn, limits.nav_limits, row_elements=roots)
+    proj = col.step_index if col.step_index is not None else -1
+    seen: dict[str, None] = {}
+    for chain in result.chains:
+        _check_step_index(step, len(chain))
+        if match_projected is not None:
+            _check_step_index(proj, len(chain))
+            if chain[proj] != match_projected:
+                continue
+        seen[chain[step]] = None
+    return list(seen)
 
 
 def _row_source_base_slots(defn: TableDefinition, base_keys: list[RowKey]) -> int:

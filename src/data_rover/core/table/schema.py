@@ -86,6 +86,11 @@ class RowSlot(BaseModel):
 class ColumnRef(BaseModel):
     kind: Literal["column"] = "column"
     index: int = Field(ge=0)
+    #: Only legal when the referenced column is a NAVIGATION column: resolve
+    #: this reference to the elements at THIS chain step (0 = the chain's
+    #: start) instead of the referenced column's own projected step. None =
+    #: the referenced column's own behavior (unchanged).
+    step_index: int | None = None
 
 
 ColumnSource = Annotated[Union[RowSlot, ColumnRef], Field(discriminator="kind")]
@@ -159,6 +164,12 @@ class TableDefinition(BaseModel):
                 raise ValueError(
                     f"column {i} sources column {src.index} (must be < {i})"
                 )
+            if isinstance(src, ColumnRef) and src.step_index is not None:
+                if self.columns[src.index].kind != "navigation":
+                    raise ValueError(
+                        f"column {i}: source step_index requires the referenced "
+                        "column to be a navigation column"
+                    )
             # chain_index only on a chains row source
             if isinstance(src, RowSlot) and src.chain_index != 0 and not is_chains:
                 raise ValueError("chain_index != 0 requires a chains row source")
@@ -196,7 +207,9 @@ class TableDefinition(BaseModel):
         if ref.kind == "element":
             return True, True
         if ref.kind == "navigation":
-            single = ref.mode == "expand"
+            # a step-index override re-projects the chains and can return MANY
+            # elements per row even off an expand column — no longer single.
+            single = ref.mode == "expand" and src.step_index is None
             return True, single
         # property column
         return False, ref.mode == "expand"
