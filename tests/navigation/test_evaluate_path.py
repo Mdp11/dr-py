@@ -343,3 +343,120 @@ def test_target_types_filter_landing() -> None:
     assert result.chains == [(root.id, db.id)]
     for chain in result.chains:
         assert mm.is_element_subtype(model.elements[chain[1]].type_name, "Database")
+
+
+def _ref_mm() -> Metamodel:
+    # `building`/`peers` are ELEMENT-REFERENCE properties (datatype names an
+    # element type; values are element ids). `tags` is a plain string.
+    return Metamodel(
+        elements=[
+            ElementType(
+                name="Building",
+                properties=[PropertyDef(name="name", datatype="string")],
+            ),
+            ElementType(
+                name="Sensor",
+                properties=[
+                    PropertyDef(name="building", datatype="Building"),
+                    PropertyDef(name="tags", datatype="string", multiplicity="0..*"),
+                    PropertyDef(name="peers", datatype="Sensor", multiplicity="0..*"),
+                ],
+            ),
+            ElementType(name="SmartSensor", extends="Sensor"),
+        ],
+        relationships=[
+            RelationshipType(name="Measures", source="Sensor", target="Building"),
+        ],
+    )
+
+
+def _prop(name: str) -> dict:
+    return {"kind": "property", "property_name": name}
+
+
+def _ref_fixture() -> tuple[Model, dict[str, str]]:
+    model = Model(_ref_mm())
+    ids: dict[str, str] = {}
+    for key, type_name in [
+        ("b1", "Building"), ("b2", "Building"),
+        ("s1", "Sensor"), ("s2", "Sensor"), ("smart", "SmartSensor"),
+    ]:
+        ids[key] = model.create_element(type_name).id
+    model.set_property(model.elements[ids["s1"]], "building", ids["b1"])
+    model.set_property(model.elements[ids["s1"]], "peers", [ids["s2"], ids["smart"]])
+    model.set_property(model.elements[ids["s1"]], "tags", ["hot"])
+    model.set_property(model.elements[ids["smart"]], "building", ids["b2"])
+    # s2 carries no properties at all.
+    return model, ids
+
+
+def _prop_path(**overrides):
+    doc = {
+        "kind": "path",
+        "start": {"kind": "scope", "types": ["Sensor"]},
+        "steps": [_prop("building")],
+    }
+    doc.update(overrides)
+    return NAVIGATION_ADAPTER.validate_python(doc)
+
+
+def test_property_hop_follows_single_reference() -> None:
+    model, ids = _ref_fixture()
+    result = evaluate(model.metamodel, model, _prop_path())
+    assert (ids["s1"], ids["b1"]) in result.chains
+    assert result.step_types == ["building"]
+
+
+def test_property_hop_follows_list_reference() -> None:
+    model, ids = _ref_fixture()
+    result = evaluate(model.metamodel, model, _prop_path(steps=[_prop("peers")]))
+    assert (ids["s1"], ids["s2"]) in result.chains
+    assert (ids["s1"], ids["smart"]) in result.chains
+
+
+def test_property_hop_resolves_inherited_property() -> None:
+    # SmartSensor inherits `building` from Sensor (effective-property lookup).
+    model, ids = _ref_fixture()
+    result = evaluate(model.metamodel, model, _prop_path())
+    assert (ids["smart"], ids["b2"]) in result.chains
+
+
+def test_property_hop_prunes_absent_property() -> None:
+    model, ids = _ref_fixture()
+    result = evaluate(model.metamodel, model, _prop_path())
+    assert not any(chain[0] == ids["s2"] for chain in result.chains)
+
+
+def test_property_hop_prunes_non_element_datatype() -> None:
+    model, ids = _ref_fixture()
+    result = evaluate(model.metamodel, model, _prop_path(steps=[_prop("tags")]))
+    assert result.chains == []
+    assert result.step_types == ["tags"]
+
+
+def test_property_hop_skips_dangling_reference() -> None:
+    model, ids = _ref_fixture()
+    model.set_property(model.elements[ids["s2"]], "building", "no-such-id")
+    result = evaluate(model.metamodel, model, _prop_path())
+    assert not any(chain[0] == ids["s2"] for chain in result.chains)
+
+
+def test_property_hop_honors_exclude_visited() -> None:
+    model, ids = _ref_fixture()
+    model.set_property(model.elements[ids["s2"]], "peers", [ids["s2"]])
+    nav = _prop_path(steps=[_prop("peers")])
+    assert (ids["s2"], ids["s2"]) not in evaluate(model.metamodel, model, nav).chains
+    nav = _prop_path(steps=[_prop("peers")], exclude_visited=False)
+    assert (ids["s2"], ids["s2"]) in evaluate(model.metamodel, model, nav).chains
+
+
+def test_mixed_relationship_and_property_chain() -> None:
+    model, ids = _ref_fixture()
+    model.connect("Measures", ids["s2"], ids["b1"])
+    nav = _prop_path(
+        start={"kind": "scope", "types": ["Sensor"]},
+        steps=[_prop("peers"), {"kind": "relationship", "relationship_type": "Measures"}],
+    )
+    result = evaluate(model.metamodel, model, nav)
+    assert (ids["s1"], ids["s2"], ids["b1"]) in result.chains
+    assert result.step_types == ["peers", "Measures"]

@@ -15,7 +15,7 @@ Format contract (Stage 1 of the navigation/tables/diagrams mega-plan):
   (a path with N *relationship or property* steps yields chains of length N+1 — a
   `FilterStep` prunes the frontier in place and adds no column).
   `Operand.step_index` addresses that tuple directly: 0 = start elements,
-  k = elements after relationship-step k, None = terminal step.
+  k = elements after chain-advancing step k, None = terminal step.
 - Set operations act on ELEMENT SETS (the elements a navigation reaches at
   one step), never on chain tuples; `difference` is a left fold over the
   operand list.
