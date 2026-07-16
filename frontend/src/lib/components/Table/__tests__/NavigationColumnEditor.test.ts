@@ -128,6 +128,9 @@ describe('NavigationColumnEditor inline mode', () => {
 			await vi.waitFor(() =>
 				expect(document.querySelector('[data-testid="inline-nav-editor"]')).toBeTruthy()
 			);
+			// Embedded PathCards default COLLAPSED (table-settings readability) —
+			// expand it to reach the step-adding buttons.
+			click(document.querySelector('[data-testid="path-collapse-toggle"]'));
 			// Edit through the REAL embedded PathCard: add a relationship step.
 			click(
 				[...document.querySelectorAll('button')].find((b) =>

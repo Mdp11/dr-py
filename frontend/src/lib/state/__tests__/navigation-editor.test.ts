@@ -10,6 +10,7 @@ import {
 	getPreview,
 	getSaveConflict,
 	getSelectedPath,
+	isCardCollapsed,
 	isNodeVisible,
 	isRunnable,
 	loadMorePreview,
@@ -19,6 +20,7 @@ import {
 	saveAsDraft,
 	saveDraft,
 	selectNode,
+	setCardCollapsed,
 	setEmbeddedRowElement,
 	unregisterVisibleNode,
 	updateDefinition
@@ -1273,5 +1275,100 @@ describe('embedded drafts', () => {
 		expect(() =>
 			ensureEmbeddedDraft('nav:draft:x', emptyRowPath(), { rowContext: true, rowElementId: null })
 		).toThrow(/navemb/);
+	});
+});
+
+describe('card collapse state', () => {
+	it('defaults collapsed for embedded drafts, expanded for standalone', async () => {
+		ensureEmbeddedDraft('navemb:t', emptyRowPath(), { rowContext: true, rowElementId: null });
+		expect(isCardCollapsed('navemb:t', [])).toBe(true);
+		await ensureDraft('nav:draft:standalone');
+		expect(isCardCollapsed('nav:draft:standalone', [])).toBe(false);
+	});
+
+	it('an explicit toggle survives definition updates and structural edits', () => {
+		ensureEmbeddedDraft('navemb:t2', emptyRowPath(), { rowContext: true, rowElementId: null });
+		setCardCollapsed('navemb:t2', [], false);
+		expect(isCardCollapsed('navemb:t2', [])).toBe(false);
+		updateDefinition('navemb:t2', emptyRowPath());
+		expect(isCardCollapsed('navemb:t2', [])).toBe(false);
+	});
+
+	it('an explicit per-node toggle follows the node through a structural edit remap', async () => {
+		const tabId = 'nav:draft:collapse-remap';
+		await ensureDraft(tabId);
+		updateDefinition(tabId, {
+			kind: 'set_op',
+			schema_version: 2,
+			op: 'union',
+			operands: [
+				{ definition: runnablePath('A'), step_index: null },
+				{ definition: runnablePath('B'), step_index: null },
+				{ definition: runnablePath('C'), step_index: null }
+			]
+		});
+		// C starts collapsed (standalone default is expanded — flip it explicitly
+		// so the override, not the default, is what must travel).
+		setCardCollapsed(tabId, [2], true);
+		applyStructuralEdit(tabId, removeOperandEdit(getDraft(tabId)!.definition, [], 0));
+		// C moved from index 2 to index 1 — its explicit collapse choice follows.
+		expect(isCardCollapsed(tabId, [1])).toBe(true);
+	});
+
+	it('a structural edit drops the collapse override for a removed node', async () => {
+		const tabId = 'nav:draft:collapse-drop';
+		await ensureDraft(tabId);
+		updateDefinition(tabId, {
+			kind: 'set_op',
+			schema_version: 2,
+			op: 'union',
+			operands: [
+				{ definition: runnablePath('A'), step_index: null },
+				{ definition: runnablePath('B'), step_index: null }
+			]
+		});
+		setCardCollapsed(tabId, [0], true);
+		applyStructuralEdit(tabId, removeOperandEdit(getDraft(tabId)!.definition, [], 0));
+		// Operand A (and its override) is gone; the surviving node at [0] (B, a
+		// standalone default) must not inherit A's stale override.
+		expect(isCardCollapsed(tabId, [0])).toBe(false);
+	});
+
+	it('rekeyTab (first-save) carries the collapse override to the new tab id', async () => {
+		const tabId = openNavigationTab({ artifactId: null, title: 'New navigation' });
+		await ensureDraft(tabId);
+		setCardCollapsed(tabId, [], true);
+		vi.spyOn(artifactsApi, 'createArtifact').mockResolvedValue({
+			id: 'a9',
+			kind: 'navigation',
+			name: 'Mine',
+			artifact_rev: 1,
+			updated_at: '',
+			updated_by: null,
+			payload: {}
+		});
+		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({ items: [] });
+		await saveDraft(tabId);
+		expect(isCardCollapsed('nav:a9', [])).toBe(true);
+	});
+
+	it('closeDraft drops the collapse override', async () => {
+		const tabId = 'nav:draft:collapse-close';
+		await ensureDraft(tabId);
+		setCardCollapsed(tabId, [], true);
+		closeDraft(tabId);
+		// Re-fetching a fresh draft under the same id must not inherit the old
+		// override — the standalone default (expanded) applies again.
+		await ensureDraft(tabId);
+		expect(isCardCollapsed(tabId, [])).toBe(false);
+	});
+
+	it('resetNavigationEditors drops every collapse override', async () => {
+		const tabId = 'nav:draft:collapse-reset';
+		await ensureDraft(tabId);
+		setCardCollapsed(tabId, [], true);
+		resetNavigationEditors();
+		await ensureDraft(tabId);
+		expect(isCardCollapsed(tabId, [])).toBe(false);
 	});
 });

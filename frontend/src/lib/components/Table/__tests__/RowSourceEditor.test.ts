@@ -87,6 +87,9 @@ describe('RowSourceEditor inline mode', () => {
 			await vi.waitFor(() =>
 				expect(document.querySelector('[data-testid="inline-rowsource-editor"]')).toBeTruthy()
 			);
+			// Embedded PathCards default COLLAPSED (table-settings readability) —
+			// expand it to reach the start-mode select.
+			click(document.querySelector('[data-testid="path-collapse-toggle"]'));
 			// No row context: the start-mode select must NOT offer the row option.
 			const select = document.querySelector('select[aria-label="Start mode"]')!;
 			expect([...select.querySelectorAll('option')].map((o) => o.value)).not.toContain('row');

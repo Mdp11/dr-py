@@ -15,10 +15,12 @@
  * `_evalErrors`, `_generations`, and `_debounceTimers` are all keyed by
  * previewKey, and `_expanded` maps a tabId to the set of expanded node
  * pathKeys. A node is previewed while it is VISIBLE — card components
- * register/unregister it on mount/unmount, and `ensureDraft` pins the root —
- * there is no user-facing collapse toggle. `_selected` maps a tabId to the
- * one selected node's pathKey; the dock renders it and structural edits
- * remap it.
+ * register/unregister it on mount/unmount, and `ensureDraft` pins the root.
+ * This is a DIFFERENT concern from the user-facing collapse toggle
+ * (`_cardCollapsed`, keyed the same way): a card can be collapsed yet still
+ * previewed (its status chip stays live), so the two maps are deliberately
+ * never merged. `_selected` maps a tabId to the one selected node's pathKey;
+ * the dock renders it and structural edits remap it.
  *
  * Auto-run: there is no manual Run button. `updateDefinition` reschedules a
  * DEBOUNCED preview run (`AUTO_RUN_DEBOUNCE_MS`, per NODE — a newer edit resets
@@ -101,6 +103,16 @@ const _conflicts = new SvelteMap<string, number>(); // tabId -> server rev (per-
 /** tabId -> the set of expanded node pathKeys. A node is previewed only while
  * expanded; the root pathKey (`''`) is expanded by default. */
 const _expanded = new SvelteMap<string, SvelteSet<string>>();
+
+/** tabId -> pathKey -> the user's explicit card-collapse choice. PathCard's
+ * disclosure USED to be component-local $state, which silently reset to
+ * expanded whenever a card remounted (auto-wrap into a combination, dialog
+ * reopen, editor reuse). Store-keyed state survives remounts; the DEFAULT
+ * (no entry) is collapsed for EMBEDDED drafts — a table-settings dialog
+ * full of expanded navigation builders is unreadable — and expanded for
+ * standalone navigation tabs. Follows `_expanded`'s lifecycle: moved by
+ * rekeyTab, remapped by applyStructuralEdit, dropped with the draft. */
+const _cardCollapsed = new SvelteMap<string, SvelteMap<string, boolean>>();
 
 /** tabId -> the pathKey of the ONE selected node (`''` = root). The dock
  * renders this node's chains; a card click sets it. Selection is per-node
@@ -313,6 +325,11 @@ function rekeyTab(oldTab: string, newTab: string): void {
 		_expanded.delete(oldTab);
 		_expanded.set(newTab, set);
 	}
+	const collapsedMap = _cardCollapsed.get(oldTab);
+	if (collapsedMap) {
+		_cardCollapsed.delete(oldTab);
+		_cardCollapsed.set(newTab, collapsedMap);
+	}
 	const sel = _selected.get(oldTab);
 	if (sel !== undefined) {
 		_selected.delete(oldTab);
@@ -364,6 +381,26 @@ export function getEvalError(tabId: string, path: NodePath = []): boolean {
 /** True when the node at `path` is rendered somewhere (and thus previewed). */
 export function isNodeVisible(tabId: string, path: NodePath = []): boolean {
 	return _expanded.get(tabId)?.has(pathKey(path)) ?? false;
+}
+
+/** Whether the PathCard at `path` should render collapsed. An explicit
+ * `setCardCollapsed` choice always wins; absent one, EMBEDDED drafts (table
+ * settings) default collapsed and standalone navigation tabs default
+ * expanded — see `_cardCollapsed`'s doc comment. */
+export function isCardCollapsed(tabId: string, path: NodePath): boolean {
+	const explicit = _cardCollapsed.get(tabId)?.get(pathKey(path));
+	if (explicit !== undefined) return explicit;
+	return getDraft(tabId)?.embedded != null;
+}
+
+/** Record the user's explicit collapse/expand choice for the card at `path`. */
+export function setCardCollapsed(tabId: string, path: NodePath, collapsed: boolean): void {
+	let m = _cardCollapsed.get(tabId);
+	if (!m) {
+		m = new SvelteMap();
+		_cardCollapsed.set(tabId, m);
+	}
+	m.set(pathKey(path), collapsed);
 }
 
 /**
@@ -587,6 +624,20 @@ export function applyStructuralEdit(tabId: string, edit: StructuralEdit): void {
 		// it up and reschedules its run against whatever now sits at the root.
 		expanded.add('');
 	}
+	// The user's explicit collapse/expand choice is per-node state too: rebuild
+	// the map through `remapPath` so an override follows its node to its new
+	// position; a node that the edit removed (`remapPath` returns null) drops
+	// its override rather than leaking onto whatever unrelated node ends up at
+	// the old pathKey.
+	const collapsedMap = _cardCollapsed.get(tabId);
+	if (collapsedMap) {
+		const next = new SvelteMap<string, boolean>();
+		for (const [pk, value] of collapsedMap) {
+			const np = edit.remapPath(parsePathKey(pk));
+			if (np !== null) next.set(pathKey(np), value);
+		}
+		_cardCollapsed.set(tabId, next);
+	}
 	// Selection is per-node state too: it must follow the node through the
 	// mutation (a removed selected node falls back to the root).
 	const selPk = _selected.get(tabId);
@@ -725,6 +776,7 @@ export async function reloadDraft(tabId: string): Promise<void> {
 	_drafts.delete(tabId);
 	_conflicts.delete(tabId);
 	_expanded.delete(tabId);
+	_cardCollapsed.delete(tabId);
 	_selected.delete(tabId);
 	await ensureDraft(tabId);
 }
@@ -823,6 +875,7 @@ export function closeDraft(tabId: string): void {
 	_drafts.delete(tabId);
 	_conflicts.delete(tabId);
 	_expanded.delete(tabId);
+	_cardCollapsed.delete(tabId);
 	_selected.delete(tabId);
 }
 
@@ -834,6 +887,7 @@ export function resetNavigationEditors(): void {
 	_conflicts.clear();
 	_evalErrors.clear();
 	_expanded.clear();
+	_cardCollapsed.clear();
 	_visibleCounts.clear();
 	_selected.clear();
 	// Bump (not clear) so in-flight responses from before the reset stay stale

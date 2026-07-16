@@ -14,8 +14,10 @@
 		getDraft,
 		getMetamodel,
 		getSelectedPath,
+		isCardCollapsed,
 		registerVisibleNode,
 		selectNode,
+		setCardCollapsed,
 		unregisterVisibleNode,
 		updateDefinition
 	} from '$lib/state';
@@ -91,12 +93,17 @@
 
 	let libraryOpen = $state(false);
 
-	// UI-only disclosure: a collapsed card keeps its header (title, status,
-	// chips) plus a one-line summary and hides the editing body. Local state —
-	// deliberately NOT the store's `_expanded` set, which tracks node
-	// VISIBILITY for preview auto-runs (see navigation-editor.svelte.ts), so
-	// previews/status stay live while collapsed.
-	let collapsed = $state(false);
+	// UI disclosure: a collapsed card keeps its header (title, status, chips)
+	// plus a one-line summary and hides the editing body. Store-keyed (NOT
+	// component-local $state) so it survives a remount — an auto-wrap into a
+	// combination, a dialog reopen, or an index-keyed editor reuse used to
+	// silently reset it back to expanded. It is also deliberately NOT the
+	// store's `_expanded` set, which tracks node VISIBILITY for preview
+	// auto-runs (see navigation-editor.svelte.ts) — previews/status stay live
+	// while collapsed. The default (no explicit choice yet) is collapsed for
+	// embedded (table-settings) drafts and expanded for standalone navigation
+	// tabs; see `isCardCollapsed`.
+	const collapsed = $derived(isCardCollapsed(tabId, path));
 
 	// Inline rename: the user-chosen name overrides the automatic "Path A"
 	// lettering (clearing it restores the letter — `name: null`).
@@ -249,7 +256,7 @@
 			aria-label={collapsed ? 'Expand path' : 'Collapse path'}
 			aria-expanded={!collapsed}
 			class="shrink-0 text-muted-foreground/70 transition-colors hover:text-foreground"
-			onclick={() => (collapsed = !collapsed)}
+			onclick={() => setCardCollapsed(tabId, path, !collapsed)}
 		>
 			{#if collapsed}<ChevronRight class="size-3.5" />{:else}<ChevronDown class="size-3.5" />{/if}
 		</button>

@@ -258,6 +258,10 @@ it('offers the row start mode only on a row-context embedded draft', async () =>
 	});
 	flushSync();
 	try {
+		// Embedded drafts default COLLAPSED (table-settings readability) — expand
+		// the card to reach the start-mode select.
+		(document.querySelector('[data-testid="path-collapse-toggle"]') as HTMLElement).click();
+		flushSync();
 		const select = document.querySelector('select[aria-label="Start mode"]')!;
 		expect([...select.querySelectorAll('option')].map((o) => o.value)).toContain('row');
 		expect((select as HTMLSelectElement).value).toBe('row');
