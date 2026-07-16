@@ -23,9 +23,9 @@
 		setEmbeddedRowElement,
 		updateDefinition
 	} from '$lib/state';
-	import { columnLabel } from '$lib/table/columns';
 	import { emptyRowPath } from '$lib/navigation/tree';
 	import type { Column, NavigationDefinition, RowSource } from '$lib/api/types';
+	import ColumnSourceEditor from './ColumnSourceEditor.svelte';
 	import NavigationNode from '../Navigation/NavigationNode.svelte';
 
 	type NavColumn = Extract<Column, { kind: 'navigation' }>;
@@ -51,7 +51,6 @@
 	} = $props();
 
 	const navHeaders = $derived(getArtifactHeaders().filter((a) => a.kind === 'navigation'));
-	const priorColumns = $derived(columns.slice(0, columnIndex));
 
 	// One embedded-draft id per mounted editor instance (never persisted).
 	const embId = `navemb:${crypto.randomUUID()}`;
@@ -175,22 +174,6 @@
 		onChange({ ...column, navigation: {} });
 	}
 
-	function setSourceKind(e: Event): void {
-		const kind = (e.currentTarget as HTMLSelectElement).value;
-		if (kind === 'row') onChange({ ...column, source: { kind: 'row', chain_index: 0 } });
-		else {
-			const index = priorColumns.length > 0 ? priorColumns.length - 1 : 0;
-			onChange({ ...column, source: { kind: 'column', index } });
-		}
-	}
-	function setSourceChainIndex(e: Event): void {
-		const v = Number((e.currentTarget as HTMLInputElement).value) || 0;
-		onChange({ ...column, source: { kind: 'row', chain_index: v } });
-	}
-	function setSourceColumnIndex(e: Event): void {
-		const v = Number((e.currentTarget as HTMLSelectElement).value) || 0;
-		onChange({ ...column, source: { kind: 'column', index: v } });
-	}
 	function setRef(e: Event): void {
 		const ref = (e.currentTarget as HTMLSelectElement).value;
 		onChange({ ...column, navigation: ref ? { ref } : {} });
@@ -222,49 +205,13 @@
 	data-testid="nav-column-editor"
 	class="mt-1.5 space-y-1.5 rounded border border-border/60 bg-muted/30 p-2 text-[11px]"
 >
-	<div class="flex flex-wrap items-center gap-2">
-		<span class="text-muted-foreground/70">source</span>
-		<select
-			aria-label="Column source kind"
-			value={column.source.kind}
-			onchange={setSourceKind}
-			class="rounded border border-input bg-card px-1 py-0.5"
-		>
-			<option value="row">Row</option>
-			<option value="column" disabled={priorColumns.length === 0}>Earlier column</option>
-		</select>
-		{#if column.source.kind === 'row'}
-			<!-- chain_index only means something for a `chains` row source (it picks
-			     which chain step the column reads); the schema rejects != 0 for any
-			     other row source, so don't offer it there. -->
-			{#if rowSource?.kind === 'chains'}
-				<label
-					class="flex items-center gap-1"
-					title="Which step of the row's chain this column reads (0 = the chain's first element)"
-				>
-					chain step
-					<input
-						type="number"
-						min="0"
-						class="w-12 rounded border border-input bg-card px-1 py-0.5"
-						value={column.source.chain_index}
-						oninput={setSourceChainIndex}
-					/>
-				</label>
-			{/if}
-		{:else}
-			<select
-				aria-label="Source column"
-				value={column.source.index}
-				onchange={setSourceColumnIndex}
-				class="rounded border border-input bg-card px-1 py-0.5"
-			>
-				{#each priorColumns as c, i (i)}
-					<option value={i}>{i}: {columnLabel(c)}</option>
-				{/each}
-			</select>
-		{/if}
-	</div>
+	<ColumnSourceEditor
+		source={column.source}
+		{columns}
+		{columnIndex}
+		{rowSource}
+		onSourceChange={(source) => onChange({ ...column, source })}
+	/>
 	<div class="flex flex-wrap items-center gap-2">
 		<span class="text-muted-foreground/70">navigation</span>
 		<div class="flex overflow-hidden rounded border border-input">
