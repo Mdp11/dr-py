@@ -383,54 +383,35 @@ describe('propertyStepTargetTypes', () => {
 });
 
 describe('frontierTypesAt', () => {
+	const node: PathNavigation = {
+		kind: 'path',
+		schema_version: 2,
+		start: { kind: 'scope', types: ['Sensor'], criteria: [] },
+		steps: [
+			{ kind: 'property', property_name: 'building' },
+			{ kind: 'filter', criteria: [] },
+			{ kind: 'property', property_name: 'tags' }
+		],
+		exclude_visited: true
+	};
+
 	it('returns the starting types at index 0', () => {
-		const node: PathNavigation = {
-			kind: 'path',
-			schema_version: 2,
-			start: { kind: 'scope', types: ['Sensor'], criteria: [] },
-			steps: [],
-			exclude_visited: true
-		};
 		expect(frontierTypesAt(smartCityMm, node, 0)).toEqual(['Sensor']);
 	});
 
 	it('walks property steps forward to their target types', () => {
-		const node: PathNavigation = {
-			kind: 'path',
-			schema_version: 2,
-			start: { kind: 'scope', types: ['Sensor'], criteria: [] },
-			steps: [{ kind: 'property', property_name: 'building' }],
-			exclude_visited: true
-		};
 		expect(frontierTypesAt(smartCityMm, node, 1)).toEqual(['Building']);
 	});
 
 	it('filter steps do not change the frontier', () => {
-		const node: PathNavigation = {
-			kind: 'path',
-			schema_version: 2,
-			start: { kind: 'scope', types: ['Sensor'], criteria: [] },
-			steps: [
-				{ kind: 'property', property_name: 'building' },
-				{ kind: 'filter', criteria: [] }
-			],
-			exclude_visited: true
-		};
 		expect(frontierTypesAt(smartCityMm, node, 2)).toEqual(['Building']);
 	});
 
 	it('returns any type past a dead-end property step', () => {
-		const node: PathNavigation = {
-			kind: 'path',
-			schema_version: 2,
-			start: { kind: 'scope', types: ['Sensor'], criteria: [] },
-			steps: [
-				{ kind: 'property', property_name: 'building' },
-				{ kind: 'filter', criteria: [] },
-				{ kind: 'property', property_name: 'tags' }
-			],
-			exclude_visited: true
-		};
 		expect(frontierTypesAt(smartCityMm, node, 3)).toEqual([]);
+	});
+
+	it('clamps index to steps.length when index exceeds it', () => {
+		expect(frontierTypesAt(smartCityMm, node, 5)).toEqual([]);
 	});
 });
