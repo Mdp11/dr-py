@@ -150,6 +150,41 @@ describe('TableGrid', () => {
 		}
 	});
 
+	it('gives a row one line per value in its tallest cell', () => {
+		const page: TablePage = {
+			...PAGE,
+			rows: [
+				{
+					key: ['e1'],
+					cells: [
+						{
+							kind: 'element',
+							item: { id: 'e1', type_name: 'Block', display_name: 'B', child_count: 0 }
+						},
+						{
+							kind: 'values',
+							present: true,
+							values: ['a', 'b', 'c'],
+							total: 3,
+							truncated: false
+						}
+					]
+				}
+			]
+		};
+		vi.spyOn(store, 'getTablePage').mockReturnValue(page);
+		vi.spyOn(store, 'getTableLoading').mockReturnValue(false);
+		const c = render('tbl:draft:multiline');
+		try {
+			const row = document.querySelector('[data-testid="table-row"]') as HTMLElement;
+			expect(row.style.height).toBe('84px'); // 3 lines * 28
+			const lines = row.querySelectorAll('[data-testid="cell-line"]');
+			expect(lines.length).toBe(3);
+		} finally {
+			unmount(c);
+		}
+	});
+
 	it('tints cells of a locked element: orange for my lock, red for a peer lock', () => {
 		vi.spyOn(store, 'getTablePage').mockReturnValue(PAGE);
 		vi.spyOn(store, 'getTableLoading').mockReturnValue(false);

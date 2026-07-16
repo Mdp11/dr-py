@@ -41,6 +41,35 @@ export function computeWindow(args: {
 }
 
 /**
+ * Variable-row-height counterpart of {@link computeWindow}: `offsets` is a
+ * prefix-sum array (offsets[i] = y of row i's top; offsets[total] = full
+ * height). Binary-searches the first/last intersecting rows so a 50k-row
+ * table costs O(log n) per scroll frame.
+ */
+export function computeWindowVariable(args: {
+	scrollTop: number;
+	viewportH: number;
+	offsets: number[];
+	overscan: number;
+}): WindowSlice {
+	const { scrollTop, viewportH, offsets, overscan } = args;
+	const total = offsets.length - 1;
+	if (total <= 0) return { start: 0, end: 0, padTop: 0, padBottom: 0 };
+	// first row whose bottom edge is past scrollTop
+	let lo = 0, hi = total - 1, first = total - 1;
+	while (lo <= hi) {
+		const mid = (lo + hi) >> 1;
+		if (offsets[mid + 1] > scrollTop) { first = mid; hi = mid - 1; } else lo = mid + 1;
+	}
+	const bottom = scrollTop + viewportH;
+	let last = first;
+	while (last < total && offsets[last] < bottom) last++;
+	const start = Math.max(0, first - overscan);
+	const end = Math.min(total, last + overscan);
+	return { start, end, padTop: offsets[start], padBottom: offsets[total] - offsets[end] };
+}
+
+/**
  * True when the mounted window is within `threshold` rows of the last loaded
  * row and the server still has more (`loadedCount < total`). Drives automatic
  * paging — there is no "Show more" button.

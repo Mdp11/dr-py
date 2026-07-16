@@ -19,7 +19,7 @@
 		updateTableDefinition
 	} from '$lib/state';
 	import { columnKindLabel, setColumnWidth } from '$lib/table/columns';
-	import { computeWindow } from '$lib/components/Sidebar/windowing';
+	import { computeWindowVariable } from '$lib/components/Sidebar/windowing';
 	import ElementCell from './Cell/ElementCell.svelte';
 	import ElementsCell from './Cell/ElementsCell.svelte';
 	import ValueCell from './Cell/ValueCell.svelte';
@@ -49,8 +49,26 @@
 	let scrollTop = $state(0);
 	let viewportH = $state(0);
 
+	// One line per value: the row is as tall as its tallest cell. Sparse
+	// (unloaded) rows count 1 line — heights can shift as rows stream in,
+	// which is the standard estimated-height virtualization tradeoff.
+	function cellLines(cell: TableCell): number {
+		if (cell.kind === 'values') return Math.max(1, cell.values.length + (cell.truncated ? 1 : 0));
+		if (cell.kind === 'elements') return Math.max(1, cell.items.length + (cell.truncated ? 1 : 0));
+		return 1;
+	}
+	const offsets = $derived.by(() => {
+		const out = new Array<number>(rows.length + 1);
+		out[0] = 0;
+		for (let i = 0; i < rows.length; i++) {
+			const r = rows[i];
+			const lines = r ? Math.max(1, ...r.cells.map(cellLines)) : 1;
+			out[i + 1] = out[i] + lines * ROW_H;
+		}
+		return out;
+	});
 	const win = $derived(
-		computeWindow({ scrollTop, viewportH, rowH: ROW_H, total: rows.length, overscan: OVERSCAN })
+		computeWindowVariable({ scrollTop, viewportH, offsets, overscan: OVERSCAN })
 	);
 	const windowedRows = $derived(rows.slice(win.start, win.end));
 
@@ -219,12 +237,12 @@
 					role="row"
 					data-testid="table-row"
 					class="flex border-b border-border/60"
-					style="height:{ROW_H}px"
+					style="height:{offsets[win.start + i + 1] - offsets[win.start + i]}px"
 				>
 					{#each row.cells as cell, ci (ci)}
 						{@const lock = cellLockBadge(cell)}
 						<div
-							class="flex shrink-0 items-center overflow-hidden border-r border-border/40 px-2 text-xs {lock.state ===
+							class="flex shrink-0 items-start overflow-hidden border-r border-border/40 px-2 text-xs {lock.state ===
 							'mine'
 								? 'bg-warning/20'
 								: lock.state === 'theirs'
@@ -239,9 +257,13 @@
 							style="width:{widthFor(page.columns[ci], ci)}px"
 						>
 							{#if cell.kind === 'element'}
-								<ElementCell {cell} />
+								<div class="flex h-7 w-full min-w-0 items-center">
+									<ElementCell {cell} />
+								</div>
 							{:else if cell.kind === 'value'}
-								<ValueCell {cell} {tabId} columnName={columnNameFor(ci)} />
+								<div class="flex h-7 w-full min-w-0 items-center">
+									<ValueCell {cell} {tabId} columnName={columnNameFor(ci)} />
+								</div>
 							{:else if cell.kind === 'values'}
 								<ValuesCell {cell} />
 							{:else}

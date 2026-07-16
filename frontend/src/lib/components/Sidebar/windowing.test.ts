@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	computeWindow,
+	computeWindowVariable,
 	shouldLoadMore,
 	shouldLoadMoreExcluded,
 	shouldLoadMoreRoots,
@@ -41,6 +42,26 @@ describe('computeWindow', () => {
 	it('handles an empty list', () => {
 		const w = computeWindow({ scrollTop: 0, viewportH: 240, rowH: 24, total: 0, overscan: 4 });
 		expect(w).toEqual({ start: 0, end: 0, padTop: 0, padBottom: 0 });
+	});
+});
+
+describe('computeWindowVariable', () => {
+	// 4 rows of heights 28, 84, 28, 56 → offsets [0, 28, 112, 140, 196]
+	const offsets = [0, 28, 112, 140, 196];
+
+	it('windows by cumulative height', () => {
+		const w = computeWindowVariable({ scrollTop: 30, viewportH: 100, offsets, overscan: 0 });
+		expect(w.start).toBe(1); // row 1 spans 28..112 — first intersecting scrollTop 30
+		expect(w.end).toBe(3); // rows 1..2 cover through y=140 ≥ 130
+		expect(w.padTop).toBe(28);
+		expect(w.padBottom).toBe(196 - 140);
+	});
+
+	it('clamps overscan at the ends and handles empty', () => {
+		expect(computeWindowVariable({ scrollTop: 0, viewportH: 50, offsets: [0], overscan: 5 }))
+			.toEqual({ start: 0, end: 0, padTop: 0, padBottom: 0 });
+		const w = computeWindowVariable({ scrollTop: 0, viewportH: 1000, offsets, overscan: 8 });
+		expect(w).toMatchObject({ start: 0, end: 4, padTop: 0, padBottom: 0 });
 	});
 });
 
