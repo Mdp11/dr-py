@@ -1,7 +1,7 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import * as artifactsApi from '$lib/api/artifacts';
-import type { PathNavigation, SetExpression } from '$lib/api/types';
+import type { Metamodel, PathNavigation, SetExpression } from '$lib/api/types';
 import {
 	ensureDraft,
 	ensureEmbeddedDraft,
@@ -13,9 +13,53 @@ import {
 	setProjectInfo,
 	updateDefinition
 } from '$lib/state';
+import { clearMetamodel, setMetamodel } from '$lib/state/metamodel.svelte';
 import { emptyRowPath, pathKey } from '$lib/navigation/tree';
 import NavigationNode from '../NavigationNode.svelte';
 import PathCard from '../PathCard.svelte';
+
+// A has a plain string property (`label`, no element anywhere reachable — a
+// dead end for a "Go to property" step) and an element-typed one (`owner`,
+// pointing at Person — a live property step).
+const PROPERTY_MM: Metamodel = {
+	enums: {},
+	elements: [
+		{
+			name: 'A',
+			abstract: false,
+			extends: null,
+			properties: [
+				{
+					name: 'label',
+					datatype: 'string',
+					multiplicity: '1',
+					min: null,
+					max: null,
+					pattern: null,
+					max_length: null
+				},
+				{
+					name: 'owner',
+					datatype: 'Person',
+					multiplicity: '0..1',
+					min: null,
+					max: null,
+					pattern: null,
+					max_length: null
+				}
+			],
+			key: null
+		},
+		{
+			name: 'Person',
+			abstract: false,
+			extends: null,
+			properties: [],
+			key: null
+		}
+	],
+	relationships: []
+};
 
 const CHAIN_PAGE = {
 	step_types: ['Uses'],
@@ -40,6 +84,7 @@ afterEach(() => {
 	resetNavigationEditors();
 	resetArtifacts();
 	resetCheckout();
+	clearMetamodel();
 	document.body.innerHTML = '';
 	vi.restoreAllMocks();
 });
@@ -336,6 +381,94 @@ it('inserting a step between existing steps splices it at that position', async 
 		]);
 		expect((steps[0] as { relationship_type: string }).relationship_type).toBe('');
 		expect((steps[1] as { relationship_type: string }).relationship_type).toBe('Uses');
+	} finally {
+		unmount(c);
+	}
+});
+
+it('the trailing "+ Go to property…" button appends an empty property step', async () => {
+	const tabId = 'nav:draft:pc-add-property';
+	await seed(tabId, pathWith());
+	const c = render(tabId);
+	try {
+		buttonByText('+ Go to property…').click();
+		flushSync();
+		const steps = (getDraft(tabId)?.definition as PathNavigation).steps;
+		expect(steps.at(-1)).toEqual({ kind: 'property', property_name: '' });
+	} finally {
+		unmount(c);
+	}
+});
+
+it('the hover insert zone includes a "+ property" button', async () => {
+	const tabId = 'nav:draft:pc-insert-property';
+	await seed(
+		tabId,
+		pathWith([
+			{
+				kind: 'relationship',
+				relationship_type: 'Uses',
+				direction: 'out',
+				target_types: [],
+				children: []
+			}
+		])
+	);
+	const c = render(tabId);
+	try {
+		const zone = document.querySelector('[data-testid="insert-step-zone"]')!;
+		const addProperty = [...zone.querySelectorAll('button')].find(
+			(b) => b.textContent?.trim() === '+ property'
+		);
+		if (!addProperty) throw new Error('"+ property" insert button not found');
+		(addProperty as HTMLButtonElement).click();
+		flushSync();
+		const steps = (getDraft(tabId)!.definition as PathNavigation).steps;
+		expect(steps[0]).toEqual({ kind: 'property', property_name: '' });
+	} finally {
+		unmount(c);
+	}
+});
+
+it('a non-element property step blocks the add affordances with the navigation-blocked hint', async () => {
+	setMetamodel(PROPERTY_MM);
+	const tabId = 'nav:draft:pc-property-blocked';
+	await seed(tabId, pathWith([{ kind: 'property', property_name: 'label' }]));
+	const c = render(tabId);
+	try {
+		expect(document.body.textContent).toContain(
+			'Navigation is blocked above — remove or change the non-element property step to continue.'
+		);
+		expect(
+			[...document.querySelectorAll('button')].some(
+				(b) => b.textContent?.trim() === '+ Go to property…'
+			)
+		).toBe(false);
+		expect(
+			[...document.querySelectorAll('button')].some(
+				(b) => b.textContent?.trim() === '+ Follow a relationship'
+			)
+		).toBe(false);
+		expect(
+			[...document.querySelectorAll('button')].some((b) => b.textContent?.trim() === '+ Keep only…')
+		).toBe(false);
+	} finally {
+		unmount(c);
+	}
+});
+
+it('an element-typed property step leaves the add affordances in place', async () => {
+	setMetamodel(PROPERTY_MM);
+	const tabId = 'nav:draft:pc-property-live';
+	await seed(tabId, pathWith([{ kind: 'property', property_name: 'owner' }]));
+	const c = render(tabId);
+	try {
+		expect(document.body.textContent).not.toContain('Navigation is blocked above');
+		expect(
+			[...document.querySelectorAll('button')].some(
+				(b) => b.textContent?.trim() === '+ Go to property…'
+			)
+		).toBe(true);
 	} finally {
 		unmount(c);
 	}
