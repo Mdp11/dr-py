@@ -73,7 +73,13 @@
 		for (let i = 0; i < rows.length; i++) {
 			const r = rows[i];
 			const lines = r
-				? Math.max(1, ...cols.map(({ i: ci }) => r.cells[ci]).filter((c) => c !== undefined).map(cellLines))
+				? Math.max(
+						1,
+						...cols
+							.map(({ i: ci }) => r.cells[ci])
+							.filter((c) => c !== undefined)
+							.map(cellLines)
+					)
 				: 1;
 			out[i + 1] = out[i] + lines * ROW_H;
 		}
@@ -234,7 +240,11 @@
 					onpointermove={onResizeMove}
 					onpointerup={onResizeEnd}
 					onpointercancel={onResizeEnd}
-					ondblclick={() => autoFitColumn(v.i, visibleCols.findIndex((vv) => vv.i === v.i))}
+					ondblclick={() =>
+						autoFitColumn(
+							v.i,
+							visibleCols.findIndex((vv) => vv.i === v.i)
+						)}
 				></div>
 			</div>
 		{/each}

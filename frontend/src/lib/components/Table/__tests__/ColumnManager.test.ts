@@ -46,7 +46,13 @@ describe('ColumnManager', () => {
 	it('adds a property column via updateTableDefinition', () => {
 		vi.spyOn(store, 'getTableDraft').mockReturnValue(
 			scopeDraft([
-				{ kind: 'element', source: { kind: 'row', chain_index: 0 }, header: '', width_px: null, hidden: false }
+				{
+					kind: 'element',
+					source: { kind: 'row', chain_index: 0 },
+					header: '',
+					width_px: null,
+					hidden: false
+				}
 			])
 		);
 		const upd = vi.spyOn(store, 'updateTableDefinition').mockImplementation(() => {});
@@ -64,7 +70,13 @@ describe('ColumnManager', () => {
 	it('offers no "+ Element column" button (the scope column is the only element column)', () => {
 		vi.spyOn(store, 'getTableDraft').mockReturnValue(
 			scopeDraft([
-				{ kind: 'element', source: { kind: 'row', chain_index: 0 }, header: '', width_px: null, hidden: false }
+				{
+					kind: 'element',
+					source: { kind: 'row', chain_index: 0 },
+					header: '',
+					width_px: null,
+					hidden: false
+				}
 			])
 		);
 		const c = render('t');
@@ -78,7 +90,13 @@ describe('ColumnManager', () => {
 	it('labels the element column "Scope" and disables removing the last one', () => {
 		vi.spyOn(store, 'getTableDraft').mockReturnValue(
 			scopeDraft([
-				{ kind: 'element', source: { kind: 'row', chain_index: 0 }, header: '', width_px: null, hidden: false },
+				{
+					kind: 'element',
+					source: { kind: 'row', chain_index: 0 },
+					header: '',
+					width_px: null,
+					hidden: false
+				},
 				{
 					kind: 'property',
 					source: { kind: 'row', chain_index: 0 },
@@ -116,8 +134,20 @@ describe('ColumnManager', () => {
 	it('keeps extra element columns removable (chains-derived tables)', () => {
 		vi.spyOn(store, 'getTableDraft').mockReturnValue(
 			scopeDraft([
-				{ kind: 'element', source: { kind: 'row', chain_index: 0 }, header: '', width_px: null, hidden: false },
-				{ kind: 'element', source: { kind: 'row', chain_index: 0 }, header: '', width_px: null, hidden: false }
+				{
+					kind: 'element',
+					source: { kind: 'row', chain_index: 0 },
+					header: '',
+					width_px: null,
+					hidden: false
+				},
+				{
+					kind: 'element',
+					source: { kind: 'row', chain_index: 0 },
+					header: '',
+					width_px: null,
+					hidden: false
+				}
 			])
 		);
 		const upd = vi.spyOn(store, 'updateTableDefinition').mockImplementation(() => {});
@@ -137,7 +167,13 @@ describe('ColumnManager', () => {
 	it('adds a navigation column via updateTableDefinition', () => {
 		vi.spyOn(store, 'getTableDraft').mockReturnValue(
 			scopeDraft([
-				{ kind: 'element', source: { kind: 'row', chain_index: 0 }, header: '', width_px: null, hidden: false }
+				{
+					kind: 'element',
+					source: { kind: 'row', chain_index: 0 },
+					header: '',
+					width_px: null,
+					hidden: false
+				}
 			])
 		);
 		const upd = vi.spyOn(store, 'updateTableDefinition').mockImplementation(() => {});
@@ -152,10 +188,16 @@ describe('ColumnManager', () => {
 		}
 	});
 
-	it('toggles a column\'s hidden flag via the eye button, flipping aria-label and icon', () => {
+	it("toggles a column's hidden flag via the eye button, flipping aria-label and icon", () => {
 		vi.spyOn(store, 'getTableDraft').mockReturnValue(
 			scopeDraft([
-				{ kind: 'element', source: { kind: 'row', chain_index: 0 }, header: '', width_px: null, hidden: false },
+				{
+					kind: 'element',
+					source: { kind: 'row', chain_index: 0 },
+					header: '',
+					width_px: null,
+					hidden: false
+				},
 				{
 					kind: 'property',
 					source: { kind: 'row', chain_index: 0 },
@@ -187,7 +229,13 @@ describe('ColumnManager', () => {
 	it('shows "Show column" and the eye-off icon once a column is hidden', () => {
 		vi.spyOn(store, 'getTableDraft').mockReturnValue(
 			scopeDraft([
-				{ kind: 'element', source: { kind: 'row', chain_index: 0 }, header: '', width_px: null, hidden: false },
+				{
+					kind: 'element',
+					source: { kind: 'row', chain_index: 0 },
+					header: '',
+					width_px: null,
+					hidden: false
+				},
 				{
 					kind: 'property',
 					source: { kind: 'row', chain_index: 0 },
@@ -216,8 +264,20 @@ describe('ColumnManager', () => {
 		// exercised.
 		vi.spyOn(store, 'getTableDraft').mockReturnValue(
 			scopeDraft([
-				{ kind: 'element', source: { kind: 'row', chain_index: 0 }, header: '', width_px: null, hidden: false },
-				{ kind: 'element', source: { kind: 'column', index: 0 }, header: '', width_px: null, hidden: false },
+				{
+					kind: 'element',
+					source: { kind: 'row', chain_index: 0 },
+					header: '',
+					width_px: null,
+					hidden: false
+				},
+				{
+					kind: 'element',
+					source: { kind: 'column', index: 0 },
+					header: '',
+					width_px: null,
+					hidden: false
+				},
 				{
 					kind: 'navigation',
 					source: { kind: 'column', index: 0 },
