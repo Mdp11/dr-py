@@ -271,7 +271,7 @@
 				onpointerdown={(e) => onHeaderPointerDown(e, v.i)}
 				onpointermove={(e) => hdrDrag.onPointerMove(e)}
 				onpointerup={(e) => hdrDrag.onPointerUp(e)}
-				onpointercancel={(e) => hdrDrag.onPointerUp(e)}
+				onpointercancel={(e) => hdrDrag.onPointerCancel(e)}
 			>
 				<span class="truncate">{v.col.header || columnKindLabel(v.col.kind)}</span>
 				<button

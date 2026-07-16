@@ -10,6 +10,7 @@ export interface ColumnDragState {
 	onPointerDown(e: PointerEvent, index: number): void;
 	onPointerMove(e: PointerEvent): void;
 	onPointerUp(e: PointerEvent): void;
+	onPointerCancel(e: PointerEvent): void;
 }
 
 /** Pointer-driven column reorder shared by the settings list and the grid
@@ -75,6 +76,11 @@ export function createColumnDrag(opts: {
 		},
 		onPointerUp(): void {
 			if (from !== null && over !== null && valid && from !== over) opts.onDrop(from, over);
+			reset();
+		},
+		onPointerCancel(): void {
+			// The browser aborted the gesture (multi-touch conflict, OS gesture,
+			// capture loss) — this is NOT a confirmed drop, unlike pointerup.
 			reset();
 		}
 	};

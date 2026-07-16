@@ -202,7 +202,7 @@
 									onpointerdown={(e) => drag.onPointerDown(e, i)}
 									onpointermove={(e) => drag.onPointerMove(e)}
 									onpointerup={(e) => drag.onPointerUp(e)}
-									onpointercancel={(e) => drag.onPointerUp(e)}>⠿</span
+									onpointercancel={(e) => drag.onPointerCancel(e)}>⠿</span
 								>
 							{/if}
 							<span class="w-4 shrink-0 text-center font-mono text-[10px] text-muted-foreground/70">

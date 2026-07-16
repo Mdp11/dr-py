@@ -171,6 +171,31 @@ describe('createColumnDrag', () => {
 		expect(drag.valid).toBe(false);
 	});
 
+	it('pointercancel over a valid target does NOT call onDrop and resets state', () => {
+		const onDrop = vi.fn();
+		const defn = defWithColumns(3);
+		const drag: ColumnDragState = createColumnDrag({
+			attr: ATTR,
+			getDefinition: () => defn,
+			onDrop
+		});
+		vi.spyOn(document, 'elementFromPoint').mockReturnValue(fakeDropTarget(2));
+
+		drag.onPointerDown(fakeEvent({ clientX: 0, clientY: 0 }), 0);
+		drag.onPointerMove(fakeEvent({ clientX: 100, clientY: 0 })); // past threshold
+
+		expect(drag.from).toBe(0);
+		expect(drag.over).toBe(2);
+		expect(drag.valid).toBe(true);
+
+		drag.onPointerCancel(fakeEvent({ clientX: 100, clientY: 0 }));
+
+		expect(onDrop).not.toHaveBeenCalled();
+		expect(drag.from).toBeNull();
+		expect(drag.over).toBeNull();
+		expect(drag.valid).toBe(false);
+	});
+
 	it('resets after a completed valid drop so a second drag starts clean', () => {
 		const onDrop = vi.fn();
 		const defn = defWithColumns(3);
