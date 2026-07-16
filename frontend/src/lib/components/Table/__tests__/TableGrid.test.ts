@@ -185,6 +185,43 @@ describe('TableGrid', () => {
 		}
 	});
 
+	it('gives a truncated single-value cell a value line plus a separate truncation-marker line', () => {
+		const page: TablePage = {
+			...PAGE,
+			rows: [
+				{
+					key: ['e1'],
+					cells: [
+						{
+							kind: 'element',
+							item: { id: 'e1', type_name: 'Block', display_name: 'B', child_count: 0 }
+						},
+						{
+							kind: 'values',
+							present: true,
+							values: ['a'],
+							total: 5,
+							truncated: true
+						}
+					]
+				}
+			]
+		};
+		vi.spyOn(store, 'getTablePage').mockReturnValue(page);
+		vi.spyOn(store, 'getTableLoading').mockReturnValue(false);
+		const c = render('tbl:draft:singletruncated');
+		try {
+			const row = document.querySelector('[data-testid="table-row"]') as HTMLElement;
+			expect(row.style.height).toBe('56px'); // 2 lines * 28
+			const lines = row.querySelectorAll('[data-testid="cell-line"]');
+			expect(lines.length).toBe(2);
+			expect(lines[0].textContent).toContain('a');
+			expect(lines[1].textContent).toContain('…');
+		} finally {
+			unmount(c);
+		}
+	});
+
 	it('tints cells of a locked element: orange for my lock, red for a peer lock', () => {
 		vi.spyOn(store, 'getTablePage').mockReturnValue(PAGE);
 		vi.spyOn(store, 'getTableLoading').mockReturnValue(false);

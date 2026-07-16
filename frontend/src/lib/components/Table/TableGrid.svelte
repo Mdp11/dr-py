@@ -257,11 +257,11 @@
 							style="width:{widthFor(page.columns[ci], ci)}px"
 						>
 							{#if cell.kind === 'element'}
-								<div class="flex h-7 w-full min-w-0 items-center">
+								<div class="flex h-7 max-w-full min-w-0 items-center">
 									<ElementCell {cell} />
 								</div>
 							{:else if cell.kind === 'value'}
-								<div class="flex h-7 w-full min-w-0 items-center">
+								<div class="flex h-7 max-w-full min-w-0 items-center">
 									<ValueCell {cell} {tabId} columnName={columnNameFor(ci)} />
 								</div>
 							{:else if cell.kind === 'values'}
