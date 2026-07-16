@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { Metamodel } from '$lib/api/types';
+import type { Metamodel, PathNavigation } from '$lib/api/types';
 import {
 	containmentRelTypes,
 	effectiveProperties,
@@ -8,8 +8,10 @@ import {
 	effectiveRelationshipProperties,
 	elementAncestors,
 	elementType,
+	frontierTypesAt,
 	isSubtype,
 	parseMultiplicity,
+	propertyStepTargetTypes,
 	relationshipAncestors
 } from './helpers';
 
@@ -308,5 +310,108 @@ describe('effectivePropertiesForTypes', () => {
 		expect(named).toContain('sla'); // subtype-only, unioned
 		const all = effectivePropertiesForTypes(mm, []).map((p) => p.name);
 		expect(all).toContain('cost');
+	});
+});
+
+const smartCityMm: Metamodel = {
+	enums: {},
+	elements: [
+		{
+			name: 'Building',
+			abstract: false,
+			extends: null,
+			properties: [],
+			key: null
+		},
+		{
+			name: 'Sensor',
+			abstract: false,
+			extends: null,
+			properties: [
+				{
+					name: 'building',
+					datatype: 'Building',
+					multiplicity: '1',
+					min: null,
+					max: null,
+					pattern: null,
+					max_length: null
+				},
+				{
+					name: 'tags',
+					datatype: 'string',
+					multiplicity: '0..*',
+					min: null,
+					max: null,
+					pattern: null,
+					max_length: null
+				}
+			],
+			key: null
+		},
+		{
+			name: 'SmartSensor',
+			abstract: false,
+			extends: 'Sensor',
+			properties: [],
+			key: null
+		}
+	],
+	relationships: []
+};
+
+describe('propertyStepTargetTypes', () => {
+	it('resolves element-typed datatypes across subtypes', () => {
+		expect(propertyStepTargetTypes(smartCityMm, ['Sensor'], 'building')).toEqual(['Building']);
+	});
+
+	it('includes inherited properties from subtypes', () => {
+		expect(propertyStepTargetTypes(smartCityMm, ['SmartSensor'], 'building')).toEqual(['Building']);
+	});
+
+	it('returns empty for non-element properties', () => {
+		expect(propertyStepTargetTypes(smartCityMm, ['Sensor'], 'tags')).toEqual([]);
+	});
+
+	it('returns empty for undeclared properties', () => {
+		expect(propertyStepTargetTypes(smartCityMm, ['Sensor'], 'nope')).toEqual([]);
+	});
+
+	it('returns all element types when typeNames is empty (any type)', () => {
+		expect(propertyStepTargetTypes(smartCityMm, [], 'building')).toEqual(['Building']);
+	});
+});
+
+describe('frontierTypesAt', () => {
+	const node: PathNavigation = {
+		kind: 'path',
+		schema_version: 2,
+		start: { kind: 'scope', types: ['Sensor'], criteria: [] },
+		steps: [
+			{ kind: 'property', property_name: 'building' },
+			{ kind: 'filter', criteria: [] },
+			{ kind: 'property', property_name: 'tags' }
+		],
+		exclude_visited: true
+	};
+
+	it('returns the starting types at index 0', () => {
+		expect(frontierTypesAt(smartCityMm, node, 0)).toEqual(['Sensor']);
+	});
+
+	it('walks property steps forward to their target types', () => {
+		expect(frontierTypesAt(smartCityMm, node, 1)).toEqual(['Building']);
+	});
+
+	it('filter steps do not change the frontier', () => {
+		expect(frontierTypesAt(smartCityMm, node, 2)).toEqual(['Building']);
+	});
+
+	it('returns any type past a dead-end property step', () => {
+		expect(frontierTypesAt(smartCityMm, node, 3)).toEqual([]);
+	});
+
+	it('clamps index to steps.length when index exceeds it', () => {
+		expect(frontierTypesAt(smartCityMm, node, 5)).toEqual([]);
 	});
 });

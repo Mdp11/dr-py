@@ -2,7 +2,13 @@
 // `src/data_rover/core/metamodel/schema.py`. Kept Svelte-free so they can be
 // unit-tested in isolation.
 
-import type { ElementType, Metamodel, PropertyDef, RelationshipType } from '$lib/api/types';
+import type {
+	ElementType,
+	Metamodel,
+	PathNavigation,
+	PropertyDef,
+	RelationshipType
+} from '$lib/api/types';
 
 /** Look up a concrete or abstract element type by name. */
 export function elementType(mm: Metamodel, name: string): ElementType | undefined {
@@ -196,4 +202,53 @@ export function effectivePropertiesForTypes(mm: Metamodel, typeNames: string[]):
 		}
 	}
 	return [...byName.values()];
+}
+
+/**
+ * Element-type datatypes `propName` resolves to across `typeNames`' reachable
+ * types (themselves + all subtypes; `[]` = every element type), sorted.
+ * Scans EVERY declaration of the name — like {@link propertyDeclaredMany},
+ * NOT {@link effectivePropertiesForTypes}, whose first-wins dedupe would lose
+ * datatype variance across same-named properties. An empty result means the
+ * property is nowhere an element reference: a navigation "Go to property"
+ * step over it is a dead end (the chain cannot continue).
+ */
+export function propertyStepTargetTypes(
+	mm: Metamodel,
+	typeNames: string[],
+	propName: string
+): string[] {
+	const roots = typeNames.length === 0 ? mm.elements.map((e) => e.name) : typeNames;
+	const out = new Set<string>();
+	for (const t of mm.elements) {
+		if (!roots.some((r) => isSubtype(mm, t.name, r))) continue;
+		for (const p of effectiveProperties(mm, t.name)) {
+			if (p.name === propName && mm.elements.some((e) => e.name === p.datatype)) {
+				out.add(p.datatype);
+			}
+		}
+	}
+	return [...out].sort();
+}
+
+/**
+ * The frontier types flowing INTO `steps[index]` — the metamodel-aware
+ * upgrade of `precedingTargetTypes` (navigation/tree.ts): a forward walk that
+ * resolves each property step's outgoing types via
+ * {@link propertyStepTargetTypes} instead of giving up to "any type".
+ * `[]` still means "any type" (combine/element starts, or an unresolvable
+ * property step). Filter steps never change the frontier.
+ */
+export function frontierTypesAt(mm: Metamodel, node: PathNavigation, index: number): string[] {
+	let frontier: string[] = node.start.kind === 'scope' ? node.start.types : [];
+	for (let i = 0; i < Math.min(index, node.steps.length); i++) {
+		const step = node.steps[i];
+		if (step.kind === 'relationship') frontier = step.target_types;
+		else if (step.kind === 'property') {
+			frontier = step.property_name
+				? propertyStepTargetTypes(mm, frontier, step.property_name)
+				: [];
+		}
+	}
+	return frontier;
 }

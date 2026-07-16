@@ -5,7 +5,12 @@ propagates to the result."""
 
 import pytest
 
-from data_rover.core.metamodel.schema import ElementType, Metamodel, RelationshipType
+from data_rover.core.metamodel.schema import (
+    ElementType,
+    Metamodel,
+    PropertyDef,
+    RelationshipType,
+)
 from data_rover.core.model.model import Model
 from data_rover.core.navigation.evaluate import EvalLimits, evaluate
 from data_rover.core.navigation.schema import NAVIGATION_ADAPTER
@@ -140,3 +145,47 @@ def test_truncation_propagates_from_operand() -> None:
                       _expr("union", {"definition": _owns()}),
                       EvalLimits(max_chains=1))
     assert result.truncated is True
+
+
+def _ref_mm() -> Metamodel:
+    # `building` is an ELEMENT-REFERENCE property (datatype names an element
+    # type; values are element ids) — this file's own `_model` fixture has no
+    # properties at all, so property-step operand tests need this local one.
+    return Metamodel(
+        elements=[
+            ElementType(name="Building"),
+            ElementType(
+                name="Sensor",
+                properties=[PropertyDef(name="building", datatype="Building")],
+            ),
+        ],
+        relationships=[],
+    )
+
+
+def _ref_fixture() -> tuple[Model, dict[str, str]]:
+    model = Model(_ref_mm())
+    ids: dict[str, str] = {}
+    for key, type_name in [("b1", "Building"), ("b2", "Building"), ("s1", "Sensor"), ("s2", "Sensor")]:
+        ids[key] = model.create_element(type_name).id
+    model.set_property(model.elements[ids["s1"]], "building", ids["b1"])
+    model.set_property(model.elements[ids["s2"]], "building", ids["b2"])
+    return model, ids
+
+
+def test_operand_step_index_addresses_property_step_column() -> None:
+    model, ids = _ref_fixture()
+    expr = NAVIGATION_ADAPTER.validate_python({
+        "kind": "set_op",
+        "op": "union",
+        "operands": [{
+            "definition": {
+                "kind": "path",
+                "start": {"kind": "scope", "types": ["Sensor"]},
+                "steps": [{"kind": "property", "property_name": "building"}],
+            },
+            "step_index": 1,
+        }],
+    })
+    result = evaluate(model.metamodel, model, expr)
+    assert {c[0] for c in result.chains} == {ids["b1"], ids["b2"]}

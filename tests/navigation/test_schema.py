@@ -1,7 +1,8 @@
-"""NavigationDefinition schema-shape tests (schema v2): each step is a
-relationship hop (`kind="relationship"`) or a filter (`kind="filter"`).
-Relationship steps carry a reserved-empty `children` slot (branch-ready;
-non-empty rejected); a definition is capped at MAX_STEPS total items."""
+"""NavigationDefinition schema-shape tests (schema v3): each step is a
+relationship hop (`kind="relationship"`), a property hop (`kind="property"`),
+or a filter (`kind="filter"`). Relationship steps carry a reserved-empty
+`children` slot (branch-ready; non-empty rejected); a definition is capped at
+MAX_STEPS total items."""
 
 import pytest
 from pydantic import ValidationError
@@ -206,3 +207,33 @@ def test_old_v2_payload_still_valid():
          "start": {"kind": "scope", "types": ["Block"]}, "steps": []}
     )
     assert defn.kind == "path"
+
+
+def test_property_step_parses_and_roundtrips() -> None:
+    doc = {
+        "kind": "path",
+        "start": {"kind": "scope"},
+        "steps": [{"kind": "property", "property_name": "owner", "comment": "why"}],
+    }
+    nav = NAVIGATION_ADAPTER.validate_python(doc)
+    assert isinstance(nav, PathNavigation)
+    step = nav.steps[0]
+    assert step.kind == "property"
+    assert step.property_name == "owner"
+    assert step.comment == "why"
+    dumped = NAVIGATION_ADAPTER.dump_python(nav)
+    assert dumped["steps"][0]["kind"] == "property"
+
+
+def test_property_step_requires_property_name() -> None:
+    doc = {"kind": "path", "start": {"kind": "scope"}, "steps": [{"kind": "property"}]}
+    with pytest.raises(ValidationError):
+        NAVIGATION_ADAPTER.validate_python(doc)
+
+
+def test_max_steps_counts_property_steps() -> None:
+    steps = [{"kind": "property", "property_name": "p"}] * (MAX_STEPS + 1)
+    with pytest.raises(ValidationError):
+        NAVIGATION_ADAPTER.validate_python(
+            {"kind": "path", "start": {"kind": "scope"}, "steps": steps}
+        )

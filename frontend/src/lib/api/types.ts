@@ -397,7 +397,14 @@ export interface NavFilterStep {
 	comment?: string | null;
 }
 
-export type NavStepItem = NavRelationshipStep | NavFilterStep;
+export interface NavPropertyStep {
+	kind: 'property';
+	property_name: string;
+	/** Free-form user note explaining the step's intent (evaluator ignores it). */
+	comment?: string | null;
+}
+
+export type NavStepItem = NavRelationshipStep | NavFilterStep | NavPropertyStep;
 
 /** Start = the element(s) the caller roots this navigation at — a table
  * column supplies its row's element(s). Mirrors core/navigation/schema.py's

@@ -12,10 +12,10 @@ Format contract (Stage 1 of the navigation/tables/diagrams mega-plan):
   (`core.search.criteria`) verbatim, so a navigation filter and a search
   criterion are the same wire object.
 - CHAIN CONVENTION: an evaluated chain includes its start element at index 0
-  (a path with N *relationship* steps yields chains of length N+1 — a
+  (a path with N *relationship or property* steps yields chains of length N+1 — a
   `FilterStep` prunes the frontier in place and adds no column).
   `Operand.step_index` addresses that tuple directly: 0 = start elements,
-  k = elements after relationship-step k, None = terminal step.
+  k = elements after chain-advancing step k, None = terminal step.
 - Set operations act on ELEMENT SETS (the elements a navigation reaches at
   one step), never on chain tuples; `difference` is a left fold over the
   operand list.
@@ -84,7 +84,26 @@ class FilterStep(BaseModel):
     comment: Optional[str] = None
 
 
-StepItem = Annotated[Union[RelationshipStep, FilterStep], Field(discriminator="kind")]
+class PropertyStep(BaseModel):
+    """A hop through an element-reference property: for each frontier element,
+    follow `property_name`'s value(s) — element ids — to the referenced
+    element(s). Adds ONE chain column, exactly like a RelationshipStep.
+
+    Per element, the hop applies only when the element's EFFECTIVE property
+    def exists and its datatype is an element type; otherwise that chain is
+    pruned — graceful, mirroring FilterStep's existence-gating, so the engine
+    never raises on odd models. Dangling ids are skipped."""
+
+    kind: Literal["property"] = "property"
+    property_name: str
+    #: free-form user note explaining the step's intent (UI-only; the
+    #: evaluator ignores it).
+    comment: Optional[str] = None
+
+
+StepItem = Annotated[
+    Union[RelationshipStep, FilterStep, PropertyStep], Field(discriminator="kind")
+]
 
 
 class PathNavigation(BaseModel):
@@ -149,6 +168,7 @@ NavigationDefinition = Annotated[
 
 RelationshipStep.model_rebuild()
 FilterStep.model_rebuild()
+PropertyStep.model_rebuild()
 PathNavigation.model_rebuild()
 Operand.model_rebuild()
 SetExpression.model_rebuild()

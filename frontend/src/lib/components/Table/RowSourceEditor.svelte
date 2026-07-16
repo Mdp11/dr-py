@@ -8,6 +8,7 @@
 	// source defines the rows, so it keeps an ordinary Scope start and its
 	// previews need no row binding).
 	import { onDestroy } from 'svelte';
+	import * as api from '$lib/api/artifacts';
 	import {
 		closeDraft,
 		ensureEmbeddedDraft,
@@ -15,7 +16,7 @@
 		getDraft,
 		updateTableDefinition
 	} from '$lib/state';
-	import { emptyPath } from '$lib/navigation/tree';
+	import { chainColumns, emptyPath } from '$lib/navigation/tree';
 	import type { NavigationDefinition, RowSource, TableDefinition } from '$lib/api/types';
 	import NavigationNode from '../Navigation/NavigationNode.svelte';
 	import ScopeEditor from '../Navigation/ScopeEditor.svelte';
@@ -35,6 +36,42 @@
 	// a deep `$state` returns a PROXY that would leak into the table
 	// definition and break every later `structuredClone` of it.
 	let lastInline = $state.raw<NavigationDefinition | null>(null);
+
+	// The saved-ref navigation's payload, fetched to size the step field.
+	// `$state.raw` for the same DataCloneError reason as lastInline.
+	let refPayload = $state.raw<NavigationDefinition | null>(null);
+	let refLoadedFor: string | null = null;
+	$effect(() => {
+		const ref = !inline && rowSource.kind !== 'scope' ? (rowSource.navigation.ref ?? null) : null;
+		if (!ref) {
+			refPayload = null;
+			refLoadedFor = null;
+			return;
+		}
+		if (refLoadedFor === ref) return;
+		refLoadedFor = ref;
+		api
+			.getArtifact(ref)
+			.then((a) => {
+				if (refLoadedFor === ref) refPayload = a.payload as unknown as NavigationDefinition;
+			})
+			.catch(() => {
+				if (refLoadedFor === ref) refPayload = null; // unknown ref: unconstrained
+			});
+	});
+	const effectiveDefn = $derived(
+		inline && rowSource.kind !== 'scope' ? rowSource.navigation.definition! : refPayload
+	);
+	// Backend contract (table/evaluate.py::_check_step_index): valid
+	// non-negative indices are 0..chain_len-1; a set_op yields 1-element
+	// chains, so its only valid index is 0. null = unknown → unconstrained.
+	const maxStepIndex = $derived(
+		effectiveDefn == null
+			? null
+			: effectiveDefn.kind === 'path'
+				? chainColumns(effectiveDefn).length - 1
+				: 0
+	);
 
 	function apply(next: RowSource): void {
 		updateTableDefinition(tabId, { ...defn, row_source: next });
@@ -63,6 +100,19 @@
 	});
 
 	onDestroy(() => closeDraft(embId));
+
+	// Re-clamp on chain shrink (converges: after the clamped write the
+	// condition is false).
+	$effect(() => {
+		if (
+			rowSource.kind === 'navigation' &&
+			maxStepIndex != null &&
+			rowSource.step_index != null &&
+			rowSource.step_index > maxStepIndex
+		) {
+			apply({ ...rowSource, step_index: maxStepIndex });
+		}
+	});
 
 	function switchToInline(): void {
 		if (rowSource.kind === 'scope' || inline) return;
@@ -96,7 +146,14 @@
 	function onStepIndexChange(e: Event): void {
 		if (rowSource.kind !== 'navigation') return;
 		const raw = (e.currentTarget as HTMLInputElement).value.trim();
-		apply({ ...rowSource, step_index: raw === '' ? null : Number(raw) });
+		if (raw === '') {
+			apply({ ...rowSource, step_index: null }); // null = end of chain
+			return;
+		}
+		const n = Math.floor(Number(raw));
+		if (!Number.isFinite(n)) return;
+		const clamped = Math.max(0, maxStepIndex == null ? n : Math.min(n, maxStepIndex));
+		apply({ ...rowSource, step_index: clamped });
 	}
 </script>
 
@@ -159,10 +216,13 @@
 			{/if}
 			{#if rowSource.kind === 'navigation'}
 				<label class="flex items-center gap-1 text-[11px] text-muted-foreground/70">
-					step
+					Return elements from step
 					<input
 						type="number"
-						class="w-14 rounded border border-input bg-card px-1 py-0.5 text-xs"
+						min="0"
+						max={maxStepIndex ?? undefined}
+						placeholder="End of chain"
+						class="w-24 rounded border border-input bg-card px-1 py-0.5 text-xs"
 						value={rowSource.step_index ?? ''}
 						oninput={onStepIndexChange}
 					/>

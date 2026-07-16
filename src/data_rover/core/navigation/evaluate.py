@@ -1,9 +1,13 @@
 """Pure navigation evaluator over (Metamodel, Model).
 
-Read-only and session-free: hops go through `model.indexes` adjacency (never
-a model scan), scopes filter with the shared search matchers, and type checks
-use the Metamodel's cached descendant/ancestor sets — so one hop is
-O(edges touching the frontier), matching the read-layer O(entity) rule.
+Read-only and session-free: relationship hops go through `model.indexes`
+adjacency (never a model scan); property hops instead read the frontier
+element's `element.properties` dict directly (an element-reference property
+is not indexed as adjacency), so a property hop's cost is per-element, not
+per-edge. Scopes filter with the shared search matchers, and type checks use
+the Metamodel's cached descendant/ancestor sets — so one hop is O(edges
+touching the frontier) or O(1) per property step, matching the read-layer
+O(entity) rule.
 Like routes/read.py, callers do NOT take the session write_mutex: reads race
 benignly against in-memory mutation.
 
@@ -31,6 +35,7 @@ from .schema import (
     FilterStep,
     NavigationDefinition,
     PathNavigation,
+    PropertyStep,
     RelationshipStep,
     RowStart,
     Scope,
@@ -113,7 +118,9 @@ def evaluate(
             break
     return ChainResult(
         step_types=[
-            s.relationship_type for s in defn.steps if isinstance(s, RelationshipStep)
+            s.relationship_type if isinstance(s, RelationshipStep) else s.property_name
+            for s in defn.steps
+            if not isinstance(s, FilterStep)
         ],
         chains=chains,
         truncated=truncated or budget.exhausted,
@@ -213,6 +220,46 @@ def _hop(
     return sorted(nxt)
 
 
+def _hop_property(
+    metamodel: Metamodel,
+    model: Model,
+    element_id: str,
+    step: PropertyStep,
+    budget: _Budget,
+) -> list[str]:
+    """Continuations of a property hop: the element's `property_name` value(s)
+    resolved to existing elements. Gated on the element's EFFECTIVE property
+    def being element-typed — a string that merely looks like an id must not
+    navigate. Absent/non-reference/dangling cases prune the chain silently
+    (never raise): navigation stays inspectable on odd models, mirroring
+    FilterStep's existence-gating. Deliberately NOT checked: the RESOLVED
+    element's own type against `prop.datatype` — a dangling-conformance id
+    still navigates, since conformance is the validation pipeline's job, so
+    the UI's frontier typing (frontierTypesAt) may be narrower than the
+    actual frontier."""
+    element = model.elements[element_id]
+    prop = next(
+        (
+            p
+            for p in metamodel.effective_element_properties(element.type_name)
+            if p.name == step.property_name
+        ),
+        None,
+    )
+    if prop is None or not metamodel.is_element_type(prop.datatype):
+        return []
+    value = element.properties.get(step.property_name)
+    if value is None:
+        return []
+    candidates = value if isinstance(value, list) else [value]
+    if not budget.spend(len(candidates)):
+        return []
+    nxt = {
+        item for item in candidates if isinstance(item, str) and item in model.elements
+    }
+    return sorted(nxt)
+
+
 def _walk(
     metamodel: Metamodel,
     model: Model,
@@ -224,10 +271,11 @@ def _walk(
     budget: _Budget,
     exclude_visited: bool,
 ) -> bool:
-    """DFS over the interleaved step-item list. A RelationshipStep extends the
-    chain by one hop (deterministic, sorted-id); a FilterStep keeps the chain
-    iff its current endpoint matches all criteria, adding no column. Returns
-    True when enumeration stopped early (chain cap or budget)."""
+    """DFS over the interleaved step-item list. A RelationshipStep or
+    PropertyStep extends the chain by one hop (deterministic, sorted-id); a
+    FilterStep keeps the chain iff its current endpoint matches all criteria,
+    adding no column. Returns True when enumeration stopped early (chain cap or
+    budget)."""
     if item_idx == len(steps):
         if len(chains) >= limits.max_chains:
             return True
@@ -249,7 +297,10 @@ def _walk(
                 exclude_visited,
             )
         return False
-    nxt = _hop(metamodel, model, current, step, budget)
+    if isinstance(step, RelationshipStep):
+        nxt = _hop(metamodel, model, current, step, budget)
+    else:
+        nxt = _hop_property(metamodel, model, current, step, budget)
     if budget.exhausted:
         return True
     for other in nxt:

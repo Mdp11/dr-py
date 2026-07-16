@@ -40,10 +40,16 @@
 		type NodePath,
 		type StructuralEdit
 	} from '$lib/navigation/tree';
-	import { effectivePropertiesForTypes } from '$lib/metamodel/helpers';
+	import {
+		effectivePropertiesForTypes,
+		frontierTypesAt,
+		propertyStepTargetTypes
+	} from '$lib/metamodel/helpers';
+	import type { PropertyItem } from '$lib/search/property-ops';
 	import type {
 		NavFilterStep,
 		NavigationDefinition,
+		NavPropertyStep,
 		NavRelationshipStep,
 		NavScope,
 		NavStepItem,
@@ -58,6 +64,7 @@
 	import NavigationNode from './NavigationNode.svelte';
 	import RelationshipStepRow from './RelationshipStepRow.svelte';
 	import FilterStepRow from './FilterStepRow.svelte';
+	import PropertyStepRow from './PropertyStepRow.svelte';
 	import StereotypePicker from '../Sidebar/StereotypePicker.svelte';
 	import type { OperandChrome } from './chrome';
 
@@ -139,15 +146,39 @@
 
 	// Types flowing into relationship step `i` (rel-type/target-type picker
 	// scope), and the property-picker scope for filter step `i` — both derive
-	// from the nearest preceding relationship step's target_types, else the
-	// path's own start types. See `precedingTargetTypes`.
+	// from the frontier at that point in the chain: the metamodel-aware walk
+	// (`frontierTypesAt`) when a metamodel is loaded, else the pure fallback
+	// (`precedingTargetTypes`, which gives up to "any type" at a property step).
+	function frontierFor(i: number): string[] {
+		return mm ? frontierTypesAt(mm, node, i) : precedingTargetTypes(node, i);
+	}
 	function sourceTypesFor(i: number): string[] {
-		return precedingTargetTypes(node, i);
+		return frontierFor(i);
 	}
 	function propertyNamesFor(i: number): string[] {
 		if (!mm) return [];
-		return effectivePropertiesForTypes(mm, precedingTargetTypes(node, i)).map((p) => p.name);
+		return effectivePropertiesForTypes(mm, frontierFor(i)).map((p) => p.name);
 	}
+	function propertyItemsForStep(i: number): PropertyItem[] {
+		if (!mm) return [];
+		return effectivePropertiesForTypes(mm, frontierFor(i)).map((p) => ({
+			name: p.name,
+			datatype: p.datatype
+		}));
+	}
+	// First step index whose configured property can never continue the chain
+	// (not an element reference anywhere reachable) — everything past it is
+	// unreachable, so the add/insert affordances close down there.
+	const blockedAt = $derived.by((): number | null => {
+		if (!mm) return null;
+		for (let i = 0; i < node.steps.length; i++) {
+			const s = node.steps[i];
+			if (s.kind !== 'property' || !s.property_name) continue;
+			if (propertyStepTargetTypes(mm, frontierTypesAt(mm, node, i), s.property_name).length === 0)
+				return i;
+		}
+		return null;
+	});
 
 	function setStep(i: number, next: NavStepItem): void {
 		const steps = node.steps.map((s, idx) => (idx === i ? next : s));
@@ -170,11 +201,17 @@
 	function insertStep(i: number, step: NavStepItem): void {
 		patch({ steps: [...node.steps.slice(0, i), step, ...node.steps.slice(i)] });
 	}
+	function emptyPropertyStep(): NavPropertyStep {
+		return { kind: 'property', property_name: '' };
+	}
 	function addRelationshipStep(): void {
 		insertStep(node.steps.length, emptyRelationshipStep());
 	}
 	function addFilterStep(): void {
 		insertStep(node.steps.length, { kind: 'filter', criteria: [] });
+	}
+	function addPropertyStep(): void {
+		insertStep(node.steps.length, emptyPropertyStep());
 	}
 
 	type StartMode = 'scope' | 'element' | 'combine' | 'row';
@@ -200,11 +237,12 @@
 		else patch({ start: emptyCombine() });
 	}
 
-	// The rail's column number for relationship step i = 1 + how many
-	// relationship steps precede it (column 0 is always the start).
+	// The rail's column number for a hop step i = 1 + how many hop steps
+	// (relationship OR property — both advance the chain, only filter doesn't)
+	// precede it (column 0 is always the start).
 	function columnFor(i: number): number {
 		let n = 1;
-		for (let j = 0; j < i; j++) if (node.steps[j].kind === 'relationship') n++;
+		for (let j = 0; j < i; j++) if (node.steps[j].kind !== 'filter') n++;
 		return n;
 	}
 
@@ -367,12 +405,13 @@
 				</div>
 			{/if}
 			{#each node.steps as step, i (i)}
-				{#if editable}
+				{#if editable && (blockedAt === null || i <= blockedAt)}
 					<!-- Hover-revealed insert zone BEFORE step i, so a forgotten step
 					     (say, a property check) can be added in place instead of
 					     deleting and re-adding everything after it. Constant height:
 					     the buttons fade in via opacity, so nothing shifts on hover;
-					     keyboard focus reveals them too. -->
+					     keyboard focus reveals them too. Suppressed past a property
+					     dead end — nothing reachable there to insert before. -->
 					<div
 						data-testid="insert-step-zone"
 						class="group/insert relative flex h-3.5 items-center gap-1.5 pl-7"
@@ -395,45 +434,78 @@
 						>
 							+ condition
 						</button>
+						<button
+							type="button"
+							aria-label="Insert property step here"
+							title="Insert a 'Go to property' step here"
+							class="rounded border border-dashed border-input px-1.5 text-[10px] leading-3 text-info/90 opacity-0 transition-opacity group-hover/insert:opacity-100 hover:border-ring hover:text-info focus-visible:opacity-100"
+							onclick={() => insertStep(i, emptyPropertyStep())}
+						>
+							+ property
+						</button>
 					</div>
 				{/if}
-				{#if step.kind === 'relationship'}
-					<RelationshipStepRow
-						step={step as NavRelationshipStep}
-						index={i}
-						column={columnFor(i)}
-						sourceTypes={sourceTypesFor(i)}
-						onChange={setStep}
-						onRemove={removeStep}
-					/>
-				{:else}
-					<FilterStepRow
-						step={step as NavFilterStep}
-						index={i}
-						propertyNames={propertyNamesFor(i)}
-						onChange={setStep}
-						onRemove={removeStep}
-					/>
-				{/if}
+				<div class:opacity-50={blockedAt !== null && i > blockedAt}>
+					{#if step.kind === 'relationship'}
+						<RelationshipStepRow
+							step={step as NavRelationshipStep}
+							index={i}
+							column={columnFor(i)}
+							sourceTypes={sourceTypesFor(i)}
+							onChange={setStep}
+							onRemove={removeStep}
+						/>
+					{:else if step.kind === 'property'}
+						<PropertyStepRow
+							step={step as NavPropertyStep}
+							index={i}
+							column={columnFor(i)}
+							items={propertyItemsForStep(i)}
+							deadEnd={blockedAt === i}
+							onChange={setStep}
+							onRemove={removeStep}
+						/>
+					{:else}
+						<FilterStepRow
+							step={step as NavFilterStep}
+							index={i}
+							propertyNames={propertyNamesFor(i)}
+							onChange={setStep}
+							onRemove={removeStep}
+						/>
+					{/if}
+				</div>
 			{/each}
 		</div>
 
 		{#if editable}
 			<div class="flex items-center gap-2 pl-7">
-				<button
-					type="button"
-					class="rounded border border-dashed border-input px-2 py-1 text-info/90 transition-colors hover:border-ring hover:text-info"
-					onclick={addRelationshipStep}
-				>
-					+ Follow a relationship
-				</button>
-				<button
-					type="button"
-					class="rounded border border-dashed border-input px-2 py-1 text-info/90 transition-colors hover:border-ring hover:text-info"
-					onclick={addFilterStep}
-				>
-					+ Keep only…
-				</button>
+				{#if blockedAt !== null}
+					<!-- prettier-ignore -->
+					<span class="text-[11px] text-warning">Navigation is blocked above — remove or change the non-element property step to continue.</span>
+				{:else}
+					<button
+						type="button"
+						class="rounded border border-dashed border-input px-2 py-1 text-info/90 transition-colors hover:border-ring hover:text-info"
+						onclick={addRelationshipStep}
+					>
+						+ Follow a relationship
+					</button>
+					<button
+						type="button"
+						class="rounded border border-dashed border-input px-2 py-1 text-info/90 transition-colors hover:border-ring hover:text-info"
+						onclick={addFilterStep}
+					>
+						+ Keep only…
+					</button>
+					<button
+						type="button"
+						class="rounded border border-dashed border-input px-2 py-1 text-info/90 transition-colors hover:border-ring hover:text-info"
+						onclick={addPropertyStep}
+					>
+						+ Go to property…
+					</button>
+				{/if}
 			</div>
 		{/if}
 
