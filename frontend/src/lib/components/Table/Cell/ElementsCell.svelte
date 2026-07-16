@@ -46,7 +46,10 @@
 			</span>
 		{/each}
 		{#if cell.truncated}
-			<span data-testid="cell-line" class="flex h-7 items-center text-[10px] text-muted-foreground/70">
+			<span
+				data-testid="cell-line"
+				class="flex h-7 items-center text-[10px] text-muted-foreground/70"
+			>
 				+{cell.total - cell.items.length} more
 			</span>
 		{/if}

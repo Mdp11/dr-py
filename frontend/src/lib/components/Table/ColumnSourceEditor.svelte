@@ -33,7 +33,8 @@
 	// definitions are computed synchronously; a saved ref is fetched once and
 	// cached per artifact id. While unknown the input is unconstrained — the
 	// backend still 422s an out-of-range value.
-	const stepCache = new Map<string, number>(); // control state, not reactive
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- control state, never read from templates
+	const stepCache = new Map<string, number>();
 	let refMaxStep = $state<number | null>(null);
 	$effect(() => {
 		if (refColumn?.kind !== 'navigation') {

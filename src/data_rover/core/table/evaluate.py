@@ -175,8 +175,13 @@ def resolve_source_elements(
                 return []
             match = b
         return _navigation_step_elements(
-            mm, model, ref_col, roots, limits,
-            step=source.step_index, match_projected=match,
+            mm,
+            model,
+            ref_col,
+            roots,
+            limits,
+            step=source.step_index,
+            match_projected=match,
         )
     if getattr(ref_col, "mode", "collapse") == "expand":
         b = key[_expand_slot_of(defn, base_slots, source.index)]

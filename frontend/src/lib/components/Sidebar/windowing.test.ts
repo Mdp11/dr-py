@@ -58,8 +58,9 @@ describe('computeWindowVariable', () => {
 	});
 
 	it('clamps overscan at the ends and handles empty', () => {
-		expect(computeWindowVariable({ scrollTop: 0, viewportH: 50, offsets: [0], overscan: 5 }))
-			.toEqual({ start: 0, end: 0, padTop: 0, padBottom: 0 });
+		expect(
+			computeWindowVariable({ scrollTop: 0, viewportH: 50, offsets: [0], overscan: 5 })
+		).toEqual({ start: 0, end: 0, padTop: 0, padBottom: 0 });
 		const w = computeWindowVariable({ scrollTop: 0, viewportH: 1000, offsets, overscan: 8 });
 		expect(w).toMatchObject({ start: 0, end: 4, padTop: 0, padBottom: 0 });
 	});

@@ -56,10 +56,15 @@ export function computeWindowVariable(args: {
 	const total = offsets.length - 1;
 	if (total <= 0) return { start: 0, end: 0, padTop: 0, padBottom: 0 };
 	// first row whose bottom edge is past scrollTop
-	let lo = 0, hi = total - 1, first = total - 1;
+	let lo = 0,
+		hi = total - 1,
+		first = total - 1;
 	while (lo <= hi) {
 		const mid = (lo + hi) >> 1;
-		if (offsets[mid + 1] > scrollTop) { first = mid; hi = mid - 1; } else lo = mid + 1;
+		if (offsets[mid + 1] > scrollTop) {
+			first = mid;
+			hi = mid - 1;
+		} else lo = mid + 1;
 	}
 	const bottom = scrollTop + viewportH;
 	let last = first;
