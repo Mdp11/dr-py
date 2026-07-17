@@ -20,13 +20,63 @@ from __future__ import annotations
 import pathlib
 import time
 
-from wasmtime import Config, Engine, ExitTrap, Linker, Module, Store, WasiConfig
+from wasmtime import Config, Engine, ExitTrap, FuncType, Linker, Module, Store, ValType, WasiConfig
 
 ROOT = pathlib.Path(__file__).parent
 VENDOR = ROOT / "vendor"
 PYTHON_WASM = VENDOR / "python.wasm"
 GUEST_LIB_HOST = VENDOR / "lib" / "python3.14"  # contains encodings/ — NOT vendor/lib
 GUEST_LIB_GUEST = "/lib"  # where the guest sees the stdlib
+
+FIXED_NANOS = 1_750_000_000_000_000_000  # fixed wall-clock epoch (criterion 5, Task 7)
+
+
+def _add_determinism_shims(linker: Linker, store: Store) -> None:
+    """Shadow wasi_snapshot_preview1.clock_time_get/random_get with fixed values.
+
+    wasmtime-py 46.0.1 confirmed API (see FINDINGS.md Task 7 section):
+      - Linker.allow_shadowing is a write-only property; set True BEFORE
+        linker.define_wasi() is called (see run_python below) — shadow-after
+        (defining the shim funcs after define_wasi()) is what actually takes
+        effect, matching the brief's predicted "last-wins" resolution order.
+      - Linker.define_func(module, name, ty, func, access_caller=True) matches
+        the brief verbatim.
+      - The host callback receives a wasmtime.Caller as its first arg (because
+        access_caller=True); caller.get("memory") returns the guest's
+        exported Memory. Memory.write(store_like, value, start) accepts a
+        Caller directly as the store-like argument (Storelike =
+        Store | Caller | StoreContext in wasmtime._store) — no extra
+        conversion needed, matching the brief's `mem.write(caller, bytes,
+        offset)` call shape exactly.
+    """
+    i32, i64 = ValType.i32(), ValType.i64()
+
+    def clock_time_get(caller, clock_id, precision, out_ptr):
+        mem = caller.get("memory")
+        # clock 0 = realtime -> fixed; others (monotonic) pass a counter so the interpreter can boot
+        nanos = FIXED_NANOS if clock_id == 0 else int(time.perf_counter_ns())
+        mem.write(caller, nanos.to_bytes(8, "little"), out_ptr)
+        return 0
+
+    def random_get(caller, buf, buf_len):
+        mem = caller.get("memory")
+        mem.write(caller, bytes([0x42]) * buf_len, buf)
+        return 0
+
+    linker.define_func(
+        "wasi_snapshot_preview1",
+        "clock_time_get",
+        FuncType([i32, i64, i32], [i32]),
+        clock_time_get,
+        access_caller=True,
+    )
+    linker.define_func(
+        "wasi_snapshot_preview1",
+        "random_get",
+        FuncType([i32, i32], [i32]),
+        random_get,
+        access_caller=True,
+    )
 
 
 def make_engine(epoch: bool = False) -> tuple[Engine, Module]:
@@ -50,12 +100,27 @@ def run_python(
     epoch: bool = False,
     mem_limit: int | None = None,
     engine_module: tuple[Engine, Module] | None = None,
+    deterministic: bool = False,
 ) -> tuple[int, float]:
-    """Boot the guest interpreter with argv, run to completion, return (exit_code, seconds)."""
+    """Boot the guest interpreter with argv, run to completion, return (exit_code, seconds).
+
+    deterministic=True (Task 7, criterion 5) shadows the WASI clock/random
+    imports with fixed values and forces PYTHONHASHSEED=0, so that identical
+    guest code run twice produces byte-identical stdout. Default False keeps
+    Tasks 1-6's probes unaffected.
+    """
     engine, module = engine_module or make_engine(epoch=epoch)
     linker = Linker(engine)
+    if deterministic:
+        # Must be set before define_wasi() — see _add_determinism_shims'
+        # docstring for why shadow-after (registering the shims after
+        # define_wasi()) is the order that actually takes effect.
+        linker.allow_shadowing = True
     linker.define_wasi()
     store = Store(engine)
+    if deterministic:
+        _add_determinism_shims(linker, store)
+        env = tuple(env) + (("PYTHONHASHSEED", "0"),)
     if mem_limit is not None:
         store.set_limits(memory_size=mem_limit)
     if epoch:
