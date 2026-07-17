@@ -2,7 +2,7 @@
 
 | # | Criterion (spec §12) | Threshold | Result | Verdict |
 |---|---|---|---|---|
-| 1 | CPython-WASI boots under wasmtime-py | runs a script, captures stdout | | |
+| 1 | CPython-WASI boots under wasmtime-py | runs a script, captures stdout | PASS — `python spikes/code_exec/s01_boot.py`: module compile 0.66s, run (boot+exec) 0.080s, exit=0, stdout=`guest-ok 3.14.6 (tags/v3.14.6-dirty:c63aec6, Jun 10 2026, ...) [Clang 18.1.2-wasi-sdk ...]`, `guest_stderr.log` empty | ✅ |
 | 2 | Interactive blocking stdio round-trip | works; p50 RTT < 5 ms | | |
 | 3 | GIL released during guest execution | host thread ≥ 50% solo rate | | |
 | 4 | Epoch kill + memory cap | trap ≤ 500 ms after deadline; cap enforced | | |
@@ -40,6 +40,14 @@ Paths Task 3's `host.py` should hardcode (relative to `spikes/code_exec/`):
 - Note the version-specific segment: stdlib lives under `lib/python3.14/` (matches the CPython 3.14.6 release), not `python3.13/` — Task 3 must not hardcode `3.13`.
 
 Reproducibility check (Step 4): `rm -rf spikes/code_exec/vendor && bash spikes/code_exec/fetch_python_wasi.sh` re-downloaded cleanly, the SHA-256 matched the pin (no mismatch error, exit 0), and unpack produced the identical layout (`vendor/python.wasm`, `vendor/lib/python3.14`).
+
+### wasmtime-py 46.0.1 API notes (Task 3)
+
+Checked against `help(wasmtime.Store)`, `help(wasmtime.WasiConfig)`, `help(wasmtime.Config)`, `help(wasmtime.ExitTrap)`, and `dir(wasmtime)` on the installed 46.0.1. Only one name from the task-3 brief's sketch has actually drifted:
+
+- **`StoreLimits` does not exist** in 46.0.1 (`dir(wasmtime)` has no such name). `Store.set_limits(...)` takes the limit kwargs directly (`memory_size`, `table_elements`, `instances`, `tables`, `memories`, each defaulting to `-1` = unset) — call `store.set_limits(memory_size=mem_limit)`, not `store.set_limits(StoreLimits(memory_size=mem_limit))`. `host.py` adapted accordingly.
+- Everything else in the brief's sketch matched the installed API verbatim: `wasi.stdin_file` / `wasi.stdout_file` / `wasi.stderr_file` (write-only attributes), `wasi.preopen_dir(path, guest_path)`, `Config.epoch_interruption`, `store.set_epoch_deadline(ticks_after_current)`, and `ExitTrap` (subclass of `WasmtimeError`, carries `.code`).
+- `mem_limit`/`epoch` wiring in `run_python` is unexercised by s01 (no `mem_limit`/`epoch` args passed by the boot probe) — the `set_limits`/`set_epoch_deadline` call sites are implemented per the corrected API above but not yet proven end-to-end; that's Task 6's job.
 
 ## Verdict
 
