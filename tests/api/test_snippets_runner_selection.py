@@ -75,10 +75,18 @@ class _StubWasmRunner:
     """Stand-in for `WasmScriptRunner` that records its constructor args
     instead of booting a real wasmtime engine/pool/threads."""
 
-    def __init__(self, guest_wasm_path: str, guest_lib_path: str, *, pool_size: int) -> None:
+    def __init__(
+        self,
+        guest_wasm_path: str,
+        guest_lib_path: str,
+        *,
+        pool_size: int,
+        memory_bytes: int | None = None,
+    ) -> None:
         self.guest_wasm_path = guest_wasm_path
         self.guest_lib_path = guest_lib_path
         self.pool_size = pool_size
+        self.memory_bytes = memory_bytes
 
 
 def test_wasm_runner_selected_without_booting_a_real_pool(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -101,6 +109,29 @@ def test_wasm_runner_selected_without_booting_a_real_pool(monkeypatch: pytest.Mo
     assert runner.guest_wasm_path == "fake/python.wasm"
     assert runner.guest_lib_path == "fake/lib"
     assert runner.pool_size == 3
+
+
+def test_wasm_runner_passes_configured_memory_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reviewer-found Important fix: `build_runner_from_settings` must thread
+    `settings.snippet_memory_bytes` into `WasmScriptRunner`'s boot-time
+    memory cap, not silently fall back to the hardcoded `RunLimits()` default
+    (256 MiB). Set the setting to a non-default value and assert it survives
+    the call, using the same monkeypatch-the-class seam as the test above."""
+    monkeypatch.setattr(script_runner, "WasmScriptRunner", _StubWasmRunner)
+    non_default_memory_bytes = 42 * 1024 * 1024  # != Settings' 256 MiB default
+    settings = Settings(
+        snippet_runner="wasm",
+        snippet_guest_wasm_path="fake/python.wasm",
+        snippet_guest_lib_path="fake/lib",
+        snippet_pool_size=2,
+        snippet_memory_bytes=non_default_memory_bytes,
+    )
+    assert settings.snippet_memory_bytes != Settings().snippet_memory_bytes
+
+    runner = build_runner_from_settings(settings)
+
+    assert isinstance(runner, _StubWasmRunner)
+    assert runner.memory_bytes == non_default_memory_bytes
 
 
 # -- run_limits_from_settings -------------------------------------------------

@@ -821,6 +821,16 @@ class WasmScriptRunner:
                 except json.JSONDecodeError:
                     logger.warning("wasm guest sent a non-JSON line; ignoring")
                     continue
+                if not isinstance(msg, dict):
+                    # A snippet can bypass the captured `sys.stdout` and write
+                    # straight to the bridge FIFO via `sys.__stdout__` (still
+                    # the real stdout fd during exec) -- e.g. a bare scalar
+                    # like `5\n` is valid JSON (`json.loads` succeeds) but not
+                    # a bridge message. Treat it like the non-JSON case: the
+                    # guest is untrusted, so the host pump must never assume
+                    # dict shape before checking it.
+                    logger.warning("wasm guest sent a non-dict JSON line; ignoring")
+                    continue
                 if msg.get("fin"):
                     fin = msg
                     break
@@ -1037,6 +1047,7 @@ def build_runner_from_settings(settings: Settings) -> ScriptRunner:
         settings.snippet_guest_wasm_path,
         settings.snippet_guest_lib_path,
         pool_size=settings.snippet_pool_size,
+        memory_bytes=settings.snippet_memory_bytes,
     )
 
 

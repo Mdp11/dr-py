@@ -232,6 +232,49 @@ def test_wasm_runtime_error(wasm_runner: WasmScriptRunner) -> None:
     assert "script_runner" not in res.error.traceback
 
 
+def test_wasm_non_dict_bridge_line_does_not_crash_host_pump(wasm_runner: WasmScriptRunner) -> None:
+    """Reviewer-found Important fix: a snippet can write straight to the real
+    stdout FIFO via `sys.__stdout__` (which -- unlike the captured `sys.
+    stdout` -- is not swapped for a buffer during exec), bypassing the
+    facade entirely. A bare scalar like `"5\\n"` is valid JSON (`json.loads`
+    succeeds, returning `5`, not a dict), so pre-fix the host pump's `msg.
+    get("fin")` raised `AttributeError` and crashed the run with an unhandled
+    exception (500 at the route). The host pump must treat a non-dict JSON
+    line the same as a non-JSON line: log and skip it, then keep reading
+    until the guest's real `{"fin": true, ...}` message arrives.
+    """
+    from data_rover.core.script.runner import RunLimits, RunRequest
+
+    from tests.script.conftest import tiny_model
+
+    code = (
+        "import sys\n"
+        'sys.__stdout__.write("5\\n")\n'
+        "sys.__stdout__.flush()\n"
+        'print("still-alive")\n'
+    )
+    res = wasm_runner.run(
+        tiny_model(),
+        RunRequest(code=code),
+        RunLimits(),
+        record_ops=False,
+        rev=0,
+    )
+    assert res.error is None, res.error
+    assert res.stdout.strip() == "still-alive"
+
+    # The runner must remain usable for a subsequent run after this one.
+    ok = wasm_runner.run(
+        tiny_model(),
+        RunRequest(code='print("ok")'),
+        RunLimits(),
+        record_ops=False,
+        rev=0,
+    )
+    assert ok.error is None
+    assert ok.stdout.strip() == "ok"
+
+
 def test_wasm_pool_refill_and_sequential_runs(wasm_runner: WasmScriptRunner) -> None:
     """Two sequential runs both succeed: the first consumes a warm instance,
     the background refill thread replaces it, and the second run gets a
