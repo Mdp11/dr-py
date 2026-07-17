@@ -24,6 +24,8 @@ from sqlalchemy.orm import Session as DbSession
 from data_rover.core.navigation.evaluate import evaluate
 from data_rover.core.navigation.resolve import NavigationResolveError, resolve_refs
 from data_rover.core.navigation.schema import NAVIGATION_ADAPTER, NavigationDefinition
+from data_rover.core.script.lint import derive_entry_points
+from data_rover.core.script.schema import SNIPPET_ADAPTER
 from data_rover.core.table.schema import TABLE_ADAPTER
 
 from .. import content
@@ -51,6 +53,7 @@ router = APIRouter()
 _PAYLOAD_ADAPTERS: dict[ArtifactKind, TypeAdapter[Any]] = {
     ArtifactKind.navigation: NAVIGATION_ADAPTER,
     ArtifactKind.table: TABLE_ADAPTER,
+    ArtifactKind.code_snippet: SNIPPET_ADAPTER,
 }
 
 
@@ -82,6 +85,13 @@ def _validate_payload(kind: ArtifactKind, payload: dict[str, Any]) -> None:
         raise HTTPException(
             status_code=422, detail=f"invalid {kind.value} payload: {exc}"
         ) from exc
+
+
+def _apply_derived_metadata(kind: ArtifactKind, payload: dict[str, Any]) -> None:
+    """Recompute server-owned derived fields in-place. For snippets, entry_points
+    is derived from the code AST and overwrites any client-supplied value."""
+    if kind is ArtifactKind.code_snippet:
+        payload["entry_points"] = derive_entry_points(payload.get("code", ""))
 
 
 def _require_artifact(db: DbSession, project_id: str, artifact_id: str) -> ArtifactRow:
@@ -122,6 +132,7 @@ def create_artifact(
 ) -> ArtifactOut:
     kind = ArtifactKind(payload.kind)
     _validate_payload(kind, payload.payload)
+    _apply_derived_metadata(kind, payload.payload)
     if content.find_artifact(db, project_id, kind, payload.name) is not None:
         raise HTTPException(
             status_code=409,
@@ -154,6 +165,7 @@ def update_artifact(
     row = _require_artifact(db, project_id, artifact_id)
     if payload.payload is not None:
         _validate_payload(row.kind, payload.payload)
+        _apply_derived_metadata(row.kind, payload.payload)
     if payload.name is not None and payload.name != row.name:
         clash = content.find_artifact(db, project_id, row.kind, payload.name)
         if clash is not None and clash.id != row.id:

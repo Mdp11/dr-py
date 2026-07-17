@@ -663,7 +663,7 @@ class ArtifactListOut(BaseModel):
 
 
 class ArtifactCreateIn(BaseModel):
-    kind: Literal["navigation", "table", "diagram", "diagram_kind"]
+    kind: Literal["navigation", "table", "diagram", "diagram_kind", "code_snippet"]
     name: str = Field(min_length=1)
     payload: dict[str, Any] = Field(default_factory=dict)
 
@@ -672,6 +672,80 @@ class ArtifactUpdateIn(BaseModel):
     artifact_rev: int
     name: str | None = Field(default=None, min_length=1)
     payload: dict[str, Any] | None = None
+
+
+# ---------------------------------------------------------------------------
+# Snippet execution (Task 11: POST /snippets/run|lint|cancel)
+# ---------------------------------------------------------------------------
+
+
+class SnippetRunIn(BaseModel):
+    """Body for POST /snippets/run. Exactly one of `code` (inline) /
+    `artifact_id` (a saved `code_snippet` artifact) must be supplied — mirrors
+    `EvaluateNavigationIn`'s exactly-one pattern above."""
+
+    run_id: str
+    code: str | None = None
+    artifact_id: str | None = None
+    entry: Literal["script", "value", "step"] = "script"
+    element_id: str | None = None
+
+    @model_validator(mode="after")
+    def _exactly_one(self) -> "SnippetRunIn":
+        if (self.code is None) == (self.artifact_id is None):
+            raise ValueError("provide exactly one of `code` / `artifact_id`")
+        return self
+
+
+class SnippetErrorOut(BaseModel):
+    """Mirrors `core.script.runner.ScriptError` field-for-field."""
+
+    kind: Literal["syntax", "runtime", "timeout", "cancelled", "memory", "limit"]
+    message: str
+    traceback: str | None = None
+
+
+class SnippetRunOut(BaseModel):
+    run_id: str
+    stdout: str
+    result_repr: str | None
+    #: recorded op batch, validated through `OPS_ADAPTER` by the route before
+    #: this response is built (a runner emitting an invalid op dict is a
+    #: server bug, surfaced as a 500 instead of reaching this model).
+    ops: "list[OpIn]"
+    error: SnippetErrorOut | None
+    duration_ms: int
+    #: `session.model_rev` as observed AFTER the run completed.
+    model_rev: int
+    #: True when `model_rev` moved between the run's start and end — the run
+    #: executed without holding `write_mutex` (see routes/snippets.py's
+    #: module docstring), so a concurrent commit could land mid-run. The
+    #: run's own read was still a consistent point-in-time snapshot; `stale`
+    #: only tells the caller that snapshot may now be behind HEAD.
+    stale: bool
+    truncated: bool
+
+
+class SnippetLintIn(BaseModel):
+    code: str
+
+
+class DiagnosticOut(BaseModel):
+    """Mirrors `core.script.lint.Diagnostic` field-for-field."""
+
+    line: int
+    col: int
+    severity: Literal["error", "warning"]
+    message: str
+
+
+class SnippetLintOut(BaseModel):
+    diagnostics: list[DiagnosticOut]
+    entry_points: list[str]
+
+
+class SnippetCancelIn(BaseModel):
+    run_id: str
 
 
 # ---------------------------------------------------------------------------

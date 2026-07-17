@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -86,6 +88,44 @@ class Settings(BaseSettings):
     #: load/upload/hydrate paths. False in production; the API test conftest
     #: pins it true so tests keep deterministic "seeded after load" semantics.
     validation_sweep_sync: bool = False
+    #: Which ScriptRunner ``build_runner_from_settings`` constructs: "wasm"
+    #: (the wasmtime/CPython-WASI sandbox, the only choice safe for real
+    #: deployments) or "trusted" (the in-process, unsandboxed test runner —
+    #: see the RCE tripwire in ``script_runner.build_runner_from_settings``,
+    #: which refuses "trusted" whenever ``dev_seed`` is false).
+    snippet_runner: Literal["wasm", "trusted"] = "wasm"
+    #: Path to the CPython-WASI guest binary (`python.wasm`) the wasm runner
+    #: loads. Fetched via `spikes/code_exec/fetch_python_wasi.sh`; not
+    #: committed, so dev/CI without it simply leaves the runner unset (routes
+    #: 503) rather than failing to boot.
+    snippet_guest_wasm_path: str = "spikes/code_exec/vendor/python.wasm"
+    #: Path to the CPython-WASI stdlib the wasm runner preopens as
+    #: `PYTHONHOME`/`PYTHONPATH` for the guest.
+    snippet_guest_lib_path: str = "spikes/code_exec/vendor/lib/python3.14"
+    #: Warm-instance pool size for the wasm runner (`WasmScriptRunner.
+    #: pool_size`). More instances absorb concurrent runs without a cold
+    #: boot, at the cost of one idle CPython-WASI interpreter per slot.
+    snippet_pool_size: int = 2
+    #: Global cap on concurrently executing snippet runs. Settings-only here;
+    #: enforcement lands in Task 11.
+    snippet_concurrency: int = 4
+    #: Per-user cap on concurrently executing snippet runs. Settings-only
+    #: here; enforcement lands in Task 11.
+    snippet_per_user_concurrency: int = 1
+    #: Mirrors ``RunLimits.wall_timeout_s`` (see ``run_limits_from_settings``).
+    snippet_wall_timeout_s: float = 10
+    #: Mirrors ``RunLimits.memory_bytes``.
+    snippet_memory_bytes: int = 256 * 1024 * 1024
+    #: Mirrors ``RunLimits.stdout_bytes``.
+    snippet_stdout_bytes: int = 256 * 1024
+    #: Mirrors ``RunLimits.result_repr_bytes``.
+    snippet_result_repr_bytes: int = 64 * 1024
+    #: Mirrors ``RunLimits.max_ops``.
+    snippet_max_ops: int = 1000
+    #: Mirrors ``RunLimits.max_op_bytes``.
+    snippet_max_op_bytes: int = 1024 * 1024
+    #: Mirrors ``RunLimits.page_limit``.
+    snippet_page_limit: int = 500
 
 
 def get_settings() -> Settings:

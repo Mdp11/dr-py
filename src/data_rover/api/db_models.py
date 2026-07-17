@@ -265,6 +265,7 @@ class ArtifactKind(str, enum.Enum):
     table = "table"
     diagram = "diagram"
     diagram_kind = "diagram_kind"
+    code_snippet = "code_snippet"
 
 
 class ArtifactRow(Base):

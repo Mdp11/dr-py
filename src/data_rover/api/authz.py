@@ -42,6 +42,15 @@ _WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 #: ``/clone`` (``POST /projects/{id}/clone``) only READS the source project —
 #: it creates a brand-new project owned by the caller and never mutates the
 #: source, so a viewer of the source may clone it.
+#:
+#: ``/snippets/run`` and ``/snippets/lint`` only READ the model (the runner's
+#: bridge dispatcher never calls a `Model` mutation-boundary method; writes
+#: are recorded op *proposals*, never applied — see core/script/bridge.py),
+#: so a viewer may execute/lint a snippet. ``/snippets/cancel`` touches no
+#: model state at all (it only mutates the in-process run registry), but a
+#: viewer who is allowed to start a run must also be allowed to cancel their
+#: own run, so it is allowlisted too rather than left to fall through as a
+#: write.
 _READ_ONLY_POST_SUFFIXES = (
     "/model/search",
     "/model/elements/batch",
@@ -53,6 +62,9 @@ _READ_ONLY_POST_SUFFIXES = (
     "/navigations/evaluate",
     "/tables/evaluate",
     "/tables/export",
+    "/snippets/run",
+    "/snippets/lint",
+    "/snippets/cancel",
 )
 
 
