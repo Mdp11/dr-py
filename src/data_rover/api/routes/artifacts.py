@@ -39,6 +39,7 @@ from ..schemas import (
     ArtifactOut,
     ArtifactUpdateIn,
     ChainPageOut,
+    ChainValueOut,
     EvaluateNavigationIn,
 )
 from .read import _tree_item  # shared lite projection
@@ -245,7 +246,15 @@ def evaluate_navigation(
     window = result.chains[payload.offset : payload.offset + payload.limit]
     return ChainPageOut(
         step_types=result.step_types,
-        chains=[[_tree_item(model, eid) for eid in chain] for chain in window],
+        chains=[
+            [
+                _tree_item(model, node)
+                if isinstance(node, str)
+                else ChainValueOut(value=node.value)
+                for node in chain
+            ]
+            for chain in window
+        ],
         total=len(result.chains),
         truncated=result.truncated,
     )

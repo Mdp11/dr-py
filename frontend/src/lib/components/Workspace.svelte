@@ -7,6 +7,7 @@
 		closeTableDraft,
 		getActiveTab,
 		getDynamicTabs,
+		isTabDirty,
 		setActiveTab
 	} from '$lib/state';
 	import DetailView from './Workspace/DetailView.svelte';
@@ -33,7 +34,9 @@
 			<Tabs.Trigger value="issues" class="h-7 text-xs">Issues</Tabs.Trigger>
 			{#each dynamicTabs as tab (tab.id)}
 				<Tabs.Trigger value={tab.id} class="group h-7 gap-1 text-xs">
-					<span class="max-w-40 truncate">{tab.title}</span>
+					<span class="max-w-40 truncate"
+						>{tab.title}{isTabDirty(tab.kind, tab.id) ? ' *' : ''}</span
+					>
 					<button
 						type="button"
 						aria-label="Close {tab.title}"

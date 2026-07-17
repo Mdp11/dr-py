@@ -32,7 +32,13 @@
 		type UnifiedTree,
 		type Visibility
 	} from './view-tree';
-	import { createFolder, deleteFolder, removeArtifactFromFolder, renameFolder } from '$lib/state';
+	import {
+		createFolder,
+		deleteFolder,
+		isArtifactDirty,
+		removeArtifactFromFolder,
+		renameFolder
+	} from '$lib/state';
 	import { elementDisplayName as displayName } from '$lib/util/element-name';
 
 	type FolderOption = { path: string[]; label: string };
@@ -327,7 +333,11 @@
 				{/if}
 			</span>
 			<span class="flex-1 truncate" title={artifactHeader.name}>
-				{artifactHeader.name}
+				{artifactHeader.name}{(artifactHeader.kind === 'table' ||
+					artifactHeader.kind === 'navigation') &&
+				isArtifactDirty(artifactHeader.kind, artifactId)
+					? ' *'
+					: ''}
 			</span>
 			<button
 				type="button"

@@ -32,7 +32,8 @@ test('build, combine, select nodes, save, save-as, and reopen round-trips the st
 
 	// --- 1. Open a new navigation tab ---------------------------------------
 	await page.getByRole('button', { name: 'New navigation' }).click();
-	await expect(page.getByText('New navigation', { exact: true })).toBeVisible();
+	// The tab label carries the unsaved `*` (a never-saved draft is unsaved).
+	await expect(page.getByRole('tab', { name: 'New navigation *' })).toBeVisible();
 	const tabpanel = page.getByRole('tabpanel');
 	const dock = tabpanel.getByTestId('results-dock');
 

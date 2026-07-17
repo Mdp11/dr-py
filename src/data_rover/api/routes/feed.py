@@ -78,7 +78,10 @@ async def feed_ws(websocket: WebSocket, project_id: str) -> None:
     session = get_registry().get(project_id)
     session.last_access = time.monotonic()
 
-    await websocket.accept()
+    try:
+        await websocket.accept()
+    except WebSocketDisconnect:
+        return  # client aborted the handshake before we accepted; nothing to clean up
     conn = ClientConn(
         user_id=user_id,
         queue=asyncio.Queue(maxsize=get_settings().feed_queue_max),
@@ -87,22 +90,28 @@ async def feed_ws(websocket: WebSocket, project_id: str) -> None:
     session.hub.broadcast(
         presence_event("join", user_id, session.hub.connected_user_ids())
     )
-    await websocket.send_json(
-        snapshot_event(
-            model_rev=session.model_rev,
-            locks=_lease_dicts(session, time.monotonic()),
-            connected=session.hub.connected_user_ids(),
-        )
-    )
-
-    pump = asyncio.create_task(_pump(websocket, conn))
+    pump: asyncio.Task[None] | None = None
     try:
+        # The initial snapshot send sits INSIDE the guarded region: a client
+        # can vanish between accept() and this send (e.g. the page reloads
+        # mid-project-open and the browser aborts the socket without a close
+        # frame), and that must unwind through the same unregister/presence
+        # cleanup as a normal disconnect — never as an unhandled ASGI error.
+        await websocket.send_json(
+            snapshot_event(
+                model_rev=session.model_rev,
+                locks=_lease_dicts(session, time.monotonic()),
+                connected=session.hub.connected_user_ids(),
+            )
+        )
+        pump = asyncio.create_task(_pump(websocket, conn))
         while True:
             await websocket.receive_text()  # raises on disconnect; ignore payloads
     except WebSocketDisconnect:
         pass
     finally:
-        pump.cancel()
+        if pump is not None:
+            pump.cancel()
         session.hub.unregister(conn)
         session.hub.broadcast(
             presence_event("leave", user_id, session.hub.connected_user_ids())

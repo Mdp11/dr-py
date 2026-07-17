@@ -338,6 +338,87 @@ def test_property_step_navigation_column_resolves_referenced_element():
     assert cell.truncated is False
 
 
+def test_scalar_property_step_navigation_column_yields_values_cell():
+    # A navigation column whose path ends in a SCALAR property step shows the
+    # property VALUES (a ValuesCell), not an empty elements cell — the chain
+    # terminates at PropertyValue nodes and the cell layer unwraps them.
+    mm = Metamodel(
+        elements=[
+            ElementType(
+                name="Sensor",
+                properties=[
+                    PropertyDef(name="tag", datatype="string"),
+                    PropertyDef(name="peer", datatype="Sensor"),
+                ],
+            ),
+        ],
+    )
+    model = Model(mm)
+    s1 = model.create_element("Sensor")
+    s2 = model.create_element("Sensor")
+    model.set_property(s1, "peer", s2.id)
+    model.set_property(s2, "tag", "hot")
+
+    _, keys, cells = _eval(mm, model, {
+        "row_source": {"kind": "scope", "types": ["Sensor"]},
+        "columns": [{"kind": "navigation", "source": {"kind": "row"},
+            "navigation": {"definition": {"kind": "path", "start": {"kind": "row"},
+                "steps": [{"kind": "property", "property_name": "peer"},
+                          {"kind": "property", "property_name": "tag"}],
+                "exclude_visited": True}}}],
+    })
+    by_row = {key[0]: cell for key, cell in zip(keys, (row[0] for row in cells))}
+    cell = by_row[s1.id]
+    assert isinstance(cell, ValuesCell)
+    assert cell.values == ["hot"]
+    assert cell.total == 1 and cell.truncated is False
+    # s2's peer is unset -> its chain pruned -> empty elements cell as before
+    empty = by_row[s2.id]
+    assert isinstance(empty, ElementsCell)
+    assert empty.element_ids == []
+
+
+def test_scalar_property_step_expand_promotes_value_cell():
+    # `expand` mode over a scalar-terminal navigation: one row per VALUE, the
+    # promoted binding rendered as a read-only ValueCell.
+    mm = Metamodel(
+        elements=[
+            ElementType(
+                name="Sensor",
+                properties=[
+                    PropertyDef(name="tags", datatype="string", multiplicity="0..*"),
+                    PropertyDef(name="peer", datatype="Sensor"),
+                ],
+            ),
+        ],
+    )
+    model = Model(mm)
+    s1 = model.create_element("Sensor")
+    s2 = model.create_element("Sensor")
+    model.set_property(s1, "peer", s2.id)
+    model.set_property(s2, "tags", ["hot", "cold"])
+
+    _, keys, cells = _eval(mm, model, {
+        "row_source": {"kind": "scope", "types": ["Sensor"],
+                       "criteria": [{"type": "property", "name": "peer",
+                                     "op": "exists", "value": ""}]},
+        "columns": [{"kind": "navigation", "source": {"kind": "row"},
+            "mode": "expand", "keep_empty": False,
+            "navigation": {"definition": {"kind": "path", "start": {"kind": "row"},
+                "steps": [{"kind": "property", "property_name": "peer"},
+                          {"kind": "property", "property_name": "tags"}],
+                "exclude_visited": True}}}],
+    })
+    assert len(keys) == 2  # one row per tag value
+    vals = []
+    for row in cells:
+        cell = row[0]
+        assert isinstance(cell, ValueCell)
+        assert cell.editable is False and cell.element_id is None
+        vals.append(cell.value)
+    assert sorted(str(v) for v in vals) == ["cold", "hot"]
+
+
 def test_export_limits_ignore_per_column_cell_cap():
     # The export path must carry the COMPLETE reached set: `ignore_cell_caps`
     # bypasses the per-column display cap (previously min(cell_cap, ...) kept

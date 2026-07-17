@@ -196,6 +196,95 @@ describe('createColumnDrag', () => {
 		expect(drag.valid).toBe(false);
 	});
 
+	describe('geometry mode (real layout)', () => {
+		let container: HTMLElement;
+
+		/** A drop target with a REAL-looking rect: geometry mode engages when any
+		 * snapshotted slot has a positive size (happy-dom itself reports zeros). */
+		function layoutTarget(index: number, left: number, width: number): HTMLElement {
+			const el = document.createElement('div');
+			el.setAttribute(ATTR, String(index));
+			el.getBoundingClientRect = () =>
+				({
+					left,
+					top: 0,
+					width,
+					height: 20,
+					right: left + width,
+					bottom: 20,
+					x: left,
+					y: 0,
+					toJSON: () => ({})
+				}) as DOMRect;
+			container.appendChild(el);
+			return el;
+		}
+
+		/** Like fakeEvent, but the event originates ON the slot element so the
+		 * controller can resolve the dragged slot and its siblings. */
+		function slotEvent(target: HTMLElement, clientX: number, clientY: number): PointerEvent {
+			return {
+				button: 0,
+				clientX,
+				clientY,
+				pointerId: 1,
+				currentTarget: target
+			} as unknown as PointerEvent;
+		}
+
+		beforeEach(() => {
+			container = document.createElement('div');
+			document.body.appendChild(container);
+		});
+
+		it('hit-tests the snapshot, previews the reflow via offsetOf, and anchors a ghost', () => {
+			const onDrop = vi.fn();
+			const defn = defWithColumns(3);
+			const drag = createColumnDrag({ attr: ATTR, getDefinition: () => defn, onDrop });
+			const s0 = layoutTarget(0, 0, 100);
+			layoutTarget(1, 100, 100);
+			layoutTarget(2, 200, 100);
+
+			drag.onPointerDown(slotEvent(s0, 10, 10), 0);
+			drag.onPointerMove(slotEvent(s0, 250, 10));
+
+			expect(drag.from).toBe(0);
+			expect(drag.over).toBe(2); // slot 2 spans [200, 300)
+			expect(drag.valid).toBe(true);
+			// previewed order [1, 2, 0]: both others shift left by the dragged
+			// width, the dragged column slides to the end
+			expect(drag.offsetOf(1)).toBe(-100);
+			expect(drag.offsetOf(2)).toBe(-100);
+			expect(drag.offsetOf(0)).toBe(200);
+			// ghost anchored at pointer minus the grab offset, sized like the slot
+			expect(drag.ghost).toEqual({ x: 240, y: 0, w: 100, h: 20 });
+
+			drag.onPointerUp(slotEvent(s0, 250, 10));
+			expect(onDrop).toHaveBeenCalledExactlyOnceWith(0, 2);
+			expect(drag.offsetOf(1)).toBe(0); // reset cleared the preview
+		});
+
+		it('clamps along the axis (overshoot still targets the last column) but detaches off the cross axis', () => {
+			const onDrop = vi.fn();
+			const defn = defWithColumns(3);
+			const drag = createColumnDrag({ attr: ATTR, getDefinition: () => defn, onDrop });
+			const s0 = layoutTarget(0, 0, 100);
+			layoutTarget(1, 100, 100);
+			layoutTarget(2, 200, 100);
+
+			drag.onPointerDown(slotEvent(s0, 10, 10), 0);
+			drag.onPointerMove(slotEvent(s0, 999, 10)); // far right, inside the band
+			expect(drag.over).toBe(2);
+
+			drag.onPointerMove(slotEvent(s0, 250, 300)); // far below the strip
+			expect(drag.over).toBeNull();
+			expect(drag.offsetOf(1)).toBe(0);
+
+			drag.onPointerUp(slotEvent(s0, 250, 300)); // detached release = no drop
+			expect(onDrop).not.toHaveBeenCalled();
+		});
+	});
+
 	it('resets after a completed valid drop so a second drag starts clean', () => {
 		const onDrop = vi.fn();
 		const defn = defWithColumns(3);

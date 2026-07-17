@@ -48,6 +48,33 @@ def test_connect_receives_snapshot(client: TestClient) -> None:
         assert snap["locks"] == []
 
 
+def test_client_vanishing_before_snapshot_unwinds_cleanly(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A browser can abort the socket between accept() and the initial snapshot
+    send (e.g. a page reload mid-project-open) — the endpoint must unwind
+    through normal cleanup (hub unregistered), not raise into the ASGI stack."""
+    import time
+
+    from starlette.websockets import WebSocket, WebSocketDisconnect
+
+    from data_rover.api.session import get_session
+
+    async def _gone(self: WebSocket, data: object, mode: str = "text") -> None:
+        raise WebSocketDisconnect(code=1006)
+
+    monkeypatch.setattr(WebSocket, "send_json", _gone)
+    # raise_server_exceptions=True (TestClient default) re-raises any unhandled
+    # endpoint exception when the `with` exits — the assertion is that none
+    # escapes. The endpoint returns without sending a close frame (uvicorn does
+    # that in production), so poll the hub instead of receiving.
+    with client.websocket_connect(_feed_url()):
+        deadline = time.monotonic() + 5.0
+        while get_session().hub.has_clients() and time.monotonic() < deadline:
+            time.sleep(0.01)
+    assert not get_session().hub.has_clients()
+
+
 def test_second_client_sees_presence_join(client: TestClient) -> None:
     with client.websocket_connect(_feed_url("test-user")) as ws1:
         ws1.receive_json()  # own snapshot

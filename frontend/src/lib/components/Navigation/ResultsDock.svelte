@@ -132,16 +132,21 @@
 				<tbody>
 					{#each preview.chains as chain, ci (ci)}
 						<tr class="border-t border-border">
-							{#each chain as item (item.id)}
+							{#each chain as item, ii (ii)}
 								<td class="py-0.5 pr-2">
-									<button
-										type="button"
-										class="rounded bg-card px-1.5 py-0.5 transition-colors hover:bg-muted"
-										title={item.type_name}
-										onclick={() => select({ kind: 'element', id: item.id })}
-									>
-										{item.display_name}
-									</button>
+									{#if 'kind' in item}
+										<!-- scalar property-step terminal: the property VALUE -->
+										<span class="rounded bg-muted/50 px-1.5 py-0.5">{String(item.value)}</span>
+									{:else}
+										<button
+											type="button"
+											class="rounded bg-card px-1.5 py-0.5 transition-colors hover:bg-muted"
+											title={item.type_name}
+											onclick={() => select({ kind: 'element', id: item.id })}
+										>
+											{item.display_name}
+										</button>
+									{/if}
 								</td>
 							{/each}
 						</tr>

@@ -491,7 +491,7 @@ describe('navigation preview staleness + pagination', () => {
 		await loadMorePreview('nav:draft:1');
 		expect(evaluate).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 100, offset: 1 }));
 		const preview = getPreview('nav:draft:1')!;
-		expect(preview.chains.map((c) => c[0].id)).toEqual(['b1', 'b2']);
+		expect(preview.chains.map((c) => ('kind' in c[0] ? undefined : c[0].id))).toEqual(['b1', 'b2']);
 		expect(preview.total).toBe(2);
 		expect(preview.loading).toBe(false);
 		// Fully paged: a further call must not fetch again.

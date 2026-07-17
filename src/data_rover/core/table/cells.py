@@ -38,6 +38,8 @@ from dataclasses import dataclass
 
 from data_rover.core.metamodel.schema import Metamodel
 from data_rover.core.model.model import Model
+from data_rover.core.model.naming import display_name
+from data_rover.core.navigation.evaluate import PropertyValue
 
 from .evaluate import (
     Binding,
@@ -180,6 +182,13 @@ def _navigation_cell(
     if col.mode == "expand":
         slot = _expand_slot_of(defn, base_slots, col_index)
         b = key[slot]
+        if isinstance(b, PropertyValue):
+            # The promoted binding is a scalar-property-step terminal: render
+            # the VALUE (read-only — it belongs to the element the navigation
+            # stepped through, not to this row's single source element).
+            return ValueCell(
+                present=True, value=b.value, element_id=None, editable=False
+            )
         return ElementCell(element_id=b if isinstance(b, str) else None)
     roots = resolve_source_elements(
         mm, model, defn, key, col.source, base_slots, limits
@@ -194,9 +203,23 @@ def _navigation_cell(
         if limits.ignore_cell_caps
         else min(col.cell_cap, limits.max_cell_elements)
     )
-    return ElementsCell(
-        element_ids=reached[:cap], total=len(reached), truncated=len(reached) > cap
-    )
+    if any(isinstance(n, PropertyValue) for n in reached):
+        # The projected step is a scalar property step: the cell shows VALUES.
+        # A mixed frontier (the same property name element-typed on one type,
+        # scalar on another) degrades element nodes to their display names so
+        # nothing silently drops.
+        vals: list[object] = [
+            n.value if isinstance(n, PropertyValue) else display_name(model.elements[n])
+            for n in reached
+        ]
+        return ValuesCell(
+            present=True,
+            values=vals[:cap],
+            total=len(vals),
+            truncated=len(vals) > cap,
+        )
+    ids = [n for n in reached if isinstance(n, str)]
+    return ElementsCell(element_ids=ids[:cap], total=len(ids), truncated=len(ids) > cap)
 
 
 def evaluate_cells(

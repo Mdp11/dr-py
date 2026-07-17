@@ -695,13 +695,24 @@ class EvaluateNavigationIn(BaseModel):
         return self
 
 
+class ChainValueOut(BaseModel):
+    """Terminal VALUE node in a chain: a scalar property step ends its chain at
+    the property's value instead of an element. Discriminated from `TreeItem`
+    by the `kind` tag (TreeItem has no `kind` field)."""
+
+    kind: Literal["value"] = "value"
+    value: str | int | float | bool
+
+
 class ChainPageOut(BaseModel):
-    """One page of navigation chains, each element as a TreeItem projection.
-    `total` counts chains found WITHIN the evaluation caps; `truncated` means
-    the caps stopped enumeration (there may be more matches than `total`)."""
+    """One page of navigation chains, each node a TreeItem projection — except
+    a possible trailing `ChainValueOut` when the path ends in a scalar property
+    step. `total` counts chains found WITHIN the evaluation caps; `truncated`
+    means the caps stopped enumeration (there may be more matches than
+    `total`)."""
 
     step_types: list[str] = Field(default_factory=list)
-    chains: list[list[TreeItem]] = Field(default_factory=list)
+    chains: list[list[TreeItem | ChainValueOut]] = Field(default_factory=list)
     total: int = 0
     truncated: bool = False
 

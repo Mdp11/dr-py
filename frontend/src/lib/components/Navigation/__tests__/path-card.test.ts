@@ -434,15 +434,16 @@ it('the hover insert zone includes a "+ property" button', async () => {
 	}
 });
 
-it('a non-element property step blocks the add affordances with the navigation-blocked hint', async () => {
+it('a non-element property step hides the add affordances (terminal step)', async () => {
 	setMetamodel(PROPERTY_MM);
 	const tabId = 'nav:draft:pc-property-blocked';
 	await seed(tabId, pathWith([{ kind: 'property', property_name: 'label' }]));
 	const c = render(tabId);
 	try {
-		expect(document.body.textContent).toContain(
-			'Navigation is blocked above — remove or change the non-element property step to continue.'
-		);
+		// The per-step "navigation ends here" notice is the ONLY message — no
+		// second card-level warning line (a scalar step is a legitimate terminal
+		// whose chains end at the property VALUE).
+		expect(document.body.textContent).not.toContain('Navigation is blocked above');
 		expect(
 			[...document.querySelectorAll('button')].some(
 				(b) => b.textContent?.trim() === '+ Go to property…'

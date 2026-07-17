@@ -19,7 +19,11 @@ if TYPE_CHECKING:
 from data_rover.core.metamodel.schema import Metamodel
 from data_rover.core.model.model import Model
 from data_rover.core.model.naming import display_name
-from data_rover.core.navigation.evaluate import EvalLimits, evaluate
+from data_rover.core.navigation.evaluate import (
+    EvalLimits,
+    PropertyValue,
+    evaluate,
+)
 
 from .schema import (
     ChainRows,
@@ -34,7 +38,13 @@ from .schema import (
     TableDefinition,
 )
 
-Binding = Union[str, int, float, bool, None]
+#: One row-key slot. `PropertyValue` appears when a chains row source or an
+#: expand navigation column ends in a scalar property step — the promoted
+#: binding is the VALUE terminal, kept wrapped so a string value can never be
+#: mistaken for an element id (RowSlot/ColumnRef reads gate on `isinstance(b,
+#: str)`). Row keys never leave the process (cells are what serialize), so the
+#: wrapper is safe to carry here.
+Binding = Union[str, int, float, bool, None, PropertyValue]
 RowKey = tuple[Binding, ...]
 
 
@@ -82,7 +92,11 @@ def _navigation_row_keys(
     seen: dict[str, None] = {}
     for chain in result.chains:
         _check_step_index(idx, len(chain))
-        seen[chain[idx]] = None
+        node = chain[idx]
+        # Rows are ELEMENTS: a PropertyValue terminal at the projected step
+        # cannot seed a row (nothing downstream could resolve it).
+        if isinstance(node, str):
+            seen[node] = None
     return [(eid,) for eid in seen], result.truncated
 
 
@@ -93,7 +107,10 @@ def _chain_row_keys(
     if defn is None:  # unconfigured ({}) source: no rows, nothing truncated
         return [], False
     result = evaluate(mm, model, defn, limits.nav_limits)
-    return [tuple(chain) for chain in result.chains], result.truncated
+    # Chains may end in a PropertyValue terminal; it rides along as a RowKey
+    # slot (see Binding) so a RowSlot column can never misread it as an id.
+    keys: list[RowKey] = [tuple(chain) for chain in result.chains]
+    return keys, result.truncated
 
 
 def _base_row_keys(
@@ -194,7 +211,9 @@ def resolve_source_elements(
         roots = resolve_source_elements(
             mm, model, defn, key, ref_col.source, base_slots, limits
         )
-        return _navigation_reached(mm, model, ref_col, roots, limits)
+        reached = _navigation_reached(mm, model, ref_col, roots, limits)
+        # element-producing by contract: PropertyValue terminals contribute none
+        return [n for n in reached if isinstance(n, str)]
     return []  # property columns are not element-producing (schema rejects this)
 
 
@@ -204,9 +223,13 @@ def _navigation_reached_ex(
     col: NavigationColumn,
     roots: list[str],
     limits: TableLimits,
-) -> tuple[list[str], bool]:
-    """(reached ids, navigation-truncated) — the flag is consumed by
-    `build_rows`' expand loop; display-only callers use `_navigation_reached`."""
+) -> tuple[list[str | PropertyValue], bool]:
+    """(reached nodes, navigation-truncated) — the flag is consumed by
+    `build_rows`' expand loop; display-only callers use `_navigation_reached`.
+    Nodes are element ids, except `PropertyValue` terminals when the projected
+    step is a scalar property step — the cell layer renders those as VALUES
+    (ValuesCell/ValueCell); callers that need elements filter on
+    `isinstance(node, str)`."""
     defn = col.navigation.definition
     if defn is None:  # unconfigured ({}) column: reaches nothing
         return [], False
@@ -214,7 +237,7 @@ def _navigation_reached_ex(
         return [], False
     result = evaluate(mm, model, defn, limits.nav_limits, row_elements=roots)
     idx = col.step_index if col.step_index is not None else -1
-    seen: dict[str, None] = {}
+    seen: dict[str | PropertyValue, None] = {}
     for chain in result.chains:
         _check_step_index(idx, len(chain))
         seen[chain[idx]] = None
@@ -227,7 +250,7 @@ def _navigation_reached(
     col: NavigationColumn,
     roots: list[str],
     limits: TableLimits,
-) -> list[str]:
+) -> list[str | PropertyValue]:
     return _navigation_reached_ex(mm, model, col, roots, limits)[0]
 
 
@@ -258,7 +281,10 @@ def _navigation_step_elements(
             _check_step_index(proj, len(chain))
             if chain[proj] != match_projected:
                 continue
-        seen[chain[step]] = None
+        node = chain[step]
+        # element-producing by contract: skip PropertyValue terminals
+        if isinstance(node, str):
+            seen[node] = None
     return list(seen)
 
 
@@ -398,7 +424,10 @@ def _expand_values(
     """(values, navigation-truncated) an expand column contributes for one row."""
     if isinstance(col, NavigationColumn):
         reached, truncated = _navigation_reached_ex(mm, model, col, roots, limits)
-        return list(reached), truncated
+        # PropertyValue terminals ride into the RowKey as-is (see Binding);
+        # cells.py renders them back as read-only ValueCells.
+        bindings: list[Binding] = list(reached)
+        return bindings, truncated
     # PropertyColumn expand: one row per property value. Single-binding source
     # guaranteed by schema; missing/scalar handled by cells.expand_property_values.
     # Function-local import: cells.py imports FROM evaluate.py (resolve_source_
@@ -516,13 +545,16 @@ def _sort_value(
         if numeric:
             return (0, tuple(float(v) for v in vals))  # type: ignore[arg-type]
         return (0, tuple(str(v).casefold() for v in vals))
-    # NavigationColumn. `expand` already put ONE reached element per row into
+    # NavigationColumn. `expand` already put ONE reached binding per row into
     # the RowKey (read it straight back); COLLAPSE needs a full re-navigation.
-    # `value` sorts on the tuple of reached display names (name-sorted, so two
-    # rows with the same multiset of reached names compare equal regardless of
-    # discovery order); `count` sorts on cardinality.
+    # `value` sorts on the tuple of reached labels — display names for element
+    # nodes, the value's string form for PropertyValue terminals — (name-
+    # sorted, so two rows with the same multiset of labels compare equal
+    # regardless of discovery order); `count` sorts on cardinality.
     if col.mode == "expand":
         b = key[_expand_slot_of(defn, base_slots, col_index)]
+        if isinstance(b, PropertyValue):
+            return (0, (str(b.value).casefold(), ""))
         if not isinstance(b, str):
             return (1, "")
         return (0, (_display_name(model, b).casefold(), b))
@@ -534,7 +566,10 @@ def _sort_value(
         return (1, 0 if col.sort_mode == "count" else ())
     if col.sort_mode == "count":
         return (0, len(reached))
-    return (0, tuple(sorted(_display_name(model, e).casefold() for e in reached)))
+    labels = [
+        _display_name(model, n) if isinstance(n, str) else str(n.value) for n in reached
+    ]
+    return (0, tuple(sorted(label.casefold() for label in labels)))
 
 
 def order_rows(

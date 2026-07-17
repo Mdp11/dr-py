@@ -163,11 +163,34 @@
 		if (draft) updateTableDefinition(tabId, setColumnWidth(draft.definition, index, width));
 	}
 
+	// Intrinsic width of one rendered cell, measured on a hidden CLONE with
+	// every width cap lifted. Measuring the live node cannot work: the cell
+	// content sits under a max-w-full/truncate chain, so a truncating child's
+	// border box is capped at the CURRENT column width and the wrapper's
+	// scrollWidth reports that cap, not the full text — which is what made each
+	// auto-fit grow the column by its padding constant instead of converging.
+	// The clone carries the cell's own classes (text-xs, px-2), so styling —
+	// and therefore text metrics — match the live cell.
+	function measureCellWidth(cell: Element): number {
+		const probe = document.createElement('div');
+		probe.style.cssText =
+			'position:fixed;left:-10000px;top:0;visibility:hidden;pointer-events:none';
+		const clone = cell.cloneNode(true) as HTMLElement;
+		clone.style.width = 'max-content'; // override the inline width:{...}px
+		for (const n of [clone, ...clone.querySelectorAll<HTMLElement>('*')]) {
+			n.style.maxWidth = 'none';
+			n.style.overflow = 'visible';
+		}
+		probe.appendChild(clone);
+		document.body.appendChild(probe);
+		const w = Math.ceil(clone.getBoundingClientRect().width);
+		probe.remove();
+		return w;
+	}
+
 	// Double-click auto-fit: size the column to its widest RENDERED content —
 	// the header label plus the cells the window currently shows (the sparse
-	// row cache means off-screen rows can't be measured). Cell wrappers are
-	// overflow-hidden, so the inner content's scrollWidth is the full,
-	// unclipped content width even when it is currently truncated.
+	// row cache means off-screen rows can't be measured).
 	// `defIndex` is the definition index (what sort/resize/width speak);
 	// `domIndex` is the compacted on-screen position hidden columns leave
 	// behind — DOM lookups use it, `setColumnWidth` uses `defIndex`.
@@ -179,9 +202,10 @@
 		// label + sort caret + flex gaps + horizontal padding
 		if (label) max = Math.max(max, Math.ceil(label.scrollWidth) + 44);
 		for (const row of scrollEl.querySelectorAll('[data-testid="table-row"]')) {
-			const content = row.children[domIndex]?.firstElementChild;
-			// px-2 padding (16) + right border + a rounding safety px
-			if (content) max = Math.max(max, Math.ceil(content.scrollWidth) + 18);
+			const cell = row.children[domIndex];
+			// the measured clone already includes the cell's px-2 padding;
+			// +2 covers the right border and a rounding safety px
+			if (cell) max = Math.max(max, measureCellWidth(cell) + 2);
 		}
 		const draft = getTableDraft(tabId);
 		if (!draft) return;
@@ -262,10 +286,11 @@
 				role="columnheader"
 				tabindex="-1"
 				class="relative flex shrink-0 cursor-grab items-center gap-1 border-r border-border px-2 py-1.5 touch-none select-none"
-				style="width:{widthFor(v.col, v.i)}px"
+				style="width:{widthFor(v.col, v.i)}px; transform:translateX({hdrDrag.offsetOf(v.i)}px)"
 				data-col-hdr-drop={v.i}
-				class:ring-1={hdrDrag.over === v.i && hdrDrag.from !== null}
-				class:ring-primary={hdrDrag.over === v.i && hdrDrag.from !== null && hdrDrag.valid}
+				class:transition-transform={hdrDrag.dragging}
+				class:duration-150={hdrDrag.dragging}
+				class:ring-1={hdrDrag.over === v.i && hdrDrag.from !== null && !hdrDrag.valid}
 				class:ring-destructive={hdrDrag.over === v.i && hdrDrag.from !== null && !hdrDrag.valid}
 				class:opacity-50={hdrDrag.from === v.i}
 				onpointerdown={(e) => onHeaderPointerDown(e, v.i)}
@@ -325,10 +350,10 @@
 					</DropdownMenu.Trigger>
 					<DropdownMenu.Content align="start">
 						<DropdownMenu.Item onSelect={() => onAddColumn?.('property')}>
-							Property column
+							+ Property
 						</DropdownMenu.Item>
 						<DropdownMenu.Item onSelect={() => onAddColumn?.('navigation')}>
-							Navigation column
+							+ Navigation
 						</DropdownMenu.Item>
 					</DropdownMenu.Content>
 				</DropdownMenu.Root>
@@ -367,7 +392,12 @@
 									: lock.state === 'theirs'
 										? `Locked by ${lock.holder}`
 										: undefined}
-								style="width:{widthFor(v.col, v.i)}px"
+								style="width:{widthFor(v.col, v.i)}px; transform:translateX({hdrDrag.offsetOf(
+									v.i
+								)}px)"
+								class:transition-transform={hdrDrag.dragging}
+								class:duration-150={hdrDrag.dragging}
+								class:opacity-50={hdrDrag.from === v.i}
 							>
 								{#if cell.kind === 'element'}
 									<div class="flex h-7 max-w-full min-w-0 items-center">
@@ -386,7 +416,11 @@
 						{:else}
 							<div
 								class="shrink-0 border-r border-border/40 px-2"
-								style="width:{widthFor(v.col, v.i)}px"
+								class:transition-transform={hdrDrag.dragging}
+								class:duration-150={hdrDrag.dragging}
+								style="width:{widthFor(v.col, v.i)}px; transform:translateX({hdrDrag.offsetOf(
+									v.i
+								)}px)"
 							></div>
 						{/if}
 					{/each}
@@ -403,7 +437,11 @@
 					{#each visibleCols as v (v.i)}
 						<div
 							class="flex shrink-0 items-center border-r border-border/40 px-2"
-							style="width:{widthFor(v.col, v.i)}px"
+							class:transition-transform={hdrDrag.dragging}
+							class:duration-150={hdrDrag.dragging}
+							style="width:{widthFor(v.col, v.i)}px; transform:translateX({hdrDrag.offsetOf(
+								v.i
+							)}px)"
 						>
 							<div class="h-3 w-3/5 animate-pulse rounded bg-muted"></div>
 						</div>
@@ -425,5 +463,18 @@
 			This table is empty. Open <span class="font-medium">Settings</span> to choose its scope — the elements
 			(or navigation) its rows come from.
 		</p>
+	{/if}
+	{#if hdrDrag.dragging && hdrDrag.ghost && hdrDrag.ghost.w > 0 && hdrDrag.from !== null}
+		{@const dragCol = getTableDraft(tabId)?.definition.columns[hdrDrag.from]}
+		<!-- Detached drag ghost: a copy of the grabbed header cell following the
+		     pointer (position:fixed so the scroll container doesn't clip it). -->
+		<div
+			data-testid="header-drag-ghost"
+			class="pointer-events-none fixed z-50 flex items-center rounded border border-primary/40 bg-card px-2 py-1.5 text-xs font-medium text-foreground opacity-90 shadow-lg"
+			style="left:{hdrDrag.ghost.x}px; top:{hdrDrag.ghost.y}px; width:{hdrDrag.ghost
+				.w}px; height:{hdrDrag.ghost.h}px"
+		>
+			<span class="truncate">{dragCol ? dragCol.header || columnKindLabel(dragCol.kind) : ''}</span>
+		</div>
 	{/if}
 </div>

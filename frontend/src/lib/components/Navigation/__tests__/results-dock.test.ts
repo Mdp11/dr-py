@@ -121,6 +121,44 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
+it('renders a value terminal (scalar property step) as plain text, not an element chip', async () => {
+	const tabId = 'nav:draft:value-terminal';
+	await ensureDraft(tabId);
+	vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue({
+		step_types: ['priority'],
+		chains: [
+			[
+				{ id: 'r1', type_name: 'Requirement', display_name: 'R1', child_count: 0 },
+				{ kind: 'value', value: 3 }
+			]
+		],
+		total: 1,
+		truncated: false
+	});
+	updateDefinition(tabId, {
+		kind: 'path',
+		schema_version: 1,
+		start: { kind: 'scope', types: ['Requirement'], criteria: [] },
+		steps: [{ kind: 'property', property_name: 'priority' }],
+		exclude_visited: true
+	} as PathNavigation);
+	await runPreview(tabId, []).catch(() => {});
+	await flushEvaluate();
+	const c = render(tabId);
+	try {
+		const status = document.querySelector('[data-testid="results-status"]');
+		expect(status?.textContent).toContain('✓ 1 chains');
+		const cells = [...document.querySelectorAll('tbody td')];
+		expect(cells).toHaveLength(2);
+		// the element node stays a clickable chip; the value node is plain text
+		expect(cells[0].querySelector('button')?.textContent?.trim()).toBe('R1');
+		expect(cells[1].querySelector('button')).toBeNull();
+		expect(cells[1].textContent?.trim()).toBe('3');
+	} finally {
+		unmount(c);
+	}
+});
+
 it('renders the selected node’s chains with rail-numbered column headers', async () => {
 	const tabId = 'nav:draft:table';
 	await ensureDraft(tabId);

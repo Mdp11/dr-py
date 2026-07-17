@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as artifactsApi from '$lib/api/artifacts';
 import * as tablesApi from '$lib/api/tables';
 import {
 	closeTableDraft,
@@ -15,7 +16,7 @@ import {
 	updateDefinition,
 	updateTableDefinition
 } from '../index';
-import { hasUnsavedWork } from '../unsaved';
+import { hasUnsavedWork, isArtifactDirty, isTabDirty } from '../unsaved';
 import { resetWorkspaceTabs } from '../workspace.svelte';
 import { resetArtifacts } from '../artifacts.svelte';
 
@@ -98,5 +99,40 @@ describe('hasUnsavedWork', () => {
 		const draft = await ensureTableDraft('tbl:draft:1');
 		updateTableDefinition('tbl:draft:1', draft.definition);
 		expect(hasUnsavedWork()).toBe(true);
+	});
+});
+
+describe('isTabDirty / isArtifactDirty', () => {
+	it('a never-saved draft tab is dirty even before any edit', async () => {
+		await ensureTableDraft('tbl:draft:1');
+		expect(isTabDirty('table', 'tbl:draft:1')).toBe(true);
+	});
+
+	it('a tab with no draft at all is not dirty', () => {
+		expect(isTabDirty('table', 'tbl:nope')).toBe(false);
+		expect(isTabDirty('navigation', 'nav:nope')).toBe(false);
+	});
+
+	it('a nav draft tab turns dirty on edit', async () => {
+		const draft = await ensureDraft('nav:draft:1');
+		updateDefinition('nav:draft:1', draft.definition);
+		expect(isTabDirty('navigation', 'nav:draft:1')).toBe(true);
+	});
+
+	it('isArtifactDirty maps an artifact id onto its deterministic tab id', async () => {
+		// Simulate an OPEN saved artifact: its tab id is tbl:<artifactId>.
+		const template = await ensureTableDraft('tbl:draft:9');
+		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue({
+			id: 'a1',
+			kind: 'table',
+			name: 'T',
+			artifact_rev: 1,
+			payload: template.definition
+		} as never);
+		expect(isArtifactDirty('table', 'a1')).toBe(false); // not open: no draft
+		await ensureTableDraft('tbl:a1');
+		expect(isArtifactDirty('table', 'a1')).toBe(false); // open but pristine
+		updateTableDefinition('tbl:a1', template.definition);
+		expect(isArtifactDirty('table', 'a1')).toBe(true); // edited
 	});
 });

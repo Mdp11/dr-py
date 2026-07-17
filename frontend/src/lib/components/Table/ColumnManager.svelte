@@ -135,6 +135,7 @@
 	// underneath the drag.
 	const drag = createColumnDrag({
 		attr: 'data-col-drop',
+		axis: 'y',
 		getDefinition: () => defn,
 		onDrop: (fromIdx, toIdx) => {
 			const current = defn;
@@ -185,8 +186,10 @@
 					<div
 						class="rounded border border-border/70 p-1.5"
 						data-col-drop={i}
-						class:ring-1={drag.over === i && drag.from !== null}
-						class:ring-primary={drag.over === i && drag.from !== null && drag.valid}
+						style="transform:translateY({drag.offsetOf(i)}px)"
+						class:transition-transform={drag.dragging}
+						class:duration-150={drag.dragging}
+						class:ring-1={drag.over === i && drag.from !== null && !drag.valid}
 						class:ring-destructive={drag.over === i && drag.from !== null && !drag.valid}
 						class:opacity-50={drag.from === i}
 					>
@@ -292,6 +295,25 @@
 			{/each}
 		</div>
 
+		{#if drag.dragging && drag.ghost && drag.ghost.w > 0 && drag.from !== null}
+			{@const dragCol = defn.columns[drag.from]}
+			<!-- Detached drag ghost: a slim copy of the grabbed row following the
+			     pointer (position:fixed so the settings panel doesn't clip it). -->
+			<div
+				data-testid="column-drag-ghost"
+				class="pointer-events-none fixed z-50 flex items-center gap-1.5 rounded border border-primary/40 bg-card p-1.5 text-xs opacity-90 shadow-lg"
+				style="left:{drag.ghost.x}px; top:{drag.ghost.y}px; width:{drag.ghost.w}px"
+			>
+				<span class="shrink-0 text-muted-foreground/50">⠿</span>
+				<span
+					class="rounded bg-muted px-1 py-0.5 font-mono text-[10px] text-muted-foreground uppercase"
+				>
+					{dragCol ? columnKindLabel(dragCol.kind) : ''}
+				</span>
+				<span class="truncate">{dragCol ? dragCol.header || columnLabel(dragCol) : ''}</span>
+			</div>
+		{/if}
+
 		{#if focusIndex === null}
 			<div class="flex flex-wrap items-center gap-2 border-t border-border pt-2">
 				<button
@@ -300,7 +322,7 @@
 					class="rounded border border-input px-2 py-1 text-[11px] hover:bg-muted"
 					onclick={addPropertyColumn}
 				>
-					+ Property column
+					+ Property
 				</button>
 				<button
 					type="button"
@@ -308,7 +330,7 @@
 					class="rounded border border-input px-2 py-1 text-[11px] hover:bg-muted"
 					onclick={addNavigationColumn}
 				>
-					+ Navigation column
+					+ Navigation
 				</button>
 			</div>
 		{/if}

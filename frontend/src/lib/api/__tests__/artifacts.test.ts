@@ -79,7 +79,8 @@ describe('artifacts api', () => {
 			)
 		);
 		const page = await evaluateNavigation({ artifact_id: 'a1' }, CFG);
-		expect(page.chains[0][1].display_name).toBe('T-1');
+		const node = page.chains[0][1];
+		expect('kind' in node ? undefined : node.display_name).toBe('T-1');
 		expect(page.total).toBe(1);
 	});
 });

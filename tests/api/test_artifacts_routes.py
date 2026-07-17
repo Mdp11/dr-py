@@ -311,6 +311,37 @@ def test_evaluate_property_step_hops_through_reference_property(
     assert [el["id"] for el in chains[0]] == [r2["id"], r1["id"]]
 
 
+def test_evaluate_scalar_property_step_returns_value_terminal(
+    client: TestClient,
+) -> None:
+    # A path ending in a SCALAR property step returns chains whose terminal is
+    # a `{"kind": "value", "value": ...}` node — the property's value — instead
+    # of pruning the chain to nothing.
+    _bootstrap_model(client)
+    r1 = client.post(
+        f"{API}/model/elements",
+        json={"type": "Requirement", "properties": {"name": "R1", "priority": 3}},
+    ).json()
+    res = client.post(
+        f"{API}/navigations/evaluate",
+        json={"definition": {
+            "kind": "path",
+            "start": {"kind": "scope", "types": ["Requirement"],
+                      "criteria": [{"type": "name_id", "field": "name",
+                                    "op": "equals", "value": "R1"}]},
+            "steps": [{"kind": "property", "property_name": "priority"}],
+        }},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["step_types"] == ["priority"]
+    assert body["total"] == 1
+    chains = body["chains"]
+    assert len(chains) == 1
+    assert chains[0][0]["id"] == r1["id"]
+    assert chains[0][1] == {"kind": "value", "value": 3}
+
+
 def test_evaluate_row_rooted_without_binding_422(client: TestClient) -> None:
     _bootstrap_model(client)
     body = {"definition": {"kind": "path", "start": {"kind": "row"}, "steps": []}}

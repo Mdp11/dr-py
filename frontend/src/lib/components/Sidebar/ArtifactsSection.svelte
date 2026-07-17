@@ -3,6 +3,7 @@
 	import {
 		canEdit,
 		getArtifactHeaders,
+		isArtifactDirty,
 		openArtifactTab,
 		openNavigationTab,
 		removeArtifact,
@@ -126,7 +127,9 @@
 						ondblclick={() => openExisting(cfg, item.id, item.name)}
 					>
 						<Icon class="size-3.5 shrink-0 text-info" />
-						<span class="flex-1 truncate">{item.name}</span>
+						<span class="flex-1 truncate"
+							>{item.name}{isArtifactDirty(cfg.kind, item.id) ? ' *' : ''}</span
+						>
 						{#if editable}
 							<button
 								type="button"

@@ -42,7 +42,7 @@
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import * as api from '$lib/api/artifacts';
 import { ConflictError } from '$lib/api/errors';
-import type { NavigationDefinition, TreeItem } from '$lib/api/types';
+import type { ChainNode, NavigationDefinition } from '$lib/api/types';
 import {
 	containsRowStart,
 	emptyPath,
@@ -90,7 +90,9 @@ const EMBEDDED_PREFIX = 'navemb:';
 
 export interface NavPreview {
 	stepTypes: string[];
-	chains: TreeItem[][];
+	/** Chain nodes are elements, except a possible trailing value terminal
+	 * (scalar property step) — see ChainNode. */
+	chains: ChainNode[][];
 	total: number;
 	truncated: boolean;
 	loading: boolean;

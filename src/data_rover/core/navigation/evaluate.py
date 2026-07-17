@@ -50,12 +50,30 @@ class EvalLimits:
     max_chains: int = 5_000
 
 
+@dataclass(frozen=True)
+class PropertyValue:
+    """Terminal chain node for a SCALAR property step: when the stepped-on
+    property is not element-typed, navigation ends AT the property's value(s)
+    instead of hopping to another element. Wrapped (rather than carried raw)
+    so a string value can never be mistaken for an element id by downstream
+    consumers — every consumer discriminates with ``isinstance(node, str)``.
+    Frozen (hashable) because chain nodes are deduped through dict keys."""
+
+    value: str | int | float | bool
+
+
+#: One position in a chain: an element id, or a terminal scalar value.
+ChainNode = str | PropertyValue
+
+
 @dataclass
 class ChainResult:
-    """Chains INCLUDE the start element at index 0 (see schema docstring)."""
+    """Chains INCLUDE the start element at index 0 (see schema docstring).
+    Every node is an element id except a possible trailing `PropertyValue`
+    (a scalar property step is always terminal)."""
 
     step_types: list[str]
-    chains: list[tuple[str, ...]]
+    chains: list[tuple[ChainNode, ...]]
     truncated: bool
 
 
@@ -100,7 +118,7 @@ def evaluate(
     start_ids = _start_ids(
         metamodel, model, defn, limits, budget, row_elements=row_elements
     )
-    chains: list[tuple[str, ...]] = []
+    chains: list[tuple[ChainNode, ...]] = []
     truncated = False
     for start_id in start_ids:
         if _walk(
@@ -226,17 +244,20 @@ def _hop_property(
     element_id: str,
     step: PropertyStep,
     budget: _Budget,
-) -> list[str]:
-    """Continuations of a property hop: the element's `property_name` value(s)
-    resolved to existing elements. Gated on the element's EFFECTIVE property
-    def being element-typed — a string that merely looks like an id must not
-    navigate. Absent/non-reference/dangling cases prune the chain silently
-    (never raise): navigation stays inspectable on odd models, mirroring
-    FilterStep's existence-gating. Deliberately NOT checked: the RESOLVED
-    element's own type against `prop.datatype` — a dangling-conformance id
-    still navigates, since conformance is the validation pipeline's job, so
-    the UI's frontier typing (frontierTypesAt) may be narrower than the
-    actual frontier."""
+) -> list[ChainNode]:
+    """Continuations of a property hop. For an ELEMENT-typed effective property
+    def, the element's `property_name` value(s) resolve to existing elements —
+    gated on the def's datatype so a string that merely looks like an id must
+    not navigate. For a SCALAR property the chain terminates AT the value(s):
+    each scalar item becomes a `PropertyValue` terminal (list order preserved —
+    it is the stored order, already deterministic), so the value is displayable
+    downstream instead of the chain silently vanishing. Absent/unset/dangling
+    cases still prune silently (never raise): navigation stays inspectable on
+    odd models, mirroring FilterStep's existence-gating. Deliberately NOT
+    checked: the RESOLVED element's own type against `prop.datatype` — a
+    dangling-conformance id still navigates, since conformance is the
+    validation pipeline's job, so the UI's frontier typing (frontierTypesAt)
+    may be narrower than the actual frontier."""
     element = model.elements[element_id]
     prop = next(
         (
@@ -246,7 +267,7 @@ def _hop_property(
         ),
         None,
     )
-    if prop is None or not metamodel.is_element_type(prop.datatype):
+    if prop is None:
         return []
     value = element.properties.get(step.property_name)
     if value is None:
@@ -254,10 +275,21 @@ def _hop_property(
     candidates = value if isinstance(value, list) else [value]
     if not budget.spend(len(candidates)):
         return []
-    nxt = {
-        item for item in candidates if isinstance(item, str) and item in model.elements
-    }
-    return sorted(nxt)
+    if not metamodel.is_element_type(prop.datatype):
+        return [
+            PropertyValue(item)
+            for item in candidates
+            if isinstance(item, (str, int, float, bool))
+        ]
+    resolved: list[ChainNode] = []
+    resolved.extend(
+        sorted(
+            item
+            for item in set(candidates)
+            if isinstance(item, str) and item in model.elements
+        )
+    )
+    return resolved
 
 
 def _walk(
@@ -265,8 +297,8 @@ def _walk(
     model: Model,
     steps: Sequence[StepItem],
     item_idx: int,
-    chain: tuple[str, ...],
-    chains: list[tuple[str, ...]],
+    chain: tuple[ChainNode, ...],
+    chains: list[tuple[ChainNode, ...]],
     limits: EvalLimits,
     budget: _Budget,
     exclude_visited: bool,
@@ -283,6 +315,11 @@ def _walk(
         return False
     step = steps[item_idx]
     current = chain[-1]
+    if not isinstance(current, str):
+        # A PropertyValue is TERMINAL — the UI blocks adding steps past a
+        # scalar property step, but a hand-written definition may still carry
+        # them; such chains prune silently (same stance as absent properties).
+        return False
     if isinstance(step, FilterStep):
         if _matches_filter(model, model.elements[current], step):
             return _walk(
@@ -297,8 +334,9 @@ def _walk(
                 exclude_visited,
             )
         return False
+    nxt: list[ChainNode]
     if isinstance(step, RelationshipStep):
-        nxt = _hop(metamodel, model, current, step, budget)
+        nxt = list(_hop(metamodel, model, current, step, budget))
     else:
         nxt = _hop_property(metamodel, model, current, step, budget)
     if budget.exhausted:
@@ -392,4 +430,8 @@ def _operand_members(
         raise ValueError(
             f"step_index {step_index} out of range: path has {n_steps} steps"
         )
-    return {chain[index] for chain in inner.chains}, inner.truncated
+    # Set members are ELEMENTS; a PropertyValue terminal at the projected step
+    # contributes nothing (a scalar cannot participate in id-set algebra).
+    return {
+        node for chain in inner.chains if isinstance((node := chain[index]), str)
+    }, inner.truncated

@@ -85,14 +85,18 @@ class FilterStep(BaseModel):
 
 
 class PropertyStep(BaseModel):
-    """A hop through an element-reference property: for each frontier element,
-    follow `property_name`'s value(s) — element ids — to the referenced
-    element(s). Adds ONE chain column, exactly like a RelationshipStep.
+    """A hop through a property. Adds ONE chain column, like a
+    RelationshipStep, with per-element behaviour decided by the element's
+    EFFECTIVE property def:
 
-    Per element, the hop applies only when the element's EFFECTIVE property
-    def exists and its datatype is an element type; otherwise that chain is
-    pruned — graceful, mirroring FilterStep's existence-gating, so the engine
-    never raises on odd models. Dangling ids are skipped."""
+    - datatype is an ELEMENT type → follow the value(s) — element ids — to the
+      referenced element(s); dangling ids are skipped.
+    - datatype is SCALAR → the chain TERMINATES at the property's value(s)
+      (one chain per list item), carried as `PropertyValue` terminal nodes so
+      the UI can display the value; no further step can extend such a chain.
+
+    A missing def or unset value prunes the chain — graceful, mirroring
+    FilterStep's existence-gating, so the engine never raises on odd models."""
 
     kind: Literal["property"] = "property"
     property_name: str

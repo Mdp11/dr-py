@@ -480,10 +480,10 @@
 
 		{#if editable}
 			<div class="flex items-center gap-2 pl-7">
-				{#if blockedAt !== null}
-					<!-- prettier-ignore -->
-					<span class="text-[11px] text-warning">Navigation is blocked above — remove or change the non-element property step to continue.</span>
-				{:else}
+				<!-- A scalar property step is a legitimate TERMINAL (the chain ends at
+				     the value); the per-step "navigation ends here" notice is the only
+				     message — this area simply hides the add-step buttons. -->
+				{#if blockedAt === null}
 					<button
 						type="button"
 						class="rounded border border-dashed border-input px-2 py-1 text-info/90 transition-colors hover:border-ring hover:text-info"

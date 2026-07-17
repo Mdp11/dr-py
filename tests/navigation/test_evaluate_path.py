@@ -19,7 +19,12 @@ from data_rover.core.metamodel.schema import (
     RelationshipType,
 )
 from data_rover.core.model.model import Model
-from data_rover.core.navigation.evaluate import ChainResult, EvalLimits, evaluate
+from data_rover.core.navigation.evaluate import (
+    ChainResult,
+    EvalLimits,
+    PropertyValue,
+    evaluate,
+)
 from data_rover.core.navigation.schema import (
     NAVIGATION_ADAPTER,
     FilterStep,
@@ -304,7 +309,9 @@ def test_property_criterion_is_existence_gated() -> None:
         steps=[],
     )
     ids = {c[0] for c in evaluate(mm, model, defn).chains}
-    assert all("cost" in model.elements[i].properties for i in ids)
+    assert all(
+        isinstance(i, str) and "cost" in model.elements[i].properties for i in ids
+    )
     assert priced.id in ids
     assert unpriced.id not in ids
 
@@ -342,7 +349,9 @@ def test_target_types_filter_landing() -> None:
     result = evaluate(mm, model, defn)
     assert result.chains == [(root.id, db.id)]
     for chain in result.chains:
-        assert mm.is_element_subtype(model.elements[chain[1]].type_name, "Database")
+        endpoint = chain[1]
+        assert isinstance(endpoint, str)
+        assert mm.is_element_subtype(model.elements[endpoint].type_name, "Database")
 
 
 def _ref_mm() -> Metamodel:
@@ -427,11 +436,31 @@ def test_property_hop_prunes_absent_property() -> None:
     assert not any(chain[0] == ids["s2"] for chain in result.chains)
 
 
-def test_property_hop_prunes_non_element_datatype() -> None:
-    model, _ids = _ref_fixture()
+def test_property_hop_scalar_terminates_at_value() -> None:
+    # A NON-element property step ends the chain AT the value: one chain per
+    # list item, each terminal wrapped in PropertyValue (never a bare string,
+    # so it can't be mistaken for an element id).
+    model, ids = _ref_fixture()
     result = evaluate(model.metamodel, model, _prop_path(steps=[_prop("tags")]))
-    assert result.chains == []
+    assert result.chains == [(ids["s1"], PropertyValue("hot"))]
     assert result.step_types == ["tags"]
+
+
+def test_property_hop_scalar_unset_prunes() -> None:
+    # An element that never set the scalar property contributes no chain.
+    model, ids = _ref_fixture()
+    result = evaluate(model.metamodel, model, _prop_path(steps=[_prop("tags")]))
+    assert not any(chain[0] == ids["s2"] for chain in result.chains)
+
+
+def test_steps_after_a_scalar_property_step_prune() -> None:
+    # A PropertyValue terminal cannot be stepped past — a hand-written
+    # definition with steps after a scalar property step yields no chains.
+    model, _ids = _ref_fixture()
+    nav = _prop_path(
+        steps=[_prop("tags"), {"kind": "relationship", "relationship_type": "Measures"}]
+    )
+    assert evaluate(model.metamodel, model, nav).chains == []
 
 
 def test_property_hop_skips_dangling_reference() -> None:

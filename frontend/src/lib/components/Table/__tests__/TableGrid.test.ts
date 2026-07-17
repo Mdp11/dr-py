@@ -522,8 +522,8 @@ describe('TableGrid', () => {
 			trigger.click();
 			flushSync();
 			const items = [...document.querySelectorAll('[role="menuitem"]')];
-			const propertyItem = items.find((el) => el.textContent?.includes('Property column'));
-			const navItem = items.find((el) => el.textContent?.includes('Navigation column'));
+			const propertyItem = items.find((el) => el.textContent?.includes('+ Property'));
+			const navItem = items.find((el) => el.textContent?.includes('+ Navigation'));
 			expect(propertyItem).toBeDefined();
 			expect(navItem).toBeDefined();
 			(propertyItem as HTMLElement).click();

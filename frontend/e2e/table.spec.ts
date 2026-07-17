@@ -34,7 +34,7 @@ const VIEW_PATH = join(__dirname, '..', '..', 'examples', 'smart-city.view.json'
  *    derived from the nav (one `element` column per chain hop) — see
  *    NavigationBuilder.svelte's `openAsTable` and table/columns.ts's
  *    `navigationAsTableDefinition`.
- *  - ColumnManager's "+ Property column" button (data-testid="add-property-column")
+ *  - ColumnManager's "+ Property" button (data-testid="add-property-column")
  *    creates the column EMPTY (row source defaulted to `chain_index: 0`, the
  *    Start column; no name yet) and opens its per-column PropertyColumnEditor
  *    — the property name is picked/typed there via a free-text input
