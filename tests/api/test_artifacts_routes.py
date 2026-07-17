@@ -77,11 +77,27 @@ def test_create_unsupported_kind_422(client: TestClient) -> None:
     assert res.status_code == 422
 
 
-def test_create_code_snippet_rejected_until_adapter(client: TestClient) -> None:
-    # Kind is accepted by the request schema, but no payload adapter yet -> 422.
+def test_snippet_entry_points_are_server_derived(client: TestClient) -> None:
+    body = {
+        "kind": "code_snippet",
+        "name": "col1",
+        "payload": {
+            "schema_version": 1, "language": "python",
+            "code": "def value(el):\n    return len(el.name)\n",
+            "entry_points": ["lies"],  # client lie, must be overwritten
+        },
+    }
+    r = client.post(papi("/artifacts"), json=body)
+    assert r.status_code == 201, r.text
+    got = r.json()["payload"]["entry_points"]
+    assert set(got) == {"script", "value"}
+
+
+def test_create_code_snippet_invalid_payload_rejected(client: TestClient) -> None:
+    # Adapter registered: schema violations (non-python language) still 422.
     r = client.post(
         papi("/artifacts"),
-        json={"kind": "code_snippet", "name": "s1", "payload": {"schema_version": 1, "language": "python", "code": "x = 1"}},
+        json={"kind": "code_snippet", "name": "s1", "payload": {"schema_version": 1, "language": "ruby", "code": "x = 1"}},
     )
     assert r.status_code == 422, r.text
 
