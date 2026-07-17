@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import os
 import threading
 import time
 from contextlib import asynccontextmanager, suppress
@@ -35,9 +37,12 @@ from .routes import (
     validation,
     view,
 )
+from .script_runner import build_runner_from_settings, get_runner, set_runner
 from .session import get_registry, install_persistent_registry
 from .settings import Settings, get_settings
 from .storage import build_store_from_settings, set_snapshot_store
+
+logger = logging.getLogger(__name__)
 
 
 def _ensure_dev_seed(settings: Settings) -> None:
@@ -149,6 +154,53 @@ def _sweep_expired_locks(now: float) -> int:
     return released
 
 
+def _boot_script_runner(settings: Settings) -> None:
+    """Construct the process-wide `ScriptRunner` (Task 10) at lifespan
+    startup and install it via `script_runner.set_runner`.
+
+    Lazy-construction policy: a `WasmScriptRunner` boots
+    `settings.snippet_pool_size` real guest interpreter instances, so it must
+    NEVER be built at import time (`create_app()` runs at module import via
+    `app = create_app()` below) -- only here, when the ASGI app actually
+    starts serving. For `snippet_runner="wasm"` specifically, this also
+    checks the guest binary exists first: it is a large, unfetched-by-default
+    vendor artifact (`spikes/code_exec/fetch_python_wasi.sh`), so a dev/CI
+    checkout without it must boot cleanly with the runner left `None` --
+    Task 11's routes are expected to 503 on that, not crash startup.
+
+    The `snippet_runner="trusted"` RCE tripwire lives in
+    `build_runner_from_settings` itself (unit-testable there); calling it
+    here is what makes the guard fire for a real deployment's boot, mirroring
+    `_guard_prod_secret`'s refuse-to-boot posture -- unlike the binary-missing
+    case, a misconfigured `trusted` selection outside a dev checkout is a
+    hard failure, not a graceful 503.
+    """
+    if settings.snippet_runner == "wasm" and not os.path.exists(
+        settings.snippet_guest_wasm_path
+    ):
+        logger.warning(
+            "snippet guest binary not found at %r; script execution routes "
+            "will report the runner unavailable until it is fetched (see "
+            "spikes/code_exec/fetch_python_wasi.sh)",
+            settings.snippet_guest_wasm_path,
+        )
+        set_runner(None)
+        return
+    set_runner(build_runner_from_settings(settings))
+
+
+def _shutdown_script_runner() -> None:
+    """Close the process-wide runner (if one was booted) and clear the
+    singleton. `TrustedRunner` (dev-only) has no `.close()`, hence the
+    `hasattr` guard rather than assuming every `ScriptRunner` needs teardown."""
+    runner = get_runner()
+    if runner is not None:
+        close = getattr(runner, "close", None)
+        if callable(close):
+            close()
+    set_runner(None)
+
+
 def _start_lock_sweeper(interval: float) -> tuple[threading.Thread, threading.Event]:
     stop = threading.Event()
 
@@ -184,6 +236,7 @@ def create_app() -> FastAPI:
             lock_thread, lock_stop = _start_lock_sweeper(
                 float(settings.lock_sweep_seconds)
             )
+        _boot_script_runner(settings)
         try:
             yield
         finally:
@@ -195,6 +248,7 @@ def create_app() -> FastAPI:
                 lock_stop.set()
             if lock_thread is not None:
                 lock_thread.join(timeout=2.0)
+            _shutdown_script_runner()
 
     app = FastAPI(
         title="data-rover API",

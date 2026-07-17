@@ -125,7 +125,15 @@ from wasmtime import (
 
 from data_rover.core.model.model import Model
 from data_rover.core.script.facade_src import FACADE_SOURCE
-from data_rover.core.script.runner import RunLimits, RunRequest, RunResult, ScriptError
+from data_rover.core.script.runner import (
+    RunLimits,
+    RunRequest,
+    RunResult,
+    ScriptError,
+    ScriptRunner,
+)
+
+from .settings import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -952,3 +960,114 @@ class WasmScriptRunner:
                 break
             self._teardown_instance(inst)
         shutil.rmtree(self._scripts_dir, ignore_errors=True)
+
+
+# -- settings integration + process-wide singleton ---------------------------
+#
+# Everything below is Task 10 scope: turning `Settings` into a `RunLimits` /
+# `ScriptRunner`, the RCE tripwire that keeps `TrustedRunner` out of real
+# deployments, and the `get_runner`/`set_runner` seam `main.py`'s lifespan
+# wires up and Task 11's routes will depend on (via FastAPI's
+# `Depends(get_runner)`, overridable through `app.dependency_overrides`).
+
+
+def run_limits_from_settings(settings: Settings) -> RunLimits:
+    """Map the ``snippet_*`` limit fields on :class:`Settings` to a
+    :class:`~data_rover.core.script.runner.RunLimits`. One-to-one field
+    mapping; see each ``snippet_*`` field's docstring in ``settings.py`` for
+    what it mirrors."""
+    return RunLimits(
+        wall_timeout_s=settings.snippet_wall_timeout_s,
+        memory_bytes=settings.snippet_memory_bytes,
+        stdout_bytes=settings.snippet_stdout_bytes,
+        result_repr_bytes=settings.snippet_result_repr_bytes,
+        max_ops=settings.snippet_max_ops,
+        max_op_bytes=settings.snippet_max_op_bytes,
+        page_limit=settings.snippet_page_limit,
+    )
+
+
+def build_runner_from_settings(settings: Settings) -> ScriptRunner:
+    """Construct the :class:`ScriptRunner` selected by ``settings.
+    snippet_runner``.
+
+    ``"wasm"`` builds a real :class:`WasmScriptRunner` (this boots
+    ``settings.snippet_pool_size`` guest interpreter instances -- callers
+    that want to avoid that cost, e.g. when the guest binary is not fetched,
+    must check for it themselves before calling this; see ``main.py``'s
+    lifespan wiring).
+
+    ``"trusted"`` is gated by an **RCE tripwire**: ``TrustedRunner`` (`tests/
+    script/trusted_runner.py`) `exec`s snippet code in-process with no
+    sandbox whatsoever (see that module's docstring). Selecting it while
+    ``settings.dev_seed`` is false raises *before* the import is even
+    attempted, mirroring ``main._guard_prod_secret``'s refuse-to-boot
+    posture: a misconfigured ``DATA_ROVER_SNIPPET_RUNNER=trusted`` in a real
+    deployment must fail loud at startup, not hand every snippet author the
+    full permissions of the API process. When ``dev_seed`` is true the import
+    is lazy and guarded: ``tests/`` is not guaranteed to be on the path of
+    every dev checkout, so a missing ``tests.script.trusted_runner`` is
+    reported as a clear configuration error rather than a bare
+    ``ModuleNotFoundError``.
+    """
+    if settings.snippet_runner == "trusted":
+        if not settings.dev_seed:
+            raise RuntimeError(
+                "DATA_ROVER_SNIPPET_RUNNER=trusted requires DATA_ROVER_DEV_SEED=true. "
+                "TrustedRunner execs snippet code in-process with NO sandbox "
+                "(no wasmtime, no subprocess, no resource ceiling) -- refusing "
+                "to boot it outside a dev checkout, which would grant every "
+                "snippet author the full permissions of the API process."
+            )
+        try:
+            # mypy (run with cwd=src/data_rover/api, see pixi.toml's
+            # lint-backend task) has no stubs for the tests/ tree -- this
+            # import is dev-checkout-only and guarded at runtime by the
+            # except clause below, not something mypy can type-check anyway.
+            from tests.script.trusted_runner import TrustedRunner  # type: ignore[import-not-found]
+        except ImportError as exc:
+            raise RuntimeError(
+                "DATA_ROVER_SNIPPET_RUNNER=trusted but tests.script.trusted_runner "
+                "could not be imported -- the trusted runner is only available in "
+                "dev checkouts that include the tests/ tree on the import path."
+            ) from exc
+        return TrustedRunner()
+
+    return WasmScriptRunner(
+        settings.snippet_guest_wasm_path,
+        settings.snippet_guest_lib_path,
+        pool_size=settings.snippet_pool_size,
+    )
+
+
+#: Process-wide runner singleton. `None` until `main.py`'s lifespan startup
+#: constructs one (or leaves it unset if the wasm guest binary is absent --
+#: see the module docstring in `main.py`'s lifespan wiring). Task 11's routes
+#: read this through `get_runner` as a FastAPI dependency and must treat
+#: `None` as "runner unavailable" (503), not crash.
+_runner: ScriptRunner | None = None
+
+
+def get_runner() -> ScriptRunner | None:
+    """Process-wide `ScriptRunner` singleton accessor. A plain zero-arg
+    callable on purpose: Task 11 wires it in as a FastAPI dependency
+    (`Depends(get_runner)`) and tests override it via
+    `app.dependency_overrides[get_runner] = ...`. Returns `None` if no
+    runner has been constructed yet (e.g. the wasm guest binary is not
+    fetched) -- callers must not assume a non-`None` result."""
+    return _runner
+
+
+def set_runner(runner: ScriptRunner | None) -> None:
+    """Install (or clear, with `None`) the process-wide runner singleton.
+    Called by `main.py`'s lifespan startup/shutdown and by tests that need a
+    stand-in runner via `app.dependency_overrides`/direct monkeypatching."""
+    global _runner
+    _runner = runner
+
+
+def reset_runner() -> None:
+    """Test seam: clear the singleton without constructing a replacement.
+    Equivalent to `set_runner(None)`, named for symmetry with other
+    `reset_*` test seams in this codebase (e.g. `session.reset_session`)."""
+    set_runner(None)
