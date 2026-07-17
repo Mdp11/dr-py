@@ -251,14 +251,25 @@ export {
 	closeSnippetDraft,
 	ensureSnippetDraft,
 	getSnippetDraft,
+	getSnippetLint,
+	getSnippetRun,
 	getSnippetSaveConflict,
 	hasDirtySnippetDrafts,
+	LINT_DEBOUNCE_MS,
+	markRunStaged,
 	reloadSnippetDraft,
 	resetSnippetEditors,
+	runSnippetTab,
 	saveSnippetDraft,
+	setSnippetElementContext,
+	setSnippetEntry,
 	setSnippetName,
+	stopSnippetTab,
 	updateSnippetCode,
-	type SnippetDraft
+	type SnippetDraft,
+	type SnippetLintState,
+	type SnippetRunPhase,
+	type SnippetRunState
 } from './snippet-editor.svelte';
 export {
 	closeTableDraft,

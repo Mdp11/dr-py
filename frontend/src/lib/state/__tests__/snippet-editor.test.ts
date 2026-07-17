@@ -1,14 +1,23 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as artifactsApi from '$lib/api/artifacts';
-import { ConflictError } from '$lib/api/errors';
+import * as snippetsApi from '$lib/api/snippets';
+import { ApiError, ConflictError } from '$lib/api/errors';
 import {
 	closeSnippetDraft,
 	ensureSnippetDraft,
 	getSnippetDraft,
+	getSnippetLint,
+	getSnippetRun,
 	getSnippetSaveConflict,
+	LINT_DEBOUNCE_MS,
+	markRunStaged,
 	resetSnippetEditors,
+	runSnippetTab,
 	saveSnippetDraft,
+	setSnippetElementContext,
+	setSnippetEntry,
 	setSnippetName,
+	stopSnippetTab,
 	updateSnippetCode
 } from '../snippet-editor.svelte';
 import { getDynamicTabs, openArtifactTab, resetWorkspaceTabs } from '../workspace.svelte';
@@ -96,5 +105,94 @@ describe('snippet drafts', () => {
 		await ensureSnippetDraft(tabId);
 		closeSnippetDraft(tabId);
 		expect(getSnippetDraft(tabId)).toBeUndefined();
+	});
+});
+
+const RUN_OUT = {
+	run_id: 'r-1',
+	stdout: 'hello\n',
+	result_repr: null,
+	ops: [],
+	error: null,
+	duration_ms: 5,
+	model_rev: 0,
+	stale: false,
+	truncated: false
+};
+
+describe('snippet lint + run', () => {
+	it('debounces lint and applies the latest response', async () => {
+		vi.useFakeTimers();
+		const lint = vi.spyOn(snippetsApi, 'lintSnippet').mockResolvedValue({
+			diagnostics: [{ line: 1, col: 0, severity: 'warning', message: 'w' }],
+			entry_points: ['script']
+		});
+		const tabId = openArtifactTab('snippet', { artifactId: null, title: 'New snippet' });
+		await ensureSnippetDraft(tabId);
+		lint.mockClear(); // drop the open-time immediate lint
+		updateSnippetCode(tabId, 'import os\n');
+		updateSnippetCode(tabId, 'import os  #\n');
+		await vi.advanceTimersByTimeAsync(LINT_DEBOUNCE_MS + 10);
+		expect(lint).toHaveBeenCalledTimes(1);
+		expect(lint).toHaveBeenCalledWith('import os  #\n');
+		expect(getSnippetLint(tabId)?.diagnostics).toHaveLength(1);
+		vi.useRealTimers();
+	});
+
+	it('runs and installs the result', async () => {
+		vi.spyOn(snippetsApi, 'runSnippet').mockResolvedValue(RUN_OUT);
+		const tabId = openArtifactTab('snippet', { artifactId: null, title: 'New snippet' });
+		await ensureSnippetDraft(tabId);
+		updateSnippetCode(tabId, 'print("hello")\n');
+		await runSnippetTab(tabId);
+		const rs = getSnippetRun(tabId);
+		expect(rs.phase).toBe('idle');
+		expect(rs.result?.stdout).toBe('hello\n');
+	});
+
+	it('sends entry + element_id for a value run', async () => {
+		const run = vi.spyOn(snippetsApi, 'runSnippet').mockResolvedValue(RUN_OUT);
+		const tabId = openArtifactTab('snippet', { artifactId: null, title: 'New snippet' });
+		await ensureSnippetDraft(tabId);
+		setSnippetEntry(tabId, 'value');
+		setSnippetElementContext(tabId, 'e1', 'Building e1');
+		await runSnippetTab(tabId);
+		expect(run.mock.calls[0][0]).toMatchObject({ entry: 'value', element_id: 'e1' });
+	});
+
+	it('stop discards the eventual response', async () => {
+		let resolveRun!: (v: typeof RUN_OUT) => void;
+		vi.spyOn(snippetsApi, 'runSnippet').mockReturnValue(new Promise((r) => (resolveRun = r)));
+		vi.spyOn(snippetsApi, 'cancelSnippet').mockResolvedValue(undefined);
+		const tabId = openArtifactTab('snippet', { artifactId: null, title: 'New snippet' });
+		await ensureSnippetDraft(tabId);
+		const running = runSnippetTab(tabId);
+		expect(getSnippetRun(tabId).phase).toBe('running');
+		await stopSnippetTab(tabId);
+		expect(getSnippetRun(tabId).phase).toBe('idle');
+		expect(getSnippetRun(tabId).notice).toContain('wall timeout');
+		resolveRun(RUN_OUT);
+		await running;
+		expect(getSnippetRun(tabId).result).toBeNull(); // discarded
+	});
+
+	it('maps 429 and 503 to notices', async () => {
+		const tabId = openArtifactTab('snippet', { artifactId: null, title: 'New snippet' });
+		await ensureSnippetDraft(tabId);
+		vi.spyOn(snippetsApi, 'runSnippet').mockRejectedValue(new ApiError(429, null, 'busy'));
+		await runSnippetTab(tabId);
+		expect(getSnippetRun(tabId).notice).toContain('already in progress');
+		vi.spyOn(snippetsApi, 'runSnippet').mockRejectedValue(new ApiError(503, null, 'no runner'));
+		await runSnippetTab(tabId);
+		expect(getSnippetRun(tabId).notice).toContain('unavailable');
+	});
+
+	it('markRunStaged pins the staged run id', async () => {
+		vi.spyOn(snippetsApi, 'runSnippet').mockResolvedValue(RUN_OUT);
+		const tabId = openArtifactTab('snippet', { artifactId: null, title: 'New snippet' });
+		await ensureSnippetDraft(tabId);
+		await runSnippetTab(tabId);
+		markRunStaged(tabId);
+		expect(getSnippetRun(tabId).stagedRunId).toBe('r-1');
 	});
 });
