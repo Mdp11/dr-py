@@ -663,7 +663,7 @@ class ArtifactListOut(BaseModel):
 
 
 class ArtifactCreateIn(BaseModel):
-    kind: Literal["navigation", "table", "diagram", "diagram_kind"]
+    kind: Literal["navigation", "table", "diagram", "diagram_kind", "code_snippet"]
     name: str = Field(min_length=1)
     payload: dict[str, Any] = Field(default_factory=dict)
 

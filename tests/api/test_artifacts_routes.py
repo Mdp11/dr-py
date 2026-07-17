@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from data_rover.api.main import create_app
 from data_rover.api.session import get_session
 
-from .conftest import AUTH_HEADERS, seed_default_project
+from .conftest import AUTH_HEADERS, papi, seed_default_project
 
 API = "/api/v1/projects/default"
 
@@ -75,6 +75,15 @@ def test_create_unsupported_kind_422(client: TestClient) -> None:
         f"{API}/artifacts", json={"kind": "table", "name": "t", "payload": {}}
     )
     assert res.status_code == 422
+
+
+def test_create_code_snippet_rejected_until_adapter(client: TestClient) -> None:
+    # Kind is accepted by the request schema, but no payload adapter yet -> 422.
+    r = client.post(
+        papi("/artifacts"),
+        json={"kind": "code_snippet", "name": "s1", "payload": {"schema_version": 1, "language": "python", "code": "x = 1"}},
+    )
+    assert r.status_code == 422, r.text
 
 
 def test_update_rev_conflict_and_success(client: TestClient) -> None:
