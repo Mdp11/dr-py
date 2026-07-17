@@ -25,3 +25,11 @@ docs/
 # generated benchmark fixtures
 benchmarks/
 dev.db
+
+spikes/code_exec/vendor/
+
+# spike probe runtime artifacts (guest stderr logs, captured stdout, fifos, compiled modules)
+spikes/code_exec/*.log
+spikes/code_exec/s*_out*.txt
+spikes/code_exec/*.fifo
+spikes/code_exec/*.cwasm
