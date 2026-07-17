@@ -1,0 +1,140 @@
+from data_rover.core.script.runner import RunLimits, RunRequest
+from tests.script.trusted_runner import TrustedRunner
+from tests.script.conftest import tiny_model
+
+
+def test_standalone_prints_and_reads():
+    r = TrustedRunner()
+    res = r.run(tiny_model(),
+                RunRequest(code="els = list(dr.elements())\nprint(len(els))\nresult = len(els)"),
+                RunLimits(), record_ops=False, rev=0)
+    assert res.error is None
+    assert res.stdout.strip() == "3"
+    assert res.result_repr == "3"
+
+
+def test_value_entry_against_element():
+    r = TrustedRunner()
+    res = r.run(tiny_model(),
+                RunRequest(code="def value(el):\n    return len(el.name)", entry="value", element_id="b1"),
+                RunLimits(), record_ops=False, rev=0)
+    assert res.error is None and res.result_repr is not None
+
+
+def test_write_recorded_as_op_not_applied():
+    m = tiny_model()
+    r = TrustedRunner()
+    res = r.run(m, RunRequest(code="dr.element('b1').delete()"), RunLimits(), record_ops=True, rev=0)
+    assert res.error is None
+    assert res.ops == [{"kind": "delete_element", "id": "b1"}]
+    assert "b1" in m.elements  # NOT applied
+
+
+def test_write_blocked_in_readonly_context():
+    r = TrustedRunner()
+    res = r.run(tiny_model(), RunRequest(code="dr.element('b1').delete()"), RunLimits(), record_ops=False, rev=0)
+    assert res.error is not None and res.error.kind == "runtime"  # dr.ReadOnlyError surfaced
+
+
+def test_stdout_truncation():
+    r = TrustedRunner()
+    res = r.run(tiny_model(), RunRequest(code="print('x' * 10)"), RunLimits(stdout_bytes=4), record_ops=False, rev=0)
+    assert res.truncated and len(res.stdout) <= 8  # cap + ellipsis slack
+
+
+# --- additional coverage beyond the brief's 5 tests -------------------------
+
+
+def test_element_attrs_indexing_and_props():
+    r = TrustedRunner()
+    code = (
+        "el = dr.element('b1')\n"
+        "result = (el.id, el.type, el.name, el['name'], el.get('name'), "
+        "el.get('missing', 'dflt'), el.props())\n"
+    )
+    res = r.run(tiny_model(), RunRequest(code=code), RunLimits(), record_ops=False, rev=0)
+    assert res.error is None
+    assert res.result_repr == (
+        "('b1', 'Building', 'Building One', 'Building One', 'Building One', "
+        "'dflt', {'name': 'Building One'})"
+    )
+
+
+def test_elements_type_filter_and_paging():
+    r = TrustedRunner()
+    code = "result = sorted(e.id for e in dr.elements(type='Building'))"
+    res = r.run(tiny_model(), RunRequest(code=code), RunLimits(), record_ops=False, rev=0)
+    assert res.error is None
+    assert res.result_repr == "['b1', 'b2', 'b3']"
+
+
+def test_out_in_parent_children():
+    r = TrustedRunner()
+    code = (
+        "b1 = dr.element('b1')\n"
+        "b2 = dr.element('b2')\n"
+        "b3 = dr.element('b3')\n"
+        "result = (\n"
+        "    [rel['type'] for rel in b1.out()],\n"
+        "    [rel['type'] for rel in b2.in_()],\n"
+        "    b2.parent().id,\n"
+        "    b3.parent(),\n"
+        "    [c.id for c in b1.children()],\n"
+        "    b3.children(),\n"
+        ")\n"
+    )
+    res = r.run(tiny_model(), RunRequest(code=code), RunLimits(), record_ops=False, rev=0)
+    assert res.error is None
+    assert res.result_repr == "(['Owns'], ['Owns'], 'b1', None, ['b2'], [])"
+
+
+def test_types_and_type_info():
+    r = TrustedRunner()
+    code = "result = (dr.types(), dr.type('Building')['type'])"
+    res = r.run(tiny_model(), RunRequest(code=code), RunLimits(), record_ops=False, rev=0)
+    assert res.error is None
+    assert res.result_repr == "(['Building'], 'Building')"
+
+
+def test_create_connect_disconnect_set_op_shapes():
+    m = tiny_model()
+    r = TrustedRunner()
+    code = (
+        "eid = dr.create('Building', properties={'name': 'New'})\n"
+        "rid = dr.connect('Owns', 'b1', 'b3')\n"
+        "dr.disconnect('some-rel-id')\n"
+        "dr.element('b2').set('name', 'Renamed')\n"
+        "result = (eid, rid)\n"
+    )
+    res = r.run(m, RunRequest(code=code), RunLimits(), record_ops=True, rev=0)
+    assert res.error is None
+    assert res.ops == [
+        {
+            "kind": "create_element",
+            "temp_id": "tmp_1",
+            "type_name": "Building",
+            "properties": {"name": "New"},
+        },
+        {
+            "kind": "create_relationship",
+            "temp_id": "tmp_2",
+            "type_name": "Owns",
+            "source_id": "b1",
+            "target_id": "b3",
+            "properties": {},
+        },
+        {"kind": "delete_relationship", "id": "some-rel-id"},
+        {
+            "kind": "update_element",
+            "id": "b2",
+            "properties_patch": {"name": "Renamed"},
+        },
+    ]
+    assert res.result_repr == "('tmp_1', 'tmp_2')"
+
+
+def test_not_found_error_on_missing_element():
+    r = TrustedRunner()
+    res = r.run(tiny_model(), RunRequest(code="dr.element('nope')"), RunLimits(), record_ops=False, rev=0)
+    assert res.error is not None and res.error.kind == "runtime"
+    assert "NotFoundError" in (res.error.traceback or res.error.message)
