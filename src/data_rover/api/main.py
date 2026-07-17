@@ -236,8 +236,15 @@ def create_app() -> FastAPI:
             lock_thread, lock_stop = _start_lock_sweeper(
                 float(settings.lock_sweep_seconds)
             )
-        _boot_script_runner(settings)
         try:
+            # Inside the try (not before it): if this raises -- the RCE
+            # tripwire firing on a misconfigured deployment, or
+            # WasmScriptRunner.__init__ failing against a present-but-broken
+            # binary -- the already-started sweeper threads above still get
+            # stopped/joined by the finally below. The exception still
+            # propagates (boot must still fail loudly); only the cleanup is
+            # unconditional.
+            _boot_script_runner(settings)
             yield
         finally:
             if idle_stop is not None:

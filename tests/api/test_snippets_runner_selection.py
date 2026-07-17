@@ -17,6 +17,8 @@ guest binary) for the real `WasmScriptRunner` end-to-end coverage.
 
 from __future__ import annotations
 
+import threading
+import time
 from collections.abc import Iterator
 
 import pytest
@@ -157,3 +159,48 @@ def test_create_app_lifespan_survives_missing_guest_binary(monkeypatch: pytest.M
 
     # Lifespan shutdown ran cleanly; the singleton was never populated.
     assert get_runner() is None
+
+
+_SWEEPER_THREAD_NAMES = {"idle-sweeper", "lock-sweeper"}
+
+
+def test_boot_script_runner_failure_does_not_leak_sweeper_threads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reviewer-found regression: the RCE tripwire firing (or any other
+    `_boot_script_runner` failure, e.g. `WasmScriptRunner.__init__` against a
+    present-but-broken binary) must not strand the idle-sweeper/lock-sweeper
+    threads that lifespan startup already spawned earlier in the SAME call.
+    `_boot_script_runner` must run INSIDE the startup `try/finally`, not
+    before it, so the `finally` cleanup always stops+joins them even when
+    boot itself raises (the raise must still propagate -- boot failure stays
+    loud)."""
+    monkeypatch.setenv("DATA_ROVER_SNIPPET_RUNNER", "trusted")
+    monkeypatch.setenv("DATA_ROVER_DEV_SEED", "false")
+    # Nonzero so lifespan actually starts both sweeper threads before
+    # `_boot_script_runner` gets its turn to raise.
+    monkeypatch.setenv("DATA_ROVER_IDLE_EVICT_SECONDS", "5")
+    monkeypatch.setenv("DATA_ROVER_LOCK_SWEEP_SECONDS", "5")
+
+    before = {t.name for t in threading.enumerate()}
+
+    app = create_app()
+    with pytest.raises(RuntimeError, match="DEV_SEED"):
+        with TestClient(app):
+            pytest.fail("lifespan startup should have raised in __enter__")
+
+    # The finally block's `.join(timeout=2.0)` calls already ran
+    # synchronously (on the portal thread) before the exception left
+    # `TestClient.__enter__`, so this should resolve immediately; poll
+    # briefly anyway to be robust against scheduling jitter rather than
+    # asserting on a single immediate snapshot.
+    deadline = time.monotonic() + 2.0
+    leaked: set[str] = set()
+    while time.monotonic() < deadline:
+        leaked = {t.name for t in threading.enumerate()} - before
+        leaked &= _SWEEPER_THREAD_NAMES
+        if not leaked:
+            break
+        time.sleep(0.05)
+
+    assert not leaked, f"leaked sweeper thread(s) after boot failure: {leaked}"
