@@ -6,18 +6,20 @@ import {
 	emit,
 	ensureDraft,
 	ensureEmbeddedDraft,
+	ensureSnippetDraft,
 	ensureTableDraft,
 	hasDirtyNavDrafts,
 	hasDirtyTableDrafts,
 	resetModelStore,
 	resetNavigationEditors,
+	resetSnippetEditors,
 	resetTableEditors,
 	seedElements,
 	updateDefinition,
 	updateTableDefinition
 } from '../index';
 import { hasUnsavedWork, isArtifactDirty, isTabDirty } from '../unsaved';
-import { resetWorkspaceTabs } from '../workspace.svelte';
+import { openArtifactTab, resetWorkspaceTabs } from '../workspace.svelte';
 import { resetArtifacts } from '../artifacts.svelte';
 
 const EMPTY_PAGE = {
@@ -33,12 +35,14 @@ beforeEach(() => {
 	resetModelStore();
 	resetTableEditors();
 	resetNavigationEditors();
+	resetSnippetEditors();
 	resetWorkspaceTabs();
 	resetArtifacts();
 	vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
 });
 afterEach(() => {
 	resetNavigationEditors();
+	resetSnippetEditors();
 	vi.restoreAllMocks();
 });
 
@@ -134,5 +138,13 @@ describe('isTabDirty / isArtifactDirty', () => {
 		expect(isArtifactDirty('table', 'a1')).toBe(false); // open but pristine
 		updateTableDefinition('tbl:a1', template.definition);
 		expect(isArtifactDirty('table', 'a1')).toBe(true); // edited
+	});
+
+	it('snippet drafts drive isTabDirty/isArtifactDirty/hasUnsavedWork', async () => {
+		const tabId = openArtifactTab('snippet', { artifactId: null, title: 'New snippet' });
+		await ensureSnippetDraft(tabId);
+		expect(isTabDirty('snippet', tabId)).toBe(true); // never-saved draft counts
+		expect(hasUnsavedWork()).toBe(true);
+		expect(isArtifactDirty('code_snippet', 'nope')).toBe(false);
 	});
 });

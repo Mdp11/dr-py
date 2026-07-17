@@ -205,6 +205,7 @@ export { isProjectOpening, setProjectOpening } from './project-open.svelte';
 export type { ViewChange } from './view-diff';
 export {
 	artifactHeaderById,
+	createCodeSnippetArtifact,
 	createNavigationArtifact,
 	createTableArtifact,
 	getArtifactHeaders,
@@ -212,7 +213,8 @@ export {
 	loadArtifacts,
 	removeArtifact,
 	renameArtifact,
-	resetArtifacts
+	resetArtifacts,
+	type CodeSnippetPayload
 } from './artifacts.svelte';
 export {
 	applyStructuralEdit,
@@ -245,6 +247,19 @@ export {
 	type NavDraft,
 	type NavPreview
 } from './navigation-editor.svelte';
+export {
+	closeSnippetDraft,
+	ensureSnippetDraft,
+	getSnippetDraft,
+	getSnippetSaveConflict,
+	hasDirtySnippetDrafts,
+	reloadSnippetDraft,
+	resetSnippetEditors,
+	saveSnippetDraft,
+	setSnippetName,
+	updateSnippetCode,
+	type SnippetDraft
+} from './snippet-editor.svelte';
 export {
 	closeTableDraft,
 	downloadTable,

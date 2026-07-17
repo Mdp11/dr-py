@@ -12,12 +12,12 @@ export const BUILTIN_TABS = ['detail', 'graph', 'issues'] as const;
 
 export interface DynamicTab {
 	id: string;
-	kind: 'navigation' | 'table';
+	kind: 'navigation' | 'table' | 'snippet';
 	artifactId: string | null;
 	title: string;
 }
 
-const PREFIX = { navigation: 'nav', table: 'tbl' } as const;
+const PREFIX = { navigation: 'nav', table: 'tbl', snippet: 'snip' } as const;
 
 let _activeTab: string = $state('detail');
 let _tabs = $state<DynamicTab[]>([]);
@@ -36,7 +36,7 @@ export function getDynamicTabs(): DynamicTab[] {
 }
 
 export function openArtifactTab(
-	kind: 'navigation' | 'table',
+	kind: 'navigation' | 'table' | 'snippet',
 	opts: { artifactId: string | null; title: string }
 ): string {
 	const p = PREFIX[kind];
