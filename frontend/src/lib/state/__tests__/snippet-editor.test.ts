@@ -195,4 +195,49 @@ describe('snippet lint + run', () => {
 		markRunStaged(tabId);
 		expect(getSnippetRun(tabId).stagedRunId).toBe('r-1');
 	});
+
+	it('rekey on first save normalizes an in-flight run to idle with a discard notice', async () => {
+		vi.spyOn(artifactsApi, 'createArtifact').mockResolvedValue(SNIPPET_ARTIFACT);
+		let resolveRun!: (v: typeof RUN_OUT) => void;
+		vi.spyOn(snippetsApi, 'runSnippet').mockReturnValue(new Promise((r) => (resolveRun = r)));
+		const tabId = openArtifactTab('snippet', { artifactId: null, title: 'New snippet' });
+		await ensureSnippetDraft(tabId);
+		const running = runSnippetTab(tabId);
+		expect(getSnippetRun(tabId).phase).toBe('running');
+		await saveSnippetDraft(tabId); // first save rekeys tabId -> snip:s1 mid-run
+		const newTab = `snip:${SNIPPET_ARTIFACT.id}`;
+		expect(getSnippetRun(newTab)).toMatchObject({
+			phase: 'idle',
+			runId: null,
+			notice: expect.stringContaining('discarded')
+		});
+		resolveRun(RUN_OUT); // the orphaned response must never land anywhere
+		await running;
+		expect(getSnippetRun(newTab).result).toBeNull();
+		expect(getSnippetRun(tabId).result).toBeNull();
+	});
+
+	it('stop drops its post-cancel write if the draft closed mid-cancel', async () => {
+		vi.spyOn(snippetsApi, 'runSnippet').mockReturnValue(new Promise(() => {})); // never resolves
+		let resolveCancel!: () => void;
+		vi.spyOn(snippetsApi, 'cancelSnippet').mockReturnValue(new Promise((r) => (resolveCancel = r)));
+		const tabId = openArtifactTab('snippet', { artifactId: null, title: 'New snippet' });
+		await ensureSnippetDraft(tabId);
+		void runSnippetTab(tabId);
+		expect(getSnippetRun(tabId).phase).toBe('running');
+		const stopping = stopSnippetTab(tabId);
+		closeSnippetDraft(tabId); // draft (and its _runs entry) gone before cancel settles
+		resolveCancel();
+		await stopping;
+		expect(getSnippetRun(tabId)).toEqual({
+			phase: 'idle',
+			runId: null,
+			result: null,
+			stagedRunId: null,
+			notice: null,
+			entry: 'script',
+			elementId: null,
+			elementLabel: null
+		});
+	});
 });

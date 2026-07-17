@@ -172,6 +172,12 @@ export async function stopSnippetTab(tabId: string): Promise<void> {
 	} catch {
 		// 404 = run already finished or not ours anymore — nothing to do.
 	}
+	// Mirrors runSnippetTab's own re-check: the draft (and its `_runs` entry)
+	// may have been closed while `cancelSnippet` was in flight. Writing
+	// unconditionally here would resurrect a `_runs` entry for a draft-less
+	// tab id, which then surfaces a stale "Run stopped" notice if the same
+	// artifact id is reopened later (tab ids are deterministic `snip:<id>`).
+	if (!_drafts.has(tabId)) return;
 	setRun(tabId, {
 		phase: 'idle',
 		runId: null,
@@ -266,7 +272,22 @@ function rekeySnippetTab(oldTab: string, newTab: string): void {
 	const run = _runs.get(oldTab);
 	if (run !== undefined) {
 		_runs.delete(oldTab);
-		_runs.set(newTab, run);
+		// A running/stopping run cannot follow a rekey: runSnippetTab/
+		// stopSnippetTab's in-flight closure is bound to oldTab and its
+		// response is about to be orphaned by the generation bump below, so no
+		// code path will ever flip the moved entry back to idle. Normalize it
+		// here instead of carrying a permanently-stuck phase to the new tab.
+		_runs.set(
+			newTab,
+			run.phase === 'idle'
+				? run
+				: {
+						...run,
+						phase: 'idle',
+						runId: null,
+						notice: 'Run discarded — the snippet was saved while it was running. Re-run.'
+					}
+		);
 	}
 	const timer = _lintTimers.get(oldTab);
 	if (timer !== undefined) {
