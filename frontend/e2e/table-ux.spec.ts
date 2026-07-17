@@ -45,7 +45,10 @@ test('property-step values, unsaved asterisk, auto-fit convergence, drag ghost',
 	await propStep.getByText('pick a property…', { exact: true }).click();
 	await page.getByPlaceholder('Filter properties…').fill('name');
 	// PropertyPicker rows read "<name> <datatype>" (e.g. "name string").
-	await page.getByRole('button', { name: /^name\s/ }).first().click();
+	await page
+		.getByRole('button', { name: /^name\s/ })
+		.first()
+		.click();
 
 	// The dock auto-runs: chains must be NON-zero and value text must render.
 	await expect(dock).toContainText(/✓ [1-9]\d* chains/, { timeout: 15_000 });
