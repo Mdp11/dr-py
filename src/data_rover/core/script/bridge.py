@@ -150,9 +150,20 @@ class BridgeDispatcher:
 
     def dispatch(self, req: dict[str, Any]) -> dict[str, Any]:
         """Handle one request dict, always returning a response dict that
-        echoes `req["id"]` — never raises. See the module docstring for the
-        polymorphic `"op"` field (`str` -> read op name, `dict` -> a
-        `record_op` payload)."""
+        echoes `req.get("id")` — NEVER raises. See the module docstring for
+        the polymorphic `"op"` field (`str` -> read op name, `dict` -> a
+        `record_op` payload).
+
+        The guest is untrusted: a malformed request (wrong param type, e.g.
+        `{"op": "element", "element_id": ["x"]}` making `element_id`
+        unhashable, or `{"offset": [1, 2]}` making `int(...)` raise) must
+        turn into an error response, not an exception that escapes and kills
+        the host's request/response pump. `Exception` is caught deliberately
+        broadly here — narrower than that reopens exactly this hole for
+        whatever stdlib `TypeError`/`AttributeError`/... a new handler
+        happens to trigger on bad input the caps and the known error types
+        below don't anticipate.
+        """
         req_id = req.get("id")
         op = req.get("op")
         try:
@@ -165,7 +176,7 @@ class BridgeDispatcher:
                 result = handler(req)
             else:
                 raise ValueError(f"'op' must be a str or dict, got {op!r}")
-        except (BridgeLimitError, ReadOnlyError, KeyError, ValueError) as exc:
+        except Exception as exc:  # noqa: BLE001 - see docstring: must never escape
             return {"id": req_id, "error": f"{type(exc).__name__}: {exc}"}
         response = dict(result)
         response["id"] = req_id

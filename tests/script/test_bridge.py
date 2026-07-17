@@ -1,3 +1,5 @@
+import json
+
 from data_rover.core.script.bridge import BridgeDispatcher, BridgeLimitError
 
 from tests.script.conftest import tiny_model
@@ -140,3 +142,59 @@ def test_unknown_op_returns_error():
 
 def test_bridge_limit_error_is_an_exception():
     assert issubclass(BridgeLimitError, Exception)
+
+
+# --- malformed params must not raise past dispatch() (untrusted guest) -----
+
+
+def test_element_with_unhashable_id_returns_error_not_raise():
+    disp = BridgeDispatcher(_model(), record_ops=False)
+    resp = disp.dispatch({"id": 1, "op": "element", "element_id": ["x"]})
+    assert resp["id"] == 1
+    assert "error" in resp
+
+
+def test_elements_page_with_non_int_offset_returns_error_not_raise():
+    disp = BridgeDispatcher(_model(), record_ops=False)
+    resp = disp.dispatch(
+        {"id": 1, "op": "elements_page", "offset": [1, 2], "limit": 5}
+    )
+    assert resp["id"] == 1
+    assert "error" in resp
+
+
+def test_type_info_with_unhashable_type_returns_error_not_raise():
+    disp = BridgeDispatcher(_model(), record_ops=False)
+    resp = disp.dispatch({"id": 1, "op": "type_info", "type": ["x"]})
+    assert resp["id"] == 1
+    assert "error" in resp
+
+
+def test_dispatch_with_missing_id_still_returns_a_response():
+    disp = BridgeDispatcher(_model(), record_ops=False)
+    resp = disp.dispatch({"op": "not_a_real_op"})
+    assert resp["id"] is None
+    assert "error" in resp
+
+
+# --- max_op_bytes cap (distinct code path from the max_ops count cap) ------
+
+
+def test_record_op_byte_cap_enforced():
+    small_op = {"kind": "delete_element", "id": "b1"}
+    # first op's serialized size, so the SECOND identical op is guaranteed to
+    # push cumulative usage over the cap (max_op_bytes counts cumulatively,
+    # not per-op).
+    cap = len(json.dumps(small_op))
+    disp = BridgeDispatcher(_model(), record_ops=True, max_op_bytes=cap)
+
+    ok = disp.dispatch({"id": 1, "op": "record_op", "op": small_op})
+    assert "error" not in ok
+    assert disp.ops == [small_op]
+
+    resp = disp.dispatch(
+        {"id": 2, "op": "record_op", "op": {"kind": "delete_element", "id": "b2"}}
+    )
+    assert "error" in resp and "cap" in resp["error"].lower()
+    # the rejected op must not have been appended
+    assert disp.ops == [small_op]
