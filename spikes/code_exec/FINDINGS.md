@@ -9,7 +9,7 @@
 | 5 | Determinism stubs | fixed clock/random/hashseed; 2 runs identical | PASS — `timeout 60 python spikes/code_exec/s06_determinism.py` → EXIT=0. `wasi_snapshot_preview1.clock_time_get`/`random_get` shadowed via `linker.allow_shadowing = True` (set **before** `define_wasi()`) + `linker.define_func(...)` registered **after** `define_wasi()` — shadow-after-define is the order that takes effect (matches the brief's prediction, no swap needed). `PYTHONHASHSEED=0` forced via env. Both runs of `import time, random; print(time.time(), random.random(), hash('spike'))` printed byte-identical `1750000000.0 0.10486408342261755 -579511815`; `guest_stderr.log` empty both runs | ✅ |
 | 6 | Warm-pool console latency | ≤ 300 ms end-to-end | PASS — `timeout 90 python spikes/code_exec/s07_pool.py` → EXIT=0. Module deserialize from `python.cwasm` disk cache: 35-37ms vs cold compile ~0.87-0.98s (~25x faster, two runs). Over 10 boot/handoff cycles on the FIFO in-process transport (reusing s02's mechanics + `guest_harness.py`'s ping/echo/quit ops): boot-to-ready p50=149-157ms max=154-171ms (off-request-path pool-refill cost, fine at hundreds of ms); **warm handoff p50=0.49-0.56ms max=0.79-0.90ms** — ~600x under the 300ms gate. `guest_stderr.log` empty both runs | ✅ |
 | 7 | 50k-element batched benchmark | ≤ 30 s total | PASS — `timeout 120 python spikes/code_exec/s08_bench50k.py` → EXIT=0 (two runs). Batched (BATCH=500, the spec's default): **0.2s** for all 50k elements (100 round-trips of 500 elements each) — ~150x under the 30s gate, no need to bump BATCH. Unbatched sample (500 single-element round-trips, extrapolated to 50k): **17s** — ~85x slower than batched, but still nominally under 30s on its own; batching remains load-bearing because it removes per-call FIFO/JSON-parse/dispatch overhead that would otherwise eat most of the 30s budget and leave no room for actual `value()` computation cost at realistic column complexity. `guest_stderr.log` empty both runs | ✅ |
-| 8 | Packaging reproducible | hash-pinned fetch, re-runnable | fetch script hash-pinned + re-runnable; CI wiring deferred to M1 | |
+| 8 | Packaging reproducible | hash-pinned fetch, re-runnable | fetch script hash-pinned + re-runnable; CI wiring deferred to M1 | ✅ |
 
 Environment: wasmtime-py 46.0.1, CPython-WASI v3.14.6 (`brettcannon/cpython-wasi-build`), host Python 3.14.5, linux-64.
 
@@ -96,6 +96,73 @@ Checked against `help(wasmtime.Store)`, `help(wasmtime.WasiConfig)`, `help(wasmt
 - **Unbatched sample:** 500 single-element `batch` round-trips, extrapolated linearly to 50k elements: **~17s**. ~85x slower than the batched run for the same total element count, even though 17s alone would still nominally clear the 30s gate in isolation — the point of this sample is to document per-call overhead (FIFO round-trip + JSON encode/decode + dispatch), not to pass/fail a gate. At any nontrivial per-element compute cost (a real `value()` body, not just `len()`), or at higher element counts, the unbatched per-call overhead would blow through the budget; batching amortizes that fixed cost across up to 500 elements per round-trip and is therefore load-bearing for the design even though this particular trivial workload doesn't force the issue on its own.
 - **Verdict: clean PASS, gate untouched.** `assert batched <= 30` stands as written, genuinely measured, not weakened. `guest_stderr.log` empty on both runs.
 
+### Criterion 8 — clean re-run confirmation (Task 10)
+
+- Second, independent from-clean reproducibility check (Task 10, distinct from Task 2's own check in the "Bundle source & pin" section above): `rm -rf spikes/code_exec/vendor && bash spikes/code_exec/fetch_python_wasi.sh` re-downloaded the pinned asset, verified the SHA-256, and unpacked the identical layout (`vendor/python.wasm`, `vendor/lib/python3.14`), exit 0.
+- All 8 probes were then re-run from this freshly-fetched vendor tree, each under `timeout 120`, and **all passed with EXIT=0**, matching every number/threshold in rows 1–7 above (see the Verdict section for the full transcript). No flakes, no `guest_stderr.log` content, no leftover untracked files (all run artifacts — `vendor/`, `*.fifo`, `*.cwasm`, `*.log`, `s*_out*.txt` — are covered by `.gitignore`).
+
 ## Verdict
 
-(go / no-go / go-with-amendments — filled in Task 10)
+### GO
+
+All 8 rows pass, confirmed on a from-clean re-run (fresh `vendor/` fetch + re-verified SHA-256, then all 8 probes re-executed end-to-end, exit 0 each, no flakes). Proceed to **M1 as specced**: in-process WASM runner, FIFO in-process bridge, no subprocess fallback needed, no spec §4 amendment required.
+
+**Clean re-run transcript (Task 10, this run):**
+
+```
+=== s01_boot ===
+[host] module compile: 0.70s
+[s01] exit=0 elapsed=0.102s stdout='guest-ok 3.14.6 (tags/v3.14.6-dirty:c63aec6, Jun 10 2026, 10:03:53) [Clang 18.1.2-wasi-sdk (https://github.com/llvm/llvm-project 26a1d6601d727a96f43'
+[s01] PASS
+EXIT=0
+=== s02_bridge ===
+[host] module compile: 0.59s
+[s02] guest ready
+[s02] 200 round-trips: p50=0.23ms p95=0.33ms
+[s02] PASS
+EXIT=0
+=== s03_gil ===
+[host] module compile: 0.77s
+[s03] solo=27042698 contended=24369451 ratio=0.90
+[s03] PASS
+EXIT=0
+=== s04_epoch ===
+[host] module compile: 0.81s
+[s04] raised wasmtime._trap.Trap, trap_code=TrapCode.INTERRUPT
+[s04] trapped after 2.00s (overshoot 1ms)
+[s04] PASS
+EXIT=0
+=== s05_memory ===
+[host] module compile: 0.67s
+[s05] guest exited code=1, no over-allocation. PASS (MemoryError path)
+EXIT=0
+=== s06_determinism ===
+[host] module compile: 0.98s
+[s06] run 1: 1750000000.0 0.10486408342261755 -579511815
+[host] module compile: 0.84s
+[s06] run 2: 1750000000.0 0.10486408342261755 -579511815
+[s06] PASS
+EXIT=0
+=== s07_pool ===
+[host] module compile: 0.68s
+[s07] module deserialize: 24ms (vs cold compile above)
+[s07] boot-to-ready: p50=110ms max=142ms
+[s07] warm handoff:  p50=0.38ms max=0.58ms
+[s07] PASS  (pool refill cost = boot-to-ready; console latency = handoff + snippet runtime)
+EXIT=0
+=== s08_bench50k ===
+[host] module compile: 0.82s
+[s08] batched 50k (batch=500): 0.2s
+[s08] unbatched extrapolated:      17s  <- why batching is load-bearing
+[s08] PASS
+EXIT=0
+```
+
+All 8 exit codes are 0; every threshold cleared (s02 p50=0.23ms « 5ms gate; s03 ratio=0.90 ≥ 0.5 gate; s04 overshoot 1ms « 500ms gate; s07 warm handoff p50=0.38ms « 300ms gate; s08 batched 0.2s « 30s gate). `guest_stderr.log` was empty after the full run and no untracked files were left behind (`git status --short` clean — all spike run-artifacts are `.gitignore`d).
+
+**M1 implementation notes** (surfaced by the spike; these are implementation notes for the M1 runner, not spec changes — the spec stands as written):
+
+- **Memory-cap error mapping**: `store.set_limits(memory_size=...)` does **not** raise a host-side `wasmtime.Trap` on this build (wasmtime-py 46.0.1) — it manifests as an in-guest `MemoryError` (nonzero WASI exit code + a traceback on `guest_stderr.log`). The M1 runner's §10 error mapping must key off **exit-code + stderr content**, not `isinstance(e, Trap)`, for the "guest exceeded its memory budget" case — while still keeping a Trap-on-alloc branch for portability across other wasmtime builds/versions.
+- **Epoch interruption**: tripping the epoch deadline raises `wasmtime.Trap` itself (not a distinct subclass, not `ExitTrap`) with `.trap_code == wasmtime.TrapCode.INTERRUPT`. The runner should branch on `trap_code` to distinguish a timeout/cancel kill from a normal guest exit (`ExitTrap`) or any other trap kind (e.g. `UNREACHABLE`).
+- **Determinism**: WASI `clock_time_get`/`random_get` shadowing works as specced — `linker.allow_shadowing = True` set **before** `define_wasi()`, with the shim funcs registered via `linker.define_func(...)` **after** `define_wasi()` (shadow-after-define, last-registration-wins). Combined with `PYTHONHASHSEED=0` in the guest env, wall clock + PRNG + string hashing are all byte-identical across runs. Spec §4's determinism design is confirmed implementable as written — no lint-block fallback for `time`/`random` needed.
+- **Warm pool / page size**: `Module.serialize()`/`Module.deserialize()` disk-cache cuts cold-compile (~0.7-1.0s) down to ~24-40ms. Warm-pool boot-to-ready (pool-refill, off the request path) runs ~110-170ms p50/max — comfortably fine at "hundreds of ms". Warm handoff (already-booted instance, first `ping`→`pong`) is ~0.4-0.6ms p50, ~600x under the 300ms console-latency gate. The 50k-element benchmark at the spec's default page size (`BATCH=500`) finishes in 0.2s, ~150x under the 30s budget — spec §9's page-size default stands, no resize needed.
