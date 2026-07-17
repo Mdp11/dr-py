@@ -4,7 +4,7 @@
 |---|---|---|---|---|
 | 1 | CPython-WASI boots under wasmtime-py | runs a script, captures stdout | PASS — `python spikes/code_exec/s01_boot.py`: module compile 0.66s, run (boot+exec) 0.080s, exit=0, stdout=`guest-ok 3.14.6 (tags/v3.14.6-dirty:c63aec6, Jun 10 2026, ...) [Clang 18.1.2-wasi-sdk ...]`, `guest_stderr.log` empty | ✅ |
 | 2 | Interactive blocking stdio round-trip | works; p50 RTT < 5 ms | PASS — **transport = FIFO in-process**. `timeout 90 python spikes/code_exec/s02_bridge.py` → EXIT=0: `[s02] guest ready`, 200 echo round-trips `p50=0.34ms p95=0.56ms`, `[s02] PASS`; `guest_stderr.log` empty | ✅ |
-| 3 | GIL released during guest execution | host thread ≥ 50% solo rate | | |
+| 3 | GIL released during guest execution | host thread ≥ 50% solo rate | PASS — `timeout 60 python spikes/code_exec/s03_gil.py`, 3 runs (24-core host): solo/contended/ratio = 22413616/22387935/1.00, 21645636/21454599/0.99, 22644651/22073321/0.97. Ratio consistently ~0.97–1.00 (well above the 0.5 gate) → wasmtime-py releases the GIL during guest execution; in-process design stays viable, no fallback to the subprocess runner needed | ✅ |
 | 4 | Epoch kill + memory cap | trap ≤ 500 ms after deadline; cap enforced | | |
 | 5 | Determinism stubs | fixed clock/random/hashseed; 2 runs identical | | |
 | 6 | Warm-pool console latency | ≤ 300 ms end-to-end | | |
