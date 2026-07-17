@@ -9,78 +9,94 @@ Spike provenance -- every mechanic below was proven in `spikes/code_exec/`
 before landing here (see `spikes/code_exec/FINDINGS.md` for the measured
 numbers this design leans on):
 
-- **Engine/Config, module compile, WASI stdio wiring, store limits, epoch**
-  -- ported from `spikes/code_exec/host.py` (`make_engine`, `run_python`).
+- **Engine/Config, module compile, WASI stdio wiring, store limits, epoch,
+  determinism shims** -- ported from `spikes/code_exec/host.py`
+  (`make_engine`, `run_python`, `_add_determinism_shims`) and
+  `spikes/code_exec/s04_epoch.py` / `s05_memory.py` / `s06_determinism.py`.
   wasmtime-py 46.0.1 API facts baked in there (and re-verified here): there
   is no `StoreLimits` class -- `store.set_limits(memory_size=...)` takes the
   limit kwargs directly; `store.set_epoch_deadline(ticks_after_current)`;
-  `wasi.preopen_dir(host_path, guest_path)`; `ExitTrap` is a sibling of
-  `Trap` (`ExitTrap(WasmtimeError)`, unrelated in the MRO) and carries a
-  `.code` int.
+  epoch interruption raises `wasmtime.Trap` with
+  `.trap_code == TrapCode.INTERRUPT`; `wasi.preopen_dir(host_path,
+  guest_path)`; `ExitTrap` is a sibling of `Trap` and carries a `.code` int.
 - **Module serialize/deserialize disk cache** -- ported from
   `spikes/code_exec/s07_pool.py`. Measured there: ~35-46ms deserialize vs
   ~0.7-1.0s cold `Module.from_file` compile, ~25x faster -- this is why the
   pool warms instances off a `.cwasm` cache instead of recompiling per boot.
 - **FIFO O_RDWR stdio bridge + boot-to-ready handshake** -- ported from
   `spikes/code_exec/s02_bridge.py` (the RTT probe) and `s07_pool.py`'s
-  `one_cycle` (the "warm pool moment": instance ready and idle, mid-cycle).
-  Both FIFOs are opened `O_RDWR` on the host side so the open() call never
-  blocks and the pipe never sees a premature EOF while the host holds it;
-  wasmtime-46 streams WASI stdio to/from the FIFO live (it does not
+  `one_cycle`. Both FIFOs are opened `O_RDWR` on the host side so the open()
+  call never blocks and the pipe never sees a premature EOF while the host
+  holds it; wasmtime-46 streams WASI stdio to/from the FIFO live (it does not
   slurp-then-run), so a guest blocked on `sys.stdin` is served as the host
   writes.
-- **Guest bootstrap loop** -- a minimal newline-JSON `ready`/`exec`/`quit`
-  loop modeled on `spikes/code_exec/guest_harness.py`'s `ready`/`ping`/
-  `echo`/`batch`/`quit` loop, trimmed to what Task 8's PROVISIONAL `run()`
-  needs (see the "Task 8 vs Task 9" note below). It is embedded here as a
-  string constant (`_GUEST_BOOTSTRAP_SOURCE`), mirroring how
-  `data_rover.core.script.facade_src.FACADE_SOURCE` travels as source text
-  rather than an importable module -- the guest interpreter has no access to
-  anything host-side, so the only way to hand it code is text it compiles
-  for itself.
 
-**Task 8 vs Task 9 scope (binding, see `.superpowers/sdd/task-8-brief.md`).**
-This task implements the engine, the module cache, and the warm pool +
-background refill thread + `.close()`. `run()` is intentionally
-PROVISIONAL: it takes a warm instance, sends it one `{"op": "exec", "code":
-...}` request, captures stdout, and tears the instance down (a fresh
-interpreter per run -- no state reuse across snippets). There is no `dr`
-facade, no `BridgeDispatcher` wiring, no per-run epoch deadline, and no
-memory-limit enforcement; those all land in Task 9, which replaces
-`_GUEST_BOOTSTRAP_SOURCE` with a real bridge loop that `exec`s
-`FACADE_SOURCE` + the user's code against a `_transport` callable backed by
-FIFO request/response pairs dispatched to `BridgeDispatcher`.
+**The bridge loop (Task 9).** `run()` now drives the REAL guest<->host
+protocol, replacing Task 8's provisional `exec`/`quit` loop:
 
-**Pool / threading model.** One shared `Engine` (`epoch_interruption=True`,
-built once in `__init__`) and one cached `Module` are shared by every pool
-instance -- both are safe to share across instances/threads (wasmtime-py
-compiles once, instantiates per `Store`). A `queue.Queue` holds pre-booted
-`_PooledInstance`s: FIFOs created, `Store`/`Linker`/`Instance` constructed,
-and the guest's `_start` launched on its own worker thread up to the point
-it blocks on `sys.stdin` after sending its `{"ready": true}` handshake.
-`run()` pops one instance, uses it for exactly one execution, and tears it
-down (sends `quit`, joins the guest thread, closes FIFOs, removes the
-instance's scratch dir) -- it never returns an instance to the pool. A
-daemon `_refill_loop` thread notices the pool is under `pool_size` and boots
-replacements off the request path (per `FINDINGS.md`, boot-to-ready is
-~110-170ms p50/max -- fine at "hundreds of ms" off-path, expensive if it
-were on the request path). A boot failure in the refill thread is logged and
-retried after a short backoff rather than silently killing refill forever
-(see `_REFILL_RETRY_DELAY_S`).
+1. `run()` pops a warm instance (its guest is parked on `sys.stdin` after the
+   boot handshake), arms the per-run wall deadline on the instance's `Store`
+   (`set_epoch_deadline`) and the per-run memory cap (`set_limits`) -- both
+   safe cross-thread because the guest is parked in a WASI read, not executing
+   wasm back-edges -- then sends ONE start message carrying `{code, entry,
+   element_id, facade_source, stdout_bytes, result_repr_bytes}`.
+2. The guest bootstrap (`_GUEST_BOOTSTRAP_SOURCE`) reads that message, `exec`s
+   `FACADE_SOURCE + code` compiled as one unit under the filename `<snippet>`
+   (so guest tracebacks strip to guest frames, mirroring
+   `tests/script/trusted_runner.py`), captures stdout in a size-capped buffer,
+   resolves the entry function for `entry != "script"`, computes `result_repr`,
+   and streams bridge requests to the host mid-execution whenever the facade's
+   `_transport` is called.
+3. The host serves each bridge request with a per-run
+   `BridgeDispatcher(model, record_ops=..., max_ops=..., ...)`, writing the
+   JSON response back. `dispatcher.ops` become `RunResult.ops`.
+4. The guest ends by emitting a distinct FINAL message (`{"fin": true, "stdout",
+   "result_repr", "truncated", "error"?}`); the host loop ends on that message
+   (or on the guest dying, or on the wall deadline).
 
-`.close()` sets a `threading.Event`, which both stops the refill loop
-(checked every `_REFILL_POLL_S`) and stops it from `put()`-ing a
-just-booted instance into a pool that's shutting down (a race window the
-event closes: refill checks the event again right before `put`). It then
-drains and tears down every instance left in the queue, and joins the
-refill thread with a timeout (it is a daemon thread either way, so a stuck
-join can't hang process exit). `.close()` is idempotent via `_closed`.
+**Two-sided deadline.** A single shared **epoch cadence ticker** thread (per
+runner, started in `__init__`) calls `engine.increment_epoch()` every
+`_EPOCH_TICK_INTERVAL_S`, turning the engine's global epoch into a coarse
+monotonic clock. Each run arms its instance's store with an ABSOLUTE deadline
+(`set_epoch_deadline(ticks)` where `ticks = ceil(wall_timeout_s /
+interval)`), so an interruption trips only when THAT store's own deadline is
+reached -- concurrent runs on the shared engine do not interfere (this is a
+deliberate, isolation-correct refinement of `s04_epoch.py`'s single per-run
+ticker, which cannot isolate multiple stores sharing one engine). That epoch
+kill handles CPU-bound guests (`while True: pass`). The complementary "host
+watchdog" is the wall-deadline-bounded FIFO read: `_readline_bounded` is
+called with a budget derived from the remaining wall time, so a guest wedged
+in a way epoch cannot reach (e.g. blocked in a WASI call) still unblocks the
+host at the deadline; teardown then closes the FIFOs so both sides die and
+the instance is discarded (never returned to the pool).
+
+**Error mapping (M0 findings, `FINDINGS.md` rows 4-5):**
+
+| outcome                                             | `ScriptError.kind` |
+|-----------------------------------------------------|--------------------|
+| guest fin `error.kind == "syntax"` (compile failed) | `"syntax"`         |
+| guest fin `error.kind == "runtime"` (user raise)    | `"runtime"`        |
+| epoch kill: `Trap.trap_code == INTERRUPT`           | `"timeout"`        |
+| nonzero WASI exit + `MemoryError` on guest stderr   | `"memory"`         |
+| non-INTERRUPT `Trap` (alloc-trap portability path)  | `"memory"`         |
+| wall-deadline read timeout, no trap                 | `"timeout"`        |
+| nonzero exit, no `MemoryError`                      | `"runtime"`        |
+
+**Pool / threading model.** One shared `Engine` (`epoch_interruption=True`)
+and one cached `Module` are shared by every pool instance. A `queue.Queue`
+holds pre-booted `_PooledInstance`s. `run()` pops one, uses it for exactly one
+execution, and tears it down -- it never returns an instance to the pool
+(fresh interpreter per snippet, no state leakage). A daemon `_refill_loop`
+thread keeps the pool topped up off the request path. `.close()` stops the
+refill + epoch ticker threads, drains and tears down every pooled instance,
+and removes the shared bootstrap-scripts dir. `.close()` is idempotent.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import queue
 import selectors
@@ -90,11 +106,25 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TextIO
+from typing import Any, TextIO
 
-from wasmtime import Config, Engine, ExitTrap, Instance, Linker, Module, Store, WasiConfig
+from wasmtime import (
+    Config,
+    Engine,
+    ExitTrap,
+    FuncType,
+    Instance,
+    Linker,
+    Module,
+    Store,
+    Trap,
+    TrapCode,
+    ValType,
+    WasiConfig,
+)
 
 from data_rover.core.model.model import Model
+from data_rover.core.script.facade_src import FACADE_SOURCE
 from data_rover.core.script.runner import RunLimits, RunRequest, RunResult, ScriptError
 
 logger = logging.getLogger(__name__)
@@ -110,17 +140,33 @@ _GUEST_LIB_GUEST = "/lib"
 _GUEST_SCRIPTS_GUEST = "/spike"
 _BOOTSTRAP_FILENAME = "bootstrap.py"
 
-#: A large-but-finite epoch deadline. `epoch_interruption=True` on the shared
-#: `Config` requires SOME deadline be set before `_start` runs, or the guest
-#: traps immediately on its first epoch checkpoint (confirmed empirically
-#: against wasmtime-py 46.0.1: booting with `epoch_interruption=True` and no
-#: `store.set_epoch_deadline()` call raises `wasmtime.Trap` with
-#: `trap_code=INTERRUPT` before any guest code runs). Task 8 does not
-#: implement per-run deadline enforcement (that's Task 9's job, wired via
-#: `engine.increment_epoch()` off a ticker thread per `s04_epoch.py`), so
-#: this constant is a placeholder large enough that no Task 8 pool boot or
-#: provisional run ever trips it.
-_PLACEHOLDER_EPOCH_DEADLINE = 1_000_000_000
+#: The filename the guest compiles the facade+snippet under. Guest tracebacks
+#: are stripped to frames from this file (never a bootstrap frame), matching
+#: `tests/script/trusted_runner.py`'s `_SNIPPET_FILENAME`.
+_SNIPPET_FILENAME = "<snippet>"
+
+#: Fixed wall-clock epoch in nanoseconds injected by the determinism shim
+#: (`1_750_000_000` seconds), matching `spikes/code_exec/host.py`'s
+#: `FIXED_NANOS`. The monotonic clock stays real so epoch/timeout still work.
+_FIXED_WALL_NANOS = 1_750_000_000_000_000_000
+
+#: Cadence of the shared epoch ticker: every interval the runner calls
+#: `engine.increment_epoch()`, advancing the engine's global epoch by one.
+#: This is the resolution of the wall-timeout epoch kill (~50ms), well under
+#: the console-latency budget and precise enough for second-scale timeouts.
+_EPOCH_TICK_INTERVAL_S = 0.05
+
+#: Store epoch deadline (in cadence ticks) baked at boot. Large enough that an
+#: idle/booting instance -- parked on stdin, or importing the stdlib during
+#: the ~150ms boot -- never trips before `run()` re-arms it with the per-run
+#: deadline. At 20Hz this is ~58 days of headroom.
+_IDLE_EPOCH_DEADLINE_TICKS = 100_000_000
+
+#: Extra time past the wall deadline the host read waits before giving up, so
+#: the epoch trap (which fires ~one cadence tick after the deadline) has time
+#: to kill the guest and the worker thread to exit -- `_readline_bounded`
+#: returns the instant the thread dies, so this ceiling is rarely reached.
+_TIMEOUT_READ_GRACE_S = 1.5
 
 #: Delay before the refill thread retries after a failed boot, so a
 #: persistent failure (e.g. a corrupted cache file) doesn't spin the CPU.
@@ -136,8 +182,8 @@ _REFILL_POLL_S = 0.2
 _POOL_GET_TIMEOUT_S = 10.0
 
 #: How long instance teardown waits for the guest worker thread to notice
-#: `quit` and exit before giving up (the thread is a daemon either way, so a
-#: timeout here just bounds `.close()`/per-run teardown latency, not
+#: `quit`/EOF and exit before giving up (the thread is a daemon either way, so
+#: a timeout here just bounds `.close()`/per-run teardown latency, not
 #: correctness).
 _TEARDOWN_JOIN_TIMEOUT_S = 5.0
 
@@ -151,96 +197,172 @@ _BOOT_HANDSHAKE_TIMEOUT_S = 30.0
 #: How often `_readline_bounded` re-checks worker-thread liveness between
 #: `select` polls. Small enough that a fast synchronous boot failure (e.g.
 #: `wasmtime` raising on `preopen_dir` for a bad path -- the guest thread
-#: dies in milliseconds) is detected and reported almost immediately,
-#: rather than waiting out the full `_BOOT_HANDSHAKE_TIMEOUT_S` ceiling for
-#: no reason.
+#: dies in milliseconds), OR an epoch kill that kills the worker thread, is
+#: detected and reported almost immediately.
 _BOOT_POLL_INTERVAL_S = 0.05
 
-#: Ceiling on how long `run()`'s provisional bridge-free path waits for the
-#: guest's `exec` response line. This is a COARSE SAFETY NET only, not real
-#: deadline enforcement -- Task 9 replaces this whole request/response call
-#: site with epoch-based cancellation keyed off `RunLimits.wall_timeout_s`.
-#: Deliberately generous (a hung user snippet under the current provisional
-#: path has no way to be killed early; this just stops the host process
-#: itself from blocking forever on a `readline()` that will genuinely never
-#: return).
-_RUN_RESPONSE_TIMEOUT_S = 60.0
 
-
-# Minimal newline-JSON guest bootstrap: ready handshake, then a request loop
-# with two ops -- `exec` (compile+exec the given source with stdout
-# captured, respond with the captured text) and `quit`. Modeled on
-# `spikes/code_exec/guest_harness.py`'s dispatch loop, trimmed to what
-# Task 8's provisional `run()` needs; Task 9 replaces this whole constant
-# with a bridge loop that execs FACADE_SOURCE + user code against a
-# `_transport` wired to FIFO request/response pairs.
-#
-# This is embedded as a string (not shipped as a standalone .py file)
-# because it never runs host-side -- the guest CPython-WASI interpreter
-# compiles it directly, so it only ever needs to be valid on the wire, the
-# same reasoning `facade_src.FACADE_SOURCE`'s docstring gives for exec'ing
-# source text rather than importing a module.
-_GUEST_BOOTSTRAP_SOURCE = '''
-import io
+# Guest bootstrap: runs INSIDE CPython-WASI. It sends a ready handshake, reads
+# ONE start message describing the run, execs FACADE_SOURCE + user code with
+# `_transport` bound so the facade's bridge calls stream to the host over the
+# real stdout (while user `print`s go to a size-capped buffer), then emits a
+# distinct FINAL message. Modeled on `tests/script/trusted_runner.py`'s run
+# semantics (entry handling, stdout cap, traceback stripping, result_repr
+# truncation) so the WASM path produces RunResults equivalent to the in-process
+# reference for equivalent inputs. Embedded as a string (not a shipped .py)
+# because it never runs host-side -- the guest interpreter compiles it itself,
+# the same reasoning `facade_src.FACADE_SOURCE`'s docstring gives.
+_GUEST_BOOTSTRAP_SOURCE = r'''
 import json
 import sys
+import traceback
 
-sys.stdout.write(json.dumps({"id": 0, "ready": True}) + "\\n")
-sys.stdout.flush()
+# The real, FIFO-backed stdout. Captured before any redirect so bridge
+# requests + the final message always reach the host even while user code has
+# sys.stdout swapped out for the capture buffer.
+_real_stdout = sys.stdout
 
-for line in sys.stdin:
-    line = line.strip()
-    if not line:
-        continue
-    req = json.loads(line)
-    op = req.get("op")
-    req_id = req.get("id")
-    if op == "quit":
-        break
-    if op == "exec":
-        buf = io.StringIO()
-        real_stdout = sys.stdout
-        sys.stdout = buf
-        try:
-            code_obj = compile(req.get("code", ""), "<snippet>", "exec")
-            exec(code_obj, {"__name__": "__main__"})
-        except Exception as exc:
-            sys.stdout = real_stdout
-            resp = {
-                "id": req_id,
-                "stdout": buf.getvalue(),
-                "error": type(exc).__name__ + ": " + str(exc),
-            }
+_SNIPPET_FILENAME = "<snippet>"
+
+
+def _emit(obj):
+    _real_stdout.write(json.dumps(obj) + "\n")
+    _real_stdout.flush()
+
+
+def _transport(req):
+    # Facade -> host bridge call: write the request, block for the response
+    # line. Uses _real_stdout (not the possibly-redirected sys.stdout).
+    _emit(req)
+    return json.loads(sys.stdin.readline())
+
+
+class _CappedStdout:
+    # Mirrors tests/script/trusted_runner.py::_CappedStdout: stops accumulating
+    # past `cap` chars, appending an ellipsis on the truncating write and
+    # flagging `.truncated`.
+    def __init__(self, cap):
+        self._cap = cap if cap > 0 else 0
+        self._parts = []
+        self._size = 0
+        self.truncated = False
+
+    def write(self, s):
+        if self._size >= self._cap:
+            if s:
+                self.truncated = True
+            return len(s)
+        remaining = self._cap - self._size
+        if len(s) > remaining:
+            self._parts.append(s[:remaining] + "...")
+            self._size = self._cap
+            self.truncated = True
         else:
-            sys.stdout = real_stdout
-            resp = {"id": req_id, "stdout": buf.getvalue()}
-    else:
-        resp = {"id": req_id, "error": "unknown op " + repr(op)}
-    sys.stdout.write(json.dumps(resp) + "\\n")
-    sys.stdout.flush()
+            self._parts.append(s)
+            self._size += len(s)
+        return len(s)
+
+    def flush(self):
+        pass
+
+    def getvalue(self):
+        return "".join(self._parts)
+
+
+def _format_guest_traceback():
+    # Keep only frames from the exec'd facade+snippet source, never a bootstrap
+    # frame -- mirrors trusted_runner.py::_format_guest_traceback.
+    exc_type, exc, tb = sys.exc_info()
+    frames = [f for f in traceback.extract_tb(tb) if f.filename == _SNIPPET_FILENAME]
+    lines = ["Traceback (most recent call last):\n"]
+    lines.extend(traceback.format_list(frames))
+    lines.extend(traceback.format_exception_only(exc_type, exc))
+    return "".join(lines)
+
+
+def _main():
+    _emit({"ready": True})
+
+    start = json.loads(sys.stdin.readline())
+    code = start["code"]
+    entry = start["entry"]
+    element_id = start["element_id"]
+    facade_source = start["facade_source"]
+    stdout_cap = start["stdout_bytes"]
+    result_repr_cap = start["result_repr_bytes"]
+
+    stdout = _CappedStdout(stdout_cap)
+    namespace = {"_transport": _transport}
+    error = None
+    value = None
+    have_value = False
+
+    source = facade_source + "\n" + code
+    try:
+        compiled = compile(source, _SNIPPET_FILENAME, "exec")
+    except SyntaxError as exc:
+        error = {"kind": "syntax", "message": str(exc), "traceback": None}
+        compiled = None
+
+    if compiled is not None:
+        sys.stdout = stdout
+        try:
+            exec(compiled, namespace)
+            if entry == "script":
+                if "result" in namespace:
+                    value = namespace["result"]
+                    have_value = True
+            else:
+                fn = namespace.get(entry)
+                if fn is None or not callable(fn):
+                    raise NameError("entry function " + repr(entry) + " is not defined")
+                el = namespace["dr"].element(element_id) if element_id is not None else None
+                value = fn(el)
+                have_value = True
+        except MemoryError:
+            # Propagate to the CPython top level: a store memory-limiter breach
+            # surfaces as a nonzero WASI exit + a MemoryError traceback on
+            # stderr, which the host maps to ScriptError(kind="memory").
+            # Catching it as an ordinary Exception would mislabel a resource
+            # breach as a runtime error (see FINDINGS.md row 5).
+            sys.stdout = _real_stdout
+            raise
+        except Exception:
+            error = {
+                "kind": "runtime",
+                "message": type(sys.exc_info()[1]).__name__ + ": " + str(sys.exc_info()[1]),
+                "traceback": _format_guest_traceback(),
+            }
+        finally:
+            sys.stdout = _real_stdout
+
+    result_repr = None
+    truncated = stdout.truncated
+    if error is None and have_value:
+        result_repr = repr(value)
+        if len(result_repr) > result_repr_cap:
+            result_repr = result_repr[:result_repr_cap] + "..."
+            truncated = True
+
+    fin = {"fin": True, "stdout": stdout.getvalue(), "result_repr": result_repr, "truncated": truncated}
+    if error is not None:
+        fin["error"] = error
+    _emit(fin)
+
+
+_main()
 '''
 
 
 def _module_cache_path(guest_wasm_path: str) -> Path:
     """Where the compiled-module disk cache for `guest_wasm_path` lives.
 
-    Choice (Task 8 scope decision): the cache file sits NEXT TO the guest
-    binary (`spikes/code_exec/s07_pool.py`'s placement -- `ROOT /
-    "python.cwasm"`, here generalized to whatever directory the caller's
-    `guest_wasm_path` is in), not a separate cache dir. Simpler to reason
-    about (one directory to look at, one thing to gitignore) and the guest
-    binary's own directory is already where deployment places
-    binary-adjacent state (see `spikes/code_exec/vendor/` in `.gitignore`).
-
-    Staleness key: the cache filename embeds the guest binary's `st_size`
-    and `st_mtime_ns` (`python-<size>-<mtime_ns>.cwasm`), so a re-fetched or
-    rebuilt binary (different size and/or mtime) misses the cache under its
-    old name and falls through to a fresh `Module.from_file` + `serialize()`
-    rather than deserializing a stale compiled module. This is a
-    content-independent proxy for "did the binary change" (not a content
-    hash) -- cheaper than hashing a multi-MB binary on every construction,
-    and correct for the actual failure mode this needs to guard (a
-    re-fetched/rebuilt binary always changes at least one of size/mtime).
+    The cache file sits NEXT TO the guest binary (`s07_pool.py`'s placement),
+    with a staleness key embedded in the filename (`python-<size>-<mtime_ns>
+    .cwasm`): a re-fetched/rebuilt binary changes size and/or mtime, so it
+    misses under the old name and falls through to a fresh `Module.from_file`
+    + `serialize()`. Cheap (no hashing a multi-MB binary), and correct for the
+    actual failure mode (a re-fetch always changes size/mtime).
     """
     src = Path(guest_wasm_path)
     st = src.stat()
@@ -248,8 +370,7 @@ def _module_cache_path(guest_wasm_path: str) -> Path:
 
 
 def _load_module(engine: Engine, guest_wasm_path: str) -> Module:
-    """`Module.deserialize` from the on-disk cache if present and fresh
-    (see `_module_cache_path`'s staleness-key docstring), else
+    """`Module.deserialize` from the on-disk cache if present and fresh, else
     `Module.from_file` + `serialize()` to populate the cache for next time.
     Ported from `spikes/code_exec/s07_pool.py`'s cache probe."""
     cache_path = _module_cache_path(guest_wasm_path)
@@ -278,41 +399,75 @@ def _make_engine() -> Engine:
     return Engine(cfg)
 
 
+def _add_determinism_shims(linker: Linker) -> None:
+    """Shadow `wasi_snapshot_preview1.clock_time_get`/`random_get` with fixed
+    values so identical guest code produces byte-identical stdout across runs.
+
+    Ported verbatim from `spikes/code_exec/host.py::_add_determinism_shims`
+    (proven in `s06_determinism.py`). The realtime clock (`clock_id == 0`) is
+    pinned to `_FIXED_WALL_NANOS`; the monotonic clock stays REAL so the
+    interpreter can boot and the epoch/timeout machinery still works. `random_
+    get` always fills the guest buffer with `0x42`, seeding CPython's PRNG
+    identically. The caller must set `linker.allow_shadowing = True` BEFORE
+    `define_wasi()` and call this AFTER `define_wasi()` -- shadow-after-define
+    is the order that takes effect on wasmtime-py 46.0.1 (see FINDINGS.md
+    Criterion 5). `PYTHONHASHSEED=0` in the guest env completes the recipe.
+    """
+    i32, i64 = ValType.i32(), ValType.i64()
+
+    def clock_time_get(caller: Any, clock_id: int, precision: int, out_ptr: int) -> int:
+        mem = caller.get("memory")
+        nanos = _FIXED_WALL_NANOS if clock_id == 0 else int(time.perf_counter_ns())
+        mem.write(caller, nanos.to_bytes(8, "little"), out_ptr)
+        return 0
+
+    def random_get(caller: Any, buf: int, buf_len: int) -> int:
+        mem = caller.get("memory")
+        mem.write(caller, bytes([0x42]) * buf_len, buf)
+        return 0
+
+    linker.define_func(
+        "wasi_snapshot_preview1",
+        "clock_time_get",
+        FuncType([i32, i64, i32], [i32]),
+        clock_time_get,
+        access_caller=True,
+    )
+    linker.define_func(
+        "wasi_snapshot_preview1",
+        "random_get",
+        FuncType([i32, i32], [i32]),
+        random_get,
+        access_caller=True,
+    )
+
+
 def _readline_bounded(
     f: TextIO, thread: threading.Thread, timeout: float, poll_interval: float = _BOOT_POLL_INTERVAL_S
 ) -> str:
     """Read one line from `f` with a bounded wait, never blocking forever.
 
-    **Why a bare `f.readline()` cannot be trusted here (post-review fix).**
-    Both FIFOs backing a pool instance are opened `O_RDWR` on the host side
-    (see the module docstring) so the `open()` call never blocks and the
-    pipe never sees a premature EOF while the host holds it. That safety
-    property has a sharp edge: because the *host* itself is always a live
-    writer reference on `f`'s underlying fd, the pipe can never reach a
-    true EOF from the host's read side, no matter what the guest does --
-    not even if the guest process/thread has already crashed. A bare
-    `f.readline()` therefore blocks INDEFINITELY if the guest never writes
-    another line, and the classic "empty string means EOF" signal a caller
-    might reach for to detect that never fires. This was reproduced
-    empirically: a bad `guest_lib_path` makes `wasi.preopen_dir` raise
-    inside the guest worker thread almost immediately, the exception is
-    caught and logged, the thread exits -- and the boot caller's
-    `host_out.readline()` still hangs forever, because nothing about the
-    thread exiting changes the fd's readability from the host's OWN O_RDWR
-    handle's point of view.
+    **Why a bare `f.readline()` cannot be trusted here.** Both FIFOs backing a
+    pool instance are opened `O_RDWR` on the host side (see the module
+    docstring) so the `open()` call never blocks and the pipe never sees a
+    premature EOF while the host holds it. That safety property has a sharp
+    edge: because the *host* itself is always a live writer reference on `f`'s
+    underlying fd, the pipe can never reach a true EOF from the host's read
+    side, no matter what the guest does -- not even if the guest process/thread
+    has already crashed or been epoch-killed. A bare `f.readline()` therefore
+    blocks INDEFINITELY if the guest never writes another line.
 
-    The fix: poll `select` for readability in `poll_interval` slices,
-    bounded by `timeout` overall, ALSO checking `thread.is_alive()` between
-    slices. A dead worker thread will never write another line, so bailing
-    out (returning `""`, the same sentinel a real EOF would produce) the
-    moment the thread is gone turns a fast synchronous failure (dead in
-    milliseconds) into a fast, bounded caller-side failure too, instead of
-    waiting out the full `timeout` ceiling for no reason. A guest that is
-    genuinely alive but wedged (or just slow) still gets the full
-    `timeout` before this gives up.
+    The fix: poll `select` for readability in `poll_interval` slices, bounded
+    by `timeout` overall, ALSO checking `thread.is_alive()` between slices. A
+    dead worker thread will never write another line, so bailing out (returning
+    `""`, the same sentinel a real EOF would produce) the moment the thread is
+    gone turns a fast guest death (boot failure, or an epoch/timeout kill) into
+    a fast, bounded caller-side return instead of waiting out the full
+    `timeout` ceiling. A guest that is genuinely alive but wedged (or just
+    slow) still gets the full `timeout` before this gives up.
 
-    Returns `""` on timeout or thread death -- callers treat that exactly
-    like a real EOF (see `_boot_instance`'s "not ready_line" branch).
+    Returns `""` on timeout or thread death -- callers treat that exactly like
+    a real EOF (guest died / wall deadline reached).
     """
     sel = selectors.DefaultSelector()
     try:
@@ -333,38 +488,50 @@ class _PooledInstance:
     """A booted-and-ready (but not yet run) guest instance: FIFOs open,
     `Store`/`Linker`/`Instance` constructed, guest `_start` running on
     `thread` and blocked on `sys.stdin` past the `ready` handshake.
-    `run()` (Task 8's provisional path) uses one and tears it down; it is
-    never returned to the pool."""
+
+    `store` is exposed so `run()` can arm the per-run epoch deadline / memory
+    cap on it (safe cross-thread because the guest is parked on stdin at that
+    point). `exit_code`/`trap` are written by the worker thread when the guest
+    finishes, so `run()`'s death-mapping can classify a guest that died without
+    sending a final message (see the module docstring's error-mapping table).
+    """
 
     scratch_dir: Path
     host_in: TextIO
     host_out: TextIO
-    thread: threading.Thread
+    thread: threading.Thread | None = None
+    store: Store | None = None
+    exit_code: int | None = None
+    trap: BaseException | None = None
 
 
 class WasmScriptRunner:
-    """`ScriptRunner` backed by a warm pool of CPython-WASI (wasmtime)
-    guest interpreters.
+    """`ScriptRunner` backed by a warm pool of CPython-WASI (wasmtime) guest
+    interpreters. See the module docstring for the full bridge loop, deadline
+    mechanics, error mapping, and pool/threading model."""
 
-    See the module docstring for the full pool/threading model and the
-    Task 8 vs Task 9 scope split. `run()` here is PROVISIONAL (Task 8): it
-    consumes one warm instance per call, feeds it raw source via the
-    `_GUEST_BOOTSTRAP_SOURCE` `exec` op, captures stdout, and tears the
-    instance down. No facade, no bridge, no deadline/memory enforcement.
-    """
-
-    def __init__(self, guest_wasm_path: str, guest_lib_path: str, *, pool_size: int = 2) -> None:
+    def __init__(
+        self,
+        guest_wasm_path: str,
+        guest_lib_path: str,
+        *,
+        pool_size: int = 2,
+        memory_bytes: int | None = None,
+    ) -> None:
         self._guest_wasm_path = guest_wasm_path
         self._guest_lib_path = guest_lib_path
         self._pool_size = pool_size
+        # Memory cap baked at boot (before instantiation, matching s05) so the
+        # store's resource limiter is attached from the start. Defaults to the
+        # RunLimits default; per-run `limits.memory_bytes` is additionally
+        # applied at arm time (best-effort -- see `run()`).
+        self._memory_bytes = memory_bytes if memory_bytes is not None else RunLimits().memory_bytes
 
         self._engine = _make_engine()
         self._module = _load_module(self._engine, guest_wasm_path)
 
         # Bootstrap script directory: written once, preopened read-only by
-        # every pool instance at `_GUEST_SCRIPTS_GUEST`. Not per-instance
-        # (unlike the FIFO scratch dirs below) because its content never
-        # changes across instances/runs.
+        # every pool instance at `_GUEST_SCRIPTS_GUEST`.
         self._scripts_dir = Path(tempfile.mkdtemp(prefix="dr_wasm_scripts_"))
         (self._scripts_dir / _BOOTSTRAP_FILENAME).write_text(_GUEST_BOOTSTRAP_SOURCE)
 
@@ -373,10 +540,29 @@ class WasmScriptRunner:
         self._closed = False
         self._close_lock = threading.Lock()
 
+        # Shared epoch cadence ticker: advances the engine's global epoch at a
+        # fixed rate so per-run absolute deadlines trip independently (see the
+        # module docstring's two-sided-deadline note).
+        self._epoch_thread = threading.Thread(
+            target=self._epoch_ticker, name="wasm-epoch-ticker", daemon=True
+        )
+        self._epoch_thread.start()
+
         self._refill_thread = threading.Thread(
             target=self._refill_loop, name="wasm-pool-refill", daemon=True
         )
         self._refill_thread.start()
+
+    # -- epoch ticker ---------------------------------------------------------
+
+    def _epoch_ticker(self) -> None:
+        """Advance the engine's global epoch once per `_EPOCH_TICK_INTERVAL_S`.
+        One shared ticker per runner (not per run): a run arms its store's
+        absolute deadline off this monotonic tick, so tripping is isolated to
+        the store whose deadline was reached even under concurrent runs."""
+        while not self._shutdown.is_set():
+            self._engine.increment_epoch()
+            self._shutdown.wait(_EPOCH_TICK_INTERVAL_S)
 
     # -- pool boot / teardown ------------------------------------------------
 
@@ -392,28 +578,28 @@ class WasmScriptRunner:
 
         # O_RDWR so the open() never blocks and the FIFO never sees an EOF
         # while the host holds this end open (see module docstring).
-        host_in: TextIO = os.fdopen(os.open(in_fifo, os.O_RDWR), "w", buffering=1)
-        host_out: TextIO = os.fdopen(os.open(out_fifo, os.O_RDWR), "r", buffering=1)
+        host_in: TextIO = os.fdopen(os.open(str(in_fifo), os.O_RDWR), "w", buffering=1)
+        host_out: TextIO = os.fdopen(os.open(str(out_fifo), os.O_RDWR), "r", buffering=1)
 
+        inst = _PooledInstance(scratch_dir=scratch_dir, host_in=host_in, host_out=host_out)
         boot_error: list[BaseException] = []
 
         def _run_guest() -> None:
             try:
-                self._run_guest_to_completion(str(in_fifo), str(out_fifo))
+                self._run_guest_to_completion(inst)
             except BaseException as exc:  # noqa: BLE001 - surfaced via boot_error/log, thread must not crash silently
                 boot_error.append(exc)
                 logger.exception("wasm guest worker thread failed")
 
         thread = threading.Thread(target=_run_guest, daemon=True)
+        inst.thread = thread
         thread.start()
 
         # Any failure past this point (bounded-wait timeout, malformed JSON,
         # missing/false "ready") must still release the FIFOs/thread/scratch
-        # dir -- a boot failure that leaks these would slowly exhaust
-        # fds/tmp dirs across refill retries. The read itself is bounded via
-        # `_readline_bounded` (see its docstring): a bare `readline()` on
-        # this O_RDWR-on-both-ends FIFO can never observe EOF, so it cannot
-        # be trusted to return on a dead/wedged guest.
+        # dir. The read is bounded via `_readline_bounded` (see its docstring):
+        # a bare `readline()` on this O_RDWR-on-both-ends FIFO can never
+        # observe EOF, so it cannot be trusted to return on a dead/wedged guest.
         try:
             ready_line = _readline_bounded(host_out, thread, _BOOT_HANDSHAKE_TIMEOUT_S)
             if not ready_line:
@@ -435,49 +621,79 @@ class WasmScriptRunner:
             shutil.rmtree(scratch_dir, ignore_errors=True)
             raise
 
-        return _PooledInstance(scratch_dir, host_in, host_out, thread)
+        return inst
 
-    def _run_guest_to_completion(self, stdin_fifo: str, stdout_fifo: str) -> None:
-        """Runs on the instance's worker thread: instantiate + run `_start`
-        to completion (blocks on `sys.stdin` inside the guest between
-        requests). Ported from `spikes/code_exec/host.py`'s `run_python`,
-        specialized to this runner's shared engine/module and fixed
-        preopens."""
+    def _run_guest_to_completion(self, inst: _PooledInstance) -> None:
+        """Runs on the instance's worker thread: instantiate + run `_start` to
+        completion (blocks on `sys.stdin` inside the guest between the ready
+        handshake and the start message, and again between bridge requests).
+        Ported from `spikes/code_exec/host.py`'s `run_python`, plus the
+        determinism recipe and the outcome capture (`exit_code`/`trap`) the
+        host's error mapping reads."""
+        stdin_fifo = str(inst.scratch_dir / "in.fifo")
+        stdout_fifo = str(inst.scratch_dir / "out.fifo")
+
         linker = Linker(self._engine)
+        # Determinism: allow_shadowing BEFORE define_wasi(), shims AFTER.
+        linker.allow_shadowing = True
         linker.define_wasi()
+        _add_determinism_shims(linker)
+
         store = Store(self._engine)
-        store.set_epoch_deadline(_PLACEHOLDER_EPOCH_DEADLINE)
+        store.set_epoch_deadline(_IDLE_EPOCH_DEADLINE_TICKS)
+        store.set_limits(memory_size=self._memory_bytes)
 
         wasi = WasiConfig()
         wasi.argv = ["python", f"{_GUEST_SCRIPTS_GUEST}/{_BOOTSTRAP_FILENAME}"]
-        wasi.env = [("PYTHONHOME", _GUEST_LIB_GUEST), ("PYTHONPATH", _GUEST_LIB_GUEST)]
+        wasi.env = [
+            ("PYTHONHOME", _GUEST_LIB_GUEST),
+            ("PYTHONPATH", _GUEST_LIB_GUEST),
+            ("PYTHONHASHSEED", "0"),  # determinism (string hashing)
+        ]
         wasi.preopen_dir(self._guest_lib_path, _GUEST_LIB_GUEST)
         wasi.preopen_dir(str(self._scripts_dir), _GUEST_SCRIPTS_GUEST)
         wasi.stdin_file = stdin_fifo
         wasi.stdout_file = stdout_fifo
-        wasi.stderr_file = str(self._scripts_dir / "guest_stderr.log")
+        # Per-instance stderr (in the instance's own scratch dir, not the
+        # shared scripts dir) so the memory-cap error mapping can parse THIS
+        # guest's stderr without cross-instance interleaving.
+        wasi.stderr_file = str(inst.scratch_dir / "guest_stderr.log")
         store.set_wasi(wasi)
+
+        # Publish the store BEFORE the (blocking) start() so `run()` can arm
+        # the per-run deadline/memory cap on it once the boot handshake lands.
+        inst.store = store
 
         instance: Instance = linker.instantiate(store, self._module)
         start = instance.exports(store)["_start"]
         try:
             start(store)  # type: ignore[operator]  # wasmtime Func.__call__ is dynamically typed
-        except ExitTrap:
-            pass  # normal `quit`-triggered guest exit (sys.exit / SystemExit under WASI)
+            inst.exit_code = 0
+        except ExitTrap as exc:
+            # Normal exit (0) or a nonzero exit (e.g. an uncaught MemoryError
+            # or SystemExit propagating to the CPython top level).
+            inst.exit_code = exc.code
+        except Trap as trap:
+            # Epoch kill (INTERRUPT) or another guest trap -- captured for the
+            # host's death-mapping rather than re-raised, since an epoch kill
+            # is an EXPECTED outcome (a wall-timeout), not a worker-thread bug.
+            inst.trap = trap
 
     def _teardown_instance(self, inst: _PooledInstance) -> None:
-        """Sends `quit`, joins the guest worker thread, closes the FIFOs,
-        and removes the instance's scratch dir. Best-effort: a guest that
-        is already gone (broken pipe) or slow to notice `quit` must not
-        prevent cleanup of everything else."""
+        """Sends `quit`, joins the guest worker thread, closes the FIFOs, and
+        removes the instance's scratch dir. Best-effort: a guest that is
+        already gone (broken pipe, epoch-killed, exited after its final
+        message) or slow to notice must not prevent cleanup of everything
+        else."""
         try:
             inst.host_in.write(json.dumps({"id": 0, "op": "quit"}) + "\n")
             inst.host_in.flush()
         except OSError:
             logger.debug("wasm instance teardown: stdin already closed", exc_info=True)
-        inst.thread.join(timeout=_TEARDOWN_JOIN_TIMEOUT_S)
-        if inst.thread.is_alive():
-            logger.warning("wasm guest worker thread did not exit within teardown timeout")
+        if inst.thread is not None:
+            inst.thread.join(timeout=_TEARDOWN_JOIN_TIMEOUT_S)
+            if inst.thread.is_alive():
+                logger.warning("wasm guest worker thread did not exit within teardown timeout")
         for f in (inst.host_in, inst.host_out):
             try:
                 f.close()
@@ -488,11 +704,10 @@ class WasmScriptRunner:
     # -- refill thread --------------------------------------------------------
 
     def _refill_loop(self) -> None:
-        """Background daemon thread: keeps the pool topped up to
-        `pool_size`, off the request path. A failed boot is logged and
-        retried after `_REFILL_RETRY_DELAY_S` rather than exiting the loop
-        (a silently-dead refill thread would starve `run()` forever with no
-        diagnostic)."""
+        """Background daemon thread: keeps the pool topped up to `pool_size`,
+        off the request path. A failed boot is logged and retried after
+        `_REFILL_RETRY_DELAY_S` rather than exiting the loop (a silently-dead
+        refill thread would starve `run()` forever with no diagnostic)."""
         while not self._shutdown.is_set():
             if self._pool.qsize() >= self._pool_size:
                 self._shutdown.wait(_REFILL_POLL_S)
@@ -504,8 +719,8 @@ class WasmScriptRunner:
                 self._shutdown.wait(_REFILL_RETRY_DELAY_S)
                 continue
             # Re-check right before publishing: close() may have flipped the
-            # event while this boot was in flight, and a just-booted
-            # instance must not survive into a pool that's shutting down.
+            # event while this boot was in flight, and a just-booted instance
+            # must not survive into a pool that's shutting down.
             if self._shutdown.is_set():
                 self._teardown_instance(inst)
                 break
@@ -522,21 +737,19 @@ class WasmScriptRunner:
         record_ops: bool,
         rev: int,
     ) -> RunResult:
-        """PROVISIONAL (Task 8): runs `req.code` as a bare script via the
-        guest bootstrap's `exec` op and returns captured stdout. `model`,
-        `limits`, and `record_ops` are accepted (protocol conformance) but
-        UNUSED -- there is no bridge/facade wiring yet, so the snippet has
-        no `dr` object and cannot read/write the model. Task 9 replaces
-        this body with the real bridge loop.
+        """Execute `req.code` against `model` in the WASM sandbox, serving the
+        guest's `dr` facade calls with a per-run `BridgeDispatcher` and
+        enforcing `limits`. See the module docstring for the full protocol,
+        deadline mechanics, and error mapping. `rev` is accepted for protocol
+        conformance (the recorded op batch is validated/rebased against it at
+        the route layer, not here)."""
+        # Imported lazily so `data_rover.core` stays free of any bridge import
+        # cycle and so this API-layer dependency is obvious at the call site.
+        from data_rover.core.script.bridge import BridgeDispatcher
 
-        The response read is bounded via `_readline_bounded` (see its
-        docstring) as a COARSE safety net only -- `_RUN_RESPONSE_TIMEOUT_S`
-        is generous and this does not cancel a hung guest early the way
-        Task 9's epoch-based deadline will; it only stops the host process
-        itself from blocking forever on a `readline()` that can never
-        observe EOF on this O_RDWR-on-both-ends FIFO."""
         if self._closed:
             raise RuntimeError("WasmScriptRunner is closed")
+
         t0 = time.perf_counter()
         try:
             inst = self._pool.get(timeout=_POOL_GET_TIMEOUT_S)
@@ -545,45 +758,185 @@ class WasmScriptRunner:
                 "wasm pool exhausted: no warm instance became available within "
                 f"{_POOL_GET_TIMEOUT_S}s"
             ) from exc
+
+        # A pooled instance always carries its worker thread and store (both
+        # are set during boot, before the ready handshake `run()` waited on).
+        assert inst.thread is not None
+        thread = inst.thread
+
+        dispatcher = BridgeDispatcher(
+            model,
+            record_ops=record_ops,
+            max_ops=limits.max_ops,
+            max_op_bytes=limits.max_op_bytes,
+            page_limit=limits.page_limit,
+        )
+        # Absolute epoch deadline (in cadence ticks) for THIS run. +1 tick of
+        # margin so a run armed just before a tick isn't killed a hair early.
+        epoch_ticks = max(1, math.ceil(limits.wall_timeout_s / _EPOCH_TICK_INTERVAL_S)) + 1
+
+        fin: dict[str, Any] | None = None
         try:
-            inst.host_in.write(json.dumps({"id": 1, "op": "exec", "code": req.code}) + "\n")
+            # Arm per-run limits while the guest is PARKED on stdin (it has not
+            # yet received the start message, so it is blocked in a WASI read,
+            # not executing wasm back-edges -- cross-thread store access is
+            # safe in this window).
+            if inst.store is not None:
+                inst.store.set_epoch_deadline(epoch_ticks)
+                try:
+                    inst.store.set_limits(memory_size=limits.memory_bytes)
+                except Exception:
+                    # Some wasmtime builds only honor set_limits before
+                    # instantiation; the boot-baked default still applies.
+                    logger.debug("per-run set_limits ignored; boot default applies", exc_info=True)
+
+            start_msg = {
+                "code": req.code,
+                "entry": req.entry,
+                "element_id": req.element_id,
+                "facade_source": FACADE_SOURCE,
+                "stdout_bytes": limits.stdout_bytes,
+                "result_repr_bytes": limits.result_repr_bytes,
+            }
+            inst.host_in.write(json.dumps(start_msg) + "\n")
             inst.host_in.flush()
-            resp_line = _readline_bounded(inst.host_out, inst.thread, _RUN_RESPONSE_TIMEOUT_S)
-            if not resp_line:
-                return RunResult(
-                    stdout="",
-                    result_repr=None,
-                    ops=[],
-                    error=ScriptError(
-                        kind="runtime",
-                        message="wasm guest did not respond (exited or timed out)",
-                    ),
-                    duration_ms=int((time.perf_counter() - t0) * 1000),
-                    truncated=False,
-                )
-            resp = json.loads(resp_line)
+
+            wall_deadline = time.monotonic() + limits.wall_timeout_s
+            while True:
+                remaining = wall_deadline - time.monotonic()
+                read_budget = max(remaining, 0.0) + _TIMEOUT_READ_GRACE_S
+                line = _readline_bounded(inst.host_out, thread, read_budget)
+                if not line:
+                    break  # guest died (epoch kill / crash) or wall deadline hit
+                try:
+                    msg = json.loads(line)
+                except json.JSONDecodeError:
+                    logger.warning("wasm guest sent a non-JSON line; ignoring")
+                    continue
+                if msg.get("fin"):
+                    fin = msg
+                    break
+                # Bridge request: dispatch host-side and write the response.
+                resp = dispatcher.dispatch(msg)
+                inst.host_in.write(json.dumps(resp) + "\n")
+                inst.host_in.flush()
+
+            duration_ms = int((time.perf_counter() - t0) * 1000)
+            return self._build_result(inst, fin, dispatcher.ops, limits, duration_ms, wall_deadline)
         finally:
+            # The instance is always discarded after one run (never returned to
+            # the pool): teardown closes the FIFOs -- which also kills a guest
+            # still wedged at the wall deadline -- and removes the scratch dir.
             self._teardown_instance(inst)
 
-        duration_ms = int((time.perf_counter() - t0) * 1000)
-        guest_error = resp.get("error")
-        error = (
-            ScriptError(kind="runtime", message=str(guest_error)) if guest_error else None
-        )
+    def _build_result(
+        self,
+        inst: _PooledInstance,
+        fin: dict[str, Any] | None,
+        ops: list[dict[str, Any]],
+        limits: RunLimits,
+        duration_ms: int,
+        wall_deadline: float,
+    ) -> RunResult:
+        """Assemble the `RunResult` from the guest's final message, or -- if
+        the guest died without sending one -- from the captured worker outcome
+        (see the module docstring's error-mapping table). Reads the guest
+        stderr file, so this MUST run before `_teardown_instance` removes the
+        scratch dir (it does, in `run()`)."""
+        recorded_ops = list(ops)
+        if fin is not None:
+            err = fin.get("error")
+            error = None
+            if err is not None:
+                error = ScriptError(
+                    kind=err.get("kind", "runtime"),
+                    message=err.get("message", ""),
+                    traceback=err.get("traceback"),
+                )
+            stdout = fin.get("stdout", "")
+            truncated = bool(fin.get("truncated", False))
+            # Defensive host-side stdout cap (the guest caps too, but a
+            # misbehaving guest must not flood the caller).
+            if len(stdout) > limits.stdout_bytes:
+                stdout = stdout[: limits.stdout_bytes] + "..."
+                truncated = True
+            return RunResult(
+                stdout=stdout,
+                result_repr=fin.get("result_repr"),
+                ops=recorded_ops,
+                error=error,
+                duration_ms=duration_ms,
+                truncated=truncated,
+            )
+
+        # No final message: the guest died mid-run. Make sure the worker thread
+        # has finished so `exit_code`/`trap` are populated, then classify.
+        if inst.thread is not None:
+            inst.thread.join(timeout=_TEARDOWN_JOIN_TIMEOUT_S)
+        error = self._map_guest_death(inst, limits, wall_deadline)
         return RunResult(
-            stdout=resp.get("stdout", ""),
+            stdout="",
             result_repr=None,
-            ops=[],
+            ops=recorded_ops,
             error=error,
             duration_ms=duration_ms,
             truncated=False,
         )
 
+    def _map_guest_death(
+        self, inst: _PooledInstance, limits: RunLimits, wall_deadline: float
+    ) -> ScriptError:
+        """Classify a guest that died without emitting a final message. See the
+        module docstring's error-mapping table."""
+        trap = inst.trap
+        if trap is not None:
+            if getattr(trap, "trap_code", None) is TrapCode.INTERRUPT:
+                return ScriptError(
+                    kind="timeout",
+                    message=f"execution exceeded the wall timeout of {limits.wall_timeout_s}s",
+                )
+            # Portability branch: on wasmtime builds where a store memory-limit
+            # breach traps on allocation (rather than surfacing as an in-guest
+            # MemoryError + nonzero exit), it lands here.
+            return ScriptError(kind="memory", message=f"guest trapped: {trap}")
+
+        exit_code = inst.exit_code
+        if exit_code:  # nonzero WASI exit
+            stderr = self._read_stderr(inst)
+            if "MemoryError" in stderr:
+                return ScriptError(
+                    kind="memory",
+                    message="guest exceeded its memory budget",
+                    traceback=stderr or None,
+                )
+            return ScriptError(
+                kind="runtime",
+                message=f"guest exited with code {exit_code}",
+                traceback=stderr or None,
+            )
+
+        # Exit 0 (or unknown) but no final message: most likely the host read
+        # hit the wall deadline before the guest could finish.
+        if time.monotonic() >= wall_deadline:
+            return ScriptError(
+                kind="timeout",
+                message=f"execution exceeded the wall timeout of {limits.wall_timeout_s}s",
+            )
+        return ScriptError(kind="runtime", message="guest exited without producing a result")
+
+    def _read_stderr(self, inst: _PooledInstance) -> str:
+        """Best-effort read of the instance's per-instance guest stderr log
+        (used only for memory-cap classification / diagnostics)."""
+        try:
+            return (inst.scratch_dir / "guest_stderr.log").read_text(errors="replace")
+        except OSError:
+            return ""
+
     # -- lifecycle --------------------------------------------------------
 
     def close(self) -> None:
-        """Idempotent shutdown: stops the refill thread, drains and tears
-        down every pooled instance, and removes the shared bootstrap
+        """Idempotent shutdown: stops the refill + epoch-ticker threads, drains
+        and tears down every pooled instance, and removes the shared bootstrap
         scripts dir."""
         with self._close_lock:
             if self._closed:
@@ -591,6 +944,7 @@ class WasmScriptRunner:
             self._closed = True
             self._shutdown.set()
         self._refill_thread.join(timeout=_TEARDOWN_JOIN_TIMEOUT_S)
+        self._epoch_thread.join(timeout=_TEARDOWN_JOIN_TIMEOUT_S)
         while True:
             try:
                 inst = self._pool.get_nowait()

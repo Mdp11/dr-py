@@ -5,13 +5,13 @@ Opt-in (``pytestmark = pytest.mark.integration``, deselected by the default
 CPython-WASI guest binary (`spikes/code_exec/fetch_python_wasi.sh`), which is
 too large to commit and isn't available in every dev/CI environment.
 
-Task 8 scope (see `.superpowers/sdd/task-8-brief.md` and the task-8 report):
-`WasmScriptRunner.run()` is PROVISIONAL here — it boots a pool instance, runs
-raw Python source through a minimal guest bootstrap loop, and captures
-stdout. There is no `dr` facade, no bridge dispatch, no deadline/memory
-enforcement yet; that lands in Task 9, which will also restore the brief's
-original `test_wasm_standalone_read` (asserting `dr.elements()` reads work
-through the real bridge).
+Task 9 scope (see `.superpowers/sdd/task-9-brief.md`): `WasmScriptRunner.run()`
+now drives the REAL bridge loop — it injects `FACADE_SOURCE` + user code into
+the guest, serves the guest's `dr` facade calls with a per-run
+`BridgeDispatcher`, enforces the two-sided wall deadline (shared epoch cadence
+ticker + wall-bounded FIFO reads), applies the determinism shims, and maps
+outcomes (timeout / memory / runtime / syntax) to `RunResult`/`ScriptError`.
+These tests exercise those behaviours end-to-end against the real guest.
 """
 
 from __future__ import annotations
@@ -47,10 +47,8 @@ def wasm_runner() -> Iterator[WasmScriptRunner]:
 
 
 def test_wasm_standalone_print(wasm_runner: WasmScriptRunner) -> None:
-    """Provisional Task-8 gate: a trivial `print` script's stdout round-trips
-    through a warm pool instance. Task 9 replaces this with the brief's
-    `test_wasm_standalone_read`, which exercises `dr.elements()` through the
-    real facade/bridge."""
+    """A plain `print` script's stdout round-trips through the real bridge
+    loop (stdout is captured guest-side and delivered in the final message)."""
     from data_rover.core.script.runner import RunLimits, RunRequest
 
     from tests.script.conftest import tiny_model
@@ -66,11 +64,178 @@ def test_wasm_standalone_print(wasm_runner: WasmScriptRunner) -> None:
     assert res.stdout.strip() == "hello-from-wasm"
 
 
+def test_wasm_standalone_read(wasm_runner: WasmScriptRunner) -> None:
+    """The brief's original read test: `dr.elements()` iterates the model
+    through the real facade+bridge, dispatched host-side by a per-run
+    `BridgeDispatcher` against `tiny_model()`."""
+    from data_rover.core.script.runner import RunLimits, RunRequest
+
+    from tests.script.conftest import tiny_model
+
+    code = "ids = sorted(e.id for e in dr.elements())\nprint(ids)"
+    res = wasm_runner.run(
+        tiny_model(),
+        RunRequest(code=code),
+        RunLimits(),
+        record_ops=False,
+        rev=0,
+    )
+    assert res.error is None, res.error
+    assert res.stdout.strip() == "['b1', 'b2', 'b3']"
+
+
+def test_wasm_value_entry(wasm_runner: WasmScriptRunner) -> None:
+    """`entry="value"` resolves the `value` function and calls it with the
+    Element handle for `element_id`, and its return value becomes
+    `result_repr` (matching TrustedRunner semantics)."""
+    from data_rover.core.script.runner import RunLimits, RunRequest
+
+    from tests.script.conftest import tiny_model
+
+    res = wasm_runner.run(
+        tiny_model(),
+        RunRequest(code="def value(el):\n    return el['name']", entry="value", element_id="b1"),
+        RunLimits(),
+        record_ops=False,
+        rev=0,
+    )
+    assert res.error is None, res.error
+    assert res.result_repr == "'Building One'"
+
+
+def test_wasm_records_op(wasm_runner: WasmScriptRunner) -> None:
+    """A write op flows through the facade -> bridge -> per-run dispatcher and
+    is RECORDED (never applied): the op appears in `RunResult.ops` and the
+    element is still present in the live model."""
+    from data_rover.core.script.runner import RunLimits, RunRequest
+
+    from tests.script.conftest import tiny_model
+
+    m = tiny_model()
+    res = wasm_runner.run(
+        m,
+        RunRequest(code="dr.element('b1').delete()"),
+        RunLimits(),
+        record_ops=True,
+        rev=0,
+    )
+    assert res.error is None, res.error
+    assert res.ops == [{"kind": "delete_element", "id": "b1"}]
+    assert "b1" in m.elements
+
+
+def test_wasm_read_only_rejects_write(wasm_runner: WasmScriptRunner) -> None:
+    """`record_ops=False` rejects a write at the bridge; the guest facade
+    raises `dr.ReadOnlyError`, surfaced as a runtime error whose message
+    preserves `ReadOnlyError`."""
+    from data_rover.core.script.runner import RunLimits, RunRequest
+
+    from tests.script.conftest import tiny_model
+
+    res = wasm_runner.run(
+        tiny_model(),
+        RunRequest(code="dr.element('b1').delete()"),
+        RunLimits(),
+        record_ops=False,
+        rev=0,
+    )
+    assert res.error is not None
+    assert res.error.kind == "runtime"
+    assert "ReadOnlyError" in res.error.message
+
+
+def test_wasm_timeout(wasm_runner: WasmScriptRunner) -> None:
+    """A CPU-bound `while True: pass` is killed by the epoch deadline within
+    ~`wall_timeout_s`, mapped to `kind="timeout"`, and the runner stays usable
+    afterwards (the pool refills)."""
+    from data_rover.core.script.runner import RunLimits, RunRequest
+
+    from tests.script.conftest import tiny_model
+
+    t0 = time.perf_counter()
+    res = wasm_runner.run(
+        tiny_model(),
+        RunRequest(code="while True: pass"),
+        RunLimits(wall_timeout_s=1.0),
+        record_ops=False,
+        rev=0,
+    )
+    elapsed = time.perf_counter() - t0
+    assert res.error is not None and res.error.kind == "timeout"
+    assert elapsed < 5.0, f"timeout took too long to fire: {elapsed:.1f}s"
+
+    # The runner must remain usable after a timeout kill: the killed instance
+    # is discarded and the pool refills, so the next run works.
+    ok = wasm_runner.run(
+        tiny_model(),
+        RunRequest(code='print("still-alive")'),
+        RunLimits(),
+        record_ops=False,
+        rev=0,
+    )
+    assert ok.error is None
+    assert ok.stdout.strip() == "still-alive"
+
+
+def test_wasm_memory_cap(wasm_runner: WasmScriptRunner) -> None:
+    """A guest allocation past the store memory cap breaches the limiter and
+    is mapped to `kind="memory"` (nonzero WASI exit + a `MemoryError`
+    traceback on the per-instance guest stderr, per the M0 findings)."""
+    from data_rover.core.script.runner import RunLimits, RunRequest
+
+    from tests.script.conftest import tiny_model
+
+    res = wasm_runner.run(
+        tiny_model(),
+        RunRequest(code="x = bytearray(512 * 1024 * 1024)"),
+        RunLimits(),
+        record_ops=False,
+        rev=0,
+    )
+    assert res.error is not None and res.error.kind == "memory"
+
+
+def test_wasm_determinism(wasm_runner: WasmScriptRunner) -> None:
+    """Two runs of a time/random-using snippet produce byte-identical stdout
+    (fixed WASI clock/random shims + `PYTHONHASHSEED=0`)."""
+    from data_rover.core.script.runner import RunLimits, RunRequest
+
+    from tests.script.conftest import tiny_model
+
+    code = "import time, random\nprint(time.time(), random.random(), hash('spike'))"
+    r1 = wasm_runner.run(tiny_model(), RunRequest(code=code), RunLimits(), record_ops=False, rev=0)
+    r2 = wasm_runner.run(tiny_model(), RunRequest(code=code), RunLimits(), record_ops=False, rev=0)
+    assert r1.error is None, r1.error
+    assert r2.error is None, r2.error
+    assert r1.stdout == r2.stdout
+    assert r1.stdout.strip() != ""
+
+
+def test_wasm_runtime_error(wasm_runner: WasmScriptRunner) -> None:
+    """An unhandled user exception maps to `kind="runtime"` with a traceback
+    stripped to the `<snippet>` frames (never a host/bootstrap frame)."""
+    from data_rover.core.script.runner import RunLimits, RunRequest
+
+    from tests.script.conftest import tiny_model
+
+    res = wasm_runner.run(
+        tiny_model(),
+        RunRequest(code="raise ValueError('boom')"),
+        RunLimits(),
+        record_ops=False,
+        rev=0,
+    )
+    assert res.error is not None
+    assert res.error.kind == "runtime"
+    assert "ValueError: boom" in res.error.message
+    assert res.error.traceback is not None
+    assert "script_runner" not in res.error.traceback
+
+
 def test_wasm_pool_refill_and_sequential_runs(wasm_runner: WasmScriptRunner) -> None:
     """Two sequential runs both succeed: the first consumes a warm instance,
     the background refill thread replaces it, and the second run gets a
-    working instance too (pool_size=2, so the fixture's first test already
-    consumed one — this proves refill keeps the pool usable across calls)."""
+    working instance too."""
     from data_rover.core.script.runner import RunLimits, RunRequest
 
     from tests.script.conftest import tiny_model
@@ -88,8 +253,8 @@ def test_wasm_pool_refill_and_sequential_runs(wasm_runner: WasmScriptRunner) -> 
 
 
 def test_wasm_runner_close_is_idempotent() -> None:
-    """`.close()` drains the pool, joins the refill thread, and can be called
-    more than once (lifespan shutdown may call it defensively)."""
+    """`.close()` drains the pool, joins the refill/epoch threads, and can be
+    called more than once (lifespan shutdown may call it defensively)."""
     if not os.path.exists(GUEST):
         pytest.skip("guest binary not fetched (bash spikes/code_exec/fetch_python_wasi.sh)")
     from data_rover.api.script_runner import WasmScriptRunner
@@ -106,7 +271,7 @@ def test_wasm_runner_close_is_idempotent() -> None:
 
 
 def test_wasm_boot_failure_does_not_wedge_pool() -> None:
-    """Reviewer-found Critical fix regression test.
+    """Reviewer-found Critical fix regression test (Task 8).
 
     A bad `guest_lib_path` makes `wasi.preopen_dir` raise inside the guest
     worker thread almost immediately (before it ever writes the `ready`
@@ -117,22 +282,12 @@ def test_wasm_boot_failure_does_not_wedge_pool() -> None:
     observe EOF either, even once the guest thread has already died: the
     host itself is always a live writer reference on the fd. Pre-fix, this
     made `_boot_instance` hang forever, which wedged the background refill
-    thread permanently (its `except Exception` retry-with-backoff never got
-    a chance to fire) and leaked that boot attempt's FIFOs/scratch dir for
-    the life of the process.
+    thread permanently and leaked that boot attempt's FIFOs/scratch dir.
 
     This test constructs a runner against a bad `guest_lib_path` on a
     background thread and asserts that BOTH construction and `.close()`
-    complete within a generous bound (proving the refill loop actually
-    recovers via retry rather than wedging) AND that no scratch dir from
-    the failed boot attempt(s) is left behind (proving the bounded-read
-    fix's failure path still runs full cleanup). Pre-fix, this test fails
-    two ways: the background thread is still alive when we time out the
-    join (assertion failure, not a real pytest hang — we bound the wait
-    ourselves rather than relying on external test-runner timeout
-    machinery), and the leak-detection `dr_wasm_inst_*` scratch dir set
-    printed in the failure message is nonempty had we forced a wait long
-    enough to observe the first hang.
+    complete within a generous bound AND that no scratch dir from the failed
+    boot attempt(s) is left behind.
     """
     if not os.path.exists(GUEST):
         pytest.skip("guest binary not fetched (bash spikes/code_exec/fetch_python_wasi.sh)")
@@ -154,10 +309,6 @@ def test_wasm_boot_failure_does_not_wedge_pool() -> None:
     watchdog = threading.Thread(target=_construct_and_close, daemon=True)
     t0 = time.perf_counter()
     watchdog.start()
-    # Generous bound: normal path is ~1.5s (the sleep) + close()'s bounded
-    # joins; pre-fix this hangs indefinitely on the first boot's readline(),
-    # so 20s comfortably distinguishes "recovered" from "wedged" without
-    # being flaky on a loaded CI box.
     watchdog.join(timeout=20)
     elapsed = time.perf_counter() - t0
 
