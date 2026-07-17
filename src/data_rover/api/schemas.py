@@ -644,7 +644,13 @@ class RevertRequest(BaseModel):
 
 
 class ArtifactHeaderOut(BaseModel):
-    """Artifact list row: everything the sidebar renders, payload omitted."""
+    """Artifact list row: everything the sidebar renders, payload omitted.
+
+    `entry_points` is the ONE payload-derived field surfaced on headers: the
+    sidebar's entry-point badges (and the M2/M3 embedding pickers) filter on
+    it, and it is server-owned anyway (`_apply_derived_metadata` recomputes it
+    on every write). None for non-snippet kinds; a (possibly empty) list for
+    `code_snippet` rows."""
 
     id: str
     kind: str
@@ -652,6 +658,7 @@ class ArtifactHeaderOut(BaseModel):
     artifact_rev: int
     updated_at: datetime
     updated_by: str | None = None
+    entry_points: list[str] | None = None
 
 
 class ArtifactOut(ArtifactHeaderOut):

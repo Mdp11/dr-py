@@ -102,6 +102,27 @@ def test_create_code_snippet_invalid_payload_rejected(client: TestClient) -> Non
     assert r.status_code == 422, r.text
 
 
+def test_snippet_header_carries_entry_points(client: TestClient) -> None:
+    code = "def value(el):\n    return el.name\n"
+    created = client.post(
+        papi("/artifacts"),
+        json={"kind": "code_snippet", "name": "snip", "payload": {"code": code}},
+    )
+    assert created.status_code == 201, created.text
+    assert sorted(created.json()["entry_points"]) == ["script", "value"]
+
+    listed = client.get(papi("/artifacts"))
+    row = next(a for a in listed.json()["items"] if a["id"] == created.json()["id"])
+    assert sorted(row["entry_points"]) == ["script", "value"]
+
+
+def test_non_snippet_header_entry_points_is_none(client: TestClient) -> None:
+    created = _create(client)
+    listed = client.get(papi("/artifacts"))
+    row = next(a for a in listed.json()["items"] if a["id"] == created["id"])
+    assert row["entry_points"] is None
+
+
 def test_update_rev_conflict_and_success(client: TestClient) -> None:
     created = _create(client)
     stale = client.put(
