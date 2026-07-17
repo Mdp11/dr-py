@@ -14,6 +14,10 @@ for line in sys.stdin:
         resp = {"id": req["id"], "pong": True}
     elif op == "echo":
         resp = {"id": req["id"], "x": req["x"] * 2}
+    elif op == "batch":
+        # Simulates ScriptColumn evaluation: value(el) = len(el["name"]) per element.
+        values = [len(el["name"]) for el in req["elements"]]
+        resp = {"id": req["id"], "values": values}
     else:
         resp = {"id": req["id"], "error": f"unknown op {op}"}
     sys.stdout.write(json.dumps(resp) + "\n")
