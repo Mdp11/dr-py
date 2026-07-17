@@ -43,3 +43,8 @@ def test_entry_points_derived():
 def test_bad_entry_signature_is_warning():
     diags = lint_code("def value(a, b):\n    return 1\n")
     assert any(d.severity == "warning" and "value" in d.message for d in diags)
+
+
+def test_except_binding_is_known():
+    code = "try:\n    x = 1\nexcept Exception as e:\n    print(e)\n"
+    assert lint_code(code) == []

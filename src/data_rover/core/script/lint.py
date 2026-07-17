@@ -103,3 +103,5 @@ def _collect_bound_names(tree: ast.Module, known: set[str]) -> None:
             known.add((node.asname or node.name).split(".")[0])
         elif isinstance(node, ast.Global) or isinstance(node, ast.Nonlocal):
             known.update(node.names)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            known.add(node.name)
