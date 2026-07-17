@@ -83,6 +83,7 @@ import json
 import logging
 import os
 import queue
+import selectors
 import shutil
 import tempfile
 import threading
@@ -139,6 +140,31 @@ _POOL_GET_TIMEOUT_S = 10.0
 #: timeout here just bounds `.close()`/per-run teardown latency, not
 #: correctness).
 _TEARDOWN_JOIN_TIMEOUT_S = 5.0
+
+#: Ceiling on how long `_boot_instance` waits for the guest's `{"ready":
+#: true}` handshake line (see `_readline_bounded`'s docstring for why a
+#: bare blocking `readline()` here can hang forever). Generous vs. the
+#: measured ~110-170ms boot-to-ready (`FINDINGS.md` Criterion 6) -- this is
+#: a "genuinely wedged guest" ceiling, not a normal-path budget.
+_BOOT_HANDSHAKE_TIMEOUT_S = 30.0
+
+#: How often `_readline_bounded` re-checks worker-thread liveness between
+#: `select` polls. Small enough that a fast synchronous boot failure (e.g.
+#: `wasmtime` raising on `preopen_dir` for a bad path -- the guest thread
+#: dies in milliseconds) is detected and reported almost immediately,
+#: rather than waiting out the full `_BOOT_HANDSHAKE_TIMEOUT_S` ceiling for
+#: no reason.
+_BOOT_POLL_INTERVAL_S = 0.05
+
+#: Ceiling on how long `run()`'s provisional bridge-free path waits for the
+#: guest's `exec` response line. This is a COARSE SAFETY NET only, not real
+#: deadline enforcement -- Task 9 replaces this whole request/response call
+#: site with epoch-based cancellation keyed off `RunLimits.wall_timeout_s`.
+#: Deliberately generous (a hung user snippet under the current provisional
+#: path has no way to be killed early; this just stops the host process
+#: itself from blocking forever on a `readline()` that will genuinely never
+#: return).
+_RUN_RESPONSE_TIMEOUT_S = 60.0
 
 
 # Minimal newline-JSON guest bootstrap: ready handshake, then a request loop
@@ -252,6 +278,56 @@ def _make_engine() -> Engine:
     return Engine(cfg)
 
 
+def _readline_bounded(
+    f: TextIO, thread: threading.Thread, timeout: float, poll_interval: float = _BOOT_POLL_INTERVAL_S
+) -> str:
+    """Read one line from `f` with a bounded wait, never blocking forever.
+
+    **Why a bare `f.readline()` cannot be trusted here (post-review fix).**
+    Both FIFOs backing a pool instance are opened `O_RDWR` on the host side
+    (see the module docstring) so the `open()` call never blocks and the
+    pipe never sees a premature EOF while the host holds it. That safety
+    property has a sharp edge: because the *host* itself is always a live
+    writer reference on `f`'s underlying fd, the pipe can never reach a
+    true EOF from the host's read side, no matter what the guest does --
+    not even if the guest process/thread has already crashed. A bare
+    `f.readline()` therefore blocks INDEFINITELY if the guest never writes
+    another line, and the classic "empty string means EOF" signal a caller
+    might reach for to detect that never fires. This was reproduced
+    empirically: a bad `guest_lib_path` makes `wasi.preopen_dir` raise
+    inside the guest worker thread almost immediately, the exception is
+    caught and logged, the thread exits -- and the boot caller's
+    `host_out.readline()` still hangs forever, because nothing about the
+    thread exiting changes the fd's readability from the host's OWN O_RDWR
+    handle's point of view.
+
+    The fix: poll `select` for readability in `poll_interval` slices,
+    bounded by `timeout` overall, ALSO checking `thread.is_alive()` between
+    slices. A dead worker thread will never write another line, so bailing
+    out (returning `""`, the same sentinel a real EOF would produce) the
+    moment the thread is gone turns a fast synchronous failure (dead in
+    milliseconds) into a fast, bounded caller-side failure too, instead of
+    waiting out the full `timeout` ceiling for no reason. A guest that is
+    genuinely alive but wedged (or just slow) still gets the full
+    `timeout` before this gives up.
+
+    Returns `""` on timeout or thread death -- callers treat that exactly
+    like a real EOF (see `_boot_instance`'s "not ready_line" branch).
+    """
+    sel = selectors.DefaultSelector()
+    try:
+        sel.register(f, selectors.EVENT_READ)
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if sel.select(timeout=poll_interval):
+                return f.readline()
+            if not thread.is_alive():
+                return ""
+        return ""
+    finally:
+        sel.close()
+
+
 @dataclass
 class _PooledInstance:
     """A booted-and-ready (but not yet run) guest instance: FIFOs open,
@@ -331,18 +407,24 @@ class WasmScriptRunner:
         thread = threading.Thread(target=_run_guest, daemon=True)
         thread.start()
 
-        # Any failure past this point (EOF, malformed JSON, missing/false
-        # "ready") must still release the FIFOs/thread/scratch dir -- a boot
-        # failure that leaks these would slowly exhaust fds/tmp dirs across
-        # refill retries.
+        # Any failure past this point (bounded-wait timeout, malformed JSON,
+        # missing/false "ready") must still release the FIFOs/thread/scratch
+        # dir -- a boot failure that leaks these would slowly exhaust
+        # fds/tmp dirs across refill retries. The read itself is bounded via
+        # `_readline_bounded` (see its docstring): a bare `readline()` on
+        # this O_RDWR-on-both-ends FIFO can never observe EOF, so it cannot
+        # be trusted to return on a dead/wedged guest.
         try:
-            ready_line = host_out.readline()
+            ready_line = _readline_bounded(host_out, thread, _BOOT_HANDSHAKE_TIMEOUT_S)
             if not ready_line:
                 if boot_error:
                     raise RuntimeError(
-                        "wasm guest exited before ready handshake"
+                        "wasm guest failed to send ready handshake"
                     ) from boot_error[0]
-                raise RuntimeError("wasm guest exited before ready handshake")
+                raise RuntimeError(
+                    "wasm guest failed to send ready handshake within "
+                    f"{_BOOT_HANDSHAKE_TIMEOUT_S}s"
+                )
             ready = json.loads(ready_line)
             if not ready.get("ready"):
                 raise RuntimeError(f"wasm guest sent unexpected first line: {ready!r}")
@@ -445,7 +527,14 @@ class WasmScriptRunner:
         `limits`, and `record_ops` are accepted (protocol conformance) but
         UNUSED -- there is no bridge/facade wiring yet, so the snippet has
         no `dr` object and cannot read/write the model. Task 9 replaces
-        this body with the real bridge loop."""
+        this body with the real bridge loop.
+
+        The response read is bounded via `_readline_bounded` (see its
+        docstring) as a COARSE safety net only -- `_RUN_RESPONSE_TIMEOUT_S`
+        is generous and this does not cancel a hung guest early the way
+        Task 9's epoch-based deadline will; it only stops the host process
+        itself from blocking forever on a `readline()` that can never
+        observe EOF on this O_RDWR-on-both-ends FIFO."""
         if self._closed:
             raise RuntimeError("WasmScriptRunner is closed")
         t0 = time.perf_counter()
@@ -459,13 +548,16 @@ class WasmScriptRunner:
         try:
             inst.host_in.write(json.dumps({"id": 1, "op": "exec", "code": req.code}) + "\n")
             inst.host_in.flush()
-            resp_line = inst.host_out.readline()
+            resp_line = _readline_bounded(inst.host_out, inst.thread, _RUN_RESPONSE_TIMEOUT_S)
             if not resp_line:
                 return RunResult(
                     stdout="",
                     result_repr=None,
                     ops=[],
-                    error=ScriptError(kind="runtime", message="wasm guest closed stdout"),
+                    error=ScriptError(
+                        kind="runtime",
+                        message="wasm guest did not respond (exited or timed out)",
+                    ),
                     duration_ms=int((time.perf_counter() - t0) * 1000),
                     truncated=False,
                 )
