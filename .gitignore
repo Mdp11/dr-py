@@ -25,3 +25,5 @@ docs/
 # generated benchmark fixtures
 benchmarks/
 dev.db
+
+spikes/code_exec/vendor/

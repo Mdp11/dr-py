@@ -18,6 +18,9 @@ pytest = "9.0.*"
 ruff = "0.15.*"
 mypy = "1.20.*"
 
+[feature.core-dev.pypi-dependencies]
+wasmtime = ">=30"
+
 [feature.api.dependencies]
 fastapi = "0.115.*"
 uvicorn = "0.32.*"
