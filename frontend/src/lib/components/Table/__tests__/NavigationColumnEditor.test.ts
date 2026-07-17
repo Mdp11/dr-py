@@ -97,6 +97,7 @@ describe('NavigationColumnEditor inline mode', () => {
 			artifact_rev: 1,
 			updated_at: '',
 			updated_by: null,
+			entry_points: null,
 			payload: saved as unknown as Record<string, unknown>
 		});
 		const onChange = vi.fn();

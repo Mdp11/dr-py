@@ -18,7 +18,8 @@ const HEADER = {
 	name: 'Sensors',
 	artifact_rev: 2,
 	updated_at: '2026-07-05T00:00:00Z',
-	updated_by: null
+	updated_by: null,
+	entry_points: null
 };
 
 const TABLE_HEADER = {
@@ -27,7 +28,8 @@ const TABLE_HEADER = {
 	name: 'Buildings table',
 	artifact_rev: 1,
 	updated_at: '2026-07-05T00:00:00Z',
-	updated_by: null
+	updated_by: null,
+	entry_points: null
 };
 
 beforeEach(() => {
@@ -128,6 +130,7 @@ describe('artifacts store', () => {
 			artifact_rev: 1,
 			updated_at: '2026-07-05T00:00:00Z',
 			updated_by: null,
+			entry_points: null,
 			payload: payload as unknown as Record<string, unknown>
 		});
 		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [TABLE_HEADER] });

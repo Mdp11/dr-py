@@ -77,7 +77,8 @@ export async function renameArtifact(id: string, name: string): Promise<void> {
 					name: updated.name,
 					artifact_rev: updated.artifact_rev,
 					updated_at: updated.updated_at,
-					updated_by: updated.updated_by
+					updated_by: updated.updated_by,
+					entry_points: updated.entry_points
 				}
 			: a
 	);

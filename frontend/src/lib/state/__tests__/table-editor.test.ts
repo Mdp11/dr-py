@@ -157,6 +157,7 @@ describe('table-editor', () => {
 			artifact_rev: 3,
 			updated_at: '',
 			updated_by: null,
+			entry_points: null,
 			payload: {
 				schema_version: 1,
 				default_cell_mode: 'collapse',
@@ -198,6 +199,7 @@ describe('table-editor', () => {
 			artifact_rev: 1,
 			updated_at: '',
 			updated_by: null,
+			entry_points: null,
 			payload: {
 				schema_version: 1,
 				default_cell_mode: 'collapse',
@@ -247,6 +249,7 @@ describe('table-editor', () => {
 			artifact_rev: 1,
 			updated_at: '',
 			updated_by: null,
+			entry_points: null,
 			payload: {}
 		});
 		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({ items: [] });
@@ -268,6 +271,7 @@ describe('table-editor', () => {
 			artifact_rev: 4,
 			updated_at: '',
 			updated_by: null,
+			entry_points: null,
 			payload: {
 				schema_version: 1,
 				default_cell_mode: 'collapse',
@@ -309,6 +313,7 @@ describe('table-editor', () => {
 			artifact_rev: 4,
 			updated_at: '',
 			updated_by: null,
+			entry_points: null,
 			payload: {
 				schema_version: 1,
 				default_cell_mode: 'collapse',
@@ -325,6 +330,7 @@ describe('table-editor', () => {
 			artifact_rev: 1,
 			updated_at: '',
 			updated_by: null,
+			entry_points: null,
 			payload: {}
 		});
 		const update = vi.spyOn(artifactsApi, 'updateArtifact');
@@ -349,6 +355,7 @@ describe('table-editor', () => {
 			artifact_rev: 4,
 			updated_at: '',
 			updated_by: null,
+			entry_points: null,
 			payload: {
 				schema_version: 1,
 				default_cell_mode: 'collapse',
@@ -411,6 +418,7 @@ describe('table-editor', () => {
 			artifact_rev: 1,
 			updated_at: '',
 			updated_by: null,
+			entry_points: null,
 			payload: {}
 		});
 		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({ items: [] });
@@ -551,6 +559,7 @@ describe('table-editor', () => {
 			artifact_rev: 4,
 			updated_at: '',
 			updated_by: null,
+			entry_points: null,
 			payload: {
 				schema_version: 1,
 				default_cell_mode: 'collapse',
@@ -571,6 +580,7 @@ describe('table-editor', () => {
 			artifact_rev: 1,
 			updated_at: '',
 			updated_by: null,
+			entry_points: null,
 			payload: {}
 		});
 		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({ items: [] });

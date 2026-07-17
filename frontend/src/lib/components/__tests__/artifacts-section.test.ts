@@ -11,7 +11,8 @@ const HEADER = {
 	name: 'Sensors',
 	artifact_rev: 1,
 	updated_at: '2026-07-05T00:00:00Z',
-	updated_by: null
+	updated_by: null,
+	entry_points: null
 };
 
 let host: HTMLElement;

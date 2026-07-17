@@ -218,6 +218,7 @@ describe('ColumnSourceEditor', () => {
 			artifact_rev: 1,
 			updated_at: '',
 			updated_by: null,
+			entry_points: null,
 			payload: ONE_HOP_PATH as unknown as Record<string, unknown>
 		});
 		const columns = [propColumn(), navColumn({ ref: 'nav1' })];

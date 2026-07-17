@@ -190,6 +190,7 @@ describe('NavigationColumnEditor step-index field', () => {
 			artifact_rev: 1,
 			updated_at: '',
 			updated_by: null,
+			entry_points: null,
 			payload: ONE_STEP_PATH as unknown as Record<string, unknown>
 		});
 		const c = render(navColumn({ ref: 'a1' }), vi.fn());
@@ -305,6 +306,7 @@ describe('RowSourceEditor step-index field', () => {
 			artifact_rev: 1,
 			updated_at: '',
 			updated_by: null,
+			entry_points: null,
 			payload: ONE_STEP_PATH as unknown as Record<string, unknown>
 		});
 		const c = render(defnWith({ kind: 'navigation', navigation: { ref: 'a1' }, step_index: null }));
