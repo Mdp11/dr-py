@@ -18,9 +18,26 @@ Two per-process, in-memory pieces of state live at module scope (both
 thread-safe, both scoped to THIS API process — not mirrored across replicas,
 matching ``LockTable``'s Phase 7 deferral note):
 
-- ``_active_runs`` — a run-id -> (owner, cancel) registry so ``POST
-  /snippets/cancel`` can look up and authorize a cancel request. Registered
-  just before ``runner.run(...)`` is called, deregistered in a ``finally``.
+- ``_active_runs`` — a ``(project_id, run_id) -> _ActiveRun(owner, cancel)``
+  registry so ``POST /snippets/cancel`` can look up and authorize a cancel
+  request. Registered just before ``runner.run(...)`` is called, deregistered
+  in a ``finally``.
+
+  **Collision semantics** (reviewer fix, see task-11 review): the key is the
+  *pair* ``(project_id, run_id)``, not bare ``run_id`` — two different
+  projects reusing the same client-chosen run_id no longer collide.
+  Registration is last-register-wins: if the same key is registered twice
+  before the first is deregistered (e.g. a client reuses a run_id while an
+  earlier run with that id is still in flight), the second call silently
+  replaces the first in the dict, same as an ordinary dict assignment.
+  Deregistration is **token-guarded** to make that safe: ``_register_run``
+  returns the ``_ActiveRun`` it just inserted as an opaque token, and
+  ``_deregister_run`` only pops the slot when the value CURRENTLY stored
+  there ``is`` that exact token (identity compare under the lock). So a
+  stale caller — one holding an older token because its key got overwritten
+  by a newer registration — can never delete an entry it doesn't own; the
+  newer registration's owner keeps full cancel capability until it
+  deregisters with its own token.
 - ``_concurrency_guard`` — a non-blocking global + per-user run limiter
   (``snippet_concurrency`` / ``snippet_per_user_concurrency`` settings from
   Task 10). Acquire fails fast (429) rather than queuing; released in a
@@ -125,18 +142,33 @@ class _ActiveRun:
     cancel: Callable[[], None]
 
 
-_active_runs: dict[str, _ActiveRun] = {}
+#: keyed by (project_id, run_id) -- see the module docstring's "Collision
+#: semantics" note for why bare run_id was not enough and why deregistration
+#: must be token-guarded rather than an unconditional pop-by-key.
+_active_runs: dict[tuple[str, str], _ActiveRun] = {}
 _active_runs_lock = threading.Lock()
 
 
-def _register_run(run_id: str, user_id: str, cancel: Callable[[], None]) -> None:
+def _register_run(
+    project_id: str, run_id: str, user_id: str, cancel: Callable[[], None]
+) -> _ActiveRun:
+    """Insert (last-register-wins) and return the inserted entry as an
+    opaque deregistration token -- the caller must pass this exact object
+    back to `_deregister_run` so a stale caller can never delete a newer
+    registration at the same key."""
+    entry = _ActiveRun(user_id=user_id, cancel=cancel)
     with _active_runs_lock:
-        _active_runs[run_id] = _ActiveRun(user_id=user_id, cancel=cancel)
+        _active_runs[(project_id, run_id)] = entry
+    return entry
 
 
-def _deregister_run(run_id: str) -> None:
+def _deregister_run(project_id: str, run_id: str, token: _ActiveRun) -> None:
+    """Compare-and-delete: only removes the slot if it still holds THIS
+    token. A no-op if the slot was already removed or was overwritten by a
+    newer `_register_run` call for the same key (see module docstring)."""
     with _active_runs_lock:
-        _active_runs.pop(run_id, None)
+        if _active_runs.get((project_id, run_id)) is token:
+            del _active_runs[(project_id, run_id)]
 
 
 def _noop_cancel() -> None:
@@ -225,13 +257,17 @@ def run_snippet(
         raise HTTPException(status_code=429, detail="too many concurrent snippet runs")
 
     start_rev = session.model_rev
+    token: _ActiveRun | None = None
     try:
         # Registration lives INSIDE the try (not between acquire and try, as
         # a prior draft had it) so that even a freak failure in
         # `_register_run` itself can't leak the concurrency permit acquired
         # just above -- the finally below always fires once acquire
-        # succeeded, no matter what happens after it.
-        _register_run(payload.run_id, user.id, _noop_cancel)
+        # succeeded, no matter what happens after it. `token` gates the
+        # deregister below: if `_register_run` never returned (raised before
+        # assignment), `token` stays None and deregister is skipped -- there
+        # is nothing of ours in the registry to remove.
+        token = _register_run(project_id, payload.run_id, user.id, _noop_cancel)
         res = runner.run(
             model,
             RunRequest(code=code, entry=payload.entry, element_id=payload.element_id),
@@ -240,7 +276,8 @@ def run_snippet(
             rev=start_rev,
         )
     finally:
-        _deregister_run(payload.run_id)
+        if token is not None:
+            _deregister_run(project_id, payload.run_id, token)
         _concurrency_guard.release(user.id)
 
     end_rev = session.model_rev
@@ -302,15 +339,17 @@ def run_snippet(
 @router.post("/snippets/cancel", status_code=204)
 def cancel_snippet(
     payload: SnippetCancelIn,
+    project_id: str,
     user: User = Depends(get_current_user),
     _membership: Membership = Depends(require_membership),
 ) -> Response:
     """Best-effort cancel of an active run (see ``_noop_cancel``). 404 both
     when the run_id is unknown AND when it belongs to another user — the two
     cases are indistinguishable in the response so a caller can't probe for
-    other users' run ids."""
+    other users' run ids. Looked up by ``(project_id, run_id)`` — see the
+    module docstring's "Collision semantics" note."""
     with _active_runs_lock:
-        entry = _active_runs.get(payload.run_id)
+        entry = _active_runs.get((project_id, payload.run_id))
     if entry is None or entry.user_id != user.id:
         raise HTTPException(status_code=404, detail="run not found")
     entry.cancel()

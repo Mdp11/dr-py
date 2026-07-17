@@ -304,14 +304,16 @@ def test_cancel_unknown_run_id_404(client: TestClient) -> None:
 def test_cancel_other_users_run_404(client: TestClient) -> None:
     from data_rover.api.routes import snippets as snippets_route
 
-    snippets_route._register_run("owned-by-someone-else", "another-user", lambda: None)
+    token = snippets_route._register_run(
+        "default", "owned-by-someone-else", "another-user", lambda: None
+    )
     try:
         r = client.post(
             papi("/snippets/cancel"), json={"run_id": "owned-by-someone-else"}
         )
         assert r.status_code == 404, r.text
     finally:
-        snippets_route._deregister_run("owned-by-someone-else")
+        snippets_route._deregister_run("default", "owned-by-someone-else", token)
 
 
 def test_cancel_own_active_run_204(client: TestClient) -> None:
@@ -320,13 +322,75 @@ def test_cancel_own_active_run_204(client: TestClient) -> None:
     from .conftest import TEST_USER_ID
 
     cancelled = []
-    snippets_route._register_run("mine", TEST_USER_ID, lambda: cancelled.append(True))
+    token = snippets_route._register_run(
+        "default", "mine", TEST_USER_ID, lambda: cancelled.append(True)
+    )
     try:
         r = client.post(papi("/snippets/cancel"), json={"run_id": "mine"})
         assert r.status_code == 204, r.text
         assert cancelled == [True]
     finally:
-        snippets_route._deregister_run("mine")
+        snippets_route._deregister_run("default", "mine", token)
+
+
+# ---------------------------------------------------------------------------
+# registry collision semantics (reviewer fix: project-scoped keys +
+# token-guarded deregistration)
+# ---------------------------------------------------------------------------
+
+
+def test_registry_stale_deregister_does_not_kill_newer_entry() -> None:
+    """The race the reviewer walked: user A registers run_id "x"; while A's
+    run is in flight, user B (any project) registers the SAME run_id "x" --
+    `_register_run`'s last-write-wins semantics silently overwrite A's entry
+    with B's. When A's request finishes and calls `_deregister_run` with
+    ITS OWN token, that must be a no-op against B's now-live entry -- an
+    unconditional pop-by-key would delete B's still-active run, and B's
+    subsequent cancel would spuriously 404 while B's run is still running."""
+    from data_rover.api.routes import snippets as snippets_route
+
+    snippets_route._active_runs.clear()
+    try:
+        token_a = snippets_route._register_run("p1", "x", "userA", lambda: None)
+        token_b = snippets_route._register_run("p1", "x", "userB", lambda: None)
+
+        # B's registration won (last-register-wins) -- confirmed via the
+        # public read path a cancel would use.
+        assert snippets_route._active_runs[("p1", "x")] is token_b
+        assert snippets_route._active_runs[("p1", "x")].user_id == "userB"
+
+        # A's finally-block deregister uses A's OWN (now-stale) token -- must
+        # NOT delete B's live entry.
+        snippets_route._deregister_run("p1", "x", token_a)
+        assert snippets_route._active_runs.get(("p1", "x")) is token_b
+        assert snippets_route._active_runs[("p1", "x")].user_id == "userB"
+
+        # B's own token correctly removes B's own entry.
+        snippets_route._deregister_run("p1", "x", token_b)
+        assert ("p1", "x") not in snippets_route._active_runs
+    finally:
+        snippets_route._active_runs.clear()
+
+
+def test_registry_cross_project_isolation() -> None:
+    """Two different projects using the same bare run_id must not collide --
+    the registry key is (project_id, run_id), not run_id alone."""
+    from data_rover.api.routes import snippets as snippets_route
+
+    snippets_route._active_runs.clear()
+    try:
+        token_p1 = snippets_route._register_run("p1", "x", "userA", lambda: None)
+        token_p2 = snippets_route._register_run("p2", "x", "userB", lambda: None)
+
+        assert snippets_route._active_runs[("p1", "x")] is token_p1
+        assert snippets_route._active_runs[("p2", "x")] is token_p2
+
+        snippets_route._deregister_run("p1", "x", token_p1)
+        assert ("p1", "x") not in snippets_route._active_runs
+        # p2's entry, keyed independently, is untouched.
+        assert snippets_route._active_runs[("p2", "x")] is token_p2
+    finally:
+        snippets_route._active_runs.clear()
 
 
 # ---------------------------------------------------------------------------
