@@ -1,9 +1,11 @@
 """Facade doc extraction: the tripwire and the doc-model contract."""
 
 import dataclasses
+import textwrap
 
 import pytest
 
+from data_rover.core.script import docs
 from data_rover.core.script.docs import FacadeDocEntry, get_facade_docs
 
 
@@ -53,3 +55,53 @@ def test_entries_are_frozen_and_cached():
     with pytest.raises(dataclasses.FrozenInstanceError):
         dataclasses.replace(get_facade_docs()[0]).__setattr__("name", "x")  # type: ignore[misc]
     assert get_facade_docs() is get_facade_docs()
+
+
+def test_undocumented_member_trips_the_tripwire(monkeypatch):
+    """A public facade member with no docstring at all is a hard failure —
+    the drift tripwire this module exists for."""
+    doctored = textwrap.dedent(
+        """
+        def _bad(id):
+            pass
+
+        class _Dr:
+            bad = staticmethod(_bad)
+
+        class Element:
+            pass
+        """
+    )
+    monkeypatch.setattr(docs, "FACADE_SOURCE", doctored)
+    get_facade_docs.cache_clear()
+    try:
+        with pytest.raises(ValueError, match=r"dr\.bad"):
+            get_facade_docs()
+    finally:
+        get_facade_docs.cache_clear()
+
+
+def test_example_without_summary_trips_the_tripwire(monkeypatch):
+    """An `Example:` block with nothing before it also has no summary, so it
+    trips the same tripwire as a missing docstring."""
+    doctored = textwrap.dedent(
+        '''
+        def _bad(id):
+            """Example:
+                dr.bad()
+            """
+
+        class _Dr:
+            bad = staticmethod(_bad)
+
+        class Element:
+            pass
+        '''
+    )
+    monkeypatch.setattr(docs, "FACADE_SOURCE", doctored)
+    get_facade_docs.cache_clear()
+    try:
+        with pytest.raises(ValueError, match=r"dr\.bad"):
+            get_facade_docs()
+    finally:
+        get_facade_docs.cache_clear()
