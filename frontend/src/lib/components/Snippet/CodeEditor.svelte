@@ -15,6 +15,7 @@
 		resolveDocAt,
 		type VocabSummary
 	} from '$lib/editor/completion-source';
+	import { editorLuxuryTheme } from '$lib/editor/theme';
 	import type { SnippetDiagnostic, SnippetDocsOut } from '$lib/api/types';
 
 	let {
@@ -85,6 +86,7 @@
 					extensions: [
 						basicSetup,
 						python(),
+						editorLuxuryTheme,
 						lintGutter(),
 						keymap.of([{ key: 'Mod-Enter', run: () => (onRun(), true) }]),
 						EditorView.updateListener.of((u) => {

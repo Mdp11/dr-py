@@ -91,6 +91,27 @@ body {
 	--success: oklch(0.74 0.09 155);
 	--warning: oklch(0.79 0.1 85);
 	--info: oklch(0.74 0.06 240);
+
+	/* Code-editor syntax palette (CodeMirror). An earthy-jewel set anchored in
+	   the app's sage-green identity: gold keywords, jade strings, pistachio
+	   functions, sand types, clay numbers. All high-lightness / restrained
+	   chroma so every token stays readable on the dark card surface. Consumed
+	   by $lib/editor/theme.ts — keep the two in sync. */
+	--cm-plain: oklch(0.9 0.008 150);
+	--cm-keyword: oklch(0.8 0.11 85);
+	--cm-string: oklch(0.79 0.085 162);
+	--cm-number: oklch(0.82 0.1 55);
+	--cm-function: oklch(0.87 0.065 142);
+	--cm-type: oklch(0.85 0.055 78);
+	--cm-property: oklch(0.86 0.03 150);
+	--cm-comment: oklch(0.58 0.018 150);
+	--cm-operator: oklch(0.74 0.03 150);
+	--cm-punctuation: oklch(0.66 0.012 150);
+	--cm-accent: oklch(0.79 0.08 200);
+	--cm-selection: oklch(0.7 0.09 165 / 26%);
+	--cm-active-line: oklch(1 0 0 / 3.5%);
+	--cm-gutter-fg: oklch(0.52 0.012 150);
+	--cm-gutter-active-fg: oklch(0.85 0.02 150);
 }
 
 @theme inline {
