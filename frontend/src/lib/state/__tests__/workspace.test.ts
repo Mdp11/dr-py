@@ -83,4 +83,13 @@ describe('dynamic workspace tabs', () => {
 		expect(getDynamicTabs()).toEqual([]);
 		expect(getActiveTab()).toBe('detail');
 	});
+
+	it('opens snippet tabs under the snip prefix and dedupes by artifact', () => {
+		const a = openArtifactTab('snippet', { artifactId: 's1', title: 'S' });
+		expect(a).toBe('snip:s1');
+		const b = openArtifactTab('snippet', { artifactId: 's1', title: 'S' });
+		expect(b).toBe(a);
+		const draft = openArtifactTab('snippet', { artifactId: null, title: 'New snippet' });
+		expect(draft).toMatch(/^snip:draft:/);
+	});
 });
