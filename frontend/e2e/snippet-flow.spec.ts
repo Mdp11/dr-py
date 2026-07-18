@@ -122,3 +122,21 @@ test('stage a snippet edit and commit it', async ({ page }) => {
 		timeout: 10_000
 	});
 });
+
+test('docs panel lists the facade reference and limits', async ({ page }) => {
+	await openNewSnippet(page);
+	await page.getByTestId('snippet-docs-toggle').click();
+	const panel = page.getByTestId('snippet-docs');
+	await expect(panel).toBeVisible();
+	await expect(panel).toContainText('dr.create');
+	await expect(panel).toContainText('Wall timeout');
+});
+
+test('typing dr. offers facade completions', async ({ page }) => {
+	await openNewSnippet(page);
+	await page.locator('[data-testid="snippet-editor"] .cm-content').click();
+	await page.keyboard.insertText('dr.');
+	const tooltip = page.locator('.cm-tooltip-autocomplete');
+	await expect(tooltip).toBeVisible({ timeout: 5000 });
+	await expect(tooltip).toContainText('create');
+});
