@@ -236,7 +236,14 @@ it('a nested combination part shows the no-steps-to-feed note and no chip', asyn
 it('a ref operand renders a compact ref card with the artifact name', async () => {
 	const tabId = 'nav:draft:refcard';
 	await setArtifactHeaders([
-		{ id: 'nav-1', kind: 'navigation', name: 'Sensors network', updated_at: '', updated_by: null }
+		{
+			id: 'nav-1',
+			kind: 'navigation',
+			name: 'Sensors network',
+			updated_at: '',
+			updated_by: null,
+			entry_points: null
+		}
 	]);
 	await ensureDraft(tabId);
 	updateDefinition(tabId, {

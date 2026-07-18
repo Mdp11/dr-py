@@ -61,6 +61,25 @@ export async function createTableArtifact(
 	return created;
 }
 
+export interface CodeSnippetPayload {
+	schema_version: number;
+	language: 'python';
+	code: string;
+}
+
+export async function createCodeSnippetArtifact(
+	name: string,
+	payload: CodeSnippetPayload
+): Promise<Artifact> {
+	const created = await api.createArtifact({
+		kind: 'code_snippet',
+		name,
+		payload: payload as unknown as Record<string, unknown>
+	});
+	await loadArtifacts();
+	return created;
+}
+
 export async function renameArtifact(id: string, name: string): Promise<void> {
 	const header = artifactHeaderById(id);
 	if (!header) throw new Error(`Unknown artifact ${id}`);
@@ -77,7 +96,8 @@ export async function renameArtifact(id: string, name: string): Promise<void> {
 					name: updated.name,
 					artifact_rev: updated.artifact_rev,
 					updated_at: updated.updated_at,
-					updated_by: updated.updated_by
+					updated_by: updated.updated_by,
+					entry_points: updated.entry_points
 				}
 			: a
 	);

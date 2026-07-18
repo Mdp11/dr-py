@@ -361,7 +361,8 @@ export const ArtifactHeaderSchema = z.object({
 	name: z.string(),
 	artifact_rev: z.number().int(),
 	updated_at: z.string(),
-	updated_by: z.string().nullable().default(null)
+	updated_by: z.string().nullable().default(null),
+	entry_points: z.array(z.string()).nullable().optional().default(null)
 });
 export type ArtifactHeader = z.infer<typeof ArtifactHeaderSchema>;
 
@@ -546,6 +547,45 @@ export const ChangesSummarySchema = z.object({
 	complete: z.boolean().default(true)
 });
 export type ChangesSummary = z.infer<typeof ChangesSummarySchema>;
+
+// ---------------------------------------------------------------------------
+// Snippet execution — mirrors api/schemas.py SnippetRunOut/SnippetLintOut.
+// ---------------------------------------------------------------------------
+
+export const SnippetErrorSchema = z.object({
+	kind: z.enum(['syntax', 'runtime', 'timeout', 'cancelled', 'memory', 'limit']),
+	message: z.string(),
+	traceback: z.string().nullable().default(null)
+});
+export type SnippetError = z.infer<typeof SnippetErrorSchema>;
+
+export const SnippetDiagnosticSchema = z.object({
+	line: z.number().int(),
+	col: z.number().int(),
+	severity: z.enum(['error', 'warning']),
+	message: z.string()
+});
+export type SnippetDiagnostic = z.infer<typeof SnippetDiagnosticSchema>;
+
+export const SnippetLintOutSchema = z.object({
+	diagnostics: z.array(SnippetDiagnosticSchema),
+	entry_points: z.array(z.string())
+});
+export type SnippetLintOut = z.infer<typeof SnippetLintOutSchema>;
+
+/** Wire shape; `ops` is refined to `Op[]` in api/snippets.ts (types.ts cannot
+ * import state/ops — state/ops imports Element/Relationship from here). */
+export const SnippetRunOutSchema = z.object({
+	run_id: z.string(),
+	stdout: z.string(),
+	result_repr: z.string().nullable(),
+	ops: z.array(z.record(z.string(), z.unknown())),
+	error: SnippetErrorSchema.nullable(),
+	duration_ms: z.number().int(),
+	model_rev: z.number().int(),
+	stale: z.boolean(),
+	truncated: z.boolean()
+});
 
 export const SaveModelResponseSchema = z.object({
 	path: z.string(),

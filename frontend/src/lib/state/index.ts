@@ -154,7 +154,8 @@ export {
 	type CheckoutResult,
 	type LockConflictLite
 } from './checkout.svelte';
-export { editLock, connectLock, deleteLock } from './edit-gate';
+export { acquireLocks, editLock, connectLock, deleteLock } from './edit-gate';
+export { stageSnippetOps, type StageOutcome } from './snippet-stage';
 export { lockBadgeFor, type LockBadge } from './lock-badge';
 export { getLockNotice, setLockNotice } from './lock-notice.svelte';
 export {
@@ -205,6 +206,7 @@ export { isProjectOpening, setProjectOpening } from './project-open.svelte';
 export type { ViewChange } from './view-diff';
 export {
 	artifactHeaderById,
+	createCodeSnippetArtifact,
 	createNavigationArtifact,
 	createTableArtifact,
 	getArtifactHeaders,
@@ -212,7 +214,8 @@ export {
 	loadArtifacts,
 	removeArtifact,
 	renameArtifact,
-	resetArtifacts
+	resetArtifacts,
+	type CodeSnippetPayload
 } from './artifacts.svelte';
 export {
 	applyStructuralEdit,
@@ -245,6 +248,30 @@ export {
 	type NavDraft,
 	type NavPreview
 } from './navigation-editor.svelte';
+export {
+	closeSnippetDraft,
+	ensureSnippetDraft,
+	getSnippetDraft,
+	getSnippetLint,
+	getSnippetRun,
+	getSnippetSaveConflict,
+	hasDirtySnippetDrafts,
+	LINT_DEBOUNCE_MS,
+	markRunStaged,
+	reloadSnippetDraft,
+	resetSnippetEditors,
+	runSnippetTab,
+	saveSnippetDraft,
+	setSnippetElementContext,
+	setSnippetEntry,
+	setSnippetName,
+	stopSnippetTab,
+	updateSnippetCode,
+	type SnippetDraft,
+	type SnippetLintState,
+	type SnippetRunPhase,
+	type SnippetRunState
+} from './snippet-editor.svelte';
 export {
 	closeTableDraft,
 	downloadTable,

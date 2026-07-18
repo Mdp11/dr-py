@@ -10,7 +10,7 @@ function explain(res: Extract<CheckoutResult, { ok: false }>): string {
 	return `Locked by ${c.held_by_email || c.held_by}.`;
 }
 
-async function gate(targets: LockTargetIn[], intent: LockIntent): Promise<boolean> {
+export async function acquireLocks(targets: LockTargetIn[], intent: LockIntent): Promise<boolean> {
 	const res = await ensureCheckout(targets, intent);
 	if (res.ok) {
 		setLockNotice(null);
@@ -21,11 +21,11 @@ async function gate(targets: LockTargetIn[], intent: LockIntent): Promise<boolea
 }
 
 export function editLock(id: string): Promise<boolean> {
-	return gate([{ resource_id: id, mode: 'exclusive' }], 'edit');
+	return acquireLocks([{ resource_id: id, mode: 'exclusive' }], 'edit');
 }
 
 export function connectLock(sourceId: string, targetId: string): Promise<boolean> {
-	return gate(
+	return acquireLocks(
 		[
 			{ resource_id: sourceId, mode: 'exclusive' },
 			{ resource_id: targetId, mode: 'shared' }
@@ -35,5 +35,5 @@ export function connectLock(sourceId: string, targetId: string): Promise<boolean
 }
 
 export function deleteLock(id: string): Promise<boolean> {
-	return gate([{ resource_id: id, mode: 'exclusive' }], 'delete');
+	return acquireLocks([{ resource_id: id, mode: 'exclusive' }], 'delete');
 }

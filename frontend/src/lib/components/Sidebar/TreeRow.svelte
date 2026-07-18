@@ -12,6 +12,7 @@
 		AlertTriangle,
 		ChevronDown,
 		ChevronRight,
+		FileCode,
 		Folder as FolderIcon,
 		FolderOpen,
 		Lock,
@@ -180,6 +181,8 @@
 		if (!artifactHeader) return;
 		if (artifactHeader.kind === 'table') {
 			openArtifactTab('table', { artifactId, title: artifactHeader.name });
+		} else if (artifactHeader.kind === 'code_snippet') {
+			openArtifactTab('snippet', { artifactId, title: artifactHeader.name });
 		} else {
 			openNavigationTab({ artifactId, title: artifactHeader.name });
 		}
@@ -328,13 +331,16 @@
 			<span class="flex h-4 w-4 shrink-0 items-center justify-center text-info">
 				{#if artifactHeader.kind === 'table'}
 					<Table class="h-3 w-3" />
+				{:else if artifactHeader.kind === 'code_snippet'}
+					<FileCode class="h-3 w-3" />
 				{:else}
 					<Route class="h-3 w-3" />
 				{/if}
 			</span>
 			<span class="flex-1 truncate" title={artifactHeader.name}>
 				{artifactHeader.name}{(artifactHeader.kind === 'table' ||
-					artifactHeader.kind === 'navigation') &&
+					artifactHeader.kind === 'navigation' ||
+					artifactHeader.kind === 'code_snippet') &&
 				isArtifactDirty(artifactHeader.kind, artifactId)
 					? ' *'
 					: ''}

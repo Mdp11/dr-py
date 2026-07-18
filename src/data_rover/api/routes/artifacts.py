@@ -58,6 +58,10 @@ _PAYLOAD_ADAPTERS: dict[ArtifactKind, TypeAdapter[Any]] = {
 
 
 def _header(row: ArtifactRow) -> ArtifactHeaderOut:
+    entry_points: list[str] | None = None
+    if row.kind is ArtifactKind.code_snippet:
+        raw = row.payload.get("entry_points")
+        entry_points = [e for e in raw if isinstance(e, str)] if isinstance(raw, list) else []
     return ArtifactHeaderOut(
         id=row.id,
         kind=row.kind.value,
@@ -65,6 +69,7 @@ def _header(row: ArtifactRow) -> ArtifactHeaderOut:
         artifact_rev=row.artifact_rev,
         updated_at=row.updated_at,
         updated_by=row.updated_by,
+        entry_points=entry_points,
     )
 
 

@@ -141,6 +141,7 @@ describe('navigation editor store', () => {
 			artifact_rev: 4,
 			updated_at: '',
 			updated_by: null,
+			entry_points: null,
 			payload: {
 				kind: 'path',
 				schema_version: 1,
@@ -185,6 +186,7 @@ describe('navigation editor store', () => {
 			artifact_rev: 1,
 			updated_at: '',
 			updated_by: null,
+			entry_points: null,
 			payload: {}
 		});
 		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({ items: [] });
@@ -204,6 +206,7 @@ describe('navigation editor store', () => {
 			artifact_rev: 4,
 			updated_at: '',
 			updated_by: null,
+			entry_points: null,
 			payload: {
 				kind: 'path',
 				schema_version: 1,
@@ -261,6 +264,7 @@ describe('saveAsDraft', () => {
 			artifact_rev: 4,
 			updated_at: '',
 			updated_by: null,
+			entry_points: null,
 			payload: {
 				kind: 'path',
 				schema_version: 1,
@@ -278,6 +282,7 @@ describe('saveAsDraft', () => {
 			artifact_rev: 1,
 			updated_at: '',
 			updated_by: null,
+			entry_points: null,
 			payload: draft.definition as unknown as Record<string, unknown>
 		});
 		const update = vi.spyOn(artifactsApi, 'updateArtifact');
@@ -313,6 +318,7 @@ describe('saveAsDraft', () => {
 			artifact_rev: 4,
 			updated_at: '',
 			updated_by: null,
+			entry_points: null,
 			payload: {
 				kind: 'path',
 				schema_version: 1,
@@ -333,6 +339,7 @@ describe('saveAsDraft', () => {
 			artifact_rev: 1,
 			updated_at: '',
 			updated_by: null,
+			entry_points: null,
 			payload: {}
 		});
 		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({ items: [] });
@@ -355,6 +362,7 @@ describe('saveAsDraft', () => {
 			artifact_rev: 4,
 			updated_at: '',
 			updated_by: null,
+			entry_points: null,
 			payload: {
 				kind: 'path',
 				schema_version: 1,
@@ -387,6 +395,7 @@ describe('saveAsDraft', () => {
 			artifact_rev: 4,
 			updated_at: '',
 			updated_by: null,
+			entry_points: null,
 			payload: {
 				kind: 'path',
 				schema_version: 1,
@@ -417,6 +426,7 @@ describe('saveAsDraft', () => {
 			artifact_rev: 1,
 			updated_at: '',
 			updated_by: null,
+			entry_points: null,
 			payload: {}
 		});
 		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({ items: [] });
@@ -784,6 +794,7 @@ describe('debounced auto-run', () => {
 			artifact_rev: 4,
 			updated_at: '',
 			updated_by: null,
+			entry_points: null,
 			payload: {
 				kind: 'path',
 				schema_version: 1,
@@ -806,6 +817,7 @@ describe('debounced auto-run', () => {
 			artifact_rev: 4,
 			updated_at: '',
 			updated_by: null,
+			entry_points: null,
 			payload: {
 				kind: 'path',
 				schema_version: 1,
@@ -1021,6 +1033,7 @@ describe('auto-run survives the first-save tab rebind', () => {
 		artifact_rev: 1,
 		updated_at: '',
 		updated_by: null,
+		entry_points: null,
 		payload: {}
 	};
 
@@ -1213,6 +1226,7 @@ describe('node selection', () => {
 			artifact_rev: 1,
 			updated_at: '',
 			updated_by: null,
+			entry_points: null,
 			payload: {}
 		});
 		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({ items: [] });
@@ -1345,6 +1359,7 @@ describe('card collapse state', () => {
 			artifact_rev: 1,
 			updated_at: '',
 			updated_by: null,
+			entry_points: null,
 			payload: {}
 		});
 		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({ items: [] });

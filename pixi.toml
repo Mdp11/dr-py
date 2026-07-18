@@ -18,9 +18,6 @@ pytest = "9.0.*"
 ruff = "0.15.*"
 mypy = "1.20.*"
 
-[feature.core-dev.pypi-dependencies]
-wasmtime = ">=30"
-
 [feature.api.dependencies]
 fastapi = "0.115.*"
 uvicorn = "0.32.*"
@@ -36,6 +33,15 @@ argon2-cffi = "23.*"
 python-multipart = "0.0.*"
 openpyxl = "3.1.*"
 types-openpyxl = "3.1.*"
+
+[feature.api.pypi-dependencies]
+# The snippet WASM sandbox runner (api/script_runner.py) imports wasmtime at
+# module scope, unconditionally, whenever routes/snippets.py loads — so it
+# must be present in the "api" backend-runtime environment itself, not just
+# core-dev (which composes "api" and inherited it transitively before this
+# was split out). Without it, `pixi run start-backend`/the e2e webServer
+# crash on import with ModuleNotFoundError before the app can boot.
+wasmtime = ">=30"
 
 [feature.api.tasks.start-backend]
 cmd = "uvicorn data_rover.api.main:app --reload --reload-dir src --host 127.0.0.1 --port 8000 --app-dir src"

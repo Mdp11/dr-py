@@ -47,6 +47,7 @@
 		resetArtifacts,
 		resetCheckout,
 		resetModelStore,
+		resetSnippetEditors,
 		setDiffDrawerOpen,
 		setHistoryDrawerOpen,
 		setMetamodel,
@@ -202,6 +203,7 @@
 			resetModelStore();
 			resetCheckout();
 			resetArtifacts();
+			resetSnippetEditors();
 			clearSelection();
 			// refreshView() runs before refreshSummary() (mirroring boot()'s order)
 			// so the tree's first paint after a reload is view-shaped rather than

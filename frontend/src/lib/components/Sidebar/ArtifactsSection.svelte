@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ChevronDown, ChevronRight, Plus, Route, Table } from '@lucide/svelte';
+	import { ChevronDown, ChevronRight, FileCode, Plus, Route, Table } from '@lucide/svelte';
 	import {
 		canEdit,
 		getArtifactHeaders,
@@ -14,7 +14,7 @@
 	// same way (direct module path), so this mirrors the existing convention.
 	import { beginDrag } from '$lib/state/tree-drag.svelte';
 
-	type ArtifactKind = 'navigation' | 'table';
+	type ArtifactKind = 'navigation' | 'table' | 'code_snippet';
 
 	type SectionConfig = {
 		kind: ArtifactKind;
@@ -42,10 +42,21 @@
 			singular: 'table',
 			icon: Table,
 			open: (o) => openArtifactTab('table', o)
+		},
+		{
+			kind: 'code_snippet',
+			title: 'Snippets',
+			singular: 'snippet',
+			icon: FileCode,
+			open: (o) => openArtifactTab('snippet', o)
 		}
 	];
 
-	let collapsed = $state<Record<ArtifactKind, boolean>>({ navigation: false, table: false });
+	let collapsed = $state<Record<ArtifactKind, boolean>>({
+		navigation: false,
+		table: false,
+		code_snippet: false
+	});
 	const editable = $derived(canEdit());
 
 	function itemsFor(kind: ArtifactKind) {
@@ -130,6 +141,11 @@
 						<span class="flex-1 truncate"
 							>{item.name}{isArtifactDirty(cfg.kind, item.id) ? ' *' : ''}</span
 						>
+						{#if cfg.kind === 'code_snippet'}
+							{#each (item.entry_points ?? []).filter((e) => e !== 'script') as ep (ep)}
+								<span class="rounded bg-muted px-1 text-[10px] text-muted-foreground">{ep}</span>
+							{/each}
+						{/if}
 						{#if editable}
 							<button
 								type="button"
