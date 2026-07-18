@@ -272,6 +272,7 @@ export {
 	type SnippetRunPhase,
 	type SnippetRunState
 } from './snippet-editor.svelte';
+export { ensureSnippetDocs, getSnippetDocs, resetSnippetDocs } from './snippet-docs.svelte';
 export {
 	closeTableDraft,
 	downloadTable,

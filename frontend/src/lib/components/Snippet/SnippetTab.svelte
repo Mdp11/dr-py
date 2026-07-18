@@ -5,7 +5,10 @@
 	// chrome-bar-over-content shape.
 	import {
 		canEdit,
+		ensureSnippetDocs,
 		ensureSnippetDraft,
+		getMetamodel,
+		getSnippetDocs,
 		getSnippetDraft,
 		getSnippetLint,
 		getSnippetRun,
@@ -18,14 +21,19 @@
 		stopSnippetTab,
 		updateSnippetCode
 	} from '$lib/state';
+	import { vocabFromMetamodel } from '$lib/editor/completion-source';
 	import CodeEditor from './CodeEditor.svelte';
 	import SnippetConsole from './SnippetConsole.svelte';
 	import ElementContextRow from './ElementContextRow.svelte';
+	import SnippetDocsPanel from './SnippetDocsPanel.svelte';
 
 	let { tabId }: { tabId: string } = $props();
 
+	let showDocs = $state(false);
+
 	$effect(() => {
 		void ensureSnippetDraft(tabId);
+		void ensureSnippetDocs();
 	});
 
 	const draft = $derived(getSnippetDraft(tabId));
@@ -33,6 +41,7 @@
 	const lint = $derived(getSnippetLint(tabId));
 	const editable = $derived(canEdit());
 	const conflictRev = $derived(getSnippetSaveConflict(tabId));
+	const vocab = $derived(vocabFromMetamodel(getMetamodel()));
 
 	const runDisabled = $derived(
 		run.phase !== 'idle' || (run.entry !== 'script' && run.elementId === null)
@@ -103,6 +112,15 @@
 					Stop
 				</button>
 			{/if}
+			<button
+				type="button"
+				data-testid="snippet-docs-toggle"
+				class="rounded border border-input px-2 py-1 text-xs text-foreground/80 transition-colors hover:bg-muted"
+				aria-pressed={showDocs}
+				onclick={() => (showDocs = !showDocs)}
+			>
+				Docs
+			</button>
 			{#if editable}
 				<button
 					type="button"
@@ -135,19 +153,28 @@
 		{#if run.entry !== 'script'}
 			<ElementContextRow {tabId} />
 		{/if}
-		<div class="flex min-h-0 flex-1 flex-col">
-			<div class="min-h-0 flex-[3] overflow-hidden">
-				<CodeEditor
-					bind:this={editor}
-					code={draft.code}
-					diagnostics={lint?.diagnostics ?? []}
-					onChange={(c) => updateSnippetCode(tabId, c)}
-					onRun={() => void runSnippetTab(tabId)}
-				/>
+		<div class="flex min-h-0 flex-1">
+			<div class="flex min-h-0 flex-1 flex-col">
+				<div class="min-h-0 flex-[3] overflow-hidden">
+					<CodeEditor
+						bind:this={editor}
+						code={draft.code}
+						diagnostics={lint?.diagnostics ?? []}
+						docs={getSnippetDocs()}
+						{vocab}
+						onChange={(c) => updateSnippetCode(tabId, c)}
+						onRun={() => void runSnippetTab(tabId)}
+					/>
+				</div>
+				<div class="min-h-0 flex-[2] overflow-hidden">
+					<SnippetConsole {tabId} onGoToLine={(l) => editor?.goToLine(l)} />
+				</div>
 			</div>
-			<div class="min-h-0 flex-[2] overflow-hidden">
-				<SnippetConsole {tabId} onGoToLine={(l) => editor?.goToLine(l)} />
-			</div>
+			{#if showDocs}
+				<div class="w-80 shrink-0">
+					<SnippetDocsPanel />
+				</div>
+			{/if}
 		</div>
 	</div>
 {/if}

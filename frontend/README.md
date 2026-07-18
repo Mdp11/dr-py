@@ -315,7 +315,17 @@ src/
                         drafts, save lifecycle, debounced lint + run/stop
                         state; snippet-stage.ts — folds a snippet run's op
                         batch into the staged-edits buffer (temp-id remap,
-                        pre-state prefetch, per-intent lock groups)
+                        pre-state prefetch, per-intent lock groups);
+                        snippet-docs.svelte.ts — fetch-once cache of the
+                        facade docs payload (ensureSnippetDocs/
+                        getSnippetDocs), silent-degrade on fetch failure,
+                        reset at onReloadModel
+    editor/completion-source.ts  dr./Element/type-name CM6 completions +
+                        hover logic (vocabFromMetamodel, computeCompletions,
+                        resolveDocAt); pure, CM-agnostic, unit-tested
+    snippet/docs-view.ts   View-model helpers for the facade docs panel
+                        (groupFacade, formatSeconds/formatBytes, type +
+                        relationship summaries); mirrors console-view.ts
     metamodel/          Pure helpers (effective properties, multiplicity,
                         containment, subtype) mirroring the Python schema
     components/         TopBar, Sidebar, Workspace, Inspector, StatusBar,

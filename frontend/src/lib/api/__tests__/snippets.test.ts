@@ -120,3 +120,43 @@ describe('snippets api', () => {
 		expect(res.items[1].entry_points).toBeNull();
 	});
 });
+
+const DOCS_FIXTURE = {
+	facade: [
+		{
+			name: 'dr.create',
+			kind: 'function',
+			signature: 'dr.create(type_name, properties=None) -> str (temp id)',
+			doc: 'Record a dry-run element create.',
+			example: 'tid = dr.create("Building", {"name": "HQ"})'
+		},
+		{
+			name: 'Element.delete',
+			kind: 'method',
+			signature: 'Element.delete()',
+			doc: 'Record a dry-run delete.',
+			example: null
+		}
+	],
+	limits: {
+		wall_timeout_s: 10,
+		memory_bytes: 268435456,
+		stdout_bytes: 262144,
+		result_repr_bytes: 65536,
+		max_ops: 1000,
+		max_op_bytes: 1048576,
+		page_limit: 500
+	},
+	notes: ['Runs are dry-run.']
+};
+
+describe('getSnippetDocs', () => {
+	it('fetches and validates the docs payload', async () => {
+		const { getSnippetDocs } = await import('../snippets');
+		server.use(http.get(`${BASE}/snippets/docs`, () => HttpResponse.json(DOCS_FIXTURE)));
+		const docs = await getSnippetDocs(CFG);
+		expect(docs.facade).toHaveLength(2);
+		expect(docs.facade[1].example).toBeNull();
+		expect(docs.limits.page_limit).toBe(500);
+	});
+});

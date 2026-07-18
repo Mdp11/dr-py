@@ -755,6 +755,34 @@ class SnippetCancelIn(BaseModel):
     run_id: str
 
 
+class FacadeDocEntryOut(BaseModel):
+    """Mirrors `core.script.docs.FacadeDocEntry` field-for-field."""
+
+    name: str
+    kind: Literal["function", "method", "property", "exception"]
+    signature: str
+    doc: str
+    example: str | None
+
+
+class SnippetLimitsOut(BaseModel):
+    """The actual configured `RunLimits` values the runner enforces."""
+
+    wall_timeout_s: float
+    memory_bytes: int
+    stdout_bytes: int
+    result_repr_bytes: int
+    max_ops: int
+    max_op_bytes: int
+    page_limit: int
+
+
+class SnippetDocsOut(BaseModel):
+    facade: list[FacadeDocEntryOut]
+    limits: SnippetLimitsOut
+    notes: list[str]
+
+
 # ---------------------------------------------------------------------------
 # Navigation evaluation (Stage 1: POST /navigations/evaluate)
 # ---------------------------------------------------------------------------

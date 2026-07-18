@@ -1,5 +1,11 @@
 import { apiFetch, type ClientConfig } from './client';
-import { SnippetLintOutSchema, SnippetRunOutSchema, type SnippetLintOut } from './types';
+import {
+	SnippetLintOutSchema,
+	SnippetRunOutSchema,
+	SnippetDocsOutSchema,
+	type SnippetLintOut,
+	type SnippetDocsOut
+} from './types';
 import type { Op } from '$lib/state/ops';
 import type { z } from 'zod';
 
@@ -34,4 +40,8 @@ export function lintSnippet(code: string, cfg?: ClientConfig): Promise<SnippetLi
 
 export function cancelSnippet(runId: string, cfg?: ClientConfig): Promise<void> {
 	return apiFetch('/snippets/cancel', { method: 'POST', body: { run_id: runId } }, cfg);
+}
+
+export function getSnippetDocs(cfg?: ClientConfig): Promise<SnippetDocsOut> {
+	return apiFetch('/snippets/docs', { schema: SnippetDocsOutSchema }, cfg);
 }

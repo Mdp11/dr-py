@@ -587,6 +587,32 @@ export const SnippetRunOutSchema = z.object({
 	truncated: z.boolean()
 });
 
+export const FacadeDocEntrySchema = z.object({
+	name: z.string(),
+	kind: z.enum(['function', 'method', 'property', 'exception']),
+	signature: z.string(),
+	doc: z.string(),
+	example: z.string().nullable().default(null)
+});
+export type FacadeDocEntry = z.infer<typeof FacadeDocEntrySchema>;
+
+export const SnippetLimitsSchema = z.object({
+	wall_timeout_s: z.number(),
+	memory_bytes: z.number(),
+	stdout_bytes: z.number(),
+	result_repr_bytes: z.number(),
+	max_ops: z.number(),
+	max_op_bytes: z.number(),
+	page_limit: z.number()
+});
+
+export const SnippetDocsOutSchema = z.object({
+	facade: z.array(FacadeDocEntrySchema).default([]),
+	limits: SnippetLimitsSchema,
+	notes: z.array(z.string()).default([])
+});
+export type SnippetDocsOut = z.infer<typeof SnippetDocsOutSchema>;
+
 export const SaveModelResponseSchema = z.object({
 	path: z.string(),
 	element_count: z.number().int(),

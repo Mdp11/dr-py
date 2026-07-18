@@ -12,6 +12,10 @@ script_runner.py`; the unsandboxed test double (`TrustedRunner`) lives in
 
 ## The `dr` facade surface
 
+Per-member reference is generated from the facade's own docstrings (see
+core/script/docs.py and GET /snippets/docs) — those docstrings are
+canonical; this section is the narrative overview.
+
 `dr` is not a Python module on disk — it is the string constant
 `FACADE_SOURCE` in `facade_src.py`, `exec`'d verbatim ahead of the snippet's
 own source (in a fresh namespace with `_transport` already bound; see

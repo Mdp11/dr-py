@@ -444,3 +444,44 @@ def test_concurrency_429_over_global_cap(client: TestClient, monkeypatch: pytest
         assert r.status_code == 429, r.text
     finally:
         snippets_route._concurrency_guard.release("someone-else")
+
+
+# ---------------------------------------------------------------------------
+# docs (Task 2)
+# ---------------------------------------------------------------------------
+
+
+def test_docs_served_with_facade_limits_and_notes(client: TestClient) -> None:
+    resp = client.get(papi("/snippets/docs"))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    names = {e["name"] for e in body["facade"]}
+    assert "dr.create" in names and "Element.set" in names
+    assert all(e["doc"] for e in body["facade"])
+    assert set(body["limits"]) == {
+        "wall_timeout_s", "memory_bytes", "stdout_bytes",
+        "result_repr_bytes", "max_ops", "max_op_bytes", "page_limit",
+    }
+    assert body["notes"] and all(isinstance(n, str) for n in body["notes"])
+
+
+def test_docs_limits_mirror_settings(client: TestClient, app: FastAPI) -> None:
+    from data_rover.api.settings import Settings, get_settings
+
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        snippet_wall_timeout_s=3.5, snippet_max_ops=7
+    )
+    try:
+        body = client.get(papi("/snippets/docs")).json()
+    finally:
+        app.dependency_overrides.pop(get_settings)
+    assert body["limits"]["wall_timeout_s"] == 3.5
+    assert body["limits"]["max_ops"] == 7
+
+
+def test_docs_need_membership(client: TestClient) -> None:
+    resp = client.get(
+        papi("/snippets/docs"),
+        headers={"x-user-id": "stranger", "x-user-email": "s@x.io"},
+    )
+    assert resp.status_code == 403, resp.text
