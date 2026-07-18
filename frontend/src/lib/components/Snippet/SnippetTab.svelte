@@ -7,6 +7,8 @@
 		canEdit,
 		ensureSnippetDocs,
 		ensureSnippetDraft,
+		getMetamodel,
+		getSnippetDocs,
 		getSnippetDraft,
 		getSnippetLint,
 		getSnippetRun,
@@ -19,6 +21,7 @@
 		stopSnippetTab,
 		updateSnippetCode
 	} from '$lib/state';
+	import { vocabFromMetamodel } from '$lib/editor/completion-source';
 	import CodeEditor from './CodeEditor.svelte';
 	import SnippetConsole from './SnippetConsole.svelte';
 	import ElementContextRow from './ElementContextRow.svelte';
@@ -38,6 +41,7 @@
 	const lint = $derived(getSnippetLint(tabId));
 	const editable = $derived(canEdit());
 	const conflictRev = $derived(getSnippetSaveConflict(tabId));
+	const vocab = $derived(vocabFromMetamodel(getMetamodel()));
 
 	const runDisabled = $derived(
 		run.phase !== 'idle' || (run.entry !== 'script' && run.elementId === null)
@@ -156,6 +160,8 @@
 						bind:this={editor}
 						code={draft.code}
 						diagnostics={lint?.diagnostics ?? []}
+						docs={getSnippetDocs()}
+						{vocab}
 						onChange={(c) => updateSnippetCode(tabId, c)}
 						onRun={() => void runSnippetTab(tabId)}
 					/>
