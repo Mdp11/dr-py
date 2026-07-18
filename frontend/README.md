@@ -60,7 +60,8 @@ The UI is a fixed grid:
   to create a new element of that type), containment tree with keyboard nav and
   per-row lock badges.
 - **Workspace** — tabbed Detail / Graph / Issues view of the current
-  selection.
+  selection, plus **snippet** tabs (`SnippetTab`) hosting a CodeMirror editor
+  and run console for server-executed Python snippets against the live model.
 - **Inspector** — property form + relationships list + new-relationship
   picker for the selected entity (gated when the resource is locked by a peer).
   For elements it also carries a **lock/unlock control** (`Inspector/LockControl`)
@@ -309,7 +310,12 @@ src/
                         resetHistory/loadFirstPage/loadMore/modelAt;
                         unsaved.ts — hasUnsavedWork() (staged ops + dirty
                         table/navigation drafts), input to the workspace
-                        unload guard (beforeNavigate in p/[projectId]/+page)
+                        unload guard (beforeNavigate in p/[projectId]/+page);
+                        snippet-editor.svelte.ts — per-tab code-snippet
+                        drafts, save lifecycle, debounced lint + run/stop
+                        state; snippet-stage.ts — folds a snippet run's op
+                        batch into the staged-edits buffer (temp-id remap,
+                        pre-state prefetch, per-intent lock groups)
     metamodel/          Pure helpers (effective properties, multiplicity,
                         containment, subtype) mirroring the Python schema
     components/         TopBar, Sidebar, Workspace, Inspector, StatusBar,
@@ -346,9 +352,12 @@ project). The suites cover: login + project picker + admin console
 element → edit → confirm the Commit review; check-out → edit → commit with the
 smart-city example; relationship picker; drag-and-drop view curation; advanced
 search; History: open drawer → list commits → diff → revert with compensating
-commit; and Strict mode: enable via Settings → create a conformance-violating
+commit; Strict mode: enable via Settings → create a conformance-violating
 element → assert the Commit button is disabled with the strict-mode alert →
-disable strict mode → assert the same batch can now commit.
+disable strict mode → assert the same batch can now commit; and the snippet
+workspace tab (`snippet-flow.spec.ts`): lint gutter surfaces a sandbox-import
+warning, run prints to the console via the real WASM sandbox, and stage +
+commit a snippet run's op batch.
 
 **Known infra note**: `rm -f /tmp/data-rover-e2e.db` before each fresh run
 clears the SQLite journal so the in-memory snapshot store stays in sync. When
