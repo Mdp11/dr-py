@@ -3,6 +3,7 @@
 	import * as Tabs from '$lib/components/ui/tabs';
 	import {
 		closeDraft,
+		closeSnippetDraft,
 		closeTab,
 		closeTableDraft,
 		getActiveTab,
@@ -15,6 +16,7 @@
 	import IssuesPanel from './Workspace/IssuesPanel.svelte';
 	import NavigationBuilder from './Navigation/NavigationBuilder.svelte';
 	import TableView from './Table/TableView.svelte';
+	import SnippetTab from './Snippet/SnippetTab.svelte';
 
 	const activeTab = $derived(getActiveTab());
 	const dynamicTabs = $derived(getDynamicTabs());
@@ -43,11 +45,9 @@
 						class="rounded p-0.5 opacity-50 transition-[color,background-color,border-color,opacity] hover:bg-muted hover:opacity-100"
 						onclick={(e) => {
 							e.stopPropagation();
-							if (tab.kind === 'table') {
-								closeTableDraft(tab.id);
-							} else {
-								closeDraft(tab.id);
-							}
+							if (tab.kind === 'table') closeTableDraft(tab.id);
+							else if (tab.kind === 'snippet') closeSnippetDraft(tab.id);
+							else closeDraft(tab.id);
 							closeTab(tab.id);
 						}}
 					>
@@ -69,6 +69,8 @@
 			<Tabs.Content value={tab.id} class="flex-1 overflow-hidden">
 				{#if tab.kind === 'table'}
 					<TableView tabId={tab.id} />
+				{:else if tab.kind === 'snippet'}
+					<SnippetTab tabId={tab.id} />
 				{:else}
 					<NavigationBuilder tabId={tab.id} />
 				{/if}
