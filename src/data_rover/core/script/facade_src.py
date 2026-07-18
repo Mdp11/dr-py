@@ -44,20 +44,15 @@ FACADE_SOURCE = '''
 
 
 class BridgeError(Exception):
-    # Generic/unclassified error surfaced from a bridge response's "error".
-    pass
+    """Base class for errors surfaced from the model bridge."""
 
 
 class ReadOnlyError(BridgeError):
-    # A write was attempted against a dispatcher constructed with
-    # record_ops=False (bridge response "error" starts with "ReadOnlyError").
-    pass
+    """A write was attempted in a read-only run (writes disabled)."""
 
 
 class NotFoundError(BridgeError):
-    # Requested element/relationship id does not exist (bridge response
-    # "error" starts with "KeyError").
-    pass
+    """The requested element or relationship id does not exist."""
 
 
 _req_counter = [0]
@@ -97,6 +92,8 @@ def _write(op):
 
 
 class Element:
+    """A read snapshot of a model element, plus dry-run write helpers."""
+
     __slots__ = ("_data",)
 
     def __init__(self, data):
@@ -104,44 +101,77 @@ class Element:
 
     @property
     def id(self):
+        """The element's id."""
         return self._data["id"]
 
     @property
     def type(self):
+        """The element's type name."""
         return self._data["type"]
 
     @property
     def name(self):
+        """The element's display name."""
         return self._data["name"]
 
     def __getitem__(self, key):
         return self._data["properties"][key]
 
     def get(self, key, default=None):
+        """Return property `key`, or `default` if absent. `el[key]` raises instead.
+
+        Example:
+            height = el.get("height", 0)
+        """
         return self._data["properties"].get(key, default)
 
     def props(self):
+        """Return a dict copy of all properties.
+
+        Example:
+            print(el.props())
+        """
         return dict(self._data["properties"])
 
     def out(self):
+        """List outgoing relationships as dicts (id, type, source_id, target_id).
+
+        Example:
+            for rel in el.out():
+                print(rel["type"], rel["target_id"])
+        """
         return _read("outgoing", element_id=self.id)["relationships"]
 
     def in_(self):
+        """List incoming relationships as dicts (id, type, source_id, target_id)."""
         return _read("incoming", element_id=self.id)["relationships"]
 
     def parent(self):
+        """Return the containment parent Element, or None at a root."""
         parent_id = _read("parent", element_id=self.id)["parent_id"]
         if parent_id is None:
             return None
         return _fetch_element(parent_id)
 
     def children(self):
+        """List containment child Elements.
+
+        Example:
+            for child in el.children():
+                print(child.name)
+        """
         return [Element(d) for d in _read("children", element_id=self.id)["children"]]
 
     def set(self, key, value):
+        """Record a dry-run property update. Nothing changes until staged and committed.
+
+        Example:
+            el.set("name", "Renamed")
+        """
         _write({"kind": "update_element", "id": self.id, "properties_patch": {key: value}})
 
     def delete(self):
+        """Record a dry-run delete of this element (containment children cascade at commit)."""
         _write({"kind": "delete_element", "id": self.id})
 
     def __repr__(self):
@@ -149,10 +179,22 @@ class Element:
 
 
 def _fetch_element(element_id):
+    """Fetch a single element by id.
+
+    Example:
+        el = dr.element("some-id")
+        print(el.name)
+    """
     return Element(_read("element", element_id=element_id)["element"])
 
 
 def _iter_elements(type=None):
+    """Iterate all elements, optionally filtered by type name. Pages transparently.
+
+    Example:
+        for el in dr.elements(type="Building"):
+            print(el.name)
+    """
     offset = 0
     while True:
         resp = _read("elements_page", type=type, offset=offset, limit=500)
@@ -165,14 +207,30 @@ def _iter_elements(type=None):
 
 
 def _list_types():
+    """List the element type names available in this project's metamodel.
+
+    Example:
+        print(dr.types())
+    """
     return _read("types")["types"]
 
 
 def _type_info(name):
+    """Describe a metamodel type: its properties, and endpoints if a relationship type.
+
+    Example:
+        info = dr.type("Building")
+    """
     return _read("type_info", type=name)
 
 
 def _create(type_name, properties=None):
+    """Record a dry-run element create. Returns a temp id usable in dr.connect
+    and dr.element within this run.
+
+    Example:
+        tid = dr.create("Building", {"name": "HQ"})
+    """
     temp_id = _next_temp_id()
     resp = _write({
         "kind": "create_element",
@@ -184,6 +242,12 @@ def _create(type_name, properties=None):
 
 
 def _connect(type_name, source_id, target_id, properties=None):
+    """Record a dry-run relationship create between two element ids (real or temp).
+    Returns the relationship's temp id.
+
+    Example:
+        dr.connect("Owns", parent_id, child_id)
+    """
     temp_id = _next_temp_id()
     resp = _write({
         "kind": "create_relationship",
@@ -197,6 +261,11 @@ def _connect(type_name, source_id, target_id, properties=None):
 
 
 def _disconnect(rel_id):
+    """Record a dry-run relationship delete.
+
+    Example:
+        dr.disconnect(rel_id)
+    """
     _write({"kind": "delete_relationship", "id": rel_id})
 
 
