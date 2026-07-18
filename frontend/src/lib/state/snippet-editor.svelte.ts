@@ -112,6 +112,13 @@ async function lintNow(tabId: string): Promise<void> {
 		const out = await snippetsApi.lintSnippet(draft.code);
 		if (_lintGenerations.get(tabId) !== gen || !_drafts.has(tabId)) return;
 		_lint.set(tabId, { diagnostics: out.diagnostics, entryPoints: out.entry_points });
+		// The select disables an entry no longer in entryPoints, but the run
+		// state's `entry` would otherwise keep the stale value and Run would
+		// still send it. 'script' is always valid (no element_id needed).
+		const rs = getSnippetRun(tabId);
+		if (rs.entry !== 'script' && !out.entry_points.includes(rs.entry)) {
+			setRun(tabId, { entry: 'script' });
+		}
 	} catch {
 		// Lint is advisory: a failed request just leaves the last diagnostics.
 	}

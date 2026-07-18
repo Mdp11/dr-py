@@ -187,6 +187,41 @@ describe('snippet lint + run', () => {
 		expect(getSnippetRun(tabId).notice).toContain('unavailable');
 	});
 
+	it('resets a stale entry to script when a new lint drops it', async () => {
+		vi.useFakeTimers();
+		const lint = vi.spyOn(snippetsApi, 'lintSnippet').mockResolvedValue({
+			diagnostics: [],
+			entry_points: ['script', 'value']
+		});
+		const tabId = openArtifactTab('snippet', { artifactId: null, title: 'New snippet' });
+		await ensureSnippetDraft(tabId);
+		setSnippetEntry(tabId, 'value');
+		expect(getSnippetRun(tabId).entry).toBe('value');
+
+		lint.mockResolvedValue({ diagnostics: [], entry_points: ['script'] }); // 'value' dropped
+		updateSnippetCode(tabId, 'print(1)\n');
+		await vi.advanceTimersByTimeAsync(LINT_DEBOUNCE_MS + 10);
+		expect(getSnippetRun(tabId).entry).toBe('script');
+		vi.useRealTimers();
+	});
+
+	it('leaves the entry untouched when the new lint still contains it', async () => {
+		vi.useFakeTimers();
+		const lint = vi.spyOn(snippetsApi, 'lintSnippet').mockResolvedValue({
+			diagnostics: [],
+			entry_points: ['script', 'value']
+		});
+		const tabId = openArtifactTab('snippet', { artifactId: null, title: 'New snippet' });
+		await ensureSnippetDraft(tabId);
+		setSnippetEntry(tabId, 'value');
+
+		lint.mockResolvedValue({ diagnostics: [], entry_points: ['script', 'value'] });
+		updateSnippetCode(tabId, 'print(1)\n');
+		await vi.advanceTimersByTimeAsync(LINT_DEBOUNCE_MS + 10);
+		expect(getSnippetRun(tabId).entry).toBe('value');
+		vi.useRealTimers();
+	});
+
 	it('markRunStaged pins the staged run id', async () => {
 		vi.spyOn(snippetsApi, 'runSnippet').mockResolvedValue(RUN_OUT);
 		const tabId = openArtifactTab('snippet', { artifactId: null, title: 'New snippet' });

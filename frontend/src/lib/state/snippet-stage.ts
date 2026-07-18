@@ -6,8 +6,10 @@
  *
  * 1. TEMP-ID REMAP — the facade numbers temp ids per run (`tmp_1`, ...), so
  *    two staged batches would collide; every batch gets fresh `createTempId()`
- *    ids, rewritten across `temp_id`/`source_id`/`target_id` AND ref-shaped
- *    property values (remapProperties).
+ *    ids, rewritten across `temp_id`/`source_id`/`target_id`/`id` (the facade
+ *    emits `el.set(...)` on a just-created element as `update_element{id:
+ *    "tmp_N"}` — same prefix as the create, so update/delete `id` needs the
+ *    same remap) AND ref-shaped property values (remapProperties).
  * 2. PRE-STATE PREFETCH — update/delete targets may be uncached (the snippet
  *    saw the server model, not the client cache); `emit`'s optimistic journal
  *    needs the entity present to record real pre-state, and relationship ops
@@ -59,9 +61,14 @@ export async function stageSnippetOps(result: SnippetRunOut): Promise<StageOutco
 				};
 			case 'update_element':
 			case 'update_relationship':
-				return { ...op, properties_patch: remapProperties(op.properties_patch, mapping) };
-			default:
-				return op;
+				return {
+					...op,
+					id: mapId(op.id),
+					properties_patch: remapProperties(op.properties_patch, mapping)
+				};
+			case 'delete_element':
+			case 'delete_relationship':
+				return { ...op, id: mapId(op.id) };
 		}
 	});
 

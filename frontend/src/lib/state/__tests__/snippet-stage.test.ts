@@ -136,4 +136,52 @@ describe('stageSnippetOps', () => {
 		await stageSnippetOps(runOut(ops));
 		expect(getCachedElements().get('e1')?.properties.name).toBe('Renamed');
 	});
+
+	it('remaps id on update/delete ops that reference a same-batch temp id', async () => {
+		// The facade emits `el.set(...)` on a just-created element as
+		// update_element{id: "tmp_N"} — same tmp_ prefix as the create's
+		// temp_id. Every id-bearing op must go through the same remap as
+		// temp_id/source_id/target_id, or the staged op dangles.
+		const ops = [
+			{
+				kind: 'create_element',
+				temp_id: 'tmp_1',
+				type_name: 'Building',
+				properties: { name: 'New B' }
+			},
+			{ kind: 'update_element', id: 'tmp_1', properties_patch: { name: 'Renamed' } },
+			{ kind: 'create_element', temp_id: 'tmp_2', type_name: 'District', properties: {} },
+			{ kind: 'delete_element', id: 'tmp_2' },
+			{
+				kind: 'create_relationship',
+				temp_id: 'tmp_3',
+				type_name: 'Owns',
+				source_id: 'tmp_1',
+				target_id: 'e2',
+				properties: {}
+			},
+			{ kind: 'update_relationship', id: 'tmp_3', properties_patch: { note: 'x' } }
+		] as SnippetRunOut['ops'];
+		const res = await stageSnippetOps(runOut(ops));
+		expect(res).toEqual({ ok: true, count: 6 });
+
+		const staged = getStagedOps();
+		const c1 = staged[0] as Extract<(typeof staged)[number], { kind: 'create_element' }>;
+		const u1 = staged[1] as Extract<(typeof staged)[number], { kind: 'update_element' }>;
+		const c2 = staged[2] as Extract<(typeof staged)[number], { kind: 'create_element' }>;
+		const d2 = staged[3] as Extract<(typeof staged)[number], { kind: 'delete_element' }>;
+		const relC = staged[4] as Extract<(typeof staged)[number], { kind: 'create_relationship' }>;
+		const relU = staged[5] as Extract<(typeof staged)[number], { kind: 'update_relationship' }>;
+
+		expect(u1.id).toBe(c1.temp_id);
+		expect(u1.id).not.toBe('tmp_1');
+		expect(d2.id).toBe(c2.temp_id);
+		expect(d2.id).not.toBe('tmp_2');
+		expect(relU.id).toBe(relC.temp_id);
+		expect(relU.id).not.toBe('tmp_3');
+
+		// The property patch actually lands on the freshly-created cache entry
+		// (proof the id remap, not just the staged-op shape, is fixed).
+		expect(getCachedElements().get(c1.temp_id)?.properties.name).toBe('Renamed');
+	});
 });
