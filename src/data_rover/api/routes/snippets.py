@@ -56,6 +56,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import ValidationError
 from sqlalchemy.orm import Session as DbSession
 
+from data_rover.core.script.docs import get_facade_docs
 from data_rover.core.script.lint import derive_entry_points, lint_code
 from data_rover.core.script.runner import RunRequest, ScriptRunner
 
@@ -68,8 +69,11 @@ from ..identity import get_current_user
 from ..schemas import (
     OPS_ADAPTER,
     DiagnosticOut,
+    FacadeDocEntryOut,
     SnippetCancelIn,
+    SnippetDocsOut,
     SnippetErrorOut,
+    SnippetLimitsOut,
     SnippetLintIn,
     SnippetLintOut,
     SnippetRunIn,
@@ -210,6 +214,55 @@ def lint_snippet(
             for d in diagnostics
         ],
         entry_points=entry_points,
+    )
+
+
+#: Static authoring facts served alongside the generated reference. The one
+#: hand-written piece of the docs payload — keep each entry a single plain
+#: sentence; the panel renders them as a bullet list.
+_SNIPPET_DOC_NOTES = [
+    "Runs are dry-run: writes (dr.create, el.set, ...) record proposed ops; "
+    "nothing changes until you stage and commit them.",
+    "Execution is deterministic: the clock and random seed are pinned, so the "
+    "same code against the same model produces identical output.",
+    "The sandbox has no network or filesystem access; many stdlib modules "
+    "(os, subprocess, socket, ...) are absent or blocked.",
+    "Stopping a run is not instant: the run ends at the wall timeout, and a "
+    "new run may be rejected until the slot frees.",
+]
+
+
+@router.get("/snippets/docs")
+def snippet_docs(
+    _membership: Membership = Depends(require_membership),
+    settings: Settings = Depends(get_settings),
+) -> SnippetDocsOut:
+    """Structured snippet-authoring docs: the facade reference extracted from
+    the facade source itself, the configured limits, and static notes.
+    Deliberately independent of the runner — served even when /snippets/run
+    would 503 (no guest binary)."""
+    limits = run_limits_from_settings(settings)
+    return SnippetDocsOut(
+        facade=[
+            FacadeDocEntryOut(
+                name=e.name,
+                kind=e.kind,  # type: ignore[arg-type]  # str -> Literal: pydantic validates at construction
+                signature=e.signature,
+                doc=e.doc,
+                example=e.example,
+            )
+            for e in get_facade_docs()
+        ],
+        limits=SnippetLimitsOut(
+            wall_timeout_s=limits.wall_timeout_s,
+            memory_bytes=limits.memory_bytes,
+            stdout_bytes=limits.stdout_bytes,
+            result_repr_bytes=limits.result_repr_bytes,
+            max_ops=limits.max_ops,
+            max_op_bytes=limits.max_op_bytes,
+            page_limit=limits.page_limit,
+        ),
+        notes=_SNIPPET_DOC_NOTES,
     )
 
 
