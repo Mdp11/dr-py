@@ -284,4 +284,48 @@ class _Dr:
 
 
 dr = _Dr()
+
+_WIRE_SCALARS = (str, int, float, bool)
+
+
+def _dr_serialize_entry_result(entry, value):
+    # Session wire serializer for embedded entry-point calls (M2/M3): maps a
+    # value()/step() return value to the tagged payload the host validates
+    # with runner.decode_call_payload. Unsupported shapes raise ValueError;
+    # the session loop reports that as the call's error. NOT part of the
+    # documented dr API (underscored on purpose).
+    if entry == "step":
+        if value is None:
+            return {"ids": []}
+        try:
+            items = list(value)
+        except TypeError:
+            raise ValueError(
+                "step() must return an iterable of Elements or element ids"
+            )
+        ids = []
+        for item in items:
+            if isinstance(item, Element):
+                ids.append(item.id)
+            elif isinstance(item, str):
+                ids.append(item)
+            else:
+                raise ValueError(
+                    "step() must return an iterable of Elements or element ids"
+                )
+        return {"ids": ids}
+    if isinstance(value, Element):
+        return {"kind": "element", "id": value.id}
+    if value is None or isinstance(value, _WIRE_SCALARS):
+        return {"kind": "scalar", "value": value}
+    if isinstance(value, (list, tuple)):
+        items = list(value)
+        if items and all(isinstance(v, Element) for v in items):
+            return {"kind": "elements", "ids": [v.id for v in items]}
+        if all(v is None or isinstance(v, _WIRE_SCALARS) for v in items):
+            return {"kind": "scalars", "values": items}
+    raise ValueError(
+        "value() must return a scalar, a list of scalars, an Element, "
+        "or a list of Elements"
+    )
 '''

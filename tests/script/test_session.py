@@ -58,3 +58,46 @@ def test_decode_step_payloads() -> None:
     for bad in (None, {"ids": "a"}, {"ids": [1]}, {"kind": "scalar", "value": 1}):
         decoded, msg = decode_call_payload("step", bad)
         assert decoded is None and msg is not None
+
+
+# --- Facade-side serialization (guest-side, M2/M3) -----
+
+
+from data_rover.core.script.bridge import BridgeDispatcher
+from data_rover.core.script.facade_src import FACADE_SOURCE
+
+
+def _facade_ns(model) -> dict:
+    dispatcher = BridgeDispatcher(
+        model, record_ops=False, max_ops=10, max_op_bytes=1024, page_limit=500
+    )
+    ns: dict = {"_transport": dispatcher.dispatch}
+    exec(FACADE_SOURCE, ns)
+    return ns
+
+
+def test_serialize_value_shapes(small_model) -> None:
+    ns = _facade_ns(small_model)
+    ser = ns["_dr_serialize_entry_result"]
+    el = ns["dr"].element(next(iter(small_model.elements)))
+    assert ser("value", 3) == {"kind": "scalar", "value": 3}
+    assert ser("value", None) == {"kind": "scalar", "value": None}
+    assert ser("value", ["a", 1, None]) == {"kind": "scalars", "values": ["a", 1, None]}
+    assert ser("value", el) == {"kind": "element", "id": el.id}
+    assert ser("value", [el, el]) == {"kind": "elements", "ids": [el.id, el.id]}
+    with pytest.raises(ValueError):
+        ser("value", {"a": 1})
+    with pytest.raises(ValueError):
+        ser("value", [el, 1])  # mixed Element/scalar list
+
+
+def test_serialize_step_shapes(small_model) -> None:
+    ns = _facade_ns(small_model)
+    ser = ns["_dr_serialize_entry_result"]
+    el = ns["dr"].element(next(iter(small_model.elements)))
+    assert ser("step", [el, "raw-id"]) == {"ids": [el.id, "raw-id"]}
+    assert ser("step", None) == {"ids": []}
+    with pytest.raises(ValueError):
+        ser("step", 42)
+    with pytest.raises(ValueError):
+        ser("step", [1])

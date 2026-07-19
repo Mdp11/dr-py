@@ -8,6 +8,8 @@ the same object graph production code produces.
 
 from __future__ import annotations
 
+import pytest
+
 from data_rover.core.metamodel.schema import (
     ElementType,
     Metamodel,
@@ -56,3 +58,9 @@ def tiny_model() -> Model:
     model.set_property(b3, "name", "Building Three")
     model.connect("Owns", "b1", "b2")
     return model
+
+
+@pytest.fixture
+def small_model() -> Model:
+    """Pytest fixture wrapping tiny_model() for tests that need a reusable model."""
+    return tiny_model()

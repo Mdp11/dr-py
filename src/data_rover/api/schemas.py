@@ -718,7 +718,9 @@ class SnippetRunIn(BaseModel):
 class SnippetErrorOut(BaseModel):
     """Mirrors `core.script.runner.ScriptError` field-for-field."""
 
-    kind: Literal["syntax", "runtime", "timeout", "cancelled", "memory", "limit", "unavailable"]
+    kind: Literal[
+        "syntax", "runtime", "timeout", "cancelled", "memory", "limit", "unavailable"
+    ]
     message: str
     traceback: str | None = None
 
