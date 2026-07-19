@@ -22,6 +22,19 @@ pixi run start-backend      # http://127.0.0.1:8000
 pixi run start-frontend     # http://localhost:5173  (separate terminal)
 ```
 
+### One-shot workflow (shortcut)
+
+The steps above are bundled into three commands (docker + backend + frontend, via
+a detached `process-compose` daemon — see `process-compose.yaml`):
+
+```sh
+pixi run start-dr    # start dockers, migrate, then backend + frontend (non-blocking)
+pixi run logs-dr     # attach live per-process logs (Ctrl-b q to detach; leaves it running)
+pixi run stop-dr     # stop backend + frontend + dockers (keeps data volumes)
+pixi run reset-dr    # stop everything + wipe the Postgres/fake-gcs volumes (clean slate;
+                     # next start-dr rebuilds fully fresh — does NOT restart)
+```
+
 Open <http://localhost:5173> and log in:
 
 ```

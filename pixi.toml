@@ -33,6 +33,10 @@ argon2-cffi = "23.*"
 python-multipart = "0.0.*"
 openpyxl = "3.1.*"
 types-openpyxl = "3.1.*"
+# Local-dev process orchestrator for the start-dr/stop-dr/reset-dr workflow: runs
+# the backend (api env) + frontend (frontend env) as a single detached daemon
+# with health-gated ordering. See process-compose.yaml at the repo root.
+process-compose = "1.*"
 
 [feature.api.pypi-dependencies]
 # The snippet WASM sandbox runner (api/script_runner.py) imports wasmtime at
@@ -83,6 +87,51 @@ default-environment = "api"
 
 [feature.api.tasks.services-logs]
 cmd = "docker compose logs -f"
+default-environment = "api"
+
+# --- One-shot local dev workflow (see process-compose.yaml) ---
+# start-dr: bring docker up, then run the migration + backend + frontend as a
+# detached process-compose daemon. Non-blocking — returns to the shell; watch
+# with `pixi run logs-dr`.
+#
+# The docker bring-up is deliberately NOT `services-up` (`docker compose up
+# --wait` over ALL services): that aborts with a non-zero exit the instant the
+# one-shot `gcs-init` container exits, which on a COLD volume happens *before*
+# Postgres finishes its slow first-time `initdb` — so `db-upgrade` would race a
+# not-yet-ready database. Instead:
+#   1. `--wait` only the long-running services (postgres, fake-gcs); they never
+#      exit, so `--wait` blocks until Postgres is genuinely healthy (cold-safe).
+#   2. start `gcs-init` and `docker compose wait` for it — the snapshot bucket is
+#      guaranteed to exist before the backend can write to it.
+# Every step is `&&`-chained, so a real failure aborts before the daemon starts.
+[feature.api.tasks.start-dr]
+cmd = """
+docker compose up -d --wait postgres fake-gcs && docker compose up -d gcs-init && docker compose wait gcs-init && process-compose up --detached
+"""
+default-environment = "api"
+
+# stop-dr: stop the backend + frontend daemon, then stop docker (keeps volumes).
+[feature.api.tasks.stop-dr]
+cmd = """
+process-compose down
+docker compose down
+"""
+default-environment = "api"
+
+# reset-dr: stop the daemon (if running), then wipe the Postgres + fake-gcs
+# volumes for a clean slate. Does NOT restart — the next `pixi run start-dr`
+# rebuilds everything fully fresh (empty DB reseeded with the bootstrap admin).
+[feature.api.tasks.reset-dr]
+cmd = """
+process-compose down || true
+docker compose down -v
+"""
+default-environment = "api"
+
+# logs-dr: attach the process-compose TUI to the running daemon (live per-process
+# logs, scrollback, restart keys). Detach with Ctrl-b / q — leaves it running.
+[feature.api.tasks.logs-dr]
+cmd = "process-compose attach"
 default-environment = "api"
 
 [feature.core-dev.tasks.test-core]
