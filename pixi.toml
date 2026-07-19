@@ -39,12 +39,12 @@ process-compose = "1.*"
 wasmtime = ">=30"
 
 [feature.api.tasks.backend-start]
-description = "Run the FastAPI backend (uvicorn) on 127.0.0.1:8000"
+description = "Run the FastAPI backend on 127.0.0.1:8000"
 cmd = "uvicorn data_rover.api.main:app --reload --reload-dir src --host 127.0.0.1 --port 8000 --app-dir src"
 default-environment = "api"
 
 [feature.api.tasks.db-upgrade]
-description = "Apply the Alembic schema (upgrade head)"
+description = "Apply the Alembic schema"
 cmd = "alembic upgrade head"
 default-environment = "api"
 
@@ -55,12 +55,12 @@ cmd = "alembic revision --autogenerate -m \"{{ message }}\""
 default-environment = "api"
 
 [feature.api.tasks.services-start]
-description = "Start docker infra (Postgres + fake-gcs), wait until ready"
+description = "Start docker infra, wait until ready"
 cmd = "docker compose up -d --wait"
 default-environment = "api"
 
 [feature.api.tasks.services-stop]
-description = "Stop docker infra (keeps data volumes)"
+description = "Stop docker infra"
 cmd = "docker compose down"
 default-environment = "api"
 
@@ -75,14 +75,14 @@ cmd = "docker compose logs -f"
 default-environment = "api"
 
 [feature.api.tasks.dr-start]
-description = "Start the full local stack: docker + migrate + backend + frontend (detached)"
+description = "Start the full local stack: docker + migrate + backend + frontend"
 cmd = """
 docker compose up -d --wait postgres fake-gcs && docker compose up -d gcs-init && docker compose wait gcs-init && bash scripts/pc.sh up --detached
 """
 default-environment = "api"
 
 [feature.api.tasks.dr-stop]
-description = "Stop the full local stack (backend, frontend, docker; keeps volumes)"
+description = "Stop the full local stack"
 cmd = """
 bash scripts/pc.sh down || true
 docker compose down
@@ -90,7 +90,7 @@ docker compose down
 default-environment = "api"
 
 [feature.api.tasks.dr-reset]
-description = "Stop the stack and wipe docker volumes for a clean slate (does not restart)"
+description = "Stop the stack and wipe docker volumes for a clean slate"
 cmd = """
 bash scripts/pc.sh down || true
 docker compose down -v
@@ -103,12 +103,12 @@ cmd = "bash scripts/pc.sh attach"
 default-environment = "api"
 
 [feature.core-dev.tasks.core-test]
-description = "Run the pytest suite (core + API)"
+description = "Run the pytest suite"
 cmd = "pytest"
 default-environment = "core-dev"
 
 [feature.core-dev.tasks.core-lint]
-description = "Lint + typecheck the core package (ruff, mypy, pyright)"
+description = "Lint + typecheck the core package"
 args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
 cmd = """
 ruff check {% if check_only == 'false' %}--fix{% endif %} .
@@ -119,7 +119,7 @@ cwd = "src/data_rover/core"
 default-environment = "core-dev"
 
 [feature.core-dev.tasks.core-format]
-description = "Format the core package (ruff format)"
+description = "Format the core package"
 args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
 cmd = "ruff format {% if check_only == 'true' %}--check{% endif %} ."
 cwd = "src/data_rover/core"
@@ -135,7 +135,7 @@ depends-on = [
 ]
 
 [feature.core-dev.tasks.backend-lint]
-description = "Lint + typecheck the API package (ruff, mypy, pyright)"
+description = "Lint + typecheck the API package"
 args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
 cmd = """
 ruff check {% if check_only == 'false' %}--fix{% endif %} .
@@ -146,7 +146,7 @@ cwd = "src/data_rover/api"
 default-environment = "core-dev"
 
 [feature.core-dev.tasks.backend-format]
-description = "Format the API package (ruff format)"
+description = "Format the API package"
 args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
 cmd = "ruff format {% if check_only == 'true' %}--check{% endif %} ."
 cwd = "src/data_rover/api"
@@ -162,7 +162,7 @@ depends-on = [
 ]
 
 [feature.core-dev.tasks.dr-tidy]
-description = "Format + lint the whole repo (frontend, core, backend)"
+description = "Format + lint the whole codebase"
 args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
 cmd = "true"
 default-environment = "core-dev"
@@ -181,18 +181,18 @@ cmd = "npm install"
 cwd = "frontend"
 
 [feature.frontend.tasks.frontend-start]
-description = "Run the SvelteKit dev server (vite) on :5173"
+description = "Run the SvelteKit dev server on :5173"
 cmd = "npm run dev"
 cwd = "frontend"
 depends-on = [{ task = "frontend-install" }]
 
 [feature.frontend.tasks.frontend-build]
-description = "Build the frontend for production (frontend/build)"
+description = "Build the frontend for production"
 cmd = "npm run build"
 cwd = "frontend"
 
 [feature.frontend.tasks.frontend-lint]
-description = "Lint + svelte-check the frontend (eslint)"
+description = "Lint + svelte-check the frontend"
 args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
 cmd = """
 npx eslint {% if check_only == 'false' %}--fix{% endif %} .
@@ -201,7 +201,7 @@ npm run check
 cwd = "frontend"
 
 [feature.frontend.tasks.frontend-format]
-description = "Format the frontend (prettier)"
+description = "Format the frontend"
 args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
 cmd = "npx prettier {% if check_only == 'true' %}--check{% else %}--write{% endif %} ."
 cwd = "frontend"
