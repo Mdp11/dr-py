@@ -21,6 +21,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, Field, TypeAdapter, model_validator
 
 from data_rover.core.navigation.schema import NavigationDefinition
+from data_rover.core.script.schema import SnippetSource
 from data_rover.core.search.criteria import Criterion
 
 SCHEMA_VERSION = 1
@@ -142,8 +143,23 @@ class NavigationColumn(BaseModel):
     hidden: bool = False
 
 
+class ScriptColumn(BaseModel):
+    kind: Literal["script"] = "script"
+    source: ColumnSource = Field(default_factory=RowSlot)
+    snippet: SnippetSource = Field(default_factory=SnippetSource)
+    mode: Literal["collapse", "expand"] = "collapse"
+    keep_empty: bool = True
+    header: str = ""
+    width_px: int | None = None
+    #: Presentation-only: a hidden column is still evaluated (later columns
+    #: may reference it via ColumnRef) but is omitted from the grid and the
+    #: xlsx export. Never feed this into evaluation — dropping the column
+    #: would shift ColumnRef indices and the expand-slot arithmetic.
+    hidden: bool = False
+
+
 Column = Annotated[
-    ElementColumn | PropertyColumn | NavigationColumn,
+    ElementColumn | PropertyColumn | NavigationColumn | ScriptColumn,
     Field(discriminator="kind"),
 ]
 
@@ -211,6 +227,13 @@ class TableDefinition(BaseModel):
             # elements per row even off an expand column — no longer single.
             single = ref.mode == "expand" and src.step_index is None
             return True, single
+        if ref.kind == "script":
+            # Element-capable at RUNTIME: value() may return Element(s); a
+            # scalar result simply binds nothing downstream (tolerant — the
+            # return type is not statically knowable). Like a navigation
+            # column, collapse is multi-binding, expand promotes one binding
+            # per row.
+            return True, ref.mode == "expand"
         # property column
         return False, ref.mode == "expand"
 

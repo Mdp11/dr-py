@@ -31,6 +31,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, TypeAdapter, model_validator
 
+from data_rover.core.script.schema import SnippetSource
 from data_rover.core.search.criteria import Criterion
 
 SCHEMA_VERSION = 3
@@ -105,8 +106,23 @@ class PropertyStep(BaseModel):
     comment: str | None = None
 
 
+class ScriptStep(BaseModel):
+    """A hop computed by a snippet's `step(el)` entry point: consumes the
+    frontier one element at a time, produces the next frontier from the ids
+    the snippet returns (unknown ids dropped with a warning; `exclude_visited`
+    applies). Adds ONE chain column, like RelationshipStep — its `step_types`
+    entry is `comment or "script"`. Per-element failures PRUNE that chain with
+    a warning (never abort), mirroring PropertyStep's graceful stance."""
+
+    kind: Literal["script"] = "script"
+    snippet: SnippetSource = Field(default_factory=SnippetSource)
+    #: free-form user note; doubles as the chain-column label.
+    comment: str | None = None
+
+
 StepItem = Annotated[
-    RelationshipStep | FilterStep | PropertyStep, Field(discriminator="kind")
+    RelationshipStep | FilterStep | PropertyStep | ScriptStep,
+    Field(discriminator="kind"),
 ]
 
 
@@ -171,6 +187,7 @@ NavigationDefinition = Annotated[
 RelationshipStep.model_rebuild()
 FilterStep.model_rebuild()
 PropertyStep.model_rebuild()
+ScriptStep.model_rebuild()
 PathNavigation.model_rebuild()
 Operand.model_rebuild()
 SetExpression.model_rebuild()

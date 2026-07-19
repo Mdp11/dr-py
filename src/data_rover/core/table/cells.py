@@ -80,7 +80,17 @@ class ElementsCell:
     truncated: bool
 
 
-Cell = ElementCell | ValueCell | ValuesCell | ElementsCell
+@dataclass
+class ErrorCell:
+    """A script cell that failed (snippet raised, timed out, budget spent,
+    runner unavailable, dangling ref). `message` is short; `traceback` (guest
+    frames only) rides along for hover detail. Sorts with empties (last)."""
+
+    message: str
+    traceback: str | None = None
+
+
+Cell = ElementCell | ValueCell | ValuesCell | ElementsCell | ErrorCell
 
 
 def _prop_present(mm: Metamodel, type_name: str, prop: str) -> bool:
