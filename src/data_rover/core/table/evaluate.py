@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
+    from data_rover.core.script.embed import ScriptEvalContext
+
     from .cells import Cell
 
 from data_rover.core.metamodel.schema import Metamodel
@@ -148,6 +150,7 @@ def resolve_source_elements(
     source: ColumnSource,
     base_slots: int,
     limits: TableLimits,
+    script: ScriptEvalContext | None = None,
 ) -> list[str]:
     """Ordered element ids a column source resolves to for ONE row.
 
@@ -166,6 +169,11 @@ def resolve_source_elements(
     row is pinned to one projected element (read back from the expand slot),
     so only chains whose projection matches it contribute — otherwise a
     step-index cell would mix in other rows' chains.
+
+    `script` is the shared per-request `ScriptEvalContext` (memoized calls,
+    one budget) — required to resolve a COLLAPSE script column as a source;
+    `None` (the default, for callers with no script columns in play) makes
+    such a reference resolve to nothing, same as an unconfigured snippet.
     """
     if isinstance(source, RowSlot):
         # Static validation only pins chain_index for NON-chains row sources;
@@ -184,7 +192,7 @@ def resolve_source_elements(
         # requested chain step. Off an EXPAND column the row is pinned to one
         # projected element, so only chains projecting to it count.
         roots = resolve_source_elements(
-            mm, model, defn, key, ref_col.source, base_slots, limits
+            mm, model, defn, key, ref_col.source, base_slots, limits, script=script
         )
         match: str | None = None
         if ref_col.mode == "expand":
@@ -206,15 +214,36 @@ def resolve_source_elements(
         return [b] if isinstance(b, str) else []
     if ref_col.kind == "element":
         return resolve_source_elements(
-            mm, model, defn, key, ref_col.source, base_slots, limits
+            mm, model, defn, key, ref_col.source, base_slots, limits, script=script
         )
     if ref_col.kind == "navigation":
         roots = resolve_source_elements(
-            mm, model, defn, key, ref_col.source, base_slots, limits
+            mm, model, defn, key, ref_col.source, base_slots, limits, script=script
         )
         reached = _navigation_reached(mm, model, ref_col, roots, limits)
         # element-producing by contract: PropertyValue terminals contribute none
         return [n for n in reached if isinstance(n, str)]
+    if ref_col.kind == "script":
+        # Collapse script column as a source: evaluate (memoized) and bind the
+        # returned ELEMENT ids; scalar results bind nothing (runtime-tolerant
+        # arity — see schema._source_arity). Expand script columns never reach
+        # here: the generic expand-slot read above already returned.
+        if ref_col.snippet.definition is None or script is None:
+            return []
+        roots = resolve_source_elements(
+            mm, model, defn, key, ref_col.source, base_slots, limits, script=script
+        )
+        if not roots:
+            return []
+        res = script.call(ref_col.snippet.definition.code, "value", roots)
+        if res.error is not None or res.value is None:
+            return []
+        p = res.value
+        if p["kind"] == "element":
+            return [p["id"]] if p["id"] in model.elements else []
+        if p["kind"] == "elements":
+            return [i for i in dict.fromkeys(p["ids"]) if i in model.elements]
+        return []
     return []  # property columns are not element-producing (schema rejects this)
 
 
@@ -312,10 +341,11 @@ def build_rows(
     model: Model,
     defn: TableDefinition,
     limits: TableLimits = TableLimits(),
+    script: ScriptEvalContext | None = None,
 ) -> tuple[list[RowKey], bool]:
     """(row keys, truncated) — thin compatibility wrapper over `build_rows_ex`
     for callers that don't need `base_total`."""
-    result = build_rows_ex(mm, model, defn, limits)
+    result = build_rows_ex(mm, model, defn, limits, script=script)
     return result.keys, result.truncated
 
 
@@ -324,6 +354,7 @@ def build_rows_ex(
     model: Model,
     defn: TableDefinition,
     limits: TableLimits = TableLimits(),
+    script: ScriptEvalContext | None = None,
 ) -> RowBuild:
     """Full row build. `truncated` is set when the row set is INCOMPLETE for
     any reason: `max_rows` was hit, OR an underlying navigation (row source /
@@ -334,24 +365,19 @@ def build_rows_ex(
     rows (extending the key tuple; empty reached sets follow `keep_empty`),
     and a COLLAPSE column with `keep_empty=False` filters rows whose cell
     would be empty without splitting anything ("Keep rows with no value"
-    works with or without the split)."""
+    works with or without the split).
+
+    `script` is `None` for callers with no script columns in play (every
+    existing caller); passed through to `resolve_source_elements`/
+    `_collapse_has_value`/`_expand_values` so a `ScriptColumn` — collapse OR
+    expand — goes through the SAME machinery every other column kind does,
+    calling `value()` (memoized) exactly where a collapse/expand navigation
+    or property column would re-navigate/re-read."""
     keys, truncated = _base_row_keys(mm, model, defn, limits)
     base_total = len(keys)
     base_slots = _row_source_base_slots(defn, keys)
     for col in defn.columns:
         if isinstance(col, ElementColumn):
-            continue
-        if isinstance(col, ScriptColumn):
-            # ScriptColumn evaluation lands in Task 7; inert until then — but an
-            # EXPAND script column must still consume its row-key slot, or
-            # _expand_slot_of's count desyncs from the built keys and every
-            # later expand column reads one slot past the tuple. Contribute an
-            # empty reach: keep_empty rows carry a None binding, otherwise the
-            # row drops (exactly what the real evaluation does for an empty
-            # result).
-            if col.mode != "expand":
-                continue
-            keys = [(*key, None) for key in keys] if col.keep_empty else []
             continue
         if col.mode != "expand":
             if col.keep_empty:
@@ -360,10 +386,10 @@ def build_rows_ex(
             kept: list[RowKey] = []
             for key in keys:
                 roots = resolve_source_elements(
-                    mm, model, defn, key, col.source, base_slots, limits
+                    mm, model, defn, key, col.source, base_slots, limits, script=script
                 )
                 has_value, nav_truncated = _collapse_has_value(
-                    mm, model, col, roots, limits
+                    mm, model, col, roots, limits, script=script
                 )
                 if nav_truncated:
                     truncated = True
@@ -375,9 +401,11 @@ def build_rows_ex(
         new_keys: list[RowKey] = []
         for key in keys:
             roots = resolve_source_elements(
-                mm, model, defn, key, col.source, base_slots, limits
+                mm, model, defn, key, col.source, base_slots, limits, script=script
             )
-            reached, nav_truncated = _expand_values(mm, model, col, roots, limits)
+            reached, nav_truncated = _expand_values(
+                mm, model, col, roots, limits, script=script
+            )
             if nav_truncated:
                 truncated = True
             if not reached:
@@ -403,15 +431,37 @@ def build_rows_ex(
 def _collapse_has_value(
     mm: Metamodel,
     model: Model,
-    col: NavigationColumn | PropertyColumn,
+    col: NavigationColumn | PropertyColumn | ScriptColumn,
     roots: list[str],
     limits: TableLimits,
+    script: ScriptEvalContext | None = None,
 ) -> tuple[bool, bool]:
     """(cell would be non-empty, navigation-truncated) for one row of a
     COLLAPSE column — the `keep_empty=False` filter in `build_rows_ex`.
     Mirrors what `cells.py` renders: a navigation cell is empty when nothing
     is reached; a property cell is empty when no source element carries a
-    non-None (and, for lists, non-empty) value."""
+    non-None (and, for lists, non-empty) value; a script cell is empty when
+    the call returns an empty/None result — EXCEPT a call error, which counts
+    as having a value (the row must stay visible so the cell can show the
+    error) same as a dangling snippet ref."""
+    if isinstance(col, ScriptColumn):
+        # keep_empty=False filter for a collapse script column. ERRORS COUNT
+        # AS VALUES: dropping an errored row would hide the failure.
+        if col.snippet.ref is not None:
+            return True, False  # dangling ref → error cell stays
+        if col.snippet.definition is None or script is None or not roots:
+            return False, False
+        res = script.call(col.snippet.definition.code, "value", roots)
+        if res.error is not None or res.value is None:
+            return True, False
+        p = res.value
+        if p["kind"] == "scalar":
+            return p["value"] is not None, False
+        if p["kind"] == "scalars":
+            return any(v is not None for v in p["values"]), False
+        if p["kind"] == "element":
+            return p["id"] in model.elements, False
+        return any(i in model.elements for i in p["ids"]), False
     if isinstance(col, NavigationColumn):
         reached, truncated = _navigation_reached_ex(mm, model, col, roots, limits)
         return bool(reached), truncated
@@ -430,11 +480,36 @@ def _collapse_has_value(
 def _expand_values(
     mm: Metamodel,
     model: Model,
-    col: NavigationColumn | PropertyColumn,
+    col: NavigationColumn | PropertyColumn | ScriptColumn,
     roots: list[str],
     limits: TableLimits,
+    script: ScriptEvalContext | None = None,
 ) -> tuple[list[Binding], bool]:
     """(values, navigation-truncated) an expand column contributes for one row."""
+    if isinstance(col, ScriptColumn):
+        # Expand promotion: element ids promote raw (str); SCALARS promote
+        # wrapped in PropertyValue so a scalar string can never be mistaken
+        # for an element id (the Binding invariant); None scalars are skipped.
+        # A call ERROR promotes the single binding None — exactly one row
+        # survives regardless of keep_empty, and the cell layer re-derives the
+        # error from the memoized call.
+        if col.snippet.ref is not None:
+            return [None], False  # dangling ref → one error row
+        if col.snippet.definition is None or script is None or not roots:
+            return [], False
+        res = script.call(col.snippet.definition.code, "value", roots)
+        if res.error is not None or res.value is None:
+            return [None], False
+        p = res.value
+        if p["kind"] == "element":
+            return ([p["id"]] if p["id"] in model.elements else []), False
+        if p["kind"] == "elements":
+            return [i for i in dict.fromkeys(p["ids"]) if i in model.elements], False
+        if p["kind"] == "scalar":
+            return (
+                [PropertyValue(p["value"])] if p["value"] is not None else []
+            ), False
+        return [PropertyValue(v) for v in p["values"] if v is not None], False
     if isinstance(col, NavigationColumn):
         reached, truncated = _navigation_reached_ex(mm, model, col, roots, limits)
         # PropertyValue terminals ride into the RowKey as-is (see Binding);
@@ -649,9 +724,12 @@ def iter_export_rows(
     keys: list[RowKey],
     limits: TableLimits = TableLimits(),
     chunk: int = 1000,
+    script: ScriptEvalContext | None = None,
 ) -> Iterator[list[Cell]]:
     """Yield evaluated cell rows for `keys`, in order, `chunk` rows at a time."""
     from .cells import evaluate_cells
 
     for i in range(0, len(keys), chunk):
-        yield from evaluate_cells(mm, model, defn, keys[i : i + chunk], limits)
+        yield from evaluate_cells(
+            mm, model, defn, keys[i : i + chunk], limits, script=script
+        )

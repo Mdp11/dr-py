@@ -35,6 +35,10 @@ implementation, in `evaluate.py`) finds that slot from the column's own index.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from data_rover.core.script.embed import ScriptEvalContext
 
 from data_rover.core.metamodel.schema import Metamodel
 from data_rover.core.model.model import Model
@@ -135,8 +139,11 @@ def _element_cell(
     col: ElementColumn,
     base_slots: int,
     limits: TableLimits,
+    script: ScriptEvalContext | None = None,
 ) -> ElementCell:
-    els = resolve_source_elements(mm, model, defn, key, col.source, base_slots, limits)
+    els = resolve_source_elements(
+        mm, model, defn, key, col.source, base_slots, limits, script=script
+    )
     return ElementCell(element_id=els[0] if els else None)
 
 
@@ -149,8 +156,11 @@ def _property_cell(
     col_index: int,
     base_slots: int,
     limits: TableLimits,
+    script: ScriptEvalContext | None = None,
 ) -> Cell:
-    els = resolve_source_elements(mm, model, defn, key, col.source, base_slots, limits)
+    els = resolve_source_elements(
+        mm, model, defn, key, col.source, base_slots, limits, script=script
+    )
     if col.mode == "expand":
         # The value already sits in this row's key slot (build_rows promoted
         # it); read it back rather than re-deriving it, so a `keep_empty` row
@@ -194,6 +204,7 @@ def _navigation_cell(
     col_index: int,
     base_slots: int,
     limits: TableLimits,
+    script: ScriptEvalContext | None = None,
 ) -> Cell:
     if col.mode == "expand":
         slot = _expand_slot_of(defn, base_slots, col_index)
@@ -207,7 +218,7 @@ def _navigation_cell(
             )
         return ElementCell(element_id=b if isinstance(b, str) else None)
     roots = resolve_source_elements(
-        mm, model, defn, key, col.source, base_slots, limits
+        mm, model, defn, key, col.source, base_slots, limits, script=script
     )
     reached = _navigation_reached(mm, model, col, roots, limits)
     # `cell_cap` is a per-column display preference; `max_cell_elements` is the
@@ -238,15 +249,101 @@ def _navigation_cell(
     return ElementsCell(element_ids=ids[:cap], total=len(ids), truncated=len(ids) > cap)
 
 
+def _script_cell(
+    mm: Metamodel,
+    model: Model,
+    defn: TableDefinition,
+    key: RowKey,
+    col: ScriptColumn,
+    col_index: int,
+    base_slots: int,
+    limits: TableLimits,
+    script: ScriptEvalContext | None,
+) -> Cell:
+    """Cell for one row of a `ScriptColumn`. `expand` reads back the binding
+    `build_rows` already promoted into this row's key slot (never re-calls
+    `value()`, mirroring `_navigation_cell`/`_property_cell`'s expand
+    branches); `collapse` calls fresh (memoized by `script`, so this agrees
+    bit-for-bit with any earlier collapse-filter/chaining call made against
+    the same `(code, entry, roots)` during `build_rows_ex`)."""
+    if col.mode == "expand":
+        # The binding already sits in this row's key slot (build_rows promoted
+        # it): PropertyValue = a returned scalar; str = a returned element id;
+        # None = keep_empty row OR the single error row _expand_values left —
+        # re-derive from the memoized call to tell the two apart.
+        slot = _expand_slot_of(defn, base_slots, col_index)
+        b = key[slot]
+        if isinstance(b, PropertyValue):
+            return ValueCell(
+                present=True, value=b.value, element_id=None, editable=False
+            )
+        if isinstance(b, str):
+            return ElementCell(element_id=b)
+        if col.snippet.ref is not None:
+            return ErrorCell(message=f"snippet artifact {col.snippet.ref!r} not found")
+        if col.snippet.definition is not None and script is not None:
+            roots = resolve_source_elements(
+                mm, model, defn, key, col.source, base_slots, limits, script=script
+            )
+            if roots:
+                res = script.call(col.snippet.definition.code, "value", roots)
+                if res.error is not None:
+                    return ErrorCell(
+                        message=res.error.message, traceback=res.error.traceback
+                    )
+        return ValueCell(present=False, value=None, element_id=None, editable=False)
+
+    if col.snippet.ref is not None:  # post-resolve: dangling ref
+        return ErrorCell(message=f"snippet artifact {col.snippet.ref!r} not found")
+    if col.snippet.definition is None:  # unconfigured ({}): empty, like an
+        # unconfigured navigation/property source
+        return ValueCell(present=False, value=None, element_id=None, editable=False)
+    els = resolve_source_elements(
+        mm, model, defn, key, col.source, base_slots, limits, script=script
+    )
+    if not els:
+        return ValueCell(present=False, value=None, element_id=None, editable=False)
+    if script is None:
+        # Defensive: routes always supply a context when table_has_script().
+        return ErrorCell(message="script runner unavailable")
+    res = script.call(col.snippet.definition.code, "value", els)
+    if res.error is not None:
+        return ErrorCell(message=res.error.message, traceback=res.error.traceback)
+    p = res.value
+    assert p is not None  # CallResult invariant: value xor error
+    if p["kind"] == "scalar":
+        if p["value"] is None:
+            return ValueCell(present=False, value=None, element_id=None, editable=False)
+        return ValueCell(
+            present=True, value=p["value"], element_id=None, editable=False
+        )
+    if p["kind"] == "scalars":
+        vals = p["values"]
+        cap = limits.max_cell_elements
+        return ValuesCell(
+            present=True, values=vals[:cap], total=len(vals), truncated=len(vals) > cap
+        )
+    if p["kind"] == "element":
+        eid = p["id"]
+        return ElementCell(element_id=eid if eid in model.elements else None)
+    ids = [i for i in dict.fromkeys(p["ids"]) if i in model.elements]
+    cap = limits.max_cell_elements
+    return ElementsCell(element_ids=ids[:cap], total=len(ids), truncated=len(ids) > cap)
+
+
 def evaluate_cells(
     mm: Metamodel,
     model: Model,
     defn: TableDefinition,
     keys: list[RowKey],
     limits: TableLimits = TableLimits(),
+    script: ScriptEvalContext | None = None,
 ) -> list[list[Cell]]:
     """Evaluate every cell for every row. Runs per page (unlike `build_rows`,
-    which must see the whole table because expansion determines row count)."""
+    which must see the whole table because expansion determines row count).
+
+    `script` is the shared per-request `ScriptEvalContext` — `None` for
+    callers with no script columns in play (every existing caller)."""
     expand_count = sum(
         1 for c in defn.columns if getattr(c, "mode", "collapse") == "expand"
     )
@@ -259,22 +356,27 @@ def evaluate_cells(
         row: list[Cell] = []
         for i, col in enumerate(defn.columns):
             if isinstance(col, ElementColumn):
-                row.append(_element_cell(mm, model, defn, key, col, base_slots, limits))
+                row.append(
+                    _element_cell(mm, model, defn, key, col, base_slots, limits, script)
+                )
             elif isinstance(col, PropertyColumn):
                 row.append(
-                    _property_cell(mm, model, defn, key, col, i, base_slots, limits)
+                    _property_cell(
+                        mm, model, defn, key, col, i, base_slots, limits, script
+                    )
                 )
-            elif isinstance(col, NavigationColumn):
+            elif isinstance(col, ScriptColumn):
                 row.append(
-                    _navigation_cell(mm, model, defn, key, col, i, base_slots, limits)
+                    _script_cell(
+                        mm, model, defn, key, col, i, base_slots, limits, script
+                    )
                 )
             else:
-                # ScriptColumn/ScriptStep evaluation lands in Task 7/9; inert
-                # until then — contributes nothing, like an unconfigured source.
-                assert isinstance(col, ScriptColumn)
+                # NavigationColumn — the last Column-union member.
+                assert isinstance(col, NavigationColumn)
                 row.append(
-                    ValueCell(
-                        present=False, value=None, element_id=None, editable=False
+                    _navigation_cell(
+                        mm, model, defn, key, col, i, base_slots, limits, script
                     )
                 )
         rows.append(row)
