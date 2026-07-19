@@ -1,0 +1,10 @@
+# Repo-wide ruff config. The lint tasks run from src/data_rover/{core,api};
+# ruff discovers this by walking up to the repo root, so target-version and
+# rule selection apply uniformly to both packages.
+#
+# target-version drives pyupgrade (UP) rewrites and pins the assumed language
+# level to match the 3.14 runtime (pixi) and the pyright floor (pyrightconfig.json).
+target-version = "py314"
+
+[lint]
+extend-select = ["UP"]

@@ -33,112 +33,82 @@ argon2-cffi = "23.*"
 python-multipart = "0.0.*"
 openpyxl = "3.1.*"
 types-openpyxl = "3.1.*"
-# Local-dev process orchestrator for the start-dr/stop-dr/reset-dr workflow: runs
-# the backend (api env) + frontend (frontend env) as a single detached daemon
-# with health-gated ordering. See process-compose.yaml at the repo root.
 process-compose = "1.*"
 
 [feature.api.pypi-dependencies]
-# The snippet WASM sandbox runner (api/script_runner.py) imports wasmtime at
-# module scope, unconditionally, whenever routes/snippets.py loads — so it
-# must be present in the "api" backend-runtime environment itself, not just
-# core-dev (which composes "api" and inherited it transitively before this
-# was split out). Without it, `pixi run start-backend`/the e2e webServer
-# crash on import with ModuleNotFoundError before the app can boot.
 wasmtime = ">=30"
 
-[feature.api.tasks.start-backend]
+[feature.api.tasks.backend-start]
+description = "Run the FastAPI backend (uvicorn) on 127.0.0.1:8000"
 cmd = "uvicorn data_rover.api.main:app --reload --reload-dir src --host 127.0.0.1 --port 8000 --app-dir src"
 default-environment = "api"
 
-# NOTE: db-upgrade/db-revision require the Alembic scaffold (alembic.ini +
-# alembic/), which lands in Phase 2 Task 9. Until then these tasks error with
-# "Can't read config file 'alembic.ini'".
 [feature.api.tasks.db-upgrade]
+description = "Apply the Alembic schema (upgrade head)"
 cmd = "alembic upgrade head"
 default-environment = "api"
 
 [feature.api.tasks.db-revision]
+description = "Autogenerate a new Alembic migration"
 args = [{ arg = "message", default = "migration" }]
 cmd = "alembic revision --autogenerate -m \"{{ message }}\""
 default-environment = "api"
 
-# Local GCS emulator for dev + the opt-in storage integration test.
-# Requires Docker; not needed for the (hermetic) unit test suite.
-[feature.api.tasks.fake-gcs]
-cmd = "docker run --rm -p 4443:4443 fsouza/fake-gcs-server -scheme http -port 4443 -public-host localhost:4443"
-default-environment = "api"
-
-# Local infra stack (Postgres + GCS emulator) via docker-compose.yml. Requires
-# Docker. `services-up` blocks until Postgres is healthy and the snapshot bucket
-# exists, so `db-upgrade` and `start-backend` can run straight after.
-[feature.api.tasks.services-up]
+[feature.api.tasks.services-start]
+description = "Start docker infra (Postgres + fake-gcs), wait until ready"
 cmd = "docker compose up -d --wait"
 default-environment = "api"
 
-[feature.api.tasks.services-down]
+[feature.api.tasks.services-stop]
+description = "Stop docker infra (keeps data volumes)"
 cmd = "docker compose down"
 default-environment = "api"
 
-# Stop and wipe the Postgres + snapshot data volumes for a clean slate.
 [feature.api.tasks.services-reset]
+description = "Stop docker infra and wipe data volumes"
 cmd = "docker compose down -v"
 default-environment = "api"
 
 [feature.api.tasks.services-logs]
+description = "Tail docker infra logs"
 cmd = "docker compose logs -f"
 default-environment = "api"
 
-# --- One-shot local dev workflow (see process-compose.yaml) ---
-# start-dr: bring docker up, then run the migration + backend + frontend as a
-# detached process-compose daemon. Non-blocking — returns to the shell; watch
-# with `pixi run logs-dr`.
-#
-# The docker bring-up is deliberately NOT `services-up` (`docker compose up
-# --wait` over ALL services): that aborts with a non-zero exit the instant the
-# one-shot `gcs-init` container exits, which on a COLD volume happens *before*
-# Postgres finishes its slow first-time `initdb` — so `db-upgrade` would race a
-# not-yet-ready database. Instead:
-#   1. `--wait` only the long-running services (postgres, fake-gcs); they never
-#      exit, so `--wait` blocks until Postgres is genuinely healthy (cold-safe).
-#   2. start `gcs-init` and `docker compose wait` for it — the snapshot bucket is
-#      guaranteed to exist before the backend can write to it.
-# Every step is `&&`-chained, so a real failure aborts before the daemon starts.
-[feature.api.tasks.start-dr]
+[feature.api.tasks.dr-start]
+description = "Start the full local stack: docker + migrate + backend + frontend (detached)"
 cmd = """
-docker compose up -d --wait postgres fake-gcs && docker compose up -d gcs-init && docker compose wait gcs-init && process-compose up --detached
+docker compose up -d --wait postgres fake-gcs && docker compose up -d gcs-init && docker compose wait gcs-init && bash scripts/pc.sh up --detached
 """
 default-environment = "api"
 
-# stop-dr: stop the backend + frontend daemon, then stop docker (keeps volumes).
-[feature.api.tasks.stop-dr]
+[feature.api.tasks.dr-stop]
+description = "Stop the full local stack (backend, frontend, docker; keeps volumes)"
 cmd = """
-process-compose down
+bash scripts/pc.sh down || true
 docker compose down
 """
 default-environment = "api"
 
-# reset-dr: stop the daemon (if running), then wipe the Postgres + fake-gcs
-# volumes for a clean slate. Does NOT restart — the next `pixi run start-dr`
-# rebuilds everything fully fresh (empty DB reseeded with the bootstrap admin).
-[feature.api.tasks.reset-dr]
+[feature.api.tasks.dr-reset]
+description = "Stop the stack and wipe docker volumes for a clean slate (does not restart)"
 cmd = """
-process-compose down || true
+bash scripts/pc.sh down || true
 docker compose down -v
 """
 default-environment = "api"
 
-# logs-dr: attach the process-compose TUI to the running daemon (live per-process
-# logs, scrollback, restart keys). Detach with Ctrl-b / q — leaves it running.
-[feature.api.tasks.logs-dr]
-cmd = "process-compose attach"
+[feature.api.tasks.dr-logs]
+description = "Attach the process-compose TUI to the running stack"
+cmd = "bash scripts/pc.sh attach"
 default-environment = "api"
 
-[feature.core-dev.tasks.test-core]
+[feature.core-dev.tasks.core-test]
+description = "Run the pytest suite (core + API)"
 cmd = "pytest"
 default-environment = "core-dev"
 
-[feature.core-dev.tasks.lint-core]
+[feature.core-dev.tasks.core-lint]
+description = "Lint + typecheck the core package (ruff, mypy, pyright)"
 args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
 cmd = """
 ruff check {% if check_only == 'false' %}--fix{% endif %} .
@@ -148,21 +118,24 @@ pyright
 cwd = "src/data_rover/core"
 default-environment = "core-dev"
 
-[feature.core-dev.tasks.format-core]
+[feature.core-dev.tasks.core-format]
+description = "Format the core package (ruff format)"
 args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
 cmd = "ruff format {% if check_only == 'true' %}--check{% endif %} ."
 cwd = "src/data_rover/core"
 default-environment = "core-dev"
 
-[feature.core-dev.tasks.tidy-core]
+[feature.core-dev.tasks.core-tidy]
+description = "Format + lint the core package"
 args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
 cmd = "true"
 depends-on = [
-    { task = "format-core", args = [{ check_only = "{{ check_only }}" }] },
-    { task = "lint-core", args = [{ check_only = "{{ check_only }}" }]},
+    { task = "core-format", args = [{ check_only = "{{ check_only }}" }] },
+    { task = "core-lint", args = [{ check_only = "{{ check_only }}" }]},
 ]
 
-[feature.core-dev.tasks.lint-backend]
+[feature.core-dev.tasks.backend-lint]
+description = "Lint + typecheck the API package (ruff, mypy, pyright)"
 args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
 cmd = """
 ruff check {% if check_only == 'false' %}--fix{% endif %} .
@@ -172,49 +145,54 @@ pyright
 cwd = "src/data_rover/api"
 default-environment = "core-dev"
 
-[feature.core-dev.tasks.format-backend]
+[feature.core-dev.tasks.backend-format]
+description = "Format the API package (ruff format)"
 args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
 cmd = "ruff format {% if check_only == 'true' %}--check{% endif %} ."
 cwd = "src/data_rover/api"
 default-environment = "core-dev"
 
-[feature.core-dev.tasks.tidy-backend]
+[feature.core-dev.tasks.backend-tidy]
+description = "Format + lint the API package"
 args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
 cmd = "true"
 depends-on = [
-    { task = "format-backend", args = [{ check_only = "{{ check_only }}" }] },
-    { task = "lint-backend", args = [{ check_only = "{{ check_only }}" }]},
+    { task = "backend-format", args = [{ check_only = "{{ check_only }}" }] },
+    { task = "backend-lint", args = [{ check_only = "{{ check_only }}" }]},
 ]
 
-[feature.core-dev.tasks.tidy]
+[feature.core-dev.tasks.all-tidy]
+description = "Format + lint the whole repo (frontend, core, backend)"
 args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
 cmd = "true"
 default-environment = "core-dev"
 depends-on = [
-    { task = "tidy-frontend", args = [{ check_only = "{{ check_only }}" }], environment = "frontend" },
-    { task = "tidy-core", args = [{ check_only = "{{ check_only }}" }] },
-    { task = "tidy-backend", args = [{ check_only = "{{ check_only }}" }] },
+    { task = "frontend-tidy", args = [{ check_only = "{{ check_only }}" }], environment = "frontend" },
+    { task = "core-tidy", args = [{ check_only = "{{ check_only }}" }] },
+    { task = "backend-tidy", args = [{ check_only = "{{ check_only }}" }] },
 ]
 
 [feature.frontend.dependencies]
 nodejs = "22.*"
 
-[feature.frontend.tasks._install-frontend-deps]
+[feature.frontend.tasks.frontend-install]
+description = "Install frontend npm dependencies"
 cmd = "npm install"
 cwd = "frontend"
 
-[feature.frontend.tasks.start-frontend]
+[feature.frontend.tasks.frontend-start]
+description = "Run the SvelteKit dev server (vite) on :5173"
 cmd = "npm run dev"
 cwd = "frontend"
-depends-on = [
-    { task = "_install-frontend-deps" }
-]
+depends-on = [{ task = "frontend-install" }]
 
-[feature.frontend.tasks]
-frontend-build = { cmd = "npm run build", cwd = "frontend" }
-frontend-install = { cmd = "npm install", cwd = "frontend" }
+[feature.frontend.tasks.frontend-build]
+description = "Build the frontend for production (frontend/build)"
+cmd = "npm run build"
+cwd = "frontend"
 
-[feature.frontend.tasks.lint-frontend]
+[feature.frontend.tasks.frontend-lint]
+description = "Lint + svelte-check the frontend (eslint)"
 args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
 cmd = """
 npx eslint {% if check_only == 'false' %}--fix{% endif %} .
@@ -222,21 +200,23 @@ npm run check
 """
 cwd = "frontend"
 
-[feature.frontend.tasks.format-frontend]
+[feature.frontend.tasks.frontend-format]
+description = "Format the frontend (prettier)"
 args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
 cmd = "npx prettier {% if check_only == 'true' %}--check{% else %}--write{% endif %} ."
 cwd = "frontend"
 
-[feature.frontend.tasks.tidy-frontend]
+[feature.frontend.tasks.frontend-tidy]
+description = "Format + lint the frontend"
 args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
 cmd = "true"
 depends-on = [
-    { task = "format-frontend", args = [{ check_only = "{{ check_only }}" }] },
-    { task = "lint-frontend", args = [{ check_only = "{{ check_only }}" }]},
+    { task = "frontend-format", args = [{ check_only = "{{ check_only }}" }] },
+    { task = "frontend-lint", args = [{ check_only = "{{ check_only }}" }]},
 ]
 
 [environments]
-core = { features = ["core"]}
-core-dev = { features = ["core", "core-dev", "api"]}
-api = { features = ["core", "api"]}
+core = { features = ["core"] }
+core-dev = { features = ["core", "core-dev", "api"] }
+api = { features = ["core", "api"] }
 frontend = { features = ["frontend"] }

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Set
-from typing import Iterable
+from collections.abc import Iterable
 
 
 class Scope:
@@ -23,7 +23,7 @@ class Scope:
         self._ids: dict[str, None] | None = None if ids is None else dict.fromkeys(ids)
 
     @classmethod
-    def all(cls) -> "Scope":
+    def all(cls) -> Scope:
         return cls(None)
 
     @property

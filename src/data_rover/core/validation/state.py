@@ -21,7 +21,7 @@ issue order, so :meth:`all_issues` is stable for a given operation history
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Iterable
+from collections.abc import Iterable
 
 from .issue import Issue, IssueCategory
 

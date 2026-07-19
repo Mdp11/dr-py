@@ -27,7 +27,7 @@ evaluation (the evaluator itself never sees a ref).
 
 from __future__ import annotations
 
-from typing import Annotated, Literal, Optional, Union
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, TypeAdapter, model_validator
 
@@ -57,13 +57,13 @@ class RelationshipStep(BaseModel):
     relationship_type: str
     direction: Literal["out", "in", "either"] = "out"
     target_types: list[str] = Field(default_factory=list)
-    children: list["StepItem"] = Field(default_factory=list)
+    children: list[StepItem] = Field(default_factory=list)
     #: free-form user note explaining the step's intent (UI-only; the
     #: evaluator ignores it).
-    comment: Optional[str] = None
+    comment: str | None = None
 
     @model_validator(mode="after")
-    def _v2_is_linear(self) -> "RelationshipStep":
+    def _v2_is_linear(self) -> RelationshipStep:
         if self.children:
             raise ValueError(
                 "branching steps (`children`) are not supported in schema v2"
@@ -81,7 +81,7 @@ class FilterStep(BaseModel):
     criteria: list[Criterion] = Field(default_factory=list)
     #: free-form user note explaining the step's intent (UI-only; the
     #: evaluator ignores it).
-    comment: Optional[str] = None
+    comment: str | None = None
 
 
 class PropertyStep(BaseModel):
@@ -102,11 +102,11 @@ class PropertyStep(BaseModel):
     property_name: str
     #: free-form user note explaining the step's intent (UI-only; the
     #: evaluator ignores it).
-    comment: Optional[str] = None
+    comment: str | None = None
 
 
 StepItem = Annotated[
-    Union[RelationshipStep, FilterStep, PropertyStep], Field(discriminator="kind")
+    RelationshipStep | FilterStep | PropertyStep, Field(discriminator="kind")
 ]
 
 
@@ -115,8 +115,8 @@ class PathNavigation(BaseModel):
     schema_version: int = SCHEMA_VERSION
     #: user-chosen display name; None keeps the UI's automatic lettering
     #: ("Path A", "Path B", ...). UI-only — the evaluator ignores it.
-    name: Optional[str] = None
-    start: "StartNode"
+    name: str | None = None
+    start: StartNode
     steps: list[StepItem] = Field(default_factory=list)
     #: cycle guard: when True (default, prior behavior), a chain skips any
     #: element already in its own prefix; when False, chains may revisit
@@ -124,7 +124,7 @@ class PathNavigation(BaseModel):
     exclude_visited: bool = True
 
     @model_validator(mode="after")
-    def _cap_steps(self) -> "PathNavigation":
+    def _cap_steps(self) -> PathNavigation:
         if len(self.steps) > MAX_STEPS:
             raise ValueError(f"a navigation may have at most {MAX_STEPS} steps")
         return self
@@ -135,12 +135,12 @@ class Operand(BaseModel):
     XOR an inline `definition`, contributing its elements at `step_index`
     (see the chain convention in the module docstring)."""
 
-    ref: Optional[str] = None
-    definition: Optional["NavigationDefinition"] = None
-    step_index: Optional[int] = Field(default=None, ge=0)
+    ref: str | None = None
+    definition: NavigationDefinition | None = None
+    step_index: int | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
-    def _exactly_one_source(self) -> "Operand":
+    def _exactly_one_source(self) -> Operand:
         if (self.ref is None) == (self.definition is None):
             raise ValueError("an operand needs exactly one of `ref` / `definition`")
         return self
@@ -163,11 +163,9 @@ class RowStart(BaseModel):
     kind: Literal["row"] = "row"
 
 
-StartNode = Annotated[
-    Union[Scope, SetExpression, RowStart], Field(discriminator="kind")
-]
+StartNode = Annotated[Scope | SetExpression | RowStart, Field(discriminator="kind")]
 NavigationDefinition = Annotated[
-    Union[PathNavigation, SetExpression], Field(discriminator="kind")
+    PathNavigation | SetExpression, Field(discriminator="kind")
 ]
 
 RelationshipStep.model_rebuild()

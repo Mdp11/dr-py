@@ -50,7 +50,7 @@ class ClientConn:
     conn can live in the hub's ``set`` (queues are not hashable)."""
 
     user_id: str
-    queue: "asyncio.Queue[Any]"
+    queue: asyncio.Queue[Any]
 
 
 @dataclass

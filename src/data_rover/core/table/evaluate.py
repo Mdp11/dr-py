@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal, Union
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from .cells import Cell
@@ -44,7 +44,7 @@ from .schema import (
 #: mistaken for an element id (RowSlot/ColumnRef reads gate on `isinstance(b,
 #: str)`). Row keys never leave the process (cells are what serialize), so the
 #: wrapper is safe to carry here.
-Binding = Union[str, int, float, bool, None, PropertyValue]
+Binding = str | int | float | bool | None | PropertyValue
 RowKey = tuple[Binding, ...]
 
 
@@ -632,7 +632,7 @@ def iter_export_rows(
     keys: list[RowKey],
     limits: TableLimits = TableLimits(),
     chunk: int = 1000,
-) -> Iterator[list["Cell"]]:
+) -> Iterator[list[Cell]]:
     """Yield evaluated cell rows for `keys`, in order, `chunk` rows at a time."""
     from .cells import evaluate_cells
 

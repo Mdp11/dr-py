@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import math
 import re
-from typing import Annotated, Literal, Union
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -90,15 +90,13 @@ class EndpointTypeCriterion(BaseModel):
 
 
 Criterion = Annotated[
-    Union[
-        EntityTypeCriterion,
-        PropertyCriterion,
-        NameIdCriterion,
-        RelationCountCriterion,
-        OrphanCriterion,
-        ConnectedToTypeCriterion,
-        EndpointTypeCriterion,
-    ],
+    EntityTypeCriterion
+    | PropertyCriterion
+    | NameIdCriterion
+    | RelationCountCriterion
+    | OrphanCriterion
+    | ConnectedToTypeCriterion
+    | EndpointTypeCriterion,
     Field(discriminator="type"),
 ]
 

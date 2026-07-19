@@ -5,6 +5,7 @@ Syntax errors block; unknown names, disallowed imports and bad entry-point
 signatures are non-blocking warnings (Python scope analysis has honest false
 positives — conditionally-defined names, comprehension scoping).
 """
+
 from __future__ import annotations
 
 import ast
@@ -13,8 +14,17 @@ from dataclasses import dataclass
 from typing import Literal
 
 IMPORT_ALLOWLIST: frozenset[str] = frozenset(
-    {"re", "math", "itertools", "collections", "functools", "json",
-     "statistics", "datetime", "string"}
+    {
+        "re",
+        "math",
+        "itertools",
+        "collections",
+        "functools",
+        "json",
+        "statistics",
+        "datetime",
+        "string",
+    }
 )
 DR_NAMES: frozenset[str] = frozenset({"dr"})
 _ENTRY_NAMES = ("value", "step")
@@ -32,7 +42,9 @@ def _parse(code: str) -> tuple[ast.Module | None, Diagnostic | None]:
     try:
         return ast.parse(code), None
     except SyntaxError as e:
-        return None, Diagnostic(e.lineno or 1, (e.offset or 1) - 1, "error", f"syntax error: {e.msg}")
+        return None, Diagnostic(
+            e.lineno or 1, (e.offset or 1) - 1, "error", f"syntax error: {e.msg}"
+        )
 
 
 def derive_entry_points(code: str) -> list[str]:
@@ -61,21 +73,39 @@ def lint_code(code: str) -> list[Diagnostic]:
             for alias in node.names:
                 root = alias.name.split(".")[0]
                 if root not in IMPORT_ALLOWLIST:
-                    diags.append(Diagnostic(node.lineno, node.col_offset, "warning",
-                                            f"module {root!r} is not available in the sandbox"))
+                    diags.append(
+                        Diagnostic(
+                            node.lineno,
+                            node.col_offset,
+                            "warning",
+                            f"module {root!r} is not available in the sandbox",
+                        )
+                    )
         elif isinstance(node, ast.ImportFrom):
             root = (node.module or "").split(".")[0]
             if root not in IMPORT_ALLOWLIST:
-                diags.append(Diagnostic(node.lineno, node.col_offset, "warning",
-                                        f"module {root!r} is not available in the sandbox"))
+                diags.append(
+                    Diagnostic(
+                        node.lineno,
+                        node.col_offset,
+                        "warning",
+                        f"module {root!r} is not available in the sandbox",
+                    )
+                )
 
     # entry-point signature checks
     for node in tree.body:
         if isinstance(node, ast.FunctionDef) and node.name in _ENTRY_NAMES:
             argc = len(node.args.posonlyargs) + len(node.args.args)
             if argc != 1:
-                diags.append(Diagnostic(node.lineno, node.col_offset, "warning",
-                                        f"{node.name}() must take exactly one argument (the element), got {argc}"))
+                diags.append(
+                    Diagnostic(
+                        node.lineno,
+                        node.col_offset,
+                        "warning",
+                        f"{node.name}() must take exactly one argument (the element), got {argc}",
+                    )
+                )
 
     # unknown-name resolution (module scope only; conservative)
     known = set(dir(builtins)) | set(DR_NAMES) | set(IMPORT_ALLOWLIST)
@@ -83,8 +113,14 @@ def lint_code(code: str) -> list[Diagnostic]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
             if node.id not in known:
-                diags.append(Diagnostic(node.lineno, node.col_offset, "warning",
-                                        f"unknown name {node.id!r}"))
+                diags.append(
+                    Diagnostic(
+                        node.lineno,
+                        node.col_offset,
+                        "warning",
+                        f"unknown name {node.id!r}",
+                    )
+                )
     return diags
 
 

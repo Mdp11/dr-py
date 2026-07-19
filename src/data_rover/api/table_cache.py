@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from data_rover.core.table.evaluate import RowKey, SortSpec
 
 
-def table_fingerprint(resolved_defn_json: str, sort: "SortSpec | None") -> str:
+def table_fingerprint(resolved_defn_json: str, sort: SortSpec | None) -> str:
     payload = {
         "defn": resolved_defn_json,
         "sort": None if sort is None else [sort.column, sort.direction],
@@ -32,11 +32,13 @@ class TableOrderCache:
     def __init__(self, cap: int = 16) -> None:
         self._cap = cap
         self._lock = threading.Lock()
-        self._d: "OrderedDict[tuple[str, str], tuple[int, tuple[RowKey, ...], bool, int]]" = OrderedDict()
+        self._d: OrderedDict[
+            tuple[str, str], tuple[int, tuple[RowKey, ...], bool, int]
+        ] = OrderedDict()
 
     def get(
         self, fingerprint: str, sort_key: str, model_rev: int
-    ) -> "tuple[tuple[RowKey, ...], bool, int] | None":
+    ) -> tuple[tuple[RowKey, ...], bool, int] | None:
         """`(rows, truncated, base_total)` on a fresh hit; `None` on a miss or
         stale rev."""
         key = (fingerprint, sort_key)
@@ -56,7 +58,7 @@ class TableOrderCache:
         fingerprint: str,
         sort_key: str,
         model_rev: int,
-        rows: "tuple[RowKey, ...]",
+        rows: tuple[RowKey, ...],
         truncated: bool,
         base_total: int,
     ) -> None:

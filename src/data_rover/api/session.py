@@ -42,8 +42,8 @@ class AppliedBatch:
     applier. ``id_map`` is the temp-id resolution the batch produced.
     """
 
-    ops: "list[OpIn]"
-    inverse_ops: "list[OpIn]"
+    ops: list[OpIn]
+    inverse_ops: list[OpIn]
     id_map: dict[str, str]
 
 
@@ -61,7 +61,7 @@ class Session:
     model_rev: int = 0
     #: applied-batch history for POST /model/undo, newest last; cleared
     #: whenever the model is replaced, capped at OP_LOG_MAX
-    op_log: "list[AppliedBatch]" = field(default_factory=list)
+    op_log: list[AppliedBatch] = field(default_factory=list)
     #: number of batches trimmed off ``op_log`` because OP_LOG_MAX was
     #: exceeded since the current model was loaded. While this is non-zero
     #: the retained log no longer reaches back to the loaded base state, so
@@ -95,13 +95,13 @@ class Session:
     #: -path hardening §3), installed by validation_sweep.start_validation_sweep;
     #: stays set after completion (running=False) so /model/status can report
     #: "ready". Replaced wholesale by the next sweep.
-    validation_sweep: "SweepProgress | None" = field(default=None, repr=False)
+    validation_sweep: SweepProgress | None = field(default=None, repr=False)
     #: per-session cache of ordered table row keys (Task 7), keyed by
     #: (resolved-definition fingerprint, sort). A stored entry's model_rev
     #: pins it to the model state it was computed against; both model
     #: replacement and out-of-protocol mutation invalidate the whole cache
     #: since any prior ordering may no longer reflect the current model.
-    table_order_cache: "TableOrderCache" = field(
+    table_order_cache: TableOrderCache = field(
         default_factory=TableOrderCache, repr=False
     )
 

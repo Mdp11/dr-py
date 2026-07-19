@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from typing_extensions import assert_never
+from typing import assert_never
 
 from data_rover.core.model.model import Model
 

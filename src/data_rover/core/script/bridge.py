@@ -48,7 +48,8 @@ wire format: a dict `"op"` *is* the write request.
 from __future__ import annotations
 
 import json
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 from ..metamodel.schema import Metamodel
 from ..model.element import Element
@@ -201,7 +202,9 @@ class BridgeDispatcher:
         candidates = (
             self.model.elements.values()
             if allowed_types is None
-            else (e for e in self.model.elements.values() if e.type_name in allowed_types)
+            else (
+                e for e in self.model.elements.values() if e.type_name in allowed_types
+            )
         )
 
         page: list[Element] = []

@@ -27,7 +27,7 @@ class ElementOut(BaseModel):
     rev: int = 0
 
     @classmethod
-    def from_core(cls, element: Element) -> "ElementOut":
+    def from_core(cls, element: Element) -> ElementOut:
         return cls(**asdict(element))
 
 
@@ -44,7 +44,7 @@ class TreeItem(BaseModel):
 
 
 class TreeItemPage(BaseModel):
-    items: list["TreeItem"] = Field(default_factory=list)
+    items: list[TreeItem] = Field(default_factory=list)
     #: number of items BEFORE limit/offset paging
     total: int = 0
 
@@ -58,7 +58,7 @@ class RelationshipOut(BaseModel):
     rev: int = 0
 
     @classmethod
-    def from_core(cls, rel: Relationship) -> "RelationshipOut":
+    def from_core(cls, rel: Relationship) -> RelationshipOut:
         return cls(**asdict(rel))
 
 
@@ -67,7 +67,7 @@ class ModelOut(BaseModel):
     relationships: list[RelationshipOut]
 
     @classmethod
-    def from_core(cls, model: Model) -> "ModelOut":
+    def from_core(cls, model: Model) -> ModelOut:
         return cls(
             elements=[ElementOut.from_core(e) for e in model.elements.values()],
             relationships=[
@@ -106,7 +106,7 @@ class ValidateRequest(BaseModel):
     inline: InlineModel | None = None
     #: staged (uncommitted) op batch to validate against the committed model;
     #: when present, the response tags each issue's origin. Mirrors PreviewRequest.
-    ops: "list[OpIn] | None" = None
+    ops: list[OpIn] | None = None
     #: model_rev the ops were computed against; mismatch -> 409 (like preview).
     base_rev: int | None = None
 
@@ -121,7 +121,7 @@ class IssueOut(BaseModel):
     origin: str = "on_server"
 
     @classmethod
-    def from_core(cls, issue: Issue, origin: str = "on_server") -> "IssueOut":
+    def from_core(cls, issue: Issue, origin: str = "on_server") -> IssueOut:
         return cls(
             severity=issue.severity.value,
             message=issue.message,
@@ -159,12 +159,12 @@ class ArtifactRefOut(BaseModel):
 
 class FolderOut(BaseModel):
     name: str
-    folders: list["FolderOut"] = Field(default_factory=list)
+    folders: list[FolderOut] = Field(default_factory=list)
     elements: list[str] = Field(default_factory=list)
     artifacts: list[ArtifactRefOut] = Field(default_factory=list)
 
     @classmethod
-    def from_core(cls, folder: Folder) -> "FolderOut":
+    def from_core(cls, folder: Folder) -> FolderOut:
         return cls(
             name=folder.name,
             folders=[FolderOut.from_core(f) for f in folder.folders],
@@ -181,7 +181,7 @@ class ViewOut(BaseModel):
     folders: list[FolderOut] = Field(default_factory=list)
 
     @classmethod
-    def from_core(cls, view: View) -> "ViewOut":
+    def from_core(cls, view: View) -> ViewOut:
         return cls(
             name=view.name,
             folders=[FolderOut.from_core(f) for f in view.folders],
@@ -698,7 +698,7 @@ class SnippetRunIn(BaseModel):
     element_id: str | None = None
 
     @model_validator(mode="after")
-    def _exactly_one(self) -> "SnippetRunIn":
+    def _exactly_one(self) -> SnippetRunIn:
         if (self.code is None) == (self.artifact_id is None):
             raise ValueError("provide exactly one of `code` / `artifact_id`")
         return self
@@ -719,7 +719,7 @@ class SnippetRunOut(BaseModel):
     #: recorded op batch, validated through `OPS_ADAPTER` by the route before
     #: this response is built (a runner emitting an invalid op dict is a
     #: server bug, surfaced as a 500 instead of reaching this model).
-    ops: "list[OpIn]"
+    ops: list[OpIn]
     error: SnippetErrorOut | None
     duration_ms: int
     #: `session.model_rev` as observed AFTER the run completed.
@@ -798,7 +798,7 @@ class EvaluateNavigationIn(BaseModel):
     offset: int = Field(0, ge=0)
 
     @model_validator(mode="after")
-    def _exactly_one(self) -> "EvaluateNavigationIn":
+    def _exactly_one(self) -> EvaluateNavigationIn:
         if (self.definition is None) == (self.artifact_id is None):
             raise ValueError("provide exactly one of `definition` / `artifact_id`")
         return self
@@ -846,7 +846,7 @@ class EvaluateTableIn(BaseModel):
     sort: TableSortIn | None = None
 
     @model_validator(mode="after")
-    def _exactly_one(self) -> "EvaluateTableIn":
+    def _exactly_one(self) -> EvaluateTableIn:
         if (self.definition is None) == (self.artifact_id is None):
             raise ValueError("provide exactly one of `definition` / `artifact_id`")
         return self

@@ -4,7 +4,7 @@ import { defineConfig, devices } from '@playwright/test';
  * Playwright config for the data-rover frontend smoke suite.
  *
  * Two webServers are launched:
- *   1. The FastAPI backend (`pixi run -e api start-backend`) on :8000. Uses a
+ *   1. The FastAPI backend (`pixi run -e api backend-start`) on :8000. Uses a
  *      throwaway SQLite file at /tmp/data-rover-e2e.db; dev-seed creates the
  *      schema and the bootstrap admin (admin@example.com/admin12345). The
  *      "Smart City" project is created by the `setup` project (seed.setup.ts),
@@ -47,7 +47,7 @@ export default defineConfig({
 			// backend is already up, so it never clears the DB out from under a live
 			// server.
 			command:
-				'rm -f /tmp/data-rover-e2e.db && DATA_ROVER_DATABASE_URL=sqlite:////tmp/data-rover-e2e.db DATA_ROVER_DEV_SEED=true DATA_ROVER_SNAPSHOT_STORE=memory DATA_ROVER_IDENTITY_PROVIDER=cookie DATA_ROVER_AUTH_COOKIE_SECURE=false DATA_ROVER_BOOTSTRAP_ADMIN_EMAIL=admin@example.com DATA_ROVER_BOOTSTRAP_ADMIN_PASSWORD=admin12345 pixi run -e api start-backend',
+				'rm -f /tmp/data-rover-e2e.db && DATA_ROVER_DATABASE_URL=sqlite:////tmp/data-rover-e2e.db DATA_ROVER_DEV_SEED=true DATA_ROVER_SNAPSHOT_STORE=memory DATA_ROVER_IDENTITY_PROVIDER=cookie DATA_ROVER_AUTH_COOKIE_SECURE=false DATA_ROVER_BOOTSTRAP_ADMIN_EMAIL=admin@example.com DATA_ROVER_BOOTSTRAP_ADMIN_PASSWORD=admin12345 pixi run -e api backend-start',
 			cwd: '..',
 			url: 'http://127.0.0.1:8000/healthz',
 			timeout: 60_000,

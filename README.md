@@ -50,10 +50,10 @@ cp .env.example .env                       # backend config (Postgres + GCS + ad
 ### 2. Start everything
 
 ```sh
-pixi run services-up      # Postgres + fake-gcs + snapshot bucket (waits until ready)
+pixi run services-start      # Postgres + fake-gcs + snapshot bucket (waits until ready)
 pixi run db-upgrade       # apply the Postgres schema (Alembic)
-pixi run start-backend    # http://127.0.0.1:8000  (reads .env)
-pixi run start-frontend   # http://localhost:5173  (separate terminal)
+pixi run backend-start    # http://127.0.0.1:8000  (reads .env)
+pixi run frontend-start   # http://localhost:5173  (separate terminal)
 ```
 
 Open <http://localhost:5173>. On first boot the backend creates the schema and
@@ -145,19 +145,19 @@ commits broadcasting, and viewer write-blocks.
 
 | pixi command | Action |
 |---|---|
-| `pixi run services-up` | Start Postgres + fake-gcs (+ bucket), wait until ready |
-| `pixi run services-down` | Stop containers, keep data |
+| `pixi run services-start` | Start Postgres + fake-gcs (+ bucket), wait until ready |
+| `pixi run services-stop` | Stop containers, keep data |
 | `pixi run services-reset` | Stop + wipe data volumes |
 | `pixi run services-logs` | Tail infra logs |
 | `pixi run db-upgrade` | Apply Postgres schema (Alembic) |
-| `pixi run start-backend` | Run the API (reads `.env`) |
-| `pixi run start-frontend` | Run the SvelteKit dev server |
+| `pixi run backend-start` | Run the API (reads `.env`) |
+| `pixi run frontend-start` | Run the SvelteKit dev server |
 
 ### Teardown
 
 ```sh
 # Ctrl-C backend + frontend
-pixi run services-down     # or: pixi run services-reset  (also wipes data)
+pixi run services-stop     # or: pixi run services-reset  (also wipes data)
 ```
 
 ### Applying changes — mental model

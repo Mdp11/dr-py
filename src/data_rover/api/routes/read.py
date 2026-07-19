@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from itertools import islice
 from typing import Literal
 
@@ -606,11 +606,7 @@ def list_containment_children(
 
 def _now_iso() -> str:
     """UTC timestamp in the shape JS ``Date.toISOString()`` produces."""
-    return (
-        datetime.now(timezone.utc)
-        .isoformat(timespec="milliseconds")
-        .replace("+00:00", "Z")
-    )
+    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 @router.get("/model/changes")

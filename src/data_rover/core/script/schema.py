@@ -6,6 +6,7 @@ is derived from the AST at save time (see `lint.derive_entry_points`) — the
 `entry_points` field here is advisory metadata only and is NEVER trusted at
 evaluation time (inline snippets carry client-supplied values).
 """
+
 from __future__ import annotations
 
 from pydantic import BaseModel, Field, TypeAdapter

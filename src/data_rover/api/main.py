@@ -5,7 +5,7 @@ import os
 import threading
 import time
 from contextlib import asynccontextmanager, suppress
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware

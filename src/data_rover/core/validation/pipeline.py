@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Callable, Protocol
+from typing import TYPE_CHECKING, Protocol
+from collections.abc import Callable
 
 from .issue import Issue
 from .scope import Scope
@@ -45,10 +46,10 @@ class MetamodelMemo:
     """
 
     def __init__(self, *caches: dict) -> None:
-        self._mm: "Metamodel | None" = None
+        self._mm: Metamodel | None = None
         self._caches = caches
 
-    def sync(self, mm: "Metamodel") -> None:
+    def sync(self, mm: Metamodel) -> None:
         """Clear all registered caches when `mm` is a different metamodel."""
         if mm is not self._mm:
             self._mm = mm
@@ -134,7 +135,7 @@ class ValidationPipeline:
         return issues
 
 
-def default_pipeline() -> "ValidationPipeline":
+def default_pipeline() -> ValidationPipeline:
     """Build the standard pipeline with a fresh instance of every validator.
 
     Thread-safety: the validators carry mutable per-metamodel memo caches, so

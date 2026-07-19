@@ -1,18 +1,18 @@
-# Local-dev process orchestrator for the `pixi run start-dr` workflow.
+# Local-dev process orchestrator for the `pixi run dr-start` workflow.
 #
 # Runs the two long-running dev servers — the backend (uvicorn, `api` pixi env)
 # and the frontend (vite, `frontend` pixi env) — as a single detached daemon,
 # gating the backend behind a successful Alembic migration. The docker services
-# (Postgres + fake-gcs) are NOT managed here: `start-dr` brings them up first via
-# `pixi run services-up` (whose `docker compose up -d --wait` already blocks until
-# Postgres is healthy and the snapshot bucket exists), and `stop-dr`/`reset-dr`
+# (Postgres + fake-gcs) are NOT managed here: `dr-start` brings them up first via
+# `pixi run services-start` (whose `docker compose up -d --wait` already blocks until
+# Postgres is healthy and the snapshot bucket exists), and `dr-stop`/`dr-reset`
 # tear them down. That keeps each tool doing what it is best at — docker owns the
 # containers, process-compose owns the host processes + the migration ordering.
 #
-#   pixi run start-dr   # services-up, then this graph as a background daemon
-#   pixi run logs-dr    # attach the TUI (live per-process logs, restart keys)
-#   pixi run stop-dr    # stop these processes, then services-down
-#   pixi run reset-dr   # stop, then wipe the docker volumes for a clean slate
+#   pixi run dr-start   # services-start, then this graph as a background daemon
+#   pixi run dr-logs    # attach the TUI (live per-process logs, restart keys)
+#   pixi run dr-stop    # stop these processes, then services-stop
+#   pixi run dr-reset   # stop, then wipe the docker volumes for a clean slate
 #
 # Commands shell out to the existing pixi tasks so there is a single source of
 # truth for the uvicorn / npm / alembic invocations.
@@ -20,11 +20,11 @@ version: "0.5"
 
 processes:
   # One-shot: apply the Alembic schema, then exit. Postgres is already healthy
-  # (services-up waited), so no docker dependency is needed here.
+  # (services-start waited), so no docker dependency is needed here.
   #
   # Each command pins its pixi environment with `-e`: this daemon is spawned from
-  # `pixi run start-dr` (the `api` env), and a bare nested `pixi run <task>` only
-  # resolves tasks in that already-activated env — so `start-frontend` (a
+  # `pixi run dr-start` (the `api` env), and a bare nested `pixi run <task>` only
+  # resolves tasks in that already-activated env — so `frontend-start` (a
   # `frontend`-env task) is not found. `-e` selects the right env unambiguously.
   db-upgrade:
     command: "pixi run -e api db-upgrade"
@@ -34,7 +34,7 @@ processes:
   # The API server. Held until the migration has completed successfully so it
   # never boots against a schema-less database.
   backend:
-    command: "pixi run -e api start-backend"
+    command: "pixi run -e api backend-start"
     depends_on:
       db-upgrade:
         condition: process_completed_successfully
@@ -42,4 +42,4 @@ processes:
   # The vite dev server. Independent of the backend — its proxy tolerates the
   # API not being up yet and reconnects — so it starts immediately.
   frontend:
-    command: "pixi run -e frontend start-frontend"
+    command: "pixi run -e frontend frontend-start"

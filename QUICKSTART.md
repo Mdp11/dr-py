@@ -16,10 +16,10 @@ pixi install -e frontend
 
 cp .env.example .env        # defaults match docker-compose + set the dev admin
 
-pixi run services-up        # Postgres + fake-gcs (waits until ready)
+pixi run services-start        # Postgres + fake-gcs (waits until ready)
 pixi run db-upgrade         # apply Postgres schema (Alembic)
-pixi run start-backend      # http://127.0.0.1:8000
-pixi run start-frontend     # http://localhost:5173  (separate terminal)
+pixi run backend-start      # http://127.0.0.1:8000
+pixi run frontend-start     # http://localhost:5173  (separate terminal)
 ```
 
 ### One-shot workflow (shortcut)
@@ -28,11 +28,11 @@ The steps above are bundled into three commands (docker + backend + frontend, vi
 a detached `process-compose` daemon — see `process-compose.yaml`):
 
 ```sh
-pixi run start-dr    # start dockers, migrate, then backend + frontend (non-blocking)
-pixi run logs-dr     # attach live per-process logs (Ctrl-b q to detach; leaves it running)
-pixi run stop-dr     # stop backend + frontend + dockers (keeps data volumes)
-pixi run reset-dr    # stop everything + wipe the Postgres/fake-gcs volumes (clean slate;
-                     # next start-dr rebuilds fully fresh — does NOT restart)
+pixi run dr-start    # start dockers, migrate, then backend + frontend (non-blocking)
+pixi run dr-logs     # attach live per-process logs (Ctrl-b q to detach; leaves it running)
+pixi run dr-stop     # stop backend + frontend + dockers (keeps data volumes)
+pixi run dr-reset    # stop everything + wipe the Postgres/fake-gcs volumes (clean slate;
+                     # next dr-start rebuilds fully fresh — does NOT restart)
 ```
 
 Open <http://localhost:5173> and log in:
@@ -44,7 +44,7 @@ admin@example.com / admin12345
 Create a project via **New Project** (header). Upload a metamodel — the bundled
 `examples/smart-city.*` give you sample content (metamodel + model + view).
 
-Teardown: `pixi run services-down` (stop, **keep** data) or `pixi run services-reset`
+Teardown: `pixi run services-stop` (stop, **keep** data) or `pixi run services-reset`
 (stop + **wipe** the Postgres and fake-gcs volumes).
 
 ### Reset to a clean slate
@@ -55,9 +55,9 @@ projects, models, snapshots) is gone. To rebuild from empty:
 
 ```sh
 pixi run services-reset     # wipe Postgres + fake-gcs volumes
-pixi run services-up        # recreate them (waits until ready)
+pixi run services-start        # recreate them (waits until ready)
 pixi run db-upgrade         # re-apply the Alembic schema
-pixi run start-backend      # re-creates the bootstrap admin on boot
+pixi run backend-start      # re-creates the bootstrap admin on boot
 ```
 
 You're back to a fresh DB with only the `DATA_ROVER_BOOTSTRAP_ADMIN_EMAIL`
@@ -81,7 +81,7 @@ DATA_ROVER_GCS_BUCKET=<your-bucket>              # real GCS + default credential
 
 ```sh
 pixi run db-upgrade         # apply schema to the prod Postgres
-pixi run start-backend      # serve the API (behind your TLS proxy)
+pixi run backend-start      # serve the API (behind your TLS proxy)
 pixi run frontend-build     # static build in frontend/build — serve it
 ```
 

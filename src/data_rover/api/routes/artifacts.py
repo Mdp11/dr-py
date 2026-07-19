@@ -61,7 +61,9 @@ def _header(row: ArtifactRow) -> ArtifactHeaderOut:
     entry_points: list[str] | None = None
     if row.kind is ArtifactKind.code_snippet:
         raw = row.payload.get("entry_points")
-        entry_points = [e for e in raw if isinstance(e, str)] if isinstance(raw, list) else []
+        entry_points = (
+            [e for e in raw if isinstance(e, str)] if isinstance(raw, list) else []
+        )
     return ArtifactHeaderOut(
         id=row.id,
         kind=row.kind.value,

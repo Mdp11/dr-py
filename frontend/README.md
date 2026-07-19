@@ -21,13 +21,13 @@ All tasks are wired through `pixi` so you don't need a global `node`.
 pixi run frontend-install
 
 # dev server on http://127.0.0.1:5173 (proxies /api/v1 -> :8000)
-pixi run start-frontend
+pixi run frontend-start
 
 # production build into frontend/build (static, hashed assets)
 pixi run frontend-build
 ```
 
-In a separate terminal, start the backend (`pixi run start-backend`) before
+In a separate terminal, start the backend (`pixi run backend-start`) before
 opening the dev server so the API calls succeed. See the **root `README.md`** for
 the full local stack (Postgres + GCS emulator), dev-seed, and how to log in — on
 first boot the backend ensures the bootstrap admin (`admin@example.com` /
@@ -353,7 +353,7 @@ pixi run -e frontend bash -c 'cd frontend && npx playwright install chromium && 
 ```
 
 The Playwright config (`playwright.config.ts`) boots both the backend
-(`pixi run -e api start-backend` against an ephemeral SQLite DB +
+(`pixi run -e api backend-start` against an ephemeral SQLite DB +
 `DATA_ROVER_IDENTITY_PROVIDER=cookie`) and the Vite dev server, and reuses them
 if already up. Because auth is cookie-based, the specs **log in first** (see
 `e2e/helpers/auth.ts`, which signs in as the seeded admin and opens the `default`

@@ -7,7 +7,8 @@ order indexes need: O(sqrt n)-amortized add/remove, O(log n + k) paging.
 
 from __future__ import annotations
 
-from typing import Any, Iterable, Iterator
+from typing import Any
+from collections.abc import Iterable, Iterator
 
 from sortedcontainers import SortedList  # type: ignore[import-untyped]
 

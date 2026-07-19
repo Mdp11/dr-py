@@ -103,7 +103,7 @@ def drop_all() -> None:
     Base.metadata.drop_all(get_engine())
 
 
-def get_db() -> Generator[Session, None, None]:
+def get_db() -> Generator[Session]:
     """FastAPI dependency: yield a DB session, closing it afterwards.
 
     Annotated ``Generator`` (not ``Iterator``) because tests drive it manually
@@ -119,7 +119,7 @@ def get_db() -> Generator[Session, None, None]:
 
 
 @contextmanager
-def db_session() -> Generator[Session, None, None]:
+def db_session() -> Generator[Session]:
     """A DB session for non-request callers (hydration, eviction, importer).
 
     Commits on clean exit, rolls back on exception, always closes. Distinct

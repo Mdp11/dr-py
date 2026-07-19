@@ -220,7 +220,7 @@ _BOOT_POLL_INTERVAL_S = 0.05
 # reference for equivalent inputs. Embedded as a string (not a shipped .py)
 # because it never runs host-side -- the guest interpreter compiles it itself,
 # the same reasoning `facade_src.FACADE_SOURCE`'s docstring gives.
-_GUEST_BOOTSTRAP_SOURCE = r'''
+_GUEST_BOOTSTRAP_SOURCE = r"""
 import json
 import sys
 import traceback
@@ -359,7 +359,7 @@ def _main():
 
 
 _main()
-'''
+"""
 
 
 def _module_cache_path(guest_wasm_path: str) -> Path:
@@ -387,14 +387,17 @@ def _load_module(engine: Engine, guest_wasm_path: str) -> Module:
             return Module.deserialize(engine, cache_path.read_bytes())
         except Exception:
             logger.warning(
-                "wasm module cache at %s failed to deserialize; recompiling", cache_path,
+                "wasm module cache at %s failed to deserialize; recompiling",
+                cache_path,
                 exc_info=True,
             )
     module = Module.from_file(engine, guest_wasm_path)
     try:
         cache_path.write_bytes(module.serialize())
     except OSError:
-        logger.warning("could not write wasm module cache to %s", cache_path, exc_info=True)
+        logger.warning(
+            "could not write wasm module cache to %s", cache_path, exc_info=True
+        )
     return module
 
 
@@ -451,7 +454,10 @@ def _add_determinism_shims(linker: Linker) -> None:
 
 
 def _readline_bounded(
-    f: TextIO, thread: threading.Thread, timeout: float, poll_interval: float = _BOOT_POLL_INTERVAL_S
+    f: TextIO,
+    thread: threading.Thread,
+    timeout: float,
+    poll_interval: float = _BOOT_POLL_INTERVAL_S,
 ) -> str:
     """Read one line from `f` with a bounded wait, never blocking forever.
 
@@ -533,7 +539,9 @@ class WasmScriptRunner:
         # store's resource limiter is attached from the start. Defaults to the
         # RunLimits default; per-run `limits.memory_bytes` is additionally
         # applied at arm time (best-effort -- see `run()`).
-        self._memory_bytes = memory_bytes if memory_bytes is not None else RunLimits().memory_bytes
+        self._memory_bytes = (
+            memory_bytes if memory_bytes is not None else RunLimits().memory_bytes
+        )
 
         self._engine = _make_engine()
         self._module = _load_module(self._engine, guest_wasm_path)
@@ -587,9 +595,13 @@ class WasmScriptRunner:
         # O_RDWR so the open() never blocks and the FIFO never sees an EOF
         # while the host holds this end open (see module docstring).
         host_in: TextIO = os.fdopen(os.open(str(in_fifo), os.O_RDWR), "w", buffering=1)
-        host_out: TextIO = os.fdopen(os.open(str(out_fifo), os.O_RDWR), "r", buffering=1)
+        host_out: TextIO = os.fdopen(
+            os.open(str(out_fifo), os.O_RDWR), "r", buffering=1
+        )
 
-        inst = _PooledInstance(scratch_dir=scratch_dir, host_in=host_in, host_out=host_out)
+        inst = _PooledInstance(
+            scratch_dir=scratch_dir, host_in=host_in, host_out=host_out
+        )
         boot_error: list[BaseException] = []
 
         def _run_guest() -> None:
@@ -701,7 +713,9 @@ class WasmScriptRunner:
         if inst.thread is not None:
             inst.thread.join(timeout=_TEARDOWN_JOIN_TIMEOUT_S)
             if inst.thread.is_alive():
-                logger.warning("wasm guest worker thread did not exit within teardown timeout")
+                logger.warning(
+                    "wasm guest worker thread did not exit within teardown timeout"
+                )
         for f in (inst.host_in, inst.host_out):
             try:
                 f.close()
@@ -781,7 +795,9 @@ class WasmScriptRunner:
         )
         # Absolute epoch deadline (in cadence ticks) for THIS run. +1 tick of
         # margin so a run armed just before a tick isn't killed a hair early.
-        epoch_ticks = max(1, math.ceil(limits.wall_timeout_s / _EPOCH_TICK_INTERVAL_S)) + 1
+        epoch_ticks = (
+            max(1, math.ceil(limits.wall_timeout_s / _EPOCH_TICK_INTERVAL_S)) + 1
+        )
 
         fin: dict[str, Any] | None = None
         try:
@@ -796,7 +812,10 @@ class WasmScriptRunner:
                 except Exception:
                     # Some wasmtime builds only honor set_limits before
                     # instantiation; the boot-baked default still applies.
-                    logger.debug("per-run set_limits ignored; boot default applies", exc_info=True)
+                    logger.debug(
+                        "per-run set_limits ignored; boot default applies",
+                        exc_info=True,
+                    )
 
             start_msg = {
                 "code": req.code,
@@ -840,7 +859,9 @@ class WasmScriptRunner:
                 inst.host_in.flush()
 
             duration_ms = int((time.perf_counter() - t0) * 1000)
-            return self._build_result(inst, fin, dispatcher.ops, limits, duration_ms, wall_deadline)
+            return self._build_result(
+                inst, fin, dispatcher.ops, limits, duration_ms, wall_deadline
+            )
         finally:
             # The instance is always discarded after one run (never returned to
             # the pool): teardown closes the FIFOs -- which also kills a guest
@@ -940,7 +961,9 @@ class WasmScriptRunner:
                 kind="timeout",
                 message=f"execution exceeded the wall timeout of {limits.wall_timeout_s}s",
             )
-        return ScriptError(kind="runtime", message="guest exited without producing a result")
+        return ScriptError(
+            kind="runtime", message="guest exited without producing a result"
+        )
 
     def _read_stderr(self, inst: _PooledInstance) -> str:
         """Best-effort read of the instance's per-instance guest stderr log

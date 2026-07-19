@@ -42,11 +42,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from typing import Any
-
-# typing.assert_never exists from 3.11, but pyright checks against the 3.10
-# floor pinned in pyrightconfig.json — typing_extensions works everywhere
-from typing_extensions import assert_never
+from typing import Any, assert_never
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
@@ -460,7 +456,7 @@ def _persist_commit(
     *,
     rev: int,
     author_id: str | None,
-    res: "_BatchResult",
+    res: _BatchResult,
     _commit_id: str | None = None,
     _message: str = "",
     _validation_error_count: int = 0,
@@ -506,7 +502,7 @@ def _persist_undo_commit(
     *,
     rev: int,
     author_id: str | None,
-    applied: "_BatchResult",
+    applied: _BatchResult,
 ) -> bool:
     """Record an undo as a forward compensating commit (append-only journal).
 

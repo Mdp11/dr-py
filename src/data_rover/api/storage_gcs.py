@@ -10,7 +10,8 @@ emulator locally rather than a bespoke filesystem store.
 from __future__ import annotations
 
 import io
-from typing import Any, Iterable
+from typing import Any
+from collections.abc import Iterable
 
 
 class GcsSnapshotStore:

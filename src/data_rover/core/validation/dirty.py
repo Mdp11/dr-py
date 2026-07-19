@@ -70,7 +70,8 @@ the authority for cycle bookkeeping.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Iterable, KeysView
+from typing import TYPE_CHECKING
+from collections.abc import Iterable, KeysView
 
 from ..model.relationship import Relationship
 from .scope import Scope

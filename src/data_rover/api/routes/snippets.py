@@ -50,7 +50,7 @@ import hashlib
 import logging
 import threading
 from dataclasses import dataclass
-from typing import Callable
+from collections.abc import Callable
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import ValidationError

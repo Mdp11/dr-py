@@ -247,7 +247,7 @@ if TYPE_CHECKING:
 _TEMP_ID_PREFIX = "tmp_"
 
 
-def containment_subtree(model: "Model", root_id: str) -> list[str]:
+def containment_subtree(model: Model, root_id: str) -> list[str]:
     """``root_id`` + all transitive containment descendants (DFS, dedup)."""
     out: list[str] = []
     seen: set[str] = set()
@@ -264,7 +264,7 @@ def containment_subtree(model: "Model", root_id: str) -> list[str]:
 
 
 def expand_targets(
-    model: "Model",
+    model: Model,
     targets: list[tuple[str, LockMode]],
     intent: LockIntent,
 ) -> list[RequiredLock]:
@@ -289,7 +289,7 @@ def expand_targets(
     return reqs
 
 
-def required_locks(model: "Model", ops: list["OpIn"]) -> list[RequiredLock]:
+def required_locks(model: Model, ops: list[OpIn]) -> list[RequiredLock]:
     """The locks an op batch needs, computed against the PRE-apply model.
 
     Ids created earlier in the same batch (temp ids) are not yet shared, so

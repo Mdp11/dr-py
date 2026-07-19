@@ -5,7 +5,8 @@ import os
 import tempfile
 from contextlib import suppress
 from pathlib import Path
-from typing import Any, Iterator, Literal
+from typing import Any, Literal
+from collections.abc import Iterator
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse

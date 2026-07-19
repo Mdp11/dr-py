@@ -83,11 +83,11 @@ def _signature(public_name: str, fn: ast.FunctionDef, *, drop_self: bool) -> str
     return f"{sig} -> {ret}" if ret else sig
 
 
-def _entry(
-    name: str, kind: str, signature: str, raw_doc: str | None
-) -> FacadeDocEntry:
+def _entry(name: str, kind: str, signature: str, raw_doc: str | None) -> FacadeDocEntry:
     doc, example = _split_doc(raw_doc, name)
-    return FacadeDocEntry(name=name, kind=kind, signature=signature, doc=doc, example=example)
+    return FacadeDocEntry(
+        name=name, kind=kind, signature=signature, doc=doc, example=example
+    )
 
 
 @lru_cache(maxsize=1)
@@ -120,10 +120,19 @@ def get_facade_docs() -> tuple[FacadeDocEntry, ...]:
         ):
             fn = module_fns[value.args[0].id]
             entries.append(
-                _entry(public, "function", _signature(public, fn, drop_self=False), ast.get_docstring(fn))
+                _entry(
+                    public,
+                    "function",
+                    _signature(public, fn, drop_self=False),
+                    ast.get_docstring(fn),
+                )
             )
         elif isinstance(value, ast.Name) and value.id in classes:
-            entries.append(_entry(public, "exception", public, ast.get_docstring(classes[value.id])))
+            entries.append(
+                _entry(
+                    public, "exception", public, ast.get_docstring(classes[value.id])
+                )
+            )
 
     # Element members: public methods and properties; dunders skipped
     # (`__getitem__` is documented under `get`).
@@ -140,7 +149,12 @@ def get_facade_docs() -> tuple[FacadeDocEntry, ...]:
             entries.append(_entry(public, "property", sig, ast.get_docstring(stmt)))
         else:
             entries.append(
-                _entry(public, "method", _signature(public, stmt, drop_self=True), ast.get_docstring(stmt))
+                _entry(
+                    public,
+                    "method",
+                    _signature(public, stmt, drop_self=True),
+                    ast.get_docstring(stmt),
+                )
             )
 
     return tuple(entries)

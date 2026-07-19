@@ -16,7 +16,7 @@ expand-on-a-scalar-property and chain_index-out-of-range.
 
 from __future__ import annotations
 
-from typing import Annotated, Literal, Union
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, TypeAdapter, model_validator
 
@@ -43,7 +43,7 @@ class NavigationSource(BaseModel):
     definition: NavigationDefinition | None = None
 
     @model_validator(mode="after")
-    def _at_most_one(self) -> "NavigationSource":
+    def _at_most_one(self) -> NavigationSource:
         if self.ref is not None and self.definition is not None:
             raise ValueError("provide at most one of `ref` / `definition`")
         return self
@@ -73,7 +73,7 @@ class ChainRows(BaseModel):
 
 
 RowSource = Annotated[
-    Union[ScopeRows, NavigationRows, ChainRows], Field(discriminator="kind")
+    ScopeRows | NavigationRows | ChainRows, Field(discriminator="kind")
 ]
 
 
@@ -93,7 +93,7 @@ class ColumnRef(BaseModel):
     step_index: int | None = None
 
 
-ColumnSource = Annotated[Union[RowSlot, ColumnRef], Field(discriminator="kind")]
+ColumnSource = Annotated[RowSlot | ColumnRef, Field(discriminator="kind")]
 
 
 # ---- columns ----------------------------------------------------------------
@@ -143,7 +143,7 @@ class NavigationColumn(BaseModel):
 
 
 Column = Annotated[
-    Union[ElementColumn, PropertyColumn, NavigationColumn],
+    ElementColumn | PropertyColumn | NavigationColumn,
     Field(discriminator="kind"),
 ]
 
@@ -155,7 +155,7 @@ class TableDefinition(BaseModel):
     default_cell_mode: Literal["collapse", "expand"] = "collapse"
 
     @model_validator(mode="after")
-    def _validate_sources(self) -> "TableDefinition":
+    def _validate_sources(self) -> TableDefinition:
         is_chains = self.row_source.kind == "chains"
         for i, col in enumerate(self.columns):
             src = col.source
@@ -193,7 +193,7 @@ class TableDefinition(BaseModel):
                 )
         return self
 
-    def _source_arity(self, src: "ColumnSource") -> tuple[bool, bool]:
+    def _source_arity(self, src: ColumnSource) -> tuple[bool, bool]:
         """(element_producing, single_binding) for a column source.
 
         A row slot is always element-producing and single. A ColumnRef inherits

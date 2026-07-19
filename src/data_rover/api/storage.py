@@ -13,7 +13,8 @@ mirroring ``identity.get_identity_provider`` / ``set_identity_provider``.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Iterable, Protocol
+from typing import TYPE_CHECKING, Protocol
+from collections.abc import Iterable
 
 if TYPE_CHECKING:
     from .settings import Settings
@@ -78,7 +79,7 @@ def set_snapshot_store(store: SnapshotStore | None) -> None:
     _store = store
 
 
-def build_store_from_settings(settings: "Settings") -> SnapshotStore:
+def build_store_from_settings(settings: Settings) -> SnapshotStore:
     if settings.snapshot_store == "memory":
         return MemorySnapshotStore()
     if settings.snapshot_store == "gcs":

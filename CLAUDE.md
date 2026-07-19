@@ -18,32 +18,32 @@ Everything runs through **pixi** (conda-based). There is no global `python` or `
 
 ```sh
 # Python core + API
-pixi run test-core                       # pytest (pythonpath=src, testpaths=tests)
+pixi run core-test                       # pytest (pythonpath=src, testpaths=tests)
 pixi run -e core-dev pytest tests/model/test_model.py::test_name   # a single test
 pixi run -e core-dev pytest -k uniqueness                          # by keyword
-pixi run start-backend                   # uvicorn on 127.0.0.1:8000 (needs Postgres + DATA_ROVER_DATABASE_URL, or DATA_ROVER_DEV_SEED with a sqlite DSN)
+pixi run backend-start                   # uvicorn on 127.0.0.1:8000 (needs Postgres + DATA_ROVER_DATABASE_URL, or DATA_ROVER_DEV_SEED with a sqlite DSN)
 pixi run db-upgrade                      # alembic upgrade head (Postgres tenancy schema)
 # API tests need NO database service: tests/api/conftest.py runs in-memory SQLite.
 
 # Lint / format / typecheck (ruff --fix, mypy, AND pyright — all three must pass)
-pixi run tidy                            # format + lint across frontend, core, backend
-pixi run lint-core                       # core only; lint-backend for the API package
+pixi run all-tidy                            # format + lint across frontend, core, backend
+pixi run core-lint                       # core only; backend-lint for the API package
 pixi run -e core-dev pytest .            # run pytest directly when you need flags
 
 # Frontend (no pixi wrappers for its npm scripts — they MUST run from inside
 # frontend/; the bare `pixi run -e frontend npm test` fails with "Missing script"
 # because pixi runs it from the repo root)
-pixi run start-frontend                  # vite dev on :5173, proxies /api/v1 -> :8000
+pixi run frontend-start                  # vite dev on :5173, proxies /api/v1 -> :8000
 pixi run -e frontend bash -c 'cd frontend && npm test'            # vitest (happy-dom + MSW)
 pixi run -e frontend bash -c 'cd frontend && npm run test:e2e'    # playwright (boots backend + dev server itself)
 pixi run -e frontend bash -c 'cd frontend && npm run check'       # svelte-check
 ```
 
-`start-frontend` runs the SvelteKit dev server (`npm run dev`). Project content comes from the backend session — a project created via the New Project wizard (or imported via the importer CLI) — not from any client-side file autoload.
+`frontend-start` runs the SvelteKit dev server (`npm run dev`). Project content comes from the backend session — a project created via the New Project wizard (or imported via the importer CLI) — not from any client-side file autoload.
 
-### Python version gotcha
+### Python version
 
-The runtime is **Python 3.14**, but `pyrightconfig.json` pins the check floor to **3.10**. Don't reach for stdlib features newer than the floor (e.g. import `assert_never`/`Self` from `typing_extensions`, not `typing`) or pyright will fail even though the code runs.
+The runtime is **Python 3.14** (`pixi.toml`), and the toolchain now targets it uniformly: `pyrightconfig.json` sets `pythonVersion` to **3.14**, `ruff.toml` sets `target-version = "py314"` (with the `UP`/pyupgrade rules enabled), and `mypy` infers 3.14 from the interpreter. This is a self-contained app with no external consumers, so there is no older-Python floor to respect — reach for modern stdlib freely (`assert_never`/`Self` from `typing`, `enum.StrEnum`, `datetime.UTC`, PEP 604 `X | Y` unions). Ruff's `UP` rules will flag/rewrite anything that lags the target on the next `--fix`.
 
 ## Architecture — the parts that span files
 

@@ -23,7 +23,7 @@ class Folder(BaseModel):
     """
 
     name: str
-    folders: list["Folder"] = Field(default_factory=list)
+    folders: list[Folder] = Field(default_factory=list)
     elements: list[str] = Field(default_factory=list)
     artifacts: list[ArtifactRef] = Field(default_factory=list)
 

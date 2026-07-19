@@ -10,7 +10,7 @@ SSO swap reuses the same primary key space.
 from __future__ import annotations
 
 import enum
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from sqlalchemy import (
     DateTime,
@@ -29,7 +29,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .db import Base
 
 
-class Role(str, enum.Enum):
+class Role(enum.StrEnum):
     """Project role. ``owner`` manages membership; ``editor`` writes the model;
     ``viewer`` is read-only (write attempts are rejected 403 in ``authz``)."""
 
@@ -131,7 +131,7 @@ class Membership(Base):
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class MetamodelRow(Base):
@@ -256,7 +256,7 @@ class Snapshot(Base):
     )
 
 
-class ArtifactKind(str, enum.Enum):
+class ArtifactKind(enum.StrEnum):
     """Kinds of project artifacts. All four mega-plan kinds are declared up
     front (the column is VARCHAR+CHECK, so this costs nothing); Stage 1 only
     accepts `navigation` payloads at the route layer."""

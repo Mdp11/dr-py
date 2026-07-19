@@ -1,10 +1,10 @@
 # Local infrastructure for the production-faithful stack: Postgres (tenancy +
 # content + commit journal, schema owned by Alembic) and a GCS-protocol blob
 # store (fake-gcs-server) for model snapshots. The backend and frontend run via
-# pixi (`pixi run start-backend` / `start-frontend`) against these services.
+# pixi (`pixi run backend-start` / `frontend-start`) against these services.
 #
-#   pixi run services-up      # start + wait for healthy, create the bucket
-#   pixi run services-down    # stop (keeps data volumes)
+#   pixi run services-start      # start + wait for healthy, create the bucket
+#   pixi run services-stop    # stop (keeps data volumes)
 #   pixi run services-reset   # stop + wipe data volumes
 #
 # Both services match the app defaults: Postgres at the default DATA_ROVER_

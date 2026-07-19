@@ -27,7 +27,8 @@ identical.
 from __future__ import annotations
 
 import json
-from typing import Any, Iterable, Iterator
+from typing import Any
+from collections.abc import Iterable, Iterator
 
 from data_rover.core.model.element import Element
 from data_rover.core.model.model import Model

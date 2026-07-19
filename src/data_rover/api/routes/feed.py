@@ -34,7 +34,7 @@ from ..tenancy import get_membership, upsert_user
 router = APIRouter()
 
 
-def _lease_dicts(session: "object", now: float) -> list[dict]:
+def _lease_dicts(session: object, now: float) -> list[dict]:
     from ..session import Session  # local: avoid a router import cycle
 
     assert isinstance(session, Session)
