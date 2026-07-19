@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from data_rover.core.metamodel.schema import Metamodel
 from data_rover.core.model.element import Element
@@ -39,9 +40,13 @@ from .schema import (
     RelationshipStep,
     RowStart,
     Scope,
+    ScriptStep,
     SetExpression,
     StepItem,
 )
+
+if TYPE_CHECKING:
+    from ..script.embed import ScriptEvalContext
 
 
 @dataclass(frozen=True)
@@ -70,11 +75,14 @@ ChainNode = str | PropertyValue
 class ChainResult:
     """Chains INCLUDE the start element at index 0 (see schema docstring).
     Every node is an element id except a possible trailing `PropertyValue`
-    (a scalar property step is always terminal)."""
+    (a scalar property step is always terminal). `warnings` carries script-
+    step degradations (pruned chains, dropped ids) generated during THIS
+    evaluate call — missing-property prunes stay silent, unchanged."""
 
     step_types: list[str]
     chains: list[tuple[ChainNode, ...]]
     truncated: bool
+    warnings: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -98,25 +106,38 @@ def evaluate(
     limits: EvalLimits = EvalLimits(),
     *,
     row_elements: Sequence[str] | None = None,
+    script: ScriptEvalContext | None = None,
 ) -> ChainResult:
     """Evaluate a ref-free definition (run `resolve_refs` first).
 
     `row_elements`, when given, binds any `RowStart` sentinel encountered
     (top-level or nested inside a `set_op` operand) to those element ids —
     table columns supply their row's element(s) here. A `RowStart` reached
-    with no binding raises `ValueError` (see `RowStart`'s docstring)."""
+    with no binding raises `ValueError` (see `RowStart`'s docstring).
+
+    `script`, when given, backs any `ScriptStep` hop encountered (top-level
+    or nested); its shared warnings channel is snapshotted at entry so the
+    returned `ChainResult.warnings` carries only what THIS call generated."""
     budget = _Budget(max_visited=limits.max_visited)
+    w0 = len(script.warnings) if script is not None else 0
     if isinstance(defn, SetExpression):
         members, truncated = _evaluate_set(
-            metamodel, model, defn, limits, budget, row_elements=row_elements
+            metamodel,
+            model,
+            defn,
+            limits,
+            budget,
+            row_elements=row_elements,
+            script=script,
         )
         return ChainResult(
             step_types=[],
             chains=[(i,) for i in sorted(members)],
             truncated=truncated or budget.exhausted,
+            warnings=list(script.warnings[w0:]) if script is not None else [],
         )
     start_ids = _start_ids(
-        metamodel, model, defn, limits, budget, row_elements=row_elements
+        metamodel, model, defn, limits, budget, row_elements=row_elements, script=script
     )
     chains: list[tuple[ChainNode, ...]] = []
     truncated = False
@@ -131,6 +152,7 @@ def evaluate(
             limits,
             budget,
             defn.exclude_visited,
+            script,
         ):
             truncated = True
             break
@@ -146,6 +168,7 @@ def evaluate(
         ],
         chains=chains,
         truncated=truncated or budget.exhausted,
+        warnings=list(script.warnings[w0:]) if script is not None else [],
     )
 
 
@@ -157,6 +180,7 @@ def _start_ids(
     budget: _Budget,
     *,
     row_elements: Sequence[str] | None = None,
+    script: ScriptEvalContext | None = None,
 ) -> list[str]:
     if isinstance(defn.start, RowStart):
         if row_elements is None:
@@ -164,7 +188,13 @@ def _start_ids(
         return sorted(dict.fromkeys(row_elements))
     if isinstance(defn.start, SetExpression):
         members, truncated = _evaluate_set(
-            metamodel, model, defn.start, limits, budget, row_elements=row_elements
+            metamodel,
+            model,
+            defn.start,
+            limits,
+            budget,
+            row_elements=row_elements,
+            script=script,
         )
         if truncated:
             budget.exhausted = True
@@ -296,6 +326,43 @@ def _hop_property(
     return resolved
 
 
+def _hop_script(
+    model: Model,
+    element_id: str,
+    step: ScriptStep,
+    script: ScriptEvalContext | None,
+    budget: _Budget,
+) -> list[ChainNode]:
+    """Continuations of a script hop: `step(el)` returns the next frontier's
+    ids. DEGRADED, NEVER RAISING: a dangling ref, a per-element error, or an
+    unknown returned id prunes/drops with a warning on the shared context; an
+    unconfigured snippet or absent context prunes silently (mirroring an
+    unconfigured navigation source). Dedup preserves the snippet's own return
+    order — deterministic because guest output is deterministic."""
+    if step.snippet.ref is not None:
+        if script is not None:
+            script.add_warning(
+                f"script step: snippet artifact {step.snippet.ref!r} not found"
+            )
+        return []
+    if step.snippet.definition is None or script is None:
+        return []
+    res = script.call(step.snippet.definition.code, "step", [element_id])
+    if res.error is not None:
+        script.add_warning(f"script step failed: {res.error.message}")
+        return []
+    assert res.value is not None
+    raw = list(dict.fromkeys(res.value["ids"]))
+    if not budget.spend(len(raw)):
+        return []
+    known = [i for i in raw if i in model.elements]
+    if len(known) != len(raw):
+        script.add_warning(
+            f"script step returned {len(raw) - len(known)} unknown element id(s)"
+        )
+    return list(known)
+
+
 def _walk(
     metamodel: Metamodel,
     model: Model,
@@ -306,6 +373,7 @@ def _walk(
     limits: EvalLimits,
     budget: _Budget,
     exclude_visited: bool,
+    script: ScriptEvalContext | None = None,
 ) -> bool:
     """DFS over the interleaved step-item list. A RelationshipStep or
     PropertyStep extends the chain by one hop (deterministic, sorted-id); a
@@ -336,6 +404,7 @@ def _walk(
                 limits,
                 budget,
                 exclude_visited,
+                script,
             )
         return False
     nxt: list[ChainNode]
@@ -343,9 +412,8 @@ def _walk(
         nxt = list(_hop(metamodel, model, current, step, budget))
     elif isinstance(step, PropertyStep):
         nxt = _hop_property(metamodel, model, current, step, budget)
-    else:
-        # ScriptColumn/ScriptStep evaluation lands in Task 7/9; inert until then.
-        nxt = []
+    else:  # ScriptStep
+        nxt = _hop_script(model, current, step, script, budget)
     if budget.exhausted:
         return True
     for other in nxt:
@@ -361,6 +429,7 @@ def _walk(
             limits,
             budget,
             exclude_visited,
+            script,
         ):
             return True
     return False
@@ -374,6 +443,7 @@ def _evaluate_set(
     budget: _Budget,
     *,
     row_elements: Sequence[str] | None = None,
+    script: ScriptEvalContext | None = None,
 ) -> tuple[set[str], bool]:
     """(member ids, any-operand-truncated). `difference` folds left-to-right
     over the operand list; the other ops are order-insensitive.
@@ -385,7 +455,9 @@ def _evaluate_set(
     (and from there into the outer `ChainResult.truncated`).
 
     `row_elements` passes through to every operand so a `RowStart` nested
-    inside a set operand also binds (see `evaluate`)."""
+    inside a set operand also binds (see `evaluate`). `script` likewise
+    passes through so a `ScriptStep` nested inside a set operand's path can
+    still hop and report warnings on the shared context."""
     truncated = False
     result: set[str] | None = None
     for operand in expr.operands:
@@ -398,6 +470,7 @@ def _evaluate_set(
             limits,
             budget,
             row_elements=row_elements,
+            script=script,
         )
         truncated = truncated or op_truncated
         if result is None:
@@ -422,15 +495,24 @@ def _operand_members(
     budget: _Budget,
     *,
     row_elements: Sequence[str] | None = None,
+    script: ScriptEvalContext | None = None,
 ) -> tuple[set[str], bool]:
     if isinstance(defn, SetExpression):
         # a set has no steps; any explicit index other than 0 is an error
         if step_index not in (None, 0):
             raise ValueError(f"step_index {step_index} out of range for a set operand")
         return _evaluate_set(
-            metamodel, model, defn, limits, budget, row_elements=row_elements
+            metamodel,
+            model,
+            defn,
+            limits,
+            budget,
+            row_elements=row_elements,
+            script=script,
         )
-    inner = evaluate(metamodel, model, defn, limits, row_elements=row_elements)
+    inner = evaluate(
+        metamodel, model, defn, limits, row_elements=row_elements, script=script
+    )
     n_steps = len(inner.step_types)
     index = n_steps if step_index is None else step_index
     if index > n_steps:
