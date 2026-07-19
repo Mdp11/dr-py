@@ -33,7 +33,9 @@ def test_script_column_parses_ref_inline_and_empty() -> None:
         }
     )
     assert [c.kind for c in defn.columns] == ["script"] * 3
-    assert defn.columns[0].snippet.is_empty
+    col0 = defn.columns[0]
+    assert isinstance(col0, ScriptColumn)
+    assert col0.snippet.is_empty
     with pytest.raises(ValidationError):
         SnippetSource(ref="a1", definition=SnippetDefinition(code="x=1"))
 

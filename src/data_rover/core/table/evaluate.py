@@ -35,6 +35,7 @@ from .schema import (
     PropertyColumn,
     RowSlot,
     ScopeRows,
+    ScriptColumn,
     TableDefinition,
 )
 
@@ -340,6 +341,9 @@ def build_rows_ex(
     for col in defn.columns:
         if isinstance(col, ElementColumn):
             continue
+        if isinstance(col, ScriptColumn):
+            # ScriptColumn/ScriptStep evaluation lands in Task 7/9; inert until then.
+            continue
         if col.mode != "expand":
             if col.keep_empty:
                 continue
@@ -545,6 +549,10 @@ def _sort_value(
         if numeric:
             return (0, tuple(float(v) for v in vals))  # type: ignore[arg-type]
         return (0, tuple(str(v).casefold() for v in vals))
+    if isinstance(col, ScriptColumn):
+        # ScriptColumn/ScriptStep evaluation lands in Task 7/9; inert until
+        # then — sorts with empties, like an unconfigured/empty source.
+        return (1, "")
     # NavigationColumn. `expand` already put ONE reached binding per row into
     # the RowKey (read it straight back); COLLAPSE needs a full re-navigation.
     # `value` sorts on the tuple of reached labels — display names for element

@@ -23,4 +23,6 @@ def test_script_step_parses() -> None:
     )
     assert isinstance(defn, PathNavigation)
     assert all(isinstance(s, ScriptStep) for s in defn.steps)
-    assert defn.steps[1].snippet.is_empty
+    step1 = defn.steps[1]
+    assert isinstance(step1, ScriptStep)
+    assert step1.snippet.is_empty

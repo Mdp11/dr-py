@@ -136,7 +136,11 @@ def evaluate(
             break
     return ChainResult(
         step_types=[
-            s.relationship_type if isinstance(s, RelationshipStep) else s.property_name
+            s.relationship_type
+            if isinstance(s, RelationshipStep)
+            else s.property_name
+            if isinstance(s, PropertyStep)
+            else (s.comment or "script")  # ScriptStep: label per its own docstring
             for s in defn.steps
             if not isinstance(s, FilterStep)
         ],
@@ -337,8 +341,11 @@ def _walk(
     nxt: list[ChainNode]
     if isinstance(step, RelationshipStep):
         nxt = list(_hop(metamodel, model, current, step, budget))
-    else:
+    elif isinstance(step, PropertyStep):
         nxt = _hop_property(metamodel, model, current, step, budget)
+    else:
+        # ScriptColumn/ScriptStep evaluation lands in Task 7/9; inert until then.
+        nxt = []
     if budget.exhausted:
         return True
     for other in nxt:

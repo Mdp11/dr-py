@@ -49,7 +49,13 @@ from .evaluate import (
     _navigation_reached,
     resolve_source_elements,
 )
-from .schema import ElementColumn, NavigationColumn, PropertyColumn, TableDefinition
+from .schema import (
+    ElementColumn,
+    NavigationColumn,
+    PropertyColumn,
+    ScriptColumn,
+    TableDefinition,
+)
 
 
 @dataclass
@@ -258,9 +264,18 @@ def evaluate_cells(
                 row.append(
                     _property_cell(mm, model, defn, key, col, i, base_slots, limits)
                 )
-            else:
+            elif isinstance(col, NavigationColumn):
                 row.append(
                     _navigation_cell(mm, model, defn, key, col, i, base_slots, limits)
+                )
+            else:
+                # ScriptColumn/ScriptStep evaluation lands in Task 7/9; inert
+                # until then — contributes nothing, like an unconfigured source.
+                assert isinstance(col, ScriptColumn)
+                row.append(
+                    ValueCell(
+                        present=False, value=None, element_id=None, editable=False
+                    )
                 )
         rows.append(row)
     return rows
