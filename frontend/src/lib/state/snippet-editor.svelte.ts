@@ -13,6 +13,7 @@ import * as snippetsApi from '$lib/api/snippets';
 import type { SnippetRunOut } from '$lib/api/snippets';
 import type { SnippetDiagnostic } from '$lib/api/types';
 import { ApiError, ConflictError } from '$lib/api/errors';
+import { entryAvailable } from '$lib/snippet/entry-stubs';
 import { createCodeSnippetArtifact, loadArtifacts } from './artifacts.svelte';
 import { bindTabToArtifact, retitleTab } from './workspace.svelte';
 
@@ -112,13 +113,11 @@ async function lintNow(tabId: string): Promise<void> {
 		const out = await snippetsApi.lintSnippet(draft.code);
 		if (_lintGenerations.get(tabId) !== gen || !_drafts.has(tabId)) return;
 		_lint.set(tabId, { diagnostics: out.diagnostics, entryPoints: out.entry_points });
-		// The select disables an entry no longer in entryPoints, but the run
-		// state's `entry` would otherwise keep the stale value and Run would
-		// still send it. 'script' is always valid (no element_id needed).
-		const rs = getSnippetRun(tabId);
-		if (rs.entry !== 'script' && !out.entry_points.includes(rs.entry)) {
-			setRun(tabId, { entry: 'script' });
-		}
+		// Deliberately KEEP the user's entry selection even when entry_points
+		// doesn't (yet) include it: the SnippetTab hint bar uses that state to
+		// explain the def value(el)/step(el) contract while the user types it.
+		// Sending a stale entry is prevented at the send site (runSnippetTab's
+		// entryAvailable guard), not by yanking the selection out from under them.
 	} catch {
 		// Lint is advisory: a failed request just leaves the last diagnostics.
 	}
@@ -141,6 +140,10 @@ export async function runSnippetTab(tabId: string): Promise<void> {
 	const rs = getSnippetRun(tabId);
 	if (!draft || rs.phase !== 'idle') return;
 	if (rs.entry !== 'script' && rs.elementId === null) return; // UI disables Run too
+	// Availability gate lives HERE, not as a lint-time entry reset: the UI's
+	// Run button is disabled too, but Mod-Enter (CodeEditor keymap) calls this
+	// directly, so the store must refuse to send an entry lint hasn't unlocked.
+	if (!entryAvailable(rs.entry, _lint.get(tabId)?.entryPoints)) return;
 	const runId = crypto.randomUUID();
 	const gen = bump(_runGenerations, tabId);
 	setRun(tabId, { phase: 'running', runId, notice: null });
