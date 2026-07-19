@@ -7,7 +7,12 @@ import pytest
 
 from data_rover.core.script.bridge import BridgeDispatcher
 from data_rover.core.script.facade_src import FACADE_SOURCE
-from data_rover.core.script.runner import ScriptBudget, decode_call_payload
+from data_rover.core.script.runner import (
+    RunLimits,
+    ScriptBudget,
+    decode_call_payload,
+)
+from tests.script.trusted_runner import TrustedRunner
 
 
 def test_budget_remaining_and_exhausted() -> None:
@@ -99,3 +104,57 @@ def test_serialize_step_shapes(small_model) -> None:
         ser("step", 42)
     with pytest.raises(ValueError):
         ser("step", [1])
+
+
+# --- Session tests (M2) -----
+
+
+def _open(model, code: str):
+    return TrustedRunner().open_session(
+        model, code, RunLimits(), budget=ScriptBudget.start(30)
+    )
+
+
+def test_session_repeated_calls_share_module_state(small_model) -> None:
+    ids = sorted(small_model.elements)
+    sess = _open(small_model, "calls = []\ndef value(els):\n    calls.append(1)\n    return len(calls)")
+    assert sess.boot_error is None
+    r1 = sess.call("value", [ids[0]])
+    r2 = sess.call("value", [ids[0]])
+    assert r1.value == {"kind": "scalar", "value": 1}
+    assert r2.value == {"kind": "scalar", "value": 2}  # module globals persist
+    sess.close()
+
+
+def test_session_boot_error_on_syntax_and_module_exec(small_model) -> None:
+    sess_syntax = _open(small_model, "def broken(:")
+    assert sess_syntax.boot_error is not None
+    assert sess_syntax.boot_error.kind == "syntax"
+    sess_runtime = _open(small_model, "raise RuntimeError('boom')")
+    assert sess_runtime.boot_error is not None
+    assert sess_runtime.boot_error.kind == "runtime"
+
+
+def test_session_per_call_errors(small_model) -> None:
+    ids = sorted(small_model.elements)
+    sess = _open(small_model, "def value(els):\n    return {'not': 'legal'}")
+    res = sess.call("value", [ids[0]])
+    assert res.error is not None and "value() must return" in res.error.message
+    missing = _open(small_model, "x = 1")
+    res = missing.call("value", [ids[0]])
+    assert res.error is not None and "not defined" in res.error.message
+
+
+def test_session_is_read_only(small_model) -> None:
+    ids = sorted(small_model.elements)
+    sess = _open(small_model, "def value(els):\n    return dr.create('T', {})")
+    res = sess.call("value", [ids[0]])
+    assert res.error is not None and "ReadOnlyError" in res.error.message
+
+
+def test_session_step_entry(small_model) -> None:
+    ids = sorted(small_model.elements)
+    sess = _open(small_model, f"def step(el):\n    return ['{ids[0]}']")
+    res = sess.call("step", [ids[0]])
+    assert res.value == {"ids": [ids[0]]}
+    sess.close()

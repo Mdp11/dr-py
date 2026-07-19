@@ -27,12 +27,14 @@ from data_rover.core.model.model import Model
 from data_rover.core.script.bridge import BridgeDispatcher
 from data_rover.core.script.facade_src import FACADE_SOURCE
 from data_rover.core.script.runner import (
+    CallResult,
     RunLimits,
     RunRequest,
     RunResult,
     ScriptBudget,
     ScriptError,
     SnippetSession,
+    decode_call_payload,
 )
 
 #: The filename `compile()`/`exec()` see for the concatenated facade+snippet
@@ -177,7 +179,77 @@ class TrustedRunner:
         budget: ScriptBudget,
     ) -> SnippetSession:
         """Open an embedded-evaluation session: exec the facade + module once,
-        then serve repeated entry-point calls.
+        then serve repeated entry-point calls."""
+        del budget  # protocol parity only — see _TrustedSession docstring
+        return _TrustedSession(model, code, limits)
 
-        Task 3: TrustedRunner.open_session (not yet implemented)."""
-        raise NotImplementedError("open_session: Task 3")
+
+class _TrustedSession:
+    """In-process `SnippetSession` (test-only; see module docstring — the same
+    no-sandbox caveat applies). `budget` is accepted for protocol parity but
+    NOT enforced here: trusted sessions run hermetic tests, and budget/timeout
+    degradation is exercised at the ScriptEvalContext / WASM layers."""
+
+    def __init__(self, model: Model, code: str, limits: RunLimits) -> None:
+        dispatcher = BridgeDispatcher(
+            model,
+            record_ops=False,  # sessions are read-only by construction
+            max_ops=limits.max_ops,
+            max_op_bytes=limits.max_op_bytes,
+            page_limit=limits.page_limit,
+        )
+        self._limits = limits
+        self._namespace: dict = {"_transport": dispatcher.dispatch}
+        self.boot_error: ScriptError | None = None
+        source = FACADE_SOURCE + "\n" + code
+        try:
+            compiled = compile(source, _SNIPPET_FILENAME, "exec")
+        except SyntaxError as exc:
+            self.boot_error = ScriptError(kind="syntax", message=str(exc), traceback=None)
+            return
+        stdout = _CappedStdout(limits.stdout_bytes)
+        with contextlib.redirect_stdout(stdout):  # type: ignore[type-var]
+            try:
+                exec(compiled, self._namespace)
+            except Exception:
+                self.boot_error = ScriptError(
+                    kind="runtime",
+                    message=f"{sys.exc_info()[0].__name__}: {sys.exc_info()[1]}",  # type: ignore[union-attr]
+                    traceback=_format_guest_traceback(),
+                )
+
+    def call(self, entry: str, element_ids: list[str]) -> CallResult:
+        start = time.monotonic()
+        if self.boot_error is not None:
+            return CallResult(value=None, error=self.boot_error, duration_ms=0)
+        stdout = _CappedStdout(self._limits.stdout_bytes)
+        with contextlib.redirect_stdout(stdout):  # type: ignore[type-var]
+            try:
+                fn = self._namespace.get(entry)
+                if fn is None or not callable(fn):
+                    raise NameError(f"entry function {entry!r} is not defined")
+                els = [self._namespace["dr"].element(i) for i in element_ids]
+                value = fn(els if entry == "value" else (els[0] if els else None))
+                payload = self._namespace["_dr_serialize_entry_result"](entry, value)
+            except Exception:
+                return CallResult(
+                    value=None,
+                    error=ScriptError(
+                        kind="runtime",
+                        message=f"{sys.exc_info()[0].__name__}: {sys.exc_info()[1]}",  # type: ignore[union-attr]
+                        traceback=_format_guest_traceback(),
+                    ),
+                    duration_ms=int((time.monotonic() - start) * 1000),
+                )
+        decoded, msg = decode_call_payload(entry, payload)
+        duration_ms = int((time.monotonic() - start) * 1000)
+        if decoded is None:
+            return CallResult(
+                value=None,
+                error=ScriptError(kind="runtime", message=msg or "malformed payload"),
+                duration_ms=duration_ms,
+            )
+        return CallResult(value=decoded, error=None, duration_ms=duration_ms)
+
+    def close(self) -> None:
+        pass  # nothing to release in-process
