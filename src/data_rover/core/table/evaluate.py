@@ -560,6 +560,18 @@ def _display_name(model: Model, eid: str) -> str:
     return display_name(model.elements[eid])
 
 
+def _script_sort_atom(model: Model, item: object) -> tuple[int, float, str]:
+    """One uniformly-comparable sort atom for a script result item. Rank
+    numbers (incl. bools) first, then strings, then elements — uniform
+    `(rank, number, string)` triples so a column whose rows return DIFFERENT
+    result kinds still sorts without a cross-type TypeError."""
+    if isinstance(item, bool) or isinstance(item, (int, float)):
+        return (0, float(item), "")
+    if isinstance(item, str) and item in model.elements:
+        return (2, 0.0, _display_name(model, item).casefold() + "\x00" + item)
+    return (1, 0.0, str(item).casefold())
+
+
 def _property_is_numeric(
     mm: Metamodel, defn: TableDefinition, col: PropertyColumn
 ) -> bool:
@@ -591,6 +603,7 @@ def _sort_value(
     col_index: int,
     base_slots: int,
     limits: TableLimits,
+    script: ScriptEvalContext | None = None,
 ) -> tuple[int, Any]:
     """`(is_empty, comparable)` for one row's sort column. `is_empty=1` always
     sorts last (see `order_rows`); the comparable half is only ever compared
@@ -634,9 +647,42 @@ def _sort_value(
             return (0, tuple(float(v) for v in vals))  # type: ignore[arg-type]
         return (0, tuple(str(v).casefold() for v in vals))
     if isinstance(col, ScriptColumn):
-        # ScriptColumn/ScriptStep evaluation lands in Task 7/9; inert until
-        # then — sorts with empties, like an unconfigured/empty source.
-        return (1, "")
+        if col.mode == "expand":
+            b = key[_expand_slot_of(defn, base_slots, col_index)]
+            if isinstance(b, PropertyValue):
+                return (0, (_script_sort_atom(model, b.value),))
+            if isinstance(b, str):
+                return (0, (_script_sort_atom(model, b),))
+            return (1, ())  # keep_empty row or error row
+        if col.snippet.definition is None or script is None:
+            return (1, ())
+        els = resolve_source_elements(
+            mm, model, defn, key, col.source, base_slots, limits, script=script
+        )
+        if not els:
+            return (1, ())
+        res = script.call(col.snippet.definition.code, "value", els)
+        if res.error is not None or res.value is None:
+            return (1, ())  # errors sort with empties
+        p = res.value
+        if p["kind"] == "scalar":
+            if p["value"] is None:
+                return (1, ())
+            return (0, (_script_sort_atom(model, p["value"]),))
+        if p["kind"] == "scalars":
+            vals = [v for v in p["values"] if v is not None]
+            if not vals:
+                return (1, ())
+            return (0, tuple(_script_sort_atom(model, v) for v in vals))
+        if p["kind"] == "element":
+            eid = p["id"]
+            if eid not in model.elements:
+                return (1, ())
+            return (0, (_script_sort_atom(model, eid),))
+        atoms = sorted(
+            _script_sort_atom(model, i) for i in p["ids"] if i in model.elements
+        )
+        return (0, tuple(atoms)) if atoms else (1, ())
     # NavigationColumn. `expand` already put ONE reached binding per row into
     # the RowKey (read it straight back); COLLAPSE needs a full re-navigation.
     # `value` sorts on the tuple of reached labels — display names for element
@@ -671,6 +717,7 @@ def order_rows(
     keys: list[RowKey],
     sort: SortSpec | None,
     limits: TableLimits = TableLimits(),
+    script: ScriptEvalContext | None = None,
 ) -> list[RowKey]:
     """Stable-sort `keys` by one column; `sort=None` returns a new list in the
     input order. Missing/empty values sort last in BOTH directions (see the
@@ -690,7 +737,12 @@ def order_rows(
     )
     base_slots = (len(keys[0]) - expand_count) if keys else 1
     decorated: list[tuple[int, Any, RowKey]] = [
-        (*_sort_value(mm, model, defn, k, col, sort.column, base_slots, limits), k)
+        (
+            *_sort_value(
+                mm, model, defn, k, col, sort.column, base_slots, limits, script=script
+            ),
+            k,
+        )
         for k in keys
     ]
     # empties always last, in BOTH directions: partition first, sort (with

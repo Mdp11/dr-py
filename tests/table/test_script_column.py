@@ -274,3 +274,37 @@ def test_script_memo_one_call_per_binding() -> None:
         counters.append(row[0].value)
     assert sorted(counters) == list(range(1, len(build.keys) + 1))  # each binding once
     ctx.close()
+
+
+# ---- Task 8: table sorting by script columns --------------------------------
+
+
+def test_sort_by_script_column_mixed_kinds_and_errors() -> None:
+    from data_rover.core.table.evaluate import SortSpec, order_rows
+
+    # names: rows return int for 'A', string for 'B', error for 'C' — the sort
+    # must not raise, numbers sort before strings, errors sort last.
+    code = (
+        "def value(els):\n"
+        "    n = els[0].name\n"
+        "    if n == 'Block A': return 2\n"
+        "    if n == 'Block B': return 'b'\n"
+        "    raise RuntimeError('boom')"
+    )
+    defn = _one_col_table(code)
+    mm = _mm()
+    model = _fixture()
+    ctx = _script_ctx(model)
+    build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
+    ordered = order_rows(
+        mm, model, defn, build.keys, SortSpec(column=0, direction="asc"),
+        TableLimits(), script=ctx,
+    )
+    names = [
+        model.elements[k[0]].properties.get("name")
+        for k in ordered
+        if isinstance(k[0], str)
+    ]
+    assert names.index("Block A") < names.index("Block B")       # number before string
+    assert names[-1] == "Block C"                                 # error last
+    ctx.close()
