@@ -38,10 +38,11 @@ matching ``LockTable``'s Phase 7 deferral note):
   by a newer registration — can never delete an entry it doesn't own; the
   newer registration's owner keeps full cancel capability until it
   deregisters with its own token.
-- ``_concurrency_guard`` — a non-blocking global + per-user run limiter
-  (``snippet_concurrency`` / ``snippet_per_user_concurrency`` settings from
-  Task 10). Acquire fails fast (429) rather than queuing; released in a
-  ``finally`` so an exception mid-run never leaks a permit.
+- ``concurrency_guard`` (``..snippet_concurrency``) — a non-blocking global +
+  per-user run limiter (``snippet_concurrency`` / ``snippet_per_user_concurrency``
+  settings from Task 10), shared with embedded evaluation (``script_eval.py``).
+  Acquire fails fast (429) rather than queuing; released in a ``finally`` so
+  an exception mid-run never leaks a permit.
 """
 
 from __future__ import annotations
@@ -81,58 +82,11 @@ from ..schemas import (
 )
 from ..script_runner import get_runner, run_limits_from_settings
 from ..settings import Settings, get_settings
+from ..snippet_concurrency import concurrency_guard
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-
-# ---------------------------------------------------------------------------
-# Concurrency guard (Task 10 settings, enforced here)
-# ---------------------------------------------------------------------------
-
-
-class _ConcurrencyGuard:
-    """Non-blocking global + per-user run-concurrency limiter.
-
-    ``try_acquire`` fails fast (returns ``False``) rather than blocking, so a
-    request over either cap gets an immediate 429 instead of queuing behind
-    other snippet executions. Thread-safe: FastAPI's sync routes run on a
-    threadpool, so ``try_acquire``/``release`` can be called concurrently
-    from multiple request threads.
-    """
-
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._global_count = 0
-        self._per_user_count: dict[str, int] = {}
-
-    def try_acquire(
-        self, user_id: str, *, global_limit: int, per_user_limit: int
-    ) -> bool:
-        with self._lock:
-            if self._global_count >= global_limit:
-                return False
-            if self._per_user_count.get(user_id, 0) >= per_user_limit:
-                return False
-            self._global_count += 1
-            self._per_user_count[user_id] = self._per_user_count.get(user_id, 0) + 1
-            return True
-
-    def release(self, user_id: str) -> None:
-        with self._lock:
-            if self._global_count > 0:
-                self._global_count -= 1
-            remaining = self._per_user_count.get(user_id, 0) - 1
-            if remaining <= 0:
-                self._per_user_count.pop(user_id, None)
-            else:
-                self._per_user_count[user_id] = remaining
-
-
-#: module singleton — counters must persist across requests within this
-#: process; limits are read fresh from settings on every acquire.
-_concurrency_guard = _ConcurrencyGuard()
 
 
 # ---------------------------------------------------------------------------
@@ -302,7 +256,7 @@ def run_snippet(
         )
     code = _resolve_code(payload, project_id, db)
 
-    if not _concurrency_guard.try_acquire(
+    if not concurrency_guard.try_acquire(
         user.id,
         global_limit=settings.snippet_concurrency,
         per_user_limit=settings.snippet_per_user_concurrency,
@@ -331,7 +285,7 @@ def run_snippet(
     finally:
         if token is not None:
             _deregister_run(project_id, payload.run_id, token)
-        _concurrency_guard.release(user.id)
+        concurrency_guard.release(user.id)
 
     end_rev = session.model_rev
     stale = start_rev != end_rev

@@ -399,14 +399,15 @@ def test_registry_cross_project_isolation() -> None:
 #
 # A live TestClient/threadpool race is awkward to drive deterministically
 # (per the brief's own acknowledgement), so this is a direct unit test on
-# `_ConcurrencyGuard` -- the class the route calls into -- rather than an
-# HTTP-level race.
+# `ConcurrencyGuard` -- the class the route calls into -- rather than an
+# HTTP-level race. `ConcurrencyGuard` moved to `snippet_concurrency.py`
+# (Task 10) so it can be shared with embedded evaluation (`script_eval.py`).
 
 
 def test_concurrency_guard_global_limit() -> None:
-    from data_rover.api.routes.snippets import _ConcurrencyGuard
+    from data_rover.api.snippet_concurrency import ConcurrencyGuard
 
-    guard = _ConcurrencyGuard()
+    guard = ConcurrencyGuard()
     assert guard.try_acquire("u1", global_limit=1, per_user_limit=5) is True
     assert guard.try_acquire("u2", global_limit=1, per_user_limit=5) is False
     guard.release("u1")
@@ -414,9 +415,9 @@ def test_concurrency_guard_global_limit() -> None:
 
 
 def test_concurrency_guard_per_user_limit() -> None:
-    from data_rover.api.routes.snippets import _ConcurrencyGuard
+    from data_rover.api.snippet_concurrency import ConcurrencyGuard
 
-    guard = _ConcurrencyGuard()
+    guard = ConcurrencyGuard()
     assert guard.try_acquire("u1", global_limit=5, per_user_limit=1) is True
     assert guard.try_acquire("u1", global_limit=5, per_user_limit=1) is False
     # a different user is unaffected by u1's per-user cap
@@ -430,11 +431,11 @@ def test_concurrency_429_over_global_cap(client: TestClient, monkeypatch: pytest
     same one the route uses), then confirm the route surfaces 429 rather than
     running -- proves the route actually calls into the shared guard, not
     just that the guard class works in isolation (covered above)."""
-    from data_rover.api.routes import snippets as snippets_route
+    from data_rover.api.snippet_concurrency import concurrency_guard
 
     _seed_model(client)
     monkeypatch.setenv("DATA_ROVER_SNIPPET_CONCURRENCY", "1")
-    assert snippets_route._concurrency_guard.try_acquire(
+    assert concurrency_guard.try_acquire(
         "someone-else", global_limit=1, per_user_limit=1
     )
     try:
@@ -443,7 +444,7 @@ def test_concurrency_429_over_global_cap(client: TestClient, monkeypatch: pytest
         )
         assert r.status_code == 429, r.text
     finally:
-        snippets_route._concurrency_guard.release("someone-else")
+        concurrency_guard.release("someone-else")
 
 
 # ---------------------------------------------------------------------------

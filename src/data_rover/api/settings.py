@@ -126,6 +126,11 @@ class Settings(BaseSettings):
     snippet_max_op_bytes: int = 1024 * 1024
     #: Mirrors ``RunLimits.page_limit``.
     snippet_page_limit: int = 500
+    #: Total wall budget (seconds) for ALL embedded snippet work one
+    #: evaluate/export request triggers (``ScriptBudget``, M2/M3 script
+    #: columns/steps) — shared across every script column/step call the
+    #: request transitively makes, not a per-call timeout.
+    snippet_eval_budget_s: float = 30.0
 
 
 def get_settings() -> Settings:
