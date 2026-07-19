@@ -26,7 +26,7 @@ from data_rover.core.table.evaluate import (
     iter_export_rows,
     order_rows,
 )
-from data_rover.core.table.resolve import _resolve_table_navigation_refs
+from data_rover.core.table.resolve import resolve_table_refs
 from data_rover.core.table.schema import TABLE_ADAPTER, TableDefinition
 
 from .. import content
@@ -51,8 +51,11 @@ def _resolve_table(
     payload: EvaluateTableIn, project_id: str, db: DbSession
 ) -> TableDefinition:
     """The table's own definition (from `artifact_id` or inline), with every
-    embedded navigation ref inlined via `_resolve_table_navigation_refs` — the
-    core evaluator (Tasks 4-6) assumes a fully ref-free definition."""
+    embedded navigation ref inlined via `resolve_table_refs` — the core
+    evaluator (Tasks 4-6) assumes a fully ref-free definition. No
+    `snippet_fetch` is passed yet (route wiring for snippet refs is Task 11),
+    so any `ScriptColumn`/`ScriptStep` ref present is left dangling — same
+    behavior as before this task."""
     if payload.artifact_id is not None:
         row = content.get_artifact(db, payload.artifact_id)
         if (
@@ -76,7 +79,7 @@ def _resolve_table(
             raise LookupError(artifact_id)
         return NAVIGATION_ADAPTER.validate_python(r.payload)
 
-    return _resolve_table_navigation_refs(defn, _fetch)
+    return resolve_table_refs(defn, _fetch)
 
 
 def _cell_out(model: Model, cell: Cell) -> TableCellOut:

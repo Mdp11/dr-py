@@ -11,6 +11,7 @@ from data_rover.core.model.model import Model
 from data_rover.core.script.schema import SnippetDefinition, SnippetSource
 from data_rover.core.table.cells import ErrorCell, ValueCell, evaluate_cells
 from data_rover.core.table.evaluate import build_rows_ex
+from data_rover.core.table.resolve import resolve_table_refs, table_has_script
 from data_rover.core.table.schema import (
     TABLE_ADAPTER,
     ColumnRef,
@@ -109,3 +110,31 @@ def test_expand_script_column_keeps_slot_arithmetic() -> None:
     cells = evaluate_cells(mm, model, defn, build.keys)
     assert all(isinstance(r[0], ValueCell) and not r[0].present for r in cells)
     assert all(isinstance(r[1], ValueCell) for r in cells)
+
+
+def test_resolve_table_inlines_script_column_refs() -> None:
+    defn = TableDefinition(
+        row_source=ScopeRows(types=[]),
+        columns=[ScriptColumn(snippet=SnippetSource(ref="s1")),
+                 ScriptColumn(snippet=SnippetSource(ref="missing"))],
+    )
+
+    def snippet_fetch(aid: str) -> SnippetDefinition:
+        if aid == "s1":
+            return SnippetDefinition(code="def value(els): return 1")
+        raise LookupError(aid)
+
+    def nav_fetch(aid: str):
+        raise LookupError(aid)
+
+    out = resolve_table_refs(defn, nav_fetch, snippet_fetch=snippet_fetch)
+    col0, col1 = out.columns
+    assert isinstance(col0, ScriptColumn)
+    assert isinstance(col1, ScriptColumn)
+    assert col0.snippet.definition is not None
+    assert col1.snippet.ref == "missing"
+    assert table_has_script(out)
+    assert not table_has_script(
+        TableDefinition(row_source=ScopeRows(types=[]),
+                        columns=[ScriptColumn(snippet=SnippetSource())])
+    )

@@ -1,4 +1,4 @@
-"""`_resolve_table_navigation_refs` inlines every `NavigationSource` embedded
+"""`resolve_table_refs` inlines every `NavigationSource` embedded
 in a `TableDefinition` (row_source's navigation on `NavigationRows`/
 `ChainRows`, and each `NavigationColumn`'s navigation) via an injected fetch
 callable — even when the source was already inline, since an inline
@@ -12,7 +12,7 @@ from data_rover.core.navigation.schema import (
     PathNavigation,
     SetExpression,
 )
-from data_rover.core.table.resolve import _resolve_table_navigation_refs
+from data_rover.core.table.resolve import resolve_table_refs
 from data_rover.core.table.schema import (
     TABLE_ADAPTER,
     ChainRows,
@@ -50,7 +50,7 @@ def test_unknown_column_ref_raises_lookup_error() -> None:
         }
     )
     with pytest.raises(LookupError):
-        _resolve_table_navigation_refs(defn, fetch={}.__getitem__)
+        resolve_table_refs(defn, fetch={}.__getitem__)
 
 
 def test_column_navigation_ref_is_replaced_by_inlined_definition() -> None:
@@ -66,7 +66,7 @@ def test_column_navigation_ref_is_replaced_by_inlined_definition() -> None:
             ],
         }
     )
-    resolved = _resolve_table_navigation_refs(
+    resolved = resolve_table_refs(
         orig, fetch={"a": _nav(PATH)}.__getitem__
     )
     col = resolved.columns[0]
@@ -87,7 +87,7 @@ def test_row_source_navigation_ref_is_replaced_by_inlined_definition() -> None:
             "columns": [{"kind": "element", "source": {"kind": "row"}}],
         }
     )
-    resolved = _resolve_table_navigation_refs(
+    resolved = resolve_table_refs(
         defn, fetch={"a": _nav(PATH)}.__getitem__
     )
     rs = resolved.row_source
@@ -103,7 +103,7 @@ def test_chain_rows_navigation_ref_is_replaced_by_inlined_definition() -> None:
             "columns": [{"kind": "element", "source": {"kind": "row"}}],
         }
     )
-    resolved = _resolve_table_navigation_refs(
+    resolved = resolve_table_refs(
         defn, fetch={"a": _nav(PATH)}.__getitem__
     )
     rs = resolved.row_source
@@ -127,7 +127,7 @@ def test_scope_rows_with_ref_free_inline_column_is_returned_equivalently() -> No
             ],
         }
     )
-    resolved = _resolve_table_navigation_refs(
+    resolved = resolve_table_refs(
         defn, fetch=lambda _id: (_ for _ in ()).throw(LookupError())
     )
     assert resolved == defn
@@ -151,7 +151,7 @@ def test_inline_definition_with_nested_operand_ref_is_also_inlined() -> None:
             ],
         }
     )
-    resolved = _resolve_table_navigation_refs(
+    resolved = resolve_table_refs(
         defn, fetch={"a": _nav(PATH)}.__getitem__
     )
     col = resolved.columns[0]
