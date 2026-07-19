@@ -16,6 +16,7 @@ import {
 	resetTableEditors,
 	seedElements,
 	updateDefinition,
+	updateSnippetCode,
 	updateTableDefinition
 } from '../index';
 import { hasUnsavedWork, isArtifactDirty, isTabDirty } from '../unsaved';
@@ -144,6 +145,11 @@ describe('isTabDirty / isArtifactDirty', () => {
 		const tabId = openArtifactTab('snippet', { artifactId: null, title: 'New snippet' });
 		await ensureSnippetDraft(tabId);
 		expect(isTabDirty('snippet', tabId)).toBe(true); // never-saved draft counts
+		// hasUnsavedWork/hasDirtySnippetDrafts is dirty-flag-only: a fresh,
+		// untouched draft starts empty (DEFAULT_CODE === ''), so there is
+		// nothing to lose yet — unlike isTabDirty's tab-marker rule above.
+		expect(hasUnsavedWork()).toBe(false);
+		updateSnippetCode(tabId, 'print(1)\n');
 		expect(hasUnsavedWork()).toBe(true);
 		expect(isArtifactDirty('code_snippet', 'nope')).toBe(false);
 	});

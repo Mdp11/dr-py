@@ -9,6 +9,7 @@ import {
 	getSnippetLint,
 	getSnippetRun,
 	getSnippetSaveConflict,
+	hasDirtySnippetDrafts,
 	LINT_DEBOUNCE_MS,
 	markRunStaged,
 	resetSnippetEditors,
@@ -56,7 +57,15 @@ describe('snippet drafts', () => {
 		const draft = await ensureSnippetDraft(tabId);
 		expect(draft.artifactId).toBeNull();
 		expect(draft.dirty).toBe(false);
-		expect(draft.code).toContain('dr');
+		expect(draft.code).toBe('');
+	});
+
+	it('a fresh never-saved draft does not count as dirty until edited', async () => {
+		const tabId = 'snip:draft:9';
+		await ensureSnippetDraft(tabId);
+		expect(hasDirtySnippetDrafts()).toBe(false);
+		updateSnippetCode(tabId, 'print(1)\n');
+		expect(hasDirtySnippetDrafts()).toBe(true);
 	});
 
 	it('loads a saved artifact draft and adopts server entry points', async () => {

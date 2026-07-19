@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { basicSetup } from 'codemirror';
-	import { EditorView, keymap, hoverTooltip } from '@codemirror/view';
+	import { EditorView, keymap, hoverTooltip, placeholder } from '@codemirror/view';
 	import { python } from '@codemirror/lang-python';
 	import { lintGutter, setDiagnostics } from '@codemirror/lint';
 	import {
@@ -74,6 +74,19 @@
 		};
 	});
 
+	// Ghost-text guidance shown only while the document is empty (never part of
+	// the content — see snippet-editor.svelte.ts DEFAULT_CODE). A DOM factory
+	// because the string form collapses newlines.
+	function placeholderDom(): HTMLElement {
+		const el = document.createElement('div');
+		el.textContent =
+			'Explore the model through the dr facade, e.g.:\n' +
+			'for el in dr.elements():\n' +
+			'    print(el.type, el.name)';
+		el.style.whiteSpace = 'pre';
+		return el;
+	}
+
 	// Creation must NOT reactively track `code`/handlers — tracking them would
 	// destroy and recreate the editor on every keystroke. The listeners call
 	// the CURRENT props (props stay live bindings), so untrack is safe.
@@ -87,6 +100,7 @@
 						basicSetup,
 						python(),
 						editorLuxuryTheme,
+						placeholder(placeholderDom),
 						lintGutter(),
 						keymap.of([{ key: 'Mod-Enter', run: () => (onRun(), true) }]),
 						EditorView.updateListener.of((u) => {

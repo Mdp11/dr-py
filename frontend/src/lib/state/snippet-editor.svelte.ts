@@ -26,10 +26,10 @@ export interface SnippetDraft {
 	entryPoints: string[];
 }
 
-const DEFAULT_CODE =
-	'# Explore the model through the `dr` facade, e.g.:\n' +
-	'# for el in dr.elements():\n' +
-	'#     print(el.type, el.name)\n';
+// New drafts start EMPTY — the "explore via dr" guidance lives in the editor
+// as CM placeholder ghost text (CodeEditor.svelte), not as document content
+// the user has to delete.
+const DEFAULT_CODE = '';
 
 const _drafts = new SvelteMap<string, SnippetDraft>();
 const _conflicts = new SvelteMap<string, number>(); // tabId -> server rev
@@ -200,13 +200,13 @@ export function getSnippetSaveConflict(tabId: string): number | undefined {
 	return _conflicts.get(tabId);
 }
 
-/** Unlike `hasDirtyNavDrafts`/`hasDirtyTableDrafts` (which only look at the
- * `dirty` flag — those tabs' default definitions are structurally trivial), a
- * never-saved snippet draft (`artifactId === null`) counts too: its starting
- * `DEFAULT_CODE` is real explanatory content the user would lose, matching
- * `isTabDirty`'s `draft.artifactId === null` rule. */
+/** Mirrors hasDirtyNavDrafts/hasDirtyTableDrafts: only the `dirty` flag
+ * matters. A never-saved draft (`artifactId === null`) with untouched code is
+ * empty (DEFAULT_CODE is ''), so there is no content to lose — the old rule
+ * that counted every never-saved draft guarded the starter comment, which is
+ * now placeholder text outside the document. */
 export function hasDirtySnippetDrafts(): boolean {
-	for (const d of _drafts.values()) if (d.dirty || d.artifactId === null) return true;
+	for (const d of _drafts.values()) if (d.dirty) return true;
 	return false;
 }
 
