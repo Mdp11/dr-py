@@ -87,7 +87,10 @@
 					setSnippetEntry(tabId, e.currentTarget.value as 'script' | 'value' | 'step')}
 			>
 				<option value="script" title="Run the whole file top-to-bottom">script</option>
-				<option value="value" title="Call a top-level value(elements) with one or more chosen elements (read-only)">
+				<option
+					value="value"
+					title="Call a top-level value(elements) with one or more chosen elements (read-only)"
+				>
 					value
 				</option>
 				<option value="step" title="Call a top-level step(el) with a chosen element (read-only)">
