@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import pytest
 
+from data_rover.core.script.bridge import BridgeDispatcher
+from data_rover.core.script.facade_src import FACADE_SOURCE
 from data_rover.core.script.runner import ScriptBudget, decode_call_payload
 
 
@@ -61,10 +63,6 @@ def test_decode_step_payloads() -> None:
 
 
 # --- Facade-side serialization (guest-side, M2/M3) -----
-
-
-from data_rover.core.script.bridge import BridgeDispatcher
-from data_rover.core.script.facade_src import FACADE_SOURCE
 
 
 def _facade_ns(model) -> dict:
