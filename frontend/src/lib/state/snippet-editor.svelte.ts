@@ -143,7 +143,7 @@ export async function runSnippetTab(tabId: string): Promise<void> {
 	// Availability gate lives HERE, not as a lint-time entry reset: the UI's
 	// Run button is disabled too, but Mod-Enter (CodeEditor keymap) calls this
 	// directly, so the store must refuse to send an entry lint hasn't unlocked.
-	if (!entryAvailable(rs.entry, _lint.get(tabId)?.entryPoints)) return;
+	if (!entryAvailable(rs.entry, getSnippetLint(tabId)?.entryPoints)) return;
 	const runId = crypto.randomUUID();
 	const gen = bump(_runGenerations, tabId);
 	setRun(tabId, { phase: 'running', runId, notice: null });

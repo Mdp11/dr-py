@@ -111,9 +111,17 @@ describe('filterTypeRows / filterRelRows', () => {
 		expect(filterTypeRows(types, '')).toEqual(types);
 	});
 
+	it('blank query returns input unchanged', () => {
+		expect(filterTypeRows(types, '   ')).toEqual(types);
+	});
+
 	it('matches relationship name or endpoints', () => {
 		expect(filterRelRows(rels, 'owns')).toEqual(rels);
 		expect(filterRelRows(rels, 'sensor')).toEqual(rels);
 		expect(filterRelRows(rels, 'zzz')).toEqual([]);
+	});
+
+	it('blank query returns input unchanged', () => {
+		expect(filterRelRows(rels, '   ')).toEqual(rels);
 	});
 });
