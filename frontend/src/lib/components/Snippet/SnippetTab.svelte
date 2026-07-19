@@ -147,7 +147,8 @@
 					type="button"
 					data-testid="snippet-insert-stub"
 					class="shrink-0 rounded border border-input px-2 py-0.5 text-foreground/80 transition-colors hover:bg-muted"
-					onclick={() => draft && updateSnippetCode(tabId, withStub(draft.code, run.entry as BoundEntry))}
+					onclick={() =>
+						draft && updateSnippetCode(tabId, withStub(draft.code, run.entry as BoundEntry))}
 				>
 					Insert stub
 				</button>
