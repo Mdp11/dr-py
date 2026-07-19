@@ -149,3 +149,15 @@ test('typing a plain identifier offers keyword/builtin completions', async ({ pa
 	await expect(tooltip).toBeVisible({ timeout: 5000 });
 	await expect(tooltip).toContainText('print');
 });
+
+test('selecting an undefined entry hints and inserts a stub', async ({ page }) => {
+	await openNewSnippet(page);
+	await page.getByTestId('snippet-entry').selectOption('value');
+	await expect(page.getByTestId('snippet-entry-hint')).toBeVisible({ timeout: 10_000 });
+	await page.getByTestId('snippet-insert-stub').click();
+	// The debounced lint picks up the stub and the hint clears.
+	await expect(page.getByTestId('snippet-entry-hint')).toBeHidden({ timeout: 10_000 });
+	await expect(page.locator('[data-testid="snippet-editor"] .cm-content')).toContainText(
+		'def value(el):'
+	);
+});
