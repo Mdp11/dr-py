@@ -129,8 +129,10 @@ from data_rover.core.script.runner import (
     RunLimits,
     RunRequest,
     RunResult,
+    ScriptBudget,
     ScriptError,
     ScriptRunner,
+    SnippetSession,
 )
 
 from .settings import Settings
@@ -974,6 +976,20 @@ class WasmScriptRunner:
             return ""
 
     # -- lifecycle --------------------------------------------------------
+
+    def open_session(
+        self,
+        model: Model,
+        code: str,
+        limits: RunLimits,
+        *,
+        budget: ScriptBudget,
+    ) -> SnippetSession:
+        """Open an embedded-evaluation session: exec the facade + module once,
+        then serve repeated entry-point calls.
+
+        Task 14: WASM embedded sessions (not yet implemented)."""
+        raise NotImplementedError("open_session: Task 14")
 
     def close(self) -> None:
         """Idempotent shutdown: stops the refill + epoch-ticker threads, drains

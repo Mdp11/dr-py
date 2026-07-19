@@ -26,7 +26,14 @@ import traceback
 from data_rover.core.model.model import Model
 from data_rover.core.script.bridge import BridgeDispatcher
 from data_rover.core.script.facade_src import FACADE_SOURCE
-from data_rover.core.script.runner import RunLimits, RunRequest, RunResult, ScriptError
+from data_rover.core.script.runner import (
+    RunLimits,
+    RunRequest,
+    RunResult,
+    ScriptBudget,
+    ScriptError,
+    SnippetSession,
+)
 
 #: The filename `compile()`/`exec()` see for the concatenated facade+snippet
 #: source. Used both as the `exec` "file" and as the marker that lets
@@ -160,3 +167,17 @@ class TrustedRunner:
             duration_ms=duration_ms,
             truncated=truncated,
         )
+
+    def open_session(
+        self,
+        model: Model,
+        code: str,
+        limits: RunLimits,
+        *,
+        budget: ScriptBudget,
+    ) -> SnippetSession:
+        """Open an embedded-evaluation session: exec the facade + module once,
+        then serve repeated entry-point calls.
+
+        Task 3: TrustedRunner.open_session (not yet implemented)."""
+        raise NotImplementedError("open_session: Task 3")
