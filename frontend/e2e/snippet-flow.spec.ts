@@ -140,3 +140,12 @@ test('typing dr. offers facade completions', async ({ page }) => {
 	await expect(tooltip).toBeVisible({ timeout: 5000 });
 	await expect(tooltip).toContainText('create');
 });
+
+test('typing a plain identifier offers keyword/builtin completions', async ({ page }) => {
+	await openNewSnippet(page);
+	await page.locator('[data-testid="snippet-editor"] .cm-content').click();
+	await page.keyboard.insertText('pri');
+	const tooltip = page.locator('.cm-tooltip-autocomplete');
+	await expect(tooltip).toBeVisible({ timeout: 5000 });
+	await expect(tooltip).toContainText('print');
+});

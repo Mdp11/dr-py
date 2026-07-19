@@ -2,13 +2,9 @@
 	import { untrack } from 'svelte';
 	import { basicSetup } from 'codemirror';
 	import { EditorView, keymap, hoverTooltip, placeholder } from '@codemirror/view';
-	import { python } from '@codemirror/lang-python';
+	import { python, pythonLanguage } from '@codemirror/lang-python';
 	import { lintGutter, setDiagnostics } from '@codemirror/lint';
-	import {
-		autocompletion,
-		type CompletionContext,
-		type CompletionResult
-	} from '@codemirror/autocomplete';
+	import type { CompletionContext, CompletionResult } from '@codemirror/autocomplete';
 	import { toCmDiagnostics } from '$lib/editor/lint-map';
 	import {
 		computeCompletions,
@@ -46,7 +42,9 @@
 
 	// Adapters close over the live `docs`/`vocab` props, same pattern as
 	// `onChange` — docs arriving after mount simply start returning results,
-	// no reconfigure needed.
+	// no reconfigure needed. Registered as a Python language-data source so it
+	// COEXISTS with lang-python's keyword/local-variable sources (an
+	// autocompletion({override}) would suppress them — that was the old bug).
 	function completionSource(ctx: CompletionContext): CompletionResult | null {
 		const line = ctx.state.doc.lineAt(ctx.pos);
 		const before = line.text.slice(0, ctx.pos - line.from);
@@ -106,7 +104,7 @@
 						EditorView.updateListener.of((u) => {
 							if (u.docChanged) onChange(u.state.doc.toString());
 						}),
-						autocompletion({ override: [completionSource] }),
+						pythonLanguage.data.of({ autocomplete: completionSource }),
 						docHover
 					]
 				})
