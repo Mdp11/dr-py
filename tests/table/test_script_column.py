@@ -1,16 +1,21 @@
 """ScriptColumn schema + evaluation tests. Model/metamodel fixtures follow
-tests/table/test_evaluate.py's construction pattern — reuse its helpers."""
+tests/table/test_build_rows.py's construction pattern — reuse its helpers."""
 
 from __future__ import annotations
 
 import pytest
 from pydantic import ValidationError
 
+from data_rover.core.metamodel.schema import ElementType, Metamodel, PropertyDef
+from data_rover.core.model.model import Model
 from data_rover.core.script.schema import SnippetDefinition, SnippetSource
-from data_rover.core.table.cells import ErrorCell
+from data_rover.core.table.cells import ErrorCell, ValueCell, evaluate_cells
+from data_rover.core.table.evaluate import build_rows_ex
 from data_rover.core.table.schema import (
     TABLE_ADAPTER,
     ColumnRef,
+    PropertyColumn,
+    RowSlot,
     ScopeRows,
     ScriptColumn,
     TableDefinition,
@@ -66,3 +71,41 @@ def test_script_column_is_chainable_but_not_step_indexable() -> None:
 def test_error_cell_shape() -> None:
     c = ErrorCell(message="boom")
     assert c.traceback is None
+
+
+def _mm() -> Metamodel:
+    return Metamodel(
+        elements=[
+            ElementType(
+                name="Block",
+                properties=[PropertyDef(name="name", datatype="string")],
+            ),
+        ],
+    )
+
+
+def _fixture() -> Model:
+    model = Model(_mm())
+    for name in ("Block A", "Block B"):
+        el = model.create_element("Block")
+        model.set_property(el, "name", name)
+    return model
+
+
+def test_expand_script_column_keeps_slot_arithmetic() -> None:
+    # ScriptColumn(mode="expand") followed by an expand property column:
+    # build_rows_ex + evaluate_cells must not IndexError; script cells render
+    # empty ValueCells (placeholder era: no script context is passed).
+    mm = _mm()
+    model = _fixture()
+    defn = TableDefinition(
+        row_source=ScopeRows(types=["Block"]),
+        columns=[
+            ScriptColumn(mode="expand", source=RowSlot(), snippet=SnippetSource()),
+            PropertyColumn(name="name", mode="expand"),
+        ],
+    )
+    build = build_rows_ex(mm, model, defn)
+    cells = evaluate_cells(mm, model, defn, build.keys)
+    assert all(isinstance(r[0], ValueCell) and not r[0].present for r in cells)
+    assert all(isinstance(r[1], ValueCell) for r in cells)

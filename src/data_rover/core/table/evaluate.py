@@ -342,7 +342,16 @@ def build_rows_ex(
         if isinstance(col, ElementColumn):
             continue
         if isinstance(col, ScriptColumn):
-            # ScriptColumn/ScriptStep evaluation lands in Task 7/9; inert until then.
+            # ScriptColumn evaluation lands in Task 7; inert until then — but an
+            # EXPAND script column must still consume its row-key slot, or
+            # _expand_slot_of's count desyncs from the built keys and every
+            # later expand column reads one slot past the tuple. Contribute an
+            # empty reach: keep_empty rows carry a None binding, otherwise the
+            # row drops (exactly what the real evaluation does for an empty
+            # result).
+            if col.mode != "expand":
+                continue
+            keys = [(*key, None) for key in keys] if col.keep_empty else []
             continue
         if col.mode != "expand":
             if col.keep_empty:

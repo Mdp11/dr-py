@@ -1,5 +1,4 @@
-"""ScriptStep schema + evaluation tests. Fixtures follow
-tests/navigation/test_evaluate.py's construction pattern."""
+"""ScriptStep schema tests (fixture-free; evaluation tests land with Task 9)."""
 
 from __future__ import annotations
 
