@@ -123,13 +123,14 @@ test('stage a snippet edit and commit it', async ({ page }) => {
 	});
 });
 
-test('docs panel lists the facade reference and limits', async ({ page }) => {
+test('docs modal lists the facade reference and limits', async ({ page }) => {
 	await openNewSnippet(page);
 	await page.getByTestId('snippet-docs-toggle').click();
-	const panel = page.getByTestId('snippet-docs');
-	await expect(panel).toBeVisible();
-	await expect(panel).toContainText('dr.create');
-	await expect(panel).toContainText('Wall timeout');
+	const modal = page.getByTestId('snippet-docs');
+	await expect(modal).toBeVisible();
+	await expect(modal).toContainText('dr.create');
+	await page.getByTestId('snippet-docs-tab-limits').click();
+	await expect(modal).toContainText('Wall timeout');
 });
 
 test('typing dr. offers facade completions', async ({ page }) => {

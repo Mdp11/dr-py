@@ -26,11 +26,11 @@
 	import CodeEditor from './CodeEditor.svelte';
 	import SnippetConsole from './SnippetConsole.svelte';
 	import ElementContextRow from './ElementContextRow.svelte';
-	import SnippetDocsPanel from './SnippetDocsPanel.svelte';
+	import SnippetDocsDialog from './SnippetDocsDialog.svelte';
 
 	let { tabId }: { tabId: string } = $props();
 
-	let showDocs = $state(false);
+	let docsOpen = $state(false);
 
 	$effect(() => {
 		void ensureSnippetDraft(tabId);
@@ -118,8 +118,7 @@
 				type="button"
 				data-testid="snippet-docs-toggle"
 				class="rounded border border-input px-2 py-1 text-xs text-foreground/80 transition-colors hover:bg-muted"
-				aria-pressed={showDocs}
-				onclick={() => (showDocs = !showDocs)}
+				onclick={() => (docsOpen = true)}
 			>
 				Docs
 			</button>
@@ -189,11 +188,8 @@
 					<SnippetConsole {tabId} onGoToLine={(l) => editor?.goToLine(l)} />
 				</div>
 			</div>
-			{#if showDocs}
-				<div class="w-80 shrink-0">
-					<SnippetDocsPanel />
-				</div>
-			{/if}
 		</div>
 	</div>
 {/if}
+
+<SnippetDocsDialog bind:open={docsOpen} />

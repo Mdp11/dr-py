@@ -1,5 +1,5 @@
-// Pure view-model helpers for SnippetDocsPanel — kept Svelte-free so the
-// panel component stays a thin template (mirrors console-view.ts).
+// Pure view-model helpers for SnippetDocsDialog — kept Svelte-free so the
+// dialog component stays a thin template (mirrors console-view.ts).
 
 import type { FacadeDocEntry, Metamodel } from '$lib/api/types';
 import { effectiveProperties } from '$lib/metamodel/helpers';
@@ -79,9 +79,7 @@ function norm(q: string): string {
 export function filterFacade(entries: FacadeDocEntry[], q: string): FacadeDocEntry[] {
 	const n = norm(q);
 	if (!n) return entries;
-	return entries.filter((e) =>
-		`${e.name}\n${e.signature}\n${e.doc}`.toLowerCase().includes(n)
-	);
+	return entries.filter((e) => `${e.name}\n${e.signature}\n${e.doc}`.toLowerCase().includes(n));
 }
 
 export function filterTypeRows(rows: TypeRow[], q: string): TypeRow[] {
@@ -89,15 +87,12 @@ export function filterTypeRows(rows: TypeRow[], q: string): TypeRow[] {
 	if (!n) return rows;
 	return rows.filter(
 		(r) =>
-			r.name.toLowerCase().includes(n) ||
-			r.properties.some((p) => p.name.toLowerCase().includes(n))
+			r.name.toLowerCase().includes(n) || r.properties.some((p) => p.name.toLowerCase().includes(n))
 	);
 }
 
 export function filterRelRows(rows: RelRow[], q: string): RelRow[] {
 	const n = norm(q);
 	if (!n) return rows;
-	return rows.filter((r) =>
-		`${r.name}\n${r.source}\n${r.target}`.toLowerCase().includes(n)
-	);
+	return rows.filter((r) => `${r.name}\n${r.source}\n${r.target}`.toLowerCase().includes(n));
 }
