@@ -6,6 +6,7 @@ from __future__ import annotations
 import pytest
 
 from data_rover.core.script.bridge import BridgeDispatcher
+from data_rover.core.script.embed import ScriptEvalContext
 from data_rover.core.script.facade_src import FACADE_SOURCE
 from data_rover.core.script.runner import (
     RunLimits,
@@ -158,3 +159,57 @@ def test_session_step_entry(small_model) -> None:
     res = sess.call("step", [ids[0]])
     assert res.value == {"ids": [ids[0]]}
     sess.close()
+
+
+# --- ScriptEvalContext tests (M2+M3) -----
+
+
+def _ctx(model, **kw) -> ScriptEvalContext:
+    return ScriptEvalContext(
+        TrustedRunner(), model, RunLimits(), ScriptBudget.start(30), **kw
+    )
+
+
+def test_ctx_memoizes_by_code_entry_ids(small_model) -> None:
+    ids = sorted(small_model.elements)
+    ctx = _ctx(small_model)
+    code = "calls = []\ndef value(els):\n    calls.append(1)\n    return len(calls)"
+    r1 = ctx.call(code, "value", [ids[0]])
+    r2 = ctx.call(code, "value", [ids[0]])       # memo hit — NOT a second call
+    r3 = ctx.call(code, "value", [ids[1]])       # different ids — a real call
+    assert r1.value == {"kind": "scalar", "value": 1}
+    assert r2.value == {"kind": "scalar", "value": 1}
+    assert r3.value == {"kind": "scalar", "value": 2}
+    ctx.close()
+
+
+def test_ctx_unavailable_and_budget(small_model) -> None:
+    ids = sorted(small_model.elements)
+    ctx = ScriptEvalContext(
+        None, None, RunLimits(), ScriptBudget.start(30),
+        unavailable_reason="script runner unavailable",
+    )
+    res = ctx.call("def value(els): return 1", "value", [ids[0]])
+    assert res.error is not None and res.error.kind == "unavailable"
+    assert ctx.errored
+
+    spent = ScriptEvalContext(
+        TrustedRunner(), small_model, RunLimits(), ScriptBudget(deadline=0.0)
+    )
+    res = spent.call("def value(els): return 1", "value", [ids[0]])
+    assert res.error is not None and res.error.kind == "timeout"
+    assert "budget" in res.error.message
+
+
+def test_ctx_boot_error_and_warnings(small_model) -> None:
+    ids = sorted(small_model.elements)
+    ctx = _ctx(small_model)
+    res = ctx.call("raise RuntimeError('boom')", "value", [ids[0]])
+    assert res.error is not None and ctx.errored
+    ctx.add_warning("w")
+    ctx.add_warning("w")  # deduped
+    for i in range(30):
+        ctx.add_warning(f"w{i}")
+    assert ctx.warnings[0] == "w"
+    assert len(ctx.warnings) == 20  # capped
+    ctx.close()
