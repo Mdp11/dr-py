@@ -695,12 +695,23 @@ class SnippetRunIn(BaseModel):
     code: str | None = None
     artifact_id: str | None = None
     entry: Literal["script", "value", "step"] = "script"
-    element_id: str | None = None
+    element_ids: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _exactly_one(self) -> SnippetRunIn:
         if (self.code is None) == (self.artifact_id is None):
             raise ValueError("provide exactly one of `code` / `artifact_id`")
+        return self
+
+    @model_validator(mode="after")
+    def _entry_context(self) -> SnippetRunIn:
+        """`value` runs against 1+ bound elements, `step` against exactly one;
+        `script` ignores the field. Enforced here (not in the runner) so a bad
+        request 422s before a sandbox instance is consumed."""
+        if self.entry == "value" and len(self.element_ids) < 1:
+            raise ValueError("entry 'value' requires at least one element id")
+        if self.entry == "step" and len(self.element_ids) != 1:
+            raise ValueError("entry 'step' requires exactly one element id")
         return self
 
 

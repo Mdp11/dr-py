@@ -15,13 +15,14 @@ error details (if one occurred).
 
 The three :attr:`RunRequest.entry` modes are:
 - ``"script"`` — run the code as a module (returns ``None`` unless explicit)
-- ``"value"`` — evaluate a single expression and return its value
-- ``"step"`` — step-wise simulation; entry point determined by snippet config
+- ``"value"`` — call the snippet's top-level ``value(elements)`` with the
+  bound elements (a list, bound order preserved) and return its result
+- ``"step"`` — step-wise simulation; ``step(el)`` receives its single element
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, Protocol
 
 from ..model.model import Model
@@ -65,15 +66,19 @@ class RunRequest:
 
     Attributes:
         code: Python source code as a string (literal or template-expanded).
-        entry: Execution mode: ``"script"`` (module), ``"value"`` (expression),
-            or ``"step"`` (snippet-defined entry point).
-        element_id: If not None, the element id to pass as context for the run
-            (e.g., the node being evaluated in a step-wise simulation).
+        entry: Execution mode: ``"script"`` (module), ``"value"`` (function of
+            the bound elements), or ``"step"`` (snippet-defined entry point).
+        element_ids: Context element ids for the run, in bound order.
+            ``"value"`` receives ALL of them as a list of Element handles;
+            ``"step"`` receives the first (its single simulated node);
+            ``"script"`` ignores them. Count constraints (``value`` >= 1,
+            ``step`` == 1) are enforced at the API route, not here — the
+            runner layer stays lenient so tests can exercise edge shapes.
     """
 
     code: str
     entry: Literal["script", "value", "step"] = "script"
-    element_id: str | None = None
+    element_ids: list[str] = field(default_factory=list)
 
 
 @dataclass

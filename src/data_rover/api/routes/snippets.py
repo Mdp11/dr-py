@@ -323,7 +323,7 @@ def run_snippet(
         token = _register_run(project_id, payload.run_id, user.id, _noop_cancel)
         res = runner.run(
             model,
-            RunRequest(code=code, entry=payload.entry, element_id=payload.element_id),
+            RunRequest(code=code, entry=payload.entry, element_ids=payload.element_ids),
             run_limits_from_settings(settings),
             record_ops=(payload.entry == "script"),
             rev=start_rev,

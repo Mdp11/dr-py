@@ -91,6 +91,13 @@ snippet: `routes/snippets.py`'s `run_snippet` constructs the runner call with
 record ops; `"value"`/`"step"` runs get a `record_ops=False` dispatcher, so
 any `dr` write call in that mode raises `dr.ReadOnlyError` in the snippet.
 
+Entry-point calling convention: a `"value"` run calls the snippet's
+top-level `value(elements)` with a **list of `Element` handles** — one per
+id in the request's `element_ids`, in that order (validated non-empty at the
+route); a `"step"` run calls `step(el)` with its single bound element. The
+arity rule for both is unchanged — exactly one argument; for `value` that
+one argument is the list.
+
 ## Limits (`RunLimits`)
 
 `core/script/runner.py`'s `RunLimits` dataclass; `api/script_runner.py`'s

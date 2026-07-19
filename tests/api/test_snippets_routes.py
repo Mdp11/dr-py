@@ -485,3 +485,63 @@ def test_docs_need_membership(client: TestClient) -> None:
         headers={"x-user-id": "stranger", "x-user-email": "s@x.io"},
     )
     assert resp.status_code == 403, resp.text
+
+
+# ---------------------------------------------------------------------------
+# element_ids (Task 2 of the multi-element-value spec)
+# ---------------------------------------------------------------------------
+
+
+def test_run_value_multi_element(client: TestClient) -> None:
+    """`value` receives ALL bound elements as a list, in request order."""
+    _seed_model(client)
+    r = client.post(
+        papi("/snippets/run"),
+        json={
+            "run_id": "rv1",
+            "code": "def value(elements):\n    return [e.id for e in elements]\n",
+            "entry": "value",
+            "element_ids": ["b2", "b1"],
+        },
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["error"] is None
+    assert body["result_repr"] == "['b2', 'b1']"
+
+
+def test_run_value_requires_element_ids_422(client: TestClient) -> None:
+    r = client.post(
+        papi("/snippets/run"),
+        json={"run_id": "rv2", "code": "def value(elements):\n    return 1\n", "entry": "value"},
+    )
+    assert r.status_code == 422, r.text
+
+
+def test_run_step_requires_exactly_one_element_id_422(client: TestClient) -> None:
+    for ids in ([], ["b1", "b2"]):
+        r = client.post(
+            papi("/snippets/run"),
+            json={
+                "run_id": "rs1",
+                "code": "def step(el):\n    return el.id\n",
+                "entry": "step",
+                "element_ids": ids,
+            },
+        )
+        assert r.status_code == 422, r.text
+
+
+def test_run_step_single_element(client: TestClient) -> None:
+    _seed_model(client)
+    r = client.post(
+        papi("/snippets/run"),
+        json={
+            "run_id": "rs2",
+            "code": "def step(el):\n    return el.id\n",
+            "entry": "step",
+            "element_ids": ["b1"],
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["result_repr"] == "'b1'"
