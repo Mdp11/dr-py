@@ -1,11 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { MetamodelSchema } from '$lib/api/types';
+import { MetamodelSchema, type FacadeDocEntry } from '$lib/api/types';
 import {
 	elementTypeRows,
+	filterFacade,
+	filterRelRows,
+	filterTypeRows,
 	formatBytes,
 	formatSeconds,
 	groupFacade,
-	relationshipRows
+	relationshipRows,
+	type RelRow,
+	type TypeRow
 } from '../docs-view';
 
 const MM = MetamodelSchema.parse({
@@ -53,5 +58,70 @@ describe('docs-view', () => {
 			{ name: 'Owns', abstract: false, source: 'Asset', target: 'Asset', containment: true }
 		]);
 		expect(relationshipRows(null)).toEqual([]);
+	});
+});
+
+describe('filterFacade', () => {
+	const entries: FacadeDocEntry[] = [
+		{
+			name: 'dr.create',
+			kind: 'function',
+			signature: 'dr.create(type_name)',
+			doc: 'Record a create.',
+			example: null
+		},
+		{
+			name: 'Element.set',
+			kind: 'method',
+			signature: 'Element.set(key, value)',
+			doc: 'Update a property.',
+			example: null
+		}
+	];
+
+	it('blank query returns input unchanged', () => {
+		expect(filterFacade(entries, '')).toEqual(entries);
+		expect(filterFacade(entries, '   ')).toEqual(entries);
+	});
+
+	it('matches name, signature, and doc, case-insensitively', () => {
+		expect(filterFacade(entries, 'CREATE').map((e) => e.name)).toEqual(['dr.create']);
+		expect(filterFacade(entries, 'key, value').map((e) => e.name)).toEqual(['Element.set']);
+		expect(filterFacade(entries, 'property').map((e) => e.name)).toEqual(['Element.set']);
+		expect(filterFacade(entries, 'zzz')).toEqual([]);
+	});
+});
+
+describe('filterTypeRows / filterRelRows', () => {
+	const types: TypeRow[] = [
+		{
+			name: 'Building',
+			abstract: false,
+			properties: [{ name: 'height', datatype: 'integer', multiplicity: '0..1' }]
+		},
+		{ name: 'Sensor', abstract: false, properties: [] }
+	];
+	const rels: RelRow[] = [
+		{ name: 'Owns', abstract: false, source: 'Building', target: 'Sensor', containment: true }
+	];
+
+	it('matches type name or property name', () => {
+		expect(filterTypeRows(types, 'sens').map((t) => t.name)).toEqual(['Sensor']);
+		expect(filterTypeRows(types, 'height').map((t) => t.name)).toEqual(['Building']);
+		expect(filterTypeRows(types, '')).toEqual(types);
+	});
+
+	it('blank query returns input unchanged', () => {
+		expect(filterTypeRows(types, '   ')).toEqual(types);
+	});
+
+	it('matches relationship name or endpoints', () => {
+		expect(filterRelRows(rels, 'owns')).toEqual(rels);
+		expect(filterRelRows(rels, 'sensor')).toEqual(rels);
+		expect(filterRelRows(rels, 'zzz')).toEqual([]);
+	});
+
+	it('blank query returns input unchanged', () => {
+		expect(filterRelRows(rels, '   ')).toEqual(rels);
 	});
 });

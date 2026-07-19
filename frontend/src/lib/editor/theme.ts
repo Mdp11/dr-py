@@ -35,6 +35,11 @@ const editorTheme = EditorView.theme(
 			fontFamily: MONO,
 			lineHeight: '1.6'
 		},
+		// Placeholder ghost text — muted so it reads as a hint, not content.
+		'.cm-placeholder': {
+			color: 'var(--muted-foreground)',
+			opacity: '0.7'
+		},
 		'&.cm-focused': { outline: 'none' },
 
 		// Cursor.

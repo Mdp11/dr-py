@@ -42,6 +42,11 @@ const CM_TYPE: Record<string, string> = {
 	exception: 'class'
 };
 
+// `boost` is only ever passed as -1 (the Element.* heuristic, deprioritized
+// below the typed-partial gate above). dr.*/type-string contexts don't need a
+// positive counterpart: lang-python's keyword/local sources never fire in
+// member-access or string-literal contexts, so this facade source is already
+// the sole provider there with no competing options to outrank.
 function facadeOptions(
 	docs: SnippetDocsOut,
 	prefix: 'dr.' | 'Element.',

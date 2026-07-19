@@ -1,5 +1,5 @@
-// Pure view-model helpers for SnippetDocsPanel — kept Svelte-free so the
-// panel component stays a thin template (mirrors console-view.ts).
+// Pure view-model helpers for SnippetDocsDialog — kept Svelte-free so the
+// dialog component stays a thin template (mirrors console-view.ts).
 
 import type { FacadeDocEntry, Metamodel } from '$lib/api/types';
 import { effectiveProperties } from '$lib/metamodel/helpers';
@@ -66,4 +66,33 @@ export function relationshipRows(mm: Metamodel | null): RelRow[] {
 			containment: r.containment
 		}))
 		.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// Docs-modal filters — case-insensitive substring over the human-searchable
+// fields; a blank query is the identity so the modal renders the full
+// reference without special-casing.
+
+function norm(q: string): string {
+	return q.trim().toLowerCase();
+}
+
+export function filterFacade(entries: FacadeDocEntry[], q: string): FacadeDocEntry[] {
+	const n = norm(q);
+	if (!n) return entries;
+	return entries.filter((e) => `${e.name}\n${e.signature}\n${e.doc}`.toLowerCase().includes(n));
+}
+
+export function filterTypeRows(rows: TypeRow[], q: string): TypeRow[] {
+	const n = norm(q);
+	if (!n) return rows;
+	return rows.filter(
+		(r) =>
+			r.name.toLowerCase().includes(n) || r.properties.some((p) => p.name.toLowerCase().includes(n))
+	);
+}
+
+export function filterRelRows(rows: RelRow[], q: string): RelRow[] {
+	const n = norm(q);
+	if (!n) return rows;
+	return rows.filter((r) => `${r.name}\n${r.source}\n${r.target}`.toLowerCase().includes(n));
 }

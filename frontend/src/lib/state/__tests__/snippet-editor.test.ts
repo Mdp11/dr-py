@@ -9,6 +9,7 @@ import {
 	getSnippetLint,
 	getSnippetRun,
 	getSnippetSaveConflict,
+	hasDirtySnippetDrafts,
 	LINT_DEBOUNCE_MS,
 	markRunStaged,
 	resetSnippetEditors,
@@ -56,7 +57,15 @@ describe('snippet drafts', () => {
 		const draft = await ensureSnippetDraft(tabId);
 		expect(draft.artifactId).toBeNull();
 		expect(draft.dirty).toBe(false);
-		expect(draft.code).toContain('dr');
+		expect(draft.code).toBe('');
+	});
+
+	it('a fresh never-saved draft does not count as dirty until edited', async () => {
+		const tabId = 'snip:draft:9';
+		await ensureSnippetDraft(tabId);
+		expect(hasDirtySnippetDrafts()).toBe(false);
+		updateSnippetCode(tabId, 'print(1)\n');
+		expect(hasDirtySnippetDrafts()).toBe(true);
 	});
 
 	it('loads a saved artifact draft and adopts server entry points', async () => {
@@ -151,13 +160,26 @@ describe('snippet lint + run', () => {
 	});
 
 	it('sends entry + element_id for a value run', async () => {
+		// runSnippetTab now refuses to send an entry lint hasn't unlocked (see
+		// the entryAvailable guard), so 'value' must be in the lint response —
+		// drive that via the debounced lint (fake timers), not the fire-and-
+		// forget immediate lint ensureSnippetDraft kicks off (unawaited, so its
+		// landing isn't ordered against the rest of this test otherwise).
+		vi.useFakeTimers();
+		vi.spyOn(snippetsApi, 'lintSnippet').mockResolvedValue({
+			diagnostics: [],
+			entry_points: ['script', 'value']
+		});
 		const run = vi.spyOn(snippetsApi, 'runSnippet').mockResolvedValue(RUN_OUT);
 		const tabId = openArtifactTab('snippet', { artifactId: null, title: 'New snippet' });
 		await ensureSnippetDraft(tabId);
+		updateSnippetCode(tabId, 'def value(el):\n    return el.name\n');
+		await vi.advanceTimersByTimeAsync(LINT_DEBOUNCE_MS + 10);
 		setSnippetEntry(tabId, 'value');
 		setSnippetElementContext(tabId, 'e1', 'Building e1');
 		await runSnippetTab(tabId);
 		expect(run.mock.calls[0][0]).toMatchObject({ entry: 'value', element_id: 'e1' });
+		vi.useRealTimers();
 	});
 
 	it('stop discards the eventual response', async () => {
@@ -187,7 +209,13 @@ describe('snippet lint + run', () => {
 		expect(getSnippetRun(tabId).notice).toContain('unavailable');
 	});
 
-	it('resets a stale entry to script when a new lint drops it', async () => {
+	it('leaves the entry selected even when a new lint drops it — the hint bar needs it', async () => {
+		// Superseded contract (was "resets a stale entry to script..."): the
+		// select is always selectable now (SnippetTab hint bar + insert-stub),
+		// so a lint response that doesn't (yet) include the chosen entry must
+		// NOT yank the selection back to 'script' out from under the user
+		// while they're still writing def value(el)/step(el). The stale-send
+		// guarantee this reset used to provide now lives in runSnippetTab.
 		vi.useFakeTimers();
 		const lint = vi.spyOn(snippetsApi, 'lintSnippet').mockResolvedValue({
 			diagnostics: [],
@@ -201,7 +229,7 @@ describe('snippet lint + run', () => {
 		lint.mockResolvedValue({ diagnostics: [], entry_points: ['script'] }); // 'value' dropped
 		updateSnippetCode(tabId, 'print(1)\n');
 		await vi.advanceTimersByTimeAsync(LINT_DEBOUNCE_MS + 10);
-		expect(getSnippetRun(tabId).entry).toBe('script');
+		expect(getSnippetRun(tabId).entry).toBe('value'); // NOT reset to 'script'
 		vi.useRealTimers();
 	});
 
@@ -219,6 +247,45 @@ describe('snippet lint + run', () => {
 		updateSnippetCode(tabId, 'print(1)\n');
 		await vi.advanceTimersByTimeAsync(LINT_DEBOUNCE_MS + 10);
 		expect(getSnippetRun(tabId).entry).toBe('value');
+		vi.useRealTimers();
+	});
+
+	it('runSnippetTab is a no-op when the selected entry is not (yet) lint-available', async () => {
+		// The stale-send guarantee moved here from lintNow's old auto-reset:
+		// Mod-Enter (CodeEditor keymap) calls runSnippetTab directly, bypassing
+		// the disabled Run button, so the store itself must refuse to send.
+		const run = vi.spyOn(snippetsApi, 'runSnippet').mockResolvedValue(RUN_OUT);
+		const tabId = openArtifactTab('snippet', { artifactId: null, title: 'New snippet' });
+		await ensureSnippetDraft(tabId); // immediate lint -> entry_points: [] (empty draft)
+		setSnippetEntry(tabId, 'value');
+		setSnippetElementContext(tabId, 'e1', 'Building e1');
+
+		await runSnippetTab(tabId);
+
+		expect(run).not.toHaveBeenCalled();
+		expect(getSnippetRun(tabId).phase).toBe('idle');
+	});
+
+	it('runSnippetTab sends once the lint response includes the selected entry', async () => {
+		vi.useFakeTimers();
+		const lint = vi.spyOn(snippetsApi, 'lintSnippet').mockResolvedValue({
+			diagnostics: [],
+			entry_points: ['script']
+		});
+		const run = vi.spyOn(snippetsApi, 'runSnippet').mockResolvedValue(RUN_OUT);
+		const tabId = openArtifactTab('snippet', { artifactId: null, title: 'New snippet' });
+		await ensureSnippetDraft(tabId);
+		setSnippetEntry(tabId, 'value');
+		setSnippetElementContext(tabId, 'e1', 'Building e1');
+
+		lint.mockResolvedValue({ diagnostics: [], entry_points: ['script', 'value'] });
+		updateSnippetCode(tabId, 'def value(el):\n    return el.name\n');
+		await vi.advanceTimersByTimeAsync(LINT_DEBOUNCE_MS + 10);
+
+		await runSnippetTab(tabId);
+
+		expect(run).toHaveBeenCalledTimes(1);
+		expect(getSnippetRun(tabId).phase).toBe('idle');
 		vi.useRealTimers();
 	});
 

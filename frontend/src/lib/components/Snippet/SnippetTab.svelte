@@ -22,14 +22,15 @@
 		updateSnippetCode
 	} from '$lib/state';
 	import { vocabFromMetamodel } from '$lib/editor/completion-source';
+	import { ENTRY_HINTS, entryAvailable, withStub, type BoundEntry } from '$lib/snippet/entry-stubs';
 	import CodeEditor from './CodeEditor.svelte';
 	import SnippetConsole from './SnippetConsole.svelte';
 	import ElementContextRow from './ElementContextRow.svelte';
-	import SnippetDocsPanel from './SnippetDocsPanel.svelte';
+	import SnippetDocsDialog from './SnippetDocsDialog.svelte';
 
 	let { tabId }: { tabId: string } = $props();
 
-	let showDocs = $state(false);
+	let docsOpen = $state(false);
 
 	$effect(() => {
 		void ensureSnippetDraft(tabId);
@@ -43,8 +44,9 @@
 	const conflictRev = $derived(getSnippetSaveConflict(tabId));
 	const vocab = $derived(vocabFromMetamodel(getMetamodel()));
 
+	const entryOk = $derived(entryAvailable(run.entry, lint?.entryPoints));
 	const runDisabled = $derived(
-		run.phase !== 'idle' || (run.entry !== 'script' && run.elementId === null)
+		run.phase !== 'idle' || !entryOk || (run.entry !== 'script' && run.elementId === null)
 	);
 
 	let editor: CodeEditor | undefined = $state();
@@ -84,11 +86,11 @@
 				onchange={(e) =>
 					setSnippetEntry(tabId, e.currentTarget.value as 'script' | 'value' | 'step')}
 			>
-				<option value="script">script</option>
-				<option value="value" disabled={!(lint?.entryPoints.includes('value') ?? false)}>
+				<option value="script" title="Run the whole file top-to-bottom">script</option>
+				<option value="value" title="Call a top-level value(el) with a chosen element (read-only)">
 					value
 				</option>
-				<option value="step" disabled={!(lint?.entryPoints.includes('step') ?? false)}>
+				<option value="step" title="Call a top-level step(el) with a chosen element (read-only)">
 					step
 				</option>
 			</select>
@@ -116,8 +118,7 @@
 				type="button"
 				data-testid="snippet-docs-toggle"
 				class="rounded border border-input px-2 py-1 text-xs text-foreground/80 transition-colors hover:bg-muted"
-				aria-pressed={showDocs}
-				onclick={() => (showDocs = !showDocs)}
+				onclick={() => (docsOpen = true)}
 			>
 				Docs
 			</button>
@@ -134,6 +135,23 @@
 		</div>
 		{#if saveError}
 			<p class="px-3 py-1 text-xs text-destructive">{saveError}</p>
+		{/if}
+		{#if lint && run.entry !== 'script' && !entryOk}
+			<div
+				data-testid="snippet-entry-hint"
+				class="flex items-center gap-2 bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground"
+			>
+				<span>{ENTRY_HINTS[run.entry as BoundEntry]}</span>
+				<button
+					type="button"
+					data-testid="snippet-insert-stub"
+					class="shrink-0 rounded border border-input px-2 py-0.5 text-foreground/80 transition-colors hover:bg-muted"
+					onclick={() =>
+						draft && updateSnippetCode(tabId, withStub(draft.code, run.entry as BoundEntry))}
+				>
+					Insert stub
+				</button>
+			</div>
 		{/if}
 		{#if showConflict && conflictRev !== undefined}
 			<div class="flex items-center gap-2 bg-warning/15 px-3 py-1.5 text-xs text-warning">
@@ -170,11 +188,8 @@
 					<SnippetConsole {tabId} onGoToLine={(l) => editor?.goToLine(l)} />
 				</div>
 			</div>
-			{#if showDocs}
-				<div class="w-80 shrink-0">
-					<SnippetDocsPanel />
-				</div>
-			{/if}
 		</div>
 	</div>
 {/if}
+
+<SnippetDocsDialog bind:open={docsOpen} />
