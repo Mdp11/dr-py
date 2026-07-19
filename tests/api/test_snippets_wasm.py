@@ -107,6 +107,25 @@ def test_wasm_value_entry(wasm_runner: WasmScriptRunner) -> None:
     assert res.result_repr == "['Building Two', 'Building One']"
 
 
+def test_wasm_step_entry(wasm_runner: WasmScriptRunner) -> None:
+    """`entry="step"` calls `step(el)` with the single element for the one id
+    in `element_ids` — the guest bootstrap's non-list branch (parity with
+    TrustedRunner's step semantics)."""
+    from data_rover.core.script.runner import RunLimits, RunRequest
+
+    from tests.script.conftest import tiny_model
+
+    res = wasm_runner.run(
+        tiny_model(),
+        RunRequest(code="def step(el):\n    return el['name']", entry="step", element_ids=["b1"]),
+        RunLimits(),
+        record_ops=False,
+        rev=0,
+    )
+    assert res.error is None, res.error
+    assert res.result_repr == "'Building One'"
+
+
 def test_wasm_records_op(wasm_runner: WasmScriptRunner) -> None:
     """A write op flows through the facade -> bridge -> per-run dispatcher and
     is RECORDED (never applied): the op appears in `RunResult.ops` and the

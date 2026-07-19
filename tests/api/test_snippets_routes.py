@@ -545,3 +545,19 @@ def test_run_step_single_element(client: TestClient) -> None:
     )
     assert r.status_code == 200, r.text
     assert r.json()["result_repr"] == "'b1'"
+
+
+def test_run_script_ignores_element_ids(client: TestClient) -> None:
+    """`script` runs ignore `element_ids` entirely — no count validation."""
+    _seed_model(client)
+    r = client.post(
+        papi("/snippets/run"),
+        json={
+            "run_id": "rsc1",
+            "code": "result = len(list(dr.elements()))",
+            "entry": "script",
+            "element_ids": ["b1", "b2"],
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["result_repr"] == "3"

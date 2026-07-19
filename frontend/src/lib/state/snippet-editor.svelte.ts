@@ -133,7 +133,7 @@ async function lintNow(tabId: string): Promise<void> {
 		_lint.set(tabId, { diagnostics: out.diagnostics, entryPoints: out.entry_points });
 		// Deliberately KEEP the user's entry selection even when entry_points
 		// doesn't (yet) include it: the SnippetTab hint bar uses that state to
-		// explain the def value(el)/step(el) contract while the user types it.
+		// explain the def value(elements):/step(el) contract while the user types it.
 		// Sending a stale entry is prevented at the send site (runSnippetTab's
 		// entryAvailable guard), not by yanking the selection out from under them.
 	} catch {

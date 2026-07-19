@@ -244,7 +244,7 @@ describe('snippet lint + run', () => {
 		// select is always selectable now (SnippetTab hint bar + insert-stub),
 		// so a lint response that doesn't (yet) include the chosen entry must
 		// NOT yank the selection back to 'script' out from under the user
-		// while they're still writing def value(el)/step(el). The stale-send
+		// while they're still writing def value(elements):/step(el). The stale-send
 		// guarantee this reset used to provide now lives in runSnippetTab.
 		vi.useFakeTimers();
 		const lint = vi.spyOn(snippetsApi, 'lintSnippet').mockResolvedValue({
