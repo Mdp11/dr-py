@@ -63,8 +63,20 @@ describe('docs-view', () => {
 
 describe('filterFacade', () => {
 	const entries: FacadeDocEntry[] = [
-		{ name: 'dr.create', kind: 'function', signature: 'dr.create(type_name)', doc: 'Record a create.', example: null },
-		{ name: 'Element.set', kind: 'method', signature: 'Element.set(key, value)', doc: 'Update a property.', example: null }
+		{
+			name: 'dr.create',
+			kind: 'function',
+			signature: 'dr.create(type_name)',
+			doc: 'Record a create.',
+			example: null
+		},
+		{
+			name: 'Element.set',
+			kind: 'method',
+			signature: 'Element.set(key, value)',
+			doc: 'Update a property.',
+			example: null
+		}
 	];
 
 	it('blank query returns input unchanged', () => {
@@ -82,7 +94,11 @@ describe('filterFacade', () => {
 
 describe('filterTypeRows / filterRelRows', () => {
 	const types: TypeRow[] = [
-		{ name: 'Building', abstract: false, properties: [{ name: 'height', datatype: 'integer', multiplicity: '0..1' }] },
+		{
+			name: 'Building',
+			abstract: false,
+			properties: [{ name: 'height', datatype: 'integer', multiplicity: '0..1' }]
+		},
 		{ name: 'Sensor', abstract: false, properties: [] }
 	];
 	const rels: RelRow[] = [
