@@ -26,7 +26,7 @@ pixi run db-upgrade                      # alembic upgrade head (Postgres tenanc
 # API tests need NO database service: tests/api/conftest.py runs in-memory SQLite.
 
 # Lint / format / typecheck (ruff --fix, mypy, AND pyright — all three must pass)
-pixi run all-tidy                            # format + lint across frontend, core, backend
+pixi run dr-tidy                            # format + lint across frontend, core, backend
 pixi run core-lint                       # core only; backend-lint for the API package
 pixi run -e core-dev pytest .            # run pytest directly when you need flags
 

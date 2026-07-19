@@ -161,7 +161,7 @@ depends-on = [
     { task = "backend-lint", args = [{ check_only = "{{ check_only }}" }]},
 ]
 
-[feature.core-dev.tasks.all-tidy]
+[feature.core-dev.tasks.dr-tidy]
 description = "Format + lint the whole repo (frontend, core, backend)"
 args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
 cmd = "true"
