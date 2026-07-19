@@ -249,6 +249,8 @@ export {
 	type NavPreview
 } from './navigation-editor.svelte';
 export {
+	addSnippetElement,
+	clearSnippetElements,
 	closeSnippetDraft,
 	ensureSnippetDraft,
 	getSnippetDraft,
@@ -259,14 +261,15 @@ export {
 	LINT_DEBOUNCE_MS,
 	markRunStaged,
 	reloadSnippetDraft,
+	removeSnippetElement,
 	resetSnippetEditors,
 	runSnippetTab,
 	saveSnippetDraft,
-	setSnippetElementContext,
 	setSnippetEntry,
 	setSnippetName,
 	stopSnippetTab,
 	updateSnippetCode,
+	type SnippetBoundElement,
 	type SnippetDraft,
 	type SnippetLintState,
 	type SnippetRunPhase,

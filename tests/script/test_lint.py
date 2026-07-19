@@ -42,7 +42,15 @@ def test_entry_points_derived():
 
 def test_bad_entry_signature_is_warning():
     diags = lint_code("def value(a, b):\n    return 1\n")
-    assert any(d.severity == "warning" and "value" in d.message for d in diags)
+    assert any(
+        d.severity == "warning" and "value" in d.message and "the list of elements" in d.message
+        for d in diags
+    )
+    diags = lint_code("def step(a, b):\n    return 1\n")
+    assert any(
+        d.severity == "warning" and "step" in d.message and "the element" in d.message
+        for d in diags
+    )
 
 
 def test_except_binding_is_known():

@@ -13,12 +13,43 @@ def test_standalone_prints_and_reads():
     assert res.result_repr == "3"
 
 
-def test_value_entry_against_element():
+def test_value_entry_receives_single_element_as_list():
     r = TrustedRunner()
     res = r.run(tiny_model(),
-                RunRequest(code="def value(el):\n    return len(el.name)", entry="value", element_id="b1"),
+                RunRequest(code="def value(elements):\n    return [e.id for e in elements]",
+                           entry="value", element_ids=["b1"]),
                 RunLimits(), record_ops=False, rev=0)
-    assert res.error is None and res.result_repr is not None
+    assert res.error is None, res.error
+    assert res.result_repr == "['b1']"
+
+
+def test_value_entry_receives_elements_in_bound_order():
+    r = TrustedRunner()
+    res = r.run(tiny_model(),
+                RunRequest(code="def value(elements):\n    return [e.name for e in elements]",
+                           entry="value", element_ids=["b2", "b1"]),
+                RunLimits(), record_ops=False, rev=0)
+    assert res.error is None, res.error
+    assert res.result_repr == "['Building Two', 'Building One']"
+
+
+def test_value_entry_unknown_id_is_runtime_error():
+    r = TrustedRunner()
+    res = r.run(tiny_model(),
+                RunRequest(code="def value(elements):\n    return 1",
+                           entry="value", element_ids=["nope"]),
+                RunLimits(), record_ops=False, rev=0)
+    assert res.error is not None and res.error.kind == "runtime"  # dr.NotFoundError surfaced
+
+
+def test_step_entry_receives_single_element():
+    r = TrustedRunner()
+    res = r.run(tiny_model(),
+                RunRequest(code="def step(el):\n    return el.id",
+                           entry="step", element_ids=["b1"]),
+                RunLimits(), record_ops=False, rev=0)
+    assert res.error is None, res.error
+    assert res.result_repr == "'b1'"
 
 
 def test_write_recorded_as_op_not_applied():

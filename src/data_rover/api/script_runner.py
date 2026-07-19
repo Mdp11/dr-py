@@ -39,7 +39,7 @@ protocol, replacing Task 8's provisional `exec`/`quit` loop:
    (`set_epoch_deadline`) and the per-run memory cap (`set_limits`) -- both
    safe cross-thread because the guest is parked in a WASI read, not executing
    wasm back-edges -- then sends ONE start message carrying `{code, entry,
-   element_id, facade_source, stdout_bytes, result_repr_bytes}`.
+   element_ids, facade_source, stdout_bytes, result_repr_bytes}`.
 2. The guest bootstrap (`_GUEST_BOOTSTRAP_SOURCE`) reads that message, `exec`s
    `FACADE_SOURCE + code` compiled as one unit under the filename `<snippet>`
    (so guest tracebacks strip to guest frames, mirroring
@@ -294,7 +294,7 @@ def _main():
     start = json.loads(sys.stdin.readline())
     code = start["code"]
     entry = start["entry"]
-    element_id = start["element_id"]
+    element_ids = start["element_ids"]
     facade_source = start["facade_source"]
     stdout_cap = start["stdout_bytes"]
     result_repr_cap = start["result_repr_bytes"]
@@ -324,8 +324,8 @@ def _main():
                 fn = namespace.get(entry)
                 if fn is None or not callable(fn):
                     raise NameError("entry function " + repr(entry) + " is not defined")
-                el = namespace["dr"].element(element_id) if element_id is not None else None
-                value = fn(el)
+                els = [namespace["dr"].element(i) for i in element_ids]
+                value = fn(els if entry == "value" else (els[0] if els else None))
                 have_value = True
         except MemoryError:
             # Propagate to the CPython top level: a store memory-limiter breach
@@ -820,7 +820,7 @@ class WasmScriptRunner:
             start_msg = {
                 "code": req.code,
                 "entry": req.entry,
-                "element_id": req.element_id,
+                "element_ids": req.element_ids,
                 "facade_source": FACADE_SOURCE,
                 "stdout_bytes": limits.stdout_bytes,
                 "result_repr_bytes": limits.result_repr_bytes,

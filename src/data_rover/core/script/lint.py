@@ -28,6 +28,9 @@ IMPORT_ALLOWLIST: frozenset[str] = frozenset(
 )
 DR_NAMES: frozenset[str] = frozenset({"dr"})
 _ENTRY_NAMES = ("value", "step")
+#: What the single argument means, per entry — `value` receives the full list
+#: of bound elements; `step` receives its one simulated element.
+_ENTRY_ARG_DESC = {"value": "the list of elements", "step": "the element"}
 
 
 @dataclass(frozen=True)
@@ -103,7 +106,8 @@ def lint_code(code: str) -> list[Diagnostic]:
                         node.lineno,
                         node.col_offset,
                         "warning",
-                        f"{node.name}() must take exactly one argument (the element), got {argc}",
+                        f"{node.name}() must take exactly one argument "
+                        f"({_ENTRY_ARG_DESC[node.name]}), got {argc}",
                     )
                 )
 

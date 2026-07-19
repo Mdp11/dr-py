@@ -18,7 +18,7 @@ describe('entryAvailable', () => {
 describe('withStub', () => {
 	it('an empty document gets just the stub', () => {
 		const out = withStub('', 'value');
-		expect(out).toMatch(/^def value\(el\):/);
+		expect(out).toMatch(/^def value\(elements\):/);
 		expect(out.endsWith('\n')).toBe(true);
 	});
 
@@ -29,14 +29,14 @@ describe('withStub', () => {
 
 	it('the stub defines the one-arg function lint derives entry points from', () => {
 		// Mirrors core/script/lint.derive_entry_points: top-level def, one arg.
-		expect(withStub('', 'value')).toContain('def value(el):');
+		expect(withStub('', 'value')).toContain('def value(elements):');
 		expect(withStub('', 'step')).toContain('def step(el):');
 	});
 });
 
 describe('ENTRY_HINTS', () => {
 	it('names the required function signature per entry', () => {
-		expect(ENTRY_HINTS.value).toContain('def value(el):');
+		expect(ENTRY_HINTS.value).toContain('def value(elements):');
 		expect(ENTRY_HINTS.step).toContain('def step(el):');
 	});
 });

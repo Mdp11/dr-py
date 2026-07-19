@@ -1,13 +1,16 @@
 <script lang="ts">
-	// Shown only for `value`/`step` entry points, which need a bound element.
-	// A "use current selection" shortcut plus a tiny debounced search — this
-	// is a component-local micro-search (see Navigation/ElementStartPicker.svelte
-	// for the same debounce shape), not a store: nothing here outlives the row.
+	// Shown only for `value`/`step` entry points. `value` binds 1+ elements as
+	// removable chips (add appends, deduped); `step` binds exactly one (add
+	// replaces — see state/snippet-editor.svelte.ts). The micro-search is a
+	// component-local debounce (see Navigation/ElementStartPicker.svelte for
+	// the same shape), not a store: nothing here outlives the row.
 	import {
+		addSnippetElement,
+		clearSnippetElements,
 		getCachedElements,
 		getSelection,
 		getSnippetRun,
-		setSnippetElementContext
+		removeSnippetElement
 	} from '$lib/state';
 	import { listElementsPage } from '$lib/api/model-read';
 	import { elementDisplayName } from '$lib/util/element-name';
@@ -57,19 +60,45 @@
 		if (!selection || selection.kind !== 'element') return;
 		const el = getCachedElements().get(selection.id);
 		if (!el) return;
-		setSnippetElementContext(tabId, el.id, elementDisplayName(el));
+		addSnippetElement(tabId, el.id, elementDisplayName(el));
 	}
 
 	function pick(el: Element): void {
-		setSnippetElementContext(tabId, el.id, elementDisplayName(el));
+		addSnippetElement(tabId, el.id, elementDisplayName(el));
 		query = '';
 		results = [];
 	}
 </script>
 
 <div class="relative flex flex-wrap items-center gap-2 border-b border-border px-3 py-2 text-xs">
-	<span class="text-muted-foreground">Element:</span>
-	<span class="font-mono text-foreground/90">{run.elementLabel ?? 'no element bound'}</span>
+	<span class="text-muted-foreground">{run.entry === 'step' ? 'Element:' : 'Elements:'}</span>
+	{#if run.elements.length === 0}
+		<span class="font-mono text-foreground/90">no element bound</span>
+	{/if}
+	{#each run.elements as bound (bound.id)}
+		<span
+			class="flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 font-mono text-foreground/90"
+		>
+			{bound.label}
+			<button
+				type="button"
+				class="text-muted-foreground transition-colors hover:text-foreground"
+				aria-label={`Remove ${bound.label}`}
+				onclick={() => removeSnippetElement(tabId, bound.id)}
+			>
+				×
+			</button>
+		</span>
+	{/each}
+	{#if run.elements.length >= 2}
+		<button
+			type="button"
+			class="text-muted-foreground underline transition-colors hover:text-foreground"
+			onclick={() => clearSnippetElements(tabId)}
+		>
+			clear all
+		</button>
+	{/if}
 	<button
 		type="button"
 		class="rounded border border-input px-2 py-1 text-xs text-foreground/80 transition-colors hover:bg-muted disabled:opacity-40"

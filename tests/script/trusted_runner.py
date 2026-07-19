@@ -132,8 +132,8 @@ class TrustedRunner:
                         fn = namespace.get(req.entry)
                         if fn is None or not callable(fn):
                             raise NameError(f"entry function {req.entry!r} is not defined")
-                        el = namespace["dr"].element(req.element_id) if req.element_id is not None else None
-                        value = fn(el)
+                        els = [namespace["dr"].element(i) for i in req.element_ids]
+                        value = fn(els if req.entry == "value" else (els[0] if els else None))
                         have_value = True
                 except Exception:
                     error = ScriptError(
