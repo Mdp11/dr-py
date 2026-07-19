@@ -3,6 +3,8 @@ import * as artifactsApi from '$lib/api/artifacts';
 import * as snippetsApi from '$lib/api/snippets';
 import { ApiError, ConflictError } from '$lib/api/errors';
 import {
+	addSnippetElement,
+	clearSnippetElements,
 	closeSnippetDraft,
 	ensureSnippetDraft,
 	getSnippetDraft,
@@ -12,10 +14,10 @@ import {
 	hasDirtySnippetDrafts,
 	LINT_DEBOUNCE_MS,
 	markRunStaged,
+	removeSnippetElement,
 	resetSnippetEditors,
 	runSnippetTab,
 	saveSnippetDraft,
-	setSnippetElementContext,
 	setSnippetEntry,
 	setSnippetName,
 	stopSnippetTab,
@@ -159,12 +161,11 @@ describe('snippet lint + run', () => {
 		expect(rs.result?.stdout).toBe('hello\n');
 	});
 
-	it('sends entry + element_id for a value run', async () => {
-		// runSnippetTab now refuses to send an entry lint hasn't unlocked (see
-		// the entryAvailable guard), so 'value' must be in the lint response —
+	it('sends entry + element_ids (bound order, deduped) for a value run', async () => {
+		// runSnippetTab refuses to send an entry lint hasn't unlocked (see the
+		// entryAvailable guard), so 'value' must be in the lint response —
 		// drive that via the debounced lint (fake timers), not the fire-and-
-		// forget immediate lint ensureSnippetDraft kicks off (unawaited, so its
-		// landing isn't ordered against the rest of this test otherwise).
+		// forget immediate lint ensureSnippetDraft kicks off.
 		vi.useFakeTimers();
 		vi.spyOn(snippetsApi, 'lintSnippet').mockResolvedValue({
 			diagnostics: [],
@@ -173,13 +174,42 @@ describe('snippet lint + run', () => {
 		const run = vi.spyOn(snippetsApi, 'runSnippet').mockResolvedValue(RUN_OUT);
 		const tabId = openArtifactTab('snippet', { artifactId: null, title: 'New snippet' });
 		await ensureSnippetDraft(tabId);
-		updateSnippetCode(tabId, 'def value(el):\n    return el.name\n');
+		updateSnippetCode(tabId, 'def value(elements):\n    return len(elements)\n');
 		await vi.advanceTimersByTimeAsync(LINT_DEBOUNCE_MS + 10);
 		setSnippetEntry(tabId, 'value');
-		setSnippetElementContext(tabId, 'e1', 'Building e1');
+		addSnippetElement(tabId, 'e2', 'Building e2');
+		addSnippetElement(tabId, 'e1', 'Building e1');
+		addSnippetElement(tabId, 'e2', 'Building e2'); // duplicate — ignored
 		await runSnippetTab(tabId);
-		expect(run.mock.calls[0][0]).toMatchObject({ entry: 'value', element_id: 'e1' });
+		expect(run.mock.calls[0][0]).toMatchObject({ entry: 'value', element_ids: ['e2', 'e1'] });
 		vi.useRealTimers();
+	});
+
+	it('element binding: remove, clear, step-mode replace and truncate-on-switch', () => {
+		const tabId = openArtifactTab('snippet', { artifactId: null, title: 'New snippet' });
+		setSnippetEntry(tabId, 'value');
+		addSnippetElement(tabId, 'e1', 'One');
+		addSnippetElement(tabId, 'e2', 'Two');
+		addSnippetElement(tabId, 'e3', 'Three');
+		removeSnippetElement(tabId, 'e2');
+		expect(getSnippetRun(tabId).elements.map((e) => e.id)).toEqual(['e1', 'e3']);
+		// switching to step keeps only the first chip (single-element contract)
+		setSnippetEntry(tabId, 'step');
+		expect(getSnippetRun(tabId).elements.map((e) => e.id)).toEqual(['e1']);
+		// step: picking replaces instead of appending
+		addSnippetElement(tabId, 'e9', 'Nine');
+		expect(getSnippetRun(tabId).elements.map((e) => e.id)).toEqual(['e9']);
+		clearSnippetElements(tabId);
+		expect(getSnippetRun(tabId).elements).toEqual([]);
+	});
+
+	it('refuses to run a value entry with no bound elements', async () => {
+		const run = vi.spyOn(snippetsApi, 'runSnippet').mockResolvedValue(RUN_OUT);
+		const tabId = openArtifactTab('snippet', { artifactId: null, title: 'New snippet' });
+		await ensureSnippetDraft(tabId);
+		setSnippetEntry(tabId, 'value');
+		await runSnippetTab(tabId);
+		expect(run).not.toHaveBeenCalled();
 	});
 
 	it('stop discards the eventual response', async () => {
@@ -258,7 +288,7 @@ describe('snippet lint + run', () => {
 		const tabId = openArtifactTab('snippet', { artifactId: null, title: 'New snippet' });
 		await ensureSnippetDraft(tabId); // immediate lint -> entry_points: [] (empty draft)
 		setSnippetEntry(tabId, 'value');
-		setSnippetElementContext(tabId, 'e1', 'Building e1');
+		addSnippetElement(tabId, 'e1', 'Building e1');
 
 		await runSnippetTab(tabId);
 
@@ -276,7 +306,7 @@ describe('snippet lint + run', () => {
 		const tabId = openArtifactTab('snippet', { artifactId: null, title: 'New snippet' });
 		await ensureSnippetDraft(tabId);
 		setSnippetEntry(tabId, 'value');
-		setSnippetElementContext(tabId, 'e1', 'Building e1');
+		addSnippetElement(tabId, 'e1', 'Building e1');
 
 		lint.mockResolvedValue({ diagnostics: [], entry_points: ['script', 'value'] });
 		updateSnippetCode(tabId, 'def value(el):\n    return el.name\n');
@@ -338,8 +368,7 @@ describe('snippet lint + run', () => {
 			stagedRunId: null,
 			notice: null,
 			entry: 'script',
-			elementId: null,
-			elementLabel: null
+			elements: []
 		});
 	});
 });

@@ -44,6 +44,11 @@ export interface SnippetLintState {
 
 export type SnippetRunPhase = 'idle' | 'running' | 'stopping';
 
+export interface SnippetBoundElement {
+	id: string;
+	label: string;
+}
+
 export interface SnippetRunState {
 	phase: SnippetRunPhase;
 	runId: string | null;
@@ -52,8 +57,9 @@ export interface SnippetRunState {
 	stagedRunId: string | null;
 	notice: string | null;
 	entry: 'script' | 'value' | 'step';
-	elementId: string | null;
-	elementLabel: string | null;
+	/** Bound context elements, in bind order — `value` receives all of them,
+	 * `step` only ever holds one (add replaces, entry-switch truncates). */
+	elements: SnippetBoundElement[];
 }
 
 const IDLE_RUN: SnippetRunState = {
@@ -63,8 +69,7 @@ const IDLE_RUN: SnippetRunState = {
 	stagedRunId: null,
 	notice: null,
 	entry: 'script',
-	elementId: null,
-	elementLabel: null
+	elements: []
 };
 
 const _lint = new SvelteMap<string, SnippetLintState>();
@@ -91,14 +96,27 @@ function setRun(tabId: string, patch: Partial<SnippetRunState>): void {
 	_runs.set(tabId, { ...getSnippetRun(tabId), ...patch });
 }
 export function setSnippetEntry(tabId: string, entry: 'script' | 'value' | 'step'): void {
-	setRun(tabId, { entry });
+	const rs = getSnippetRun(tabId);
+	// `step` binds a single element: switching there with several chips bound
+	// keeps only the first so the row never shows an unrunnable step state.
+	const elements = entry === 'step' ? rs.elements.slice(0, 1) : rs.elements;
+	setRun(tabId, { entry, elements });
 }
-export function setSnippetElementContext(
-	tabId: string,
-	elementId: string | null,
-	label: string | null
-): void {
-	setRun(tabId, { elementId, elementLabel: label });
+export function addSnippetElement(tabId: string, id: string, label: string): void {
+	const rs = getSnippetRun(tabId);
+	if (rs.entry === 'step') {
+		setRun(tabId, { elements: [{ id, label }] }); // step: picking replaces
+		return;
+	}
+	if (rs.elements.some((e) => e.id === id)) return; // duplicate — ignored
+	setRun(tabId, { elements: [...rs.elements, { id, label }] });
+}
+export function removeSnippetElement(tabId: string, id: string): void {
+	const rs = getSnippetRun(tabId);
+	setRun(tabId, { elements: rs.elements.filter((e) => e.id !== id) });
+}
+export function clearSnippetElements(tabId: string): void {
+	setRun(tabId, { elements: [] });
 }
 export function markRunStaged(tabId: string): void {
 	const rs = getSnippetRun(tabId);
@@ -139,7 +157,7 @@ export async function runSnippetTab(tabId: string): Promise<void> {
 	const draft = _drafts.get(tabId);
 	const rs = getSnippetRun(tabId);
 	if (!draft || rs.phase !== 'idle') return;
-	if (rs.entry !== 'script' && rs.elementId === null) return; // UI disables Run too
+	if (rs.entry !== 'script' && rs.elements.length === 0) return; // UI disables Run too
 	// Availability gate lives HERE, not as a lint-time entry reset: the UI's
 	// Run button is disabled too, but Mod-Enter (CodeEditor keymap) calls this
 	// directly, so the store must refuse to send an entry lint hasn't unlocked.
@@ -152,7 +170,7 @@ export async function runSnippetTab(tabId: string): Promise<void> {
 			run_id: runId,
 			code: draft.code,
 			entry: rs.entry,
-			element_id: rs.entry === 'script' ? undefined : (rs.elementId ?? undefined)
+			element_ids: rs.entry === 'script' ? undefined : rs.elements.map((e) => e.id)
 		});
 		if (_runGenerations.get(tabId) !== gen || !_drafts.has(tabId)) return; // stopped/closed/newer
 		setRun(tabId, { phase: 'idle', runId: null, result: out });

@@ -19,7 +19,7 @@ export interface SnippetRunBody {
 	code?: string;
 	artifact_id?: string;
 	entry?: 'script' | 'value' | 'step';
-	element_id?: string;
+	element_ids?: string[];
 }
 
 export function runSnippet(body: SnippetRunBody, cfg?: ClientConfig): Promise<SnippetRunOut> {
