@@ -67,3 +67,37 @@ export function relationshipRows(mm: Metamodel | null): RelRow[] {
 		}))
 		.sort((a, b) => a.name.localeCompare(b.name));
 }
+
+// Docs-modal filters — case-insensitive substring over the human-searchable
+// fields; a blank query is the identity so the modal renders the full
+// reference without special-casing.
+
+function norm(q: string): string {
+	return q.trim().toLowerCase();
+}
+
+export function filterFacade(entries: FacadeDocEntry[], q: string): FacadeDocEntry[] {
+	const n = norm(q);
+	if (!n) return entries;
+	return entries.filter((e) =>
+		`${e.name}\n${e.signature}\n${e.doc}`.toLowerCase().includes(n)
+	);
+}
+
+export function filterTypeRows(rows: TypeRow[], q: string): TypeRow[] {
+	const n = norm(q);
+	if (!n) return rows;
+	return rows.filter(
+		(r) =>
+			r.name.toLowerCase().includes(n) ||
+			r.properties.some((p) => p.name.toLowerCase().includes(n))
+	);
+}
+
+export function filterRelRows(rows: RelRow[], q: string): RelRow[] {
+	const n = norm(q);
+	if (!n) return rows;
+	return rows.filter((r) =>
+		`${r.name}\n${r.source}\n${r.target}`.toLowerCase().includes(n)
+	);
+}
