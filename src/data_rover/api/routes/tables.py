@@ -10,10 +10,13 @@ from sqlalchemy.orm import Session as DbSession
 from data_rover.core.model.model import Model
 from data_rover.core.navigation.resolve import NavigationResolveError
 from data_rover.core.navigation.schema import NAVIGATION_ADAPTER, NavigationDefinition
+from data_rover.core.script.runner import ScriptRunner
+from data_rover.core.script.schema import SNIPPET_ADAPTER, SnippetDefinition
 from data_rover.core.table.cells import (
     Cell,
     ElementCell,
     ElementsCell,
+    ErrorCell,
     ValueCell,
     ValuesCell,
     evaluate_cells,
@@ -26,7 +29,7 @@ from data_rover.core.table.evaluate import (
     iter_export_rows,
     order_rows,
 )
-from data_rover.core.table.resolve import resolve_table_refs
+from data_rover.core.table.resolve import resolve_table_refs, table_has_script
 from data_rover.core.table.schema import TABLE_ADAPTER, TableDefinition
 
 from .. import content
@@ -40,6 +43,9 @@ from ..schemas import (
     TablePageOut,
     TableRowOut,
 )
+from ..script_eval import close_script_context, open_script_context
+from ..script_runner import get_runner
+from ..settings import Settings, get_settings
 from ..table_cache import table_fingerprint
 from ..table_export import build_workbook
 from .read import _tree_item
@@ -51,11 +57,11 @@ def _resolve_table(
     payload: EvaluateTableIn, project_id: str, db: DbSession
 ) -> TableDefinition:
     """The table's own definition (from `artifact_id` or inline), with every
-    embedded navigation ref inlined via `resolve_table_refs` — the core
-    evaluator (Tasks 4-6) assumes a fully ref-free definition. No
-    `snippet_fetch` is passed yet (route wiring for snippet refs is Task 11),
-    so any `ScriptColumn`/`ScriptStep` ref present is left dangling — same
-    behavior as before this task."""
+    embedded navigation ref AND `ScriptColumn`/`ScriptStep` snippet ref
+    inlined via `resolve_table_refs` — the core evaluator (Tasks 4-6, 9-10)
+    assumes a fully ref-free definition. A dangling snippet ref is left in
+    place (degrades to an error cell at evaluation time); a dangling
+    navigation ref still raises `LookupError` (422)."""
     if payload.artifact_id is not None:
         row = content.get_artifact(db, payload.artifact_id)
         if (
@@ -79,7 +85,17 @@ def _resolve_table(
             raise LookupError(artifact_id)
         return NAVIGATION_ADAPTER.validate_python(r.payload)
 
-    return resolve_table_refs(defn, _fetch)
+    def _fetch_snippet(artifact_id: str) -> SnippetDefinition:
+        r = content.get_artifact(db, artifact_id)
+        if (
+            r is None
+            or r.project_id != project_id
+            or r.kind is not ArtifactKind.code_snippet
+        ):
+            raise LookupError(artifact_id)
+        return SNIPPET_ADAPTER.validate_python(r.payload)
+
+    return resolve_table_refs(defn, _fetch, snippet_fetch=_fetch_snippet)
 
 
 def _cell_out(model: Model, cell: Cell) -> TableCellOut:
@@ -104,6 +120,10 @@ def _cell_out(model: Model, cell: Cell) -> TableCellOut:
             total=cell.total,
             truncated=cell.truncated,
         )
+    if isinstance(cell, ErrorCell):
+        return TableCellOut(
+            kind="error", message=cell.message, traceback=cell.traceback
+        )
     assert isinstance(cell, ElementsCell)
     return TableCellOut(
         kind="elements",
@@ -119,6 +139,8 @@ def evaluate_table(
     project_id: str,
     session: Session = Depends(get_request_session),
     db: DbSession = Depends(get_db),
+    runner: ScriptRunner | None = Depends(get_runner),
+    settings: Settings = Depends(get_settings),
 ) -> TablePageOut:
     """Read-only (viewer-callable; listed in authz._READ_ONLY_POST_SUFFIXES).
     Row ORDER is cached per session (Task 7's TableOrderCache) keyed on the
@@ -157,19 +179,43 @@ def evaluate_table(
         # built against the OLD model under the NEW rev's key — poisoning the
         # cache for every subsequent request instead of merely missing it.
         rev = session.model_rev
-        cached = session.table_order_cache.get(fp, sort_key, rev)
-        if cached is not None:
-            cached_rows, truncated, base_total = cached
-            ordered = list(cached_rows)
-        else:
-            built = build_rows_ex(metamodel, model, defn, limits)
-            truncated, base_total = built.truncated, built.base_total
-            ordered = order_rows(metamodel, model, defn, built.keys, sort, limits)
-            session.table_order_cache.put(
-                fp, sort_key, rev, tuple(ordered), truncated, base_total
+        script_ctx, acquired = open_script_context(
+            runner, model, settings, needs_script=table_has_script(defn)
+        )
+        try:
+            cached = session.table_order_cache.get(fp, sort_key, rev)
+            if cached is not None:
+                cached_rows, truncated, base_total = cached
+                ordered = list(cached_rows)
+            else:
+                built = build_rows_ex(metamodel, model, defn, limits, script=script_ctx)
+                truncated, base_total = built.truncated, built.base_total
+                ordered = order_rows(
+                    metamodel, model, defn, built.keys, sort, limits, script=script_ctx
+                )
+            window = ordered[payload.offset : payload.offset + payload.limit]
+            cells = evaluate_cells(
+                metamodel, model, defn, window, limits, script=script_ctx
             )
-        window = ordered[payload.offset : payload.offset + payload.limit]
-        cells = evaluate_cells(metamodel, model, defn, window, limits)
+            # Cache-poisoning guard: only store a FRESHLY built order (a cache
+            # hit is already cached), and only when nothing this request ran
+            # through the script errored — `script_ctx.errored` only settles
+            # once cell evaluation (not just build/order) has actually run,
+            # since an unsorted keep_empty=True script column never calls
+            # `value()` until cells are rendered. A bad order (or an order
+            # built against a since-superseded rev) must never be cached:
+            # neither the fingerprint (code hash) nor `rev` changes on retry,
+            # so a poisoned entry would be served forever.
+            if cached is None and (
+                script_ctx is None
+                or (not script_ctx.errored and session.model_rev == rev)
+            ):
+                session.table_order_cache.put(
+                    fp, sort_key, rev, tuple(ordered), truncated, base_total
+                )
+            warnings = list(script_ctx.warnings) if script_ctx is not None else []
+        finally:
+            close_script_context(script_ctx, acquired)
     except LookupError as exc:
         raise HTTPException(status_code=422, detail=f"unknown artifact {exc}") from exc
     except (NavigationResolveError, ValueError) as exc:
@@ -191,6 +237,7 @@ def evaluate_table(
         truncated=truncated,
         offset=payload.offset,
         model_rev=rev,
+        warnings=warnings,
     )
 
 

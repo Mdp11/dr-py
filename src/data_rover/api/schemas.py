@@ -872,7 +872,7 @@ class TableColumnOut(BaseModel):
 
 
 class TableCellOut(BaseModel):
-    kind: Literal["element", "value", "values", "elements"]
+    kind: Literal["element", "value", "values", "elements", "error"]
     # element
     item: TreeItem | None = None
     # value
@@ -885,6 +885,9 @@ class TableCellOut(BaseModel):
     values: list[object] | None = None
     total: int | None = None
     truncated: bool | None = None
+    # error
+    message: str | None = None
+    traceback: str | None = None
 
 
 class TableRowOut(BaseModel):
@@ -902,3 +905,6 @@ class TablePageOut(BaseModel):
     truncated: bool
     offset: int
     model_rev: int
+    #: script-step degradations from navigations this evaluation triggered
+    #: (pruned-frontier warnings etc.) + nothing else today.
+    warnings: list[str] = Field(default_factory=list)
