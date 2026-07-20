@@ -23,6 +23,7 @@
 		getMissingElementIds,
 		getModelGeneration,
 		getModelSummary,
+		getMultiSelectedIds,
 		getStructureRev,
 		getSelection,
 		getTypeFilter,
@@ -831,10 +832,12 @@
 		}
 	});
 
-	// ----- multi-selection (sidebar-local; the Inspector still tracks the single
-	// `selection`, which we keep pointed at the last-touched element) -----
-	// SvelteSet is reactive on its own; mutate in place (no `$state` wrapper).
-	const multiSelected = new SvelteSet<string>();
+	// ----- multi-selection (the Inspector still tracks the single `selection`,
+	// which we keep pointed at the last-touched element) -----
+	// Shared across modules (selection.svelte.ts) so consumers like the snippet
+	// "Use current selection" can read the whole set. SvelteSet is reactive on
+	// its own; mutate in place (no `$state` wrapper).
+	const multiSelected = getMultiSelectedIds();
 	let anchorId: string | null = $state(null);
 
 	function replaceMultiSelected(keys: Iterable<string>): void {
@@ -851,7 +854,12 @@
 			return;
 		}
 		if (e.shiftKey && anchorId !== null) {
-			const keys = treeVisibleRows.map((r) => r.key);
+			// Range-select within whichever list owns the clicked row — the in-view
+			// tree or the "Not in view" pool. A range never spans the two lists, so
+			// pick the list containing `key` and require the anchor to live in it
+			// too (otherwise fall back to a single select).
+			const inTree = treeVisibleRows.some((r) => r.key === key);
+			const keys = (inTree ? treeVisibleRows : poolVisibleRows).map((r) => r.key);
 			const a = keys.indexOf(anchorId);
 			const b = keys.indexOf(key);
 			if (a >= 0 && b >= 0) {

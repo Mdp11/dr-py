@@ -2,6 +2,7 @@
 	import { untrack } from 'svelte';
 	import { basicSetup } from 'codemirror';
 	import { EditorView, keymap, hoverTooltip, placeholder } from '@codemirror/view';
+	import { indentWithTab } from '@codemirror/commands';
 	import { python, pythonLanguage } from '@codemirror/lang-python';
 	import { lintGutter, setDiagnostics } from '@codemirror/lint';
 	import type { CompletionContext, CompletionResult } from '@codemirror/autocomplete';
@@ -100,7 +101,10 @@
 						editorLuxuryTheme,
 						placeholder(placeholderDom),
 						lintGutter(),
-						keymap.of([{ key: 'Mod-Enter', run: () => (onRun(), true) }]),
+						// Tab indents, Shift-Tab dedents (basicSetup deliberately omits
+						// this — CodeMirror leaves Tab for focus traversal by default;
+						// a code editor wants indentation, so we opt in explicitly).
+						keymap.of([{ key: 'Mod-Enter', run: () => (onRun(), true) }, indentWithTab]),
 						EditorView.updateListener.of((u) => {
 							if (u.docChanged) onChange(u.state.doc.toString());
 						}),

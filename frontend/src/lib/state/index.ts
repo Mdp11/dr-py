@@ -72,6 +72,7 @@ export {
 } from './changes.svelte';
 export {
 	clearSelection,
+	getMultiSelectedIds,
 	getSelection,
 	select,
 	type Selection,

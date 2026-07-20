@@ -61,12 +61,17 @@ const editorTheme = EditorView.theme(
 			borderRadius: '2px'
 		},
 
-		// Active line + its gutter marker. The gutter marker carries a thin
-		// primary-green spine — the editor's one signature accent.
+		// Active line + its gutter marker. The line-numbers gutter marker carries
+		// a thin primary-green spine — the editor's one signature accent.
 		'.cm-activeLine': { backgroundColor: 'var(--cm-active-line)' },
 		'.cm-activeLineGutter': {
 			backgroundColor: 'var(--cm-active-line)',
-			color: 'var(--cm-gutter-active-fg)',
+			color: 'var(--cm-gutter-active-fg)'
+		},
+		// Draw the spine ONLY on the line-numbers gutter. `.cm-activeLineGutter`
+		// matches the active row in every gutter (line numbers, fold, lint), so an
+		// unscoped spine painted a second/third bar to the right of the number.
+		'.cm-lineNumbers .cm-activeLineGutter': {
 			boxShadow: 'inset 2px 0 0 var(--primary)'
 		},
 

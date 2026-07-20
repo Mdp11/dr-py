@@ -37,7 +37,7 @@
 	}: {
 		tabId: string;
 		onEditColumn?: (index: number) => void;
-		onAddColumn?: (kind: 'property' | 'navigation') => void;
+		onAddColumn?: (kind: 'property' | 'navigation' | 'script') => void;
 	} = $props();
 
 	const ROW_H = 28;
@@ -356,6 +356,7 @@
 						<DropdownMenu.Item onSelect={() => onAddColumn?.('navigation')}>
 							+ Navigation
 						</DropdownMenu.Item>
+						<DropdownMenu.Item onSelect={() => onAddColumn?.('script')}>+ Script</DropdownMenu.Item>
 					</DropdownMenu.Content>
 				</DropdownMenu.Root>
 			</div>

@@ -525,11 +525,13 @@ describe('TableGrid', () => {
 			const items = [...document.querySelectorAll('[role="menuitem"]')];
 			const propertyItem = items.find((el) => el.textContent?.includes('+ Property'));
 			const navItem = items.find((el) => el.textContent?.includes('+ Navigation'));
+			const scriptItem = items.find((el) => el.textContent?.includes('+ Script'));
 			expect(propertyItem).toBeDefined();
 			expect(navItem).toBeDefined();
-			(propertyItem as HTMLElement).click();
+			expect(scriptItem).toBeDefined();
+			(scriptItem as HTMLElement).click();
 			flushSync();
-			expect(onAddColumn).toHaveBeenCalledWith('property');
+			expect(onAddColumn).toHaveBeenCalledWith('script');
 		} finally {
 			unmount(c);
 		}

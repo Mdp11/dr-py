@@ -8,6 +8,7 @@
 		addSnippetElement,
 		clearSnippetElements,
 		getCachedElements,
+		getMultiSelectedIds,
 		getSelection,
 		getSnippetRun,
 		removeSnippetElement
@@ -23,7 +24,8 @@
 
 	const run = $derived(getSnippetRun(tabId));
 	const selection = $derived(getSelection());
-	const canUseSelection = $derived(selection?.kind === 'element');
+	const multiSelected = getMultiSelectedIds();
+	const canUseSelection = $derived(selection?.kind === 'element' || multiSelected.size > 0);
 
 	let query = $state('');
 	let results: Element[] = $state([]);
@@ -57,10 +59,16 @@
 	});
 
 	function useSelection(): void {
-		if (!selection || selection.kind !== 'element') return;
-		const el = getCachedElements().get(selection.id);
-		if (!el) return;
-		addSnippetElement(tabId, el.id, elementDisplayName(el));
+		// `value` binds every selected element; `step` binds exactly one (the
+		// primary/last-touched selection — addSnippetElement replaces for step).
+		const primary = selection?.kind === 'element' ? [selection.id] : [];
+		const ids =
+			run.entry === 'step' ? primary : multiSelected.size > 0 ? [...multiSelected] : primary;
+		const cache = getCachedElements();
+		for (const id of ids) {
+			const el = cache.get(id);
+			if (el) addSnippetElement(tabId, el.id, elementDisplayName(el));
+		}
 	}
 
 	function pick(el: Element): void {

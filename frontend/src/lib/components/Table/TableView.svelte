@@ -20,7 +20,12 @@
 	} from '$lib/state';
 	import { Settings } from '@lucide/svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
-	import { addColumn, newNavigationColumn, newPropertyColumn } from '$lib/table/columns';
+	import {
+		addColumn,
+		newNavigationColumn,
+		newPropertyColumn,
+		newScriptColumn
+	} from '$lib/table/columns';
 	import ColumnManager from './ColumnManager.svelte';
 	import TableGrid from './TableGrid.svelte';
 
@@ -85,13 +90,16 @@
 	// The header "+" menu appends a fresh column, then focuses the dialog on
 	// it — the new column's definition index is always `length - 1` regardless
 	// of any hidden columns (addColumn only ever pushes).
-	function addColumnFromHeader(kind: 'property' | 'navigation'): void {
+	function addColumnFromHeader(kind: 'property' | 'navigation' | 'script'): void {
 		const d = getTableDraft(tabId);
 		if (!d) return;
-		updateTableDefinition(
-			tabId,
-			addColumn(d.definition, kind === 'property' ? newPropertyColumn() : newNavigationColumn())
-		);
+		const column =
+			kind === 'property'
+				? newPropertyColumn()
+				: kind === 'script'
+					? newScriptColumn()
+					: newNavigationColumn();
+		updateTableDefinition(tabId, addColumn(d.definition, column));
 		settingsFocus = getTableDraft(tabId)!.definition.columns.length - 1;
 		settingsOpen = true;
 	}
