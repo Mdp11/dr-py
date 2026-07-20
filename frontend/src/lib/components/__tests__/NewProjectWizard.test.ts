@@ -2,11 +2,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import NewProjectWizard from '../projects/NewProjectWizard.svelte';
 import { ValidationError } from '$lib/api/errors';
+import { resetJourney } from '$lib/state/open-journey';
+import { getActiveProgress, resetProgress } from '$lib/state/progress.svelte';
 
 const createProject = vi.fn();
 vi.mock('$lib/api/projects', () => ({ createProject: (...a: unknown[]) => createProject(...a) }));
 
 afterEach(() => {
+	resetJourney();
+	resetProgress();
 	document.body.innerHTML = '';
 	vi.clearAllMocks();
 });
@@ -66,6 +70,31 @@ describe('NewProjectWizard', () => {
 		flushSync();
 		expect(onCreated).not.toHaveBeenCalled();
 		expect(document.body.textContent).toMatch(/could not create|invalid metamodel/i);
+		unmount(c);
+	});
+
+	it('tears the progress bar down when creation fails', async () => {
+		createProject.mockRejectedValue(new ValidationError(422, { detail: 'nope' }, 'nope'));
+		const c = mount(NewProjectWizard, {
+			target: document.body,
+			props: { open: true, onCreated: vi.fn() }
+		});
+		flushSync();
+		const name = document.querySelector('input[name="project-name"]') as HTMLInputElement;
+		name.value = 'W';
+		name.dispatchEvent(new Event('input', { bubbles: true }));
+		setFile(
+			document.querySelector('input[data-testid="mm-input"]') as HTMLInputElement,
+			new File(['types: []'], 'mm.yaml')
+		);
+		flushSync();
+		document
+			.querySelector('form')!
+			.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+		await Promise.resolve();
+		await Promise.resolve();
+		flushSync();
+		expect(getActiveProgress()).toBeNull();
 		unmount(c);
 	});
 

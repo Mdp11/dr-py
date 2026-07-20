@@ -4,13 +4,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import { createProject } from '$lib/api/projects';
 	import { ApiError } from '$lib/api/errors';
-	import {
-		endProgress,
-		setProgressIndeterminate,
-		setProgressLabel,
-		startProgress,
-		updateProgress
-	} from '$lib/state';
+	import { beginJourney, journeyUpload, cancelJourney } from '$lib/state/open-journey';
 	import FileSlot from './FileSlot.svelte';
 
 	let {
@@ -32,30 +26,21 @@
 		if (!canSubmit || !metamodel) return;
 		error = null;
 		pending = true;
-		const token = startProgress('Uploading project files…');
+		// Start the single journey bar now (on the click). It survives the goto()
+		// into the workspace, where boot() adopts the same journey (beginJourney is
+		// idempotent) and drives it through hydration/validation to 100%.
+		beginJourney('create');
 		try {
 			const created = await createProject({ name, metamodel, model, view }, (loaded, total) => {
-				if (total === null || total <= 0) return;
-				if (loaded >= total) {
-					// All bytes are on the wire; for a large model the server-side
-					// parse/persist dominates from here, so switch to an
-					// indeterminate phase instead of sitting at 100%.
-					setProgressLabel(token, 'Processing files…');
-					setProgressIndeterminate(token);
-				} else {
-					updateProgress(token, loaded, total);
-				}
+				journeyUpload(loaded, total);
 			});
-			// Keep the overlay up until navigation into the new project has
-			// completed, so the projects list never flashes in between.
-			setProgressLabel(token, 'Opening project…');
-			setProgressIndeterminate(token);
+			// Do NOT end the journey here — boot() continues it after navigation.
 			await onCreated(created.id);
 		} catch (err) {
+			cancelJourney(); // tear the bar down on failure
 			error =
 				err instanceof ApiError ? err.message : 'Could not create the project. Check the files.';
 		} finally {
-			endProgress(token);
 			pending = false;
 		}
 	}
