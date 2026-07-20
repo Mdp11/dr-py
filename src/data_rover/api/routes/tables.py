@@ -247,6 +247,8 @@ def export_table(
     project_id: str,
     session: Session = Depends(get_request_session),
     db: DbSession = Depends(get_db),
+    runner: ScriptRunner | None = Depends(get_runner),
+    settings: Settings = Depends(get_settings),
 ) -> Response:
     """Read-only (viewer-callable; listed in authz._READ_ONLY_POST_SUFFIXES).
     Exports the WHOLE table (every row `build_rows`/`order_rows` produce,
@@ -263,6 +265,8 @@ def export_table(
     underlying navigation that hit its `max_chains`/`max_visited` budget),
     never for cell-level capping (which cannot happen with this override)."""
     metamodel, model = require_model(session)
+    script_ctx = None
+    acquired = False
     try:
         defn = _resolve_table(payload, project_id, db)
         sort = (
@@ -278,38 +282,65 @@ def export_table(
         # Export never caps cells: lift the server-wide ceiling AND drop each
         # navigation column's per-column `cell_cap` display preference.
         limits = TableLimits(max_cell_elements=10**9, ignore_cell_caps=True)
-        keys, truncated = build_rows(metamodel, model, defn, limits)
-        ordered = order_rows(metamodel, model, defn, keys, sort, limits)
+        script_ctx, acquired = open_script_context(
+            runner, model, settings, needs_script=table_has_script(defn)
+        )
+        keys, truncated = build_rows(metamodel, model, defn, limits, script=script_ctx)
+        ordered = order_rows(
+            metamodel, model, defn, keys, sort, limits, script=script_ctx
+        )
+
+        name = "table"
+        if payload.artifact_id is not None:
+            row = content.get_artifact(db, payload.artifact_id)
+            if row is not None:
+                name = row.name
+        # Hidden columns are evaluated (a visible column may reference them)
+        # but never exported: filter headers/widths AND each row's cells by
+        # position.
+        visible = [i for i, c in enumerate(defn.columns) if not c.hidden]
+        headers = [defn.columns[i].header or defn.columns[i].kind for i in visible]
+        widths = [defn.columns[i].width_px for i in visible]
+        all_rows = iter_export_rows(
+            metamodel, model, defn, ordered, limits, script=script_ctx
+        )
+
+        def _notice() -> str | None:
+            # `row_iter` (and therefore any script column's `value()` calls)
+            # is consumed lazily INSIDE `build_workbook` — `script_ctx.errored`
+            # is only fully settled once that consumption finishes, so this
+            # must be a callable invoked AFTER the row loop, not a value
+            # computed up front.
+            if script_ctx is not None and script_ctx.errored:
+                return (
+                    "Some script cells failed or exceeded the evaluation "
+                    "budget; affected cells are marked #ERROR."
+                )
+            return None
+
+        blob = build_workbook(
+            model,
+            headers,
+            widths,
+            name,
+            ([row[i] for i in visible] for row in all_rows),
+            notice_provider=_notice,
+        )
+        resp_headers = {"Content-Disposition": f'attachment; filename="{name}.xlsx"'}
+        if truncated:
+            resp_headers["X-Table-Truncated"] = "true"
+        if script_ctx is not None and script_ctx.errored:
+            resp_headers["X-Table-Script-Errors"] = "true"
+        return Response(
+            content=blob,
+            media_type=(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            ),
+            headers=resp_headers,
+        )
     except LookupError as exc:
         raise HTTPException(status_code=422, detail=f"unknown artifact {exc}") from exc
     except (NavigationResolveError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-    name = "table"
-    if payload.artifact_id is not None:
-        row = content.get_artifact(db, payload.artifact_id)
-        if row is not None:
-            name = row.name
-    # Hidden columns are evaluated (a visible column may reference them) but
-    # never exported: filter headers/widths AND each row's cells by position.
-    visible = [i for i, c in enumerate(defn.columns) if not c.hidden]
-    headers = [defn.columns[i].header or defn.columns[i].kind for i in visible]
-    widths = [defn.columns[i].width_px for i in visible]
-    all_rows = iter_export_rows(metamodel, model, defn, ordered, limits)
-    blob = build_workbook(
-        model,
-        headers,
-        widths,
-        name,
-        ([row[i] for i in visible] for row in all_rows),
-    )
-    resp_headers = {"Content-Disposition": f'attachment; filename="{name}.xlsx"'}
-    if truncated:
-        resp_headers["X-Table-Truncated"] = "true"
-    return Response(
-        content=blob,
-        media_type=(
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        ),
-        headers=resp_headers,
-    )
+    finally:
+        close_script_context(script_ctx, acquired)

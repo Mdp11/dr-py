@@ -4,11 +4,13 @@ and now covers Task 11's `POST /tables/evaluate` script-column wiring."""
 
 from __future__ import annotations
 
+import io
 from collections.abc import Iterator
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from openpyxl import load_workbook
 
 from data_rover.api.main import create_app
 from data_rover.api.script_eval import close_script_context, open_script_context
@@ -128,7 +130,10 @@ def client(app: FastAPI) -> TestClient:
 def seed_thing_model(client: TestClient) -> None:
     """Metamodel declaring `Thing` (a `name` string property) plus a few
     `Thing` elements, seeded into the default session via the HTTP routes
-    (mirrors `tests/api/test_ops_route.py`'s `client` fixture shape)."""
+    (mirrors `tests/api/test_ops_route.py`'s `client` fixture shape). Includes
+    a `name == "B"` element so tests exercising a conditional-raise snippet
+    (`if els[0].name == 'B': raise ...`) get both an erroring row and clean
+    rows in the same table."""
     r = client.post(
         papi("/metamodel"),
         content=THING_MM,
@@ -141,6 +146,7 @@ def seed_thing_model(client: TestClient) -> None:
             "elements": [
                 {"id": "t1", "type_name": "Thing", "properties": {"name": "Alpha"}},
                 {"id": "t2", "type_name": "Thing", "properties": {"name": "Beta"}},
+                {"id": "t3", "type_name": "Thing", "properties": {"name": "B"}},
             ],
             "relationships": [],
         },
@@ -246,3 +252,41 @@ def test_evaluate_saved_snippet_ref_and_fingerprint(
     assert r.status_code == 200, r.text
     r = client.post(papi("/tables/evaluate"), json={"definition": defn}, headers=AUTH_HEADERS)
     assert r.json()["rows"][0]["cells"][0]["value"] == "v2"
+
+
+# ---------------------------------------------------------------------------
+# Task 12: POST /tables/export script-column wiring
+# ---------------------------------------------------------------------------
+
+
+def test_export_script_column_with_errors_gets_marker_and_notice(
+    client: TestClient, seed_thing_model: None
+) -> None:
+    defn = _script_table(
+        "def value(els):\n"
+        "    if els[0].name == 'B': raise RuntimeError('boom')\n"
+        "    return els[0].name"
+    )
+    r = client.post(papi("/tables/export"), json={"definition": defn}, headers=AUTH_HEADERS)
+    assert r.status_code == 200, r.text
+    assert r.headers.get("X-Table-Script-Errors") == "true"
+    wb = load_workbook(io.BytesIO(r.content), read_only=True)
+    ws = wb.active
+    assert ws is not None
+    texts = [str(row[0].value) for row in ws.iter_rows() if row and row[0].value is not None]
+    assert any(t.startswith("#ERROR:") for t in texts)
+    assert "script" in texts[-1].lower()  # trailing notice row
+
+
+def test_export_script_column_no_errors_no_notice(
+    client: TestClient, seed_thing_model: None
+) -> None:
+    defn = _script_table("def value(els): return els[0].name")
+    r = client.post(papi("/tables/export"), json={"definition": defn}, headers=AUTH_HEADERS)
+    assert r.status_code == 200, r.text
+    assert "X-Table-Script-Errors" not in r.headers
+    wb = load_workbook(io.BytesIO(r.content), read_only=True)
+    ws = wb.active
+    assert ws is not None
+    texts = [str(row[0].value) for row in ws.iter_rows() if row and row[0].value is not None]
+    assert not any(t.startswith("#ERROR:") for t in texts)
