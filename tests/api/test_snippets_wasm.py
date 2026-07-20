@@ -46,6 +46,15 @@ def wasm_runner() -> Iterator[WasmScriptRunner]:
     r.close()
 
 
+@pytest.fixture
+def small_model():
+    """Same tiny 3-`Building` model the standalone `run()` tests use, wrapped
+    as a fixture so the Task 14 session tests can address elements by id."""
+    from tests.script.conftest import tiny_model
+
+    return tiny_model()
+
+
 def test_wasm_standalone_print(wasm_runner: WasmScriptRunner) -> None:
     """A plain `print` script's stdout round-trips through the real bridge
     loop (stdout is captured guest-side and delivered in the final message)."""
@@ -387,3 +396,70 @@ def test_wasm_boot_failure_does_not_wedge_pool() -> None:
 
     leaked = set(glob.glob(leak_glob)) - before
     assert not leaked, f"leaked wasm instance scratch dir(s) after close(): {leaked}"
+
+
+def test_wasm_session_repeated_calls_and_state(wasm_runner: WasmScriptRunner, small_model) -> None:
+    """Task 14: an embedded session execs the module once and keeps
+    module-level state (`n`) across repeated `call()`s on the same warm guest;
+    `close()` is idempotent."""
+    from data_rover.core.script.runner import RunLimits, ScriptBudget
+
+    ids = sorted(small_model.elements)
+    sess = wasm_runner.open_session(
+        small_model,
+        "n = [0]\ndef value(els):\n    n[0] += 1\n    return n[0]",
+        RunLimits(),
+        budget=ScriptBudget.start(60),
+    )
+    assert sess.boot_error is None
+    assert sess.call("value", [ids[0]]).value == {"kind": "scalar", "value": 1}
+    assert sess.call("value", [ids[0]]).value == {"kind": "scalar", "value": 2}
+    sess.close()
+    sess.close()  # idempotent
+
+
+def test_wasm_session_boot_error(wasm_runner: WasmScriptRunner, small_model) -> None:
+    """A module-level exception during boot exec is captured as `boot_error`
+    (kind="runtime") rather than raised."""
+    from data_rover.core.script.runner import RunLimits, ScriptBudget
+
+    sess = wasm_runner.open_session(
+        small_model, "raise RuntimeError('boom')", RunLimits(),
+        budget=ScriptBudget.start(60),
+    )
+    assert sess.boot_error is not None and sess.boot_error.kind == "runtime"
+    sess.close()
+
+
+def test_wasm_session_call_timeout_kills_session(wasm_runner: WasmScriptRunner, small_model) -> None:
+    """A per-call epoch timeout kills the guest; the session is promoted to a
+    terminal `boot_error` so a subsequent call also fails fast."""
+    from data_rover.core.script.runner import RunLimits, ScriptBudget
+
+    ids = sorted(small_model.elements)
+    sess = wasm_runner.open_session(
+        small_model,
+        "def value(els):\n    while True:\n        pass",
+        RunLimits(wall_timeout_s=2),
+        budget=ScriptBudget.start(60),
+    )
+    res = sess.call("value", [ids[0]])
+    assert res.error is not None and res.error.kind == "timeout"
+    res2 = sess.call("value", [ids[0]])          # session is dead now
+    assert res2.error is not None
+    sess.close()
+
+
+def test_wasm_session_read_only(wasm_runner: WasmScriptRunner, small_model) -> None:
+    """Sessions are read-only by construction: a write attempt inside a call
+    surfaces the facade's `ReadOnlyError`."""
+    from data_rover.core.script.runner import RunLimits, ScriptBudget
+
+    ids = sorted(small_model.elements)
+    sess = wasm_runner.open_session(
+        small_model, "def value(els):\n    return dr.create('T', {})",
+        RunLimits(), budget=ScriptBudget.start(60),
+    )
+    res = sess.call("value", [ids[0]])
+    assert res.error is not None and "ReadOnlyError" in res.error.message
+    sess.close()

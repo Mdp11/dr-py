@@ -106,7 +106,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TextIO
+from typing import TYPE_CHECKING, Any, Literal, TextIO
 
 from wasmtime import (
     Config,
@@ -126,16 +126,24 @@ from wasmtime import (
 from data_rover.core.model.model import Model
 from data_rover.core.script.facade_src import FACADE_SOURCE
 from data_rover.core.script.runner import (
+    CallResult,
     RunLimits,
     RunRequest,
     RunResult,
     ScriptBudget,
     ScriptError,
     ScriptRunner,
-    SnippetSession,
+    decode_call_payload,
 )
 
 from .settings import Settings
+
+if TYPE_CHECKING:
+    # Only needed for the `BridgeDispatcher` type annotation on `_serve_until`
+    # / `_WasmSnippetSession`; the runtime import stays lazy inside `run()`/
+    # `open_session()` (see the module docstring: `data_rover.core` must stay
+    # free of any bridge import cycle).
+    from data_rover.core.script.bridge import BridgeDispatcher
 
 logger = logging.getLogger(__name__)
 
@@ -290,10 +298,7 @@ def _format_guest_traceback():
     return "".join(lines)
 
 
-def _main():
-    _emit({"ready": True})
-
-    start = json.loads(sys.stdin.readline())
+def _run_once(start):
     code = start["code"]
     entry = start["entry"]
     element_ids = start["element_ids"]
@@ -358,6 +363,82 @@ def _main():
     if error is not None:
         fin["error"] = error
     _emit(fin)
+
+
+def _run_embedded(start):
+    code = start["code"]
+    facade_source = start["facade_source"]
+    stdout = _CappedStdout(start["stdout_bytes"])
+    namespace = {"_transport": _transport}
+    err = None
+    source = facade_source + "\n" + code
+    try:
+        compiled = compile(source, _SNIPPET_FILENAME, "exec")
+    except SyntaxError as exc:
+        err = {"kind": "syntax", "message": str(exc), "traceback": None}
+        compiled = None
+    if compiled is not None:
+        sys.stdout = stdout
+        try:
+            exec(compiled, namespace)
+        except MemoryError:
+            sys.stdout = _real_stdout
+            raise
+        except Exception:
+            err = {
+                "kind": "runtime",
+                "message": type(sys.exc_info()[1]).__name__ + ": " + str(sys.exc_info()[1]),
+                "traceback": _format_guest_traceback(),
+            }
+        finally:
+            sys.stdout = _real_stdout
+    _emit({"boot": True, "error": err})
+    if err is not None:
+        return
+    while True:
+        line = sys.stdin.readline()
+        if not line:
+            return
+        msg = json.loads(line)
+        if msg.get("close"):
+            return
+        call = msg.get("call")
+        if call is None:
+            continue
+        entry = call["entry"]
+        element_ids = call["element_ids"]
+        cerr = None
+        payload = None
+        sys.stdout = stdout
+        try:
+            fn = namespace.get(entry)
+            if fn is None or not callable(fn):
+                raise NameError("entry function " + repr(entry) + " is not defined")
+            els = [namespace["dr"].element(i) for i in element_ids]
+            value = fn(els if entry == "value" else (els[0] if els else None))
+            payload = namespace["_dr_serialize_entry_result"](entry, value)
+        except MemoryError:
+            sys.stdout = _real_stdout
+            raise
+        except Exception:
+            cerr = {
+                "kind": "runtime",
+                "message": type(sys.exc_info()[1]).__name__ + ": " + str(sys.exc_info()[1]),
+                "traceback": _format_guest_traceback(),
+            }
+        finally:
+            sys.stdout = _real_stdout
+        _emit({"call_result": {"payload": payload, "error": cerr}})
+
+
+def _main():
+    _emit({"ready": True})
+    start = json.loads(sys.stdin.readline())
+    mode = start.get("mode", "run")
+    if mode == "embedded":
+        _run_embedded(start)
+    else:
+        _run_once(start)
 
 
 _main()
@@ -831,34 +912,7 @@ class WasmScriptRunner:
             inst.host_in.flush()
 
             wall_deadline = time.monotonic() + limits.wall_timeout_s
-            while True:
-                remaining = wall_deadline - time.monotonic()
-                read_budget = max(remaining, 0.0) + _TIMEOUT_READ_GRACE_S
-                line = _readline_bounded(inst.host_out, thread, read_budget)
-                if not line:
-                    break  # guest died (epoch kill / crash) or wall deadline hit
-                try:
-                    msg = json.loads(line)
-                except json.JSONDecodeError:
-                    logger.warning("wasm guest sent a non-JSON line; ignoring")
-                    continue
-                if not isinstance(msg, dict):
-                    # A snippet can bypass the captured `sys.stdout` and write
-                    # straight to the bridge FIFO via `sys.__stdout__` (still
-                    # the real stdout fd during exec) -- e.g. a bare scalar
-                    # like `5\n` is valid JSON (`json.loads` succeeds) but not
-                    # a bridge message. Treat it like the non-JSON case: the
-                    # guest is untrusted, so the host pump must never assume
-                    # dict shape before checking it.
-                    logger.warning("wasm guest sent a non-dict JSON line; ignoring")
-                    continue
-                if msg.get("fin"):
-                    fin = msg
-                    break
-                # Bridge request: dispatch host-side and write the response.
-                resp = dispatcher.dispatch(msg)
-                inst.host_in.write(json.dumps(resp) + "\n")
-                inst.host_in.flush()
+            fin = self._serve_until(inst, thread, dispatcher, "fin", wall_deadline)
 
             duration_ms = int((time.perf_counter() - t0) * 1000)
             return self._build_result(
@@ -869,6 +923,50 @@ class WasmScriptRunner:
             # the pool): teardown closes the FIFOs -- which also kills a guest
             # still wedged at the wall deadline -- and removes the scratch dir.
             self._teardown_instance(inst)
+
+    def _serve_until(
+        self,
+        inst: _PooledInstance,
+        thread: threading.Thread,
+        dispatcher: BridgeDispatcher,
+        final_key: str,
+        deadline: float,
+    ) -> dict[str, Any] | None:
+        """Serve bridge requests until a message carrying `final_key` arrives,
+        the wall `deadline` passes, or the guest dies. Returns the final
+        message or None. This is `run()`'s loop, factored so embedded sessions
+        reuse the exact same pump for the boot ack and each call result."""
+        while True:
+            remaining = deadline - time.monotonic()
+            read_budget = max(remaining, 0.0) + _TIMEOUT_READ_GRACE_S
+            line = _readline_bounded(inst.host_out, thread, read_budget)
+            if not line:
+                return None
+            try:
+                msg = json.loads(line)
+            except json.JSONDecodeError:
+                logger.warning("wasm guest sent a non-JSON line; ignoring")
+                continue
+            if not isinstance(msg, dict):
+                # A snippet can bypass the captured `sys.stdout` and write
+                # straight to the bridge FIFO via `sys.__stdout__` (still the
+                # real stdout fd during exec) -- e.g. a bare scalar like `5\n`
+                # is valid JSON (`json.loads` succeeds) but not a bridge
+                # message. Treat it like the non-JSON case: the guest is
+                # untrusted, so the host pump must never assume dict shape
+                # before checking it.
+                logger.warning("wasm guest sent a non-dict JSON line; ignoring")
+                continue
+            if msg.get(final_key):
+                return msg
+            if "op" not in msg and "id" not in msg:
+                # Every legitimate bridge request carries both an "id" (from
+                # the facade's `_next_req_id()`) and an "op" -- this only
+                # skips malformed dicts a well-behaved guest never sends.
+                continue
+            resp = dispatcher.dispatch(msg)
+            inst.host_in.write(json.dumps(resp) + "\n")
+            inst.host_in.flush()
 
     def _build_result(
         self,
@@ -984,12 +1082,37 @@ class WasmScriptRunner:
         limits: RunLimits,
         *,
         budget: ScriptBudget,
-    ) -> SnippetSession:
-        """Open an embedded-evaluation session: exec the facade + module once,
-        then serve repeated entry-point calls.
+    ) -> _WasmSnippetSession:
+        """Open an embedded-evaluation session: pop a warm instance, start it
+        in `"mode": "embedded"` (see `_GUEST_BOOTSTRAP_SOURCE`'s `_run_embedded`),
+        and hand back a `_WasmSnippetSession` that execs the facade + module
+        once then serves repeated `call()`s on the SAME guest -- module-level
+        state (e.g. memoized computation) persists between calls, unlike
+        `run()`'s one-shot-per-instance model. The session's dispatcher is
+        built `record_ops=False`: embedded evaluation is read-only by
+        construction (see `SnippetSession`'s protocol docstring)."""
+        # Imported lazily, same reasoning as `run()` (see the module docstring
+        # and this class's `if TYPE_CHECKING` import above).
+        from data_rover.core.script.bridge import BridgeDispatcher
 
-        Task 14: WASM embedded sessions (not yet implemented)."""
-        raise NotImplementedError("open_session: Task 14")
+        if self._closed:
+            raise RuntimeError("WasmScriptRunner is closed")
+        try:
+            inst = self._pool.get(timeout=_POOL_GET_TIMEOUT_S)
+        except queue.Empty as exc:
+            raise RuntimeError(
+                "wasm pool exhausted: no warm instance became available within "
+                f"{_POOL_GET_TIMEOUT_S}s"
+            ) from exc
+        assert inst.thread is not None
+        dispatcher = BridgeDispatcher(
+            model,
+            record_ops=False,  # sessions are read-only by construction
+            max_ops=limits.max_ops,
+            max_op_bytes=limits.max_op_bytes,
+            page_limit=limits.page_limit,
+        )
+        return _WasmSnippetSession(self, inst, dispatcher, code, limits, budget)
 
     def close(self) -> None:
         """Idempotent shutdown: stops the refill + epoch-ticker threads, drains
@@ -1009,6 +1132,143 @@ class WasmScriptRunner:
                 break
             self._teardown_instance(inst)
         shutil.rmtree(self._scripts_dir, ignore_errors=True)
+
+
+class _WasmSnippetSession:
+    """`SnippetSession` over one pooled guest instance (discarded on close).
+    Boot (module exec) happens in __init__ under the same pump as calls; a
+    guest death at ANY point promotes the mapped error into `boot_error`, so
+    every later call fails fast and the evaluator error-cells the remainder."""
+
+    def __init__(
+        self,
+        runner: WasmScriptRunner,
+        inst: _PooledInstance,
+        dispatcher: BridgeDispatcher,
+        code: str,
+        limits: RunLimits,
+        budget: ScriptBudget,
+    ) -> None:
+        self._runner = runner
+        self._inst = inst
+        self._dispatcher = dispatcher
+        self._limits = limits
+        self._budget = budget
+        self._closed = False
+        self.boot_error: ScriptError | None = None
+
+        deadline_s = min(limits.wall_timeout_s, max(budget.remaining(), 0.0))
+        self._arm(deadline_s)
+        start_msg = {
+            "mode": "embedded",
+            "code": code,
+            "entry": "value",  # unused in embedded mode; kept for shape
+            "element_ids": [],
+            "facade_source": FACADE_SOURCE,
+            "stdout_bytes": limits.stdout_bytes,
+            "result_repr_bytes": limits.result_repr_bytes,
+        }
+        inst.host_in.write(json.dumps(start_msg) + "\n")
+        inst.host_in.flush()
+        wall_deadline = time.monotonic() + deadline_s + _TIMEOUT_READ_GRACE_S
+        assert inst.thread is not None
+        boot = runner._serve_until(inst, inst.thread, dispatcher, "boot", wall_deadline)
+        if boot is None:
+            self.boot_error = self._death_error(wall_deadline)
+            return
+        err = boot.get("error")
+        if err is not None:
+            self.boot_error = ScriptError(
+                kind=err.get("kind", "runtime"),
+                message=err.get("message", ""),
+                traceback=err.get("traceback"),
+            )
+        else:
+            self._idle()
+
+    def _arm(self, deadline_s: float) -> None:
+        # Safe cross-thread: only called while the guest is parked on stdin.
+        if self._inst.store is not None:
+            ticks = max(1, math.ceil(deadline_s / _EPOCH_TICK_INTERVAL_S)) + 1
+            self._inst.store.set_epoch_deadline(ticks)
+
+    def _idle(self) -> None:
+        if self._inst.store is not None:
+            self._inst.store.set_epoch_deadline(_IDLE_EPOCH_DEADLINE_TICKS)
+
+    def _death_error(self, wall_deadline: float) -> ScriptError:
+        if self._inst.thread is not None:
+            self._inst.thread.join(timeout=_TEARDOWN_JOIN_TIMEOUT_S)
+        return self._runner._map_guest_death(self._inst, self._limits, wall_deadline)
+
+    def call(
+        self, entry: Literal["value", "step"], element_ids: list[str]
+    ) -> CallResult:
+        t0 = time.perf_counter()
+        if self.boot_error is not None or self._closed:
+            return CallResult(
+                value=None,
+                error=self.boot_error
+                or ScriptError(kind="cancelled", message="session closed"),
+                duration_ms=0,
+            )
+        deadline_s = min(
+            self._limits.wall_timeout_s, max(self._budget.remaining(), 0.0)
+        )
+        self._arm(deadline_s)
+        self._inst.host_in.write(
+            json.dumps({"call": {"entry": entry, "element_ids": element_ids}}) + "\n"
+        )
+        self._inst.host_in.flush()
+        wall_deadline = time.monotonic() + deadline_s + _TIMEOUT_READ_GRACE_S
+        assert self._inst.thread is not None
+        msg = self._runner._serve_until(
+            self._inst,
+            self._inst.thread,
+            self._dispatcher,
+            "call_result",
+            wall_deadline,
+        )
+        duration_ms = int((time.perf_counter() - t0) * 1000)
+        if msg is None:
+            # Guest died mid-call (epoch kill / crash): session is terminally
+            # dead -- promote so later calls fail fast.
+            self.boot_error = self._death_error(wall_deadline)
+            return CallResult(
+                value=None, error=self.boot_error, duration_ms=duration_ms
+            )
+        self._idle()
+        cr = msg["call_result"]
+        err = cr.get("error")
+        if err is not None:
+            return CallResult(
+                value=None,
+                error=ScriptError(
+                    kind=err.get("kind", "runtime"),
+                    message=err.get("message", ""),
+                    traceback=err.get("traceback"),
+                ),
+                duration_ms=duration_ms,
+            )
+        decoded, dmsg = decode_call_payload(entry, cr.get("payload"))
+        if decoded is None:
+            return CallResult(
+                value=None,
+                error=ScriptError(kind="runtime", message=dmsg or "malformed payload"),
+                duration_ms=duration_ms,
+            )
+        return CallResult(value=decoded, error=None, duration_ms=duration_ms)
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            self._inst.host_in.write(json.dumps({"close": True}) + "\n")
+            self._inst.host_in.flush()
+        except OSError:
+            pass
+        self._runner._teardown_instance(self._inst)
 
 
 # -- settings integration + process-wide singleton ---------------------------
