@@ -164,6 +164,30 @@ describe('ColumnManager', () => {
 		}
 	});
 
+	it('adds a script column via updateTableDefinition', () => {
+		vi.spyOn(store, 'getTableDraft').mockReturnValue(
+			scopeDraft([
+				{
+					kind: 'element',
+					source: { kind: 'row', chain_index: 0 },
+					header: '',
+					width_px: null,
+					hidden: false
+				}
+			])
+		);
+		const upd = vi.spyOn(store, 'updateTableDefinition').mockImplementation(() => {});
+		const c = render('t');
+		try {
+			click(document.querySelector('[data-testid="add-script-column"]'));
+			expect(upd).toHaveBeenCalled();
+			const defn = upd.mock.calls.at(-1)![1];
+			expect(defn.columns.some((col) => col.kind === 'script')).toBe(true);
+		} finally {
+			unmount(c);
+		}
+	});
+
 	it('adds a navigation column via updateTableDefinition', () => {
 		vi.spyOn(store, 'getTableDraft').mockReturnValue(
 			scopeDraft([

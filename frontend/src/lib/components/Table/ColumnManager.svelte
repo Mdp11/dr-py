@@ -23,6 +23,7 @@
 		moveColumn,
 		newNavigationColumn,
 		newPropertyColumn,
+		newScriptColumn,
 		removeColumn,
 		renameColumn,
 		replaceColumn
@@ -33,6 +34,7 @@
 	import NavigationColumnEditor from './NavigationColumnEditor.svelte';
 	import PropertyColumnEditor from './PropertyColumnEditor.svelte';
 	import RowSourceEditor from './RowSourceEditor.svelte';
+	import ScriptColumnEditor from './ScriptColumnEditor.svelte';
 
 	let { tabId, focusIndex = null }: { tabId: string; focusIndex?: number | null } = $props();
 
@@ -156,6 +158,11 @@
 	function addNavigationColumn(): void {
 		if (!defn) return;
 		apply(addColumn(defn, newNavigationColumn()));
+	}
+
+	function addScriptColumn(): void {
+		if (!defn) return;
+		apply(addColumn(defn, newScriptColumn()));
 	}
 
 	// Whole-column field replacement for the per-column editors: a same-shape
@@ -289,6 +296,14 @@
 								rowSource={defn.row_source}
 								onChange={(next) => onColumnChange(i, next)}
 							/>
+						{:else if col.kind === 'script'}
+							<ScriptColumnEditor
+								column={col}
+								columnIndex={i}
+								columns={defn.columns}
+								rowSource={defn.row_source}
+								onChange={(next) => onColumnChange(i, next)}
+							/>
 						{/if}
 					</div>
 				{/if}
@@ -331,6 +346,14 @@
 					onclick={addNavigationColumn}
 				>
 					+ Navigation
+				</button>
+				<button
+					type="button"
+					data-testid="add-script-column"
+					class="rounded border border-input px-2 py-1 text-[11px] hover:bg-muted"
+					onclick={addScriptColumn}
+				>
+					+ Script
 				</button>
 			</div>
 		{/if}
