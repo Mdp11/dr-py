@@ -7,6 +7,7 @@
  * deterministic under fake timers. This file is the whole journey unit.
  */
 import type { ModelStatus } from '$lib/api/model-status';
+import { startProgress, updateProgress, setProgressLabel, endProgress } from './progress.svelte';
 
 export type JourneyKind = 'create' | 'open';
 export type PhaseName = 'upload' | 'create' | 'hydrate' | 'validate' | 'finalize';
@@ -20,22 +21,22 @@ export interface StatusProgress {
 export const SPLINES: readonly string[] = [
 	'Asking every arrow where it thinks it’s going…',
 	'Deciding whether “one” or “many” was the right answer…',
-	"Reminding a box that it lives inside another box…",
-	"Untangling things that were connected a little too enthusiastically…",
+	'Reminding a box that it lives inside another box…',
+	'Untangling things that were connected a little too enthusiastically…',
 	'Convincing two boxes they can’t both be the parent…',
-	"Making sure nothing is secretly its own grandparent…",
-	"Letting the rules read the model and quietly judge it…",
-	"Gently informing a loop that it is, in fact, a loop…",
-	"Asking each relationship if it still likes where it ends up…",
-	"Convincing the metamodel to stop reflecting on itself for one second…",
-	"Reminding the view that it owns nothing and never did…",
+	'Making sure nothing is secretly its own grandparent…',
+	'Letting the rules read the model and quietly judge it…',
+	'Gently informing a loop that it is, in fact, a loop…',
+	'Asking each relationship if it still likes where it ends up…',
+	'Convincing the metamodel to stop reflecting on itself for one second…',
+	'Reminding the view that it owns nothing and never did…',
 	'Running validation, then pretending we didn’t see that…',
-	"Checking that every element remembered to bring a property…",
-	"Asking the metamodel what counts as a relationship today…",
-	"Quietly asking validation to be gentle this time…",
+	'Checking that every element remembered to bring a property…',
+	'Asking the metamodel what counts as a relationship today…',
+	'Quietly asking validation to be gentle this time…',
 	'Sorting the table by a column it didn’t know it had…',
-	"Widening a column so one property could finally stretch its legs…",
-	"Asking a subtree to hold still while we lock the whole family…",
+	'Widening a column so one property could finally stretch its legs…',
+	'Asking a subtree to hold still while we lock the whole family…',
 	'Walking the navigation chain so you don’t have to…'
 ];
 
@@ -95,4 +96,126 @@ export function statusToProgress(status: ModelStatus): StatusProgress {
 		return { phase: 'cold', fraction: null };
 	}
 	return { phase: 'hydrate', fraction: null };
+}
+
+// Tick cadence (ms). Elapsed time is accumulated from these nominal intervals —
+// see the module header for why we avoid Date.now().
+const TICK_MS = 80;
+const SPLINE_MS = 3000;
+const TAU_MS = 1200; // creep time-constant: visible motion that decelerates near the ceil
+const MIN_VISIBLE_MS = 600; // floor so a warm open reads as a smooth fill, not a flash
+
+let _active = false;
+let _kind: JourneyKind = 'open';
+let _phase: PhaseName = 'hydrate';
+let _phaseElapsed = 0;
+let _totalElapsed = 0;
+let _fraction: number | null = null;
+let _last = 0;
+let _finishing = false;
+let _splineIndex = 0;
+let _token: number | null = null;
+let _tick: ReturnType<typeof setInterval> | null = null;
+let _splineTick: ReturnType<typeof setInterval> | null = null;
+
+function _setPhase(phase: PhaseName, fraction: number | null): void {
+	if (phase !== _phase) {
+		_phase = phase;
+		_phaseElapsed = 0; // restart the creep clock for the new slice
+	}
+	_fraction = fraction;
+}
+
+function _stop(): void {
+	if (_tick !== null) clearInterval(_tick);
+	if (_splineTick !== null) clearInterval(_splineTick);
+	if (_token !== null) endProgress(_token);
+	_tick = null;
+	_splineTick = null;
+	_token = null;
+	_active = false;
+	_finishing = false;
+	_phaseElapsed = 0;
+	_totalElapsed = 0;
+	_fraction = null;
+	_last = 0;
+	_splineIndex = 0;
+}
+
+function _onTick(): void {
+	if (!_active || _token === null) return;
+	_phaseElapsed += TICK_MS;
+	_totalElapsed += TICK_MS;
+	const [floor, ceil] = phaseSlice(_kind, _phase);
+	const candidate =
+		_fraction !== null
+			? floor + _fraction * (ceil - floor)
+			: easeToward(floor, ceil, _phaseElapsed, TAU_MS);
+	_last = clampMonotonic(candidate, _last);
+	updateProgress(_token, _last, 100);
+	if (_finishing && _totalElapsed >= MIN_VISIBLE_MS && _last >= 100) _stop();
+}
+
+function _onSplineTick(): void {
+	if (!_active || _token === null) return;
+	_splineIndex += 1;
+	setProgressLabel(_token, splineAt(_splineIndex));
+}
+
+/** Start the journey. Idempotent: a no-op if one is already active, so the
+ * create flow can start it and the workspace boot() can adopt the same one. */
+export function beginJourney(kind: JourneyKind): void {
+	if (_active) return;
+	_active = true;
+	_kind = kind;
+	_phase = kind === 'create' ? 'upload' : 'hydrate';
+	_phaseElapsed = 0;
+	_totalElapsed = 0;
+	_fraction = kind === 'create' ? 0 : null;
+	_last = 0;
+	_finishing = false;
+	_splineIndex = 0;
+	_token = startProgress(splineAt(0));
+	updateProgress(_token, 0, 100);
+	_tick = setInterval(_onTick, TICK_MS);
+	_splineTick = setInterval(_onSplineTick, SPLINE_MS);
+}
+
+/** Feed real upload bytes (create journey only). */
+export function journeyUpload(loaded: number, total: number | null): void {
+	if (!_active || _kind !== 'create' || _phase !== 'upload') return;
+	if (total !== null && total > 0) {
+		_fraction = Math.min(1, loaded / total);
+		if (loaded >= total) _setPhase('create', null); // bytes on the wire; server-side parse dominates
+	}
+}
+
+/** Feed a `/model/status` poll result. */
+export function journeyStatus(status: ModelStatus): void {
+	if (!_active) return;
+	const p = statusToProgress(status);
+	if (p.phase === 'cold') return; // keep creeping in the current slice
+	if (p.phase === 'ready') {
+		_setPhase('validate', 1); // push to the validate ceil while boot's last fetches finish
+		return;
+	}
+	_setPhase(p.phase, p.fraction);
+}
+
+/** Snap to 100% (honoring the min visible duration) then tear down. */
+export function finishJourney(): void {
+	if (!_active) return;
+	_finishing = true;
+	_setPhase('finalize', 1);
+}
+
+/** Tear down immediately (error / unmount) with no min-duration hold. */
+export function cancelJourney(): void {
+	if (!_active) return;
+	_stop();
+}
+
+/** Test-only teardown; safe when inactive. */
+export function resetJourney(): void {
+	_stop();
 }

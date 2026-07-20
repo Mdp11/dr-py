@@ -63,3 +63,106 @@ describe('open-journey pure helpers', () => {
 		expect(statusToProgress({ state: 'cold' })).toEqual({ phase: 'cold', fraction: null });
 	});
 });
+
+import { afterEach, beforeEach, vi } from 'vitest';
+import {
+	beginJourney,
+	journeyUpload,
+	journeyStatus,
+	finishJourney,
+	cancelJourney,
+	resetJourney
+} from '../open-journey';
+import { getActiveProgress, resetProgress } from '../progress.svelte';
+
+describe('open-journey controller', () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+		resetProgress();
+		resetJourney();
+	});
+	afterEach(() => {
+		resetJourney();
+		resetProgress();
+		vi.useRealTimers();
+	});
+
+	const pct = () => getActiveProgress()?.done ?? null;
+
+	it('starts one entry showing the first spline at 0%', () => {
+		beginJourney('open');
+		const e = getActiveProgress();
+		expect(e).not.toBeNull();
+		expect(e?.label).toBe(SPLINES[0]);
+		expect(e?.done).toBe(0);
+		expect(e?.total).toBe(100);
+	});
+
+	it('beginJourney is idempotent — no second entry, kind is preserved', () => {
+		beginJourney('create');
+		journeyUpload(50, 100); // create-only signal takes effect
+		beginJourney('open'); // must no-op (kind stays create)
+		journeyUpload(100, 100); // still honored → proves kind is still create
+		vi.advanceTimersByTime(80);
+		// create/upload slice is [0,30]; 100% bytes → phase advances to create[30,42]
+		expect(pct()).toBeGreaterThanOrEqual(30);
+	});
+
+	it('open journey creeps in the hydrate slice and never exceeds its ceil', () => {
+		beginJourney('open');
+		vi.advanceTimersByTime(80 * 200); // long creep
+		const p = pct()!;
+		expect(p).toBeGreaterThan(0);
+		expect(p).toBeLessThanOrEqual(72);
+	});
+
+	it('is monotonic across a full open sequence and finishes at 100', () => {
+		beginJourney('open');
+		const seen: number[] = [];
+		const step = () => {
+			vi.advanceTimersByTime(80);
+			seen.push(pct()!);
+		};
+		journeyStatus({ state: 'hydrating', hydration: { phase: 'build', done: 1, total: 4 } });
+		step();
+		journeyStatus({ state: 'validating', validation: { running: true, done: 2, total: 10 } });
+		step();
+		journeyStatus({ state: 'ready', model_rev: 1 });
+		step();
+		finishJourney();
+		vi.advanceTimersByTime(80 * 20); // past MIN_VISIBLE + fill to 100
+		// monotonic non-decrease
+		for (let i = 1; i < seen.length; i++) expect(seen[i]).toBeGreaterThanOrEqual(seen[i - 1]);
+		// teardown after finish
+		expect(getActiveProgress()).toBeNull();
+	});
+
+	it('rotates the spline label on the spline ticker', () => {
+		beginJourney('open');
+		expect(getActiveProgress()?.label).toBe(SPLINES[0]);
+		vi.advanceTimersByTime(3000);
+		expect(getActiveProgress()?.label).toBe(SPLINES[1]);
+	});
+
+	it('finishJourney holds the entry for the minimum visible duration', () => {
+		beginJourney('open');
+		finishJourney();
+		vi.advanceTimersByTime(240); // < MIN_VISIBLE_MS (600)
+		expect(getActiveProgress()).not.toBeNull();
+		vi.advanceTimersByTime(600); // now past the floor
+		expect(getActiveProgress()).toBeNull();
+	});
+
+	it('cancelJourney tears down immediately with no hold', () => {
+		beginJourney('open');
+		vi.advanceTimersByTime(80);
+		cancelJourney();
+		expect(getActiveProgress()).toBeNull();
+	});
+
+	it('journeyStatus/journeyUpload are no-ops when inactive', () => {
+		journeyStatus({ state: 'ready', model_rev: 1 });
+		journeyUpload(1, 2);
+		expect(getActiveProgress()).toBeNull();
+	});
+});
