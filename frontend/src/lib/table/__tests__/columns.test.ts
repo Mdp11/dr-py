@@ -12,7 +12,8 @@ import {
 	ColumnInUseError,
 	navMaxStepIndex,
 	newNavigationColumn,
-	newPropertyColumn
+	newPropertyColumn,
+	newScriptColumn
 } from '$lib/table/columns';
 import { ColumnSchema, TableDefinitionSchema } from '$lib/api/types';
 import type { NavigationDefinition, TableDefinition } from '$lib/api/types';
@@ -446,4 +447,63 @@ test('hidden and source step_index round-trip through the definition schema', ()
 	});
 	expect(defn.columns[1].hidden).toBe(true);
 	expect((defn.columns[2].source as { step_index?: number | null }).step_index).toBe(1);
+});
+
+test('newScriptColumn produces schema-valid defaults', () => {
+	expect(ColumnSchema.parse(newScriptColumn())).toMatchObject({ hidden: false, kind: 'script' });
+});
+
+it('columnLabel returns Script for script columns', () => {
+	const col = newScriptColumn();
+	expect(columnLabel(col)).toBe('Script');
+});
+
+it('columnKindLabel returns Script for script kind', () => {
+	expect(columnKindLabel('script')).toBe('Script');
+});
+
+it('removeColumn shifts down a surviving forward ref when a script column with ColumnRef source is present', () => {
+	// cols: [element(0), property(1), script source=column(1)(2)]
+	let d = addColumn(base, {
+		kind: 'property',
+		source: { kind: 'row', chain_index: 0 },
+		name: 'mass',
+		mode: 'collapse',
+		keep_empty: true,
+		header: '',
+		width_px: null,
+		hidden: false
+	});
+	const scriptCol = newScriptColumn();
+	d = addColumn(d, {
+		...scriptCol,
+		source: { kind: 'column', index: 1 }
+	});
+	// removing column 0 (element, which nothing sources) should shift the script's ref from 1 -> 0
+	const next = removeColumn(d, 0);
+	expect(next.columns).toHaveLength(2);
+	expect(next.columns[1].source).toEqual({ kind: 'column', index: 0 });
+});
+
+it('moveColumn remaps ColumnRef.index when a script column with ColumnRef source is moved', () => {
+	// cols: [element(0), property(1), script source=column(1)(2)]
+	let d = addColumn(base, {
+		kind: 'property',
+		source: { kind: 'row', chain_index: 0 },
+		name: 'mass',
+		mode: 'collapse',
+		keep_empty: true,
+		header: '',
+		width_px: null,
+		hidden: false
+	});
+	const scriptCol = newScriptColumn();
+	d = addColumn(d, {
+		...scriptCol,
+		source: { kind: 'column', index: 1 }
+	});
+	// move property from 1 → 0; the script column's source must follow to index 0
+	const moved = moveColumn(d, 1, 0);
+	const script = moved.columns[2];
+	expect(script.source).toEqual({ kind: 'column', index: 0 });
 });

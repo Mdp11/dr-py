@@ -70,6 +70,19 @@ export function newNavigationColumn(): Column {
 	};
 }
 
+export function newScriptColumn(): Column {
+	return {
+		kind: 'script',
+		source: { kind: 'row', chain_index: 0 },
+		snippet: {},
+		mode: 'collapse',
+		keep_empty: true,
+		header: '',
+		width_px: null,
+		hidden: false
+	};
+}
+
 /** Highest addressable chain step of a navigation definition: a path has one
  * column per relationship/property hop plus the start (index 0); a set_op
  * root exposes a single implicit column. */
@@ -225,6 +238,7 @@ export function columnLabel(col: Column): string {
 	if (col.header) return col.header;
 	if (col.kind === 'property') return col.name;
 	if (col.kind === 'element') return 'Scope';
+	if (col.kind === 'script') return 'Script';
 	return 'Navigation';
 }
 
@@ -237,5 +251,6 @@ export function columnKindLabel(kind: string): string {
 	if (kind === 'element') return 'Scope';
 	if (kind === 'property') return 'Property';
 	if (kind === 'navigation') return 'Navigation';
+	if (kind === 'script') return 'Script';
 	return kind;
 }
