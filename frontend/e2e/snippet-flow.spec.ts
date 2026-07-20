@@ -159,6 +159,6 @@ test('selecting an undefined entry hints and inserts a stub', async ({ page }) =
 	// The debounced lint picks up the stub and the hint clears.
 	await expect(page.getByTestId('snippet-entry-hint')).toBeHidden({ timeout: 10_000 });
 	await expect(page.locator('[data-testid="snippet-editor"] .cm-content')).toContainText(
-		'def value(el):'
+		'def value(elements):'
 	);
 });
