@@ -1170,7 +1170,7 @@ class _WasmSnippetSession:
         }
         inst.host_in.write(json.dumps(start_msg) + "\n")
         inst.host_in.flush()
-        wall_deadline = time.monotonic() + deadline_s + _TIMEOUT_READ_GRACE_S
+        wall_deadline = time.monotonic() + deadline_s
         assert inst.thread is not None
         boot = runner._serve_until(inst, inst.thread, dispatcher, "boot", wall_deadline)
         if boot is None:
@@ -1220,7 +1220,7 @@ class _WasmSnippetSession:
             json.dumps({"call": {"entry": entry, "element_ids": element_ids}}) + "\n"
         )
         self._inst.host_in.flush()
-        wall_deadline = time.monotonic() + deadline_s + _TIMEOUT_READ_GRACE_S
+        wall_deadline = time.monotonic() + deadline_s
         assert self._inst.thread is not None
         msg = self._runner._serve_until(
             self._inst,

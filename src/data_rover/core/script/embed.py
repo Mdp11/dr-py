@@ -96,9 +96,21 @@ class ScriptEvalContext:
         assert self._runner is not None and self._model is not None
         sess = self._sessions.get(code)
         if sess is None:
-            sess = self._runner.open_session(
-                self._model, code, self._limits, budget=self.budget
-            )
+            try:
+                sess = self._runner.open_session(
+                    self._model, code, self._limits, budget=self.budget
+                )
+            except Exception as exc:
+                # `open_session` is documented as never raising for
+                # snippet-caused failures, but a closed runner or an
+                # exhausted warm pool (`WasmScriptRunner`) raises
+                # `RuntimeError` -- degrade like the runner-unavailable
+                # branch above rather than letting it 500 the route.
+                return CallResult(
+                    value=None,
+                    error=ScriptError(kind="unavailable", message=str(exc)),
+                    duration_ms=0,
+                )
             self._sessions[code] = sess
         if sess.boot_error is not None:
             return CallResult(value=None, error=sess.boot_error, duration_ms=0)

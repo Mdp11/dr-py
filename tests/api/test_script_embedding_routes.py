@@ -214,6 +214,58 @@ def test_evaluate_runner_unavailable_degrades(
     assert cell["kind"] == "error" and "unavailable" in cell["message"]
 
 
+class _OpenSessionRaisesRunner:
+    """Runner whose `open_session` raises, mirroring `WasmScriptRunner` when
+    it's closed or its warm pool doesn't yield an instance in time (both
+    surface as `RuntimeError`, not a snippet-caused `ScriptError`). The
+    route must still degrade to an error cell/warning and stay 200 — never
+    a 500 (`ScriptEvalContext._call_uncached` guards the `open_session`
+    call for exactly this)."""
+
+    def run(self, model, req, limits, *, record_ops, rev):
+        raise NotImplementedError("unused; only open_session is exercised")
+
+    def open_session(self, model, code, limits, *, budget):
+        raise RuntimeError("wasm pool exhausted: no warm instance became available")
+
+
+def test_evaluate_open_session_raises_degrades(
+    client: TestClient, app: FastAPI, seed_thing_model: None
+) -> None:
+    app.dependency_overrides[get_runner] = lambda: _OpenSessionRaisesRunner()
+    r = client.post(
+        papi("/tables/evaluate"),
+        json={"definition": _script_table("def value(els): return 1")},
+        headers=AUTH_HEADERS,
+    )
+    assert r.status_code == 200, r.text
+    cell = r.json()["rows"][0]["cells"][0]
+    assert cell["kind"] == "error" and "pool exhausted" in cell["message"]
+
+
+def test_navigation_open_session_raises_degrades(
+    client: TestClient, app: FastAPI, seed_thing_model: None
+) -> None:
+    app.dependency_overrides[get_runner] = lambda: _OpenSessionRaisesRunner()
+    defn = {
+        "kind": "path",
+        "start": {"kind": "scope", "types": ["Thing"]},
+        "steps": [
+            {
+                "kind": "script",
+                "snippet": {"definition": {"code": "def step(el): return []"}},
+            }
+        ],
+    }
+    r = client.post(
+        papi("/navigations/evaluate"), json={"definition": defn}, headers=AUTH_HEADERS
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["chains"] == []
+    assert any("pool exhausted" in w for w in body["warnings"])
+
+
 def test_evaluate_dangling_snippet_ref(
     client: TestClient, seed_thing_model: None
 ) -> None:

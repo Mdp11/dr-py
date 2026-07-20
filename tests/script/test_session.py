@@ -105,6 +105,11 @@ def test_serialize_step_shapes(small_model) -> None:
         ser("step", 42)
     with pytest.raises(ValueError):
         ser("step", [1])
+    # A bare `str` is iterable char-by-char; without the guard this would
+    # silently produce one single-character "id" per character instead of
+    # raising (see the `entry == "step"` branch in facade_src.py).
+    with pytest.raises(ValueError, match="iterable of Elements or element ids"):
+        ser("step", el.id)
 
 
 # --- Session tests (M2) -----
@@ -161,6 +166,20 @@ def test_session_step_entry(small_model) -> None:
     sess.close()
 
 
+def test_session_step_rejects_bare_str_return(small_model) -> None:
+    # A bare `str` (e.g. `return el.id`) is iterable char-by-char; without a
+    # guard the step branch would silently yield one single-character "id"
+    # per character instead of erroring. It must be rejected up front, not
+    # iterated.
+    ids = sorted(small_model.elements)
+    sess = _open(small_model, "def step(el):\n    return el.id")
+    res = sess.call("step", [ids[0]])
+    assert res.value is None
+    assert res.error is not None
+    assert "iterable of Elements or element ids" in res.error.message
+    sess.close()
+
+
 # --- ScriptEvalContext tests (M2+M3) -----
 
 
@@ -199,6 +218,37 @@ def test_ctx_unavailable_and_budget(small_model) -> None:
     res = spent.call("def value(els): return 1", "value", [ids[0]])
     assert res.error is not None and res.error.kind == "timeout"
     assert "budget" in res.error.message
+
+
+class _OpenSessionRaisesRunner:
+    """Stub `ScriptRunner` whose `open_session` raises, mirroring
+    `WasmScriptRunner.open_session` when the runner is closed or the warm
+    pool doesn't yield an instance within its timeout (both `RuntimeError`,
+    despite the protocol docstring saying `open_session` never raises for
+    snippet-caused failures -- these are runner-lifecycle failures, not
+    snippet-caused ones)."""
+
+    def run(self, model, req, limits, *, record_ops, rev):
+        raise NotImplementedError("unused; only open_session is exercised")
+
+    def open_session(self, model, code, limits, *, budget):
+        raise RuntimeError("wasm pool exhausted: no warm instance became available")
+
+
+def test_ctx_open_session_raises_degrades(small_model) -> None:
+    # embed.py's ScriptEvalContext._call_uncached must guard the
+    # open_session() call: an exhausted/closed runner must degrade to an
+    # "unavailable" CallResult (and set ctx.errored), never propagate the
+    # RuntimeError up through the route handler as a 500.
+    ids = sorted(small_model.elements)
+    ctx = ScriptEvalContext(
+        _OpenSessionRaisesRunner(), small_model, RunLimits(), ScriptBudget.start(30)
+    )
+    res = ctx.call("def value(els): return 1", "value", [ids[0]])
+    assert res.value is None
+    assert res.error is not None and res.error.kind == "unavailable"
+    assert "pool exhausted" in res.error.message
+    assert ctx.errored
 
 
 def test_ctx_boot_error_and_warnings(small_model) -> None:

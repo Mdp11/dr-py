@@ -297,6 +297,10 @@ def _dr_serialize_entry_result(entry, value):
     if entry == "step":
         if value is None:
             return {"ids": []}
+        if isinstance(value, str):
+            raise ValueError(
+                "step() must return an iterable of Elements or element ids"
+            )
         try:
             items = list(value)
         except TypeError:
