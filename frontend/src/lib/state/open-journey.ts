@@ -18,25 +18,25 @@ export interface StatusProgress {
 /** Reticulating splines — pure flavor text; the bar tells the real story.
  * Fixed order, cycled on a timer. Verbatim per product copy. */
 export const SPLINES: readonly string[] = [
-	"Asking every arrow where it thinks it's going…",
-	'Deciding whether "one" or "many" was the right answer…',
+	'Asking every arrow where it thinks it’s going…',
+	'Deciding whether “one” or “many” was the right answer…',
 	"Reminding a box that it lives inside another box…",
 	"Untangling things that were connected a little too enthusiastically…",
-	"Convincing two boxes they can't both be the parent…",
+	'Convincing two boxes they can’t both be the parent…',
 	"Making sure nothing is secretly its own grandparent…",
 	"Letting the rules read the model and quietly judge it…",
 	"Gently informing a loop that it is, in fact, a loop…",
 	"Asking each relationship if it still likes where it ends up…",
 	"Convincing the metamodel to stop reflecting on itself for one second…",
 	"Reminding the view that it owns nothing and never did…",
-	"Running validation, then pretending we didn't see that…",
+	'Running validation, then pretending we didn’t see that…',
 	"Checking that every element remembered to bring a property…",
 	"Asking the metamodel what counts as a relationship today…",
 	"Quietly asking validation to be gentle this time…",
-	"Sorting the table by a column it didn't know it had…",
+	'Sorting the table by a column it didn’t know it had…',
 	"Widening a column so one property could finally stretch its legs…",
 	"Asking a subtree to hold still while we lock the whole family…",
-	"Walking the navigation chain so you don't have to…"
+	'Walking the navigation chain so you don’t have to…'
 ];
 
 /** Cycle the splines, wrapping (and tolerating negative indices). */

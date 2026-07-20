@@ -11,8 +11,8 @@ import {
 describe('open-journey pure helpers', () => {
 	it('has 19 verbatim splines, first is the arrow line', () => {
 		expect(SPLINES).toHaveLength(19);
-		expect(SPLINES[0]).toBe("Asking every arrow where it thinks it's going…");
-		expect(SPLINES[18]).toBe("Walking the navigation chain so you don't have to…");
+		expect(SPLINES[0]).toBe('Asking every arrow where it thinks it’s going…');
+		expect(SPLINES[18]).toBe('Walking the navigation chain so you don’t have to…');
 	});
 
 	it('splineAt wraps and never returns undefined, including negatives', () => {
