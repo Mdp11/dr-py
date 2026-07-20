@@ -6,6 +6,7 @@
 	// the unconfigured `{}`), but stays deliberately simpler: a code string
 	// has no embedded-draft mirror machinery to maintain, so this component
 	// is plain controlled state — no `$state.raw`, no mirror `$effect`.
+	import { onDestroy } from 'svelte';
 	import * as api from '$lib/api/artifacts';
 	import { lintSnippet } from '$lib/api/snippets';
 	import { getArtifactHeaders } from '$lib/state';
@@ -69,6 +70,14 @@
 		scheduleLint(snippet.definition?.code ?? '');
 	});
 
+	// An unmounted instance must not write lint state from a pending timer or
+	// an in-flight response — bump the generation and drop the timer so both
+	// are neutralized.
+	onDestroy(() => {
+		if (lintTimer) clearTimeout(lintTimer);
+		lintSeq++;
+	});
+
 	function handleCodeChange(code: string): void {
 		if (!snippet.definition) return;
 		onChange({ definition: { ...snippet.definition, code } });
@@ -76,18 +85,23 @@
 
 	async function switchToInline(): Promise<void> {
 		if (inline || seeding) return;
+		const capturedRef = snippet.ref ?? null;
 		let code: string | null = null;
-		if (snippet.ref) {
+		if (capturedRef) {
 			seeding = true;
 			try {
-				const artifact = await api.getArtifact(snippet.ref);
-				const payload = artifact.payload as Record<string, unknown>;
-				code = typeof payload.code === 'string' ? payload.code : null;
+				const artifact = await api.getArtifact(capturedRef);
+				code = typeof artifact.payload.code === 'string' ? artifact.payload.code : null;
 			} catch {
 				code = null; // unknown/foreign ref: fall through to a fresh stub
 			} finally {
 				seeding = false;
 			}
+			// The user picked a DIFFERENT ref while this fetch was in flight (the
+			// select stays enabled — only the toggle buttons are gated by
+			// `seeding`). That newer pick must win: bail without emitting, or
+			// we'd silently clobber it with the stale ref's definition.
+			if (snippet.ref !== capturedRef) return;
 		}
 		onChange({
 			definition: {
@@ -140,6 +154,7 @@
 			aria-label="Saved snippet"
 			value={snippet.ref ?? ''}
 			onchange={setRef}
+			disabled={seeding}
 			class="rounded border border-input bg-card px-1 py-0.5"
 		>
 			<option value="">Select a saved snippet…</option>

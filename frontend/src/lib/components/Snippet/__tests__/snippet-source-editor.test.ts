@@ -14,7 +14,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { server } from '../../../api/__tests__/server';
 import * as artifactsApi from '$lib/api/artifacts';
 import { getArtifactHeaders, loadArtifacts, resetArtifacts } from '$lib/state';
-import type { ArtifactHeader, SnippetSource } from '$lib/api/types';
+import type { Artifact, ArtifactHeader, SnippetSource } from '$lib/api/types';
 import SnippetSourceEditor from '../SnippetSourceEditor.svelte';
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
@@ -207,6 +207,84 @@ describe('SnippetSourceEditor — switching to inline', () => {
 		} finally {
 			unmount(c);
 			vi.useRealTimers();
+		}
+	});
+
+	it('does not clobber a newer ref pick with a stale getArtifact response (race)', async () => {
+		// 'B' must be a real <option> for `sel.value = 'B'` to stick below.
+		await setArtifactHeaders([
+			{
+				id: 'B',
+				kind: 'code_snippet',
+				name: 'B',
+				updated_at: '2026-07-17T00:00:00Z',
+				updated_by: null,
+				entry_points: ['value']
+			}
+		]);
+		// A plain mutable object (not $state) — mount() keeps a live reference
+		// to it, so mutating a field in place is how this bare-mount test
+		// simulates "the parent re-passed an updated snippet prop" without a
+		// full parent/child reactivity round-trip.
+		const snippet: SnippetSource = { ref: 'A' };
+		let resolveArtifact: ((a: Artifact) => void) | undefined;
+		const pending = new Promise<Artifact>((resolve) => {
+			resolveArtifact = resolve;
+		});
+		const getArtifactSpy = vi.spyOn(artifactsApi, 'getArtifact').mockReturnValue(pending);
+		const onChange = vi.fn();
+		const c = mount(SnippetSourceEditor, {
+			target: document.body,
+			props: { snippet, entry: 'value', onChange }
+		});
+		flushSync();
+		try {
+			// Click "inline": switchToInline captures ref A and awaits
+			// getArtifact('A') — it does not resolve yet.
+			click(document.querySelector('[data-testid="snippet-mode-inline"]'));
+			expect(getArtifactSpy).toHaveBeenCalledTimes(1);
+			expect(getArtifactSpy).toHaveBeenCalledWith('A');
+
+			// The ref select renders `disabled` while seeding, but disabled only
+			// blocks native user interaction — a scripted dispatch (used here to
+			// stand in for a concurrent update landing) still reaches the
+			// listener, same as test 2 above.
+			const sel = select('snippet-ref-select');
+			sel.value = 'B';
+			sel.dispatchEvent(new Event('change', { bubbles: true }));
+			flushSync();
+			expect(onChange).toHaveBeenCalledWith({ ref: 'B' });
+			// Simulate the parent applying that pick back into the prop.
+			snippet.ref = 'B';
+
+			// The stale fetch for A now resolves.
+			resolveArtifact!({
+				id: 'A',
+				kind: 'code_snippet',
+				name: 'A',
+				artifact_rev: 1,
+				updated_at: '2026-07-17T00:00:00Z',
+				updated_by: null,
+				entry_points: ['value'],
+				payload: {
+					schema_version: 1,
+					language: 'python',
+					code: 'def value(elements):\n    return "A"\n'
+				}
+			});
+			// Let switchToInline's continuation run to completion.
+			await pending;
+			await Promise.resolve();
+			await Promise.resolve();
+
+			// Only the { ref: 'B' } pick was ever emitted — the stale
+			// continuation for A saw the changed ref and bailed silently.
+			expect(onChange).toHaveBeenCalledTimes(1);
+			expect(onChange).not.toHaveBeenCalledWith(
+				expect.objectContaining({ definition: expect.anything() })
+			);
+		} finally {
+			unmount(c);
 		}
 	});
 });
