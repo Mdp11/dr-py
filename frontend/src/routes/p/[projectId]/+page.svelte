@@ -26,9 +26,12 @@
 	import { hasUnsavedWork } from '$lib/state/unsaved';
 	import { runValidation } from '$lib/state/validate-action';
 	import {
+		beginJourney,
+		cancelJourney,
 		cancelOpenProgress,
 		clearModelError,
 		clearSelection,
+		finishJourney,
 		getActiveProjectId,
 		reactToBootError,
 		setAccessNotice,
@@ -70,7 +73,10 @@
 		void boot();
 	});
 	onDestroy(() => stopRealtime());
-	onDestroy(() => cancelOpenProgress());
+	onDestroy(() => {
+		cancelOpenProgress();
+		cancelJourney();
+	});
 
 	// Unload guard: staged (uncommitted) edits and unsaved table/navigation
 	// drafts live only in this page's memory — losing the document loses them.
@@ -102,8 +108,12 @@
 		// immediately), so this flag is what keeps the containment tree on a
 		// skeleton instead of flashing its empty states while the loads below run.
 		setProjectOpening(true);
+		// Adopt the journey started on the picker/wizard click, or start one now for
+		// a direct-URL landing. Idempotent: a create/open journey already running is
+		// preserved (kind + slice table intact).
+		beginJourney('open');
 		try {
-			void trackOpenProgress(); // fire-and-forget: overlay while the requests below hydrate the session
+			void trackOpenProgress(); // fire-and-forget: feeds the journey while the requests below hydrate
 			markViewUnresolved(); // reset the view-answered gate on every project (re)entry
 			try {
 				setMetamodel(await metamodelApi.getMetamodel());
@@ -118,7 +128,8 @@
 					setNotice: setAccessNotice,
 					navigate: () => void goto(resolve('/projects'))
 				});
-				cancelOpenProgress(); // a failed boot must tear the open-progress overlay down
+				cancelOpenProgress(); // stop the status poll loop
+				cancelJourney(); // and tear the progress bar down
 				return;
 			}
 			await refreshView();
@@ -135,6 +146,7 @@
 			await loadArtifacts().catch(() => {}); // artifact library is best-effort
 		} finally {
 			setProjectOpening(false);
+			finishJourney(); // snap to 100% (honoring the min visible duration) and tear down; no-op if already cancelled
 		}
 	}
 
