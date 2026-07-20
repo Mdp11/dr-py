@@ -313,6 +313,60 @@ it('a selected ref node shows the linked empty state', async () => {
 	}
 });
 
+it('renders the script-warnings chip when the preview carries warnings', async () => {
+	const tabId = 'nav:draft:warnings';
+	await ensureDraft(tabId);
+	vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue({
+		...CHAIN_PAGE,
+		warnings: ['step 2: divide by zero']
+	});
+	updateDefinition(tabId, runnablePath());
+	await runPreview(tabId, []).catch(() => {});
+	await flushEvaluate();
+	const c = render(tabId);
+	try {
+		const chip = document.querySelector('[data-testid="nav-warnings"]');
+		expect(chip).toBeTruthy();
+		expect(chip?.textContent).toContain('1 script warning');
+	} finally {
+		unmount(c);
+	}
+});
+
+it('renders the plural script-warnings chip for more than one warning', async () => {
+	const tabId = 'nav:draft:warnings-plural';
+	await ensureDraft(tabId);
+	vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue({
+		...CHAIN_PAGE,
+		warnings: ['warning one', 'warning two']
+	});
+	updateDefinition(tabId, runnablePath());
+	await runPreview(tabId, []).catch(() => {});
+	await flushEvaluate();
+	const c = render(tabId);
+	try {
+		const chip = document.querySelector('[data-testid="nav-warnings"]');
+		expect(chip?.textContent).toContain('2 script warnings');
+	} finally {
+		unmount(c);
+	}
+});
+
+it('does not render the warnings chip when the preview has no warnings', async () => {
+	const tabId = 'nav:draft:no-warnings';
+	await ensureDraft(tabId);
+	vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+	updateDefinition(tabId, runnablePath());
+	await runPreview(tabId, []).catch(() => {});
+	await flushEvaluate();
+	const c = render(tabId);
+	try {
+		expect(document.querySelector('[data-testid="nav-warnings"]')).toBeNull();
+	} finally {
+		unmount(c);
+	}
+});
+
 it('Load more pages the selected node’s chains', async () => {
 	const tabId = 'nav:draft:load-more';
 	await ensureDraft(tabId);

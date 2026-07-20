@@ -512,6 +512,28 @@ describe('navigation preview staleness + pagination', () => {
 		expect(evaluate).toHaveBeenCalledTimes(2);
 	});
 
+	it('runPreview stores warnings from the evaluate response', async () => {
+		await ensureDraft('nav:draft:1');
+		vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue({
+			...CHAIN_PAGE,
+			warnings: ['step 2: divide by zero']
+		});
+		await runPreview('nav:draft:1');
+		expect(getPreview('nav:draft:1')?.warnings).toEqual(['step 2: divide by zero']);
+	});
+
+	it('loadMorePreview keeps the first page’s warnings even when the second page carries none', async () => {
+		await ensureDraft('nav:draft:1');
+		vi.spyOn(artifactsApi, 'evaluateNavigation')
+			.mockResolvedValueOnce({ ...PAGE_1, warnings: ['first page warning'] })
+			.mockResolvedValueOnce({ ...PAGE_2, warnings: [] });
+		await runPreview('nav:draft:1');
+		expect(getPreview('nav:draft:1')?.warnings).toEqual(['first page warning']);
+		await loadMorePreview('nav:draft:1');
+		// Second page's (empty) warnings must NOT clobber the first page's.
+		expect(getPreview('nav:draft:1')?.warnings).toEqual(['first page warning']);
+	});
+
 	it('a failed loadMorePreview restores loading and keeps existing chains', async () => {
 		await ensureDraft('nav:draft:1');
 		vi.spyOn(artifactsApi, 'evaluateNavigation')

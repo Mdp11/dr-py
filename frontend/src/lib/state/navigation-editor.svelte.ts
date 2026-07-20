@@ -96,6 +96,11 @@ export interface NavPreview {
 	total: number;
 	truncated: boolean;
 	loading: boolean;
+	/** Script-step warnings collected during evaluation (F6 script steps).
+	 * `loadMorePreview` deliberately keeps the FIRST page's warnings — same
+	 * policy as the table's `mergePage` — rather than overwriting with a later
+	 * page's (possibly empty) warnings. */
+	warnings: string[];
 }
 
 const _drafts = new SvelteMap<string, NavDraft>();
@@ -810,7 +815,8 @@ export async function runPreview(tabId: string, path: NodePath = []): Promise<vo
 		chains: [],
 		total: 0,
 		truncated: false,
-		loading: true
+		loading: true,
+		warnings: []
 	});
 	try {
 		const page = await api.evaluateNavigation({
@@ -825,7 +831,8 @@ export async function runPreview(tabId: string, path: NodePath = []): Promise<vo
 			chains: page.chains,
 			total: page.total,
 			truncated: page.truncated,
-			loading: false
+			loading: false,
+			warnings: page.warnings
 		});
 	} catch (err) {
 		if (isCurrent(tabId, key, gen)) {

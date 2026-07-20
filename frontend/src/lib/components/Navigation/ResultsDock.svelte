@@ -156,6 +156,11 @@
 			{#if preview.truncated}
 				<p class="mt-1 text-[10px] text-muted-foreground/70">(results capped)</p>
 			{/if}
+			{#if preview.warnings.length}
+				<span class="text-warning" data-testid="nav-warnings" title={preview.warnings.join('\n')}
+					>⚠ {preview.warnings.length} script warning{preview.warnings.length > 1 ? 's' : ''}</span
+				>
+			{/if}
 			{#if !preview.loading && preview.chains.length < preview.total}
 				<button
 					type="button"
