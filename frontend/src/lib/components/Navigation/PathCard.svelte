@@ -52,6 +52,7 @@
 		NavPropertyStep,
 		NavRelationshipStep,
 		NavScope,
+		NavScriptStep,
 		NavStepItem,
 		PathNavigation
 	} from '$lib/api/types';
@@ -65,6 +66,7 @@
 	import RelationshipStepRow from './RelationshipStepRow.svelte';
 	import FilterStepRow from './FilterStepRow.svelte';
 	import PropertyStepRow from './PropertyStepRow.svelte';
+	import ScriptStepRow from './ScriptStepRow.svelte';
 	import StereotypePicker from '../Sidebar/StereotypePicker.svelte';
 	import type { OperandChrome } from './chrome';
 
@@ -212,6 +214,9 @@
 	}
 	function addPropertyStep(): void {
 		insertStep(node.steps.length, emptyPropertyStep());
+	}
+	function addScriptStep(): void {
+		insertStep(node.steps.length, { kind: 'script', snippet: {}, comment: null });
 	}
 
 	type StartMode = 'scope' | 'element' | 'combine' | 'row';
@@ -443,6 +448,15 @@
 						>
 							+ property
 						</button>
+						<button
+							type="button"
+							aria-label="Insert script step here"
+							title="Insert a 'Script' step here"
+							class="rounded border border-dashed border-input px-1.5 text-[10px] leading-3 text-info/90 opacity-0 transition-opacity group-hover/insert:opacity-100 hover:border-ring hover:text-info focus-visible:opacity-100"
+							onclick={() => insertStep(i, { kind: 'script', snippet: {}, comment: null })}
+						>
+							+ script
+						</button>
 					</div>
 				{/if}
 				<div class:opacity-50={blockedAt !== null && i > blockedAt}>
@@ -465,7 +479,14 @@
 							onChange={setStep}
 							onRemove={removeStep}
 						/>
-					{:else}
+					{:else if step.kind === 'script'}
+						<ScriptStepRow
+							step={step as NavScriptStep}
+							index={i}
+							onChange={setStep}
+							onRemove={removeStep}
+						/>
+					{:else if step.kind === 'filter'}
 						<FilterStepRow
 							step={step as NavFilterStep}
 							index={i}
@@ -504,6 +525,14 @@
 						onclick={addPropertyStep}
 					>
 						+ Go to property…
+					</button>
+					<button
+						type="button"
+						data-testid="add-script-step"
+						class="rounded border border-dashed border-input px-2 py-1 text-info/90 transition-colors hover:border-ring hover:text-info"
+						onclick={addScriptStep}
+					>
+						+ Script step
 					</button>
 				{/if}
 			</div>

@@ -543,3 +543,61 @@ it('an empty property_name step does not block navigation (unlike a configured n
 		unmount(c);
 	}
 });
+
+it('the trailing "+ Script step" button appends the default script step shape', async () => {
+	const tabId = 'nav:draft:pc-add-script';
+	await seed(tabId, pathWith());
+	const c = render(tabId);
+	try {
+		const btn = document.querySelector('[data-testid="add-script-step"]');
+		if (!btn) throw new Error('add-script-step button not found');
+		(btn as HTMLButtonElement).click();
+		flushSync();
+		const steps = (getDraft(tabId)?.definition as PathNavigation).steps;
+		expect(steps.at(-1)).toEqual({ kind: 'script', snippet: {}, comment: null });
+	} finally {
+		unmount(c);
+	}
+});
+
+it('the hover insert zone includes a "+ script" button that inserts the default script step shape', async () => {
+	const tabId = 'nav:draft:pc-insert-script';
+	await seed(
+		tabId,
+		pathWith([
+			{
+				kind: 'relationship',
+				relationship_type: 'Uses',
+				direction: 'out',
+				target_types: [],
+				children: []
+			}
+		])
+	);
+	const c = render(tabId);
+	try {
+		const zone = document.querySelector('[data-testid="insert-step-zone"]')!;
+		const addScript = [...zone.querySelectorAll('button')].find(
+			(b) => b.textContent?.trim() === '+ script'
+		);
+		if (!addScript) throw new Error('"+ script" insert button not found');
+		(addScript as HTMLButtonElement).click();
+		flushSync();
+		const steps = (getDraft(tabId)!.definition as PathNavigation).steps;
+		expect(steps[0]).toEqual({ kind: 'script', snippet: {}, comment: null });
+	} finally {
+		unmount(c);
+	}
+});
+
+it('a script step renders ScriptStepRow, not FilterStepRow', async () => {
+	const tabId = 'nav:draft:pc-script-dispatch';
+	await seed(tabId, pathWith([{ kind: 'script', snippet: {}, comment: null }]));
+	const c = render(tabId);
+	try {
+		expect(document.querySelector('[data-testid="script-step"]')).not.toBeNull();
+		expect(document.querySelector('[data-testid="filter-step"]')).toBeNull();
+	} finally {
+		unmount(c);
+	}
+});
