@@ -89,6 +89,9 @@ export interface TableData {
 	truncated: boolean;
 	offset: number;
 	model_rev: number;
+	/** Non-fatal per-page issues surfaced by embedded script evaluation (e.g. a
+	 * ScriptColumn raising on some rows) — see TablePageSchema.warnings. */
+	warnings: string[];
 }
 
 const _drafts = new SvelteMap<string, TableDraft>();
@@ -222,6 +225,11 @@ export function getTableError(tabId: string): string | undefined {
 export function getTableConflict(tabId: string): number | undefined {
 	return _conflicts.get(tabId);
 }
+/** Non-fatal warnings from the last installed page (e.g. a ScriptColumn that
+ * raised on some rows) — empty when no page is installed or none were sent. */
+export function getTableWarnings(tabId: string): string[] {
+	return _pages.get(tabId)?.warnings ?? [];
+}
 
 /** True when ANY open table draft holds unsaved definition/name edits —
  * closing or reloading the page would lose them (the unload guard's input). */
@@ -338,7 +346,8 @@ function installPage(tabId: string, page: TablePage): void {
 		base_total: page.base_total,
 		truncated: page.truncated,
 		offset: page.offset,
-		model_rev: page.model_rev
+		model_rev: page.model_rev,
+		warnings: page.warnings
 	});
 }
 

@@ -26,6 +26,7 @@
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import ElementCell from './Cell/ElementCell.svelte';
 	import ElementsCell from './Cell/ElementsCell.svelte';
+	import ErrorCell from './Cell/ErrorCell.svelte';
 	import ValueCell from './Cell/ValueCell.svelte';
 	import ValuesCell from './Cell/ValuesCell.svelte';
 
@@ -410,13 +411,8 @@
 								{:else if cell.kind === 'values'}
 									<ValuesCell {cell} />
 								{:else if cell.kind === 'error'}
-									<div
-										class="flex h-7 max-w-full min-w-0 items-center truncate text-destructive"
-										title={cell.message}
-									>
-										{cell.message}
-									</div>
-								{:else}
+									<ErrorCell {cell} />
+								{:else if cell.kind === 'elements'}
 									<ElementsCell {cell} />
 								{/if}
 							</div>

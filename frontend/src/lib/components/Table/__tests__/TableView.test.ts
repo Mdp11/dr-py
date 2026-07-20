@@ -15,6 +15,7 @@ import TableView from '../TableView.svelte';
 const h = vi.hoisted(() => ({
 	editable: true,
 	page: undefined as unknown,
+	warnings: [] as string[],
 	draft: {
 		tabId: 'tbl:draft:1',
 		name: 'My Table',
@@ -36,6 +37,7 @@ vi.mock('$lib/state', () => ({
 	ensureTableDraft: vi.fn(async () => {}),
 	getTableDraft: () => h.draft,
 	getTableConflict: () => undefined,
+	getTableWarnings: () => h.warnings,
 	downloadTable: vi.fn(async () => {}),
 	saveTableDraft: vi.fn(async () => {}),
 	saveAsTableDraft: vi.fn(async () => {}),
@@ -80,6 +82,7 @@ afterEach(() => {
 	document.body.innerHTML = '';
 	vi.restoreAllMocks();
 	h.editable = true;
+	h.warnings = [];
 });
 
 describe('TableView settings popup', () => {
@@ -341,6 +344,31 @@ describe('TableView settings dialog sizing', () => {
 			flushSync();
 			expect(parseFloat(dialog.style.width)).toBe(640);
 			expect(parseFloat(dialog.style.height)).toBe(400);
+		} finally {
+			unmount(c);
+		}
+	});
+});
+
+describe('TableView warnings banner', () => {
+	it('shows the banner with the joined warnings when getTableWarnings is non-empty', () => {
+		h.warnings = ['column 1: script raised on 2 rows', 'column 3: truncated to 20 items'];
+		const c = render('tbl:draft:1');
+		try {
+			const banner = document.querySelector('[data-testid="table-warnings"]');
+			expect(banner).not.toBeNull();
+			expect(banner?.textContent).toContain('column 1: script raised on 2 rows');
+			expect(banner?.textContent).toContain('column 3: truncated to 20 items');
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('hides the banner when getTableWarnings returns empty', () => {
+		h.warnings = [];
+		const c = render('tbl:draft:1');
+		try {
+			expect(document.querySelector('[data-testid="table-warnings"]')).toBeNull();
 		} finally {
 			unmount(c);
 		}

@@ -535,6 +535,34 @@ describe('TableGrid', () => {
 		}
 	});
 
+	it('dispatches an error cell to ErrorCell', () => {
+		const page: TablePage = {
+			...PAGE,
+			rows: [
+				{
+					key: ['e1'],
+					cells: [
+						{
+							kind: 'element',
+							item: { id: 'e1', type_name: 'Block', display_name: 'B', child_count: 0 }
+						},
+						{ kind: 'error', message: 'division by zero', traceback: null }
+					]
+				}
+			]
+		};
+		vi.spyOn(store, 'getTablePage').mockReturnValue(page);
+		vi.spyOn(store, 'getTableLoading').mockReturnValue(false);
+		const c = render('tbl:draft:errorcell');
+		try {
+			const errorCell = document.querySelector('[data-testid="error-cell"]');
+			expect(errorCell).not.toBeNull();
+			expect(errorCell?.textContent).toContain('division by zero');
+		} finally {
+			unmount(c);
+		}
+	});
+
 	it('tints cells of a locked element: orange for my lock, red for a peer lock', () => {
 		vi.spyOn(store, 'getTablePage').mockReturnValue(PAGE);
 		vi.spyOn(store, 'getTableLoading').mockReturnValue(false);

@@ -11,6 +11,7 @@
 		getTableConflict,
 		getTableDraft,
 		getTablePage,
+		getTableWarnings,
 		reloadTableDraft,
 		saveAsTableDraft,
 		saveTableDraft,
@@ -31,6 +32,7 @@
 	const conflict = $derived(getTableConflict(tabId));
 	const editable = $derived(canEdit());
 	const page = $derived(getTablePage(tabId));
+	const warnings = $derived(getTableWarnings(tabId));
 	// Any expand column multiplies rows — then the count reads
 	// "N elements → M rows" (the pre-split base vs the split result).
 	const hasSplit = $derived(
@@ -201,6 +203,11 @@
 				<button type="button" class="underline" onclick={() => void reloadTableDraft(tabId)}>
 					Reload their version
 				</button>
+			</div>
+		{/if}
+		{#if warnings.length > 0}
+			<div class="bg-warning/15 px-3 py-1.5 text-xs text-warning" data-testid="table-warnings">
+				{warnings.join(' · ')}
 			</div>
 		{/if}
 		{#if saveError}

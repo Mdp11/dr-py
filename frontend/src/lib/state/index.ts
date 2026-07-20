@@ -287,6 +287,7 @@ export {
 	getTableLoading,
 	getTablePage,
 	getTableSort,
+	getTableWarnings,
 	hasDirtyTableDrafts,
 	loadTablePage,
 	reloadTableDraft,

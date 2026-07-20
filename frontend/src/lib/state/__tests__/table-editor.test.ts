@@ -12,6 +12,7 @@ import {
 	getTableLoading,
 	getTablePage,
 	getTableSort,
+	getTableWarnings,
 	handleTableModelRevChanged,
 	loadTablePage,
 	reloadTableDraft,
@@ -171,10 +172,11 @@ describe('table-editor', () => {
 		const draft = await ensureTableDraft('tbl:a1');
 		expect(draft.name).toBe('My table');
 		expect(draft.artifactRev).toBe(3);
-		// getTablePage returns the store's sparse-cache TableData, not the raw
-		// TablePage response — it never carries `warnings` (see TableData in
-		// table-editor.svelte.ts), so compare against EMPTY_PAGE minus that field.
-		expect(getTablePage('tbl:a1')).toEqual({ ...EMPTY_PAGE, warnings: undefined });
+		// getTablePage returns the store's sparse-cache TableData, which now
+		// carries `warnings` straight from the TablePage response (see
+		// installPage in table-editor.svelte.ts) — the raw EMPTY_PAGE fixture
+		// already sets `warnings: []`, so the two now compare equal outright.
+		expect(getTablePage('tbl:a1')).toEqual(EMPTY_PAGE);
 	});
 
 	it('updateTableDefinition marks dirty, resets to offset 0, and reloads', async () => {
@@ -235,6 +237,42 @@ describe('table-editor', () => {
 		await flush();
 		expect(spy).toHaveBeenCalled();
 		expect(spy.mock.calls.every(([args]) => !('artifactId' in args))).toBe(true);
+	});
+
+	it('threads warnings from an installed page through getTableWarnings', async () => {
+		const draft = await ensureTableDraft('tbl:draft:warn1'); // new drafts do not auto-load
+		vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue({
+			...EMPTY_PAGE,
+			warnings: ['column 2: script raised on 3 rows']
+		});
+		updateTableDefinition('tbl:draft:warn1', { ...draft.definition });
+		await flush();
+		expect(getTableWarnings('tbl:draft:warn1')).toEqual(['column 2: script raised on 3 rows']);
+	});
+
+	it('returns an empty array from getTableWarnings when no page is installed or the page has none', async () => {
+		expect(getTableWarnings('tbl:never-installed')).toEqual([]);
+		const draft = await ensureTableDraft('tbl:draft:nowarn1'); // new drafts do not auto-load
+		vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
+		updateTableDefinition('tbl:draft:nowarn1', { ...draft.definition });
+		await flush();
+		expect(getTableWarnings('tbl:draft:nowarn1')).toEqual([]);
+	});
+
+	it('mergePage (a lazy chunk fill) preserves the warnings installed by the reset load', async () => {
+		const spy = vi
+			.spyOn(tablesApi, 'evaluateTable')
+			.mockResolvedValueOnce({ ...pageAt(0, 100, 250), warnings: ['column 1: 2 rows errored'] })
+			.mockImplementation(async (args) => pageAt(args.offset ?? 0, args.limit ?? 100, 250));
+		await ensureTableDraft('tbl:draft:warnmerge');
+		await loadTablePage('tbl:draft:warnmerge', 0);
+		expect(getTableWarnings('tbl:draft:warnmerge')).toEqual(['column 1: 2 rows errored']);
+		ensureTableRange('tbl:draft:warnmerge', 100, 150);
+		await flush();
+		// The chunk fill's own response carries no warnings (pageAt defaults to
+		// []) — mergePage must not clobber the reset load's warnings with it.
+		expect(getTableWarnings('tbl:draft:warnmerge')).toEqual(['column 1: 2 rows errored']);
+		spy.mockRestore();
 	});
 
 	it('a failed load stores the error message', async () => {
