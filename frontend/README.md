@@ -203,6 +203,52 @@ per tab:
   key for the tab (expanded set plus any lingering keys), cancel all timers, and
   bump generations so nothing leaks.
 
+### Script columns & steps (M2/M3)
+
+Table script columns (`ScriptColumnEditor.svelte`, kind `'script'`) and
+navigation script steps (`Navigation/ScriptStepRow.svelte`) both embed a
+snippet's `value(elements)`/`step(el)` call against a live row/frontier
+element, and both share one component: `components/Snippet/
+SnippetSourceEditor.svelte`, bound to a `SnippetSource` (`{ ref?, definition?
+}`) plus the entry point it must satisfy (`"value"` or `"step"`).
+
+- **Ref/inline contract.** Mode is derived, not stored: `definition != null`
+  means inline, ref mode otherwise — including the freshly-added, unconfigured
+  `{}`. **Ref mode** narrows the saved-snippet dropdown (`snippet-ref-select`)
+  to `code_snippet` artifacts whose (server-derived) `entry_points` actually
+  cover the bound entry (`entryAvailable`, `lib/snippet/entry-stubs.ts`); a
+  selected ref that later falls out of that filter (the artifact's snippet no
+  longer defines the entry, or was deleted) surfaces as `snippet-ref-missing`
+  rather than being silently cleared — the user might be mid-edit of that
+  snippet elsewhere. **Inline mode** is a plain `CodeEditor` over
+  `snippet.definition.code`, seeded from the previously-selected ref's code (or
+  a fresh entry stub) on first switch. It runs its own **component-local
+  debounced lint** (300 ms, `POST /snippets/lint`) to drive the editor's
+  diagnostics and the `snippet-entry-warning` hint — this is deliberately
+  **not** the tab-level `_lint` map in `state/snippet-editor.svelte.ts`, since
+  this editor only ever holds a bare code string with no per-tab draft/save
+  lifecycle of its own.
+- **Error cells.** A script column's `value()` call failing server-side
+  (`core/script/embed.py`'s `ScriptEvalContext` — degraded, not failed: a
+  missing runner, a full concurrency slot, or a snippet exception) renders
+  that one cell as `Table/Cell/ErrorCell.svelte` (`error-cell`) instead of a
+  `ValueCell`, showing `cell.message` with `cell.traceback ?? cell.message` as
+  the hover title. The row otherwise renders normally — one bad cell never
+  blanks the row, and sorting/paging keep working around it.
+- **`warnings` threading.** Both evaluation paths share one
+  `ScriptEvalContext` per request and report through its `.warnings` list:
+  `TableData.warnings` (`state/table-editor.svelte.ts`) is read via
+  `getTableWarnings(tabId)` and rendered as a single `table-warnings` banner
+  (messages joined by " · ") above the grid in `Table/TableView.svelte`;
+  `NavPreview.warnings` carries the equivalent list for a navigation node's
+  chain preview, rendered by `Navigation/ResultsDock.svelte` as a
+  `nav-warnings` chip (`⚠ N script warning(s)`, full messages in the `title`
+  tooltip) beside the chain-count status. `loadMorePreview` deliberately keeps
+  the **first page's** warnings on subsequent pages rather than
+  replacing/merging them — see the comment on `NavPreview.warnings` in
+  `state/navigation-editor.svelte.ts` — so paging in more rows never churns
+  the banner.
+
 ### Settings dialog + strict-mode toggle
 
 The **Settings** button in the TopBar opens `SettingsDialog.svelte`, which
@@ -364,10 +410,17 @@ smart-city example; relationship picker; drag-and-drop view curation; advanced
 search; History: open drawer → list commits → diff → revert with compensating
 commit; Strict mode: enable via Settings → create a conformance-violating
 element → assert the Commit button is disabled with the strict-mode alert →
-disable strict mode → assert the same batch can now commit; and the snippet
+disable strict mode → assert the same batch can now commit; the snippet
 workspace tab (`snippet-flow.spec.ts`): lint gutter surfaces a sandbox-import
 warning, run prints to the console via the real WASM sandbox, and stage +
-commit a snippet run's op batch.
+commit a snippet run's op batch; and embedded script evaluation
+(`script-embedding.spec.ts`, M2/M3): a table script column bound to a saved
+snippet renders computed values alongside an `error-cell` for a row that
+raises and survives sorting, an inline script column computes a constant, and
+a navigation script step follows real `el.out()` neighbors into non-empty
+chains before a raising step surfaces the `nav-warnings` chip — all three
+self-skip if the WASM guest binary isn't fetched (same runner-availability
+guard as `snippet-flow.spec.ts`).
 
 **Known infra note**: `rm -f /tmp/data-rover-e2e.db` before each fresh run
 clears the SQLite journal so the in-memory snapshot store stays in sync. When
