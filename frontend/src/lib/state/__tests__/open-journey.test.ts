@@ -165,4 +165,15 @@ describe('open-journey controller', () => {
 		journeyUpload(1, 2);
 		expect(getActiveProgress()).toBeNull();
 	});
+
+	it('ignores a late status poll after finishJourney so the bar still tears down (no strand at 95%)', () => {
+		beginJourney('open');
+		journeyStatus({ state: 'validating', validation: { running: true, done: 5, total: 10 } });
+		vi.advanceTimersByTime(80 * 10); // past MIN_VISIBLE
+		finishJourney();
+		// a stray poll that resolved in-flight AFTER finishJourney (the bug trigger)
+		journeyStatus({ state: 'validating', validation: { running: true, done: 9, total: 10 } });
+		vi.advanceTimersByTime(80 * 40); // let the ticker run to teardown
+		expect(getActiveProgress()).toBeNull(); // was stuck at {done:95} before the guard
+	});
 });

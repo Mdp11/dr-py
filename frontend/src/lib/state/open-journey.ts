@@ -183,7 +183,7 @@ export function beginJourney(kind: JourneyKind): void {
 
 /** Feed real upload bytes (create journey only). */
 export function journeyUpload(loaded: number, total: number | null): void {
-	if (!_active || _kind !== 'create' || _phase !== 'upload') return;
+	if (!_active || _finishing || _kind !== 'create' || _phase !== 'upload') return;
 	if (total !== null && total > 0) {
 		_fraction = Math.min(1, loaded / total);
 		if (loaded >= total) _setPhase('create', null); // bytes on the wire; server-side parse dominates
@@ -192,7 +192,7 @@ export function journeyUpload(loaded: number, total: number | null): void {
 
 /** Feed a `/model/status` poll result. */
 export function journeyStatus(status: ModelStatus): void {
-	if (!_active) return;
+	if (!_active || _finishing) return;
 	const p = statusToProgress(status);
 	if (p.phase === 'cold') return; // keep creeping in the current slice
 	if (p.phase === 'ready') {
