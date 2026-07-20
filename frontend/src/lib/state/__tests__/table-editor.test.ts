@@ -37,7 +37,8 @@ const EMPTY_PAGE = {
 	total: 0,
 	truncated: false,
 	offset: 0,
-	model_rev: 1
+	model_rev: 1,
+	warnings: []
 };
 
 /** A page of `count` synthetic rows at `offset` out of `total`. */
@@ -51,7 +52,8 @@ function pageAt(offset: number, count: number, total: number, model_rev = 1) {
 		total,
 		truncated: false,
 		offset,
-		model_rev
+		model_rev,
+		warnings: []
 	};
 }
 
@@ -169,7 +171,10 @@ describe('table-editor', () => {
 		const draft = await ensureTableDraft('tbl:a1');
 		expect(draft.name).toBe('My table');
 		expect(draft.artifactRev).toBe(3);
-		expect(getTablePage('tbl:a1')).toEqual(EMPTY_PAGE);
+		// getTablePage returns the store's sparse-cache TableData, not the raw
+		// TablePage response — it never carries `warnings` (see TableData in
+		// table-editor.svelte.ts), so compare against EMPTY_PAGE minus that field.
+		expect(getTablePage('tbl:a1')).toEqual({ ...EMPTY_PAGE, warnings: undefined });
 	});
 
 	it('updateTableDefinition marks dirty, resets to offset 0, and reloads', async () => {

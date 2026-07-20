@@ -15,7 +15,8 @@ const CHAIN_PAGE = {
 	step_types: [],
 	chains: [[{ id: 'e1', type_name: 'B', display_name: 'e1', child_count: 0 }]],
 	total: 1,
-	truncated: false
+	truncated: false,
+	warnings: []
 };
 
 function navColumn(navigation: NavColumn['navigation']): NavColumn {

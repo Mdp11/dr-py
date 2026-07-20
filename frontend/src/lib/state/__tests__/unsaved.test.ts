@@ -29,7 +29,8 @@ const EMPTY_PAGE = {
 	total: 0,
 	truncated: false,
 	offset: 0,
-	model_rev: 1
+	model_rev: 1,
+	warnings: []
 };
 
 beforeEach(() => {

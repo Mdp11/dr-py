@@ -41,7 +41,8 @@ const CHAIN_PAGE = {
 	step_types: ['Owns'],
 	chains: [[{ id: 'b1', type_name: 'B', display_name: 'b1', child_count: 0 }]],
 	total: 1,
-	truncated: false
+	truncated: false,
+	warnings: []
 };
 
 /** Two-page result set for pagination tests (PAGE-sized slices are irrelevant:
@@ -50,13 +51,15 @@ const PAGE_1 = {
 	step_types: ['Owns'],
 	chains: [[{ id: 'b1', type_name: 'B', display_name: 'b1', child_count: 0 }]],
 	total: 2,
-	truncated: false
+	truncated: false,
+	warnings: []
 };
 const PAGE_2 = {
 	step_types: ['Owns'],
 	chains: [[{ id: 'b2', type_name: 'B', display_name: 'b2', child_count: 0 }]],
 	total: 2,
-	truncated: false
+	truncated: false,
+	warnings: []
 };
 
 function deferred<T>(): {

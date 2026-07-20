@@ -36,9 +36,10 @@ const EMPTY_PAGE = {
 	total: 0,
 	truncated: false,
 	offset: 0,
-	model_rev: 1
+	model_rev: 1,
+	warnings: []
 };
-const CHAIN_PAGE = { step_types: [], chains: [], total: 0, truncated: false };
+const CHAIN_PAGE = { step_types: [], chains: [], total: 0, truncated: false, warnings: [] };
 
 const INLINE: NavigationDefinition = {
 	kind: 'path',

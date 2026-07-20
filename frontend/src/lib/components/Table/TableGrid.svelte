@@ -409,6 +409,13 @@
 									</div>
 								{:else if cell.kind === 'values'}
 									<ValuesCell {cell} />
+								{:else if cell.kind === 'error'}
+									<div
+										class="flex h-7 max-w-full min-w-0 items-center truncate text-destructive"
+										title={cell.message}
+									>
+										{cell.message}
+									</div>
 								{:else}
 									<ElementsCell {cell} />
 								{/if}

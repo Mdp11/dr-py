@@ -21,21 +21,24 @@ const CHAIN_PAGE = {
 	step_types: ['Uses'],
 	chains: [[{ id: 'b1', type_name: 'B', display_name: 'b1', child_count: 0 }]],
 	total: 1,
-	truncated: false
+	truncated: false,
+	warnings: []
 };
 
 const PAGE_1 = {
 	step_types: ['Uses'],
 	chains: [[{ id: 'b1', type_name: 'B', display_name: 'b1', child_count: 0 }]],
 	total: 2,
-	truncated: false
+	truncated: false,
+	warnings: []
 };
 
 const PAGE_2 = {
 	step_types: ['Uses'],
 	chains: [[{ id: 'b2', type_name: 'B', display_name: 'b2', child_count: 0 }]],
 	total: 2,
-	truncated: false
+	truncated: false,
+	warnings: []
 };
 
 /** A runnable path node: a start type plus one complete relationship step
@@ -133,7 +136,8 @@ it('renders a value terminal (scalar property step) as plain text, not an elemen
 			]
 		],
 		total: 1,
-		truncated: false
+		truncated: false,
+		warnings: []
 	});
 	updateDefinition(tabId, {
 		kind: 'path',

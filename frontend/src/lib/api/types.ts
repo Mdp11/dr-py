@@ -405,7 +405,13 @@ export interface NavPropertyStep {
 	comment?: string | null;
 }
 
-export type NavStepItem = NavRelationshipStep | NavFilterStep | NavPropertyStep;
+export interface NavScriptStep {
+	kind: 'script';
+	snippet: SnippetSource;
+	comment?: string | null;
+}
+
+export type NavStepItem = NavRelationshipStep | NavFilterStep | NavPropertyStep | NavScriptStep;
 
 /** Start = the element(s) the caller roots this navigation at — a table
  * column supplies its row's element(s). Mirrors core/navigation/schema.py's
@@ -492,7 +498,8 @@ export const ChainPageSchema = z.object({
 	step_types: z.array(z.string()).default([]),
 	chains: z.array(z.array(ChainNodeSchema)).default([]),
 	total: z.number().int().default(0),
-	truncated: z.boolean().default(false)
+	truncated: z.boolean().default(false),
+	warnings: z.array(z.string()).default([])
 });
 export type ChainPage = z.infer<typeof ChainPageSchema>;
 
@@ -669,6 +676,30 @@ const ColumnRefSchema = z.object({
 });
 export const ColumnSourceSchema = z.discriminatedUnion('kind', [RowSlotSchema, ColumnRefSchema]);
 
+export const SnippetDefinitionSchema = z.object({
+	schema_version: z.number().int().default(1),
+	language: z.literal('python').default('python'),
+	code: z.string(),
+	entry_points: z.array(z.string()).default([])
+});
+
+export const SnippetSourceSchema = z.object({
+	ref: z.string().nullish(),
+	definition: SnippetDefinitionSchema.nullish()
+});
+export type SnippetSource = z.infer<typeof SnippetSourceSchema>;
+
+const ScriptColumnSchema = z.object({
+	kind: z.literal('script'),
+	source: ColumnSourceSchema.default({ kind: 'row', chain_index: 0 }),
+	snippet: SnippetSourceSchema.default({}),
+	mode: z.enum(['collapse', 'expand']).default('collapse'),
+	keep_empty: z.boolean().default(true),
+	header: z.string().default(''),
+	width_px: z.number().int().nullish(),
+	hidden: z.boolean().default(false)
+});
+
 export const ScopeRowsSchema = z.object({
 	kind: z.literal('scope'),
 	types: z.array(z.string()).default([]),
@@ -722,7 +753,8 @@ const NavigationColumnSchema = z.object({
 export const ColumnSchema = z.discriminatedUnion('kind', [
 	ElementColumnSchema,
 	PropertyColumnSchema,
-	NavigationColumnSchema
+	NavigationColumnSchema,
+	ScriptColumnSchema
 ]);
 
 export const TableDefinitionSchema = z.object({
@@ -763,7 +795,8 @@ export const TableCellSchema = z.discriminatedUnion('kind', [
 		items: z.array(TreeItemSchema),
 		total: z.number().int(),
 		truncated: z.boolean()
-	})
+	}),
+	z.object({ kind: z.literal('error'), message: z.string(), traceback: z.string().nullish() })
 ]);
 export const TableRowSchema = z.object({
 	key: z.array(z.unknown()),
@@ -778,7 +811,8 @@ export const TablePageSchema = z.object({
 	base_total: z.number().int().nullish(),
 	truncated: z.boolean(),
 	offset: z.number().int(),
-	model_rev: z.number().int()
+	model_rev: z.number().int(),
+	warnings: z.array(z.string()).default([])
 });
 export type TablePage = z.infer<typeof TablePageSchema>;
 export type TableCell = z.infer<typeof TableCellSchema>;

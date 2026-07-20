@@ -16,7 +16,7 @@ import RowSourceEditor from '../RowSourceEditor.svelte';
 
 type NavColumn = Extract<Column, { kind: 'navigation' }>;
 
-const CHAIN_PAGE = { step_types: [], chains: [], total: 0, truncated: false };
+const CHAIN_PAGE = { step_types: [], chains: [], total: 0, truncated: false, warnings: [] };
 
 // An inline path with 2 chain-advancing steps: chainColumns = [Start, s1, s2]
 // -> maxStepIndex = 2.

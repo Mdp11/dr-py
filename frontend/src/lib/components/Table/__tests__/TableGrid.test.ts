@@ -33,7 +33,8 @@ const PAGE: TablePage = {
 	total: 1,
 	truncated: false,
 	offset: 0,
-	model_rev: 1
+	model_rev: 1,
+	warnings: []
 };
 
 const DRAFT: store.TableDraft = {

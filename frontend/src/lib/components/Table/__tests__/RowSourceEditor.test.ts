@@ -10,7 +10,7 @@ import { resetArtifacts, resetCheckout, resetNavigationEditors, setProjectInfo }
 import type { TableDefinition } from '$lib/api/types';
 import RowSourceEditor from '../RowSourceEditor.svelte';
 
-const CHAIN_PAGE = { step_types: [], chains: [], total: 0, truncated: false };
+const CHAIN_PAGE = { step_types: [], chains: [], total: 0, truncated: false, warnings: [] };
 
 function defnWith(rowSource: TableDefinition['row_source']): TableDefinition {
 	return {

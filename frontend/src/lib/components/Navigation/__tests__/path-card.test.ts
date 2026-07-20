@@ -65,7 +65,8 @@ const CHAIN_PAGE = {
 	step_types: ['Uses'],
 	chains: [[{ id: 'b1', type_name: 'B', display_name: 'b1', child_count: 0 }]],
 	total: 1,
-	truncated: false
+	truncated: false,
+	warnings: []
 };
 
 beforeEach(() => {
@@ -77,7 +78,8 @@ beforeEach(() => {
 		step_types: [],
 		chains: [],
 		total: 0,
-		truncated: false
+		truncated: false,
+		warnings: []
 	});
 });
 afterEach(() => {

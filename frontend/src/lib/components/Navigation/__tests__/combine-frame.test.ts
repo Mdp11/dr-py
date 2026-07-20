@@ -28,7 +28,8 @@ beforeEach(() => {
 		step_types: [],
 		chains: [],
 		total: 0,
-		truncated: false
+		truncated: false,
+		warnings: []
 	});
 });
 afterEach(() => {

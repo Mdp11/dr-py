@@ -320,7 +320,11 @@ export function nodeLabel(defn: NavigationDefinition): string {
 	const hops = defn.steps
 		.filter((s) => s.kind !== 'filter')
 		.map((s) =>
-			s.kind === 'relationship' ? s.relationship_type || '?' : `.${s.property_name || '?'}`
+			s.kind === 'relationship'
+				? s.relationship_type || '?'
+				: s.kind === 'script'
+					? s.comment || 'script'
+					: `.${s.property_name || '?'}`
 		);
 	return [head, ...hops].join(' → ');
 }
@@ -444,6 +448,10 @@ export function chainColumns(node: PathNavigation): ChainColumn[] {
 				label: step.relationship_type || 'unset step',
 				sub: step.target_types.length > 0 ? [...step.target_types].sort().join(', ') : undefined
 			});
+		} else if (step.kind === 'script') {
+			// A script hop advances the chain exactly like a relationship or
+			// property hop; there is no target type to show.
+			cols.push({ index: cols.length, label: step.comment || 'script', sub: 'script' });
 		} else {
 			// A property hop advances the chain exactly like a relationship hop.
 			// `sub: 'property'` (not a type list): the pure helper has no
