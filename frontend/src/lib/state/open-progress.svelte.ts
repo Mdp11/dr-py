@@ -1,46 +1,31 @@
 /**
- * Project-open progress tracking (spec §4): polls GET /model/status until the
- * backend session is ready, driving the global progress overlay. Fired from
- * boot() in parallel with the data requests that actually trigger hydration —
- * the status endpoint itself never hydrates, so polls return immediately.
+ * Project-open status poll loop: polls GET /model/status until the backend
+ * session is ready and feeds each result into the open-journey controller,
+ * which owns the single progress bar. Fired from boot() in parallel with the
+ * data requests that actually trigger hydration — the status endpoint itself
+ * never hydrates, so polls return immediately.
+ *
+ * This loop no longer owns a progress token or any user-facing label — that is
+ * the journey's job (lib/state/open-journey.ts). It only observes status and
+ * decides when to stop (ready/empty, cold-timeout, cancel, or navigation).
  */
 
 import { getModelStatus } from '$lib/api/model-status';
 import { getActiveProjectId } from './active-project.svelte';
 import { refreshSummary } from './model.svelte';
-import {
-	endProgress,
-	setProgressIndeterminate,
-	setProgressLabel,
-	startProgress,
-	updateProgress
-} from './progress.svelte';
-
-/** User-facing label per backend hydration phase. Only the `build` phase
- * reports done/total counts; the others show as an indeterminate spinner, so
- * the label is the sole sign of life — keep each phase distinct. */
-const HYDRATION_LABELS: Record<string, string> = {
-	download: 'Downloading model…',
-	parse: 'Parsing model…',
-	build: 'Loading model…',
-	replay: 'Replaying changes…'
-};
+import { journeyStatus } from './open-journey';
 
 // Consecutive 'cold' polls tolerated before giving up (~20s at the default
 // 400ms pollMs). A project whose server-side hydration failed reports 'cold'
-// forever — without this cap the poll loop (and the token it holds open)
-// would never exit, leaving the fixed inset-0 overlay blocking clicks
-// permanently.
+// forever; without this cap the poll loop would never exit.
 export const MAX_COLD_POLLS = 50;
 
-// Bumped by cancelOpenProgress() to abort any in-flight poll loop (e.g. a
-// failed boot tearing down the overlay, or unmount). Each trackOpenProgress
-// call captures the generation at entry and re-checks it every iteration;
-// a mismatch means someone else wants this run stopped, so it exits (the
-// existing finally -> endProgress cleans up the token).
+// Bumped by cancelOpenProgress() to abort any in-flight poll loop. Each
+// trackOpenProgress captures the generation at entry and re-checks it every
+// iteration; a mismatch means someone wants this run stopped, so it exits.
 let _generation = 0;
 
-/** Abort any in-flight trackOpenProgress poll loop and tear down its overlay token. */
+/** Abort any in-flight trackOpenProgress poll loop. */
 export function cancelOpenProgress(): void {
 	_generation++;
 }
@@ -48,45 +33,29 @@ export function cancelOpenProgress(): void {
 export async function trackOpenProgress(pollMs = 400): Promise<void> {
 	const pid = getActiveProjectId();
 	const generation = _generation;
-	let token: number | null = null;
 	let consecutiveCold = 0;
-	try {
-		for (;;) {
-			if (_generation !== generation) return; // cancelled
-			if (getActiveProjectId() !== pid) return; // navigated away
-			let status;
-			try {
-				status = await getModelStatus();
-			} catch {
-				return; // status is best-effort; never block or crash boot
-			}
-			if (status.state === 'ready' || status.state === 'empty') break;
-			if (status.state === 'cold') {
-				consecutiveCold++;
-				if (consecutiveCold > MAX_COLD_POLLS) return; // hydration never progressed; stop polling
-			} else {
-				consecutiveCold = 0;
-			}
-			if (token === null) token = startProgress('Opening project…');
-			if (status.state === 'validating' && status.validation) {
-				setProgressLabel(token, 'Validating model…');
-				updateProgress(token, status.validation.done, status.validation.total);
-			} else if (status.state === 'hydrating' && status.hydration) {
-				// Only the build phase carries done/total; the others must fall
-				// BACK to indeterminate (a stale percentage from an earlier phase
-				// would read as stuck progress).
-				setProgressLabel(token, HYDRATION_LABELS[status.hydration.phase] ?? 'Loading model…');
-				if (status.hydration.total > 0) {
-					updateProgress(token, status.hydration.done, status.hydration.total);
-				} else {
-					setProgressIndeterminate(token);
-				}
-			}
-			await new Promise((resolve) => setTimeout(resolve, pollMs));
+	let sawWork = false;
+	for (;;) {
+		if (_generation !== generation) return; // cancelled
+		if (getActiveProjectId() !== pid) return; // navigated away
+		let status;
+		try {
+			status = await getModelStatus();
+		} catch {
+			return; // status is best-effort; never block or crash boot
 		}
-		// issue counts (and possibly the model itself) landed while we watched
-		if (token !== null) await refreshSummary().catch(() => {});
-	} finally {
-		if (token !== null) endProgress(token);
+		if (status.state === 'ready' || status.state === 'empty') break;
+		if (status.state === 'cold') {
+			consecutiveCold++;
+			if (consecutiveCold > MAX_COLD_POLLS) return; // hydration never progressed; stop polling
+		} else {
+			consecutiveCold = 0;
+			sawWork = true;
+		}
+		journeyStatus(status);
+		await new Promise((resolve) => setTimeout(resolve, pollMs));
 	}
+	journeyStatus({ state: 'ready', model_rev: null });
+	// issue counts (and possibly the model itself) landed while we watched
+	if (sawWork) await refreshSummary().catch(() => {});
 }
