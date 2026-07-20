@@ -22,10 +22,15 @@ from pydantic import TypeAdapter, ValidationError
 from sqlalchemy.orm import Session as DbSession
 
 from data_rover.core.navigation.evaluate import evaluate
-from data_rover.core.navigation.resolve import NavigationResolveError, resolve_refs
+from data_rover.core.navigation.resolve import (
+    NavigationResolveError,
+    navigation_has_script,
+    resolve_refs,
+)
 from data_rover.core.navigation.schema import NAVIGATION_ADAPTER, NavigationDefinition
 from data_rover.core.script.lint import derive_entry_points
-from data_rover.core.script.schema import SNIPPET_ADAPTER
+from data_rover.core.script.runner import ScriptRunner
+from data_rover.core.script.schema import SNIPPET_ADAPTER, SnippetDefinition
 from data_rover.core.table.schema import TABLE_ADAPTER
 
 from .. import content
@@ -44,6 +49,9 @@ from ..schemas import (
     ChainValueOut,
     EvaluateNavigationIn,
 )
+from ..script_eval import close_script_context, open_script_context
+from ..script_runner import get_runner
+from ..settings import Settings, get_settings
 from .read import _tree_item  # shared lite projection
 
 router = APIRouter()
@@ -225,6 +233,8 @@ def evaluate_navigation(
     project_id: str,
     session: Session = Depends(get_request_session),
     db: DbSession = Depends(get_db),
+    runner: ScriptRunner | None = Depends(get_runner),
+    settings: Settings = Depends(get_settings),
 ) -> ChainPageOut:
     """Read-only (viewer-callable; listed in authz._READ_ONLY_POST_SUFFIXES).
     Stateless offset paging: the evaluator's deterministic chain order makes
@@ -242,17 +252,42 @@ def evaluate_navigation(
             raise LookupError(artifact_id)
         return NAVIGATION_ADAPTER.validate_python(row.payload)
 
+    def _fetch_snippet(artifact_id: str) -> SnippetDefinition:
+        row = content.get_artifact(db, artifact_id)
+        if (
+            row is None
+            or row.project_id != project_id
+            or row.kind is not ArtifactKind.code_snippet
+        ):
+            raise LookupError(artifact_id)
+        return SNIPPET_ADAPTER.validate_python(row.payload)
+
     try:
         if payload.artifact_id is not None:
             defn = _fetch(payload.artifact_id)
-            defn = resolve_refs(defn, _fetch, frozenset({payload.artifact_id}))
+            defn = resolve_refs(
+                defn,
+                _fetch,
+                frozenset({payload.artifact_id}),
+                snippet_fetch=_fetch_snippet,
+            )
         else:
             assert payload.definition is not None  # schema: exactly one
-            defn = resolve_refs(payload.definition, _fetch)
+            defn = resolve_refs(
+                payload.definition, _fetch, snippet_fetch=_fetch_snippet
+            )
         row_elements = (
             [payload.row_element_id] if payload.row_element_id is not None else None
         )
-        result = evaluate(metamodel, model, defn, row_elements=row_elements)
+        script_ctx, acquired = open_script_context(
+            runner, model, settings, needs_script=navigation_has_script(defn)
+        )
+        try:
+            result = evaluate(
+                metamodel, model, defn, row_elements=row_elements, script=script_ctx
+            )
+        finally:
+            close_script_context(script_ctx, acquired)
     except LookupError as exc:
         raise HTTPException(
             status_code=422, detail=f"unknown navigation artifact {exc}"
@@ -276,4 +311,5 @@ def evaluate_navigation(
         ],
         total=len(result.chains),
         truncated=result.truncated,
+        warnings=result.warnings,
     )

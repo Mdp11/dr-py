@@ -837,6 +837,10 @@ class ChainPageOut(BaseModel):
     chains: list[list[TreeItem | ChainValueOut]] = Field(default_factory=list)
     total: int = 0
     truncated: bool = False
+    warnings: list[str] = Field(
+        default_factory=list,
+        description="Script-step degradations produced by this evaluation.",
+    )
 
 
 # ---------------------------------------------------------------------------

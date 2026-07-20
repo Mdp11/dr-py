@@ -154,6 +154,14 @@ def seed_thing_model(client: TestClient) -> None:
     assert r.status_code == 200, r.text
 
 
+@pytest.fixture
+def thing_ids(seed_thing_model: None) -> list[str]:
+    """The element ids seeded by `seed_thing_model`, in creation order —
+    lets navigation-route tests build a script step that targets a specific
+    element by id without hard-coding it twice."""
+    return ["t1", "t2", "t3"]
+
+
 def _script_table(code: str) -> dict:
     return {
         "row_source": {"kind": "scope", "types": ["Thing"]},
@@ -290,3 +298,62 @@ def test_export_script_column_no_errors_no_notice(
     assert ws is not None
     texts = [str(row[0].value) for row in ws.iter_rows() if row and row[0].value is not None]
     assert not any(t.startswith("#ERROR:") for t in texts)
+
+
+# ---------------------------------------------------------------------------
+# Task 13: POST /navigations/evaluate script-step wiring
+# ---------------------------------------------------------------------------
+
+
+def test_navigation_script_step_end_to_end(
+    client: TestClient, seed_thing_model: None, thing_ids: list[str]
+) -> None:
+    target = thing_ids[0]
+    defn = {
+        "kind": "path",
+        "start": {"kind": "scope", "types": ["Thing"]},
+        "steps": [
+            {
+                "kind": "script",
+                "snippet": {
+                    "definition": {
+                        "code": (
+                            f"def step(el):\n"
+                            f"    return ['{target}'] if el.id != '{target}' else []"
+                        )
+                    }
+                },
+            }
+        ],
+    }
+    r = client.post(
+        papi("/navigations/evaluate"), json={"definition": defn}, headers=AUTH_HEADERS
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["warnings"] == []
+    assert all(chain[1]["id"] == target for chain in body["chains"])
+
+
+def test_navigation_script_step_error_warns(
+    client: TestClient, seed_thing_model: None
+) -> None:
+    defn = {
+        "kind": "path",
+        "start": {"kind": "scope", "types": ["Thing"]},
+        "steps": [
+            {
+                "kind": "script",
+                "snippet": {
+                    "definition": {"code": "def step(el): raise RuntimeError('boom')"}
+                },
+            }
+        ],
+    }
+    r = client.post(
+        papi("/navigations/evaluate"), json={"definition": defn}, headers=AUTH_HEADERS
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["chains"] == []
+    assert any("boom" in w for w in body["warnings"])
