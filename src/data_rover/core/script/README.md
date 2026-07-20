@@ -96,7 +96,11 @@ top-level `value(elements)` with a **list of `Element` handles** — one per
 id in the request's `element_ids`, in that order (validated non-empty at the
 route); a `"step"` run calls `step(el)` with its single bound element. The
 arity rule for both is unchanged — exactly one argument; for `value` that
-one argument is the list.
+one argument is the list. This is the same calling convention an embedded
+session (see "Evaluation sessions (M2/M3)" below) uses for its `value`/`step`
+calls — the only difference is that a console run boots a fresh guest per
+call, while a session boots once and serves many calls off the same warm
+instance.
 
 ## Limits (`RunLimits`)
 
@@ -212,3 +216,135 @@ for writes). `bridge.py`'s module docstring is the authoritative source for
 this contract, including the exact read-op parameter/response shapes and the
 `BridgeDispatcher` construction knobs (`record_ops`, `max_ops`,
 `max_op_bytes`, `page_limit`).
+
+## Evaluation sessions (M2/M3)
+
+Table columns (`ScriptColumn`) and navigation steps (`ScriptStep`) call a
+snippet's entry point once per row/hop against the live model, but unlike a
+console run (`ScriptRunner.run` — one fresh guest instance per invocation)
+that would mean booting a WASM interpreter and re-`exec`ing the whole
+snippet module for every cell. `ScriptRunner.open_session` instead opens one
+**warm session per distinct column/step code**: the guest execs the facade +
+snippet module exactly once, then serves as many entry-point calls as the
+caller needs on that same live instance, so module-level state (imports,
+top-level computation) persists across calls the way it would in a normal
+long-lived interpreter — see the determinism caveat below for the one place
+that persistence bites.
+
+**The `SnippetSession` protocol** (`core/script/runner.py`) is the
+sandbox-agnostic session handle: `boot_error: ScriptError | None` (set if the
+facade+module `exec` itself failed at open, or set LATER if the guest dies
+mid-session — either way every subsequent call must report that same
+error), `call(entry, element_ids) -> CallResult`, and an idempotent
+`close()` ("discards the underlying instance (never pooled again)").
+`CallResult.value` is the already-validated tagged wire payload (never a
+repr string); it is `None` iff `.error` is set.
+
+**`mode: "embedded"` start message.** `_WasmSnippetSession.__init__`
+(`api/script_runner.py`) pops a warm pool instance and sends ONE start
+message shaped like a normal run's (`code`, `facade_source`, `stdout_bytes`,
+`result_repr_bytes`) plus `"mode": "embedded"`. The guest bootstrap
+(`_GUEST_BOOTSTRAP_SOURCE`) branches on that field: `"embedded"` runs
+`_run_embedded` instead of the one-shot `_run_once` console runs use.
+`_run_embedded` execs `FACADE_SOURCE + code` once, emits a boot ack
+(`{"boot": true, "error": ...}`), and — if the exec didn't raise — enters a
+call loop reading newline-JSON frames from the host:
+
+- `{"call": {"entry": "value"|"step", "element_ids": [...]}}` — resolve the
+  named entry function in the module namespace, fetch a fresh `Element` per
+  id, invoke it (`value` gets the whole list; `step` gets the single bound
+  element), serialize the return value via the facade's own
+  `_dr_serialize_entry_result(entry, value)`, and reply with
+  `{"call_result": {"payload": ..., "error": ...}}`. `print()` output during
+  the call is still captured through the same size-capped `_CappedStdout`
+  console runs use, but the buffer is never included in `call_result` —
+  **embedded calls' stdout is captured and discarded**, by design; only the
+  tagged wire payload (and, in a future write-enabled mode, recorded ops —
+  sessions are read-only in M2/M3, see below) reaches the caller.
+- `{"close": true}` — the loop returns, ending the guest's `_start`; the host
+  then tears the instance down (never pooled again, same lifecycle as a
+  console run's single-use instance).
+
+**Tagged return-value wire shapes.** The guest-side encoder
+(`facade_src.py`'s `_dr_serialize_entry_result`) and the host-side untrusted-
+payload validator (`runner.py`'s `decode_call_payload`) are written to agree
+on the same tags and the same scalar set *by construction* — one changes,
+the other must change with it:
+
+| entry | shape |
+|---|---|
+| `step` | `{"ids": [str, ...]}` — `step()` may return `None` (→ `[]`), or an iterable of `Element`s and/or raw id strings; anything else raises `ValueError` guest-side, which surfaces as a `"runtime"` `CallResult.error`. |
+| `value`, scalar | `{"kind": "scalar", "value": None \| str \| int \| float \| bool}` |
+| `value`, list of scalars | `{"kind": "scalars", "values": [...]}` |
+| `value`, single `Element` | `{"kind": "element", "id": str}` |
+| `value`, list of `Element`s | `{"kind": "elements", "ids": [str, ...]}` |
+
+`decode_call_payload` re-validates every field's shape on the host — the
+guest is untrusted input, same stance as every other bridge response — and
+returns `(None, error message)` on anything that doesn't match one of the
+rows above; that path surfaces as a plain `"runtime"` `CallResult.error`,
+not a host-side crash.
+
+**Read-only stance.** `WasmScriptRunner.open_session` always builds its
+`BridgeDispatcher` with `record_ops=False` — embedded sessions are read-only
+by construction, not by caller choice (`open_session` has no `record_ops`
+parameter at all). Any `dr.create`/`connect`/`disconnect`/`Element.set`/
+`Element.delete` call inside a `value`/`step` snippet raises
+`dr.ReadOnlyError` in the guest, exactly like a console `"value"`/`"step"`
+run (see "The read-only / dry-run stance" above) — the entry-point calling
+convention is otherwise identical between a console run and a session call,
+just invoked once per run there vs. repeatedly per warm session here.
+
+**`ScriptEvalContext`** (`core/script/embed.py`) is the per-request state
+that ties embedded evaluation together: one instance is built per top-level
+evaluate/export request and threaded through everything that request
+transitively triggers — a script step inside a navigation used by a table
+column shares the SAME context as the table's own script columns, not a
+fresh one.
+
+- **Sessions keyed by code** — two columns/steps carrying byte-identical
+  code share one guest instance, opened lazily on the first `.call()` that
+  needs it; all sessions are closed together by `.close()`.
+- **Calls memoized by `(code, entry, element_ids)`** — `.call()` checks its
+  memo before dispatching to a session, so sorting a table by a script
+  column and then rendering the page calls `value()` at most once per
+  distinct binding, and identical bindings across rows dedupe for free.
+  This is sound under the WASM determinism guarantee (same code + same
+  model ⇒ same output — see "Determinism guarantees" above) — but an entry
+  point that mutates **module-level globals** across calls (e.g. a counter
+  it bumps on every invocation) falls outside that soundness assumption:
+  the memo has no notion of call order, so a second identical binding
+  returns the FIRST call's cached result rather than re-running against the
+  now-mutated module state. This is not detected or warned about — it is a
+  documented caveat for snippet authors, not a bug the context guards
+  against.
+- **`.warnings` / `.add_warning(message)`** — deduped by exact message
+  text, capped at `MAX_SCRIPT_WARNINGS` (20); the table/nav evaluation
+  layers use this to report prune/degrade decisions without flooding the
+  response.
+- **`.errored`** — flips `True` the first time any `.call()` in the
+  context's lifetime returns a `CallResult` with `.error` set. Callers (the
+  table route's row-order cache) use this as a cache-poisoning guard: an
+  order built while ANY script call in the request failed (or while the
+  model moved mid-build) must never be cached under a fingerprint/rev pair
+  that won't change on retry — see `routes/tables.py`'s comment at the
+  `TableOrderCache.put` call site.
+- **Degradation, not failure** — if the context was built with no runner
+  (`unavailable_reason` set explicitly, or defaulted to `"script runner
+  unavailable"`) or the shared budget is exhausted, `.call()` never touches
+  a session at all: it synthesizes a `CallResult` whose `ScriptError.kind`
+  is `"unavailable"` or `"timeout"` respectively. Route-layer glue for the
+  runner-missing / no-concurrency-slot cases lives in `api/script_eval.py`'s
+  `open_script_context`/`close_script_context`.
+- **`.close()`** — closes every session opened during the request
+  (route-level `finally`); a session is never reused across requests, even
+  identical ones.
+
+**Per-call deadline.** Every `SnippetSession.call` (and session boot) arms
+the guest's epoch deadline to `min(limits.wall_timeout_s, budget.
+remaining())`. Both the per-call wall-timeout cap AND the whole-request
+`ScriptBudget` (`settings.snippet_eval_budget_s`, a single `time.
+monotonic()` deadline shared by every session the context opens) bound each
+call — a column that burns most of the budget leaves later columns/steps in
+the same request a shrinking window rather than each getting a fresh
+`wall_timeout_s`.
