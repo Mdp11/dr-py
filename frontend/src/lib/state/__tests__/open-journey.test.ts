@@ -103,7 +103,7 @@ describe('open-journey controller', () => {
 		journeyUpload(50, 100); // create-only signal takes effect
 		beginJourney('open'); // must no-op (kind stays create)
 		journeyUpload(100, 100); // still honored → proves kind is still create
-		vi.advanceTimersByTime(80);
+		vi.advanceTimersByTime(80 * 40); // the bar eases toward the new phase floor
 		// create/upload slice is [0,30]; 100% bytes → phase advances to create[30,42]
 		expect(pct()).toBeGreaterThanOrEqual(30);
 	});
@@ -137,10 +137,39 @@ describe('open-journey controller', () => {
 		expect(getActiveProgress()).toBeNull();
 	});
 
+	it('keeps moving when a real fraction lands below the creep (no mid-open freeze)', () => {
+		beginJourney('open');
+		vi.advanceTimersByTime(80 * 20); // creep runs ahead of the server
+		const crept = pct()!;
+		expect(crept).toBeGreaterThan(0);
+		// server reports it has barely started — the old mapping froze here
+		journeyStatus({ state: 'hydrating', hydration: { phase: 'build', done: 1, total: 100 } });
+		vi.advanceTimersByTime(80 * 10);
+		const afterFirst = pct()!;
+		expect(afterFirst).toBeGreaterThan(crept);
+		journeyStatus({ state: 'hydrating', hydration: { phase: 'build', done: 20, total: 100 } });
+		vi.advanceTimersByTime(80 * 10);
+		expect(pct()!).toBeGreaterThan(afterFirst);
+	});
+
+	it('eases into a jump instead of teleporting (ready → validate ceil)', () => {
+		beginJourney('open');
+		vi.advanceTimersByTime(80 * 5);
+		const before = pct()!;
+		journeyStatus({ state: 'ready', model_rev: 1 });
+		vi.advanceTimersByTime(80); // a single tick must not land on the ceil
+		expect(pct()!).toBeLessThan(72);
+		expect(pct()!).toBeGreaterThan(before);
+		vi.advanceTimersByTime(80 * 40);
+		expect(pct()!).toBeGreaterThan(90); // but it does get there
+	});
+
 	it('rotates the spline label on the spline ticker', () => {
 		beginJourney('open');
 		expect(getActiveProgress()?.label).toBe(SPLINES[0]);
 		vi.advanceTimersByTime(3000);
+		expect(getActiveProgress()?.label).toBe(SPLINES[0]); // still on the first line
+		vi.advanceTimersByTime(1200); // 4200ms total: one spline period
 		expect(getActiveProgress()?.label).toBe(SPLINES[1]);
 	});
 
