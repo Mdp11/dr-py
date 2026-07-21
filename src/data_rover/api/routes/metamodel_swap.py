@@ -161,6 +161,11 @@ async def rebind_metamodel(
         state.set_full(issues)
         session.validation = state
         session.model_rev += 1
+        # Mirrors touch_model: the metamodel (and therefore every derived row
+        # order / script cell value) changed under the caches. The rev bump
+        # alone makes stale entries unreachable; clearing reclaims them now and
+        # re-stamps the cell cache to the new rev.
+        session.invalidate_derived_caches()
 
         commit_id = uuid.uuid4().hex
         issues_json = [IssueOut.from_core(i).model_dump() for i in issues]
@@ -189,6 +194,13 @@ async def rebind_metamodel(
             model.metamodel = old_mm
             model.indexes.rebuild()
             session.model_rev = old_rev
+            # The rev moves BACKWARDS here (and the metamodel itself was
+            # swapped in place and back), so both derived caches may hold
+            # entries computed against the discarded state — and the cell
+            # cache may already be STAMPED at the higher rev by a concurrent
+            # lock-free /tables/evaluate, which would brick it (final-review
+            # I1). Re-stamp to the restored rev and cancel the sweeps.
+            session.invalidate_derived_caches()
             session.validation = None  # force a re-seed on next read
             raise HTTPException(
                 status_code=500, detail="failed to persist rebind"

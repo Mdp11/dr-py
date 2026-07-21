@@ -143,6 +143,39 @@ describe('table script-status polling', () => {
 		expect(spy).toHaveBeenCalledTimes(1);
 	});
 
+	it('gives up after POLL_MAX_ATTEMPTS and surfaces a failed status', async () => {
+		// Defence in depth for C1: the backend is supposed to turn terminal on
+		// its own (a finished sweep that left holes now reports `failed`), but a
+		// client that answers an endless `computing` with an unbounded
+		// once-a-second loop hammers a route that re-pays a whole-table pass on
+		// every request. The bound mirrors `downloadTable`'s EXPORT_MAX_ATTEMPTS,
+		// and the give-up is VISIBLE (a `failed` status the grid renders in its
+		// destructive strip), never a silent stop.
+		const spy = vi
+			.spyOn(tablesApi, 'evaluateTable')
+			.mockResolvedValue(pageAt(100, 100, 300, { state: 'computing', done: 40, total: 300 }));
+		await seedComputing(spy as unknown as ReturnType<typeof vi.fn>);
+
+		// 1 seed + 120 polls; the 121st is never scheduled.
+		await vi.advanceTimersByTimeAsync(1000 * 200);
+		expect(spy).toHaveBeenCalledTimes(121);
+		const status = getTableScriptStatus(TAB);
+		expect(status).toMatchObject({ state: 'failed', done: 40, total: 300 });
+		expect(status?.message).toMatch(/giving up/i);
+
+		// ...and it really has stopped, not merely paused.
+		await vi.advanceTimersByTimeAsync(1000 * 200);
+		expect(spy).toHaveBeenCalledTimes(121);
+
+		// A USER-initiated load starts a fresh budget (the sweep may have moved
+		// on), so the loop resumes rather than being wedged for the tab's life.
+		await loadTablePage(TAB, 100);
+		expect(spy).toHaveBeenCalledTimes(122);
+		expect(getTableScriptStatus(TAB)).toMatchObject({ state: 'computing' });
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(spy).toHaveBeenCalledTimes(123);
+	});
+
 	it('clears the status when a page arrives without one', async () => {
 		const spy = vi
 			.spyOn(tablesApi, 'evaluateTable')

@@ -119,10 +119,11 @@ def preview_commit(
             scoped = default_pipeline().validate(model, res.dirty.to_scope())
         finally:
             _rollback(model, res.inverse_units)  # always restore the model
-            # The in-place apply-then-rollback leaves model_rev unchanged, so
-            # a concurrent lock-free /tables/evaluate could have cached rows
-            # computed mid-preview at this rev (final-review A1). Invalidate.
-            session.table_order_cache.clear()
+            # The in-place apply-then-rollback leaves model_rev unchanged, so a
+            # concurrent lock-free /tables/evaluate could have cached rows AND
+            # script cell values computed mid-preview at this rev (final-review
+            # A1/I1). Invalidate both caches and the sweeps behind them.
+            session.invalidate_derived_caches()
     structural = [i for i in scoped if i.category is IssueCategory.STRUCTURAL]
     conformance = [i for i in scoped if i.category is IssueCategory.CONFORMANCE]
     return PreviewResponse(
@@ -258,7 +259,7 @@ def create_commit(
         structural = [i for i in scoped if i.category is IssueCategory.STRUCTURAL]
         if structural:
             _rollback(model, res.inverse_units)
-            session.table_order_cache.clear()  # rolled back in place; A1
+            session.invalidate_derived_caches()  # rolled back in place; A1/I1
             return JSONResponse(
                 status_code=422,
                 content={
@@ -276,7 +277,7 @@ def create_commit(
         # and does not pass through here, so it stays exempt by construction.
         if session.strict_mode and conformance:
             _rollback(model, res.inverse_units)
-            session.table_order_cache.clear()  # rolled back in place; A1
+            session.invalidate_derived_caches()  # rolled back in place; A1/I1
             return JSONResponse(
                 status_code=422,
                 content={
@@ -288,7 +289,7 @@ def create_commit(
             )
         delta = state.replace(res.dirty.ids, scoped)
         session.model_rev += 1
-        session.table_order_cache.clear()  # mirrors touch_model; harmless/defensive
+        session.invalidate_derived_caches()  # mirrors touch_model
         session.record_batch(
             AppliedBatch(
                 ops=res.canonical_ops,
@@ -314,7 +315,7 @@ def create_commit(
         except Exception as exc:
             _rollback(model, res.inverse_units)
             session.model_rev -= 1
-            session.table_order_cache.clear()  # rolled back in place; A1
+            session.invalidate_derived_caches()  # rolled back in place; A1/I1
             session.op_log.pop()
             db.rollback()
             raise HTTPException(
@@ -490,7 +491,7 @@ def revert_commit(
         structural = [i for i in scoped if i.category is IssueCategory.STRUCTURAL]
         if structural:
             _rollback(model, res.inverse_units)
-            session.table_order_cache.clear()  # rolled back in place; A1
+            session.invalidate_derived_caches()  # rolled back in place; A1/I1
             return JSONResponse(
                 status_code=422,
                 content={
@@ -503,7 +504,7 @@ def revert_commit(
         conformance = [i for i in scoped if i.category is IssueCategory.CONFORMANCE]
         delta = state.replace(res.dirty.ids, scoped)
         session.model_rev += 1
-        session.table_order_cache.clear()  # mirrors touch_model; harmless/defensive
+        session.invalidate_derived_caches()  # mirrors touch_model
         session.record_batch(
             AppliedBatch(
                 ops=res.canonical_ops,
@@ -529,7 +530,7 @@ def revert_commit(
         except Exception as exc:
             _rollback(model, res.inverse_units)
             session.model_rev -= 1
-            session.table_order_cache.clear()  # rolled back in place; A1
+            session.invalidate_derived_caches()  # rolled back in place; A1/I1
             session.op_log.pop()
             db.rollback()
             raise HTTPException(

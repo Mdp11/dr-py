@@ -99,7 +99,10 @@ class ScriptSweepRegistry:
     directly rather than reaching into a private attribute. It gives one active
     sweep per session — a queued job blocks its own daemon thread on the lock,
     a natural FIFO for the handful of tables a user flips between, and it keeps
-    a single session from monopolising the process-wide worker slots.
+    a single session from monopolising the process-wide worker slots. That last
+    property depends on the LOCK ORDER in ``_run``: this lock is taken BEFORE
+    the process-wide slot, so a session's queued sweeps wait here holding no
+    global capacity at all.
     """
 
     def __init__(self) -> None:
@@ -244,9 +247,22 @@ def _run(
 ) -> None:
     try:
         slot = _acquire_global_slot(settings)
-        with slot, session.script_sweeps.run_lock:
+        # LOCK ORDER — per-session `run_lock` FIRST, process-wide `slot`
+        # SECOND, everywhere, no exceptions. Taking the slot first would have
+        # a session's queued sweeps sit on their own run_lock while HOLDING
+        # global capacity: four tables of one project would occupy all four
+        # slots with one thread working and three idle, starving every other
+        # project for up to the sweep ceiling — the exact opposite of what
+        # `ScriptSweepRegistry.run_lock` is documented to do. This way a
+        # queued sweep blocks on its session's lock holding nothing global.
+        # No deadlock: these are the only two locks acquired together on this
+        # path (everything deeper — the cell cache, `_SharedGuards.lock`, the
+        # registry's own `_lock`, the work queue — is a leaf taken and
+        # released strictly inside, and `kick()` releases `_lock` before
+        # calling `start`), so the acquisition order is globally consistent.
+        with session.script_sweeps.run_lock, slot:
             # Re-check after queuing: the job may have been cancelled (or the
-            # rev moved) while this thread waited for a slot / the run lock.
+            # rev moved) while this thread waited for the run lock / a slot.
             if _aborted(session, job):
                 _cancelled(job)
                 return

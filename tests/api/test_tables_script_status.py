@@ -525,6 +525,164 @@ def test_runner_unavailable_reports_failed_without_a_sweep(
     assert session.script_sweeps.get(_fingerprint(), session.model_rev) is None
 
 
+def test_done_sweep_with_offwindow_hole_reports_failed(
+    client: TestClient,
+    app: FastAPI,
+    seed_thing_model: None,
+    settings_sync_sweep: Settings,
+) -> None:
+    """C1 — the forever-`computing` regression (the evaluate-route twin of
+    `test_export_done_sweep_with_permanent_hole_does_not_202_forever`).
+
+    A `done` sweep does NOT imply a complete cache: `ScriptCellCache.put`
+    refuses non-deterministic error kinds while the sweep only aborts on a run
+    of `snippet_sweep_timeout_abort` CONSECUTIVE ones, so ONE intermittently
+    timing-out cell leaves a permanent hole behind an otherwise successful
+    sweep (the per-session cell cache LRU-evicting the sweep's own earlier
+    writes does the same). `_status_from_job` maps `done` -> `computing` and
+    failed-job memory hands that same job back at this rev forever, so
+    reporting the job state alone would tell the client to poll a page that is
+    ALSO permanently stuck in build order — once a second, re-paying the whole
+    cache-only build+sort pass every time.
+
+    The hole must be OFF-WINDOW to strand: the visible window is evaluated
+    LIVE, so an in-window hole self-heals on the first poll. Hence `limit=2`
+    (window `t1`,`t2`) with `t5` — never in the window — as the timing-out
+    cell.
+
+    The route instead RE-PROBES: terminal job + still-missing values => no
+    retry can help => report `failed` and let the client stop.
+    """
+    runner = ScriptedRunner(lambda i, ids: timeout() if ids[0] == "t5" else ok(7))
+    app.dependency_overrides[get_runner] = lambda: runner
+
+    statuses = []
+    for _ in range(3):
+        page = _evaluate(client, _script_table(), limit=2)
+        statuses.append(page["script_status"])
+        assert _keys(page) == THING_IDS[:2]  # degraded to build order throughout
+    assert [s["state"] for s in statuses] == ["failed"] * 3
+    assert "could not be computed" in statuses[0]["message"]
+
+    session = get_session()
+    job = session.script_sweeps.get(_fingerprint(), session.model_rev)
+    # The setup really is the "terminal + hole" case and not a failed sweep:
+    # the job ENDED WELL, the cache just isn't complete.
+    assert job is not None and job.state == "done"
+    # Five guest calls in TOTAL, all in the first request: `t1`/`t2` live for
+    # the window (which caches them, so the sweep behind it only computes
+    # `t3`..`t5`). The later polls touch the guest not at all — failed-job
+    # memory kept them from re-grinding, which is also why the hole is
+    # permanent at this rev.
+    assert runner.calls[0] == len(THING_IDS)
+
+
+def test_dead_sweep_with_complete_cache_reports_computing_not_failed(
+    client: TestClient, app: FastAPI, seed_thing_model: None
+) -> None:
+    """The other side of C1's re-probe: a DEAD job whose values exist anyway.
+
+    A `cancelled`/`failed` job is not evidence that the data is missing — here
+    the live window pass computes (and caches) every value itself, so a retry
+    WILL return the clean sorted page. Reporting the job's own dead state would
+    stop the client polling and freeze the table in build order for the rest of
+    the rev. Mirrors the export route's FIX B.
+
+    Deterministic with no threads and no sweep: a `cancelled` job is registered
+    for this `(fingerprint, rev)` up front, so `kick` hands it straight back.
+    """
+    runner = ScriptedRunner(_descending_value)
+    app.dependency_overrides[get_runner] = lambda: runner
+    session = get_session()
+
+    def _start(job: SweepJob) -> None:
+        job.state = "cancelled"
+        job.message = "sweep cancelled"
+
+    job = session.script_sweeps.kick(_fingerprint(), session.model_rev, _start)
+    assert job.state == "cancelled"
+
+    first = _evaluate(client, _script_table())
+    assert first["script_status"]["state"] == "computing"  # NOT "failed"
+    assert _keys(first) == THING_IDS  # this response is still degraded...
+    # ...and the promised retry really does deliver the sorted page.
+    second = _evaluate(client, _script_table())
+    assert second["script_status"]["state"] == "ready"
+    assert _keys(second) == list(reversed(THING_IDS))
+
+
+# --------------------------------------------------------------------------
+# I1: a rev ROLLBACK must restore the cell cache's stamp
+# --------------------------------------------------------------------------
+
+
+def test_ops_persist_failure_restores_the_cell_cache_stamp(
+    client: TestClient,
+    app: FastAPI,
+    seed_thing_model: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """I1 — a backward rev move must not leave the cell cache stamped AHEAD.
+
+    `/model/ops` mutates in place, bumps `model_rev`, and — if the durable
+    persist fails — rolls the mutation back and does `model_rev -= 1`. Table
+    routes take NO `write_mutex`, so a concurrent `/tables/evaluate` can sample
+    the BUMPED rev and `put` a cell computed against the about-to-be-discarded
+    model; `ScriptCellCache.put` self-clears and re-stamps FORWARD on such a
+    write. That racing writer is simulated here from inside the failing
+    persist, which is exactly the window it happens in.
+
+    Without the fix the stamp stays one rev AHEAD of `model_rev` forever, so
+    (a) every later `put`/`get` at the live rev is refused/misses — sweeps
+    cache nothing, end `done`, and strand the evaluate poller (C1's loop) —
+    and (b) when a LATER commit legitimately reaches that rev, the stamp
+    matches and the cache serves values computed against the ROLLED-BACK
+    model.
+    """
+    session = get_session()
+    base_rev = session.model_rev
+    sha = hashlib.sha256(VALUE_CODE.encode()).hexdigest()
+    raced_key = (sha, "value", ("t1",))
+    fp = _fingerprint()
+    session.script_sweeps.kick(fp, base_rev, lambda job: None)
+
+    def _boom(*args: object, **kwargs: object) -> None:
+        # Stand-in for the racing lock-free /tables/evaluate.
+        assert session.model_rev == base_rev + 1
+        session.script_cell_cache.put(raced_key, ok(99), session.model_rev)
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr("data_rover.api.routes.ops._persist_commit", _boom)
+    r = client.post(
+        papi("/model/ops"),
+        json={
+            "base_rev": base_rev,
+            "ops": [
+                {
+                    "kind": "create_element",
+                    "temp_id": "tmp_1",
+                    "type_name": "Thing",
+                    "properties": {"name": "N9"},
+                }
+            ],
+        },
+        headers=AUTH_HEADERS,
+    )
+    assert r.status_code == 500, r.text
+    assert session.model_rev == base_rev  # rolled back
+
+    assert session.script_cell_cache.stamp == base_rev  # NOT base_rev + 1
+    # The raced value — computed against the discarded model — is gone, and
+    # cannot resurface when a later commit reaches that rev.
+    assert session.script_cell_cache.get(raced_key, base_rev) is None
+    assert session.script_cell_cache.get(raced_key, base_rev + 1) is None
+    # ...and the cache is not bricked: writes at the live rev land again.
+    session.script_cell_cache.put(raced_key, ok(1), base_rev)
+    assert session.script_cell_cache.get(raced_key, base_rev) is not None
+    # In-flight sweeps for the discarded state were cancelled and forgotten.
+    assert session.script_sweeps.get(fp, base_rev) is None
+
+
 # --------------------------------------------------------------------------
 # /tables/export: 202 while the sweep is computing (Task 8, spec §4.4)
 # --------------------------------------------------------------------------

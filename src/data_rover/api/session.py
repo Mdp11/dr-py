@@ -132,6 +132,43 @@ class Session:
         default_factory=ScriptSweepRegistry, repr=False
     )
 
+    def invalidate_derived_caches(self) -> None:
+        """Drop every model-derived cache and re-stamp the cell cache to the
+        CURRENT ``model_rev``.
+
+        Called by ``set_model``/``touch_model`` after they bump the rev, and —
+        this is the load-bearing part — by every route that mutates the model
+        IN PLACE and then rolls it back (``routes/commits.py``,
+        ``routes/ops.py``, ``routes/metamodel_swap.py``).
+
+        Table routes take NO ``write_mutex``, so a concurrent
+        ``/tables/evaluate`` can sample the rev mid-mutation and write results
+        computed against the about-to-be-discarded model. Two distinct hazards
+        follow, and both are fixed here:
+
+        * ROLLBACK AT AN UNCHANGED REV — the values are simply wrong for the
+          model that survives, and their key (fingerprint, rev) is unchanged,
+          so nothing would ever evict them.
+        * ROLLBACK THAT MOVES THE REV BACKWARDS (a persist failure doing
+          ``model_rev -= 1``) — the racing writer may have already stamped the
+          cell cache at the HIGHER rev. ``ScriptCellCache`` only self-clears on
+          a FORWARD stamp move, so afterwards every ``put``/``get`` at the
+          restored rev is refused/misses (the cache is bricked, sweeps cache
+          nothing and end ``done`` — stranding the evaluate route's poller),
+          and when a LATER commit legitimately reaches that rev again the
+          stamp matches and the cache serves values computed against the
+          ROLLED-BACK model. ``clear_and_stamp(self.model_rev)`` moves the
+          stamp back in lockstep with the rev; it is the only writer allowed
+          to move a stamp DOWN.
+
+        In-flight sweeps are cancelled for the same reason: they were computing
+        cells against the discarded model state (and, past a rev rollback,
+        would keep re-stamping the cache forward). The next evaluate re-kicks.
+        """
+        self.table_order_cache.clear()
+        self.script_cell_cache.clear_and_stamp(self.model_rev)
+        self.script_sweeps.cancel_all()
+
     def set_model(
         self, model: Model | None, *, validation: ValidationState | None = None
     ) -> None:
@@ -149,9 +186,7 @@ class Session:
         self.op_log.clear()  # recorded inverses no longer apply to this model
         self.op_log_dropped = 0
         self.model_rev += 1
-        self.table_order_cache.clear()
-        self.script_cell_cache.clear_and_stamp(self.model_rev)
-        self.script_sweeps.cancel_all()
+        self.invalidate_derived_caches()
 
     def touch_model(self) -> None:
         """Call when the model is mutated outside the ops protocol.
@@ -178,9 +213,7 @@ class Session:
         self.op_log.clear()
         self.op_log_dropped = 0
         self.validation = None
-        self.table_order_cache.clear()
-        self.script_cell_cache.clear_and_stamp(self.model_rev)
-        self.script_sweeps.cancel_all()
+        self.invalidate_derived_caches()
 
     def set_metamodel(self, metamodel: Metamodel | None) -> None:
         """Replace (or clear) the metamodel; the model conforms to it, so the

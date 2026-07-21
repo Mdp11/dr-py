@@ -583,6 +583,13 @@ def apply_ops(
         except Exception as exc:
             _rollback(model, res.inverse_units)  # undo the in-memory mutation
             session.model_rev -= 1
+            # The rev moves BACKWARDS here. A concurrent lock-free
+            # /tables/evaluate may already have stamped the script cell cache
+            # at the higher rev (it only self-clears on a FORWARD stamp move),
+            # which would brick every later write/read at the restored rev and
+            # then serve values computed against this rolled-back model once a
+            # LATER commit reaches that rev again (final-review I1).
+            session.invalidate_derived_caches()
             session.op_log.pop()  # drop the batch we just recorded
             db.rollback()
             raise HTTPException(
@@ -625,6 +632,7 @@ def undo(
         except Exception as exc:
             _rollback(model, res.inverse_units)  # undo the in-memory mutation
             session.model_rev -= 1
+            session.invalidate_derived_caches()  # rev moved BACK; see apply_ops
             session.op_log.append(batch)  # re-push the batch so undo history is intact
             db.rollback()
             raise HTTPException(

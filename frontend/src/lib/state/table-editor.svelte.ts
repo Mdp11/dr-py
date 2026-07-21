@@ -51,6 +51,11 @@ const PAGE = 100;
 const MAX_LIMIT = 500;
 /** Delay between two script-sweep polls (matches the backend's Retry-After). */
 const POLL_MS = 1_000;
+/** Bound on consecutive `computing` polls for one tab, mirroring
+ * `EXPORT_MAX_ATTEMPTS` (~2 minutes at POLL_MS). A backend that somehow keeps
+ * answering `computing` must not turn into an infinite client loop — every
+ * poll costs a full server-side table pass. Reset by any user-initiated load. */
+const POLL_MAX_ATTEMPTS = 120;
 /** Delay between two export retries while the sweep is still computing
  * (the backend answers 202 with `Retry-After: 1`). */
 const EXPORT_RETRY_MS = 1_000;
@@ -126,6 +131,17 @@ const _scriptStatus = new SvelteMap<string, ScriptStatus>();
  */
 // eslint-disable-next-line svelte/prefer-svelte-reactivity
 const _pollTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+/**
+ * tabId -> consecutive script-sweep polls issued for this tab (the loop bound,
+ * see `POLL_MAX_ATTEMPTS`). Deliberately NOT cleared by `bumpGeneration`: every
+ * poll goes through `loadTablePage`, which bumps the generation, so a
+ * generation-scoped counter would reset itself on every tick and bound nothing.
+ * Cleared on a non-`computing` status, on a USER-initiated load, and by the
+ * per-tab teardown paths. Control state, never read from templates.
+ */
+// eslint-disable-next-line svelte/prefer-svelte-reactivity
+const _pollAttempts = new Map<string, number>();
 
 /**
  * Per-TAB page-load generation. Control state, never read from templates.
@@ -213,13 +229,41 @@ function visibleRequest(tabId: string): { offset: number; limit: number } {
  *
  * Called from every page landing (install AND merge). Exactly one timer per
  * tab — the previous one is always cancelled first.
+ *
+ * The loop is BOUNDED (`POLL_MAX_ATTEMPTS`), the same defence in depth
+ * `downloadTable` applies to its export retries: the backend is supposed to
+ * turn terminal on its own (a sweep that finished but left holes reports
+ * `failed`), but a client must never answer "still computing" with an
+ * unbounded once-a-second request loop — each poll re-pays a whole-table pass
+ * server-side. On give-up the tab's status is replaced with a `failed` one
+ * carrying a user-facing message, which the grid already renders in its
+ * destructive status strip; a user-initiated reload starts a fresh budget
+ * (only poll-driven loads count, see `_loadTablePage`).
  */
 function handleScriptStatus(tabId: string, page: TablePage): void {
 	const status = page.script_status ?? null;
 	if (status) _scriptStatus.set(tabId, status);
 	else _scriptStatus.delete(tabId);
 	cancelPoll(tabId);
-	if (status?.state !== 'computing') return;
+	if (status?.state !== 'computing') {
+		_pollAttempts.delete(tabId);
+		return;
+	}
+	const attempts = (_pollAttempts.get(tabId) ?? 0) + 1;
+	if (attempts > POLL_MAX_ATTEMPTS) {
+		_pollAttempts.delete(tabId);
+		_scriptStatus.set(tabId, {
+			state: 'failed',
+			done: status.done,
+			total: status.total,
+			message:
+				'Script values are still being computed after ' +
+				`${Math.round((POLL_MAX_ATTEMPTS * POLL_MS) / 1000)}s — giving up. ` +
+				'Reload the table to try again.'
+		});
+		return;
+	}
+	_pollAttempts.set(tabId, attempts);
 	const gen = _generations.get(tabId) ?? 0;
 	_pollTimers.set(
 		tabId,
@@ -227,7 +271,7 @@ function handleScriptStatus(tabId: string, page: TablePage): void {
 			_pollTimers.delete(tabId);
 			if (!isCurrent(tabId, gen)) return; // edited/reloaded/closed since scheduled
 			const { offset, limit } = visibleRequest(tabId);
-			void loadTablePage(tabId, offset, limit);
+			void _loadTablePage(tabId, offset, limit, true);
 		}, POLL_MS)
 	);
 }
@@ -281,6 +325,11 @@ function moveTabState(oldTab: string, newTab: string): void {
 	const status = _scriptStatus.get(oldTab);
 	_scriptStatus.delete(oldTab);
 	if (status !== undefined) _scriptStatus.set(newTab, status);
+	// The attempt budget follows the status: a rebind is not a fresh start for
+	// a sweep that has already been polled 100 times under the old tab id.
+	const attempts = _pollAttempts.get(oldTab);
+	_pollAttempts.delete(oldTab);
+	if (attempts !== undefined) _pollAttempts.set(newTab, attempts);
 
 	// Chunk fetches in flight are closed over `oldTab`, whose draft is gone —
 	// they will be dropped on landing. Drop their bookkeeping with them; the
@@ -290,13 +339,17 @@ function moveTabState(oldTab: string, newTab: string): void {
 	// The orphaned in-flight load will never settle under `newTab`; re-issue it
 	// so the new tab does not hang on `loading: true`. Reads the draft under the
 	// NEW id (the caller has already set it), same as nav's rekeyTab re-run.
-	if (loading === true) void loadTablePage(newTab, _pages.get(newTab)?.offset ?? 0);
-	else if (status?.state === 'computing') {
+	// Both re-issues below count as POLL continuations (`fromPoll: true`), not
+	// user-initiated loads: a rebind mid-sweep must not hand the poll loop a
+	// fresh attempt budget.
+	if (loading === true) {
+		void _loadTablePage(newTab, _pages.get(newTab)?.offset ?? 0, PAGE, true);
+	} else if (status?.state === 'computing') {
 		// Nothing was in flight to re-issue, but the sweep is still running and
 		// the cancelled timer belonged to the old id — restart the loop, or the
 		// tab would sit on `pending` cells forever.
 		const { offset, limit } = visibleRequest(newTab);
-		void loadTablePage(newTab, offset, limit);
+		void _loadTablePage(newTab, offset, limit, true);
 	}
 }
 
@@ -490,6 +543,21 @@ export async function loadTablePage(
 	offset: number,
 	limit: number = PAGE
 ): Promise<void> {
+	// A load nobody's poll timer asked for is a fresh start: give the sweep
+	// poll loop a new attempt budget (see `_pollAttempts`).
+	return _loadTablePage(tabId, offset, limit, false);
+}
+
+/** `loadTablePage` plus the poll-loop bookkeeping the exported wrapper hides:
+ * `fromPoll` distinguishes a tick of the script-sweep poll loop (which spends
+ * the tab's attempt budget) from any other caller (which resets it). */
+async function _loadTablePage(
+	tabId: string,
+	offset: number,
+	limit: number,
+	fromPoll: boolean
+): Promise<void> {
+	if (!fromPoll) _pollAttempts.delete(tabId);
 	const draft = _drafts.get(tabId);
 	if (!draft) return;
 	const gen = bumpGeneration(tabId); // supersede any older in-flight load
@@ -690,6 +758,7 @@ export async function reloadTableDraft(tabId: string): Promise<void> {
 	_conflicts.delete(tabId);
 	_viewRanges.delete(tabId);
 	_scriptStatus.delete(tabId);
+	_pollAttempts.delete(tabId);
 	cancelPoll(tabId);
 	bumpGeneration(tabId); // orphan any in-flight load for the old draft
 	await ensureTableDraft(tabId);
@@ -704,6 +773,7 @@ export function closeTableDraft(tabId: string): void {
 	_conflicts.delete(tabId);
 	_viewRanges.delete(tabId);
 	_scriptStatus.delete(tabId);
+	_pollAttempts.delete(tabId);
 	cancelPoll(tabId);
 	bumpGeneration(tabId); // orphan any in-flight load
 }
@@ -791,6 +861,7 @@ export function resetTableEditors(): void {
 	_conflicts.clear();
 	_viewRanges.clear();
 	_scriptStatus.clear();
+	_pollAttempts.clear();
 	for (const tabId of [..._pollTimers.keys()]) cancelPoll(tabId);
 	// Bump (not clear) so in-flight responses from before the reset stay stale
 	// even if the same tab id is immediately re-created. (bumpGeneration also

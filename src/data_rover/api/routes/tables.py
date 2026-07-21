@@ -176,6 +176,14 @@ def _status_from_job(job: SweepJob) -> ScriptStatusOut:
     return ScriptStatusOut(state="computing", done=job.done, total=job.total)
 
 
+#: Wire message for a TERMINAL sweep that still left holes at this rev — the
+#: `done`-job case has no `job.message` of its own to borrow.
+INCOMPLETE_SWEEP_MESSAGE = (
+    "Some script values could not be computed at this revision; "
+    "they are shown as not computed until the model changes."
+)
+
+
 @router.post("/tables/evaluate")
 def evaluate_table(
     payload: EvaluateTableIn,
@@ -204,7 +212,11 @@ def evaluate_table(
     `script_status` carries the poll-again contract; it stays None for tables
     that have no script column at all. It is computed AFTER the window pass on
     every branch (order-cache hit included), so a window that renders a
-    `pending` cell can never be reported as `ready`.
+    `pending` cell can never be reported as `ready`. A TERMINAL sweep that
+    still left holes reports `failed`, not `computing` (decision table at the
+    call site) — otherwise failed-job memory would hand the same dead job back
+    forever and the client would poll a permanently build-ordered page once a
+    second for the life of the rev.
 
     Lock stance for the sweep kick: this route holds NO session lock (no
     `write_mutex` — see above), so kicking is safe even in the sync sweep mode
@@ -325,6 +337,104 @@ def evaluate_table(
                         session, metamodel, model, defn, runner, settings, rev
                     )
                     script_status = _status_from_job(job)
+                    # Terminality is read off the WIRE state (which collapses
+                    # both DEAD job states, `failed` and `cancelled`, onto
+                    # `failed`) PLUS the `done` job state — which
+                    # `_status_from_job` deliberately reports as `computing`
+                    # and so cannot be recovered from `script_status` alone.
+                    #
+                    # Once a job exists the honest question is not "did the job
+                    # finish" but "would a RETRY ACTUALLY HELP", i.e. is the
+                    # cache complete NOW. A RE-PROBE answers it, and (exactly
+                    # as in `export_table`) is only ever CONSULTED for a
+                    # terminal job:
+                    #
+                    #   job state       | re-probe? | answer
+                    #   ----------------+-----------+--------------------------
+                    #   running         | SKIPPED   | `computing` — work is
+                    #                   |           | genuinely in flight and
+                    #                   |           | nothing a re-probe could
+                    #                   |           | find changes that answer,
+                    #                   |           | so running one would just
+                    #                   |           | re-pay the whole-table
+                    #                   |           | pass (whose navigation
+                    #                   |           | walk is NOT memoized)
+                    #                   |           | once per poll second.
+                    #   terminal, none  | consulted | `computing` — the cache
+                    #   re-probe misses |           | filled in behind this
+                    #                   |           | request (a sync sweep
+                    #                   |           | fills it AFTER this
+                    #                   |           | request's build), so one
+                    #                   |           | more poll returns the
+                    #                   |           | clean, correctly SORTED
+                    #                   |           | page. True even when the
+                    #                   |           | job died `failed`/
+                    #                   |           | `cancelled`: the job is
+                    #                   |           | dead, the DATA is not.
+                    #   terminal, some  | consulted | `failed` — nothing will
+                    #   re-probe misses |           | ever fill those cells at
+                    #                   |           | this rev (`put` refuses
+                    #                   |           | non-deterministic error
+                    #                   |           | kinds while the sweep
+                    #                   |           | only aborts on a
+                    #                   |           | CONSECUTIVE run of them;
+                    #                   |           | the per-session cell
+                    #                   |           | cache can also LRU-evict
+                    #                   |           | the sweep's own earlier
+                    #                   |           | writes), and failed-job
+                    #                   |           | memory hands the same
+                    #                   |           | terminal job back to
+                    #                   |           | every later poll. Saying
+                    #                   |           | `computing` here would
+                    #                   |           | loop the client forever
+                    #                   |           | on a page that is also
+                    #                   |           | permanently stuck in
+                    #                   |           | BUILD order.
+                    #
+                    # `ready` is still unreachable on this whole branch: the
+                    # rows in THIS response predate whatever the re-probe found.
+                    terminal = script_status.state == "failed" or job.state == "done"
+                    if terminal:
+                        # RE-PROBE: replay this request's own passes with a
+                        # fresh miss baseline. Truthful despite reusing the
+                        # context — a `pending` result is never memoized and
+                        # never cached, so every cell that missed re-consults
+                        # the (now sweep-filled) cell cache, while cells this
+                        # request already computed live are served from the
+                        # memo (no fresh guest work, no double-counting).
+                        # Cache-only throughout: the question is what a RETRY
+                        # would find, and a retry's whole-table pass is
+                        # cache-only too.
+                        miss_baseline = script_ctx.pending_misses
+                        script_ctx.cache_only = True
+                        if cached is None:
+                            re_built = build_rows_ex(
+                                metamodel, model, defn, limits, script=script_ctx
+                            )
+                            order_rows(
+                                metamodel,
+                                model,
+                                defn,
+                                re_built.keys,
+                                sort,
+                                limits,
+                                script=script_ctx,
+                            )
+                        evaluate_cells(
+                            metamodel, model, defn, window, limits, script=script_ctx
+                        )
+                        script_ctx.cache_only = False
+                        if script_ctx.pending_misses > miss_baseline:
+                            script_status = ScriptStatusOut(
+                                state="failed",
+                                done=job.done,
+                                total=job.total,
+                                message=job.message or INCOMPLETE_SWEEP_MESSAGE,
+                            )
+                        else:
+                            script_status = ScriptStatusOut(
+                                state="computing", done=job.done, total=job.total
+                            )
             warnings = list(script_ctx.warnings) if script_ctx is not None else []
         finally:
             close_script_context(script_ctx, acquired)
