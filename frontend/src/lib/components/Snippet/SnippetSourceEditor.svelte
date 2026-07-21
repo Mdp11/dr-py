@@ -13,6 +13,7 @@
 	import { entryAvailable, withStub, type BoundEntry } from '$lib/snippet/entry-stubs';
 	import type { SnippetDiagnostic, SnippetSource } from '$lib/api/types';
 	import CodeEditor from './CodeEditor.svelte';
+	import SnippetTestPanel from './SnippetTestPanel.svelte';
 
 	let {
 		snippet,
@@ -40,6 +41,12 @@
 	);
 
 	let seeding = $state(false);
+
+	// bind:this handles the two directions the editor and the test panel need
+	// to reach each other: Mod-Enter in the code editor triggers a run, and a
+	// traceback frame in the run's result jumps the editor's cursor.
+	let editor: CodeEditor | undefined = $state();
+	let testPanel: SnippetTestPanel | undefined = $state();
 
 	// Component-local lint state — NOT the M1 store's embedded-draft
 	// machinery (snippet-editor.svelte.ts): this editor just holds a code
@@ -170,7 +177,13 @@
 	{:else if snippet.definition}
 		{@const def = snippet.definition}
 		<div class="h-48 overflow-hidden rounded border border-input">
-			<CodeEditor code={def.code} {diagnostics} onChange={handleCodeChange} onRun={() => {}} />
+			<CodeEditor
+				bind:this={editor}
+				code={def.code}
+				{diagnostics}
+				onChange={handleCodeChange}
+				onRun={() => void testPanel?.requestRun()}
+			/>
 		</div>
 		{#if !entryPoints.includes(entry)}
 			<div data-testid="snippet-entry-warning" class="text-amber-600">
@@ -178,4 +191,17 @@
 			</div>
 		{/if}
 	{/if}
+
+	<!-- In ref mode there is no lint response to ask, so `[entry]` stands in
+	     as "the ref covers it" — EXCEPT when `refMissing` is true: the ref
+	     that was covering it is gone (deleted, or its own entry_points moved),
+	     the `snippet-ref-missing` warning above already says so, and Run must
+	     agree rather than post a doomed `artifact_id` to the backend. -->
+	<SnippetTestPanel
+		bind:this={testPanel}
+		{snippet}
+		{entry}
+		entryPoints={inline ? entryPoints : refMissing ? [] : [entry]}
+		onGoToLine={(l) => editor?.goToLine(l)}
+	/>
 </div>

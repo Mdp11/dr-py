@@ -228,6 +228,27 @@ SnippetSourceEditor.svelte`, bound to a `SnippetSource` (`{ ref?, definition?
   **not** the tab-level `_lint` map in `state/snippet-editor.svelte.ts`, since
   this editor only ever holds a bare code string with no per-tab draft/save
   lifecycle of its own.
+- **Test panel.** Both modes render `SnippetTestPanel.svelte` (`snippet-test-
+toggle`), a collapsed disclosure that expands to the shared
+  `ElementContextRow` (chips + fuzzy search + "Use current selection"), a Run
+  button, and `SnippetResultView` — the same result surface the tab console
+  renders, minus ops staging. Inline mode posts `{ code }` to
+  `POST /snippets/run`, ref mode posts `{ artifact_id }`; both post `entry` +
+  `element_ids`. Run is gated on all four of: a configured source, the entry
+  point being available (`entryAvailable`, from the editor's local lint inline
+  / implied by the pre-filtered dropdown in ref mode), and the element count
+  the server's `SnippetRunIn` validators require (`value` ≥ 1, `step` == 1) —
+  so the UI never sends a request that would 422. The gate lives in
+  `requestRun()` itself, not just on the button, because the editor's
+  `Mod-Enter` keymap calls it directly. Run state is **component-local**
+  (`$state` + a `runSeq` generation guard bumped in `onDestroy`), NOT the
+  tab-keyed `_runs` map: several script columns/steps can be open at once and
+  a nav script step is identified only by an array index that shifts on
+  reorder. Recorded ops are listed but **never stageable** — embedded
+  `value()`/`step()` evaluation is read-only, so the panel says so
+  (`snippet-test-ops-readonly`) instead of offering a Stage button. There is
+  no Stop button: M1's cancel is a server-side no-op and the wall timeout is
+  10s.
 - **Error cells.** A script column's `value()` call failing server-side
   (`core/script/embed.py`'s `ScriptEvalContext` — degraded, not failed: a
   missing runner, a full concurrency slot, or a snippet exception) renders

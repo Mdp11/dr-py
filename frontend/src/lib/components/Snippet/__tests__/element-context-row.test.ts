@@ -1,18 +1,18 @@
 // "Use current selection" binds elements from the shared multi-selection.
-// Follows the repo's raw mount/flushSync Svelte-5 convention (see
+// The row is CONTROLLED (Task 1): it owns no list state, so these tests
+// assert the emitted callbacks rather than reading a store. Follows the
+// repo's raw mount/flushSync Svelte-5 convention (see
 // Table/__tests__/ColumnManager.test.ts).
 import { flushSync, mount, unmount } from 'svelte';
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 
 import type { Element } from '$lib/api/types';
 import {
 	clearSelection,
-	clearSnippetElements,
 	getMultiSelectedIds,
-	getSnippetRun,
 	seedElements,
 	select,
-	setSnippetEntry
+	type SnippetBoundElement
 } from '$lib/state';
 import ElementContextRow from '../ElementContextRow.svelte';
 
@@ -20,8 +20,15 @@ function el(id: string, name: string): Element {
 	return { id, type_name: 'Block', properties: { name }, rev: 1 };
 }
 
-function render(tabId: string) {
-	const c = mount(ElementContextRow, { target: document.body, props: { tabId } });
+function render(
+	entry: 'value' | 'step',
+	elements: SnippetBoundElement[],
+	onAdd: (id: string, label: string) => void
+) {
+	const c = mount(ElementContextRow, {
+		target: document.body,
+		props: { entry, elements, onAdd, onRemove: () => {}, onClear: () => {} }
+	});
 	flushSync();
 	return c;
 }
@@ -38,61 +45,133 @@ function clickUseSelection(): void {
 afterEach(() => {
 	getMultiSelectedIds().clear();
 	clearSelection();
+	document.body.innerHTML = '';
 });
 
-it('binds every multi-selected element for a value entry', () => {
-	const tabId = 'snip:sel:value';
-	setSnippetEntry(tabId, 'value');
-	clearSnippetElements(tabId);
+it('emits onAdd for every multi-selected element for a value entry', () => {
 	seedElements([el('a', 'Alpha'), el('b', 'Beta')]);
 	const ms = getMultiSelectedIds();
 	ms.add('a');
 	ms.add('b');
 	select({ kind: 'element', id: 'b' }); // primary; the whole set should win
 
-	const c = render(tabId);
+	const onAdd = vi.fn();
+	const c = render('value', [], onAdd);
 	try {
 		clickUseSelection();
-		const ids = getSnippetRun(tabId)
-			.elements.map((e) => e.id)
-			.sort();
+		const ids = onAdd.mock.calls.map((call) => call[0] as string).sort();
 		expect(ids).toEqual(['a', 'b']);
 	} finally {
 		unmount(c);
 	}
 });
 
-it('binds only the primary selection for a step entry even with multiple selected', () => {
-	const tabId = 'snip:sel:step';
-	setSnippetEntry(tabId, 'step');
-	clearSnippetElements(tabId);
+it('emits onAdd only for the primary selection for a step entry', () => {
 	seedElements([el('a', 'Alpha'), el('b', 'Beta')]);
 	const ms = getMultiSelectedIds();
 	ms.add('a');
 	ms.add('b');
 	select({ kind: 'element', id: 'b' });
 
-	const c = render(tabId);
+	const onAdd = vi.fn();
+	const c = render('step', [], onAdd);
 	try {
 		clickUseSelection();
-		expect(getSnippetRun(tabId).elements.map((e) => e.id)).toEqual(['b']);
+		expect(onAdd.mock.calls.map((call) => call[0])).toEqual(['b']);
 	} finally {
 		unmount(c);
 	}
 });
 
 it('falls back to the single primary selection when nothing is multi-selected', () => {
-	const tabId = 'snip:sel:single';
-	setSnippetEntry(tabId, 'value');
-	clearSnippetElements(tabId);
 	seedElements([el('a', 'Alpha')]);
 	select({ kind: 'element', id: 'a' });
 
-	const c = render(tabId);
+	const onAdd = vi.fn();
+	const c = render('value', [], onAdd);
 	try {
 		clickUseSelection();
-		expect(getSnippetRun(tabId).elements.map((e) => e.id)).toEqual(['a']);
+		expect(onAdd.mock.calls.map((call) => call[0])).toEqual(['a']);
 	} finally {
 		unmount(c);
+	}
+});
+
+it('renders a chip per bound element and emits onRemove for the clicked one', () => {
+	const onRemove = vi.fn();
+	const c = mount(ElementContextRow, {
+		target: document.body,
+		props: {
+			entry: 'value' as const,
+			elements: [
+				{ id: 'a', label: 'Alpha' },
+				{ id: 'b', label: 'Beta' }
+			],
+			onAdd: () => {},
+			onRemove,
+			onClear: () => {}
+		}
+	});
+	flushSync();
+	try {
+		const removeBeta = document.querySelector('[aria-label="Remove Beta"]') as HTMLButtonElement;
+		expect(removeBeta).toBeTruthy();
+		removeBeta.click();
+		flushSync();
+		expect(onRemove).toHaveBeenCalledWith('b');
+	} finally {
+		unmount(c);
+	}
+});
+
+function findClearAll(): HTMLButtonElement | undefined {
+	return [...document.querySelectorAll('button')].find(
+		(b) => b.textContent?.trim() === 'clear all'
+	) as HTMLButtonElement | undefined;
+}
+
+it('shows "clear all" only once >=2 elements are bound, and wires the click to onClear', () => {
+	const onClear = vi.fn();
+	const single = mount(ElementContextRow, {
+		target: document.body,
+		props: {
+			entry: 'value' as const,
+			elements: [{ id: 'a', label: 'Alpha' }],
+			onAdd: () => {},
+			onRemove: () => {},
+			onClear
+		}
+	});
+	flushSync();
+	try {
+		expect(findClearAll()).toBeUndefined();
+	} finally {
+		unmount(single);
+	}
+
+	document.body.innerHTML = '';
+
+	const pair = mount(ElementContextRow, {
+		target: document.body,
+		props: {
+			entry: 'value' as const,
+			elements: [
+				{ id: 'a', label: 'Alpha' },
+				{ id: 'b', label: 'Beta' }
+			],
+			onAdd: () => {},
+			onRemove: () => {},
+			onClear
+		}
+	});
+	flushSync();
+	try {
+		const clearAll = findClearAll();
+		expect(clearAll).toBeTruthy();
+		clearAll?.click();
+		flushSync();
+		expect(onClear).toHaveBeenCalledOnce();
+	} finally {
+		unmount(pair);
 	}
 });

@@ -4,7 +4,9 @@
 	// editor, and the console below it. Mirrors Table/TableView.svelte's
 	// chrome-bar-over-content shape.
 	import {
+		addSnippetElement,
 		canEdit,
+		clearSnippetElements,
 		ensureSnippetDocs,
 		ensureSnippetDraft,
 		getMetamodel,
@@ -14,6 +16,7 @@
 		getSnippetRun,
 		getSnippetSaveConflict,
 		reloadSnippetDraft,
+		removeSnippetElement,
 		runSnippetTab,
 		saveSnippetDraft,
 		setSnippetEntry,
@@ -172,7 +175,13 @@
 			</div>
 		{/if}
 		{#if run.entry !== 'script'}
-			<ElementContextRow {tabId} />
+			<ElementContextRow
+				entry={run.entry}
+				elements={run.elements}
+				onAdd={(id, label) => addSnippetElement(tabId, id, label)}
+				onRemove={(id) => removeSnippetElement(tabId, id)}
+				onClear={() => clearSnippetElements(tabId)}
+			/>
 		{/if}
 		<div class="flex min-h-0 flex-1">
 			<div class="flex min-h-0 flex-1 flex-col">
