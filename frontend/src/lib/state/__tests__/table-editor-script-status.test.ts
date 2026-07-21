@@ -78,6 +78,13 @@ describe('table script-status polling', () => {
 
 		expect(getTableScriptStatus(TAB)).toMatchObject({ state: 'computing', done: 40, total: 300 });
 
+		// The poll is DELAYED, not immediate: half an interval in, nothing has
+		// gone out. Without this a regression to a zero-delay re-poll (a tight
+		// request loop against a route that re-pays a whole-table pass) would
+		// still satisfy the call-count assertions below.
+		await vi.advanceTimersByTimeAsync(500);
+		expect(spy).toHaveBeenCalledTimes(1);
+
 		await vi.advanceTimersByTimeAsync(1000);
 		expect(spy).toHaveBeenCalledTimes(2);
 		// the poll asks for the window the user is looking at, not row 0

@@ -203,6 +203,22 @@ function cancelPoll(tabId: string): void {
 }
 
 /**
+ * Forget everything the script-sweep poll loop holds for a tab: the reported
+ * status, the attempt budget, and any scheduled timer. The teardown paths
+ * (`closeTableDraft`, `reloadTableDraft`) all want exactly this trio, and
+ * dropping only two of the three leaks a timer or a stale budget.
+ *
+ * NOT used by `rekeyTableDraft`, which deliberately CARRIES the status and the
+ * attempt budget over to the new tab id (only the timer is cancelled), nor by
+ * `resetTableEditors`, which clears the maps wholesale.
+ */
+function clearScriptStatus(tabId: string): void {
+	_scriptStatus.delete(tabId);
+	_pollAttempts.delete(tabId);
+	cancelPoll(tabId);
+}
+
+/**
  * The chunk-aligned request covering the range the grid last reported as
  * visible (falling back to the first chunk), capped at the backend's limit
  * bound. Shared by the commit refresh and the script-sweep poll: both must
@@ -757,9 +773,7 @@ export async function reloadTableDraft(tabId: string): Promise<void> {
 	_errors.delete(tabId);
 	_conflicts.delete(tabId);
 	_viewRanges.delete(tabId);
-	_scriptStatus.delete(tabId);
-	_pollAttempts.delete(tabId);
-	cancelPoll(tabId);
+	clearScriptStatus(tabId);
 	bumpGeneration(tabId); // orphan any in-flight load for the old draft
 	await ensureTableDraft(tabId);
 }
@@ -772,9 +786,7 @@ export function closeTableDraft(tabId: string): void {
 	_errors.delete(tabId);
 	_conflicts.delete(tabId);
 	_viewRanges.delete(tabId);
-	_scriptStatus.delete(tabId);
-	_pollAttempts.delete(tabId);
-	cancelPoll(tabId);
+	clearScriptStatus(tabId);
 	bumpGeneration(tabId); // orphan any in-flight load
 }
 

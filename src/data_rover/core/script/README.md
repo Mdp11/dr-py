@@ -462,7 +462,8 @@ definition at ONE model rev, writing into that session's `ScriptCellCache`.
 resolve expand or script-as-source columns, and every later stage depends on
 its output — but the per-cell work after it is fanned out over up to
 `snippet_sweep_workers` threads, each driving its OWN `ScriptEvalContext` and
-therefore its own guest instance. Results are identical to serial execution:
+therefore its own guest instances — one per distinct snippet code it touches
+(see the pool-sizing caveat below). Results are identical to serial execution:
 a cell's value is a pure function of (code, model, element ids), the cell
 cache is internally locked, and the pathology counters are job-global.
 
@@ -522,10 +523,24 @@ cache is internally locked, and the pathology counters are job-global.
 | `snippet_sweep_timeout_abort` | `3` | Consecutive-`timeout` **and** consecutive-`unavailable` abort threshold (job-global). |
 | `snippet_sweep_sync` | `False` | Run each sweep inline inside `kick_or_join_sweep` instead of on a daemon thread. **Tests only** — it makes a sweep complete deterministically within the calling test. |
 
-`snippet_pool_size` (6) is sized for this: 4 sweep workers + 2 interactive
-headroom. A pool smaller than `snippet_sweep_workers + 1` makes sweep workers
-fail to get an instance, which surfaces as `unavailable` — and then the
-unavailable guard aborts the sweep, correctly but confusingly.
+**Pool sizing caveat.** `snippet_pool_size` (6) is nominally sized for this: 4
+sweep workers + 2 interactive headroom. That arithmetic is only right for a
+table with ONE distinct snippet. `ScriptEvalContext._sessions` is a
+`dict[code, SnippetSession]` (`embed.py`), so a worker holds one live guest
+session per distinct column/step code it has touched, and does not release any
+of them until the context closes. The real demand is therefore
+
+    snippet_sweep_workers × (distinct script codes in the table)
+
+Exceed the pool and `open_session` finds it exhausted, so those cells come back
+`unavailable`. That is not benign here: the sweep's consecutive-`unavailable`
+guard (`snippet_sweep_timeout_abort`, 3) then FAILS the whole job, and the
+failed job stays in the sweep registry — blocking retry until the next commit
+re-keys it, with the table stuck reporting `failed` in the meantime. Concretely,
+a table with 3 distinct snippets at `workers=4` wants 12 instances against the
+default pool of 6, so roughly half the cells miss and the sweep dies. Size the
+pool for the widest table you expect (`workers × distinct codes`, plus
+interactive headroom), or lower `snippet_sweep_workers` to match the pool.
 
 Coverage: `tests/api/test_script_sweep.py` and
 `tests/api/test_tables_script_status.py` (fakes, default suite),

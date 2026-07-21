@@ -16,6 +16,7 @@ const h = vi.hoisted(() => ({
 	editable: true,
 	page: undefined as unknown,
 	warnings: [] as string[],
+	scriptStatus: null as unknown,
 	draft: {
 		tabId: 'tbl:draft:1',
 		name: 'My Table',
@@ -47,7 +48,7 @@ vi.mock('$lib/state', () => ({
 	getTablePage: () => h.page,
 	getTableLoading: () => false,
 	getTableSort: () => undefined,
-	getTableScriptStatus: () => null,
+	getTableScriptStatus: () => h.scriptStatus,
 	getTableError: () => undefined,
 	setTableSort: vi.fn(),
 	updateTableDefinition: vi.fn(),
@@ -84,6 +85,7 @@ afterEach(() => {
 	vi.restoreAllMocks();
 	h.editable = true;
 	h.warnings = [];
+	h.scriptStatus = null;
 });
 
 describe('TableView settings popup', () => {
@@ -104,6 +106,39 @@ describe('TableView settings popup', () => {
 		const c = render('tbl:draft:1');
 		try {
 			expect(document.querySelector('[data-testid="table-settings-button"]')).toBeNull();
+		} finally {
+			unmount(c);
+		}
+	});
+});
+
+// Task 10 / cross-impl adoption: the sweep readout is FIXED chrome next to the
+// conflict and warnings strips, NOT an in-flow element inside TableGrid's
+// scroll container (where it would scroll away on a long table and offset the
+// virtualizer's row math while `computing`). These two cases moved here from
+// TableGrid.test.ts with the strip itself.
+describe('TableView script-status strip', () => {
+	it('shows the sweep progress readout while computing', () => {
+		h.scriptStatus = { state: 'computing', done: 7, total: 42 };
+		const c = render('tbl:draft:computing');
+		try {
+			const strip = document.querySelector('[data-testid="table-script-status"]');
+			expect(strip?.textContent).toContain('Computing script columns 7/42');
+			expect(strip?.getAttribute('aria-live')).toBe('polite');
+			// It is chrome, not grid content: outside the scrolling body.
+			expect(strip?.closest('[data-testid="table-header"]')).toBeNull();
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('surfaces a failed sweep message instead of the progress readout', () => {
+		h.scriptStatus = { state: 'failed', done: 3, total: 42, message: 'sweep died' };
+		const c = render('tbl:draft:failed');
+		try {
+			const strip = document.querySelector('[data-testid="table-script-status"]');
+			expect(strip?.textContent).toContain('sweep died');
+			expect(strip?.className).toContain('text-destructive');
 		} finally {
 			unmount(c);
 		}

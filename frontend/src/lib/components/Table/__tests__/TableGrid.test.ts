@@ -132,8 +132,11 @@ describe('TableGrid', () => {
 
 	// Task 10: a script cell the sweep hasn't computed yet arrives as
 	// `{kind:'pending'}`. Before this branch existed it rendered as NOTHING —
-	// a silently blank cell — so this is the regression guard.
-	it('renders a pending script cell as a placeholder and shows sweep progress', () => {
+	// a silently blank cell — so this is the regression guard. The sweep's
+	// done/total readout is NOT the grid's job: it is fixed chrome in
+	// TableView (see TableView.test.ts) so it cannot scroll away or offset the
+	// virtualizer's row math.
+	it('renders a pending script cell as a placeholder', () => {
 		const pendingPage: TablePage = {
 			...PAGE,
 			rows: [{ key: ['e1'], cells: [PAGE.rows[0].cells[0], { kind: 'pending' }] }],
@@ -141,36 +144,11 @@ describe('TableGrid', () => {
 		};
 		vi.spyOn(store, 'getTablePage').mockReturnValue(pendingPage);
 		vi.spyOn(store, 'getTableLoading').mockReturnValue(false);
-		vi.spyOn(store, 'getTableScriptStatus').mockReturnValue({
-			state: 'computing',
-			done: 7,
-			total: 42
-		});
 		const c = render('tbl:draft:pending');
 		try {
 			expect(document.querySelectorAll('[data-testid="pending-cell"]')).toHaveLength(1);
-			expect(document.querySelector('[data-testid="table-script-status"]')?.textContent).toContain(
-				'computing 7/42'
-			);
-		} finally {
-			unmount(c);
-		}
-	});
-
-	it('surfaces a failed sweep message instead of the progress readout', () => {
-		vi.spyOn(store, 'getTablePage').mockReturnValue(PAGE);
-		vi.spyOn(store, 'getTableLoading').mockReturnValue(false);
-		vi.spyOn(store, 'getTableScriptStatus').mockReturnValue({
-			state: 'failed',
-			done: 3,
-			total: 42,
-			message: 'sweep died'
-		});
-		const c = render('tbl:draft:failed');
-		try {
-			const strip = document.querySelector('[data-testid="table-script-status"]');
-			expect(strip?.textContent).toContain('sweep died');
-			expect(strip?.className).toContain('text-destructive');
+			// The grid renders no status strip of its own.
+			expect(document.querySelector('[data-testid="table-script-status"]')).toBeNull();
 		} finally {
 			unmount(c);
 		}

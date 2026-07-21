@@ -11,6 +11,7 @@
 		getTableConflict,
 		getTableDraft,
 		getTablePage,
+		getTableScriptStatus,
 		getTableWarnings,
 		reloadTableDraft,
 		saveAsTableDraft,
@@ -39,6 +40,11 @@
 	const editable = $derived(canEdit());
 	const page = $derived(getTablePage(tabId));
 	const warnings = $derived(getTableWarnings(tabId));
+	// Progress of the background script-value sweep: `computing` means some
+	// cells came back `pending` and the store has a re-poll scheduled (rows are
+	// in BUILD order until it lands — a sort over half-computed values would
+	// reshuffle on every poll, so the backend deliberately doesn't sort them).
+	const scriptStatus = $derived(getTableScriptStatus(tabId));
 	// Any expand column multiplies rows — then the count reads
 	// "N elements → M rows" (the pre-split base vs the split result).
 	const hasSplit = $derived(
@@ -247,6 +253,28 @@
 			<div class="bg-warning/15 px-3 py-1.5 text-xs text-warning" data-testid="table-warnings">
 				{warnings.join(' · ')}
 			</div>
+		{/if}
+		<!-- Script-sweep readout. It lives HERE, in the tab's fixed chrome beside
+		     the conflict/warnings strips, and NOT inside TableGrid: an in-flow
+		     element inside the grid's scroll container would (a) scroll out of
+		     view on a long table, hiding the only explanation for the blank
+		     `pending` cells, and (b) shift every row's true y relative to the
+		     virtualizer's window math (`computeWindowVariable` assumes row 0's
+		     top sits at scroll y = 0) — a shift that would appear and vanish as
+		     the status flipped to `ready`. -->
+		{#if scriptStatus?.state === 'computing'}
+			<div
+				class="flex items-center gap-2 bg-muted/60 px-3 py-1.5 text-xs text-muted-foreground"
+				data-testid="table-script-status"
+				aria-live="polite"
+			>
+				<span class="h-2 w-2 animate-pulse rounded-full bg-primary"></span>
+				Computing script columns {scriptStatus.done}/{scriptStatus.total ?? '…'}
+			</div>
+		{:else if scriptStatus?.state === 'failed'}
+			<p class="px-3 py-1.5 text-xs text-destructive" data-testid="table-script-status">
+				{scriptStatus.message ?? 'Computing this table’s script values failed.'}
+			</p>
 		{/if}
 		{#if saveError}
 			<p class="px-3 py-1 text-xs text-destructive">{saveError}</p>

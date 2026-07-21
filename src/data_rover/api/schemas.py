@@ -923,6 +923,11 @@ class ScriptStatusOut(BaseModel):
 
     Only ever populated for tables that actually carry a script column: a table
     with no script work reports `script_status: null`.
+
+    The field names below are part of the frontend contract — the client reads
+    `state`/`done`/`total`/`message` verbatim (see
+    `frontend/src/lib/state/table-editor.svelte.ts`), so they must not be
+    renamed without changing the client in the same commit.
     """
 
     state: Literal["ready", "computing", "failed"]

@@ -138,7 +138,12 @@ class ScriptEvalContext:
                 error=ScriptError(kind="cancelled", message="evaluation cancelled"),
                 duration_ms=0,
             )
-        if cache_only if cache_only is not None else self.cache_only:
+        # A per-call `cache_only=` wins over the instance attribute, but ONLY
+        # when it is explicitly given: `None` means "no opinion, use the
+        # instance's phase", while an explicit `False` forces a live call even
+        # on a cache-only context (see `test_per_call_override_forces_live`).
+        effective_cache_only = cache_only if cache_only is not None else self.cache_only
+        if effective_cache_only:
             self.pending_misses += 1
             return CallResult(
                 value=None,

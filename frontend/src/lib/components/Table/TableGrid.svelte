@@ -13,7 +13,6 @@
 		getTableError,
 		getTableLoading,
 		getTablePage,
-		getTableScriptStatus,
 		getTableSort,
 		lockBadgeFor,
 		remapTableSortForMove,
@@ -58,11 +57,6 @@
 	const loading = $derived(getTableLoading(tabId));
 	const sort = $derived(getTableSort(tabId));
 	const error = $derived(getTableError(tabId));
-	// Progress of the background script-value sweep: `computing` means some
-	// cells came back `pending` and the store has a re-poll scheduled (rows are
-	// in BUILD order until it lands — a sort over half-computed values would
-	// reshuffle on every poll, so the backend deliberately doesn't sort them).
-	const scriptStatus = $derived(getTableScriptStatus(tabId));
 	const rows = $derived(page?.rows ?? []);
 
 	// Hidden columns are evaluated server-side (ColumnRefs may target them)
@@ -370,21 +364,6 @@
 		{/if}
 	</div>
 
-	{#if scriptStatus && scriptStatus.state !== 'ready'}
-		{#if scriptStatus.state === 'computing'}
-			<p
-				data-testid="table-script-status"
-				class="p-2 text-xs text-muted-foreground/70"
-				aria-live="polite"
-			>
-				computing {scriptStatus.done}/{scriptStatus.total ?? '…'}
-			</p>
-		{:else}
-			<p data-testid="table-script-status" class="p-2 text-xs text-destructive">
-				{scriptStatus.message ?? 'Computing this table\u2019s script values failed.'}
-			</p>
-		{/if}
-	{/if}
 	{#if error}
 		<p class="p-4 text-xs text-destructive">{error}</p>
 	{:else if loading && !page}
