@@ -61,6 +61,29 @@ from ..model.relationship import Relationship
 #: API route boundary (Task 11), not here — see the module docstring.
 RecordedOp = dict[str, Any]
 
+#: Above this many DISTINCT far endpoints, `_far_endpoints` skips inlining
+#: entirely and returns `[]` instead of projecting anything. Without this, a
+#: hop on a high-degree hub (e.g. 10k outgoing relationships) would ship 10k
+#: full element projections even when the snippet only reads `rel["type"]`
+#: and never dereferences a neighbor — roughly doubling the JSON shipped
+#: across the bridge for zero benefit — and the guest's priming loop
+#: (`facade_src.py`'s `out()`/`in_()`) would push all 10k entries through its
+#: `_MEMO_CAP`-sized (default 4096, see `RunLimits.read_memo_max`) FIFO memo,
+#: evicting every other entry the session had cached. Skipping is legal by
+#: construction: the facade already tolerates a missing/empty "elements" key
+#: (`resp.get("elements") or []`) and falls back to one `dr.element(id)` call
+#: per neighbor actually dereferenced — exactly today's (pre-trip-collapse)
+#: behavior, just without the inline fast path for this one hop. Half the
+#: default memo cap: comfortably below the point where priming would evict
+#: the memo's own prior contents, without being so small it defeats the
+#: optimization on ordinarily-sized fan-out. `bridge.py` is host-side and
+#: does not know the guest's actual configured `read_memo_max` (that value
+#: never crosses the bridge), so this is a fixed constant rather than a
+#: derived one — threading a new setting through the stack for this single
+#: guard would be scope creep for what a hard-coded, documented number
+#: already solves.
+_MAX_INLINE_FAR_ENDPOINTS = 2048
+
 
 class BridgeLimitError(Exception):
     """A bridge request would exceed a configured cap (`max_ops`,
@@ -105,9 +128,9 @@ def _project_relationship(rel: Relationship) -> dict[str, Any]:
     }
 
 
-#: Public alias: the api layer (embedded-session root piggyback) and the
-#: trusted test runner project elements host-side with exactly the wire
-#: shape `_op_element` uses; a second projection implementation would drift.
+#: Public alias: Task 4's embedded-session root piggyback will project
+#: elements host-side with exactly the wire shape `_op_element` uses;
+#: exported here so a second projection implementation never has to exist.
 project_element = _project_element
 
 
@@ -257,13 +280,31 @@ class BridgeDispatcher:
         trip. Deduped, in first-appearance (sorted-rel-id) order; an endpoint
         missing from the model (dangling reference — the engine stays
         inspectable) is silently skipped, so the guest's own fetch surfaces
-        the same NotFoundError it always did."""
+        the same NotFoundError it always did.
+
+        High-degree guard: dedup ids FIRST (a hub with many parallel edges to
+        the same neighbor must not inflate the count), then bail out with
+        `[]` before projecting anything if the distinct count exceeds
+        `_MAX_INLINE_FAR_ENDPOINTS` — see that constant's docstring for why.
+        Bailing here (rather than after projecting) is what actually saves
+        the work, not just the wire bytes: this is a pathological-hub guard,
+        not a truncation, so it is all-or-nothing rather than a partial/
+        best-effort inline of the first N — a partial list would make the
+        facade's memo-priming depend on which endpoints happened to fit,
+        i.e. make results depend on iteration order instead of just falling
+        back to the same per-neighbor fetch every hub hop already used
+        before trip-collapse existed."""
         seen: set[str] = set()
-        out: list[dict[str, Any]] = []
+        unique_ids: list[str] = []
         for fid in ids:
             if fid in seen:
                 continue
             seen.add(fid)
+            unique_ids.append(fid)
+        if len(unique_ids) > _MAX_INLINE_FAR_ENDPOINTS:
+            return []
+        out: list[dict[str, Any]] = []
+        for fid in unique_ids:
             el = self.model.elements.get(fid)
             if el is not None:
                 out.append(_project_element(el))

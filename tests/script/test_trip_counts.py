@@ -188,3 +188,33 @@ def test_incoming_primes_source_projections(bridge_call_log: list[str]) -> None:
     )
     assert sess.call("value", ["b2"]).error is None
     assert bridge_call_log.count("element") == 1  # b2 root only
+
+
+def test_hop_falls_back_to_per_neighbor_fetch_when_inline_guard_trips(
+    bridge_call_log: list[str], monkeypatch
+) -> None:
+    """`bridge._far_endpoints`'s high-degree guard (tested directly in
+    `tests/script/test_bridge.py`) ships `resp["elements"] == []` once
+    tripped. The facade's `out()` already tolerates that via `resp.get(
+    "elements") or []` -- this proves the DEGRADED path still produces the
+    SAME correct result as the fast path (`test_hop_primes_neighbor_
+    projections` above), just via one round trip per dereferenced neighbor
+    instead of zero, so the optimization never changes what a snippet
+    observes, only how many bridge round trips it costs."""
+    from data_rover.core.script import bridge as bridge_module
+
+    monkeypatch.setattr(bridge_module, "_MAX_INLINE_FAR_ENDPOINTS", 0)
+    sess = _open(
+        "def value(els):\n"
+        "    total = 0\n"
+        "    for rel in els[0].out():\n"
+        "        total += len(dr.element(rel['target_id']).name)\n"
+        "    return total\n"
+    )
+    res = sess.call("value", ["b1"])
+    assert res.error is None
+    assert res.value == {"kind": "scalar", "value": len("Building Two")}
+    # guard tripped -> the b2 neighbor fetch costs its own round trip, unlike
+    # the fast path's 1 (b1 root only)
+    assert bridge_call_log.count("element") == 2  # b1 root + b2 neighbor
+    assert bridge_call_log.count("outgoing") == 1

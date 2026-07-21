@@ -177,24 +177,74 @@ def test_dispatch_with_missing_id_still_returns_a_response():
     assert "error" in resp
 
 
-# --- max_op_bytes cap (distinct code path from the max_ops count cap) ------
+# --- far-endpoint inlining (trip-collapse, spec 2026-07-21 Phase A') -------
 
 
 def test_outgoing_response_inlines_far_endpoints():
-    from tests.script.conftest import tiny_model
-
-    d = BridgeDispatcher(tiny_model(), record_ops=False)
+    d = BridgeDispatcher(_model(), record_ops=False)
     resp = d.dispatch({"id": 1, "op": "outgoing", "element_id": "b1"})
     assert [e["id"] for e in resp["elements"]] == ["b2"]
     assert resp["elements"][0]["name"] == "Building Two"
 
 
 def test_incoming_response_inlines_far_endpoints():
-    from tests.script.conftest import tiny_model
-
-    d = BridgeDispatcher(tiny_model(), record_ops=False)
+    d = BridgeDispatcher(_model(), record_ops=False)
     resp = d.dispatch({"id": 1, "op": "incoming", "element_id": "b2"})
     assert [e["id"] for e in resp["elements"]] == ["b1"]
+
+
+def test_far_endpoints_skips_inlining_above_the_high_degree_guard(monkeypatch):
+    """A hub whose distinct-endpoint count exceeds `_MAX_INLINE_FAR_ENDPOINTS`
+    must get `resp["elements"] == []` (guard tripped, no projection work
+    done) while `resp["relationships"]` stays complete -- the read itself is
+    never degraded, only the inline fast path is skipped. Monkeypatch the
+    module constant down to 2 rather than building 2048+ real elements: the
+    guard only cares about the count, not what the number IS.
+    """
+    from data_rover.core.script import bridge as bridge_module
+
+    monkeypatch.setattr(bridge_module, "_MAX_INLINE_FAR_ENDPOINTS", 2)
+
+    model = tiny_model()
+    hub = model.restore_element("hub", "Building")
+    model.set_property(hub, "name", "Hub")
+    targets = []
+    for i in range(3):  # 3 distinct endpoints > guard of 2
+        tid = f"t{i}"
+        targets.append(tid)
+        el = model.restore_element(tid, "Building")
+        model.set_property(el, "name", f"Target {i}")
+        model.connect("Owns", "hub", tid)
+
+    d = BridgeDispatcher(model, record_ops=False)
+    resp = d.dispatch({"id": 1, "op": "outgoing", "element_id": "hub"})
+    assert resp["elements"] == []
+    assert sorted(r["target_id"] for r in resp["relationships"]) == sorted(targets)
+
+
+def test_far_endpoints_dedup_happens_before_the_guard_check(monkeypatch):
+    """The guard compares against the DISTINCT endpoint count, not the raw
+    relationship count -- a hub with many parallel edges to the SAME
+    neighbor must not trip the guard just because it has many edges."""
+    from data_rover.core.script import bridge as bridge_module
+
+    monkeypatch.setattr(bridge_module, "_MAX_INLINE_FAR_ENDPOINTS", 2)
+
+    model = tiny_model()
+    hub = model.restore_element("hub", "Building")
+    model.set_property(hub, "name", "Hub")
+    # 3 parallel edges, but only ONE distinct target -- must stay under the
+    # guard of 2 distinct endpoints and still inline.
+    for _ in range(3):
+        model.connect("Owns", "hub", "b1")
+
+    d = BridgeDispatcher(model, record_ops=False)
+    resp = d.dispatch({"id": 1, "op": "outgoing", "element_id": "hub"})
+    assert [e["id"] for e in resp["elements"]] == ["b1"]
+    assert len(resp["relationships"]) == 3
+
+
+# --- max_op_bytes cap (distinct code path from the max_ops count cap) ------
 
 
 def test_record_op_byte_cap_enforced():
