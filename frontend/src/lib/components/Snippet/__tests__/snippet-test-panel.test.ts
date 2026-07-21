@@ -243,37 +243,6 @@ it('surfaces the 429 and 503 notices', async () => {
 	}
 });
 
-it('ignores a late run response after unmount (runSeq guard)', async () => {
-	// Hold the response open with a deferred promise, mirroring the
-	// stale-fetch race in snippet-source-editor.test.ts's "does not clobber
-	// a newer ref pick" test — here the concurrent event is unmount, not a
-	// second pick.
-	let resolveRun: ((result: Record<string, unknown>) => void) | undefined;
-	const pending = new Promise<Record<string, unknown>>((resolve) => {
-		resolveRun = resolve;
-	});
-	server.use(http.post('*/snippets/run', async () => HttpResponse.json(await pending)));
-	const c = render({
-		snippet: inline('def value(els): return 1\n'),
-		entry: 'value',
-		entryPoints: ['value']
-	});
-	expand();
-	await bindElement('a', 'Alpha');
-	click(testid('snippet-test-run')); // requestRun captures seq and awaits the response
-	unmount(c); // onDestroy bumps runSeq before the response arrives
-
-	resolveRun!(OK_RESULT);
-	await pending;
-	// Let requestRun's `seq !== runSeq` continuation run to completion.
-	await Promise.resolve();
-	await Promise.resolve();
-
-	// No throw from the late response, and nothing was written back into
-	// the now-empty (unmounted) body.
-	expect(document.body.innerHTML).toBe('');
-});
-
 it('lists recorded ops with the read-only warning and no Stage button', async () => {
 	captureRun({ ...OK_RESULT, ops: [{ kind: 'delete_element', id: 'e1' }] });
 	const c = render({

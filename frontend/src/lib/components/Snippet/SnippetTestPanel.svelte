@@ -46,7 +46,18 @@
 	let notice = $state<string | null>(null);
 
 	// Generation guard: an in-flight response must not land on an unmounted
-	// panel (or behind a newer run). Bumped on unmount, checked after await.
+	// panel (or behind a newer run). Bumped on unmount, checked after await —
+	// the same convention as state/snippet-editor.svelte.ts's
+	// `_runGenerations` and SnippetSourceEditor's `lintSeq`. This is
+	// defence-in-depth, not a fix for an observed bug, and it is deliberately
+	// left without a unit test: its effect is unobservable through the
+	// component's public surface. Svelte 5 tolerates a `$state` write after
+	// unmount (no throw, no warning), and a superseding in-flight run is
+	// structurally impossible here — `requestRun` flips `phase` to
+	// `'running'` synchronously before its only `await`, and `runDisabled`
+	// blocks re-entry while `phase !== 'idle'`. A mutation probe (deleting
+	// the `seq !== runSeq` check) confirmed this: every test still passed,
+	// because there is no externally visible difference to assert on.
 	let runSeq = 0;
 	onDestroy(() => {
 		runSeq++;
