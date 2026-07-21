@@ -161,7 +161,7 @@ def _fingerprint(table: dict | None = None) -> str:
 
 
 def _descending_value(_i: int, ids: list[str]) -> CallResult:
-    """`t1`->5 … `t5`->1, so an ASCENDING sort on the script column yields the
+    """`t1`->9 … `t5`->5, so an ASCENDING sort on the script column yields the
     exact REVERSE of the build order — build order and sorted order can never
     be confused for one another."""
     return ok(10 - int(ids[0][1:]))
