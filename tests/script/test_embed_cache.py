@@ -1,0 +1,102 @@
+"""ScriptEvalContext × ScriptCellCache: write-through, cross-context reuse,
+rev-mismatch miss, non-deterministic errors not written (spec §3.2)."""
+
+from typing import Literal
+
+from data_rover.core.script.cell_cache import ScriptCellCache
+from data_rover.core.script.embed import ScriptEvalContext
+from data_rover.core.script.runner import (
+    CallResult,
+    RunLimits,
+    ScriptBudget,
+    ScriptError,
+)
+
+
+class _FakeSession:
+    boot_error = None
+
+    def __init__(self, outcome: CallResult, counter: list[int]) -> None:
+        self._outcome = outcome
+        self._counter = counter
+
+    def call(self, entry: Literal["value", "step"], element_ids: list[str]) -> CallResult:
+        self._counter[0] += 1
+        return self._outcome
+
+    def close(self) -> None:
+        pass
+
+
+class _FakeRunner:
+    def __init__(self, outcome: CallResult) -> None:
+        self.calls = [0]
+        self._outcome = outcome
+
+    def open_session(self, model, code, limits, *, budget):
+        return _FakeSession(self._outcome, self.calls)
+
+    def run(self, *a, **k):  # pragma: no cover - protocol completeness
+        raise NotImplementedError
+
+
+OK = CallResult(value={"kind": "scalar", "value": 5}, error=None, duration_ms=1)
+TIMEOUT = CallResult(
+    value=None, error=ScriptError(kind="timeout", message="t"), duration_ms=1
+)
+
+
+def _ctx(runner, cache: ScriptCellCache | None, rev: int = 1) -> ScriptEvalContext:
+    return ScriptEvalContext(
+        runner,
+        object(),  # type: ignore[arg-type]
+        RunLimits(),
+        ScriptBudget.start(60),
+        cell_cache=cache,
+        rev=rev,
+    )
+
+
+def test_cross_context_reuse() -> None:
+    cache = ScriptCellCache()
+    cache.clear_and_stamp(1)
+    runner = _FakeRunner(OK)
+    c1 = _ctx(runner, cache)
+    assert c1.call("def value(e): ...", "value", ["e1"]).error is None
+    c1.close()
+    c2 = _ctx(runner, cache)  # fresh request, same session cache
+    assert c2.call("def value(e): ...", "value", ["e1"]).error is None
+    c2.close()
+    assert runner.calls[0] == 1  # second context never hit the guest
+
+
+def test_rev_mismatch_misses_and_does_not_poison() -> None:
+    cache = ScriptCellCache()
+    cache.clear_and_stamp(2)
+    runner = _FakeRunner(OK)
+    c = _ctx(runner, cache, rev=1)  # request raced a commit: older rev
+    c.call("code", "value", ["e1"])
+    c.close()
+    assert cache.size == 0  # stale write rejected
+    assert runner.calls[0] == 1
+
+
+def test_environmental_error_not_written() -> None:
+    cache = ScriptCellCache()
+    cache.clear_and_stamp(1)
+    runner = _FakeRunner(TIMEOUT)
+    c = _ctx(runner, cache)
+    assert c.call("code", "value", ["e1"]).error.kind == "timeout"  # type: ignore[union-attr]
+    c.close()
+    assert cache.size == 0
+    c2 = _ctx(runner, cache)
+    c2.call("code", "value", ["e1"])  # retried, not served from cache
+    c2.close()
+    assert runner.calls[0] == 2
+
+
+def test_no_cache_still_works() -> None:
+    runner = _FakeRunner(OK)
+    c = _ctx(runner, None)
+    assert c.call("code", "value", ["e1"]).error is None
+    c.close()

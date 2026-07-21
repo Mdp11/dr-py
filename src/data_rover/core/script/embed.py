@@ -14,7 +14,9 @@ and one warnings channel.
   distinct binding, and identical bindings across rows dedupe for free. Sound
   under the determinism guarantee (same code + same model ⇒ same output);
   entry points that mutate module globals between calls are outside that
-  guarantee and documented as such.
+  guarantee and documented as such. Calls are memoized per-request AND write
+  through to the session-level `ScriptCellCache` (spec §3), which makes
+  results durable across requests within one model rev.
 - **Degradation, not failure**: runner-unavailable / no-slot / budget-spent
   conditions synthesize error `CallResult`s (kinds `"unavailable"` /
   `"timeout"`), which the table layer renders as error cells and the nav
@@ -25,9 +27,11 @@ and one warnings channel.
 
 from __future__ import annotations
 
+import hashlib
 from typing import Literal
 
 from ..model.model import Model
+from .cell_cache import CellKey, ScriptCellCache
 from .runner import (
     CallResult,
     RunLimits,
@@ -49,6 +53,8 @@ class ScriptEvalContext:
         budget: ScriptBudget,
         *,
         unavailable_reason: str | None = None,
+        cell_cache: ScriptCellCache | None = None,
+        rev: int = 0,
     ) -> None:
         self._runner = runner
         self._model = model
@@ -62,6 +68,16 @@ class ScriptEvalContext:
         self.warnings: list[str] = []
         self._warning_set: set[str] = set()
         self.errored = False
+        self._cell_cache = cell_cache
+        self._rev = rev
+        self._code_sha: dict[str, str] = {}
+
+    def _cell_key(self, code: str, entry: str, ids: tuple[str, ...]) -> CellKey:
+        sha = self._code_sha.get(code)
+        if sha is None:
+            sha = hashlib.sha256(code.encode()).hexdigest()
+            self._code_sha[code] = sha
+        return (sha, entry, ids)
 
     def call(
         self, code: str, entry: Literal["value", "step"], element_ids: list[str]
@@ -70,10 +86,22 @@ class ScriptEvalContext:
         hit = self._memo.get(key)
         if hit is not None:
             return hit
+        ckey: CellKey | None = None
+        if self._cell_cache is not None:
+            ckey = self._cell_key(code, entry, key[2])
+            cached = self._cell_cache.get(ckey, self._rev)
+            if cached is not None:
+                if cached.error is not None:
+                    self.errored = True
+                self._memo[key] = cached
+                return cached
         res = self._call_uncached(code, entry, element_ids)
         if res.error is not None:
             self.errored = True
         self._memo[key] = res
+        if self._cell_cache is not None and ckey is not None:
+            # put() filters non-deterministic error kinds itself
+            self._cell_cache.put(ckey, res, self._rev)
         return res
 
     def _call_uncached(
