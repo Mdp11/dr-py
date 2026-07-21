@@ -24,7 +24,7 @@ import time
 import traceback
 
 from data_rover.core.model.model import Model
-from data_rover.core.script.bridge import BridgeDispatcher, project_element
+from data_rover.core.script.bridge import BridgeDispatcher, project_roots
 from data_rover.core.script.facade_src import FACADE_SOURCE
 from data_rover.core.script.runner import (
     CallResult,
@@ -205,7 +205,7 @@ class _TrustedSession:
             max_op_bytes=limits.max_op_bytes,
             page_limit=limits.page_limit,
         )
-        self._model = model
+        self._dispatcher = dispatcher
         self._limits = limits
         self._namespace: dict = {
             "_transport": dispatcher.dispatch,
@@ -233,12 +233,16 @@ class _TrustedSession:
         start = time.monotonic()
         if self.boot_error is not None:
             return CallResult(value=None, error=self.boot_error, duration_ms=0)
-        elements = []
-        for eid in element_ids:
-            try:
-                elements.append(project_element(self._model.get_element(eid)))
-            except KeyError:
-                pass  # guest-side fetch surfaces NotFoundError, today's shape
+        # Skip the projection entirely when the guest can't memoize anyway
+        # (read_memo_max <= 0): `_memo_put` no-ops on a non-positive cap, so
+        # projecting every root would be pure wasted work for zero payoff.
+        # Doesn't change results, only whether we bother -- mirrors the
+        # WASM host's identical guard in `api/script_runner.py`.
+        elements = (
+            project_roots(self._dispatcher.model, element_ids)
+            if self._limits.read_memo_max > 0
+            else []
+        )
         stdout = _CappedStdout(self._limits.stdout_bytes)
         with contextlib.redirect_stdout(stdout):  # type: ignore[type-var]
             try:

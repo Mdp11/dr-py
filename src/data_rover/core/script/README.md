@@ -264,17 +264,31 @@ see above), emits a boot ack
 (`{"boot": true, "error": ...}`), and — if the exec didn't raise — enters a
 call loop reading newline-JSON frames from the host:
 
-- `{"call": {"entry": "value"|"step", "element_ids": [...]}}` — resolve the
-  named entry function in the module namespace, fetch a fresh `Element` per
-  id, invoke it (`value` gets the whole list; `step` gets the single bound
-  element), serialize the return value via the facade's own
-  `_dr_serialize_entry_result(entry, value)`, and reply with
-  `{"call_result": {"payload": ..., "error": ...}}`. `print()` output during
-  the call is still captured through the same size-capped `_CappedStdout`
-  console runs use, but the buffer is never included in `call_result` —
-  **embedded calls' stdout is captured and discarded**, by design; only the
-  tagged wire payload (and, in a future write-enabled mode, recorded ops —
-  sessions are read-only in M2/M3, see below) reaches the caller.
+- `{"call": {"entry": "value"|"step", "element_ids": [...], "elements":
+  [<projection>, ...]}}` — the additive `"elements"` field is the root
+  piggyback (trip-collapse): the host projects each bound root it can still
+  find in the live model (`bridge.py`'s `project_roots`) and ships those
+  projections alongside the ids, so a property-math cell that never
+  navigates past its bound element(s) costs zero bridge round trips. An id
+  the host could not project (e.g. a benign race — the root was deleted
+  between binding the call and running it) is simply ABSENT from
+  `"elements"`, never a `None` placeholder; the guest's own fetch for that
+  id then goes to the bridge and raises the same `NotFoundError` a direct
+  fetch always produced. The whole per-call sequence — priming the read
+  memo from `"elements"`, resolving the named entry function, fetching any
+  remaining `Element`s by id, invoking it (`value` gets the whole list;
+  `step` gets the single bound element), and serializing the result via
+  `_dr_serialize_entry_result` — is driven by ONE guest-side function,
+  `facade_src.py`'s `_dr_call_entry`, called by BOTH hosts (the WASM
+  bootstrap loop above and `tests/script/trusted_runner.py`'s
+  `_TrustedSession`) so per-call semantics live in exactly one place and the
+  two hosts cannot drift. The guest replies with `{"call_result": {"payload":
+  ..., "error": ...}}`. `print()` output during the call is still captured
+  through the same size-capped `_CappedStdout` console runs use, but the
+  buffer is never included in `call_result` — **embedded calls' stdout is
+  captured and discarded**, by design; only the tagged wire payload (and, in
+  a future write-enabled mode, recorded ops — sessions are read-only in
+  M2/M3, see below) reaches the caller.
 - `{"close": true}` — the loop returns, ending the guest's `_start`; the host
   then tears the instance down (never pooled again, same lifecycle as a
   console run's single-use instance).

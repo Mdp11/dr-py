@@ -49,7 +49,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 
 from ..metamodel.schema import Metamodel
 from ..model.element import Element
@@ -128,10 +128,44 @@ def _project_relationship(rel: Relationship) -> dict[str, Any]:
     }
 
 
-#: Public alias: Task 4's embedded-session root piggyback will project
-#: elements host-side with exactly the wire shape `_op_element` uses;
-#: exported here so a second projection implementation never has to exist.
+#: Public alias: the embedded-session root piggyback (both hosts — the WASM
+#: bootstrap loop and the trusted test session) projects elements host-side
+#: with exactly the wire shape `_op_element` uses; exported here so a second
+#: projection implementation never has to exist.
 project_element = _project_element
+
+
+def project_roots(model: Model, element_ids: Sequence[str]) -> list[dict[str, Any]]:
+    """Project each of `element_ids` still present in `model`, in input
+    order, silently OMITTING any id no longer present (never a `None`
+    placeholder in its place).
+
+    This is the HOST half of the embedded-session root piggyback: both hosts
+    (`api/script_runner.py`'s `_WasmSnippetSession.call` and `tests/script/
+    trusted_runner.py`'s `_TrustedSession.call`) call this to build the
+    `"elements"` list they ship alongside a `{"call": ...}` request, so the
+    guest's read memo (`facade_src.py`'s `_dr_call_entry`) can be primed with
+    the bound root(s) before the entry point runs — a property-math cell
+    (e.g. `def value(els): return els[0].name`) then costs zero bridge round
+    trips instead of one `element` fetch per root.
+
+    Omission, not a `None` placeholder, is the load-bearing contract: the
+    guest keys priming off `proj["id"]` (a dict per surviving projection),
+    never off list position, so a hole in this list is simply invisible to
+    it — nothing shifts, nothing needs a sentinel. An id missing here (a
+    benign race, e.g. the root was deleted between binding the call and
+    running it) is never primed, so the guest's own `_fetch_element` for
+    that id falls through to the bridge and raises the same `NotFoundError`
+    a direct, unmemoized fetch has always produced. Encoding "missing" as a
+    `None` placeholder instead would force the guest to special-case a dead
+    entry it must never treat as a real (if empty) result.
+    """
+    out: list[dict[str, Any]] = []
+    for eid in element_ids:
+        element = model.elements.get(eid)
+        if element is not None:
+            out.append(_project_element(element))
+    return out
 
 
 class BridgeDispatcher:

@@ -127,7 +127,7 @@ from wasmtime import (
 )
 
 from data_rover.core.model.model import Model
-from data_rover.core.script.bridge import project_element
+from data_rover.core.script.bridge import project_roots
 from data_rover.core.script.facade_src import FACADE_SOURCE
 from data_rover.core.script.runner import (
     CallResult,
@@ -1230,17 +1230,22 @@ class _WasmSnippetSession:
         deadline_s = min(
             self._limits.wall_timeout_s, max(self._budget.remaining(), 0.0)
         )
+        # Skip the projection entirely when the guest can't memoize anyway
+        # (read_memo_max <= 0): `_memo_put` no-ops on a non-positive cap, so
+        # projecting + serializing every root would be pure wasted work for
+        # zero payoff. Doesn't change results, only whether we bother.
+        elements = (
+            project_roots(self._dispatcher.model, element_ids)
+            if self._limits.read_memo_max > 0
+            else []
+        )
+        # Arm the epoch deadline as late as possible -- immediately before
+        # the write that hands control to the guest -- so host-side work
+        # above (projection, json.dumps below) is never deducted from the
+        # guest's own wall budget (it was previously armed before this
+        # block, skewing this deadline against `wall_deadline` below, which
+        # is read from the clock AFTER that host-side work).
         self._arm(deadline_s)
-        elements = []
-        for eid in element_ids:
-            try:
-                elements.append(
-                    project_element(self._dispatcher.model.get_element(eid))
-                )
-            except KeyError:
-                # Benign race (root deleted since binding): omit — the
-                # guest's own fetch surfaces NotFoundError, today's shape.
-                pass
         self._inst.host_in.write(
             json.dumps(
                 {

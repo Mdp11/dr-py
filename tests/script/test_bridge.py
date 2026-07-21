@@ -1,6 +1,10 @@
 import json
 
-from data_rover.core.script.bridge import BridgeDispatcher, BridgeLimitError
+from data_rover.core.script.bridge import (
+    BridgeDispatcher,
+    BridgeLimitError,
+    project_roots,
+)
 
 from tests.script.conftest import tiny_model
 
@@ -265,3 +269,42 @@ def test_record_op_byte_cap_enforced():
     assert "error" in resp and "cap" in resp["error"].lower()
     # the rejected op must not have been appended
     assert disp.ops == [small_op]
+
+
+# --- project_roots (shared host-side root piggyback helper) ---------------
+
+
+def test_project_roots_omits_missing_id_rather_than_placeholder():
+    """A missing id must be OMITTED, never encoded as a `None`/placeholder
+    entry -- the guest keys priming off `proj["id"]`, not position, so a
+    placeholder would either crash the guest's priming loop or silently
+    prime a fake entry. See `project_roots`'s docstring for the full
+    contract this protects."""
+    model = tiny_model()
+    result = project_roots(model, ["b1", "nope", "b2"])
+    assert [proj["id"] for proj in result] == ["b1", "b2"]
+    assert all(proj is not None for proj in result)
+
+
+def test_project_roots_preserves_input_order():
+    model = tiny_model()
+    # Deliberately out-of-natural-order and with a repeat -- the surviving
+    # projections must follow the INPUT order, not model insertion order.
+    result = project_roots(model, ["b3", "b1", "b3", "b2"])
+    assert [proj["id"] for proj in result] == ["b3", "b1", "b3", "b2"]
+
+
+def test_project_roots_projection_matches_project_element_shape():
+    model = tiny_model()
+    result = project_roots(model, ["b1"])
+    assert len(result) == 1
+    proj = result[0]
+    assert proj["id"] == "b1"
+    assert proj["type"] == "Building"
+    assert proj["name"] == "Building One"
+    assert proj["properties"]["name"] == "Building One"
+
+
+def test_project_roots_empty_input_returns_empty_list():
+    model = tiny_model()
+    assert project_roots(model, []) == []
