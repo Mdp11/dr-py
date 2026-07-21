@@ -123,3 +123,55 @@ it('renders a chip per bound element and emits onRemove for the clicked one', ()
 		unmount(c);
 	}
 });
+
+function findClearAll(): HTMLButtonElement | undefined {
+	return [...document.querySelectorAll('button')].find(
+		(b) => b.textContent?.trim() === 'clear all'
+	) as HTMLButtonElement | undefined;
+}
+
+it('shows "clear all" only once >=2 elements are bound, and wires the click to onClear', () => {
+	const onClear = vi.fn();
+	const single = mount(ElementContextRow, {
+		target: document.body,
+		props: {
+			entry: 'value' as const,
+			elements: [{ id: 'a', label: 'Alpha' }],
+			onAdd: () => {},
+			onRemove: () => {},
+			onClear
+		}
+	});
+	flushSync();
+	try {
+		expect(findClearAll()).toBeUndefined();
+	} finally {
+		unmount(single);
+	}
+
+	document.body.innerHTML = '';
+
+	const pair = mount(ElementContextRow, {
+		target: document.body,
+		props: {
+			entry: 'value' as const,
+			elements: [
+				{ id: 'a', label: 'Alpha' },
+				{ id: 'b', label: 'Beta' }
+			],
+			onAdd: () => {},
+			onRemove: () => {},
+			onClear
+		}
+	});
+	flushSync();
+	try {
+		const clearAll = findClearAll();
+		expect(clearAll).toBeTruthy();
+		clearAll?.click();
+		flushSync();
+		expect(onClear).toHaveBeenCalledOnce();
+	} finally {
+		unmount(pair);
+	}
+});
