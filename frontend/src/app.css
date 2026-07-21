@@ -177,6 +177,25 @@ body {
 	.microlabel {
 		@apply text-[11px] font-medium tracking-[0.18em] text-muted-foreground uppercase;
 	}
+
+	/* Indeterminate activity bar: a short segment sweeping across an
+	   `overflow-hidden` track. For work that is genuinely in flight but has no
+	   fraction to report (a page request, an export waiting on 202) — a static
+	   partial bar there would read as stuck, which is exactly the "the table
+	   looks frozen" complaint this exists to answer. Work that DOES know its
+	   done/total gets a real determinate bar instead. */
+	.activity-sweep {
+		animation: activity-sweep 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+	}
+}
+
+@keyframes activity-sweep {
+	from {
+		transform: translateX(-100%);
+	}
+	to {
+		transform: translateX(400%);
+	}
 }
 
 /* Calm-motion guard: neutralize CSS animations/transitions when the user

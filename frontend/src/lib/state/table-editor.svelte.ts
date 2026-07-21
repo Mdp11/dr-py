@@ -178,6 +178,100 @@ const CHUNK_RETRY_MAX = 3;
 // eslint-disable-next-line svelte/prefer-svelte-reactivity
 const _viewRanges = new Map<string, { start: number; end: number }>();
 
+/**
+ * Tabs whose definition edits are being STAGED rather than evaluated — the
+ * table settings dialog is open over them.
+ *
+ * Every applied definition edit re-evaluates the whole table against a fresh
+ * backend cache key, and for a script or navigation column that means paying
+ * a full sweep. While the user is inside the settings dialog they are
+ * *composing*: typing a snippet, trying a navigation chain, undoing it. Each
+ * of those intermediate states used to kick off a full re-evaluation of a
+ * table nobody could even see (the dialog is modal), so the grid behind it
+ * churned and the final, real edit queued behind the throwaway ones.
+ *
+ * So: `suspendTableEvaluation` records the definition as it stood when the
+ * dialog opened; `updateTableDefinition` keeps updating the draft (the
+ * editors, the dirty flag and Save all stay live and immediate — only the
+ * *evaluation* is deferred) but skips the reload; `resumeTableEvaluation`
+ * reloads exactly once, and only if the definition actually ended up
+ * different from the snapshot.
+ *
+ * The value is a JSON fingerprint of the definition at suspend time. Object
+ * key order can in principle differ between two structurally equal
+ * definitions, which would cost one needless reload — the failure mode is a
+ * false POSITIVE, never a false negative, so a real edit can never be
+ * swallowed.
+ *
+ * Control state, never read from templates.
+ */
+// eslint-disable-next-line svelte/prefer-svelte-reactivity
+const _suspended = new Map<string, string>();
+
+/**
+ * Suspended tabs that a peer's commit arrived for (`handleTableModelRevChanged`
+ * skips suspended tabs — it would otherwise re-evaluate the half-composed
+ * definition). Forces the reload on resume even when the definition came back
+ * unchanged, so the user does not sit on data that is known to be stale.
+ * Control state, never read from templates.
+ */
+// eslint-disable-next-line svelte/prefer-svelte-reactivity
+const _suspendedStale = new Set<string>();
+
+function definitionFingerprint(tabId: string): string {
+	return JSON.stringify(_drafts.get(tabId)?.definition ?? null);
+}
+
+/**
+ * Stage definition edits for `tabId` instead of evaluating them (see
+ * `_suspended`). Idempotent — a second call while already suspended keeps the
+ * ORIGINAL snapshot, so "opened the dialog, edited, opened a nested editor"
+ * still compares against where the user started.
+ *
+ * Callers must suspend BEFORE the first edit: the header's "+ column" menu
+ * appends the new column and *then* opens the dialog, and that append is
+ * exactly one of the throwaway evaluations this exists to avoid.
+ */
+export function suspendTableEvaluation(tabId: string): void {
+	if (_suspended.has(tabId)) return;
+	_suspended.set(tabId, definitionFingerprint(tabId));
+}
+
+/**
+ * Resume evaluation and, if anything actually changed while suspended,
+ * re-evaluate the table once from row 0. A no-op if the tab was not suspended.
+ *
+ * When the definition came back identical (composed and undone, or the dialog
+ * was opened and dismissed), the loaded page is still valid — but chunk fills
+ * were declined while suspended, so the visible range is re-driven to fill any
+ * placeholder rows that were skipped rather than left pulsing until the next
+ * scroll.
+ */
+export function resumeTableEvaluation(tabId: string): void {
+	const before = _suspended.get(tabId);
+	if (before === undefined) return;
+	_suspended.delete(tabId);
+	const stale = _suspendedStale.delete(tabId);
+	if (!_drafts.has(tabId)) return; // tab closed while the dialog was open
+	if (stale || definitionFingerprint(tabId) !== before) {
+		const { offset, limit } = visibleRequest(tabId);
+		void loadTablePage(tabId, offset, limit);
+		return;
+	}
+	const view = _viewRanges.get(tabId);
+	if (view) ensureTableRange(tabId, view.start, view.end);
+}
+
+/**
+ * Drop a suspension WITHOUT evaluating — for teardown (the tab unmounted with
+ * the dialog still open). Distinct from `resumeTableEvaluation` precisely
+ * because firing a request for a view that is gone is the thing to avoid.
+ */
+export function abandonTableEvaluationSuspension(tabId: string): void {
+	_suspended.delete(tabId);
+	_suspendedStale.delete(tabId);
+}
+
 function bumpGeneration(tabId: string): number {
 	const next = (_generations.get(tabId) ?? 0) + 1;
 	_generations.set(tabId, next);
@@ -333,6 +427,14 @@ function moveTabState(oldTab: string, newTab: string): void {
 	const view = _viewRanges.get(oldTab);
 	_viewRanges.delete(oldTab);
 	if (view !== undefined) _viewRanges.set(newTab, view);
+
+	// An active staged-edit suspension must follow the tab, or it would sit
+	// under `oldTab` forever (nothing else ever clears that key) while the new
+	// tab evaluated on every keystroke.
+	const suspendedAt = _suspended.get(oldTab);
+	_suspended.delete(oldTab);
+	if (suspendedAt !== undefined) _suspended.set(newTab, suspendedAt);
+	if (_suspendedStale.delete(oldTab)) _suspendedStale.add(newTab);
 
 	// The pending poll is closed over `oldTab` (whose draft is gone), so it
 	// would no-op — cancel it and carry the status over; the re-issued load
@@ -610,6 +712,11 @@ export function ensureTableRange(tabId: string, start: number, end: number): voi
 	const hi = Math.min(end, data.total);
 	_viewRanges.set(tabId, { start: lo, end: Math.max(lo, hi) });
 	if (lo >= hi) return;
+	// Staged-edit window: the draft's definition has moved on from the one
+	// `data` was built with, so a chunk fetched now would splice rows of a
+	// DIFFERENT shape into the loaded page. The range is recorded above and
+	// re-driven by `resumeTableEvaluation`, so nothing is lost by declining.
+	if (_suspended.has(tabId)) return;
 	const gen = _generations.get(tabId) ?? 0;
 	let chunks = _inflightChunks.get(tabId);
 	for (let c = Math.floor(lo / PAGE) * PAGE; c < hi; c += PAGE) {
@@ -674,6 +781,10 @@ export function updateTableDefinition(tabId: string, defn: TableDefinition): voi
 	const draft = _drafts.get(tabId);
 	if (!draft) return;
 	_drafts.set(tabId, { ...draft, definition: defn, dirty: true });
+	// The draft update above is always immediate — only the (expensive)
+	// re-evaluation is staged while the settings dialog is open. See
+	// `_suspended`; `resumeTableEvaluation` performs the single reload.
+	if (_suspended.has(tabId)) return;
 	void loadTablePage(tabId, 0);
 }
 
@@ -773,6 +884,7 @@ export async function reloadTableDraft(tabId: string): Promise<void> {
 	_errors.delete(tabId);
 	_conflicts.delete(tabId);
 	_viewRanges.delete(tabId);
+	abandonTableEvaluationSuspension(tabId);
 	clearScriptStatus(tabId);
 	bumpGeneration(tabId); // orphan any in-flight load for the old draft
 	await ensureTableDraft(tabId);
@@ -786,6 +898,7 @@ export function closeTableDraft(tabId: string): void {
 	_errors.delete(tabId);
 	_conflicts.delete(tabId);
 	_viewRanges.delete(tabId);
+	abandonTableEvaluationSuspension(tabId);
 	clearScriptStatus(tabId);
 	bumpGeneration(tabId); // orphan any in-flight load
 }
@@ -854,6 +967,13 @@ export function handleTableModelRevChanged(): void {
 		// a brand-new table still waiting for its scope — a peer's commit must not
 		// surprise-fill it with every element.
 		if (!_pages.has(tabId) && !_errors.has(tabId) && !(_loading.get(tabId) ?? false)) continue;
+		// Mid-composition (settings dialog open): re-evaluating here would run
+		// the half-edited definition. Remember that this tab owes a refresh and
+		// let `resumeTableEvaluation` do it on close.
+		if (_suspended.has(tabId)) {
+			_suspendedStale.add(tabId);
+			continue;
+		}
 		const { offset, limit } = visibleRequest(tabId);
 		void loadTablePage(tabId, offset, limit);
 	}
@@ -872,6 +992,8 @@ export function resetTableEditors(): void {
 	_errors.clear();
 	_conflicts.clear();
 	_viewRanges.clear();
+	_suspended.clear();
+	_suspendedStale.clear();
 	_scriptStatus.clear();
 	_pollAttempts.clear();
 	for (const tabId of [..._pollTimers.keys()]) cancelPoll(tabId);

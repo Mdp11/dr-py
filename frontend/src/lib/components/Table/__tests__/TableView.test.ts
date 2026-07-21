@@ -44,6 +44,11 @@ vi.mock('$lib/state', () => ({
 	saveAsTableDraft: vi.fn(async () => {}),
 	reloadTableDraft: vi.fn(),
 	setTableName: vi.fn(),
+	// Staged definition edits: the settings dialog suspends evaluation while
+	// open and resumes (evaluating at most once) on close.
+	suspendTableEvaluation: vi.fn(),
+	resumeTableEvaluation: vi.fn(),
+	abandonTableEvaluationSuspension: vi.fn(),
 	// TableGrid's dependencies (always mounted below the chrome bar).
 	getTablePage: () => h.page,
 	getTableLoading: () => false,

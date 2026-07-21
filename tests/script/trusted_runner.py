@@ -37,11 +37,15 @@ from data_rover.core.script.runner import (
     decode_call_payload,
 )
 
-#: The filename `compile()`/`exec()` see for the concatenated facade+snippet
-#: source. Used both as the `exec` "file" and as the marker that lets
+#: The filename `compile()`/`exec()` see for the USER's snippet source. The
+#: facade is a SEPARATE compilation unit (`_FACADE_FILENAME`) so a snippet's
+#: line numbers are its own rather than offset by the facade's length. Used
+#: both as the `exec` "file" and as the marker that lets
 #: `_format_guest_traceback` keep only guest frames (never a
-#: `trusted_runner.py` frame) when rendering a `ScriptError.traceback`.
+#: `trusted_runner.py` or facade frame) when rendering a
+#: `ScriptError.traceback`. Mirrors `api/script_runner.py`.
 _SNIPPET_FILENAME = "<snippet>"
+_FACADE_FILENAME = "<facade>"
 
 
 class _CappedStdout:
@@ -82,10 +86,10 @@ class _CappedStdout:
 
 
 def _format_guest_traceback() -> str:
-    """Render `sys.exc_info()` keeping only frames from the exec'd
-    facade+snippet source (`_SNIPPET_FILENAME`) — never a `trusted_runner.py`
-    frame, so the traceback a snippet author sees points at their own code,
-    not this harness's internals."""
+    """Render `sys.exc_info()` keeping only frames from the exec'd snippet
+    source (`_SNIPPET_FILENAME`) — never a `trusted_runner.py` frame and never
+    a `<facade>` frame, so the traceback a snippet author sees points at their
+    own code, at their own line numbers, not at internals they cannot see."""
     exc_type, exc, tb = sys.exc_info()
     assert exc_type is not None and exc is not None
     frames = [f for f in traceback.extract_tb(tb) if f.filename == _SNIPPET_FILENAME]
@@ -122,9 +126,8 @@ class TrustedRunner:
         value = None
         have_value = False
 
-        source = FACADE_SOURCE + "\n" + req.code
         try:
-            compiled = compile(source, _SNIPPET_FILENAME, "exec")
+            compiled = compile(req.code, _SNIPPET_FILENAME, "exec")
         except SyntaxError as exc:
             error = ScriptError(kind="syntax", message=str(exc), traceback=None)
             compiled = None
@@ -132,6 +135,7 @@ class TrustedRunner:
         if compiled is not None:
             with contextlib.redirect_stdout(stdout):  # type: ignore[type-var]
                 try:
+                    exec(compile(FACADE_SOURCE, _FACADE_FILENAME, "exec"), namespace)
                     exec(compiled, namespace)
                     if req.entry == "script":
                         if "result" in namespace:
@@ -201,15 +205,15 @@ class _TrustedSession:
         self._limits = limits
         self._namespace: dict = {"_transport": dispatcher.dispatch}
         self.boot_error: ScriptError | None = None
-        source = FACADE_SOURCE + "\n" + code
         try:
-            compiled = compile(source, _SNIPPET_FILENAME, "exec")
+            compiled = compile(code, _SNIPPET_FILENAME, "exec")
         except SyntaxError as exc:
             self.boot_error = ScriptError(kind="syntax", message=str(exc), traceback=None)
             return
         stdout = _CappedStdout(limits.stdout_bytes)
         with contextlib.redirect_stdout(stdout):  # type: ignore[type-var]
             try:
+                exec(compile(FACADE_SOURCE, _FACADE_FILENAME, "exec"), self._namespace)
                 exec(compiled, self._namespace)
             except Exception:
                 self.boot_error = ScriptError(

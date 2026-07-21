@@ -266,6 +266,32 @@ SnippetSourceEditor.svelte`, bound to a `SnippetSource` (`{ ref?, definition?
   200 always carries a real workbook — possibly with `#ERROR` cells and
   `X-Table-Script-Errors` set, which is the server saying "retrying will not
   help", not an invitation to poll again.
+- **Staged definition edits (the settings dialog).** `updateTableDefinition`
+  normally re-evaluates the whole table — a fresh backend cache key, and for a
+  script column a fresh sweep. Inside the settings dialog the user is
+  _composing_ (typing a snippet, trying a chain, undoing it), and each
+  intermediate state used to pay for that, on a grid the modal was covering
+  anyway. So `TableView.openSettings` calls `suspendTableEvaluation(tabId)`
+  **before the first edit** (the header "+" menu appends the new column _then_
+  opens the dialog — that append is itself an edit), which snapshots the
+  definition; while suspended, `updateTableDefinition` still updates the draft
+  immediately (editors, dirty flag and Save are unaffected — only the
+  _evaluation_ is deferred) but issues no request, and `ensureTableRange`
+  declines chunk fills (the draft's definition has drifted from the loaded
+  page's, so a chunk would splice rows of a different shape into it).
+  `resumeTableEvaluation`, called from the dialog's `onOpenChange` close, does
+  **one** reload — and only if the definition actually differs from the
+  snapshot, or a peer's commit landed meanwhile
+  (`handleTableModelRevChanged` records that on `_suspendedStale` rather than
+  re-evaluating a half-composed definition). Unchanged ⇒ no request, just a
+  re-drive of the visible range to fill chunks skipped while suspended.
+  `abandonTableEvaluationSuspension` (TableView unmount, close/reload/reset)
+  drops a suspension _without_ evaluating, so a suspension can never outlive
+  its dialog and silently freeze a tab. This is also why `ColumnManager`'s
+  header input no longer debounces: per-keystroke applies now cost a draft
+  object and nothing else, and the old 400ms timer silently discarded a rename
+  that was typed and then Escaped inside the window (`change` never fires for
+  an input unmounted while still focused).
 - **`warnings` threading.** Both evaluation paths share one
   `ScriptEvalContext` per request and report through its `.warnings` list:
   `TableData.warnings` (`state/table-editor.svelte.ts`) is read via
@@ -400,6 +426,17 @@ src/
     editor/completion-source.ts  dr./Element/type-name CM6 completions +
                         hover logic (vocabFromMetamodel, computeCompletions,
                         resolveDocAt); pure, CM-agnostic, unit-tested
+    editor/indent.ts    Indentation policy — FOUR SPACES, never a tab, because
+                        CPython rejects mixed indentation with TabError and
+                        the author cannot see which is which. expandTabs()
+                        is column-aware (next tab stop, not blind 4×);
+                        hasTabs() gates CodeEditor's "Fix indentation" button.
+                        indent-extension.ts is the CM6 half: indentUnit +
+                        tabSize of 4, Tab/Shift-Tab bound to one full level
+                        (CM's DEFAULT unit is TWO spaces — with it Shift-Tab
+                        dedented half a level and read as broken), and a
+                        paste handler that expands tabs on the way in. Both
+                        unit-tested without a mounted view.
     snippet/docs-view.ts   View-model helpers for the facade docs panel
                         (groupFacade, formatSeconds/formatBytes, type +
                         relationship summaries); mirrors console-view.ts

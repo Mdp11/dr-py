@@ -41,9 +41,12 @@ protocol, replacing Task 8's provisional `exec`/`quit` loop:
    wasm back-edges -- then sends ONE start message carrying `{code, entry,
    element_ids, facade_source, stdout_bytes, result_repr_bytes}`.
 2. The guest bootstrap (`_GUEST_BOOTSTRAP_SOURCE`) reads that message, `exec`s
-   `FACADE_SOURCE + code` compiled as one unit under the filename `<snippet>`
-   (so guest tracebacks strip to guest frames, mirroring
-   `tests/script/trusted_runner.py`), captures stdout in a size-capped buffer,
+   `FACADE_SOURCE` under the filename `<facade>` and then the user's `code`
+   SEPARATELY under `<snippet>` -- two compilation units so a snippet's line
+   numbers are its OWN (concatenating them offset every traceback and
+   `SyntaxError` by the facade's ~300 lines), and so guest tracebacks strip to
+   user frames only (mirroring `tests/script/trusted_runner.py`). It captures
+   stdout in a size-capped buffer,
    resolves the entry function for `entry != "script"`, computes `result_repr`,
    and streams bridge requests to the host mid-execution whenever the facade's
    `_transport` is called.
@@ -158,10 +161,19 @@ _GUEST_LIB_GUEST = "/lib"
 _GUEST_SCRIPTS_GUEST = "/spike"
 _BOOTSTRAP_FILENAME = "bootstrap.py"
 
-#: The filename the guest compiles the facade+snippet under. Guest tracebacks
-#: are stripped to frames from this file (never a bootstrap frame), matching
+#: The filename the guest compiles the USER's snippet under -- its own
+#: compilation unit, so `line N` in a traceback or `SyntaxError` is the line
+#: the author sees in the editor. Guest tracebacks are stripped to frames from
+#: this file (never a bootstrap or facade frame), matching
 #: `tests/script/trusted_runner.py`'s `_SNIPPET_FILENAME`.
 _SNIPPET_FILENAME = "<snippet>"
+
+#: The filename the guest compiles `FACADE_SOURCE` under. Distinct from
+#: `_SNIPPET_FILENAME` for two reasons: it keeps the snippet's line numbering
+#: independent of the facade's length, and it makes facade frames invisible to
+#: `_format_guest_traceback` (an error raised inside `dr.…` should point at the
+#: caller's line, not at facade internals the author cannot see).
+_FACADE_FILENAME = "<facade>"
 
 #: Fixed wall-clock epoch in nanoseconds injected by the determinism shim
 #: (`1_750_000_000` seconds), matching `spikes/code_exec/host.py`'s
@@ -221,7 +233,8 @@ _BOOT_POLL_INTERVAL_S = 0.05
 
 
 # Guest bootstrap: runs INSIDE CPython-WASI. It sends a ready handshake, reads
-# ONE start message describing the run, execs FACADE_SOURCE + user code with
+# ONE start message describing the run, execs FACADE_SOURCE then user code (as
+# two separate compilation units, so snippet line numbers are the author's) with
 # `_transport` bound so the facade's bridge calls stream to the host over the
 # real stdout (while user `print`s go to a size-capped buffer), then emits a
 # distinct FINAL message. Modeled on `tests/script/trusted_runner.py`'s run
@@ -241,6 +254,7 @@ import traceback
 _real_stdout = sys.stdout
 
 _SNIPPET_FILENAME = "<snippet>"
+_FACADE_FILENAME = "<facade>"
 
 
 def _emit(obj):
@@ -288,8 +302,8 @@ class _CappedStdout:
 
 
 def _format_guest_traceback():
-    # Keep only frames from the exec'd facade+snippet source, never a bootstrap
-    # frame -- mirrors trusted_runner.py::_format_guest_traceback.
+    # Keep only frames from the exec'd snippet source -- never a bootstrap or
+    # <facade> frame -- mirrors trusted_runner.py::_format_guest_traceback.
     exc_type, exc, tb = sys.exc_info()
     frames = [f for f in traceback.extract_tb(tb) if f.filename == _SNIPPET_FILENAME]
     lines = ["Traceback (most recent call last):\n"]
@@ -312,9 +326,10 @@ def _run_once(start):
     value = None
     have_value = False
 
-    source = facade_source + "\n" + code
+    # Two compilation units, NOT `facade + "\n" + code`: the snippet must own
+    # its line numbers (see _SNIPPET_FILENAME / _FACADE_FILENAME on the host).
     try:
-        compiled = compile(source, _SNIPPET_FILENAME, "exec")
+        compiled = compile(code, _SNIPPET_FILENAME, "exec")
     except SyntaxError as exc:
         error = {"kind": "syntax", "message": str(exc), "traceback": None}
         compiled = None
@@ -322,6 +337,7 @@ def _run_once(start):
     if compiled is not None:
         sys.stdout = stdout
         try:
+            exec(compile(facade_source, _FACADE_FILENAME, "exec"), namespace)
             exec(compiled, namespace)
             if entry == "script":
                 if "result" in namespace:
@@ -371,15 +387,15 @@ def _run_embedded(start):
     stdout = _CappedStdout(start["stdout_bytes"])
     namespace = {"_transport": _transport}
     err = None
-    source = facade_source + "\n" + code
     try:
-        compiled = compile(source, _SNIPPET_FILENAME, "exec")
+        compiled = compile(code, _SNIPPET_FILENAME, "exec")
     except SyntaxError as exc:
         err = {"kind": "syntax", "message": str(exc), "traceback": None}
         compiled = None
     if compiled is not None:
         sys.stdout = stdout
         try:
+            exec(compile(facade_source, _FACADE_FILENAME, "exec"), namespace)
             exec(compiled, namespace)
         except MemoryError:
             sys.stdout = _real_stdout

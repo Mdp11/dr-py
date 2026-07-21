@@ -2,7 +2,8 @@
 	import { untrack } from 'svelte';
 	import { basicSetup } from 'codemirror';
 	import { EditorView, keymap, hoverTooltip, placeholder } from '@codemirror/view';
-	import { indentWithTab } from '@codemirror/commands';
+	import { expandTabs, hasTabs, INDENT_WIDTH } from '$lib/editor/indent';
+	import { pythonIndentation } from '$lib/editor/indent-extension';
 	import { python, pythonLanguage } from '@codemirror/lang-python';
 	import { lintGutter, setDiagnostics } from '@codemirror/lint';
 	import type { CompletionContext, CompletionResult } from '@codemirror/autocomplete';
@@ -33,6 +34,25 @@
 
 	let host: HTMLDivElement;
 	let view: EditorView | undefined;
+
+	/** Whether the CURRENT document still holds a tab character — drives the
+	 * "Fix indentation" affordance. Derived from the `code` prop rather than the
+	 * view so it is correct before the editor mounts and after an external
+	 * replacement, and so it stays plain reactive state (the view is not). */
+	const tabby = $derived(hasTabs(code));
+
+	/** Expand every tab in the document to spaces in ONE undoable transaction.
+	 * Offered as a button (not done silently on every keystroke) because it
+	 * rewrites text the author did not just type — but paste, the way tabs
+	 * actually get in here, IS normalized silently below. */
+	function fixIndentation(): void {
+		if (!view) return;
+		const current = view.state.doc.toString();
+		const fixed = expandTabs(current);
+		if (fixed === current) return;
+		view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: fixed } });
+		view.focus();
+	}
 
 	export function goToLine(line: number): void {
 		if (!view || line < 1 || line > view.state.doc.lines) return;
@@ -101,10 +121,10 @@
 						editorLuxuryTheme,
 						placeholder(placeholderDom),
 						lintGutter(),
-						// Tab indents, Shift-Tab dedents (basicSetup deliberately omits
-						// this — CodeMirror leaves Tab for focus traversal by default;
-						// a code editor wants indentation, so we opt in explicitly).
-						keymap.of([{ key: 'Mod-Enter', run: () => (onRun(), true) }, indentWithTab]),
+						// Four-space levels, Tab/Shift-Tab, and paste tab-expansion —
+						// see indent-extension.ts for why each of those is spelled out.
+						pythonIndentation,
+						keymap.of([{ key: 'Mod-Enter', run: () => (onRun(), true) }]),
 						EditorView.updateListener.of((u) => {
 							if (u.docChanged) onChange(u.state.doc.toString());
 						}),
@@ -129,4 +149,21 @@
 	});
 </script>
 
-<div bind:this={host} class="h-full overflow-auto text-sm" data-testid="snippet-editor"></div>
+<div class="relative h-full">
+	<div bind:this={host} class="h-full overflow-auto text-sm" data-testid="snippet-editor"></div>
+	<!-- Shown only while a tab character survives in the document: paste is
+	     normalized on the way in, so this is the escape hatch for code that got
+	     here another way (a loaded draft, a saved snippet from before this
+	     rule). It disappears the moment there is nothing left to fix. -->
+	{#if tabby}
+		<button
+			type="button"
+			data-testid="snippet-fix-indent"
+			class="absolute top-1 right-3 z-10 rounded border border-warning/40 bg-warning/15 px-1.5 py-0.5 text-[10px] text-warning shadow-sm hover:bg-warning/25"
+			title="This snippet mixes tab and space indentation, which Python rejects. Expand every tab to {INDENT_WIDTH} spaces."
+			onclick={fixIndentation}
+		>
+			Fix indentation
+		</button>
+	{/if}
+</div>

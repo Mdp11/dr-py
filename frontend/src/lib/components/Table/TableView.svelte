@@ -5,18 +5,22 @@
 	// ⚙ Settings button so the grid gets the whole area — see
 	// docs/superpowers/specs/2026-07-13-table-settings-popup-design.md.
 	import {
+		abandonTableEvaluationSuspension,
 		canEdit,
 		downloadTable,
 		ensureTableDraft,
 		getTableConflict,
 		getTableDraft,
+		getTableLoading,
 		getTablePage,
 		getTableScriptStatus,
 		getTableWarnings,
 		reloadTableDraft,
+		resumeTableEvaluation,
 		saveAsTableDraft,
 		saveTableDraft,
 		setTableName,
+		suspendTableEvaluation,
 		updateTableDefinition,
 		type ExportProgress
 	} from '$lib/state';
@@ -45,6 +49,14 @@
 	// in BUILD order until it lands — a sort over half-computed values would
 	// reshuffle on every poll, so the backend deliberately doesn't sort them).
 	const scriptStatus = $derived(getTableScriptStatus(tabId));
+	const loading = $derived(getTableLoading(tabId));
+	// The sweep's fraction, or null when it has no total to divide by. Drives a
+	// DETERMINATE bar; everything else falls back to the indeterminate sweep.
+	const sweepPercent = $derived.by(() => {
+		const s = scriptStatus;
+		if (s?.state !== 'computing' || !s.total || s.total <= 0) return null;
+		return Math.min(100, Math.round((s.done / s.total) * 100));
+	});
 	// Any expand column multiplies rows — then the count reads
 	// "N elements → M rows" (the pre-split base vs the split result).
 	const hasSplit = $derived(
@@ -59,6 +71,18 @@
 	let exportProgress = $state<ExportProgress | null>(null);
 	let exportAbort: AbortController | null = null;
 	$effect(() => () => exportAbort?.abort());
+	// Unmounting with the settings dialog still open would leave the tab
+	// suspended forever (nothing else clears that key), so the tab would silently
+	// stop evaluating. Drop the suspension WITHOUT evaluating — firing a request
+	// for a view that is going away is exactly what we don't want.
+	$effect(() => () => abandonTableEvaluationSuspension(tabId));
+	// Anything the table is doing that the user did not just get a result for.
+	// Surfaced as an always-visible bar in the tab's FIXED chrome: a page
+	// request, a background script sweep and an export retry loop all used to
+	// be reported only by muted text (or, for a re-fetch over an existing page,
+	// by a line at the very BOTTOM of a scrolled grid) — which is why a long
+	// computation read as a frozen table.
+	const busy = $derived(loading || scriptStatus?.state === 'computing' || exporting);
 	let settingsOpen = $state(false);
 	// Which column the settings dialog is scoped to — null shows the whole
 	// definition editor (row source + every column); a definition index shows
@@ -97,9 +121,20 @@
 		dlgResize = null;
 	}
 
-	function editColumn(index: number): void {
-		settingsFocus = index;
+	// Opening the settings dialog STAGES definition edits: the draft still
+	// updates on every keystroke (the editors and Save stay immediate), but the
+	// table is not re-evaluated until the dialog closes, and then only if the
+	// definition actually ended up different. Composing a script or navigation
+	// column otherwise fired a full re-evaluation — sweep included — per
+	// intermediate state, for a grid the modal was covering anyway.
+	function openSettings(focus: number | null): void {
+		suspendTableEvaluation(tabId);
+		settingsFocus = focus;
 		settingsOpen = true;
+	}
+
+	function editColumn(index: number): void {
+		openSettings(index);
 	}
 
 	// The header "+" menu appends a fresh column, then focuses the dialog on
@@ -114,9 +149,14 @@
 				: kind === 'script'
 					? newScriptColumn()
 					: newNavigationColumn();
+		// Suspend BEFORE the append: that append is itself a definition edit, and
+		// evaluating a blank, unconfigured column is the most pointless reload of
+		// the lot. The snapshot taken here is the pre-append definition, so
+		// adding a column and then cancelling out of it correctly evaluates once
+		// (the column is still there) — abandoning the column is a Remove away.
+		suspendTableEvaluation(tabId);
 		updateTableDefinition(tabId, addColumn(d.definition, column));
-		settingsFocus = getTableDraft(tabId)!.definition.columns.length - 1;
-		settingsOpen = true;
+		openSettings(getTableDraft(tabId)!.definition.columns.length - 1);
 	}
 
 	async function save(): Promise<void> {
@@ -196,10 +236,7 @@
 						type="button"
 						data-testid="table-settings-button"
 						class="flex items-center gap-1 rounded border border-input px-2 py-1 text-xs text-foreground/80 transition-colors hover:bg-muted"
-						onclick={() => {
-							settingsFocus = null;
-							settingsOpen = true;
-						}}
+						onclick={() => openSettings(null)}
 					>
 						<Settings class="h-3.5 w-3.5" /> Settings
 					</button>
@@ -207,13 +244,21 @@
 				<button
 					type="button"
 					data-testid="table-export-button"
-					class="rounded border border-input px-2 py-1 text-xs text-foreground/80 transition-colors hover:bg-muted disabled:opacity-40"
+					class="flex items-center gap-1.5 rounded border border-input px-2 py-1 text-xs text-foreground/80 transition-colors hover:bg-muted disabled:opacity-60"
 					disabled={exporting}
 					title={exporting
 						? 'Waiting for this table\u2019s script values to finish computing'
 						: undefined}
 					onclick={() => void exportTable()}
 				>
+					<!-- A disabled button with static text is the whole "the export
+					     did nothing" complaint: the spinner is what says the retry
+					     loop is alive while the backend answers 202. -->
+					{#if exporting}
+						<span
+							class="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-muted border-t-primary"
+						></span>
+					{/if}
 					{#if exportProgress}
 						Preparing… {exportProgress.done}/{exportProgress.total ?? '…'}
 					{:else if exporting}
@@ -240,6 +285,23 @@
 					</button>
 				{/if}
 			</div>
+		</div>
+		<!-- Activity bar. Always occupies its 2px of chrome (an appearing/
+		     disappearing element here would shift the grid, and the grid's
+		     virtualizer measures row tops against a stable origin), and only
+		     paints while something is in flight. Determinate whenever the sweep
+		     reports a total; an indeterminate sweep otherwise. -->
+		<div class="h-0.5 w-full overflow-hidden" data-testid="table-activity" data-busy={busy}>
+			{#if busy}
+				{#if sweepPercent !== null}
+					<div
+						class="h-full bg-primary transition-[width] duration-300"
+						style:width={`${sweepPercent}%`}
+					></div>
+				{:else}
+					<div class="activity-sweep h-full w-1/4 bg-primary"></div>
+				{/if}
+			{/if}
 		</div>
 		{#if conflict !== undefined}
 			<div class="flex items-center gap-2 bg-warning/15 px-3 py-1.5 text-xs text-warning">
@@ -268,8 +330,12 @@
 				data-testid="table-script-status"
 				aria-live="polite"
 			>
-				<span class="h-2 w-2 animate-pulse rounded-full bg-primary"></span>
+				<span
+					class="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-muted border-t-primary"
+				></span>
 				Computing script columns {scriptStatus.done}/{scriptStatus.total ?? '…'}
+				{#if sweepPercent !== null}<span class="tabular-nums">({sweepPercent}%)</span>{/if}
+				<span class="text-muted-foreground/60">— values fill in as they finish</span>
 			</div>
 		{:else if scriptStatus?.state === 'failed'}
 			<p class="px-3 py-1.5 text-xs text-destructive" data-testid="table-script-status">
@@ -292,7 +358,11 @@
 		<Dialog.Root
 			bind:open={settingsOpen}
 			onOpenChange={(o) => {
-				if (!o) settingsFocus = null;
+				if (o) return;
+				settingsFocus = null;
+				// Every close path (the X, Escape, an overlay click) lands here —
+				// this is the single point where staged edits are evaluated.
+				resumeTableEvaluation(tabId);
 			}}
 		>
 			<Dialog.Content

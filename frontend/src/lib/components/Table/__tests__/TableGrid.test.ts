@@ -99,8 +99,22 @@ describe('TableGrid', () => {
 		}
 	});
 
-	it('shows a loading indicator while the page is (re)loading', () => {
+	// First load has no page to show, so it gets pulsing skeleton rows rather
+	// than a static "Loading…" word — a table whose script columns are still
+	// being swept can sit here for a while, and motionless text reads as hung.
+	it('shows a skeleton while the FIRST page is loading', () => {
 		vi.spyOn(store, 'getTablePage').mockReturnValue(undefined);
+		vi.spyOn(store, 'getTableLoading').mockReturnValue(true);
+		const c = render('tbl:draft:2');
+		try {
+			expect(document.querySelector('[data-testid="table-loading-skeleton"]')).not.toBeNull();
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('shows a loading indicator while an EXISTING page is reloading', () => {
+		vi.spyOn(store, 'getTablePage').mockReturnValue(PAGE);
 		vi.spyOn(store, 'getTableLoading').mockReturnValue(true);
 		const c = render('tbl:draft:2');
 		try {

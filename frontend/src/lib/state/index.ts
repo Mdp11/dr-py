@@ -278,6 +278,7 @@ export {
 } from './snippet-editor.svelte';
 export { ensureSnippetDocs, getSnippetDocs, resetSnippetDocs } from './snippet-docs.svelte';
 export {
+	abandonTableEvaluationSuspension,
 	closeTableDraft,
 	downloadTable,
 	ensureTableDraft,
@@ -296,10 +297,12 @@ export {
 	remapTableSortForMove,
 	remapTableSortForRemove,
 	resetTableEditors,
+	resumeTableEvaluation,
 	saveAsTableDraft,
 	saveTableDraft,
 	setTableName,
 	setTableSort,
+	suspendTableEvaluation,
 	updateTableDefinition,
 	type ExportProgress,
 	type TableData,

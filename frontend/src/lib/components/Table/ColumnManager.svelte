@@ -7,7 +7,6 @@
 	// (`ColumnInUseError` / a forward-ref error) when the edit would leave a
 	// dangling `ColumnRef` — both are caught here and surfaced as an inline
 	// message instead of propagating.
-	import { onDestroy } from 'svelte';
 	import {
 		getTableDraft,
 		getTablePage,
@@ -79,31 +78,15 @@
 		apply(renameColumn(defn, index, header));
 	}
 
-	// Header typing is debounced: every applied definition edit re-evaluates
-	// the table against a fresh backend cache key, so committing per keystroke
-	// would refetch (and drop the loaded rows of) the whole grid once per
-	// character. `change` (blur/Enter) flushes immediately.
-	const RENAME_DEBOUNCE_MS = 400;
-	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- control state, never read from templates
-	const renameTimers = new Map<number, ReturnType<typeof setTimeout>>();
-	function onRenameInput(index: number, header: string): void {
-		clearTimeout(renameTimers.get(index));
-		renameTimers.set(
-			index,
-			setTimeout(() => {
-				renameTimers.delete(index);
-				onRename(index, header);
-			}, RENAME_DEBOUNCE_MS)
-		);
-	}
-	function onRenameCommit(index: number, header: string): void {
-		clearTimeout(renameTimers.get(index));
-		renameTimers.delete(index);
-		if (defn && defn.columns[index]?.header !== header) onRename(index, header);
-	}
-	onDestroy(() => {
-		for (const t of renameTimers.values()) clearTimeout(t);
-	});
+	// Header typing used to be debounced 400ms, because every applied
+	// definition edit re-evaluated the whole table and committing per keystroke
+	// refetched the grid once per character. This panel only ever renders
+	// inside the settings dialog, which now STAGES definition edits until it
+	// closes (see TableView's openSettings / table-editor's `_suspended`), so a
+	// per-keystroke apply costs a draft object and nothing else — and dropping
+	// the timer removes its one sharp edge: a rename typed and then Escaped
+	// within the debounce window was silently discarded, since `change` never
+	// fires for an input that is unmounted while still focused.
 
 	// remove/move shift column indices, so the active sort must be remapped in
 	// the same breath (the remap runs only after the mutator succeeds — a
@@ -227,8 +210,7 @@
 								class="min-w-0 flex-1 rounded border border-input bg-card px-1.5 py-0.5"
 								placeholder={columnLabel(col)}
 								value={col.header}
-								oninput={(e) => onRenameInput(i, (e.currentTarget as HTMLInputElement).value)}
-								onchange={(e) => onRenameCommit(i, (e.currentTarget as HTMLInputElement).value)}
+								oninput={(e) => onRename(i, (e.currentTarget as HTMLInputElement).value)}
 							/>
 							{#if focusIndex === null}
 								<button

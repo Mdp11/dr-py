@@ -23,6 +23,15 @@ own source (in a fresh namespace with `_transport` already bound; see
 the *same* string, so the surface below is exactly what a snippet author gets
 in either environment.
 
+The facade and the snippet are **two separate compilation units** — the facade
+under the filename `<facade>`, the snippet under `<snippet>`. Concatenating
+them (as this code originally did) offset every traceback frame and every
+`SyntaxError` by the facade's ~300 lines, so a three-line snippet reported
+errors on line 300-something; and it made facade internals appear as snippet
+frames. Splitting them means `line N` is the line the author sees in the
+editor, and `_format_guest_traceback`'s `<snippet>`-only filter now strips
+facade frames as well as harness frames.
+
 Module-level exceptions (all subclass `dr.BridgeError`, itself
 `Exception`):
 
@@ -249,7 +258,8 @@ message shaped like a normal run's (`code`, `facade_source`, `stdout_bytes`,
 `result_repr_bytes`) plus `"mode": "embedded"`. The guest bootstrap
 (`_GUEST_BOOTSTRAP_SOURCE`) branches on that field: `"embedded"` runs
 `_run_embedded` instead of the one-shot `_run_once` console runs use.
-`_run_embedded` execs `FACADE_SOURCE + code` once, emits a boot ack
+`_run_embedded` execs `FACADE_SOURCE` then `code` once (separate units,
+see above), emits a boot ack
 (`{"boot": true, "error": ...}`), and — if the exec didn't raise — enters a
 call loop reading newline-JSON frames from the host:
 

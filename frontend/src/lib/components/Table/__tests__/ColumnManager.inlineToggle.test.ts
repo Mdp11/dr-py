@@ -132,13 +132,14 @@ describe('ColumnManager saved <-> inline toggle', () => {
 			// DataCloneError.
 			expect(() => structuredClone(getTableDraft(TAB)!.definition)).not.toThrow();
 
-			// And a follow-up edit through the panel still works ('change' —
-			// blur/Enter — commits a rename immediately; 'input' is debounced).
+			// And a follow-up edit through the panel still works. Renames commit on
+			// `input`, undebounced — the settings dialog stages evaluation, so a
+			// per-keystroke apply costs a draft object and nothing else.
 			const rename = document.querySelector(
 				'[data-testid="column-manager"] input[placeholder]'
 			) as HTMLInputElement;
 			rename.value = 'Renamed';
-			rename.dispatchEvent(new Event('change', { bubbles: true }));
+			rename.dispatchEvent(new Event('input', { bubbles: true }));
 			flushSync();
 			expect(getTableDraft(TAB)!.definition.columns[0].header).toBe('Renamed');
 		} finally {

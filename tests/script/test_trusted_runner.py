@@ -169,3 +169,25 @@ def test_not_found_error_on_missing_element():
     res = r.run(tiny_model(), RunRequest(code="dr.element('nope')"), RunLimits(), record_ops=False, rev=0)
     assert res.error is not None and res.error.kind == "runtime"
     assert "NotFoundError" in (res.error.traceback or res.error.message)
+
+
+def test_traceback_line_numbers_are_the_snippet_s_own():
+    """A raise on line 3 of a 3-line snippet reports line 3 — not line 3 +
+    len(FACADE_SOURCE). The facade is its own compilation unit precisely so a
+    snippet author's traceback matches what the editor shows them."""
+    r = TrustedRunner()
+    res = r.run(tiny_model(),
+                RunRequest(code="x = 1\ny = 2\nraise ValueError('boom')"),
+                RunLimits(), record_ops=False, rev=0)
+    assert res.error is not None and res.error.kind == "runtime"
+    assert 'File "<snippet>", line 3' in (res.error.traceback or "")
+    assert "<facade>" not in (res.error.traceback or "")
+
+
+def test_syntax_error_line_number_is_the_snippet_s_own():
+    r = TrustedRunner()
+    res = r.run(tiny_model(),
+                RunRequest(code="x = 1\ndef (:\n"),
+                RunLimits(), record_ops=False, rev=0)
+    assert res.error is not None and res.error.kind == "syntax"
+    assert "line 2" in res.error.message

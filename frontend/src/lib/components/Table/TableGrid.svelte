@@ -367,7 +367,18 @@
 	{#if error}
 		<p class="p-4 text-xs text-destructive">{error}</p>
 	{:else if loading && !page}
-		<p class="p-4 text-xs text-muted-foreground/70">Loading…</p>
+		<!-- First load: pulsing skeleton rows, not a static "Loading…" line. A
+		     table whose script columns are still being computed can sit here for
+		     a while, and a word that never moves reads as a hung UI. -->
+		<div data-testid="table-loading-skeleton" class="p-2">
+			{#each { length: 8 }, i (i)}
+				<div class="flex gap-2 border-b border-border/40 py-2" style="opacity:{1 - i * 0.1}">
+					<div class="h-3 w-1/4 animate-pulse rounded bg-muted"></div>
+					<div class="h-3 w-1/3 animate-pulse rounded bg-muted"></div>
+					<div class="h-3 w-1/6 animate-pulse rounded bg-muted"></div>
+				</div>
+			{/each}
+		</div>
 	{:else if page}
 		<div style="height:{win.padTop}px"></div>
 		{#each windowedRows as row, i (win.start + i)}
@@ -470,7 +481,12 @@
 			<p class="p-4 text-xs text-muted-foreground/70">No rows.</p>
 		{/if}
 		{#if loading}
-			<p class="p-2 text-xs text-muted-foreground/70">Loading…</p>
+			<p class="flex items-center gap-2 p-2 text-xs text-muted-foreground/70">
+				<span
+					class="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-muted border-t-primary"
+				></span>
+				Loading…
+			</p>
 		{/if}
 	{:else}
 		<!-- A brand-new table: never evaluated (see ensureTableDraft — the untyped

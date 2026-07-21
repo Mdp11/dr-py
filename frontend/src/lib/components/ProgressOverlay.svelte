@@ -22,11 +22,17 @@
 		<img src={`${assets}/dr-mark.png`} alt="" class="h-8 w-auto opacity-90" />
 
 		<!-- The label swaps on the spline ticker; a keyed block crossfades the old
-		     line out and the new one in (absolutely stacked so nothing reflows). -->
-		<div class="relative h-4 w-[30rem] max-w-[80vw]">
+		     line out and the new one in (absolutely stacked so nothing reflows).
+		     The box is ONE line tall, so the label must never wrap: `microlabel`
+		     is uppercase at 0.18em tracking, which makes the longer splines
+		     ~46rem wide — at the old 30rem they wrapped and spilled out of the
+		     h-4 box. Wide enough for every spline on a desktop, and `truncate`
+		     guarantees one line on a narrow viewport rather than letting flavor
+		     text break the layout. -->
+		<div class="relative h-4 w-[46rem] max-w-[90vw]">
 			{#key entry.label}
 				<p
-					class="microlabel absolute inset-0 text-center"
+					class="microlabel absolute inset-0 truncate text-center"
 					in:fly={{ y: 4, duration: dur(PANEL), delay: dur(MICRO) }}
 					out:fly={{ y: -4, duration: dur(MICRO) }}
 				>
