@@ -8,6 +8,8 @@ to the WASM path by construction (same FACADE_SOURCE, same dispatcher).
 
 from __future__ import annotations
 
+from data_rover.core.metamodel.schema import ElementType, Metamodel, PropertyDef
+from data_rover.core.model.model import Model
 from data_rover.core.script.runner import RunLimits, ScriptBudget
 
 from tests.script.conftest import tiny_model
@@ -107,3 +109,57 @@ def test_memoized_results_do_not_alias_mutations(bridge_call_log: list[str]) -> 
     res = sess.call("value", ["b1"])
     assert res.error is None
     assert res.value == {"kind": "scalar", "value": 1}
+
+
+def test_memoized_element_does_not_alias_list_valued_property(
+    bridge_call_log: list[str],
+) -> None:
+    """A snippet mutating a LIST-VALUED PROPERTY in place on a memoized
+    element projection must not poison a later fetch of the same element in
+    the same session.
+
+    Multi-valued properties are first-class (see
+    `validation/validators/multiplicity.py` and `type_conformance.py`), so a
+    projection's `properties` dict can map a key to a `list`. A shallow
+    `dict(...)` copy of the projection copies the outer dict, but the
+    `properties` dict AND its list values are still the memo's own objects
+    -- `el["tags"].append(...)` would reach back into `_memo` and change
+    what a later `dr.element(same_id)` call returns. Only `_copy_projection`
+    (which deep-copies `properties` and any list values inside it) closes
+    that hole; this test exercises it through the public `dr`/`Element` API
+    only (no `_data` access).
+    """
+    del bridge_call_log  # unused; this test asserts on returned VALUES, not trip counts
+    mm = Metamodel(
+        elements=[
+            ElementType(
+                name="Building",
+                properties=[
+                    PropertyDef(name="name", datatype="string"),
+                    PropertyDef(name="tags", datatype="string", multiplicity="0..*"),
+                ],
+            ),
+        ],
+    )
+    model = Model(mm)
+    b1 = model.restore_element("b1", "Building")
+    model.set_property(b1, "name", "Building One")
+    model.set_property(b1, "tags", ["a", "b"])
+
+    runner = TrustedRunner()
+    sess = runner.open_session(
+        model,
+        "def value(els):\n"
+        "    first = dr.element('b1')\n"
+        "    first['tags'].append('junk')\n"
+        "    second = dr.element('b1')\n"
+        "    return len(second['tags'])\n",
+        RunLimits(),
+        budget=ScriptBudget.start(60),
+    )
+    assert sess.boot_error is None, sess.boot_error
+    res = sess.call("value", ["b1"])
+    assert res.error is None
+    # The memo entry must still hold the original 2 tags -- the mutation on
+    # `first` must not have leaked into the memo for `second` to observe.
+    assert res.value == {"kind": "scalar", "value": 2}

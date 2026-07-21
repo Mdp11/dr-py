@@ -38,11 +38,16 @@ directly, in-process. The facade code below is oblivious to which.
 `_read_memo_max` (an `int`, the memo capacity — see `RunLimits.read_memo_max`)
 in the same namespace before `FACADE_SOURCE` executes. It caps the facade's
 session-lifetime read memo (`_memo`, defined below): memoized reads cost zero
-round trips on repeat, which is sound only because a session never outlives
-one model rev's worth of work. Missing the binding (e.g. a caller that
-forgets it) falls back to a hardcoded default via `except NameError`, so the
-facade never hard-fails on it — but every real embedding path threads it
-through explicitly (`RunLimits.read_memo_max` -> `start_msg`/`namespace`).
+round trips on repeat. For embedded/sweep work the results this memo backs
+are rev-stamped and discarded if the model rev moves under them, so the memo
+can never be *observed* stale there; a console run reads without holding
+`session.write_mutex` at all and can already observe a torn read with or
+without the memo (see `RunLimits.read_memo_max`'s docstring in `runner.py`
+for the full scoping). Missing the binding (e.g. a caller that forgets it)
+falls back to a hardcoded default via `except (NameError, TypeError,
+ValueError)`, so the facade never hard-fails on it — but every real
+embedding path threads it through explicitly (`RunLimits.read_memo_max` ->
+`start_msg`/`namespace`).
 """
 
 from __future__ import annotations
@@ -128,14 +133,16 @@ except (NameError, TypeError, ValueError):
 # would make snippet behavior depend on `_read_memo_max` (whether the memo
 # was populated/evicted at the time), which must never be observable.
 #
-# What is still shared, and why that's fine: property VALUES nested inside
-# an element projection's `properties` dict, and inside a `type_info`
-# entry's per-property dicts, are not deep-copied — they are always
-# scalars/None/str off the wire (see bridge.py's `_project_element` and
-# `_op_type_info`), so they are already immutable and safe to share. If a
-# facade helper is ever added that can return a mutable nested structure
-# from inside one of those, it must copy that structure too — this comment
-# is the reminder to check.
+# Property values are NOT always immutable scalars: multi-valued properties
+# are first-class (see `validation/validators/multiplicity.py` and
+# `type_conformance.py`), so a projection's `properties` dict can map a key
+# to a LIST. `_copy_projection` below is the one place that copies an
+# element projection safely: it copies the outer dict AND replaces any
+# list-valued property with a fresh list, so `el["tags"].append(...)` or
+# `el.out()[0]["properties"]["k"] = v` can never reach back into `_memo`.
+# Every read path in this module that hands out a projection (or a
+# structure built from one) must go through this helper rather than a bare
+# `dict(...)`.
 _memo = {}
 
 
@@ -145,6 +152,19 @@ def _memo_put(key, value):
     if key not in _memo and len(_memo) >= _MEMO_CAP:
         _memo.pop(next(iter(_memo)))
     _memo[key] = value
+
+
+def _copy_projection(d):
+    # Shallow dict() is not enough: the projection's `properties` dict is
+    # memo state, and property VALUES can be lists (multi-valued
+    # properties), so `el["tags"].append(...)` would mutate the memo.
+    c = dict(d)
+    props = c.get("properties")
+    if props is not None:
+        c["properties"] = {
+            k: (list(v) if isinstance(v, list) else v) for k, v in props.items()
+        }
+    return c
 
 
 class Element:
@@ -201,11 +221,12 @@ class Element:
         if hit is None:
             hit = _read("outgoing", element_id=self.id)["relationships"]
             _memo_put(key, hit)
-        # Copy the outer list AND each relationship dict inside it — the
+        # Copy the outer list AND each relationship dict inside it (via
+        # _copy_projection, so list-valued properties are copied too) — the
         # memo entry is shared canonical state (see the invariant comment
         # above `_memo`), so a snippet mutating a returned dict must not be
         # able to change what a later `.out()` call returns.
-        return [dict(r) for r in hit]
+        return [_copy_projection(r) for r in hit]
 
     def in_(self):
         """List incoming relationships as dicts (id, type, source_id, target_id)."""
@@ -215,7 +236,7 @@ class Element:
             hit = _read("incoming", element_id=self.id)["relationships"]
             _memo_put(key, hit)
         # See the comment in `out()` above: copy the relationship dicts too.
-        return [dict(r) for r in hit]
+        return [_copy_projection(r) for r in hit]
 
     def parent(self):
         """Return the containment parent Element, or None at a root."""
@@ -245,10 +266,11 @@ class Element:
             _memo_put(key, hit)
         # `hit`'s dicts are the SAME objects primed into the ("element", id)
         # memo entries above (or, on a repeat call, into the "children" memo
-        # entry from a prior call) — build each Element over a copy so a
+        # entry from a prior call) — build each Element over a copy (via
+        # _copy_projection, which also copies list-valued properties) so a
         # snippet holding one of these children can't mutate the shared
         # projection out from under a later `dr.element(child_id)` call.
-        return [Element(dict(d)) for d in hit]
+        return [Element(_copy_projection(d)) for d in hit]
 
     def set(self, key, value):
         """Record a dry-run property update. Nothing changes until staged and committed.
@@ -279,9 +301,10 @@ def _fetch_element(element_id):
         proj = _read("element", element_id=element_id)["element"]
         _memo_put(key, proj)
     # `proj` may be the memo's own dict (on a hit, or after _memo_put aliases
-    # it in) — build the Element over a copy so `Element._data` is never the
+    # it in) — build the Element over a copy (via _copy_projection, which
+    # also copies list-valued properties) so `Element._data` is never the
     # live memo entry. See the invariant comment above `_memo`.
-    return Element(dict(proj))
+    return Element(_copy_projection(proj))
 
 
 # Deliberately NOT memoized: a whole-model scan does not fit the single
