@@ -906,6 +906,26 @@ class TableRowOut(BaseModel):
     cells: list[TableCellOut]
 
 
+class ScriptStatusOut(BaseModel):
+    """Progress of script-column computation for this table (spec §4.2).
+
+    `ready`: every needed script value was available (or none were needed) —
+    the rows in this response are final for this model rev.
+    `computing`: a background sweep is filling the cell cache; the rows in this
+    response are DEGRADED (build order, possibly `pending` cells) — poll again.
+    `failed`: the work is dead and will not finish on its own; `message` says
+    why. Cleared by the next commit, which re-keys the sweep registry.
+
+    Only ever populated for tables that actually carry a script column: a table
+    with no script work reports `script_status: null`.
+    """
+
+    state: Literal["ready", "computing", "failed"]
+    done: int = 0
+    total: int | None = None
+    message: str | None = None
+
+
 class TablePageOut(BaseModel):
     columns: list[TableColumnOut]
     rows: list[TableRowOut]
@@ -919,3 +939,6 @@ class TablePageOut(BaseModel):
     #: script-step degradations from navigations this evaluation triggered
     #: (pruned-frontier warnings etc.) + nothing else today.
     warnings: list[str] = Field(default_factory=list)
+    #: None when the table has no script column at all; otherwise the
+    #: poll-again contract for this page (see `ScriptStatusOut`).
+    script_status: ScriptStatusOut | None = None

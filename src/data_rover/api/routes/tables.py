@@ -39,6 +39,7 @@ from ..db_models import ArtifactKind
 from ..deps import Session, get_request_session, require_model
 from ..schemas import (
     EvaluateTableIn,
+    ScriptStatusOut,
     TableCellOut,
     TableColumnOut,
     TablePageOut,
@@ -46,6 +47,7 @@ from ..schemas import (
 )
 from ..script_eval import close_script_context, open_script_context
 from ..script_runner import get_runner
+from ..script_sweep import SweepJob, kick_or_join_sweep
 from ..settings import Settings, get_settings
 from ..table_cache import table_fingerprint
 from ..table_export import build_workbook
@@ -136,6 +138,30 @@ def _cell_out(model: Model, cell: Cell) -> TableCellOut:
     )
 
 
+def _status_from_job(job: SweepJob) -> ScriptStatusOut:
+    """Map a `SweepJob` onto the wire status of the request that kicked/joined it.
+
+    CALLERS ONLY REACH THIS AFTER THE CACHE-ONLY PASS SAW PENDING — that is the
+    function's whole precondition, and it is why no branch here can return
+    `ready`. Those rows were built before the values existed (degraded to build
+    order), so even a sync/racing sweep that FINISHED during this very request
+    must report `computing`: the client polls once more and gets the clean
+    sorted page from the now-full cache.
+
+    Both DEAD job states collapse onto `failed`. `cancelled` is not a
+    pathology (a rev change or an eviction cancelled it, never the snippet),
+    but no thread is behind it any more, so reporting `computing` would strand
+    the poller forever — `failed` is the honest terminal answer, and the cause
+    of a cancel is always something (a commit) that re-keys the sweep registry
+    and gets a fresh job kicked on the next request anyway.
+    """
+    if job.state in ("failed", "cancelled"):
+        return ScriptStatusOut(
+            state="failed", done=job.done, total=job.total, message=job.message
+        )
+    return ScriptStatusOut(state="computing", done=job.done, total=job.total)
+
+
 @router.post("/tables/evaluate")
 def evaluate_table(
     payload: EvaluateTableIn,
@@ -151,7 +177,22 @@ def evaluate_table(
     large table re-evaluates cells per page but not the (possibly expensive)
     row build+sort. No write_mutex — same benign-race stance as
     routes/read.py: a concurrent mutation simply misses the cache (stale
-    model_rev) rather than corrupting it."""
+    model_rev) rather than corrupting it.
+
+    Script columns (spec §4.1-4.2): the WHOLE-TABLE passes (`build_rows_ex` +
+    `order_rows`) run CACHE-ONLY — the guest is never invoked O(rows) times
+    inside a request, because that is precisely the grind that used to freeze
+    the UI. Every miss records a pending cell; if any were recorded the
+    response DEGRADES to build order (a sort computed over half-pending values
+    would reshuffle visibly on every poll) and a background `SweepJob` is
+    kicked/joined to fill the cell cache. Only the visible window is evaluated
+    live, so a page still shows real values while the rest is computing.
+    `script_status` carries the poll-again contract; it stays None for tables
+    that have no script column at all.
+
+    Lock stance for the sweep kick: this route holds NO session lock (no
+    `write_mutex` — see above), so kicking is safe even in the sync sweep mode
+    where `kick_or_join_sweep` runs the whole sweep on this thread."""
     metamodel, model = require_model(session)
     try:
         defn = _resolve_table(payload, project_id, db)
@@ -191,16 +232,48 @@ def evaluate_table(
             rev=rev,
         )
         try:
+            script_status: ScriptStatusOut | None = None
             cached = session.table_order_cache.get(fp, sort_key, rev)
             if cached is not None:
                 cached_rows, truncated, base_total = cached
                 ordered = list(cached_rows)
+                if script_ctx is not None:
+                    # A cached order was only ever stored by a complete pass
+                    # (see the poisoning guard below), so it is final.
+                    script_status = ScriptStatusOut(state="ready")
             else:
+                # Whole-table passes are CACHE-ONLY (spec §4.1): the guest is
+                # never driven O(rows) times inside a request. A miss records a
+                # pending cell instead of blocking; the visible window below is
+                # still evaluated live.
+                if script_ctx is not None:
+                    script_ctx.cache_only = True
                 built = build_rows_ex(metamodel, model, defn, limits, script=script_ctx)
                 truncated, base_total = built.truncated, built.base_total
                 ordered = order_rows(
                     metamodel, model, defn, built.keys, sort, limits, script=script_ctx
                 )
+                if script_ctx is not None:
+                    script_ctx.cache_only = False
+                    if script_ctx.pending_misses > 0:
+                        # Sort/filter incomplete: degrade to build order (a sort
+                        # over half-pending values would visibly reshuffle on
+                        # every poll) and kick/join the sweep that fills the
+                        # cache. `_status_from_job` is reached ONLY from here,
+                        # i.e. only when pending was seen — which is exactly why
+                        # it never reports `ready` for this response.
+                        ordered = list(built.keys)
+                        if runner is None:
+                            script_status = ScriptStatusOut(
+                                state="failed", message="script runner unavailable"
+                            )
+                        else:
+                            job = kick_or_join_sweep(
+                                session, metamodel, model, defn, runner, settings, rev
+                            )
+                            script_status = _status_from_job(job)
+                    else:
+                        script_status = ScriptStatusOut(state="ready")
             window = ordered[payload.offset : payload.offset + payload.limit]
             cells = evaluate_cells(
                 metamodel, model, defn, window, limits, script=script_ctx
@@ -213,10 +286,17 @@ def evaluate_table(
             # `value()` until cells are rendered. A bad order (or an order
             # built against a since-superseded rev) must never be cached:
             # neither the fingerprint (code hash) nor `rev` changes on retry,
-            # so a poisoned entry would be served forever.
+            # so a poisoned entry would be served forever. `pending_misses > 0`
+            # is the Phase B addition: that order is the DEGRADED build order,
+            # not the requested sort, and caching it would freeze the table in
+            # its unsorted shape for this rev.
             if cached is None and (
                 script_ctx is None
-                or (not script_ctx.errored and session.model_rev == rev)
+                or (
+                    not script_ctx.errored
+                    and script_ctx.pending_misses == 0
+                    and session.model_rev == rev
+                )
             ):
                 session.table_order_cache.put(
                     fp, sort_key, rev, tuple(ordered), truncated, base_total
@@ -246,6 +326,7 @@ def evaluate_table(
         offset=payload.offset,
         model_rev=rev,
         warnings=warnings,
+        script_status=script_status,
     )
 
 
