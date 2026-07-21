@@ -29,6 +29,7 @@ from data_rover.api import db  # noqa: E402
 from data_rover.api import db_models  # noqa: E402,F401  (registers ORM tables)
 from data_rover.api.db_models import Membership, Project, Role, User  # noqa: E402
 from data_rover.api.identity import set_identity_provider  # noqa: E402
+from data_rover.api.script_sweep import reset_global_slots  # noqa: E402
 from data_rover.api.session import (  # noqa: E402
     DEFAULT_PROJECT_ID,
     install_persistent_registry,
@@ -43,6 +44,9 @@ def _fresh_db() -> Iterator[None]:
     db.init_engine("sqlite://")
     db.create_all()
     reset_session()
+    # a test pinning different sweep settings gets a freshly sized process-wide
+    # sweep semaphore instead of one another test lazily sized
+    reset_global_slots()
     set_snapshot_store(MemorySnapshotStore())
     install_persistent_registry()  # get() now hydrates from the (empty) DB
     set_identity_provider(None)  # forget any provider a test swapped in
@@ -51,6 +55,7 @@ def _fresh_db() -> Iterator[None]:
     finally:
         db.drop_all()
         reset_session()
+        reset_global_slots()
         set_snapshot_store(None)
         set_identity_provider(None)
 

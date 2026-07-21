@@ -131,6 +131,33 @@ class Settings(BaseSettings):
     #: columns/steps) — shared across every script column/step call the
     #: request transitively makes, not a per-call timeout.
     snippet_eval_budget_s: float = 30.0
+    #: Capacity of each session's ``ScriptCellCache`` (spec 2026-07-20 §3).
+    #: Consumed at ``Session`` CONSTRUCTION: the ``script_cell_cache`` field's
+    #: ``default_factory`` reads this via ``get_settings()`` so every
+    #: construction path (the empty-fallback ``Session()`` and hydration's
+    #: ``Session(metamodel=..., model=...)``) gets a setting-sized cache
+    #: without threading a cap argument through ``SessionRegistry``. 50k cells
+    #: comfortably holds a whole large table's script column at one rev.
+    snippet_cell_cache_max: int = 50_000
+    #: Process-wide bound on concurrently RUNNING background sweep jobs
+    #: (``script_sweep._global_slots``). Bounded across ALL sessions so N open
+    #: projects cannot mean N×workers guest instances — a sweep pool separate
+    #: from the interactive ``snippet_concurrency`` guard.
+    snippet_sweep_workers: int = 4
+    #: Per-sweep wall ceiling (seconds): a ``SweepJob`` whose ``ScriptBudget``
+    #: exhausts mid-grind aborts (``failed``, and NOT cached) rather than
+    #: pinning a worker on one pathological table forever.
+    snippet_sweep_ceiling_s: float = 600.0
+    #: Consecutive-timeout abort threshold: a sweep that sees this many script
+    #: timeouts in a row gives up (``failed``). A single slow cell resets the
+    #: counter on the next success, so only a persistently-timing-out snippet
+    #: trips it.
+    snippet_sweep_timeout_abort: int = 3
+    #: Run each background sweep inline (synchronously) inside
+    #: ``kick_or_join_sweep`` instead of on a daemon thread. False in
+    #: production; tests pin it true (``DATA_ROVER_SNIPPET_SWEEP_SYNC``) so a
+    #: sweep completes deterministically within the calling test.
+    snippet_sweep_sync: bool = False
 
 
 def get_settings() -> Settings:

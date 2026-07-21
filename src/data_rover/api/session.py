@@ -14,6 +14,8 @@ from data_rover.core.view.schema import View
 
 from .feed import FeedHub
 from .locking import LockTable
+from .script_sweep import ScriptSweepRegistry
+from .settings import get_settings
 from .table_cache import TableOrderCache
 
 if TYPE_CHECKING:
@@ -108,8 +110,26 @@ class Session:
     #: per-session cache of embedded snippet call results (spec 2026-07-20
     #: §3). Rev-stamped; cleared by the same two invalidation points as
     #: table_order_cache. Sound because of the runner determinism guarantee.
+    #: Its capacity comes from ``settings.snippet_cell_cache_max``: the factory
+    #: reads ``get_settings()`` so BOTH construction paths — the empty-fallback
+    #: ``Session()`` and hydration's ``Session(metamodel=..., model=...)`` —
+    #: pick the setting up in this one place, with no cap argument threaded
+    #: through ``SessionRegistry``/``hydration``.
     script_cell_cache: ScriptCellCache = field(
-        default_factory=ScriptCellCache, repr=False
+        default_factory=lambda: ScriptCellCache(
+            cap=get_settings().snippet_cell_cache_max
+        ),
+        repr=False,
+    )
+    #: per-session background script-sweep jobs (spec 2026-07-20 §4.3). One
+    #: ``SweepJob`` per resolved-definition fingerprint, with FAILED-JOB
+    #: memory: an aborted job stays registered at its ``(fingerprint, rev)`` so
+    #: a polling client never restarts the grind. Cancelled+cleared by the same
+    #: two invalidation points as the caches (``set_model``/``touch_model``)
+    #: and, unconditionally, by ``SessionRegistry.evict`` — sweeps never block
+    #: eviction.
+    script_sweeps: ScriptSweepRegistry = field(
+        default_factory=ScriptSweepRegistry, repr=False
     )
 
     def set_model(
@@ -131,6 +151,7 @@ class Session:
         self.model_rev += 1
         self.table_order_cache.clear()
         self.script_cell_cache.clear_and_stamp(self.model_rev)
+        self.script_sweeps.cancel_all()
 
     def touch_model(self) -> None:
         """Call when the model is mutated outside the ops protocol.
@@ -149,7 +170,9 @@ class Session:
         the LRU to age out), and clear+re-stamp ``script_cell_cache`` for the
         same reason (its rev-stamp check would otherwise reject every entry
         computed against the pre-mutation model without ever reclaiming
-        their memory).
+        their memory), and cancel+forget any in-flight ``script_sweeps`` (they
+        were computing cells for the pre-mutation rev; the next evaluate
+        re-kicks at the new rev).
         """
         self.model_rev += 1
         self.op_log.clear()
@@ -157,6 +180,7 @@ class Session:
         self.validation = None
         self.table_order_cache.clear()
         self.script_cell_cache.clear_and_stamp(self.model_rev)
+        self.script_sweeps.cancel_all()
 
     def set_metamodel(self, metamodel: Metamodel | None) -> None:
         """Replace (or clear) the metamodel; the model conforms to it, so the
@@ -244,6 +268,12 @@ class SessionRegistry:
             return
         # Serialise vs an in-flight commit (spec §11 evict-during-commit guard).
         with session.write_mutex:
+            # Sweeps must NEVER block eviction, so they are cancelled
+            # unconditionally BEFORE the guard and are deliberately not part of
+            # its condition (unlike live leases / feed clients / an in-flight
+            # validation sweep). Sweep reads are lock-free and rev-stamped, so
+            # a cancelled sweep merely wastes its remaining work.
+            session.script_sweeps.cancel_all()
             if (
                 session.lock_table.active_leases(time.monotonic())
                 or session.hub.has_clients()

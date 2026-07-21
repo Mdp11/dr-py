@@ -8,7 +8,6 @@ column, so the seeded default project actually has rows to evaluate."""
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import Literal
 
 import pytest
 from fastapi import FastAPI
@@ -17,8 +16,8 @@ from fastapi.testclient import TestClient
 from data_rover.api.main import create_app
 from data_rover.api.script_runner import get_runner
 from data_rover.api.session import get_session
-from data_rover.core.script.runner import CallResult
 
+from ._script_fakes import CountingRunner
 from .conftest import AUTH_HEADERS, papi, seed_default_project
 
 THING_MM = """
@@ -28,36 +27,6 @@ elements:
     properties:
       - {name: name, datatype: string, multiplicity: "1"}
 """
-
-
-class _CountingRunner:
-    """Fake `ScriptRunner`: every `.call()` on the session it hands back
-    increments `calls`, so the test can assert cache hits never reach it."""
-
-    def __init__(self) -> None:
-        self.calls = 0
-
-    def open_session(self, model, code, limits, *, budget):
-        runner = self
-
-        class _S:
-            boot_error = None
-
-            def call(self, entry: Literal["value", "step"], element_ids: list[str]):
-                runner.calls += 1
-                return CallResult(
-                    value={"kind": "scalar", "value": len(element_ids)},
-                    error=None,
-                    duration_ms=0,
-                )
-
-            def close(self) -> None:
-                pass
-
-        return _S()
-
-    def run(self, *a, **k):  # pragma: no cover - unused by ScriptEvalContext
-        raise NotImplementedError
 
 
 @pytest.fixture
@@ -120,7 +89,7 @@ def _script_table() -> dict:
 def test_second_evaluate_serves_from_cell_cache(
     client: TestClient, app: FastAPI, seed_thing_model: None
 ) -> None:
-    counting = _CountingRunner()
+    counting = CountingRunner()
     app.dependency_overrides[get_runner] = lambda: counting
 
     r1 = client.post(
