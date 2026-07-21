@@ -3,6 +3,7 @@ import json
 from data_rover.core.script.bridge import (
     BridgeDispatcher,
     BridgeLimitError,
+    project_element,
     project_roots,
 )
 
@@ -295,14 +296,9 @@ def test_project_roots_preserves_input_order():
 
 
 def test_project_roots_projection_matches_project_element_shape():
-    model = tiny_model()
+    model = _model()
     result = project_roots(model, ["b1"])
-    assert len(result) == 1
-    proj = result[0]
-    assert proj["id"] == "b1"
-    assert proj["type"] == "Building"
-    assert proj["name"] == "Building One"
-    assert proj["properties"]["name"] == "Building One"
+    assert result == [project_element(model.get_element("b1"))]
 
 
 def test_project_roots_empty_input_returns_empty_list():

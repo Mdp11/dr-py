@@ -1239,14 +1239,7 @@ class _WasmSnippetSession:
             if self._limits.read_memo_max > 0
             else []
         )
-        # Arm the epoch deadline as late as possible -- immediately before
-        # the write that hands control to the guest -- so host-side work
-        # above (projection, json.dumps below) is never deducted from the
-        # guest's own wall budget (it was previously armed before this
-        # block, skewing this deadline against `wall_deadline` below, which
-        # is read from the clock AFTER that host-side work).
-        self._arm(deadline_s)
-        self._inst.host_in.write(
+        frame = (
             json.dumps(
                 {
                     "call": {
@@ -1258,6 +1251,14 @@ class _WasmSnippetSession:
             )
             + "\n"
         )
+        # Arm the epoch deadline as late as possible -- immediately before
+        # the write that hands control to the guest -- so host-side work
+        # above (projection, frame serialization) is never deducted from the
+        # guest's own wall budget (it was previously armed before this
+        # block, skewing this deadline against `wall_deadline` below, which
+        # is read from the clock AFTER that host-side work).
+        self._arm(deadline_s)
+        self._inst.host_in.write(frame)
         self._inst.host_in.flush()
         wall_deadline = time.monotonic() + deadline_s
         assert self._inst.thread is not None

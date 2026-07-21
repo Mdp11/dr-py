@@ -244,3 +244,46 @@ def test_step_entry_gets_piggybacked_root(bridge_call_log: list[str]) -> None:
     assert res.error is None
     assert res.value == {"ids": ["b1"]}
     assert bridge_call_log == []
+
+
+def test_read_memo_max_zero_changes_trips_never_results(
+    bridge_call_log: list[str],
+) -> None:
+    """`read_memo_max <= 0` skips host-side root projection (the `call()`
+    guard documented in `trusted_runner.py`/`api/script_runner.py`, right
+    beside `_memo_put`'s no-op-on-non-positive-cap behavior). The point of
+    this test is that the guard is a pure trip-count optimization: it must
+    NEVER change what a snippet computes, only whether the root rides the
+    call frame for free or costs a fetch.
+
+    Baseline (default `RunLimits`, memo enabled): the root piggybacks on the
+    call frame for zero round trips -- see
+    `test_root_piggyback_zero_trips_for_property_math` above, same snippet.
+    With `read_memo_max=0`: the guard skips that projection (it would be
+    wasted work -- a disabled memo can't retain it), so the guest's first
+    access to the root falls back to an explicit `element` fetch, exactly
+    like the cache-miss path in `test_missing_root_still_raises_not_found`.
+    """
+    code = "def value(els):\n    return els[0].name\n"
+    model = tiny_model()
+
+    baseline = TrustedRunner().open_session(
+        model, code, RunLimits(), budget=ScriptBudget.start(60)
+    )
+    assert baseline.boot_error is None, baseline.boot_error
+    baseline_res = baseline.call("value", ["b1"])
+    assert baseline_res.error is None
+    assert bridge_call_log.count("element") == 0  # root piggybacked, no fetch
+    bridge_call_log.clear()
+
+    unmemoized = TrustedRunner().open_session(
+        model, code, RunLimits(read_memo_max=0), budget=ScriptBudget.start(60)
+    )
+    assert unmemoized.boot_error is None, unmemoized.boot_error
+    unmemoized_res = unmemoized.call("value", ["b1"])
+    assert unmemoized_res.error is None
+
+    # Same result either way -- the guard only ever changes trip counts.
+    assert unmemoized_res.value == baseline_res.value
+    # But the root projection was skipped, so the guest had to fetch it.
+    assert bridge_call_log.count("element") == 1
