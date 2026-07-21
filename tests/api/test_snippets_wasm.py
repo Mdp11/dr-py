@@ -463,3 +463,45 @@ def test_wasm_session_read_only(wasm_runner: WasmScriptRunner, small_model) -> N
     res = sess.call("value", [ids[0]])
     assert res.error is not None and "ReadOnlyError" in res.error.message
     sess.close()
+
+
+def test_embedded_session_trip_collapse_wasm(
+    wasm_runner: WasmScriptRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Real-sandbox leg of tests/script/test_trip_counts.py: a property-math
+    cell makes ZERO bridge reads (roots piggybacked), and a hop + neighbor
+    fetch makes ONE (far endpoints inlined)."""
+    from data_rover.core.script.bridge import BridgeDispatcher
+    from data_rover.core.script.runner import RunLimits, ScriptBudget
+
+    from tests.script.conftest import tiny_model
+
+    calls: list[str] = []
+    orig = BridgeDispatcher.dispatch
+
+    def counting(self, req):  # type: ignore[no-untyped-def]
+        op = req.get("op")
+        calls.append(op if isinstance(op, str) else "write")
+        return orig(self, req)
+
+    monkeypatch.setattr(BridgeDispatcher, "dispatch", counting)
+
+    model = tiny_model()
+    sess = wasm_runner.open_session(
+        model,
+        "def value(els):\n"
+        "    n = els[0].name\n"
+        "    for rel in els[0].out():\n"
+        "        n += dr.element(rel['target_id']).name\n"
+        "    return n\n",
+        RunLimits(),
+        budget=ScriptBudget.start(60),
+    )
+    try:
+        assert sess.boot_error is None, sess.boot_error
+        res = sess.call("value", ["b1"])
+        assert res.error is None, res.error
+        assert res.value == {"kind": "scalar", "value": "Building OneBuilding Two"}
+        assert calls == ["outgoing"]
+    finally:
+        sess.close()

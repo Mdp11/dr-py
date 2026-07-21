@@ -281,3 +281,67 @@ def test_parallel_sweep_speedup(
         f"sharded sweep took {ratio:.2f}x the serial wall time "
         f"({sharded:.2f}s vs {serial:.2f}s) — is the fan-out serialised?"
     )
+
+
+#: Traversal snippet for the trips-per-cell guard: one hop plus a far-element
+#: read per row. Post trip-collapse this costs exactly ONE dispatch per cell
+#: (the hop); the far endpoints ride the hop response and the root rides the
+#: call frame. Budget 3 leaves headroom, not room for a per-read regression
+#: (which would cost 2+ extra trips per cell).
+TRAVERSAL_CODE = (
+    "def value(els):\n"
+    "    n = els[0]['name']\n"
+    "    for rel in els[0].out():\n"
+    "        n = n + dr.element(rel['target_id'])['name']\n"
+    "    return n\n"
+)
+MAX_TRIPS_PER_CELL = 3.0
+
+
+def test_trips_per_cell_budget(
+    wasm_runner: WasmScriptRunner,
+    big_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from data_rover.core.script.bridge import BridgeDispatcher
+
+    count = [0]
+    orig = BridgeDispatcher.dispatch
+
+    def counting(self, req):  # type: ignore[no-untyped-def]
+        count[0] += 1
+        return orig(self, req)
+
+    monkeypatch.setattr(BridgeDispatcher, "dispatch", counting)
+    monkeypatch.setenv("DATA_ROVER_SNIPPET_SWEEP_SYNC", "true")
+    monkeypatch.setenv("DATA_ROVER_SNIPPET_SWEEP_WORKERS", "1")
+    settings: Settings = get_settings()
+    reset_global_slots()
+    big_session.table_order_cache.clear()
+    big_session.script_cell_cache.clear_and_stamp(big_session.model_rev)
+    big_session.script_sweeps.cancel_all()
+    _wait_for_pool(wasm_runner, 2)
+
+    defn = TABLE_ADAPTER.validate_python(
+        {
+            "row_source": {"kind": "scope", "types": ["Thing"]},
+            "columns": [
+                {"kind": "element"},
+                {"kind": "script", "snippet": {"definition": {"code": TRAVERSAL_CODE}}},
+            ],
+        }
+    )
+    assert big_session.metamodel is not None and big_session.model is not None
+    job = kick_or_join_sweep(
+        big_session,
+        big_session.metamodel,
+        big_session.model,
+        defn,
+        wasm_runner,
+        settings,
+        big_session.model_rev,
+    )
+    assert job.state == "done", (job.state, job.message)
+    per_cell = count[0] / SWEEP_ROWS
+    print(f"\nbridge trips per cell: {per_cell:.2f} ({count[0]} trips / {SWEEP_ROWS} cells)")
+    assert per_cell < MAX_TRIPS_PER_CELL
