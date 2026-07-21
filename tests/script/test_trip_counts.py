@@ -27,10 +27,10 @@ def _open(code: str):
 
 
 def test_fixture_counts_dispatch_calls(bridge_call_log: list[str]) -> None:
-    sess = _open("def value(els):\n    return els[0].name\n")
+    sess = _open("def value(els):\n    return dr.element('b2').name\n")
     res = sess.call("value", ["b1"])
     assert res.error is None
-    assert bridge_call_log.count("element") >= 1
+    assert bridge_call_log.count("element") == 1  # b2; the b1 root rode the call frame
 
 
 def test_element_refetch_is_memoized(bridge_call_log: list[str]) -> None:
@@ -41,7 +41,7 @@ def test_element_refetch_is_memoized(bridge_call_log: list[str]) -> None:
         "    return a.name + b.name\n"
     )
     assert sess.call("value", ["b1"]).error is None
-    assert bridge_call_log.count("element") == 2  # b1 root + b2 once
+    assert bridge_call_log.count("element") == 1  # b2 once; b1 root piggybacked
 
 
 def test_memo_survives_across_calls(bridge_call_log: list[str]) -> None:
@@ -49,7 +49,7 @@ def test_memo_survives_across_calls(bridge_call_log: list[str]) -> None:
     assert sess.call("value", ["b1"]).error is None
     assert sess.call("value", ["b3"]).error is None
     # b2 fetched once across BOTH calls (session-lifetime memo)
-    assert bridge_call_log.count("element") == 3  # b1, b2, b3
+    assert bridge_call_log.count("element") == 1  # b2 once; b1/b3 roots piggybacked
 
 
 def test_adjacency_reads_are_memoized(bridge_call_log: list[str]) -> None:
@@ -94,7 +94,9 @@ def test_memo_cap_admits_multiple_and_evicts_fifo(bridge_call_log: list[str]) ->
     )
     assert sess.boot_error is None
     assert sess.call("value", ["b1"]).error is None
-    assert bridge_call_log.count("element") == 3  # b1, b2, b3 (b2-again is a memo hit)
+    # b1 root rides the call frame (primed, no round trip, but still occupies
+    # a FIFO slot); b2 and b3 each cost one round trip; b2-again is a memo hit.
+    assert bridge_call_log.count("element") == 2  # b2, b3
 
 
 def test_memoized_results_do_not_alias_mutations(bridge_call_log: list[str]) -> None:
@@ -174,9 +176,9 @@ def test_hop_primes_neighbor_projections(bridge_call_log: list[str]) -> None:
         "    return total\n"
     )
     assert sess.call("value", ["b1"]).error is None
-    # b1 root fetch + one outgoing hop; the b2 neighbor fetch is served from
-    # the projections the hop response shipped.
-    assert bridge_call_log.count("element") == 1
+    # b1 root piggybacked (no fetch); one outgoing hop; the b2 neighbor fetch
+    # is served from the projections the hop response shipped.
+    assert bridge_call_log.count("element") == 0  # root piggybacked, neighbor rode the hop
     assert bridge_call_log.count("outgoing") == 1
 
 
@@ -187,7 +189,7 @@ def test_incoming_primes_source_projections(bridge_call_log: list[str]) -> None:
         "    return dr.element(rels[0]['source_id']).name\n"
     )
     assert sess.call("value", ["b2"]).error is None
-    assert bridge_call_log.count("element") == 1  # b2 root only
+    assert bridge_call_log.count("element") == 0  # b2 root piggybacked; b1 rode the hop
 
 
 def test_hop_falls_back_to_per_neighbor_fetch_when_inline_guard_trips(
@@ -215,6 +217,30 @@ def test_hop_falls_back_to_per_neighbor_fetch_when_inline_guard_trips(
     assert res.error is None
     assert res.value == {"kind": "scalar", "value": len("Building Two")}
     # guard tripped -> the b2 neighbor fetch costs its own round trip, unlike
-    # the fast path's 1 (b1 root only)
-    assert bridge_call_log.count("element") == 2  # b1 root + b2 neighbor
+    # the fast path's 0 (b1 root piggybacked, b2 rides the hop)
+    assert bridge_call_log.count("element") == 1  # b2 neighbor; b1 root piggybacked
     assert bridge_call_log.count("outgoing") == 1
+
+
+def test_root_piggyback_zero_trips_for_property_math(bridge_call_log: list[str]) -> None:
+    sess = _open("def value(els):\n    return els[0].name\n")
+    assert sess.call("value", ["b1"]).error is None
+    assert sess.call("value", ["b2"]).error is None
+    assert bridge_call_log == []  # roots ship with the call frame
+
+
+def test_missing_root_still_raises_not_found(bridge_call_log: list[str]) -> None:
+    sess = _open("def value(els):\n    return els[0].name\n")
+    res = sess.call("value", ["nope"])
+    assert res.error is not None
+    assert res.error.kind == "runtime"
+    assert "NotFoundError" in res.error.message
+    assert bridge_call_log.count("element") == 1  # guest fell back to a fetch
+
+
+def test_step_entry_gets_piggybacked_root(bridge_call_log: list[str]) -> None:
+    sess = _open("def step(el):\n    return [el]\n")
+    res = sess.call("step", ["b1"])
+    assert res.error is None
+    assert res.value == {"ids": ["b1"]}
+    assert bridge_call_log == []

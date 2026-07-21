@@ -447,6 +447,28 @@ dr = _Dr()
 _WIRE_SCALARS = (str, int, float, bool)
 
 
+def _dr_call_entry(entry, element_ids, elements=None):
+    # Single per-call driver for embedded sessions (M2/M3): prime the read
+    # memo with the host-projected root elements, build the Element handles,
+    # invoke the snippet's entry point, and serialize its result. Both hosts
+    # (the WASM bootstrap loop and the trusted test session) call THIS —
+    # per-call semantics live in exactly one place, so the two runners
+    # cannot drift. Roots the host could not project (a benign race with a
+    # concurrent delete) are simply absent from `elements`; _fetch_element
+    # then goes to the bridge and surfaces the same NotFoundError a direct
+    # fetch always produced. Raises on snippet errors — the caller owns the
+    # exception -> error-result mapping (traceback formatting differs by
+    # host). NOT part of the documented dr API (underscored on purpose).
+    for proj in elements or []:
+        _memo_put(("element", proj["id"]), proj)
+    fn = globals().get(entry)
+    if fn is None or not callable(fn):
+        raise NameError("entry function " + repr(entry) + " is not defined")
+    els = [_fetch_element(i) for i in element_ids]
+    value = fn(els if entry == "value" else (els[0] if els else None))
+    return _dr_serialize_entry_result(entry, value)
+
+
 def _dr_serialize_entry_result(entry, value):
     # Session wire serializer for embedded entry-point calls (M2/M3): maps a
     # value()/step() return value to the tagged payload the host validates

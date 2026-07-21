@@ -127,6 +127,7 @@ from wasmtime import (
 )
 
 from data_rover.core.model.model import Model
+from data_rover.core.script.bridge import project_element
 from data_rover.core.script.facade_src import FACADE_SOURCE
 from data_rover.core.script.runner import (
     CallResult,
@@ -423,16 +424,12 @@ def _run_embedded(start):
             continue
         entry = call["entry"]
         element_ids = call["element_ids"]
+        elements = call.get("elements")
         cerr = None
         payload = None
         sys.stdout = stdout
         try:
-            fn = namespace.get(entry)
-            if fn is None or not callable(fn):
-                raise NameError("entry function " + repr(entry) + " is not defined")
-            els = [namespace["dr"].element(i) for i in element_ids]
-            value = fn(els if entry == "value" else (els[0] if els else None))
-            payload = namespace["_dr_serialize_entry_result"](entry, value)
+            payload = namespace["_dr_call_entry"](entry, element_ids, elements)
         except MemoryError:
             sys.stdout = _real_stdout
             raise
@@ -1234,8 +1231,27 @@ class _WasmSnippetSession:
             self._limits.wall_timeout_s, max(self._budget.remaining(), 0.0)
         )
         self._arm(deadline_s)
+        elements = []
+        for eid in element_ids:
+            try:
+                elements.append(
+                    project_element(self._dispatcher.model.get_element(eid))
+                )
+            except KeyError:
+                # Benign race (root deleted since binding): omit — the
+                # guest's own fetch surfaces NotFoundError, today's shape.
+                pass
         self._inst.host_in.write(
-            json.dumps({"call": {"entry": entry, "element_ids": element_ids}}) + "\n"
+            json.dumps(
+                {
+                    "call": {
+                        "entry": entry,
+                        "element_ids": element_ids,
+                        "elements": elements,
+                    }
+                }
+            )
+            + "\n"
         )
         self._inst.host_in.flush()
         wall_deadline = time.monotonic() + deadline_s

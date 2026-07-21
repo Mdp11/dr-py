@@ -24,7 +24,7 @@ import time
 import traceback
 
 from data_rover.core.model.model import Model
-from data_rover.core.script.bridge import BridgeDispatcher
+from data_rover.core.script.bridge import BridgeDispatcher, project_element
 from data_rover.core.script.facade_src import FACADE_SOURCE
 from data_rover.core.script.runner import (
     CallResult,
@@ -205,6 +205,7 @@ class _TrustedSession:
             max_op_bytes=limits.max_op_bytes,
             page_limit=limits.page_limit,
         )
+        self._model = model
         self._limits = limits
         self._namespace: dict = {
             "_transport": dispatcher.dispatch,
@@ -232,15 +233,18 @@ class _TrustedSession:
         start = time.monotonic()
         if self.boot_error is not None:
             return CallResult(value=None, error=self.boot_error, duration_ms=0)
+        elements = []
+        for eid in element_ids:
+            try:
+                elements.append(project_element(self._model.get_element(eid)))
+            except KeyError:
+                pass  # guest-side fetch surfaces NotFoundError, today's shape
         stdout = _CappedStdout(self._limits.stdout_bytes)
         with contextlib.redirect_stdout(stdout):  # type: ignore[type-var]
             try:
-                fn = self._namespace.get(entry)
-                if fn is None or not callable(fn):
-                    raise NameError(f"entry function {entry!r} is not defined")
-                els = [self._namespace["dr"].element(i) for i in element_ids]
-                value = fn(els if entry == "value" else (els[0] if els else None))
-                payload = self._namespace["_dr_serialize_entry_result"](entry, value)
+                payload = self._namespace["_dr_call_entry"](
+                    entry, element_ids, elements
+                )
             except Exception:
                 return CallResult(
                     value=None,
