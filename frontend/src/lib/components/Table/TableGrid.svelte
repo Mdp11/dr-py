@@ -13,6 +13,7 @@
 		getTableError,
 		getTableLoading,
 		getTablePage,
+		getTableScriptStatus,
 		getTableSort,
 		lockBadgeFor,
 		remapTableSortForMove,
@@ -27,6 +28,7 @@
 	import ElementCell from './Cell/ElementCell.svelte';
 	import ElementsCell from './Cell/ElementsCell.svelte';
 	import ErrorCell from './Cell/ErrorCell.svelte';
+	import PendingCell from './Cell/PendingCell.svelte';
 	import ValueCell from './Cell/ValueCell.svelte';
 	import ValuesCell from './Cell/ValuesCell.svelte';
 
@@ -56,6 +58,11 @@
 	const loading = $derived(getTableLoading(tabId));
 	const sort = $derived(getTableSort(tabId));
 	const error = $derived(getTableError(tabId));
+	// Progress of the background script-value sweep: `computing` means some
+	// cells came back `pending` and the store has a re-poll scheduled (rows are
+	// in BUILD order until it lands — a sort over half-computed values would
+	// reshuffle on every poll, so the backend deliberately doesn't sort them).
+	const scriptStatus = $derived(getTableScriptStatus(tabId));
 	const rows = $derived(page?.rows ?? []);
 
 	// Hidden columns are evaluated server-side (ColumnRefs may target them)
@@ -363,6 +370,21 @@
 		{/if}
 	</div>
 
+	{#if scriptStatus && scriptStatus.state !== 'ready'}
+		{#if scriptStatus.state === 'computing'}
+			<p
+				data-testid="table-script-status"
+				class="p-2 text-xs text-muted-foreground/70"
+				aria-live="polite"
+			>
+				computing {scriptStatus.done}/{scriptStatus.total ?? '…'}
+			</p>
+		{:else}
+			<p data-testid="table-script-status" class="p-2 text-xs text-destructive">
+				{scriptStatus.message ?? 'Computing this table\u2019s script values failed.'}
+			</p>
+		{/if}
+	{/if}
 	{#if error}
 		<p class="p-4 text-xs text-destructive">{error}</p>
 	{:else if loading && !page}
@@ -415,6 +437,17 @@
 									<ErrorCell {cell} />
 								{:else if cell.kind === 'elements'}
 									<ElementsCell {cell} />
+								{:else if cell.kind === 'pending'}
+									<PendingCell />
+								{:else}
+									<!-- Exhaustiveness guard: `cell` is `never` here, so a new
+									     TableCell kind fails `npm run check` at THIS line instead
+									     of silently rendering a blank cell (which is exactly how
+									     `pending` shipped invisible). Renders nothing at runtime,
+									     so an unknown kind from a newer backend degrades to an
+									     empty cell rather than throwing. -->
+									<!-- eslint-disable-next-line @typescript-eslint/no-unused-vars -->
+									{@const _exhaustive = cell satisfies never}
 								{/if}
 							</div>
 						{:else}

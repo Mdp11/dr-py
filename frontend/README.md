@@ -235,6 +235,24 @@ SnippetSourceEditor.svelte`, bound to a `SnippetSource` (`{ ref?, definition?
   `ValueCell`, showing `cell.message` with `cell.traceback ?? cell.message` as
   the hover title. The row otherwise renders normally — one bad cell never
   blanks the row, and sorting/paging keep working around it.
+- **Pending cells + the sweep poll.** Whole-table script passes no longer run
+  inline: `/tables/evaluate` reads a per-session value cache a **background
+  sweep** fills, so uncomputed cells come back as `{kind:'pending'}` (rendered
+  by `Table/Cell/PendingCell.svelte`, the same pulsing bar as an un-fetched
+  row) and the response carries a `script_status`
+  (`ready`/`computing`/`failed` + `done`/`total`/`message`). While `computing`,
+  `state/table-editor.svelte.ts` keeps **exactly one** pending timer per tab
+  (`_pollTimers`, cancelled on every landing page, on close/reload/reset, and
+  guarded by the tab's generation counter) and re-requests the **visible
+  window** (`visibleRequest`, shared with the commit refresh) every second
+  until the status turns terminal. Rows arrive in build order while computing —
+  a response that saw pending values never reports `ready`, so the last poll
+  always lands a clean, correctly-sorted page. `TableGrid` shows
+  `computing {done}/{total}` (or the failure message) above the body via
+  `getTableScriptStatus(tabId)`. **Export** mirrors this: `/tables/export`
+  answers **202 + Retry-After: 1** while values are still computing, and
+  `downloadTable` retries (bounded, `onProgress` on the Export button,
+  abortable on unmount) until the xlsx arrives.
 - **`warnings` threading.** Both evaluation paths share one
   `ScriptEvalContext` per request and report through its `.warnings` list:
   `TableData.warnings` (`state/table-editor.svelte.ts`) is read via

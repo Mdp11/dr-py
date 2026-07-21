@@ -47,6 +47,7 @@ vi.mock('$lib/state', () => ({
 	getTablePage: () => h.page,
 	getTableLoading: () => false,
 	getTableSort: () => undefined,
+	getTableScriptStatus: () => null,
 	getTableError: () => undefined,
 	setTableSort: vi.fn(),
 	updateTableDefinition: vi.fn(),

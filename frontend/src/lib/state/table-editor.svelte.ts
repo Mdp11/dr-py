@@ -34,6 +34,7 @@ import { ConflictError } from '$lib/api/errors';
 import { evaluateTable, exportTable } from '$lib/api/tables';
 import {
 	TableDefinitionSchema,
+	type ScriptStatus,
 	type TableColumn,
 	type TableDefinition,
 	type TablePage,
@@ -48,6 +49,14 @@ import { bindTabToArtifact, retitleTab } from './workspace.svelte';
 const PAGE = 100;
 /** The backend's `EvaluateTableIn.limit` upper bound (`le=500`). */
 const MAX_LIMIT = 500;
+/** Delay between two script-sweep polls (matches the backend's Retry-After). */
+const POLL_MS = 1_000;
+/** Delay between two export retries while the sweep is still computing
+ * (the backend answers 202 with `Retry-After: 1`). */
+const EXPORT_RETRY_MS = 1_000;
+/** Bound on export retries so a stuck sweep surfaces an error instead of
+ * spinning silently forever (~2 minutes at EXPORT_RETRY_MS). */
+const EXPORT_MAX_ATTEMPTS = 120;
 
 export interface TableDraft {
 	name: string;
@@ -103,6 +112,20 @@ const _loading = new SvelteMap<string, boolean>();
 /** tabId -> the last load's error message (422/500). */
 const _errors = new SvelteMap<string, string>();
 const _conflicts = new SvelteMap<string, number>(); // tabId -> server rev
+/**
+ * tabId -> the last page's `script_status`. Rendered (progress readout /
+ * failure strip), so it lives in a reactive map like `_loading`.
+ */
+const _scriptStatus = new SvelteMap<string, ScriptStatus>();
+
+/**
+ * tabId -> the ONE pending script-sweep re-poll. Exactly one timer per tab:
+ * every landing page cancels the previous timer before scheduling its own, or
+ * concurrent chunk fills would compound the polls geometrically. Control
+ * state, never read from templates.
+ */
+// eslint-disable-next-line svelte/prefer-svelte-reactivity
+const _pollTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 /**
  * Per-TAB page-load generation. Control state, never read from templates.
@@ -154,6 +177,61 @@ function isCurrent(tabId: string, gen: number): boolean {
 	return _generations.get(tabId) === gen && _drafts.has(tabId);
 }
 
+/** Cancel the tab's pending script-sweep poll, if any. */
+function cancelPoll(tabId: string): void {
+	const timer = _pollTimers.get(tabId);
+	if (timer !== undefined) {
+		clearTimeout(timer);
+		_pollTimers.delete(tabId);
+	}
+}
+
+/**
+ * The chunk-aligned request covering the range the grid last reported as
+ * visible (falling back to the first chunk), capped at the backend's limit
+ * bound. Shared by the commit refresh and the script-sweep poll: both must
+ * re-request where the user is LOOKING, not row 0.
+ */
+function visibleRequest(tabId: string): { offset: number; limit: number } {
+	const view = _viewRanges.get(tabId);
+	const offset = view ? Math.floor(view.start / PAGE) * PAGE : 0;
+	const limit = view
+		? Math.min(MAX_LIMIT, Math.max(PAGE, Math.ceil((view.end - offset) / PAGE) * PAGE))
+		: PAGE;
+	return { offset, limit };
+}
+
+/**
+ * Record a landed page's `script_status` and drive the polling loop.
+ *
+ * `computing` means the backend served this page from a script-value cache the
+ * background sweep is still filling — some cells came back `pending` and, while
+ * that is true, rows are returned in BUILD order (sorting half-computed values
+ * would reshuffle the grid on every poll). A response that saw pending values
+ * never reports `ready`, so the loop always gets one clean final page: poll
+ * until the status turns terminal (`ready`/`failed`), then stop.
+ *
+ * Called from every page landing (install AND merge). Exactly one timer per
+ * tab — the previous one is always cancelled first.
+ */
+function handleScriptStatus(tabId: string, page: TablePage): void {
+	const status = page.script_status ?? null;
+	if (status) _scriptStatus.set(tabId, status);
+	else _scriptStatus.delete(tabId);
+	cancelPoll(tabId);
+	if (status?.state !== 'computing') return;
+	const gen = _generations.get(tabId) ?? 0;
+	_pollTimers.set(
+		tabId,
+		setTimeout(() => {
+			_pollTimers.delete(tabId);
+			if (!isCurrent(tabId, gen)) return; // edited/reloaded/closed since scheduled
+			const { offset, limit } = visibleRequest(tabId);
+			void loadTablePage(tabId, offset, limit);
+		}, POLL_MS)
+	);
+}
+
 /**
  * Move every per-tab entry (page, sort, loading, error, generation, view
  * range) from `oldTab` to `newTab`. Used by the first-save/fork paths, where a
@@ -196,6 +274,14 @@ function moveTabState(oldTab: string, newTab: string): void {
 	_viewRanges.delete(oldTab);
 	if (view !== undefined) _viewRanges.set(newTab, view);
 
+	// The pending poll is closed over `oldTab` (whose draft is gone), so it
+	// would no-op — cancel it and carry the status over; the re-issued load
+	// below, or the next landing page, schedules a fresh poll under `newTab`.
+	cancelPoll(oldTab);
+	const status = _scriptStatus.get(oldTab);
+	_scriptStatus.delete(oldTab);
+	if (status !== undefined) _scriptStatus.set(newTab, status);
+
 	// Chunk fetches in flight are closed over `oldTab`, whose draft is gone —
 	// they will be dropped on landing. Drop their bookkeeping with them; the
 	// grid re-requests any still-missing chunks under the new tab id.
@@ -205,6 +291,13 @@ function moveTabState(oldTab: string, newTab: string): void {
 	// so the new tab does not hang on `loading: true`. Reads the draft under the
 	// NEW id (the caller has already set it), same as nav's rekeyTab re-run.
 	if (loading === true) void loadTablePage(newTab, _pages.get(newTab)?.offset ?? 0);
+	else if (status?.state === 'computing') {
+		// Nothing was in flight to re-issue, but the sweep is still running and
+		// the cancelled timer belonged to the old id — restart the loop, or the
+		// tab would sit on `pending` cells forever.
+		const { offset, limit } = visibleRequest(newTab);
+		void loadTablePage(newTab, offset, limit);
+	}
 }
 
 export function getTableDraft(tabId: string): TableDraft | undefined {
@@ -225,6 +318,16 @@ export function getTableError(tabId: string): string | undefined {
 export function getTableConflict(tabId: string): number | undefined {
 	return _conflicts.get(tabId);
 }
+/**
+ * Progress of the background script-value sweep behind this table's script
+ * column(s), as of the last landed page. `null` for tables with no script
+ * column (or before the first page lands). `computing` means the store has a
+ * poll scheduled and some cells render as `pending`.
+ */
+export function getTableScriptStatus(tabId: string): ScriptStatus | null {
+	return _scriptStatus.get(tabId) ?? null;
+}
+
 /** Non-fatal warnings from the last installed page (e.g. a ScriptColumn that
  * raised on some rows) — empty when no page is installed or none were sent. */
 export function getTableWarnings(tabId: string): string[] {
@@ -349,6 +452,7 @@ function installPage(tabId: string, page: TablePage): void {
 		model_rev: page.model_rev,
 		warnings: page.warnings
 	});
+	handleScriptStatus(tabId, page);
 }
 
 /**
@@ -369,6 +473,8 @@ function mergePage(tabId: string, page: TablePage): void {
 		rows[page.offset + i] = page.rows[i];
 	}
 	_pages.set(tabId, { ...data, rows });
+	// (the install branch above already handled the status for its own page)
+	handleScriptStatus(tabId, page);
 }
 
 /**
@@ -583,6 +689,8 @@ export async function reloadTableDraft(tabId: string): Promise<void> {
 	_errors.delete(tabId);
 	_conflicts.delete(tabId);
 	_viewRanges.delete(tabId);
+	_scriptStatus.delete(tabId);
+	cancelPoll(tabId);
 	bumpGeneration(tabId); // orphan any in-flight load for the old draft
 	await ensureTableDraft(tabId);
 }
@@ -595,24 +703,50 @@ export function closeTableDraft(tabId: string): void {
 	_errors.delete(tabId);
 	_conflicts.delete(tabId);
 	_viewRanges.delete(tabId);
+	_scriptStatus.delete(tabId);
+	cancelPoll(tabId);
 	bumpGeneration(tabId); // orphan any in-flight load
 }
 
-/** Export the current definition (or saved artifact) as an .xlsx and trigger
- * a browser download via a synthetic anchor click.
+/** Progress of an export that is waiting on the background script sweep. */
+export interface ExportProgress {
+	done: number;
+	total: number | null;
+	/** 1-based retry number, so a caller can show "still preparing". */
+	attempt: number;
+}
+
+/**
+ * Export the current definition (or saved artifact) as an .xlsx and trigger a
+ * browser download via a synthetic anchor click.
  *
- * While the backend's script-cache sweep is still filling in a script
- * column's cells, `exportTable` answers `{ kind: 'preparing' }` (202) instead
- * of the file. Task 10 adds the real retry loop; for now this surfaces as a
- * thrown Error so it flows through the existing catch/`saveError` handling in
- * `TableView.svelte` unchanged, same as any other export failure. */
-export async function downloadTable(tabId: string): Promise<void> {
+ * While the backend's script-cache sweep is still filling in a script column's
+ * cells, `/tables/export` answers **202 + Retry-After: 1** (surfaced by the API
+ * client as `{ kind: 'preparing' }`) instead of the file. THE STATUS CODE IS
+ * THE RETRY SIGNAL: retry until the call resolves `ready`, reporting each wait
+ * through `onProgress` so the caller can keep the user informed, and stop early
+ * when `signal` aborts (the tab was closed / the user navigated away). Retries
+ * are bounded (`EXPORT_MAX_ATTEMPTS`) so a wedged sweep ends in a visible error
+ * rather than an invisible infinite loop.
+ */
+export async function downloadTable(
+	tabId: string,
+	opts?: { onProgress?: (p: ExportProgress) => void; signal?: AbortSignal }
+): Promise<void> {
 	const draft = _drafts.get(tabId);
 	if (!draft) return;
 	const sort = _sortFor(tabId, draft);
-	const result = await exportTable({ ..._evaluateSource(draft), sort });
-	if (result.kind === 'preparing') {
-		throw new Error('Export is being prepared — try again shortly.');
+	const args = { ..._evaluateSource(draft), sort };
+	let result = await exportTable(args);
+	for (let attempt = 1; result.kind === 'preparing'; attempt++) {
+		if (opts?.signal?.aborted) return;
+		if (attempt > EXPORT_MAX_ATTEMPTS) {
+			throw new Error('Export is still being prepared — try again shortly.');
+		}
+		opts?.onProgress?.({ done: result.done, total: result.total, attempt });
+		await new Promise((r) => setTimeout(r, EXPORT_RETRY_MS));
+		if (opts?.signal?.aborted) return;
+		result = await exportTable(args);
 	}
 	const url = URL.createObjectURL(result.blob);
 	const a = document.createElement('a');
@@ -638,12 +772,8 @@ export function handleTableModelRevChanged(): void {
 		// a brand-new table still waiting for its scope — a peer's commit must not
 		// surprise-fill it with every element.
 		if (!_pages.has(tabId) && !_errors.has(tabId) && !(_loading.get(tabId) ?? false)) continue;
-		const view = _viewRanges.get(tabId);
-		const start = view ? Math.floor(view.start / PAGE) * PAGE : 0;
-		const limit = view
-			? Math.min(MAX_LIMIT, Math.max(PAGE, Math.ceil((view.end - start) / PAGE) * PAGE))
-			: PAGE;
-		void loadTablePage(tabId, start, limit);
+		const { offset, limit } = visibleRequest(tabId);
+		void loadTablePage(tabId, offset, limit);
 	}
 }
 
@@ -660,6 +790,8 @@ export function resetTableEditors(): void {
 	_errors.clear();
 	_conflicts.clear();
 	_viewRanges.clear();
+	_scriptStatus.clear();
+	for (const tabId of [..._pollTimers.keys()]) cancelPoll(tabId);
 	// Bump (not clear) so in-flight responses from before the reset stay stale
 	// even if the same tab id is immediately re-created. (bumpGeneration also
 	// drops the tab's in-flight chunk bookkeeping.)

@@ -130,6 +130,52 @@ describe('TableGrid', () => {
 		}
 	});
 
+	// Task 10: a script cell the sweep hasn't computed yet arrives as
+	// `{kind:'pending'}`. Before this branch existed it rendered as NOTHING —
+	// a silently blank cell — so this is the regression guard.
+	it('renders a pending script cell as a placeholder and shows sweep progress', () => {
+		const pendingPage: TablePage = {
+			...PAGE,
+			rows: [{ key: ['e1'], cells: [PAGE.rows[0].cells[0], { kind: 'pending' }] }],
+			script_status: { state: 'computing', done: 7, total: 42 }
+		};
+		vi.spyOn(store, 'getTablePage').mockReturnValue(pendingPage);
+		vi.spyOn(store, 'getTableLoading').mockReturnValue(false);
+		vi.spyOn(store, 'getTableScriptStatus').mockReturnValue({
+			state: 'computing',
+			done: 7,
+			total: 42
+		});
+		const c = render('tbl:draft:pending');
+		try {
+			expect(document.querySelectorAll('[data-testid="pending-cell"]')).toHaveLength(1);
+			expect(document.querySelector('[data-testid="table-script-status"]')?.textContent).toContain(
+				'computing 7/42'
+			);
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('surfaces a failed sweep message instead of the progress readout', () => {
+		vi.spyOn(store, 'getTablePage').mockReturnValue(PAGE);
+		vi.spyOn(store, 'getTableLoading').mockReturnValue(false);
+		vi.spyOn(store, 'getTableScriptStatus').mockReturnValue({
+			state: 'failed',
+			done: 3,
+			total: 42,
+			message: 'sweep died'
+		});
+		const c = render('tbl:draft:failed');
+		try {
+			const strip = document.querySelector('[data-testid="table-script-status"]');
+			expect(strip?.textContent).toContain('sweep died');
+			expect(strip?.className).toContain('text-destructive');
+		} finally {
+			unmount(c);
+		}
+	});
+
 	it('double-clicking a resize handle auto-fits the column to an integer width', () => {
 		vi.spyOn(store, 'getTablePage').mockReturnValue(PAGE);
 		vi.spyOn(store, 'getTableLoading').mockReturnValue(false);

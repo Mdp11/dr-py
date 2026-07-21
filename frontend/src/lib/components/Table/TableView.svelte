@@ -16,7 +16,8 @@
 		saveAsTableDraft,
 		saveTableDraft,
 		setTableName,
-		updateTableDefinition
+		updateTableDefinition,
+		type ExportProgress
 	} from '$lib/state';
 	import { Settings } from '@lucide/svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
@@ -44,6 +45,14 @@
 		draft?.definition.columns.some((c) => c.kind !== 'element' && c.mode === 'expand') ?? false
 	);
 	let saveError = $state<string | null>(null);
+	// Export is a retry loop while the backend's script sweep is still filling
+	// in this table's cells (202 + Retry-After): the button reports progress and
+	// stays disabled for the duration, and the controller aborts the loop when
+	// the tab unmounts so it can't keep polling for a view that is gone.
+	let exporting = $state(false);
+	let exportProgress = $state<ExportProgress | null>(null);
+	let exportAbort: AbortController | null = null;
+	$effect(() => () => exportAbort?.abort());
 	let settingsOpen = $state(false);
 	// Which column the settings dialog is scoped to — null shows the whole
 	// definition editor (row source + every column); a definition index shows
@@ -126,11 +135,21 @@
 	}
 
 	async function exportTable(): Promise<void> {
+		if (exporting) return; // one export at a time — the button is disabled too
 		saveError = null;
+		exporting = true;
+		exportAbort = new AbortController();
 		try {
-			await downloadTable(tabId);
+			await downloadTable(tabId, {
+				onProgress: (p) => (exportProgress = p),
+				signal: exportAbort.signal
+			});
 		} catch (e) {
 			saveError = e instanceof Error ? e.message : 'Export failed';
+		} finally {
+			exporting = false;
+			exportProgress = null;
+			exportAbort = null;
 		}
 	}
 </script>
@@ -181,10 +200,21 @@
 				{/if}
 				<button
 					type="button"
-					class="rounded border border-input px-2 py-1 text-xs text-foreground/80 transition-colors hover:bg-muted"
+					data-testid="table-export-button"
+					class="rounded border border-input px-2 py-1 text-xs text-foreground/80 transition-colors hover:bg-muted disabled:opacity-40"
+					disabled={exporting}
+					title={exporting
+						? 'Waiting for this table\u2019s script values to finish computing'
+						: undefined}
 					onclick={() => void exportTable()}
 				>
-					Export
+					{#if exportProgress}
+						Preparing… {exportProgress.done}/{exportProgress.total ?? '…'}
+					{:else if exporting}
+						Exporting…
+					{:else}
+						Export
+					{/if}
 				</button>
 				{#if editable}
 					<button

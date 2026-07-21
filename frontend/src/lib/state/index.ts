@@ -287,6 +287,7 @@ export {
 	getTableError,
 	getTableLoading,
 	getTablePage,
+	getTableScriptStatus,
 	getTableSort,
 	getTableWarnings,
 	hasDirtyTableDrafts,
@@ -300,6 +301,7 @@ export {
 	setTableName,
 	setTableSort,
 	updateTableDefinition,
+	type ExportProgress,
 	type TableData,
 	type TableDraft
 } from './table-editor.svelte';
