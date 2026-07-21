@@ -19,12 +19,14 @@ case parks the sweep thread on an Event instead.
 from __future__ import annotations
 
 import hashlib
+import io
 import threading
 from collections.abc import Iterator
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from openpyxl import load_workbook
 
 from data_rover.api.main import create_app
 from data_rover.api.routes.tables import _status_from_job
@@ -180,6 +182,21 @@ def _evaluate(
 
 def _keys(page: dict) -> list[object]:
     return [row["key"][0] for row in page["rows"]]
+
+
+def _export(client: TestClient, table: dict, *, sort: bool = False):
+    body: dict = {"definition": table}
+    if sort:
+        body["sort"] = {"column": 1, "direction": "asc"}
+    return client.post(papi("/tables/export"), json=body, headers=AUTH_HEADERS)
+
+
+def _sheet(resp) -> list[list[object]]:
+    """The exported sheet as a list of rows (header row included)."""
+    wb = load_workbook(io.BytesIO(resp.content))
+    ws = wb.active
+    assert ws is not None
+    return [[c.value for c in row] for row in ws.iter_rows()]
 
 
 # --------------------------------------------------------------------------
@@ -479,3 +496,142 @@ def test_runner_unavailable_reports_failed_without_a_sweep(
     assert _keys(page) == THING_IDS
     session = get_session()
     assert session.script_sweeps.get(_fingerprint(), session.model_rev) is None
+
+
+# --------------------------------------------------------------------------
+# /tables/export: 202 while the sweep is computing (Task 8, spec §4.4)
+# --------------------------------------------------------------------------
+
+
+def test_export_plain_table_never_202s(
+    client: TestClient, app: FastAPI, seed_thing_model: None
+) -> None:
+    """Regression net: no script column => `script_ctx is None` => no probe, no
+    202, byte-for-byte the pre-Phase-B export."""
+    app.dependency_overrides[get_runner] = lambda: CountingRunner()
+    r = _export(client, _plain_table())
+    assert r.status_code == 200
+    assert len(_sheet(r)) == 1 + len(THING_IDS)
+
+
+def test_export_display_only_script_column_202s_on_cold_cache(
+    client: TestClient,
+    app: FastAPI,
+    seed_thing_model: None,
+    settings_sync_sweep: Settings,
+) -> None:
+    """THE completeness-probe test.
+
+    `_script_table()`'s script column is a plain COLLAPSE `keep_empty=True`
+    DISPLAY column with no sort on it: `build_rows`/`order_rows` never invoke
+    its `value()` at all, so a probe made of those two passes alone reports
+    `pending_misses == 0` on a stone-cold cache and the export 200s — full of
+    silent `#ERROR: not computed` cells. Only the extra whole-table
+    `evaluate_cells` pass sees the display column, so this must be a 202.
+    """
+    runner = ScriptedRunner(_descending_value)
+    app.dependency_overrides[get_runner] = lambda: runner
+
+    r = _export(client, _script_table())
+    assert r.status_code == 202, r.text
+    assert r.headers["retry-after"] == "1"
+    assert r.json()["state"] == "computing"
+
+    # ...and the retry (the sync sweep already filled the cache) ships values.
+    second = _export(client, _script_table())
+    assert second.status_code == 200
+    assert [row[1] for row in _sheet(second)[1:]] == [9, 8, 7, 6, 5]
+
+
+def test_export_202_while_computing_then_200(
+    client: TestClient,
+    app: FastAPI,
+    seed_thing_model: None,
+    settings_sync_sweep: Settings,
+) -> None:
+    """Sorted export: 202 + `Retry-After: 1` + a `computing` body first, then a
+    200 xlsx carrying the sorted real values — served entirely from the cell
+    cache, with a pristine runner proving NO fresh guest call was made."""
+    runner = ScriptedRunner(_descending_value)
+    app.dependency_overrides[get_runner] = lambda: runner
+
+    first = _export(client, _script_table(), sort=True)
+    assert first.status_code == 202, first.text
+    assert first.headers["retry-after"] == "1"
+    body = first.json()
+    assert body["state"] == "computing"
+    assert body["done"] == body["total"] == len(THING_IDS)  # the sync sweep ran
+    assert first.headers["content-type"].startswith("application/json")
+
+    fresh = CountingRunner()
+    app.dependency_overrides[get_runner] = lambda: fresh
+    second = _export(client, _script_table(), sort=True)
+    assert second.status_code == 200, second.text
+    assert second.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    rows = _sheet(second)[1:]
+    # ascending by script value => t5..t1 => 5,6,7,8,9
+    assert [row[1] for row in rows] == [5, 6, 7, 8, 9]
+    assert "x-table-script-errors" not in second.headers
+    assert fresh.calls == 0  # cache hits only: no guest work during a download
+
+
+def test_export_failed_sweep_ships_error_cells(
+    client: TestClient,
+    app: FastAPI,
+    seed_thing_model: None,
+    settings_sync_sweep: Settings,
+) -> None:
+    """A sweep aborted by the consecutive-timeout guard is TERMINAL: promising
+    the client `computing` would make it retry forever, so the export falls
+    through and ships the honest answer — pending rendered `#ERROR`.
+
+    Timeouts are never cached and a cache-only miss records a PENDING cell (not
+    an error), so `script_ctx.errored` stays False: the route sets no
+    `X-Table-Script-Errors` header and appends no notice row on this path. That
+    is the current, asserted behaviour."""
+    runner = ScriptedRunner(lambda i, ids: timeout())
+    app.dependency_overrides[get_runner] = lambda: runner
+
+    r = _export(client, _script_table())
+    assert r.status_code == 200, r.text
+    rows = _sheet(r)[1:]
+    assert [row[1] for row in rows] == ["#ERROR: not computed"] * len(THING_IDS)
+    assert "x-table-script-errors" not in r.headers
+
+    # Failed-job memory: the retry is served the SAME dead job, so no second
+    # grind is started (only the abort threshold's calls were ever made).
+    calls_after_first = runner.calls[0]
+    assert calls_after_first == settings_sync_sweep.snippet_sweep_timeout_abort
+    again = _export(client, _script_table())
+    assert again.status_code == 200
+    assert runner.calls[0] == calls_after_first
+
+
+def test_export_cancelled_sweep_does_not_202_forever(
+    client: TestClient, app: FastAPI, seed_thing_model: None
+) -> None:
+    """A `cancelled` job has no thread behind it either. `kick()` hands the same
+    dead job back at the same rev, so answering 202 would strand the client in
+    an endless retry loop — the route reads the wire state from
+    `_status_from_job` (which collapses `cancelled` onto `failed`) and exports.
+    """
+    runner = ScriptedRunner(_descending_value)
+    app.dependency_overrides[get_runner] = lambda: runner
+    session = get_session()
+
+    def _start(job: SweepJob) -> None:
+        job.state = "cancelled"
+        job.message = "sweep cancelled"
+
+    job = session.script_sweeps.kick(_fingerprint(), session.model_rev, _start)
+    assert job.state == "cancelled"
+
+    r = _export(client, _script_table())
+    assert r.status_code == 200, r.text
+    assert [row[1] for row in _sheet(r)[1:]] == ["#ERROR: not computed"] * len(
+        THING_IDS
+    )
+    # No fresh job was started behind the cancelled one.
+    assert session.script_sweeps.get(_fingerprint(), session.model_rev) is job

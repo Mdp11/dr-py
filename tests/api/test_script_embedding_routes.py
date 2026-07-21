@@ -319,16 +319,38 @@ def test_evaluate_saved_snippet_ref_and_fingerprint(
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture
+def sync_sweep(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Phase B: an export never runs O(rows) guest work inline — it answers 202
+    while a background `SweepJob` fills the script cell cache. Pin the sweep to
+    run INLINE so exactly one retry is needed and no test has to sleep."""
+    monkeypatch.setenv("DATA_ROVER_SNIPPET_SWEEP_SYNC", "true")
+
+
+def _export_after_sweep(client: TestClient, defn: dict):
+    """The Phase B export handshake: 202 + `Retry-After: 1` first (the sweep
+    runs inline under the `sync_sweep` fixture), then the real xlsx."""
+    first = client.post(
+        papi("/tables/export"), json={"definition": defn}, headers=AUTH_HEADERS
+    )
+    assert first.status_code == 202, first.text
+    assert first.headers["retry-after"] == "1"
+    second = client.post(
+        papi("/tables/export"), json={"definition": defn}, headers=AUTH_HEADERS
+    )
+    assert second.status_code == 200, second.text
+    return second
+
+
 def test_export_script_column_with_errors_gets_marker_and_notice(
-    client: TestClient, seed_thing_model: None
+    client: TestClient, seed_thing_model: None, sync_sweep: None
 ) -> None:
     defn = _script_table(
         "def value(els):\n"
         "    if els[0].name == 'B': raise RuntimeError('boom')\n"
         "    return els[0].name"
     )
-    r = client.post(papi("/tables/export"), json={"definition": defn}, headers=AUTH_HEADERS)
-    assert r.status_code == 200, r.text
+    r = _export_after_sweep(client, defn)
     assert r.headers.get("X-Table-Script-Errors") == "true"
     wb = load_workbook(io.BytesIO(r.content), read_only=True)
     ws = wb.active
@@ -339,11 +361,10 @@ def test_export_script_column_with_errors_gets_marker_and_notice(
 
 
 def test_export_script_column_no_errors_no_notice(
-    client: TestClient, seed_thing_model: None
+    client: TestClient, seed_thing_model: None, sync_sweep: None
 ) -> None:
     defn = _script_table("def value(els): return els[0].name")
-    r = client.post(papi("/tables/export"), json={"definition": defn}, headers=AUTH_HEADERS)
-    assert r.status_code == 200, r.text
+    r = _export_after_sweep(client, defn)
     assert "X-Table-Script-Errors" not in r.headers
     wb = load_workbook(io.BytesIO(r.content), read_only=True)
     ws = wb.active

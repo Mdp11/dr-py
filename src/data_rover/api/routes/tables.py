@@ -5,6 +5,7 @@ list per session. No write_mutex — same benign-race stance as routes/read.py."
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session as DbSession
 
 from data_rover.core.model.model import Model
@@ -364,7 +365,16 @@ def export_table(
     still governed by `TableLimits.max_rows`; `X-Table-Truncated` is set when
     `build_rows` reports an incomplete row set (its own `max_rows` cap, or an
     underlying navigation that hit its `max_chains`/`max_visited` budget),
-    never for cell-level capping (which cannot happen with this override)."""
+    never for cell-level capping (which cannot happen with this override).
+
+    Script columns (spec §4.4): an export is the one route that MUST touch every
+    row, so running it inline would be exactly the O(rows) guest grind Phase B
+    exists to remove. Instead the whole thing runs CACHE-ONLY and the route
+    probes for completeness first; if anything is still uncomputed it kicks/joins
+    the background sweep and answers **202 + `Retry-After: 1`** with a
+    `ScriptStatusOut` body (the frontend retries on that exact shape) rather than
+    downloading a half-computed workbook. A dead sweep (failed/cancelled) or a
+    missing runner is terminal: the file ships with pending cells as `#ERROR`."""
     metamodel, model = require_model(session)
     script_ctx = None
     acquired = False
@@ -392,10 +402,53 @@ def export_table(
             cell_cache=session.script_cell_cache,
             rev=rev,
         )
+        # Every whole-table pass below (build, order, the completeness probe AND
+        # the export render itself) runs CACHE-ONLY: an export must never drive
+        # the guest O(rows) times inline (spec §4.4). The flag is set once here
+        # and deliberately never cleared.
+        if script_ctx is not None:
+            script_ctx.cache_only = True
         keys, truncated = build_rows(metamodel, model, defn, limits, script=script_ctx)
         ordered = order_rows(
             metamodel, model, defn, keys, sort, limits, script=script_ctx
         )
+        if script_ctx is not None:
+            # COMPLETENESS PROBE — do not "optimize" this pass away.
+            #
+            # `build_rows`/`order_rows` only invoke a script column's `value()`
+            # when that column FILTERS (`keep_empty=False`), is the SORT column,
+            # or is an EXPAND column. A plain collapse `keep_empty=True` DISPLAY
+            # column is invisible to both, so judging completeness from those two
+            # passes alone reports `pending_misses == 0` on a stone-cold cache —
+            # and the export 200s with a silent `#ERROR` in every row of that
+            # column. Rendering every row here is what makes the check honest.
+            #
+            # It is cheap: cache-only means dict lookups and no guest work, and
+            # the per-request memo makes the later `iter_export_rows` render
+            # nearly free. The cells themselves are discarded (the real render
+            # streams chunk-by-chunk into the workbook to bound peak memory).
+            evaluate_cells(metamodel, model, defn, ordered, limits, script=script_ctx)
+            if script_ctx.pending_misses > 0 and runner is not None:
+                # Lock stance: this route holds NO session lock (no write_mutex —
+                # same benign-race stance as /tables/evaluate), so kicking is
+                # safe even in the sync sweep mode where `kick_or_join_sweep`
+                # runs the whole sweep on this thread. We never BLOCK on a job.
+                job = kick_or_join_sweep(
+                    session, metamodel, model, defn, runner, settings, rev
+                )
+                status = _status_from_job(job)
+                # Read the decision off the WIRE state, which collapses both
+                # DEAD job states (`failed` and `cancelled`) onto `failed`: no
+                # thread is behind either, so a 202 would make the client retry
+                # forever. Anything else means work really is in flight.
+                if status.state != "failed":
+                    return JSONResponse(
+                        status_code=202,
+                        content=status.model_dump(),
+                        headers={"Retry-After": "1"},
+                    )
+            # Fall through on a dead sweep (or no runner at all) and export with
+            # pending rendered as `#ERROR` — the honest terminal answer.
 
         name = "table"
         if payload.artifact_id is not None:
