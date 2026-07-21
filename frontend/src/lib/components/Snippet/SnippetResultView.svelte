@@ -49,8 +49,7 @@
 	{#if result}
 		{#if stale}
 			<p data-testid="snippet-stale" class="rounded bg-warning/15 px-2 py-1 text-warning">
-				The model changed during/after this run — results may be out of date. Re-run before
-				staging.
+				The model changed during/after this run — results may be out of date. Re-run before staging.
 			</p>
 		{/if}
 

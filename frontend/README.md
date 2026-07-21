@@ -229,7 +229,7 @@ SnippetSourceEditor.svelte`, bound to a `SnippetSource` (`{ ref?, definition?
   this editor only ever holds a bare code string with no per-tab draft/save
   lifecycle of its own.
 - **Test panel.** Both modes render `SnippetTestPanel.svelte` (`snippet-test-
-  toggle`), a collapsed disclosure that expands to the shared
+toggle`), a collapsed disclosure that expands to the shared
   `ElementContextRow` (chips + fuzzy search + "Use current selection"), a Run
   button, and `SnippetResultView` — the same result surface the tab console
   renders, minus ops staging. Inline mode posts `{ code }` to

@@ -51,11 +51,7 @@ function inline(code: string): SnippetSource {
 	return { definition: { schema_version: 1, language: 'python', code, entry_points: [] } };
 }
 
-function render(props: {
-	snippet: SnippetSource;
-	entry: 'value' | 'step';
-	entryPoints: string[];
-}) {
+function render(props: { snippet: SnippetSource; entry: 'value' | 'step'; entryPoints: string[] }) {
 	const c = mount(SnippetTestPanel, {
 		target: document.body,
 		props: { onGoToLine: () => {}, ...props }
@@ -101,7 +97,11 @@ async function bindElement(id: string, label: string): Promise<void> {
 }
 
 it('is collapsed until the toggle is clicked', () => {
-	const c = render({ snippet: inline('def value(els): return 1\n'), entry: 'value', entryPoints: ['value'] });
+	const c = render({
+		snippet: inline('def value(els): return 1\n'),
+		entry: 'value',
+		entryPoints: ['value']
+	});
 	try {
 		expect(testid('snippet-test-run')).toBeNull();
 		expand();
@@ -206,9 +206,7 @@ it('binds exactly one element for a step entry (a second pick replaces)', async 
 });
 
 it('surfaces the 429 and 503 notices', async () => {
-	server.use(
-		http.post('*/snippets/run', () => new HttpResponse(null, { status: 429 }))
-	);
+	server.use(http.post('*/snippets/run', () => new HttpResponse(null, { status: 429 })));
 	const c = render({
 		snippet: inline('def value(els): return 1\n'),
 		entry: 'value',

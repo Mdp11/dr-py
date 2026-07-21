@@ -24,7 +24,14 @@ function result(over: Partial<SnippetRunOut> = {}): SnippetRunOut {
 function render(props: Record<string, unknown>) {
 	const c = mount(SnippetResultView, {
 		target: document.body,
-		props: { phase: 'idle', notice: null, result: null, stale: false, onGoToLine: () => {}, ...props }
+		props: {
+			phase: 'idle',
+			notice: null,
+			result: null,
+			stale: false,
+			onGoToLine: () => {},
+			...props
+		}
 	});
 	flushSync();
 	return c;
