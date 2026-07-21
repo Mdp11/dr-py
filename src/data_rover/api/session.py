@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from data_rover.core.metamodel.schema import Metamodel
 from data_rover.core.model.model import Model
+from data_rover.core.script.cell_cache import ScriptCellCache
 from data_rover.core.validation.state import ValidationState
 from data_rover.core.view.schema import View
 
@@ -104,6 +105,12 @@ class Session:
     table_order_cache: TableOrderCache = field(
         default_factory=TableOrderCache, repr=False
     )
+    #: per-session cache of embedded snippet call results (spec 2026-07-20
+    #: §3). Rev-stamped; cleared by the same two invalidation points as
+    #: table_order_cache. Sound because of the runner determinism guarantee.
+    script_cell_cache: ScriptCellCache = field(
+        default_factory=ScriptCellCache, repr=False
+    )
 
     def set_model(
         self, model: Model | None, *, validation: ValidationState | None = None
@@ -123,6 +130,7 @@ class Session:
         self.op_log_dropped = 0
         self.model_rev += 1
         self.table_order_cache.clear()
+        self.script_cell_cache.clear_and_stamp(self.model_rev)
 
     def touch_model(self) -> None:
         """Call when the model is mutated outside the ops protocol.
@@ -138,13 +146,17 @@ class Session:
         wouldn't evict it, since a cache miss is keyed on rev *mismatch* —
         bumping rev already makes stale entries unreachable, but clearing
         also reclaims their memory immediately rather than leaving them for
-        the LRU to age out).
+        the LRU to age out), and clear+re-stamp ``script_cell_cache`` for the
+        same reason (its rev-stamp check would otherwise reject every entry
+        computed against the pre-mutation model without ever reclaiming
+        their memory).
         """
         self.model_rev += 1
         self.op_log.clear()
         self.op_log_dropped = 0
         self.validation = None
         self.table_order_cache.clear()
+        self.script_cell_cache.clear_and_stamp(self.model_rev)
 
     def set_metamodel(self, metamodel: Metamodel | None) -> None:
         """Replace (or clear) the metamodel; the model conforms to it, so the

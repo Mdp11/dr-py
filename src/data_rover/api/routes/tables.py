@@ -180,7 +180,12 @@ def evaluate_table(
         # cache for every subsequent request instead of merely missing it.
         rev = session.model_rev
         script_ctx, acquired = open_script_context(
-            runner, model, settings, needs_script=table_has_script(defn)
+            runner,
+            model,
+            settings,
+            needs_script=table_has_script(defn),
+            cell_cache=session.script_cell_cache,
+            rev=rev,
         )
         try:
             cached = session.table_order_cache.get(fp, sort_key, rev)
@@ -282,8 +287,14 @@ def export_table(
         # Export never caps cells: lift the server-wide ceiling AND drop each
         # navigation column's per-column `cell_cap` display preference.
         limits = TableLimits(max_cell_elements=10**9, ignore_cell_caps=True)
+        rev = session.model_rev
         script_ctx, acquired = open_script_context(
-            runner, model, settings, needs_script=table_has_script(defn)
+            runner,
+            model,
+            settings,
+            needs_script=table_has_script(defn),
+            cell_cache=session.script_cell_cache,
+            rev=rev,
         )
         keys, truncated = build_rows(metamodel, model, defn, limits, script=script_ctx)
         ordered = order_rows(

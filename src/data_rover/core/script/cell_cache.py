@@ -53,10 +53,7 @@ class ScriptCellCache:
             return hit
 
     def put(self, key: CellKey, result: CallResult, rev: int) -> None:
-        if (
-            result.error is not None
-            and result.error.kind not in _CACHEABLE_ERROR_KINDS
-        ):
+        if result.error is not None and result.error.kind not in _CACHEABLE_ERROR_KINDS:
             return
         with self._lock:
             if rev < self._stamp:

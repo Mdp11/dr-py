@@ -280,7 +280,12 @@ def evaluate_navigation(
             [payload.row_element_id] if payload.row_element_id is not None else None
         )
         script_ctx, acquired = open_script_context(
-            runner, model, settings, needs_script=navigation_has_script(defn)
+            runner,
+            model,
+            settings,
+            needs_script=navigation_has_script(defn),
+            cell_cache=session.script_cell_cache,
+            rev=session.model_rev,
         )
         try:
             result = evaluate(
