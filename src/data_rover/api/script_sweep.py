@@ -15,11 +15,29 @@ retries naturally.
 Reads run lock-free (benign-race stance): the job aborts when
 session.model_rev moves, and cache writes are rev-stamped, so a raced commit
 merely wastes the job's remaining work, never poisons anything.
+
+Sharding (spec §4.3): the row BUILD stays serial — it may itself call the
+guest to resolve expand columns or script-as-source columns, and every later
+stage depends on its output — but the per-cell work after it is fanned out
+across up to `settings.snippet_sweep_workers` threads, each driving its OWN
+`ScriptEvalContext` and therefore its own guest instance. Results are
+identical to serial execution: the WASM determinism guarantee makes a cell's
+value a pure function of (code, model, element ids), the cell cache is
+internally locked, and the pathology counters are job-global (see
+`_SharedGuards`).
+
+DON'T rely on module-global state inside a snippet. Mutating a module global
+between `value()` calls was already outside the determinism guarantee (see
+`core/script/embed.py`), but sharding makes it reachable in a NEW way: two
+cells of the same table can now land on different guest instances, so
+"accumulate into a global across cells" no longer even sees a single
+interpreter. Snippet entry points must be pure functions of their arguments.
 """
 
 from __future__ import annotations
 
 import logging
+import queue
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -238,6 +256,119 @@ def _run(
         _fail(job, "internal sweep error")
 
 
+#: One unit of shardable sweep work: (snippet code, root element ids). The
+#: entry point is always "value" — expand columns were resolved by the serial
+#: row build, which happens before any fan-out.
+_Item = tuple[str, tuple[str, ...]]
+
+
+@dataclass
+class _SharedGuards:
+    """Job-global pathology counters plus the lock that publishes them.
+
+    BOTH counters must be counted ACROSS workers, not per worker: 4 workers
+    each seeing 2 consecutive timeouts is 8 timeouts in a row for the job, not
+    "under the limit 4 times". Per-worker counters would let a pathological
+    table burn ``workers x threshold`` guest calls before giving up, and — for
+    ``unavailable`` — cache nothing at all while doing it.
+
+    ``lock`` also guards every write to ``job.state``/``job.message``/
+    ``job.done``, which several workers touch concurrently.
+    """
+
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    consecutive_timeouts: int = 0
+    consecutive_unavailable: int = 0
+
+
+def _ceiling_message(settings: Settings) -> str:
+    return f"sweep ceiling ({settings.snippet_sweep_ceiling_s:g}s) exceeded"
+
+
+def _drain(
+    session: Session,
+    settings: Settings,
+    job: SweepJob,
+    budget: ScriptBudget,
+    wctx: ScriptEvalContext,
+    q: queue.SimpleQueue[_Item],
+    guards: _SharedGuards,
+) -> None:
+    """Pull items off the shared queue until it is empty or the job goes
+    terminal. Run by every worker thread (and, at ``workers == 1``, by the
+    calling thread with the serial context).
+
+    Every exit that ends the JOB (not just this worker) sets a TERMINAL state
+    under ``guards.lock`` — a job left ``running`` behind dead threads strands
+    a polling client forever, because failed-job memory hands it back as-is.
+    The first terminal writer wins; later workers observe ``state != running``
+    and simply stop, so an abort reason is never overwritten.
+    """
+    while True:
+        try:
+            code, roots = q.get_nowait()
+        except queue.Empty:
+            return
+        with guards.lock:
+            if job.state != "running":
+                return  # another worker already ended the job
+        if _aborted(session, job):
+            with guards.lock:
+                if job.state == "running":
+                    _cancelled(job)
+            return
+        if budget.exhausted:
+            with guards.lock:
+                if job.state == "running":
+                    _fail(job, _ceiling_message(settings))
+            return
+        res = wctx.call(code, "value", list(roots))
+        kind = res.error.kind if res.error is not None else None
+        with guards.lock:
+            if kind == "timeout":
+                # Timeouts are environmental and never cached, so a snippet
+                # that keeps timing out would otherwise be re-run for every
+                # remaining cell of a huge table.
+                guards.consecutive_timeouts += 1
+                guards.consecutive_unavailable = 0
+                if guards.consecutive_timeouts >= settings.snippet_sweep_timeout_abort:
+                    if job.state == "running":
+                        _fail(
+                            job,
+                            f"aborted after {guards.consecutive_timeouts} "
+                            "consecutive snippet timeouts",
+                        )
+                    return
+            elif kind == "unavailable":
+                # WHY this guard exists: `unavailable` results (no runner, or
+                # an exhausted wasm warm pool) are deliberately never cached
+                # either. Without it a sweep against a busy/absent runner
+                # grinds every cell, caches NOTHING, and still ends
+                # state="done" — a "success" indistinguishable from a real
+                # one. Since kick() returns a same-rev done job as-is, nothing
+                # ever re-kicks and the table renders pending forever. Shares
+                # the timeout guard's threshold and its
+                # reset-on-any-other-outcome discipline.
+                guards.consecutive_unavailable += 1
+                guards.consecutive_timeouts = 0
+                if (
+                    guards.consecutive_unavailable
+                    >= settings.snippet_sweep_timeout_abort
+                ):
+                    if job.state == "running":
+                        _fail(
+                            job,
+                            f"aborted after {guards.consecutive_unavailable} "
+                            "consecutive results with the script runner "
+                            "unavailable",
+                        )
+                    return
+            else:
+                guards.consecutive_timeouts = 0
+                guards.consecutive_unavailable = 0
+            job.done += 1
+
+
 def _run_inner(
     session: Session,
     metamodel: Metamodel,
@@ -283,20 +414,26 @@ def _run_inner(
         )
         base_slots = (len(built.keys[0]) - expand_count) if built.keys else 1
         job.total = len(built.keys) * len(script_cols)
-        consecutive_timeouts = 0
-        consecutive_unavailable = 0
+
+        # Enumerate the cell work list through the SERIAL context: resolving a
+        # script-as-source column may itself call the guest, and the resolution
+        # order is part of the definition's dependency order. Dedupe: rows
+        # sharing a binding produce identical (code, roots) items, and
+        # computing them once matches ScriptEvalContext's own memo semantics
+        # (which is what the serial implementation did too — a repeat binding
+        # hit the memo instead of the guest).
+        items: list[_Item] = []
+        seen: set[_Item] = set()
+        dup_or_empty = 0
         for key in built.keys:
+            if _aborted(session, job):
+                _cancelled(job)
+                return
+            if budget.exhausted:
+                _fail(job, _ceiling_message(settings))
+                return
             for col in script_cols:
-                if _aborted(session, job):
-                    _cancelled(job)
-                    return
-                if budget.exhausted:
-                    _fail(
-                        job,
-                        f"sweep ceiling ({settings.snippet_sweep_ceiling_s:g}s)"
-                        " exceeded",
-                    )
-                    return
+                assert col.snippet.definition is not None
                 roots = resolve_source_elements(
                     metamodel,
                     model,
@@ -307,51 +444,69 @@ def _run_inner(
                     TableLimits(),
                     script=ctx,
                 )
-                if roots:
-                    assert col.snippet.definition is not None
-                    res = ctx.call(col.snippet.definition.code, "value", roots)
-                    kind = res.error.kind if res.error is not None else None
-                    if kind == "timeout":
-                        # Timeouts are environmental and never cached, so a
-                        # snippet that keeps timing out would otherwise be
-                        # re-run for every remaining cell of a huge table.
-                        consecutive_timeouts += 1
-                        consecutive_unavailable = 0
-                        if consecutive_timeouts >= settings.snippet_sweep_timeout_abort:
-                            _fail(
-                                job,
-                                f"aborted after {consecutive_timeouts} "
-                                "consecutive snippet timeouts",
-                            )
-                            return
-                    elif kind == "unavailable":
-                        # WHY this guard exists: `unavailable` results (no
-                        # runner, or an exhausted wasm warm pool) are
-                        # deliberately never cached either. Without it a sweep
-                        # against a busy/absent runner grinds every cell,
-                        # caches NOTHING, and still ends state="done" — a
-                        # "success" indistinguishable from a real one. Since
-                        # kick() returns a same-rev done job as-is, nothing
-                        # ever re-kicks and the table renders pending forever.
-                        # Shares the timeout guard's threshold and its
-                        # reset-on-any-other-outcome discipline.
-                        consecutive_unavailable += 1
-                        consecutive_timeouts = 0
-                        if (
-                            consecutive_unavailable
-                            >= settings.snippet_sweep_timeout_abort
-                        ):
-                            _fail(
-                                job,
-                                f"aborted after {consecutive_unavailable} "
-                                "consecutive results with the script runner "
-                                "unavailable",
-                            )
-                            return
-                    else:
-                        consecutive_timeouts = 0
-                        consecutive_unavailable = 0
-                job.done += 1
-        job.state = "done"
+                item = (col.snippet.definition.code, tuple(roots))
+                if not roots or item in seen:
+                    # Empty-source cells have nothing to compute and duplicate
+                    # bindings are computed by the item they duplicate, so both
+                    # are already "done" as far as progress is concerned.
+                    dup_or_empty += 1
+                    continue
+                seen.add(item)
+                items.append(item)
+        job.done += dup_or_empty  # still single-threaded here
+
+        guards = _SharedGuards()
+        q: queue.SimpleQueue[_Item] = queue.SimpleQueue()
+        for it in items:
+            q.put(it)
+        workers = max(1, settings.snippet_sweep_workers)
+        if workers == 1 or len(items) <= 1:
+            # No fan-out worth its thread: reuse the serial context (and its
+            # already-open guest session).
+            _drain(session, settings, job, budget, ctx, q, guards)
+        else:
+
+            def _worker() -> None:
+                try:
+                    wctx = ScriptEvalContext(
+                        runner,
+                        model,
+                        limits,
+                        budget,
+                        cell_cache=session.script_cell_cache,
+                        rev=job.rev,
+                        # Same cancellation probe as the serial context: without
+                        # it an evicted session's ~80 MB model stays reachable
+                        # from a worker until the sweep ceiling.
+                        should_abort=job.cancel.is_set,
+                    )
+                    try:
+                        _drain(session, settings, job, budget, wctx, q, guards)
+                    finally:
+                        wctx.close()
+                except Exception:
+                    # A worker thread's exception would otherwise be swallowed
+                    # by threading, and the join below would then declare the
+                    # job "done". Mirror `_run`'s outer guard instead.
+                    logger.exception(
+                        "script sweep worker failed for table %s",
+                        job.fingerprint[:12],
+                    )
+                    with guards.lock:
+                        if job.state == "running":
+                            _fail(job, "internal sweep error")
+
+            threads = [
+                threading.Thread(target=_worker, name=f"script-sweep-w{i}", daemon=True)
+                for i in range(min(workers, len(items)))
+            ]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+        # Only a job no worker ended is a success; an abort already wrote its
+        # own terminal state (failed/cancelled) and must not be overwritten.
+        if job.state == "running":
+            job.state = "done"
     finally:
         ctx.close()

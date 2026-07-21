@@ -330,10 +330,16 @@ def sync_sweep(monkeypatch: pytest.MonkeyPatch) -> Settings:
     `test_tables_script_status.py`): with only the `setenv`, a rename of the
     env var would degrade this fixture SILENTLY to async sweeping, and the
     tests below would start racing a background daemon thread — flaking as an
-    occasional 202-instead-of-200 rather than failing honestly."""
+    occasional 202-instead-of-200 rather than failing honestly.
+
+    `snippet_sweep_workers=1` is pinned alongside it (Task 11) so the inline
+    sweep also runs SERIALLY: these tests assert exact guest-call counts, which
+    sharding makes scheduling-dependent."""
     monkeypatch.setenv("DATA_ROVER_SNIPPET_SWEEP_SYNC", "true")
+    monkeypatch.setenv("DATA_ROVER_SNIPPET_SWEEP_WORKERS", "1")
     settings = get_settings()
     assert settings.snippet_sweep_sync is True
+    assert settings.snippet_sweep_workers == 1
     return settings
 
 

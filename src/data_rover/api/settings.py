@@ -105,7 +105,15 @@ class Settings(BaseSettings):
     #: Warm-instance pool size for the wasm runner (`WasmScriptRunner.
     #: pool_size`). More instances absorb concurrent runs without a cold
     #: boot, at the cost of one idle CPython-WASI interpreter per slot.
-    snippet_pool_size: int = 2
+    #:
+    #: SIZED FOR THE SHARDED SWEEP (spec 2026-07-20 §4.3): a background sweep
+    #: fans its cell work out across ``snippet_sweep_workers`` (4) guest
+    #: sessions, and it draws from its OWN process-wide semaphore — it does
+    #: NOT take a slot from the interactive ``snippet_concurrency`` guard. So
+    #: a running sweep plus concurrent console/table evaluation would exhaust
+    #: a pool of 2 and degrade those interactive calls to ``unavailable``.
+    #: 4 sweep workers + 2 interactive headroom = 6.
+    snippet_pool_size: int = 6
     #: Global cap on concurrently executing snippet runs. Settings-only here;
     #: enforcement lands in Task 11.
     snippet_concurrency: int = 4

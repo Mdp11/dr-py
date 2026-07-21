@@ -9,6 +9,11 @@ Sync mode is pinned exactly the way `tests/api/conftest.py` pins
 `validation_sweep_sync` — an env var read through `get_settings()` — via the
 local `settings_sync_sweep` fixture. In sync mode `kick_or_join_sweep` runs the
 whole sweep inline, so every assertion below observes a finished job.
+
+That fixture ALSO pins `snippet_sweep_workers=1`: index-scripted outcome
+sequences and exact call counts are only meaningful under serial execution.
+The `test_parallel_*` block at the bottom opts back into the fan-out (and uses
+`BarrierRunner` to synchronize on it deterministically).
 """
 
 from __future__ import annotations
@@ -41,6 +46,7 @@ from data_rover.core.table.schema import (
 )
 
 from ._script_fakes import (
+    BarrierRunner,
     BlockingRunner,
     CountingRunner,
     ScriptedRunner,
@@ -96,10 +102,21 @@ def _session_with(model: Model) -> Session:
 @pytest.fixture
 def settings_sync_sweep(monkeypatch: pytest.MonkeyPatch) -> Settings:
     """Pin `snippet_sweep_sync=True` the same way conftest pins
-    `validation_sweep_sync`: an env var, then a fresh `get_settings()`."""
+    `validation_sweep_sync`: an env var, then a fresh `get_settings()`.
+
+    ALSO pins `snippet_sweep_workers=1` (Task 11). Sharding the cell work
+    across workers makes `ScriptedRunner`'s call INDEX — and therefore any
+    scripted timeout/success SEQUENCE, and any exact "aborted at exactly the
+    threshold" call count — scheduling-dependent. The guard-semantics tests
+    below assert those exact sequences, so they need the serial executor; the
+    fan-out itself is covered by the `test_parallel_*` tests, which opt back in
+    with `model_copy(update={"snippet_sweep_workers": 4})`. Both assertions are
+    load-bearing: a renamed env var must fail here, not degrade silently."""
     monkeypatch.setenv("DATA_ROVER_SNIPPET_SWEEP_SYNC", "true")
+    monkeypatch.setenv("DATA_ROVER_SNIPPET_SWEEP_WORKERS", "1")
     settings = get_settings()
     assert settings.snippet_sweep_sync is True
+    assert settings.snippet_sweep_workers == 1
     return settings
 
 
@@ -422,3 +439,152 @@ def test_evict_refused_leaves_the_sweep_running() -> None:
     assert job.state == "running"
 
     runner.proceed.set()
+
+
+# --- Task 11: sharding the cell work across parallel guest sessions ---------
+#
+# These tests opt BACK IN to the fan-out (`settings_sync_sweep` pins
+# `snippet_sweep_workers=1` for the deterministic-sequence tests above). Sync
+# mode still drives the fan-out inline: the worker threads are spawned AND
+# joined inside `_run_inner`, so `kick_or_join_sweep` still returns a finished
+# job and nothing here has to sleep.
+
+PARALLEL_WORKERS = 4
+
+
+def _parallel(settings: Settings, workers: int = PARALLEL_WORKERS) -> Settings:
+    return settings.model_copy(update={"snippet_sweep_workers": workers})
+
+
+def _cache_snapshot(session: Session, model: Model) -> dict[str, object]:
+    """Read every swept cell back through a CACHE-ONLY context: the only
+    supported way to observe what a sweep actually stored (the cache's dict is
+    private). A pending miss here means the sweep left a hole."""
+    probe = ScriptEvalContext(
+        CountingRunner(),
+        model,
+        RunLimits(),
+        ScriptBudget.start(60),
+        cell_cache=session.script_cell_cache,
+        rev=0,
+        cache_only=True,
+    )
+    snapshot: dict[str, object] = {
+        eid: probe.call(VALUE_CODE, "value", [eid]).value for eid in model.elements
+    }
+    assert probe.pending_misses == 0, "sweep left uncomputed cells behind"
+    return snapshot
+
+
+def test_parallel_sweep_matches_serial_results(settings_sync_sweep: Settings) -> None:
+    """The determinism guarantee is what makes the cell cache sound, so
+    sharding must not perturb a single byte: same model + same definition ⇒
+    identical cache contents and identical done/total, at 1 worker and at 4."""
+    model = _model(8)  # ONE model, so element ids are identical across runs
+    defn = _defn()
+    snapshots: dict[int, dict[str, object]] = {}
+
+    for workers in (1, PARALLEL_WORKERS):
+        session = _session_with(model)
+        # Value derived from the element ids, NOT the call index: identical
+        # under any scheduling, which is exactly the property under test.
+        runner = ScriptedRunner(lambda i, ids: ok("|".join(ids)))
+        job = kick_or_join_sweep(
+            session,
+            model.metamodel,
+            model,
+            defn,
+            runner,
+            _parallel(settings_sync_sweep, workers),
+            0,
+        )
+        assert job.state == "done", job.message
+        assert job.done == job.total == 8
+        assert runner.calls[0] == 8  # one guest call per distinct cell either way
+        snapshots[workers] = _cache_snapshot(session, model)
+
+    assert snapshots[1] == snapshots[PARALLEL_WORKERS]
+    assert snapshots[PARALLEL_WORKERS] == {
+        eid: {"kind": "scalar", "value": eid} for eid in model.elements
+    }
+
+
+def test_parallel_sweep_uses_multiple_sessions(settings_sync_sweep: Settings) -> None:
+    """The fan-out really opens one guest session PER WORKER.
+
+    Synchronization is a `threading.Barrier`, not a count-after-the-fact: with
+    a plain counter a fast worker can drain the queue before a slow one ever
+    starts, so `opens` would be scheduling-dependent. The barrier forces all
+    four workers to be in-flight simultaneously, making `opens == 4` exact. A
+    missing participant breaks the barrier after a bounded 10s wait, which
+    surfaces as `state == "failed"` here rather than a hung suite."""
+    model = _model(8)  # >= workers, so every worker is guaranteed an item
+    session = _session_with(model)
+    defn = _defn()
+    runner = BarrierRunner(parties=PARALLEL_WORKERS)
+
+    job = kick_or_join_sweep(
+        session,
+        model.metamodel,
+        model,
+        defn,
+        runner,
+        _parallel(settings_sync_sweep),
+        0,
+    )
+    assert job.state == "done", job.message
+    assert job.done == job.total == 8
+    assert not runner.barrier.broken
+    # Exactly one per worker: the SERIAL prefix context never touches the guest
+    # for this definition (keep_empty defaults True), so it opens nothing.
+    assert runner.opens == PARALLEL_WORKERS
+
+
+def test_parallel_consecutive_timeout_abort_is_global(
+    settings_sync_sweep: Settings,
+) -> None:
+    """The consecutive-timeout counter is JOB-GLOBAL, not per worker.
+
+    With per-worker counters, 4 workers would each grind their own run of
+    `snippet_sweep_timeout_abort` calls before giving up — 4x the threshold.
+    The bound below (`threshold + workers`) is strictly under that, so the test
+    genuinely discriminates a shared counter from four private ones."""
+    model = _model(40)  # far more rows than any bound below
+    session = _session_with(model)
+    defn = _defn()
+    runner = ScriptedRunner(lambda i, ids: timeout())  # every call times out
+    settings = _parallel(settings_sync_sweep)
+    abort_at = settings.snippet_sweep_timeout_abort
+
+    job = kick_or_join_sweep(
+        session, model.metamodel, model, defn, runner, settings, 0
+    )
+    assert job.state == "failed"
+    assert "consecutive snippet timeouts" in (job.message or "")
+    # >= threshold (it takes that many to trip) and <= threshold + one in-flight
+    # call per worker; NOT O(rows) and not workers x threshold.
+    assert abort_at <= runner.calls[0] <= abort_at + PARALLEL_WORKERS
+    assert session.script_cell_cache.size == 0  # timeouts are never cached
+
+
+def test_parallel_consecutive_unavailable_abort_is_global(
+    settings_sync_sweep: Settings,
+) -> None:
+    """Same discipline for the SECOND pathology guard: `unavailable` results
+    are not cacheable either, so a per-worker counter would let a sweep against
+    an exhausted guest pool grind `workers x threshold` cells and still cache
+    nothing."""
+    model = _model(40)
+    session = _session_with(model)
+    defn = _defn()
+    runner = UnavailableRunner()  # every open_session raises
+    settings = _parallel(settings_sync_sweep)
+    abort_at = settings.snippet_sweep_timeout_abort
+
+    job = kick_or_join_sweep(
+        session, model.metamodel, model, defn, runner, settings, 0
+    )
+    assert job.state == "failed"
+    assert "unavailable" in (job.message or "")
+    assert abort_at <= runner.opens <= abort_at + PARALLEL_WORKERS
+    assert session.script_cell_cache.size == 0

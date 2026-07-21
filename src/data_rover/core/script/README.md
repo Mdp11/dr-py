@@ -122,8 +122,11 @@ snippet_*` field (`api/settings.py`), itself a `DATA_ROVER_SNIPPET_*` env var
 Settings that shape the *runner*, not a per-run `RunLimits` value:
 `snippet_runner` (`"wasm"` default, or `"trusted"` — gated by the RCE
 tripwire, see below), `snippet_guest_wasm_path`/`snippet_guest_lib_path`
-(vendor binary/stdlib paths), `snippet_pool_size` (default `2` warm guest
-instances), `snippet_concurrency`/`snippet_per_user_concurrency` (default
+(vendor binary/stdlib paths), `snippet_pool_size` (default `6` warm guest
+instances — sized as `snippet_sweep_workers` (4) for a sharded background
+sweep plus 2 headroom for interactive console/table evaluation, since sweeps
+draw from their own semaphore and do NOT take an interactive
+`_ConcurrencyGuard` slot), `snippet_concurrency`/`snippet_per_user_concurrency` (default
 `4`/`1` — enforced by `routes/snippets.py`'s `_ConcurrencyGuard`, fail-fast
 429, no queuing).
 

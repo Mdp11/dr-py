@@ -7,7 +7,15 @@ CALL INDEX (the call's element ids are passed through too), so a sweep's
 timeout sequence is deterministic regardless of scope iteration order.
 `BlockingRunner` gates every call on a caller-controlled event, so an async
 sweep can be paused mid-run while a test cancels/evicts it, then released for a
-clean daemon-thread exit.
+clean daemon-thread exit. `BarrierRunner` parks every session's FIRST call on a
+`threading.Barrier`, which is how a test proves a sharded sweep really opened N
+distinct guest sessions instead of asserting a scheduling-dependent count.
+
+THREAD SAFETY (Task 11): a sharded sweep drives these doubles from several
+worker threads at once, so every counter below is mutated under a private lock.
+The public attributes keep their pre-existing shapes (`CountingRunner.calls` a
+plain `int`, `ScriptedRunner.calls`/`BlockingRunner.calls` a mutable `[count]`)
+so the single-threaded tests that read them are untouched.
 
 These are purpose-built TEST DOUBLES and belong in `tests/` — they run snippet
 code nowhere at all (they never exec anything), and must never be confused with
@@ -61,7 +69,8 @@ class _CountingSession:
     def call(
         self, entry: Literal["value", "step"], element_ids: list[str]
     ) -> CallResult:
-        self._runner.calls += 1
+        with self._runner.lock:
+            self._runner.calls += 1
         return CallResult(
             value={"kind": "scalar", "value": len(element_ids)},
             error=None,
@@ -75,10 +84,12 @@ class _CountingSession:
 class CountingRunner:
     """A minimal ScriptRunner stand-in whose `open_session().call()` counts real
     invocations, so a test can assert the cell cache — not the guest — served a
-    repeat call. `.calls` is a plain int."""
+    repeat call. `.calls` is a plain int, incremented under `.lock` so several
+    sweep workers can drive one runner."""
 
     def __init__(self) -> None:
         self.calls = 0
+        self.lock = threading.Lock()
 
     def open_session(
         self, model: Model, code: str, limits: RunLimits, *, budget: ScriptBudget
@@ -106,8 +117,11 @@ class _ScriptedSession:
     def call(
         self, entry: Literal["value", "step"], element_ids: list[str]
     ) -> CallResult:
-        idx = self._runner.calls[0]
-        self._runner.calls[0] += 1
+        # Only the index hand-out is serialized; `outcome_fn` runs outside the
+        # lock so a scripted callback that blocks cannot serialize the workers.
+        with self._runner.lock:
+            idx = self._runner.calls[0]
+            self._runner.calls[0] += 1
         return self._runner.outcome_fn(idx, element_ids)
 
     def close(self) -> None:
@@ -119,11 +133,18 @@ class ScriptedRunner:
     `outcome_fn(call_index, element_ids)`. Call-INDEX scripting makes a sweep's
     timeout sequence deterministic no matter what order rows are evaluated in;
     `element_ids` is passed through for tests that want to key per element.
-    `.calls` is a mutable `[count]` so a scripted lambda can read it."""
+    `.calls` is a mutable `[count]` so a scripted lambda can read it.
+
+    NOTE for sharded sweeps: the call INDEX is handed out in arrival order, so
+    with more than one worker the index a given cell sees is scheduling-
+    dependent. Index-scripted sequences are only deterministic when the sweep
+    runs serially (`snippet_sweep_workers=1`, which the `settings_sync_sweep`
+    fixtures pin)."""
 
     def __init__(self, outcome_fn: Callable[[int, list[str]], CallResult]) -> None:
         self.outcome_fn = outcome_fn
         self.calls = [0]
+        self.lock = threading.Lock()
 
     def open_session(
         self, model: Model, code: str, limits: RunLimits, *, budget: ScriptBudget
@@ -151,7 +172,8 @@ class _BlockingSession:
     def call(
         self, entry: Literal["value", "step"], element_ids: list[str]
     ) -> CallResult:
-        self._runner.calls[0] += 1
+        with self._runner.lock:
+            self._runner.calls[0] += 1
         self._runner.entered.set()
         # Bounded wait so a forgotten release can never hang the suite forever.
         self._runner.proceed.wait(timeout=10.0)
@@ -169,6 +191,7 @@ class BlockingRunner:
 
     def __init__(self) -> None:
         self.calls = [0]
+        self.lock = threading.Lock()
         self.entered = threading.Event()
         self.proceed = threading.Event()
 
@@ -198,12 +221,70 @@ class UnavailableRunner:
 
     def __init__(self) -> None:
         self.opens = 0
+        self.lock = threading.Lock()
 
     def open_session(
         self, model: Model, code: str, limits: RunLimits, *, budget: ScriptBudget
     ) -> SnippetSession:
-        self.opens += 1
+        with self.lock:
+            self.opens += 1
         raise RuntimeError("wasm pool exhausted")
+
+    def run(
+        self,
+        model: Model,
+        req: RunRequest,
+        limits: RunLimits,
+        *,
+        record_ops: bool,
+        rev: int,
+    ) -> RunResult:  # pragma: no cover - unused by these tests
+        raise NotImplementedError
+
+
+class _BarrierSession:
+    boot_error: ScriptError | None = None
+
+    def __init__(self, runner: BarrierRunner) -> None:
+        self._runner = runner
+        self._waited = False
+
+    def call(
+        self, entry: Literal["value", "step"], element_ids: list[str]
+    ) -> CallResult:
+        if not self._waited:
+            # Only the FIRST call of each session waits: the barrier has one
+            # cycle, and a second wait() would park on the next cycle forever.
+            self._waited = True
+            self._runner.barrier.wait(timeout=10.0)
+        return ok(len(element_ids))
+
+    def close(self) -> None:
+        pass
+
+
+class BarrierRunner:
+    """ScriptRunner stand-in that parks every session's FIRST call on a shared
+    `threading.Barrier` of `parties` participants.
+
+    This is how a test asserts a sharded sweep really opened N distinct guest
+    sessions: counting `open_session` calls after the fact is scheduling-
+    dependent (a fast worker can drain the queue before a slow one starts), but
+    a barrier FORCES `parties` concurrent in-flight calls, so `opens` is exact.
+    A missing participant raises `BrokenBarrierError` after the bounded timeout
+    rather than hanging the suite, which surfaces as an honest test failure."""
+
+    def __init__(self, parties: int) -> None:
+        self.barrier = threading.Barrier(parties)
+        self.opens = 0
+        self.lock = threading.Lock()
+
+    def open_session(
+        self, model: Model, code: str, limits: RunLimits, *, budget: ScriptBudget
+    ) -> SnippetSession:
+        with self.lock:
+            self.opens += 1
+        return _BarrierSession(self)
 
     def run(
         self,

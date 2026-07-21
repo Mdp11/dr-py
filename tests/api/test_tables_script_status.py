@@ -101,10 +101,18 @@ def settings_sync_sweep(monkeypatch: pytest.MonkeyPatch) -> Settings:
     """Pin `snippet_sweep_sync=True` (env var + fresh `get_settings()`), so
     `kick_or_join_sweep` runs the whole sweep inline inside the request that
     kicks it. `get_settings` is an uncached `Settings()` factory, so the route's
-    own `Depends(get_settings)` picks the env var up too."""
+    own `Depends(get_settings)` picks the env var up too.
+
+    ALSO pins `snippet_sweep_workers=1` (Task 11): the tests below script
+    outcomes by `ScriptedRunner` CALL INDEX and assert exact call counts, both
+    of which become scheduling-dependent once the sweep shards its cell work
+    across worker threads. Fan-out behaviour is covered by the
+    `test_parallel_*` tests in `test_script_sweep.py`."""
     monkeypatch.setenv("DATA_ROVER_SNIPPET_SWEEP_SYNC", "true")
+    monkeypatch.setenv("DATA_ROVER_SNIPPET_SWEEP_WORKERS", "1")
     settings = get_settings()
     assert settings.snippet_sweep_sync is True
+    assert settings.snippet_sweep_workers == 1
     return settings
 
 
@@ -336,10 +344,11 @@ def test_sorted_script_table_while_computing(
     with `computing` + BUILD-order rows, while the window itself renders live
     values.
 
-    The fake blocks calls made from the sweep's own daemon thread (named
-    `script-sweep`) and answers every other call immediately — that is the
-    deterministic sync point, no sleeping and no self-deadlock when the route
-    evaluates the visible window with the very same runner object.
+    The fake blocks calls made from the sweep's own threads (the daemon named
+    `script-sweep` and its `script-sweep-wN` shard workers — hence the prefix
+    match) and answers every other call immediately — that is the deterministic
+    sync point, no sleeping and no self-deadlock when the route evaluates the
+    visible window with the very same runner object.
 
     `limit=2` removes the scheduling race the first cut of this test had. The
     sweep and the window compute the SAME `(code, "value", ids)` keys at the
@@ -350,11 +359,15 @@ def test_sorted_script_table_while_computing(
     """
     entered = threading.Event()
     proceed = threading.Event()
-    sweep_thread: list[threading.Thread] = []
+    lock = threading.Lock()
+    sweep_threads: list[threading.Thread] = []
 
     def _outcome(i: int, ids: list[str]) -> CallResult:
-        if threading.current_thread().name == "script-sweep":
-            sweep_thread.append(threading.current_thread())
+        # Prefix match: since Task 11 the cell work runs on `script-sweep-wN`
+        # shard workers, not on the `script-sweep` daemon itself.
+        if threading.current_thread().name.startswith("script-sweep"):
+            with lock:
+                sweep_threads.append(threading.current_thread())
             entered.set()
             proceed.wait(timeout=10.0)
         return _descending_value(i, ids)
@@ -372,13 +385,16 @@ def test_sorted_script_table_while_computing(
         # The sweep thread really is running behind that `computing`.
         assert entered.wait(timeout=5.0)
     finally:
-        proceed.set()  # release the parked call so the daemon thread exits
-        # Deterministic teardown: the released daemon thread keeps writing into
-        # this session's cell cache, so JOIN it rather than letting the next
-        # test race it.
-        if sweep_thread:
-            sweep_thread[0].join(timeout=10.0)
-            assert not sweep_thread[0].is_alive()
+        proceed.set()  # release the parked calls so the daemon threads exit
+        # Deterministic teardown: the released threads keep writing into this
+        # session's cell cache, so JOIN them all — the shard workers AND the
+        # `script-sweep` daemon that spawned them — rather than letting the
+        # next test race them.
+        for t in threading.enumerate():
+            if t.name.startswith("script-sweep"):
+                t.join(timeout=10.0)
+                assert not t.is_alive()
+        assert sweep_threads  # the sweep really did reach the blocking fake
 
 
 def test_sorted_script_table_after_sweep(
