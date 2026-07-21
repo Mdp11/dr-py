@@ -120,7 +120,10 @@ class TrustedRunner:
             max_op_bytes=limits.max_op_bytes,
             page_limit=limits.page_limit,
         )
-        namespace: dict = {"_transport": dispatcher.dispatch}
+        namespace: dict = {
+            "_transport": dispatcher.dispatch,
+            "_read_memo_max": limits.read_memo_max,
+        }
         stdout = _CappedStdout(limits.stdout_bytes)
         error: ScriptError | None = None
         value = None
@@ -203,7 +206,10 @@ class _TrustedSession:
             page_limit=limits.page_limit,
         )
         self._limits = limits
-        self._namespace: dict = {"_transport": dispatcher.dispatch}
+        self._namespace: dict = {
+            "_transport": dispatcher.dispatch,
+            "_read_memo_max": limits.read_memo_max,
+        }
         self.boot_error: ScriptError | None = None
         try:
             compiled = compile(code, _SNIPPET_FILENAME, "exec")

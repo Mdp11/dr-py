@@ -321,7 +321,7 @@ def _run_once(start):
     result_repr_cap = start["result_repr_bytes"]
 
     stdout = _CappedStdout(stdout_cap)
-    namespace = {"_transport": _transport}
+    namespace = {"_transport": _transport, "_read_memo_max": start.get("read_memo_max", 4096)}
     error = None
     value = None
     have_value = False
@@ -385,7 +385,7 @@ def _run_embedded(start):
     code = start["code"]
     facade_source = start["facade_source"]
     stdout = _CappedStdout(start["stdout_bytes"])
-    namespace = {"_transport": _transport}
+    namespace = {"_transport": _transport, "_read_memo_max": start.get("read_memo_max", 4096)}
     err = None
     try:
         compiled = compile(code, _SNIPPET_FILENAME, "exec")
@@ -923,6 +923,7 @@ class WasmScriptRunner:
                 "facade_source": FACADE_SOURCE,
                 "stdout_bytes": limits.stdout_bytes,
                 "result_repr_bytes": limits.result_repr_bytes,
+                "read_memo_max": limits.read_memo_max,
             }
             inst.host_in.write(json.dumps(start_msg) + "\n")
             inst.host_in.flush()
@@ -1183,6 +1184,7 @@ class _WasmSnippetSession:
             "facade_source": FACADE_SOURCE,
             "stdout_bytes": limits.stdout_bytes,
             "result_repr_bytes": limits.result_repr_bytes,
+            "read_memo_max": limits.read_memo_max,
         }
         inst.host_in.write(json.dumps(start_msg) + "\n")
         inst.host_in.flush()
@@ -1309,6 +1311,7 @@ def run_limits_from_settings(settings: Settings) -> RunLimits:
         max_ops=settings.snippet_max_ops,
         max_op_bytes=settings.snippet_max_op_bytes,
         page_limit=settings.snippet_page_limit,
+        read_memo_max=settings.snippet_read_memo_max,
     )
 
 

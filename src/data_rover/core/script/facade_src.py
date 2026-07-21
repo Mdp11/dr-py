@@ -33,6 +33,16 @@ response dict, synchronously, never raising — errors come back as
 newline-JSON request to a pipe/stdio channel and blocks for the matching
 response line; in `TrustedRunner` it is `BridgeDispatcher.dispatch` called
 directly, in-process. The facade code below is oblivious to which.
+
+**The `_read_memo_max` contract.** The embedding runner MUST also bind
+`_read_memo_max` (an `int`, the memo capacity — see `RunLimits.read_memo_max`)
+in the same namespace before `FACADE_SOURCE` executes. It caps the facade's
+session-lifetime read memo (`_memo`, defined below): memoized reads cost zero
+round trips on repeat, which is sound only because a session never outlives
+one model rev's worth of work. Missing the binding (e.g. a caller that
+forgets it) falls back to a hardcoded default via `except NameError`, so the
+facade never hard-fails on it — but every real embedding path threads it
+through explicitly (`RunLimits.read_memo_max` -> `start_msg`/`namespace`).
 """
 
 from __future__ import annotations
@@ -91,6 +101,28 @@ def _write(op):
     return _raise_for_error(_transport(req))
 
 
+try:
+    _MEMO_CAP = int(_read_memo_max)
+except NameError:
+    _MEMO_CAP = 4096
+
+# Session-lifetime read memo: (op_name, id_or_None) -> response fragment.
+# Sound because a session never outlives one model rev's worth of work (the
+# same invariant the host's ScriptCellCache rests on). Insertion-ordered
+# dict gives FIFO eviction at _MEMO_CAP entries. Element entries hold the
+# PROJECTION dict (not the whole response) so hop/root priming can insert
+# projections directly under ("element", id).
+_memo = {}
+
+
+def _memo_put(key, value):
+    if _MEMO_CAP <= 0:
+        return
+    if key not in _memo and len(_memo) >= _MEMO_CAP:
+        _memo.pop(next(iter(_memo)))
+    _memo[key] = value
+
+
 class Element:
     """A read snapshot of a model element, plus dry-run write helpers."""
 
@@ -140,15 +172,30 @@ class Element:
             for rel in el.out():
                 print(rel["type"], rel["target_id"])
         """
-        return _read("outgoing", element_id=self.id)["relationships"]
+        key = ("outgoing", self.id)
+        hit = _memo.get(key)
+        if hit is None:
+            hit = _read("outgoing", element_id=self.id)["relationships"]
+            _memo_put(key, hit)
+        return list(hit)
 
     def in_(self):
         """List incoming relationships as dicts (id, type, source_id, target_id)."""
-        return _read("incoming", element_id=self.id)["relationships"]
+        key = ("incoming", self.id)
+        hit = _memo.get(key)
+        if hit is None:
+            hit = _read("incoming", element_id=self.id)["relationships"]
+            _memo_put(key, hit)
+        return list(hit)
 
     def parent(self):
         """Return the containment parent Element, or None at a root."""
-        parent_id = _read("parent", element_id=self.id)["parent_id"]
+        key = ("parent", self.id)
+        if key in _memo:
+            parent_id = _memo[key]
+        else:
+            parent_id = _read("parent", element_id=self.id)["parent_id"]
+            _memo_put(key, parent_id)
         if parent_id is None:
             return None
         return _fetch_element(parent_id)
@@ -160,7 +207,14 @@ class Element:
             for child in el.children():
                 print(child.name)
         """
-        return [Element(d) for d in _read("children", element_id=self.id)["children"]]
+        key = ("children", self.id)
+        hit = _memo.get(key)
+        if hit is None:
+            hit = _read("children", element_id=self.id)["children"]
+            for proj in hit:
+                _memo_put(("element", proj["id"]), proj)
+            _memo_put(key, hit)
+        return [Element(d) for d in hit]
 
     def set(self, key, value):
         """Record a dry-run property update. Nothing changes until staged and committed.
@@ -185,11 +239,22 @@ def _fetch_element(element_id):
         el = dr.element("some-id")
         print(el.name)
     """
-    return Element(_read("element", element_id=element_id)["element"])
+    key = ("element", element_id)
+    proj = _memo.get(key)
+    if proj is None:
+        proj = _read("element", element_id=element_id)["element"]
+        _memo_put(key, proj)
+    return Element(proj)
 
 
 def _iter_elements(type=None):
     """Iterate all elements, optionally filtered by type name. Pages transparently.
+
+    Deliberately NOT memoized: a whole-model scan does not fit the single
+    `(op_name, id_or_None)` memo key shape, and re-running the same scan
+    twice in one snippet is rare enough not to be worth a bespoke key scheme
+    here. Phase B is expected to track these via `("scan", ...)` read keys
+    if it becomes worth it.
 
     Example:
         for el in dr.elements(type="Building"):
@@ -212,7 +277,12 @@ def _list_types():
     Example:
         print(dr.types())
     """
-    return _read("types")["types"]
+    key = ("types", None)
+    hit = _memo.get(key)
+    if hit is None:
+        hit = _read("types")["types"]
+        _memo_put(key, hit)
+    return list(hit)
 
 
 def _type_info(name):
@@ -221,7 +291,12 @@ def _type_info(name):
     Example:
         info = dr.type("Building")
     """
-    return _read("type_info", type=name)
+    key = ("type_info", name)
+    hit = _memo.get(key)
+    if hit is None:
+        hit = _read("type_info", type=name)
+        _memo_put(key, hit)
+    return hit
 
 
 def _create(type_name, properties=None):

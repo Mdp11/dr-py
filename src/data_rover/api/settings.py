@@ -134,6 +134,10 @@ class Settings(BaseSettings):
     snippet_max_op_bytes: int = 1024 * 1024
     #: Mirrors ``RunLimits.page_limit``.
     snippet_page_limit: int = 500
+    #: Capacity (entries) of the guest facade's session-lifetime read memo
+    #: (spec 2026-07-21 Phase A'). One entry is one memoized bridge read
+    #: response (element projection / adjacency list / type info). 0 disables.
+    snippet_read_memo_max: int = 4096
     #: Total wall budget (seconds) for ALL embedded snippet work one
     #: evaluate/export request triggers (``ScriptBudget``, M2/M3 script
     #: columns/steps) — shared across every script column/step call the

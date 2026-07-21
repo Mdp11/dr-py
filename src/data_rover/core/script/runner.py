@@ -50,6 +50,10 @@ class RunLimits:
         page_limit: Maximum number of model elements per paginated result in
             bridge reads (e.g., ``elements_page``). Runners enforce this on
             their bridge dispatcher.
+        read_memo_max: Capacity of the guest facade's session-lifetime read
+            memo (entries). 0 disables memoization. Sound under the runner
+            determinism guarantee: a session never outlives one model rev's
+            worth of work, so a memoized read can never go stale within it.
     """
 
     wall_timeout_s: float = 10
@@ -59,6 +63,7 @@ class RunLimits:
     max_ops: int = 1000
     max_op_bytes: int = 1024 * 1024
     page_limit: int = 500
+    read_memo_max: int = 4096
 
 
 @dataclass(frozen=True)
