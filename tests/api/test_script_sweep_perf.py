@@ -5,9 +5,10 @@ Opt-in (``pytestmark = pytest.mark.perf``, deselected by the default
 CPython-WASI guest binary AND they measure wall time, so they have no place in
 the normal suite.
 
-Two properties are worth a timing test because losing either silently
-reintroduces the ~49 s whole-table freeze this work removed, with every
-functional test still green:
+Three properties are worth a timing/counting test because losing any of them
+silently reintroduces the ~49 s whole-table freeze this work removed (or the
+per-read bridge chatter that goes with it), with every functional test still
+green:
 
 1. **Per-call round-trip.** `ScriptRunner.open_session` exists so a whole-table
    pass pays ONE guest boot and then N cheap calls. A regression that boots per
@@ -18,11 +19,22 @@ functional test still green:
    an over-broad lock, a shared session, a per-item global-slot acquire — costs
    the whole speedup while every assertion about RESULTS still holds (results
    are identical by design).
+3. **Bridge trip collapse.** A one-hop traversal (read the row, follow an
+   outgoing relationship, read the far element) should cost ONE bridge
+   dispatch per cell, not three: the root rides the call frame (root
+   piggyback), the far endpoint rides the hop response (far-endpoint
+   inlining on hops), and a repeated read within one call is served from the
+   guest's own memo. Losing any of the three silently reintroduces per-read
+   bridge round trips with every functional test still green (results are
+   identical either way).
 
-Both bounds are deliberately loose. The numbers on the reference machine are
-~0.3-1 ms/call and a ~3-4x sharding speedup; the assertions are 5 ms/call and
-a 0.7x wall-time ratio, so roughly an order of magnitude and 4x of headroom
-respectively absorb CI noise, cold caches and shared runners.
+The bounds in 1-2 are deliberately loose: the numbers on the reference machine
+are ~0.3-1 ms/call and a ~3-4x sharding speedup; the assertions are 5 ms/call
+and a 0.7x wall-time ratio, so roughly an order of magnitude and 4x of
+headroom respectively absorb CI noise, cold caches and shared runners. The
+bound in 3 is tighter (1.5 vs. a measured ~1.0 trips/cell) because it counts
+discrete dispatches rather than timing wall clock, so it has no noise to
+absorb — only enough headroom to not flap on an incidental extra call.
 """
 
 from __future__ import annotations
@@ -77,6 +89,12 @@ elements:
     key: [name]
     properties:
       - {name: name, datatype: string, multiplicity: "1"}
+relationships:
+  - name: Links
+    source: Thing
+    target: Thing
+    source_multiplicity: "0..*"
+    target_multiplicity: "0..*"
 """
 
 #: Trivial body: the budget test is measuring the BRIDGE round trip, not the
@@ -143,7 +161,16 @@ def _seed(client: TestClient, rows: int) -> Session:
                 }
                 for i in range(rows)
             ],
-            "relationships": [],
+            "relationships": [
+                {
+                    "id": f"r{i:04d}",
+                    "type_name": "Links",
+                    "source_id": _eid(i),
+                    "target_id": _eid((i + 1) % rows),
+                    "properties": {},
+                }
+                for i in range(rows)
+            ],
         },
     )
     assert r.status_code == 200, r.text
@@ -221,15 +248,22 @@ def _table() -> dict[str, Any]:
     }
 
 
-def _time_sweep(
+def _cold_sweep_setup(
     session: Session,
     runner: WasmScriptRunner,
     workers: int,
     monkeypatch: pytest.MonkeyPatch,
-) -> float:
-    """Run ONE cold sweep of the heavy table at `workers` and return its wall
-    time. `snippet_sweep_sync` makes `kick_or_join_sweep` run the job inline, so
-    the measurement needs no polling and no sleeping."""
+) -> Settings:
+    """Shared cold-sweep ritual: force sync sweeping at `workers`, drop the
+    lazily-sized process-wide sweep semaphore so the new worker count actually
+    takes effect, and reset the per-session cache/order/job state so the sweep
+    that follows is genuinely cold (no reused cache, no remembered job).
+
+    Also waits for the pool to have `workers + 1` warm instances parked (the
+    `workers` sweep contexts plus the sweep's own serial context all need one
+    immediately, or the run degrades to `unavailable` and measures the wrong
+    thing) — see `_wait_for_pool`.
+    """
     monkeypatch.setenv("DATA_ROVER_SNIPPET_SWEEP_SYNC", "true")
     monkeypatch.setenv("DATA_ROVER_SNIPPET_SWEEP_WORKERS", str(workers))
     settings: Settings = get_settings()
@@ -243,6 +277,19 @@ def _time_sweep(
     session.script_cell_cache.clear_and_stamp(session.model_rev)
     session.script_sweeps.cancel_all()
     _wait_for_pool(runner, min(POOL, workers + 1))
+    return settings
+
+
+def _time_sweep(
+    session: Session,
+    runner: WasmScriptRunner,
+    workers: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> float:
+    """Run ONE cold sweep of the heavy table at `workers` and return its wall
+    time. `snippet_sweep_sync` makes `kick_or_join_sweep` run the job inline, so
+    the measurement needs no polling and no sleeping."""
+    settings = _cold_sweep_setup(session, runner, workers, monkeypatch)
 
     defn = TABLE_ADAPTER.validate_python(_table())
     assert session.metamodel is not None and session.model is not None
@@ -286,8 +333,11 @@ def test_parallel_sweep_speedup(
 #: Traversal snippet for the trips-per-cell guard: one hop plus a far-element
 #: read per row. Post trip-collapse this costs exactly ONE dispatch per cell
 #: (the hop); the far endpoints ride the hop response and the root rides the
-#: call frame. Budget 3 leaves headroom, not room for a per-read regression
-#: (which would cost 2+ extra trips per cell).
+#: call frame. Budget 1.5 leaves a little headroom over the measured 1.0/cell,
+#: not room for a per-read regression (which would cost 2+ extra trips per
+#: cell) — see `big_session`'s ring of `Links` edges, without which
+#: `els[0].out()` is always empty and this snippet never exercises a hop at
+#: all.
 TRAVERSAL_CODE = (
     "def value(els):\n"
     "    n = els[0]['name']\n"
@@ -295,7 +345,7 @@ TRAVERSAL_CODE = (
     "        n = n + dr.element(rel['target_id'])['name']\n"
     "    return n\n"
 )
-MAX_TRIPS_PER_CELL = 3.0
+MAX_TRIPS_PER_CELL = 1.5
 
 
 def test_trips_per_cell_budget(
@@ -303,9 +353,25 @@ def test_trips_per_cell_budget(
     big_session: Session,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """A sweep of `SWEEP_ROWS` one-hop traversal cells must average under
+    `MAX_TRIPS_PER_CELL` bridge dispatches per cell.
+
+    This is the regression guard for the trip-collapse work: root piggyback
+    (the row's own element data rides the call frame instead of a separate
+    `dr.element` round trip), the guest-side read memo (a repeated
+    `dr.element` read within one call is served from the guest's own cache),
+    and far-endpoint inlining on hops (the related element's data rides the
+    `out()` response itself, so the `dr.element(rel['target_id'])` read below
+    is a memo hit rather than a bridge dispatch). Losing any one of the three
+    regresses this from 1 trip/cell to 2-3.
+
+    `workers=1` here (unlike the sharding test) so the module-global `count`
+    list below is a safe, uncontended counter — if this ever runs with
+    `workers > 1` the increment needs a lock.
+    """
     from data_rover.core.script.bridge import BridgeDispatcher
 
-    count = [0]
+    count = [0]  # safe only because workers=1 below: single-threaded sweep
     orig = BridgeDispatcher.dispatch
 
     def counting(self, req):  # type: ignore[no-untyped-def]
@@ -313,14 +379,7 @@ def test_trips_per_cell_budget(
         return orig(self, req)
 
     monkeypatch.setattr(BridgeDispatcher, "dispatch", counting)
-    monkeypatch.setenv("DATA_ROVER_SNIPPET_SWEEP_SYNC", "true")
-    monkeypatch.setenv("DATA_ROVER_SNIPPET_SWEEP_WORKERS", "1")
-    settings: Settings = get_settings()
-    reset_global_slots()
-    big_session.table_order_cache.clear()
-    big_session.script_cell_cache.clear_and_stamp(big_session.model_rev)
-    big_session.script_sweeps.cancel_all()
-    _wait_for_pool(wasm_runner, 2)
+    settings = _cold_sweep_setup(big_session, wasm_runner, 1, monkeypatch)
 
     defn = TABLE_ADAPTER.validate_python(
         {
@@ -344,4 +403,7 @@ def test_trips_per_cell_budget(
     assert job.state == "done", (job.state, job.message)
     per_cell = count[0] / SWEEP_ROWS
     print(f"\nbridge trips per cell: {per_cell:.2f} ({count[0]} trips / {SWEEP_ROWS} cells)")
-    assert per_cell < MAX_TRIPS_PER_CELL
+    assert per_cell < MAX_TRIPS_PER_CELL, (
+        f"{per_cell:.2f} bridge trips/cell (budget {MAX_TRIPS_PER_CELL}) — "
+        f"{count[0]} trips over {SWEEP_ROWS} cells; lost the root piggyback or the far-endpoint inline?"
+    )
