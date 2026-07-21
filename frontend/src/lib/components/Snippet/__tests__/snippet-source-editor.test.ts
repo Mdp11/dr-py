@@ -7,12 +7,13 @@
 // `Navigation/__tests__/combine-frame.test.ts`'s `setArtifactHeaders` helper
 // — there is no direct headers setter.
 import { flushSync, mount, unmount } from 'svelte';
-import { EditorView } from '@codemirror/view';
+import { EditorView, keymap } from '@codemirror/view';
 import { http, HttpResponse } from 'msw';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { server } from '../../../api/__tests__/server';
 import * as artifactsApi from '$lib/api/artifacts';
+import * as modelRead from '$lib/api/model-read';
 import { getArtifactHeaders, loadArtifacts, resetArtifacts } from '$lib/state';
 import type { Artifact, ArtifactHeader, SnippetSource } from '$lib/api/types';
 import SnippetSourceEditor from '../SnippetSourceEditor.svelte';
@@ -63,6 +64,58 @@ function inlineSnippet(code: string): SnippetSource {
 	return {
 		definition: { schema_version: 1, language: 'python', code, entry_points: [] }
 	};
+}
+
+/** Bind one element by driving the REAL picker inside ElementContextRow:
+ * stub the search endpoint, type, let the 250 ms debounce fire, click the
+ * result. Adapted from snippet-test-panel.test.ts's helper of the same name
+ * — the panel exposes no test-only bind method here either. */
+async function bindElement(id: string, label: string): Promise<void> {
+	vi.spyOn(modelRead, 'listElementsPage').mockResolvedValue({
+		items: [{ id, type_name: 'Block', properties: { name: label }, rev: 1 }],
+		total: 1
+	});
+	const search = document.querySelector(
+		'[data-testid="snippet-element-search"]'
+	) as HTMLInputElement;
+	if (!search) throw new Error('element search not rendered — is the panel expanded?');
+	search.value = label;
+	search.dispatchEvent(new Event('input', { bubbles: true }));
+	flushSync();
+	await vi.advanceTimersByTimeAsync(300);
+	flushSync();
+	const option = [...document.querySelectorAll('button')].find((b) =>
+		b.textContent?.includes(label)
+	);
+	if (!option) throw new Error(`no search result button for ${label}`);
+	click(option);
+}
+
+const OK_RUN_RESULT = {
+	run_id: 'r1',
+	stdout: '',
+	result_repr: "['Alpha']",
+	ops: [],
+	error: null,
+	duration_ms: 3,
+	model_rev: 0,
+	stale: false,
+	truncated: false
+};
+
+/** Capture the body of the next POST /snippets/run and answer `response`
+ * (mirrors snippet-test-panel.test.ts's helper of the same name). */
+function captureRun(response: Record<string, unknown> = OK_RUN_RESULT): {
+	body: () => Record<string, unknown> | null;
+} {
+	let seen: Record<string, unknown> | null = null;
+	server.use(
+		http.post('*/snippets/run', async ({ request }) => {
+			seen = (await request.json()) as Record<string, unknown>;
+			return HttpResponse.json(response);
+		})
+	);
+	return { body: () => seen };
 }
 
 describe('SnippetSourceEditor — ref mode', () => {
@@ -372,6 +425,132 @@ describe('SnippetSourceEditor — test panel', () => {
 			const run = document.querySelector('[data-testid="snippet-test-run"]') as HTMLButtonElement;
 			expect(run).toBeTruthy();
 			expect(run.disabled).toBe(true); // no element bound yet
+
+			// Now bind one element — the ONLY remaining false term in runDisabled
+			// is countOk. If entryPoints weren't actually threaded through from
+			// this editor's own lint state (inline ? entryPoints : [entry]),
+			// entryOk would still be false and Run would stay disabled.
+			await bindElement('a', 'Alpha');
+			expect(run.disabled).toBe(false);
+		} finally {
+			unmount(c);
+			vi.useRealTimers();
+		}
+	});
+
+	it('the CodeEditor Mod-Enter binding invokes onRun, which drives a run through the panel (CodeEditor onRun -> testPanel.requestRun wiring)', async () => {
+		// A genuine `keydown` with ctrlKey/metaKey does NOT reach this
+		// component's own Mod-Enter binding: CodeMirror's `basicSetup` bundles
+		// @codemirror/commands' defaultKeymap, which ALSO binds Mod-Enter (to
+		// `insertBlankLine`) and is registered in CodeEditor.svelte's
+		// extensions array BEFORE this component's own `keymap.of([...])`.
+		// CodeMirror keymap facets try earlier-registered groups first and
+		// stop at the first handler that returns true, so `insertBlankLine`
+		// (which always returns true) consumes the keydown before the
+		// onRun binding is ever tried. Verified directly: dispatching a real
+		// `keydown` on `view.contentDOM` left `onRunSpy` uncalled and instead
+		// inserted a blank line at the cursor — a pre-existing production bug
+		// in CodeEditor.svelte's keymap ordering, out of scope for this
+		// test-file-only change (see the fix task's report).
+		//
+		// So rather than fake a passing keydown dispatch, this test locates
+		// CodeEditor's OWN Mod-Enter binding directly in the editor's keymap
+		// facet (its own `keymap.of(...)` is always the LAST-registered
+		// group) and invokes its `run` the same way CodeMirror would if
+		// precedence ever let it through — exercising the real onRun ->
+		// requestRun -> POST /snippets/run chain end to end.
+		vi.useFakeTimers();
+		server.use(
+			http.post('*/snippets/lint', () =>
+				HttpResponse.json({ diagnostics: [], entry_points: ['value'] })
+			)
+		);
+		const captured = captureRun();
+		const c = render(inlineSnippet('def value(elements):\n    return 1\n'), 'value', vi.fn());
+		try {
+			await vi.advanceTimersByTimeAsync(310);
+			click(document.querySelector('[data-testid="snippet-test-toggle"]'));
+			await bindElement('a', 'Alpha');
+			expect(
+				(document.querySelector('[data-testid="snippet-test-run"]') as HTMLButtonElement).disabled
+			).toBe(false);
+
+			const content = document.querySelector(
+				'[data-testid="snippet-editor"] .cm-content'
+			) as HTMLElement;
+			const view = EditorView.findFromDOM(content);
+			expect(view).not.toBeNull();
+			const ownGroup = view!.state.facet(keymap).at(-1)!;
+			const binding = ownGroup.find((b) => b.key === 'Mod-Enter');
+			expect(binding).toBeTruthy(); // the run binding a real keypress WOULD hit if precedence let it through
+
+			binding!.run!(view!);
+			await vi.waitFor(() => expect(captured.body()).not.toBeNull());
+			expect(captured.body()!['entry']).toBe('value');
+			expect(captured.body()!['element_ids']).toEqual(['a']);
+		} finally {
+			unmount(c);
+			vi.useRealTimers();
+		}
+	});
+
+	it('clicking a traceback frame moves the CodeMirror cursor to that line (onGoToLine -> editor.goToLine wiring)', async () => {
+		vi.useFakeTimers();
+		server.use(
+			http.post('*/snippets/lint', () =>
+				HttpResponse.json({ diagnostics: [], entry_points: ['value'] })
+			),
+			http.post('*/snippets/run', () =>
+				HttpResponse.json({
+					run_id: 'r1',
+					stdout: '',
+					result_repr: null,
+					ops: [],
+					error: {
+						kind: 'runtime',
+						message: 'boom',
+						traceback:
+							'Traceback (most recent call last):\n' +
+							'  File "<snippet>", line 2, in value\n' +
+							'NameError: boom'
+					},
+					duration_ms: 3,
+					model_rev: 0,
+					stale: false,
+					truncated: false
+				})
+			)
+		);
+		const c = render(
+			inlineSnippet('def value(elements):\n    return undefined_name\n'),
+			'value',
+			vi.fn()
+		);
+		try {
+			await vi.advanceTimersByTimeAsync(310);
+			click(document.querySelector('[data-testid="snippet-test-toggle"]'));
+			await bindElement('a', 'Alpha');
+			click(document.querySelector('[data-testid="snippet-test-run"]'));
+			await vi.waitFor(() =>
+				expect(document.querySelector('[data-testid="snippet-error"]')).not.toBeNull()
+			);
+
+			const showTraceback = [...document.querySelectorAll('button')].find((b) =>
+				b.textContent?.includes('Show traceback')
+			);
+			click(showTraceback ?? null);
+			const frameButton = [...document.querySelectorAll('button')].find((b) =>
+				b.textContent?.includes('line 2, in value')
+			);
+			click(frameButton ?? null);
+
+			const content = document.querySelector(
+				'[data-testid="snippet-editor"] .cm-content'
+			) as HTMLElement;
+			const view = EditorView.findFromDOM(content);
+			expect(view).not.toBeNull();
+			const cursorLine = view!.state.doc.lineAt(view!.state.selection.main.head).number;
+			expect(cursorLine).toBe(2);
 		} finally {
 			unmount(c);
 			vi.useRealTimers();
