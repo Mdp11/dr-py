@@ -269,3 +269,56 @@ test('script step: el.out() renders real chains; a raising step surfaces nav-war
 	await expect(navWarnings).toBeVisible({ timeout: 30_000 });
 	await expect(navWarnings).toContainText(/script warning/);
 });
+
+test('script column: the Test panel runs the inline snippet against a bound element', async ({
+	page
+}) => {
+	test.setTimeout(120_000);
+	page.on('dialog', (dialog) => void dialog.accept());
+	await openDefaultProject(page);
+	await loadFiles(page, { metamodel: METAMODEL_PATH, model: MODEL_PATH, view: VIEW_PATH });
+	await expect(page.getByText('live')).toBeVisible({ timeout: 60_000 });
+
+	// A nav -> "Open as table" gets us a table whose settings dialog can host
+	// a script column (identical entry point to the test above).
+	await buildSoftwareSystemNav(page, page.getByRole('tabpanel'));
+	const navTabpanel = page.getByRole('tabpanel');
+	const openAsTableButton = navTabpanel.getByRole('button', { name: 'Open as table' });
+	await expect(openAsTableButton).toBeEnabled();
+	await openAsTableButton.click();
+
+	const tabpanel = page.getByRole('tabpanel');
+	await expect(tabpanel.getByTestId('table-grid')).toBeVisible({ timeout: 15_000 });
+	await expect(tabpanel.getByTestId('table-row')).toHaveCount(12, { timeout: 15_000 });
+
+	await tabpanel.getByTestId('table-settings-button').click();
+	const settings = page.getByRole('dialog', { name: 'Table settings' });
+	await expect(settings).toBeVisible();
+	await settings.getByTestId('add-script-column').click();
+
+	const editor = settings.getByTestId('script-column-editor').nth(0);
+	await editor.getByTestId('snippet-mode-inline').click();
+	await setCode(page, editor.getByTestId('snippet-editor'), INLINE_COLUMN_CODE);
+
+	// Expand Test, bind one element through the fuzzy search, run.
+	await editor.getByTestId('snippet-test-toggle').click();
+	const runButton = editor.getByTestId('snippet-test-run');
+	await expect(runButton).toBeDisabled(); // nothing bound yet
+	await editor.getByTestId('snippet-element-search').fill('SoftwareSystem-001');
+	await editor
+		.getByRole('button', { name: /SoftwareSystem-001/ })
+		.first()
+		.click();
+	await expect(runButton).toBeEnabled({ timeout: 15_000 }); // lint must unlock value()
+	await runButton.click();
+
+	// Runner-availability guard, same rationale as the test above: without the
+	// fetched WASM guest the route 503s and the panel says so.
+	const notice = editor.getByTestId('snippet-notice');
+	const result = editor.getByTestId('snippet-result');
+	await expect(result.or(notice)).toBeVisible({ timeout: 60_000 });
+	if ((await notice.count()) > 0 && (await notice.textContent())?.includes('unavailable')) {
+		test.skip(true, 'snippet runner not booted (guest binary not fetched)');
+	}
+	await expect(result).toHaveText('2'); // INLINE_COLUMN_CODE returns the constant 2
+});
