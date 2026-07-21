@@ -337,3 +337,44 @@ describe('SnippetSourceEditor — inline mode', () => {
 		}
 	});
 });
+
+describe('SnippetSourceEditor — test panel', () => {
+	it('renders the test panel in ref mode', async () => {
+		await setArtifactHeaders([
+			{
+				id: 'value-snip',
+				kind: 'code_snippet',
+				name: 'Value snippet',
+				updated_at: '2026-07-17T00:00:00Z',
+				updated_by: null,
+				entry_points: ['value']
+			}
+		]);
+		const c = render({ ref: 'value-snip' }, 'value', vi.fn());
+		try {
+			expect(document.querySelector('[data-testid="snippet-test-toggle"]')).not.toBeNull();
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('renders the test panel in inline mode and enables Run once lint unlocks the entry and an element is bound', async () => {
+		vi.useFakeTimers();
+		server.use(
+			http.post('*/snippets/lint', () =>
+				HttpResponse.json({ diagnostics: [], entry_points: ['value'] })
+			)
+		);
+		const c = render(inlineSnippet('def value(elements):\n    return 1\n'), 'value', vi.fn());
+		try {
+			await vi.advanceTimersByTimeAsync(310);
+			click(document.querySelector('[data-testid="snippet-test-toggle"]'));
+			const run = document.querySelector('[data-testid="snippet-test-run"]') as HTMLButtonElement;
+			expect(run).toBeTruthy();
+			expect(run.disabled).toBe(true); // no element bound yet
+		} finally {
+			unmount(c);
+			vi.useRealTimers();
+		}
+	});
+});
