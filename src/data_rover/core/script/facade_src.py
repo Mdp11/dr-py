@@ -117,8 +117,9 @@ except (NameError, TypeError, ValueError):
     _MEMO_CAP = 4096
 
 # Session-lifetime read memo: (op_name, id_or_None) -> response fragment.
-# Sound because a session never outlives one model rev's worth of work (the
-# same invariant the host's ScriptCellCache rests on). Insertion-ordered
+# Soundness is scoped in `RunLimits.read_memo_max`'s docstring (rev-stamped
+# for embedded/sweep work; a console run can observe a torn read with or
+# without the memo). Insertion-ordered
 # dict gives FIFO eviction at _MEMO_CAP entries. Element entries hold the
 # PROJECTION dict (not the whole response) so hop/root priming can insert
 # projections directly under ("element", id).
@@ -162,8 +163,12 @@ def _copy_projection(d):
     props = c.get("properties")
     if props is not None:
         c["properties"] = {
-            k: (list(v) if isinstance(v, list) else v) for k, v in props.items()
+            k: (list(v) if isinstance(v, list) else dict(v) if isinstance(v, dict) else v)
+            for k, v in props.items()
         }
+    # No metamodel datatype admits a dict value, so dict copying is unreachable
+    # for a conformant model — but the engine deliberately stays inspectable
+    # and will hold non-conformant data, and over-copying is the safe direction.
     return c
 
 
