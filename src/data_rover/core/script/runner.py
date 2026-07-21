@@ -182,13 +182,21 @@ class ScriptError:
             - ``"memory"`` — exceeded :attr:`~RunLimits.memory_bytes`
             - ``"limit"`` — exceeded op count/size limit
             - ``"unavailable"`` — the script runner is not available (no runner constructed, or no concurrency slot free) — embedded evaluation degrades, never 5xxs
+            - ``"pending"`` — synthetic, produced only by :class:`~data_rover.core.script.embed.ScriptEvalContext` in cache-only mode (spec §4.1): the value is not computed yet; a background sweep is (or will be) filling it in. Never produced by a runner, never cached.
         message: Human-readable error message.
         traceback: Python traceback string if available (``None`` for
             syntax/timeout/memory errors or when details are unavailable).
     """
 
     kind: Literal[
-        "syntax", "runtime", "timeout", "cancelled", "memory", "limit", "unavailable"
+        "syntax",
+        "runtime",
+        "timeout",
+        "cancelled",
+        "memory",
+        "limit",
+        "unavailable",
+        "pending",
     ]
     message: str
     traceback: str | None = None

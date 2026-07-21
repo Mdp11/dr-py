@@ -141,3 +141,46 @@ def test_cache_hit_populates_memo() -> None:
     c.close()
     assert second is first
     assert runner.calls[0] == 1  # still not called: this came from the memo
+
+
+def test_cache_only_miss_is_pending_not_guest() -> None:
+    cache = ScriptCellCache()
+    cache.clear_and_stamp(1)
+    runner = _FakeRunner(OK)
+    c = _ctx(runner, cache)
+    c.cache_only = True
+    res = c.call("code", "value", ["e1"])
+    assert res.error is not None and res.error.kind == "pending"
+    assert runner.calls[0] == 0
+    assert c.pending_misses == 1
+    assert not c.errored  # pending is not poison
+    # NOT memoized: flipping to live mode computes for real
+    c.cache_only = False
+    assert c.call("code", "value", ["e1"]).error is None
+    assert runner.calls[0] == 1
+    c.close()
+
+
+def test_cache_only_hit_served() -> None:
+    cache = ScriptCellCache()
+    cache.clear_and_stamp(1)
+    runner = _FakeRunner(OK)
+    warm = _ctx(runner, cache)
+    warm.call("code", "value", ["e1"])
+    warm.close()
+    c = _ctx(runner, cache)
+    c.cache_only = True
+    assert c.call("code", "value", ["e1"]).error is None
+    assert c.pending_misses == 0
+    c.close()
+
+
+def test_per_call_override_forces_cache_only() -> None:
+    cache = ScriptCellCache()
+    cache.clear_and_stamp(1)
+    runner = _FakeRunner(OK)
+    c = _ctx(runner, cache)  # ctx-level mode is live
+    res = c.call("code", "value", ["e1"], cache_only=True)
+    assert res.error is not None and res.error.kind == "pending"
+    assert runner.calls[0] == 0
+    c.close()

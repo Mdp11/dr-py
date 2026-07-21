@@ -23,6 +23,17 @@ and one warnings channel.
   layer as pruned-with-warning chains. `errored` records that ANY call failed
   — the route layer uses it to skip the row-order cache (cache-poisoning
   guard).
+- **Cache-only mode (`pending`, spec §4.1)**: a whole-table pass can run with
+  `cache_only=True` (instance attribute, flippable between phases, or a
+  per-call `cache_only=` override) so it never invokes the guest inline — a
+  cell-cache miss synthesizes a `CallResult` with error kind `"pending"`
+  instead of computing, and a background sweep is expected to fill the cache
+  in later. `pending` is a first-class degradation the table layer renders as
+  a placeholder, not an error: it does NOT set `errored`. It is also
+  deliberately never memoized and never written to the cell cache, so the
+  same context can still serve live window calls (e.g. an on-screen window
+  evaluated without `cache_only`) after a cache-only whole-table pass already
+  produced a pending result for the same cell.
 """
 
 from __future__ import annotations
@@ -55,6 +66,7 @@ class ScriptEvalContext:
         unavailable_reason: str | None = None,
         cell_cache: ScriptCellCache | None = None,
         rev: int = 0,
+        cache_only: bool = False,
     ) -> None:
         self._runner = runner
         self._model = model
@@ -71,6 +83,8 @@ class ScriptEvalContext:
         self._cell_cache = cell_cache
         self._rev = rev
         self._code_sha: dict[str, str] = {}
+        self.cache_only = cache_only
+        self.pending_misses = 0
 
     def _cell_key(self, code: str, entry: str, ids: tuple[str, ...]) -> CellKey:
         sha = self._code_sha.get(code)
@@ -80,7 +94,12 @@ class ScriptEvalContext:
         return (sha, entry, ids)
 
     def call(
-        self, code: str, entry: Literal["value", "step"], element_ids: list[str]
+        self,
+        code: str,
+        entry: Literal["value", "step"],
+        element_ids: list[str],
+        *,
+        cache_only: bool | None = None,
     ) -> CallResult:
         key = (code, entry, tuple(element_ids))
         hit = self._memo.get(key)
@@ -95,6 +114,13 @@ class ScriptEvalContext:
                     self.errored = True
                 self._memo[key] = cached
                 return cached
+        if cache_only if cache_only is not None else self.cache_only:
+            self.pending_misses += 1
+            return CallResult(
+                value=None,
+                error=ScriptError(kind="pending", message="not computed yet"),
+                duration_ms=0,
+            )
         res = self._call_uncached(code, entry, element_ids)
         if res.error is not None:
             self.errored = True

@@ -719,7 +719,14 @@ class SnippetErrorOut(BaseModel):
     """Mirrors `core.script.runner.ScriptError` field-for-field."""
 
     kind: Literal[
-        "syntax", "runtime", "timeout", "cancelled", "memory", "limit", "unavailable"
+        "syntax",
+        "runtime",
+        "timeout",
+        "cancelled",
+        "memory",
+        "limit",
+        "unavailable",
+        "pending",
     ]
     message: str
     traceback: str | None = None
