@@ -351,3 +351,177 @@ monotonic()` deadline shared by every session the context opens) bound each
 call — a column that burns most of the budget leaves later columns/steps in
 the same request a shrinking window rather than each getting a fresh
 `wall_timeout_s`.
+
+### Cell cache + background sweep (whole-table work)
+
+A warm session makes one cell cheap (~0.5 ms round trip), but a table has as
+many cells as it has rows: evaluating 3,000 of them inline took ~49 s and
+froze the UI for the whole of it. The fix is not a faster cell — it is that
+**no request ever computes a whole table**. A request serves what is already
+cached and returns; a background job computes the rest; the client polls.
+
+**`ScriptCellCache`** (`core/script/cell_cache.py`) is the per-`Session` store
+that makes this possible.
+
+- **Key** — `(sha256(code).hexdigest(), entry, tuple(element_ids))`. The code
+  is hashed so keys stay small (`ScriptEvalContext` hashes each distinct code
+  once per request). Nothing about the table definition, the sort, or the row
+  is in the key: a cell is a pure function of *what snippet ran against which
+  elements*, which is exactly why one sweep can serve every consumer (below).
+- **Rev stamping, not rev-in-key** — the cache carries one `_stamp` (a model
+  rev) instead of putting the rev in every key. `Session.touch_model`/
+  `set_model` call `clear_and_stamp(new_rev)`; a `get`/`put` at any *other* rev
+  is a miss/no-op. This is the same sampled-rev poisoning guard the table
+  order cache uses: evaluation runs outside any lock, so a request that
+  computed against a since-superseded model must never write into the fresh
+  cache (a lost race merely recomputes).
+- **Self-stamping** — a `put` at a rev NEWER than the stamp clears and
+  re-stamps rather than being rejected. Some paths advance `model_rev` without
+  running the invalidation hooks (hydration assigning the DB-authoritative
+  rev, most notably); without self-stamping the cache would silently refuse
+  every write until the next commit.
+- **Which errors are cached: `runtime` and `syntax`, and nothing else.** Those
+  two are DETERMINISTIC — the same code against the same model reproduces them
+  exactly, so recomputing is pure waste and caching them is what stops a
+  broken snippet from being re-run for every row. Every other kind
+  (`timeout`, `unavailable`, `memory`, `cancelled`, and the synthetic
+  `pending`) is environmental: it says something about the machine or the
+  caller, not the snippet, and must stay retryable. `put()` enforces this
+  itself, so no caller can poison the cache with a transient failure.
+
+**Cache-only mode and the `pending` kind.** `ScriptEvalContext(cache_only=...)`
+(also flippable per phase as an instance attribute, or overridden per call)
+turns a cache miss into a synthesized `CallResult` with
+`ScriptError(kind="pending")` instead of invoking the guest. `pending` is a
+first-class degradation, not an error:
+
+- it does **not** set `.errored` (the row-order cache-poisoning guard must not
+  trip merely because the table is still computing);
+- it is **never memoized** and **never written to the cell cache**, so the same
+  context can serve a live window call for a cell that a preceding cache-only
+  whole-table pass already reported pending;
+- the table layer renders it as a `PendingCell` (wire `kind: "pending"`), a
+  placeholder, not an error cell.
+
+`ScriptEvalContext.pending_misses` counts them, and that counter — not
+`.errored` — is what the routes branch on. `should_abort` (an optional
+zero-arg predicate consulted before any guest work) is the sibling mechanism:
+an aborted call returns `kind="cancelled"`, which is likewise uncached,
+unmemoized, and not an error.
+
+**`SweepJob` / `ScriptSweepRegistry`** (`api/script_sweep.py`) is the
+background half. One job computes every script cell of ONE resolved table
+definition at ONE model rev, writing into that session's `ScriptCellCache`.
+
+- **The job key excludes the sort.** The fingerprint is
+  `table_fingerprint(dumped_definition, None)` on purpose: `_sort_value` calls
+  the same `(code, "value", ids)` keys that cell rendering does, so ONE sweep
+  serves every sort order of that table, the `keep_empty` filter, cell
+  rendering, and export. Adding the sort would multiply the guest work by the
+  number of sort orders the user tries for zero benefit.
+- **Four states.** `running` → `done` | `failed` | `cancelled`. `cancelled` is
+  deliberately distinct from `failed`: it means no pathology occurred (the rev
+  moved, or the session was evicted), which a client-facing status wants to be
+  able to tell apart. **Every** exit from the run loop must leave a TERMINAL
+  state — a job left `running` behind a dead thread strands a polling client
+  forever, because of:
+- **Failed-job memory.** `kick()` returns an existing same-rev job **as-is,
+  whatever its state** — running, done, or failed. Only a rev change creates a
+  new job. This exists because timeouts are deliberately not cached: without
+  it, the next poll would restart the exact grind that just aborted, forever.
+  `touch_model`/`set_model` cancel-and-clear the registry, so the next commit
+  retries naturally. (If `start` raises — thread exhaustion — the freshly
+  registered job is removed before the exception propagates, so a threadless
+  "running" zombie is never remembered.)
+- **Two pathology guards**, both counted JOB-GLOBALLY across workers (per-worker
+  counters would let a bad table burn `workers × threshold` guest calls), both
+  reset by any other outcome, both thresholded on
+  `snippet_sweep_timeout_abort`:
+  - *consecutive `timeout`* — timeouts are never cached, so a snippet that
+    keeps timing out would otherwise be re-run for every remaining cell.
+  - *consecutive `unavailable`* — **this one is load-bearing, not symmetry.**
+    `unavailable` (no runner, or an exhausted warm pool) is also never cached,
+    so without the guard a sweep against a busy/absent runner grinds every
+    cell, caches NOTHING, and still ends `state="done"` — a "success"
+    indistinguishable from a real one. Since `kick()` hands a same-rev `done`
+    job back forever, nothing would ever re-kick and the table would render
+    pending for the rest of the rev.
+- **Ceiling.** The job runs under a `ScriptBudget.start(snippet_sweep_ceiling_s)`;
+  exhausting it fails the job with a `sweep ceiling (Ns) exceeded` message.
+- **Cancellation.** `job.cancel` is set by the session invalidation hooks and
+  by eviction. The run loop checks it between cells, AND the job's
+  `ScriptEvalContext`s are built with `should_abort=job.cancel.is_set` so a
+  cancelled job also stops mid-row-build — otherwise an evicted session's
+  ~80 MB model stays reachable from a sweep thread until the ceiling.
+- **Concurrency.** A per-session `run_lock` gives one active sweep per session
+  (a queued job blocks its own daemon thread, a natural FIFO); a lazily-sized
+  process-wide semaphore bounds concurrently running jobs across ALL sessions,
+  so N open projects cannot mean N × workers guest instances.
+
+**Sharding.** The row BUILD stays serial — it may itself call the guest to
+resolve expand or script-as-source columns, and every later stage depends on
+its output — but the per-cell work after it is fanned out over up to
+`snippet_sweep_workers` threads, each driving its OWN `ScriptEvalContext` and
+therefore its own guest instance. Results are identical to serial execution:
+a cell's value is a pure function of (code, model, element ids), the cell
+cache is internally locked, and the pathology counters are job-global.
+
+> **DON'T rely on module-global state inside a snippet.** Mutating a module
+> global between `value()` calls was already outside the determinism guarantee
+> (see the memo caveat above), but sharding makes it reachable in a NEW way:
+> two cells of the same table can now land on different guest instances, so
+> "accumulate into a global across cells" no longer even sees a single
+> interpreter. Snippet entry points must be pure functions of their arguments.
+
+**Route contracts** (`api/routes/tables.py`) — the client-visible half:
+
+- `POST /tables/evaluate` runs its whole-table passes (`build_rows_ex` +
+  `order_rows`) CACHE-ONLY and evaluates only the visible window live. If
+  anything went pending it degrades to BUILD order (a sort over half-pending
+  values would visibly reshuffle on every poll) and kicks/joins the sweep.
+- `script_status` (`ScriptStatusOut`) is `null` for a table with no script
+  column at all; otherwise `ready` (nothing pending — these rows are final for
+  this rev, though a cell may still hold an `unavailable`/error value, since
+  retrying that is the client's decision), `computing` (a sweep is filling the
+  cache — these rows are degraded, poll again), or `failed` (dead work,
+  `message` says why; both `failed` and `cancelled` jobs collapse here,
+  because no thread is behind either). **A response that saw a pending cell
+  can never report `ready`** — `_status_from_job` has no `ready` branch at all,
+  and the status is finalized after the window pass on every branch (including
+  an order-cache hit) so this holds universally. A sweep that finished
+  *during* the very request that kicked it still reports `computing`: the rows
+  in hand predate it, and one more poll returns the clean page.
+- `POST /tables/export` must touch every row, so it runs entirely cache-only
+  and probes for completeness first (a full cache-only render pass — a plain
+  collapse display column is invisible to build/order, so judging completeness
+  from those alone would ship a workbook full of silent `#ERROR`s). If
+  anything is still uncomputed it kicks/joins the sweep and answers **`202`
+  with `Retry-After: 1`** and a `ScriptStatusOut` body instead of a workbook.
+  **The STATUS CODE is the retry signal, not the body's `state`** — a 202 body
+  routinely carries `state: "computing"` for a job that has already finished,
+  and the ship-vs-retry decision is made by RE-PROBING the cache after the
+  kick ("would a retry actually help"), not by the job's state. When a retry
+  would not help (a terminal sweep that still left holes, or no runner at all)
+  the file ships with pending cells as `#ERROR`, flagged by
+  `X-Table-Script-Errors` and a trailing notice row.
+
+**Sweep + cache settings** (`api/settings.py`, all `DATA_ROVER_`-prefixed):
+
+| setting | default | meaning |
+|---|---|---|
+| `snippet_cell_cache_max` | `50_000` | LRU cap on `ScriptCellCache` entries per session. |
+| `snippet_sweep_workers` | `4` | Threads a sweep fans its cell work across, AND the size of the process-wide semaphore bounding concurrently running sweep jobs. |
+| `snippet_sweep_ceiling_s` | `600.0` | Per-sweep wall ceiling; the job's `ScriptBudget`. Exhausting it fails the job. |
+| `snippet_sweep_timeout_abort` | `3` | Consecutive-`timeout` **and** consecutive-`unavailable` abort threshold (job-global). |
+| `snippet_sweep_sync` | `False` | Run each sweep inline inside `kick_or_join_sweep` instead of on a daemon thread. **Tests only** — it makes a sweep complete deterministically within the calling test. |
+
+`snippet_pool_size` (6) is sized for this: 4 sweep workers + 2 interactive
+headroom. A pool smaller than `snippet_sweep_workers + 1` makes sweep workers
+fail to get an instance, which surfaces as `unavailable` — and then the
+unavailable guard aborts the sweep, correctly but confusingly.
+
+Coverage: `tests/api/test_script_sweep.py` and
+`tests/api/test_tables_script_status.py` (fakes, default suite),
+`tests/api/test_script_sweep_wasm.py` (`-m integration`, real guest,
+end-to-end settle + sharding determinism), `tests/api/test_script_sweep_perf.py`
+(`-m perf`, per-call round-trip budget + parallel speedup floor).

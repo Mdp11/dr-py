@@ -249,10 +249,18 @@ SnippetSourceEditor.svelte`, bound to a `SnippetSource` (`{ ref?, definition?
   a response that saw pending values never reports `ready`, so the last poll
   always lands a clean, correctly-sorted page. `TableGrid` shows
   `computing {done}/{total}` (or the failure message) above the body via
-  `getTableScriptStatus(tabId)`. **Export** mirrors this: `/tables/export`
-  answers **202 + Retry-After: 1** while values are still computing, and
-  `downloadTable` retries (bounded, `onProgress` on the Export button,
-  abortable on unmount) until the xlsx arrives.
+  `getTableScriptStatus(tabId)`. `failed` is terminal — stop polling; the work
+  is dead and only the next commit revives it (a commit re-keys the server's
+  sweep registry, and `script_status` starts over from the new rev).
+  **Export** mirrors this: `/tables/export` answers **202 + Retry-After: 1**
+  while values are still computing, and `downloadTable` retries (bounded,
+  `onProgress` on the Export button, abortable on unmount) until the xlsx
+  arrives. Retry off the **HTTP status code, never the body's `state`**: a 202
+  body routinely says `computing` for a sweep that already finished (the server
+  decides ship-vs-retry by re-probing its cache, not by the job's state), and a
+  200 always carries a real workbook — possibly with `#ERROR` cells and
+  `X-Table-Script-Errors` set, which is the server saying "retrying will not
+  help", not an invitation to poll again.
 - **`warnings` threading.** Both evaluation paths share one
   `ScriptEvalContext` per request and report through its `.warnings` list:
   `TableData.warnings` (`state/table-editor.svelte.ts`) is read via
