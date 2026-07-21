@@ -7,7 +7,7 @@
 // `Navigation/__tests__/combine-frame.test.ts`'s `setArtifactHeaders` helper
 // — there is no direct headers setter.
 import { flushSync, mount, unmount } from 'svelte';
-import { EditorView, keymap } from '@codemirror/view';
+import { EditorView } from '@codemirror/view';
 import { http, HttpResponse } from 'msw';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -439,26 +439,13 @@ describe('SnippetSourceEditor — test panel', () => {
 	});
 
 	it('the CodeEditor Mod-Enter binding invokes onRun, which drives a run through the panel (CodeEditor onRun -> testPanel.requestRun wiring)', async () => {
-		// A genuine `keydown` with ctrlKey/metaKey does NOT reach this
-		// component's own Mod-Enter binding: CodeMirror's `basicSetup` bundles
-		// @codemirror/commands' defaultKeymap, which ALSO binds Mod-Enter (to
-		// `insertBlankLine`) and is registered in CodeEditor.svelte's
-		// extensions array BEFORE this component's own `keymap.of([...])`.
-		// CodeMirror keymap facets try earlier-registered groups first and
-		// stop at the first handler that returns true, so `insertBlankLine`
-		// (which always returns true) consumes the keydown before the
-		// onRun binding is ever tried. Verified directly: dispatching a real
-		// `keydown` on `view.contentDOM` left `onRunSpy` uncalled and instead
-		// inserted a blank line at the cursor — a pre-existing production bug
-		// in CodeEditor.svelte's keymap ordering, out of scope for this
-		// test-file-only change (see the fix task's report).
-		//
-		// So rather than fake a passing keydown dispatch, this test locates
-		// CodeEditor's OWN Mod-Enter binding directly in the editor's keymap
-		// facet (its own `keymap.of(...)` is always the LAST-registered
-		// group) and invokes its `run` the same way CodeMirror would if
-		// precedence ever let it through — exercising the real onRun ->
-		// requestRun -> POST /snippets/run chain end to end.
+		// CodeEditor.svelte wraps its Mod-Enter binding in `Prec.highest(...)` so
+		// it wins over basicSetup's defaultKeymap (which ALSO claims Mod-Enter,
+		// for insertBlankLine) regardless of extensions-array order — see
+		// CodeEditor.svelte for the full why. That lets this test dispatch a
+		// REAL keydown on the view's contentDOM (as an actual keypress would
+		// arrive) instead of reaching into the keymap facet to invoke the
+		// binding directly, the way this test used to work around the bug.
 		vi.useFakeTimers();
 		server.use(
 			http.post('*/snippets/lint', () =>
@@ -480,11 +467,18 @@ describe('SnippetSourceEditor — test panel', () => {
 			) as HTMLElement;
 			const view = EditorView.findFromDOM(content);
 			expect(view).not.toBeNull();
-			const ownGroup = view!.state.facet(keymap).at(-1)!;
-			const binding = ownGroup.find((b) => b.key === 'Mod-Enter');
-			expect(binding).toBeTruthy(); // the run binding a real keypress WOULD hit if precedence let it through
 
-			binding!.run!(view!);
+			// CodeMirror's `Mod` is Ctrl on Linux (this environment).
+			content.dispatchEvent(
+				new KeyboardEvent('keydown', {
+					key: 'Enter',
+					ctrlKey: true,
+					bubbles: true,
+					cancelable: true
+				})
+			);
+			flushSync();
+
 			await vi.waitFor(() => expect(captured.body()).not.toBeNull());
 			expect(captured.body()!['entry']).toBe('value');
 			expect(captured.body()!['element_ids']).toEqual(['a']);

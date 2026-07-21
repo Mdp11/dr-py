@@ -2,6 +2,7 @@
 	import { untrack } from 'svelte';
 	import { basicSetup } from 'codemirror';
 	import { EditorView, keymap, hoverTooltip, placeholder } from '@codemirror/view';
+	import { Prec } from '@codemirror/state';
 	import { expandTabs, hasTabs, INDENT_WIDTH } from '$lib/editor/indent';
 	import { pythonIndentation } from '$lib/editor/indent-extension';
 	import { python, pythonLanguage } from '@codemirror/lang-python';
@@ -124,7 +125,15 @@
 						// Four-space levels, Tab/Shift-Tab, and paste tab-expansion —
 						// see indent-extension.ts for why each of those is spelled out.
 						pythonIndentation,
-						keymap.of([{ key: 'Mod-Enter', run: () => (onRun(), true) }]),
+						// Prec.highest is required, not decorative: basicSetup bundles
+						// @codemirror/commands' defaultKeymap, which ALSO claims Mod-Enter
+						// (for insertBlankLine). CodeMirror's keymap facet tries earlier-
+						// registered groups first, and basicSetup sits ABOVE this keymap
+						// in the extensions array below — so without an explicit
+						// precedence bump, array order alone hands Mod-Enter to
+						// insertBlankLine and this binding never fires. Do not "simplify"
+						// this back to a plain keymap.of.
+						Prec.highest(keymap.of([{ key: 'Mod-Enter', run: () => (onRun(), true) }])),
 						EditorView.updateListener.of((u) => {
 							if (u.docChanged) onChange(u.state.doc.toString());
 						}),
