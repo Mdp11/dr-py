@@ -180,6 +180,23 @@ def test_dispatch_with_missing_id_still_returns_a_response():
 # --- max_op_bytes cap (distinct code path from the max_ops count cap) ------
 
 
+def test_outgoing_response_inlines_far_endpoints():
+    from tests.script.conftest import tiny_model
+
+    d = BridgeDispatcher(tiny_model(), record_ops=False)
+    resp = d.dispatch({"id": 1, "op": "outgoing", "element_id": "b1"})
+    assert [e["id"] for e in resp["elements"]] == ["b2"]
+    assert resp["elements"][0]["name"] == "Building Two"
+
+
+def test_incoming_response_inlines_far_endpoints():
+    from tests.script.conftest import tiny_model
+
+    d = BridgeDispatcher(tiny_model(), record_ops=False)
+    resp = d.dispatch({"id": 1, "op": "incoming", "element_id": "b2"})
+    assert [e["id"] for e in resp["elements"]] == ["b1"]
+
+
 def test_record_op_byte_cap_enforced():
     small_op = {"kind": "delete_element", "id": "b1"}
     # first op's serialized size, so the SECOND identical op is guaranteed to

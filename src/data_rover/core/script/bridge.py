@@ -49,7 +49,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 
 from ..metamodel.schema import Metamodel
 from ..model.element import Element
@@ -103,6 +103,12 @@ def _project_relationship(rel: Relationship) -> dict[str, Any]:
         "source_id": rel.source_id,
         "target_id": rel.target_id,
     }
+
+
+#: Public alias: the api layer (embedded-session root piggyback) and the
+#: trusted test runner project elements host-side with exactly the wire
+#: shape `_op_element` uses; a second projection implementation would drift.
+project_element = _project_element
 
 
 class BridgeDispatcher:
@@ -229,14 +235,39 @@ class BridgeDispatcher:
         self.model.get_element(element_id)  # raises KeyError if missing
         rel_ids = sorted(self.model.indexes.outgoing_ids(element_id))
         rels = [self.model.get_relationship(rid) for rid in rel_ids]
-        return {"relationships": [_project_relationship(r) for r in rels]}
+        return {
+            "relationships": [_project_relationship(r) for r in rels],
+            "elements": self._far_endpoints(r.target_id for r in rels),
+        }
 
     def _op_incoming(self, req: dict[str, Any]) -> dict[str, Any]:
         element_id = req["element_id"]
         self.model.get_element(element_id)  # raises KeyError if missing
         rel_ids = sorted(self.model.indexes.incoming_ids(element_id))
         rels = [self.model.get_relationship(rid) for rid in rel_ids]
-        return {"relationships": [_project_relationship(r) for r in rels]}
+        return {
+            "relationships": [_project_relationship(r) for r in rels],
+            "elements": self._far_endpoints(r.source_id for r in rels),
+        }
+
+    def _far_endpoints(self, ids: Iterable[str]) -> list[dict[str, Any]]:
+        """Inline far-endpoint projections shipped with a hop response
+        (trip-collapse, spec 2026-07-21 Phase A'): the facade primes its read
+        memo with these, collapsing `out()` + N neighbor fetches into one
+        trip. Deduped, in first-appearance (sorted-rel-id) order; an endpoint
+        missing from the model (dangling reference — the engine stays
+        inspectable) is silently skipped, so the guest's own fetch surfaces
+        the same NotFoundError it always did."""
+        seen: set[str] = set()
+        out: list[dict[str, Any]] = []
+        for fid in ids:
+            if fid in seen:
+                continue
+            seen.add(fid)
+            el = self.model.elements.get(fid)
+            if el is not None:
+                out.append(_project_element(el))
+        return out
 
     def _op_parent(self, req: dict[str, Any]) -> dict[str, Any]:
         element_id = req["element_id"]

@@ -163,3 +163,28 @@ def test_memoized_element_does_not_alias_list_valued_property(
     # The memo entry must still hold the original 2 tags -- the mutation on
     # `first` must not have leaked into the memo for `second` to observe.
     assert res.value == {"kind": "scalar", "value": 2}
+
+
+def test_hop_primes_neighbor_projections(bridge_call_log: list[str]) -> None:
+    sess = _open(
+        "def value(els):\n"
+        "    total = 0\n"
+        "    for rel in els[0].out():\n"
+        "        total += len(dr.element(rel['target_id']).name)\n"
+        "    return total\n"
+    )
+    assert sess.call("value", ["b1"]).error is None
+    # b1 root fetch + one outgoing hop; the b2 neighbor fetch is served from
+    # the projections the hop response shipped.
+    assert bridge_call_log.count("element") == 1
+    assert bridge_call_log.count("outgoing") == 1
+
+
+def test_incoming_primes_source_projections(bridge_call_log: list[str]) -> None:
+    sess = _open(
+        "def value(els):\n"
+        "    rels = els[0].in_()\n"
+        "    return dr.element(rels[0]['source_id']).name\n"
+    )
+    assert sess.call("value", ["b2"]).error is None
+    assert bridge_call_log.count("element") == 1  # b2 root only

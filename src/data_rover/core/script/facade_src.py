@@ -224,7 +224,17 @@ class Element:
         key = ("outgoing", self.id)
         hit = _memo.get(key)
         if hit is None:
-            hit = _read("outgoing", element_id=self.id)["relationships"]
+            resp = _read("outgoing", element_id=self.id)
+            # Hop responses ship the far endpoints' element projections
+            # inline (trip-collapse, spec 2026-07-21 Phase A') -- prime the
+            # element memo with them BEFORE storing the relationships, so a
+            # snippet that follows up with dr.element(rel["target_id"]) for
+            # each neighbor gets a memo hit instead of one round trip per
+            # neighbor. `or []` keeps this tolerant of a host that predates
+            # the additive "elements" key.
+            for proj in resp.get("elements") or []:
+                _memo_put(("element", proj["id"]), proj)
+            hit = resp["relationships"]
             _memo_put(key, hit)
         # Copy the outer list AND each relationship dict inside it (via
         # _copy_projection, so list-valued properties are copied too) — the
@@ -238,7 +248,12 @@ class Element:
         key = ("incoming", self.id)
         hit = _memo.get(key)
         if hit is None:
-            hit = _read("incoming", element_id=self.id)["relationships"]
+            resp = _read("incoming", element_id=self.id)
+            # See the comment in `out()` above: prime the element memo from
+            # the inlined far (source) endpoints before storing.
+            for proj in resp.get("elements") or []:
+                _memo_put(("element", proj["id"]), proj)
+            hit = resp["relationships"]
             _memo_put(key, hit)
         # See the comment in `out()` above: copy the relationship dicts too.
         return [_copy_projection(r) for r in hit]
