@@ -24,6 +24,8 @@ from data_rover.api.script_sweep import (
 )
 from data_rover.api.session import Session, SessionRegistry
 from data_rover.api.settings import Settings, get_settings
+from data_rover.api.table_cache import table_fingerprint
+from data_rover.api.validation_sweep import SweepProgress
 from data_rover.core.metamodel.schema import ElementType, Metamodel, PropertyDef
 from data_rover.core.model.model import Model
 from data_rover.core.script.embed import ScriptEvalContext
@@ -31,13 +33,21 @@ from data_rover.core.script.runner import RunLimits, ScriptBudget
 from data_rover.core.script.schema import SnippetDefinition, SnippetSource
 from data_rover.core.table.evaluate import SortSpec, build_rows_ex, order_rows
 from data_rover.core.table.schema import (
+    TABLE_ADAPTER,
     ElementColumn,
     ScopeRows,
     ScriptColumn,
     TableDefinition,
 )
 
-from ._script_fakes import BlockingRunner, CountingRunner, ScriptedRunner, ok, timeout
+from ._script_fakes import (
+    BlockingRunner,
+    CountingRunner,
+    ScriptedRunner,
+    UnavailableRunner,
+    ok,
+    timeout,
+)
 
 VALUE_CODE = "def value(els): return len(els)"
 
@@ -288,3 +298,127 @@ def test_run_lock_is_public() -> None:
     a private field."""
     reg = ScriptSweepRegistry()
     assert isinstance(reg.run_lock, type(threading.Lock()))
+
+
+def _fingerprint(defn: TableDefinition) -> str:
+    """The sweep's job key: the definition dumped with a None sort (the job
+    key deliberately excludes the sort — see the module docstring)."""
+    return table_fingerprint(TABLE_ADAPTER.dump_json(defn).decode(), None)
+
+
+def test_cancelled_job_reaches_a_terminal_state(
+    settings_sync_sweep: Settings,
+) -> None:
+    """A job aborted by cancellation must end `cancelled`, NOT `running`.
+
+    Pre-fix the abort path `return`ed without touching `job.state`, so the job
+    stayed `running` with a dead thread behind it and failed-job memory handed
+    that zombie to every later poll forever.
+    """
+    model = _model(4)
+    session = _session_with(model)
+    defn = _defn()
+    fp = _fingerprint(defn)
+
+    def _outcome(i: int, ids: list[str]) -> object:
+        if i == 0:
+            job = session.script_sweeps.get(fp, 0)
+            assert job is not None
+            job.cancel.set()  # cancelled mid-run, exactly like evict does
+        return ok(1)
+
+    runner = ScriptedRunner(_outcome)  # type: ignore[arg-type]
+    job = kick_or_join_sweep(
+        session, model.metamodel, model, defn, runner, settings_sync_sweep, 0
+    )
+    assert job.state == "cancelled"
+    assert job.state != "running"
+    assert runner.calls[0] == 1  # stopped at the next cell, not at the end
+
+
+def test_rev_rollback_aborted_job_is_terminal(settings_sync_sweep: Settings) -> None:
+    """The other abort trigger — `session.model_rev` moving off `job.rev` —
+    must also land a terminal state. `routes/metamodel_swap.py` rolls the rev
+    BACK on its DB-persist failure path, so an aborted job can find itself
+    registered at the current rev again; left `running` it would be returned
+    by `kick` forever."""
+    model = _model(4)
+    session = _session_with(model)
+    defn = _defn()
+
+    def _outcome(i: int, ids: list[str]) -> object:
+        if i == 0:
+            session.model_rev += 1  # a commit landed under the sweep
+        return ok(1)
+
+    runner = ScriptedRunner(_outcome)  # type: ignore[arg-type]
+    job = kick_or_join_sweep(
+        session, model.metamodel, model, defn, runner, settings_sync_sweep, 0
+    )
+    assert job.state == "cancelled"
+
+
+def test_kick_drops_the_job_when_start_raises() -> None:
+    """`Thread.start()` can raise (thread exhaustion). The job must not stay
+    registered, or every later kick returns a threadless "running" zombie."""
+    reg = ScriptSweepRegistry()
+
+    def _boom(job: SweepJob) -> None:
+        raise RuntimeError("can't start new thread")
+
+    with pytest.raises(RuntimeError):
+        reg.kick("fp", 0, _boom)
+    assert reg.get("fp", 0) is None  # dropped, not remembered
+
+    started: list[SweepJob] = []
+    job = reg.kick("fp", 0, started.append)  # the NEXT kick gets a fresh job
+    assert started == [job]
+    assert job.state == "running"
+    assert reg.get("fp", 0) is job
+
+
+def test_runner_unavailable_fails_instead_of_reporting_done(
+    settings_sync_sweep: Settings,
+) -> None:
+    """A sweep whose runner is never available caches NOTHING (unavailable is
+    not a cacheable kind), so without the consecutive-unavailable guard it
+    would report `done` having achieved nothing and failed-job memory would
+    block every retry at that rev."""
+    model = _model(8)
+    session = _session_with(model)
+    defn = _defn()
+    runner = UnavailableRunner()
+
+    job = kick_or_join_sweep(
+        session, model.metamodel, model, defn, runner, settings_sync_sweep, 0
+    )
+    assert job.state == "failed"
+    assert "unavailable" in (job.message or "")
+    # Aborted at exactly the threshold, sharing the timeout guard's setting.
+    assert runner.opens == settings_sync_sweep.snippet_sweep_timeout_abort
+    assert session.script_cell_cache.size == 0
+
+
+def test_evict_refused_leaves_the_sweep_running() -> None:
+    """Eviction the guard REFUSES must not cancel the sweep: the idle sweeper
+    retries every interval, so a repeatedly-killed sweep on a long-lived
+    session would restart forever and never converge."""
+    reg = SessionRegistry()
+    session = reg.get("p")
+    session.metamodel = _mm()
+    session.model = _model(3)
+    session.validation_sweep = SweepProgress(running=True)  # guard refuses evict
+    defn = _defn()
+    runner = BlockingRunner()
+
+    job = kick_or_join_sweep(
+        session, session.metamodel, session.model, defn, runner, Settings(), 0
+    )
+    assert runner.entered.wait(timeout=5.0)
+
+    reg.evict("p")
+    assert reg.peek("p") is session  # eviction really was refused
+    assert not job.cancel.is_set()  # ...so the sweep survives untouched
+    assert job.state == "running"
+
+    runner.proceed.set()

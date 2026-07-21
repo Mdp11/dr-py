@@ -56,11 +56,18 @@ class SweepJob:
     until the row build finishes). ``message`` carries the abort reason of a
     ``failed`` job. ``cancel`` is set by the session invalidation hooks and by
     eviction; the run loop checks it between cells.
+
+    ``state`` has THREE terminal values. ``cancelled`` is distinct from
+    ``failed`` on purpose: a cancelled job hit no pathology (the session was
+    evicted, or the rev moved under it), so a client-facing status must be
+    able to tell the two apart. Every exit from the run loop MUST leave a
+    terminal state — a job left ``running`` behind a dead thread strands a
+    polling client forever, because failed-job memory returns it as-is.
     """
 
     fingerprint: str
     rev: int
-    state: Literal["running", "done", "failed"] = "running"
+    state: Literal["running", "done", "failed", "cancelled"] = "running"
     done: int = 0
     total: int | None = None
     message: str | None = None
@@ -95,6 +102,12 @@ class ScriptSweepRegistry:
         An existing job at the SAME rev is returned as-is whatever its state —
         running, done, or **failed** (failed-job memory, see the module
         docstring). Only a rev change creates a new job (and calls ``start``).
+
+        If ``start`` raises (e.g. ``Thread.start`` under thread exhaustion),
+        the freshly registered job is REMOVED before the exception propagates:
+        leaving it in place would register a threadless "running" job that
+        failed-job memory hands back to every later poll forever. Dropping it
+        lets the next kick try again.
         """
         created = False
         with self._lock:
@@ -104,7 +117,13 @@ class ScriptSweepRegistry:
                 self._jobs[fingerprint] = job
                 created = True
         if created:
-            start(job)
+            try:
+                start(job)
+            except BaseException:
+                with self._lock:
+                    if self._jobs.get(fingerprint) is job:
+                        del self._jobs[fingerprint]
+                raise
         return job
 
     def cancel_all(self) -> None:
@@ -165,6 +184,20 @@ def _fail(job: SweepJob, message: str) -> None:
     job.message = message
 
 
+def _cancelled(job: SweepJob) -> None:
+    """Mark an aborted job terminal.
+
+    EVERY ``_aborted()`` return path must go through here. A bare ``return``
+    leaves ``state="running"`` with a dead thread behind it, and failed-job
+    memory (``kick`` returns a same-rev job as-is) then hands that zombie back
+    to every subsequent poll — the client waits on a sweep nobody is running.
+    Reachable both when the rev rolls BACK onto the job's rev (see
+    ``routes/metamodel_swap.py``'s DB-failure path) and after any cancel.
+    """
+    job.state = "cancelled"
+    job.message = "sweep cancelled"
+
+
 #: Process-wide bound on concurrently RUNNING sweep jobs (spec §4.3: sweeps
 #: get their own pool, bounded across ALL sessions — N open projects must not
 #: mean N×workers guest instances). Lazily sized from settings on first use.
@@ -197,6 +230,7 @@ def _run(
             # Re-check after queuing: the job may have been cancelled (or the
             # rev moved) while this thread waited for a slot / the run lock.
             if _aborted(session, job):
+                _cancelled(job)
                 return
             _run_inner(session, metamodel, model, defn, runner, settings, job)
     except Exception:
@@ -222,12 +256,20 @@ def _run_inner(
         budget,
         cell_cache=session.script_cell_cache,
         rev=job.rev,
+        # Cancellation granularity INSIDE the serial row build: for a
+        # definition with an expand script column (or a script column used as
+        # a source) `build_rows_ex` IS the grind, and without this probe a
+        # cancelled job would keep an evicted session's model alive until the
+        # ceiling. Aborted calls come back kind="cancelled", which the cell
+        # cache refuses to store.
+        should_abort=job.cancel.is_set,
     )
     try:
         # Serial prefix: computes (and caches) every expand/keep_empty/
         # script-as-source item in dependency order.
         built = build_rows_ex(metamodel, model, defn, TableLimits(), script=ctx)
         if _aborted(session, job):
+            _cancelled(job)
             return
         script_cols = [
             c
@@ -242,9 +284,11 @@ def _run_inner(
         base_slots = (len(built.keys[0]) - expand_count) if built.keys else 1
         job.total = len(built.keys) * len(script_cols)
         consecutive_timeouts = 0
+        consecutive_unavailable = 0
         for key in built.keys:
             for col in script_cols:
                 if _aborted(session, job):
+                    _cancelled(job)
                     return
                 if budget.exhausted:
                     _fail(
@@ -266,11 +310,13 @@ def _run_inner(
                 if roots:
                     assert col.snippet.definition is not None
                     res = ctx.call(col.snippet.definition.code, "value", roots)
-                    if res.error is not None and res.error.kind == "timeout":
+                    kind = res.error.kind if res.error is not None else None
+                    if kind == "timeout":
                         # Timeouts are environmental and never cached, so a
                         # snippet that keeps timing out would otherwise be
                         # re-run for every remaining cell of a huge table.
                         consecutive_timeouts += 1
+                        consecutive_unavailable = 0
                         if consecutive_timeouts >= settings.snippet_sweep_timeout_abort:
                             _fail(
                                 job,
@@ -278,8 +324,33 @@ def _run_inner(
                                 "consecutive snippet timeouts",
                             )
                             return
+                    elif kind == "unavailable":
+                        # WHY this guard exists: `unavailable` results (no
+                        # runner, or an exhausted wasm warm pool) are
+                        # deliberately never cached either. Without it a sweep
+                        # against a busy/absent runner grinds every cell,
+                        # caches NOTHING, and still ends state="done" — a
+                        # "success" indistinguishable from a real one. Since
+                        # kick() returns a same-rev done job as-is, nothing
+                        # ever re-kicks and the table renders pending forever.
+                        # Shares the timeout guard's threshold and its
+                        # reset-on-any-other-outcome discipline.
+                        consecutive_unavailable += 1
+                        consecutive_timeouts = 0
+                        if (
+                            consecutive_unavailable
+                            >= settings.snippet_sweep_timeout_abort
+                        ):
+                            _fail(
+                                job,
+                                f"aborted after {consecutive_unavailable} "
+                                "consecutive results with the script runner "
+                                "unavailable",
+                            )
+                            return
                     else:
                         consecutive_timeouts = 0
+                        consecutive_unavailable = 0
                 job.done += 1
         job.state = "done"
     finally:

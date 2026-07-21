@@ -268,12 +268,6 @@ class SessionRegistry:
             return
         # Serialise vs an in-flight commit (spec §11 evict-during-commit guard).
         with session.write_mutex:
-            # Sweeps must NEVER block eviction, so they are cancelled
-            # unconditionally BEFORE the guard and are deliberately not part of
-            # its condition (unlike live leases / feed clients / an in-flight
-            # validation sweep). Sweep reads are lock-free and rev-stamped, so
-            # a cancelled sweep merely wastes its remaining work.
-            session.script_sweeps.cancel_all()
             if (
                 session.lock_table.active_leases(time.monotonic())
                 or session.hub.has_clients()
@@ -289,6 +283,15 @@ class SessionRegistry:
                 # but waste the sweep; sweeps finish in seconds and the idle
                 # sweeper retries.
                 return
+            # Only now that eviction is actually going ahead do we cancel the
+            # script sweeps: they must NEVER block eviction (they are
+            # deliberately absent from the guard above — reads are lock-free
+            # and rev-stamped, so a cancelled sweep merely wastes its
+            # remaining work), but cancelling a session that the guard just
+            # REFUSED to evict would kill a sweep the session still needs, and
+            # the idle sweeper's next retry would kill it again — a sweep on a
+            # long-lived session would restart forever and never converge.
+            session.script_sweeps.cancel_all()
             if self._evict_hook is not None:
                 self._evict_hook(project_id, session)
             # Remove only after the snapshot hook completes, and only when we

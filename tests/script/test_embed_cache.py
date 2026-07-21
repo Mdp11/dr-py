@@ -49,7 +49,12 @@ RUNTIME_ERROR = CallResult(
 )
 
 
-def _ctx(runner, cache: ScriptCellCache | None, rev: int = 1) -> ScriptEvalContext:
+def _ctx(
+    runner,
+    cache: ScriptCellCache | None,
+    rev: int = 1,
+    should_abort=None,
+) -> ScriptEvalContext:
     return ScriptEvalContext(
         runner,
         object(),  # type: ignore[arg-type]
@@ -57,6 +62,7 @@ def _ctx(runner, cache: ScriptCellCache | None, rev: int = 1) -> ScriptEvalConte
         ScriptBudget.start(60),
         cell_cache=cache,
         rev=rev,
+        should_abort=should_abort,
     )
 
 
@@ -198,3 +204,56 @@ def test_per_call_override_forces_live() -> None:
     assert runner.calls[0] == 1  # guest was invoked
     assert c.pending_misses == 0  # no pending recorded
     c.close()
+
+
+def test_should_abort_short_circuits_call() -> None:
+    """An already-firing abort predicate must stop `call()` before any guest
+    work: no guest call, no `errored` poison, and nothing written to the cell
+    cache (kind "cancelled" is not a cacheable kind)."""
+    cache = ScriptCellCache()
+    cache.clear_and_stamp(1)
+    runner = _FakeRunner(OK)
+    c = _ctx(runner, cache, should_abort=lambda: True)
+    res = c.call("code", "value", ["e1"])
+    c.close()
+    assert res.error is not None and res.error.kind == "cancelled"
+    assert runner.calls[0] == 0  # ZERO guest calls
+    assert c.errored is False  # an abort says nothing about the snippet
+    assert cache.size == 0  # never cached
+
+
+def test_should_abort_is_not_memoized_and_defaults_off() -> None:
+    """The abort result must not be memoized (a later live call still
+    computes), and the default `should_abort=None` preserves today's
+    behaviour exactly."""
+    cache = ScriptCellCache()
+    cache.clear_and_stamp(1)
+    runner = _FakeRunner(OK)
+    flag = [True]
+    c = _ctx(runner, cache, should_abort=lambda: flag[0])
+    assert c.call("code", "value", ["e1"]).error is not None
+    flag[0] = False
+    assert c.call("code", "value", ["e1"]).error is None  # recomputed, not memoized
+    assert runner.calls[0] == 1
+    c.close()
+
+    plain = _ctx(_FakeRunner(OK), None)  # no should_abort: unchanged behaviour
+    assert plain.call("code", "value", ["e1"]).error is None
+    plain.close()
+
+
+def test_should_abort_returns_a_cached_value_it_already_has() -> None:
+    """The probe sits AFTER the memo/cell-cache probes: a value already in
+    hand costs nothing to return, so an abort does not discard it."""
+    cache = ScriptCellCache()
+    cache.clear_and_stamp(1)
+    runner = _FakeRunner(OK)
+    warm = _ctx(runner, cache)
+    warm.call("code", "value", ["e1"])
+    warm.close()
+
+    c = _ctx(runner, cache, should_abort=lambda: True)
+    res = c.call("code", "value", ["e1"])
+    c.close()
+    assert res.error is None and res.value == {"kind": "scalar", "value": 5}
+    assert runner.calls[0] == 1

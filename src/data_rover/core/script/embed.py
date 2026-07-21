@@ -34,11 +34,21 @@ and one warnings channel.
   same context can still serve live window calls (e.g. an on-screen window
   evaluated without `cache_only`) after a cache-only whole-table pass already
   produced a pending result for the same cell.
+- **Cooperative abort (`should_abort`)**: an optional zero-arg predicate the
+  context consults inside `call()` before doing any guest work. A background
+  sweep passes its cancel-event's `is_set` so a cancelled job stops grinding
+  mid-row-build instead of only between cells (an evicted session's ~80 MB
+  model must not stay reachable for the whole sweep ceiling). An aborted call
+  returns error kind `"cancelled"` — a kind `ScriptCellCache.put` refuses to
+  store, so it can never poison the cache — and, like `pending`, it does NOT
+  set `errored` and is NOT memoized (the abort is about the caller, not the
+  snippet). Default `None` disables the probe entirely.
 """
 
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 from typing import Literal
 
 from ..model.model import Model
@@ -67,6 +77,7 @@ class ScriptEvalContext:
         cell_cache: ScriptCellCache | None = None,
         rev: int = 0,
         cache_only: bool = False,
+        should_abort: Callable[[], bool] | None = None,
     ) -> None:
         self._runner = runner
         self._model = model
@@ -84,6 +95,7 @@ class ScriptEvalContext:
         self._rev = rev
         self._code_sha: dict[str, str] = {}
         self.cache_only = cache_only
+        self._should_abort = should_abort
         self.pending_misses = 0
 
     def _cell_key(self, code: str, entry: str, ids: tuple[str, ...]) -> CellKey:
@@ -114,6 +126,18 @@ class ScriptEvalContext:
                     self.errored = True
                 self._memo[key] = cached
                 return cached
+        # Cooperative abort probe: placed AFTER the memo/cell-cache probes (a
+        # value already in hand costs nothing to return) but BEFORE the
+        # cache-only pending branch and any guest work. `"cancelled"` is
+        # refused by ScriptCellCache.put, so an aborted call can never poison
+        # the cache; it is neither memoized nor counted as an error, because
+        # the abort says nothing about the snippet.
+        if self._should_abort is not None and self._should_abort():
+            return CallResult(
+                value=None,
+                error=ScriptError(kind="cancelled", message="evaluation cancelled"),
+                duration_ms=0,
+            )
         if cache_only if cache_only is not None else self.cache_only:
             self.pending_misses += 1
             return CallResult(

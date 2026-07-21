@@ -187,3 +187,31 @@ class BlockingRunner:
         rev: int,
     ) -> RunResult:  # pragma: no cover - unused by these tests
         raise NotImplementedError
+
+
+class UnavailableRunner:
+    """ScriptRunner stand-in whose `open_session` always raises, exactly the
+    way `WasmScriptRunner` does when its warm pool is exhausted (or the runner
+    is closed). `ScriptEvalContext._call_uncached` turns that into an
+    `unavailable` CallResult, which the cell cache refuses to store — the
+    condition the sweep's consecutive-unavailable abort guard exists for."""
+
+    def __init__(self) -> None:
+        self.opens = 0
+
+    def open_session(
+        self, model: Model, code: str, limits: RunLimits, *, budget: ScriptBudget
+    ) -> SnippetSession:
+        self.opens += 1
+        raise RuntimeError("wasm pool exhausted")
+
+    def run(
+        self,
+        model: Model,
+        req: RunRequest,
+        limits: RunLimits,
+        *,
+        record_ops: bool,
+        rev: int,
+    ) -> RunResult:  # pragma: no cover - unused by these tests
+        raise NotImplementedError
