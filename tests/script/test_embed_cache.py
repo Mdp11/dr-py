@@ -184,3 +184,17 @@ def test_per_call_override_forces_cache_only() -> None:
     assert res.error is not None and res.error.kind == "pending"
     assert runner.calls[0] == 0
     c.close()
+
+
+def test_per_call_override_forces_live() -> None:
+    cache = ScriptCellCache()
+    cache.clear_and_stamp(1)
+    runner = _FakeRunner(OK)
+    c = _ctx(runner, cache)  # start with empty cache
+    c.cache_only = True  # ctx-level mode is cache-only
+    res = c.call("code", "value", ["e1"], cache_only=False)  # override to live
+    assert res.error is None
+    assert res.value == {"kind": "scalar", "value": 5}
+    assert runner.calls[0] == 1  # guest was invoked
+    assert c.pending_misses == 0  # no pending recorded
+    c.close()
