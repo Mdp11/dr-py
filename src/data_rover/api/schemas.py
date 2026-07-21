@@ -909,8 +909,13 @@ class TableRowOut(BaseModel):
 class ScriptStatusOut(BaseModel):
     """Progress of script-column computation for this table (spec §4.2).
 
-    `ready`: every needed script value was available (or none were needed) —
-    the rows in this response are final for this model rev.
+    `ready`: NOTHING IS PENDING COMPUTATION — the rows in this response are
+    final for this model rev and polling again would not change them. It does
+    NOT promise every cell holds a value: the degraded-not-failed stance means
+    a cell whose call was never attempted (no runner, no free concurrency slot)
+    or whose snippet raised renders as an `unavailable`/error cell under a
+    `ready` status, because retrying is the client's decision, not a matter of
+    waiting for a background sweep.
     `computing`: a background sweep is filling the cell cache; the rows in this
     response are DEGRADED (build order, possibly `pending` cells) — poll again.
     `failed`: the work is dead and will not finish on its own; `message` says

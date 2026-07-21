@@ -18,6 +18,7 @@ case parks the sweep thread on an Event instead.
 
 from __future__ import annotations
 
+import hashlib
 import threading
 from collections.abc import Iterator
 
@@ -120,6 +121,29 @@ def _script_table() -> dict:
     }
 
 
+#: An EXPAND script column whose snippet returns a None scalar: `_expand_values`
+#: promotes no binding, `keep_empty` (default True) keeps one row per element
+#: with a None key slot, and `cells.py` re-derives that slot's cell with a
+#: FORCED cache-only call. That forced call is the only production path that can
+#: record a pending miss on an ORDER-CACHE HIT (there is no per-request memo to
+#: serve it), which is exactly what FIX 2's path (a) is about.
+EMPTY_EXPAND_CODE = "def value(els): return None"
+
+
+def _expand_script_table() -> dict:
+    return {
+        "row_source": {"kind": "scope", "types": ["Thing"]},
+        "columns": [
+            {"kind": "element"},
+            {
+                "kind": "script",
+                "mode": "expand",
+                "snippet": {"definition": {"code": EMPTY_EXPAND_CODE}},
+            },
+        ],
+    }
+
+
 def _plain_table() -> dict:
     """No script column anywhere: `script_ctx is None`, so the route must be
     completely untouched by Phase B (`script_status is None`)."""
@@ -129,10 +153,10 @@ def _plain_table() -> dict:
     }
 
 
-def _fingerprint() -> str:
-    """The sweep's job key for `_script_table()`: the resolved definition dumped
-    with a None sort (the job key excludes the sort on purpose)."""
-    defn = TABLE_ADAPTER.validate_python(_script_table())
+def _fingerprint(table: dict | None = None) -> str:
+    """The sweep's job key for a table: the resolved definition dumped with a
+    None sort (the job key excludes the sort on purpose)."""
+    defn = TABLE_ADAPTER.validate_python(table if table is not None else _script_table())
     return table_fingerprint(TABLE_ADAPTER.dump_json(defn).decode(), None)
 
 
@@ -233,6 +257,50 @@ def test_unsorted_default_table_stays_inline(
     assert session.script_sweeps.get(_fingerprint(), session.model_rev) is None
 
 
+def test_partially_cached_sort_degrades_to_build_order(
+    client: TestClient,
+    app: FastAPI,
+    seed_thing_model: None,
+    settings_sync_sweep: Settings,
+) -> None:
+    """THE discriminating test for "degrade to build order".
+
+    A FULLY cold table cannot prove it: `_sort_value` maps every pending result
+    onto the same `(1, ())` empty key, so sorting an all-pending table is a
+    stable no-op that already equals build order. The failure the degrade
+    actually prevents is a PARTIALLY cached table visibly reshuffling on every
+    poll — so this test warms the cell cache for a strict SUBSET of the rows.
+
+    `t4`/`t5` are pre-seeded with 6/5 (the values the runner would produce);
+    `t1`..`t3` stay pending. Ascending sort on the script column would put the
+    two non-empty rows FIRST (empties always sort last, in both directions),
+    yielding `[t5, t4, t1, t2, t3]` — distinct from BOTH the build order
+    `[t1..t5]` this route must return AND the fully-warm sort
+    `[t5, t4, t3, t2, t1]` a later poll returns. Three mutually
+    distinguishable orders, so the assertion below can only pass for one of
+    them.
+    """
+    runner = ScriptedRunner(_descending_value)
+    app.dependency_overrides[get_runner] = lambda: runner
+
+    session = get_session()
+    sha = hashlib.sha256(VALUE_CODE.encode()).hexdigest()
+    for tid in ("t4", "t5"):
+        session.script_cell_cache.put(
+            (sha, "value", (tid,)), ok(10 - int(tid[1:])), session.model_rev
+        )
+
+    page = _evaluate(client, _script_table())
+    assert page["script_status"]["state"] == "computing"
+    assert _keys(page) == THING_IDS  # NOT ["t5","t4","t1","t2","t3"]
+
+    # ...and once the (sync) sweep has filled the rest, the sort is the clean
+    # fully-warm one — proving the half-sorted interleave was never the answer.
+    second = _evaluate(client, _script_table())
+    assert second["script_status"]["state"] == "ready"
+    assert _keys(second) == list(reversed(THING_IDS))
+
+
 def test_sorted_script_table_while_computing(
     client: TestClient, app: FastAPI, seed_thing_model: None
 ) -> None:
@@ -244,12 +312,21 @@ def test_sorted_script_table_while_computing(
     `script-sweep`) and answers every other call immediately — that is the
     deterministic sync point, no sleeping and no self-deadlock when the route
     evaluates the visible window with the very same runner object.
+
+    `limit=2` removes the scheduling race the first cut of this test had. The
+    sweep and the window compute the SAME `(code, "value", ids)` keys at the
+    same rev, so with a full-width window the sweep could get nothing but cache
+    hits, never call the runner, and never set `entered`. A two-row window
+    leaves `t3`..`t5` computable ONLY by the sweep, so it must reach the
+    blocking fake whatever the interleaving.
     """
     entered = threading.Event()
     proceed = threading.Event()
+    sweep_thread: list[threading.Thread] = []
 
     def _outcome(i: int, ids: list[str]) -> CallResult:
         if threading.current_thread().name == "script-sweep":
+            sweep_thread.append(threading.current_thread())
             entered.set()
             proceed.wait(timeout=10.0)
         return _descending_value(i, ids)
@@ -258,16 +335,22 @@ def test_sorted_script_table_while_computing(
     app.dependency_overrides[get_runner] = lambda: runner
 
     try:
-        page = _evaluate(client, _script_table())
+        page = _evaluate(client, _script_table(), limit=2)
         assert page["script_status"]["state"] == "computing"
         # Degraded: build order, NOT the requested descending-value sort.
-        assert _keys(page) == THING_IDS
+        assert _keys(page) == THING_IDS[:2]
         # The visible window is still evaluated live, so its cells are real.
-        assert [row["cells"][1]["kind"] for row in page["rows"]] == ["value"] * 5
+        assert [row["cells"][1]["kind"] for row in page["rows"]] == ["value"] * 2
         # The sweep thread really is running behind that `computing`.
         assert entered.wait(timeout=5.0)
     finally:
         proceed.set()  # release the parked call so the daemon thread exits
+        # Deterministic teardown: the released daemon thread keeps writing into
+        # this session's cell cache, so JOIN it rather than letting the next
+        # test race it.
+        if sweep_thread:
+            sweep_thread[0].join(timeout=10.0)
+            assert not sweep_thread[0].is_alive()
 
 
 def test_sorted_script_table_after_sweep(
@@ -335,6 +418,48 @@ def test_failed_sweep_reported_not_rekicked(
     # Only the two live window cells ran again: no second sweep (which would
     # have added another `abort_at` calls).
     assert runner.calls[0] == after_first + 2
+
+
+def test_order_cache_hit_with_evicted_cell_downgrades_to_computing(
+    client: TestClient,
+    app: FastAPI,
+    seed_thing_model: None,
+    settings_sync_sweep: Settings,
+) -> None:
+    """FIX 2, path (a): an order-cache HIT must not report `ready` when the
+    window itself goes pending.
+
+    The order cache and the cell cache are bounded INDEPENDENTLY, so a warm
+    order can outlive the cell entries it was built from. An `expand` script
+    column re-derives its cell with a FORCED cache-only call (cells.py) and on
+    an order-cache hit there is no per-request memo to serve it — so an evicted
+    cell entry yields a `PendingCell`. Reporting `ready` there would stop the
+    client polling and strand that cell until the rev moves.
+    """
+    runner = ScriptedRunner(lambda i, ids: ok(None))
+    app.dependency_overrides[get_runner] = lambda: runner
+    table = _expand_script_table()
+
+    # 1st: cold — pending everywhere, sync sweep fills the cell cache.
+    assert _evaluate(client, table, sort=False)["script_status"]["state"] == "computing"
+    # 2nd: fully warm — `ready`, and THIS is the response that stores the order.
+    assert _evaluate(client, table, sort=False)["script_status"]["state"] == "ready"
+
+    session = get_session()
+    fp = _fingerprint(table)
+    rev = session.model_rev
+    assert session.table_order_cache.get(fp, "none", rev) is not None
+    # Simulate the independent LRU evictions: drop the cell entries (keeping the
+    # rev stamp, so writes still land) and forget the finished sweep job.
+    session.script_cell_cache.clear_and_stamp(rev)
+    session.script_sweeps.cancel_all()
+    assert session.script_sweeps.get(fp, rev) is None
+
+    page = _evaluate(client, table, sort=False)
+    assert session.table_order_cache.get(fp, "none", rev) is not None  # still a HIT
+    assert [row["cells"][1]["kind"] for row in page["rows"]] == ["pending"] * 5
+    assert page["script_status"]["state"] == "computing"  # NOT "ready"
+    assert session.script_sweeps.get(fp, rev) is not None  # ...and a sweep was kicked
 
 
 def test_runner_unavailable_reports_failed_without_a_sweep(

@@ -141,12 +141,14 @@ def _cell_out(model: Model, cell: Cell) -> TableCellOut:
 def _status_from_job(job: SweepJob) -> ScriptStatusOut:
     """Map a `SweepJob` onto the wire status of the request that kicked/joined it.
 
-    CALLERS ONLY REACH THIS AFTER THE CACHE-ONLY PASS SAW PENDING — that is the
+    CALLERS ONLY REACH THIS AFTER PENDING WAS SEEN (in the cache-only
+    whole-table pass, in the visible-window pass, or both) — that is the
     function's whole precondition, and it is why no branch here can return
-    `ready`. Those rows were built before the values existed (degraded to build
-    order), so even a sync/racing sweep that FINISHED during this very request
-    must report `computing`: the client polls once more and gets the clean
-    sorted page from the now-full cache.
+    `ready`. This response was already assembled before those values existed
+    (possibly degraded to build order, possibly carrying `pending` cells), so
+    even a sync/racing sweep that FINISHED during this very request must report
+    `computing`: the client polls once more and gets the clean page from the
+    now-full cache.
 
     Both DEAD job states collapse onto `failed`. `cancelled` is not a
     pathology (a rev change or an eviction cancelled it, never the snippet),
@@ -188,7 +190,9 @@ def evaluate_table(
     kicked/joined to fill the cell cache. Only the visible window is evaluated
     live, so a page still shows real values while the rest is computing.
     `script_status` carries the poll-again contract; it stays None for tables
-    that have no script column at all.
+    that have no script column at all. It is computed AFTER the window pass on
+    every branch (order-cache hit included), so a window that renders a
+    `pending` cell can never be reported as `ready`.
 
     Lock stance for the sweep kick: this route holds NO session lock (no
     `write_mutex` — see above), so kicking is safe even in the sync sweep mode
@@ -232,15 +236,10 @@ def evaluate_table(
             rev=rev,
         )
         try:
-            script_status: ScriptStatusOut | None = None
             cached = session.table_order_cache.get(fp, sort_key, rev)
             if cached is not None:
                 cached_rows, truncated, base_total = cached
                 ordered = list(cached_rows)
-                if script_ctx is not None:
-                    # A cached order was only ever stored by a complete pass
-                    # (see the poisoning guard below), so it is final.
-                    script_status = ScriptStatusOut(state="ready")
             else:
                 # Whole-table passes are CACHE-ONLY (spec §4.1): the guest is
                 # never driven O(rows) times inside a request. A miss records a
@@ -258,22 +257,9 @@ def evaluate_table(
                     if script_ctx.pending_misses > 0:
                         # Sort/filter incomplete: degrade to build order (a sort
                         # over half-pending values would visibly reshuffle on
-                        # every poll) and kick/join the sweep that fills the
-                        # cache. `_status_from_job` is reached ONLY from here,
-                        # i.e. only when pending was seen — which is exactly why
-                        # it never reports `ready` for this response.
+                        # every poll). The status/sweep decision itself is
+                        # deferred until after the window pass below.
                         ordered = list(built.keys)
-                        if runner is None:
-                            script_status = ScriptStatusOut(
-                                state="failed", message="script runner unavailable"
-                            )
-                        else:
-                            job = kick_or_join_sweep(
-                                session, metamodel, model, defn, runner, settings, rev
-                            )
-                            script_status = _status_from_job(job)
-                    else:
-                        script_status = ScriptStatusOut(state="ready")
             window = ordered[payload.offset : payload.offset + payload.limit]
             cells = evaluate_cells(
                 metamodel, model, defn, window, limits, script=script_ctx
@@ -287,9 +273,12 @@ def evaluate_table(
             # built against a since-superseded rev) must never be cached:
             # neither the fingerprint (code hash) nor `rev` changes on retry,
             # so a poisoned entry would be served forever. `pending_misses > 0`
-            # is the Phase B addition: that order is the DEGRADED build order,
-            # not the requested sort, and caching it would freeze the table in
-            # its unsorted shape for this rev.
+            # is the Phase B addition, and it is read here at its FINAL value
+            # (the window pass has already run): if the whole-table pass went
+            # pending, this order is the DEGRADED build order rather than the
+            # requested sort and caching it would freeze the table unsorted for
+            # this rev; if only the window went pending, the order is fine but
+            # declining to cache it is merely conservative.
             if cached is None and (
                 script_ctx is None
                 or (
@@ -301,6 +290,29 @@ def evaluate_table(
                 session.table_order_cache.put(
                     fp, sort_key, rev, tuple(ordered), truncated, base_total
                 )
+            # Status is finalized HERE, after the window pass, so that EVERY
+            # branch — including an order-cache HIT — observes the final
+            # `pending_misses`. The window is not automatically pending-free
+            # just because the whole-table pass was: an `expand` script column
+            # re-derives its cell with a FORCED cache-only call (cells.py), and
+            # on an order-cache hit there is no per-request memo to serve it,
+            # so an independently LRU-evicted cell-cache entry surfaces as a
+            # `PendingCell`. Reporting `ready` there would stop the client
+            # polling and strand that cell until the rev moves.
+            script_status: ScriptStatusOut | None = None
+            if script_ctx is not None:
+                if script_ctx.pending_misses == 0:
+                    script_status = ScriptStatusOut(state="ready")
+                elif runner is None:
+                    # Nothing to sweep with: a kicked job could only fail.
+                    script_status = ScriptStatusOut(
+                        state="failed", message="script runner unavailable"
+                    )
+                else:
+                    job = kick_or_join_sweep(
+                        session, metamodel, model, defn, runner, settings, rev
+                    )
+                    script_status = _status_from_job(job)
             warnings = list(script_ctx.warnings) if script_ctx is not None else []
         finally:
             close_script_context(script_ctx, acquired)
