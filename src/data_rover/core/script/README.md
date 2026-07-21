@@ -490,7 +490,14 @@ cache is internally locked, and the pathology counters are job-global.
   and the status is finalized after the window pass on every branch (including
   an order-cache hit) so this holds universally. A sweep that finished
   *during* the very request that kicked it still reports `computing`: the rows
-  in hand predate it, and one more poll returns the clean page.
+  in hand predate it, and one more poll returns the clean page. The
+  computing-vs-failed call for a TERMINAL job is made exactly like the export
+  route's ship-vs-retry one — by RE-PROBING the cache ("would a retry actually
+  help"), never by the job's state alone: a dead job whose values landed anyway
+  reports `computing` (the retry really will deliver), while a job that ended
+  `done` with holes still in the cache reports `failed`, because failed-job
+  memory hands that same job back at this rev forever and the page would
+  otherwise stay stuck in build order behind an endless once-a-second poll.
 - `POST /tables/export` must touch every row, so it runs entirely cache-only
   and probes for completeness first (a full cache-only render pass — a plain
   collapse display column is invisible to build/order, so judging completeness
