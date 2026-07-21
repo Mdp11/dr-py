@@ -44,6 +44,9 @@ OK = CallResult(value={"kind": "scalar", "value": 5}, error=None, duration_ms=1)
 TIMEOUT = CallResult(
     value=None, error=ScriptError(kind="timeout", message="t"), duration_ms=1
 )
+RUNTIME_ERROR = CallResult(
+    value=None, error=ScriptError(kind="runtime", message="boom"), duration_ms=1
+)
 
 
 def _ctx(runner, cache: ScriptCellCache | None, rev: int = 1) -> ScriptEvalContext:
@@ -100,3 +103,41 @@ def test_no_cache_still_works() -> None:
     c = _ctx(runner, None)
     assert c.call("code", "value", ["e1"]).error is None
     c.close()
+
+
+def test_cached_runtime_error_poisons_fresh_context() -> None:
+    cache = ScriptCellCache()
+    cache.clear_and_stamp(1)
+    runner = _FakeRunner(RUNTIME_ERROR)
+    c1 = _ctx(runner, cache)
+    assert c1.call("code", "value", ["e1"]).error.kind == "runtime"  # type: ignore[union-attr]
+    c1.close()
+    assert cache.size == 1  # "runtime" is a cacheable error kind
+
+    c2 = _ctx(runner, cache)  # fresh context, has never called anything yet
+    assert c2.errored is False
+    result = c2.call("code", "value", ["e1"])
+    c2.close()
+    assert runner.calls[0] == 1  # served from the cache, guest never re-invoked
+    assert result.error.kind == "runtime"  # type: ignore[union-attr]
+    assert c2.errored is True  # a cached error must still poison the request
+
+
+def test_cache_hit_populates_memo() -> None:
+    cache = ScriptCellCache()
+    cache.clear_and_stamp(1)
+    runner = _FakeRunner(OK)
+    primer = _ctx(runner, cache)
+    primer.call("code", "value", ["e1"])
+    primer.close()
+    assert runner.calls[0] == 1  # priming call hit the guest once
+
+    c = _ctx(runner, cache)  # fresh context; its first call is a cache hit
+    first = c.call("code", "value", ["e1"])
+    assert runner.calls[0] == 1  # served from the cache, not the guest
+
+    cache.clear_and_stamp(999)  # any further cache.get at rev=1 now misses
+    second = c.call("code", "value", ["e1"])
+    c.close()
+    assert second is first
+    assert runner.calls[0] == 1  # still not called: this came from the memo
