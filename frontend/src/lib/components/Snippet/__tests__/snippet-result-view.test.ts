@@ -98,3 +98,25 @@ it('shows the stale banner when told it is stale', () => {
 		unmount(c);
 	}
 });
+
+it("appends the console's staleHint to the base banner (owner: SnippetConsole)", () => {
+	const c = render({ result: result(), stale: true, staleHint: 'Re-run before staging.' });
+	try {
+		expect(document.querySelector('[data-testid="snippet-stale"]')?.textContent).toBe(
+			'The model changed during/after this run — results may be out of date. Re-run before staging.'
+		);
+	} finally {
+		unmount(c);
+	}
+});
+
+it('renders the base banner alone with no staleHint (owner: the embedded test panel, which never stages)', () => {
+	const c = render({ result: result(), stale: true });
+	try {
+		expect(document.querySelector('[data-testid="snippet-stale"]')?.textContent).toBe(
+			'The model changed during/after this run — results may be out of date.'
+		);
+	} finally {
+		unmount(c);
+	}
+});

@@ -39,6 +39,12 @@
 		onGoToLine?: (line: number) => void;
 	} = $props();
 
+	// A unique id per instance (several panels can be open on one page — one
+	// per script column / nav step) so the toggle's `aria-controls` points at
+	// THIS panel's expanded region and not some other instance's, mirroring
+	// RowSourceEditor/NavigationColumnEditor's `embId` convention.
+	const contentId = `snippet-test-panel:${crypto.randomUUID()}`;
+
 	let open = $state(false);
 	let elements = $state<SnippetBoundElement[]>([]);
 	let phase = $state<SnippetRunPhase>('idle');
@@ -55,9 +61,13 @@
 	// unmount (no throw, no warning), and a superseding in-flight run is
 	// structurally impossible here — `requestRun` flips `phase` to
 	// `'running'` synchronously before its only `await`, and `runDisabled`
-	// blocks re-entry while `phase !== 'idle'`. A mutation probe (deleting
-	// the `seq !== runSeq` check) confirmed this: every test still passed,
-	// because there is no externally visible difference to assert on.
+	// blocks re-entry while `phase !== 'idle'`. That guarantee holds only so
+	// long as `runDisabled` keeps its `phase !== 'idle'` term — drop or weaken
+	// that term and a second `requestRun` can start while the first is still
+	// in flight, at which point this generation guard stops being decorative
+	// and starts being load-bearing. A mutation probe (deleting the
+	// `seq !== runSeq` check) confirmed today's redundancy: every test still
+	// passed, because there is no externally visible difference to assert on.
 	let runSeq = 0;
 	onDestroy(() => {
 		runSeq++;
@@ -93,7 +103,25 @@
 	 * state/snippet-editor.runSnippetTab's entryAvailable guard). */
 	export async function requestRun(): Promise<void> {
 		open = true;
-		if (runDisabled) return;
+		if (runDisabled) {
+			// First-use path: Ctrl-Enter (the button itself is `disabled`, so it
+			// can only arrive this way) can fire before the panel is actually
+			// runnable. Without this, the panel unfurls and nothing else
+			// happens, leaving the user to guess why. Skip the notice while a
+			// run is already in flight (`phase !== 'idle'`) — that state
+			// explains itself via the spinner/"Stopping" text above, and
+			// nothing here is actually missing. The three checks below mirror
+			// `runDisabled`'s own left-to-right priority, so whichever is named
+			// is genuinely the first thing blocking the user.
+			if (phase === 'idle') {
+				notice = !configured
+					? 'Pick a saved snippet or write some code first.'
+					: !entryOk
+						? `Define ${entry}() to run this here.`
+						: `Bind ${entry === 'step' ? 'exactly one element' : 'at least one element'} to run this.`;
+			}
+			return;
+		}
 		const seq = ++runSeq;
 		phase = 'running';
 		notice = null;
@@ -132,34 +160,37 @@
 		data-testid="snippet-test-toggle"
 		class="flex w-full items-center gap-1 px-1.5 py-1 text-left text-muted-foreground transition-colors hover:text-foreground"
 		aria-expanded={open}
+		aria-controls={contentId}
 		onclick={() => (open = !open)}
 	>
 		<span class="font-mono">{open ? '▾' : '▸'}</span> Test
 	</button>
 	{#if open}
-		<ElementContextRow
-			{entry}
-			{elements}
-			onAdd={addElement}
-			onRemove={(id) => (elements = elements.filter((e) => e.id !== id))}
-			onClear={() => (elements = [])}
-		/>
-		<div class="flex items-center gap-2 px-1.5 py-1">
-			<button
-				type="button"
-				data-testid="snippet-test-run"
-				class="rounded bg-primary px-2 py-0.5 text-primary-foreground transition-colors hover:bg-primary/80 disabled:opacity-40"
-				disabled={runDisabled}
-				onclick={() => void requestRun()}
-			>
-				Run
-			</button>
-			<span class="text-muted-foreground/70">
-				{entry === 'step' ? 'runs step(el)' : 'runs value(elements)'}
-			</span>
-		</div>
-		<div class="max-h-56 overflow-y-auto border-t border-border/60">
-			<SnippetResultView {phase} {notice} {result} {stale} {onGoToLine} opsFooter={opsReadonly} />
+		<div id={contentId}>
+			<ElementContextRow
+				{entry}
+				{elements}
+				onAdd={addElement}
+				onRemove={(id) => (elements = elements.filter((e) => e.id !== id))}
+				onClear={() => (elements = [])}
+			/>
+			<div class="flex items-center gap-2 px-1.5 py-1">
+				<button
+					type="button"
+					data-testid="snippet-test-run"
+					class="rounded bg-primary px-2 py-0.5 text-primary-foreground transition-colors hover:bg-primary/80 disabled:opacity-40"
+					disabled={runDisabled}
+					onclick={() => void requestRun()}
+				>
+					Run
+				</button>
+				<span class="text-muted-foreground/70">
+					{entry === 'step' ? 'runs step(el)' : 'runs value(elements)'}
+				</span>
+			</div>
+			<div class="max-h-56 overflow-y-auto border-t border-border/60">
+				<SnippetResultView {phase} {notice} {result} {stale} {onGoToLine} opsFooter={opsReadonly} />
+			</div>
 		</div>
 	{/if}
 </div>

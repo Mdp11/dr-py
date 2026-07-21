@@ -19,7 +19,8 @@
 		result,
 		stale,
 		onGoToLine,
-		opsFooter
+		opsFooter,
+		staleHint
 	}: {
 		phase: SnippetRunPhase;
 		notice: string | null;
@@ -27,6 +28,13 @@
 		stale: boolean;
 		onGoToLine: (line: number) => void;
 		opsFooter?: Snippet;
+		// The stale banner's base sentence is true for both owners, but what to
+		// DO about it is not: the console can stage, the embedded test panel
+		// never can (see its file header). Rather than hardcode a call to
+		// action that is a lie for one owner, each owner supplies its own —
+		// SnippetConsole passes "Re-run before staging.", the test panel
+		// passes nothing and lets the base sentence stand alone.
+		staleHint?: string;
 	} = $props();
 
 	let tracebackOpen = $state(false);
@@ -49,7 +57,9 @@
 	{#if result}
 		{#if stale}
 			<p data-testid="snippet-stale" class="rounded bg-warning/15 px-2 py-1 text-warning">
-				The model changed during/after this run — results may be out of date. Re-run before staging.
+				The model changed during/after this run — results may be out of date.{staleHint
+					? ` ${staleHint}`
+					: ''}
 			</p>
 		{/if}
 

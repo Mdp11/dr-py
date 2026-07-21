@@ -241,6 +241,22 @@ it('surfaces the 429 and 503 notices', async () => {
 	}
 });
 
+it('shows a notice explaining what is missing when requestRun is invoked while gated (e.g. Ctrl-Enter before an element is bound)', async () => {
+	const c = render({
+		snippet: inline('def value(els): return 1\n'),
+		entry: 'value',
+		entryPoints: ['value'] // entry is fine; no element is bound yet, so countOk is the false term
+	});
+	try {
+		expand();
+		expect(testid('snippet-test-run')).not.toBeNull();
+		await c.requestRun();
+		expect(testid('snippet-notice')?.textContent).toContain('element');
+	} finally {
+		unmount(c);
+	}
+});
+
 it('lists recorded ops with the read-only warning and no Stage button', async () => {
 	captureRun({ ...OK_RESULT, ops: [{ kind: 'delete_element', id: 'e1' }] });
 	const c = render({

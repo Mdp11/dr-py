@@ -192,11 +192,16 @@
 		{/if}
 	{/if}
 
+	<!-- In ref mode there is no lint response to ask, so `[entry]` stands in
+	     as "the ref covers it" — EXCEPT when `refMissing` is true: the ref
+	     that was covering it is gone (deleted, or its own entry_points moved),
+	     the `snippet-ref-missing` warning above already says so, and Run must
+	     agree rather than post a doomed `artifact_id` to the backend. -->
 	<SnippetTestPanel
 		bind:this={testPanel}
 		{snippet}
 		{entry}
-		entryPoints={inline ? entryPoints : [entry]}
+		entryPoints={inline ? entryPoints : refMissing ? [] : [entry]}
 		onGoToLine={(l) => editor?.goToLine(l)}
 	/>
 </div>

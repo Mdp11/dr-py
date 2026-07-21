@@ -61,5 +61,6 @@
 		{stale}
 		{onGoToLine}
 		opsFooter={stageFooter}
+		staleHint="Re-run before staging."
 	/>
 </div>

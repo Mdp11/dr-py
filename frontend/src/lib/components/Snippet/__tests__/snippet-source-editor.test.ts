@@ -196,6 +196,25 @@ describe('SnippetSourceEditor — ref mode', () => {
 			unmount(c);
 		}
 	});
+
+	it('disables Run in the test panel when the selected ref is missing, even with an element bound (entryPoints must go empty, not just stay [entry])', async () => {
+		// An element is bound first so `countOk` is satisfied — if this test
+		// left it unbound, Run would be disabled either way and the assertion
+		// would prove nothing about the `refMissing` wiring under test.
+		vi.useFakeTimers();
+		await setArtifactHeaders([]);
+		const c = render({ ref: 'gone' }, 'value', vi.fn());
+		try {
+			expect(document.querySelector('[data-testid="snippet-ref-missing"]')).not.toBeNull();
+			click(document.querySelector('[data-testid="snippet-test-toggle"]'));
+			await bindElement('a', 'Alpha');
+			const run = document.querySelector('[data-testid="snippet-test-run"]') as HTMLButtonElement;
+			expect(run.disabled).toBe(true);
+		} finally {
+			unmount(c);
+			vi.useRealTimers();
+		}
+	});
 });
 
 describe('SnippetSourceEditor — switching to inline', () => {
