@@ -308,3 +308,107 @@ def test_sort_by_script_column_mixed_kinds_and_errors() -> None:
     assert names.index("Block A") < names.index("Block B")       # number before string
     assert names[-1] == "Block C"                                 # error last
     ctx.close()
+
+
+# ---- Task 5: PendingCell (cache-only misses) ---------------------------------
+#
+# Task 4 gave ScriptEvalContext a cache-only mode: a cell-cache miss under
+# cache_only synthesizes a `pending` CallResult instead of calling the guest.
+# These tests prove the table cell layer renders that as a `PendingCell`
+# (never as an `ErrorCell`, never setting `ctx.errored`) in both the collapse
+# fresh-call path and the expand re-derive path — and that the re-derive path
+# never reaches the sandbox even when the surrounding context is live.
+
+
+class _CountingRunner:
+    """Wraps `TrustedRunner`, counting real guest calls (`SnippetSession.call`)
+    so a test can prove a code path never reaches the sandbox. `calls` is a
+    one-element list (mutable counter) mirroring the shape a real caller would
+    use to observe a shared counter across sessions."""
+
+    def __init__(self) -> None:
+        self._inner = TrustedRunner()
+        self.calls = [0]
+
+    def open_session(self, model: Model, code: str, limits: RunLimits, *, budget):
+        session = self._inner.open_session(model, code, limits, budget=budget)
+        counts = self.calls
+
+        class _CountingSession:
+            boot_error = session.boot_error
+
+            def call(self, entry, element_ids):
+                counts[0] += 1
+                return session.call(entry, element_ids)
+
+            def close(self) -> None:
+                session.close()
+
+        return _CountingSession()
+
+    def run(self, model: Model, req, limits: RunLimits, *, record_ops: bool, rev: int):
+        return self._inner.run(model, req, limits, record_ops=record_ops, rev=rev)
+
+
+def test_pending_cell_from_cache_only_context() -> None:
+    # A collapse script column evaluated through a cache-only context with an
+    # empty cell cache: every cell must be a PendingCell (never an ErrorCell),
+    # `errored` must stay False, and `pending_misses` must record the misses.
+    from data_rover.core.script.cell_cache import ScriptCellCache
+    from data_rover.core.table.cells import PendingCell
+
+    mm = _mm()
+    model = _fixture()
+    defn = _one_col_table("def value(els): return els[0].name")
+    ctx = ScriptEvalContext(
+        TrustedRunner(),
+        model,
+        RunLimits(),
+        ScriptBudget.start(60),
+        cell_cache=ScriptCellCache(),
+        rev=0,
+        cache_only=True,
+    )
+    build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
+    cells = evaluate_cells(mm, model, defn, build.keys, TableLimits(), script=ctx)
+    assert build.keys  # sanity: the fixture's 3 Blocks produced rows
+    assert all(isinstance(row[0], PendingCell) for row in cells)
+    assert not ctx.errored and ctx.pending_misses > 0
+    ctx.close()
+
+
+def test_expand_rederive_is_cache_only() -> None:
+    # An expand script column whose BUILD phase ran cache-only (so the
+    # promoted binding is None, the same slot value an error row would leave)
+    # must NOT trigger a live guest call when the row is later rendered — even
+    # though the context is flipped to LIVE (cache_only=False) by then. The
+    # expand re-derive branch in `_script_cell` forces `cache_only=True`
+    # per-call regardless of the instance attribute.
+    from data_rover.core.script.cell_cache import ScriptCellCache
+    from data_rover.core.table.cells import PendingCell
+
+    mm = _mm()
+    model = _fixture()
+    runner = _CountingRunner()
+    defn = _one_col_table(
+        "def value(els): return els[0].name", mode="expand"
+    )
+    ctx = ScriptEvalContext(
+        runner,
+        model,
+        RunLimits(),
+        ScriptBudget.start(60),
+        cell_cache=ScriptCellCache(),
+        rev=0,
+        cache_only=True,
+    )
+    build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
+    n_blocks = len(model.indexes.elements_by_type.get("Block", set()))
+    assert len(build.keys) == n_blocks  # one promoted (pending) row per Block
+    assert runner.calls[0] == 0  # the build-phase cache-only call never hit the guest
+
+    ctx.cache_only = False  # flip to live for cell-render, as a real caller would
+    cells = evaluate_cells(mm, model, defn, build.keys, TableLimits(), script=ctx)
+    assert all(isinstance(row[0], PendingCell) for row in cells)
+    assert runner.calls[0] == 0  # re-derive still never called the guest
+    ctx.close()

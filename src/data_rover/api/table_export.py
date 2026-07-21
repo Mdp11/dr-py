@@ -25,6 +25,7 @@ from data_rover.core.table.cells import (
     ElementCell,
     ElementsCell,
     ErrorCell,
+    PendingCell,
     ValueCell,
     ValuesCell,
 )
@@ -45,6 +46,11 @@ def _cell_text(model: Model, cell: Cell) -> object:
         return "; ".join(str(v) for v in cell.values)
     if isinstance(cell, ErrorCell):
         return f"#ERROR: {cell.message}"
+    if isinstance(cell, PendingCell):
+        # Only reachable when exporting after a FAILED sweep (Task 8): a
+        # completed sweep leaves no pending cells, so this path is a
+        # last-resort rendering rather than an expected export outcome.
+        return "#ERROR: not computed"
     assert isinstance(cell, ElementsCell)
     return "; ".join(_display(model, e) for e in cell.element_ids)
 

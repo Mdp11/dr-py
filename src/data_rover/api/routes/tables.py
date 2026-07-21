@@ -17,6 +17,7 @@ from data_rover.core.table.cells import (
     ElementCell,
     ElementsCell,
     ErrorCell,
+    PendingCell,
     ValueCell,
     ValuesCell,
     evaluate_cells,
@@ -124,6 +125,8 @@ def _cell_out(model: Model, cell: Cell) -> TableCellOut:
         return TableCellOut(
             kind="error", message=cell.message, traceback=cell.traceback
         )
+    if isinstance(cell, PendingCell):
+        return TableCellOut(kind="pending")
     assert isinstance(cell, ElementsCell)
     return TableCellOut(
         kind="elements",

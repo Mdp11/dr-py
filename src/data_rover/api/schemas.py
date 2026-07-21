@@ -883,7 +883,7 @@ class TableColumnOut(BaseModel):
 
 
 class TableCellOut(BaseModel):
-    kind: Literal["element", "value", "values", "elements", "error"]
+    kind: Literal["element", "value", "values", "elements", "error", "pending"]
     # element
     item: TreeItem | None = None
     # value

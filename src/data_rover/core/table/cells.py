@@ -100,7 +100,15 @@ class ErrorCell:
     traceback: str | None = None
 
 
-Cell = ElementCell | ValueCell | ValuesCell | ElementsCell | ErrorCell
+@dataclass
+class PendingCell:
+    """A script cell whose value is not computed yet (cache-only miss, spec
+    §4.2): a background sweep is filling it. Renders as a placeholder, never
+    as an error; sorts with empties; exports as #ERROR only in the
+    failed-sweep path (a completed sweep leaves no pending cells)."""
+
+
+Cell = ElementCell | ValueCell | ValuesCell | ElementsCell | ErrorCell | PendingCell
 
 
 def _prop_present(mm: Metamodel, type_name: str, prop: str) -> bool:
@@ -286,8 +294,16 @@ def _script_cell(
                 mm, model, defn, key, col.source, base_slots, limits, script=script
             )
             if roots:
-                res = script.call(col.snippet.definition.code, "value", roots)
+                # Force cache-only: the row shape is unknown here (this is a
+                # re-derive, not the original build-time call), so a live call
+                # could not change the single-row rendering anyway; recomputing
+                # it live would also bypass sweep accounting.
+                res = script.call(
+                    col.snippet.definition.code, "value", roots, cache_only=True
+                )
                 if res.error is not None:
+                    if res.error.kind == "pending":
+                        return PendingCell()
                     return ErrorCell(
                         message=res.error.message, traceback=res.error.traceback
                     )
@@ -308,6 +324,8 @@ def _script_cell(
         return ErrorCell(message="script runner unavailable")
     res = script.call(col.snippet.definition.code, "value", els)
     if res.error is not None:
+        if res.error.kind == "pending":
+            return PendingCell()
         return ErrorCell(message=res.error.message, traceback=res.error.traceback)
     p = res.value
     assert p is not None  # CallResult invariant: value xor error

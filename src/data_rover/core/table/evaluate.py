@@ -443,10 +443,13 @@ def _collapse_has_value(
     non-None (and, for lists, non-empty) value; a script cell is empty when
     the call returns an empty/None result — EXCEPT a call error, which counts
     as having a value (the row must stay visible so the cell can show the
-    error) same as a dangling snippet ref."""
+    error) same as a dangling snippet ref. A `pending` result (Task 5:
+    cache-only miss) is an error kind too, so a pending row is also KEPT — a
+    background sweep is expected to fill it in, not hide it."""
     if isinstance(col, ScriptColumn):
         # keep_empty=False filter for a collapse script column. ERRORS COUNT
-        # AS VALUES: dropping an errored row would hide the failure.
+        # AS VALUES (this includes `pending`): dropping an errored/pending row
+        # would hide the failure/placeholder.
         if col.snippet.ref is not None:
             return True, False  # dangling ref → error cell stays
         if col.snippet.definition is None or script is None or not roots:
@@ -490,9 +493,11 @@ def _expand_values(
         # Expand promotion: element ids promote raw (str); SCALARS promote
         # wrapped in PropertyValue so a scalar string can never be mistaken
         # for an element id (the Binding invariant); None scalars are skipped.
-        # A call ERROR promotes the single binding None — exactly one row
-        # survives regardless of keep_empty, and the cell layer re-derives the
-        # error from the memoized call.
+        # A call ERROR (including the synthetic `pending` kind, Task 5:
+        # cache-only miss) promotes the single binding None — exactly one row
+        # survives regardless of keep_empty, and the cell layer re-derives
+        # the error/pending result with a forced cache-only call (never
+        # from a memo — `pending` results are deliberately never memoized).
         if col.snippet.ref is not None:
             return [None], False  # dangling ref → one error row
         if col.snippet.definition is None or script is None or not roots:
@@ -653,7 +658,7 @@ def _sort_value(
                 return (0, (_script_sort_atom(model, b.value),))
             if isinstance(b, str):
                 return (0, (_script_sort_atom(model, b),))
-            return (1, ())  # keep_empty row or error row
+            return (1, ())  # keep_empty row, error row, or pending row
         if col.snippet.definition is None or script is None:
             return (1, ())
         els = resolve_source_elements(
@@ -663,7 +668,7 @@ def _sort_value(
             return (1, ())
         res = script.call(col.snippet.definition.code, "value", els)
         if res.error is not None or res.value is None:
-            return (1, ())  # errors sort with empties
+            return (1, ())  # errors AND pending sort with empties
         p = res.value
         if p["kind"] == "scalar":
             if p["value"] is None:
