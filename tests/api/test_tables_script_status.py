@@ -694,6 +694,76 @@ def test_export_done_sweep_with_permanent_hole_does_not_202_forever(
     assert runner.calls[0] == len(THING_IDS)
 
 
+def test_export_terminal_job_with_cache_that_completed_anyway_202s_once(
+    client: TestClient,
+    app: FastAPI,
+    seed_thing_model: None,
+    settings_sync_sweep: Settings,
+) -> None:
+    """FIX C — the untested branch: a job that ends `cancelled`/`failed` while
+    the cache it was swept for is, regardless, COMPLETE (decision table row
+    "terminal, none re-probe misses", for a job state OTHER than `done` —
+    `done` is already covered by `test_export_display_only_script_column_...`
+    and `test_export_202_while_computing_then_200`).
+
+    Arranging this deterministically (no thread, no `time.sleep`, no race):
+    `t2`..`t5` are pre-seeded straight into the cell cache, leaving only `t1`
+    missing, so this request's *first* completeness probe sees exactly one
+    miss and enters the kick/re-probe branch. `kick_or_join_sweep` (sync mode)
+    then creates a brand-new job and runs the sweep on THIS same thread, whose
+    only real cell is `t1`. The scripted runner's callback for `t1` reaches
+    into the session's sweep registry (already populated by `kick()` before
+    `start()` runs) and sets that job's `cancel` Event as a side effect of
+    producing `t1`'s value — `_run_inner`'s abort check runs at the TOP of
+    every loop iteration, so the sweep exits via `_cancelled()` immediately
+    after (never touching `t2`..`t5`, which don't need it: they are already
+    cached). The job therefore lands in `state="cancelled"` at the exact
+    moment the cache becomes fully complete — a job state other than `done`,
+    with nothing left to compute. Everything happens inline on the request
+    thread under `settings_sync_sweep`, so there is no timing window to race.
+
+    Asserts the FIX B body (`state: "computing"`, not `"failed"`, despite
+    `job.state == "cancelled"`) and that the very next export is a clean 200
+    with real values and zero fresh guest calls — proving the branch cannot
+    loop.
+    """
+    session = get_session()
+    fp = _fingerprint()
+    rev = session.model_rev
+    sha = hashlib.sha256(VALUE_CODE.encode()).hexdigest()
+    for tid in ("t2", "t3", "t4", "t5"):
+        session.script_cell_cache.put((sha, "value", (tid,)), ok(1), rev)
+
+    def _outcome(i: int, ids: list[str]) -> CallResult:
+        assert ids == ["t1"]  # the sweep's only real call: t2..t5 are cached
+        job = session.script_sweeps.get(fp, rev)
+        assert job is not None  # registered by kick() before start() runs
+        job.cancel.set()
+        return ok(1)
+
+    runner = ScriptedRunner(_outcome)
+    app.dependency_overrides[get_runner] = lambda: runner
+
+    r = _export(client, _script_table())
+    assert r.status_code == 202, r.text
+    assert r.headers["retry-after"] == "1"
+    body = r.json()
+    assert body["state"] == "computing"  # FIX B, not "failed"
+    assert runner.calls[0] == 1  # only t1 was ever swept
+
+    job = session.script_sweeps.get(fp, rev)
+    assert job is not None and job.state == "cancelled"  # confirms the setup
+
+    # ...and the NEXT export is a clean 200 with real values: the branch does
+    # not strand the client in an endless 202 loop.
+    fresh = CountingRunner()
+    app.dependency_overrides[get_runner] = lambda: fresh
+    second = _export(client, _script_table())
+    assert second.status_code == 200, second.text
+    assert [row[1] for row in _data_rows(second)] == [1, 1, 1, 1, 1]
+    assert fresh.calls == 0  # served entirely from the cell cache
+
+
 def test_export_without_runner_flags_error_cells(
     client: TestClient, app: FastAPI, seed_thing_model: None
 ) -> None:

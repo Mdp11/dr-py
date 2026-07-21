@@ -465,35 +465,68 @@ def export_table(
                 # `_status_from_job` deliberately reports as `computing` and so
                 # cannot be recovered from `status` alone.
                 terminal = status.state == "failed" or job.state == "done"
-                # RE-PROBE. A terminal job does NOT imply a complete cache:
-                # `ScriptCellCache.put` refuses non-deterministic error kinds
-                # (timeout/unavailable/cancelled) while the sweep only aborts on
-                # a CONSECUTIVE run of them, so one intermittently-timing-out
-                # cell leaves a permanent hole in an otherwise `done` sweep.
-                # Answering 202 off `state != "failed"` alone would then loop
-                # forever (same rev => failed-job memory hands back the same
-                # `done` job => `computing` => 202 => ...) and the file would be
-                # permanently undownloadable.
                 #
-                # The honest question is not "did the job finish" but "would a
-                # RETRY ACTUALLY HELP", i.e. is the cache complete NOW:
+                # The honest question, once a job exists, is not "did the job
+                # finish" but "would a RETRY ACTUALLY HELP", i.e. is the cache
+                # complete NOW — and a RE-PROBE (below) is how that gets
+                # answered. But the re-probe is only ever CONSULTED for a
+                # terminal job:
                 #
-                #   re-probe misses | job state  | answer
-                #   ----------------+------------+-----------------------------
-                #   none            | any        | 202 — the cache is complete
-                #                   |            | but THIS request's `ordered`
-                #                   |            | predates it (sync sweeps fill
-                #                   |            | the cache after the build),
-                #                   |            | so retry for correct order
-                #                   |            | and real values.
-                #   some            | running    | 202 — work is genuinely in
-                #                   |            | flight; a retry can improve.
-                #   some            | terminal   | fall through — nothing will
-                #                   | (done/     | ever fill those cells at this
-                #                   |  failed/   | rev, so ship the honest
-                #                   |  cancelled)| terminal export (`#ERROR`).
-                #
-                # The re-reading is TRUTHFUL despite reusing this context: a
+                #   job state       | re-probe? | answer
+                #   ----------------+-----------+------------------------------
+                #   running         | SKIPPED   | 202 unconditionally (FIX A) —
+                #                   |           | work is genuinely in flight,
+                #                   |           | and nothing a re-probe could
+                #                   |           | find changes that answer, so
+                #                   |           | running it would just be an
+                #                   |           | O(rows) navigation-column
+                #                   |           | re-walk paid for nothing:
+                #                   |           | non-script columns are NOT
+                #                   |           | memoized, so this cost would
+                #                   |           | repeat every second of a poll
+                #                   |           | loop that already knows its
+                #                   |           | answer.
+                #   terminal, none  | consulted | 202 — the cache IS complete
+                #   re-probe misses |           | but THIS request's `ordered`
+                #                   |           | predates it (sync sweeps fill
+                #                   |           | the cache after the build), so
+                #                   |           | retry for correct order and
+                #                   |           | real values. The wire `state`
+                #                   |           | in the body is forced to
+                #                   |           | `computing` here (FIX B) even
+                #                   |           | when `job.state` is a DEAD
+                #                   |           | `failed`/`cancelled` — the
+                #                   |           | retry WILL succeed (the values
+                #                   |           | are already in the cache), so
+                #                   |           | reporting the job's own dead
+                #                   |           | state would tell the client to
+                #                   |           | abandon a download the very
+                #                   |           | next poll would deliver.
+                #   terminal, some  | consulted | fall through — nothing will
+                #   re-probe misses |           | ever fill those cells at this
+                #                   |           | rev (`ScriptCellCache.put`
+                #                   |           | refuses non-deterministic
+                #                   |           | error kinds while the sweep
+                #                   |           | only aborts on a CONSECUTIVE
+                #                   |           | run of them, so one
+                #                   |           | intermittently-timing-out cell
+                #                   |           | leaves a permanent hole in an
+                #                   |           | otherwise `done` sweep), so
+                #                   |           | ship the honest terminal
+                #                   |           | export (`#ERROR`). Answering
+                #                   |           | 202 off `state != "failed"`
+                #                   |           | alone would loop forever here
+                #                   |           | (same rev => failed-job memory
+                #                   |           | hands back the same `done` job
+                #                   |           | => `computing` => 202 => ...).
+                if not terminal:
+                    return JSONResponse(
+                        status_code=202,
+                        content=status.model_dump(),
+                        headers={"Retry-After": "1"},
+                    )
+                # RE-PROBE (terminal jobs only — see table above). The
+                # re-reading is TRUTHFUL despite reusing this context: a
                 # `pending` result is never memoized and never written to the
                 # cell cache (see `ScriptEvalContext.call`), so every cell that
                 # missed the first time re-consults the (now sweep-filled) cell
@@ -508,10 +541,25 @@ def export_table(
                     )
                 )
                 still_pending = script_ctx.pending_misses > miss_baseline
-                if not still_pending or not terminal:
+                if not still_pending:
+                    # FIX B: the wire body must not say `state: "failed"` here.
+                    # This 202 means "the cache filled in behind this request —
+                    # retry and you'll get real data", which is true REGARDLESS
+                    # of what killed the job (a `done` sweep already reports
+                    # `computing` via `_status_from_job`; a `failed`/`cancelled`
+                    # one does not, and that mismatch is exactly the bug: the
+                    # job is dead, but the DATA it needed is not, because those
+                    # cells were satisfied some other way — pre-warmed, or
+                    # computed before the abort landed). `ScriptStatusOut`'s own
+                    # docstring defines `failed` as work that "will not finish
+                    # on its own"; that is false here, so the body must not
+                    # claim it. Status code, `Retry-After`, and `done`/`total`
+                    # are untouched — only the wire `state` is overridden.
+                    body = status.model_dump()
+                    body["state"] = "computing"
                     return JSONResponse(
                         status_code=202,
-                        content=status.model_dump(),
+                        content=body,
                         headers={"Retry-After": "1"},
                     )
             # Fall through on a terminal-but-incomplete sweep (or no runner at
