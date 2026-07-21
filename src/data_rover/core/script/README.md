@@ -18,10 +18,10 @@ canonical; this section is the narrative overview.
 
 `dr` is not a Python module on disk — it is the string constant
 `FACADE_SOURCE` in `facade_src.py`, `exec`'d verbatim ahead of the snippet's
-own source (in a fresh namespace with `_transport` already bound; see
-"Bridge wire contract" below). Both the WASM guest and `TrustedRunner` `exec`
-the *same* string, so the surface below is exactly what a snippet author gets
-in either environment.
+own source (in a fresh namespace with `_transport` and `_read_memo_max`
+already bound; see "Bridge wire contract" below). Both the WASM guest and
+`TrustedRunner` `exec` the *same* string, so the surface below is exactly
+what a snippet author gets in either environment.
 
 The facade and the snippet are **two separate compilation units** — the facade
 under the filename `<facade>`, the snippet under `<snippet>`. Concatenating
@@ -127,6 +127,7 @@ snippet_*` field (`api/settings.py`), itself a `DATA_ROVER_SNIPPET_*` env var
 | `max_ops` | `1000` | `DATA_ROVER_SNIPPET_MAX_OPS` | Cap on recorded op count; `BridgeDispatcher.record_op` raises `BridgeLimitError` past this (see "Error kinds" — this currently surfaces to the snippet as a `dr.BridgeError`, not a distinct `ScriptError.kind`). |
 | `max_op_bytes` | `1024 * 1024` (1,048,576) | `DATA_ROVER_SNIPPET_MAX_OP_BYTES` | Cap on cumulative JSON-serialized op bytes; same `BridgeLimitError` path as `max_ops`. |
 | `page_limit` | `500` | `DATA_ROVER_SNIPPET_PAGE_LIMIT` | Max elements per `dr.elements()` page (`elements_page` bridge op); a snippet never observes pagination directly. |
+| `read_memo_max` | `4096` | `DATA_ROVER_SNIPPET_READ_MEMO_MAX` | Entry cap on the guest facade's session-lifetime read memo; 0 disables. |
 
 Settings that shape the *runner*, not a per-run `RunLimits` value:
 `snippet_runner` (`"wasm"` default, or `"trusted"` — gated by the RCE

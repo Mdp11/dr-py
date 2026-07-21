@@ -103,7 +103,12 @@ def _write(op):
 
 try:
     _MEMO_CAP = int(_read_memo_max)
-except NameError:
+except (NameError, TypeError, ValueError):
+    # NameError: caller forgot to bind _read_memo_max at all.
+    # TypeError: caller bound it to None (or another non-int-coercible value).
+    # ValueError: caller bound it to a non-numeric string.
+    # Any of these falls back to the hardcoded default rather than letting
+    # an opaque exception kill facade exec before the snippet even starts.
     _MEMO_CAP = 4096
 
 # Session-lifetime read memo: (op_name, id_or_None) -> response fragment.
@@ -112,6 +117,25 @@ except NameError:
 # dict gives FIFO eviction at _MEMO_CAP entries. Element entries hold the
 # PROJECTION dict (not the whole response) so hop/root priming can insert
 # projections directly under ("element", id).
+#
+# INVARIANT: memo entries are canonical session state, read by every future
+# call to the op they were stored under. Every read path in this module
+# hands out COPIES of the containers it returns (lists and dicts alike) —
+# never the memo's own list/dict object. This is load-bearing, not just
+# defensive: if a snippet's returned structure aliased the memo entry, a
+# snippet that mutates what it gets back (e.g. `el.out().append(...)`)
+# would silently change the RESULT of a later call to the same read. That
+# would make snippet behavior depend on `_read_memo_max` (whether the memo
+# was populated/evicted at the time), which must never be observable.
+#
+# What is still shared, and why that's fine: property VALUES nested inside
+# an element projection's `properties` dict, and inside a `type_info`
+# entry's per-property dicts, are not deep-copied — they are always
+# scalars/None/str off the wire (see bridge.py's `_project_element` and
+# `_op_type_info`), so they are already immutable and safe to share. If a
+# facade helper is ever added that can return a mutable nested structure
+# from inside one of those, it must copy that structure too — this comment
+# is the reminder to check.
 _memo = {}
 
 
@@ -177,7 +201,11 @@ class Element:
         if hit is None:
             hit = _read("outgoing", element_id=self.id)["relationships"]
             _memo_put(key, hit)
-        return list(hit)
+        # Copy the outer list AND each relationship dict inside it — the
+        # memo entry is shared canonical state (see the invariant comment
+        # above `_memo`), so a snippet mutating a returned dict must not be
+        # able to change what a later `.out()` call returns.
+        return [dict(r) for r in hit]
 
     def in_(self):
         """List incoming relationships as dicts (id, type, source_id, target_id)."""
@@ -186,7 +214,8 @@ class Element:
         if hit is None:
             hit = _read("incoming", element_id=self.id)["relationships"]
             _memo_put(key, hit)
-        return list(hit)
+        # See the comment in `out()` above: copy the relationship dicts too.
+        return [dict(r) for r in hit]
 
     def parent(self):
         """Return the containment parent Element, or None at a root."""
@@ -214,7 +243,12 @@ class Element:
             for proj in hit:
                 _memo_put(("element", proj["id"]), proj)
             _memo_put(key, hit)
-        return [Element(d) for d in hit]
+        # `hit`'s dicts are the SAME objects primed into the ("element", id)
+        # memo entries above (or, on a repeat call, into the "children" memo
+        # entry from a prior call) — build each Element over a copy so a
+        # snippet holding one of these children can't mutate the shared
+        # projection out from under a later `dr.element(child_id)` call.
+        return [Element(dict(d)) for d in hit]
 
     def set(self, key, value):
         """Record a dry-run property update. Nothing changes until staged and committed.
@@ -244,17 +278,19 @@ def _fetch_element(element_id):
     if proj is None:
         proj = _read("element", element_id=element_id)["element"]
         _memo_put(key, proj)
-    return Element(proj)
+    # `proj` may be the memo's own dict (on a hit, or after _memo_put aliases
+    # it in) — build the Element over a copy so `Element._data` is never the
+    # live memo entry. See the invariant comment above `_memo`.
+    return Element(dict(proj))
 
 
+# Deliberately NOT memoized: a whole-model scan does not fit the single
+# `(op_name, id_or_None)` memo key shape, and re-running the same scan
+# twice in one snippet is rare enough not to be worth a bespoke key scheme
+# here. Phase B is expected to track these via `("scan", ...)` read keys
+# if it becomes worth it.
 def _iter_elements(type=None):
     """Iterate all elements, optionally filtered by type name. Pages transparently.
-
-    Deliberately NOT memoized: a whole-model scan does not fit the single
-    `(op_name, id_or_None)` memo key shape, and re-running the same scan
-    twice in one snippet is rare enough not to be worth a bespoke key scheme
-    here. Phase B is expected to track these via `("scan", ...)` read keys
-    if it becomes worth it.
 
     Example:
         for el in dr.elements(type="Building"):
@@ -296,7 +332,12 @@ def _type_info(name):
     if hit is None:
         hit = _read("type_info", type=name)
         _memo_put(key, hit)
-    return hit
+    # Copy the outer dict AND its nested `properties` list-of-dicts — same
+    # rule as `out()`/`in_()`: a snippet mutating what it gets back must not
+    # poison the memo entry a later `dr.type(name)` call would return.
+    out = dict(hit)
+    out["properties"] = [dict(p) for p in out.get("properties") or []]
+    return out
 
 
 def _create(type_name, properties=None):

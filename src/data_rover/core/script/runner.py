@@ -51,9 +51,13 @@ class RunLimits:
             bridge reads (e.g., ``elements_page``). Runners enforce this on
             their bridge dispatcher.
         read_memo_max: Capacity of the guest facade's session-lifetime read
-            memo (entries). 0 disables memoization. Sound under the runner
-            determinism guarantee: a session never outlives one model rev's
-            worth of work, so a memoized read can never go stale within it.
+            memo (entries). 0 disables memoization. A session's results are
+            rev-stamped and discarded if the model rev moves under it (see
+            `api/script_sweep.py`'s `session.model_rev != job.rev` check,
+            and console runs read without holding `session.write_mutex` at
+            all) — so a memoized read can never be *observed* stale, even
+            though the underlying model is not actually frozen for the
+            session's lifetime.
     """
 
     wall_timeout_s: float = 10

@@ -64,21 +64,35 @@ def test_adjacency_reads_are_memoized(bridge_call_log: list[str]) -> None:
         assert bridge_call_log.count(op) == 1, op
 
 
-def test_memo_cap_evicts_oldest(bridge_call_log: list[str]) -> None:
+def test_memo_cap_admits_multiple_and_evicts_fifo(bridge_call_log: list[str]) -> None:
+    """cap=1 can't distinguish real FIFO eviction from a broken/no-op memo:
+    the b2-refetch would cost a round trip either way, so that cap can't
+    prove the memo evicts (as opposed to caching nothing at all, or capping
+    at 0). Use cap=2 instead: after `element('b1')` (the bound root) and
+    `element('b2')`, the memo holds {b1, b2} (2 entries, at cap). Fetching
+    b3 must evict the OLDEST entry (b1) to admit b3, leaving {b2, b3} — so
+    the re-fetch of b2 is a memo HIT (no round trip). This proves both that
+    the cap admits more than one entry AND that eviction order is
+    FIFO-from-the-front (insertion order): a broken/no-op memo, a cap that
+    silently clamped to 0 or 1, or an eviction policy that pops the NEWEST
+    entry instead would all leave b2 evicted too, making the b2-refetch a
+    round trip and the total 4 instead of 3.
+    """
     model = tiny_model()
     runner = TrustedRunner()
     sess = runner.open_session(
         model,
         "def value(els):\n"
-        "    dr.element('b2'); dr.element('b3')\n"
-        "    dr.element('b2')\n"  # b2 was evicted by b3 under cap=1
+        "    dr.element('b2')\n"
+        "    dr.element('b3')\n"  # cap=2 full at {b1, b2}; b3 evicts b1 (FIFO)
+        "    dr.element('b2')\n"  # b2 still resident -> memo HIT, no round trip
         "    return 1\n",
-        RunLimits(read_memo_max=1),
+        RunLimits(read_memo_max=2),
         budget=ScriptBudget.start(60),
     )
     assert sess.boot_error is None
     assert sess.call("value", ["b1"]).error is None
-    assert bridge_call_log.count("element") == 4  # b1, b2, b3, b2-again
+    assert bridge_call_log.count("element") == 3  # b1, b2, b3 (b2-again is a memo hit)
 
 
 def test_memoized_results_do_not_alias_mutations(bridge_call_log: list[str]) -> None:
