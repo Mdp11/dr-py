@@ -4,6 +4,8 @@ list per session. No write_mutex — same benign-race stance as routes/read.py."
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session as DbSession
@@ -137,6 +139,15 @@ def _cell_out(model: Model, cell: Cell) -> TableCellOut:
         total=cell.total,
         truncated=cell.truncated,
     )
+
+
+def _drain(rows: Iterator[list[Cell]]) -> None:
+    """Consume a lazy row stream for its SIDE EFFECTS only (the script calls
+    each cell makes), discarding the cells chunk-by-chunk. Used by the export's
+    completeness probe, where materializing the list would defeat the very
+    bounded-peak-memory property `iter_export_rows` exists to provide."""
+    for _ in rows:
+        pass
 
 
 def _status_from_job(job: SweepJob) -> ScriptStatusOut:
@@ -373,8 +384,13 @@ def export_table(
     probes for completeness first; if anything is still uncomputed it kicks/joins
     the background sweep and answers **202 + `Retry-After: 1`** with a
     `ScriptStatusOut` body (the frontend retries on that exact shape) rather than
-    downloading a half-computed workbook. A dead sweep (failed/cancelled) or a
-    missing runner is terminal: the file ships with pending cells as `#ERROR`."""
+    downloading a half-computed workbook. The 202-vs-ship decision is made by
+    RE-PROBING the cache after the kick/join (decision table at the call site):
+    a finished sweep does not imply a complete cache, so "would a retry help"
+    — not "is the job over" — is the discriminator. When it would not (a
+    terminal sweep that still left holes, or no runner at all) the file ships
+    with pending cells as `#ERROR`, flagged by `X-Table-Script-Errors` and a
+    trailing notice row."""
     metamodel, model = require_model(session)
     script_ctx = None
     acquired = False
@@ -425,9 +441,15 @@ def export_table(
             #
             # It is cheap: cache-only means dict lookups and no guest work, and
             # the per-request memo makes the later `iter_export_rows` render
-            # nearly free. The cells themselves are discarded (the real render
-            # streams chunk-by-chunk into the workbook to bound peak memory).
-            evaluate_cells(metamodel, model, defn, ordered, limits, script=script_ctx)
+            # nearly free. The rows are streamed and DISCARDED chunk-by-chunk
+            # (`for _ in ...: pass`) exactly like the real render, so the probe
+            # never materializes 50 000 rows x every column just to throw them
+            # away — it makes the same calls at a bounded peak memory.
+            _drain(
+                iter_export_rows(
+                    metamodel, model, defn, ordered, limits, script=script_ctx
+                )
+            )
             if script_ctx.pending_misses > 0 and runner is not None:
                 # Lock stance: this route holds NO session lock (no write_mutex —
                 # same benign-race stance as /tables/evaluate), so kicking is
@@ -437,18 +459,64 @@ def export_table(
                     session, metamodel, model, defn, runner, settings, rev
                 )
                 status = _status_from_job(job)
-                # Read the decision off the WIRE state, which collapses both
-                # DEAD job states (`failed` and `cancelled`) onto `failed`: no
-                # thread is behind either, so a 202 would make the client retry
-                # forever. Anything else means work really is in flight.
-                if status.state != "failed":
+                # Terminality is read off the WIRE state, which collapses both
+                # DEAD job states (`failed` and `cancelled`) onto `failed` (no
+                # thread is behind either), PLUS the `done` job state — which
+                # `_status_from_job` deliberately reports as `computing` and so
+                # cannot be recovered from `status` alone.
+                terminal = status.state == "failed" or job.state == "done"
+                # RE-PROBE. A terminal job does NOT imply a complete cache:
+                # `ScriptCellCache.put` refuses non-deterministic error kinds
+                # (timeout/unavailable/cancelled) while the sweep only aborts on
+                # a CONSECUTIVE run of them, so one intermittently-timing-out
+                # cell leaves a permanent hole in an otherwise `done` sweep.
+                # Answering 202 off `state != "failed"` alone would then loop
+                # forever (same rev => failed-job memory hands back the same
+                # `done` job => `computing` => 202 => ...) and the file would be
+                # permanently undownloadable.
+                #
+                # The honest question is not "did the job finish" but "would a
+                # RETRY ACTUALLY HELP", i.e. is the cache complete NOW:
+                #
+                #   re-probe misses | job state  | answer
+                #   ----------------+------------+-----------------------------
+                #   none            | any        | 202 — the cache is complete
+                #                   |            | but THIS request's `ordered`
+                #                   |            | predates it (sync sweeps fill
+                #                   |            | the cache after the build),
+                #                   |            | so retry for correct order
+                #                   |            | and real values.
+                #   some            | running    | 202 — work is genuinely in
+                #                   |            | flight; a retry can improve.
+                #   some            | terminal   | fall through — nothing will
+                #                   | (done/     | ever fill those cells at this
+                #                   |  failed/   | rev, so ship the honest
+                #                   |  cancelled)| terminal export (`#ERROR`).
+                #
+                # The re-reading is TRUTHFUL despite reusing this context: a
+                # `pending` result is never memoized and never written to the
+                # cell cache (see `ScriptEvalContext.call`), so every cell that
+                # missed the first time re-consults the (now sweep-filled) cell
+                # cache instead of being served a stale pending from the memo.
+                # Only genuine HITS are memoized, and those were not misses in
+                # the first probe either. A fresh miss counter baseline is all
+                # that is needed to keep the first probe's misses out of it.
+                miss_baseline = script_ctx.pending_misses
+                _drain(
+                    iter_export_rows(
+                        metamodel, model, defn, ordered, limits, script=script_ctx
+                    )
+                )
+                still_pending = script_ctx.pending_misses > miss_baseline
+                if not still_pending or not terminal:
                     return JSONResponse(
                         status_code=202,
                         content=status.model_dump(),
                         headers={"Retry-After": "1"},
                     )
-            # Fall through on a dead sweep (or no runner at all) and export with
-            # pending rendered as `#ERROR` — the honest terminal answer.
+            # Fall through on a terminal-but-incomplete sweep (or no runner at
+            # all) and export with pending rendered as `#ERROR` — the honest
+            # terminal answer.
 
         name = "table"
         if payload.artifact_id is not None:
@@ -464,17 +532,42 @@ def export_table(
         all_rows = iter_export_rows(
             metamodel, model, defn, ordered, limits, script=script_ctx
         )
+        # Baseline for the RENDER's own pending misses (see `_degraded` below).
+        # Sampled here, after every probe pass, so only cells that the workbook
+        # actually rendered as `#ERROR: not computed` are counted.
+        render_miss_baseline = script_ctx.pending_misses if script_ctx else 0
+
+        def _degraded() -> bool:
+            """Did this workbook ship any `#ERROR` cell?
+
+            `errored` alone is NOT the answer. A cache-only `pending` result is
+            a deliberate non-error (it must not poison the row-order cache, so
+            `ScriptEvalContext.call` leaves `errored` False by design) — but
+            `table_export.py` still renders it `#ERROR: not computed`. On the
+            terminal fall-through above, and on the runner-unavailable path
+            (whose context is cache-only too, so its cells come back `pending`
+            rather than `unavailable`), EVERY affected cell is `#ERROR` while
+            `errored` stays False. Signalling nothing there hands the user a
+            workbook that looks authoritative and is entirely `#ERROR`, and a
+            programmatic client a clean 200. So OR in the misses the render
+            itself recorded. `errored`'s meaning is left untouched."""
+            if script_ctx is None:
+                return False
+            return (
+                script_ctx.errored or script_ctx.pending_misses > render_miss_baseline
+            )
 
         def _notice() -> str | None:
             # `row_iter` (and therefore any script column's `value()` calls)
-            # is consumed lazily INSIDE `build_workbook` — `script_ctx.errored`
-            # is only fully settled once that consumption finishes, so this
-            # must be a callable invoked AFTER the row loop, not a value
+            # is consumed lazily INSIDE `build_workbook` — the flags `_degraded`
+            # reads are only fully settled once that consumption finishes, so
+            # this must be a callable invoked AFTER the row loop, not a value
             # computed up front.
-            if script_ctx is not None and script_ctx.errored:
+            if _degraded():
                 return (
-                    "Some script cells failed or exceeded the evaluation "
-                    "budget; affected cells are marked #ERROR."
+                    "Some script cells failed, could not be computed, or "
+                    "exceeded the evaluation budget; affected cells are "
+                    "marked #ERROR."
                 )
             return None
 
@@ -489,7 +582,7 @@ def export_table(
         resp_headers = {"Content-Disposition": f'attachment; filename="{name}.xlsx"'}
         if truncated:
             resp_headers["X-Table-Truncated"] = "true"
-        if script_ctx is not None and script_ctx.errored:
+        if _degraded():  # settled: `build_workbook` has consumed every row
             resp_headers["X-Table-Script-Errors"] = "true"
         return Response(
             content=blob,

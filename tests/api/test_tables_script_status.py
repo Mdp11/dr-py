@@ -23,6 +23,7 @@ import io
 import threading
 from collections.abc import Iterator
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -184,19 +185,29 @@ def _keys(page: dict) -> list[object]:
     return [row["key"][0] for row in page["rows"]]
 
 
-def _export(client: TestClient, table: dict, *, sort: bool = False):
+def _export(
+    client: TestClient, table: dict, *, sort: bool = False
+) -> httpx.Response:
     body: dict = {"definition": table}
     if sort:
         body["sort"] = {"column": 1, "direction": "asc"}
     return client.post(papi("/tables/export"), json=body, headers=AUTH_HEADERS)
 
 
-def _sheet(resp) -> list[list[object]]:
-    """The exported sheet as a list of rows (header row included)."""
+def _sheet(resp: httpx.Response) -> list[list[object]]:
+    """The exported sheet as a list of rows (header row included, and — when
+    the export degraded — the trailing single-cell notice row)."""
     wb = load_workbook(io.BytesIO(resp.content))
     ws = wb.active
     assert ws is not None
     return [[c.value for c in row] for row in ws.iter_rows()]
+
+
+def _data_rows(resp: httpx.Response) -> list[list[object]]:
+    """Just the `THING_IDS` rows: header stripped off the front and any notice
+    row off the back, so an assertion on cell values is unaffected by whether
+    the export flagged itself as degraded."""
+    return _sheet(resp)[1 : 1 + len(THING_IDS)]
 
 
 # --------------------------------------------------------------------------
@@ -588,17 +599,21 @@ def test_export_failed_sweep_ships_error_cells(
     through and ships the honest answer — pending rendered `#ERROR`.
 
     Timeouts are never cached and a cache-only miss records a PENDING cell (not
-    an error), so `script_ctx.errored` stays False: the route sets no
-    `X-Table-Script-Errors` header and appends no notice row on this path. That
-    is the current, asserted behaviour."""
+    an error), so `script_ctx.errored` stays False — but the cells still SHIP as
+    `#ERROR`, so the route must not stay silent: it flags the workbook with
+    `X-Table-Script-Errors` and a trailing notice row on the strength of the
+    pending misses the render itself recorded (FIX 2)."""
     runner = ScriptedRunner(lambda i, ids: timeout())
     app.dependency_overrides[get_runner] = lambda: runner
 
     r = _export(client, _script_table())
     assert r.status_code == 200, r.text
-    rows = _sheet(r)[1:]
-    assert [row[1] for row in rows] == ["#ERROR: not computed"] * len(THING_IDS)
-    assert "x-table-script-errors" not in r.headers
+    assert [row[1] for row in _data_rows(r)] == ["#ERROR: not computed"] * len(
+        THING_IDS
+    )
+    assert r.headers["x-table-script-errors"] == "true"
+    notice = _sheet(r)[-1][0]
+    assert isinstance(notice, str) and "#ERROR" in notice
 
     # Failed-job memory: the retry is served the SAME dead job, so no second
     # grind is started (only the abort threshold's calls were ever made).
@@ -630,8 +645,77 @@ def test_export_cancelled_sweep_does_not_202_forever(
 
     r = _export(client, _script_table())
     assert r.status_code == 200, r.text
-    assert [row[1] for row in _sheet(r)[1:]] == ["#ERROR: not computed"] * len(
+    assert [row[1] for row in _data_rows(r)] == ["#ERROR: not computed"] * len(
         THING_IDS
     )
     # No fresh job was started behind the cancelled one.
     assert session.script_sweeps.get(_fingerprint(), session.model_rev) is job
+
+
+def test_export_done_sweep_with_permanent_hole_does_not_202_forever(
+    client: TestClient,
+    app: FastAPI,
+    seed_thing_model: None,
+    settings_sync_sweep: Settings,
+) -> None:
+    """FIX 1 — the ENDLESS-202 regression.
+
+    A `done` sweep does NOT imply a complete cache. `ScriptCellCache.put`
+    refuses non-deterministic error kinds (`timeout`/`unavailable`/`cancelled`)
+    while the sweep only aborts on a run of `snippet_sweep_timeout_abort` (3)
+    CONSECUTIVE ones — so a single intermittently-timing-out cell (here: guest
+    call #0, i.e. `t1`) leaves a permanent hole behind an otherwise successful
+    sweep. Deciding 202 off "the job is not failed" alone would then loop
+    forever: the same rev hands back the same `done` job, `_status_from_job`
+    maps `done` -> `computing`, and the file becomes undownloadable.
+
+    The route instead RE-PROBES the cache after joining the sweep: terminal job
+    + still-pending cells => nothing will ever fill them at this rev => ship the
+    honest terminal export. So the very first call is a 200, and it stays a 200
+    however many times the client asks."""
+    runner = ScriptedRunner(lambda i, ids: timeout() if i == 0 else ok(7))
+    app.dependency_overrides[get_runner] = lambda: runner
+
+    responses: list[httpx.Response] = []
+    for attempt in range(5):
+        r = _export(client, _script_table())
+        assert r.status_code == 200, f"attempt {attempt}: {r.status_code} {r.text}"
+        responses.append(r)
+
+    last = responses[-1]
+    rows = _data_rows(last)
+    # `t1` was the timed-out call: never cached, so it ships as `#ERROR`; the
+    # other four were swept successfully and carry real values.
+    assert [row[1] for row in rows] == ["#ERROR: not computed"] + [7] * 4
+    # ...and the degraded workbook says so (FIX 2).
+    assert last.headers["x-table-script-errors"] == "true"
+    # Exactly one sweep ran (5 guest calls): failed-job memory kept the retries
+    # from re-grinding, which is also why the hole is permanent at this rev.
+    assert runner.calls[0] == len(THING_IDS)
+
+
+def test_export_without_runner_flags_error_cells(
+    client: TestClient, app: FastAPI, seed_thing_model: None
+) -> None:
+    """FIX 3 — the runner-unavailable export path.
+
+    With no runner there is nothing to sweep with, so the route never kicks a
+    job and falls straight through. Its context is cache-only like every other
+    export context, so the cells come back `pending` (rendered
+    `#ERROR: not computed`) rather than `unavailable` — which leaves
+    `script_ctx.errored` False. The signal must still be there: header plus
+    trailing notice row, so nobody mistakes an all-`#ERROR` workbook for an
+    authoritative one."""
+    app.dependency_overrides[get_runner] = lambda: None
+
+    r = _export(client, _script_table())
+    assert r.status_code == 200, r.text
+    assert [row[1] for row in _data_rows(r)] == ["#ERROR: not computed"] * len(
+        THING_IDS
+    )
+    assert r.headers["x-table-script-errors"] == "true"
+    notice = _sheet(r)[-1][0]
+    assert isinstance(notice, str) and "#ERROR" in notice
+    # No runner => no sweep was kicked (there would be nothing to sweep with).
+    session = get_session()
+    assert session.script_sweeps.get(_fingerprint(), session.model_rev) is None

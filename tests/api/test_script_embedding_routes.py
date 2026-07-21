@@ -7,6 +7,7 @@ from __future__ import annotations
 import io
 from collections.abc import Iterator
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -15,7 +16,7 @@ from openpyxl import load_workbook
 from data_rover.api.main import create_app
 from data_rover.api.script_eval import close_script_context, open_script_context
 from data_rover.api.script_runner import get_runner
-from data_rover.api.settings import Settings
+from data_rover.api.settings import Settings, get_settings
 from data_rover.api.snippet_concurrency import ConcurrencyGuard, concurrency_guard
 from data_rover.core.metamodel.schema import ElementType, Metamodel
 from data_rover.core.model.model import Model
@@ -320,14 +321,23 @@ def test_evaluate_saved_snippet_ref_and_fingerprint(
 
 
 @pytest.fixture
-def sync_sweep(monkeypatch: pytest.MonkeyPatch) -> None:
+def sync_sweep(monkeypatch: pytest.MonkeyPatch) -> Settings:
     """Phase B: an export never runs O(rows) guest work inline — it answers 202
     while a background `SweepJob` fills the script cell cache. Pin the sweep to
-    run INLINE so exactly one retry is needed and no test has to sleep."""
+    run INLINE so exactly one retry is needed and no test has to sleep.
+
+    The ASSERTION is load-bearing (this mirrors `settings_sync_sweep` in
+    `test_tables_script_status.py`): with only the `setenv`, a rename of the
+    env var would degrade this fixture SILENTLY to async sweeping, and the
+    tests below would start racing a background daemon thread — flaking as an
+    occasional 202-instead-of-200 rather than failing honestly."""
     monkeypatch.setenv("DATA_ROVER_SNIPPET_SWEEP_SYNC", "true")
+    settings = get_settings()
+    assert settings.snippet_sweep_sync is True
+    return settings
 
 
-def _export_after_sweep(client: TestClient, defn: dict):
+def _export_after_sweep(client: TestClient, defn: dict) -> httpx.Response:
     """The Phase B export handshake: 202 + `Retry-After: 1` first (the sweep
     runs inline under the `sync_sweep` fixture), then the real xlsx."""
     first = client.post(
@@ -343,7 +353,7 @@ def _export_after_sweep(client: TestClient, defn: dict):
 
 
 def test_export_script_column_with_errors_gets_marker_and_notice(
-    client: TestClient, seed_thing_model: None, sync_sweep: None
+    client: TestClient, seed_thing_model: None, sync_sweep: Settings
 ) -> None:
     defn = _script_table(
         "def value(els):\n"
@@ -361,7 +371,7 @@ def test_export_script_column_with_errors_gets_marker_and_notice(
 
 
 def test_export_script_column_no_errors_no_notice(
-    client: TestClient, seed_thing_model: None, sync_sweep: None
+    client: TestClient, seed_thing_model: None, sync_sweep: Settings
 ) -> None:
     defn = _script_table("def value(els): return els[0].name")
     r = _export_after_sweep(client, defn)
