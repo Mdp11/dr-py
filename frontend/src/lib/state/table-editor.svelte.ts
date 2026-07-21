@@ -599,16 +599,25 @@ export function closeTableDraft(tabId: string): void {
 }
 
 /** Export the current definition (or saved artifact) as an .xlsx and trigger
- * a browser download via a synthetic anchor click. */
+ * a browser download via a synthetic anchor click.
+ *
+ * While the backend's script-cache sweep is still filling in a script
+ * column's cells, `exportTable` answers `{ kind: 'preparing' }` (202) instead
+ * of the file. Task 10 adds the real retry loop; for now this surfaces as a
+ * thrown Error so it flows through the existing catch/`saveError` handling in
+ * `TableView.svelte` unchanged, same as any other export failure. */
 export async function downloadTable(tabId: string): Promise<void> {
 	const draft = _drafts.get(tabId);
 	if (!draft) return;
 	const sort = _sortFor(tabId, draft);
-	const { blob, filename } = await exportTable({ ..._evaluateSource(draft), sort });
-	const url = URL.createObjectURL(blob);
+	const result = await exportTable({ ..._evaluateSource(draft), sort });
+	if (result.kind === 'preparing') {
+		throw new Error('Export is being prepared — try again shortly.');
+	}
+	const url = URL.createObjectURL(result.blob);
 	const a = document.createElement('a');
 	a.href = url;
-	a.download = filename;
+	a.download = result.filename;
 	a.click();
 	URL.revokeObjectURL(url);
 }

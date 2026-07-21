@@ -796,12 +796,28 @@ export const TableCellSchema = z.discriminatedUnion('kind', [
 		total: z.number().int(),
 		truncated: z.boolean()
 	}),
-	z.object({ kind: z.literal('error'), message: z.string(), traceback: z.string().nullish() })
+	z.object({ kind: z.literal('error'), message: z.string(), traceback: z.string().nullish() }),
+	// A cell whose script value hasn't been computed by the background sweep
+	// yet (core/table's cache-only evaluate path). No other fields — the
+	// client polls script_status and/or re-evaluates until it resolves.
+	z.object({ kind: z.literal('pending') })
 ]);
 export const TableRowSchema = z.object({
 	key: z.array(z.unknown()),
 	cells: z.array(TableCellSchema)
 });
+
+/** Progress of the background script-cache sweep for a table's script
+ * column(s). Absent/null for tables with no script column, or for older
+ * backend responses that predate this field. */
+export const ScriptStatusSchema = z.object({
+	state: z.enum(['ready', 'computing', 'failed']),
+	done: z.number().int().default(0),
+	total: z.number().int().nullish(),
+	message: z.string().nullish()
+});
+export type ScriptStatus = z.infer<typeof ScriptStatusSchema>;
+
 export const TablePageSchema = z.object({
 	columns: z.array(TableColumnSchema),
 	rows: z.array(TableRowSchema),
@@ -812,7 +828,8 @@ export const TablePageSchema = z.object({
 	truncated: z.boolean(),
 	offset: z.number().int(),
 	model_rev: z.number().int(),
-	warnings: z.array(z.string()).default([])
+	warnings: z.array(z.string()).default([]),
+	script_status: ScriptStatusSchema.nullish()
 });
 export type TablePage = z.infer<typeof TablePageSchema>;
 export type TableCell = z.infer<typeof TableCellSchema>;

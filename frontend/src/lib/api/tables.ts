@@ -20,11 +20,25 @@ export function evaluateTable(args: EvaluateArgs, cfg?: ClientConfig): Promise<T
 	return apiFetch('/tables/evaluate', { method: 'POST', body, schema: TablePageSchema }, cfg);
 }
 
-/** Fetch the xlsx as a Blob (raw Response → blob); caller triggers the download. */
+/**
+ * Outcome of a `/tables/export` call. `'preparing'` means the backend's
+ * cache-only export path hasn't finished computing every script cell yet — it
+ * answered 202 with `Retry-After: 1` instead of the xlsx body. The caller is
+ * expected to retry after a short delay (the retry loop itself is Task 10);
+ * this task only distinguishes the two outcomes.
+ */
+export type ExportResult =
+	| { kind: 'ready'; blob: Blob; filename: string }
+	| { kind: 'preparing'; done: number; total: number | null };
+
+/** Export the current definition (or saved artifact) as an .xlsx. Resolves to
+ * `{ kind: 'ready' }` with the Blob once the backend has it, or
+ * `{ kind: 'preparing' }` while the script-cache sweep is still filling in
+ * cells for this table (backend 202 + Retry-After). */
 export async function exportTable(
 	args: { definition?: TableDefinition; artifactId?: string; sort?: TableSort },
 	cfg?: ClientConfig
-): Promise<{ blob: Blob; filename: string }> {
+): Promise<ExportResult> {
 	const res = await apiFetchRaw(
 		'/tables/export',
 		{
@@ -33,7 +47,11 @@ export async function exportTable(
 		},
 		cfg
 	);
+	if (res.status === 202) {
+		const body = (await res.json()) as { done?: number; total?: number | null };
+		return { kind: 'preparing', done: body.done ?? 0, total: body.total ?? null };
+	}
 	const disp = res.headers.get('content-disposition') ?? '';
 	const m = /filename="([^"]+)"/.exec(disp);
-	return { blob: await res.blob(), filename: m?.[1] ?? 'table.xlsx' };
+	return { kind: 'ready', blob: await res.blob(), filename: m?.[1] ?? 'table.xlsx' };
 }
