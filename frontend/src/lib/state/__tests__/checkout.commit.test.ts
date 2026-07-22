@@ -233,7 +233,10 @@ describe('commit lifecycle', () => {
 
 		expect(getStagedOps()).toEqual([]); // the incident rel op went too
 		expect(rel).toHaveBeenCalledWith('t_src', undefined);
-		expect(getHeldTokens()).not.toContain('t_src');
+		// Only the target element's OWN token is a release candidate (parity with
+		// discardElement): the far endpoint's shared pin survives the cascade and
+		// expires with its TTL. Pinned so the asymmetry stays a decision, not drift.
+		expect(getHeldTokens()).toEqual(['t_tgt']);
 		expect(isCheckedOutByMe('src')).toBe(false);
 		expect(getCachedElements().get('src')?.properties.name).toBe('a');
 	});

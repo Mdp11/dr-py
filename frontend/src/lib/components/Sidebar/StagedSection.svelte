@@ -61,8 +61,22 @@
 	// rows", never to "no rows".
 	let viewportH = $state(0);
 
+	// Reverting rows shrinks the list under an already-scrolled viewport, and a
+	// stale scrollTop past the new end makes computeWindow return an empty
+	// window (start = end = total) — a blank list until the browser's own
+	// scrollTop correction fires a scroll event. Revert IS this list's primary
+	// interaction, so reconcile in the derivation instead of waiting for it.
+	const clampedScrollTop = $derived(
+		Math.min(scrollTop, Math.max(0, rows.length * ROW_H - viewportH))
+	);
 	const win = $derived(
-		computeWindow({ scrollTop, viewportH, rowH: ROW_H, total: rows.length, overscan: OVERSCAN })
+		computeWindow({
+			scrollTop: clampedScrollTop,
+			viewportH,
+			rowH: ROW_H,
+			total: rows.length,
+			overscan: OVERSCAN
+		})
 	);
 	const windowedRows = $derived(rows.slice(win.start, win.end));
 
