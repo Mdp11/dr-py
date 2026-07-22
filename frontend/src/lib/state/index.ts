@@ -342,3 +342,8 @@ export {
 	finishJourney,
 	cancelJourney
 } from './open-journey';
+export {
+	deriveStagedElementRows,
+	type StagedElementRow,
+	type StagedRowStatus
+} from './staged-rows';
