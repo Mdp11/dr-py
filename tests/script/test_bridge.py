@@ -1,5 +1,7 @@
 import json
 
+from data_rover.core.metamodel.schema import ElementType, Metamodel, PropertyDef
+from data_rover.core.model.model import Model
 from data_rover.core.script.bridge import (
     BridgeDispatcher,
     BridgeLimitError,
@@ -304,3 +306,37 @@ def test_project_roots_projection_matches_project_element_shape():
 def test_project_roots_empty_input_returns_empty_list():
     model = tiny_model()
     assert project_roots(model, []) == []
+
+
+# --- Element.name resolution goes through core.model.naming.name_of --------
+
+
+def _cased_name_model() -> Model:
+    mm = Metamodel(
+        elements=[
+            ElementType(
+                name="Building",
+                properties=[PropertyDef(name="Name", datatype="string")],
+            ),
+        ],
+        relationships=[],
+    )
+    model = Model(mm)
+    cased = model.restore_element("cased", "Building")
+    model.set_property(cased, "Name", "Cased Name")
+    model.restore_element("unnamed", "Building")
+    return model
+
+
+def test_projection_name_resolves_cased_name_property() -> None:
+    d = BridgeDispatcher(_cased_name_model(), record_ops=False)
+    resp = d.dispatch({"id": 1, "op": "element", "element_id": "cased"})
+    assert resp.get("error") is None
+    assert resp["element"]["name"] == "Cased Name"
+
+
+def test_projection_name_is_none_when_unnamed() -> None:
+    d = BridgeDispatcher(_cased_name_model(), record_ops=False)
+    resp = d.dispatch({"id": 1, "op": "element", "element_id": "unnamed"})
+    assert resp.get("error") is None
+    assert resp["element"]["name"] is None

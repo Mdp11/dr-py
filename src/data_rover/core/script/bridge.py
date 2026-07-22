@@ -54,6 +54,7 @@ from collections.abc import Callable, Iterable, Sequence
 from ..metamodel.schema import Metamodel
 from ..model.element import Element
 from ..model.model import Model
+from ..model.naming import name_of
 from ..model.relationship import Relationship
 
 #: A recorded write op: a (verbatim, unvalidated) `OpIn`-shaped dict, e.g.
@@ -101,14 +102,17 @@ class ReadOnlyError(Exception):
 def _project_element(element: Element) -> dict[str, Any]:
     """Element -> plain dict: `{"id", "type", "name", "properties"}`.
 
-    `name` is a display convenience (`properties.get("name")`, `None` when
-    absent) — the full property bag is still there under `"properties"` for
-    a snippet that needs more than the display name.
+    `name` is a display convenience resolved via `core.model.naming.name_of`
+    — the same case-insensitive `name`/`Name`/`NAME` resolution the tree/
+    search/table code uses (list-valued names contribute their first
+    non-empty entry), `None` when no usable name property exists. The full
+    property bag is still there under `"properties"` for a snippet that
+    needs more than the display name.
     """
     return {
         "id": element.id,
         "type": element.type_name,
-        "name": element.properties.get("name"),
+        "name": name_of(element),
         "properties": dict(element.properties),
     }
 
