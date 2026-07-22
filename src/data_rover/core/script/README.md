@@ -282,13 +282,18 @@ call loop reading newline-JSON frames from the host:
   `facade_src.py`'s `_dr_call_entry`, called by BOTH hosts (the WASM
   bootstrap loop above and `tests/script/trusted_runner.py`'s
   `_TrustedSession`) so per-call semantics live in exactly one place and the
-  two hosts cannot drift. The guest replies with `{"call_result": {"payload":
-  ..., "error": ...}}`. `print()` output during the call is still captured
+  two hosts cannot drift. `_dr_call_entry` returns `{"payload", "reads"}` —
+  the guest replies with `{"call_result": {"payload": ..., "error": ...,
+  "reads": <sorted list of [tag, id_or_null] 2-lists> | null}}`. `reads` is
+  the call's recorded read-set (Phase B — see `runner.py`'s `ReadKey` and
+  `CallResult.reads`), decoded host-side via `decode_reads`; `null` means
+  "depends on everything" (recording overflowed, or the call errored).
+  `print()` output during the call is still captured
   through the same size-capped `_CappedStdout` console runs use, but the
   buffer is never included in `call_result` — **embedded calls' stdout is
-  captured and discarded**, by design; only the tagged wire payload (and, in
-  a future write-enabled mode, recorded ops — sessions are read-only in
-  M2/M3, see below) reaches the caller.
+  captured and discarded**, by design; only the tagged wire payload, the
+  read-set, and, in a future write-enabled mode, recorded ops (sessions are
+  read-only in M2/M3, see below) reach the caller.
 - `{"close": true}` — the loop returns, ending the guest's `_start`; the host
   then tears the instance down (never pooled again, same lifecycle as a
   console run's single-use instance).
@@ -346,6 +351,24 @@ fresh one.
   now-mutated module state. This is not detected or warned about — it is a
   documented caveat for snippet authors, not a bug the context guards
   against.
+- **Build lookup indexes at module top level, never lazily.** A read-set
+  capture pass (`facade_src.py`'s `_note_read`, threaded into
+  `CallResult.reads`) records which parts of the model each call USES, so a
+  later commit can evict only the table cells that read something it
+  changed. Reads made while the snippet MODULE executes (e.g. `_index = {e.id:
+  e.name for e in dr.elements(type="Building")}` at top level) are charged to
+  every call against that session, which is correct and exactly what you
+  want. But if the same index is built LAZILY inside `value`/`step` (`if
+  _index is None: _index = {...}`), only the FIRST call that happens to
+  trigger the build performs — and therefore records — those reads; every
+  later call hits the already-built global directly and reports nothing for
+  it, even though its result still depends on it just as much as the first
+  call's did. Those later cells will NOT be evicted when the underlying data
+  changes and will silently serve stale values. The same trap catches a
+  generator merely created at module level but advanced (`next()`'d) inside a
+  call. There is no way to fix this with better instrumentation — the reads
+  genuinely only happen once — so the rule is simply: build your indexes at
+  real module top level, not behind an `if _x is None` guard.
 - **`.warnings` / `.add_warning(message)`** — deduped by exact message
   text, capped at `MAX_SCRIPT_WARNINGS` (20); the table/nav evaluation
   layers use this to report prune/degrade decisions without flooding the

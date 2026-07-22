@@ -172,6 +172,16 @@ def _copy_projection(d):
     return c
 
 
+# Cannot import runner.py's _MAX_READS here (this string is exec'd guest
+# source -- no imports, see the module docstring), so this cap and that one
+# can only be kept in sync by convention: this value MUST be <= host-side
+# `runner.py`'s `_MAX_READS`. If it were ever greater, a read-set sized
+# between the two caps (under _READS_CAP, so `_dr_call_entry` ships it
+# un-overflowed) would arrive at `decode_reads` over `_MAX_READS` and get
+# silently decoded to `None` there (its `len(obj) > _MAX_READS` guard) --
+# indistinguishable from a deliberate overflow report, so nothing would ever
+# surface the drift. Keep the two literals equal unless you have a specific
+# reason the facade should overflow strictly before the host does.
 _READS_CAP = 2000
 
 # Read-set recording (Phase B): _boot_reads accumulates reads made during
@@ -188,6 +198,24 @@ _call_overflow = [False]
 
 
 def _note_read(tag, ident):
+    # LIMITATION -- cannot be fixed by more instrumentation, only by author
+    # discipline (see README.md's "Evaluation sessions (M2/M3)" section for
+    # the author-facing version of this warning): a read made during module
+    # exec (boot) is charged to EVERY call via _boot_reads, which covers an
+    # index built at true module top level. It does NOT cover the equally
+    # common LAZY variant -- a module global initialized on first use inside
+    # value()/step() (`if _index is None: _index = {...}`) -- because only
+    # the FIRST call that triggers the lazy build ever executes the reads
+    # that build it; every later call hits the already-built global directly
+    # and never calls back into this module, so its _call_reads set is
+    # missing that dependency even though its RESULT still depends on it.
+    # The same shape bites a generator merely CREATED at module level but
+    # ADVANCED (next()'d) inside a call: the _note_read call living in the
+    # generator body only fires on the first advance, not at creation. There
+    # is no way for this module to tell "a read the whole snippet depends
+    # on" apart from "a read one lucky first call happened to trigger" after
+    # the fact -- the fix has to be snippet authors building indexes at
+    # actual module top level, not lazily.
     target = _call_reads[0]
     if target is None:
         if len(_boot_reads) >= _READS_CAP:
@@ -492,7 +520,18 @@ def _dr_call_entry(entry, element_ids, elements=None):
     # surfaces NotFoundError exactly as a direct fetch would. Raises on
     # snippet errors — the caller owns exception -> error-result mapping
     # (and an errored call ships no reads: reads=None, always-evict). NOT
-    # part of the documented dr API (underscored on purpose).
+    # part of the documented dr API (underscored on purpose). Saves/restores
+    # the prior _call_reads/_call_overflow rather than resetting to a fixed
+    # None/False in `finally`: today the driver is never reentrant (nothing
+    # calls `_dr_call_entry` while another invocation is on the stack), so a
+    # fixed reset and a restore are observably identical -- but a future
+    # nested or write-enabled driver would otherwise silently attribute its
+    # boot/inner-call reads to the WRONG frame the moment reentrancy showed
+    # up, which is exactly the kind of silent-stale-value bug this module
+    # exists to prevent. The restore costs nothing today and removes that
+    # failure mode for free.
+    prior_reads = _call_reads[0]
+    prior_overflow = _call_overflow[0]
     _call_reads[0] = set()
     _call_overflow[0] = False
     try:
@@ -522,7 +561,8 @@ def _dr_call_entry(entry, element_ids, elements=None):
                 )
         return {"payload": payload, "reads": reads}
     finally:
-        _call_reads[0] = None
+        _call_reads[0] = prior_reads
+        _call_overflow[0] = prior_overflow
 
 
 def _dr_serialize_entry_result(entry, value):
