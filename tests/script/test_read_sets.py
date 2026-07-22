@@ -73,7 +73,7 @@ def test_memo_hit_charged_to_reusing_call() -> None:
 def test_scan_read_recorded() -> None:
     res = _call(
         "def value(els):\n"
-        "    return sum(1 for _ in dr.elements(type='Building'))\n",
+        "    return sum(1 for _ in dr.elements(stereotypes='Building'))\n",
         ["b1"],
     )
     assert res.reads == frozenset({("el", "b1"), ("scan", "Building")})
@@ -88,7 +88,7 @@ def test_untyped_scan_records_none_key() -> None:
 
 def test_boot_reads_charged_to_every_call() -> None:
     res = _call(
-        "_index = {e.id: e.name for e in dr.elements(type='Building')}\n"
+        "_index = {e.id: e.name for e in dr.elements(stereotypes='Building')}\n"
         "def value(els):\n"
         "    return _index[els[0].id]\n",
         ["b2"],
@@ -189,7 +189,7 @@ def test_mixed_typed_and_untyped_scan_does_not_crash_the_call() -> None:
     # -- that raised TypeError and turned a legitimate call into an error.
     res = _call(
         "def value(els):\n"
-        "    a = sum(1 for _ in dr.elements(type='Building'))\n"
+        "    a = sum(1 for _ in dr.elements(stereotypes='Building'))\n"
         "    b = sum(1 for _ in dr.elements())\n"
         "    return a + b\n",
         ["b1"],
@@ -210,3 +210,29 @@ def test_decode_reads_accepts_and_rejects() -> None:
     assert decode_reads([["x" * 33, "b1"]]) is None  # tag too long
     assert decode_reads([["el", "x" * 513]]) is None  # id too long
     assert decode_reads([["el", str(i)] for i in range(2001)]) is None  # cap
+
+
+def test_list_stereotype_scan_records_the_name_not_the_list() -> None:
+    # A list-valued filter must still record a per-NAME tag: the tag ident is
+    # the string "Building", never the list itself (which is unhashable and
+    # would not match anything `invalidation.touched_keys` emits).
+    res = _call(
+        "def value(els):\n"
+        "    return len(list(dr.elements(stereotypes=['Building'])))\n",
+        ["b1"],
+    )
+    assert res.reads == frozenset({("el", "b1"), ("scan", "Building")})
+
+
+def test_multi_stereotype_scan_records_one_tag_per_name() -> None:
+    # One ("scan", name) tag per REQUESTED name — including a name the
+    # metamodel does not know (it is still a dependency: creating an element
+    # of that stereotype later would change the scan's answer).
+    res = _call(
+        "def value(els):\n"
+        "    return len(list(dr.elements(stereotypes=['Building', 'Ghost'])))\n",
+        ["b1"],
+    )
+    assert res.reads == frozenset(
+        {("el", "b1"), ("scan", "Building"), ("scan", "Ghost")}
+    )

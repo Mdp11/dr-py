@@ -297,11 +297,12 @@ SNIPPET_HOPS_IN = (
 )
 SNIPPET_SCAN = (
     "def value(els):\n"
-    "    return sum(1 for _ in dr.elements(type='Thing'))\n"
+    "    return sum(1 for _ in dr.elements(stereotypes='Thing'))\n"
 )
-#: Untyped scan (no `type=`) — this is the ("scan", None) key. A cell that
-#: only ever recorded this key must still be evicted by ANY element change,
-#: not just changes to elements of a type the snippet happened to filter on.
+#: Unfiltered scan (no `stereotypes=`) — this is the ("scan", None) key. A
+#: cell that only ever recorded this key must still be evicted by ANY element
+#: change, not just changes to elements of a stereotype the snippet happened
+#: to filter on.
 SNIPPET_SCAN_ALL = "def value(els):\n    return sum(1 for _ in dr.elements())\n"
 #: Reads containment children — the ("children", parent) key, which is
 #: emitted per-PARENT (an element can have more than one containment

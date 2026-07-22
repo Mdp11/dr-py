@@ -58,11 +58,10 @@ def test_adjacency_reads_are_memoized(bridge_call_log: list[str]) -> None:
         "    els[0].out(); els[0].out()\n"
         "    els[0].children(); els[0].children()\n"
         "    els[0].parent(); els[0].parent()\n"
-        "    dr.types(); dr.types()\n"
         "    return 1\n"
     )
     assert sess.call("value", ["b2"]).error is None
-    for op in ("outgoing", "children", "parent", "types"):
+    for op in ("outgoing", "children", "parent"):
         assert bridge_call_log.count(op) == 1, op
 
 

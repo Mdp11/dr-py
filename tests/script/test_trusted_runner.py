@@ -80,7 +80,7 @@ def test_element_attrs_indexing_and_props():
     r = TrustedRunner()
     code = (
         "el = dr.element('b1')\n"
-        "result = (el.id, el.type, el.name, el['name'], el.get('name'), "
+        "result = (el.id, el.stereotype, el.name, el['name'], el.get('name'), "
         "el.get('missing', 'dflt'), el.props())\n"
     )
     res = r.run(tiny_model(), RunRequest(code=code), RunLimits(), record_ops=False, rev=0)
@@ -89,14 +89,6 @@ def test_element_attrs_indexing_and_props():
         "('b1', 'Building', 'Building One', 'Building One', 'Building One', "
         "'dflt', {'name': 'Building One'})"
     )
-
-
-def test_elements_type_filter_and_paging():
-    r = TrustedRunner()
-    code = "result = sorted(e.id for e in dr.elements(type='Building'))"
-    res = r.run(tiny_model(), RunRequest(code=code), RunLimits(), record_ops=False, rev=0)
-    assert res.error is None
-    assert res.result_repr == "['b1', 'b2', 'b3']"
 
 
 def test_out_in_parent_children():
@@ -117,14 +109,6 @@ def test_out_in_parent_children():
     res = r.run(tiny_model(), RunRequest(code=code), RunLimits(), record_ops=False, rev=0)
     assert res.error is None
     assert res.result_repr == "(['Owns'], ['Owns'], 'b1', None, ['b2'], [])"
-
-
-def test_types_and_type_info():
-    r = TrustedRunner()
-    code = "result = (dr.types(), dr.type('Building')['type'])"
-    res = r.run(tiny_model(), RunRequest(code=code), RunLimits(), record_ops=False, rev=0)
-    assert res.error is None
-    assert res.result_repr == "(['Building'], 'Building')"
 
 
 def test_create_connect_disconnect_set_op_shapes():
@@ -191,3 +175,48 @@ def test_syntax_error_line_number_is_the_snippet_s_own():
                 RunLimits(), record_ops=False, rev=0)
     assert res.error is not None and res.error.kind == "syntax"
     assert "line 2" in res.error.message
+
+
+def test_element_stereotype_property_and_repr():
+    r = TrustedRunner()
+    res = r.run(tiny_model(),
+                RunRequest(code="el = dr.element('b1')\nresult = (el.stereotype, repr(el))"),
+                RunLimits(), record_ops=False, rev=0)
+    assert res.error is None, res.error
+    assert res.result_repr == "('Building', \"Element(id='b1', stereotype='Building')\")"
+
+
+def test_element_type_attribute_is_gone():
+    r = TrustedRunner()
+    res = r.run(tiny_model(),
+                RunRequest(code="result = dr.element('b1').type"),
+                RunLimits(), record_ops=False, rev=0)
+    assert res.error is not None and res.error.kind == "runtime"
+
+
+def test_elements_accepts_stereotypes_list():
+    r = TrustedRunner()
+    res = r.run(tiny_model(),
+                RunRequest(code="result = sorted(e.id for e in dr.elements(stereotypes=['Building']))"),
+                RunLimits(), record_ops=False, rev=0)
+    assert res.error is None, res.error
+    assert res.result_repr == "['b1', 'b2', 'b3']"
+
+
+def test_elements_accepts_single_stereotype_string():
+    r = TrustedRunner()
+    res = r.run(tiny_model(),
+                RunRequest(code="result = len(list(dr.elements(stereotypes='Building')))"),
+                RunLimits(), record_ops=False, rev=0)
+    assert res.error is None, res.error
+    assert res.result_repr == "3"
+
+
+def test_dr_types_and_dr_type_are_gone():
+    r = TrustedRunner()
+    res = r.run(tiny_model(), RunRequest(code="result = dr.types()"),
+                RunLimits(), record_ops=False, rev=0)
+    assert res.error is not None and res.error.kind == "runtime"
+    res = r.run(tiny_model(), RunRequest(code="result = dr.type('Building')"),
+                RunLimits(), record_ops=False, rev=0)
+    assert res.error is not None and res.error.kind == "runtime"

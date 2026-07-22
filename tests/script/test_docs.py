@@ -16,10 +16,10 @@ def _by_name() -> dict[str, FacadeDocEntry]:
 def test_every_public_member_present_and_documented():
     entries = _by_name()
     expected = {
-        "dr.element", "dr.elements", "dr.types", "dr.type",
+        "dr.element", "dr.elements",
         "dr.create", "dr.connect", "dr.disconnect",
         "dr.BridgeError", "dr.ReadOnlyError", "dr.NotFoundError",
-        "Element.id", "Element.type", "Element.name",
+        "Element.id", "Element.stereotype", "Element.name",
         "Element.get", "Element.props", "Element.out", "Element.in_",
         "Element.parent", "Element.children", "Element.set", "Element.delete",
     }
@@ -30,8 +30,8 @@ def test_every_public_member_present_and_documented():
 
 def test_signatures_render_public_names_and_defaults():
     entries = _by_name()
-    assert entries["dr.create"].signature == "dr.create(type_name, properties=None) -> str (temp id)"
-    assert entries["dr.elements"].signature == "dr.elements(type=None) -> iterator of Element"
+    assert entries["dr.create"].signature == "dr.create(stereotype, properties=None) -> str (temp id)"
+    assert entries["dr.elements"].signature == "dr.elements(stereotypes=None) -> iterator of Element"
     assert entries["Element.set"].signature == "Element.set(key, value)"
     assert entries["Element.get"].signature == "Element.get(key, default=None) -> value or default"
     assert entries["Element.id"].signature == "Element.id -> str"

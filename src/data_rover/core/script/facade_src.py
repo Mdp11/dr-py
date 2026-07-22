@@ -243,13 +243,13 @@ class Element:
         return self._data["id"]
 
     @property
-    def type(self):
-        """The element's type name."""
+    def stereotype(self):
+        """The element's stereotype (type) name."""
         return self._data["type"]
 
     @property
     def name(self):
-        """The element's display name."""
+        """The element's display name, or None when the element is unnamed."""
         return self._data["name"]
 
     def __getitem__(self, key):
@@ -366,7 +366,7 @@ class Element:
         _write({"kind": "delete_element", "id": self.id})
 
     def __repr__(self):
-        return "Element(id=" + repr(self.id) + ", type=" + repr(self.type) + ")"
+        return "Element(id=" + repr(self.id) + ", stereotype=" + repr(self.stereotype) + ")"
 
 
 def _fetch_element(element_id):
@@ -394,17 +394,33 @@ def _fetch_element(element_id):
 # twice in one snippet is rare enough not to be worth a bespoke key scheme
 # here. Its read-set key is recorded once per call regardless of how many
 # pages it takes (`_note_read` before the loop, not per page).
-def _iter_elements(type=None):
-    """Iterate all elements, optionally filtered by type name. Pages transparently.
+def _iter_elements(stereotypes=None):
+    """Iterate all elements, optionally filtered by stereotype name(s).
+
+    `stereotypes` is a single name or a list of names; matches include
+    subtypes of each named stereotype. Pages transparently.
 
     Example:
-        for el in dr.elements(type="Building"):
+        for el in dr.elements(stereotypes="Building"):
             print(el.name)
     """
-    _note_read("scan", type)
+    # One ("scan", name) read tag per REQUESTED name -- not one per expanded
+    # subtype, and never the list object itself (unhashable, and it would
+    # match nothing `api/invalidation.py`'s `touched_keys` ever emits). The
+    # unfiltered scan keeps its distinct ("scan", None) tag, which that
+    # module treats as "depends on every stereotype".
+    if stereotypes is None:
+        names = None
+        _note_read("scan", None)
+    else:
+        names = [stereotypes] if isinstance(stereotypes, str) else list(stereotypes)
+        for s in names:
+            _note_read("scan", s)
     offset = 0
     while True:
-        resp = _read("elements_page", type=type, offset=offset, limit=500)
+        # Wire key stays "type" (the host's `elements_page` contract); only
+        # the snippet-visible parameter name is `stereotypes`.
+        resp = _read("elements_page", type=names, offset=offset, limit=500)
         for item in resp["elements"]:
             yield Element(item)
         next_offset = resp.get("next_offset")
@@ -413,40 +429,7 @@ def _iter_elements(type=None):
         offset = next_offset
 
 
-def _list_types():
-    """List the element type names available in this project's metamodel.
-
-    Example:
-        print(dr.types())
-    """
-    key = ("types", None)
-    hit = _memo.get(key)
-    if hit is None:
-        hit = _read("types")["types"]
-        _memo_put(key, hit)
-    return list(hit)
-
-
-def _type_info(name):
-    """Describe a metamodel type: its properties, and endpoints if a relationship type.
-
-    Example:
-        info = dr.type("Building")
-    """
-    key = ("type_info", name)
-    hit = _memo.get(key)
-    if hit is None:
-        hit = _read("type_info", type=name)
-        _memo_put(key, hit)
-    # Copy the outer dict AND its nested `properties` list-of-dicts — same
-    # rule as `out()`/`in_()`: a snippet mutating what it gets back must not
-    # poison the memo entry a later `dr.type(name)` call would return.
-    out = dict(hit)
-    out["properties"] = [dict(p) for p in out.get("properties") or []]
-    return out
-
-
-def _create(type_name, properties=None):
+def _create(stereotype, properties=None):
     """Record a dry-run element create. Returns a temp id usable in dr.connect
     and dr.element within this run.
 
@@ -457,13 +440,15 @@ def _create(type_name, properties=None):
     resp = _write({
         "kind": "create_element",
         "temp_id": temp_id,
-        "type_name": type_name,
+        # Wire key stays "type_name" (the recorded-op contract); only the
+        # snippet-visible parameter name is `stereotype`.
+        "type_name": stereotype,
         "properties": dict(properties) if properties else {},
     })
     return resp.get("temp_id", temp_id)
 
 
-def _connect(type_name, source_id, target_id, properties=None):
+def _connect(stereotype, source_id, target_id, properties=None):
     """Record a dry-run relationship create between two element ids (real or temp).
     Returns the relationship's temp id.
 
@@ -474,7 +459,8 @@ def _connect(type_name, source_id, target_id, properties=None):
     resp = _write({
         "kind": "create_relationship",
         "temp_id": temp_id,
-        "type_name": type_name,
+        # Wire key stays "type_name" — see `_create` above.
+        "type_name": stereotype,
         "source_id": source_id,
         "target_id": target_id,
         "properties": dict(properties) if properties else {},
@@ -498,8 +484,6 @@ class _Dr:
 
     element = staticmethod(_fetch_element)
     elements = staticmethod(_iter_elements)
-    types = staticmethod(_list_types)
-    type = staticmethod(_type_info)
     create = staticmethod(_create)
     connect = staticmethod(_connect)
     disconnect = staticmethod(_disconnect)
@@ -551,10 +535,11 @@ def _dr_call_entry(entry, element_ids, elements=None):
                 reads = None
             else:
                 # Sort key avoids comparing None to str directly: a
-                # ("scan", None) (untyped scan) and a ("scan", "Building")
-                # (typed scan) can coexist in one call's set, and plain
-                # `sorted(list(k) for k in merged)` raises TypeError trying
-                # to order their second elements against each other.
+                # ("scan", None) (unfiltered scan) and a ("scan", "Building")
+                # (stereotype-filtered scan) can coexist in one call's set,
+                # and plain `sorted(list(k) for k in merged)` raises
+                # TypeError trying to order their second elements against
+                # each other.
                 reads = sorted(
                     (list(k) for k in merged),
                     key=lambda k: (k[0], k[1] is not None, k[1] or ""),
