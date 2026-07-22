@@ -266,7 +266,7 @@ def test_reparent_batch_touches_both_old_and_new_parent_children() -> None:
     reparented element) is just as stale as one that read the new parent's,
     so both must be evicted."""
     model = _model()
-    old_owns_id = next(iter(model.indexes.out_rels["a"]))
+    old_owns_id = next(iter(model.indexes.outgoing_ids("a")))
     res = _apply(
         model,
         [
