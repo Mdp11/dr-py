@@ -572,6 +572,7 @@ def apply_ops(
         session.model_rev += 1
         if get_settings().snippet_incremental_invalidation:
             session.evict_touched_caches(touched_keys(model, model.metamodel, res))
+        # no else: pre-branch /model/ops relied on the rev-stamp mismatch alone
         session.record_batch(
             AppliedBatch(
                 ops=res.canonical_ops,
@@ -627,6 +628,7 @@ def undo(
         session.model_rev += 1
         if get_settings().snippet_incremental_invalidation:
             session.evict_touched_caches(touched_keys(model, model.metamodel, res))
+        # no else: pre-branch /model/ops relied on the rev-stamp mismatch alone
         # append-only journal: the undo is a NEW forward commit whose ops are
         # the inverse batch, so hydration replays to the post-undo state and
         # model_rev moves up (Phase 8 revert reuses this shape).

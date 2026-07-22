@@ -44,6 +44,21 @@ CellKey = tuple[str, str, tuple[str, ...]]
 
 _CACHEABLE_ERROR_KINDS = frozenset({"runtime", "syntax"})
 
+#: `put` degrades an oversized incoming read-set to `None` above this many
+#: keys. Storing read-sets (Phase B) changed the cache's memory profile by
+#: orders of magnitude: each entry can now carry up to `_MAX_READS` (2000,
+#: see `runner.py`) `ReadKey` tuples, each id up to 512 chars, times
+#: `snippet_cell_cache_max` (default 50 000) cells. Nothing bounds the
+#: aggregate, and a realistic pathological cell -- a multi-hop snippet
+#: charging dozens of keys per cell over a big table -- is already hundreds
+#: of MB of pure bookkeeping. `None` already means "evict on every commit"
+#: (the conservative, always-correct direction), so collapsing an oversized
+#: set to `None` here costs only extra recompute for that one cell; it can
+#: NEVER cause a stale value, only extra work. Deliberately far below
+#: `_MAX_READS`: this bounds steady-state cache memory, not a single call's
+#: worst case.
+_MAX_STORED_READS = 128
+
 
 class ScriptCellCache:
     def __init__(self, cap: int = 50_000) -> None:
@@ -74,6 +89,12 @@ class ScriptCellCache:
     ) -> None:
         if result.error is not None and result.error.kind not in _CACHEABLE_ERROR_KINDS:
             return
+        if reads is not None and len(reads) > _MAX_STORED_READS:
+            # Degrade to "depends on everything" rather than storing a huge
+            # read-set: correctness-neutral (None is already the always-evict
+            # direction), just forfeits the recompute savings for this one
+            # pathological cell. See _MAX_STORED_READS's docstring.
+            reads = None
         with self._lock:
             if rev < self._stamp:
                 return  # stale writer: poisoning guard

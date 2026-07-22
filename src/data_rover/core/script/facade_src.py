@@ -211,7 +211,7 @@ def _note_read(tag, ident):
     # missing that dependency even though its RESULT still depends on it.
     # The same shape bites a generator merely CREATED at module level but
     # ADVANCED (next()'d) inside a call: the _note_read call living in the
-    # generator body only fires on the first advance, not at creation. There
+    # generator body only fires on the first advance, not at creation. The
     # fix would require unioning each call's reads into a session-sticky set
     # that later calls inherit, which degrades back to clear-all invalidation
     # and defeats the whole point of per-call tracking — so author discipline

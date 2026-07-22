@@ -206,14 +206,20 @@ def test_hop_falls_back_to_per_neighbor_fetch_when_inline_guard_trips(
     observes, only how many bridge round trips it costs."""
     from data_rover.core.script import bridge as bridge_module
 
-    monkeypatch.setattr(bridge_module, "_MAX_INLINE_FAR_ENDPOINTS", 0)
-    sess = _open(
+    code = (
         "def value(els):\n"
         "    total = 0\n"
         "    for rel in els[0].out():\n"
         "        total += len(dr.element(rel['target_id']).name)\n"
         "    return total\n"
     )
+    fast_sess = _open(code)
+    fast_res = fast_sess.call("value", ["b1"])
+    assert fast_res.error is None
+    bridge_call_log.clear()
+
+    monkeypatch.setattr(bridge_module, "_MAX_INLINE_FAR_ENDPOINTS", 0)
+    sess = _open(code)
     res = sess.call("value", ["b1"])
     assert res.error is None
     assert res.value == {"kind": "scalar", "value": len("Building Two")}
@@ -221,6 +227,10 @@ def test_hop_falls_back_to_per_neighbor_fetch_when_inline_guard_trips(
     # the fast path's 0 (b1 root piggybacked, b2 rides the hop)
     assert bridge_call_log.count("element") == 1  # b2 neighbor; b1 root piggybacked
     assert bridge_call_log.count("outgoing") == 1
+    # Read-sets drive incremental invalidation, so the degraded (per-neighbor
+    # fetch) path must record the SAME dependencies as the fast (inlined)
+    # path -- only the trip count may differ, never what got tracked as read.
+    assert res.reads == fast_res.reads
 
 
 def test_root_piggyback_zero_trips_for_property_math(bridge_call_log: list[str]) -> None:
@@ -286,5 +296,8 @@ def test_read_memo_max_zero_changes_trips_never_results(
 
     # Same result either way -- the guard only ever changes trip counts.
     assert unmemoized_res.value == baseline_res.value
+    # Read-sets drive incremental invalidation, so they're part of the
+    # determinism contract too, not just the value.
+    assert unmemoized_res.reads == baseline_res.reads
     # But the root projection was skipped, so the guest had to fetch it.
     assert bridge_call_log.count("element") == 1

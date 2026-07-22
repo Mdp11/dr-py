@@ -1,6 +1,6 @@
 """ScriptCellCache: rev stamping, LRU, error-kind filtering (spec §3.1)."""
 
-from data_rover.core.script.cell_cache import ScriptCellCache
+from data_rover.core.script.cell_cache import _MAX_STORED_READS, ScriptCellCache
 from data_rover.core.script.runner import CallResult, ScriptError
 
 KEY = ("a" * 64, "value", ("e1",))
@@ -100,6 +100,29 @@ def test_survivor_hits_at_new_rev_only() -> None:
     c.evict_touched(frozenset({("el", "other")}), 6)
     assert c.get(("sb", "value", ("t2",)), 5) is None  # old rev misses
     assert c.get(("sb", "value", ("t2",)), 6) is not None
+
+
+def test_put_degrades_oversized_read_set_to_none() -> None:
+    """A `put` whose read-set exceeds `_MAX_STORED_READS` must be stored as
+    `reads=None` -- the conservative "evict on every commit" direction -- so
+    the entry is later dropped by an `evict_touched` call whose touched set
+    is disjoint from what the cell actually read."""
+    c = ScriptCellCache(cap=10)
+    c.clear_and_stamp(5)
+    huge = frozenset(("el", f"t{i}") for i in range(_MAX_STORED_READS + 1))
+    c.put(("sa", "value", ("t1",)), _ok(1), 5, reads=huge)
+    c.evict_touched(frozenset({("el", "disjoint-from-everything")}), 6)
+    assert c.get(("sa", "value", ("t1",)), 6) is None
+
+
+def test_put_keeps_normal_sized_read_set_unchanged() -> None:
+    c = ScriptCellCache(cap=10)
+    c.clear_and_stamp(5)
+    reads = frozenset(("el", f"t{i}") for i in range(_MAX_STORED_READS))
+    c.put(("sa", "value", ("t1",)), _ok(1), 5, reads=reads)
+    c.evict_touched(frozenset({("el", "not-in-reads")}), 6)
+    hit = c.get(("sa", "value", ("t1",)), 6)
+    assert hit is not None and hit.value == {"kind": "scalar", "value": 1}
 
 
 def test_put_stale_rev_rejected_after_evict_touched_moves_stamp() -> None:

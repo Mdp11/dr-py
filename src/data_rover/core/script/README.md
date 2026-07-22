@@ -407,8 +407,9 @@ the same request a shrinking window rather than each getting a fresh
 Embedded sessions minimize guest<->host round trips three ways, all invisible
 to snippet authors: (1) the facade memoizes bridge reads for the session's
 lifetime (`_memo`, capped at `snippet_read_memo_max` entries; sound because a
-session never outlives one model rev's worth of work — the same invariant
-the cell cache below rests on); (2) `outgoing`/`incoming` responses inline
+session's results are rev-stamped and rejected if the rev moved under them —
+see `RunLimits.read_memo_max`; an unstamped console run can observe a torn
+read with or without the memo); (2) `outgoing`/`incoming` responses inline
 the far endpoints' projections under an additive `elements` key, priming
 that memo (see the bridge wire contract above); (3) each embedded call ships
 its bound root elements' projections in the call frame's own `elements`
