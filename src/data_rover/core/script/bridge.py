@@ -49,7 +49,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 
 from ..metamodel.schema import Metamodel
 from ..model.element import Element
@@ -99,6 +99,34 @@ class ReadOnlyError(Exception):
     `record_ops=False`. Caught by `dispatch()` like `BridgeLimitError`."""
 
 
+def _copy_properties(properties: Mapping[str, Any]) -> dict[str, Any]:
+    """Copy a property bag deeply enough that nothing a snippet can reach
+    still aliases the live `Model`.
+
+    A bare `dict(properties)` is NOT enough: multi-valued properties are
+    first-class (see `validation/validators/multiplicity.py`), so a value can
+    be a LIST — and that list object would still be the core `Element`'s own.
+    Under a transport with a real JSON boundary (`WasmScriptRunner`) the
+    decode breaks the alias anyway, but the in-process `TrustedRunner` binds
+    the guest straight to `dispatch()`, so a read-only snippet doing
+    `el["tags"].append(...)` would mutate the session's model — breaking this
+    module's headline invariant that "a snippet that only reads ... can never
+    corrupt the session's model" (see `BridgeDispatcher`).
+
+    Fixing it HERE rather than in `facade_src.py` puts the copy at the single
+    point every projection flows through (`_op_element`, `_op_elements_page`,
+    `_op_children`, `_far_endpoints`, the hop relationship projections and
+    the `project_roots` piggyback), so no read path can be added that forgets
+    it. `dict` values are copied too on the same "the engine stays
+    inspectable and will hold non-conformant data" reasoning as
+    `facade_src.py`'s guest-side `_copy_projection`.
+    """
+    return {
+        k: (list(v) if isinstance(v, list) else dict(v) if isinstance(v, dict) else v)
+        for k, v in properties.items()
+    }
+
+
 def _project_element(element: Element) -> dict[str, Any]:
     """Element -> plain dict: `{"id", "type", "name", "properties"}`.
 
@@ -113,7 +141,7 @@ def _project_element(element: Element) -> dict[str, Any]:
         "id": element.id,
         "type": element.type_name,
         "name": name_of(element),
-        "properties": dict(element.properties),
+        "properties": _copy_properties(element.properties),
     }
 
 
@@ -126,7 +154,7 @@ def _project_relationship(rel: Relationship) -> dict[str, Any]:
         "id": rel.id,
         "type": rel.type_name,
         "name": rel.properties.get("name"),
-        "properties": dict(rel.properties),
+        "properties": _copy_properties(rel.properties),
         "source_id": rel.source_id,
         "target_id": rel.target_id,
     }

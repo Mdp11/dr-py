@@ -43,7 +43,8 @@ const CM_TYPE: Record<string, string> = {
 };
 
 // `boost` is only ever passed as -1 (the member-access heuristic, deprioritized
-// below the typed-partial gate above). dr.*/type-string contexts don't need a
+// below the typed-partial gate above). The `dr.*` and stereotype-string
+// contexts (`CREATE_STRING_RE`/`ELEMENTS_STRING_RE`) don't need a
 // positive counterpart: lang-python's keyword/local sources never fire in
 // member-access or string-literal contexts, so this facade source is already
 // the sole provider there with no competing options to outrank.

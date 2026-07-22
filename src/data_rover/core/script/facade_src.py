@@ -594,6 +594,13 @@ def _iter_elements(stereotypes=None):
         # the snippet-visible parameter name is `stereotypes`.
         resp = _read("elements_page", type=names, offset=offset, limit=500)
         for item in resp["elements"]:
+            # No _copy_projection here, and that is deliberate: scan pages are
+            # never put in `_memo` (see the comment above this function), so
+            # each projection is a fresh per-page object no other read path
+            # can ever hand out again. Aliasing the HOST's model is handled at
+            # the source instead — `bridge.py`'s `_copy_properties` already
+            # copied list-valued property values out of the live `Element` —
+            # so this stays copy-free on the whole-model scan hot path.
             yield Element(item)
         next_offset = resp.get("next_offset")
         if next_offset is None:

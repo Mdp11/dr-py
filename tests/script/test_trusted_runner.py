@@ -207,7 +207,12 @@ def test_element_type_attribute_is_gone():
     res = r.run(tiny_model(),
                 RunRequest(code="result = dr.element('b1').type"),
                 RunLimits(), record_ops=False, rev=0)
+    # Assert on the message too, not just the kind: a `runtime` error alone
+    # would also be produced if `dr.element` itself regressed, so the bare
+    # kind check could pass green while proving nothing about the removal.
     assert res.error is not None and res.error.kind == "runtime"
+    assert "AttributeError" in res.error.message, res.error.message
+    assert "type" in res.error.message
 
 
 def test_elements_accepts_stereotypes_list():
@@ -232,10 +237,17 @@ def test_dr_types_and_dr_type_are_gone():
     r = TrustedRunner()
     res = r.run(tiny_model(), RunRequest(code="result = dr.types()"),
                 RunLimits(), record_ops=False, rev=0)
+    # Message, not just kind — see test_element_type_attribute_is_gone.
     assert res.error is not None and res.error.kind == "runtime"
+    assert "AttributeError" in res.error.message, res.error.message
+    assert "types" in res.error.message
     res = r.run(tiny_model(), RunRequest(code="result = dr.type('Building')"),
                 RunLimits(), record_ops=False, rev=0)
+    # `type` is no longer an attribute of `_Dr` at all, so the failure is the
+    # attribute lookup itself (AttributeError), never a call-time TypeError.
     assert res.error is not None and res.error.kind == "runtime"
+    assert "AttributeError" in res.error.message, res.error.message
+    assert "'type'" in res.error.message
 
 
 # --- Task 5: Relationship class, outgoing()/incoming() filters, expected= ----
@@ -290,10 +302,14 @@ def test_relationship_getitem_raises_on_missing_property():
 
 def test_old_hop_names_are_gone():
     r = TrustedRunner()
-    for code in ("dr.element('b1').out()", "dr.element('b1').in_()"):
+    for code, name in (("dr.element('b1').out()", "out"),
+                       ("dr.element('b1').in_()", "in_")):
         res = r.run(tiny_model(), RunRequest(code="result = " + code),
                     RunLimits(), record_ops=False, rev=0)
+        # Message, not just kind — see test_element_type_attribute_is_gone.
         assert res.error is not None and res.error.kind == "runtime"
+        assert "AttributeError" in res.error.message, res.error.message
+        assert repr(name) in res.error.message, res.error.message
 
 
 def test_hop_filter_by_relationship_stereotype():
@@ -609,3 +625,104 @@ def test_hop_other_stereotype_filter_skips_dangling_far_endpoint():
     # 'ghost'); the other_stereotype filter must silently skip the dangling
     # one rather than raising when it tries to resolve 'ghost'.
     assert res.result_repr == "(2, ['b2'])"
+
+
+# --- read-only snippets must never be able to mutate the session model -------
+
+
+def _multi_valued_model():
+    """tiny_model()'s shape plus a LIST-valued `tags` property on `b1` (and on
+    the `Owns` relationship), so a projection carries a mutable container.
+
+    A dedicated metamodel is needed because `Model.set_property` rejects a
+    property the element type does not declare — the conftest metamodel only
+    declares the scalar `name`.
+    """
+    from data_rover.core.metamodel.schema import (
+        ElementType,
+        Metamodel,
+        PropertyDef,
+        RelationshipType,
+    )
+    from data_rover.core.model.model import Model
+
+    mm = Metamodel(
+        elements=[
+            ElementType(
+                name="Building",
+                properties=[
+                    PropertyDef(name="name", datatype="string"),
+                    PropertyDef(name="tags", datatype="string", multiplicity="0..*"),
+                ],
+            ),
+        ],
+        relationships=[
+            RelationshipType(
+                name="Owns",
+                containment=True,
+                source="Building",
+                target="Building",
+                properties=[
+                    PropertyDef(name="tags", datatype="string", multiplicity="0..*"),
+                ],
+            ),
+        ],
+    )
+    model = Model(mm)
+    b1 = model.restore_element("b1", "Building")
+    model.restore_element("b2", "Building")
+    model.set_property(b1, "name", "Building One")
+    model.set_property(b1, "tags", ["a", "b"])
+    rel = model.connect("Owns", "b1", "b2")
+    model.set_property(rel, "tags", ["r1"])
+    return model
+
+
+def test_scan_cannot_mutate_list_valued_property_of_live_model():
+    """`bridge.py`'s headline invariant: "a snippet that only reads never needs
+    a lock and can never corrupt the session's model".
+
+    `TrustedRunner` binds the guest transport straight to
+    `BridgeDispatcher.dispatch` with no JSON boundary, so a projection that
+    only shallow-copied the property bag would hand snippet code the core
+    `Element`'s OWN list — and `el['tags'].append(...)` in a read-only scan
+    would edit the session model in place. Host-side `_copy_properties` is
+    what makes this impossible for both runners.
+    """
+    model = _multi_valued_model()
+    r = TrustedRunner()
+    res = r.run(model,
+                RunRequest(code=(
+                    "for el in dr.elements():\n"
+                    "    el.props()\n"
+                    "    try:\n"
+                    "        el['tags'].append('POISON')\n"
+                    "    except KeyError:\n"
+                    "        pass\n"
+                    "result = 'done'\n"
+                )),
+                RunLimits(), record_ops=False, rev=0)
+    assert res.error is None, res.error
+    assert res.result_repr == "'done'"
+    assert model.elements["b1"].properties["tags"] == ["a", "b"]
+
+
+def test_hop_and_fetch_cannot_mutate_list_valued_properties_of_live_model():
+    """Same invariant across the non-scan read paths: a single-element fetch
+    and a relationship hop (whose response also inlines the far endpoint)."""
+    model = _multi_valued_model()
+    r = TrustedRunner()
+    res = r.run(model,
+                RunRequest(code=(
+                    "el = dr.element('b1')\n"
+                    "el['tags'].append('POISON')\n"
+                    "rel = el.outgoing()[0]\n"
+                    "rel['tags'].append('POISON')\n"
+                    "for child in el.children():\n"
+                    "    child.props()\n"
+                    "result = 'done'\n"
+                )),
+                RunLimits(), record_ops=False, rev=0)
+    assert res.error is None, res.error
+    assert model.elements["b1"].properties["tags"] == ["a", "b"]
+    assert [r_.properties["tags"] for r_ in model.relationships.values()] == [["r1"]]
