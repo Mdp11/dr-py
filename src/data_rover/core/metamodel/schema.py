@@ -328,9 +328,7 @@ def _build_caches(mm: Metamodel) -> _Caches:
         },
         end_constraints=_build_end_constraints(mm.relationships, element_ancestor_sets),
         element_descendants={n: frozenset(s) for n, s in descendants.items()},
-        relationship_descendants={
-            n: frozenset(s) for n, s in rel_descendants.items()
-        },
+        relationship_descendants={n: frozenset(s) for n, s in rel_descendants.items()},
         rel_types_from={n: tuple(v) for n, v in rel_types_from.items()},
         rel_types_to={n: tuple(v) for n, v in rel_types_to.items()},
     )
