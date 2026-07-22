@@ -62,3 +62,45 @@ def test_lru_eviction() -> None:
     assert c.get(("k2", "value", ()), 1) is None
     assert c.get(("k1", "value", ()), 1) is not None
     assert c.get(("k3", "value", ()), 1) is not None
+
+
+def _res(v: int) -> CallResult:
+    return CallResult(value={"kind": "scalar", "value": v}, error=None, duration_ms=1)
+
+
+def test_evict_touched_drops_intersecting_and_keeps_rest() -> None:
+    c = ScriptCellCache(cap=10)
+    c.clear_and_stamp(5)
+    c.put(("sa", "value", ("t1",)), _res(1), 5, reads=frozenset({("el", "t1")}))
+    c.put(("sb", "value", ("t2",)), _res(2), 5, reads=frozenset({("el", "t2")}))
+    c.evict_touched(frozenset({("el", "t1")}), 6)
+    assert c.stamp == 6
+    assert c.get(("sa", "value", ("t1",)), 6) is None
+    hit = c.get(("sb", "value", ("t2",)), 6)
+    assert hit is not None and hit.value == {"kind": "scalar", "value": 2}
+
+
+def test_evict_touched_none_reads_always_evicted() -> None:
+    c = ScriptCellCache(cap=10)
+    c.clear_and_stamp(5)
+    c.put(("sa", "value", ("t1",)), _res(1), 5, reads=None)
+    c.evict_touched(frozenset(), 6)
+    assert c.get(("sa", "value", ("t1",)), 6) is None
+
+
+def test_evict_touched_non_adjacent_rev_clears_all() -> None:
+    c = ScriptCellCache(cap=10)
+    c.clear_and_stamp(5)
+    c.put(("sa", "value", ("t1",)), _res(1), 5, reads=frozenset({("el", "zz")}))
+    c.evict_touched(frozenset(), 9)  # unknown history between 5 and 9
+    assert c.stamp == 9
+    assert c.size == 0
+
+
+def test_survivor_hits_at_new_rev_only() -> None:
+    c = ScriptCellCache(cap=10)
+    c.clear_and_stamp(5)
+    c.put(("sb", "value", ("t2",)), _res(2), 5, reads=frozenset({("el", "t2")}))
+    c.evict_touched(frozenset({("el", "other")}), 6)
+    assert c.get(("sb", "value", ("t2",)), 5) is None  # old rev misses
+    assert c.get(("sb", "value", ("t2",)), 6) is not None

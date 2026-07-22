@@ -20,6 +20,15 @@ they reproduce identically, so recomputing them is pure waste. Environmental
 kinds (`timeout`, `unavailable`, `memory`, `cancelled`, and the synthetic
 `pending`) must stay retryable and are silently not stored; `put` enforces
 this itself so no caller can poison the cache with a transient failure.
+Cached deterministic errors carry whatever `reads` their call reported
+(usually `None` — errored calls ship no read-set — so they are evicted by
+every commit; conservative and cheap).
+
+Selective eviction (`evict_touched`, spec 2026-07-21 Phase B): each entry now
+carries the read-set (`frozenset[ReadKey] | None`) its call reported
+alongside the `CallResult`, so a commit that only touched a known subset of
+the model can drop just the cells that read what changed instead of the
+whole cache. See `evict_touched`'s docstring for the exact contract.
 """
 
 from __future__ import annotations
@@ -27,7 +36,7 @@ from __future__ import annotations
 import threading
 from collections import OrderedDict
 
-from .runner import CallResult
+from .runner import CallResult, ReadKey
 
 #: (sha256(code).hexdigest(), entry, element_ids) — code is hashed so keys
 #: stay small; ScriptEvalContext computes the hash once per distinct code.
@@ -41,18 +50,27 @@ class ScriptCellCache:
         self._cap = cap
         self._lock = threading.Lock()
         self._stamp = 0
-        self._d: OrderedDict[CellKey, CallResult] = OrderedDict()
+        self._d: OrderedDict[CellKey, tuple[CallResult, frozenset[ReadKey] | None]] = (
+            OrderedDict()
+        )
 
     def get(self, key: CellKey, rev: int) -> CallResult | None:
         with self._lock:
             if rev != self._stamp:
                 return None
             hit = self._d.get(key)
-            if hit is not None:
-                self._d.move_to_end(key)
-            return hit
+            if hit is None:
+                return None
+            self._d.move_to_end(key)
+            return hit[0]
 
-    def put(self, key: CellKey, result: CallResult, rev: int) -> None:
+    def put(
+        self,
+        key: CellKey,
+        result: CallResult,
+        rev: int,
+        reads: frozenset[ReadKey] | None = None,
+    ) -> None:
         if result.error is not None and result.error.kind not in _CACHEABLE_ERROR_KINDS:
             return
         with self._lock:
@@ -61,10 +79,46 @@ class ScriptCellCache:
             if rev > self._stamp:
                 self._d.clear()
                 self._stamp = rev
-            self._d[key] = result
+            self._d[key] = (result, reads)
             self._d.move_to_end(key)
             while len(self._d) > self._cap:
                 self._d.popitem(last=False)
+
+    def evict_touched(self, touched: frozenset[ReadKey], rev: int) -> None:
+        """Selective post-commit invalidation (spec 2026-07-21 Phase B).
+
+        Called with the JUST-BUMPED `model_rev` while its commit's touched
+        read-keys are in hand. Drops every entry whose read-set intersects
+        `touched` — or whose read-set is `None`, meaning "depends on
+        everything" (pre-read-set result, overflow, errored call) — and
+        re-stamps the survivors to `rev` IN PLACE: they were computed against
+        state this commit provably did not touch, so they carry forward
+        rather than recompute. A survivor therefore hits at the new rev and
+        misses at the old one (the stamp has moved out from under it).
+
+        `rev != stamp + 1` degrades to clear-all: some path moved the rev
+        without coming through here (a legacy `touch_model`/`set_model` full
+        clear, a rev jump during hydration, or a stale stamp surviving a lazy
+        period), so the intermediate history between the old stamp and `rev`
+        is unknown and keeping anything would be a guess. Over-invalidation
+        is always the safe direction — this mirrors `put`'s self-stamping
+        rule but is stricter (that one accepts any newer rev; this one
+        insists on exactly +1 because keeping survivors requires knowing
+        precisely what changed).
+        """
+        with self._lock:
+            if rev != self._stamp + 1:
+                self._d.clear()
+                self._stamp = rev
+                return
+            self._stamp = rev
+            doomed = [
+                k
+                for k, (_res, reads) in self._d.items()
+                if reads is None or not touched.isdisjoint(reads)
+            ]
+            for k in doomed:
+                del self._d[k]
 
     def clear_and_stamp(self, rev: int) -> None:
         with self._lock:

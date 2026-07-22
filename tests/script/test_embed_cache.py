@@ -257,3 +257,30 @@ def test_should_abort_returns_a_cached_value_it_already_has() -> None:
     c.close()
     assert res.error is None and res.value == {"kind": "scalar", "value": 5}
     assert runner.calls[0] == 1
+
+
+def test_write_through_carries_reads() -> None:
+    from tests.script.conftest import tiny_model
+    from tests.script.trusted_runner import TrustedRunner
+
+    cache = ScriptCellCache(cap=10)
+    cache.clear_and_stamp(3)
+    ctx = ScriptEvalContext(
+        TrustedRunner(),
+        tiny_model(),
+        RunLimits(),
+        ScriptBudget.start(60),
+        cell_cache=cache,
+        rev=3,
+    )
+    try:
+        res = ctx.call("def value(els):\n    return els[0].name\n", "value", ["b1"])
+        assert res.error is None
+    finally:
+        ctx.close()
+    # the stored entry survives a commit that does NOT touch b1...
+    cache.evict_touched(frozenset({("el", "b2")}), 4)
+    assert cache.size == 1
+    # ...and is evicted by one that does
+    cache.evict_touched(frozenset({("el", "b1")}), 5)
+    assert cache.size == 0
