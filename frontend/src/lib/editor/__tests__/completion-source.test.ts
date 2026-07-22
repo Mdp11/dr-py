@@ -8,14 +8,14 @@ const DOCS: SnippetDocsOut = {
 		{
 			name: 'dr.create',
 			kind: 'function',
-			signature: 'dr.create(type_name, properties=None) -> str (temp id)',
+			signature: 'dr.create(stereotype, properties=None) -> str (temp id)',
 			doc: 'Record a dry-run element create.',
 			example: null
 		},
 		{
 			name: 'dr.elements',
 			kind: 'function',
-			signature: 'dr.elements(type=None)',
+			signature: 'dr.elements(stereotypes=None)',
 			doc: 'Iterate.',
 			example: null
 		},
@@ -37,6 +37,27 @@ const DOCS: SnippetDocsOut = {
 			name: 'Element.id',
 			kind: 'property',
 			signature: 'Element.id -> str',
+			doc: 'Id.',
+			example: null
+		},
+		{
+			name: 'Element.stereotype',
+			kind: 'property',
+			signature: 'Element.stereotype -> str',
+			doc: 'Stereotype name.',
+			example: null
+		},
+		{
+			name: 'Relationship.source',
+			kind: 'method',
+			signature: 'Relationship.source() -> Element',
+			doc: 'Source element.',
+			example: null
+		},
+		{
+			name: 'Relationship.id',
+			kind: 'property',
+			signature: 'Relationship.id -> str',
 			doc: 'Id.',
 			example: null
 		}
@@ -78,7 +99,7 @@ describe('computeCompletions', () => {
 		const labels = r!.options.map((o) => o.label);
 		expect(labels).toContain('create');
 		expect(labels).toContain('NotFoundError');
-		expect(r!.options.find((o) => o.label === 'create')?.detail).toContain('type_name');
+		expect(r!.options.find((o) => o.label === 'create')?.detail).toContain('stereotype');
 	});
 
 	it('filters dr. members by the partial word', () => {
@@ -87,13 +108,27 @@ describe('computeCompletions', () => {
 		expect(r!.options.map((o) => o.label)).toEqual(['create']);
 	});
 
-	it('offers Element members after a non-dr dot only with a partial or explicit', () => {
+	it('offers member completions after a non-dr dot only with a partial or explicit', () => {
 		expect(computeCompletions('el.', DOCS, VOCAB)).toBeNull();
 		expect(computeCompletions('el.', DOCS, VOCAB, true)).not.toBeNull();
 		const r = computeCompletions('el.s', DOCS, VOCAB);
 		expect(r?.from).toBe(3);
-		expect(r!.options.map((o) => o.label)).toEqual(['set']);
+		// Element members first, then the Relationship-only ones.
+		expect(r!.options.map((o) => o.label)).toEqual(['set', 'stereotype', 'source']);
 		expect(r!.options[0].boost).toBeLessThan(0);
+	});
+
+	it('member completion merges Element and Relationship options', () => {
+		const spec = computeCompletions('rel.sou', DOCS, VOCAB);
+		expect(spec?.options.map((o) => o.label)).toContain('source');
+		expect(spec!.options.every((o) => (o.boost ?? 0) < 0)).toBe(true);
+	});
+
+	it('dedupes members that exist on both Element and Relationship', () => {
+		const spec = computeCompletions('x.i', DOCS, VOCAB);
+		expect(spec!.options.map((o) => o.label)).toEqual(['id']);
+		// The Element entry wins the dedup, not the Relationship one.
+		expect(spec!.options[0].detail).toBe('Element.id -> str');
 	});
 
 	it('never offers Element members after dr.', () => {
@@ -101,7 +136,7 @@ describe('computeCompletions', () => {
 		expect(labels).not.toContain('set');
 	});
 
-	it('completes type names inside create/type/elements string literals', () => {
+	it('still completes the dr.create first argument', () => {
 		expect(computeCompletions('dr.create("', DOCS, VOCAB)?.options.map((o) => o.label)).toEqual([
 			'Building',
 			'Sensor'
@@ -109,8 +144,33 @@ describe('computeCompletions', () => {
 		const partial = computeCompletions("dr.create('Bu", DOCS, VOCAB);
 		expect(partial?.from).toBe(11);
 		expect(partial!.options.map((o) => o.label)).toEqual(['Building']);
-		expect(computeCompletions('dr.elements(type="', DOCS, VOCAB)).not.toBeNull();
-		expect(computeCompletions('dr.type("', DOCS, VOCAB)).not.toBeNull();
+	});
+
+	it('completes stereotype names in dr.elements(stereotypes=...)', () => {
+		expect(computeCompletions('dr.elements(stereotypes="', DOCS, VOCAB)).not.toBeNull();
+		const partial = computeCompletions("dr.elements(stereotypes='Bui", DOCS, VOCAB);
+		expect(partial!.options.map((o) => o.label)).toEqual(['Building']);
+		// Positional form too.
+		expect(computeCompletions('dr.elements("', DOCS, VOCAB)).not.toBeNull();
+	});
+
+	it('completes stereotype names inside the list form', () => {
+		expect(computeCompletions('dr.elements(stereotypes=["', DOCS, VOCAB)).not.toBeNull();
+		expect(computeCompletions('dr.elements(stereotypes=["A", "', DOCS, VOCAB)).not.toBeNull();
+		expect(
+			computeCompletions('dr.elements(stereotypes=["A", "B", \'Bui', DOCS, VOCAB)!.options.map(
+				(o) => o.label
+			)
+		).toEqual(['Building']);
+	});
+
+	it('no longer special-cases dr.type or the old type= keyword', () => {
+		expect(computeCompletions('dr.type("', DOCS, VOCAB)).toBeNull();
+		expect(computeCompletions('dr.types("', DOCS, VOCAB)).toBeNull();
+		expect(computeCompletions('dr.elements(type="', DOCS, VOCAB)).toBeNull();
+	});
+
+	it('stays out of unrelated call arguments', () => {
 		expect(computeCompletions('dr.connect("', DOCS, VOCAB)).toBeNull();
 		expect(computeCompletions('print("', DOCS, VOCAB)).toBeNull();
 	});
@@ -130,6 +190,12 @@ describe('resolveDocAt', () => {
 
 	it('resolves Element members after a non-dr dot, heuristically', () => {
 		expect(resolveDocAt('el.set("name", 1)', 4, DOCS)?.name).toBe('Element.set');
+	});
+
+	it('falls back to Relationship members when Element has none', () => {
+		expect(resolveDocAt('x = rel.source()', 10, DOCS)?.name).toBe('Relationship.source');
+		// Element wins when both define the member.
+		expect(resolveDocAt('x = rel.id', 9, DOCS)?.name).toBe('Element.id');
 	});
 
 	it('returns null on plain words and without docs', () => {

@@ -8,7 +8,7 @@ const DOCS: SnippetDocsOut = {
 		{
 			name: 'dr.create',
 			kind: 'function',
-			signature: 'dr.create(type_name, properties=None) -> str',
+			signature: 'dr.create(stereotype, properties=None) -> str',
 			doc: 'Record a dry-run element create.',
 			example: 'tmp = dr.create("Building")'
 		},
