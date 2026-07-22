@@ -24,9 +24,9 @@ green:
    dispatch per cell, not three: the root rides the call frame (root
    piggyback), the far endpoint rides the hop response (far-endpoint
    inlining on hops), and a repeated read within one call is served from the
-   guest's own memo. Losing any of the three silently reintroduces per-read
-   bridge round trips with every functional test still green (results are
-   identical either way).
+   guest's own memo. Losing far-endpoint inlining or the guest memo fails this
+   guard; the root piggyback leg is pinned by test_trip_counts.py (see
+   test_trips_per_cell_budget).
 
 The bounds in 1-2 are deliberately loose: the numbers on the reference machine
 are ~0.3-1 ms/call and a ~3-4x sharding speedup; the assertions are 5 ms/call
@@ -337,7 +337,8 @@ def test_parallel_sweep_speedup(
 #: not room for a per-read regression (which would cost 2+ extra trips per
 #: cell) — see `big_session`'s ring of `Links` edges, without which
 #: `els[0].out()` is always empty and this snippet never exercises a hop at
-#: all.
+#: all — though on this ring the root is also memo-primed by the previous
+#: row's hop; see the test docstring.
 TRAVERSAL_CODE = (
     "def value(els):\n"
     "    n = els[0]['name']\n"
@@ -362,8 +363,17 @@ def test_trips_per_cell_budget(
     `dr.element` read within one call is served from the guest's own cache),
     and far-endpoint inlining on hops (the related element's data rides the
     `out()` response itself, so the `dr.element(rel['target_id'])` read below
-    is a memo hit rather than a bridge dispatch). Losing any one of the three
-    regresses this from 1 trip/cell to 2-3.
+    is a memo hit rather than a bridge dispatch).
+
+    Mutation-probed: disabling the read memo costs 3.0 trips/cell and disabling
+    far-endpoint inlining costs 2.0 — both fail this budget. Disabling the ROOT
+    PIGGYBACK alone measures 1.0025 and PASSES, because the ring means row i's
+    hop response inlines row i+1's element and thereby primes its root; only
+    row 0 pays a fetch. That leg is pinned instead by
+    tests/script/test_trip_counts.py::test_root_piggyback_zero_trips_for_property_math
+    and tests/api/test_snippets_wasm.py::test_embedded_session_trip_collapse_wasm
+    (exact `calls == ["outgoing"]`). To bring it under THIS guard, retarget the
+    edges at a non-row element type.
 
     `workers=1` here (unlike the sharding test) so the module-global `count`
     list below is a safe, uncontended counter — if this ever runs with
@@ -405,5 +415,5 @@ def test_trips_per_cell_budget(
     print(f"\nbridge trips per cell: {per_cell:.2f} ({count[0]} trips / {SWEEP_ROWS} cells)")
     assert per_cell < MAX_TRIPS_PER_CELL, (
         f"{per_cell:.2f} bridge trips/cell (budget {MAX_TRIPS_PER_CELL}) — "
-        f"{count[0]} trips over {SWEEP_ROWS} cells; lost the root piggyback or the far-endpoint inline?"
+        f"{count[0]} trips over {SWEEP_ROWS} cells — lost the far-endpoint inline, or the guest read memo?"
     )
