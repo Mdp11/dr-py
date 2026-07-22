@@ -91,15 +91,15 @@ def test_element_attrs_indexing_and_props():
     )
 
 
-def test_out_in_parent_children():
+def test_outgoing_incoming_parent_children():
     r = TrustedRunner()
     code = (
         "b1 = dr.element('b1')\n"
         "b2 = dr.element('b2')\n"
         "b3 = dr.element('b3')\n"
         "result = (\n"
-        "    [rel['type'] for rel in b1.out()],\n"
-        "    [rel['type'] for rel in b2.in_()],\n"
+        "    [rel.stereotype for rel in b1.outgoing()],\n"
+        "    [rel.stereotype for rel in b2.incoming()],\n"
         "    b2.parent().id,\n"
         "    b3.parent(),\n"
         "    [c.id for c in b1.children()],\n"
@@ -220,3 +220,255 @@ def test_dr_types_and_dr_type_are_gone():
     res = r.run(tiny_model(), RunRequest(code="result = dr.type('Building')"),
                 RunLimits(), record_ops=False, rev=0)
     assert res.error is not None and res.error.kind == "runtime"
+
+
+# --- Task 5: Relationship class, outgoing()/incoming() filters, expected= ----
+
+
+def test_outgoing_returns_relationship_objects():
+    r = TrustedRunner()
+    res = r.run(tiny_model(),
+                RunRequest(code=(
+                    "rel = dr.element('b1').outgoing()[0]\n"
+                    "result = (rel.stereotype, rel.source().id, rel.destination().id)"
+                )),
+                RunLimits(), record_ops=False, rev=0)
+    assert res.error is None, res.error
+    assert res.result_repr == "('Owns', 'b1', 'b2')"
+
+
+def test_relationship_get_props_and_getitem():
+    r = TrustedRunner()
+    res = r.run(tiny_model(),
+                RunRequest(code=(
+                    "rel = dr.element('b1').outgoing()[0]\n"
+                    "result = (rel.get('missing', 'dflt'), rel.props())"
+                )),
+                RunLimits(), record_ops=False, rev=0)
+    assert res.error is None, res.error
+    assert res.result_repr == "('dflt', {})"
+
+
+def test_relationship_id_and_repr():
+    r = TrustedRunner()
+    res = r.run(tiny_model(),
+                RunRequest(code=(
+                    "rel = dr.element('b1').outgoing()[0]\n"
+                    "result = (rel.id == rel._data['id'], repr(rel))"
+                )),
+                RunLimits(), record_ops=False, rev=0)
+    assert res.error is None, res.error
+    assert res.result_repr is not None
+    assert res.result_repr.startswith("(True, \"Relationship(id=")
+    assert "stereotype='Owns')\"" in res.result_repr
+
+
+def test_relationship_getitem_raises_on_missing_property():
+    r = TrustedRunner()
+    res = r.run(tiny_model(),
+                RunRequest(code="result = dr.element('b1').outgoing()[0]['nope']"),
+                RunLimits(), record_ops=False, rev=0)
+    assert res.error is not None and res.error.kind == "runtime"
+    assert "KeyError" in (res.error.traceback or res.error.message)
+
+
+def test_old_hop_names_are_gone():
+    r = TrustedRunner()
+    for code in ("dr.element('b1').out()", "dr.element('b1').in_()"):
+        res = r.run(tiny_model(), RunRequest(code="result = " + code),
+                    RunLimits(), record_ops=False, rev=0)
+        assert res.error is not None and res.error.kind == "runtime"
+
+
+def test_hop_filter_by_relationship_stereotype():
+    r = TrustedRunner()
+    res = r.run(tiny_model(),
+                RunRequest(code=(
+                    "el = dr.element('b1')\n"
+                    "result = (len(el.outgoing(stereotype='Owns')),\n"
+                    "          len(el.outgoing(stereotype=['Owns'])))"
+                )),
+                RunLimits(), record_ops=False, rev=0)
+    assert res.error is None, res.error
+    # tiny_model() has exactly one Owns rel out of b1; str and list filter
+    # forms must agree.
+    assert res.result_repr == "(1, 1)"
+
+
+def test_hop_filter_unknown_stereotype_raises_notfound():
+    r = TrustedRunner()
+    res = r.run(tiny_model(),
+                RunRequest(code="result = dr.element('b1').outgoing(stereotype='Nope')"),
+                RunLimits(), record_ops=False, rev=0)
+    assert res.error is not None and res.error.kind == "runtime"
+    assert "NotFoundError" in res.error.message
+
+
+def test_hop_filter_by_other_stereotype():
+    r = TrustedRunner()
+    res = r.run(tiny_model(),
+                RunRequest(code=(
+                    "el = dr.element('b1')\n"
+                    "result = (len(el.outgoing(other_stereotype='Building')),\n"
+                    "          len(el.incoming(other_stereotype='Building')))"
+                )),
+                RunLimits(), record_ops=False, rev=0)
+    assert res.error is None, res.error
+    assert res.result_repr == "(1, 0)"
+
+
+def test_incoming_returns_relationships_and_filters():
+    r = TrustedRunner()
+    res = r.run(tiny_model(),
+                RunRequest(code=(
+                    "rel = dr.element('b2').incoming(stereotype='Owns', expected=1)\n"
+                    "result = (rel.source().id, rel.destination().id,\n"
+                    "          len(dr.element('b2').incoming(other_stereotype='Building')))"
+                )),
+                RunLimits(), record_ops=False, rev=0)
+    assert res.error is None, res.error
+    assert res.result_repr == "('b1', 'b2', 1)"
+
+
+def test_expected_returns_single_relationship():
+    r = TrustedRunner()
+    res = r.run(tiny_model(),
+                RunRequest(code=(
+                    "rel = dr.element('b1').outgoing(expected=1)\n"
+                    "result = rel.destination().id"
+                )),
+                RunLimits(), record_ops=False, rev=0)
+    assert res.error is None, res.error
+    assert res.result_repr == "'b2'"
+
+
+def test_expected_mismatch_is_informative_cardinality_error():
+    r = TrustedRunner()
+    res = r.run(tiny_model(),
+                RunRequest(code="dr.element('b3').outgoing(expected=1)"),
+                RunLimits(), record_ops=False, rev=0)
+    assert res.error is not None and res.error.kind == "runtime"
+    assert "CardinalityError" in res.error.message
+    assert "'b3'" in res.error.message
+    assert "outgoing" in res.error.message
+    assert "expected 1" in res.error.message
+
+
+def test_expected_mismatch_message_names_active_filters():
+    r = TrustedRunner()
+    res = r.run(tiny_model(),
+                RunRequest(code="dr.element('b3').outgoing(stereotype='Owns', expected=2)"),
+                RunLimits(), record_ops=False, rev=0)
+    assert res.error is not None
+    assert "stereotype='Owns'" in res.error.message
+    assert "expected 2" in res.error.message
+
+
+def test_expected_invalid_values_raise_valueerror():
+    r = TrustedRunner()
+    for bad in ("0", "-1", "True", "'1'"):
+        res = r.run(tiny_model(),
+                    RunRequest(code="dr.element('b1').outgoing(expected=%s)" % bad),
+                    RunLimits(), record_ops=False, rev=0)
+        assert res.error is not None and res.error.kind == "runtime", bad
+        assert "ValueError" in res.error.message, bad
+
+
+def test_expected_check_applies_to_filtered_count():
+    # b1 has 1 outgoing rel; filtered to a stereotype that matches it,
+    # expected=1 passes even though an unfiltered expected=2 would fail.
+    r = TrustedRunner()
+    res = r.run(tiny_model(),
+                RunRequest(code=(
+                    "rel = dr.element('b1').outgoing(stereotype='Owns', expected=1)\n"
+                    "result = rel.id is not None"
+                )),
+                RunLimits(), record_ops=False, rev=0)
+    assert res.error is None, res.error
+    assert res.result_repr == "True"
+
+
+def test_cardinality_error_is_catchable_via_dr_alias():
+    r = TrustedRunner()
+    res = r.run(tiny_model(),
+                RunRequest(code=(
+                    "try:\n"
+                    "    dr.element('b3').outgoing(expected=1)\n"
+                    "    result = 'no-raise'\n"
+                    "except dr.CardinalityError:\n"
+                    "    result = 'caught'\n"
+                )),
+                RunLimits(), record_ops=False, rev=0)
+    assert res.error is None, res.error
+    assert res.result_repr == "'caught'"
+
+
+def test_relationship_mutation_cannot_poison_memo():
+    # Mirrors the Element memo-aliasing tests: mutating what a hop returned
+    # must not change what a later identical hop returns.
+    r = TrustedRunner()
+    res = r.run(tiny_model(),
+                RunRequest(code=(
+                    "el = dr.element('b1')\n"
+                    "first = el.outgoing()[0]\n"
+                    "first.props()['injected'] = True\n"
+                    "second = el.outgoing()[0]\n"
+                    "result = second.get('injected') is None"
+                )),
+                RunLimits(), record_ops=False, rev=0)
+    assert res.error is None, res.error
+    assert res.result_repr == "True"
+
+
+def test_relationship_does_not_alias_list_valued_property_in_memo():
+    """The REAL memo-aliasing probe for Relationship.
+
+    `props()` already returns a `dict(...)` copy, so mutating it can never
+    reach `_memo` whether or not the hop copies — that test pins the API, not
+    the invariant. The load-bearing case is a LIST-VALUED relationship
+    property reached through `rel[key]`: without `_copy_projection` in the
+    hop, `rel['tags'].append(...)` mutates the memo's own relationship dict
+    and a later identical hop observes the injected value.
+    """
+    from data_rover.core.metamodel.schema import (
+        ElementType,
+        Metamodel,
+        PropertyDef,
+        RelationshipType,
+    )
+    from data_rover.core.model.model import Model
+
+    mm = Metamodel(
+        elements=[
+            ElementType(name="Building", properties=[PropertyDef(name="name", datatype="string")]),
+        ],
+        relationships=[
+            RelationshipType(
+                name="Owns",
+                containment=True,
+                source="Building",
+                target="Building",
+                properties=[
+                    PropertyDef(name="tags", datatype="string", multiplicity="0..*")
+                ],
+            ),
+        ],
+    )
+    model = Model(mm)
+    model.restore_element("b1", "Building")
+    model.restore_element("b2", "Building")
+    rel = model.connect("Owns", "b1", "b2")
+    model.set_property(rel, "tags", ["a", "b"])
+
+    r = TrustedRunner()
+    res = r.run(model,
+                RunRequest(code=(
+                    "el = dr.element('b1')\n"
+                    "first = el.outgoing()[0]\n"
+                    "first['tags'].append('junk')\n"
+                    "second = el.outgoing()[0]\n"
+                    "result = len(second['tags'])\n"
+                )),
+                RunLimits(), record_ops=False, rev=0)
+    assert res.error is None, res.error
+    assert res.result_repr == "2"

@@ -34,8 +34,8 @@ def test_traversal_reads_recorded() -> None:
     res = _call(
         "def value(els):\n"
         "    n = els[0].name\n"
-        "    for rel in els[0].out():\n"
-        "        n += dr.element(rel['target_id']).name\n"
+        "    for rel in els[0].outgoing():\n"
+        "        n += rel.destination().name\n"
         "    els[0].children()\n"
         "    els[0].parent()\n"
         "    return n\n",
@@ -236,3 +236,25 @@ def test_multi_stereotype_scan_records_one_tag_per_name() -> None:
     assert res.reads == frozenset(
         {("el", "b1"), ("scan", "Building"), ("scan", "Ghost")}
     )
+
+
+def test_other_stereotype_filter_records_far_element_reads() -> None:
+    res = _call(
+        "def value(els):\n"
+        "    return len(els[0].outgoing(other_stereotype='Building'))\n",
+        ["b1"],
+    )
+    # NOTE: `res.reads` is a frozenset of TUPLES (see `decode_reads`), so the
+    # membership checks must use tuples, not the wire-shape lists.
+    assert res.reads == frozenset({("el", "b1"), ("out", "b1"), ("el", "b2")})
+
+
+def test_stereotype_filter_records_no_descendants_read() -> None:
+    # The descendant closure is metamodel state, immutable for the session's
+    # lifetime, so it is deliberately NOT a tracked dependency.
+    res = _call(
+        "def value(els):\n"
+        "    return len(els[0].outgoing(stereotype='Owns'))\n",
+        ["b1"],
+    )
+    assert res.reads == frozenset({("el", "b1"), ("out", "b1")})

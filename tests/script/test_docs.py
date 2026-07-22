@@ -19,8 +19,9 @@ def test_every_public_member_present_and_documented():
         "dr.element", "dr.elements",
         "dr.create", "dr.connect", "dr.disconnect",
         "dr.BridgeError", "dr.ReadOnlyError", "dr.NotFoundError",
+        "dr.CardinalityError",
         "Element.id", "Element.stereotype", "Element.name",
-        "Element.get", "Element.props", "Element.out", "Element.in_",
+        "Element.get", "Element.props", "Element.outgoing", "Element.incoming",
         "Element.parent", "Element.children", "Element.set", "Element.delete",
     }
     assert set(entries) == expected

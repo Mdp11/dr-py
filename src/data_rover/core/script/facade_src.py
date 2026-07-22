@@ -70,6 +70,10 @@ class NotFoundError(BridgeError):
     """The requested element or relationship id does not exist."""
 
 
+class CardinalityError(BridgeError):
+    """A hop's `expected=` relationship-count assertion failed."""
+
+
 _req_counter = [0]
 _temp_counter = [0]
 
@@ -129,7 +133,8 @@ except (NameError, TypeError, ValueError):
 # hands out COPIES of the containers it returns (lists and dicts alike) —
 # never the memo's own list/dict object. This is load-bearing, not just
 # defensive: if a snippet's returned structure aliased the memo entry, a
-# snippet that mutates what it gets back (e.g. `el.out().append(...)`)
+# snippet that mutates what it gets back (e.g. appending to a list-valued
+# property of an element or of a hop's Relationship)
 # would silently change the RESULT of a later call to the same read. That
 # would make snippet behavior depend on `_read_memo_max` (whether the memo
 # was populated/evicted at the time), which must never be observable.
@@ -138,9 +143,10 @@ except (NameError, TypeError, ValueError):
 # are first-class (see `validation/validators/multiplicity.py` and
 # `type_conformance.py`), so a projection's `properties` dict can map a key
 # to a LIST. `_copy_projection` below is the one place that copies an
-# element projection safely: it copies the outer dict AND replaces any
-# list-valued property with a fresh list, so `el["tags"].append(...)` or
-# `el.out()[0]["properties"]["k"] = v` can never reach back into `_memo`.
+# element (or relationship) projection safely: it copies the outer dict AND
+# replaces any list-valued property with a fresh list, so `el["tags"]` or
+# `el.outgoing()[0]["tags"]` can be appended to without ever reaching back
+# into `_memo`.
 # Every read path in this module that hands out a projection (or a
 # structure built from one) must go through this helper rather than a bare
 # `dict(...)`.
@@ -170,6 +176,43 @@ def _copy_projection(d):
     # for a conformant model — but the engine deliberately stays inspectable
     # and will hold non-conformant data, and over-copying is the safe direction.
     return c
+
+
+def _descendant_set(kind, name):
+    # Stereotype descendant closure fetched from the host, memoized for the
+    # session under a 3-part key (the only memo key that is not the usual
+    # (op_name, id_or_None) shape -- it is keyed by type NAMESPACE + name,
+    # not by entity id). Deliberately NO _note_read: the metamodel is
+    # immutable per session (a swap goes through session replacement /
+    # clear-all), so a cached cell can never observe a stale descendant set,
+    # and recording it would only add a dependency nothing can ever touch.
+    #
+    # The returned list is the memo's own object, which is safe ONLY because
+    # it never escapes this module: `_stereotype_filter` copies it into a set
+    # and no facade path ever hands it to snippet code. Do not return it from
+    # a public member without going through a copy first.
+    key = ("descendants", kind, name)
+    hit = _memo.get(key)
+    if hit is None:
+        hit = _read("descendants", kind=kind, name=name)["descendants"]
+        _memo_put(key, hit)
+    return hit
+
+
+def _stereotype_filter(kind, names):
+    # None -> no filtering (distinct from an empty list, which is a real
+    # filter matching nothing). A str or list of names -> the union of each
+    # name's descendant closure, so a filter is inheritance-aware. An unknown
+    # name raises NotFoundError from the host rather than silently matching
+    # nothing, so a typo surfaces.
+    if names is None:
+        return None
+    if isinstance(names, str):
+        names = [names]
+    allowed = set()
+    for n in names:
+        allowed.update(_descendant_set(kind, n))
+    return allowed
 
 
 # Cannot import runner.py's _MAX_READS here (this string is exec'd guest
@@ -271,51 +314,110 @@ class Element:
         """
         return dict(self._data["properties"])
 
-    def out(self):
-        """List outgoing relationships as dicts (id, type, source_id, target_id).
+    def outgoing(self, stereotype=None, other_stereotype=None, expected=None):
+        """List outgoing Relationships, optionally filtered.
+
+        `stereotype` (str or list) keeps only relationships of the named
+        stereotype(s) or their subtypes; `other_stereotype` (str or list)
+        keeps only relationships whose TARGET element matches. `expected`
+        (int >= 1) asserts the filtered count — a mismatch raises
+        dr.CardinalityError — and with expected=1 the single Relationship is
+        returned directly instead of a list.
 
         Example:
-            for rel in el.out():
-                print(rel["type"], rel["target_id"])
+            for rel in el.outgoing(stereotype="Owns"):
+                print(rel.destination().name)
         """
-        _note_read("out", self.id)
-        key = ("outgoing", self.id)
+        return self._hop("outgoing", stereotype, other_stereotype, expected)
+
+    def incoming(self, stereotype=None, other_stereotype=None, expected=None):
+        """List incoming Relationships. Same filters as `outgoing`;
+        `other_stereotype` matches the SOURCE element.
+
+        Example:
+            owner = el.incoming(stereotype="Owns", expected=1).source()
+        """
+        return self._hop("incoming", stereotype, other_stereotype, expected)
+
+    def _hop(self, direction, stereotype, other_stereotype, expected):
+        # Shared driver behind `outgoing`/`incoming` (underscored: internal,
+        # and the docs walker skips it -- the two public wrappers carry the
+        # docstrings). Validation of `expected` runs BEFORE any bridge work so
+        # a bad argument costs no round trip and always reports the same way
+        # regardless of what the model happens to contain.
+        if expected is not None:
+            # bool is an int subclass -- reject it explicitly, True would
+            # otherwise pass as expected=1.
+            if (
+                isinstance(expected, bool)
+                or not isinstance(expected, int)
+                or expected < 1
+            ):
+                raise ValueError(
+                    "expected must be a positive int, got " + repr(expected)
+                )
+        # Read-set tags stay "out"/"in" (the shapes `api/invalidation.py`'s
+        # `touched_keys` emits) even though the ops/memo keys are the longer
+        # "outgoing"/"incoming" -- renaming either would silently break
+        # incremental invalidation.
+        _note_read("out" if direction == "outgoing" else "in", self.id)
+        key = (direction, self.id)
         hit = _memo.get(key)
         if hit is None:
-            resp = _read("outgoing", element_id=self.id)
+            resp = _read(direction, element_id=self.id)
             # Hop responses ship the far endpoints' element projections
             # inline (trip-collapse, spec 2026-07-21 Phase A') -- prime the
-            # element memo with them BEFORE storing the relationships, so a
-            # snippet that follows up with dr.element(rel["target_id"]) for
-            # each neighbor gets a memo hit instead of one round trip per
-            # neighbor. `or []` keeps this tolerant of a host that predates
-            # the additive "elements" key.
+            # element memo with them BEFORE storing the relationships, so
+            # `rel.destination()` / `rel.source()` is a memo hit instead of
+            # one round trip per neighbor. `or []` keeps this tolerant of the
+            # host's high-degree guard (`bridge._MAX_INLINE_FAR_ENDPOINTS`),
+            # which ships no inline elements at all past its threshold.
             for proj in resp.get("elements") or []:
                 _memo_put(("element", proj["id"]), proj)
             hit = resp["relationships"]
             _memo_put(key, hit)
-        # Copy the outer list AND each relationship dict inside it (via
-        # _copy_projection, so list-valued properties are copied too) — the
-        # memo entry is shared canonical state (see the invariant comment
-        # above `_memo`), so a snippet mutating a returned dict must not be
-        # able to change what a later `.out()` call returns.
-        return [_copy_projection(r) for r in hit]
-
-    def in_(self):
-        """List incoming relationships as dicts (id, type, source_id, target_id)."""
-        _note_read("in", self.id)
-        key = ("incoming", self.id)
-        hit = _memo.get(key)
-        if hit is None:
-            resp = _read("incoming", element_id=self.id)
-            # See the comment in `out()` above: prime the element memo from
-            # the inlined far (source) endpoints before storing.
-            for proj in resp.get("elements") or []:
-                _memo_put(("element", proj["id"]), proj)
-            hit = resp["relationships"]
-            _memo_put(key, hit)
-        # See the comment in `out()` above: copy the relationship dicts too.
-        return [_copy_projection(r) for r in hit]
+        rel_allowed = _stereotype_filter("relationship", stereotype)
+        other_allowed = _stereotype_filter("element", other_stereotype)
+        rels = []
+        for r in hit:
+            # Wire key stays "type" (the host's relationship projection
+            # contract); only the snippet-visible spelling is `stereotype`.
+            if rel_allowed is not None and r["type"] not in rel_allowed:
+                continue
+            if other_allowed is not None:
+                far_id = r["target_id"] if direction == "outgoing" else r["source_id"]
+                try:
+                    far = _fetch_element(far_id)
+                except NotFoundError:
+                    # Dangling far endpoint (the engine stays inspectable):
+                    # treated as non-matching, never raising. An unfiltered
+                    # hop still returns such relationships.
+                    continue
+                if far.stereotype not in other_allowed:
+                    continue
+            # Copy each relationship dict (via _copy_projection, so
+            # list-valued properties are copied too) -- the memo entry is
+            # shared canonical state (see the invariant comment above
+            # `_memo`); a snippet mutating a Relationship's data (e.g.
+            # `rel["tags"].append(...)`) must not change what a later hop
+            # returns. The enclosing `rels` list is freshly built per call,
+            # so the memo's own list object never escapes either.
+            rels.append(Relationship(_copy_projection(r)))
+        if expected is not None and len(rels) != expected:
+            parts = []
+            if stereotype is not None:
+                parts.append("stereotype=" + repr(stereotype))
+            if other_stereotype is not None:
+                parts.append("other_stereotype=" + repr(other_stereotype))
+            detail = " (" + ", ".join(parts) + ")" if parts else ""
+            raise CardinalityError(
+                "element " + repr(self.id) + " has " + str(len(rels)) + " "
+                + direction + " relationships" + detail
+                + ", expected " + str(expected)
+            )
+        if expected == 1:
+            return rels[0]
+        return rels
 
     def parent(self):
         """Return the containment parent Element, or None at a root."""
@@ -367,6 +469,76 @@ class Element:
 
     def __repr__(self):
         return "Element(id=" + repr(self.id) + ", stereotype=" + repr(self.stereotype) + ")"
+
+
+class Relationship:
+    """A read snapshot of a model relationship, returned by
+    `Element.outgoing`/`Element.incoming`.
+
+    Read-only on purpose: there is no `.set()`/`.delete()` here (use
+    `dr.disconnect(rel.id)` to record a dry-run delete), and `value()`/
+    `step()` still reject a Relationship return — the wire payload shapes
+    only carry elements and scalars.
+    """
+
+    __slots__ = ("_data",)
+
+    def __init__(self, data):
+        # `data` MUST already be a `_copy_projection` copy, never a live
+        # `_memo` entry -- see the invariant comment above `_memo`.
+        self._data = data
+
+    @property
+    def id(self):
+        """The relationship's id."""
+        return self._data["id"]
+
+    @property
+    def stereotype(self):
+        """The relationship's stereotype (type) name."""
+        # Wire key stays "type" (the host's projection contract).
+        return self._data["type"]
+
+    def __getitem__(self, key):
+        return self._data["properties"][key]
+
+    def get(self, key, default=None):
+        """Return property `key`, or `default` if absent. `rel[key]` raises instead.
+
+        Example:
+            weight = rel.get("weight", 0)
+        """
+        return self._data["properties"].get(key, default)
+
+    def props(self):
+        """Return a dict copy of all properties.
+
+        Example:
+            print(rel.props())
+        """
+        return dict(self._data["properties"])
+
+    def source(self):
+        """Return the source Element of this relationship.
+
+        Example:
+            owner = rel.source()
+        """
+        return _fetch_element(self._data["source_id"])
+
+    def destination(self):
+        """Return the destination (target) Element of this relationship.
+
+        Example:
+            owned = rel.destination()
+        """
+        return _fetch_element(self._data["target_id"])
+
+    def __repr__(self):
+        return (
+            "Relationship(id=" + repr(self.id)
+            + ", stereotype=" + repr(self.stereotype) + ")"
+        )
 
 
 def _fetch_element(element_id):
@@ -481,6 +653,7 @@ class _Dr:
     ReadOnlyError = ReadOnlyError
     NotFoundError = NotFoundError
     BridgeError = BridgeError
+    CardinalityError = CardinalityError
 
     element = staticmethod(_fetch_element)
     elements = staticmethod(_iter_elements)

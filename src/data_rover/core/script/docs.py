@@ -32,8 +32,8 @@ _RETURNS: dict[str, str] = {
     "Element.name": "str | None",
     "Element.get": "value or default",
     "Element.props": "dict",
-    "Element.out": "list[dict]",
-    "Element.in_": "list[dict]",
+    "Element.outgoing": "list[Relationship] (Relationship when expected=1)",
+    "Element.incoming": "list[Relationship] (Relationship when expected=1)",
     "Element.parent": "Element | None",
     "Element.children": "list[Element]",
 }

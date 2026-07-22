@@ -491,8 +491,8 @@ def test_embedded_session_trip_collapse_wasm(
         model,
         "def value(els):\n"
         "    n = els[0].name\n"
-        "    for rel in els[0].out():\n"
-        "        n += dr.element(rel['target_id']).name\n"
+        "    for rel in els[0].outgoing():\n"
+        "        n += rel.destination().name\n"
         "    return n\n",
         RunLimits(),
         budget=ScriptBudget.start(60),

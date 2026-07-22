@@ -336,14 +336,14 @@ def test_parallel_sweep_speedup(
 #: call frame. Budget 1.5 leaves a little headroom over the measured 1.0/cell,
 #: not room for a per-read regression (which would cost 2+ extra trips per
 #: cell) — see `big_session`'s ring of `Links` edges, without which
-#: `els[0].out()` is always empty and this snippet never exercises a hop at
+#: `els[0].outgoing()` is always empty and this snippet never exercises a hop at
 #: all — though on this ring the root is also memo-primed by the previous
 #: row's hop; see the test docstring.
 TRAVERSAL_CODE = (
     "def value(els):\n"
     "    n = els[0]['name']\n"
-    "    for rel in els[0].out():\n"
-    "        n = n + dr.element(rel['target_id'])['name']\n"
+    "    for rel in els[0].outgoing():\n"
+    "        n = n + rel.destination()['name']\n"
     "    return n\n"
 )
 MAX_TRIPS_PER_CELL = 1.5
@@ -362,8 +362,8 @@ def test_trips_per_cell_budget(
     `dr.element` round trip), the guest-side read memo (a repeated
     `dr.element` read within one call is served from the guest's own cache),
     and far-endpoint inlining on hops (the related element's data rides the
-    `out()` response itself, so the `dr.element(rel['target_id'])` read below
-    is a memo hit rather than a bridge dispatch).
+    `outgoing()` response itself, so the `rel.destination()` read below is a
+    memo hit rather than a bridge dispatch).
 
     Mutation-probed: disabling the read memo costs 3.0 trips/cell and disabling
     far-endpoint inlining costs 2.0 — both fail this budget. Disabling the ROOT

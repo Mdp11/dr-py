@@ -287,13 +287,21 @@ def test_commit_structural_reject_leaves_cache_fully_cleared(
 # --------------------------------------------------------------------------
 
 SNIPPET_NAME = "def value(els):\n    return els[0].get('name', '?')\n"
+#: Reads ONLY the hop keys — ("out", id) / ("in", id). Deliberately returns
+#: `r.id` rather than `r.destination().id`: dereferencing the far endpoint
+#: would add an ("el", far_id) key to the cell's read-set, and that key would
+#: then mask a missing hop-key eviction (an endpoint change evicts on the
+#: element key even if the hop key were broken). Relationship endpoints are
+#: immutable — a retargeted edge is a delete + create, so a fresh id — which
+#: makes the id join an equally sensitive discriminator with a strictly
+#: hop-only read-set.
 SNIPPET_HOPS = (
     "def value(els):\n"
-    "    return ','.join(sorted(r['target_id'] for r in els[0].out()))\n"
+    "    return ','.join(sorted(r.id for r in els[0].outgoing()))\n"
 )
 SNIPPET_HOPS_IN = (
     "def value(els):\n"
-    "    return ','.join(sorted(r['source_id'] for r in els[0].in_()))\n"
+    "    return ','.join(sorted(r.id for r in els[0].incoming()))\n"
 )
 SNIPPET_SCAN = (
     "def value(els):\n"
