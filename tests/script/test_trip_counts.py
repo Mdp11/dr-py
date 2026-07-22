@@ -101,7 +101,8 @@ def test_memo_cap_admits_multiple_and_evicts_fifo(bridge_call_log: list[str]) ->
 
 def test_memoized_results_do_not_alias_mutations(bridge_call_log: list[str]) -> None:
     """A snippet mutating a returned relationships list must not poison later
-    reads of the same memo entry — the facade hands out shallow copies."""
+    reads of the same memo entry — the facade hands out copies (containers
+    and list-valued properties included; see `_copy_projection`)."""
     sess = _open(
         "def value(els):\n"
         "    rels = els[0].out()\n"

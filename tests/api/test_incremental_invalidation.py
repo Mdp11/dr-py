@@ -3,6 +3,7 @@ touches; the legacy flag and the no-delta paths still clear everything."""
 
 from __future__ import annotations
 
+import hashlib
 import random
 from typing import Literal, cast
 
@@ -290,11 +291,46 @@ SNIPPET_HOPS = (
     "def value(els):\n"
     "    return ','.join(sorted(r['target_id'] for r in els[0].out()))\n"
 )
+SNIPPET_HOPS_IN = (
+    "def value(els):\n"
+    "    return ','.join(sorted(r['source_id'] for r in els[0].in_()))\n"
+)
 SNIPPET_SCAN = (
     "def value(els):\n"
     "    return sum(1 for _ in dr.elements(type='Thing'))\n"
 )
-SNIPPETS = [SNIPPET_NAME, SNIPPET_HOPS, SNIPPET_SCAN]
+#: Untyped scan (no `type=`) — this is the ("scan", None) key. A cell that
+#: only ever recorded this key must still be evicted by ANY element change,
+#: not just changes to elements of a type the snippet happened to filter on.
+SNIPPET_SCAN_ALL = "def value(els):\n    return sum(1 for _ in dr.elements())\n"
+#: Reads containment children — the ("children", parent) key, which is
+#: emitted per-PARENT (an element can have more than one containment
+#: parent), not from a single first-parent lookup. See invalidation.py.
+#: Deliberately includes each child's `name` (not just its id): `children()`
+#: inlines full child projections, so a plain-property change on a CHILD
+#: must invalidate the PARENT's cached `children()` cell too — an id-only
+#: return value would never notice a stale child projection surviving.
+SNIPPET_CHILDREN = (
+    "def value(els):\n"
+    "    return ','.join(\n"
+    "        sorted(f\"{c.id}:{c.get('name', '?')}\" for c in els[0].children())\n"
+    "    )\n"
+)
+#: Reads the containment parent — the ("parent", target) key.
+SNIPPET_PARENT = (
+    "def value(els):\n"
+    "    p = els[0].parent()\n"
+    "    return p.id if p is not None else ''\n"
+)
+SNIPPETS = [
+    SNIPPET_NAME,
+    SNIPPET_HOPS,
+    SNIPPET_HOPS_IN,
+    SNIPPET_SCAN,
+    SNIPPET_SCAN_ALL,
+    SNIPPET_CHILDREN,
+    SNIPPET_PARENT,
+]
 
 
 def _prop_mm() -> Metamodel:
@@ -306,14 +342,52 @@ def _prop_mm() -> Metamodel:
             )
         ],
         relationships=[
-            RelationshipType(name="Link", source="Thing", target="Thing")
+            RelationshipType(name="Link", source="Thing", target="Thing"),
+            # Containment sibling of Link: exercises the ("children", parent)
+            # / ("parent", target) invalidation keys, which a non-containment
+            # relationship type can never touch (see invalidation.py's
+            # `rel_keys`, gated on `metamodel.is_containment`).
+            RelationshipType(
+                name="Owns", source="Thing", target="Thing", containment=True
+            ),
         ],
     )
 
 
+def _connect_batch(rng: random.Random, ids: list[str]) -> list[dict]:
+    s, t = rng.sample(ids, 2)
+    rel_type = rng.choice(["Link", "Owns"])
+    return [
+        {
+            "kind": "create_relationship",
+            "temp_id": f"tmp_{rng.randrange(10**6)}",
+            "type_name": rel_type,
+            "source_id": s,
+            "target_id": t,
+            "properties": {},
+        }
+    ]
+
+
 def _random_batch(rng: random.Random, model: Model) -> list[dict]:
     ids = sorted(model.elements)
-    kind = rng.choice(["update", "create", "delete", "connect", "disconnect"])
+    rel_ids = sorted(model.relationships)
+    # Top up the graph when relationships are scarce instead of leaving hop-
+    # reading cells (out/in_/children/parent) trivially "" for round after
+    # round, which would let a stale hop survivor coincidentally match the
+    # fresh value. This branch runs BEFORE the weighted kind choice below, so
+    # it also replaces the old disconnect-with-no-rel_ids create-element
+    # fallback.
+    if len(rel_ids) < 2 and len(ids) >= 2:
+        return _connect_batch(rng, ids)
+    # `connect` is weighted heaviest to keep relationship coverage up across
+    # the whole walk (measured: without this, relationship count hit 0 at
+    # round 8 and stayed at 0-1 for 16 of 25 rounds).
+    kind = rng.choices(
+        ["update", "create", "delete", "connect", "disconnect"],
+        weights=[3, 2, 1, 4, 2],
+        k=1,
+    )[0]
     if kind == "update" and ids:
         return [
             {
@@ -334,20 +408,13 @@ def _random_batch(rng: random.Random, model: Model) -> list[dict]:
     if kind == "delete" and len(ids) > 2:
         return [{"kind": "delete_element", "id": rng.choice(ids)}]
     if kind == "connect" and len(ids) >= 2:
-        s, t = rng.sample(ids, 2)
-        return [
-            {
-                "kind": "create_relationship",
-                "temp_id": f"tmp_{rng.randrange(10**6)}",
-                "type_name": "Link",
-                "source_id": s,
-                "target_id": t,
-                "properties": {},
-            }
-        ]
-    rel_ids = sorted(model.relationships)
+        return _connect_batch(rng, ids)
     if kind == "disconnect" and rel_ids:
         return [{"kind": "delete_relationship", "id": rng.choice(rel_ids)}]
+    # Fallback (e.g. `delete` chosen with <=2 elements): top the graph back
+    # up rather than defaulting to element growth (see the docstring above).
+    if len(ids) >= 2:
+        return _connect_batch(rng, ids)
     return [
         {
             "kind": "create_element",
@@ -370,8 +437,6 @@ def _fill_cache(model: Model, cache: ScriptCellCache, rev: int) -> dict[str, str
         rev=rev,
     )
     try:
-        import hashlib
-
         sha_to_code: dict[str, str] = {}
         for code in SNIPPETS:
             sha_to_code[hashlib.sha256(code.encode()).hexdigest()] = code
@@ -391,12 +456,15 @@ def test_surviving_cells_equal_fresh_recompute() -> None:
         model.set_property(e, "name", f"N{i}")
     model.connect("Link", "e0", "e1")
     model.connect("Link", "e1", "e2")
+    model.connect("Owns", "e3", "e4")
+    model.connect("Owns", "e3", "e5")
 
     cache = ScriptCellCache(cap=1000)
     rev = 1
     cache.clear_and_stamp(rev)
     sha_to_code = _fill_cache(model, cache, rev)
 
+    verified = 0
     for _round in range(25):
         batch = _random_batch(rng, model)
         res = _apply_batch(model, OPS_ADAPTER.validate_python(batch), restore=False)
@@ -425,7 +493,21 @@ def test_surviving_cells_equal_fresh_recompute() -> None:
                     f"round {_round}: stale survivor {sha[:8]}/{ids} "
                     f"cached={cached.value} fresh={fresh.value} batch={batch}"
                 )
+                verified += 1
         finally:
             verify.close()
 
         sha_to_code = _fill_cache(model, cache, rev)  # refill for next round
+
+    # Anti-vacuity: if a future change made `evict_touched` over-evict every
+    # cell every round, or `put` silently stopped storing, the verification
+    # loop body above would never run and every round would pass vacuously.
+    # Observed ~1056 verified survivors across the 25 rounds with the 7
+    # SNIPPETS above and the fixed seed; 200 is a comfortable floor under
+    # that (fully deterministic — the walk carries no run-to-run variance)
+    # without being so tight that a small, legitimate change to SNIPPETS or
+    # the walk's weights would make this flaky.
+    assert verified > 200, (
+        f"only {verified} surviving cache entries were ever verified across "
+        "25 rounds — the verification loop may be running vacuously"
+    )
