@@ -123,6 +123,53 @@ describe('StagedSection', () => {
 		expect(getSelection()).toEqual({ kind: 'element', id: 'e1' });
 	});
 
+	it('virtualizes: mounts a window of rows while the header counts them all', () => {
+		// A snippet batch can stage thousands of ops; the scroller shows ~8 rows.
+		// In this detached host clientHeight is 0, so the window degrades to the
+		// overscan band — rows still render, just not all of them.
+		const ids = Array.from({ length: 40 }, () => createTempId());
+		for (const [i, id] of ids.entries()) {
+			emit({
+				kind: 'create_element',
+				temp_id: id,
+				type_name: 'Device',
+				properties: { name: `el-${String(i).padStart(2, '0')}` }
+			});
+		}
+		mountSection();
+		expect(host.textContent).toContain('40');
+		const mounted = host.querySelectorAll('[data-staged-id]');
+		expect(mounted.length).toBeGreaterThan(0);
+		expect(mounted.length).toBeLessThan(ids.length);
+		// the bottom spacer stands in for the unmounted rows, so the scrollbar
+		// still reflects the full list
+		const spacers = host.querySelectorAll('li[aria-hidden="true"]');
+		expect(spacers.length).toBe(2);
+		expect(spacers[1].getAttribute('style')).not.toBe('height: 0px');
+	});
+
+	it('marks the selected row with aria-current', () => {
+		const tmp = createTempId();
+		emit({
+			kind: 'create_element',
+			temp_id: tmp,
+			type_name: 'Device',
+			properties: { name: 'Fresh' }
+		});
+		mountSection();
+		const btn = host.querySelector(
+			`[data-staged-id="${tmp}"] button.staged-select`
+		) as HTMLButtonElement;
+		expect(btn.getAttribute('aria-current')).toBeNull();
+		btn.click();
+		flushSync();
+		expect(
+			host
+				.querySelector(`[data-staged-id="${tmp}"] button.staged-select`)
+				?.getAttribute('aria-current')
+		).toBe('true');
+	});
+
 	it('header toggle collapses the row list', () => {
 		const tmp = createTempId();
 		emit({

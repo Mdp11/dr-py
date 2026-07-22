@@ -4,16 +4,19 @@
 	import {
 		clearSelection,
 		deriveStagedElementRows,
+		discardElementCascade,
 		ensureTreeItems,
 		getCachedElements,
 		getCachedTreeItems,
 		getSelection,
 		getStagedDiff,
-		revertStagedForElement,
+		getStagedOps,
 		select,
+		stagedRelationshipOpIds,
 		type StagedElementRow
 	} from '$lib/state';
 	import { isTempId } from '$lib/state/ops';
+	import { computeWindow } from './windowing';
 
 	// "Staged elements" section: the navigation path to elements touched by
 	// the staged-edits buffer (snippet-staged or manual). The tree renders only
@@ -32,9 +35,50 @@
 	});
 
 	const rows = $derived(
-		deriveStagedElementRows(getStagedDiff(), getCachedElements(), getCachedTreeItems())
+		deriveStagedElementRows(
+			getStagedDiff(),
+			getCachedElements(),
+			getCachedTreeItems(),
+			stagedRelationshipOpIds(getStagedOps())
+		)
 	);
 	const selection = $derived(getSelection());
+
+	// ----- virtualized windowing -----
+	// A snippet batch can stage thousands of ops, and this scroller only ever
+	// shows ~8 rows — mount the visible window (+overscan) instead of the whole
+	// list, exactly as ContainmentTree does. Spacer divs above/below keep the
+	// scrollbar proportional to the FULL row count so every row stays reachable
+	// (a "…and N more" cap was rejected: this is the surface for reviewing and
+	// discarding staged edits, so nothing may be unreachable).
+	const ROW_H = 28;
+	const OVERSCAN = 8;
+
+	let scrollEl: HTMLElement | null = $state(null);
+	let scrollTop = $state(0);
+	// Height is measured from the live element; in a detached test host it stays
+	// 0, and computeWindow then still mounts OVERSCAN rows — degrading to "some
+	// rows", never to "no rows".
+	let viewportH = $state(0);
+
+	const win = $derived(
+		computeWindow({ scrollTop, viewportH, rowH: ROW_H, total: rows.length, overscan: OVERSCAN })
+	);
+	const windowedRows = $derived(rows.slice(win.start, win.end));
+
+	function onScroll(): void {
+		if (scrollEl) scrollTop = scrollEl.scrollTop;
+	}
+
+	$effect(() => {
+		if (!scrollEl) return;
+		viewportH = scrollEl.clientHeight;
+		const ro = new ResizeObserver(() => {
+			if (scrollEl) viewportH = scrollEl.clientHeight;
+		});
+		ro.observe(scrollEl);
+		return () => ro.disconnect();
+	});
 
 	// Modified rows can be in neither cache (staged-rel endpoint of an element
 	// this client never loaded) — lite-fetch their display rows. ensureTreeItems
@@ -63,7 +107,11 @@
 		if (row.status === 'new' && selection?.kind === 'element' && selection.id === row.id) {
 			clearSelection();
 		}
-		revertStagedForElement(row.id);
+		// discardElementCascade, not the bare revert: staged edits always hold a
+		// lease (manual via the edit gate, snippet batches via acquireLocks), and
+		// nothing else releases it once the buffer empties — a raw revert would
+		// leave the element checked out against peers for the full TTL.
+		void discardElementCascade(row.id);
 	}
 </script>
 
@@ -84,12 +132,20 @@
 			<span class="font-mono text-[10px] normal-case text-muted-foreground">{rows.length}</span>
 		</button>
 		{#if !collapsed}
-			<ul class="max-h-48 overflow-auto px-1 pb-1 text-xs" role="list">
-				{#each rows as row (row.id)}
+			<ul
+				bind:this={scrollEl}
+				onscroll={onScroll}
+				class="max-h-48 overflow-auto px-1 pb-1 text-xs"
+				role="list"
+			>
+				<li style="height: {win.padTop}px" aria-hidden="true"></li>
+				{#each windowedRows as row (row.id)}
 					{@const badge = BADGE[row.status]}
+					{@const isSelected = selection?.kind === 'element' && selection.id === row.id}
 					<li
 						class="group flex items-center gap-2 rounded px-2 py-1 hover:bg-muted"
-						class:bg-muted={selection?.kind === 'element' && selection.id === row.id}
+						class:bg-muted={isSelected}
+						style="height: {ROW_H}px"
 						data-staged-id={row.id}
 						data-status={row.status}
 					>
@@ -101,6 +157,7 @@
 							<button
 								type="button"
 								class="staged-select flex-1 truncate text-left text-foreground/90"
+								aria-current={isSelected ? 'true' : undefined}
 								onclick={() => onRowClick(row)}
 							>
 								{row.displayName}
@@ -126,6 +183,7 @@
 						</button>
 					</li>
 				{/each}
+				<li style="height: {win.padBottom}px" aria-hidden="true"></li>
 			</ul>
 		{/if}
 	</section>
