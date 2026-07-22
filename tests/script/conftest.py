@@ -64,3 +64,26 @@ def tiny_model() -> Model:
 def small_model() -> Model:
     """Pytest fixture wrapping tiny_model() for tests that need a reusable model."""
     return tiny_model()
+
+
+@pytest.fixture
+def bridge_call_log(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Log of every `BridgeDispatcher.dispatch` call's op name, in order.
+
+    Dispatch is the single host-side choke point of the bridge protocol for
+    BOTH runners (TrustedRunner calls it in-process; the WASM host pump calls
+    it once per guest request line), so its call count IS the round-trip
+    count the trip-collapse work optimizes. Write ops log as `"write"`.
+    """
+    from data_rover.core.script.bridge import BridgeDispatcher
+
+    calls: list[str] = []
+    orig = BridgeDispatcher.dispatch
+
+    def counting(self: BridgeDispatcher, req: dict) -> dict:
+        op = req.get("op")
+        calls.append(op if isinstance(op, str) else "write")
+        return orig(self, req)
+
+    monkeypatch.setattr(BridgeDispatcher, "dispatch", counting)
+    return calls

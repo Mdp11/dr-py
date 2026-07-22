@@ -60,6 +60,7 @@ from ..db_models import User
 from ..deps import Session, get_request_session, require_model
 from ..hydration import serialize_ops, write_snapshot
 from ..identity import get_current_user
+from ..invalidation import touched_keys
 from ..settings import get_settings
 from ..schemas import (
     CreateElementOp,
@@ -569,6 +570,9 @@ def apply_ops(
     with session.write_mutex:
         res = _apply_batch(model, payload.ops, restore=False)
         session.model_rev += 1
+        if get_settings().snippet_incremental_invalidation:
+            session.evict_touched_caches(touched_keys(model, model.metamodel, res))
+        # no else: pre-branch /model/ops relied on the rev-stamp mismatch alone
         session.record_batch(
             AppliedBatch(
                 ops=res.canonical_ops,
@@ -622,6 +626,9 @@ def undo(
             session.op_log.append(batch)  # _apply_batch already rolled back
             raise
         session.model_rev += 1
+        if get_settings().snippet_incremental_invalidation:
+            session.evict_touched_caches(touched_keys(model, model.metamodel, res))
+        # no else: pre-branch /model/ops relied on the rev-stamp mismatch alone
         # append-only journal: the undo is a NEW forward commit whose ops are
         # the inverse batch, so hydration replays to the post-undo state and
         # model_rev moves up (Phase 8 revert reuses this shape).

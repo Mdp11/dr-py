@@ -30,6 +30,7 @@ from ..db_models import Commit, Membership, User
 from ..deps import Session, get_request_session, require_model
 from ..hydration import deserialize_ops, reconstruct_model_at
 from ..identity import get_current_user
+from ..invalidation import touched_keys
 from ..locking import required_locks
 from ..settings import get_settings
 from ..schemas import (
@@ -289,7 +290,12 @@ def create_commit(
             )
         delta = state.replace(res.dirty.ids, scoped)
         session.model_rev += 1
-        session.invalidate_derived_caches()  # mirrors touch_model
+        if get_settings().snippet_incremental_invalidation:
+            # Selective eviction: cells this commit provably did not touch
+            # stay warm at the new rev (spec 2026-07-21 Phase B).
+            session.evict_touched_caches(touched_keys(model, model.metamodel, res))
+        else:
+            session.invalidate_derived_caches()  # legacy clear-all
         session.record_batch(
             AppliedBatch(
                 ops=res.canonical_ops,

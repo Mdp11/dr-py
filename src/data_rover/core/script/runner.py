@@ -28,6 +28,11 @@ from typing import Literal, Protocol
 
 from ..model.model import Model
 
+#: One structured read dependency recorded by the guest facade (Phase B,
+#: spec 2026-07-21): ("el", id) | ("out", id) | ("in", id) |
+#: ("children", id) | ("parent", id) | ("scan", type_name_or_None).
+ReadKey = tuple[str, str | None]
+
 
 @dataclass(frozen=True)
 class RunLimits:
@@ -50,6 +55,17 @@ class RunLimits:
         page_limit: Maximum number of model elements per paginated result in
             bridge reads (e.g., ``elements_page``). Runners enforce this on
             their bridge dispatcher.
+        read_memo_max: Capacity of the guest facade's session-lifetime read
+            memo (entries). 0 disables memoization. This staleness guarantee
+            holds for embedded/sweep work, whose results are rev-stamped and
+            discarded if the model rev moves under it (see
+            `api/script_sweep.py`'s `session.model_rev != job.rev` check): a
+            memoized read can never be *observed* stale there, even though
+            the underlying model is not actually frozen for the session's
+            lifetime. A console run is different — it reads without holding
+            `session.write_mutex` and its result goes straight back to the
+            user with no rev stamp, so it can already observe a torn read
+            with or without the memo; the memo does not change that.
     """
 
     wall_timeout_s: float = 10
@@ -59,6 +75,7 @@ class RunLimits:
     max_ops: int = 1000
     max_op_bytes: int = 1024 * 1024
     page_limit: int = 500
+    read_memo_max: int = 4096
 
 
 @dataclass(frozen=True)
@@ -139,12 +156,34 @@ class CallResult:
 
     ``value`` is the already-validated tagged wire payload (see
     :func:`decode_call_payload`), never a repr string; ``None`` iff ``error``
-    is set.
+    is set. ``reads`` is the call's recorded read-set (:data:`ReadKey`
+    tuples) — the union of boot-time reads and this call's reads — or
+    ``None`` meaning "depends on everything" (recording overflowed, the
+    guest predates read recording, or the call errored). ``None`` is the
+    conservative direction: the incremental invalidator always evicts it.
+
+    Boot-time attribution has a real gap: a read made during module exec is
+    charged to every call, which correctly covers an index built at true
+    module top level, but NOT the equally common lazy-init variant (a module
+    global built on first use inside ``value``/``step``, e.g. ``if _index is
+    None: _index = {...}``). Only the first call that triggers that lazy
+    build performs the underlying reads; every later call hits the
+    already-built global directly and reports nothing for it, even though
+    its result still depends on it — so those later calls' cells can go
+    stale across a commit that changes what the index covers. The same
+    shape bites a generator created at module level but advanced
+    (``next()``'d) inside a call. Fixing it would require unioning each
+    call's reads into a set that later calls inherit, which degrades back to
+    clear-all invalidation and defeats the purpose — so author discipline is
+    required. See the ``# LIMITATION`` comment beside ``facade_src.py``'s
+    ``_note_read`` and the author-facing warning in ``core/script/README.md``'s
+    "Evaluation sessions (M2/M3)" section.
     """
 
     value: dict | None
     error: ScriptError | None
     duration_ms: int
+    reads: frozenset[ReadKey] | None = None
 
 
 class SnippetSession(Protocol):
@@ -302,3 +341,46 @@ def decode_call_payload(entry: str, payload: object) -> tuple[dict | None, str |
         if isinstance(ids, list) and all(isinstance(i, str) for i in ids):
             return {"kind": "elements", "ids": ids}, None
     return None, "malformed value() result payload"
+
+
+# Mirrors (and must stay >=) `facade_src.py`'s `_READS_CAP`. The facade
+# cannot import this constant (it is exec'd guest source with no imports
+# allowed), so the two are kept in sync by convention, not by code sharing.
+# If the facade's cap ever exceeded this one, a read-set sized between the
+# two would ship un-overflowed from the guest and land here over
+# `_MAX_READS`, silently decoding to `None` (see the `len(obj) > _MAX_READS`
+# check below) with no signal that the caps had drifted apart.
+_MAX_READS = 2000
+_MAX_READ_TAG_LEN = 32
+_MAX_READ_ID_LEN = 512
+
+
+def decode_reads(obj: object) -> frozenset[ReadKey] | None:
+    """Validate a call's read-set from an UNTRUSTED guest.
+
+    Wire shape: a list of ``[tag, id_or_null]`` 2-lists (the facade sends
+    ``sorted(list(k) for k in reads)``), or ``null`` for "depends on
+    everything". ANY malformation — wrong container, wrong arity, non-string
+    members, oversized strings, more than ``_MAX_READS`` entries — degrades
+    to ``None`` rather than raising: a hostile guest must only ever be able
+    to make invalidation MORE conservative, never crash the host or shrink
+    its own dependency set to dodge eviction... shrinking is inherently
+    possible for a hostile guest, but a hostile guest can already return
+    arbitrary VALUES; read-sets are a performance contract, not a security
+    boundary (the cache is per-session, per-project, behind authz).
+    """
+    if not isinstance(obj, list) or len(obj) > _MAX_READS:
+        return None
+    out: set[ReadKey] = set()
+    for item in obj:
+        if not isinstance(item, list) or len(item) != 2:
+            return None
+        tag, ident = item
+        if not isinstance(tag, str) or len(tag) > _MAX_READ_TAG_LEN:
+            return None
+        if ident is not None and (
+            not isinstance(ident, str) or len(ident) > _MAX_READ_ID_LEN
+        ):
+            return None
+        out.add((tag, ident))
+    return frozenset(out)

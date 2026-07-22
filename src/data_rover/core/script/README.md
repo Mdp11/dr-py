@@ -18,10 +18,10 @@ canonical; this section is the narrative overview.
 
 `dr` is not a Python module on disk — it is the string constant
 `FACADE_SOURCE` in `facade_src.py`, `exec`'d verbatim ahead of the snippet's
-own source (in a fresh namespace with `_transport` already bound; see
-"Bridge wire contract" below). Both the WASM guest and `TrustedRunner` `exec`
-the *same* string, so the surface below is exactly what a snippet author gets
-in either environment.
+own source (in a fresh namespace with `_transport` and `_read_memo_max`
+already bound; see "Bridge wire contract" below). Both the WASM guest and
+`TrustedRunner` `exec` the *same* string, so the surface below is exactly
+what a snippet author gets in either environment.
 
 The facade and the snippet are **two separate compilation units** — the facade
 under the filename `<facade>`, the snippet under `<snippet>`. Concatenating
@@ -127,6 +127,7 @@ snippet_*` field (`api/settings.py`), itself a `DATA_ROVER_SNIPPET_*` env var
 | `max_ops` | `1000` | `DATA_ROVER_SNIPPET_MAX_OPS` | Cap on recorded op count; `BridgeDispatcher.record_op` raises `BridgeLimitError` past this (see "Error kinds" — this currently surfaces to the snippet as a `dr.BridgeError`, not a distinct `ScriptError.kind`). |
 | `max_op_bytes` | `1024 * 1024` (1,048,576) | `DATA_ROVER_SNIPPET_MAX_OP_BYTES` | Cap on cumulative JSON-serialized op bytes; same `BridgeLimitError` path as `max_ops`. |
 | `page_limit` | `500` | `DATA_ROVER_SNIPPET_PAGE_LIMIT` | Max elements per `dr.elements()` page (`elements_page` bridge op); a snippet never observes pagination directly. |
+| `read_memo_max` | `4096` | `DATA_ROVER_SNIPPET_READ_MEMO_MAX` | Entry cap on the guest facade's session-lifetime read memo; 0 disables. |
 
 Settings that shape the *runner*, not a per-run `RunLimits` value:
 `snippet_runner` (`"wasm"` default, or `"trusted"` — gated by the RCE
@@ -263,17 +264,36 @@ see above), emits a boot ack
 (`{"boot": true, "error": ...}`), and — if the exec didn't raise — enters a
 call loop reading newline-JSON frames from the host:
 
-- `{"call": {"entry": "value"|"step", "element_ids": [...]}}` — resolve the
-  named entry function in the module namespace, fetch a fresh `Element` per
-  id, invoke it (`value` gets the whole list; `step` gets the single bound
-  element), serialize the return value via the facade's own
-  `_dr_serialize_entry_result(entry, value)`, and reply with
-  `{"call_result": {"payload": ..., "error": ...}}`. `print()` output during
-  the call is still captured through the same size-capped `_CappedStdout`
-  console runs use, but the buffer is never included in `call_result` —
-  **embedded calls' stdout is captured and discarded**, by design; only the
-  tagged wire payload (and, in a future write-enabled mode, recorded ops —
-  sessions are read-only in M2/M3, see below) reaches the caller.
+- `{"call": {"entry": "value"|"step", "element_ids": [...], "elements":
+  [<projection>, ...]}}` — the additive `"elements"` field is the root
+  piggyback (trip-collapse): the host projects each bound root it can still
+  find in the live model (`bridge.py`'s `project_roots`) and ships those
+  projections alongside the ids, so a property-math cell that never
+  navigates past its bound element(s) costs zero bridge round trips. An id
+  the host could not project (e.g. a benign race — the root was deleted
+  between binding the call and running it) is simply ABSENT from
+  `"elements"`, never a `None` placeholder; the guest's own fetch for that
+  id then goes to the bridge and raises the same `NotFoundError` a direct
+  fetch always produced. The whole per-call sequence — priming the read
+  memo from `"elements"`, resolving the named entry function, fetching any
+  remaining `Element`s by id, invoking it (`value` gets the whole list;
+  `step` gets the single bound element), and serializing the result via
+  `_dr_serialize_entry_result` — is driven by ONE guest-side function,
+  `facade_src.py`'s `_dr_call_entry`, called by BOTH hosts (the WASM
+  bootstrap loop above and `tests/script/trusted_runner.py`'s
+  `_TrustedSession`) so per-call semantics live in exactly one place and the
+  two hosts cannot drift. `_dr_call_entry` returns `{"payload", "reads"}` —
+  the guest replies with `{"call_result": {"payload": ..., "error": ...,
+  "reads": <sorted list of [tag, id_or_null] 2-lists> | null}}`. `reads` is
+  the call's recorded read-set (Phase B — see `runner.py`'s `ReadKey` and
+  `CallResult.reads`), decoded host-side via `decode_reads`; `null` means
+  "depends on everything" (recording overflowed, or the call errored).
+  `print()` output during the call is still captured
+  through the same size-capped `_CappedStdout` console runs use, but the
+  buffer is never included in `call_result` — **embedded calls' stdout is
+  captured and discarded**, by design; only the tagged wire payload, the
+  read-set, and, in a future write-enabled mode, recorded ops (sessions are
+  read-only in M2/M3, see below) reach the caller.
 - `{"close": true}` — the loop returns, ending the guest's `_start`; the host
   then tears the instance down (never pooled again, same lifecycle as a
   console run's single-use instance).
@@ -331,6 +351,26 @@ fresh one.
   now-mutated module state. This is not detected or warned about — it is a
   documented caveat for snippet authors, not a bug the context guards
   against.
+- **Build lookup indexes at module top level, never lazily.** A read-set
+  capture pass (`facade_src.py`'s `_note_read`, threaded into
+  `CallResult.reads`) records which parts of the model each call USES, so a
+  later commit can evict only the table cells that read something it
+  changed. Reads made while the snippet MODULE executes (e.g. `_index = {e.id:
+  e.name for e in dr.elements(type="Building")}` at top level) are charged to
+  every call against that session, which is correct and exactly what you
+  want. But if the same index is built LAZILY inside `value`/`step` (`if
+  _index is None: _index = {...}`), only the FIRST call that happens to
+  trigger the build performs — and therefore records — those reads; every
+  later call hits the already-built global directly and reports nothing for
+  it, even though its result still depends on it just as much as the first
+  call's did. Those later cells will NOT be evicted when the underlying data
+  changes and will silently serve stale values. The same trap catches a
+  generator merely created at module level but advanced (`next()`'d) inside a
+  call. This cannot be fixed without making every later call in the session
+  inherit every earlier call's reads, which degrades back to clear-all
+  invalidation and defeats the point — so the fix has to be author discipline:
+  build your indexes at real module top level, not behind an `if _x is None`
+  guard.
 - **`.warnings` / `.add_warning(message)`** — deduped by exact message
   text, capped at `MAX_SCRIPT_WARNINGS` (20); the table/nav evaluation
   layers use this to report prune/degrade decisions without flooding the
@@ -361,6 +401,50 @@ monotonic()` deadline shared by every session the context opens) bound each
 call — a column that burns most of the budget leaves later columns/steps in
 the same request a shrinking window rather than each getting a fresh
 `wall_timeout_s`.
+
+### Trip collapse (Phase A', spec 2026-07-21)
+
+Embedded sessions minimize guest<->host round trips three ways, all invisible
+to snippet authors: (1) the facade memoizes bridge reads for the session's
+lifetime (`_memo`, capped at `snippet_read_memo_max` entries; sound because a
+session's results are rev-stamped and rejected if the rev moved under them —
+see `RunLimits.read_memo_max`; an unstamped console run can observe a torn
+read with or without the memo); (2) `outgoing`/`incoming` responses inline
+the far endpoints' projections under an additive `elements` key, priming
+that memo (see the bridge wire contract above); (3) each embedded call ships
+its bound root elements' projections in the call frame's own `elements`
+field (the root piggyback described above under the `mode: "embedded"` start
+message), so a property-math cell that never navigates past its bound
+element(s) makes zero bridge round trips. Every path that hands memo-derived
+data to a snippet goes through `facade_src.py`'s `_copy_projection`, which
+copies the projection dict, its `properties` dict, and any list/dict-valued
+property within it — so a snippet that mutates what it gets back (e.g.
+`el.out()[0]["properties"]["tags"].append(...)`) can never reach into
+`_memo` and corrupt a later call's result. Only genuinely immutable scalars
+(`str`/`int`/`float`/`bool`/`None`) are ever shared between a memo entry and
+what a snippet holds — see the invariant comment above `_memo` in
+`facade_src.py` and the regression test
+`test_memoized_element_does_not_alias_list_valued_property`.
+
+### Incremental invalidation (Phase B, spec 2026-07-21)
+
+Each embedded call records the read-keys it USED — memo hits and piggybacked
+roots included, via `facade_src.py`'s `_note_read` threaded into
+`_dr_call_entry` (see above) — and ships them on `call_result`
+(`CallResult.reads`; `None` means "depends on everything" and is always
+evicted, e.g. an errored call or a read-set that overflowed `_READS_CAP`/
+`_MAX_READS`). On the op-delta commit paths (`/model/ops`, `/model/undo`,
+`/commits`), `api/invalidation.touched_keys` translates the applied batch
+into the same `ReadKey` vocabulary and `ScriptCellCache.evict_touched` drops
+only intersecting cells, re-stamping survivors to the new rev — one edit no
+longer recomputes a 3k-row table. Paths with no op delta (`touch_model`,
+uploads, hydration, metamodel swap, every rollback) keep clear-all — the
+same safe default the cell cache already used everywhere before this phase.
+Escape hatch: `DATA_ROVER_SNIPPET_INCREMENTAL_INVALIDATION=false`. See
+"Build lookup indexes at module top level, never lazily" above for the one
+way a snippet author can make this optimization observe a stale value
+despite `touched_keys` being correct — the read-set capture itself, not the
+commit-side translation, is the thing that misses a dependency in that case.
 
 ### Cell cache + background sweep (whole-table work)
 

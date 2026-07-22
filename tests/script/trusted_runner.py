@@ -24,7 +24,7 @@ import time
 import traceback
 
 from data_rover.core.model.model import Model
-from data_rover.core.script.bridge import BridgeDispatcher
+from data_rover.core.script.bridge import BridgeDispatcher, project_roots
 from data_rover.core.script.facade_src import FACADE_SOURCE
 from data_rover.core.script.runner import (
     CallResult,
@@ -35,6 +35,7 @@ from data_rover.core.script.runner import (
     ScriptError,
     SnippetSession,
     decode_call_payload,
+    decode_reads,
 )
 
 #: The filename `compile()`/`exec()` see for the USER's snippet source. The
@@ -120,7 +121,10 @@ class TrustedRunner:
             max_op_bytes=limits.max_op_bytes,
             page_limit=limits.page_limit,
         )
-        namespace: dict = {"_transport": dispatcher.dispatch}
+        namespace: dict = {
+            "_transport": dispatcher.dispatch,
+            "_read_memo_max": limits.read_memo_max,
+        }
         stdout = _CappedStdout(limits.stdout_bytes)
         error: ScriptError | None = None
         value = None
@@ -202,8 +206,12 @@ class _TrustedSession:
             max_op_bytes=limits.max_op_bytes,
             page_limit=limits.page_limit,
         )
+        self._dispatcher = dispatcher
         self._limits = limits
-        self._namespace: dict = {"_transport": dispatcher.dispatch}
+        self._namespace: dict = {
+            "_transport": dispatcher.dispatch,
+            "_read_memo_max": limits.read_memo_max,
+        }
         self.boot_error: ScriptError | None = None
         try:
             compiled = compile(code, _SNIPPET_FILENAME, "exec")
@@ -226,15 +234,22 @@ class _TrustedSession:
         start = time.monotonic()
         if self.boot_error is not None:
             return CallResult(value=None, error=self.boot_error, duration_ms=0)
+        # Skip the projection entirely when the guest can't memoize anyway
+        # (read_memo_max <= 0): `_memo_put` no-ops on a non-positive cap, so
+        # projecting every root would be pure wasted work for zero payoff.
+        # Doesn't change results, only whether we bother -- mirrors the
+        # WASM host's identical guard in `api/script_runner.py`.
+        elements = (
+            project_roots(self._dispatcher.model, element_ids)
+            if self._limits.read_memo_max > 0
+            else []
+        )
         stdout = _CappedStdout(self._limits.stdout_bytes)
         with contextlib.redirect_stdout(stdout):  # type: ignore[type-var]
             try:
-                fn = self._namespace.get(entry)
-                if fn is None or not callable(fn):
-                    raise NameError(f"entry function {entry!r} is not defined")
-                els = [self._namespace["dr"].element(i) for i in element_ids]
-                value = fn(els if entry == "value" else (els[0] if els else None))
-                payload = self._namespace["_dr_serialize_entry_result"](entry, value)
+                res = self._namespace["_dr_call_entry"](
+                    entry, element_ids, elements
+                )
             except Exception:
                 return CallResult(
                     value=None,
@@ -245,7 +260,7 @@ class _TrustedSession:
                     ),
                     duration_ms=int((time.monotonic() - start) * 1000),
                 )
-        decoded, msg = decode_call_payload(entry, payload)
+        decoded, msg = decode_call_payload(entry, res["payload"])
         duration_ms = int((time.monotonic() - start) * 1000)
         if decoded is None:
             return CallResult(
@@ -253,7 +268,12 @@ class _TrustedSession:
                 error=ScriptError(kind="runtime", message=msg or "malformed payload"),
                 duration_ms=duration_ms,
             )
-        return CallResult(value=decoded, error=None, duration_ms=duration_ms)
+        return CallResult(
+            value=decoded,
+            error=None,
+            duration_ms=duration_ms,
+            reads=decode_reads(res["reads"]),
+        )
 
     def close(self) -> None:
         pass  # nothing to release in-process

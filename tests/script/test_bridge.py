@@ -1,6 +1,11 @@
 import json
 
-from data_rover.core.script.bridge import BridgeDispatcher, BridgeLimitError
+from data_rover.core.script.bridge import (
+    BridgeDispatcher,
+    BridgeLimitError,
+    project_element,
+    project_roots,
+)
 
 from tests.script.conftest import tiny_model
 
@@ -177,6 +182,73 @@ def test_dispatch_with_missing_id_still_returns_a_response():
     assert "error" in resp
 
 
+# --- far-endpoint inlining (trip-collapse, spec 2026-07-21 Phase A') -------
+
+
+def test_outgoing_response_inlines_far_endpoints():
+    d = BridgeDispatcher(_model(), record_ops=False)
+    resp = d.dispatch({"id": 1, "op": "outgoing", "element_id": "b1"})
+    assert [e["id"] for e in resp["elements"]] == ["b2"]
+    assert resp["elements"][0]["name"] == "Building Two"
+
+
+def test_incoming_response_inlines_far_endpoints():
+    d = BridgeDispatcher(_model(), record_ops=False)
+    resp = d.dispatch({"id": 1, "op": "incoming", "element_id": "b2"})
+    assert [e["id"] for e in resp["elements"]] == ["b1"]
+
+
+def test_far_endpoints_skips_inlining_above_the_high_degree_guard(monkeypatch):
+    """A hub whose distinct-endpoint count exceeds `_MAX_INLINE_FAR_ENDPOINTS`
+    must get `resp["elements"] == []` (guard tripped, no projection work
+    done) while `resp["relationships"]` stays complete -- the read itself is
+    never degraded, only the inline fast path is skipped. Monkeypatch the
+    module constant down to 2 rather than building 2048+ real elements: the
+    guard only cares about the count, not what the number IS.
+    """
+    from data_rover.core.script import bridge as bridge_module
+
+    monkeypatch.setattr(bridge_module, "_MAX_INLINE_FAR_ENDPOINTS", 2)
+
+    model = tiny_model()
+    hub = model.restore_element("hub", "Building")
+    model.set_property(hub, "name", "Hub")
+    targets = []
+    for i in range(3):  # 3 distinct endpoints > guard of 2
+        tid = f"t{i}"
+        targets.append(tid)
+        el = model.restore_element(tid, "Building")
+        model.set_property(el, "name", f"Target {i}")
+        model.connect("Owns", "hub", tid)
+
+    d = BridgeDispatcher(model, record_ops=False)
+    resp = d.dispatch({"id": 1, "op": "outgoing", "element_id": "hub"})
+    assert resp["elements"] == []
+    assert sorted(r["target_id"] for r in resp["relationships"]) == sorted(targets)
+
+
+def test_far_endpoints_dedup_happens_before_the_guard_check(monkeypatch):
+    """The guard compares against the DISTINCT endpoint count, not the raw
+    relationship count -- a hub with many parallel edges to the SAME
+    neighbor must not trip the guard just because it has many edges."""
+    from data_rover.core.script import bridge as bridge_module
+
+    monkeypatch.setattr(bridge_module, "_MAX_INLINE_FAR_ENDPOINTS", 2)
+
+    model = tiny_model()
+    hub = model.restore_element("hub", "Building")
+    model.set_property(hub, "name", "Hub")
+    # 3 parallel edges, but only ONE distinct target -- must stay under the
+    # guard of 2 distinct endpoints and still inline.
+    for _ in range(3):
+        model.connect("Owns", "hub", "b1")
+
+    d = BridgeDispatcher(model, record_ops=False)
+    resp = d.dispatch({"id": 1, "op": "outgoing", "element_id": "hub"})
+    assert [e["id"] for e in resp["elements"]] == ["b1"]
+    assert len(resp["relationships"]) == 3
+
+
 # --- max_op_bytes cap (distinct code path from the max_ops count cap) ------
 
 
@@ -198,3 +270,37 @@ def test_record_op_byte_cap_enforced():
     assert "error" in resp and "cap" in resp["error"].lower()
     # the rejected op must not have been appended
     assert disp.ops == [small_op]
+
+
+# --- project_roots (shared host-side root piggyback helper) ---------------
+
+
+def test_project_roots_omits_missing_id_rather_than_placeholder():
+    """A missing id must be OMITTED, never encoded as a `None`/placeholder
+    entry -- the guest keys priming off `proj["id"]`, not position, so a
+    placeholder would either crash the guest's priming loop or silently
+    prime a fake entry. See `project_roots`'s docstring for the full
+    contract this protects."""
+    model = tiny_model()
+    result = project_roots(model, ["b1", "nope", "b2"])
+    assert [proj["id"] for proj in result] == ["b1", "b2"]
+    assert all(proj is not None for proj in result)
+
+
+def test_project_roots_preserves_input_order():
+    model = tiny_model()
+    # Deliberately out-of-natural-order and with a repeat -- the surviving
+    # projections must follow the INPUT order, not model insertion order.
+    result = project_roots(model, ["b3", "b1", "b3", "b2"])
+    assert [proj["id"] for proj in result] == ["b3", "b1", "b3", "b2"]
+
+
+def test_project_roots_projection_matches_project_element_shape():
+    model = _model()
+    result = project_roots(model, ["b1"])
+    assert result == [project_element(model.get_element("b1"))]
+
+
+def test_project_roots_empty_input_returns_empty_list():
+    model = tiny_model()
+    assert project_roots(model, []) == []

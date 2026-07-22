@@ -33,6 +33,21 @@ response dict, synchronously, never raising — errors come back as
 newline-JSON request to a pipe/stdio channel and blocks for the matching
 response line; in `TrustedRunner` it is `BridgeDispatcher.dispatch` called
 directly, in-process. The facade code below is oblivious to which.
+
+**The `_read_memo_max` contract.** The embedding runner MUST also bind
+`_read_memo_max` (an `int`, the memo capacity — see `RunLimits.read_memo_max`)
+in the same namespace before `FACADE_SOURCE` executes. It caps the facade's
+session-lifetime read memo (`_memo`, defined below): memoized reads cost zero
+round trips on repeat. For embedded/sweep work the results this memo backs
+are rev-stamped and discarded if the model rev moves under them, so the memo
+can never be *observed* stale there; a console run reads without holding
+`session.write_mutex` at all and can already observe a torn read with or
+without the memo (see `RunLimits.read_memo_max`'s docstring in `runner.py`
+for the full scoping). Missing the binding (e.g. a caller that forgets it)
+falls back to a hardcoded default via `except (NameError, TypeError,
+ValueError)`, so the facade never hard-fails on it — but every real
+embedding path threads it through explicitly (`RunLimits.read_memo_max` ->
+`start_msg`/`namespace`).
 """
 
 from __future__ import annotations
@@ -91,6 +106,129 @@ def _write(op):
     return _raise_for_error(_transport(req))
 
 
+try:
+    _MEMO_CAP = int(_read_memo_max)
+except (NameError, TypeError, ValueError):
+    # NameError: caller forgot to bind _read_memo_max at all.
+    # TypeError: caller bound it to None (or another non-int-coercible value).
+    # ValueError: caller bound it to a non-numeric string.
+    # Any of these falls back to the hardcoded default rather than letting
+    # an opaque exception kill facade exec before the snippet even starts.
+    _MEMO_CAP = 4096
+
+# Session-lifetime read memo: (op_name, id_or_None) -> response fragment.
+# Soundness is scoped in `RunLimits.read_memo_max`'s docstring (rev-stamped
+# for embedded/sweep work; a console run can observe a torn read with or
+# without the memo). Insertion-ordered
+# dict gives FIFO eviction at _MEMO_CAP entries. Element entries hold the
+# PROJECTION dict (not the whole response) so hop/root priming can insert
+# projections directly under ("element", id).
+#
+# INVARIANT: memo entries are canonical session state, read by every future
+# call to the op they were stored under. Every read path in this module
+# hands out COPIES of the containers it returns (lists and dicts alike) —
+# never the memo's own list/dict object. This is load-bearing, not just
+# defensive: if a snippet's returned structure aliased the memo entry, a
+# snippet that mutates what it gets back (e.g. `el.out().append(...)`)
+# would silently change the RESULT of a later call to the same read. That
+# would make snippet behavior depend on `_read_memo_max` (whether the memo
+# was populated/evicted at the time), which must never be observable.
+#
+# Property values are NOT always immutable scalars: multi-valued properties
+# are first-class (see `validation/validators/multiplicity.py` and
+# `type_conformance.py`), so a projection's `properties` dict can map a key
+# to a LIST. `_copy_projection` below is the one place that copies an
+# element projection safely: it copies the outer dict AND replaces any
+# list-valued property with a fresh list, so `el["tags"].append(...)` or
+# `el.out()[0]["properties"]["k"] = v` can never reach back into `_memo`.
+# Every read path in this module that hands out a projection (or a
+# structure built from one) must go through this helper rather than a bare
+# `dict(...)`.
+_memo = {}
+
+
+def _memo_put(key, value):
+    if _MEMO_CAP <= 0:
+        return
+    if key not in _memo and len(_memo) >= _MEMO_CAP:
+        _memo.pop(next(iter(_memo)))
+    _memo[key] = value
+
+
+def _copy_projection(d):
+    # Shallow dict() is not enough: the projection's `properties` dict is
+    # memo state, and property VALUES can be lists (multi-valued
+    # properties), so `el["tags"].append(...)` would mutate the memo.
+    c = dict(d)
+    props = c.get("properties")
+    if props is not None:
+        c["properties"] = {
+            k: (list(v) if isinstance(v, list) else dict(v) if isinstance(v, dict) else v)
+            for k, v in props.items()
+        }
+    # No metamodel datatype admits a dict value, so dict copying is unreachable
+    # for a conformant model — but the engine deliberately stays inspectable
+    # and will hold non-conformant data, and over-copying is the safe direction.
+    return c
+
+
+# Cannot import runner.py's _MAX_READS here (this string is exec'd guest
+# source -- no imports, see the module docstring), so this cap and that one
+# can only be kept in sync by convention: this value MUST be <= host-side
+# `runner.py`'s `_MAX_READS`. If it were ever greater, a read-set sized
+# between the two caps (under _READS_CAP, so `_dr_call_entry` ships it
+# un-overflowed) would arrive at `decode_reads` over `_MAX_READS` and get
+# silently decoded to `None` there (its `len(obj) > _MAX_READS` guard) --
+# indistinguishable from a deliberate overflow report, so nothing would ever
+# surface the drift. Keep the two literals equal unless you have a specific
+# reason the facade should overflow strictly before the host does.
+_READS_CAP = 2000
+
+# Read-set recording (Phase B): _boot_reads accumulates reads made during
+# module exec (an import-time index feeds every later call, so its reads
+# belong to every call's set); _call_reads[0] holds the active per-call set
+# while _dr_call_entry is driving, else None (console 'script' runs record
+# into _boot_reads and never ship it — harmless). Overflow past _READS_CAP
+# flips the matching flag and the call reports reads=None ("depends on
+# everything") — the conservative direction.
+_boot_reads = set()
+_boot_overflow = [False]
+_call_reads = [None]
+_call_overflow = [False]
+
+
+def _note_read(tag, ident):
+    # LIMITATION -- cannot be fixed by more instrumentation, only by author
+    # discipline (see README.md's "Evaluation sessions (M2/M3)" section for
+    # the author-facing version of this warning): a read made during module
+    # exec (boot) is charged to EVERY call via _boot_reads, which covers an
+    # index built at true module top level. It does NOT cover the equally
+    # common LAZY variant -- a module global initialized on first use inside
+    # value()/step() (`if _index is None: _index = {...}`) -- because only
+    # the FIRST call that triggers the lazy build ever executes the reads
+    # that build it; every later call hits the already-built global directly
+    # and never calls back into this module, so its _call_reads set is
+    # missing that dependency even though its RESULT still depends on it.
+    # The same shape bites a generator merely CREATED at module level but
+    # ADVANCED (next()'d) inside a call: the _note_read call living in the
+    # generator body only fires on the first advance, not at creation. The
+    # fix would require unioning each call's reads into a session-sticky set
+    # that later calls inherit, which degrades back to clear-all invalidation
+    # and defeats the whole point of per-call tracking — so author discipline
+    # is required: build indexes at actual module top level, not lazily.
+    target = _call_reads[0]
+    if target is None:
+        if len(_boot_reads) >= _READS_CAP:
+            _boot_overflow[0] = True
+        else:
+            _boot_reads.add((tag, ident))
+        return
+    if len(target) >= _READS_CAP:
+        _call_overflow[0] = True
+    else:
+        target.add((tag, ident))
+
+
 class Element:
     """A read snapshot of a model element, plus dry-run write helpers."""
 
@@ -140,15 +278,54 @@ class Element:
             for rel in el.out():
                 print(rel["type"], rel["target_id"])
         """
-        return _read("outgoing", element_id=self.id)["relationships"]
+        _note_read("out", self.id)
+        key = ("outgoing", self.id)
+        hit = _memo.get(key)
+        if hit is None:
+            resp = _read("outgoing", element_id=self.id)
+            # Hop responses ship the far endpoints' element projections
+            # inline (trip-collapse, spec 2026-07-21 Phase A') -- prime the
+            # element memo with them BEFORE storing the relationships, so a
+            # snippet that follows up with dr.element(rel["target_id"]) for
+            # each neighbor gets a memo hit instead of one round trip per
+            # neighbor. `or []` keeps this tolerant of a host that predates
+            # the additive "elements" key.
+            for proj in resp.get("elements") or []:
+                _memo_put(("element", proj["id"]), proj)
+            hit = resp["relationships"]
+            _memo_put(key, hit)
+        # Copy the outer list AND each relationship dict inside it (via
+        # _copy_projection, so list-valued properties are copied too) — the
+        # memo entry is shared canonical state (see the invariant comment
+        # above `_memo`), so a snippet mutating a returned dict must not be
+        # able to change what a later `.out()` call returns.
+        return [_copy_projection(r) for r in hit]
 
     def in_(self):
         """List incoming relationships as dicts (id, type, source_id, target_id)."""
-        return _read("incoming", element_id=self.id)["relationships"]
+        _note_read("in", self.id)
+        key = ("incoming", self.id)
+        hit = _memo.get(key)
+        if hit is None:
+            resp = _read("incoming", element_id=self.id)
+            # See the comment in `out()` above: prime the element memo from
+            # the inlined far (source) endpoints before storing.
+            for proj in resp.get("elements") or []:
+                _memo_put(("element", proj["id"]), proj)
+            hit = resp["relationships"]
+            _memo_put(key, hit)
+        # See the comment in `out()` above: copy the relationship dicts too.
+        return [_copy_projection(r) for r in hit]
 
     def parent(self):
         """Return the containment parent Element, or None at a root."""
-        parent_id = _read("parent", element_id=self.id)["parent_id"]
+        _note_read("parent", self.id)
+        key = ("parent", self.id)
+        if key in _memo:
+            parent_id = _memo[key]
+        else:
+            parent_id = _read("parent", element_id=self.id)["parent_id"]
+            _memo_put(key, parent_id)
         if parent_id is None:
             return None
         return _fetch_element(parent_id)
@@ -160,7 +337,21 @@ class Element:
             for child in el.children():
                 print(child.name)
         """
-        return [Element(d) for d in _read("children", element_id=self.id)["children"]]
+        _note_read("children", self.id)
+        key = ("children", self.id)
+        hit = _memo.get(key)
+        if hit is None:
+            hit = _read("children", element_id=self.id)["children"]
+            for proj in hit:
+                _memo_put(("element", proj["id"]), proj)
+            _memo_put(key, hit)
+        # `hit`'s dicts are the SAME objects primed into the ("element", id)
+        # memo entries above (or, on a repeat call, into the "children" memo
+        # entry from a prior call) — build each Element over a copy (via
+        # _copy_projection, which also copies list-valued properties) so a
+        # snippet holding one of these children can't mutate the shared
+        # projection out from under a later `dr.element(child_id)` call.
+        return [Element(_copy_projection(d)) for d in hit]
 
     def set(self, key, value):
         """Record a dry-run property update. Nothing changes until staged and committed.
@@ -185,9 +376,24 @@ def _fetch_element(element_id):
         el = dr.element("some-id")
         print(el.name)
     """
-    return Element(_read("element", element_id=element_id)["element"])
+    _note_read("el", element_id)
+    key = ("element", element_id)
+    proj = _memo.get(key)
+    if proj is None:
+        proj = _read("element", element_id=element_id)["element"]
+        _memo_put(key, proj)
+    # `proj` may be the memo's own dict (on a hit, or after _memo_put aliases
+    # it in) — build the Element over a copy (via _copy_projection, which
+    # also copies list-valued properties) so `Element._data` is never the
+    # live memo entry. See the invariant comment above `_memo`.
+    return Element(_copy_projection(proj))
 
 
+# Deliberately NOT memoized: a whole-model scan does not fit the single
+# `(op_name, id_or_None)` memo key shape, and re-running the same scan
+# twice in one snippet is rare enough not to be worth a bespoke key scheme
+# here. Its read-set key is recorded once per call regardless of how many
+# pages it takes (`_note_read` before the loop, not per page).
 def _iter_elements(type=None):
     """Iterate all elements, optionally filtered by type name. Pages transparently.
 
@@ -195,6 +401,7 @@ def _iter_elements(type=None):
         for el in dr.elements(type="Building"):
             print(el.name)
     """
+    _note_read("scan", type)
     offset = 0
     while True:
         resp = _read("elements_page", type=type, offset=offset, limit=500)
@@ -212,7 +419,12 @@ def _list_types():
     Example:
         print(dr.types())
     """
-    return _read("types")["types"]
+    key = ("types", None)
+    hit = _memo.get(key)
+    if hit is None:
+        hit = _read("types")["types"]
+        _memo_put(key, hit)
+    return list(hit)
 
 
 def _type_info(name):
@@ -221,7 +433,17 @@ def _type_info(name):
     Example:
         info = dr.type("Building")
     """
-    return _read("type_info", type=name)
+    key = ("type_info", name)
+    hit = _memo.get(key)
+    if hit is None:
+        hit = _read("type_info", type=name)
+        _memo_put(key, hit)
+    # Copy the outer dict AND its nested `properties` list-of-dicts — same
+    # rule as `out()`/`in_()`: a snippet mutating what it gets back must not
+    # poison the memo entry a later `dr.type(name)` call would return.
+    out = dict(hit)
+    out["properties"] = [dict(p) for p in out.get("properties") or []]
+    return out
 
 
 def _create(type_name, properties=None):
@@ -286,6 +508,61 @@ class _Dr:
 dr = _Dr()
 
 _WIRE_SCALARS = (str, int, float, bool)
+
+
+def _dr_call_entry(entry, element_ids, elements=None):
+    # Single per-call driver for embedded sessions (M2/M3): prime the read
+    # memo with the host-projected roots, build handles, invoke the entry
+    # point, serialize, and report the call's read-set (boot reads union
+    # per-call reads; None on overflow). Both hosts call THIS — per-call
+    # semantics live in one place, so the runners cannot drift. Roots the
+    # host could not project are absent from `elements`; _fetch_element then
+    # surfaces NotFoundError exactly as a direct fetch would. Raises on
+    # snippet errors — the caller owns exception -> error-result mapping
+    # (and an errored call ships no reads: reads=None, always-evict). NOT
+    # part of the documented dr API (underscored on purpose). Saves/restores
+    # the prior _call_reads/_call_overflow rather than resetting to a fixed
+    # None/False in `finally`: today the driver is never reentrant (nothing
+    # calls `_dr_call_entry` while another invocation is on the stack), so a
+    # fixed reset and a restore are observably identical -- but a future
+    # nested or write-enabled driver would otherwise silently attribute its
+    # boot/inner-call reads to the WRONG frame the moment reentrancy showed
+    # up, which is exactly the kind of silent-stale-value bug this module
+    # exists to prevent. The restore costs nothing today and removes that
+    # failure mode for free.
+    prior_reads = _call_reads[0]
+    prior_overflow = _call_overflow[0]
+    _call_reads[0] = set()
+    _call_overflow[0] = False
+    try:
+        for proj in elements or []:
+            _memo_put(("element", proj["id"]), proj)
+        fn = globals().get(entry)
+        if fn is None or not callable(fn):
+            raise NameError("entry function " + repr(entry) + " is not defined")
+        els = [_fetch_element(i) for i in element_ids]
+        value = fn(els if entry == "value" else (els[0] if els else None))
+        payload = _dr_serialize_entry_result(entry, value)
+        if _boot_overflow[0] or _call_overflow[0]:
+            reads = None
+        else:
+            merged = _boot_reads | _call_reads[0]
+            if len(merged) > _READS_CAP:
+                reads = None
+            else:
+                # Sort key avoids comparing None to str directly: a
+                # ("scan", None) (untyped scan) and a ("scan", "Building")
+                # (typed scan) can coexist in one call's set, and plain
+                # `sorted(list(k) for k in merged)` raises TypeError trying
+                # to order their second elements against each other.
+                reads = sorted(
+                    (list(k) for k in merged),
+                    key=lambda k: (k[0], k[1] is not None, k[1] or ""),
+                )
+        return {"payload": payload, "reads": reads}
+    finally:
+        _call_reads[0] = prior_reads
+        _call_overflow[0] = prior_overflow
 
 
 def _dr_serialize_entry_result(entry, value):

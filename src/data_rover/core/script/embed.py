@@ -156,7 +156,7 @@ class ScriptEvalContext:
         self._memo[key] = res
         if self._cell_cache is not None and ckey is not None:
             # put() filters non-deterministic error kinds itself
-            self._cell_cache.put(ckey, res, self._rev)
+            self._cell_cache.put(ckey, res, self._rev, reads=res.reads)
         return res
 
     def _call_uncached(

@@ -127,6 +127,7 @@ from wasmtime import (
 )
 
 from data_rover.core.model.model import Model
+from data_rover.core.script.bridge import project_roots
 from data_rover.core.script.facade_src import FACADE_SOURCE
 from data_rover.core.script.runner import (
     CallResult,
@@ -137,6 +138,7 @@ from data_rover.core.script.runner import (
     ScriptError,
     ScriptRunner,
     decode_call_payload,
+    decode_reads,
 )
 
 from .settings import Settings
@@ -321,7 +323,7 @@ def _run_once(start):
     result_repr_cap = start["result_repr_bytes"]
 
     stdout = _CappedStdout(stdout_cap)
-    namespace = {"_transport": _transport}
+    namespace = {"_transport": _transport, "_read_memo_max": start.get("read_memo_max", 4096)}
     error = None
     value = None
     have_value = False
@@ -385,7 +387,7 @@ def _run_embedded(start):
     code = start["code"]
     facade_source = start["facade_source"]
     stdout = _CappedStdout(start["stdout_bytes"])
-    namespace = {"_transport": _transport}
+    namespace = {"_transport": _transport, "_read_memo_max": start.get("read_memo_max", 4096)}
     err = None
     try:
         compiled = compile(code, _SNIPPET_FILENAME, "exec")
@@ -423,16 +425,15 @@ def _run_embedded(start):
             continue
         entry = call["entry"]
         element_ids = call["element_ids"]
+        elements = call.get("elements")
         cerr = None
         payload = None
+        reads = None
         sys.stdout = stdout
         try:
-            fn = namespace.get(entry)
-            if fn is None or not callable(fn):
-                raise NameError("entry function " + repr(entry) + " is not defined")
-            els = [namespace["dr"].element(i) for i in element_ids]
-            value = fn(els if entry == "value" else (els[0] if els else None))
-            payload = namespace["_dr_serialize_entry_result"](entry, value)
+            res = namespace["_dr_call_entry"](entry, element_ids, elements)
+            payload = res["payload"]
+            reads = res["reads"]
         except MemoryError:
             sys.stdout = _real_stdout
             raise
@@ -444,7 +445,7 @@ def _run_embedded(start):
             }
         finally:
             sys.stdout = _real_stdout
-        _emit({"call_result": {"payload": payload, "error": cerr}})
+        _emit({"call_result": {"payload": payload, "error": cerr, "reads": reads}})
 
 
 def _main():
@@ -923,6 +924,7 @@ class WasmScriptRunner:
                 "facade_source": FACADE_SOURCE,
                 "stdout_bytes": limits.stdout_bytes,
                 "result_repr_bytes": limits.result_repr_bytes,
+                "read_memo_max": limits.read_memo_max,
             }
             inst.host_in.write(json.dumps(start_msg) + "\n")
             inst.host_in.flush()
@@ -1183,6 +1185,7 @@ class _WasmSnippetSession:
             "facade_source": FACADE_SOURCE,
             "stdout_bytes": limits.stdout_bytes,
             "result_repr_bytes": limits.result_repr_bytes,
+            "read_memo_max": limits.read_memo_max,
         }
         inst.host_in.write(json.dumps(start_msg) + "\n")
         inst.host_in.flush()
@@ -1231,10 +1234,35 @@ class _WasmSnippetSession:
         deadline_s = min(
             self._limits.wall_timeout_s, max(self._budget.remaining(), 0.0)
         )
-        self._arm(deadline_s)
-        self._inst.host_in.write(
-            json.dumps({"call": {"entry": entry, "element_ids": element_ids}}) + "\n"
+        # Skip the projection entirely when the guest can't memoize anyway
+        # (read_memo_max <= 0): `_memo_put` no-ops on a non-positive cap, so
+        # projecting + serializing every root would be pure wasted work for
+        # zero payoff. Doesn't change results, only whether we bother.
+        elements = (
+            project_roots(self._dispatcher.model, element_ids)
+            if self._limits.read_memo_max > 0
+            else []
         )
+        frame = (
+            json.dumps(
+                {
+                    "call": {
+                        "entry": entry,
+                        "element_ids": element_ids,
+                        "elements": elements,
+                    }
+                }
+            )
+            + "\n"
+        )
+        # Arm the epoch deadline as late as possible -- immediately before
+        # the write that hands control to the guest -- so host-side work
+        # above (projection, frame serialization) is never deducted from the
+        # guest's own wall budget (it was previously armed before this
+        # block, skewing this deadline against `wall_deadline` below, which
+        # is read from the clock AFTER that host-side work).
+        self._arm(deadline_s)
+        self._inst.host_in.write(frame)
         self._inst.host_in.flush()
         wall_deadline = time.monotonic() + deadline_s
         assert self._inst.thread is not None
@@ -1273,7 +1301,12 @@ class _WasmSnippetSession:
                 error=ScriptError(kind="runtime", message=dmsg or "malformed payload"),
                 duration_ms=duration_ms,
             )
-        return CallResult(value=decoded, error=None, duration_ms=duration_ms)
+        return CallResult(
+            value=decoded,
+            error=None,
+            duration_ms=duration_ms,
+            reads=decode_reads(cr.get("reads")),
+        )
 
     def close(self) -> None:
         if self._closed:
@@ -1309,6 +1342,7 @@ def run_limits_from_settings(settings: Settings) -> RunLimits:
         max_ops=settings.snippet_max_ops,
         max_op_bytes=settings.snippet_max_op_bytes,
         page_limit=settings.snippet_page_limit,
+        read_memo_max=settings.snippet_read_memo_max,
     )
 
 
