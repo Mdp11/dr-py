@@ -69,6 +69,7 @@ class ScriptCellCache:
         key: CellKey,
         result: CallResult,
         rev: int,
+        *,
         reads: frozenset[ReadKey] | None = None,
     ) -> None:
         if result.error is not None and result.error.kind not in _CACHEABLE_ERROR_KINDS:

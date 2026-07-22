@@ -159,7 +159,9 @@ class Session:
           stamp matches and the cache serves values computed against the
           ROLLED-BACK model. ``clear_and_stamp(self.model_rev)`` moves the
           stamp back in lockstep with the rev; it is the only writer allowed
-          to move a stamp DOWN.
+          to move a stamp DOWN WITHOUT CLEARING (``evict_touched``'s
+          clear-all branch also moves the stamp down, but only ever after
+          clearing the cache first, so no stale entry can survive under it).
 
         In-flight sweeps are cancelled for the same reason: they were computing
         cells against the discarded model state (and, past a rev rollback,
