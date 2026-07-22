@@ -157,6 +157,15 @@ follows a pessimistic **check-out → stage → commit** loop (Spec B):
    the last staged op from its per-op journal); per-element and discard-all
    reverts (`revertStagedFor` / `revertAllStaged`) work the same way. There is
    no server-side undo in the editing loop.
+   Staged elements are also browsable: the sidebar's **"Staged elements"**
+   section (`components/Sidebar/StagedSection.svelte`, rows derived by
+   `state/staged-rows.ts`) lists every element the buffer touches — new /
+   edited / deleted, badged — which is the ONLY way to reach a temp-id element
+   (it exists nowhere in the server-paged containment tree). Its per-row revert
+   is `discardElementCascade`, which reverts via `revertStagedForElement` (the
+   element's own ops PLUS every staged relationship op incident to it — a
+   surviving rel pointing at a reverted temp id would 422 the commit) and then
+   releases the element's lock token when no remaining staged op still needs it.
 6. Reads are **paged/on-demand**: element pages and fuzzy search
    (`/model/elements`), containment tree roots/children
    (`/model/containment/*`), and BFS neighborhoods for the graph view
@@ -424,7 +433,13 @@ src/
                         LeaseLite), feed-termination state, applies remote
                         commit deltas via applyDelta; checkout.svelte.ts — lock
                         registry, ensureCheckout/heartbeat, preview/commit,
-                        discard, role gating; edit-gate.ts — maps an edit intent
+                        discard (discardElement / discardElementCascade),
+                        role gating; staged-rows.ts — pure derivation of the
+                        sidebar "Staged elements" rows from getStagedDiff() +
+                        the display caches (new/edited/deleted badges; the
+                        edited rule fires only for endpoints of staged
+                        relationship OPS, never cascade-journal entries);
+                        edit-gate.ts — maps an edit intent
                         to its required locks and gates the mutation;
                         lock-badge.ts — per-row lock badge derivation;
                         lock-notice.svelte.ts — transient lock-conflict notice;

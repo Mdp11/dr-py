@@ -662,7 +662,10 @@ function queuedRelEndpoints(q: QueuedOp): { source_id: string; target_id: string
  * — a surviving staged rel referencing the reverted temp id would 422 the
  * eventual commit with an unknown id. Side effect accepted by design: this
  * can demote the OTHER endpoint of a removed staged rel from "modified" back
- * to untouched. */
+ * to untouched. Corollary for created elements: reverting one also removes the
+ * staged containment relationship to any staged-created CHILD, leaving that
+ * child staged with no parent — which surfaces at commit as a containment
+ * conformance issue rather than silently vanishing. */
 export function revertStagedForElement(id: string): void {
 	const remove = _queue.filter((q) => {
 		if (queuedTargetId(q) === id) return true;
