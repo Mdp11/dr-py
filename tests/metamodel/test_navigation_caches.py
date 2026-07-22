@@ -65,3 +65,27 @@ def test_unknown_type_rel_lookups_are_empty() -> None:
     mm = _mm()
     assert mm.relationship_types_from("Nope") == []
     assert mm.relationship_types_to("Nope") == []
+
+
+def _rel_mm() -> Metamodel:
+    return Metamodel(
+        elements=[ElementType(name="Thing")],
+        relationships=[
+            RelationshipType(name="Rel", abstract=True, source="Thing", target="Thing"),
+            RelationshipType(name="Owns", extends="Rel", source="Thing", target="Thing"),
+            RelationshipType(name="Rents", extends="Owns", source="Thing", target="Thing"),
+            RelationshipType(name="Feeds", source="Thing", target="Thing"),
+        ],
+    )
+
+
+def test_relationship_descendants_include_self_and_transitive_subtypes() -> None:
+    mm = _rel_mm()
+    assert mm.relationship_descendants("Rel") == frozenset({"Rel", "Owns", "Rents"})
+    assert mm.relationship_descendants("Owns") == frozenset({"Owns", "Rents"})
+    assert mm.relationship_descendants("Rents") == frozenset({"Rents"})
+    assert mm.relationship_descendants("Feeds") == frozenset({"Feeds"})
+
+
+def test_relationship_descendants_unknown_type_is_empty() -> None:
+    assert _rel_mm().relationship_descendants("Nope") == frozenset()

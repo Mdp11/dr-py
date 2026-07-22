@@ -16,22 +16,32 @@ def _by_name() -> dict[str, FacadeDocEntry]:
 def test_every_public_member_present_and_documented():
     entries = _by_name()
     expected = {
-        "dr.element", "dr.elements", "dr.types", "dr.type",
+        "dr.element", "dr.elements",
         "dr.create", "dr.connect", "dr.disconnect",
         "dr.BridgeError", "dr.ReadOnlyError", "dr.NotFoundError",
-        "Element.id", "Element.type", "Element.name",
-        "Element.get", "Element.props", "Element.out", "Element.in_",
+        "dr.CardinalityError",
+        "Element.id", "Element.stereotype", "Element.name",
+        "Element.get", "Element.props", "Element.outgoing", "Element.incoming",
         "Element.parent", "Element.children", "Element.set", "Element.delete",
+        "Relationship.id", "Relationship.stereotype", "Relationship.get",
+        "Relationship.props", "Relationship.source", "Relationship.destination",
     }
     assert set(entries) == expected
     for e in entries.values():
         assert e.doc.strip(), f"{e.name} has an empty doc"
 
 
+def test_relationship_members_documented():
+    docs = _by_name()
+    assert docs["Relationship.source"].kind == "method"
+    assert docs["Relationship.stereotype"].kind == "property"
+    assert "Relationship" in docs["Element.outgoing"].signature
+
+
 def test_signatures_render_public_names_and_defaults():
     entries = _by_name()
-    assert entries["dr.create"].signature == "dr.create(type_name, properties=None) -> str (temp id)"
-    assert entries["dr.elements"].signature == "dr.elements(type=None) -> iterator of Element"
+    assert entries["dr.create"].signature == "dr.create(stereotype, properties=None) -> str (temp id)"
+    assert entries["dr.elements"].signature == "dr.elements(stereotypes=None) -> iterator of Element"
     assert entries["Element.set"].signature == "Element.set(key, value)"
     assert entries["Element.get"].signature == "Element.get(key, default=None) -> value or default"
     assert entries["Element.id"].signature == "Element.id -> str"

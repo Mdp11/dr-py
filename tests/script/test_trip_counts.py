@@ -55,14 +55,13 @@ def test_memo_survives_across_calls(bridge_call_log: list[str]) -> None:
 def test_adjacency_reads_are_memoized(bridge_call_log: list[str]) -> None:
     sess = _open(
         "def value(els):\n"
-        "    els[0].out(); els[0].out()\n"
+        "    els[0].outgoing(); els[0].outgoing()\n"
         "    els[0].children(); els[0].children()\n"
         "    els[0].parent(); els[0].parent()\n"
-        "    dr.types(); dr.types()\n"
         "    return 1\n"
     )
     assert sess.call("value", ["b2"]).error is None
-    for op in ("outgoing", "children", "parent", "types"):
+    for op in ("outgoing", "children", "parent"):
         assert bridge_call_log.count(op) == 1, op
 
 
@@ -105,9 +104,9 @@ def test_memoized_results_do_not_alias_mutations(bridge_call_log: list[str]) -> 
     and list-valued properties included; see `_copy_projection`)."""
     sess = _open(
         "def value(els):\n"
-        "    rels = els[0].out()\n"
+        "    rels = els[0].outgoing()\n"
         "    rels.append('junk')\n"
-        "    return len(els[0].out())\n"
+        "    return len(els[0].outgoing())\n"
     )
     res = sess.call("value", ["b1"])
     assert res.error is None
@@ -172,8 +171,8 @@ def test_hop_primes_neighbor_projections(bridge_call_log: list[str]) -> None:
     sess = _open(
         "def value(els):\n"
         "    total = 0\n"
-        "    for rel in els[0].out():\n"
-        "        total += len(dr.element(rel['target_id']).name)\n"
+        "    for rel in els[0].outgoing():\n"
+        "        total += len(rel.destination().name)\n"
         "    return total\n"
     )
     assert sess.call("value", ["b1"]).error is None
@@ -186,8 +185,8 @@ def test_hop_primes_neighbor_projections(bridge_call_log: list[str]) -> None:
 def test_incoming_primes_source_projections(bridge_call_log: list[str]) -> None:
     sess = _open(
         "def value(els):\n"
-        "    rels = els[0].in_()\n"
-        "    return dr.element(rels[0]['source_id']).name\n"
+        "    rels = els[0].incoming()\n"
+        "    return rels[0].source().name\n"
     )
     assert sess.call("value", ["b2"]).error is None
     assert bridge_call_log.count("element") == 0  # b2 root piggybacked; b1 rode the hop
@@ -198,7 +197,7 @@ def test_hop_falls_back_to_per_neighbor_fetch_when_inline_guard_trips(
 ) -> None:
     """`bridge._far_endpoints`'s high-degree guard (tested directly in
     `tests/script/test_bridge.py`) ships `resp["elements"] == []` once
-    tripped. The facade's `out()` already tolerates that via `resp.get(
+    tripped. The facade's `_hop` already tolerates that via `resp.get(
     "elements") or []` -- this proves the DEGRADED path still produces the
     SAME correct result as the fast path (`test_hop_primes_neighbor_
     projections` above), just via one round trip per dereferenced neighbor
@@ -209,8 +208,8 @@ def test_hop_falls_back_to_per_neighbor_fetch_when_inline_guard_trips(
     code = (
         "def value(els):\n"
         "    total = 0\n"
-        "    for rel in els[0].out():\n"
-        "        total += len(dr.element(rel['target_id']).name)\n"
+        "    for rel in els[0].outgoing():\n"
+        "        total += len(rel.destination().name)\n"
         "    return total\n"
     )
     fast_sess = _open(code)
@@ -301,3 +300,46 @@ def test_read_memo_max_zero_changes_trips_never_results(
     assert unmemoized_res.reads == baseline_res.reads
     # But the root projection was skipped, so the guest had to fetch it.
     assert bridge_call_log.count("element") == 1
+
+
+def test_relationship_source_destination_are_zero_trip(
+    bridge_call_log: list[str],
+) -> None:
+    """Trip collapse inlines far endpoints with the hop response, so
+    `rel.destination()` must be a memo hit — no extra `element` dispatch."""
+    sess = _open(
+        "def value(els):\n"
+        "    rels = els[0].outgoing()\n"
+        "    return rels[0].destination().name\n"
+    )
+    assert sess.call("value", ["b1"]).error is None
+    assert bridge_call_log.count("element") == 0
+    assert bridge_call_log.count("outgoing") == 1
+
+
+def test_relationship_source_is_zero_trip_on_incoming(
+    bridge_call_log: list[str],
+) -> None:
+    sess = _open(
+        "def value(els):\n"
+        "    rels = els[0].incoming()\n"
+        "    return rels[0].source().name\n"
+    )
+    assert sess.call("value", ["b2"]).error is None
+    assert bridge_call_log.count("element") == 0
+    assert bridge_call_log.count("incoming") == 1
+
+
+def test_descendant_sets_are_memoized_across_calls(bridge_call_log: list[str]) -> None:
+    """The stereotype-filter descendant closure is fetched once per (kind,
+    name) for the session's lifetime — repeated filtered hops must not pay a
+    `descendants` round trip each."""
+    sess = _open(
+        "def value(els):\n"
+        "    els[0].outgoing(stereotype='Owns')\n"
+        "    els[0].outgoing(stereotype='Owns')\n"
+        "    return 1\n"
+    )
+    assert sess.call("value", ["b1"]).error is None
+    assert sess.call("value", ["b1"]).error is None
+    assert bridge_call_log.count("descendants") == 1

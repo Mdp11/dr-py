@@ -102,7 +102,7 @@
 		el.textContent =
 			'Explore the model through the dr facade, e.g.:\n' +
 			'for el in dr.elements():\n' +
-			'    print(el.type, el.name)';
+			'    print(el.stereotype, el.name)';
 		el.style.whiteSpace = 'pre';
 		return el;
 	}

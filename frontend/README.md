@@ -444,7 +444,7 @@ src/
                         facade docs payload (ensureSnippetDocs/
                         getSnippetDocs), silent-degrade on fetch failure,
                         reset at onReloadModel
-    editor/completion-source.ts  dr./Element/type-name CM6 completions +
+    editor/completion-source.ts  dr./Element/Relationship/stereotype-name CM6 completions +
                         hover logic (vocabFromMetamodel, computeCompletions,
                         resolveDocAt); pure, CM-agnostic, unit-tested
     editor/indent.ts    Indentation policy — FOUR SPACES, never a tab, because
@@ -506,7 +506,7 @@ commit a snippet run's op batch; and embedded script evaluation
 (`script-embedding.spec.ts`, M2/M3): a table script column bound to a saved
 snippet renders computed values alongside an `error-cell` for a row that
 raises and survives sorting, an inline script column computes a constant, and
-a navigation script step follows real `el.out()` neighbors into non-empty
+a navigation script step follows real `el.outgoing()` neighbors into non-empty
 chains before a raising step surfaces the `nav-warnings` chip — all three
 self-skip if the WASM guest binary isn't fetched (same runner-availability
 guard as `snippet-flow.spec.ts`).

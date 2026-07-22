@@ -287,21 +287,30 @@ def test_commit_structural_reject_leaves_cache_fully_cleared(
 # --------------------------------------------------------------------------
 
 SNIPPET_NAME = "def value(els):\n    return els[0].get('name', '?')\n"
+#: Reads ONLY the hop keys — ("out", id) / ("in", id). Deliberately returns
+#: `r.id` rather than `r.destination().id`: dereferencing the far endpoint
+#: would add an ("el", far_id) key to the cell's read-set, and that key would
+#: then mask a missing hop-key eviction (an endpoint change evicts on the
+#: element key even if the hop key were broken). Relationship endpoints are
+#: immutable — a retargeted edge is a delete + create, so a fresh id — which
+#: makes the id join an equally sensitive discriminator with a strictly
+#: hop-only read-set.
 SNIPPET_HOPS = (
     "def value(els):\n"
-    "    return ','.join(sorted(r['target_id'] for r in els[0].out()))\n"
+    "    return ','.join(sorted(r.id for r in els[0].outgoing()))\n"
 )
 SNIPPET_HOPS_IN = (
     "def value(els):\n"
-    "    return ','.join(sorted(r['source_id'] for r in els[0].in_()))\n"
+    "    return ','.join(sorted(r.id for r in els[0].incoming()))\n"
 )
 SNIPPET_SCAN = (
     "def value(els):\n"
-    "    return sum(1 for _ in dr.elements(type='Thing'))\n"
+    "    return sum(1 for _ in dr.elements(stereotypes='Thing'))\n"
 )
-#: Untyped scan (no `type=`) — this is the ("scan", None) key. A cell that
-#: only ever recorded this key must still be evicted by ANY element change,
-#: not just changes to elements of a type the snippet happened to filter on.
+#: Unfiltered scan (no `stereotypes=`) — this is the ("scan", None) key. A
+#: cell that only ever recorded this key must still be evicted by ANY element
+#: change, not just changes to elements of a stereotype the snippet happened
+#: to filter on.
 SNIPPET_SCAN_ALL = "def value(els):\n    return sum(1 for _ in dr.elements())\n"
 #: Reads containment children — the ("children", parent) key, which is
 #: emitted per-PARENT (an element can have more than one containment

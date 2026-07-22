@@ -16,13 +16,15 @@ intersection. Everything here is conservative by construction:
   validation issue this engine deliberately holds rather than rejects) is
   inlined into every one of its parents' `children()` responses, and a
   property change is visible through them, not just through `("el", id)`.
-- Every typed `("scan", T)` key is emitted alongside `("scan", None)`: an
-  untyped `dr.elements()` scan's page also inlines every element regardless
-  of type, so it is touched by ANY element change. `evict_touched` does a
-  plain set intersection with no expansion of its own, so a cell that only
-  recorded `("scan", None)` would survive a touched set of `{("scan",
-  "Building")}` alone — a stale-value bug. Pairing the two here is what
-  keeps that cell honest.
+- Every stereotype-filtered `("scan", T)` key is emitted alongside
+  `("scan", None)`: an unfiltered `dr.elements()` scan's page also inlines
+  every element regardless of stereotype, so it is touched by ANY element
+  change. (A multi-name `dr.elements(stereotypes=[A, B])` scan records one
+  `("scan", name)` per requested name, so it is covered by the same rule,
+  one name at a time.) `evict_touched` does a plain set intersection with
+  no expansion of its own, so a cell that only recorded `("scan", None)`
+  would survive a touched set of `{("scan", "Building")}` alone — a
+  stale-value bug. Pairing the two here is what keeps that cell honest.
 - Deleted-entity metadata (types, endpoints) is recovered from the batch's
   inverse units — the only place it survives the apply. If any expected
   metadata is missing, the function returns ``None`` ("unknown — clear

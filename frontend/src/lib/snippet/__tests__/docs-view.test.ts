@@ -38,10 +38,12 @@ describe('docs-view', () => {
 		const g = groupFacade([
 			{ name: 'dr.create', kind: 'function', signature: 's', doc: 'd', example: null },
 			{ name: 'Element.set', kind: 'method', signature: 's', doc: 'd', example: null },
+			{ name: 'Relationship.source', kind: 'method', signature: 's', doc: 'd', example: null },
 			{ name: 'dr.NotFoundError', kind: 'exception', signature: 's', doc: 'd', example: null }
 		]);
 		expect(g.dr.map((e) => e.name)).toEqual(['dr.create']);
 		expect(g.element.map((e) => e.name)).toEqual(['Element.set']);
+		expect(g.relationship.map((e) => e.name)).toEqual(['Relationship.source']);
 		expect(g.errors.map((e) => e.name)).toEqual(['dr.NotFoundError']);
 	});
 

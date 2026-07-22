@@ -30,6 +30,7 @@
 	const sections = $derived([
 		{ title: 'dr', entries: groups?.dr ?? [] },
 		{ title: 'Element', entries: groups?.element ?? [] },
+		{ title: 'Relationship', entries: groups?.relationship ?? [] },
 		{ title: 'Errors', entries: groups?.errors ?? [] }
 	]);
 </script>

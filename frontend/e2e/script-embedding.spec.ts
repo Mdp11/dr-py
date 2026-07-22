@@ -13,7 +13,7 @@
  *    type (no relationship hop needed) is runnable and yields exactly 12 rows
  *    when opened as a table.
  *  - Every SoftwareSystem has real outgoing SystemContainsComponent
- *    relationships (9, in the one spot-checked above) — `el.out()` inside a
+ *    relationships (9, in the one spot-checked above) — `el.outgoing()` inside a
  *    script step therefore always expands to a non-empty next frontier,
  *    without depending on any specific target id.
  *
@@ -42,7 +42,7 @@ const VIEW_PATH = join(__dirname, '..', '..', 'examples', 'smart-city.view.json'
 const SCRIPT_COLUMN_CODE =
 	'def value(els): return els[0].name if not els[0].name.endswith("-006") else 1 / 0\n';
 const INLINE_COLUMN_CODE = 'def value(els): return 2\n';
-const STEP_HAPPY_CODE = 'def step(el): return [r["target_id"] for r in el.out()]\n';
+const STEP_HAPPY_CODE = 'def step(el): return [r.destination().id for r in el.outgoing()]\n';
 const STEP_RAISE_CODE = 'def step(el): return 1 / 0\n';
 
 /** Focus a CM6 editor scoped under `container` and replace its content.
@@ -219,7 +219,7 @@ test('script column: ref snippet computes values + error cell + sorts; inline sc
 		.toBeGreaterThanOrEqual(12);
 });
 
-test('script step: el.out() renders real chains; a raising step surfaces nav-warnings', async ({
+test('script step: el.outgoing() renders real chains; a raising step surfaces nav-warnings', async ({
 	page
 }) => {
 	test.setTimeout(120_000);
@@ -232,7 +232,7 @@ test('script step: el.out() renders real chains; a raising step surfaces nav-war
 	await buildSoftwareSystemNav(page, tabpanel);
 
 	// --- 1. Add a script step, switch it to inline, and give it a snippet
-	// that follows every REAL outgoing relationship (el.out()) rather than a
+	// that follows every REAL outgoing relationship (el.outgoing()) rather than a
 	// hardcoded id — robust against exactly which components each system
 	// happens to contain. -----------------------------------------------
 	await tabpanel.getByTestId('add-script-step').click();

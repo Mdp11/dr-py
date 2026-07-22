@@ -42,14 +42,15 @@ const CM_TYPE: Record<string, string> = {
 	exception: 'class'
 };
 
-// `boost` is only ever passed as -1 (the Element.* heuristic, deprioritized
-// below the typed-partial gate above). dr.*/type-string contexts don't need a
+// `boost` is only ever passed as -1 (the member-access heuristic, deprioritized
+// below the typed-partial gate above). The `dr.*` and stereotype-string
+// contexts (`CREATE_STRING_RE`/`ELEMENTS_STRING_RE`) don't need a
 // positive counterpart: lang-python's keyword/local sources never fire in
 // member-access or string-literal contexts, so this facade source is already
 // the sole provider there with no competing options to outrank.
 function facadeOptions(
 	docs: SnippetDocsOut,
-	prefix: 'dr.' | 'Element.',
+	prefix: 'dr.' | 'Element.' | 'Relationship.',
 	partial: string,
 	boost?: number
 ): CompletionOption[] {
@@ -66,10 +67,27 @@ function facadeOptions(
 		}));
 }
 
-// First string argument of dr.create( / dr.type( — or dr.elements( with an
-// optional type= keyword — with an optional partial type name after the quote.
-const TYPE_STRING_RE =
-	/dr\.(?:create|type|elements)\(\s*(?:type\s*=\s*)?(["'])([A-Za-z_][A-Za-z0-9_]*)?$/;
+// Member-access heuristic: the receiver's class is unknown, so offer the
+// union of Element and Relationship members, Element first, deduped by
+// label (get/props/id/stereotype exist on both with identical docs shape).
+function memberOptions(docs: SnippetDocsOut, partial: string, boost: number): CompletionOption[] {
+	const element = facadeOptions(docs, 'Element.', partial, boost);
+	const seen = new Set(element.map((o) => o.label));
+	const rel = facadeOptions(docs, 'Relationship.', partial, boost).filter(
+		(o) => !seen.has(o.label)
+	);
+	return [...element, ...rel];
+}
+
+// First string argument of dr.create( — stereotype name after the quote.
+const CREATE_STRING_RE = /dr\.create\(\s*(["'])([A-Za-z_][A-Za-z0-9_]*)?$/;
+// dr.elements( with an optional stereotypes= keyword, single string or list
+// form (`stereotypes=["A", "` keeps completing later entries). Bounded scan
+// of the current line, like everything here: every quantifier consumes at
+// least one character and the inner class excludes quotes, so the repeated
+// group can't backtrack catastrophically.
+const ELEMENTS_STRING_RE =
+	/dr\.elements\(\s*(?:stereotypes\s*=\s*)?(?:\[\s*(?:["'][^"']*["']\s*,\s*)*)?(["'])([A-Za-z_][A-Za-z0-9_]*)?$/;
 const DR_MEMBER_RE = /(?:^|[^\w.])dr\.(\w*)$/;
 const OTHER_MEMBER_RE = /(\w+|\)|\])\.(\w*)$/;
 
@@ -79,7 +97,7 @@ export function computeCompletions(
 	vocab: VocabSummary | null,
 	explicit = false
 ): CompletionSpec | null {
-	const typeMatch = TYPE_STRING_RE.exec(before);
+	const typeMatch = CREATE_STRING_RE.exec(before) ?? ELEMENTS_STRING_RE.exec(before);
 	if (typeMatch) {
 		if (!vocab || vocab.typeNames.length === 0) return null;
 		const partial = typeMatch[2] ?? '';
@@ -105,7 +123,7 @@ export function computeCompletions(
 		// typed partial (or an explicit request) so a bare `.` after any
 		// paren doesn't pop noise, and rank below exact-context results.
 		if (partial === '' && !explicit) return null;
-		const options = facadeOptions(docs, 'Element.', partial, -1);
+		const options = memberOptions(docs, partial, -1);
 		return options.length ? { from: before.length - partial.length, options } : null;
 	}
 
@@ -129,7 +147,13 @@ export function resolveDocAt(
 		return docs.facade.find((e) => e.name === `dr.${word}`) ?? null;
 	}
 	if (start > 0 && line[start - 1] === '.') {
-		return docs.facade.find((e) => e.name === `Element.${word}`) ?? null;
+		// Same heuristic as memberOptions: the receiver's class is unknown, so
+		// prefer the Element entry and fall back to the Relationship one.
+		return (
+			docs.facade.find((e) => e.name === `Element.${word}`) ??
+			docs.facade.find((e) => e.name === `Relationship.${word}`) ??
+			null
+		);
 	}
 	return null;
 }

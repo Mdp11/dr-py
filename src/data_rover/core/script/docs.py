@@ -25,19 +25,23 @@ from data_rover.core.script.facade_src import FACADE_SOURCE
 _RETURNS: dict[str, str] = {
     "dr.element": "Element",
     "dr.elements": "iterator of Element",
-    "dr.types": "list[str]",
-    "dr.type": "dict",
     "dr.create": "str (temp id)",
     "dr.connect": "str (temp id)",
     "Element.id": "str",
-    "Element.type": "str",
-    "Element.name": "str",
+    "Element.stereotype": "str",
+    "Element.name": "str | None",
     "Element.get": "value or default",
     "Element.props": "dict",
-    "Element.out": "list[dict]",
-    "Element.in_": "list[dict]",
+    "Element.outgoing": "list[Relationship] (Relationship when expected=1)",
+    "Element.incoming": "list[Relationship] (Relationship when expected=1)",
     "Element.parent": "Element | None",
     "Element.children": "list[Element]",
+    "Relationship.id": "str",
+    "Relationship.stereotype": "str",
+    "Relationship.get": "value or default",
+    "Relationship.props": "dict",
+    "Relationship.source": "Element",
+    "Relationship.destination": "Element",
 }
 
 
@@ -134,27 +138,30 @@ def get_facade_docs() -> tuple[FacadeDocEntry, ...]:
                 )
             )
 
-    # Element members: public methods and properties; dunders skipped
-    # (`__getitem__` is documented under `get`).
-    for stmt in classes["Element"].body:
-        if not isinstance(stmt, ast.FunctionDef) or stmt.name.startswith("_"):
-            continue
-        public = f"Element.{stmt.name}"
-        is_property = any(
-            isinstance(d, ast.Name) and d.id == "property" for d in stmt.decorator_list
-        )
-        if is_property:
-            ret = _RETURNS.get(public)
-            sig = f"{public} -> {ret}" if ret else public
-            entries.append(_entry(public, "property", sig, ast.get_docstring(stmt)))
-        else:
-            entries.append(
-                _entry(
-                    public,
-                    "method",
-                    _signature(public, stmt, drop_self=True),
-                    ast.get_docstring(stmt),
-                )
+    # Element/Relationship members: public methods and properties; dunders
+    # and underscored helpers skipped (`__getitem__` is documented under
+    # `get`; `_hop` is an internal driver).
+    for cls_name in ("Element", "Relationship"):
+        for stmt in classes[cls_name].body:
+            if not isinstance(stmt, ast.FunctionDef) or stmt.name.startswith("_"):
+                continue
+            public = f"{cls_name}.{stmt.name}"
+            is_property = any(
+                isinstance(d, ast.Name) and d.id == "property"
+                for d in stmt.decorator_list
             )
+            if is_property:
+                ret = _RETURNS.get(public)
+                sig = f"{public} -> {ret}" if ret else public
+                entries.append(_entry(public, "property", sig, ast.get_docstring(stmt)))
+            else:
+                entries.append(
+                    _entry(
+                        public,
+                        "method",
+                        _signature(public, stmt, drop_self=True),
+                        ast.get_docstring(stmt),
+                    )
+                )
 
     return tuple(entries)

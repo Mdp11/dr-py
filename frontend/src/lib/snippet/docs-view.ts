@@ -17,11 +17,13 @@ export function formatBytes(n: number): string {
 export function groupFacade(entries: FacadeDocEntry[]): {
 	dr: FacadeDocEntry[];
 	element: FacadeDocEntry[];
+	relationship: FacadeDocEntry[];
 	errors: FacadeDocEntry[];
 } {
 	return {
 		dr: entries.filter((e) => e.name.startsWith('dr.') && e.kind !== 'exception'),
 		element: entries.filter((e) => e.name.startsWith('Element.')),
+		relationship: entries.filter((e) => e.name.startsWith('Relationship.')),
 		errors: entries.filter((e) => e.kind === 'exception')
 	};
 }

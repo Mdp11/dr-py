@@ -10,8 +10,8 @@ against an in-memory :class:`~data_rover.core.model.model.Model`.
 Two invariants shape everything here:
 
 - **Read-only against the live model.** Every read op (`element`,
-  `elements_page`, `outgoing`, `incoming`, `parent`, `children`, `types`,
-  `type_info`) only ever calls accessor methods on `Model`/`Metamodel` —
+  `elements_page`, `outgoing`, `incoming`, `parent`, `children`,
+  `descendants`) only ever calls accessor methods on `Model`/`Metamodel` —
   never `create_element`/`set_property`/`connect`/... A snippet that only
   reads never needs a lock and can never corrupt the session's model.
 - **Writes are dry-run recording, not application.** `record_op` never calls
@@ -49,11 +49,12 @@ from __future__ import annotations
 
 import json
 from typing import Any
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 
 from ..metamodel.schema import Metamodel
 from ..model.element import Element
 from ..model.model import Model
+from ..model.naming import name_of
 from ..model.relationship import Relationship
 
 #: A recorded write op: a (verbatim, unvalidated) `OpIn`-shaped dict, e.g.
@@ -98,18 +99,49 @@ class ReadOnlyError(Exception):
     `record_ops=False`. Caught by `dispatch()` like `BridgeLimitError`."""
 
 
+def _copy_properties(properties: Mapping[str, Any]) -> dict[str, Any]:
+    """Copy a property bag deeply enough that nothing a snippet can reach
+    still aliases the live `Model`.
+
+    A bare `dict(properties)` is NOT enough: multi-valued properties are
+    first-class (see `validation/validators/multiplicity.py`), so a value can
+    be a LIST — and that list object would still be the core `Element`'s own.
+    Under a transport with a real JSON boundary (`WasmScriptRunner`) the
+    decode breaks the alias anyway, but the in-process `TrustedRunner` binds
+    the guest straight to `dispatch()`, so a read-only snippet doing
+    `el["tags"].append(...)` would mutate the session's model — breaking this
+    module's headline invariant that "a snippet that only reads ... can never
+    corrupt the session's model" (see `BridgeDispatcher`).
+
+    Fixing it HERE rather than in `facade_src.py` puts the copy at the single
+    point every projection flows through (`_op_element`, `_op_elements_page`,
+    `_op_children`, `_far_endpoints`, the hop relationship projections and
+    the `project_roots` piggyback), so no read path can be added that forgets
+    it. `dict` values are copied too on the same "the engine stays
+    inspectable and will hold non-conformant data" reasoning as
+    `facade_src.py`'s guest-side `_copy_projection`.
+    """
+    return {
+        k: (list(v) if isinstance(v, list) else dict(v) if isinstance(v, dict) else v)
+        for k, v in properties.items()
+    }
+
+
 def _project_element(element: Element) -> dict[str, Any]:
     """Element -> plain dict: `{"id", "type", "name", "properties"}`.
 
-    `name` is a display convenience (`properties.get("name")`, `None` when
-    absent) — the full property bag is still there under `"properties"` for
-    a snippet that needs more than the display name.
+    `name` is a display convenience resolved via `core.model.naming.name_of`
+    — the same case-insensitive `name`/`Name`/`NAME` resolution the tree/
+    search/table code uses (list-valued names contribute their first
+    non-empty entry), `None` when no usable name property exists. The full
+    property bag is still there under `"properties"` for a snippet that
+    needs more than the display name.
     """
     return {
         "id": element.id,
         "type": element.type_name,
-        "name": element.properties.get("name"),
-        "properties": dict(element.properties),
+        "name": name_of(element),
+        "properties": _copy_properties(element.properties),
     }
 
 
@@ -122,7 +154,7 @@ def _project_relationship(rel: Relationship) -> dict[str, Any]:
         "id": rel.id,
         "type": rel.type_name,
         "name": rel.properties.get("name"),
-        "properties": dict(rel.properties),
+        "properties": _copy_properties(rel.properties),
         "source_id": rel.source_id,
         "target_id": rel.target_id,
     }
@@ -206,8 +238,7 @@ class BridgeDispatcher:
             "incoming": self._op_incoming,
             "parent": self._op_parent,
             "children": self._op_children,
-            "types": self._op_types,
-            "type_info": self._op_type_info,
+            "descendants": self._op_descendants,
         }
 
     # -- dispatch -------------------------------------------------------
@@ -253,15 +284,24 @@ class BridgeDispatcher:
         return {"element": _project_element(element)}
 
     def _op_elements_page(self, req: dict[str, Any]) -> dict[str, Any]:
-        type_name = req.get("type")
+        # `type` is None (no filter), a single stereotype name, or a list of
+        # names (facade sends a list since the stereotypes= rework); each
+        # name expands to its descendant closure, lists union them. An empty
+        # list is a real filter matching nothing — distinct from None.
+        type_names = req.get("type")
         offset = max(0, int(req.get("offset") or 0))
         raw_limit = req.get("limit")
         limit = self.page_limit if raw_limit is None else int(raw_limit)
         limit = max(0, min(limit, self.page_limit))
 
-        allowed_types = (
-            None if type_name is None else self.metamodel.element_descendants(type_name)
-        )
+        if type_names is None:
+            allowed_types: set[str] | None = None
+        else:
+            if isinstance(type_names, str):
+                type_names = [type_names]
+            allowed_types = set()
+            for name in type_names:
+                allowed_types.update(self.metamodel.element_descendants(name))
         candidates = (
             self.model.elements.values()
             if allowed_types is None
@@ -367,21 +407,26 @@ class BridgeDispatcher:
         children = [_project_element(self.model.get_element(cid)) for cid in child_ids]
         return {"children": children}
 
-    def _op_types(self, req: dict[str, Any]) -> dict[str, Any]:
-        return {"types": [et.name for et in self.metamodel.elements]}
-
-    def _op_type_info(self, req: dict[str, Any]) -> dict[str, Any]:
-        type_name = req["type"]
-        if self.metamodel.element_type(type_name) is None:
-            raise KeyError(f"Unknown element type {type_name!r}")
-        props = self.metamodel.effective_element_properties(type_name)
-        return {
-            "type": type_name,
-            "properties": [
-                {"name": p.name, "datatype": p.datatype, "multiplicity": p.multiplicity}
-                for p in props
-            ],
-        }
+    def _op_descendants(self, req: dict[str, Any]) -> dict[str, Any]:
+        """Descendant closure for a stereotype — internal support for the
+        facade's inheritance-aware filters (`dr.elements(stereotypes=...)`
+        expands host-side in `_op_elements_page`; hop filters expand
+        guest-side from this op). `kind` disambiguates the two type
+        namespaces. Unknown names raise KeyError (guest `NotFoundError`) so
+        a typo'd filter surfaces instead of silently matching nothing."""
+        kind = req.get("kind")
+        name = req["name"]
+        if kind == "element":
+            if self.metamodel.element_type(name) is None:
+                raise KeyError(f"Unknown element stereotype {name!r}")
+            return {"descendants": sorted(self.metamodel.element_descendants(name))}
+        if kind == "relationship":
+            if self.metamodel.relationship_type(name) is None:
+                raise KeyError(f"Unknown relationship stereotype {name!r}")
+            return {
+                "descendants": sorted(self.metamodel.relationship_descendants(name))
+            }
+        raise ValueError(f"descendants: unknown kind {kind!r}")
 
     # -- write op: dry-run recording ---------------------------------------
 

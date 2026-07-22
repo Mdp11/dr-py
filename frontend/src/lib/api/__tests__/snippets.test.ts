@@ -126,7 +126,7 @@ const DOCS_FIXTURE = {
 		{
 			name: 'dr.create',
 			kind: 'function',
-			signature: 'dr.create(type_name, properties=None) -> str (temp id)',
+			signature: 'dr.create(stereotype, properties=None) -> str (temp id)',
 			doc: 'Record a dry-run element create.',
 			example: 'tid = dr.create("Building", {"name": "HQ"})'
 		},
