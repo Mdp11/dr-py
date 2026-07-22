@@ -212,10 +212,10 @@ def _note_read(tag, ident):
     # The same shape bites a generator merely CREATED at module level but
     # ADVANCED (next()'d) inside a call: the _note_read call living in the
     # generator body only fires on the first advance, not at creation. There
-    # is no way for this module to tell "a read the whole snippet depends
-    # on" apart from "a read one lucky first call happened to trigger" after
-    # the fact -- the fix has to be snippet authors building indexes at
-    # actual module top level, not lazily.
+    # fix would require unioning each call's reads into a session-sticky set
+    # that later calls inherit, which degrades back to clear-all invalidation
+    # and defeats the whole point of per-call tracking — so author discipline
+    # is required: build indexes at actual module top level, not lazily.
     target = _call_reads[0]
     if target is None:
         if len(_boot_reads) >= _READS_CAP:

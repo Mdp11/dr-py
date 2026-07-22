@@ -366,9 +366,11 @@ fresh one.
   call's did. Those later cells will NOT be evicted when the underlying data
   changes and will silently serve stale values. The same trap catches a
   generator merely created at module level but advanced (`next()`'d) inside a
-  call. There is no way to fix this with better instrumentation — the reads
-  genuinely only happen once — so the rule is simply: build your indexes at
-  real module top level, not behind an `if _x is None` guard.
+  call. This cannot be fixed without making every later call in the session
+  inherit every earlier call's reads, which degrades back to clear-all
+  invalidation and defeats the point — so the fix has to be author discipline:
+  build your indexes at real module top level, not behind an `if _x is None`
+  guard.
 - **`.warnings` / `.add_warning(message)`** — deduped by exact message
   text, capped at `MAX_SCRIPT_WARNINGS` (20); the table/nav evaluation
   layers use this to report prune/degrade decisions without flooding the

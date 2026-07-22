@@ -172,11 +172,12 @@ class CallResult:
     its result still depends on it — so those later calls' cells can go
     stale across a commit that changes what the index covers. The same
     shape bites a generator created at module level but advanced
-    (``next()``'d) inside a call. This is inherent to attributing reads
-    after the fact, not a bug in the recording mechanism, and it cannot be
-    fixed with more instrumentation — see the ``# LIMITATION`` comment
-    beside ``facade_src.py``'s ``_note_read`` and the author-facing warning
-    in ``core/script/README.md``'s "Evaluation sessions (M2/M3)" section.
+    (``next()``'d) inside a call. Fixing it would require unioning each
+    call's reads into a set that later calls inherit, which degrades back to
+    clear-all invalidation and defeats the purpose — so author discipline is
+    required. See the ``# LIMITATION`` comment beside ``facade_src.py``'s
+    ``_note_read`` and the author-facing warning in ``core/script/README.md``'s
+    "Evaluation sessions (M2/M3)" section.
     """
 
     value: dict | None
