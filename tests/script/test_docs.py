@@ -23,10 +23,19 @@ def test_every_public_member_present_and_documented():
         "Element.id", "Element.stereotype", "Element.name",
         "Element.get", "Element.props", "Element.outgoing", "Element.incoming",
         "Element.parent", "Element.children", "Element.set", "Element.delete",
+        "Relationship.id", "Relationship.stereotype", "Relationship.get",
+        "Relationship.props", "Relationship.source", "Relationship.destination",
     }
     assert set(entries) == expected
     for e in entries.values():
         assert e.doc.strip(), f"{e.name} has an empty doc"
+
+
+def test_relationship_members_documented():
+    docs = _by_name()
+    assert docs["Relationship.source"].kind == "method"
+    assert docs["Relationship.stereotype"].kind == "property"
+    assert "Relationship" in docs["Element.outgoing"].signature
 
 
 def test_signatures_render_public_names_and_defaults():
