@@ -4,6 +4,7 @@
 	import ArtifactsSection from './Sidebar/ArtifactsSection.svelte';
 	import ContainmentTree from './Sidebar/ContainmentTree.svelte';
 	import Search from './Sidebar/Search.svelte';
+	import StagedSection from './Sidebar/StagedSection.svelte';
 	import ViewSelector from './Sidebar/ViewSelector.svelte';
 
 	const mm = $derived(getMetamodel());
@@ -24,5 +25,6 @@
 		<ViewSelector />
 		<ArtifactsSection />
 		<ContainmentTree />
+		<StagedSection />
 	{/if}
 </aside>
