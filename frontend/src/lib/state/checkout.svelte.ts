@@ -26,7 +26,8 @@ import {
 	getModelRev,
 	getStagedOps,
 	revertAllStaged,
-	revertStagedFor
+	revertStagedFor,
+	revertStagedForElement
 } from './model.svelte';
 
 /**
@@ -319,16 +320,27 @@ function lockedResourcesNeededBy(ops: Op[]): Set<string> {
 	return needed;
 }
 
-/** Per-element abandon: revert the element's staged edits and release its
- * token. The token is released ONLY when no REMAINING staged op still needs a
- * lock on any resource the token covers (a connect holds the source under one
- * token but stages a create_relationship that still needs that source lock to
- * commit; releasing it here would orphan that op into a 409 at commit). When a
- * remaining op still needs it, keep the token (and its registry entries) intact
- * so the lock is still reported held and sent at commit. */
-export async function discardElement(id: string): Promise<void> {
+/**
+ * Shared body of the per-element abandon surfaces: run `revert` over `id`'s
+ * staged ops, then release `id`'s lock token IFF no REMAINING staged op still
+ * needs a lock on any resource that token covers (a connect holds the source
+ * under one token but stages a create_relationship that still needs that
+ * source lock to commit; releasing it here would orphan that op into a 409 at
+ * commit). When a remaining op still needs it, the token and its registry
+ * entries are kept intact so the lock stays reported-held and is sent at
+ * commit. Either way the resource stops being stale-blocked (its staged edits
+ * are gone) and an emptied registry stops the heartbeat.
+ *
+ * Only `id`'s OWN token is a release candidate. A cascade can additionally
+ * strand a co-endpoint's token (the far end of a discarded staged
+ * relationship), which is deliberately left held: that lease was acquired for
+ * an explicit user intent and expires on its own TTL, whereas eagerly
+ * releasing every now-unneeded token would silently drop check-outs the user
+ * still believes they hold.
+ */
+async function _discardWith(id: string, revert: (id: string) => void): Promise<void> {
 	const token = getHeldToken(id);
-	revertStagedFor(id);
+	revert(id);
 	if (token !== undefined) {
 		const stillNeeded = lockedResourcesNeededBy(getStagedOps());
 		const tokenResources = [..._registry].filter(([, l]) => l.token === token).map(([rid]) => rid);
@@ -345,6 +357,26 @@ export async function discardElement(id: string): Promise<void> {
 	// Its staged edits were abandoned; the resource is no longer stale-blocked.
 	_stale.delete(id);
 	if (_registry.size === 0) _stopHeartbeat();
+}
+
+/** Per-element abandon: revert the element's OWN staged ops (ops whose target
+ * is `id`) and release its token when nothing staged still needs it. Used by
+ * the diff drawer and the inspector's lock control, where a co-acquired
+ * relationship op must survive the discard (see {@link _discardWith}). */
+export function discardElement(id: string): Promise<void> {
+	return _discardWith(id, revertStagedFor);
+}
+
+/** Cascading per-element abandon: like {@link discardElement} but also reverts
+ * every staged relationship op incident to `id` ({@link revertStagedForElement}).
+ * This is the "Staged elements" sidebar's revert: that section is the only way
+ * to reach a temp element, and leaving a staged rel pointing at a reverted temp
+ * id would 422 the commit — so the surface that un-creates the element must take
+ * its incident rel ops with it. Because the cascade removes the very ops that
+ * would otherwise keep `id`'s token needed, this reliably releases the lease
+ * instead of leaking it for the full TTL. */
+export function discardElementCascade(id: string): Promise<void> {
+	return _discardWith(id, revertStagedForElement);
 }
 
 /** Abandon everything: revert all staged edits and release every token. */
