@@ -402,6 +402,49 @@ call — a column that burns most of the budget leaves later columns/steps in
 the same request a shrinking window rather than each getting a fresh
 `wall_timeout_s`.
 
+### Trip collapse (Phase A', spec 2026-07-21)
+
+Embedded sessions minimize guest<->host round trips three ways, all invisible
+to snippet authors: (1) the facade memoizes bridge reads for the session's
+lifetime (`_memo`, capped at `snippet_read_memo_max` entries; sound because a
+session never outlives one model rev's worth of work — the same invariant
+the cell cache below rests on); (2) `outgoing`/`incoming` responses inline
+the far endpoints' projections under an additive `elements` key, priming
+that memo (see the bridge wire contract above); (3) each embedded call ships
+its bound root elements' projections in the call frame's own `elements`
+field (the root piggyback described above under the `mode: "embedded"` start
+message), so a property-math cell that never navigates past its bound
+element(s) makes zero bridge round trips. Every path that hands memo-derived
+data to a snippet goes through `facade_src.py`'s `_copy_projection`, which
+copies the projection dict, its `properties` dict, and any list/dict-valued
+property within it — so a snippet that mutates what it gets back (e.g.
+`el.out()[0]["properties"]["tags"].append(...)`) can never reach into
+`_memo` and corrupt a later call's result. Only genuinely immutable scalars
+(`str`/`int`/`float`/`bool`/`None`) are ever shared between a memo entry and
+what a snippet holds — see the invariant comment above `_memo` in
+`facade_src.py` and the regression test
+`test_memoized_element_does_not_alias_list_valued_property`.
+
+### Incremental invalidation (Phase B, spec 2026-07-21)
+
+Each embedded call records the read-keys it USED — memo hits and piggybacked
+roots included, via `facade_src.py`'s `_note_read` threaded into
+`_dr_call_entry` (see above) — and ships them on `call_result`
+(`CallResult.reads`; `None` means "depends on everything" and is always
+evicted, e.g. an errored call or a read-set that overflowed `_READS_CAP`/
+`_MAX_READS`). On the op-delta commit paths (`/model/ops`, `/model/undo`,
+`/commits`), `api/invalidation.touched_keys` translates the applied batch
+into the same `ReadKey` vocabulary and `ScriptCellCache.evict_touched` drops
+only intersecting cells, re-stamping survivors to the new rev — one edit no
+longer recomputes a 3k-row table. Paths with no op delta (`touch_model`,
+uploads, hydration, metamodel swap, every rollback) keep clear-all — the
+same safe default the cell cache already used everywhere before this phase.
+Escape hatch: `DATA_ROVER_SNIPPET_INCREMENTAL_INVALIDATION=false`. See
+"Build lookup indexes at module top level, never lazily" above for the one
+way a snippet author can make this optimization observe a stale value
+despite `touched_keys` being correct — the read-set capture itself, not the
+commit-side translation, is the thing that misses a dependency in that case.
+
 ### Cell cache + background sweep (whole-table work)
 
 A warm session makes one cell cheap (~0.5 ms round trip), but a table has as
