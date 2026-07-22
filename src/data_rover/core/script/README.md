@@ -42,41 +42,78 @@ Module-level exceptions (all subclass `dr.BridgeError`, itself
   run — see "Read-only / dry-run stance").
 - `dr.NotFoundError(dr.BridgeError)` — raised when a requested element/
   relationship id does not exist (bridge response `"error"` starts with
-  `"KeyError"`).
+  `"KeyError"`), and when a hop's `stereotype=`/`other_stereotype=` filter
+  names a stereotype the metamodel doesn't have (the `descendants` read op
+  raises `KeyError` on an unknown name, so a typo'd filter surfaces instead
+  of silently matching nothing).
+- `dr.CardinalityError(dr.BridgeError)` — raised when a hop's `expected=`
+  count assertion fails (`el.outgoing(..., expected=N)` found some other
+  number of *filtered* relationships). Purely guest-side: no bridge response
+  carries this. A malformed `expected` argument (not an int, a `bool`, or
+  `< 1`) is a plain `ValueError` instead, raised before any bridge work.
 
 Top-level functions/attributes on `dr`:
 
 | call | semantics |
 |---|---|
 | `dr.element(element_id) -> Element` | Fetch one element by id. Raises `dr.NotFoundError` if it doesn't exist. |
-| `dr.elements(type=None) -> Iterator[Element]` | Lazily iterate all elements, optionally filtered to a type and its subtypes (`type_name` passed through `Metamodel.element_descendants`). Pages transparently in batches of `page_limit` (default 500; see limits table) via the bridge's `elements_page` op — a snippet never sees pagination. |
-| `dr.types() -> list[str]` | All element type names in the metamodel. |
-| `dr.type(name) -> dict` | `{"type": name, "properties": [{"name", "datatype", "multiplicity"}, ...]}` — the type's effective (inherited) properties. Raises `dr.NotFoundError` for an unknown type. |
-| `dr.create(type_name, properties=None) -> str` | Records a `create_element` op (dry-run — see below) and returns a client-side temp id (`"tmp_1"`, `"tmp_2"`, ...) usable as a `source_id`/`target_id` in a later `dr.connect()` call within the same run. |
-| `dr.connect(type_name, source_id, target_id, properties=None) -> str` | Records a `create_relationship` op; returns a temp id the same way. |
+| `dr.elements(stereotypes=None) -> Iterator[Element]` | Lazily iterate all elements, optionally filtered by stereotype. `stereotypes` is `None` (no filter), a single name, or a list of names; each name is expanded HOST-side through `Metamodel.element_descendants` (so a filter matches that stereotype **or any subtype**) and the expansions are unioned. An empty list is a real filter matching nothing — distinct from `None`. An unknown name expands to the empty set and therefore silently matches nothing here (unlike the hop filters below, which raise `dr.NotFoundError` on a typo — `_op_elements_page` expands names itself and never validates them). Pages transparently via the bridge's `elements_page` op (the facade requests 500 per page, clamped host-side to `page_limit`; see limits table) — a snippet never sees pagination. |
+| `dr.create(stereotype, properties=None) -> str` | Records a `create_element` op (dry-run — see below) and returns a client-side temp id (`"tmp_1"`, `"tmp_2"`, ...) usable as a `source_id`/`target_id` in a later `dr.connect()` call within the same run. The recorded op's wire key is still `"type_name"` — only the snippet-visible parameter is spelled `stereotype`. |
+| `dr.connect(stereotype, source_id, target_id, properties=None) -> str` | Records a `create_relationship` op (wire key `"type_name"` likewise); returns a temp id the same way. |
 | `dr.disconnect(rel_id)` | Records a `delete_relationship` op. Returns `None`. |
 
 `Element` (returned by `dr.element`, `dr.elements`, `Element.parent`,
-`Element.children`; `__slots__ = ("_data",)`, wraps the bridge's plain
+`Element.children`, `Relationship.source`/`destination`; `__slots__ =
+("_data",)`, wraps the bridge's plain
 `{"id", "type", "name", "properties"}` projection):
 
 | member | semantics |
 |---|---|
-| `.id` / `.type` / `.name` | The element's id, type name, and `properties.get("name")` (may be `None`). |
+| `.id` / `.stereotype` / `.name` | The element's id, stereotype (type) name, and display name. `.name` is resolved HOST-side by `_project_element` via `core.model.naming.name_of` — the same case-insensitive `name`/`Name`/`NAME` resolution the tree/search/table code uses, with a list-valued (multiplicity-many) name contributing its first non-empty string entry — and is `None` when no usable name property exists. There is **no id fallback** (that is `display_name`, which the facade does not use). The raw bag is still reachable via `el["name"]`/`el.props()`. `repr(el)` is `Element(id=..., stereotype=...)`. |
 | `el[key]` | `properties[key]` — raises a plain (not `dr.`) `KeyError` if the property is absent, since this reads the already-fetched local dict, not a fresh bridge call. |
 | `el.get(key, default=None)` | `properties.get(key, default)`. |
 | `el.props() -> dict` | A shallow copy of the full property bag. |
-| `el.out() -> list[dict]` | Outgoing relationships as plain dicts (`id`/`type`/`name`/`properties`/`source_id`/`target_id`) — **not** wrapped in a facade class, sorted by relationship id host-side. One bridge round trip. |
-| `el.in_() -> list[dict]` | Incoming relationships, same shape. (Named `in_` — `in` is a keyword.) |
+| `el.outgoing(stereotype=None, other_stereotype=None, expected=None)` | Outgoing `Relationship` objects, sorted by relationship id host-side. `stereotype`/`other_stereotype` accept a str or a list of names and match that stereotype **or any subtype** (the filter is applied GUEST-side over the memoized unfiltered hop; descendant closures come from the internal `descendants` bridge op, memoized per `(kind, name)` for the session). `other_stereotype` checks the far — for `outgoing`, the TARGET — element's stereotype; a dangling far endpoint (the engine stays inspectable) is treated as non-matching, never raising, while an *unfiltered* hop still returns that relationship. `expected` (an int ≥ 1; `bool` is rejected explicitly since it is an `int` subclass) asserts the **filtered** count, raising `dr.CardinalityError` naming the element id, the direction, the active filters, and expected vs. actual; with `expected=1` the single `Relationship` is returned directly instead of a one-item list. A bad `expected` is a `ValueError` raised before any bridge work. One bridge round trip for the hop itself regardless of filters (plus, on first use, one `descendants` trip per distinct filter name, and per-neighbor `element` fetches under `other_stereotype` whenever trip-collapse inlining didn't prime the memo, i.e. past `bridge.py`'s high-degree guard `_MAX_INLINE_FAR_ENDPOINTS`). |
+| `el.incoming(stereotype=None, other_stereotype=None, expected=None)` | Same, with the far element being the relationship's SOURCE. |
 | `el.parent() -> Element | None` | The containing element, or `None` at a containment root. |
 | `el.children() -> list[Element]` | Elements reached via this element's own outgoing containment relationships (derived host-side from `metamodel.is_containment`, not a dedicated model index). |
 | `el.set(key, value)` | Records an `update_element` op with `properties_patch={key: value}`. Dry-run — see below. |
 | `el.delete()` | Records a `delete_element` op. Dry-run — see below. |
 
+`Relationship` (returned by `Element.outgoing`/`Element.incoming` — the only
+two members that produce one; `__slots__ = ("_data",)`, wrapping a
+`_copy_projection` copy of the bridge's plain `{"id", "type", "name",
+"properties", "source_id", "target_id"}` relationship projection, never a
+live `_memo` entry):
+
+| member | semantics |
+|---|---|
+| `.id` / `.stereotype` | The relationship's id and stereotype (type) name. The wire key stays `"type"` — only the snippet-visible spelling changed. `repr(rel)` is `Relationship(id=..., stereotype=...)`. |
+| `rel[key]` | `properties[key]` — a plain (not `dr.`) `KeyError` if absent, same reasoning as `el[key]`. |
+| `rel.get(key, default=None)` | `properties.get(key, default)`. |
+| `rel.props() -> dict` | A shallow copy of the full property bag. |
+| `rel.source() -> Element` | The relationship's source element (`_fetch_element(source_id)`). |
+| `rel.destination() -> Element` | The relationship's target element (`_fetch_element(target_id)`). |
+
+Both `.source()`/`.destination()` are ordinary `_fetch_element` calls, so
+they are memo-primed by trip collapse (a hop response inlines its far
+endpoints' projections) and therefore typically cost **zero** round trips —
+but they always record an `("el", id)` read in the call's read-set, memo hit
+or not. There is deliberately **no** `.name` (the wire projection does carry
+a `name` key — a raw `properties.get("name")`, *not* the `name_of`
+resolution `Element.name` gets — but the facade exposes no accessor for it;
+`rel.get("name")` is the same value) and no `.set()`/`.delete()`: recording
+a relationship delete goes through
+`dr.disconnect(rel.id)`, and `value()`/`step()` reject a `Relationship`
+return value outright since the tagged wire payloads only carry elements and
+scalars.
+
 ## The read-only / dry-run stance
 
-Every `dr` **read** (`element`, `elements`, `types`, `type`, `Element.out`/
-`in_`/`parent`/`children`) is answered by `BridgeDispatcher` calling only
+Every `dr` **read** (`element`, `elements`, `Element.outgoing`/`incoming`/
+`parent`/`children`, `Relationship.source`/`destination`, plus the internal
+`descendants` closure lookup behind the hop filters) is answered by
+`BridgeDispatcher` calling only
 accessor methods on the live `Model`/`Metamodel` — never a mutation-boundary
 method. A read-only run can never corrupt the session model, and reads never
 need `session.write_mutex` (see `routes/snippets.py`'s module docstring and
@@ -208,8 +245,8 @@ implementations actually produce today:
 
 | `kind` | when it's actually raised |
 |---|---|
-| `"syntax"` | `compile(facade_source + "\n" + code, ...)` raises `SyntaxError` — the snippet doesn't parse. |
-| `"runtime"` | Any other unhandled exception during `exec`/entry-call, including a `dr.BridgeError`/`dr.ReadOnlyError`/`dr.NotFoundError` raised by facade code, and (WASM only) a nonzero guest exit whose stderr doesn't mention `MemoryError`. |
+| `"syntax"` | Compiling the snippet unit (`<snippet>` — the facade is its own unit, see above) raises `SyntaxError` — the snippet doesn't parse. |
+| `"runtime"` | Any other unhandled exception during `exec`/entry-call, including a `dr.BridgeError`/`dr.ReadOnlyError`/`dr.NotFoundError`/`dr.CardinalityError` raised by facade code, and (WASM only) a nonzero guest exit whose stderr doesn't mention `MemoryError`. |
 | `"timeout"` | (WASM only) the epoch kill trips (`Trap.trap_code == TrapCode.INTERRUPT`) or the host's wall-bounded read hits its deadline with no final message. |
 | `"memory"` | (WASM only) a nonzero guest exit whose stderr contains `MemoryError`, or a non-`INTERRUPT` `Trap` (the portability path for wasmtime builds that trap-on-allocation instead of raising `MemoryError` guest-side). |
 | `"cancelled"` | **Not currently produced by either runner.** `POST /snippets/cancel`'s abort hook (`_noop_cancel` in `routes/snippets.py`) is a documented no-op in M1 — a "cancelled" run still only terminates via `wall_timeout_s`, surfacing as `"timeout"`. |
@@ -221,7 +258,7 @@ The guest talks to the host over newline-JSON: one line in is one request
 dict, one line out is one response dict echoing the same `"id"`. The
 request's `"op"` field is polymorphic — a `str` selects a fixed read op
 (`element`, `elements_page`, `outgoing`, `incoming`, `parent`, `children`,
-`types`, `type_info`) with extra params read from sibling keys; a `dict` *is*
+`descendants`) with extra params read from sibling keys; a `dict` *is*
 an `OpIn`-shaped write payload, i.e. an implicit `record_op` call. This is
 not incidental — see `bridge.py`'s module docstring for why (JSON can't
 carry two values under one repeated key, so there's no separate "op name"
@@ -356,7 +393,7 @@ fresh one.
   `CallResult.reads`) records which parts of the model each call USES, so a
   later commit can evict only the table cells that read something it
   changed. Reads made while the snippet MODULE executes (e.g. `_index = {e.id:
-  e.name for e in dr.elements(type="Building")}` at top level) are charged to
+  e.name for e in dr.elements(stereotypes="Building")}` at top level) are charged to
   every call against that session, which is correct and exactly what you
   want. But if the same index is built LAZILY inside `value`/`step` (`if
   _index is None: _index = {...}`), only the FIRST call that happens to
@@ -419,7 +456,7 @@ element(s) makes zero bridge round trips. Every path that hands memo-derived
 data to a snippet goes through `facade_src.py`'s `_copy_projection`, which
 copies the projection dict, its `properties` dict, and any list/dict-valued
 property within it — so a snippet that mutates what it gets back (e.g.
-`el.out()[0]["properties"]["tags"].append(...)`) can never reach into
+`el.outgoing()[0]["tags"].append(...)`) can never reach into
 `_memo` and corrupt a later call's result. Only genuinely immutable scalars
 (`str`/`int`/`float`/`bool`/`None`) are ever shared between a memo entry and
 what a snippet holds — see the invariant comment above `_memo` in
@@ -445,6 +482,39 @@ Escape hatch: `DATA_ROVER_SNIPPET_INCREMENTAL_INVALIDATION=false`. See
 way a snippet author can make this optimization observe a stale value
 despite `touched_keys` being correct — the read-set capture itself, not the
 commit-side translation, is the thing that misses a dependency in that case.
+
+**The tag vocabulary is fixed and did not follow the facade's rename.** A
+read key is a `(tag, id_or_None)` pair; the tags are `"scan"`, `"el"`,
+`"out"`, `"in"`, `"children"`, `"parent"` — in particular `el.outgoing()`
+records `"out"` and `el.incoming()` records `"in"`, deliberately keeping the
+short spellings `api/invalidation.py`'s `touched_keys` emits even though the
+method and memo/op names are now the longer `outgoing`/`incoming`. Renaming
+either half silently breaks incremental invalidation. Two rules worth
+knowing:
+
+- **A scan records one `("scan", name)` per REQUESTED stereotype name** —
+  not one per expanded subtype, and never the list object itself. An
+  unfiltered `dr.elements()` records the distinct `("scan", None)` key,
+  which `touched_keys` treats as "depends on every stereotype". `_note_read`
+  fires once per call, before the paging loop, however many pages the scan
+  takes.
+- **`descendants` records nothing at all.** The stereotype-closure lookup
+  behind a hop filter is deliberately untagged: the metamodel is immutable
+  for a session's lifetime (a swap goes through session replacement /
+  clear-all), so a cached cell can never observe a stale descendant set and
+  recording it would only add a dependency nothing can ever touch.
+
+**Author note: `other_stereotype=` inflates the read-set.** To decide
+whether a candidate relationship matches, the filter must fetch each far
+endpoint, and every one of those fetches records an `("el", far_id)` read —
+memo hit or not, and including the candidates the filter then REJECTS. A hop
+with `other_stereotype=` therefore makes the cell depend on every candidate
+neighbor (every one surviving the `stereotype=` filter, or all of them when
+there is none), not just the ones it kept, so an edit to any of them evicts it.
+That is correct (the result genuinely did depend on those stereotypes), but
+it makes such cells noticeably more eviction-prone than the equivalent
+`stereotype=`-only hop, which touches no far endpoints. Prefer filtering on
+the relationship stereotype when it is selective enough.
 
 ### Cell cache + background sweep (whole-table work)
 
