@@ -7,10 +7,15 @@ tuples on `CallResult.reads`), this module computes what a commit WROTE in
 the same vocabulary, and `ScriptCellCache.evict_touched` drops the
 intersection. Everything here is conservative by construction:
 
-- A changed element also touches its ancestors' `("scan", ...)` keys and its
-  parent's `("children", ...)` key because scan pages and `children()`
-  responses inline full element projections — a property change is visible
-  through them, not just through `("el", id)`.
+- A changed element also touches its ancestors' `("scan", ...)` keys and ALL
+  of its containment parents' `("children", ...)` keys — not just the first —
+  because scan pages and `children()` responses inline full element
+  projections: `children()` is derived per-parent from that parent's
+  OUTGOING containment edges (`bridge.py`'s `_op_children`), not from a single
+  `container_of`/first-parent lookup, so a multi-parent element (a structural
+  validation issue this engine deliberately holds rather than rejects) is
+  inlined into every one of its parents' `children()` responses, and a
+  property change is visible through them, not just through `("el", id)`.
 - Every typed `("scan", T)` key is emitted alongside `("scan", None)`: an
   untyped `dr.elements()` scan's page also inlines every element regardless
   of type, so it is touched by ANY element change. `evict_touched` does a
@@ -79,8 +84,7 @@ def touched_keys(
         if el is None:
             return None  # changed entity missing post-apply: unknown state
         touched.add(("el", eid))
-        parent = model.container_of(eid)
-        if parent is not None:
+        for parent in model.indexes.parents_of(eid):
             touched.add(("children", parent))
         scan_keys(el.type_name)
 
