@@ -162,6 +162,7 @@ class _Caches:
     containment: dict[str, bool]
     end_constraints: dict[str, list[EndConstraint]]
     element_descendants: dict[str, frozenset[str]]
+    relationship_descendants: dict[str, frozenset[str]]
     rel_types_from: dict[str, tuple[str, ...]]
     rel_types_to: dict[str, tuple[str, ...]]
 
@@ -280,6 +281,15 @@ def _build_caches(mm: Metamodel) -> _Caches:
         for ancestor in ancestors:
             descendants[ancestor].add(name)
 
+    relationship_ancestor_sets = {
+        n: frozenset(c) for n, c in relationship_ancestors.items()
+    }
+    # downward closure for relationship types, mirroring `descendants` above
+    rel_descendants: dict[str, set[str]] = {n: set() for n in rel_types_by_name}
+    for name, ancestors in relationship_ancestor_sets.items():
+        for ancestor in ancestors:
+            rel_descendants[ancestor].add(name)
+
     # relationship types attachable to each element type, by end. Mirrors
     # _build_end_constraints' ancestor-set membership test but without the
     # multiplicity gating: this answers "what CAN attach", not "what binds".
@@ -302,9 +312,7 @@ def _build_caches(mm: Metamodel) -> _Caches:
         element_ancestors=element_ancestors,
         relationship_ancestors=relationship_ancestors,
         element_ancestor_sets=element_ancestor_sets,
-        relationship_ancestor_sets={
-            n: frozenset(c) for n, c in relationship_ancestors.items()
-        },
+        relationship_ancestor_sets=relationship_ancestor_sets,
         effective_element_props={
             n: _effective_props(c, types_by_name) for n, c in element_ancestors.items()
         },
@@ -320,6 +328,9 @@ def _build_caches(mm: Metamodel) -> _Caches:
         },
         end_constraints=_build_end_constraints(mm.relationships, element_ancestor_sets),
         element_descendants={n: frozenset(s) for n, s in descendants.items()},
+        relationship_descendants={
+            n: frozenset(s) for n, s in rel_descendants.items()
+        },
         rel_types_from={n: tuple(v) for n, v in rel_types_from.items()},
         rel_types_to={n: tuple(v) for n, v in rel_types_to.items()},
     )
@@ -433,6 +444,16 @@ class Metamodel(BaseModel):
         is exact-type keyed.
         """
         return self._caches().element_descendants.get(name, frozenset())
+
+    def relationship_descendants(self, name: str) -> frozenset[str]:
+        """`name` plus every transitive relationship subtype (empty for
+        unknown names).
+
+        The downward complement of `relationship_ancestors`, mirroring
+        `element_descendants`; used by the snippet bridge's `descendants` op
+        to expand hop stereotype filters over inheritance.
+        """
+        return self._caches().relationship_descendants.get(name, frozenset())
 
     def relationship_types_from(self, name: str) -> list[str]:
         """Non-abstract relationship types that accept `name` (or an
