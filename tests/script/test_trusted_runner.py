@@ -212,7 +212,13 @@ def test_element_type_attribute_is_gone():
     # kind check could pass green while proving nothing about the removal.
     assert res.error is not None and res.error.kind == "runtime"
     assert "AttributeError" in res.error.message, res.error.message
-    assert "type" in res.error.message
+    # Name the RECEIVER, not just the attribute: a regression where
+    # `dr.element` returned None would still raise AttributeError mentioning
+    # `type` ("'NoneType' object has no attribute 'type'"), so only pinning
+    # `Element` proves the lookup reached a real Element and failed there.
+    assert "'Element' object has no attribute 'type'" in res.error.message, (
+        res.error.message
+    )
 
 
 def test_elements_accepts_stereotypes_list():
@@ -709,7 +715,13 @@ def test_scan_cannot_mutate_list_valued_property_of_live_model():
 
 def test_hop_and_fetch_cannot_mutate_list_valued_properties_of_live_model():
     """Same invariant across the non-scan read paths: a single-element fetch
-    and a relationship hop (whose response also inlines the far endpoint)."""
+    and a relationship hop (whose response also inlines the far endpoint).
+
+    Unlike the scan case above, these paths are ALSO defended guest-side by
+    `_copy_projection`, so this test stays green even with the host-side
+    `_copy_properties` removed — it pins the invariant, not that one fix.
+    Do not read it as coverage for `bridge._copy_properties`.
+    """
     model = _multi_valued_model()
     r = TrustedRunner()
     res = r.run(model,
