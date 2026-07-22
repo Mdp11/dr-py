@@ -472,3 +472,124 @@ def test_relationship_does_not_alias_list_valued_property_in_memo():
                 RunLimits(), record_ops=False, rev=0)
     assert res.error is None, res.error
     assert res.result_repr == "2"
+
+
+# --- Fix wave: inheritance-aware hop filters + dangling far-endpoint skip ---
+# (closes two coverage gaps a reviewer found in Task 5's test suite: see
+# .superpowers/sdd/task-5-report.md's "Fix wave" section for the writeup.)
+
+
+def _inheritance_model():
+    """A model with a real `extends` hierarchy on BOTH axes -- an element
+    supertype/subtype pair (`Asset` / `Building`) and a relationship
+    supertype/subtype pair (`Association` / `Owns`) -- which `tiny_model()`
+    cannot express (its lone `Building` element type and `Owns` relationship
+    type have no subtypes). Every existing stereotype-filter test in this
+    file filters by an exact, subtype-less name, so none of them can catch
+    `_stereotype_filter` degrading to plain exact-name matching; this
+    fixture is what makes that regression visible.
+    """
+    from data_rover.core.metamodel.schema import (
+        ElementType,
+        Metamodel,
+        PropertyDef,
+        RelationshipType,
+    )
+    from data_rover.core.model.model import Model
+
+    mm = Metamodel(
+        elements=[
+            ElementType(
+                name="Asset",
+                abstract=True,
+                properties=[PropertyDef(name="name", datatype="string")],
+            ),
+            ElementType(name="Building", extends="Asset"),
+        ],
+        relationships=[
+            RelationshipType(name="Association", abstract=True),
+            RelationshipType(
+                name="Owns",
+                extends="Association",
+                source="Building",
+                target="Building",
+            ),
+        ],
+    )
+    model = Model(mm)
+    s1 = model.restore_element("s1", "Building")
+    s2 = model.restore_element("s2", "Building")
+    model.set_property(s1, "name", "S1")
+    model.set_property(s2, "name", "S2")
+    model.connect("Owns", "s1", "s2")
+    return model
+
+
+def test_hop_stereotype_filter_matches_subtype_of_named_supertype():
+    """`stereotype='Association'` (the SUPERtype) must match an actual
+    `Owns` (SUBtype) relationship -- both filters are documented as
+    inheritance-aware over the relationship-type hierarchy."""
+    r = TrustedRunner()
+    res = r.run(_inheritance_model(),
+                RunRequest(code=(
+                    "rel = dr.element('s1').outgoing(stereotype='Association', expected=1)\n"
+                    "result = rel.stereotype"
+                )),
+                RunLimits(), record_ops=False, rev=0)
+    assert res.error is None, res.error
+    assert res.result_repr == "'Owns'"
+
+
+def test_hop_other_stereotype_filter_matches_subtype_of_named_supertype():
+    """`other_stereotype='Asset'` (the SUPERtype) must match a far endpoint
+    that is actually a `Building` (SUBtype) -- filters are documented as
+    inheritance-aware over the element-type hierarchy too."""
+    r = TrustedRunner()
+    res = r.run(_inheritance_model(),
+                RunRequest(code=(
+                    "rel = dr.element('s1').outgoing(other_stereotype='Asset', expected=1)\n"
+                    "result = rel.destination().id"
+                )),
+                RunLimits(), record_ops=False, rev=0)
+    assert res.error is None, res.error
+    assert res.result_repr == "'s2'"
+
+
+def test_hop_other_stereotype_filter_skips_dangling_far_endpoint():
+    """A relationship whose far endpoint element no longer exists is treated
+    as NON-MATCHING under `other_stereotype` and silently skipped -- never
+    raising `NotFoundError`. The engine deliberately stays inspectable on
+    non-conformant data (see `facade_src.py`'s `_hop`, the `try/except
+    NotFoundError` around its `_fetch_element(far_id)` call).
+
+    The dangling relationship cannot be built through `Model`'s mutation
+    boundary: `connect`/`restore_relationship` both require the target
+    element to already exist, and `delete_element` cascades to clean up any
+    relationship still touching a deleted element. So this uses the
+    documented bulk-loader path instead (`Model`'s class docstring: "Bulk
+    loaders that populate the dicts directly must call indexes.rebuild()"),
+    the same pattern
+    `tests/model/test_indexes.py::test_rebuild_after_direct_population` uses.
+    """
+    from data_rover.core.model.relationship import Relationship
+
+    model = tiny_model()
+    model.relationships["dangling"] = Relationship(
+        id="dangling", type_name="Owns", source_id="b1", target_id="ghost",
+    )
+    model.indexes.rebuild()
+
+    r = TrustedRunner()
+    res = r.run(model,
+                RunRequest(code=(
+                    "el = dr.element('b1')\n"
+                    "unfiltered = el.outgoing()\n"
+                    "filtered = el.outgoing(other_stereotype='Building')\n"
+                    "result = (len(unfiltered), sorted(rel.destination().id for rel in filtered))\n"
+                )),
+                RunLimits(), record_ops=False, rev=0)
+    assert res.error is None, res.error
+    # b1 has 2 outgoing rels (the real one to b2, plus the dangling one to
+    # 'ghost'); the other_stereotype filter must silently skip the dangling
+    # one rather than raising when it tries to resolve 'ghost'.
+    assert res.result_repr == "(2, ['b2'])"
