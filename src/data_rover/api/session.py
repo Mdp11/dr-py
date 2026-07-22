@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from data_rover.core.metamodel.schema import Metamodel
 from data_rover.core.model.model import Model
 from data_rover.core.script.cell_cache import ScriptCellCache
+from data_rover.core.script.runner import ReadKey
 from data_rover.core.validation.state import ValidationState
 from data_rover.core.view.schema import View
 
@@ -169,6 +170,26 @@ class Session:
         """
         self.table_order_cache.clear()
         self.script_cell_cache.clear_and_stamp(self.model_rev)
+        self.script_sweeps.cancel_all()
+
+    def evict_touched_caches(self, touched: frozenset[ReadKey] | None) -> None:
+        """Selective sibling of ``invalidate_derived_caches`` for the
+        op-delta commit paths (``/model/ops``, ``/model/undo``,
+        ``/commits`` — the ONLY places an exact touched-key set exists).
+        Must be called AFTER ``model_rev`` is bumped, under the write mutex.
+
+        The order cache still clears (row membership/order can change on any
+        commit) and in-flight sweeps still cancel (they compute against the
+        pre-commit rev), but cells whose read-sets this commit provably did
+        not touch survive re-stamped — that is the whole point (a 3k-row
+        table no longer recomputes wholesale because one element changed).
+        ``touched=None`` means "unknown" and degrades to clear-all.
+        """
+        self.table_order_cache.clear()
+        if touched is None:
+            self.script_cell_cache.clear_and_stamp(self.model_rev)
+        else:
+            self.script_cell_cache.evict_touched(touched, self.model_rev)
         self.script_sweeps.cancel_all()
 
     def set_model(

@@ -170,6 +170,12 @@ class Settings(BaseSettings):
     #: production; tests pin it true (``DATA_ROVER_SNIPPET_SWEEP_SYNC``) so a
     #: sweep completes deterministically within the calling test.
     snippet_sweep_sync: bool = False
+    #: Incremental cell-cache invalidation on the op-delta commit paths
+    #: (spec 2026-07-21 Phase B). True: a commit evicts only the cells whose
+    #: recorded read-sets intersect its touched keys, and survivors stay
+    #: warm at the new rev. False: legacy behavior (clear-all semantics via
+    #: rev-stamp mismatch). Escape hatch, default on.
+    snippet_incremental_invalidation: bool = True
 
 
 def get_settings() -> Settings:
