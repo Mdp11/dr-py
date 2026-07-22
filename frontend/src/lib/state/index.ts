@@ -57,6 +57,7 @@ export {
 	getStagedDiff,
 	getStagedChangeCount,
 	revertStagedFor,
+	revertStagedForElement,
 	revertAllStaged,
 	popLastStaged,
 	clearStaged,
