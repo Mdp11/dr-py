@@ -602,8 +602,10 @@ def _iter_elements(stereotypes=None):
 
 
 def _create(stereotype, properties=None):
-    """Record a dry-run element create. Returns a temp id usable in dr.connect
-    and dr.element within this run.
+    """Record a dry-run element create. Returns a temp id usable as a
+    source_id/target_id in a later dr.connect() within this run. The temp id
+    is NOT resolvable via dr.element() -- the create is only a recorded op,
+    never applied to the model this run reads against.
 
     Example:
         tid = dr.create("Building", {"name": "HQ"})

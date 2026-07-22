@@ -148,6 +148,22 @@ def test_create_connect_disconnect_set_op_shapes():
     assert res.result_repr == "('tmp_1', 'tmp_2')"
 
 
+def test_create_temp_id_not_resolvable_via_element():
+    # dr.create is a recorded op, never applied to the model this run reads
+    # against -- so the temp id it returns is usable as a source_id/target_id
+    # in dr.connect(), but dr.element() on it is a plain miss. Pins the
+    # facade_src.py `_create` docstring's corrected claim.
+    m = tiny_model()
+    r = TrustedRunner()
+    code = (
+        "tid = dr.create('Building', properties={'name': 'New'})\n"
+        "dr.element(tid)\n"
+    )
+    res = r.run(m, RunRequest(code=code), RunLimits(), record_ops=True, rev=0)
+    assert res.error is not None and res.error.kind == "runtime"
+    assert "NotFoundError" in (res.error.traceback or res.error.message)
+
+
 def test_not_found_error_on_missing_element():
     r = TrustedRunner()
     res = r.run(tiny_model(), RunRequest(code="dr.element('nope')"), RunLimits(), record_ops=False, rev=0)

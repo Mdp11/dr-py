@@ -69,11 +69,11 @@ Top-level functions/attributes on `dr`:
 
 | member | semantics |
 |---|---|
-| `.id` / `.stereotype` / `.name` | The element's id, stereotype (type) name, and display name. `.name` is resolved HOST-side by `_project_element` via `core.model.naming.name_of` — the same case-insensitive `name`/`Name`/`NAME` resolution the tree/search/table code uses, with a list-valued (multiplicity-many) name contributing its first non-empty string entry — and is `None` when no usable name property exists. There is **no id fallback** (that is `display_name`, which the facade does not use). The raw bag is still reachable via `el["name"]`/`el.props()`. `repr(el)` is `Element(id=..., stereotype=...)`. |
+| `.id` / `.stereotype` / `.name` | The element's id, stereotype (type) name, and display name. `.name` is resolved HOST-side by `_project_element` via `core.model.naming.name_of` — the same case-insensitive `name`/`Name`/`NAME` resolution the tree/search/table code uses, with a list-valued (multiplicity-many) name contributing its first non-empty string entry — and is `None` when no usable name property exists. There is **no id fallback** (that is `display_name`, which the facade does not use). The raw bag is still reachable via `el.props()`/`el.get("name")` — not `el["name"]`, which raises a plain `KeyError` whenever the property is absent or spelled `Name`/`NAME`, precisely the cases where `.name`'s resolution differs. `repr(el)` is `Element(id=..., stereotype=...)`. |
 | `el[key]` | `properties[key]` — raises a plain (not `dr.`) `KeyError` if the property is absent, since this reads the already-fetched local dict, not a fresh bridge call. |
 | `el.get(key, default=None)` | `properties.get(key, default)`. |
 | `el.props() -> dict` | A shallow copy of the full property bag. |
-| `el.outgoing(stereotype=None, other_stereotype=None, expected=None)` | Outgoing `Relationship` objects, sorted by relationship id host-side. `stereotype`/`other_stereotype` accept a str or a list of names and match that stereotype **or any subtype** (the filter is applied GUEST-side over the memoized unfiltered hop; descendant closures come from the internal `descendants` bridge op, memoized per `(kind, name)` for the session). `other_stereotype` checks the far — for `outgoing`, the TARGET — element's stereotype; a dangling far endpoint (the engine stays inspectable) is treated as non-matching, never raising, while an *unfiltered* hop still returns that relationship. `expected` (an int ≥ 1; `bool` is rejected explicitly since it is an `int` subclass) asserts the **filtered** count, raising `dr.CardinalityError` naming the element id, the direction, the active filters, and expected vs. actual; with `expected=1` the single `Relationship` is returned directly instead of a one-item list. A bad `expected` is a `ValueError` raised before any bridge work. One bridge round trip for the hop itself regardless of filters (plus, on first use, one `descendants` trip per distinct filter name, and per-neighbor `element` fetches under `other_stereotype` whenever trip-collapse inlining didn't prime the memo, i.e. past `bridge.py`'s high-degree guard `_MAX_INLINE_FAR_ENDPOINTS`). |
+| `el.outgoing(stereotype=None, other_stereotype=None, expected=None)` | Outgoing `Relationship` objects, sorted by relationship id host-side. `stereotype`/`other_stereotype` accept a str or a list of names and match that stereotype **or any subtype** (the filter is applied GUEST-side over the memoized unfiltered hop; descendant closures come from the internal `descendants` bridge op, memoized per `(kind, name)` for the session). As with `dr.elements`, an empty list for either filter is a real filter matching nothing — distinct from `None`. `other_stereotype` checks the far — for `outgoing`, the TARGET — element's stereotype; a dangling far endpoint (the engine stays inspectable) is treated as non-matching, never raising, while an *unfiltered* hop still returns that relationship. `expected` (an int ≥ 1; `bool` is rejected explicitly since it is an `int` subclass) asserts the **filtered** count, raising `dr.CardinalityError` naming the element id, the direction, the active filters, and expected vs. actual; with `expected=1` the single `Relationship` is returned directly instead of a one-item list. A bad `expected` is a `ValueError` raised before any bridge work. At most one bridge round trip for the hop itself regardless of filters — the hop is memoized under `(direction, self.id)`, so repeating it on the same element within the same run costs zero round trips — plus, on first use, one `descendants` trip per distinct filter name, and per-neighbor `element` fetches under `other_stereotype` whenever trip-collapse inlining didn't prime the memo: past `bridge.py`'s high-degree guard `_MAX_INLINE_FAR_ENDPOINTS`, or for a dangling far endpoint below that threshold, which `bridge.py` silently omits from the inline list. |
 | `el.incoming(stereotype=None, other_stereotype=None, expected=None)` | Same, with the far element being the relationship's SOURCE. |
 | `el.parent() -> Element | None` | The containing element, or `None` at a containment root. |
 | `el.children() -> list[Element]` | Elements reached via this element's own outgoing containment relationships (derived host-side from `metamodel.is_containment`, not a dedicated model index). |
@@ -493,11 +493,15 @@ either half silently breaks incremental invalidation. Two rules worth
 knowing:
 
 - **A scan records one `("scan", name)` per REQUESTED stereotype name** —
-  not one per expanded subtype, and never the list object itself. An
-  unfiltered `dr.elements()` records the distinct `("scan", None)` key,
-  which `touched_keys` treats as "depends on every stereotype". `_note_read`
-  fires once per call, before the paging loop, however many pages the scan
-  takes.
+  not one per expanded subtype, and never the list object itself. This is
+  sound only because the commit side pulls the other half of the weight:
+  `api/invalidation.py`'s `touched_keys` emits a changed element's type
+  **plus its ancestors**, so a scan cell recorded against a supertype name
+  still gets evicted when a subtype element changes, without the guest ever
+  having to record one key per expanded subtype. An unfiltered
+  `dr.elements()` records the distinct `("scan", None)` key, which
+  `touched_keys` treats as "depends on every stereotype". `_note_read` fires
+  once per call, before the paging loop, however many pages the scan takes.
 - **`descendants` records nothing at all.** The stereotype-closure lookup
   behind a hop filter is deliberately untagged: the metamodel is immutable
   for a session's lifetime (a swap goes through session replacement /
