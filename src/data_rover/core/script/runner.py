@@ -28,6 +28,11 @@ from typing import Literal, Protocol
 
 from ..model.model import Model
 
+#: One structured read dependency recorded by the guest facade (Phase B,
+#: spec 2026-07-21): ("el", id) | ("out", id) | ("in", id) |
+#: ("children", id) | ("parent", id) | ("scan", type_name_or_None).
+ReadKey = tuple[str, str | None]
+
 
 @dataclass(frozen=True)
 class RunLimits:
@@ -151,12 +156,17 @@ class CallResult:
 
     ``value`` is the already-validated tagged wire payload (see
     :func:`decode_call_payload`), never a repr string; ``None`` iff ``error``
-    is set.
+    is set. ``reads`` is the call's recorded read-set (:data:`ReadKey`
+    tuples) — the union of boot-time reads and this call's reads — or
+    ``None`` meaning "depends on everything" (recording overflowed, the
+    guest predates read recording, or the call errored). ``None`` is the
+    conservative direction: the incremental invalidator always evicts it.
     """
 
     value: dict | None
     error: ScriptError | None
     duration_ms: int
+    reads: frozenset[ReadKey] | None = None
 
 
 class SnippetSession(Protocol):
@@ -314,3 +324,39 @@ def decode_call_payload(entry: str, payload: object) -> tuple[dict | None, str |
         if isinstance(ids, list) and all(isinstance(i, str) for i in ids):
             return {"kind": "elements", "ids": ids}, None
     return None, "malformed value() result payload"
+
+
+_MAX_READS = 2000
+_MAX_READ_TAG_LEN = 32
+_MAX_READ_ID_LEN = 512
+
+
+def decode_reads(obj: object) -> frozenset[ReadKey] | None:
+    """Validate a call's read-set from an UNTRUSTED guest.
+
+    Wire shape: a list of ``[tag, id_or_null]`` 2-lists (the facade sends
+    ``sorted(list(k) for k in reads)``), or ``null`` for "depends on
+    everything". ANY malformation — wrong container, wrong arity, non-string
+    members, oversized strings, more than ``_MAX_READS`` entries — degrades
+    to ``None`` rather than raising: a hostile guest must only ever be able
+    to make invalidation MORE conservative, never crash the host or shrink
+    its own dependency set to dodge eviction... shrinking is inherently
+    possible for a hostile guest, but a hostile guest can already return
+    arbitrary VALUES; read-sets are a performance contract, not a security
+    boundary (the cache is per-session, per-project, behind authz).
+    """
+    if not isinstance(obj, list) or len(obj) > _MAX_READS:
+        return None
+    out: set[ReadKey] = set()
+    for item in obj:
+        if not isinstance(item, list) or len(item) != 2:
+            return None
+        tag, ident = item
+        if not isinstance(tag, str) or len(tag) > _MAX_READ_TAG_LEN:
+            return None
+        if ident is not None and (
+            not isinstance(ident, str) or len(ident) > _MAX_READ_ID_LEN
+        ):
+            return None
+        out.add((tag, ident))
+    return frozenset(out)

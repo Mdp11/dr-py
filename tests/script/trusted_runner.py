@@ -35,6 +35,7 @@ from data_rover.core.script.runner import (
     ScriptError,
     SnippetSession,
     decode_call_payload,
+    decode_reads,
 )
 
 #: The filename `compile()`/`exec()` see for the USER's snippet source. The
@@ -246,7 +247,7 @@ class _TrustedSession:
         stdout = _CappedStdout(self._limits.stdout_bytes)
         with contextlib.redirect_stdout(stdout):  # type: ignore[type-var]
             try:
-                payload = self._namespace["_dr_call_entry"](
+                res = self._namespace["_dr_call_entry"](
                     entry, element_ids, elements
                 )
             except Exception:
@@ -259,7 +260,7 @@ class _TrustedSession:
                     ),
                     duration_ms=int((time.monotonic() - start) * 1000),
                 )
-        decoded, msg = decode_call_payload(entry, payload)
+        decoded, msg = decode_call_payload(entry, res["payload"])
         duration_ms = int((time.monotonic() - start) * 1000)
         if decoded is None:
             return CallResult(
@@ -267,7 +268,12 @@ class _TrustedSession:
                 error=ScriptError(kind="runtime", message=msg or "malformed payload"),
                 duration_ms=duration_ms,
             )
-        return CallResult(value=decoded, error=None, duration_ms=duration_ms)
+        return CallResult(
+            value=decoded,
+            error=None,
+            duration_ms=duration_ms,
+            reads=decode_reads(res["reads"]),
+        )
 
     def close(self) -> None:
         pass  # nothing to release in-process

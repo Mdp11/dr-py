@@ -172,6 +172,35 @@ def _copy_projection(d):
     return c
 
 
+_READS_CAP = 2000
+
+# Read-set recording (Phase B): _boot_reads accumulates reads made during
+# module exec (an import-time index feeds every later call, so its reads
+# belong to every call's set); _call_reads[0] holds the active per-call set
+# while _dr_call_entry is driving, else None (console 'script' runs record
+# into _boot_reads and never ship it — harmless). Overflow past _READS_CAP
+# flips the matching flag and the call reports reads=None ("depends on
+# everything") — the conservative direction.
+_boot_reads = set()
+_boot_overflow = [False]
+_call_reads = [None]
+_call_overflow = [False]
+
+
+def _note_read(tag, ident):
+    target = _call_reads[0]
+    if target is None:
+        if len(_boot_reads) >= _READS_CAP:
+            _boot_overflow[0] = True
+        else:
+            _boot_reads.add((tag, ident))
+        return
+    if len(target) >= _READS_CAP:
+        _call_overflow[0] = True
+    else:
+        target.add((tag, ident))
+
+
 class Element:
     """A read snapshot of a model element, plus dry-run write helpers."""
 
@@ -221,6 +250,7 @@ class Element:
             for rel in el.out():
                 print(rel["type"], rel["target_id"])
         """
+        _note_read("out", self.id)
         key = ("outgoing", self.id)
         hit = _memo.get(key)
         if hit is None:
@@ -245,6 +275,7 @@ class Element:
 
     def in_(self):
         """List incoming relationships as dicts (id, type, source_id, target_id)."""
+        _note_read("in", self.id)
         key = ("incoming", self.id)
         hit = _memo.get(key)
         if hit is None:
@@ -260,6 +291,7 @@ class Element:
 
     def parent(self):
         """Return the containment parent Element, or None at a root."""
+        _note_read("parent", self.id)
         key = ("parent", self.id)
         if key in _memo:
             parent_id = _memo[key]
@@ -277,6 +309,7 @@ class Element:
             for child in el.children():
                 print(child.name)
         """
+        _note_read("children", self.id)
         key = ("children", self.id)
         hit = _memo.get(key)
         if hit is None:
@@ -315,6 +348,7 @@ def _fetch_element(element_id):
         el = dr.element("some-id")
         print(el.name)
     """
+    _note_read("el", element_id)
     key = ("element", element_id)
     proj = _memo.get(key)
     if proj is None:
@@ -330,8 +364,8 @@ def _fetch_element(element_id):
 # Deliberately NOT memoized: a whole-model scan does not fit the single
 # `(op_name, id_or_None)` memo key shape, and re-running the same scan
 # twice in one snippet is rare enough not to be worth a bespoke key scheme
-# here. Phase B is expected to track these via `("scan", ...)` read keys
-# if it becomes worth it.
+# here. Its read-set key is recorded once per call regardless of how many
+# pages it takes (`_note_read` before the loop, not per page).
 def _iter_elements(type=None):
     """Iterate all elements, optionally filtered by type name. Pages transparently.
 
@@ -339,6 +373,7 @@ def _iter_elements(type=None):
         for el in dr.elements(type="Building"):
             print(el.name)
     """
+    _note_read("scan", type)
     offset = 0
     while True:
         resp = _read("elements_page", type=type, offset=offset, limit=500)
@@ -449,24 +484,45 @@ _WIRE_SCALARS = (str, int, float, bool)
 
 def _dr_call_entry(entry, element_ids, elements=None):
     # Single per-call driver for embedded sessions (M2/M3): prime the read
-    # memo with the host-projected root elements, build the Element handles,
-    # invoke the snippet's entry point, and serialize its result. Both hosts
-    # (the WASM bootstrap loop and the trusted test session) call THIS —
-    # per-call semantics live in exactly one place, so the two runners
-    # cannot drift. Roots the host could not project (a benign race with a
-    # concurrent delete) are simply absent from `elements`; _fetch_element
-    # then goes to the bridge and surfaces the same NotFoundError a direct
-    # fetch always produced. Raises on snippet errors — the caller owns the
-    # exception -> error-result mapping (traceback formatting differs by
-    # host). NOT part of the documented dr API (underscored on purpose).
-    for proj in elements or []:
-        _memo_put(("element", proj["id"]), proj)
-    fn = globals().get(entry)
-    if fn is None or not callable(fn):
-        raise NameError("entry function " + repr(entry) + " is not defined")
-    els = [_fetch_element(i) for i in element_ids]
-    value = fn(els if entry == "value" else (els[0] if els else None))
-    return _dr_serialize_entry_result(entry, value)
+    # memo with the host-projected roots, build handles, invoke the entry
+    # point, serialize, and report the call's read-set (boot reads union
+    # per-call reads; None on overflow). Both hosts call THIS — per-call
+    # semantics live in one place, so the runners cannot drift. Roots the
+    # host could not project are absent from `elements`; _fetch_element then
+    # surfaces NotFoundError exactly as a direct fetch would. Raises on
+    # snippet errors — the caller owns exception -> error-result mapping
+    # (and an errored call ships no reads: reads=None, always-evict). NOT
+    # part of the documented dr API (underscored on purpose).
+    _call_reads[0] = set()
+    _call_overflow[0] = False
+    try:
+        for proj in elements or []:
+            _memo_put(("element", proj["id"]), proj)
+        fn = globals().get(entry)
+        if fn is None or not callable(fn):
+            raise NameError("entry function " + repr(entry) + " is not defined")
+        els = [_fetch_element(i) for i in element_ids]
+        value = fn(els if entry == "value" else (els[0] if els else None))
+        payload = _dr_serialize_entry_result(entry, value)
+        if _boot_overflow[0] or _call_overflow[0]:
+            reads = None
+        else:
+            merged = _boot_reads | _call_reads[0]
+            if len(merged) > _READS_CAP:
+                reads = None
+            else:
+                # Sort key avoids comparing None to str directly: a
+                # ("scan", None) (untyped scan) and a ("scan", "Building")
+                # (typed scan) can coexist in one call's set, and plain
+                # `sorted(list(k) for k in merged)` raises TypeError trying
+                # to order their second elements against each other.
+                reads = sorted(
+                    (list(k) for k in merged),
+                    key=lambda k: (k[0], k[1] is not None, k[1] or ""),
+                )
+        return {"payload": payload, "reads": reads}
+    finally:
+        _call_reads[0] = None
 
 
 def _dr_serialize_entry_result(entry, value):

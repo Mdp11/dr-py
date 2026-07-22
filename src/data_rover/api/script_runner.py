@@ -138,6 +138,7 @@ from data_rover.core.script.runner import (
     ScriptError,
     ScriptRunner,
     decode_call_payload,
+    decode_reads,
 )
 
 from .settings import Settings
@@ -427,9 +428,12 @@ def _run_embedded(start):
         elements = call.get("elements")
         cerr = None
         payload = None
+        reads = None
         sys.stdout = stdout
         try:
-            payload = namespace["_dr_call_entry"](entry, element_ids, elements)
+            res = namespace["_dr_call_entry"](entry, element_ids, elements)
+            payload = res["payload"]
+            reads = res["reads"]
         except MemoryError:
             sys.stdout = _real_stdout
             raise
@@ -441,7 +445,7 @@ def _run_embedded(start):
             }
         finally:
             sys.stdout = _real_stdout
-        _emit({"call_result": {"payload": payload, "error": cerr}})
+        _emit({"call_result": {"payload": payload, "error": cerr, "reads": reads}})
 
 
 def _main():
@@ -1297,7 +1301,12 @@ class _WasmSnippetSession:
                 error=ScriptError(kind="runtime", message=dmsg or "malformed payload"),
                 duration_ms=duration_ms,
             )
-        return CallResult(value=decoded, error=None, duration_ms=duration_ms)
+        return CallResult(
+            value=decoded,
+            error=None,
+            duration_ms=duration_ms,
+            reads=decode_reads(cr.get("reads")),
+        )
 
     def close(self) -> None:
         if self._closed:
