@@ -120,26 +120,6 @@ def test_children_of_childless_element_is_empty():
     assert resp["children"] == []
 
 
-def test_types_lists_element_type_names():
-    disp = BridgeDispatcher(_model(), record_ops=False)
-    resp = disp.dispatch({"id": 1, "op": "types"})
-    assert resp["types"] == ["Building"]
-
-
-def test_type_info_returns_effective_properties():
-    disp = BridgeDispatcher(_model(), record_ops=False)
-    resp = disp.dispatch({"id": 1, "op": "type_info", "type": "Building"})
-    assert resp["type"] == "Building"
-    names = {p["name"] for p in resp["properties"]}
-    assert "name" in names
-
-
-def test_type_info_unknown_type_returns_error():
-    disp = BridgeDispatcher(_model(), record_ops=False)
-    resp = disp.dispatch({"id": 1, "op": "type_info", "type": "Ghost"})
-    assert "error" in resp and "KeyError" in resp["error"]
-
-
 def test_unknown_op_returns_error():
     disp = BridgeDispatcher(_model(), record_ops=False)
     resp = disp.dispatch({"id": 1, "op": "not_a_real_op"})
@@ -170,9 +150,9 @@ def test_elements_page_with_non_int_offset_returns_error_not_raise():
     assert "error" in resp
 
 
-def test_type_info_with_unhashable_type_returns_error_not_raise():
+def test_descendants_with_unhashable_name_returns_error_not_raise():
     disp = BridgeDispatcher(_model(), record_ops=False)
-    resp = disp.dispatch({"id": 1, "op": "type_info", "type": ["x"]})
+    resp = disp.dispatch({"id": 1, "op": "descendants", "kind": "element", "name": ["x"]})
     assert resp["id"] == 1
     assert "error" in resp
 
@@ -340,3 +320,53 @@ def test_projection_name_is_none_when_unnamed() -> None:
     resp = d.dispatch({"id": 1, "op": "element", "element_id": "unnamed"})
     assert resp.get("error") is None
     assert resp["element"]["name"] is None
+
+
+# --- elements_page multi-stereotype filter + descendants op ---------------
+
+
+def test_elements_page_accepts_type_list() -> None:
+    d = BridgeDispatcher(tiny_model(), record_ops=False)
+    resp = d.dispatch({"id": 1, "op": "elements_page", "type": ["Building"], "offset": 0})
+    assert resp.get("error") is None
+    assert {e["id"] for e in resp["elements"]} == {"b1", "b2", "b3"}
+
+
+def test_elements_page_empty_type_list_yields_no_elements() -> None:
+    d = BridgeDispatcher(tiny_model(), record_ops=False)
+    resp = d.dispatch({"id": 1, "op": "elements_page", "type": [], "offset": 0})
+    assert resp.get("error") is None
+    assert resp["elements"] == []
+    assert resp["next_offset"] is None
+
+
+def test_descendants_op_element_kind() -> None:
+    d = BridgeDispatcher(tiny_model(), record_ops=False)
+    resp = d.dispatch({"id": 1, "op": "descendants", "kind": "element", "name": "Building"})
+    assert resp.get("error") is None
+    assert resp["descendants"] == ["Building"]
+
+
+def test_descendants_op_relationship_kind() -> None:
+    d = BridgeDispatcher(tiny_model(), record_ops=False)
+    resp = d.dispatch({"id": 1, "op": "descendants", "kind": "relationship", "name": "Owns"})
+    assert resp.get("error") is None
+    assert resp["descendants"] == ["Owns"]
+
+
+def test_descendants_op_unknown_name_is_keyerror() -> None:
+    d = BridgeDispatcher(tiny_model(), record_ops=False)
+    resp = d.dispatch({"id": 1, "op": "descendants", "kind": "element", "name": "Nope"})
+    assert resp["error"].startswith("KeyError")
+
+
+def test_descendants_op_bad_kind_is_error() -> None:
+    d = BridgeDispatcher(tiny_model(), record_ops=False)
+    resp = d.dispatch({"id": 1, "op": "descendants", "kind": "bogus", "name": "Building"})
+    assert resp["error"].startswith("ValueError")
+
+
+def test_types_and_type_info_ops_are_gone() -> None:
+    d = BridgeDispatcher(tiny_model(), record_ops=False)
+    assert "unknown op" in d.dispatch({"id": 1, "op": "types"})["error"]
+    assert "unknown op" in d.dispatch({"id": 2, "op": "type_info", "type": "Building"})["error"]

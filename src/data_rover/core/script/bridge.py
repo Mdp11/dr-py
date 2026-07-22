@@ -10,8 +10,8 @@ against an in-memory :class:`~data_rover.core.model.model.Model`.
 Two invariants shape everything here:
 
 - **Read-only against the live model.** Every read op (`element`,
-  `elements_page`, `outgoing`, `incoming`, `parent`, `children`, `types`,
-  `type_info`) only ever calls accessor methods on `Model`/`Metamodel` —
+  `elements_page`, `outgoing`, `incoming`, `parent`, `children`,
+  `descendants`) only ever calls accessor methods on `Model`/`Metamodel` —
   never `create_element`/`set_property`/`connect`/... A snippet that only
   reads never needs a lock and can never corrupt the session's model.
 - **Writes are dry-run recording, not application.** `record_op` never calls
@@ -210,8 +210,7 @@ class BridgeDispatcher:
             "incoming": self._op_incoming,
             "parent": self._op_parent,
             "children": self._op_children,
-            "types": self._op_types,
-            "type_info": self._op_type_info,
+            "descendants": self._op_descendants,
         }
 
     # -- dispatch -------------------------------------------------------
@@ -257,15 +256,24 @@ class BridgeDispatcher:
         return {"element": _project_element(element)}
 
     def _op_elements_page(self, req: dict[str, Any]) -> dict[str, Any]:
-        type_name = req.get("type")
+        # `type` is None (no filter), a single stereotype name, or a list of
+        # names (facade sends a list since the stereotypes= rework); each
+        # name expands to its descendant closure, lists union them. An empty
+        # list is a real filter matching nothing — distinct from None.
+        type_names = req.get("type")
         offset = max(0, int(req.get("offset") or 0))
         raw_limit = req.get("limit")
         limit = self.page_limit if raw_limit is None else int(raw_limit)
         limit = max(0, min(limit, self.page_limit))
 
-        allowed_types = (
-            None if type_name is None else self.metamodel.element_descendants(type_name)
-        )
+        if type_names is None:
+            allowed_types: set[str] | None = None
+        else:
+            if isinstance(type_names, str):
+                type_names = [type_names]
+            allowed_types = set()
+            for name in type_names:
+                allowed_types.update(self.metamodel.element_descendants(name))
         candidates = (
             self.model.elements.values()
             if allowed_types is None
@@ -371,21 +379,26 @@ class BridgeDispatcher:
         children = [_project_element(self.model.get_element(cid)) for cid in child_ids]
         return {"children": children}
 
-    def _op_types(self, req: dict[str, Any]) -> dict[str, Any]:
-        return {"types": [et.name for et in self.metamodel.elements]}
-
-    def _op_type_info(self, req: dict[str, Any]) -> dict[str, Any]:
-        type_name = req["type"]
-        if self.metamodel.element_type(type_name) is None:
-            raise KeyError(f"Unknown element type {type_name!r}")
-        props = self.metamodel.effective_element_properties(type_name)
-        return {
-            "type": type_name,
-            "properties": [
-                {"name": p.name, "datatype": p.datatype, "multiplicity": p.multiplicity}
-                for p in props
-            ],
-        }
+    def _op_descendants(self, req: dict[str, Any]) -> dict[str, Any]:
+        """Descendant closure for a stereotype — internal support for the
+        facade's inheritance-aware filters (`dr.elements(stereotypes=...)`
+        expands host-side in `_op_elements_page`; hop filters expand
+        guest-side from this op). `kind` disambiguates the two type
+        namespaces. Unknown names raise KeyError (guest `NotFoundError`) so
+        a typo'd filter surfaces instead of silently matching nothing."""
+        kind = req.get("kind")
+        name = req["name"]
+        if kind == "element":
+            if self.metamodel.element_type(name) is None:
+                raise KeyError(f"Unknown element stereotype {name!r}")
+            return {"descendants": sorted(self.metamodel.element_descendants(name))}
+        if kind == "relationship":
+            if self.metamodel.relationship_type(name) is None:
+                raise KeyError(f"Unknown relationship stereotype {name!r}")
+            return {
+                "descendants": sorted(self.metamodel.relationship_descendants(name))
+            }
+        raise ValueError(f"descendants: unknown kind {kind!r}")
 
     # -- write op: dry-run recording ---------------------------------------
 
