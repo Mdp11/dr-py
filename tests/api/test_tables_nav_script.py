@@ -237,6 +237,107 @@ def test_nav_script_step_error_surfaces_in_page_warnings(
 
 
 # ---------------------------------------------------------------------------
+# SORTING by a navigation column that carries a script step.
+#
+# The row-source case above settles because the SWEEP's serial row build fills
+# the step cells. A SORT has no such backstop: `script_sweep._run_inner` never
+# calls `order_rows`, and its fan-out only computes ScriptColumn `value()`
+# calls, so a `step()` cell that only the sort needs is never filled by
+# anything. Forwarding the script context into the cache-only sort therefore
+# produced a page that was permanently `failed` — degraded to build order, with
+# the client polling once a second for the life of the rev and the sort never
+# applying anyway. The evaluator now falls back (empty reached set, every row
+# ties) and warns instead.
+# ---------------------------------------------------------------------------
+
+#: `step()` that hops each Thing onto the next one, so row t1 reaches t2, t2
+#: reaches t3, t3 reaches t1. With names T1/T2/T3 the reached-label sort is
+#: t3 ("T1"), t1 ("T2"), t2 ("T3") — a real reordering, so a degraded sort is
+#: visibly distinguishable from a working one.
+ROTATE_CODE = (
+    "def step(el):\n"
+    "    order = ['t1', 't2', 't3']\n"
+    "    i = order.index(el.id)\n"
+    "    return [order[(i + 1) % len(order)]]\n"
+)
+
+
+def _nav_column_table(code: str) -> dict:
+    """Scope row source + a COLLAPSE navigation column whose one step is a
+    script step. Nothing else in the definition can produce snippet work."""
+    return {
+        "row_source": {"kind": "scope", "types": ["Thing"]},
+        "columns": [
+            {"kind": "element"},
+            {
+                "kind": "navigation",
+                "navigation": {
+                    "definition": {
+                        "kind": "path",
+                        "start": {"kind": "row"},
+                        "steps": [
+                            {
+                                "kind": "script",
+                                "snippet": {"definition": {"code": code}},
+                            }
+                        ],
+                    }
+                },
+            },
+        ],
+    }
+
+
+def test_sort_by_nav_script_step_column_settles_instead_of_failing(
+    client: TestClient, seed_things: list[str], settings_sync_sweep: Settings
+) -> None:
+    """Sorting by a script-step navigation column must SETTLE, not stick at
+    `failed`.
+
+    Against the pre-fix code this test fails on the very first assertion: the
+    cache-only `order_rows` pass drove `step()` for every row, every call missed
+    the cell cache, the route degraded + kicked a sweep that cannot fill a
+    sort-driven step cell, the re-probe missed again, and the page reported
+    `script_status: failed` — on this poll and on every later one.
+
+    `limit: 2` is load-bearing. The visible window IS evaluated live, so a table
+    small enough to fit entirely on one page used to have its off-window
+    problem masked: poll 1's window pass cached every step cell and poll 2's
+    sort found them all. With one row left off the window that row's step cell
+    is never computed by anything — the permanently-`failed` shape a real
+    (50 000-row) table always had."""
+    payload = {
+        "definition": _nav_column_table(ROTATE_CODE),
+        "sort": {"column": 1, "direction": "asc"},
+        "limit": 2,
+    }
+    r = client.post(papi("/tables/evaluate"), json=payload)
+    assert r.status_code == 200, r.text
+    first = r.json()
+
+    # SETTLED on the first poll: nothing pending, so nothing to poll for.
+    assert first["script_status"]["state"] == "ready"
+    assert first["total"] == 3
+    # Degraded to BUILD order (the scope's own id order), and the user is told.
+    assert [row["key"][0] for row in first["rows"]] == ["t1", "t2"]
+    assert any("build order" in w for w in first["warnings"])
+
+    # The page still WORKS: the visible window is evaluated live, so the
+    # navigation column's cells hold the real script-step results.
+    nav_cells = [row["cells"][1] for row in first["rows"]]
+    assert [[i["id"] for i in c["items"]] for c in nav_cells] == [["t2"], ["t3"]]
+
+    # No poll storm: a second identical request is `ready` too (this one is
+    # served from the row-order cache, which is why it carries no warning —
+    # the degraded order is deterministic at this rev, so caching it is sound).
+    r = client.post(papi("/tables/evaluate"), json=payload)
+    assert r.status_code == 200, r.text
+    second = r.json()
+    assert second["script_status"]["state"] == "ready"
+    assert [row["key"][0] for row in second["rows"]] == ["t1", "t2"]
+
+
+# ---------------------------------------------------------------------------
 # read-only entry mapping (Task 7): script_runner.open_session's
 # record_ops=False -- SECURITY TRIPWIRE, see the Task 7 brief. A script
 # COLUMN's `value()` is embedded evaluation: it must never be able to record

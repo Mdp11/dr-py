@@ -591,6 +591,112 @@ class SortSpec:
     direction: Literal["asc", "desc"]
 
 
+#: Emitted (once — `add_warning` dedupes by exact text) when a sort is skipped
+#: because computing it would mean driving a navigation `ScriptStep` under a
+#: CACHE-ONLY context. See `_sort_script` for why that is a dead end rather
+#: than a "poll again".
+SORT_SCRIPT_NAV_WARNING = (
+    "script step: this column's navigation runs a script step whose values are "
+    "not computed for every row, so the table cannot be sorted by it; rows stay "
+    "in build order"
+)
+
+
+def _nav_col_has_script(col: NavigationColumn) -> bool:
+    # Function-local import: navigation.resolve imports navigation.schema only,
+    # but keeping it local matches this module's other lazy imports and keeps
+    # the module-import graph of core.table flat.
+    from data_rover.core.navigation.resolve import navigation_has_script
+
+    defn = col.navigation.definition
+    return defn is not None and navigation_has_script(defn)
+
+
+def _source_reaches_script_navigation(defn: TableDefinition, source: ColumnSource) -> bool:
+    """Would resolving `source` evaluate a navigation containing a `ScriptStep`?
+
+    Mirrors `resolve_source_elements` BRANCH FOR BRANCH — if that function
+    grows a new way to reach a navigation, this must grow the same one. A
+    `RowSlot` and any EXPAND reference read a RowKey slot and evaluate nothing;
+    a script-column reference calls `value()` (which the background sweep DOES
+    fill, so it is not a dead end) but its own source may still reach a
+    navigation, hence the recursion. Terminates because a column's source can
+    only reference EARLIER columns (schema guarantee — see `_expand_slot_of`).
+    """
+    if isinstance(source, RowSlot):
+        return False
+    ref_col = defn.columns[source.index]
+    if isinstance(ref_col, NavigationColumn) and source.step_index is not None:
+        # Step-override: re-navigates ref_col's navigation from ref_col's own
+        # source, EXPAND or not.
+        return _nav_col_has_script(ref_col) or _source_reaches_script_navigation(
+            defn, ref_col.source
+        )
+    if getattr(ref_col, "mode", "collapse") == "expand":
+        return False  # reads the promoted RowKey slot; nothing is evaluated
+    if isinstance(ref_col, ElementColumn):
+        return _source_reaches_script_navigation(defn, ref_col.source)
+    if isinstance(ref_col, NavigationColumn):
+        return _nav_col_has_script(ref_col) or _source_reaches_script_navigation(
+            defn, ref_col.source
+        )
+    if isinstance(ref_col, ScriptColumn):
+        return _source_reaches_script_navigation(defn, ref_col.source)
+    return False  # property columns are not element-producing
+
+
+def _sort_reaches_script_navigation(defn: TableDefinition, col: Column) -> bool:
+    """Would computing `col`'s sort value evaluate a navigation containing a
+    `ScriptStep`? Mirrors `_sort_value`'s own branches: every `expand` branch
+    reads a RowKey slot and evaluates nothing at all."""
+    if isinstance(col, ElementColumn):
+        return _source_reaches_script_navigation(defn, col.source)
+    if col.mode == "expand":
+        return False
+    if isinstance(col, NavigationColumn):
+        return _nav_col_has_script(col) or _source_reaches_script_navigation(
+            defn, col.source
+        )
+    return _source_reaches_script_navigation(defn, col.source)
+
+
+def _sort_script(
+    defn: TableDefinition, col: Column, script: ScriptEvalContext | None
+) -> ScriptEvalContext | None:
+    """The context `_sort_value` may drive for `col` — `script` itself, or
+    `None` to fall back to the script-less (tie-everything) sort.
+
+    WHY the fallback exists. Under a CACHE-ONLY context (every whole-table pass
+    of every table route) a cache miss synthesizes a `pending` result and bumps
+    `pending_misses`, which is the route's signal to degrade to build order,
+    kick a background sweep, and tell the client to poll. That contract holds
+    for a script COLUMN, because the sweep computes exactly those `value()`
+    cells. It does NOT hold for a `step()` call a SORT needs: the sweep never
+    calls `order_rows`, and its per-cell fan-out only covers `ScriptColumn`s —
+    so nothing in the system will ever fill a step cell that only the sort
+    wants. Driving the context anyway produced one `pending` per off-window
+    row, a page permanently degraded to build order, `script_status: failed`
+    for the whole rev, and a once-a-second poll loop that could never converge.
+
+    So under cache-only we do NOT drive the context for such a sort: the
+    navigation is evaluated with `script=None`, its `ScriptStep` prunes
+    silently (exactly what it did before the context was threaded in), every
+    row ties, and the rows come out in build order — but WITH a warning, so the
+    user is told rather than silently handed an unsorted table. The LIVE path
+    (`script.cache_only` False) is untouched and still sorts for real.
+
+    Caveat, deliberately accepted: the warning rides the response that actually
+    ran the sort pass, so a later page request served from `TableOrderCache`
+    repeats the (deterministic, identical) degraded order without repeating the
+    warning."""
+    if script is None or not script.cache_only:
+        return script
+    if not _sort_reaches_script_navigation(defn, col):
+        return script
+    script.add_warning(SORT_SCRIPT_NAV_WARNING)
+    return None
+
+
 def _display_name(model: Model, eid: str) -> str:
     """The label used to order elements: the shared case-insensitive `name`
     property lookup (``core.model.naming.display_name``), else their id (so
@@ -657,7 +763,14 @@ def _sort_value(
     `cells.py`'s `_expand_slot_of` use) — re-deriving it via
     resolve_source_elements/re-navigation would collapse every row sharing the
     same root back onto that root's WHOLE reached set, losing the per-row value
-    that made it a binding column in the first place."""
+    that made it a binding column in the first place.
+
+    `script` is dropped to `None` for a CACHE-ONLY sort whose value would come
+    from a navigation `ScriptStep` — nothing can ever compute those cells for a
+    sort, so recording pending misses for them strands the page (see
+    `_sort_script`, which also emits the user-facing warning). Every other
+    combination — and the whole LIVE path — is unaffected."""
+    script = _sort_script(defn, col, script)
     if isinstance(col, ElementColumn):
         els = resolve_source_elements(
             mm, model, defn, key, col.source, base_slots, limits, script=script

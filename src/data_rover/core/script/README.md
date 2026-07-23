@@ -656,6 +656,20 @@ cache is internally locked, and the pathology counters are job-global.
   `order_rows`) CACHE-ONLY and evaluates only the visible window live. If
   anything went pending it degrades to BUILD order (a sort over half-pending
   values would visibly reshuffle on every poll) and kicks/joins the sweep.
+- **A sort that would need a navigation `ScriptStep` falls back instead of
+  pending.** The sweep never calls `order_rows`, and its per-cell fan-out only
+  covers `ScriptColumn` `value()` calls — so a `step()` cell that ONLY the sort
+  wants is filled by nothing, ever. Driving the context for it under cache-only
+  produced one `pending` per off-window row, a page permanently degraded to
+  build order, and `script_status: failed` for the life of the rev behind a
+  once-a-second poll loop. `core/table/evaluate.py`'s `_sort_script` therefore
+  hands `_sort_value` a `None` context for exactly that case (the sort column
+  is — or is `ColumnRef`-sourced from — a collapse navigation column whose
+  navigation carries a `ScriptStep`), so the step prunes silently, every row
+  ties, and the rows stay in build order — with `SORT_SCRIPT_NAV_WARNING` on
+  the response so the user is told. Sorting by a script COLUMN is untouched
+  (the sweep does fill those cells, so its pending misses are a real
+  poll-again), and so is every LIVE sort.
 - `script_status` (`ScriptStatusOut`) is `null` for a table with no script
   column at all; otherwise `ready` (nothing pending — these rows are final for
   this rev, though a cell may still hold an `unavailable`/error value, since
