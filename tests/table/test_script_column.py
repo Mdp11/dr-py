@@ -8,7 +8,7 @@ from pydantic import ValidationError
 
 from data_rover.core.metamodel.schema import ElementType, Metamodel, PropertyDef
 from data_rover.core.model.model import Model
-from data_rover.core.navigation.schema import PathNavigation, Scope, ScriptStep
+from data_rover.core.navigation.schema import PathNavigation, RowStart, Scope, ScriptStep
 from data_rover.core.script.embed import ScriptEvalContext
 from data_rover.core.script.runner import RunLimits, ScriptBudget
 from data_rover.core.script.schema import SnippetDefinition, SnippetSource
@@ -493,4 +493,64 @@ def test_nav_script_step_error_warns_through_table() -> None:
     build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
     assert build.keys == []
     assert any("script step failed" in w for w in ctx.warnings)
+    ctx.close()
+
+
+def test_sort_by_collapse_nav_script_step_column_uses_reached_labels() -> None:
+    # `_sort_value`'s COLLAPSE `NavigationColumn` branch re-navigates to get
+    # the sort key (unlike `expand`, which reads a slot already bound at
+    # build time — see the module docstring above `_sort_value`). That
+    # re-navigation must forward the table's `script` context too, exactly
+    # like the cell-rendering path `test_nav_script_step_as_navigation_column`
+    # already covers: a navigation containing a `ScriptStep` must actually
+    # run when the table sorts by it, not silently prune to an empty reached
+    # set (which would make every row tie and the sort a no-op).
+    mm = _mm()
+    model = _fixture()
+    ids = sorted(model.elements)
+    # Rename so the script-reached label order (below) diverges from row
+    # build order (ScopeRows rows come out sorted by id: ids[0], ids[1],
+    # ids[2] — see `_scope_ids`).
+    model.set_property(model.elements[ids[0]], "name", "B")
+    model.set_property(model.elements[ids[1]], "name", "C")
+    model.set_property(model.elements[ids[2]], "name", "A")
+    # The step rotates every row's own element onto the NEXT id in `ids`
+    # order, so row i's navigation column reaches ids[(i + 1) % 3]:
+    #   row0 (ids[0]) -> ids[1] "C"
+    #   row1 (ids[1]) -> ids[2] "A"
+    #   row2 (ids[2]) -> ids[0] "B"
+    # Ascending by reached label: "A" < "B" < "C" -> row1, row2, row0 — a
+    # real reordering, not build order restated.
+    code = (
+        "def step(el):\n"
+        f"    order = {ids!r}\n"
+        "    i = order.index(el.id)\n"
+        "    return [order[(i + 1) % len(order)]]\n"
+    )
+    # `RowStart` (not `Scope`) so each row's navigation is rooted at that
+    # row's own element — `_nav_with_script_step` above uses `Scope` instead
+    # because it is exercised as a table-wide row SOURCE (no row binding
+    # exists yet); here the navigation is a per-row COLUMN.
+    nav = PathNavigation(
+        kind="path",
+        start=RowStart(),
+        steps=[ScriptStep(snippet=_snip(code))],
+    )
+    defn = TableDefinition(
+        row_source=ScopeRows(types=["Block"]),
+        columns=[
+            ElementColumn(),
+            NavigationColumn(navigation=NavigationSource(definition=nav)),
+        ],
+    )
+    ctx = _script_ctx(model)
+    from data_rover.core.table.evaluate import SortSpec, order_rows
+
+    build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
+    assert build.keys == [(ids[0],), (ids[1],), (ids[2],)]  # build order == id order
+    ordered = order_rows(
+        mm, model, defn, build.keys, SortSpec(column=1, direction="asc"),
+        TableLimits(), script=ctx,
+    )
+    assert ordered == [(ids[1],), (ids[2],), (ids[0],)]
     ctx.close()

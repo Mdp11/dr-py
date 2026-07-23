@@ -735,7 +735,7 @@ def _sort_value(
     roots = resolve_source_elements(
         mm, model, defn, key, col.source, base_slots, limits
     )
-    reached = _navigation_reached(mm, model, col, roots, limits)
+    reached = _navigation_reached(mm, model, col, roots, limits, script=script)
     if not reached:
         return (1, 0 if col.sort_mode == "count" else ())
     if col.sort_mode == "count":
