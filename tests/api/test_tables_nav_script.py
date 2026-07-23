@@ -234,3 +234,45 @@ def test_nav_script_step_error_surfaces_in_page_warnings(
     assert second["warnings"] == [
         "script step failed: ZeroDivisionError: division by zero"
     ]
+
+
+# ---------------------------------------------------------------------------
+# read-only entry mapping (Task 7): script_runner.open_session's
+# record_ops=False -- SECURITY TRIPWIRE, see the Task 7 brief. A script
+# COLUMN's `value()` is embedded evaluation: it must never be able to record
+# an op, so a write attempt renders as an error cell (degraded-never-failing)
+# and the model is left untouched.
+# ---------------------------------------------------------------------------
+
+
+def test_table_script_column_write_attempt_is_error_cell(
+    client: TestClient, seed_things: list[str]
+) -> None:
+    """End-to-end pin of the embedded read-only guarantee: a script COLUMN
+    whose snippet writes renders an error cell and mutates nothing.
+
+    No sort / no sync-sweep fixture needed: the visible window's cells are
+    always evaluated LIVE (routes/tables.py resets `script_ctx.cache_only =
+    False` before rendering the window — see `test_unsorted_default_table_
+    stays_inline` in test_tables_script_status.py), so the write attempt's
+    `ReadOnlyError` surfaces on the very first request."""
+    write_code = "def value(els):\n    return dr.create('Thing', {})"
+    defn = {
+        "row_source": {"kind": "scope", "types": []},
+        "columns": [
+            {"kind": "element"},
+            {"kind": "script", "snippet": {"definition": {"code": write_code}}},
+        ],
+    }
+    r = client.post(papi("/tables/evaluate"), json={"definition": defn})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    error_cells = [
+        c for row in body["rows"] for c in row["cells"] if c["kind"] == "error"
+    ]
+    assert error_cells and len(error_cells) == len(seed_things)
+    assert all("ReadOnly" in (c["message"] or "") for c in error_cells)
+
+    r = client.get(papi("/model/elements"), params={"limit": 100})
+    assert r.status_code == 200, r.text
+    assert len(r.json()["items"]) == len(seed_things)

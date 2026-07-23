@@ -562,3 +562,42 @@ def test_run_script_ignores_element_ids(client: TestClient) -> None:
     )
     assert r.status_code == 200, r.text
     assert r.json()["result_repr"] == "3"
+
+
+# ---------------------------------------------------------------------------
+# read-only entry mapping (Task 7): routes/snippets.py's
+# record_ops=(payload.entry == "script") -- SECURITY TRIPWIRE, see module
+# note at the top of this file and the Task 7 brief. `value`/`step` console
+# runs must be blocked with zero recorded ops, exactly like the embedded
+# (open_session) path's record_ops=False.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("entry", ["value", "step"])
+def test_run_value_and_step_entries_are_read_only(
+    client: TestClient, entry: str
+) -> None:
+    """Pins routes/snippets.py's record_ops=(entry == "script") mapping: a
+    value/step console run carrying a write must be blocked with zero ops.
+
+    `element_ids=["b1"]` satisfies RunIn's per-entry count validator (value
+    needs >=1, step needs exactly 1) so the request reaches the runner rather
+    than 422ing before the mapping under test is ever exercised."""
+    _seed_model(client)
+    before = _model_summary(client)
+    code = f"def {entry}(x):\n    return dr.create('Building', {{}})"
+    r = client.post(
+        papi("/snippets/run"),
+        json={
+            "run_id": f"ro-{entry}",
+            "code": code,
+            "entry": entry,
+            "element_ids": ["b1"],
+        },
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["error"] is not None
+    assert "ReadOnly" in body["error"]["message"]
+    assert body["ops"] == []
+    assert _model_summary(client) == before
