@@ -31,9 +31,10 @@
 import { SvelteMap } from 'svelte/reactivity';
 import * as api from '$lib/api/artifacts';
 import { ConflictError } from '$lib/api/errors';
-import { evaluateTable, exportTable } from '$lib/api/tables';
+import { evaluateTable, exportTable, fetchScriptErrors } from '$lib/api/tables';
 import {
 	TableDefinitionSchema,
+	type ScriptErrorsRecap,
 	type ScriptStatus,
 	type TableColumn,
 	type TableDefinition,
@@ -56,6 +57,16 @@ const POLL_MS = 1_000;
  * answering `computing` must not turn into an infinite client loop — every
  * poll costs a full server-side table pass. Reset by any user-initiated load. */
 const POLL_MAX_ATTEMPTS = 120;
+/** Delay between two script-error recap retries (the recap route answers 202
+ * with `Retry-After: 1` while the sweep is still filling the cache). */
+const RECAP_RETRY_MS = 1_000;
+/** Bound on consecutive 202 recap retries for one tab. Same reasoning — and
+ * the same order of magnitude — as `POLL_MAX_ATTEMPTS`: a recap is a
+ * whole-table pass server-side, so "still computing" must never turn into an
+ * unbounded once-a-second request loop. Giving up leaves NO badge, which is
+ * the honest degraded answer (we do not know the failures) rather than an
+ * error strip for something the user did not ask for. */
+const RECAP_MAX_ATTEMPTS = 120;
 /** Delay between two export retries while the sweep is still computing
  * (the backend answers 202 with `Retry-After: 1`). */
 const EXPORT_RETRY_MS = 1_000;
@@ -122,6 +133,49 @@ const _conflicts = new SvelteMap<string, number>(); // tabId -> server rev
  * failure strip), so it lives in a reactive map like `_loading`.
  */
 const _scriptStatus = new SvelteMap<string, ScriptStatus>();
+
+/**
+ * tabId -> the whole-table script-error recap for the page state currently on
+ * screen (`POST /tables/script-errors`). Rendered as the error badge + panel,
+ * so it lives in a reactive map. Absent means "no recap to show": no script
+ * column, a table that has not settled yet, or a recap fetch that failed —
+ * embedded evaluation is degraded-never-failed, and that stance extends here.
+ */
+const _scriptErrors = new SvelteMap<string, ScriptErrorsRecap>();
+
+/**
+ * tabId -> the page state the tab's recap was fetched for, as
+ * `"<script status>:<model_rev>"`. This is the whole fetch-once discipline:
+ * a recap costs a whole-table pass server-side, and `handleScriptStatus` runs
+ * on EVERY landing page (including each background chunk fill), so without a
+ * signature a settled table would re-fetch the recap on every scroll. Set
+ * before the request goes out (so an in-flight fetch is not duplicated) and
+ * dropped again if that request fails, so a later page retries it.
+ * Control state, never read from templates.
+ */
+// eslint-disable-next-line svelte/prefer-svelte-reactivity
+const _recapKeys = new Map<string, string>();
+
+/**
+ * tabId -> the ONE pending recap retry timer, and the consecutive 202s it has
+ * spent. Same single-timer discipline as `_pollTimers`/`_pollAttempts`, kept
+ * separate because the two loops answer different signals (a `computing` page
+ * vs a 202 recap) and can in principle overlap for one tab.
+ * Control state, never read from templates.
+ */
+// eslint-disable-next-line svelte/prefer-svelte-reactivity
+const _recapTimers = new Map<string, ReturnType<typeof setTimeout>>();
+// eslint-disable-next-line svelte/prefer-svelte-reactivity
+const _recapAttempts = new Map<string, number>();
+
+/**
+ * tabId -> a pending "scroll the grid to this cell" request, set by the error
+ * panel and consumed by `TableGrid`'s effect. Deliberately REACTIVE (unlike
+ * the other control-state maps): the grid's `$effect` has to re-run when a
+ * request appears, and it only ever reads it through `consumeScrollRequest`,
+ * which clears the entry — so the effect converges after one extra run.
+ */
+const _scrollRequests = new SvelteMap<string, { rowIndex: number; columnIndex: number }>();
 
 /**
  * tabId -> the ONE pending script-sweep re-poll. Exactly one timer per tab:
@@ -310,6 +364,94 @@ function clearScriptStatus(tabId: string): void {
 	_scriptStatus.delete(tabId);
 	_pollAttempts.delete(tabId);
 	cancelPoll(tabId);
+	clearScriptErrors(tabId);
+}
+
+/** Cancel the tab's pending recap retry, if any. */
+function cancelRecapRetry(tabId: string): void {
+	const timer = _recapTimers.get(tabId);
+	if (timer !== undefined) {
+		clearTimeout(timer);
+		_recapTimers.delete(tabId);
+	}
+}
+
+/**
+ * Forget everything the script-error recap holds for a tab: the recap itself,
+ * the page-state signature that says which page state it describes, the retry
+ * budget and timer, and any un-consumed jump request (which addresses rows of
+ * a grid that is going away).
+ */
+function clearScriptErrors(tabId: string): void {
+	_scriptErrors.delete(tabId);
+	_recapKeys.delete(tabId);
+	_recapAttempts.delete(tabId);
+	_scrollRequests.delete(tabId);
+	cancelRecapRetry(tabId);
+}
+
+/**
+ * Fetch the whole-table script-error recap for `tabId`. Called only from
+ * `handleScriptErrorRecap` once a landed page's status has SETTLED — never
+ * speculatively, because the route re-pays a whole-table pass on every call.
+ *
+ * Guarded TWICE, and both guards earn their keep: the generation (as every
+ * async loader here is) and the page-state signature `key`. A chunk fill can
+ * install a page of a NEWER model rev without bumping the generation (see
+ * `mergePage`), so two fetches for two different page states could otherwise
+ * be in flight under one generation and land in the wrong order.
+ *
+ * A 202 (`{ retry: true }`) means the background sweep is still filling the
+ * cache: schedule ONE delayed retry (never two — the previous timer is always
+ * cancelled first), bounded by `RECAP_MAX_ATTEMPTS`. Anything else — a
+ * network error, a 4xx, a superseded generation — leaves the tab with no
+ * recap and therefore no badge: this surface is an aid for finding failures,
+ * and it must never be the thing that breaks a table view.
+ */
+async function _fetchScriptErrors(tabId: string, gen: number, key: string): Promise<void> {
+	const draft = _drafts.get(tabId);
+	if (!draft) return;
+	const sort = _sortFor(tabId, draft);
+	const args = { ..._evaluateSource(draft), sort };
+	try {
+		const result = await fetchScriptErrors(args);
+		// stale: edited/reloaded/closed, or a newer page state, mid-flight
+		if (!isCurrent(tabId, gen) || _recapKeys.get(tabId) !== key) return;
+		if ('retry' in result) {
+			scheduleRecapRetry(tabId, gen, key);
+			return;
+		}
+		_recapAttempts.delete(tabId);
+		_scriptErrors.set(tabId, result);
+	} catch {
+		if (!isCurrent(tabId, gen) || _recapKeys.get(tabId) !== key) return;
+		// Drop the signature so a later landing page (or the next rev) retries;
+		// leaving it set would wedge this tab's badge for the life of the page.
+		_recapKeys.delete(tabId);
+		_recapAttempts.delete(tabId);
+		_scriptErrors.delete(tabId);
+	}
+}
+
+/** Schedule the ONE pending recap retry for `tabId`, or give up once the
+ * attempt budget is spent (silently — see `RECAP_MAX_ATTEMPTS`). */
+function scheduleRecapRetry(tabId: string, gen: number, key: string): void {
+	cancelRecapRetry(tabId);
+	const attempts = (_recapAttempts.get(tabId) ?? 0) + 1;
+	if (attempts > RECAP_MAX_ATTEMPTS) {
+		_recapAttempts.delete(tabId);
+		return;
+	}
+	_recapAttempts.set(tabId, attempts);
+	_recapTimers.set(
+		tabId,
+		setTimeout(() => {
+			_recapTimers.delete(tabId);
+			// edited/reloaded/closed, or superseded by a newer page state
+			if (!isCurrent(tabId, gen) || _recapKeys.get(tabId) !== key) return;
+			void _fetchScriptErrors(tabId, gen, key);
+		}, RECAP_RETRY_MS)
+	);
 }
 
 /**
@@ -354,6 +496,7 @@ function handleScriptStatus(tabId: string, page: TablePage): void {
 	const status = page.script_status ?? null;
 	if (status) _scriptStatus.set(tabId, status);
 	else _scriptStatus.delete(tabId);
+	handleScriptErrorRecap(tabId, page, status);
 	cancelPoll(tabId);
 	if (status?.state !== 'computing') {
 		_pollAttempts.delete(tabId);
@@ -384,6 +527,46 @@ function handleScriptStatus(tabId: string, page: TablePage): void {
 			void _loadTablePage(tabId, offset, limit, true);
 		}, POLL_MS)
 	);
+}
+
+/**
+ * Keep the tab's script-error recap in step with the page state that just
+ * landed. Called from `handleScriptStatus` (i.e. from every landing page).
+ *
+ * A recap describes a SETTLED table: its `row_index`es address the very order
+ * the page route renders for this `(definition, sort, model_rev)`. So it is
+ * fetched exactly when the status is terminal (`ready` — including a first
+ * page that arrives already settled — or `failed`, whose remaining holes ARE
+ * the errors), and dropped whenever that stops being true: no script status at
+ * all (no script column), or a table that went back to `computing`, where the
+ * grid shows degraded BUILD order and a stale recap would jump to the wrong
+ * row.
+ *
+ * `_recapKeys` makes it fetch-ONCE per page state: this function runs on every
+ * chunk fill too, and each recap is a whole-table pass server-side. The
+ * signature is `"<status>:<model rev>:<generation>"`, and all three matter:
+ *
+ *   * the **generation** covers every re-evaluation the user can cause — a
+ *     definition edit, a sort change, a reload — none of which need change the
+ *     rev, yet all of which move `row_index`/`column_index`;
+ *   * the **model rev** covers a chunk fill that installs a newer page WITHOUT
+ *     bumping the generation (`mergePage`'s rev-mismatch branch);
+ *   * the **status** covers a sweep that settles from `ready` to `failed`.
+ *
+ * A background chunk fill of the SAME page state changes none of them, which
+ * is the point: scrolling a settled table costs no recap requests at all.
+ */
+function handleScriptErrorRecap(tabId: string, page: TablePage, status: ScriptStatus | null): void {
+	if (status === null || status.state === 'computing') {
+		clearScriptErrors(tabId);
+		return;
+	}
+	const gen = _generations.get(tabId) ?? 0;
+	const key = `${status.state}:${page.model_rev}:${gen}`;
+	if (_recapKeys.get(tabId) === key) return; // already fetched (or fetching) this state
+	clearScriptErrors(tabId);
+	_recapKeys.set(tabId, key);
+	void _fetchScriptErrors(tabId, gen, key);
 }
 
 /**
@@ -449,6 +632,22 @@ function moveTabState(oldTab: string, newTab: string): void {
 	_pollAttempts.delete(oldTab);
 	if (attempts !== undefined) _pollAttempts.set(newTab, attempts);
 
+	// The script-error recap belongs to the TABLE, not the tab id, so carry it
+	// over rather than paying for a second whole-table pass after a save. Its
+	// page-state signature only follows a recap we actually HAVE: a fetch still
+	// in flight is closed over `oldTab` (whose draft is gone) and will be
+	// dropped, and carrying its signature would leave the new tab believing it
+	// had already fetched. Dropping the signature instead makes the next
+	// landing page re-fetch. The pending retry timer is closed over the old id
+	// too — cancel it; the rescheduled loads below re-settle the new one.
+	const recap = _scriptErrors.get(oldTab);
+	const recapKey = _recapKeys.get(oldTab);
+	clearScriptErrors(oldTab);
+	if (recap !== undefined) {
+		_scriptErrors.set(newTab, recap);
+		if (recapKey !== undefined) _recapKeys.set(newTab, recapKey);
+	}
+
 	// Chunk fetches in flight are closed over `oldTab`, whose draft is gone —
 	// they will be dropped on landing. Drop their bookkeeping with them; the
 	// grid re-requests any still-missing chunks under the new tab id.
@@ -497,6 +696,43 @@ export function getTableConflict(tabId: string): number | undefined {
  */
 export function getTableScriptStatus(tabId: string): ScriptStatus | null {
 	return _scriptStatus.get(tabId) ?? null;
+}
+
+/**
+ * Every failing script cell in the WHOLE table, as of the last settled page —
+ * the input to the error badge and panel. `null` while the table has no script
+ * column, has not settled yet, or the recap could not be fetched (degraded,
+ * never failed: no recap simply means no badge).
+ */
+export function getScriptErrors(tabId: string): ScriptErrorsRecap | null {
+	return _scriptErrors.get(tabId) ?? null;
+}
+
+/**
+ * Ask the grid to scroll to (and briefly highlight) one cell. Set by the error
+ * panel; the grid picks it up in an effect via {@link consumeScrollRequest}.
+ * The indirection exists because the panel lives in the tab's fixed chrome
+ * while the scroll container is inside `TableGrid` — and because the grid is
+ * virtualized, so "scroll to row N" is the grid's own math, not the panel's.
+ * One pending request per tab: a second click supersedes the first.
+ */
+export function requestScrollToCell(tabId: string, rowIndex: number, columnIndex: number): void {
+	_scrollRequests.set(tabId, { rowIndex, columnIndex });
+}
+
+/**
+ * Take the tab's pending scroll request, CLEARING it. Single-consumer by
+ * design: the grid's effect re-runs on unrelated cache changes, and a request
+ * that survived consumption would re-scroll the user away from wherever they
+ * had since scrolled to.
+ */
+export function consumeScrollRequest(
+	tabId: string
+): { rowIndex: number; columnIndex: number } | null {
+	const request = _scrollRequests.get(tabId);
+	if (request === undefined) return null;
+	_scrollRequests.delete(tabId);
+	return request;
 }
 
 /** Non-fatal warnings from the last installed page (e.g. a ScriptColumn that
@@ -997,6 +1233,11 @@ export function resetTableEditors(): void {
 	_scriptStatus.clear();
 	_pollAttempts.clear();
 	for (const tabId of [..._pollTimers.keys()]) cancelPoll(tabId);
+	_scriptErrors.clear();
+	_recapKeys.clear();
+	_recapAttempts.clear();
+	_scrollRequests.clear();
+	for (const tabId of [..._recapTimers.keys()]) cancelRecapRetry(tabId);
 	// Bump (not clear) so in-flight responses from before the reset stay stale
 	// even if the same tab id is immediately re-created. (bumpGeneration also
 	// drops the tab's in-flight chunk bookkeeping.)

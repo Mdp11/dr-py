@@ -296,6 +296,26 @@ toggle`), a collapsed disclosure that expands to the shared
   200 always carries a real workbook — possibly with `#ERROR` cells and
   `X-Table-Script-Errors` set, which is the server saying "retrying will not
   help", not an invitation to poll again.
+- **Script-error recap (badge → panel → jump).** A failing script cell can be
+  anywhere in a table the grid only ever holds a WINDOW of, so scrolling is not
+  a way to find one. Once a landed page's `script_status` SETTLES
+  (`ready`/`failed`), `state/table-editor.svelte.ts` fetches the backend's
+  whole-table recap (`POST /tables/script-errors` →
+  `getScriptErrors(tabId)`), `TableView` badges the count
+  (`script-errors-badge`) beside the status readout, and the badge opens
+  `Table/ScriptErrorsPanel.svelte` listing every failure (row label, column,
+  message). Clicking one calls `requestScrollToCell(tabId, row, col)`;
+  `TableGrid` picks it up with `consumeScrollRequest` in an effect, scrolls to
+  the row and outlines the cell for 2s — best effort, since row heights are
+  estimated for rows the sparse cache hasn't fetched. **Fetch-ONCE per page
+  state**: the recap is a whole-table pass server-side, so it is keyed by
+  `"<status>:<model_rev>"` — chunk fills as the user scrolls re-use it, a
+  peer's commit re-fetches it (`row_index` is a per-rev grid address), and it
+  is dropped whenever the table stops being settled. A **202** (sweep still
+  filling the cache — the STATUS CODE is the retry signal, as for export)
+  schedules exactly ONE delayed retry per tab, bounded like the sweep poll; a
+  failed recap simply leaves no badge, because this surface must never be what
+  breaks a table view.
 - **Staged definition edits (the settings dialog).** `updateTableDefinition`
   normally re-evaluates the whole table — a fresh backend cache key, and for a
   script column a fresh sweep. Inside the settings dialog the user is

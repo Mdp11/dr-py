@@ -17,6 +17,8 @@ const h = vi.hoisted(() => ({
 	page: undefined as unknown,
 	warnings: [] as string[],
 	scriptStatus: null as unknown,
+	scriptErrors: null as unknown,
+	jump: vi.fn(),
 	draft: {
 		tabId: 'tbl:draft:1',
 		name: 'My Table',
@@ -54,6 +56,9 @@ vi.mock('$lib/state', () => ({
 	getTableLoading: () => false,
 	getTableSort: () => undefined,
 	getTableScriptStatus: () => h.scriptStatus,
+	getScriptErrors: () => h.scriptErrors,
+	requestScrollToCell: h.jump,
+	consumeScrollRequest: () => null,
 	getTableError: () => undefined,
 	setTableSort: vi.fn(),
 	updateTableDefinition: vi.fn(),
@@ -91,6 +96,8 @@ afterEach(() => {
 	h.editable = true;
 	h.warnings = [];
 	h.scriptStatus = null;
+	h.scriptErrors = null;
+	h.jump.mockReset();
 });
 
 describe('TableView settings popup', () => {
@@ -144,6 +151,89 @@ describe('TableView script-status strip', () => {
 			const strip = document.querySelector('[data-testid="table-script-status"]');
 			expect(strip?.textContent).toContain('sweep died');
 			expect(strip?.className).toContain('text-destructive');
+		} finally {
+			unmount(c);
+		}
+	});
+});
+
+// Task 6: the script-error recap. A failing script cell can be anywhere in a
+// virtualized table, so the badge (count) → panel (the whole list) → jump
+// (scroll the grid to it) chain is the only way to reach one. The recap comes
+// from the store (whole-table `POST /tables/script-errors`), which is stubbed
+// here; the fetch/retry discipline is pinned in
+// state/__tests__/table-editor-script-errors.test.ts.
+describe('TableView script-error badge + panel', () => {
+	const RECAP = {
+		state: 'ready',
+		errors: [
+			{
+				row_index: 3,
+				row_element_id: 't4',
+				row_label: 'Pump A',
+				column_index: 1,
+				column_label: 'script',
+				message: 'ZeroDivisionError: division by zero'
+			}
+		],
+		total_errors: 1,
+		truncated: false
+	};
+
+	it('shows no badge when the recap is empty or absent', () => {
+		h.scriptErrors = { state: 'ready', errors: [], total_errors: 0, truncated: false };
+		const c = render('tbl:draft:1');
+		try {
+			expect(document.querySelector('[data-testid="script-errors-badge"]')).toBeNull();
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('badges the error count, opens the panel, and jumps to the cell on click', () => {
+		h.scriptErrors = RECAP;
+		const c = render('tbl:draft:1');
+		try {
+			const badge = document.querySelector('[data-testid="script-errors-badge"]') as HTMLElement;
+			expect(badge).not.toBeNull();
+			expect(badge.textContent).toContain('1 script error');
+			// Closed until asked for — it overlays the grid.
+			expect(document.querySelector('[data-testid="script-errors-panel"]')).toBeNull();
+
+			badge.click();
+			flushSync();
+			const panel = document.querySelector('[data-testid="script-errors-panel"]') as HTMLElement;
+			expect(panel).not.toBeNull();
+			expect(panel.textContent).toContain('Pump A');
+			expect(panel.textContent).toContain('script');
+			expect(panel.textContent).toContain('ZeroDivisionError');
+
+			const entry = panel.querySelector('[data-testid="script-error-entry"]') as HTMLElement;
+			// The full message stays reachable even though the line is truncated.
+			expect(entry.getAttribute('title')).toBe('ZeroDivisionError: division by zero');
+			entry.click();
+			flushSync();
+
+			// The jump is recorded as a store request (the grid consumes it), and
+			// the panel closes so it doesn't sit over the row it just jumped to.
+			expect(h.jump).toHaveBeenCalledTimes(1);
+			expect(h.jump.mock.calls[0]).toEqual(['tbl:draft:1', 3, 1]);
+			expect(document.querySelector('[data-testid="script-errors-panel"]')).toBeNull();
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('says how many of the total are listed when the recap is truncated', () => {
+		h.scriptErrors = { ...RECAP, total_errors: 4021, truncated: true };
+		const c = render('tbl:draft:1');
+		try {
+			const badge = document.querySelector('[data-testid="script-errors-badge"]') as HTMLElement;
+			expect(badge.textContent).toContain('4021 script errors');
+			badge.click();
+			flushSync();
+			const panel = document.querySelector('[data-testid="script-errors-panel"]');
+			expect(panel?.textContent).toContain('showing first 1');
 		} finally {
 			unmount(c);
 		}

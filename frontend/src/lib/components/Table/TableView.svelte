@@ -9,6 +9,7 @@
 		canEdit,
 		downloadTable,
 		ensureTableDraft,
+		getScriptErrors,
 		getTableConflict,
 		getTableDraft,
 		getTableLoading,
@@ -16,6 +17,7 @@
 		getTableScriptStatus,
 		getTableWarnings,
 		reloadTableDraft,
+		requestScrollToCell,
 		resumeTableEvaluation,
 		saveAsTableDraft,
 		saveTableDraft,
@@ -24,7 +26,7 @@
 		updateTableDefinition,
 		type ExportProgress
 	} from '$lib/state';
-	import { Settings } from '@lucide/svelte';
+	import { AlertTriangle, Settings } from '@lucide/svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import {
 		addColumn,
@@ -33,6 +35,7 @@
 		newScriptColumn
 	} from '$lib/table/columns';
 	import ColumnManager from './ColumnManager.svelte';
+	import ScriptErrorsPanel from './ScriptErrorsPanel.svelte';
 	import TableGrid from './TableGrid.svelte';
 
 	let { tabId }: { tabId: string } = $props();
@@ -49,6 +52,20 @@
 	// in BUILD order until it lands — a sort over half-computed values would
 	// reshuffle on every poll, so the backend deliberately doesn't sort them).
 	const scriptStatus = $derived(getTableScriptStatus(tabId));
+	// Whole-table recap of the failing script cells, fetched by the store once
+	// the sweep settles. The grid is virtualized, so without this a failure a
+	// few thousand rows down is unreachable — the badge is how it is found.
+	const scriptErrors = $derived(getScriptErrors(tabId));
+	let scriptErrorsOpen = $state(false);
+	// A recap that arrives (or is dropped) while the panel is open must not
+	// leave an orphaned dropdown hanging over the grid.
+	$effect(() => {
+		if (!scriptErrors || scriptErrors.total_errors === 0) scriptErrorsOpen = false;
+	});
+	function jumpToErrorCell(rowIndex: number, columnIndex: number): void {
+		requestScrollToCell(tabId, rowIndex, columnIndex);
+		scriptErrorsOpen = false;
+	}
 	const loading = $derived(getTableLoading(tabId));
 	// The sweep's fraction, or null when it has no total to divide by. Drives a
 	// DETERMINATE bar; everything else falls back to the indeterminate sweep.
@@ -341,6 +358,29 @@
 			<p class="px-3 py-1.5 text-xs text-destructive" data-testid="table-script-status">
 				{scriptStatus.message ?? 'Computing this table’s script values failed.'}
 			</p>
+		{/if}
+		<!-- Script-error badge + panel. Same fixed-chrome strip family as the
+		     conflict/warnings/status lines above (and for the same reason: it
+		     must not scroll away, nor offset the virtualizer's row math). The
+		     strip is the panel's positioning context — the dropdown is absolute
+		     so it overlays the grid instead of pushing it down. -->
+		{#if scriptErrors && scriptErrors.total_errors > 0}
+			<div class="relative flex items-center px-3 py-1">
+				<button
+					type="button"
+					data-testid="script-errors-badge"
+					aria-expanded={scriptErrorsOpen}
+					title="Show the rows whose script column failed"
+					class="flex items-center gap-1.5 rounded border border-destructive/40 bg-destructive/10 px-2 py-0.5 text-xs text-destructive transition-colors hover:bg-destructive/20"
+					onclick={() => (scriptErrorsOpen = !scriptErrorsOpen)}
+				>
+					<AlertTriangle class="h-3 w-3 shrink-0" />
+					{scriptErrors.total_errors} script error{scriptErrors.total_errors === 1 ? '' : 's'}
+				</button>
+				{#if scriptErrorsOpen}
+					<ScriptErrorsPanel recap={scriptErrors} onJump={jumpToErrorCell} />
+				{/if}
+			</div>
 		{/if}
 		{#if saveError}
 			<p class="px-3 py-1 text-xs text-destructive">{saveError}</p>

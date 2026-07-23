@@ -836,3 +836,41 @@ export type TableCell = z.infer<typeof TableCellSchema>;
 export type TableColumn = z.infer<typeof TableColumnSchema>;
 export type TableRow = z.infer<typeof TableRowSchema>;
 export type TableSort = { column: number; direction: 'asc' | 'desc' };
+
+/**
+ * One failing script cell in a table's whole-table error recap
+ * (`POST /tables/script-errors`, api/schemas.py's `ScriptErrorItemOut`).
+ *
+ * `row_index` is a GRID ADDRESS — the row's position in the very order the
+ * page route would render for the same `(definition, sort, model_rev)`, which
+ * is what makes jump-to-cell land on the right row. It is only valid for that
+ * triple: send the sort the grid is showing, and re-fetch when the rev moves.
+ * `column_index` indexes the DEFINITION's columns (hidden columns are not
+ * filtered out), so it lines up with `TablePage.columns` / `TableRow.cells`.
+ *
+ * `message` is `"not computed"` for a cell that no longer has any chance of
+ * being computed at this rev — the same wording the degraded xlsx export
+ * renders as `#ERROR: not computed`.
+ */
+export interface ScriptErrorItem {
+	row_index: number;
+	row_element_id: string | null;
+	row_label: string | null;
+	column_index: number;
+	column_label: string;
+	message: string;
+}
+
+/**
+ * The recap body itself (`ScriptErrorsOut`). `truncated` means `errors` was
+ * capped server-side while `total_errors` is the true count, so the panel says
+ * "showing first N". `state` is a one-valued literal: the 200 body is always
+ * `ready`, and the retry signal for a still-computing sweep is the 202 STATUS
+ * CODE, never a body field (see `fetchScriptErrors`).
+ */
+export interface ScriptErrorsRecap {
+	state: 'ready';
+	errors: ScriptErrorItem[];
+	total_errors: number;
+	truncated: boolean;
+}
