@@ -875,6 +875,17 @@ def table_script_errors(
     DEGRADED, NEVER FAILED: no script column, no runner, or no free
     concurrency slot all answer 200 with whatever the cache holds — this route
     must not 5xx any more than the page route may.
+
+    NO RUNNER ⇒ ZERO ERRORS, not N. With `runner is None` every cell of the
+    cache-only pass comes back `pending` (cache-only wins over unavailable
+    mode) and the sweep kick below is guarded on `runner is not None`, so the
+    unguarded route reported one "not computed" error PER CELL — a 50 000-row
+    table badged "50000 script errors" when the only true statement is "the
+    sandbox isn't running". That count is not merely useless, it is
+    confidently wrong: nothing was evaluated, so nothing is known to have
+    failed. And it is not information the user is missing either — the page
+    route renders those same cells LIVE, so its cells and status strip already
+    say the runner is unavailable. The honest recap is empty.
     """
     metamodel, model = require_model(session)
     script_ctx = None
@@ -901,10 +912,17 @@ def table_script_errors(
             cell_cache=session.script_cell_cache,
             rev=rev,
         )
-        if script_ctx is None:
-            # No script work in this definition at all: `ErrorCell` is only
-            # ever produced by a script column, so the recap is empty by
-            # construction and the whole-table render would be pure waste.
+        if script_ctx is None or runner is None:
+            # Two ways to have nothing honest to report (see the docstring):
+            #   - no script work in this definition at all — `ErrorCell` is only
+            #     ever produced by a script column, so the recap is empty by
+            #     construction and the whole-table render would be pure waste;
+            #   - no runner — every cell would come back `pending` and be
+            #     counted as a "not computed" error, which says nothing about
+            #     the snippets and is already surfaced by the page route.
+            # Both answer the same empty 200 body; the wire shape is unchanged
+            # (deliberately no `kind` discriminator — the frontend is built
+            # against `ScriptErrorsOut` as it stands).
             return JSONResponse(
                 ScriptErrorsOut(errors=[], total_errors=0, truncated=False).model_dump()
             )

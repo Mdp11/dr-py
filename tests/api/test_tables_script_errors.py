@@ -338,6 +338,41 @@ def test_script_errors_cap_truncates(
     assert len(body["errors"]) == 2 and body["truncated"] is True
 
 
+def test_script_errors_zero_when_runner_unavailable(
+    client: TestClient, app: FastAPI, seed_thing_model: None
+) -> None:
+    """NO RUNNER ⇒ NO ERROR COUNT.
+
+    With `runner is None` the recap's cache-only context answers `pending` for
+    every cell (cache-only wins over unavailable mode), and the sweep kick is
+    guarded on `runner is not None` — so the route used to fall straight
+    through to a 200 reporting `rows × script columns` "not computed" errors. A
+    50 000-row table badged "50000 script errors" when the truth was "the
+    sandbox isn't running". The recap now short-circuits to zero.
+
+    The two guards below are what make the empty body discriminating: an empty
+    recap is byte-identical to the one the `script_ctx is None` early return
+    emits, so without them this test would also pass for a table with no script
+    work at all."""
+    app.dependency_overrides[get_runner] = lambda: None
+
+    page = _evaluate(client)
+    assert page["script_status"] is not None  # the definition DOES carry script work
+    cells = [row["cells"][SCRIPT_COL_INDEX] for row in page["rows"]]
+    assert cells and all(c["kind"] == "error" for c in cells)
+    # ...and the runner really is the thing that is missing.
+    assert all("unavailable" in (c["message"] or "") for c in cells)
+
+    r = _recap(client)
+    assert r.status_code == 200, r.text
+    assert r.json() == {
+        "state": "ready",
+        "errors": [],
+        "total_errors": 0,
+        "truncated": False,
+    }
+
+
 def test_script_errors_is_viewer_callable(
     client: TestClient,
     app: FastAPI,
