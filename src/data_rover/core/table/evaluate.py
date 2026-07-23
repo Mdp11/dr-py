@@ -287,7 +287,9 @@ def _navigation_reached_ex(
         return [], False
     if not roots:
         return [], False
-    result = evaluate(mm, model, defn, limits.nav_limits, row_elements=roots, script=script)
+    result = evaluate(
+        mm, model, defn, limits.nav_limits, row_elements=roots, script=script
+    )
     idx = col.step_index if col.step_index is not None else -1
     seen: dict[str | PropertyValue, None] = {}
     for chain in result.chains:
@@ -326,7 +328,9 @@ def _navigation_step_elements(
     defn = col.navigation.definition
     if defn is None or not roots:
         return []
-    result = evaluate(mm, model, defn, limits.nav_limits, row_elements=roots, script=script)
+    result = evaluate(
+        mm, model, defn, limits.nav_limits, row_elements=roots, script=script
+    )
     proj = col.step_index if col.step_index is not None else -1
     seen: dict[str, None] = {}
     for chain in result.chains:

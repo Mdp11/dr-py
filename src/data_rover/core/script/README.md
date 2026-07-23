@@ -281,6 +281,14 @@ top-level computation) persists across calls the way it would in a normal
 long-lived interpreter — see the determinism caveat below for the one place
 that persistence bites.
 
+A `ScriptStep`'s cycle guard (`core/navigation/evaluate.py`) drops an id
+already visited earlier in the chain exactly like a relationship hop's
+revisit — but, unlike a relationship hop where a revisit is expected
+navigation semantics, it also emits `script step: N element(s) dropped
+(already visited in this chain)`, since the natural `def step(el): return
+[el]` idiom returns an already-visited id and would otherwise disappear into
+an empty result with no signal at all.
+
 **The `SnippetSession` protocol** (`core/script/runner.py`) is the
 sandbox-agnostic session handle: `boot_error: ScriptError | None` (set if the
 facade+module `exec` itself failed at open, or set LATER if the guest dies
@@ -343,7 +351,7 @@ the other must change with it:
 
 | entry | shape |
 |---|---|
-| `step` | `{"ids": [str, ...]}` — `step()` may return `None` (→ `[]`), or an iterable of `Element`s and/or raw id strings; anything else raises `ValueError` guest-side, which surfaces as a `"runtime"` `CallResult.error`. |
+| `step` | `{"ids": [str, ...]}` — `step()` may return `None` (→ `[]`, ending the chain), a single `Element`, a single element-id `str`, or an iterable of `Element`s and/or raw id strings; anything else raises, guest-side, `ValueError("step() must return an Element, an element id, an iterable of those, or None (None ends the chain); got <TypeName>")`, which surfaces as a `"runtime"` `CallResult.error`. The single-value cases are checked before generic iteration: a bare `Element` would otherwise be "iterated" via its `__getitem__` (`KeyError: 0`), and a bare id string would be iterated per character. |
 | `value`, scalar | `{"kind": "scalar", "value": None \| str \| int \| float \| bool}` |
 | `value`, list of scalars | `{"kind": "scalars", "values": [...]}` |
 | `value`, single `Element` | `{"kind": "element", "id": str}` |
