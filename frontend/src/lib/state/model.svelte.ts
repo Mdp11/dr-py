@@ -635,6 +635,50 @@ export function revertStagedFor(id: string): void {
 	_queue = _queue.filter((q) => queuedTargetId(q) !== id);
 }
 
+/** Resolve a queued relationship op's endpoints: create ops carry them
+ * inline; update/delete ops resolve via the cache, falling back to the op's
+ * own journal snapshot (a staged delete removed the rel from the cache, but
+ * its pre-state is journaled). Returns null for element ops and rels that
+ * were never cached (endpoints unknowable client-side). */
+function queuedRelEndpoints(q: QueuedOp): { source_id: string; target_id: string } | null {
+	const op = q.op;
+	if (op.kind === 'create_relationship') {
+		return { source_id: op.source_id, target_id: op.target_id };
+	}
+	if (op.kind !== 'update_relationship' && op.kind !== 'delete_relationship') return null;
+	const cached = _relationships.get(op.id);
+	if (cached !== undefined) return { source_id: cached.source_id, target_id: cached.target_id };
+	for (const entry of q.revert) {
+		if (entry.entity === 'relationship' && entry.id === op.id && entry.before !== null) {
+			return { source_id: entry.before.source_id, target_id: entry.before.target_id };
+		}
+	}
+	return null;
+}
+
+/** Cascade revert for the "Staged elements" section: revert and remove every
+ * staged op targeting `id` PLUS every staged relationship op whose source or
+ * target is `id`. The relationship cascade is mandatory for created elements
+ * — a surviving staged rel referencing the reverted temp id would 422 the
+ * eventual commit with an unknown id. Side effect accepted by design: this
+ * can demote the OTHER endpoint of a removed staged rel from "modified" back
+ * to untouched. Corollary for created elements: reverting one also removes the
+ * staged containment relationship to any staged-created CHILD, leaving that
+ * child staged with no parent — which surfaces at commit as a containment
+ * conformance issue rather than silently vanishing. */
+export function revertStagedForElement(id: string): void {
+	const remove = _queue.filter((q) => {
+		if (queuedTargetId(q) === id) return true;
+		const ep = queuedRelEndpoints(q);
+		return ep !== null && (ep.source_id === id || ep.target_id === id);
+	});
+	if (remove.length === 0) return;
+	revertOptimistic(remove);
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity
+	const removeSet = new Set(remove);
+	_queue = _queue.filter((q) => !removeSet.has(q));
+}
+
 export function revertAllStaged(): void {
 	if (_queue.length === 0) return;
 	revertOptimistic(_queue);

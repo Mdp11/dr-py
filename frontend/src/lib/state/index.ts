@@ -57,6 +57,7 @@ export {
 	getStagedDiff,
 	getStagedChangeCount,
 	revertStagedFor,
+	revertStagedForElement,
 	revertAllStaged,
 	popLastStaged,
 	clearStaged,
@@ -151,6 +152,7 @@ export {
 	previewStaged,
 	commitStaged,
 	discardElement,
+	discardElementCascade,
 	discardAll,
 	type CheckoutResult,
 	type LockConflictLite
@@ -342,3 +344,9 @@ export {
 	finishJourney,
 	cancelJourney
 } from './open-journey';
+export {
+	deriveStagedElementRows,
+	stagedRelationshipOpIds,
+	type StagedElementRow,
+	type StagedRowStatus
+} from './staged-rows';
