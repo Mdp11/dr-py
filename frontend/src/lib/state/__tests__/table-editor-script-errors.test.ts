@@ -1,14 +1,26 @@
-// The script-error RECAP (Task 6). A table's failing script cells can sit
-// anywhere in a virtualized grid the client only ever holds a window of, so
-// the backend's whole-table `POST /tables/script-errors` is the only complete
-// answer. This suite pins the client half of that contract:
+// The script-error RECAP (Task 6, on-demand since the final review). A table's
+// failing script cells can sit anywhere in a virtualized grid the client only
+// ever holds a window of, so the backend's whole-table
+// `POST /tables/script-errors` is the only complete answer.
 //
-//   * WHEN the recap is fetched — only once a landed page's `script_status`
-//     SETTLES (`ready`/`failed`), never per chunk fill (each call re-pays a
-//     whole-table pass server-side);
+// That answer is EXPENSIVE, and expensive in a way the plan did not anticipate:
+// the route renders the whole table CACHE-ONLY, so for the commonest shape (an
+// unsorted collapse script column) — where the page route makes zero `value()`
+// calls and reports `ready` without ever kicking a sweep — the recap misses on
+// every row outside the window and kicks a full background sweep. Fetching it
+// automatically would have turned "open a table with a script column" into
+// "sweep the whole table", plus up to 120 once-a-second retries. So the recap
+// is fetched only when the user asks for it. This suite pins the client half:
+//
+//   * WHEN the recap is fetched — never on settle, only on `requestScriptErrors`
+//     (each call re-pays a whole-table pass server-side), and once per page
+//     state no matter how many times it is asked for;
 //   * the 202 retry discipline — one timer per tab, delayed, non-compounding;
-//   * invalidation — a new model rev, a status that stops being terminal, a
-//     page with no script status at all, and tab teardown;
+//   * INVALIDATION: a new model rev, a re-evaluation at the same rev (sort /
+//     definition edit), a status that stops being terminal, a page with no
+//     script status at all, and tab teardown all DROP the recap without
+//     fetching anything — a `row_index` is a grid address, so a recap that
+//     outlived its row order must never be shown against the new one;
 //   * the jump request round-trip (`requestScrollToCell`/`consumeScrollRequest`).
 //
 // Same harness as `table-editor-script-status.test.ts`: fake timers advanced
@@ -24,7 +36,9 @@ import {
 	ensureTableDraft,
 	ensureTableRange,
 	getScriptErrors,
+	getScriptErrorsPhase,
 	loadTablePage,
+	requestScriptErrors,
 	requestScrollToCell,
 	resetTableEditors,
 	setTableSort
@@ -86,42 +100,51 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
-/** Land one page for TAB and let the recap's own promise chain settle. */
+/** Land one page for TAB and let any follow-up promise chain settle. */
 async function land(page: TablePage): Promise<void> {
 	evalSpy.mockResolvedValue(page);
 	await loadTablePage(TAB, page.offset);
 	await vi.advanceTimersByTimeAsync(0);
 }
 
-describe('script-error recap fetch-on-settle', () => {
-	it('fetches the recap when the first page already reports a settled status', async () => {
+/** Ask for the recap and let its promise chain settle. */
+async function ask(): Promise<void> {
+	requestScriptErrors(TAB);
+	await vi.advanceTimersByTimeAsync(0);
+}
+
+describe('script-error recap fetch-on-demand', () => {
+	it('does NOT fetch a recap when a page settles — only when asked', async () => {
 		const recapSpy = vi.spyOn(tablesApi, 'fetchScriptErrors').mockResolvedValue(RECAP);
 		await ensureTableDraft(TAB);
-		expect(getScriptErrors(TAB)).toBeNull();
 
 		await land(pageWith({ state: 'ready', done: 10, total: 10 }));
 
-		expect(recapSpy).toHaveBeenCalledTimes(1);
-		expect(getScriptErrors(TAB)).toEqual(RECAP);
-	});
-
-	it('fetches once when the status transitions computing -> ready, not per chunk fill', async () => {
-		const recapSpy = vi.spyOn(tablesApi, 'fetchScriptErrors').mockResolvedValue(RECAP);
-		await ensureTableDraft(TAB);
-
-		// While computing the table is still being filled in — no recap yet (it
-		// would 202 anyway) and, crucially, no request.
-		await land(pageWith({ state: 'computing', done: 2, total: 300 }, 1, 0, 300));
+		// The whole point of the on-demand switch: settling is free.
 		expect(recapSpy).toHaveBeenCalledTimes(0);
 		expect(getScriptErrors(TAB)).toBeNull();
+		expect(getScriptErrorsPhase(TAB)).toBe('idle');
 
+		await ask();
+		expect(recapSpy).toHaveBeenCalledTimes(1);
+		expect(getScriptErrors(TAB)).toEqual(RECAP);
+		expect(getScriptErrorsPhase(TAB)).toBe('done');
+	});
+
+	it('fetches once per page state, however often it is asked for', async () => {
+		const recapSpy = vi.spyOn(tablesApi, 'fetchScriptErrors').mockResolvedValue(RECAP);
+		await ensureTableDraft(TAB);
 		await land(pageWith({ state: 'ready', done: 300, total: 300 }, 1, 0, 300));
+
+		await ask();
+		expect(recapSpy).toHaveBeenCalledTimes(1);
+		await ask();
+		await ask();
 		expect(recapSpy).toHaveBeenCalledTimes(1);
 
 		// Background CHUNK FILLS as the user scrolls (`mergePage`, no generation
-		// bump) land the same page state over and over. Each recap is a
-		// whole-table pass server-side, so scrolling a settled table must cost
-		// exactly zero of them.
+		// bump) land the same page state over and over. They must neither
+		// re-fetch nor invalidate the recap the user already paid for.
 		const evalCalls = evalSpy.mock.calls.length;
 		ensureTableRange(TAB, 100, 200);
 		await vi.advanceTimersByTimeAsync(0);
@@ -132,43 +155,114 @@ describe('script-error recap fetch-on-settle', () => {
 		expect(getScriptErrors(TAB)).toEqual(RECAP);
 	});
 
-	it('fetches the recap for a FAILED sweep too (its holes are the errors)', async () => {
+	it('coalesces a rapid double request into ONE in-flight fetch', async () => {
+		const recapSpy = vi.spyOn(tablesApi, 'fetchScriptErrors').mockResolvedValue(RECAP);
+		await ensureTableDraft(TAB);
+		await land(pageWith({ state: 'ready', done: 10, total: 10 }));
+
+		// Two clicks in the same tick, before the first response lands.
+		requestScriptErrors(TAB);
+		requestScriptErrors(TAB);
+		expect(getScriptErrorsPhase(TAB)).toBe('loading');
+		await vi.advanceTimersByTimeAsync(0);
+		expect(recapSpy).toHaveBeenCalledTimes(1);
+	});
+
+	it('ignores a request while the table is still computing', async () => {
+		const recapSpy = vi.spyOn(tablesApi, 'fetchScriptErrors').mockResolvedValue(RECAP);
+		await ensureTableDraft(TAB);
+		await land(pageWith({ state: 'computing', done: 2, total: 300 }, 1, 0, 300));
+
+		await ask();
+		// The grid is showing degraded BUILD order — a recap's row indices would
+		// not address it, and the route would 202 anyway.
+		expect(recapSpy).toHaveBeenCalledTimes(0);
+		expect(getScriptErrors(TAB)).toBeNull();
+	});
+
+	it('ignores a request for a table with no script work at all', async () => {
+		const recapSpy = vi.spyOn(tablesApi, 'fetchScriptErrors').mockResolvedValue(RECAP);
+		await ensureTableDraft(TAB);
+		await land(pageWith(null));
+
+		await ask();
+		expect(recapSpy).toHaveBeenCalledTimes(0);
+	});
+
+	it('fetches a recap for a FAILED sweep too (its holes are the errors)', async () => {
 		const recapSpy = vi.spyOn(tablesApi, 'fetchScriptErrors').mockResolvedValue(RECAP);
 		await ensureTableDraft(TAB);
 		await land(pageWith({ state: 'failed', done: 4, total: 10, message: 'sweep died' }));
+		await ask();
 		expect(recapSpy).toHaveBeenCalledTimes(1);
 		expect(getScriptErrors(TAB)).toEqual(RECAP);
 	});
 
-	it('re-fetches when a new model rev lands (row indices are per-rev addresses)', async () => {
+	it('drops the recap when a new model rev lands, and re-fetches only on the next request', async () => {
 		const recapSpy = vi.spyOn(tablesApi, 'fetchScriptErrors').mockResolvedValue(RECAP);
 		await ensureTableDraft(TAB);
 		await land(pageWith({ state: 'ready', done: 10, total: 10 }, 1));
+		await ask();
 		expect(recapSpy).toHaveBeenCalledTimes(1);
 
+		// A peer's commit re-numbers every row: the recap on hand addresses the
+		// PREVIOUS order and must go, without costing a request.
 		await land(pageWith({ state: 'ready', done: 10, total: 10 }, 2));
+		expect(getScriptErrors(TAB)).toBeNull();
+		expect(getScriptErrorsPhase(TAB)).toBe('idle');
+		expect(recapSpy).toHaveBeenCalledTimes(1);
+
+		await ask();
 		expect(recapSpy).toHaveBeenCalledTimes(2);
 	});
 
-	it('re-fetches after a re-evaluation at the SAME rev (a sort moves every row index)', async () => {
+	it('drops the recap after a re-evaluation at the SAME rev (a sort moves every row index)', async () => {
 		const recapSpy = vi.spyOn(tablesApi, 'fetchScriptErrors').mockResolvedValue(RECAP);
 		await ensureTableDraft(TAB);
 		await land(pageWith({ state: 'ready', done: 10, total: 10 }, 1));
+		await ask();
 		expect(recapSpy).toHaveBeenCalledTimes(1);
 
 		// `row_index` is an address into the order the grid is SHOWING, so a
 		// sort (or a definition edit) invalidates the recap even though the
 		// model rev and the sweep status are both unchanged.
+		evalSpy.mockResolvedValue(pageWith({ state: 'ready', done: 10, total: 10 }, 1));
 		setTableSort(TAB, { column: 0, direction: 'asc' });
 		await vi.advanceTimersByTimeAsync(0);
+		expect(getScriptErrors(TAB)).toBeNull();
+		expect(recapSpy).toHaveBeenCalledTimes(1);
+
+		await ask();
 		expect(recapSpy).toHaveBeenCalledTimes(2);
 		expect(recapSpy.mock.calls[1][0]).toMatchObject({ sort: { column: 0, direction: 'asc' } });
+	});
+
+	it('cannot be asked for while a re-evaluation is in flight — even one that fails', async () => {
+		const recapSpy = vi.spyOn(tablesApi, 'fetchScriptErrors').mockResolvedValue(RECAP);
+		await ensureTableDraft(TAB);
+		await land(pageWith({ state: 'ready', done: 10, total: 10 }, 1));
+		await ask();
+		expect(recapSpy).toHaveBeenCalledTimes(1);
+
+		// A sort whose evaluation FAILS. The grid keeps showing the rows of the
+		// old order (nothing landed to replace them), but the recap route would
+		// now be asked with the NEW sort — its `row_index`es would address an
+		// order nobody is looking at. So the tab has no askable page state until
+		// one really lands, and the stale recap is gone either way.
+		evalSpy.mockRejectedValue(new Error('network'));
+		setTableSort(TAB, { column: 0, direction: 'asc' });
+		await vi.advanceTimersByTimeAsync(0);
+
+		expect(getScriptErrors(TAB)).toBeNull();
+		await ask();
+		expect(recapSpy).toHaveBeenCalledTimes(1);
 	});
 
 	it('drops the recap when a page arrives with no script status at all', async () => {
 		vi.spyOn(tablesApi, 'fetchScriptErrors').mockResolvedValue(RECAP);
 		await ensureTableDraft(TAB);
 		await land(pageWith({ state: 'ready', done: 10, total: 10 }));
+		await ask();
 		expect(getScriptErrors(TAB)).toEqual(RECAP);
 
 		await land(pageWith(null));
@@ -179,6 +273,7 @@ describe('script-error recap fetch-on-settle', () => {
 		vi.spyOn(tablesApi, 'fetchScriptErrors').mockResolvedValue(RECAP);
 		await ensureTableDraft(TAB);
 		await land(pageWith({ state: 'ready', done: 10, total: 10 }));
+		await ask();
 		expect(getScriptErrors(TAB)).toEqual(RECAP);
 
 		// A recap describes a SETTLED table: its row indices address the sorted
@@ -187,22 +282,50 @@ describe('script-error recap fetch-on-settle', () => {
 		expect(getScriptErrors(TAB)).toBeNull();
 	});
 
-	it('never 5xx-breaks the table: a failed recap fetch just leaves no badge', async () => {
+	it('keeps an EMPTY recap: "we checked, there are none" is an answer', async () => {
+		const empty: ScriptErrorsRecap = {
+			state: 'ready',
+			errors: [],
+			total_errors: 0,
+			truncated: false
+		};
+		vi.spyOn(tablesApi, 'fetchScriptErrors').mockResolvedValue(empty);
+		await ensureTableDraft(TAB);
+		await land(pageWith({ state: 'ready', done: 10, total: 10 }));
+		await ask();
+
+		expect(getScriptErrors(TAB)).toEqual(empty);
+		expect(getScriptErrorsPhase(TAB)).toBe('done');
+	});
+
+	it('never breaks the table: a failed fetch reports the error phase and can be retried', async () => {
 		const recapSpy = vi.spyOn(tablesApi, 'fetchScriptErrors').mockRejectedValue(new Error('boom'));
 		await ensureTableDraft(TAB);
 		await land(pageWith({ state: 'ready', done: 10, total: 10 }));
+
+		await ask();
 		expect(recapSpy).toHaveBeenCalledTimes(1);
 		expect(getScriptErrors(TAB)).toBeNull();
+		expect(getScriptErrorsPhase(TAB)).toBe('error');
+
+		// The user asked and got nothing: asking again must really try again,
+		// not be swallowed by a signature that says "already fetched".
+		recapSpy.mockResolvedValue(RECAP);
+		await ask();
+		expect(recapSpy).toHaveBeenCalledTimes(2);
+		expect(getScriptErrors(TAB)).toEqual(RECAP);
 	});
 
 	it('forgets the recap when the tab is closed', async () => {
 		vi.spyOn(tablesApi, 'fetchScriptErrors').mockResolvedValue(RECAP);
 		await ensureTableDraft(TAB);
 		await land(pageWith({ state: 'ready', done: 10, total: 10 }));
+		await ask();
 		expect(getScriptErrors(TAB)).toEqual(RECAP);
 
 		closeTableDraft(TAB);
 		expect(getScriptErrors(TAB)).toBeNull();
+		expect(getScriptErrorsPhase(TAB)).toBe('idle');
 	});
 });
 
@@ -214,9 +337,12 @@ describe('script-error recap 202 retry', () => {
 			.mockResolvedValue(RECAP);
 		await ensureTableDraft(TAB);
 		await land(pageWith({ state: 'ready', done: 10, total: 10 }));
+		await ask();
 
 		expect(recapSpy).toHaveBeenCalledTimes(1);
 		expect(getScriptErrors(TAB)).toBeNull();
+		// The control must keep saying "checking" across the retry chain.
+		expect(getScriptErrorsPhase(TAB)).toBe('loading');
 
 		// The retry is DELAYED, not immediate — a zero-delay retry would be a
 		// tight loop against a route that re-pays a whole-table pass.
@@ -236,6 +362,7 @@ describe('script-error recap 202 retry', () => {
 		const recapSpy = vi.spyOn(tablesApi, 'fetchScriptErrors').mockResolvedValue({ retry: true });
 		await ensureTableDraft(TAB);
 		await land(pageWith({ state: 'ready', done: 10, total: 10 }));
+		await ask();
 		expect(recapSpy).toHaveBeenCalledTimes(1);
 
 		// One retry per second, never two: a compounding loop would double each
@@ -246,14 +373,20 @@ describe('script-error recap 202 retry', () => {
 		expect(recapSpy).toHaveBeenCalledTimes(3);
 		await vi.advanceTimersByTimeAsync(1000);
 		expect(recapSpy).toHaveBeenCalledTimes(4);
+
+		// A second request mid-chain must not start a parallel loop.
+		await ask();
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(recapSpy).toHaveBeenCalledTimes(5);
 	});
 
 	it('gives up after RECAP_MAX_ATTEMPTS rather than retrying a 202 forever', async () => {
 		const recapSpy = vi.spyOn(tablesApi, 'fetchScriptErrors').mockResolvedValue({ retry: true });
 		await ensureTableDraft(TAB);
 		await land(pageWith({ state: 'ready', done: 10, total: 10 }));
+		await ask();
 
-		// The exact bound: 1 fetch-on-settle + RECAP_MAX_ATTEMPTS (120) retries;
+		// The exact bound: 1 requested fetch + RECAP_MAX_ATTEMPTS (120) retries;
 		// the 121st is never scheduled. Same shape as the sweep poll's give-up
 		// test, and asserted exactly so a change to the constant has to be a
 		// deliberate edit here rather than sliding under a loose ceiling.
@@ -263,19 +396,41 @@ describe('script-error recap 202 retry', () => {
 		// ...and it really has stopped, not merely paused.
 		await vi.advanceTimersByTimeAsync(1000 * 400);
 		expect(recapSpy).toHaveBeenCalledTimes(121);
-		// Giving up leaves NO badge — we do not know the failures.
+		// Giving up is reported as a failed check, not as "no errors" — and the
+		// user can ask again.
 		expect(getScriptErrors(TAB)).toBeNull();
+		expect(getScriptErrorsPhase(TAB)).toBe('error');
+
+		recapSpy.mockResolvedValue(RECAP);
+		await ask();
+		expect(recapSpy).toHaveBeenCalledTimes(122);
+		expect(getScriptErrors(TAB)).toEqual(RECAP);
 	});
 
 	it('cancels a pending retry when the tab is closed', async () => {
 		const recapSpy = vi.spyOn(tablesApi, 'fetchScriptErrors').mockResolvedValue({ retry: true });
 		await ensureTableDraft(TAB);
 		await land(pageWith({ state: 'ready', done: 10, total: 10 }));
+		await ask();
 		expect(recapSpy).toHaveBeenCalledTimes(1);
 
 		closeTableDraft(TAB);
 		await vi.advanceTimersByTimeAsync(30_000);
 		expect(recapSpy).toHaveBeenCalledTimes(1);
+	});
+
+	it('cancels a pending retry when the page state changes under it', async () => {
+		const recapSpy = vi.spyOn(tablesApi, 'fetchScriptErrors').mockResolvedValue({ retry: true });
+		await ensureTableDraft(TAB);
+		await land(pageWith({ state: 'ready', done: 10, total: 10 }, 1));
+		await ask();
+		expect(recapSpy).toHaveBeenCalledTimes(1);
+
+		// A newer rev supersedes the state the pending retry was fetching for.
+		await land(pageWith({ state: 'ready', done: 10, total: 10 }, 2));
+		await vi.advanceTimersByTimeAsync(30_000);
+		expect(recapSpy).toHaveBeenCalledTimes(1);
+		expect(getScriptErrorsPhase(TAB)).toBe('idle');
 	});
 });
 

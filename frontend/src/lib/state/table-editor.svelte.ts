@@ -63,9 +63,9 @@ const RECAP_RETRY_MS = 1_000;
 /** Bound on consecutive 202 recap retries for one tab. Same reasoning — and
  * the same order of magnitude — as `POLL_MAX_ATTEMPTS`: a recap is a
  * whole-table pass server-side, so "still computing" must never turn into an
- * unbounded once-a-second request loop. Giving up leaves NO badge, which is
- * the honest degraded answer (we do not know the failures) rather than an
- * error strip for something the user did not ask for. */
+ * unbounded once-a-second request loop. Giving up reports the `error` phase —
+ * "we could not check", which is the honest answer — and the user can ask
+ * again. */
 const RECAP_MAX_ATTEMPTS = 120;
 /** Delay between two export retries while the sweep is still computing
  * (the backend answers 202 with `Retry-After: 1`). */
@@ -136,29 +136,38 @@ const _scriptStatus = new SvelteMap<string, ScriptStatus>();
 
 /**
  * tabId -> the whole-table script-error recap for the page state currently on
- * screen (`POST /tables/script-errors`). Rendered as the error badge + panel,
- * so it lives in a reactive map. Absent means "no recap to show": no script
- * column, a table that has not settled yet, or a recap fetch that failed —
- * embedded evaluation is degraded-never-failed, and that stance extends here.
+ * screen (`POST /tables/script-errors`), once the USER has asked for it (see
+ * `requestScriptErrors`). Rendered as the error badge + panel, so it lives in a
+ * reactive map. Absent means "no recap on hand": no script column, a table that
+ * has not settled, a recap nobody asked for yet, one invalidated by a newer page
+ * state, or a fetch that failed — embedded evaluation is degraded-never-failed,
+ * and that stance extends here.
+ *
+ * An EMPTY recap (`total_errors === 0`) is a real, kept answer — "we checked,
+ * there are none" — not the same thing as absent.
  */
 const _scriptErrors = new SvelteMap<string, ScriptErrorsRecap>();
 
 /**
- * tabId -> the page state the tab's recap was fetched for, as
- * `"<script status>:<model_rev>:<generation>"`. This is the whole fetch-once
- * discipline: a recap costs a whole-table pass server-side, and
- * `handleScriptStatus` runs on EVERY landing page (including each background
- * chunk fill), so without a signature a settled table would re-fetch the recap
- * on every scroll. Set before the request goes out (so an in-flight fetch is
- * not duplicated) and dropped again if that request fails, so a later page
- * retries it.
+ * tabId -> the SETTLED page state currently on screen, as
+ * `"<script status>:<model_rev>:<generation>"`. Absent means the tab has
+ * nothing a recap could describe: no script work at all, or a sweep still
+ * `computing` (where the grid shows degraded BUILD order).
+ *
+ * This signature is what makes a recap on hand valid or stale. It is recomputed
+ * on every landing page (`handleScriptErrorRecap`, which runs on each background
+ * chunk fill too); when it CHANGES the recap and any in-flight fetch for the
+ * previous state are dropped, and when it does not change they are kept — so
+ * scrolling a settled table neither re-fetches nor loses the recap. It is also
+ * the key an in-flight fetch is guarded by, since a chunk fill can install a
+ * page of a NEWER model rev without bumping the generation (`mergePage`).
  *
  * THE GENERATION IS LOAD-BEARING — do not reduce this to status + rev. A sort
  * change, a definition edit and a reload all re-evaluate the table at a
  * CONSTANT `model_rev` while reordering (or renumbering) every row, and a
  * recap's `row_index`/`column_index` are addresses into the order the grid is
- * showing. Keyed without the generation, the tab would keep serving the recap
- * built for the previous order and jump-to-cell would scroll to the wrong row.
+ * showing. Without the generation the tab would keep showing the recap built
+ * for the previous order and jump-to-cell would scroll to the wrong row.
  * `bumpGeneration` runs on exactly those re-evaluations, which is why it is
  * the right signal. See `handleScriptErrorRecap` for the full table.
  *
@@ -166,6 +175,18 @@ const _scriptErrors = new SvelteMap<string, ScriptErrorsRecap>();
  */
 // eslint-disable-next-line svelte/prefer-svelte-reactivity
 const _recapKeys = new Map<string, string>();
+
+/**
+ * tabId -> the recap fetch's phase while it is NOT simply "we have one":
+ * `loading` (a request — including its 202 retry chain — is in flight) or
+ * `error` (the fetch failed, or the 202 retries were exhausted). Absent means
+ * idle-or-done, which `getScriptErrorsPhase` disambiguates via `_scriptErrors`.
+ *
+ * Reactive: the badge label is driven by it ("Checking for script errors…" /
+ * "Could not check"), and a user who clicked deserves to see which of the two
+ * happened rather than an unexplained absence.
+ */
+const _recapPhase = new SvelteMap<string, 'loading' | 'error'>();
 
 /**
  * tabId -> the ONE pending recap retry timer, and the consecutive 202s it has
@@ -389,13 +410,14 @@ function cancelRecapRetry(tabId: string): void {
 
 /**
  * Forget everything the script-error recap holds for a tab: the recap itself,
- * the page-state signature that says which page state it describes, the retry
- * budget and timer, and any un-consumed jump request (which addresses rows of
- * a grid that is going away).
+ * the page-state signature it describes, the fetch phase, the retry budget and
+ * timer, and any un-consumed jump request (which addresses rows of a grid that
+ * is going away).
  */
 function clearScriptErrors(tabId: string): void {
 	_scriptErrors.delete(tabId);
 	_recapKeys.delete(tabId);
+	_recapPhase.delete(tabId);
 	_recapAttempts.delete(tabId);
 	_scrollRequests.delete(tabId);
 	cancelRecapRetry(tabId);
@@ -403,21 +425,23 @@ function clearScriptErrors(tabId: string): void {
 
 /**
  * Fetch the whole-table script-error recap for `tabId`. Called only from
- * `handleScriptErrorRecap` once a landed page's status has SETTLED — never
- * speculatively, because the route re-pays a whole-table pass on every call.
+ * `requestScriptErrors` (a user asking) and from its own 202 retry — NEVER
+ * speculatively, because the route re-renders the whole table cache-only on
+ * every call, which for the commonest table shape also kicks a background sweep
+ * nobody asked for. See `requestScriptErrors` for that argument in full.
  *
  * Guarded TWICE, and both guards earn their keep: the generation (as every
  * async loader here is) and the page-state signature `key`. A chunk fill can
  * install a page of a NEWER model rev without bumping the generation (see
- * `mergePage`), so two fetches for two different page states could otherwise
- * be in flight under one generation and land in the wrong order.
+ * `mergePage`), so a fetch issued for the previous page state must not land on
+ * top of the new one — its `row_index`es would address the wrong row order.
  *
  * A 202 (`{ retry: true }`) means the background sweep is still filling the
  * cache: schedule ONE delayed retry (never two — the previous timer is always
- * cancelled first), bounded by `RECAP_MAX_ATTEMPTS`. Anything else — a
- * network error, a 4xx, a superseded generation — leaves the tab with no
- * recap and therefore no badge: this surface is an aid for finding failures,
- * and it must never be the thing that breaks a table view.
+ * cancelled first), bounded by `RECAP_MAX_ATTEMPTS`. Anything else — a network
+ * error, a 4xx — leaves the tab with no recap and an `error` phase the badge
+ * reports; this surface is an aid for finding failures, and it must never be
+ * the thing that breaks a table view.
  */
 async function _fetchScriptErrors(tabId: string, gen: number, key: string): Promise<void> {
 	const draft = _drafts.get(tabId);
@@ -433,24 +457,30 @@ async function _fetchScriptErrors(tabId: string, gen: number, key: string): Prom
 			return;
 		}
 		_recapAttempts.delete(tabId);
+		_recapPhase.delete(tabId);
 		_scriptErrors.set(tabId, result);
 	} catch {
 		if (!isCurrent(tabId, gen) || _recapKeys.get(tabId) !== key) return;
-		// Drop the signature so a later landing page (or the next rev) retries;
-		// leaving it set would wedge this tab's badge for the life of the page.
-		_recapKeys.delete(tabId);
+		// The user asked and we have no answer: say so (rather than leaving an
+		// unexplained blank), and leave the tab ready to try again on the next
+		// click — the signature stays, because it describes the PAGE, not the
+		// fetch, and `requestScriptErrors` re-fetches whenever the phase is not
+		// `loading`/`done`.
 		_recapAttempts.delete(tabId);
 		_scriptErrors.delete(tabId);
+		_recapPhase.set(tabId, 'error');
 	}
 }
 
 /** Schedule the ONE pending recap retry for `tabId`, or give up once the
- * attempt budget is spent (silently — see `RECAP_MAX_ATTEMPTS`). */
+ * attempt budget is spent — reported as a failed check (see
+ * `RECAP_MAX_ATTEMPTS`), which the user can repeat. */
 function scheduleRecapRetry(tabId: string, gen: number, key: string): void {
 	cancelRecapRetry(tabId);
 	const attempts = (_recapAttempts.get(tabId) ?? 0) + 1;
 	if (attempts > RECAP_MAX_ATTEMPTS) {
 		_recapAttempts.delete(tabId);
+		_recapPhase.set(tabId, 'error');
 		return;
 	}
 	_recapAttempts.set(tabId, attempts);
@@ -543,19 +573,17 @@ function handleScriptStatus(tabId: string, page: TablePage): void {
 /**
  * Keep the tab's script-error recap in step with the page state that just
  * landed. Called from `handleScriptStatus` (i.e. from every landing page).
+ * INVALIDATION ONLY — this function never fetches; see `requestScriptErrors`.
  *
  * A recap describes a SETTLED table: its `row_index`es address the very order
- * the page route renders for this `(definition, sort, model_rev)`. So it is
- * fetched exactly when the status is terminal (`ready` — including a first
- * page that arrives already settled — or `failed`, whose remaining holes ARE
- * the errors), and dropped whenever that stops being true: no script status at
- * all (no script column), or a table that went back to `computing`, where the
- * grid shows degraded BUILD order and a stale recap would jump to the wrong
- * row.
+ * the page route renders for this `(definition, sort, model_rev)`. So a recap
+ * can exist only while the status is terminal (`ready`, or `failed` — whose
+ * remaining holes ARE the errors), and is dropped the moment that stops being
+ * true: no script status at all (no script column), or a table that went back
+ * to `computing`, where the grid shows degraded BUILD order.
  *
- * `_recapKeys` makes it fetch-ONCE per page state: this function runs on every
- * chunk fill too, and each recap is a whole-table pass server-side. The
- * signature is `"<status>:<model rev>:<generation>"`, and all three matter:
+ * The signature `"<status>:<model rev>:<generation>"` is what "the same page
+ * state" means, and all three parts matter:
  *
  *   * the **generation** covers every re-evaluation the user can cause — a
  *     definition edit, a sort change, a reload — none of which need change the
@@ -564,8 +592,11 @@ function handleScriptStatus(tabId: string, page: TablePage): void {
  *     bumping the generation (`mergePage`'s rev-mismatch branch);
  *   * the **status** covers a sweep that settles from `ready` to `failed`.
  *
- * A background chunk fill of the SAME page state changes none of them, which
- * is the point: scrolling a settled table costs no recap requests at all.
+ * A change in any of them drops the recap on hand (and cancels an in-flight
+ * fetch for it) rather than letting jump-to-cell scroll to the row that used to
+ * be there. A background chunk fill of the SAME page state changes none of
+ * them, which is the point: scrolling a settled table neither costs a recap
+ * request nor loses the recap the user already paid for.
  */
 function handleScriptErrorRecap(tabId: string, page: TablePage, status: ScriptStatus | null): void {
 	if (status === null || status.state === 'computing') {
@@ -574,10 +605,44 @@ function handleScriptErrorRecap(tabId: string, page: TablePage, status: ScriptSt
 	}
 	const gen = _generations.get(tabId) ?? 0;
 	const key = `${status.state}:${page.model_rev}:${gen}`;
-	if (_recapKeys.get(tabId) === key) return; // already fetched (or fetching) this state
-	clearScriptErrors(tabId);
+	if (_recapKeys.get(tabId) === key) return; // same page state: keep what we have
+	clearScriptErrors(tabId); // stale (or first sight): drop recap + in-flight fetch
 	_recapKeys.set(tabId, key);
-	void _fetchScriptErrors(tabId, gen, key);
+}
+
+/**
+ * Ask for this tab's whole-table script-error recap — the badge click, and the
+ * ONLY thing that ever fetches one.
+ *
+ * ON DEMAND BY DESIGN. `POST /tables/script-errors` renders the whole table
+ * CACHE-ONLY, and for the commonest shape — an unsorted collapse script column
+ * with `keep_empty` — the page route makes ZERO `value()` calls (the build pass
+ * skips it, the order pass short-circuits with no sort) and only the visible
+ * window is computed live: the page reports `ready` without ever kicking a
+ * background sweep. The recap misses on every row outside that window, so
+ * fetching it automatically on settle would have turned "open a table with a
+ * script column" into "sweep the whole table", plus up to `RECAP_MAX_ATTEMPTS`
+ * once-a-second retries each re-paying a full build + order + render. So the
+ * error COUNT is deliberately not known up front: the badge is a neutral
+ * affordance, and this is what the user pressing it costs.
+ *
+ * A no-op unless the tab is showing a settled table with script work
+ * (`_recapKeys` holds its page-state signature) — and unless a fetch is
+ * actually needed: a recap already on hand for this exact page state is
+ * re-used, and a rapid double click cannot start two fetches because the phase
+ * turns `loading` synchronously, before the request goes out.
+ */
+export function requestScriptErrors(tabId: string): void {
+	const key = _recapKeys.get(tabId);
+	if (key === undefined) return; // nothing settled to describe
+	if (_scriptErrors.has(tabId)) return; // already answered for this page state
+	if (_recapPhase.get(tabId) === 'loading') return; // already asking
+	// A previous attempt may have left a retry timer or a spent budget behind
+	// (an `error` phase after the 202 chain gave up); this is a fresh ask.
+	cancelRecapRetry(tabId);
+	_recapAttempts.delete(tabId);
+	_recapPhase.set(tabId, 'loading');
+	void _fetchScriptErrors(tabId, _generations.get(tabId) ?? 0, key);
 }
 
 /**
@@ -644,20 +709,18 @@ function moveTabState(oldTab: string, newTab: string): void {
 	if (attempts !== undefined) _pollAttempts.set(newTab, attempts);
 
 	// The script-error recap belongs to the TABLE, not the tab id, so carry it
-	// over rather than paying for a second whole-table pass after a save. Its
-	// page-state signature only follows a recap we actually HAVE: a fetch still
-	// in flight is closed over `oldTab` (whose draft is gone) and will be
-	// dropped, and carrying its signature would leave the new tab believing it
-	// had already fetched. Dropping the signature instead makes the next
-	// landing page re-fetch. The pending retry timer is closed over the old id
-	// too — cancel it; the rescheduled loads below re-settle the new one.
+	// (and the page-state signature it is valid for — the generation inside it
+	// moves with `_generations` above) over rather than making the user pay for
+	// a second whole-table pass after a save. What is deliberately NOT carried
+	// is an in-flight fetch: it is closed over `oldTab`, whose draft is gone, so
+	// it will be dropped on landing — carrying a `loading` phase would strand
+	// the new tab on "Checking…" forever. The pending retry timer is closed over
+	// the old id too; `clearScriptErrors` cancels it. The next click re-asks.
 	const recap = _scriptErrors.get(oldTab);
 	const recapKey = _recapKeys.get(oldTab);
 	clearScriptErrors(oldTab);
-	if (recap !== undefined) {
-		_scriptErrors.set(newTab, recap);
-		if (recapKey !== undefined) _recapKeys.set(newTab, recapKey);
-	}
+	if (recapKey !== undefined) _recapKeys.set(newTab, recapKey);
+	if (recap !== undefined) _scriptErrors.set(newTab, recap);
 
 	// Chunk fetches in flight are closed over `oldTab`, whose draft is gone —
 	// they will be dropped on landing. Drop their bookkeeping with them; the
@@ -710,13 +773,27 @@ export function getTableScriptStatus(tabId: string): ScriptStatus | null {
 }
 
 /**
- * Every failing script cell in the WHOLE table, as of the last settled page —
- * the input to the error badge and panel. `null` while the table has no script
- * column, has not settled yet, or the recap could not be fetched (degraded,
- * never failed: no recap simply means no badge).
+ * Every failing script cell in the WHOLE table, for the page state on screen —
+ * the input to the error panel. `null` until the user asks for it
+ * (`requestScriptErrors`), and again whenever the page state moves under it or
+ * the fetch failed (degraded, never failed). An EMPTY recap is not `null`: it
+ * is the answer "we checked, there are none".
  */
 export function getScriptErrors(tabId: string): ScriptErrorsRecap | null {
 	return _scriptErrors.get(tabId) ?? null;
+}
+
+/**
+ * Where the tab's script-error check stands: `idle` (never asked, or asked for
+ * a page state that has since been superseded), `loading` (a fetch — possibly
+ * mid-202-retry-chain — is in flight), `done` (a recap is on hand, possibly an
+ * empty one) or `error` (the fetch failed or its retries ran out). Drives the
+ * badge's label, so the user always gets an answer to a click.
+ */
+export function getScriptErrorsPhase(tabId: string): 'idle' | 'loading' | 'done' | 'error' {
+	const phase = _recapPhase.get(tabId);
+	if (phase !== undefined) return phase;
+	return _scriptErrors.has(tabId) ? 'done' : 'idle';
 }
 
 /**
@@ -926,6 +1003,13 @@ async function _loadTablePage(
 	const draft = _drafts.get(tabId);
 	if (!draft) return;
 	const gen = bumpGeneration(tabId); // supersede any older in-flight load
+	// A re-evaluation is under way, so the tab has NO settled page state: drop
+	// the recap and its signature until one lands. Without this, a load that
+	// fails (or simply hasn't landed) would leave the previous recap askable at
+	// the NEW sort — `_fetchScriptErrors` reads the draft's current sort, while
+	// the grid is still showing the rows of the old one, and every `row_index`
+	// would address an order nobody is looking at.
+	clearScriptErrors(tabId);
 	_errors.delete(tabId);
 	_loading.set(tabId, true);
 	const sort = _sortFor(tabId, draft);
@@ -1246,6 +1330,7 @@ export function resetTableEditors(): void {
 	for (const tabId of [..._pollTimers.keys()]) cancelPoll(tabId);
 	_scriptErrors.clear();
 	_recapKeys.clear();
+	_recapPhase.clear();
 	_recapAttempts.clear();
 	_scrollRequests.clear();
 	for (const tabId of [..._recapTimers.keys()]) cancelRecapRetry(tabId);
