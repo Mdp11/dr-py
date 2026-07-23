@@ -13,9 +13,12 @@
 	import type { ScriptErrorsRecap } from '$lib/api/types';
 
 	let {
+		id,
 		recap,
 		onJump
 	}: {
+		/** DOM id, so the badge that opens this can point `aria-controls` at it. */
+		id: string;
 		recap: ScriptErrorsRecap;
 		onJump: (rowIndex: number, columnIndex: number) => void;
 	} = $props();
@@ -26,8 +29,15 @@
 	const shown = $derived(recap.errors.length);
 </script>
 
+<!-- A NON-MODAL dialog: it names itself and Escape dismisses it (handled by the
+     wrapper in TableView, where the badge's keydown lands too), but it does not
+     trap focus — the grid behind it stays usable, which is the point of jumping
+     from it. -->
 <div
+	{id}
 	data-testid="script-errors-panel"
+	role="dialog"
+	aria-label="Script errors in this table"
 	class="absolute top-full left-0 z-20 mt-1 w-96 max-w-[calc(100vw-2rem)] overflow-hidden rounded border border-destructive/40 bg-card shadow-lg"
 >
 	<div

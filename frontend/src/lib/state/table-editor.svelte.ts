@@ -145,12 +145,23 @@ const _scriptErrors = new SvelteMap<string, ScriptErrorsRecap>();
 
 /**
  * tabId -> the page state the tab's recap was fetched for, as
- * `"<script status>:<model_rev>"`. This is the whole fetch-once discipline:
- * a recap costs a whole-table pass server-side, and `handleScriptStatus` runs
- * on EVERY landing page (including each background chunk fill), so without a
- * signature a settled table would re-fetch the recap on every scroll. Set
- * before the request goes out (so an in-flight fetch is not duplicated) and
- * dropped again if that request fails, so a later page retries it.
+ * `"<script status>:<model_rev>:<generation>"`. This is the whole fetch-once
+ * discipline: a recap costs a whole-table pass server-side, and
+ * `handleScriptStatus` runs on EVERY landing page (including each background
+ * chunk fill), so without a signature a settled table would re-fetch the recap
+ * on every scroll. Set before the request goes out (so an in-flight fetch is
+ * not duplicated) and dropped again if that request fails, so a later page
+ * retries it.
+ *
+ * THE GENERATION IS LOAD-BEARING — do not reduce this to status + rev. A sort
+ * change, a definition edit and a reload all re-evaluate the table at a
+ * CONSTANT `model_rev` while reordering (or renumbering) every row, and a
+ * recap's `row_index`/`column_index` are addresses into the order the grid is
+ * showing. Keyed without the generation, the tab would keep serving the recap
+ * built for the previous order and jump-to-cell would scroll to the wrong row.
+ * `bumpGeneration` runs on exactly those re-evaluations, which is why it is
+ * the right signal. See `handleScriptErrorRecap` for the full table.
+ *
  * Control state, never read from templates.
  */
 // eslint-disable-next-line svelte/prefer-svelte-reactivity

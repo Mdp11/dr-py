@@ -141,11 +141,15 @@
 		const request = consumeScrollRequest(tabId);
 		if (!request) return;
 		if (scrollEl) {
-			// The header is sticky, so scrolling exactly to the row's top would
-			// park it UNDER the header. Offset by the header's own height.
-			const headerH = scrollEl.querySelector('[data-testid="table-header"]')?.clientHeight || ROW_H;
+			// `offsets` is measured from the FIRST ROW's top (`offsets[0] === 0`),
+			// while the sticky header sits inside the same scroll container and
+			// precedes the rows in normal flow — so row i's content-box top is
+			// `headerHeight + offsets[i]`, and `scrollTop = offsets[i]` already
+			// parks row i flush BELOW the sticky header. No header correction:
+			// subtracting one would push the target a header's height further
+			// down the viewport, not clear of it.
 			const max = Math.max(0, scrollEl.scrollHeight - scrollEl.clientHeight);
-			const top = Math.max(0, Math.min((offsets[request.rowIndex] ?? 0) - headerH, max));
+			const top = Math.max(0, Math.min(offsets[request.rowIndex] ?? 0, max));
 			scrollEl.scrollTop = top;
 			scrollTop = top;
 		}

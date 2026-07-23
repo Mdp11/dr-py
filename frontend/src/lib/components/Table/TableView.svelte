@@ -66,6 +66,14 @@
 		requestScrollToCell(tabId, rowIndex, columnIndex);
 		scriptErrorsOpen = false;
 	}
+	// Escape dismisses the panel from anywhere inside it (keydown bubbles from
+	// the badge and from every entry button up to their shared wrapper) — the
+	// same one-liner idiom `PropertyColumnEditor`'s suggestion popup uses. No
+	// focus trap: the panel is a non-modal disclosure, so tabbing out of it is
+	// a legitimate way to leave it too.
+	function onScriptErrorsKeydown(e: KeyboardEvent): void {
+		if (e.key === 'Escape') scriptErrorsOpen = false;
+	}
 	const loading = $derived(getTableLoading(tabId));
 	// The sweep's fraction, or null when it has no total to divide by. Drives a
 	// DETERMINATE bar; everything else falls back to the indeterminate sweep.
@@ -365,11 +373,14 @@
 		     strip is the panel's positioning context — the dropdown is absolute
 		     so it overlays the grid instead of pushing it down. -->
 		{#if scriptErrors && scriptErrors.total_errors > 0}
-			<div class="relative flex items-center px-3 py-1">
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<div class="relative flex items-center px-3 py-1" onkeydown={onScriptErrorsKeydown}>
 				<button
 					type="button"
 					data-testid="script-errors-badge"
 					aria-expanded={scriptErrorsOpen}
+					aria-controls="script-errors-panel-{tabId}"
+					aria-haspopup="dialog"
 					title="Show the rows whose script column failed"
 					class="flex items-center gap-1.5 rounded border border-destructive/40 bg-destructive/10 px-2 py-0.5 text-xs text-destructive transition-colors hover:bg-destructive/20"
 					onclick={() => (scriptErrorsOpen = !scriptErrorsOpen)}
@@ -378,7 +389,11 @@
 					{scriptErrors.total_errors} script error{scriptErrors.total_errors === 1 ? '' : 's'}
 				</button>
 				{#if scriptErrorsOpen}
-					<ScriptErrorsPanel recap={scriptErrors} onJump={jumpToErrorCell} />
+					<ScriptErrorsPanel
+						id="script-errors-panel-{tabId}"
+						recap={scriptErrors}
+						onJump={jumpToErrorCell}
+					/>
 				{/if}
 			</div>
 		{/if}

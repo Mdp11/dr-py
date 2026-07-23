@@ -224,6 +224,71 @@ describe('TableView script-error badge + panel', () => {
 		}
 	});
 
+	it('wires the badge to the panel for assistive tech', () => {
+		h.scriptErrors = RECAP;
+		const c = render('tbl:draft:1');
+		try {
+			const badge = document.querySelector('[data-testid="script-errors-badge"]') as HTMLElement;
+			expect(badge.getAttribute('aria-expanded')).toBe('false');
+			expect(badge.getAttribute('aria-haspopup')).toBe('dialog');
+			badge.click();
+			flushSync();
+			const panel = document.querySelector('[data-testid="script-errors-panel"]') as HTMLElement;
+			expect(badge.getAttribute('aria-expanded')).toBe('true');
+			// The badge names the element it controls, and that element exists.
+			expect(badge.getAttribute('aria-controls')).toBe(panel.id);
+			expect(panel.id).not.toBe('');
+			expect(panel.getAttribute('role')).toBe('dialog');
+			expect(panel.getAttribute('aria-label')).toBeTruthy();
+		} finally {
+			unmount(c);
+		}
+	});
+
+	// Escape must work from INSIDE the panel too, not just from the badge: once
+	// the user tabs into the list there is otherwise no keyboard way out of it
+	// (the panel deliberately does not trap focus, but it does overlay the grid).
+	it('dismisses the panel on Escape from the badge and from an entry', () => {
+		h.scriptErrors = RECAP;
+		const c = render('tbl:draft:1');
+		try {
+			const badge = document.querySelector('[data-testid="script-errors-badge"]') as HTMLElement;
+			badge.click();
+			flushSync();
+			expect(document.querySelector('[data-testid="script-errors-panel"]')).not.toBeNull();
+
+			badge.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+			flushSync();
+			expect(document.querySelector('[data-testid="script-errors-panel"]')).toBeNull();
+
+			badge.click();
+			flushSync();
+			const entry = document.querySelector('[data-testid="script-error-entry"]') as HTMLElement;
+			entry.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+			flushSync();
+			expect(document.querySelector('[data-testid="script-errors-panel"]')).toBeNull();
+			// Dismissing is not jumping.
+			expect(h.jump).not.toHaveBeenCalled();
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('leaves the panel open on any other key', () => {
+		h.scriptErrors = RECAP;
+		const c = render('tbl:draft:1');
+		try {
+			const badge = document.querySelector('[data-testid="script-errors-badge"]') as HTMLElement;
+			badge.click();
+			flushSync();
+			badge.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+			flushSync();
+			expect(document.querySelector('[data-testid="script-errors-panel"]')).not.toBeNull();
+		} finally {
+			unmount(c);
+		}
+	});
+
 	it('says how many of the total are listed when the recap is truncated', () => {
 		h.scriptErrors = { ...RECAP, total_errors: 4021, truncated: true };
 		const c = render('tbl:draft:1');

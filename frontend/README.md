@@ -309,9 +309,16 @@ toggle`), a collapsed disclosure that expands to the shared
   the row and outlines the cell for 2s — best effort, since row heights are
   estimated for rows the sparse cache hasn't fetched. **Fetch-ONCE per page
   state**: the recap is a whole-table pass server-side, so it is keyed by
-  `"<status>:<model_rev>"` — chunk fills as the user scrolls re-use it, a
-  peer's commit re-fetches it (`row_index` is a per-rev grid address), and it
-  is dropped whenever the table stops being settled. A **202** (sweep still
+  `"<status>:<model_rev>:<generation>"` — background chunk fills as the user
+  scrolls change none of the three and re-use it, while a peer's commit (new
+  rev) **and** a sort change, a definition edit or a reload (all of which bump
+  the tab's page-load **generation**) re-fetch it. All three parts are
+  load-bearing: `row_index`/`column_index` address the order the grid is
+  _currently_ showing, and a sort or definition edit reorders every row at a
+  CONSTANT `model_rev` — keyed without the generation the tab would keep
+  serving the recap built for the previous order, and jump-to-cell would
+  scroll to the row that used to be there. The recap is also dropped whenever
+  the table stops being settled. A **202** (sweep still
   filling the cache — the STATUS CODE is the retry signal, as for export)
   schedules exactly ONE delayed retry per tab, bounded like the sweep poll; a
   failed recap simply leaves no badge, because this surface must never be what

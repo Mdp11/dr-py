@@ -248,16 +248,23 @@ describe('script-error recap 202 retry', () => {
 		expect(recapSpy).toHaveBeenCalledTimes(4);
 	});
 
-	it('gives up rather than retrying a 202 forever', async () => {
+	it('gives up after RECAP_MAX_ATTEMPTS rather than retrying a 202 forever', async () => {
 		const recapSpy = vi.spyOn(tablesApi, 'fetchScriptErrors').mockResolvedValue({ retry: true });
 		await ensureTableDraft(TAB);
 		await land(pageWith({ state: 'ready', done: 10, total: 10 }));
 
+		// The exact bound: 1 fetch-on-settle + RECAP_MAX_ATTEMPTS (120) retries;
+		// the 121st is never scheduled. Same shape as the sweep poll's give-up
+		// test, and asserted exactly so a change to the constant has to be a
+		// deliberate edit here rather than sliding under a loose ceiling.
 		await vi.advanceTimersByTimeAsync(1000 * 400);
-		const settled = recapSpy.mock.calls.length;
-		expect(settled).toBeLessThan(200); // bounded, not once-a-second forever
+		expect(recapSpy).toHaveBeenCalledTimes(121);
+
+		// ...and it really has stopped, not merely paused.
 		await vi.advanceTimersByTimeAsync(1000 * 400);
-		expect(recapSpy).toHaveBeenCalledTimes(settled); // really stopped
+		expect(recapSpy).toHaveBeenCalledTimes(121);
+		// Giving up leaves NO badge — we do not know the failures.
+		expect(getScriptErrors(TAB)).toBeNull();
 	});
 
 	it('cancels a pending retry when the tab is closed', async () => {
