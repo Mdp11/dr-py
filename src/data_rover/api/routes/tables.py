@@ -29,6 +29,7 @@ from data_rover.core.table.cells import (
     evaluate_cells,
 )
 from data_rover.core.table.evaluate import (
+    SORT_SCRIPT_NAV_WARNING,
     RowKey,
     SortSpec,
     TableLimits,
@@ -36,6 +37,7 @@ from data_rover.core.table.evaluate import (
     build_rows_ex,
     iter_export_rows,
     order_rows,
+    sort_falls_back_to_build_order,
 )
 from data_rover.core.table.resolve import resolve_table_refs, table_has_script
 from data_rover.core.table.schema import TABLE_ADAPTER, TableDefinition
@@ -270,6 +272,22 @@ def evaluate_table(
             if cached is not None:
                 cached_rows, truncated, base_total = cached
                 ordered = list(cached_rows)
+                # RE-DERIVE the sort-degraded warning on the cache-hit path.
+                # `order_rows` — the only thing that emits it — is skipped
+                # entirely here, and a degraded order IS cacheable (the degrade
+                # records no pending miss, so the poisoning guard below stores
+                # it). Without this, exactly one request per rev explains why
+                # the table the user asked to sort is in build order; every
+                # reload, tab reopen, and second viewer at the same rev gets an
+                # unsorted table with no explanation anywhere. Cheap and safe:
+                # `sort_falls_back_to_build_order` is O(definition) and reads
+                # nothing but the definition (no cache, no model, no context),
+                # and every cached order was necessarily built by the CACHE-ONLY
+                # pass below — this route is the only writer — so the predicate
+                # answers for the order actually in hand. It runs BEFORE the
+                # window pass, so `MAX_SCRIPT_WARNINGS` can never crowd it out.
+                if script_ctx is not None and sort_falls_back_to_build_order(defn, sort):
+                    script_ctx.add_warning(SORT_SCRIPT_NAV_WARNING)
             else:
                 # Whole-table passes are CACHE-ONLY (spec §4.1): the guest is
                 # never driven O(rows) times inside a request. A miss records a

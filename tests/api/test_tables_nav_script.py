@@ -327,14 +327,20 @@ def test_sort_by_nav_script_step_column_settles_instead_of_failing(
     nav_cells = [row["cells"][1] for row in first["rows"]]
     assert [[i["id"] for i in c["items"]] for c in nav_cells] == [["t2"], ["t3"]]
 
-    # No poll storm: a second identical request is `ready` too (this one is
-    # served from the row-order cache, which is why it carries no warning —
-    # the degraded order is deterministic at this rev, so caching it is sound).
+    # No poll storm: a second identical request is `ready` too. This one is
+    # served from the ROW-ORDER CACHE — `order_rows` never runs — and that is
+    # exactly why the warning has to be re-derived at the route: the degraded
+    # order is cached (a degrade records no pending miss, so the poisoning
+    # guard lets it through), so without the re-derivation only the very first
+    # request in a rev ever explains itself. Reopen the tab, reload, or be the
+    # second viewer and you get a table you asked to sort, unsorted, with no
+    # explanation anywhere.
     r = client.post(papi("/tables/evaluate"), json=payload)
     assert r.status_code == 200, r.text
     second = r.json()
     assert second["script_status"]["state"] == "ready"
     assert [row["key"][0] for row in second["rows"]] == ["t1", "t2"]
+    assert any("build order" in w for w in second["warnings"])
 
 
 #: `value()` for the script column below: the name of whatever the navigation

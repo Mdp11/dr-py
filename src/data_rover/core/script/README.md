@@ -678,6 +678,12 @@ cache is internally locked, and the pathology counters are job-global.
     sweep at all (a degrade records no pending miss). Sorting by an
     ELEMENT/PROPERTY column sourced from that same navigation column has no
     such backstop and does degrade.
+  - **The warning survives the order cache.** A degraded order records no
+    pending miss, so `TableOrderCache` stores it and later requests skip
+    `order_rows` entirely. `evaluate_table` therefore re-derives the warning on
+    the cache-hit path from the public, context-free
+    `sort_falls_back_to_build_order(defn, sort)` — otherwise only the one
+    request per rev that built the order would ever explain itself.
 - `script_status` (`ScriptStatusOut`) is `null` for a table with no script
   column at all; otherwise `ready` (nothing pending — these rows are final for
   this rev, though a cell may still hold an `unavailable`/error value, since

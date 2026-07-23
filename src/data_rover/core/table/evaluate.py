@@ -675,6 +675,25 @@ def _sort_reaches_script_navigation(defn: TableDefinition, col: Column) -> bool:
     return _source_reaches_script_navigation(defn, col.source)  # PropertyColumn
 
 
+def sort_falls_back_to_build_order(
+    defn: TableDefinition, sort: SortSpec | None
+) -> bool:
+    """Would a CACHE-ONLY `order_rows(defn, ..., sort)` degrade to build order
+    (and emit `SORT_SCRIPT_NAV_WARNING`) rather than sort? See `_sort_script`.
+
+    Public because the decision is O(definition) and depends on NOTHING else —
+    not the cell cache, not the model, not the context. That is what lets the
+    API layer re-derive it when it serves a CACHED row order and so never calls
+    `order_rows` at all: a degraded order records no pending miss, so it IS
+    cached, and without this the only request in a whole rev that explains
+    itself is the one that happened to build the order. Every later reload, tab
+    reopen, and second viewer would get a table they asked to sort, unsorted,
+    with no explanation anywhere."""
+    if sort is None:
+        return False
+    return _sort_reaches_script_navigation(defn, defn.columns[sort.column])
+
+
 def _sort_script(
     defn: TableDefinition, col: Column, script: ScriptEvalContext | None
 ) -> ScriptEvalContext | None:
@@ -702,10 +721,9 @@ def _sort_script(
     user is told rather than silently handed an unsorted table. The LIVE path
     (`script.cache_only` False) is untouched and still sorts for real.
 
-    Caveat, deliberately accepted: the warning rides the response that actually
-    ran the sort pass, so a later page request served from `TableOrderCache`
-    repeats the (deterministic, identical) degraded order without repeating the
-    warning."""
+    The warning rides the response that ran the sort pass; a later request
+    served from the API layer's row-order cache never calls `order_rows` at all
+    and re-derives it from `sort_falls_back_to_build_order` instead."""
     if script is None or not script.cache_only:
         return script
     if not _sort_reaches_script_navigation(defn, col):

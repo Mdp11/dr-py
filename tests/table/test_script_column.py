@@ -899,3 +899,35 @@ def test_cache_only_sort_by_unconfigured_script_column_does_not_warn() -> None:
     assert ctx.warnings == []
     assert ctx.pending_misses == 0
     ctx.close()
+
+
+def test_sort_falls_back_to_build_order_predicate() -> None:
+    """The public predicate the API layer re-asks on an order-cache HIT. It is
+    context-free (O(definition), no cache, no model walk) precisely so a route
+    that skipped `order_rows` can still reproduce its warning."""
+    from data_rover.core.table.evaluate import SortSpec, sort_falls_back_to_build_order
+
+    model = _fixture()
+    ids = sorted(model.elements)
+    nav_col = NavigationColumn(
+        navigation=NavigationSource(definition=_rotating_step_nav(ids))
+    )
+    defn = TableDefinition(
+        row_source=ScopeRows(types=["Block"]),
+        columns=[
+            ElementColumn(),
+            nav_col,
+            ScriptColumn(
+                source=ColumnRef(index=1),
+                snippet=_snip("def value(els): return els[0].name if els else None"),
+            ),
+            PropertyColumn(name="name", source=ColumnRef(index=1)),
+        ],
+    )
+    assert sort_falls_back_to_build_order(defn, None) is False
+    assert sort_falls_back_to_build_order(defn, SortSpec(0, "asc")) is False
+    assert sort_falls_back_to_build_order(defn, SortSpec(1, "asc")) is True
+    # sweep-covered, so a real poll-again rather than a dead end
+    assert sort_falls_back_to_build_order(defn, SortSpec(2, "asc")) is False
+    # a property column has no such backstop
+    assert sort_falls_back_to_build_order(defn, SortSpec(3, "asc")) is True
