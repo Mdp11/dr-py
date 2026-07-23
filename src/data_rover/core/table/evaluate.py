@@ -81,7 +81,11 @@ def _scope_row_keys(mm: Metamodel, model: Model, rs: ScopeRows) -> list[RowKey]:
 
 
 def _navigation_row_keys(
-    mm: Metamodel, model: Model, rs: NavigationRows, limits: TableLimits
+    mm: Metamodel,
+    model: Model,
+    rs: NavigationRows,
+    limits: TableLimits,
+    script: ScriptEvalContext | None = None,
 ) -> tuple[list[RowKey], bool]:
     """(row keys, navigation-truncated). The second half matters: a navigation
     that hit its own `max_chains`/`max_visited` budget yields an INCOMPLETE row
@@ -90,7 +94,7 @@ def _navigation_row_keys(
     defn = rs.navigation.definition
     if defn is None:  # unconfigured ({}) source: no rows, nothing truncated
         return [], False
-    result = evaluate(mm, model, defn, limits.nav_limits)
+    result = evaluate(mm, model, defn, limits.nav_limits, script=script)
     idx = rs.step_index if rs.step_index is not None else -1
     seen: dict[str, None] = {}
     for chain in result.chains:
@@ -104,12 +108,16 @@ def _navigation_row_keys(
 
 
 def _chain_row_keys(
-    mm: Metamodel, model: Model, rs: ChainRows, limits: TableLimits
+    mm: Metamodel,
+    model: Model,
+    rs: ChainRows,
+    limits: TableLimits,
+    script: ScriptEvalContext | None = None,
 ) -> tuple[list[RowKey], bool]:
     defn = rs.navigation.definition
     if defn is None:  # unconfigured ({}) source: no rows, nothing truncated
         return [], False
-    result = evaluate(mm, model, defn, limits.nav_limits)
+    result = evaluate(mm, model, defn, limits.nav_limits, script=script)
     # Chains may end in a PropertyValue terminal; it rides along as a RowKey
     # slot (see Binding) so a RowSlot column can never misread it as an id.
     keys: list[RowKey] = [tuple(chain) for chain in result.chains]
@@ -117,14 +125,18 @@ def _chain_row_keys(
 
 
 def _base_row_keys(
-    mm: Metamodel, model: Model, defn: TableDefinition, limits: TableLimits
+    mm: Metamodel,
+    model: Model,
+    defn: TableDefinition,
+    limits: TableLimits,
+    script: ScriptEvalContext | None = None,
 ) -> tuple[list[RowKey], bool]:
     rs = defn.row_source
     if isinstance(rs, ScopeRows):
         return _scope_row_keys(mm, model, rs), False
     if isinstance(rs, NavigationRows):
-        return _navigation_row_keys(mm, model, rs, limits)
-    return _chain_row_keys(mm, model, rs, limits)
+        return _navigation_row_keys(mm, model, rs, limits, script=script)
+    return _chain_row_keys(mm, model, rs, limits, script=script)
 
 
 def _expand_slot_of(defn: TableDefinition, base_slots: int, col_index: int) -> int:
@@ -171,9 +183,14 @@ def resolve_source_elements(
     step-index cell would mix in other rows' chains.
 
     `script` is the shared per-request `ScriptEvalContext` (memoized calls,
-    one budget) — required to resolve a COLLAPSE script column as a source;
-    `None` (the default, for callers with no script columns in play) makes
-    such a reference resolve to nothing, same as an unconfigured snippet.
+    one budget) — required to resolve a COLLAPSE script column as a source,
+    AND threaded through to every navigation `evaluate()` call this function
+    reaches (directly or via `_navigation_reached`/`_navigation_step_elements`)
+    so a `ScriptStep` inside that navigation can run too; `None` (the default,
+    for callers with no script work in play) makes a script-column reference
+    resolve to nothing (same as an unconfigured snippet) and makes any
+    `ScriptStep` inside a reached navigation prune silently (same as an
+    unconfigured navigation source).
     """
     if isinstance(source, RowSlot):
         # Static validation only pins chain_index for NON-chains row sources;
@@ -208,6 +225,7 @@ def resolve_source_elements(
             limits,
             step=source.step_index,
             match_projected=match,
+            script=script,
         )
     if getattr(ref_col, "mode", "collapse") == "expand":
         b = key[_expand_slot_of(defn, base_slots, source.index)]
@@ -220,7 +238,7 @@ def resolve_source_elements(
         roots = resolve_source_elements(
             mm, model, defn, key, ref_col.source, base_slots, limits, script=script
         )
-        reached = _navigation_reached(mm, model, ref_col, roots, limits)
+        reached = _navigation_reached(mm, model, ref_col, roots, limits, script=script)
         # element-producing by contract: PropertyValue terminals contribute none
         return [n for n in reached if isinstance(n, str)]
     if ref_col.kind == "script":
@@ -253,19 +271,25 @@ def _navigation_reached_ex(
     col: NavigationColumn,
     roots: list[str],
     limits: TableLimits,
+    script: ScriptEvalContext | None = None,
 ) -> tuple[list[str | PropertyValue], bool]:
     """(reached nodes, navigation-truncated) — the flag is consumed by
     `build_rows`' expand loop; display-only callers use `_navigation_reached`.
     Nodes are element ids, except `PropertyValue` terminals when the projected
     step is a scalar property step — the cell layer renders those as VALUES
     (ValuesCell/ValueCell); callers that need elements filter on
-    `isinstance(node, str)`."""
+    `isinstance(node, str)`.
+
+    `script` backs a `ScriptStep` inside `col`'s navigation the same way it
+    backs a `ScriptColumn` — see `resolve_source_elements`'s docstring."""
     defn = col.navigation.definition
     if defn is None:  # unconfigured ({}) column: reaches nothing
         return [], False
     if not roots:
         return [], False
-    result = evaluate(mm, model, defn, limits.nav_limits, row_elements=roots)
+    result = evaluate(
+        mm, model, defn, limits.nav_limits, row_elements=roots, script=script
+    )
     idx = col.step_index if col.step_index is not None else -1
     seen: dict[str | PropertyValue, None] = {}
     for chain in result.chains:
@@ -280,8 +304,9 @@ def _navigation_reached(
     col: NavigationColumn,
     roots: list[str],
     limits: TableLimits,
+    script: ScriptEvalContext | None = None,
 ) -> list[str | PropertyValue]:
-    return _navigation_reached_ex(mm, model, col, roots, limits)[0]
+    return _navigation_reached_ex(mm, model, col, roots, limits, script=script)[0]
 
 
 def _navigation_step_elements(
@@ -293,6 +318,7 @@ def _navigation_step_elements(
     *,
     step: int,
     match_projected: str | None,
+    script: ScriptEvalContext | None = None,
 ) -> list[str]:
     """Elements at chain step `step` of `col`'s navigation, evaluated from
     `roots`. With `match_projected` set (the expand-column case) only chains
@@ -302,7 +328,9 @@ def _navigation_step_elements(
     defn = col.navigation.definition
     if defn is None or not roots:
         return []
-    result = evaluate(mm, model, defn, limits.nav_limits, row_elements=roots)
+    result = evaluate(
+        mm, model, defn, limits.nav_limits, row_elements=roots, script=script
+    )
     proj = col.step_index if col.step_index is not None else -1
     seen: dict[str, None] = {}
     for chain in result.chains:
@@ -367,13 +395,16 @@ def build_rows_ex(
     would be empty without splitting anything ("Keep rows with no value"
     works with or without the split).
 
-    `script` is `None` for callers with no script columns in play (every
-    existing caller); passed through to `resolve_source_elements`/
-    `_collapse_has_value`/`_expand_values` so a `ScriptColumn` — collapse OR
-    expand — goes through the SAME machinery every other column kind does,
-    calling `value()` (memoized) exactly where a collapse/expand navigation
-    or property column would re-navigate/re-read."""
-    keys, truncated = _base_row_keys(mm, model, defn, limits)
+    `script` is `None` for callers with no script work in play; passed
+    through to `resolve_source_elements`/`_collapse_has_value`/
+    `_expand_values`/`_base_row_keys` so a `ScriptColumn` — collapse OR expand
+    — goes through the SAME machinery every other column kind does, calling
+    `value()` (memoized) exactly where a collapse/expand navigation or
+    property column would re-navigate/re-read, AND so any `ScriptStep` inside
+    a navigation (row source, navigation column, or a `ColumnRef`'s
+    step-index re-navigation) rides the same context rather than pruning to
+    nothing."""
+    keys, truncated = _base_row_keys(mm, model, defn, limits, script=script)
     base_total = len(keys)
     base_slots = _row_source_base_slots(defn, keys)
     for col in defn.columns:
@@ -466,7 +497,9 @@ def _collapse_has_value(
             return p["id"] in model.elements, False
         return any(i in model.elements for i in p["ids"]), False
     if isinstance(col, NavigationColumn):
-        reached, truncated = _navigation_reached_ex(mm, model, col, roots, limits)
+        reached, truncated = _navigation_reached_ex(
+            mm, model, col, roots, limits, script=script
+        )
         return bool(reached), truncated
     for eid in roots:
         raw = model.elements[eid].properties.get(col.name)
@@ -516,7 +549,9 @@ def _expand_values(
             ), False
         return [PropertyValue(v) for v in p["values"] if v is not None], False
     if isinstance(col, NavigationColumn):
-        reached, truncated = _navigation_reached_ex(mm, model, col, roots, limits)
+        reached, truncated = _navigation_reached_ex(
+            mm, model, col, roots, limits, script=script
+        )
         # PropertyValue terminals ride into the RowKey as-is (see Binding);
         # cells.py renders them back as read-only ValueCells.
         bindings: list[Binding] = list(reached)
@@ -554,6 +589,157 @@ def _expand_values(
 class SortSpec:
     column: int
     direction: Literal["asc", "desc"]
+
+
+#: Emitted (once per sort — `order_rows` decides once, and `add_warning` dedupes
+#: by exact text anyway) when a sort is skipped because computing it would mean
+#: driving a navigation `ScriptStep` under a CACHE-ONLY context. See
+#: `_sort_script` for why that is a dead end rather than a "poll again".
+#:
+#: Deliberately says "SORTING BY this column needs", not "this column's
+#: navigation": the sort column is often a property/element column merely
+#: SOURCED from the navigation column, and has no navigation of its own.
+SORT_SCRIPT_NAV_WARNING = (
+    "script step: sorting by this column needs a navigation script step whose "
+    "values are not computed for every row, so the table cannot be sorted by "
+    "it; rows stay in build order"
+)
+
+
+def _nav_col_has_script(col: NavigationColumn) -> bool:
+    # Function-local import: navigation.resolve imports navigation.schema only,
+    # but keeping it local matches this module's other lazy imports and keeps
+    # the module-import graph of core.table flat.
+    from data_rover.core.navigation.resolve import navigation_has_script
+
+    defn = col.navigation.definition
+    return defn is not None and navigation_has_script(defn)
+
+
+def _source_reaches_script_navigation(
+    defn: TableDefinition, source: ColumnSource
+) -> bool:
+    """Would resolving `source` evaluate a navigation containing a `ScriptStep`?
+
+    Mirrors `resolve_source_elements` BRANCH FOR BRANCH — if that function
+    grows a new way to reach a navigation, this must grow the same one. A
+    `RowSlot` and any EXPAND reference read a RowKey slot and evaluate nothing.
+
+    A collapse `ScriptColumn` reference is a SWEEP-COVERED BOUNDARY and stops
+    the walk (see `_sort_script` for the whole argument): `script_sweep.
+    _run_inner` resolves every collapse script column's `source` LIVE, once per
+    built row, to enumerate its `value()` work — which drives and caches every
+    navigation `step()` underneath it on the way. So a sort that reaches a
+    navigation only THROUGH such a column pends once and converges on the next
+    poll, exactly like a plain script column; degrading it would tie every row
+    forever AND (a degrade records no pending miss) never even kick the sweep
+    that would have fixed it. An unconfigured one resolves nothing at all.
+
+    Terminates because a column's source can only reference EARLIER columns
+    (schema guarantee — see `_expand_slot_of`).
+    """
+    if isinstance(source, RowSlot):
+        return False
+    ref_col = defn.columns[source.index]
+    if isinstance(ref_col, NavigationColumn) and source.step_index is not None:
+        # Step-override: re-navigates ref_col's navigation from ref_col's own
+        # source, EXPAND or not.
+        return _nav_col_has_script(ref_col) or _source_reaches_script_navigation(
+            defn, ref_col.source
+        )
+    if getattr(ref_col, "mode", "collapse") == "expand":
+        return False  # reads the promoted RowKey slot; nothing is evaluated
+    if isinstance(ref_col, ElementColumn):
+        return _source_reaches_script_navigation(defn, ref_col.source)
+    if isinstance(ref_col, NavigationColumn):
+        return _nav_col_has_script(ref_col) or _source_reaches_script_navigation(
+            defn, ref_col.source
+        )
+    if isinstance(ref_col, ScriptColumn):
+        return False  # sweep-covered boundary (docstring); stop the walk
+    return False  # property columns are not element-producing
+
+
+def _sort_reaches_script_navigation(defn: TableDefinition, col: Column) -> bool:
+    """Would computing `col`'s sort value evaluate a navigation containing a
+    `ScriptStep` that NOTHING will ever compute? Mirrors `_sort_value`'s own
+    branches: every `expand` branch reads a RowKey slot and evaluates nothing
+    at all, and a `ScriptColumn` sort is the sweep-covered boundary
+    `_source_reaches_script_navigation` documents — the sweep enumerates that
+    very column's `value()` work by resolving its source live per row, so both
+    layers are filled after one round."""
+    if isinstance(col, ElementColumn):
+        return _source_reaches_script_navigation(defn, col.source)
+    if col.mode == "expand":
+        return False
+    if isinstance(col, NavigationColumn):
+        return _nav_col_has_script(col) or _source_reaches_script_navigation(
+            defn, col.source
+        )
+    if isinstance(col, ScriptColumn):
+        return False
+    return _source_reaches_script_navigation(defn, col.source)  # PropertyColumn
+
+
+def sort_falls_back_to_build_order(
+    defn: TableDefinition, sort: SortSpec | None
+) -> bool:
+    """Would a CACHE-ONLY `order_rows(defn, ..., sort)` degrade to build order
+    (and emit `SORT_SCRIPT_NAV_WARNING`) rather than sort? See `_sort_script`.
+
+    Public because the decision is O(definition) and depends on NOTHING else —
+    not the cell cache, not the model, not the context. That is what lets the
+    API layer re-derive it when it serves a CACHED row order and so never calls
+    `order_rows` at all: a degraded order records no pending miss, so it IS
+    cached, and without this the only request in a whole rev that explains
+    itself is the one that happened to build the order. Every later reload, tab
+    reopen, and second viewer would get a table they asked to sort, unsorted,
+    with no explanation anywhere."""
+    if sort is None:
+        return False
+    return _sort_reaches_script_navigation(defn, defn.columns[sort.column])
+
+
+def _sort_script(
+    defn: TableDefinition, col: Column, script: ScriptEvalContext | None
+) -> ScriptEvalContext | None:
+    """The context the sort pass may drive for `col` — `script` itself, or
+    `None` to fall back to the script-less (tie-everything) sort. Called ONCE
+    per `order_rows`, not once per row: the answer depends only on `(defn, col,
+    script.cache_only)`, so per-row evaluation was 50 000 identical traversals
+    and 50 000 `add_warning` dedup probes on a 50 000-row table — and left the
+    warning unemitted on an empty key set, the one case where no row is sorted.
+
+    WHY the fallback exists. Under a CACHE-ONLY context (every whole-table pass
+    of every table route) a cache miss synthesizes a `pending` result and bumps
+    `pending_misses`, which is the route's signal to degrade to build order,
+    kick a background sweep, and tell the client to poll. That contract holds
+    wherever the sweep computes the missing cell — which is every `value()`
+    cell of a collapse `ScriptColumn`, AND (because the sweep resolves each such
+    column's `source` LIVE per row to enumerate that work) every navigation
+    `step()` cell underneath one. It does NOT hold for a `step()` call that ONLY
+    a SORT wants: the sweep never calls `order_rows`, so nothing in the system
+    will ever fill it. Driving the context anyway produced one `pending` per
+    off-window row, a page permanently degraded to build order, `script_status:
+    failed` for the whole rev, and a once-a-second poll loop that could never
+    converge.
+
+    So under cache-only we do NOT drive the context for such a sort: the
+    navigation is evaluated with `script=None`, its `ScriptStep` prunes
+    silently (exactly what it did before the context was threaded in), every
+    row ties, and the rows come out in build order — but WITH a warning, so the
+    user is told rather than silently handed an unsorted table. The LIVE path
+    (`script.cache_only` False) is untouched and still sorts for real.
+
+    The warning rides the response that ran the sort pass; a later request
+    served from the API layer's row-order cache never calls `order_rows` at all
+    and re-derives it from `sort_falls_back_to_build_order` instead."""
+    if script is None or not script.cache_only:
+        return script
+    if not _sort_reaches_script_navigation(defn, col):
+        return script
+    script.add_warning(SORT_SCRIPT_NAV_WARNING)
+    return None
 
 
 def _display_name(model: Model, eid: str) -> str:
@@ -622,10 +808,15 @@ def _sort_value(
     `cells.py`'s `_expand_slot_of` use) — re-deriving it via
     resolve_source_elements/re-navigation would collapse every row sharing the
     same root back onto that root's WHOLE reached set, losing the per-row value
-    that made it a binding column in the first place."""
+    that made it a binding column in the first place.
+
+    `script` is the context `order_rows` already resolved through
+    `_sort_script` — `None` there means either "no script work in play" or "this
+    cache-only sort falls back to build order"; either way this function just
+    threads it through, and the fallback decision is not re-taken per row."""
     if isinstance(col, ElementColumn):
         els = resolve_source_elements(
-            mm, model, defn, key, col.source, base_slots, limits
+            mm, model, defn, key, col.source, base_slots, limits, script=script
         )
         if not els:
             return (1, "")
@@ -638,7 +829,7 @@ def _sort_value(
                 return (1, ())
             return (0, (float(v),)) if numeric else (0, (str(v).casefold(),))  # type: ignore[arg-type]
         els = resolve_source_elements(
-            mm, model, defn, key, col.source, base_slots, limits
+            mm, model, defn, key, col.source, base_slots, limits, script=script
         )
         vals: list[Binding] = []
         for eid in els:
@@ -702,9 +893,9 @@ def _sort_value(
             return (1, "")
         return (0, (_display_name(model, b).casefold(), b))
     roots = resolve_source_elements(
-        mm, model, defn, key, col.source, base_slots, limits
+        mm, model, defn, key, col.source, base_slots, limits, script=script
     )
-    reached = _navigation_reached(mm, model, col, roots, limits)
+    reached = _navigation_reached(mm, model, col, roots, limits, script=script)
     if not reached:
         return (1, 0 if col.sort_mode == "count" else ())
     if col.sort_mode == "count":
@@ -737,6 +928,12 @@ def order_rows(
     if sort is None:
         return list(keys)
     col = defn.columns[sort.column]
+    # Taken ONCE, here, rather than inside `_sort_value`: it depends only on
+    # (defn, col, script.cache_only), so per-row evaluation was pure repetition
+    # — and skipped the warning entirely on an empty key set. Nothing between
+    # here and the decorate loop mutates what it reads (`cache_only` is a phase
+    # flag the caller flips around whole passes, never mid-pass).
+    script = _sort_script(defn, col, script)
     expand_count = sum(
         1 for c in defn.columns if getattr(c, "mode", "collapse") == "expand"
     )

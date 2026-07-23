@@ -936,6 +936,48 @@ class ScriptStatusOut(BaseModel):
     message: str | None = None
 
 
+class ScriptErrorItemOut(BaseModel):
+    """One failed script cell, addressable by grid position.
+
+    `row_index` is an index into the row order the CLIENT DISPLAYS for the same
+    `(definition, sort, model_rev)` — the recap route derives it exactly the way
+    `/tables/evaluate` derives its page, degrade rules included — so the panel
+    can scroll straight to the offending cell. `column_index` indexes
+    `defn.columns`, i.e. the same positions as `TablePageOut.columns` and each
+    `TableRowOut.cells` (hidden columns are NOT filtered out, so the two stay
+    aligned).
+
+    `row_element_id`/`row_label` describe the row's first key slot when it holds
+    an element id (`display_name` of it), purely so the panel can name the row
+    without a second round trip; both are None for a row keyed by a scalar.
+    """
+
+    row_index: int
+    row_element_id: str | None = None
+    row_label: str | None = None
+    column_index: int
+    column_label: str
+    message: str
+
+
+class ScriptErrorsOut(BaseModel):
+    """Whole-table script-error recap (cache-only; never drives the guest).
+
+    `state` is a one-valued literal on purpose: the recap route answers either
+    this shape with 200, or a `ScriptStatusOut` (`computing`/`failed`) with 202,
+    so a client can discriminate the two bodies on `state` alone even though the
+    STATUS CODE is the actual retry signal (same contract as `/tables/export`).
+
+    `errors` is capped at `routes.tables.SCRIPT_ERRORS_CAP`; `total_errors` is
+    always the full count, and `truncated` says the list is short of it.
+    """
+
+    state: Literal["ready"] = "ready"
+    errors: list[ScriptErrorItemOut]
+    total_errors: int
+    truncated: bool
+
+
 class TablePageOut(BaseModel):
     columns: list[TableColumnOut]
     rows: list[TableRowOut]

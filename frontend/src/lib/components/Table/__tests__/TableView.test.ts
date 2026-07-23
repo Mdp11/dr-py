@@ -17,6 +17,16 @@ const h = vi.hoisted(() => ({
 	page: undefined as unknown,
 	warnings: [] as string[],
 	scriptStatus: null as unknown,
+	scriptErrors: null as unknown,
+	scriptErrorsPhase: 'idle' as 'idle' | 'loading' | 'error' | 'done',
+	/** Mirrors the store's `_recapKeys.has(tab)`: is there a settled page state
+	 * a recap could describe RIGHT NOW (false while a load is in flight). */
+	canCheckScriptErrors: true,
+	/** Mirrors the store's evidence from the page on screen: why a script cell
+	 * holds no value, or null when they all do. */
+	uncomputedScriptCellReason: null as string | null,
+	requestScriptErrors: vi.fn(),
+	jump: vi.fn(),
 	draft: {
 		tabId: 'tbl:draft:1',
 		name: 'My Table',
@@ -54,6 +64,13 @@ vi.mock('$lib/state', () => ({
 	getTableLoading: () => false,
 	getTableSort: () => undefined,
 	getTableScriptStatus: () => h.scriptStatus,
+	getScriptErrors: () => h.scriptErrors,
+	getScriptErrorsPhase: () => h.scriptErrorsPhase,
+	canRequestScriptErrors: () => h.canCheckScriptErrors,
+	getUncomputedScriptCellReason: () => h.uncomputedScriptCellReason,
+	requestScriptErrors: h.requestScriptErrors,
+	requestScrollToCell: h.jump,
+	consumeScrollRequest: () => null,
 	getTableError: () => undefined,
 	setTableSort: vi.fn(),
 	updateTableDefinition: vi.fn(),
@@ -91,6 +108,12 @@ afterEach(() => {
 	h.editable = true;
 	h.warnings = [];
 	h.scriptStatus = null;
+	h.scriptErrors = null;
+	h.scriptErrorsPhase = 'idle';
+	h.canCheckScriptErrors = true;
+	h.uncomputedScriptCellReason = null;
+	h.requestScriptErrors.mockReset();
+	h.jump.mockReset();
 });
 
 describe('TableView settings popup', () => {
@@ -144,6 +167,340 @@ describe('TableView script-status strip', () => {
 			const strip = document.querySelector('[data-testid="table-script-status"]');
 			expect(strip?.textContent).toContain('sweep died');
 			expect(strip?.className).toContain('text-destructive');
+		} finally {
+			unmount(c);
+		}
+	});
+});
+
+// Task 6 + final review: the script-error recap, fetched ON DEMAND. A failing
+// script cell can be anywhere in a virtualized table, so the badge → panel (the
+// whole list) → jump (scroll the grid to it) chain is the only way to reach
+// one. The recap comes from the store (whole-table `POST /tables/script-errors`,
+// stubbed here), and that route re-renders the whole table cache-only — so it
+// is NOT fetched when the table settles: the badge is a neutral "check for
+// script errors" affordance and the click is what pays for the pass. The
+// fetch/retry discipline is pinned in
+// state/__tests__/table-editor-script-errors.test.ts.
+describe('TableView script-error badge + panel', () => {
+	const READY = { state: 'ready', done: 10, total: 10 };
+	const RECAP = {
+		state: 'ready',
+		errors: [
+			{
+				row_index: 3,
+				row_element_id: 't4',
+				row_label: 'Pump A',
+				column_index: 1,
+				column_label: 'script',
+				message: 'ZeroDivisionError: division by zero'
+			}
+		],
+		total_errors: 1,
+		truncated: false
+	};
+
+	it('shows no badge for a table with no script work', () => {
+		h.scriptStatus = null;
+		h.canCheckScriptErrors = false;
+		const c = render('tbl:draft:1');
+		try {
+			expect(document.querySelector('[data-testid="script-errors-badge"]')).toBeNull();
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('shows no badge while the sweep is still computing', () => {
+		// Row order is degraded (build order) until it settles, so a recap's row
+		// indices would not address what the grid is showing.
+		h.scriptStatus = { state: 'computing', done: 2, total: 42 };
+		h.canCheckScriptErrors = false;
+		const c = render('tbl:draft:1');
+		try {
+			expect(document.querySelector('[data-testid="script-errors-badge"]')).toBeNull();
+		} finally {
+			unmount(c);
+		}
+	});
+
+	// Re-review finding (MINOR): a badge that cannot be acted on. A sort or a
+	// reload drops the store's page-state signature the instant the request goes
+	// out, but the PREVIOUS page's `script_status` survives it — so a badge gated
+	// on the status alone stayed lit, and clicking it did nothing at all
+	// (`requestScriptErrors` no-ops, the panel opens and the effect shuts it in
+	// the same flush). Gate on the store's askability instead.
+	it('hides the badge while a re-evaluation is in flight', () => {
+		h.scriptStatus = READY; // still the previous page's, and stale
+		h.canCheckScriptErrors = false;
+		const c = render('tbl:draft:1');
+		try {
+			expect(document.querySelector('[data-testid="script-errors-badge"]')).toBeNull();
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('offers a NEUTRAL check affordance once settled, and fetches only on click', () => {
+		h.scriptStatus = READY;
+		const c = render('tbl:draft:1');
+		try {
+			const badge = document.querySelector('[data-testid="script-errors-badge"]') as HTMLElement;
+			expect(badge).not.toBeNull();
+			expect(badge.textContent).toContain('Check for script errors');
+			// Nothing is known yet, so nothing may be styled as a failure.
+			expect(badge.className).not.toContain('destructive');
+			// Rendering the badge must not have cost a whole-table pass.
+			expect(h.requestScriptErrors).not.toHaveBeenCalled();
+
+			badge.click();
+			flushSync();
+			expect(h.requestScriptErrors).toHaveBeenCalledTimes(1);
+			expect(h.requestScriptErrors.mock.calls[0]).toEqual(['tbl:draft:1']);
+			// ...and the panel opens, so the click has a visible answer.
+			expect(document.querySelector('[data-testid="script-errors-panel"]')).not.toBeNull();
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('says so while the check is in flight', () => {
+		h.scriptStatus = READY;
+		h.scriptErrorsPhase = 'loading';
+		const c = render('tbl:draft:1');
+		try {
+			const badge = document.querySelector('[data-testid="script-errors-badge"]') as HTMLElement;
+			expect(badge.textContent).toContain('Checking');
+			badge.click();
+			flushSync();
+			expect(document.querySelector('[data-testid="script-errors-panel"]')?.textContent).toContain(
+				'Checking'
+			);
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('answers plainly when the fetched recap is empty', () => {
+		h.scriptStatus = READY;
+		h.scriptErrorsPhase = 'done';
+		h.scriptErrors = { state: 'ready', errors: [], total_errors: 0, truncated: false };
+		const c = render('tbl:draft:1');
+		try {
+			const badge = document.querySelector('[data-testid="script-errors-badge"]') as HTMLElement;
+			expect(badge.textContent).toContain('No script errors');
+			expect(badge.className).not.toContain('destructive');
+			badge.click();
+			flushSync();
+			expect(document.querySelector('[data-testid="script-errors-panel"]')?.textContent).toContain(
+				'No script errors'
+			);
+		} finally {
+			unmount(c);
+		}
+	});
+
+	// Re-review finding (IMPORTANT): with no script runner the recap route now
+	// answers ZERO errors (the honest server-side answer — nothing ran, so
+	// nothing is known to have failed), and the wire cannot carry the
+	// distinction. Rendering that as "No script errors" puts a green tick
+	// directly above a grid whose every script cell reads
+	// `#ERROR: script runner unavailable`. The cells are the evidence, so the
+	// client uses them.
+	it('does not claim a clean table when script cells were never computed', () => {
+		h.scriptStatus = READY; // the unsorted-collapse shape: no calls, so `ready`
+		h.scriptErrorsPhase = 'done';
+		h.scriptErrors = { state: 'ready', errors: [], total_errors: 0, truncated: false };
+		h.uncomputedScriptCellReason = 'script runner unavailable';
+		const c = render('tbl:draft:1');
+		try {
+			const badge = document.querySelector('[data-testid="script-errors-badge"]') as HTMLElement;
+			expect(badge.textContent).not.toContain('No script errors');
+			expect(badge.textContent).toContain('unknown');
+			badge.click();
+			flushSync();
+			const panel = document.querySelector('[data-testid="script-errors-panel"]') as HTMLElement;
+			expect(panel.textContent).not.toContain('No script errors in this table');
+			// ...and it says WHY, which for the `ready` shape is the only place the
+			// user is told anything at all (there is no failure strip above).
+			expect(panel.textContent).toContain('script runner unavailable');
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('still answers a plain "none" when the check really did cover the table', () => {
+		// The guard must not become a shrug: a healthy runner that found nothing
+		// is a useful answer, and the user asked for it.
+		h.scriptStatus = { state: 'failed', done: 4, total: 10, message: 'sweep died' };
+		h.scriptErrorsPhase = 'done';
+		h.scriptErrors = { state: 'ready', errors: [], total_errors: 0, truncated: false };
+		h.uncomputedScriptCellReason = null;
+		const c = render('tbl:draft:1');
+		try {
+			const badge = document.querySelector('[data-testid="script-errors-badge"]') as HTMLElement;
+			expect(badge.textContent).toContain('No script errors');
+			badge.click();
+			flushSync();
+			expect(document.querySelector('[data-testid="script-errors-panel"]')?.textContent).toContain(
+				'No script errors in this table'
+			);
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('leaves a real error count alone when cells are uncomputed too', () => {
+		// A known count is a stronger statement than "unknown": never downgrade it.
+		h.scriptStatus = READY;
+		h.scriptErrorsPhase = 'done';
+		h.scriptErrors = RECAP;
+		h.uncomputedScriptCellReason = 'script runner unavailable';
+		const c = render('tbl:draft:1');
+		try {
+			const badge = document.querySelector('[data-testid="script-errors-badge"]') as HTMLElement;
+			expect(badge.textContent).toContain('1 script error');
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('reports a failed check instead of pretending there are no errors', () => {
+		h.scriptStatus = READY;
+		h.scriptErrorsPhase = 'error';
+		const c = render('tbl:draft:1');
+		try {
+			const badge = document.querySelector('[data-testid="script-errors-badge"]') as HTMLElement;
+			badge.click();
+			flushSync();
+			const panel = document.querySelector('[data-testid="script-errors-panel"]') as HTMLElement;
+			expect(panel.textContent).toContain('Could not check');
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('badges the error count, opens the panel, and jumps to the cell on click', () => {
+		h.scriptStatus = READY;
+		h.scriptErrorsPhase = 'done';
+		h.scriptErrors = RECAP;
+		const c = render('tbl:draft:1');
+		try {
+			const badge = document.querySelector('[data-testid="script-errors-badge"]') as HTMLElement;
+			expect(badge).not.toBeNull();
+			expect(badge.textContent).toContain('1 script error');
+			// A known failure count IS a failure: the destructive styling returns.
+			expect(badge.className).toContain('destructive');
+			// Closed until asked for — it overlays the grid.
+			expect(document.querySelector('[data-testid="script-errors-panel"]')).toBeNull();
+
+			badge.click();
+			flushSync();
+			const panel = document.querySelector('[data-testid="script-errors-panel"]') as HTMLElement;
+			expect(panel).not.toBeNull();
+			expect(panel.textContent).toContain('Pump A');
+			expect(panel.textContent).toContain('script');
+			expect(panel.textContent).toContain('ZeroDivisionError');
+
+			const entry = panel.querySelector('[data-testid="script-error-entry"]') as HTMLElement;
+			// The full message stays reachable even though the line is truncated.
+			expect(entry.getAttribute('title')).toBe('ZeroDivisionError: division by zero');
+			entry.click();
+			flushSync();
+
+			// The jump is recorded as a store request (the grid consumes it), and
+			// the panel closes so it doesn't sit over the row it just jumped to.
+			expect(h.jump).toHaveBeenCalledTimes(1);
+			expect(h.jump.mock.calls[0]).toEqual(['tbl:draft:1', 3, 1]);
+			expect(document.querySelector('[data-testid="script-errors-panel"]')).toBeNull();
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('wires the badge to the panel for assistive tech', () => {
+		h.scriptStatus = READY;
+		h.scriptErrorsPhase = 'done';
+		h.scriptErrors = RECAP;
+		const c = render('tbl:draft:1');
+		try {
+			const badge = document.querySelector('[data-testid="script-errors-badge"]') as HTMLElement;
+			expect(badge.getAttribute('aria-expanded')).toBe('false');
+			expect(badge.getAttribute('aria-haspopup')).toBe('dialog');
+			badge.click();
+			flushSync();
+			const panel = document.querySelector('[data-testid="script-errors-panel"]') as HTMLElement;
+			expect(badge.getAttribute('aria-expanded')).toBe('true');
+			// The badge names the element it controls, and that element exists.
+			expect(badge.getAttribute('aria-controls')).toBe(panel.id);
+			expect(panel.id).not.toBe('');
+			expect(panel.getAttribute('role')).toBe('dialog');
+			expect(panel.getAttribute('aria-label')).toBeTruthy();
+		} finally {
+			unmount(c);
+		}
+	});
+
+	// Escape must work from INSIDE the panel too, not just from the badge: once
+	// the user tabs into the list there is otherwise no keyboard way out of it
+	// (the panel deliberately does not trap focus, but it does overlay the grid).
+	it('dismisses the panel on Escape from the badge and from an entry', () => {
+		h.scriptStatus = READY;
+		h.scriptErrorsPhase = 'done';
+		h.scriptErrors = RECAP;
+		const c = render('tbl:draft:1');
+		try {
+			const badge = document.querySelector('[data-testid="script-errors-badge"]') as HTMLElement;
+			badge.click();
+			flushSync();
+			expect(document.querySelector('[data-testid="script-errors-panel"]')).not.toBeNull();
+
+			badge.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+			flushSync();
+			expect(document.querySelector('[data-testid="script-errors-panel"]')).toBeNull();
+
+			badge.click();
+			flushSync();
+			const entry = document.querySelector('[data-testid="script-error-entry"]') as HTMLElement;
+			entry.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+			flushSync();
+			expect(document.querySelector('[data-testid="script-errors-panel"]')).toBeNull();
+			// Dismissing is not jumping.
+			expect(h.jump).not.toHaveBeenCalled();
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('leaves the panel open on any other key', () => {
+		h.scriptStatus = READY;
+		h.scriptErrorsPhase = 'done';
+		h.scriptErrors = RECAP;
+		const c = render('tbl:draft:1');
+		try {
+			const badge = document.querySelector('[data-testid="script-errors-badge"]') as HTMLElement;
+			badge.click();
+			flushSync();
+			badge.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+			flushSync();
+			expect(document.querySelector('[data-testid="script-errors-panel"]')).not.toBeNull();
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('says how many of the total are listed when the recap is truncated', () => {
+		h.scriptStatus = READY;
+		h.scriptErrorsPhase = 'done';
+		h.scriptErrors = { ...RECAP, total_errors: 4021, truncated: true };
+		const c = render('tbl:draft:1');
+		try {
+			const badge = document.querySelector('[data-testid="script-errors-badge"]') as HTMLElement;
+			expect(badge.textContent).toContain('4021 script errors');
+			badge.click();
+			flushSync();
+			const panel = document.querySelector('[data-testid="script-errors-panel"]');
+			expect(panel?.textContent).toContain('showing first 1');
 		} finally {
 			unmount(c);
 		}

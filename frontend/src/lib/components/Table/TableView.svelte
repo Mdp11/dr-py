@@ -7,15 +7,21 @@
 	import {
 		abandonTableEvaluationSuspension,
 		canEdit,
+		canRequestScriptErrors,
 		downloadTable,
 		ensureTableDraft,
+		getScriptErrors,
+		getScriptErrorsPhase,
 		getTableConflict,
 		getTableDraft,
 		getTableLoading,
 		getTablePage,
 		getTableScriptStatus,
 		getTableWarnings,
+		getUncomputedScriptCellReason,
 		reloadTableDraft,
+		requestScriptErrors,
+		requestScrollToCell,
 		resumeTableEvaluation,
 		saveAsTableDraft,
 		saveTableDraft,
@@ -24,7 +30,7 @@
 		updateTableDefinition,
 		type ExportProgress
 	} from '$lib/state';
-	import { Settings } from '@lucide/svelte';
+	import { AlertTriangle, Check, Search, Settings } from '@lucide/svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import {
 		addColumn,
@@ -33,6 +39,7 @@
 		newScriptColumn
 	} from '$lib/table/columns';
 	import ColumnManager from './ColumnManager.svelte';
+	import ScriptErrorsPanel from './ScriptErrorsPanel.svelte';
 	import TableGrid from './TableGrid.svelte';
 
 	let { tabId }: { tabId: string } = $props();
@@ -49,6 +56,69 @@
 	// in BUILD order until it lands — a sort over half-computed values would
 	// reshuffle on every poll, so the backend deliberately doesn't sort them).
 	const scriptStatus = $derived(getTableScriptStatus(tabId));
+	// Whole-table recap of the failing script cells. The grid is virtualized, so
+	// without this a failure a few thousand rows down is unreachable — the badge
+	// is how it is found.
+	//
+	// It is fetched ON DEMAND, on the badge click, and the up-front error count
+	// is deliberately given up: `POST /tables/script-errors` renders the whole
+	// table cache-only, so for the commonest shape (an unsorted collapse script
+	// column, whose page never computes anything outside the visible window)
+	// fetching it on settle would kick a full background sweep on every table
+	// open. So the badge is NEUTRAL until a recap says otherwise.
+	const scriptErrors = $derived(getScriptErrors(tabId));
+	const scriptErrorsPhase = $derived(getScriptErrorsPhase(tabId));
+	// The badge shows exactly while asking would DO something — the store's own
+	// answer, not a re-derivation from `scriptStatus`. A settled status is
+	// necessary (while `computing` the grid is in degraded build order, which a
+	// recap's row indices would not address) but NOT sufficient: a sort or reload
+	// in flight has already dropped the askable page state while the previous
+	// page's status is still sitting there, and a badge lit in that window
+	// invites a click that does nothing at all.
+	const canCheckScriptErrors = $derived(canRequestScriptErrors(tabId));
+	const scriptErrorCount = $derived(scriptErrors?.total_errors ?? 0);
+	// An empty recap means "we checked, there are none" — UNLESS the cells on
+	// screen say nothing was ever computed. The backend answers a runner-less
+	// recap with zero errors (the honest count: nothing ran, so nothing is known
+	// to have failed) and `ScriptErrorsOut` has no room to say which zero it is,
+	// so the client tells them apart from the page it is already showing. Only
+	// consulted for an empty recap, and `&&` short-circuits, so a table with a
+	// real count (or no answer yet) never pays for the scan.
+	const uncomputedReason = $derived(
+		scriptErrorsPhase === 'done' && scriptErrorCount === 0
+			? getUncomputedScriptCellReason(tabId)
+			: null
+	);
+	let scriptErrorsOpen = $state(false);
+	// The panel must not outlive what it describes: the badge going away (the
+	// table went back to computing, or lost its script column), or the recap
+	// being invalidated under it by a newer page state — `idle` means nothing
+	// was asked for the state now on screen, so there is nothing to show.
+	$effect(() => {
+		if (!canCheckScriptErrors || scriptErrorsPhase === 'idle') scriptErrorsOpen = false;
+	});
+	// Opening IS asking: the store no-ops when a recap for this page state is
+	// already on hand (or already in flight), so a double click costs one fetch.
+	function toggleScriptErrors(): void {
+		if (scriptErrorsOpen) {
+			scriptErrorsOpen = false;
+			return;
+		}
+		requestScriptErrors(tabId);
+		scriptErrorsOpen = true;
+	}
+	function jumpToErrorCell(rowIndex: number, columnIndex: number): void {
+		requestScrollToCell(tabId, rowIndex, columnIndex);
+		scriptErrorsOpen = false;
+	}
+	// Escape dismisses the panel from anywhere inside it (keydown bubbles from
+	// the badge and from every entry button up to their shared wrapper) — the
+	// same one-liner idiom `PropertyColumnEditor`'s suggestion popup uses. No
+	// focus trap: the panel is a non-modal disclosure, so tabbing out of it is
+	// a legitimate way to leave it too.
+	function onScriptErrorsKeydown(e: KeyboardEvent): void {
+		if (e.key === 'Escape') scriptErrorsOpen = false;
+	}
 	const loading = $derived(getTableLoading(tabId));
 	// The sweep's fraction, or null when it has no total to divide by. Drives a
 	// DETERMINATE bar; everything else falls back to the indeterminate sweep.
@@ -341,6 +411,67 @@
 			<p class="px-3 py-1.5 text-xs text-destructive" data-testid="table-script-status">
 				{scriptStatus.message ?? 'Computing this table’s script values failed.'}
 			</p>
+		{/if}
+		<!-- Script-error badge + panel. Same fixed-chrome strip family as the
+		     conflict/warnings/status lines above (and for the same reason: it
+		     must not scroll away, nor offset the virtualizer's row math). The
+		     strip is the panel's positioning context — the dropdown is absolute
+		     so it overlays the grid instead of pushing it down. -->
+		{#if canCheckScriptErrors}
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<div class="relative flex items-center px-3 py-1" onkeydown={onScriptErrorsKeydown}>
+				<button
+					type="button"
+					data-testid="script-errors-badge"
+					aria-expanded={scriptErrorsOpen}
+					aria-controls="script-errors-panel-{tabId}"
+					aria-haspopup="dialog"
+					title={scriptErrorCount > 0
+						? 'Show the rows whose script column failed'
+						: uncomputedReason !== null
+							? `Script cells on this page were never computed (${uncomputedReason}), so this table could not be checked`
+							: 'Check the whole table for failing script cells'}
+					class="flex items-center gap-1.5 rounded border px-2 py-0.5 text-xs transition-colors {scriptErrorCount >
+					0
+						? 'border-destructive/40 bg-destructive/10 text-destructive hover:bg-destructive/20'
+						: uncomputedReason !== null
+							? 'border-warning/40 bg-warning/15 text-warning hover:bg-warning/25'
+							: 'border-border bg-muted/60 text-muted-foreground hover:bg-muted'}"
+					onclick={toggleScriptErrors}
+				>
+					{#if scriptErrorCount > 0}
+						<AlertTriangle class="h-3 w-3 shrink-0" />
+						{scriptErrorCount} script error{scriptErrorCount === 1 ? '' : 's'}
+					{:else if scriptErrorsPhase === 'loading'}
+						<span
+							class="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-muted border-t-primary"
+						></span>
+						Checking for script errors…
+					{:else if uncomputedReason !== null}
+						<!-- An empty recap over cells that were never computed. Not a
+						     failure (nothing is known to have failed) and emphatically
+						     not a clean bill of health — so: warning-toned, and honest
+						     about the unknown. -->
+						<AlertTriangle class="h-3 w-3 shrink-0" />
+						Script errors unknown
+					{:else if scriptErrors}
+						<Check class="h-3 w-3 shrink-0" />
+						No script errors
+					{:else}
+						<Search class="h-3 w-3 shrink-0" />
+						Check for script errors
+					{/if}
+				</button>
+				{#if scriptErrorsOpen}
+					<ScriptErrorsPanel
+						id="script-errors-panel-{tabId}"
+						recap={scriptErrors}
+						phase={scriptErrorsPhase}
+						{uncomputedReason}
+						onJump={jumpToErrorCell}
+					/>
+				{/if}
+			</div>
 		{/if}
 		{#if saveError}
 			<p class="px-3 py-1 text-xs text-destructive">{saveError}</p>

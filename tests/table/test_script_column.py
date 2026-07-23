@@ -8,6 +8,7 @@ from pydantic import ValidationError
 
 from data_rover.core.metamodel.schema import ElementType, Metamodel, PropertyDef
 from data_rover.core.model.model import Model
+from data_rover.core.navigation.schema import PathNavigation, RowStart, Scope, ScriptStep
 from data_rover.core.script.embed import ScriptEvalContext
 from data_rover.core.script.runner import RunLimits, ScriptBudget
 from data_rover.core.script.schema import SnippetDefinition, SnippetSource
@@ -17,6 +18,10 @@ from data_rover.core.table.resolve import resolve_table_refs, table_has_script
 from data_rover.core.table.schema import (
     TABLE_ADAPTER,
     ColumnRef,
+    ElementColumn,
+    NavigationColumn,
+    NavigationRows,
+    NavigationSource,
     PropertyColumn,
     RowSlot,
     ScopeRows,
@@ -412,3 +417,546 @@ def test_expand_rederive_is_cache_only() -> None:
     assert all(isinstance(row[0], PendingCell) for row in cells)
     assert runner.calls[0] == 0  # re-derive still never called the guest
     ctx.close()
+
+
+# ---- Task 3 (script correctness): navigation ScriptStep threaded through ----
+#
+# `evaluate.py`'s navigation helpers (row source AND navigation columns) must
+# forward the table's `ScriptEvalContext` into `navigation.evaluate.evaluate`
+# so a navigation containing a ScriptStep can actually run when used inside a
+# table. Fixture: this file's `_mm()`/`_fixture()` (3 "Block" elements).
+
+
+def _nav_with_script_step(target_expr: str) -> PathNavigation:
+    """One-step navigation whose only step is a script step."""
+    return PathNavigation(
+        kind="path",
+        start=Scope(types=[]),
+        steps=[ScriptStep(snippet=_snip(f"def step(el):\n    return {target_expr}"))],
+    )
+
+
+def test_nav_script_step_as_row_source() -> None:
+    mm = _mm()
+    model = _fixture()
+    ids = sorted(model.elements)
+    defn = TableDefinition(
+        row_source=NavigationRows(
+            navigation=NavigationSource(definition=_nav_with_script_step(f"['{ids[1]}']")),
+        ),
+        columns=[ElementColumn()],
+    )
+    ctx = _script_ctx(model)
+    build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
+    # the step hops every start element (except ids[1] itself, cycle guard)
+    # onto ids[1]; projected step -1 -> the row set is exactly {ids[1]}
+    assert build.keys == [(ids[1],)]
+    ctx.close()
+
+
+def test_nav_script_step_as_navigation_column() -> None:
+    mm = _mm()
+    model = _fixture()
+    ids = sorted(model.elements)
+    defn = TableDefinition(
+        row_source=ScopeRows(types=[]),
+        columns=[
+            ElementColumn(),
+            NavigationColumn(
+                navigation=NavigationSource(definition=_nav_with_script_step(f"['{ids[0]}']")),
+            ),
+        ],
+    )
+    ctx = _script_ctx(model)
+    build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
+    rows = evaluate_cells(mm, model, defn, build.keys, TableLimits(), script=ctx)
+    # every row except ids[0]'s reaches ids[0] in the nav column
+    reached = {
+        key[0]: cell
+        for key, cell in zip(build.keys, [r[1] for r in rows], strict=True)
+    }
+    other = next(k for k in reached if k != ids[0])
+    assert getattr(reached[other], "element_ids", None) == [ids[0]]
+    ctx.close()
+
+
+def test_nav_script_step_error_warns_through_table() -> None:
+    mm = _mm()
+    model = _fixture()
+    defn = TableDefinition(
+        row_source=NavigationRows(
+            navigation=NavigationSource(definition=_nav_with_script_step("1/0")),
+        ),
+        columns=[ElementColumn()],
+    )
+    ctx = _script_ctx(model)
+    build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
+    assert build.keys == []
+    assert any("script step failed" in w for w in ctx.warnings)
+    ctx.close()
+
+
+def test_sort_by_collapse_nav_script_step_column_uses_reached_labels() -> None:
+    # `_sort_value`'s COLLAPSE `NavigationColumn` branch re-navigates to get
+    # the sort key (unlike `expand`, which reads a slot already bound at
+    # build time — see the module docstring above `_sort_value`). That
+    # re-navigation must forward the table's `script` context too, exactly
+    # like the cell-rendering path `test_nav_script_step_as_navigation_column`
+    # already covers: a navigation containing a `ScriptStep` must actually
+    # run when the table sorts by it, not silently prune to an empty reached
+    # set (which would make every row tie and the sort a no-op).
+    mm = _mm()
+    model = _fixture()
+    ids = sorted(model.elements)
+    # Rename so the script-reached label order (below) diverges from row
+    # build order (ScopeRows rows come out sorted by id: ids[0], ids[1],
+    # ids[2] — see `_scope_ids`).
+    model.set_property(model.elements[ids[0]], "name", "B")
+    model.set_property(model.elements[ids[1]], "name", "C")
+    model.set_property(model.elements[ids[2]], "name", "A")
+    # The step rotates every row's own element onto the NEXT id in `ids`
+    # order, so row i's navigation column reaches ids[(i + 1) % 3]:
+    #   row0 (ids[0]) -> ids[1] "C"
+    #   row1 (ids[1]) -> ids[2] "A"
+    #   row2 (ids[2]) -> ids[0] "B"
+    # Ascending by reached label: "A" < "B" < "C" -> row1, row2, row0 — a
+    # real reordering, not build order restated.
+    code = (
+        "def step(el):\n"
+        f"    order = {ids!r}\n"
+        "    i = order.index(el.id)\n"
+        "    return [order[(i + 1) % len(order)]]\n"
+    )
+    # `RowStart` (not `Scope`) so each row's navigation is rooted at that
+    # row's own element — `_nav_with_script_step` above uses `Scope` instead
+    # because it is exercised as a table-wide row SOURCE (no row binding
+    # exists yet); here the navigation is a per-row COLUMN.
+    nav = PathNavigation(
+        kind="path",
+        start=RowStart(),
+        steps=[ScriptStep(snippet=_snip(code))],
+    )
+    defn = TableDefinition(
+        row_source=ScopeRows(types=["Block"]),
+        columns=[
+            ElementColumn(),
+            NavigationColumn(navigation=NavigationSource(definition=nav)),
+        ],
+    )
+    ctx = _script_ctx(model)
+    from data_rover.core.table.evaluate import SortSpec, order_rows
+
+    build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
+    assert build.keys == [(ids[0],), (ids[1],), (ids[2],)]  # build order == id order
+    ordered = order_rows(
+        mm, model, defn, build.keys, SortSpec(column=1, direction="asc"),
+        TableLimits(), script=ctx,
+    )
+    assert ordered == [(ids[1],), (ids[2],), (ids[0],)]
+    ctx.close()
+
+
+def test_sort_by_property_column_sourced_from_nav_script_step_column() -> None:
+    # A PropertyColumn whose `source` is a `ColumnRef` to a COLLAPSE
+    # NavigationColumn re-navigates via `resolve_source_elements` (evaluate.py
+    # ~line 237's "navigation" branch, called from _sort_value's PropertyColumn
+    # branch ~line 671). A collapse navigation column is multi-binding (see
+    # TableDefinition._source_arity), so it can't source an ElementColumn
+    # (needs single-binding) — PropertyColumn has no such restriction in
+    # collapse mode, so it's the natural way to exercise this branch.
+    #
+    # That outer `resolve_source_elements` call must forward `script` too, or
+    # the nested `_navigation_reached` it makes gets `script=None` regardless
+    # of what the OUTER resolve_source_elements call received, and the
+    # ScriptStep inside the referenced navigation column silently prunes to
+    # nothing (same tie-everything, no-op-sort failure mode as the COLLAPSE
+    # NavigationColumn branch above).
+    mm = _mm()
+    model = _fixture()
+    ids = sorted(model.elements)
+    # Same rename/rotation trick as the COLLAPSE-navigation-column test above:
+    # row i's navigation reaches ids[(i + 1) % 3], and the labels are chosen
+    # so ascending order genuinely differs from build order.
+    model.set_property(model.elements[ids[0]], "name", "B")
+    model.set_property(model.elements[ids[1]], "name", "C")
+    model.set_property(model.elements[ids[2]], "name", "A")
+    code = (
+        "def step(el):\n"
+        f"    order = {ids!r}\n"
+        "    i = order.index(el.id)\n"
+        "    return [order[(i + 1) % len(order)]]\n"
+    )
+    nav = PathNavigation(
+        kind="path",
+        start=RowStart(),
+        steps=[ScriptStep(snippet=_snip(code))],
+    )
+    defn = TableDefinition(
+        row_source=ScopeRows(types=["Block"]),
+        columns=[
+            NavigationColumn(navigation=NavigationSource(definition=nav)),
+            PropertyColumn(name="name", source=ColumnRef(index=0)),
+        ],
+    )
+    ctx = _script_ctx(model)
+    from data_rover.core.table.evaluate import SortSpec, order_rows
+
+    build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
+    assert build.keys == [(ids[0],), (ids[1],), (ids[2],)]  # build order == id order
+    ordered = order_rows(
+        mm, model, defn, build.keys, SortSpec(column=1, direction="asc"),
+        TableLimits(), script=ctx,
+    )
+    # row0 -> "C", row1 -> "A", row2 -> "B"; ascending -> row1, row2, row0
+    assert ordered == [(ids[1],), (ids[2],), (ids[0],)]
+    ctx.close()
+
+
+# ---- cache-only sort fallback (script step behind a sort column) ------------
+#
+# The two tests above are the LIVE path and must keep passing verbatim. Under a
+# CACHE-ONLY context the same forwarding is a trap: `order_rows` would drive
+# `step()` once per off-window row, every one of those calls would miss the cell
+# cache (`pending`), and NOTHING can ever fill them — `script_sweep._run_inner`
+# never calls `order_rows`, and its fan-out only covers ScriptColumn `value()`
+# calls. The page would degrade to build order and report `failed` for the whole
+# rev while the client polls once a second forever. So a cache-only sort must
+# fall back to the pre-forwarding behaviour (empty reached set, every row ties)
+# and SAY SO in the warnings instead.
+
+
+def _rotating_step_nav(ids: list[str]) -> PathNavigation:
+    """Per-row navigation whose single script step hops row i onto ids[i+1]."""
+    code = (
+        "def step(el):\n"
+        f"    order = {ids!r}\n"
+        "    i = order.index(el.id)\n"
+        "    return [order[(i + 1) % len(order)]]\n"
+    )
+    return PathNavigation(
+        kind="path", start=RowStart(), steps=[ScriptStep(snippet=_snip(code))]
+    )
+
+
+def _rename_for_rotation(model: Model, ids: list[str]) -> None:
+    """Labels chosen so the LIVE sort order (row1, row2, row0) differs from
+    build order — otherwise a degraded sort would be indistinguishable."""
+    model.set_property(model.elements[ids[0]], "name", "B")
+    model.set_property(model.elements[ids[1]], "name", "C")
+    model.set_property(model.elements[ids[2]], "name", "A")
+
+
+def test_cache_only_sort_by_nav_script_step_degrades_with_warning() -> None:
+    from data_rover.core.script.cell_cache import ScriptCellCache
+    from data_rover.core.table.evaluate import SortSpec, order_rows
+
+    mm = _mm()
+    model = _fixture()
+    ids = sorted(model.elements)
+    _rename_for_rotation(model, ids)
+    defn = TableDefinition(
+        row_source=ScopeRows(types=["Block"]),
+        columns=[
+            ElementColumn(),
+            NavigationColumn(
+                navigation=NavigationSource(definition=_rotating_step_nav(ids))
+            ),
+        ],
+    )
+    runner = _CountingRunner()
+    ctx = ScriptEvalContext(
+        runner,
+        model,
+        RunLimits(),
+        ScriptBudget.start(60),
+        cell_cache=ScriptCellCache(),
+        rev=0,
+        cache_only=True,
+    )
+    build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
+    assert build.keys == [(ids[0],), (ids[1],), (ids[2],)]
+    ordered = order_rows(
+        mm, model, defn, build.keys, SortSpec(column=1, direction="asc"),
+        TableLimits(), script=ctx,
+    )
+    # Degraded: build order, not the live sort's [ids[1], ids[2], ids[0]].
+    assert ordered == build.keys
+    # The guest was never driven, and — the load-bearing half — no PENDING was
+    # recorded either: a pending miss is what makes the route kick a sweep that
+    # cannot help and then report `failed` forever.
+    assert runner.calls[0] == 0
+    assert ctx.pending_misses == 0
+    assert not ctx.errored
+    # The user is TOLD, rather than silently handed an unsorted table.
+    assert any("build order" in w for w in ctx.warnings)
+    ctx.close()
+
+
+def test_cache_only_sort_via_column_ref_to_nav_script_step_degrades() -> None:
+    # Same fallback, reached through a `ColumnRef`: the sort column is a
+    # PropertyColumn sourced from a COLLAPSE navigation column whose navigation
+    # carries the script step (the `resolve_source_elements` path 855c7e1
+    # threaded `script` into).
+    from data_rover.core.script.cell_cache import ScriptCellCache
+    from data_rover.core.table.evaluate import SortSpec, order_rows
+
+    mm = _mm()
+    model = _fixture()
+    ids = sorted(model.elements)
+    _rename_for_rotation(model, ids)
+    defn = TableDefinition(
+        row_source=ScopeRows(types=["Block"]),
+        columns=[
+            NavigationColumn(
+                navigation=NavigationSource(definition=_rotating_step_nav(ids))
+            ),
+            PropertyColumn(name="name", source=ColumnRef(index=0)),
+        ],
+    )
+    runner = _CountingRunner()
+    ctx = ScriptEvalContext(
+        runner,
+        model,
+        RunLimits(),
+        ScriptBudget.start(60),
+        cell_cache=ScriptCellCache(),
+        rev=0,
+        cache_only=True,
+    )
+    build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
+    ordered = order_rows(
+        mm, model, defn, build.keys, SortSpec(column=1, direction="asc"),
+        TableLimits(), script=ctx,
+    )
+    assert ordered == build.keys
+    assert runner.calls[0] == 0
+    assert ctx.pending_misses == 0
+    assert any("build order" in w for w in ctx.warnings)
+    ctx.close()
+
+
+def test_cache_only_sort_by_script_column_still_pends() -> None:
+    # The fallback must be SURGICAL. A sort by a plain ScriptColumn drives
+    # `value()`, and the sweep DOES fill those cells — so that sort must keep
+    # recording pending misses (that is what kicks the sweep) and must NOT be
+    # degraded away with a warning.
+    from data_rover.core.script.cell_cache import ScriptCellCache
+    from data_rover.core.table.evaluate import SortSpec, order_rows
+
+    mm = _mm()
+    model = _fixture()
+    defn = _one_col_table("def value(els): return els[0].name")
+    ctx = ScriptEvalContext(
+        TrustedRunner(),
+        model,
+        RunLimits(),
+        ScriptBudget.start(60),
+        cell_cache=ScriptCellCache(),
+        rev=0,
+        cache_only=True,
+    )
+    build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
+    order_rows(
+        mm, model, defn, build.keys, SortSpec(column=0, direction="asc"),
+        TableLimits(), script=ctx,
+    )
+    assert ctx.pending_misses > 0
+    assert ctx.warnings == []
+    ctx.close()
+
+
+def test_cache_only_sort_by_script_free_navigation_is_untouched() -> None:
+    # A collapse navigation column with NO script step anywhere sorts exactly as
+    # it always did under a cache-only context: real re-navigation, no warning.
+    from data_rover.core.script.cell_cache import ScriptCellCache
+    from data_rover.core.navigation.schema import PropertyStep
+    from data_rover.core.table.evaluate import SortSpec, order_rows
+
+    mm = _mm()
+    model = _fixture()
+    ids = sorted(model.elements)
+    model.set_property(model.elements[ids[0]], "name", "B")
+    model.set_property(model.elements[ids[1]], "name", "C")
+    model.set_property(model.elements[ids[2]], "name", "A")
+    nav = PathNavigation(
+        kind="path", start=RowStart(), steps=[PropertyStep(property_name="name")]
+    )
+    defn = TableDefinition(
+        row_source=ScopeRows(types=["Block"]),
+        columns=[
+            ElementColumn(),
+            NavigationColumn(navigation=NavigationSource(definition=nav)),
+        ],
+    )
+    ctx = ScriptEvalContext(
+        TrustedRunner(),
+        model,
+        RunLimits(),
+        ScriptBudget.start(60),
+        cell_cache=ScriptCellCache(),
+        rev=0,
+        cache_only=True,
+    )
+    build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
+    ordered = order_rows(
+        mm, model, defn, build.keys, SortSpec(column=1, direction="asc"),
+        TableLimits(), script=ctx,
+    )
+    # The property step reaches the row's own name: "A" < "B" < "C".
+    assert ordered == [(ids[2],), (ids[0],), (ids[1],)]
+    assert ctx.warnings == []
+    ctx.close()
+
+
+# ---- the fallback must NOT swallow a sweep-covered sort ----------------------
+#
+# The degrade above is only correct where NOTHING can ever fill the step cells.
+# A collapse `ScriptColumn` is the counter-example: `script_sweep._run_inner`
+# resolves EVERY collapse script column's `source` LIVE, once per row, before it
+# fans the `value()` work out — so the navigation `step()` cells underneath such
+# a column are computed and cached by the sweep just like the `value()` cells
+# above them. Degrading a sort that goes through a script column therefore turns
+# a "pend once, poll again, converge" table into one that ties every row
+# FOREVER and never even kicks a sweep (the degrade records no pending miss).
+
+
+def _cache_only_ctx(model: Model) -> ScriptEvalContext:
+    from data_rover.core.script.cell_cache import ScriptCellCache
+
+    return ScriptEvalContext(
+        TrustedRunner(),
+        model,
+        RunLimits(),
+        ScriptBudget.start(60),
+        cell_cache=ScriptCellCache(),
+        rev=0,
+        cache_only=True,
+    )
+
+
+def test_cache_only_sort_by_script_column_over_nav_script_still_pends() -> None:
+    """`[nav column with a script step, script column sourced from it]`, sorted
+    on the script column. The sweep covers this shape end to end, so the sort
+    must keep RECORDING PENDING MISSES (the signal that kicks the sweep) and
+    must not be degraded away with a warning."""
+    from data_rover.core.table.evaluate import SortSpec, order_rows
+
+    mm = _mm()
+    model = _fixture()
+    ids = sorted(model.elements)
+    _rename_for_rotation(model, ids)
+    defn = TableDefinition(
+        row_source=ScopeRows(types=["Block"]),
+        columns=[
+            NavigationColumn(
+                navigation=NavigationSource(definition=_rotating_step_nav(ids))
+            ),
+            ScriptColumn(
+                source=ColumnRef(index=0),
+                snippet=_snip("def value(els): return els[0].name if els else None"),
+            ),
+        ],
+    )
+    ctx = _cache_only_ctx(model)
+    build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
+    order_rows(
+        mm, model, defn, build.keys, SortSpec(column=1, direction="asc"),
+        TableLimits(), script=ctx,
+    )
+    assert ctx.pending_misses > 0, "no pending miss => nothing ever kicks a sweep"
+    # The only warning is the ordinary cache-only placeholder the nav step
+    # emits while it waits for the sweep — NOT the give-up degrade warning.
+    assert ctx.warnings == ["script step failed: not computed yet"]
+    ctx.close()
+
+
+def test_cache_only_sort_by_unconfigured_script_column_does_not_warn() -> None:
+    """An unconfigured (`snippet.definition is None`) script column resolves
+    NOTHING — `_sort_value` bails before touching its source — so telling the
+    user a navigation script step blocked their sort would be a lie."""
+    from data_rover.core.table.evaluate import SortSpec, order_rows
+
+    mm = _mm()
+    model = _fixture()
+    ids = sorted(model.elements)
+    _rename_for_rotation(model, ids)
+    defn = TableDefinition(
+        row_source=ScopeRows(types=["Block"]),
+        columns=[
+            NavigationColumn(
+                navigation=NavigationSource(definition=_rotating_step_nav(ids))
+            ),
+            ScriptColumn(source=ColumnRef(index=0), snippet=SnippetSource()),
+        ],
+    )
+    ctx = _cache_only_ctx(model)
+    build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
+    ordered = order_rows(
+        mm, model, defn, build.keys, SortSpec(column=1, direction="asc"),
+        TableLimits(), script=ctx,
+    )
+    assert ordered == build.keys  # every row ties, as it always did
+    assert ctx.warnings == []
+    assert ctx.pending_misses == 0
+    ctx.close()
+
+
+def test_cache_only_sort_warning_is_emitted_per_sort_not_per_row() -> None:
+    """The decision depends only on `(definition, sort column, context)`, so it
+    is taken ONCE in `order_rows` rather than once per row. Sorting an EMPTY key
+    set is the structural probe: with the predicate evaluated per row it never
+    runs at all, so the warning would be missing exactly when the row count is
+    zero — and, on a 50 000-row table, computed 50 000 identical times."""
+    from data_rover.core.table.evaluate import SortSpec, order_rows
+
+    mm = _mm()
+    model = _fixture()
+    ids = sorted(model.elements)
+    defn = TableDefinition(
+        row_source=ScopeRows(types=["Block"]),
+        columns=[
+            ElementColumn(),
+            NavigationColumn(
+                navigation=NavigationSource(definition=_rotating_step_nav(ids))
+            ),
+        ],
+    )
+    ctx = _cache_only_ctx(model)
+    assert order_rows(
+        mm, model, defn, [], SortSpec(column=1, direction="asc"),
+        TableLimits(), script=ctx,
+    ) == []
+    assert any("build order" in w for w in ctx.warnings)
+    ctx.close()
+
+
+def test_sort_falls_back_to_build_order_predicate() -> None:
+    """The public predicate the API layer re-asks on an order-cache HIT. It is
+    context-free (O(definition), no cache, no model walk) precisely so a route
+    that skipped `order_rows` can still reproduce its warning."""
+    from data_rover.core.table.evaluate import SortSpec, sort_falls_back_to_build_order
+
+    model = _fixture()
+    ids = sorted(model.elements)
+    nav_col = NavigationColumn(
+        navigation=NavigationSource(definition=_rotating_step_nav(ids))
+    )
+    defn = TableDefinition(
+        row_source=ScopeRows(types=["Block"]),
+        columns=[
+            ElementColumn(),
+            nav_col,
+            ScriptColumn(
+                source=ColumnRef(index=1),
+                snippet=_snip("def value(els): return els[0].name if els else None"),
+            ),
+            PropertyColumn(name="name", source=ColumnRef(index=1)),
+        ],
+    )
+    assert sort_falls_back_to_build_order(defn, None) is False
+    assert sort_falls_back_to_build_order(defn, SortSpec(0, "asc")) is False
+    assert sort_falls_back_to_build_order(defn, SortSpec(1, "asc")) is True
+    # sweep-covered, so a real poll-again rather than a dead end
+    assert sort_falls_back_to_build_order(defn, SortSpec(2, "asc")) is False
+    # a property column has no such backstop
+    assert sort_falls_back_to_build_order(defn, SortSpec(3, "asc")) is True

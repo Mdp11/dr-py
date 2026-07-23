@@ -414,6 +414,17 @@ def _walk(
         nxt = _hop_property(metamodel, model, current, step, budget)
     else:  # ScriptStep
         nxt = _hop_script(model, current, step, script, budget)
+        if script is not None and exclude_visited:
+            # The generic cycle guard below drops silently -- correct for
+            # relationship hops (revisits are expected navigation semantics)
+            # but a silent mystery for script steps, where an identity return
+            # ("keep this element") is the natural idiom. Warn with a count.
+            dropped = sum(1 for o in nxt if o in chain)
+            if dropped:
+                script.add_warning(
+                    f"script step: {dropped} element(s) dropped "
+                    "(already visited in this chain)"
+                )
     if budget.exhausted:
         return True
     for other in nxt:

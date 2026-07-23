@@ -281,6 +281,14 @@ top-level computation) persists across calls the way it would in a normal
 long-lived interpreter — see the determinism caveat below for the one place
 that persistence bites.
 
+A `ScriptStep`'s cycle guard (`core/navigation/evaluate.py`) drops an id
+already visited earlier in the chain exactly like a relationship hop's
+revisit — but, unlike a relationship hop where a revisit is expected
+navigation semantics, it also emits `script step: N element(s) dropped
+(already visited in this chain)`, since the natural `def step(el): return
+[el]` idiom returns an already-visited id and would otherwise disappear into
+an empty result with no signal at all.
+
 **The `SnippetSession` protocol** (`core/script/runner.py`) is the
 sandbox-agnostic session handle: `boot_error: ScriptError | None` (set if the
 facade+module `exec` itself failed at open, or set LATER if the guest dies
@@ -343,7 +351,7 @@ the other must change with it:
 
 | entry | shape |
 |---|---|
-| `step` | `{"ids": [str, ...]}` — `step()` may return `None` (→ `[]`), or an iterable of `Element`s and/or raw id strings; anything else raises `ValueError` guest-side, which surfaces as a `"runtime"` `CallResult.error`. |
+| `step` | `{"ids": [str, ...]}` — `step()` may return `None` (→ `[]`, ending the chain), a single `Element`, a single element-id `str`, or an iterable of `Element`s and/or raw id strings; anything else raises, guest-side, `ValueError("step() must return an Element, an element id, an iterable of those, or None (None ends the chain); got <TypeName>")`, which surfaces as a `"runtime"` `CallResult.error`. The single-value cases are checked before generic iteration: a bare `Element` would otherwise be "iterated" via its `__getitem__` (`KeyError: 0`), and a bare id string would be iterated per character. |
 | `value`, scalar | `{"kind": "scalar", "value": None \| str \| int \| float \| bool}` |
 | `value`, list of scalars | `{"kind": "scalars", "values": [...]}` |
 | `value`, single `Element` | `{"kind": "element", "id": str}` |
@@ -648,6 +656,36 @@ cache is internally locked, and the pathology counters are job-global.
   `order_rows`) CACHE-ONLY and evaluates only the visible window live. If
   anything went pending it degrades to BUILD order (a sort over half-pending
   values would visibly reshuffle on every poll) and kicks/joins the sweep.
+- **A sort that would need an UNCOVERED navigation `ScriptStep` falls back
+  instead of pending.** The sweep never calls `order_rows`, so a `step()` cell
+  that ONLY the sort wants is filled by nothing, ever. Driving the context for
+  it under cache-only produced one `pending` per off-window row, a page
+  permanently degraded to build order, and `script_status: failed` for the life
+  of the rev behind a once-a-second poll loop. `core/table/evaluate.py`'s
+  `_sort_script` therefore hands the sort pass a `None` context for exactly
+  that case, so the step prunes silently, every row ties, and the rows stay in
+  build order — with `SORT_SCRIPT_NAV_WARNING` on the response so the user is
+  told. The decision is taken ONCE per `order_rows` call (it depends only on
+  the definition, the sort column, and `cache_only`), and the LIVE path never
+  enters the branch at all.
+  - **What counts as COVERED** — a collapse `ScriptColumn` is a *sweep-covered
+    boundary*, so the walk (`_sort_reaches_script_navigation` /
+    `_source_reaches_script_navigation`) stops at one rather than recursing
+    through its source. `script_sweep._run_inner` resolves every collapse
+    script column's `source` LIVE, once per built row, to enumerate its
+    `value()` work — and that resolution drives and caches every navigation
+    `step()` underneath it. So `[nav column with a script step, script column
+    sourced from it]` sorted on the script column pends once and converges on
+    the next poll; degrading it would tie every row forever AND never kick a
+    sweep at all (a degrade records no pending miss). Sorting by an
+    ELEMENT/PROPERTY column sourced from that same navigation column has no
+    such backstop and does degrade.
+  - **The warning survives the order cache.** A degraded order records no
+    pending miss, so `TableOrderCache` stores it and later requests skip
+    `order_rows` entirely. `evaluate_table` therefore re-derives the warning on
+    the cache-hit path from the public, context-free
+    `sort_falls_back_to_build_order(defn, sort)` — otherwise only the one
+    request per rev that built the order would ever explain itself.
 - `script_status` (`ScriptStatusOut`) is `null` for a table with no script
   column at all; otherwise `ready` (nothing pending — these rows are final for
   this rev, though a cell may still hold an `unavailable`/error value, since

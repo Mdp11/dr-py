@@ -62,6 +62,7 @@ _READ_ONLY_POST_SUFFIXES = (
     "/navigations/evaluate",
     "/tables/evaluate",
     "/tables/export",
+    "/tables/script-errors",
     "/snippets/run",
     "/snippets/lint",
     "/snippets/cancel",

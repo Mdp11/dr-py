@@ -228,7 +228,7 @@ def _navigation_cell(
     roots = resolve_source_elements(
         mm, model, defn, key, col.source, base_slots, limits, script=script
     )
-    reached = _navigation_reached(mm, model, col, roots, limits)
+    reached = _navigation_reached(mm, model, col, roots, limits, script=script)
     # `cell_cap` is a per-column display preference; `max_cell_elements` is the
     # server-wide ceiling, so the effective cap is whichever is stricter. An
     # export sets `ignore_cell_caps` so the workbook carries the COMPLETE
@@ -361,7 +361,11 @@ def evaluate_cells(
     which must see the whole table because expansion determines row count).
 
     `script` is the shared per-request `ScriptEvalContext` — `None` for
-    callers with no script columns in play (every existing caller)."""
+    callers with no script work in play; it backs both
+    `ScriptColumn` evaluation AND any `ScriptStep` inside a navigation column's
+    navigation (forwarded through `_navigation_reached`/`resolve_source_
+    elements`), so a script-driven navigation renders the same with `None`
+    (silent prune) as it does everywhere else in the table pipeline."""
     expand_count = sum(
         1 for c in defn.columns if getattr(c, "mode", "collapse") == "expand"
     )

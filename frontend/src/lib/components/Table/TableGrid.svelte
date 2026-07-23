@@ -8,6 +8,7 @@
 	// should land on already-prefetched rows and never show a placeholder.
 	import type { TableCell, TableColumn } from '$lib/api/types';
 	import {
+		consumeScrollRequest,
 		ensureTableRange,
 		getTableDraft,
 		getTableError,
@@ -52,6 +53,10 @@
 	/** Upper bound for double-click auto-fit, so one huge cell can't blow the
 	 * column out to an unusable width. */
 	const MAX_AUTO_WIDTH = 640;
+	/** How long a jumped-to cell keeps its outline. Long enough to find with
+	 * the eye after the scroll settles, short enough not to be mistaken for a
+	 * persistent state of the cell. */
+	const HIGHLIGHT_MS = 2_000;
 
 	const page = $derived(getTablePage(tabId));
 	const loading = $derived(getTableLoading(tabId));
@@ -115,6 +120,54 @@
 
 	function onScroll(): void {
 		if (scrollEl) scrollTop = scrollEl.scrollTop;
+	}
+
+	// Jump-to-cell, driven by the script-error panel through the store (see
+	// `requestScrollToCell`). The panel lives in TableView's fixed chrome and
+	// the scroll container is here, so the request is handed over as state
+	// rather than a prop chain; `consumeScrollRequest` CLEARS it, which is what
+	// makes this effect converge — it re-runs once on the clear, finds nothing,
+	// and stops. Anything else that re-runs it (rows streaming in) finds
+	// nothing too, so the user is never scrolled somewhere they didn't ask for.
+	//
+	// BEST EFFORT by construction: row heights are estimated for rows the
+	// sparse cache hasn't fetched (see `offsets` above — one line each), so a
+	// jump far past the loaded window can land slightly off. That is the same
+	// tradeoff the virtualizer already makes; the temporary outline is what
+	// makes the target findable when it does.
+	let highlight = $state<{ rowIndex: number; columnIndex: number } | null>(null);
+	let highlightTimer: ReturnType<typeof setTimeout> | null = null;
+	$effect(() => {
+		const request = consumeScrollRequest(tabId);
+		if (!request) return;
+		if (scrollEl) {
+			// `offsets` is measured from the FIRST ROW's top (`offsets[0] === 0`),
+			// while the sticky header sits inside the same scroll container and
+			// precedes the rows in normal flow — so row i's content-box top is
+			// `headerHeight + offsets[i]`, and `scrollTop = offsets[i]` already
+			// parks row i flush BELOW the sticky header. No header correction:
+			// subtracting one would push the target a header's height further
+			// down the viewport, not clear of it.
+			const max = Math.max(0, scrollEl.scrollHeight - scrollEl.clientHeight);
+			const top = Math.max(0, Math.min(offsets[request.rowIndex] ?? 0, max));
+			scrollEl.scrollTop = top;
+			scrollTop = top;
+		}
+		highlight = request;
+		if (highlightTimer !== null) clearTimeout(highlightTimer);
+		highlightTimer = setTimeout(() => {
+			highlight = null;
+			highlightTimer = null;
+		}, HIGHLIGHT_MS);
+	});
+	$effect(() => () => {
+		if (highlightTimer !== null) clearTimeout(highlightTimer);
+	});
+
+	function isHighlighted(rowIndex: number, columnIndex: number): boolean {
+		return (
+			highlight !== null && highlight.rowIndex === rowIndex && highlight.columnIndex === columnIndex
+		);
 	}
 
 	$effect(() => {
@@ -401,6 +454,10 @@
 										? 'bg-destructive/15'
 										: ''}"
 								data-lock={lock.state === 'none' ? undefined : lock.state}
+								data-highlight={isHighlighted(win.start + i, v.i) ? 'true' : undefined}
+								class:ring-2={isHighlighted(win.start + i, v.i)}
+								class:ring-destructive={isHighlighted(win.start + i, v.i)}
+								class:ring-inset={isHighlighted(win.start + i, v.i)}
 								title={lock.state === 'mine'
 									? 'Locked by you'
 									: lock.state === 'theirs'

@@ -634,4 +634,39 @@ describe('TableGrid', () => {
 			unmount(c2);
 		}
 	});
+	// Task 6 (jump-to-cell): the script-error panel lives in TableView's fixed
+	// chrome, so it hands the grid a scroll request through the store. The grid
+	// CONSUMES it (single-consumer — a request that survived would re-scroll
+	// the user on every unrelated cache change) and outlines the target cell.
+	// The scroll itself is best-effort and unobservable here: happy-dom has no
+	// layout, so every offset/height is 0 and the clamp lands on 0.
+	it('consumes a jump request and outlines the target cell', () => {
+		vi.spyOn(store, 'getTablePage').mockReturnValue(PAGE);
+		vi.spyOn(store, 'getTableLoading').mockReturnValue(false);
+		store.requestScrollToCell('tbl:draft:jump', 0, 1);
+		const c = render('tbl:draft:jump');
+		try {
+			const cell = document.querySelector('[data-highlight="true"]');
+			expect(cell).not.toBeNull();
+			// ...on the requested COLUMN, not just any cell of the row.
+			const row = document.querySelector('[data-testid="table-row"]') as HTMLElement;
+			expect([...row.children].indexOf(cell as Element)).toBe(1);
+			// Consumed: the effect re-runs on every window/cache change and must
+			// not find the same request waiting for it.
+			expect(store.consumeScrollRequest('tbl:draft:jump')).toBeNull();
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('leaves the grid alone when no jump was requested', () => {
+		vi.spyOn(store, 'getTablePage').mockReturnValue(PAGE);
+		vi.spyOn(store, 'getTableLoading').mockReturnValue(false);
+		const c = render('tbl:draft:nojump');
+		try {
+			expect(document.querySelector('[data-highlight="true"]')).toBeNull();
+		} finally {
+			unmount(c);
+		}
+	});
 });

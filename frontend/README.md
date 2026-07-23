@@ -296,6 +296,81 @@ toggle`), a collapsed disclosure that expands to the shared
   200 always carries a real workbook — possibly with `#ERROR` cells and
   `X-Table-Script-Errors` set, which is the server saying "retrying will not
   help", not an invitation to poll again.
+- **Script-error recap (badge → panel → jump), fetched ON DEMAND.** A failing
+  script cell can be anywhere in a table the grid only ever holds a WINDOW of,
+  so scrolling is not a way to find one. Whenever asking would actually do
+  something — `canRequestScriptErrors(tabId)`, i.e. the store holds a settled
+  page-state signature for the tab — `TableView` shows a **neutral** "Check for
+  script errors" affordance (`script-errors-badge`) beside the status readout.
+  That gate is the STORE's, deliberately not a re-derivation from
+  `script_status`: a sort/reload drops the signature the instant its request
+  goes out while the previous page's status survives until the new page lands
+  (or forever, if the load fails), and a badge lit in that window invited a
+  click that did nothing at all. Clicking it calls `requestScriptErrors(tabId)`
+  — the only thing that ever fetches the backend's whole-table recap
+  (`POST /tables/script-errors` → `getScriptErrors(tabId)`) — and opens
+  `Table/ScriptErrorsPanel.svelte`, which reports whichever of the
+  four `getScriptErrorsPhase(tabId)` outcomes applies: `loading` ("checking…"),
+  `done` with failures (the list: row label, column, message — and the badge
+  switches to the destructive `N script errors` count), `done` with none ("no
+  script errors in this table" — a user who asked deserves an answer), or
+  `error` ("could not check", retryable by clicking again). Clicking an entry
+  calls `requestScrollToCell(tabId, row, col)`; `TableGrid` picks it up with
+  `consumeScrollRequest` in an effect, scrolls to the row and outlines the cell
+  for 2s — best effort, since row heights are estimated for rows the sparse
+  cache hasn't fetched.
+  **An empty recap is not always a clean bill of health.** With no script runner
+  the route answers **zero** errors — the honest count, since nothing ran and so
+  nothing is KNOWN to have failed (reporting one "not computed" error per cell
+  instead badged a 50 000-row table "50000 script errors" for a sandbox that was
+  simply switched off). `ScriptErrorsOut` has no room to say which zero it is
+  (its `state` is a one-valued literal and the wire shape is frozen), so the
+  client earns the distinction from the page it is already showing:
+  `getUncomputedScriptCellReason(tabId)` returns the message of the first
+  SCRIPT-column cell in the loaded rows that came back `error` or `pending`, and
+  an empty recap over such a page is rendered as a warning-toned "Script errors
+  unknown" badge and a panel saying the cells were never computed, with the
+  reason. The CELLS are the reliable signal here: for the commonest shape (an
+  unsorted `collapse` column) a runner-less page reports `script_status: ready`
+  — no strip, no message — while the window pass, which is live, renders every
+  cell an error saying exactly why; only the sorted/`expand` shape reports
+  `failed`. And `failed` alone would over-suppress, because the client's own
+  poll give-up writes a `failed` status while the backend is healthy. Narrow on
+  purpose: script columns only (a broken navigation column is not something a
+  script-error recap covered), only when the recap came back EMPTY (a real count
+  is a stronger statement and is never downgraded), and `&&`-short-circuited so
+  no other table pays for the scan.
+  **WHY on demand** (this is not a UX preference — fetching on settle was the
+  original design and had to be undone): the recap route renders the whole
+  table CACHE-ONLY, and for the commonest shape — an unsorted `collapse` script
+  column with `keep_empty` — the page route makes **zero** `value()` calls (the
+  build pass skips it, the order pass short-circuits with no sort) and computes
+  only the visible window live, so the page reports `ready` **without ever
+  kicking a sweep**. The recap then misses on every row outside that window and
+  kicks a full background sweep. Fetching it automatically would have turned
+  "open a table with a script column" into "sweep the whole table", plus up to
+  120 once-a-second retries each re-paying a full build + order + render.
+  `/tables/export` has the identical loop, but only behind an explicit click —
+  so the recap is behind one too, and the up-front error count is deliberately
+  given up.
+  **Fetch-ONCE per page state**: the recap is still keyed by
+  `"<status>:<model_rev>:<generation>"`, now as the signature of the page state
+  on screen — background chunk fills as the user scrolls change none of the
+  three, so they neither re-fetch nor drop the recap already paid for, while a
+  peer's commit (new rev) **and** a sort change, a definition edit or a reload
+  (all of which bump the tab's page-load **generation**) DROP it on the spot,
+  without fetching anything; the next click re-fetches. All three parts are
+  load-bearing: `row_index`/`column_index` address the order the grid is
+  _currently_ showing, and a sort or definition edit reorders every row at a
+  CONSTANT `model_rev` — keyed without the generation the tab would keep
+  showing the recap built for the previous order, and jump-to-cell would scroll
+  to the row that used to be there. The recap is also dropped whenever the table
+  stops being settled (which also hides the badge). A **202** (sweep still
+  filling the cache — the STATUS CODE is the retry signal, as for export)
+  schedules exactly ONE delayed retry per tab, bounded like the sweep poll;
+  exhausting that budget, like any failed fetch, reports the `error` phase and
+  never anything worse, because this surface must never be what breaks a table
+  view.
 - **Staged definition edits (the settings dialog).** `updateTableDefinition`
   normally re-evaluates the whole table — a fresh backend cache key, and for a
   script column a fresh sweep. Inside the settings dialog the user is

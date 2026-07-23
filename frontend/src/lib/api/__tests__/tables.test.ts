@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, it, expect } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { TablePageSchema, TableDefinitionSchema, ChainPageSchema } from '../types';
-import { exportTable } from '../tables';
+import { exportTable, fetchScriptErrors } from '../tables';
 import { server } from './server';
 
 const BASE = 'http://api.test/api/v1';
@@ -217,5 +217,68 @@ describe('exportTable', () => {
 		const result = await exportTable({ artifactId: 'a1' }, cfg);
 		expect(result.kind).toBe('ready');
 		expect(result.kind === 'ready' && result.filename).toBe('my table.xlsx');
+	});
+});
+
+describe('fetchScriptErrors', () => {
+	it('returns the recap on a 200', async () => {
+		server.use(
+			http.post(`${BASE}/tables/script-errors`, () =>
+				HttpResponse.json({
+					state: 'ready',
+					errors: [
+						{
+							row_index: 1,
+							row_element_id: 't2',
+							row_label: 't2',
+							column_index: 1,
+							column_label: 'script',
+							message: 'ZeroDivisionError: division by zero'
+						}
+					],
+					total_errors: 2,
+					truncated: false
+				})
+			)
+		);
+		const recap = await fetchScriptErrors({ artifactId: 'a1' }, cfg);
+		expect('retry' in recap).toBe(false);
+		expect(recap).toMatchObject({ state: 'ready', total_errors: 2, truncated: false });
+		expect('retry' in recap ? [] : recap.errors[0]).toMatchObject({
+			row_index: 1,
+			column_index: 1,
+			column_label: 'script',
+			row_label: 't2'
+		});
+	});
+
+	// The 202 is discriminated by the STATUS CODE, never the body: a 202 body
+	// routinely says `computing` for a sweep that already finished (the server
+	// decides ship-vs-retry by re-probing its cache, not by the job's state).
+	it('returns { retry: true } on a 202 (sweep still filling the cache)', async () => {
+		server.use(
+			http.post(`${BASE}/tables/script-errors`, () =>
+				HttpResponse.json(
+					{ state: 'computing', done: 10, total: 3000, message: null },
+					{ status: 202, headers: { 'Retry-After': '1' } }
+				)
+			)
+		);
+		expect(await fetchScriptErrors({ artifactId: 'a1' }, cfg)).toEqual({ retry: true });
+	});
+
+	// `offset`/`limit` are IGNORED by the route (the recap is always
+	// whole-table) but `sort` is load-bearing: `row_index` is only a valid grid
+	// address for the (definition, sort, model_rev) the page was rendered with.
+	it('forwards the sort the grid is showing', async () => {
+		let body: unknown;
+		server.use(
+			http.post(`${BASE}/tables/script-errors`, async ({ request }) => {
+				body = await request.json();
+				return HttpResponse.json({ state: 'ready', errors: [], total_errors: 0, truncated: false });
+			})
+		);
+		await fetchScriptErrors({ artifactId: 'a1', sort: { column: 1, direction: 'asc' } }, cfg);
+		expect(body).toMatchObject({ artifact_id: 'a1', sort: { column: 1, direction: 'asc' } });
 	});
 });

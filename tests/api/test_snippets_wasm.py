@@ -465,6 +465,26 @@ def test_wasm_session_read_only(wasm_runner: WasmScriptRunner, small_model) -> N
     sess.close()
 
 
+def test_wasm_step_single_element_return(wasm_runner: WasmScriptRunner, small_model) -> None:
+    """Real-sandbox leg of tests/script/test_session.py's
+    test_step_returns_single_element: `step()` returning a bare `Element`
+    (not a list) resolves to a single-id payload rather than raising
+    `KeyError: 0` (Element's property-access `__getitem__` misread as list
+    indexing)."""
+    from data_rover.core.script.runner import RunLimits, ScriptBudget
+
+    ids = sorted(small_model.elements)
+    eid = ids[0]
+    sess = wasm_runner.open_session(
+        small_model, "def step(el): return el",
+        RunLimits(), budget=ScriptBudget.start(60),
+    )
+    res = sess.call("step", [eid])
+    assert res.error is None
+    assert res.value == {"ids": [eid]}
+    sess.close()
+
+
 def test_embedded_session_trip_collapse_wasm(
     wasm_runner: WasmScriptRunner, monkeypatch: pytest.MonkeyPatch
 ) -> None:
