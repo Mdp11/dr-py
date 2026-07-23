@@ -554,3 +554,59 @@ def test_sort_by_collapse_nav_script_step_column_uses_reached_labels() -> None:
     )
     assert ordered == [(ids[1],), (ids[2],), (ids[0],)]
     ctx.close()
+
+
+def test_sort_by_property_column_sourced_from_nav_script_step_column() -> None:
+    # A PropertyColumn whose `source` is a `ColumnRef` to a COLLAPSE
+    # NavigationColumn re-navigates via `resolve_source_elements` (evaluate.py
+    # ~line 237's "navigation" branch, called from _sort_value's PropertyColumn
+    # branch ~line 671). A collapse navigation column is multi-binding (see
+    # TableDefinition._source_arity), so it can't source an ElementColumn
+    # (needs single-binding) — PropertyColumn has no such restriction in
+    # collapse mode, so it's the natural way to exercise this branch.
+    #
+    # That outer `resolve_source_elements` call must forward `script` too, or
+    # the nested `_navigation_reached` it makes gets `script=None` regardless
+    # of what the OUTER resolve_source_elements call received, and the
+    # ScriptStep inside the referenced navigation column silently prunes to
+    # nothing (same tie-everything, no-op-sort failure mode as the COLLAPSE
+    # NavigationColumn branch above).
+    mm = _mm()
+    model = _fixture()
+    ids = sorted(model.elements)
+    # Same rename/rotation trick as the COLLAPSE-navigation-column test above:
+    # row i's navigation reaches ids[(i + 1) % 3], and the labels are chosen
+    # so ascending order genuinely differs from build order.
+    model.set_property(model.elements[ids[0]], "name", "B")
+    model.set_property(model.elements[ids[1]], "name", "C")
+    model.set_property(model.elements[ids[2]], "name", "A")
+    code = (
+        "def step(el):\n"
+        f"    order = {ids!r}\n"
+        "    i = order.index(el.id)\n"
+        "    return [order[(i + 1) % len(order)]]\n"
+    )
+    nav = PathNavigation(
+        kind="path",
+        start=RowStart(),
+        steps=[ScriptStep(snippet=_snip(code))],
+    )
+    defn = TableDefinition(
+        row_source=ScopeRows(types=["Block"]),
+        columns=[
+            NavigationColumn(navigation=NavigationSource(definition=nav)),
+            PropertyColumn(name="name", source=ColumnRef(index=0)),
+        ],
+    )
+    ctx = _script_ctx(model)
+    from data_rover.core.table.evaluate import SortSpec, order_rows
+
+    build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
+    assert build.keys == [(ids[0],), (ids[1],), (ids[2],)]  # build order == id order
+    ordered = order_rows(
+        mm, model, defn, build.keys, SortSpec(column=1, direction="asc"),
+        TableLimits(), script=ctx,
+    )
+    # row0 -> "C", row1 -> "A", row2 -> "B"; ascending -> row1, row2, row0
+    assert ordered == [(ids[1],), (ids[2],), (ids[0],)]
+    ctx.close()

@@ -656,7 +656,7 @@ def _sort_value(
     that made it a binding column in the first place."""
     if isinstance(col, ElementColumn):
         els = resolve_source_elements(
-            mm, model, defn, key, col.source, base_slots, limits
+            mm, model, defn, key, col.source, base_slots, limits, script=script
         )
         if not els:
             return (1, "")
@@ -669,7 +669,7 @@ def _sort_value(
                 return (1, ())
             return (0, (float(v),)) if numeric else (0, (str(v).casefold(),))  # type: ignore[arg-type]
         els = resolve_source_elements(
-            mm, model, defn, key, col.source, base_slots, limits
+            mm, model, defn, key, col.source, base_slots, limits, script=script
         )
         vals: list[Binding] = []
         for eid in els:
@@ -733,7 +733,7 @@ def _sort_value(
             return (1, "")
         return (0, (_display_name(model, b).casefold(), b))
     roots = resolve_source_elements(
-        mm, model, defn, key, col.source, base_slots, limits
+        mm, model, defn, key, col.source, base_slots, limits, script=script
     )
     reached = _navigation_reached(mm, model, col, roots, limits, script=script)
     if not reached:
