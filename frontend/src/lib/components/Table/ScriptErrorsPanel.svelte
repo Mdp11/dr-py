@@ -22,6 +22,7 @@
 		id,
 		recap,
 		phase,
+		uncomputedReason = null,
 		onJump
 	}: {
 		/** DOM id, so the badge that opens this can point `aria-controls` at it. */
@@ -30,6 +31,11 @@
 		 * it failed, or if the page state moved under it). */
 		recap: ScriptErrorsRecap | null;
 		phase: 'idle' | 'loading' | 'done' | 'error';
+		/** Set when an EMPTY recap arrived over cells that were never computed
+		 * (typically: the server has no script runner, which the recap route
+		 * honestly reports as zero errors because nothing ran). The reason is the
+		 * cell's own message. `null` = the empty answer is trustworthy. */
+		uncomputedReason?: string | null;
 		onJump: (rowIndex: number, columnIndex: number) => void;
 	} = $props();
 
@@ -52,7 +58,9 @@
 	aria-label="Script errors in this table"
 	class="absolute top-full left-0 z-20 mt-1 w-96 max-w-[calc(100vw-2rem)] overflow-hidden rounded border bg-card shadow-lg {hasErrors
 		? 'border-destructive/40'
-		: 'border-border'}"
+		: uncomputedReason !== null
+			? 'border-warning/40'
+			: 'border-border'}"
 >
 	{#if recap && hasErrors}
 		<div
@@ -97,6 +105,14 @@
 				Checking the whole table for script errors…
 			{:else if phase === 'error'}
 				Could not check this table for script errors. Try again.
+			{:else if recap && uncomputedReason !== null}
+				<!-- An empty recap that means "nothing ran", not "nothing failed":
+				     saying "no script errors" here would be a clean bill of health
+				     over a grid whose every script cell is an error. For the common
+				     shape this panel is the ONLY place the user is told — that page
+				     reports `ready`, so there is no failure strip above us. -->
+				Script cells in this table were never computed ({uncomputedReason}), so it could not be
+				checked for script errors.
 			{:else if recap}
 				No script errors in this table.
 			{:else}

@@ -7,6 +7,7 @@
 	import {
 		abandonTableEvaluationSuspension,
 		canEdit,
+		canRequestScriptErrors,
 		downloadTable,
 		ensureTableDraft,
 		getScriptErrors,
@@ -17,6 +18,7 @@
 		getTablePage,
 		getTableScriptStatus,
 		getTableWarnings,
+		getUncomputedScriptCellReason,
 		reloadTableDraft,
 		requestScriptErrors,
 		requestScrollToCell,
@@ -66,11 +68,27 @@
 	// open. So the badge is NEUTRAL until a recap says otherwise.
 	const scriptErrors = $derived(getScriptErrors(tabId));
 	const scriptErrorsPhase = $derived(getScriptErrorsPhase(tabId));
-	// The badge shows whenever there IS script work whose row order has settled —
-	// i.e. exactly when a recap could be asked for. While `computing` the grid is
-	// in degraded build order, which a recap's row indices would not address.
-	const canCheckScriptErrors = $derived(!!scriptStatus && scriptStatus.state !== 'computing');
+	// The badge shows exactly while asking would DO something — the store's own
+	// answer, not a re-derivation from `scriptStatus`. A settled status is
+	// necessary (while `computing` the grid is in degraded build order, which a
+	// recap's row indices would not address) but NOT sufficient: a sort or reload
+	// in flight has already dropped the askable page state while the previous
+	// page's status is still sitting there, and a badge lit in that window
+	// invites a click that does nothing at all.
+	const canCheckScriptErrors = $derived(canRequestScriptErrors(tabId));
 	const scriptErrorCount = $derived(scriptErrors?.total_errors ?? 0);
+	// An empty recap means "we checked, there are none" — UNLESS the cells on
+	// screen say nothing was ever computed. The backend answers a runner-less
+	// recap with zero errors (the honest count: nothing ran, so nothing is known
+	// to have failed) and `ScriptErrorsOut` has no room to say which zero it is,
+	// so the client tells them apart from the page it is already showing. Only
+	// consulted for an empty recap, and `&&` short-circuits, so a table with a
+	// real count (or no answer yet) never pays for the scan.
+	const uncomputedReason = $derived(
+		scriptErrorsPhase === 'done' && scriptErrorCount === 0
+			? getUncomputedScriptCellReason(tabId)
+			: null
+	);
 	let scriptErrorsOpen = $state(false);
 	// The panel must not outlive what it describes: the badge going away (the
 	// table went back to computing, or lost its script column), or the recap
@@ -410,11 +428,15 @@
 					aria-haspopup="dialog"
 					title={scriptErrorCount > 0
 						? 'Show the rows whose script column failed'
-						: 'Check the whole table for failing script cells'}
+						: uncomputedReason !== null
+							? `Script cells on this page were never computed (${uncomputedReason}), so this table could not be checked`
+							: 'Check the whole table for failing script cells'}
 					class="flex items-center gap-1.5 rounded border px-2 py-0.5 text-xs transition-colors {scriptErrorCount >
 					0
 						? 'border-destructive/40 bg-destructive/10 text-destructive hover:bg-destructive/20'
-						: 'border-border bg-muted/60 text-muted-foreground hover:bg-muted'}"
+						: uncomputedReason !== null
+							? 'border-warning/40 bg-warning/15 text-warning hover:bg-warning/25'
+							: 'border-border bg-muted/60 text-muted-foreground hover:bg-muted'}"
 					onclick={toggleScriptErrors}
 				>
 					{#if scriptErrorCount > 0}
@@ -425,6 +447,13 @@
 							class="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-muted border-t-primary"
 						></span>
 						Checking for script errors…
+					{:else if uncomputedReason !== null}
+						<!-- An empty recap over cells that were never computed. Not a
+						     failure (nothing is known to have failed) and emphatically
+						     not a clean bill of health — so: warning-toned, and honest
+						     about the unknown. -->
+						<AlertTriangle class="h-3 w-3 shrink-0" />
+						Script errors unknown
 					{:else if scriptErrors}
 						<Check class="h-3 w-3 shrink-0" />
 						No script errors
@@ -438,6 +467,7 @@
 						id="script-errors-panel-{tabId}"
 						recap={scriptErrors}
 						phase={scriptErrorsPhase}
+						{uncomputedReason}
 						onJump={jumpToErrorCell}
 					/>
 				{/if}

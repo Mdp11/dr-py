@@ -19,6 +19,12 @@ const h = vi.hoisted(() => ({
 	scriptStatus: null as unknown,
 	scriptErrors: null as unknown,
 	scriptErrorsPhase: 'idle' as 'idle' | 'loading' | 'error' | 'done',
+	/** Mirrors the store's `_recapKeys.has(tab)`: is there a settled page state
+	 * a recap could describe RIGHT NOW (false while a load is in flight). */
+	canCheckScriptErrors: true,
+	/** Mirrors the store's evidence from the page on screen: why a script cell
+	 * holds no value, or null when they all do. */
+	uncomputedScriptCellReason: null as string | null,
 	requestScriptErrors: vi.fn(),
 	jump: vi.fn(),
 	draft: {
@@ -60,6 +66,8 @@ vi.mock('$lib/state', () => ({
 	getTableScriptStatus: () => h.scriptStatus,
 	getScriptErrors: () => h.scriptErrors,
 	getScriptErrorsPhase: () => h.scriptErrorsPhase,
+	canRequestScriptErrors: () => h.canCheckScriptErrors,
+	getUncomputedScriptCellReason: () => h.uncomputedScriptCellReason,
 	requestScriptErrors: h.requestScriptErrors,
 	requestScrollToCell: h.jump,
 	consumeScrollRequest: () => null,
@@ -102,6 +110,8 @@ afterEach(() => {
 	h.scriptStatus = null;
 	h.scriptErrors = null;
 	h.scriptErrorsPhase = 'idle';
+	h.canCheckScriptErrors = true;
+	h.uncomputedScriptCellReason = null;
 	h.requestScriptErrors.mockReset();
 	h.jump.mockReset();
 });
@@ -192,6 +202,7 @@ describe('TableView script-error badge + panel', () => {
 
 	it('shows no badge for a table with no script work', () => {
 		h.scriptStatus = null;
+		h.canCheckScriptErrors = false;
 		const c = render('tbl:draft:1');
 		try {
 			expect(document.querySelector('[data-testid="script-errors-badge"]')).toBeNull();
@@ -204,6 +215,24 @@ describe('TableView script-error badge + panel', () => {
 		// Row order is degraded (build order) until it settles, so a recap's row
 		// indices would not address what the grid is showing.
 		h.scriptStatus = { state: 'computing', done: 2, total: 42 };
+		h.canCheckScriptErrors = false;
+		const c = render('tbl:draft:1');
+		try {
+			expect(document.querySelector('[data-testid="script-errors-badge"]')).toBeNull();
+		} finally {
+			unmount(c);
+		}
+	});
+
+	// Re-review finding (MINOR): a badge that cannot be acted on. A sort or a
+	// reload drops the store's page-state signature the instant the request goes
+	// out, but the PREVIOUS page's `script_status` survives it — so a badge gated
+	// on the status alone stayed lit, and clicking it did nothing at all
+	// (`requestScriptErrors` no-ops, the panel opens and the effect shuts it in
+	// the same flush). Gate on the store's askability instead.
+	it('hides the badge while a re-evaluation is in flight', () => {
+		h.scriptStatus = READY; // still the previous page's, and stale
+		h.canCheckScriptErrors = false;
 		const c = render('tbl:draft:1');
 		try {
 			expect(document.querySelector('[data-testid="script-errors-badge"]')).toBeNull();
@@ -266,6 +295,71 @@ describe('TableView script-error badge + panel', () => {
 			expect(document.querySelector('[data-testid="script-errors-panel"]')?.textContent).toContain(
 				'No script errors'
 			);
+		} finally {
+			unmount(c);
+		}
+	});
+
+	// Re-review finding (IMPORTANT): with no script runner the recap route now
+	// answers ZERO errors (the honest server-side answer — nothing ran, so
+	// nothing is known to have failed), and the wire cannot carry the
+	// distinction. Rendering that as "No script errors" puts a green tick
+	// directly above a grid whose every script cell reads
+	// `#ERROR: script runner unavailable`. The cells are the evidence, so the
+	// client uses them.
+	it('does not claim a clean table when script cells were never computed', () => {
+		h.scriptStatus = READY; // the unsorted-collapse shape: no calls, so `ready`
+		h.scriptErrorsPhase = 'done';
+		h.scriptErrors = { state: 'ready', errors: [], total_errors: 0, truncated: false };
+		h.uncomputedScriptCellReason = 'script runner unavailable';
+		const c = render('tbl:draft:1');
+		try {
+			const badge = document.querySelector('[data-testid="script-errors-badge"]') as HTMLElement;
+			expect(badge.textContent).not.toContain('No script errors');
+			expect(badge.textContent).toContain('unknown');
+			badge.click();
+			flushSync();
+			const panel = document.querySelector('[data-testid="script-errors-panel"]') as HTMLElement;
+			expect(panel.textContent).not.toContain('No script errors in this table');
+			// ...and it says WHY, which for the `ready` shape is the only place the
+			// user is told anything at all (there is no failure strip above).
+			expect(panel.textContent).toContain('script runner unavailable');
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('still answers a plain "none" when the check really did cover the table', () => {
+		// The guard must not become a shrug: a healthy runner that found nothing
+		// is a useful answer, and the user asked for it.
+		h.scriptStatus = { state: 'failed', done: 4, total: 10, message: 'sweep died' };
+		h.scriptErrorsPhase = 'done';
+		h.scriptErrors = { state: 'ready', errors: [], total_errors: 0, truncated: false };
+		h.uncomputedScriptCellReason = null;
+		const c = render('tbl:draft:1');
+		try {
+			const badge = document.querySelector('[data-testid="script-errors-badge"]') as HTMLElement;
+			expect(badge.textContent).toContain('No script errors');
+			badge.click();
+			flushSync();
+			expect(document.querySelector('[data-testid="script-errors-panel"]')?.textContent).toContain(
+				'No script errors in this table'
+			);
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('leaves a real error count alone when cells are uncomputed too', () => {
+		// A known count is a stronger statement than "unknown": never downgrade it.
+		h.scriptStatus = READY;
+		h.scriptErrorsPhase = 'done';
+		h.scriptErrors = RECAP;
+		h.uncomputedScriptCellReason = 'script runner unavailable';
+		const c = render('tbl:draft:1');
+		try {
+			const badge = document.querySelector('[data-testid="script-errors-badge"]') as HTMLElement;
+			expect(badge.textContent).toContain('1 script error');
 		} finally {
 			unmount(c);
 		}

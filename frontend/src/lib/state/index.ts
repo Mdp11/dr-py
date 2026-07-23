@@ -281,6 +281,7 @@ export {
 export { ensureSnippetDocs, getSnippetDocs, resetSnippetDocs } from './snippet-docs.svelte';
 export {
 	abandonTableEvaluationSuspension,
+	canRequestScriptErrors,
 	closeTableDraft,
 	consumeScrollRequest,
 	downloadTable,
@@ -296,6 +297,7 @@ export {
 	getTableScriptStatus,
 	getTableSort,
 	getTableWarnings,
+	getUncomputedScriptCellReason,
 	hasDirtyTableDrafts,
 	loadTablePage,
 	reloadTableDraft,

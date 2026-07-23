@@ -29,14 +29,16 @@
 // count is the assertion for "did a request actually go out".
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import * as tablesApi from '$lib/api/tables';
-import type { ScriptErrorsRecap, TablePage } from '$lib/api/types';
+import type { ScriptErrorsRecap, TableCell, TablePage } from '$lib/api/types';
 import {
+	canRequestScriptErrors,
 	closeTableDraft,
 	consumeScrollRequest,
 	ensureTableDraft,
 	ensureTableRange,
 	getScriptErrors,
 	getScriptErrorsPhase,
+	getUncomputedScriptCellReason,
 	loadTablePage,
 	requestScriptErrors,
 	requestScrollToCell,
@@ -83,6 +85,40 @@ function pageWith(
 		script_status
 	};
 }
+
+/** A 10-row page whose SECOND column is a script column, every row carrying
+ * `cell` in it — the evidence `getUncomputedScriptCellReason` reads. */
+function scriptPageWith(
+	script_status: TablePage['script_status'],
+	cell: TableCell,
+	model_rev = 1
+): TablePage {
+	return {
+		columns: [
+			{ kind: 'element', header: '', width_px: null },
+			{ kind: 'script', header: 'calc', width_px: null }
+		],
+		rows: Array.from({ length: 10 }, (_, i) => ({
+			key: [`e${i}`],
+			cells: [{ kind: 'element', item: null }, cell] as TableCell[]
+		})),
+		total: 10,
+		truncated: false,
+		offset: 0,
+		model_rev,
+		warnings: [],
+		script_status
+	};
+}
+
+const READY: TablePage['script_status'] = { state: 'ready', done: 10, total: 10 };
+const VALUE_CELL: TableCell = {
+	kind: 'value',
+	present: true,
+	value: 42,
+	element_id: null,
+	editable: false
+};
 
 let evalSpy: MockInstance<typeof tablesApi.evaluateTable>;
 
@@ -452,5 +488,103 @@ describe('jump-to-cell request', () => {
 
 		expect(consumeScrollRequest(TAB)).toBeNull();
 		expect(consumeScrollRequest('tbl:draft:2')).toEqual({ rowIndex: 7, columnIndex: 2 });
+	});
+});
+
+// Re-review finding (MINOR): the badge must never be DEAD. `_loadTablePage`
+// drops the recap signature the instant a re-evaluation goes out, but leaves
+// the previous page's `script_status` in place — so a badge gated on the status
+// alone kept reading "Check for script errors" while a sort was in flight, and
+// clicking it did literally nothing (`requestScriptErrors` no-ops without a
+// signature). The store owns the answer to "can this be asked for", so it says
+// so; the component does not re-derive it from a status that outlives it.
+describe('script-error recap askability', () => {
+	it('is askable only while a settled page state is actually on screen', async () => {
+		await ensureTableDraft(TAB);
+		expect(canRequestScriptErrors(TAB)).toBe(false);
+
+		await land(pageWith(READY));
+		expect(canRequestScriptErrors(TAB)).toBe(true);
+
+		// A re-evaluation in flight: unaskable from the moment the request goes
+		// out (not from the moment its response lands), because that is exactly
+		// when `requestScriptErrors` starts no-opping.
+		let settle: (p: TablePage) => void = () => {};
+		evalSpy.mockImplementation(
+			() =>
+				new Promise<TablePage>((res) => {
+					settle = res;
+				})
+		);
+		setTableSort(TAB, { column: 0, direction: 'asc' });
+		expect(canRequestScriptErrors(TAB)).toBe(false);
+
+		settle(pageWith(READY));
+		await vi.advanceTimersByTimeAsync(0);
+		expect(canRequestScriptErrors(TAB)).toBe(true);
+	});
+
+	it('is not askable while computing, nor for a table with no script work', async () => {
+		await ensureTableDraft(TAB);
+		await land(pageWith({ state: 'computing', done: 1, total: 10 }));
+		expect(canRequestScriptErrors(TAB)).toBe(false);
+
+		await land(pageWith(null, 2));
+		expect(canRequestScriptErrors(TAB)).toBe(false);
+	});
+});
+
+// Re-review finding (IMPORTANT): with no script runner the backend now answers
+// the recap with ZERO errors — the honest server-side answer, since nothing was
+// evaluated and so nothing is KNOWN to have failed. Rendered as an affirmative
+// ("No script errors") it becomes a lie told directly above a grid whose every
+// script cell reads `script runner unavailable`. `ScriptErrorsOut` cannot carry
+// the distinction (its `state` is a one-valued literal and the wire shape is
+// deliberately frozen), so the client earns it from the evidence it already
+// holds: the cells of the page on screen.
+describe('uncomputed script cells', () => {
+	it('reports no reason when every script cell on screen produced a value', async () => {
+		await ensureTableDraft(TAB);
+		await land(scriptPageWith(READY, VALUE_CELL));
+		expect(getUncomputedScriptCellReason(TAB)).toBeNull();
+	});
+
+	it("reports the cell's own message when a script cell came back an error", async () => {
+		await ensureTableDraft(TAB);
+		// What the page route renders for every script cell with no runner: the
+		// window pass is LIVE, so the cells say why while the status says `ready`
+		// (an unsorted collapse column's whole-table passes make no calls at all).
+		await land(scriptPageWith(READY, { kind: 'error', message: 'script runner unavailable' }));
+		expect(getUncomputedScriptCellReason(TAB)).toBe('script runner unavailable');
+	});
+
+	it('reports a pending script cell too — nothing will compute it at this rev', async () => {
+		await ensureTableDraft(TAB);
+		// The other shape: a sorted/expand script column re-derives cache-only,
+		// so its cells come back `pending` under a `failed` status.
+		await land(
+			scriptPageWith(
+				{ state: 'failed', done: 0, total: 10, message: 'script runner unavailable' },
+				{ kind: 'pending' }
+			)
+		);
+		expect(getUncomputedScriptCellReason(TAB)).toBe('not computed');
+	});
+
+	it('ignores error cells OUTSIDE script columns — a recap never covered those', async () => {
+		await ensureTableDraft(TAB);
+		const page = scriptPageWith(READY, VALUE_CELL);
+		page.rows[0].cells[0] = { kind: 'error', message: 'dangling reference' };
+		await land(page);
+		// Over-suppressing is its own failure: an honest "no script errors" must
+		// survive a navigation column that happens to be broken.
+		expect(getUncomputedScriptCellReason(TAB)).toBeNull();
+	});
+
+	it('reports nothing before a page lands, and nothing for a script-less table', async () => {
+		await ensureTableDraft(TAB);
+		expect(getUncomputedScriptCellReason(TAB)).toBeNull();
+		await land(pageWith(null));
+		expect(getUncomputedScriptCellReason(TAB)).toBeNull();
 	});
 });

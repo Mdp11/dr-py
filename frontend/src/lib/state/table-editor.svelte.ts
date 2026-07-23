@@ -171,10 +171,15 @@ const _scriptErrors = new SvelteMap<string, ScriptErrorsRecap>();
  * `bumpGeneration` runs on exactly those re-evaluations, which is why it is
  * the right signal. See `handleScriptErrorRecap` for the full table.
  *
- * Control state, never read from templates.
+ * REACTIVE, because its mere PRESENCE is what the badge is gated on
+ * (`canRequestScriptErrors`): "is there a page state a recap could describe",
+ * i.e. "would asking do anything at all". The tab's `script_status` cannot
+ * answer that — `_loadTablePage` drops this signature the instant a
+ * re-evaluation goes out while the previous page's status survives until the
+ * new one lands, and a badge gated on the status alone spent that window
+ * inviting a click that no-ops.
  */
-// eslint-disable-next-line svelte/prefer-svelte-reactivity
-const _recapKeys = new Map<string, string>();
+const _recapKeys = new SvelteMap<string, string>();
 
 /**
  * tabId -> the recap fetch's phase while it is NOT simply "we have one":
@@ -794,6 +799,87 @@ export function getScriptErrorsPhase(tabId: string): 'idle' | 'loading' | 'done'
 	const phase = _recapPhase.get(tabId);
 	if (phase !== undefined) return phase;
 	return _scriptErrors.has(tabId) ? 'done' : 'idle';
+}
+
+/**
+ * Would asking for this tab's script-error recap DO anything? True exactly
+ * while the tab is showing a settled page state a recap could describe — which
+ * is what `requestScriptErrors` itself checks, so the badge and the action can
+ * never disagree.
+ *
+ * NOT the same as "the tab has a terminal `script_status`", which is what the
+ * badge used to be gated on: `_loadTablePage` drops the page-state signature
+ * the moment a sort/reload request goes out, while the PREVIOUS page's status
+ * stays until the new page lands (or forever, if the load fails). In that
+ * window a status-gated badge still read "Check for script errors" and clicking
+ * it did nothing at all — the request no-ops, the panel opens, and the effect
+ * that closes it on an `idle` phase shuts it again in the same flush.
+ */
+export function canRequestScriptErrors(tabId: string): boolean {
+	return _recapKeys.has(tabId);
+}
+
+/**
+ * Why a script cell on screen holds no value — the message of the first script
+ * cell in the LOADED rows that came back an `error` or `pending`, or `null`
+ * when every one of them produced a value (including when the table has no
+ * script column, or no page yet).
+ *
+ * WHY THIS EXISTS. `POST /tables/script-errors` answers ZERO errors when the
+ * server has no script runner: nothing was evaluated, so nothing is KNOWN to
+ * have failed, and reporting one "not computed" error per cell instead would
+ * badge a 50 000-row table with "50000 script errors" for a sandbox that simply
+ * is not running. That is the honest answer, but `ScriptErrorsOut` cannot carry
+ * the difference between "we checked and there are none" and "we could not
+ * check" — its `state` is a one-valued literal and the wire shape is
+ * deliberately frozen. Rendered as an affirmative, the honest zero becomes a
+ * green tick over a grid whose every script cell reads `script runner
+ * unavailable`.
+ *
+ * So the client earns the distinction from evidence it already holds. THE CELLS
+ * ARE THE RELIABLE SIGNAL, and better than the alternatives:
+ *
+ *   * the page's `script_status` does NOT cover it. For the commonest shape (an
+ *     unsorted `collapse` script column) the whole-table passes make no
+ *     `value()` calls at all, so a runner-less page reports `ready` — no strip,
+ *     no message, nothing to key off — while the window pass, which is LIVE,
+ *     renders every cell an error saying exactly why. Only the sorted/`expand`
+ *     shape reports `failed`;
+ *   * `failed` alone would also OVER-suppress: the client's own poll give-up
+ *     writes a `failed` status while the backend sweep is still healthy, and a
+ *     recap that then comes back empty is a real, trustworthy "none".
+ *
+ * Restricted to SCRIPT columns on purpose — a broken navigation column's error
+ * cell is not something a script-error recap ever claimed to cover, and
+ * suppressing a good answer because of it would turn a useful check into a
+ * shrug. Loaded rows only: un-fetched slots of the sparse cache are `undefined`
+ * and say nothing either way.
+ *
+ * Cheap in the only place it is used: the badge consults it only once a recap
+ * has landed EMPTY (`&&`-guarded, so the page is not even read otherwise), and
+ * the scan stops at the first uncomputed cell.
+ */
+export function getUncomputedScriptCellReason(tabId: string): string | null {
+	const data = _pages.get(tabId);
+	if (!data) return null;
+	const scriptCols: number[] = [];
+	data.columns.forEach((c, i) => {
+		if (c.kind === 'script') scriptCols.push(i);
+	});
+	if (scriptCols.length === 0) return null;
+	for (const row of data.rows) {
+		if (row === undefined) continue;
+		for (const i of scriptCols) {
+			const cell = row.cells[i];
+			if (cell === undefined) continue;
+			if (cell.kind === 'error') return cell.message;
+			// A `pending` cell under a SETTLED status is a cell nothing will fill
+			// at this rev (the sweep is done or dead) — same evidence, no message
+			// of its own, so it borrows the wording the degraded export uses.
+			if (cell.kind === 'pending') return 'not computed';
+		}
+	}
+	return null;
 }
 
 /**
