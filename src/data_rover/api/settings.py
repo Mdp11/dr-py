@@ -95,9 +95,11 @@ class Settings(BaseSettings):
     #: which refuses "trusted" whenever ``dev_seed`` is false).
     snippet_runner: Literal["wasm", "trusted"] = "wasm"
     #: Path to the CPython-WASI guest binary (`python.wasm`) the wasm runner
-    #: loads. Fetched via `spikes/code_exec/fetch_python_wasi.sh`; not
-    #: committed, so dev/CI without it simply leaves the runner unset (routes
-    #: 503) rather than failing to boot.
+    #: loads. Not committed: it is fetched by the `scripts/ensure_guest.sh`
+    #: pixi activation hook (or by hand via
+    #: `spikes/code_exec/fetch_python_wasi.sh`), so a checkout where that never
+    #: ran — no network, a non-pixi deployment — simply leaves the runner unset
+    #: (routes 503) rather than failing to boot.
     snippet_guest_wasm_path: str = "spikes/code_exec/vendor/python.wasm"
     #: Path to the CPython-WASI stdlib the wasm runner preopens as
     #: `PYTHONHOME`/`PYTHONPATH` for the guest.

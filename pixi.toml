@@ -38,6 +38,9 @@ process-compose = "1.*"
 [feature.api.pypi-dependencies]
 wasmtime = ">=30"
 
+[feature.api.activation]
+scripts = ["scripts/ensure_guest.sh"]
+
 [feature.api.tasks.backend-start]
 description = "Run the FastAPI backend on 127.0.0.1:8000"
 cmd = "uvicorn data_rover.api.main:app --reload --reload-dir src --host 127.0.0.1 --port 8000 --app-dir src"

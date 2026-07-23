@@ -164,10 +164,12 @@ def _boot_script_runner(settings: Settings) -> None:
     NEVER be built at import time (`create_app()` runs at module import via
     `app = create_app()` below) -- only here, when the ASGI app actually
     starts serving. For `snippet_runner="wasm"` specifically, this also
-    checks the guest binary exists first: it is a large, unfetched-by-default
-    vendor artifact (`spikes/code_exec/fetch_python_wasi.sh`), so a dev/CI
-    checkout without it must boot cleanly with the runner left `None` --
-    Task 11's routes are expected to 503 on that, not crash startup.
+    checks the guest binary exists first: it is a large, uncommitted vendor
+    artifact fetched by the `scripts/ensure_guest.sh` pixi activation hook (or
+    by hand via `spikes/code_exec/fetch_python_wasi.sh`), so a checkout where
+    that never ran -- no network, or a deployment that does not go through
+    pixi -- must boot cleanly with the runner left `None`; Task 11's routes are
+    expected to 503 on that, not crash startup.
 
     The `snippet_runner="trusted"` RCE tripwire lives in
     `build_runner_from_settings` itself (unit-testable there); calling it
