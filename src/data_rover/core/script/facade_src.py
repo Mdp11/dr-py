@@ -741,16 +741,21 @@ def _dr_serialize_entry_result(entry, value):
     if entry == "step":
         if value is None:
             return {"ids": []}
+        # Single-return conveniences BEFORE generic iteration: a bare Element
+        # would otherwise be "iterated" via its __getitem__ (KeyError: 0), and
+        # a bare id string would be iterated per-character.
+        if isinstance(value, Element):
+            return {"ids": [value.id]}
         if isinstance(value, str):
-            raise ValueError(
-                "step() must return an iterable of Elements or element ids"
-            )
+            return {"ids": [value]}
+        _bad = (
+            "step() must return an Element, an element id, an iterable of "
+            "those, or None (None ends the chain); got "
+        )
         try:
             items = list(value)
         except TypeError:
-            raise ValueError(
-                "step() must return an iterable of Elements or element ids"
-            )
+            raise ValueError(_bad + type(value).__name__)
         ids = []
         for item in items:
             if isinstance(item, Element):
@@ -758,9 +763,7 @@ def _dr_serialize_entry_result(entry, value):
             elif isinstance(item, str):
                 ids.append(item)
             else:
-                raise ValueError(
-                    "step() must return an iterable of Elements or element ids"
-                )
+                raise ValueError(_bad + type(item).__name__)
         return {"ids": ids}
     if isinstance(value, Element):
         return {"kind": "element", "id": value.id}

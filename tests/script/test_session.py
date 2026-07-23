@@ -105,11 +105,13 @@ def test_serialize_step_shapes(small_model) -> None:
         ser("step", 42)
     with pytest.raises(ValueError):
         ser("step", [1])
-    # A bare `str` is iterable char-by-char; without the guard this would
-    # silently produce one single-character "id" per character instead of
-    # raising (see the `entry == "step"` branch in facade_src.py).
-    with pytest.raises(ValueError, match="iterable of Elements or element ids"):
-        ser("step", el.id)
+    # A bare `str` return (e.g. `return el.id`) is a single element id, not
+    # something to iterate char-by-char (see the `entry == "step"` branch in
+    # facade_src.py).
+    assert ser("step", el.id) == {"ids": [el.id]}
+    # A bare `Element` return (e.g. `return el.children()[0]`) is a single
+    # element, not something to index via its property-access __getitem__.
+    assert ser("step", el) == {"ids": [el.id]}
 
 
 # --- Session tests (M2) -----
@@ -166,18 +168,60 @@ def test_session_step_entry(small_model) -> None:
     sess.close()
 
 
-def test_session_step_rejects_bare_str_return(small_model) -> None:
-    # A bare `str` (e.g. `return el.id`) is iterable char-by-char; without a
-    # guard the step branch would silently yield one single-character "id"
-    # per character instead of erroring. It must be rejected up front, not
-    # iterated.
+def test_session_step_accepts_bare_str_return(small_model) -> None:
+    # A bare `str` return (e.g. `return el.id`) is a single element id, not
+    # something to iterate char-by-char (see the `entry == "step"` branch in
+    # facade_src.py). This exercises the same contract as
+    # test_step_returns_single_id_string below, via the _open()/small_model
+    # plumbing already used by the neighboring session tests.
     ids = sorted(small_model.elements)
     sess = _open(small_model, "def step(el):\n    return el.id")
     res = sess.call("step", [ids[0]])
-    assert res.value is None
-    assert res.error is not None
-    assert "iterable of Elements or element ids" in res.error.message
+    assert res.error is None
+    assert res.value == {"ids": [ids[0]]}
     sess.close()
+
+
+@pytest.fixture
+def session_model(small_model):
+    """(model, one existing element id) — shared setup for the step()
+    return-contract tests below."""
+    return small_model, sorted(small_model.elements)[0]
+
+
+def test_step_returns_single_element(session_model) -> None:
+    model, eid = session_model
+    sess = _open(model, "def step(el): return el")
+    res = sess.call("step", [eid])
+    assert res.error is None
+    assert res.value == {"ids": [eid]}
+
+
+def test_step_returns_single_id_string(session_model) -> None:
+    model, eid = session_model
+    sess = _open(model, "def step(el): return el.id")
+    res = sess.call("step", [eid])
+    assert res.error is None
+    assert res.value == {"ids": [eid]}
+
+
+def test_step_indexed_child_style_return(session_model) -> None:
+    # regression for the reported `el.children()[0]` case: an Element pulled
+    # out of a list is still a single-Element return
+    model, eid = session_model
+    sess = _open(model, "def step(el): return [el][0]")
+    res = sess.call("step", [eid])
+    assert res.error is None
+    assert res.value == {"ids": [eid]}
+
+
+def test_step_bad_return_message_teaches_none(session_model) -> None:
+    model, eid = session_model
+    sess = _open(model, "def step(el): return 42")
+    res = sess.call("step", [eid])
+    assert res.error is not None
+    assert "None ends the chain" in res.error.message
+    assert "int" in res.error.message
 
 
 # --- ScriptEvalContext tests (M2+M3) -----
