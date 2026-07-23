@@ -186,7 +186,15 @@ def test_script_errors_empty_when_all_ok(
     wire shape Task 6 consumes."""
     app.dependency_overrides[get_runner] = lambda: ScriptedRunner(lambda i, ids: ok(1))
 
-    _evaluate_until_ready(client)
+    page = _evaluate_until_ready(client)
+    # Self-standing guard: an EMPTY recap is byte-identical to the body the
+    # `script_ctx is None` early return emits, so on its own the assertion
+    # below would also pass if the whole-table pass never ran. Pin that this
+    # definition really does carry script work -- `table_has_script(defn)` is
+    # what gates that early return, and a rendered script cell proves it True.
+    assert page["script_status"] is not None
+    assert page["rows"][0]["cells"][SCRIPT_COL_INDEX]["kind"] == "value"
+
     r = _recap(client)
     assert r.status_code == 200, r.text
     body = r.json()

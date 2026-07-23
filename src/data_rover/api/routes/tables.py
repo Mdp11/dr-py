@@ -868,6 +868,9 @@ def table_script_errors(
     which is worse than not offering it. Same `TableLimits()` as the page route
     and the sweep for the same reason (export's uncapped limits are a
     display-only difference, but "same inputs" is the invariant worth keeping).
+    `EvaluateTableIn` is reused for the payload, but `offset`/`limit` are
+    IGNORED here: a recap of a window would defeat the point, so `row_index`
+    is always a whole-table index regardless of what the caller sends.
 
     DEGRADED, NEVER FAILED: no script column, no runner, or no free
     concurrency slot all answer 200 with whatever the cache holds — this route
