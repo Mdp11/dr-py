@@ -153,3 +153,13 @@ def test_script_step_without_context_prunes_silently() -> None:
     defn = _path([ScriptStep(snippet=_snip("def step(el): return []"))])
     res = evaluate(mm, model, defn)                      # script=None
     assert res.chains == [] and res.warnings == []
+
+
+def test_script_step_visited_drop_warns() -> None:
+    # identity return: every id the step returns is already in the chain, so
+    # the cycle guard drops them all -- previously with NO signal at all
+    mm, model = _fixture()
+    defn = _path([ScriptStep(snippet=_snip("def step(el): return [el]"))])
+    res = evaluate(mm, model, defn, script=_ctx(model))
+    assert res.chains == []
+    assert any("already visited" in w for w in res.warnings)
