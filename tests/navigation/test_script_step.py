@@ -148,7 +148,11 @@ def test_script_step_dangling_and_unconfigured() -> None:
     assert res.chains == [] and res.warnings == []      # unconfigured: silent
 
 
-def test_script_step_without_context_prunes_silently() -> None:
+def test_script_step_no_runner_fallback_prunes_silently() -> None:
+    # script=None is the DEGRADED fallback for callers with no runner at all.
+    # Table/nav routes always open a context when the definition has script
+    # work (table_has_script / navigation_has_script), so this path is never
+    # the table story -- see 2026-07-23 spec, section 1.
     mm, model = _fixture()
     defn = _path([ScriptStep(snippet=_snip("def step(el): return []"))])
     res = evaluate(mm, model, defn)                      # script=None

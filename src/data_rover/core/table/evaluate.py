@@ -81,7 +81,11 @@ def _scope_row_keys(mm: Metamodel, model: Model, rs: ScopeRows) -> list[RowKey]:
 
 
 def _navigation_row_keys(
-    mm: Metamodel, model: Model, rs: NavigationRows, limits: TableLimits
+    mm: Metamodel,
+    model: Model,
+    rs: NavigationRows,
+    limits: TableLimits,
+    script: ScriptEvalContext | None = None,
 ) -> tuple[list[RowKey], bool]:
     """(row keys, navigation-truncated). The second half matters: a navigation
     that hit its own `max_chains`/`max_visited` budget yields an INCOMPLETE row
@@ -90,7 +94,7 @@ def _navigation_row_keys(
     defn = rs.navigation.definition
     if defn is None:  # unconfigured ({}) source: no rows, nothing truncated
         return [], False
-    result = evaluate(mm, model, defn, limits.nav_limits)
+    result = evaluate(mm, model, defn, limits.nav_limits, script=script)
     idx = rs.step_index if rs.step_index is not None else -1
     seen: dict[str, None] = {}
     for chain in result.chains:
@@ -104,12 +108,16 @@ def _navigation_row_keys(
 
 
 def _chain_row_keys(
-    mm: Metamodel, model: Model, rs: ChainRows, limits: TableLimits
+    mm: Metamodel,
+    model: Model,
+    rs: ChainRows,
+    limits: TableLimits,
+    script: ScriptEvalContext | None = None,
 ) -> tuple[list[RowKey], bool]:
     defn = rs.navigation.definition
     if defn is None:  # unconfigured ({}) source: no rows, nothing truncated
         return [], False
-    result = evaluate(mm, model, defn, limits.nav_limits)
+    result = evaluate(mm, model, defn, limits.nav_limits, script=script)
     # Chains may end in a PropertyValue terminal; it rides along as a RowKey
     # slot (see Binding) so a RowSlot column can never misread it as an id.
     keys: list[RowKey] = [tuple(chain) for chain in result.chains]
@@ -117,14 +125,18 @@ def _chain_row_keys(
 
 
 def _base_row_keys(
-    mm: Metamodel, model: Model, defn: TableDefinition, limits: TableLimits
+    mm: Metamodel,
+    model: Model,
+    defn: TableDefinition,
+    limits: TableLimits,
+    script: ScriptEvalContext | None = None,
 ) -> tuple[list[RowKey], bool]:
     rs = defn.row_source
     if isinstance(rs, ScopeRows):
         return _scope_row_keys(mm, model, rs), False
     if isinstance(rs, NavigationRows):
-        return _navigation_row_keys(mm, model, rs, limits)
-    return _chain_row_keys(mm, model, rs, limits)
+        return _navigation_row_keys(mm, model, rs, limits, script=script)
+    return _chain_row_keys(mm, model, rs, limits, script=script)
 
 
 def _expand_slot_of(defn: TableDefinition, base_slots: int, col_index: int) -> int:
@@ -171,9 +183,14 @@ def resolve_source_elements(
     step-index cell would mix in other rows' chains.
 
     `script` is the shared per-request `ScriptEvalContext` (memoized calls,
-    one budget) — required to resolve a COLLAPSE script column as a source;
-    `None` (the default, for callers with no script columns in play) makes
-    such a reference resolve to nothing, same as an unconfigured snippet.
+    one budget) — required to resolve a COLLAPSE script column as a source,
+    AND threaded through to every navigation `evaluate()` call this function
+    reaches (directly or via `_navigation_reached`/`_navigation_step_elements`)
+    so a `ScriptStep` inside that navigation can run too; `None` (the default,
+    for callers with no script work in play) makes a script-column reference
+    resolve to nothing (same as an unconfigured snippet) and makes any
+    `ScriptStep` inside a reached navigation prune silently (same as an
+    unconfigured navigation source).
     """
     if isinstance(source, RowSlot):
         # Static validation only pins chain_index for NON-chains row sources;
@@ -208,6 +225,7 @@ def resolve_source_elements(
             limits,
             step=source.step_index,
             match_projected=match,
+            script=script,
         )
     if getattr(ref_col, "mode", "collapse") == "expand":
         b = key[_expand_slot_of(defn, base_slots, source.index)]
@@ -220,7 +238,7 @@ def resolve_source_elements(
         roots = resolve_source_elements(
             mm, model, defn, key, ref_col.source, base_slots, limits, script=script
         )
-        reached = _navigation_reached(mm, model, ref_col, roots, limits)
+        reached = _navigation_reached(mm, model, ref_col, roots, limits, script=script)
         # element-producing by contract: PropertyValue terminals contribute none
         return [n for n in reached if isinstance(n, str)]
     if ref_col.kind == "script":
@@ -253,19 +271,23 @@ def _navigation_reached_ex(
     col: NavigationColumn,
     roots: list[str],
     limits: TableLimits,
+    script: ScriptEvalContext | None = None,
 ) -> tuple[list[str | PropertyValue], bool]:
     """(reached nodes, navigation-truncated) — the flag is consumed by
     `build_rows`' expand loop; display-only callers use `_navigation_reached`.
     Nodes are element ids, except `PropertyValue` terminals when the projected
     step is a scalar property step — the cell layer renders those as VALUES
     (ValuesCell/ValueCell); callers that need elements filter on
-    `isinstance(node, str)`."""
+    `isinstance(node, str)`.
+
+    `script` backs a `ScriptStep` inside `col`'s navigation the same way it
+    backs a `ScriptColumn` — see `resolve_source_elements`'s docstring."""
     defn = col.navigation.definition
     if defn is None:  # unconfigured ({}) column: reaches nothing
         return [], False
     if not roots:
         return [], False
-    result = evaluate(mm, model, defn, limits.nav_limits, row_elements=roots)
+    result = evaluate(mm, model, defn, limits.nav_limits, row_elements=roots, script=script)
     idx = col.step_index if col.step_index is not None else -1
     seen: dict[str | PropertyValue, None] = {}
     for chain in result.chains:
@@ -280,8 +302,9 @@ def _navigation_reached(
     col: NavigationColumn,
     roots: list[str],
     limits: TableLimits,
+    script: ScriptEvalContext | None = None,
 ) -> list[str | PropertyValue]:
-    return _navigation_reached_ex(mm, model, col, roots, limits)[0]
+    return _navigation_reached_ex(mm, model, col, roots, limits, script=script)[0]
 
 
 def _navigation_step_elements(
@@ -293,6 +316,7 @@ def _navigation_step_elements(
     *,
     step: int,
     match_projected: str | None,
+    script: ScriptEvalContext | None = None,
 ) -> list[str]:
     """Elements at chain step `step` of `col`'s navigation, evaluated from
     `roots`. With `match_projected` set (the expand-column case) only chains
@@ -302,7 +326,7 @@ def _navigation_step_elements(
     defn = col.navigation.definition
     if defn is None or not roots:
         return []
-    result = evaluate(mm, model, defn, limits.nav_limits, row_elements=roots)
+    result = evaluate(mm, model, defn, limits.nav_limits, row_elements=roots, script=script)
     proj = col.step_index if col.step_index is not None else -1
     seen: dict[str, None] = {}
     for chain in result.chains:
@@ -367,13 +391,16 @@ def build_rows_ex(
     would be empty without splitting anything ("Keep rows with no value"
     works with or without the split).
 
-    `script` is `None` for callers with no script columns in play (every
-    existing caller); passed through to `resolve_source_elements`/
-    `_collapse_has_value`/`_expand_values` so a `ScriptColumn` — collapse OR
-    expand — goes through the SAME machinery every other column kind does,
-    calling `value()` (memoized) exactly where a collapse/expand navigation
-    or property column would re-navigate/re-read."""
-    keys, truncated = _base_row_keys(mm, model, defn, limits)
+    `script` is `None` for callers with no script work in play (every existing
+    caller); passed through to `resolve_source_elements`/`_collapse_has_value`/
+    `_expand_values`/`_base_row_keys` so a `ScriptColumn` — collapse OR expand
+    — goes through the SAME machinery every other column kind does, calling
+    `value()` (memoized) exactly where a collapse/expand navigation or
+    property column would re-navigate/re-read, AND so any `ScriptStep` inside
+    a navigation (row source, navigation column, or a `ColumnRef`'s
+    step-index re-navigation) rides the same context rather than pruning to
+    nothing."""
+    keys, truncated = _base_row_keys(mm, model, defn, limits, script=script)
     base_total = len(keys)
     base_slots = _row_source_base_slots(defn, keys)
     for col in defn.columns:
@@ -466,7 +493,9 @@ def _collapse_has_value(
             return p["id"] in model.elements, False
         return any(i in model.elements for i in p["ids"]), False
     if isinstance(col, NavigationColumn):
-        reached, truncated = _navigation_reached_ex(mm, model, col, roots, limits)
+        reached, truncated = _navigation_reached_ex(
+            mm, model, col, roots, limits, script=script
+        )
         return bool(reached), truncated
     for eid in roots:
         raw = model.elements[eid].properties.get(col.name)
@@ -516,7 +545,9 @@ def _expand_values(
             ), False
         return [PropertyValue(v) for v in p["values"] if v is not None], False
     if isinstance(col, NavigationColumn):
-        reached, truncated = _navigation_reached_ex(mm, model, col, roots, limits)
+        reached, truncated = _navigation_reached_ex(
+            mm, model, col, roots, limits, script=script
+        )
         # PropertyValue terminals ride into the RowKey as-is (see Binding);
         # cells.py renders them back as read-only ValueCells.
         bindings: list[Binding] = list(reached)

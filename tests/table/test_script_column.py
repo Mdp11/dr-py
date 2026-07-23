@@ -8,6 +8,7 @@ from pydantic import ValidationError
 
 from data_rover.core.metamodel.schema import ElementType, Metamodel, PropertyDef
 from data_rover.core.model.model import Model
+from data_rover.core.navigation.schema import PathNavigation, Scope, ScriptStep
 from data_rover.core.script.embed import ScriptEvalContext
 from data_rover.core.script.runner import RunLimits, ScriptBudget
 from data_rover.core.script.schema import SnippetDefinition, SnippetSource
@@ -17,6 +18,10 @@ from data_rover.core.table.resolve import resolve_table_refs, table_has_script
 from data_rover.core.table.schema import (
     TABLE_ADAPTER,
     ColumnRef,
+    ElementColumn,
+    NavigationColumn,
+    NavigationRows,
+    NavigationSource,
     PropertyColumn,
     RowSlot,
     ScopeRows,
@@ -411,4 +416,81 @@ def test_expand_rederive_is_cache_only() -> None:
     cells = evaluate_cells(mm, model, defn, build.keys, TableLimits(), script=ctx)
     assert all(isinstance(row[0], PendingCell) for row in cells)
     assert runner.calls[0] == 0  # re-derive still never called the guest
+    ctx.close()
+
+
+# ---- Task 3 (script correctness): navigation ScriptStep threaded through ----
+#
+# `evaluate.py`'s navigation helpers (row source AND navigation columns) must
+# forward the table's `ScriptEvalContext` into `navigation.evaluate.evaluate`
+# so a navigation containing a ScriptStep can actually run when used inside a
+# table. Fixture: this file's `_mm()`/`_fixture()` (3 "Block" elements).
+
+
+def _nav_with_script_step(target_expr: str) -> PathNavigation:
+    """One-step navigation whose only step is a script step."""
+    return PathNavigation(
+        kind="path",
+        start=Scope(types=[]),
+        steps=[ScriptStep(snippet=_snip(f"def step(el):\n    return {target_expr}"))],
+    )
+
+
+def test_nav_script_step_as_row_source() -> None:
+    mm = _mm()
+    model = _fixture()
+    ids = sorted(model.elements)
+    defn = TableDefinition(
+        row_source=NavigationRows(
+            navigation=NavigationSource(definition=_nav_with_script_step(f"['{ids[1]}']")),
+        ),
+        columns=[ElementColumn()],
+    )
+    ctx = _script_ctx(model)
+    build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
+    # the step hops every start element (except ids[1] itself, cycle guard)
+    # onto ids[1]; projected step -1 -> the row set is exactly {ids[1]}
+    assert build.keys == [(ids[1],)]
+    ctx.close()
+
+
+def test_nav_script_step_as_navigation_column() -> None:
+    mm = _mm()
+    model = _fixture()
+    ids = sorted(model.elements)
+    defn = TableDefinition(
+        row_source=ScopeRows(types=[]),
+        columns=[
+            ElementColumn(),
+            NavigationColumn(
+                navigation=NavigationSource(definition=_nav_with_script_step(f"['{ids[0]}']")),
+            ),
+        ],
+    )
+    ctx = _script_ctx(model)
+    build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
+    rows = evaluate_cells(mm, model, defn, build.keys, TableLimits(), script=ctx)
+    # every row except ids[0]'s reaches ids[0] in the nav column
+    reached = {
+        key[0]: cell
+        for key, cell in zip(build.keys, [r[1] for r in rows], strict=True)
+    }
+    other = next(k for k in reached if k != ids[0])
+    assert getattr(reached[other], "element_ids", None) == [ids[0]]
+    ctx.close()
+
+
+def test_nav_script_step_error_warns_through_table() -> None:
+    mm = _mm()
+    model = _fixture()
+    defn = TableDefinition(
+        row_source=NavigationRows(
+            navigation=NavigationSource(definition=_nav_with_script_step("1/0")),
+        ),
+        columns=[ElementColumn()],
+    )
+    ctx = _script_ctx(model)
+    build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
+    assert build.keys == []
+    assert any("script step failed" in w for w in ctx.warnings)
     ctx.close()
