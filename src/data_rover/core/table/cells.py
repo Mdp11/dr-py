@@ -361,7 +361,7 @@ def evaluate_cells(
     which must see the whole table because expansion determines row count).
 
     `script` is the shared per-request `ScriptEvalContext` — `None` for
-    callers with no script work in play (every existing caller); it backs both
+    callers with no script work in play; it backs both
     `ScriptColumn` evaluation AND any `ScriptStep` inside a navigation column's
     navigation (forwarded through `_navigation_reached`/`resolve_source_
     elements`), so a script-driven navigation renders the same with `None`

@@ -391,8 +391,8 @@ def build_rows_ex(
     would be empty without splitting anything ("Keep rows with no value"
     works with or without the split).
 
-    `script` is `None` for callers with no script work in play (every existing
-    caller); passed through to `resolve_source_elements`/`_collapse_has_value`/
+    `script` is `None` for callers with no script work in play; passed
+    through to `resolve_source_elements`/`_collapse_has_value`/
     `_expand_values`/`_base_row_keys` so a `ScriptColumn` — collapse OR expand
     — goes through the SAME machinery every other column kind does, calling
     `value()` (memoized) exactly where a collapse/expand navigation or
