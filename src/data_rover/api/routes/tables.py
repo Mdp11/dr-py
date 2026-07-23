@@ -286,7 +286,9 @@ def evaluate_table(
                 # pass below — this route is the only writer — so the predicate
                 # answers for the order actually in hand. It runs BEFORE the
                 # window pass, so `MAX_SCRIPT_WARNINGS` can never crowd it out.
-                if script_ctx is not None and sort_falls_back_to_build_order(defn, sort):
+                if script_ctx is not None and sort_falls_back_to_build_order(
+                    defn, sort
+                ):
                     script_ctx.add_warning(SORT_SCRIPT_NAV_WARNING)
             else:
                 # Whole-table passes are CACHE-ONLY (spec §4.1): the guest is

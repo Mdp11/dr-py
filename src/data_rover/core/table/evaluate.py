@@ -616,7 +616,9 @@ def _nav_col_has_script(col: NavigationColumn) -> bool:
     return defn is not None and navigation_has_script(defn)
 
 
-def _source_reaches_script_navigation(defn: TableDefinition, source: ColumnSource) -> bool:
+def _source_reaches_script_navigation(
+    defn: TableDefinition, source: ColumnSource
+) -> bool:
     """Would resolving `source` evaluate a navigation containing a `ScriptStep`?
 
     Mirrors `resolve_source_elements` BRANCH FOR BRANCH — if that function
