@@ -665,7 +665,9 @@ cache is internally locked, and the pathology counters are job-global.
   `_sort_script` therefore hands the sort pass a `None` context for exactly
   that case, so the step prunes silently, every row ties, and the rows stay in
   build order — with `SORT_SCRIPT_NAV_WARNING` on the response so the user is
-  told. Every LIVE sort is untouched (it never enters the branch at all).
+  told. The decision is taken ONCE per `order_rows` call (it depends only on
+  the definition, the sort column, and `cache_only`), and the LIVE path never
+  enters the branch at all.
   - **What counts as COVERED** — a collapse `ScriptColumn` is a *sweep-covered
     boundary*, so the walk (`_sort_reaches_script_navigation` /
     `_source_reaches_script_navigation`) stops at one rather than recursing

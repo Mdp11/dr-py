@@ -1032,8 +1032,11 @@ def table_script_errors(
                     headers={"Retry-After": "1"},
                 )
             items, total = re_items, re_total
-        # Falls through here on: a complete cache (the common case), a
-        # terminal-but-incomplete sweep, and no runner at all.
+        # Falls through here on: a complete cache (the common case) and a
+        # terminal sweep whose re-probe still missed. The no-runner case does
+        # NOT reach here — it returns the empty recap ~100 lines above (see the
+        # docstring: a runnerless recap would count one "not computed" error
+        # per cell for something no snippet did).
         return JSONResponse(
             ScriptErrorsOut(
                 errors=items,

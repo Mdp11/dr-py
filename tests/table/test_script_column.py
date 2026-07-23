@@ -901,6 +901,35 @@ def test_cache_only_sort_by_unconfigured_script_column_does_not_warn() -> None:
     ctx.close()
 
 
+def test_cache_only_sort_warning_is_emitted_per_sort_not_per_row() -> None:
+    """The decision depends only on `(definition, sort column, context)`, so it
+    is taken ONCE in `order_rows` rather than once per row. Sorting an EMPTY key
+    set is the structural probe: with the predicate evaluated per row it never
+    runs at all, so the warning would be missing exactly when the row count is
+    zero — and, on a 50 000-row table, computed 50 000 identical times."""
+    from data_rover.core.table.evaluate import SortSpec, order_rows
+
+    mm = _mm()
+    model = _fixture()
+    ids = sorted(model.elements)
+    defn = TableDefinition(
+        row_source=ScopeRows(types=["Block"]),
+        columns=[
+            ElementColumn(),
+            NavigationColumn(
+                navigation=NavigationSource(definition=_rotating_step_nav(ids))
+            ),
+        ],
+    )
+    ctx = _cache_only_ctx(model)
+    assert order_rows(
+        mm, model, defn, [], SortSpec(column=1, direction="asc"),
+        TableLimits(), script=ctx,
+    ) == []
+    assert any("build order" in w for w in ctx.warnings)
+    ctx.close()
+
+
 def test_sort_falls_back_to_build_order_predicate() -> None:
     """The public predicate the API layer re-asks on an order-cache HIT. It is
     context-free (O(definition), no cache, no model walk) precisely so a route

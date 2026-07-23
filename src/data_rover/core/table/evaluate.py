@@ -591,14 +591,18 @@ class SortSpec:
     direction: Literal["asc", "desc"]
 
 
-#: Emitted (once — `add_warning` dedupes by exact text) when a sort is skipped
-#: because computing it would mean driving a navigation `ScriptStep` under a
-#: CACHE-ONLY context. See `_sort_script` for why that is a dead end rather
-#: than a "poll again".
+#: Emitted (once per sort — `order_rows` decides once, and `add_warning` dedupes
+#: by exact text anyway) when a sort is skipped because computing it would mean
+#: driving a navigation `ScriptStep` under a CACHE-ONLY context. See
+#: `_sort_script` for why that is a dead end rather than a "poll again".
+#:
+#: Deliberately says "SORTING BY this column needs", not "this column's
+#: navigation": the sort column is often a property/element column merely
+#: SOURCED from the navigation column, and has no navigation of its own.
 SORT_SCRIPT_NAV_WARNING = (
-    "script step: this column's navigation runs a script step whose values are "
-    "not computed for every row, so the table cannot be sorted by it; rows stay "
-    "in build order"
+    "script step: sorting by this column needs a navigation script step whose "
+    "values are not computed for every row, so the table cannot be sorted by "
+    "it; rows stay in build order"
 )
 
 
@@ -697,8 +701,12 @@ def sort_falls_back_to_build_order(
 def _sort_script(
     defn: TableDefinition, col: Column, script: ScriptEvalContext | None
 ) -> ScriptEvalContext | None:
-    """The context `_sort_value` may drive for `col` — `script` itself, or
-    `None` to fall back to the script-less (tie-everything) sort.
+    """The context the sort pass may drive for `col` — `script` itself, or
+    `None` to fall back to the script-less (tie-everything) sort. Called ONCE
+    per `order_rows`, not once per row: the answer depends only on `(defn, col,
+    script.cache_only)`, so per-row evaluation was 50 000 identical traversals
+    and 50 000 `add_warning` dedup probes on a 50 000-row table — and left the
+    warning unemitted on an empty key set, the one case where no row is sorted.
 
     WHY the fallback exists. Under a CACHE-ONLY context (every whole-table pass
     of every table route) a cache miss synthesizes a `pending` result and bumps
@@ -800,12 +808,10 @@ def _sort_value(
     same root back onto that root's WHOLE reached set, losing the per-row value
     that made it a binding column in the first place.
 
-    `script` is dropped to `None` for a CACHE-ONLY sort whose value would come
-    from a navigation `ScriptStep` — nothing can ever compute those cells for a
-    sort, so recording pending misses for them strands the page (see
-    `_sort_script`, which also emits the user-facing warning). Every other
-    combination — and the whole LIVE path — is unaffected."""
-    script = _sort_script(defn, col, script)
+    `script` is the context `order_rows` already resolved through
+    `_sort_script` — `None` there means either "no script work in play" or "this
+    cache-only sort falls back to build order"; either way this function just
+    threads it through, and the fallback decision is not re-taken per row."""
     if isinstance(col, ElementColumn):
         els = resolve_source_elements(
             mm, model, defn, key, col.source, base_slots, limits, script=script
@@ -920,6 +926,12 @@ def order_rows(
     if sort is None:
         return list(keys)
     col = defn.columns[sort.column]
+    # Taken ONCE, here, rather than inside `_sort_value`: it depends only on
+    # (defn, col, script.cache_only), so per-row evaluation was pure repetition
+    # — and skipped the warning entirely on an empty key set. Nothing between
+    # here and the decorate loop mutates what it reads (`cache_only` is a phase
+    # flag the caller flips around whole passes, never mid-pass).
+    script = _sort_script(defn, col, script)
     expand_count = sum(
         1 for c in defn.columns if getattr(c, "mode", "collapse") == "expand"
     )
