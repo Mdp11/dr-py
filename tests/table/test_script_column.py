@@ -806,3 +806,96 @@ def test_cache_only_sort_by_script_free_navigation_is_untouched() -> None:
     assert ordered == [(ids[2],), (ids[0],), (ids[1],)]
     assert ctx.warnings == []
     ctx.close()
+
+
+# ---- the fallback must NOT swallow a sweep-covered sort ----------------------
+#
+# The degrade above is only correct where NOTHING can ever fill the step cells.
+# A collapse `ScriptColumn` is the counter-example: `script_sweep._run_inner`
+# resolves EVERY collapse script column's `source` LIVE, once per row, before it
+# fans the `value()` work out — so the navigation `step()` cells underneath such
+# a column are computed and cached by the sweep just like the `value()` cells
+# above them. Degrading a sort that goes through a script column therefore turns
+# a "pend once, poll again, converge" table into one that ties every row
+# FOREVER and never even kicks a sweep (the degrade records no pending miss).
+
+
+def _cache_only_ctx(model: Model) -> ScriptEvalContext:
+    from data_rover.core.script.cell_cache import ScriptCellCache
+
+    return ScriptEvalContext(
+        TrustedRunner(),
+        model,
+        RunLimits(),
+        ScriptBudget.start(60),
+        cell_cache=ScriptCellCache(),
+        rev=0,
+        cache_only=True,
+    )
+
+
+def test_cache_only_sort_by_script_column_over_nav_script_still_pends() -> None:
+    """`[nav column with a script step, script column sourced from it]`, sorted
+    on the script column. The sweep covers this shape end to end, so the sort
+    must keep RECORDING PENDING MISSES (the signal that kicks the sweep) and
+    must not be degraded away with a warning."""
+    from data_rover.core.table.evaluate import SortSpec, order_rows
+
+    mm = _mm()
+    model = _fixture()
+    ids = sorted(model.elements)
+    _rename_for_rotation(model, ids)
+    defn = TableDefinition(
+        row_source=ScopeRows(types=["Block"]),
+        columns=[
+            NavigationColumn(
+                navigation=NavigationSource(definition=_rotating_step_nav(ids))
+            ),
+            ScriptColumn(
+                source=ColumnRef(index=0),
+                snippet=_snip("def value(els): return els[0].name if els else None"),
+            ),
+        ],
+    )
+    ctx = _cache_only_ctx(model)
+    build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
+    order_rows(
+        mm, model, defn, build.keys, SortSpec(column=1, direction="asc"),
+        TableLimits(), script=ctx,
+    )
+    assert ctx.pending_misses > 0, "no pending miss => nothing ever kicks a sweep"
+    # The only warning is the ordinary cache-only placeholder the nav step
+    # emits while it waits for the sweep — NOT the give-up degrade warning.
+    assert ctx.warnings == ["script step failed: not computed yet"]
+    ctx.close()
+
+
+def test_cache_only_sort_by_unconfigured_script_column_does_not_warn() -> None:
+    """An unconfigured (`snippet.definition is None`) script column resolves
+    NOTHING — `_sort_value` bails before touching its source — so telling the
+    user a navigation script step blocked their sort would be a lie."""
+    from data_rover.core.table.evaluate import SortSpec, order_rows
+
+    mm = _mm()
+    model = _fixture()
+    ids = sorted(model.elements)
+    _rename_for_rotation(model, ids)
+    defn = TableDefinition(
+        row_source=ScopeRows(types=["Block"]),
+        columns=[
+            NavigationColumn(
+                navigation=NavigationSource(definition=_rotating_step_nav(ids))
+            ),
+            ScriptColumn(source=ColumnRef(index=0), snippet=SnippetSource()),
+        ],
+    )
+    ctx = _cache_only_ctx(model)
+    build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
+    ordered = order_rows(
+        mm, model, defn, build.keys, SortSpec(column=1, direction="asc"),
+        TableLimits(), script=ctx,
+    )
+    assert ordered == build.keys  # every row ties, as it always did
+    assert ctx.warnings == []
+    assert ctx.pending_misses == 0
+    ctx.close()

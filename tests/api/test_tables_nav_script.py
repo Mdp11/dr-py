@@ -337,6 +337,67 @@ def test_sort_by_nav_script_step_column_settles_instead_of_failing(
     assert [row["key"][0] for row in second["rows"]] == ["t1", "t2"]
 
 
+#: `value()` for the script column below: the name of whatever the navigation
+#: column reached for this row. Sorting on it is a REAL reordering (t1 -> "T2",
+#: t2 -> "T3", t3 -> "T1", so ascending is t3, t1, t2), so a degraded sort is
+#: immediately distinguishable from a working one.
+REACHED_NAME_CODE = "def value(els): return els[0].name if els else None\n"
+
+
+def _nav_then_script_column_table(step_code: str, value_code: str) -> dict:
+    """`[element, collapse navigation with a script step, script column sourced
+    from that navigation column]` — the shape the SWEEP covers end to end."""
+    table = _nav_column_table(step_code)
+    table["columns"].append(
+        {
+            "kind": "script",
+            "source": {"kind": "column", "index": 1},
+            "snippet": {"definition": {"code": value_code}},
+        }
+    )
+    return table
+
+
+def test_sort_by_script_column_over_nav_script_step_converges(
+    client: TestClient, seed_things: list[str], settings_sync_sweep: Settings
+) -> None:
+    """Sorting by a script COLUMN whose source is a script-step navigation
+    column must PEND and then CONVERGE — it must not be degraded away.
+
+    This is the shape `script_sweep._run_inner` covers end to end: it resolves
+    every collapse script column's `source` LIVE, once per built row, to
+    enumerate its `value()` work — and that resolution drives (and caches) the
+    navigation's `step()` calls on the way. So one sweep round fills BOTH the
+    step cells and the value cells, and the next poll sorts for real.
+
+    Degrading it instead is strictly worse than the bug the fallback was
+    written for: the degrade records no pending miss, so the page reports
+    `ready`, never kicks a sweep, and ties every row for the life of the rev —
+    a sort that can never converge, rather than one that converges next poll.
+    """
+    payload = {
+        "definition": _nav_then_script_column_table(ROTATE_CODE, REACHED_NAME_CODE),
+        "sort": {"column": 2, "direction": "asc"},
+        "limit": 2,
+    }
+    r = client.post(papi("/tables/evaluate"), json=payload)
+    assert r.status_code == 200, r.text
+    first = r.json()
+    # Poll 1 pends (which is what KICKS the sweep) rather than silently tying.
+    assert first["script_status"]["state"] == "computing"
+    assert not any("build order" in w for w in first["warnings"])
+
+    r = client.post(papi("/tables/evaluate"), json=payload)
+    assert r.status_code == 200, r.text
+    second = r.json()
+    # Poll 2: the sweep filled both layers, so the sort is the REAL one
+    # (t3 "T1" < t1 "T2" < t2 "T3"), not build order (t1, t2, t3).
+    assert second["script_status"]["state"] == "ready"
+    assert second["total"] == 3
+    assert [row["key"][0] for row in second["rows"]] == ["t3", "t1"]
+    assert second["warnings"] == []
+
+
 # ---------------------------------------------------------------------------
 # read-only entry mapping (Task 7): script_runner.open_session's
 # record_ops=False -- SECURITY TRIPWIRE, see the Task 7 brief. A script

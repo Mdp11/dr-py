@@ -617,11 +617,20 @@ def _source_reaches_script_navigation(defn: TableDefinition, source: ColumnSourc
 
     Mirrors `resolve_source_elements` BRANCH FOR BRANCH — if that function
     grows a new way to reach a navigation, this must grow the same one. A
-    `RowSlot` and any EXPAND reference read a RowKey slot and evaluate nothing;
-    a script-column reference calls `value()` (which the background sweep DOES
-    fill, so it is not a dead end) but its own source may still reach a
-    navigation, hence the recursion. Terminates because a column's source can
-    only reference EARLIER columns (schema guarantee — see `_expand_slot_of`).
+    `RowSlot` and any EXPAND reference read a RowKey slot and evaluate nothing.
+
+    A collapse `ScriptColumn` reference is a SWEEP-COVERED BOUNDARY and stops
+    the walk (see `_sort_script` for the whole argument): `script_sweep.
+    _run_inner` resolves every collapse script column's `source` LIVE, once per
+    built row, to enumerate its `value()` work — which drives and caches every
+    navigation `step()` underneath it on the way. So a sort that reaches a
+    navigation only THROUGH such a column pends once and converges on the next
+    poll, exactly like a plain script column; degrading it would tie every row
+    forever AND (a degrade records no pending miss) never even kick the sweep
+    that would have fixed it. An unconfigured one resolves nothing at all.
+
+    Terminates because a column's source can only reference EARLIER columns
+    (schema guarantee — see `_expand_slot_of`).
     """
     if isinstance(source, RowSlot):
         return False
@@ -641,14 +650,18 @@ def _source_reaches_script_navigation(defn: TableDefinition, source: ColumnSourc
             defn, ref_col.source
         )
     if isinstance(ref_col, ScriptColumn):
-        return _source_reaches_script_navigation(defn, ref_col.source)
+        return False  # sweep-covered boundary (docstring); stop the walk
     return False  # property columns are not element-producing
 
 
 def _sort_reaches_script_navigation(defn: TableDefinition, col: Column) -> bool:
     """Would computing `col`'s sort value evaluate a navigation containing a
-    `ScriptStep`? Mirrors `_sort_value`'s own branches: every `expand` branch
-    reads a RowKey slot and evaluates nothing at all."""
+    `ScriptStep` that NOTHING will ever compute? Mirrors `_sort_value`'s own
+    branches: every `expand` branch reads a RowKey slot and evaluates nothing
+    at all, and a `ScriptColumn` sort is the sweep-covered boundary
+    `_source_reaches_script_navigation` documents — the sweep enumerates that
+    very column's `value()` work by resolving its source live per row, so both
+    layers are filled after one round."""
     if isinstance(col, ElementColumn):
         return _source_reaches_script_navigation(defn, col.source)
     if col.mode == "expand":
@@ -657,7 +670,9 @@ def _sort_reaches_script_navigation(defn: TableDefinition, col: Column) -> bool:
         return _nav_col_has_script(col) or _source_reaches_script_navigation(
             defn, col.source
         )
-    return _source_reaches_script_navigation(defn, col.source)
+    if isinstance(col, ScriptColumn):
+        return False
+    return _source_reaches_script_navigation(defn, col.source)  # PropertyColumn
 
 
 def _sort_script(
@@ -670,13 +685,15 @@ def _sort_script(
     of every table route) a cache miss synthesizes a `pending` result and bumps
     `pending_misses`, which is the route's signal to degrade to build order,
     kick a background sweep, and tell the client to poll. That contract holds
-    for a script COLUMN, because the sweep computes exactly those `value()`
-    cells. It does NOT hold for a `step()` call a SORT needs: the sweep never
-    calls `order_rows`, and its per-cell fan-out only covers `ScriptColumn`s —
-    so nothing in the system will ever fill a step cell that only the sort
-    wants. Driving the context anyway produced one `pending` per off-window
-    row, a page permanently degraded to build order, `script_status: failed`
-    for the whole rev, and a once-a-second poll loop that could never converge.
+    wherever the sweep computes the missing cell — which is every `value()`
+    cell of a collapse `ScriptColumn`, AND (because the sweep resolves each such
+    column's `source` LIVE per row to enumerate that work) every navigation
+    `step()` cell underneath one. It does NOT hold for a `step()` call that ONLY
+    a SORT wants: the sweep never calls `order_rows`, so nothing in the system
+    will ever fill it. Driving the context anyway produced one `pending` per
+    off-window row, a page permanently degraded to build order, `script_status:
+    failed` for the whole rev, and a once-a-second poll loop that could never
+    converge.
 
     So under cache-only we do NOT drive the context for such a sort: the
     navigation is evaluated with `script=None`, its `ScriptStep` prunes
