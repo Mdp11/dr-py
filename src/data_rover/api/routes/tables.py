@@ -708,11 +708,10 @@ def export_table(
             if row is not None:
                 name = row.name
         # Hidden columns are evaluated (a visible column may reference them)
-        # but never exported: filter headers/widths AND each row's cells by
+        # but never exported: filter headers AND each row's cells by
         # position.
         visible = [i for i, c in enumerate(defn.columns) if not c.hidden]
         headers = [defn.columns[i].header or defn.columns[i].kind for i in visible]
-        widths = [defn.columns[i].width_px for i in visible]
         all_rows = iter_export_rows(
             metamodel, model, defn, ordered, limits, script=script_ctx
         )
@@ -758,7 +757,6 @@ def export_table(
         blob = build_workbook(
             model,
             headers,
-            widths,
             name,
             ([row[i] for i in visible] for row in all_rows),
             notice_provider=_notice,
