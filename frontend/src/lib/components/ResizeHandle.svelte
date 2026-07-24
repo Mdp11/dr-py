@@ -4,15 +4,33 @@
 		value: number;
 		/** Axis to resize along. 'x' = column width, 'y' = row height. */
 		axis?: 'x' | 'y';
-		/** For axis 'x': 'left' grows on drag-right, 'right' grows on drag-left.
-		 *  Ignored for axis 'y' (drag-up always grows). */
-		side?: 'left' | 'right';
+		/** Which side of the handle grows on drag.
+		 *  axis 'x': 'left' grows on drag-right, 'right' grows on drag-left.
+		 *  axis 'y': 'top' grows on drag-DOWN (the handle sits under the panel it
+		 *  sizes), 'bottom' grows on drag-UP (the handle sits above it).
+		 *
+		 *  The default is 'left', which for axis 'y' falls through to the
+		 *  drag-up-grows branch — deliberate, and load-bearing: the two
+		 *  pre-existing axis='y' call sites (the workspace results panel and
+		 *  NavigationBuilder's results dock) pass no `side` and must keep their
+		 *  current behaviour. Do not "tidy" this into separate defaults per axis. */
+		side?: 'left' | 'right' | 'top' | 'bottom';
 		min?: number;
 		max?: number;
+		/** Accessible name for the separator. */
+		label?: string;
 		onchange: (next: number) => void;
 	};
 
-	let { value, axis = 'x', side = 'left', min = 160, max = 720, onchange }: Props = $props();
+	let {
+		value,
+		axis = 'x',
+		side = 'left',
+		min = 160,
+		max = 720,
+		label,
+		onchange
+	}: Props = $props();
 
 	let dragging = $state(false);
 	let start = 0;
@@ -34,8 +52,8 @@
 	function onPointerMove(e: PointerEvent) {
 		if (!dragging) return;
 		const delta = coord(e) - start;
-		// axis 'y': drag up (negative delta) grows the panel below.
-		const signed = axis === 'y' ? -delta : side === 'left' ? delta : -delta;
+		const signed =
+			axis === 'y' ? (side === 'top' ? delta : -delta) : side === 'left' ? delta : -delta;
 		const next = Math.max(min, Math.min(max, startSize + signed));
 		onchange(next);
 	}
@@ -50,6 +68,7 @@
 <div
 	role="separator"
 	aria-orientation={axis === 'y' ? 'horizontal' : 'vertical'}
+	aria-label={label}
 	tabindex="-1"
 	class="group relative select-none bg-border hover:bg-primary/50"
 	class:h-full={axis === 'x'}
