@@ -114,7 +114,8 @@ it('right-click (contextmenu) also opens the dropdown', () => {
 		flushSync();
 		backButton().dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
 		flushSync();
-		expect(document.querySelector('[data-testid="inspector-history-entry-0"]')).not.toBeNull();
+		const entry = document.querySelector('[data-testid="inspector-history-entry-0"]');
+		expect(entry).not.toBeNull();
 		expect(document.querySelector('[data-slot="dropdown-menu-content"]')).not.toBeNull();
 	} finally {
 		unmount(component);
@@ -122,8 +123,10 @@ it('right-click (contextmenu) also opens the dropdown', () => {
 });
 
 it('an entry whose element is unknown falls back to its bare id', () => {
-	// e3 is never cached and the fetch 404s -> row shows the id as its label.
-	server.use(http.get(`*/model/elements/e3`, () => new HttpResponse(null, { status: 404 })));
+	// e3 is never seeded into getTreeElements(), so resolveRows() finds no
+	// cached element for it and the name falls through to the entry's bare id
+	// (no fetch is involved: the Inspector only ever fetches the *currently
+	// selected* element, e2, via ensureElement).
 	select({ kind: 'element', id: 'e3' });
 	select({ kind: 'element', id: 'e2' });
 	const component = mount(Inspector, { target: document.body });
@@ -132,7 +135,12 @@ it('an entry whose element is unknown falls back to its bare id', () => {
 		backButton().dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
 		flushSync();
 		const entry = document.querySelector('[data-testid="inspector-history-entry-0"]');
-		expect(entry?.textContent).toContain('e3');
+		expect(entry).not.toBeNull();
+		// Target the name span specifically (not the whole item, which always
+		// also renders row.id in its own mono span) so a regression that made
+		// the fallback resolve to '' rather than the bare id would be caught.
+		const nameSpan = entry?.querySelector('.min-w-0.truncate');
+		expect(nameSpan?.textContent).toBe('e3');
 	} finally {
 		unmount(component);
 	}
