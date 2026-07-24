@@ -1,5 +1,7 @@
 import { SvelteSet } from 'svelte/reactivity';
 
+import { pushVisit } from './inspection-history.svelte';
+
 export type SelectionKind = 'element' | 'relationship';
 export type Selection = { kind: SelectionKind; id: string } | null;
 
@@ -18,6 +20,11 @@ export function getSelection(): Selection {
 
 export function select(s: Selection): void {
 	_selection = s;
+	// Every element selection is an inspection "visit", recorded at this one
+	// choke point so all navigation paths (tree, search, palette, graph,
+	// endpoint links, table cells) feed the Inspector's back/forward history.
+	// Replays from goBack/goForward are guarded inside pushVisit.
+	if (s !== null && s.kind === 'element') pushVisit(s.id);
 }
 
 export function clearSelection(): void {

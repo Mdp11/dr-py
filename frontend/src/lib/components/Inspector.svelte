@@ -9,6 +9,7 @@
 		getSelection,
 		isTempId
 	} from '$lib/state';
+	import HistoryNav from './Inspector/HistoryNav.svelte';
 	import LockControl from './Inspector/LockControl.svelte';
 	import NewRelationshipPicker from './Inspector/NewRelationshipPicker.svelte';
 	import PropertyForm from './Inspector/PropertyForm.svelte';
@@ -46,6 +47,10 @@
 	data-testid="inspector"
 	class="flex h-full flex-col overflow-hidden border-l border-border bg-background text-sm text-foreground/80"
 >
+	<!-- Outside the state branches on purpose: the back/forward cluster must
+	     survive every Inspector state (empty / loading / not-found / entity),
+	     otherwise a deselect would unmount the only way back. -->
+	<HistoryNav />
 	{#if selection === null}
 		<section
 			class="flex flex-1 flex-col items-center justify-center gap-1 overflow-auto px-3 py-6 text-center"

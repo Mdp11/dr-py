@@ -3,6 +3,8 @@ import { http, HttpResponse } from 'msw';
 
 import type { Element, OpsResponse, Relationship } from '$lib/api/types';
 import { server } from '../../api/__tests__/server';
+import { getVisitStack, resetInspectionHistory } from '../inspection-history.svelte';
+import { select } from '../selection.svelte';
 import {
 	applyDelta,
 	emit,
@@ -48,6 +50,7 @@ afterAll(() => {
 });
 beforeEach(() => {
 	resetModelStore();
+	resetInspectionHistory();
 });
 
 function el(id: string, props: Record<string, unknown> = {}, rev = 0): Element {
@@ -198,6 +201,15 @@ describe('applyDelta', () => {
 		expect(getCachedRelationships().get('r_untouched')).toBe(relBefore);
 		expect(getCachedElements().get('touched')).not.toBe(touchedBefore);
 		expect(getCachedElements().get('touched')?.properties.ref).toBe('E1');
+	});
+
+	it('remaps the inspection-history visit stack through a commit id_map BEFORE the selection re-point', () => {
+		// Guards the wiring at model.svelte.ts's applyDelta: remapVisitIds(d.id_map)
+		// must run before the selection re-point below it, or a created-then-
+		// committed element leaves a dead temp-id entry in the user's back stack.
+		select({ kind: 'element', id: 'tmp_a' });
+		applyDelta(delta({ model_rev: 2, id_map: { tmp_a: 'E1' } }));
+		expect(getVisitStack().map((e) => e.id)).toEqual(['E1']);
 	});
 
 	it('applies the issue-store delta keyed by owner (target_ids[0])', () => {
