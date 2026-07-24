@@ -74,11 +74,19 @@ from ..schemas import (
     SnippetCancelIn,
     SnippetDocsOut,
     SnippetErrorOut,
+    SnippetFormatIn,
+    SnippetFormatOut,
     SnippetLimitsOut,
     SnippetLintIn,
     SnippetLintOut,
     SnippetRunIn,
     SnippetRunOut,
+)
+from ..script_format import (
+    FormatSyntaxError,
+    FormatTimeout,
+    FormatUnavailable,
+    format_code,
 )
 from ..script_runner import get_runner, run_limits_from_settings
 from ..settings import Settings, get_settings
@@ -169,6 +177,28 @@ def lint_snippet(
         ],
         entry_points=entry_points,
     )
+
+
+@router.post("/snippets/format")
+def format_snippet_code(
+    payload: SnippetFormatIn,
+    _membership: Membership = Depends(require_membership),
+    settings: Settings = Depends(get_settings),
+) -> SnippetFormatOut:
+    """Reformat a snippet with ``ruff format``.
+
+    Read-only (listed in ``authz._READ_ONLY_POST_SUFFIXES``): it never touches
+    ``session.model``, so a viewer may format their own draft. A missing
+    formatter is a 503, matching the missing-guest-binary posture of
+    ``POST /snippets/run`` — degraded, never a 500.
+    """
+    try:
+        result = format_code(payload.code, timeout_s=settings.snippet_format_timeout_s)
+    except FormatSyntaxError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except (FormatUnavailable, FormatTimeout) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return SnippetFormatOut(code=result.code, changed=result.changed)
 
 
 #: Static authoring facts served alongside the generated reference. The one

@@ -138,12 +138,117 @@ const editorTheme = EditorView.theme(
 		'.cm-lint-marker-warning': { color: 'var(--warning)' },
 		'.cm-lint-marker-info': { color: 'var(--info)' },
 
-		// Search panel (basicSetup search).
+		// Search panel. `basicSetup` gives only `searchKeymap`; the panel itself
+		// comes from `search-panel.ts` (a custom `createPanel`), which builds
+		// plain DOM with the class names below. Everything here is presentation
+		// for that markup — behaviour lives in @codemirror/search.
 		'.cm-panels': {
 			backgroundColor: 'var(--popover)',
 			color: 'var(--popover-foreground)',
-			borderTop: '1px solid var(--border)'
-		}
+			border: 'none'
+		},
+		'.cm-panels-top': { borderBottom: '1px solid var(--border)' },
+		'.cm-panels-bottom': { borderTop: '1px solid var(--border)' },
+
+		'.cm-dr-search': {
+			display: 'flex',
+			flexDirection: 'column',
+			gap: '0.3rem',
+			padding: '0.45rem 0.6rem',
+			fontFamily: 'inherit',
+			fontSize: '0.75rem'
+		},
+		'.cm-dr-search-row': {
+			display: 'flex',
+			alignItems: 'center',
+			gap: '0.35rem'
+		},
+		'.cm-dr-search-field': {
+			flex: '1',
+			minWidth: '0',
+			backgroundColor: 'var(--card)',
+			color: 'var(--foreground)',
+			border: '1px solid var(--border)',
+			borderRadius: 'var(--radius-md)',
+			padding: '0.2rem 0.5rem',
+			fontFamily: MONO,
+			fontSize: '0.75rem',
+			outline: 'none'
+		},
+		'.cm-dr-search-field:focus': {
+			borderColor: 'var(--primary)',
+			boxShadow: '0 0 0 2px oklch(0.78 0.06 155 / 18%)'
+		},
+		'.cm-dr-search-invalid': {
+			borderColor: 'var(--destructive)',
+			boxShadow: '0 0 0 2px oklch(0.66 0.14 25 / 18%)'
+		},
+		'.cm-dr-search-count': {
+			flexShrink: '0',
+			minWidth: '4.5ch',
+			textAlign: 'right',
+			color: 'var(--muted-foreground)',
+			fontFamily: MONO,
+			fontSize: '0.6875rem',
+			fontVariantNumeric: 'tabular-nums'
+		},
+		'.cm-dr-search-btn': {
+			display: 'inline-flex',
+			alignItems: 'center',
+			justifyContent: 'center',
+			flexShrink: '0',
+			width: '1.5rem',
+			height: '1.5rem',
+			padding: '0',
+			border: 'none',
+			borderRadius: 'var(--radius-md)',
+			background: 'transparent',
+			color: 'var(--muted-foreground)',
+			cursor: 'pointer',
+			transition: 'background-color 120ms ease, color 120ms ease'
+		},
+		'.cm-dr-search-btn:hover': {
+			backgroundColor: 'var(--accent)',
+			color: 'var(--accent-foreground)'
+		},
+		'.cm-dr-search-btn svg': { width: '0.875rem', height: '0.875rem' },
+		'.cm-dr-search-chips': {
+			display: 'flex',
+			alignItems: 'center',
+			gap: '0.3rem',
+			paddingLeft: '1.85rem'
+		},
+		'.cm-dr-search-chip': {
+			padding: '0.1rem 0.4rem',
+			border: '1px solid var(--border)',
+			borderRadius: '999px',
+			background: 'transparent',
+			color: 'var(--muted-foreground)',
+			fontFamily: MONO,
+			fontSize: '0.6875rem',
+			lineHeight: '1.2',
+			cursor: 'pointer',
+			transition: 'background-color 120ms ease, color 120ms ease, border-color 120ms ease'
+		},
+		'.cm-dr-search-chip:hover': { color: 'var(--foreground)' },
+		'.cm-dr-search-chip[aria-pressed="true"]': {
+			backgroundColor: 'oklch(0.78 0.06 155 / 18%)',
+			borderColor: 'oklch(0.78 0.06 155 / 45%)',
+			color: 'var(--cm-plain)'
+		},
+		'.cm-dr-search-replace': { paddingLeft: '1.85rem' },
+		'.cm-dr-search-action': {
+			flexShrink: '0',
+			padding: '0.2rem 0.5rem',
+			border: '1px solid var(--border)',
+			borderRadius: 'var(--radius-md)',
+			background: 'transparent',
+			color: 'var(--foreground)',
+			fontSize: '0.6875rem',
+			cursor: 'pointer',
+			transition: 'background-color 120ms ease'
+		},
+		'.cm-dr-search-action:hover': { backgroundColor: 'var(--accent)' }
 	},
 	{ dark: true }
 );

@@ -381,3 +381,10 @@ export {
 	setSnippetExpanded,
 	resetSnippetCollapse
 } from './snippet-collapse.svelte';
+export {
+	getInlineEditorHeight,
+	setInlineEditorHeight,
+	getSnippetSplitRatio,
+	setSnippetSplitRatio,
+	resetEditorSize
+} from './editor-size.svelte';

@@ -14,7 +14,15 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { server } from '../../../api/__tests__/server';
 import * as artifactsApi from '$lib/api/artifacts';
 import * as modelRead from '$lib/api/model-read';
-import { getArtifactHeaders, loadArtifacts, resetArtifacts } from '$lib/state';
+import {
+	getArtifactHeaders,
+	getInlineEditorHeight,
+	loadArtifacts,
+	resetArtifacts,
+	resetEditorSize,
+	setInlineEditorHeight
+} from '$lib/state';
+import { INLINE_MIN_H } from '$lib/editor/editor-size';
 import type { Artifact, ArtifactHeader, SnippetSource } from '$lib/api/types';
 import SnippetSourceEditor from '../SnippetSourceEditor.svelte';
 
@@ -567,6 +575,66 @@ describe('SnippetSourceEditor — test panel', () => {
 		} finally {
 			unmount(c);
 			vi.useRealTimers();
+		}
+	});
+});
+
+describe('SnippetSourceEditor — inline editor height', () => {
+	beforeEach(() => {
+		localStorage.clear();
+		resetEditorSize();
+	});
+
+	const CODE = 'def value(elements):\n    return 1\n';
+
+	function box(): HTMLElement {
+		const el = document.querySelector('[data-testid="snippet-editor-box"]') as HTMLElement;
+		if (!el) throw new Error('snippet-editor-box not rendered');
+		return el;
+	}
+
+	it('renders the editor at the stored height and the grip resizes it', () => {
+		const c = render(inlineSnippet(CODE), 'value', () => {});
+		try {
+			expect(box().style.height).toBe('192px');
+
+			const grip = document.querySelector('[aria-label="Resize snippet editor"]') as HTMLElement;
+			expect(grip).toBeTruthy();
+			grip.setPointerCapture = () => {};
+			grip.releasePointerCapture = () => {};
+
+			// A +60px drag downward from the grip's own pointer position.
+			grip.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0, clientY: 300 }));
+			grip.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientY: 360 }));
+			grip.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientY: 360 }));
+			flushSync();
+
+			expect(getInlineEditorHeight()).toBe(252);
+			expect(box().style.height).toBe('252px');
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('persists the height so a fresh mount reads it back', () => {
+		setInlineEditorHeight(310);
+		resetEditorSize();
+		const c = render(inlineSnippet(CODE), 'value', () => {});
+		try {
+			expect(box().style.height).toBe('310px');
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('never renders below the minimum height', () => {
+		setInlineEditorHeight(10);
+		resetEditorSize();
+		const c = render(inlineSnippet(CODE), 'value', () => {});
+		try {
+			expect(box().style.height).toBe(`${INLINE_MIN_H}px`);
+		} finally {
+			unmount(c);
 		}
 	});
 });

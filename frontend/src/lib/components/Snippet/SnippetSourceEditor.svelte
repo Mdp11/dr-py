@@ -10,7 +10,15 @@
 	import { ChevronDown, ChevronRight } from '@lucide/svelte';
 	import * as api from '$lib/api/artifacts';
 	import { lintSnippet } from '$lib/api/snippets';
-	import { getArtifactHeaders, isSnippetExpanded, setSnippetExpanded } from '$lib/state';
+	import {
+		getArtifactHeaders,
+		getInlineEditorHeight,
+		isSnippetExpanded,
+		setInlineEditorHeight,
+		setSnippetExpanded
+	} from '$lib/state';
+	import ResizeHandle from '$lib/components/ResizeHandle.svelte';
+	import { INLINE_MAX_H, INLINE_MIN_H } from '$lib/editor/editor-size';
 	import { entryAvailable, withStub, type BoundEntry } from '$lib/snippet/entry-stubs';
 	import type { SnippetDiagnostic, SnippetSource } from '$lib/api/types';
 	import CodeEditor from './CodeEditor.svelte';
@@ -230,13 +238,32 @@
 			{/if}
 		{:else if snippet.definition}
 			{@const def = snippet.definition}
-			<div class="h-48 overflow-hidden rounded border border-input">
-				<CodeEditor
-					bind:this={editor}
-					code={def.code}
-					{diagnostics}
-					onChange={handleCodeChange}
-					onRun={() => void testPanel?.requestRun()}
+			<!-- Height is a GLOBAL preference (state/editor-size.svelte.ts), so
+			     dragging any inline editor's grip resizes every mounted one and the
+			     choice survives a reload — see that store's docstring for why
+			     per-instance memory cannot work for navigation script steps. -->
+			<div class="overflow-hidden rounded border border-input">
+				<div
+					data-testid="snippet-editor-box"
+					class="overflow-hidden"
+					style="height: {getInlineEditorHeight()}px"
+				>
+					<CodeEditor
+						bind:this={editor}
+						code={def.code}
+						{diagnostics}
+						onChange={handleCodeChange}
+						onRun={() => void testPanel?.requestRun()}
+					/>
+				</div>
+				<ResizeHandle
+					axis="y"
+					side="top"
+					label="Resize snippet editor"
+					value={getInlineEditorHeight()}
+					min={INLINE_MIN_H}
+					max={INLINE_MAX_H}
+					onchange={setInlineEditorHeight}
 				/>
 			</div>
 			{#if !entryPoints.includes(entry)}
