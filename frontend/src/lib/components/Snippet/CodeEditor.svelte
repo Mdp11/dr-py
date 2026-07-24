@@ -15,6 +15,7 @@
 		type VocabSummary
 	} from '$lib/editor/completion-source';
 	import { editorLuxuryTheme } from '$lib/editor/theme';
+	import { luxurySearch } from '$lib/editor/search-panel';
 	import type { SnippetDiagnostic, SnippetDocsOut } from '$lib/api/types';
 
 	let {
@@ -120,6 +121,10 @@
 						basicSetup,
 						python(),
 						editorLuxuryTheme,
+						// Custom Ctrl+F panel. basicSetup contributes only searchKeymap +
+						// highlightSelectionMatches, so this is the ONLY search() config in
+						// the editor — no duplicate panel.
+						luxurySearch,
 						placeholder(placeholderDom),
 						lintGutter(),
 						// Four-space levels, Tab/Shift-Tab, and paste tab-expansion —
