@@ -46,9 +46,7 @@
 	const criteria = $derived(getSearchCriteria());
 
 	const leafInvalidRegex = (c: LeafCriterion): boolean =>
-		(c.type === 'property' || c.type === 'name_id') &&
-		c.op === 'matches' &&
-		!isValidRegex(c.value);
+		(c.type === 'property' || c.type === 'name_id') && c.op === 'matches' && !isValidRegex(c.value);
 	const hasInvalidRegex = $derived(
 		criteria.some((c) =>
 			c.type === 'any_of' ? c.criteria.some(leafInvalidRegex) : leafInvalidRegex(c)
