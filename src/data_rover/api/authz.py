@@ -65,6 +65,7 @@ _READ_ONLY_POST_SUFFIXES = (
     "/tables/script-errors",
     "/snippets/run",
     "/snippets/lint",
+    "/snippets/format",
     "/snippets/cancel",
 )
 

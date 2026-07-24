@@ -15,6 +15,7 @@ from data_rover.core.model.element import Element
 from data_rover.core.model.model import Model
 from data_rover.core.model.relationship import Relationship
 from data_rover.core.navigation.schema import NavigationDefinition
+from data_rover.core.script.schema import SNIPPET_MAX_CODE_BYTES
 from data_rover.core.table.schema import TableDefinition
 from data_rover.core.validation.issue import Issue
 from data_rover.core.view.schema import Folder, View
@@ -773,6 +774,22 @@ class SnippetLintOut(BaseModel):
 
 class SnippetCancelIn(BaseModel):
     run_id: str
+
+
+class SnippetFormatIn(BaseModel):
+    """Body for POST /snippets/format. The cap is enforced here so oversized
+    input 422s in validation, before a subprocess is spawned. ``max_length``
+    counts characters, not bytes — a tighter-or-equal bound, and the same
+    spelling ``SnippetDefinition.code`` already uses."""
+
+    code: str = Field(max_length=SNIPPET_MAX_CODE_BYTES)
+
+
+class SnippetFormatOut(BaseModel):
+    code: str
+    #: False when the snippet was already formatted — the client skips the
+    #: editor transaction (and its undo entry) in that case.
+    changed: bool
 
 
 class FacadeDocEntryOut(BaseModel):

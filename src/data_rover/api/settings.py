@@ -136,6 +136,10 @@ class Settings(BaseSettings):
     snippet_max_op_bytes: int = 1024 * 1024
     #: Mirrors ``RunLimits.page_limit``.
     snippet_page_limit: int = 500
+    #: Wall budget for one ``ruff format`` subprocess (POST /snippets/format).
+    #: Generous for a <=64 KiB file; a breach means something is wrong with the
+    #: host, which the route reports as 503 rather than hanging the editor.
+    snippet_format_timeout_s: float = 5.0
     #: Capacity (entries) of the guest facade's session-lifetime read memo
     #: (spec 2026-07-21 Phase A'). One entry is one memoized bridge read
     #: response (element projection / adjacency list / type info). 0 disables.

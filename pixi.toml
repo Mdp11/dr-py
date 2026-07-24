@@ -35,6 +35,11 @@ openpyxl = "3.1.*"
 types-openpyxl = "3.1.*"
 xlsxwriter = "3.2.*"
 process-compose = "1.*"
+# `ruff format` backs POST /snippets/format. It is a formatter, not an
+# executor: it parses and prints the snippet and never runs it, so unlike the
+# snippet runner it needs no sandbox. Pinned to the same version core-dev uses
+# so CI-formatted and user-formatted code cannot disagree.
+ruff = "0.15.*"
 
 [feature.api.pypi-dependencies]
 wasmtime = ">=30"
