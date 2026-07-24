@@ -55,6 +55,23 @@ export function longpress(node: HTMLElement, options: LongPressOptions) {
 
 	const onContextMenu = (e: MouseEvent) => {
 		e.preventDefault();
+		// On some touch platforms the browser synthesizes `contextmenu` from the
+		// very press-and-hold gesture our internal timer is independently timing:
+		// the timer fires first (fired = true), the platform then aborts the
+		// touch with `pointercancel` and hands the gesture to its own long-press
+		// detector, so no `click` ever follows to clear `fired` via
+		// onClickCapture. If we called onLongPress again here it would double-fire
+		// the same physical gesture, and leaving `fired` stranded true would
+		// wrongly suppress a later, unrelated click (e.g. a keyboard-activated
+		// Enter/Space click). So a `fired`-true contextmenu is treated as
+		// belonging to the gesture the timer already handled: consume it and
+		// return without a second onLongPress() call. A genuine desktop
+		// right-click never hits this branch — it arrives with `fired` still
+		// false since no timer ran.
+		if (fired) {
+			fired = false;
+			return;
+		}
 		cancel();
 		opts.onLongPress();
 	};

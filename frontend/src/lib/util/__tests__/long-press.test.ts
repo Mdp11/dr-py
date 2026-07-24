@@ -80,4 +80,58 @@ describe('longpress action', () => {
 		vi.advanceTimersByTime(1000);
 		expect(onLongPress).not.toHaveBeenCalled();
 	});
+
+	it('a contextmenu following an already-fired press is consumed without double-firing', () => {
+		const clicked = vi.fn();
+		node.addEventListener('click', clicked);
+		pointerDown(node);
+		vi.advanceTimersByTime(500);
+		expect(onLongPress).toHaveBeenCalledOnce();
+		// Simulate the platform aborting the touch and synthesizing contextmenu
+		// instead of a click (no pointerup/click ever arrives).
+		node.dispatchEvent(new PointerEvent('pointercancel', { bubbles: true }));
+		const e = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+		node.dispatchEvent(e);
+		expect(onLongPress).toHaveBeenCalledOnce();
+		expect(e.defaultPrevented).toBe(true);
+		// fired must not be left stranded true: a later click not preceded by a
+		// fresh pointerdown (e.g. keyboard Enter/Space) is not suppressed.
+		node.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+		expect(clicked).toHaveBeenCalledOnce();
+	});
+
+	it('honors a custom durationMs', () => {
+		const customNode = document.createElement('button');
+		document.body.appendChild(customNode);
+		const customOnLongPress = vi.fn();
+		const customAction = longpress(customNode, {
+			onLongPress: customOnLongPress,
+			durationMs: 1000
+		});
+		pointerDown(customNode);
+		vi.advanceTimersByTime(500);
+		expect(customOnLongPress).not.toHaveBeenCalled();
+		vi.advanceTimersByTime(500);
+		expect(customOnLongPress).toHaveBeenCalledOnce();
+		customAction.destroy();
+		customNode.remove();
+	});
+
+	it('honors a widened moveTolerancePx', () => {
+		const customNode = document.createElement('button');
+		document.body.appendChild(customNode);
+		const customOnLongPress = vi.fn();
+		const customAction = longpress(customNode, {
+			onLongPress: customOnLongPress,
+			moveTolerancePx: 50
+		});
+		pointerDown(customNode, 10, 10);
+		customNode.dispatchEvent(
+			new PointerEvent('pointermove', { clientX: 30, clientY: 10, bubbles: true })
+		);
+		vi.advanceTimersByTime(500);
+		expect(customOnLongPress).toHaveBeenCalledOnce();
+		customAction.destroy();
+		customNode.remove();
+	});
 });
