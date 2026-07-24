@@ -5,7 +5,9 @@ navigation engine (``core/navigation``) can filter start sets and hop targets
 with the exact same semantics (and wire format) as ``POST /model/search``.
 ``api/search.py`` re-exports everything, so the API surface is unchanged.
 Matching is pure and O(criteria) per entity; relationship-aware criteria go
-through ``model.indexes``, never a scan.
+through ``model.indexes``, never a scan. Criteria combine with AND at every
+call site; the single OR construct is ``AnyOfCriterion`` (a flat, leaf-only
+group).
 
 Coercion mirrors JavaScript so results match the client reference exactly:
 ``String(raw ?? '')`` for text ops (``true``/``false`` lower-cased, integral
@@ -89,7 +91,7 @@ class EndpointTypeCriterion(BaseModel):
     names: list[str] = Field(default_factory=list)
 
 
-Criterion = Annotated[
+LeafCriterion = Annotated[
     EntityTypeCriterion
     | PropertyCriterion
     | NameIdCriterion
@@ -97,6 +99,34 @@ Criterion = Annotated[
     | OrphanCriterion
     | ConnectedToTypeCriterion
     | EndpointTypeCriterion,
+    Field(discriminator="type"),
+]
+"""Every non-group criterion — the only members an OR group may hold."""
+
+
+class AnyOfCriterion(BaseModel):
+    """OR group: matches iff ANY member matches. Members are LEAVES only —
+    nesting is structurally unrepresentable (``criteria: list[LeafCriterion]``),
+    so a nested group fails validation at every API boundary that parses
+    criteria. An EMPTY group is a deliberate NO-OP (matches everything): it is
+    a transient editing state and must not blank a half-configured table or
+    navigation — the same tolerant stance as an unconfigured table
+    ``NavigationSource``. This overrides literal ``any([]) is False``; the
+    matchers here and the client evaluator special-case it identically."""
+
+    type: Literal["any_of"]
+    criteria: list[LeafCriterion] = Field(default_factory=list)
+
+
+Criterion = Annotated[
+    EntityTypeCriterion
+    | PropertyCriterion
+    | NameIdCriterion
+    | RelationCountCriterion
+    | OrphanCriterion
+    | ConnectedToTypeCriterion
+    | EndpointTypeCriterion
+    | AnyOfCriterion,
     Field(discriminator="type"),
 ]
 
@@ -230,6 +260,9 @@ def _rels_for(
 
 
 def match_element(model: Model, e: Element, c: Criterion) -> bool:
+    if isinstance(c, AnyOfCriterion):
+        # empty group = configured-nothing no-op (see AnyOfCriterion docstring)
+        return not c.criteria or any(match_element(model, e, m) for m in c.criteria)
     if isinstance(c, EntityTypeCriterion):
         return _match_entity_type(e.type_name, c.names)
     if isinstance(c, PropertyCriterion):
@@ -261,6 +294,11 @@ def match_element(model: Model, e: Element, c: Criterion) -> bool:
 
 
 def match_relationship(model: Model, r: Relationship, c: Criterion) -> bool:
+    if isinstance(c, AnyOfCriterion):
+        # empty group = configured-nothing no-op (see AnyOfCriterion docstring)
+        return not c.criteria or any(
+            match_relationship(model, r, m) for m in c.criteria
+        )
     if isinstance(c, EntityTypeCriterion):
         return _match_entity_type(r.type_name, c.names)
     if isinstance(c, PropertyCriterion):

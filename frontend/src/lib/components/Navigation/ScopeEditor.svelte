@@ -2,8 +2,9 @@
 	import { SvelteSet } from 'svelte/reactivity';
 	import { getMetamodel } from '$lib/state';
 	import type { NavScope } from '$lib/api/types';
-	import type { Criterion } from '$lib/search/types';
+	import type { AnyOfCriterion, Criterion, LeafCriterion } from '$lib/search/types';
 	import { newCriterion } from '$lib/search/types';
+	import CriterionGroupRow from '../Sidebar/CriterionGroupRow.svelte';
 	import CriterionRow from '../Sidebar/CriterionRow.svelte';
 	import StereotypePicker from '../Sidebar/StereotypePicker.svelte';
 
@@ -46,6 +47,12 @@
 			criteria: [...(scope.criteria as Criterion[]), newCriterion('property')]
 		});
 	}
+	function addGroup(): void {
+		onChange({
+			...scope,
+			criteria: [...(scope.criteria as Criterion[]), newCriterion('any_of')]
+		});
+	}
 </script>
 
 <div class="space-y-1.5">
@@ -77,14 +84,29 @@
 			class="text-xs text-info/90 transition-colors hover:text-info"
 			onclick={addCriterion}>+ condition</button
 		>
+		<button
+			type="button"
+			class="text-xs text-info/90 transition-colors hover:text-info"
+			onclick={addGroup}>+ OR group</button
+		>
 	</div>
 	{#each scope.criteria as criterion, i (i)}
-		<CriterionRow
-			criterion={criterion as Criterion}
-			index={i}
-			target="element"
-			onChange={setCriterion}
-			onRemove={removeCriterion}
-		/>
+		{#if (criterion as Criterion).type === 'any_of'}
+			<CriterionGroupRow
+				criterion={criterion as AnyOfCriterion}
+				index={i}
+				target="element"
+				onChange={setCriterion}
+				onRemove={removeCriterion}
+			/>
+		{:else}
+			<CriterionRow
+				criterion={criterion as LeafCriterion}
+				index={i}
+				target="element"
+				onChange={setCriterion}
+				onRemove={removeCriterion}
+			/>
+		{/if}
 	{/each}
 </div>

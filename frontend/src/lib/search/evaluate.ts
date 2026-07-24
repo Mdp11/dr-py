@@ -148,6 +148,9 @@ function matchElement(e: Element, c: Criterion, ctx: Ctx): boolean {
 				return other != null && c.names.includes(other.type_name);
 			});
 		}
+		case 'any_of':
+			// empty group = configured-nothing no-op; mirrors the backend matcher.
+			return c.criteria.length === 0 || c.criteria.some((m) => matchElement(e, m, ctx));
 		default:
 			// relationship-only criterion on an element query: skip (no-op).
 			return true;
@@ -167,6 +170,9 @@ function matchRelationship(r: Relationship, c: Criterion, ctx: Ctx): boolean {
 			const el = ctx.elementsById.get(endId);
 			return el != null && c.names.includes(el.type_name);
 		}
+		case 'any_of':
+			// empty group = configured-nothing no-op; mirrors the backend matcher.
+			return c.criteria.length === 0 || c.criteria.some((m) => matchRelationship(r, m, ctx));
 		default:
 			// element-only criterion on a relationship query: skip (no-op).
 			return true;

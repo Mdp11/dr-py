@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { MessageSquarePlus, MessageSquareText } from '@lucide/svelte';
 	import type { NavFilterStep } from '$lib/api/types';
-	import type { Criterion } from '$lib/search/types';
+	import type { AnyOfCriterion, Criterion, LeafCriterion } from '$lib/search/types';
 	import { newCriterion } from '$lib/search/types';
+	import CriterionGroupRow from '../Sidebar/CriterionGroupRow.svelte';
 	import CriterionRow from '../Sidebar/CriterionRow.svelte';
 	import ChainBadge from './ChainBadge.svelte';
 
@@ -29,6 +30,12 @@
 		onChange(index, {
 			...step,
 			criteria: [...(step.criteria as Criterion[]), newCriterion('property')]
+		});
+	}
+	function addGroup(): void {
+		onChange(index, {
+			...step,
+			criteria: [...(step.criteria as Criterion[]), newCriterion('any_of')]
 		});
 	}
 
@@ -103,19 +110,35 @@
 		{/if}
 		<div class="space-y-1 pl-7">
 			{#each step.criteria as criterion, i (i)}
-				<CriterionRow
-					criterion={criterion as Criterion}
-					index={i}
-					target="element"
-					{propertyNames}
-					onChange={setCriterion}
-					onRemove={removeCriterion}
-				/>
+				{#if (criterion as Criterion).type === 'any_of'}
+					<CriterionGroupRow
+						criterion={criterion as AnyOfCriterion}
+						index={i}
+						target="element"
+						{propertyNames}
+						onChange={setCriterion}
+						onRemove={removeCriterion}
+					/>
+				{:else}
+					<CriterionRow
+						criterion={criterion as LeafCriterion}
+						index={i}
+						target="element"
+						{propertyNames}
+						onChange={setCriterion}
+						onRemove={removeCriterion}
+					/>
+				{/if}
 			{/each}
 			<button
 				type="button"
 				class="text-xs text-info/90 transition-colors hover:text-info"
 				onclick={addCriterion}>+ condition</button
+			>
+			<button
+				type="button"
+				class="text-xs text-info/90 transition-colors hover:text-info"
+				onclick={addGroup}>+ OR group</button
 			>
 		</div>
 	</div>

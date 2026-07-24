@@ -376,3 +376,19 @@ def test_build_rows_ex_reports_base_total():
     # the 2-tuple wrapper stays intact for existing callers
     keys, truncated = build_rows(mm, model, defn)
     assert keys == result.keys and truncated is result.truncated
+
+
+def test_scope_rows_any_of_criteria_group():
+    mm = _mm(); model, ids = _fixture()
+    defn = TABLE_ADAPTER.validate_python({
+        "row_source": {"kind": "scope", "types": ["Block"], "criteria": [
+            {"type": "any_of", "criteria": [
+                {"type": "property", "name": "name", "op": "equals", "value": "Root"},
+                {"type": "property", "name": "name", "op": "equals", "value": "Leaf"},
+            ]},
+        ]},
+        "columns": [{"kind": "element", "source": {"kind": "row"}}],
+    })
+    keys, truncated = build_rows(mm, model, defn)
+    assert not truncated
+    assert sorted(keys) == sorted([(ids["root"],), (ids["leaf"],)])
