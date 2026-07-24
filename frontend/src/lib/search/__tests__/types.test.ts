@@ -17,7 +17,8 @@ describe('criteriaForKind', () => {
 			'name_id',
 			'relation_count',
 			'orphan',
-			'connected_to_type'
+			'connected_to_type',
+			'any_of'
 		]);
 	});
 	it('returns the full ordered relationship criteria array', () => {
@@ -25,7 +26,8 @@ describe('criteriaForKind', () => {
 			'entity_type',
 			'property',
 			'name_id',
-			'endpoint_type'
+			'endpoint_type',
+			'any_of'
 		]);
 	});
 });
@@ -69,5 +71,42 @@ describe('pruneCriteria', () => {
 		];
 		const pruned = pruneCriteria(criteria, 'element');
 		expect(pruned).toEqual(criteria);
+	});
+});
+
+describe('any_of in the criterion vocabulary', () => {
+	it('newCriterion builds an empty group', () => {
+		expect(newCriterion('any_of')).toEqual({ type: 'any_of', criteria: [] });
+	});
+	it('is offered for both targets', () => {
+		expect(criteriaForKind('element')).toContain('any_of');
+		expect(criteriaForKind('relationship')).toContain('any_of');
+	});
+});
+
+describe('pruneCriteria recurses into groups', () => {
+	it('drops inapplicable members and keeps the rest', () => {
+		const criteria: Criterion[] = [
+			{
+				type: 'any_of',
+				criteria: [
+					{ type: 'orphan' },
+					{ type: 'property', name: 'status', op: 'equals', value: 'x' }
+				]
+			}
+		];
+		expect(pruneCriteria(criteria, 'relationship')).toEqual([
+			{
+				type: 'any_of',
+				criteria: [{ type: 'property', name: 'status', op: 'equals', value: 'x' }]
+			}
+		]);
+	});
+	it('drops a group emptied by pruning', () => {
+		const criteria: Criterion[] = [
+			{ type: 'entity_type', names: [] },
+			{ type: 'any_of', criteria: [{ type: 'orphan' }] }
+		];
+		expect(pruneCriteria(criteria, 'relationship')).toEqual([{ type: 'entity_type', names: [] }]);
 	});
 });

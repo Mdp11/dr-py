@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Element, Relationship } from '$lib/api/types';
-import type { AdvancedQuery, SearchModel } from '../types';
+import type { AdvancedQuery, LeafCriterion, SearchModel } from '../types';
 import { isValidRegex, runQuery } from '../evaluate';
 
 function el(id: string, type_name = 'Thing', properties: Record<string, unknown> = {}): Element {
@@ -405,5 +405,97 @@ describe('runQuery — cross-kind criteria are no-ops', () => {
 				m
 			).map((r) => r.id)
 		).toEqual(['r1']);
+	});
+});
+
+describe('runQuery — any_of group', () => {
+	const m = model(
+		[
+			el('e1', 'Block', { status: 'active' }),
+			el('e2', 'Block', { status: 'pending' }),
+			el('e3', 'Port', { status: 'closed', name: 'legacy-x' })
+		],
+		[rel('r1', 'e1', 'e2', 'Link'), rel('r2', 'e2', 'e3', 'Wire')]
+	);
+	const status = (value: string): LeafCriterion => ({
+		type: 'property',
+		name: 'status',
+		op: 'equals',
+		value
+	});
+
+	it('matches when any member matches', () => {
+		expect(
+			ids(
+				{
+					target: 'element',
+					criteria: [{ type: 'any_of', criteria: [status('active'), status('pending')] }]
+				},
+				m
+			)
+		).toEqual(['e1', 'e2']);
+	});
+
+	it('mixes member kinds', () => {
+		expect(
+			ids(
+				{
+					target: 'element',
+					criteria: [
+						{
+							type: 'any_of',
+							criteria: [
+								status('pending'),
+								{ type: 'name_id', field: 'name', op: 'contains', value: 'legacy' }
+							]
+						}
+					]
+				},
+				m
+			)
+		).toEqual(['e2', 'e3']);
+	});
+
+	it('empty group is a no-op (matches everything)', () => {
+		expect(ids({ target: 'element', criteria: [{ type: 'any_of', criteria: [] }] }, m)).toEqual([
+			'e1',
+			'e2',
+			'e3'
+		]);
+	});
+
+	it('is ANDed with sibling criteria', () => {
+		expect(
+			ids(
+				{
+					target: 'element',
+					criteria: [
+						{ type: 'entity_type', names: ['Block'] },
+						{ type: 'any_of', criteria: [status('active'), status('closed')] }
+					]
+				},
+				m
+			)
+		).toEqual(['e1']);
+	});
+
+	it('applies to relationship queries', () => {
+		expect(
+			ids(
+				{
+					target: 'relationship',
+					criteria: [
+						{
+							type: 'any_of',
+							criteria: [
+								{ type: 'entity_type', names: ['Wire'] },
+								{ type: 'endpoint_type', endpoint: 'source', names: ['Nope'] }
+							]
+						}
+					]
+				},
+				m
+			)
+		).toEqual(['r2']);
 	});
 });
