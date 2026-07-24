@@ -169,6 +169,10 @@ class TableDefinition(BaseModel):
     row_source: RowSource
     columns: list[Column] = Field(min_length=1, max_length=MAX_COLUMNS)
     default_cell_mode: Literal["collapse", "expand"] = "collapse"
+    #: Presentation flag: render a 1-based "#" first column in the grid and
+    #: prepend the same column to the xlsx export. Not a real column — it
+    #: never participates in ColumnRef indexing, sorting, or evaluation.
+    show_row_numbers: bool = False
 
     @model_validator(mode="after")
     def _validate_sources(self) -> TableDefinition:

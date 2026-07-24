@@ -197,3 +197,47 @@ def test_export_styling_autofit_filters_borders(client):
     # (700px under the old px/7 heuristic would exceed 90 char-units)
     w = ws.column_dimensions["B"].width
     assert w is not None and 0 < w < 90
+
+
+def test_export_row_numbers_column(client):
+    # Item 10: `show_row_numbers` prepends a 1-based "#" column, numbered in
+    # export row order (which follows the current sort).
+    _bootstrap_model(client)
+    body = {
+        "definition": {
+            "row_source": {"kind": "scope", "types": ["Block"]},
+            "show_row_numbers": True,
+            "columns": [
+                {"kind": "element", "source": {"kind": "row"}, "header": "Block"},
+            ],
+        }
+    }
+    r = client.post(papi("/tables/export"), json=body, headers=AUTH_HEADERS)
+    assert r.status_code == 200, r.text
+    wb = load_workbook(io.BytesIO(r.content))
+    ws = wb.active
+    assert ws is not None
+    header = [c.value for c in ws[1]]
+    assert header[0] == "#"
+    assert header[1] == "Block"
+    numbers = [row[0].value for row in ws.iter_rows(min_row=2) if row[0].value is not None]
+    assert numbers == list(range(1, len(numbers) + 1))
+    # the autofilter spans the "#" column too
+    assert ws.auto_filter.ref.startswith("A1:B")
+
+
+def test_export_row_numbers_off_by_default(client):
+    _bootstrap_model(client)
+    body = {
+        "definition": {
+            "row_source": {"kind": "scope", "types": ["Block"]},
+            "columns": [
+                {"kind": "element", "source": {"kind": "row"}, "header": "Block"},
+            ],
+        }
+    }
+    r = client.post(papi("/tables/export"), json=body, headers=AUTH_HEADERS)
+    wb = load_workbook(io.BytesIO(r.content))
+    ws = wb.active
+    assert ws is not None
+    assert [c.value for c in ws[1]] == ["Block"]

@@ -760,6 +760,7 @@ def export_table(
             name,
             ([row[i] for i in visible] for row in all_rows),
             notice_provider=_notice,
+            row_numbers=defn.show_row_numbers,
         )
         resp_headers = {"Content-Disposition": f'attachment; filename="{name}.xlsx"'}
         if truncated:

@@ -79,6 +79,7 @@ def build_workbook(
     row_iter: Iterable[list[Cell]],
     *,
     notice_provider: Callable[[], str | None] | None = None,
+    row_numbers: bool = False,
 ) -> bytes:
     """Render `row_iter` into a single-sheet workbook: bold bordered header
     row with filter dropdowns and frozen panes, thin borders on every data
@@ -91,24 +92,31 @@ def build_workbook(
     once every lazily-evaluated cell has been visited (e.g. a script column's
     error flag) must defer that decision to this point rather than computing
     it up front. A truthy return appends one trailing single-cell row, OUTSIDE
-    the autofilter range (a notice is not a data row to filter on)."""
+    the autofilter range (a notice is not a data row to filter on).
+
+    `row_numbers` prepends a 1-based "#" column (spec item 10) — numbering
+    follows export row order, which follows the requested sort."""
     buf = io.BytesIO()
     wb = xlsxwriter.Workbook(buf, {"in_memory": True})
     ws = wb.add_worksheet(_sheet_title(sheet_name))
     header_fmt = wb.add_format({"bold": True, "border": 1, "bottom": 2})
     cell_fmt = wb.add_format({"border": 1})
 
-    for col, h in enumerate(headers):
+    cols = ["#", *headers] if row_numbers else headers
+    for col, h in enumerate(cols):
         ws.write(0, col, h, header_fmt)
     ws.freeze_panes(1, 0)
 
+    offset = 1 if row_numbers else 0
     r = 0
     for r, row in enumerate(row_iter, start=1):
-        for col, cell in enumerate(row):
+        if row_numbers:
+            ws.write_number(r, 0, r, cell_fmt)
+        for col, cell in enumerate(row, start=offset):
             ws.write(r, col, _cell_text(model, cell), cell_fmt)
 
-    if headers:
-        ws.autofilter(0, 0, r, len(headers) - 1)
+    if cols:
+        ws.autofilter(0, 0, r, len(cols) - 1)
 
     if notice_provider is not None:
         text = notice_provider()
