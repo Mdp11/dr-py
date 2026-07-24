@@ -53,8 +53,7 @@
 	// line for inline snippets, the referenced artifact's name for refs.
 	const summary = $derived.by(() => {
 		if (inline) {
-			const first =
-				(snippet.definition?.code ?? '').split('\n').find((l) => l.trim() !== '') ?? '';
+			const first = (snippet.definition?.code ?? '').split('\n').find((l) => l.trim() !== '') ?? '';
 			return `${entry}() · ${first.trim() || 'empty snippet'}`;
 		}
 		if (!snippet.ref) return 'no snippet selected';
