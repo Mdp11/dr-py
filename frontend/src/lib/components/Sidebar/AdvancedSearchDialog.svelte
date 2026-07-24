@@ -22,7 +22,14 @@
 	} from '$lib/state';
 	import { getElementsBatch, READ_PAGE_LIMIT, searchModel } from '$lib/api/model-read';
 	import { isValidRegex } from '$lib/search/evaluate';
-	import { CRITERION_LABELS, type Criterion, type SearchResultItem } from '$lib/search/types';
+	import {
+		CRITERION_LABELS,
+		type AnyOfCriterion,
+		type Criterion,
+		type LeafCriterion,
+		type SearchResultItem
+	} from '$lib/search/types';
+	import CriterionGroupRow from './CriterionGroupRow.svelte';
 	import CriterionRow from './CriterionRow.svelte';
 
 	// Writable $derived mirror of the global search-dialog store, matching the
@@ -38,11 +45,13 @@
 	const target = $derived(getSearchTarget());
 	const criteria = $derived(getSearchCriteria());
 
+	const leafInvalidRegex = (c: LeafCriterion): boolean =>
+		(c.type === 'property' || c.type === 'name_id') &&
+		c.op === 'matches' &&
+		!isValidRegex(c.value);
 	const hasInvalidRegex = $derived(
-		criteria.some(
-			(c) =>
-				(c.type === 'property' && c.op === 'matches' && !isValidRegex(c.value)) ||
-				(c.type === 'name_id' && c.op === 'matches' && !isValidRegex(c.value))
+		criteria.some((c) =>
+			c.type === 'any_of' ? c.criteria.some(leafInvalidRegex) : leafInvalidRegex(c)
 		)
 	);
 
@@ -145,13 +154,23 @@
 				</p>
 			{/if}
 			{#each criteria as criterion, index (index)}
-				<CriterionRow
-					{criterion}
-					{index}
-					{target}
-					onChange={(i: number, next: Criterion) => updateSearchCriterion(i, next)}
-					onRemove={(i: number) => removeSearchCriterion(i)}
-				/>
+				{#if criterion.type === 'any_of'}
+					<CriterionGroupRow
+						criterion={criterion as AnyOfCriterion}
+						{index}
+						{target}
+						onChange={(i: number, next: Criterion) => updateSearchCriterion(i, next)}
+						onRemove={(i: number) => removeSearchCriterion(i)}
+					/>
+				{:else}
+					<CriterionRow
+						criterion={criterion as LeafCriterion}
+						{index}
+						{target}
+						onChange={(i: number, next: Criterion) => updateSearchCriterion(i, next)}
+						onRemove={(i: number) => removeSearchCriterion(i)}
+					/>
+				{/if}
 			{/each}
 		</div>
 

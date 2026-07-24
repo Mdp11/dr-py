@@ -4,7 +4,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import { getCachedElements, getCachedRelationships, getMetamodel } from '$lib/state';
 	import { isValidRegex } from '$lib/search/evaluate';
-	import { CRITERION_LABELS, type Criterion, type TargetKind } from '$lib/search/types';
+	import { CRITERION_LABELS, type LeafCriterion, type TargetKind } from '$lib/search/types';
 	import {
 		compatibleOps,
 		propertyItemsFor,
@@ -15,10 +15,10 @@
 	import PropertyPicker from './PropertyPicker.svelte';
 
 	type Props = {
-		criterion: Criterion;
+		criterion: LeafCriterion;
 		index: number;
 		target: TargetKind;
-		onChange: (index: number, next: Criterion) => void;
+		onChange: (index: number, next: LeafCriterion) => void;
 		onRemove: (index: number) => void;
 		/** When non-null, scope the property picker to these names (a navigation
 		 * filter step's reachable-type property union). `null` (default, all
@@ -56,8 +56,8 @@
 	// Which inline picker popover is open (keyed by a string id within this row).
 	let openPicker = $state<string | null>(null);
 
-	function patch(next: Partial<Criterion>): void {
-		onChange(index, { ...criterion, ...next } as Criterion);
+	function patch(next: Partial<LeafCriterion>): void {
+		onChange(index, { ...criterion, ...next } as LeafCriterion);
 	}
 
 	// Pick a property: record its name and datatype, and if the current operator
@@ -79,7 +79,7 @@
 	function toggleName(field: 'names' | 'relTypes', name: string): void {
 		const current = (criterion as Record<string, unknown>)[field] as string[];
 		const next = current.includes(name) ? current.filter((n) => n !== name) : [...current, name];
-		patch({ [field]: next } as Partial<Criterion>);
+		patch({ [field]: next } as Partial<LeafCriterion>);
 	}
 
 	const regexInvalid = $derived(
