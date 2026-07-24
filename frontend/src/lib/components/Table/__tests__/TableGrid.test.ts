@@ -45,6 +45,7 @@ const DRAFT: store.TableDraft = {
 	definition: {
 		schema_version: 1,
 		default_cell_mode: 'collapse',
+		show_row_numbers: false,
 		row_source: { kind: 'scope', types: ['Block'], criteria: [] },
 		columns: [
 			{
@@ -665,6 +666,37 @@ describe('TableGrid', () => {
 		const c = render('tbl:draft:nojump');
 		try {
 			expect(document.querySelector('[data-highlight="true"]')).toBeNull();
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('renders a row-number gutter when the definition asks for one', () => {
+		vi.spyOn(store, 'getTablePage').mockReturnValue(PAGE);
+		vi.spyOn(store, 'getTableLoading').mockReturnValue(false);
+		vi.spyOn(store, 'getTableDraft').mockReturnValue({
+			...DRAFT,
+			definition: { ...DRAFT.definition, show_row_numbers: true }
+		});
+		const c = render('tbl:draft:rn');
+		try {
+			expect(document.querySelector('[data-testid="row-number-header"]')?.textContent).toBe('#');
+			const cells = [...document.querySelectorAll('[data-testid="row-number-cell"]')];
+			expect(cells).toHaveLength(1); // one per rendered row
+			expect(cells[0].textContent).toBe('1');
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('renders no gutter by default', () => {
+		vi.spyOn(store, 'getTablePage').mockReturnValue(PAGE);
+		vi.spyOn(store, 'getTableLoading').mockReturnValue(false);
+		vi.spyOn(store, 'getTableDraft').mockReturnValue(DRAFT);
+		const c = render('tbl:draft:rn2');
+		try {
+			expect(document.querySelector('[data-testid="row-number-header"]')).toBeNull();
+			expect(document.querySelector('[data-testid="row-number-cell"]')).toBeNull();
 		} finally {
 			unmount(c);
 		}

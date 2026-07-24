@@ -38,6 +38,7 @@ async function seedForClone(): Promise<void> {
 	const defn: TableDefinition = {
 		schema_version: 1,
 		default_cell_mode: 'collapse',
+		show_row_numbers: false,
 		row_source: { kind: 'scope', types: ['Block'], criteria: [] },
 		columns: [
 			{
@@ -72,6 +73,7 @@ function scopeDraft(columns: TableDefinition['columns']) {
 		definition: {
 			schema_version: 1,
 			default_cell_mode: 'collapse' as const,
+			show_row_numbers: false,
 			row_source: { kind: 'scope' as const, types: ['Block'], criteria: [] },
 			columns
 		}
@@ -443,6 +445,22 @@ describe('ColumnManager', () => {
 			expect(defn.columns).toHaveLength(3);
 			expect(defn.columns[2].header).toBe('Mass (copy)');
 			expect(defn.columns[2].kind).toBe('property');
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('the row-numbers toggle flips show_row_numbers on the definition', async () => {
+		await seedForClone(); // Task 4's seed helper in this same file
+		const c = mount(ColumnManager, { target: document.body, props: { tabId: CLONE_TAB } });
+		flushSync();
+		try {
+			const box = document.querySelector('[data-testid="toggle-row-numbers"]') as HTMLInputElement;
+			expect(box).toBeTruthy();
+			expect(box.checked).toBe(false);
+			box.click();
+			flushSync();
+			expect(getTableDraft(CLONE_TAB)!.definition.show_row_numbers).toBe(true);
 		} finally {
 			unmount(c);
 		}

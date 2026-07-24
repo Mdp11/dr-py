@@ -69,6 +69,7 @@ async function seed(columns: NavColumn[]): Promise<void> {
 	const defn: TableDefinition = {
 		schema_version: 1,
 		default_cell_mode: 'collapse',
+		show_row_numbers: false,
 		row_source: { kind: 'scope', types: ['Block'], criteria: [] },
 		columns
 	};
@@ -81,6 +82,7 @@ async function seedScript(): Promise<void> {
 	const defn: TableDefinition = {
 		schema_version: 1,
 		default_cell_mode: 'collapse',
+		show_row_numbers: false,
 		row_source: { kind: 'scope', types: ['Block'], criteria: [] },
 		columns: [
 			{
@@ -181,9 +183,7 @@ describe('ColumnManager PathCard collapse (durable across edits)', () => {
 			await Promise.resolve();
 			flushSync();
 
-			const t2 = root.querySelector(
-				'[data-testid="snippet-collapse-toggle"]'
-			) as HTMLButtonElement;
+			const t2 = root.querySelector('[data-testid="snippet-collapse-toggle"]') as HTMLButtonElement;
 			expect(t2.getAttribute('aria-expanded')).toBe('true'); // survived the re-render
 		} finally {
 			unmount(c);

@@ -179,6 +179,19 @@
 	<div data-testid="column-manager" class="space-y-3 text-xs">
 		{#if focusIndex === null}
 			<RowSourceEditor {tabId} {defn} />
+			<label
+				class="flex w-fit items-center gap-1.5"
+				title="Show a numbered first column (1-based, follows the current sort; also included in Excel exports)"
+			>
+				<input
+					type="checkbox"
+					data-testid="toggle-row-numbers"
+					checked={defn.show_row_numbers}
+					onchange={(e) =>
+						apply({ ...defn, show_row_numbers: (e.currentTarget as HTMLInputElement).checked })}
+				/>
+				Show row numbers
+			</label>
 		{/if}
 
 		{#if error}

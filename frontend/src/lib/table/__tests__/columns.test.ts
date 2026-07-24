@@ -22,6 +22,7 @@ import type { Column, NavigationDefinition, TableDefinition } from '$lib/api/typ
 const base: TableDefinition = {
 	schema_version: 1,
 	default_cell_mode: 'collapse',
+	show_row_numbers: false,
 	row_source: { kind: 'scope', types: ['Block'], criteria: [] },
 	columns: [
 		{

@@ -263,7 +263,8 @@ export function navigationAsTableDefinition({
 			navigation: artifactId ? { ref: artifactId } : { definition }
 		},
 		columns,
-		default_cell_mode: 'collapse'
+		default_cell_mode: 'collapse',
+		show_row_numbers: false
 	};
 }
 

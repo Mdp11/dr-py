@@ -220,6 +220,7 @@ describe('RowSourceEditor step-index field', () => {
 		return {
 			schema_version: 1,
 			default_cell_mode: 'collapse',
+			show_row_numbers: false,
 			row_source: rowSource,
 			columns: [
 				{
