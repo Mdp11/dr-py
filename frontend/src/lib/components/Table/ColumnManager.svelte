@@ -10,6 +10,7 @@
 	import {
 		getTableDraft,
 		getTablePage,
+		remapTableSortForInsert,
 		remapTableSortForMove,
 		remapTableSortForRemove,
 		updateTableDefinition
@@ -17,6 +18,7 @@
 	import {
 		ColumnInUseError,
 		addColumn,
+		cloneColumn,
 		columnKindLabel,
 		columnLabel,
 		moveColumn,
@@ -29,7 +31,7 @@
 	} from '$lib/table/columns';
 	import { createColumnDrag } from '$lib/table/column-dnd.svelte';
 	import type { Column, TableDefinition } from '$lib/api/types';
-	import { Eye, EyeOff } from '@lucide/svelte';
+	import { Copy, Eye, EyeOff } from '@lucide/svelte';
 	import NavigationColumnEditor from './NavigationColumnEditor.svelte';
 	import PropertyColumnEditor from './PropertyColumnEditor.svelte';
 	import RowSourceEditor from './RowSourceEditor.svelte';
@@ -97,6 +99,19 @@
 		tryApply(() => {
 			const next = removeColumn(current, index);
 			remapTableSortForRemove(tabId, index);
+			return next;
+		});
+	}
+
+	// Insert a deep copy right after the original. The sort is remapped in the
+	// same breath (a sort at/past the insertion point must follow its column),
+	// mirroring how onRemove/onMove pair their mutator with a sort remap.
+	function onClone(index: number): void {
+		if (!defn) return;
+		const current = defn;
+		tryApply(() => {
+			const next = cloneColumn(current, index);
+			remapTableSortForInsert(tabId, index + 1);
 			return next;
 		});
 	}
@@ -247,6 +262,16 @@
 									/>{/if}
 							</button>
 							{#if focusIndex === null}
+								<button
+									type="button"
+									data-testid="clone-column-{i}"
+									class="rounded border border-input px-1 py-0.5 text-[10px] hover:bg-muted"
+									aria-label="Duplicate column"
+									title="Duplicate this column (inserted below)"
+									onclick={() => onClone(i)}
+								>
+									<Copy class="size-3" />
+								</button>
 								<button
 									type="button"
 									data-testid="remove-column-{i}"

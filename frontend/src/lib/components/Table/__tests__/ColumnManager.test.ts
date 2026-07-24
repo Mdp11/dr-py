@@ -6,9 +6,62 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import * as tablesApi from '$lib/api/tables';
 import type { TableDefinition } from '$lib/api/types';
+import { ensureTableDraft, getTableDraft, updateTableDefinition } from '$lib/state';
 import * as store from '$lib/state/table-editor.svelte';
 import ColumnManager from '../ColumnManager.svelte';
+
+const CLONE_TAB = 'tbl:draft:clone-test';
+
+const EMPTY_PAGE = {
+	columns: [],
+	rows: [],
+	total: 0,
+	truncated: false,
+	offset: 0,
+	model_rev: 1,
+	warnings: []
+};
+
+// Drives the REAL table store (not the getTableDraft/updateTableDefinition
+// spies the other tests in this file use) so the clone handler's paired
+// mutator+remap can be observed end to end. Defined at module scope because a
+// later task's sibling `it(...)` in this file reuses this seed.
+// `updateTableDefinition` fire-and-forgets a page reload (`loadTablePage`), so
+// `evaluateTable` is stubbed here — same as `ColumnManager.collapse.test.ts`
+// and `table-editor.test.ts` — to keep the run free of a real, unmocked
+// network call against the (absent) dev backend.
+async function seedForClone(): Promise<void> {
+	vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
+	await ensureTableDraft(CLONE_TAB);
+	const defn: TableDefinition = {
+		schema_version: 1,
+		default_cell_mode: 'collapse',
+		row_source: { kind: 'scope', types: ['Block'], criteria: [] },
+		columns: [
+			{
+				kind: 'element',
+				source: { kind: 'row', chain_index: 0 },
+				header: 'Block',
+				width_px: null,
+				hidden: false
+			},
+			{
+				kind: 'property',
+				source: { kind: 'row', chain_index: 0 },
+				name: 'mass',
+				mode: 'collapse',
+				keep_empty: true,
+				header: 'Mass',
+				width_px: null,
+				hidden: false
+			}
+		]
+	};
+	updateTableDefinition(CLONE_TAB, defn);
+	flushSync();
+}
 
 function scopeDraft(columns: TableDefinition['columns']) {
 	return {
@@ -372,6 +425,24 @@ describe('ColumnManager', () => {
 			expect(upd).not.toHaveBeenCalled();
 			const msg = document.querySelector('[data-testid="column-manager-error"]');
 			expect(msg?.textContent).toContain('column 1 sources column 0');
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('clone button inserts a "(copy)" duplicate right below the original', async () => {
+		await seedForClone();
+		const c = mount(ColumnManager, { target: document.body, props: { tabId: CLONE_TAB } });
+		flushSync();
+		try {
+			const clone = document.querySelector('[data-testid="clone-column-1"]') as HTMLButtonElement;
+			expect(clone).toBeTruthy();
+			clone.click();
+			flushSync();
+			const defn = getTableDraft(CLONE_TAB)!.definition;
+			expect(defn.columns).toHaveLength(3);
+			expect(defn.columns[2].header).toBe('Mass (copy)');
+			expect(defn.columns[2].kind).toBe('property');
 		} finally {
 			unmount(c);
 		}
