@@ -49,6 +49,7 @@
 		refreshView,
 		resetArtifacts,
 		resetCheckout,
+		resetInspectionHistory,
 		resetModelStore,
 		resetSnippetEditors,
 		resetSnippetDocs,
@@ -68,6 +69,9 @@
 		// so the active id is set before this mount fires.
 		const pid = getActiveProjectId();
 		if (pid) initWorkspaceTabs(pid);
+		// The visit trail is per-project and in-memory: opening a project
+		// (including switching projects) starts it fresh.
+		resetInspectionHistory();
 	});
 	onMount(() => {
 		void boot();

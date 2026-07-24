@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { clearSelection, getSelection } from '../selection.svelte';
+import { clearSelection, getSelection, select } from '../selection.svelte';
 import {
 	backEntries,
 	canGoBack,
@@ -141,5 +141,45 @@ describe('metadata', () => {
 		resetInspectionHistory();
 		expect(getVisitStack()).toEqual([]);
 		expect(getVisitCursor()).toBe(-1);
+	});
+});
+
+describe('capture via select()', () => {
+	it('selecting an element pushes a visit', () => {
+		select({ kind: 'element', id: 'a' });
+		select({ kind: 'element', id: 'b' });
+		expect(getVisitStack().map((e) => e.id)).toEqual(['a', 'b']);
+	});
+
+	it('relationship selections and deselects do not push', () => {
+		select({ kind: 'element', id: 'a' });
+		select({ kind: 'relationship', id: 'r1' });
+		select(null);
+		expect(getVisitStack().map((e) => e.id)).toEqual(['a']);
+	});
+
+	it('re-selecting the current element does not push', () => {
+		select({ kind: 'element', id: 'a' });
+		select({ kind: 'element', id: 'a' });
+		expect(getVisitStack()).toHaveLength(1);
+	});
+
+	it('goBack replays selection without re-pushing (re-entrancy guard)', () => {
+		select({ kind: 'element', id: 'a' });
+		select({ kind: 'element', id: 'b' });
+		goBack();
+		expect(getSelection()).toEqual({ kind: 'element', id: 'a' });
+		expect(getVisitStack().map((e) => e.id)).toEqual(['a', 'b']);
+		expect(getVisitCursor()).toBe(0);
+	});
+
+	it('commit remap + selection re-point dedups instead of duplicating', () => {
+		// Mirrors applyDelta's ordering contract: remapVisitIds() first, then
+		// the selection re-point through select().
+		select({ kind: 'element', id: 'tmp1' });
+		remapVisitIds({ tmp1: 'real1' });
+		select({ kind: 'element', id: 'real1' });
+		expect(getVisitStack().map((e) => e.id)).toEqual(['real1']);
+		expect(getVisitCursor()).toBe(0);
 	});
 });

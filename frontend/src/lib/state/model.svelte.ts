@@ -16,6 +16,7 @@ import * as modelReadApi from '../api/model-read';
 import { validateModel } from '../api/validation';
 import { mergePatch } from './apply';
 import { computeDiff, type Diff } from './diff';
+import { remapVisitIds } from './inspection-history.svelte';
 import { isTempId, type Op } from './ops';
 import { nameProp } from '$lib/util/element-name';
 import { remapProperties } from './remap';
@@ -366,6 +367,10 @@ export function applyDelta(d: OpsResponse): void {
 
 	if (Object.keys(d.id_map).length > 0) {
 		remapCaches(d.id_map);
+		// Rewrite the inspection history BEFORE the selection re-point below:
+		// the re-point goes through select(), whose pushVisit then finds the
+		// canonical id already at the cursor and dedups (no duplicate entry).
+		remapVisitIds(d.id_map);
 		// keep the global selection pointing at the same entity across the
 		// temp-id -> canonical-id rename (the old architecture kept temp ids
 		// alive until file save; the delta protocol renames on first flush ack)

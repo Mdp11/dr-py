@@ -22,6 +22,23 @@ export {
 	setViewFileHandle
 } from './file.svelte';
 export {
+	backEntries,
+	canGoBack,
+	canGoForward,
+	forwardEntries,
+	getVisitCursor,
+	getVisitStack,
+	goBack,
+	goForward,
+	goToVisit,
+	noteResolved,
+	pushVisit,
+	remapVisitIds,
+	resetInspectionHistory,
+	type VisitEntry,
+	type VisitMenuEntry
+} from './inspection-history.svelte';
+export {
 	adoptSummary,
 	applyDelta,
 	clearModelError,
