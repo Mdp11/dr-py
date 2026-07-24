@@ -27,9 +27,24 @@
 		onChange: (next: SnippetSource) => void;
 		/** When set, the editor renders behind a chevron disclosure (default
 		 * collapsed) whose expansion state lives in the snippet-collapse store
-		 * under this key — survives re-renders and dialog reopens. Absent =
-		 * always expanded, no chevron (no current consumer does this, but the
-		 * fallback keeps the component droppable anywhere). */
+		 * under this key. Absent = always expanded, no chevron (no current
+		 * consumer does this, but the fallback keeps the component droppable
+		 * anywhere).
+		 *
+		 * "Survives re-renders and dialog reopens" is only true for a STABLE key
+		 * owner: a table column's key (`${tabId}::col:${i}`) is built from the
+		 * table tab's own stable id, so toggling a column's editor keeps its
+		 * state across reopens. It is FALSE for navigation script steps —
+		 * `PathCard.svelte` builds `${tabId}::${pathKey(path)}::step:${i}`, and
+		 * inside a table column, `PathCard`'s `tabId` is the EMBEDDED navigation
+		 * draft id, which `NavigationColumnEditor` mints fresh
+		 * (`navemb:${crypto.randomUUID()}`) on every mount. So every dialog
+		 * reopen produces a brand-new key: a nav-step disclosure always resets
+		 * to collapsed, and each previously-toggled step leaves a permanently
+		 * inert entry behind in the store's map (not a leak in any dangerous
+		 * sense — keys are tab-id-prefixed, so there is no cross-tab/cross-
+		 * project bleed, and the growth is bytes per toggle). Prefix-eviction or
+		 * key remapping for this case is a deliberate non-goal for now. */
 		collapseKey?: string;
 	} = $props();
 

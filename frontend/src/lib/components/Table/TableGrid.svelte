@@ -459,6 +459,13 @@
 					style="height:{offsets[win.start + i + 1] - offsets[win.start + i]}px"
 				>
 					{#if showRowNumbers}
+						<!-- items-start on the gutter + items-center on an inner h-7 span
+						     (not items-center on the gutter itself, unlike the placeholder
+						     gutter below): a data row's HEIGHT IS VARIABLE (wrapped cell
+						     content), so the number must top-align to line 1 at the
+						     ROW_H-tall first line, not center across the whole row. The
+						     placeholder gutter below is always exactly ROW_H tall, where
+						     top-align and center-align are the same thing. -->
 						<div
 							data-testid="row-number-cell"
 							class="flex w-12 shrink-0 items-start justify-end border-r border-border/40 px-2 text-xs tabular-nums text-muted-foreground/60"

@@ -28,6 +28,7 @@ const h = vi.hoisted(() => ({
 	requestScriptErrors: vi.fn(),
 	jump: vi.fn(),
 	revertSuspendedTableEdits: vi.fn(),
+	resumeTableEvaluation: vi.fn(),
 	draft: {
 		tabId: 'tbl:draft:1',
 		name: 'My Table',
@@ -37,12 +38,13 @@ const h = vi.hoisted(() => ({
 	} as unknown
 }));
 
-// TableView (and, when opened, ColumnManager) import from the $lib/state barrel.
-// Only TableView's own functions are exercised here — the dialog stays closed,
-// so ColumnManager is never mounted and its state functions are never called.
-// TableGrid *is* always mounted (full-height grid below the chrome bar), so its
-// $lib/state dependencies are stubbed too — vi.mock replaces the whole barrel,
-// so any export TableGrid imports must be present or the mount throws.
+// TableView (and, once opened via the Settings button or a header edit
+// button, ColumnManager) import from the $lib/state barrel. Most tests below
+// never open the dialog, but several now do — vi.mock replaces the WHOLE
+// barrel, so every export ColumnManager (and its RowSourceEditor descendant)
+// imports must be present too, or opening the dialog throws "No export is
+// defined on the mock". TableGrid *is* always mounted (full-height grid below
+// the chrome bar), so its $lib/state dependencies are stubbed unconditionally.
 vi.mock('$lib/state', () => ({
 	canEdit: () => h.editable,
 	getMetamodel: () => null,
@@ -58,7 +60,7 @@ vi.mock('$lib/state', () => ({
 	// Staged definition edits: the settings dialog suspends evaluation while
 	// open and resumes (evaluating at most once) on close.
 	suspendTableEvaluation: vi.fn(),
-	resumeTableEvaluation: vi.fn(),
+	resumeTableEvaluation: h.resumeTableEvaluation,
 	revertSuspendedTableEdits: h.revertSuspendedTableEdits,
 	abandonTableEvaluationSuspension: vi.fn(),
 	// TableGrid's dependencies (always mounted below the chrome bar).
@@ -78,6 +80,11 @@ vi.mock('$lib/state', () => ({
 	updateTableDefinition: vi.fn(),
 	ensureTableRange: vi.fn(),
 	lockBadgeFor: () => ({ state: 'none' }),
+	// ColumnManager's own reorder/clone dependencies — needed once a test opens
+	// the dialog and ColumnManager mounts for real.
+	remapTableSortForInsert: vi.fn(),
+	remapTableSortForMove: vi.fn(),
+	remapTableSortForRemove: vi.fn(),
 	// RowSourceEditor's dependencies (mounted once the settings dialog opens
 	// unfocused — the "shows every column" path renders it for real).
 	closeDraft: vi.fn(),
@@ -117,6 +124,7 @@ afterEach(() => {
 	h.requestScriptErrors.mockReset();
 	h.jump.mockReset();
 	h.revertSuspendedTableEdits.mockClear();
+	h.resumeTableEvaluation.mockClear();
 });
 
 describe('TableView settings popup', () => {
@@ -152,6 +160,10 @@ describe('TableView settings popup', () => {
 			flushSync();
 			await waitFor(() => !document.querySelector('[data-testid="table-settings-dialog"]'));
 			expect(h.revertSuspendedTableEdits).toHaveBeenCalledWith('tbl:draft:1');
+			// The entire contract of the staged-edit suspend/resume machinery:
+			// exactly one resume per close, not zero (stuck suspended) and not
+			// more than one (a double reload).
+			expect(h.resumeTableEvaluation).toHaveBeenCalledTimes(1);
 		} finally {
 			unmount(c);
 		}
@@ -167,6 +179,7 @@ describe('TableView settings popup', () => {
 			flushSync();
 			await waitFor(() => !document.querySelector('[data-testid="table-settings-dialog"]'));
 			expect(h.revertSuspendedTableEdits).not.toHaveBeenCalled();
+			expect(h.resumeTableEvaluation).toHaveBeenCalledTimes(1);
 		} finally {
 			unmount(c);
 		}
@@ -672,11 +685,24 @@ describe('TableView header edit / add-column focus', () => {
 			const editBtn = document.querySelector('[data-testid="header-edit-1"]') as HTMLElement;
 			editBtn.click();
 			flushSync();
-			// Close the dialog via its built-in close button (bits-ui fires
+			// Close the dialog via its built-in X button (bits-ui fires
 			// onOpenChange(false), which is where the focus reset lives). Content
 			// unmount is deferred until bits-ui's close "animation" resolves.
-			const closeBtn = document.querySelector('[data-slot="dialog-close"]') as HTMLElement;
-			expect(closeBtn).not.toBeNull();
+			// `dialog-content.svelte` renders the X AFTER `{@render children}`, and
+			// the footer Cancel button is a `Dialog.Close` that ALSO carries
+			// `data-slot="dialog-close"` and comes first in DOM order — so the
+			// first match would silently be Cancel, not the X. Take the LAST match
+			// to unambiguously target the X and keep this the only test exercising
+			// that discard route.
+			const closeButtons = document.querySelectorAll('[data-slot="dialog-close"]');
+			expect(closeButtons.length).toBeGreaterThan(0);
+			const closeBtn = closeButtons[closeButtons.length - 1] as HTMLElement;
+			// The X, Cancel and Save buttons all share `data-slot="dialog-close"`,
+			// so position alone isn't self-verifying — assert on the X's own
+			// accessible name (its `sr-only` "Close" span) so this test actually
+			// fails if the selector ever again lands on the wrong button (Cancel's
+			// and Save's visible text differ, and neither is "Close").
+			expect(closeBtn.textContent?.trim()).toBe('Close');
 			closeBtn.click();
 			await waitFor(() => document.querySelector('[data-testid="column-manager"]') === null);
 			const settingsBtn = document.querySelector(
