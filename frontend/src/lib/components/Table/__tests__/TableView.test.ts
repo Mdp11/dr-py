@@ -27,12 +27,13 @@ const h = vi.hoisted(() => ({
 	uncomputedScriptCellReason: null as string | null,
 	requestScriptErrors: vi.fn(),
 	jump: vi.fn(),
+	revertSuspendedTableEdits: vi.fn(),
 	draft: {
 		tabId: 'tbl:draft:1',
 		name: 'My Table',
 		dirty: false,
 		artifactId: 'a1',
-		definition: { row_source: { kind: 'scope', scope: {} }, columns: [] }
+		definition: { row_source: { kind: 'scope', types: [], criteria: [] }, columns: [] }
 	} as unknown
 }));
 
@@ -58,6 +59,7 @@ vi.mock('$lib/state', () => ({
 	// open and resumes (evaluating at most once) on close.
 	suspendTableEvaluation: vi.fn(),
 	resumeTableEvaluation: vi.fn(),
+	revertSuspendedTableEdits: h.revertSuspendedTableEdits,
 	abandonTableEvaluationSuspension: vi.fn(),
 	// TableGrid's dependencies (always mounted below the chrome bar).
 	getTablePage: () => h.page,
@@ -114,6 +116,7 @@ afterEach(() => {
 	h.uncomputedScriptCellReason = null;
 	h.requestScriptErrors.mockReset();
 	h.jump.mockReset();
+	h.revertSuspendedTableEdits.mockClear();
 });
 
 describe('TableView settings popup', () => {
@@ -134,6 +137,78 @@ describe('TableView settings popup', () => {
 		const c = render('tbl:draft:1');
 		try {
 			expect(document.querySelector('[data-testid="table-settings-button"]')).toBeNull();
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('Cancel reverts staged edits, then resumes evaluation', async () => {
+		const c = render('tbl:draft:1');
+		try {
+			(document.querySelector('[data-testid="table-settings-button"]') as HTMLElement).click();
+			flushSync();
+			await waitFor(() => !!document.querySelector('[data-testid="settings-cancel"]'));
+			(document.querySelector('[data-testid="settings-cancel"]') as HTMLElement).click();
+			flushSync();
+			await waitFor(() => !document.querySelector('[data-testid="table-settings-dialog"]'));
+			expect(h.revertSuspendedTableEdits).toHaveBeenCalledWith('tbl:draft:1');
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('Save keeps staged edits (no revert), then resumes evaluation', async () => {
+		const c = render('tbl:draft:1');
+		try {
+			(document.querySelector('[data-testid="table-settings-button"]') as HTMLElement).click();
+			flushSync();
+			await waitFor(() => !!document.querySelector('[data-testid="settings-save"]'));
+			(document.querySelector('[data-testid="settings-save"]') as HTMLElement).click();
+			flushSync();
+			await waitFor(() => !document.querySelector('[data-testid="table-settings-dialog"]'));
+			expect(h.revertSuspendedTableEdits).not.toHaveBeenCalled();
+		} finally {
+			unmount(c);
+		}
+	});
+
+	// Regression: opening the dialog is a direct `settingsOpen = true`
+	// assignment (never a `Dialog.Trigger`), so bits-ui's onOpenChange(true)
+	// never fires for it — the flag Save sets must therefore be reset by
+	// openSettings itself, not by that branch, or it would stick from one
+	// open to the next and make a later Cancel wrongly keep the edits.
+	it('Cancel still reverts after a prior Save earlier in the same mount', async () => {
+		const c = render('tbl:draft:1');
+		try {
+			(document.querySelector('[data-testid="table-settings-button"]') as HTMLElement).click();
+			flushSync();
+			await waitFor(() => !!document.querySelector('[data-testid="settings-save"]'));
+			(document.querySelector('[data-testid="settings-save"]') as HTMLElement).click();
+			flushSync();
+			await waitFor(() => !document.querySelector('[data-testid="table-settings-dialog"]'));
+			h.revertSuspendedTableEdits.mockClear();
+			(document.querySelector('[data-testid="table-settings-button"]') as HTMLElement).click();
+			flushSync();
+			await waitFor(() => !!document.querySelector('[data-testid="settings-cancel"]'));
+			(document.querySelector('[data-testid="settings-cancel"]') as HTMLElement).click();
+			flushSync();
+			await waitFor(() => !document.querySelector('[data-testid="table-settings-dialog"]'));
+			expect(h.revertSuspendedTableEdits).toHaveBeenCalledWith('tbl:draft:1');
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('closing via Escape behaves like Cancel', async () => {
+		const c = render('tbl:draft:1');
+		try {
+			(document.querySelector('[data-testid="table-settings-button"]') as HTMLElement).click();
+			flushSync();
+			await waitFor(() => !!document.querySelector('[data-testid="table-settings-dialog"]'));
+			document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+			flushSync();
+			await waitFor(() => !document.querySelector('[data-testid="table-settings-dialog"]'));
+			expect(h.revertSuspendedTableEdits).toHaveBeenCalledWith('tbl:draft:1');
 		} finally {
 			unmount(c);
 		}
