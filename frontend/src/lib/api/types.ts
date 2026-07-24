@@ -580,6 +580,14 @@ export const SnippetLintOutSchema = z.object({
 });
 export type SnippetLintOut = z.infer<typeof SnippetLintOutSchema>;
 
+/** `changed` is false when the snippet was already formatted — the editor
+ * skips the replacement transaction (and its undo entry) in that case. */
+export const SnippetFormatOutSchema = z.object({
+	code: z.string(),
+	changed: z.boolean()
+});
+export type SnippetFormatOut = z.infer<typeof SnippetFormatOutSchema>;
+
 /** Wire shape; `ops` is refined to `Op[]` in api/snippets.ts (types.ts cannot
  * import state/ops — state/ops imports Element/Relationship from here). */
 export const SnippetRunOutSchema = z.object({

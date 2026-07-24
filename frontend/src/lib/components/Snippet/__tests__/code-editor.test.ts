@@ -13,9 +13,18 @@
 // actually exercises CodeMirror's precedence resolution end to end.
 import { flushSync, mount, unmount } from 'svelte';
 import { EditorView } from '@codemirror/view';
-import { describe, expect, it, vi } from 'vitest';
+import { http, HttpResponse } from 'msw';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
+import { server } from '../../../api/__tests__/server';
 import CodeEditor from '../CodeEditor.svelte';
+
+beforeAll(() => server.listen({ onUnhandledRequest: 'bypass' }));
+afterEach(() => {
+	server.resetHandlers();
+	document.body.innerHTML = '';
+});
+afterAll(() => server.close());
 
 function render(code: string, onRun: () => void) {
 	const onChange = vi.fn();
@@ -63,6 +72,115 @@ describe('CodeEditor — Mod-Enter', () => {
 			// dispatched event whose listener called preventDefault (which
 			// CodeMirror's keymap handler does for a handled binding).
 			expect(handled).toBe(false);
+		} finally {
+			unmount(c);
+		}
+	});
+});
+
+function docText(): string {
+	const content = document.querySelector(
+		'[data-testid="snippet-editor"] .cm-content'
+	) as HTMLElement;
+	const view = EditorView.findFromDOM(content);
+	if (!view) throw new Error('no view');
+	return view.state.doc.toString();
+}
+
+function formatButton(): HTMLButtonElement {
+	const btn = document.querySelector('[data-testid="snippet-format"]') as HTMLButtonElement;
+	if (!btn) throw new Error('no format button');
+	return btn;
+}
+
+function clickFormat(): void {
+	formatButton().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+}
+
+/** Let the fetch promise chain resolve, then flush Svelte. */
+async function settle(): Promise<void> {
+	await new Promise((r) => setTimeout(r, 0));
+	await new Promise((r) => setTimeout(r, 0));
+	flushSync();
+}
+
+describe('CodeEditor — Reformat', () => {
+	it('replaces the document with the formatted code in one undo step', async () => {
+		server.use(
+			http.post('*/snippets/format', () =>
+				HttpResponse.json({ code: 'def f(a):\n    return a + 1\n', changed: true })
+			)
+		);
+		const c = render('def f( a ):\n  return  a+1\n', () => {});
+		try {
+			clickFormat();
+			await settle();
+			expect(docText()).toBe('def f(a):\n    return a + 1\n');
+
+			// One transaction, so one undo restores the original.
+			const view = EditorView.findFromDOM(
+				document.querySelector('[data-testid="snippet-editor"] .cm-content') as HTMLElement
+			)!;
+			view.contentDOM.dispatchEvent(
+				new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true })
+			);
+			flushSync();
+			expect(docText()).toBe('def f( a ):\n  return  a+1\n');
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('expands tabs before sending, so tab-indented code can be formatted', async () => {
+		let sent = '';
+		server.use(
+			http.post('*/snippets/format', async ({ request }) => {
+				sent = ((await request.json()) as { code: string }).code;
+				return HttpResponse.json({ code: sent, changed: false });
+			})
+		);
+		const c = render('def f():\n\treturn 1\n', () => {});
+		try {
+			clickFormat();
+			await settle();
+			expect(sent).toBe('def f():\n    return 1\n');
+			expect(sent).not.toContain('\t');
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('a 422 shows a message and still sanitizes the tabs locally', async () => {
+		server.use(
+			http.post('*/snippets/format', () =>
+				HttpResponse.json({ detail: 'syntax error at line 1' }, { status: 422 })
+			)
+		);
+		const c = render('def f(:\n\tpass\n', () => {});
+		try {
+			clickFormat();
+			await settle();
+			const err = document.querySelector('[data-testid="snippet-format-error"]');
+			expect(err?.textContent).toContain('syntax error');
+			// The absorbed "Fix indentation" behaviour survives a refused format.
+			expect(docText()).toBe('def f(:\n    pass\n');
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('a 503 disables the control instead of failing loudly', async () => {
+		server.use(
+			http.post('*/snippets/format', () =>
+				HttpResponse.json({ detail: 'formatter unavailable' }, { status: 503 })
+			)
+		);
+		const c = render('x=1\n', () => {});
+		try {
+			clickFormat();
+			await settle();
+			expect(formatButton().disabled).toBe(true);
+			expect(docText()).toBe('x=1\n');
 		} finally {
 			unmount(c);
 		}

@@ -1,8 +1,10 @@
 import { apiFetch, type ClientConfig } from './client';
 import {
+	SnippetFormatOutSchema,
 	SnippetLintOutSchema,
 	SnippetRunOutSchema,
 	SnippetDocsOutSchema,
+	type SnippetFormatOut,
 	type SnippetLintOut,
 	type SnippetDocsOut
 } from './types';
@@ -34,6 +36,14 @@ export function lintSnippet(code: string, cfg?: ClientConfig): Promise<SnippetLi
 	return apiFetch(
 		'/snippets/lint',
 		{ method: 'POST', body: { code }, schema: SnippetLintOutSchema },
+		cfg
+	);
+}
+
+export function formatSnippet(code: string, cfg?: ClientConfig): Promise<SnippetFormatOut> {
+	return apiFetch(
+		'/snippets/format',
+		{ method: 'POST', body: { code }, schema: SnippetFormatOutSchema },
 		cfg
 	);
 }
