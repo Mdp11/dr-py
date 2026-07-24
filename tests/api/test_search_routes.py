@@ -264,3 +264,53 @@ def test_search_404_without_model() -> None:
         f"{API}/model/search", json={"target": "element", "criteria": []}
     )
     assert res.status_code == 404
+
+
+def test_search_any_of_group_ors_members_and_ands_with_siblings(
+    client: TestClient,
+) -> None:
+    _load(
+        client,
+        [
+            _person("p1", "Ann", age=30),
+            _person("p2", "Bob", age=40),
+            _person("p3", "Cy", age=20),
+            _company("c1", "Acme"),
+        ],
+        [],
+    )
+    page = _search(
+        client,
+        {
+            "target": "element",
+            "criteria": [
+                {"type": "entity_type", "names": ["Person"]},
+                {"type": "any_of", "criteria": [
+                    {"type": "property", "name": "age", "op": "equals", "value": "30"},
+                    {"type": "name_id", "field": "name", "op": "contains", "value": "Cy"},
+                ]},
+            ],
+        },
+    )
+    assert _ids(page) == ["p1", "p3"]
+
+
+def test_search_empty_any_of_group_is_no_op(client: TestClient) -> None:
+    _load(client, [_person("p1", "Ann"), _person("p2", "Bob")], [])
+    page = _search(
+        client,
+        {"target": "element", "criteria": [{"type": "any_of", "criteria": []}]},
+    )
+    assert _ids(page) == ["p1", "p2"]
+
+
+def test_search_nested_any_of_rejected(client: TestClient) -> None:
+    res = client.post(
+        f"{API}/model/search",
+        json={
+            "target": "element",
+            "criteria": [{"type": "any_of",
+                          "criteria": [{"type": "any_of", "criteria": []}]}],
+        },
+    )
+    assert res.status_code == 422
