@@ -240,6 +240,30 @@ SnippetSourceEditor.svelte`, bound to a `SnippetSource` (`{ ref?, definition?
   **not** the tab-level `_lint` map in `state/snippet-editor.svelte.ts`, since
   this editor only ever holds a bare code string with no per-tab draft/save
   lifecycle of its own.
+- **Shared editor chrome.** Everything below lives in `CodeEditor.svelte` /
+  `lib/editor/`, so the standalone snippet tab, table script columns and
+  navigation script steps all inherit it from one implementation.
+  - **Vertical resize.** Inline editors render at the height in
+    `state/editor-size.svelte.ts` with a `ResizeHandle axis="y" side="top"`
+    grip on their bottom edge (`snippet-editor-box`); the standalone tab has a
+    divider (`snippet-split-divider`) between editor and console that
+    reapportions the persisted ratio. Both sizes are **global per kind** and
+    survive a reload; see `editor/editor-size.ts` for the clamping and why the
+    editor (not the console) yields when the body is too short for two
+    minimums.
+  - **Ctrl+F.** `editor/search-panel.ts` replaces CodeMirror's stock panel via
+    `search({ top, createPanel })`: styled field, live match counter,
+    icon prev/next/close, `Aa`/`.*`/`ab|` chips, and a replace row behind a
+    chevron. Presentation only — the commands and keybindings are still
+    `@codemirror/search`'s.
+  - **Reformat.** The corner control (`snippet-format`, `Shift+Alt+F`) expands
+    tabs locally with `expandTabs` and then posts to `POST /snippets/format`
+    (`ruff format`, `indent-width=4`). The document is replaced in ONE
+    transaction so a reformat is a single undo step, with the cursor kept on
+    the same line number. The local tab expansion is applied **even when the
+    server refuses** (422 unparseable, 503 no ruff) — that is the old "Fix
+    indentation" behaviour this control absorbed. A 503 latches the control
+    disabled rather than letting the user pump a dead endpoint.
 - **Test panel.** Both modes render `SnippetTestPanel.svelte` (`snippet-test-
 toggle`), a collapsed disclosure that expands to the shared
   `ElementContextRow` (chips + fuzzy search + "Use current selection"), a Run
@@ -549,13 +573,32 @@ src/
                         CPython rejects mixed indentation with TabError and
                         the author cannot see which is which. expandTabs()
                         is column-aware (next tab stop, not blind 4×);
-                        hasTabs() gates CodeEditor's "Fix indentation" button.
+                        hasTabs() now tints CodeEditor's Reformat control
+                        (which absorbed the old "Fix indentation" button)
+                        rather than gating a separate one.
                         indent-extension.ts is the CM6 half: indentUnit +
                         tabSize of 4, Tab/Shift-Tab bound to one full level
                         (CM's DEFAULT unit is TWO spaces — with it Shift-Tab
                         dedented half a level and read as broken), and a
                         paste handler that expands tabs on the way in. Both
                         unit-tested without a mounted view.
+    editor/editor-size.ts  Inline-editor height + snippet-tab split geometry and
+                        their localStorage keys (ui.snippet.inlineEditorH /
+                        ui.snippet.tabSplitRatio). Pure; the reactive wrapper
+                        is state/editor-size.svelte.ts, GLOBAL per kind — see
+                        its docstring for why per-instance memory cannot work
+                        for navigation script steps. Storage is try/catch'd
+                        rather than `browser`-gated (the vitest alias stubs
+                        browser to false, which would defeat every test).
+    editor/search-panel.ts  Custom Ctrl+F panel (search({top,createPanel})) with
+                        a live match counter capped at 1000 so a one-char
+                        query cannot rescan the doc on every keystroke.
+                        Presentation only — every action delegates to
+                        @codemirror/search's commands; plain DOM (no nested
+                        Svelte root inside a CM panel), styled by the
+                        cm-dr-search* rules in editor/theme.ts.
+    editor/format.ts    lineStartOffset() — cursor-line preservation for the
+                        one-transaction reformat replacement.
     snippet/docs-view.ts   View-model helpers for the facade docs panel
                         (groupFacade, formatSeconds/formatBytes, type +
                         relationship summaries); mirrors console-view.ts
