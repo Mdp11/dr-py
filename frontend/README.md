@@ -522,6 +522,11 @@ src/
                         history.svelte.ts — commit-list store (paged
                         GET /commits), rev→ModelOut reconstruction cache,
                         resetHistory/loadFirstPage/loadMore/modelAt;
+                        inspection-history.svelte.ts — the Inspector's
+                        back/forward visit trail: in-memory stack + cursor (cap
+                        50), pushed from select(), replayed with a re-entrancy
+                        guard; per-direction dropdown slices resolve labels
+                        lazily;
                         unsaved.ts — hasUnsavedWork() (staged ops + dirty
                         table/navigation drafts), input to the workspace
                         unload guard (beforeNavigate in p/[projectId]/+page);
