@@ -30,7 +30,11 @@ from typing import TYPE_CHECKING
 from data_rover.core.metamodel.schema import Metamodel
 from data_rover.core.model.element import Element
 from data_rover.core.model.model import Model
-from data_rover.core.search.criteria import PropertyCriterion, match_element
+from data_rover.core.search.criteria import (
+    AnyOfCriterion,
+    PropertyCriterion,
+    match_element,
+)
 
 from .schema import (
     FilterStep,
@@ -218,7 +222,14 @@ def _match_nav_criterion(model: Model, element: Element, criterion) -> bool:
     element must actually carry the property (except `exists`/`is_empty`, which
     handle absence explicitly). This intentionally diverges from the shared
     search matcher's coerce-missing-to-'' semantics — `core/search` is
-    untouched, so `/model/search` stays byte-identical."""
+    untouched, so `/model/search` stays byte-identical. An `any_of` group
+    recurses HERE (not through the shared matcher) so each member is gated
+    exactly as a top-level criterion would be; an empty group stays the
+    shared no-op (matches everything)."""
+    if isinstance(criterion, AnyOfCriterion):
+        return not criterion.criteria or any(
+            _match_nav_criterion(model, element, m) for m in criterion.criteria
+        )
     if isinstance(criterion, PropertyCriterion) and criterion.op not in (
         "exists",
         "is_empty",

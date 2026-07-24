@@ -489,3 +489,44 @@ def test_mixed_relationship_and_property_chain() -> None:
     result = evaluate(model.metamodel, model, nav)
     assert (ids["s1"], ids["s2"], ids["b1"]) in result.chains
     assert result.step_types == ["peers", "Measures"]
+
+
+def test_start_scope_any_of_group() -> None:
+    model, ids = _fixture()
+    nav = _path(start={"kind": "scope", "types": [],
+                       "criteria": [{"type": "any_of", "criteria": [
+                           {"type": "property", "name": "name",
+                            "op": "equals", "value": "Plant 1"},
+                           {"type": "property", "name": "name",
+                            "op": "equals", "value": "T-2"},
+                       ]}]},
+                steps=[])
+    result = evaluate(model.metamodel, model, nav)
+    assert result.chains == sorted([(ids["b1"],), (ids["s2"],)])
+
+
+def test_filter_step_any_of_members_are_existence_gated() -> None:
+    model, ids = _fixture()
+    # `missing` is set on NO element: ungated, `not_equals X` would coerce the
+    # absent value to "" and match EVERYTHING, making the group always-true.
+    # Gated, that member matches nothing — so the group's fate rides on its
+    # other member (name == T-1).
+    group = {"type": "any_of", "criteria": [
+        {"type": "property", "name": "missing", "op": "not_equals", "value": "X"},
+        {"type": "property", "name": "name", "op": "equals", "value": "T-1"},
+    ]}
+    nav = _path(start={"kind": "scope", "types": ["Building"]},
+                steps=[_rel("Owns"), {"kind": "filter", "criteria": [group]}])
+    result = evaluate(model.metamodel, model, nav)
+    assert result.chains == [(ids["b1"], ids["s1"])]
+
+
+def test_filter_step_empty_any_of_is_no_op() -> None:
+    model, ids = _fixture()
+    nav = _path(start={"kind": "scope", "types": ["Building"]},
+                steps=[_rel("Owns"), {"kind": "filter",
+                                      "criteria": [{"type": "any_of", "criteria": []}]}])
+    result = evaluate(model.metamodel, model, nav)
+    assert result.chains == sorted([
+        (ids["b1"], ids["s1"]), (ids["b1"], ids["s2"]), (ids["b2"], ids["s3"]),
+    ])
