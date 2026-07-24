@@ -1,14 +1,20 @@
 """xlsx writer for table export. Lives in the API layer (core stays xlsx-free).
 Consumes core cell dataclasses and produces workbook bytes.
 
-xlsxwriter in normal (in-memory) mode, NOT the old openpyxl write-only
-streaming: `worksheet.autofit()` needs the whole sheet's cell data to measure
+xlsxwriter in normal mode, NOT the old openpyxl write-only streaming:
+`worksheet.autofit()` needs the whole sheet's cell data to measure
 (xlsxwriter itself warns and no-ops in `constant_memory` mode, and openpyxl
 has no working autofit at all — its `bestFit` flag is ignored by Excel). The
 bounded-peak-memory property the old streaming builder had is consciously
 traded away for the export path (spec:
 docs/superpowers/specs/2026-07-24-table-panel-polish-pack-design.md, item 11);
 `iter_export_rows` still feeds this chunk-by-chunk, xlsxwriter accumulates.
+This trade-off is about `constant_memory` only — the `Workbook` options below
+deliberately do NOT set `in_memory`, which is an orthogonal knob controlling
+whether generated worksheet XML is buffered in RAM or spilled to temp files;
+setting it `True` would stack a second full sheet copy on top of what
+autofit already forces, for no benefit `constant_memory` doesn't already
+give up.
 
 openpyxl remains a test-suite dependency (it READS workbooks back; xlsxwriter
 is write-only).
@@ -45,7 +51,13 @@ _INVALID_SHEET_CHARS = set("[]:*?/\\")
 
 def _sheet_title(name: str) -> str:
     cleaned = "".join("_" if ch in _INVALID_SHEET_CHARS else ch for ch in name)
-    return (cleaned.strip("'") or "Table")[:31]
+    # Truncate BEFORE stripping leading/trailing apostrophes: stripping first
+    # then truncating can leave a 31-char name ending in "'" (e.g. when char
+    # 32 of the original was itself an apostrophe), which xlsxwriter rejects
+    # with InvalidWorksheetName — NOT a ValueError, so the route's
+    # `except (NavigationResolveError, ValueError)` misses it and the request
+    # 500s instead of the 422 this helper exists to guarantee.
+    return cleaned[:31].strip("'") or "Table"
 
 
 def _display(model: Model, eid: str) -> str:
@@ -97,7 +109,21 @@ def build_workbook(
     `row_numbers` prepends a 1-based "#" column (spec item 10) — numbering
     follows export row order, which follows the requested sort."""
     buf = io.BytesIO()
-    wb = xlsxwriter.Workbook(buf, {"in_memory": True})
+    wb = xlsxwriter.Workbook(
+        buf,
+        {
+            # Model property values are untrusted content. xlsxwriter's
+            # defaults would otherwise (a) route any string matching
+            # `^(ftp|http)s?://`/`mailto:`/`file://`/`(in|ex)ternal:` through
+            # its hyperlink writer, which SILENTLY WRITES NOTHING (only a
+            # discarded `warnings.warn`) past 65,530 URL cells per sheet or
+            # for a URL longer than 2079 chars — a real reachable case at
+            # this export's 50,000-row x 50-col ceiling — and (b) turn a
+            # value starting with "=" into a live formula.
+            "strings_to_urls": False,
+            "strings_to_formulas": False,
+        },
+    )
     ws = wb.add_worksheet(_sheet_title(sheet_name))
     header_fmt = wb.add_format({"bold": True, "border": 1, "bottom": 2})
     cell_fmt = wb.add_format({"border": 1})
@@ -118,11 +144,19 @@ def build_workbook(
     if cols:
         ws.autofilter(0, 0, r, len(cols) - 1)
 
+    # autofit measures whatever has been written so far, so it must run
+    # BEFORE the notice row: the notice text (~130 chars) is not data and
+    # must not drive column A's width to the AUTOFIT_MAX_PX cap regardless
+    # of column A's actual content.
+    ws.autofit(AUTOFIT_MAX_PX)
+
     if notice_provider is not None:
         text = notice_provider()
         if text:
+            # Column 0, unshifted by `offset`: a notice is not a data row,
+            # so it must not be pushed right to align under the "#"
+            # row-number column — it always starts at the sheet's left edge.
             ws.write(r + 1, 0, text)
 
-    ws.autofit(AUTOFIT_MAX_PX)
     wb.close()
     return buf.getvalue()

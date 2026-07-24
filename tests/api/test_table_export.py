@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from openpyxl import load_workbook
 
 from data_rover.api.main import create_app
+from data_rover.api.table_export import _sheet_title
 
 from .conftest import AUTH_HEADERS, papi, seed_default_project
 from .test_artifacts_routes import _bootstrap_model
@@ -241,3 +242,94 @@ def test_export_row_numbers_off_by_default(client):
     ws = wb.active
     assert ws is not None
     assert [c.value for c in ws[1]] == ["Block"]
+
+
+def test_export_url_like_value_stays_a_plain_string(client):
+    # A1 regression: xlsxwriter's default `strings_to_urls=True` routes any
+    # string matching the url/mailto/file/(in|ex)ternal patterns through its
+    # hyperlink writer instead of a plain string write. That writer silently
+    # discards the cell past 65,530 URL cells/sheet or a 2079+ char URL (only
+    # a `warnings.warn`, return code ignored) — a workbook shipped at HTTP
+    # 200 with blank cells and no error. The `name` property is the only
+    # string-typed property on Block in this metamodel, so it stands in for
+    # "a property value" here.
+    _bootstrap_model(client)
+    client.post(
+        papi("/model/elements"),
+        json={
+            "type": "Block",
+            "properties": {"name": "https://example.com/x", "mass": 1.0},
+        },
+        headers=AUTH_HEADERS,
+    )
+    body = {
+        "definition": {
+            "row_source": {
+                "kind": "scope",
+                "types": ["Block"],
+                "criteria": [
+                    {
+                        "type": "name_id",
+                        "field": "name",
+                        "op": "equals",
+                        "value": "https://example.com/x",
+                    }
+                ],
+            },
+            "columns": [
+                {
+                    "kind": "property",
+                    "source": {"kind": "row"},
+                    "name": "name",
+                    "header": "Name",
+                },
+            ],
+        }
+    }
+    r = client.post(papi("/tables/export"), json=body, headers=AUTH_HEADERS)
+    assert r.status_code == 200, r.text
+    wb = load_workbook(io.BytesIO(r.content))
+    ws = wb.active
+    assert ws is not None
+    cell = ws["A2"]
+    assert cell.value == "https://example.com/x"
+    assert cell.hyperlink is None
+
+
+class TestSheetTitle:
+    """Direct unit tests for `_sheet_title`; it had zero before this fix."""
+
+    def test_forbidden_chars_replaced(self):
+        assert _sheet_title("a[b]:c*d?e/f\\g") == "a_b__c_d_e_f_g"
+
+    def test_leading_trailing_apostrophe_stripped(self):
+        assert _sheet_title("'quoted name'") == "quoted name"
+
+    def test_empty_name_falls_back_to_table(self):
+        assert _sheet_title("") == "Table"
+
+    def test_all_apostrophes_name_falls_back_to_table(self):
+        # The only way `cleaned.strip("'")` (unchanged by this fix, see
+        # module docstring / A3 report note) produces an empty string from a
+        # non-empty input: a name made entirely of apostrophes/quotes.
+        assert _sheet_title("''''") == "Table"
+
+    def test_31_char_name_with_apostrophe_as_32nd_char_regression(self):
+        # A3 regression: stripping BEFORE truncating would keep this name at
+        # 31 chars ending in "'" (the truncation would land exactly after
+        # the leading 31 chars, all non-apostrophe, but the ORIGINAL bug was
+        # stripping outer quotes first and truncating second — reproduced
+        # here as a name whose 31st character is itself an apostrophe, which
+        # must survive truncation and then be stripped).
+        name = "a" * 30 + "'" + "extra text past the limit"
+        assert len(name) > 31
+        assert name[30] == "'"
+        title = _sheet_title(name)
+        assert not title.endswith("'")
+        assert title == "a" * 30
+
+    def test_plain_truncation_to_31_chars(self):
+        name = "x" * 40
+        title = _sheet_title(name)
+        assert title == "x" * 31
+        assert len(title) == 31
