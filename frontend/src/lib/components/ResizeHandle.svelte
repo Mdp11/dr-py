@@ -22,15 +22,7 @@
 		onchange: (next: number) => void;
 	};
 
-	let {
-		value,
-		axis = 'x',
-		side = 'left',
-		min = 160,
-		max = 720,
-		label,
-		onchange
-	}: Props = $props();
+	let { value, axis = 'x', side = 'left', min = 160, max = 720, label, onchange }: Props = $props();
 
 	let dragging = $state(false);
 	let start = 0;

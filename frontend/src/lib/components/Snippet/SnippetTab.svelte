@@ -24,7 +24,14 @@
 		stopSnippetTab,
 		updateSnippetCode
 	} from '$lib/state';
+	import { getSnippetSplitRatio, setSnippetSplitRatio } from '$lib/state';
 	import { vocabFromMetamodel } from '$lib/editor/completion-source';
+	import {
+		SPLIT_DIVIDER_H,
+		SPLIT_MIN_PANEL_H,
+		ratioFromPointer,
+		splitHeights
+	} from '$lib/editor/editor-size';
 	import { ENTRY_HINTS, entryAvailable, withStub, type BoundEntry } from '$lib/snippet/entry-stubs';
 	import CodeEditor from './CodeEditor.svelte';
 	import SnippetConsole from './SnippetConsole.svelte';
@@ -69,6 +76,71 @@
 			saveError = e instanceof Error ? e.message : 'Save failed';
 		}
 	}
+
+	// Measured editor/console split. `flex-[3]`/`flex-[2]` gave a fixed 60/40
+	// with no way to change it; the ratio now lives in a persisted store and the
+	// divider below drives it. Container height comes from a ResizeObserver
+	// rather than a one-shot read — the tab body changes height whenever a
+	// banner (save error, entry hint, conflict) appears above it.
+	let bodyEl: HTMLElement | null = $state(null);
+	let bodyH = $state(0);
+
+	$effect(() => {
+		if (!bodyEl) return;
+		bodyH = bodyEl.clientHeight;
+		const ro = new ResizeObserver(() => {
+			if (bodyEl) bodyH = bodyEl.clientHeight;
+		});
+		ro.observe(bodyEl);
+		return () => ro.disconnect();
+	});
+
+	const paneHeights = $derived(
+		splitHeights({
+			containerH: bodyH,
+			ratio: getSnippetSplitRatio(),
+			dividerH: SPLIT_DIVIDER_H,
+			minPanelH: SPLIT_MIN_PANEL_H
+		})
+	);
+
+	// Plain `let`, not `$state`: drag bookkeeping never read in the template
+	// (same call as VerticalSplit.svelte's `dragging`).
+	let dragging = false;
+
+	function onDividerPointerDown(e: PointerEvent): void {
+		if (e.button !== 0 || !e.isPrimary) return;
+		e.preventDefault();
+		dragging = true;
+		(e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+		window.addEventListener('pointermove', onDividerPointerMove);
+		window.addEventListener('pointerup', endDrag);
+		// pointercancel (a system interruption) must end the drag too, or the
+		// divider stays locked to the pointer — mirrors VerticalSplit's teardown.
+		window.addEventListener('pointercancel', endDrag);
+	}
+
+	function onDividerPointerMove(e: PointerEvent): void {
+		if (!dragging || bodyEl === null) return;
+		const rect = bodyEl.getBoundingClientRect();
+		setSnippetSplitRatio(
+			ratioFromPointer({
+				pointerY: e.clientY - rect.top,
+				containerH: rect.height,
+				dividerH: SPLIT_DIVIDER_H,
+				minPanelH: SPLIT_MIN_PANEL_H
+			})
+		);
+	}
+
+	function endDrag(): void {
+		dragging = false;
+		window.removeEventListener('pointermove', onDividerPointerMove);
+		window.removeEventListener('pointerup', endDrag);
+		window.removeEventListener('pointercancel', endDrag);
+	}
+
+	$effect(() => endDrag); // drop window listeners on unmount
 </script>
 
 {#if !draft}
@@ -183,22 +255,29 @@
 				onClear={() => clearSnippetElements(tabId)}
 			/>
 		{/if}
-		<div class="flex min-h-0 flex-1">
-			<div class="flex min-h-0 flex-1 flex-col">
-				<div class="min-h-0 flex-[3] overflow-hidden">
-					<CodeEditor
-						bind:this={editor}
-						code={draft.code}
-						diagnostics={lint?.diagnostics ?? []}
-						docs={getSnippetDocs()}
-						{vocab}
-						onChange={(c) => updateSnippetCode(tabId, c)}
-						onRun={() => void runSnippetTab(tabId)}
-					/>
-				</div>
-				<div class="min-h-0 flex-[2] overflow-hidden">
-					<SnippetConsole {tabId} onGoToLine={(l) => editor?.goToLine(l)} />
-				</div>
+		<div bind:this={bodyEl} class="flex min-h-0 flex-1 flex-col">
+			<div class="min-h-0 overflow-hidden" style="height: {paneHeights.topH}px">
+				<CodeEditor
+					bind:this={editor}
+					code={draft.code}
+					diagnostics={lint?.diagnostics ?? []}
+					docs={getSnippetDocs()}
+					{vocab}
+					onChange={(c) => updateSnippetCode(tabId, c)}
+					onRun={() => void runSnippetTab(tabId)}
+				/>
+			</div>
+			<div
+				data-testid="snippet-split-divider"
+				role="separator"
+				aria-orientation="horizontal"
+				aria-label="Resize code editor and console"
+				class="shrink-0 cursor-row-resize bg-border transition-colors hover:bg-primary/50"
+				style="height: {SPLIT_DIVIDER_H}px"
+				onpointerdown={onDividerPointerDown}
+			></div>
+			<div class="min-h-0 overflow-hidden" style="height: {paneHeights.bottomH}px">
+				<SnippetConsole {tabId} onGoToLine={(l) => editor?.goToLine(l)} />
 			</div>
 		</div>
 	</div>

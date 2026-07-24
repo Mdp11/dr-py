@@ -604,9 +604,7 @@ describe('SnippetSourceEditor — inline editor height', () => {
 			grip.releasePointerCapture = () => {};
 
 			// A +60px drag downward from the grip's own pointer position.
-			grip.dispatchEvent(
-				new MouseEvent('pointerdown', { bubbles: true, button: 0, clientY: 300 })
-			);
+			grip.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0, clientY: 300 }));
 			grip.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientY: 360 }));
 			grip.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, clientY: 360 }));
 			flushSync();
