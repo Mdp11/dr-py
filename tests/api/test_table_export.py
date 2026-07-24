@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from openpyxl import load_workbook
 
 from data_rover.api.main import create_app
+from data_rover.api.table_export import _sheet_title
 
 from .conftest import AUTH_HEADERS, papi, seed_default_project
 from .test_artifacts_routes import _bootstrap_model
@@ -154,3 +155,181 @@ def test_export_skips_hidden_columns(client):
     body_rows = [[c.value for c in row] for row in ws.iter_rows(min_row=2)]
     assert len(body_rows) == 2
     assert all(row == ["root", 1.0] for row in body_rows)
+
+
+def test_export_styling_autofit_filters_borders(client):
+    # Item 11: the workbook ships with header-filter dropdowns, borders, bold
+    # header, frozen header row, and autofitted column widths.
+    _bootstrap_model(client)
+    body = {
+        "definition": {
+            "row_source": {"kind": "scope", "types": ["Block"]},
+            "columns": [
+                {"kind": "element", "source": {"kind": "row"}, "header": "Block"},
+                {
+                    "kind": "property",
+                    "source": {"kind": "row"},
+                    "name": "mass",
+                    "header": "Mass",
+                    # a definition width must NOT drive the export any more
+                    "width_px": 700,
+                },
+            ],
+        }
+    }
+    r = client.post(papi("/tables/export"), json=body, headers=AUTH_HEADERS)
+    assert r.status_code == 200, r.text
+    wb = load_workbook(io.BytesIO(r.content))
+    ws = wb.active
+    assert ws is not None
+    # header filters span the data range (header row through the last data row)
+    assert ws.auto_filter.ref is not None
+    assert ws.auto_filter.ref.startswith("A1:B")
+    # frozen header row survives the library swap
+    assert ws.freeze_panes == "A2"
+    # bold header with a heavier bottom edge; thin borders on data cells
+    hdr = ws["A1"]
+    assert hdr.font.b
+    assert hdr.border.bottom.style == "medium"
+    data = ws["A2"]
+    assert data.border.left.style == "thin"
+    assert data.border.bottom.style == "thin"
+    # autofit set a real width, and the 700px definition width did not win
+    # (700px under the old px/7 heuristic would exceed 90 char-units)
+    w = ws.column_dimensions["B"].width
+    assert w is not None and 0 < w < 90
+
+
+def test_export_row_numbers_column(client):
+    # Item 10: `show_row_numbers` prepends a 1-based "#" column, numbered in
+    # export row order (which follows the current sort).
+    _bootstrap_model(client)
+    body = {
+        "definition": {
+            "row_source": {"kind": "scope", "types": ["Block"]},
+            "show_row_numbers": True,
+            "columns": [
+                {"kind": "element", "source": {"kind": "row"}, "header": "Block"},
+            ],
+        }
+    }
+    r = client.post(papi("/tables/export"), json=body, headers=AUTH_HEADERS)
+    assert r.status_code == 200, r.text
+    wb = load_workbook(io.BytesIO(r.content))
+    ws = wb.active
+    assert ws is not None
+    header = [c.value for c in ws[1]]
+    assert header[0] == "#"
+    assert header[1] == "Block"
+    numbers = [row[0].value for row in ws.iter_rows(min_row=2) if row[0].value is not None]
+    assert numbers == list(range(1, len(numbers) + 1))
+    # the autofilter spans the "#" column too
+    assert ws.auto_filter.ref.startswith("A1:B")
+
+
+def test_export_row_numbers_off_by_default(client):
+    _bootstrap_model(client)
+    body = {
+        "definition": {
+            "row_source": {"kind": "scope", "types": ["Block"]},
+            "columns": [
+                {"kind": "element", "source": {"kind": "row"}, "header": "Block"},
+            ],
+        }
+    }
+    r = client.post(papi("/tables/export"), json=body, headers=AUTH_HEADERS)
+    wb = load_workbook(io.BytesIO(r.content))
+    ws = wb.active
+    assert ws is not None
+    assert [c.value for c in ws[1]] == ["Block"]
+
+
+def test_export_url_like_value_stays_a_plain_string(client):
+    # A1 regression: xlsxwriter's default `strings_to_urls=True` routes any
+    # string matching the url/mailto/file/(in|ex)ternal patterns through its
+    # hyperlink writer instead of a plain string write. That writer silently
+    # discards the cell past 65,530 URL cells/sheet or a 2079+ char URL (only
+    # a `warnings.warn`, return code ignored) — a workbook shipped at HTTP
+    # 200 with blank cells and no error. The `name` property is the only
+    # string-typed property on Block in this metamodel, so it stands in for
+    # "a property value" here.
+    _bootstrap_model(client)
+    client.post(
+        papi("/model/elements"),
+        json={
+            "type": "Block",
+            "properties": {"name": "https://example.com/x", "mass": 1.0},
+        },
+        headers=AUTH_HEADERS,
+    )
+    body = {
+        "definition": {
+            "row_source": {
+                "kind": "scope",
+                "types": ["Block"],
+                "criteria": [
+                    {
+                        "type": "name_id",
+                        "field": "name",
+                        "op": "equals",
+                        "value": "https://example.com/x",
+                    }
+                ],
+            },
+            "columns": [
+                {
+                    "kind": "property",
+                    "source": {"kind": "row"},
+                    "name": "name",
+                    "header": "Name",
+                },
+            ],
+        }
+    }
+    r = client.post(papi("/tables/export"), json=body, headers=AUTH_HEADERS)
+    assert r.status_code == 200, r.text
+    wb = load_workbook(io.BytesIO(r.content))
+    ws = wb.active
+    assert ws is not None
+    cell = ws["A2"]
+    assert cell.value == "https://example.com/x"
+    assert cell.hyperlink is None
+
+
+class TestSheetTitle:
+    """Direct unit tests for `_sheet_title`; it had zero before this fix."""
+
+    def test_forbidden_chars_replaced(self):
+        assert _sheet_title("a[b]:c*d?e/f\\g") == "a_b__c_d_e_f_g"
+
+    def test_leading_trailing_apostrophe_stripped(self):
+        assert _sheet_title("'quoted name'") == "quoted name"
+
+    def test_empty_name_falls_back_to_table(self):
+        assert _sheet_title("") == "Table"
+
+    def test_all_apostrophes_name_falls_back_to_table(self):
+        # The only way `cleaned.strip("'")` (unchanged by this fix, see
+        # module docstring / A3 report note) produces an empty string from a
+        # non-empty input: a name made entirely of apostrophes/quotes.
+        assert _sheet_title("''''") == "Table"
+
+    def test_31_char_name_with_apostrophe_as_32nd_char_regression(self):
+        # A3 regression: stripping BEFORE truncating would keep this name at
+        # 31 chars ending in "'" (the truncation would land exactly after
+        # the leading 31 chars, all non-apostrophe, but the ORIGINAL bug was
+        # stripping outer quotes first and truncating second — reproduced
+        # here as a name whose 31st character is itself an apostrophe, which
+        # must survive truncation and then be stripped).
+        name = "a" * 30 + "'" + "extra text past the limit"
+        assert len(name) > 31
+        assert name[30] == "'"
+        title = _sheet_title(name)
+        assert not title.endswith("'")
+        assert title == "a" * 30
+
+    def test_plain_truncation_to_31_chars(self):
+        name = "x" * 40
+        title = _sheet_title(name)
+        assert title == "x" * 31
+        assert len(title) == 31

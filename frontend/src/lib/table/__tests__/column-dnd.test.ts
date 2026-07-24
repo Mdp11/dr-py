@@ -47,6 +47,7 @@ function defWithColumns(
 	return {
 		schema_version: 1,
 		default_cell_mode: 'collapse',
+		show_row_numbers: false,
 		row_source: { kind: 'scope', types: ['Block'], criteria: [] },
 		columns
 	};

@@ -23,6 +23,7 @@
 		requestScriptErrors,
 		requestScrollToCell,
 		resumeTableEvaluation,
+		revertSuspendedTableEdits,
 		saveAsTableDraft,
 		saveTableDraft,
 		setTableName,
@@ -159,6 +160,24 @@
 	// only that column's card (see ColumnManager's focusIndex).
 	let settingsFocus = $state<number | null>(null);
 
+	// Set by the Save button just before it closes the dialog, so onOpenChange
+	// can tell "Save" apart from every discard path (Cancel, the X, Escape, an
+	// overlay click) — those all land in onOpenChange(false) with the flag
+	// still false and revert the staged edits first. Plain variable, not
+	// $state: control flow only, never rendered.
+	//
+	// Both footer buttons are `Dialog.Close`, not plain buttons that set
+	// `settingsOpen = false` directly: bits-ui's `onOpenChange` fires only from
+	// DialogRootState's own handleClose() (wired through Close/Escape/overlay),
+	// not from an external assignment to the bound `open` value — the latter
+	// closes the dialog (the bound prop still drives presence) but silently
+	// skips onOpenChange, so neither the revert nor the resume would run.
+	let settingsSaved = false;
+
+	function saveSettings(): void {
+		settingsSaved = true;
+	}
+
 	// The settings dialog is a working surface, not an alert: open big
 	// (most of the viewport) and let the user resize from the corner. The
 	// Dialog primitive centers via translate(-50%,-50%), so width/height are
@@ -200,6 +219,15 @@
 	function openSettings(focus: number | null): void {
 		suspendTableEvaluation(tabId);
 		settingsFocus = focus;
+		// Reset HERE, not in onOpenChange's `o === true` branch: every open in
+		// this component goes through this function via a direct `settingsOpen =
+		// true` assignment, never through a `Dialog.Trigger` — and bits-ui's
+		// onOpenChange only fires from DialogRootState's own handleOpen/
+		// handleClose (see the note by `settingsSaved`'s declaration), so an
+		// open driven by this external assignment would never reach it. Without
+		// resetting here, a Save leaves `settingsSaved` stuck `true` and the
+		// dialog's NEXT close — even a Cancel — would wrongly keep the edits.
+		settingsSaved = false;
 		settingsOpen = true;
 	}
 
@@ -221,9 +249,8 @@
 					: newNavigationColumn();
 		// Suspend BEFORE the append: that append is itself a definition edit, and
 		// evaluating a blank, unconfigured column is the most pointless reload of
-		// the lot. The snapshot taken here is the pre-append definition, so
-		// adding a column and then cancelling out of it correctly evaluates once
-		// (the column is still there) — abandoning the column is a Remove away.
+		// the lot. The snapshot taken here is the PRE-append definition, so the
+		// dialog's Cancel discards the new column entirely (and Save keeps it).
 		suspendTableEvaluation(tabId);
 		updateTableDefinition(tabId, addColumn(d.definition, column));
 		openSettings(getTableDraft(tabId)!.definition.columns.length - 1);
@@ -489,10 +516,14 @@
 		<Dialog.Root
 			bind:open={settingsOpen}
 			onOpenChange={(o) => {
-				if (o) return;
+				if (o) return; // opening is handled by openSettings, not here — see its comment
+				// Every close path (the X, Escape, an overlay click, both footer
+				// buttons) lands here. Only Save keeps the staged edits; everything
+				// else restores the definition/dirty/sort snapshot taken at open —
+				// after which the resume below sees an unchanged definition and
+				// skips the reload entirely.
+				if (!settingsSaved) revertSuspendedTableEdits(tabId);
 				settingsFocus = null;
-				// Every close path (the X, Escape, an overlay click) lands here —
-				// this is the single point where staged edits are evaluated.
 				resumeTableEvaluation(tabId);
 			}}
 		>
@@ -506,6 +537,21 @@
 				</Dialog.Title>
 				<div class="min-h-0 flex-1 overflow-y-auto pr-1">
 					<ColumnManager {tabId} focusIndex={settingsFocus} />
+				</div>
+				<div class="flex shrink-0 items-center justify-end gap-2 border-t border-border pt-2">
+					<Dialog.Close
+						data-testid="settings-cancel"
+						class="rounded border border-input px-3 py-1 text-xs text-foreground/80 transition-colors hover:bg-muted"
+					>
+						Cancel
+					</Dialog.Close>
+					<Dialog.Close
+						data-testid="settings-save"
+						class="rounded bg-primary px-3 py-1 text-xs text-primary-foreground transition-colors hover:bg-primary/80"
+						onclick={saveSettings}
+					>
+						Save
+					</Dialog.Close>
 				</div>
 				<div
 					role="separator"

@@ -128,6 +128,39 @@ export function removeColumn(defn: TableDefinition, index: number): TableDefinit
 	return next;
 }
 
+/**
+ * Deep-copy the column at `index` and insert the copy immediately after it.
+ * A non-empty header gains a ` (copy)` suffix; an empty one stays empty (the
+ * grid already falls back to the kind label).
+ *
+ * The copy is a plain-JSON round-trip, deliberately NOT `structuredClone`
+ * (see module doc, subtlety 2 — a leaked `$state` proxy bricks it) and NOT a
+ * reference-preserving shallow copy: the whole point of a clone is that
+ * editing it (its inline navigation/snippet definition included) can never
+ * bleed into the original, so the two must share no references at all.
+ *
+ * Ref bookkeeping mirrors `removeColumn`'s shift-down, in reverse: every
+ * `ColumnRef.index` pointing PAST `index` shifts up one (its target moved).
+ * Refs pointing AT `index` keep pointing at the original, and the clone's own
+ * source ref — backward-only by schema invariant, so always `<= index` — is
+ * untouched and stays valid. Callers with an active sort must remap it with
+ * `remapTableSortForInsert(tabId, index + 1)` in the same breath.
+ */
+export function cloneColumn(defn: TableDefinition, index: number): TableDefinition {
+	const src = defn.columns[index];
+	const copy = JSON.parse(JSON.stringify(src)) as Column;
+	if (copy.header) copy.header = `${copy.header} (copy)`;
+	const next = clone(defn);
+	// copy-on-write: only the columns whose ref actually shifts are re-made
+	next.columns = next.columns.map((c) =>
+		c.source.kind === 'column' && c.source.index > index
+			? { ...c, source: { ...c.source, index: c.source.index + 1 } }
+			: c
+	);
+	next.columns.splice(index + 1, 0, copy);
+	return next;
+}
+
 export function moveColumn(defn: TableDefinition, from: number, to: number): TableDefinition {
 	const n = defn.columns.length;
 	if (from === to) return clone(defn);
@@ -230,7 +263,8 @@ export function navigationAsTableDefinition({
 			navigation: artifactId ? { ref: artifactId } : { definition }
 		},
 		columns,
-		default_cell_mode: 'collapse'
+		default_cell_mode: 'collapse',
+		show_row_numbers: false
 	};
 }
 

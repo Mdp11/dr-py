@@ -73,6 +73,13 @@
 		return cols.map((col, i) => ({ col, i })).filter(({ i }) => !defCols?.[i]?.hidden);
 	});
 
+	// Item 10: a presentation-only "#" gutter. NOT a definition column — it
+	// never enters visibleCols, so ColumnRef indices, sort, resize and reorder
+	// are untouched. The number is the row's 1-based absolute index in the
+	// CURRENT (post-sort) result set, which the virtualizer already knows as
+	// `win.start + i`.
+	const showRowNumbers = $derived(getTableDraft(tabId)?.definition.show_row_numbers ?? false);
+
 	let scrollEl: HTMLElement | null = $state(null);
 	let scrollTop = $state(0);
 	let viewportH = $state(0);
@@ -336,6 +343,15 @@
 		role="row"
 		class="sticky top-0 z-10 flex border-b border-border bg-card text-xs font-medium text-muted-foreground"
 	>
+		{#if showRowNumbers}
+			<div
+				role="columnheader"
+				data-testid="row-number-header"
+				class="flex w-12 shrink-0 items-center justify-end border-r border-border px-2 py-1.5 tabular-nums text-muted-foreground/70"
+			>
+				#
+			</div>
+		{/if}
 		{#each visibleCols as v (v.i)}
 			<div
 				role="columnheader"
@@ -442,6 +458,21 @@
 					class="flex border-b border-border/60"
 					style="height:{offsets[win.start + i + 1] - offsets[win.start + i]}px"
 				>
+					{#if showRowNumbers}
+						<!-- items-start on the gutter + items-center on an inner h-7 span
+						     (not items-center on the gutter itself, unlike the placeholder
+						     gutter below): a data row's HEIGHT IS VARIABLE (wrapped cell
+						     content), so the number must top-align to line 1 at the
+						     ROW_H-tall first line, not center across the whole row. The
+						     placeholder gutter below is always exactly ROW_H tall, where
+						     top-align and center-align are the same thing. -->
+						<div
+							data-testid="row-number-cell"
+							class="flex w-12 shrink-0 items-start justify-end border-r border-border/40 px-2 text-xs tabular-nums text-muted-foreground/60"
+						>
+							<span class="flex h-7 items-center">{win.start + i + 1}</span>
+						</div>
+					{/if}
 					{#each visibleCols as v (v.i)}
 						{@const cell = row.cells[v.i]}
 						{#if cell}
@@ -518,6 +549,14 @@
 					class="flex border-b border-border/60"
 					style="height:{ROW_H}px"
 				>
+					{#if showRowNumbers}
+						<div
+							data-testid="row-number-cell"
+							class="flex w-12 shrink-0 items-center justify-end border-r border-border/40 px-2 text-xs tabular-nums text-muted-foreground/60"
+						>
+							{win.start + i + 1}
+						</div>
+					{/if}
 					{#each visibleCols as v (v.i)}
 						<div
 							class="flex shrink-0 items-center border-r border-border/40 px-2"

@@ -86,6 +86,7 @@ function emptyDefinition(): TableDefinition {
 	return {
 		schema_version: 1,
 		default_cell_mode: 'collapse',
+		show_row_numbers: false,
 		row_source: { kind: 'scope', types: [], criteria: [] },
 		columns: [
 			{
@@ -309,6 +310,21 @@ const _suspended = new Map<string, string>();
 // eslint-disable-next-line svelte/prefer-svelte-reactivity
 const _suspendedStale = new Set<string>();
 
+/**
+ * The draft (definition + dirty) and active sort as they stood when the
+ * settings dialog opened — what `revertSuspendedTableEdits` (the dialog's
+ * Cancel) restores. Populated by `suspendTableEvaluation`, dropped by
+ * resume/abandon, moved by `moveTabState`, exactly like `_suspended`. The
+ * definition is held BY REFERENCE (the column mutators are copy-on-write, so
+ * the pre-open object is immutable from the dialog's point of view — no clone
+ * needed). Control state, never read from templates.
+ */
+// eslint-disable-next-line svelte/prefer-svelte-reactivity
+const _suspendedSnapshot = new Map<
+	string,
+	{ definition: TableDefinition; dirty: boolean; sort: TableSort | undefined }
+>();
+
 function definitionFingerprint(tabId: string): string {
 	return JSON.stringify(_drafts.get(tabId)?.definition ?? null);
 }
@@ -326,6 +342,15 @@ function definitionFingerprint(tabId: string): string {
 export function suspendTableEvaluation(tabId: string): void {
 	if (_suspended.has(tabId)) return;
 	_suspended.set(tabId, definitionFingerprint(tabId));
+
+	const draft = _drafts.get(tabId);
+	if (draft) {
+		_suspendedSnapshot.set(tabId, {
+			definition: draft.definition,
+			dirty: draft.dirty,
+			sort: _sorts.get(tabId)
+		});
+	}
 }
 
 /**
@@ -342,6 +367,7 @@ export function resumeTableEvaluation(tabId: string): void {
 	const before = _suspended.get(tabId);
 	if (before === undefined) return;
 	_suspended.delete(tabId);
+	_suspendedSnapshot.delete(tabId);
 	const stale = _suspendedStale.delete(tabId);
 	if (!_drafts.has(tabId)) return; // tab closed while the dialog was open
 	if (stale || definitionFingerprint(tabId) !== before) {
@@ -360,7 +386,29 @@ export function resumeTableEvaluation(tabId: string): void {
  */
 export function abandonTableEvaluationSuspension(tabId: string): void {
 	_suspended.delete(tabId);
+	_suspendedSnapshot.delete(tabId);
 	_suspendedStale.delete(tabId);
+}
+
+/**
+ * The settings dialog's Cancel: restore the draft's definition, dirty flag
+ * and the active sort to their values at suspend time, discarding everything
+ * `updateTableDefinition` applied while the dialog was open (including sort
+ * remaps from remove/move/clone edits). Call BEFORE `resumeTableEvaluation`:
+ * the restored definition matches the suspend-time fingerprint, so the resume
+ * skips the reload — cancelling an untouched-in-the-end dialog stays free.
+ * No-op when the tab was never suspended (there is nothing to revert to).
+ */
+export function revertSuspendedTableEdits(tabId: string): void {
+	const snap = _suspendedSnapshot.get(tabId);
+	if (!snap) return;
+	const draft = _drafts.get(tabId);
+	if (!draft) return;
+	if (draft.definition !== snap.definition || draft.dirty !== snap.dirty) {
+		_drafts.set(tabId, { ...draft, definition: snap.definition, dirty: snap.dirty });
+	}
+	if (snap.sort === undefined) _sorts.delete(tabId);
+	else _sorts.set(tabId, snap.sort);
 }
 
 function bumpGeneration(tabId: string): number {
@@ -699,6 +747,9 @@ function moveTabState(oldTab: string, newTab: string): void {
 	_suspended.delete(oldTab);
 	if (suspendedAt !== undefined) _suspended.set(newTab, suspendedAt);
 	if (_suspendedStale.delete(oldTab)) _suspendedStale.add(newTab);
+	const snapshot = _suspendedSnapshot.get(oldTab);
+	_suspendedSnapshot.delete(oldTab);
+	if (snapshot !== undefined) _suspendedSnapshot.set(newTab, snapshot);
 
 	// The pending poll is closed over `oldTab` (whose draft is gone), so it
 	// would no-op — cancel it and carry the status over; the re-issued load
@@ -1015,6 +1066,15 @@ export function remapTableSortForMove(tabId: string, from: number, to: number): 
 	else if (from < column && column <= to) column -= 1;
 	else if (to <= column && column < from) column += 1;
 	if (column !== sort.column) _sorts.set(tabId, { ...sort, column });
+}
+
+/** Same contract as `remapTableSortForRemove`, for a single-column INSERTION
+ * at `index` (`cloneColumn` inserts at original+1): a sort at or past the
+ * insertion point shifts up one so it keeps naming the same column. */
+export function remapTableSortForInsert(tabId: string, index: number): void {
+	const sort = _sorts.get(tabId);
+	if (sort === undefined) return;
+	if (sort.column >= index) _sorts.set(tabId, { ...sort, column: sort.column + 1 });
 }
 
 /** Install `page` as a FRESH sparse cache (drops any previously loaded rows). */
@@ -1410,6 +1470,7 @@ export function resetTableEditors(): void {
 	_conflicts.clear();
 	_viewRanges.clear();
 	_suspended.clear();
+	_suspendedSnapshot.clear();
 	_suspendedStale.clear();
 	_scriptStatus.clear();
 	_pollAttempts.clear();

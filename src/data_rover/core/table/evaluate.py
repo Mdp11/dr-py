@@ -967,7 +967,7 @@ def order_rows(
 # would cycle). This is a generator purely to bound peak memory for a large
 # export — it does NOT change what gets exported (the caller still owns the
 # full, uncapped `TableLimits` used for every chunk). Core stays xlsx-free:
-# this function only orchestrates cell evaluation, never touches openpyxl —
+# this function only orchestrates cell evaluation, never touches xlsxwriter —
 # the writer lives in `api/table_export.py`.
 
 

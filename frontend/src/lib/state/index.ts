@@ -301,12 +301,14 @@ export {
 	hasDirtyTableDrafts,
 	loadTablePage,
 	reloadTableDraft,
+	remapTableSortForInsert,
 	remapTableSortForMove,
 	remapTableSortForRemove,
 	requestScriptErrors,
 	requestScrollToCell,
 	resetTableEditors,
 	resumeTableEvaluation,
+	revertSuspendedTableEdits,
 	saveAsTableDraft,
 	saveTableDraft,
 	setTableName,
@@ -357,3 +359,8 @@ export {
 	type StagedElementRow,
 	type StagedRowStatus
 } from './staged-rows';
+export {
+	isSnippetExpanded,
+	setSnippetExpanded,
+	resetSnippetCollapse
+} from './snippet-collapse.svelte';

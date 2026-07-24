@@ -15,6 +15,7 @@ import {
 	resetArtifacts,
 	resetCheckout,
 	resetNavigationEditors,
+	resetSnippetCollapse,
 	resetTableEditors,
 	setProjectInfo,
 	updateTableDefinition
@@ -68,8 +69,40 @@ async function seed(columns: NavColumn[]): Promise<void> {
 	const defn: TableDefinition = {
 		schema_version: 1,
 		default_cell_mode: 'collapse',
+		show_row_numbers: false,
 		row_source: { kind: 'scope', types: ['Block'], criteria: [] },
 		columns
+	};
+	updateTableDefinition(TAB, defn);
+	flushSync();
+}
+
+async function seedScript(): Promise<void> {
+	await ensureTableDraft(TAB);
+	const defn: TableDefinition = {
+		schema_version: 1,
+		default_cell_mode: 'collapse',
+		show_row_numbers: false,
+		row_source: { kind: 'scope', types: ['Block'], criteria: [] },
+		columns: [
+			{
+				kind: 'script',
+				source: { kind: 'row', chain_index: 0 },
+				snippet: {
+					definition: {
+						schema_version: 1,
+						language: 'python',
+						code: 'def value(elements):\n    return 1',
+						entry_points: []
+					}
+				},
+				mode: 'collapse',
+				keep_empty: true,
+				header: 'S',
+				width_px: null,
+				hidden: false
+			}
+		]
 	};
 	updateTableDefinition(TAB, defn);
 	flushSync();
@@ -87,6 +120,7 @@ beforeEach(() => {
 	resetNavigationEditors();
 	resetArtifacts();
 	resetCheckout();
+	resetSnippetCollapse();
 	setProjectInfo({ role: 'editor', lockTtlSeconds: 300 });
 	vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
 	vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
@@ -96,6 +130,7 @@ afterEach(() => {
 	resetNavigationEditors();
 	resetArtifacts();
 	resetCheckout();
+	resetSnippetCollapse();
 	document.body.innerHTML = '';
 	vi.restoreAllMocks();
 });
@@ -125,6 +160,31 @@ describe('ColumnManager PathCard collapse (durable across edits)', () => {
 
 			const t2 = root.querySelector('[data-testid="path-collapse-toggle"]') as HTMLButtonElement;
 			expect(t2.getAttribute('aria-expanded')).toBe('true'); // state preserved
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('an expanded snippet editor stays expanded when a column is added', async () => {
+		await seedScript();
+		const root = document.body;
+		const c = mount(ColumnManager, { target: root, props: { tabId: TAB } });
+		flushSync();
+		try {
+			const toggle = root.querySelector(
+				'[data-testid="snippet-collapse-toggle"]'
+			) as HTMLButtonElement;
+			expect(toggle.getAttribute('aria-expanded')).toBe('false'); // default collapsed
+			toggle.click();
+			flushSync();
+			expect(toggle.getAttribute('aria-expanded')).toBe('true');
+
+			click('[data-testid="add-property-column"]');
+			await Promise.resolve();
+			flushSync();
+
+			const t2 = root.querySelector('[data-testid="snippet-collapse-toggle"]') as HTMLButtonElement;
+			expect(t2.getAttribute('aria-expanded')).toBe('true'); // survived the re-render
 		} finally {
 			unmount(c);
 		}

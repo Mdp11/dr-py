@@ -761,7 +761,8 @@ export const TableDefinitionSchema = z.object({
 	schema_version: z.number().int().default(1),
 	row_source: RowSourceSchema,
 	columns: z.array(ColumnSchema).min(1),
-	default_cell_mode: z.enum(['collapse', 'expand']).default('collapse')
+	default_cell_mode: z.enum(['collapse', 'expand']).default('collapse'),
+	show_row_numbers: z.boolean().default(false)
 });
 export type TableDefinition = z.infer<typeof TableDefinitionSchema>;
 export type Column = z.infer<typeof ColumnSchema>;

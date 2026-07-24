@@ -10,6 +10,7 @@
 	import {
 		getTableDraft,
 		getTablePage,
+		remapTableSortForInsert,
 		remapTableSortForMove,
 		remapTableSortForRemove,
 		updateTableDefinition
@@ -17,6 +18,7 @@
 	import {
 		ColumnInUseError,
 		addColumn,
+		cloneColumn,
 		columnKindLabel,
 		columnLabel,
 		moveColumn,
@@ -29,7 +31,7 @@
 	} from '$lib/table/columns';
 	import { createColumnDrag } from '$lib/table/column-dnd.svelte';
 	import type { Column, TableDefinition } from '$lib/api/types';
-	import { Eye, EyeOff } from '@lucide/svelte';
+	import { Copy, Eye, EyeOff } from '@lucide/svelte';
 	import NavigationColumnEditor from './NavigationColumnEditor.svelte';
 	import PropertyColumnEditor from './PropertyColumnEditor.svelte';
 	import RowSourceEditor from './RowSourceEditor.svelte';
@@ -101,6 +103,19 @@
 		});
 	}
 
+	// Insert a deep copy right after the original. The sort is remapped in the
+	// same breath (a sort at/past the insertion point must follow its column),
+	// mirroring how onRemove/onMove pair their mutator with a sort remap.
+	function onClone(index: number): void {
+		if (!defn) return;
+		const current = defn;
+		tryApply(() => {
+			const next = cloneColumn(current, index);
+			remapTableSortForInsert(tabId, index + 1);
+			return next;
+		});
+	}
+
 	function onMove(index: number, dir: 'up' | 'down'): void {
 		if (!defn) return;
 		const to = dir === 'up' ? index - 1 : index + 1;
@@ -164,6 +179,19 @@
 	<div data-testid="column-manager" class="space-y-3 text-xs">
 		{#if focusIndex === null}
 			<RowSourceEditor {tabId} {defn} />
+			<label
+				class="flex w-fit items-center gap-1.5"
+				title="Show a numbered first column (1-based, follows the current sort; also included in Excel exports)"
+			>
+				<input
+					type="checkbox"
+					data-testid="toggle-row-numbers"
+					checked={defn.show_row_numbers}
+					onchange={(e) =>
+						apply({ ...defn, show_row_numbers: (e.currentTarget as HTMLInputElement).checked })}
+				/>
+				Show row numbers
+			</label>
 		{/if}
 
 		{#if error}
@@ -249,6 +277,16 @@
 							{#if focusIndex === null}
 								<button
 									type="button"
+									data-testid="clone-column-{i}"
+									class="rounded border border-input px-1 py-0.5 text-[10px] hover:bg-muted"
+									aria-label="Duplicate column"
+									title="Duplicate this column (inserted below)"
+									onclick={() => onClone(i)}
+								>
+									<Copy class="size-3" />
+								</button>
+								<button
+									type="button"
 									data-testid="remove-column-{i}"
 									class="rounded border border-destructive/40 px-1.5 py-0.5 text-[10px] text-destructive hover:bg-destructive/10 disabled:opacity-30"
 									disabled={col.kind === 'element' && elementColumnCount <= 1}
@@ -284,6 +322,7 @@
 								columnIndex={i}
 								columns={defn.columns}
 								rowSource={defn.row_source}
+								{tabId}
 								onChange={(next) => onColumnChange(i, next)}
 							/>
 						{/if}

@@ -6,9 +6,75 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { TableDefinition } from '$lib/api/types';
+import * as tablesApi from '$lib/api/tables';
+import type { Column, TableDefinition } from '$lib/api/types';
+import {
+	ensureTableDraft,
+	getTableDraft,
+	getTableSort,
+	setTableSort,
+	updateTableDefinition
+} from '$lib/state';
 import * as store from '$lib/state/table-editor.svelte';
 import ColumnManager from '../ColumnManager.svelte';
+
+const CLONE_TAB = 'tbl:draft:clone-test';
+
+const EMPTY_PAGE = {
+	columns: [],
+	rows: [],
+	total: 0,
+	truncated: false,
+	offset: 0,
+	model_rev: 1,
+	warnings: []
+};
+
+// Drives the REAL table store (not the getTableDraft/updateTableDefinition
+// spies the other tests in this file use) so the clone handler's paired
+// mutator+remap can be observed end to end. Defined at module scope because a
+// later task's sibling `it(...)` in this file reuses this seed.
+// `updateTableDefinition` fire-and-forgets a page reload (`loadTablePage`), so
+// `evaluateTable` is stubbed here — same as `ColumnManager.collapse.test.ts`
+// and `table-editor.test.ts` — to keep the run free of a real, unmocked
+// network call against the (absent) dev backend.
+// `extraColumns` defaults to none, so the original 2-column (element, Mass)
+// shape is unchanged for the existing callers below. C5's sort-remap test
+// passes a third column so a post-clone sort index (>= the clone's
+// insertion point) is still IN RANGE — `_sortFor` clears any sort pointing
+// past the last column, which would silently launder a missing remap call.
+async function seedForClone(extraColumns: Column[] = []): Promise<void> {
+	vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
+	await ensureTableDraft(CLONE_TAB);
+	const defn: TableDefinition = {
+		schema_version: 1,
+		default_cell_mode: 'collapse',
+		show_row_numbers: false,
+		row_source: { kind: 'scope', types: ['Block'], criteria: [] },
+		columns: [
+			{
+				kind: 'element',
+				source: { kind: 'row', chain_index: 0 },
+				header: 'Block',
+				width_px: null,
+				hidden: false
+			},
+			{
+				kind: 'property',
+				source: { kind: 'row', chain_index: 0 },
+				name: 'mass',
+				mode: 'collapse',
+				keep_empty: true,
+				header: 'Mass',
+				width_px: null,
+				hidden: false
+			},
+			...extraColumns
+		]
+	};
+	updateTableDefinition(CLONE_TAB, defn);
+	flushSync();
+}
 
 function scopeDraft(columns: TableDefinition['columns']) {
 	return {
@@ -19,6 +85,7 @@ function scopeDraft(columns: TableDefinition['columns']) {
 		definition: {
 			schema_version: 1,
 			default_cell_mode: 'collapse' as const,
+			show_row_numbers: false,
 			row_source: { kind: 'scope' as const, types: ['Block'], criteria: [] },
 			columns
 		}
@@ -372,6 +439,82 @@ describe('ColumnManager', () => {
 			expect(upd).not.toHaveBeenCalled();
 			const msg = document.querySelector('[data-testid="column-manager-error"]');
 			expect(msg?.textContent).toContain('column 1 sources column 0');
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('clone button inserts a "(copy)" duplicate right below the original', async () => {
+		await seedForClone();
+		const c = mount(ColumnManager, { target: document.body, props: { tabId: CLONE_TAB } });
+		flushSync();
+		try {
+			const clone = document.querySelector('[data-testid="clone-column-1"]') as HTMLButtonElement;
+			expect(clone).toBeTruthy();
+			clone.click();
+			flushSync();
+			const defn = getTableDraft(CLONE_TAB)!.definition;
+			expect(defn.columns).toHaveLength(3);
+			expect(defn.columns[2].header).toBe('Mass (copy)');
+			expect(defn.columns[2].kind).toBe('property');
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('shifts a sort at/after the clone insertion point so it keeps naming the same column', async () => {
+		// C5 regression pin: onClone pairs cloneColumn with
+		// remapTableSortForInsert(tabId, index + 1) in the SAME breath, mirroring
+		// onRemove/onMove. A third column (index 2) sits after the clone target
+		// (index 1, "Mass"), so the insertion at index 2 must shift the sort's
+		// column from 2 to 3 to keep pointing at the same underlying column.
+		await seedForClone([
+			{
+				kind: 'property',
+				source: { kind: 'row', chain_index: 0 },
+				name: 'name',
+				mode: 'collapse',
+				keep_empty: true,
+				header: 'Name',
+				width_px: null,
+				hidden: false
+			}
+		]);
+		const c = mount(ColumnManager, { target: document.body, props: { tabId: CLONE_TAB } });
+		flushSync();
+		try {
+			setTableSort(CLONE_TAB, { column: 2, direction: 'asc' });
+			flushSync();
+			expect(getTableSort(CLONE_TAB)).toEqual({ column: 2, direction: 'asc' });
+
+			const clone = document.querySelector('[data-testid="clone-column-1"]') as HTMLButtonElement;
+			expect(clone).toBeTruthy();
+			clone.click();
+			flushSync();
+
+			const defn = getTableDraft(CLONE_TAB)!.definition;
+			expect(defn.columns).toHaveLength(4);
+			// The original column 2 ("Name") is now at index 3.
+			expect(defn.columns[3].header).toBe('Name');
+			// ...and the sort followed it there, rather than staying at 2 (which
+			// after the insert names the CLONE, not "Name").
+			expect(getTableSort(CLONE_TAB)).toEqual({ column: 3, direction: 'asc' });
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('the row-numbers toggle flips show_row_numbers on the definition', async () => {
+		await seedForClone(); // Task 4's seed helper in this same file
+		const c = mount(ColumnManager, { target: document.body, props: { tabId: CLONE_TAB } });
+		flushSync();
+		try {
+			const box = document.querySelector('[data-testid="toggle-row-numbers"]') as HTMLInputElement;
+			expect(box).toBeTruthy();
+			expect(box.checked).toBe(false);
+			box.click();
+			flushSync();
+			expect(getTableDraft(CLONE_TAB)!.definition.show_row_numbers).toBe(true);
 		} finally {
 			unmount(c);
 		}
