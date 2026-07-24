@@ -13,10 +13,11 @@ import {
 	navMaxStepIndex,
 	newNavigationColumn,
 	newPropertyColumn,
-	newScriptColumn
+	newScriptColumn,
+	cloneColumn
 } from '$lib/table/columns';
 import { ColumnSchema, TableDefinitionSchema } from '$lib/api/types';
-import type { NavigationDefinition, TableDefinition } from '$lib/api/types';
+import type { Column, NavigationDefinition, TableDefinition } from '$lib/api/types';
 
 const base: TableDefinition = {
 	schema_version: 1,
@@ -506,4 +507,87 @@ it('moveColumn remaps ColumnRef.index when a script column with ColumnRef source
 	const moved = moveColumn(d, 1, 0);
 	const script = moved.columns[2];
 	expect(script.source).toEqual({ kind: 'column', index: 0 });
+});
+
+describe('cloneColumn', () => {
+	it('inserts a deep copy right after the original with a "(copy)" header', () => {
+		const withProp = addColumn(base, {
+			...newPropertyColumn(),
+			name: 'mass',
+			header: 'Mass'
+		} as Column);
+		const d = cloneColumn(withProp, 1);
+		expect(d.columns).toHaveLength(3);
+		expect(d.columns[2]).toMatchObject({ kind: 'property', name: 'mass', header: 'Mass (copy)' });
+		expect(withProp.columns).toHaveLength(2); // input untouched
+	});
+
+	it('keeps an empty header empty (the grid falls back to the kind label)', () => {
+		const d = cloneColumn(base, 0);
+		expect(d.columns[1].header).toBe('');
+	});
+
+	it('shares no references with the original (inline nav definition fully copied)', () => {
+		const nav = {
+			...newNavigationColumn(),
+			navigation: {
+				definition: {
+					kind: 'path' as const,
+					schema_version: 2,
+					start: { kind: 'row' as const },
+					steps: [],
+					exclude_visited: true
+				}
+			}
+		};
+		const withNav = addColumn(base, nav);
+		const d = cloneColumn(withNav, 1);
+		const src = d.columns[1];
+		const copy = d.columns[2];
+		expect(copy).not.toBe(src);
+		if (src.kind === 'navigation' && copy.kind === 'navigation') {
+			expect(copy.navigation).not.toBe(src.navigation);
+			expect(copy.navigation.definition).not.toBe(src.navigation.definition);
+			expect(copy.navigation.definition).toEqual(src.navigation.definition);
+		} else {
+			throw new Error('expected navigation columns');
+		}
+	});
+
+	it('shifts ColumnRefs past the insertion point and leaves refs at/before it alone', () => {
+		// cols: [element(0), property(1), property sourced from column 1 (2)]
+		let d = addColumn(base, { ...newPropertyColumn(), name: 'a' } as Column);
+		d = addColumn(d, {
+			...newPropertyColumn(),
+			name: 'b',
+			source: { kind: 'column', index: 1 }
+		} as Column);
+		// clone column 0 → [element(0), CLONE(1), property(2), ref-column(3)]
+		const out = cloneColumn(d, 0);
+		expect(out.columns).toHaveLength(4);
+		// the ref pointed at old index 1, which is now index 2
+		const ref = out.columns[3];
+		expect(ref.source).toEqual({ kind: 'column', index: 2 });
+		// cloning the REFERENCED column keeps the ref on the ORIGINAL
+		const out2 = cloneColumn(d, 1);
+		const ref2 = out2.columns[3];
+		expect(ref2.source).toEqual({ kind: 'column', index: 1 });
+	});
+
+	it('the clone of a ref-sourced column keeps its own (backward) ref valid', () => {
+		let d = addColumn(base, { ...newPropertyColumn(), name: 'a' } as Column);
+		d = addColumn(d, {
+			...newPropertyColumn(),
+			name: 'b',
+			source: { kind: 'column', index: 1 }
+		} as Column);
+		const out = cloneColumn(d, 2); // clone the ref-carrying column
+		expect(out.columns[3].source).toEqual({ kind: 'column', index: 1 });
+	});
+
+	it('round-trips through the zod schema (clone output is a valid definition)', () => {
+		const withNav = addColumn(base, newNavigationColumn());
+		const d = cloneColumn(withNav, 1);
+		expect(() => TableDefinitionSchema.parse(d)).not.toThrow();
+	});
 });
