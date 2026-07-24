@@ -79,6 +79,12 @@ export function goForward(): void {
  * truncate the forward stack or shift every index by one at the 50 cap. If
  * `_stack[index]` no longer holds the id the caller expects, this is a no-op
  * rather than navigating to whatever now happens to sit at that index.
+ *
+ * The guard also swallows the case where remapVisitIds() renamed the entry
+ * (temp -> canonical) while the menu was open, so the snapshotted id is stale
+ * for an entry that still points at the same element. That is deliberate: a
+ * swallowed click that self-heals on the next menu open is a strictly better
+ * failure than navigating to the wrong element.
  */
 export function goToVisit(index: number, expectedId?: string): void {
 	if (expectedId !== undefined && _stack[index]?.id !== expectedId) return;
