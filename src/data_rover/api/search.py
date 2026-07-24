@@ -30,11 +30,13 @@ from pydantic import BaseModel, Field
 
 from data_rover.core.model.model import Model
 from data_rover.core.search.criteria import (
+    AnyOfCriterion,
     ConnectedToTypeCriterion,
     Criterion,
     Direction,
     EndpointTypeCriterion,
     EntityTypeCriterion,
+    LeafCriterion,
     NameIdCriterion,
     OrphanCriterion,
     PropertyCriterion,
@@ -84,11 +86,13 @@ def run_query(model: Model, query: SearchQueryIn) -> list[str]:
 
 
 __all__ = [
+    "AnyOfCriterion",
     "ConnectedToTypeCriterion",
     "Criterion",
     "Direction",
     "EndpointTypeCriterion",
     "EntityTypeCriterion",
+    "LeafCriterion",
     "NameIdCriterion",
     "OrphanCriterion",
     "PropertyCriterion",
