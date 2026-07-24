@@ -223,6 +223,11 @@
 			resetSnippetEditors();
 			resetSnippetDocs();
 			clearSelection();
+			// Deliberately NOT resetInspectionHistory(): a reload is the same project,
+			// same ids, so the visit trail is still valid — unlike opening a different
+			// project (reset at mount, above). resolveRows() prefers the live cache, so
+			// the only residue is a stale name/type_name stamp on an entry until it is
+			// re-visited or re-resolved.
 			// refreshView() runs before refreshSummary() (mirroring boot()'s order)
 			// so the tree's first paint after a reload is view-shaped rather than
 			// briefly rendering against the stale pre-reload view. We deliberately

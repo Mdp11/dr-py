@@ -87,6 +87,25 @@ describe('navigation', () => {
 		expect(getSelection()).toEqual({ kind: 'element', id: 'a' });
 	});
 
+	it('goToVisit with a matching expectedId navigates; a mismatched one is a no-op', () => {
+		// Guards against a STALE absolute index: the history dropdown snapshots
+		// indices when the menu opens, and a pushVisit landing before a click is
+		// handled (e.g. applyDelta's selection re-point firing while the menu is
+		// still up) can truncate the forward stack or shift every index at the
+		// 50-cap, making `index` point at a different entry than the one the
+		// user saw and clicked.
+		pushVisit('a');
+		pushVisit('b');
+		pushVisit('c');
+		goToVisit(0, 'a');
+		expect(getVisitCursor()).toBe(0);
+		expect(getSelection()).toEqual({ kind: 'element', id: 'a' });
+
+		goToVisit(2, 'a'); // index 2 is 'c', not 'a' — mismatch, no-op
+		expect(getVisitCursor()).toBe(0);
+		expect(getSelection()).toEqual({ kind: 'element', id: 'a' });
+	});
+
 	it('goBack/goForward/goToVisit are no-ops out of range', () => {
 		pushVisit('a');
 		goBack();

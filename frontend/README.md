@@ -64,6 +64,9 @@ The UI is a fixed grid:
   and run console for server-executed Python snippets against the live model.
 - **Inspector** — property form + relationships list + new-relationship
   picker for the selected entity (gated when the resource is locked by a peer).
+  A back/forward arrow cluster (`Inspector/HistoryNav`) sits above it, replaying
+  the trail of inspected elements, with a long-press/right-click dropdown of up
+  to 10 entries per direction.
   For elements it also carries a **lock/unlock control** (`Inspector/LockControl`)
   in the Properties header: **Lock** checks the element out without editing it
   (`editLock`); **Unlock** releases my lease (`discardElement`), confirming first

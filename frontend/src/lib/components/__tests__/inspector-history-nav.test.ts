@@ -43,6 +43,8 @@ function forwardButton(): HTMLButtonElement {
 	return document.querySelector('[data-testid="inspector-history-forward"]') as HTMLButtonElement;
 }
 
+const settle = () => new Promise((r) => setTimeout(r, 30));
+
 it('arrows render in every state and disable without history', () => {
 	const component = mount(Inspector, { target: document.body });
 	try {
@@ -139,8 +141,33 @@ it('an entry whose element is unknown falls back to its bare id', () => {
 		// Target the name span specifically (not the whole item, which always
 		// also renders row.id in its own mono span) so a regression that made
 		// the fallback resolve to '' rather than the bare id would be caught.
-		const nameSpan = entry?.querySelector('.min-w-0.truncate');
+		// A testid, not the Tailwind classes, so a layout tweak can't break this.
+		const nameSpan = entry?.querySelector('[data-testid="inspector-history-entry-name"]');
 		expect(nameSpan?.textContent).toBe('e3');
+	} finally {
+		unmount(component);
+	}
+});
+
+it('back-navigating to a deleted element lands on "Selection not found" (deleted elements stay navigable)', async () => {
+	// Design decision under test: the visit stack never prunes deleted ids, so
+	// Back can land on one — the Inspector's existing not-found state is the
+	// mechanism, driven by ensureElement's 404 marking `_missingElementIds`.
+	server.use(
+		http.get(`*/model/elements/:id`, () => HttpResponse.json({ detail: 'nope' }, { status: 404 }))
+	);
+	select({ kind: 'element', id: 'ghost' }); // never seeded; the server 404s it
+	select({ kind: 'element', id: 'e2' }); // seeded — no fetch needed, entity renders
+	const component = mount(Inspector, { target: document.body });
+	try {
+		flushSync();
+		expect(document.body.textContent).toContain('Properties');
+		backButton().click();
+		flushSync();
+		expect(getSelection()).toEqual({ kind: 'element', id: 'ghost' });
+		await settle();
+		flushSync();
+		expect(document.body.textContent).toContain('Selection not found');
 	} finally {
 		unmount(component);
 	}

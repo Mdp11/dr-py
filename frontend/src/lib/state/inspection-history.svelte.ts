@@ -37,6 +37,13 @@ export function pushVisit(id: string): void {
 	_cursor = _stack.length - 1;
 }
 
+// Deselecting (select(null)) does NOT move the cursor: a deselect is not a
+// navigation. Consequence: the cursor stays parked on the last-selected entry,
+// which is no longer the current selection, so with a one-entry stack Back is
+// disabled (_cursor > 0 is false) and that entry is unreachable until
+// something else is visited; with a longer stack it takes Back-then-Forward
+// to get back to it. Accepted as browser semantics; revisit only as an
+// explicit design change, not a bug fix.
 export function canGoBack(): boolean {
 	return _cursor > 0;
 }
@@ -64,7 +71,17 @@ export function goForward(): void {
 	if (canGoForward()) navigateTo(_cursor + 1);
 }
 
-export function goToVisit(index: number): void {
+/**
+ * Jump to an absolute stack index. `expectedId`, when given, guards against a
+ * STALE index: a caller (the history dropdown) snapshots absolute indices
+ * when the menu opens, but a `pushVisit` landing while the menu is still open
+ * (e.g. a programmatic `select()` from applyDelta's selection re-point) can
+ * truncate the forward stack or shift every index by one at the 50 cap. If
+ * `_stack[index]` no longer holds the id the caller expects, this is a no-op
+ * rather than navigating to whatever now happens to sit at that index.
+ */
+export function goToVisit(index: number, expectedId?: string): void {
+	if (expectedId !== undefined && _stack[index]?.id !== expectedId) return;
 	navigateTo(index);
 }
 

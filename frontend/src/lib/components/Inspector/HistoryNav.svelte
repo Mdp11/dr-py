@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { ChevronLeft, ChevronRight } from '@lucide/svelte';
 
+	import type { Element } from '$lib/api/types';
 	import { buttonVariants } from '$lib/components/ui/button';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import {
@@ -8,7 +9,8 @@
 		canGoBack,
 		canGoForward,
 		forwardEntries,
-		getTreeElements,
+		getCachedElements,
+		getCachedTreeItems,
 		goBack,
 		goForward,
 		goToVisit,
@@ -29,15 +31,29 @@
 	let backRows: Row[] = $state([]);
 	let forwardRows: Row[] = $state([]);
 
+	// O(1) per-id lookup instead of getTreeElements(), which allocates a fresh
+	// Map + a synthetic Element per tree row on every call — wasteful for a
+	// menu that only ever needs <=10 ids, right before it paints, against a
+	// model that can be ~80MB. Reproduces getTreeElements()'s exact precedence
+	// (full `_elements` entry wins; otherwise synthesize a minimal Element from
+	// the lite `_treeItems` row, same shape it uses) for a single id.
+	function lookupElement(id: string): Element | undefined {
+		const full = getCachedElements().get(id);
+		if (full !== undefined) return full;
+		const t = getCachedTreeItems().get(id);
+		if (t === undefined) return undefined;
+		const properties = t.display_name && t.display_name !== id ? { name: t.display_name } : {};
+		return { id, type_name: t.type_name, properties, rev: 0 };
+	}
+
 	// Rows are resolved ONCE, when the menu opens (not in $derived: the
 	// noteResolved write-back mutates $state, which a derived must not do).
 	// Resolution order: staged rename > lite/full cache > the entry's
 	// last-known label > bare id — so a later-deleted element keeps showing
 	// its last-known name.
 	function resolveRows(entries: VisitMenuEntry[]): Row[] {
-		const cache = getTreeElements();
 		return entries.map(({ index, entry }) => {
-			const el = cache.get(entry.id);
+			const el = lookupElement(entry.id);
 			const staged = getStagedNameOverride(entry.id);
 			const liveName = staged ?? (el ? elementDisplayName(el) : undefined);
 			const liveType = el?.type_name;
@@ -70,10 +86,10 @@
 	<DropdownMenu.Item
 		data-testid={`inspector-history-entry-${row.index}`}
 		class="flex flex-col items-start gap-0.5"
-		onclick={() => goToVisit(row.index)}
+		onclick={() => goToVisit(row.index, row.id)}
 	>
 		<span class="flex w-full items-baseline gap-2">
-			<span class="min-w-0 truncate">{row.name}</span>
+			<span data-testid="inspector-history-entry-name" class="min-w-0 truncate">{row.name}</span>
 			{#if row.type_name}
 				<span class="ml-auto shrink-0 text-xs text-muted-foreground">{row.type_name}</span>
 			{/if}
