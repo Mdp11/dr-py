@@ -18,12 +18,14 @@
 		columnIndex,
 		columns,
 		rowSource,
+		tabId,
 		onChange
 	}: {
 		column: ScriptColumn;
 		columnIndex: number;
 		columns: Column[];
 		rowSource: RowSource;
+		tabId: string;
 		onChange: (next: ScriptColumn) => void;
 	} = $props();
 
@@ -50,6 +52,7 @@
 	<SnippetSourceEditor
 		snippet={column.snippet}
 		entry="value"
+		collapseKey={`${tabId}::col:${columnIndex}`}
 		onChange={(s) => onChange({ ...column, snippet: s })}
 	/>
 	<div class="flex flex-wrap items-center gap-2">

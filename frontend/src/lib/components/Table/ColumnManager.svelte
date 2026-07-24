@@ -309,6 +309,7 @@
 								columnIndex={i}
 								columns={defn.columns}
 								rowSource={defn.row_source}
+								{tabId}
 								onChange={(next) => onColumnChange(i, next)}
 							/>
 						{/if}

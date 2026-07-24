@@ -7,9 +7,10 @@
 // keep_empty), not SnippetSourceEditor's internals (covered by its own
 // suite).
 import { flushSync, mount, unmount } from 'svelte';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Column } from '$lib/api/types';
+import { resetSnippetCollapse } from '$lib/state';
 import ScriptColumnEditor from '../ScriptColumnEditor.svelte';
 
 type ScriptColumn = Extract<Column, { kind: 'script' }>;
@@ -45,6 +46,7 @@ function render(column: ScriptColumn, onChange: (next: ScriptColumn) => void) {
 				column
 			],
 			rowSource: { kind: 'scope', types: ['Block'], criteria: [] },
+			tabId: 'tbl:draft:sce',
 			onChange
 		}
 	});
@@ -58,9 +60,20 @@ function click(el: Element | null): void {
 	flushSync();
 }
 
+function expandSnippet(root: ParentNode = document): void {
+	const t = root.querySelector('[data-testid="snippet-collapse-toggle"]') as HTMLButtonElement;
+	t.click();
+	flushSync();
+}
+
+beforeEach(() => {
+	resetSnippetCollapse();
+});
+
 afterEach(() => {
 	document.body.innerHTML = '';
 	vi.restoreAllMocks();
+	resetSnippetCollapse();
 });
 
 describe('ScriptColumnEditor', () => {
@@ -80,6 +93,7 @@ describe('ScriptColumnEditor', () => {
 		const original = scriptColumn();
 		const c = render(original, onChange);
 		try {
+			expandSnippet();
 			click(document.querySelector('[data-testid="snippet-mode-inline"]'));
 			expect(onChange).toHaveBeenCalledTimes(1);
 			const next = onChange.mock.calls[0][0] as ScriptColumn;
@@ -137,6 +151,59 @@ describe('ScriptColumnEditor', () => {
 			expect(next.keep_empty).toBe(false);
 			expect(next.mode).toBe(original.mode);
 			expect(original.keep_empty).toBe(true);
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('renders the snippet editor collapsed by default with a summary line', () => {
+		const c = render(
+			scriptColumn({
+				snippet: {
+					definition: {
+						schema_version: 1,
+						language: 'python',
+						code: 'def value(elements):\n    return 1',
+						entry_points: []
+					}
+				}
+			}),
+			vi.fn()
+		);
+		try {
+			const toggle = document.querySelector('[data-testid="snippet-collapse-toggle"]');
+			expect(toggle?.getAttribute('aria-expanded')).toBe('false');
+			expect(document.querySelector('[data-testid="snippet-mode-inline"]')).toBeNull();
+			const summary = document.querySelector('[data-testid="snippet-collapse-summary"]');
+			expect(summary?.textContent).toContain('value()');
+			expect(summary?.textContent).toContain('def value(elements):');
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('expanding reveals the full editor', () => {
+		const c = render(
+			scriptColumn({
+				snippet: {
+					definition: {
+						schema_version: 1,
+						language: 'python',
+						code: 'def value(elements):\n    return 1',
+						entry_points: []
+					}
+				}
+			}),
+			vi.fn()
+		);
+		try {
+			expandSnippet();
+			expect(
+				document
+					.querySelector('[data-testid="snippet-collapse-toggle"]')
+					?.getAttribute('aria-expanded')
+			).toBe('true');
+			expect(document.querySelector('[data-testid="snippet-mode-inline"]')).not.toBeNull();
 		} finally {
 			unmount(c);
 		}

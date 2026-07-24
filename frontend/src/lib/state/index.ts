@@ -359,3 +359,8 @@ export {
 	type StagedElementRow,
 	type StagedRowStatus
 } from './staged-rows';
+export {
+	isSnippetExpanded,
+	setSnippetExpanded,
+	resetSnippetCollapse
+} from './snippet-collapse.svelte';

@@ -13,10 +13,11 @@
 	type Props = {
 		step: NavScriptStep;
 		index: number;
+		collapseKey: string;
 		onChange: (index: number, next: NavScriptStep) => void;
 		onRemove: (index: number) => void;
 	};
-	let { step, index, onChange, onRemove }: Props = $props();
+	let { step, index, collapseKey, onChange, onRemove }: Props = $props();
 
 	function patch(next: Partial<NavScriptStep>): void {
 		onChange(index, { ...step, ...next });
@@ -93,6 +94,7 @@
 		<SnippetSourceEditor
 			snippet={step.snippet}
 			entry="step"
+			{collapseKey}
 			onChange={(s) => patch({ snippet: s })}
 		/>
 	</div>
