@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
 	SPLINES,
 	splineAt,
+	cycleAt,
+	shuffled,
 	easeToward,
 	clampMonotonic,
 	phaseSlice,
@@ -20,6 +22,41 @@ describe('open-journey pure helpers', () => {
 		expect(splineAt(19)).toBe(SPLINES[0]);
 		expect(splineAt(20)).toBe(SPLINES[1]);
 		expect(splineAt(-1)).toBe(SPLINES[18]);
+	});
+
+	it('cycleAt wraps over any list, tolerating negatives', () => {
+		const list = ['a', 'b', 'c'];
+		expect(cycleAt(list, 0)).toBe('a');
+		expect(cycleAt(list, 3)).toBe('a');
+		expect(cycleAt(list, 4)).toBe('b');
+		expect(cycleAt(list, -1)).toBe('c');
+	});
+
+	// THE property the whole RNG seam rests on: the forward Fisher-Yates
+	// variant degenerates to identity at rand()===0, which is what lets the
+	// journey tests below keep their verbatim SPLINES[0]/SPLINES[1]
+	// expectations. The conventional backward variant does NOT have this
+	// property (it swaps out[i] with out[0]), so this test is load-bearing.
+	it('shuffled with a zero rand is the identity permutation', () => {
+		expect(shuffled(SPLINES, () => 0)).toEqual([...SPLINES]);
+	});
+
+	it('shuffled returns a permutation and never mutates the input', () => {
+		const before = [...SPLINES];
+		let n = 0;
+		const out = shuffled(SPLINES, () => ((n = (n * 9301 + 49297) % 233280), n / 233280));
+		expect(out).toHaveLength(SPLINES.length);
+		expect([...out].sort()).toEqual([...SPLINES].sort());
+		expect(SPLINES).toEqual(before);
+	});
+
+	// Math.random never returns exactly 1, but setSplineRandom is a public
+	// seam, so a stub that does must not produce an out-of-range index.
+	it('shuffled clamps a rand that returns 1', () => {
+		const out = shuffled(SPLINES, () => 1);
+		expect(out).toHaveLength(SPLINES.length);
+		expect(out.every((s) => typeof s === 'string')).toBe(true);
+		expect([...out].sort()).toEqual([...SPLINES].sort());
 	});
 
 	it('easeToward approaches ceil asymptotically and never exceeds it', () => {

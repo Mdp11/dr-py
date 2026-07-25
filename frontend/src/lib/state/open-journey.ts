@@ -40,10 +40,38 @@ export const SPLINES: readonly string[] = [
 	'Walking the navigation chain so you don’t have to…'
 ];
 
-/** Cycle the splines, wrapping (and tolerating negative indices). */
+/** Wrap `index` over `list`, tolerating negative indices. */
+export function cycleAt(list: readonly string[], index: number): string {
+	const n = list.length;
+	return list[((index % n) + n) % n];
+}
+
+/** Cycle the AUTHORED spline order, wrapping. The journey itself walks a
+ * shuffled order (see `_order`); this stays for callers that want the
+ * canonical sequence. */
 export function splineAt(index: number): string {
-	const n = SPLINES.length;
-	return SPLINES[((index % n) + n) % n];
+	return cycleAt(SPLINES, index);
+}
+
+/** Fisher-Yates, FORWARD variant: `j` is drawn from `[i, n)` rather than
+ * `[0, i]`.
+ *
+ * The direction is load-bearing, not stylistic. With `rand = () => 0` every
+ * `j` equals `i`, so this returns the identity permutation — which is what
+ * makes the RNG seam testable: a test installs a zero rand and the journey's
+ * label sequence is exactly `SPLINES` again. The conventional backward
+ * variant swaps `out[i]` with `out[0]` at every step and does NOT degenerate
+ * to identity, so it could not carry that guarantee.
+ *
+ * The `Math.min` clamp guards a stub `rand` that returns exactly 1 —
+ * `Math.random` never does, but `setSplineRandom` is public. */
+export function shuffled(items: readonly string[], rand: () => number): string[] {
+	const out = [...items];
+	for (let i = 0; i < out.length - 1; i++) {
+		const j = Math.min(out.length - 1, i + Math.floor(rand() * (out.length - i)));
+		[out[i], out[j]] = [out[j], out[i]];
+	}
+	return out;
 }
 
 /** Asymptotic creep toward `ceil` for phases with no real fraction. */
