@@ -354,26 +354,6 @@ def _row_source_base_slots(defn: TableDefinition, base_keys: list[RowKey]) -> in
     return len(base_keys[0]) if base_keys else 1
 
 
-def base_slot_count(defn: TableDefinition, row_keys: list[RowKey]) -> int:
-    """Number of ROW-SOURCE slots at the head of a FULLY BUILT row key.
-
-    `_row_source_base_slots` answers the same question from the PRE-expand
-    base keys; callers downstream of `build_rows` (the exporters) only hold
-    the post-expand keys, where the count is `len(key)` minus one slot per
-    expand column. Both assume every chain of a chains row source has the
-    same length, which is the assumption `_row_source_base_slots` already
-    makes when it reads `len(base_keys[0])`.
-    """
-    if defn.row_source.kind != "chains":
-        return 1
-    if not row_keys:
-        return 1
-    expands = sum(
-        1 for c in defn.columns if getattr(c, "mode", "collapse") == "expand"
-    )
-    return len(row_keys[0]) - expands
-
-
 @dataclass(frozen=True)
 class RowBuild:
     keys: list[RowKey]
@@ -383,6 +363,15 @@ class RowBuild:
     #: the scope size. The UI shows it next to `len(keys)` so a split table
     #: reads "N elements -> M rows".
     base_total: int
+    #: Row-source slot count at the head of every key in `keys` — the
+    #: `_row_source_base_slots` answer, carried through rather than
+    #: reconstructed from a built key's length. It CANNOT be reconstructed
+    #: post-hoc by subtracting "number of expand columns in `defn`": when
+    #: `max_rows` caps the build mid-column, later expand columns never run
+    #: and never append their slot, so a formula that subtracts one slot per
+    #: DECLARED expand column overcounts and returns a wrong (too-small, even
+    #: negative) answer on exactly the truncated path a real export can hit.
+    base_slots: int
 
 
 def build_rows(
@@ -477,7 +466,9 @@ def build_rows_ex(
     if len(keys) > limits.max_rows:
         keys = keys[: limits.max_rows]
         truncated = True
-    return RowBuild(keys=keys, truncated=truncated, base_total=base_total)
+    return RowBuild(
+        keys=keys, truncated=truncated, base_total=base_total, base_slots=base_slots
+    )
 
 
 def _collapse_has_value(

@@ -6,7 +6,12 @@ cells — a hand-rolled cell cannot catch a slot-index mistake."""
 
 import copy
 
-from data_rover.core.metamodel.schema import ElementType, Metamodel, PropertyDef
+from data_rover.core.metamodel.schema import (
+    ElementType,
+    Metamodel,
+    PropertyDef,
+    RelationshipType,
+)
 from data_rover.core.model.model import Model
 from data_rover.core.table.cells import (
     ElementCell,
@@ -16,8 +21,12 @@ from data_rover.core.table.cells import (
     ValueCell,
     ValuesCell,
 )
-from data_rover.core.table.evaluate import base_slot_count
-from data_rover.core.table.json_export import build_group_plan, render_cell, resolve_json_keys
+from data_rover.core.table.evaluate import TableLimits, build_rows_ex
+from data_rover.core.table.json_export import (
+    build_group_plan,
+    render_cell,
+    resolve_json_keys,
+)
 from data_rover.core.table.schema import TABLE_ADAPTER
 
 
@@ -90,7 +99,9 @@ def test_json_export_available_on_every_column_kind():
 
 def _cols(*specs):
     """One `_defn` per test with N element columns described by dicts."""
-    return _defn(columns=[{"kind": "element", "source": {"kind": "row"}, **s} for s in specs])
+    return _defn(
+        columns=[{"kind": "element", "source": {"kind": "row"}, **s} for s in specs]
+    )
 
 
 def test_keys_default_to_the_header():
@@ -109,12 +120,16 @@ def test_blank_header_falls_back_to_kind_and_index():
 
 
 def test_duplicate_keys_are_suffixed_first_one_wins():
-    keys = resolve_json_keys(_cols({"header": "Mass"}, {"header": "Mass"}, {"header": "Mass"}))
+    keys = resolve_json_keys(
+        _cols({"header": "Mass"}, {"header": "Mass"}, {"header": "Mass"})
+    )
     assert keys == ["Mass", "Mass_2", "Mass_3"]
 
 
 def test_a_suffix_that_would_itself_collide_keeps_counting():
-    keys = resolve_json_keys(_cols({"header": "Mass"}, {"header": "Mass_2"}, {"header": "Mass"}))
+    keys = resolve_json_keys(
+        _cols({"header": "Mass"}, {"header": "Mass_2"}, {"header": "Mass"})
+    )
     assert keys == ["Mass", "Mass_2", "Mass_3"]
 
 
@@ -128,7 +143,9 @@ def test_hidden_columns_get_no_key_and_do_not_consume_a_name():
 def _one_element_model() -> tuple[Model, str]:
     mm = Metamodel(
         elements=[
-            ElementType(name="Block", properties=[PropertyDef(name="name", datatype="string")])
+            ElementType(
+                name="Block", properties=[PropertyDef(name="name", datatype="string")]
+            )
         ]
     )
     model = Model(mm)
@@ -139,7 +156,14 @@ def _one_element_model() -> tuple[Model, str]:
 
 def test_value_cell_absent_property_is_null():
     model, _ = _one_element_model()
-    assert render_cell(model, ValueCell(present=False, value=None, element_id=None, editable=False), "name") is None
+    assert (
+        render_cell(
+            model,
+            ValueCell(present=False, value=None, element_id=None, editable=False),
+            "name",
+        )
+        is None
+    )
 
 
 def test_value_cell_passes_native_types_through():
@@ -179,8 +203,15 @@ def test_empty_element_cell_is_null():
 
 def test_elements_cell_is_a_list_and_empty_is_a_list():
     model, eid = _one_element_model()
-    assert render_cell(model, ElementsCell(element_ids=[eid], total=1, truncated=False), "name") == ["Root"]
-    assert render_cell(model, ElementsCell(element_ids=[], total=0, truncated=False), "name") == []
+    assert render_cell(
+        model, ElementsCell(element_ids=[eid], total=1, truncated=False), "name"
+    ) == ["Root"]
+    assert (
+        render_cell(
+            model, ElementsCell(element_ids=[], total=0, truncated=False), "name"
+        )
+        == []
+    )
 
 
 def test_error_cell_becomes_an_error_marker():
@@ -215,7 +246,12 @@ def _nav_doc() -> dict:
     return {
         "row_source": {"kind": "scope", "types": ["Block"]},
         "columns": [
-            {"kind": "property", "source": {"kind": "row"}, "name": "name", "header": "Name"},
+            {
+                "kind": "property",
+                "source": {"kind": "row"},
+                "name": "name",
+                "header": "Name",
+            },
             {
                 "kind": "navigation",
                 "source": {"kind": "row"},
@@ -241,8 +277,149 @@ def _validated(doc: dict, **column_patches: dict):
     return TABLE_ADAPTER.validate_python(doc)
 
 
-def test_base_slot_count_is_one_for_a_scope_source():
-    assert base_slot_count(_validated(_nav_doc()), [("a", "b")]) == 1
+def _chain_mm() -> Metamodel:
+    return Metamodel(
+        elements=[
+            ElementType(
+                name="Block", properties=[PropertyDef(name="name", datatype="string")]
+            )
+        ],
+        relationships=[
+            RelationshipType(name="BlockHasPart", source="Block", target="Block")
+        ],
+    )
+
+
+def _chain_fixture(model: Model) -> dict[str, str]:
+    """root: a Block owning 3 parts, each a leaf Block."""
+    ids: dict[str, str] = {}
+    for key, name in [
+        ("root", "Root"),
+        ("part1", "P1"),
+        ("part2", "P2"),
+        ("part3", "P3"),
+    ]:
+        el = model.create_element("Block")
+        model.set_property(el, "name", name)
+        ids[key] = el.id
+    for part in ("part1", "part2", "part3"):
+        model.connect("BlockHasPart", ids["root"], ids[part])
+    return ids
+
+
+_HAS_PART_STEP = {
+    "kind": "relationship",
+    "relationship_type": "BlockHasPart",
+    "direction": "out",
+}
+
+
+def test_build_rows_ex_base_slots_is_one_for_a_scope_source():
+    mm = _chain_mm()
+    model = Model(mm)
+    _chain_fixture(model)
+    defn = TABLE_ADAPTER.validate_python(
+        {
+            "row_source": {"kind": "scope", "types": ["Block"]},
+            "columns": [{"kind": "element", "source": {"kind": "row"}}],
+        }
+    )
+    assert build_rows_ex(mm, model, defn).base_slots == 1
+
+
+def test_build_rows_ex_base_slots_is_the_chain_length_not_the_key_length():
+    # chains of length 2 (root, part); one expand column adds a THIRD slot, so
+    # a base_slots that just echoed len(key) would wrongly read 3.
+    mm = _chain_mm()
+    model = Model(mm)
+    _chain_fixture(model)
+    defn = TABLE_ADAPTER.validate_python(
+        {
+            "row_source": {
+                "kind": "chains",
+                "navigation": {
+                    "definition": {
+                        "kind": "path",
+                        "start": {"kind": "scope", "types": ["Block"]},
+                        "steps": [_HAS_PART_STEP],
+                    }
+                },
+            },
+            "columns": [
+                {
+                    "kind": "navigation",
+                    "source": {"kind": "row", "chain_index": 0},
+                    "mode": "expand",
+                    "navigation": {
+                        "definition": {
+                            "kind": "path",
+                            "start": {"kind": "row"},
+                            "steps": [_HAS_PART_STEP],
+                        }
+                    },
+                },
+            ],
+        }
+    )
+    result = build_rows_ex(mm, model, defn)
+    assert result.base_slots == 2
+    assert result.keys and all(len(k) == 3 for k in result.keys)
+
+
+def test_build_rows_ex_base_slots_survives_a_capped_build():
+    # Two expand columns; max_rows is small enough that the cap trips inside
+    # the FIRST one, so the loop breaks before the second ever runs (see
+    # `build_rows_ex`'s `if capped: break`). Every built key therefore has
+    # base_slots(2) + 1 slot, never base_slots(2) + 2 — and `base_slots`
+    # itself, carried from the pre-expand count rather than reconstructed,
+    # must still read 2 despite the truncation.
+    mm = _chain_mm()
+    model = Model(mm)
+    _chain_fixture(model)
+    defn = TABLE_ADAPTER.validate_python(
+        {
+            "row_source": {
+                "kind": "chains",
+                "navigation": {
+                    "definition": {
+                        "kind": "path",
+                        "start": {"kind": "scope", "types": ["Block"]},
+                        "steps": [_HAS_PART_STEP],
+                    }
+                },
+            },
+            "columns": [
+                {
+                    "kind": "navigation",
+                    "source": {"kind": "row", "chain_index": 0},
+                    "mode": "expand",
+                    "navigation": {
+                        "definition": {
+                            "kind": "path",
+                            "start": {"kind": "row"},
+                            "steps": [_HAS_PART_STEP],
+                        }
+                    },
+                },
+                {
+                    "kind": "navigation",
+                    "source": {"kind": "row", "chain_index": 1},
+                    "mode": "expand",
+                    "navigation": {
+                        "definition": {
+                            "kind": "path",
+                            "start": {"kind": "row"},
+                            "steps": [_HAS_PART_STEP],
+                        }
+                    },
+                },
+            ],
+        }
+    )
+    result = build_rows_ex(mm, model, defn, TableLimits(max_rows=2))
+    assert result.truncated is True
+    assert result.base_slots == 2
+    assert result.keys and all(len(k) == 3 for k in result.keys)
 
 
 def test_no_grouping_means_every_column_is_top_level():
@@ -258,9 +435,9 @@ def test_grouping_pulls_dependents_into_the_group():
     assert plan.grouped == (1,)
     assert plan.top_columns == (0,)
     assert plan.top_groups == (1,)
-    assert plan.members[1] == (1, 2)   # the grouped column itself, then its dependent
+    assert plan.members[1] == (1, 2)  # the grouped column itself, then its dependent
     assert plan.children[1] == ()
-    assert plan.slot_of[1] == 1        # base slot 0, then the first expand column
+    assert plan.slot_of[1] == 1  # base slot 0, then the first expand column
 
 
 def test_group_flag_is_ignored_on_a_collapse_column():
@@ -281,7 +458,12 @@ def test_nested_groups_nest_by_dependency():
     doc = {
         "row_source": {"kind": "scope", "types": ["Block"]},
         "columns": [
-            {"kind": "property", "source": {"kind": "row"}, "name": "name", "header": "Name"},
+            {
+                "kind": "property",
+                "source": {"kind": "row"},
+                "name": "name",
+                "header": "Name",
+            },
             {
                 "kind": "navigation",
                 "source": {"kind": "row"},
