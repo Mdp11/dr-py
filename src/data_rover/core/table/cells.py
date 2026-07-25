@@ -108,6 +108,13 @@ class PendingCell:
     failed-sweep path (a completed sweep leaves no pending cells)."""
 
 
+#: Wire message for a cell that is still `pending` after a TERMINAL sweep.
+#: Deliberately the same wording `api/table_export.py` renders into a degraded
+#: workbook cell (`#ERROR: not computed`) and `json_export.py` puts in a
+#: `$error` marker, so every surface agrees. Lives HERE, beside `PendingCell`,
+#: because core cannot import from the API layer where it used to sit.
+NOT_COMPUTED_MESSAGE = "not computed"
+
 Cell = ElementCell | ValueCell | ValuesCell | ElementsCell | ErrorCell | PendingCell
 
 

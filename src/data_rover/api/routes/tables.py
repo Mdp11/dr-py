@@ -20,6 +20,7 @@ from data_rover.core.script.runner import ScriptRunner
 from data_rover.core.script.schema import SNIPPET_ADAPTER, SnippetDefinition
 from data_rover.core.script.warnings import ScriptWarningCode
 from data_rover.core.table.cells import (
+    NOT_COMPUTED_MESSAGE,
     Cell,
     ElementCell,
     ElementsCell,
@@ -794,11 +795,6 @@ def export_table(
 #: as a module global at call time (never captured in a default argument) so a
 #: test can lower it.
 SCRIPT_ERRORS_CAP = 200
-
-#: Wire message for a cell that is still `pending` after a TERMINAL sweep.
-#: Deliberately the same wording `table_export.py` renders into a degraded
-#: workbook cell (`#ERROR: not computed`), so the two surfaces agree.
-NOT_COMPUTED_MESSAGE = "not computed"
 
 
 def _collect_script_errors(
