@@ -510,8 +510,13 @@ def export_table(
 ) -> Response:
     """Read-only (viewer-callable; listed in authz._READ_ONLY_POST_SUFFIXES).
     Exports the WHOLE table (every row `build_rows`/`order_rows` produce,
-    honoring `max_rows` and the requested sort) as a single-sheet `.xlsx` —
-    unlike `/tables/evaluate`, there is no `offset`/`limit` windowing here.
+    honoring `max_rows` and the requested sort) — unlike `/tables/evaluate`,
+    there is no `offset`/`limit` windowing here. `payload.format` picks the
+    shape: `"xlsx"` (default) ships a single-sheet
+    `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`
+    workbook via `build_workbook`; `"json"` ships `application/json` via
+    `render_json`, one object per (possibly grouped) row — see
+    `core/table/json_export.py` for the grouping rules.
 
     Cells are evaluated with `max_cell_elements` overridden to effectively
     unbounded (10**9): the interactive page route caps a navigation cell's
@@ -533,9 +538,15 @@ def export_table(
     RE-PROBING the cache after the kick/join (decision table at the call site):
     a finished sweep does not imply a complete cache, so "would a retry help"
     — not "is the job over" — is the discriminator. When it would not (a
-    terminal sweep that still left holes, or no runner at all) the file ships
-    with pending cells as `#ERROR`, flagged by `X-Table-Script-Errors` and a
-    trailing notice row."""
+    terminal sweep that still left holes, or no runner at all) the file still
+    ships with pending cells surfaced — but the two formats carry that
+    differently. The `.xlsx` branch renders each affected cell `#ERROR` and
+    appends a trailing notice row; the `.json` branch has no sheet and no
+    notice row to append, so it marks each affected cell in-band with a
+    `{"$error": ...}` object instead (see `render_cell` in
+    `core/table/json_export.py`). Both branches still set the
+    `X-Table-Script-Errors` response header when this happens, so a
+    programmatic client can detect degradation without parsing the body."""
     metamodel, model = require_model(session)
     script_ctx = None
     acquired = False
@@ -828,10 +839,18 @@ def json_preview(
     if they exported right now.
 
     The final top-level object is DROPPED when the window did not cover the
-    whole table: grouping merges rows, so the last group is likely cut
-    mid-way, while every earlier one is complete. Dropping it would leave the
-    pane blank for a single group wider than the window, so in that one case
-    the (approximate) object is kept and `truncated` says so.
+    whole table — a cheap heuristic, not a completeness guarantee. Grouping
+    merges rows by key through a dict (see `render_json`), and a sort can
+    scatter one group's rows across `ordered` so they are not contiguous;
+    dropping only the last object assumes contiguity and catches just the
+    common case where a sort keeps a group's rows together. When rows ARE
+    scattered, an earlier-shown group can be truncated too — its window-cut
+    array will look complete but be missing members that fall past
+    `PREVIEW_MAX_ROWS`. So: when `truncated` is true, ANY object in `sample`
+    may be short, not only the last one. Dropping the last object still avoids
+    leaving the pane blank when a single group is wider than the window (the
+    lone remaining object is then itself approximate), so it is kept despite
+    not being a guarantee.
     """
     metamodel, model = require_model(session)
     script_ctx = None

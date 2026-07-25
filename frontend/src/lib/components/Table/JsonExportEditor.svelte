@@ -162,7 +162,7 @@
 				<span class="text-xs text-muted-foreground">Preview</span>
 				{#if truncated}
 					<span data-testid="json-preview-truncated" class="text-[11px] text-muted-foreground/70">
-						first rows only
+						sample only — groups may be incomplete
 					</span>
 				{/if}
 			</div>

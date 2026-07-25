@@ -13,7 +13,16 @@ import type { ScriptWarning } from '$lib/api/types';
 // it) talks to `POST /tables/json-preview` directly via `$lib/api/tables`,
 // not through the `$lib/state` barrel mocked below — stub it so switching to
 // that tab in the tab-strip test below never fires a real network call.
-vi.mock('$lib/api/tables', () => ({
+// Spread the real module rather than replacing it wholesale: this file is
+// safe today only because `$lib/state` is ALSO fully mocked below, so
+// `state/table-editor.svelte.ts` (which imports `evaluateTable`/
+// `exportTable`/`fetchScriptErrors` from this same module) never loads. If
+// the `$lib/state` mock is ever switched to `importActual`, a wholesale
+// replacement here would die at module-eval with "No 'evaluateTable' export
+// is defined on the mock" — spreading the actual exports keeps this mock
+// correct independent of that.
+vi.mock('$lib/api/tables', async () => ({
+	...(await vi.importActual('$lib/api/tables')),
 	previewTableJson: vi.fn().mockResolvedValue({ sample: '[]', truncated: false })
 }));
 // The whole `$lib/state` barrel is mocked below (`downloadTable: vi.fn(...)`)
@@ -1082,7 +1091,7 @@ describe('TableView settings dialog tab strip', () => {
 			const columnsTab = document.querySelector(
 				'[data-testid="settings-tab-columns"]'
 			) as HTMLElement;
-			expect(columnsTab.getAttribute('aria-selected')).toBe('true');
+			expect(columnsTab.getAttribute('aria-pressed')).toBe('true');
 			expect(document.querySelector('[data-testid="column-manager"]')).not.toBeNull();
 
 			(document.querySelector('[data-testid="settings-tab-json"]') as HTMLElement).click();

@@ -588,23 +588,21 @@
 				<Dialog.Title class="font-display text-lg font-light tracking-wide">
 					{settingsFocus === null ? 'Table settings' : 'Column settings'}
 				</Dialog.Title>
-				<div role="tablist" class="flex shrink-0 items-center gap-1 border-b border-border pb-1">
+				<div class="flex shrink-0 items-center gap-1 border-b border-border pb-1">
 					<button
 						type="button"
-						role="tab"
 						data-testid="settings-tab-columns"
-						aria-selected={settingsTab === 'columns'}
-						class="rounded px-2 py-1 text-xs transition-colors aria-selected:bg-muted aria-selected:text-foreground text-muted-foreground hover:bg-muted/60"
+						aria-pressed={settingsTab === 'columns'}
+						class="rounded px-2 py-1 text-xs transition-colors aria-pressed:bg-muted aria-pressed:text-foreground text-muted-foreground hover:bg-muted/60"
 						onclick={() => (settingsTab = 'columns')}
 					>
 						Columns
 					</button>
 					<button
 						type="button"
-						role="tab"
 						data-testid="settings-tab-json"
-						aria-selected={settingsTab === 'json'}
-						class="rounded px-2 py-1 text-xs transition-colors aria-selected:bg-muted aria-selected:text-foreground text-muted-foreground hover:bg-muted/60"
+						aria-pressed={settingsTab === 'json'}
+						class="rounded px-2 py-1 text-xs transition-colors aria-pressed:bg-muted aria-pressed:text-foreground text-muted-foreground hover:bg-muted/60"
 						onclick={() => (settingsTab = 'json')}
 					>
 						JSON export

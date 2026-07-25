@@ -174,6 +174,20 @@ def test_value_cell_passes_native_types_through():
     assert render_cell(model, cell, "name") == 12
 
 
+def test_value_cell_passes_falsy_but_present_values_through():
+    # `render_cell` reads `None if not cell.present else cell.value` -- a
+    # regression to `cell.value or None` would still pass every other test
+    # in this file (they all use truthy values) while silently exporting a
+    # real `0`/`""`/`False` as `null`. Pin each falsy-but-present value to
+    # itself, not to `None`.
+    model, _ = _one_element_model()
+    for value in (0, "", False):
+        cell = ValueCell(present=True, value=value, element_id=None, editable=False)
+        rendered = render_cell(model, cell, "name")
+        assert rendered == value
+        assert rendered is not None
+
+
 def test_value_cell_declared_but_unset_is_null():
     model, _ = _one_element_model()
     cell = ValueCell(present=True, value=None, element_id=None, editable=False)
@@ -422,6 +436,77 @@ def test_build_rows_ex_base_slots_survives_a_capped_build():
     assert result.truncated is True
     assert result.base_slots == 2
     assert result.keys and all(len(k) == 3 for k in result.keys)
+
+
+def test_grouping_works_with_a_chains_row_source():
+    """The one shape where `base_slots != 1`: a `chains` row source combined
+    with grouping. This is exactly the case the deleted `base_slot_count`
+    formula got wrong, yet no other grouping test exercises it -- they all
+    use a `scope` row source, where `base_slots` is always 1 and a hardcoded
+    `1` would silently pass.
+
+    Reuses the fixture from the `base_slots` tests above: root owning 3
+    parts, chains of (root, part_i). The expand column here hops from the
+    chain's root slot (chain_index 0) back out over `BlockHasPart`, so its
+    own key slot sits AFTER the two chain slots (`_expand_slot_of` = base_slots
+    + 0 = 2) -- grouping must key off the (root, part_i) base slots, not off
+    its own slot, or every row would collapse into one group instead of
+    three.
+    """
+    mm = _chain_mm()
+    model = Model(mm)
+    _chain_fixture(model)
+    defn = TABLE_ADAPTER.validate_python(
+        {
+            "row_source": {
+                "kind": "chains",
+                "navigation": {
+                    "definition": {
+                        "kind": "path",
+                        "start": {"kind": "scope", "types": ["Block"]},
+                        "steps": [_HAS_PART_STEP],
+                    }
+                },
+            },
+            "columns": [
+                {
+                    "kind": "property",
+                    "source": {"kind": "row", "chain_index": 1},
+                    "name": "name",
+                    "header": "Part",
+                },
+                {
+                    "kind": "navigation",
+                    "source": {"kind": "row", "chain_index": 0},
+                    "mode": "expand",
+                    "navigation": {
+                        "definition": {
+                            "kind": "path",
+                            "start": {"kind": "row"},
+                            "steps": [_HAS_PART_STEP],
+                        }
+                    },
+                    "header": "Sibling",
+                    "json_export": {"group": True},
+                },
+            ],
+        }
+    )
+    build = build_rows_ex(mm, model, defn)
+    docs = render_json(
+        model,
+        defn,
+        build.keys,
+        iter_export_rows(mm, model, defn, build.keys),
+        build.base_slots,
+    )
+    # Three base chains -- (root, P1), (root, P2), (root, P3) -- each grouping
+    # the sibling expand into the full [P1, P2, P3] set, keyed by the base
+    # (root, part_i) slots rather than by the grouped column's own slot.
+    assert len(docs) == 3
+    assert {d["Part"] for d in docs} == {"P1", "P2", "P3"}
+    for d in docs:
+        assert d["Sibling"] == ["P1", "P2", "P3"]
 
 
 def test_no_grouping_means_every_column_is_top_level():
