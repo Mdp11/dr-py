@@ -4,6 +4,7 @@ list per session. No write_mutex — same benign-race stance as routes/read.py."
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -34,12 +35,12 @@ from data_rover.core.table.evaluate import (
     RowKey,
     SortSpec,
     TableLimits,
-    build_rows,
     build_rows_ex,
     iter_export_rows,
     order_rows,
     sort_falls_back_to_build_order,
 )
+from data_rover.core.table.json_export import render_json
 from data_rover.core.table.resolve import resolve_table_refs, table_has_script
 from data_rover.core.table.schema import TABLE_ADAPTER, TableDefinition
 
@@ -49,6 +50,7 @@ from ..db_models import ArtifactKind
 from ..deps import Session, get_request_session, require_model
 from ..schemas import (
     EvaluateTableIn,
+    ExportTableIn,
     ScriptErrorItemOut,
     ScriptErrorsOut,
     ScriptStatusOut,
@@ -498,7 +500,7 @@ def evaluate_table(
 
 @router.post("/tables/export")
 def export_table(
-    payload: EvaluateTableIn,
+    payload: ExportTableIn,
     project_id: str,
     session: Session = Depends(get_request_session),
     db: DbSession = Depends(get_db),
@@ -566,7 +568,8 @@ def export_table(
         # and deliberately never cleared.
         if script_ctx is not None:
             script_ctx.cache_only = True
-        keys, truncated = build_rows(metamodel, model, defn, limits, script=script_ctx)
+        build = build_rows_ex(metamodel, model, defn, limits, script=script_ctx)
+        keys, truncated = build.keys, build.truncated
         ordered = order_rows(
             metamodel, model, defn, keys, sort, limits, script=script_ctx
         )
@@ -760,26 +763,36 @@ def export_table(
                 )
             return None
 
-        blob = build_workbook(
-            model,
-            headers,
-            name,
-            ([row[i] for i in visible] for row in all_rows),
-            notice_provider=_notice,
-            row_numbers=defn.show_row_numbers,
-        )
-        resp_headers = {"Content-Disposition": f'attachment; filename="{name}.xlsx"'}
+        if payload.format == "json":
+            # `render_json` indexes cells by DEFINITION column index, so it
+            # gets the UNFILTERED rows — hidden columns are dropped inside it
+            # by their `None` key, not by pre-slicing the row like the xlsx
+            # path does.
+            docs = render_json(model, defn, ordered, all_rows, build.base_slots)
+            blob = json.dumps(docs, ensure_ascii=False, indent=2).encode("utf-8")
+            media_type = "application/json"
+            filename = f"{name}.json"
+            # No JSON analogue of the xlsx trailing notice row: the `$error`
+            # markers are in-band and the header below carries the summary.
+        else:
+            blob = build_workbook(
+                model,
+                headers,
+                name,
+                ([row[i] for i in visible] for row in all_rows),
+                notice_provider=_notice,
+                row_numbers=defn.show_row_numbers,
+            )
+            media_type = (
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+            filename = f"{name}.xlsx"
+        resp_headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
         if truncated:
             resp_headers["X-Table-Truncated"] = "true"
-        if _degraded():  # settled: `build_workbook` has consumed every row
+        if _degraded():  # settled: every row has been consumed by now
             resp_headers["X-Table-Script-Errors"] = "true"
-        return Response(
-            content=blob,
-            media_type=(
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            ),
-            headers=resp_headers,
-        )
+        return Response(content=blob, media_type=media_type, headers=resp_headers)
     except LookupError as exc:
         raise HTTPException(status_code=422, detail=f"unknown artifact {exc}") from exc
     except (NavigationResolveError, ValueError) as exc:

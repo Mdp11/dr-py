@@ -919,6 +919,18 @@ class EvaluateTableIn(BaseModel):
         return self
 
 
+class ExportTableIn(EvaluateTableIn):
+    """`/tables/export`'s payload: `EvaluateTableIn` plus the output format.
+
+    A SUBCLASS rather than a new field on `EvaluateTableIn` so `/tables/evaluate`
+    and `/tables/script-errors` — which have no notion of a format — keep their
+    exact wire contract. `offset`/`limit` are inherited and ignored here: an
+    export is always whole-table.
+    """
+
+    format: Literal["xlsx", "json"] = "xlsx"
+
+
 class TableColumnOut(BaseModel):
     kind: str
     header: str
