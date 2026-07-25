@@ -9,6 +9,13 @@ import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ScriptWarning } from '$lib/api/types';
+// The JSON-export settings tab (mounted once the settings dialog switches to
+// it) talks to `POST /tables/json-preview` directly via `$lib/api/tables`,
+// not through the `$lib/state` barrel mocked below — stub it so switching to
+// that tab in the tab-strip test below never fires a real network call.
+vi.mock('$lib/api/tables', () => ({
+	previewTableJson: vi.fn().mockResolvedValue({ sample: '[]', truncated: false })
+}));
 // The whole `$lib/state` barrel is mocked below (`downloadTable: vi.fn(...)`)
 // — importing the name here resolves to that SAME mock instance, so calls
 // made through TableView's onclick handlers show up on it.
@@ -1032,6 +1039,51 @@ describe('TableView export format menu', () => {
 				'tbl:draft:1',
 				expect.objectContaining({ format: 'xlsx' })
 			);
+		} finally {
+			unmount(c);
+		}
+	});
+});
+
+// Task 11: the settings dialog gained a second tab (JSON export options + a
+// live preview) alongside the existing column editor. Uses this file's own
+// mount/flushSync/unmount + waitFor convention, not the brief's literal
+// `@testing-library/svelte` `render`/`screen`/`fireEvent` snippet — see the
+// file header.
+describe('TableView settings dialog tab strip', () => {
+	afterEach(() => {
+		(h.draft as { definition: { row_source: unknown; columns: unknown[] } }).definition = {
+			row_source: { kind: 'scope', scope: {} },
+			columns: []
+		};
+	});
+
+	it('switches the settings dialog between the columns and json tabs', async () => {
+		// A self-contained, valid scope row source: earlier describe blocks in
+		// this file leave `h.draft` (shared hoisted state) in various shapes for
+		// their own tests, and the unfocused settings path mounts RowSourceEditor
+		// -> ScopeEditor for real, which needs `types`/`criteria` present (see
+		// `seedTwoColumnPage` / `renderWithSettingsOpen` above for the same fix).
+		(h.draft as { definition: { row_source: unknown; columns: unknown[] } }).definition = {
+			row_source: { kind: 'scope', types: [], criteria: [] },
+			columns: []
+		};
+		const c = render('tbl:draft:1');
+		try {
+			(document.querySelector('[data-testid="table-settings-button"]') as HTMLElement).click();
+			flushSync();
+			await waitFor(() => !!document.querySelector('[data-testid="settings-tab-columns"]'));
+			const columnsTab = document.querySelector(
+				'[data-testid="settings-tab-columns"]'
+			) as HTMLElement;
+			expect(columnsTab.getAttribute('aria-selected')).toBe('true');
+			expect(document.querySelector('[data-testid="column-manager"]')).not.toBeNull();
+
+			(document.querySelector('[data-testid="settings-tab-json"]') as HTMLElement).click();
+			flushSync();
+			expect(document.querySelector('[data-testid="json-snake-all"]')).not.toBeNull();
+			// The column editor is gone — only one tab's body renders at a time.
+			expect(document.querySelector('[data-testid="column-manager"]')).toBeNull();
 		} finally {
 			unmount(c);
 		}

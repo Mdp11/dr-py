@@ -41,6 +41,7 @@
 		newScriptColumn
 	} from '$lib/table/columns';
 	import ColumnManager from './ColumnManager.svelte';
+	import JsonExportEditor from './JsonExportEditor.svelte';
 	import ScriptErrorsPanel from './ScriptErrorsPanel.svelte';
 	import ScriptWarningsPanel from './ScriptWarningsPanel.svelte';
 	import TableGrid from './TableGrid.svelte';
@@ -171,6 +172,9 @@
 	// definition editor (row source + every column); a definition index shows
 	// only that column's card (see ColumnManager's focusIndex).
 	let settingsFocus = $state<number | null>(null);
+	// Which settings-dialog tab is showing: the column definition editor, or
+	// the JSON export options + live preview.
+	let settingsTab = $state<'columns' | 'json'>('columns');
 
 	// Set by the Save button just before it closes the dialog, so onOpenChange
 	// can tell "Save" apart from every discard path (Cancel, the X, Escape, an
@@ -231,6 +235,7 @@
 	function openSettings(focus: number | null): void {
 		suspendTableEvaluation(tabId);
 		settingsFocus = focus;
+		settingsTab = 'columns';
 		// Reset HERE, not in onOpenChange's `o === true` branch: every open in
 		// this component goes through this function via a direct `settingsOpen =
 		// true` assignment, never through a `Dialog.Trigger` — and bits-ui's
@@ -583,8 +588,34 @@
 				<Dialog.Title class="font-display text-lg font-light tracking-wide">
 					{settingsFocus === null ? 'Table settings' : 'Column settings'}
 				</Dialog.Title>
+				<div role="tablist" class="flex shrink-0 items-center gap-1 border-b border-border pb-1">
+					<button
+						type="button"
+						role="tab"
+						data-testid="settings-tab-columns"
+						aria-selected={settingsTab === 'columns'}
+						class="rounded px-2 py-1 text-xs transition-colors aria-selected:bg-muted aria-selected:text-foreground text-muted-foreground hover:bg-muted/60"
+						onclick={() => (settingsTab = 'columns')}
+					>
+						Columns
+					</button>
+					<button
+						type="button"
+						role="tab"
+						data-testid="settings-tab-json"
+						aria-selected={settingsTab === 'json'}
+						class="rounded px-2 py-1 text-xs transition-colors aria-selected:bg-muted aria-selected:text-foreground text-muted-foreground hover:bg-muted/60"
+						onclick={() => (settingsTab = 'json')}
+					>
+						JSON export
+					</button>
+				</div>
 				<div class="min-h-0 flex-1 overflow-y-auto pr-1">
-					<ColumnManager {tabId} focusIndex={settingsFocus} />
+					{#if settingsTab === 'columns'}
+						<ColumnManager {tabId} focusIndex={settingsFocus} />
+					{:else}
+						<JsonExportEditor {tabId} />
+					{/if}
 				</div>
 				<div class="flex shrink-0 items-center justify-end gap-2 border-t border-border pt-2">
 					<Dialog.Close
