@@ -7,7 +7,8 @@ import {
 	easeToward,
 	clampMonotonic,
 	phaseSlice,
-	statusToProgress
+	statusToProgress,
+	setSplineRandom
 } from '../open-journey';
 
 describe('open-journey pure helpers', () => {
@@ -114,6 +115,9 @@ import { getActiveProgress, resetProgress } from '../progress.svelte';
 
 describe('open-journey controller', () => {
 	beforeEach(() => {
+		// Identity permutation — see `shuffled`'s docstring. Keeps every
+		// SPLINES[n] expectation in this block literally true.
+		setSplineRandom(() => 0);
 		vi.useFakeTimers();
 		resetProgress();
 		resetJourney();
@@ -208,6 +212,44 @@ describe('open-journey controller', () => {
 		expect(getActiveProgress()?.label).toBe(SPLINES[0]); // still on the first line
 		vi.advanceTimersByTime(1200); // 4200ms total: one spline period
 		expect(getActiveProgress()?.label).toBe(SPLINES[1]);
+	});
+
+	it('walks all 19 distinct lines before repeating any', () => {
+		// A rotating rand: each draw picks the LAST candidate in the remaining
+		// window, so the order is a real permutation, not the identity.
+		setSplineRandom(() => 0.999);
+		beginJourney('open');
+		const seen = [getActiveProgress()?.label];
+		for (let i = 1; i < SPLINES.length; i++) {
+			vi.advanceTimersByTime(4200);
+			seen.push(getActiveProgress()?.label);
+		}
+		expect(new Set(seen).size).toBe(SPLINES.length);
+		expect([...seen].sort()).toEqual([...SPLINES].sort());
+	});
+
+	it('re-shuffles on wrap instead of replaying the same permutation', () => {
+		// A continuously ADVANCING rand: the second shuffle must draw from a
+		// different part of the sequence than the first. A short repeating
+		// pattern would not do — `shuffled` draws exactly n-1 (18) times per
+		// shuffle, so any period dividing 18 hands the second shuffle the same
+		// numbers and the same permutation, testing nothing.
+		let seed = 1;
+		setSplineRandom(() => ((seed = (seed * 9301 + 49297) % 233280), seed / 233280));
+		beginJourney('open');
+		const first: (string | undefined)[] = [getActiveProgress()?.label];
+		for (let i = 1; i < SPLINES.length; i++) {
+			vi.advanceTimersByTime(4200);
+			first.push(getActiveProgress()?.label);
+		}
+		// Tick 19 wraps: a fresh shuffle must be in effect.
+		const second: (string | undefined)[] = [];
+		for (let i = 0; i < SPLINES.length; i++) {
+			vi.advanceTimersByTime(4200);
+			second.push(getActiveProgress()?.label);
+		}
+		expect(second).not.toEqual(first);
+		expect([...second].sort()).toEqual([...SPLINES].sort());
 	});
 
 	it('finishJourney holds the entry for the minimum visible duration', () => {

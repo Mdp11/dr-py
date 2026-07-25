@@ -2,8 +2,10 @@
  * Unified project open/create progress ("the journey"): one entry in the global
  * progress store spanning click → workspace-ready, fed by real upload bytes and
  * `/model/status` polls, with time-based creep filling phases that report no
- * fraction. The controller (added below) contains no Date.now()/Math.random():
- * elapsed time is accumulated from the ticker interval so the store is
+ * fraction. The controller (added below) contains no Date.now() and no direct
+ * Math.random() call: elapsed time is accumulated from the ticker interval,
+ * and randomness comes from the injectable `_rand` seam (default
+ * `Math.random`, overridable via `setSplineRandom`) — so the store stays
  * deterministic under fake timers. This file is the whole journey unit.
  */
 import type { ModelStatus } from '$lib/api/model-status';
@@ -17,7 +19,10 @@ export interface StatusProgress {
 }
 
 /** Reticulating splines — pure flavor text; the bar tells the real story.
- * Fixed order, cycled on a timer. Verbatim per product copy. */
+ * SHUFFLED once per journey (see `_order`) so every line gets a turn and no
+ * two opens read the same; a typical open only shows the first few, which is
+ * why a fixed order meant lines past the fourth were never seen. Verbatim per
+ * product copy. */
 export const SPLINES: readonly string[] = [
 	'Asking every arrow where it thinks it’s going…',
 	'Deciding whether “one” or “many” was the right answer…',
@@ -152,6 +157,18 @@ let _last = 0;
 let _finishing = false;
 let _finishStep = 0;
 let _splineIndex = 0;
+// Randomness seam. Production uses Math.random; tests install a scripted
+// source. Deliberately NOT reset by `_stop()`/`resetJourney()`: a test
+// installs it once in `beforeEach` and it must survive the teardown that
+// runs in `afterEach`.
+let _rand: () => number = Math.random;
+/** Test seam: install the RNG backing the per-journey spline shuffle. */
+export function setSplineRandom(fn: () => number): void {
+	_rand = fn;
+}
+// The shuffled spline order for the CURRENT journey. Defaults to the authored
+// order so a label read before beginJourney is still a real line.
+let _order: readonly string[] = SPLINES;
 // Anchor for remapping a real fraction onto the *remaining* slice. Without it,
 // a creep that ran ahead of the first reported fraction (e.g. displayed 20% of
 // the hydrate slice while the server reports 2% done) stalls at that value
@@ -229,6 +246,7 @@ function _stop(): void {
 	_fraction = null;
 	_last = 0;
 	_splineIndex = 0;
+	_order = SPLINES;
 	_anchorPercent = null;
 	_anchorFraction = 0;
 	_phaseFloor = 0;
@@ -254,7 +272,12 @@ function _onTick(): void {
 function _onSplineTick(): void {
 	if (!_active || _token === null) return;
 	_splineIndex += 1;
-	setProgressLabel(_token, splineAt(_splineIndex));
+	// A full pass through the shuffle: draw a fresh permutation rather than
+	// replaying the same one. 19 lines x 4.2s is ~80s, so only a very slow
+	// open ever gets here — but when it does, a repeat would be the exact
+	// monotony this shuffle exists to remove.
+	if (_splineIndex % _order.length === 0) _order = shuffled(SPLINES, _rand);
+	setProgressLabel(_token, cycleAt(_order, _splineIndex));
 }
 
 /** Start the journey. Idempotent: a no-op if one is already active, so the
@@ -271,12 +294,13 @@ export function beginJourney(kind: JourneyKind): void {
 	_finishing = false;
 	_finishStep = 0;
 	_splineIndex = 0;
+	_order = shuffled(SPLINES, _rand);
 	_anchorPercent = null;
 	_anchorFraction = 0;
 	_phaseFloor = phaseSlice(kind, _phase)[0];
 	_signalElapsed = 0;
 	_signalPercent = 0;
-	_token = startProgress(splineAt(0));
+	_token = startProgress(cycleAt(_order, 0));
 	updateProgress(_token, 0, 100);
 	_tick = setInterval(_onTick, TICK_MS);
 	_splineTick = setInterval(_onSplineTick, SPLINE_MS);
