@@ -12,6 +12,7 @@ from data_rover.core.navigation.schema import PathNavigation, RowStart, Scope, S
 from data_rover.core.script.embed import ScriptEvalContext
 from data_rover.core.script.runner import RunLimits, ScriptBudget
 from data_rover.core.script.schema import SnippetDefinition, SnippetSource
+from data_rover.core.script.warnings import ScriptWarningCode
 from data_rover.core.table.cells import ElementsCell, ErrorCell, ValueCell, evaluate_cells
 from data_rover.core.table.evaluate import TableLimits, build_rows_ex
 from data_rover.core.table.resolve import resolve_table_refs, table_has_script
@@ -492,7 +493,7 @@ def test_nav_script_step_error_warns_through_table() -> None:
     ctx = _script_ctx(model)
     build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
     assert build.keys == []
-    assert any("script step failed" in w for w in ctx.warnings)
+    assert any(w.code == ScriptWarningCode.NAV_STEP_FAILED for w in ctx.warnings)
     ctx.close()
 
 
@@ -688,7 +689,7 @@ def test_cache_only_sort_by_nav_script_step_degrades_with_warning() -> None:
     assert ctx.pending_misses == 0
     assert not ctx.errored
     # The user is TOLD, rather than silently handed an unsorted table.
-    assert any("build order" in w for w in ctx.warnings)
+    assert any(w.code == ScriptWarningCode.SORT_NEEDS_SCRIPT_NAV for w in ctx.warnings)
     ctx.close()
 
 
@@ -731,7 +732,7 @@ def test_cache_only_sort_via_column_ref_to_nav_script_step_degrades() -> None:
     assert ordered == build.keys
     assert runner.calls[0] == 0
     assert ctx.pending_misses == 0
-    assert any("build order" in w for w in ctx.warnings)
+    assert any(w.code == ScriptWarningCode.SORT_NEEDS_SCRIPT_NAV for w in ctx.warnings)
     ctx.close()
 
 
@@ -866,7 +867,9 @@ def test_cache_only_sort_by_script_column_over_nav_script_still_pends() -> None:
     assert ctx.pending_misses > 0, "no pending miss => nothing ever kicks a sweep"
     # The only warning is the ordinary cache-only placeholder the nav step
     # emits while it waits for the sweep — NOT the give-up degrade warning.
-    assert ctx.warnings == ["script step failed: not computed yet"]
+    assert len(ctx.warnings) == 1
+    assert ctx.warnings[0].code == ScriptWarningCode.NAV_STEP_FAILED
+    assert ctx.warnings[0].detail == "not computed yet"
     ctx.close()
 
 
@@ -926,7 +929,7 @@ def test_cache_only_sort_warning_is_emitted_per_sort_not_per_row() -> None:
         mm, model, defn, [], SortSpec(column=1, direction="asc"),
         TableLimits(), script=ctx,
     ) == []
-    assert any("build order" in w for w in ctx.warnings)
+    assert any(w.code == ScriptWarningCode.SORT_NEEDS_SCRIPT_NAV for w in ctx.warnings)
     ctx.close()
 
 

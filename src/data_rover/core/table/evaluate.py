@@ -26,6 +26,7 @@ from data_rover.core.navigation.evaluate import (
     PropertyValue,
     evaluate,
 )
+from data_rover.core.script.warnings import ScriptWarningCode
 
 from .schema import (
     ChainRows,
@@ -591,19 +592,16 @@ class SortSpec:
     direction: Literal["asc", "desc"]
 
 
-#: Emitted (once per sort — `order_rows` decides once, and `add_warning` dedupes
-#: by exact text anyway) when a sort is skipped because computing it would mean
-#: driving a navigation `ScriptStep` under a CACHE-ONLY context. See
-#: `_sort_script` for why that is a dead end rather than a "poll again".
+#: `ScriptWarningCode.SORT_NEEDS_SCRIPT_NAV` is emitted (once per sort —
+#: `order_rows` decides once) when a sort is skipped because computing it
+#: would mean driving a navigation `ScriptStep` under a CACHE-ONLY context.
+#: See `_sort_script` for why that is a dead end rather than a "poll again".
 #:
-#: Deliberately says "SORTING BY this column needs", not "this column's
-#: navigation": the sort column is often a property/element column merely
-#: SOURCED from the navigation column, and has no navigation of its own.
-SORT_SCRIPT_NAV_WARNING = (
-    "script step: sorting by this column needs a navigation script step whose "
-    "values are not computed for every row, so the table cannot be sorted by "
-    "it; rows stay in build order"
-)
+#: The user-facing wording — why it says "sorting by this column needs" and
+#: not "this column's navigation": the sort column is often a property/
+#: element column merely SOURCED from the navigation column, and has no
+#: navigation of its own — now lives client-side in the frontend formatter
+#: keyed off this code (see the `2026-07-25-splines-and-script-warnings` spec).
 
 
 def _nav_col_has_script(col: NavigationColumn) -> bool:
@@ -685,7 +683,8 @@ def sort_falls_back_to_build_order(
     defn: TableDefinition, sort: SortSpec | None
 ) -> bool:
     """Would a CACHE-ONLY `order_rows(defn, ..., sort)` degrade to build order
-    (and emit `SORT_SCRIPT_NAV_WARNING`) rather than sort? See `_sort_script`.
+    (and emit `ScriptWarningCode.SORT_NEEDS_SCRIPT_NAV`) rather than sort? See
+    `_sort_script`.
 
     Public because the decision is O(definition) and depends on NOTHING else —
     not the cell cache, not the model, not the context. That is what lets the
@@ -738,7 +737,7 @@ def _sort_script(
         return script
     if not _sort_reaches_script_navigation(defn, col):
         return script
-    script.add_warning(SORT_SCRIPT_NAV_WARNING)
+    script.add_warning(ScriptWarningCode.SORT_NEEDS_SCRIPT_NAV)
     return None
 
 

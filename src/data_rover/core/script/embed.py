@@ -61,8 +61,21 @@ from .runner import (
     ScriptRunner,
     SnippetSession,
 )
+from .warnings import (
+    MAX_SCRIPT_WARNINGS,
+    ScriptWarning,
+    ScriptWarningCode,
+    ScriptWarningLog,
+    WarningKey,
+)
 
-MAX_SCRIPT_WARNINGS = 20
+__all__ = [
+    "MAX_SCRIPT_WARNINGS",
+    "ScriptEvalContext",
+    "ScriptWarning",
+    "ScriptWarningCode",
+    "ScriptWarningLog",
+]
 
 
 class ScriptEvalContext:
@@ -88,8 +101,7 @@ class ScriptEvalContext:
         )
         self._sessions: dict[str, SnippetSession] = {}
         self._memo: dict[tuple[str, str, tuple[str, ...]], CallResult] = {}
-        self.warnings: list[str] = []
-        self._warning_set: set[str] = set()
+        self._warning_log = ScriptWarningLog()
         self.errored = False
         self._cell_cache = cell_cache
         self._rev = rev
@@ -199,11 +211,28 @@ class ScriptEvalContext:
             return CallResult(value=None, error=sess.boot_error, duration_ms=0)
         return sess.call(entry, element_ids)
 
-    def add_warning(self, message: str) -> None:
-        if message in self._warning_set or len(self.warnings) >= MAX_SCRIPT_WARNINGS:
-            return
-        self._warning_set.add(message)
-        self.warnings.append(message)
+    @property
+    def warnings(self) -> list[ScriptWarning]:
+        """Aggregated warnings, first-seen order. See `ScriptWarningLog`."""
+        return self._warning_log.entries
+
+    def add_warning(
+        self,
+        code: ScriptWarningCode,
+        *,
+        detail: str | None = None,
+        count: int = 0,
+    ) -> None:
+        """Record one occurrence of a degradation. Structured on purpose: the
+        rendered sentence is built client-side, so counts aggregate instead of
+        being frozen into a deduped string."""
+        self._warning_log.add(code, detail=detail, count=count)
+
+    def warning_snapshot(self) -> dict[WarningKey, tuple[int, int]]:
+        return self._warning_log.snapshot()
+
+    def warnings_since(self, snap: dict[WarningKey, tuple[int, int]]) -> list[ScriptWarning]:
+        return self._warning_log.since(snap)
 
     def close(self) -> None:
         for sess in self._sessions.values():

@@ -416,10 +416,15 @@ fresh one.
   invalidation and defeats the point — so the fix has to be author discipline:
   build your indexes at real module top level, not behind an `if _x is None`
   guard.
-- **`.warnings` / `.add_warning(message)`** — deduped by exact message
-  text, capped at `MAX_SCRIPT_WARNINGS` (20); the table/nav evaluation
-  layers use this to report prune/degrade decisions without flooding the
-  response.
+- **`.warnings` / `.add_warning(code, *, detail=None, count=0)`** — the
+  structured degradation channel (`core/script/warnings.py`). Entries are
+  aggregated by `(code, detail)`, NOT by rendered text: `occurrences` counts
+  firings and `total` sums the subject quantity, so ten chains each dropping
+  one id report 10, not the "1" that dedup-by-message used to report. Capped
+  at `MAX_SCRIPT_WARNINGS` (20) DISTINCT KINDS; a new kind past the cap is
+  dropped, but kinds already present keep counting. User-facing copy lives
+  client-side, keyed off `code`. `.warning_snapshot()` / `.warnings_since()`
+  give a caller (navigation's `evaluate`) the delta produced by its own call.
 - **`.errored`** — flips `True` the first time any `.call()` in the
   context's lifetime returns a `CallResult` with `.error` set. Callers (the
   table route's row-order cache) use this as a cache-poisoning guard: an
@@ -664,7 +669,7 @@ cache is internally locked, and the pathology counters are job-global.
   of the rev behind a once-a-second poll loop. `core/table/evaluate.py`'s
   `_sort_script` therefore hands the sort pass a `None` context for exactly
   that case, so the step prunes silently, every row ties, and the rows stay in
-  build order — with `SORT_SCRIPT_NAV_WARNING` on the response so the user is
+  build order — with `ScriptWarningCode.SORT_NEEDS_SCRIPT_NAV` on the response so the user is
   told. The decision is taken ONCE per `order_rows` call (it depends only on
   the definition, the sort column, and `cache_only`), and the LIVE path never
   enters the branch at all.

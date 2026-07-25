@@ -18,6 +18,7 @@ from data_rover.core.navigation.schema import NAVIGATION_ADAPTER, NavigationDefi
 from data_rover.core.script.embed import ScriptEvalContext
 from data_rover.core.script.runner import ScriptRunner
 from data_rover.core.script.schema import SNIPPET_ADAPTER, SnippetDefinition
+from data_rover.core.script.warnings import ScriptWarningCode
 from data_rover.core.table.cells import (
     Cell,
     ElementCell,
@@ -29,7 +30,6 @@ from data_rover.core.table.cells import (
     evaluate_cells,
 )
 from data_rover.core.table.evaluate import (
-    SORT_SCRIPT_NAV_WARNING,
     RowKey,
     SortSpec,
     TableLimits,
@@ -289,7 +289,7 @@ def evaluate_table(
                 if script_ctx is not None and sort_falls_back_to_build_order(
                     defn, sort
                 ):
-                    script_ctx.add_warning(SORT_SCRIPT_NAV_WARNING)
+                    script_ctx.add_warning(ScriptWarningCode.SORT_NEEDS_SCRIPT_NAV)
             else:
                 # Whole-table passes are CACHE-ONLY (spec §4.1): the guest is
                 # never driven O(rows) times inside a request. A miss records a

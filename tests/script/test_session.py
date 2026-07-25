@@ -13,6 +13,7 @@ from data_rover.core.script.runner import (
     ScriptBudget,
     decode_call_payload,
 )
+from data_rover.core.script.warnings import ScriptWarningCode
 from tests.script.trusted_runner import TrustedRunner
 
 
@@ -296,14 +297,18 @@ def test_ctx_open_session_raises_degrades(small_model) -> None:
 
 
 def test_ctx_boot_error_and_warnings(small_model) -> None:
+    # `ScriptWarningLog`'s dedup/cap semantics are exhaustively covered by
+    # tests/script/test_warnings.py; this test just confirms ScriptEvalContext
+    # still wires `add_warning`/`.warnings` through to it.
     ids = sorted(small_model.elements)
     ctx = _ctx(small_model)
     res = ctx.call("raise RuntimeError('boom')", "value", [ids[0]])
     assert res.error is not None and ctx.errored
-    ctx.add_warning("w")
-    ctx.add_warning("w")  # deduped
+    ctx.add_warning(ScriptWarningCode.NAV_STEP_FAILED, detail="w")
+    ctx.add_warning(ScriptWarningCode.NAV_STEP_FAILED, detail="w")  # aggregates
     for i in range(30):
-        ctx.add_warning(f"w{i}")
-    assert ctx.warnings[0] == "w"
+        ctx.add_warning(ScriptWarningCode.NAV_STEP_FAILED, detail=f"w{i}")
+    assert ctx.warnings[0].detail == "w"
+    assert ctx.warnings[0].occurrences == 2
     assert len(ctx.warnings) == 20  # capped
     ctx.close()

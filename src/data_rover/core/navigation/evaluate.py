@@ -36,6 +36,7 @@ from data_rover.core.search.criteria import (
     match_element,
 )
 
+from ..script.warnings import ScriptWarning, ScriptWarningCode
 from .schema import (
     FilterStep,
     NavigationDefinition,
@@ -79,14 +80,15 @@ ChainNode = str | PropertyValue
 class ChainResult:
     """Chains INCLUDE the start element at index 0 (see schema docstring).
     Every node is an element id except a possible trailing `PropertyValue`
-    (a scalar property step is always terminal). `warnings` carries script-
-    step degradations (pruned chains, dropped ids) generated during THIS
-    evaluate call — missing-property prunes stay silent, unchanged."""
+    (a scalar property step is always terminal). `warnings` carries aggregated
+    `ScriptWarning`s (pruned chains, dropped ids) — but only the DELTA counts
+    THIS evaluate call produced, not the shared context's running totals;
+    missing-property prunes stay silent, unchanged."""
 
     step_types: list[str]
     chains: list[tuple[ChainNode, ...]]
     truncated: bool
-    warnings: list[str] = field(default_factory=list)
+    warnings: list[ScriptWarning] = field(default_factory=list)
 
 
 @dataclass
@@ -120,10 +122,12 @@ def evaluate(
     with no binding raises `ValueError` (see `RowStart`'s docstring).
 
     `script`, when given, backs any `ScriptStep` hop encountered (top-level
-    or nested); its shared warnings channel is snapshotted at entry so the
-    returned `ChainResult.warnings` carries only what THIS call generated."""
+    or nested); its shared warnings channel's COUNTS are snapshotted at entry
+    and diffed on exit (entries mutate in place, so an index slice cannot see
+    growth in a kind that already existed) so the returned
+    `ChainResult.warnings` carries only what THIS call generated."""
     budget = _Budget(max_visited=limits.max_visited)
-    w0 = len(script.warnings) if script is not None else 0
+    w0 = script.warning_snapshot() if script is not None else {}
     if isinstance(defn, SetExpression):
         members, truncated = _evaluate_set(
             metamodel,
@@ -138,7 +142,7 @@ def evaluate(
             step_types=[],
             chains=[(i,) for i in sorted(members)],
             truncated=truncated or budget.exhausted,
-            warnings=list(script.warnings[w0:]) if script is not None else [],
+            warnings=script.warnings_since(w0) if script is not None else [],
         )
     start_ids = _start_ids(
         metamodel, model, defn, limits, budget, row_elements=row_elements, script=script
@@ -172,7 +176,7 @@ def evaluate(
         ],
         chains=chains,
         truncated=truncated or budget.exhausted,
-        warnings=list(script.warnings[w0:]) if script is not None else [],
+        warnings=script.warnings_since(w0) if script is not None else [],
     )
 
 
@@ -353,14 +357,16 @@ def _hop_script(
     if step.snippet.ref is not None:
         if script is not None:
             script.add_warning(
-                f"script step: snippet artifact {step.snippet.ref!r} not found"
+                ScriptWarningCode.NAV_SNIPPET_NOT_FOUND, detail=step.snippet.ref
             )
         return []
     if step.snippet.definition is None or script is None:
         return []
     res = script.call(step.snippet.definition.code, "step", [element_id])
     if res.error is not None:
-        script.add_warning(f"script step failed: {res.error.message}")
+        script.add_warning(
+            ScriptWarningCode.NAV_STEP_FAILED, detail=res.error.message
+        )
         return []
     assert res.value is not None
     raw = list(dict.fromkeys(res.value["ids"]))
@@ -369,7 +375,7 @@ def _hop_script(
     known = [i for i in raw if i in model.elements]
     if len(known) != len(raw):
         script.add_warning(
-            f"script step returned {len(raw) - len(known)} unknown element id(s)"
+            ScriptWarningCode.NAV_UNKNOWN_IDS, count=len(raw) - len(known)
         )
     return list(known)
 
@@ -433,8 +439,7 @@ def _walk(
             dropped = sum(1 for o in nxt if o in chain)
             if dropped:
                 script.add_warning(
-                    f"script step: {dropped} element(s) dropped "
-                    "(already visited in this chain)"
+                    ScriptWarningCode.NAV_ALREADY_VISITED, count=dropped
                 )
     if budget.exhausted:
         return True

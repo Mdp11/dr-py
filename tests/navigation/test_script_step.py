@@ -17,6 +17,7 @@ from data_rover.core.navigation.schema import (
 from data_rover.core.script.embed import ScriptEvalContext
 from data_rover.core.script.runner import RunLimits, ScriptBudget
 from data_rover.core.script.schema import SnippetDefinition, SnippetSource
+from data_rover.core.script.warnings import ScriptWarning, ScriptWarningCode
 from tests.script.trusted_runner import TrustedRunner
 
 
@@ -122,7 +123,16 @@ def test_script_step_error_prunes_with_warning() -> None:
     defn = _path([ScriptStep(snippet=_snip("def step(el): raise RuntimeError('boom')"))])
     res = evaluate(mm, model, defn, script=_ctx(model))
     assert res.chains == []
-    assert any("boom" in w for w in res.warnings)
+    # occurrences is per START ELEMENT: `Scope(types=[])` matches the whole
+    # fixture, so the step fires once per element, not once per evaluate call.
+    assert res.warnings == [
+        ScriptWarning(
+            code=ScriptWarningCode.NAV_STEP_FAILED,
+            occurrences=len(model.elements),
+            detail=res.warnings[0].detail,
+        )
+    ]
+    assert "boom" in (res.warnings[0].detail or "")
 
 
 def test_script_step_unknown_ids_dropped_with_warning() -> None:
@@ -132,7 +142,14 @@ def test_script_step_unknown_ids_dropped_with_warning() -> None:
         snippet=_snip(f"def step(el): return ['{ids[0]}', 'no-such-id']")
     )])
     res = evaluate(mm, model, defn, script=_ctx(model))
-    assert any("unknown element id" in w for w in res.warnings)
+    # occurrences/total are per START ELEMENT (see above) -- len(ids), not 1.
+    # The start element equal to ids[0] also returns its own id, which trips
+    # the already-visited cycle guard too, so `res.warnings` carries a second,
+    # unrelated NAV_ALREADY_VISITED entry: filter by code rather than
+    # asserting the whole list.
+    (entry,) = [w for w in res.warnings if w.code == ScriptWarningCode.NAV_UNKNOWN_IDS]
+    assert entry.occurrences == len(ids)
+    assert entry.total == len(ids)
     assert all(chain[1] == ids[0] for chain in res.chains)
 
 
@@ -143,7 +160,15 @@ def test_script_step_dangling_and_unconfigured() -> None:
         _path([ScriptStep(snippet=SnippetSource(ref="missing"))]),
         script=_ctx(model),
     )
-    assert res.chains == [] and any("not found" in w for w in res.warnings)
+    assert res.chains == []
+    # occurrences is per START ELEMENT (see above) -- len(model.elements), not 1.
+    assert res.warnings == [
+        ScriptWarning(
+            code=ScriptWarningCode.NAV_SNIPPET_NOT_FOUND,
+            occurrences=len(model.elements),
+            detail="missing",
+        )
+    ]
     res = evaluate(mm, model, _path([ScriptStep()]), script=_ctx(model))
     assert res.chains == [] and res.warnings == []      # unconfigured: silent
 
@@ -166,4 +191,53 @@ def test_script_step_visited_drop_warns() -> None:
     defn = _path([ScriptStep(snippet=_snip("def step(el): return [el]"))])
     res = evaluate(mm, model, defn, script=_ctx(model))
     assert res.chains == []
-    assert any("already visited" in w for w in res.warnings)
+    assert res.warnings == [
+        ScriptWarning(
+            code=ScriptWarningCode.NAV_ALREADY_VISITED,
+            occurrences=res.warnings[0].occurrences,
+            total=res.warnings[0].total,
+        )
+    ]
+    assert res.warnings[0].total >= 1
+
+
+def test_unknown_ids_across_many_chains_sum_instead_of_collapsing() -> None:
+    """THE BUG: each start element's step drops one unknown id, and the old
+    dedup-by-message channel reported that as a single line reading "1"
+    regardless of how many chains hit it. One entry is right; a total of 1 is
+    not."""
+    mm, model = _fixture()
+    ids = sorted(model.elements)
+    defn = _path([ScriptStep(
+        snippet=_snip(f"def step(el): return ['{ids[0]}', 'no-such-id']")
+    )])
+    res = evaluate(mm, model, defn, script=_ctx(model))
+    (entry,) = [w for w in res.warnings if w.code == ScriptWarningCode.NAV_UNKNOWN_IDS]
+    assert entry.occurrences == len(ids)
+    assert entry.total == len(ids)
+
+
+def test_two_distinct_step_failures_stay_two_entries() -> None:
+    mm, model = _fixture()
+    ctx = _ctx(model)
+    evaluate(mm, model, _path([ScriptStep(
+        snippet=_snip("def step(el): raise RuntimeError('boom')")
+    )]), script=ctx)
+    evaluate(mm, model, _path([ScriptStep(
+        snippet=_snip("def step(el): raise RuntimeError('kaboom')")
+    )]), script=ctx)
+    failures = [w for w in ctx.warnings if w.code == ScriptWarningCode.NAV_STEP_FAILED]
+    assert len(failures) == 2
+
+
+def test_chain_result_warnings_are_this_call_only() -> None:
+    """`ChainResult.warnings` carries deltas: a second evaluate over a context
+    that already logged the same kind must not re-report the first call's
+    counts (the invariant `warnings[w0:]` slicing used to provide)."""
+    mm, model = _fixture()
+    ctx = _ctx(model)
+    defn = _path([ScriptStep(snippet=_snip("def step(el): return [el]"))])
+    first = evaluate(mm, model, defn, script=ctx)
+    second = evaluate(mm, model, defn, script=ctx)
+    assert first.warnings and second.warnings
+    assert second.warnings[0].occurrences == first.warnings[0].occurrences
