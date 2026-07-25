@@ -20,9 +20,9 @@ describe('formatScriptWarning', () => {
 	});
 
 	it('reports already-visited drops', () => {
-		expect(
-			formatScriptWarning(w({ code: 'nav_already_visited', occurrences: 3, total: 8 }))
-		).toBe('8 elements already visited in the chain, dropped across 3 steps.');
+		expect(formatScriptWarning(w({ code: 'nav_already_visited', occurrences: 3, total: 8 }))).toBe(
+			'8 elements already visited in the chain, dropped across 3 steps.'
+		);
 	});
 
 	it('reports a step failure with its message and firing count', () => {
@@ -40,9 +40,9 @@ describe('formatScriptWarning', () => {
 	});
 
 	it('reports a dangling snippet ref', () => {
-		expect(
-			formatScriptWarning(w({ code: 'nav_snippet_not_found', detail: 'snip-7' }))
-		).toBe('Navigation script step references a snippet that no longer exists (snip-7).');
+		expect(formatScriptWarning(w({ code: 'nav_snippet_not_found', detail: 'snip-7' }))).toBe(
+			'Navigation script step references a snippet that no longer exists (snip-7).'
+		);
 	});
 
 	// `detail` is typed `string | null`, so a null is a valid input by the
@@ -56,7 +56,9 @@ describe('formatScriptWarning', () => {
 	});
 
 	it('drops the detail clause but keeps the count for a repeated step failure with no detail', () => {
-		const result = formatScriptWarning(w({ code: 'nav_step_failed', occurrences: 4, detail: null }));
+		const result = formatScriptWarning(
+			w({ code: 'nav_step_failed', occurrences: 4, detail: null })
+		);
 		expect(result).toBe('Navigation script step failed (4×).');
 		expect(result).not.toContain('null');
 	});

@@ -364,9 +364,7 @@ def _hop_script(
         return []
     res = script.call(step.snippet.definition.code, "step", [element_id])
     if res.error is not None:
-        script.add_warning(
-            ScriptWarningCode.NAV_STEP_FAILED, detail=res.error.message
-        )
+        script.add_warning(ScriptWarningCode.NAV_STEP_FAILED, detail=res.error.message)
         return []
     assert res.value is not None
     raw = list(dict.fromkeys(res.value["ids"]))
@@ -438,9 +436,7 @@ def _walk(
             # ("keep this element") is the natural idiom. Warn with a count.
             dropped = sum(1 for o in nxt if o in chain)
             if dropped:
-                script.add_warning(
-                    ScriptWarningCode.NAV_ALREADY_VISITED, count=dropped
-                )
+                script.add_warning(ScriptWarningCode.NAV_ALREADY_VISITED, count=dropped)
     if budget.exhausted:
         return True
     for other in nxt:

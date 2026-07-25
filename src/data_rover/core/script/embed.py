@@ -231,7 +231,9 @@ class ScriptEvalContext:
     def warning_snapshot(self) -> dict[WarningKey, tuple[int, int]]:
         return self._warning_log.snapshot()
 
-    def warnings_since(self, snap: dict[WarningKey, tuple[int, int]]) -> list[ScriptWarning]:
+    def warnings_since(
+        self, snap: dict[WarningKey, tuple[int, int]]
+    ) -> list[ScriptWarning]:
         return self._warning_log.since(snap)
 
     def close(self) -> None:

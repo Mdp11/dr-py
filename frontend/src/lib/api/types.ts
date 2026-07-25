@@ -503,7 +503,10 @@ export const ScriptWarningSchema = z.object({
 	code: z.string(),
 	occurrences: z.number().int().default(1),
 	total: z.number().int().default(0),
-	detail: z.string().nullish().transform((v) => v ?? null)
+	detail: z
+		.string()
+		.nullish()
+		.transform((v) => v ?? null)
 });
 export type ScriptWarning = z.infer<typeof ScriptWarningSchema>;
 

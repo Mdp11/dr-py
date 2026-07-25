@@ -103,7 +103,9 @@ class ScriptWarningLog:
         if entry is None:
             if len(self._by_key) >= MAX_SCRIPT_WARNINGS:
                 return
-            self._by_key[key] = ScriptWarning(code=code, detail=detail, occurrences=1, total=count)
+            self._by_key[key] = ScriptWarning(
+                code=code, detail=detail, occurrences=1, total=count
+            )
         else:
             self._by_key[key] = replace(
                 entry,
