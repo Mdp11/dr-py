@@ -42,7 +42,7 @@
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import * as api from '$lib/api/artifacts';
 import { ConflictError } from '$lib/api/errors';
-import type { ChainNode, NavigationDefinition } from '$lib/api/types';
+import type { ChainNode, NavigationDefinition, ScriptWarning } from '$lib/api/types';
 import {
 	containsRowStart,
 	emptyPath,
@@ -100,7 +100,7 @@ export interface NavPreview {
 	 * `loadMorePreview` deliberately keeps the FIRST page's warnings — same
 	 * policy as the table's `mergePage` — rather than overwriting with a later
 	 * page's (possibly empty) warnings. */
-	warnings: string[];
+	warnings: ScriptWarning[];
 }
 
 const _drafts = new SvelteMap<string, NavDraft>();

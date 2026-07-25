@@ -89,9 +89,11 @@ describe('TablePageSchema', () => {
 			truncated: false,
 			offset: 0,
 			model_rev: 3,
-			warnings: ['warning 1']
+			warnings: [{ code: 'nav_step_failed', occurrences: 1, total: 0, detail: 'warning 1' }]
 		});
-		expect(page.warnings).toEqual(['warning 1']);
+		expect(page.warnings).toEqual([
+			{ code: 'nav_step_failed', occurrences: 1, total: 0, detail: 'warning 1' }
+		]);
 	});
 
 	it('parses pending cells and script_status', () => {
@@ -186,9 +188,11 @@ describe('ChainPageSchema', () => {
 			chains: [[{ id: 'e1', type_name: 'Block', display_name: 'B', child_count: 0 }]],
 			total: 1,
 			truncated: false,
-			warnings: ['chain warning']
+			warnings: [{ code: 'nav_step_failed', occurrences: 1, total: 0, detail: 'chain warning' }]
 		});
-		expect(page.warnings).toEqual(['chain warning']);
+		expect(page.warnings).toEqual([
+			{ code: 'nav_step_failed', occurrences: 1, total: 0, detail: 'chain warning' }
+		]);
 	});
 });
 

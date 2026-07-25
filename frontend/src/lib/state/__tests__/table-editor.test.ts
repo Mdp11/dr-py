@@ -243,11 +243,13 @@ describe('table-editor', () => {
 		const draft = await ensureTableDraft('tbl:draft:warn1'); // new drafts do not auto-load
 		vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue({
 			...EMPTY_PAGE,
-			warnings: ['column 2: script raised on 3 rows']
+			warnings: [{ code: 'nav_step_failed', occurrences: 3, total: 0, detail: 'script raised' }]
 		});
 		updateTableDefinition('tbl:draft:warn1', { ...draft.definition });
 		await flush();
-		expect(getTableWarnings('tbl:draft:warn1')).toEqual(['column 2: script raised on 3 rows']);
+		expect(getTableWarnings('tbl:draft:warn1')).toEqual([
+			{ code: 'nav_step_failed', occurrences: 3, total: 0, detail: 'script raised' }
+		]);
 	});
 
 	it('returns an empty array from getTableWarnings when no page is installed or the page has none', async () => {
@@ -260,18 +262,19 @@ describe('table-editor', () => {
 	});
 
 	it('mergePage (a lazy chunk fill) preserves the warnings installed by the reset load', async () => {
+		const warning = { code: 'nav_step_failed', occurrences: 2, total: 0, detail: 'rows errored' };
 		const spy = vi
 			.spyOn(tablesApi, 'evaluateTable')
-			.mockResolvedValueOnce({ ...pageAt(0, 100, 250), warnings: ['column 1: 2 rows errored'] })
+			.mockResolvedValueOnce({ ...pageAt(0, 100, 250), warnings: [warning] })
 			.mockImplementation(async (args) => pageAt(args.offset ?? 0, args.limit ?? 100, 250));
 		await ensureTableDraft('tbl:draft:warnmerge');
 		await loadTablePage('tbl:draft:warnmerge', 0);
-		expect(getTableWarnings('tbl:draft:warnmerge')).toEqual(['column 1: 2 rows errored']);
+		expect(getTableWarnings('tbl:draft:warnmerge')).toEqual([warning]);
 		ensureTableRange('tbl:draft:warnmerge', 100, 150);
 		await flush();
 		// The chunk fill's own response carries no warnings (pageAt defaults to
 		// []) — mergePage must not clobber the reset load's warnings with it.
-		expect(getTableWarnings('tbl:draft:warnmerge')).toEqual(['column 1: 2 rows errored']);
+		expect(getTableWarnings('tbl:draft:warnmerge')).toEqual([warning]);
 		spy.mockRestore();
 	});
 

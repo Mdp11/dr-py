@@ -494,12 +494,25 @@ export type ChainValue = z.infer<typeof ChainValueSchema>;
 export const ChainNodeSchema = z.union([ChainValueSchema, TreeItemSchema]);
 export type ChainNode = z.infer<typeof ChainNodeSchema>;
 
+/** Structured script-degradation warning (nav step failures, dropped unknown
+ * ids, etc). The backend ships codes + counts, not sentences — see
+ * `$lib/script/warnings.ts` for the copy that renders these. */
+export const ScriptWarningSchema = z.object({
+	// Deliberately z.string(), not an enum: a server that ships a new code
+	// must not fail validation on an older client. The formatter degrades.
+	code: z.string(),
+	occurrences: z.number().int().default(1),
+	total: z.number().int().default(0),
+	detail: z.string().nullish().transform((v) => v ?? null)
+});
+export type ScriptWarning = z.infer<typeof ScriptWarningSchema>;
+
 export const ChainPageSchema = z.object({
 	step_types: z.array(z.string()).default([]),
 	chains: z.array(z.array(ChainNodeSchema)).default([]),
 	total: z.number().int().default(0),
 	truncated: z.boolean().default(false),
-	warnings: z.array(z.string()).default([])
+	warnings: z.array(ScriptWarningSchema).default([])
 });
 export type ChainPage = z.infer<typeof ChainPageSchema>;
 
@@ -837,7 +850,7 @@ export const TablePageSchema = z.object({
 	truncated: z.boolean(),
 	offset: z.number().int(),
 	model_rev: z.number().int(),
-	warnings: z.array(z.string()).default([]),
+	warnings: z.array(ScriptWarningSchema).default([]),
 	script_status: ScriptStatusSchema.nullish()
 });
 export type TablePage = z.infer<typeof TablePageSchema>;

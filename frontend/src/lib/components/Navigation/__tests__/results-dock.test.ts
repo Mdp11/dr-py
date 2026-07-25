@@ -318,7 +318,7 @@ it('renders the script-warnings chip when the preview carries warnings', async (
 	await ensureDraft(tabId);
 	vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue({
 		...CHAIN_PAGE,
-		warnings: ['step 2: divide by zero']
+		warnings: [{ code: 'nav_step_failed', occurrences: 1, total: 0, detail: 'divide by zero' }]
 	});
 	updateDefinition(tabId, runnablePath());
 	await runPreview(tabId, []).catch(() => {});
@@ -338,7 +338,10 @@ it('renders the plural script-warnings chip for more than one warning', async ()
 	await ensureDraft(tabId);
 	vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue({
 		...CHAIN_PAGE,
-		warnings: ['warning one', 'warning two']
+		warnings: [
+			{ code: 'nav_step_failed', occurrences: 1, total: 0, detail: 'warning one' },
+			{ code: 'nav_step_failed', occurrences: 1, total: 0, detail: 'warning two' }
+		]
 	});
 	updateDefinition(tabId, runnablePath());
 	await runPreview(tabId, []).catch(() => {});

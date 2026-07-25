@@ -36,6 +36,7 @@ import {
 	TableDefinitionSchema,
 	type ScriptErrorsRecap,
 	type ScriptStatus,
+	type ScriptWarning,
 	type TableColumn,
 	type TableDefinition,
 	type TablePage,
@@ -116,8 +117,9 @@ export interface TableData {
 	offset: number;
 	model_rev: number;
 	/** Non-fatal per-page issues surfaced by embedded script evaluation (e.g. a
-	 * ScriptColumn raising on some rows) — see TablePageSchema.warnings. */
-	warnings: string[];
+	 * ScriptColumn raising on some rows) — see TablePageSchema.warnings.
+	 * Structured and aggregated; render via `formatScriptWarning`. */
+	warnings: ScriptWarning[];
 }
 
 const _drafts = new SvelteMap<string, TableDraft>();
@@ -962,7 +964,7 @@ export function consumeScrollRequest(
 
 /** Non-fatal warnings from the last installed page (e.g. a ScriptColumn that
  * raised on some rows) — empty when no page is installed or none were sent. */
-export function getTableWarnings(tabId: string): string[] {
+export function getTableWarnings(tabId: string): ScriptWarning[] {
 	return _pages.get(tabId)?.warnings ?? [];
 }
 
