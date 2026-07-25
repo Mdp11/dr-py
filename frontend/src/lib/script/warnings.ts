@@ -35,12 +35,20 @@ export function formatScriptWarning(w: ScriptWarning): string {
 				`the chain, dropped across ${w.occurrences} ` +
 				`${plural(w.occurrences, 'step', 'steps')}.`
 			);
-		case 'nav_step_failed':
-			return w.occurrences === 1
-				? `Navigation script step failed: ${w.detail}`
-				: `Navigation script step failed (${w.occurrences}×): ${w.detail}`;
+		case 'nav_step_failed': {
+			// `detail` is typed `string | null` — a null must drop the detail
+			// clause rather than interpolate the literal word "null" into the
+			// sentence. Not currently reachable from either backend call site
+			// (both always supply a message), but the client type doesn't
+			// depend on that holding.
+			const count = w.occurrences === 1 ? '' : ` (${w.occurrences}×)`;
+			const detail = w.detail === null ? '.' : `: ${w.detail}`;
+			return `Navigation script step failed${count}${detail}`;
+		}
 		case 'nav_snippet_not_found':
-			return `Navigation script step references a snippet that no longer exists (${w.detail}).`;
+			return w.detail === null
+				? 'Navigation script step references a snippet that no longer exists.'
+				: `Navigation script step references a snippet that no longer exists (${w.detail}).`;
 		// Says "SORTING BY this column needs", not "this column's navigation":
 		// the sort column is often a property/element column merely SOURCED
 		// from the navigation column, and has no navigation of its own.
