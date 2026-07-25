@@ -264,7 +264,7 @@ def test_navigation_open_session_raises_degrades(
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["chains"] == []
-    assert any("pool exhausted" in w for w in body["warnings"])
+    assert any("pool exhausted" in (w["detail"] or "") for w in body["warnings"])
 
 
 def test_evaluate_dangling_snippet_ref(
@@ -445,4 +445,4 @@ def test_navigation_script_step_error_warns(
     assert r.status_code == 200
     body = r.json()
     assert body["chains"] == []
-    assert any("boom" in w for w in body["warnings"])
+    assert any("boom" in (w["detail"] or "") for w in body["warnings"])

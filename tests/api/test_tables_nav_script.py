@@ -187,7 +187,17 @@ def test_nav_script_step_row_source_over_http(
     assert first["rows"] == []
     assert first["total"] == 0
     assert first["script_status"]["state"] == "computing"
-    assert first["warnings"] == ["script step failed: not computed yet"]
+    # occurrences is per START ELEMENT: the step fires once per seeded Thing and
+    # ScriptWarningLog aggregates them into a single entry, so this is the seed
+    # count — not 1 per evaluate call.
+    assert first["warnings"] == [
+        {
+            "code": "nav_step_failed",
+            "occurrences": len(seed_things),
+            "total": 0,
+            "detail": "not computed yet",
+        }
+    ]
 
     # THE MECHANISM: the sweep's serial row build ran the step LIVE and wrote
     # its result into the session cell cache under the "step" entry point.
@@ -223,7 +233,10 @@ def test_nav_script_step_error_surfaces_in_page_warnings(
     assert first["rows"] == []
     # Poll 1 sees the cache-only placeholder AND — via the route's terminal-job
     # re-probe, which re-reads the now sweep-filled cache — the real error.
-    assert "script step failed: not computed yet" in first["warnings"]
+    assert any(
+        w["code"] == "nav_step_failed" and w["detail"] == "not computed yet"
+        for w in first["warnings"]
+    )
 
     second = _evaluate(client, BOOM_CODE)
     assert second["total"] == 0
@@ -231,8 +244,16 @@ def test_nav_script_step_error_surfaces_in_page_warnings(
     # The error is deterministic, so the sweep cached it: settled state is the
     # real message alone, and the page stops asking the client to poll.
     assert second["script_status"]["state"] == "ready"
+    # occurrences is per START ELEMENT: the step fires once per seeded Thing and
+    # ScriptWarningLog aggregates them into a single entry, so this is the seed
+    # count — not 1 per evaluate call.
     assert second["warnings"] == [
-        "script step failed: ZeroDivisionError: division by zero"
+        {
+            "code": "nav_step_failed",
+            "occurrences": len(seed_things),
+            "total": 0,
+            "detail": "ZeroDivisionError: division by zero",
+        }
     ]
 
 
@@ -320,7 +341,7 @@ def test_sort_by_nav_script_step_column_settles_instead_of_failing(
     assert first["total"] == 3
     # Degraded to BUILD order (the scope's own id order), and the user is told.
     assert [row["key"][0] for row in first["rows"]] == ["t1", "t2"]
-    assert any("build order" in w for w in first["warnings"])
+    assert any(w["code"] == "sort_needs_script_nav" for w in first["warnings"])
 
     # The page still WORKS: the visible window is evaluated live, so the
     # navigation column's cells hold the real script-step results.
@@ -340,7 +361,7 @@ def test_sort_by_nav_script_step_column_settles_instead_of_failing(
     second = r.json()
     assert second["script_status"]["state"] == "ready"
     assert [row["key"][0] for row in second["rows"]] == ["t1", "t2"]
-    assert any("build order" in w for w in second["warnings"])
+    assert any(w["code"] == "sort_needs_script_nav" for w in second["warnings"])
 
 
 #: `value()` for the script column below: the name of whatever the navigation
@@ -391,7 +412,7 @@ def test_sort_by_script_column_over_nav_script_step_converges(
     first = r.json()
     # Poll 1 pends (which is what KICKS the sweep) rather than silently tying.
     assert first["script_status"]["state"] == "computing"
-    assert not any("build order" in w for w in first["warnings"])
+    assert not any(w["code"] == "sort_needs_script_nav" for w in first["warnings"])
 
     r = client.post(papi("/tables/evaluate"), json=payload)
     assert r.status_code == 200, r.text
@@ -444,3 +465,16 @@ def test_table_script_column_write_attempt_is_error_cell(
     r = client.get(papi("/model/elements"), params={"limit": 100})
     assert r.status_code == 200, r.text
     assert len(r.json()["items"]) == len(seed_things)
+
+
+def test_page_warning_shape_is_stable(
+    client: TestClient, seed_things: list[str], settings_sync_sweep: Settings
+) -> None:
+    """Every warning on the wire carries the four fields the client formatter
+    reads. A missing `total` would render as NaN in the strip."""
+    body = _evaluate(client, BOOM_CODE)
+    for w in body["warnings"]:
+        assert set(w) == {"code", "occurrences", "total", "detail"}
+        assert isinstance(w["code"], str)
+        assert isinstance(w["occurrences"], int) and w["occurrences"] >= 1
+        assert isinstance(w["total"], int)

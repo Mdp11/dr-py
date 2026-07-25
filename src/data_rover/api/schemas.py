@@ -16,6 +16,7 @@ from data_rover.core.model.model import Model
 from data_rover.core.model.relationship import Relationship
 from data_rover.core.navigation.schema import NavigationDefinition
 from data_rover.core.script.schema import SNIPPET_MAX_CODE_BYTES
+from data_rover.core.script.warnings import ScriptWarning
 from data_rover.core.table.schema import TableDefinition
 from data_rover.core.validation.issue import Issue
 from data_rover.core.view.schema import Folder, View
@@ -841,6 +842,31 @@ class EvaluateNavigationIn(BaseModel):
         return self
 
 
+class ScriptWarningOut(BaseModel):
+    """A structured embedded-evaluation degradation.
+
+    `code` is typed `str`, NOT the enum, so a client that does not know a
+    newly added code still parses the payload — the frontend formatter falls
+    back to `detail` for an unrecognized code. Copy lives client-side, which
+    is why nothing here is a sentence.
+    """
+
+    code: str
+    #: How many times this kind fired.
+    occurrences: int
+    #: Summed subject quantity (unknown ids, dropped elements); 0 when the
+    #: kind carries no such number.
+    total: int = 0
+    #: The variable part — an artifact ref, an exception message.
+    detail: str | None = None
+
+    @classmethod
+    def from_core(cls, w: ScriptWarning) -> ScriptWarningOut:
+        return cls(
+            code=str(w.code), occurrences=w.occurrences, total=w.total, detail=w.detail
+        )
+
+
 class ChainValueOut(BaseModel):
     """Terminal VALUE node in a chain: a scalar property step ends its chain at
     the property's value instead of an element. Discriminated from `TreeItem`
@@ -861,7 +887,7 @@ class ChainPageOut(BaseModel):
     chains: list[list[TreeItem | ChainValueOut]] = Field(default_factory=list)
     total: int = 0
     truncated: bool = False
-    warnings: list[str] = Field(
+    warnings: list[ScriptWarningOut] = Field(
         default_factory=list,
         description="Script-step degradations produced by this evaluation.",
     )
@@ -1006,8 +1032,9 @@ class TablePageOut(BaseModel):
     offset: int
     model_rev: int
     #: script-step degradations from navigations this evaluation triggered
-    #: (pruned-frontier warnings etc.) + nothing else today.
-    warnings: list[str] = Field(default_factory=list)
+    #: (pruned-frontier warnings etc.) + nothing else today. Structured, with
+    #: aggregated counts; the client renders the copy.
+    warnings: list[ScriptWarningOut] = Field(default_factory=list)
     #: None when the table has no script column at all; otherwise the
     #: poll-again contract for this page (see `ScriptStatusOut`).
     script_status: ScriptStatusOut | None = None

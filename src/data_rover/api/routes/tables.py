@@ -51,6 +51,7 @@ from ..schemas import (
     ScriptErrorItemOut,
     ScriptErrorsOut,
     ScriptStatusOut,
+    ScriptWarningOut,
     TableCellOut,
     TableColumnOut,
     TablePageOut,
@@ -461,7 +462,11 @@ def evaluate_table(
                             script_status = ScriptStatusOut(
                                 state="computing", done=job.done, total=job.total
                             )
-            warnings = list(script_ctx.warnings) if script_ctx is not None else []
+            warnings = (
+                [ScriptWarningOut.from_core(w) for w in script_ctx.warnings]
+                if script_ctx is not None
+                else []
+            )
         finally:
             close_script_context(script_ctx, acquired)
     except LookupError as exc:

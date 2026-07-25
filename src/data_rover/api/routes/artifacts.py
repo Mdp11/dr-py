@@ -48,6 +48,7 @@ from ..schemas import (
     ChainPageOut,
     ChainValueOut,
     EvaluateNavigationIn,
+    ScriptWarningOut,
 )
 from ..script_eval import close_script_context, open_script_context
 from ..script_runner import get_runner
@@ -316,5 +317,5 @@ def evaluate_navigation(
         ],
         total=len(result.chains),
         truncated=result.truncated,
-        warnings=result.warnings,
+        warnings=[ScriptWarningOut.from_core(w) for w in result.warnings],
     )
