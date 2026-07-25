@@ -354,6 +354,26 @@ def _row_source_base_slots(defn: TableDefinition, base_keys: list[RowKey]) -> in
     return len(base_keys[0]) if base_keys else 1
 
 
+def base_slot_count(defn: TableDefinition, row_keys: list[RowKey]) -> int:
+    """Number of ROW-SOURCE slots at the head of a FULLY BUILT row key.
+
+    `_row_source_base_slots` answers the same question from the PRE-expand
+    base keys; callers downstream of `build_rows` (the exporters) only hold
+    the post-expand keys, where the count is `len(key)` minus one slot per
+    expand column. Both assume every chain of a chains row source has the
+    same length, which is the assumption `_row_source_base_slots` already
+    makes when it reads `len(base_keys[0])`.
+    """
+    if defn.row_source.kind != "chains":
+        return 1
+    if not row_keys:
+        return 1
+    expands = sum(
+        1 for c in defn.columns if getattr(c, "mode", "collapse") == "expand"
+    )
+    return len(row_keys[0]) - expands
+
+
 @dataclass(frozen=True)
 class RowBuild:
     keys: list[RowKey]

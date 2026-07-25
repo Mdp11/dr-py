@@ -8,6 +8,8 @@ Spec: docs/superpowers/specs/2026-07-25-table-json-export-design.md
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from data_rover.core.model.model import Model
 from data_rover.core.model.naming import display_name
 
@@ -21,7 +23,8 @@ from .cells import (
     ValueCell,
     ValuesCell,
 )
-from .schema import Column, TableDefinition
+from .evaluate import _expand_slot_of
+from .schema import Column, ColumnRef, TableDefinition
 
 
 def resolve_json_keys(defn: TableDefinition) -> list[str | None]:
@@ -105,3 +108,101 @@ def render_cell(model: Model, cell: Cell, mode: str) -> object:
 
 def _mode_of(col: Column) -> str:
     return col.json_export.value if col.json_export is not None else "name"
+
+
+@dataclass(frozen=True)
+class GroupPlan:
+    """Static grouping layout, derived once per export and reused per row.
+
+    `grouped` holds only the columns whose `group` flag is HONORED — a visible
+    `expand` column. Everything else about the plan is derived from those.
+    """
+
+    #: honored grouped columns, ascending
+    grouped: tuple[int, ...]
+    #: grouped column -> its row-key slot
+    slot_of: dict[int, int]
+    #: grouped column -> the columns rendered inside its array entries,
+    #: ascending and always starting with the grouped column itself
+    members: dict[int, tuple[int, ...]]
+    #: grouped column -> the grouped columns nested directly inside it
+    children: dict[int, tuple[int, ...]]
+    #: visible columns rendered on the top-level object
+    top_columns: tuple[int, ...]
+    #: grouped columns with no grouped ancestor
+    top_groups: tuple[int, ...]
+
+
+def _deps(defn: TableDefinition) -> list[set[int]]:
+    """Per column, the TRANSITIVE set of columns its source chain reaches.
+
+    Single forward pass: the schema guarantees a `ColumnRef` points strictly
+    backward, so the referenced column's own set is always already computed.
+    """
+    out: list[set[int]] = []
+    for col in defn.columns:
+        src = col.source
+        if isinstance(src, ColumnRef):
+            out.append({src.index} | out[src.index])
+        else:
+            out.append(set())
+    return out
+
+
+def build_group_plan(defn: TableDefinition, base_slots: int) -> GroupPlan:
+    """Work out what nests inside what, from the definition alone.
+
+    A column `j` is OWNED BY grouped column `k` when `k` is in `deps(j)`; when
+    several grouped columns qualify the INNERMOST (largest index) wins, which
+    is what makes `{part: [{subpart: [{mass: ...}]}]}` come out right instead
+    of hoisting `mass` up beside `subpart`.
+
+    `group` is honored only on a VISIBLE EXPAND column. A stale flag on a
+    collapse or hidden column is IGNORED rather than rejected: the column
+    editor can flip expand->collapse at any moment, and 422-ing there would
+    block exporting the whole table over a leftover checkbox.
+    """
+    deps = _deps(defn)
+    grouped = tuple(
+        i
+        for i, c in enumerate(defn.columns)
+        if c.json_export is not None
+        and c.json_export.group
+        and not c.hidden
+        and getattr(c, "mode", "collapse") == "expand"
+    )
+    gset = set(grouped)
+
+    def owner(i: int) -> int | None:
+        candidates = [k for k in gset if k in deps[i]]
+        return max(candidates) if candidates else None
+
+    members: dict[int, list[int]] = {k: [] for k in grouped}
+    children: dict[int, list[int]] = {k: [] for k in grouped}
+    top_columns: list[int] = []
+    top_groups: list[int] = []
+
+    for i, col in enumerate(defn.columns):
+        if col.hidden:
+            continue  # evaluated, never emitted
+        home = owner(i)
+        if i in gset:
+            # A grouped column renders its own value inside its own entries,
+            # and nests under its grouped ANCESTOR (never under itself).
+            members[i].append(i)
+            (children[home] if home is not None else top_groups).append(i)
+        elif home is None:
+            top_columns.append(i)
+        else:
+            members[home].append(i)
+
+    # Members come out ascending for free: ownership requires a backward
+    # reference, so a grouped column always precedes everything it owns.
+    return GroupPlan(
+        grouped=grouped,
+        slot_of={k: _expand_slot_of(defn, base_slots, k) for k in grouped},
+        members={k: tuple(v) for k, v in members.items()},
+        children={k: tuple(v) for k, v in children.items()},
+        top_columns=tuple(top_columns),
+        top_groups=tuple(top_groups),
+    )

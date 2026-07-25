@@ -4,6 +4,8 @@ Grouping is slot arithmetic over the evaluator's RowKey tuples, so these tests
 build real rows through `build_rows`/`evaluate_cells` rather than hand-rolling
 cells — a hand-rolled cell cannot catch a slot-index mistake."""
 
+import copy
+
 from data_rover.core.metamodel.schema import ElementType, Metamodel, PropertyDef
 from data_rover.core.model.model import Model
 from data_rover.core.table.cells import (
@@ -14,7 +16,8 @@ from data_rover.core.table.cells import (
     ValueCell,
     ValuesCell,
 )
-from data_rover.core.table.json_export import render_cell, resolve_json_keys
+from data_rover.core.table.evaluate import base_slot_count
+from data_rover.core.table.json_export import build_group_plan, render_cell, resolve_json_keys
 from data_rover.core.table.schema import TABLE_ADAPTER
 
 
@@ -199,3 +202,171 @@ def test_dangling_element_id_becomes_an_error_marker_not_a_crash():
     assert render_cell(model, ElementCell(element_id="gone"), "name") == {
         "$error": "unknown element gone"
     }
+
+
+def _nav_doc() -> dict:
+    """Block rows; an expand navigation column; a property sourced from it.
+
+    Returns a DOC, not a definition: every variant below tweaks the doc and
+    re-validates through `TABLE_ADAPTER`. Do not reach for
+    `model_copy(update=...)` — it skips validation, so `json_export` would stay
+    a raw dict and `.group` would blow up with an AttributeError.
+    """
+    return {
+        "row_source": {"kind": "scope", "types": ["Block"]},
+        "columns": [
+            {"kind": "property", "source": {"kind": "row"}, "name": "name", "header": "Name"},
+            {
+                "kind": "navigation",
+                "source": {"kind": "row"},
+                "navigation": {},
+                "mode": "expand",
+                "header": "Component",
+            },
+            {
+                "kind": "property",
+                "source": {"kind": "column", "index": 1},
+                "name": "mass",
+                "header": "Component Mass",
+            },
+        ],
+    }
+
+
+def _validated(doc: dict, **column_patches: dict):
+    """Validate `doc` after merging `{index: patch}` into its columns."""
+    doc = copy.deepcopy(doc)
+    for index, patch in column_patches.items():
+        doc["columns"][int(index)].update(patch)
+    return TABLE_ADAPTER.validate_python(doc)
+
+
+def test_base_slot_count_is_one_for_a_scope_source():
+    assert base_slot_count(_validated(_nav_doc()), [("a", "b")]) == 1
+
+
+def test_no_grouping_means_every_column_is_top_level():
+    plan = build_group_plan(_validated(_nav_doc()), base_slots=1)
+    assert plan.grouped == ()
+    assert plan.top_columns == (0, 1, 2)
+    assert plan.top_groups == ()
+
+
+def test_grouping_pulls_dependents_into_the_group():
+    defn = _validated(_nav_doc(), **{"1": {"json_export": {"group": True}}})
+    plan = build_group_plan(defn, base_slots=1)
+    assert plan.grouped == (1,)
+    assert plan.top_columns == (0,)
+    assert plan.top_groups == (1,)
+    assert plan.members[1] == (1, 2)   # the grouped column itself, then its dependent
+    assert plan.children[1] == ()
+    assert plan.slot_of[1] == 1        # base slot 0, then the first expand column
+
+
+def test_group_flag_is_ignored_on_a_collapse_column():
+    defn = _validated(
+        _nav_doc(), **{"1": {"json_export": {"group": True}, "mode": "collapse"}}
+    )
+    assert build_group_plan(defn, base_slots=1).grouped == ()
+
+
+def test_group_flag_is_ignored_on_a_hidden_column():
+    defn = _validated(
+        _nav_doc(), **{"1": {"json_export": {"group": True}, "hidden": True}}
+    )
+    assert build_group_plan(defn, base_slots=1).grouped == ()
+
+
+def test_nested_groups_nest_by_dependency():
+    doc = {
+        "row_source": {"kind": "scope", "types": ["Block"]},
+        "columns": [
+            {"kind": "property", "source": {"kind": "row"}, "name": "name", "header": "Name"},
+            {
+                "kind": "navigation",
+                "source": {"kind": "row"},
+                "navigation": {},
+                "mode": "expand",
+                "header": "Part",
+                "json_export": {"group": True},
+            },
+            {
+                "kind": "navigation",
+                "source": {"kind": "column", "index": 1},
+                "navigation": {},
+                "mode": "expand",
+                "header": "Subpart",
+                "json_export": {"group": True},
+            },
+        ],
+    }
+    plan = build_group_plan(TABLE_ADAPTER.validate_python(doc), base_slots=1)
+    assert plan.grouped == (1, 2)
+    assert plan.top_columns == (0,)
+    assert plan.top_groups == (1,)
+    assert plan.children[1] == (2,)
+    assert plan.members[1] == (1,)
+    assert plan.members[2] == (2,)
+    assert plan.slot_of == {1: 1, 2: 2}
+
+
+def test_two_independent_groups_are_both_top_level():
+    doc = {
+        "row_source": {"kind": "scope", "types": ["Block"]},
+        "columns": [
+            {
+                "kind": "navigation",
+                "source": {"kind": "row"},
+                "navigation": {},
+                "mode": "expand",
+                "header": "A",
+                "json_export": {"group": True},
+            },
+            {
+                "kind": "navigation",
+                "source": {"kind": "row"},
+                "navigation": {},
+                "mode": "expand",
+                "header": "B",
+                "json_export": {"group": True},
+            },
+        ],
+    }
+    plan = build_group_plan(TABLE_ADAPTER.validate_python(doc), base_slots=1)
+    assert plan.top_groups == (0, 1)
+    assert plan.children == {0: (), 1: ()}
+    assert plan.slot_of == {0: 1, 1: 2}
+
+
+def test_innermost_grouped_ancestor_owns_a_dependent():
+    """A column depending on BOTH grouped columns belongs to the inner one."""
+    doc = {
+        "row_source": {"kind": "scope", "types": ["Block"]},
+        "columns": [
+            {
+                "kind": "navigation",
+                "source": {"kind": "row"},
+                "navigation": {},
+                "mode": "expand",
+                "header": "Part",
+                "json_export": {"group": True},
+            },
+            {
+                "kind": "navigation",
+                "source": {"kind": "column", "index": 0},
+                "navigation": {},
+                "mode": "expand",
+                "header": "Subpart",
+                "json_export": {"group": True},
+            },
+            {
+                "kind": "property",
+                "source": {"kind": "column", "index": 1},
+                "name": "mass",
+                "header": "Mass",
+            },
+        ],
+    }
+    plan = build_group_plan(TABLE_ADAPTER.validate_python(doc), base_slots=1)
+    assert plan.members[0] == (0,)
+    assert plan.members[1] == (1, 2)
