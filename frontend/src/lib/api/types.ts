@@ -713,6 +713,16 @@ export const SnippetSourceSchema = z.object({
 });
 export type SnippetSource = z.infer<typeof SnippetSourceSchema>;
 
+/** Per-column JSON-export settings. Mirrors core/table/schema.py's
+ *  JsonColumnOptions. `group` is honored by the backend only on a VISIBLE
+ *  EXPAND column; a stale flag elsewhere is ignored, not rejected. */
+export const JsonColumnOptionsSchema = z.object({
+	key: z.string().default(''),
+	value: z.enum(['name', 'id', 'object']).default('name'),
+	group: z.boolean().default(false)
+});
+export type JsonColumnOptions = z.infer<typeof JsonColumnOptionsSchema>;
+
 const ScriptColumnSchema = z.object({
 	kind: z.literal('script'),
 	source: ColumnSourceSchema.default({ kind: 'row', chain_index: 0 }),
@@ -721,7 +731,8 @@ const ScriptColumnSchema = z.object({
 	keep_empty: z.boolean().default(true),
 	header: z.string().default(''),
 	width_px: z.number().int().nullish(),
-	hidden: z.boolean().default(false)
+	hidden: z.boolean().default(false),
+	json_export: JsonColumnOptionsSchema.nullish()
 });
 
 export const ScopeRowsSchema = z.object({
@@ -749,7 +760,8 @@ const ElementColumnSchema = z.object({
 	source: ColumnSourceSchema.default({ kind: 'row', chain_index: 0 }),
 	header: z.string().default(''),
 	width_px: z.number().int().nullish(),
-	hidden: z.boolean().default(false)
+	hidden: z.boolean().default(false),
+	json_export: JsonColumnOptionsSchema.nullish()
 });
 const PropertyColumnSchema = z.object({
 	kind: z.literal('property'),
@@ -759,7 +771,8 @@ const PropertyColumnSchema = z.object({
 	keep_empty: z.boolean().default(true),
 	header: z.string().default(''),
 	width_px: z.number().int().nullish(),
-	hidden: z.boolean().default(false)
+	hidden: z.boolean().default(false),
+	json_export: JsonColumnOptionsSchema.nullish()
 });
 const NavigationColumnSchema = z.object({
 	kind: z.literal('navigation'),
@@ -772,7 +785,8 @@ const NavigationColumnSchema = z.object({
 	cell_cap: z.number().int().default(20),
 	header: z.string().default(''),
 	width_px: z.number().int().nullish(),
-	hidden: z.boolean().default(false)
+	hidden: z.boolean().default(false),
+	json_export: JsonColumnOptionsSchema.nullish()
 });
 export const ColumnSchema = z.discriminatedUnion('kind', [
 	ElementColumnSchema,

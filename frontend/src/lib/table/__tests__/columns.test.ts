@@ -14,7 +14,10 @@ import {
 	newNavigationColumn,
 	newPropertyColumn,
 	newScriptColumn,
-	cloneColumn
+	cloneColumn,
+	defaultJsonKeys,
+	setColumnJsonOptions,
+	snakeCaseKey
 } from '$lib/table/columns';
 import { ColumnSchema, TableDefinitionSchema } from '$lib/api/types';
 import type { Column, NavigationDefinition, TableDefinition } from '$lib/api/types';
@@ -590,5 +593,75 @@ describe('cloneColumn', () => {
 		const withNav = addColumn(base, newNavigationColumn());
 		const d = cloneColumn(withNav, 1);
 		expect(() => TableDefinitionSchema.parse(d)).not.toThrow();
+	});
+});
+
+function defn(...columns: unknown[]): TableDefinition {
+	return {
+		schema_version: 1,
+		row_source: { kind: 'scope', types: ['Block'], criteria: [] },
+		columns,
+		default_cell_mode: 'collapse',
+		show_row_numbers: false
+	} as TableDefinition;
+}
+
+function el(over: Record<string, unknown> = {}) {
+	return {
+		kind: 'element',
+		source: { kind: 'row', chain_index: 0 },
+		header: '',
+		hidden: false,
+		...over
+	};
+}
+
+describe('defaultJsonKeys', () => {
+	it('mirrors the backend: header, then kind_index, deduped', () => {
+		const d = defn(el({ header: 'Name' }), el({ header: '' }), el({ header: 'Name' }));
+		expect(defaultJsonKeys(d)).toEqual(['Name', 'element_1', 'Name_2']);
+	});
+
+	it('prefers an explicit key', () => {
+		const d = defn(
+			el({ header: 'Name', json_export: { key: 'name', value: 'name', group: false } })
+		);
+		expect(defaultJsonKeys(d)).toEqual(['name']);
+	});
+
+	it('gives a hidden column no key and lets it consume no name', () => {
+		const d = defn(el({ header: 'Mass', hidden: true }), el({ header: 'Mass' }));
+		expect(defaultJsonKeys(d)).toEqual([null, 'Mass']);
+	});
+});
+
+describe('snakeCaseKey', () => {
+	it('lowercases and underscores', () => {
+		expect(snakeCaseKey('Component Mass')).toBe('component_mass');
+	});
+	it('collapses punctuation and runs of separators', () => {
+		expect(snakeCaseKey('  Mass (kg) ')).toBe('mass_kg');
+	});
+	it('splits camelCase', () => {
+		expect(snakeCaseKey('grossMass')).toBe('gross_mass');
+	});
+	it('leaves an already-snake key alone', () => {
+		expect(snakeCaseKey('mass_kg')).toBe('mass_kg');
+	});
+});
+
+describe('setColumnJsonOptions', () => {
+	it('creates the options object when absent and keeps other columns', () => {
+		const d = defn(el({ header: 'A' }), el({ header: 'B' }));
+		const next = setColumnJsonOptions(d, 1, { key: 'b' });
+		expect(next.columns[1].json_export).toEqual({ key: 'b', value: 'name', group: false });
+		expect(next.columns[0].json_export).toBeUndefined();
+		expect(d.columns[1].json_export).toBeUndefined(); // input not mutated
+	});
+
+	it('merges into existing options', () => {
+		const d = defn(el({ json_export: { key: 'a', value: 'id', group: false } }));
+		const next = setColumnJsonOptions(d, 0, { group: true });
+		expect(next.columns[0].json_export).toEqual({ key: 'a', value: 'id', group: true });
 	});
 });

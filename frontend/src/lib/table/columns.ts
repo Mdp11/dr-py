@@ -24,7 +24,13 @@
  *    leaked `$state` proxy once bricked tables via `structuredClone` —
  *    reference-preserving copies sidestep that entire class of failure.)
  */
-import type { Column, ColumnSource, NavigationDefinition, TableDefinition } from '$lib/api/types';
+import type {
+	Column,
+	ColumnSource,
+	JsonColumnOptions,
+	NavigationDefinition,
+	TableDefinition
+} from '$lib/api/types';
 import { chainColumns } from '$lib/navigation/tree';
 
 export class ColumnInUseError extends Error {}
@@ -287,4 +293,56 @@ export function columnKindLabel(kind: string): string {
 	if (kind === 'navigation') return 'Navigation';
 	if (kind === 'script') return 'Script';
 	return kind;
+}
+
+const DEFAULT_JSON_OPTIONS: JsonColumnOptions = { key: '', value: 'name', group: false };
+
+/**
+ * The JSON key each column gets, mirroring `resolve_json_keys` in
+ * `core/table/json_export.py`: explicit key, else header, else `kind_index`,
+ * with later duplicates suffixed `_2`, `_3`. Hidden columns get `null` and
+ * consume no name.
+ *
+ * DISPLAY ONLY — this is what the settings pane shows as a placeholder. The
+ * authoritative keys are the backend's, and the preview pane renders through
+ * the backend for exactly that reason.
+ */
+export function defaultJsonKeys(defn: TableDefinition): (string | null)[] {
+	const used = new Set<string>();
+	return defn.columns.map((col, i) => {
+		if (col.hidden) return null;
+		const base = col.json_export?.key || col.header || `${col.kind}_${i}`;
+		let key = base;
+		let n = 2;
+		while (used.has(key)) key = `${base}_${n++}`;
+		used.add(key);
+		return key;
+	});
+}
+
+/** "Component Mass" -> "component_mass". Used only by the settings pane's
+ *  "snake_case all" button, which writes the result into each column's
+ *  `json_export.key` — the backend has no notion of slugification. */
+export function snakeCaseKey(s: string): string {
+	return s
+		.replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+		.replace(/[^a-zA-Z0-9]+/g, '_')
+		.replace(/^_+|_+$/g, '')
+		.toLowerCase();
+}
+
+/** Merge a patch into one column's JSON-export options, materializing the
+ *  options object if the column had none. Pure — returns a new definition. */
+export function setColumnJsonOptions(
+	defn: TableDefinition,
+	index: number,
+	patch: Partial<JsonColumnOptions>
+): TableDefinition {
+	const next = clone(defn);
+	const current = defn.columns[index].json_export ?? DEFAULT_JSON_OPTIONS;
+	next.columns[index] = {
+		...defn.columns[index],
+		json_export: { ...current, ...patch }
+	};
+	return next;
 }
