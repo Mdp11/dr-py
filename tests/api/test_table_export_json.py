@@ -166,3 +166,86 @@ def test_export_stays_a_read_only_post():
     from data_rover.api.authz import _READ_ONLY_POST_SUFFIXES
 
     assert "/tables/export" in _READ_ONLY_POST_SUFFIXES
+
+
+def test_preview_returns_rendered_sample(client):
+    _bootstrap_model(client)
+    body = {
+        "definition": {
+            "row_source": {"kind": "scope", "types": ["Block"]},
+            "columns": [
+                {"kind": "element", "source": {"kind": "row"}, "header": "Block"}
+            ],
+        }
+    }
+    r = client.post(papi("/tables/json-preview"), json=body, headers=AUTH_HEADERS)
+    assert r.status_code == 200
+    payload = r.json()
+    assert payload["truncated"] is False
+    docs = json.loads(payload["sample"])
+    assert isinstance(docs, list)
+    assert set(docs[0]) == {"Block"}
+
+
+def _blocks_column_body():
+    return {
+        "definition": {
+            "row_source": {"kind": "scope", "types": ["Block"]},
+            "columns": [
+                {"kind": "element", "source": {"kind": "row"}, "header": "Block"}
+            ],
+        }
+    }
+
+
+def _full_row_count(client) -> int:
+    """How many objects the UNBOUNDED json export produces for this fixture —
+    the preview assertions are stated relative to it, so they hold whatever
+    `_bootstrap_model` happens to seed."""
+    body = _blocks_column_body() | {"format": "json"}
+    r = client.post(papi("/tables/export"), json=body, headers=AUTH_HEADERS)
+    return len(json.loads(r.content))
+
+
+def test_preview_drops_the_last_possibly_partial_object(client, monkeypatch):
+    """With the window smaller than the table, the final object may be cut
+    mid-group, so it is dropped — every earlier one is complete."""
+    from data_rover.api.routes import tables as tables_route
+
+    _bootstrap_model(client)
+    total = _full_row_count(client)
+    assert total >= 3, "fixture too small: seed more Block elements first"
+    monkeypatch.setattr(tables_route, "PREVIEW_MAX_ROWS", total - 1)
+    r = client.post(
+        papi("/tables/json-preview"), json=_blocks_column_body(), headers=AUTH_HEADERS
+    )
+    payload = r.json()
+    assert payload["truncated"] is True
+    # window = total - 1 objects (no grouping: one row per object), minus the
+    # dropped last one.
+    assert len(json.loads(payload["sample"])) == total - 2
+
+
+def test_preview_keeps_a_lone_object_rather_than_showing_nothing(client, monkeypatch):
+    """Dropping the only object would blank the pane, so it is kept and
+    `truncated` carries the caveat instead."""
+    from data_rover.api.routes import tables as tables_route
+
+    _bootstrap_model(client)
+    assert _full_row_count(client) >= 2, (
+        "fixture too small: seed more Block elements first"
+    )
+    monkeypatch.setattr(tables_route, "PREVIEW_MAX_ROWS", 1)
+    r = client.post(
+        papi("/tables/json-preview"), json=_blocks_column_body(), headers=AUTH_HEADERS
+    )
+    payload = r.json()
+    assert payload["truncated"] is True
+    assert len(json.loads(payload["sample"])) == 1
+
+
+def test_preview_is_read_only_and_reachable_by_a_viewer(client):
+    """`/tables/json-preview` must be in authz._READ_ONLY_POST_SUFFIXES."""
+    from data_rover.api.authz import _READ_ONLY_POST_SUFFIXES
+
+    assert "/tables/json-preview" in _READ_ONLY_POST_SUFFIXES

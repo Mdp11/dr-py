@@ -931,6 +931,18 @@ class ExportTableIn(EvaluateTableIn):
     format: Literal["xlsx", "json"] = "xlsx"
 
 
+class JsonPreviewOut(BaseModel):
+    """A bounded, already-rendered JSON sample for the export settings UI.
+
+    `sample` is the rendered TEXT rather than parsed objects: the pane displays
+    it verbatim, and re-serializing it client-side would let key order and
+    formatting drift from what the real export produces.
+    """
+
+    sample: str
+    truncated: bool
+
+
 class TableColumnOut(BaseModel):
     kind: str
     header: str

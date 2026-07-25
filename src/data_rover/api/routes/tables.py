@@ -51,6 +51,7 @@ from ..deps import Session, get_request_session, require_model
 from ..schemas import (
     EvaluateTableIn,
     ExportTableIn,
+    JsonPreviewOut,
     ScriptErrorItemOut,
     ScriptErrorsOut,
     ScriptStatusOut,
@@ -793,6 +794,93 @@ def export_table(
         if _degraded():  # settled: every row has been consumed by now
             resp_headers["X-Table-Script-Errors"] = "true"
         return Response(content=blob, media_type=media_type, headers=resp_headers)
+    except LookupError as exc:
+        raise HTTPException(status_code=422, detail=f"unknown artifact {exc}") from exc
+    except (NavigationResolveError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    finally:
+        close_script_context(script_ctx, acquired)
+
+
+#: Rows the preview renders before it stops. Read as a module global at call
+#: time (never captured in a default argument) so a test can lower it.
+PREVIEW_MAX_ROWS = 200
+
+
+@router.post("/tables/json-preview")
+def json_preview(
+    payload: EvaluateTableIn,
+    project_id: str,
+    session: Session = Depends(get_request_session),
+    db: DbSession = Depends(get_db),
+    runner: ScriptRunner | None = Depends(get_runner),
+    settings: Settings = Depends(get_settings),
+) -> JsonPreviewOut:
+    """Read-only (viewer-callable; listed in authz._READ_ONLY_POST_SUFFIXES).
+
+    Exists so the JSON-export settings UI can show a live sample WITHOUT
+    reimplementing the grouping algorithm in TypeScript, where it would drift
+    from `core/table/json_export.py`. Same renderer, bounded input.
+
+    Bounded and CACHE-ONLY: it never kicks a script sweep and never answers
+    202. A script cell that has not been computed simply renders its `$error`
+    marker in the sample, which is the honest preview of what a user would get
+    if they exported right now.
+
+    The final top-level object is DROPPED when the window did not cover the
+    whole table: grouping merges rows, so the last group is likely cut
+    mid-way, while every earlier one is complete. Dropping it would leave the
+    pane blank for a single group wider than the window, so in that one case
+    the (approximate) object is kept and `truncated` says so.
+    """
+    metamodel, model = require_model(session)
+    script_ctx = None
+    acquired = False
+    try:
+        defn = _resolve_table(payload, project_id, db)
+        sort = (
+            SortSpec(column=payload.sort.column, direction=payload.sort.direction)
+            if payload.sort is not None
+            else None
+        )
+        if sort is not None and not (0 <= sort.column < len(defn.columns)):
+            raise ValueError(
+                f"sort column {sort.column} out of range "
+                f"(table has {len(defn.columns)} columns)"
+            )
+        # Same uncapped cell limits as the export: a preview whose navigation
+        # arrays were capped at 20 would not be a preview of the export.
+        limits = TableLimits(max_cell_elements=10**9, ignore_cell_caps=True)
+        script_ctx, acquired = open_script_context(
+            runner,
+            model,
+            settings,
+            needs_script=table_has_script(defn),
+            cell_cache=session.script_cell_cache,
+            rev=session.model_rev,
+        )
+        if script_ctx is not None:
+            script_ctx.cache_only = True
+        build = build_rows_ex(metamodel, model, defn, limits, script=script_ctx)
+        keys = build.keys
+        ordered = order_rows(
+            metamodel, model, defn, keys, sort, limits, script=script_ctx
+        )
+        window = ordered[:PREVIEW_MAX_ROWS]
+        truncated = len(ordered) > len(window)
+        docs = render_json(
+            model,
+            defn,
+            window,
+            iter_export_rows(metamodel, model, defn, window, limits, script=script_ctx),
+            build.base_slots,
+        )
+        if truncated and len(docs) > 1:
+            docs = docs[:-1]
+        return JsonPreviewOut(
+            sample=json.dumps(docs, ensure_ascii=False, indent=2),
+            truncated=truncated,
+        )
     except LookupError as exc:
         raise HTTPException(status_code=422, detail=f"unknown artifact {exc}") from exc
     except (NavigationResolveError, ValueError) as exc:
