@@ -226,6 +226,12 @@ describe('open-journey controller', () => {
 		}
 		expect(new Set(seen).size).toBe(SPLINES.length);
 		expect([...seen].sort()).toEqual([...SPLINES].sort());
+		// The set/length checks above pass even for the UNSHUFFLED authored
+		// order, so on their own they don't prove `beginJourney` shuffles at
+		// all. Under this test's rand = () => 0.999, the forward Fisher-Yates
+		// places SPLINES[18] at index 0 — pin that the walked order is not
+		// simply the authored one.
+		expect(seen).not.toEqual([...SPLINES]);
 	});
 
 	it('re-shuffles on wrap instead of replaying the same permutation', () => {
