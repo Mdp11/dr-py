@@ -186,7 +186,11 @@ def test_script_step_no_runner_fallback_prunes_silently() -> None:
 
 def test_script_step_visited_drop_warns() -> None:
     # identity return: every id the step returns is already in the chain, so
-    # the cycle guard drops them all -- previously with NO signal at all
+    # the cycle guard drops them all -- previously with NO signal at all.
+    # occurrences/total are per START ELEMENT (see the sibling tests above):
+    # the step is an identity return, so every one of the fixture's elements
+    # fires it once and drops exactly its own id -- len(model.elements) for
+    # both, matching e.g. test_script_step_error_prunes_with_warning.
     mm, model = _fixture()
     defn = _path([ScriptStep(snippet=_snip("def step(el): return [el]"))])
     res = evaluate(mm, model, defn, script=_ctx(model))
@@ -194,11 +198,10 @@ def test_script_step_visited_drop_warns() -> None:
     assert res.warnings == [
         ScriptWarning(
             code=ScriptWarningCode.NAV_ALREADY_VISITED,
-            occurrences=res.warnings[0].occurrences,
-            total=res.warnings[0].total,
+            occurrences=len(model.elements),
+            total=len(model.elements),
         )
     ]
-    assert res.warnings[0].total >= 1
 
 
 def test_unknown_ids_across_many_chains_sum_instead_of_collapsing() -> None:

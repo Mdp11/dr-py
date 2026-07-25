@@ -96,15 +96,17 @@ def test_code_is_a_plain_string_on_the_wire() -> None:
 
 
 def test_entries_copies_are_independent() -> None:
-    # Mutating what entries() returns must not corrupt the log.
-    # Entries are frozen and returned as fresh instances.
+    # Mutating what entries() returns must not corrupt the log. entries()
+    # returns a fresh LIST each call; the ScriptWarning instances inside it
+    # may be shared with the log because they are frozen, so identity
+    # equality on the elements is not the guarantee to pin here — only that
+    # nothing can be mutated through them.
     log = ScriptWarningLog()
     log.add(ScriptWarningCode.NAV_UNKNOWN_IDS, count=5)
     entries1 = log.entries
     entries2 = log.entries
     assert entries1 is not entries2  # Different list objects
-    assert entries1[0] is not entries2[0]  # Different ScriptWarning objects
-    assert entries1[0] == entries2[0]  # But same data
+    assert entries1[0] == entries2[0]  # Same data
     # Verify instances are frozen (cannot be mutated)
     import pytest
     with pytest.raises(AttributeError):

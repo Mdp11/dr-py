@@ -473,6 +473,7 @@ def test_page_warning_shape_is_stable(
     """Every warning on the wire carries the four fields the client formatter
     reads. A missing `total` would render as NaN in the strip."""
     body = _evaluate(client, BOOM_CODE)
+    assert body["warnings"]  # otherwise the loop below guards nothing
     for w in body["warnings"]:
         assert set(w) == {"code", "occurrences", "total", "detail"}
         assert isinstance(w["code"], str)
