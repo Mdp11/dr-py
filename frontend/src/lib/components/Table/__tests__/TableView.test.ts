@@ -9,6 +9,10 @@ import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ScriptWarning } from '$lib/api/types';
+// The whole `$lib/state` barrel is mocked below (`downloadTable: vi.fn(...)`)
+// — importing the name here resolves to that SAME mock instance, so calls
+// made through TableView's onclick handlers show up on it.
+import { downloadTable } from '$lib/state';
 import TableView from '../TableView.svelte';
 
 // Hoisted so the vi.mock factory (hoisted above imports) can reference it, and
@@ -976,6 +980,57 @@ describe('TableView row count', () => {
 		try {
 			expect(document.querySelector('[data-testid="table-row-count"]')?.textContent).toContain(
 				'50+'
+			);
+		} finally {
+			unmount(c);
+		}
+	});
+});
+
+// Task 10: the Export button is now a dropdown trigger (bits-ui's
+// DropdownMenu, not a Dialog) offering both file formats. Unlike the settings
+// Dialog elsewhere in this file, DropdownMenu.Content is not gated behind a
+// requestAnimationFrame-deferred close "animation" — PathCard's "Combine
+// with… ▾" menu (path-card.test.ts) opens its items with a plain click +
+// flushSync, no waitFor. `waitFor` is used below anyway, defensively, since a
+// portal-based Content is still one more render pass than an inline element.
+describe('TableView export format menu', () => {
+	afterEach(() => {
+		// downloadTable is a plain `vi.fn()` inside the vi.mock factory (not a
+		// vi.spyOn target), so the file's blanket `vi.restoreAllMocks()` in its
+		// own afterEach does not clear its call history — do it here so one
+		// test's click can't be mistaken for another's.
+		vi.mocked(downloadTable).mockClear();
+	});
+
+	it('offers both export formats and passes the chosen one through', async () => {
+		const c = render('tbl:draft:1');
+		try {
+			(document.querySelector('[data-testid="table-export-button"]') as HTMLElement).click();
+			flushSync();
+			await waitFor(() => !!document.querySelector('[data-testid="table-export-json"]'));
+			(document.querySelector('[data-testid="table-export-json"]') as HTMLElement).click();
+			flushSync();
+			expect(downloadTable).toHaveBeenCalledWith(
+				'tbl:draft:1',
+				expect.objectContaining({ format: 'json' })
+			);
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('exports xlsx when that item is chosen', async () => {
+		const c = render('tbl:draft:1');
+		try {
+			(document.querySelector('[data-testid="table-export-button"]') as HTMLElement).click();
+			flushSync();
+			await waitFor(() => !!document.querySelector('[data-testid="table-export-xlsx"]'));
+			(document.querySelector('[data-testid="table-export-xlsx"]') as HTMLElement).click();
+			flushSync();
+			expect(downloadTable).toHaveBeenCalledWith(
+				'tbl:draft:1',
+				expect.objectContaining({ format: 'xlsx' })
 			);
 		} finally {
 			unmount(c);

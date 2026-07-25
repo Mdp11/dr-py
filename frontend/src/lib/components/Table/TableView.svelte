@@ -33,6 +33,7 @@
 	} from '$lib/state';
 	import { AlertTriangle, Check, Search, Settings } from '@lucide/svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
+	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import {
 		addColumn,
 		newNavigationColumn,
@@ -288,13 +289,14 @@
 		}
 	}
 
-	async function exportTable(): Promise<void> {
-		if (exporting) return; // one export at a time — the button is disabled too
+	async function exportTable(format: 'xlsx' | 'json'): Promise<void> {
+		if (exporting) return; // one export at a time — the trigger is disabled too
 		saveError = null;
 		exporting = true;
 		exportAbort = new AbortController();
 		try {
 			await downloadTable(tabId, {
+				format,
 				onProgress: (p) => (exportProgress = p),
 				signal: exportAbort.signal
 			});
@@ -349,32 +351,46 @@
 						<Settings class="h-3.5 w-3.5" /> Settings
 					</button>
 				{/if}
-				<button
-					type="button"
-					data-testid="table-export-button"
-					class="flex items-center gap-1.5 rounded border border-input px-2 py-1 text-xs text-foreground/80 transition-colors hover:bg-muted disabled:opacity-60"
-					disabled={exporting}
-					title={exporting
-						? 'Waiting for this table\u2019s script values to finish computing'
-						: undefined}
-					onclick={() => void exportTable()}
-				>
-					<!-- A disabled button with static text is the whole "the export
-					     did nothing" complaint: the spinner is what says the retry
-					     loop is alive while the backend answers 202. -->
-					{#if exporting}
-						<span
-							class="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-muted border-t-primary"
-						></span>
-					{/if}
-					{#if exportProgress}
-						Preparing… {exportProgress.done}/{exportProgress.total ?? '…'}
-					{:else if exporting}
-						Exporting…
-					{:else}
-						Export
-					{/if}
-				</button>
+				<DropdownMenu.Root>
+					<DropdownMenu.Trigger
+						data-testid="table-export-button"
+						class="flex items-center gap-1.5 rounded border border-input px-2 py-1 text-xs text-foreground/80 transition-colors hover:bg-muted disabled:opacity-60"
+						disabled={exporting}
+						title={exporting
+							? 'Waiting for this table\u2019s script values to finish computing'
+							: undefined}
+					>
+						<!-- A disabled trigger with static text is the whole "the export
+						     did nothing" complaint: the spinner is what says the retry
+						     loop is alive while the backend answers 202. -->
+						{#if exporting}
+							<span
+								class="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-muted border-t-primary"
+							></span>
+						{/if}
+						{#if exportProgress}
+							Preparing… {exportProgress.done}/{exportProgress.total ?? '…'}
+						{:else if exporting}
+							Exporting…
+						{:else}
+							Export ▾
+						{/if}
+					</DropdownMenu.Trigger>
+					<DropdownMenu.Content align="end" class="w-44">
+						<DropdownMenu.Item
+							data-testid="table-export-xlsx"
+							onSelect={() => void exportTable('xlsx')}
+						>
+							Excel (.xlsx)
+						</DropdownMenu.Item>
+						<DropdownMenu.Item
+							data-testid="table-export-json"
+							onSelect={() => void exportTable('json')}
+						>
+							JSON (.json)
+						</DropdownMenu.Item>
+					</DropdownMenu.Content>
+				</DropdownMenu.Root>
 				{#if editable}
 					<button
 						type="button"
