@@ -93,3 +93,19 @@ def test_since_omits_untouched_kinds() -> None:
 def test_code_is_a_plain_string_on_the_wire() -> None:
     # Serialized straight into JSON by the API layer.
     assert ScriptWarningCode.NAV_UNKNOWN_IDS == "nav_unknown_ids"
+
+
+def test_entries_copies_are_independent() -> None:
+    # Mutating what entries() returns must not corrupt the log.
+    # Entries are frozen and returned as fresh instances.
+    log = ScriptWarningLog()
+    log.add(ScriptWarningCode.NAV_UNKNOWN_IDS, count=5)
+    entries1 = log.entries
+    entries2 = log.entries
+    assert entries1 is not entries2  # Different list objects
+    assert entries1[0] is not entries2[0]  # Different ScriptWarning objects
+    assert entries1[0] == entries2[0]  # But same data
+    # Verify instances are frozen (cannot be mutated)
+    import pytest
+    with pytest.raises(AttributeError):
+        entries1[0].occurrences = 0  # type: ignore[misc]

@@ -21,7 +21,7 @@ of an import cycle through `embed`.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 
 #: Cap on DISTINCT KINDS held at once (see `ScriptWarningLog.add`).
@@ -49,7 +49,7 @@ class ScriptWarningCode(StrEnum):
 type WarningKey = tuple[ScriptWarningCode, str | None]
 
 
-@dataclass
+@dataclass(frozen=True)
 class ScriptWarning:
     """One aggregated warning kind.
 
@@ -64,10 +64,6 @@ class ScriptWarning:
     total: int = 0
     detail: str | None = None
 
-    @property
-    def key(self) -> WarningKey:
-        return (self.code, self.detail)
-
 
 class ScriptWarningLog:
     """Insertion-ordered aggregate of `ScriptWarning`s, keyed by kind."""
@@ -77,9 +73,13 @@ class ScriptWarningLog:
 
     @property
     def entries(self) -> list[ScriptWarning]:
-        """The aggregate, in first-seen order. A fresh list per call — callers
-        must not rely on mutating it."""
-        return list(self._by_key.values())
+        """The aggregate, in first-seen order.
+
+        Returns a fresh list of new `ScriptWarning` instances on every call.
+        Mutating returned instances does not affect the log; instances are
+        frozen dataclasses.
+        """
+        return [replace(w) for w in self._by_key.values()]
 
     def add(
         self,
@@ -103,10 +103,13 @@ class ScriptWarningLog:
         if entry is None:
             if len(self._by_key) >= MAX_SCRIPT_WARNINGS:
                 return
-            entry = ScriptWarning(code=code, detail=detail)
-            self._by_key[key] = entry
-        entry.occurrences += 1
-        entry.total += count
+            self._by_key[key] = ScriptWarning(code=code, detail=detail, occurrences=1, total=count)
+        else:
+            self._by_key[key] = replace(
+                entry,
+                occurrences=entry.occurrences + 1,
+                total=entry.total + count,
+            )
 
     def snapshot(self) -> dict[WarningKey, tuple[int, int]]:
         """Freeze the current counts, for a later `since()`.
