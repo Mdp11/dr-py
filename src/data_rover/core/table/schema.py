@@ -98,6 +98,31 @@ ColumnSource = Annotated[RowSlot | ColumnRef, Field(discriminator="kind")]
 
 
 # ---- columns ----------------------------------------------------------------
+class JsonColumnOptions(BaseModel):
+    """Per-column JSON-export settings (spec:
+    docs/superpowers/specs/2026-07-25-table-json-export-design.md).
+
+    Lives on the COLUMN rather than on `TableDefinition` as an index-keyed map
+    deliberately: column indices move under reorder/insert/remove (the frontend
+    already carries `remapTableSortForRemove/Move/Insert` to keep a single index
+    valid across those edits), and settings attached to the column travel with
+    it for free.
+
+    The field is named `json_export` and not `json`: pydantic v2 still carries a
+    deprecated `.json()` method that a field of that name would collide with.
+    """
+
+    #: "" means "derive from the header" — see `resolve_json_keys`.
+    key: str = ""
+    #: How an element reference renders. Ignored by columns that never produce
+    #: elements (a property column), which is tolerated rather than rejected.
+    value: Literal["name", "id", "object"] = "name"
+    #: Roll this `expand` column's rows back up into one array. Honored only on
+    #: a VISIBLE EXPAND column; ignored elsewhere (the column editor can flip
+    #: expand->collapse at any time and a 422 would block the whole export).
+    group: bool = False
+
+
 class ElementColumn(BaseModel):
     kind: Literal["element"] = "element"
     source: ColumnSource = Field(default_factory=RowSlot)
@@ -108,6 +133,9 @@ class ElementColumn(BaseModel):
     #: xlsx export. Never feed this into evaluation — dropping the column
     #: would shift ColumnRef indices and the expand-slot arithmetic.
     hidden: bool = False
+    #: JSON-export settings; `None` means "all defaults", which keeps saved
+    #: payloads clean for the overwhelming majority of columns.
+    json_export: JsonColumnOptions | None = None
 
 
 class PropertyColumn(BaseModel):
@@ -123,6 +151,9 @@ class PropertyColumn(BaseModel):
     #: xlsx export. Never feed this into evaluation — dropping the column
     #: would shift ColumnRef indices and the expand-slot arithmetic.
     hidden: bool = False
+    #: JSON-export settings; `None` means "all defaults", which keeps saved
+    #: payloads clean for the overwhelming majority of columns.
+    json_export: JsonColumnOptions | None = None
 
 
 class NavigationColumn(BaseModel):
@@ -141,6 +172,9 @@ class NavigationColumn(BaseModel):
     #: xlsx export. Never feed this into evaluation — dropping the column
     #: would shift ColumnRef indices and the expand-slot arithmetic.
     hidden: bool = False
+    #: JSON-export settings; `None` means "all defaults", which keeps saved
+    #: payloads clean for the overwhelming majority of columns.
+    json_export: JsonColumnOptions | None = None
 
 
 class ScriptColumn(BaseModel):
@@ -156,6 +190,9 @@ class ScriptColumn(BaseModel):
     #: xlsx export. Never feed this into evaluation — dropping the column
     #: would shift ColumnRef indices and the expand-slot arithmetic.
     hidden: bool = False
+    #: JSON-export settings; `None` means "all defaults", which keeps saved
+    #: payloads clean for the overwhelming majority of columns.
+    json_export: JsonColumnOptions | None = None
 
 
 Column = Annotated[
