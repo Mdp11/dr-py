@@ -270,6 +270,18 @@ describe('exportTable', () => {
 		expect((seen as { format: string }).format).toBe('xlsx');
 	});
 
+	it('falls back to a .json filename when content-disposition is missing', async () => {
+		server.use(http.post(`${BASE}/tables/export`, () => new HttpResponse('[]')));
+		const res = await exportTable({ definition: DEFN, format: 'json' }, cfg);
+		expect(res.kind === 'ready' && res.filename).toBe('table.json');
+	});
+
+	it('falls back to a .xlsx filename when content-disposition is missing', async () => {
+		server.use(http.post(`${BASE}/tables/export`, () => new HttpResponse('x')));
+		const res = await exportTable({ definition: DEFN }, cfg);
+		expect(res.kind === 'ready' && res.filename).toBe('table.xlsx');
+	});
+
 	it('fetches a json preview', async () => {
 		server.use(
 			http.post(`${BASE}/tables/json-preview`, () =>

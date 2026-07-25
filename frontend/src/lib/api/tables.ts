@@ -70,7 +70,11 @@ export async function exportTable(
 	}
 	const disp = res.headers.get('content-disposition') ?? '';
 	const m = /filename="([^"]+)"/.exec(disp);
-	return { kind: 'ready', blob: await res.blob(), filename: m?.[1] ?? 'table.xlsx' };
+	return {
+		kind: 'ready',
+		blob: await res.blob(),
+		filename: m?.[1] ?? `table.${args.format ?? 'xlsx'}`
+	};
 }
 
 /**
