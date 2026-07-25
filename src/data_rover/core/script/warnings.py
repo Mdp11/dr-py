@@ -60,7 +60,7 @@ class ScriptWarning:
     """
 
     code: ScriptWarningCode
-    occurrences: int = 0
+    occurrences: int
     total: int = 0
     detail: str | None = None
 
@@ -75,11 +75,12 @@ class ScriptWarningLog:
     def entries(self) -> list[ScriptWarning]:
         """The aggregate, in first-seen order.
 
-        Returns a fresh list of new `ScriptWarning` instances on every call.
-        Mutating returned instances does not affect the log; instances are
-        frozen dataclasses.
+        A fresh list on every call, but the `ScriptWarning` instances inside
+        it are shared with the log: since they are frozen, a caller has no
+        way to corrupt the aggregate through them, so copying the instances
+        too would buy nothing.
         """
-        return [replace(w) for w in self._by_key.values()]
+        return list(self._by_key.values())
 
     def add(
         self,
@@ -116,9 +117,11 @@ class ScriptWarningLog:
     def snapshot(self) -> dict[WarningKey, tuple[int, int]]:
         """Freeze the current counts, for a later `since()`.
 
-        Needed because entries mutate IN PLACE: `navigation.evaluate` used to
-        slice `warnings[w0:]` to return only its own call's warnings, and an
-        index slice cannot see growth in an entry that already existed.
+        Needed because a repeat `add()` of an existing key keeps that entry's
+        POSITION in `_by_key` (insertion order is by first occurrence, not
+        last write): `navigation.evaluate` used to slice `warnings[w0:]` to
+        return only its own call's warnings, and a positional slice cannot
+        see growth in an entry that already existed earlier in the order.
         """
         return {k: (w.occurrences, w.total) for k, w in self._by_key.items()}
 

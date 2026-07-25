@@ -123,9 +123,10 @@ def evaluate(
 
     `script`, when given, backs any `ScriptStep` hop encountered (top-level
     or nested); its shared warnings channel's COUNTS are snapshotted at entry
-    and diffed on exit (entries mutate in place, so an index slice cannot see
-    growth in a kind that already existed) so the returned
-    `ChainResult.warnings` carries only what THIS call generated."""
+    and diffed on exit (a repeat warning keeps its first-seen POSITION in the
+    shared log, so a positional slice can't see growth in a kind that already
+    existed) so the returned `ChainResult.warnings` carries only what THIS
+    call generated."""
     budget = _Budget(max_visited=limits.max_visited)
     w0 = script.warning_snapshot() if script is not None else {}
     if isinstance(defn, SetExpression):
