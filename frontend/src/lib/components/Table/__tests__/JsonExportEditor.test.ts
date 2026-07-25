@@ -17,7 +17,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import * as tablesApi from '$lib/api/tables';
 import type { TableDefinition } from '$lib/api/types';
-import { ensureTableDraft, getTableDraft, updateTableDefinition } from '$lib/state';
+import { ensureTableDraft, getTableDraft, setTableSort, updateTableDefinition } from '$lib/state';
 import JsonExportEditor from '../JsonExportEditor.svelte';
 
 const TAB_ID = 'tbl:draft:json-export-test';
@@ -108,6 +108,13 @@ function testid(id: string): HTMLElement | null {
 
 afterEach(() => {
 	document.body.innerHTML = '';
+	// `_sorts` (unlike the draft's definition) is not reset by re-seeding —
+	// clear it so a sort set by one test can't leak into the next test's
+	// previewTableJson call args. Done BEFORE restoreAllMocks: setTableSort
+	// fire-and-forgets a loadTablePage/evaluateTable call, and this test's
+	// evaluateTable mock (from `seed()`) is still installed at this point —
+	// after restoreAllMocks that call would hit the real, absent dev backend.
+	setTableSort(TAB_ID, undefined);
 	vi.restoreAllMocks();
 });
 
@@ -217,6 +224,117 @@ describe('JsonExportEditor', () => {
 			expect(testid('json-preview-truncated')).not.toBeNull();
 		} finally {
 			unmount(c);
+		}
+	});
+
+	// Fix round 1, Finding 3: the happy-path preview test above only ever
+	// asserts the badge's PRESENCE — a component that rendered
+	// json-preview-truncated unconditionally would still pass it. Wait for the
+	// same round trip to land (proving the response was actually consulted,
+	// not just the `truncated` state's zero-value default) and then assert
+	// absence.
+	it('hides the truncated badge when the preview response says truncated: false', async () => {
+		await seed();
+		vi.spyOn(tablesApi, 'previewTableJson').mockResolvedValue({ sample: '[]', truncated: false });
+		const c = render();
+		try {
+			await waitFor(() => testid('json-preview')?.textContent === '[]');
+			expect(testid('json-preview-truncated')).toBeNull();
+		} finally {
+			unmount(c);
+		}
+	});
+
+	// Fix round 1, Finding 1: `downloadTable` always sends the active grid
+	// sort (`_sortFor` in table-editor.svelte.ts), and grouping rolls same-key
+	// rows into arrays — a different row ORDER can therefore produce a
+	// different grouped SHAPE, not just reordered output. The preview must
+	// send the same sort or it can honestly disagree with the download, which
+	// is the one thing `POST /tables/json-preview` exists to prevent.
+	it('includes the active grid sort in the preview request', async () => {
+		await seed();
+		setTableSort(TAB_ID, { column: 1, direction: 'asc' });
+		flushSync();
+		const preview = vi
+			.spyOn(tablesApi, 'previewTableJson')
+			.mockResolvedValue({ sample: '[]', truncated: false });
+		const c = render();
+		try {
+			await waitFor(() => preview.mock.calls.length > 0);
+			expect(preview).toHaveBeenCalledWith(
+				expect.objectContaining({ sort: { column: 1, direction: 'asc' } })
+			);
+		} finally {
+			unmount(c);
+		}
+	});
+
+	// Fix round 1, Finding 1 (regression half): changing the sort AFTER the
+	// panel is already open must refresh the preview too — the effect reads
+	// `getTableSort` on every run, not just once at mount.
+	it('re-fetches the preview when the sort changes while the panel is open', async () => {
+		await seed();
+		const preview = vi
+			.spyOn(tablesApi, 'previewTableJson')
+			.mockResolvedValue({ sample: '[]', truncated: false });
+		const c = render();
+		try {
+			await waitFor(() => preview.mock.calls.length > 0);
+			expect(preview).toHaveBeenLastCalledWith(expect.objectContaining({ sort: undefined }));
+
+			setTableSort(TAB_ID, { column: 0, direction: 'desc' });
+			flushSync();
+			await waitFor(
+				() => preview.mock.calls.at(-1)?.[0]?.sort !== undefined && preview.mock.calls.length > 1
+			);
+			expect(preview).toHaveBeenLastCalledWith(
+				expect.objectContaining({ sort: { column: 0, direction: 'desc' } })
+			);
+		} finally {
+			unmount(c);
+		}
+	});
+
+	// Fix round 1, Finding 4: the debounce and token guard are correct by
+	// inspection, but deleting the `setTimeout` entirely would leave every
+	// other test in this file green (they all eventually wait for the single
+	// settled call). Pin the call COUNT under rapid edits instead of just the
+	// final content.
+	it('debounces rapid edits into a single preview call', async () => {
+		vi.useFakeTimers();
+		try {
+			await seed();
+			const preview = vi
+				.spyOn(tablesApi, 'previewTableJson')
+				.mockResolvedValue({ sample: '[]', truncated: false });
+			const c = render();
+			try {
+				const key0 = testid('json-key-0') as HTMLInputElement;
+				for (const v of ['n', 'na', 'nam', 'name']) {
+					key0.value = v;
+					key0.dispatchEvent(new Event('input', { bubbles: true }));
+					flushSync();
+					// Each edit re-arms the debounce well inside the 300ms window, so
+					// none of these advances alone should let a call through.
+					await vi.advanceTimersByTimeAsync(100);
+				}
+				expect(preview).not.toHaveBeenCalled();
+				await vi.advanceTimersByTimeAsync(300);
+				expect(preview).toHaveBeenCalledTimes(1);
+				expect(preview).toHaveBeenCalledWith(
+					expect.objectContaining({
+						definition: expect.objectContaining({
+							columns: expect.arrayContaining([
+								expect.objectContaining({ json_export: expect.objectContaining({ key: 'name' }) })
+							])
+						})
+					})
+				);
+			} finally {
+				unmount(c);
+			}
+		} finally {
+			vi.useRealTimers();
 		}
 	});
 });

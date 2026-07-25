@@ -7,7 +7,7 @@
 	// row keys, and a second implementation in TypeScript would drift from
 	// `core/table/json_export.py` — the pane would then confidently show
 	// something the download does not produce.
-	import { getTableDraft, updateTableDefinition } from '$lib/state';
+	import { getTableDraft, getTableSort, updateTableDefinition } from '$lib/state';
 	import { defaultJsonKeys, setColumnJsonOptions, snakeCaseKey } from '$lib/table/columns';
 	import { previewTableJson } from '$lib/api/tables';
 	import type { Column, TableDefinition } from '$lib/api/types';
@@ -46,7 +46,14 @@
 		updateTableDefinition(tabId, next);
 	}
 
-	// Preview follows the definition. Debounced so typing a key does not fire a
+	// Preview follows the definition AND the active grid sort — `downloadTable`
+	// always sends the sort (`_sortFor` in table-editor.svelte.ts), and since
+	// grouping rolls same-key rows into arrays, a different row ORDER can
+	// produce a different grouped SHAPE, not just reordered output. Omitting
+	// the sort here would let the pane disagree with the download precisely
+	// where this route exists to prevent that (see the file header). Read
+	// inside the effect (not captured once outside it) so a sort change alone
+	// re-triggers the preview. Debounced so typing a key does not fire a
 	// whole-table build per keystroke; the last write wins via the token guard.
 	let sample = $state('');
 	let truncated = $state(false);
@@ -55,9 +62,10 @@
 	$effect(() => {
 		const d = defn;
 		if (!d) return;
+		const s = getTableSort(tabId);
 		const mine = ++token;
 		const timer = setTimeout(() => {
-			void previewTableJson({ definition: d })
+			void previewTableJson({ definition: d, sort: s })
 				.then((r) => {
 					if (mine !== token) return; // a newer edit is in flight
 					sample = r.sample;

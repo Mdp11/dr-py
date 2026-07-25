@@ -1052,8 +1052,14 @@ describe('TableView export format menu', () => {
 // file header.
 describe('TableView settings dialog tab strip', () => {
 	afterEach(() => {
+		// Restore the hoisted default's VALID shape (matching `h`'s own
+		// declaration above), not the `{kind:'scope', scope:{}}` sentinel other
+		// describe blocks in this file leave behind — that shape is exactly what
+		// crashes ScopeEditor (see the comment in the test below), and since this
+		// describe is lexically last, restoring it here is what keeps the trap
+		// from being re-armed for whichever describe block is appended next.
 		(h.draft as { definition: { row_source: unknown; columns: unknown[] } }).definition = {
-			row_source: { kind: 'scope', scope: {} },
+			row_source: { kind: 'scope', types: [], criteria: [] },
 			columns: []
 		};
 	});
