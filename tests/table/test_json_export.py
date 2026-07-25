@@ -21,10 +21,11 @@ from data_rover.core.table.cells import (
     ValueCell,
     ValuesCell,
 )
-from data_rover.core.table.evaluate import TableLimits, build_rows_ex
+from data_rover.core.table.evaluate import TableLimits, build_rows_ex, iter_export_rows
 from data_rover.core.table.json_export import (
     build_group_plan,
     render_cell,
+    render_json,
     resolve_json_keys,
 )
 from data_rover.core.table.schema import TABLE_ADAPTER
@@ -552,3 +553,300 @@ def test_innermost_grouped_ancestor_owns_a_dependent():
     plan = build_group_plan(TABLE_ADAPTER.validate_python(doc), base_slots=1)
     assert plan.members[0] == (0,)
     assert plan.members[1] == (1, 2)
+
+
+def _parts_mm() -> Metamodel:
+    return Metamodel(
+        elements=[
+            ElementType(
+                name="Block",
+                properties=[
+                    PropertyDef(name="name", datatype="string"),
+                    PropertyDef(name="mass", datatype="integer", multiplicity="0..1"),
+                ],
+            )
+        ],
+        relationships=[
+            RelationshipType(name="BlockHasPart", source="Block", target="Block")
+        ],
+    )
+
+
+def _parts_model(mm: Metamodel) -> Model:
+    """Root -> (Part 1 mass 12, Part 2 mass 9); Lonely has no parts."""
+    model = Model(mm)
+    ids = {}
+    for key, name, mass in [
+        ("root", "Root", None),
+        ("p1", "Part 1", 12),
+        ("p2", "Part 2", 9),
+        ("lonely", "Lonely", None),
+    ]:
+        el = model.create_element("Block")
+        model.set_property(el, "name", name)
+        if mass is not None:
+            model.set_property(el, "mass", mass)
+        ids[key] = el.id
+    model.connect("BlockHasPart", ids["root"], ids["p1"])
+    model.connect("BlockHasPart", ids["root"], ids["p2"])
+    return model
+
+
+def _hop_nav(mode: str, group: bool) -> dict:
+    """An inline one-hop navigation column over BlockHasPart.
+
+    The navigation-definition shape is copied verbatim from
+    `tests/table/test_cells.py` — `kind: "path"`, a `start`, and
+    `relationship_type`/`direction: "out"` steps. Do not invent field names
+    here; a mismatch 422s at validation, not at evaluation.
+    """
+    col = {
+        "kind": "navigation",
+        "source": {"kind": "row"},
+        "navigation": {
+            "definition": {
+                "kind": "path",
+                "start": {"kind": "row"},
+                "steps": [
+                    {
+                        "kind": "relationship",
+                        "relationship_type": "BlockHasPart",
+                        "direction": "out",
+                    }
+                ],
+            }
+        },
+        "mode": mode,
+        "header": "Component",
+    }
+    if group:
+        col["json_export"] = {"group": True}
+    return col
+
+
+def _render(mm, model, doc):
+    defn = TABLE_ADAPTER.validate_python(doc)
+    build = build_rows_ex(mm, model, defn)
+    return render_json(
+        model,
+        defn,
+        build.keys,
+        iter_export_rows(mm, model, defn, build.keys),
+        build.base_slots,
+    )
+
+
+def test_ungrouped_is_one_object_per_row():
+    mm = _parts_mm()
+    model = _parts_model(mm)
+    docs = _render(
+        mm,
+        model,
+        {
+            "row_source": {"kind": "scope", "types": ["Block"], "criteria": []},
+            "columns": [
+                {
+                    "kind": "property",
+                    "source": {"kind": "row"},
+                    "name": "name",
+                    "header": "Name",
+                },
+                _hop_nav("expand", group=False),
+            ],
+        },
+    )
+    rows = [d for d in docs if d["Name"] == "Root"]
+    assert rows == [
+        {"Name": "Root", "Component": "Part 1"},
+        {"Name": "Root", "Component": "Part 2"},
+    ]
+
+
+def test_grouping_with_no_dependent_unwraps_to_scalars():
+    mm = _parts_mm()
+    model = _parts_model(mm)
+    docs = _render(
+        mm,
+        model,
+        {
+            "row_source": {"kind": "scope", "types": ["Block"], "criteria": []},
+            "columns": [
+                {
+                    "kind": "property",
+                    "source": {"kind": "row"},
+                    "name": "name",
+                    "header": "Name",
+                },
+                _hop_nav("expand", group=True),
+            ],
+        },
+    )
+    root = next(d for d in docs if d["Name"] == "Root")
+    assert root == {"Name": "Root", "Component": ["Part 1", "Part 2"]}
+
+
+def test_grouping_nests_a_dependent_column():
+    mm = _parts_mm()
+    model = _parts_model(mm)
+    docs = _render(
+        mm,
+        model,
+        {
+            "row_source": {"kind": "scope", "types": ["Block"], "criteria": []},
+            "columns": [
+                {
+                    "kind": "property",
+                    "source": {"kind": "row"},
+                    "name": "name",
+                    "header": "Name",
+                },
+                _hop_nav("expand", group=True),
+                {
+                    "kind": "property",
+                    "source": {"kind": "column", "index": 1},
+                    "name": "mass",
+                    "header": "Component Mass",
+                },
+            ],
+        },
+    )
+    root = next(d for d in docs if d["Name"] == "Root")
+    assert root == {
+        "Name": "Root",
+        "Component": [
+            {"Component": "Part 1", "Component Mass": 12},
+            {"Component": "Part 2", "Component Mass": 9},
+        ],
+    }
+
+
+def test_keep_empty_group_is_an_empty_list_not_a_null_entry():
+    mm = _parts_mm()
+    model = _parts_model(mm)
+    docs = _render(
+        mm,
+        model,
+        {
+            "row_source": {"kind": "scope", "types": ["Block"], "criteria": []},
+            "columns": [
+                {
+                    "kind": "property",
+                    "source": {"kind": "row"},
+                    "name": "name",
+                    "header": "Name",
+                },
+                _hop_nav("expand", group=True),
+            ],
+        },
+    )
+    lonely = next(d for d in docs if d["Name"] == "Lonely")
+    assert lonely == {"Name": "Lonely", "Component": []}
+
+
+def test_hidden_columns_are_not_emitted():
+    mm = _parts_mm()
+    model = _parts_model(mm)
+    docs = _render(
+        mm,
+        model,
+        {
+            "row_source": {"kind": "scope", "types": ["Block"], "criteria": []},
+            "columns": [
+                {
+                    "kind": "property",
+                    "source": {"kind": "row"},
+                    "name": "name",
+                    "header": "Name",
+                },
+                {
+                    "kind": "property",
+                    "source": {"kind": "row"},
+                    "name": "mass",
+                    "header": "Mass",
+                    "hidden": True,
+                },
+            ],
+        },
+    )
+    assert all(set(d) == {"Name"} for d in docs)
+
+
+def test_key_order_follows_column_order_with_the_group_in_place():
+    mm = _parts_mm()
+    model = _parts_model(mm)
+    docs = _render(
+        mm,
+        model,
+        {
+            "row_source": {"kind": "scope", "types": ["Block"], "criteria": []},
+            "columns": [
+                {
+                    "kind": "property",
+                    "source": {"kind": "row"},
+                    "name": "name",
+                    "header": "Name",
+                },
+                _hop_nav("expand", group=True),
+                {
+                    "kind": "property",
+                    "source": {"kind": "row"},
+                    "name": "mass",
+                    "header": "Own Mass",
+                },
+            ],
+        },
+    )
+    root = next(d for d in docs if d["Name"] == "Root")
+    assert list(root) == ["Name", "Component", "Own Mass"]
+
+
+def test_groups_merge_even_when_their_rows_are_not_contiguous():
+    """Grouping merges by row key through a dict, so a sort that scatters a
+    group's rows must not produce two objects for one group."""
+    mm = _parts_mm()
+    model = _parts_model(mm)
+    defn = TABLE_ADAPTER.validate_python(
+        {
+            "row_source": {"kind": "scope", "types": ["Block"], "criteria": []},
+            "columns": [
+                {
+                    "kind": "property",
+                    "source": {"kind": "row"},
+                    "name": "name",
+                    "header": "Name",
+                },
+                _hop_nav("expand", group=True),
+            ],
+        }
+    )
+    build = build_rows_ex(mm, model, defn)
+    scattered = list(reversed(build.keys))
+    docs = render_json(
+        model,
+        defn,
+        scattered,
+        iter_export_rows(mm, model, defn, scattered),
+        build.base_slots,
+    )
+    assert len([d for d in docs if d["Name"] == "Root"]) == 1
+
+
+def test_zero_rows_is_an_empty_document():
+    mm = _parts_mm()
+    model = Model(mm)
+    docs = _render(
+        mm,
+        model,
+        {
+            "row_source": {"kind": "scope", "types": ["Block"], "criteria": []},
+            "columns": [
+                {
+                    "kind": "property",
+                    "source": {"kind": "row"},
+                    "name": "name",
+                    "header": "Name",
+                }
+            ],
+        },
+    )
+    assert docs == []

@@ -8,6 +8,7 @@ Spec: docs/superpowers/specs/2026-07-25-table-json-export-design.md
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from data_rover.core.model.model import Model
@@ -23,7 +24,7 @@ from .cells import (
     ValueCell,
     ValuesCell,
 )
-from .evaluate import _expand_slot_of
+from .evaluate import RowKey, _expand_slot_of
 from .schema import Column, ColumnRef, TableDefinition
 
 
@@ -206,3 +207,117 @@ def build_group_plan(defn: TableDefinition, base_slots: int) -> GroupPlan:
         top_columns=tuple(top_columns),
         top_groups=tuple(top_groups),
     )
+
+
+#: One export row: its key (for grouping) paired with its evaluated cells.
+_Pair = tuple[RowKey, list[Cell]]
+
+
+def render_json(
+    model: Model,
+    defn: TableDefinition,
+    row_keys: list[RowKey],
+    row_iter: Iterable[list[Cell]],
+    base_slots: int,
+) -> list[dict[str, object]]:
+    """The whole table as a list of JSON objects.
+
+    `row_iter` yields cells in `row_keys` order (that is `iter_export_rows`'
+    contract), so the two zip positionally.
+
+    THIS CANNOT STREAM. Grouping merges rows through a dict, and a sort can
+    scatter one group's rows across the whole result, so the document is held
+    whole — the same trade `api/table_export.py` already makes when it gives up
+    xlsxwriter's `constant_memory` for `autofit`, bounded by the same
+    `TableLimits.max_rows`. Rows still ARRIVE chunk by chunk.
+    """
+    plan = build_group_plan(defn, base_slots)
+    jkeys = resolve_json_keys(defn)
+    pairs: list[_Pair] = list(zip(row_keys, row_iter, strict=True))
+
+    if not plan.grouped:
+        # Fast path, and not merely an optimization: bucketing would merge two
+        # rows that happen to carry EQUAL keys into one object, silently
+        # dropping a row the xlsx export renders twice.
+        buckets: list[list[_Pair]] = [[p] for p in pairs]
+    else:
+        grouped_slots = {plan.slot_of[k] for k in plan.grouped}
+        merged: dict[tuple[object, ...], list[_Pair]] = {}
+        for rk, cells in pairs:
+            gkey = tuple(v for i, v in enumerate(rk) if i not in grouped_slots)
+            merged.setdefault(gkey, []).append((rk, cells))
+        # dict preserves first-appearance order, which is what keeps the
+        # document in the requested sort's order.
+        buckets = list(merged.values())
+
+    return [
+        _render_level(model, defn, jkeys, plan, plan.top_columns, plan.top_groups, b)
+        for b in buckets
+    ]
+
+
+def _render_level(
+    model: Model,
+    defn: TableDefinition,
+    jkeys: list[str | None],
+    plan: GroupPlan,
+    columns: tuple[int, ...],
+    groups: tuple[int, ...],
+    rows: list[_Pair],
+) -> dict[str, object]:
+    """One JSON object: the plain `columns` plus one array per grouped column
+    in `groups`, emitted in COLUMN ORDER so a grouped column's array sits at
+    that column's own position rather than being pushed to the end.
+
+    A plain column is read from `rows[0]` because its value is CONSTANT across
+    the group by construction: it reads no grouped slot, so nothing that varies
+    within the group can reach it.
+    """
+    group_set = set(groups)
+    obj: dict[str, object] = {}
+    for i in sorted([*columns, *groups]):
+        key = jkeys[i]
+        if key is None:  # hidden: evaluated, never emitted
+            continue
+        if i in group_set:
+            obj[key] = _render_group(model, defn, jkeys, plan, i, rows)
+        else:
+            obj[key] = render_cell(model, rows[0][1][i], _mode_of(defn.columns[i]))
+    return obj
+
+
+def _render_group(
+    model: Model,
+    defn: TableDefinition,
+    jkeys: list[str | None],
+    plan: GroupPlan,
+    g: int,
+    rows: list[_Pair],
+) -> list[object]:
+    """The array for one grouped column: its rows re-partitioned by the value
+    sitting in its own expand slot.
+
+    A `None` slot is DROPPED rather than rendered: it is the `keep_empty` row
+    an expand column emits when it reached nothing, and `[]` — not `[null]` —
+    is the honest JSON for "no children".
+
+    Unwrapping: when the group holds only the grouped column itself and nests
+    nothing, the array carries that column's values directly. Wrapping them in
+    single-key objects would be noise.
+    """
+    slot = plan.slot_of[g]
+    parts: dict[object, list[_Pair]] = {}
+    for rk, cells in rows:
+        value = rk[slot]
+        if value is None:
+            continue
+        parts.setdefault(value, []).append((rk, cells))
+
+    members, children = plan.members[g], plan.children[g]
+    if len(members) == 1 and not children:
+        mode = _mode_of(defn.columns[g])
+        return [render_cell(model, sub[0][1][g], mode) for sub in parts.values()]
+    return [
+        _render_level(model, defn, jkeys, plan, members, children, sub)
+        for sub in parts.values()
+    ]
