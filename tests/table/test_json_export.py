@@ -14,6 +14,7 @@ from data_rover.core.metamodel.schema import (
 )
 from data_rover.core.model.model import Model
 from data_rover.core.table.cells import (
+    Cell,
     ElementCell,
     ElementsCell,
     ErrorCell,
@@ -662,6 +663,43 @@ def test_ungrouped_is_one_object_per_row():
     ]
 
 
+def test_ungrouped_does_not_bucket_identical_row_keys():
+    """The no-bucketing fast path's own contract: two rows sharing the SAME
+    row key must still render as two separate objects when nothing is
+    grouped -- bucketing by key would merge them and silently drop a row.
+
+    `test_ungrouped_is_one_object_per_row` doesn't pin this: its two Root
+    rows carry DIFFERENT keys (different expand slots), so an implementation
+    that bucketed by row key would still pass it. Constructing two rows with
+    a genuinely equal key isn't natural through `build_rows_ex` (keys track
+    distinct element bindings, one per row), so this calls `render_json`
+    directly with hand-built keys/cells -- legitimate here since the target
+    is `render_json`'s own contract, not the row builder's.
+    """
+    mm = _parts_mm()
+    model = _parts_model(mm)
+    defn = TABLE_ADAPTER.validate_python(
+        {
+            "row_source": {"kind": "scope", "types": ["Block"], "criteria": []},
+            "columns": [
+                {
+                    "kind": "property",
+                    "source": {"kind": "row"},
+                    "name": "name",
+                    "header": "Name",
+                },
+            ],
+        }
+    )
+    same_key = ("dupe",)
+    cells: list[list[Cell]] = [
+        [ValueCell(present=True, value="First", element_id=None, editable=False)],
+        [ValueCell(present=True, value="Second", element_id=None, editable=False)],
+    ]
+    docs = render_json(model, defn, [same_key, same_key], iter(cells), 1)
+    assert docs == [{"Name": "First"}, {"Name": "Second"}]
+
+
 def test_grouping_with_no_dependent_unwraps_to_scalars():
     mm = _parts_mm()
     model = _parts_model(mm)
@@ -801,8 +839,18 @@ def test_key_order_follows_column_order_with_the_group_in_place():
 
 
 def test_groups_merge_even_when_their_rows_are_not_contiguous():
-    """Grouping merges by row key through a dict, so a sort that scatters a
-    group's rows must not produce two objects for one group."""
+    """Grouping merges by row key through a dict, so an order that scatters a
+    group's rows must not produce two objects for one group.
+
+    A plain `reversed()` of the build order does NOT scatter anything --
+    reversal preserves adjacency, so a wrong run-length "merge consecutive
+    equal keys" implementation would pass it too. The build order here is
+    [(Root,P1), (Root,P2), (P1,None), (P2,None), (Lonely,None)] (asserted
+    below rather than assumed), so this picks an explicit permutation that
+    puts the Lonely row BETWEEN Root's two rows, and asserts up front that
+    Root's rows really are non-adjacent -- so this test cannot silently decay
+    into a no-op if the fixture ever changes.
+    """
     mm = _parts_mm()
     model = _parts_model(mm)
     defn = TABLE_ADAPTER.validate_python(
@@ -820,7 +868,18 @@ def test_groups_merge_even_when_their_rows_are_not_contiguous():
         }
     )
     build = build_rows_ex(mm, model, defn)
-    scattered = list(reversed(build.keys))
+    keys = build.keys
+    root_id = keys[0][0]
+    assert [k[0] == root_id for k in keys] == [True, True, False, False, False]
+
+    scattered = [keys[1], keys[4], keys[0], keys[3], keys[2]]
+    root_positions = [i for i, k in enumerate(scattered) if k[0] == root_id]
+    assert len(root_positions) == 2
+    assert root_positions[1] - root_positions[0] > 1, (
+        "the chosen permutation must keep Root's two rows non-adjacent, or "
+        "this test cannot catch a run-length merge"
+    )
+
     docs = render_json(
         model,
         defn,
@@ -828,7 +887,9 @@ def test_groups_merge_even_when_their_rows_are_not_contiguous():
         iter_export_rows(mm, model, defn, scattered),
         build.base_slots,
     )
-    assert len([d for d in docs if d["Name"] == "Root"]) == 1
+    roots = [d for d in docs if d["Name"] == "Root"]
+    assert len(roots) == 1
+    assert roots[0] == {"Name": "Root", "Component": ["Part 2", "Part 1"]}
 
 
 def test_zero_rows_is_an_empty_document():
