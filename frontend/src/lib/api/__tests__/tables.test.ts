@@ -1,11 +1,26 @@
 import { afterAll, afterEach, beforeAll, describe, it, expect } from 'vitest';
 import { http, HttpResponse } from 'msw';
-import { TablePageSchema, TableDefinitionSchema, ChainPageSchema } from '../types';
-import { exportTable, fetchScriptErrors } from '../tables';
+import {
+	TablePageSchema,
+	TableDefinitionSchema,
+	ChainPageSchema,
+	type TableDefinition
+} from '../types';
+import { exportTable, fetchScriptErrors, previewTableJson } from '../tables';
 import { server } from './server';
 
 const BASE = 'http://api.test/api/v1';
 const cfg = { baseUrl: BASE };
+
+const DEFN = {
+	schema_version: 1,
+	row_source: { kind: 'scope', types: ['Block'], criteria: [] },
+	columns: [
+		{ kind: 'element', source: { kind: 'row', chain_index: 0 }, header: 'Block', hidden: false }
+	],
+	default_cell_mode: 'collapse',
+	show_row_numbers: false
+} as unknown as TableDefinition;
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => server.resetHandlers());
@@ -221,6 +236,50 @@ describe('exportTable', () => {
 		const result = await exportTable({ artifactId: 'a1' }, cfg);
 		expect(result.kind).toBe('ready');
 		expect(result.kind === 'ready' && result.filename).toBe('my table.xlsx');
+	});
+
+	it('sends the requested format and returns the json filename', async () => {
+		let seen: unknown = null;
+		server.use(
+			http.post(`${BASE}/tables/export`, async ({ request }) => {
+				seen = await request.json();
+				return new HttpResponse('[]', {
+					headers: {
+						'content-type': 'application/json',
+						'content-disposition': 'attachment; filename="table.json"'
+					}
+				});
+			})
+		);
+		const res = await exportTable({ definition: DEFN, format: 'json' }, cfg);
+		expect((seen as { format: string }).format).toBe('json');
+		expect(res).toMatchObject({ kind: 'ready', filename: 'table.json' });
+	});
+
+	it('defaults the format to xlsx', async () => {
+		let seen: unknown = null;
+		server.use(
+			http.post(`${BASE}/tables/export`, async ({ request }) => {
+				seen = await request.json();
+				return new HttpResponse('x', {
+					headers: { 'content-disposition': 'attachment; filename="t.xlsx"' }
+				});
+			})
+		);
+		await exportTable({ definition: DEFN }, cfg);
+		expect((seen as { format: string }).format).toBe('xlsx');
+	});
+
+	it('fetches a json preview', async () => {
+		server.use(
+			http.post(`${BASE}/tables/json-preview`, () =>
+				HttpResponse.json({ sample: '[]', truncated: true })
+			)
+		);
+		await expect(previewTableJson({ definition: DEFN }, cfg)).resolves.toEqual({
+			sample: '[]',
+			truncated: true
+		});
 	});
 });
 

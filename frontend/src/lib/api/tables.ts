@@ -37,19 +37,30 @@ export type ExportResult =
 	| { kind: 'ready'; blob: Blob; filename: string }
 	| { kind: 'preparing'; done: number; total: number | null };
 
-/** Export the current definition (or saved artifact) as an .xlsx. Resolves to
- * `{ kind: 'ready' }` with the Blob once the backend has it, or
+/** Export the current definition (or saved artifact) as `.xlsx` or `.json`.
+ * Resolves to `{ kind: 'ready' }` with the Blob once the backend has it, or
  * `{ kind: 'preparing' }` while the script-cache sweep is still filling in
- * cells for this table (backend 202 + Retry-After). */
+ * cells for this table (backend 202 + Retry-After). The 202 protocol is
+ * format-agnostic — the backend runs the identical preamble for both. */
 export async function exportTable(
-	args: { definition?: TableDefinition; artifactId?: string; sort?: TableSort },
+	args: {
+		definition?: TableDefinition;
+		artifactId?: string;
+		sort?: TableSort;
+		format?: 'xlsx' | 'json';
+	},
 	cfg?: ClientConfig
 ): Promise<ExportResult> {
 	const res = await apiFetchRaw(
 		'/tables/export',
 		{
 			method: 'POST',
-			body: { definition: args.definition, artifact_id: args.artifactId, sort: args.sort }
+			body: {
+				definition: args.definition,
+				artifact_id: args.artifactId,
+				sort: args.sort,
+				format: args.format ?? 'xlsx'
+			}
 		},
 		cfg
 	);
@@ -60,6 +71,28 @@ export async function exportTable(
 	const disp = res.headers.get('content-disposition') ?? '';
 	const m = /filename="([^"]+)"/.exec(disp);
 	return { kind: 'ready', blob: await res.blob(), filename: m?.[1] ?? 'table.xlsx' };
+}
+
+/**
+ * A bounded, already-rendered JSON sample for the export settings pane
+ * (`POST /tables/json-preview`).
+ *
+ * The sample is rendered SERVER-SIDE through the very function the export
+ * uses, so the pane can never disagree with the file the user downloads.
+ * `truncated` means the sample covers only the head of the table.
+ */
+export async function previewTableJson(
+	args: { definition?: TableDefinition; artifactId?: string; sort?: TableSort },
+	cfg?: ClientConfig
+): Promise<{ sample: string; truncated: boolean }> {
+	return apiFetch(
+		'/tables/json-preview',
+		{
+			method: 'POST',
+			body: { definition: args.definition, artifact_id: args.artifactId, sort: args.sort }
+		},
+		cfg
+	);
 }
 
 /**

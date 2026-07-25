@@ -1391,8 +1391,8 @@ export interface ExportProgress {
 }
 
 /**
- * Export the current definition (or saved artifact) as an .xlsx and trigger a
- * browser download via a synthetic anchor click.
+ * Export the current definition (or saved artifact) as an `.xlsx` or `.json`
+ * and trigger a browser download via a synthetic anchor click.
  *
  * While the backend's script-cache sweep is still filling in a script column's
  * cells, `/tables/export` answers **202 + Retry-After: 1** (surfaced by the API
@@ -1405,12 +1405,16 @@ export interface ExportProgress {
  */
 export async function downloadTable(
 	tabId: string,
-	opts?: { onProgress?: (p: ExportProgress) => void; signal?: AbortSignal }
+	opts?: {
+		format?: 'xlsx' | 'json';
+		onProgress?: (p: ExportProgress) => void;
+		signal?: AbortSignal;
+	}
 ): Promise<void> {
 	const draft = _drafts.get(tabId);
 	if (!draft) return;
 	const sort = _sortFor(tabId, draft);
-	const args = { ..._evaluateSource(draft), sort };
+	const args = { ..._evaluateSource(draft), sort, format: opts?.format ?? 'xlsx' };
 	let result = await exportTable(args);
 	for (let attempt = 1; result.kind === 'preparing'; attempt++) {
 		if (opts?.signal?.aborted) return;
