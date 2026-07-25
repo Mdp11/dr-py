@@ -427,8 +427,8 @@ toggle`), a collapsed disclosure that expands to the shared
 - **`warnings` threading.** Both evaluation paths share one
   `ScriptEvalContext` per request and report through its `.warnings` list, but
   the warnings themselves are **structured**, not message strings: each one is
-  `{code, occurrences, total, detail}`, aggregated backend-side by `(code,
-detail)` (see `core/script/warnings.py` — a kind firing 17 times is one
+  `{code, occurrences, total, detail}`, aggregated backend-side by `(code, detail)`
+  (see `core/script/warnings.py` — a kind firing 17 times is one
   entry with `occurrences: 17`, not 17 near-identical strings). All copy is
   rendered client-side by `formatScriptWarning` in `$lib/script/warnings.ts`,
   the single place that turns a code into a sentence — components never write
@@ -438,9 +438,10 @@ detail)` (see `core/script/warnings.py` — a kind firing 17 times is one
   `table-warnings-badge` summary (count of distinct kinds) that toggles open
   `ScriptWarningsPanel` for the full formatted list; `NavPreview.warnings`
   carries the equivalent list for a navigation node's chain preview, rendered
-  by `Navigation/ResultsDock.svelte` as a `nav-warnings` chip (`⚠ N script
-warning(s)`, each entry formatted by `formatScriptWarning` and joined by
-  `\n` into the `title` tooltip) beside the chain-count status. `loadMorePreview`
+  by `Navigation/ResultsDock.svelte` as a `nav-warnings` chip
+  (`⚠ N script warning(s)`, each entry formatted by `formatScriptWarning` and
+  joined by `\n` into the `title` tooltip) beside the chain-count status.
+  `loadMorePreview`
   deliberately keeps the **first page's** warnings on subsequent pages rather
   than replacing/merging them — see the comment on `NavPreview.warnings` in
   `state/navigation-editor.svelte.ts` — so paging in more rows never churns

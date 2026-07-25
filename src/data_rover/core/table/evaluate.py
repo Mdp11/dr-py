@@ -592,16 +592,14 @@ class SortSpec:
     direction: Literal["asc", "desc"]
 
 
-#: `ScriptWarningCode.SORT_NEEDS_SCRIPT_NAV` is emitted (once per sort —
-#: `order_rows` decides once) when a sort is skipped because computing it
-#: would mean driving a navigation `ScriptStep` under a CACHE-ONLY context.
-#: See `_sort_script` for why that is a dead end rather than a "poll again".
-#:
-#: The user-facing wording — why it says "sorting by this column needs" and
-#: not "this column's navigation": the sort column is often a property/
-#: element column merely SOURCED from the navigation column, and has no
-#: navigation of its own — now lives client-side in the frontend formatter
-#: keyed off this code (see the `2026-07-25-splines-and-script-warnings` spec).
+# `ScriptWarningCode.SORT_NEEDS_SCRIPT_NAV` is emitted (once per sort —
+# `order_rows` decides once) when a sort is skipped because computing it
+# would mean driving a navigation `ScriptStep` under a CACHE-ONLY context.
+# See `_sort_script` for why that is a dead end rather than a "poll again".
+#
+# The user-facing wording lives client-side in `formatScriptWarning`
+# (frontend/src/lib/script/warnings.ts), keyed off this code — that is the
+# one place the rationale for the copy is spelled out.
 
 
 def _nav_col_has_script(col: NavigationColumn) -> bool:
@@ -706,8 +704,10 @@ def _sort_script(
     `None` to fall back to the script-less (tie-everything) sort. Called ONCE
     per `order_rows`, not once per row: the answer depends only on `(defn, col,
     script.cache_only)`, so per-row evaluation was 50 000 identical traversals
-    and 50 000 `add_warning` dedup probes on a 50 000-row table — and left the
-    warning unemitted on an empty key set, the one case where no row is sorted.
+    that would, under aggregation-by-`(code, detail)`, report ONE entry with
+    `occurrences: 50 000` to the user for what is a single sort decision — and
+    it left the warning unemitted on an empty key set, the one case where no
+    row is sorted.
 
     WHY the fallback exists. Under a CACHE-ONLY context (every whole-table pass
     of every table route) a cache miss synthesizes a `pending` result and bumps

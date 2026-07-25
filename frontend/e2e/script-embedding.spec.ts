@@ -247,8 +247,10 @@ test('script step: el.outgoing() renders real chains; a raising step surfaces na
 	// Runner-availability guard: with no runner booted, EVERY step() call
 	// fails with "...script runner unavailable" (core/script/embed.py),
 	// which `_hop_script` (core/navigation/evaluate.py) turns into a
-	// deduped "script step failed: script runner unavailable" warning —
-	// surfacing here even for this non-raising snippet.
+	// structured NAV_STEP_FAILED warning that `formatScriptWarning`
+	// (frontend/src/lib/script/warnings.ts) renders as "script step
+	// failed: script runner unavailable" — surfacing here even for this
+	// non-raising snippet.
 	const navWarnings = tabpanel.getByTestId('nav-warnings');
 	if (await navWarnings.isVisible().catch(() => false)) {
 		const title = (await navWarnings.getAttribute('title')) ?? '';

@@ -75,6 +75,7 @@ __all__ = [
     "ScriptWarning",
     "ScriptWarningCode",
     "ScriptWarningLog",
+    "WarningKey",
 ]
 
 
