@@ -4,6 +4,7 @@ Grouping is slot arithmetic over the evaluator's RowKey tuples, so these tests
 build real rows through `build_rows`/`evaluate_cells` rather than hand-rolling
 cells — a hand-rolled cell cannot catch a slot-index mistake."""
 
+from data_rover.core.table.json_export import resolve_json_keys
 from data_rover.core.table.schema import TABLE_ADAPTER
 
 
@@ -72,9 +73,6 @@ def test_json_export_available_on_every_column_kind():
         assert c.json_export is not None
         keys.append(c.json_export.key)
     assert keys == ["a", "b", "c", "d"]
-
-
-from data_rover.core.table.json_export import resolve_json_keys
 
 
 def _cols(*specs):
