@@ -447,6 +447,19 @@ toggle`), a collapsed disclosure that expands to the shared
   `state/navigation-editor.svelte.ts` — so paging in more rows never churns
   the badge.
 
+### Table JSON export
+
+The Export button is a dropdown (Excel `.xlsx` / JSON `.json`); both formats go
+through the same `downloadTable` retry loop, because the backend's 202 +
+`Retry-After` protocol is format-agnostic.
+
+JSON settings live per column (`json_export: {key, value, group}`) and are edited
+in the "JSON export" tab of the table Settings dialog
+(`components/Table/JsonExportEditor.svelte`). `defaultJsonKeys` in
+`lib/table/columns.ts` mirrors the backend's key derivation, but ONLY to fill
+input placeholders — the sample pane fetches `POST /tables/json-preview` so the
+grouping algorithm is never reimplemented in TypeScript.
+
 ### Settings dialog + strict-mode toggle
 
 The **Settings** button in the TopBar opens `SettingsDialog.svelte`, which

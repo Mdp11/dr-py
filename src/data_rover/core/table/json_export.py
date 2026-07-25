@@ -98,7 +98,11 @@ def render_cell(model: Model, cell: Cell, mode: str) -> object:
         # branch on arity to read a multi-source column.
         return list(cell.values)
     if isinstance(cell, ElementCell):
-        return None if cell.element_id is None else _element_json(model, cell.element_id, mode)
+        return (
+            None
+            if cell.element_id is None
+            else _element_json(model, cell.element_id, mode)
+        )
     if isinstance(cell, ElementsCell):
         return [_element_json(model, e, mode) for e in cell.element_ids]
     if isinstance(cell, ErrorCell):
