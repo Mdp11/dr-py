@@ -8,6 +8,7 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import type { ScriptWarning } from '$lib/api/types';
 import TableView from '../TableView.svelte';
 
 // Hoisted so the vi.mock factory (hoisted above imports) can reference it, and
@@ -15,7 +16,9 @@ import TableView from '../TableView.svelte';
 const h = vi.hoisted(() => ({
 	editable: true,
 	page: undefined as unknown,
-	warnings: [] as string[],
+	// Task 7: warnings are now structured (`ScriptWarning[]`, formatted via
+	// `formatScriptWarning`), not the old joined-string strip.
+	warnings: [] as ScriptWarning[],
 	scriptStatus: null as unknown,
 	scriptErrors: null as unknown,
 	scriptErrorsPhase: 'idle' as 'idle' | 'loading' | 'error' | 'done',
@@ -849,25 +852,52 @@ describe('TableView settings dialog sizing', () => {
 	});
 });
 
-describe('TableView warnings banner', () => {
-	it('shows the banner with the joined warnings when getTableWarnings is non-empty', () => {
-		h.warnings = ['column 1: script raised on 2 rows', 'column 3: truncated to 20 items'];
+// Task 7: the old strip joined raw backend prose with ' · ' behind
+// `data-testid="table-warnings"`. It is now a COUNT plus a disclosure
+// (`table-warnings-badge`) — the formatted prose lives behind a click, in
+// `ScriptWarningsPanel`. Uses this file's own mount/flushSync/unmount
+// convention, not the brief's literal `@testing-library/svelte`
+// `render`/`screen`/`fireEvent` snippet — see the file header.
+describe('TableView script-warnings badge + panel', () => {
+	const WARNINGS: ScriptWarning[] = [
+		{ code: 'nav_unknown_ids', occurrences: 17, total: 42, detail: null },
+		{ code: 'sort_needs_script_nav', occurrences: 1, total: 0, detail: null }
+	];
+
+	it('hides the badge when getTableWarnings returns empty', () => {
+		h.warnings = [];
 		const c = render('tbl:draft:1');
 		try {
-			const banner = document.querySelector('[data-testid="table-warnings"]');
-			expect(banner).not.toBeNull();
-			expect(banner?.textContent).toContain('column 1: script raised on 2 rows');
-			expect(banner?.textContent).toContain('column 3: truncated to 20 items');
+			expect(document.querySelector('[data-testid="table-warnings-badge"]')).toBeNull();
 		} finally {
 			unmount(c);
 		}
 	});
 
-	it('hides the banner when getTableWarnings returns empty', () => {
-		h.warnings = [];
+	it('summarises script warnings and opens the panel on demand', () => {
+		h.warnings = WARNINGS;
 		const c = render('tbl:draft:1');
 		try {
-			expect(document.querySelector('[data-testid="table-warnings"]')).toBeNull();
+			const badge = document.querySelector('[data-testid="table-warnings-badge"]') as HTMLElement;
+			expect(badge).not.toBeNull();
+			expect(badge.textContent).toContain('2 script warnings');
+			expect(document.querySelector('[data-testid="script-warnings-panel"]')).toBeNull();
+
+			badge.click();
+			flushSync();
+			expect(document.querySelector('[data-testid="script-warnings-panel"]')).not.toBeNull();
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('singularises a lone warning', () => {
+		h.warnings = [WARNINGS[1]];
+		const c = render('tbl:draft:1');
+		try {
+			const badge = document.querySelector('[data-testid="table-warnings-badge"]') as HTMLElement;
+			expect(badge.textContent).toContain('1 script warning');
+			expect(badge.textContent).not.toContain('1 script warnings');
 		} finally {
 			unmount(c);
 		}

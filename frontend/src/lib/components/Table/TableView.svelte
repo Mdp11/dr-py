@@ -41,6 +41,7 @@
 	} from '$lib/table/columns';
 	import ColumnManager from './ColumnManager.svelte';
 	import ScriptErrorsPanel from './ScriptErrorsPanel.svelte';
+	import ScriptWarningsPanel from './ScriptWarningsPanel.svelte';
 	import TableGrid from './TableGrid.svelte';
 
 	let { tabId }: { tabId: string } = $props();
@@ -119,6 +120,16 @@
 	// a legitimate way to leave it too.
 	function onScriptErrorsKeydown(e: KeyboardEvent): void {
 		if (e.key === 'Escape') scriptErrorsOpen = false;
+	}
+	let warningsOpen = $state(false);
+	// The panel must not outlive what it describes: a reload that clears the
+	// warnings closes it, exactly as the errors panel closes when its badge
+	// goes away.
+	$effect(() => {
+		if (warnings.length === 0) warningsOpen = false;
+	});
+	function onWarningsKeydown(e: KeyboardEvent): void {
+		if (e.key === 'Escape') warningsOpen = false;
 	}
 	const loading = $derived(getTableLoading(tabId));
 	// The sweep's fraction, or null when it has no total to divide by. Drives a
@@ -409,8 +420,29 @@
 			</div>
 		{/if}
 		{#if warnings.length > 0}
-			<div class="bg-warning/15 px-3 py-1.5 text-xs text-warning" data-testid="table-warnings">
-				{warnings.join(' · ')}
+			<!-- A SUMMARY plus a disclosure, not the prose itself: several kinds
+			     can fire at once, and the old `join(' · ')` put every one of them
+			     on a single line with no indication of how many rows each
+			     affected. Stays in the tab's FIXED chrome for the same reason as
+			     the status line below. -->
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<div class="relative flex items-center px-3 py-1" onkeydown={onWarningsKeydown}>
+				<button
+					type="button"
+					data-testid="table-warnings-badge"
+					aria-expanded={warningsOpen}
+					aria-controls="script-warnings-panel-{tabId}"
+					aria-haspopup="dialog"
+					title="Show what the script evaluation degraded on"
+					class="flex items-center gap-1.5 rounded border border-warning/40 bg-warning/15 px-2 py-0.5 text-xs text-warning transition-colors hover:bg-warning/25"
+					onclick={() => (warningsOpen = !warningsOpen)}
+				>
+					<AlertTriangle class="h-3 w-3 shrink-0" />
+					{warnings.length} script warning{warnings.length === 1 ? '' : 's'}
+				</button>
+				{#if warningsOpen}
+					<ScriptWarningsPanel id="script-warnings-panel-{tabId}" {warnings} />
+				{/if}
 			</div>
 		{/if}
 		<!-- Script-sweep readout. It lives HERE, in the tab's fixed chrome beside
