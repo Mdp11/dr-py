@@ -143,13 +143,16 @@ def test_script_step_unknown_ids_dropped_with_warning() -> None:
     )])
     res = evaluate(mm, model, defn, script=_ctx(model))
     # occurrences/total are per START ELEMENT (see above) -- len(ids), not 1.
-    # The start element equal to ids[0] also returns its own id, which trips
-    # the already-visited cycle guard too, so `res.warnings` carries a second,
-    # unrelated NAV_ALREADY_VISITED entry: filter by code rather than
-    # asserting the whole list.
-    (entry,) = [w for w in res.warnings if w.code == ScriptWarningCode.NAV_UNKNOWN_IDS]
-    assert entry.occurrences == len(ids)
-    assert entry.total == len(ids)
+    # The start element equal to ids[0] also returns its own id and trips the
+    # already-visited cycle guard, which is SILENT -- so the unknown-id entry
+    # is the only warning, and asserting the whole list pins that.
+    assert res.warnings == [
+        ScriptWarning(
+            code=ScriptWarningCode.NAV_UNKNOWN_IDS,
+            occurrences=len(ids),
+            total=len(ids),
+        )
+    ]
     assert all(chain[1] == ids[0] for chain in res.chains)
 
 
@@ -184,24 +187,17 @@ def test_script_step_no_runner_fallback_prunes_silently() -> None:
     assert res.chains == [] and res.warnings == []
 
 
-def test_script_step_visited_drop_warns() -> None:
+def test_script_step_visited_drop_is_silent() -> None:
     # identity return: every id the step returns is already in the chain, so
-    # the cycle guard drops them all -- previously with NO signal at all.
-    # occurrences/total are per START ELEMENT (see the sibling tests above):
-    # the step is an identity return, so every one of the fixture's elements
-    # fires it once and drops exactly its own id -- len(model.elements) for
-    # both, matching e.g. test_script_step_error_prunes_with_warning.
+    # the cycle guard drops them all. That is INTENDED -- "keep this element"
+    # is the natural idiom for a step that filters rather than hops -- so it
+    # must not warn. It used to raise NAV_ALREADY_VISITED, which trained
+    # users to ignore the warnings badge.
     mm, model = _fixture()
     defn = _path([ScriptStep(snippet=_snip("def step(el): return [el]"))])
     res = evaluate(mm, model, defn, script=_ctx(model))
     assert res.chains == []
-    assert res.warnings == [
-        ScriptWarning(
-            code=ScriptWarningCode.NAV_ALREADY_VISITED,
-            occurrences=len(model.elements),
-            total=len(model.elements),
-        )
-    ]
+    assert res.warnings == []
 
 
 def test_unknown_ids_across_many_chains_sum_instead_of_collapsing() -> None:
@@ -239,7 +235,10 @@ def test_chain_result_warnings_are_this_call_only() -> None:
     counts (the invariant `warnings[w0:]` slicing used to provide)."""
     mm, model = _fixture()
     ctx = _ctx(model)
-    defn = _path([ScriptStep(snippet=_snip("def step(el): return [el]"))])
+    # A step failure (unlike an identity return) still warns every call, so it
+    # can pin the delta-not-cumulative invariant now that identity returns are
+    # silent (see test_script_step_visited_drop_is_silent).
+    defn = _path([ScriptStep(snippet=_snip("def step(el): raise RuntimeError('boom')"))])
     first = evaluate(mm, model, defn, script=ctx)
     second = evaluate(mm, model, defn, script=ctx)
     assert first.warnings and second.warnings

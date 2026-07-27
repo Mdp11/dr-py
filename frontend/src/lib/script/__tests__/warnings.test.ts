@@ -19,12 +19,6 @@ describe('formatScriptWarning', () => {
 		);
 	});
 
-	it('reports already-visited drops', () => {
-		expect(formatScriptWarning(w({ code: 'nav_already_visited', occurrences: 3, total: 8 }))).toBe(
-			'8 elements already visited in the chain, dropped across 3 steps.'
-		);
-	});
-
 	it('reports a step failure with its message and firing count', () => {
 		expect(
 			formatScriptWarning(
@@ -82,5 +76,13 @@ describe('formatScriptWarning', () => {
 			'something happened'
 		);
 		expect(formatScriptWarning(w({ code: 'brand_new', detail: null }))).toBe('brand_new');
+	});
+
+	it('falls back for a code this client does not know', () => {
+		// `nav_already_visited` was removed server-side; an older server that
+		// still sends it must degrade to something readable, never a blank.
+		expect(
+			formatScriptWarning(w({ code: 'nav_already_visited', occurrences: 3, total: 8 }))
+		).toBe('nav_already_visited');
 	});
 });

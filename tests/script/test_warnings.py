@@ -27,7 +27,7 @@ def test_differing_counts_sum_into_one_entry() -> None:
     # Previously these were THREE near-identical lines saying 1, 2 and 5.
     log = ScriptWarningLog()
     for n in (1, 2, 5):
-        log.add(ScriptWarningCode.NAV_ALREADY_VISITED, count=n)
+        log.add(ScriptWarningCode.NAV_UNKNOWN_IDS, count=n)
     (entry,) = log.entries
     assert (entry.occurrences, entry.total) == (3, 8)
 
@@ -69,10 +69,10 @@ def test_since_returns_deltas_not_absolutes() -> None:
     log.add(ScriptWarningCode.NAV_UNKNOWN_IDS, count=4)
     snap = log.snapshot()
     log.add(ScriptWarningCode.NAV_UNKNOWN_IDS, count=3)
-    log.add(ScriptWarningCode.NAV_ALREADY_VISITED, count=1)
+    log.add(ScriptWarningCode.NAV_SNIPPET_NOT_FOUND, count=1)
     assert log.since(snap) == [
         ScriptWarning(code=ScriptWarningCode.NAV_UNKNOWN_IDS, occurrences=1, total=3),
-        ScriptWarning(code=ScriptWarningCode.NAV_ALREADY_VISITED, occurrences=1, total=1),
+        ScriptWarning(code=ScriptWarningCode.NAV_SNIPPET_NOT_FOUND, occurrences=1, total=1),
     ]
 
 
