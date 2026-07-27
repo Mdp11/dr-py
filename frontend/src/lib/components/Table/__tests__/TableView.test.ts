@@ -52,6 +52,9 @@ const h = vi.hoisted(() => ({
 	jump: vi.fn(),
 	revertSuspendedTableEdits: vi.fn(),
 	resumeTableEvaluation: vi.fn(),
+	/** Mirrors `hasSuspendedTableEdits`: did the definition change since the
+	 * settings dialog opened? Drives the discard-confirmation gate. */
+	dirtySinceOpen: false,
 	draft: {
 		tabId: 'tbl:draft:1',
 		name: 'My Table',
@@ -85,6 +88,7 @@ vi.mock('$lib/state', () => ({
 	suspendTableEvaluation: vi.fn(),
 	resumeTableEvaluation: h.resumeTableEvaluation,
 	revertSuspendedTableEdits: h.revertSuspendedTableEdits,
+	hasSuspendedTableEdits: () => h.dirtySinceOpen,
 	abandonTableEvaluationSuspension: vi.fn(),
 	// TableGrid's dependencies (always mounted below the chrome bar).
 	getTablePage: () => h.page,
@@ -148,6 +152,7 @@ afterEach(() => {
 	h.jump.mockReset();
 	h.revertSuspendedTableEdits.mockClear();
 	h.resumeTableEvaluation.mockClear();
+	h.dirtySinceOpen = false;
 });
 
 describe('TableView settings popup', () => {
@@ -245,6 +250,143 @@ describe('TableView settings popup', () => {
 			flushSync();
 			await waitFor(() => !document.querySelector('[data-testid="table-settings-dialog"]'));
 			expect(h.revertSuspendedTableEdits).toHaveBeenCalledWith('tbl:draft:1');
+		} finally {
+			unmount(c);
+		}
+	});
+});
+
+// The discard gate: staged definition edits are lost on Cancel/X/Escape/
+// overlay, and a composed script column is expensive to lose. Nag only when
+// there is something to lose — `hasSuspendedTableEdits` is the whole test.
+describe('TableView settings discard confirmation', () => {
+	async function openSettings(): Promise<void> {
+		(document.querySelector('[data-testid="table-settings-button"]') as HTMLElement).click();
+		flushSync();
+		await waitFor(() => !!document.querySelector('[data-testid="table-settings-dialog"]'));
+	}
+
+	it('Cancel on a clean dialog closes with no confirmation', async () => {
+		h.dirtySinceOpen = false;
+		const c = render('tbl:draft:1');
+		try {
+			await openSettings();
+			(document.querySelector('[data-testid="settings-cancel"]') as HTMLElement).click();
+			flushSync();
+			await waitFor(() => !document.querySelector('[data-testid="table-settings-dialog"]'));
+			expect(document.querySelector('[data-testid="confirm-dialog"]')).toBeNull();
+			expect(h.revertSuspendedTableEdits).toHaveBeenCalledWith('tbl:draft:1');
+			expect(h.resumeTableEvaluation).toHaveBeenCalledTimes(1);
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('Cancel on a dirty dialog asks first and keeps the dialog open', async () => {
+		h.dirtySinceOpen = true;
+		const c = render('tbl:draft:1');
+		try {
+			await openSettings();
+			(document.querySelector('[data-testid="settings-cancel"]') as HTMLElement).click();
+			flushSync();
+			await waitFor(() => !!document.querySelector('[data-testid="confirm-dialog"]'));
+			expect(document.querySelector('[data-testid="table-settings-dialog"]')).not.toBeNull();
+			expect(h.revertSuspendedTableEdits).not.toHaveBeenCalled();
+			expect(h.resumeTableEvaluation).not.toHaveBeenCalled();
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('"Keep editing" dismisses only the confirmation', async () => {
+		h.dirtySinceOpen = true;
+		const c = render('tbl:draft:1');
+		try {
+			await openSettings();
+			(document.querySelector('[data-testid="settings-cancel"]') as HTMLElement).click();
+			flushSync();
+			await waitFor(() => !!document.querySelector('[data-testid="confirm-dialog"]'));
+			(document.querySelector('[data-testid="confirm-dialog-cancel"]') as HTMLElement).click();
+			flushSync();
+			await waitFor(() => !document.querySelector('[data-testid="confirm-dialog"]'));
+			expect(document.querySelector('[data-testid="table-settings-dialog"]')).not.toBeNull();
+			expect(h.revertSuspendedTableEdits).not.toHaveBeenCalled();
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('"Discard changes" reverts and closes, resuming exactly once', async () => {
+		h.dirtySinceOpen = true;
+		const c = render('tbl:draft:1');
+		try {
+			await openSettings();
+			(document.querySelector('[data-testid="settings-cancel"]') as HTMLElement).click();
+			flushSync();
+			await waitFor(() => !!document.querySelector('[data-testid="confirm-dialog"]'));
+			(document.querySelector('[data-testid="confirm-dialog-confirm"]') as HTMLElement).click();
+			flushSync();
+			await waitFor(() => !document.querySelector('[data-testid="table-settings-dialog"]'));
+			expect(h.revertSuspendedTableEdits).toHaveBeenCalledWith('tbl:draft:1');
+			// The suspend/resume contract: exactly one resume per close, not
+			// zero (stuck suspended) and not two (a double reload).
+			expect(h.resumeTableEvaluation).toHaveBeenCalledTimes(1);
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('Escape on a dirty dialog is gated too', async () => {
+		h.dirtySinceOpen = true;
+		const c = render('tbl:draft:1');
+		try {
+			await openSettings();
+			// `cancelable: true` matters here (unlike the ungated Escape test
+			// above): bits-ui's escape-layer clones the native event via
+			// `new KeyboardEvent(e.type, e)` before handing it to Content's
+			// `onEscapeKeydown`, inheriting `cancelable` from the original — a
+			// non-cancelable event makes our `preventDefault()` a silent no-op, so
+			// bits-ui's own close would fire right alongside the confirmation,
+			// same as it would for a keypress-derived event that had been
+			// (incorrectly) built non-cancelable. A real Escape keypress is always
+			// cancelable, so this matches production.
+			document.dispatchEvent(
+				new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+			);
+			flushSync();
+			await waitFor(() => !!document.querySelector('[data-testid="confirm-dialog"]'));
+			expect(document.querySelector('[data-testid="table-settings-dialog"]')).not.toBeNull();
+			expect(h.revertSuspendedTableEdits).not.toHaveBeenCalled();
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('the X is gated too', async () => {
+		h.dirtySinceOpen = true;
+		const c = render('tbl:draft:1');
+		try {
+			await openSettings();
+			(document.querySelector('[data-testid="settings-close"]') as HTMLElement).click();
+			flushSync();
+			await waitFor(() => !!document.querySelector('[data-testid="confirm-dialog"]'));
+			expect(document.querySelector('[data-testid="table-settings-dialog"]')).not.toBeNull();
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('Save is never gated, even when dirty', async () => {
+		h.dirtySinceOpen = true;
+		const c = render('tbl:draft:1');
+		try {
+			await openSettings();
+			(document.querySelector('[data-testid="settings-save"]') as HTMLElement).click();
+			flushSync();
+			await waitFor(() => !document.querySelector('[data-testid="table-settings-dialog"]'));
+			expect(document.querySelector('[data-testid="confirm-dialog"]')).toBeNull();
+			expect(h.revertSuspendedTableEdits).not.toHaveBeenCalled();
+			expect(h.resumeTableEvaluation).toHaveBeenCalledTimes(1);
 		} finally {
 			unmount(c);
 		}
@@ -713,25 +855,17 @@ describe('TableView header edit / add-column focus', () => {
 			const editBtn = document.querySelector('[data-testid="header-edit-1"]') as HTMLElement;
 			editBtn.click();
 			flushSync();
-			// Close the dialog via its built-in X button (bits-ui fires
-			// onOpenChange(false), which is where the focus reset lives). Content
-			// unmount is deferred until bits-ui's close "animation" resolves.
-			// `dialog-content.svelte` renders the X AFTER `{@render children}`, and
-			// the footer Cancel button is a `Dialog.Close` that ALSO carries
-			// `data-slot="dialog-close"` and comes first in DOM order — so the
-			// first match would silently be Cancel, not the X. Take the LAST match
-			// to unambiguously target the X and keep this the only test exercising
-			// that discard route.
-			const closeButtons = document.querySelectorAll('[data-slot="dialog-close"]');
-			expect(closeButtons.length).toBeGreaterThan(0);
-			const closeBtn = closeButtons[closeButtons.length - 1] as HTMLElement;
-			// The X, Cancel and Save buttons all share `data-slot="dialog-close"`,
-			// so position alone isn't self-verifying — assert on the X's own
-			// accessible name (its `sr-only` "Close" span) so this test actually
-			// fails if the selector ever again lands on the wrong button (Cancel's
-			// and Save's visible text differ, and neither is "Close").
-			expect(closeBtn.textContent?.trim()).toBe('Close');
+			// Close the dialog via the custom X button (Task 6: the primitive's
+			// built-in X is gone — `showCloseButton={false}` — replaced by a plain
+			// button with a stable testid so it no longer needs picking out of a
+			// `data-slot="dialog-close"` list shared with Cancel/Save). Content
+			// unmount is still deferred until bits-ui's close "animation" resolves,
+			// since `applyClose()` still closes by assigning `settingsOpen`, which
+			// the dialog's presence still tracks.
+			const closeBtn = document.querySelector('[data-testid="settings-close"]') as HTMLElement;
+			expect(closeBtn).not.toBeNull();
 			closeBtn.click();
+			flushSync();
 			await waitFor(() => document.querySelector('[data-testid="column-manager"]') === null);
 			const settingsBtn = document.querySelector(
 				'[data-testid="table-settings-button"]'

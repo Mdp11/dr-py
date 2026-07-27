@@ -19,6 +19,7 @@
 		getTableScriptStatus,
 		getTableWarnings,
 		getUncomputedScriptCellReason,
+		hasSuspendedTableEdits,
 		reloadTableDraft,
 		requestScriptErrors,
 		requestScrollToCell,
@@ -32,9 +33,10 @@
 		updateTableDefinition,
 		type ExportProgress
 	} from '$lib/state';
-	import { AlertTriangle, Check, Search, Settings } from '@lucide/svelte';
+	import { AlertTriangle, Check, Search, Settings, X } from '@lucide/svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
+	import ConfirmDialog from '$lib/components/ui/confirm-dialog/confirm-dialog.svelte';
 	import {
 		addColumn,
 		newNavigationColumn,
@@ -177,22 +179,65 @@
 	// the JSON export options + live preview.
 	let settingsTab = $state<'columns' | 'json'>('columns');
 
-	// Set by the Save button just before it closes the dialog, so onOpenChange
-	// can tell "Save" apart from every discard path (Cancel, the X, Escape, an
-	// overlay click) — those all land in onOpenChange(false) with the flag
-	// still false and revert the staged edits first. Plain variable, not
-	// $state: control flow only, never rendered.
+	// Set by the Save button just before it closes the dialog, so whichever
+	// close path runs (Save's onOpenChange, or applyClose() called directly by
+	// a discard path) can tell "Save" apart from every DISCARD path (Cancel,
+	// the X, Escape, an overlay click) and skip reverting the staged edits.
+	// Plain variable, not $state: control flow only, never rendered.
 	//
-	// Both footer buttons are `Dialog.Close`, not plain buttons that set
-	// `settingsOpen = false` directly: bits-ui's `onOpenChange` fires only from
-	// DialogRootState's own handleClose() (wired through Close/Escape/overlay),
-	// not from an external assignment to the bound `open` value — the latter
-	// closes the dialog (the bound prop still drives presence) but silently
-	// skips onOpenChange, so neither the revert nor the resume would run.
+	// Save is the only footer button still a `Dialog.Close`: it sets this flag
+	// then closes through the primitive, so bits-ui's `onOpenChange` fires (see
+	// its own DialogRootState's handleClose(), wired through Close/Escape/
+	// overlay) and applyClose() there sees the flag and keeps the edits. Every
+	// discard path (Cancel, the X, Escape, an overlay click) must be gated
+	// BEFORE closing — see `requestClose`/`discardAndClose` below — and a
+	// `Dialog.Close` cannot be gated (it closes on click before a handler could
+	// intercept it), so those paths are plain buttons / preventDefault'd
+	// primitive callbacks that close by assigning `settingsOpen = false`
+	// directly and call `applyClose()` themselves, since an external
+	// assignment to the bound `open` value closes the dialog (the bound prop
+	// still drives presence) but bits-ui does NOT report it through
+	// `onOpenChange` — that only fires from its own internal handleClose().
 	let settingsSaved = false;
 
 	function saveSettings(): void {
 		settingsSaved = true;
+	}
+
+	/** Whether the discard confirmation is showing over the settings dialog. */
+	let confirmDiscardOpen = $state(false);
+
+	/** Everything a settings-dialog close must do, regardless of which path
+	 * got there. Lives in a function rather than inline in `onOpenChange`
+	 * because two of the four close paths (the gated Cancel/X, and the
+	 * confirmation's "Discard changes") close by assigning `settingsOpen`,
+	 * which bits-ui does NOT report through `onOpenChange` — see the note by
+	 * `settingsSaved`'s declaration.
+	 *
+	 * Safe to run twice: `revertSuspendedTableEdits` returns early once the
+	 * suspend-time snapshot is gone, and `resumeTableEvaluation` returns early
+	 * once the suspension is dropped. */
+	function applyClose(): void {
+		if (!settingsSaved) revertSuspendedTableEdits(tabId);
+		settingsFocus = null;
+		resumeTableEvaluation(tabId);
+	}
+
+	/** The gate. Every DISCARD path (Cancel, the X, Escape, an overlay click)
+	 * funnels through here; Save does not, because it keeps the edits. */
+	function requestClose(): void {
+		if (hasSuspendedTableEdits(tabId)) {
+			confirmDiscardOpen = true;
+			return;
+		}
+		applyClose();
+		settingsOpen = false;
+	}
+
+	function discardAndClose(): void {
+		confirmDiscardOpen = false;
+		applyClose();
+		settingsOpen = false;
 	}
 
 	// The settings dialog is a working surface, not an alert: open big
@@ -246,6 +291,7 @@
 		// resetting here, a Save leaves `settingsSaved` stuck `true` and the
 		// dialog's NEXT close — even a Cancel — would wrongly keep the edits.
 		settingsSaved = false;
+		confirmDiscardOpen = false;
 		settingsOpen = true;
 	}
 
@@ -578,21 +624,45 @@
 			bind:open={settingsOpen}
 			onOpenChange={(o) => {
 				if (o) return; // opening is handled by openSettings, not here — see its comment
-				// Every close path (the X, Escape, an overlay click, both footer
-				// buttons) lands here. Only Save keeps the staged edits; everything
-				// else restores the definition/dirty/sort snapshot taken at open —
-				// after which the resume below sees an unchanged definition and
-				// skips the reload entirely.
-				if (!settingsSaved) revertSuspendedTableEdits(tabId);
-				settingsFocus = null;
-				resumeTableEvaluation(tabId);
+				// Only Save still reaches here: every discard path is intercepted
+				// by `requestClose` (Cancel, the X) or by the preventDefault
+				// handlers below (Escape, overlay click), and those close by
+				// assigning `settingsOpen`, which bits-ui does not report here.
+				applyClose();
 			}}
 		>
 			<Dialog.Content
 				data-testid="table-settings-dialog"
 				class="flex max-w-none flex-col overflow-hidden sm:max-w-none"
 				style="width:{dlgW}px;height:{dlgH}px"
+				showCloseButton={false}
+				onEscapeKeydown={(e) => {
+					// Gate Escape rather than letting the primitive close: a stray
+					// Escape used to bin a fully composed script column silently.
+					if (hasSuspendedTableEdits(tabId)) {
+						e.preventDefault();
+						confirmDiscardOpen = true;
+					}
+				}}
+				onInteractOutside={(e) => {
+					if (hasSuspendedTableEdits(tabId)) {
+						e.preventDefault();
+						confirmDiscardOpen = true;
+					}
+				}}
 			>
+				<!-- Our own X: the primitive's built-in one is a `Dialog.Close`,
+				     whose click cannot be preventDefault-ed, so it could not be
+				     gated. `showCloseButton={false}` above turns that one off. -->
+				<button
+					type="button"
+					data-testid="settings-close"
+					class="absolute top-4 right-4 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+					onclick={requestClose}
+				>
+					<X class="size-4" />
+					<span class="sr-only">Close</span>
+				</button>
 				<Dialog.Title class="font-display text-lg font-light tracking-wide">
 					{settingsFocus === null ? 'Table settings' : 'Column settings'}
 				</Dialog.Title>
@@ -624,12 +694,14 @@
 					{/if}
 				</div>
 				<div class="flex shrink-0 items-center justify-end gap-2 border-t border-border pt-2">
-					<Dialog.Close
+					<button
+						type="button"
 						data-testid="settings-cancel"
 						class="rounded border border-input px-3 py-1 text-xs text-foreground/80 transition-colors hover:bg-muted"
+						onclick={requestClose}
 					>
 						Cancel
-					</Dialog.Close>
+					</button>
 					<Dialog.Close
 						data-testid="settings-save"
 						class="rounded bg-primary px-3 py-1 text-xs text-primary-foreground transition-colors hover:bg-primary/80"
@@ -649,6 +721,15 @@
 					onpointerup={onDlgResizeEnd}
 					onpointercancel={onDlgResizeEnd}
 				></div>
+				<ConfirmDialog
+					bind:open={confirmDiscardOpen}
+					title="Discard changes?"
+					description="The column changes you made in this dialog will be lost. This cannot be undone."
+					confirmLabel="Discard changes"
+					cancelLabel="Keep editing"
+					variant="destructive"
+					onConfirm={discardAndClose}
+				/>
 			</Dialog.Content>
 		</Dialog.Root>
 	{/if}
