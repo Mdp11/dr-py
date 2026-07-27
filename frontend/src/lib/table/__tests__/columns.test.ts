@@ -676,7 +676,9 @@ describe('setColumnJsonOptions', () => {
 	});
 
 	it('patches the item key without disturbing the group key', () => {
-		const d = defn(el({ json_export: { key: 'Signals', item_key: '', value: 'name', group: true } }));
+		const d = defn(
+			el({ json_export: { key: 'Signals', item_key: '', value: 'name', group: true } })
+		);
 		const next = setColumnJsonOptions(d, 0, { item_key: 'One Signal' });
 		expect(next.columns[0].json_export).toEqual({
 			key: 'Signals',
