@@ -1073,3 +1073,141 @@ def test_two_explicit_item_keys_that_collide_are_suffixed():
         _grouped(json_export={"group": True, "key": "B", "item_key": "one"}),
     )
     assert keys == ["one", "one_2"]
+
+
+def _nav_group(json_export: dict) -> dict:
+    """`_hop_nav('expand', group=True)` with the json_export block spelled out,
+    so a test can set `key`/`item_key` on it."""
+    col = _hop_nav("expand", group=False)
+    col["json_export"] = json_export
+    return col
+
+
+def test_item_key_names_the_value_inside_a_group():
+    mm = _parts_mm()
+    model = _parts_model(mm)
+    docs = _render(
+        mm,
+        model,
+        {
+            "row_source": {"kind": "scope", "types": ["Block"], "criteria": []},
+            "columns": [
+                {
+                    "kind": "property",
+                    "source": {"kind": "row"},
+                    "name": "name",
+                    "header": "Name",
+                },
+                _nav_group(
+                    {"group": True, "key": "Components", "item_key": "One Component"}
+                ),
+                {
+                    "kind": "property",
+                    "source": {"kind": "column", "index": 1},
+                    "name": "mass",
+                    "header": "Component Mass",
+                },
+            ],
+        },
+    )
+    root = next(d for d in docs if d["Name"] == "Root")
+    assert root == {
+        "Name": "Root",
+        "Components": [
+            {"One Component": "Part 1", "Component Mass": 12},
+            {"One Component": "Part 2", "Component Mass": 9},
+        ],
+    }
+
+
+def test_a_blank_item_key_still_repeats_the_group_key():
+    """Back-compat: this is the pre-`item_key` output, verbatim."""
+    mm = _parts_mm()
+    model = _parts_model(mm)
+    docs = _render(
+        mm,
+        model,
+        {
+            "row_source": {"kind": "scope", "types": ["Block"], "criteria": []},
+            "columns": [
+                {
+                    "kind": "property",
+                    "source": {"kind": "row"},
+                    "name": "name",
+                    "header": "Name",
+                },
+                _nav_group({"group": True, "key": "Components"}),
+                {
+                    "kind": "property",
+                    "source": {"kind": "column", "index": 1},
+                    "name": "mass",
+                    "header": "Component Mass",
+                },
+            ],
+        },
+    )
+    root = next(d for d in docs if d["Name"] == "Root")
+    assert root == {
+        "Name": "Root",
+        "Components": [
+            {"Components": "Part 1", "Component Mass": 12},
+            {"Components": "Part 2", "Component Mass": 9},
+        ],
+    }
+
+
+def test_item_key_is_unused_when_the_group_unwraps_to_scalars():
+    mm = _parts_mm()
+    model = _parts_model(mm)
+    docs = _render(
+        mm,
+        model,
+        {
+            "row_source": {"kind": "scope", "types": ["Block"], "criteria": []},
+            "columns": [
+                {
+                    "kind": "property",
+                    "source": {"kind": "row"},
+                    "name": "name",
+                    "header": "Name",
+                },
+                _nav_group({"group": True, "key": "Components", "item_key": "each"}),
+            ],
+        },
+    )
+    root = next(d for d in docs if d["Name"] == "Root")
+    assert root == {"Name": "Root", "Components": ["Part 1", "Part 2"]}
+
+
+def test_a_grouped_column_keeps_its_group_key_at_the_top_level():
+    """The array's own name comes from `key`, never from `item_key` — the
+    grouped column is in its home level's group set."""
+    mm = _parts_mm()
+    model = _parts_model(mm)
+    docs = _render(
+        mm,
+        model,
+        {
+            "row_source": {"kind": "scope", "types": ["Block"], "criteria": []},
+            "columns": [
+                {
+                    "kind": "property",
+                    "source": {"kind": "row"},
+                    "name": "name",
+                    "header": "Name",
+                },
+                _nav_group({"group": True, "key": "Components", "item_key": "each"}),
+                {
+                    "kind": "property",
+                    "source": {"kind": "column", "index": 1},
+                    "name": "mass",
+                    "header": "Component Mass",
+                },
+            ],
+        },
+    )
+    root = next(d for d in docs if d["Name"] == "Root")
+    assert set(root) == {"Name", "Components"}
+    components = root["Components"]
+    assert isinstance(components, list)
+    assert set(components[0]) == {"each", "Component Mass"}

@@ -249,3 +249,35 @@ def test_preview_is_read_only_and_reachable_by_a_viewer(client):
     from data_rover.api.authz import _READ_ONLY_POST_SUFFIXES
 
     assert "/tables/json-preview" in _READ_ONLY_POST_SUFFIXES
+
+
+def test_json_export_accepts_item_key_over_the_wire(client):
+    """`item_key` has to survive TABLE_ADAPTER validation and reach the
+    renderer without disturbing the array's own name. The NESTED shape it
+    produces is pinned in tests/table/test_json_export.py, which can build a
+    dependent column against a metamodel it controls — this fixture's
+    relationships are `_bootstrap_model`'s business, so asserting a nested
+    object here would pin the fixture rather than the feature."""
+    _bootstrap_model(client)
+    body = _body(
+        [
+            {"kind": "element", "source": {"kind": "row"}, "header": "Block"},
+            {
+                "kind": "property",
+                "source": {"kind": "row"},
+                "name": "mass",
+                "mode": "expand",
+                "header": "Mass",
+                "json_export": {
+                    "group": True,
+                    "key": "Masses",
+                    "item_key": "One Mass",
+                },
+            },
+        ]
+    )
+    r = client.post(papi("/tables/export"), json=body, headers=AUTH_HEADERS)
+    assert r.status_code == 200
+    docs = json.loads(r.content)
+    assert set(docs[0]) == {"Block", "Masses"}
+    assert isinstance(docs[0]["Masses"], list)

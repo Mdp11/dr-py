@@ -257,6 +257,26 @@ def build_group_plan(defn: TableDefinition, base_slots: int) -> GroupPlan:
     )
 
 
+@dataclass(frozen=True)
+class JsonKeys:
+    """The resolved names, one entry per definition column.
+
+    `level` is the key at a column's HOME level — for a grouped column that is
+    the array's name. `item` is the key a grouped column uses for its own value
+    INSIDE its entries, and is `None` for every column that does not group.
+    Bundled rather than passed as two parallel lists so the recursive renderers
+    keep their arity.
+    """
+
+    level: list[str | None]
+    item: list[str | None]
+
+    @staticmethod
+    def resolve(defn: TableDefinition) -> JsonKeys:
+        level = resolve_json_keys(defn)
+        return JsonKeys(level=level, item=resolve_item_keys(defn, level))
+
+
 #: One export row: its key (for grouping) paired with its evaluated cells.
 _Pair = tuple[RowKey, list[Cell]]
 
@@ -280,7 +300,7 @@ def render_json(
     `TableLimits.max_rows`. Rows still ARRIVE chunk by chunk.
     """
     plan = build_group_plan(defn, base_slots)
-    jkeys = resolve_json_keys(defn)
+    keys = JsonKeys.resolve(defn)
     pairs: list[_Pair] = list(zip(row_keys, row_iter, strict=True))
 
     if not plan.grouped:
@@ -299,7 +319,7 @@ def render_json(
         buckets = list(merged.values())
 
     return [
-        _render_level(model, defn, jkeys, plan, plan.top_columns, plan.top_groups, b)
+        _render_level(model, defn, keys, plan, plan.top_columns, plan.top_groups, b)
         for b in buckets
     ]
 
@@ -307,7 +327,7 @@ def render_json(
 def _render_level(
     model: Model,
     defn: TableDefinition,
-    jkeys: list[str | None],
+    keys: JsonKeys,
     plan: GroupPlan,
     columns: tuple[int, ...],
     groups: tuple[int, ...],
@@ -320,16 +340,27 @@ def _render_level(
     A plain column is read from `rows[0]` because its value is CONSTANT across
     the group by construction: it reads no grouped slot, so nothing that varies
     within the group can reach it.
+
+    A grouped column appears in exactly two places: as an ARRAY at its home
+    level (where it is in `group_set`) and as the plain leading member of its
+    OWN entry level (where it is not — `build_group_plan` routes every other
+    grouped column to `children`). That is the whole rule for picking between
+    the two names.
     """
     group_set = set(groups)
     obj: dict[str, object] = {}
     for i in sorted([*columns, *groups]):
-        key = jkeys[i]
-        if key is None:  # hidden: evaluated, never emitted
-            continue
         if i in group_set:
-            obj[key] = _render_group(model, defn, jkeys, plan, i, rows)
+            key = keys.level[i]
+            if key is None:  # hidden: evaluated, never emitted
+                continue
+            obj[key] = _render_group(model, defn, keys, plan, i, rows)
         else:
+            # A grouped column reached here is rendering its own value inside
+            # its own entries, which is what `item` names.
+            key = keys.item[i] if i in plan.grouped else keys.level[i]
+            if key is None:  # hidden: evaluated, never emitted
+                continue
             obj[key] = render_cell(model, rows[0][1][i], _mode_of(defn.columns[i]))
     return obj
 
@@ -337,7 +368,7 @@ def _render_level(
 def _render_group(
     model: Model,
     defn: TableDefinition,
-    jkeys: list[str | None],
+    keys: JsonKeys,
     plan: GroupPlan,
     g: int,
     rows: list[_Pair],
@@ -351,7 +382,8 @@ def _render_group(
 
     Unwrapping: when the group holds only the grouped column itself and nests
     nothing, the array carries that column's values directly. Wrapping them in
-    single-key objects would be noise.
+    single-key objects would be noise — and `item_key` goes unused, since there
+    is no object to put it on.
     """
     slot = plan.slot_of[g]
     parts: dict[object, list[_Pair]] = {}
@@ -366,6 +398,6 @@ def _render_group(
         mode = _mode_of(defn.columns[g])
         return [render_cell(model, sub[0][1][g], mode) for sub in parts.values()]
     return [
-        _render_level(model, defn, jkeys, plan, members, children, sub)
+        _render_level(model, defn, keys, plan, members, children, sub)
         for sub in parts.values()
     ]
