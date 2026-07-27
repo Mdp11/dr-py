@@ -18,6 +18,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as tablesApi from '$lib/api/tables';
 import type { TableDefinition } from '$lib/api/types';
 import { ensureTableDraft, getTableDraft, setTableSort, updateTableDefinition } from '$lib/state';
+import { setColumnJsonOptions } from '$lib/table/columns';
 import JsonExportEditor from '../JsonExportEditor.svelte';
 
 const TAB_ID = 'tbl:draft:json-export-test';
@@ -335,6 +336,85 @@ describe('JsonExportEditor', () => {
 			}
 		} finally {
 			vi.useRealTimers();
+		}
+	});
+
+	// The item key names a grouped column's own value INSIDE its array
+	// entries; ungrouped rows have one role and keep the single bare input.
+	it('shows the item-key input only once a column is grouped', async () => {
+		await seed();
+		vi.spyOn(tablesApi, 'previewTableJson').mockResolvedValue({ sample: '[]', truncated: false });
+		const c = render();
+		try {
+			expect(testid('json-item-key-1')).toBeNull();
+			const box = testid('json-group-1') as HTMLInputElement;
+			box.checked = true;
+			box.dispatchEvent(new Event('change', { bubbles: true }));
+			flushSync();
+			expect(testid('json-item-key-1')).not.toBeNull();
+			// A collapse column can never group, so it never gets one.
+			expect(testid('json-item-key-0')).toBeNull();
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('writes an edited item key into the definition', async () => {
+		await seed();
+		vi.spyOn(tablesApi, 'previewTableJson').mockResolvedValue({ sample: '[]', truncated: false });
+		updateTableDefinition(
+			TAB_ID,
+			setColumnJsonOptions(defn(), 1, { group: true, key: 'Components' })
+		);
+		flushSync();
+		const c = render();
+		try {
+			const item = testid('json-item-key-1') as HTMLInputElement;
+			item.value = 'One Component';
+			item.dispatchEvent(new Event('input', { bubbles: true }));
+			flushSync();
+			const opts = getTableDraft(TAB_ID)!.definition.columns[1].json_export;
+			expect(opts?.item_key).toBe('One Component');
+			expect(opts?.key).toBe('Components'); // the group key is untouched
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('placeholds the item key with the resolved group key it falls back to', async () => {
+		await seed();
+		vi.spyOn(tablesApi, 'previewTableJson').mockResolvedValue({ sample: '[]', truncated: false });
+		updateTableDefinition(
+			TAB_ID,
+			setColumnJsonOptions(defn(), 1, { group: true, key: 'Components' })
+		);
+		flushSync();
+		const c = render();
+		try {
+			expect((testid('json-item-key-1') as HTMLInputElement).placeholder).toBe('Components');
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('snake_cases an explicitly set item key and leaves a blank one blank', async () => {
+		await seed();
+		vi.spyOn(tablesApi, 'previewTableJson').mockResolvedValue({ sample: '[]', truncated: false });
+		updateTableDefinition(
+			TAB_ID,
+			setColumnJsonOptions(defn(), 1, { group: true, item_key: 'One Component' })
+		);
+		flushSync();
+		const c = render();
+		try {
+			(testid('json-snake-all') as HTMLButtonElement).click();
+			flushSync();
+			const cols = getTableDraft(TAB_ID)!.definition.columns;
+			expect(cols[1].json_export?.item_key).toBe('one_component');
+			// Column 0 never had one: it stays blank and keeps following its key.
+			expect(cols[0].json_export?.item_key).toBe('');
+		} finally {
+			unmount(c);
 		}
 	});
 });

@@ -453,8 +453,8 @@ The Export button is a dropdown (Excel `.xlsx` / JSON `.json`); both formats go
 through the same `downloadTable` retry loop, because the backend's 202 +
 `Retry-After` protocol is format-agnostic.
 
-JSON settings live per column (`json_export: {key, value, group}`) and are edited
-in the "JSON export" tab of the table Settings dialog
+JSON settings live per column (`json_export: {key, item_key, value, group}`) and
+are edited in the "JSON export" tab of the table Settings dialog
 (`components/Table/JsonExportEditor.svelte`). `defaultJsonKeys` in
 `lib/table/columns.ts` mirrors the backend's key derivation, but ONLY to fill
 input placeholders — the sample pane fetches `POST /tables/json-preview` so the

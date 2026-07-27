@@ -654,14 +654,37 @@ describe('setColumnJsonOptions', () => {
 	it('creates the options object when absent and keeps other columns', () => {
 		const d = defn(el({ header: 'A' }), el({ header: 'B' }));
 		const next = setColumnJsonOptions(d, 1, { key: 'b' });
-		expect(next.columns[1].json_export).toEqual({ key: 'b', value: 'name', group: false });
+		expect(next.columns[1].json_export).toEqual({
+			key: 'b',
+			item_key: '',
+			value: 'name',
+			group: false
+		});
 		expect(next.columns[0].json_export).toBeUndefined();
 		expect(d.columns[1].json_export).toBeUndefined(); // input not mutated
 	});
 
 	it('merges into existing options', () => {
-		const d = defn(el({ json_export: { key: 'a', value: 'id', group: false } }));
+		const d = defn(el({ json_export: { key: 'a', item_key: '', value: 'id', group: false } }));
 		const next = setColumnJsonOptions(d, 0, { group: true });
-		expect(next.columns[0].json_export).toEqual({ key: 'a', value: 'id', group: true });
+		expect(next.columns[0].json_export).toEqual({
+			key: 'a',
+			item_key: '',
+			value: 'id',
+			group: true
+		});
+	});
+
+	it('patches the item key without disturbing the group key', () => {
+		const d = defn(
+			el({ json_export: { key: 'Signals', item_key: '', value: 'name', group: true } })
+		);
+		const next = setColumnJsonOptions(d, 0, { item_key: 'One Signal' });
+		expect(next.columns[0].json_export).toEqual({
+			key: 'Signals',
+			item_key: 'One Signal',
+			value: 'name',
+			group: true
+		});
 	});
 });

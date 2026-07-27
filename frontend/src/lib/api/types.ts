@@ -715,9 +715,12 @@ export type SnippetSource = z.infer<typeof SnippetSourceSchema>;
 
 /** Per-column JSON-export settings. Mirrors core/table/schema.py's
  *  JsonColumnOptions. `group` is honored by the backend only on a VISIBLE
- *  EXPAND column; a stale flag elsewhere is ignored, not rejected. */
+ *  EXPAND column; a stale flag elsewhere is ignored, not rejected. `key` names
+ *  the column at its home level (the ARRAY, once grouped) and `item_key` names
+ *  its own value inside that array's entries; blank falls back to `key`. */
 export const JsonColumnOptionsSchema = z.object({
 	key: z.string().default(''),
+	item_key: z.string().default(''),
 	value: z.enum(['name', 'id', 'object']).default('name'),
 	group: z.boolean().default(false)
 });

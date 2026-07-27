@@ -1,6 +1,9 @@
 <script lang="ts">
 	// The "JSON export" settings tab: one row per VISIBLE column (key, element
-	// rendering, group), plus a live sample.
+	// rendering, group), plus a live sample. A grouped column names two things
+	// — the array at its parent level and its own value inside each entry — so
+	// its Key cell carries a second "item" input; blank means "same as array",
+	// which is what the placeholder shows.
 	//
 	// The sample is fetched from `POST /tables/json-preview` rather than built
 	// here on purpose: grouping is a non-trivial algorithm over the evaluator's
@@ -41,7 +44,14 @@
 		const derived = defaultJsonKeys(defn);
 		derived.forEach((k, i) => {
 			if (k === null) return; // hidden: no key to rewrite
-			next = setColumnJsonOptions(next, i, { key: snakeCaseKey(k) });
+			// A blank item key keeps following the (now snaked) group key —
+			// writing one would only freeze today's fallback into the payload.
+			const item = defn.columns[i].json_export?.item_key ?? '';
+			next = setColumnJsonOptions(
+				next,
+				i,
+				item ? { key: snakeCaseKey(k), item_key: snakeCaseKey(item) } : { key: snakeCaseKey(k) }
+			);
 		});
 		updateTableDefinition(tabId, next);
 	}
@@ -109,16 +119,40 @@
 			<tbody>
 				{#each defn.columns as col, i (i)}
 					{#if !col.hidden}
+						{@const grouped = canGroup(col) && (col.json_export?.group ?? false)}
 						<tr class="border-t border-border">
 							<td class="py-1 pr-2 text-muted-foreground">{col.header || col.kind}</td>
 							<td class="py-1 pr-2">
-								<input
-									data-testid={`json-key-${i}`}
-									class="w-full rounded border border-input bg-card px-2 py-1"
-									placeholder={keys[i] ?? ''}
-									value={col.json_export?.key ?? ''}
-									oninput={(e) => patch(i, { key: e.currentTarget.value })}
-								/>
+								<div class="flex flex-col gap-1">
+									<label class="flex items-center gap-1">
+										{#if grouped}
+											<span class="w-9 shrink-0 text-[10px] uppercase text-muted-foreground/70">
+												array
+											</span>
+										{/if}
+										<input
+											data-testid={`json-key-${i}`}
+											class="w-full rounded border border-input bg-card px-2 py-1"
+											placeholder={keys[i] ?? ''}
+											value={col.json_export?.key ?? ''}
+											oninput={(e) => patch(i, { key: e.currentTarget.value })}
+										/>
+									</label>
+									{#if grouped}
+										<label class="flex items-center gap-1">
+											<span class="w-9 shrink-0 text-[10px] uppercase text-muted-foreground/70">
+												item
+											</span>
+											<input
+												data-testid={`json-item-key-${i}`}
+												class="w-full rounded border border-input bg-card px-2 py-1"
+												placeholder={keys[i] ?? ''}
+												value={col.json_export?.item_key ?? ''}
+												oninput={(e) => patch(i, { item_key: e.currentTarget.value })}
+											/>
+										</label>
+									{/if}
+								</div>
 							</td>
 							<td class="py-1 pr-2">
 								{#if producesElements(col)}

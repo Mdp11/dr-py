@@ -62,6 +62,59 @@ def resolve_json_keys(defn: TableDefinition) -> list[str | None]:
     return out
 
 
+def _honors_group(col: Column) -> bool:
+    """Whether this column's `group` flag is actually acted on: set, on a
+    VISIBLE EXPAND column. A stale flag anywhere else is IGNORED rather than
+    rejected — the column editor can flip expand->collapse at any moment and a
+    422 would block exporting the whole table over a leftover checkbox."""
+    return (
+        col.json_export is not None
+        and col.json_export.group
+        and not col.hidden
+        and getattr(col, "mode", "collapse") == "expand"
+    )
+
+
+def resolve_item_keys(
+    defn: TableDefinition, jkeys: list[str | None]
+) -> list[str | None]:
+    """Per definition column, the key a GROUPED column uses for its own value
+    inside its array entries; `None` for every column that does not group.
+
+    Positionally aligned with `jkeys`, and deliberately a SECOND pass over it:
+    resolving group keys first means a group key always wins a collision, which
+    is what keeps definitions written before `item_key` existed rendering
+    byte-identically.
+
+    A blank `item_key` — and an explicit one that repeats the column's own
+    group key — is taken VERBATIM rather than uniquified. The two names belong
+    to the same column at two nesting levels, so the global "one key means one
+    column" invariant `resolve_json_keys` maintains still holds; suffixing it
+    to `Signals_2` would be noise. Any OTHER explicit key joins that global
+    namespace and takes `_2`, `_3`, ... on a clash.
+    """
+    out: list[str | None] = []
+    used = {k for k in jkeys if k is not None}
+    for i, col in enumerate(defn.columns):
+        own = jkeys[i]
+        if own is None or not _honors_group(col):
+            out.append(None)  # hidden, or never rendered as a group
+            continue
+        opts = col.json_export
+        base = (opts.item_key if opts is not None else "") or own
+        if base == own:
+            out.append(own)
+            continue
+        key = base
+        n = 2
+        while key in used:
+            key = f"{base}_{n}"
+            n += 1
+        used.add(key)
+        out.append(key)
+    return out
+
+
 def _element_json(model: Model, eid: str, mode: str) -> object:
     """One element reference rendered per the column's `json_export.value`.
 
@@ -162,20 +215,11 @@ def build_group_plan(defn: TableDefinition, base_slots: int) -> GroupPlan:
     is what makes `{part: [{subpart: [{mass: ...}]}]}` come out right instead
     of hoisting `mass` up beside `subpart`.
 
-    `group` is honored only on a VISIBLE EXPAND column. A stale flag on a
-    collapse or hidden column is IGNORED rather than rejected: the column
-    editor can flip expand->collapse at any moment, and 422-ing there would
-    block exporting the whole table over a leftover checkbox.
+    `group` is honored only where `_honors_group` says so; a stale flag
+    elsewhere is ignored, not rejected.
     """
     deps = _deps(defn)
-    grouped = tuple(
-        i
-        for i, c in enumerate(defn.columns)
-        if c.json_export is not None
-        and c.json_export.group
-        and not c.hidden
-        and getattr(c, "mode", "collapse") == "expand"
-    )
+    grouped = tuple(i for i, c in enumerate(defn.columns) if _honors_group(c))
     gset = set(grouped)
 
     def owner(i: int) -> int | None:
@@ -213,6 +257,26 @@ def build_group_plan(defn: TableDefinition, base_slots: int) -> GroupPlan:
     )
 
 
+@dataclass(frozen=True)
+class JsonKeys:
+    """The resolved names, one entry per definition column.
+
+    `level` is the key at a column's HOME level — for a grouped column that is
+    the array's name. `item` is the key a grouped column uses for its own value
+    INSIDE its entries, and is `None` for every column that does not group.
+    Bundled rather than passed as two parallel lists so the recursive renderers
+    keep their arity.
+    """
+
+    level: list[str | None]
+    item: list[str | None]
+
+    @staticmethod
+    def resolve(defn: TableDefinition) -> JsonKeys:
+        level = resolve_json_keys(defn)
+        return JsonKeys(level=level, item=resolve_item_keys(defn, level))
+
+
 #: One export row: its key (for grouping) paired with its evaluated cells.
 _Pair = tuple[RowKey, list[Cell]]
 
@@ -236,7 +300,7 @@ def render_json(
     `TableLimits.max_rows`. Rows still ARRIVE chunk by chunk.
     """
     plan = build_group_plan(defn, base_slots)
-    jkeys = resolve_json_keys(defn)
+    keys = JsonKeys.resolve(defn)
     pairs: list[_Pair] = list(zip(row_keys, row_iter, strict=True))
 
     if not plan.grouped:
@@ -255,7 +319,7 @@ def render_json(
         buckets = list(merged.values())
 
     return [
-        _render_level(model, defn, jkeys, plan, plan.top_columns, plan.top_groups, b)
+        _render_level(model, defn, keys, plan, plan.top_columns, plan.top_groups, b)
         for b in buckets
     ]
 
@@ -263,7 +327,7 @@ def render_json(
 def _render_level(
     model: Model,
     defn: TableDefinition,
-    jkeys: list[str | None],
+    keys: JsonKeys,
     plan: GroupPlan,
     columns: tuple[int, ...],
     groups: tuple[int, ...],
@@ -276,16 +340,27 @@ def _render_level(
     A plain column is read from `rows[0]` because its value is CONSTANT across
     the group by construction: it reads no grouped slot, so nothing that varies
     within the group can reach it.
+
+    A grouped column appears in exactly two places: as an ARRAY at its home
+    level (where it is in `group_set`) and as the plain leading member of its
+    OWN entry level (where it is not — `build_group_plan` routes every other
+    grouped column to `children`). That is the whole rule for picking between
+    the two names.
     """
     group_set = set(groups)
     obj: dict[str, object] = {}
     for i in sorted([*columns, *groups]):
-        key = jkeys[i]
-        if key is None:  # hidden: evaluated, never emitted
-            continue
         if i in group_set:
-            obj[key] = _render_group(model, defn, jkeys, plan, i, rows)
+            key = keys.level[i]
+            if key is None:  # hidden: evaluated, never emitted
+                continue
+            obj[key] = _render_group(model, defn, keys, plan, i, rows)
         else:
+            # A grouped column reached here is rendering its own value inside
+            # its own entries, which is what `item` names.
+            key = keys.item[i] if i in plan.grouped else keys.level[i]
+            if key is None:  # hidden: evaluated, never emitted
+                continue
             obj[key] = render_cell(model, rows[0][1][i], _mode_of(defn.columns[i]))
     return obj
 
@@ -293,7 +368,7 @@ def _render_level(
 def _render_group(
     model: Model,
     defn: TableDefinition,
-    jkeys: list[str | None],
+    keys: JsonKeys,
     plan: GroupPlan,
     g: int,
     rows: list[_Pair],
@@ -307,7 +382,8 @@ def _render_group(
 
     Unwrapping: when the group holds only the grouped column itself and nests
     nothing, the array carries that column's values directly. Wrapping them in
-    single-key objects would be noise.
+    single-key objects would be noise — and `item_key` goes unused, since there
+    is no object to put it on.
     """
     slot = plan.slot_of[g]
     parts: dict[object, list[_Pair]] = {}
@@ -322,6 +398,6 @@ def _render_group(
         mode = _mode_of(defn.columns[g])
         return [render_cell(model, sub[0][1][g], mode) for sub in parts.values()]
     return [
-        _render_level(model, defn, jkeys, plan, members, children, sub)
+        _render_level(model, defn, keys, plan, members, children, sub)
         for sub in parts.values()
     ]

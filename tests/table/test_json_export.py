@@ -27,6 +27,7 @@ from data_rover.core.table.json_export import (
     build_group_plan,
     render_cell,
     render_json,
+    resolve_item_keys,
     resolve_json_keys,
 )
 from data_rover.core.table.schema import TABLE_ADAPTER
@@ -996,3 +997,296 @@ def test_zero_rows_is_an_empty_document():
         },
     )
     assert docs == []
+
+
+def _grouped(**over) -> dict:
+    """A visible expand column with `group` on — the only shape whose
+    `item_key` is honored."""
+    col = {
+        "kind": "property",
+        "source": {"kind": "row"},
+        "name": "mass",
+        "mode": "expand",
+        "header": "Signal",
+        "json_export": {"group": True},
+    }
+    col.update(over)
+    return col
+
+
+def _item_keys(*cols):
+    defn = _defn(columns=list(cols))
+    return resolve_item_keys(defn, resolve_json_keys(defn))
+
+
+def test_item_key_defaults_to_empty():
+    defn = _defn(columns=[_grouped()])
+    opts = defn.columns[0].json_export
+    assert opts is not None
+    assert opts.item_key == ""
+
+
+def test_blank_item_key_falls_back_to_the_resolved_group_key():
+    assert _item_keys(_grouped(json_export={"group": True, "key": "Signals"})) == [
+        "Signals"
+    ]
+
+
+def test_explicit_item_key_wins():
+    keys = _item_keys(
+        _grouped(json_export={"group": True, "key": "Signals", "item_key": "One Signal"})
+    )
+    assert keys == ["One Signal"]
+
+
+def test_item_key_is_none_for_a_column_that_does_not_group():
+    keys = _item_keys(
+        {"kind": "element", "source": {"kind": "row"}, "header": "Block"},
+        _grouped(json_export={"group": True, "item_key": "ignored"}, mode="collapse"),
+    )
+    assert keys == [None, None]
+
+
+def test_item_key_is_none_for_a_hidden_grouped_column():
+    assert _item_keys(_grouped(hidden=True, json_export={"group": True})) == [None]
+
+
+def test_an_item_key_equal_to_its_own_group_key_is_not_suffixed():
+    """The group key and the item key name the SAME column at two levels, so
+    the global 'one key, one column' namespace is not violated and a `_2`
+    suffix would be pure noise."""
+    keys = _item_keys(_grouped(json_export={"group": True, "key": "Signal"}))
+    assert keys == ["Signal"]
+
+
+def test_an_explicit_item_key_colliding_with_another_column_is_suffixed():
+    keys = _item_keys(
+        {"kind": "element", "source": {"kind": "row"}, "header": "Mass"},
+        _grouped(json_export={"group": True, "key": "Signals", "item_key": "Mass"}),
+    )
+    assert keys == [None, "Mass_2"]
+
+
+def test_two_explicit_item_keys_that_collide_are_suffixed():
+    keys = _item_keys(
+        _grouped(json_export={"group": True, "key": "A", "item_key": "one"}),
+        _grouped(json_export={"group": True, "key": "B", "item_key": "one"}),
+    )
+    assert keys == ["one", "one_2"]
+
+
+def _nav_group(json_export: dict) -> dict:
+    """`_hop_nav('expand', group=True)` with the json_export block spelled out,
+    so a test can set `key`/`item_key` on it."""
+    col = _hop_nav("expand", group=False)
+    col["json_export"] = json_export
+    return col
+
+
+def test_item_key_names_the_value_inside_a_group():
+    mm = _parts_mm()
+    model = _parts_model(mm)
+    docs = _render(
+        mm,
+        model,
+        {
+            "row_source": {"kind": "scope", "types": ["Block"], "criteria": []},
+            "columns": [
+                {
+                    "kind": "property",
+                    "source": {"kind": "row"},
+                    "name": "name",
+                    "header": "Name",
+                },
+                _nav_group(
+                    {"group": True, "key": "Components", "item_key": "One Component"}
+                ),
+                {
+                    "kind": "property",
+                    "source": {"kind": "column", "index": 1},
+                    "name": "mass",
+                    "header": "Component Mass",
+                },
+            ],
+        },
+    )
+    root = next(d for d in docs if d["Name"] == "Root")
+    assert root == {
+        "Name": "Root",
+        "Components": [
+            {"One Component": "Part 1", "Component Mass": 12},
+            {"One Component": "Part 2", "Component Mass": 9},
+        ],
+    }
+
+
+def test_a_blank_item_key_still_repeats_the_group_key():
+    """Back-compat: this is the pre-`item_key` output, verbatim."""
+    mm = _parts_mm()
+    model = _parts_model(mm)
+    docs = _render(
+        mm,
+        model,
+        {
+            "row_source": {"kind": "scope", "types": ["Block"], "criteria": []},
+            "columns": [
+                {
+                    "kind": "property",
+                    "source": {"kind": "row"},
+                    "name": "name",
+                    "header": "Name",
+                },
+                _nav_group({"group": True, "key": "Components"}),
+                {
+                    "kind": "property",
+                    "source": {"kind": "column", "index": 1},
+                    "name": "mass",
+                    "header": "Component Mass",
+                },
+            ],
+        },
+    )
+    root = next(d for d in docs if d["Name"] == "Root")
+    assert root == {
+        "Name": "Root",
+        "Components": [
+            {"Components": "Part 1", "Component Mass": 12},
+            {"Components": "Part 2", "Component Mass": 9},
+        ],
+    }
+
+
+def test_item_key_is_unused_when_the_group_unwraps_to_scalars():
+    mm = _parts_mm()
+    model = _parts_model(mm)
+    docs = _render(
+        mm,
+        model,
+        {
+            "row_source": {"kind": "scope", "types": ["Block"], "criteria": []},
+            "columns": [
+                {
+                    "kind": "property",
+                    "source": {"kind": "row"},
+                    "name": "name",
+                    "header": "Name",
+                },
+                _nav_group({"group": True, "key": "Components", "item_key": "each"}),
+            ],
+        },
+    )
+    root = next(d for d in docs if d["Name"] == "Root")
+    assert root == {"Name": "Root", "Components": ["Part 1", "Part 2"]}
+
+
+def test_a_grouped_column_keeps_its_group_key_at_the_top_level():
+    """The array's own name comes from `key`, never from `item_key` — the
+    grouped column is in its home level's group set."""
+    mm = _parts_mm()
+    model = _parts_model(mm)
+    docs = _render(
+        mm,
+        model,
+        {
+            "row_source": {"kind": "scope", "types": ["Block"], "criteria": []},
+            "columns": [
+                {
+                    "kind": "property",
+                    "source": {"kind": "row"},
+                    "name": "name",
+                    "header": "Name",
+                },
+                _nav_group({"group": True, "key": "Components", "item_key": "each"}),
+                {
+                    "kind": "property",
+                    "source": {"kind": "column", "index": 1},
+                    "name": "mass",
+                    "header": "Component Mass",
+                },
+            ],
+        },
+    )
+    root = next(d for d in docs if d["Name"] == "Root")
+    assert set(root) == {"Name", "Components"}
+    components = root["Components"]
+    assert isinstance(components, list)
+    assert set(components[0]) == {"each", "Component Mass"}
+
+
+def _grandchild_model(mm: Metamodel) -> Model:
+    """Root -> Part 1 -> Sub 1 (mass 7): a two-hop containment chain, one level
+    deeper than `_parts_model` (which has no grandchildren) -- needed to render
+    a nested GROUP inside another group rather than merely plan one
+    structurally."""
+    model = Model(mm)
+    ids: dict[str, str] = {}
+    for key, name, mass in [
+        ("root", "Root", None),
+        ("part1", "Part 1", None),
+        ("sub1", "Sub 1", 7),
+    ]:
+        el = model.create_element("Block")
+        model.set_property(el, "name", name)
+        if mass is not None:
+            model.set_property(el, "mass", mass)
+        ids[key] = el.id
+    model.connect("BlockHasPart", ids["root"], ids["part1"])
+    model.connect("BlockHasPart", ids["part1"], ids["sub1"])
+    return model
+
+
+def test_two_level_nested_groups_use_the_right_key_at_each_level():
+    """Pins `_render_level`'s whole predicate for picking a grouped column's
+    name: the ITEM key when it renders its own value inside its own entries,
+    the LEVEL key when it is the array at its home level.
+
+    That predicate rests on `build_group_plan` never placing a grouped column
+    into another group's `members` -- it always routes it to `children`
+    instead (structurally pinned by `test_nested_groups_nest_by_dependency`).
+    No test rendered the two-level nesting that invariant makes possible, so
+    a swap of `keys.item`/`keys.level` in `_render_level` could still slip
+    through the suite. This asserts the whole nested document verbatim, at
+    both levels, so it fails if either level's array key and item key are
+    swapped.
+    """
+    mm = _parts_mm()
+    model = _grandchild_model(mm)
+    part_col = _nav_group({"group": True, "key": "Parts", "item_key": "One Component"})
+    sub_col = _nav_group({"group": True, "key": "Subs", "item_key": "One Sub"})
+    sub_col["source"] = {"kind": "column", "index": 1}
+    sub_col["header"] = "Subcomponent"
+    docs = _render(
+        mm,
+        model,
+        {
+            "row_source": {"kind": "scope", "types": ["Block"], "criteria": []},
+            "columns": [
+                {
+                    "kind": "property",
+                    "source": {"kind": "row"},
+                    "name": "name",
+                    "header": "Name",
+                },
+                part_col,
+                sub_col,
+                {
+                    "kind": "property",
+                    "source": {"kind": "column", "index": 2},
+                    "name": "mass",
+                    "header": "Mass",
+                },
+            ],
+        },
+    )
+    root = next(d for d in docs if d["Name"] == "Root")
+    assert root == {
+        "Name": "Root",
+        "Parts": [
+            {
+                "One Component": "Part 1",
+                "Subs": [
+                    {"One Sub": "Sub 1", "Mass": 7},
+                ],
+            }
+        ],
+    }
