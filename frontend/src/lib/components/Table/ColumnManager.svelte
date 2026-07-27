@@ -251,10 +251,18 @@
 						     controls in the same visual register. `rounded-t` (not just
 						     `border-b`) matches the card's own `rounded` corners now that
 						     the card no longer clips to them via `overflow-hidden` — see
-						     the why-comment on the card above. -->
+						     the why-comment on the card above. An `element` column has no
+						     editor body (the guard below never renders one), so the band
+						     IS the whole card for that kind: it also picks up `rounded-b`
+						     to match the card's bottom corners (otherwise a few square px
+						     of `bg-muted/50` poked past them), and drops `border-b`, which
+						     would otherwise draw a hairline across the bottom of a card
+						     with nothing beneath it. -->
 						<div
 							data-testid="column-header-band-{i}"
-							class="flex flex-wrap items-center gap-1.5 rounded-t border-b border-border/70 bg-muted/50 p-1.5"
+							class="flex flex-wrap items-center gap-1.5 rounded-t border-border/70 bg-muted/50 p-1.5"
+							class:border-b={col.kind !== 'element'}
+							class:rounded-b={col.kind === 'element'}
 							class:opacity-60={col.hidden}
 						>
 							{#if focusIndex === null}

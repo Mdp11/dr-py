@@ -539,39 +539,39 @@
 		     `pending` cells, and (b) shift every row's true y relative to the
 		     virtualizer's window math (`computeWindowVariable` assumes row 0's
 		     top sits at scroll y = 0).
-		     The element itself is rendered UNCONDITIONALLY (only its contents
-		     toggle on state) for two reasons that turn out to be the same fix:
-		     a fixed `h-7` means no state transition — including the ones into
-		     and out of `ready`, when nothing renders inside it at all — ever
-		     changes this strip's height, so (b) above is now always true, not
-		     just "while computing"; and `role="status"` on an element that
-		     did not exist before generally is NOT announced by a screen reader
-		     when it first appears with content — an `aria-live` region has to
-		     already be present in the DOM for content changing *inside* it to
-		     be announced. Mounting it once, up front, and only ever swapping
-		     what is inside is what makes the sweep's start actually get
-		     announced. -->
-		<div
-			class="flex h-7 items-center gap-2 px-3 text-xs {scriptStatus?.state === 'computing'
-				? 'bg-muted/60 text-muted-foreground'
-				: scriptStatus?.state === 'failed'
-					? 'text-destructive'
-					: ''}"
-			data-testid="table-script-status"
-			role="status"
-		>
-			{#if scriptStatus?.state === 'computing'}
-				<!-- Spinner only. The sweep's done/total counters and the "values
-				     fill in as they finish" clause were removed deliberately: they
-				     narrated an internal mechanism. -->
+		     The strip mounts only while `computing` (and briefly for `failed`)
+		     — idle/ready render nothing here, so a table with no script
+		     columns, which never sweeps, never pays a permanent chrome tax.
+		     Known, accepted tradeoff: `role="status"` on an element that did
+		     not exist a moment ago is generally NOT announced by a screen
+		     reader — an `aria-live` region normally has to already be present
+		     in the DOM before content changing *inside* it gets announced, and
+		     appearing already-populated doesn't count. We're keeping the
+		     text-free spinner (see below) rather than reserving a blank band
+		     on every table just to guarantee that announcement. -->
+		{#if scriptStatus?.state === 'computing'}
+			<!-- Spinner only. The sweep's done/total counters and the "values fill
+			     in as they finish" clause were removed deliberately: they narrated
+			     an internal mechanism. -->
+			<div
+				class="flex items-center gap-2 bg-muted/60 px-3 py-1.5 text-xs text-muted-foreground"
+				data-testid="table-script-status"
+				role="status"
+			>
 				<span
 					class="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-muted border-t-primary"
 				></span>
 				<span class="sr-only">Computing script columns</span>
-			{:else if scriptStatus?.state === 'failed'}
+			</div>
+		{:else if scriptStatus?.state === 'failed'}
+			<p
+				class="px-3 py-1.5 text-xs text-destructive"
+				data-testid="table-script-status"
+				role="status"
+			>
 				{scriptStatus.message ?? 'Computing this table’s script values failed.'}
-			{/if}
-		</div>
+			</p>
+		{/if}
 		<!-- Script-error badge + panel. Same fixed-chrome strip family as the
 		     conflict/warnings/status lines above (and for the same reason: it
 		     must not scroll away, nor offset the virtualizer's row math). The
