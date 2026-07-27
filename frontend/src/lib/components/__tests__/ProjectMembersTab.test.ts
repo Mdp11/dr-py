@@ -2,6 +2,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import ProjectMembersTab from '../admin/ProjectMembersTab.svelte';
 import { ApiError } from '$lib/api/errors';
+// The remove guard prompts through the app-wide `confirm()` helper; these tests
+// answer it at the store (ConfirmHost.test.ts covers the dialog itself).
+import { answerConfirm, getPendingConfirm, resetConfirm } from '$lib/state/confirm.svelte';
 
 const listProjects = vi.fn();
 vi.mock('$lib/api/projects', () => ({
@@ -20,6 +23,7 @@ vi.mock('$lib/api/admin', () => ({
 }));
 
 afterEach(() => {
+	resetConfirm();
 	document.body.innerHTML = '';
 	vi.clearAllMocks();
 });
@@ -92,16 +96,16 @@ describe('ProjectMembersTab', () => {
 		const c = mount(ProjectMembersTab, { target: document.body });
 		await new Promise((r) => setTimeout(r, 0));
 		flushSync();
-		const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
 		const removeBtn = [...document.querySelectorAll('button')].find(
 			(b) => b.textContent?.trim() === 'remove'
 		) as HTMLButtonElement;
 		removeBtn.click();
+		flushSync();
+		answerConfirm(true);
 		await new Promise((r) => setTimeout(r, 0));
 		flushSync();
 		expect(document.body.textContent).toContain('Cannot remove last owner');
 		expect(document.body.textContent).toContain('owner@x');
-		confirmSpy.mockRestore();
 		unmount(c);
 	});
 });
@@ -156,22 +160,22 @@ describe('ProjectMembersTab user picker', () => {
 				(b) => b.textContent?.trim() === 'remove'
 			) as HTMLButtonElement;
 
-		const confirmSpy = vi.spyOn(window, 'confirm');
-
-		confirmSpy.mockReturnValueOnce(false);
 		findRemoveBtn().click();
+		flushSync();
+		expect(getPendingConfirm()).not.toBeNull();
+		answerConfirm(false);
 		await new Promise((r) => setTimeout(r, 0));
 		flushSync();
 		expect(removeMember).not.toHaveBeenCalled();
 
-		confirmSpy.mockReturnValueOnce(true);
 		removeMember.mockResolvedValue(undefined);
 		findRemoveBtn().click();
+		flushSync();
+		answerConfirm(true);
 		await new Promise((r) => setTimeout(r, 0));
 		flushSync();
 		expect(removeMember).toHaveBeenCalledWith('p1', 'u1');
 
-		confirmSpy.mockRestore();
 		unmount(c);
 	});
 });

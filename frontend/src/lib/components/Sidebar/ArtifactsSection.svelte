@@ -13,6 +13,7 @@
 	// from `$lib/state` — Search.svelte and ContainmentTree.svelte import it the
 	// same way (direct module path), so this mirrors the existing convention.
 	import { beginDrag } from '$lib/state/tree-drag.svelte';
+	import { confirm } from '$lib/state/confirm.svelte';
 
 	type ArtifactKind = 'navigation' | 'table' | 'code_snippet';
 
@@ -74,7 +75,13 @@
 		if (name && name !== current) await renameArtifact(id, name);
 	}
 	async function del(cfg: SectionConfig, id: string, name: string): Promise<void> {
-		if (window.confirm(`Delete ${cfg.singular} "${name}"?`)) await removeArtifact(id);
+		const ok = await confirm({
+			title: `Delete ${cfg.singular}`,
+			description: `Delete "${name}"? This cannot be undone.`,
+			confirmLabel: 'Delete',
+			variant: 'destructive'
+		});
+		if (ok) await removeArtifact(id);
 	}
 	const DRAG_THRESHOLD_PX = 4;
 	function onPointerDown(e: PointerEvent, cfg: SectionConfig, id: string): void {

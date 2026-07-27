@@ -7,6 +7,7 @@
 		openArtifactTab,
 		openNavigationTab
 	} from '$lib/state';
+	import { confirm } from '$lib/state/confirm.svelte';
 	import {
 		AlertCircle,
 		AlertTriangle,
@@ -168,8 +169,13 @@
 	}
 
 	async function onDelete(): Promise<void> {
-		if (!window.confirm(`Delete folder "${folderName}" and its nested folders? Elements remain.`))
-			return;
+		const ok = await confirm({
+			title: 'Delete folder',
+			description: `Delete "${folderName}" and its nested folders? Elements remain.`,
+			confirmLabel: 'Delete',
+			variant: 'destructive'
+		});
+		if (!ok) return;
 		try {
 			await deleteFolder(folderPath);
 		} catch (err) {

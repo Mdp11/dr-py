@@ -11,6 +11,7 @@
 		select
 	} from '$lib/state';
 	import { deleteLock } from '$lib/state/edit-gate';
+	import { confirm } from '$lib/state/confirm.svelte';
 	import { lockBadgeFor } from '$lib/state';
 	import { nameProp } from '$lib/util/element-name';
 	import PropertyForm from '../Inspector/PropertyForm.svelte';
@@ -81,12 +82,21 @@
 
 	async function onDeleteElement(): Promise<void> {
 		if (entity === null || selection?.kind !== 'element') return;
-		const confirmed = window.confirm(
-			'Delete this element? Related relationships will also be removed.'
-		);
+		// Pin the id BEFORE awaiting: `entity` is derived from the live selection,
+		// and the confirmation is no longer the blocking browser dialog it used to
+		// be — the realtime feed or a keyboard shortcut can move the selection
+		// while it is open. Deleting whatever happens to be selected on the way
+		// back out is not what the user was asked about.
+		const targetId = entity.id;
+		const confirmed = await confirm({
+			title: 'Delete element',
+			description: 'Delete this element? Related relationships will also be removed.',
+			confirmLabel: 'Delete',
+			variant: 'destructive'
+		});
 		if (!confirmed) return;
-		if (!(await deleteLock(entity.id))) return;
-		emit({ kind: 'delete_element', id: entity.id });
+		if (!(await deleteLock(targetId))) return;
+		emit({ kind: 'delete_element', id: targetId });
 		select(null);
 	}
 

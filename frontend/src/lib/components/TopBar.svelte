@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
+	import { confirm } from '$lib/state/confirm.svelte';
 	import { resolve, assets } from '$app/paths';
 	import { goto } from '$app/navigation';
 	import { Button } from '$lib/components/ui/button';
@@ -76,13 +77,25 @@
 		});
 	});
 
-	function confirmDiscardChanges(message: string): boolean {
+	// Async because the confirmation is an in-app dialog rather than the browser's
+	// blocking one, so leaving is now a two-frame flow: prompt, then navigate.
+	// Safe here in a way it would not be inside the workspace's `beforeNavigate`
+	// unload guard: this gate runs BEFORE `goto`, with nothing waiting on its
+	// answer, whereas `beforeNavigate` has to call `nav.cancel()` synchronously.
+	// (That guard still fires on the `goto` below, so a user with unsaved work
+	// can see both prompts — the same double-gating as before this change.)
+	async function confirmDiscardChanges(): Promise<boolean> {
 		if (combinedChanges === 0) return true;
-		return window.confirm(message);
+		return await confirm({
+			title: 'Leave this project?',
+			description: 'Unsaved changes may be lost.',
+			confirmLabel: 'Leave',
+			variant: 'destructive'
+		});
 	}
 
-	function goHome(): void {
-		if (!confirmDiscardChanges('Leave this project? Unsaved changes may be lost.')) return;
+	async function goHome(): Promise<void> {
+		if (!(await confirmDiscardChanges())) return;
 		void goto(resolve('/projects'));
 	}
 

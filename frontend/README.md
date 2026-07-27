@@ -550,7 +550,13 @@ src/
                         + FS Access handle); auth.svelte.ts — current user +
                         signIn/signOut; active-project.svelte.ts — active id +
                         base-URL wiring; access-notice.svelte.ts — denied-access
-                        message for the picker; session-recovery.ts — global
+                        message for the picker; confirm.svelte.ts — the app-wide
+                        `confirm({...}): Promise<boolean>` prompt, a FIFO queue
+                        of requests drained by the single ConfirmHost mounted in
+                        the root layout (requests queue rather than replace, so
+                        nothing is auto-answered); the browser's own confirm
+                        survives only in the beforeNavigate unload guard, which
+                        must decide synchronously; session-recovery.ts — global
                         401 → clear + bounce to /login; realtime.svelte.ts —
                         feed transport store: connection status, presence
                         (string[]), lock state (SvelteMap resource_id →

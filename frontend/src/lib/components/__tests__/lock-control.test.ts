@@ -14,6 +14,9 @@ import {
 } from '../../state/checkout.svelte';
 import { handleFeedEvent, resetRealtime } from '../../state/realtime.svelte';
 import LockControl from '../Inspector/LockControl.svelte';
+// The discard-on-unlock guard prompts through the app-wide `confirm()` helper;
+// these tests answer it at the store (ConfirmHost.test.ts covers the dialog).
+import { answerConfirm, getPendingConfirm, resetConfirm } from '../../state/confirm.svelte';
 
 const BASE = 'http://api.test/api/v1';
 
@@ -30,6 +33,7 @@ afterAll(() => {
 	server.close();
 });
 beforeEach(() => {
+	resetConfirm();
 	resetModelStore();
 	resetCheckout();
 	resetRealtime();
@@ -146,7 +150,6 @@ it('unlocks without confirmation when the element has no staged changes', async 
 			return HttpResponse.json({ released: 1 });
 		})
 	);
-	const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
 	applyDelta(delta({ changed_elements: [el('e1')] }));
 	_recordLeases([lease('e1', 'default-user')]);
 
@@ -158,7 +161,9 @@ it('unlocks without confirmation when the element has no staged changes', async 
 		await settle();
 		flushSync();
 
-		expect(confirmSpy).not.toHaveBeenCalled();
+		// No staged edits, so nothing was ever asked — the unlock went straight
+		// through rather than parking on an unanswered prompt.
+		expect(getPendingConfirm()).toBeNull();
 		expect(released).toBe(1);
 		expect(isCheckedOutByMe('e1')).toBe(false);
 		expect(control().textContent?.trim()).toBe('Lock');
@@ -175,7 +180,6 @@ it('confirms before discarding staged changes on unlock; keeps the lock when dec
 			return HttpResponse.json({ released: 1 });
 		})
 	);
-	const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
 	applyDelta(delta({ changed_elements: [el('e1', { name: '' })] }));
 	_recordLeases([lease('e1', 'default-user')]);
 	emit({ kind: 'update_element', id: 'e1', properties_patch: { name: 'edited' } });
@@ -185,18 +189,25 @@ it('confirms before discarding staged changes on unlock; keeps the lock when dec
 	const c = render('e1');
 	try {
 		control().click();
+		flushSync();
+
+		// the prompt names the number of edits at stake before anything happens
+		expect(getPendingConfirm()?.description).toContain('1 unsaved change');
+		expect(released).toBe(0);
+
+		answerConfirm(false);
 		await settle();
 		flushSync();
 
-		// declined: warning shown, nothing released, edit + lock retained
-		expect(confirmSpy).toHaveBeenCalledOnce();
+		// declined: nothing released, edit + lock retained
 		expect(released).toBe(0);
 		expect(isCheckedOutByMe('e1')).toBe(true);
 		expect(getStagedOpsFor('e1').length).toBe(1);
 
 		// accept this time: edit discarded and lock released
-		confirmSpy.mockReturnValue(true);
 		control().click();
+		flushSync();
+		answerConfirm(true);
 		await settle();
 		flushSync();
 

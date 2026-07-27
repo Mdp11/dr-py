@@ -11,9 +11,13 @@
  *      dialog; the control flips back to "Lock".
  *   4. Edit a property → the element auto-locks; control shows "Unlock" and the
  *      uncommitted badge increments.
- *   5. Click "Unlock" with a staged edit → a confirm dialog warns the edit will
- *      be discarded; accepting reverts the edit (badge back to 0, value
- *      restored) and the control flips back to "Lock".
+ *   5. Click "Unlock" with a staged edit → the in-app ConfirmDialog warns the
+ *      edit will be discarded; confirming reverts the edit (badge back to 0,
+ *      value restored) and the control flips back to "Lock".
+ *
+ * The confirmation is the app's own dialog, not `window.confirm`, so it is
+ * driven through the DOM (`confirm-dialog` test ids) rather than Playwright's
+ * native-dialog channel.
  */
 
 import { test, expect } from '@playwright/test';
@@ -30,15 +34,14 @@ const VIEW_PATH = join(__dirname, '..', '..', 'examples', 'smart-city.view.json'
 test('lock without editing, then unlock-with-confirm discards staged edits', async ({ page }) => {
 	test.setTimeout(120_000);
 
-	// Record every native dialog (confirm) message and accept it. The unlock
-	// confirm and any load-time "discard unsaved changes" prompt both flow here;
-	// we assert on the recorded messages to prove WHEN a confirm fired.
-	const dialogMessages: string[] = [];
-	page.on('dialog', (dialog) => {
-		dialogMessages.push(dialog.message());
-		void dialog.accept();
-	});
-	const discardPrompts = () => dialogMessages.filter((m) => /will be discarded/i.test(m));
+	// Blanket-accept any native dialog. Nothing in this flow raises one any more
+	// (the unlock confirmation is the in-app dialog located below), but a stray
+	// browser prompt would hang the test rather than fail it, so the handler
+	// stays as insurance.
+	page.on('dialog', (dialog) => void dialog.accept());
+
+	const confirmDialog = page.getByTestId('confirm-dialog');
+	const confirmButton = page.getByTestId('confirm-dialog-confirm');
 
 	await openDefaultProject(page);
 	await loadFiles(page, { metamodel: METAMODEL_PATH, model: MODEL_PATH, view: VIEW_PATH });
@@ -82,7 +85,9 @@ test('lock without editing, then unlock-with-confirm discards staged edits', asy
 	// --- 3. Unlock with no staged edits → no confirm ---------------------------
 	await lockControl.click();
 	await expect(lockControl).toHaveText('Lock', { timeout: 10_000 });
-	expect(discardPrompts()).toHaveLength(0); // no discard warning was shown
+	// The control reaching "Lock" already proves nothing blocked on a prompt;
+	// this pins that no dialog was left standing either.
+	await expect(confirmDialog).toBeHidden();
 
 	// --- 4. Edit a property → auto-lock ----------------------------------------
 	const nameInput = inspector.locator('input[type="text"]').first();
@@ -97,8 +102,11 @@ test('lock without editing, then unlock-with-confirm discards staged edits', asy
 
 	// --- 5. Unlock with a staged edit → confirm + discard ----------------------
 	await lockControl.click();
-	// The confirm dialog fired and was accepted.
-	await expect.poll(() => discardPrompts().length, { timeout: 10_000 }).toBe(1);
+	// The confirmation is raised, names what is at stake, and is accepted.
+	await expect(confirmDialog).toBeVisible({ timeout: 10_000 });
+	await expect(confirmDialog).toContainText(/will be discarded/i);
+	await confirmButton.click();
+	await expect(confirmDialog).toBeHidden({ timeout: 10_000 });
 	// The edit was discarded: control back to "Lock", badge back to 0.
 	await expect(lockControl).toHaveText('Lock', { timeout: 10_000 });
 	await expect(uncommittedBadge).toContainText('0 uncommitted', { timeout: 15_000 });

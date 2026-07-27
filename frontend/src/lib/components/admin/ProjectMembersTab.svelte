@@ -12,6 +12,7 @@
 		type AdminUser
 	} from '$lib/api/admin';
 	import { ApiError } from '$lib/api/errors';
+	import { confirm } from '$lib/state/confirm.svelte';
 
 	let projects = $state<ProjectSummary[]>([]);
 	let selected = $state<string>('');
@@ -94,7 +95,13 @@
 		}
 	}
 	async function remove(userId: string): Promise<void> {
-		if (!window.confirm('Remove this member from the project?')) return;
+		const ok = await confirm({
+			title: 'Remove member',
+			description: 'Remove this member from the project?',
+			confirmLabel: 'Remove',
+			variant: 'destructive'
+		});
+		if (!ok) return;
 		error = null;
 		busy = true;
 		try {

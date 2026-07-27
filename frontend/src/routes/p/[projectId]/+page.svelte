@@ -92,6 +92,14 @@
 			nav.cancel();
 			return;
 		}
+		// The one browser dialog left in the app — every other confirmation now
+		// goes through `confirm()` in `$lib/state/confirm.svelte`. It cannot be
+		// used here: that helper returns a Promise, and `nav.cancel()` is a
+		// no-op once this callback has returned, so an awaited answer would
+		// arrive after the navigation it was meant to stop. The alternative —
+		// cancel unconditionally, prompt, then re-`goto` — cannot faithfully
+		// replay a cancelled popstate (a back-button nav would come back as a
+		// forward push), so the synchronous dialog stays on purpose.
 		if (
 			!confirm('You have unsaved changes (tables, navigations, or edits). Leave and lose them?')
 		) {

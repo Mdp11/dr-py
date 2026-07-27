@@ -2,6 +2,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import UsersTab from '../admin/UsersTab.svelte';
 import { ApiError } from '$lib/api/errors';
+// The delete guard prompts through the app-wide `confirm()` helper; these tests
+// answer it at the store (ConfirmHost.test.ts covers the dialog itself).
+import { answerConfirm, getPendingConfirm, resetConfirm } from '$lib/state/confirm.svelte';
 
 const listUsers = vi.fn();
 const createUser = vi.fn();
@@ -15,6 +18,7 @@ vi.mock('$lib/api/admin', () => ({
 }));
 
 afterEach(() => {
+	resetConfirm();
 	vi.useRealTimers(); // restore if a test left fake timers active
 	document.body.innerHTML = '';
 	vi.clearAllMocks();
@@ -156,7 +160,6 @@ describe('UsersTab', () => {
 		deleteUser.mockRejectedValue(
 			new ApiError(409, { detail: 'Cannot delete last admin' }, 'Cannot delete last admin')
 		);
-		const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
 		const c = mount(UsersTab, { target: document.body });
 		await new Promise((r) => setTimeout(r, 0));
 		flushSync();
@@ -165,11 +168,12 @@ describe('UsersTab', () => {
 			(b) => b.textContent?.trim() === 'delete'
 		) as HTMLButtonElement;
 		deleteBtn.click();
+		flushSync();
+		answerConfirm(true);
 		await new Promise((r) => setTimeout(r, 0));
 		flushSync();
 		expect(document.body.textContent).toContain('Cannot delete last admin');
 		expect(document.body.textContent).toContain('a@x');
-		confirmSpy.mockRestore();
 		unmount(c);
 	});
 });
@@ -177,7 +181,6 @@ describe('UsersTab', () => {
 describe('UsersTab delete confirmation', () => {
 	it('confirms before deleting and aborts on cancel', async () => {
 		listUsers.mockResolvedValue([{ id: 'u1', email: 'a@b.c', is_admin: false, is_active: true }]);
-		const confirmSpy = vi.spyOn(window, 'confirm');
 		const c = mount(UsersTab, { target: document.body });
 		await new Promise((r) => setTimeout(r, 0));
 		flushSync();
@@ -186,19 +189,21 @@ describe('UsersTab delete confirmation', () => {
 			(b) => b.textContent?.trim() === 'delete'
 		) as HTMLButtonElement;
 
-		confirmSpy.mockReturnValue(false);
 		deleteBtn.click();
+		flushSync();
+		expect(getPendingConfirm()?.description).toContain('a@b.c');
+		answerConfirm(false);
 		await new Promise((r) => setTimeout(r, 0));
 		flushSync();
 		expect(deleteUser).not.toHaveBeenCalled();
 
-		confirmSpy.mockReturnValue(true);
 		deleteBtn.click();
+		flushSync();
+		answerConfirm(true);
 		await new Promise((r) => setTimeout(r, 0));
 		flushSync();
 		expect(deleteUser).toHaveBeenCalledWith('u1');
 
-		confirmSpy.mockRestore();
 		unmount(c);
 	});
 });

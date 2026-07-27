@@ -1,10 +1,16 @@
 <script lang="ts">
 	// A small, generic confirmation dialog for destructive-or-lossy actions.
+	// This is the app's confirmation prompt. The browser's own survives at
+	// exactly one call site — the `beforeNavigate` unload guard in
+	// `routes/p/[projectId]/+page.svelte`, which must decide synchronously;
+	// there is a comment there explaining why. Everything else uses this.
 	//
-	// Deliberately NOT a replacement for the repo's `window.confirm` call
-	// sites — those keep working; this exists so surfaces that need a styled,
-	// in-app confirmation (starting with the table settings dialog's discard
-	// gate) do not each hand-roll one.
+	// Two ways in. Own an instance directly (`bind:open` + `onConfirm`) when the
+	// prompt belongs to a surface you already control, as the table settings
+	// dialog's discard gate does. Otherwise call `confirm()` from
+	// `$lib/state/confirm.svelte`, the promise-shaped helper that every former
+	// `window.confirm` site uses — it drives one shared instance mounted by
+	// `ConfirmHost` in the root layout, so a caller needs no markup of its own.
 	//
 	// Fully controlled: `open` is bindable, and the component never decides on
 	// its own that the action should proceed — it reports the click and lets

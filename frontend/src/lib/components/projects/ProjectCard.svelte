@@ -2,6 +2,7 @@
 	import type { ProjectSummary } from '$lib/api/projects';
 	import { deleteProject, cloneProject } from '$lib/api/projects';
 	import { isAdmin } from '$lib/state';
+	import { confirm } from '$lib/state/confirm.svelte';
 	import { ApiError } from '$lib/api/errors';
 
 	let {
@@ -31,7 +32,13 @@
 	}
 
 	async function onDelete(): Promise<void> {
-		if (!window.confirm(`Delete project "${project.name}"? This cannot be undone.`)) return;
+		const ok = await confirm({
+			title: 'Delete project',
+			description: `Delete "${project.name}"? This cannot be undone.`,
+			confirmLabel: 'Delete',
+			variant: 'destructive'
+		});
+		if (!ok) return;
 		error = null;
 		busy = true;
 		try {

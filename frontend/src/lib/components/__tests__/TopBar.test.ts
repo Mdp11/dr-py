@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import TopBar from '../TopBar.svelte';
+import { getPendingConfirm, resetConfirm } from '$lib/state/confirm.svelte';
 
 // Svelte 5 components are compiled to functions (anchor, props) => void.
 // Provide a minimal no-op stub for each dialog/drawer child of TopBar so we
@@ -55,6 +56,7 @@ function findButton(name: RegExp): HTMLButtonElement | undefined {
 }
 
 afterEach(() => {
+	resetConfirm();
 	document.body.innerHTML = '';
 	vi.clearAllMocks();
 });
@@ -69,13 +71,19 @@ describe('TopBar', () => {
 		unmount(c);
 	});
 
-	it('home link navigates to /projects', () => {
+	// goHome is async: leaving now clears its unsaved-changes gate through the
+	// in-app `confirm()` helper instead of the browser's blocking dialog. With
+	// no staged changes the gate short-circuits without prompting, but the
+	// navigation still lands a microtask later.
+	it('home link navigates to /projects', async () => {
 		const c = mount(TopBar, { target: document.body });
 		flushSync();
 
 		const homeButton = document.querySelector<HTMLButtonElement>('[aria-label="Data Rover"]');
 		homeButton!.click();
+		await new Promise((r) => setTimeout(r, 0));
 
+		expect(getPendingConfirm()).toBeNull();
 		expect(goto).toHaveBeenCalledWith('/projects');
 
 		unmount(c);

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button';
 	import { dropView, getView, getViewWarnings } from '$lib/state';
+	import { confirm } from '$lib/state/confirm.svelte';
 	import { AlertTriangle, X } from '@lucide/svelte';
 
 	const view = $derived(getView());
@@ -8,8 +9,13 @@
 
 	async function onClear(): Promise<void> {
 		if (view === null) return;
-		if (!window.confirm(`Clear view "${view.name}"? Folder structure is forgotten until reloaded.`))
-			return;
+		const ok = await confirm({
+			title: 'Clear view',
+			description: `Clear "${view.name}"? Folder structure is forgotten until reloaded.`,
+			confirmLabel: 'Clear',
+			variant: 'destructive'
+		});
+		if (!ok) return;
 		try {
 			await dropView();
 		} catch (err) {

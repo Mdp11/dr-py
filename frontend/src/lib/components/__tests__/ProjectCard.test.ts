@@ -2,6 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import ProjectCard from '../projects/ProjectCard.svelte';
 import { ApiError } from '$lib/api/errors';
+// The delete guard prompts through the app-wide `confirm()` helper. These tests
+// answer it at the store rather than mounting ConfirmHost: the dialog's own
+// rendering is covered by ConfirmHost.test.ts, and a mounted dialog would put a
+// second "Delete" button in the body for findButton() to trip over.
+import { answerConfirm, getPendingConfirm, resetConfirm } from '$lib/state/confirm.svelte';
 
 // Mutable flag so individual tests can flip admin on/off without re-mocking
 // (mirrors ProjectsPage.test.ts's convention for $lib/state).
@@ -27,6 +32,7 @@ function findButton(name: RegExp): HTMLButtonElement | undefined {
 }
 
 beforeEach(() => {
+	resetConfirm();
 	adminFlag = false;
 	deleteProject.mockClear();
 	cloneProject.mockClear();
@@ -105,7 +111,6 @@ describe('ProjectCard', () => {
 	it('admin delete confirms then calls api', async () => {
 		adminFlag = true;
 		const onChanged = vi.fn();
-		const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
 		const c = mount(ProjectCard, {
 			target: document.body,
 			props: { project, onOpen: vi.fn(), onChanged }
@@ -113,8 +118,12 @@ describe('ProjectCard', () => {
 		flushSync();
 		const deleteBtn = findButton(/delete/i)!;
 		deleteBtn.click();
+		flushSync();
+		// The prompt is pending and names the project — nothing has been called yet.
+		expect(getPendingConfirm()?.description).toContain('Alpha');
+		expect(deleteProject).not.toHaveBeenCalled();
+		answerConfirm(true);
 		await settle();
-		expect(confirm).toHaveBeenCalled();
 		expect(deleteProject).toHaveBeenCalledWith('p1');
 		expect(onChanged).toHaveBeenCalled();
 		unmount(c);
@@ -122,7 +131,6 @@ describe('ProjectCard', () => {
 
 	it('admin delete aborts when not confirmed', async () => {
 		adminFlag = true;
-		vi.spyOn(window, 'confirm').mockReturnValue(false);
 		const c = mount(ProjectCard, {
 			target: document.body,
 			props: { project, onOpen: vi.fn(), onChanged: vi.fn() }
@@ -130,6 +138,9 @@ describe('ProjectCard', () => {
 		flushSync();
 		const deleteBtn = findButton(/delete/i)!;
 		deleteBtn.click();
+		flushSync();
+		expect(getPendingConfirm()).not.toBeNull();
+		answerConfirm(false);
 		await settle();
 		expect(deleteProject).not.toHaveBeenCalled();
 		unmount(c);

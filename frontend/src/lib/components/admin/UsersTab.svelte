@@ -4,6 +4,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import { listUsers, createUser, patchUser, deleteUser, type AdminUser } from '$lib/api/admin';
 	import { ApiError } from '$lib/api/errors';
+	import { confirm } from '$lib/state/confirm.svelte';
 
 	let users = $state<AdminUser[]>([]);
 	let query = $state('');
@@ -91,7 +92,13 @@
 		}
 	}
 	async function remove(u: AdminUser): Promise<void> {
-		if (!window.confirm(`Delete user "${u.email}"? This cannot be undone.`)) return;
+		const ok = await confirm({
+			title: 'Delete user',
+			description: `Delete "${u.email}"? This cannot be undone.`,
+			confirmLabel: 'Delete',
+			variant: 'destructive'
+		});
+		if (!ok) return;
 		error = null;
 		busy = true;
 		try {

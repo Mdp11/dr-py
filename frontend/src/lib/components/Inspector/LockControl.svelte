@@ -2,6 +2,7 @@
 	import { canEdit, discardElement, getStagedOpsFor, isCheckedOutByMe } from '$lib/state';
 	import { editLock } from '$lib/state';
 	import { lockBadgeFor } from '$lib/state';
+	import { confirm } from '$lib/state/confirm.svelte';
 
 	// The lock/unlock affordance for the selected element. Three states:
 	//   - I hold the lock  -> "Unlock" (release my lease; discards this element's
@@ -35,18 +36,27 @@
 
 	async function onUnlock(): Promise<void> {
 		if (busy) return;
+		// Pin the id: the confirmation is a real dialog now, not the blocking
+		// browser one, so the inspector's selection (and with it this component's
+		// `elementId` prop) can move while it is open. Discard what was asked
+		// about, not whatever ended up selected.
+		const targetId = elementId;
 		if (changeCount > 0) {
-			const ok = window.confirm(
-				`Unlock this element? ${changeCount} unsaved change${changeCount === 1 ? '' : 's'} ` +
-					`to this element will be discarded.`
-			);
+			const ok = await confirm({
+				title: 'Unlock element',
+				description:
+					`Unlock this element? ${changeCount} unsaved change${changeCount === 1 ? '' : 's'} ` +
+					`to this element will be discarded.`,
+				confirmLabel: 'Unlock and discard',
+				variant: 'destructive'
+			});
 			if (!ok) return;
 		}
 		busy = true;
 		try {
 			// discardElement reverts this element's staged edits (a no-op when there
 			// are none) and releases its lease.
-			await discardElement(elementId);
+			await discardElement(targetId);
 		} finally {
 			busy = false;
 		}
