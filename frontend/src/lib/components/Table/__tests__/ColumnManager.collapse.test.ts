@@ -189,4 +189,40 @@ describe('ColumnManager PathCard collapse (durable across edits)', () => {
 			unmount(c);
 		}
 	});
+
+	it('a script column added from the panel opens expanded', async () => {
+		await seed([navColumn('A')]); // one non-script column, so index 1 is new
+		const root = document.body;
+		const c = mount(ColumnManager, { target: root, props: { tabId: TAB } });
+		flushSync();
+		try {
+			expect(root.querySelector('[data-testid="snippet-collapse-toggle"]')).toBeNull();
+
+			click('[data-testid="add-script-column"]');
+			await Promise.resolve();
+			flushSync();
+
+			const toggle = root.querySelector(
+				'[data-testid="snippet-collapse-toggle"]'
+			) as HTMLButtonElement;
+			expect(toggle.getAttribute('aria-expanded')).toBe('true');
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('a pre-existing script column still opens collapsed', async () => {
+		await seedScript();
+		const root = document.body;
+		const c = mount(ColumnManager, { target: root, props: { tabId: TAB } });
+		flushSync();
+		try {
+			const toggle = root.querySelector(
+				'[data-testid="snippet-collapse-toggle"]'
+			) as HTMLButtonElement;
+			expect(toggle.getAttribute('aria-expanded')).toBe('false');
+		} finally {
+			unmount(c);
+		}
+	});
 });

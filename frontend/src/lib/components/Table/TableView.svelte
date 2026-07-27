@@ -26,6 +26,7 @@
 		revertSuspendedTableEdits,
 		saveAsTableDraft,
 		saveTableDraft,
+		seedSnippetExpanded,
 		setTableName,
 		suspendTableEvaluation,
 		updateTableDefinition,
@@ -269,6 +270,10 @@
 		// the lot. The snapshot taken here is the PRE-append definition, so the
 		// dialog's Cancel discards the new column entirely (and Save keeps it).
 		suspendTableEvaluation(tabId);
+		// A brand-new script column opens with its code editor already showing —
+		// the user clicked "+ Script" precisely to write code. Keyed on the
+		// pre-append length, which is the appended column's index.
+		if (kind === 'script') seedSnippetExpanded(`${tabId}::col:${d.definition.columns.length}`);
 		updateTableDefinition(tabId, addColumn(d.definition, column));
 		openSettings(getTableDraft(tabId)!.definition.columns.length - 1);
 	}

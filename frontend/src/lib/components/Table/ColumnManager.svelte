@@ -13,6 +13,7 @@
 		remapTableSortForInsert,
 		remapTableSortForMove,
 		remapTableSortForRemove,
+		seedSnippetExpanded,
 		updateTableDefinition
 	} from '$lib/state';
 	import {
@@ -160,6 +161,9 @@
 
 	function addScriptColumn(): void {
 		if (!defn) return;
+		// `addColumn` appends, so the new column's index is the pre-add length.
+		// Seed BEFORE applying: the editor reads the store on its first render.
+		seedSnippetExpanded(`${tabId}::col:${defn.columns.length}`);
 		apply(addColumn(defn, newScriptColumn()));
 	}
 
