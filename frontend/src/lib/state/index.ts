@@ -378,6 +378,7 @@ export {
 } from './staged-rows';
 export {
 	isSnippetExpanded,
+	seedSnippetExpanded,
 	setSnippetExpanded,
 	resetSnippetCollapse
 } from './snippet-collapse.svelte';
