@@ -295,7 +295,12 @@ export function columnKindLabel(kind: string): string {
 	return kind;
 }
 
-const DEFAULT_JSON_OPTIONS: JsonColumnOptions = { key: '', value: 'name', group: false };
+const DEFAULT_JSON_OPTIONS: JsonColumnOptions = {
+	key: '',
+	item_key: '',
+	value: 'name',
+	group: false
+};
 
 /**
  * The JSON key each column gets, mirroring `resolve_json_keys` in
