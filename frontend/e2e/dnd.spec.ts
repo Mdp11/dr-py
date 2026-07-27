@@ -84,7 +84,13 @@ async function pointerDragDrop(
 	if (!s) throw new Error('drag source has no bounding box');
 	const sx = s.x + Math.min(40, s.width / 2);
 	const sy = s.y + s.height / 2;
-	await page.mouse.move(sx, sy);
+	// Press via an actionability-checked hover, not a raw mouse.move: raw mouse
+	// events have no hit-target check, so right after bootstrap they can land on
+	// the project-open progress overlay (which outlives the tree becoming
+	// "visible" by design) and the row's onPointerDown never fires — the drag
+	// silently never starts. hover() waits until the row actually receives
+	// pointer events at the press point.
+	await source.hover({ position: { x: sx - s.x, y: sy - s.y } });
 	await page.mouse.down();
 	// Move past the drag threshold; this is what starts the drag and reveals the
 	// "move to top level" dropzone.
