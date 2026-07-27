@@ -316,6 +316,7 @@ export {
 	getTableWarnings,
 	getUncomputedScriptCellReason,
 	hasDirtyTableDrafts,
+	hasSuspendedTableEdits,
 	loadTablePage,
 	reloadTableDraft,
 	remapTableSortForInsert,

@@ -14,6 +14,7 @@ import {
 	ensureTableDraft,
 	getTableDraft,
 	getTableSort,
+	hasSuspendedTableEdits,
 	loadTablePage,
 	remapTableSortForInsert,
 	remapTableSortForRemove,
@@ -200,5 +201,51 @@ describe('staged table definition edits', () => {
 		expect(getTableSort(TAB)).toEqual({ column: 2, direction: 'desc' });
 		remapTableSortForInsert(TAB, 3); // past the sort → unchanged
 		expect(getTableSort(TAB)).toEqual({ column: 2, direction: 'desc' });
+	});
+});
+
+// The settings dialog's discard-confirmation gate: nag only when there is
+// something to lose. Reuses the suspend-time fingerprint, so "changed" means
+// exactly what `resumeTableEvaluation`'s reload decision means by it.
+describe('hasSuspendedTableEdits', () => {
+	it('is false when the tab was never suspended', async () => {
+		await ensureTableDraft(TAB);
+		expect(hasSuspendedTableEdits(TAB)).toBe(false);
+	});
+
+	it('is false right after suspending, with no edit yet', async () => {
+		await ensureTableDraft(TAB);
+		suspendTableEvaluation(TAB);
+		expect(hasSuspendedTableEdits(TAB)).toBe(false);
+	});
+
+	it('is true once the definition changes while suspended', async () => {
+		await ensureTableDraft(TAB);
+		suspendTableEvaluation(TAB);
+		updateTableDefinition(TAB, renamed('Edited'));
+		expect(hasSuspendedTableEdits(TAB)).toBe(true);
+	});
+
+	it('goes back to false when the edit is undone by hand', async () => {
+		await ensureTableDraft(TAB);
+		const before = getTableDraft(TAB)!.definition;
+		suspendTableEvaluation(TAB);
+		updateTableDefinition(TAB, renamed('Edited'));
+		updateTableDefinition(TAB, before);
+		expect(hasSuspendedTableEdits(TAB)).toBe(false);
+	});
+
+	it('is false again after the revert, and after the resume drops the suspension', async () => {
+		await ensureTableDraft(TAB);
+		suspendTableEvaluation(TAB);
+		updateTableDefinition(TAB, renamed('Edited'));
+		revertSuspendedTableEdits(TAB);
+		expect(hasSuspendedTableEdits(TAB)).toBe(false);
+		resumeTableEvaluation(TAB);
+		expect(hasSuspendedTableEdits(TAB)).toBe(false);
+	});
+
+	it('is false for an unknown tab', () => {
+		expect(hasSuspendedTableEdits('tbl:draft:nope')).toBe(false);
 	});
 });

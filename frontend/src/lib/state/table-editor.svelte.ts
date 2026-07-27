@@ -356,6 +356,31 @@ export function suspendTableEvaluation(tabId: string): void {
 }
 
 /**
+ * Did the definition actually change since the settings dialog opened?
+ *
+ * The dialog's discard-confirmation gate: a Cancel/Escape on an untouched
+ * dialog closes silently, and only a real edit is worth interrupting for.
+ * Compares against the SAME suspend-time fingerprint `resumeTableEvaluation`
+ * uses to decide whether to reload, so the two can never disagree about what
+ * "changed" means.
+ *
+ * `false` when the tab is not suspended (no dialog open, nothing staged).
+ *
+ * Sort remaps are not in the fingerprint, but they only ever happen alongside
+ * a definition edit (remove/move/clone), so they cannot produce a false
+ * negative. Object key order could in principle differ between two
+ * structurally equal definitions — a false POSITIVE (one needless
+ * confirmation), never a false negative that loses work.
+ *
+ * Called from event handlers, never from a template — no reactivity
+ * requirement.
+ */
+export function hasSuspendedTableEdits(tabId: string): boolean {
+	const before = _suspended.get(tabId);
+	return before !== undefined && definitionFingerprint(tabId) !== before;
+}
+
+/**
  * Resume evaluation and, if anything actually changed while suspended,
  * re-evaluate the table once from row 0. A no-op if the tab was not suspended.
  *
