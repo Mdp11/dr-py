@@ -475,17 +475,20 @@
 		     top sits at scroll y = 0) — a shift that would appear and vanish as
 		     the status flipped to `ready`. -->
 		{#if scriptStatus?.state === 'computing'}
+			<!-- Spinner only. The sweep's done/total counters and the "values fill
+			     in as they finish" clause were removed deliberately: they narrated
+			     an internal mechanism. The strip ITSELF stays (see the block
+			     comment above) — it is load-bearing for the virtualizer's row math,
+			     which assumes a stable chrome height while `computing`. -->
 			<div
 				class="flex items-center gap-2 bg-muted/60 px-3 py-1.5 text-xs text-muted-foreground"
 				data-testid="table-script-status"
-				aria-live="polite"
+				role="status"
 			>
 				<span
 					class="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-muted border-t-primary"
 				></span>
-				Computing script columns {scriptStatus.done}/{scriptStatus.total ?? '…'}
-				{#if sweepPercent !== null}<span class="tabular-nums">({sweepPercent}%)</span>{/if}
-				<span class="text-muted-foreground/60">— values fill in as they finish</span>
+				<span class="sr-only">Computing script columns</span>
 			</div>
 		{:else if scriptStatus?.state === 'failed'}
 			<p class="px-3 py-1.5 text-xs text-destructive" data-testid="table-script-status">

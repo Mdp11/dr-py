@@ -257,13 +257,18 @@ describe('TableView settings popup', () => {
 // virtualizer's row math while `computing`). These two cases moved here from
 // TableGrid.test.ts with the strip itself.
 describe('TableView script-status strip', () => {
-	it('shows the sweep progress readout while computing', () => {
+	it('shows a bare spinner while computing, with no progress text', () => {
 		h.scriptStatus = { state: 'computing', done: 7, total: 42 };
 		const c = render('tbl:draft:computing');
 		try {
 			const strip = document.querySelector('[data-testid="table-script-status"]');
-			expect(strip?.textContent).toContain('Computing script columns 7/42');
-			expect(strip?.getAttribute('aria-live')).toBe('polite');
+			expect(strip).not.toBeNull();
+			// The sweep's internal counters explained a mechanism nobody asked
+			// about; only the spinner (and an sr-only label) survive.
+			expect(strip?.textContent).not.toContain('Computing script columns 7/42');
+			expect(strip?.textContent).not.toContain('values fill in');
+			expect(strip?.querySelector('.animate-spin')).not.toBeNull();
+			expect(strip?.getAttribute('role')).toBe('status');
 			// It is chrome, not grid content: outside the scrolling body.
 			expect(strip?.closest('[data-testid="table-header"]')).toBeNull();
 		} finally {
