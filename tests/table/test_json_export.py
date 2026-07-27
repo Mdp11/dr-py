@@ -1211,3 +1211,82 @@ def test_a_grouped_column_keeps_its_group_key_at_the_top_level():
     components = root["Components"]
     assert isinstance(components, list)
     assert set(components[0]) == {"each", "Component Mass"}
+
+
+def _grandchild_model(mm: Metamodel) -> Model:
+    """Root -> Part 1 -> Sub 1 (mass 7): a two-hop containment chain, one level
+    deeper than `_parts_model` (which has no grandchildren) -- needed to render
+    a nested GROUP inside another group rather than merely plan one
+    structurally."""
+    model = Model(mm)
+    ids: dict[str, str] = {}
+    for key, name, mass in [
+        ("root", "Root", None),
+        ("part1", "Part 1", None),
+        ("sub1", "Sub 1", 7),
+    ]:
+        el = model.create_element("Block")
+        model.set_property(el, "name", name)
+        if mass is not None:
+            model.set_property(el, "mass", mass)
+        ids[key] = el.id
+    model.connect("BlockHasPart", ids["root"], ids["part1"])
+    model.connect("BlockHasPart", ids["part1"], ids["sub1"])
+    return model
+
+
+def test_two_level_nested_groups_use_the_right_key_at_each_level():
+    """Pins `_render_level`'s whole predicate for picking a grouped column's
+    name: the ITEM key when it renders its own value inside its own entries,
+    the LEVEL key when it is the array at its home level.
+
+    That predicate rests on `build_group_plan` never placing a grouped column
+    into another group's `members` -- it always routes it to `children`
+    instead (structurally pinned by `test_nested_groups_nest_by_dependency`).
+    No test rendered the two-level nesting that invariant makes possible, so
+    a swap of `keys.item`/`keys.level` in `_render_level` could still slip
+    through the suite. This asserts the whole nested document verbatim, at
+    both levels, so it fails if either level's array key and item key are
+    swapped.
+    """
+    mm = _parts_mm()
+    model = _grandchild_model(mm)
+    part_col = _nav_group({"group": True, "key": "Parts", "item_key": "One Component"})
+    sub_col = _nav_group({"group": True, "key": "Subs", "item_key": "One Sub"})
+    sub_col["source"] = {"kind": "column", "index": 1}
+    sub_col["header"] = "Subcomponent"
+    docs = _render(
+        mm,
+        model,
+        {
+            "row_source": {"kind": "scope", "types": ["Block"], "criteria": []},
+            "columns": [
+                {
+                    "kind": "property",
+                    "source": {"kind": "row"},
+                    "name": "name",
+                    "header": "Name",
+                },
+                part_col,
+                sub_col,
+                {
+                    "kind": "property",
+                    "source": {"kind": "column", "index": 2},
+                    "name": "mass",
+                    "header": "Mass",
+                },
+            ],
+        },
+    )
+    root = next(d for d in docs if d["Name"] == "Root")
+    assert root == {
+        "Name": "Root",
+        "Parts": [
+            {
+                "One Component": "Part 1",
+                "Subs": [
+                    {"One Sub": "Sub 1", "Mass": 7},
+                ],
+            }
+        ],
+    }
