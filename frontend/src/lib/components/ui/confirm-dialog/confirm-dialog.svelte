@@ -11,6 +11,7 @@
 	// the owner close it. Both buttons close it as a convenience, which is the
 	// behaviour every caller so far wants.
 	import * as Dialog from '$lib/components/ui/dialog';
+	import { Button } from '$lib/components/ui/button';
 
 	let {
 		open = $bindable(false),
@@ -45,7 +46,8 @@
 <Dialog.Root
 	bind:open
 	onOpenChange={(o) => {
-		// Escape, the overlay and the built-in X all land here. They are
+		// Escape and an overlay click land here — there is no built-in X,
+		// since Content below passes showCloseButton={false}. They are
 		// DISMISSALS, so they must behave like Cancel — never like Confirm.
 		if (!o) onCancel?.();
 	}}
@@ -58,24 +60,31 @@
 			{description}
 		</Dialog.Description>
 		<div class="flex items-center justify-end gap-2">
-			<button
+			<!-- `ghost` is this repo's dismissive-footer-button convention (see
+			     SettingsDialog.svelte's Close and ApplyCrDialog.svelte's Cancel);
+			     `xs` matches this dialog's text-xs scale. Using the shared Button
+			     component (rather than hand-rolled classes) keeps every variant's
+			     colours inside vetted tokens — a hand-rolled `bg-destructive` +
+			     `text-white` combination here previously failed WCAG AA contrast
+			     in dark theme. -->
+			<Button
 				type="button"
+				variant="ghost"
+				size="xs"
 				data-testid="confirm-dialog-cancel"
-				class="rounded border border-input px-3 py-1.5 text-xs text-foreground/80 transition-colors hover:bg-muted"
 				onclick={cancel}
 			>
 				{cancelLabel}
-			</button>
-			<button
+			</Button>
+			<Button
 				type="button"
+				variant={variant === 'destructive' ? 'destructive' : 'default'}
+				size="xs"
 				data-testid="confirm-dialog-confirm"
-				class="rounded px-3 py-1.5 text-xs transition-colors {variant === 'destructive'
-					? 'bg-destructive text-white hover:bg-destructive/90'
-					: 'bg-primary text-primary-foreground hover:bg-primary/80'}"
 				onclick={confirm}
 			>
 				{confirmLabel}
-			</button>
+			</Button>
 		</div>
 	</Dialog.Content>
 </Dialog.Root>

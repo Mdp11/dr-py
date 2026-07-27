@@ -86,20 +86,39 @@ describe('ConfirmDialog', () => {
 	});
 
 	it('uses the supplied labels and marks the destructive variant', async () => {
-		const c = render({
+		const destructive = render({
 			confirmLabel: 'Discard changes',
 			cancelLabel: 'Keep editing',
 			variant: 'destructive'
 		});
+		let defaultRender: ReturnType<typeof render> | undefined;
 		try {
 			await waitFor(() => !!document.querySelector('[data-testid="confirm-dialog-confirm"]'));
 			const confirm = document.querySelector('[data-testid="confirm-dialog-confirm"]');
 			const cancel = document.querySelector('[data-testid="confirm-dialog-cancel"]');
 			expect(confirm?.textContent?.trim()).toBe('Discard changes');
 			expect(cancel?.textContent?.trim()).toBe('Keep editing');
-			expect(confirm?.className).toContain('bg-destructive');
+
+			const destructiveClass = confirm?.className ?? '';
+			unmount(destructive);
+			document.body.innerHTML = '';
+
+			// Render again with the default variant and diff the class lists —
+			// a hollow check like `.toContain('rounded')` would still pass if
+			// `variant` were silently ignored. Pinning `text-destructive`'s
+			// presence/absence (the Button component's own destructive-variant
+			// token, per button.svelte's `tv()` config) actually fails if the
+			// variant prop stops being threaded through.
+			defaultRender = render({});
+			await waitFor(() => !!document.querySelector('[data-testid="confirm-dialog-confirm"]'));
+			const defaultClass =
+				document.querySelector('[data-testid="confirm-dialog-confirm"]')?.className ?? '';
+
+			expect(destructiveClass).not.toBe(defaultClass);
+			expect(destructiveClass).toContain('text-destructive');
+			expect(defaultClass).not.toContain('text-destructive');
 		} finally {
-			unmount(c);
+			if (defaultRender) unmount(defaultRender);
 		}
 	});
 });
