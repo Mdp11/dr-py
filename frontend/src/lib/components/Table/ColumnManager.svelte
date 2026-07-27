@@ -13,6 +13,7 @@
 		remapTableSortForInsert,
 		remapTableSortForMove,
 		remapTableSortForRemove,
+		seedSnippetExpanded,
 		updateTableDefinition
 	} from '$lib/state';
 	import {
@@ -160,6 +161,9 @@
 
 	function addScriptColumn(): void {
 		if (!defn) return;
+		// `addColumn` appends, so the new column's index is the pre-add length.
+		// Seed BEFORE applying: the editor reads the store on its first render.
+		seedSnippetExpanded(`${tabId}::col:${defn.columns.length}`);
 		apply(addColumn(defn, newScriptColumn()));
 	}
 
@@ -172,6 +176,26 @@
 	function onColumnChange(index: number, next: Column): void {
 		if (!defn) return;
 		apply(replaceColumn(defn, index, next));
+	}
+
+	/** Per-kind accent for the header band's kind badge, so ELEMENT /
+	 * PROPERTY / NAVIGATION / SCRIPT are distinguishable at a glance in a long
+	 * column list. All four tokens are defined per-theme in app.css, and the
+	 * DARK theme passes WCAG AA (roughly 5.6-6.4:1 against the band's `bg-
+	 * muted/50`) — but the LIGHT variants measured against that same
+	 * background come in under AA (roughly 2.7:1 for warning, 3.6:1 for
+	 * success, 3.8:1 for info, all below the 4.5:1 threshold). That is a real
+	 * gap, not a hypothetical one — it just has no user impact TODAY because
+	 * the app hard-codes dark theme (see app.html). Revisiting this palette
+	 * for AA contrast is required before light theme ships; the colours
+	 * themselves are the project owner's call, not something to silently
+	 * retint here. */
+	function kindBadgeClass(kind: string): string {
+		if (kind === 'element') return 'bg-foreground/10 text-foreground/70';
+		if (kind === 'property') return 'bg-info/15 text-info';
+		if (kind === 'navigation') return 'bg-success/15 text-success';
+		if (kind === 'script') return 'bg-warning/15 text-warning';
+		return 'bg-muted text-muted-foreground';
 	}
 </script>
 
@@ -201,8 +225,19 @@
 		<div class="space-y-1.5">
 			{#each defn.columns as col, i (i)}
 				{#if focusIndex === null || focusIndex === i}
+					<!-- NEVER put `overflow-hidden` back on this card: it was tried
+					     once (to keep the header band's tint flush with the rounded
+					     corners) and it turned the card into a clipping context that
+					     swallowed every popup rendered inside it — PropertyColumnEditor's
+					     property-name suggestion list (`position:absolute`, anchored to
+					     the last row of that editor) and CodeMirror's completion/hover/
+					     lint tooltips inside ScriptColumnEditor/CodeEditor (some
+					     `position:fixed`, since the `transform` below makes this card a
+					     containing block for those too). The header band gets its own
+					     `rounded-t` instead, so the tint still meets the card's rounded
+					     top corners without the card clipping anything. -->
 					<div
-						class="rounded border border-border/70 p-1.5"
+						class="rounded border border-border/70"
 						data-col-drop={i}
 						style="transform:translateY({drag.offsetOf(i)}px)"
 						class:transition-transform={drag.dragging}
@@ -211,7 +246,25 @@
 						class:ring-destructive={drag.over === i && drag.from !== null && !drag.valid}
 						class:opacity-50={drag.from === i}
 					>
-						<div class="flex flex-wrap items-center gap-1.5" class:opacity-60={col.hidden}>
+						<!-- The header band: the column's identity (kind + name) set off
+						     from the editor body below it, which is otherwise a wall of
+						     controls in the same visual register. `rounded-t` (not just
+						     `border-b`) matches the card's own `rounded` corners now that
+						     the card no longer clips to them via `overflow-hidden` — see
+						     the why-comment on the card above. An `element` column has no
+						     editor body (the guard below never renders one), so the band
+						     IS the whole card for that kind: it also picks up `rounded-b`
+						     to match the card's bottom corners (otherwise a few square px
+						     of `bg-muted/50` poked past them), and drops `border-b`, which
+						     would otherwise draw a hairline across the bottom of a card
+						     with nothing beneath it. -->
+						<div
+							data-testid="column-header-band-{i}"
+							class="flex flex-wrap items-center gap-1.5 rounded-t border-border/70 bg-muted/50 p-1.5"
+							class:border-b={col.kind !== 'element'}
+							class:rounded-b={col.kind === 'element'}
+							class:opacity-60={col.hidden}
+						>
 							{#if focusIndex === null}
 								<span
 									role="button"
@@ -230,12 +283,14 @@
 								{i}
 							</span>
 							<span
-								class="rounded bg-muted px-1 py-0.5 font-mono text-[10px] text-muted-foreground uppercase"
+								class="rounded px-1 py-0.5 font-mono text-[10px] uppercase {kindBadgeClass(
+									col.kind
+								)}"
 							>
 								{columnKindLabel(col.kind)}
 							</span>
 							<input
-								class="min-w-0 flex-1 rounded border border-input bg-card px-1.5 py-0.5"
+								class="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1.5 py-0.5 font-medium transition-colors hover:border-input hover:bg-card focus:border-input focus:bg-card"
 								placeholder={columnLabel(col)}
 								value={col.header}
 								oninput={(e) => onRename(i, (e.currentTarget as HTMLInputElement).value)}
@@ -299,32 +354,36 @@
 								</button>
 							{/if}
 						</div>
-						{#if col.kind === 'navigation'}
-							<NavigationColumnEditor
-								column={col}
-								columnIndex={i}
-								columns={defn.columns}
-								rowSource={defn.row_source}
-								{sampleRowElementId}
-								onChange={(next) => onColumnChange(i, next)}
-							/>
-						{:else if col.kind === 'property'}
-							<PropertyColumnEditor
-								column={col}
-								columnIndex={i}
-								columns={defn.columns}
-								rowSource={defn.row_source}
-								onChange={(next) => onColumnChange(i, next)}
-							/>
-						{:else if col.kind === 'script'}
-							<ScriptColumnEditor
-								column={col}
-								columnIndex={i}
-								columns={defn.columns}
-								rowSource={defn.row_source}
-								{tabId}
-								onChange={(next) => onColumnChange(i, next)}
-							/>
+						{#if col.kind !== 'element'}
+							<div class="p-1.5">
+								{#if col.kind === 'navigation'}
+									<NavigationColumnEditor
+										column={col}
+										columnIndex={i}
+										columns={defn.columns}
+										rowSource={defn.row_source}
+										{sampleRowElementId}
+										onChange={(next) => onColumnChange(i, next)}
+									/>
+								{:else if col.kind === 'property'}
+									<PropertyColumnEditor
+										column={col}
+										columnIndex={i}
+										columns={defn.columns}
+										rowSource={defn.row_source}
+										onChange={(next) => onColumnChange(i, next)}
+									/>
+								{:else if col.kind === 'script'}
+									<ScriptColumnEditor
+										column={col}
+										columnIndex={i}
+										columns={defn.columns}
+										rowSource={defn.row_source}
+										{tabId}
+										onChange={(next) => onColumnChange(i, next)}
+									/>
+								{/if}
+							</div>
 						{/if}
 					</div>
 				{/if}
@@ -334,7 +393,13 @@
 		{#if drag.dragging && drag.ghost && drag.ghost.w > 0 && drag.from !== null}
 			{@const dragCol = defn.columns[drag.from]}
 			<!-- Detached drag ghost: a slim copy of the grabbed row following the
-			     pointer (position:fixed so the settings panel doesn't clip it). -->
+			     pointer (position:fixed so the settings panel doesn't clip it).
+			     Opaque background, unlike the header band's `bg-muted/50`: the
+			     band sits on the (opaque) card, but this ghost floats over the
+			     column list itself, and `bg-muted/50` stacked with `opacity-90`
+			     below works out to ~45% alpha — the list showed through and the
+			     ghost's own label got hard to read. The badge tint below still
+			     mirrors the band's per-kind colours. -->
 			<div
 				data-testid="column-drag-ghost"
 				class="pointer-events-none fixed z-50 flex items-center gap-1.5 rounded border border-primary/40 bg-card p-1.5 text-xs opacity-90 shadow-lg"
@@ -342,7 +407,9 @@
 			>
 				<span class="shrink-0 text-muted-foreground/50">⠿</span>
 				<span
-					class="rounded bg-muted px-1 py-0.5 font-mono text-[10px] text-muted-foreground uppercase"
+					class="rounded px-1 py-0.5 font-mono text-[10px] uppercase {dragCol
+						? kindBadgeClass(dragCol.kind)
+						: 'bg-muted text-muted-foreground'}"
 				>
 					{dragCol ? columnKindLabel(dragCol.kind) : ''}
 				</span>

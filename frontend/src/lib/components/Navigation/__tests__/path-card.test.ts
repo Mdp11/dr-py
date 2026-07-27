@@ -10,6 +10,7 @@ import {
 	resetArtifacts,
 	resetCheckout,
 	resetNavigationEditors,
+	resetSnippetCollapse,
 	setProjectInfo,
 	updateDefinition
 } from '$lib/state';
@@ -71,6 +72,7 @@ const CHAIN_PAGE = {
 
 beforeEach(() => {
 	resetNavigationEditors();
+	resetSnippetCollapse();
 	resetArtifacts();
 	resetCheckout();
 	setProjectInfo({ role: 'editor', lockTtlSeconds: 300 });
@@ -84,6 +86,7 @@ beforeEach(() => {
 });
 afterEach(() => {
 	resetNavigationEditors();
+	resetSnippetCollapse();
 	resetArtifacts();
 	resetCheckout();
 	clearMetamodel();
@@ -597,6 +600,28 @@ it('a script step renders ScriptStepRow, not FilterStepRow', async () => {
 	try {
 		expect(document.querySelector('[data-testid="script-step"]')).not.toBeNull();
 		expect(document.querySelector('[data-testid="filter-step"]')).toBeNull();
+	} finally {
+		unmount(c);
+	}
+});
+
+it('a script step added from the trailing button opens expanded', async () => {
+	// The chevron disclosure defaults to COLLAPSED (a settings dialog full of
+	// open code editors is unreadable), but a step the user just created is
+	// exactly the one they want to type into.
+	const tabId = 'nav:draft:pc-script-seed';
+	await seed(tabId, pathWith([]));
+	const c = render(tabId);
+	try {
+		expect(document.querySelector('[data-testid="snippet-collapse-toggle"]')).toBeNull();
+
+		(document.querySelector('[data-testid="add-script-step"]') as HTMLButtonElement).click();
+		flushSync();
+
+		const toggle = document.querySelector(
+			'[data-testid="snippet-collapse-toggle"]'
+		) as HTMLButtonElement;
+		expect(toggle.getAttribute('aria-expanded')).toBe('true');
 	} finally {
 		unmount(c);
 	}

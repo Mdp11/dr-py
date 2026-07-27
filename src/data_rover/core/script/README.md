@@ -283,11 +283,12 @@ that persistence bites.
 
 A `ScriptStep`'s cycle guard (`core/navigation/evaluate.py`) drops an id
 already visited earlier in the chain exactly like a relationship hop's
-revisit — but, unlike a relationship hop where a revisit is expected
-navigation semantics, it also emits `script step: N element(s) dropped
-(already visited in this chain)`, since the natural `def step(el): return
-[el]` idiom returns an already-visited id and would otherwise disappear into
-an empty result with no signal at all.
+revisit, and — unlike an earlier revision of this guard — does so SILENTLY
+for script steps too, with no warning. That silence is deliberate: the
+natural `def step(el): return [el]` idiom for a filtering step returns an
+already-visited id on purpose ("keep this element"), so a warning there
+would have fired on ordinary, correct usage rather than on a mistake, and
+would have just trained users to ignore the warnings badge.
 
 **The `SnippetSession` protocol** (`core/script/runner.py`) is the
 sandbox-agnostic session handle: `boot_error: ScriptError | None` (set if the

@@ -40,7 +40,6 @@ class ScriptWarningCode(StrEnum):
     NAV_SNIPPET_NOT_FOUND = "nav_snippet_not_found"
     NAV_STEP_FAILED = "nav_step_failed"
     NAV_UNKNOWN_IDS = "nav_unknown_ids"
-    NAV_ALREADY_VISITED = "nav_already_visited"
     SORT_NEEDS_SCRIPT_NAV = "sort_needs_script_nav"
 
 

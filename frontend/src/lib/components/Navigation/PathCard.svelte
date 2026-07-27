@@ -16,6 +16,7 @@
 		getSelectedPath,
 		isCardCollapsed,
 		registerVisibleNode,
+		seedSnippetExpanded,
 		selectNode,
 		setCardCollapsed,
 		unregisterVisibleNode,
@@ -215,8 +216,16 @@
 	function addPropertyStep(): void {
 		insertStep(node.steps.length, emptyPropertyStep());
 	}
+	/** Insert a script step AND open its editor expanded — the user clicked
+	 * "+ script" to write code, so a collapsed chevron is one click of pure
+	 * friction. The key must match what `ScriptStepRow`'s `collapseKey` prop
+	 * is built from below. */
+	function insertScriptStep(i: number): void {
+		seedSnippetExpanded(`${tabId}::${pathKey(path)}::step:${i}`);
+		insertStep(i, { kind: 'script', snippet: {}, comment: null });
+	}
 	function addScriptStep(): void {
-		insertStep(node.steps.length, { kind: 'script', snippet: {}, comment: null });
+		insertScriptStep(node.steps.length);
 	}
 
 	type StartMode = 'scope' | 'element' | 'combine' | 'row';
@@ -453,7 +462,7 @@
 							aria-label="Insert script step here"
 							title="Insert a 'Script' step here"
 							class="rounded border border-dashed border-input px-1.5 text-[10px] leading-3 text-info/90 opacity-0 transition-opacity group-hover/insert:opacity-100 hover:border-ring hover:text-info focus-visible:opacity-100"
-							onclick={() => insertStep(i, { kind: 'script', snippet: {}, comment: null })}
+							onclick={() => insertScriptStep(i)}
 						>
 							+ script
 						</button>

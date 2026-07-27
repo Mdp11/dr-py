@@ -316,6 +316,7 @@ export {
 	getTableWarnings,
 	getUncomputedScriptCellReason,
 	hasDirtyTableDrafts,
+	hasSuspendedTableEdits,
 	loadTablePage,
 	reloadTableDraft,
 	remapTableSortForInsert,
@@ -378,6 +379,7 @@ export {
 } from './staged-rows';
 export {
 	isSnippetExpanded,
+	seedSnippetExpanded,
 	setSnippetExpanded,
 	resetSnippetCollapse
 } from './snippet-collapse.svelte';

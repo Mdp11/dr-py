@@ -29,12 +29,6 @@ export function formatScriptWarning(w: ScriptWarning): string {
 				`${plural(w.total, 'element id', 'element ids')} across ` +
 				`${w.occurrences} ${plural(w.occurrences, 'call', 'calls')} — dropped.`
 			);
-		case 'nav_already_visited':
-			return (
-				`${w.total} ${plural(w.total, 'element', 'elements')} already visited in ` +
-				`the chain, dropped across ${w.occurrences} ` +
-				`${plural(w.occurrences, 'step', 'steps')}.`
-			);
 		case 'nav_step_failed': {
 			// `detail` is typed `string | null` — a null must drop the detail
 			// clause rather than interpolate the literal word "null" into the

@@ -430,14 +430,10 @@ def _walk(
         nxt = _hop_property(metamodel, model, current, step, budget)
     else:  # ScriptStep
         nxt = _hop_script(model, current, step, script, budget)
-        if script is not None and exclude_visited:
-            # The generic cycle guard below drops silently -- correct for
-            # relationship hops (revisits are expected navigation semantics)
-            # but a silent mystery for script steps, where an identity return
-            # ("keep this element") is the natural idiom. Warn with a count.
-            dropped = sum(1 for o in nxt if o in chain)
-            if dropped:
-                script.add_warning(ScriptWarningCode.NAV_ALREADY_VISITED, count=dropped)
+        # No already-visited warning here: the cycle guard below drops
+        # revisits SILENTLY for script steps too. An identity return
+        # ("keep this element") is the natural idiom for a filtering step,
+        # so warning on it fired constantly for intended behaviour.
     if budget.exhausted:
         return True
     for other in nxt:
