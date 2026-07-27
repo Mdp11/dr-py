@@ -36,7 +36,7 @@
 	import { AlertTriangle, Check, Search, Settings, X } from '@lucide/svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
-	import ConfirmDialog from '$lib/components/ui/confirm-dialog/confirm-dialog.svelte';
+	import { ConfirmDialog } from '$lib/components/ui/confirm-dialog';
 	import {
 		addColumn,
 		newNavigationColumn,
@@ -190,14 +190,22 @@
 	// its own DialogRootState's handleClose(), wired through Close/Escape/
 	// overlay) and applyClose() there sees the flag and keeps the edits. Every
 	// discard path (Cancel, the X, Escape, an overlay click) must be gated
-	// BEFORE closing — see `requestClose`/`discardAndClose` below — and a
-	// `Dialog.Close` cannot be gated (it closes on click before a handler could
-	// intercept it), so those paths are plain buttons / preventDefault'd
-	// primitive callbacks that close by assigning `settingsOpen = false`
-	// directly and call `applyClose()` themselves, since an external
-	// assignment to the bound `open` value closes the dialog (the bound prop
-	// still drives presence) but bits-ui does NOT report it through
-	// `onOpenChange` — that only fires from its own internal handleClose().
+	// BEFORE an edit is lost — see `requestClose`/`discardAndClose` below, and
+	// the `onEscapeKeydown`/`onInteractOutside` handlers on `Dialog.Content` —
+	// but the paths get there differently. Cancel and the X are plain buttons
+	// (never a `Dialog.Close`, which closes on click before a handler could
+	// intercept it), so `requestClose` runs first and only closes — by
+	// assigning `settingsOpen = false` directly and calling `applyClose()`
+	// itself — once it has confirmed there is nothing staged to lose; a dirty
+	// dialog gets the confirmation instead, whose "Discard changes" closes the
+	// same direct way. Escape and an overlay click are gated the OTHER way:
+	// their primitive callbacks below `preventDefault()` and open the
+	// confirmation only when dirty; when clean, they do nothing and bits-ui's
+	// own primitive proceeds to close on its own, which is what still reaches
+	// `onOpenChange` below — an external assignment to the bound `open` value
+	// closes the dialog too (the bound prop still drives presence), but bits-ui
+	// does NOT report that through `onOpenChange`, only its own internal
+	// handleClose() does.
 	let settingsSaved = false;
 
 	function saveSettings(): void {
@@ -209,10 +217,17 @@
 
 	/** Everything a settings-dialog close must do, regardless of which path
 	 * got there. Lives in a function rather than inline in `onOpenChange`
-	 * because two of the four close paths (the gated Cancel/X, and the
-	 * confirmation's "Discard changes") close by assigning `settingsOpen`,
+	 * because `applyClose` is reached by TWO routes and both need it: (1)
+	 * `onOpenChange` below, for Save (which sets `settingsSaved` first) AND
+	 * for a CLEAN Escape/overlay click (dirty ones are intercepted by the
+	 * gated handlers below and never reach bits-ui's own close at all); and
+	 * (2) directly, from the ungated Cancel/X (`requestClose`, when nothing
+	 * is staged) and from the confirmation's "Discard changes"
+	 * (`discardAndClose`) — both of which assign `settingsOpen` themselves,
 	 * which bits-ui does NOT report through `onOpenChange` — see the note by
-	 * `settingsSaved`'s declaration.
+	 * `settingsSaved`'s declaration. The `if (!settingsSaved)` guard just
+	 * below is live on both routes: `settingsSaved` is true only for Save, so
+	 * every other arrival here (clean Escape/overlay included) reverts.
 	 *
 	 * Safe to run twice: `revertSuspendedTableEdits` returns early once the
 	 * suspend-time snapshot is gone, and `resumeTableEvaluation` returns early
@@ -523,29 +538,40 @@
 		     view on a long table, hiding the only explanation for the blank
 		     `pending` cells, and (b) shift every row's true y relative to the
 		     virtualizer's window math (`computeWindowVariable` assumes row 0's
-		     top sits at scroll y = 0) — a shift that would appear and vanish as
-		     the status flipped to `ready`. -->
-		{#if scriptStatus?.state === 'computing'}
-			<!-- Spinner only. The sweep's done/total counters and the "values fill
-			     in as they finish" clause were removed deliberately: they narrated
-			     an internal mechanism. The strip ITSELF stays (see the block
-			     comment above) — it is load-bearing for the virtualizer's row math,
-			     which assumes a stable chrome height while `computing`. -->
-			<div
-				class="flex items-center gap-2 bg-muted/60 px-3 py-1.5 text-xs text-muted-foreground"
-				data-testid="table-script-status"
-				role="status"
-			>
+		     top sits at scroll y = 0).
+		     The element itself is rendered UNCONDITIONALLY (only its contents
+		     toggle on state) for two reasons that turn out to be the same fix:
+		     a fixed `h-7` means no state transition — including the ones into
+		     and out of `ready`, when nothing renders inside it at all — ever
+		     changes this strip's height, so (b) above is now always true, not
+		     just "while computing"; and `role="status"` on an element that
+		     did not exist before generally is NOT announced by a screen reader
+		     when it first appears with content — an `aria-live` region has to
+		     already be present in the DOM for content changing *inside* it to
+		     be announced. Mounting it once, up front, and only ever swapping
+		     what is inside is what makes the sweep's start actually get
+		     announced. -->
+		<div
+			class="flex h-7 items-center gap-2 px-3 text-xs {scriptStatus?.state === 'computing'
+				? 'bg-muted/60 text-muted-foreground'
+				: scriptStatus?.state === 'failed'
+					? 'text-destructive'
+					: ''}"
+			data-testid="table-script-status"
+			role="status"
+		>
+			{#if scriptStatus?.state === 'computing'}
+				<!-- Spinner only. The sweep's done/total counters and the "values
+				     fill in as they finish" clause were removed deliberately: they
+				     narrated an internal mechanism. -->
 				<span
 					class="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-muted border-t-primary"
 				></span>
 				<span class="sr-only">Computing script columns</span>
-			</div>
-		{:else if scriptStatus?.state === 'failed'}
-			<p class="px-3 py-1.5 text-xs text-destructive" data-testid="table-script-status">
+			{:else if scriptStatus?.state === 'failed'}
 				{scriptStatus.message ?? 'Computing this table’s script values failed.'}
-			</p>
-		{/if}
+			{/if}
+		</div>
 		<!-- Script-error badge + panel. Same fixed-chrome strip family as the
 		     conflict/warnings/status lines above (and for the same reason: it
 		     must not scroll away, nor offset the virtualizer's row math). The
@@ -624,10 +650,16 @@
 			bind:open={settingsOpen}
 			onOpenChange={(o) => {
 				if (o) return; // opening is handled by openSettings, not here — see its comment
-				// Only Save still reaches here: every discard path is intercepted
-				// by `requestClose` (Cancel, the X) or by the preventDefault
-				// handlers below (Escape, overlay click), and those close by
-				// assigning `settingsOpen`, which bits-ui does not report here.
+				// TWO routes reach here, both needing `applyClose()`: Save (which
+				// sets `settingsSaved` first, so the guard inside keeps the edits)
+				// and a CLEAN Escape/overlay click — the `onEscapeKeydown`/
+				// `onInteractOutside` handlers below only `preventDefault()` when
+				// `hasSuspendedTableEdits` is true, so a clean dialog's Escape/
+				// overlay click falls through to bits-ui's own close and lands
+				// here. Cancel/the X and the confirmation's "Discard changes" do
+				// NOT come through here — they close by assigning `settingsOpen`
+				// directly (see the note by `settingsSaved`'s declaration), which
+				// bits-ui does not report through `onOpenChange`.
 				applyClose();
 			}}
 		>
@@ -651,18 +683,6 @@
 					}
 				}}
 			>
-				<!-- Our own X: the primitive's built-in one is a `Dialog.Close`,
-				     whose click cannot be preventDefault-ed, so it could not be
-				     gated. `showCloseButton={false}` above turns that one off. -->
-				<button
-					type="button"
-					data-testid="settings-close"
-					class="absolute top-4 right-4 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-					onclick={requestClose}
-				>
-					<X class="size-4" />
-					<span class="sr-only">Close</span>
-				</button>
 				<Dialog.Title class="font-display text-lg font-light tracking-wide">
 					{settingsFocus === null ? 'Table settings' : 'Column settings'}
 				</Dialog.Title>
@@ -721,10 +741,29 @@
 					onpointerup={onDlgResizeEnd}
 					onpointercancel={onDlgResizeEnd}
 				></div>
+				<!-- Our own X: the primitive's built-in one is a `Dialog.Close`,
+				     whose click cannot be preventDefault-ed, so it could not be
+				     gated. `showCloseButton={false}` above turns that one off.
+				     `absolute top-4 right-4` positions it regardless of DOM order,
+				     so it lives here (late in `Dialog.Content`, beside the resize
+				     handle) rather than as the first child: bits-ui's focus scope
+				     focuses the first focusable descendant on open, and with the X
+				     first that was THIS button — a keyboard user pressing Space/
+				     Enter right after opening would close the dialog they just
+				     opened instead of landing on the "Columns" tab. -->
+				<button
+					type="button"
+					data-testid="settings-close"
+					class="absolute top-4 right-4 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+					onclick={requestClose}
+				>
+					<X class="size-4" />
+					<span class="sr-only">Close</span>
+				</button>
 				<ConfirmDialog
 					bind:open={confirmDiscardOpen}
 					title="Discard changes?"
-					description="The column changes you made in this dialog will be lost. This cannot be undone."
+					description="Your unsaved changes in this dialog — columns, row source, sort, and JSON export settings — will be lost. This cannot be undone."
 					confirmLabel="Discard changes"
 					cancelLabel="Keep editing"
 					variant="destructive"

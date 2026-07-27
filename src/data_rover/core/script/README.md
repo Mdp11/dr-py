@@ -286,9 +286,9 @@ already visited earlier in the chain exactly like a relationship hop's
 revisit, and — unlike an earlier revision of this guard — does so SILENTLY
 for script steps too, with no warning. That silence is deliberate: the
 natural `def step(el): return [el]` idiom for a filtering step returns an
-already-visited id on purpose ("keep this element"), so it fires on ordinary,
-correct usage rather than on a mistake, and a warning there just trained
-users to ignore the warnings badge.
+already-visited id on purpose ("keep this element"), so a warning there
+would have fired on ordinary, correct usage rather than on a mistake, and
+would have just trained users to ignore the warnings badge.
 
 **The `SnippetSession` protocol** (`core/script/runner.py`) is the
 sandbox-agnostic session handle: `boot_error: ScriptError | None` (set if the

@@ -180,8 +180,16 @@
 
 	/** Per-kind accent for the header band's kind badge, so ELEMENT /
 	 * PROPERTY / NAVIGATION / SCRIPT are distinguishable at a glance in a long
-	 * column list. All four tokens are defined per-theme in app.css, so the
-	 * tints are legible in light and dark without a media query. */
+	 * column list. All four tokens are defined per-theme in app.css, and the
+	 * DARK theme passes WCAG AA (roughly 5.6-6.4:1 against the band's `bg-
+	 * muted/50`) — but the LIGHT variants measured against that same
+	 * background come in under AA (roughly 2.7:1 for warning, 3.6:1 for
+	 * success, 3.8:1 for info, all below the 4.5:1 threshold). That is a real
+	 * gap, not a hypothetical one — it just has no user impact TODAY because
+	 * the app hard-codes dark theme (see app.html). Revisiting this palette
+	 * for AA contrast is required before light theme ships; the colours
+	 * themselves are the project owner's call, not something to silently
+	 * retint here. */
 	function kindBadgeClass(kind: string): string {
 		if (kind === 'element') return 'bg-foreground/10 text-foreground/70';
 		if (kind === 'property') return 'bg-info/15 text-info';
@@ -217,8 +225,19 @@
 		<div class="space-y-1.5">
 			{#each defn.columns as col, i (i)}
 				{#if focusIndex === null || focusIndex === i}
+					<!-- NEVER put `overflow-hidden` back on this card: it was tried
+					     once (to keep the header band's tint flush with the rounded
+					     corners) and it turned the card into a clipping context that
+					     swallowed every popup rendered inside it — PropertyColumnEditor's
+					     property-name suggestion list (`position:absolute`, anchored to
+					     the last row of that editor) and CodeMirror's completion/hover/
+					     lint tooltips inside ScriptColumnEditor/CodeEditor (some
+					     `position:fixed`, since the `transform` below makes this card a
+					     containing block for those too). The header band gets its own
+					     `rounded-t` instead, so the tint still meets the card's rounded
+					     top corners without the card clipping anything. -->
 					<div
-						class="overflow-hidden rounded border border-border/70"
+						class="rounded border border-border/70"
 						data-col-drop={i}
 						style="transform:translateY({drag.offsetOf(i)}px)"
 						class:transition-transform={drag.dragging}
@@ -229,10 +248,13 @@
 					>
 						<!-- The header band: the column's identity (kind + name) set off
 						     from the editor body below it, which is otherwise a wall of
-						     controls in the same visual register. -->
+						     controls in the same visual register. `rounded-t` (not just
+						     `border-b`) matches the card's own `rounded` corners now that
+						     the card no longer clips to them via `overflow-hidden` — see
+						     the why-comment on the card above. -->
 						<div
 							data-testid="column-header-band-{i}"
-							class="flex flex-wrap items-center gap-1.5 border-b border-border/70 bg-muted/50 p-1.5"
+							class="flex flex-wrap items-center gap-1.5 rounded-t border-b border-border/70 bg-muted/50 p-1.5"
 							class:opacity-60={col.hidden}
 						>
 							{#if focusIndex === null}
@@ -363,10 +385,16 @@
 		{#if drag.dragging && drag.ghost && drag.ghost.w > 0 && drag.from !== null}
 			{@const dragCol = defn.columns[drag.from]}
 			<!-- Detached drag ghost: a slim copy of the grabbed row following the
-			     pointer (position:fixed so the settings panel doesn't clip it). -->
+			     pointer (position:fixed so the settings panel doesn't clip it).
+			     Opaque background, unlike the header band's `bg-muted/50`: the
+			     band sits on the (opaque) card, but this ghost floats over the
+			     column list itself, and `bg-muted/50` stacked with `opacity-90`
+			     below works out to ~45% alpha — the list showed through and the
+			     ghost's own label got hard to read. The badge tint below still
+			     mirrors the band's per-kind colours. -->
 			<div
 				data-testid="column-drag-ghost"
-				class="pointer-events-none fixed z-50 flex items-center gap-1.5 rounded border border-primary/40 bg-muted/50 p-1.5 text-xs opacity-90 shadow-lg"
+				class="pointer-events-none fixed z-50 flex items-center gap-1.5 rounded border border-primary/40 bg-card p-1.5 text-xs opacity-90 shadow-lg"
 				style="left:{drag.ghost.x}px; top:{drag.ghost.y}px; width:{drag.ghost.w}px"
 			>
 				<span class="shrink-0 text-muted-foreground/50">⠿</span>
