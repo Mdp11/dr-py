@@ -21,6 +21,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { loadFiles } from './helpers/load';
 import { openDefaultProject } from './helpers/auth';
+import { expectLiveFeed } from './helpers/feed';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const METAMODEL_PATH = join(__dirname, '..', '..', 'examples', 'example.metamodel.yaml');
@@ -44,7 +45,7 @@ test('History: list, diff, and revert a commit', async ({ page }) => {
 
 	// Wait for the live feed before interacting — the dev-seeded smart-city model
 	// hydrates on first access and the frontend eagerly loads the containment tree.
-	await expect(page.getByText('live')).toBeVisible({ timeout: 120_000 });
+	await expectLiveFeed(page, 120_000);
 
 	// 1. Load the example metamodel + empty model for a clean, known starting state.
 	//    The loadFiles helper handles the 409 "model not empty" guard by falling
@@ -52,7 +53,7 @@ test('History: list, diff, and revert a commit', async ({ page }) => {
 	await loadFiles(page, { metamodel: METAMODEL_PATH, model: EMPTY_MODEL });
 
 	// Wait for the live feed to reconnect after the model reload.
-	await expect(page.getByText('live')).toBeVisible({ timeout: 30_000 });
+	await expectLiveFeed(page, 30_000);
 
 	// Confirm we start with a clean staged buffer.
 	const uncommittedBadge = page.locator('footer').getByText(/\d+ uncommitted/);

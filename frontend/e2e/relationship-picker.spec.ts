@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { loadFiles } from './helpers/load';
 import { openDefaultProject } from './helpers/auth';
+import { expectLiveFeed } from './helpers/feed';
 
 // Self-contained fixtures (mirrors how smoke.spec.ts builds inline buffers).
 // From an `A` element: AtoB is metamodel-allowed; BtoB is not (B-source only).
@@ -55,7 +56,7 @@ test('relationship picker filters by metamodel and reveals all via escape hatch'
 	await loadFiles(page, { metamodel: METAMODEL, model: MODEL });
 
 	// Wait for the live feed to connect (model is fully loaded and WebSocket is up).
-	await expect(page.getByText('live')).toBeVisible({ timeout: 60_000 });
+	await expectLiveFeed(page, 60_000);
 
 	// Reset the stereotype type filter to "Select all" so both A and B elements
 	// are visible in the tree (the filter may be initialized from a prior test's

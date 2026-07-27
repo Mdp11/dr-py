@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { openDefaultProject } from './helpers/auth';
 import { loadFiles } from './helpers/load';
+import { expectLiveFeed } from './helpers/feed';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const METAMODEL_PATH = join(__dirname, '..', '..', 'examples', 'smart-city.metamodel.yaml');
@@ -28,7 +29,7 @@ test('property-step values, unsaved asterisk, auto-fit convergence, drag ghost',
 
 	await openDefaultProject(page);
 	await loadFiles(page, { metamodel: METAMODEL_PATH, model: MODEL_PATH, view: VIEW_PATH });
-	await expect(page.getByText('live')).toBeVisible({ timeout: 60_000 });
+	await expectLiveFeed(page, 60_000);
 
 	// --- 1. Navigation with a SCALAR property step shows values -------------
 	await page.getByRole('button', { name: 'New navigation' }).click();
@@ -82,11 +83,17 @@ test('property-step values, unsaved asterisk, auto-fit convergence, drag ghost',
 	await expect(settings.getByTestId('add-property-column')).toHaveText('+ Property');
 	await expect(settings.getByTestId('add-navigation-column')).toHaveText('+ Navigation');
 	// Add a property column (name) so the grid has two columns for the checks.
+	// Settings edits are STAGED: the draft updates immediately but the grid is
+	// not re-evaluated while the dialog is open, and every close path except
+	// Save reverts (Escape/Cancel/overlay raise a discard confirmation once
+	// there is something to lose). So compose here, then Save — Escape would
+	// throw the new column away instead of closing.
 	await settings.getByTestId('add-property-column').click();
 	await settings.getByLabel('Property name').fill('name');
-	await expect(grid.getByTestId('table-row').first()).toContainText(/\w/, { timeout: 10_000 });
-	await page.keyboard.press('Escape');
+	await settings.getByTestId('settings-save').click();
 	await expect(settings).toBeHidden();
+	// Re-evaluation happens on save; the new column now carries values.
+	await expect(grid.getByTestId('table-row').first()).toContainText(/\w/, { timeout: 10_000 });
 
 	// --- 4. Auto-fit converges on the first double-click ---------------------
 	const header = grid.getByTestId('table-header');

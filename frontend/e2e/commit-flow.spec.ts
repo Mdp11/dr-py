@@ -29,6 +29,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { loadFiles } from './helpers/load';
 import { openDefaultProject } from './helpers/auth';
+import { expectLiveFeed } from './helpers/feed';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const METAMODEL_PATH = join(__dirname, '..', '..', 'examples', 'smart-city.metamodel.yaml');
@@ -50,7 +51,7 @@ test('check out, edit, and commit a property', async ({ page }) => {
 
 	// Wait for the live feed to connect — the readiness signal that the model is
 	// fully loaded and the WebSocket is up.
-	await expect(page.getByText('live')).toBeVisible({ timeout: 60_000 });
+	await expectLiveFeed(page, 60_000);
 
 	// Reset the stereotype type filter to "select all" so elements are visible
 	// in the tree. When a prior test loaded a different metamodel (e.g. example.

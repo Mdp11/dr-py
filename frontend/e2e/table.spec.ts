@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { openDefaultProject } from './helpers/auth';
 import { loadFiles } from './helpers/load';
+import { expectLiveFeed } from './helpers/feed';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const METAMODEL_PATH = join(__dirname, '..', '..', 'examples', 'smart-city.metamodel.yaml');
@@ -82,7 +83,7 @@ test('open navigation as table, add a column, edit a cell, commit, save, and reo
 
 	await openDefaultProject(page);
 	await loadFiles(page, { metamodel: METAMODEL_PATH, model: MODEL_PATH, view: VIEW_PATH });
-	await expect(page.getByText('live')).toBeVisible({ timeout: 60_000 });
+	await expectLiveFeed(page, 60_000);
 
 	// --- 1. Build a minimal navigation, then "Open as table" -----------------
 	await page.getByRole('button', { name: 'New navigation' }).click();
@@ -130,20 +131,29 @@ test('open navigation as table, add a column, edit a cell, commit, save, and reo
 	await tabpanel.getByTestId('table-settings-button').click();
 	const settings = page.getByRole('dialog', { name: 'Table settings' });
 	await expect(settings).toBeVisible();
+	// Settings edits are STAGED: the draft updates immediately, but the grid is
+	// deliberately NOT re-evaluated while the dialog is open (composing a column
+	// must not re-run a whole-table evaluation per keystroke). So the live
+	// checkpoint here is the dialog's own column list, not the grid header —
+	// the header cannot grow until Save triggers the re-evaluation.
 	const columnCountBefore = await header.locator('> div').count();
+	const columnCards = settings.locator('[data-testid^="column-header-band-"]');
+	const cardsBefore = await columnCards.count();
 	await settings.getByTestId('add-property-column').click();
-	await expect(header.locator('> div')).toHaveCount(columnCountBefore + 1, { timeout: 10_000 });
+	await expect(columnCards).toHaveCount(cardsBefore + 1, { timeout: 10_000 });
 	await settings.getByLabel('Property name').fill('name');
-	// The grid re-evaluates with the edited definition; the new column now
-	// carries values (any non-empty cell text will do — seeded elements all
-	// have a `name`).
+	// Save (not Escape) — every other close path DISCARDS the staged edits, and
+	// section 3 needs this column to exist. Saving also closes the dialog, so
+	// its overlay stops intercepting clicks on the grid.
+	await settings.getByTestId('settings-save').click();
+	await expect(settings).toBeHidden();
+	// Now the re-evaluation has run: the column is in the header and carries
+	// values (any non-empty cell text will do — seeded elements all have a
+	// `name`).
+	await expect(header.locator('> div')).toHaveCount(columnCountBefore + 1, { timeout: 10_000 });
 	await expect(tabpanel.getByTestId('table-row').first()).toContainText(/\w/, {
 		timeout: 10_000
 	});
-	// Close the popup so its overlay stops intercepting clicks on the grid for
-	// the value-cell edit in section 3.
-	await page.keyboard.press('Escape');
-	await expect(settings).toBeHidden();
 
 	// --- 3. Edit a value cell, then stage -> commit through the DiffDrawer ---
 	// (this reuses the Inspector's exact checkout/commit path — see
@@ -227,7 +237,7 @@ test('lazy loads rows while scrolling a large scope table', async ({ page }) => 
 	page.on('dialog', (dialog) => void dialog.accept());
 	await openDefaultProject(page);
 	await loadFiles(page, { metamodel: METAMODEL_PATH, model: MODEL_PATH, view: VIEW_PATH });
-	await expect(page.getByText('live')).toBeVisible({ timeout: 60_000 });
+	await expectLiveFeed(page, 60_000);
 
 	await page.getByRole('button', { name: 'New table' }).click();
 	const tabpanel = page.getByRole('tabpanel');
@@ -243,7 +253,10 @@ test('lazy loads rows while scrolling a large scope table', async ({ page }) => 
 	await settings.getByText('any element', { exact: true }).click();
 	await page.getByRole('button', { name: 'Select all', exact: true }).click();
 	await page.keyboard.press('Escape'); // close the type picker popover
-	await page.keyboard.press('Escape'); // close the settings dialog
+	// Save, not Escape: the scope pick is a staged edit, and Escape is a DISCARD
+	// path — it would raise the discard confirmation and then revert the scope,
+	// leaving the empty table this test needs rows in.
+	await settings.getByTestId('settings-save').click();
 	await expect(settings).toBeHidden();
 	await expect(tabpanel.getByTestId('table-row').first()).toBeVisible({ timeout: 15_000 });
 
@@ -276,7 +289,7 @@ test('inline navigation column and inline row source', async ({ page }) => {
 	page.on('dialog', (dialog) => void dialog.accept());
 	await openDefaultProject(page);
 	await loadFiles(page, { metamodel: METAMODEL_PATH, model: MODEL_PATH, view: VIEW_PATH });
-	await expect(page.getByText('live')).toBeVisible({ timeout: 60_000 });
+	await expectLiveFeed(page, 60_000);
 
 	// --- Build a minimal navigation, then "Open as table" (mirrors test 1) ---
 	await page.getByRole('button', { name: 'New navigation' }).click();
@@ -305,14 +318,16 @@ test('inline navigation column and inline row source', async ({ page }) => {
 	// asserting the header count right after the add click alone would wait
 	// on a 422'd load that never produces a 2nd header column.
 	// The ColumnManager now lives behind the ⚙ Settings popup (portaled to the
-	// body); open it and scope column edits to the dialog. Grid/header
-	// assertions below still read from the tabpanel — it renders live behind
-	// the overlay — and there are no grid *clicks* in this test, so the popup
-	// can stay open through to the end.
+	// body); open it and scope column edits to the dialog. Everything composed
+	// in here is STAGED — the grid is not re-evaluated until Save — so the live
+	// checkpoints below read the dialog's own column list, and the grid is
+	// asserted once at the end, after saving.
 	await tabpanel.getByTestId('table-settings-button').click();
 	const settings = page.getByRole('dialog', { name: 'Table settings' });
 	await expect(settings).toBeVisible();
 	const columnCountBefore = await header.locator('> div').count();
+	const columnCards = settings.locator('[data-testid^="column-header-band-"]');
+	const cardsBefore = await columnCards.count();
 	await settings.getByTestId('add-navigation-column').click();
 	await settings.getByTestId('nav-mode-inline').click();
 
@@ -327,7 +342,7 @@ test('inline navigation column and inline row source', async ({ page }) => {
 	await inlineCollapseToggle.click();
 	await expect(inlineCollapseToggle).toHaveAttribute('aria-expanded', 'true');
 	await expect(inlineEditor).toContainText("each row's element");
-	await expect(header.locator('> div')).toHaveCount(columnCountBefore + 1, { timeout: 10_000 });
+	await expect(columnCards).toHaveCount(cardsBefore + 1, { timeout: 10_000 });
 	await inlineEditor.getByRole('button', { name: '+ Follow a relationship', exact: true }).click();
 	const inlineRelStep = inlineEditor.getByTestId('relationship-step');
 	await expect(inlineRelStep).toHaveCount(1);
@@ -336,12 +351,12 @@ test('inline navigation column and inline row source', async ({ page }) => {
 	await page.getByRole('button', { name: 'SystemContainsComponent', exact: true }).click();
 	await expect(inlineRelStep.getByText('SystemContainsComponent', { exact: true })).toBeVisible();
 
-	// The embedded status chip previews against the table's first row.
+	// The embedded status chip previews against the table's first row. This is
+	// the one live preview the staged dialog still gives: it is computed by the
+	// editor itself, not by re-evaluating the table.
 	await expect(inlineEditor.getByTestId('status-chip')).toContainText(/✓ \d+ chains/, {
 		timeout: 15_000
 	});
-	// And the grid itself re-evaluated with the inline definition.
-	await expect(tabpanel.getByTestId('table-row').first()).toBeVisible({ timeout: 15_000 });
 
 	// --- Inline row source ---------------------------------------------------
 	// Switch the rows to an inline chains navigation: the seed is an empty
@@ -352,5 +367,13 @@ test('inline navigation column and inline row source', async ({ page }) => {
 	await settings.getByLabel('Row source kind').selectOption('chains');
 	await settings.getByTestId('rowsource-mode-inline').click();
 	await expect(settings.getByTestId('inline-rowsource-editor')).toBeVisible();
+
+	// Save, and only now does the grid re-evaluate: the inline navigation column
+	// reaches the header and the inline row source produces rows. Asserting this
+	// with the dialog still open would have been vacuous — the rows and header
+	// standing behind it are the pre-edit ones until a save resumes evaluation.
+	await settings.getByTestId('settings-save').click();
+	await expect(settings).toBeHidden();
+	await expect(header.locator('> div')).toHaveCount(columnCountBefore + 1, { timeout: 15_000 });
 	await expect(tabpanel.getByTestId('table-row').first()).toBeVisible({ timeout: 15_000 });
 });

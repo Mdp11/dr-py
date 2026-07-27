@@ -27,6 +27,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { loadFiles } from './helpers/load';
 import { openDefaultProject } from './helpers/auth';
+import { expectLiveFeed } from './helpers/feed';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const METAMODEL_PATH = join(__dirname, '..', '..', 'examples', 'smart-city.metamodel.yaml');
@@ -93,7 +94,7 @@ test('script column: ref snippet computes values + error cell + sorts; inline sc
 	page.on('dialog', (dialog) => void dialog.accept());
 	await openDefaultProject(page);
 	await loadFiles(page, { metamodel: METAMODEL_PATH, model: MODEL_PATH, view: VIEW_PATH });
-	await expect(page.getByText('live')).toBeVisible({ timeout: 60_000 });
+	await expectLiveFeed(page, 60_000);
 
 	// --- 0. Save a code_snippet artifact defining value() (F1/M1 flow, as
 	// snippet-flow.spec.ts does), so the script column below can reference it
@@ -138,12 +139,24 @@ test('script column: ref snippet computes values + error cell + sorts; inline sc
 	const settings = page.getByRole('dialog', { name: 'Table settings' });
 	await expect(settings).toBeVisible();
 	const columnCountBefore = await columnHeaders.count();
+	const columnCards = settings.locator('[data-testid^="column-header-band-"]');
+	const cardsBefore = await columnCards.count();
 	await settings.getByTestId('add-script-column').click();
-	await expect(columnHeaders).toHaveCount(columnCountBefore + 1, { timeout: 10_000 });
+	// Settings edits are STAGED — the table is not re-evaluated while the dialog
+	// is open, so the live checkpoint is the dialog's own column list. The grid
+	// header cannot grow until Save resumes evaluation (below).
+	await expect(columnCards).toHaveCount(cardsBefore + 1, { timeout: 10_000 });
 	const scriptColIndex = columnCountBefore; // 0-indexed; appended at the end
 
 	const firstEditor = settings.getByTestId('script-column-editor').nth(0);
 	await firstEditor.getByTestId('snippet-ref-select').selectOption({ label: snippetName });
+
+	// Save to commit the composed column and resume evaluation. Escape/Cancel
+	// would DISCARD it — this dialog keeps edits only on Save. Closing here also
+	// stops the portaled overlay intercepting the grid clicks in section 4.
+	await settings.getByTestId('settings-save').click();
+	await expect(settings).toBeHidden();
+	await expect(columnHeaders).toHaveCount(columnCountBefore + 1, { timeout: 10_000 });
 
 	// Wait for every row's script cell to settle (value or error-cell) before
 	// reading them — the column re-evaluates async against the live model.
@@ -178,12 +191,8 @@ test('script column: ref snippet computes values + error cell + sorts; inline sc
 	// --- 4. Sort by the script column: no crash, and the row order changes
 	// (the errored row's position moves relative to its neighbors either way,
 	// even though the rest were already near-sorted by fixture insertion
-	// order — see the CODE comment above). The Table settings dialog is
-	// portaled over the grid (table.spec.ts's "close the popup so its overlay
-	// stops intercepting clicks on the grid" note applies here too) — close it
-	// first, the grid keeps rendering/re-evaluating live underneath. ---------
-	await page.keyboard.press('Escape');
-	await expect(settings).toBeHidden();
+	// order — see the CODE comment above). The settings dialog was already
+	// saved-and-closed above, so nothing is intercepting the grid. ----------
 	const before = cells.map((c) => c.text);
 	const sortButton = columnHeaders.nth(scriptColIndex).getByRole('button', { name: /^Sort by/ });
 	await sortButton.click();
@@ -203,10 +212,14 @@ test('script column: ref snippet computes values + error cell + sorts; inline sc
 	const columnEditors = settings.getByTestId('script-column-editor');
 	await expect(columnEditors).toHaveCount(2);
 	const inlineColIndex = scriptColIndex + 1;
-	await expect(columnHeaders).toHaveCount(columnCountBefore + 2, { timeout: 10_000 });
 	const secondEditor = columnEditors.nth(1);
 	await secondEditor.getByTestId('snippet-mode-inline').click();
 	await setCode(page, secondEditor, INLINE_COLUMN_CODE);
+
+	// Save again — the inline column's cells only compute once evaluation resumes.
+	await settings.getByTestId('settings-save').click();
+	await expect(settings).toBeHidden();
+	await expect(columnHeaders).toHaveCount(columnCountBefore + 2, { timeout: 10_000 });
 
 	await expect
 		.poll(
@@ -226,7 +239,7 @@ test('script step: el.outgoing() renders real chains; a raising step surfaces na
 	page.on('dialog', (dialog) => void dialog.accept());
 	await openDefaultProject(page);
 	await loadFiles(page, { metamodel: METAMODEL_PATH, model: MODEL_PATH, view: VIEW_PATH });
-	await expect(page.getByText('live')).toBeVisible({ timeout: 60_000 });
+	await expectLiveFeed(page, 60_000);
 
 	const tabpanel = page.getByRole('tabpanel');
 	await buildSoftwareSystemNav(page, tabpanel);
@@ -279,7 +292,7 @@ test('script column: the Test panel runs the inline snippet against a bound elem
 	page.on('dialog', (dialog) => void dialog.accept());
 	await openDefaultProject(page);
 	await loadFiles(page, { metamodel: METAMODEL_PATH, model: MODEL_PATH, view: VIEW_PATH });
-	await expect(page.getByText('live')).toBeVisible({ timeout: 60_000 });
+	await expectLiveFeed(page, 60_000);
 
 	// A nav -> "Open as table" gets us a table whose settings dialog can host
 	// a script column (identical entry point to the test above).

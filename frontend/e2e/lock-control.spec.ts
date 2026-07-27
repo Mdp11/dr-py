@@ -25,6 +25,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { loadFiles } from './helpers/load';
 import { openDefaultProject } from './helpers/auth';
+import { expectLiveFeed } from './helpers/feed';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const METAMODEL_PATH = join(__dirname, '..', '..', 'examples', 'smart-city.metamodel.yaml');
@@ -45,7 +46,7 @@ test('lock without editing, then unlock-with-confirm discards staged edits', asy
 
 	await openDefaultProject(page);
 	await loadFiles(page, { metamodel: METAMODEL_PATH, model: MODEL_PATH, view: VIEW_PATH });
-	await expect(page.getByText('live')).toBeVisible({ timeout: 60_000 });
+	await expectLiveFeed(page, 60_000);
 
 	// Reset the stereotype filter to "select all" so elements are visible (guard
 	// against leftover filter state from a prior test — see commit-flow.spec.ts).
