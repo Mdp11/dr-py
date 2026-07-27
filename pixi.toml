@@ -2,7 +2,7 @@
 name = "data-rover"
 version = "0.1.0"
 description = "Reflective MBSE metamodel engine: a mutable metamodel, a generic model layer, and a pluggable validation pipeline."
-authors = ["Mattia Di Pietro <mattia.dipi@gmail.com>"]
+authors = ["Mattia De Prisco <mattia.dipi@gmail.com>"]
 channels = ["conda-forge"]
 platforms = ["linux-64"]
 
@@ -35,10 +35,6 @@ openpyxl = "3.1.*"
 types-openpyxl = "3.1.*"
 xlsxwriter = "3.2.*"
 process-compose = "1.*"
-# `ruff format` backs POST /snippets/format. It is a formatter, not an
-# executor: it parses and prints the snippet and never runs it, so unlike the
-# snippet runner it needs no sandbox. Pinned to the same version core-dev uses
-# so CI-formatted and user-formatted code cannot disagree.
 ruff = "0.15.*"
 
 [feature.api.pypi-dependencies]
@@ -181,6 +177,15 @@ depends-on = [
     { task = "backend-tidy", args = [{ check_only = "{{ check_only }}" }] },
 ]
 
+[feature.core-dev.tasks.dr-test]
+description = "Run every test suite: core pytest + frontend vitest"
+cmd = "true"
+default-environment = "core-dev"
+depends-on = [
+    { task = "core-test" },
+    { task = "frontend-test", environment = "frontend" },
+]
+
 [feature.frontend.dependencies]
 nodejs = "22.*"
 
@@ -213,6 +218,21 @@ cwd = "frontend"
 description = "Format the frontend"
 args = [{ arg = "check_only", default = "false", choices = ["true", "false"] }]
 cmd = "npx prettier {% if check_only == 'true' %}--check{% else %}--write{% endif %} ."
+cwd = "frontend"
+
+[feature.frontend.tasks.frontend-test]
+description = "Run the frontend vitest suite"
+cmd = "npm test"
+cwd = "frontend"
+
+[feature.frontend.tasks.frontend-test-e2e]
+description = "Run the frontend playwright e2e suite"
+cmd = "npm run test:e2e"
+cwd = "frontend"
+
+[feature.frontend.tasks.frontend-check]
+description = "Run svelte-check on the frontend"
+cmd = "npm run check"
 cwd = "frontend"
 
 [feature.frontend.tasks.frontend-tidy]
