@@ -40,7 +40,7 @@
 
 <div
 	data-testid="script-column-editor"
-	class="mt-1.5 space-y-1.5 rounded border border-border/60 bg-muted/30 p-2 text-[11px]"
+	class="space-y-1.5 rounded border border-border/60 bg-muted/30 p-2 text-[11px]"
 >
 	<ColumnSourceEditor
 		source={column.source}

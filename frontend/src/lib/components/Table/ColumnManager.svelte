@@ -177,6 +177,18 @@
 		if (!defn) return;
 		apply(replaceColumn(defn, index, next));
 	}
+
+	/** Per-kind accent for the header band's kind badge, so ELEMENT /
+	 * PROPERTY / NAVIGATION / SCRIPT are distinguishable at a glance in a long
+	 * column list. All four tokens are defined per-theme in app.css, so the
+	 * tints are legible in light and dark without a media query. */
+	function kindBadgeClass(kind: string): string {
+		if (kind === 'element') return 'bg-foreground/10 text-foreground/70';
+		if (kind === 'property') return 'bg-info/15 text-info';
+		if (kind === 'navigation') return 'bg-success/15 text-success';
+		if (kind === 'script') return 'bg-warning/15 text-warning';
+		return 'bg-muted text-muted-foreground';
+	}
 </script>
 
 {#if defn}
@@ -206,7 +218,7 @@
 			{#each defn.columns as col, i (i)}
 				{#if focusIndex === null || focusIndex === i}
 					<div
-						class="rounded border border-border/70 p-1.5"
+						class="overflow-hidden rounded border border-border/70"
 						data-col-drop={i}
 						style="transform:translateY({drag.offsetOf(i)}px)"
 						class:transition-transform={drag.dragging}
@@ -215,7 +227,14 @@
 						class:ring-destructive={drag.over === i && drag.from !== null && !drag.valid}
 						class:opacity-50={drag.from === i}
 					>
-						<div class="flex flex-wrap items-center gap-1.5" class:opacity-60={col.hidden}>
+						<!-- The header band: the column's identity (kind + name) set off
+						     from the editor body below it, which is otherwise a wall of
+						     controls in the same visual register. -->
+						<div
+							data-testid="column-header-band-{i}"
+							class="flex flex-wrap items-center gap-1.5 border-b border-border/70 bg-muted/50 p-1.5"
+							class:opacity-60={col.hidden}
+						>
 							{#if focusIndex === null}
 								<span
 									role="button"
@@ -234,12 +253,12 @@
 								{i}
 							</span>
 							<span
-								class="rounded bg-muted px-1 py-0.5 font-mono text-[10px] text-muted-foreground uppercase"
+								class="rounded px-1 py-0.5 font-mono text-[10px] uppercase {kindBadgeClass(col.kind)}"
 							>
 								{columnKindLabel(col.kind)}
 							</span>
 							<input
-								class="min-w-0 flex-1 rounded border border-input bg-card px-1.5 py-0.5"
+								class="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1.5 py-0.5 font-medium transition-colors hover:border-input hover:bg-card focus:border-input focus:bg-card"
 								placeholder={columnLabel(col)}
 								value={col.header}
 								oninput={(e) => onRename(i, (e.currentTarget as HTMLInputElement).value)}
@@ -303,32 +322,36 @@
 								</button>
 							{/if}
 						</div>
-						{#if col.kind === 'navigation'}
-							<NavigationColumnEditor
-								column={col}
-								columnIndex={i}
-								columns={defn.columns}
-								rowSource={defn.row_source}
-								{sampleRowElementId}
-								onChange={(next) => onColumnChange(i, next)}
-							/>
-						{:else if col.kind === 'property'}
-							<PropertyColumnEditor
-								column={col}
-								columnIndex={i}
-								columns={defn.columns}
-								rowSource={defn.row_source}
-								onChange={(next) => onColumnChange(i, next)}
-							/>
-						{:else if col.kind === 'script'}
-							<ScriptColumnEditor
-								column={col}
-								columnIndex={i}
-								columns={defn.columns}
-								rowSource={defn.row_source}
-								{tabId}
-								onChange={(next) => onColumnChange(i, next)}
-							/>
+						{#if col.kind !== 'element'}
+							<div class="p-1.5">
+								{#if col.kind === 'navigation'}
+									<NavigationColumnEditor
+										column={col}
+										columnIndex={i}
+										columns={defn.columns}
+										rowSource={defn.row_source}
+										{sampleRowElementId}
+										onChange={(next) => onColumnChange(i, next)}
+									/>
+								{:else if col.kind === 'property'}
+									<PropertyColumnEditor
+										column={col}
+										columnIndex={i}
+										columns={defn.columns}
+										rowSource={defn.row_source}
+										onChange={(next) => onColumnChange(i, next)}
+									/>
+								{:else if col.kind === 'script'}
+									<ScriptColumnEditor
+										column={col}
+										columnIndex={i}
+										columns={defn.columns}
+										rowSource={defn.row_source}
+										{tabId}
+										onChange={(next) => onColumnChange(i, next)}
+									/>
+								{/if}
+							</div>
 						{/if}
 					</div>
 				{/if}
@@ -341,12 +364,14 @@
 			     pointer (position:fixed so the settings panel doesn't clip it). -->
 			<div
 				data-testid="column-drag-ghost"
-				class="pointer-events-none fixed z-50 flex items-center gap-1.5 rounded border border-primary/40 bg-card p-1.5 text-xs opacity-90 shadow-lg"
+				class="pointer-events-none fixed z-50 flex items-center gap-1.5 rounded border border-primary/40 bg-muted/50 p-1.5 text-xs opacity-90 shadow-lg"
 				style="left:{drag.ghost.x}px; top:{drag.ghost.y}px; width:{drag.ghost.w}px"
 			>
 				<span class="shrink-0 text-muted-foreground/50">⠿</span>
 				<span
-					class="rounded bg-muted px-1 py-0.5 font-mono text-[10px] text-muted-foreground uppercase"
+					class="rounded px-1 py-0.5 font-mono text-[10px] uppercase {dragCol
+						? kindBadgeClass(dragCol.kind)
+						: 'bg-muted text-muted-foreground'}"
 				>
 					{dragCol ? columnKindLabel(dragCol.kind) : ''}
 				</span>
