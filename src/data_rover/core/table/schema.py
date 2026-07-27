@@ -114,6 +114,11 @@ class JsonColumnOptions(BaseModel):
 
     #: "" means "derive from the header" — see `resolve_json_keys`.
     key: str = ""
+    #: Key for the column's OWN value inside the array entries `group`
+    #: produces. Meaningful only where `group` is honored; "" falls back to
+    #: the RESOLVED group key — which is exactly what the single key this
+    #: field splits already did, so old definitions export unchanged.
+    item_key: str = ""
     #: How an element reference renders. Ignored by columns that never produce
     #: elements (a property column), which is tolerated rather than rejected.
     value: Literal["name", "id", "object"] = "name"

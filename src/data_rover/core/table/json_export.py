@@ -62,6 +62,59 @@ def resolve_json_keys(defn: TableDefinition) -> list[str | None]:
     return out
 
 
+def _honors_group(col: Column) -> bool:
+    """Whether this column's `group` flag is actually acted on: set, on a
+    VISIBLE EXPAND column. A stale flag anywhere else is IGNORED rather than
+    rejected — the column editor can flip expand->collapse at any moment and a
+    422 would block exporting the whole table over a leftover checkbox."""
+    return (
+        col.json_export is not None
+        and col.json_export.group
+        and not col.hidden
+        and getattr(col, "mode", "collapse") == "expand"
+    )
+
+
+def resolve_item_keys(
+    defn: TableDefinition, jkeys: list[str | None]
+) -> list[str | None]:
+    """Per definition column, the key a GROUPED column uses for its own value
+    inside its array entries; `None` for every column that does not group.
+
+    Positionally aligned with `jkeys`, and deliberately a SECOND pass over it:
+    resolving group keys first means a group key always wins a collision, which
+    is what keeps definitions written before `item_key` existed rendering
+    byte-identically.
+
+    A blank `item_key` — and an explicit one that repeats the column's own
+    group key — is taken VERBATIM rather than uniquified. The two names belong
+    to the same column at two nesting levels, so the global "one key means one
+    column" invariant `resolve_json_keys` maintains still holds; suffixing it
+    to `Signals_2` would be noise. Any OTHER explicit key joins that global
+    namespace and takes `_2`, `_3`, ... on a clash.
+    """
+    out: list[str | None] = []
+    used = {k for k in jkeys if k is not None}
+    for i, col in enumerate(defn.columns):
+        own = jkeys[i]
+        if own is None or not _honors_group(col):
+            out.append(None)  # hidden, or never rendered as a group
+            continue
+        opts = col.json_export
+        base = (opts.item_key if opts is not None else "") or own
+        if base == own:
+            out.append(own)
+            continue
+        key = base
+        n = 2
+        while key in used:
+            key = f"{base}_{n}"
+            n += 1
+        used.add(key)
+        out.append(key)
+    return out
+
+
 def _element_json(model: Model, eid: str, mode: str) -> object:
     """One element reference rendered per the column's `json_export.value`.
 
@@ -162,20 +215,11 @@ def build_group_plan(defn: TableDefinition, base_slots: int) -> GroupPlan:
     is what makes `{part: [{subpart: [{mass: ...}]}]}` come out right instead
     of hoisting `mass` up beside `subpart`.
 
-    `group` is honored only on a VISIBLE EXPAND column. A stale flag on a
-    collapse or hidden column is IGNORED rather than rejected: the column
-    editor can flip expand->collapse at any moment, and 422-ing there would
-    block exporting the whole table over a leftover checkbox.
+    `group` is honored only where `_honors_group` says so; a stale flag
+    elsewhere is ignored, not rejected.
     """
     deps = _deps(defn)
-    grouped = tuple(
-        i
-        for i, c in enumerate(defn.columns)
-        if c.json_export is not None
-        and c.json_export.group
-        and not c.hidden
-        and getattr(c, "mode", "collapse") == "expand"
-    )
+    grouped = tuple(i for i, c in enumerate(defn.columns) if _honors_group(c))
     gset = set(grouped)
 
     def owner(i: int) -> int | None:
