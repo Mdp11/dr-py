@@ -253,7 +253,9 @@
 								{i}
 							</span>
 							<span
-								class="rounded px-1 py-0.5 font-mono text-[10px] uppercase {kindBadgeClass(col.kind)}"
+								class="rounded px-1 py-0.5 font-mono text-[10px] uppercase {kindBadgeClass(
+									col.kind
+								)}"
 							>
 								{columnKindLabel(col.kind)}
 							</span>

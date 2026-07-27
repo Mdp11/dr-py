@@ -81,8 +81,8 @@ describe('formatScriptWarning', () => {
 	it('falls back for a code this client does not know', () => {
 		// `nav_already_visited` was removed server-side; an older server that
 		// still sends it must degrade to something readable, never a blank.
-		expect(
-			formatScriptWarning(w({ code: 'nav_already_visited', occurrences: 3, total: 8 }))
-		).toBe('nav_already_visited');
+		expect(formatScriptWarning(w({ code: 'nav_already_visited', occurrences: 3, total: 8 }))).toBe(
+			'nav_already_visited'
+		);
 	});
 });
