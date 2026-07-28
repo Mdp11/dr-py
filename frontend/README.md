@@ -447,18 +447,47 @@ toggle`), a collapsed disclosure that expands to the shared
   `state/navigation-editor.svelte.ts` — so paging in more rows never churns
   the badge.
 
-### Table JSON export
+### Table export settings
 
-The Export button is a dropdown (Excel `.xlsx` / JSON `.json`); both formats go
-through the same `downloadTable` retry loop, because the backend's 202 +
-`Retry-After` protocol is format-agnostic.
+The Export button is a dropdown (Excel `.xlsx` / JSON `.json`). Neither item
+downloads directly: both open `components/Table/ExportDialog.svelte` with that
+format preselected, and a segmented control switches format in place. Confirming
+runs the same `downloadTable` retry loop as before — the backend's 202 +
+`Retry-After` protocol is format-agnostic — and the dialog **closes first and
+does not await it**, because that loop can run for minutes while a script sweep
+fills the cell cache and the progress belongs on the chrome's Export button, not
+behind a modal overlay.
 
-JSON settings live per column (`json_export: {key, item_key, value, group}`) and
-are edited in the "JSON export" tab of the table Settings dialog
-(`components/Table/JsonExportEditor.svelte`). `defaultJsonKeys` in
-`lib/table/columns.ts` mirrors the backend's key derivation, but ONLY to fill
-input placeholders — the sample pane fetches `POST /tables/json-preview` so the
-grouping algorithm is never reimplemented in TypeScript.
+Everything the dialog edits is an **export override**: it changes the file and
+never the grid. Include/exclude, output order and the row-number entry are
+shared across formats; only the rename differs (xlsx writes `export.header`,
+JSON writes `json_export.key`, so one row never shows two rename boxes). JSON
+keeps its per-column extras (`json_export: {key, item_key, value, group}`) and
+its live sample pane. The overrides are part of the saved definition, so a table
+exported the same way every week is configured once.
+
+- **`lib/table/export-layout.ts`** mirrors `core/table/export_layout.py`'s
+  normalizer — `ROW_NUMBER_SLOT` (`-1`), `columnIncluded` (tri-state `include`:
+  `null` follows `hidden`) and `exportEntries`. DISPLAY ONLY, like
+  `defaultJsonKeys`: the authoritative layout is the backend's. It exists
+  because the dialog must list the EXCLUDED entries too — so the user can opt
+  one back in — and the backend's `ExportLayout` has already dropped them.
+- **`updateTableExportSettings` / `restoreTableExportSettings`**
+  (`state/table-editor.svelte.ts`) are the dialog's only writes. They set the
+  draft and deliberately **skip the reload** `updateTableDefinition` fires:
+  `/tables/evaluate` reads none of these fields, so a reload could only repaint
+  the identical page — while bumping the generation, dropping the script-error
+  recap and pulsing the activity bar, once per keystroke. `restore…` is Cancel's
+  half and puts `dirty` back with the definition; discarding an edit has to
+  discard the unsaved-ness the edit created.
+- **`export_order` bookkeeping** lives with the column mutators in
+  `lib/table/columns.ts` (the backend normalizes defensively on read, but the
+  client remaps precisely on move/insert/remove/clone, like
+  `remapTableSortFor*`).
+- **`defaultJsonKeys`** mirrors the backend's key derivation, but ONLY to fill
+  input placeholders — the sample pane fetches `POST /tables/json-preview`, with
+  the active grid sort, so the grouping algorithm is never reimplemented in
+  TypeScript and the pane cannot disagree with the download.
 
 ### Settings dialog + strict-mode toggle
 

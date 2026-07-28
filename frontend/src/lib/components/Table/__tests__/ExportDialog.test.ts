@@ -453,10 +453,7 @@ describe('ExportDialog', () => {
 	});
 
 	it('snake_cases an explicitly set item key and leaves a blank one blank', async () => {
-		await open(
-			'json',
-			setColumnJsonOptions(defn(), 1, { group: true, item_key: 'One Component' })
-		);
+		await open('json', setColumnJsonOptions(defn(), 1, { group: true, item_key: 'One Component' }));
 		(byTestId(document, 'json-snake-all') as HTMLButtonElement).click();
 		flushSync();
 		const cols = current().columns;
@@ -542,7 +539,8 @@ describe('ExportDialog', () => {
 		setTableSort(TAB_ID, { column: 0, direction: 'desc' });
 		flushSync();
 		await waitFor(
-			() => previewSpy.mock.calls.at(-1)?.[0]?.sort !== undefined && previewSpy.mock.calls.length > 1
+			() =>
+				previewSpy.mock.calls.at(-1)?.[0]?.sort !== undefined && previewSpy.mock.calls.length > 1
 		);
 		expect(previewSpy).toHaveBeenLastCalledWith(
 			expect.objectContaining({ sort: { column: 0, direction: 'desc' } })

@@ -766,12 +766,7 @@ describe('export_order bookkeeping', () => {
 
 		it('addColumn keeps it and still appends the new index', () => {
 			const d = { ...defn(el(), el()), export_order: [ROW_NUMBER_SLOT, 1, 0] };
-			expect(addColumn(d, newPropertyColumn()).export_order).toEqual([
-				ROW_NUMBER_SLOT,
-				1,
-				0,
-				2
-			]);
+			expect(addColumn(d, newPropertyColumn()).export_order).toEqual([ROW_NUMBER_SLOT, 1, 0, 2]);
 		});
 
 		it('cloneColumn keeps it and still inserts the copy after its original', () => {
