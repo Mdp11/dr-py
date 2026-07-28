@@ -130,6 +130,12 @@ def test_serialize_step_shapes(small_model) -> None:
         ser("step", {"a": 1})
     with pytest.raises(ValueError):
         ser("step", [[1]])
+    # `return el.outgoing()[0]` is a plausible mistake, and a Relationship is
+    # "iterable" via its property-access __getitem__ (KeyError: 0). It must
+    # hit the teaching ValueError, not that confusing KeyError.
+    rel = ns["dr"].element("b1").outgoing()[0]
+    with pytest.raises(ValueError):
+        ser("step", rel)
 
 
 # --- Session tests (M2) -----

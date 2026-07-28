@@ -761,11 +761,13 @@ def _dr_serialize_entry_result(entry, value):
             "step() must return an Element, an element id, a scalar value, "
             "an iterable of those, or None (None ends the chain); got "
         )
-        # A dict is technically iterable, but iterating one yields its KEYS —
-        # `return {el.id: el}` would otherwise be silently reinterpreted as a
-        # list of ids. Reject it explicitly rather than falling through to
-        # generic iteration.
-        if isinstance(value, dict):
+        # Neither of these may fall through to generic iteration. Iterating a
+        # dict yields its KEYS, so `return {el.id: el}` would be silently
+        # reinterpreted as a list of ids; a Relationship "iterates" through
+        # its property-access __getitem__ and dies on `KeyError: 0`, hiding
+        # the teaching message from `return el.outgoing()[0]` — the obvious
+        # mistake, since a step's payload carries elements and scalars only.
+        if isinstance(value, (dict, Relationship)):
             raise ValueError(_bad + type(value).__name__)
         try:
             items = list(value)
