@@ -128,6 +128,45 @@ class JsonColumnOptions(BaseModel):
     group: bool = False
 
 
+class ColumnExportOptions(BaseModel):
+    """Per-column export overrides (spec:
+    docs/superpowers/specs/2026-07-28-table-export-settings-design.md).
+
+    On the COLUMN rather than in an index-keyed map on `TableDefinition`, for
+    the same reason `JsonColumnOptions` is: column indices move under reorder,
+    insert, and remove, and settings attached to the column travel with it for
+    free.
+
+    Presentation-only, like `hidden` and `json_export`: never consulted during
+    evaluation.
+    """
+
+    #: `None` = follow `hidden`, which is what makes every pre-existing
+    #: definition export byte-identically. `True` on a hidden column exports it
+    #: WITHOUT unhiding it in the grid; `False` on a visible one keeps it on
+    #: screen and out of the file.
+    include: bool | None = None
+    #: xlsx header override; "" keeps today's `header or kind`. JSON renames
+    #: through `json_export.key` instead and ignores this — one rename box per
+    #: format, never two on one row.
+    header: str = ""
+
+
+class RowNumberExportOptions(BaseModel):
+    """Export overrides for the row-number pseudo-column.
+
+    Lives on the definition rather than on a column because there is no
+    `Column` to hang it off: the row-number column is synthesized by the
+    renderers from `show_row_numbers`.
+    """
+
+    include: bool = True
+    #: "" -> "#" (xlsx).
+    header: str = ""
+    #: "" -> "row_number" (JSON).
+    key: str = ""
+
+
 class ElementColumn(BaseModel):
     kind: Literal["element"] = "element"
     source: ColumnSource = Field(default_factory=RowSlot)
@@ -141,6 +180,9 @@ class ElementColumn(BaseModel):
     #: JSON-export settings; `None` means "all defaults", which keeps saved
     #: payloads clean for the overwhelming majority of columns.
     json_export: JsonColumnOptions | None = None
+    #: Export overrides (inclusion, xlsx header). `None` means "all defaults",
+    #: which keeps saved payloads clean for the overwhelming majority.
+    export: ColumnExportOptions | None = None
 
 
 class PropertyColumn(BaseModel):
@@ -159,6 +201,9 @@ class PropertyColumn(BaseModel):
     #: JSON-export settings; `None` means "all defaults", which keeps saved
     #: payloads clean for the overwhelming majority of columns.
     json_export: JsonColumnOptions | None = None
+    #: Export overrides (inclusion, xlsx header). `None` means "all defaults",
+    #: which keeps saved payloads clean for the overwhelming majority.
+    export: ColumnExportOptions | None = None
 
 
 class NavigationColumn(BaseModel):
@@ -180,6 +225,9 @@ class NavigationColumn(BaseModel):
     #: JSON-export settings; `None` means "all defaults", which keeps saved
     #: payloads clean for the overwhelming majority of columns.
     json_export: JsonColumnOptions | None = None
+    #: Export overrides (inclusion, xlsx header). `None` means "all defaults",
+    #: which keeps saved payloads clean for the overwhelming majority.
+    export: ColumnExportOptions | None = None
 
 
 class ScriptColumn(BaseModel):
@@ -198,6 +246,9 @@ class ScriptColumn(BaseModel):
     #: JSON-export settings; `None` means "all defaults", which keeps saved
     #: payloads clean for the overwhelming majority of columns.
     json_export: JsonColumnOptions | None = None
+    #: Export overrides (inclusion, xlsx header). `None` means "all defaults",
+    #: which keeps saved payloads clean for the overwhelming majority.
+    export: ColumnExportOptions | None = None
 
 
 Column = Annotated[
@@ -215,6 +266,16 @@ class TableDefinition(BaseModel):
     #: prepend the same column to the xlsx export. Not a real column — it
     #: never participates in ColumnRef indexing, sorting, or evaluation.
     show_row_numbers: bool = False
+    #: Output order for the export, as definition column indices, with
+    #: `export_layout.ROW_NUMBER_SLOT` (-1) standing for the row-number
+    #: pseudo-column. `[]` = definition order. NOT an evaluation order:
+    #: column order is structural (backward-only `ColumnRef`, positional
+    #: expand slots) and is never permuted — this reorders the OUTPUT.
+    #: Normalized rather than validated (see `export_layout.normalized_order`):
+    #: a stale list left behind by a column insert or remove must degrade to a
+    #: sensible order, not 422 the whole export.
+    export_order: list[int] = Field(default_factory=list)
+    export_row_number: RowNumberExportOptions | None = None
 
     @model_validator(mode="after")
     def _validate_sources(self) -> TableDefinition:
