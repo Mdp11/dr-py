@@ -48,9 +48,11 @@ function clone(defn: TableDefinition): TableDefinition {
  * has to move them — a stale list would silently reorder the export, which
  * the backend's normalizer cannot detect (its entries are all still in range).
  * An EMPTY order is left empty throughout: it already means "definition
- * order", which stays correct across every one of these edits. */
+ * order", which stays correct across every one of these edits. A FRESH empty
+ * array, never the input one — a caller that splices into the result (see
+ * `cloneColumn`) would otherwise reach into the original definition. */
 function remapExportOrder(order: number[], f: (i: number) => number | null): number[] {
-	if (order.length === 0) return order;
+	if (order.length === 0) return [];
 	const out: number[] = [];
 	for (const i of order) {
 		if (i === ROW_NUMBER_SLOT) {
@@ -193,13 +195,9 @@ export function cloneColumn(defn: TableDefinition, index: number): TableDefiniti
 			: c
 	);
 	next.columns.splice(index + 1, 0, copy);
-	// the copy lands at index + 1, so shift and then insert. `.slice()` because
-	// remapExportOrder returns its INPUT unchanged when empty, and the splice
-	// below must never reach the original definition's array.
+	// the copy lands at index + 1, so shift and then insert
 	{
-		const shifted = remapExportOrder(defn.export_order ?? [], (i) =>
-			i > index ? i + 1 : i
-		).slice();
+		const shifted = remapExportOrder(defn.export_order ?? [], (i) => (i > index ? i + 1 : i));
 		const at = shifted.indexOf(index);
 		if (at >= 0) shifted.splice(at + 1, 0, index + 1);
 		next.export_order = shifted;

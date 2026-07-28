@@ -22,6 +22,7 @@ import {
 	setRowNumberExportOptions,
 	moveExportEntry
 } from '$lib/table/columns';
+import { ROW_NUMBER_SLOT } from '$lib/table/export-layout';
 import { ColumnSchema, TableDefinitionSchema } from '$lib/api/types';
 import type { Column, NavigationDefinition, TableDefinition } from '$lib/api/types';
 
@@ -743,6 +744,40 @@ describe('export_order bookkeeping', () => {
 	it('cloneColumn inserts the copy right after its original', () => {
 		const d = { ...defn(el(), el()), export_order: [1, 0] };
 		expect(cloneColumn(d, 0).export_order).toEqual([2, 0, 1]);
+	});
+
+	// `remapExportOrder`'s ROW_NUMBER_SLOT pass-through is the branch that can
+	// regress silently: -1 is not a definition index, so every `f` above would
+	// mangle it — `moveColumn`'s `oldToNew.get(-1) ?? null` would DELETE it —
+	// and the row-number entry would then vanish from a saved export order on
+	// the next unrelated column edit, with the rest of this suite still green.
+	// One case per structural mutator, because each one passes a different `f`.
+	describe('the row-number slot survives every structural edit', () => {
+		it('removeColumn keeps it while shifting the columns around it', () => {
+			const d = { ...defn(el(), el()), export_order: [ROW_NUMBER_SLOT, 1, 0] };
+			expect(removeColumn(d, 0).export_order).toEqual([ROW_NUMBER_SLOT, 0]);
+		});
+
+		it('moveColumn keeps it — `oldToNew.get(-1)` would drop it', () => {
+			const d = { ...defn(el(), el(), el()), export_order: [2, ROW_NUMBER_SLOT, 1, 0] };
+			// old 0->2, old 1->0, old 2->1; the slot stays where it sits
+			expect(moveColumn(d, 0, 2).export_order).toEqual([1, ROW_NUMBER_SLOT, 0, 2]);
+		});
+
+		it('addColumn keeps it and still appends the new index', () => {
+			const d = { ...defn(el(), el()), export_order: [ROW_NUMBER_SLOT, 1, 0] };
+			expect(addColumn(d, newPropertyColumn()).export_order).toEqual([
+				ROW_NUMBER_SLOT,
+				1,
+				0,
+				2
+			]);
+		});
+
+		it('cloneColumn keeps it and still inserts the copy after its original', () => {
+			const d = { ...defn(el(), el()), export_order: [ROW_NUMBER_SLOT, 1, 0] };
+			expect(cloneColumn(d, 0).export_order).toEqual([ROW_NUMBER_SLOT, 2, 0, 1]);
+		});
 	});
 
 	it('moveExportEntry writes a full order, materializing the natural one', () => {
