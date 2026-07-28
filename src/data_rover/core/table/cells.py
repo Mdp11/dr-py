@@ -225,8 +225,9 @@ def _navigation_cell(
         slot = _expand_slot_of(defn, base_slots, col_index)
         b = key[slot]
         if isinstance(b, PropertyValue):
-            # The promoted binding is a scalar-property-step terminal: render
-            # the VALUE (read-only — it belongs to the element the navigation
+            # The promoted binding is a value terminal (a scalar property
+            # step, or a script step that returned a non-element): render the
+            # VALUE (read-only — it belongs to the element the navigation
             # stepped through, not to this row's single source element).
             return ValueCell(
                 present=True, value=b.value, element_id=None, editable=False

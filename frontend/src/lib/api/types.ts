@@ -495,8 +495,9 @@ export type ChainValue = z.infer<typeof ChainValueSchema>;
 export const ChainNodeSchema = z.union([ChainValueSchema, TreeItemSchema]);
 export type ChainNode = z.infer<typeof ChainNodeSchema>;
 
-/** Structured script-degradation warning (nav step failures, dropped unknown
- * ids, etc). The backend ships codes + counts, not sentences — see
+/** Structured script-degradation warning (nav step failures, a snippet the
+ * navigation references that no longer exists, etc). The backend ships codes
+ * + counts, not sentences — see
  * `$lib/script/warnings.ts` for the copy that renders these. */
 export const ScriptWarningSchema = z.object({
 	// Deliberately z.string(), not an enum: a server that ships a new code
