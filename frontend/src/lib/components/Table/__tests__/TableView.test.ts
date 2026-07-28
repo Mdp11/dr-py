@@ -9,10 +9,10 @@ import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ScriptWarning } from '$lib/api/types';
-// The JSON-export settings tab (mounted once the settings dialog switches to
-// it) talks to `POST /tables/json-preview` directly via `$lib/api/tables`,
-// not through the `$lib/state` barrel mocked below — stub it so switching to
-// that tab in the tab-strip test below never fires a real network call.
+// The export dialog's JSON preview talks to `POST /tables/json-preview`
+// directly via `$lib/api/tables`, not through the `$lib/state` barrel mocked
+// below — stub it so opening that dialog on the JSON format never fires a real
+// network call.
 // Spread the real module rather than replacing it wholesale: this file is
 // safe today only because `$lib/state` is ALSO fully mocked below, so
 // `state/table-editor.svelte.ts` (which imports `evaluateTable`/
@@ -1249,13 +1249,32 @@ describe('TableView export format menu', () => {
 		vi.mocked(downloadTable).mockClear();
 	});
 
-	it('offers both export formats and passes the chosen one through', async () => {
+	/** Pick a format from the Export ▾ menu and wait for the dialog it opens. */
+	async function chooseFormat(format: 'xlsx' | 'json'): Promise<void> {
+		(document.querySelector('[data-testid="table-export-button"]') as HTMLElement).click();
+		flushSync();
+		await waitFor(() => !!document.querySelector(`[data-testid="table-export-${format}"]`));
+		(document.querySelector(`[data-testid="table-export-${format}"]`) as HTMLElement).click();
+		flushSync();
+		await waitFor(() => !!document.querySelector('[data-testid="export-confirm"]'));
+	}
+
+	// Task 7: the menu items no longer download — they open the export settings
+	// dialog on the chosen format, and the download happens on its Export
+	// button. Asserting only "the dialog opened" would let a component that
+	// downloaded anyway pass, so both halves are checked: nothing downloads on
+	// the menu click, and the right format downloads on the confirm click.
+	it('opens the export dialog on the chosen format rather than downloading', async () => {
 		const c = render('tbl:draft:1');
 		try {
-			(document.querySelector('[data-testid="table-export-button"]') as HTMLElement).click();
-			flushSync();
-			await waitFor(() => !!document.querySelector('[data-testid="table-export-json"]'));
-			(document.querySelector('[data-testid="table-export-json"]') as HTMLElement).click();
+			await chooseFormat('json');
+			expect(document.querySelector('[data-testid="table-export-dialog"]')).not.toBeNull();
+			expect(
+				document.querySelector('[data-testid="export-format-json"]')?.getAttribute('aria-pressed')
+			).toBe('true');
+			expect(downloadTable).not.toHaveBeenCalled();
+
+			(document.querySelector('[data-testid="export-confirm"]') as HTMLElement).click();
 			flushSync();
 			expect(downloadTable).toHaveBeenCalledWith(
 				'tbl:draft:1',
@@ -1269,10 +1288,8 @@ describe('TableView export format menu', () => {
 	it('exports xlsx when that item is chosen', async () => {
 		const c = render('tbl:draft:1');
 		try {
-			(document.querySelector('[data-testid="table-export-button"]') as HTMLElement).click();
-			flushSync();
-			await waitFor(() => !!document.querySelector('[data-testid="table-export-xlsx"]'));
-			(document.querySelector('[data-testid="table-export-xlsx"]') as HTMLElement).click();
+			await chooseFormat('xlsx');
+			(document.querySelector('[data-testid="export-confirm"]') as HTMLElement).click();
 			flushSync();
 			expect(downloadTable).toHaveBeenCalledWith(
 				'tbl:draft:1',
@@ -1284,12 +1301,13 @@ describe('TableView export format menu', () => {
 	});
 });
 
-// Task 11: the settings dialog gained a second tab (JSON export options + a
-// live preview) alongside the existing column editor. Uses this file's own
-// mount/flushSync/unmount + waitFor convention, not the brief's literal
-// `@testing-library/svelte` `render`/`screen`/`fireEvent` snippet — see the
-// file header.
-describe('TableView settings dialog tab strip', () => {
+// Task 11 gave the settings dialog a second tab (JSON export options + a live
+// preview); the export-settings task took it back out again — those options
+// moved to the export dialog, beside the inclusion/order settings they share a
+// file with. What is pinned here is that the settings dialog is a single body
+// once more, with no tab strip to switch. Uses this file's own
+// mount/flushSync/unmount + waitFor convention.
+describe('TableView settings dialog body', () => {
 	afterEach(() => {
 		// Restore the hoisted default's VALID shape (matching `h`'s own
 		// declaration above), not the `{kind:'scope', scope:{}}` sentinel other
@@ -1303,7 +1321,7 @@ describe('TableView settings dialog tab strip', () => {
 		};
 	});
 
-	it('switches the settings dialog between the columns and json tabs', async () => {
+	it('shows the column editor with no tab strip over it', async () => {
 		// A self-contained, valid scope row source: earlier describe blocks in
 		// this file leave `h.draft` (shared hoisted state) in various shapes for
 		// their own tests, and the unfocused settings path mounts RowSourceEditor
@@ -1317,18 +1335,11 @@ describe('TableView settings dialog tab strip', () => {
 		try {
 			(document.querySelector('[data-testid="table-settings-button"]') as HTMLElement).click();
 			flushSync();
-			await waitFor(() => !!document.querySelector('[data-testid="settings-tab-columns"]'));
-			const columnsTab = document.querySelector(
-				'[data-testid="settings-tab-columns"]'
-			) as HTMLElement;
-			expect(columnsTab.getAttribute('aria-pressed')).toBe('true');
-			expect(document.querySelector('[data-testid="column-manager"]')).not.toBeNull();
-
-			(document.querySelector('[data-testid="settings-tab-json"]') as HTMLElement).click();
-			flushSync();
-			expect(document.querySelector('[data-testid="json-snake-all"]')).not.toBeNull();
-			// The column editor is gone — only one tab's body renders at a time.
-			expect(document.querySelector('[data-testid="column-manager"]')).toBeNull();
+			await waitFor(() => !!document.querySelector('[data-testid="column-manager"]'));
+			expect(document.querySelector('[data-testid="settings-tab-columns"]')).toBeNull();
+			expect(document.querySelector('[data-testid="settings-tab-json"]')).toBeNull();
+			// The JSON export options are the export dialog's now, not this one's.
+			expect(document.querySelector('[data-testid="json-snake-all"]')).toBeNull();
 		} finally {
 			unmount(c);
 		}

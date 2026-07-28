@@ -429,11 +429,7 @@ export function setRowNumberExportOptions(
  *  row-number entry has no definition index at all. Always writes a FULL
  *  order, materializing the natural one first, so the result no longer depends
  *  on the empty-means-natural fallback. */
-export function moveExportEntry(
-	defn: TableDefinition,
-	from: number,
-	to: number
-): TableDefinition {
+export function moveExportEntry(defn: TableDefinition, from: number, to: number): TableDefinition {
 	const order = exportEntries(defn).map((e) => e.index);
 	if (from === to || from < 0 || to < 0 || from >= order.length || to >= order.length) {
 		return clone(defn);

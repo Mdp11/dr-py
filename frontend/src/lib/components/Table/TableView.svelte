@@ -44,7 +44,7 @@
 		newScriptColumn
 	} from '$lib/table/columns';
 	import ColumnManager from './ColumnManager.svelte';
-	import JsonExportEditor from './JsonExportEditor.svelte';
+	import ExportDialog from './ExportDialog.svelte';
 	import ScriptErrorsPanel from './ScriptErrorsPanel.svelte';
 	import ScriptWarningsPanel from './ScriptWarningsPanel.svelte';
 	import TableGrid from './TableGrid.svelte';
@@ -157,6 +157,12 @@
 	let exporting = $state(false);
 	let exportProgress = $state<ExportProgress | null>(null);
 	let exportAbort: AbortController | null = null;
+	// The Export ▾ items no longer download: they open the export settings
+	// dialog on the chosen format, which owns the per-column include/rename/
+	// order overrides and runs the download itself. `exportFormat` is bound, so
+	// switching format inside the dialog is remembered for the next opening.
+	let exportOpen = $state(false);
+	let exportFormat = $state<'xlsx' | 'json'>('xlsx');
 	$effect(() => () => exportAbort?.abort());
 	// Unmounting with the settings dialog still open would leave the tab
 	// suspended forever (nothing else clears that key), so the tab would silently
@@ -175,9 +181,6 @@
 	// definition editor (row source + every column); a definition index shows
 	// only that column's card (see ColumnManager's focusIndex).
 	let settingsFocus = $state<number | null>(null);
-	// Which settings-dialog tab is showing: the column definition editor, or
-	// the JSON export options + live preview.
-	let settingsTab = $state<'columns' | 'json'>('columns');
 
 	// Set by the Save button just before it closes the dialog, so whichever
 	// close path runs (Save's onOpenChange, or applyClose() called directly by
@@ -296,7 +299,6 @@
 	function openSettings(focus: number | null): void {
 		suspendTableEvaluation(tabId);
 		settingsFocus = focus;
-		settingsTab = 'columns';
 		// Reset HERE, not in onOpenChange's `o === true` branch: every open in
 		// this component goes through this function via a direct `settingsOpen =
 		// true` assignment, never through a `Dialog.Trigger` — and bits-ui's
@@ -448,15 +450,25 @@
 						{/if}
 					</DropdownMenu.Trigger>
 					<DropdownMenu.Content align="end" class="w-44">
+						<!-- Both items now OPEN the export dialog on the chosen format
+						     instead of downloading straight away: the file's contents are
+						     the dialog's business (include/rename/order), and the format
+						     is still switchable in place once it is open. -->
 						<DropdownMenu.Item
 							data-testid="table-export-xlsx"
-							onSelect={() => void exportTable('xlsx')}
+							onSelect={() => {
+								exportFormat = 'xlsx';
+								exportOpen = true;
+							}}
 						>
 							Excel (.xlsx)
 						</DropdownMenu.Item>
 						<DropdownMenu.Item
 							data-testid="table-export-json"
-							onSelect={() => void exportTable('json')}
+							onSelect={() => {
+								exportFormat = 'json';
+								exportOpen = true;
+							}}
 						>
 							JSON (.json)
 						</DropdownMenu.Item>
@@ -645,6 +657,16 @@
 		</div>
 	</div>
 
+	<!-- Outside the `editable` gate, like the Export ▾ trigger that opens it: a
+	     viewer can export too, and the overrides it edits are export-only. -->
+	<ExportDialog
+		{tabId}
+		bind:open={exportOpen}
+		bind:format={exportFormat}
+		onClose={() => (exportOpen = false)}
+		onExport={exportTable}
+	/>
+
 	{#if editable}
 		<Dialog.Root
 			bind:open={settingsOpen}
@@ -686,32 +708,11 @@
 				<Dialog.Title class="font-display text-lg font-light tracking-wide">
 					{settingsFocus === null ? 'Table settings' : 'Column settings'}
 				</Dialog.Title>
-				<div class="flex shrink-0 items-center gap-1 border-b border-border pb-1">
-					<button
-						type="button"
-						data-testid="settings-tab-columns"
-						aria-pressed={settingsTab === 'columns'}
-						class="rounded px-2 py-1 text-xs transition-colors aria-pressed:bg-muted aria-pressed:text-foreground text-muted-foreground hover:bg-muted/60"
-						onclick={() => (settingsTab = 'columns')}
-					>
-						Columns
-					</button>
-					<button
-						type="button"
-						data-testid="settings-tab-json"
-						aria-pressed={settingsTab === 'json'}
-						class="rounded px-2 py-1 text-xs transition-colors aria-pressed:bg-muted aria-pressed:text-foreground text-muted-foreground hover:bg-muted/60"
-						onclick={() => (settingsTab = 'json')}
-					>
-						JSON export
-					</button>
-				</div>
+				<!-- One body, no tab strip: the JSON export options moved out to the
+				     export dialog, where they sit beside the inclusion/order settings
+				     they share a file with. -->
 				<div class="min-h-0 flex-1 overflow-y-auto pr-1">
-					{#if settingsTab === 'columns'}
-						<ColumnManager {tabId} focusIndex={settingsFocus} />
-					{:else}
-						<JsonExportEditor {tabId} />
-					{/if}
+					<ColumnManager {tabId} focusIndex={settingsFocus} />
 				</div>
 				<div class="flex shrink-0 items-center justify-end gap-2 border-t border-border pt-2">
 					<button
@@ -763,7 +764,7 @@
 				<ConfirmDialog
 					bind:open={confirmDiscardOpen}
 					title="Discard changes?"
-					description="Your unsaved changes in this dialog — columns, row source, sort, and JSON export settings — will be lost. This cannot be undone."
+					description="Your unsaved changes in this dialog — columns, row source, and sort — will be lost. This cannot be undone."
 					confirmLabel="Discard changes"
 					cancelLabel="Keep editing"
 					variant="destructive"
