@@ -23,6 +23,7 @@ function render(step: NavScriptStep, onChange: (index: number, next: NavScriptSt
 		props: {
 			step,
 			index: 0,
+			column: 2,
 			collapseKey: 'nav:t::[]::step:0',
 			onChange,
 			onRemove: vi.fn()
@@ -55,6 +56,19 @@ afterEach(() => {
 });
 
 describe('ScriptStepRow', () => {
+	it('renders the chain badge for its column', () => {
+		const c = render(scriptStep(), vi.fn());
+		try {
+			// A script step advances the chain exactly like a relationship or
+			// property step, so it carries the same numbered rail badge — its
+			// absence was a visual hole in the rail.
+			const badge = document.querySelector('[data-testid="chain-badge"]');
+			expect(badge?.textContent?.trim()).toBe('2');
+		} finally {
+			unmount(c);
+		}
+	});
+
 	it('renders the row with the snippet source editor', () => {
 		const c = render(scriptStep(), vi.fn());
 		try {

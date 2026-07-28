@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from math import isfinite
 from typing import TYPE_CHECKING
 
 from data_rover.core.metamodel.schema import Metamodel
@@ -60,16 +61,37 @@ class EvalLimits:
     max_chains: int = 5_000
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class PropertyValue:
-    """Terminal chain node for a SCALAR property step: when the stepped-on
-    property is not element-typed, navigation ends AT the property's value(s)
-    instead of hopping to another element. Wrapped (rather than carried raw)
-    so a string value can never be mistaken for an element id by downstream
-    consumers — every consumer discriminates with ``isinstance(node, str)``.
-    Frozen (hashable) because chain nodes are deduped through dict keys."""
+    """Terminal chain node for a value a chain ends AT rather than hops from.
+
+    Two steps produce one: a SCALAR property step (the stepped-on property is
+    not element-typed) and a script step whose `step()` returned something
+    that names no model element. Wrapped (rather than carried raw) so a string
+    value can never be mistaken for an element id by downstream consumers —
+    every consumer discriminates with ``isinstance(node, str)``. Frozen
+    (hashable) because chain nodes are deduped through dict keys.
+
+    Equality and hash are TYPE-AWARE (hence `eq=False`: hand-written, not the
+    dataclass's value-only pair). Python calls `1`, `True` and `1.0` equal and
+    hashes them alike, but these are DISPLAYED values and render as "1",
+    "True" and "1.0" — three different cells. Every structure that dedups
+    terminals does it through this equality (`_hop_script`'s own node dedup,
+    `table/evaluate.py`'s reached-node dict, `RowKey` tuples), so a value-only
+    comparison here silently collapses three distinct results into one no
+    matter how carefully the producer kept them apart."""
 
     value: str | int | float | bool
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, PropertyValue):
+            return NotImplemented
+        return type(self.value) is type(other.value) and self.value == other.value
+
+    def __hash__(self) -> int:
+        # Mirrors `_hop_script`'s `(type name, value)` dedup key, so the two
+        # agree by construction.
+        return hash((type(self.value).__name__, self.value))
 
 
 #: One position in a chain: an element id, or a terminal scalar value.
@@ -80,10 +102,11 @@ ChainNode = str | PropertyValue
 class ChainResult:
     """Chains INCLUDE the start element at index 0 (see schema docstring).
     Every node is an element id except a possible trailing `PropertyValue`
-    (a scalar property step is always terminal). `warnings` carries aggregated
-    `ScriptWarning`s (pruned chains, dropped ids) — but only the DELTA counts
-    THIS evaluate call produced, not the shared context's running totals;
-    missing-property prunes stay silent, unchanged."""
+    (a scalar property step, or a script step that returned a non-element, is
+    always terminal). `warnings` carries aggregated `ScriptWarning`s (pruned
+    chains, failed script steps) — but only the DELTA counts THIS evaluate call
+    produced, not the shared context's running totals; missing-property
+    prunes stay silent, unchanged."""
 
     step_types: list[str]
     chains: list[tuple[ChainNode, ...]]
@@ -349,12 +372,34 @@ def _hop_script(
     script: ScriptEvalContext | None,
     budget: _Budget,
 ) -> list[ChainNode]:
-    """Continuations of a script hop: `step(el)` returns the next frontier's
-    ids. DEGRADED, NEVER RAISING: a dangling ref, a per-element error, or an
-    unknown returned id prunes/drops with a warning on the shared context; an
-    unconfigured snippet or absent context prunes silently (mirroring an
-    unconfigured navigation source). Dedup preserves the snippet's own return
-    order — deterministic because guest output is deterministic."""
+    """Continuations of a script hop: `step(el)` returns the next frontier.
+
+    A returned node that is a string NAMING A MODEL ELEMENT hops; anything
+    else — a non-string scalar, or a string that names no element — becomes a
+    terminal `PropertyValue`, so the chain ENDS AT the value and displays it
+    instead of vanishing. That mirrors a scalar `PropertyStep` exactly, and is
+    the only sane rule available here: unlike a property, a snippet declares
+    no return type, so the model — not the metamodel — decides per value.
+    (This is why there is no unknown-id warning: with every string either
+    hopping or displaying, "unknown id" is no longer a failure mode.)
+
+    A non-finite float (`inf`/`-inf`/`nan`) becomes its repr — a plain string
+    terminal — HERE, at the producer, rather than at any serialization
+    boundary: JSON has no literal for those, so pydantic emits `null`, which
+    the client's non-nullable chain-value union rejects at the PAGE level (one
+    bad node would blank the whole results dock, and the same value would
+    break table JSON export next).
+
+    DEGRADED, NEVER RAISING: a dangling ref or a per-element error prunes with
+    a warning on the shared context; an unconfigured snippet or absent context
+    prunes silently (mirroring an unconfigured navigation source). Dedup
+    preserves the snippet's own return order — deterministic because guest
+    output is deterministic — and keys on `(type name, value)` rather than the
+    value alone: plain `dict.fromkeys` collapses `True`/`1` and `1`/`1.0`,
+    which was invisible when every node was an id but is a visible difference
+    once nodes render as values. `PropertyValue`'s own equality keeps that
+    same distinction one layer down, so the two agree by construction.
+    """
     if step.snippet.ref is not None:
         if script is not None:
             script.add_warning(
@@ -368,15 +413,15 @@ def _hop_script(
         script.add_warning(ScriptWarningCode.NAV_STEP_FAILED, detail=res.error.message)
         return []
     assert res.value is not None
-    raw = list(dict.fromkeys(res.value["ids"]))
+    raw = list({(type(n).__name__, n): n for n in res.value["nodes"]}.values())
     if not budget.spend(len(raw)):
         return []
-    known = [i for i in raw if i in model.elements]
-    if len(known) != len(raw):
-        script.add_warning(
-            ScriptWarningCode.NAV_UNKNOWN_IDS, count=len(raw) - len(known)
-        )
-    return list(known)
+    return [
+        n
+        if isinstance(n, str) and n in model.elements
+        else PropertyValue(repr(n) if isinstance(n, float) and not isfinite(n) else n)
+        for n in raw
+    ]
 
 
 def _walk(
@@ -404,9 +449,12 @@ def _walk(
     step = steps[item_idx]
     current = chain[-1]
     if not isinstance(current, str):
-        # A PropertyValue is TERMINAL — the UI blocks adding steps past a
-        # scalar property step, but a hand-written definition may still carry
-        # them; such chains prune silently (same stance as absent properties).
+        # A PropertyValue is TERMINAL — a scalar property step or a script
+        # step that returned a non-element ends its chain there. The UI blocks
+        # adding steps past a scalar property step (it can read the datatype
+        # from the metamodel); it cannot for a script step, whose return type
+        # is unknowable before it runs, so those chains prune HERE — silently,
+        # the same stance as absent properties.
         return False
     if isinstance(step, FilterStep):
         if _matches_filter(model, model.elements[current], step):

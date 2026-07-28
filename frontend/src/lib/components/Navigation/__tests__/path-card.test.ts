@@ -150,6 +150,35 @@ it('a bare root path is titled "Path" and shows the numbered rail', async () => 
 	}
 });
 
+it('numbers a script step on the rail like any other hop', async () => {
+	const tabId = 'nav:draft:pc-script-badge';
+	await seed(
+		tabId,
+		pathWith([
+			{
+				kind: 'relationship',
+				relationship_type: 'Owns',
+				direction: 'out',
+				target_types: [],
+				children: []
+			},
+			{ kind: 'filter', criteria: [] },
+			{ kind: 'script', snippet: {}, comment: null }
+		])
+	);
+	const c = render(tabId);
+	try {
+		const badges = [...document.querySelectorAll('[data-testid="chain-badge"]')].map(
+			(b) => b.textContent?.trim() ?? ''
+		);
+		// 0 = start, 1 = the relationship hop, · = the filter (adds no column),
+		// 2 = the script hop.
+		expect(badges.slice(0, 4)).toEqual(['0', '1', '·', '2']);
+	} finally {
+		unmount(c);
+	}
+});
+
 it('clicking the card selects its node; inner controls do not', async () => {
 	const tabId = 'nav:draft:pc-select';
 	await seed(tabId, pathWith());

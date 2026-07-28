@@ -317,9 +317,12 @@ def decode_call_payload(entry: str, payload: object) -> tuple[dict | None, str |
     if not isinstance(payload, dict):
         return None, "malformed call result payload"
     if entry == "step":
-        ids = payload.get("ids")
-        if isinstance(ids, list) and all(isinstance(i, str) for i in ids):
-            return {"ids": ids}, None
+        nodes = payload.get("nodes")
+        # `_WIRE_SCALARS` deliberately admits values as well as ids: the
+        # element/value split is made in `_hop_script`, not here (a hostile
+        # guest can only choose what to send, never what it means).
+        if isinstance(nodes, list) and all(isinstance(n, _WIRE_SCALARS) for n in nodes):
+            return {"nodes": nodes}, None
         return None, "malformed step() result payload"
     kind = payload.get("kind")
     if kind == "scalar":

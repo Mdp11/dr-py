@@ -23,6 +23,9 @@ function plural(n: number, one: string, many: string): string {
  * to a blank strip. */
 export function formatScriptWarning(w: ScriptWarning): string {
 	switch (w.code) {
+		// Retained for older/other servers: the current backend no longer
+		// emits this — a nav script step displays an unresolvable return
+		// value rather than dropping it.
 		case 'nav_unknown_ids':
 			return (
 				`Navigation script returned ${w.total} unknown ` +

@@ -492,6 +492,7 @@
 						<ScriptStepRow
 							step={step as NavScriptStep}
 							index={i}
+							column={columnFor(i)}
 							collapseKey={`${tabId}::${pathKey(path)}::step:${i}`}
 							onChange={setStep}
 							onRemove={removeStep}

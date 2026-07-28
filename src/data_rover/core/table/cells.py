@@ -225,8 +225,9 @@ def _navigation_cell(
         slot = _expand_slot_of(defn, base_slots, col_index)
         b = key[slot]
         if isinstance(b, PropertyValue):
-            # The promoted binding is a scalar-property-step terminal: render
-            # the VALUE (read-only — it belongs to the element the navigation
+            # The promoted binding is a value terminal (a scalar property
+            # step, or a script step that returned a non-element): render the
+            # VALUE (read-only — it belongs to the element the navigation
             # stepped through, not to this row's single source element).
             return ValueCell(
                 present=True, value=b.value, element_id=None, editable=False
@@ -246,7 +247,8 @@ def _navigation_cell(
         else min(col.cell_cap, limits.max_cell_elements)
     )
     if any(isinstance(n, PropertyValue) for n in reached):
-        # The projected step is a scalar property step: the cell shows VALUES.
+        # The projected step ended at a value (a scalar property step, or a
+        # script step that returned a non-element): the cell shows VALUES.
         # A mixed frontier (the same property name element-typed on one type,
         # scalar on another) degrades element nodes to their display names so
         # nothing silently drops.

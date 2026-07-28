@@ -13,7 +13,13 @@ from data_rover.core.script.embed import ScriptEvalContext
 from data_rover.core.script.runner import RunLimits, ScriptBudget
 from data_rover.core.script.schema import SnippetDefinition, SnippetSource
 from data_rover.core.script.warnings import ScriptWarningCode
-from data_rover.core.table.cells import ElementsCell, ErrorCell, ValueCell, evaluate_cells
+from data_rover.core.table.cells import (
+    ElementsCell,
+    ErrorCell,
+    ValueCell,
+    ValuesCell,
+    evaluate_cells,
+)
 from data_rover.core.table.evaluate import TableLimits, build_rows_ex
 from data_rover.core.table.resolve import resolve_table_refs, table_has_script
 from data_rover.core.table.schema import (
@@ -963,3 +969,87 @@ def test_sort_falls_back_to_build_order_predicate() -> None:
     assert sort_falls_back_to_build_order(defn, SortSpec(2, "asc")) is False
     # a property column has no such backstop
     assert sort_falls_back_to_build_order(defn, SortSpec(3, "asc")) is True
+
+
+def test_nav_script_step_value_terminal_renders_as_a_values_cell() -> None:
+    """Seam test: a navigation column whose script step returns a NON-element
+    reaches the cell layer as a `PropertyValue` terminal, exactly like a
+    scalar property step, and renders as a `ValuesCell`. The unwrapping code
+    in table/cells.py is shared between the two producers, so one test pins
+    the seam rather than re-covering that module."""
+    mm = _mm()
+    model = _fixture()
+    defn = TableDefinition(
+        row_source=ScopeRows(types=["Block"]),
+        columns=[
+            ElementColumn(),
+            NavigationColumn(
+                navigation=NavigationSource(
+                    definition=PathNavigation(
+                        kind="path",
+                        start=RowStart(),
+                        steps=[
+                            ScriptStep(
+                                snippet=_snip("def step(el):\n    return el.name")
+                            )
+                        ],
+                    )
+                ),
+            ),
+        ],
+    )
+    ctx = _script_ctx(model)
+    build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
+    rows = evaluate_cells(mm, model, defn, build.keys, TableLimits(), script=ctx)
+    cells = [r[1] for r in rows]
+    assert all(isinstance(c, ValuesCell) for c in cells)
+    assert {v for c in cells if isinstance(c, ValuesCell) for v in c.values} == {
+        "Block A",
+        "Block B",
+        "Block C",
+    }
+    # The set above cannot tell three one-value cells from a lopsided split
+    # (one cell holding all three, two empty), so pin the distribution too.
+    # Positional comparison would need a stable row order this fixture does
+    # not promise.
+    assert len(cells) == 3
+    assert all(len(c.values) == 1 for c in cells if isinstance(c, ValuesCell))
+    assert not ctx.warnings
+    ctx.close()
+
+
+def test_nav_script_step_distinct_scalar_types_survive_the_cell_layer() -> None:
+    """The table layer dedups reached nodes in its own dict, so it re-collapses
+    anything PropertyValue calls equal. `[1, True, 1.0]` renders THREE values
+    ("1", "True", "1.0"); a value-only equality would silently show one."""
+    mm = _mm()
+    model = _fixture()
+    defn = TableDefinition(
+        row_source=ScopeRows(types=["Block"]),
+        columns=[
+            ElementColumn(),
+            NavigationColumn(
+                navigation=NavigationSource(
+                    definition=PathNavigation(
+                        kind="path",
+                        start=RowStart(),
+                        steps=[
+                            ScriptStep(
+                                snippet=_snip("def step(el):\n    return [1, True, 1.0]")
+                            )
+                        ],
+                    )
+                ),
+            ),
+        ],
+    )
+    ctx = _script_ctx(model)
+    build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
+    rows = evaluate_cells(mm, model, defn, build.keys, TableLimits(), script=ctx)
+    cells = [r[1] for r in rows]
+    assert all(isinstance(c, ValuesCell) for c in cells)
+    for c in cells:
+        assert isinstance(c, ValuesCell)
+        assert c.values == [1, True, 1.0]
+        assert [type(v).__name__ for v in c.values] == ["int", "bool", "float"]
+    ctx.close()

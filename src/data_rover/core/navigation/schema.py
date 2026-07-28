@@ -108,11 +108,21 @@ class PropertyStep(BaseModel):
 
 class ScriptStep(BaseModel):
     """A hop computed by a snippet's `step(el)` entry point: consumes the
-    frontier one element at a time, produces the next frontier from the ids
-    the snippet returns (unknown ids dropped with a warning; `exclude_visited`
-    applies). Adds ONE chain column, like RelationshipStep — its `step_types`
-    entry is `comment or "script"`. Per-element failures PRUNE that chain with
-    a warning (never abort), mirroring PropertyStep's graceful stance."""
+    frontier one element at a time, produces the next frontier from what the
+    snippet returns. A returned string naming a model element hops; anything
+    else (a scalar, or a string naming no element) TERMINATES that chain at
+    the value, carried as a `PropertyValue` so the UI can display it — the
+    same contract a scalar `PropertyStep` has, since a snippet declares no
+    return type. A snippet may return BOTH kinds at once (`return
+    [el.parent(), el.name]`), which for a table navigation column degrades the
+    whole cell to values — element nodes render as their display names and
+    lose their links, because a cell is one kind or the other. That is the
+    deliberate trade (nothing silently drops), but it is easy to trigger here,
+    unlike with property steps where it needs a mixed-datatype metamodel.
+    `exclude_visited` applies to the hopping nodes. Adds ONE
+    chain column, like RelationshipStep — its `step_types` entry is
+    `comment or "script"`. Per-element failures PRUNE that chain with a
+    warning (never abort), mirroring PropertyStep's graceful stance."""
 
     kind: Literal["script"] = "script"
     snippet: SnippetSource = Field(default_factory=SnippetSource)

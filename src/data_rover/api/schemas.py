@@ -879,9 +879,9 @@ class ChainValueOut(BaseModel):
 class ChainPageOut(BaseModel):
     """One page of navigation chains, each node a TreeItem projection — except
     a possible trailing `ChainValueOut` when the path ends in a scalar property
-    step. `total` counts chains found WITHIN the evaluation caps; `truncated`
-    means the caps stopped enumeration (there may be more matches than
-    `total`)."""
+    step or in a script step that returned a non-element. `total` counts
+    chains found WITHIN the evaluation caps; `truncated` means the caps
+    stopped enumeration (there may be more matches than `total`)."""
 
     step_types: list[str] = Field(default_factory=list)
     chains: list[list[TreeItem | ChainValueOut]] = Field(default_factory=list)

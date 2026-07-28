@@ -1,23 +1,28 @@
 <script lang="ts">
 	// A `script`-kind step: runs a snippet's step(el) per frontier element.
-	// Deliberately minimal compared to PropertyStepRow — a script step has no
-	// column/frontier machinery of its own (see the module docstring in
-	// PathCard.svelte on the known frontier-tracking gap for script steps),
-	// so this row is just the shared SnippetSourceEditor (bound to the
-	// "step" entry point) plus the same per-step comment note the other rows
-	// have.
+	// Carries the rail's numbered ChainBadge like the other chain-advancing
+	// rows — a script step adds a chain column exactly as a relationship or
+	// property step does. It has no FRONTIER machinery of its own, though
+	// (see the note in PathCard.svelte on the known frontier-tracking gap for
+	// script steps: a snippet's return type is unknowable before it runs), so
+	// the body is just the shared SnippetSourceEditor (bound to the "step"
+	// entry point) plus the same per-step comment note the other rows have.
 	import { MessageSquarePlus, MessageSquareText } from '@lucide/svelte';
 	import type { NavScriptStep } from '$lib/api/types';
 	import SnippetSourceEditor from '$lib/components/Snippet/SnippetSourceEditor.svelte';
+	import ChainBadge from './ChainBadge.svelte';
 
 	type Props = {
 		step: NavScriptStep;
 		index: number;
+		/** The rail's column number for this hop (a script step advances the
+		 * chain exactly like a relationship step) — see PathCard's `columnFor`. */
+		column: number;
 		collapseKey: string;
 		onChange: (index: number, next: NavScriptStep) => void;
 		onRemove: (index: number) => void;
 	};
-	let { step, index, collapseKey, onChange, onRemove }: Props = $props();
+	let { step, index, column, collapseKey, onChange, onRemove }: Props = $props();
 
 	function patch(next: Partial<NavScriptStep>): void {
 		onChange(index, { ...step, ...next });
@@ -40,6 +45,7 @@
 </script>
 
 <div class="group relative flex items-baseline gap-2.5 py-0.5" data-testid="script-step">
+	<ChainBadge value={column} />
 	<div class="flex min-h-[22px] flex-1 flex-col gap-1">
 		<div class="flex flex-wrap items-center gap-1.5">
 			<span class="text-muted-foreground">Script</span>

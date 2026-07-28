@@ -482,9 +482,10 @@ export const ArtifactSchema = ArtifactHeaderSchema.extend({
 });
 export type Artifact = z.infer<typeof ArtifactSchema>;
 
-/** Terminal VALUE node in a chain: a scalar property step ends its chain at
- * the property's value instead of an element (discriminated from TreeItem by
- * the `kind` tag — TreeItem has no `kind`). */
+/** Terminal VALUE node in a chain: a scalar property step — or a script step
+ * whose `step()` returned something that names no element — ends its chain at
+ * that value instead of an element (discriminated from TreeItem by the `kind`
+ * tag — TreeItem has no `kind`). */
 export const ChainValueSchema = z.object({
 	kind: z.literal('value'),
 	value: z.union([z.string(), z.number(), z.boolean()])
@@ -494,8 +495,9 @@ export type ChainValue = z.infer<typeof ChainValueSchema>;
 export const ChainNodeSchema = z.union([ChainValueSchema, TreeItemSchema]);
 export type ChainNode = z.infer<typeof ChainNodeSchema>;
 
-/** Structured script-degradation warning (nav step failures, dropped unknown
- * ids, etc). The backend ships codes + counts, not sentences — see
+/** Structured script-degradation warning (nav step failures, a snippet the
+ * navigation references that no longer exists, etc). The backend ships codes
+ * + counts, not sentences — see
  * `$lib/script/warnings.ts` for the copy that renders these. */
 export const ScriptWarningSchema = z.object({
 	// Deliberately z.string(), not an enum: a server that ships a new code

@@ -1,9 +1,10 @@
 """The embedded-evaluation warnings channel: structured, aggregated by KIND.
 
 Table and navigation evaluation degrade rather than fail — a snippet that
-raises prunes its chains, an unknown returned id is dropped — and this channel
-is how the user is told. It is deliberately DATA, not prose: every entry is a
-code plus counts, and the user-facing sentence is built client-side.
+raises prunes its chains, a snippet reference that no longer resolves is
+reported — and this channel is how the user is told. It is deliberately
+DATA, not prose: every entry is a code plus counts, and the user-facing
+sentence is built client-side.
 
 That split is the fix for the channel's original defect. It deduped on the
 rendered message text while the navigation messages baked their counts INTO
@@ -39,6 +40,11 @@ class ScriptWarningCode(StrEnum):
 
     NAV_SNIPPET_NOT_FOUND = "nav_snippet_not_found"
     NAV_STEP_FAILED = "nav_step_failed"
+    #: No longer emitted: a navigation script step now DISPLAYS a returned
+    #: value that names no element (see navigation/evaluate.py::_hop_script)
+    #: instead of dropping it, so "unknown id" stopped being a failure mode.
+    #: Kept in the vocabulary because the wire is open by design — a client
+    #: must still format a code an older/other server sends.
     NAV_UNKNOWN_IDS = "nav_unknown_ids"
     SORT_NEEDS_SCRIPT_NAV = "sort_needs_script_nav"
 

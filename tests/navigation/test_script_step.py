@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from data_rover.core.metamodel.schema import ElementType, Metamodel
 from data_rover.core.model.model import Model
-from data_rover.core.navigation.evaluate import evaluate
+from data_rover.core.navigation.evaluate import PropertyValue, evaluate
 from data_rover.core.navigation.resolve import navigation_has_script, resolve_refs
 from data_rover.core.navigation.schema import (
     NAVIGATION_ADAPTER,
@@ -135,25 +135,99 @@ def test_script_step_error_prunes_with_warning() -> None:
     assert "boom" in (res.warnings[0].detail or "")
 
 
-def test_script_step_unknown_ids_dropped_with_warning() -> None:
+def test_script_step_unresolvable_string_becomes_a_value_terminal() -> None:
+    # A string that names no element is DISPLAYED, not dropped: `step()` has
+    # no declared return type, so the model decides per value — the same
+    # stance a scalar PropertyStep takes, and what makes
+    # `return el.properties["name"]` useful instead of silently empty.
     mm, model = _fixture()
     ids = sorted(model.elements)
     defn = _path([ScriptStep(
         snippet=_snip(f"def step(el): return ['{ids[0]}', 'no-such-id']")
     )])
     res = evaluate(mm, model, defn, script=_ctx(model))
-    # occurrences/total are per START ELEMENT (see above) -- len(ids), not 1.
-    # The start element equal to ids[0] also returns its own id and trips the
-    # already-visited cycle guard, which is SILENT -- so the unknown-id entry
-    # is the only warning, and asserting the whole list pins that.
-    assert res.warnings == [
-        ScriptWarning(
-            code=ScriptWarningCode.NAV_UNKNOWN_IDS,
-            occurrences=len(ids),
-            total=len(ids),
-        )
+    assert res.warnings == []                       # nothing was dropped
+    seconds = sorted({chain[1] for chain in res.chains}, key=repr)
+    # ids[0] hops (except from itself — the cycle guard); the unknown string
+    # terminates every chain at its value.
+    assert PropertyValue("no-such-id") in seconds
+    assert ids[0] in seconds
+
+
+def test_script_step_scalar_returns_become_value_terminals() -> None:
+    mm, model = _fixture()
+    defn = _path([ScriptStep(snippet=_snip("def step(el): return len(el.id)"))])
+    res = evaluate(mm, model, defn, script=_ctx(model))
+    assert res.warnings == []
+    assert all(len(chain) == 2 for chain in res.chains)
+    assert all(isinstance(chain[1], PropertyValue) for chain in res.chains)
+    assert {chain[1] for chain in res.chains} == {
+        PropertyValue(len(i)) for i in model.elements
+    }
+
+
+def test_script_step_mixed_return_keeps_order_and_both_node_kinds() -> None:
+    mm, model = _fixture()
+    ids = sorted(model.elements)
+    defn = _path([ScriptStep(
+        snippet=_snip(f"def step(el): return ['{ids[0]}', 7, 'note']")
+    )])
+    res = evaluate(mm, model, defn, script=_ctx(model))
+    start = ids[1]                                   # not ids[0]: no cycle guard hit
+    reached = [chain[1] for chain in res.chains if chain[0] == start]
+    assert reached == [ids[0], PropertyValue(7), PropertyValue("note")]
+
+
+def test_script_step_dedup_keeps_distinct_scalar_types() -> None:
+    # dict.fromkeys would collapse True/1 (and 1/1.0) into one node — for
+    # element ids that never mattered, but these render as "True" and "1".
+    mm, model = _fixture()
+    defn = _path([ScriptStep(snippet=_snip("def step(el): return [1, True, 1.0, 1]"))])
+    res = evaluate(mm, model, defn, script=_ctx(model))
+    start = sorted(model.elements)[0]
+    reached = [chain[1] for chain in res.chains if chain[0] == start]
+    assert reached == [PropertyValue(1), PropertyValue(True), PropertyValue(1.0)]
+    # The equality above is type-aware (PropertyValue's own), but spell the
+    # surviving types out: a list of three identical `1`s would satisfy a
+    # value-only comparison, which is exactly the collapse under test.
+    assert [type(n.value).__name__ for n in reached if isinstance(n, PropertyValue)] == [
+        "int",
+        "bool",
+        "float",
     ]
-    assert all(chain[1] == ids[0] for chain in res.chains)
+
+
+def test_script_step_non_finite_floats_become_strings() -> None:
+    # inf/-inf/nan have no JSON literal, so they must never reach the wire as
+    # floats (see _hop_script). Each arrives as its repr, a plain string
+    # terminal — and, being strings that name no element, stays terminal.
+    mm, model = _fixture()
+    defn = _path([ScriptStep(snippet=_snip(
+        "def step(el): return [float('inf'), float('-inf'), float('nan')]"
+    ))])
+    res = evaluate(mm, model, defn, script=_ctx(model))
+    start = sorted(model.elements)[0]
+    reached = [chain[1] for chain in res.chains if chain[0] == start]
+    assert reached == [
+        PropertyValue("inf"),
+        PropertyValue("-inf"),
+        PropertyValue("nan"),
+    ]
+    assert res.warnings == []
+
+
+def test_step_after_a_value_terminal_prunes_the_chain() -> None:
+    # "Block further navigation": identical to a scalar PropertyStep followed
+    # by another step — the chain cannot continue from a value.
+    mm, model = _fixture()
+    ids = sorted(model.elements)
+    defn = _path([
+        ScriptStep(snippet=_snip("def step(el): return 'not-an-id'")),
+        ScriptStep(snippet=_snip(f"def step(el): return ['{ids[0]}']")),
+    ])
+    res = evaluate(mm, model, defn, script=_ctx(model))
+    assert res.chains == []
+    assert res.warnings == []
 
 
 def test_script_step_dangling_and_unconfigured() -> None:
@@ -198,22 +272,6 @@ def test_script_step_visited_drop_is_silent() -> None:
     res = evaluate(mm, model, defn, script=_ctx(model))
     assert res.chains == []
     assert res.warnings == []
-
-
-def test_unknown_ids_across_many_chains_sum_instead_of_collapsing() -> None:
-    """THE BUG: each start element's step drops one unknown id, and the old
-    dedup-by-message channel reported that as a single line reading "1"
-    regardless of how many chains hit it. One entry is right; a total of 1 is
-    not."""
-    mm, model = _fixture()
-    ids = sorted(model.elements)
-    defn = _path([ScriptStep(
-        snippet=_snip(f"def step(el): return ['{ids[0]}', 'no-such-id']")
-    )])
-    res = evaluate(mm, model, defn, script=_ctx(model))
-    (entry,) = [w for w in res.warnings if w.code == ScriptWarningCode.NAV_UNKNOWN_IDS]
-    assert entry.occurrences == len(ids)
-    assert entry.total == len(ids)
 
 
 def test_two_distinct_step_failures_stay_two_entries() -> None:
