@@ -9,8 +9,14 @@
 	// different fields.
 	//
 	// No evaluation-suspension machinery (`suspendTableEvaluation` and
-	// friends), unlike the Settings dialog: nothing in here affects
-	// evaluation, so a mid-edit re-evaluation is harmless.
+	// friends), unlike the Settings dialog — but NOT because a stray
+	// re-evaluation would be harmless. It would be pure waste: nothing here
+	// can change a single grid cell, yet `updateTableDefinition`'s reload
+	// bumps the tab's generation, drops the script-error recap and pulses the
+	// activity bar, once per keystroke. So every edit below goes through
+	// `updateTableExportSettings`, which writes the draft and stops there.
+	// Suspension exists to defer a reload that IS needed; here there is none
+	// to defer.
 	//
 	// The sample is fetched from `POST /tables/json-preview` rather than built
 	// here on purpose: grouping is a non-trivial algorithm over the evaluator's
@@ -18,9 +24,9 @@
 	// `core/table/json_export.py` — the pane would then confidently show
 	// something the download does not produce.
 	import {
-		downloadTable,
 		getTableDraft,
 		getTableSort,
+		restoreTableExportSettings,
 		updateTableExportSettings
 	} from '$lib/state';
 	import {
@@ -49,12 +55,12 @@
 		open: boolean;
 		format: 'xlsx' | 'json';
 		onClose: () => void;
-		/** How the download is actually run. Defaults to a bare `downloadTable`;
-		 *  the table tab supplies its own wrapper so the 202-retry loop keeps
-		 *  reporting through the chrome's Export button and keeps aborting when
-		 *  the tab unmounts — this dialog decides WHAT is exported, not how the
-		 *  waiting is surfaced. */
-		onExport?: (format: 'xlsx' | 'json') => Promise<void>;
+		/** How the download is actually run — required, never defaulted: the
+		 *  table tab's wrapper is what keeps the 202-retry loop reporting
+		 *  through the chrome's Export button and aborting when the tab
+		 *  unmounts. This dialog decides WHAT is exported, not how the waiting
+		 *  is surfaced, and it is closed long before the wait is over. */
+		onExport: (format: 'xlsx' | 'json') => Promise<void>;
 	} = $props();
 
 	const draft = $derived(getTableDraft(tabId));
@@ -83,13 +89,25 @@
 	// baseline. Every edit below writes STRAIGHT into the draft (the JSON
 	// preview needs a real definition to render, and the grid is indifferent to
 	// export settings), so restoring this is the whole of Cancel.
-	let snapshot: TableDefinition | null = null;
+	//
+	// `dirty` is captured ALONGSIDE the definition — see
+	// `restoreTableExportSettings`. Discarding an edit has to discard the
+	// unsaved-ness the edit created, or a table that was saved when the dialog
+	// opened stays marked unsaved forever; for a viewer, who has no Save
+	// button, forever is literal. This mirrors `_suspendedSnapshot`'s
+	// `{ definition, dirty, sort }`, minus the sort this dialog never touches.
+	let snapshot: { definition: TableDefinition; dirty: boolean } | null = null;
 	$effect(() => {
 		if (!open) {
 			snapshot = null;
 			return;
 		}
-		if (snapshot === null && defn) snapshot = $state.snapshot(defn) as TableDefinition;
+		if (snapshot === null && draft) {
+			snapshot = {
+				definition: $state.snapshot(draft.definition) as TableDefinition,
+				dirty: draft.dirty
+			};
+		}
 	});
 
 	function patchExport(index: number, p: Parameters<typeof setColumnExportOptions>[2]): void {
@@ -214,50 +232,49 @@
 		return () => clearTimeout(timer);
 	});
 
-	/** Restore the definition this dialog opened with. Reached by the Cancel
-	 *  button and by every dismissal bits-ui reports (Escape, an overlay click,
-	 *  its own close) — a discard is a discard whichever way it is spelled.
+	/** Restore the definition — and the dirty flag — this dialog opened with.
+	 *  Reached by the Cancel button and by every dismissal bits-ui reports
+	 *  (Escape, an overlay click, its own close): a discard is a discard
+	 *  whichever way it is spelled.
 	 *
-	 *  WRITES NOTHING when nothing changed. `updateTableExportSettings` sets
-	 *  `dirty` unconditionally, so an unguarded restore would mark a clean,
-	 *  saved table unsaved just for opening this dialog and dismissing it.
-	 *  Compared by JSON fingerprint — the same "did anything actually change"
-	 *  test the settings dialog's discard gate uses (`hasSuspendedTableEdits`
-	 *  → `definitionFingerprint`), including its harmless failure mode: two
-	 *  structurally equal definitions with different key order would compare
-	 *  unequal and cost one needless restore, never a lost one. */
+	 *  WRITES NOTHING when the definition is unchanged. `updateTableExportSettings`
+	 *  sets `dirty` unconditionally, so an unguarded restore would mark a
+	 *  clean, saved table unsaved just for opening this dialog and dismissing
+	 *  it. Compared by JSON fingerprint — the same "did anything actually
+	 *  change" test the settings dialog's discard gate uses
+	 *  (`hasSuspendedTableEdits` → `definitionFingerprint`), including its
+	 *  harmless failure mode: two structurally equal definitions with different
+	 *  key order would compare unequal and cost one needless restore, never a
+	 *  lost one.
+	 *
+	 *  The gate deliberately reads the DEFINITION only, never the dirty flag.
+	 *  A dirty flag that moved on its own (a Save landing while the dialog is
+	 *  open) belongs to that other event; there is nothing of ours to discard,
+	 *  and forcing the captured flag back would undo it. */
 	function cancel(): void {
-		if (snapshot && defn && JSON.stringify(defn) !== JSON.stringify(snapshot)) {
-			updateTableExportSettings(tabId, snapshot);
+		if (snapshot && defn && JSON.stringify(defn) !== JSON.stringify(snapshot.definition)) {
+			restoreTableExportSettings(tabId, snapshot.definition, snapshot.dirty);
 		}
 		snapshot = null;
-		// The message describes an export that is now over: leaving it behind
-		// would greet the next opening with a stale failure.
-		exportError = null;
 		onClose();
 	}
 
-	// The download runs through the same `downloadTable` the chrome's Export
-	// button has always used (via `onExport`), so the tab's spinner/progress
-	// reporting and its abort-on-unmount are unchanged; this dialog only
-	// decides WHAT gets exported.
-	let exporting = $state(false);
-	let exportError = $state<string | null>(null);
-	async function runExport(): Promise<void> {
-		if (exporting) return;
-		exporting = true;
-		exportError = null;
-		try {
-			await (onExport ? onExport(format) : downloadTable(tabId, { format }));
-			// Dropped BEFORE the close so the dismissal path below cannot mistake
-			// a completed export for a discard and revert the settings it used.
-			snapshot = null;
-			onClose();
-		} catch (e) {
-			exportError = e instanceof Error ? e.message : 'Export failed';
-		} finally {
-			exporting = false;
-		}
+	/** Close FIRST, then start the download — deliberately not awaited.
+	 *
+	 *  `onExport` runs `downloadTable`'s whole 202/`Retry-After` loop, which
+	 *  can wait minutes while a script sweep fills the cell cache. Awaiting it
+	 *  here would hold the modal open for that entire time, showing a static
+	 *  label over an overlay that covers the chrome's Export button — the one
+	 *  place the real `Preparing… 3/40` progress is reported. The dialog picks
+	 *  WHAT to export; the tab owns the waiting, the progress and the failure
+	 *  message (`TableView.exportTable` catches into its own `saveError`), so
+	 *  there is nothing left here to await for. */
+	function runExport(): void {
+		// Dropped BEFORE the close so the dismissal path below cannot mistake a
+		// started export for a discard and revert the settings it is using.
+		snapshot = null;
+		onClose();
+		void onExport(format);
 	}
 </script>
 
@@ -445,9 +462,6 @@
 			</div>
 		{/if}
 
-		{#if exportError}
-			<p class="shrink-0 text-xs text-destructive">{exportError}</p>
-		{/if}
 		<div class="flex shrink-0 items-center justify-end gap-2 border-t border-border pt-2">
 			<button
 				type="button"
@@ -460,11 +474,10 @@
 			<button
 				type="button"
 				data-testid="export-confirm"
-				class="rounded bg-primary px-3 py-1 text-xs text-primary-foreground transition-colors hover:bg-primary/80 disabled:opacity-40"
-				disabled={exporting}
-				onclick={() => void runExport()}
+				class="rounded bg-primary px-3 py-1 text-xs text-primary-foreground transition-colors hover:bg-primary/80"
+				onclick={runExport}
 			>
-				{exporting ? 'Exporting…' : 'Export'}
+				Export
 			</button>
 		</div>
 	</Dialog.Content>

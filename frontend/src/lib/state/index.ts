@@ -325,6 +325,7 @@ export {
 	requestScriptErrors,
 	requestScrollToCell,
 	resetTableEditors,
+	restoreTableExportSettings,
 	resumeTableEvaluation,
 	revertSuspendedTableEdits,
 	saveAsTableDraft,

@@ -1316,12 +1316,42 @@ export function updateTableDefinition(tabId: string, defn: TableDefinition): voi
  *
  * `dirty` is still set: export settings are part of the saved payload like
  * everything else. Callers that must not dirty a clean draft (a dialog's
- * Cancel restoring an unchanged definition) are expected not to call at all.
+ * Cancel restoring an unchanged definition) are expected not to call at all,
+ * or to go through `restoreTableExportSettings`.
  */
 export function updateTableExportSettings(tabId: string, defn: TableDefinition): void {
 	const draft = _drafts.get(tabId);
 	if (!draft) return;
 	_drafts.set(tabId, { ...draft, definition: defn, dirty: true });
+}
+
+/**
+ * `updateTableExportSettings`' undo half: put back a definition AND the
+ * `dirty` flag it was captured with. Still no re-evaluation, for the reasons
+ * that function's docstring gives.
+ *
+ * `dirty` HAS to travel with the definition, because `dirty` is not a fact
+ * about the definition — it is a fact about whether the draft differs from
+ * what is saved, and restoring the definition restores that difference too.
+ * A revert that only put the definition back would leave a saved table
+ * permanently unsaved over an edit the user explicitly discarded: the tab
+ * keeps its `*` marker and arms the unload guard, Save would write an
+ * identical artifact revision, and `_evaluateSource` flips from `artifactId`
+ * to the inline definition for the rest of the session — forfeiting the
+ * backend's per-artifact order cache on every later page and chunk request.
+ * Worse for a VIEWER, who can open the export dialog but has no Save button
+ * to clean the draft with. This is the same three-field contract
+ * `_suspendedSnapshot`/`revertSuspendedTableEdits` keep for the settings
+ * dialog; the export dialog needs two of the three (it never touches sort).
+ */
+export function restoreTableExportSettings(
+	tabId: string,
+	defn: TableDefinition,
+	dirty: boolean
+): void {
+	const draft = _drafts.get(tabId);
+	if (!draft) return;
+	_drafts.set(tabId, { ...draft, definition: defn, dirty });
 }
 
 export function setTableSort(tabId: string, sort: TableSort | undefined): void {
