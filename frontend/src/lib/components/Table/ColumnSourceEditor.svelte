@@ -1,16 +1,20 @@
 <script lang="ts">
 	// Shared column-source row: kind select (Row / Earlier column), a
-	// chain-step input for a `chains` row source, and an earlier-column
+	// chain-step picker for a `chains` row source, and an earlier-column
 	// select — identical in NavigationColumnEditor and PropertyColumnEditor,
 	// so it lives here once. When the selected earlier column is itself a
-	// `navigation` column, also renders a "Step to use" numeric input bound to
+	// `navigation` column, also renders a "Step to use" picker bound to
 	// `source.step_index` (ColumnRef.step_index: which chain step of THAT
 	// navigation this column reads; null = the referenced column's own
-	// projection). Fully controlled: emits a whole new `ColumnSource` via
-	// `onSourceChange`; callers spread `{ ...column, source }`.
+	// projection). Both step fields are ChainStepSelects listing the steps by
+	// the numbers the navigation editor badges. Fully controlled: emits a whole
+	// new `ColumnSource` via `onSourceChange`; callers spread
+	// `{ ...column, source }`.
 	import * as api from '$lib/api/artifacts';
-	import { columnLabel, navMaxStepIndex } from '$lib/table/columns';
+	import { columnLabel } from '$lib/table/columns';
+	import { chainStepOptions } from '$lib/table/chain-steps';
 	import type { Column, ColumnSource, NavigationDefinition, RowSource } from '$lib/api/types';
+	import ChainStepSelect from './ChainStepSelect.svelte';
 
 	let {
 		source,
@@ -29,42 +33,80 @@
 	const priorColumns = $derived(columns.slice(0, columnIndex));
 
 	const refColumn = $derived(source.kind === 'column' ? (columns[source.index] ?? null) : null);
-	// Max addressable chain step of the referenced navigation: inline
-	// definitions are computed synchronously; a saved ref is fetched once and
-	// cached per artifact id. While unknown the input is unconstrained — the
-	// backend still 422s an out-of-range value.
+
+	// The navigation behind each step field — the ROW SOURCE's for `chain step`,
+	// the REFERENCED COLUMN's for `Step to use` — resolved so both fields can
+	// LIST their steps by name instead of asking for a bare number. Inline
+	// definitions are read synchronously; a saved ref is fetched once and cached
+	// per artifact id. While a definition is unknown the field degrades to an
+	// unconstrained numeric input — the backend still 422s an out-of-range value.
 	// eslint-disable-next-line svelte/prefer-svelte-reactivity -- control state, never read from templates
-	const stepCache = new Map<string, number>();
-	let refMaxStep = $state<number | null>(null);
-	$effect(() => {
-		if (refColumn?.kind !== 'navigation') {
-			refMaxStep = null;
+	const defnCache = new Map<string, NavigationDefinition>();
+	// `$state.raw`: definitions are stored and read back WHOLE. A deep `$state`
+	// would hand back a PROXY that could reach a table definition and break its
+	// next `structuredClone` (see NavigationColumnEditor's lastInline note).
+	let rowNavDefn = $state.raw<NavigationDefinition | null>(null);
+	let refNavDefn = $state.raw<NavigationDefinition | null>(null);
+
+	/** Resolve a navigation source to a definition, fetching a saved ref once.
+	 * `wantedRef` re-reads the CURRENT ref when the fetch lands, so a field that
+	 * moved on meanwhile (another column picked, another row source) is not
+	 * overwritten with a stale payload. */
+	function resolveNav(
+		nav: { ref?: string | null; definition?: NavigationDefinition | null } | null,
+		assign: (defn: NavigationDefinition | null) => void,
+		wantedRef: () => string | null
+	): void {
+		if (nav?.definition) {
+			assign(nav.definition);
 			return;
 		}
-		const nav = refColumn.navigation;
-		if (nav.definition) {
-			refMaxStep = navMaxStepIndex(nav.definition);
+		const ref = nav?.ref ?? null;
+		if (!ref) {
+			assign(null);
 			return;
 		}
-		if (!nav.ref) {
-			refMaxStep = null;
+		const cached = defnCache.get(ref);
+		if (cached) {
+			assign(cached);
 			return;
 		}
-		const cached = stepCache.get(nav.ref);
-		if (cached !== undefined) {
-			refMaxStep = cached;
-			return;
-		}
-		refMaxStep = null;
-		const ref = nav.ref;
+		assign(null);
 		void api
 			.getArtifact(ref)
 			.then((a) => {
-				const max = navMaxStepIndex(a.payload as unknown as NavigationDefinition);
-				stepCache.set(ref, max);
-				if (refColumn?.kind === 'navigation' && refColumn.navigation.ref === ref) refMaxStep = max;
+				const defn = a.payload as unknown as NavigationDefinition;
+				defnCache.set(ref, defn);
+				if (wantedRef() === ref) assign(defn);
 			})
-			.catch(() => {});
+			.catch(() => {}); // unknown/foreign ref: stays unconstrained
+	}
+
+	$effect(() => {
+		resolveNav(
+			rowSource?.kind === 'chains' ? rowSource.navigation : null,
+			(d) => (rowNavDefn = d),
+			() => (rowSource?.kind === 'chains' ? (rowSource.navigation.ref ?? null) : null)
+		);
+	});
+	$effect(() => {
+		resolveNav(
+			refColumn?.kind === 'navigation' ? refColumn.navigation : null,
+			(d) => (refNavDefn = d),
+			() => (refColumn?.kind === 'navigation' ? (refColumn.navigation.ref ?? null) : null)
+		);
+	});
+
+	const rowStepOptions = $derived(chainStepOptions(rowNavDefn));
+	const refStepOptions = $derived(chainStepOptions(refNavDefn));
+
+	// Re-clamp a stored step_index the referenced chain no longer has (it
+	// shrank under us), mirroring NavigationColumnEditor/RowSourceEditor.
+	// Converges: after the clamped write the condition is false.
+	$effect(() => {
+		if (source.kind !== 'column' || source.step_index == null || refStepOptions === null) return;
+		const max = refStepOptions.length - 1;
+		if (source.step_index > max) onSourceChange({ ...source, step_index: max });
 	});
 
 	function setSourceKind(e: Event): void {
@@ -75,21 +117,19 @@
 			onSourceChange({ kind: 'column', index, step_index: null });
 		}
 	}
-	function setSourceChainIndex(e: Event): void {
-		const v = Number((e.currentTarget as HTMLInputElement).value) || 0;
-		onSourceChange({ kind: 'row', chain_index: v });
+	function setSourceChainIndex(next: number | null): void {
+		onSourceChange({ kind: 'row', chain_index: next ?? 0 });
 	}
 	function setSourceColumnIndex(e: Event): void {
 		const v = Number((e.currentTarget as HTMLSelectElement).value) || 0;
 		onSourceChange({ kind: 'column', index: v, step_index: null });
 	}
-	function setStepIndex(e: Event): void {
+	function setStepIndex(next: number | null): void {
 		if (source.kind !== 'column') return;
-		const raw = (e.currentTarget as HTMLInputElement).value.trim();
-		let v = raw === '' ? null : Math.max(0, Math.floor(Number(raw)));
-		if (v !== null && !Number.isFinite(v)) v = null;
-		if (v !== null && refMaxStep !== null) v = Math.min(v, refMaxStep);
-		onSourceChange({ ...source, step_index: v });
+		// null = the referenced column's own projection. The picker only offers
+		// steps that chain has; a number typed into its fallback (chain still
+		// unknown) is re-clamped by the effect above once the payload arrives.
+		onSourceChange({ ...source, step_index: next });
 	}
 </script>
 
@@ -114,12 +154,12 @@
 				title="Which step of the row's chain this column reads"
 			>
 				chain step
-				<input
-					type="number"
-					min="0"
-					class="w-12 rounded border border-input bg-card px-1 py-0.5"
+				<ChainStepSelect
+					options={rowStepOptions}
 					value={source.chain_index}
-					oninput={setSourceChainIndex}
+					ariaLabel="Chain step"
+					testId="source-chain-index"
+					onChange={setSourceChainIndex}
 				/>
 			</label>
 		{/if}
@@ -140,15 +180,13 @@
 				title="Which chain step of that navigation this column reads"
 			>
 				Step to use
-				<input
-					data-testid="source-step-index"
-					type="number"
-					min="0"
-					max={refMaxStep ?? undefined}
-					placeholder="column's step"
-					class="w-20 rounded border border-input bg-card px-1 py-0.5"
-					value={source.step_index ?? ''}
-					oninput={setStepIndex}
+				<ChainStepSelect
+					options={refStepOptions}
+					value={source.step_index}
+					emptyLabel="column's step"
+					ariaLabel="Step to use"
+					testId="source-step-index"
+					onChange={setStepIndex}
 				/>
 			</label>
 		{/if}

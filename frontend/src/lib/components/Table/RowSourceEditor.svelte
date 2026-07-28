@@ -16,8 +16,10 @@
 		getDraft,
 		updateTableDefinition
 	} from '$lib/state';
-	import { chainColumns, emptyPath } from '$lib/navigation/tree';
+	import { emptyPath } from '$lib/navigation/tree';
+	import { chainStepOptions } from '$lib/table/chain-steps';
 	import type { NavigationDefinition, RowSource, TableDefinition } from '$lib/api/types';
+	import ChainStepSelect from './ChainStepSelect.svelte';
 	import NavigationNode from '../Navigation/NavigationNode.svelte';
 	import ScopeEditor from '../Navigation/ScopeEditor.svelte';
 
@@ -62,16 +64,13 @@
 	const effectiveDefn = $derived(
 		inline && rowSource.kind !== 'scope' ? rowSource.navigation.definition! : refPayload
 	);
-	// Backend contract (table/evaluate.py::_check_step_index): valid
-	// non-negative indices are 0..chain_len-1; a set_op yields 1-element
-	// chains, so its only valid index is 0. null = unknown → unconstrained.
-	const maxStepIndex = $derived(
-		effectiveDefn == null
-			? null
-			: effectiveDefn.kind === 'path'
-				? chainColumns(effectiveDefn).length - 1
-				: 0
-	);
+	// The steps this navigation offers, numbered as the editor rail badges them
+	// (0 = the start). Backend contract (table/evaluate.py::_check_step_index):
+	// valid non-negative indices are 0..chain_len-1; a set_op yields 1-element
+	// chains, so its only valid index is 0. null = unknown → the field degrades
+	// to a free numeric input.
+	const stepOptions = $derived(chainStepOptions(effectiveDefn));
+	const maxStepIndex = $derived(stepOptions === null ? null : stepOptions.length - 1);
 
 	function apply(next: RowSource): void {
 		updateTableDefinition(tabId, { ...defn, row_source: next });
@@ -143,17 +142,12 @@
 		apply({ ...rowSource, navigation: ref ? { ref } : {} });
 	}
 
-	function onStepIndexChange(e: Event): void {
+	function onStepIndexChange(next: number | null): void {
 		if (rowSource.kind !== 'navigation') return;
-		const raw = (e.currentTarget as HTMLInputElement).value.trim();
-		if (raw === '') {
-			apply({ ...rowSource, step_index: null }); // null = end of chain
-			return;
-		}
-		const n = Math.floor(Number(raw));
-		if (!Number.isFinite(n)) return;
-		const clamped = Math.max(0, maxStepIndex == null ? n : Math.min(n, maxStepIndex));
-		apply({ ...rowSource, step_index: clamped });
+		// null = end of chain. The picker only offers steps this chain has; a
+		// number typed into its fallback (chain still unknown) is re-clamped by
+		// the effect above once the definition arrives.
+		apply({ ...rowSource, step_index: next });
 	}
 </script>
 
@@ -217,14 +211,13 @@
 			{#if rowSource.kind === 'navigation'}
 				<label class="flex items-center gap-1 text-[11px] text-muted-foreground/70">
 					Return elements from step
-					<input
-						type="number"
-						min="0"
-						max={maxStepIndex ?? undefined}
-						placeholder="End of chain"
-						class="w-24 rounded border border-input bg-card px-1 py-0.5 text-xs"
-						value={rowSource.step_index ?? ''}
-						oninput={onStepIndexChange}
+					<ChainStepSelect
+						options={stepOptions}
+						value={rowSource.step_index}
+						emptyLabel="End of chain"
+						ariaLabel="Return elements from step"
+						class="text-xs"
+						onChange={onStepIndexChange}
 					/>
 				</label>
 			{/if}

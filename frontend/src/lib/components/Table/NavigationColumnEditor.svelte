@@ -23,8 +23,10 @@
 		setEmbeddedRowElement,
 		updateDefinition
 	} from '$lib/state';
-	import { chainColumns, emptyRowPath } from '$lib/navigation/tree';
+	import { emptyRowPath } from '$lib/navigation/tree';
+	import { chainStepOptions } from '$lib/table/chain-steps';
 	import type { Column, NavigationDefinition, RowSource } from '$lib/api/types';
+	import ChainStepSelect from './ChainStepSelect.svelte';
 	import ColumnSourceEditor from './ColumnSourceEditor.svelte';
 	import NavigationNode from '../Navigation/NavigationNode.svelte';
 
@@ -108,16 +110,13 @@
 			});
 	});
 	const effectiveDefn = $derived(inline ? column.navigation.definition! : refPayload);
-	// Backend contract (table/evaluate.py::_check_step_index): valid
-	// non-negative indices are 0..chain_len-1; a set_op yields 1-element
-	// chains, so its only valid index is 0. null = unknown → unconstrained.
-	const maxStepIndex = $derived(
-		effectiveDefn == null
-			? null
-			: effectiveDefn.kind === 'path'
-				? chainColumns(effectiveDefn).length - 1
-				: 0
-	);
+	// The steps this navigation offers, numbered as the editor rail badges them
+	// (0 = the start). Backend contract (table/evaluate.py::_check_step_index):
+	// valid non-negative indices are 0..chain_len-1; a set_op yields 1-element
+	// chains, so its only valid index is 0. null = unknown → the field degrades
+	// to a free numeric input.
+	const stepOptions = $derived(chainStepOptions(effectiveDefn));
+	const maxStepIndex = $derived(stepOptions === null ? null : stepOptions.length - 1);
 
 	// Lifecycle: an inline column needs its embedded draft (e.g. a saved
 	// table reopened with an inline definition already in the payload); a
@@ -220,16 +219,11 @@
 		const ref = (e.currentTarget as HTMLSelectElement).value;
 		onChange({ ...column, navigation: ref ? { ref } : {} });
 	}
-	function setStepIndex(e: Event): void {
-		const raw = (e.currentTarget as HTMLInputElement).value.trim();
-		if (raw === '') {
-			onChange({ ...column, step_index: null }); // null = end of chain
-			return;
-		}
-		const n = Math.floor(Number(raw));
-		if (!Number.isFinite(n)) return;
-		const clamped = Math.max(0, maxStepIndex == null ? n : Math.min(n, maxStepIndex));
-		onChange({ ...column, step_index: clamped });
+	function setStepIndex(next: number | null): void {
+		// null = end of chain. The picker only offers steps this chain has; a
+		// number typed into its fallback (chain still unknown) is re-clamped by
+		// the effect above once the definition arrives.
+		onChange({ ...column, step_index: next });
 	}
 	function setSortMode(e: Event): void {
 		const v = (e.currentTarget as HTMLSelectElement).value as NavColumn['sort_mode'];
@@ -300,14 +294,12 @@
 		{/if}
 		<label class="flex items-center gap-1">
 			Return elements from step
-			<input
-				type="number"
-				min="0"
-				max={maxStepIndex ?? undefined}
-				placeholder="End of chain"
-				class="w-24 rounded border border-input bg-card px-1 py-0.5"
-				value={column.step_index ?? ''}
-				oninput={setStepIndex}
+			<ChainStepSelect
+				options={stepOptions}
+				value={column.step_index}
+				emptyLabel="End of chain"
+				ariaLabel="Return elements from step"
+				onChange={setStepIndex}
 			/>
 		</label>
 	</div>
