@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from math import isfinite
 from typing import TYPE_CHECKING
 
 from data_rover.core.metamodel.schema import Metamodel
@@ -60,7 +61,7 @@ class EvalLimits:
     max_chains: int = 5_000
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class PropertyValue:
     """Terminal chain node for a value a chain ends AT rather than hops from.
 
@@ -69,9 +70,28 @@ class PropertyValue:
     that names no model element. Wrapped (rather than carried raw) so a string
     value can never be mistaken for an element id by downstream consumers —
     every consumer discriminates with ``isinstance(node, str)``. Frozen
-    (hashable) because chain nodes are deduped through dict keys."""
+    (hashable) because chain nodes are deduped through dict keys.
+
+    Equality and hash are TYPE-AWARE (hence `eq=False`: hand-written, not the
+    dataclass's value-only pair). Python calls `1`, `True` and `1.0` equal and
+    hashes them alike, but these are DISPLAYED values and render as "1",
+    "True" and "1.0" — three different cells. Every structure that dedups
+    terminals does it through this equality (`_hop_script`'s own node dedup,
+    `table/evaluate.py`'s reached-node dict, `RowKey` tuples), so a value-only
+    comparison here silently collapses three distinct results into one no
+    matter how carefully the producer kept them apart."""
 
     value: str | int | float | bool
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, PropertyValue):
+            return NotImplemented
+        return type(self.value) is type(other.value) and self.value == other.value
+
+    def __hash__(self) -> int:
+        # Mirrors `_hop_script`'s `(type name, value)` dedup key, so the two
+        # agree by construction.
+        return hash((type(self.value).__name__, self.value))
 
 
 #: One position in a chain: an element id, or a terminal scalar value.
@@ -84,7 +104,7 @@ class ChainResult:
     Every node is an element id except a possible trailing `PropertyValue`
     (a scalar property step, or a script step that returned a non-element, is
     always terminal). `warnings` carries aggregated `ScriptWarning`s (pruned
-    chains, dropped ids) — but only the DELTA counts THIS evaluate call
+    chains, failed script steps) — but only the DELTA counts THIS evaluate call
     produced, not the shared context's running totals; missing-property
     prunes stay silent, unchanged."""
 
@@ -363,6 +383,13 @@ def _hop_script(
     (This is why there is no unknown-id warning: with every string either
     hopping or displaying, "unknown id" is no longer a failure mode.)
 
+    A non-finite float (`inf`/`-inf`/`nan`) becomes its repr — a plain string
+    terminal — HERE, at the producer, rather than at any serialization
+    boundary: JSON has no literal for those, so pydantic emits `null`, which
+    the client's non-nullable chain-value union rejects at the PAGE level (one
+    bad node would blank the whole results dock, and the same value would
+    break table JSON export next).
+
     DEGRADED, NEVER RAISING: a dangling ref or a per-element error prunes with
     a warning on the shared context; an unconfigured snippet or absent context
     prunes silently (mirroring an unconfigured navigation source). Dedup
@@ -370,7 +397,8 @@ def _hop_script(
     output is deterministic — and keys on `(type name, value)` rather than the
     value alone: plain `dict.fromkeys` collapses `True`/`1` and `1`/`1.0`,
     which was invisible when every node was an id but is a visible difference
-    once nodes render as values.
+    once nodes render as values. `PropertyValue`'s own equality keeps that
+    same distinction one layer down, so the two agree by construction.
     """
     if step.snippet.ref is not None:
         if script is not None:
@@ -389,7 +417,9 @@ def _hop_script(
     if not budget.spend(len(raw)):
         return []
     return [
-        n if isinstance(n, str) and n in model.elements else PropertyValue(n)
+        n
+        if isinstance(n, str) and n in model.elements
+        else PropertyValue(repr(n) if isinstance(n, float) and not isfinite(n) else n)
         for n in raw
     ]
 

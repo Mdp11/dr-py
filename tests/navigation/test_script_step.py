@@ -187,6 +187,33 @@ def test_script_step_dedup_keeps_distinct_scalar_types() -> None:
     start = sorted(model.elements)[0]
     reached = [chain[1] for chain in res.chains if chain[0] == start]
     assert reached == [PropertyValue(1), PropertyValue(True), PropertyValue(1.0)]
+    # The equality above is type-aware (PropertyValue's own), but spell the
+    # surviving types out: a list of three identical `1`s would satisfy a
+    # value-only comparison, which is exactly the collapse under test.
+    assert [type(n.value).__name__ for n in reached if isinstance(n, PropertyValue)] == [
+        "int",
+        "bool",
+        "float",
+    ]
+
+
+def test_script_step_non_finite_floats_become_strings() -> None:
+    # inf/-inf/nan have no JSON literal, so they must never reach the wire as
+    # floats (see _hop_script). Each arrives as its repr, a plain string
+    # terminal — and, being strings that name no element, stays terminal.
+    mm, model = _fixture()
+    defn = _path([ScriptStep(snippet=_snip(
+        "def step(el): return [float('inf'), float('-inf'), float('nan')]"
+    ))])
+    res = evaluate(mm, model, defn, script=_ctx(model))
+    start = sorted(model.elements)[0]
+    reached = [chain[1] for chain in res.chains if chain[0] == start]
+    assert reached == [
+        PropertyValue("inf"),
+        PropertyValue("-inf"),
+        PropertyValue("nan"),
+    ]
+    assert res.warnings == []
 
 
 def test_step_after_a_value_terminal_prunes_the_chain() -> None:

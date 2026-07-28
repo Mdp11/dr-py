@@ -1008,5 +1008,48 @@ def test_nav_script_step_value_terminal_renders_as_a_values_cell() -> None:
         "Block B",
         "Block C",
     }
+    # The set above cannot tell three one-value cells from a lopsided split
+    # (one cell holding all three, two empty), so pin the distribution too.
+    # Positional comparison would need a stable row order this fixture does
+    # not promise.
+    assert len(cells) == 3
+    assert all(len(c.values) == 1 for c in cells if isinstance(c, ValuesCell))
     assert not ctx.warnings
+    ctx.close()
+
+
+def test_nav_script_step_distinct_scalar_types_survive_the_cell_layer() -> None:
+    """The table layer dedups reached nodes in its own dict, so it re-collapses
+    anything PropertyValue calls equal. `[1, True, 1.0]` renders THREE values
+    ("1", "True", "1.0"); a value-only equality would silently show one."""
+    mm = _mm()
+    model = _fixture()
+    defn = TableDefinition(
+        row_source=ScopeRows(types=["Block"]),
+        columns=[
+            ElementColumn(),
+            NavigationColumn(
+                navigation=NavigationSource(
+                    definition=PathNavigation(
+                        kind="path",
+                        start=RowStart(),
+                        steps=[
+                            ScriptStep(
+                                snippet=_snip("def step(el):\n    return [1, True, 1.0]")
+                            )
+                        ],
+                    )
+                ),
+            ),
+        ],
+    )
+    ctx = _script_ctx(model)
+    build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
+    rows = evaluate_cells(mm, model, defn, build.keys, TableLimits(), script=ctx)
+    cells = [r[1] for r in rows]
+    assert all(isinstance(c, ValuesCell) for c in cells)
+    for c in cells:
+        assert isinstance(c, ValuesCell)
+        assert c.values == [1, True, 1.0]
+        assert [type(v).__name__ for v in c.values] == ["int", "bool", "float"]
     ctx.close()

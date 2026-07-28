@@ -446,6 +446,21 @@ def test_property_hop_scalar_terminates_at_value() -> None:
     assert result.step_types == ["tags"]
 
 
+def test_property_value_equality_is_type_aware() -> None:
+    # `1`, `True` and `1.0` are EQUAL as bare Python values but render as
+    # three different terminals ("1", "True", "1.0"), so PropertyValue must
+    # keep them apart — every downstream dedup (chain-node dict keys, the
+    # table layer's reached-set, RowKey tuples) is this equality.
+    one, yes, onepointoh = PropertyValue(1), PropertyValue(True), PropertyValue(1.0)
+    assert one != yes
+    assert one != onepointoh
+    assert yes != onepointoh
+    assert PropertyValue(1) == one  # same type, same value: still equal
+    assert len({one, yes, onepointoh}) == 3
+    assert len(dict.fromkeys([one, yes, onepointoh, PropertyValue(1)])) == 3
+    assert len({hash(v) for v in (one, yes, onepointoh)}) == 3
+
+
 def test_property_hop_scalar_unset_prunes() -> None:
     # An element that never set the scalar property contributes no chain.
     model, ids = _ref_fixture()
