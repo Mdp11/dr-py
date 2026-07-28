@@ -381,6 +381,92 @@ def test_build_workbook_rejects_mismatched_row_length():
         )
 
 
+def _two_col_body(**defn_over):
+    defn = {
+        "row_source": {"kind": "scope", "types": ["Block"]},
+        "columns": [
+            {"kind": "element", "source": {"kind": "row"}, "header": "Block"},
+            {
+                "kind": "property",
+                "source": {"kind": "row"},
+                "name": "mass",
+                "header": "Mass",
+            },
+        ],
+    }
+    defn.update(defn_over)
+    return {"definition": defn}
+
+
+def test_export_xlsx_honors_export_order_and_header_override(client):
+    _bootstrap_model(client)
+    body = _two_col_body(export_order=[1, 0])
+    body["definition"]["columns"][0]["export"] = {"header": "Assembly"}
+    r = client.post(papi("/tables/export"), json=body, headers=AUTH_HEADERS)
+    assert r.status_code == 200
+    ws = load_workbook(io.BytesIO(r.content)).active
+    assert ws is not None
+    assert [c.value for c in ws[1]] == ["Mass", "Assembly"]
+
+
+def test_export_xlsx_excludes_an_opted_out_column(client):
+    _bootstrap_model(client)
+    body = _two_col_body()
+    body["definition"]["columns"][1]["export"] = {"include": False}
+    r = client.post(papi("/tables/export"), json=body, headers=AUTH_HEADERS)
+    ws = load_workbook(io.BytesIO(r.content)).active
+    assert ws is not None
+    assert [c.value for c in ws[1]] == ["Block"]
+
+
+def test_export_xlsx_includes_an_opted_in_hidden_column(client):
+    _bootstrap_model(client)
+    body = _two_col_body()
+    body["definition"]["columns"][1]["hidden"] = True
+    body["definition"]["columns"][1]["export"] = {"include": True}
+    r = client.post(papi("/tables/export"), json=body, headers=AUTH_HEADERS)
+    ws = load_workbook(io.BytesIO(r.content)).active
+    assert ws is not None
+    assert [c.value for c in ws[1]] == ["Block", "Mass"]
+
+
+def test_export_xlsx_row_number_column_can_be_moved_and_renamed(client):
+    _bootstrap_model(client)
+    body = _two_col_body(
+        show_row_numbers=True,
+        export_order=[0, -1, 1],
+        export_row_number={"header": "No."},
+    )
+    r = client.post(papi("/tables/export"), json=body, headers=AUTH_HEADERS)
+    ws = load_workbook(io.BytesIO(r.content)).active
+    assert ws is not None
+    assert [c.value for c in ws[1]] == ["Block", "No.", "Mass"]
+    assert ws.cell(row=2, column=2).value == 1
+
+
+def test_export_xlsx_row_number_column_can_be_excluded(client):
+    _bootstrap_model(client)
+    body = _two_col_body(show_row_numbers=True, export_row_number={"include": False})
+    r = client.post(papi("/tables/export"), json=body, headers=AUTH_HEADERS)
+    ws = load_workbook(io.BytesIO(r.content)).active
+    assert ws is not None
+    assert [c.value for c in ws[1]] == ["Block", "Mass"]
+
+
+def test_export_xlsx_unchanged_without_export_settings(client):
+    # The no-migration guarantee, asserted rather than assumed: a definition
+    # that carries no export settings must produce the same sheet it did
+    # before this feature existed. Structural, not a byte comparison — xlsx
+    # bytes are not reproducible across runs.
+    _bootstrap_model(client)
+    body = _two_col_body(show_row_numbers=True)
+    first = client.post(papi("/tables/export"), json=body, headers=AUTH_HEADERS)
+    ws = load_workbook(io.BytesIO(first.content)).active
+    assert ws is not None
+    assert [c.value for c in ws[1]] == ["#", "Block", "Mass"]
+    assert ws.cell(row=2, column=1).value == 1
+
+
 class TestSheetTitle:
     """Direct unit tests for `_sheet_title`; it had zero before this fix."""
 

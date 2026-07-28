@@ -40,6 +40,11 @@ from data_rover.core.table.evaluate import (
     order_rows,
     sort_falls_back_to_build_order,
 )
+from data_rover.core.table.export_layout import (
+    export_definition,
+    export_header,
+    export_layout,
+)
 from data_rover.core.table.json_export import render_json
 from data_rover.core.table.resolve import resolve_table_refs, table_has_script
 from data_rover.core.table.schema import TABLE_ADAPTER, TableDefinition
@@ -728,13 +733,18 @@ def export_table(
             row = content.get_artifact(db, payload.artifact_id)
             if row is not None:
                 name = row.name
-        # Hidden columns are evaluated (a visible column may reference them)
-        # but never exported: filter headers AND each row's cells by
-        # position.
-        visible = [i for i, c in enumerate(defn.columns) if not c.hidden]
-        headers = [defn.columns[i].header or defn.columns[i].kind for i in visible]
-        if defn.show_row_numbers:
-            headers.insert(0, "#")
+        # Export settings are PRESENTATION: the layout says what the file
+        # contains and in what order, and `export_definition` restates
+        # inclusion as `hidden` so `json_export`'s existing hidden-column and
+        # group-nesting logic is reused rather than reimplemented. Both are
+        # for the RENDER only — `iter_export_rows` below keeps the ORIGINAL
+        # `defn`, so cell values, row order, and every script cache key are
+        # exactly what they would be without any of this.
+        layout = export_layout(defn)
+        eff = export_definition(defn)
+        headers = [export_header(defn, i) for i in layout.order]
+        if layout.row_number_pos is not None:
+            headers.insert(layout.row_number_pos, layout.row_number_header)
         all_rows = iter_export_rows(
             metamodel, model, defn, ordered, limits, script=script_ctx
         )
@@ -779,10 +789,20 @@ def export_table(
 
         if payload.format == "json":
             # `render_json` indexes cells by DEFINITION column index, so it
-            # gets the UNFILTERED rows — hidden columns are dropped inside it
+            # gets the UNFILTERED rows — excluded columns are dropped inside it
             # by their `None` key, not by pre-slicing the row like the xlsx
             # path does.
-            docs = render_json(model, defn, ordered, all_rows, build.base_slots)
+            docs = render_json(
+                model,
+                eff,
+                ordered,
+                all_rows,
+                build.base_slots,
+                order=layout.rank,
+                row_number=(layout.row_number_pos, layout.row_number_key)
+                if layout.row_number_pos is not None
+                else None,
+            )
             blob = json.dumps(docs, ensure_ascii=False, indent=2).encode("utf-8")
             media_type = "application/json"
             filename = f"{name}.json"
@@ -793,9 +813,9 @@ def export_table(
                 model,
                 headers,
                 name,
-                ([row[i] for i in visible] for row in all_rows),
+                ([row[i] for i in layout.order] for row in all_rows),
                 notice_provider=_notice,
-                row_number_col=0 if defn.show_row_numbers else None,
+                row_number_col=layout.row_number_pos,
             )
             media_type = (
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -889,12 +909,17 @@ def json_preview(
         )
         window = ordered[:PREVIEW_MAX_ROWS]
         truncated = len(ordered) > len(window)
+        layout = export_layout(defn)
         docs = render_json(
             model,
-            defn,
+            export_definition(defn),
             window,
             iter_export_rows(metamodel, model, defn, window, limits, script=script_ctx),
             build.base_slots,
+            order=layout.rank,
+            row_number=(layout.row_number_pos, layout.row_number_key)
+            if layout.row_number_pos is not None
+            else None,
         )
         if truncated and len(docs) > 1:
             docs = docs[:-1]

@@ -251,6 +251,70 @@ def test_preview_is_read_only_and_reachable_by_a_viewer(client):
     assert "/tables/json-preview" in _READ_ONLY_POST_SUFFIXES
 
 
+def _json_body(**defn_over):
+    defn = {
+        "row_source": {"kind": "scope", "types": ["Block"]},
+        "columns": [
+            {"kind": "element", "source": {"kind": "row"}, "header": "Block"},
+            {
+                "kind": "property",
+                "source": {"kind": "row"},
+                "name": "mass",
+                "header": "Mass",
+            },
+        ],
+    }
+    defn.update(defn_over)
+    return {"definition": defn, "format": "json"}
+
+
+def test_export_json_honors_export_order(client):
+    _bootstrap_model(client)
+    body = _json_body(export_order=[1, 0])
+    r = client.post(papi("/tables/export"), json=body, headers=AUTH_HEADERS)
+    assert r.status_code == 200
+    docs = r.json()
+    assert list(docs[0].keys()) == ["Mass", "Block"]
+
+
+def test_export_json_excludes_an_opted_out_column(client):
+    _bootstrap_model(client)
+    body = _json_body()
+    body["definition"]["columns"][1]["export"] = {"include": False}
+    docs = client.post(papi("/tables/export"), json=body, headers=AUTH_HEADERS).json()
+    assert "Mass" not in docs[0]
+
+
+def test_export_json_emits_row_numbers_when_the_grid_flag_is_on(client):
+    # Deliberate behaviour change (spec, "Behaviour change worth stating"):
+    # JSON has never carried row numbers, and now follows show_row_numbers.
+    _bootstrap_model(client)
+    body = _json_body(show_row_numbers=True)
+    docs = client.post(papi("/tables/export"), json=body, headers=AUTH_HEADERS).json()
+    assert list(docs[0].keys())[0] == "row_number"
+    assert [d["row_number"] for d in docs] == list(range(1, len(docs) + 1))
+
+
+def test_export_json_ignores_the_xlsx_header_override(client):
+    # The two renames are separate: an xlsx header override must never become
+    # a JSON key.
+    _bootstrap_model(client)
+    body = _json_body()
+    body["definition"]["columns"][0]["export"] = {"header": "Assembly"}
+    docs = client.post(papi("/tables/export"), json=body, headers=AUTH_HEADERS).json()
+    assert "Block" in docs[0]
+    assert "Assembly" not in docs[0]
+
+
+def test_json_preview_honors_export_settings(client):
+    _bootstrap_model(client)
+    body = _json_body(export_order=[1, 0])
+    r = client.post(papi("/tables/json-preview"), json=body, headers=AUTH_HEADERS)
+    assert r.status_code == 200
+    sample = json.loads(r.json()["sample"])
+    assert list(sample[0].keys()) == ["Mass", "Block"]
+
+
 def test_json_export_accepts_item_key_over_the_wire(client):
     """`item_key` has to survive TABLE_ADAPTER validation and reach the
     renderer without disturbing the array's own name. The NESTED shape it
