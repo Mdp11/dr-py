@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+import time
 
 from data_rover.api.session import (
     DEFAULT_PROJECT_ID,
@@ -171,7 +172,13 @@ def test_idle_lists_stale_projects() -> None:
     reg.set_loader(lambda pid: Session())
     reg.get("p1")
     reg.touch("p1")
-    assert reg.idle(now=1000.0, ttl=10.0) == []  # just touched (last_access ~ monotonic)
+    # `now` must be anchored to the SAME monotonic clock touch() stamps into
+    # last_access, never an absolute constant: time.monotonic() is uptime-based,
+    # so on a freshly booted host (or a CI container) it is a small number and a
+    # hardcoded now=1000.0 reads a just-touched session as long idle.
+    now = time.monotonic()
+    assert reg.idle(now=now, ttl=10.0) == []  # just touched -> not idle
+    assert reg.idle(now=now + 10.0, ttl=10.0) == ["p1"]  # ttl elapsed -> idle
 
 
 def test_evict_skips_session_with_live_locks() -> None:

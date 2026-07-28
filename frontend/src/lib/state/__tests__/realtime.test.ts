@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FeedConfig } from '$lib/api/feed';
+import * as modelReadApi from '$lib/api/model-read';
 
 // Capture the config startRealtime hands connectFeed so a test can drive the
 // onTerminal callback the way the transport would on a permanent close. The rest
@@ -33,7 +34,20 @@ import { setActiveProject } from '../active-project.svelte';
 beforeEach(() => {
 	resetRealtime();
 	resetModelStore();
+	// A 'snapshot' event whose model_rev is ahead of the cached rev fires
+	// refreshSummary() (fire-and-forget, .catch()-swallowed). Stub the read so it
+	// doesn't escape to a real fetch — these tests assert on reducer state, not
+	// on the summary refresh.
+	vi.spyOn(modelReadApi, 'getModelSummary').mockResolvedValue({
+		model_rev: 1,
+		element_count: 0,
+		relationship_count: 0,
+		elements_by_type: {},
+		issue_counts: null,
+		undo_depth: 0
+	});
 });
+afterEach(() => vi.restoreAllMocks());
 
 describe('realtime store reducers', () => {
 	it('tracks presence from snapshot + presence events', () => {

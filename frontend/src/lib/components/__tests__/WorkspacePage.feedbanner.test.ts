@@ -66,6 +66,10 @@ vi.mock('$lib/state', async (orig) => {
 		handleRemoteLockEvent: () => {},
 		refreshSummary: () => Promise.resolve(),
 		refreshView: () => Promise.resolve(),
+		// boot() fires `void trackOpenProgress()`, which polls GET /model/status;
+		// unstubbed it escapes to a real fetch (the rejection is swallowed, so the
+		// test still passes — it just floods the run with ECONNREFUSED).
+		trackOpenProgress: () => Promise.resolve(),
 		loadProjectInfo: () => Promise.resolve(),
 		reactToBootError: () => false,
 		setAccessNotice: () => {}

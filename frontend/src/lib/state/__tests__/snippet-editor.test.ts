@@ -44,6 +44,15 @@ const SNIPPET_ARTIFACT = {
 
 beforeEach(() => {
 	vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({ items: [] });
+	// ensureSnippetDraft() fires `void lintNow()` unconditionally, so EVERY test
+	// here triggers a lint whether or not it cares about one. Without a default
+	// stub that escapes to a real fetch against happy-dom's origin and the run
+	// fills with ECONNREFUSED noise (lintNow swallows the rejection, so it stays
+	// green and silent-ish). Tests asserting on lint re-spy with their own value.
+	vi.spyOn(snippetsApi, 'lintSnippet').mockResolvedValue({
+		diagnostics: [],
+		entry_points: ['script']
+	});
 });
 afterEach(() => {
 	resetSnippetEditors();

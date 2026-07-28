@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as artifactsApi from '$lib/api/artifacts';
+import * as snippetsApi from '$lib/api/snippets';
 import * as tablesApi from '$lib/api/tables';
 import {
 	closeTableDraft,
@@ -41,6 +42,12 @@ beforeEach(() => {
 	resetWorkspaceTabs();
 	resetArtifacts();
 	vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
+	// ensureSnippetDraft()/updateSnippetCode() lint in the background; stub it so
+	// the dirty-tracking assertions here don't escape to a real fetch.
+	vi.spyOn(snippetsApi, 'lintSnippet').mockResolvedValue({
+		diagnostics: [],
+		entry_points: ['script']
+	});
 });
 afterEach(() => {
 	resetNavigationEditors();
