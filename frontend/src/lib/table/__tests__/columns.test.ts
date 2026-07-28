@@ -17,7 +17,10 @@ import {
 	cloneColumn,
 	defaultJsonKeys,
 	setColumnJsonOptions,
-	snakeCaseKey
+	snakeCaseKey,
+	setColumnExportOptions,
+	setRowNumberExportOptions,
+	moveExportEntry
 } from '$lib/table/columns';
 import { ColumnSchema, TableDefinitionSchema } from '$lib/api/types';
 import type { Column, NavigationDefinition, TableDefinition } from '$lib/api/types';
@@ -26,6 +29,7 @@ const base: TableDefinition = {
 	schema_version: 1,
 	default_cell_mode: 'collapse',
 	show_row_numbers: false,
+	export_order: [],
 	row_source: { kind: 'scope', types: ['Block'], criteria: [] },
 	columns: [
 		{
@@ -602,7 +606,8 @@ function defn(...columns: unknown[]): TableDefinition {
 		row_source: { kind: 'scope', types: ['Block'], criteria: [] },
 		columns,
 		default_cell_mode: 'collapse',
-		show_row_numbers: false
+		show_row_numbers: false,
+		export_order: []
 	} as TableDefinition;
 }
 
@@ -685,6 +690,56 @@ describe('setColumnJsonOptions', () => {
 			item_key: 'One Signal',
 			value: 'name',
 			group: true
+		});
+	});
+});
+
+// `defn()`/`el()` above are this file's existing fixture builders (there is no
+// zero-arg `base()`); each case below passes exactly as many columns as its
+// own index arithmetic needs — e.g. moveColumn's old-0/1/2 remap needs three
+// real columns, addColumn's appended-index math needs exactly two.
+describe('export_order bookkeeping', () => {
+	it('removeColumn drops the entry and shifts the ones above it', () => {
+		const d = { ...defn(el(), el(), el()), export_order: [2, 0, 1] };
+		expect(removeColumn(d, 0).export_order).toEqual([1, 0]);
+	});
+
+	it('moveColumn remaps entries to the new definition indices', () => {
+		const d = { ...defn(el(), el(), el()), export_order: [2, 1, 0] };
+		// definition column 0 moves to the end: old 0->2, old 1->0, old 2->1
+		expect(moveColumn(d, 0, 2).export_order).toEqual([1, 0, 2]);
+	});
+
+	it('addColumn appends the new index when an order exists', () => {
+		const d = { ...defn(el(), el()), export_order: [1, 0] };
+		expect(addColumn(d, newPropertyColumn()).export_order).toEqual([1, 0, 2]);
+	});
+
+	it('leaves an empty order empty — that already means definition order', () => {
+		expect(addColumn(defn(el()), newPropertyColumn()).export_order).toEqual([]);
+	});
+
+	it('cloneColumn inserts the copy right after its original', () => {
+		const d = { ...defn(el(), el()), export_order: [1, 0] };
+		expect(cloneColumn(d, 0).export_order).toEqual([2, 0, 1]);
+	});
+
+	it('moveExportEntry writes a full order, materializing the natural one', () => {
+		const d = { ...defn(el(), el()), show_row_numbers: true };
+		// export list is [-1, 0, 1]; drag the row number to the end
+		expect(moveExportEntry(d, 0, 2).export_order).toEqual([0, 1, -1]);
+	});
+
+	it('setColumnExportOptions merges into a column with no options yet', () => {
+		const next = setColumnExportOptions(defn(el(), el()), 1, { include: false });
+		expect(next.columns[1].export).toEqual({ include: false, header: '' });
+	});
+
+	it('setRowNumberExportOptions materializes the defaults', () => {
+		expect(setRowNumberExportOptions(defn(el()), { header: 'No.' }).export_row_number).toEqual({
+			include: true,
+			header: 'No.',
+			key: ''
 		});
 	});
 });

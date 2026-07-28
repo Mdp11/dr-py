@@ -70,6 +70,7 @@ async function seed(columns: NavColumn[]): Promise<void> {
 		schema_version: 1,
 		default_cell_mode: 'collapse',
 		show_row_numbers: false,
+		export_order: [],
 		row_source: { kind: 'scope', types: ['Block'], criteria: [] },
 		columns
 	};
@@ -83,6 +84,7 @@ async function seedScript(): Promise<void> {
 		schema_version: 1,
 		default_cell_mode: 'collapse',
 		show_row_numbers: false,
+		export_order: [],
 		row_source: { kind: 'scope', types: ['Block'], criteria: [] },
 		columns: [
 			{

@@ -69,7 +69,8 @@ function defn(): TableDefinition {
 			}
 		],
 		default_cell_mode: 'collapse',
-		show_row_numbers: false
+		show_row_numbers: false,
+		export_order: []
 	} as TableDefinition;
 }
 

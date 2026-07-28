@@ -17,6 +17,7 @@ function defnWith(rowSource: TableDefinition['row_source']): TableDefinition {
 		schema_version: 1,
 		default_cell_mode: 'collapse',
 		show_row_numbers: false,
+		export_order: [],
 		row_source: rowSource,
 		columns: [
 			{

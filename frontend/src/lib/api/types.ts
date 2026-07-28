@@ -728,6 +728,26 @@ export const JsonColumnOptionsSchema = z.object({
 });
 export type JsonColumnOptions = z.infer<typeof JsonColumnOptionsSchema>;
 
+/** Per-column export overrides. Mirrors core/table/schema.py's
+ *  ColumnExportOptions. `include: null` means "follow `hidden`", which is what
+ *  keeps every pre-existing table exporting unchanged. `header` renames the
+ *  column for XLSX only — JSON renames through `json_export.key`. */
+export const ColumnExportOptionsSchema = z.object({
+	include: z.boolean().nullish(),
+	header: z.string().default('')
+});
+export type ColumnExportOptions = z.infer<typeof ColumnExportOptionsSchema>;
+
+/** Export overrides for the row-number pseudo-column. On the definition, not a
+ *  column, because there is no Column to hang it off. Blank names fall back to
+ *  "#" (xlsx) and "row_number" (JSON). */
+export const RowNumberExportOptionsSchema = z.object({
+	include: z.boolean().default(true),
+	header: z.string().default(''),
+	key: z.string().default('')
+});
+export type RowNumberExportOptions = z.infer<typeof RowNumberExportOptionsSchema>;
+
 const ScriptColumnSchema = z.object({
 	kind: z.literal('script'),
 	source: ColumnSourceSchema.default({ kind: 'row', chain_index: 0 }),
@@ -737,7 +757,8 @@ const ScriptColumnSchema = z.object({
 	header: z.string().default(''),
 	width_px: z.number().int().nullish(),
 	hidden: z.boolean().default(false),
-	json_export: JsonColumnOptionsSchema.nullish()
+	json_export: JsonColumnOptionsSchema.nullish(),
+	export: ColumnExportOptionsSchema.nullish()
 });
 
 export const ScopeRowsSchema = z.object({
@@ -766,7 +787,8 @@ const ElementColumnSchema = z.object({
 	header: z.string().default(''),
 	width_px: z.number().int().nullish(),
 	hidden: z.boolean().default(false),
-	json_export: JsonColumnOptionsSchema.nullish()
+	json_export: JsonColumnOptionsSchema.nullish(),
+	export: ColumnExportOptionsSchema.nullish()
 });
 const PropertyColumnSchema = z.object({
 	kind: z.literal('property'),
@@ -777,7 +799,8 @@ const PropertyColumnSchema = z.object({
 	header: z.string().default(''),
 	width_px: z.number().int().nullish(),
 	hidden: z.boolean().default(false),
-	json_export: JsonColumnOptionsSchema.nullish()
+	json_export: JsonColumnOptionsSchema.nullish(),
+	export: ColumnExportOptionsSchema.nullish()
 });
 const NavigationColumnSchema = z.object({
 	kind: z.literal('navigation'),
@@ -791,7 +814,8 @@ const NavigationColumnSchema = z.object({
 	header: z.string().default(''),
 	width_px: z.number().int().nullish(),
 	hidden: z.boolean().default(false),
-	json_export: JsonColumnOptionsSchema.nullish()
+	json_export: JsonColumnOptionsSchema.nullish(),
+	export: ColumnExportOptionsSchema.nullish()
 });
 export const ColumnSchema = z.discriminatedUnion('kind', [
 	ElementColumnSchema,
@@ -805,7 +829,9 @@ export const TableDefinitionSchema = z.object({
 	row_source: RowSourceSchema,
 	columns: z.array(ColumnSchema).min(1),
 	default_cell_mode: z.enum(['collapse', 'expand']).default('collapse'),
-	show_row_numbers: z.boolean().default(false)
+	show_row_numbers: z.boolean().default(false),
+	export_order: z.array(z.number().int()).default([]),
+	export_row_number: RowNumberExportOptionsSchema.nullish()
 });
 export type TableDefinition = z.infer<typeof TableDefinitionSchema>;
 export type Column = z.infer<typeof ColumnSchema>;

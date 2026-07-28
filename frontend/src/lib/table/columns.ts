@@ -26,12 +26,15 @@
  */
 import type {
 	Column,
+	ColumnExportOptions,
 	ColumnSource,
 	JsonColumnOptions,
 	NavigationDefinition,
+	RowNumberExportOptions,
 	TableDefinition
 } from '$lib/api/types';
 import { chainColumns } from '$lib/navigation/tree';
+import { ROW_NUMBER_SLOT, exportEntries } from './export-layout';
 
 export class ColumnInUseError extends Error {}
 
@@ -39,6 +42,25 @@ export class ColumnInUseError extends Error {}
  * every column kept by reference (see module doc, subtlety 2). */
 function clone(defn: TableDefinition): TableDefinition {
 	return { ...defn, columns: defn.columns.slice() };
+}
+
+/** `export_order` holds DEFINITION indices, so every structural column edit
+ * has to move them — a stale list would silently reorder the export, which
+ * the backend's normalizer cannot detect (its entries are all still in range).
+ * An EMPTY order is left empty throughout: it already means "definition
+ * order", which stays correct across every one of these edits. */
+function remapExportOrder(order: number[], f: (i: number) => number | null): number[] {
+	if (order.length === 0) return order;
+	const out: number[] = [];
+	for (const i of order) {
+		if (i === ROW_NUMBER_SLOT) {
+			out.push(i);
+			continue;
+		}
+		const next = f(i);
+		if (next !== null) out.push(next);
+	}
+	return out;
 }
 
 function sourcesColumn(source: ColumnSource, index: number): boolean {
@@ -99,6 +121,9 @@ export function navMaxStepIndex(defn: NavigationDefinition): number {
 export function addColumn(defn: TableDefinition, col: Column): TableDefinition {
 	const next = clone(defn);
 	next.columns.push(col);
+	// the appended column takes the next index
+	next.export_order = remapExportOrder(defn.export_order ?? [], (i) => i);
+	if (next.export_order.length) next.export_order = [...next.export_order, defn.columns.length];
 	return next;
 }
 
@@ -130,6 +155,10 @@ export function removeColumn(defn: TableDefinition, index: number): TableDefinit
 		c.source.kind === 'column' && c.source.index > index
 			? { ...c, source: { ...c.source, index: c.source.index - 1 } }
 			: c
+	);
+	// drop it, shift the ones above down
+	next.export_order = remapExportOrder(defn.export_order ?? [], (i) =>
+		i === index ? null : i > index ? i - 1 : i
 	);
 	return next;
 }
@@ -164,6 +193,17 @@ export function cloneColumn(defn: TableDefinition, index: number): TableDefiniti
 			: c
 	);
 	next.columns.splice(index + 1, 0, copy);
+	// the copy lands at index + 1, so shift and then insert. `.slice()` because
+	// remapExportOrder returns its INPUT unchanged when empty, and the splice
+	// below must never reach the original definition's array.
+	{
+		const shifted = remapExportOrder(defn.export_order ?? [], (i) =>
+			i > index ? i + 1 : i
+		).slice();
+		const at = shifted.indexOf(index);
+		if (at >= 0) shifted.splice(at + 1, 0, index + 1);
+		next.export_order = shifted;
+	}
 	return next;
 }
 
@@ -189,6 +229,8 @@ export function moveColumn(defn: TableDefinition, from: number, to: number): Tab
 		}
 		return { ...c, source: { ...c.source, index: remapped } };
 	});
+	// reuse the oldToNew map the function already built above
+	next.export_order = remapExportOrder(defn.export_order ?? [], (i) => oldToNew.get(i) ?? null);
 	return next;
 }
 
@@ -270,7 +312,8 @@ export function navigationAsTableDefinition({
 		},
 		columns,
 		default_cell_mode: 'collapse',
-		show_row_numbers: false
+		show_row_numbers: false,
+		export_order: []
 	};
 }
 
@@ -300,6 +343,13 @@ const DEFAULT_JSON_OPTIONS: JsonColumnOptions = {
 	item_key: '',
 	value: 'name',
 	group: false
+};
+
+const DEFAULT_EXPORT_OPTIONS: ColumnExportOptions = { include: null, header: '' };
+const DEFAULT_ROW_NUMBER_OPTIONS: RowNumberExportOptions = {
+	include: true,
+	header: '',
+	key: ''
 };
 
 /**
@@ -350,4 +400,44 @@ export function setColumnJsonOptions(
 		json_export: { ...current, ...patch }
 	};
 	return next;
+}
+
+/** Merge a patch into one column's export options, materializing the options
+ *  object if the column had none. Pure — returns a new definition. */
+export function setColumnExportOptions(
+	defn: TableDefinition,
+	index: number,
+	patch: Partial<ColumnExportOptions>
+): TableDefinition {
+	const next = clone(defn);
+	const current = defn.columns[index].export ?? DEFAULT_EXPORT_OPTIONS;
+	next.columns[index] = { ...defn.columns[index], export: { ...current, ...patch } };
+	return next;
+}
+
+/** Merge a patch into the row-number pseudo-column's export options. */
+export function setRowNumberExportOptions(
+	defn: TableDefinition,
+	patch: Partial<RowNumberExportOptions>
+): TableDefinition {
+	const current = defn.export_row_number ?? DEFAULT_ROW_NUMBER_OPTIONS;
+	return { ...clone(defn), export_row_number: { ...current, ...patch } };
+}
+
+/** Reorder the EXPORT list. `from`/`to` are positions in `exportEntries`, not
+ *  definition indices — the export list has its own coordinate space, and the
+ *  row-number entry has no definition index at all. Always writes a FULL
+ *  order, materializing the natural one first, so the result no longer depends
+ *  on the empty-means-natural fallback. */
+export function moveExportEntry(
+	defn: TableDefinition,
+	from: number,
+	to: number
+): TableDefinition {
+	const order = exportEntries(defn).map((e) => e.index);
+	if (from === to || from < 0 || to < 0 || from >= order.length || to >= order.length) {
+		return clone(defn);
+	}
+	order.splice(to, 0, order.splice(from, 1)[0]);
+	return { ...clone(defn), export_order: order };
 }

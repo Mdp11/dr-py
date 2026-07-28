@@ -50,6 +50,7 @@ async function seedForClone(extraColumns: Column[] = []): Promise<void> {
 		schema_version: 1,
 		default_cell_mode: 'collapse',
 		show_row_numbers: false,
+		export_order: [],
 		row_source: { kind: 'scope', types: ['Block'], criteria: [] },
 		columns: [
 			{
@@ -86,6 +87,7 @@ function scopeDraft(columns: TableDefinition['columns']) {
 			schema_version: 1,
 			default_cell_mode: 'collapse' as const,
 			show_row_numbers: false,
+			export_order: [],
 			row_source: { kind: 'scope' as const, types: ['Block'], criteria: [] },
 			columns
 		}
