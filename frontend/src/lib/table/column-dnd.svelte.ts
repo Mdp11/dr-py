@@ -44,13 +44,22 @@ export interface ColumnDragState {
  * zero) hit-testing falls back to document.elementFromPoint + closest(attr) —
  * the previous mechanism, which the test suites stub. The move is validated
  * with the PURE moveColumn before the drop is offered, so a forward-ref-
- * violating drop shows as invalid instead of throwing late. */
+ * violating drop shows as invalid instead of throwing late — unless the host
+ * supplies its own `validate`, which bypasses moveColumn entirely (the export
+ * list reorders OUTPUT positions, which have no such constraint). */
 export function createColumnDrag(opts: {
 	attr: string;
 	/** Drag axis: 'x' for the horizontal header strip, 'y' for the settings
 	 * list. Defaults to 'x'. */
 	axis?: 'x' | 'y';
-	getDefinition: () => TableDefinition | undefined;
+	/** Only needed by the DEFAULT validator. */
+	getDefinition?: () => TableDefinition | undefined;
+	/** Whether a drop is offered. Defaults to "moveColumn would succeed",
+	 * which is right for the two hosts that reorder DEFINITION columns
+	 * (backward-only ColumnRef). The export list reorders OUTPUT positions,
+	 * which carry no such constraint and include a slot with no definition
+	 * column at all, so it supplies its own. */
+	validate?: (from: number, to: number) => boolean;
 	onDrop: (from: number, to: number) => void;
 }): ColumnDragState {
 	const axis = opts.axis ?? 'x';
@@ -213,17 +222,25 @@ export function createColumnDrag(opts: {
 				const t = hit ? Number(hit.getAttribute(opts.attr)) : NaN;
 				over = Number.isInteger(t) ? t : null;
 			}
-			const defn = opts.getDefinition();
-			if (over === null || from === over || !defn) {
+			if (over === null || from === over) {
 				valid = false;
 				computeOffsets();
 				return;
 			}
-			try {
-				moveColumn(defn, from, over);
-				valid = true;
-			} catch {
-				valid = false;
+			if (opts.validate) {
+				valid = opts.validate(from, over);
+			} else {
+				const defn = opts.getDefinition?.();
+				if (!defn) {
+					valid = false;
+				} else {
+					try {
+						moveColumn(defn, from, over);
+						valid = true;
+					} catch {
+						valid = false;
+					}
+				}
 			}
 			computeOffsets();
 		},

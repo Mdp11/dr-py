@@ -287,6 +287,33 @@ describe('createColumnDrag', () => {
 		});
 	});
 
+	it('uses a custom validator instead of moveColumn when given one', () => {
+		// The export list reorders OUTPUT positions, which have none of
+		// moveColumn's backward-reference constraints — and its entries include
+		// the row-number slot, which has no definition column at all.
+		const drops: Array<[number, number]> = [];
+		const drag = createColumnDrag({
+			attr: 'data-export-drop',
+			axis: 'y',
+			validate: () => true,
+			onDrop: (from, to) => drops.push([from, to])
+		});
+		const target = document.createElement('div');
+		target.setAttribute('data-export-drop', '1');
+		vi.spyOn(document, 'elementFromPoint').mockReturnValue(target);
+
+		drag.onPointerDown(fakeEvent({ clientX: 0, clientY: 0 }), 0);
+		drag.onPointerMove(fakeEvent({ clientX: 0, clientY: 100 })); // past threshold
+
+		expect(drag.from).toBe(0);
+		expect(drag.over).toBe(1);
+		expect(drag.valid).toBe(true);
+
+		drag.onPointerUp(fakeEvent({ clientX: 0, clientY: 100 }));
+
+		expect(drops).toEqual([[0, 1]]);
+	});
+
 	it('resets after a completed valid drop so a second drag starts clean', () => {
 		const onDrop = vi.fn();
 		const defn = defWithColumns(3);
