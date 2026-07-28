@@ -16,7 +16,13 @@ import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } fr
 import * as tablesApi from '$lib/api/tables';
 import type { TableDefinition } from '$lib/api/types';
 import * as state from '$lib/state';
-import { ensureTableDraft, getTableDraft, setTableSort, updateTableDefinition } from '$lib/state';
+import {
+	closeTableDraft,
+	ensureTableDraft,
+	getTableDraft,
+	getTableLoading,
+	updateTableDefinition
+} from '$lib/state';
 import ExportDialog from '../ExportDialog.svelte';
 
 const TAB_ID = 'tbl:draft:export-dialog-test';
@@ -97,12 +103,14 @@ async function waitFor(pred: () => boolean, ms = 2000): Promise<void> {
 
 let mounted: ReturnType<typeof mount>[] = [];
 
-async function open(
-	format: 'xlsx' | 'json' = 'xlsx',
-	over: Partial<TableDefinition> = {}
-): Promise<{ target: HTMLElement; component: ReturnType<typeof mount> }> {
-	await ensureTableDraft(TAB_ID);
-	updateTableDefinition(TAB_ID, { ...defn(), ...over });
+/** Mount the dialog over whatever the draft currently holds. Kept apart from
+ *  `open()` so a test can drive a PRISTINE draft (one no `updateTableDefinition`
+ *  has dirtied) — which is the only state in which "cancelling changes nothing"
+ *  is observable. */
+function mountDialog(format: 'xlsx' | 'json'): {
+	target: HTMLElement;
+	component: ReturnType<typeof mount>;
+} {
 	const target = document.createElement('div');
 	document.body.appendChild(target);
 	const component = mount(ExportDialog, {
@@ -114,18 +122,36 @@ async function open(
 	return { target, component };
 }
 
+/** Close every dialog this test opened. Two live dialogs over one tabId means
+ *  two snapshot effects on the same draft — never what a test means to set up. */
+function closeAll(): void {
+	for (const c of mounted) unmount(c);
+	mounted = [];
+	document.body.innerHTML = '';
+}
+
+async function open(
+	format: 'xlsx' | 'json' = 'xlsx',
+	over: Partial<TableDefinition> = {}
+): Promise<{ target: HTMLElement; component: ReturnType<typeof mount> }> {
+	await ensureTableDraft(TAB_ID);
+	updateTableDefinition(TAB_ID, { ...defn(), ...over });
+	return mountDialog(format);
+}
+
 const current = (): TableDefinition => getTableDraft(TAB_ID)!.definition;
 const byTestId = (t: HTMLElement | Document, id: string): HTMLElement =>
 	(t as HTMLElement).querySelector(`[data-testid="${id}"]`) as HTMLElement;
 
 afterEach(() => {
-	for (const c of mounted) unmount(c);
-	mounted = [];
-	document.body.innerHTML = '';
-	// `_sorts` (unlike the draft's definition) is not reset by re-seeding — clear
-	// it BEFORE restoreAllMocks, since setTableSort fire-and-forgets a
-	// loadTablePage/evaluateTable call that must still land on the stub.
-	setTableSort(TAB_ID, undefined);
+	closeAll();
+	// Drop the whole tab, not just the DOM: `ensureTableDraft` returns the
+	// EXISTING draft, so a draft one test dirtied (and the sort it left in
+	// `_sorts`) would otherwise be what the next test opens over — and the
+	// clean-draft assertions below could never fail. Done BEFORE
+	// restoreAllMocks, since it orphans any in-flight load that would
+	// otherwise land on the real, absent dev backend.
+	closeTableDraft(TAB_ID);
 	vi.restoreAllMocks();
 });
 
@@ -181,9 +207,55 @@ describe('ExportDialog', () => {
 		await open('xlsx');
 		expect(byTestId(document, 'json-group-1')).toBeNull();
 		expect(byTestId(document, 'json-value-1')).toBeNull();
+		// Unmount before re-opening: two live dialogs on one tabId would each
+		// hold their own snapshot of the same draft.
+		closeAll();
 		await open('json');
 		expect(byTestId(document, 'json-group-1')).toBeTruthy();
 		expect(byTestId(document, 'json-value-1')).toBeTruthy();
+	});
+
+	// Export settings change the FILE, never the grid, so no edit here may kick
+	// a whole-table evaluate. `evaluateTable` is the store's own dependency
+	// (`table-editor.svelte.ts` imports it), and the real store is what these
+	// tests drive — so the spy sees exactly the requests the component caused.
+	it('an export-settings edit reloads no table page', async () => {
+		await open('xlsx');
+		const evaluate = vi.mocked(tablesApi.evaluateTable);
+		evaluate.mockClear(); // the seeding updateTableDefinition above fired one
+		byTestId(document, 'export-include-1').click();
+		flushSync();
+		const input = byTestId(document, 'export-name-0') as HTMLInputElement;
+		input.value = 'Assembly';
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+		// The edits landed...
+		expect(current().columns[1].export?.include).toBe(false);
+		expect(current().columns[0].export?.header).toBe('Assembly');
+		// ...and cost nothing: no request, and no "busy" pulse on the tab.
+		await new Promise((r) => setTimeout(r, 0));
+		expect(evaluate).not.toHaveBeenCalled();
+		expect(getTableLoading(TAB_ID)).toBe(false);
+	});
+
+	// The bug this pins: `cancel()` used to write the snapshot back
+	// unconditionally, and every definition write sets `dirty`. Opening the
+	// dialog on a saved, clean table and dismissing it therefore left the table
+	// unsaved — with an enabled Save button and one wasted evaluate — over an
+	// edit the user never made. A pristine draft is the only state that shows
+	// it, hence `ensureTableDraft` alone here (no seeding write).
+	it('Cancel with no edits writes nothing and leaves the draft clean', async () => {
+		await ensureTableDraft(TAB_ID);
+		const before = getTableDraft(TAB_ID)!;
+		expect(before.dirty).toBe(false);
+		mountDialog('xlsx');
+		byTestId(document, 'export-cancel').click();
+		flushSync();
+		await new Promise((r) => setTimeout(r, 0));
+		// Same draft OBJECT: not merely "clean again", but never written at all.
+		expect(getTableDraft(TAB_ID)).toBe(before);
+		expect(getTableDraft(TAB_ID)!.dirty).toBe(false);
+		expect(vi.mocked(tablesApi.evaluateTable)).not.toHaveBeenCalled();
 	});
 
 	it('Cancel restores the definition captured when the dialog opened', async () => {

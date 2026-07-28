@@ -34,7 +34,7 @@ import type {
 	TableDefinition
 } from '$lib/api/types';
 import { chainColumns } from '$lib/navigation/tree';
-import { ROW_NUMBER_SLOT, exportEntries } from './export-layout';
+import { ROW_NUMBER_SLOT, columnIncluded, exportEntries } from './export-layout';
 
 export class ColumnInUseError extends Error {}
 
@@ -355,17 +355,25 @@ const DEFAULT_ROW_NUMBER_OPTIONS: RowNumberExportOptions = {
 /**
  * The JSON key each column gets, mirroring `resolve_json_keys` in
  * `core/table/json_export.py`: explicit key, else header, else `kind_index`,
- * with later duplicates suffixed `_2`, `_3`. Hidden columns get `null` and
- * consume no name.
+ * with later duplicates suffixed `_2`, `_3`. A column the export EXCLUDES gets
+ * `null` and consumes no name.
  *
- * DISPLAY ONLY — this is what the settings pane shows as a placeholder. The
+ * Keyed off `columnIncluded`, NOT off `hidden`. The backend renders through
+ * `export_definition`, which rewrites each `hidden` flag to say what the export
+ * contains before `resolve_json_keys` ever sees it — so a grid-hidden column
+ * that was opted back in does get a key and does appear in the file, and an
+ * opted-OUT visible column gets neither. Reading `hidden` here would have shown
+ * a blank placeholder (and refused to snake_case) for a column the download
+ * emits, and vice versa.
+ *
+ * DISPLAY ONLY — this is what the export dialog shows as a placeholder. The
  * authoritative keys are the backend's, and the preview pane renders through
  * the backend for exactly that reason.
  */
 export function defaultJsonKeys(defn: TableDefinition): (string | null)[] {
 	const used = new Set<string>();
 	return defn.columns.map((col, i) => {
-		if (col.hidden) return null;
+		if (!columnIncluded(defn, i)) return null;
 		const base = col.json_export?.key || col.header || `${col.kind}_${i}`;
 		let key = base;
 		let n = 2;

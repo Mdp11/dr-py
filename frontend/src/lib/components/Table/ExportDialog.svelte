@@ -17,7 +17,12 @@
 	// row keys, and a second implementation in TypeScript would drift from
 	// `core/table/json_export.py` — the pane would then confidently show
 	// something the download does not produce.
-	import { downloadTable, getTableDraft, getTableSort, updateTableDefinition } from '$lib/state';
+	import {
+		downloadTable,
+		getTableDraft,
+		getTableSort,
+		updateTableExportSettings
+	} from '$lib/state';
 	import {
 		defaultJsonKeys,
 		moveExportEntry,
@@ -89,17 +94,17 @@
 
 	function patchExport(index: number, p: Parameters<typeof setColumnExportOptions>[2]): void {
 		if (!defn) return;
-		updateTableDefinition(tabId, setColumnExportOptions(defn, index, p));
+		updateTableExportSettings(tabId, setColumnExportOptions(defn, index, p));
 	}
 
 	function patchJson(index: number, p: Parameters<typeof setColumnJsonOptions>[2]): void {
 		if (!defn) return;
-		updateTableDefinition(tabId, setColumnJsonOptions(defn, index, p));
+		updateTableExportSettings(tabId, setColumnJsonOptions(defn, index, p));
 	}
 
 	function patchRowNumber(p: Parameters<typeof setRowNumberExportOptions>[1]): void {
 		if (!defn) return;
-		updateTableDefinition(tabId, setRowNumberExportOptions(defn, p));
+		updateTableExportSettings(tabId, setRowNumberExportOptions(defn, p));
 	}
 
 	function toggleInclude(entry: ExportEntry): void {
@@ -129,8 +134,8 @@
 	}
 
 	/** What the file falls back to when the name is left blank: the grid header
-	 *  for xlsx, the derived JSON key otherwise (blank for a grid-hidden column,
-	 *  which has no derived key — see `defaultJsonKeys`). */
+	 *  for xlsx, the derived JSON key otherwise (blank only for an EXCLUDED
+	 *  entry, which is emitted nowhere — see `defaultJsonKeys`). */
 	function placeholderOf(entry: ExportEntry): string {
 		if (entry.index === ROW_NUMBER_SLOT) return format === 'json' ? 'row_number' : '#';
 		const col = defn?.columns[entry.index];
@@ -149,7 +154,7 @@
 		validate: () => true,
 		onDrop: (from, to) => {
 			if (!defn) return;
-			updateTableDefinition(tabId, moveExportEntry(defn, from, to));
+			updateTableExportSettings(tabId, moveExportEntry(defn, from, to));
 		}
 	});
 
@@ -158,7 +163,7 @@
 		let next: TableDefinition = defn;
 		const derived = defaultJsonKeys(defn);
 		derived.forEach((k, i) => {
-			if (k === null) return; // hidden: no key to rewrite
+			if (k === null) return; // excluded from the export: no key to rewrite
 			// A blank item key keeps following the (now snaked) group key —
 			// writing one would only freeze today's fallback into the payload.
 			const item = defn.columns[i].json_export?.item_key ?? '';
@@ -168,7 +173,7 @@
 				item ? { key: snakeCaseKey(k), item_key: snakeCaseKey(item) } : { key: snakeCaseKey(k) }
 			);
 		});
-		updateTableDefinition(tabId, next);
+		updateTableExportSettings(tabId, next);
 	}
 
 	// Preview follows the definition AND the active grid sort — `downloadTable`
@@ -211,10 +216,24 @@
 
 	/** Restore the definition this dialog opened with. Reached by the Cancel
 	 *  button and by every dismissal bits-ui reports (Escape, an overlay click,
-	 *  its own close) — a discard is a discard whichever way it is spelled. */
+	 *  its own close) — a discard is a discard whichever way it is spelled.
+	 *
+	 *  WRITES NOTHING when nothing changed. `updateTableExportSettings` sets
+	 *  `dirty` unconditionally, so an unguarded restore would mark a clean,
+	 *  saved table unsaved just for opening this dialog and dismissing it.
+	 *  Compared by JSON fingerprint — the same "did anything actually change"
+	 *  test the settings dialog's discard gate uses (`hasSuspendedTableEdits`
+	 *  → `definitionFingerprint`), including its harmless failure mode: two
+	 *  structurally equal definitions with different key order would compare
+	 *  unequal and cost one needless restore, never a lost one. */
 	function cancel(): void {
-		if (snapshot) updateTableDefinition(tabId, snapshot);
+		if (snapshot && defn && JSON.stringify(defn) !== JSON.stringify(snapshot)) {
+			updateTableExportSettings(tabId, snapshot);
+		}
 		snapshot = null;
+		// The message describes an export that is now over: leaving it behind
+		// would greet the next opening with a stale failure.
+		exportError = null;
 		onClose();
 	}
 

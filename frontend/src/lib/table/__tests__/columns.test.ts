@@ -638,6 +638,27 @@ describe('defaultJsonKeys', () => {
 		const d = defn(el({ header: 'Mass', hidden: true }), el({ header: 'Mass' }));
 		expect(defaultJsonKeys(d)).toEqual([null, 'Mass']);
 	});
+
+	// The keys follow what the EXPORT contains, not what the grid shows: the
+	// backend resolves them from `export_definition`, whose `hidden` flags have
+	// already been rewritten from the include overrides. A hidden column opted
+	// back in is emitted, so it must get a key here too (and, being first, must
+	// take the undecorated name and push the visible duplicate to `Mass_2`).
+	it('keys a hidden column that the export includes', () => {
+		const d = defn(
+			el({ header: 'Mass', hidden: true, export: { include: true, header: '' } }),
+			el({ header: 'Mass' })
+		);
+		expect(defaultJsonKeys(d)).toEqual(['Mass', 'Mass_2']);
+	});
+
+	it('gives a visible column the export excludes no key', () => {
+		const d = defn(
+			el({ header: 'Mass', export: { include: false, header: '' } }),
+			el({ header: 'Mass' })
+		);
+		expect(defaultJsonKeys(d)).toEqual([null, 'Mass']);
+	});
 });
 
 describe('snakeCaseKey', () => {

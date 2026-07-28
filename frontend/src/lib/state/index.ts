@@ -333,6 +333,7 @@ export {
 	setTableSort,
 	suspendTableEvaluation,
 	updateTableDefinition,
+	updateTableExportSettings,
 	type ExportProgress,
 	type TableData,
 	type TableDraft

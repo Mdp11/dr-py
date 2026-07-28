@@ -1293,6 +1293,37 @@ export function updateTableDefinition(tabId: string, defn: TableDefinition): voi
 	void loadTablePage(tabId, 0);
 }
 
+/**
+ * `updateTableDefinition` for EXPORT-ONLY settings: the same draft write,
+ * without the re-evaluation.
+ *
+ * Skipping the reload is safe because `export`, `json_export`, `export_order`
+ * and `export_row_number` describe the exported FILE and nothing else. They
+ * change no row, no cell value and no order in the grid — `/tables/evaluate`
+ * reads none of them (the layout is applied by `/tables/export` and
+ * `/tables/json-preview`), so the reload could only repaint the identical page.
+ * And it is not free: `loadTablePage` bumps the tab's generation, drops the
+ * script-error recap (`clearScriptErrors`) and pulses the activity bar, so the
+ * export dialog's per-keystroke renames would each cost a whole-table evaluate
+ * for a grid that cannot change.
+ *
+ * A SEPARATE function rather than a flag on `updateTableDefinition`, because
+ * only the caller knows which fields it just edited. A "skip the reload"
+ * boolean on the mutation every other editor funnels through would be one
+ * careless `true` away from a grid that silently stops following its own
+ * definition; a wrongly-chosen function here can only ever fail to repaint the
+ * one call site that chose it.
+ *
+ * `dirty` is still set: export settings are part of the saved payload like
+ * everything else. Callers that must not dirty a clean draft (a dialog's
+ * Cancel restoring an unchanged definition) are expected not to call at all.
+ */
+export function updateTableExportSettings(tabId: string, defn: TableDefinition): void {
+	const draft = _drafts.get(tabId);
+	if (!draft) return;
+	_drafts.set(tabId, { ...draft, definition: defn, dirty: true });
+}
+
 export function setTableSort(tabId: string, sort: TableSort | undefined): void {
 	if (sort === undefined) _sorts.delete(tabId);
 	else _sorts.set(tabId, sort);
