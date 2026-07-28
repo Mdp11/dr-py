@@ -323,6 +323,64 @@ def test_build_workbook_places_row_numbers_at_a_middle_column():
     assert ws.auto_filter.ref == "A1:C3"
 
 
+def test_build_workbook_rejects_out_of_range_row_number_col():
+    # Review finding: Task 4 will compute `row_number_col` dynamically from
+    # user-draggable export settings, a caller that CAN get the index wrong.
+    # Both too-high and negative must raise a clear `ValueError` (not a bare
+    # `StopIteration`/`AssertionError`) so the route's
+    # `except (NavigationResolveError, ValueError)` turns it into a 422.
+    from data_rover.api.table_export import build_workbook
+    from data_rover.core.metamodel.schema import Metamodel
+    from data_rover.core.model.model import Model
+    from data_rover.core.table.cells import ValueCell
+
+    def v(text: str) -> ValueCell:
+        return ValueCell(present=True, value=text, element_id=None, editable=False)
+
+    for bad_col in (2, -1):
+        with pytest.raises(ValueError, match="row_number_col"):
+            build_workbook(
+                Model(Metamodel()),
+                ["A", "B"],
+                "Sheet",
+                [[v("a1"), v("b1")]],
+                row_number_col=bad_col,
+            )
+
+
+def test_build_workbook_rejects_mismatched_row_length():
+    # Companion to the out-of-range guard above: a row with the wrong cell
+    # count (too few OR too many, relative to `len(headers)` minus the
+    # row-number slot) must raise a clear `ValueError` rather than a bare
+    # `StopIteration` or silently dropping extra cells.
+    from data_rover.api.table_export import build_workbook
+    from data_rover.core.metamodel.schema import Metamodel
+    from data_rover.core.model.model import Model
+    from data_rover.core.table.cells import ValueCell
+
+    def v(text: str) -> ValueCell:
+        return ValueCell(present=True, value=text, element_id=None, editable=False)
+
+    # too few cells for a 3-header, 1-row-number-column sheet (expects 2)
+    with pytest.raises(ValueError, match="row 1 has 1 cell"):
+        build_workbook(
+            Model(Metamodel()),
+            ["A", "#", "B"],
+            "Sheet",
+            [[v("a1")]],
+            row_number_col=1,
+        )
+    # too many cells for the same sheet
+    with pytest.raises(ValueError, match="row 1 has 3 cell"):
+        build_workbook(
+            Model(Metamodel()),
+            ["A", "#", "B"],
+            "Sheet",
+            [[v("a1"), v("b1"), v("extra")]],
+            row_number_col=1,
+        )
+
+
 class TestSheetTitle:
     """Direct unit tests for `_sheet_title`; it had zero before this fix."""
 

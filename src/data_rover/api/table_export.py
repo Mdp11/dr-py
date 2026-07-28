@@ -112,7 +112,25 @@ def build_workbook(
     column list. `headers` must already carry that column's header at this
     index, and each row from `row_iter` therefore carries one FEWER cell than
     `headers` has entries. Numbering follows export row order, which follows
-    the requested sort."""
+    the requested sort.
+
+    Both a `row_number_col` outside `headers`' range and a row whose cell
+    count doesn't match the expected length raise `ValueError` (not
+    `AssertionError` — an `assert` disappears under `python -O`, and a bare
+    `StopIteration` from an exhausted row would otherwise propagate
+    uncaught). `ValueError` specifically because callers (`routes/tables.py`)
+    wrap this in `except (NavigationResolveError, ValueError)` and answer a
+    422; the same reasoning `_sheet_title` documents for preferring a
+    sanitize-or-raise-`ValueError` failure over a raw exception that would
+    500 instead. This contract only bites once a caller computes
+    `row_number_col` dynamically (Task 4) rather than passing the constant
+    `0`/`None` the sole caller uses today."""
+    if row_number_col is not None and not 0 <= row_number_col < len(headers):
+        raise ValueError(
+            f"row_number_col={row_number_col} is out of range for "
+            f"{len(headers)} header(s)"
+        )
+    expected_len = len(headers) - (1 if row_number_col is not None else 0)
     buf = io.BytesIO()
     wb = xlsxwriter.Workbook(
         buf,
@@ -139,6 +157,12 @@ def build_workbook(
 
     r = 0
     for r, row in enumerate(row_iter, start=1):
+        if len(row) != expected_len:
+            raise ValueError(
+                f"row {r} has {len(row)} cell(s), expected {expected_len} "
+                f"for {len(headers)} header(s) with row_number_col="
+                f"{row_number_col!r}"
+            )
         cells = iter(row)
         for col in range(len(headers)):
             if col == row_number_col:
