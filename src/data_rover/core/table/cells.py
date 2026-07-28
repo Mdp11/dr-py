@@ -246,7 +246,8 @@ def _navigation_cell(
         else min(col.cell_cap, limits.max_cell_elements)
     )
     if any(isinstance(n, PropertyValue) for n in reached):
-        # The projected step is a scalar property step: the cell shows VALUES.
+        # The projected step ended at a value (a scalar property step, or a
+        # script step that returned a non-element): the cell shows VALUES.
         # A mixed frontier (the same property name element-typed on one type,
         # scalar on another) degrades element nodes to their display names so
         # nothing silently drops.

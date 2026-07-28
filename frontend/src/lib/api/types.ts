@@ -482,9 +482,10 @@ export const ArtifactSchema = ArtifactHeaderSchema.extend({
 });
 export type Artifact = z.infer<typeof ArtifactSchema>;
 
-/** Terminal VALUE node in a chain: a scalar property step ends its chain at
- * the property's value instead of an element (discriminated from TreeItem by
- * the `kind` tag — TreeItem has no `kind`). */
+/** Terminal VALUE node in a chain: a scalar property step — or a script step
+ * whose `step()` returned something that names no element — ends its chain at
+ * that value instead of an element (discriminated from TreeItem by the `kind`
+ * tag — TreeItem has no `kind`). */
 export const ChainValueSchema = z.object({
 	kind: z.literal('value'),
 	value: z.union([z.string(), z.number(), z.boolean()])

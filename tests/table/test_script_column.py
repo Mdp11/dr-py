@@ -13,7 +13,13 @@ from data_rover.core.script.embed import ScriptEvalContext
 from data_rover.core.script.runner import RunLimits, ScriptBudget
 from data_rover.core.script.schema import SnippetDefinition, SnippetSource
 from data_rover.core.script.warnings import ScriptWarningCode
-from data_rover.core.table.cells import ElementsCell, ErrorCell, ValueCell, evaluate_cells
+from data_rover.core.table.cells import (
+    ElementsCell,
+    ErrorCell,
+    ValueCell,
+    ValuesCell,
+    evaluate_cells,
+)
 from data_rover.core.table.evaluate import TableLimits, build_rows_ex
 from data_rover.core.table.resolve import resolve_table_refs, table_has_script
 from data_rover.core.table.schema import (
@@ -963,3 +969,44 @@ def test_sort_falls_back_to_build_order_predicate() -> None:
     assert sort_falls_back_to_build_order(defn, SortSpec(2, "asc")) is False
     # a property column has no such backstop
     assert sort_falls_back_to_build_order(defn, SortSpec(3, "asc")) is True
+
+
+def test_nav_script_step_value_terminal_renders_as_a_values_cell() -> None:
+    """Seam test: a navigation column whose script step returns a NON-element
+    reaches the cell layer as a `PropertyValue` terminal, exactly like a
+    scalar property step, and renders as a `ValuesCell`. The unwrapping code
+    in table/cells.py is shared between the two producers, so one test pins
+    the seam rather than re-covering that module."""
+    mm = _mm()
+    model = _fixture()
+    defn = TableDefinition(
+        row_source=ScopeRows(types=["Block"]),
+        columns=[
+            ElementColumn(),
+            NavigationColumn(
+                navigation=NavigationSource(
+                    definition=PathNavigation(
+                        kind="path",
+                        start=RowStart(),
+                        steps=[
+                            ScriptStep(
+                                snippet=_snip("def step(el):\n    return el.name")
+                            )
+                        ],
+                    )
+                ),
+            ),
+        ],
+    )
+    ctx = _script_ctx(model)
+    build = build_rows_ex(mm, model, defn, TableLimits(), script=ctx)
+    rows = evaluate_cells(mm, model, defn, build.keys, TableLimits(), script=ctx)
+    cells = [r[1] for r in rows]
+    assert all(isinstance(c, ValuesCell) for c in cells)
+    assert {v for c in cells if isinstance(c, ValuesCell) for v in c.values} == {
+        "Block A",
+        "Block B",
+        "Block C",
+    }
+    assert not ctx.warnings
+    ctx.close()
