@@ -734,14 +734,13 @@ def export_table(
             if row is not None:
                 name = row.name
         # Export settings are PRESENTATION: the layout says what the file
-        # contains and in what order, and `export_definition` restates
-        # inclusion as `hidden` so `json_export`'s existing hidden-column and
-        # group-nesting logic is reused rather than reimplemented. Both are
-        # for the RENDER only — `iter_export_rows` below keeps the ORIGINAL
-        # `defn`, so cell values, row order, and every script cache key are
-        # exactly what they would be without any of this.
+        # contains and in what order. It is for the RENDER only —
+        # `iter_export_rows` below keeps the ORIGINAL `defn`, so cell values,
+        # row order, and every script cache key are exactly what they would be
+        # without any of this. (`export_definition`, the other half of that
+        # boundary, is built inside the JSON branch and nowhere else — see
+        # there.)
         layout = export_layout(defn)
-        eff = export_definition(defn)
         headers = [export_header(defn, i) for i in layout.order]
         if layout.row_number_pos is not None:
             headers.insert(layout.row_number_pos, layout.row_number_header)
@@ -788,6 +787,14 @@ def export_table(
             return None
 
         if payload.format == "json":
+            # `export_definition` restates inclusion as `hidden` so
+            # `json_export`'s existing hidden-column and group-nesting logic is
+            # reused rather than reimplemented. Built HERE rather than beside
+            # `layout` above because only this branch renders through it: the
+            # xlsx path slices rows by `layout.order` and never sees an
+            # export-effective definition at all, which is the render-only
+            # boundary made visible instead of merely argued.
+            eff = export_definition(defn)
             # `render_json` indexes cells by DEFINITION column index, so it
             # gets the UNFILTERED rows — excluded columns are dropped inside it
             # by their `None` key, not by pre-slicing the row like the xlsx

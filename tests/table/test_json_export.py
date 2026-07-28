@@ -1345,6 +1345,58 @@ def test_render_json_emits_the_row_number_at_its_position():
     assert [d["row_number"] for d in docs] == list(range(1, len(docs) + 1))
 
 
+def test_render_json_honors_export_order_for_a_grouped_column():
+    """A grouped column's array moves with the export order, at BOTH levels.
+
+    `_render_level` used to emit `sorted([*columns, *groups])` — definition
+    order — which happens to put the array last in every naturally-ordered
+    table, so no other test can tell the two apart. Here the ranks reverse the
+    definition: the "Component" array leads its object, and inside each entry
+    "Component Mass" leads the grouped column's own value. Both levels are
+    asserted verbatim because `_render_group` forwards `order` to the nested
+    `_render_level` and nothing else pins that it does.
+    """
+    mm = _parts_mm()
+    # rank per DEFINITION index: Name -> 2, Component -> 1, Component Mass -> 0.
+    docs = _render(
+        mm,
+        _parts_model(mm),
+        {
+            "row_source": {"kind": "scope", "types": ["Block"], "criteria": []},
+            "columns": [
+                {
+                    "kind": "property",
+                    "source": {"kind": "row"},
+                    "name": "name",
+                    "header": "Name",
+                },
+                _hop_nav("expand", group=True),
+                {
+                    "kind": "property",
+                    "source": {"kind": "column", "index": 1},
+                    "name": "mass",
+                    "header": "Component Mass",
+                },
+            ],
+        },
+        order=[2, 1, 0],
+    )
+    root = next(d for d in docs if d.get("Name") == "Root")
+    assert root == {
+        "Component": [
+            {"Component Mass": 12, "Component": "Part 1"},
+            {"Component Mass": 9, "Component": "Part 2"},
+        ],
+        "Name": "Root",
+    }
+    # dict equality ignores key order, so pin the observable separately.
+    assert list(root.keys()) == ["Component", "Name"]
+    assert [list(e.keys()) for e in cast(list[dict], root["Component"])] == [
+        ["Component Mass", "Component"],
+        ["Component Mass", "Component"],
+    ]
+
+
 def test_render_json_omits_the_row_number_inside_groups():
     # A grouped column's array entries are not rows, so a row number there
     # would have no referent.

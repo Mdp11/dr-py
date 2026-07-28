@@ -126,6 +126,45 @@ def test_row_number_entry_sits_where_the_order_puts_it():
     assert layout.rank == (0, 2)
 
 
+def test_an_excluded_column_before_the_row_number_consumes_no_position():
+    """Position compaction, which nothing else pins.
+
+    `export_layout` advances `pos` only for entries that survive, so an
+    EXCLUDED column sitting ahead of the row-number slot must not push the
+    slot right. Getting this wrong is not a cosmetic misorder: the xlsx caller
+    builds `headers` from `layout.order` and then inserts the "#" header at
+    `row_number_pos`, so a position that counts a dropped column lands the
+    header on the wrong output column — and one past the end is exactly the
+    `build_workbook` `ValueError` guard's reason to exist.
+    """
+    defn = _defn(
+        show_row_numbers=True,
+        export_order=[0, ROW_NUMBER_SLOT, 1],
+        columns=[
+            {
+                "kind": "element",
+                "source": {"kind": "row"},
+                "header": "Block",
+                "export": {"include": False},
+            },
+            {
+                "kind": "property",
+                "source": {"kind": "row"},
+                "name": "mass",
+                "header": "Mass",
+            },
+        ],
+    )
+    layout = export_layout(defn)
+    assert layout.order == (1,)
+    assert layout.row_number_pos == 0  # NOT 1 — column 0 is not in the file
+    assert layout.rank[1] == 1
+    # The header list the xlsx route builds from this stays in range.
+    headers = [export_header(defn, i) for i in layout.order]
+    headers.insert(layout.row_number_pos, layout.row_number_header)
+    assert headers == ["#", "Mass"]
+
+
 def test_row_number_entry_can_be_excluded():
     defn = _defn(show_row_numbers=True, export_row_number={"include": False})
     layout = export_layout(defn)

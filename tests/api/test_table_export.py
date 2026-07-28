@@ -444,6 +444,26 @@ def test_export_xlsx_row_number_column_can_be_moved_and_renamed(client):
     assert ws.cell(row=2, column=2).value == 1
 
 
+def test_export_xlsx_excluded_column_before_the_row_number_column(client):
+    # The combination `test_export_xlsx_row_number_column_can_be_moved_and_
+    # renamed` does not reach: the row-number slot sits AFTER a column the
+    # export drops, so its output position only lines up if `export_layout`
+    # skips the dropped column without spending a position on it. A stale
+    # position would put "#" on the wrong column here, or (one past the end)
+    # trip `build_workbook`'s ValueError guard and 422 the whole export.
+    _bootstrap_model(client)
+    body = _two_col_body(show_row_numbers=True, export_order=[0, -1, 1])
+    body["definition"]["columns"][0]["export"] = {"include": False}
+    r = client.post(papi("/tables/export"), json=body, headers=AUTH_HEADERS)
+    assert r.status_code == 200, r.text
+    ws = load_workbook(io.BytesIO(r.content)).active
+    assert ws is not None
+    assert [c.value for c in ws[1]] == ["#", "Mass"]
+    assert ws.cell(row=2, column=1).value == 1
+    # the autofilter still spans both output columns
+    assert ws.auto_filter.ref.startswith("A1:B")
+
+
 def test_export_xlsx_row_number_column_can_be_excluded(client):
     _bootstrap_model(client)
     body = _two_col_body(show_row_numbers=True, export_row_number={"include": False})

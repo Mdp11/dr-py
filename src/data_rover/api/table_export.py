@@ -132,7 +132,15 @@ def build_workbook(
         )
     expected_len = len(headers) - (1 if row_number_col is not None else 0)
     buf = io.BytesIO()
-    wb = xlsxwriter.Workbook(
+    # `with`, not a bare `close()` at the end: the row-length check below
+    # raises MID-SHEET, and a `Workbook` that is never closed keeps whatever
+    # xlsxwriter allocated for it (in the default non-`in_memory` mode that
+    # includes temp files it removes only in `close()`). Closing while a
+    # ValueError unwinds is safe — it serializes the rows written so far into
+    # a `BytesIO` this function is about to drop — and it cannot mask the
+    # error: the sheet is structurally complete at every point the check can
+    # fire (header row written, autofilter/autofit merely not applied yet).
+    with xlsxwriter.Workbook(
         buf,
         {
             # Model property values are untrusted content. xlsxwriter's
@@ -146,46 +154,45 @@ def build_workbook(
             "strings_to_urls": False,
             "strings_to_formulas": False,
         },
-    )
-    ws = wb.add_worksheet(_sheet_title(sheet_name))
-    header_fmt = wb.add_format({"bold": True, "border": 1, "bottom": 2})
-    cell_fmt = wb.add_format({"border": 1})
+    ) as wb:
+        ws = wb.add_worksheet(_sheet_title(sheet_name))
+        header_fmt = wb.add_format({"bold": True, "border": 1, "bottom": 2})
+        cell_fmt = wb.add_format({"border": 1})
 
-    for col, h in enumerate(headers):
-        ws.write(0, col, h, header_fmt)
-    ws.freeze_panes(1, 0)
+        for col, h in enumerate(headers):
+            ws.write(0, col, h, header_fmt)
+        ws.freeze_panes(1, 0)
 
-    r = 0
-    for r, row in enumerate(row_iter, start=1):
-        if len(row) != expected_len:
-            raise ValueError(
-                f"row {r} has {len(row)} cell(s), expected {expected_len} "
-                f"for {len(headers)} header(s) with row_number_col="
-                f"{row_number_col!r}"
-            )
-        cells = iter(row)
-        for col in range(len(headers)):
-            if col == row_number_col:
-                ws.write_number(r, col, r, cell_fmt)
-            else:
-                ws.write(r, col, _cell_text(model, next(cells)), cell_fmt)
+        r = 0
+        for r, row in enumerate(row_iter, start=1):
+            if len(row) != expected_len:
+                raise ValueError(
+                    f"row {r} has {len(row)} cell(s), expected {expected_len} "
+                    f"for {len(headers)} header(s) with row_number_col="
+                    f"{row_number_col!r}"
+                )
+            cells = iter(row)
+            for col in range(len(headers)):
+                if col == row_number_col:
+                    ws.write_number(r, col, r, cell_fmt)
+                else:
+                    ws.write(r, col, _cell_text(model, next(cells)), cell_fmt)
 
-    if headers:
-        ws.autofilter(0, 0, r, len(headers) - 1)
+        if headers:
+            ws.autofilter(0, 0, r, len(headers) - 1)
 
-    # autofit measures whatever has been written so far, so it must run
-    # BEFORE the notice row: the notice text (~130 chars) is not data and
-    # must not drive column A's width to the AUTOFIT_MAX_PX cap regardless
-    # of column A's actual content.
-    ws.autofit(AUTOFIT_MAX_PX)
+        # autofit measures whatever has been written so far, so it must run
+        # BEFORE the notice row: the notice text (~130 chars) is not data and
+        # must not drive column A's width to the AUTOFIT_MAX_PX cap regardless
+        # of column A's actual content.
+        ws.autofit(AUTOFIT_MAX_PX)
 
-    if notice_provider is not None:
-        text = notice_provider()
-        if text:
-            # Column 0 regardless of where the row-number column landed: a
-            # notice is not a data row, so it always starts at the sheet's
-            # left edge.
-            ws.write(r + 1, 0, text)
+        if notice_provider is not None:
+            text = notice_provider()
+            if text:
+                # Column 0 regardless of where the row-number column landed: a
+                # notice is not a data row, so it always starts at the sheet's
+                # left edge.
+                ws.write(r + 1, 0, text)
 
-    wb.close()
     return buf.getvalue()
