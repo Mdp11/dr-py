@@ -5,6 +5,7 @@ build real rows through `build_rows`/`evaluate_cells` rather than hand-rolling
 cells — a hand-rolled cell cannot catch a slot-index mistake."""
 
 import copy
+from typing import cast
 
 from data_rover.core.metamodel.schema import (
     ElementType,
@@ -711,7 +712,7 @@ def _hop_nav(mode: str, group: bool) -> dict:
     return col
 
 
-def _render(mm, model, doc):
+def _render(mm, model, doc, *, order=None, row_number=None):
     defn = TABLE_ADAPTER.validate_python(doc)
     build = build_rows_ex(mm, model, defn)
     return render_json(
@@ -720,6 +721,8 @@ def _render(mm, model, doc):
         build.keys,
         iter_export_rows(mm, model, defn, build.keys),
         build.base_slots,
+        order=order,
+        row_number=row_number,
     )
 
 
@@ -1290,3 +1293,94 @@ def test_two_level_nested_groups_use_the_right_key_at_each_level():
             }
         ],
     }
+
+
+def _two_col_doc() -> dict:
+    return {
+        "row_source": {"kind": "scope", "types": ["Block"], "criteria": []},
+        "columns": [
+            {
+                "kind": "property",
+                "source": {"kind": "row"},
+                "name": "name",
+                "header": "Name",
+            },
+            {
+                "kind": "property",
+                "source": {"kind": "row"},
+                "name": "mass",
+                "header": "Mass",
+            },
+        ],
+    }
+
+
+def test_render_json_honors_export_order():
+    # Key ORDER in the object is the observable: JSON objects preserve
+    # insertion order and consumers read it.
+    mm = _parts_mm()
+    docs = _render(mm, _parts_model(mm), _two_col_doc(), order=[1, 0])
+    assert list(docs[0].keys()) == ["Mass", "Name"]
+
+
+def test_render_json_without_order_is_unchanged():
+    mm = _parts_mm()
+    model = _parts_model(mm)
+    assert _render(mm, model, _two_col_doc()) == _render(
+        mm, model, _two_col_doc(), order=[0, 1]
+    )
+
+
+def test_render_json_emits_the_row_number_at_its_position():
+    # Column 0 at output position 0, the row number at 1, column 1 at 2.
+    mm = _parts_mm()
+    docs = _render(
+        mm,
+        _parts_model(mm),
+        _two_col_doc(),
+        order=[0, 2],
+        row_number=(1, "row_number"),
+    )
+    assert list(docs[0].keys()) == ["Name", "row_number", "Mass"]
+    assert [d["row_number"] for d in docs] == list(range(1, len(docs) + 1))
+
+
+def test_render_json_omits_the_row_number_inside_groups():
+    # A grouped column's array entries are not rows, so a row number there
+    # would have no referent.
+    mm = _parts_mm()
+    docs = _render(
+        mm,
+        _parts_model(mm),
+        {
+            "row_source": {"kind": "scope", "types": ["Block"], "criteria": []},
+            "columns": [
+                {
+                    "kind": "property",
+                    "source": {"kind": "row"},
+                    "name": "name",
+                    "header": "Name",
+                },
+                _hop_nav("expand", group=True),
+                {
+                    "kind": "property",
+                    "source": {"kind": "column", "index": 1},
+                    "name": "mass",
+                    "header": "Component Mass",
+                },
+            ],
+        },
+        order=[1, 2, 3],
+        row_number=(0, "row_number"),
+    )
+    root = next(d for d in docs if d.get("Name") == "Root")
+    # top level has it, first, and numbering runs 1..n over the objects
+    assert list(root.keys())[0] == "row_number"
+    assert sorted(cast(int, d["row_number"]) for d in docs) == list(
+        range(1, len(docs) + 1)
+    )
+    # the group entries do NOT
+    assert root["Component"] == [
+        {"Component": "Part 1", "Component Mass": 12},
+        {"Component": "Part 2", "Component Mass": 9},
+    ]

@@ -8,7 +8,7 @@ Spec: docs/superpowers/specs/2026-07-25-table-json-export-design.md
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 from data_rover.core.model.model import Model
@@ -25,6 +25,7 @@ from .cells import (
     ValuesCell,
 )
 from .evaluate import RowKey, _expand_slot_of
+from .export_layout import ROW_NUMBER_SLOT
 from .schema import Column, ColumnRef, TableDefinition
 
 
@@ -287,6 +288,9 @@ def render_json(
     row_keys: list[RowKey],
     row_iter: Iterable[list[Cell]],
     base_slots: int,
+    *,
+    order: Sequence[int] | None = None,
+    row_number: tuple[int, str] | None = None,
 ) -> list[dict[str, object]]:
     """The whole table as a list of JSON objects.
 
@@ -298,6 +302,16 @@ def render_json(
     whole — the same trade `api/table_export.py` already makes when it gives up
     xlsxwriter's `constant_memory` for `autofit`, bounded by the same
     `TableLimits.max_rows`. Rows still ARRIVE chunk by chunk.
+
+    `order` is a RANK LIST indexed by definition column index — that is,
+    `ExportLayout.rank`, not the order list itself — so the lookup in the
+    render loop is a subscript rather than a search. `None` keeps definition
+    order.
+
+    `row_number` is `(output_position, key)` and is emitted in TOP-LEVEL
+    objects only: inside a grouped array the entries are not rows, so a row
+    number there would have no referent. The number is the object's 1-based
+    position in the returned list, which follows the requested sort.
     """
     plan = build_group_plan(defn, base_slots)
     keys = JsonKeys.resolve(defn)
@@ -319,8 +333,18 @@ def render_json(
         buckets = list(merged.values())
 
     return [
-        _render_level(model, defn, keys, plan, plan.top_columns, plan.top_groups, b)
-        for b in buckets
+        _render_level(
+            model,
+            defn,
+            keys,
+            plan,
+            plan.top_columns,
+            plan.top_groups,
+            b,
+            order=order,
+            row_number=(row_number[0], row_number[1], n) if row_number else None,
+        )
+        for n, b in enumerate(buckets, start=1)
     ]
 
 
@@ -332,6 +356,9 @@ def _render_level(
     columns: tuple[int, ...],
     groups: tuple[int, ...],
     rows: list[_Pair],
+    *,
+    order: Sequence[int] | None = None,
+    row_number: tuple[int, str, int] | None = None,
 ) -> dict[str, object]:
     """One JSON object: the plain `columns` plus one array per grouped column
     in `groups`, emitted in COLUMN ORDER so a grouped column's array sits at
@@ -346,15 +373,31 @@ def _render_level(
     OWN entry level (where it is not — `build_group_plan` routes every other
     grouped column to `children`). That is the whole rule for picking between
     the two names.
+
+    Emission order is the EXPORT order when `order` is given, definition order
+    otherwise. `row_number` is `(position, key, number)` and is passed only for
+    a top-level object — `_render_group` never forwards it.
     """
     group_set = set(groups)
+    # (position, definition index) so the sort is total and stable. With no
+    # `order` the position IS the definition index; ROW_NUMBER_SLOT's -1 then
+    # breaks a tie toward the row number, which is where it belongs.
+    entries: list[tuple[int, int]] = [
+        (order[i] if order is not None else i, i) for i in (*columns, *groups)
+    ]
+    if row_number is not None:
+        entries.append((row_number[0], ROW_NUMBER_SLOT))
+
     obj: dict[str, object] = {}
-    for i in sorted([*columns, *groups]):
-        if i in group_set:
+    for _, i in sorted(entries):
+        if i == ROW_NUMBER_SLOT:
+            assert row_number is not None
+            obj[row_number[1]] = row_number[2]
+        elif i in group_set:
             key = keys.level[i]
             if key is None:  # hidden: evaluated, never emitted
                 continue
-            obj[key] = _render_group(model, defn, keys, plan, i, rows)
+            obj[key] = _render_group(model, defn, keys, plan, i, rows, order=order)
         else:
             # A grouped column reached here is rendering its own value inside
             # its own entries, which is what `item` names.
@@ -372,6 +415,8 @@ def _render_group(
     plan: GroupPlan,
     g: int,
     rows: list[_Pair],
+    *,
+    order: Sequence[int] | None = None,
 ) -> list[object]:
     """The array for one grouped column: its rows re-partitioned by the value
     sitting in its own expand slot.
@@ -398,6 +443,6 @@ def _render_group(
         mode = _mode_of(defn.columns[g])
         return [render_cell(model, sub[0][1][g], mode) for sub in parts.values()]
     return [
-        _render_level(model, defn, keys, plan, members, children, sub)
+        _render_level(model, defn, keys, plan, members, children, sub, order=order)
         for sub in parts.values()
     ]
