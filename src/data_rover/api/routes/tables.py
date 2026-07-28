@@ -733,6 +733,8 @@ def export_table(
         # position.
         visible = [i for i, c in enumerate(defn.columns) if not c.hidden]
         headers = [defn.columns[i].header or defn.columns[i].kind for i in visible]
+        if defn.show_row_numbers:
+            headers.insert(0, "#")
         all_rows = iter_export_rows(
             metamodel, model, defn, ordered, limits, script=script_ctx
         )
@@ -793,7 +795,7 @@ def export_table(
                 name,
                 ([row[i] for i in visible] for row in all_rows),
                 notice_provider=_notice,
-                row_numbers=defn.show_row_numbers,
+                row_number_col=0 if defn.show_row_numbers else None,
             )
             media_type = (
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"

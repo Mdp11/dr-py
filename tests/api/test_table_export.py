@@ -296,6 +296,33 @@ def test_export_url_like_value_stays_a_plain_string(client):
     assert cell.hyperlink is None
 
 
+def test_build_workbook_places_row_numbers_at_a_middle_column():
+    # Regression guard for the reorderable row-number entry: the old API could
+    # only PREPEND, so a row number anywhere but column A was unreachable.
+    from data_rover.api.table_export import build_workbook
+    from data_rover.core.metamodel.schema import Metamodel
+    from data_rover.core.model.model import Model
+    from data_rover.core.table.cells import ValueCell
+
+    def v(text: str) -> ValueCell:
+        return ValueCell(present=True, value=text, element_id=None, editable=False)
+
+    blob = build_workbook(
+        Model(Metamodel()),
+        ["A", "#", "B"],
+        "Sheet",
+        [[v("a1"), v("b1")], [v("a2"), v("b2")]],
+        row_number_col=1,
+    )
+    ws = load_workbook(io.BytesIO(blob)).active
+    assert ws is not None
+    assert [c.value for c in ws[1]] == ["A", "#", "B"]
+    assert [c.value for c in ws[2]] == ["a1", 1, "b1"]
+    assert [c.value for c in ws[3]] == ["a2", 2, "b2"]
+    # the autofilter still spans every column, row number included
+    assert ws.auto_filter.ref == "A1:C3"
+
+
 class TestSheetTitle:
     """Direct unit tests for `_sheet_title`; it had zero before this fix."""
 

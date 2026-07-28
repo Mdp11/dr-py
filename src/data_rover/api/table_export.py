@@ -91,7 +91,7 @@ def build_workbook(
     row_iter: Iterable[list[Cell]],
     *,
     notice_provider: Callable[[], str | None] | None = None,
-    row_numbers: bool = False,
+    row_number_col: int | None = None,
 ) -> bytes:
     """Render `row_iter` into a single-sheet workbook: bold bordered header
     row with filter dropdowns and frozen panes, thin borders on every data
@@ -106,8 +106,13 @@ def build_workbook(
     it up front. A truthy return appends one trailing single-cell row, OUTSIDE
     the autofilter range (a notice is not a data row to filter on).
 
-    `row_numbers` prepends a 1-based "#" column (spec item 10) — numbering
-    follows export row order, which follows the requested sort."""
+    `row_number_col`, if given, is the OUTPUT COLUMN INDEX at which a 1-based
+    row number is written. It is a position rather than a prepend flag because
+    the export settings let the user drag the row-number entry anywhere in the
+    column list. `headers` must already carry that column's header at this
+    index, and each row from `row_iter` therefore carries one FEWER cell than
+    `headers` has entries. Numbering follows export row order, which follows
+    the requested sort."""
     buf = io.BytesIO()
     wb = xlsxwriter.Workbook(
         buf,
@@ -128,21 +133,21 @@ def build_workbook(
     header_fmt = wb.add_format({"bold": True, "border": 1, "bottom": 2})
     cell_fmt = wb.add_format({"border": 1})
 
-    cols = ["#", *headers] if row_numbers else headers
-    for col, h in enumerate(cols):
+    for col, h in enumerate(headers):
         ws.write(0, col, h, header_fmt)
     ws.freeze_panes(1, 0)
 
-    offset = 1 if row_numbers else 0
     r = 0
     for r, row in enumerate(row_iter, start=1):
-        if row_numbers:
-            ws.write_number(r, 0, r, cell_fmt)
-        for col, cell in enumerate(row, start=offset):
-            ws.write(r, col, _cell_text(model, cell), cell_fmt)
+        cells = iter(row)
+        for col in range(len(headers)):
+            if col == row_number_col:
+                ws.write_number(r, col, r, cell_fmt)
+            else:
+                ws.write(r, col, _cell_text(model, next(cells)), cell_fmt)
 
-    if cols:
-        ws.autofilter(0, 0, r, len(cols) - 1)
+    if headers:
+        ws.autofilter(0, 0, r, len(headers) - 1)
 
     # autofit measures whatever has been written so far, so it must run
     # BEFORE the notice row: the notice text (~130 chars) is not data and
@@ -153,9 +158,9 @@ def build_workbook(
     if notice_provider is not None:
         text = notice_provider()
         if text:
-            # Column 0, unshifted by `offset`: a notice is not a data row,
-            # so it must not be pushed right to align under the "#"
-            # row-number column — it always starts at the sheet's left edge.
+            # Column 0 regardless of where the row-number column landed: a
+            # notice is not a data row, so it always starts at the sheet's
+            # left edge.
             ws.write(r + 1, 0, text)
 
     wb.close()
