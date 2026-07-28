@@ -111,7 +111,7 @@
 		{#if rowSource?.kind === 'chains'}
 			<label
 				class="flex items-center gap-1"
-				title="Which step of the row's chain this column reads (0 = the chain's first element)"
+				title="Which step of the row's chain this column reads"
 			>
 				chain step
 				<input
@@ -137,7 +137,7 @@
 		{#if refColumn?.kind === 'navigation'}
 			<label
 				class="flex items-center gap-1"
-				title="Which chain step of that navigation this column reads (0 = its start; empty = the step the column itself shows)"
+				title="Which chain step of that navigation this column reads"
 			>
 				Step to use
 				<input

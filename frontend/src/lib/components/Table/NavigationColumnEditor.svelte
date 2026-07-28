@@ -352,7 +352,7 @@
 		</label>
 		<label
 			class="flex items-center gap-1"
-			title="Keep a row with an empty cell when nothing is reached (unchecked drops those rows — with or without splitting)"
+			title="Keep a row with an empty cell when nothing is reached"
 		>
 			<input
 				type="checkbox"

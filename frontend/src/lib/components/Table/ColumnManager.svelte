@@ -203,10 +203,7 @@
 	<div data-testid="column-manager" class="space-y-3 text-xs">
 		{#if focusIndex === null}
 			<RowSourceEditor {tabId} {defn} />
-			<label
-				class="flex w-fit items-center gap-1.5"
-				title="Show a numbered first column (1-based, follows the current sort; also included in Excel exports)"
-			>
+			<label class="flex w-fit items-center gap-1.5" title="Show a numbered first column">
 				<input
 					type="checkbox"
 					data-testid="toggle-row-numbers"
@@ -322,7 +319,7 @@
 								aria-label={col.hidden ? 'Show column' : 'Hide column'}
 								title={col.hidden
 									? 'Show this column in the table and exports again'
-									: 'Hide from the table and exports — still computed and usable as an "Earlier column" source'}
+									: 'Hide from the table and exports'}
 								onclick={() => onColumnChange(i, { ...col, hidden: !col.hidden })}
 							>
 								{#if col.hidden}<EyeOff class="size-3" data-testid="eye-off-icon" />{:else}<Eye
@@ -335,7 +332,7 @@
 									data-testid="clone-column-{i}"
 									class="rounded border border-input px-1 py-0.5 text-[10px] hover:bg-muted"
 									aria-label="Duplicate column"
-									title="Duplicate this column (inserted below)"
+									title="Duplicate this column"
 									onclick={() => onClone(i)}
 								>
 									<Copy class="size-3" />

@@ -70,7 +70,7 @@
 		</label>
 		<label
 			class="flex items-center gap-1"
-			title="Keep a row with an empty cell when the script has no value (unchecked drops those rows — with or without splitting)"
+			title="Keep a row with an empty cell when the script has no value"
 		>
 			<input
 				type="checkbox"

@@ -158,7 +158,7 @@
 		<label
 			class="flex items-center gap-1 {splitDisabled ? 'opacity-50' : ''}"
 			title={splitDisabled
-				? 'This property is single-valued for the scoped types — there are no multiple values to split'
+				? 'This property is single-valued for the scoped types'
 				: 'One row per property value instead of listing them all in one cell'}
 		>
 			<input
@@ -172,7 +172,7 @@
 		</label>
 		<label
 			class="flex items-center gap-1"
-			title="Keep a row with an empty cell when the property has no value (unchecked drops those rows — with or without splitting)"
+			title="Keep a row with an empty cell when the property has no value"
 		>
 			<input
 				type="checkbox"
