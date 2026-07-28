@@ -62,9 +62,20 @@ def test_decode_value_payloads_rejected(payload: object) -> None:
 
 
 def test_decode_step_payloads() -> None:
-    decoded, msg = decode_call_payload("step", {"ids": ["a", "b"]})
-    assert (decoded, msg) == ({"ids": ["a", "b"]}, None)
-    for bad in (None, {"ids": "a"}, {"ids": [1]}, {"kind": "scalar", "value": 1}):
+    decoded, msg = decode_call_payload("step", {"nodes": ["a", "b"]})
+    assert (decoded, msg) == ({"nodes": ["a", "b"]}, None)
+    # Values ride the same list as ids — the host, not the guest, decides
+    # which strings name elements (see navigation/evaluate.py::_hop_script).
+    decoded, msg = decode_call_payload("step", {"nodes": ["a", 1, 2.5, True]})
+    assert (decoded, msg) == ({"nodes": ["a", 1, 2.5, True]}, None)
+    for bad in (
+        None,
+        {"nodes": "a"},
+        {"nodes": [{"a": 1}]},
+        {"nodes": [None]},
+        {"ids": ["a"]},  # the pre-`nodes` shape is no longer accepted
+        {"kind": "scalar", "value": 1},
+    ):
         decoded, msg = decode_call_payload("step", bad)
         assert decoded is None and msg is not None
 
@@ -100,19 +111,25 @@ def test_serialize_step_shapes(small_model) -> None:
     ns = _facade_ns(small_model)
     ser = ns["_dr_serialize_entry_result"]
     el = ns["dr"].element(next(iter(small_model.elements)))
-    assert ser("step", [el, "raw-id"]) == {"ids": [el.id, "raw-id"]}
-    assert ser("step", None) == {"ids": []}
-    with pytest.raises(ValueError):
-        ser("step", 42)
-    with pytest.raises(ValueError):
-        ser("step", [1])
-    # A bare `str` return (e.g. `return el.id`) is a single element id, not
+    assert ser("step", [el, "raw-id"]) == {"nodes": [el.id, "raw-id"]}
+    assert ser("step", None) == {"nodes": []}
+    # A bare `str` return (e.g. `return el.id`) is a single node, not
     # something to iterate char-by-char (see the `entry == "step"` branch in
     # facade_src.py).
-    assert ser("step", el.id) == {"ids": [el.id]}
+    assert ser("step", el.id) == {"nodes": [el.id]}
     # A bare `Element` return (e.g. `return el.children()[0]`) is a single
     # element, not something to index via its property-access __getitem__.
-    assert ser("step", el) == {"ids": [el.id]}
+    assert ser("step", el) == {"nodes": [el.id]}
+    # Non-string scalars are legal now: the host renders them as terminal
+    # values rather than failing the call.
+    assert ser("step", 42) == {"nodes": [42]}
+    assert ser("step", [1, 2.5, True, "text"]) == {"nodes": [1, 2.5, True, "text"]}
+    # A None ITEM contributes no node (a None RETURN already ends the chain).
+    assert ser("step", [el, None]) == {"nodes": [el.id]}
+    with pytest.raises(ValueError):
+        ser("step", {"a": 1})
+    with pytest.raises(ValueError):
+        ser("step", [[1]])
 
 
 # --- Session tests (M2) -----
@@ -165,7 +182,7 @@ def test_session_step_entry(small_model) -> None:
     ids = sorted(small_model.elements)
     sess = _open(small_model, f"def step(el):\n    return ['{ids[0]}']")
     res = sess.call("step", [ids[0]])
-    assert res.value == {"ids": [ids[0]]}
+    assert res.value == {"nodes": [ids[0]]}
     sess.close()
 
 
@@ -179,7 +196,19 @@ def test_session_step_accepts_bare_str_return(small_model) -> None:
     sess = _open(small_model, "def step(el):\n    return el.id")
     res = sess.call("step", [ids[0]])
     assert res.error is None
-    assert res.value == {"ids": [ids[0]]}
+    assert res.value == {"nodes": [ids[0]]}
+    sess.close()
+
+
+def test_session_step_returns_a_scalar(small_model) -> None:
+    # A step() that computes a value rather than a hop is legal end-to-end:
+    # the guest ships the scalar, the host turns it into a terminal chain
+    # node (nav evaluator's job, tested in tests/navigation/test_script_step.py).
+    ids = sorted(small_model.elements)
+    sess = _open(small_model, "def step(el):\n    return len(el.id)")
+    res = sess.call("step", [ids[0]])
+    assert res.error is None
+    assert res.value == {"nodes": [len(ids[0])]}
     sess.close()
 
 
@@ -195,7 +224,7 @@ def test_step_returns_single_element(session_model) -> None:
     sess = _open(model, "def step(el): return el")
     res = sess.call("step", [eid])
     assert res.error is None
-    assert res.value == {"ids": [eid]}
+    assert res.value == {"nodes": [eid]}
 
 
 def test_step_returns_single_id_string(session_model) -> None:
@@ -203,7 +232,7 @@ def test_step_returns_single_id_string(session_model) -> None:
     sess = _open(model, "def step(el): return el.id")
     res = sess.call("step", [eid])
     assert res.error is None
-    assert res.value == {"ids": [eid]}
+    assert res.value == {"nodes": [eid]}
 
 
 def test_step_indexed_child_style_return(session_model) -> None:
@@ -213,16 +242,19 @@ def test_step_indexed_child_style_return(session_model) -> None:
     sess = _open(model, "def step(el): return [el][0]")
     res = sess.call("step", [eid])
     assert res.error is None
-    assert res.value == {"ids": [eid]}
+    assert res.value == {"nodes": [eid]}
 
 
 def test_step_bad_return_message_teaches_none(session_model) -> None:
+    # `int` is no longer a bad return (non-string scalars ride the wire as
+    # terminal values), so this regresses against a shape that is still
+    # genuinely invalid: a bare non-iterable object.
     model, eid = session_model
-    sess = _open(model, "def step(el): return 42")
+    sess = _open(model, "def step(el): return object()")
     res = sess.call("step", [eid])
     assert res.error is not None
     assert "None ends the chain" in res.error.message
-    assert "int" in res.error.message
+    assert "object" in res.error.message
 
 
 # --- ScriptEvalContext tests (M2+M3) -----

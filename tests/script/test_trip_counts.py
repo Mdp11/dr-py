@@ -252,7 +252,7 @@ def test_step_entry_gets_piggybacked_root(bridge_call_log: list[str]) -> None:
     sess = _open("def step(el):\n    return [el]\n")
     res = sess.call("step", ["b1"])
     assert res.error is None
-    assert res.value == {"ids": ["b1"]}
+    assert res.value == {"nodes": ["b1"]}
     assert bridge_call_log == []
 
 

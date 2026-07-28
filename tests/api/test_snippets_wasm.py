@@ -481,7 +481,7 @@ def test_wasm_step_single_element_return(wasm_runner: WasmScriptRunner, small_mo
     )
     res = sess.call("step", [eid])
     assert res.error is None
-    assert res.value == {"ids": [eid]}
+    assert res.value == {"nodes": [eid]}
     sess.close()
 
 

@@ -739,32 +739,49 @@ def _dr_serialize_entry_result(entry, value):
     # the session loop reports that as the call's error. NOT part of the
     # documented dr API (underscored on purpose).
     if entry == "step":
+        # Nodes are UNTAGGED: JSON's own types carry the only distinction the
+        # host needs. A string stays ambiguous ON PURPOSE — the host resolves
+        # it against the model and falls back to a displayed terminal value
+        # when it names no element (navigation/evaluate.py::_hop_script), so
+        # `return el.properties["name"]` shows the name instead of vanishing
+        # as an unknown id. The guest cannot make that call itself: resolving
+        # would mean a model read, which would pollute the call's read-set
+        # (and therefore cache invalidation) with a lookup the snippet never
+        # asked for.
         if value is None:
-            return {"ids": []}
-        # Single-return conveniences BEFORE generic iteration: a bare Element
+            return {"nodes": []}
+        # Single-value conveniences BEFORE generic iteration: a bare Element
         # would otherwise be "iterated" via its __getitem__ (KeyError: 0), and
-        # a bare id string would be iterated per-character.
+        # a bare id string would be iterated per character.
         if isinstance(value, Element):
-            return {"ids": [value.id]}
-        if isinstance(value, str):
-            return {"ids": [value]}
+            return {"nodes": [value.id]}
+        if isinstance(value, _WIRE_SCALARS):
+            return {"nodes": [value]}
         _bad = (
-            "step() must return an Element, an element id, an iterable of "
-            "those, or None (None ends the chain); got "
+            "step() must return an Element, an element id, a scalar value, "
+            "an iterable of those, or None (None ends the chain); got "
         )
+        # A dict is technically iterable, but iterating one yields its KEYS —
+        # `return {el.id: el}` would otherwise be silently reinterpreted as a
+        # list of ids. Reject it explicitly rather than falling through to
+        # generic iteration.
+        if isinstance(value, dict):
+            raise ValueError(_bad + type(value).__name__)
         try:
             items = list(value)
         except TypeError:
             raise ValueError(_bad + type(value).__name__)
-        ids = []
+        nodes = []
         for item in items:
             if isinstance(item, Element):
-                ids.append(item.id)
-            elif isinstance(item, str):
-                ids.append(item)
+                nodes.append(item.id)
+            elif item is None:
+                continue  # a None ITEM contributes no node; a None RETURN ends the chain
+            elif isinstance(item, _WIRE_SCALARS):
+                nodes.append(item)
             else:
                 raise ValueError(_bad + type(item).__name__)
-        return {"ids": ids}
+        return {"nodes": nodes}
     if isinstance(value, Element):
         return {"kind": "element", "id": value.id}
     if value is None or isinstance(value, _WIRE_SCALARS):
