@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { MessageSquarePlus, MessageSquareText } from '@lucide/svelte';
 	import type { NavFilterStep } from '$lib/api/types';
-	import type { AnyOfCriterion, Criterion, LeafCriterion } from '$lib/search/types';
-	import { newCriterion } from '$lib/search/types';
+	import type { AnyOfCriterion, Criterion, CriterionType, LeafCriterion } from '$lib/search/types';
+	import { criteriaForKind, newCriterion } from '$lib/search/types';
+	import AddCriterionMenu from '../Sidebar/AddCriterionMenu.svelte';
 	import CriterionGroupRow from '../Sidebar/CriterionGroupRow.svelte';
 	import CriterionRow from '../Sidebar/CriterionRow.svelte';
 	import ChainBadge from './ChainBadge.svelte';
@@ -26,16 +27,15 @@
 	function removeCriterion(i: number): void {
 		onChange(index, { ...step, criteria: step.criteria.filter((_, j) => j !== i) });
 	}
-	function addCriterion(): void {
+	// A filter step always tests ELEMENTS, so the offered vocabulary is the
+	// element criterion set — including `any_of`, which is why the step has no
+	// separate "+ OR group" button: the group is just another choice here.
+	const criterionTypes: CriterionType[] = criteriaForKind('element');
+
+	function addCriterion(type: CriterionType): void {
 		onChange(index, {
 			...step,
-			criteria: [...(step.criteria as Criterion[]), newCriterion('property')]
-		});
-	}
-	function addGroup(): void {
-		onChange(index, {
-			...step,
-			criteria: [...(step.criteria as Criterion[]), newCriterion('any_of')]
+			criteria: [...(step.criteria as Criterion[]), newCriterion(type)]
 		});
 	}
 
@@ -130,16 +130,13 @@
 					/>
 				{/if}
 			{/each}
-			<button
-				type="button"
+			<AddCriterionMenu
+				types={criterionTypes}
+				onAdd={addCriterion}
 				class="text-xs text-info/90 transition-colors hover:text-info"
-				onclick={addCriterion}>+ condition</button
 			>
-			<button
-				type="button"
-				class="text-xs text-info/90 transition-colors hover:text-info"
-				onclick={addGroup}>+ OR group</button
-			>
+				+ condition
+			</AddCriterionMenu>
 		</div>
 	</div>
 </div>

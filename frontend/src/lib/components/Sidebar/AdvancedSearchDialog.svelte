@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { Plus } from '@lucide/svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
-	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import { Button } from '$lib/components/ui/button';
 	import {
 		addSearchCriterion,
@@ -22,13 +21,13 @@
 	} from '$lib/state';
 	import { getElementsBatch, READ_PAGE_LIMIT, searchModel } from '$lib/api/model-read';
 	import { isValidRegex } from '$lib/search/evaluate';
-	import {
-		CRITERION_LABELS,
-		type AnyOfCriterion,
-		type Criterion,
-		type LeafCriterion,
-		type SearchResultItem
+	import type {
+		AnyOfCriterion,
+		Criterion,
+		LeafCriterion,
+		SearchResultItem
 	} from '$lib/search/types';
+	import AddCriterionMenu from './AddCriterionMenu.svelte';
 	import CriterionGroupRow from './CriterionGroupRow.svelte';
 	import CriterionRow from './CriterionRow.svelte';
 
@@ -172,20 +171,13 @@
 			{/each}
 		</div>
 
-		<DropdownMenu.Root>
-			<DropdownMenu.Trigger
-				class="inline-flex w-fit items-center gap-1 rounded border border-input px-2 py-1 text-xs text-foreground/90 transition-colors hover:bg-muted"
-			>
-				<Plus class="h-3 w-3" /> Add criterion
-			</DropdownMenu.Trigger>
-			<DropdownMenu.Content align="start" class="w-52">
-				{#each availableCriterionTypes() as t (t)}
-					<DropdownMenu.Item onSelect={() => addSearchCriterion(t)}>
-						{CRITERION_LABELS[t]}
-					</DropdownMenu.Item>
-				{/each}
-			</DropdownMenu.Content>
-		</DropdownMenu.Root>
+		<AddCriterionMenu
+			types={availableCriterionTypes()}
+			onAdd={addSearchCriterion}
+			class="inline-flex w-fit items-center gap-1 rounded border border-input px-2 py-1 text-xs text-foreground/90 transition-colors hover:bg-muted"
+		>
+			<Plus class="h-3 w-3" /> Add criterion
+		</AddCriterionMenu>
 
 		<Dialog.Footer>
 			<Button type="button" variant="ghost" onclick={() => clearSearchCriteria()}>Clear</Button>

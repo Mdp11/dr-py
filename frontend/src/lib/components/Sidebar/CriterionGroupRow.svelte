@@ -1,8 +1,6 @@
 <script lang="ts">
 	import { Plus } from '@lucide/svelte';
-	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import {
-		CRITERION_LABELS,
 		criteriaForKind,
 		newCriterion,
 		type AnyOfCriterion,
@@ -11,6 +9,7 @@
 		type LeafCriterion,
 		type TargetKind
 	} from '$lib/search/types';
+	import AddCriterionMenu from './AddCriterionMenu.svelte';
 	import CriterionRow from './CriterionRow.svelte';
 
 	// An "Any of" OR group: an indented list of leaf criteria, each edited by
@@ -72,19 +71,12 @@
 				onRemove={removeMember}
 			/>
 		{/each}
-		<DropdownMenu.Root>
-			<DropdownMenu.Trigger
-				class="inline-flex w-fit items-center gap-1 text-xs text-info/90 transition-colors hover:text-info"
-			>
-				<Plus class="h-3 w-3" /> alternative
-			</DropdownMenu.Trigger>
-			<DropdownMenu.Content align="start" class="w-52">
-				{#each memberTypes as t (t)}
-					<DropdownMenu.Item onSelect={() => addMember(t)}>
-						{CRITERION_LABELS[t]}
-					</DropdownMenu.Item>
-				{/each}
-			</DropdownMenu.Content>
-		</DropdownMenu.Root>
+		<AddCriterionMenu
+			types={memberTypes}
+			onAdd={addMember}
+			class="inline-flex w-fit items-center gap-1 text-xs text-info/90 transition-colors hover:text-info"
+		>
+			<Plus class="h-3 w-3" /> alternative
+		</AddCriterionMenu>
 	</div>
 </div>

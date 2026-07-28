@@ -2,8 +2,9 @@
 	import { SvelteSet } from 'svelte/reactivity';
 	import { getMetamodel } from '$lib/state';
 	import type { NavScope } from '$lib/api/types';
-	import type { AnyOfCriterion, Criterion, LeafCriterion } from '$lib/search/types';
-	import { newCriterion } from '$lib/search/types';
+	import type { AnyOfCriterion, Criterion, CriterionType, LeafCriterion } from '$lib/search/types';
+	import { criteriaForKind, newCriterion } from '$lib/search/types';
+	import AddCriterionMenu from '../Sidebar/AddCriterionMenu.svelte';
 	import CriterionGroupRow from '../Sidebar/CriterionGroupRow.svelte';
 	import CriterionRow from '../Sidebar/CriterionRow.svelte';
 	import StereotypePicker from '../Sidebar/StereotypePicker.svelte';
@@ -41,16 +42,15 @@
 	function removeCriterion(index: number): void {
 		onChange({ ...scope, criteria: scope.criteria.filter((_, i) => i !== index) });
 	}
-	function addCriterion(): void {
+	// A scope always selects ELEMENTS, so the offered vocabulary is the element
+	// criterion set — including `any_of`, which is why there is no separate
+	// "+ OR group" button: the group is just another choice here.
+	const criterionTypes: CriterionType[] = criteriaForKind('element');
+
+	function addCriterion(type: CriterionType): void {
 		onChange({
 			...scope,
-			criteria: [...(scope.criteria as Criterion[]), newCriterion('property')]
-		});
-	}
-	function addGroup(): void {
-		onChange({
-			...scope,
-			criteria: [...(scope.criteria as Criterion[]), newCriterion('any_of')]
+			criteria: [...(scope.criteria as Criterion[]), newCriterion(type)]
 		});
 	}
 </script>
@@ -79,16 +79,13 @@
 				</span>
 			{/snippet}
 		</StereotypePicker>
-		<button
-			type="button"
+		<AddCriterionMenu
+			types={criterionTypes}
+			onAdd={addCriterion}
 			class="text-xs text-info/90 transition-colors hover:text-info"
-			onclick={addCriterion}>+ condition</button
 		>
-		<button
-			type="button"
-			class="text-xs text-info/90 transition-colors hover:text-info"
-			onclick={addGroup}>+ OR group</button
-		>
+			+ condition
+		</AddCriterionMenu>
 	</div>
 	{#each scope.criteria as criterion, i (i)}
 		{#if (criterion as Criterion).type === 'any_of'}

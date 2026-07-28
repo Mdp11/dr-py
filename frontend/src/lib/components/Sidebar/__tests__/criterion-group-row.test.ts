@@ -1,6 +1,6 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, expect, it, vi } from 'vitest';
-import type { AnyOfCriterion } from '$lib/search/types';
+import { CRITERION_LABELS, criteriaForKind, type AnyOfCriterion } from '$lib/search/types';
 import CriterionGroupRow from '../CriterionGroupRow.svelte';
 
 let component: Record<string, unknown> | null = null;
@@ -54,6 +54,43 @@ it('removing a member patches the group in place', () => {
 		type: 'any_of',
 		criteria: [{ type: 'property', name: 'b', op: 'equals', value: '2' }]
 	});
+});
+
+// The members menu is the SHARED AddCriterionMenu; what makes it a group menu
+// is the type list it is handed. Nesting is forbidden structurally, so "Any of"
+// must never appear among the alternatives.
+it('the alternatives menu offers leaf types only — never a nested "Any of"', () => {
+	mountRow({ type: 'any_of', criteria: [] });
+	const trigger = [...document.querySelectorAll('button')].find(
+		(b) => b.textContent?.trim() === 'alternative'
+	);
+	if (!trigger) throw new Error('"alternative" trigger not found');
+	(trigger as HTMLButtonElement).click();
+	flushSync();
+	const labels = [...document.querySelectorAll('[role="menuitem"]')].map((i) =>
+		i.textContent?.trim()
+	);
+	expect(labels).toEqual(
+		criteriaForKind('element')
+			.filter((t) => t !== 'any_of')
+			.map((t) => CRITERION_LABELS[t])
+	);
+});
+
+it('picking an alternative appends that criterion type to the group', () => {
+	const { onChange } = mountRow({ type: 'any_of', criteria: [] });
+	const trigger = [...document.querySelectorAll('button')].find(
+		(b) => b.textContent?.trim() === 'alternative'
+	);
+	(trigger as HTMLButtonElement).click();
+	flushSync();
+	const item = [...document.querySelectorAll('[role="menuitem"]')].find(
+		(i) => i.textContent?.trim() === CRITERION_LABELS.orphan
+	);
+	if (!item) throw new Error('"Is orphan" menu item not found');
+	(item as HTMLElement).click();
+	flushSync();
+	expect(onChange).toHaveBeenCalledWith(3, { type: 'any_of', criteria: [{ type: 'orphan' }] });
 });
 
 it('the group remove button reports the group index', () => {

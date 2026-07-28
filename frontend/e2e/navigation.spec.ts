@@ -64,7 +64,10 @@ test('build, combine, select nodes, save, save-as, and reopen round-trips the st
 	await tabpanel.getByRole('button', { name: '+ Keep only…', exact: true }).click();
 	const filterStep = tabpanel.getByTestId('filter-step');
 	await expect(filterStep).toHaveCount(1);
+	// "+ condition" is a type menu (the same one the search dialog and an
+	// "Any of" group use) — pick Property, then fill it in.
 	await filterStep.getByRole('button', { name: '+ condition' }).click();
+	await page.getByRole('menuitem', { name: 'Property', exact: true }).click();
 	await filterStep.getByText('property…', { exact: true }).click();
 	await page.getByPlaceholder('Filter properties…').fill('language');
 	await page.getByRole('button', { name: 'language' }).click();
