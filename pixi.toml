@@ -82,7 +82,7 @@ default-environment = "api"
 [feature.api.tasks.dr-start]
 description = "Start the full local stack: docker + migrate + backend + frontend"
 cmd = """
-docker compose up -d --wait postgres fake-gcs && docker compose up -d gcs-init && docker compose wait gcs-init && bash scripts/pc.sh up --detached
+docker compose up -d --wait && bash scripts/pc.sh up --detached
 """
 default-environment = "api"
 

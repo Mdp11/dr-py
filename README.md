@@ -50,7 +50,7 @@ cp .env.example .env                       # backend config (Postgres + GCS + ad
 ### 2. Start everything
 
 ```sh
-pixi run services-start      # Postgres + fake-gcs + snapshot bucket (waits until ready)
+pixi run services-start      # Postgres + fake-gcs (waits until ready)
 pixi run db-upgrade       # apply the Postgres schema (Alembic)
 pixi run backend-start    # http://127.0.0.1:8000  (reads .env)
 pixi run frontend-start   # http://localhost:5173  (separate terminal)
@@ -145,7 +145,7 @@ commits broadcasting, and viewer write-blocks.
 
 | pixi command | Action |
 |---|---|
-| `pixi run services-start` | Start Postgres + fake-gcs (+ bucket), wait until ready |
+| `pixi run services-start` | Start Postgres + fake-gcs, wait until ready |
 | `pixi run services-stop` | Stop containers, keep data |
 | `pixi run services-reset` | Stop + wipe data volumes |
 | `pixi run services-logs` | Tail infra logs |

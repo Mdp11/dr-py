@@ -98,6 +98,9 @@ over a durable journal**, hydrated on cache-miss and snapshotted on eviction.
   (real `google-cloud-storage`) is used in dev (pointed at `fake-gcs-server` via
   `DATA_ROVER_STORAGE_EMULATOR_HOST`) and prod; `MemorySnapshotStore` backs the
   hermetic test suite. One opt-in `integration`-marked test hits the emulator.
+  `build_store_from_settings` passes `create_bucket=` **iff** an emulator
+  endpoint is set, so the bucket is provisioned at backend boot in dev (docker
+  compose owns containers only) while prod never calls `storage.buckets.create`.
 - **`content.py`** — service functions over the content tables (the `tenancy.py`
   of model content). **`hydration.py`** — `hydrate_session` (nearest snapshot +
   replay commit tail through the restore-mode applier) and `persist_baseline`/

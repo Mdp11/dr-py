@@ -4,8 +4,9 @@
 # and the frontend (vite, `frontend` pixi env) — as a single detached daemon,
 # gating the backend behind a successful Alembic migration. The docker services
 # (Postgres + fake-gcs) are NOT managed here: `dr-start` brings them up first via
-# `pixi run services-start` (whose `docker compose up -d --wait` already blocks until
-# Postgres is healthy and the snapshot bucket exists), and `dr-stop`/`dr-reset`
+# `docker compose up -d --wait` (which blocks until Postgres is healthy and
+# fake-gcs is running; the backend creates the snapshot bucket itself on boot,
+# see `build_store_from_settings`), and `dr-stop`/`dr-reset`
 # tear them down. That keeps each tool doing what it is best at — docker owns the
 # containers, process-compose owns the host processes + the migration ordering.
 #

@@ -3,13 +3,18 @@
 # store (fake-gcs-server) for model snapshots. The backend and frontend run via
 # pixi (`pixi run backend-start` / `frontend-start`) against these services.
 #
-#   pixi run services-start      # start + wait for healthy, create the bucket
+#   pixi run services-start      # start + wait for healthy
 #   pixi run services-stop    # stop (keeps data volumes)
 #   pixi run services-reset   # stop + wipe data volumes
 #
 # Both services match the app defaults: Postgres at the default DATA_ROVER_
-# DATABASE_URL, fake-gcs reachable at http://localhost:4443 with the
-# `data-rover-snapshots` bucket. Data persists in named volumes across restarts.
+# DATABASE_URL, fake-gcs reachable at http://localhost:4443. Data persists in
+# named volumes across restarts.
+#
+# This file owns CONTAINERS ONLY. Their contents belong to the app: Alembic
+# owns the Postgres schema, and the backend creates the snapshot bucket at boot
+# (`build_store_from_settings` passes create_bucket= when pointed at an
+# emulator).
 name: data-rover
 
 services:
@@ -51,27 +56,6 @@ services:
       - "4443:4443"
     volumes:
       - gcsdata:/storage
-
-  # One-shot: wait for fake-gcs, then create the snapshot bucket (idempotent —
-  # a 409 if it already exists from the persisted volume is harmless). The store
-  # does NOT auto-create the bucket, so this must run before the backend writes.
-  gcs-init:
-    image: curlimages/curl:latest
-    container_name: data-rover-gcs-init
-    depends_on:
-      - fake-gcs
-    restart: "no"
-    entrypoint:
-      - "sh"
-      - "-c"
-      - |
-        until curl -s -o /dev/null http://fake-gcs:4443/storage/v1/b?project=data-rover; do
-          echo "waiting for fake-gcs..."; sleep 1;
-        done
-        curl -s -X POST 'http://fake-gcs:4443/storage/v1/b?project=data-rover' \
-          -H 'Content-Type: application/json' \
-          -d '{"name":"data-rover-snapshots"}'
-        echo "bucket ready"
 
 volumes:
   pgdata:

@@ -88,5 +88,11 @@ def build_store_from_settings(settings: Settings) -> SnapshotStore:
         return GcsSnapshotStore(
             settings.gcs_bucket,
             endpoint=settings.storage_emulator_host or None,
+            # Emulator only: fake-gcs-server boots with an empty volume and the
+            # bucket has to exist before the first snapshot write. Gating on the
+            # endpoint override keeps prod's contract intact — against real GCS
+            # this is False, the ctor makes no RPC at all, and the API never
+            # needs `storage.buckets.create` (buckets are terraform's job there).
+            create_bucket=bool(settings.storage_emulator_host),
         )
     raise ValueError(f"unknown snapshot_store {settings.snapshot_store!r}")
