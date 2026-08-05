@@ -118,6 +118,7 @@ def snapshot_event(
 def commit_event(
     *,
     rev: int,
+    scope: list[str],
     commit_id: str,
     author_id: str,
     message: str,
@@ -127,9 +128,15 @@ def commit_event(
     deleted_element_ids: list[str],
     deleted_relationship_ids: list[str],
 ) -> dict[str, Any]:
+    """``scope`` says which content families the commit touched (``model`` /
+    ``artifact``) so clients refresh only what moved: a commit that only
+    renamed a saved table must not make every peer refetch model pages. It is
+    a REQUIRED keyword rather than a defaulted one so a new broadcast site
+    cannot silently claim the wrong scope."""
     return {
         "type": "commit",
         "rev": rev,
+        "scope": scope,
         "commit_id": commit_id,
         "author_id": author_id,
         "message": message,

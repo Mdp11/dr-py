@@ -3,8 +3,10 @@
 Artifacts are materialized DB rows, not model content, so their ops must
 never reach the model applier (routes/ops.py::_apply_one). ``split_ops`` is
 the single chokepoint every batch passes through into ``apply_artifact_ops``/
-``validate_artifact_ops`` below, the DB-side applier; the commit route that
-calls them lands in Task 5 (see this module's growth in the same plan)."""
+``validate_artifact_ops`` below, the DB-side applier. ``routes/commits.py``
+is the caller: ``POST /commits/preview`` validates artifact ops dry, and
+``POST /commits`` applies them alongside the model half under the write mutex
+(it owns the transaction — see ``create_commit``'s atomicity note)."""
 
 from __future__ import annotations
 

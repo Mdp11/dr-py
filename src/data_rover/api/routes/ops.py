@@ -41,6 +41,7 @@ change ticker.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, assert_never
 
@@ -71,6 +72,7 @@ from ..schemas import (
     ElementOut,
     IssueOut,
     ModelOpIn,
+    OpIn,
     OpsRequest,
     OpsResponse,
     RelationshipOut,
@@ -458,13 +460,24 @@ def _persist_commit(
     *,
     rev: int,
     author_id: str | None,
-    res: _BatchResult,
+    ops: Sequence[OpIn],
+    inverse_ops: Sequence[OpIn],
+    id_map: dict[str, str],
     _commit_id: str | None = None,
     _message: str = "",
     _validation_error_count: int = 0,
     _issues: list | None = None,
 ) -> bool:
     """Append the accepted batch to the durable journal and advance model_rev.
+
+    The batch arrives as three explicit lists rather than a ``_BatchResult``
+    because a commit can span BOTH content families: ``POST /commits`` merges
+    the model applier's result with the artifact applier's (``artifact_ops.
+    ArtifactBatchResult``) into one journal entry, and neither result type is
+    a superset of the other. ``Sequence[OpIn]`` (covariant) rather than
+    ``list[OpIn]`` for the same reason ``hydration.serialize_ops`` uses it:
+    the model-only caller passes a ``list[ModelOpIn]``, which is not a
+    ``list[OpIn]`` under list invariance.
 
     Only persists when the project actually has a durable model row (the
     interactive/legacy in-memory-only flows have none yet — they persist a
@@ -486,9 +499,9 @@ def _persist_commit(
         rev=rev,
         commit_id=_commit_id or uuid.uuid4().hex,
         author_id=author_id,
-        ops=serialize_ops(res.canonical_ops),
-        inverse_ops=serialize_ops(res.inverse_ops()),
-        id_map=dict(res.id_map),
+        ops=serialize_ops(ops),
+        inverse_ops=serialize_ops(inverse_ops),
+        id_map=dict(id_map),
         message=_message,
         validation_error_count=_validation_error_count,
         issues=_issues or [],
@@ -584,14 +597,24 @@ def apply_ops(
         # no else: pre-branch /model/ops relied on the rev-stamp mismatch alone
         session.record_batch(
             AppliedBatch(
-                ops=res.canonical_ops,
-                inverse_ops=res.inverse_ops(),
+                # list displays, not the raw lists: AppliedBatch is typed over
+                # the full OpIn union (mixed batches land here from
+                # POST /commits) and list is invariant, so a list[ModelOpIn]
+                # is not a list[OpIn].
+                ops=[*res.canonical_ops],
+                inverse_ops=[*res.inverse_ops()],
                 id_map=dict(res.id_map),
             )
         )
         try:
             persisted = _persist_commit(
-                db, project_id, rev=session.model_rev, author_id=user.id, res=res
+                db,
+                project_id,
+                rev=session.model_rev,
+                author_id=user.id,
+                ops=res.canonical_ops,
+                inverse_ops=res.inverse_ops(),
+                id_map=dict(res.id_map),
             )
         except Exception as exc:
             _rollback(model, res.inverse_units)  # undo the in-memory mutation
@@ -631,11 +654,12 @@ def undo(
         batch = session.op_log.pop()
         model_inv, artifact_inv = split_ops(batch.inverse_ops)
         if artifact_inv:
-            # No artifact op can enter session.op_log until Task 5 wires
-            # artifact ops into POST /commits, so this branch is unreachable
-            # today; it exists so the ModelOpIn retype above is honest about
-            # the closed set _apply_batch accepts. Task 6 replaces this stub
-            # with real undo-across-artifact-changes handling.
+            # REACHABLE since Task 5: POST /commits records mixed batches in
+            # session.op_log, and undoing one would have to reinstate DB rows
+            # (a transaction this route does not own) as well as model state.
+            # Refuse the whole batch rather than half-undoing it, and re-push
+            # it so undo history stays intact. Task 6 replaces this stub with
+            # real undo-across-artifact-changes handling.
             session.op_log.append(batch)
             raise HTTPException(
                 status_code=422,

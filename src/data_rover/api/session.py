@@ -20,7 +20,7 @@ from .settings import get_settings
 from .table_cache import TableOrderCache
 
 if TYPE_CHECKING:
-    from .schemas import ModelOpIn
+    from .schemas import OpIn
     from .validation_sweep import SweepProgress
 
 #: Maximum number of applied batches retained for undo. Each batch holds the
@@ -46,15 +46,20 @@ class AppliedBatch:
     applier. ``id_map`` is the temp-id resolution the batch produced.
     """
 
-    #: Typed ``ModelOpIn``, never the full ``OpIn`` union: as of Phase 1
-    #: Task 3, every producer (see ``routes/ops.py``/``routes/commits.py``)
-    #: rejects a batch containing artifact ops with 422 before it ever
-    #: reaches ``record_batch``, so the op log — and everything that walks
-    #: it (undo, CR compaction in ``changes.py``) — only ever sees
-    #: model-content ops. A later task in this plan (artifact ops folded
-    #: into commit/undo) will need to revisit this invariant.
-    ops: list[ModelOpIn]
-    inverse_ops: list[ModelOpIn]
+    #: Typed over the FULL ``OpIn`` union (model + artifact ops): as of
+    #: Phase 1 Task 5, ``POST /commits`` accepts mixed batches and records
+    #: the merged canonical/inverse lists here, so the log genuinely can
+    #: hold artifact ops. ``/model/ops`` still rejects them (that path is
+    #: model-only forever), but the log is shared.
+    #:
+    #: The narrower type is NOT recoverable by a cast: every consumer that
+    #: feeds the model applier must funnel the batch through
+    #: ``artifact_ops.split_ops`` first (see ``routes/ops.py::undo`` and
+    #: ``changes.compact_changes``). That split — not this annotation — is
+    #: what keeps ``_apply_one``'s ``assert_never`` over ``ModelOpIn``
+    #: exhaustive and the model applier model-only.
+    ops: list[OpIn]
+    inverse_ops: list[OpIn]
     id_map: dict[str, str]
 
 

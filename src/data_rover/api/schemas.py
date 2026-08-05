@@ -631,6 +631,12 @@ class CommitResponse(OpsResponse):
     commit_id: str
     message: str = ""
     validation_error_count: int = 0
+    #: artifact half of the commit delta (created + updated rows, headers
+    #: only — the client refetches a payload it actually has open). Empty on
+    #: a model-only commit, which is why both fields default rather than
+    #: being required: every pre-artifact client keeps parsing the response.
+    changed_artifacts: list[ArtifactHeaderOut] = Field(default_factory=list)
+    deleted_artifact_ids: list[str] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

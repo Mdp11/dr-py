@@ -1,7 +1,7 @@
 """The op-union split: artifact ops parse through OPS_ADAPTER (journal
 round-trip), split_ops separates families, required_locks derives art:
-leases, and every legacy endpoint still rejects artifact ops until the
-commit route learns them (Task 5)."""
+leases, the legacy /model/ops endpoint still rejects artifact ops
+permanently, and the commit endpoints route them into the artifact flow."""
 
 from __future__ import annotations
 
@@ -106,10 +106,17 @@ def test_legacy_model_ops_endpoint_rejects_artifact_ops(client: TestClient) -> N
     assert "artifact ops" in r.text
 
 
-def test_commit_endpoints_reject_artifact_ops_until_wired(client: TestClient) -> None:
-    # These two flip to real behavior in Task 5; the guard proves artifact ops
-    # can never reach the model applier meanwhile.
+def test_commit_endpoints_route_artifact_ops_to_the_artifact_flow(
+    client: TestClient,
+) -> None:
+    # Task 5 replaced the temporary 422 guards here with the real flow, so
+    # these two now fail for their own domain's reasons rather than a blanket
+    # rejection: preview validates the op dry (unknown artifact -> 422) and
+    # commit checks the lease first (none held -> 409). Neither ever reaches
+    # the model applier. Full behavior lives in test_commits_artifact_ops.py.
     r = client.post(papi("/commits/preview"), json=_artifact_op_batch(client))
     assert r.status_code == 422
+    assert "a1" in r.text  # rejected as an unknown artifact, not as an op kind
     r = client.post(papi("/commits"), json={**_artifact_op_batch(client), "lock_tokens": []})
-    assert r.status_code == 422
+    assert r.status_code == 409
+    assert r.json()["missing"][0]["resource_id"] == artifact_resource("a1")

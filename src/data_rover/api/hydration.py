@@ -60,9 +60,10 @@ def hydration_progress(project_id: str) -> HydrationProgress | None:
 
 
 def serialize_ops(ops: Sequence[OpIn]) -> list[Any]:
-    # Sequence (covariant), not list: callers pass `list[ModelOpIn]` (the op
-    # log is model-only — see AppliedBatch's docstring), which is not a
-    # `list[OpIn]` under list's invariance even though ModelOpIn <: OpIn.
+    # Sequence (covariant), not list: model-only callers pass a
+    # `list[ModelOpIn]` (e.g. /model/ops, which rejects artifact ops), which
+    # is not a `list[OpIn]` under list's invariance even though
+    # ModelOpIn <: OpIn. Mixed commits pass a genuine `list[OpIn]`.
     return OPS_ADAPTER.dump_python(list(ops), mode="json")
 
 

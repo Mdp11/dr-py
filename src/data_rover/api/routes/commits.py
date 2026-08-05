@@ -6,7 +6,14 @@ apply with inverse collection; raises 422 on a mutation-boundary error),
 (full-run baseline). Preview runs apply → validate dirty set → roll back,
 all under ``session.write_mutex`` (spec §11). This module deliberately imports
 those module-private helpers — they are part of the ops package's internal
-surface, shared with this sibling.
+surface, shared with this sibling. ``routes/artifacts._header`` is imported on
+the same terms: a commit's artifact delta must be projected EXACTLY the way
+the artifact CRUD routes project it, so the two write paths cannot drift.
+
+Since the Phase 1 artefacts revamp a commit can carry artifact ops as well as
+model ops (``artifact_ops.split_ops`` separates the two families). Model ops
+mutate the in-memory model; artifact ops stage DB rows — see
+``create_commit``'s docstring for how the two are kept atomic.
 """
 
 from __future__ import annotations
@@ -22,9 +29,13 @@ from sqlalchemy.orm import Session as DbSession
 from data_rover.core.validation.issue import IssueCategory
 from data_rover.core.validation.pipeline import default_pipeline
 
-from ..artifact_ops import split_ops
+from ..artifact_ops import (
+    apply_artifact_ops,
+    split_ops,
+    validate_artifact_ops,
+)
 from ..authz import require_membership
-from ..feed import commit_event, lock_event
+from ..feed import artifact_event, commit_event, lock_event
 from .. import content
 from ..db import get_db
 from ..db_models import Commit, Membership, User
@@ -35,6 +46,7 @@ from ..invalidation import touched_keys
 from ..locking import required_locks
 from ..settings import get_settings
 from ..schemas import (
+    ArtifactHeaderOut,
     CommitHistoryResponse,
     CommitRequest,
     CommitResponse,
@@ -43,12 +55,14 @@ from ..schemas import (
     IssueOut,
     ModelOut,
     OpenResponse,
+    OpIn,
     PreviewRequest,
     PreviewResponse,
     RelationshipOut,
     RevertRequest,
 )
 from ..session import AppliedBatch
+from .artifacts import _header as _artifact_header
 from .ops import (
     _apply_batch,
     _ensure_validation_seeded,
@@ -105,7 +119,9 @@ def open_project(
 @router.post("/commits/preview", response_model=None)
 def preview_commit(
     payload: PreviewRequest,
+    project_id: str,
     session: Session = Depends(get_request_session),
+    db: DbSession = Depends(get_db),
 ) -> PreviewResponse | JSONResponse:
     _, model = require_model(session)
     if payload.base_rev != session.model_rev:
@@ -114,13 +130,12 @@ def preview_commit(
             content={"detail": "stale base_rev", "model_rev": session.model_rev},
         )
     model_ops, artifact_ops = split_ops(payload.ops)
-    if artifact_ops:
-        # Task 5 wires artifact ops into the preview flow; until then they
-        # are rejected outright so they can never reach the model applier.
-        raise HTTPException(
-            status_code=422,
-            detail="artifact ops are not yet supported on this endpoint",
-        )
+    # Artifact ops are DB rows, not model content: there is nothing to apply
+    # into the model and roll back, so they are checked DRY (422 on an invalid
+    # payload / unknown id / name clash, 409 on a stale artifact_rev) and
+    # contribute no issues. Deliberately outside the write mutex — it writes
+    # nothing and the model is untouched by it.
+    validate_artifact_ops(db, project_id, artifact_ops)
     with session.write_mutex:
         # _apply_batch raises 422 on a mutation-boundary structural error
         # (unknown type, missing endpoint, unknown property) — the safety net.
@@ -228,15 +243,28 @@ def create_commit(
     2. Seed the validation baseline.
     3. Under the write mutex:
        a. Verify the caller still holds every required lock (409 if any gone).
-       b. Apply the batch (422 on mutation-boundary error from _apply_batch).
+       b. Apply the model ops (422 on mutation-boundary error from
+          _apply_batch), then the artifact ops (staged on this request's DB
+          transaction).
        c. Hard-reject structural blockers (422; rolls back).
        d. Splice conformance issues into the issue store, bump rev, record batch.
        e. Persist to the durable journal (500 + full rollback on failure).
        f. Periodic snapshot (mirrors apply_ops to bound replay tail).
        g. Release the caller's locks (explicit loop).
-       h. Broadcast commit delta + lock-release events (inside mutex for
-          enqueue-order == rev-order guarantee; broadcast is non-blocking).
+       h. Broadcast commit delta + artifact + lock-release events (inside mutex
+          for enqueue-order == rev-order guarantee; broadcast is non-blocking).
     4. Return CommitResponse with full delta + commit metadata.
+
+    Mixed-batch atomicity (Phase 1 artefacts revamp)
+    ------------------------------------------------
+    A batch can span both content families, and the two halves live in
+    different places: model ops mutate the in-memory model IN PLACE, artifact
+    ops stage row changes on this request's DB transaction. So every failure
+    path after an apply has to undo BOTH — ``_rollback(model,
+    res.inverse_units)`` + ``session.invalidate_derived_caches()`` for the
+    model half, ``db.rollback()`` for the artifact half. ``apply_artifact_ops``
+    deliberately has no internal rollback path (it only flushes), so that
+    ``db.rollback()`` is the ONLY thing that discards staged artifact rows.
     """
     _, model = require_model(session)
     if payload.base_rev != session.model_rev:
@@ -245,16 +273,11 @@ def create_commit(
             content={"detail": "stale base_rev", "model_rev": session.model_rev},
         )
     model_ops, artifact_ops = split_ops(payload.ops)
-    if artifact_ops:
-        # Task 5 wires artifact ops into the commit flow; until then they are
-        # rejected outright so they can never reach the model applier.
-        raise HTTPException(
-            status_code=422,
-            detail="artifact ops are not yet supported on this endpoint",
-        )
     state = _ensure_validation_seeded(session, model)
     with session.write_mutex:
-        # a. verify the caller still holds every required lock
+        # a. verify the caller still holds every required lock. `payload.ops`
+        #    (not `model_ops`) so the `art:`-namespaced leases artifact ops
+        #    need are derived and checked too.
         reqs = required_locks(model, payload.ops)
         missing = session.lock_table.verify_held(
             user.id, payload.lock_tokens, reqs, now=time.monotonic()
@@ -270,14 +293,41 @@ def create_commit(
                     ],
                 },
             )
-        # b. apply (422 on mutation-boundary error — let it propagate)
+        # b. apply the model half (422 on mutation-boundary error — let it
+        #    propagate; _apply_batch already rolled itself back and nothing
+        #    artifact-side has been staged yet)
         res = _apply_batch(model, model_ops, restore=False)
-        # c. hard-reject structural blockers
+        # b2. apply the artifact half, staged on this request's DB transaction.
+        #     Seeded with the model id_map so an artifact payload may reference
+        #     an element created earlier in the SAME batch. On failure both
+        #     halves are undone (see the docstring's atomicity note).
+        try:
+            art_res = apply_artifact_ops(
+                db,
+                project_id,
+                artifact_ops,
+                user_id=user.id,
+                id_map=dict(res.id_map),
+                restore=False,
+            )
+        except Exception:
+            # Broad on purpose, mirroring _apply_batch's stance: the expected
+            # rejections are HTTPException 422/409, but an UNforeseen error
+            # (a DB failure, a bug) must not be the one case that leaves the
+            # model half-mutated. Undo both halves, then let it propagate.
+            _rollback(model, res.inverse_units)
+            session.invalidate_derived_caches()  # rolled back in place; A1/I1
+            db.rollback()  # discard staged artifact rows
+            raise
+        # c. hard-reject structural blockers. Model content only: an artifact
+        #    op's own validity was settled at apply time (b2), and an artifact
+        #    row can never make the MODEL structurally invalid.
         scoped = default_pipeline().validate(model, res.dirty.to_scope())
         structural = [i for i in scoped if i.category is IssueCategory.STRUCTURAL]
         if structural:
             _rollback(model, res.inverse_units)
             session.invalidate_derived_caches()  # rolled back in place; A1/I1
+            db.rollback()  # discard staged artifact rows
             return JSONResponse(
                 status_code=422,
                 content={
@@ -296,6 +346,7 @@ def create_commit(
         if session.strict_mode and conformance:
             _rollback(model, res.inverse_units)
             session.invalidate_derived_caches()  # rolled back in place; A1/I1
+            db.rollback()  # discard staged artifact rows
             return JSONResponse(
                 status_code=422,
                 content={
@@ -313,11 +364,17 @@ def create_commit(
             session.evict_touched_caches(touched_keys(model, model.metamodel, res))
         else:
             session.invalidate_derived_caches()  # legacy clear-all
+        # ONE journal entry per commit, spanning both families: model ops
+        # first, then artifact ops (the families are independent, so relative
+        # cross-family order carries no meaning — see split_ops).
+        merged_id_map = {**res.id_map, **art_res.id_map}
+        canonical_ops: list[OpIn] = [*res.canonical_ops, *art_res.canonical_ops]
+        inverse_ops: list[OpIn] = [*res.inverse_ops(), *art_res.inverse_ops()]
         session.record_batch(
             AppliedBatch(
-                ops=res.canonical_ops,
-                inverse_ops=res.inverse_ops(),
-                id_map=dict(res.id_map),
+                ops=canonical_ops,
+                inverse_ops=inverse_ops,
+                id_map=merged_id_map,
             )
         )
         # e. persist to the durable journal; mirror apply_ops 500 pattern exactly
@@ -329,7 +386,9 @@ def create_commit(
                 project_id,
                 rev=session.model_rev,
                 author_id=user.id,
-                res=res,
+                ops=canonical_ops,
+                inverse_ops=inverse_ops,
+                id_map=merged_id_map,
                 _commit_id=commit_id,
                 _message=payload.message,
                 _validation_error_count=len(conformance),
@@ -340,10 +399,17 @@ def create_commit(
             session.model_rev -= 1
             session.invalidate_derived_caches()  # rolled back in place; A1/I1
             session.op_log.pop()
-            db.rollback()
+            db.rollback()  # also discards the staged artifact rows
             raise HTTPException(
                 status_code=500, detail="failed to persist commit"
             ) from exc
+        if artifact_ops and not persisted:
+            # No durable model row (in-memory-only legacy project), so
+            # _persist_commit skipped its db.commit() — but artifact rows are
+            # real DB state that must not silently vanish when the request
+            # session closes. Commit them on their own; the journal entry is
+            # the only thing this project forgoes.
+            db.commit()
         # f. periodic snapshot: mirrors apply_ops so a hot commit-only project
         #    doesn't accumulate an unbounded replay tail. The durable commit has
         #    already landed; a snapshot failure here is recoverable (hydration
@@ -361,12 +427,24 @@ def create_commit(
                     session.model_rev,
                     exc_info=True,
                 )
+        # f2. artifact half of the response/feed delta. Re-read each touched
+        #     row rather than trusting the ops: the applier reruns server-owned
+        #     derived metadata (snippet entry_points) and bumped artifact_rev,
+        #     and headers must carry what actually landed.
+        created_artifact_ids = {
+            aid for temp, aid in art_res.id_map.items() if temp not in res.id_map
+        }
+        changed_artifact_headers: list[ArtifactHeaderOut] = []
+        for aid in art_res.changed_ids:
+            arow = content.get_artifact(db, aid)
+            if arow is not None:
+                changed_artifact_headers.append(_artifact_header(arow))
         # g. release the caller's locks (explicit loop — no helper)
         released = []
         for tok in payload.lock_tokens:
             released.extend(session.lock_table.release(user.id, tok))
-        # h. broadcast commit delta + lock-release events (inside the mutex so
-        #    enqueue order == rev order across concurrent commits).
+        # h. broadcast commit delta + artifact + lock-release events (inside the
+        #    mutex so enqueue order == rev order across concurrent commits).
         changed_elements = [
             ElementOut.from_core(model.elements[eid]).model_dump()
             for eid in res.changed_element_ids
@@ -375,6 +453,12 @@ def create_commit(
             RelationshipOut.from_core(model.relationships[rid]).model_dump()
             for rid in res.changed_relationship_ids
         ]
+        # an empty batch touched neither family; report it as "model" so the
+        # scope list is never empty and peers keep their existing behaviour.
+        scope = sorted(
+            ({"model"} if model_ops else set())
+            | ({"artifact"} if artifact_ops else set())
+        ) or ["model"]
         session.hub.broadcast(
             commit_event(
                 rev=session.model_rev,
@@ -382,12 +466,23 @@ def create_commit(
                 author_id=user.id,
                 message=payload.message,
                 validation_error_count=len(conformance),
+                scope=scope,
                 changed_elements=changed_elements,
                 changed_relationships=changed_relationships,
                 deleted_element_ids=list(res.deleted_element_ids),
                 deleted_relationship_ids=list(res.deleted_relationship_ids),
             )
         )
+        # the artifact library is a separate client-side store, so the commit
+        # event's model delta cannot carry it — mirror the legacy CRUD route's
+        # per-row events so both write paths look identical on the wire.
+        for header in changed_artifact_headers:
+            action = "created" if header.id in created_artifact_ids else "updated"
+            session.hub.broadcast(
+                artifact_event(action, header.model_dump(mode="json"))
+            )
+        for deleted in art_res.deleted:
+            session.hub.broadcast(artifact_event("deleted", deleted))
         if released:
             session.hub.broadcast(
                 lock_event(
@@ -404,7 +499,7 @@ def create_commit(
             )
     return CommitResponse(
         model_rev=session.model_rev,
-        id_map=dict(res.id_map),
+        id_map=merged_id_map,  # both families' temp ids in one map
         changed_elements=[
             ElementOut.from_core(model.elements[eid]) for eid in res.changed_element_ids
         ],
@@ -420,6 +515,8 @@ def create_commit(
         commit_id=commit_id,
         message=payload.message,
         validation_error_count=len(conformance),
+        changed_artifacts=changed_artifact_headers,
+        deleted_artifact_ids=[d["id"] for d in art_res.deleted],
     )
 
 
@@ -539,8 +636,12 @@ def revert_commit(
         session.invalidate_derived_caches()  # mirrors touch_model
         session.record_batch(
             AppliedBatch(
-                ops=res.canonical_ops,
-                inverse_ops=res.inverse_ops(),
+                # list displays, not the raw lists: AppliedBatch is typed over
+                # the full OpIn union (mixed batches land here from
+                # POST /commits) and list is invariant, so a list[ModelOpIn]
+                # is not a list[OpIn].
+                ops=[*res.canonical_ops],
+                inverse_ops=[*res.inverse_ops()],
                 id_map=dict(res.id_map),
             )
         )
@@ -553,7 +654,9 @@ def revert_commit(
                 project_id,
                 rev=session.model_rev,
                 author_id=user.id,
-                res=res,
+                ops=res.canonical_ops,
+                inverse_ops=res.inverse_ops(),
+                id_map=dict(res.id_map),
                 _commit_id=commit_id,
                 _message=message,
                 _validation_error_count=len(conformance),
@@ -595,6 +698,9 @@ def revert_commit(
                 commit_id=commit_id,
                 author_id=user.id,
                 message=message,
+                # revert refuses batches spanning artifact ops (below), so a
+                # revert commit is model-only by construction.
+                scope=["model"],
                 validation_error_count=len(conformance),
                 changed_elements=changed_elements,
                 changed_relationships=changed_relationships,
