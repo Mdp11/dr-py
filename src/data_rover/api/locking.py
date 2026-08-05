@@ -26,6 +26,7 @@ target shared pin); they live with the table because they share its types.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Collection
 from dataclasses import dataclass
 from enum import Enum
 
@@ -234,6 +235,32 @@ class LockTable:
                 del self._by_resource[rid]
         return expired
 
+    def peer_leases(
+        self, resource_ids: Collection[str], holder: str, *, now: float
+    ) -> list[Lease]:
+        """Live leases on any of *resource_ids* held by SOMEONE OTHER than
+        *holder*.
+
+        The "is a peer mid-edit on this?" question, asked by the writers that
+        are NOT themselves lock-verified: the legacy artifact CRUD routes
+        (``PUT``/``DELETE /artifacts/{id}``) and the legacy unlocked
+        ``POST /model/undo``. A lease is only a guarantee if EVERY writer to
+        the resource honours it — a writer that ignores it turns a held lease
+        into a silent lost update, with no error anywhere (the holder's own
+        commit still verifies, applies and wins).
+
+        The caller's OWN lease never blocks them: they are the editor the
+        lease exists for, so locking them out of their own write path would
+        make check-out actively harmful. Same holder-comparison rule as the
+        conflict matrix above (identity, not mode).
+        """
+        wanted = set(resource_ids)
+        return [
+            le
+            for le in self.active_leases(now)
+            if le.resource_id in wanted and le.holder != holder
+        ]
+
     def active_leases(self, now: float) -> list[Lease]:
         """Return all non-expired leases as a pure read — never mutates
         ``_by_resource``. Compaction is left to ``sweep_expired`` (which runs
@@ -254,6 +281,7 @@ class LockTable:
 from typing import TYPE_CHECKING  # noqa: E402
 
 from .schemas import (  # noqa: E402
+    TEMP_ID_PREFIX,
     CreateArtifactOp,
     CreateElementOp,
     CreateRelationshipOp,
@@ -269,8 +297,6 @@ if TYPE_CHECKING:
     from data_rover.core.model.model import Model
 
     from .schemas import OpIn
-
-_TEMP_ID_PREFIX = "tmp_"
 
 
 def containment_subtree(model: Model, root_id: str) -> list[str]:
@@ -329,7 +355,7 @@ def required_locks(model: Model, ops: list[OpIn]) -> list[RequiredLock]:
     created: set[str] = set()
 
     def add(rid: str, mode: LockMode, intent: LockIntent) -> None:
-        if rid.startswith(_TEMP_ID_PREFIX) or rid in created:
+        if rid.startswith(TEMP_ID_PREFIX) or rid in created:
             return
         if (rid, mode) not in seen:
             seen.add((rid, mode))

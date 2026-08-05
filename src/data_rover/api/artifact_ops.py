@@ -26,6 +26,7 @@ from .artifact_kinds import ArtifactKindSpec, get_spec
 from .db_models import ArtifactKind, ArtifactRow
 from .feed import FeedHub, artifact_event
 from .schemas import (
+    TEMP_ID_PREFIX,
     ArtifactHeaderOut,
     ArtifactOpIn,
     CreateArtifactOp,
@@ -56,6 +57,27 @@ def split_ops(ops: Sequence[OpIn]) -> tuple[list[ModelOpIn], list[ArtifactOpIn]]
     return model_ops, artifact_ops
 
 
+def artifact_op_ids(ops: Sequence[ArtifactOpIn]) -> set[str]:
+    """The artifact ROW ids a batch would write.
+
+    A create op's ``temp_id`` is included because in RESTORE mode (undo) it is
+    not provisional at all — it is the exact canonical id being reinstated, so
+    a peer's lease on it is just as meaningful as on an update/delete target.
+    Used by the peer-lease guards on the writers that are not themselves
+    lock-verified (see ``LockTable.peer_leases``); ids are BARE here — callers
+    namespace them with ``locking.artifact_resource`` for lease comparison.
+    """
+    ids: set[str] = set()
+    for op in ops:
+        if isinstance(op, CreateArtifactOp):
+            ids.add(op.temp_id)
+        elif isinstance(op, (UpdateArtifactOp, DeleteArtifactOp)):
+            ids.add(op.id)
+        else:
+            assert_never(op)
+    return ids
+
+
 # ---------------------------------------------------------------------------
 # Artifact op applier (Task 4) — the DB-side twin of routes/ops.py::_apply_batch
 # ---------------------------------------------------------------------------
@@ -73,9 +95,6 @@ def split_ops(ops: Sequence[OpIn]) -> tuple[list[ModelOpIn], list[ArtifactOpIn]]
 # which rolls the live model back via inverses on a mid-batch failure): a
 # failed batch here just stops, and the caller's db.rollback() discards every
 # staged row change made so far. Tasks 5/6 own that transaction boundary.
-
-#: mirrors routes/ops.py TEMP_ID_PREFIX (same precedent as locking.py's copy)
-_TEMP_ID_PREFIX = "tmp_"
 
 
 def _resolve_json(value: Any, id_map: dict[str, str]) -> Any:
@@ -339,16 +358,27 @@ def apply_artifact_ops(
             kind, payload = _check_create(
                 db, project_id, op, tracker, res.id_map, restore=restore
             )
-            if op.temp_id.startswith(_TEMP_ID_PREFIX):
+            if op.temp_id.startswith(TEMP_ID_PREFIX):
                 artifact_id = uuid.uuid4().hex
                 res.id_map[op.temp_id] = artifact_id
             elif restore:
                 artifact_id = op.temp_id  # reinstate the exact id
+                if content.get_artifact(db, artifact_id) is not None:
+                    # The id is already taken (a double-undo, or an undo after
+                    # a peer recreated the row). Pre-checked rather than left
+                    # to the IntegrityError catch below: that catch is scoped
+                    # to the exception TYPE, not the constraint, so a PRIMARY
+                    # KEY violation would be reported as the name clash it is
+                    # not — right status, actively misleading message.
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"an artifact with id {artifact_id!r} already exists",
+                    )
             else:
                 raise HTTPException(
                     status_code=422,
                     detail=f"create_artifact temp_id {op.temp_id!r} must start "
-                    f"with {_TEMP_ID_PREFIX!r}",
+                    f"with {TEMP_ID_PREFIX!r}",
                 )
             try:
                 row = content.create_artifact(
@@ -361,6 +391,9 @@ def apply_artifact_ops(
                     artifact_id=artifact_id,
                 )
             except IntegrityError as exc:
+                # By elimination the only remaining constraint on this insert
+                # is UNIQUE(project, kind, name) — the id collision, the other
+                # candidate, was pre-checked above.
                 raise HTTPException(
                     status_code=422,
                     detail=f"a {kind.value} named {op.name!r} already exists",
@@ -385,6 +418,12 @@ def apply_artifact_ops(
             )
             old_name = row.name
             try:
+                # ``content.update_artifact`` REPLACES ``payload`` wholesale
+                # (see its docstring, content.py): never mutate the row's dict
+                # in place here — the inverse op above aliases the prior
+                # payload through a shallow copy, so an in-place write would
+                # silently corrupt the recorded inverse (and SQLAlchemy's JSON
+                # change-tracking would not even fire).
                 content.update_artifact(
                     db,
                     row,
@@ -394,9 +433,17 @@ def apply_artifact_ops(
                     updated_by=user_id,
                 )
             except IntegrityError as exc:
+                # An UPDATE cannot violate the PK (the row already exists under
+                # that id), so this is the UNIQUE(project, kind, name) rename
+                # clash — hence the name in the message. ``op.name or row.name``
+                # keeps it truthful if a future caller trips the constraint on a
+                # payload-only update.
                 raise HTTPException(
                     status_code=422,
-                    detail=f"a {row.kind.value} named {op.name!r} already exists",
+                    detail=(
+                        f"a {row.kind.value} named {op.name or row.name!r} "
+                        "already exists"
+                    ),
                 ) from exc
             if op.name is not None and op.name != old_name:
                 tracker.free(row.kind, old_name)

@@ -24,6 +24,8 @@ from __future__ import annotations
 import logging
 import time
 import uuid
+from collections.abc import Iterable
+from typing import Any, assert_never, get_args
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
@@ -54,17 +56,21 @@ from ..invalidation import touched_keys
 from ..locking import ARTIFACT_PREFIX, required_locks
 from ..settings import get_settings
 from ..schemas import (
+    ArtifactOpIn,
     CommitDiffOut,
     CommitHistoryResponse,
     CommitRequest,
     CommitResponse,
     CommitSummaryOut,
+    CreateArtifactOp,
+    CreateElementOp,
     CreateRelationshipOp,
     DeleteArtifactOp,
     DeleteElementOp,
     DeleteRelationshipOp,
     ElementOut,
     IssueOut,
+    ModelOpIn,
     ModelOut,
     OpenResponse,
     OpIn,
@@ -90,10 +96,37 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-#: op-dict keys that carry a resource id. In CANONICAL stored ops every one of
-#: these holds a real id — a create op's ``temp_id`` was rewritten to the
-#: assigned canonical id at apply time (see session.py / _apply_one).
-_ID_KEYS = ("id", "temp_id", "source_id", "target_id")
+def _id_field_names(op_types: Iterable[Any]) -> frozenset[str]:
+    """Field names that carry a resource id, DERIVED from the op models.
+
+    ``_affected_ids`` scans RAW journal dicts (``Commit.ops`` JSON), so it
+    cannot lean on ``assert_never`` the way the typed appliers do — and a
+    hand-maintained tuple of field names is exactly the kind of list that
+    silently stops covering the union: add an op kind, or an id-bearing field
+    to an existing one, and the conflict backstop quietly under-reports, which
+    turns a real conflict into a lost update with no test and no type error.
+    Deriving from ``model_fields`` closes that gap: the union members below are
+    read straight off ``ModelOpIn``/``ArtifactOpIn``, so a new op kind is
+    covered the moment it joins the union.
+
+    The naming rule (``id`` or ``*_id``) errs toward OVER-reporting, which is
+    the safe direction here: a spurious key can only add ids to the touched
+    set — i.e. produce a conservative 409 — never hide one.
+    """
+    return frozenset(
+        name
+        for op_type in op_types
+        for name in op_type.model_fields
+        if name == "id" or name.endswith("_id")
+    )
+
+
+#: op-dict keys that carry a resource id, per family. In CANONICAL stored ops
+#: every one of these holds a real id — a create op's ``temp_id`` was rewritten
+#: to the assigned canonical id at apply time (see session.py / _apply_one and
+#: artifact_ops.apply_artifact_ops).
+_MODEL_ID_KEYS = _id_field_names(get_args(ModelOpIn))
+_ARTIFACT_ID_KEYS = _id_field_names(get_args(ArtifactOpIn))
 
 
 def _affected_ids(commits: list[Commit]) -> set[str]:
@@ -124,12 +157,12 @@ def _affected_ids(commits: list[Commit]) -> set[str]:
     for c in commits:
         for op in (*c.ops, *c.inverse_ops):
             if op.get("kind") in ARTIFACT_OP_KINDS:
-                for key in ("id", "temp_id"):
+                for key in _ARTIFACT_ID_KEYS:
                     v = op.get(key)
                     if isinstance(v, str):
                         ids.add(ARTIFACT_PREFIX + v)
                 continue
-            for key in _ID_KEYS:
+            for key in _MODEL_ID_KEYS:
                 v = op.get(key)
                 if isinstance(v, str):
                     ids.add(v)
@@ -153,8 +186,12 @@ def _batch_touched_ids(model: Model, ops: list[OpIn]) -> set[str]:
     MUST be conservative: under-reporting a touched resource here is exactly
     the failure mode the backstop exists to prevent (a real conflict would
     silently land instead of 409ing), so every op kind that carries an id
-    that could ever collide with a peer's is covered — CreateElementOp is
-    the only kind with no server-known id at all until apply time.
+    that could ever collide with a peer's is covered — the two CREATE kinds
+    (``CreateElementOp``, ``CreateArtifactOp``) are the only ones with no
+    server-known id at all until apply time, and they say so EXPLICITLY
+    below: the chain ends in ``assert_never`` so a seventh op kind is a
+    type error here rather than a silent hole (same discipline
+    ``_apply_one``'s ``assert_never`` gives the applier).
     """
     ids = {r.resource_id for r in required_locks(model, ops)}
     for op in ops:
@@ -173,6 +210,12 @@ def _batch_touched_ids(model: Model, ops: list[OpIn]) -> set[str]:
             ids.add(op.target_id)
         elif isinstance(op, (UpdateArtifactOp, DeleteArtifactOp)):
             ids.add(ARTIFACT_PREFIX + op.id)
+        elif isinstance(op, (CreateElementOp, CreateArtifactOp)):
+            # deliberate no-op: a create names no id a PEER could also be
+            # touching (its temp id is batch-local and stripped below).
+            pass
+        else:
+            assert_never(op)
     # Strip batch-local temp ids: they never appear in _affected_ids (canonical
     # stored ops always carry the assigned id, never the batch-local one), so
     # a temp id here can never overlap a real journal id and only adds noise.
@@ -189,7 +232,12 @@ def _conflict_response(model_rev: int, detail: str) -> JSONResponse:
     """The uniform 409 envelope every staleness/overlap fallback in
     ``create_commit`` returns — factored out so that branch structure (see
     its docstring: no-journal / short-tail / baseline-or-rebind / overlap)
-    reads at a glance instead of six near-identical ``JSONResponse`` blocks."""
+    reads at a glance instead of four near-identical ``JSONResponse`` blocks.
+
+    Single-instance assumption: the completeness reasoning behind these
+    branches (one journaled batch == one rev == one row) holds because ONE
+    process owns the session and its journal writes. Multi-instance
+    deployment is Phase 7's debt, shared with ``LockTable``."""
     return JSONResponse(
         status_code=409,
         content={"detail": detail, "model_rev": model_rev},
@@ -379,9 +427,11 @@ def create_commit(
          - the tail is SHORTER than the rev gap — the completeness invariant
            (one journaled batch == one rev == one row, spelled out at the
            check itself below) means a short tail can only mean some rev in
-           the gap advanced without a journal row (``Session.touch_model()``/
-           ``set_model(None)``, used by the legacy unlocked mutation routes
-           and CR-apply), so there is no way to know what it touched;
+           the gap advanced without a journal row (``Session.touch_model()``,
+           the legacy unlocked mutation routes, or ``set_model(...)`` — model
+           load/clear and CR-apply, which passes the replacement model and
+           its spliced validation state in), so there is no way to know what
+           it touched;
          - a rebind is in the tail (the metamodel changed under the client,
            so its element ops were computed against a schema that no longer
            exists);
@@ -437,7 +487,8 @@ def create_commit(
             # mutex). So a FULL tail always has len(tail) == head - base_rev.
             # A SHORT tail means some rev in the gap moved without a journal
             # row at all — e.g. touch_model() (legacy PATCH/POST/DELETE
-            # mutation routes) or set_model(None) (clear/apply-cr) — so there
+            # mutation routes) or set_model() (model load/clear, and CR-apply,
+            # which passes the replacement model in) — so there
             # is nothing to inspect for that rev and no way to know it didn't
             # touch this batch's resources. Fail closed.
             return _conflict_response(session.model_rev, "stale base_rev")
@@ -466,6 +517,31 @@ def create_commit(
             )
     model_ops, artifact_ops = split_ops(payload.ops)
     state = _ensure_validation_seeded(session, model)
+    if not payload.ops:
+        # Empty batch: nothing to apply. Mirrors apply_ops' and revert's
+        # no-op early returns — current state, no rev bump, no undo slot. It
+        # matters MORE here than there: an empty-ops journal row is
+        # persist_baseline's marker for "the whole model was replaced
+        # opaquely", which the staleness guard above reads as an
+        # unconditional 409 for every client below that rev. A message-only
+        # "checkpoint" commit would therefore permanently disable the overlap
+        # rule for the project — fail-closed, but wrong. Keeping the invariant
+        # (empty ops in the journal ⟺ opaque baseline reset) true is this
+        # branch's real job; the saved rev is a bonus.
+        return CommitResponse(
+            model_rev=session.model_rev,
+            id_map={},
+            changed_elements=[],
+            changed_relationships=[],
+            deleted_element_ids=[],
+            deleted_relationship_ids=[],
+            issues_removed_owner_ids=[],
+            issues_added=[],
+            issue_counts=state.counts(),
+            commit_id="",
+            message="",
+            validation_error_count=0,
+        )
     with session.write_mutex:
         # a. verify the caller still holds every required lock. `payload.ops`
         #    (not `model_ops`) so the `art:`-namespaced leases artifact ops

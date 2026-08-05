@@ -1,11 +1,21 @@
 """Project-artifact CRUD (saved navigations and tables; diagrams in a later
 stage).
 
-Artifacts are DB rows, NOT model content: no leases, no commits, no op-log.
-Concurrency is optimistic via `artifact_rev` (PUT echoes the loaded rev;
-mismatch -> 409 carrying `current_rev`). Every successful write broadcasts an
-`artifact_event` on the session's FeedHub — safe without the write_mutex
-because artifact writes never touch the in-memory model.
+Artifacts are DB rows, NOT model content, so these routes take no
+`write_mutex`: they never touch the in-memory model, and that is also why
+broadcasting an `artifact_event` per successful write is safe here.
+
+Concurrency, since the Phase 1 artefacts revamp, is TWO-layered:
+- optimistic `artifact_rev` (PUT echoes the loaded rev; mismatch -> 409
+  carrying `current_rev`) — this route family's own, older mechanism; and
+- the `art:<id>` LEASES `POST /commits` verifies. These routes are not
+  lock-verified (they take no token and grant nothing), but they must still
+  REFUSE (409) while a peer holds a lease, or the guarantee is empty in both
+  directions: an editor checked out on `art:X` would find their commit
+  quietly overwriting — or overwritten by — a legacy write they never saw.
+  A legacy write bumps no `model_rev`, so the commit path's overlap backstop
+  cannot see it either; this guard is the only thing standing there. The
+  caller's OWN lease never blocks them (see `LockTable.peer_leases`).
 
 Payloads are validated per kind on write via the `artifact_kinds` registry;
 Stage 1 added `navigation` (`NAVIGATION_ADAPTER`), Stage 2 added `table`
@@ -15,6 +25,7 @@ lands.
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -39,6 +50,7 @@ from ..db_models import ArtifactKind, ArtifactRow, User
 from ..deps import Session, get_request_session, require_model
 from ..feed import artifact_event
 from ..identity import get_current_user
+from ..locking import artifact_resource
 from ..schemas import (
     ArtifactCreateIn,
     ArtifactListOut,
@@ -89,6 +101,30 @@ def _apply_derived_metadata(kind: ArtifactKind, payload: dict[str, Any]) -> None
     spec = get_spec(kind)
     if spec is not None and spec.derive_metadata is not None:
         spec.derive_metadata(payload)
+
+
+def _reject_if_peer_locked(session: Session, artifact_id: str, user_id: str) -> None:
+    """409 while a PEER holds a live lease on this artifact (see the module
+    docstring: these routes honour `art:` leases without granting them)."""
+    conflicts = session.lock_table.peer_leases(
+        [artifact_resource(artifact_id)], user_id, now=time.monotonic()
+    )
+    if conflicts:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "artifact is checked out by someone else",
+                "conflicts": [
+                    {
+                        "resource_id": le.resource_id,
+                        "mode": le.mode.value,
+                        "holder_id": le.holder,
+                        "holder_email": le.holder_email,
+                    }
+                    for le in conflicts
+                ],
+            },
+        )
 
 
 def _require_artifact(db: DbSession, project_id: str, artifact_id: str) -> ArtifactRow:
@@ -160,6 +196,7 @@ def update_artifact(
     user: User = Depends(get_current_user),
 ) -> ArtifactOut:
     row = _require_artifact(db, project_id, artifact_id)
+    _reject_if_peer_locked(session, artifact_id, user.id)
     if payload.payload is not None:
         _validate_payload(row.kind, payload.payload)
         _apply_derived_metadata(row.kind, payload.payload)
@@ -200,8 +237,10 @@ def delete_artifact(
     artifact_id: str,
     session: Session = Depends(get_request_session),
     db: DbSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> Response:
     row = _require_artifact(db, project_id, artifact_id)
+    _reject_if_peer_locked(session, artifact_id, user.id)
     header = _header(row).model_dump(mode="json")
     content.delete_artifact(db, row)
     db.commit()

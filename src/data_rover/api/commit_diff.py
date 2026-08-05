@@ -152,13 +152,18 @@ def _artifact_states(
     return before, after, kinds
 
 
-def _kind_from_row(db: DbSession, artifact_id: str) -> str:
+def _kind_from_row(db: DbSession, project_id: str, artifact_id: str) -> str:
     """Resolve an artifact's kind from its row (update-only commits only).
 
     The applier's update inverse carries no kind, and kind is immutable for the
     life of a row, so a row lookup is exact whenever the row still exists. The
     ``"unknown"`` fallback is reached only for an artifact a LATER commit
     deleted — the diff's states stay correct, only this label degrades.
+
+    Project-scoped like every other content read (``artifact_ops._require_row``
+    is the model): uuid4 ids make a cross-tenant hit unreachable in practice,
+    but a bare PK lookup is still the wrong SHAPE — the scoping is what keeps
+    it unreachable BY CONSTRUCTION rather than by id entropy.
 
     Imported locally: this module must stay route-free and content.py is a
     service module, but the import is kept out of the header so the dependency
@@ -167,7 +172,9 @@ def _kind_from_row(db: DbSession, artifact_id: str) -> str:
     from . import content
 
     row = content.get_artifact(db, artifact_id)
-    return row.kind.value if row is not None else "unknown"
+    if row is None or row.project_id != project_id:
+        return "unknown"
+    return row.kind.value
 
 
 def _element_diffs(
@@ -206,14 +213,16 @@ def _relationship_diffs(
     return out
 
 
-def _artifact_diffs(db: DbSession, commit: Commit) -> CommitArtifactDiffs:
+def _artifact_diffs(
+    db: DbSession, project_id: str, commit: Commit
+) -> CommitArtifactDiffs:
     art_before, art_after, art_kinds = _artifact_states(commit)
     out = CommitArtifactDiffs()
     for aid in sorted(set(art_before) | set(art_after)):
         b, a = art_before.get(aid), art_after.get(aid)
         if b is None and a is None:
             continue  # created and deleted within this same commit — a no-op
-        kind = art_kinds.get(aid) or _kind_from_row(db, aid)
+        kind = art_kinds.get(aid) or _kind_from_row(db, project_id, aid)
         if b is None and a is not None:
             out.added.append(
                 ArtifactDiffAddedOut(
@@ -292,5 +301,5 @@ def diff_commit(db: DbSession, project_id: str, commit: Commit) -> CommitDiffOut
         is_rebind=is_rebind,
         elements=_element_diffs(el_ids, b_el, a_el),
         relationships=_relationship_diffs(rel_ids, b_rel, a_rel),
-        artifacts=_artifact_diffs(db, commit),
+        artifacts=_artifact_diffs(db, project_id, commit),
     )

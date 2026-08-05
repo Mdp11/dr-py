@@ -92,12 +92,18 @@ def validate_model(
             )
         model_ops, artifact_ops = split_ops(payload.ops)
         if artifact_ops:
-            # Task 5 wires artifact ops into staged validation; until then
-            # they are rejected outright so they can never reach the model
-            # applier (same guard as preview/create/revert).
+            # PERMANENT rule, not a stub (CLAUDE.md, Phase 4 "Artifact ops"):
+            # this endpoint validates MODEL content — it applies ops to the
+            # model, re-runs the pipeline over the dirty scope and rolls back.
+            # An artifact op has nothing to contribute to that: its rows are
+            # not model content, and its own preconditions are dry-checked by
+            # POST /commits/preview, which is where a client stages an
+            # artifact batch. Rejected outright so one can never reach the
+            # model applier (same guard as /model/ops).
             raise HTTPException(
                 status_code=422,
-                detail="artifact ops are not yet supported on this endpoint",
+                detail="artifact ops are not supported on this endpoint; "
+                "use /commits/preview",
             )
         # committed baseline = the session's maintained issue store (seeded on first
         # use). Reused, not recomputed: avoids a full O(model) pass per Validate and

@@ -334,6 +334,99 @@ def test_delete_feed_event_matches_the_legacy_delete_route(client: TestClient) -
     assert commit_evt["artifact"]["entry_points"] == ["script", "value"]
 
 
+def test_undo_refuses_while_a_peer_holds_the_artifact_lease(
+    client: TestClient,
+) -> None:
+    """POST /model/undo is the legacy UNLOCKED path, but its artifact half
+    writes rows that ``art:`` leases are supposed to protect: undoing a peer's
+    artifact commit under their nose is exactly the lost update the leases
+    exist to prevent. The refusal must not eat undo history either — the batch
+    goes back on the op_log, so the same undo succeeds once the lease is gone.
+    """
+    art = _mk_snippet(client, "undo-me")
+    tok = _lock_artifacts(client, [art["id"]])
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": _rev(client),
+            "ops": [
+                {
+                    "kind": "update_artifact",
+                    "id": art["id"],
+                    "payload": {**SNIP, "code": "committed = 1"},
+                }
+            ],
+            "lock_tokens": [tok],
+        },
+    )
+    assert r.status_code == 200, r.text
+    # a peer checks the artifact out (the commit released the committer's lease)
+    _seed_second_member(OTHER_HEADERS["x-user-id"], OTHER_HEADERS["x-user-email"])
+    peer_r = client.post(
+        papi("/locks"),
+        headers=OTHER_HEADERS,
+        json={
+            "targets": [
+                {"resource_id": art["id"], "mode": "exclusive", "type": "artifact"}
+            ],
+            "intent": "edit",
+        },
+    )
+    assert peer_r.status_code == 200, peer_r.text
+    peer_token = peer_r.json()["token"]
+
+    rev_before = _rev(client)
+    r = client.post(papi("/model/undo"))
+    assert r.status_code == 409, r.text
+    assert r.json()["conflicts"][0]["resource_id"] == f"art:{art['id']}"
+    assert _rev(client) == rev_before  # nothing applied
+    assert (
+        client.get(papi(f"/artifacts/{art['id']}")).json()["payload"]["code"]
+        == "committed = 1"
+    )
+
+    # undo history survived the refusal: the same undo lands once the lease goes
+    rel = client.post(
+        papi("/locks/release"), headers=OTHER_HEADERS, json={"token": peer_token}
+    )
+    assert rel.status_code == 200, rel.text
+    r = client.post(papi("/model/undo"))
+    assert r.status_code == 200, r.text
+    assert (
+        client.get(papi(f"/artifacts/{art['id']}")).json()["payload"]["code"]
+        == SNIP["code"]
+    )
+
+
+def test_undo_is_allowed_for_the_lease_holder(client: TestClient) -> None:
+    """The mirror of the test above: only a PEER's lease blocks. A user holding
+    the lease is the one editing, so their own undo must go through."""
+    art = _mk_snippet(client, "self-undo")
+    tok = _lock_artifacts(client, [art["id"]])
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": _rev(client),
+            "ops": [
+                {
+                    "kind": "update_artifact",
+                    "id": art["id"],
+                    "payload": {**SNIP, "code": "mine = 1"},
+                }
+            ],
+            "lock_tokens": [tok],
+        },
+    )
+    assert r.status_code == 200, r.text
+    _lock_artifacts(client, [art["id"]])  # re-check-out, same user
+    r = client.post(papi("/model/undo"))
+    assert r.status_code == 200, r.text
+    assert (
+        client.get(papi(f"/artifacts/{art['id']}")).json()["payload"]["code"]
+        == SNIP["code"]
+    )
+
+
 def test_preview_validates_artifact_ops_without_writes(client: TestClient) -> None:
     art = _mk_snippet(client, "pv")
     r = client.post(

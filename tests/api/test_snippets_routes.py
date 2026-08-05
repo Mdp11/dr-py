@@ -20,6 +20,15 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from data_rover.core.model.model import Model
+from data_rover.core.script.runner import (
+    RunLimits,
+    RunRequest,
+    RunResult,
+    ScriptBudget,
+    SnippetSession,
+)
+
 from data_rover.api import tenancy
 from data_rover.api.db import db_session
 from data_rover.api.db_models import Role
@@ -601,3 +610,64 @@ def test_run_value_and_step_entries_are_read_only(
     assert "ReadOnly" in body["error"]["message"]
     assert body["ops"] == []
     assert _model_summary(client) == before
+
+
+# ---------------------------------------------------------------------------
+# Guest-proposed ARTIFACT ops are refused (final-review finding 3).
+# `bridge._op_record_op` appends a guest-supplied op dict VERBATIM, and both
+# `OPS_ADAPTER` and `POST /commits` now accept the artifact op family — so
+# without this gate a snippet could propose rewriting another snippet's code,
+# staged for an editor who believes they are approving data edits (and the
+# snippet's author may be a mere viewer: /snippets/run is a read-only POST).
+# ---------------------------------------------------------------------------
+
+
+class _ArtifactOpRunner:
+    """Stands in for a guest that recorded an artifact op. A test double, not
+    a sandbox: it never executes the snippet at all — it just hands the route
+    the op batch a compromised/buggy guest could produce."""
+
+    def run(
+        self,
+        model: Model,
+        req: RunRequest,
+        limits: RunLimits,
+        *,
+        record_ops: bool,
+        rev: int,
+    ) -> RunResult:
+        return RunResult(
+            stdout="",
+            result_repr=None,
+            ops=[
+                {
+                    "kind": "update_artifact",
+                    "id": "victim",
+                    "payload": {"code": "import os"},
+                }
+            ],
+            error=None,
+            duration_ms=0,
+            truncated=False,
+        )
+
+    def open_session(
+        self,
+        model: Model,
+        code: str,
+        limits: RunLimits,
+        *,
+        budget: ScriptBudget,
+    ) -> SnippetSession:  # pragma: no cover - never used by /snippets/run
+        raise NotImplementedError
+
+
+def test_run_refuses_a_guest_recorded_artifact_op(
+    app: FastAPI, client: TestClient
+) -> None:
+    _seed_model(client)
+    app.dependency_overrides[get_runner] = lambda: _ArtifactOpRunner()
+    r = client.post(papi("/snippets/run"), json={"run_id": "art", "code": "pass"})
+    assert r.status_code == 500, r.text
+    # ...and nothing artifact-shaped reached the client for staging
+    assert "update_artifact" not in r.text

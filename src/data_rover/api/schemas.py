@@ -215,6 +215,16 @@ class ViewStateResponse(BaseModel):
 # `frontend/src/lib/state/ops.ts` exactly (THE FILE IS THE CONTRACT)
 # ---------------------------------------------------------------------------
 
+#: Client-generated provisional ids carry this prefix (mirrors
+#: ``TEMP_ID_PREFIX`` in ``frontend/src/lib/state/ops.ts``). It lives HERE, with
+#: the op union it belongs to, because it is part of that wire contract and
+#: every module that reasons about ops needs it: ``routes/ops.py`` (re-exported
+#: from there for its long-standing importers), ``artifact_ops.py`` and
+#: ``locking.py``. It used to be copied literally into each — a copy is exactly
+#: how the applier and the lock-scope derivation could come to disagree about
+#: which ids are "not yet shared".
+TEMP_ID_PREFIX = "tmp_"
+
 
 class CreateElementOp(BaseModel):
     kind: Literal["create_element"]

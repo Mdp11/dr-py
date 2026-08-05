@@ -8,8 +8,11 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from data_rover.api import db
+from data_rover.api.db_models import Role, User
 from data_rover.api.main import create_app
-from data_rover.api.session import get_session
+from data_rover.api.session import DEFAULT_PROJECT_ID, get_session
+from data_rover.api.tenancy import add_member
 
 from .conftest import AUTH_HEADERS, papi, seed_default_project
 
@@ -146,6 +149,99 @@ def test_delete_then_404(client: TestClient) -> None:
     assert client.delete(f"{API}/artifacts/{created['id']}").status_code == 204
     assert client.get(f"{API}/artifacts/{created['id']}").status_code == 404
     assert client.delete(f"{API}/artifacts/{created['id']}").status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Peer-lease guard on the legacy write routes (final-review finding 1).
+# `art:` leases only mean anything if EVERY writer to the row honours them:
+# without this, an editor holding `art:X` mid-edit can have their commit
+# silently overwrite (or be overwritten by) a legacy PUT/DELETE.
+# ---------------------------------------------------------------------------
+
+OTHER_HEADERS = {"x-user-id": "user-2", "x-user-email": "user2@example.com"}
+
+
+def _seed_second_member(user_id: str, email: str) -> None:
+    """Add *user_id* as an editor of the default project (mirrors the helper of
+    the same name in ``test_commits_artifact_ops.py``) so a peer-lease test
+    exercises the 409 lock path rather than authz's 403."""
+    gen = db.get_db()
+    s = next(gen)
+    try:
+        if s.get(User, user_id) is None:
+            s.add(User(id=user_id, email=email))
+            s.commit()
+        add_member(s, DEFAULT_PROJECT_ID, user_id, Role.editor)
+    finally:
+        gen.close()
+
+
+def _seed_empty_model(client: TestClient) -> None:
+    """POST /locks goes through ``require_model``, so a lease test needs a
+    loaded (if empty) model even though artifacts are not model content."""
+    r = client.post(
+        f"{API}/metamodel",
+        content="elements:\n  - name: Node\n",
+        headers={"content-type": "application/x-yaml"},
+    )
+    assert r.status_code == 200, r.text
+    r = client.post(f"{API}/model", json={"elements": [], "relationships": []})
+    assert r.status_code == 200, r.text
+
+
+def _lock_artifact(client: TestClient, artifact_id: str, **kw: object) -> str:
+    r = client.post(
+        papi("/locks"),
+        json={
+            "targets": [
+                {"resource_id": artifact_id, "mode": "exclusive", "type": "artifact"}
+            ],
+            "intent": "edit",
+        },
+        **kw,  # type: ignore[arg-type]
+    )
+    assert r.status_code == 200, r.text
+    token: str = r.json()["token"]
+    return token
+
+
+def test_put_409s_while_a_peer_holds_the_artifact_lease(client: TestClient) -> None:
+    _seed_empty_model(client)
+    created = _create(client)
+    _seed_second_member(OTHER_HEADERS["x-user-id"], OTHER_HEADERS["x-user-email"])
+    _lock_artifact(client, created["id"], headers=OTHER_HEADERS)
+    r = client.put(
+        f"{API}/artifacts/{created['id']}",
+        json={"artifact_rev": 1, "name": "stomped"},
+    )
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"]["conflicts"][0]["resource_id"] == f"art:{created['id']}"
+    # nothing was written
+    assert client.get(f"{API}/artifacts/{created['id']}").json()["name"] == "My nav"
+
+
+def test_delete_409s_while_a_peer_holds_the_artifact_lease(client: TestClient) -> None:
+    _seed_empty_model(client)
+    created = _create(client)
+    _seed_second_member(OTHER_HEADERS["x-user-id"], OTHER_HEADERS["x-user-email"])
+    _lock_artifact(client, created["id"], headers=OTHER_HEADERS)
+    r = client.delete(f"{API}/artifacts/{created['id']}")
+    assert r.status_code == 409, r.text
+    assert client.get(f"{API}/artifacts/{created['id']}").status_code == 200
+
+
+def test_lease_holder_may_still_use_the_legacy_routes(client: TestClient) -> None:
+    """Only a PEER's lease blocks: the holder is the one editing, so their own
+    lease must never lock them out of their own write path."""
+    _seed_empty_model(client)
+    created = _create(client)
+    _lock_artifact(client, created["id"])
+    r = client.put(
+        f"{API}/artifacts/{created['id']}",
+        json={"artifact_rev": 1, "name": "mine"},
+    )
+    assert r.status_code == 200, r.text
+    assert client.delete(f"{API}/artifacts/{created['id']}").status_code == 204
 
 
 def test_writes_broadcast_artifact_events(client: TestClient) -> None:

@@ -294,3 +294,59 @@ def test_no_durable_journal_keeps_strict_rule() -> None:
                       "type_name": "Node", "properties": {}}], base)
     assert r2.status_code == 409
     assert r2.json()["detail"] == "stale base_rev"
+
+
+def test_empty_commit_is_a_no_op_and_never_poisons_the_tail(
+    client: TestClient,
+) -> None:
+    """A message-only "checkpoint" commit must not burn a rev (final-review
+    finding 4). An empty-ops journal row IS ``persist_baseline``'s marker for
+    "the whole model was replaced opaquely", so writing one here would turn
+    every later stale base_rev into an unconditional 409 forever — permanently
+    disabling the overlap rule this module tests. Mirrors ``apply_ops``' own
+    empty-batch early return."""
+    base = _rev(client)
+    r = client.post(
+        papi("/commits"),
+        json={"base_rev": base, "ops": [], "lock_tokens": [], "message": "checkpoint"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["model_rev"] == base
+    assert _rev(client) == base
+    assert client.get(papi("/commits")).json()["commits"] == []  # no journal row
+
+    # the overlap rule still works afterwards: a stale, DISJOINT batch lands
+    r1 = _commit(client, [{"kind": "create_element", "temp_id": "tmp_a",
+                           "type_name": "Node", "properties": {}}], base)
+    assert r1.status_code == 200, r1.text
+    r2 = _commit(client, [{"kind": "create_element", "temp_id": "tmp_b",
+                           "type_name": "Node", "properties": {}}], base)
+    assert r2.status_code == 200, r2.text
+
+
+def test_id_keys_are_derived_from_the_op_models() -> None:
+    """The touched-set scan over RAW journal dicts cannot use ``assert_never``
+    (it never sees typed ops), so its id-bearing field names must be DERIVED
+    from the op models instead of hand-maintained — otherwise a new op kind,
+    or a new id field on an existing one, silently contributes nothing to the
+    conflict backstop and a real conflict becomes a lost update."""
+    from typing import Literal
+
+    from pydantic import BaseModel
+
+    from data_rover.api.routes.commits import (
+        _ARTIFACT_ID_KEYS,
+        _MODEL_ID_KEYS,
+        _id_field_names,
+    )
+
+    assert _MODEL_ID_KEYS == frozenset({"id", "temp_id", "source_id", "target_id"})
+    assert _ARTIFACT_ID_KEYS == frozenset({"id", "temp_id"})
+
+    class _FutureOp(BaseModel):
+        kind: Literal["future_op"]
+        id: str
+        owner_id: str  # a new id-bearing field on a future op kind
+        label: str
+
+    assert _id_field_names((_FutureOp,)) == frozenset({"id", "owner_id"})

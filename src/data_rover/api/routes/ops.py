@@ -48,6 +48,7 @@ is only a change ticker.
 
 from __future__ import annotations
 
+import time
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -67,6 +68,7 @@ from .. import content
 from ..artifact_ops import (
     apply_artifact_ops,
     artifact_delta_headers,
+    artifact_op_ids,
     broadcast_artifact_events,
     split_ops,
 )
@@ -76,8 +78,10 @@ from ..deps import Session, get_request_session, require_model
 from ..hydration import serialize_ops, write_snapshot
 from ..identity import get_current_user
 from ..invalidation import touched_keys
+from ..locking import artifact_resource
 from ..settings import get_settings
 from ..schemas import (
+    TEMP_ID_PREFIX,
     CreateElementOp,
     CreateRelationshipOp,
     DeleteElementOp,
@@ -96,11 +100,11 @@ from ..session import AppliedBatch
 
 router = APIRouter()
 
-#: Client-generated provisional ids carry this prefix (mirrors
-#: ``TEMP_ID_PREFIX`` in ``frontend/src/lib/state/ops.ts``). A create op whose
-#: ``temp_id`` lacks the prefix is rejected on the public endpoint; in restore
-#: mode (undo/rollback) it means "reinstate this exact canonical id".
-TEMP_ID_PREFIX = "tmp_"
+# ``TEMP_ID_PREFIX`` is imported from ``schemas`` above — its single source,
+# living with the op union it is part of — and re-exported through this module
+# for its long-standing importers (``routes/commits.py`` among them). A create
+# op whose ``temp_id`` lacks the prefix is rejected on the public endpoint; in
+# restore mode (undo/rollback) it means "reinstate this exact canonical id".
 
 
 def _resolve_value(value: Any, id_map: dict[str, str]) -> Any:
@@ -677,6 +681,37 @@ def undo(
         # the undo replays each half through its own applier: the model half in
         # place, the artifact half staged on this request's DB transaction.
         model_inv, artifact_inv = split_ops(batch.inverse_ops)
+        # The MODEL half of this route stays deliberately unlocked (the
+        # documented migration-window stance until the frontend moves to
+        # check-out/commit). The ARTIFACT half cannot: artifact rows are
+        # ONLY ever protected by their `art:` lease — there is no per-request
+        # write_mutex ordering and no rev to conflict on — so replaying an
+        # artifact inverse over a peer's checked-out row would void, from
+        # this side, exactly the guarantee POST /commits and the legacy
+        # artifact CRUD routes enforce on theirs. Refuse instead, and push
+        # the batch BACK so a refusal never eats undo history.
+        peer_held = session.lock_table.peer_leases(
+            [artifact_resource(aid) for aid in artifact_op_ids(artifact_inv)],
+            user.id,
+            now=time.monotonic(),
+        )
+        if peer_held:
+            session.op_log.append(batch)
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "detail": "artifact is checked out by someone else",
+                    "model_rev": session.model_rev,
+                    "conflicts": [
+                        {
+                            "resource_id": le.resource_id,
+                            "mode": le.mode.value,
+                            "holder_id": le.holder,
+                        }
+                        for le in peer_held
+                    ],
+                },
+            )
         try:
             res = _apply_batch(model, model_inv, restore=True)
         except Exception:

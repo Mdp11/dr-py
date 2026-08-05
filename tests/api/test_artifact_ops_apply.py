@@ -207,6 +207,26 @@ def test_restore_update_rename_into_taken_name_422(dbs) -> None:
     dbs.rollback()  # see the matching comment in the create-into-taken-name test above
 
 
+def test_restore_create_of_an_existing_id_reports_the_id_not_a_name(dbs) -> None:
+    """A restore-mode create whose exact id is already taken (a double-undo,
+    or an undo after a peer recreated the row) trips the PRIMARY KEY, not the
+    name UNIQUE. Both are 422, but the message must name the real cause — the
+    IntegrityError catch is scoped to the exception TYPE, so without the
+    id pre-check it would blame a name clash that never happened."""
+    row = content.create_artifact(dbs, "default", kind=ArtifactKind.code_snippet,
+                                  name="dup-id", payload=dict(SNIP), updated_by="u1")
+    with pytest.raises(HTTPException) as e:
+        apply_artifact_ops(
+            dbs, "default",
+            _ops([{"kind": "create_artifact", "temp_id": row.id,
+                   "artifact_kind": "code_snippet", "name": "another-name",
+                   "payload": dict(SNIP)}]),
+            user_id="u1", restore=True,
+        )
+    assert e.value.status_code == 422
+    assert str(e.value.detail) == f"an artifact with id {row.id!r} already exists"
+
+
 # --- Finding 2: validate and apply must agree on batch-local name state ---
 
 
