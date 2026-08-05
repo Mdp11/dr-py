@@ -29,6 +29,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session as DbSession
 
+from data_rover.core.model.model import Model
 from data_rover.core.validation.issue import IssueCategory
 from data_rover.core.validation.pipeline import default_pipeline
 
@@ -49,13 +50,17 @@ from ..deps import Session, get_request_session, require_model
 from ..hydration import deserialize_ops, reconstruct_model_at
 from ..identity import get_current_user
 from ..invalidation import touched_keys
-from ..locking import required_locks
+from ..locking import ARTIFACT_PREFIX, required_locks
 from ..settings import get_settings
 from ..schemas import (
     CommitHistoryResponse,
     CommitRequest,
     CommitResponse,
     CommitSummaryOut,
+    CreateRelationshipOp,
+    DeleteArtifactOp,
+    DeleteElementOp,
+    DeleteRelationshipOp,
     ElementOut,
     IssueOut,
     ModelOut,
@@ -65,6 +70,9 @@ from ..schemas import (
     PreviewResponse,
     RelationshipOut,
     RevertRequest,
+    UpdateArtifactOp,
+    UpdateElementOp,
+    UpdateRelationshipOp,
 )
 from ..session import AppliedBatch
 from .ops import (
@@ -88,18 +96,64 @@ _ID_KEYS = ("id", "temp_id", "source_id", "target_id")
 def _affected_ids(commits: list[Commit]) -> set[str]:
     """Resource ids touched by the forward ops of these commits.
 
-    Used by revert's peer-lock guard: any active lease over one of these ids
+    Used by revert's peer-lock guard (any active lease over one of these ids
     means a peer is mid-edit on something the revert would change, so the
-    revert is refused (409) rather than stomping their uncommitted work.
+    revert is refused (409) rather than stomping their uncommitted work) AND
+    by the generalized conflict backstop in ``create_commit``, which
+    intersects this against ``_batch_touched_ids``. Artifact ids are
+    prefixed with the ``art:`` lease namespace so the two sets — and lease
+    resource ids generally — compare directly; model ids stay bare (the
+    pre-existing wire format).
     """
     ids: set[str] = set()
     for c in commits:
         for op in c.ops:
+            if op.get("kind") in ARTIFACT_OP_KINDS:
+                for key in ("id", "temp_id"):
+                    v = op.get(key)
+                    if isinstance(v, str):
+                        ids.add(ARTIFACT_PREFIX + v)
+                continue
             for key in _ID_KEYS:
                 v = op.get(key)
                 if isinstance(v, str):
                     ids.add(v)
     return ids
+
+
+def _batch_touched_ids(model: Model, ops: list[OpIn]) -> set[str]:
+    """Conservative touched-set for the conflict backstop (spec 2026-07-29):
+    a batch conflicts with the commit tail iff their touched-id sets overlap.
+
+    Starts from ``required_locks`` — the same per-op resource derivation the
+    lock table already trusts to gate concurrent edits — then adds the raw
+    ids locks deliberately abstract away: a relationship update/delete locks
+    only its SOURCE element (the two are inseparable for editing purposes),
+    but the journal records the relationship's OWN id, so a peer batch that
+    only names that relationship id (e.g. a second delete of the same
+    relationship) must still register as touching it. A create's temp id
+    never appears in `_affected_ids` (canonical ops carry the assigned id),
+    so temp ids are filtered out at the end rather than tracked specially.
+
+    MUST be conservative: under-reporting a touched resource here is exactly
+    the failure mode the backstop exists to prevent (a real conflict would
+    silently land instead of 409ing), so every op kind that carries an id
+    that could ever collide with a peer's is covered — CreateElementOp is
+    the only kind with no server-known id at all until apply time.
+    """
+    ids = {r.resource_id for r in required_locks(model, ops)}
+    for op in ops:
+        if isinstance(
+            op,
+            (UpdateElementOp, DeleteElementOp, UpdateRelationshipOp, DeleteRelationshipOp),
+        ):
+            ids.add(op.id)
+        elif isinstance(op, CreateRelationshipOp):
+            ids.add(op.source_id)
+            ids.add(op.target_id)
+        elif isinstance(op, (UpdateArtifactOp, DeleteArtifactOp)):
+            ids.add(ARTIFACT_PREFIX + op.id)
+    return {i for i in ids if not i.startswith("tmp_")}
 
 
 @router.get("/open", response_model=None)
@@ -243,7 +297,19 @@ def create_commit(
     """Lock-verified, structural-gated commit (Phase 4 spec §7).
 
     Flow:
-    1. Stale-rev check (before the mutex — mirrors preview and apply_ops).
+    1. Staleness check (before the mutex — mirrors preview and apply_ops).
+       A future ``base_rev`` always 409s. A behind-head ``base_rev`` uses the
+       GENERALIZED rule (spec 2026-07-29): the batch conflicts iff the
+       resources it touches overlap what landed in ``(base_rev, head]`` — see
+       ``_batch_touched_ids``/``_affected_ids``. Leases already prevent most
+       conflicts up front; this is the backstop for the window where the
+       legacy unlocked ``/model/ops`` path and this lock-verified path
+       coexist, so a stale-but-non-overlapping batch lands instead of being
+       rejected. Requires a durable journal to inspect the tail against —
+       a project with none (in-memory-only) keeps the old strict-equality
+       rule, and any rebind in the tail always conflicts regardless of
+       overlap (the metamodel changed under the client, so its element ops
+       were computed against a schema that no longer exists).
     2. Seed the validation baseline.
     3. Under the write mutex:
        a. Verify the caller still holds every required lock (409 if any gone).
@@ -271,11 +337,39 @@ def create_commit(
     ``db.rollback()`` is the ONLY thing that discards staged artifact rows.
     """
     _, model = require_model(session)
-    if payload.base_rev != session.model_rev:
+    if payload.base_rev > session.model_rev:
         return JSONResponse(
             status_code=409,
             content={"detail": "stale base_rev", "model_rev": session.model_rev},
         )
+    if payload.base_rev < session.model_rev:
+        # Generalized staleness (spec 2026-07-29): conflict iff this batch's
+        # touched resources overlap what landed in (base_rev, head]. Requires
+        # a durable journal to inspect; projects without one keep the strict
+        # rule. A rebind in the tail always conflicts (the metamodel changed
+        # under the client — element ops were computed against the old one).
+        if content.get_model_row(db, project_id) is None:
+            return JSONResponse(
+                status_code=409,
+                content={"detail": "stale base_rev", "model_rev": session.model_rev},
+            )
+        tail = content.commits_after(db, project_id, payload.base_rev)
+        if any(
+            c.from_metamodel_id is not None or c.to_metamodel_id is not None
+            for c in tail
+        ):
+            return JSONResponse(
+                status_code=409,
+                content={"detail": "stale base_rev", "model_rev": session.model_rev},
+            )
+        if _affected_ids(tail) & _batch_touched_ids(model, payload.ops):
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "detail": "conflicting concurrent commits",
+                    "model_rev": session.model_rev,
+                },
+            )
     model_ops, artifact_ops = split_ops(payload.ops)
     state = _ensure_validation_seeded(session, model)
     with session.write_mutex:
