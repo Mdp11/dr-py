@@ -508,6 +508,10 @@ class SaveModelResponse(BaseModel):
 class LockTargetIn(BaseModel):
     resource_id: str
     mode: Literal["exclusive", "shared"]
+    #: what the id names; the route canonicalizes to the internal namespace
+    #: ("element" -> bare id, "artifact" -> "art:<id>", "metamodel" -> "mm").
+    #: Defaults to "element" so pre-existing clients are untouched.
+    type: Literal["element", "artifact", "metamodel"] = "element"
 
 
 class LockRequest(BaseModel):
