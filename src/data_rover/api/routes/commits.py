@@ -42,6 +42,7 @@ from ..artifact_ops import (
     validate_artifact_ops,
 )
 from ..authz import require_membership
+from ..commit_diff import diff_commit
 from ..feed import commit_event, lock_event
 from .. import content
 from ..db import get_db
@@ -53,6 +54,7 @@ from ..invalidation import touched_keys
 from ..locking import ARTIFACT_PREFIX, required_locks
 from ..settings import get_settings
 from ..schemas import (
+    CommitDiffOut,
     CommitHistoryResponse,
     CommitRequest,
     CommitResponse,
@@ -317,6 +319,31 @@ def model_at_rev(
     if model is None:
         return ModelOut(elements=[], relationships=[])
     return ModelOut.from_core(model)
+
+
+@router.get("/commits/{rev}/diff", response_model=None)
+def commit_diff_endpoint(
+    rev: int,
+    project_id: str,
+    session: Session = Depends(get_request_session),
+    db: DbSession = Depends(get_db),
+) -> CommitDiffOut | JSONResponse:
+    """Render one commit's changes across content families (Phase 1 artefacts
+    revamp).
+
+    Read endpoint — any member (the ``session`` dependency only establishes
+    membership, exactly like GET /commits above). O(model) like
+    GET /commits/{rev}/model, since the model half reconstructs both sides; the
+    artifact half is journal-only. The rendering itself lives in
+    ``commit_diff.diff_commit`` so the future change-request workflow can point
+    it at a draft instead of a commit row.
+    """
+    row = content.get_commit(db, project_id, rev)
+    if row is None:
+        return JSONResponse(
+            status_code=404, content={"detail": "no commit at this rev"}
+        )
+    return diff_commit(db, project_id, row)
 
 
 @router.post("/commits", response_model=None)

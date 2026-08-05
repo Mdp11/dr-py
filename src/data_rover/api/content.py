@@ -133,6 +133,17 @@ def commits_after(db: Session, project_id: str, rev: int) -> list[Commit]:
     )
 
 
+def get_commit(db: Session, project_id: str, rev: int) -> Commit | None:
+    """The single journal row at ``rev`` (None if there is none).
+
+    Point lookup on the composite PK, for readers that render ONE commit (the
+    diff endpoint) rather than a replay range — distinct from ``commits_after``/
+    ``commits_between``, which exist to feed hydration."""
+    return db.execute(
+        select(Commit).where(Commit.project_id == project_id, Commit.rev == rev)
+    ).scalar_one_or_none()
+
+
 def commits_between(
     db: Session, project_id: str, *, after_rev: int, max_rev: int
 ) -> list[Commit]:

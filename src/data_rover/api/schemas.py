@@ -675,6 +675,85 @@ class CommitHistoryResponse(BaseModel):
     has_more: bool
 
 
+# ---------------------------------------------------------------------------
+# Per-commit diff schemas (Phase 1 artefacts revamp: GET /commits/{rev}/diff)
+# ---------------------------------------------------------------------------
+
+
+class JsonChangeOut(BaseModel):
+    """One leaf-level difference between two JSON documents.
+
+    ``path`` is a dotted key path into the document ("$" for the document root,
+    i.e. the two values are not both objects). Lists and scalars are reported
+    wholesale at their own path — see ``commit_diff.json_structural_diff`` for
+    why a reordered list is one reviewable change rather than N index deltas.
+    """
+
+    path: str
+    before: Any = None
+    after: Any = None
+
+
+class ArtifactDiffAddedOut(BaseModel):
+    """An artifact this commit created, in its post-commit state."""
+
+    id: str
+    kind: str
+    name: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class ArtifactDiffModifiedOut(BaseModel):
+    """An artifact this commit changed. ``kind`` may be ``"unknown"``: an
+    update op carries no kind on either side, so it is resolved from the row,
+    which a LATER commit may have deleted."""
+
+    id: str
+    kind: str
+    name_before: str
+    name_after: str
+    changes: list[JsonChangeOut] = Field(default_factory=list)
+
+
+class ArtifactDiffDeletedOut(BaseModel):
+    """An artifact this commit deleted, in its pre-commit state. Reconstructed
+    from the delete's inverse op (a create carrying kind + name + full
+    payload), so it stays renderable long after the row is gone."""
+
+    id: str
+    kind: str
+    name: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class CommitArtifactDiffs(BaseModel):
+    added: list[ArtifactDiffAddedOut] = Field(default_factory=list)
+    modified: list[ArtifactDiffModifiedOut] = Field(default_factory=list)
+    deleted: list[ArtifactDiffDeletedOut] = Field(default_factory=list)
+
+
+class CommitDiffOut(BaseModel):
+    """Everything one commit changed, across content families.
+
+    Model entities reuse the change-request shapes (``CrElementOps`` /
+    ``CrRelationshipOps``) rather than parallel ones, so a client renders a
+    commit diff and a CR diff with the same component. ``scope`` mirrors the
+    commit feed event's field ("model" / "artifact"); ``is_rebind`` is true
+    when either metamodel FK is set, matching ``CommitSummaryOut``.
+    """
+
+    rev: int
+    commit_id: str
+    author_id: str | None = None
+    ts: datetime
+    message: str = ""
+    scope: list[str] = Field(default_factory=list)
+    is_rebind: bool = False
+    elements: CrElementOps = Field(default_factory=CrElementOps)
+    relationships: CrRelationshipOps = Field(default_factory=CrRelationshipOps)
+    artifacts: CommitArtifactDiffs = Field(default_factory=CommitArtifactDiffs)
+
+
 class RevertRequest(BaseModel):
     """Revert the model to the state at ``target_rev`` (Phase 8).
 
