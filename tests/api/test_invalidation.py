@@ -4,6 +4,7 @@ so the `_BatchResult` shapes match production."""
 
 from __future__ import annotations
 
+from data_rover.api.artifact_ops import split_ops
 from data_rover.api.invalidation import touched_keys
 from data_rover.api.routes.ops import _apply_batch, _BatchResult
 from data_rover.api.schemas import OPS_ADAPTER
@@ -51,7 +52,8 @@ def _model() -> Model:
 
 
 def _apply(model: Model, ops: list[dict]) -> _BatchResult:
-    return _apply_batch(model, OPS_ADAPTER.validate_python(ops), restore=False)
+    model_ops, _artifact_ops = split_ops(OPS_ADAPTER.validate_python(ops))
+    return _apply_batch(model, model_ops, restore=False)
 
 
 def test_update_element_keys() -> None:

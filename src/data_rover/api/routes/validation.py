@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
 from data_rover.core.validation.issue import Issue
@@ -10,6 +10,7 @@ from data_rover.core.validation.pipeline import default_pipeline
 from data_rover.core.validation.scope import Scope
 from data_rover.core.validation.state import ValidationState, issue_owner
 
+from ..artifact_ops import split_ops
 from ..deps import Session, get_request_session, require_model
 from ..schemas import IssueOut, ValidateRequest
 from ._snapshot import _build_model_from_payload
@@ -89,6 +90,15 @@ def validate_model(
                 status_code=409,
                 content={"detail": "stale base_rev", "model_rev": session.model_rev},
             )
+        model_ops, artifact_ops = split_ops(payload.ops)
+        if artifact_ops:
+            # Task 5 wires artifact ops into staged validation; until then
+            # they are rejected outright so they can never reach the model
+            # applier (same guard as preview/create/revert).
+            raise HTTPException(
+                status_code=422,
+                detail="artifact ops are not yet supported on this endpoint",
+            )
         # committed baseline = the session's maintained issue store (seeded on first
         # use). Reused, not recomputed: avoids a full O(model) pass per Validate and
         # avoids a racy session.validation reassignment outside the write mutex.
@@ -97,7 +107,7 @@ def validate_model(
         # apply -> scoped re-validate -> roll back, under the write mutex. On a
         # mutation-boundary error _apply_batch self-rolls-back and raises 422.
         with session.write_mutex:
-            res = _apply_batch(current, payload.ops, restore=False)
+            res = _apply_batch(current, model_ops, restore=False)
             try:
                 scoped = default_pipeline().validate(current, res.dirty.to_scope())
             finally:

@@ -24,9 +24,9 @@ from .schemas import (
     DeleteElementOp,
     DeleteRelationshipOp,
     ElementOut,
+    ModelOpIn,
     ModifiedElementOut,
     ModifiedRelationshipOut,
-    OpIn,
     RelationshipOut,
     UpdateElementOp,
     UpdateRelationshipOp,
@@ -74,7 +74,7 @@ def _merge_patch(props: dict[str, Any], patch: dict[str, Any]) -> None:
 
 
 def _touch(
-    op: OpIn, touched_els: dict[str, None], touched_rels: dict[str, None]
+    op: ModelOpIn, touched_els: dict[str, None], touched_rels: dict[str, None]
 ) -> None:
     if isinstance(op, CreateElementOp):
         touched_els.setdefault(op.temp_id)
@@ -89,7 +89,7 @@ def _touch(
 
 
 def _apply_inverse(
-    op: OpIn, el_state: dict[str, _ElState], rel_state: dict[str, _RelState]
+    op: ModelOpIn, el_state: dict[str, _ElState], rel_state: dict[str, _RelState]
 ) -> None:
     """Step the scratch entity states one inverse op backwards in history.
 

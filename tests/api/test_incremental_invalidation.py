@@ -10,6 +10,7 @@ from typing import Literal, cast
 import pytest
 from fastapi.testclient import TestClient
 
+from data_rover.api.artifact_ops import split_ops
 from data_rover.api.invalidation import touched_keys
 from data_rover.api.main import create_app
 from data_rover.api.routes.ops import _apply_batch
@@ -476,7 +477,8 @@ def test_surviving_cells_equal_fresh_recompute() -> None:
     verified = 0
     for _round in range(25):
         batch = _random_batch(rng, model)
-        res = _apply_batch(model, OPS_ADAPTER.validate_python(batch), restore=False)
+        model_ops, _artifact_ops = split_ops(OPS_ADAPTER.validate_python(batch))
+        res = _apply_batch(model, model_ops, restore=False)
         rev += 1
         touched = touched_keys(model, model.metamodel, res)
         if touched is None:

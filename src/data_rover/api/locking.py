@@ -254,10 +254,13 @@ class LockTable:
 from typing import TYPE_CHECKING  # noqa: E402
 
 from .schemas import (  # noqa: E402
+    CreateArtifactOp,
     CreateElementOp,
     CreateRelationshipOp,
+    DeleteArtifactOp,
     DeleteElementOp,
     DeleteRelationshipOp,
+    UpdateArtifactOp,
     UpdateElementOp,
     UpdateRelationshipOp,
 )
@@ -356,4 +359,10 @@ def required_locks(model: Model, ops: list[OpIn]) -> list[RequiredLock]:
             src = rel_source(op.id)
             if src is not None:
                 add(src, LockMode.EXCLUSIVE, LockIntent.DELETE)
+        elif isinstance(op, CreateArtifactOp):
+            created.add(op.temp_id)
+        elif isinstance(op, UpdateArtifactOp):
+            add(ARTIFACT_PREFIX + op.id, LockMode.EXCLUSIVE, LockIntent.EDIT)
+        elif isinstance(op, DeleteArtifactOp):
+            add(ARTIFACT_PREFIX + op.id, LockMode.EXCLUSIVE, LockIntent.DELETE)
     return reqs

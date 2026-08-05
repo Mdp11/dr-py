@@ -20,7 +20,7 @@ from .settings import get_settings
 from .table_cache import TableOrderCache
 
 if TYPE_CHECKING:
-    from .schemas import OpIn
+    from .schemas import ModelOpIn
     from .validation_sweep import SweepProgress
 
 #: Maximum number of applied batches retained for undo. Each batch holds the
@@ -46,8 +46,13 @@ class AppliedBatch:
     applier. ``id_map`` is the temp-id resolution the batch produced.
     """
 
-    ops: list[OpIn]
-    inverse_ops: list[OpIn]
+    #: Typed ``ModelOpIn``, never the full ``OpIn`` union: every producer
+    #: (see ``routes/ops.py``/``routes/commits.py``) rejects a batch
+    #: containing artifact ops with 422 before it ever reaches
+    #: ``record_batch``, so the op log — and everything that walks it (undo,
+    #: CR compaction in ``changes.py``) — only ever sees model-content ops.
+    ops: list[ModelOpIn]
+    inverse_ops: list[ModelOpIn]
     id_map: dict[str, str]
 
 

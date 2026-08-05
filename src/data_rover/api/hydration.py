@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -25,6 +26,7 @@ from data_rover.core.validation.state import ValidationState
 from data_rover.core.view.schema import View
 
 from . import content
+from .artifact_ops import split_ops
 from .db import db_session
 from .db_models import Commit
 from .schemas import OPS_ADAPTER, OpIn
@@ -57,8 +59,11 @@ def hydration_progress(project_id: str) -> HydrationProgress | None:
     return _hydration_progress.get(project_id)
 
 
-def serialize_ops(ops: list[OpIn]) -> list[Any]:
-    return OPS_ADAPTER.dump_python(ops, mode="json")
+def serialize_ops(ops: Sequence[OpIn]) -> list[Any]:
+    # Sequence (covariant), not list: callers pass `list[ModelOpIn]` (the op
+    # log is model-only — see AppliedBatch's docstring), which is not a
+    # `list[OpIn]` under list's invariance even though ModelOpIn <: OpIn.
+    return OPS_ADAPTER.dump_python(list(ops), mode="json")
 
 
 def deserialize_ops(raw: list[Any]) -> list[OpIn]:
@@ -112,7 +117,10 @@ def replay_commits_into(session: Session, commits: list[Commit]) -> None:
 
     assert session.model is not None
     for c in commits:
-        ops = deserialize_ops(c.ops)
+        ops, _artifact_ops = split_ops(deserialize_ops(c.ops))
+        # artifact ops are SKIPPED on model replay: artifact rows are the
+        # materialized heads and already reflect them (spec: one journal,
+        # materialized heads).
         if ops:
             _apply_batch(session.model, ops, restore=True)
 

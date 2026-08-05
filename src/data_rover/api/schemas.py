@@ -256,15 +256,47 @@ class DeleteRelationshipOp(BaseModel):
     id: str
 
 
-OpIn = Annotated[
+class CreateArtifactOp(BaseModel):
+    kind: Literal["create_artifact"]
+    temp_id: str
+    artifact_kind: Literal["navigation", "table", "diagram", "diagram_kind", "code_snippet"]
+    name: str = Field(min_length=1)
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class UpdateArtifactOp(BaseModel):
+    kind: Literal["update_artifact"]
+    id: str
+    name: str | None = Field(default=None, min_length=1)
+    #: FULL replacement payload (None = name-only change). Inverse ops always
+    #: carry the full prior payload — that is what makes diffs/undo journal-only.
+    payload: dict[str, Any] | None = None
+    #: optional optimistic precondition (mirrors PUT /artifacts); None skips.
+    #: Stripped from the canonical stored op (precondition is consumed at apply).
+    artifact_rev: int | None = None
+
+
+class DeleteArtifactOp(BaseModel):
+    kind: Literal["delete_artifact"]
+    id: str
+
+
+#: Model-content ops — the ONLY ops routes/ops.py::_apply_one may receive
+#: (its assert_never enforces the closed set at type-check time).
+ModelOpIn = (
     CreateElementOp
     | UpdateElementOp
     | DeleteElementOp
     | CreateRelationshipOp
     | UpdateRelationshipOp
-    | DeleteRelationshipOp,
-    Field(discriminator="kind"),
-]
+    | DeleteRelationshipOp
+)
+
+#: Artifact-row ops (Phase 1 artefacts revamp) — applied by
+#: api/artifact_ops.py to DB rows, never to the in-memory model.
+ArtifactOpIn = CreateArtifactOp | UpdateArtifactOp | DeleteArtifactOp
+
+OpIn = Annotated[ModelOpIn | ArtifactOpIn, Field(discriminator="kind")]
 
 #: (de)serializes a list of ops to/from plain JSON for the durable commit
 #: journal (Commit.ops / inverse_ops). Mode "json" keeps Literal "kind" tags

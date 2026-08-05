@@ -55,6 +55,7 @@ from data_rover.core.validation.scope import Scope
 from data_rover.core.validation.state import ValidationState
 
 from .. import content
+from ..artifact_ops import split_ops
 from ..db import get_db
 from ..db_models import User
 from ..deps import Session, get_request_session, require_model
@@ -69,7 +70,7 @@ from ..schemas import (
     DeleteRelationshipOp,
     ElementOut,
     IssueOut,
-    OpIn,
+    ModelOpIn,
     OpsRequest,
     OpsResponse,
     RelationshipOut,
@@ -115,11 +116,11 @@ class _BatchResult:
     re-creating it removes it from the deleted set, so the two are disjoint.
     """
 
-    canonical_ops: list[OpIn] = field(default_factory=list)
+    canonical_ops: list[ModelOpIn] = field(default_factory=list)
     #: one inner list per completed mutation, in application order; an inner
     #: list's internal order matters (delete-element inverses recreate
     #: elements before relationships) and must never be reversed
-    inverse_units: list[list[OpIn]] = field(default_factory=list)
+    inverse_units: list[list[ModelOpIn]] = field(default_factory=list)
     id_map: dict[str, str] = field(default_factory=dict)
     dirty: DirtyCollector = field(default_factory=DirtyCollector)
     changed_element_ids: dict[str, None] = field(default_factory=dict)
@@ -143,7 +144,7 @@ class _BatchResult:
         self.deleted_relationship_ids[rel_id] = None
         self.changed_relationship_ids.pop(rel_id, None)
 
-    def inverse_ops(self) -> list[OpIn]:
+    def inverse_ops(self) -> list[ModelOpIn]:
         """Flat inverse batch: applying it front-to-back undoes this batch."""
         return [op for unit in reversed(self.inverse_units) for op in unit]
 
@@ -163,7 +164,7 @@ def _check_patch_keys(
             raise KeyError(f"{type_name!r} has no property {key!r}")
 
 
-def _apply_one(model: Model, op: OpIn, res: _BatchResult, *, restore: bool) -> None:
+def _apply_one(model: Model, op: ModelOpIn, res: _BatchResult, *, restore: bool) -> None:
     """Apply one op to the live model, recording inverse unit(s) and deltas.
 
     Every mutation goes through the DirtyCollector wrappers (or the raw
@@ -247,7 +248,7 @@ def _apply_one(model: Model, op: OpIn, res: _BatchResult, *, restore: bool) -> N
         # inverse unit recreates elements BEFORE relationships (endpoints
         # must exist when relationships are reinstated); internal order of
         # this unit is preserved by inverse_ops()/rollback
-        unit: list[OpIn] = []
+        unit: list[ModelOpIn] = []
         for ce in closure:
             e = model.elements[ce]
             unit.append(
@@ -363,7 +364,7 @@ def _apply_one(model: Model, op: OpIn, res: _BatchResult, *, restore: bool) -> N
     assert_never(op)  # a new OpIn variant without a branch fails type-checking
 
 
-def _rollback(model: Model, inverse_units: list[list[OpIn]]) -> None:
+def _rollback(model: Model, inverse_units: list[list[ModelOpIn]]) -> None:
     """Undo the completed mutations of a failed batch on the live model.
 
     Applies the recorded inverse units newest-first (preserving each unit's
@@ -382,7 +383,7 @@ def _error_detail(exc: BaseException) -> str:
     return str(exc).strip("'\"") if isinstance(exc, KeyError) else str(exc)
 
 
-def _apply_batch(model: Model, ops: list[OpIn], *, restore: bool) -> _BatchResult:
+def _apply_batch(model: Model, ops: list[ModelOpIn], *, restore: bool) -> _BatchResult:
     """Apply *ops* atomically to the live model.
 
     On ANY op failure the completed mutations are rolled back via their
@@ -561,6 +562,14 @@ def apply_ops(
                 "model_rev": session.model_rev,
             },
         )
+    model_ops, artifact_ops = split_ops(payload.ops)
+    if artifact_ops:
+        # The legacy unlocked path is model-only FOREVER: artifact edits go
+        # through POST /commits (lock-verified) or legacy PUT /artifacts.
+        raise HTTPException(
+            status_code=422,
+            detail="artifact ops are not supported on /model/ops; use /commits",
+        )
     state = _ensure_validation_seeded(session, model)
     if not payload.ops:
         # Empty batch: nothing to apply. Report the current state WITHOUT
@@ -568,7 +577,7 @@ def apply_ops(
         # empty POST must not invalidate clients or burn an undo step.
         return OpsResponse(model_rev=session.model_rev, issue_counts=state.counts())
     with session.write_mutex:
-        res = _apply_batch(model, payload.ops, restore=False)
+        res = _apply_batch(model, model_ops, restore=False)
         session.model_rev += 1
         if get_settings().snippet_incremental_invalidation:
             session.evict_touched_caches(touched_keys(model, model.metamodel, res))
@@ -620,8 +629,20 @@ def undo(
     state = _ensure_validation_seeded(session, model)
     with session.write_mutex:
         batch = session.op_log.pop()
+        model_inv, artifact_inv = split_ops(batch.inverse_ops)
+        if artifact_inv:
+            # No artifact op can enter session.op_log until Task 5 wires
+            # artifact ops into POST /commits, so this branch is unreachable
+            # today; it exists so the ModelOpIn retype above is honest about
+            # the closed set _apply_batch accepts. Task 6 replaces this stub
+            # with real undo-across-artifact-changes handling.
+            session.op_log.append(batch)
+            raise HTTPException(
+                status_code=422,
+                detail="undo across artifact changes lands with the commit wiring",
+            )
         try:
-            res = _apply_batch(model, batch.inverse_ops, restore=True)
+            res = _apply_batch(model, model_inv, restore=True)
         except Exception:
             session.op_log.append(batch)  # _apply_batch already rolled back
             raise

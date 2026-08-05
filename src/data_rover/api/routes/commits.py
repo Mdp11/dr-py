@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session as DbSession
 from data_rover.core.validation.issue import IssueCategory
 from data_rover.core.validation.pipeline import default_pipeline
 
+from ..artifact_ops import split_ops
 from ..authz import require_membership
 from ..feed import commit_event, lock_event
 from .. import content
@@ -112,10 +113,18 @@ def preview_commit(
             status_code=409,
             content={"detail": "stale base_rev", "model_rev": session.model_rev},
         )
+    model_ops, artifact_ops = split_ops(payload.ops)
+    if artifact_ops:
+        # Task 5 wires artifact ops into the preview flow; until then they
+        # are rejected outright so they can never reach the model applier.
+        raise HTTPException(
+            status_code=422,
+            detail="artifact ops are not yet supported on this endpoint",
+        )
     with session.write_mutex:
         # _apply_batch raises 422 on a mutation-boundary structural error
         # (unknown type, missing endpoint, unknown property) — the safety net.
-        res = _apply_batch(model, payload.ops, restore=False)
+        res = _apply_batch(model, model_ops, restore=False)
         try:
             scoped = default_pipeline().validate(model, res.dirty.to_scope())
         finally:
@@ -235,6 +244,14 @@ def create_commit(
             status_code=409,
             content={"detail": "stale base_rev", "model_rev": session.model_rev},
         )
+    model_ops, artifact_ops = split_ops(payload.ops)
+    if artifact_ops:
+        # Task 5 wires artifact ops into the commit flow; until then they are
+        # rejected outright so they can never reach the model applier.
+        raise HTTPException(
+            status_code=422,
+            detail="artifact ops are not yet supported on this endpoint",
+        )
     state = _ensure_validation_seeded(session, model)
     with session.write_mutex:
         # a. verify the caller still holds every required lock
@@ -254,7 +271,7 @@ def create_commit(
                 },
             )
         # b. apply (422 on mutation-boundary error — let it propagate)
-        res = _apply_batch(model, payload.ops, restore=False)
+        res = _apply_batch(model, model_ops, restore=False)
         # c. hard-reject structural blockers
         scoped = default_pipeline().validate(model, res.dirty.to_scope())
         structural = [i for i in scoped if i.category is IssueCategory.STRUCTURAL]
@@ -489,9 +506,18 @@ def revert_commit(
                 },
             )
         # apply inverse_ops newest-first; deserialize the stored JSON op dicts
-        combined = deserialize_ops(
+        combined_ops = deserialize_ops(
             [op for c in reversed(commits) for op in c.inverse_ops]
         )
+        combined, artifact_combined = split_ops(combined_ops)
+        if artifact_combined:
+            # Task 5/6 wire artifact ops into revert; until then a revert
+            # spanning an artifact change is rejected outright so it can
+            # never reach the model applier. Same guard as preview/create.
+            raise HTTPException(
+                status_code=422,
+                detail="artifact ops are not yet supported on this endpoint",
+            )
         res = _apply_batch(model, combined, restore=True)
         scoped = default_pipeline().validate(model, res.dirty.to_scope())
         structural = [i for i in scoped if i.category is IssueCategory.STRUCTURAL]
