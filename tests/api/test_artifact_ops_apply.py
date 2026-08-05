@@ -141,3 +141,106 @@ def test_validate_artifact_ops_is_write_free(dbs) -> None:
         validate_artifact_ops(dbs, "default",
                               _ops([{"kind": "update_artifact", "id": "nope",
                                      "payload": SNIP}]))
+
+
+def test_create_unsupported_kind_422(dbs) -> None:
+    """`diagram`/`diagram_kind` stay unregistered in artifact_kinds.py — a
+    create_artifact op naming one is a valid Literal but has no spec, and
+    must 422 rather than crash later (zero prior coverage for this path)."""
+    with pytest.raises(HTTPException) as e:
+        apply_artifact_ops(
+            dbs, "default",
+            _ops([{"kind": "create_artifact", "temp_id": "tmp_d",
+                   "artifact_kind": "diagram", "name": "d1", "payload": {}}]),
+            user_id="u1",
+        )
+    assert e.value.status_code == 422
+
+
+# --- Finding 1: restore mode must 422 on a DB-level name clash, not 500 ----
+
+
+def test_restore_create_into_taken_name_422(dbs) -> None:
+    """delete "s1" -> someone else creates a new "s1" -> undo the delete
+    (a restore-mode create replaying the delete's inverse) must 422, not
+    raise a raw IntegrityError, even though restore mode skips the
+    pre-emptive _check_clash."""
+    row = content.create_artifact(dbs, "default", kind=ArtifactKind.code_snippet,
+                                  name="s1", payload=dict(SNIP), updated_by="u1")
+    original_id = row.id
+    res = apply_artifact_ops(
+        dbs, "default",
+        _ops([{"kind": "delete_artifact", "id": original_id}]), user_id="u1",
+    )
+    undo_ops = list(res.inverse_ops())
+    # a collaborator claims "s1" before the undo lands
+    content.create_artifact(dbs, "default", kind=ArtifactKind.code_snippet,
+                            name="s1", payload=dict(SNIP), updated_by="u1")
+    with pytest.raises(HTTPException) as e:
+        apply_artifact_ops(dbs, "default", undo_ops, user_id="u1", restore=True)
+    assert e.value.status_code == 422
+    # the applier has NO internal rollback path (see its docstring): a DB
+    # IntegrityError leaves the session's transaction needing an explicit
+    # rollback before further use — exactly the contract Tasks 5/6 (the real
+    # callers) fulfil via db.rollback() on any HTTPException from apply.
+    dbs.rollback()
+
+
+def test_restore_update_rename_into_taken_name_422(dbs) -> None:
+    """rename "s1" -> "s2" -> someone else creates a new "s1" -> undo the
+    rename (a restore-mode update replaying the rename's inverse, which
+    renames back to "s1") must 422, not raise a raw IntegrityError."""
+    row = content.create_artifact(dbs, "default", kind=ArtifactKind.code_snippet,
+                                  name="s1", payload=dict(SNIP), updated_by="u1")
+    res = apply_artifact_ops(
+        dbs, "default",
+        _ops([{"kind": "update_artifact", "id": row.id, "name": "s2",
+               "payload": dict(SNIP)}]), user_id="u1",
+    )
+    undo_ops = list(res.inverse_ops())
+    # a collaborator claims "s1" before the undo lands
+    content.create_artifact(dbs, "default", kind=ArtifactKind.code_snippet,
+                            name="s1", payload=dict(SNIP), updated_by="u1")
+    with pytest.raises(HTTPException) as e:
+        apply_artifact_ops(dbs, "default", undo_ops, user_id="u1", restore=True)
+    assert e.value.status_code == 422
+    dbs.rollback()  # see the matching comment in the create-into-taken-name test above
+
+
+# --- Finding 2: validate and apply must agree on batch-local name state ---
+
+
+def test_validate_and_apply_agree_on_delete_then_reuse_name(dbs) -> None:
+    """[delete X, create "X's freed name"] is a legal batch: apply succeeds
+    (the name is free by the time the create runs), so validate — a preview
+    of the SAME batch — must not 422 it."""
+    row = content.create_artifact(dbs, "default", kind=ArtifactKind.code_snippet,
+                                  name="s1", payload=dict(SNIP), updated_by="u1")
+    ops = _ops([
+        {"kind": "delete_artifact", "id": row.id},
+        {"kind": "create_artifact", "temp_id": "tmp_x", "artifact_kind": "code_snippet",
+         "name": "s1", "payload": SNIP},
+    ])
+    validate_artifact_ops(dbs, "default", ops)  # must not raise
+    res = apply_artifact_ops(dbs, "default", ops, user_id="u1")
+    assert res.canonical_ops[-1].kind == "create_artifact"
+
+
+def test_validate_and_apply_agree_on_duplicate_create_in_batch(dbs) -> None:
+    """[create "n", create "n"] is an illegal batch: the second create
+    collides with the first's not-yet-committed claim on "n". apply already
+    422s on it (the first create's row is flushed and visible to the
+    second's DB lookup); validate — a preview of the SAME batch — must 422
+    it too, even though it performs no writes for the first create to see."""
+    ops = _ops([
+        {"kind": "create_artifact", "temp_id": "tmp_a", "artifact_kind": "code_snippet",
+         "name": "dup", "payload": SNIP},
+        {"kind": "create_artifact", "temp_id": "tmp_b", "artifact_kind": "code_snippet",
+         "name": "dup", "payload": SNIP},
+    ])
+    with pytest.raises(HTTPException) as e:
+        validate_artifact_ops(dbs, "default", ops)
+    assert e.value.status_code == 422
+    with pytest.raises(HTTPException) as e2:
+        apply_artifact_ops(dbs, "default", ops, user_id="u1")
+    assert e2.value.status_code == 422
