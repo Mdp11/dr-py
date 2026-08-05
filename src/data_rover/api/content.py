@@ -259,9 +259,12 @@ def create_artifact(
     name: str,
     payload: dict,
     updated_by: str | None,
+    artifact_id: str | None = None,
 ) -> ArtifactRow:
+    """`artifact_id` reinstates an exact id (undo/revert restore mode);
+    None (the normal path) assigns a fresh uuid."""
     row = ArtifactRow(
-        id=uuid.uuid4().hex,
+        id=artifact_id or uuid.uuid4().hex,
         project_id=project_id,
         kind=kind,
         name=name,
