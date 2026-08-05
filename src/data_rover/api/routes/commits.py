@@ -160,7 +160,12 @@ def _batch_touched_ids(model: Model, ops: list[OpIn]) -> set[str]:
     for op in ops:
         if isinstance(
             op,
-            (UpdateElementOp, DeleteElementOp, UpdateRelationshipOp, DeleteRelationshipOp),
+            (
+                UpdateElementOp,
+                DeleteElementOp,
+                UpdateRelationshipOp,
+                DeleteRelationshipOp,
+            ),
         ):
             ids.add(op.id)
         elif isinstance(op, CreateRelationshipOp):

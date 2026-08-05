@@ -179,7 +179,9 @@ def _check_patch_keys(
             raise KeyError(f"{type_name!r} has no property {key!r}")
 
 
-def _apply_one(model: Model, op: ModelOpIn, res: _BatchResult, *, restore: bool) -> None:
+def _apply_one(
+    model: Model, op: ModelOpIn, res: _BatchResult, *, restore: bool
+) -> None:
     """Apply one op to the live model, recording inverse unit(s) and deltas.
 
     Every mutation goes through the DirtyCollector wrappers (or the raw

@@ -121,7 +121,11 @@ def _spec_or_422(kind: ArtifactKind) -> ArtifactKindSpec:
 
 
 def _validated_payload(
-    spec: ArtifactKindSpec, kind: ArtifactKind, payload: dict[str, Any], *, restore: bool
+    spec: ArtifactKindSpec,
+    kind: ArtifactKind,
+    payload: dict[str, Any],
+    *,
+    restore: bool,
 ) -> dict[str, Any]:
     """Adapter-validate + rerun derived metadata. Restore replays previously
     accepted state verbatim (mirrors the model applier's restore stance)."""
@@ -142,7 +146,9 @@ def _validated_payload(
 def _require_row(db: DbSession, project_id: str, artifact_id: str) -> ArtifactRow:
     row = content.get_artifact(db, artifact_id)
     if row is None or row.project_id != project_id:
-        raise HTTPException(status_code=422, detail=f"no artifact with id {artifact_id!r}")
+        raise HTTPException(
+            status_code=422, detail=f"no artifact with id {artifact_id!r}"
+        )
     return row
 
 
@@ -346,8 +352,13 @@ def apply_artifact_ops(
                 )
             try:
                 row = content.create_artifact(
-                    db, project_id, kind=kind, name=op.name, payload=payload,
-                    updated_by=user_id, artifact_id=artifact_id,
+                    db,
+                    project_id,
+                    kind=kind,
+                    name=op.name,
+                    payload=payload,
+                    updated_by=user_id,
+                    artifact_id=artifact_id,
                 )
             except IntegrityError as exc:
                 raise HTTPException(
@@ -355,7 +366,9 @@ def apply_artifact_ops(
                     detail=f"a {kind.value} named {op.name!r} already exists",
                 ) from exc
             tracker.claim(kind, op.name, row.id)
-            res.inverse_units.append([DeleteArtifactOp(kind="delete_artifact", id=row.id)])
+            res.inverse_units.append(
+                [DeleteArtifactOp(kind="delete_artifact", id=row.id)]
+            )
             res.canonical_ops.append(
                 op.model_copy(update={"temp_id": row.id, "payload": payload})
             )
@@ -365,14 +378,20 @@ def apply_artifact_ops(
                 db, project_id, op, tracker, res.id_map, restore=restore
             )
             inverse = UpdateArtifactOp(
-                kind="update_artifact", id=row.id, name=row.name,
+                kind="update_artifact",
+                id=row.id,
+                name=row.name,
                 payload=dict(row.payload),
             )
             old_name = row.name
             try:
                 content.update_artifact(
-                    db, row, expected_rev=row.artifact_rev, name=op.name,
-                    payload=update_payload, updated_by=user_id,
+                    db,
+                    row,
+                    expected_rev=row.artifact_rev,
+                    name=op.name,
+                    payload=update_payload,
+                    updated_by=user_id,
                 )
             except IntegrityError as exc:
                 raise HTTPException(
@@ -393,8 +412,10 @@ def apply_artifact_ops(
             res.inverse_units.append(
                 [
                     CreateArtifactOp(
-                        kind="create_artifact", temp_id=row.id,
-                        artifact_kind=row.kind.value, name=row.name,
+                        kind="create_artifact",
+                        temp_id=row.id,
+                        artifact_kind=row.kind.value,
+                        name=row.name,
                         payload=dict(row.payload),
                     )
                 ]
@@ -466,7 +487,9 @@ def broadcast_artifact_events(
         hub.broadcast(artifact_event("deleted", row))
 
 
-def validate_artifact_ops(db: DbSession, project_id: str, ops: list[ArtifactOpIn]) -> None:
+def validate_artifact_ops(
+    db: DbSession, project_id: str, ops: list[ArtifactOpIn]
+) -> None:
     """Dry preview validation: payload adapters + existence + preconditions +
     name clashes — WITHOUT writing anything. Calls the exact same
     ``_check_create``/``_check_update``/``_check_delete`` functions
@@ -480,10 +503,14 @@ def validate_artifact_ops(db: DbSession, project_id: str, ops: list[ArtifactOpIn
     tracker = _ClashTracker()
     for op in ops:
         if isinstance(op, CreateArtifactOp):
-            kind, _payload = _check_create(db, project_id, op, tracker, {}, restore=False)
+            kind, _payload = _check_create(
+                db, project_id, op, tracker, {}, restore=False
+            )
             tracker.claim(kind, op.name, op.temp_id)
         elif isinstance(op, UpdateArtifactOp):
-            row, _update_payload = _check_update(db, project_id, op, tracker, {}, restore=False)
+            row, _update_payload = _check_update(
+                db, project_id, op, tracker, {}, restore=False
+            )
             if op.name is not None and op.name != row.name:
                 tracker.free(row.kind, row.name)
                 tracker.claim(row.kind, op.name, row.id)

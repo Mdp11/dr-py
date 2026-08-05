@@ -92,7 +92,9 @@ _REGISTRY: dict[ArtifactKind, ArtifactKindSpec] = {
     ArtifactKind.navigation: ArtifactKindSpec(
         kind=ArtifactKind.navigation, adapter=NAVIGATION_ADAPTER
     ),
-    ArtifactKind.table: ArtifactKindSpec(kind=ArtifactKind.table, adapter=TABLE_ADAPTER),
+    ArtifactKind.table: ArtifactKindSpec(
+        kind=ArtifactKind.table, adapter=TABLE_ADAPTER
+    ),
     ArtifactKind.code_snippet: ArtifactKindSpec(
         kind=ArtifactKind.code_snippet,
         adapter=SNIPPET_ADAPTER,
