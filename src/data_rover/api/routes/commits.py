@@ -76,6 +76,7 @@ from ..schemas import (
 )
 from ..session import AppliedBatch
 from .ops import (
+    TEMP_ID_PREFIX,
     _apply_batch,
     _ensure_validation_seeded,
     _maybe_periodic_snapshot,
@@ -94,7 +95,7 @@ _ID_KEYS = ("id", "temp_id", "source_id", "target_id")
 
 
 def _affected_ids(commits: list[Commit]) -> set[str]:
-    """Resource ids touched by the forward ops of these commits.
+    """Resource ids touched by the forward AND inverse ops of these commits.
 
     Used by revert's peer-lock guard (any active lease over one of these ids
     means a peer is mid-edit on something the revert would change, so the
@@ -104,10 +105,22 @@ def _affected_ids(commits: list[Commit]) -> set[str]:
     prefixed with the ``art:`` lease namespace so the two sets — and lease
     resource ids generally — compare directly; model ids stay bare (the
     pre-existing wire format).
+
+    Reads BOTH ``c.ops`` and ``c.inverse_ops``, not just the forward half: a
+    containment ``delete_element`` cascades to every descendant element and
+    incident relationship, but its FORWARD op only names the root id — the
+    cascade victims surface exclusively in the INVERSE unit's
+    ``create_element``/``create_relationship`` ops (``temp_id`` = the
+    original id; see ``ops.py``'s ``DeleteElementOp`` branch, which snapshots
+    the closure before deleting). Skipping ``inverse_ops`` would let a stale
+    batch that touches a cascade victim slip past the overlap check here (and
+    fail later, at the mutation boundary, as a 422 instead of a clean 409) —
+    or, for revert's guard, let a peer's lease on a cascade victim go
+    unnoticed.
     """
     ids: set[str] = set()
     for c in commits:
-        for op in c.ops:
+        for op in (*c.ops, *c.inverse_ops):
             if op.get("kind") in ARTIFACT_OP_KINDS:
                 for key in ("id", "temp_id"):
                     v = op.get(key)
@@ -153,7 +166,27 @@ def _batch_touched_ids(model: Model, ops: list[OpIn]) -> set[str]:
             ids.add(op.target_id)
         elif isinstance(op, (UpdateArtifactOp, DeleteArtifactOp)):
             ids.add(ARTIFACT_PREFIX + op.id)
-    return {i for i in ids if not i.startswith("tmp_")}
+    # Strip batch-local temp ids: they never appear in _affected_ids (canonical
+    # stored ops always carry the assigned id, never the batch-local one), so
+    # a temp id here can never overlap a real journal id and only adds noise.
+    # This runs AFTER the art: prefixing above, so a same-batch update/delete
+    # of an artifact created earlier IN THIS batch by temp id would strip to
+    # "art:tmp_x", not "tmp_x" — harmless: required_locks already exempts
+    # same-batch-created artifacts from needing a lease at all (see its
+    # `created` set), so that id never reaches this filter in practice, and
+    # even if it did, "art:tmp_x" still can't collide with a bare canonical id.
+    return {i for i in ids if not i.startswith(TEMP_ID_PREFIX)}
+
+
+def _conflict_response(model_rev: int, detail: str) -> JSONResponse:
+    """The uniform 409 envelope every staleness/overlap fallback in
+    ``create_commit`` returns — factored out so that branch structure (see
+    its docstring: no-journal / short-tail / baseline-or-rebind / overlap)
+    reads at a glance instead of six near-identical ``JSONResponse`` blocks."""
+    return JSONResponse(
+        status_code=409,
+        content={"detail": detail, "model_rev": model_rev},
+    )
 
 
 @router.get("/open", response_model=None)
@@ -305,11 +338,28 @@ def create_commit(
        conflicts up front; this is the backstop for the window where the
        legacy unlocked ``/model/ops`` path and this lock-verified path
        coexist, so a stale-but-non-overlapping batch lands instead of being
-       rejected. Requires a durable journal to inspect the tail against —
-       a project with none (in-memory-only) keeps the old strict-equality
-       rule, and any rebind in the tail always conflicts regardless of
-       overlap (the metamodel changed under the client, so its element ops
-       were computed against a schema that no longer exists).
+       rejected.
+
+       This requires the durable journal to fully explain the gap between
+       ``base_rev`` and head, so several fallbacks fail CLOSED (409 "stale
+       base_rev") rather than risk a silent false negative:
+         - no durable journal to inspect at all (in-memory-only project);
+         - the tail is SHORTER than the rev gap — the completeness invariant
+           (one journaled batch == one rev == one row, spelled out at the
+           check itself below) means a short tail can only mean some rev in
+           the gap advanced without a journal row (``Session.touch_model()``/
+           ``set_model(None)``, used by the legacy unlocked mutation routes
+           and CR-apply), so there is no way to know what it touched;
+         - a rebind is in the tail (the metamodel changed under the client,
+           so its element ops were computed against a schema that no longer
+           exists);
+         - an EMPTY-ops commit is in the tail that still consumed a rev —
+           ``persist_baseline``'s marker for "the whole model was replaced
+           opaquely" (model upload/clear/apply-cr baseline reset). The tail
+           fully accounts for the rev gap here, but names no resources at
+           all, so the overlap check alone would find nothing and let a
+           stale batch land against a wholesale-replaced model.
+       Only once none of these apply does the overlap check itself run.
     2. Seed the validation baseline.
     3. Under the write mutex:
        a. Verify the caller still holds every required lock (409 if any gone).
@@ -338,37 +388,49 @@ def create_commit(
     """
     _, model = require_model(session)
     if payload.base_rev > session.model_rev:
-        return JSONResponse(
-            status_code=409,
-            content={"detail": "stale base_rev", "model_rev": session.model_rev},
-        )
+        return _conflict_response(session.model_rev, "stale base_rev")
     if payload.base_rev < session.model_rev:
-        # Generalized staleness (spec 2026-07-29): conflict iff this batch's
-        # touched resources overlap what landed in (base_rev, head]. Requires
-        # a durable journal to inspect; projects without one keep the strict
-        # rule. A rebind in the tail always conflicts (the metamodel changed
-        # under the client — element ops were computed against the old one).
+        # Generalized staleness (spec 2026-07-29) — see the docstring above
+        # for the full rationale; branch order mirrors it: no-journal /
+        # short-tail / baseline-or-rebind / overlap, cheapest-and-safest
+        # first, each a fail-closed 409 before the real overlap check runs.
         if content.get_model_row(db, project_id) is None:
-            return JSONResponse(
-                status_code=409,
-                content={"detail": "stale base_rev", "model_rev": session.model_rev},
-            )
+            return _conflict_response(session.model_rev, "stale base_rev")
         tail = content.commits_after(db, project_id, payload.base_rev)
+        if len(tail) != session.model_rev - payload.base_rev:
+            # Completeness invariant (db_models.Commit's own docstring: "one
+            # accepted ops batch == one revision == one journal row"): every
+            # journaled batch bumps model_rev by exactly 1 and writes exactly
+            # 1 row (create_commit/undo/revert each do both under the same
+            # mutex). So a FULL tail always has len(tail) == head - base_rev.
+            # A SHORT tail means some rev in the gap moved without a journal
+            # row at all — e.g. touch_model() (legacy PATCH/POST/DELETE
+            # mutation routes) or set_model(None) (clear/apply-cr) — so there
+            # is nothing to inspect for that rev and no way to know it didn't
+            # touch this batch's resources. Fail closed.
+            return _conflict_response(session.model_rev, "stale base_rev")
         if any(
-            c.from_metamodel_id is not None or c.to_metamodel_id is not None
+            c.from_metamodel_id is not None
+            or c.to_metamodel_id is not None
+            or not c.ops
             for c in tail
         ):
-            return JSONResponse(
-                status_code=409,
-                content={"detail": "stale base_rev", "model_rev": session.model_rev},
-            )
+            # Two distinct always-conflict cases, same treatment: a rebind
+            # changed the metamodel under the client (its element ops were
+            # computed against a schema that no longer exists), and an
+            # EMPTY-ops commit that still consumed a rev is
+            # persist_baseline's marker for "the whole model was replaced
+            # opaquely" (model upload/clear/apply-cr baseline reset — see
+            # hydration.persist_baseline). Both fully account for the rev
+            # gap (so the short-tail check above doesn't catch them) but
+            # name no resources the overlap check could ever match against,
+            # so without this branch a stale batch would silently land
+            # against a metamodel/model that no longer matches what it was
+            # computed against.
+            return _conflict_response(session.model_rev, "stale base_rev")
         if _affected_ids(tail) & _batch_touched_ids(model, payload.ops):
-            return JSONResponse(
-                status_code=409,
-                content={
-                    "detail": "conflicting concurrent commits",
-                    "model_rev": session.model_rev,
-                },
+            return _conflict_response(
+                session.model_rev, "conflicting concurrent commits"
             )
     model_ops, artifact_ops = split_ops(payload.ops)
     state = _ensure_validation_seeded(session, model)
