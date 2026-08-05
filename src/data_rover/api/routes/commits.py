@@ -32,6 +32,7 @@ from data_rover.core.validation.issue import IssueCategory
 from data_rover.core.validation.pipeline import default_pipeline
 
 from ..artifact_ops import (
+    ARTIFACT_OP_KINDS,
     apply_artifact_ops,
     artifact_header,
     split_ops,
@@ -602,6 +603,23 @@ def revert_commit(
                         "rebind_rev": c.rev,
                     },
                 )
+        for c in commits:
+            # Deliberate Phase-1 boundary, not a stub: reverting an artifact
+            # change means replaying row state a range of commits deep, and
+            # ``ArtifactRow`` names are UNIQUE per (project, kind) — a range
+            # revert can therefore collide with rows created after the target
+            # rev in ways a single undo step never can. Refused as a clean 409
+            # (a conflict, like the rebind and peer-lock refusals around it)
+            # naming the offending commit, checked on the RAW journal dicts so
+            # it fires before anything is deserialized or applied.
+            if any(op.get("kind") in ARTIFACT_OP_KINDS for op in c.ops):
+                return JSONResponse(
+                    status_code=409,
+                    content={
+                        "detail": "revert across artifact changes is not yet supported",
+                        "artifact_commit_rev": c.rev,
+                    },
+                )
         affected = _affected_ids(commits)
         held = [
             le
@@ -623,19 +641,15 @@ def revert_commit(
                     ],
                 },
             )
-        # apply inverse_ops newest-first; deserialize the stored JSON op dicts
-        combined_ops = deserialize_ops(
-            [op for c in reversed(commits) for op in c.inverse_ops]
+        # apply inverse_ops newest-first; deserialize the stored JSON op dicts.
+        # split_ops is here as the TYPE narrowing only (deserialize_ops answers
+        # the full OpIn union while _apply_batch takes model ops): the guard
+        # above already proved the artifact half empty, since an artifact op's
+        # inverse is always itself an artifact op.
+        combined, artifact_combined = split_ops(
+            deserialize_ops([op for c in reversed(commits) for op in c.inverse_ops])
         )
-        combined, artifact_combined = split_ops(combined_ops)
-        if artifact_combined:
-            # Task 6 wires artifact ops into revert (Task 5 did commit and
-            # preview); until then a revert spanning an artifact change is
-            # rejected outright so it can never reach the model applier.
-            raise HTTPException(
-                status_code=422,
-                detail="artifact ops are not yet supported on this endpoint",
-            )
+        assert not artifact_combined, "artifact-op range should have 409'd above"
         res = _apply_batch(model, combined, restore=True)
         scoped = default_pipeline().validate(model, res.dirty.to_scope())
         structural = [i for i in scoped if i.category is IssueCategory.STRUCTURAL]
