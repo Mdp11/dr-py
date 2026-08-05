@@ -46,11 +46,13 @@ class AppliedBatch:
     applier. ``id_map`` is the temp-id resolution the batch produced.
     """
 
-    #: Typed ``ModelOpIn``, never the full ``OpIn`` union: every producer
-    #: (see ``routes/ops.py``/``routes/commits.py``) rejects a batch
-    #: containing artifact ops with 422 before it ever reaches
-    #: ``record_batch``, so the op log — and everything that walks it (undo,
-    #: CR compaction in ``changes.py``) — only ever sees model-content ops.
+    #: Typed ``ModelOpIn``, never the full ``OpIn`` union: as of Phase 1
+    #: Task 3, every producer (see ``routes/ops.py``/``routes/commits.py``)
+    #: rejects a batch containing artifact ops with 422 before it ever
+    #: reaches ``record_batch``, so the op log — and everything that walks
+    #: it (undo, CR compaction in ``changes.py``) — only ever sees
+    #: model-content ops. A later task in this plan (artifact ops folded
+    #: into commit/undo) will need to revisit this invariant.
     ops: list[ModelOpIn]
     inverse_ops: list[ModelOpIn]
     id_map: dict[str, str]

@@ -360,9 +360,13 @@ def required_locks(model: Model, ops: list[OpIn]) -> list[RequiredLock]:
             if src is not None:
                 add(src, LockMode.EXCLUSIVE, LockIntent.DELETE)
         elif isinstance(op, CreateArtifactOp):
-            created.add(op.temp_id)
+            # namespaced, to match what the update/delete branches derive
+            # below for the SAME temp id (bare op.temp_id would never match
+            # "art:" + op.id, leaving a same-batch update/delete-by-temp-id
+            # stuck requiring a lease on a resource no one can ever hold).
+            created.add(artifact_resource(op.temp_id))
         elif isinstance(op, UpdateArtifactOp):
-            add(ARTIFACT_PREFIX + op.id, LockMode.EXCLUSIVE, LockIntent.EDIT)
+            add(artifact_resource(op.id), LockMode.EXCLUSIVE, LockIntent.EDIT)
         elif isinstance(op, DeleteArtifactOp):
-            add(ARTIFACT_PREFIX + op.id, LockMode.EXCLUSIVE, LockIntent.DELETE)
+            add(artifact_resource(op.id), LockMode.EXCLUSIVE, LockIntent.DELETE)
     return reqs

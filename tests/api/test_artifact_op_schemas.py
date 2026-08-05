@@ -8,7 +8,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from data_rover.api.artifact_ops import ARTIFACT_OP_KINDS, split_ops
+from data_rover.api.artifact_ops import split_ops
 from data_rover.api.locking import LockIntent, LockMode, artifact_resource, required_locks
 from data_rover.api.schemas import OPS_ADAPTER, CreateArtifactOp, UpdateArtifactOp
 from data_rover.core.metamodel.loader import load_metamodel_str
@@ -38,7 +38,10 @@ def test_ops_adapter_roundtrips_artifact_ops() -> None:
     assert isinstance(ops[0], CreateArtifactOp)
     dumped = OPS_ADAPTER.dump_python(ops, mode="json")
     assert [d["kind"] for d in dumped] == [r["kind"] for r in raw]
-    assert set(d["kind"] for d in dumped) <= ARTIFACT_OP_KINDS | {"create_element"}
+    # The actual round-trip property the journal's durability rests on:
+    # dump -> JSON -> re-validate reproduces the SAME ops field-for-field
+    # (payload/temp_id/name/artifact_rev included), not just matching kinds.
+    assert OPS_ADAPTER.validate_python(dumped) == ops
 
 
 def test_split_ops_separates_families() -> None:
@@ -57,6 +60,16 @@ def test_required_locks_for_artifact_ops() -> None:
          "name": "t", "payload": {}},
         {"kind": "update_artifact", "id": "a1", "payload": {}},
         {"kind": "delete_artifact", "id": "a2"},
+        # Same-batch create-then-mutate-by-temp-id: "tmp_x" is created earlier
+        # in THIS batch, so no lease could ever cover it yet — it must derive
+        # NO RequiredLock (mirrors the model-op temp-id exemption). Regression
+        # case for the create_artifact branch storing a NAMESPACED id in
+        # `created` (art:tmp_x), matching what update/delete derive for the
+        # same id — a bare "tmp_x" would never satisfy either `add()` guard.
+        {"kind": "create_artifact", "temp_id": "tmp_x", "artifact_kind": "table",
+         "name": "x", "payload": {}},
+        {"kind": "update_artifact", "id": "tmp_x", "payload": {}},
+        {"kind": "delete_artifact", "id": "tmp_x"},
     ])
     reqs = required_locks(_model(), ops)
     by_id = {r.resource_id: r for r in reqs}
@@ -64,6 +77,7 @@ def test_required_locks_for_artifact_ops() -> None:
     assert by_id["art:a1"].mode is LockMode.EXCLUSIVE
     assert by_id["art:a1"].intent is LockIntent.EDIT
     assert by_id["art:a2"].intent is LockIntent.DELETE
+    assert artifact_resource("tmp_x") not in by_id
 
 
 @pytest.fixture
