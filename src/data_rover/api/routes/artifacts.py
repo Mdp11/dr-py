@@ -7,8 +7,8 @@ mismatch -> 409 carrying `current_rev`). Every successful write broadcasts an
 `artifact_event` on the session's FeedHub — safe without the write_mutex
 because artifact writes never touch the in-memory model.
 
-Payloads are validated per kind on write via `_PAYLOAD_ADAPTERS`; Stage 1
-added `navigation` (`NAVIGATION_ADAPTER`), Stage 2 added `table`
+Payloads are validated per kind on write via the `artifact_kinds` registry;
+Stage 1 added `navigation` (`NAVIGATION_ADAPTER`), Stage 2 added `table`
 (`TABLE_ADAPTER`) — `diagram`/`diagram_kind` still 422 until their stage
 lands.
 """
@@ -18,7 +18,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from pydantic import TypeAdapter, ValidationError
+from pydantic import ValidationError
 from sqlalchemy.orm import Session as DbSession
 
 from data_rover.core.navigation.evaluate import evaluate
@@ -28,12 +28,11 @@ from data_rover.core.navigation.resolve import (
     resolve_refs,
 )
 from data_rover.core.navigation.schema import NAVIGATION_ADAPTER, NavigationDefinition
-from data_rover.core.script.lint import derive_entry_points
 from data_rover.core.script.runner import ScriptRunner
 from data_rover.core.script.schema import SNIPPET_ADAPTER, SnippetDefinition
-from data_rover.core.table.schema import TABLE_ADAPTER
 
 from .. import content
+from ..artifact_kinds import get_spec
 from ..db import get_db
 from ..db_models import ArtifactKind, ArtifactRow, User
 from ..deps import Session, get_request_session, require_model
@@ -57,18 +56,11 @@ from .read import _tree_item  # shared lite projection
 
 router = APIRouter()
 
-#: kind -> payload validator. The route 422s on kinds absent here, so adding
-#: a stage's kind means adding one entry (and its schema) — nothing else.
-_PAYLOAD_ADAPTERS: dict[ArtifactKind, TypeAdapter[Any]] = {
-    ArtifactKind.navigation: NAVIGATION_ADAPTER,
-    ArtifactKind.table: TABLE_ADAPTER,
-    ArtifactKind.code_snippet: SNIPPET_ADAPTER,
-}
-
 
 def _header(row: ArtifactRow) -> ArtifactHeaderOut:
+    spec = get_spec(row.kind)
     entry_points: list[str] | None = None
-    if row.kind is ArtifactKind.code_snippet:
+    if spec is not None and spec.surfaces_entry_points:
         raw = row.payload.get("entry_points")
         entry_points = (
             [e for e in raw if isinstance(e, str)] if isinstance(raw, list) else []
@@ -89,14 +81,14 @@ def _full(row: ArtifactRow) -> ArtifactOut:
 
 
 def _validate_payload(kind: ArtifactKind, payload: dict[str, Any]) -> None:
-    adapter = _PAYLOAD_ADAPTERS.get(kind)
-    if adapter is None:
+    spec = get_spec(kind)
+    if spec is None:
         raise HTTPException(
             status_code=422,
             detail=f"artifact kind {kind.value!r} is not supported yet",
         )
     try:
-        adapter.validate_python(payload)
+        spec.adapter.validate_python(payload)
     except ValidationError as exc:
         raise HTTPException(
             status_code=422, detail=f"invalid {kind.value} payload: {exc}"
@@ -104,10 +96,10 @@ def _validate_payload(kind: ArtifactKind, payload: dict[str, Any]) -> None:
 
 
 def _apply_derived_metadata(kind: ArtifactKind, payload: dict[str, Any]) -> None:
-    """Recompute server-owned derived fields in-place. For snippets, entry_points
-    is derived from the code AST and overwrites any client-supplied value."""
-    if kind is ArtifactKind.code_snippet:
-        payload["entry_points"] = derive_entry_points(payload.get("code", ""))
+    """Recompute server-owned derived fields in-place (registry hook)."""
+    spec = get_spec(kind)
+    if spec is not None and spec.derive_metadata is not None:
+        spec.derive_metadata(payload)
 
 
 def _require_artifact(db: DbSession, project_id: str, artifact_id: str) -> ArtifactRow:
