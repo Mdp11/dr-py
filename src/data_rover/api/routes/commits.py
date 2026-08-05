@@ -6,9 +6,11 @@ apply with inverse collection; raises 422 on a mutation-boundary error),
 (full-run baseline). Preview runs apply → validate dirty set → roll back,
 all under ``session.write_mutex`` (spec §11). This module deliberately imports
 those module-private helpers — they are part of the ops package's internal
-surface, shared with this sibling. ``routes/artifacts._header`` is imported on
-the same terms: a commit's artifact delta must be projected EXACTLY the way
-the artifact CRUD routes project it, so the two write paths cannot drift.
+surface, shared with this sibling. ``artifact_ops.artifact_header`` is the
+single row->header projection (``routes/artifacts._header`` is an alias of it):
+a commit's artifact delta must be projected EXACTLY the way the artifact CRUD
+routes project it — same fields on created, updated AND deleted events — so
+the two write paths cannot drift.
 
 Since the Phase 1 artefacts revamp a commit can carry artifact ops as well as
 model ops (``artifact_ops.split_ops`` separates the two families). Model ops
@@ -31,6 +33,7 @@ from data_rover.core.validation.pipeline import default_pipeline
 
 from ..artifact_ops import (
     apply_artifact_ops,
+    artifact_header,
     split_ops,
     validate_artifact_ops,
 )
@@ -48,6 +51,7 @@ from ..settings import get_settings
 from ..schemas import (
     ArtifactHeaderOut,
     CommitHistoryResponse,
+    CreateArtifactOp,
     CommitRequest,
     CommitResponse,
     CommitSummaryOut,
@@ -62,7 +66,6 @@ from ..schemas import (
     RevertRequest,
 )
 from ..session import AppliedBatch
-from .artifacts import _header as _artifact_header
 from .ops import (
     _apply_batch,
     _ensure_validation_seeded,
@@ -431,14 +434,32 @@ def create_commit(
         #     row rather than trusting the ops: the applier reruns server-owned
         #     derived metadata (snippet entry_points) and bumped artifact_rev,
         #     and headers must carry what actually landed.
+        #    Created-vs-updated is read off the CANONICAL ops (the applier
+        #    rewrites a create's temp_id to the assigned id), not off the
+        #    id_map: the id_map is seeded with the MODEL temp ids, so keying on
+        #    it would depend on the two families' temp ids never colliding —
+        #    which nothing enforces.
         created_artifact_ids = {
-            aid for temp, aid in art_res.id_map.items() if temp not in res.id_map
+            op.temp_id
+            for op in art_res.canonical_ops
+            if isinstance(op, CreateArtifactOp)
         }
         changed_artifact_headers: list[ArtifactHeaderOut] = []
         for aid in art_res.changed_ids:
             arow = content.get_artifact(db, aid)
-            if arow is not None:
-                changed_artifact_headers.append(_artifact_header(arow))
+            if arow is None:
+                # Unreachable: the row was created/updated moments ago under
+                # the write mutex and the transaction has just committed. Log
+                # rather than silently dropping it from the response + feed.
+                logger.warning(
+                    "artifact %s vanished between commit and delta assembly "
+                    "for project %s at rev %s",
+                    aid,
+                    project_id,
+                    session.model_rev,
+                )
+                continue
+            changed_artifact_headers.append(artifact_header(arow))
         # g. release the caller's locks (explicit loop — no helper)
         released = []
         for tok in payload.lock_tokens:
@@ -608,9 +629,9 @@ def revert_commit(
         )
         combined, artifact_combined = split_ops(combined_ops)
         if artifact_combined:
-            # Task 5/6 wire artifact ops into revert; until then a revert
-            # spanning an artifact change is rejected outright so it can
-            # never reach the model applier. Same guard as preview/create.
+            # Task 6 wires artifact ops into revert (Task 5 did commit and
+            # preview); until then a revert spanning an artifact change is
+            # rejected outright so it can never reach the model applier.
             raise HTTPException(
                 status_code=422,
                 detail="artifact ops are not yet supported on this endpoint",

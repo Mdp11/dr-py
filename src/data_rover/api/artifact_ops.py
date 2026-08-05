@@ -24,6 +24,7 @@ from . import content
 from .artifact_kinds import ArtifactKindSpec, get_spec
 from .db_models import ArtifactKind, ArtifactRow
 from .schemas import (
+    ArtifactHeaderOut,
     ArtifactOpIn,
     CreateArtifactOp,
     DeleteArtifactOp,
@@ -195,13 +196,41 @@ def _check_clash(
         )
 
 
+def artifact_header(row: ArtifactRow) -> ArtifactHeaderOut:
+    """The ONE artifact-row -> header projection, shared by every producer.
+
+    It lives here rather than in ``routes/artifacts.py`` (which re-exports it
+    as ``_header``) because the DELETE branch below has to capture a header
+    BEFORE the row is gone, and a service module cannot import a route module
+    without a cycle. One implementation is the point: the artifact feed events
+    a commit emits and the ones the legacy CRUD routes emit must be
+    byte-identical in shape, or a client that reads ``updated_by`` off a
+    delete event works through one write path and breaks through the other.
+    """
+    spec = get_spec(row.kind)
+    entry_points: list[str] | None = None
+    if spec is not None and spec.surfaces_entry_points:
+        raw = row.payload.get("entry_points")
+        entry_points = (
+            [e for e in raw if isinstance(e, str)] if isinstance(raw, list) else []
+        )
+    return ArtifactHeaderOut(
+        id=row.id,
+        kind=row.kind.value,
+        name=row.name,
+        artifact_rev=row.artifact_rev,
+        updated_at=row.updated_at,
+        updated_by=row.updated_by,
+        entry_points=entry_points,
+    )
+
+
 def _header_dict(row: ArtifactRow) -> dict[str, Any]:
-    return {
-        "id": row.id,
-        "kind": row.kind.value,
-        "name": row.name,
-        "artifact_rev": row.artifact_rev,
-    }
+    """JSON-ready pre-delete header snapshot (``ArtifactBatchResult.deleted``).
+
+    ``mode="json"`` because these dicts go straight onto the wire as feed
+    events — the same dump the legacy DELETE route broadcasts."""
+    return artifact_header(row).model_dump(mode="json")
 
 
 def _check_create(

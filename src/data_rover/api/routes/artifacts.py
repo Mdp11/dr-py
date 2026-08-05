@@ -33,6 +33,7 @@ from data_rover.core.script.schema import SNIPPET_ADAPTER, SnippetDefinition
 
 from .. import content
 from ..artifact_kinds import get_spec
+from ..artifact_ops import artifact_header
 from ..db import get_db
 from ..db_models import ArtifactKind, ArtifactRow, User
 from ..deps import Session, get_request_session, require_model
@@ -40,7 +41,6 @@ from ..feed import artifact_event
 from ..identity import get_current_user
 from ..schemas import (
     ArtifactCreateIn,
-    ArtifactHeaderOut,
     ArtifactListOut,
     ArtifactOut,
     ArtifactUpdateIn,
@@ -57,23 +57,12 @@ from .read import _tree_item  # shared lite projection
 router = APIRouter()
 
 
-def _header(row: ArtifactRow) -> ArtifactHeaderOut:
-    spec = get_spec(row.kind)
-    entry_points: list[str] | None = None
-    if spec is not None and spec.surfaces_entry_points:
-        raw = row.payload.get("entry_points")
-        entry_points = (
-            [e for e in raw if isinstance(e, str)] if isinstance(raw, list) else []
-        )
-    return ArtifactHeaderOut(
-        id=row.id,
-        kind=row.kind.value,
-        name=row.name,
-        artifact_rev=row.artifact_rev,
-        updated_at=row.updated_at,
-        updated_by=row.updated_by,
-        entry_points=entry_points,
-    )
+#: The row -> header projection lives in ``artifact_ops`` (see its docstring:
+#: the artifact-op applier must capture a header before a DELETE removes the
+#: row, and a service module cannot import a route module). Aliased here so
+#: this module's call sites — and the shape of every artifact feed event —
+#: keep coming from the single implementation.
+_header = artifact_header
 
 
 def _full(row: ArtifactRow) -> ArtifactOut:
