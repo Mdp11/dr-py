@@ -78,19 +78,32 @@ def _commit_create_snippet(c: TestClient, name: str = "s1") -> str:
     return aid
 
 
-def _delete_lock(c: TestClient, artifact_id: str) -> str:
+def _lock(c: TestClient, artifact_id: str, intent: str = "delete") -> str:
     r = c.post(
         papi("/locks"),
         json={
             "targets": [
                 {"resource_id": artifact_id, "mode": "exclusive", "type": "artifact"}
             ],
-            "intent": "delete",
+            "intent": intent,
         },
     )
     assert r.status_code == 200, r.text
     token: str = r.json()["token"]
     return token
+
+
+def _receive_artifact_event(ws: Any, attempts: int = 5) -> dict[str, Any]:
+    """Drain up to *attempts* feed events looking for an artifact one.
+
+    Bounded on purpose: an unbounded `while evt["type"] != "artifact"` loop
+    turns a missing event into a hung test run instead of a failure.
+    """
+    for _ in range(attempts):
+        evt: dict[str, Any] = ws.receive_json()
+        if evt["type"] == "artifact":
+            return evt
+    raise AssertionError(f"no artifact event within {attempts} feed events")
 
 
 def test_undo_artifact_create_deletes_row_and_moves_rev_forward(
@@ -112,7 +125,7 @@ def test_undo_walks_back_restoring_the_exact_artifact_id(client: TestClient) -> 
     under its ORIGINAL id (restore mode), and undoing the create after it must
     remove that same row again."""
     aid = _commit_create_snippet(client, "roundtrip")
-    tok = _delete_lock(client, aid)
+    tok = _lock(client, aid)
     r = _commit(client, [{"kind": "delete_artifact", "id": aid}], [tok])
     assert r.status_code == 200, r.text
     assert client.get(papi(f"/artifacts/{aid}")).status_code == 404
@@ -191,14 +204,39 @@ def test_failed_artifact_replay_restores_model_and_op_log(client: TestClient) ->
     assert summary["undo_depth"] == 1  # batch pushed back onto the op log
 
 
+def test_undo_of_an_update_restores_prior_name_and_payload(client: TestClient) -> None:
+    """update_artifact is the only op shape whose inverse carries FULL prior
+    state, so the undo must bring back the pre-commit name AND payload."""
+    aid = _commit_create_snippet(client, "before")
+    tok = _lock(client, aid, intent="edit")
+    r = _commit(
+        client,
+        [
+            {
+                "kind": "update_artifact",
+                "id": aid,
+                "name": "after",
+                "payload": {**SNIP, "code": "def value(el):\n    return 2\n"},
+            }
+        ],
+        [tok],
+    )
+    assert r.status_code == 200, r.text
+    got = client.get(papi(f"/artifacts/{aid}")).json()
+    assert got["name"] == "after" and got["payload"]["code"].endswith("return 2\n")
+
+    assert client.post(papi("/model/undo")).status_code == 200
+    got = client.get(papi(f"/artifacts/{aid}")).json()
+    assert got["name"] == "before"
+    assert got["payload"]["code"] == SNIP["code"]
+
+
 def test_undo_broadcasts_artifact_events(client: TestClient) -> None:
     aid = _commit_create_snippet(client, "feed-me")
     with client.websocket_connect(feed_url()) as ws:
         assert ws.receive_json()["type"] == "snapshot"
         assert client.post(papi("/model/undo")).status_code == 200
-        evt = ws.receive_json()
-        while evt["type"] != "artifact":  # skip the own-presence join
-            evt = ws.receive_json()
+        evt = _receive_artifact_event(ws)  # skips the own-presence join
     assert evt["action"] == "deleted"
     assert evt["artifact"]["id"] == aid
 

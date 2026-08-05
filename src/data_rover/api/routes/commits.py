@@ -6,11 +6,12 @@ apply with inverse collection; raises 422 on a mutation-boundary error),
 (full-run baseline). Preview runs apply → validate dirty set → roll back,
 all under ``session.write_mutex`` (spec §11). This module deliberately imports
 those module-private helpers — they are part of the ops package's internal
-surface, shared with this sibling. ``artifact_ops.artifact_header`` is the
-single row->header projection (``routes/artifacts._header`` is an alias of it):
-a commit's artifact delta must be projected EXACTLY the way the artifact CRUD
-routes project it — same fields on created, updated AND deleted events — so
-the two write paths cannot drift.
+surface, shared with this sibling. The artifact delta is likewise not built
+here: ``artifact_ops.artifact_delta_headers`` /
+``artifact_ops.broadcast_artifact_events`` are shared with POST /model/undo,
+over the single ``artifact_header`` row->header projection the artifact CRUD
+routes use (``routes/artifacts._header`` is an alias of it) — same fields on
+created, updated AND deleted events, so no two write paths can drift.
 
 Since the Phase 1 artefacts revamp a commit can carry artifact ops as well as
 model ops (``artifact_ops.split_ops`` separates the two families). Model ops
@@ -34,12 +35,13 @@ from data_rover.core.validation.pipeline import default_pipeline
 from ..artifact_ops import (
     ARTIFACT_OP_KINDS,
     apply_artifact_ops,
-    artifact_header,
+    artifact_delta_headers,
+    broadcast_artifact_events,
     split_ops,
     validate_artifact_ops,
 )
 from ..authz import require_membership
-from ..feed import artifact_event, commit_event, lock_event
+from ..feed import commit_event, lock_event
 from .. import content
 from ..db import get_db
 from ..db_models import Commit, Membership, User
@@ -50,9 +52,7 @@ from ..invalidation import touched_keys
 from ..locking import required_locks
 from ..settings import get_settings
 from ..schemas import (
-    ArtifactHeaderOut,
     CommitHistoryResponse,
-    CreateArtifactOp,
     CommitRequest,
     CommitResponse,
     CommitSummaryOut,
@@ -431,36 +431,12 @@ def create_commit(
                     session.model_rev,
                     exc_info=True,
                 )
-        # f2. artifact half of the response/feed delta. Re-read each touched
-        #     row rather than trusting the ops: the applier reruns server-owned
-        #     derived metadata (snippet entry_points) and bumped artifact_rev,
-        #     and headers must carry what actually landed.
-        #    Created-vs-updated is read off the CANONICAL ops (the applier
-        #    rewrites a create's temp_id to the assigned id), not off the
-        #    id_map: the id_map is seeded with the MODEL temp ids, so keying on
-        #    it would depend on the two families' temp ids never colliding —
-        #    which nothing enforces.
-        created_artifact_ids = {
-            op.temp_id
-            for op in art_res.canonical_ops
-            if isinstance(op, CreateArtifactOp)
-        }
-        changed_artifact_headers: list[ArtifactHeaderOut] = []
-        for aid in art_res.changed_ids:
-            arow = content.get_artifact(db, aid)
-            if arow is None:
-                # Unreachable: the row was created/updated moments ago under
-                # the write mutex and the transaction has just committed. Log
-                # rather than silently dropping it from the response + feed.
-                logger.warning(
-                    "artifact %s vanished between commit and delta assembly "
-                    "for project %s at rev %s",
-                    aid,
-                    project_id,
-                    session.model_rev,
-                )
-                continue
-            changed_artifact_headers.append(artifact_header(arow))
+        # f2. artifact half of the response/feed delta — shared with
+        #     POST /model/undo so both write paths are wire-identical (see
+        #     artifact_ops.artifact_delta_headers for the re-read rationale).
+        changed_artifact_headers, created_artifact_ids = artifact_delta_headers(
+            db, art_res
+        )
         # g. release the caller's locks (explicit loop — no helper)
         released = []
         for tok in payload.lock_tokens:
@@ -495,16 +471,9 @@ def create_commit(
                 deleted_relationship_ids=list(res.deleted_relationship_ids),
             )
         )
-        # the artifact library is a separate client-side store, so the commit
-        # event's model delta cannot carry it — mirror the legacy CRUD route's
-        # per-row events so both write paths look identical on the wire.
-        for header in changed_artifact_headers:
-            action = "created" if header.id in created_artifact_ids else "updated"
-            session.hub.broadcast(
-                artifact_event(action, header.model_dump(mode="json"))
-            )
-        for deleted in art_res.deleted:
-            session.hub.broadcast(artifact_event("deleted", deleted))
+        broadcast_artifact_events(
+            session.hub, changed_artifact_headers, created_artifact_ids, art_res.deleted
+        )
         if released:
             session.hub.broadcast(
                 lock_event(
@@ -649,7 +618,16 @@ def revert_commit(
         combined, artifact_combined = split_ops(
             deserialize_ops([op for c in reversed(commits) for op in c.inverse_ops])
         )
-        assert not artifact_combined, "artifact-op range should have 409'd above"
+        if artifact_combined:
+            # Unreachable while the 409 guard above stands. An explicit raise
+            # rather than an assert: `python -O` strips asserts, and silently
+            # dropping artifact ops on the floor is precisely the outcome the
+            # Phase-1 boundary exists to prevent, so a narrowed guard must fail
+            # loudly instead of half-reverting.
+            raise HTTPException(
+                status_code=500,
+                detail="internal error: artifact ops reached the revert applier",
+            )
         res = _apply_batch(model, combined, restore=True)
         scoped = default_pipeline().validate(model, res.dirty.to_scope())
         structural = [i for i in scoped if i.category is IssueCategory.STRUCTURAL]

@@ -10,6 +10,7 @@ is the caller: ``POST /commits/preview`` validates artifact ops dry, and
 
 from __future__ import annotations
 
+import logging
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -23,6 +24,7 @@ from sqlalchemy.orm import Session as DbSession
 from . import content
 from .artifact_kinds import ArtifactKindSpec, get_spec
 from .db_models import ArtifactKind, ArtifactRow
+from .feed import FeedHub, artifact_event
 from .schemas import (
     ArtifactHeaderOut,
     ArtifactOpIn,
@@ -32,6 +34,8 @@ from .schemas import (
     OpIn,
     UpdateArtifactOp,
 )
+
+logger = logging.getLogger(__name__)
 
 #: kind-tags of artifact ops, for raw journal dicts (Commit.ops JSON).
 ARTIFACT_OP_KINDS = frozenset({"create_artifact", "update_artifact", "delete_artifact"})
@@ -402,6 +406,64 @@ def apply_artifact_ops(
         else:
             assert_never(op)
     return res
+
+
+def artifact_delta_headers(
+    db: DbSession, res: ArtifactBatchResult
+) -> tuple[list[ArtifactHeaderOut], set[str]]:
+    """Project an applied batch into (changed headers, ids that are NEW).
+
+    Every write path that lands artifact ops — ``POST /commits`` and
+    ``POST /model/undo`` — needs exactly this, and their results must be
+    wire-identical (a peer cannot tell an undo's artifact event from a
+    commit's), so it is derived in ONE place rather than restated per route.
+
+    Rows are RE-READ rather than projected off the ops: the applier reruns
+    server-owned derived metadata (snippet entry_points) and bumps
+    ``artifact_rev``, so a header must carry what actually landed. New-vs-
+    updated is read off the CANONICAL ops (the applier rewrote a create's
+    ``temp_id`` to the assigned id), never off the id_map — that map is seeded
+    with MODEL temp ids, so keying on it would depend on the two families' temp
+    ids never colliding, which nothing enforces.
+
+    Call AFTER the transaction commits: a re-read that misses is unreachable
+    (the row was written moments ago under the write mutex) and is logged
+    rather than silently dropped from the response + feed.
+    """
+    created_ids = {
+        op.temp_id for op in res.canonical_ops if isinstance(op, CreateArtifactOp)
+    }
+    headers: list[ArtifactHeaderOut] = []
+    for artifact_id in res.changed_ids:
+        row = content.get_artifact(db, artifact_id)
+        if row is None:
+            logger.warning(
+                "artifact %s vanished between its write and delta assembly", artifact_id
+            )
+            continue
+        headers.append(artifact_header(row))
+    return headers, created_ids
+
+
+def broadcast_artifact_events(
+    hub: FeedHub,
+    headers: Sequence[ArtifactHeaderOut],
+    created_ids: set[str],
+    deleted: Sequence[dict[str, Any]],
+) -> None:
+    """Fan an applied batch's artifact delta out to peers (twin of
+    ``artifact_delta_headers``, and the other half of why both write paths
+    look identical on the wire).
+
+    The artifact library is a separate client-side store, so a commit event's
+    model delta cannot carry it: peers learn about it through the same per-row
+    events the legacy artifact CRUD routes emit.
+    """
+    for header in headers:
+        action = "created" if header.id in created_ids else "updated"
+        hub.broadcast(artifact_event(action, header.model_dump(mode="json")))
+    for row in deleted:
+        hub.broadcast(artifact_event("deleted", row))
 
 
 def validate_artifact_ops(db: DbSession, project_id: str, ops: list[ArtifactOpIn]) -> None:

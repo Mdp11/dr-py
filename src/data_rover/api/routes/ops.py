@@ -41,14 +41,13 @@ commit covers both, and every failure path unwinds both (in-memory rollback +
 silently eaten.
 
 Undo restores entity STATE (ids, types, endpoints, properties) but per-entity
-``rev`` counters continue forward: nothing uses ``rev`` for conflict detection (CR matching
-explicitly ignores it, see ``core/model/change_request.py``), it is only a
-change ticker.
+``rev`` counters continue forward: nothing uses ``rev`` for conflict detection
+(CR matching explicitly ignores it, see ``core/model/change_request.py``), it
+is only a change ticker.
 """
 
 from __future__ import annotations
 
-import logging
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -66,21 +65,19 @@ from data_rover.core.validation.state import ValidationState
 
 from .. import content
 from ..artifact_ops import (
-    ArtifactBatchResult,
     apply_artifact_ops,
-    artifact_header,
+    artifact_delta_headers,
+    broadcast_artifact_events,
     split_ops,
 )
 from ..db import get_db
 from ..db_models import User
 from ..deps import Session, get_request_session, require_model
-from ..feed import artifact_event
 from ..hydration import serialize_ops, write_snapshot
 from ..identity import get_current_user
 from ..invalidation import touched_keys
 from ..settings import get_settings
 from ..schemas import (
-    CreateArtifactOp,
     CreateElementOp,
     CreateRelationshipOp,
     DeleteElementOp,
@@ -96,8 +93,6 @@ from ..schemas import (
     UpdateRelationshipOp,
 )
 from ..session import AppliedBatch
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -579,41 +574,6 @@ def _maybe_periodic_snapshot(
         write_snapshot(project_id, session, rev)
 
 
-def _broadcast_artifact_delta(
-    db: DbSession, session: Session, art_res: ArtifactBatchResult
-) -> None:
-    """Announce the artifact half of an undo to peers (mirrors POST /commits
-    step h, which is why the event shapes are identical).
-
-    The artifact library is a separate client-side store, so no model delta can
-    carry it: peers learn about it through the same per-row events the legacy
-    artifact CRUD routes emit. Rows are RE-READ rather than projected off the
-    ops because restore mode reinstates a row and bumps its ``artifact_rev`` —
-    a header must carry what actually landed. Created-vs-updated is read off
-    the CANONICAL ops (the applier rewrites a create's ``temp_id`` to the
-    assigned id), not off an id_map that is seeded with MODEL temp ids.
-    """
-    created_ids = {
-        op.temp_id for op in art_res.canonical_ops if isinstance(op, CreateArtifactOp)
-    }
-    for artifact_id in art_res.changed_ids:
-        row = content.get_artifact(db, artifact_id)
-        if row is None:
-            # Unreachable: the row was written moments ago under the write
-            # mutex and the transaction has just committed. Log rather than
-            # silently dropping it from the feed.
-            logger.warning(
-                "artifact %s vanished between undo and its feed event", artifact_id
-            )
-            continue
-        action = "created" if row.id in created_ids else "updated"
-        session.hub.broadcast(
-            artifact_event(action, artifact_header(row).model_dump(mode="json"))
-        )
-    for deleted in art_res.deleted:
-        session.hub.broadcast(artifact_event("deleted", deleted))
-
-
 @router.post("/model/ops", response_model=None)
 def apply_ops(
     payload: OpsRequest,
@@ -776,5 +736,9 @@ def undo(
             db.commit()
         if persisted:
             _maybe_periodic_snapshot(db, project_id, session, session.model_rev)
-        _broadcast_artifact_delta(db, session, art_res)
+        # artifact feed events, shared with POST /commits step h so a peer
+        # cannot tell an undo's artifact event from a commit's. Inside the
+        # mutex, like every other broadcast site (enqueue order == rev order).
+        headers, created_ids = artifact_delta_headers(db, art_res)
+        broadcast_artifact_events(session.hub, headers, created_ids, art_res.deleted)
         return _finalize(session, state, model, res)
