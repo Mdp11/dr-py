@@ -13,10 +13,11 @@
  * (`artifact-edits.svelte.ts`), and nothing reaches the server until the
  * DiffDrawer's Commit sends the batch. Opening a SAVED snippet first checks the
  * artifact out (`art:<id>` exclusive lease); a denial does not refuse the tab —
- * it opens UNSAVEABLE behind the holder banner (`_lockDenied`): Save and Save
- * as are disabled, while the definition-editing surface itself is NOT yet gated.
- * `navigation-editor.svelte.ts`'s `ensureDraft` docstring is the canonical
- * statement of that scope and of the open follow-up. The tab is deliberately
+ * it opens UNSAVEABLE behind the holder banner (`_lockDenied`): Save is
+ * disabled (this tab has no Save-as), while the definition-editing surface
+ * itself is NOT yet gated. `navigation-editor.svelte.ts`'s `ensureDraft`
+ * docstring is the canonical statement of that scope and of the open
+ * follow-up. The tab is deliberately
  * NOT re-keyed when a create is staged: the draft keeps living in its
  * `snip:draft:N` tab and is rebound to `snip:<id>` only when the commit's
  * `id_map` supplies a canonical id (see the module-scope listeners at the
@@ -64,8 +65,9 @@ const _drafts = new SvelteMap<string, SnippetDraft>();
 /**
  * tabId -> the peer holding the `art:` lease this tab was refused, as a display
  * label. Present == the tab is UNSAVEABLE: the payload loaded (a denial never
- * refuses the tab), the name input / Save / Save as are disabled and the banner
- * offers Retry — but the editing surface itself is NOT gated (see
+ * refuses the tab), the name input and Save are disabled (this tab has no
+ * Save-as) and the banner offers Retry — but the editing surface itself is
+ * NOT gated (see
  * `navigation-editor.svelte.ts`'s `ensureDraft` docstring). Absent for a
  * VIEWER too — the whole workspace is already read-only for them, so a per-tab
  * "checked out by…" line would be noise.

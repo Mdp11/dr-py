@@ -53,14 +53,16 @@
 	const lint = $derived(getSnippetLint(tabId));
 	const editable = $derived(canEdit());
 	/** Non-null while a peer holds this snippet's `art:` lease: the tab is
-	 * UNSAVEABLE until the check-out succeeds — Save and Save as are disabled
-	 * behind the banner ("Retry"), while the editing surface itself stays live.
-	 * See `navigation-editor.svelte.ts`'s `ensureDraft` docstring. */
+	 * UNSAVEABLE until the check-out succeeds — Save is disabled behind the
+	 * banner ("Retry"), while the editing surface itself stays live. This tab
+	 * has no Save-as. See `navigation-editor.svelte.ts`'s `ensureDraft`
+	 * docstring. */
 	const lockHolder = $derived(getSnippetLockHolder(tabId));
-	/** A refused check-out disables the SAVE affordances (name, Save, Save as)
-	 * but keeps them VISIBLE — paired with the banner, that is what explains why.
-	 * It does NOT gate the editing surface; the banner copy says "you will not be
-	 * able to save" rather than "read-only" for exactly that reason. */
+	/** A refused check-out disables the SAVE affordances (name, Save — this tab
+	 * has no Save-as) but keeps them VISIBLE — paired with the banner, that is
+	 * what explains why. It does NOT gate the editing surface; the banner copy
+	 * says "you will not be able to save" rather than "read-only" for exactly
+	 * that reason. */
 	const locked = $derived(lockHolder !== null);
 	const vocab = $derived(vocabFromMetamodel(getMetamodel()));
 

@@ -529,14 +529,16 @@ export function selectNode(tabId: string, path: NodePath): void {
  *
  * **What "lock-denied" actually gates today — the canonical statement, which
  * `table-editor.svelte.ts` and `snippet-editor.svelte.ts` mirror by reference.**
- * A refused check-out sets `_lockDenied`, which disables the NAME input, Save
- * and Save as, and renders the holder banner with its Retry. It does NOT
- * disable the definition-editing surface: PathCard/CombineFrame structural
- * edits, the table Settings dialog and column editors, and the snippet
- * CodeMirror document all stay live on `canEdit()` alone. So the honest
- * description of a denied tab is **unsaveable**, not read-only — a user can
- * still rebuild a whole navigation and only discover at Save that the artifact
- * was never theirs, with Save AND Save-as both disabled.
+ * A refused check-out sets `_lockDenied`, which disables the NAME input and
+ * every save affordance the tab has — Save here and in the table editor, plus
+ * Save-as in both of those (the snippet tab has no Save-as; Save is its only
+ * one) — and renders the holder banner with its Retry. It does NOT disable
+ * the definition-editing surface: PathCard/CombineFrame structural edits, the
+ * table Settings dialog and column editors, and the snippet CodeMirror
+ * document all stay live on `canEdit()` alone. So the honest description of a
+ * denied tab is **unsaveable**, not read-only — a user can still rebuild a
+ * whole navigation and only discover at Save that the artifact was never
+ * theirs, with every save affordance the tab has disabled.
  *
  * TODO (deliberate follow-up, not an oversight): gate the editing surface too.
  * It was scoped out on purpose — the plan asked for the save buttons at

@@ -428,11 +428,16 @@ function openArtifactResources(): Set<string> {
  * {@link _discardWith}:
  *   - a REMAINING staged op still needs a resource the token covers (the
  *     element rule; a token can cover a whole delete subtree), and
- *   - an artifact the token covers is still OPEN in an editor tab
- *     ({@link openArtifactResources}, the same rule {@link discardAll} applies).
- *     Elements need no such term: they have no per-tab check-out. Without it,
- *     discarding a row for an artifact whose editor is still on screen would
- *     silently yank that editor's check-out out from under it.
+ *   - an artifact the token covers is still OPEN in an editor tab. This draws
+ *     on the same protected-resource SET as {@link discardAll}
+ *     ({@link openArtifactResources}) — but NOT the same rule: discardAll
+ *     keeps a token only if EVERY resource it covers is protected (release is
+ *     by token, so a mixed token must still be released), while this function
+ *     keeps a token if ANY resource it covers is protected, because a per-row
+ *     discard must never yank a still-open editor's check-out out from under
+ *     it. Both predicates are individually correct for their own caller; do
+ *     not "unify" them on the strength of the shared set.
+ *     Elements need no such term: they have no per-tab check-out.
  *
  * The release is best-effort (`.catch`), matching its artifact siblings
  * {@link releaseArtifactIfUnneeded} and {@link discardAll}: the local buffer
