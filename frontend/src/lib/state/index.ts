@@ -397,3 +397,25 @@ export {
 	setSnippetSplitRatio,
 	resetEditorSize
 } from './editor-size.svelte';
+export {
+	clearStagedArtifacts,
+	discardAllStagedArtifacts,
+	getStagedArtifactDepth,
+	getStagedArtifactEntries,
+	getStagedArtifactOps,
+	hasStagedArtifactOp,
+	notifyArtifactCommit,
+	onArtifactCommit,
+	onArtifactStageDiscarded,
+	onArtifactStagedDelete,
+	overlayArtifactHeaders,
+	resetArtifactEdits,
+	revertStagedArtifact,
+	stageArtifactCreate,
+	stageArtifactDelete,
+	stageArtifactUpdate,
+	stagedArtifactState,
+	stagedCreateSourceTab,
+	type ArtifactCommitInfo,
+	type StagedArtifactEntry
+} from './artifact-edits.svelte';
