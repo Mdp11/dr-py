@@ -181,7 +181,6 @@ describe('snippet drafts', () => {
 	});
 
 	it('saveSnippetDraft on an unsaved draft stages a create and binds the draft to the temp id', async () => {
-		const create = vi.spyOn(artifactsApi, 'createArtifact');
 		const tabId = openArtifactTab('snippet', { artifactId: null, title: 'New snippet' });
 		await ensureSnippetDraft(tabId);
 		updateSnippetCode(tabId, 'print(2)\n');
@@ -199,8 +198,6 @@ describe('snippet drafts', () => {
 				payload: { schema_version: 1, language: 'python', code: 'print(2)\n' }
 			}
 		]);
-		// Nothing reaches the legacy REST route any more.
-		expect(create).not.toHaveBeenCalled();
 		const draft = getSnippetDraft(tabId)!;
 		expect(isTempId(draft.artifactId!)).toBe(true);
 		expect(draft.dirty).toBe(false);
@@ -243,7 +240,6 @@ describe('snippet drafts', () => {
 		asEditor();
 		mockAcquire();
 		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue(SNIPPET_ARTIFACT);
-		const update = vi.spyOn(artifactsApi, 'updateArtifact');
 		await ensureSnippetDraft('snip:s1');
 		updateSnippetCode('snip:s1', 'print(3)\n');
 
@@ -257,7 +253,6 @@ describe('snippet drafts', () => {
 				payload: { schema_version: 1, language: 'python', code: 'print(3)\n' }
 			}
 		]);
-		expect(update).not.toHaveBeenCalled();
 		expect(getSnippetDraft('snip:s1')?.dirty).toBe(false);
 		expect(getSnippetDraft('snip:s1')?.artifactId).toBe('s1');
 	});

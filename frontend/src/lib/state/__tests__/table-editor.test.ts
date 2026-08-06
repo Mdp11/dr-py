@@ -397,7 +397,6 @@ describe('table-editor', () => {
 
 	it('saveTableDraft on an unsaved draft stages a create and binds the draft to the temp id', async () => {
 		vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
-		const create = vi.spyOn(artifactsApi, 'createArtifact');
 		const tabId = openArtifactTab('table', { artifactId: null, title: 'New table' });
 		await ensureTableDraft(tabId);
 		setTableName(tabId, 'Mine');
@@ -414,8 +413,6 @@ describe('table-editor', () => {
 				payload: definition
 			}
 		]);
-		// Nothing reaches the legacy REST route any more.
-		expect(create).not.toHaveBeenCalled();
 		const draft = getTableDraft(tabId)!;
 		expect(isTempId(draft.artifactId!)).toBe(true);
 		expect(draft.dirty).toBe(false);
@@ -463,7 +460,6 @@ describe('table-editor', () => {
 		mockAcquire();
 		mockGetTable();
 		vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
-		const update = vi.spyOn(artifactsApi, 'updateArtifact');
 		const draft = await ensureTableDraft('tbl:a1');
 		const edited = {
 			...draft.definition,
@@ -477,7 +473,6 @@ describe('table-editor', () => {
 		expect(getStagedArtifactOps()).toEqual([
 			{ kind: 'update_artifact', id: 'a1', name: 'Sensors', payload: edited }
 		]);
-		expect(update).not.toHaveBeenCalled();
 		expect(getTableDraft('tbl:a1')?.dirty).toBe(false);
 		expect(getTableDraft('tbl:a1')?.artifactId).toBe('a1');
 	});
@@ -949,14 +944,14 @@ describe('saveAsTableDraft', () => {
 		mockAcquire();
 		mockGetTable();
 		vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
-		const create = vi.spyOn(artifactsApi, 'createArtifact');
-		const update = vi.spyOn(artifactsApi, 'updateArtifact');
 		const release = vi.spyOn(checkoutApi, 'releaseLock').mockResolvedValue(undefined);
 		openArtifactTab('table', { artifactId: 'a1', title: 'Sensors' });
 		const draft = await ensureTableDraft('tbl:a1');
 
 		await saveAsTableDraft('tbl:a1', 'Copy');
 
+		// The original artifact is never touched: the staged batch holds the
+		// fork's create and nothing else — no update op against `a1`.
 		const ops = getStagedArtifactOps();
 		expect(ops).toEqual([
 			{
@@ -967,9 +962,6 @@ describe('saveAsTableDraft', () => {
 				payload: draft.definition
 			}
 		]);
-		// The original artifact is never touched — no update op, no REST call.
-		expect(create).not.toHaveBeenCalled();
-		expect(update).not.toHaveBeenCalled();
 		// The fork tab is re-keyed to tbl:<tempId> AT STAGE TIME (unlike a create
 		// staged from a tbl:draft:N tab): a bound tab's key must always be
 		// `tbl:<its own artifactId>`, or reopening the original would mint a

@@ -21,24 +21,16 @@ export function getArtifact(id: string, cfg?: ClientConfig): Promise<Artifact> {
 	return apiFetch(`/artifacts/${id}`, { method: 'GET', schema: ArtifactSchema }, cfg);
 }
 
-export function createArtifact(
-	body: { kind: string; name: string; payload: Record<string, unknown> },
-	cfg?: ClientConfig
-): Promise<Artifact> {
-	return apiFetch('/artifacts', { method: 'POST', body, schema: ArtifactSchema }, cfg);
-}
-
-export function updateArtifact(
-	id: string,
-	body: { artifact_rev: number; name?: string; payload?: Record<string, unknown> },
-	cfg?: ClientConfig
-): Promise<Artifact> {
-	return apiFetch(`/artifacts/${id}`, { method: 'PUT', body, schema: ArtifactSchema }, cfg);
-}
-
-export function deleteArtifact(id: string, cfg?: ClientConfig): Promise<void> {
-	return apiFetch(`/artifacts/${id}`, { method: 'DELETE' }, cfg);
-}
+/*
+ * There are deliberately NO artifact write wrappers here. Artifact creation,
+ * update and deletion travel as staged `create_artifact`/`update_artifact`/
+ * `delete_artifact` ops through `POST /commits` (see `lib/state/artifact-edits`
+ * and `lib/api/checkout`), which is the only lock-VERIFIED artifact writer. The
+ * backend's legacy `POST/PUT/DELETE /artifacts` routes still exist and still
+ * honor `art:` leases, but the client must never reach for them: an unlocked
+ * write would land outside the commit journal, so nothing would show up in the
+ * DiffDrawer, no `Commit` row would carry it, and undo could not replay it.
+ */
 
 export function evaluateNavigation(
 	body: {

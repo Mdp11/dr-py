@@ -189,7 +189,6 @@ describe('renameArtifact', () => {
 		const acquire = mockAcquire();
 		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [HEADER] });
 		await loadArtifacts();
-		const update = vi.spyOn(api, 'updateArtifact');
 
 		await renameArtifact('a1', 'N2');
 
@@ -197,7 +196,6 @@ describe('renameArtifact', () => {
 			targets: [{ resource_id: 'a1', mode: 'exclusive', type: 'artifact' }],
 			intent: 'edit'
 		});
-		expect(update).not.toHaveBeenCalled();
 		expect(getStagedArtifactEntries()).toEqual([
 			{ kind: 'update', id: 'a1', name: 'N2', payload: undefined, header: null }
 		]);
@@ -264,7 +262,6 @@ describe('removeArtifact', () => {
 		const acquire = mockAcquire();
 		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [HEADER] });
 		await loadArtifacts();
-		const del = vi.spyOn(api, 'deleteArtifact');
 		const put = vi
 			.spyOn(viewApi, 'putViewSnapshot')
 			.mockImplementation(async (v) => ({ view: v, warnings: [] }));
@@ -277,7 +274,6 @@ describe('removeArtifact', () => {
 			targets: [{ resource_id: 'a1', mode: 'exclusive', type: 'artifact' }],
 			intent: 'delete'
 		});
-		expect(del).not.toHaveBeenCalled();
 		expect(getStagedArtifactEntries()).toEqual([{ kind: 'delete', id: 'a1', header: HEADER }]);
 		// The artifact still exists server-side until the commit lands, so its
 		// view placements must survive a discard — no scrub push here.
