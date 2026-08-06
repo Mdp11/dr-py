@@ -103,9 +103,9 @@ export function isTempId(id: string): boolean {
 }
 
 /** Client mirror of api/locking.py's ARTIFACT_PREFIX: artifact lock targets
- * are REQUESTED with the bare id + type:"artifact", but granted leases come
- * back canonicalized under this namespace, and the checkout registry keys on
- * the canonical form. Elements stay bare (existing badges depend on it). */
+ * are REQUESTED with the bare id + `type: "artifact"`, but granted leases
+ * come back canonicalized under this namespace, and the checkout registry
+ * keys on the canonical form. Elements stay bare (existing badges depend on it). */
 export const ARTIFACT_RESOURCE_PREFIX = 'art:';
 
 export function artifactResource(artifactId: string): string {

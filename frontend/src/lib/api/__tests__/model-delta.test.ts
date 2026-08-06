@@ -23,7 +23,7 @@ import {
 } from '../model-read';
 import { ConflictError, NotFoundError } from '../errors';
 import type { ChangeRequest } from '$lib/state/cr';
-import type { Op } from '$lib/state/ops';
+import type { ModelOp } from '$lib/state/ops';
 import { server } from './server';
 
 const BASE = 'http://api.test/api/v1';
@@ -61,7 +61,7 @@ describe('model-ops client', () => {
 				return HttpResponse.json({ model_rev: 5 });
 			})
 		);
-		const ops: Op[] = [{ kind: 'delete_element', id: 'e1' }];
+		const ops: ModelOp[] = [{ kind: 'delete_element', id: 'e1' }];
 		const res = await applyOps(4, ops, cfg);
 		expect(body).toEqual({ base_rev: 4, ops });
 		expect(res.model_rev).toBe(5);
