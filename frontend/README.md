@@ -183,8 +183,14 @@ follows a pessimistic **check-out → stage → commit** loop (Spec B):
 ### Navigation editor state (per-node previews)
 
 `lib/state/navigation-editor.svelte.ts` holds the per-tab navigation drafts
-(one draft + one save-conflict marker per `tabId`) and drives the live chain
-preview. A navigation is a **tree** — a Path, or a set expression over nested
+(one draft + one lock-denied marker per `tabId`) and drives the live chain
+preview. **Saving stages, it does not POST**: opening a saved navigation takes
+an `art:<id>` exclusive lease (a denial opens the tab read-only behind the
+`getNavLockHolder` banner rather than refusing it), `saveDraft`/`saveAsDraft`
+push a `create_artifact`/`update_artifact` op onto the staged-artifact buffer,
+and the tab is re-keyed from `nav:draft:N` to `nav:<id>` only when the commit's
+`id_map` arrives (module-scope `onArtifactCommit` listener). `closeDraft`
+releases the lease unless a staged op still needs it. A navigation is a **tree** — a Path, or a set expression over nested
 definitions addressed by positional `NodePath` (`lib/navigation/tree.ts`:
 `pathKey`, `nodeAt`, `isRunnable`) — so preview state is keyed **per node**, not
 per tab:
@@ -210,7 +216,7 @@ per tab:
   get no per-node preview this iteration and are skipped.
 - **Accessors are node-scoped** (`getPreview`/`getEvalError`/`isExpanded`/
   `runPreview`/`loadMorePreview` all take `(tabId, path)`, `path` defaulting to
-  the root `[]`); `getDraft`/`getSaveConflict`/`updateDefinition`/`saveDraft`
+  the root `[]`); `getDraft`/`getNavLockHolder`/`updateDefinition`/`saveDraft`
   stay per-tab. `closeDraft` and `resetNavigationEditors` clear **every** node
   key for the tab (expanded set plus any lingering keys), cancel all timers, and
   bump generations so nothing leaks.

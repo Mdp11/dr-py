@@ -241,6 +241,7 @@ export { isProjectOpening, setProjectOpening } from './project-open.svelte';
 export type { ViewChange } from './view-diff';
 export {
 	artifactHeaderById,
+	assertNoNameClash,
 	createCodeSnippetArtifact,
 	createNavigationArtifact,
 	createTableArtifact,
@@ -259,8 +260,8 @@ export {
 	ensureEmbeddedDraft,
 	getDraft,
 	getEvalError,
+	getNavLockHolder,
 	getPreview,
-	getSaveConflict,
 	getSelectedPath,
 	hasDirtyNavDrafts,
 	isCardCollapsed,
@@ -270,6 +271,7 @@ export {
 	registerVisibleNode,
 	reloadDraft,
 	resetNavigationEditors,
+	retryNavLock,
 	runPreview,
 	saveAsDraft,
 	saveDraft,

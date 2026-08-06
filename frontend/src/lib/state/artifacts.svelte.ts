@@ -26,6 +26,36 @@ export function artifactHeaderById(id: string): ArtifactHeader | undefined {
 	return _items.find((a) => a.id === id);
 }
 
+/**
+ * Best-effort client-side name-clash check — the ONE definition, shared by all
+ * three artifact editors' save paths (navigation, table, code snippet).
+ *
+ * The SERVER's uniqueness check is authoritative and, now that saves stage an
+ * artifact op instead of POSTing, surfaces as a 422 at preview/commit. This
+ * only preserves today's at-SAVE feedback: the user learns about a collision
+ * when they press Save, not when they commit a whole batch. It lives here (and
+ * not next to a single editor) because it needs the header list.
+ *
+ * Reads through {@link getArtifactHeaders}, so the check strengthens for free
+ * once that returns the STAGED OVERLAY: a name taken by a staged-but-
+ * uncommitted create will clash too. `excludeId` is the artifact being saved
+ * (null for a brand-new one), so re-saving one under its own name is fine.
+ */
+export function assertNoNameClash(
+	kind: 'navigation' | 'table' | 'code_snippet',
+	name: string,
+	excludeId: string | null
+): void {
+	const clash = getArtifactHeaders().find(
+		(h) => h.kind === kind && h.name === name && h.id !== excludeId
+	);
+	if (clash) {
+		throw new Error(
+			`a ${kind === 'code_snippet' ? 'code snippet' : kind} named "${name}" already exists`
+		);
+	}
+}
+
 export async function loadArtifacts(): Promise<void> {
 	_loading = true;
 	try {

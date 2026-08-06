@@ -1,14 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as artifactsApi from '$lib/api/artifacts';
+import * as checkoutApi from '$lib/api/checkout';
 import { ConflictError } from '$lib/api/errors';
+import type { ArtifactHeader } from '$lib/api/types';
 import {
 	closeDraft,
 	ensureDraft,
 	ensureEmbeddedDraft,
 	getDraft,
 	getEvalError,
+	getNavLockHolder,
 	getPreview,
-	getSaveConflict,
 	getSelectedPath,
 	isCardCollapsed,
 	isNodeVisible,
@@ -16,11 +18,13 @@ import {
 	loadMorePreview,
 	registerVisibleNode,
 	resetNavigationEditors,
+	retryNavLock,
 	runPreview,
 	saveAsDraft,
 	saveDraft,
 	selectNode,
 	setCardCollapsed,
+	setDraftName,
 	setEmbeddedRowElement,
 	unregisterVisibleNode,
 	updateDefinition
@@ -35,7 +39,16 @@ import {
 	removeOperandEdit
 } from '$lib/navigation/tree';
 import { resetWorkspaceTabs, openNavigationTab, getDynamicTabs } from '../workspace.svelte';
-import { resetArtifacts } from '../artifacts.svelte';
+import { loadArtifacts, resetArtifacts } from '../artifacts.svelte';
+import {
+	getStagedArtifactOps,
+	notifyArtifactCommit,
+	resetArtifactEdits,
+	revertStagedArtifact,
+	stageArtifactDelete
+} from '../artifact-edits.svelte';
+import { isCheckedOutByMe, resetCheckout, setProjectInfo } from '../checkout.svelte';
+import { isTempId } from '../ops';
 
 const CHAIN_PAGE = {
 	step_types: ['Owns'],
@@ -100,10 +113,76 @@ function runnablePath(startType = 'Component') {
  * `registerVisibleNode`) needs to settle its mocked (immediately-resolved) evaluate. */
 const flushEvaluate = () => new Promise<void>((r) => setTimeout(r, 0));
 
+function header(id: string, name: string, rev = 1, kind = 'navigation'): ArtifactHeader {
+	return {
+		id,
+		kind,
+		name,
+		artifact_rev: rev,
+		updated_at: '',
+		updated_by: null,
+		entry_points: null
+	};
+}
+
+/** The saved artifact every `nav:a1` test opens: a runnable one-scope path. */
+function mockGetArtifact(payload?: Record<string, unknown>) {
+	return vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue({
+		...header('a1', 'Sensors', 4),
+		payload: payload ?? {
+			kind: 'path',
+			schema_version: 1,
+			start: { kind: 'scope', types: ['Building'], criteria: [] },
+			steps: []
+		}
+	});
+}
+
+/** Mirror of the backend's lock canonicalization (see checkout.artifact.test.ts):
+ * targets go out with the bare id + `type: "artifact"`, leases come back keyed
+ * `art:<id>` under one token per call. */
+function mockAcquire() {
+	return vi.spyOn(checkoutApi, 'acquireLocks').mockImplementation(async (req) => {
+		const token = `t_${req.targets[0].resource_id}`;
+		return {
+			token,
+			leases: req.targets.map((t) => ({
+				resource_id: t.type === 'artifact' ? `art:${t.resource_id}` : t.resource_id,
+				mode: t.mode,
+				holder: 'me',
+				token,
+				intent: req.intent,
+				expires_at: 1
+			}))
+		};
+	});
+}
+
+/** What POST /locks throws when a peer holds the artifact. */
+function lockConflict(email: string): ConflictError {
+	return new ConflictError(
+		409,
+		{
+			conflicts: [
+				{ resource_id: 'art:a1', held_by: 'u2', held_by_email: email, held_mode: 'exclusive' }
+			]
+		},
+		'lock conflict'
+	);
+}
+
+/** Role + lease mocks for the checked-out-editor path (the default role after
+ * `resetCheckout` is viewer, which fails the lease open with no banner). */
+function asEditor() {
+	setProjectInfo({ role: 'editor', lockTtlSeconds: 100 });
+}
+
 beforeEach(() => {
 	resetNavigationEditors();
 	resetWorkspaceTabs();
 	resetArtifacts();
+	resetArtifactEdits();
+	resetCheckout();
 });
 afterEach(() => {
 	// Belt-and-suspenders: a debounce timer left pending by a test (real or
@@ -179,265 +258,380 @@ describe('navigation editor store', () => {
 		expect(getPreview('nav:draft:1')).toBeUndefined();
 	});
 
-	it('first save creates the artifact and binds the tab', async () => {
+	it('saveDraft on an unsaved draft stages a create and binds the draft to the temp id', async () => {
 		const tabId = openNavigationTab({ artifactId: null, title: 'New navigation' });
 		await ensureDraft(tabId);
-		const create = vi.spyOn(artifactsApi, 'createArtifact').mockResolvedValue({
-			id: 'a9',
-			kind: 'navigation',
-			name: 'Mine',
-			artifact_rev: 1,
-			updated_at: '',
-			updated_by: null,
-			entry_points: null,
-			payload: {}
-		});
-		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({ items: [] });
-		const draft = getDraft(tabId)!;
-		draft.name = 'Mine';
+		const create = vi.spyOn(artifactsApi, 'createArtifact');
+		setDraftName(tabId, 'Mine');
+		const definition = getDraft(tabId)!.definition;
+
 		await saveDraft(tabId);
-		expect(create).toHaveBeenCalled();
-		expect(getDynamicTabs()[0].artifactId).toBe('a9');
-		expect(getDraft('nav:a9')?.artifactRev).toBe(1);
-	});
 
-	it('save conflict records the server rev from the 409 detail body', async () => {
-		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue({
-			id: 'a1',
-			kind: 'navigation',
-			name: 'Sensors',
-			artifact_rev: 4,
-			updated_at: '',
-			updated_by: null,
-			entry_points: null,
-			payload: {
-				kind: 'path',
-				schema_version: 1,
-				start: { kind: 'scope', types: [], criteria: [] },
-				steps: []
+		expect(getStagedArtifactOps()).toEqual([
+			{
+				kind: 'create_artifact',
+				temp_id: expect.stringMatching(/^tmp_/),
+				artifact_kind: 'navigation',
+				name: 'Mine',
+				payload: definition
 			}
-		});
-		await ensureDraft('nav:a1');
-		// Mirror what the real client throws: apiFetchRaw parses the FastAPI
-		// HTTPException body — {"detail": {"message": ..., "current_rev": N}} —
-		// and passes the WHOLE parsed body to errorForStatus (see client.ts).
-		vi.spyOn(artifactsApi, 'updateArtifact').mockRejectedValue(
-			new ConflictError(
-				409,
-				{ detail: { message: 'artifact was modified by someone else', current_rev: 7 } },
-				'HTTP 409'
-			)
-		);
-		await expect(saveDraft('nav:a1')).rejects.toBeInstanceOf(ConflictError);
-		expect(getSaveConflict('nav:a1')).toBe(7);
+		]);
+		// Nothing reaches the legacy REST route any more.
+		expect(create).not.toHaveBeenCalled();
+		const draft = getDraft(tabId)!;
+		expect(isTempId(draft.artifactId!)).toBe(true);
+		expect(draft.dirty).toBe(false);
+		// The tab is NOT re-keyed at stage time: it keeps living under nav:draft:N
+		// until the commit's id_map supplies a canonical id.
+		expect(getDynamicTabs()[0].id).toBe(tabId);
+		expect(getDynamicTabs()[0].artifactId).toBeNull();
 	});
 
-	it('a name-clash 409 on create does NOT enter rev-conflict state', async () => {
+	it('saveDraft on a saved artifact stages a full-payload update', async () => {
+		asEditor();
+		mockAcquire();
+		mockGetArtifact();
+		vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		await ensureDraft('nav:a1');
+		const update = vi.spyOn(artifactsApi, 'updateArtifact');
+		updateDefinition('nav:a1', runnablePath('Edited'));
+
+		await saveDraft('nav:a1');
+
+		expect(getStagedArtifactOps()).toEqual([
+			{ kind: 'update_artifact', id: 'a1', name: 'Sensors', payload: runnablePath('Edited') }
+		]);
+		expect(update).not.toHaveBeenCalled();
+		expect(getDraft('nav:a1')?.dirty).toBe(false);
+		expect(getDraft('nav:a1')?.artifactId).toBe('a1');
+	});
+
+	it('re-saving coalesces into one staged op carrying the latest payload', async () => {
+		asEditor();
+		mockAcquire();
+		mockGetArtifact();
+		vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		await ensureDraft('nav:a1');
+		updateDefinition('nav:a1', runnablePath('First'));
+		await saveDraft('nav:a1');
+		updateDefinition('nav:a1', runnablePath('Second'));
+		await saveDraft('nav:a1');
+
+		expect(getStagedArtifactOps()).toEqual([
+			{ kind: 'update_artifact', id: 'a1', name: 'Sensors', payload: runnablePath('Second') }
+		]);
+	});
+
+	it('saveDraft refuses a name another artifact of the same kind already uses', async () => {
+		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({
+			items: [header('a2', 'Taken')]
+		});
+		await loadArtifacts();
 		const tabId = openNavigationTab({ artifactId: null, title: 'New navigation' });
-		const draft = await ensureDraft(tabId);
-		draft.name = 'Taken';
-		// Mirror what the real client throws for the create-path 409:
-		// routes/artifacts.py raises HTTPException(409, detail=f"a navigation
-		// named {name!r} already exists") — a plain STRING detail, unlike the
-		// update-path's {message, current_rev} object. err.body is the whole
-		// parsed body: {"detail": "..."}.
-		vi.spyOn(artifactsApi, 'createArtifact').mockRejectedValue(
-			new ConflictError(
-				409,
-				{ detail: "a navigation named 'Taken' already exists" },
-				"a navigation named 'Taken' already exists"
-			)
-		);
-		await expect(saveDraft(tabId)).rejects.toBeInstanceOf(ConflictError);
-		// No numeric current_rev in the body -> must NOT set a conflict, or the
-		// UI's "Reload their version" recovery would wipe this brand-new draft.
-		expect(getSaveConflict(tabId)).toBeUndefined();
-		// The draft itself must be untouched (name-clash isn't a rev conflict).
-		expect(getDraft(tabId)?.name).toBe('Taken');
+		await ensureDraft(tabId);
+		setDraftName(tabId, 'Taken');
+
+		await expect(saveDraft(tabId)).rejects.toThrow(/named "Taken" already exists/);
+		// Nothing staged, and the draft is untouched (still unsaved + dirty).
+		expect(getStagedArtifactOps()).toEqual([]);
 		expect(getDraft(tabId)?.artifactId).toBeNull();
+		expect(getDraft(tabId)?.dirty).toBe(true);
+	});
+});
+
+describe('artifact lease on open', () => {
+	it('acquires the art: lease before fetching the payload', async () => {
+		asEditor();
+		const acquire = mockAcquire();
+		const get = mockGetArtifact();
+		vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+
+		await ensureDraft('nav:a1');
+
+		expect(acquire.mock.calls[0][0]).toMatchObject({
+			targets: [{ resource_id: 'a1', mode: 'exclusive', type: 'artifact' }],
+			intent: 'edit'
+		});
+		// The lease is taken FIRST: showing an editable surface we may not own is
+		// the failure mode the check-out is there to prevent.
+		expect(acquire.mock.invocationCallOrder[0]).toBeLessThan(get.mock.invocationCallOrder[0]);
+		expect(get).toHaveBeenCalledWith('a1');
+		expect(isCheckedOutByMe('art:a1')).toBe(true);
+		expect(getNavLockHolder('nav:a1')).toBeNull();
+	});
+
+	it('marks the tab read-only when the lease is denied, but still loads it', async () => {
+		asEditor();
+		vi.spyOn(checkoutApi, 'acquireLocks').mockRejectedValue(lockConflict('peer@x'));
+		mockGetArtifact();
+		vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+
+		const draft = await ensureDraft('nav:a1');
+
+		expect(getNavLockHolder('nav:a1')).toBe('peer@x');
+		// A denial must not refuse the tab — it opens read-only with the banner.
+		expect(draft.name).toBe('Sensors');
+		expect(getPreview('nav:a1')?.total).toBe(1);
+	});
+
+	it('shows no banner to a viewer (the whole workspace is already read-only)', async () => {
+		const acquire = mockAcquire();
+		mockGetArtifact();
+		vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+
+		await ensureDraft('nav:a1'); // role is viewer (resetCheckout default)
+
+		expect(acquire).not.toHaveBeenCalled();
+		expect(getNavLockHolder('nav:a1')).toBeNull();
+		expect(getDraft('nav:a1')).toBeDefined();
+	});
+
+	it('retryNavLock clears the banner once the peer releases', async () => {
+		asEditor();
+		const acquire = mockAcquire();
+		acquire.mockRejectedValueOnce(lockConflict('peer@x'));
+		mockGetArtifact();
+		vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		await ensureDraft('nav:a1');
+		expect(getNavLockHolder('nav:a1')).toBe('peer@x');
+
+		await retryNavLock('nav:a1');
+
+		expect(getNavLockHolder('nav:a1')).toBeNull();
+		expect(isCheckedOutByMe('art:a1')).toBe(true);
+	});
+
+	it('retryNavLock is a no-op for an unsaved (temp-id) draft', async () => {
+		asEditor();
+		const acquire = mockAcquire();
+		const tabId = openNavigationTab({ artifactId: null, title: 'New navigation' });
+		await ensureDraft(tabId);
+		await saveDraft(tabId); // draft.artifactId is now a temp id
+
+		await retryNavLock(tabId);
+
+		expect(acquire).not.toHaveBeenCalled();
+	});
+
+	it('closeDraft releases the lease when nothing staged needs it', async () => {
+		asEditor();
+		mockAcquire();
+		mockGetArtifact();
+		vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		const release = vi.spyOn(checkoutApi, 'releaseLock').mockResolvedValue(undefined);
+		await ensureDraft('nav:a1');
+
+		closeDraft('nav:a1');
+		await Promise.resolve();
+
+		expect(release).toHaveBeenCalledWith('t_a1', undefined);
+		expect(isCheckedOutByMe('art:a1')).toBe(false);
+		expect(getNavLockHolder('nav:a1')).toBeNull();
+	});
+
+	it('closeDraft keeps the lease while a staged op still needs it', async () => {
+		asEditor();
+		mockAcquire();
+		mockGetArtifact();
+		vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		await ensureDraft('nav:a1');
+		await saveDraft('nav:a1'); // stages update_artifact a1 — the commit needs the lease
+		const release = vi.spyOn(checkoutApi, 'releaseLock').mockResolvedValue(undefined);
+
+		closeDraft('nav:a1');
+		await Promise.resolve();
+
+		expect(release).not.toHaveBeenCalled();
+		expect(isCheckedOutByMe('art:a1')).toBe(true);
 	});
 });
 
 describe('saveAsDraft', () => {
-	it('creates a new artifact and rebinds the tab, leaving original untouched', async () => {
-		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue({
-			id: 'a1',
-			kind: 'navigation',
-			name: 'Sensors',
-			artifact_rev: 4,
-			updated_at: '',
-			updated_by: null,
-			entry_points: null,
-			payload: {
-				kind: 'path',
-				schema_version: 1,
-				start: { kind: 'scope', types: ['Building'], criteria: [] },
-				steps: []
-			}
-		});
+	it('stages a fresh create, retitles the tab, and leaves the original untouched', async () => {
+		asEditor();
+		mockAcquire();
+		mockGetArtifact();
 		vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
 		openNavigationTab({ artifactId: 'a1', title: 'Sensors' });
 		const draft = await ensureDraft('nav:a1');
-		const create = vi.spyOn(artifactsApi, 'createArtifact').mockResolvedValue({
-			id: 'a9',
-			kind: 'navigation',
-			name: 'Copy',
-			artifact_rev: 1,
-			updated_at: '',
-			updated_by: null,
-			entry_points: null,
-			payload: draft.definition as unknown as Record<string, unknown>
-		});
+		const create = vi.spyOn(artifactsApi, 'createArtifact');
 		const update = vi.spyOn(artifactsApi, 'updateArtifact');
-		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({ items: [] });
+		const release = vi.spyOn(checkoutApi, 'releaseLock').mockResolvedValue(undefined);
 
 		await saveAsDraft('nav:a1', 'Copy');
 
-		expect(create).toHaveBeenCalledWith({
-			kind: 'navigation',
-			name: 'Copy',
-			payload: draft.definition
-		});
-		// The original artifact is never mutated by save-as.
+		const ops = getStagedArtifactOps();
+		expect(ops).toEqual([
+			{
+				kind: 'create_artifact',
+				temp_id: expect.stringMatching(/^tmp_/),
+				artifact_kind: 'navigation',
+				name: 'Copy',
+				payload: draft.definition
+			}
+		]);
+		// The original artifact is never touched — no update op, no REST call.
+		expect(create).not.toHaveBeenCalled();
 		expect(update).not.toHaveBeenCalled();
-		// The old tab is gone; a new tab bound to the created artifact exists.
-		expect(getDraft('nav:a1')).toBeUndefined();
-		expect(getDynamicTabs()[0].artifactId).toBe('a9');
-		// The visible tab title must follow the new name too — bindTabToArtifact
-		// only re-keys the tab id, it does not retitle it.
+		// The tab is NOT re-keyed at stage time (that happens on commit), but it
+		// IS retitled and its draft now points at the fork's temp id.
+		expect(getDynamicTabs()[0].id).toBe('nav:a1');
 		expect(getDynamicTabs()[0].title).toBe('Copy');
-		const newDraft = getDraft('nav:a9')!;
-		expect(newDraft.name).toBe('Copy');
-		expect(newDraft.artifactId).toBe('a9');
-		expect(newDraft.artifactRev).toBe(1);
-		expect(newDraft.dirty).toBe(false);
+		const forked = getDraft('nav:a1')!;
+		expect(forked.name).toBe('Copy');
+		expect(forked.artifactId).toBe((ops[0] as { temp_id: string }).temp_id);
+		expect(forked.artifactRev).toBeNull();
+		expect(forked.dirty).toBe(false);
+		// The original's lease is no longer needed by anything staged: released.
+		expect(release).toHaveBeenCalledWith('t_a1', undefined);
+		expect(isCheckedOutByMe('art:a1')).toBe(false);
 	});
 
-	it('carries the previous tab’s visible/preview node-keys to the new tab key', async () => {
-		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue({
-			id: 'a1',
-			kind: 'navigation',
-			name: 'Sensors',
-			artifact_rev: 4,
-			updated_at: '',
-			updated_by: null,
-			entry_points: null,
-			payload: {
-				kind: 'path',
-				schema_version: 1,
-				start: { kind: 'scope', types: ['Building'], criteria: [] },
-				steps: []
-			}
-		});
+	it('keeps the tab’s per-node preview state in place (no rekey until commit)', async () => {
+		asEditor();
+		mockAcquire();
+		mockGetArtifact();
 		vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		vi.spyOn(checkoutApi, 'releaseLock').mockResolvedValue(undefined);
 		openNavigationTab({ artifactId: 'a1', title: 'Sensors' });
 		await ensureDraft('nav:a1'); // root expanded by default + auto-runs
 		expect(getPreview('nav:a1', [])?.total).toBe(1);
-		expect(isNodeVisible('nav:a1', [])).toBe(true);
-
-		vi.spyOn(artifactsApi, 'createArtifact').mockResolvedValue({
-			id: 'a9',
-			kind: 'navigation',
-			name: 'Copy',
-			artifact_rev: 1,
-			updated_at: '',
-			updated_by: null,
-			entry_points: null,
-			payload: {}
-		});
-		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({ items: [] });
 
 		await saveAsDraft('nav:a1', 'Copy');
 
-		// The old tab's per-node preview/expanded state must not leak.
-		expect(getPreview('nav:a1', [])).toBeUndefined();
-		expect(isNodeVisible('nav:a1', [])).toBe(false);
-		// The new tab key inherits the root's preview + expanded state.
-		expect(getPreview('nav:a9', [])?.total).toBe(1);
-		expect(isNodeVisible('nav:a9', [])).toBe(true);
+		expect(getPreview('nav:a1', [])?.total).toBe(1);
+		expect(isNodeVisible('nav:a1', [])).toBe(true);
 	});
 
-	it('a name-clash 409 on save-as surfaces as an error, not a rev conflict', async () => {
-		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue({
-			id: 'a1',
-			kind: 'navigation',
-			name: 'Sensors',
-			artifact_rev: 4,
-			updated_at: '',
-			updated_by: null,
-			entry_points: null,
-			payload: {
-				kind: 'path',
-				schema_version: 1,
-				start: { kind: 'scope', types: [], criteria: [] },
-				steps: []
-			}
-		});
+	it('refuses a name another navigation already uses', async () => {
+		asEditor();
+		mockAcquire();
+		mockGetArtifact();
+		vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({ items: [header('a2', 'Taken')] });
+		await loadArtifacts();
 		await ensureDraft('nav:a1');
-		vi.spyOn(artifactsApi, 'createArtifact').mockRejectedValue(
-			new ConflictError(
-				409,
-				{ detail: "a navigation named 'Taken' already exists" },
-				"a navigation named 'Taken' already exists"
-			)
-		);
-		await expect(saveAsDraft('nav:a1', 'Taken')).rejects.toBeInstanceOf(ConflictError);
-		// No rev-conflict must be recorded for either the old or a new tab key.
-		expect(getSaveConflict('nav:a1')).toBeUndefined();
-		expect(getSaveConflict('nav:a9')).toBeUndefined();
+
+		await expect(saveAsDraft('nav:a1', 'Taken')).rejects.toThrow(/named "Taken" already exists/);
+		expect(getStagedArtifactOps()).toEqual([]);
 		// The original tab/draft is left exactly as it was (untouched).
-		expect(getDraft('nav:a1')).toBeDefined();
+		expect(getDraft('nav:a1')?.artifactId).toBe('a1');
+		expect(getDraft('nav:a1')?.name).toBe('Sensors');
+	});
+});
+
+describe('staged-artifact listeners', () => {
+	/** Stage a create from a fresh draft tab; returns [tabId, tempId]. */
+	async function stageCreate(name = 'Mine'): Promise<[string, string]> {
+		const tabId = openNavigationTab({ artifactId: null, title: 'New navigation' });
+		await ensureDraft(tabId);
+		setDraftName(tabId, name);
+		await saveDraft(tabId);
+		return [tabId, getDraft(tabId)!.artifactId!];
+	}
+
+	it('a commit rebinds a temp draft to its canonical id, carrying per-node state', async () => {
+		vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		const tabId = openNavigationTab({ artifactId: null, title: 'New navigation' });
+		await ensureDraft(tabId);
+		updateDefinition(tabId, runnablePath('A'));
+		await runPreview(tabId, []);
+		setCardCollapsed(tabId, [], true);
+		selectNode(tabId, []);
+		setDraftName(tabId, 'Mine');
+		await saveDraft(tabId);
+		const tempId = getDraft(tabId)!.artifactId!;
+
+		notifyArtifactCommit({
+			idMap: { [tempId]: 'a9' },
+			changed: [header('a9', 'Mine', 7)],
+			deletedIds: []
+		});
+
+		expect(getDraft(tabId)).toBeUndefined();
+		const bound = getDraft('nav:a9')!;
+		expect(bound.artifactId).toBe('a9');
+		expect(bound.artifactRev).toBe(7);
+		expect(getDynamicTabs()[0].id).toBe('nav:a9');
+		expect(getDynamicTabs()[0].artifactId).toBe('a9');
+		// Per-node state follows the rebind, as it used to on first save.
+		expect(getPreview('nav:a9', [])?.total).toBe(1);
+		expect(getPreview(tabId, [])).toBeUndefined();
+		expect(isNodeVisible('nav:a9', [])).toBe(true);
+		expect(isCardCollapsed('nav:a9', [])).toBe(true);
+		expect(getSelectedPath('nav:a9')).toEqual([]);
+	});
+
+	it('a commit adopts the new artifact_rev on an already-saved draft', async () => {
+		asEditor();
+		mockAcquire();
+		mockGetArtifact();
+		vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		await ensureDraft('nav:a1');
+		expect(getDraft('nav:a1')?.artifactRev).toBe(4);
+
+		notifyArtifactCommit({ idMap: {}, changed: [header('a1', 'Sensors', 9)], deletedIds: [] });
+
+		expect(getDraft('nav:a1')?.artifactRev).toBe(9);
 		expect(getDraft('nav:a1')?.artifactId).toBe('a1');
 	});
 
-	it('clears a stale rev-conflict recorded against the retired tab id', async () => {
-		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue({
-			id: 'a1',
-			kind: 'navigation',
-			name: 'Sensors',
-			artifact_rev: 4,
-			updated_at: '',
-			updated_by: null,
-			entry_points: null,
-			payload: {
-				kind: 'path',
-				schema_version: 1,
-				start: { kind: 'scope', types: [], criteria: [] },
-				steps: []
-			}
-		});
+	it('a committed delete closes the artifact’s open tab', async () => {
+		asEditor();
+		mockAcquire();
+		mockGetArtifact();
+		vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		vi.spyOn(checkoutApi, 'releaseLock').mockResolvedValue(undefined);
+		openNavigationTab({ artifactId: 'a1', title: 'Sensors' });
 		await ensureDraft('nav:a1');
-		// Induce a rev-conflict on nav:a1, same as the saveDraft conflict test.
-		vi.spyOn(artifactsApi, 'updateArtifact').mockRejectedValue(
-			new ConflictError(
-				409,
-				{ detail: { message: 'artifact was modified by someone else', current_rev: 7 } },
-				'HTTP 409'
-			)
-		);
-		await expect(saveDraft('nav:a1')).rejects.toBeInstanceOf(ConflictError);
-		expect(getSaveConflict('nav:a1')).toBe(7);
 
-		// Now fork the still-conflicted tab via Save as… — this must clear the
-		// stale conflict on the retired tab id, or a later reopen of a1 (which
-		// deterministically re-mints tab id nav:a1) inherits a false-positive
-		// conflict banner for a fresh, non-conflicted tab.
-		vi.spyOn(artifactsApi, 'createArtifact').mockResolvedValue({
-			id: 'a9',
-			kind: 'navigation',
-			name: 'Copy',
-			artifact_rev: 1,
-			updated_at: '',
-			updated_by: null,
-			entry_points: null,
-			payload: {}
-		});
-		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({ items: [] });
+		notifyArtifactCommit({ idMap: {}, changed: [], deletedIds: ['a1'] });
 
-		await saveAsDraft('nav:a1', 'Copy');
+		expect(getDraft('nav:a1')).toBeUndefined();
+		expect(getDynamicTabs()).toEqual([]);
+	});
 
-		expect(getSaveConflict('nav:a1')).toBeUndefined();
-		expect(getSaveConflict('nav:a9')).toBeUndefined();
+	it('a staged delete closes the artifact’s open tab immediately', async () => {
+		asEditor();
+		mockAcquire();
+		mockGetArtifact();
+		vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		vi.spyOn(checkoutApi, 'releaseLock').mockResolvedValue(undefined);
+		openNavigationTab({ artifactId: 'a1', title: 'Sensors' });
+		await ensureDraft('nav:a1');
+
+		stageArtifactDelete('a1', header('a1', 'Sensors', 4));
+
+		expect(getDraft('nav:a1')).toBeUndefined();
+		expect(getDynamicTabs()).toEqual([]);
+	});
+
+	it('discarding a staged update re-dirties the draft', async () => {
+		asEditor();
+		mockAcquire();
+		mockGetArtifact();
+		vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		await ensureDraft('nav:a1');
+		await saveDraft('nav:a1');
+		expect(getDraft('nav:a1')?.dirty).toBe(false);
+
+		revertStagedArtifact('a1');
+
+		expect(getDraft('nav:a1')?.dirty).toBe(true);
+		expect(getDraft('nav:a1')?.artifactId).toBe('a1');
+	});
+
+	it('discarding a staged create unbinds the draft back to unsaved', async () => {
+		const [tabId, tempId] = await stageCreate();
+
+		revertStagedArtifact(tempId);
+
+		const draft = getDraft(tabId)!;
+		expect(draft.artifactId).toBeNull();
+		expect(draft.artifactRev).toBeNull();
+		expect(draft.dirty).toBe(true);
+		// The tab was never re-keyed, so it is still the draft tab it started as.
+		expect(getDynamicTabs()[0].id).toBe(tabId);
 	});
 });
 
@@ -1050,7 +1244,7 @@ describe('structural edits keep per-node state attached to nodes', () => {
 	});
 });
 
-describe('auto-run survives the first-save tab rebind', () => {
+describe('auto-run survives the commit tab rebind', () => {
 	function runnableDef() {
 		return {
 			kind: 'path' as const,
@@ -1060,27 +1254,26 @@ describe('auto-run survives the first-save tab rebind', () => {
 			exclude_visited: true
 		};
 	}
-	const CREATED = {
-		id: 'a9',
-		kind: 'navigation',
-		name: 'Mine',
-		artifact_rev: 1,
-		updated_at: '',
-		updated_by: null,
-		entry_points: null,
-		payload: {}
-	};
+
+	/** Land the commit that turns this tab's staged create into artifact `a9`. */
+	function commitCreate(tabId: string): void {
+		const tempId = getDraft(tabId)!.artifactId!;
+		notifyArtifactCommit({
+			idMap: { [tempId]: 'a9' },
+			changed: [header('a9', 'Mine')],
+			deletedIds: []
+		});
+	}
 
 	it('a pending debounced run is rescheduled under the rebound tab id', async () => {
 		vi.useFakeTimers();
 		const tabId = openNavigationTab({ artifactId: null, title: 'New navigation' });
 		await ensureDraft(tabId);
 		const evaluate = vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
-		vi.spyOn(artifactsApi, 'createArtifact').mockResolvedValue(CREATED);
-		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({ items: [] });
 		updateDefinition(tabId, runnableDef());
-		// Save lands INSIDE the debounce window: the run must not be lost.
+		// The commit lands INSIDE the debounce window: the run must not be lost.
 		await saveDraft(tabId);
+		commitCreate(tabId);
 		expect(getPreview('nav:a9')).toBeUndefined(); // not yet — still debounced
 		await vi.advanceTimersByTimeAsync(400);
 		expect(evaluate).toHaveBeenCalledTimes(1);
@@ -1097,12 +1290,11 @@ describe('auto-run survives the first-save tab rebind', () => {
 			.spyOn(artifactsApi, 'evaluateNavigation')
 			.mockImplementationOnce(() => first.promise)
 			.mockResolvedValue(CHAIN_PAGE);
-		vi.spyOn(artifactsApi, 'createArtifact').mockResolvedValue(CREATED);
-		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({ items: [] });
 		updateDefinition(tabId, runnableDef());
 		await vi.advanceTimersByTimeAsync(400); // debounce fires → run in flight
 		expect(getPreview(tabId)?.loading).toBe(true);
-		await saveDraft(tabId); // rebind while the evaluate is still in flight
+		await saveDraft(tabId);
+		commitCreate(tabId); // rebind while the evaluate is still in flight
 		first.resolve(CHAIN_PAGE); // the old response is orphaned by the rebind
 		await vi.advanceTimersByTimeAsync(0);
 		// The preview must settle via a re-issued run, not hang on loading.
@@ -1249,24 +1441,21 @@ describe('node selection', () => {
 		expect(getSelectedPath(tabId)).toEqual([]);
 	});
 
-	it('rekeyTab carries the selection across the first-save rebind', async () => {
+	it('rekeyTab carries the selection across the commit rebind', async () => {
 		const tabId = openNavigationTab({ artifactId: null, title: 'New navigation' });
 		await ensureDraft(tabId);
 		vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
-		vi.spyOn(artifactsApi, 'createArtifact').mockResolvedValue({
-			id: 'a9',
-			kind: 'navigation',
-			name: 'Mine',
-			artifact_rev: 1,
-			updated_at: '',
-			updated_by: null,
-			entry_points: null,
-			payload: {}
-		});
-		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({ items: [] });
 		updateDefinition(tabId, combine2());
 		selectNode(tabId, [1]);
 		await saveDraft(tabId);
+		const tempId = getDraft(tabId)!.artifactId!;
+		// Staging alone must not move anything — the tab is re-keyed on commit.
+		expect(getSelectedPath(tabId)).toEqual([1]);
+		notifyArtifactCommit({
+			idMap: { [tempId]: 'a9' },
+			changed: [header('a9', 'Mine')],
+			deletedIds: []
+		});
 		expect(getSelectedPath('nav:a9')).toEqual([1]);
 		expect(getSelectedPath(tabId)).toEqual([]); // the retired tab keeps nothing
 	});
@@ -1382,22 +1571,16 @@ describe('card collapse state', () => {
 		expect(isCardCollapsed(tabId, [0])).toBe(false);
 	});
 
-	it('rekeyTab (first-save) carries the collapse override to the new tab id', async () => {
+	it('rekeyTab (commit rebind) carries the collapse override to the new tab id', async () => {
 		const tabId = openNavigationTab({ artifactId: null, title: 'New navigation' });
 		await ensureDraft(tabId);
 		setCardCollapsed(tabId, [], true);
-		vi.spyOn(artifactsApi, 'createArtifact').mockResolvedValue({
-			id: 'a9',
-			kind: 'navigation',
-			name: 'Mine',
-			artifact_rev: 1,
-			updated_at: '',
-			updated_by: null,
-			entry_points: null,
-			payload: {}
-		});
-		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({ items: [] });
 		await saveDraft(tabId);
+		notifyArtifactCommit({
+			idMap: { [getDraft(tabId)!.artifactId!]: 'a9' },
+			changed: [header('a9', 'Mine')],
+			deletedIds: []
+		});
 		expect(isCardCollapsed('nav:a9', [])).toBe(true);
 	});
 
