@@ -281,10 +281,38 @@ describe('navigation editor store', () => {
 		const draft = getDraft(tabId)!;
 		expect(isTempId(draft.artifactId!)).toBe(true);
 		expect(draft.dirty).toBe(false);
-		// The tab is NOT re-keyed at stage time: it keeps living under nav:draft:N
-		// until the commit's id_map supplies a canonical id.
+		// The tab KEY is NOT re-keyed at stage time: it keeps living under
+		// nav:draft:N until the commit's id_map supplies a canonical id. The tab
+		// RECORD does follow the draft onto the temp id.
 		expect(getDynamicTabs()[0].id).toBe(tabId);
-		expect(getDynamicTabs()[0].artifactId).toBeNull();
+		expect(getDynamicTabs()[0].artifactId).toBe(draft.artifactId);
+	});
+
+	it('re-saving a staged create folds back into the create op', async () => {
+		const tabId = openNavigationTab({ artifactId: null, title: 'New navigation' });
+		await ensureDraft(tabId);
+		setDraftName(tabId, 'Mine');
+		await saveDraft(tabId);
+		const tempId = getDraft(tabId)!.artifactId!;
+		vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		updateDefinition(tabId, runnablePath('Edited'));
+		setDraftName(tabId, 'Renamed');
+
+		await saveDraft(tabId);
+
+		// Still ONE op, still a create: the backend resolves update_artifact ids
+		// literally, so a create+update pair for the same temp id would 422.
+		expect(getStagedArtifactOps()).toEqual([
+			{
+				kind: 'create_artifact',
+				temp_id: tempId,
+				artifact_kind: 'navigation',
+				name: 'Renamed',
+				payload: runnablePath('Edited')
+			}
+		]);
+		expect(getDraft(tabId)?.artifactId).toBe(tempId); // no second temp id minted
+		expect(getDraft(tabId)?.dirty).toBe(false);
 	});
 
 	it('saveDraft on a saved artifact stages a full-payload update', async () => {
@@ -372,6 +400,23 @@ describe('artifact lease on open', () => {
 		// A denial must not refuse the tab — it opens read-only with the banner.
 		expect(draft.name).toBe('Sensors');
 		expect(getPreview('nav:a1')?.total).toBe(1);
+	});
+
+	it('fails OPEN when POST /locks errors for a non-conflict reason', async () => {
+		asEditor();
+		// ensureCheckout rethrows anything that is not a ConflictError; if that
+		// escaped ensureDraft the tab would sit on "Loading…" forever (its caller
+		// is a fire-and-forget $effect).
+		vi.spyOn(checkoutApi, 'acquireLocks').mockRejectedValue(new Error('boom'));
+		const get = mockGetArtifact();
+		vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+
+		const draft = await ensureDraft('nav:a1');
+
+		expect(get).toHaveBeenCalledWith('a1');
+		expect(draft.name).toBe('Sensors');
+		// No banner: an infrastructure error is not a peer holding the artifact.
+		expect(getNavLockHolder('nav:a1')).toBeNull();
 	});
 
 	it('shows no banner to a viewer (the whole workspace is already read-only)', async () => {
@@ -473,18 +518,42 @@ describe('saveAsDraft', () => {
 		// The original artifact is never touched — no update op, no REST call.
 		expect(create).not.toHaveBeenCalled();
 		expect(update).not.toHaveBeenCalled();
-		// The tab is NOT re-keyed at stage time (that happens on commit), but it
-		// IS retitled and its draft now points at the fork's temp id.
+		// The tab KEY is NOT re-keyed at stage time (that happens on commit), but
+		// it IS retitled and both the draft and the tab RECORD now point at the
+		// fork's temp id — a record still claiming a1 would make the sidebar's
+		// entry for the ORIGINAL focus this fork's editor (openArtifactTab
+		// dedupes on artifactId) and leave a1 unreachable until the commit.
+		const tempId = (ops[0] as { temp_id: string }).temp_id;
 		expect(getDynamicTabs()[0].id).toBe('nav:a1');
 		expect(getDynamicTabs()[0].title).toBe('Copy');
+		expect(getDynamicTabs()[0].artifactId).toBe(tempId);
 		const forked = getDraft('nav:a1')!;
 		expect(forked.name).toBe('Copy');
-		expect(forked.artifactId).toBe((ops[0] as { temp_id: string }).temp_id);
+		expect(forked.artifactId).toBe(tempId);
 		expect(forked.artifactRev).toBeNull();
 		expect(forked.dirty).toBe(false);
 		// The original's lease is no longer needed by anything staged: released.
 		expect(release).toHaveBeenCalledWith('t_a1', undefined);
 		expect(isCheckedOutByMe('art:a1')).toBe(false);
+	});
+
+	it('frees the original artifact so the sidebar can reopen it in its own tab', async () => {
+		asEditor();
+		mockAcquire();
+		mockGetArtifact();
+		vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		vi.spyOn(checkoutApi, 'releaseLock').mockResolvedValue(undefined);
+		openNavigationTab({ artifactId: 'a1', title: 'Sensors' });
+		await ensureDraft('nav:a1');
+
+		await saveAsDraft('nav:a1', 'Copy');
+		openNavigationTab({ artifactId: 'a1', title: 'Sensors' }); // sidebar click
+
+		// Two tabs: the fork (retitled Copy) and a fresh one for the original —
+		// not one tab silently serving the wrong editor.
+		expect(getDynamicTabs()).toHaveLength(2);
+		expect(getDynamicTabs()[1].artifactId).toBe('a1');
+		expect(getDynamicTabs()[1].title).toBe('Sensors');
 	});
 
 	it('keeps the tab’s per-node preview state in place (no rekey until commit)', async () => {
@@ -630,8 +699,10 @@ describe('staged-artifact listeners', () => {
 		expect(draft.artifactId).toBeNull();
 		expect(draft.artifactRev).toBeNull();
 		expect(draft.dirty).toBe(true);
-		// The tab was never re-keyed, so it is still the draft tab it started as.
+		// The tab was never re-keyed, so it is still the draft tab it started as —
+		// and its record unbinds with the draft (the temp id will never exist).
 		expect(getDynamicTabs()[0].id).toBe(tabId);
+		expect(getDynamicTabs()[0].artifactId).toBeNull();
 	});
 });
 

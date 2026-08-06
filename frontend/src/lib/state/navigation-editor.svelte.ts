@@ -74,7 +74,7 @@ import {
 import { releaseArtifactIfUnneeded } from './checkout.svelte';
 import { acquireArtifactLease, lockHolderLabel } from './edit-gate';
 import { isTempId } from './ops';
-import { bindTabToArtifact, closeTab, retitleTab } from './workspace.svelte';
+import { bindTabToArtifact, closeTab, repointTabArtifact, retitleTab } from './workspace.svelte';
 
 // `isRunnable` moved to lib/navigation/tree (it now understands the NavStepItem
 // discriminated union); re-export so the barrel + existing consumers keep the
@@ -525,8 +525,15 @@ export async function ensureDraft(tabId: string): Promise<NavDraft> {
 		// what the pessimistic lease exists to prevent. A denial does NOT refuse
 		// the tab — the payload still loads and the tab opens read-only behind
 		// the holder banner (a viewer gets no banner: see `_lockDenied`).
-		const res = await acquireArtifactLease(id, 'edit');
-		if (!res.ok && res.reason === 'conflict') {
+		//
+		// The `.catch` is load-bearing, not defensive noise: `ensureCheckout`
+		// RETHROWS anything that is not a lock conflict, and our only caller is a
+		// fire-and-forget `$effect` — a 500 or a network blip from POST /locks
+		// would otherwise reject before `getArtifact` runs and strand the tab on
+		// "Loading…" forever. Fail OPEN with no banner: an infrastructure error
+		// is not a peer holding the artifact.
+		const res = await acquireArtifactLease(id, 'edit').catch(() => null);
+		if (res !== null && !res.ok && res.reason === 'conflict') {
 			_lockDenied.set(tabId, lockHolderLabel(res));
 		} else {
 			_lockDenied.delete(tabId);
@@ -742,6 +749,7 @@ export async function saveDraft(tabId: string): Promise<void> {
 	if (draft.artifactId === null) {
 		const tempId = stageArtifactCreate('navigation', draft.name, payload, tabId);
 		_drafts.set(tabId, { ...draft, artifactId: tempId, dirty: false });
+		repointTabArtifact(tabId, tempId); // tab RECORD follows the draft; tab KEY does not
 	} else {
 		stageArtifactUpdate(draft.artifactId, { name: draft.name, payload });
 		_drafts.set(tabId, { ...draft, dirty: false });
@@ -753,13 +761,16 @@ export async function saveDraft(tabId: string): Promise<void> {
  * original artifact completely untouched (no update op against it — this is
  * always a create, never a rename-in-place).
  *
- * Like `saveDraft`'s create branch this only STAGES, and the tab keeps its id
- * until the commit rebinds it; only the title follows `name` immediately
- * (`setDraftName` is what normally keeps the tab label in sync, but there was
- * no such edit here — `name` is a fresh argument, not something the user typed
- * into the draft-name input). The original artifact's lease is released if
- * nothing staged still needs it: this tab has stopped editing it, and holding
- * a lease no editor is behind blocks peers for a full TTL.
+ * Like `saveDraft`'s create branch this only STAGES, and the tab KEY keeps its
+ * id until the commit rebinds it. The title and the tab RECORD's `artifactId`
+ * both follow immediately: the title because `setDraftName` (which normally
+ * keeps the label in sync) never ran — `name` is a fresh argument, not
+ * something the user typed into the draft-name input — and the record because
+ * `openArtifactTab` dedupes on it, so a tab still claiming the ORIGINAL id
+ * would make the sidebar's entry for it focus this fork instead, leaving the
+ * original unreachable until the commit lands. The original artifact's lease is
+ * released if nothing staged still needs it: this tab has stopped editing it,
+ * and holding a lease no editor is behind blocks peers for a full TTL.
  */
 export async function saveAsDraft(tabId: string, name: string): Promise<void> {
 	const draft = _drafts.get(tabId);
@@ -775,6 +786,7 @@ export async function saveAsDraft(tabId: string, name: string): Promise<void> {
 	const tempId = stageArtifactCreate('navigation', name, payload, tabId);
 	_drafts.set(tabId, { ...draft, name, artifactId: tempId, artifactRev: null, dirty: false });
 	retitleTab(tabId, name);
+	repointTabArtifact(tabId, tempId); // stop the tab claiming the ORIGINAL artifact
 	// The fork is ours by construction (nothing exists server-side to hold), so
 	// any read-only banner inherited from the original no longer applies.
 	_lockDenied.delete(tabId);
@@ -980,6 +992,7 @@ onArtifactStageDiscarded((id) => {
 		if (draft.artifactId !== id) continue;
 		if (isTempId(id)) {
 			_drafts.set(tabId, { ...draft, artifactId: null, artifactRev: null, dirty: true });
+			repointTabArtifact(tabId, null); // the record tracks the draft, both ways
 		} else {
 			_drafts.set(tabId, { ...draft, dirty: true });
 		}

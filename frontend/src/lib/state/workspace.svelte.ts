@@ -3,9 +3,14 @@
  * dynamic closable tabs (navigation and table editors; diagrams later).
  * The active id is either a built-in literal or a dynamic tab id, so existing
  * `setActiveTab('detail')` call sites are untouched. Saved-artifact tabs are
- * persisted per project under `ui.workspace.tabs.<projectId>`; DRAFT tabs
- * (unsaved definitions, artifactId null) are memory-only by design.
+ * persisted per project under `ui.workspace.tabs.<projectId>`; DRAFT tabs are
+ * memory-only by design — that means `artifactId === null` AND a TEMP id (a
+ * staged-but-uncommitted create, see {@link repointTabArtifact}): the staged
+ * buffer does not survive a reload, so restoring a tab pointed at a temp id
+ * that will never exist would resurrect a ghost.
  */
+
+import { isTempId } from './ops';
 
 export type WorkspaceTab = string;
 export const BUILTIN_TABS = ['detail', 'graph', 'issues'] as const;
@@ -70,7 +75,24 @@ export function retitleTab(id: string, title: string): void {
 	persist();
 }
 
-/** After the first save of a draft: bind it to its new artifact id (re-keyed). */
+/**
+ * Repoint a tab record's `artifactId` WITHOUT re-keying the tab id — the
+ * staging half of {@link bindTabToArtifact}.
+ *
+ * An artifact editor that stages a create (Save on a new draft, or Save as… on
+ * a saved one) adopts a TEMP id long before the commit mints the real one, and
+ * the tab id deliberately does not move until then. The record's `artifactId`
+ * must move immediately though: {@link openArtifactTab} dedupes on it, so a
+ * fork that left `nav:a1` still claiming `a1` would make the sidebar's original
+ * entry focus the FORK's editor, with no way to reopen the original. Pass
+ * `null` to unbind (a staged create that was discarded).
+ */
+export function repointTabArtifact(id: string, artifactId: string | null): void {
+	_tabs = _tabs.map((t) => (t.id === id ? { ...t, artifactId } : t));
+	persist();
+}
+
+/** After a create COMMITS: bind the tab to its new artifact id (re-keyed). */
 export function bindTabToArtifact(id: string, artifactId: string): void {
 	_tabs = _tabs.map((t) =>
 		t.id === id ? { ...t, id: `${PREFIX[t.kind]}:${artifactId}`, artifactId } : t
@@ -84,10 +106,16 @@ function storageKey(): string | null {
 	return _projectId ? `ui.workspace.tabs.${_projectId}` : null;
 }
 
+/** True when a tab is worth persisting: it is bound to an artifact the SERVER
+ * knows about. See the module docstring for why a temp id is not one. */
+function persistable(t: DynamicTab): boolean {
+	return t.artifactId !== null && !isTempId(t.artifactId);
+}
+
 function persist(): void {
 	const key = storageKey();
 	if (!key) return;
-	const saved = _tabs.filter((t) => t.artifactId !== null);
+	const saved = _tabs.filter(persistable);
 	try {
 		localStorage.setItem(key, JSON.stringify({ active: _activeTab, tabs: saved }));
 	} catch {
@@ -106,7 +134,7 @@ export function initWorkspaceTabs(projectId: string): void {
 		}
 		const parsed = JSON.parse(raw) as { active?: string; tabs?: DynamicTab[] };
 		_tabs = (parsed.tabs ?? [])
-			.filter((t) => t.artifactId !== null)
+			.filter(persistable)
 			.map((t) => ({ ...t, kind: t.kind ?? 'navigation' }));
 		const active = parsed.active ?? 'detail';
 		_activeTab =

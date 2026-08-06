@@ -121,6 +121,7 @@ export {
 	initWorkspaceTabs,
 	openArtifactTab,
 	openNavigationTab,
+	repointTabArtifact,
 	resetWorkspaceTabs,
 	retitleTab,
 	setActiveTab,

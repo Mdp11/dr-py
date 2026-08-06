@@ -7,6 +7,7 @@ import {
 	initWorkspaceTabs,
 	openArtifactTab,
 	openNavigationTab,
+	repointTabArtifact,
 	resetWorkspaceTabs,
 	setActiveTab
 } from '../workspace.svelte';
@@ -82,6 +83,30 @@ describe('dynamic workspace tabs', () => {
 		initWorkspaceTabs('p2');
 		expect(getDynamicTabs()).toEqual([]);
 		expect(getActiveTab()).toBe('detail');
+	});
+
+	it('repointTabArtifact moves the record without moving the tab key', () => {
+		initWorkspaceTabs('p1');
+		const id = openNavigationTab({ artifactId: 'a1', title: 'Sensors' });
+		repointTabArtifact(id, 'tmp_fork');
+		expect(getDynamicTabs()[0].id).toBe('nav:a1'); // key unchanged
+		expect(getDynamicTabs()[0].artifactId).toBe('tmp_fork');
+		// The dedupe must stop matching the original, so the sidebar can reopen it
+		// in its OWN tab instead of focusing the fork's editor.
+		const reopened = openNavigationTab({ artifactId: 'a1', title: 'Sensors' });
+		expect(reopened).toBe('nav:a1'); // same deterministic id…
+		expect(getDynamicTabs()).toHaveLength(2); // …but a second, separate tab
+	});
+
+	it('does not persist a tab pointed at a temp (staged, uncommitted) id', () => {
+		initWorkspaceTabs('p1');
+		const id = openNavigationTab({ artifactId: 'a1', title: 'Sensors' });
+		repointTabArtifact(id, 'tmp_fork');
+		resetWorkspaceTabs();
+		initWorkspaceTabs('p1');
+		// The staged buffer does not survive a reload either — restoring the tab
+		// would resurrect a ghost pointed at an id the server never minted.
+		expect(getDynamicTabs()).toEqual([]);
 	});
 
 	it('opens snippet tabs under the snip prefix and dedupes by artifact', () => {
