@@ -893,6 +893,18 @@ export async function retryTableLock(tabId: string): Promise<void> {
 	if (res.ok) _lockDenied.delete(tabId);
 	else if (res.reason === 'conflict') _lockDenied.set(tabId, lockHolderLabel(res));
 }
+
+/** Mark this tab lock-denied from OUTSIDE the editor — the only such writer is
+ * the post-commit lease sweep (`reacquireOpenArtifactLeases`, dispatched by
+ * `artifact-lock-denied.ts`). `POST /commits` releases every token it is sent,
+ * so a still-open tab whose artifact was in the batch loses its lease; the
+ * sweep re-checks it out, and when a peer got there first this is how the tab
+ * flips read-only with the holder banner (and its Retry) instead of silently
+ * accepting edits it could never commit. */
+export function setTableLockDenied(tabId: string, holder: string): void {
+	_lockDenied.set(tabId, holder);
+}
+
 /**
  * Progress of the background script-value sweep behind this table's script
  * column(s), as of the last landed page. `null` for tables with no script

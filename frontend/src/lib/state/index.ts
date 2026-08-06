@@ -279,6 +279,7 @@ export {
 	setCardCollapsed,
 	setDraftName,
 	setEmbeddedRowElement,
+	setNavLockDenied,
 	unregisterVisibleNode,
 	updateDefinition,
 	type EmbeddedContext,
@@ -304,6 +305,7 @@ export {
 	runSnippetTab,
 	saveSnippetDraft,
 	setSnippetEntry,
+	setSnippetLockDenied,
 	setSnippetName,
 	stopSnippetTab,
 	updateSnippetCode,
@@ -349,6 +351,7 @@ export {
 	revertSuspendedTableEdits,
 	saveAsTableDraft,
 	saveTableDraft,
+	setTableLockDenied,
 	setTableName,
 	setTableSort,
 	suspendTableEvaluation,
@@ -434,3 +437,4 @@ export {
 	type ArtifactCommitInfo,
 	type StagedArtifactEntry
 } from './artifact-edits.svelte';
+export { markEditorLockDenied } from './artifact-lock-denied';

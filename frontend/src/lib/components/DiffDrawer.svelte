@@ -5,8 +5,11 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Tabs from '$lib/components/ui/tabs';
 	import {
+		artifactHeaderById,
 		ensureElement,
+		getStagedArtifactEntries,
 		getStagedDiff,
+		markEditorLockDenied,
 		previewStaged,
 		commitStaged,
 		discardAll,
@@ -17,15 +20,19 @@
 		getViewChanges,
 		getViewFileHandle,
 		getViewFilename,
+		reacquireOpenArtifactLeases,
+		revertStagedArtifact,
 		setViewFileHandle,
 		setViewFilename,
 		setViewBaseline,
 		getCachedElements,
 		viewChangeSegments,
 		type Diff,
+		type StagedArtifactEntry,
 		type ViewChange,
 		type ViewChangeSegmentKind
 	} from '$lib/state';
+	import { ConflictError } from '$lib/api/errors';
 	import type { PreviewResponse } from '$lib/api/types';
 	import { saveJsonToFile } from '$lib/util/fileSave';
 	import { elementDisplayName } from '$lib/util/element-name';
@@ -82,7 +89,17 @@
 	});
 
 	const diff = $derived<Diff>(getStagedDiff());
-	const total = $derived(diff.counts.added + diff.counts.modified + diff.counts.deleted);
+	// Staged ARTIFACT ops (navigations, tables, code snippets) ride in the same
+	// `POST /commits` batch as the model ops, so they count towards the same
+	// total. This is not cosmetic: `commitStaged` throws on an empty batch (an
+	// empty commit orphans its lock tokens server-side — see its guard), so the
+	// artifact-inclusive total is what keeps the Commit button reachable for an
+	// artifact-ONLY batch and unreachable when nothing at all is staged.
+	const artifactEntries = $derived<StagedArtifactEntry[]>(getStagedArtifactEntries());
+	const artifactCount = $derived(artifactEntries.length);
+	const total = $derived(
+		diff.counts.added + diff.counts.modified + diff.counts.deleted + artifactCount
+	);
 
 	const addedElements = $derived(diff.elements.filter((d) => d.status === 'added'));
 	const modifiedElements = $derived(diff.elements.filter((d) => d.status === 'modified'));
@@ -94,6 +111,60 @@
 	const addedCount = $derived(addedElements.length + addedRels.length);
 	const modifiedCount = $derived(modifiedElements.length + modifiedRels.length);
 	const deletedCount = $derived(deletedElements.length + deletedRels.length);
+
+	// --- staged artifact rows -------------------------------------------------
+	// Display-only projections of a `StagedArtifactEntry`. The three kinds carry
+	// their display name in three different places BY DESIGN (see the store):
+	//   - create: the staged name (nothing exists server-side to look up);
+	//   - update: NO header — resolved through the overlay-aware
+	//     `artifactHeaderById`, which reports a staged rename and knows temp ids;
+	//   - delete: the COMMITTED header, so an artifact that was renamed and then
+	//     deleted shows the name the server actually holds, not one that only
+	//     ever existed in this client's buffer.
+	const ARTIFACT_KIND_LABEL: Record<'navigation' | 'table' | 'code_snippet', string> = {
+		navigation: 'navigation',
+		table: 'table',
+		code_snippet: 'code snippet'
+	};
+
+	function artifactEntryId(e: StagedArtifactEntry): string {
+		return e.kind === 'create' ? e.tempId : e.id;
+	}
+
+	function artifactEntryName(e: StagedArtifactEntry): string {
+		switch (e.kind) {
+			case 'create':
+				return e.name;
+			case 'update':
+				return artifactHeaderById(e.id)?.name ?? e.id;
+			case 'delete':
+				return e.header.name;
+		}
+	}
+
+	function artifactEntryNote(e: StagedArtifactEntry): string {
+		switch (e.kind) {
+			case 'create':
+				return `new ${ARTIFACT_KIND_LABEL[e.artifactKind]}`;
+			case 'update':
+				return 'edited';
+			case 'delete':
+				return 'deleted';
+		}
+	}
+
+	// Same glyph vocabulary as DiffRow, so an artifact row reads like an entity row.
+	function artifactGlyph(e: StagedArtifactEntry): string {
+		return e.kind === 'create' ? '+' : e.kind === 'update' ? '~' : '-';
+	}
+
+	function artifactGlyphClass(e: StagedArtifactEntry): string {
+		return e.kind === 'create'
+			? 'text-success'
+			: e.kind === 'update'
+				? 'text-warning'
+				: 'text-destructive';
+	}
 
 	let message = $state('');
 	let committing = $state(false);
@@ -195,6 +266,32 @@
 		}
 	}
 
+	/**
+	 * Commit failures the user can act on. The backend answers every commit
+	 * conflict as a 409 with a `{detail: <string>, …}` body, which `api/errors.ts`
+	 * parks verbatim on `ConflictError.body`; the details are engine vocabulary
+	 * ("required lock not held", "stale base_rev") that says nothing about what to
+	 * do next. Anything unmapped falls through to the error's own message — for an
+	 * ApiError that is already `messageFromBody`'s `detail`, so a server detail we
+	 * do not recognise still reaches the user unchanged.
+	 *
+	 * Lives in the component rather than in `checkout.svelte.ts` because it is
+	 * user-facing copy for THIS surface, and the drawer is the only caller of
+	 * `commitStaged`.
+	 */
+	function friendlyCommitError(err: unknown): string {
+		if (err instanceof ConflictError) {
+			const detail = (err.body as { detail?: unknown } | null | undefined)?.detail;
+			if (detail === 'required lock not held')
+				return 'A required lock expired or was released. Close and re-open the affected editor, then commit again.';
+			if (detail === 'conflicting concurrent commits')
+				return 'Someone else committed overlapping changes. Reload the project to see them, then commit again.';
+			if (detail === 'stale base_rev')
+				return 'The project moved ahead of this session. Reload and try again.';
+		}
+		return err instanceof Error ? err.message : String(err);
+	}
+
 	async function onCommitClick(): Promise<void> {
 		committing = true;
 		commitError = null;
@@ -203,8 +300,23 @@
 			await commitStaged(message, errorCount > 0);
 			message = '';
 			open = false;
+			// `POST /commits` RELEASES every lock token it is sent, and the batch
+			// sends the token of every artifact it touches — so each still-open
+			// editor whose artifact was in the batch just lost its lease server-side
+			// while the client registry still believes it holds one. Re-check-out
+			// every open artifact tab (ALREADY-SAVED ones too, not just the creates
+			// this commit gave real ids to). Best effort: a peer may have grabbed one
+			// in between, and `markEditorLockDenied` flips that tab read-only with its
+			// editor's holder banner rather than failing the sweep.
+			//
+			// The `.catch` is load-bearing: the sweep bottoms out in `ensureCheckout`,
+			// which RETHROWS anything that is not a lock conflict, so a 500 mid-sweep
+			// would otherwise escape this fire-and-forget call as an unhandled
+			// rejection. It must NOT become `commitError` either — the commit itself
+			// succeeded and is durable; only the re-check-out failed.
+			void reacquireOpenArtifactLeases(markEditorLockDenied).catch(() => {});
 		} catch (err) {
-			commitError = err instanceof Error ? err.message : String(err);
+			commitError = friendlyCommitError(err);
 		} finally {
 			committing = false;
 		}
@@ -227,7 +339,9 @@
 
 		<Tabs.Root bind:value={activeTab} class="flex flex-col gap-3">
 			<Tabs.List class="h-8">
-				<Tabs.Trigger value="model" class="h-7 text-xs">Model ({total})</Tabs.Trigger>
+				<!-- "Changes", not "Model": this tab now also lists staged ARTIFACT ops,
+				     which commit in the same batch but are not model content. -->
+				<Tabs.Trigger value="model" class="h-7 text-xs">Changes ({total})</Tabs.Trigger>
 				<Tabs.Trigger value="view" class="h-7 text-xs" disabled={view === null}>
 					View ({viewChangeCount})
 				</Tabs.Trigger>
@@ -273,6 +387,37 @@
 							{/each}
 							{#each deletedRels as d (d.id)}
 								<DiffRow diff={d} kind="relationship" />
+							{/each}
+						</section>
+					{/if}
+
+					{#if artifactCount > 0}
+						<section class="flex flex-col gap-1">
+							<h3 class="text-xs font-semibold text-info">Artifacts ({artifactCount})</h3>
+							{#each artifactEntries as e (artifactEntryId(e))}
+								<div
+									class="flex items-center gap-2 rounded border border-border bg-muted/40 px-2 py-1.5 text-xs"
+								>
+									<span class="w-3 font-mono {artifactGlyphClass(e)}" aria-label={e.kind}
+										>{artifactGlyph(e)}</span
+									>
+									<span class="font-mono text-foreground">{artifactEntryName(e)}</span>
+									<span
+										class="rounded border border-input bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground/80"
+									>
+										{artifactEntryNote(e)}
+									</span>
+									<span class="ml-auto font-mono text-[10px] text-muted-foreground/70"
+										>{artifactEntryId(e)}</span
+									>
+									<button
+										type="button"
+										class="rounded border border-input px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:border-ring hover:text-foreground"
+										onclick={() => revertStagedArtifact(artifactEntryId(e))}
+									>
+										Discard
+									</button>
+								</div>
 							{/each}
 						</section>
 					{/if}
