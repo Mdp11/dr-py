@@ -59,8 +59,9 @@
 	const inline = $derived(snippet.definition != null);
 
 	// referenceableArtifactHeaders, not getArtifactHeaders: the picked id is
-	// written into the HOSTING artifact's payload, which commits verbatim, so a
-	// staged create's temp id must never be offered. (The entry_points filter
+	// written into the HOSTING artifact's payload, where a staged create's temp
+	// id resolves only under batch-ordering and survival conditions this picker
+	// cannot promise (see that function's docstring). (The entry_points filter
 	// below happens to exclude staged creates too — `entry_points` is
 	// server-derived and null until commit — but that is a side effect of a
 	// snippet-specific rule, not the guard.)

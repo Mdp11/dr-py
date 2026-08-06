@@ -65,12 +65,26 @@ export function artifactHeaderById(id: string): ArtifactHeader | undefined {
  * artifact's payload — every "pick a saved navigation / snippet" dropdown.
  *
  * A staged create sits in the overlay under a TEMP id, and a temp id must never
- * reach a payload. Payloads are staged and shipped VERBATIM by
- * `getStagedArtifactOps`; the backend resolves artifact-op ids LITERALLY (no
- * `id_map` pass — see `api/artifact_ops.py`), and the client consumes `idMap`
- * only to rebind editor tabs. Nothing anywhere rewrites refs nested inside a
- * payload, so a ref picked from a staged create would commit as a string that
- * names nothing and — once the create is re-keyed to its real id — never will.
+ * reach a payload — not because nothing would rewrite it, but because whether
+ * anything does is out of this picker's hands.
+ *
+ * The backend DOES resolve temp ids nested inside a payload: `_resolve_json`
+ * (`api/artifact_ops.py`) walks every create/update payload against the
+ * batch's `id_map`, which accumulates `temp_id → real id` AS THE BATCH IS
+ * APPLIED, op by op. So the rewrite only reaches a create that has ALREADY
+ * been applied — a ref to a create ordered LATER in the batch resolves to
+ * nothing, and an unknown string passes through as a tolerant dangler rather
+ * than an error. Two things this dropdown cannot promise, then: that the
+ * referenced create ships in the SAME batch AHEAD of the artifact referencing
+ * it, and that the user does not revert it before committing. Either one
+ * leaves a payload naming an artifact that will never exist, silently. The
+ * filter refuses to depend on either.
+ *
+ * (Distinct from — and not to be conflated with — the rule that artifact-OP
+ * ids are resolved literally: `update_artifact.id` / `delete_artifact.id` get
+ * no `id_map` pass at all (`_check_update` looks the row up by `op.id`
+ * directly), which is what makes `artifact-edits.svelte.ts`'s one-entry-per-id
+ * coalescing a correctness invariant rather than tidiness.)
  *
  * Staged RENAMES stay, under their staged name: the id is real and persistable,
  * only the label changed. This is the payload-side half of the same rule the

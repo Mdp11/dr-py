@@ -231,9 +231,17 @@ follows a pessimistic **check-out → stage → commit** loop (Spec B):
      separate function rather than a flag: a caller wanting committed truth
      is making a claim about the server. Reference pickers use neither —
      they go through `referenceableArtifactHeaders(kind)`, which drops temp
-     ids, because payloads are staged and shipped VERBATIM and nothing
-     rewrites refs nested inside one, so a ref picked from a staged create
-     would commit as a string that names nothing and never will.
+     ids. Note the reason, which is ordering and lifetime rather than an
+     absence of rewriting: the backend DOES resolve temp ids nested inside a
+     payload (`_resolve_json`), but only against the batch's `id_map` as it
+     accumulates op by op, so a ref resolves only if its create ships in the
+     SAME batch AHEAD of the artifact referencing it — and an unresolved one
+     passes through as a tolerant dangler, not an error. A picker can promise
+     neither that ordering nor that the user will not revert the create
+     before committing, so it refuses to depend on either. Distinct from the
+     sibling rule that artifact-OP ids (`update_artifact.id`,
+     `delete_artifact.id`) get no `id_map` pass at all — THAT literalness is
+     what makes the coalescing invariant above correctness.
    - **Commit feed events carry a `scope`.** `realtime.svelte.ts` adopts a
      peer commit's rev and applies its delta UNCONDITIONALLY (preview
      compares our `base_rev` with strict equality, so declining to adopt an

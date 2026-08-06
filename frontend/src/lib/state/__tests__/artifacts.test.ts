@@ -160,9 +160,10 @@ describe('referenceableArtifactHeaders', () => {
 
 		// The overlay (what the sidebar renders) shows it...
 		expect(getArtifactHeaders().map((h) => h.id)).toEqual(['a1', tempId]);
-		// ...but a ref picker must not offer an id that would commit as a
-		// dangling string: artifact-op ids are resolved LITERALLY server-side and
-		// nothing rewrites refs inside payloads.
+		// ...but a ref picker must not offer an id that could commit as a
+		// dangling string. The backend resolves temp ids inside payloads only
+		// against creates ALREADY applied in the same batch, and the create may
+		// also be reverted before commit — see `referenceableArtifactHeaders`.
 		expect(referenceableArtifactHeaders('navigation').map((h) => h.id)).toEqual(['a1']);
 	});
 

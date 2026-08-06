@@ -19,6 +19,9 @@ beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
+// Every case here is a READ. That is the whole surface: `../artifacts.ts` is
+// read-only by design, because artifact writes go through `POST /commits` as
+// staged ops. There is deliberately no PUT/POST/DELETE case to write.
 describe('artifacts api', () => {
 	it('lists headers with a kind filter', async () => {
 		server.use(
@@ -43,10 +46,6 @@ describe('artifacts api', () => {
 		const res = await getArtifact('a1', CFG);
 		expect(res.payload.kind).toBe('path');
 	});
-
-	// This module is READ-ONLY by design: writes go through `POST /commits` as
-	// staged artifact ops, so there is nothing here to test a PUT/POST/DELETE
-	// against. See the comment in `../artifacts.ts`.
 
 	it('evaluates and parses a chain page', async () => {
 		server.use(

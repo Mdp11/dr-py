@@ -205,7 +205,9 @@ describe('NavigationColumnEditor inline mode', () => {
 			) as HTMLSelectElement;
 			const options = [...select.options].map((o) => ({ value: o.value, text: o.textContent }));
 			// Picking a staged create would write a temp id into THIS table's
-			// payload, which commits verbatim and then names nothing.
+			// payload, which resolves server-side only if that create ships in
+			// the same batch ahead of this table — and not at all if it is
+			// reverted first. See `referenceableArtifactHeaders`.
 			expect(options.some((o) => o.value.startsWith('tmp_'))).toBe(false);
 			expect(options.map((o) => o.value)).toEqual(['', 'a1']);
 			// A staged rename is still pickable — the id is real.
