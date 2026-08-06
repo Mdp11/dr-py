@@ -171,6 +171,13 @@ function lockConflict(email: string): ConflictError {
 	);
 }
 
+/** The temp id of the one staged `create_artifact` op in the buffer. */
+function stagedTempId(): string {
+	const op = getStagedArtifactOps().find((o) => o.kind === 'create_artifact');
+	if (op?.kind !== 'create_artifact') throw new Error('no staged create in the buffer');
+	return op.temp_id;
+}
+
 /** Role + lease mocks for the checked-out-editor path (the default role after
  * `resetCheckout` is viewer, which fails the lease open with no banner). */
 function asEditor() {
@@ -518,16 +525,17 @@ describe('saveAsDraft', () => {
 		// The original artifact is never touched — no update op, no REST call.
 		expect(create).not.toHaveBeenCalled();
 		expect(update).not.toHaveBeenCalled();
-		// The tab KEY is NOT re-keyed at stage time (that happens on commit), but
-		// it IS retitled and both the draft and the tab RECORD now point at the
-		// fork's temp id — a record still claiming a1 would make the sidebar's
-		// entry for the ORIGINAL focus this fork's editor (openArtifactTab
-		// dedupes on artifactId) and leave a1 unreachable until the commit.
+		// The fork tab is re-keyed to nav:<tempId> AT STAGE TIME (unlike a create
+		// staged from a nav:draft:N tab): a bound tab's key must always be
+		// `nav:<its own artifactId>`, or reopening the original would mint a
+		// SECOND record with the id this tab still holds.
 		const tempId = (ops[0] as { temp_id: string }).temp_id;
-		expect(getDynamicTabs()[0].id).toBe('nav:a1');
+		expect(getDynamicTabs()).toHaveLength(1);
+		expect(getDynamicTabs()[0].id).toBe(`nav:${tempId}`);
 		expect(getDynamicTabs()[0].title).toBe('Copy');
 		expect(getDynamicTabs()[0].artifactId).toBe(tempId);
-		const forked = getDraft('nav:a1')!;
+		expect(getDraft('nav:a1')).toBeUndefined();
+		const forked = getDraft(`nav:${tempId}`)!;
 		expect(forked.name).toBe('Copy');
 		expect(forked.artifactId).toBe(tempId);
 		expect(forked.artifactRev).toBeNull();
@@ -537,7 +545,7 @@ describe('saveAsDraft', () => {
 		expect(isCheckedOutByMe('art:a1')).toBe(false);
 	});
 
-	it('frees the original artifact so the sidebar can reopen it in its own tab', async () => {
+	it('frees the original artifact to reopen in its OWN tab with its own draft', async () => {
 		asEditor();
 		mockAcquire();
 		mockGetArtifact();
@@ -547,16 +555,25 @@ describe('saveAsDraft', () => {
 		await ensureDraft('nav:a1');
 
 		await saveAsDraft('nav:a1', 'Copy');
-		openNavigationTab({ artifactId: 'a1', title: 'Sensors' }); // sidebar click
+		const reopened = openNavigationTab({ artifactId: 'a1', title: 'Sensors' }); // sidebar click
 
-		// Two tabs: the fork (retitled Copy) and a fresh one for the original —
-		// not one tab silently serving the wrong editor.
-		expect(getDynamicTabs()).toHaveLength(2);
-		expect(getDynamicTabs()[1].artifactId).toBe('a1');
-		expect(getDynamicTabs()[1].title).toBe('Sensors');
+		// Two tabs with DISTINCT ids — a duplicate id would blow up Workspace's
+		// keyed {#each} over tab.id (each_key_duplicate), and there is no
+		// <svelte:boundary> to catch it.
+		const tabs = getDynamicTabs();
+		expect(tabs).toHaveLength(2);
+		expect(new Set(tabs.map((t) => t.id)).size).toBe(2);
+		expect(reopened).toBe('nav:a1');
+		expect(tabs[1].artifactId).toBe('a1');
+		expect(tabs[1].title).toBe('Sensors');
+		// …and the reopened tab really serves the ORIGINAL, not the fork's draft
+		// (ensureDraft early-returns an existing draft under the same key).
+		const original = await ensureDraft(reopened);
+		expect(original.artifactId).toBe('a1');
+		expect(original.name).toBe('Sensors');
 	});
 
-	it('keeps the tab’s per-node preview state in place (no rekey until commit)', async () => {
+	it('carries the tab’s per-node preview state onto the fork’s new tab key', async () => {
 		asEditor();
 		mockAcquire();
 		mockGetArtifact();
@@ -568,8 +585,12 @@ describe('saveAsDraft', () => {
 
 		await saveAsDraft('nav:a1', 'Copy');
 
-		expect(getPreview('nav:a1', [])?.total).toBe(1);
-		expect(isNodeVisible('nav:a1', [])).toBe(true);
+		const forkTab = `nav:${stagedTempId()}`;
+		expect(getPreview(forkTab, [])?.total).toBe(1);
+		expect(isNodeVisible(forkTab, [])).toBe(true);
+		// The retired key keeps nothing (or a reopened original would inherit it).
+		expect(getPreview('nav:a1', [])).toBeUndefined();
+		expect(isNodeVisible('nav:a1', [])).toBe(false);
 	});
 
 	it('refuses a name another navigation already uses', async () => {
@@ -703,6 +724,34 @@ describe('staged-artifact listeners', () => {
 		// and its record unbinds with the draft (the temp id will never exist).
 		expect(getDynamicTabs()[0].id).toBe(tabId);
 		expect(getDynamicTabs()[0].artifactId).toBeNull();
+	});
+
+	it('discarding a save-as fork leaves an unbound tab that cannot collide', async () => {
+		asEditor();
+		mockAcquire();
+		mockGetArtifact();
+		vi.spyOn(artifactsApi, 'evaluateNavigation').mockResolvedValue(CHAIN_PAGE);
+		vi.spyOn(checkoutApi, 'releaseLock').mockResolvedValue(undefined);
+		openNavigationTab({ artifactId: 'a1', title: 'Sensors' });
+		await ensureDraft('nav:a1');
+		await saveAsDraft('nav:a1', 'Copy');
+		const tempId = stagedTempId();
+
+		revertStagedArtifact(tempId);
+
+		// The fork stays where it is, as an unbound (unsaved) draft named Copy.
+		const forkTab = `nav:${tempId}`;
+		expect(getDraft(forkTab)?.artifactId).toBeNull();
+		expect(getDraft(forkTab)?.name).toBe('Copy');
+		expect(getDraft(forkTab)?.dirty).toBe(true);
+		expect(getDynamicTabs()[0].id).toBe(forkTab);
+		expect(getDynamicTabs()[0].artifactId).toBeNull();
+		// Its key holds a client-minted `tmp_` id, which no artifact id can ever
+		// equal — so reopening the original still gets a DISTINCT tab.
+		openNavigationTab({ artifactId: 'a1', title: 'Sensors' });
+		const tabs = getDynamicTabs();
+		expect(tabs).toHaveLength(2);
+		expect(new Set(tabs.map((t) => t.id)).size).toBe(2);
 	});
 });
 

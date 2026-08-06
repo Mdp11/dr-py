@@ -761,16 +761,32 @@ export async function saveDraft(tabId: string): Promise<void> {
  * original artifact completely untouched (no update op against it — this is
  * always a create, never a rename-in-place).
  *
- * Like `saveDraft`'s create branch this only STAGES, and the tab KEY keeps its
- * id until the commit rebinds it. The title and the tab RECORD's `artifactId`
- * both follow immediately: the title because `setDraftName` (which normally
- * keeps the label in sync) never ran — `name` is a fresh argument, not
- * something the user typed into the draft-name input — and the record because
- * `openArtifactTab` dedupes on it, so a tab still claiming the ORIGINAL id
- * would make the sidebar's entry for it focus this fork instead, leaving the
- * original unreachable until the commit lands. The original artifact's lease is
- * released if nothing staged still needs it: this tab has stopped editing it,
- * and holding a lease no editor is behind blocks peers for a full TTL.
+ * Like `saveDraft`'s create branch this only STAGES — but UNLIKE it, the tab is
+ * RE-KEYED to `nav:<tempId>` right here. That is not a violation of "don't
+ * re-key at stage time" (Decision 4), it is what keeps that decision safe:
+ *
+ *   - Decision 4 governs a create staged from a `nav:draft:N` tab. That key
+ *     names no artifact, so `openArtifactTab`'s deterministic `nav:<artifactId>`
+ *     can never collide with it, and it is re-keyed only at commit.
+ *   - Save-as is the other case: the tab is keyed to a REAL artifact it has
+ *     stopped editing. Leaving it as `nav:a1` while the sidebar reopens the
+ *     original would mint a SECOND record with the same id (openArtifactTab
+ *     assumes id <-> artifactId are 1:1), which Svelte's keyed `{#each}` over
+ *     `tab.id` rejects outright (`each_key_duplicate`) — and `ensureDraft`
+ *     would hand the reopened original this fork's draft anyway.
+ *
+ * So the invariant is: a BOUND tab's key is always `nav:<its own artifactId>`.
+ * The fork moves to `nav:<tempId>` now and to `nav:<realId>` at commit, and the
+ * original is instantly reopenable in a clean `nav:a1`. `rekeyTab` carries every
+ * tab-keyed map across (previews, eval-errors, generations, visible counts,
+ * expanded set, collapse overrides, selection, pending timers, in-flight runs),
+ * exactly as the commit listener does.
+ *
+ * The title is set explicitly because `setDraftName` — which normally keeps the
+ * label in sync — never ran: `name` is a fresh argument, not something the user
+ * typed into the draft-name input. The original artifact's lease is released if
+ * nothing staged still needs it: this tab has stopped editing it, and holding a
+ * lease no editor is behind blocks peers for a full TTL.
  */
 export async function saveAsDraft(tabId: string, name: string): Promise<void> {
 	const draft = _drafts.get(tabId);
@@ -784,11 +800,14 @@ export async function saveAsDraft(tabId: string, name: string): Promise<void> {
 	const payload = draft.definition as unknown as Record<string, unknown>;
 	const prevId = draft.artifactId;
 	const tempId = stageArtifactCreate('navigation', name, payload, tabId);
-	_drafts.set(tabId, { ...draft, name, artifactId: tempId, artifactRev: null, dirty: false });
-	retitleTab(tabId, name);
-	repointTabArtifact(tabId, tempId); // stop the tab claiming the ORIGINAL artifact
+	bindTabToArtifact(tabId, tempId); // re-keys the tab id AND repoints its record
+	const newTab = `nav:${tempId}`;
+	retitleTab(newTab, name);
+	_drafts.delete(tabId);
+	_drafts.set(newTab, { ...draft, name, artifactId: tempId, artifactRev: null, dirty: false });
+	rekeyTab(tabId, newTab); // must run with the new draft already in place
 	// The fork is ours by construction (nothing exists server-side to hold), so
-	// any read-only banner inherited from the original no longer applies.
+	// any read-only banner inherited from the original does not carry over.
 	_lockDenied.delete(tabId);
 	if (prevId !== null && !isTempId(prevId)) {
 		void releaseArtifactIfUnneeded(prevId).catch(() => {});
@@ -984,8 +1003,13 @@ onArtifactCommit(({ idMap, changed, deletedIds }) => {
 /**
  * A staged op was DISCARDED — nothing was saved, so the draft goes back to
  * holding unsaved work. A discarded CREATE additionally un-binds: its temp id
- * will never exist, so the draft becomes the unsaved draft it was before Save
- * (still in its original `nav:draft:N` tab, which was never re-keyed).
+ * will never exist, so the draft becomes the unsaved draft it was before Save.
+ *
+ * The tab KEY is deliberately left alone, in both create shapes. A create
+ * staged from a draft tab is still sitting in `nav:draft:N`; a `saveAsDraft`
+ * fork is sitting in `nav:<tempId>`, which stays collision-free because a temp
+ * id is client-minted with a `tmp_` prefix and can never be an artifact id — so
+ * reopening the original artifact still gets its own clean `nav:<id>` tab.
  */
 onArtifactStageDiscarded((id) => {
 	for (const [tabId, draft] of [..._drafts]) {

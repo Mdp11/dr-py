@@ -188,9 +188,16 @@ preview. **Saving stages, it does not POST**: opening a saved navigation takes
 an `art:<id>` exclusive lease (a denial opens the tab read-only behind the
 `getNavLockHolder` banner rather than refusing it), `saveDraft`/`saveAsDraft`
 push a `create_artifact`/`update_artifact` op onto the staged-artifact buffer,
-and the tab is re-keyed from `nav:draft:N` to `nav:<id>` only when the commit's
-`id_map` arrives (module-scope `onArtifactCommit` listener). `closeDraft`
-releases the lease unless a staged op still needs it. A navigation is a **tree** — a Path, or a set expression over nested
+and a create staged from a `nav:draft:N` tab is re-keyed to `nav:<id>` only when
+the commit's `id_map` arrives (module-scope `onArtifactCommit` listener) — its
+tab record follows the temp id immediately (`repointTabArtifact`), but its key
+names no artifact so nothing can collide with it. A `saveAsDraft` fork is the
+exception: that tab IS keyed to a real artifact it has stopped editing, so it
+re-keys to `nav:<tempId>` at stage time, keeping the invariant that a bound
+tab's key is always `nav:<its own artifactId>` (which is what makes
+`openArtifactTab`'s deterministic id collision-free) and letting the original
+reopen immediately. `closeDraft` releases the lease unless a staged op still
+needs it. A navigation is a **tree** — a Path, or a set expression over nested
 definitions addressed by positional `NodePath` (`lib/navigation/tree.ts`:
 `pathKey`, `nodeAt`, `isRunnable`) — so preview state is keyed **per node**, not
 per tab:

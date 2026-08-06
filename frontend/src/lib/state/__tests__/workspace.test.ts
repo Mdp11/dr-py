@@ -87,21 +87,20 @@ describe('dynamic workspace tabs', () => {
 
 	it('repointTabArtifact moves the record without moving the tab key', () => {
 		initWorkspaceTabs('p1');
-		const id = openNavigationTab({ artifactId: 'a1', title: 'Sensors' });
-		repointTabArtifact(id, 'tmp_fork');
-		expect(getDynamicTabs()[0].id).toBe('nav:a1'); // key unchanged
-		expect(getDynamicTabs()[0].artifactId).toBe('tmp_fork');
-		// The dedupe must stop matching the original, so the sidebar can reopen it
-		// in its OWN tab instead of focusing the fork's editor.
-		const reopened = openNavigationTab({ artifactId: 'a1', title: 'Sensors' });
-		expect(reopened).toBe('nav:a1'); // same deterministic id…
-		expect(getDynamicTabs()).toHaveLength(2); // …but a second, separate tab
+		// The only shape that uses it: a DRAFT tab whose editor staged a create.
+		const id = openNavigationTab({ artifactId: null, title: 'New navigation' });
+		repointTabArtifact(id, 'tmp_new');
+		expect(getDynamicTabs()[0].id).toBe(id); // key unchanged (nav:draft:N)
+		expect(getDynamicTabs()[0].artifactId).toBe('tmp_new');
+		repointTabArtifact(id, null); // the staged create was discarded
+		expect(getDynamicTabs()[0].id).toBe(id);
+		expect(getDynamicTabs()[0].artifactId).toBeNull();
 	});
 
 	it('does not persist a tab pointed at a temp (staged, uncommitted) id', () => {
 		initWorkspaceTabs('p1');
-		const id = openNavigationTab({ artifactId: 'a1', title: 'Sensors' });
-		repointTabArtifact(id, 'tmp_fork');
+		const id = openNavigationTab({ artifactId: null, title: 'New navigation' });
+		repointTabArtifact(id, 'tmp_new');
 		resetWorkspaceTabs();
 		initWorkspaceTabs('p1');
 		// The staged buffer does not survive a reload either — restoring the tab

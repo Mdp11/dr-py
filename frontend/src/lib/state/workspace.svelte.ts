@@ -79,13 +79,14 @@ export function retitleTab(id: string, title: string): void {
  * Repoint a tab record's `artifactId` WITHOUT re-keying the tab id — the
  * staging half of {@link bindTabToArtifact}.
  *
- * An artifact editor that stages a create (Save on a new draft, or Save as… on
- * a saved one) adopts a TEMP id long before the commit mints the real one, and
- * the tab id deliberately does not move until then. The record's `artifactId`
- * must move immediately though: {@link openArtifactTab} dedupes on it, so a
- * fork that left `nav:a1` still claiming `a1` would make the sidebar's original
- * entry focus the FORK's editor, with no way to reopen the original. Pass
- * `null` to unbind (a staged create that was discarded).
+ * Used by an artifact editor that stages a create from a DRAFT tab: the draft
+ * adopts a TEMP id immediately, but the tab keeps its `<p>:draft:N` key until
+ * the commit mints a real id (that key names no artifact, so it can never
+ * collide with the deterministic `<p>:<artifactId>` {@link openArtifactTab}
+ * builds — which is why this is safe HERE and would not be on a tab already
+ * keyed to a real artifact). The record must follow the draft even so:
+ * `openArtifactTab` dedupes on `artifactId`, and the sidebar addresses a staged
+ * create by its temp id. Pass `null` to unbind again (a discarded create).
  */
 export function repointTabArtifact(id: string, artifactId: string | null): void {
 	_tabs = _tabs.map((t) => (t.id === id ? { ...t, artifactId } : t));
