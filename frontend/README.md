@@ -319,8 +319,8 @@ toggle`), a collapsed disclosure that expands to the shared
   a response that saw pending values never reports `ready`, so the last poll
   always lands a clean, correctly-sorted page. `TableView` shows
   `Computing script columns {done}/{total}` (or the failure message) via
-  `getTableScriptStatus(tabId)`, as **fixed chrome** beside the conflict and
-  warnings strips — deliberately _not_ inside `TableGrid`, whose scroll
+  `getTableScriptStatus(tabId)`, as **fixed chrome** beside the read-only lock
+  and warnings strips — deliberately _not_ inside `TableGrid`, whose scroll
   container would both scroll the readout out of view on a long table and, as
   an in-flow element ahead of the `padTop` spacer, offset every row relative to
   what the virtualizer's window math assumes. `failed` is terminal — stop

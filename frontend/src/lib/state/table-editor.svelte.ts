@@ -27,10 +27,20 @@
  * reload, a close, a reset — bumps the tab's generation, and the async
  * loaders (full load AND chunk fills) drop the response on mismatch (or when
  * the draft is gone).
+ *
+ * Saving STAGES, it does not PUT: `saveTableDraft`/`saveAsTableDraft` push a
+ * `create_artifact`/`update_artifact` op onto the staged-artifact buffer
+ * (`artifact-edits.svelte.ts`), and nothing reaches the server until the
+ * DiffDrawer's Commit sends the batch. Opening a SAVED table first checks the
+ * artifact out (`art:<id>` exclusive lease); a denial does not refuse the tab —
+ * it opens read-only with the holder banner (`_lockDenied`). The tab is
+ * deliberately NOT re-keyed when a create is staged from a `tbl:draft:N` tab:
+ * the draft keeps living under that key and is rebound to `tbl:<id>` only when
+ * the commit's `id_map` supplies a canonical id (see the module-scope listeners
+ * at the bottom of this file).
  */
 import { SvelteMap } from 'svelte/reactivity';
 import * as api from '$lib/api/artifacts';
-import { ConflictError } from '$lib/api/errors';
 import { evaluateTable, exportTable, fetchScriptErrors } from '$lib/api/tables';
 import {
 	TableDefinitionSchema,
@@ -43,9 +53,20 @@ import {
 	type TableRow,
 	type TableSort
 } from '$lib/api/types';
-import { loadArtifacts } from './artifacts.svelte';
+import { assertNoNameClash } from './artifacts.svelte';
+import {
+	hasStagedArtifactOp,
+	onArtifactCommit,
+	onArtifactStageDiscarded,
+	onArtifactStagedDelete,
+	stageArtifactCreate,
+	stageArtifactUpdate
+} from './artifact-edits.svelte';
+import { releaseArtifactIfUnneeded } from './checkout.svelte';
+import { acquireArtifactLease, lockHolderLabel } from './edit-gate';
+import { isTempId } from './ops';
 import { onCommitEvent } from './realtime.svelte';
-import { bindTabToArtifact, retitleTab } from './workspace.svelte';
+import { bindTabToArtifact, closeTab, repointTabArtifact, retitleTab } from './workspace.svelte';
 
 /** Chunk size for both full loads and lazy range fills. */
 const PAGE = 100;
@@ -131,7 +152,14 @@ const _sorts = new SvelteMap<string, TableSort>();
 const _loading = new SvelteMap<string, boolean>();
 /** tabId -> the last load's error message (422/500). */
 const _errors = new SvelteMap<string, string>();
-const _conflicts = new SvelteMap<string, number>(); // tabId -> server rev
+/**
+ * tabId -> the peer holding the `art:` lease this tab was refused, as a display
+ * label. Present == the tab is READ-ONLY: the payload loaded (a denial never
+ * refuses the tab) but every write affordance is disabled and the banner offers
+ * Retry. Absent for a VIEWER too — the whole workspace is already read-only for
+ * them, so a per-tab "checked out by…" line would be noise.
+ */
+const _lockDenied = new SvelteMap<string, string>();
 /**
  * tabId -> the last page's `script_status`. Rendered (progress readout /
  * failure strip), so it lives in a reactive map like `_loading`.
@@ -728,13 +756,14 @@ export function requestScriptErrors(tabId: string): void {
 
 /**
  * Move every per-tab entry (page, sort, loading, error, generation, view
- * range) from `oldTab` to `newTab`. Used by the first-save/fork paths, where a
- * `tbl:draft:*` tab is rebound to `tbl:<id>`. The draft itself is moved
- * separately by the caller (it also gets new artifact fields, not a plain
- * carry-over), and MUST already be `_drafts.set(newTab, …)` in place before
- * this runs.
+ * range) from `oldTab` to `newTab`. Used by the two re-key paths: the COMMIT
+ * rebind, where a `tbl:draft:*` tab adopts the canonical `tbl:<id>` its create
+ * was minted, and `saveAsTableDraft`'s fork, which moves to `tbl:<tempId>` at
+ * stage time. The draft itself is moved separately by the caller (it also gets
+ * new artifact fields, not a plain carry-over), and MUST already be
+ * `_drafts.set(newTab, …)` in place before this runs.
  *
- * A load in flight when the save lands is closed over `oldTab`: once `oldTab`'s
+ * A load in flight when the re-key lands is closed over `oldTab`: once `oldTab`'s
  * draft is deleted its `isCurrent(oldTab, gen)` check fails, so its response is
  * orphaned and never clears `_loading`. Moving a `loading: true` marker to
  * `newTab` without a fresh request would therefore strand the new tab on
@@ -843,8 +872,21 @@ export function getTableLoading(tabId: string): boolean {
 export function getTableError(tabId: string): string | undefined {
 	return _errors.get(tabId);
 }
-export function getTableConflict(tabId: string): number | undefined {
-	return _conflicts.get(tabId);
+/** The peer holding this tab's artifact, or null when the tab is editable
+ * (lease granted, or the user is a viewer — see `_lockDenied`). */
+export function getTableLockHolder(tabId: string): string | null {
+	return _lockDenied.get(tabId) ?? null;
+}
+
+/** Banner "Retry": re-attempt the check-out the tab was refused. A draft that
+ * has no server-side row yet (unsaved, or a staged create under a temp id) has
+ * nothing to lock, so it is silently skipped. */
+export async function retryTableLock(tabId: string): Promise<void> {
+	const draft = _drafts.get(tabId);
+	if (!draft?.artifactId || isTempId(draft.artifactId)) return;
+	const res = await acquireArtifactLease(draft.artifactId, 'edit');
+	if (res.ok) _lockDenied.delete(tabId);
+	else if (res.reason === 'conflict') _lockDenied.set(tabId, lockHolderLabel(res));
 }
 /**
  * Progress of the background script-value sweep behind this table's script
@@ -1024,6 +1066,24 @@ export async function ensureTableDraft(tabId: string): Promise<TableDraft> {
 		return draft;
 	}
 	const id = tabId.slice('tbl:'.length);
+	// Check the artifact out BEFORE showing an editable surface: an editor that
+	// lets the user rework a table someone else holds is exactly what the
+	// pessimistic lease exists to prevent. A denial does NOT refuse the tab — the
+	// payload still loads and the tab opens read-only behind the holder banner (a
+	// viewer gets no banner: see `_lockDenied`).
+	//
+	// The `.catch` is load-bearing, not defensive noise: `ensureCheckout`
+	// RETHROWS anything that is not a lock conflict, and our only caller is a
+	// fire-and-forget `$effect` — a 500 or a network blip from POST /locks would
+	// otherwise reject before `getArtifact` runs and strand the tab on "Loading…"
+	// forever. Fail OPEN with no banner: an infrastructure error is not a peer
+	// holding the artifact.
+	const res = await acquireArtifactLease(id, 'edit').catch(() => null);
+	if (res !== null && !res.ok && res.reason === 'conflict') {
+		_lockDenied.set(tabId, lockHolderLabel(res));
+	} else {
+		_lockDenied.delete(tabId);
+	}
 	const artifact = await api.getArtifact(id);
 	const draft: TableDraft = {
 		name: artifact.name,
@@ -1039,18 +1099,33 @@ export async function ensureTableDraft(tabId: string): Promise<TableDraft> {
 
 /**
  * What evaluate/export requests should evaluate: the artifact id ONLY while
- * the draft is pristine (letting the backend reuse its per-artifact order
- * cache), the INLINE definition otherwise. A dirty saved table MUST send its
- * edited definition — evaluating by artifactId re-reads the SAVED payload, so
- * every unsaved settings edit (scope change, new column, restored config)
- * would be silently ignored and the grid would appear frozen until Save.
+ * the draft matches the SERVER HEAD (letting the backend reuse its per-artifact
+ * order cache), the INLINE definition otherwise. Evaluating by artifactId
+ * re-reads the payload the server holds, so it is only ever right when that is
+ * the payload on screen. Three things make it wrong, and all three must be
+ * checked:
+ *
+ *   - a DIRTY draft — every unsaved settings edit (scope change, new column,
+ *     restored config) would be silently ignored and the grid would appear
+ *     frozen until Save;
+ *   - a STAGED-but-uncommitted save (`hasStagedArtifactOp`) — Save no longer
+ *     PUTs, it stages an op, so a clean draft can still be ahead of the server
+ *     head until the DiffDrawer's Commit lands;
+ *   - a TEMP id (a staged create) — the server has no such artifact at all,
+ *     so the request would 404.
  */
 function _evaluateSource(
 	draft: TableDraft
 ): { definition: TableDefinition } | { artifactId: string } {
-	return draft.artifactId === null || draft.dirty
-		? { definition: draft.definition }
-		: { artifactId: draft.artifactId };
+	if (
+		draft.artifactId !== null &&
+		!isTempId(draft.artifactId) &&
+		!draft.dirty &&
+		!hasStagedArtifactOp(draft.artifactId)
+	) {
+		return { artifactId: draft.artifactId };
+	}
+	return { definition: draft.definition };
 }
 
 /**
@@ -1367,88 +1442,101 @@ export function setTableName(tabId: string, name: string): void {
 	retitleTab(tabId, name);
 }
 
+/**
+ * "Save" = STAGE an artifact op. Nothing is sent here; the op joins the staged
+ * batch that the DiffDrawer's Commit posts to `/commits`.
+ *
+ * An unsaved draft stages a `create_artifact` and adopts its TEMP id, but the
+ * TAB IS NOT RE-KEYED — a temp id is not an artifact id, and re-keying now
+ * would strand the tab (and every per-tab key hanging off it) on an id the
+ * server may never mint if the batch is discarded. The rebind to `tbl:<id>`
+ * happens in the commit listener at the bottom of this file, driven by the
+ * commit's `id_map`.
+ *
+ * A saved draft stages a FULL-payload `update_artifact` (name + definition);
+ * re-saving coalesces into that same entry (see `stageArtifactUpdate`). No
+ * `artifact_rev` is sent with either op: the `art:` lease taken at open time is
+ * the concurrency control, not OCC.
+ */
 export async function saveTableDraft(tabId: string): Promise<void> {
 	const draft = _drafts.get(tabId);
 	if (!draft) return;
 	const payload = draft.definition as unknown as Record<string, unknown>;
-	try {
-		if (draft.artifactId === null) {
-			const created = await api.createArtifact({ kind: 'table', name: draft.name, payload });
-			bindTabToArtifact(tabId, created.id);
-			const newTab = `tbl:${created.id}`;
-			_drafts.delete(tabId);
-			_drafts.set(newTab, {
-				...draft,
-				artifactId: created.id,
-				artifactRev: created.artifact_rev,
-				dirty: false
-			});
-			moveTabState(tabId, newTab);
-		} else {
-			const updated = await api.updateArtifact(draft.artifactId, {
-				artifact_rev: draft.artifactRev ?? 1,
-				name: draft.name,
-				payload
-			});
-			_drafts.set(tabId, { ...draft, artifactRev: updated.artifact_rev, dirty: false });
-			_conflicts.delete(tabId);
-		}
-		await loadArtifacts().catch(() => {});
-	} catch (err) {
-		if (err instanceof ConflictError) {
-			// Two distinct 409 shapes share this status code (routes/artifacts.py):
-			// the update-path rev conflict raises detail={message, current_rev: N}
-			// (an OBJECT), while the create/rename-path name clash raises a plain
-			// STRING detail. Only the former is a rev conflict — see the identical
-			// discrimination in navigation-editor.svelte.ts's saveDraft.
-			const body = err.body as { detail?: unknown } | undefined;
-			const detail = body?.detail;
-			if (
-				detail !== null &&
-				typeof detail === 'object' &&
-				typeof (detail as { current_rev?: unknown }).current_rev === 'number'
-			) {
-				_conflicts.set(tabId, (detail as { current_rev: number }).current_rev);
-			}
-		}
-		throw err;
+	// Best-effort: the server's uniqueness check is authoritative and fires at
+	// preview/commit. Throws, and TableView renders it as `saveError`.
+	assertNoNameClash('table', draft.name, draft.artifactId);
+	if (draft.artifactId === null) {
+		const tempId = stageArtifactCreate('table', draft.name, payload, tabId);
+		_drafts.set(tabId, { ...draft, artifactId: tempId, dirty: false });
+		repointTabArtifact(tabId, tempId); // tab RECORD follows the draft; tab KEY does not
+	} else {
+		stageArtifactUpdate(draft.artifactId, { name: draft.name, payload });
+		_drafts.set(tabId, { ...draft, dirty: false });
 	}
 }
 
 /**
- * Fork the current draft into a NEW library artifact under `name`, rebind
- * `tabId` to the copy, and leave any original artifact untouched. Mirrors
- * `navigation-editor.svelte.ts`'s `saveAsDraft`.
+ * Fork the current draft into a NEW library artifact under `name`, leaving any
+ * original artifact completely untouched (no update op against it — this is
+ * always a create, never a rename-in-place).
+ *
+ * Like `saveTableDraft`'s create branch this only STAGES — but UNLIKE it, the
+ * tab is RE-KEYED to `tbl:<tempId>` right here. That is not a violation of
+ * "don't re-key at stage time", it is what keeps that rule safe:
+ *
+ *   - a create staged from a `tbl:draft:N` tab keeps its key, because that key
+ *     names no artifact and `openArtifactTab`'s deterministic `tbl:<artifactId>`
+ *     can therefore never collide with it;
+ *   - save-as is the other case: the tab is keyed to a REAL artifact it has
+ *     stopped editing. Leaving it as `tbl:a1` while the sidebar reopens the
+ *     original would mint a SECOND record with the same id (openArtifactTab
+ *     assumes id <-> artifactId are 1:1), which Svelte's keyed `{#each}` over
+ *     `tab.id` rejects outright (`each_key_duplicate`) — and `ensureTableDraft`
+ *     would hand the reopened original this fork's draft anyway.
+ *
+ * So the invariant is: a BOUND tab's key is always `tbl:<its own artifactId>`.
+ * The fork moves to `tbl:<tempId>` now and to `tbl:<realId>` at commit.
+ * `moveTabState` carries every tab-keyed map across (page cache, sort, loading,
+ * error, generation, view range, suspension + its snapshot, script status and
+ * poll budget, script-error recap) and re-issues an orphaned in-flight load,
+ * exactly as the commit listener does.
+ *
+ * The original artifact's lease is released if nothing staged still needs it:
+ * this tab has stopped editing it, and holding a lease no editor is behind
+ * blocks peers for a full TTL.
  */
 export async function saveAsTableDraft(tabId: string, name: string): Promise<void> {
 	const draft = _drafts.get(tabId);
 	if (!draft) return;
+	// A fork is always a brand-new artifact, so nothing is excluded from the
+	// clash check — not even the original it was forked from.
+	assertNoNameClash('table', name, null);
 	const payload = draft.definition as unknown as Record<string, unknown>;
-	const created = await api.createArtifact({ kind: 'table', name, payload });
-	bindTabToArtifact(tabId, created.id);
-	const newTab = `tbl:${created.id}`;
+	const prevId = draft.artifactId;
+	const tempId = stageArtifactCreate('table', name, payload, tabId);
+	bindTabToArtifact(tabId, tempId); // re-keys the tab id AND repoints its record
+	const newTab = `tbl:${tempId}`;
 	retitleTab(newTab, name);
 	_drafts.delete(tabId);
-	_conflicts.delete(tabId);
-	_drafts.set(newTab, {
-		...draft,
-		name,
-		artifactId: created.id,
-		artifactRev: created.artifact_rev,
-		dirty: false
-	});
-	moveTabState(tabId, newTab);
-	await loadArtifacts().catch(() => {});
+	_drafts.set(newTab, { ...draft, name, artifactId: tempId, artifactRev: null, dirty: false });
+	moveTabState(tabId, newTab); // must run with the new draft already in place
+	// The fork is ours by construction (nothing exists server-side to hold), so
+	// any read-only banner inherited from the original does not carry over.
+	_lockDenied.delete(tabId);
+	if (prevId !== null && !isTempId(prevId)) {
+		void releaseArtifactIfUnneeded(prevId).catch(() => {});
+	}
 }
 
-/** Discard the local draft and re-fetch the server copy (409 recovery). */
+/** Discard the local draft and re-fetch the server copy — the recovery path for
+ * a tab showing a stale payload (e.g. one opened read-only while a peer was
+ * editing). Re-runs `ensureTableDraft`, so it re-attempts the check-out too. */
 export async function reloadTableDraft(tabId: string): Promise<void> {
 	_drafts.delete(tabId);
 	_pages.delete(tabId);
 	_sorts.delete(tabId);
 	_loading.delete(tabId);
 	_errors.delete(tabId);
-	_conflicts.delete(tabId);
 	_viewRanges.delete(tabId);
 	abandonTableEvaluationSuspension(tabId);
 	clearScriptStatus(tabId);
@@ -1457,16 +1545,25 @@ export async function reloadTableDraft(tabId: string): Promise<void> {
 }
 
 export function closeTableDraft(tabId: string): void {
+	const draft = _drafts.get(tabId); // read BEFORE the delete: it owns the lease
 	_drafts.delete(tabId);
 	_pages.delete(tabId);
 	_sorts.delete(tabId);
 	_loading.delete(tabId);
 	_errors.delete(tabId);
-	_conflicts.delete(tabId);
+	_lockDenied.delete(tabId);
 	_viewRanges.delete(tabId);
 	abandonTableEvaluationSuspension(tabId);
 	clearScriptStatus(tabId);
 	bumpGeneration(tabId); // orphan any in-flight load
+	// Give the check-out back: no editor is behind this lease any more. A NO-OP
+	// when a staged op still needs it (a saved-but-uncommitted edit must keep its
+	// lease or the commit 409s "required lock not held") — that is
+	// `releaseArtifactIfUnneeded`'s whole job. A temp id has no server-side row
+	// and therefore no lease.
+	if (draft?.artifactId && !isTempId(draft.artifactId)) {
+		void releaseArtifactIfUnneeded(draft.artifactId).catch(() => {});
+	}
 }
 
 /** Progress of an export that is waiting on the background script sweep. */
@@ -1560,7 +1657,7 @@ export function resetTableEditors(): void {
 	_sorts.clear();
 	_loading.clear();
 	_errors.clear();
-	_conflicts.clear();
+	_lockDenied.clear();
 	_viewRanges.clear();
 	_suspended.clear();
 	_suspendedSnapshot.clear();
@@ -1579,3 +1676,88 @@ export function resetTableEditors(): void {
 	// drops the tab's in-flight chunk bookkeeping.)
 	for (const key of _generations.keys()) bumpGeneration(key);
 }
+
+// ---------------------------------------------------------------------------
+// Staged-artifact listeners (module scope: registered once for the app's life)
+// ---------------------------------------------------------------------------
+
+/**
+ * The commit landed. Two things follow from the server's authoritative delta:
+ *
+ *  - a draft whose artifact was DELETED in the batch loses its tab — there is
+ *    nothing left to edit. A delete staged from the sidebar already closed the
+ *    tab eagerly (see the staged-delete listener below); this is the
+ *    authoritative backstop for any path that reaches commit without it;
+ *  - a draft still on a TEMP id is rebound to the canonical id the `id_map`
+ *    minted: the workspace tab is re-keyed (`bindTabToArtifact`) and every
+ *    per-tab key — page cache, sort, loading/error, generation, view range,
+ *    suspension, script status/recap — is carried across by `moveTabState`,
+ *    which is why the new draft must be in `_drafts` before it is called.
+ *
+ * Anything else already-saved just adopts the header's fresh `artifact_rev`
+ * (display-only now that no save sends it back as an OCC precondition).
+ */
+onArtifactCommit(({ idMap, changed, deletedIds }) => {
+	for (const [tabId, draft] of [..._drafts]) {
+		if (draft.artifactId === null) continue; // unsaved: nothing committed
+		if (deletedIds.includes(draft.artifactId)) {
+			closeTableDraft(tabId);
+			closeTab(tabId);
+			continue;
+		}
+		if (isTempId(draft.artifactId)) {
+			const realId = idMap[draft.artifactId];
+			if (realId === undefined) continue; // not part of this batch
+			const artHeader = changed.find((h) => h.id === realId);
+			bindTabToArtifact(tabId, realId);
+			const newTab = `tbl:${realId}`;
+			_drafts.delete(tabId);
+			_drafts.set(newTab, {
+				...draft,
+				artifactId: realId,
+				artifactRev: artHeader?.artifact_rev ?? null
+			});
+			moveTabState(tabId, newTab);
+			_lockDenied.delete(tabId);
+		} else {
+			const artHeader = changed.find((h) => h.id === draft.artifactId);
+			if (artHeader) _drafts.set(tabId, { ...draft, artifactRev: artHeader.artifact_rev });
+		}
+	}
+});
+
+/**
+ * A staged op was DISCARDED — nothing was saved, so the draft goes back to
+ * holding unsaved work. A discarded CREATE additionally un-binds: its temp id
+ * will never exist, so the draft becomes the unsaved draft it was before Save.
+ *
+ * The tab KEY is deliberately left alone, in both create shapes. A create
+ * staged from a draft tab is still sitting in `tbl:draft:N`; a
+ * `saveAsTableDraft` fork is sitting in `tbl:<tempId>`, which stays
+ * collision-free because a temp id is client-minted with a `tmp_` prefix and can
+ * never be an artifact id — so reopening the original artifact still gets its
+ * own clean `tbl:<id>` tab.
+ */
+onArtifactStageDiscarded((id) => {
+	for (const [tabId, draft] of [..._drafts]) {
+		if (draft.artifactId !== id) continue;
+		if (isTempId(id)) {
+			_drafts.set(tabId, { ...draft, artifactId: null, artifactRev: null, dirty: true });
+			repointTabArtifact(tabId, null); // the record tracks the draft, both ways
+		} else {
+			_drafts.set(tabId, { ...draft, dirty: true });
+		}
+	}
+});
+
+/** A delete was STAGED (from the sidebar). Close the tab right away rather than
+ * leaving an editor open on an artifact the pending batch removes — the user
+ * has already decided it is going. */
+onArtifactStagedDelete((id) => {
+	for (const [tabId, draft] of [..._drafts]) {
+		if (draft.artifactId === id) {
+			closeTableDraft(tabId);
+			closeTab(tabId);
+		}
+	}
+});
