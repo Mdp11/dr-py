@@ -16,11 +16,19 @@ from ..deps import Session, get_request_session, require_model
 from ..feed import lock_event
 from ..identity import get_current_user
 from ..db_models import User
-from ..locking import Lease, LockIntent, LockMode, expand_targets
+from ..locking import (
+    METAMODEL_RESOURCE,
+    Lease,
+    LockIntent,
+    LockMode,
+    artifact_resource,
+    expand_targets,
+)
 from ..schemas import (
     LeaseOut,
     LockRequest,
     LockResponse,
+    LockTargetIn,
     ReleaseRequest,
     RenewRequest,
     RenewResponse,
@@ -61,7 +69,15 @@ def acquire_locks(
     user: User = Depends(get_current_user),
 ) -> LockResponse | JSONResponse:
     _, model = require_model(session)
-    targets = [(t.resource_id, LockMode(t.mode)) for t in payload.targets]
+
+    def _canonical(t: LockTargetIn) -> str:
+        if t.type == "artifact":
+            return artifact_resource(t.resource_id)
+        if t.type == "metamodel":
+            return METAMODEL_RESOURCE
+        return t.resource_id
+
+    targets = [(_canonical(t), LockMode(t.mode)) for t in payload.targets]
     reqs = expand_targets(model, targets, LockIntent(payload.intent))
     now = time.monotonic()
     ttl = float(get_settings().lock_ttl_seconds)

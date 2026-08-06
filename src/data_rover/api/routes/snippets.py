@@ -62,6 +62,7 @@ from data_rover.core.script.lint import derive_entry_points, lint_code
 from data_rover.core.script.runner import RunRequest, ScriptRunner
 
 from .. import content
+from ..artifact_ops import split_ops
 from ..authz import require_membership
 from ..db import get_db
 from ..db_models import ArtifactKind, Membership, User
@@ -337,6 +338,29 @@ def run_snippet(
         raise HTTPException(
             status_code=500, detail="runner emitted an invalid op batch"
         ) from None
+
+    _, artifact_ops = split_ops(validated_ops)
+    if artifact_ops:
+        # SECURITY GATE, not a schema check. `bridge._op_record_op` appends a
+        # guest-supplied op dict VERBATIM, and OPS_ADAPTER now accepts the
+        # artifact op family — so without this, a snippet could propose
+        # `update_artifact` rewriting ANOTHER snippet's code and have it staged
+        # for an editor who believes they are approving the data edits they
+        # asked for. `create_artifact` needs no lease at all, so nothing
+        # downstream would stop it landing, and /snippets/run is a read-only
+        # POST: the proposing author can be a VIEWER while the approver is an
+        # editor — a confused deputy. The guest facade has no artifact surface
+        # whatsoever, so an artifact op here is by definition not legitimate;
+        # refused exactly like the malformed batch above (server-side fault,
+        # never surfaced to the client for staging).
+        logger.error(
+            "snippet run %s emitted artifact ops (not a guest capability): %r",
+            payload.run_id,
+            res.ops,
+        )
+        raise HTTPException(
+            status_code=500, detail="runner emitted an invalid op batch"
+        )
 
     code_hash = hashlib.sha256(code.encode("utf-8")).hexdigest()[:12]
     logger.info(

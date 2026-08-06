@@ -46,6 +46,18 @@ class AppliedBatch:
     applier. ``id_map`` is the temp-id resolution the batch produced.
     """
 
+    #: Typed over the FULL ``OpIn`` union (model + artifact ops): as of
+    #: Phase 1 Task 5, ``POST /commits`` accepts mixed batches and records
+    #: the merged canonical/inverse lists here, so the log genuinely can
+    #: hold artifact ops. ``/model/ops`` still rejects them (that path is
+    #: model-only forever), but the log is shared.
+    #:
+    #: The narrower type is NOT recoverable by a cast: every consumer that
+    #: feeds the model applier must funnel the batch through
+    #: ``artifact_ops.split_ops`` first (see ``routes/ops.py::undo`` and
+    #: ``changes.compact_changes``). That split — not this annotation — is
+    #: what keeps ``_apply_one``'s ``assert_never`` over ``ModelOpIn``
+    #: exhaustive and the model applier model-only.
     ops: list[OpIn]
     inverse_ops: list[OpIn]
     id_map: dict[str, str]

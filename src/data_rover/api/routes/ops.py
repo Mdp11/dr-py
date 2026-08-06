@@ -31,16 +31,26 @@ via ``Model.restore_element`` / ``restore_relationship``). The undo itself
 is popped from the in-memory op_log (so repeated undos walk back through
 in-memory history), but with durable persistence each undo ALSO appends a
 compensating forward commit to the journal (append-only; ``model_rev`` moves
-forward) so hydration replays to the post-undo state. Undo restores entity
-STATE (ids, types, endpoints, properties) but per-entity ``rev`` counters
-continue forward: nothing uses ``rev`` for conflict detection (CR matching
-explicitly ignores it, see ``core/model/change_request.py``), it is only a
-change ticker.
+forward) so hydration replays to the post-undo state.
+
+A batch recorded by POST /commits can span BOTH content families, so undo
+splits the inverse ops and replays the artifact half through
+``artifact_ops.apply_artifact_ops`` (also in restore mode): one compensating
+commit covers both, and every failure path unwinds both (in-memory rollback +
+``db.rollback()``) AND pushes the popped batch back so undo history is never
+silently eaten.
+
+Undo restores entity STATE (ids, types, endpoints, properties) but per-entity
+``rev`` counters continue forward: nothing uses ``rev`` for conflict detection
+(CR matching explicitly ignores it, see ``core/model/change_request.py``), it
+is only a change ticker.
 """
 
 from __future__ import annotations
 
+import time
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, assert_never
 
@@ -55,20 +65,30 @@ from data_rover.core.validation.scope import Scope
 from data_rover.core.validation.state import ValidationState
 
 from .. import content
+from ..artifact_ops import (
+    apply_artifact_ops,
+    artifact_delta_headers,
+    artifact_op_ids,
+    broadcast_artifact_events,
+    split_ops,
+)
 from ..db import get_db
 from ..db_models import User
 from ..deps import Session, get_request_session, require_model
 from ..hydration import serialize_ops, write_snapshot
 from ..identity import get_current_user
 from ..invalidation import touched_keys
+from ..locking import artifact_resource
 from ..settings import get_settings
 from ..schemas import (
+    TEMP_ID_PREFIX,
     CreateElementOp,
     CreateRelationshipOp,
     DeleteElementOp,
     DeleteRelationshipOp,
     ElementOut,
     IssueOut,
+    ModelOpIn,
     OpIn,
     OpsRequest,
     OpsResponse,
@@ -80,11 +100,11 @@ from ..session import AppliedBatch
 
 router = APIRouter()
 
-#: Client-generated provisional ids carry this prefix (mirrors
-#: ``TEMP_ID_PREFIX`` in ``frontend/src/lib/state/ops.ts``). A create op whose
-#: ``temp_id`` lacks the prefix is rejected on the public endpoint; in restore
-#: mode (undo/rollback) it means "reinstate this exact canonical id".
-TEMP_ID_PREFIX = "tmp_"
+# ``TEMP_ID_PREFIX`` is imported from ``schemas`` above — its single source,
+# living with the op union it is part of — and re-exported through this module
+# for its long-standing importers (``routes/commits.py`` among them). A create
+# op whose ``temp_id`` lacks the prefix is rejected on the public endpoint; in
+# restore mode (undo/rollback) it means "reinstate this exact canonical id".
 
 
 def _resolve_value(value: Any, id_map: dict[str, str]) -> Any:
@@ -115,11 +135,11 @@ class _BatchResult:
     re-creating it removes it from the deleted set, so the two are disjoint.
     """
 
-    canonical_ops: list[OpIn] = field(default_factory=list)
+    canonical_ops: list[ModelOpIn] = field(default_factory=list)
     #: one inner list per completed mutation, in application order; an inner
     #: list's internal order matters (delete-element inverses recreate
     #: elements before relationships) and must never be reversed
-    inverse_units: list[list[OpIn]] = field(default_factory=list)
+    inverse_units: list[list[ModelOpIn]] = field(default_factory=list)
     id_map: dict[str, str] = field(default_factory=dict)
     dirty: DirtyCollector = field(default_factory=DirtyCollector)
     changed_element_ids: dict[str, None] = field(default_factory=dict)
@@ -143,7 +163,7 @@ class _BatchResult:
         self.deleted_relationship_ids[rel_id] = None
         self.changed_relationship_ids.pop(rel_id, None)
 
-    def inverse_ops(self) -> list[OpIn]:
+    def inverse_ops(self) -> list[ModelOpIn]:
         """Flat inverse batch: applying it front-to-back undoes this batch."""
         return [op for unit in reversed(self.inverse_units) for op in unit]
 
@@ -163,7 +183,9 @@ def _check_patch_keys(
             raise KeyError(f"{type_name!r} has no property {key!r}")
 
 
-def _apply_one(model: Model, op: OpIn, res: _BatchResult, *, restore: bool) -> None:
+def _apply_one(
+    model: Model, op: ModelOpIn, res: _BatchResult, *, restore: bool
+) -> None:
     """Apply one op to the live model, recording inverse unit(s) and deltas.
 
     Every mutation goes through the DirtyCollector wrappers (or the raw
@@ -247,7 +269,7 @@ def _apply_one(model: Model, op: OpIn, res: _BatchResult, *, restore: bool) -> N
         # inverse unit recreates elements BEFORE relationships (endpoints
         # must exist when relationships are reinstated); internal order of
         # this unit is preserved by inverse_ops()/rollback
-        unit: list[OpIn] = []
+        unit: list[ModelOpIn] = []
         for ce in closure:
             e = model.elements[ce]
             unit.append(
@@ -363,7 +385,7 @@ def _apply_one(model: Model, op: OpIn, res: _BatchResult, *, restore: bool) -> N
     assert_never(op)  # a new OpIn variant without a branch fails type-checking
 
 
-def _rollback(model: Model, inverse_units: list[list[OpIn]]) -> None:
+def _rollback(model: Model, inverse_units: list[list[ModelOpIn]]) -> None:
     """Undo the completed mutations of a failed batch on the live model.
 
     Applies the recorded inverse units newest-first (preserving each unit's
@@ -382,7 +404,7 @@ def _error_detail(exc: BaseException) -> str:
     return str(exc).strip("'\"") if isinstance(exc, KeyError) else str(exc)
 
 
-def _apply_batch(model: Model, ops: list[OpIn], *, restore: bool) -> _BatchResult:
+def _apply_batch(model: Model, ops: list[ModelOpIn], *, restore: bool) -> _BatchResult:
     """Apply *ops* atomically to the live model.
 
     On ANY op failure the completed mutations are rolled back via their
@@ -457,13 +479,24 @@ def _persist_commit(
     *,
     rev: int,
     author_id: str | None,
-    res: _BatchResult,
+    ops: Sequence[OpIn],
+    inverse_ops: Sequence[OpIn],
+    id_map: dict[str, str],
     _commit_id: str | None = None,
     _message: str = "",
     _validation_error_count: int = 0,
     _issues: list | None = None,
 ) -> bool:
     """Append the accepted batch to the durable journal and advance model_rev.
+
+    The batch arrives as three explicit lists rather than a ``_BatchResult``
+    because a commit can span BOTH content families: ``POST /commits`` merges
+    the model applier's result with the artifact applier's (``artifact_ops.
+    ArtifactBatchResult``) into one journal entry, and neither result type is
+    a superset of the other. ``Sequence[OpIn]`` (covariant) rather than
+    ``list[OpIn]`` for the same reason ``hydration.serialize_ops`` uses it:
+    the model-only caller passes a ``list[ModelOpIn]``, which is not a
+    ``list[OpIn]`` under list invariance.
 
     Only persists when the project actually has a durable model row (the
     interactive/legacy in-memory-only flows have none yet — they persist a
@@ -485,9 +518,9 @@ def _persist_commit(
         rev=rev,
         commit_id=_commit_id or uuid.uuid4().hex,
         author_id=author_id,
-        ops=serialize_ops(res.canonical_ops),
-        inverse_ops=serialize_ops(res.inverse_ops()),
-        id_map=dict(res.id_map),
+        ops=serialize_ops(ops),
+        inverse_ops=serialize_ops(inverse_ops),
+        id_map=dict(id_map),
         message=_message,
         validation_error_count=_validation_error_count,
         issues=_issues or [],
@@ -503,13 +536,19 @@ def _persist_undo_commit(
     *,
     rev: int,
     author_id: str | None,
-    applied: _BatchResult,
+    ops: Sequence[OpIn],
+    inverse_ops: Sequence[OpIn],
+    id_map: dict[str, str],
 ) -> bool:
     """Record an undo as a forward compensating commit (append-only journal).
 
-    ``applied`` is the result of applying the inverse batch: its canonical_ops
-    ARE the ops that reproduce the undo on replay, and its inverse_ops redo the
-    original change.
+    ``ops`` are the ops that reproduce the undo on replay (the applied inverse
+    batch, canonicalized) and ``inverse_ops`` redo the original change. They
+    arrive as explicit lists rather than a ``_BatchResult`` for the same reason
+    ``_persist_commit`` does: an undone batch can span BOTH content families,
+    so the model applier's result has to be merged with the artifact applier's
+    (``artifact_ops.ArtifactBatchResult``) and neither type is a superset of
+    the other.
 
     Returns True if a durable row existed and the commit was persisted,
     False when the project has no model row (in-memory-only legacy flow)."""
@@ -521,9 +560,9 @@ def _persist_undo_commit(
         rev=rev,
         commit_id=uuid.uuid4().hex,
         author_id=author_id,
-        ops=serialize_ops(applied.canonical_ops),
-        inverse_ops=serialize_ops(applied.inverse_ops()),
-        id_map=dict(applied.id_map),
+        ops=serialize_ops(ops),
+        inverse_ops=serialize_ops(inverse_ops),
+        id_map=dict(id_map),
     )
     content.set_model_rev(db, project_id, rev)
     db.commit()
@@ -561,6 +600,14 @@ def apply_ops(
                 "model_rev": session.model_rev,
             },
         )
+    model_ops, artifact_ops = split_ops(payload.ops)
+    if artifact_ops:
+        # The legacy unlocked path is model-only FOREVER: artifact edits go
+        # through POST /commits (lock-verified) or legacy PUT /artifacts.
+        raise HTTPException(
+            status_code=422,
+            detail="artifact ops are not supported on /model/ops; use /commits",
+        )
     state = _ensure_validation_seeded(session, model)
     if not payload.ops:
         # Empty batch: nothing to apply. Report the current state WITHOUT
@@ -568,21 +615,31 @@ def apply_ops(
         # empty POST must not invalidate clients or burn an undo step.
         return OpsResponse(model_rev=session.model_rev, issue_counts=state.counts())
     with session.write_mutex:
-        res = _apply_batch(model, payload.ops, restore=False)
+        res = _apply_batch(model, model_ops, restore=False)
         session.model_rev += 1
         if get_settings().snippet_incremental_invalidation:
             session.evict_touched_caches(touched_keys(model, model.metamodel, res))
         # no else: pre-branch /model/ops relied on the rev-stamp mismatch alone
         session.record_batch(
             AppliedBatch(
-                ops=res.canonical_ops,
-                inverse_ops=res.inverse_ops(),
+                # list displays, not the raw lists: AppliedBatch is typed over
+                # the full OpIn union (mixed batches land here from
+                # POST /commits) and list is invariant, so a list[ModelOpIn]
+                # is not a list[OpIn].
+                ops=[*res.canonical_ops],
+                inverse_ops=[*res.inverse_ops()],
                 id_map=dict(res.id_map),
             )
         )
         try:
             persisted = _persist_commit(
-                db, project_id, rev=session.model_rev, author_id=user.id, res=res
+                db,
+                project_id,
+                rev=session.model_rev,
+                author_id=user.id,
+                ops=res.canonical_ops,
+                inverse_ops=res.inverse_ops(),
+                id_map=dict(res.id_map),
             )
         except Exception as exc:
             _rollback(model, res.inverse_units)  # undo the in-memory mutation
@@ -620,10 +677,62 @@ def undo(
     state = _ensure_validation_seeded(session, model)
     with session.write_mutex:
         batch = session.op_log.pop()
+        # A batch recorded by POST /commits can span both content families, so
+        # the undo replays each half through its own applier: the model half in
+        # place, the artifact half staged on this request's DB transaction.
+        model_inv, artifact_inv = split_ops(batch.inverse_ops)
+        # The MODEL half of this route stays deliberately unlocked (the
+        # documented migration-window stance until the frontend moves to
+        # check-out/commit). The ARTIFACT half cannot: artifact rows are
+        # ONLY ever protected by their `art:` lease — there is no per-request
+        # write_mutex ordering and no rev to conflict on — so replaying an
+        # artifact inverse over a peer's checked-out row would void, from
+        # this side, exactly the guarantee POST /commits and the legacy
+        # artifact CRUD routes enforce on theirs. Refuse instead, and push
+        # the batch BACK so a refusal never eats undo history.
+        peer_held = session.lock_table.peer_leases(
+            [artifact_resource(aid) for aid in artifact_op_ids(artifact_inv)],
+            user.id,
+            now=time.monotonic(),
+        )
+        if peer_held:
+            session.op_log.append(batch)
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "detail": "artifact is checked out by someone else",
+                    "model_rev": session.model_rev,
+                    "conflicts": [
+                        {
+                            "resource_id": le.resource_id,
+                            "mode": le.mode.value,
+                            "holder_id": le.holder,
+                        }
+                        for le in peer_held
+                    ],
+                },
+            )
         try:
-            res = _apply_batch(model, batch.inverse_ops, restore=True)
+            res = _apply_batch(model, model_inv, restore=True)
         except Exception:
             session.op_log.append(batch)  # _apply_batch already rolled back
+            raise
+        try:
+            # restore mode on both halves: exact ids are reinstated and the
+            # already-accepted state is replayed without re-validation.
+            art_res = apply_artifact_ops(
+                db, project_id, artifact_inv, user_id=user.id, restore=True
+            )
+        except Exception:
+            # Broad on purpose, mirroring create_commit's artifact branch: the
+            # expected rejections are HTTPException 422/409 (a peer deleted or
+            # renamed the row this undo wants back), but an UNforeseen error
+            # must not be the one case that leaves the model half-undone.
+            # Undo BOTH halves and re-push the batch so undo history survives.
+            _rollback(model, res.inverse_units)
+            session.invalidate_derived_caches()  # rolled back in place; A1/I1
+            session.op_log.append(batch)
+            db.rollback()  # discard staged artifact rows
             raise
         session.model_rev += 1
         if get_settings().snippet_incremental_invalidation:
@@ -631,20 +740,42 @@ def undo(
         # no else: pre-branch /model/ops relied on the rev-stamp mismatch alone
         # append-only journal: the undo is a NEW forward commit whose ops are
         # the inverse batch, so hydration replays to the post-undo state and
-        # model_rev moves up (Phase 8 revert reuses this shape).
+        # model_rev moves up (Phase 8 revert reuses this shape). ONE entry per
+        # undo, spanning both families: model ops first, then artifact ops (the
+        # families are independent, so cross-family order carries no meaning).
+        canonical_ops: list[OpIn] = [*res.canonical_ops, *art_res.canonical_ops]
+        inverse_ops: list[OpIn] = [*res.inverse_ops(), *art_res.inverse_ops()]
+        merged_id_map = {**res.id_map, **art_res.id_map}
         try:
             persisted = _persist_undo_commit(
-                db, project_id, rev=session.model_rev, author_id=user.id, applied=res
+                db,
+                project_id,
+                rev=session.model_rev,
+                author_id=user.id,
+                ops=canonical_ops,
+                inverse_ops=inverse_ops,
+                id_map=merged_id_map,
             )
         except Exception as exc:
             _rollback(model, res.inverse_units)  # undo the in-memory mutation
             session.model_rev -= 1
             session.invalidate_derived_caches()  # rev moved BACK; see apply_ops
             session.op_log.append(batch)  # re-push the batch so undo history is intact
-            db.rollback()
+            db.rollback()  # also discards the staged artifact rows
             raise HTTPException(
                 status_code=500, detail="failed to persist commit"
             ) from exc
+        if artifact_inv and not persisted:
+            # No durable model row (in-memory-only legacy project), so
+            # _persist_undo_commit skipped its db.commit() — but the restored/
+            # removed artifact rows are real DB state that must not vanish when
+            # the request session closes (mirrors create_commit's same guard).
+            db.commit()
         if persisted:
             _maybe_periodic_snapshot(db, project_id, session, session.model_rev)
+        # artifact feed events, shared with POST /commits step h so a peer
+        # cannot tell an undo's artifact event from a commit's. Inside the
+        # mutex, like every other broadcast site (enqueue order == rev order).
+        headers, created_ids = artifact_delta_headers(db, art_res)
+        broadcast_artifact_events(session.hub, headers, created_ids, art_res.deleted)
         return _finalize(session, state, model, res)

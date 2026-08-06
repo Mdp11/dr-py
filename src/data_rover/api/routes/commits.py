@@ -6,7 +6,17 @@ apply with inverse collection; raises 422 on a mutation-boundary error),
 (full-run baseline). Preview runs apply → validate dirty set → roll back,
 all under ``session.write_mutex`` (spec §11). This module deliberately imports
 those module-private helpers — they are part of the ops package's internal
-surface, shared with this sibling.
+surface, shared with this sibling. The artifact delta is likewise not built
+here: ``artifact_ops.artifact_delta_headers`` /
+``artifact_ops.broadcast_artifact_events`` are shared with POST /model/undo,
+over the single ``artifact_header`` row->header projection the artifact CRUD
+routes use (``routes/artifacts._header`` is an alias of it) — same fields on
+created, updated AND deleted events, so no two write paths can drift.
+
+Since the Phase 1 artefacts revamp a commit can carry artifact ops as well as
+model ops (``artifact_ops.split_ops`` separates the two families). Model ops
+mutate the in-memory model; artifact ops stage DB rows — see
+``create_commit``'s docstring for how the two are kept atomic.
 """
 
 from __future__ import annotations
@@ -14,15 +24,27 @@ from __future__ import annotations
 import logging
 import time
 import uuid
+from collections.abc import Iterable
+from typing import Any, assert_never, get_args
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session as DbSession
 
+from data_rover.core.model.model import Model
 from data_rover.core.validation.issue import IssueCategory
 from data_rover.core.validation.pipeline import default_pipeline
 
+from ..artifact_ops import (
+    ARTIFACT_OP_KINDS,
+    apply_artifact_ops,
+    artifact_delta_headers,
+    broadcast_artifact_events,
+    split_ops,
+    validate_artifact_ops,
+)
 from ..authz import require_membership
+from ..commit_diff import diff_commit
 from ..feed import commit_event, lock_event
 from .. import content
 from ..db import get_db
@@ -31,24 +53,38 @@ from ..deps import Session, get_request_session, require_model
 from ..hydration import deserialize_ops, reconstruct_model_at
 from ..identity import get_current_user
 from ..invalidation import touched_keys
-from ..locking import required_locks
+from ..locking import ARTIFACT_PREFIX, required_locks
 from ..settings import get_settings
 from ..schemas import (
+    ArtifactOpIn,
+    CommitDiffOut,
     CommitHistoryResponse,
     CommitRequest,
     CommitResponse,
     CommitSummaryOut,
+    CreateArtifactOp,
+    CreateElementOp,
+    CreateRelationshipOp,
+    DeleteArtifactOp,
+    DeleteElementOp,
+    DeleteRelationshipOp,
     ElementOut,
     IssueOut,
+    ModelOpIn,
     ModelOut,
     OpenResponse,
+    OpIn,
     PreviewRequest,
     PreviewResponse,
     RelationshipOut,
     RevertRequest,
+    UpdateArtifactOp,
+    UpdateElementOp,
+    UpdateRelationshipOp,
 )
 from ..session import AppliedBatch
 from .ops import (
+    TEMP_ID_PREFIX,
     _apply_batch,
     _ensure_validation_seeded,
     _maybe_periodic_snapshot,
@@ -60,27 +96,152 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-#: op-dict keys that carry a resource id. In CANONICAL stored ops every one of
-#: these holds a real id — a create op's ``temp_id`` was rewritten to the
-#: assigned canonical id at apply time (see session.py / _apply_one).
-_ID_KEYS = ("id", "temp_id", "source_id", "target_id")
+def _id_field_names(op_types: Iterable[Any]) -> frozenset[str]:
+    """Field names that carry a resource id, DERIVED from the op models.
+
+    ``_affected_ids`` scans RAW journal dicts (``Commit.ops`` JSON), so it
+    cannot lean on ``assert_never`` the way the typed appliers do — and a
+    hand-maintained tuple of field names is exactly the kind of list that
+    silently stops covering the union: add an op kind, or an id-bearing field
+    to an existing one, and the conflict backstop quietly under-reports, which
+    turns a real conflict into a lost update with no test and no type error.
+    Deriving from ``model_fields`` closes that gap: the union members below are
+    read straight off ``ModelOpIn``/``ArtifactOpIn``, so a new op kind is
+    covered the moment it joins the union.
+
+    The naming rule (``id`` or ``*_id``) errs toward OVER-reporting, which is
+    the safe direction here: a spurious key can only add ids to the touched
+    set — i.e. produce a conservative 409 — never hide one.
+    """
+    return frozenset(
+        name
+        for op_type in op_types
+        for name in op_type.model_fields
+        if name == "id" or name.endswith("_id")
+    )
+
+
+#: op-dict keys that carry a resource id, per family. In CANONICAL stored ops
+#: every one of these holds a real id — a create op's ``temp_id`` was rewritten
+#: to the assigned canonical id at apply time (see session.py / _apply_one and
+#: artifact_ops.apply_artifact_ops).
+_MODEL_ID_KEYS = _id_field_names(get_args(ModelOpIn))
+_ARTIFACT_ID_KEYS = _id_field_names(get_args(ArtifactOpIn))
 
 
 def _affected_ids(commits: list[Commit]) -> set[str]:
-    """Resource ids touched by the forward ops of these commits.
+    """Resource ids touched by the forward AND inverse ops of these commits.
 
-    Used by revert's peer-lock guard: any active lease over one of these ids
+    Used by revert's peer-lock guard (any active lease over one of these ids
     means a peer is mid-edit on something the revert would change, so the
-    revert is refused (409) rather than stomping their uncommitted work.
+    revert is refused (409) rather than stomping their uncommitted work) AND
+    by the generalized conflict backstop in ``create_commit``, which
+    intersects this against ``_batch_touched_ids``. Artifact ids are
+    prefixed with the ``art:`` lease namespace so the two sets — and lease
+    resource ids generally — compare directly; model ids stay bare (the
+    pre-existing wire format).
+
+    Reads BOTH ``c.ops`` and ``c.inverse_ops``, not just the forward half: a
+    containment ``delete_element`` cascades to every descendant element and
+    incident relationship, but its FORWARD op only names the root id — the
+    cascade victims surface exclusively in the INVERSE unit's
+    ``create_element``/``create_relationship`` ops (``temp_id`` = the
+    original id; see ``ops.py``'s ``DeleteElementOp`` branch, which snapshots
+    the closure before deleting). Skipping ``inverse_ops`` would let a stale
+    batch that touches a cascade victim slip past the overlap check here (and
+    fail later, at the mutation boundary, as a 422 instead of a clean 409) —
+    or, for revert's guard, let a peer's lease on a cascade victim go
+    unnoticed.
     """
     ids: set[str] = set()
     for c in commits:
-        for op in c.ops:
-            for key in _ID_KEYS:
+        for op in (*c.ops, *c.inverse_ops):
+            if op.get("kind") in ARTIFACT_OP_KINDS:
+                for key in _ARTIFACT_ID_KEYS:
+                    v = op.get(key)
+                    if isinstance(v, str):
+                        ids.add(ARTIFACT_PREFIX + v)
+                continue
+            for key in _MODEL_ID_KEYS:
                 v = op.get(key)
                 if isinstance(v, str):
                     ids.add(v)
     return ids
+
+
+def _batch_touched_ids(model: Model, ops: list[OpIn]) -> set[str]:
+    """Conservative touched-set for the conflict backstop (spec 2026-07-29):
+    a batch conflicts with the commit tail iff their touched-id sets overlap.
+
+    Starts from ``required_locks`` — the same per-op resource derivation the
+    lock table already trusts to gate concurrent edits — then adds the raw
+    ids locks deliberately abstract away: a relationship update/delete locks
+    only its SOURCE element (the two are inseparable for editing purposes),
+    but the journal records the relationship's OWN id, so a peer batch that
+    only names that relationship id (e.g. a second delete of the same
+    relationship) must still register as touching it. A create's temp id
+    never appears in `_affected_ids` (canonical ops carry the assigned id),
+    so temp ids are filtered out at the end rather than tracked specially.
+
+    MUST be conservative: under-reporting a touched resource here is exactly
+    the failure mode the backstop exists to prevent (a real conflict would
+    silently land instead of 409ing), so every op kind that carries an id
+    that could ever collide with a peer's is covered — the two CREATE kinds
+    (``CreateElementOp``, ``CreateArtifactOp``) are the only ones with no
+    server-known id at all until apply time, and they say so EXPLICITLY
+    below: the chain ends in ``assert_never`` so a seventh op kind is a
+    type error here rather than a silent hole (same discipline
+    ``_apply_one``'s ``assert_never`` gives the applier).
+    """
+    ids = {r.resource_id for r in required_locks(model, ops)}
+    for op in ops:
+        if isinstance(
+            op,
+            (
+                UpdateElementOp,
+                DeleteElementOp,
+                UpdateRelationshipOp,
+                DeleteRelationshipOp,
+            ),
+        ):
+            ids.add(op.id)
+        elif isinstance(op, CreateRelationshipOp):
+            ids.add(op.source_id)
+            ids.add(op.target_id)
+        elif isinstance(op, (UpdateArtifactOp, DeleteArtifactOp)):
+            ids.add(ARTIFACT_PREFIX + op.id)
+        elif isinstance(op, (CreateElementOp, CreateArtifactOp)):
+            # deliberate no-op: a create names no id a PEER could also be
+            # touching (its temp id is batch-local and stripped below).
+            pass
+        else:
+            assert_never(op)
+    # Strip batch-local temp ids: they never appear in _affected_ids (canonical
+    # stored ops always carry the assigned id, never the batch-local one), so
+    # a temp id here can never overlap a real journal id and only adds noise.
+    # This runs AFTER the art: prefixing above, so a same-batch update/delete
+    # of an artifact created earlier IN THIS batch by temp id would strip to
+    # "art:tmp_x", not "tmp_x" — harmless: required_locks already exempts
+    # same-batch-created artifacts from needing a lease at all (see its
+    # `created` set), so that id never reaches this filter in practice, and
+    # even if it did, "art:tmp_x" still can't collide with a bare canonical id.
+    return {i for i in ids if not i.startswith(TEMP_ID_PREFIX)}
+
+
+def _conflict_response(model_rev: int, detail: str) -> JSONResponse:
+    """The uniform 409 envelope every staleness/overlap fallback in
+    ``create_commit`` returns — factored out so that branch structure (see
+    its docstring: no-journal / short-tail / baseline-or-rebind / overlap)
+    reads at a glance instead of four near-identical ``JSONResponse`` blocks.
+
+    Single-instance assumption: the completeness reasoning behind these
+    branches (one journaled batch == one rev == one row) holds because ONE
+    process owns the session and its journal writes. Multi-instance
+    deployment is Phase 7's debt, shared with ``LockTable``."""
+    return JSONResponse(
+        status_code=409,
+        content={"detail": detail, "model_rev": model_rev},
+    )
 
 
 @router.get("/open", response_model=None)
@@ -104,7 +265,9 @@ def open_project(
 @router.post("/commits/preview", response_model=None)
 def preview_commit(
     payload: PreviewRequest,
+    project_id: str,
     session: Session = Depends(get_request_session),
+    db: DbSession = Depends(get_db),
 ) -> PreviewResponse | JSONResponse:
     _, model = require_model(session)
     if payload.base_rev != session.model_rev:
@@ -112,10 +275,17 @@ def preview_commit(
             status_code=409,
             content={"detail": "stale base_rev", "model_rev": session.model_rev},
         )
+    model_ops, artifact_ops = split_ops(payload.ops)
+    # Artifact ops are DB rows, not model content: there is nothing to apply
+    # into the model and roll back, so they are checked DRY (422 on an invalid
+    # payload / unknown id / name clash, 409 on a stale artifact_rev) and
+    # contribute no issues. Deliberately outside the write mutex — it writes
+    # nothing and the model is untouched by it.
+    validate_artifact_ops(db, project_id, artifact_ops)
     with session.write_mutex:
         # _apply_batch raises 422 on a mutation-boundary structural error
         # (unknown type, missing endpoint, unknown property) — the safety net.
-        res = _apply_batch(model, payload.ops, restore=False)
+        res = _apply_batch(model, model_ops, restore=False)
         try:
             scoped = default_pipeline().validate(model, res.dirty.to_scope())
         finally:
@@ -204,6 +374,31 @@ def model_at_rev(
     return ModelOut.from_core(model)
 
 
+@router.get("/commits/{rev}/diff", response_model=None)
+def commit_diff_endpoint(
+    rev: int,
+    project_id: str,
+    session: Session = Depends(get_request_session),
+    db: DbSession = Depends(get_db),
+) -> CommitDiffOut | JSONResponse:
+    """Render one commit's changes across content families (Phase 1 artefacts
+    revamp).
+
+    Read endpoint — any member (the ``session`` dependency only establishes
+    membership, exactly like GET /commits above). O(model) like
+    GET /commits/{rev}/model, since the model half reconstructs both sides; the
+    artifact half is journal-only. The rendering itself lives in
+    ``commit_diff.diff_commit`` so the future change-request workflow can point
+    it at a draft instead of a commit row.
+    """
+    row = content.get_commit(db, project_id, rev)
+    if row is None:
+        return JSONResponse(
+            status_code=404, content={"detail": "no commit at this rev"}
+        )
+    return diff_commit(db, project_id, row)
+
+
 @router.post("/commits", response_model=None)
 def create_commit(
     payload: CommitRequest,
@@ -215,29 +410,142 @@ def create_commit(
     """Lock-verified, structural-gated commit (Phase 4 spec §7).
 
     Flow:
-    1. Stale-rev check (before the mutex — mirrors preview and apply_ops).
+    1. Staleness check (before the mutex — mirrors preview and apply_ops).
+       A future ``base_rev`` always 409s. A behind-head ``base_rev`` uses the
+       GENERALIZED rule (spec 2026-07-29): the batch conflicts iff the
+       resources it touches overlap what landed in ``(base_rev, head]`` — see
+       ``_batch_touched_ids``/``_affected_ids``. Leases already prevent most
+       conflicts up front; this is the backstop for the window where the
+       legacy unlocked ``/model/ops`` path and this lock-verified path
+       coexist, so a stale-but-non-overlapping batch lands instead of being
+       rejected.
+
+       This requires the durable journal to fully explain the gap between
+       ``base_rev`` and head, so several fallbacks fail CLOSED (409 "stale
+       base_rev") rather than risk a silent false negative:
+         - no durable journal to inspect at all (in-memory-only project);
+         - the tail is SHORTER than the rev gap — the completeness invariant
+           (one journaled batch == one rev == one row, spelled out at the
+           check itself below) means a short tail can only mean some rev in
+           the gap advanced without a journal row (``Session.touch_model()``,
+           the legacy unlocked mutation routes, or ``set_model(...)`` — model
+           load/clear and CR-apply, which passes the replacement model and
+           its spliced validation state in), so there is no way to know what
+           it touched;
+         - a rebind is in the tail (the metamodel changed under the client,
+           so its element ops were computed against a schema that no longer
+           exists);
+         - an EMPTY-ops commit is in the tail that still consumed a rev —
+           ``persist_baseline``'s marker for "the whole model was replaced
+           opaquely" (model upload/clear/apply-cr baseline reset). The tail
+           fully accounts for the rev gap here, but names no resources at
+           all, so the overlap check alone would find nothing and let a
+           stale batch land against a wholesale-replaced model.
+       Only once none of these apply does the overlap check itself run.
     2. Seed the validation baseline.
     3. Under the write mutex:
        a. Verify the caller still holds every required lock (409 if any gone).
-       b. Apply the batch (422 on mutation-boundary error from _apply_batch).
+       b. Apply the model ops (422 on mutation-boundary error from
+          _apply_batch), then the artifact ops (staged on this request's DB
+          transaction).
        c. Hard-reject structural blockers (422; rolls back).
        d. Splice conformance issues into the issue store, bump rev, record batch.
        e. Persist to the durable journal (500 + full rollback on failure).
        f. Periodic snapshot (mirrors apply_ops to bound replay tail).
        g. Release the caller's locks (explicit loop).
-       h. Broadcast commit delta + lock-release events (inside mutex for
-          enqueue-order == rev-order guarantee; broadcast is non-blocking).
+       h. Broadcast commit delta + artifact + lock-release events (inside mutex
+          for enqueue-order == rev-order guarantee; broadcast is non-blocking).
     4. Return CommitResponse with full delta + commit metadata.
+
+    Mixed-batch atomicity (Phase 1 artefacts revamp)
+    ------------------------------------------------
+    A batch can span both content families, and the two halves live in
+    different places: model ops mutate the in-memory model IN PLACE, artifact
+    ops stage row changes on this request's DB transaction. So every failure
+    path after an apply has to undo BOTH — ``_rollback(model,
+    res.inverse_units)`` + ``session.invalidate_derived_caches()`` for the
+    model half, ``db.rollback()`` for the artifact half. ``apply_artifact_ops``
+    deliberately has no internal rollback path (it only flushes), so that
+    ``db.rollback()`` is the ONLY thing that discards staged artifact rows.
     """
     _, model = require_model(session)
-    if payload.base_rev != session.model_rev:
-        return JSONResponse(
-            status_code=409,
-            content={"detail": "stale base_rev", "model_rev": session.model_rev},
-        )
+    if payload.base_rev > session.model_rev:
+        return _conflict_response(session.model_rev, "stale base_rev")
+    if payload.base_rev < session.model_rev:
+        # Generalized staleness (spec 2026-07-29) — see the docstring above
+        # for the full rationale; branch order mirrors it: no-journal /
+        # short-tail / baseline-or-rebind / overlap, cheapest-and-safest
+        # first, each a fail-closed 409 before the real overlap check runs.
+        if content.get_model_row(db, project_id) is None:
+            return _conflict_response(session.model_rev, "stale base_rev")
+        tail = content.commits_after(db, project_id, payload.base_rev)
+        if len(tail) != session.model_rev - payload.base_rev:
+            # Completeness invariant (db_models.Commit's own docstring: "one
+            # accepted ops batch == one revision == one journal row"): every
+            # journaled batch bumps model_rev by exactly 1 and writes exactly
+            # 1 row (create_commit/undo/revert each do both under the same
+            # mutex). So a FULL tail always has len(tail) == head - base_rev.
+            # A SHORT tail means some rev in the gap moved without a journal
+            # row at all — e.g. touch_model() (legacy PATCH/POST/DELETE
+            # mutation routes) or set_model() (model load/clear, and CR-apply,
+            # which passes the replacement model in) — so there
+            # is nothing to inspect for that rev and no way to know it didn't
+            # touch this batch's resources. Fail closed.
+            return _conflict_response(session.model_rev, "stale base_rev")
+        if any(
+            c.from_metamodel_id is not None
+            or c.to_metamodel_id is not None
+            or not c.ops
+            for c in tail
+        ):
+            # Two distinct always-conflict cases, same treatment: a rebind
+            # changed the metamodel under the client (its element ops were
+            # computed against a schema that no longer exists), and an
+            # EMPTY-ops commit that still consumed a rev is
+            # persist_baseline's marker for "the whole model was replaced
+            # opaquely" (model upload/clear/apply-cr baseline reset — see
+            # hydration.persist_baseline). Both fully account for the rev
+            # gap (so the short-tail check above doesn't catch them) but
+            # name no resources the overlap check could ever match against,
+            # so without this branch a stale batch would silently land
+            # against a metamodel/model that no longer matches what it was
+            # computed against.
+            return _conflict_response(session.model_rev, "stale base_rev")
+        if _affected_ids(tail) & _batch_touched_ids(model, payload.ops):
+            return _conflict_response(
+                session.model_rev, "conflicting concurrent commits"
+            )
+    model_ops, artifact_ops = split_ops(payload.ops)
     state = _ensure_validation_seeded(session, model)
+    if not payload.ops:
+        # Empty batch: nothing to apply. Mirrors apply_ops' and revert's
+        # no-op early returns — current state, no rev bump, no undo slot. It
+        # matters MORE here than there: an empty-ops journal row is
+        # persist_baseline's marker for "the whole model was replaced
+        # opaquely", which the staleness guard above reads as an
+        # unconditional 409 for every client below that rev. A message-only
+        # "checkpoint" commit would therefore permanently disable the overlap
+        # rule for the project — fail-closed, but wrong. Keeping the invariant
+        # (empty ops in the journal ⟺ opaque baseline reset) true is this
+        # branch's real job; the saved rev is a bonus.
+        return CommitResponse(
+            model_rev=session.model_rev,
+            id_map={},
+            changed_elements=[],
+            changed_relationships=[],
+            deleted_element_ids=[],
+            deleted_relationship_ids=[],
+            issues_removed_owner_ids=[],
+            issues_added=[],
+            issue_counts=state.counts(),
+            commit_id="",
+            message="",
+            validation_error_count=0,
+        )
     with session.write_mutex:
-        # a. verify the caller still holds every required lock
+        # a. verify the caller still holds every required lock. `payload.ops`
+        #    (not `model_ops`) so the `art:`-namespaced leases artifact ops
+        #    need are derived and checked too.
         reqs = required_locks(model, payload.ops)
         missing = session.lock_table.verify_held(
             user.id, payload.lock_tokens, reqs, now=time.monotonic()
@@ -253,14 +561,41 @@ def create_commit(
                     ],
                 },
             )
-        # b. apply (422 on mutation-boundary error — let it propagate)
-        res = _apply_batch(model, payload.ops, restore=False)
-        # c. hard-reject structural blockers
+        # b. apply the model half (422 on mutation-boundary error — let it
+        #    propagate; _apply_batch already rolled itself back and nothing
+        #    artifact-side has been staged yet)
+        res = _apply_batch(model, model_ops, restore=False)
+        # b2. apply the artifact half, staged on this request's DB transaction.
+        #     Seeded with the model id_map so an artifact payload may reference
+        #     an element created earlier in the SAME batch. On failure both
+        #     halves are undone (see the docstring's atomicity note).
+        try:
+            art_res = apply_artifact_ops(
+                db,
+                project_id,
+                artifact_ops,
+                user_id=user.id,
+                id_map=dict(res.id_map),
+                restore=False,
+            )
+        except Exception:
+            # Broad on purpose, mirroring _apply_batch's stance: the expected
+            # rejections are HTTPException 422/409, but an UNforeseen error
+            # (a DB failure, a bug) must not be the one case that leaves the
+            # model half-mutated. Undo both halves, then let it propagate.
+            _rollback(model, res.inverse_units)
+            session.invalidate_derived_caches()  # rolled back in place; A1/I1
+            db.rollback()  # discard staged artifact rows
+            raise
+        # c. hard-reject structural blockers. Model content only: an artifact
+        #    op's own validity was settled at apply time (b2), and an artifact
+        #    row can never make the MODEL structurally invalid.
         scoped = default_pipeline().validate(model, res.dirty.to_scope())
         structural = [i for i in scoped if i.category is IssueCategory.STRUCTURAL]
         if structural:
             _rollback(model, res.inverse_units)
             session.invalidate_derived_caches()  # rolled back in place; A1/I1
+            db.rollback()  # discard staged artifact rows
             return JSONResponse(
                 status_code=422,
                 content={
@@ -279,6 +614,7 @@ def create_commit(
         if session.strict_mode and conformance:
             _rollback(model, res.inverse_units)
             session.invalidate_derived_caches()  # rolled back in place; A1/I1
+            db.rollback()  # discard staged artifact rows
             return JSONResponse(
                 status_code=422,
                 content={
@@ -296,11 +632,17 @@ def create_commit(
             session.evict_touched_caches(touched_keys(model, model.metamodel, res))
         else:
             session.invalidate_derived_caches()  # legacy clear-all
+        # ONE journal entry per commit, spanning both families: model ops
+        # first, then artifact ops (the families are independent, so relative
+        # cross-family order carries no meaning — see split_ops).
+        merged_id_map = {**res.id_map, **art_res.id_map}
+        canonical_ops: list[OpIn] = [*res.canonical_ops, *art_res.canonical_ops]
+        inverse_ops: list[OpIn] = [*res.inverse_ops(), *art_res.inverse_ops()]
         session.record_batch(
             AppliedBatch(
-                ops=res.canonical_ops,
-                inverse_ops=res.inverse_ops(),
-                id_map=dict(res.id_map),
+                ops=canonical_ops,
+                inverse_ops=inverse_ops,
+                id_map=merged_id_map,
             )
         )
         # e. persist to the durable journal; mirror apply_ops 500 pattern exactly
@@ -312,7 +654,9 @@ def create_commit(
                 project_id,
                 rev=session.model_rev,
                 author_id=user.id,
-                res=res,
+                ops=canonical_ops,
+                inverse_ops=inverse_ops,
+                id_map=merged_id_map,
                 _commit_id=commit_id,
                 _message=payload.message,
                 _validation_error_count=len(conformance),
@@ -323,10 +667,17 @@ def create_commit(
             session.model_rev -= 1
             session.invalidate_derived_caches()  # rolled back in place; A1/I1
             session.op_log.pop()
-            db.rollback()
+            db.rollback()  # also discards the staged artifact rows
             raise HTTPException(
                 status_code=500, detail="failed to persist commit"
             ) from exc
+        if artifact_ops and not persisted:
+            # No durable model row (in-memory-only legacy project), so
+            # _persist_commit skipped its db.commit() — but artifact rows are
+            # real DB state that must not silently vanish when the request
+            # session closes. Commit them on their own; the journal entry is
+            # the only thing this project forgoes.
+            db.commit()
         # f. periodic snapshot: mirrors apply_ops so a hot commit-only project
         #    doesn't accumulate an unbounded replay tail. The durable commit has
         #    already landed; a snapshot failure here is recoverable (hydration
@@ -344,12 +695,18 @@ def create_commit(
                     session.model_rev,
                     exc_info=True,
                 )
+        # f2. artifact half of the response/feed delta — shared with
+        #     POST /model/undo so both write paths are wire-identical (see
+        #     artifact_ops.artifact_delta_headers for the re-read rationale).
+        changed_artifact_headers, created_artifact_ids = artifact_delta_headers(
+            db, art_res
+        )
         # g. release the caller's locks (explicit loop — no helper)
         released = []
         for tok in payload.lock_tokens:
             released.extend(session.lock_table.release(user.id, tok))
-        # h. broadcast commit delta + lock-release events (inside the mutex so
-        #    enqueue order == rev order across concurrent commits).
+        # h. broadcast commit delta + artifact + lock-release events (inside the
+        #    mutex so enqueue order == rev order across concurrent commits).
         changed_elements = [
             ElementOut.from_core(model.elements[eid]).model_dump()
             for eid in res.changed_element_ids
@@ -358,6 +715,12 @@ def create_commit(
             RelationshipOut.from_core(model.relationships[rid]).model_dump()
             for rid in res.changed_relationship_ids
         ]
+        # an empty batch touched neither family; report it as "model" so the
+        # scope list is never empty and peers keep their existing behaviour.
+        scope = sorted(
+            ({"model"} if model_ops else set())
+            | ({"artifact"} if artifact_ops else set())
+        ) or ["model"]
         session.hub.broadcast(
             commit_event(
                 rev=session.model_rev,
@@ -365,11 +728,15 @@ def create_commit(
                 author_id=user.id,
                 message=payload.message,
                 validation_error_count=len(conformance),
+                scope=scope,
                 changed_elements=changed_elements,
                 changed_relationships=changed_relationships,
                 deleted_element_ids=list(res.deleted_element_ids),
                 deleted_relationship_ids=list(res.deleted_relationship_ids),
             )
+        )
+        broadcast_artifact_events(
+            session.hub, changed_artifact_headers, created_artifact_ids, art_res.deleted
         )
         if released:
             session.hub.broadcast(
@@ -387,7 +754,7 @@ def create_commit(
             )
     return CommitResponse(
         model_rev=session.model_rev,
-        id_map=dict(res.id_map),
+        id_map=merged_id_map,  # both families' temp ids in one map
         changed_elements=[
             ElementOut.from_core(model.elements[eid]) for eid in res.changed_element_ids
         ],
@@ -403,6 +770,8 @@ def create_commit(
         commit_id=commit_id,
         message=payload.message,
         validation_error_count=len(conformance),
+        changed_artifacts=changed_artifact_headers,
+        deleted_artifact_ids=[d["id"] for d in art_res.deleted],
     )
 
 
@@ -467,6 +836,23 @@ def revert_commit(
                         "rebind_rev": c.rev,
                     },
                 )
+        for c in commits:
+            # Deliberate Phase-1 boundary, not a stub: reverting an artifact
+            # change means replaying row state a range of commits deep, and
+            # ``ArtifactRow`` names are UNIQUE per (project, kind) — a range
+            # revert can therefore collide with rows created after the target
+            # rev in ways a single undo step never can. Refused as a clean 409
+            # (a conflict, like the rebind and peer-lock refusals around it)
+            # naming the offending commit, checked on the RAW journal dicts so
+            # it fires before anything is deserialized or applied.
+            if any(op.get("kind") in ARTIFACT_OP_KINDS for op in c.ops):
+                return JSONResponse(
+                    status_code=409,
+                    content={
+                        "detail": "revert across artifact changes is not yet supported",
+                        "artifact_commit_rev": c.rev,
+                    },
+                )
         affected = _affected_ids(commits)
         held = [
             le
@@ -488,10 +874,24 @@ def revert_commit(
                     ],
                 },
             )
-        # apply inverse_ops newest-first; deserialize the stored JSON op dicts
-        combined = deserialize_ops(
-            [op for c in reversed(commits) for op in c.inverse_ops]
+        # apply inverse_ops newest-first; deserialize the stored JSON op dicts.
+        # split_ops is here as the TYPE narrowing only (deserialize_ops answers
+        # the full OpIn union while _apply_batch takes model ops): the guard
+        # above already proved the artifact half empty, since an artifact op's
+        # inverse is always itself an artifact op.
+        combined, artifact_combined = split_ops(
+            deserialize_ops([op for c in reversed(commits) for op in c.inverse_ops])
         )
+        if artifact_combined:
+            # Unreachable while the 409 guard above stands. An explicit raise
+            # rather than an assert: `python -O` strips asserts, and silently
+            # dropping artifact ops on the floor is precisely the outcome the
+            # Phase-1 boundary exists to prevent, so a narrowed guard must fail
+            # loudly instead of half-reverting.
+            raise HTTPException(
+                status_code=500,
+                detail="internal error: artifact ops reached the revert applier",
+            )
         res = _apply_batch(model, combined, restore=True)
         scoped = default_pipeline().validate(model, res.dirty.to_scope())
         structural = [i for i in scoped if i.category is IssueCategory.STRUCTURAL]
@@ -513,8 +913,12 @@ def revert_commit(
         session.invalidate_derived_caches()  # mirrors touch_model
         session.record_batch(
             AppliedBatch(
-                ops=res.canonical_ops,
-                inverse_ops=res.inverse_ops(),
+                # list displays, not the raw lists: AppliedBatch is typed over
+                # the full OpIn union (mixed batches land here from
+                # POST /commits) and list is invariant, so a list[ModelOpIn]
+                # is not a list[OpIn].
+                ops=[*res.canonical_ops],
+                inverse_ops=[*res.inverse_ops()],
                 id_map=dict(res.id_map),
             )
         )
@@ -527,7 +931,9 @@ def revert_commit(
                 project_id,
                 rev=session.model_rev,
                 author_id=user.id,
-                res=res,
+                ops=res.canonical_ops,
+                inverse_ops=res.inverse_ops(),
+                id_map=dict(res.id_map),
                 _commit_id=commit_id,
                 _message=message,
                 _validation_error_count=len(conformance),
@@ -569,6 +975,9 @@ def revert_commit(
                 commit_id=commit_id,
                 author_id=user.id,
                 message=message,
+                # revert refuses batches spanning artifact ops (below), so a
+                # revert commit is model-only by construction.
+                scope=["model"],
                 validation_error_count=len(conformance),
                 changed_elements=changed_elements,
                 changed_relationships=changed_relationships,

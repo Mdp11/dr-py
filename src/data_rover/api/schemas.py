@@ -215,6 +215,16 @@ class ViewStateResponse(BaseModel):
 # `frontend/src/lib/state/ops.ts` exactly (THE FILE IS THE CONTRACT)
 # ---------------------------------------------------------------------------
 
+#: Client-generated provisional ids carry this prefix (mirrors
+#: ``TEMP_ID_PREFIX`` in ``frontend/src/lib/state/ops.ts``). It lives HERE, with
+#: the op union it belongs to, because it is part of that wire contract and
+#: every module that reasons about ops needs it: ``routes/ops.py`` (re-exported
+#: from there for its long-standing importers), ``artifact_ops.py`` and
+#: ``locking.py``. It used to be copied literally into each — a copy is exactly
+#: how the applier and the lock-scope derivation could come to disagree about
+#: which ids are "not yet shared".
+TEMP_ID_PREFIX = "tmp_"
+
 
 class CreateElementOp(BaseModel):
     kind: Literal["create_element"]
@@ -256,15 +266,49 @@ class DeleteRelationshipOp(BaseModel):
     id: str
 
 
-OpIn = Annotated[
+class CreateArtifactOp(BaseModel):
+    kind: Literal["create_artifact"]
+    temp_id: str
+    artifact_kind: Literal[
+        "navigation", "table", "diagram", "diagram_kind", "code_snippet"
+    ]
+    name: str = Field(min_length=1)
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class UpdateArtifactOp(BaseModel):
+    kind: Literal["update_artifact"]
+    id: str
+    name: str | None = Field(default=None, min_length=1)
+    #: FULL replacement payload (None = name-only change). Inverse ops always
+    #: carry the full prior payload — that is what makes diffs/undo journal-only.
+    payload: dict[str, Any] | None = None
+    #: optional optimistic precondition (mirrors PUT /artifacts); None skips.
+    #: Stripped from the canonical stored op (precondition is consumed at apply).
+    artifact_rev: int | None = None
+
+
+class DeleteArtifactOp(BaseModel):
+    kind: Literal["delete_artifact"]
+    id: str
+
+
+#: Model-content ops — the ONLY ops routes/ops.py::_apply_one may receive
+#: (its assert_never enforces the closed set at type-check time).
+ModelOpIn = (
     CreateElementOp
     | UpdateElementOp
     | DeleteElementOp
     | CreateRelationshipOp
     | UpdateRelationshipOp
-    | DeleteRelationshipOp,
-    Field(discriminator="kind"),
-]
+    | DeleteRelationshipOp
+)
+
+#: Artifact-row ops (Phase 1 artefacts revamp) — applied by
+#: api/artifact_ops.py to DB rows, never to the in-memory model.
+ArtifactOpIn = CreateArtifactOp | UpdateArtifactOp | DeleteArtifactOp
+
+OpIn = Annotated[ModelOpIn | ArtifactOpIn, Field(discriminator="kind")]
 
 #: (de)serializes a list of ops to/from plain JSON for the durable commit
 #: journal (Commit.ops / inverse_ops). Mode "json" keeps Literal "kind" tags
@@ -508,6 +552,10 @@ class SaveModelResponse(BaseModel):
 class LockTargetIn(BaseModel):
     resource_id: str
     mode: Literal["exclusive", "shared"]
+    #: what the id names; the route canonicalizes to the internal namespace
+    #: ("element" -> bare id, "artifact" -> "art:<id>", "metamodel" -> "mm").
+    #: Defaults to "element" so pre-existing clients are untouched.
+    type: Literal["element", "artifact", "metamodel"] = "element"
 
 
 class LockRequest(BaseModel):
@@ -595,6 +643,12 @@ class CommitResponse(OpsResponse):
     commit_id: str
     message: str = ""
     validation_error_count: int = 0
+    #: artifact half of the commit delta (created + updated rows, headers
+    #: only — the client refetches a payload it actually has open). Empty on
+    #: a model-only commit, which is why both fields default rather than
+    #: being required: every pre-artifact client keeps parsing the response.
+    changed_artifacts: list[ArtifactHeaderOut] = Field(default_factory=list)
+    deleted_artifact_ids: list[str] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -631,6 +685,85 @@ class CommitHistoryResponse(BaseModel):
 
     commits: list[CommitSummaryOut]
     has_more: bool
+
+
+# ---------------------------------------------------------------------------
+# Per-commit diff schemas (Phase 1 artefacts revamp: GET /commits/{rev}/diff)
+# ---------------------------------------------------------------------------
+
+
+class JsonChangeOut(BaseModel):
+    """One leaf-level difference between two JSON documents.
+
+    ``path`` is a dotted key path into the document ("$" for the document root,
+    i.e. the two values are not both objects). Lists and scalars are reported
+    wholesale at their own path — see ``commit_diff.json_structural_diff`` for
+    why a reordered list is one reviewable change rather than N index deltas.
+    """
+
+    path: str
+    before: Any = None
+    after: Any = None
+
+
+class ArtifactDiffAddedOut(BaseModel):
+    """An artifact this commit created, in its post-commit state."""
+
+    id: str
+    kind: str
+    name: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class ArtifactDiffModifiedOut(BaseModel):
+    """An artifact this commit changed. ``kind`` may be ``"unknown"``: an
+    update op carries no kind on either side, so it is resolved from the row,
+    which a LATER commit may have deleted."""
+
+    id: str
+    kind: str
+    name_before: str
+    name_after: str
+    changes: list[JsonChangeOut] = Field(default_factory=list)
+
+
+class ArtifactDiffDeletedOut(BaseModel):
+    """An artifact this commit deleted, in its pre-commit state. Reconstructed
+    from the delete's inverse op (a create carrying kind + name + full
+    payload), so it stays renderable long after the row is gone."""
+
+    id: str
+    kind: str
+    name: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class CommitArtifactDiffs(BaseModel):
+    added: list[ArtifactDiffAddedOut] = Field(default_factory=list)
+    modified: list[ArtifactDiffModifiedOut] = Field(default_factory=list)
+    deleted: list[ArtifactDiffDeletedOut] = Field(default_factory=list)
+
+
+class CommitDiffOut(BaseModel):
+    """Everything one commit changed, across content families.
+
+    Model entities reuse the change-request shapes (``CrElementOps`` /
+    ``CrRelationshipOps``) rather than parallel ones, so a client renders a
+    commit diff and a CR diff with the same component. ``scope`` mirrors the
+    commit feed event's field ("model" / "artifact"); ``is_rebind`` is true
+    when either metamodel FK is set, matching ``CommitSummaryOut``.
+    """
+
+    rev: int
+    commit_id: str
+    author_id: str | None = None
+    ts: datetime
+    message: str = ""
+    scope: list[str] = Field(default_factory=list)
+    is_rebind: bool = False
+    elements: CrElementOps = Field(default_factory=CrElementOps)
+    relationships: CrRelationshipOps = Field(default_factory=CrRelationshipOps)
+    artifacts: CommitArtifactDiffs = Field(default_factory=CommitArtifactDiffs)
 
 
 class RevertRequest(BaseModel):

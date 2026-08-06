@@ -26,6 +26,7 @@ target shared pin); they live with the table because they share its types.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Collection
 from dataclasses import dataclass
 from enum import Enum
 
@@ -40,6 +41,29 @@ class LockIntent(Enum):
     CREATE_CHILD = "create_child"
     CONNECT = "connect"
     DELETE = "delete"
+
+
+#: Resource-id namespace (spec 2026-07-29, locking section). Elements and
+#: relationships keep BARE ids — the pre-existing wire format the frontend's
+#: lock badges key on — so only non-model resources carry a prefix. Element
+#: ids are uuid-hex / user ids that never contain ':', so prefix collision
+#: is not a practical concern; all writers go through the helpers below.
+ARTIFACT_PREFIX = "art:"
+FOLDER_PREFIX = "folder:"  # Phase 2 (view folders); declared with its family
+METAMODEL_RESOURCE = "mm"  # singleton — one metamodel binding per project
+
+
+def artifact_resource(artifact_id: str) -> str:
+    return ARTIFACT_PREFIX + artifact_id
+
+
+def is_model_resource(resource_id: str) -> bool:
+    """True for bare element/relationship ids — the resources whose leases
+    gate model mutation (and rebind quiescence)."""
+    return (
+        not resource_id.startswith((ARTIFACT_PREFIX, FOLDER_PREFIX))
+        and resource_id != METAMODEL_RESOURCE
+    )
 
 
 @dataclass(frozen=True)
@@ -211,6 +235,32 @@ class LockTable:
                 del self._by_resource[rid]
         return expired
 
+    def peer_leases(
+        self, resource_ids: Collection[str], holder: str, *, now: float
+    ) -> list[Lease]:
+        """Live leases on any of *resource_ids* held by SOMEONE OTHER than
+        *holder*.
+
+        The "is a peer mid-edit on this?" question, asked by the writers that
+        are NOT themselves lock-verified: the legacy artifact CRUD routes
+        (``PUT``/``DELETE /artifacts/{id}``) and the legacy unlocked
+        ``POST /model/undo``. A lease is only a guarantee if EVERY writer to
+        the resource honours it — a writer that ignores it turns a held lease
+        into a silent lost update, with no error anywhere (the holder's own
+        commit still verifies, applies and wins).
+
+        The caller's OWN lease never blocks them: they are the editor the
+        lease exists for, so locking them out of their own write path would
+        make check-out actively harmful. Same holder-comparison rule as the
+        conflict matrix above (identity, not mode).
+        """
+        wanted = set(resource_ids)
+        return [
+            le
+            for le in self.active_leases(now)
+            if le.resource_id in wanted and le.holder != holder
+        ]
+
     def active_leases(self, now: float) -> list[Lease]:
         """Return all non-expired leases as a pure read — never mutates
         ``_by_resource``. Compaction is left to ``sweep_expired`` (which runs
@@ -231,10 +281,14 @@ class LockTable:
 from typing import TYPE_CHECKING  # noqa: E402
 
 from .schemas import (  # noqa: E402
+    TEMP_ID_PREFIX,
+    CreateArtifactOp,
     CreateElementOp,
     CreateRelationshipOp,
+    DeleteArtifactOp,
     DeleteElementOp,
     DeleteRelationshipOp,
+    UpdateArtifactOp,
     UpdateElementOp,
     UpdateRelationshipOp,
 )
@@ -243,8 +297,6 @@ if TYPE_CHECKING:
     from data_rover.core.model.model import Model
 
     from .schemas import OpIn
-
-_TEMP_ID_PREFIX = "tmp_"
 
 
 def containment_subtree(model: Model, root_id: str) -> list[str]:
@@ -281,7 +333,11 @@ def expand_targets(
             reqs.append(RequiredLock(resource_id=rid, mode=mode, intent=intent))
 
     for rid, mode in targets:
-        if intent is LockIntent.DELETE and mode is LockMode.EXCLUSIVE:
+        if (
+            intent is LockIntent.DELETE
+            and mode is LockMode.EXCLUSIVE
+            and is_model_resource(rid)
+        ):
             for member in containment_subtree(model, rid):
                 add(member, LockMode.EXCLUSIVE)
         else:
@@ -299,7 +355,7 @@ def required_locks(model: Model, ops: list[OpIn]) -> list[RequiredLock]:
     created: set[str] = set()
 
     def add(rid: str, mode: LockMode, intent: LockIntent) -> None:
-        if rid.startswith(_TEMP_ID_PREFIX) or rid in created:
+        if rid.startswith(TEMP_ID_PREFIX) or rid in created:
             return
         if (rid, mode) not in seen:
             seen.add((rid, mode))
@@ -329,4 +385,14 @@ def required_locks(model: Model, ops: list[OpIn]) -> list[RequiredLock]:
             src = rel_source(op.id)
             if src is not None:
                 add(src, LockMode.EXCLUSIVE, LockIntent.DELETE)
+        elif isinstance(op, CreateArtifactOp):
+            # namespaced, to match what the update/delete branches derive
+            # below for the SAME temp id (bare op.temp_id would never match
+            # "art:" + op.id, leaving a same-batch update/delete-by-temp-id
+            # stuck requiring a lease on a resource no one can ever hold).
+            created.add(artifact_resource(op.temp_id))
+        elif isinstance(op, UpdateArtifactOp):
+            add(artifact_resource(op.id), LockMode.EXCLUSIVE, LockIntent.EDIT)
+        elif isinstance(op, DeleteArtifactOp):
+            add(artifact_resource(op.id), LockMode.EXCLUSIVE, LockIntent.DELETE)
     return reqs

@@ -32,6 +32,7 @@ from ..deps import Session, get_request_session, require_model
 from ..feed import rebind_event
 from ..hydration import write_snapshot
 from ..identity import get_current_user
+from ..locking import is_model_resource
 from ..schemas import IssueOut, MetamodelDiffResponse, RebindResponse
 from .ops import _ensure_validation_seeded
 
@@ -107,8 +108,10 @@ async def rebind_metamodel(
 ) -> RebindResponse | JSONResponse:
     """Owner-only, non-destructive metamodel rebind journaled as a commit.
 
-    Refuses (409) when any lease is active — a rebind retypes the whole model
-    and must not silently invalidate an open check-out. Mirrors the commit
+    Refuses (409) when any MODEL lease is active (artifact/folder leases
+    don't block — affected artifacts degrade tolerantly under the new
+    metamodel) — a rebind retypes the whole model and must not silently
+    invalidate an open element/relationship check-out. Mirrors the commit
     route's durable-failure pattern: a DB error fully restores in-memory state.
 
     Correction A applied: persists the original request blob rather than a
@@ -130,7 +133,12 @@ async def rebind_metamodel(
     candidate = _load_candidate(raw_blob)
     state = _ensure_validation_seeded(session, model)
     with session.write_mutex:
-        if session.lock_table.active_leases(time.monotonic()):
+        model_leases = [
+            le
+            for le in session.lock_table.active_leases(time.monotonic())
+            if is_model_resource(le.resource_id)
+        ]
+        if model_leases:
             return JSONResponse(
                 status_code=409,
                 content={"detail": "active locks; rebind requires a quiet project"},

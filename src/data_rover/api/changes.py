@@ -15,6 +15,7 @@ from typing import assert_never
 
 from data_rover.core.model.model import Model
 
+from .artifact_ops import split_ops
 from .schemas import (
     CrElementOps,
     CrOps,
@@ -24,9 +25,9 @@ from .schemas import (
     DeleteElementOp,
     DeleteRelationshipOp,
     ElementOut,
+    ModelOpIn,
     ModifiedElementOut,
     ModifiedRelationshipOut,
-    OpIn,
     RelationshipOut,
     UpdateElementOp,
     UpdateRelationshipOp,
@@ -74,7 +75,7 @@ def _merge_patch(props: dict[str, Any], patch: dict[str, Any]) -> None:
 
 
 def _touch(
-    op: OpIn, touched_els: dict[str, None], touched_rels: dict[str, None]
+    op: ModelOpIn, touched_els: dict[str, None], touched_rels: dict[str, None]
 ) -> None:
     if isinstance(op, CreateElementOp):
         touched_els.setdefault(op.temp_id)
@@ -89,7 +90,7 @@ def _touch(
 
 
 def _apply_inverse(
-    op: OpIn, el_state: dict[str, _ElState], rel_state: dict[str, _RelState]
+    op: ModelOpIn, el_state: dict[str, _ElState], rel_state: dict[str, _RelState]
 ) -> None:
     """Step the scratch entity states one inverse op backwards in history.
 
@@ -136,13 +137,26 @@ def compact_changes(model: Model, op_log: list[AppliedBatch]) -> CrOps:
     states are serialized with ``rev=0``: the session model's rev counters
     only ever move forward, the base rev is unrecoverable — and the CR apply
     path explicitly ignores rev when matching.
+
+    Artifact ops in the log are skipped outright (``split_ops``): a change
+    set is a MODEL diff — ``datarover.cr/v1`` has no representation for an
+    artifact, and artifacts are materialized DB rows that a CR apply would
+    have nothing to match against. Filtering here (rather than widening the
+    two op walkers below) is also what keeps their ``assert_never`` honest:
+    they stay exhaustive over ``ModelOpIn``, so a new MODEL op kind still
+    fails type-checking until it is handled.
     """
     touched_els: dict[str, None] = {}
     touched_rels: dict[str, None] = {}
-    for batch in op_log:
-        for op in batch.ops:
+    #: model-only view of each batch, computed once and reused by the rewind
+    #: pass below (split_ops is O(batch), and this runs over the whole log)
+    model_log: list[tuple[list[ModelOpIn], list[ModelOpIn]]] = [
+        (split_ops(b.ops)[0], split_ops(b.inverse_ops)[0]) for b in op_log
+    ]
+    for batch_ops, batch_inverse in model_log:
+        for op in batch_ops:
             _touch(op, touched_els, touched_rels)
-        for op in batch.inverse_ops:
+        for op in batch_inverse:
             _touch(op, touched_els, touched_rels)
 
     el_state: dict[str, _ElState] = {}
@@ -157,8 +171,8 @@ def compact_changes(model: Model, op_log: list[AppliedBatch]) -> CrOps:
             rel_state[rid] = _RelState(
                 rel.type_name, rel.source_id, rel.target_id, dict(rel.properties)
             )
-    for batch in reversed(op_log):
-        for op in batch.inverse_ops:
+    for _batch_ops, batch_inverse in reversed(model_log):
+        for op in batch_inverse:
             _apply_inverse(op, el_state, rel_state)
 
     elements = CrElementOps()

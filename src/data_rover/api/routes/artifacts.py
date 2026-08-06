@@ -1,24 +1,35 @@
 """Project-artifact CRUD (saved navigations and tables; diagrams in a later
 stage).
 
-Artifacts are DB rows, NOT model content: no leases, no commits, no op-log.
-Concurrency is optimistic via `artifact_rev` (PUT echoes the loaded rev;
-mismatch -> 409 carrying `current_rev`). Every successful write broadcasts an
-`artifact_event` on the session's FeedHub — safe without the write_mutex
-because artifact writes never touch the in-memory model.
+Artifacts are DB rows, NOT model content, so these routes take no
+`write_mutex`: they never touch the in-memory model, and that is also why
+broadcasting an `artifact_event` per successful write is safe here.
 
-Payloads are validated per kind on write via `_PAYLOAD_ADAPTERS`; Stage 1
-added `navigation` (`NAVIGATION_ADAPTER`), Stage 2 added `table`
+Concurrency, since the Phase 1 artefacts revamp, is TWO-layered:
+- optimistic `artifact_rev` (PUT echoes the loaded rev; mismatch -> 409
+  carrying `current_rev`) — this route family's own, older mechanism; and
+- the `art:<id>` LEASES `POST /commits` verifies. These routes are not
+  lock-verified (they take no token and grant nothing), but they must still
+  REFUSE (409) while a peer holds a lease, or the guarantee is empty in both
+  directions: an editor checked out on `art:X` would find their commit
+  quietly overwriting — or overwritten by — a legacy write they never saw.
+  A legacy write bumps no `model_rev`, so the commit path's overlap backstop
+  cannot see it either; this guard is the only thing standing there. The
+  caller's OWN lease never blocks them (see `LockTable.peer_leases`).
+
+Payloads are validated per kind on write via the `artifact_kinds` registry;
+Stage 1 added `navigation` (`NAVIGATION_ADAPTER`), Stage 2 added `table`
 (`TABLE_ADAPTER`) — `diagram`/`diagram_kind` still 422 until their stage
 lands.
 """
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response
-from pydantic import TypeAdapter, ValidationError
+from pydantic import ValidationError
 from sqlalchemy.orm import Session as DbSession
 
 from data_rover.core.navigation.evaluate import evaluate
@@ -28,20 +39,20 @@ from data_rover.core.navigation.resolve import (
     resolve_refs,
 )
 from data_rover.core.navigation.schema import NAVIGATION_ADAPTER, NavigationDefinition
-from data_rover.core.script.lint import derive_entry_points
 from data_rover.core.script.runner import ScriptRunner
 from data_rover.core.script.schema import SNIPPET_ADAPTER, SnippetDefinition
-from data_rover.core.table.schema import TABLE_ADAPTER
 
 from .. import content
+from ..artifact_kinds import get_spec
+from ..artifact_ops import artifact_header
 from ..db import get_db
 from ..db_models import ArtifactKind, ArtifactRow, User
 from ..deps import Session, get_request_session, require_model
 from ..feed import artifact_event
 from ..identity import get_current_user
+from ..locking import artifact_resource
 from ..schemas import (
     ArtifactCreateIn,
-    ArtifactHeaderOut,
     ArtifactListOut,
     ArtifactOut,
     ArtifactUpdateIn,
@@ -57,31 +68,13 @@ from .read import _tree_item  # shared lite projection
 
 router = APIRouter()
 
-#: kind -> payload validator. The route 422s on kinds absent here, so adding
-#: a stage's kind means adding one entry (and its schema) — nothing else.
-_PAYLOAD_ADAPTERS: dict[ArtifactKind, TypeAdapter[Any]] = {
-    ArtifactKind.navigation: NAVIGATION_ADAPTER,
-    ArtifactKind.table: TABLE_ADAPTER,
-    ArtifactKind.code_snippet: SNIPPET_ADAPTER,
-}
 
-
-def _header(row: ArtifactRow) -> ArtifactHeaderOut:
-    entry_points: list[str] | None = None
-    if row.kind is ArtifactKind.code_snippet:
-        raw = row.payload.get("entry_points")
-        entry_points = (
-            [e for e in raw if isinstance(e, str)] if isinstance(raw, list) else []
-        )
-    return ArtifactHeaderOut(
-        id=row.id,
-        kind=row.kind.value,
-        name=row.name,
-        artifact_rev=row.artifact_rev,
-        updated_at=row.updated_at,
-        updated_by=row.updated_by,
-        entry_points=entry_points,
-    )
+#: The row -> header projection lives in ``artifact_ops`` (see its docstring:
+#: the artifact-op applier must capture a header before a DELETE removes the
+#: row, and a service module cannot import a route module). Aliased here so
+#: this module's call sites — and the shape of every artifact feed event —
+#: keep coming from the single implementation.
+_header = artifact_header
 
 
 def _full(row: ArtifactRow) -> ArtifactOut:
@@ -89,14 +82,14 @@ def _full(row: ArtifactRow) -> ArtifactOut:
 
 
 def _validate_payload(kind: ArtifactKind, payload: dict[str, Any]) -> None:
-    adapter = _PAYLOAD_ADAPTERS.get(kind)
-    if adapter is None:
+    spec = get_spec(kind)
+    if spec is None:
         raise HTTPException(
             status_code=422,
             detail=f"artifact kind {kind.value!r} is not supported yet",
         )
     try:
-        adapter.validate_python(payload)
+        spec.adapter.validate_python(payload)
     except ValidationError as exc:
         raise HTTPException(
             status_code=422, detail=f"invalid {kind.value} payload: {exc}"
@@ -104,10 +97,34 @@ def _validate_payload(kind: ArtifactKind, payload: dict[str, Any]) -> None:
 
 
 def _apply_derived_metadata(kind: ArtifactKind, payload: dict[str, Any]) -> None:
-    """Recompute server-owned derived fields in-place. For snippets, entry_points
-    is derived from the code AST and overwrites any client-supplied value."""
-    if kind is ArtifactKind.code_snippet:
-        payload["entry_points"] = derive_entry_points(payload.get("code", ""))
+    """Recompute server-owned derived fields in-place (registry hook)."""
+    spec = get_spec(kind)
+    if spec is not None and spec.derive_metadata is not None:
+        spec.derive_metadata(payload)
+
+
+def _reject_if_peer_locked(session: Session, artifact_id: str, user_id: str) -> None:
+    """409 while a PEER holds a live lease on this artifact (see the module
+    docstring: these routes honour `art:` leases without granting them)."""
+    conflicts = session.lock_table.peer_leases(
+        [artifact_resource(artifact_id)], user_id, now=time.monotonic()
+    )
+    if conflicts:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "artifact is checked out by someone else",
+                "conflicts": [
+                    {
+                        "resource_id": le.resource_id,
+                        "mode": le.mode.value,
+                        "holder_id": le.holder,
+                        "holder_email": le.holder_email,
+                    }
+                    for le in conflicts
+                ],
+            },
+        )
 
 
 def _require_artifact(db: DbSession, project_id: str, artifact_id: str) -> ArtifactRow:
@@ -179,6 +196,7 @@ def update_artifact(
     user: User = Depends(get_current_user),
 ) -> ArtifactOut:
     row = _require_artifact(db, project_id, artifact_id)
+    _reject_if_peer_locked(session, artifact_id, user.id)
     if payload.payload is not None:
         _validate_payload(row.kind, payload.payload)
         _apply_derived_metadata(row.kind, payload.payload)
@@ -219,8 +237,10 @@ def delete_artifact(
     artifact_id: str,
     session: Session = Depends(get_request_session),
     db: DbSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> Response:
     row = _require_artifact(db, project_id, artifact_id)
+    _reject_if_peer_locked(session, artifact_id, user.id)
     header = _header(row).model_dump(mode="json")
     content.delete_artifact(db, row)
     db.commit()
