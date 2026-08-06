@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
 	LockResponseSchema,
+	LockTargetInSchema,
 	OpenResponseSchema,
 	PreviewResponseSchema,
 	CommitResponseSchema
@@ -64,5 +65,39 @@ describe('checkout schemas', () => {
 		});
 		expect(v.commit_id).toBe('c1');
 		expect(v.model_rev).toBe(4);
+	});
+
+	it('parses a commit response carrying the artifact delta', () => {
+		const res = CommitResponseSchema.parse({
+			model_rev: 3,
+			commit_id: 'c1',
+			changed_artifacts: [
+				{
+					id: 'a1',
+					kind: 'table',
+					name: 'T',
+					artifact_rev: 2,
+					updated_at: '2026-08-06T00:00:00Z',
+					updated_by: null,
+					entry_points: null
+				}
+			],
+			deleted_artifact_ids: ['a2']
+		});
+		expect(res.changed_artifacts[0].artifact_rev).toBe(2);
+		expect(res.deleted_artifact_ids).toEqual(['a2']);
+	});
+
+	it('defaults the artifact delta to empty on a model-only commit', () => {
+		const res = CommitResponseSchema.parse({ model_rev: 3, commit_id: 'c1' });
+		expect(res.changed_artifacts).toEqual([]);
+		expect(res.deleted_artifact_ids).toEqual([]);
+	});
+
+	it('accepts an artifact-typed lock target', () => {
+		const t = LockTargetInSchema.parse({ resource_id: 'a1', mode: 'exclusive', type: 'artifact' });
+		expect(t.type).toBe('artifact');
+		// absent type stays absent (backend defaults to element)
+		expect(LockTargetInSchema.parse({ resource_id: 'e1', mode: 'shared' }).type).toBeUndefined();
 	});
 });

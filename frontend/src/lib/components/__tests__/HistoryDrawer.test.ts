@@ -117,7 +117,9 @@ describe('HistoryDrawer revert', () => {
 			issue_counts: {},
 			commit_id: 'c3',
 			message: 'Revert to rev 1',
-			validation_error_count: 0
+			validation_error_count: 0,
+			changed_artifacts: [],
+			deleted_artifact_ids: []
 		});
 		const c = mount(HistoryDrawer, { target: document.body, props: { open: true } });
 		flushSync();
