@@ -1,8 +1,13 @@
 export {
+	ARTIFACT_RESOURCE_PREFIX,
 	TEMP_ID_PREFIX,
+	artifactResource,
 	createTempId,
+	isArtifactResource,
 	isTempId,
+	type ArtifactOp,
 	type ElementOp,
+	type ModelOp,
 	type Op,
 	type RelationshipOp,
 	type Snapshot
@@ -116,6 +121,7 @@ export {
 	initWorkspaceTabs,
 	openArtifactTab,
 	openNavigationTab,
+	repointTabArtifact,
 	resetWorkspaceTabs,
 	retitleTab,
 	setActiveTab,
@@ -146,6 +152,7 @@ export {
 	getLockFor,
 	getLockState,
 	getPresence,
+	hasModelLocks,
 	onLockEvent,
 	startRealtime,
 	stopRealtime
@@ -168,13 +175,25 @@ export {
 	handleRemoteLockEvent,
 	previewStaged,
 	commitStaged,
+	discardArtifact,
 	discardElement,
 	discardElementCascade,
 	discardAll,
+	reacquireOpenArtifactLeases,
+	releaseArtifactIfUnneeded,
 	type CheckoutResult,
 	type LockConflictLite
 } from './checkout.svelte';
-export { acquireLocks, editLock, connectLock, deleteLock } from './edit-gate';
+export {
+	acquireLocks,
+	acquireArtifactLease,
+	artifactDeleteLock,
+	artifactEditLock,
+	editLock,
+	connectLock,
+	deleteLock,
+	lockHolderLabel
+} from './edit-gate';
 export { stageSnippetOps, type StageOutcome } from './snippet-stage';
 export { lockBadgeFor, type LockBadge } from './lock-badge';
 export { getLockNotice, setLockNotice } from './lock-notice.svelte';
@@ -226,16 +245,15 @@ export { isProjectOpening, setProjectOpening } from './project-open.svelte';
 export type { ViewChange } from './view-diff';
 export {
 	artifactHeaderById,
-	createCodeSnippetArtifact,
-	createNavigationArtifact,
-	createTableArtifact,
+	assertNoNameClash,
 	getArtifactHeaders,
 	getArtifactsLoading,
+	getCommittedArtifactHeaders,
 	loadArtifacts,
+	referenceableArtifactHeaders,
 	removeArtifact,
 	renameArtifact,
-	resetArtifacts,
-	type CodeSnippetPayload
+	resetArtifacts
 } from './artifacts.svelte';
 export {
 	applyStructuralEdit,
@@ -244,8 +262,8 @@ export {
 	ensureEmbeddedDraft,
 	getDraft,
 	getEvalError,
+	getNavLockHolder,
 	getPreview,
-	getSaveConflict,
 	getSelectedPath,
 	hasDirtyNavDrafts,
 	isCardCollapsed,
@@ -255,6 +273,7 @@ export {
 	registerVisibleNode,
 	reloadDraft,
 	resetNavigationEditors,
+	retryNavLock,
 	runPreview,
 	saveAsDraft,
 	saveDraft,
@@ -262,6 +281,7 @@ export {
 	setCardCollapsed,
 	setDraftName,
 	setEmbeddedRowElement,
+	setNavLockDenied,
 	unregisterVisibleNode,
 	updateDefinition,
 	type EmbeddedContext,
@@ -275,17 +295,19 @@ export {
 	ensureSnippetDraft,
 	getSnippetDraft,
 	getSnippetLint,
+	getSnippetLockHolder,
 	getSnippetRun,
-	getSnippetSaveConflict,
 	hasDirtySnippetDrafts,
 	LINT_DEBOUNCE_MS,
 	markRunStaged,
 	reloadSnippetDraft,
 	removeSnippetElement,
 	resetSnippetEditors,
+	retrySnippetLock,
 	runSnippetTab,
 	saveSnippetDraft,
 	setSnippetEntry,
+	setSnippetLockDenied,
 	setSnippetName,
 	stopSnippetTab,
 	updateSnippetCode,
@@ -306,10 +328,10 @@ export {
 	ensureTableRange,
 	getScriptErrors,
 	getScriptErrorsPhase,
-	getTableConflict,
 	getTableDraft,
 	getTableError,
 	getTableLoading,
+	getTableLockHolder,
 	getTablePage,
 	getTableScriptStatus,
 	getTableSort,
@@ -327,9 +349,11 @@ export {
 	resetTableEditors,
 	restoreTableExportSettings,
 	resumeTableEvaluation,
+	retryTableLock,
 	revertSuspendedTableEdits,
 	saveAsTableDraft,
 	saveTableDraft,
+	setTableLockDenied,
 	setTableName,
 	setTableSort,
 	suspendTableEvaluation,
@@ -392,3 +416,28 @@ export {
 	setSnippetSplitRatio,
 	resetEditorSize
 } from './editor-size.svelte';
+export {
+	clearStagedArtifacts,
+	discardAllStagedArtifacts,
+	getStagedArtifactDepth,
+	getStagedArtifactEntries,
+	getStagedArtifactOps,
+	hasStagedArtifactOp,
+	notifyArtifactCommit,
+	onArtifactCommit,
+	onArtifactStageDiscarded,
+	onArtifactStagedDelete,
+	overlayArtifactHeaders,
+	repointStagedArtifactSourceTab,
+	resetArtifactEdits,
+	revertStagedArtifact,
+	stageArtifactCreate,
+	stageArtifactDelete,
+	stageArtifactUpdate,
+	stagedArtifactState,
+	stagedCreateSourceTab,
+	type ArtifactCommitInfo,
+	type StagedArtifactEntry
+} from './artifact-edits.svelte';
+export { markEditorLockDenied } from './artifact-lock-denied';
+export { isProjectQuiet } from './quiet';

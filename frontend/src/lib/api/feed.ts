@@ -27,6 +27,9 @@ export type FeedEvent =
 			changed_relationships: unknown[];
 			deleted_element_ids: string[];
 			deleted_relationship_ids: string[];
+			/** which content families the commit touched ("model"/"artifact");
+			 * reducer treats absent as ["model"] defensively */
+			scope?: string[];
 	  }
 	| { type: 'lock'; action: 'acquired' | 'released' | 'expired'; leases: LeaseLite[] }
 	| { type: 'presence'; action: 'join' | 'leave'; user_id: string; connected: string[] }

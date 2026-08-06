@@ -8,13 +8,16 @@ import {
 	type SnippetLintOut,
 	type SnippetDocsOut
 } from './types';
-import type { Op } from '$lib/state/ops';
+import type { ModelOp } from '$lib/state/ops';
 import type { z } from 'zod';
 
 /** SnippetRunOut with `ops` typed as the staged-buffer wire format — the
  * backend records ops in exactly the `state/ops.ts` shape (validated through
- * OPS_ADAPTER server-side), so the cast is the contract, not a guess. */
-export type SnippetRunOut = Omit<z.infer<typeof SnippetRunOutSchema>, 'ops'> & { ops: Op[] };
+ * OPS_ADAPTER server-side), so the cast is the contract, not a guess.
+ * `ModelOp`, not the full `Op` union: the guest facade has no artifact
+ * surface, and `POST /snippets/run` refuses a guest-proposed artifact op
+ * outright (CLAUDE.md), so a dry-run batch can only ever hold model ops. */
+export type SnippetRunOut = Omit<z.infer<typeof SnippetRunOutSchema>, 'ops'> & { ops: ModelOp[] };
 
 export interface SnippetRunBody {
 	run_id: string;

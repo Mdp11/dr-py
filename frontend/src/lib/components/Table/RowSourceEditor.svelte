@@ -12,8 +12,8 @@
 	import {
 		closeDraft,
 		ensureEmbeddedDraft,
-		getArtifactHeaders,
 		getDraft,
+		referenceableArtifactHeaders,
 		updateTableDefinition
 	} from '$lib/state';
 	import { emptyPath } from '$lib/navigation/tree';
@@ -26,7 +26,7 @@
 	let { tabId, defn }: { tabId: string; defn: TableDefinition } = $props();
 
 	const rowSource = $derived(defn.row_source);
-	const navHeaders = $derived(getArtifactHeaders().filter((a) => a.kind === 'navigation'));
+	const navHeaders = $derived(referenceableArtifactHeaders('navigation'));
 
 	const embId = `navemb:${crypto.randomUUID()}`;
 	const inline = $derived(rowSource.kind !== 'scope' && rowSource.navigation.definition != null);

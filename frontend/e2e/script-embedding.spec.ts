@@ -28,6 +28,7 @@ import { dirname, join } from 'node:path';
 import { loadFiles } from './helpers/load';
 import { openDefaultProject } from './helpers/auth';
 import { expectLiveFeed } from './helpers/feed';
+import { commitStaged } from './helpers/commit';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const METAMODEL_PATH = join(__dirname, '..', '..', 'examples', 'smart-city.metamodel.yaml');
@@ -110,6 +111,12 @@ test('script column: ref snippet computes values + error cell + sorts; inline sc
 	await setCode(page, snippetEditor, SCRIPT_COLUMN_CODE);
 	await page.getByTestId('snippet-save').click();
 	await expect(page.getByTestId('snippet-save')).toHaveText('Save', { timeout: 10_000 });
+	// Save only STAGED a create_artifact. The script column's "Saved snippet"
+	// picker lists REFERENCEABLE artifacts, which deliberately excludes anything
+	// staged in the current batch (a ref only resolves if its create ships ahead
+	// of it in the same batch, and the user may still revert it) — so the ref
+	// below can only find this snippet once it is committed.
+	await commitStaged(page);
 
 	// --- 1. A minimal nav (SoftwareSystem start, no hop — see file header) ->
 	// "Open as table" (identical entry point to table.spec.ts). -------------

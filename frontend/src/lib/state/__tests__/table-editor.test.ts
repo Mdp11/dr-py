@@ -1,15 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as artifactsApi from '$lib/api/artifacts';
+import * as checkoutApi from '$lib/api/checkout';
 import { ConflictError } from '$lib/api/errors';
 import * as tablesApi from '$lib/api/tables';
+import type { FeedEvent } from '$lib/api/feed';
+import type { ArtifactHeader } from '$lib/api/types';
 import {
 	closeTableDraft,
 	ensureTableDraft,
 	ensureTableRange,
-	getTableConflict,
 	getTableDraft,
 	getTableError,
 	getTableLoading,
+	getTableLockHolder,
 	getTablePage,
 	getTableSort,
 	getTableWarnings,
@@ -19,14 +22,29 @@ import {
 	remapTableSortForMove,
 	remapTableSortForRemove,
 	resetTableEditors,
+	retryTableLock,
 	saveAsTableDraft,
 	saveTableDraft,
 	setTableName,
 	setTableSort,
 	updateTableDefinition
 } from '../table-editor.svelte';
-import { resetWorkspaceTabs } from '../workspace.svelte';
-import { resetArtifacts } from '../artifacts.svelte';
+import { getDynamicTabs, openArtifactTab, resetWorkspaceTabs } from '../workspace.svelte';
+import { loadArtifacts, resetArtifacts } from '../artifacts.svelte';
+import {
+	clearStagedArtifacts,
+	getStagedArtifactOps,
+	notifyArtifactCommit,
+	resetArtifactEdits,
+	revertStagedArtifact,
+	stageArtifactDelete,
+	stagedCreateSourceTab
+} from '../artifact-edits.svelte';
+import { isCheckedOutByMe, resetCheckout, setProjectInfo } from '../checkout.svelte';
+// NB: `handleFeedEvent` only — never `resetRealtime` here, which would clear the
+// module-load commit-tap table-editor registers and silently disarm the test.
+import { handleFeedEvent } from '../realtime.svelte';
+import { isTempId } from '../ops';
 
 /** Flush the microtask/macrotask queue so a fire-and-forget `loadTablePage`
  * call (triggered by `updateTableDefinition`/`setTableSort`) has settled. */
@@ -58,10 +76,83 @@ function pageAt(offset: number, count: number, total: number, model_rev = 1) {
 	};
 }
 
+function header(id: string, name: string, rev = 1, kind = 'table'): ArtifactHeader {
+	return {
+		id,
+		kind,
+		name,
+		artifact_rev: rev,
+		updated_at: '',
+		updated_by: null,
+		entry_points: null
+	};
+}
+
+/** The saved table every `tbl:a1` test opens. */
+function mockGetTable(id = 'a1', name = 'Sensors', rev = 4) {
+	return vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue({
+		...header(id, name, rev),
+		payload: {
+			schema_version: 1,
+			default_cell_mode: 'collapse',
+			row_source: { kind: 'scope', types: [], criteria: [] },
+			columns: [{ kind: 'element', source: { kind: 'row', chain_index: 0 }, header: '' }]
+		}
+	});
+}
+
+/** Mirror of the backend's lock canonicalization (see checkout.artifact.test.ts):
+ * targets go out with the bare id + `type: "artifact"`, leases come back keyed
+ * `art:<id>` under one token per call. */
+function mockAcquire() {
+	return vi.spyOn(checkoutApi, 'acquireLocks').mockImplementation(async (req) => {
+		const token = `t_${req.targets[0].resource_id}`;
+		return {
+			token,
+			leases: req.targets.map((t) => ({
+				resource_id: t.type === 'artifact' ? `art:${t.resource_id}` : t.resource_id,
+				mode: t.mode,
+				holder: 'me',
+				token,
+				intent: req.intent,
+				expires_at: 1
+			}))
+		};
+	});
+}
+
+/** What POST /locks throws when a peer holds the artifact. */
+function lockConflict(email: string): ConflictError {
+	return new ConflictError(
+		409,
+		{
+			conflicts: [
+				{ resource_id: 'art:a1', held_by: 'u2', held_by_email: email, held_mode: 'exclusive' }
+			]
+		},
+		'lock conflict'
+	);
+}
+
+/** The temp id of the one staged `create_artifact` op in the buffer. */
+function stagedTempId(): string {
+	const op = getStagedArtifactOps().find((o) => o.kind === 'create_artifact');
+	if (op?.kind !== 'create_artifact') throw new Error('no staged create in the buffer');
+	return op.temp_id;
+}
+
+/** The checked-out-editor path: the default role after `resetCheckout` is
+ * viewer, which short-circuits the lease open before any network call. */
+function asEditor() {
+	setProjectInfo({ role: 'editor', lockTtlSeconds: 100 });
+}
+
 beforeEach(() => {
 	resetTableEditors();
 	resetWorkspaceTabs();
 	resetArtifacts();
+	resetArtifactEdits();
+	resetCheckout();
 });
 afterEach(() => {
 	resetTableEditors();
@@ -89,6 +180,24 @@ describe('table-editor', () => {
 		await flush();
 		expect(spy).toHaveBeenCalled();
 		expect(getTablePage('tbl:draft:1')).toBeDefined();
+	});
+
+	it('treats a TEMP-id tab as an unsaved draft rather than fetching it', async () => {
+		// A save-as fork lives under `tbl:<tempId>`, which names nothing
+		// server-side: `getArtifact('tmp_…')` would 404 and, since our only caller
+		// is a fire-and-forget `$effect`, the rejection would strand the tab on
+		// "Loading…" forever. The `tbl:draft:` prefix alone does not catch it.
+		asEditor();
+		const acquire = mockAcquire();
+		const get = vi.spyOn(artifactsApi, 'getArtifact');
+		const evaluate = vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
+
+		const draft = await ensureTableDraft('tbl:tmp_abc');
+
+		expect(get).not.toHaveBeenCalled();
+		expect(acquire).not.toHaveBeenCalled();
+		expect(evaluate).not.toHaveBeenCalled();
+		expect(draft.artifactId).toBeNull();
 	});
 
 	it('setTableSort resets the loaded page offset', async () => {
@@ -286,111 +395,162 @@ describe('table-editor', () => {
 		expect(getTablePage('tbl:draft:4')).toBeUndefined();
 	});
 
-	it('first save creates the artifact and rebinds the draft under tbl:<id>', async () => {
+	it('saveTableDraft on an unsaved draft stages a create and binds the draft to the temp id', async () => {
 		vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
-		const create = vi.spyOn(artifactsApi, 'createArtifact').mockResolvedValue({
-			id: 'a9',
-			kind: 'table',
-			name: 'Mine',
-			artifact_rev: 1,
-			updated_at: '',
-			updated_by: null,
-			entry_points: null,
-			payload: {}
-		});
-		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({ items: [] });
-		await ensureTableDraft('tbl:draft:5');
-		setTableName('tbl:draft:5', 'Mine');
-		await saveTableDraft('tbl:draft:5');
-		expect(create).toHaveBeenCalled();
-		// The old draft-tab key must not leak after the rebind.
-		expect(getTableDraft('tbl:draft:5')).toBeUndefined();
-		expect(getTableDraft('tbl:a9')?.artifactRev).toBe(1);
-		expect(getTableDraft('tbl:a9')?.dirty).toBe(false);
-	});
+		const tabId = openArtifactTab('table', { artifactId: null, title: 'New table' });
+		await ensureTableDraft(tabId);
+		setTableName(tabId, 'Mine');
+		const definition = getTableDraft(tabId)!.definition;
 
-	it('save conflict records the server rev from the 409 detail body', async () => {
-		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue({
-			id: 'a1',
-			kind: 'table',
-			name: 'Sensors',
-			artifact_rev: 4,
-			updated_at: '',
-			updated_by: null,
-			entry_points: null,
-			payload: {
-				schema_version: 1,
-				default_cell_mode: 'collapse',
-				row_source: { kind: 'scope', types: [], criteria: [] },
-				columns: [{ kind: 'element', source: { kind: 'row', chain_index: 0 }, header: '' }]
+		await saveTableDraft(tabId);
+
+		expect(getStagedArtifactOps()).toEqual([
+			{
+				kind: 'create_artifact',
+				temp_id: expect.stringMatching(/^tmp_/),
+				artifact_kind: 'table',
+				name: 'Mine',
+				payload: definition
 			}
-		});
-		vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
-		await ensureTableDraft('tbl:a1');
-		vi.spyOn(artifactsApi, 'updateArtifact').mockRejectedValue(
-			new ConflictError(
-				409,
-				{ detail: { message: 'artifact was modified by someone else', current_rev: 7 } },
-				'HTTP 409'
-			)
-		);
-		await expect(saveTableDraft('tbl:a1')).rejects.toBeInstanceOf(ConflictError);
-		expect(getTableConflict('tbl:a1')).toBe(7);
+		]);
+		const draft = getTableDraft(tabId)!;
+		expect(isTempId(draft.artifactId!)).toBe(true);
+		expect(draft.dirty).toBe(false);
+		// The tab KEY is NOT re-keyed at stage time: it keeps living under
+		// tbl:draft:N until the commit's id_map supplies a canonical id. The tab
+		// RECORD does follow the draft onto the temp id.
+		expect(getDynamicTabs()[0].id).toBe(tabId);
+		expect(getDynamicTabs()[0].artifactId).toBe(draft.artifactId);
 	});
 
-	it('a name-clash 409 on create does NOT enter rev-conflict state', async () => {
+	it('re-saving a staged create folds back into the create op', async () => {
 		vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
-		await ensureTableDraft('tbl:draft:6');
-		setTableName('tbl:draft:6', 'Taken');
-		vi.spyOn(artifactsApi, 'createArtifact').mockRejectedValue(
-			new ConflictError(409, { detail: "a table named 'Taken' already exists" }, 'name clash')
-		);
-		await expect(saveTableDraft('tbl:draft:6')).rejects.toBeInstanceOf(ConflictError);
-		expect(getTableConflict('tbl:draft:6')).toBeUndefined();
-		expect(getTableDraft('tbl:draft:6')?.name).toBe('Taken');
-		expect(getTableDraft('tbl:draft:6')?.artifactId).toBeNull();
-	});
+		const tabId = openArtifactTab('table', { artifactId: null, title: 'New table' });
+		const draft = await ensureTableDraft(tabId);
+		setTableName(tabId, 'Mine');
+		await saveTableDraft(tabId);
+		const tempId = getTableDraft(tabId)!.artifactId!;
+		const edited = {
+			...draft.definition,
+			row_source: { kind: 'scope' as const, types: ['Sensor'], criteria: [] }
+		};
+		updateTableDefinition(tabId, edited);
+		setTableName(tabId, 'Renamed');
+		await flush();
 
-	it('saveAsTableDraft forks into a new artifact, leaving the original untouched', async () => {
-		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue({
-			id: 'a1',
-			kind: 'table',
-			name: 'Sensors',
-			artifact_rev: 4,
-			updated_at: '',
-			updated_by: null,
-			entry_points: null,
-			payload: {
-				schema_version: 1,
-				default_cell_mode: 'collapse',
-				row_source: { kind: 'scope', types: [], criteria: [] },
-				columns: [{ kind: 'element', source: { kind: 'row', chain_index: 0 }, header: '' }]
+		await saveTableDraft(tabId);
+
+		// Still ONE op, still a create: the backend resolves update_artifact ids
+		// literally, so a create+update pair for the same temp id would 422.
+		expect(getStagedArtifactOps()).toEqual([
+			{
+				kind: 'create_artifact',
+				temp_id: tempId,
+				artifact_kind: 'table',
+				name: 'Renamed',
+				payload: edited
 			}
-		});
+		]);
+		expect(getTableDraft(tabId)?.artifactId).toBe(tempId); // no second temp id minted
+		expect(getTableDraft(tabId)?.dirty).toBe(false);
+	});
+
+	it('saveTableDraft on a saved artifact stages a full-payload update', async () => {
+		asEditor();
+		mockAcquire();
+		mockGetTable();
 		vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
-		await ensureTableDraft('tbl:a1');
-		const create = vi.spyOn(artifactsApi, 'createArtifact').mockResolvedValue({
-			id: 'a9',
-			kind: 'table',
-			name: 'Copy',
-			artifact_rev: 1,
-			updated_at: '',
-			updated_by: null,
-			entry_points: null,
-			payload: {}
-		});
-		const update = vi.spyOn(artifactsApi, 'updateArtifact');
-		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({ items: [] });
+		const draft = await ensureTableDraft('tbl:a1');
+		const edited = {
+			...draft.definition,
+			row_source: { kind: 'scope' as const, types: ['Sensor'], criteria: [] }
+		};
+		updateTableDefinition('tbl:a1', edited);
+		await flush();
 
-		await saveAsTableDraft('tbl:a1', 'Copy');
+		await saveTableDraft('tbl:a1');
 
-		expect(create).toHaveBeenCalled();
-		expect(update).not.toHaveBeenCalled();
-		expect(getTableDraft('tbl:a1')).toBeUndefined();
-		const newDraft = getTableDraft('tbl:a9')!;
-		expect(newDraft.name).toBe('Copy');
-		expect(newDraft.artifactId).toBe('a9');
-		expect(newDraft.dirty).toBe(false);
+		expect(getStagedArtifactOps()).toEqual([
+			{ kind: 'update_artifact', id: 'a1', name: 'Sensors', payload: edited }
+		]);
+		expect(getTableDraft('tbl:a1')?.dirty).toBe(false);
+		expect(getTableDraft('tbl:a1')?.artifactId).toBe('a1');
+	});
+
+	it('re-saving coalesces into one staged op carrying the latest payload', async () => {
+		asEditor();
+		mockAcquire();
+		mockGetTable();
+		vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
+		const draft = await ensureTableDraft('tbl:a1');
+		const first = {
+			...draft.definition,
+			row_source: { kind: 'scope' as const, types: ['First'], criteria: [] }
+		};
+		updateTableDefinition('tbl:a1', first);
+		await flush();
+		await saveTableDraft('tbl:a1');
+		const second = {
+			...draft.definition,
+			row_source: { kind: 'scope' as const, types: ['Second'], criteria: [] }
+		};
+		updateTableDefinition('tbl:a1', second);
+		await flush();
+		await saveTableDraft('tbl:a1');
+
+		expect(getStagedArtifactOps()).toEqual([
+			{ kind: 'update_artifact', id: 'a1', name: 'Sensors', payload: second }
+		]);
+	});
+
+	it('saveTableDraft refuses a name another table already uses', async () => {
+		vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
+		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({ items: [header('a2', 'Taken')] });
+		await loadArtifacts();
+		const tabId = openArtifactTab('table', { artifactId: null, title: 'New table' });
+		await ensureTableDraft(tabId);
+		setTableName(tabId, 'Taken');
+
+		await expect(saveTableDraft(tabId)).rejects.toThrow(/named "Taken" already exists/);
+		// Nothing staged, and the draft is untouched (still unsaved + dirty).
+		expect(getStagedArtifactOps()).toEqual([]);
+		expect(getTableDraft(tabId)?.artifactId).toBeNull();
+		expect(getTableDraft(tabId)?.dirty).toBe(true);
+	});
+
+	it('evaluates the INLINE definition while a save is staged but uncommitted', async () => {
+		// A staged save has not reached the server: evaluating by artifactId would
+		// re-read the OLD payload and show the user a table they stopped editing.
+		asEditor();
+		mockAcquire();
+		mockGetTable();
+		const spy = vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
+		const draft = await ensureTableDraft('tbl:a1');
+		// pristine + nothing staged: evaluate by artifactId (backend cache reuse)
+		expect(spy.mock.calls.at(-1)![0]).toMatchObject({ artifactId: 'a1' });
+		const edited = {
+			...draft.definition,
+			row_source: { kind: 'scope' as const, types: ['Sensor'], criteria: [] }
+		};
+		updateTableDefinition('tbl:a1', edited);
+		await flush();
+
+		await saveTableDraft('tbl:a1');
+		expect(getTableDraft('tbl:a1')?.dirty).toBe(false); // clean, but uncommitted
+
+		spy.mockClear();
+		await loadTablePage('tbl:a1', 0);
+		const staged = spy.mock.calls.at(-1)![0];
+		expect('artifactId' in staged).toBe(false);
+		expect(staged.definition).toEqual(edited);
+
+		// Once the commit lands (and the buffer is cleared) the server head IS the
+		// draft again, so the per-artifact order cache is worth using once more.
+		clearStagedArtifacts(); // `commitStaged` clears BEFORE it notifies
+		notifyArtifactCommit({ idMap: {}, changed: [header('a1', 'Sensors', 5)], deletedIds: [] });
+		spy.mockClear();
+		await loadTablePage('tbl:a1', 0);
+		expect(spy.mock.calls.at(-1)![0]).toMatchObject({ artifactId: 'a1' });
 	});
 
 	it('reloadTableDraft drops local state and re-fetches the server copy', async () => {
@@ -424,13 +584,13 @@ describe('table-editor', () => {
 		setTableSort('tbl:draft:7', { column: 0, direction: 'asc' });
 		await flush();
 		closeTableDraft('tbl:draft:7');
-		// closeTableDraft touches all six per-tab maps — every one must be cleared.
+		// closeTableDraft touches every per-tab map — all of them must be cleared.
 		expect(getTableDraft('tbl:draft:7')).toBeUndefined();
 		expect(getTablePage('tbl:draft:7')).toBeUndefined();
 		expect(getTableSort('tbl:draft:7')).toBeUndefined();
 		expect(getTableLoading('tbl:draft:7')).toBe(false);
 		expect(getTableError('tbl:draft:7')).toBeUndefined();
-		expect(getTableConflict('tbl:draft:7')).toBeUndefined();
+		expect(getTableLockHolder('tbl:draft:7')).toBeNull();
 	});
 
 	it('a stale evaluate response after a newer definition edit is dropped', async () => {
@@ -449,7 +609,7 @@ describe('table-editor', () => {
 		expect(getTablePage('tbl:draft:8')?.total).not.toBe(1);
 	});
 
-	it('a save landing while a load is in flight does not strand the new tab on loading', async () => {
+	it('a commit landing while a load is in flight does not strand the rebound tab on loading', async () => {
 		// Hold the first evaluate open, resolve the re-issued one immediately.
 		let resolveInflight!: (v: typeof EMPTY_PAGE) => void;
 		const inflightPage = new Promise<typeof EMPTY_PAGE>((res) => (resolveInflight = res));
@@ -457,24 +617,22 @@ describe('table-editor', () => {
 			.spyOn(tablesApi, 'evaluateTable')
 			.mockImplementationOnce(() => inflightPage)
 			.mockResolvedValue(EMPTY_PAGE);
-		vi.spyOn(artifactsApi, 'createArtifact').mockResolvedValue({
-			id: 'a9',
-			kind: 'table',
-			name: 'Mine',
-			artifact_rev: 1,
-			updated_at: '',
-			updated_by: null,
-			entry_points: null,
-			payload: {}
-		});
-		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({ items: [] });
 
-		const draft = await ensureTableDraft('tbl:draft:9'); // new drafts do not auto-load
+		const tabId = openArtifactTab('table', { artifactId: null, title: 'New table' });
+		const draft = await ensureTableDraft(tabId); // new drafts do not auto-load
+		await saveTableDraft(tabId); // stages the create; the tab is NOT re-keyed yet
+		const tempId = getTableDraft(tabId)!.artifactId!;
 		// Kick a load and leave it unresolved (updateTableDefinition fires it).
-		updateTableDefinition('tbl:draft:9', { ...draft.definition });
-		expect(getTableLoading('tbl:draft:9')).toBe(true);
-		// Save before that load resolves: the draft key is retired mid-flight.
-		await saveTableDraft('tbl:draft:9');
+		updateTableDefinition(tabId, { ...draft.definition });
+		expect(getTableLoading(tabId)).toBe(true);
+
+		// The commit rebinds the tab mid-flight: the old key is retired.
+		notifyArtifactCommit({
+			idMap: { [tempId]: 'a9' },
+			changed: [header('a9', 'New table', 1)],
+			deletedIds: []
+		});
+
 		// The orphaned request finally resolves — but its generation is stale now.
 		resolveInflight(EMPTY_PAGE);
 		await flush();
@@ -505,6 +663,40 @@ describe('table-editor', () => {
 		// Chunk-aligned start covering [250, 320): offset 200, limit 200.
 		expect(lastCall.offset ?? 0).toBe(200);
 		expect(lastCall.limit).toBe(200);
+	});
+
+	it('a peer commit re-pages open tables only when it touched model content', async () => {
+		const commit = (scope: string[]): FeedEvent => ({
+			type: 'commit',
+			rev: scope.length, // any forward rev; the reducer adopts it either way
+			commit_id: 'c',
+			author_id: 'peer',
+			message: 'm',
+			validation_error_count: 0,
+			changed_elements: [],
+			changed_relationships: [],
+			deleted_element_ids: [],
+			deleted_relationship_ids: [],
+			scope
+		});
+
+		const spy = vi
+			.spyOn(tablesApi, 'evaluateTable')
+			.mockImplementation(async (args) => pageAt(args.offset ?? 0, args.limit ?? 100, 1000));
+		await ensureTableDraft('tbl:draft:11');
+		await loadTablePage('tbl:draft:11', 0);
+		await flush();
+		spy.mockClear();
+
+		// Artifact-only: no model content changed and no server-side evaluation
+		// cache was invalidated, so re-paging every open table is pure waste.
+		handleFeedEvent(commit(['artifact']));
+		await flush();
+		expect(spy).not.toHaveBeenCalled();
+
+		handleFeedEvent(commit(['model', 'artifact']));
+		await flush();
+		expect(spy).toHaveBeenCalledTimes(1);
 	});
 
 	describe('lazy range loading', () => {
@@ -598,46 +790,420 @@ describe('table-editor', () => {
 	});
 
 	it('save-as landing while a load is in flight also re-issues under the new tab', async () => {
-		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue({
-			id: 'a1',
-			kind: 'table',
-			name: 'Sensors',
-			artifact_rev: 4,
-			updated_at: '',
-			updated_by: null,
-			entry_points: null,
-			payload: {
-				schema_version: 1,
-				default_cell_mode: 'collapse',
-				row_source: { kind: 'scope', types: [], criteria: [] },
-				columns: [{ kind: 'element', source: { kind: 'row', chain_index: 0 }, header: '' }]
-			}
-		});
+		asEditor();
+		mockAcquire();
+		mockGetTable();
+		vi.spyOn(checkoutApi, 'releaseLock').mockResolvedValue(undefined);
 		let resolveInflight!: (v: typeof EMPTY_PAGE) => void;
 		const inflightPage = new Promise<typeof EMPTY_PAGE>((res) => (resolveInflight = res));
 		vi.spyOn(tablesApi, 'evaluateTable')
 			.mockResolvedValueOnce(EMPTY_PAGE) // ensureTableDraft's first page
 			.mockImplementationOnce(() => inflightPage) // the edit's in-flight load
 			.mockResolvedValue(EMPTY_PAGE); // the re-issued load
-		vi.spyOn(artifactsApi, 'createArtifact').mockResolvedValue({
-			id: 'a9',
-			kind: 'table',
-			name: 'Copy',
-			artifact_rev: 1,
-			updated_at: '',
-			updated_by: null,
-			entry_points: null,
-			payload: {}
-		});
-		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({ items: [] });
 
 		const draft = await ensureTableDraft('tbl:a1');
 		updateTableDefinition('tbl:a1', { ...draft.definition });
 		expect(getTableLoading('tbl:a1')).toBe(true);
 		await saveAsTableDraft('tbl:a1', 'Copy');
+		const forkTab = `tbl:${stagedTempId()}`;
 		resolveInflight(EMPTY_PAGE);
 		await flush();
-		expect(getTableLoading('tbl:a9')).toBe(false);
-		expect(getTablePage('tbl:a9')).toBeDefined();
+		expect(getTableLoading(forkTab)).toBe(false);
+		expect(getTablePage(forkTab)).toBeDefined();
+	});
+});
+
+describe('artifact lease on open', () => {
+	it('acquires the art: lease before fetching the payload', async () => {
+		asEditor();
+		const acquire = mockAcquire();
+		const get = mockGetTable();
+		vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
+
+		await ensureTableDraft('tbl:a1');
+
+		expect(acquire.mock.calls[0][0]).toMatchObject({
+			targets: [{ resource_id: 'a1', mode: 'exclusive', type: 'artifact' }],
+			intent: 'edit'
+		});
+		// The lease is taken FIRST: showing an editable surface we may not own is
+		// the failure mode the check-out is there to prevent.
+		expect(acquire.mock.invocationCallOrder[0]).toBeLessThan(get.mock.invocationCallOrder[0]);
+		expect(get).toHaveBeenCalledWith('a1');
+		expect(isCheckedOutByMe('art:a1')).toBe(true);
+		expect(getTableLockHolder('tbl:a1')).toBeNull();
+	});
+
+	it('marks the tab lock-denied (unsaveable) when the lease is refused, but still loads it', async () => {
+		asEditor();
+		vi.spyOn(checkoutApi, 'acquireLocks').mockRejectedValue(lockConflict('peer@x'));
+		mockGetTable();
+		vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
+
+		const draft = await ensureTableDraft('tbl:a1');
+
+		expect(getTableLockHolder('tbl:a1')).toBe('peer@x');
+		// A denial must not refuse the tab — it opens unsaveable with the banner.
+		expect(draft.name).toBe('Sensors');
+		expect(getTablePage('tbl:a1')).toBeDefined();
+	});
+
+	it('fails OPEN when POST /locks errors for a non-conflict reason', async () => {
+		asEditor();
+		// ensureCheckout rethrows anything that is not a ConflictError; if that
+		// escaped ensureTableDraft the tab would sit on "Loading…" forever (its
+		// caller is a fire-and-forget $effect).
+		vi.spyOn(checkoutApi, 'acquireLocks').mockRejectedValue(new Error('boom'));
+		const get = mockGetTable();
+		vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
+
+		const draft = await ensureTableDraft('tbl:a1');
+
+		expect(get).toHaveBeenCalledWith('a1');
+		expect(draft.name).toBe('Sensors');
+		// No banner: an infrastructure error is not a peer holding the artifact.
+		expect(getTableLockHolder('tbl:a1')).toBeNull();
+	});
+
+	it('shows no banner to a viewer (the whole workspace is already read-only)', async () => {
+		const acquire = mockAcquire();
+		mockGetTable();
+		vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
+
+		await ensureTableDraft('tbl:a1'); // role is viewer (resetCheckout default)
+
+		expect(acquire).not.toHaveBeenCalled();
+		expect(getTableLockHolder('tbl:a1')).toBeNull();
+		expect(getTableDraft('tbl:a1')).toBeDefined();
+	});
+
+	it('retryTableLock clears the banner once the peer releases', async () => {
+		asEditor();
+		const acquire = mockAcquire();
+		acquire.mockRejectedValueOnce(lockConflict('peer@x'));
+		mockGetTable();
+		vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
+		await ensureTableDraft('tbl:a1');
+		expect(getTableLockHolder('tbl:a1')).toBe('peer@x');
+
+		await retryTableLock('tbl:a1');
+
+		expect(getTableLockHolder('tbl:a1')).toBeNull();
+		expect(isCheckedOutByMe('art:a1')).toBe(true);
+	});
+
+	it('retryTableLock is a no-op for an unsaved (temp-id) draft', async () => {
+		asEditor();
+		const acquire = mockAcquire();
+		vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
+		const tabId = openArtifactTab('table', { artifactId: null, title: 'New table' });
+		await ensureTableDraft(tabId);
+		await saveTableDraft(tabId); // draft.artifactId is now a temp id
+
+		await retryTableLock(tabId);
+
+		expect(acquire).not.toHaveBeenCalled();
+	});
+
+	it('closeTableDraft releases the lease when nothing staged needs it', async () => {
+		asEditor();
+		mockAcquire();
+		mockGetTable();
+		vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
+		const release = vi.spyOn(checkoutApi, 'releaseLock').mockResolvedValue(undefined);
+		await ensureTableDraft('tbl:a1');
+
+		closeTableDraft('tbl:a1');
+		await Promise.resolve();
+
+		expect(release).toHaveBeenCalledWith('t_a1', undefined);
+		expect(isCheckedOutByMe('art:a1')).toBe(false);
+		expect(getTableLockHolder('tbl:a1')).toBeNull();
+	});
+
+	it('closeTableDraft keeps the lease while a staged op still needs it', async () => {
+		asEditor();
+		mockAcquire();
+		mockGetTable();
+		vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
+		await ensureTableDraft('tbl:a1');
+		await saveTableDraft('tbl:a1'); // stages update_artifact a1 — the commit needs the lease
+		const release = vi.spyOn(checkoutApi, 'releaseLock').mockResolvedValue(undefined);
+
+		closeTableDraft('tbl:a1');
+		await Promise.resolve();
+
+		expect(release).not.toHaveBeenCalled();
+		expect(isCheckedOutByMe('art:a1')).toBe(true);
+	});
+});
+
+describe('saveAsTableDraft', () => {
+	it('stages a fresh create, retitles and re-keys the tab, and leaves the original untouched', async () => {
+		asEditor();
+		mockAcquire();
+		mockGetTable();
+		vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
+		const release = vi.spyOn(checkoutApi, 'releaseLock').mockResolvedValue(undefined);
+		openArtifactTab('table', { artifactId: 'a1', title: 'Sensors' });
+		const draft = await ensureTableDraft('tbl:a1');
+
+		await saveAsTableDraft('tbl:a1', 'Copy');
+
+		// The original artifact is never touched: the staged batch holds the
+		// fork's create and nothing else — no update op against `a1`.
+		const ops = getStagedArtifactOps();
+		expect(ops).toEqual([
+			{
+				kind: 'create_artifact',
+				temp_id: expect.stringMatching(/^tmp_/),
+				artifact_kind: 'table',
+				name: 'Copy',
+				payload: draft.definition
+			}
+		]);
+		// The fork tab is re-keyed to tbl:<tempId> AT STAGE TIME (unlike a create
+		// staged from a tbl:draft:N tab): a bound tab's key must always be
+		// `tbl:<its own artifactId>`, or reopening the original would mint a
+		// SECOND record with the id this tab still holds.
+		const tempId = stagedTempId();
+		expect(getDynamicTabs()).toHaveLength(1);
+		expect(getDynamicTabs()[0].id).toBe(`tbl:${tempId}`);
+		expect(getDynamicTabs()[0].title).toBe('Copy');
+		expect(getDynamicTabs()[0].artifactId).toBe(tempId);
+		expect(getTableDraft('tbl:a1')).toBeUndefined();
+		const forked = getTableDraft(`tbl:${tempId}`)!;
+		expect(forked.name).toBe('Copy');
+		expect(forked.artifactId).toBe(tempId);
+		expect(forked.artifactRev).toBeNull();
+		expect(forked.dirty).toBe(false);
+		// The original's lease is no longer needed by anything staged: released.
+		expect(release).toHaveBeenCalledWith('t_a1', undefined);
+		expect(isCheckedOutByMe('art:a1')).toBe(false);
+	});
+
+	it('frees the original artifact to reopen in its OWN tab with its own draft', async () => {
+		asEditor();
+		mockAcquire();
+		mockGetTable();
+		vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
+		vi.spyOn(checkoutApi, 'releaseLock').mockResolvedValue(undefined);
+		openArtifactTab('table', { artifactId: 'a1', title: 'Sensors' });
+		await ensureTableDraft('tbl:a1');
+
+		await saveAsTableDraft('tbl:a1', 'Copy');
+		const reopened = openArtifactTab('table', { artifactId: 'a1', title: 'Sensors' }); // sidebar click
+
+		// Two tabs with DISTINCT ids — a duplicate id would blow up Workspace's
+		// keyed {#each} over tab.id (each_key_duplicate), and there is no
+		// <svelte:boundary> to catch it.
+		const tabs = getDynamicTabs();
+		expect(tabs).toHaveLength(2);
+		expect(new Set(tabs.map((t) => t.id)).size).toBe(2);
+		expect(reopened).toBe('tbl:a1');
+		// …and the reopened tab really serves the ORIGINAL, not the fork's draft
+		// (ensureTableDraft early-returns an existing draft under the same key).
+		const original = await ensureTableDraft(reopened);
+		expect(original.artifactId).toBe('a1');
+		expect(original.name).toBe('Sensors');
+	});
+
+	it('carries the tab’s per-tab state onto the fork’s new tab key', async () => {
+		asEditor();
+		mockAcquire();
+		mockGetTable();
+		vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(pageAt(0, 100, 250));
+		vi.spyOn(checkoutApi, 'releaseLock').mockResolvedValue(undefined);
+		openArtifactTab('table', { artifactId: 'a1', title: 'Sensors' });
+		await ensureTableDraft('tbl:a1');
+		setTableSort('tbl:a1', { column: 0, direction: 'asc' });
+		await flush();
+		expect(getTablePage('tbl:a1')?.total).toBe(250);
+
+		await saveAsTableDraft('tbl:a1', 'Copy');
+
+		const forkTab = `tbl:${stagedTempId()}`;
+		expect(getTablePage(forkTab)?.total).toBe(250);
+		expect(getTableSort(forkTab)).toEqual({ column: 0, direction: 'asc' });
+		// The retired key keeps nothing (or a reopened original would inherit it).
+		expect(getTablePage('tbl:a1')).toBeUndefined();
+		expect(getTableSort('tbl:a1')).toBeUndefined();
+	});
+
+	it('records the POST-re-key tab as the staged create’s source', async () => {
+		// The entry has to be minted before the fork's key can be computed, so its
+		// sourceTabId starts out naming the tab that is about to be retired — and,
+		// once the original is reopened, a DIFFERENT tab entirely.
+		asEditor();
+		mockAcquire();
+		mockGetTable();
+		vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
+		vi.spyOn(checkoutApi, 'releaseLock').mockResolvedValue(undefined);
+		openArtifactTab('table', { artifactId: 'a1', title: 'Sensors' });
+		await ensureTableDraft('tbl:a1');
+
+		await saveAsTableDraft('tbl:a1', 'Copy');
+
+		const tempId = stagedTempId();
+		expect(stagedCreateSourceTab(tempId)).toBe(`tbl:${tempId}`);
+		// And that tab really is the one on screen.
+		expect(getDynamicTabs().map((t) => t.id)).toContain(stagedCreateSourceTab(tempId));
+	});
+
+	it('refuses a name another table already uses', async () => {
+		asEditor();
+		mockAcquire();
+		mockGetTable();
+		vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
+		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({ items: [header('a2', 'Taken')] });
+		await loadArtifacts();
+		await ensureTableDraft('tbl:a1');
+
+		await expect(saveAsTableDraft('tbl:a1', 'Taken')).rejects.toThrow(
+			/named "Taken" already exists/
+		);
+		expect(getStagedArtifactOps()).toEqual([]);
+		// The original tab/draft is left exactly as it was (untouched).
+		expect(getTableDraft('tbl:a1')?.artifactId).toBe('a1');
+		expect(getTableDraft('tbl:a1')?.name).toBe('Sensors');
+	});
+});
+
+describe('staged-artifact listeners', () => {
+	it('a commit rebinds a temp draft to its canonical id, carrying per-tab state', async () => {
+		vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(pageAt(0, 100, 250));
+		const tabId = openArtifactTab('table', { artifactId: null, title: 'New table' });
+		const draft = await ensureTableDraft(tabId);
+		updateTableDefinition(tabId, { ...draft.definition });
+		await flush();
+		setTableSort(tabId, { column: 0, direction: 'asc' });
+		await flush();
+		setTableName(tabId, 'Mine');
+		await saveTableDraft(tabId);
+		const tempId = getTableDraft(tabId)!.artifactId!;
+
+		notifyArtifactCommit({
+			idMap: { [tempId]: 'a9' },
+			changed: [header('a9', 'Mine', 7)],
+			deletedIds: []
+		});
+
+		expect(getTableDraft(tabId)).toBeUndefined();
+		const bound = getTableDraft('tbl:a9')!;
+		expect(bound.artifactId).toBe('a9');
+		expect(bound.artifactRev).toBe(7);
+		expect(getDynamicTabs()[0].id).toBe('tbl:a9');
+		expect(getDynamicTabs()[0].artifactId).toBe('a9');
+		// Per-tab state follows the rebind, as it used to on first save.
+		expect(getTablePage('tbl:a9')?.total).toBe(250);
+		expect(getTableSort('tbl:a9')).toEqual({ column: 0, direction: 'asc' });
+		expect(getTablePage(tabId)).toBeUndefined();
+	});
+
+	it('a commit adopts the new artifact_rev on an already-saved draft', async () => {
+		asEditor();
+		mockAcquire();
+		mockGetTable();
+		vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
+		await ensureTableDraft('tbl:a1');
+		expect(getTableDraft('tbl:a1')?.artifactRev).toBe(4);
+
+		notifyArtifactCommit({ idMap: {}, changed: [header('a1', 'Sensors', 9)], deletedIds: [] });
+
+		expect(getTableDraft('tbl:a1')?.artifactRev).toBe(9);
+		expect(getTableDraft('tbl:a1')?.artifactId).toBe('a1');
+	});
+
+	it('a committed delete closes the artifact’s open tab', async () => {
+		asEditor();
+		mockAcquire();
+		mockGetTable();
+		vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
+		vi.spyOn(checkoutApi, 'releaseLock').mockResolvedValue(undefined);
+		openArtifactTab('table', { artifactId: 'a1', title: 'Sensors' });
+		await ensureTableDraft('tbl:a1');
+
+		notifyArtifactCommit({ idMap: {}, changed: [], deletedIds: ['a1'] });
+
+		expect(getTableDraft('tbl:a1')).toBeUndefined();
+		expect(getDynamicTabs()).toEqual([]);
+	});
+
+	it('a staged delete closes the artifact’s open tab immediately', async () => {
+		asEditor();
+		mockAcquire();
+		mockGetTable();
+		vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
+		vi.spyOn(checkoutApi, 'releaseLock').mockResolvedValue(undefined);
+		openArtifactTab('table', { artifactId: 'a1', title: 'Sensors' });
+		await ensureTableDraft('tbl:a1');
+
+		stageArtifactDelete('a1', header('a1', 'Sensors', 4));
+
+		expect(getTableDraft('tbl:a1')).toBeUndefined();
+		expect(getDynamicTabs()).toEqual([]);
+	});
+
+	it('discarding a staged update re-dirties the draft', async () => {
+		asEditor();
+		mockAcquire();
+		mockGetTable();
+		vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
+		await ensureTableDraft('tbl:a1');
+		await saveTableDraft('tbl:a1');
+		expect(getTableDraft('tbl:a1')?.dirty).toBe(false);
+
+		revertStagedArtifact('a1');
+
+		expect(getTableDraft('tbl:a1')?.dirty).toBe(true);
+		expect(getTableDraft('tbl:a1')?.artifactId).toBe('a1');
+	});
+
+	it('discarding a staged create unbinds the draft back to unsaved', async () => {
+		vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
+		const tabId = openArtifactTab('table', { artifactId: null, title: 'New table' });
+		await ensureTableDraft(tabId);
+		setTableName(tabId, 'Mine');
+		await saveTableDraft(tabId);
+		const tempId = getTableDraft(tabId)!.artifactId!;
+
+		revertStagedArtifact(tempId);
+
+		const draft = getTableDraft(tabId)!;
+		expect(draft.artifactId).toBeNull();
+		expect(draft.artifactRev).toBeNull();
+		expect(draft.dirty).toBe(true);
+		// The tab was never re-keyed, so it is still the draft tab it started as —
+		// and its record unbinds with the draft (the temp id will never exist).
+		expect(getDynamicTabs()[0].id).toBe(tabId);
+		expect(getDynamicTabs()[0].artifactId).toBeNull();
+	});
+
+	it('discarding a save-as fork leaves an unbound tab that cannot collide', async () => {
+		asEditor();
+		mockAcquire();
+		mockGetTable();
+		vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
+		vi.spyOn(checkoutApi, 'releaseLock').mockResolvedValue(undefined);
+		openArtifactTab('table', { artifactId: 'a1', title: 'Sensors' });
+		await ensureTableDraft('tbl:a1');
+		await saveAsTableDraft('tbl:a1', 'Copy');
+		const tempId = stagedTempId();
+
+		revertStagedArtifact(tempId);
+
+		// The fork stays where it is, as an unbound (unsaved) draft named Copy.
+		const forkTab = `tbl:${tempId}`;
+		expect(getTableDraft(forkTab)?.artifactId).toBeNull();
+		expect(getTableDraft(forkTab)?.name).toBe('Copy');
+		expect(getTableDraft(forkTab)?.dirty).toBe(true);
+		expect(getDynamicTabs()[0].id).toBe(forkTab);
+		expect(getDynamicTabs()[0].artifactId).toBeNull();
+		// Its key holds a client-minted `tmp_` id, which no artifact id can ever
+		// equal — so reopening the original still gets a DISTINCT tab.
+		openArtifactTab('table', { artifactId: 'a1', title: 'Sensors' });
+		const tabs = getDynamicTabs();
+		expect(tabs).toHaveLength(2);
+		expect(new Set(tabs.map((t) => t.id)).size).toBe(2);
 	});
 });

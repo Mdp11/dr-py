@@ -10,11 +10,11 @@
 	import {
 		applyStructuralEdit,
 		canEdit,
-		getArtifactHeaders,
 		getDraft,
 		getMetamodel,
 		getSelectedPath,
 		isCardCollapsed,
+		referenceableArtifactHeaders,
 		registerVisibleNode,
 		seedSnippetExpanded,
 		selectNode,
@@ -86,7 +86,7 @@
 	const editable = $derived(canEdit());
 	const draft = $derived(getDraft(tabId));
 	const mm = $derived(getMetamodel());
-	const navHeaders = $derived(getArtifactHeaders().filter((a) => a.kind === 'navigation'));
+	const navHeaders = $derived(referenceableArtifactHeaders('navigation'));
 	const title = $derived(draft ? titleForPath(draft.definition, path) : '');
 	const isSelected = $derived(pathKey(getSelectedPath(tabId)) === pathKey(path));
 

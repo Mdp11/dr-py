@@ -1,6 +1,7 @@
 <script lang="ts">
 	// The table tab root: a slim chrome bar (name input, dirty dot, Settings,
-	// Export, Save/Save as…, conflict banner) above a full-height `TableGrid`.
+	// Export, Save/Save as…, lock-denied banner) above a full-height
+	// `TableGrid`.
 	// Definition editing (row source + columns) lives in a modal opened by the
 	// ⚙ Settings button so the grid gets the whole area — see
 	// docs/superpowers/specs/2026-07-13-table-settings-popup-design.md.
@@ -12,9 +13,9 @@
 		ensureTableDraft,
 		getScriptErrors,
 		getScriptErrorsPhase,
-		getTableConflict,
 		getTableDraft,
 		getTableLoading,
+		getTableLockHolder,
 		getTablePage,
 		getTableScriptStatus,
 		getTableWarnings,
@@ -24,6 +25,7 @@
 		requestScriptErrors,
 		requestScrollToCell,
 		resumeTableEvaluation,
+		retryTableLock,
 		revertSuspendedTableEdits,
 		saveAsTableDraft,
 		saveTableDraft,
@@ -54,8 +56,17 @@
 		void ensureTableDraft(tabId);
 	});
 	const draft = $derived(getTableDraft(tabId));
-	const conflict = $derived(getTableConflict(tabId));
+	/** Non-null while a peer holds this table's `art:` lease: the tab is
+	 * UNSAVEABLE until the check-out succeeds — Save and Save as are disabled
+	 * behind the banner ("Retry"), while the editing surface itself stays live.
+	 * See `navigation-editor.svelte.ts`'s `ensureDraft` docstring. */
+	const lockHolder = $derived(getTableLockHolder(tabId));
 	const editable = $derived(canEdit());
+	/** A refused check-out disables the SAVE affordances (name, Save, Save as)
+	 * but keeps them VISIBLE — paired with the banner, that is what explains why.
+	 * It does NOT gate the editing surface; the banner copy says "you will not be
+	 * able to save" rather than "read-only" for exactly that reason. */
+	const locked = $derived(lockHolder !== null);
 	const page = $derived(getTablePage(tabId));
 	const warnings = $derived(getTableWarnings(tabId));
 	// Progress of the background script-value sweep: `computing` means some
@@ -392,7 +403,7 @@
 				data-testid="table-name"
 				class="w-56 rounded border border-input bg-card px-2 py-1 text-xs"
 				value={draft.name}
-				disabled={!editable}
+				disabled={!editable || locked}
 				oninput={(e) => setTableName(tabId, e.currentTarget.value)}
 			/>
 			{#if draft.dirty}
@@ -478,14 +489,15 @@
 					<button
 						type="button"
 						class="rounded bg-primary px-2 py-1 text-xs text-primary-foreground transition-colors hover:bg-primary/80 disabled:opacity-40"
-						disabled={!draft.dirty && draft.artifactId !== null}
+						disabled={locked || (!draft.dirty && draft.artifactId !== null)}
 						onclick={() => void save()}
 					>
 						Save{draft.dirty ? ' *' : ''}
 					</button>
 					<button
 						type="button"
-						class="rounded border border-input px-2 py-1 text-xs text-foreground/80 transition-colors hover:bg-muted"
+						class="rounded border border-input px-2 py-1 text-xs text-foreground/80 transition-colors hover:bg-muted disabled:opacity-40"
+						disabled={locked}
 						onclick={() => void saveAs()}
 					>
 						Save as…
@@ -510,11 +522,17 @@
 				{/if}
 			{/if}
 		</div>
-		{#if conflict !== undefined}
-			<div class="flex items-center gap-2 bg-warning/15 px-3 py-1.5 text-xs text-warning">
-				Someone else modified this table.
+		{#if lockHolder !== null}
+			<div
+				class="flex items-center gap-2 bg-warning/15 px-3 py-1.5 text-xs text-warning"
+				role="status"
+			>
+				Checked out by {lockHolder} — you will not be able to save.
+				<button type="button" class="underline" onclick={() => void retryTableLock(tabId)}>
+					Retry
+				</button>
 				<button type="button" class="underline" onclick={() => void reloadTableDraft(tabId)}>
-					Reload their version
+					Reload
 				</button>
 			</div>
 		{/if}

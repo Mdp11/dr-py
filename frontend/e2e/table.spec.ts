@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { openDefaultProject } from './helpers/auth';
 import { loadFiles } from './helpers/load';
 import { expectLiveFeed } from './helpers/feed';
+import { commitStaged } from './helpers/commit';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const METAMODEL_PATH = join(__dirname, '..', '..', 'examples', 'smart-city.metamodel.yaml');
@@ -213,6 +214,11 @@ test('open navigation as table, add a column, edit a cell, commit, save, and reo
 	// saveAsTableDraft rebinds the CURRENT tab in place (unlike navigation's
 	// saveAsDraft, which opens a second tab) — confirm the tab title followed.
 	await expect(page.getByRole('button', { name: 'Close My Table' })).toBeVisible();
+
+	// "Save as…" only STAGED a create_artifact — the sidebar row above is the
+	// staged overlay under a temp id. Commit it, so the reopen below actually
+	// loads the artifact from the server rather than finding nothing to open.
+	await commitStaged(page);
 
 	// Close the tab, then reopen the artifact via a sidebar double-click —
 	// exercises the actual "open from library" path, not just presence.

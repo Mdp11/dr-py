@@ -25,10 +25,11 @@ import {
 	getPresence,
 	getPendingRebind,
 	handleFeedEvent,
+	onCommitEvent,
 	resetRealtime,
 	startRealtime
 } from '../realtime.svelte';
-import { getCachedElements, resetModelStore, seedElements } from '../model.svelte';
+import { getCachedElements, getModelRev, resetModelStore, seedElements } from '../model.svelte';
 import { setActiveProject } from '../active-project.svelte';
 
 beforeEach(() => {
@@ -87,6 +88,72 @@ describe('realtime store reducers', () => {
 			deleted_relationship_ids: []
 		});
 		expect(getCachedElements().get('e1')?.properties.name).toBe('new');
+	});
+});
+
+describe('commit event scope', () => {
+	/** A commit feed event with the artifact-op fields defaulted away. */
+	function commitEvent(rev: number, scope?: string[]) {
+		return {
+			type: 'commit' as const,
+			rev,
+			commit_id: `c${rev}`,
+			author_id: 'peer',
+			message: 'm',
+			validation_error_count: 0,
+			changed_elements: [],
+			changed_relationships: [],
+			deleted_element_ids: [],
+			deleted_relationship_ids: [],
+			...(scope === undefined ? {} : { scope })
+		};
+	}
+
+	it('an artifact-only commit still adopts the rev but tags the tap artifact-scoped', () => {
+		const tap = vi.fn();
+		onCommitEvent(tap);
+
+		handleFeedEvent(commitEvent(5, ['artifact']));
+
+		// Rev adoption is UNCONDITIONAL: previewStaged/commitStaged send base_rev
+		// and the backend's preview path compares it with strict equality, so a
+		// peer that ignored artifact-only revs would 409 on its next preview.
+		expect(getModelRev()).toBe(5);
+		expect(tap).toHaveBeenCalledWith({ scope: ['artifact'] });
+	});
+
+	it('a commit event without scope is treated as model-scoped', () => {
+		const tap = vi.fn();
+		onCommitEvent(tap);
+
+		handleFeedEvent(commitEvent(6));
+
+		expect(getModelRev()).toBe(6);
+		expect(tap).toHaveBeenCalledWith({ scope: ['model'] });
+	});
+
+	it('a mixed-scope commit passes both scopes through', () => {
+		const tap = vi.fn();
+		onCommitEvent(tap);
+
+		handleFeedEvent(commitEvent(7, ['model', 'artifact']));
+
+		expect(tap).toHaveBeenCalledWith({ scope: ['model', 'artifact'] });
+	});
+
+	it('a rebind fires the commit taps as model-scoped', () => {
+		const tap = vi.fn();
+		onCommitEvent(tap);
+
+		handleFeedEvent({
+			type: 'rebind',
+			rev: 9,
+			from_metamodel_id: 'mm-1',
+			to_metamodel_id: 'mm-2',
+			validation_error_count: 0
+		});
+
+		expect(tap).toHaveBeenCalledWith({ scope: ['model'] });
 	});
 });
 

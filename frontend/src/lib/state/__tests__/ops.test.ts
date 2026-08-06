@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { TEMP_ID_PREFIX, createTempId, isTempId } from '../ops';
+import {
+	ARTIFACT_RESOURCE_PREFIX,
+	TEMP_ID_PREFIX,
+	artifactResource,
+	createTempId,
+	isArtifactResource,
+	isTempId
+} from '../ops';
+import type { ArtifactOp, ModelOp, Op } from '../ops';
 
 describe('createTempId', () => {
 	it('returns a string that starts with the temp prefix', () => {
@@ -30,5 +38,24 @@ describe('isTempId', () => {
 		expect(isTempId('e-1')).toBe(false);
 		expect(isTempId('elem-123')).toBe(false);
 		expect(isTempId('')).toBe(false);
+	});
+});
+
+describe('artifact lock namespace', () => {
+	it('prefixes artifact ids with art:', () => {
+		expect(artifactResource('abc')).toBe('art:abc');
+		expect(ARTIFACT_RESOURCE_PREFIX).toBe('art:');
+	});
+	it('classifies resource ids', () => {
+		expect(isArtifactResource('art:abc')).toBe(true);
+		expect(isArtifactResource('abc')).toBe(false); // bare element id
+	});
+	it('artifact ops are assignable to Op but not ModelOp', () => {
+		const op: ArtifactOp = { kind: 'delete_artifact', id: 'a1' };
+		const asOp: Op = op; // compile-time check
+		expect(asOp.kind).toBe('delete_artifact');
+		// @ts-expect-error - ArtifactOp is not assignable to ModelOp
+		const asModelOp: ModelOp = op;
+		void asModelOp;
 	});
 });

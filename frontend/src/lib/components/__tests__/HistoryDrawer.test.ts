@@ -32,15 +32,19 @@ vi.mock('$lib/state/history.svelte', () => ({
 	modelAt: vi.fn(),
 	resetHistory: vi.fn()
 }));
-vi.mock('$lib/state/realtime.svelte', () => ({ onCommitEvent: vi.fn(() => () => {}) }));
+// Only `onCommitEvent` is stubbed: the revert gate reads `isProjectQuiet()`,
+// whose lock term is the REAL `hasModelLocks()` over the real lock table, so
+// these tests drive locks through `handleFeedEvent` the way the feed does.
+vi.mock('$lib/state/realtime.svelte', async (orig) => {
+	const actual = await orig<typeof import('$lib/state/realtime.svelte')>();
+	return { ...actual, onCommitEvent: vi.fn(() => () => {}) };
+});
 vi.mock('$lib/state', async (orig) => {
 	const actual = await orig<typeof import('$lib/state')>();
 	return {
 		...actual,
 		getRole: vi.fn(() => 'owner'),
 		getModelRev: vi.fn(() => 2),
-		getStagedDepth: vi.fn(() => 0),
-		getLockState: vi.fn(() => new Map()),
 		applyDelta: vi.fn()
 	};
 });
@@ -51,11 +55,34 @@ vi.mock('$lib/api/history', async (orig) => {
 
 import { loadFirstPage, modelAt } from '$lib/state/history.svelte';
 import { revertToCommit } from '$lib/api/history';
-import { applyDelta, getStagedDepth } from '$lib/state';
+import { applyDelta } from '$lib/state';
+// Left real by the `...actual` spread above so the revert gate is exercised
+// against the actual stores it reads in production.
+import { resetArtifactEdits, stageArtifactCreate } from '$lib/state/artifact-edits.svelte';
+import { emit, resetModelStore, seedElements } from '$lib/state/model.svelte';
+import { handleFeedEvent, resetRealtime } from '$lib/state/realtime.svelte';
+import type { LeaseLite } from '$lib/api/feed';
 import { ConflictError, ValidationError } from '$lib/api';
+
+/** Install `resourceIds` as the project-wide lock table, as a feed snapshot
+ * would. `model_rev: 0` keeps the reducer's "am I behind?" summary refresh
+ * (fire-and-forget, network) from firing. */
+function seedLocks(...resourceIds: string[]): void {
+	handleFeedEvent({
+		type: 'snapshot',
+		model_rev: 0,
+		locks: resourceIds.map(
+			(resource_id): LeaseLite => ({ resource_id, mode: 'exclusive', holder_id: 'peer' })
+		),
+		connected: []
+	});
+}
 
 afterEach(() => {
 	document.body.innerHTML = '';
+	resetArtifactEdits();
+	resetModelStore();
+	resetRealtime();
 	vi.clearAllMocks();
 });
 
@@ -104,7 +131,6 @@ describe('HistoryDrawer diff', () => {
 
 describe('HistoryDrawer revert', () => {
 	it('reverts to a rev, applies the delta, returns to list', async () => {
-		vi.mocked(getStagedDepth).mockReturnValue(0);
 		vi.mocked(revertToCommit).mockResolvedValue({
 			model_rev: 3,
 			id_map: {},
@@ -117,7 +143,9 @@ describe('HistoryDrawer revert', () => {
 			issue_counts: {},
 			commit_id: 'c3',
 			message: 'Revert to rev 1',
-			validation_error_count: 0
+			validation_error_count: 0,
+			changed_artifacts: [],
+			deleted_artifact_ids: []
 		});
 		const c = mount(HistoryDrawer, { target: document.body, props: { open: true } });
 		flushSync();
@@ -144,7 +172,6 @@ describe('HistoryDrawer revert', () => {
 	});
 
 	it('shows mapped error for 409 rebind/metamodel-swap and does not call applyDelta', async () => {
-		vi.mocked(getStagedDepth).mockReturnValue(0);
 		vi.mocked(revertToCommit).mockRejectedValue(
 			new ConflictError(
 				409,
@@ -175,7 +202,6 @@ describe('HistoryDrawer revert', () => {
 	});
 
 	it('shows mapped error for 422 structural blocker and does not call applyDelta', async () => {
-		vi.mocked(getStagedDepth).mockReturnValue(0);
 		vi.mocked(revertToCommit).mockRejectedValue(
 			new ValidationError(422, { detail: 'structural validation blocker' }, 'invalid')
 		);
@@ -204,7 +230,8 @@ describe('HistoryDrawer revert', () => {
 	});
 
 	it('blocks revert when there are staged edits', async () => {
-		vi.mocked(getStagedDepth).mockReturnValue(2);
+		seedElements([{ id: 'e1', type_name: 'T', properties: { name: 'a' }, rev: 1 }]);
+		emit({ kind: 'update_element', id: 'e1', properties_patch: { name: 'b' } });
 		const c = mount(HistoryDrawer, { target: document.body, props: { open: true } });
 		flushSync();
 		await Promise.resolve();
@@ -216,6 +243,82 @@ describe('HistoryDrawer revert', () => {
 		flushSync();
 		expect(document.body.textContent?.toLowerCase()).toContain('commit or discard');
 		expect(revertToCommit).not.toHaveBeenCalled();
+		unmount(c);
+	});
+
+	it('blocks revert when only artifact ops are staged', async () => {
+		stageArtifactCreate('table', 'T', {}, null);
+		const c = mount(HistoryDrawer, { target: document.body, props: { open: true } });
+		flushSync();
+		await Promise.resolve();
+		flushSync();
+		const revertBtn = Array.from(document.querySelectorAll('button')).find((b) =>
+			b.textContent?.includes('Revert')
+		)!;
+		revertBtn.click();
+		flushSync();
+		expect(document.body.textContent?.toLowerCase()).toContain('commit or discard');
+		expect(revertToCommit).not.toHaveBeenCalled();
+		unmount(c);
+	});
+
+	it('blocks revert while a MODEL-scope lease is live', async () => {
+		seedLocks('e1');
+		const c = mount(HistoryDrawer, { target: document.body, props: { open: true } });
+		flushSync();
+		await Promise.resolve();
+		flushSync();
+		const revertBtn = Array.from(document.querySelectorAll('button')).find((b) =>
+			b.textContent?.includes('Revert')
+		)!;
+		revertBtn.click();
+		flushSync();
+		expect(document.body.textContent?.toLowerCase()).toContain('commit or discard');
+		expect(revertToCommit).not.toHaveBeenCalled();
+		unmount(c);
+	});
+
+	it('STAYS ENABLED while only an art: lease is live (regression)', async () => {
+		// Every open artifact editor tab holds an `art:` lease now. Counting them
+		// in the quiet gate disabled Revert for the WHOLE project — for anyone —
+		// for the full lock TTL, whenever anyone had a table/navigation/snippet
+		// tab open. `art:` is orthogonal to a model revert.
+		seedLocks('art:a9');
+		vi.mocked(revertToCommit).mockResolvedValue({
+			model_rev: 3,
+			id_map: {},
+			changed_elements: [],
+			changed_relationships: [],
+			deleted_element_ids: [],
+			deleted_relationship_ids: [],
+			issues_removed_owner_ids: [],
+			issues_added: [],
+			issue_counts: {},
+			commit_id: 'c3',
+			message: 'Revert to rev 1',
+			validation_error_count: 0,
+			changed_artifacts: [],
+			deleted_artifact_ids: []
+		});
+		const c = mount(HistoryDrawer, { target: document.body, props: { open: true } });
+		flushSync();
+		await Promise.resolve();
+		flushSync();
+		const revertBtn = Array.from(document.querySelectorAll('button')).find((b) =>
+			b.textContent?.includes('Revert')
+		)!;
+		revertBtn.click();
+		flushSync();
+		expect(document.body.textContent?.toLowerCase()).not.toContain('commit or discard');
+		const confirmBtn = Array.from(document.querySelectorAll('button')).find(
+			(b) => b.textContent?.trim() === 'Revert'
+		)!;
+		expect((confirmBtn as HTMLButtonElement).disabled).toBe(false);
+		confirmBtn.click();
+		await Promise.resolve();
+		await Promise.resolve();
+		flushSync();
+		expect(revertToCommit).toHaveBeenCalled();
 		unmount(c);
 	});
 });

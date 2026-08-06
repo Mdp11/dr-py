@@ -19,7 +19,7 @@
  *    stages NOTHING (already-acquired leases from earlier groups just expire
  *    via TTL — same as a user who locked an element and never edited it).
  */
-import type { Op } from './ops';
+import type { ModelOp } from './ops';
 import { createTempId, isTempId } from './ops';
 import { remapProperties } from './remap';
 import { emit, ensureElement, ensureRelationship, getModelRev } from './model.svelte';
@@ -43,7 +43,7 @@ export async function stageSnippetOps(result: SnippetRunOut): Promise<StageOutco
 		}
 	}
 	const mapId = (id: string): string => mapping[id] ?? id;
-	const ops: Op[] = result.ops.map((op) => {
+	const ops: ModelOp[] = result.ops.map((op) => {
 		switch (op.kind) {
 			case 'create_element':
 				return {

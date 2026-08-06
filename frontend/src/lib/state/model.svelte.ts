@@ -17,7 +17,7 @@ import { validateModel } from '../api/validation';
 import { mergePatch } from './apply';
 import { computeDiff, type Diff } from './diff';
 import { remapVisitIds } from './inspection-history.svelte';
-import { isTempId, type Op } from './ops';
+import { isTempId, type ModelOp } from './ops';
 import { nameProp } from '$lib/util/element-name';
 import { remapProperties } from './remap';
 import { getSelection, select } from './selection.svelte';
@@ -71,7 +71,7 @@ type RevertEntry =
 	| { entity: 'relationship'; id: string; before: Relationship | null };
 
 interface QueuedOp {
-	op: Op;
+	op: ModelOp;
 	revert: RevertEntry[];
 }
 
@@ -256,7 +256,7 @@ function remapRelationship(r: Relationship, idMap: Record<string, string>): Rela
 	return { ...r, id, source_id, target_id, properties };
 }
 
-function remapOp(op: Op, idMap: Record<string, string>): Op {
+function remapOp(op: ModelOp, idMap: Record<string, string>): ModelOp {
 	switch (op.kind) {
 		case 'create_element':
 			return { ...op, properties: remapProperties(op.properties, idMap) };
@@ -437,7 +437,7 @@ function snapshotRelationship(id: string): RevertEntry {
  * restore the pre-op cache state. Ops touching entities that are not cached
  * are a local no-op (the server delta upserts them on ack).
  */
-function applyOptimistic(op: Op): RevertEntry[] {
+function applyOptimistic(op: ModelOp): RevertEntry[] {
 	switch (op.kind) {
 		case 'create_element': {
 			const revert = [snapshotElement(op.temp_id)];
@@ -502,8 +502,8 @@ function applyOptimistic(op: Op): RevertEntry[] {
 }
 
 function isPropertyUpdate(
-	op: Op
-): op is Extract<Op, { properties_patch: Record<string, unknown> }> {
+	op: ModelOp
+): op is Extract<ModelOp, { properties_patch: Record<string, unknown> }> {
 	return op.kind === 'update_element' || op.kind === 'update_relationship';
 }
 
@@ -521,7 +521,7 @@ function isPropertyUpdate(
  * buffer in a divergent state. Recovery is a full reload (resetModelStore +
  * refetch).
  */
-export function emit(op: Op): void {
+export function emit(op: ModelOp): void {
 	if (_error?.kind === 'conflict') return;
 
 	const revert = applyOptimistic(op);
@@ -587,11 +587,11 @@ function queuedTargetId(q: QueuedOp): string {
 	return op.kind === 'create_element' || op.kind === 'create_relationship' ? op.temp_id : op.id;
 }
 
-export function getStagedOps(): Op[] {
+export function getStagedOps(): ModelOp[] {
 	return _queue.map((q) => q.op);
 }
 
-export function getStagedOpsFor(id: string): Op[] {
+export function getStagedOpsFor(id: string): ModelOp[] {
 	return _queue.filter((q) => queuedTargetId(q) === id).map((q) => q.op);
 }
 

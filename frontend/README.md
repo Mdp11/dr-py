@@ -169,11 +169,101 @@ follows a pessimistic **check-out → stage → commit** loop (Spec B):
    element's own ops PLUS every staged relationship op incident to it — a
    surviving rel pointing at a reverted temp id would 422 the commit) and then
    releases the element's lock token when no remaining staged op still needs it.
-6. Reads are **paged/on-demand**: element pages and fuzzy search
+6. **Artifacts ride the same loop.** Saved navigations, tables and code
+   snippets are project artifacts rather than model entities, but their
+   editing is the identical check-out → stage → commit shape, so the client
+   holds **no artifact write wrapper at all**: `lib/api/artifacts.ts` is
+   read-only (`listArtifacts`, `getArtifact`, `evaluateNavigation`). The
+   backend's legacy `POST/PUT/DELETE /artifacts` routes still exist and still
+   honor `art:` leases; the client simply never reaches for them, because an
+   unlocked write lands outside the commit journal — invisible to the
+   DiffDrawer, absent from the `Commit` row, unreachable by undo.
+   - **Save = stage.** Each editor's Save pushes a `create_artifact` /
+     `update_artifact` / `delete_artifact` op onto a SECOND staged buffer,
+     `lib/state/artifact-edits.svelte.ts` (the artifact sibling of the model
+     store's buffer). Its invariant is **one staged entry per artifact id**,
+     and that is correctness, not tidiness: the backend's applier
+     (`api/artifact_ops.py`) resolves `update`/`delete` ids **literally**,
+     never through the batch's `id_map`, so a batch carrying both
+     `create_artifact{temp_id: tmp_x}` and `update_artifact{id: tmp_x}` is a
+     hard 422. Every `stageArtifact*` call therefore COALESCES into the
+     artifact's existing entry — update-over-create merges into the create,
+     update-over-update keeps whichever fields the later call omits,
+     delete-over-create drops both ops (nothing exists server-side to
+     delete), delete-over-update collapses to a bare delete.
+   - **The lease is per editor tab.** Opening a saved artifact takes an
+     `art:<id>` exclusive lease (`acquireArtifactLease`); a denial does not
+     refuse the open, it renders that tab **unsaveable** behind its holder
+     banner ("Checked out by X — you will not be able to save"): the name
+     input, Save and Save as are disabled, while the definition-editing
+     surface (PathCard/CombineFrame, the table Settings dialog and column
+     editors, the snippet CodeMirror document) is **not** gated. Gating that
+     too is deliberate follow-up work — see the `ensureDraft` docstring in
+     `lib/state/navigation-editor.svelte.ts`, the canonical statement of the
+     scope and of the open UX question (whether Save-as should stay enabled so
+     a denied user can fork their work). Closing releases through
+     `releaseArtifactIfUnneeded`, which
+     KEEPS the lease whenever a staged op still needs a resource that token
+     covers — a saved-but-uncommitted edit whose lease lapsed would 409
+     "required lock not held" at commit. The sidebar's two write surfaces
+     take their own: rename takes a plain exclusive it deliberately never
+     releases (every path past the acquire stages an op that needs it),
+     delete takes a **DELETE-intent** exclusive that conflicts with any peer
+     lease, shared pins included — and hands it straight back when the row
+     turns out to be stale and there is nothing to stage.
+   - **Commit is ONE mixed batch.** `previewStaged`/`commitStaged`
+     concatenate `getStagedOps()` and `getStagedArtifactOps()` into a single
+     `POST /commits/preview` / `POST /commits`; the backend splits the union
+     itself. The token partition is the subtle part: `POST /commits` releases
+     every token it is SENT, so an artifact lease whose artifact is NOT in
+     this batch is held back for its still-open editor, while everything the
+     batch needs is sent. Afterwards the DiffDrawer fires
+     `reacquireOpenArtifactLeases` (fire-and-forget, `.catch`ed — the commit
+     is already durable), re-checking-out every open artifact tab and
+     flipping to lock-denied (unsaveable) via `markEditorLockDenied` any a peer
+     grabbed in between.
+   - **The DiffDrawer reviews them.** Staged artifact entries render as
+     `+`/`~`/`-` rows in their own section, same glyph vocabulary as the
+     entity rows, each per-row discardable through `discardArtifact` — the
+     artifact sibling of `discardElement`, which also hands the `art:` lease
+     back instead of stranding it for the full TTL. They
+     count towards the drawer's `total`, which is what keeps Commit reachable
+     for an artifact-ONLY batch and unreachable when nothing at all is staged
+     — `commitStaged` throws on an empty batch, because the backend's
+     empty-batch early return skips its lock-release step and would orphan
+     the tokens until TTL.
+   - **The library is server truth plus a staged overlay.**
+     `lib/state/artifacts.svelte.ts` holds committed headers only;
+     everything rendered goes through `getArtifactHeaders()`, which overlays
+     the staged buffer (a rename shows its staged name, a staged delete is
+     hidden, a staged create is appended under a TEMP id) and badges rows in
+     the sidebar's artifacts section. `getCommittedArtifactHeaders()` is a
+     separate function rather than a flag: a caller wanting committed truth
+     is making a claim about the server. Reference pickers use neither —
+     they go through `referenceableArtifactHeaders(kind)`, which drops temp
+     ids. Note the reason, which is ordering and lifetime rather than an
+     absence of rewriting: the backend DOES resolve temp ids nested inside a
+     payload (`_resolve_json`), but only against the batch's `id_map` as it
+     accumulates op by op, so a ref resolves only if its create ships in the
+     SAME batch AHEAD of the artifact referencing it — and an unresolved one
+     passes through as a tolerant dangler, not an error. A picker can promise
+     neither that ordering nor that the user will not revert the create
+     before committing, so it refuses to depend on either. Distinct from the
+     sibling rule that artifact-OP ids (`update_artifact.id`,
+     `delete_artifact.id`) get no `id_map` pass at all — THAT literalness is
+     what makes the coalescing invariant above correctness.
+   - **Commit feed events carry a `scope`.** `realtime.svelte.ts` adopts a
+     peer commit's rev and applies its delta UNCONDITIONALLY (preview
+     compares our `base_rev` with strict equality, so declining to adopt an
+     artifact-only rev would 409 the next preview); only the `onCommitEvent`
+     taps are handed `scope`, which lets the table editor skip its re-page
+     when the commit touched no model content. An absent `scope` defaults to
+     `['model']` — the defensive direction is the one that does more work.
+7. Reads are **paged/on-demand**: element pages and fuzzy search
    (`/model/elements`), containment tree roots/children
    (`/model/containment/*`), and BFS neighborhoods for the graph view
    (`/model/elements/{id}/neighborhood`).
-7. **Export** streams the last committed session state to a file: a picked
+8. **Export** streams the last committed session state to a file: a picked
    file goes up as a raw `fetch` body (`POST /model/upload`, no JS-side parse)
    or by server path (`POST /model/load`); export pipes `GET /model/download`
    into a File System Access writable (or writes server-side via
@@ -183,8 +273,22 @@ follows a pessimistic **check-out → stage → commit** loop (Spec B):
 ### Navigation editor state (per-node previews)
 
 `lib/state/navigation-editor.svelte.ts` holds the per-tab navigation drafts
-(one draft + one save-conflict marker per `tabId`) and drives the live chain
-preview. A navigation is a **tree** — a Path, or a set expression over nested
+(one draft + one lock-denied marker per `tabId`) and drives the live chain
+preview. **Saving stages, it does not POST**: opening a saved navigation takes
+an `art:<id>` exclusive lease (a denial opens the tab UNSAVEABLE behind the
+`getNavLockHolder` banner rather than refusing it — Save/Save-as off, editing
+surface still live), `saveDraft`/`saveAsDraft`
+push a `create_artifact`/`update_artifact` op onto the staged-artifact buffer,
+and a create staged from a `nav:draft:N` tab is re-keyed to `nav:<id>` only when
+the commit's `id_map` arrives (module-scope `onArtifactCommit` listener) — its
+tab record follows the temp id immediately (`repointTabArtifact`), but its key
+names no artifact so nothing can collide with it. A `saveAsDraft` fork is the
+exception: that tab IS keyed to a real artifact it has stopped editing, so it
+re-keys to `nav:<tempId>` at stage time, keeping the invariant that a bound
+tab's key is always `nav:<its own artifactId>` (which is what makes
+`openArtifactTab`'s deterministic id collision-free) and letting the original
+reopen immediately. `closeDraft` releases the lease unless a staged op still
+needs it. A navigation is a **tree** — a Path, or a set expression over nested
 definitions addressed by positional `NodePath` (`lib/navigation/tree.ts`:
 `pathKey`, `nodeAt`, `isRunnable`) — so preview state is keyed **per node**, not
 per tab:
@@ -210,7 +314,7 @@ per tab:
   get no per-node preview this iteration and are skipped.
 - **Accessors are node-scoped** (`getPreview`/`getEvalError`/`isExpanded`/
   `runPreview`/`loadMorePreview` all take `(tabId, path)`, `path` defaulting to
-  the root `[]`); `getDraft`/`getSaveConflict`/`updateDefinition`/`saveDraft`
+  the root `[]`); `getDraft`/`getNavLockHolder`/`updateDefinition`/`saveDraft`
   stay per-tab. `closeDraft` and `resetNavigationEditors` clear **every** node
   key for the tab (expanded set plus any lingering keys), cancel all timers, and
   bump generations so nothing leaks.
@@ -306,8 +410,8 @@ toggle`), a collapsed disclosure that expands to the shared
   a response that saw pending values never reports `ready`, so the last poll
   always lands a clean, correctly-sorted page. `TableView` shows
   `Computing script columns {done}/{total}` (or the failure message) via
-  `getTableScriptStatus(tabId)`, as **fixed chrome** beside the conflict and
-  warnings strips — deliberately _not_ inside `TableGrid`, whose scroll
+  `getTableScriptStatus(tabId)`, as **fixed chrome** beside the lock-denied
+  and warnings strips — deliberately _not_ inside `TableGrid`, whose scroll
   container would both scroll the readout out of view on a long table and, as
   an in-flow element ahead of the `padTop` spacer, offset every row relative to
   what the virtualizer's window math assumes. `failed` is terminal — stop
@@ -534,7 +638,9 @@ browses the project's durable commit journal:
   renders the range diff. A warning banner is shown when the range spans a
   metamodel-swap (rebind) commit.
 - **Revert-to-commit** (`POST /commits/revert`) — gated on a clean staged
-  buffer (`getStagedDepth() === 0 && getLockState().size === 0`). Selecting
+  buffer, MODEL and ARTIFACT alike: `getStagedDepth()`,
+  `getStagedArtifactDepth()` and `getLockState().size` must all be 0 (the
+  metamodel-swap drawer gates on the same expression). Selecting
   "Revert to here" on a row shows an inline confirm panel with an optional
   message; submitting applies the compensating inverse ops as a new durable
   commit (history stays append-only, `model_rev` advances), broadcasts the
@@ -573,6 +679,12 @@ src/
     api/settings.ts     REST client for project settings:
                         getSettings (GET /settings) and
                         updateSettings (PATCH /settings → strict_mode bool)
+    api/artifacts.ts    READ-ONLY by design: listArtifacts / getArtifact /
+                        evaluateNavigation. Artifact writes travel as staged
+                        ops through POST /commits (see the staged-commit flow
+                        above); the legacy POST/PUT/DELETE /artifacts wrappers
+                        were deleted so no regression can reintroduce an
+                        unjournalled write
     state/              model.svelte.ts (staged-edit store) / changes (server
                         change-set badge) / selection / ui / filters /
                         metamodel / workspace / validation / file (filename
@@ -590,10 +702,22 @@ src/
                         feed transport store: connection status, presence
                         (string[]), lock state (SvelteMap resource_id →
                         LeaseLite), feed-termination state, applies remote
-                        commit deltas via applyDelta; checkout.svelte.ts — lock
-                        registry, ensureCheckout/heartbeat, preview/commit,
-                        discard (discardElement / discardElementCascade),
-                        role gating; staged-rows.ts — pure derivation of the
+                        commit deltas via applyDelta (UNCONDITIONALLY — rev
+                        adoption is mandatory) and fans commits out to
+                        onCommitEvent taps with the event's {scope} (absent =
+                        ['model']), so an artifact-only commit skips model-only
+                        work like the table re-page; checkout.svelte.ts — lock
+                        registry, ensureCheckout/heartbeat, preview/commit of
+                        the model + artifact buffers as one batch (keeping back
+                        the leases the batch does not need),
+                        releaseArtifactIfUnneeded /
+                        reacquireOpenArtifactLeases, discard (discardElement /
+                        discardElementCascade), role gating;
+                        artifact-edits.svelte.ts — the staged-artifact-ops
+                        buffer: one coalesced entry per artifact id, commit /
+                        discard / staged-delete listener registries, and the
+                        overlayArtifactHeaders projection the library renders
+                        through; staged-rows.ts — pure derivation of the
                         sidebar "Staged elements" rows from getStagedDiff() +
                         the display caches (new/edited/deleted badges; the
                         edited rule fires only for endpoints of staged
@@ -611,9 +735,10 @@ src/
                         50), pushed from select(), replayed with a re-entrancy
                         guard; per-direction dropdown slices resolve labels
                         lazily;
-                        unsaved.ts — hasUnsavedWork() (staged ops + dirty
-                        table/navigation drafts), input to the workspace
-                        unload guard (beforeNavigate in p/[projectId]/+page);
+                        unsaved.ts — hasUnsavedWork() (staged model ops + staged
+                        artifact ops + dirty table/navigation/snippet drafts),
+                        input to the workspace unload guard (beforeNavigate in
+                        p/[projectId]/+page);
                         snippet-editor.svelte.ts — per-tab code-snippet
                         drafts, save lifecycle, debounced lint + run/stop
                         state; snippet-stage.ts — folds a snippet run's op

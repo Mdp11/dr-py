@@ -7,7 +7,7 @@ import {
 	type OpsResponse,
 	type SaveModelResponse
 } from './types';
-import type { Op } from '$lib/state/ops';
+import type { ModelOp } from '$lib/state/ops';
 import type { ChangeRequest } from '$lib/state/cr';
 
 /**
@@ -24,10 +24,14 @@ import type { ChangeRequest } from '$lib/state/cr';
  * built from that file). Raises `ConflictError` (409, body carries the
  * current `model_rev`) on a rev mismatch and `ValidationError` (422) when an
  * op is invalid — in both cases the server model is unchanged.
+ *
+ * `ModelOp`, not the full `Op` union: CLAUDE.md is explicit that `/model/ops`
+ * rejects artifact ops permanently — they flow through `POST /commits`
+ * instead (see `api/artifact_ops.py`'s `split_ops`).
  */
 export function applyOps(
 	baseRev: number,
-	ops: readonly Op[],
+	ops: readonly ModelOp[],
 	cfg?: ClientConfig
 ): Promise<OpsResponse> {
 	return apiFetch(

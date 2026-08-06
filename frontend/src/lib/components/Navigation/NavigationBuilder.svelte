@@ -4,10 +4,11 @@
 		ensureDraft,
 		ensureTableDraft,
 		getDraft,
-		getSaveConflict,
+		getNavLockHolder,
 		isRunnable,
 		openArtifactTab,
 		reloadDraft,
+		retryNavLock,
 		saveAsDraft,
 		saveDraft,
 		setDraftName,
@@ -23,8 +24,17 @@
 		void ensureDraft(tabId);
 	});
 	const draft = $derived(getDraft(tabId));
-	const conflict = $derived(getSaveConflict(tabId));
+	/** Non-null while a peer holds this navigation's `art:` lease: the tab is
+	 * UNSAVEABLE until the check-out succeeds — Save and Save as are disabled
+	 * behind the banner ("Retry"), while the editing surface itself stays live.
+	 * See `navigation-editor.svelte.ts`'s `ensureDraft` docstring. */
+	const lockHolder = $derived(getNavLockHolder(tabId));
 	const editable = $derived(canEdit());
+	/** A refused check-out disables the SAVE affordances (name, Save, Save as)
+	 * but keeps them VISIBLE — paired with the banner, that is what explains why.
+	 * It does NOT gate the editing surface; the banner copy says "you will not be
+	 * able to save" rather than "read-only" for exactly that reason. */
+	const locked = $derived(lockHolder !== null);
 	let saveError = $state<string | null>(null);
 	let dockHeight = $state(280);
 
@@ -72,7 +82,7 @@
 				data-testid="nav-name"
 				class="w-56 rounded border border-input bg-card px-2 py-1 text-xs"
 				value={draft.name}
-				disabled={!editable}
+				disabled={!editable || locked}
 				oninput={(e) => setDraftName(tabId, e.currentTarget.value)}
 			/>
 			{#if draft.dirty}
@@ -92,14 +102,15 @@
 					<button
 						type="button"
 						class="rounded bg-primary px-2 py-1 text-xs text-primary-foreground transition-colors hover:bg-primary/80 disabled:opacity-40"
-						disabled={!draft.dirty && draft.artifactId !== null}
+						disabled={locked || (!draft.dirty && draft.artifactId !== null)}
 						onclick={() => void save()}
 					>
 						Save{draft.dirty ? ' *' : ''}
 					</button>
 					<button
 						type="button"
-						class="rounded border border-input px-2 py-1 text-xs text-foreground/80 transition-colors hover:bg-muted"
+						class="rounded border border-input px-2 py-1 text-xs text-foreground/80 transition-colors hover:bg-muted disabled:opacity-40"
+						disabled={locked}
 						onclick={() => void saveAs()}
 					>
 						Save as…
@@ -107,11 +118,17 @@
 				</div>
 			{/if}
 		</div>
-		{#if conflict !== undefined}
-			<div class="flex items-center gap-2 bg-warning/15 px-3 py-1.5 text-xs text-warning">
-				Someone else modified this navigation.
+		{#if lockHolder !== null}
+			<div
+				class="flex items-center gap-2 bg-warning/15 px-3 py-1.5 text-xs text-warning"
+				role="status"
+			>
+				Checked out by {lockHolder} — you will not be able to save.
+				<button type="button" class="underline" onclick={() => void retryNavLock(tabId)}>
+					Retry
+				</button>
 				<button type="button" class="underline" onclick={() => void reloadDraft(tabId)}>
-					Reload their version
+					Reload
 				</button>
 			</div>
 		{/if}

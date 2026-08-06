@@ -2,15 +2,27 @@ import { getDraft, hasDirtyNavDrafts } from './navigation-editor.svelte';
 import { getSnippetDraft, hasDirtySnippetDrafts } from './snippet-editor.svelte';
 import { getTableDraft, hasDirtyTableDrafts } from './table-editor.svelte';
 import { hasStagedOps } from './model.svelte';
+import { getStagedArtifactDepth } from './artifact-edits.svelte';
 
 /**
  * True when leaving the workspace would lose work the server has not seen:
- * staged (uncommitted) model edits, or an unsaved table / navigation /
- * snippet draft. Drives the workspace unload guard (`beforeNavigate` in the
- * project page).
+ * staged (uncommitted) model edits, staged (uncommitted) ARTIFACT ops, or an
+ * unsaved table / navigation / snippet draft. Drives the workspace unload
+ * guard (`beforeNavigate` in the project page).
+ *
+ * The artifact term is not redundant with the draft terms: saving an artifact
+ * editor CLEARS its draft's `dirty` flag and hands the work to the staged
+ * artifact buffer, so a saved-but-uncommitted artifact is invisible to
+ * `hasDirty*Drafts()` and would otherwise walk out the door unguarded.
  */
 export function hasUnsavedWork(): boolean {
-	return hasStagedOps() || hasDirtyTableDrafts() || hasDirtyNavDrafts() || hasDirtySnippetDrafts();
+	return (
+		hasStagedOps() ||
+		getStagedArtifactDepth() > 0 ||
+		hasDirtyTableDrafts() ||
+		hasDirtyNavDrafts() ||
+		hasDirtySnippetDrafts()
+	);
 }
 
 /**

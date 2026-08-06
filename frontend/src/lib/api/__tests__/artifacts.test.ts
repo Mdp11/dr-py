@@ -1,8 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { server } from './server';
-import { createArtifact, evaluateNavigation, listArtifacts, updateArtifact } from '../artifacts';
-import { ConflictError } from '../errors';
+import { evaluateNavigation, getArtifact, listArtifacts } from '../artifacts';
 
 const BASE = 'http://api.test/api/v1/projects/p1';
 const CFG = { baseUrl: BASE };
@@ -20,6 +19,9 @@ beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
+// Every case here is a READ. That is the whole surface: `../artifacts.ts` is
+// read-only by design, because artifact writes go through `POST /commits` as
+// staged ops. There is deliberately no PUT/POST/DELETE case to write.
 describe('artifacts api', () => {
 	it('lists headers with a kind filter', async () => {
 		server.use(
@@ -32,34 +34,17 @@ describe('artifacts api', () => {
 		expect(res.items[0].name).toBe('Sensors');
 	});
 
-	it('creates and returns the full artifact', async () => {
+	it('fetches one artifact with its payload', async () => {
 		server.use(
-			http.post(`${BASE}/artifacts`, async ({ request }) => {
-				const body = (await request.json()) as Record<string, unknown>;
-				expect(body.kind).toBe('navigation');
-				return HttpResponse.json({ ...HEADER, payload: body.payload }, { status: 201 });
-			})
-		);
-		const res = await createArtifact(
-			{
-				kind: 'navigation',
-				name: 'Sensors',
-				payload: { kind: 'path', start: { kind: 'scope', types: [] }, steps: [] }
-			},
-			CFG
-		);
-		expect(res.payload.kind).toBe('path');
-	});
-
-	it('surfaces a stale-rev PUT as ConflictError', async () => {
-		server.use(
-			http.put(`${BASE}/artifacts/a1`, () =>
-				HttpResponse.json({ detail: { message: 'stale', current_rev: 3 } }, { status: 409 })
+			http.get(`${BASE}/artifacts/a1`, () =>
+				HttpResponse.json({
+					...HEADER,
+					payload: { kind: 'path', start: { kind: 'scope', types: [] }, steps: [] }
+				})
 			)
 		);
-		await expect(updateArtifact('a1', { artifact_rev: 1, name: 'x' }, CFG)).rejects.toBeInstanceOf(
-			ConflictError
-		);
+		const res = await getArtifact('a1', CFG);
+		expect(res.payload.kind).toBe('path');
 	});
 
 	it('evaluates and parses a chain page', async () => {

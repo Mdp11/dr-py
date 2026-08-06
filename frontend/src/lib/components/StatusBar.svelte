@@ -6,6 +6,7 @@
 		getTypeFilter,
 		getFeedConnected,
 		getPresence,
+		getStagedArtifactDepth,
 		getStagedChangeCount,
 		getLockNotice,
 		getStaleResources
@@ -13,7 +14,11 @@
 
 	const summary = $derived(getModelSummary());
 	const filename = $derived(getFilename());
-	const totalChanges = $derived(getStagedChangeCount());
+	// "Uncommitted" is everything in the next commit batch: the model staged
+	// diff's entity count plus one per staged artifact op. Composed here rather
+	// than inside getStagedChangeCount(), which is model-diff-derived by
+	// definition — see the same composition in TopBar.svelte.
+	const totalChanges = $derived(getStagedChangeCount() + getStagedArtifactDepth());
 	const lockNotice = $derived(getLockNotice());
 	// Own-lock expiry surfacing: getStaleResources reads the reactive _stale
 	// SvelteMap, so this derives live as locks lapse / are re-acquired / discarded.

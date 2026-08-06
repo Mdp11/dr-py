@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { openDefaultProject } from './helpers/auth';
+import { commitStaged } from './helpers/commit';
 
 /**
  * Drives the refactored navigation builder (chain rail + results dock):
@@ -136,6 +137,12 @@ test('build, combine, select nodes, save, save-as, and reopen round-trips the st
 		.filter({ has: page.locator('span.flex-1', { hasText: /^Nav base copy$/ }) });
 	await expect(navBaseCopyItem).toBeVisible();
 	await expect(navBaseItem).toBeVisible();
+
+	// --- 8b. Commit: Save only STAGED the two creates -----------------------
+	// Both rows above are the sidebar's staged overlay, under TEMP ids. Section 9
+	// closes the fork's tab and reopens the original from the library, which only
+	// resolves to a real editor once the artifacts exist server-side.
+	await commitStaged(page);
 
 	// --- 9. Reopen the ORIGINAL and verify the round-trip ------------------
 	await page.getByRole('button', { name: 'Close Nav base copy' }).click();

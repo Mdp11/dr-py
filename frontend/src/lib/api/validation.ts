@@ -1,12 +1,14 @@
 import { apiFetch, type ClientConfig } from './client';
-import type { Op } from '$lib/state/ops';
+import type { ModelOp } from '$lib/state/ops';
 import { IssueListSchema, type InlineModel, type Issue } from './types';
 
 export interface ValidateOptions {
 	inline?: InlineModel;
 	scope?: string[];
-	/** Staged (uncommitted) ops to validate against the committed model. */
-	ops?: Op[];
+	/** Staged (uncommitted) ops to validate against the committed model.
+	 * `ModelOp`, not the full `Op` union: CLAUDE.md is explicit that
+	 * `POST /model/validate` rejects artifact ops permanently. */
+	ops?: ModelOp[];
 	/** model_rev the ops were computed against; sent as base_rev (409 on stale). */
 	baseRev?: number;
 }

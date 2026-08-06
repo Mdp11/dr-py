@@ -4,7 +4,7 @@
  * store reads here: everything is a function of its arguments so it can be
  * unit-tested without mounting a component.
  */
-import type { Op } from '$lib/state/ops';
+import type { ModelOp } from '$lib/state/ops';
 import type { SnippetRunOut } from '$lib/api/snippets';
 import type { SnippetError } from '$lib/api/types';
 
@@ -35,7 +35,7 @@ export function errorKindLabel(kind: SnippetError['kind']): string {
 	}
 }
 
-export function opSummary(op: Op): string {
+export function opSummary(op: ModelOp): string {
 	switch (op.kind) {
 		case 'create_element': {
 			const name = op.properties['name'];

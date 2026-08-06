@@ -57,6 +57,32 @@ describe('connectFeed', () => {
 		expect(events[0]).toMatchObject({ type: 'presence', user_id: 'bob' });
 	});
 
+	it('delivers a commit event carrying scope unchanged', () => {
+		const events: FeedEvent[] = [];
+		connectFeed({
+			url: 'ws://x/feed',
+			socketFactory: (u) => new FakeSocket(u),
+			onEvent: (e) => events.push(e),
+			onStatus: () => {}
+		});
+		const sock = FakeSocket.last!;
+		sock.open();
+		sock.message({
+			type: 'commit',
+			rev: 5,
+			commit_id: 'c1',
+			author_id: 'bob',
+			message: 'edit table',
+			validation_error_count: 0,
+			changed_elements: [],
+			changed_relationships: [],
+			deleted_element_ids: [],
+			deleted_relationship_ids: [],
+			scope: ['artifact']
+		});
+		expect(events[0]).toMatchObject({ type: 'commit', rev: 5, scope: ['artifact'] });
+	});
+
 	it('reconnects after an unexpected close', () => {
 		vi.useFakeTimers();
 		connectFeed({

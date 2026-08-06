@@ -17,8 +17,6 @@ vi.mock('$lib/state', async (orig) => {
 		...actual,
 		getRole: vi.fn(() => 'owner'),
 		getModelRev: vi.fn(() => 7),
-		getStagedDepth: vi.fn(() => 0),
-		getLockState: vi.fn(() => new Map()),
 		setIssues: vi.fn(),
 		setMetamodel: vi.fn(),
 		setMetamodelFilename: vi.fn(),
@@ -26,10 +24,34 @@ vi.mock('$lib/state', async (orig) => {
 	};
 });
 
-import { getRole, getStagedDepth, getLockState, setIssues, refreshSummary } from '$lib/state';
+import { getRole, setIssues, refreshSummary } from '$lib/state';
+// The quiet gate (`isProjectQuiet`) is left REAL by the `...actual` spread, so
+// these tests drive its three terms through the actual stores: the staged model
+// buffer, the staged artifact buffer, and the feed's lock table.
+import { emit, resetModelStore, seedElements } from '$lib/state/model.svelte';
+import { resetArtifactEdits } from '$lib/state/artifact-edits.svelte';
+import { handleFeedEvent, resetRealtime } from '$lib/state/realtime.svelte';
+import type { LeaseLite } from '$lib/api/feed';
+
+/** Install `resourceIds` as the project-wide lock table, as a feed snapshot
+ * would. `model_rev: 0` keeps the reducer's "am I behind?" summary refresh
+ * (fire-and-forget, network) from firing. */
+function seedLocks(...resourceIds: string[]): void {
+	handleFeedEvent({
+		type: 'snapshot',
+		model_rev: 0,
+		locks: resourceIds.map(
+			(resource_id): LeaseLite => ({ resource_id, mode: 'exclusive', holder_id: 'peer' })
+		),
+		connected: []
+	});
+}
 
 afterEach(() => {
 	document.body.innerHTML = '';
+	resetModelStore();
+	resetArtifactEdits();
+	resetRealtime();
 	vi.clearAllMocks();
 });
 
@@ -166,7 +188,8 @@ describe('SwapMetamodelDrawer rebind path', () => {
 
 	it('blocks rebind when staged edits exist (quiet-project)', async () => {
 		(getRole as ReturnType<typeof vi.fn>).mockReturnValue('owner');
-		(getStagedDepth as ReturnType<typeof vi.fn>).mockReturnValue(3);
+		seedElements([{ id: 'e1', type_name: 'T', properties: { name: 'a' }, rev: 1 }]);
+		emit({ kind: 'update_element', id: 'e1', properties_patch: { name: 'b' } });
 		const component = mount(SwapMetamodelDrawer, {
 			target: document.body,
 			props: { open: true }
@@ -186,10 +209,9 @@ describe('SwapMetamodelDrawer rebind path', () => {
 		}
 	});
 
-	it('blocks rebind when a lease is live', async () => {
+	it('blocks rebind when a MODEL-scope lease is live', async () => {
 		(getRole as ReturnType<typeof vi.fn>).mockReturnValue('owner');
-		(getStagedDepth as ReturnType<typeof vi.fn>).mockReturnValue(0);
-		(getLockState as ReturnType<typeof vi.fn>).mockReturnValue(new Map([['e1', {}]]));
+		seedLocks('e1');
 		const component = mount(SwapMetamodelDrawer, {
 			target: document.body,
 			props: { open: true }
@@ -207,10 +229,33 @@ describe('SwapMetamodelDrawer rebind path', () => {
 		}
 	});
 
+	it('STAYS ENABLED while only an art: lease is live (regression)', async () => {
+		// An `art:` lease just means someone has an artifact editor tab open. A
+		// rebind rewrites MODEL content; gating on it disabled Swap metamodel for
+		// the whole project, for the full lock TTL, whenever anyone had a table or
+		// navigation open.
+		(getRole as ReturnType<typeof vi.fn>).mockReturnValue('owner');
+		seedLocks('art:a9');
+		const component = mount(SwapMetamodelDrawer, {
+			target: document.body,
+			props: { open: true }
+		});
+		try {
+			flushSync();
+			await pickAndDiff();
+			expect(/needs a quiet project/i.test(bodyText())).toBe(false);
+			const btn = Array.from(document.querySelectorAll('button')).find((b) =>
+				/rebind/i.test(b.textContent ?? '')
+			) as HTMLButtonElement | undefined;
+			expect(btn).toBeTruthy();
+			expect(btn!.disabled).toBe(false);
+		} finally {
+			unmount(component);
+		}
+	});
+
 	it('on success refreshes metamodel, issues, summary and closes', async () => {
 		(getRole as ReturnType<typeof vi.fn>).mockReturnValue('owner');
-		(getStagedDepth as ReturnType<typeof vi.fn>).mockReturnValue(0);
-		(getLockState as ReturnType<typeof vi.fn>).mockReturnValue(new Map());
 		(rebindMetamodel as ReturnType<typeof vi.fn>).mockResolvedValue({
 			model_rev: 8,
 			metamodel_id: 'mm-2',
@@ -251,8 +296,6 @@ describe('SwapMetamodelDrawer rebind path', () => {
 
 	it('shows a stale-rev message on 409 base_rev', async () => {
 		(getRole as ReturnType<typeof vi.fn>).mockReturnValue('owner');
-		(getStagedDepth as ReturnType<typeof vi.fn>).mockReturnValue(0);
-		(getLockState as ReturnType<typeof vi.fn>).mockReturnValue(new Map());
 		// Fabricate a real ApiError (status 409) so instanceof check in the component works
 		const err = new ApiError(409, { detail: 'stale base_rev' }, 'stale base_rev');
 		(rebindMetamodel as ReturnType<typeof vi.fn>).mockRejectedValue(err);
@@ -277,8 +320,6 @@ describe('SwapMetamodelDrawer rebind path', () => {
 
 	it('shows an active-locks message on 409 with lock detail', async () => {
 		(getRole as ReturnType<typeof vi.fn>).mockReturnValue('owner');
-		(getStagedDepth as ReturnType<typeof vi.fn>).mockReturnValue(0);
-		(getLockState as ReturnType<typeof vi.fn>).mockReturnValue(new Map());
 		// detail contains "lock" → component shows the active-locks message, not stale-rev
 		const err = new ApiError(
 			409,

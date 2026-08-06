@@ -198,11 +198,30 @@ export const OpsResponseSchema = z.object({
 });
 export type OpsResponse = z.infer<typeof OpsResponseSchema>;
 
+// ArtifactHeaderSchema is moved up here (from its home in the "Project
+// artifacts" section below) because CommitResponseSchema, just past the
+// Phase-4 section, references it — a `const` referenced before its module-init
+// assignment throws (TDZ), so definition order in this file must follow use.
+export const ArtifactHeaderSchema = z.object({
+	id: z.string(),
+	kind: z.string(),
+	name: z.string(),
+	artifact_rev: z.number().int(),
+	updated_at: z.string(),
+	updated_by: z.string().nullable().default(null),
+	entry_points: z.array(z.string()).nullable().optional().default(null)
+});
+export type ArtifactHeader = z.infer<typeof ArtifactHeaderSchema>;
+
 // --- Phase 4 check-out / commit (Spec B) -----------------------------------
 
 export const LockTargetInSchema = z.object({
 	resource_id: z.string(),
-	mode: z.enum(['exclusive', 'shared'])
+	mode: z.enum(['exclusive', 'shared']),
+	// what the id names; the backend canonicalizes ("artifact" -> "art:<id>",
+	// "metamodel" -> "mm"). Optional: absent means "element", so every
+	// pre-existing element call site is untouched.
+	type: z.enum(['element', 'artifact', 'metamodel']).optional()
 });
 export type LockTargetIn = z.infer<typeof LockTargetInSchema>;
 
@@ -284,7 +303,12 @@ export type PreviewResponse = z.infer<typeof PreviewResponseSchema>;
 export const CommitResponseSchema = OpsResponseSchema.extend({
 	commit_id: z.string(),
 	message: z.string().default(''),
-	validation_error_count: z.number().int().default(0)
+	validation_error_count: z.number().int().default(0),
+	// artifact half of the commit delta (headers only — an open editor
+	// refetches nothing: the staged payload it just committed IS the payload).
+	// Defaults keep every pre-artifact fixture parsing.
+	changed_artifacts: z.array(ArtifactHeaderSchema).default([]),
+	deleted_artifact_ids: z.array(z.string()).default([])
 });
 export type CommitResponse = z.infer<typeof CommitResponseSchema>;
 
@@ -354,17 +378,6 @@ export type TreeItemPage = z.infer<typeof TreeItemPageSchema>;
 // ---------------------------------------------------------------------------
 // Project artifacts (Stage 1: saved navigations; tables/diagrams later)
 // ---------------------------------------------------------------------------
-
-export const ArtifactHeaderSchema = z.object({
-	id: z.string(),
-	kind: z.string(),
-	name: z.string(),
-	artifact_rev: z.number().int(),
-	updated_at: z.string(),
-	updated_by: z.string().nullable().default(null),
-	entry_points: z.array(z.string()).nullable().optional().default(null)
-});
-export type ArtifactHeader = z.infer<typeof ArtifactHeaderSchema>;
 
 export const ArtifactListSchema = z.object({
 	items: z.array(ArtifactHeaderSchema).default([])

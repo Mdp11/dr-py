@@ -73,7 +73,9 @@ describe('commit lifecycle', () => {
 			issue_counts: {},
 			commit_id: 'c1',
 			message: 'm',
-			validation_error_count: 0
+			validation_error_count: 0,
+			changed_artifacts: [],
+			deleted_artifact_ids: []
 		});
 		await commitStaged('m', false);
 		expect(hasStagedOps()).toBe(false);
@@ -96,7 +98,9 @@ describe('commit lifecycle', () => {
 			issue_counts: {},
 			commit_id: 'c1',
 			message: 'm',
-			validation_error_count: 3
+			validation_error_count: 3,
+			changed_artifacts: [],
+			deleted_artifact_ids: []
 		});
 		await commitStaged('m', true);
 		expect(spy.mock.calls[0][0]).toMatchObject({

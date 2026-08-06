@@ -11,9 +11,9 @@
 	import {
 		applyStructuralEdit,
 		canEdit,
-		getArtifactHeaders,
 		getDraft,
 		getSelectedPath,
+		referenceableArtifactHeaders,
 		registerVisibleNode,
 		selectNode,
 		unregisterVisibleNode,
@@ -54,7 +54,7 @@
 
 	const editable = $derived(canEdit());
 	const draft = $derived(getDraft(tabId));
-	const navHeaders = $derived(getArtifactHeaders().filter((a) => a.kind === 'navigation'));
+	const navHeaders = $derived(referenceableArtifactHeaders('navigation'));
 	const title = $derived(draft ? titleForPath(draft.definition, path) : '');
 	const isSelected = $derived(pathKey(getSelectedPath(tabId)) === pathKey(path));
 

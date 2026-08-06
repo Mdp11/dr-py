@@ -23,6 +23,7 @@ import {
 import { hasUnsavedWork, isArtifactDirty, isTabDirty } from '../unsaved';
 import { openArtifactTab, resetWorkspaceTabs } from '../workspace.svelte';
 import { resetArtifacts } from '../artifacts.svelte';
+import { resetArtifactEdits, stageArtifactCreate } from '../artifact-edits.svelte';
 
 const EMPTY_PAGE = {
 	columns: [],
@@ -41,6 +42,7 @@ beforeEach(() => {
 	resetSnippetEditors();
 	resetWorkspaceTabs();
 	resetArtifacts();
+	resetArtifactEdits();
 	vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
 	// ensureSnippetDraft()/updateSnippetCode() lint in the background; stub it so
 	// the dirty-tracking assertions here don't escape to a real fetch.
@@ -111,6 +113,15 @@ describe('hasUnsavedWork', () => {
 	it('is true with a dirty table draft only', async () => {
 		const draft = await ensureTableDraft('tbl:draft:1');
 		updateTableDefinition('tbl:draft:1', draft.definition);
+		expect(hasUnsavedWork()).toBe(true);
+	});
+
+	it('is true while only an artifact op is staged', () => {
+		// A saved-but-uncommitted artifact leaves no dirty draft behind (the
+		// editor's Save clears `dirty` and hands the work to the staged-artifact
+		// buffer), so without the artifact-depth term the unload guard would let
+		// the whole batch leave silently.
+		stageArtifactCreate('navigation', 'N', {}, null);
 		expect(hasUnsavedWork()).toBe(true);
 	});
 });
