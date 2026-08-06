@@ -8,6 +8,7 @@ import {
 	getCommittedArtifactHeaders,
 	artifactHeaderById,
 	loadArtifacts,
+	referenceableArtifactHeaders,
 	removeArtifact,
 	renameArtifact,
 	resetArtifacts
@@ -151,6 +152,38 @@ describe('staged overlay', () => {
 	});
 });
 
+describe('referenceableArtifactHeaders', () => {
+	it('omits staged creates — a temp id can never be persisted inside a payload', async () => {
+		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [HEADER] });
+		await loadArtifacts();
+		const tempId = stageArtifactCreate('navigation', 'Draft nav', {}, 'nav:draft:1');
+
+		// The overlay (what the sidebar renders) shows it...
+		expect(getArtifactHeaders().map((h) => h.id)).toEqual(['a1', tempId]);
+		// ...but a ref picker must not offer an id that would commit as a
+		// dangling string: artifact-op ids are resolved LITERALLY server-side and
+		// nothing rewrites refs inside payloads.
+		expect(referenceableArtifactHeaders('navigation').map((h) => h.id)).toEqual(['a1']);
+	});
+
+	it('keeps staged renames, under the staged name', async () => {
+		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [HEADER] });
+		await loadArtifacts();
+		stageArtifactUpdate('a1', { name: 'Sensors v2' });
+		// The id is real and persistable — only the label changed.
+		expect(referenceableArtifactHeaders('navigation')).toEqual([{ ...HEADER, name: 'Sensors v2' }]);
+	});
+
+	it('omits staged deletes and filters by kind', async () => {
+		mockAcquire();
+		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [HEADER, TABLE_HEADER] });
+		await loadArtifacts();
+		expect(referenceableArtifactHeaders('table')).toEqual([TABLE_HEADER]);
+		await removeArtifact('t1');
+		expect(referenceableArtifactHeaders('table')).toEqual([]);
+	});
+});
+
 describe('renameArtifact', () => {
 	it('stages a name-only update after acquiring the edit lease', async () => {
 		const acquire = mockAcquire();
@@ -252,6 +285,20 @@ describe('removeArtifact', () => {
 		expect(getView()!.folders[0].artifacts).toEqual([{ id: 'a1', kind: 'navigation' }]);
 	});
 
+	it('records the COMMITTED header on the delete entry, not a staged rename', async () => {
+		mockAcquire();
+		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [HEADER] });
+		await loadArtifacts();
+		await renameArtifact('a1', 'Never committed');
+
+		await removeArtifact('a1');
+
+		// The delete entry's `header` is the DiffDrawer's display source; showing
+		// the uncommitted rename there would name the artifact something the
+		// server never saw.
+		expect(getStagedArtifactEntries()).toEqual([{ kind: 'delete', id: 'a1', header: HEADER }]);
+	});
+
 	it('refuses without staging when the delete lease is denied', async () => {
 		mockAcquireConflict();
 		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [HEADER] });
@@ -312,6 +359,21 @@ describe('commit listener', () => {
 		expect(put).toHaveBeenCalledTimes(1);
 		expect(getView()!.folders[0].artifacts).toEqual([]);
 		expect(getView()!.folders[0].folders[0].artifacts).toEqual([]);
+	});
+
+	it('upserts a changed header IN PLACE and appends only genuinely new ids', async () => {
+		const third = { ...TABLE_HEADER, id: 't2', name: 'Rooms table' };
+		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [HEADER, TABLE_HEADER, third] });
+		await loadArtifacts();
+
+		const renamed: ArtifactHeader = { ...HEADER, name: 'Sensors v2', artifact_rev: 3 };
+		const created: ArtifactHeader = { ...TABLE_HEADER, id: 'n9', name: 'Fresh' };
+		notifyArtifactCommit({ idMap: {}, changed: [renamed, created], deletedIds: [] });
+
+		// A committed rename must keep its slot: appending would make the row jump
+		// to the bottom of its sidebar section until the next feed refetch
+		// happened to reorder it.
+		expect(getCommittedArtifactHeaders()).toEqual([renamed, TABLE_HEADER, third, created]);
 	});
 
 	it('does not push the view when the commit deleted nothing this view placed', async () => {

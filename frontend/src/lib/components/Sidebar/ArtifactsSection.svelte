@@ -3,6 +3,7 @@
 	import {
 		canEdit,
 		getArtifactHeaders,
+		getDynamicTabs,
 		isArtifactDirty,
 		openArtifactTab,
 		openNavigationTab,
@@ -86,12 +87,17 @@
 	}
 	function openExisting(cfg: SectionConfig, id: string, name: string): void {
 		// A staged create has no server-side row, so there is nothing for a fresh
-		// editor tab to load — but the draft it was staged from is still open.
-		// Focus that tab instead; if it is gone (closed since), do nothing rather
-		// than opening a tab that would 404 on its payload fetch.
+		// editor tab to load — focus the tab it was staged from instead.
+		//
+		// That tab may be GONE: closing an editor clears its draft and releases its
+		// lease but does NOT revert the staged create, so the recorded source tab id
+		// outlives the tab. Activating a dead id would leave `_activeTab` matching no
+		// pane and blank the workspace, so check it is still open and otherwise do
+		// nothing — the row stays in the sidebar and the DiffDrawer remains the way
+		// to review or discard the staged create.
 		if (isTempId(id)) {
 			const tab = stagedCreateSourceTab(id);
-			if (tab) setActiveTab(tab);
+			if (tab !== null && getDynamicTabs().some((t) => t.id === tab)) setActiveTab(tab);
 			return;
 		}
 		cfg.open({ artifactId: id, title: name });

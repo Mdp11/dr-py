@@ -5,7 +5,15 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as artifactsApi from '$lib/api/artifacts';
-import { resetArtifacts, resetCheckout, resetNavigationEditors, setProjectInfo } from '$lib/state';
+import {
+	loadArtifacts,
+	resetArtifacts,
+	resetCheckout,
+	resetNavigationEditors,
+	setProjectInfo,
+	stageArtifactCreate,
+	stageArtifactUpdate
+} from '$lib/state';
 import type { Column } from '$lib/api/types';
 import NavigationColumnEditor from '../NavigationColumnEditor.svelte';
 
@@ -167,6 +175,41 @@ describe('NavigationColumnEditor inline mode', () => {
 			click(document.querySelector('[data-testid="nav-mode-ref"]'));
 			const next = onChange.mock.calls.at(-1)![0] as NavColumn;
 			expect(next.navigation).toEqual({});
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('the saved-navigation picker omits staged creates but shows staged renames', async () => {
+		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({
+			items: [
+				{
+					id: 'a1',
+					kind: 'navigation',
+					name: 'Sensors',
+					artifact_rev: 1,
+					updated_at: '',
+					updated_by: null,
+					entry_points: null
+				}
+			]
+		});
+		await loadArtifacts();
+		stageArtifactUpdate('a1', { name: 'Sensors v2' });
+		stageArtifactCreate('navigation', 'Draft nav', {}, 'nav:draft:1');
+
+		const c = render(navColumn({}), vi.fn());
+		try {
+			const select = document.querySelector(
+				'select[aria-label="Saved navigation for column"]'
+			) as HTMLSelectElement;
+			const options = [...select.options].map((o) => ({ value: o.value, text: o.textContent }));
+			// Picking a staged create would write a temp id into THIS table's
+			// payload, which commits verbatim and then names nothing.
+			expect(options.some((o) => o.value.startsWith('tmp_'))).toBe(false);
+			expect(options.map((o) => o.value)).toEqual(['', 'a1']);
+			// A staged rename is still pickable — the id is real.
+			expect(options[1].text).toBe('Sensors v2');
 		} finally {
 			unmount(c);
 		}

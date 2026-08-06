@@ -18,8 +18,8 @@
 	import {
 		closeDraft,
 		ensureEmbeddedDraft,
-		getArtifactHeaders,
 		getDraft,
+		referenceableArtifactHeaders,
 		setEmbeddedRowElement,
 		updateDefinition
 	} from '$lib/state';
@@ -52,7 +52,7 @@
 		onChange: (next: NavColumn) => void;
 	} = $props();
 
-	const navHeaders = $derived(getArtifactHeaders().filter((a) => a.kind === 'navigation'));
+	const navHeaders = $derived(referenceableArtifactHeaders('navigation'));
 
 	// One embedded-draft id per mounted editor instance (never persisted).
 	const embId = `navemb:${crypto.randomUUID()}`;

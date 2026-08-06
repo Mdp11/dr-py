@@ -2,9 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import * as api from '$lib/api/artifacts';
 import {
+	closeTab,
 	getActiveTab,
 	getDynamicTabs,
 	loadArtifacts,
+	openArtifactTab,
 	resetArtifacts,
 	resetWorkspaceTabs,
 	setActiveTab,
@@ -146,7 +148,8 @@ describe('ArtifactsSection staged rows', () => {
 	});
 
 	it('double-clicking a staged create focuses its originating tab instead of opening one', () => {
-		const tempId = stageArtifactCreate('table', 'Draft table', {}, 'tbl:draft:1');
+		const sourceTab = openArtifactTab('table', { artifactId: null, title: 'New table' });
+		const tempId = stageArtifactCreate('table', 'Draft table', {}, sourceTab);
 		setActiveTab('model');
 		app = mount(ArtifactsSection, { target: host });
 		flushSync();
@@ -154,14 +157,32 @@ describe('ArtifactsSection staged rows', () => {
 			.querySelector(`[data-artifact-id="${tempId}"]`)!
 			.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
 		flushSync();
-		// No new tab: the draft is ALREADY open somewhere, and a temp id has no
+		// No SECOND tab: the draft is already open, and a temp id has no
 		// server-side artifact for a fresh tab to load.
-		expect(getDynamicTabs()).toHaveLength(0);
-		expect(getActiveTab()).toBe('tbl:draft:1');
+		expect(getDynamicTabs().map((t) => t.id)).toEqual([sourceTab]);
+		expect(getActiveTab()).toBe(sourceTab);
 	});
 
-	it('does not open a tab for a staged create whose originating tab is gone', () => {
+	it('does not open a tab for a staged create that recorded no originating tab', () => {
 		const tempId = stageArtifactCreate('table', 'Draft table', {}, null);
+		setActiveTab('model');
+		app = mount(ArtifactsSection, { target: host });
+		flushSync();
+		host
+			.querySelector(`[data-artifact-id="${tempId}"]`)!
+			.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+		flushSync();
+		expect(getDynamicTabs()).toHaveLength(0);
+		expect(getActiveTab()).toBe('model');
+	});
+
+	it('does not activate a staged create whose originating tab has since been closed', () => {
+		// Closing an editor tab clears its draft and releases its lease but does
+		// NOT revert the staged create, so the recorded source tab id outlives the
+		// tab. Activating it would leave the workspace on an id no pane matches.
+		const sourceTab = openArtifactTab('table', { artifactId: null, title: 'New table' });
+		const tempId = stageArtifactCreate('table', 'Draft table', {}, sourceTab);
+		closeTab(sourceTab);
 		setActiveTab('model');
 		app = mount(ArtifactsSection, { target: host });
 		flushSync();

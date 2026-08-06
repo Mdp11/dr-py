@@ -11,9 +11,9 @@
 	import * as api from '$lib/api/artifacts';
 	import { lintSnippet } from '$lib/api/snippets';
 	import {
-		getArtifactHeaders,
 		getInlineEditorHeight,
 		isSnippetExpanded,
+		referenceableArtifactHeaders,
 		setInlineEditorHeight,
 		setSnippetExpanded
 	} from '$lib/state';
@@ -58,9 +58,15 @@
 
 	const inline = $derived(snippet.definition != null);
 
+	// referenceableArtifactHeaders, not getArtifactHeaders: the picked id is
+	// written into the HOSTING artifact's payload, which commits verbatim, so a
+	// staged create's temp id must never be offered. (The entry_points filter
+	// below happens to exclude staged creates too — `entry_points` is
+	// server-derived and null until commit — but that is a side effect of a
+	// snippet-specific rule, not the guard.)
 	const refOptions = $derived(
-		getArtifactHeaders().filter(
-			(a) => a.kind === 'code_snippet' && entryAvailable(entry, a.entry_points ?? undefined)
+		referenceableArtifactHeaders('code_snippet').filter((a) =>
+			entryAvailable(entry, a.entry_points ?? undefined)
 		)
 	);
 	// The currently selected ref may have fallen out of the filtered list (its

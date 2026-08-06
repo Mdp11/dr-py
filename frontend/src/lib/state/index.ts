@@ -248,6 +248,7 @@ export {
 	getArtifactsLoading,
 	getCommittedArtifactHeaders,
 	loadArtifacts,
+	referenceableArtifactHeaders,
 	removeArtifact,
 	renameArtifact,
 	resetArtifacts

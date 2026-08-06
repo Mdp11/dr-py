@@ -61,6 +61,30 @@ export function artifactHeaderById(id: string): ArtifactHeader | undefined {
 }
 
 /**
+ * The headers of `kind` that may be REFERENCED BY ID from inside another
+ * artifact's payload — every "pick a saved navigation / snippet" dropdown.
+ *
+ * A staged create sits in the overlay under a TEMP id, and a temp id must never
+ * reach a payload. Payloads are staged and shipped VERBATIM by
+ * `getStagedArtifactOps`; the backend resolves artifact-op ids LITERALLY (no
+ * `id_map` pass — see `api/artifact_ops.py`), and the client consumes `idMap`
+ * only to rebind editor tabs. Nothing anywhere rewrites refs nested inside a
+ * payload, so a ref picked from a staged create would commit as a string that
+ * names nothing and — once the create is re-keyed to its real id — never will.
+ *
+ * Staged RENAMES stay, under their staged name: the id is real and persistable,
+ * only the label changed. This is the payload-side half of the same rule the
+ * sidebar's drag guard enforces for view placements — go through here rather
+ * than filtering {@link getArtifactHeaders} by hand, so the next picker added
+ * inherits it instead of re-discovering the hazard.
+ */
+export function referenceableArtifactHeaders(
+	kind: 'navigation' | 'table' | 'code_snippet'
+): ArtifactHeader[] {
+	return getArtifactHeaders().filter((h) => h.kind === kind && !isTempId(h.id));
+}
+
+/**
  * Best-effort client-side name-clash check — the ONE definition, shared by all
  * three artifact editors' save paths (navigation, table, code snippet).
  *
@@ -148,7 +172,11 @@ export async function removeArtifact(id: string): Promise<void> {
 		return;
 	}
 	if (!(await artifactDeleteLock(id))) return;
-	const header = artifactHeaderById(id);
+	// COMMITTED header, not the overlay's: `stageArtifactDelete` records this as
+	// the DiffDrawer's display source, and deleting an artifact you also staged a
+	// rename for must show the user the name the server actually holds — not one
+	// that only ever existed in this client's buffer.
+	const header = getCommittedArtifactHeaders().find((a) => a.id === id);
 	if (!header) {
 		// Raced: the row was stale (a peer's delete landed, or a refetch dropped
 		// it) and there is nothing to stage. Hand the lease straight back — see
@@ -183,6 +211,11 @@ export function resetArtifacts(): void {
  * `idMap`, which the editors use to rebind their tabs), so upsert-by-id is the
  * whole reconciliation: no refetch, no rev arithmetic.
  *
+ * The upsert is IN PLACE — a committed rename keeps its slot, and only genuinely
+ * new ids append. Rebuilding the list as "survivors then everything changed"
+ * would make a renamed artifact jump to the bottom of its sidebar section until
+ * the next `artifact` feed event happened to refetch and reorder it.
+ *
  * The view scrub happens HERE rather than at stage time: this is the first
  * moment the artifact is genuinely gone server-side, so it is the first moment
  * dropping its placements is not destroying recoverable content. Fire-and-forget
@@ -191,9 +224,9 @@ export function resetArtifacts(): void {
  * removably by TreeRow (see view-tree.ts).
  */
 onArtifactCommit(({ changed, deletedIds }) => {
-	_items = [
-		..._items.filter((a) => !deletedIds.includes(a.id) && !changed.some((h) => h.id === a.id)),
-		...changed
-	];
+	const kept = _items
+		.filter((a) => !deletedIds.includes(a.id))
+		.map((a) => changed.find((h) => h.id === a.id) ?? a);
+	_items = [...kept, ...changed.filter((h) => !kept.some((a) => a.id === h.id))];
 	for (const id of deletedIds) void scrubArtifactFromView(id).catch(() => {});
 });
