@@ -13,10 +13,11 @@
 		getSnippetDocs,
 		getSnippetDraft,
 		getSnippetLint,
+		getSnippetLockHolder,
 		getSnippetRun,
-		getSnippetSaveConflict,
 		reloadSnippetDraft,
 		removeSnippetElement,
+		retrySnippetLock,
 		runSnippetTab,
 		saveSnippetDraft,
 		setSnippetEntry,
@@ -51,7 +52,12 @@
 	const run = $derived(getSnippetRun(tabId));
 	const lint = $derived(getSnippetLint(tabId));
 	const editable = $derived(canEdit());
-	const conflictRev = $derived(getSnippetSaveConflict(tabId));
+	/** Non-null while a peer holds this snippet's `art:` lease: the tab is
+	 * read-only until the check-out succeeds (banner "Retry"). */
+	const lockHolder = $derived(getSnippetLockHolder(tabId));
+	/** A refused check-out disables the write affordances but keeps them
+	 * VISIBLE — paired with the banner, that is what explains why. */
+	const locked = $derived(lockHolder !== null);
 	const vocab = $derived(vocabFromMetamodel(getMetamodel()));
 
 	const entryOk = $derived(entryAvailable(run.entry, lint?.entryPoints));
@@ -61,12 +67,6 @@
 
 	let editor: CodeEditor | undefined = $state();
 	let saveError = $state<string | null>(null);
-	// Local dismissal of the conflict banner — there is no store-level "clear
-	// conflict" op short of reloading; "Keep editing" just hides the banner
-	// for this rev so it doesn't reappear on every re-render while the user
-	// keeps typing over their own (still-unsaved) copy.
-	let dismissedConflictRev = $state<number | null>(null);
-	const showConflict = $derived(conflictRev !== undefined && conflictRev !== dismissedConflictRev);
 
 	async function save(): Promise<void> {
 		saveError = null;
@@ -81,7 +81,7 @@
 	// with no way to change it; the ratio now lives in a persisted store and the
 	// divider below drives it. Container height comes from a ResizeObserver
 	// rather than a one-shot read — the tab body changes height whenever a
-	// banner (save error, entry hint, conflict) appears above it.
+	// banner (save error, entry hint, read-only lock) appears above it.
 	let bodyEl: HTMLElement | null = $state(null);
 	let bodyH = $state(0);
 
@@ -151,7 +151,7 @@
 			<input
 				class="w-56 rounded border border-input bg-card px-2 py-1 text-xs"
 				value={draft.name}
-				disabled={!editable}
+				disabled={!editable || locked}
 				oninput={(e) => setSnippetName(tabId, e.currentTarget.value)}
 			/>
 			<select
@@ -204,7 +204,8 @@
 				<button
 					type="button"
 					data-testid="snippet-save"
-					class="rounded border border-input px-2 py-1 text-xs text-foreground/80 transition-colors hover:bg-muted"
+					class="rounded border border-input px-2 py-1 text-xs text-foreground/80 transition-colors hover:bg-muted disabled:opacity-40"
+					disabled={locked}
 					onclick={() => void save()}
 				>
 					Save{draft.dirty ? ' *' : ''}
@@ -231,18 +232,17 @@
 				</button>
 			</div>
 		{/if}
-		{#if showConflict && conflictRev !== undefined}
-			<div class="flex items-center gap-2 bg-warning/15 px-3 py-1.5 text-xs text-warning">
-				Saved elsewhere (rev {conflictRev}).
-				<button type="button" class="underline" onclick={() => void reloadSnippetDraft(tabId)}>
-					Reload server copy
+		{#if lockHolder !== null}
+			<div
+				class="flex items-center gap-2 bg-warning/15 px-3 py-1.5 text-xs text-warning"
+				role="status"
+			>
+				Checked out by {lockHolder} — read-only.
+				<button type="button" class="underline" onclick={() => void retrySnippetLock(tabId)}>
+					Retry
 				</button>
-				<button
-					type="button"
-					class="underline"
-					onclick={() => (dismissedConflictRev = conflictRev)}
-				>
-					Keep editing
+				<button type="button" class="underline" onclick={() => void reloadSnippetDraft(tabId)}>
+					Reload
 				</button>
 			</div>
 		{/if}

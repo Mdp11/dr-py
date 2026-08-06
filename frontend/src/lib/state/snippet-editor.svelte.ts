@@ -4,18 +4,40 @@
  * This module owns the draft + save lifecycle; lint and run state (debounced
  * /snippets/lint, run/stop phases, generation guards) live here too (added
  * with the console work). `entryPoints` mirrors the SERVER-derived value
- * (adopted from artifact responses; a run's availability gating uses the
- * live lint response instead) — the client never sends it.
+ * (adopted from artifact responses and commit headers; a run's availability
+ * gating uses the live lint response instead) — the client never sends it, so
+ * a STAGED (uncommitted) snippet legitimately has none until its commit lands.
+ *
+ * Saving STAGES, it does not POST: `saveSnippetDraft` pushes a
+ * `create_artifact`/`update_artifact` op onto the staged-artifact buffer
+ * (`artifact-edits.svelte.ts`), and nothing reaches the server until the
+ * DiffDrawer's Commit sends the batch. Opening a SAVED snippet first checks the
+ * artifact out (`art:<id>` exclusive lease); a denial does not refuse the tab —
+ * it opens read-only with the holder banner (`_lockDenied`). The tab is
+ * deliberately NOT re-keyed when a create is staged: the draft keeps living in
+ * its `snip:draft:N` tab and is rebound to `snip:<id>` only when the commit's
+ * `id_map` supplies a canonical id (see the module-scope listeners at the
+ * bottom of this file).
  */
 import { SvelteMap } from 'svelte/reactivity';
 import * as artifactsApi from '$lib/api/artifacts';
 import * as snippetsApi from '$lib/api/snippets';
 import type { SnippetRunOut } from '$lib/api/snippets';
 import type { SnippetDiagnostic } from '$lib/api/types';
-import { ApiError, ConflictError } from '$lib/api/errors';
+import { ApiError } from '$lib/api/errors';
 import { entryAvailable } from '$lib/snippet/entry-stubs';
-import { createCodeSnippetArtifact, loadArtifacts } from './artifacts.svelte';
-import { bindTabToArtifact, retitleTab } from './workspace.svelte';
+import { assertNoNameClash } from './artifacts.svelte';
+import {
+	onArtifactCommit,
+	onArtifactStageDiscarded,
+	onArtifactStagedDelete,
+	stageArtifactCreate,
+	stageArtifactUpdate
+} from './artifact-edits.svelte';
+import { releaseArtifactIfUnneeded } from './checkout.svelte';
+import { acquireArtifactLease, lockHolderLabel } from './edit-gate';
+import { isTempId } from './ops';
+import { bindTabToArtifact, closeTab, repointTabArtifact, retitleTab } from './workspace.svelte';
 
 export interface SnippetDraft {
 	name: string;
@@ -23,7 +45,10 @@ export interface SnippetDraft {
 	artifactRev: number | null;
 	code: string;
 	dirty: boolean;
-	/** Server-derived (artifact responses); [] until first save/load. */
+	/** Server-derived (artifact responses and commit headers); `[]` until the
+	 * draft is LOADED from a saved artifact or its staged save COMMITS — a
+	 * staged-but-uncommitted snippet has none, because nothing has parsed its
+	 * code yet. */
 	entryPoints: string[];
 }
 
@@ -33,7 +58,14 @@ export interface SnippetDraft {
 const DEFAULT_CODE = '';
 
 const _drafts = new SvelteMap<string, SnippetDraft>();
-const _conflicts = new SvelteMap<string, number>(); // tabId -> server rev
+/**
+ * tabId -> the peer holding the `art:` lease this tab was refused, as a display
+ * label. Present == the tab is READ-ONLY: the payload loaded (a denial never
+ * refuses the tab) but every write affordance is disabled and the banner offers
+ * Retry. Absent for a VIEWER too — the whole workspace is already read-only for
+ * them, so a per-tab "checked out by…" line would be noise.
+ */
+const _lockDenied = new SvelteMap<string, string>();
 
 export const LINT_DEBOUNCE_MS = 300;
 
@@ -217,8 +249,25 @@ export function getSnippetDraft(tabId: string): SnippetDraft | undefined {
 	return _drafts.get(tabId);
 }
 
-export function getSnippetSaveConflict(tabId: string): number | undefined {
-	return _conflicts.get(tabId);
+/** The peer holding this tab's artifact, or null when the tab is editable
+ * (lease granted, or the user is a viewer — see `_lockDenied`). */
+export function getSnippetLockHolder(tabId: string): string | null {
+	return _lockDenied.get(tabId) ?? null;
+}
+
+/** Banner "Retry": re-attempt the check-out the tab was refused. A draft that
+ * has no server-side row yet (unsaved, or a staged create under a temp id) has
+ * nothing to lock, so it is silently skipped. The `.catch` is load-bearing:
+ * `ensureCheckout` RETHROWS anything that is not a lock conflict and the banner
+ * calls this as `void retrySnippetLock(tabId)`, so a 500 would otherwise become
+ * an unhandled rejection. A failed retry just leaves the banner up. */
+export async function retrySnippetLock(tabId: string): Promise<void> {
+	const draft = _drafts.get(tabId);
+	if (!draft?.artifactId || isTempId(draft.artifactId)) return;
+	const res = await acquireArtifactLease(draft.artifactId, 'edit').catch(() => null);
+	if (res === null) return;
+	if (res.ok) _lockDenied.delete(tabId);
+	else if (res.reason === 'conflict') _lockDenied.set(tabId, lockHolderLabel(res));
 }
 
 /** Mirrors hasDirtyNavDrafts/hasDirtyTableDrafts: only the `dirty` flag
@@ -240,7 +289,14 @@ export async function ensureSnippetDraft(tabId: string): Promise<SnippetDraft> {
 	const existing = _drafts.get(tabId);
 	if (existing) return existing;
 	let draft: SnippetDraft;
-	if (tabId.startsWith('snip:draft:')) {
+	const id = tabId.slice('snip:'.length);
+	// An unsaved draft tab is the `snip:draft:N` a New-snippet click mints — or,
+	// in the sibling editors (which have a save-as this one does not), a
+	// `<prefix>:<tempId>` fork. A temp id names nothing server-side, so it must
+	// never reach the lease/fetch branch below: `getArtifact('tmp_…')` 404s and
+	// our only caller is a fire-and-forget `$effect`, which would leave the tab
+	// on "Loading…" forever. The prefix test alone does not catch that shape.
+	if (tabId.startsWith('snip:draft:') || isTempId(id)) {
 		draft = {
 			name: 'New snippet',
 			artifactId: null,
@@ -250,7 +306,25 @@ export async function ensureSnippetDraft(tabId: string): Promise<SnippetDraft> {
 			entryPoints: []
 		};
 	} else {
-		const artifact = await artifactsApi.getArtifact(tabId.slice('snip:'.length));
+		// Check the artifact out BEFORE showing an editable surface: an editor
+		// that lets the user type into a snippet someone else holds is exactly
+		// what the pessimistic lease exists to prevent. A denial does NOT refuse
+		// the tab — the payload still loads and the tab opens read-only behind the
+		// holder banner (a viewer gets no banner: see `_lockDenied`).
+		//
+		// The `.catch` is load-bearing, not defensive noise: `ensureCheckout`
+		// RETHROWS anything that is not a lock conflict, and our only caller is a
+		// fire-and-forget `$effect` — a 500 or a network blip from POST /locks
+		// would otherwise reject before `getArtifact` runs and strand the tab on
+		// "Loading…" forever. Fail OPEN with no banner: an infrastructure error is
+		// not a peer holding the artifact.
+		const res = await acquireArtifactLease(id, 'edit').catch(() => null);
+		if (res !== null && !res.ok && res.reason === 'conflict') {
+			_lockDenied.set(tabId, lockHolderLabel(res));
+		} else {
+			_lockDenied.delete(tabId);
+		}
+		const artifact = await artifactsApi.getArtifact(id);
 		const payload = artifact.payload as Record<string, unknown>;
 		draft = {
 			name: artifact.name,
@@ -280,18 +354,17 @@ export function setSnippetName(tabId: string, name: string): void {
 	retitleTab(tabId, name);
 }
 
-/** Move per-tab state from a draft tab id to its post-save artifact id,
- * including lint/run state. A pending debounced lint is cancelled under the
- * old id and rescheduled under the new one (mirrors
- * navigation-editor.rekeyTab's reschedule discipline); the old id's
- * generations are bumped so any in-flight lint/run response for it is
- * orphaned rather than landing on a tab id nobody reads anymore. */
+/** Move per-tab state from a draft tab id to the canonical artifact id its
+ * staged create was minted at commit, including lint/run state. A pending
+ * debounced lint is cancelled under the old id and rescheduled under the new
+ * one (mirrors navigation-editor.rekeyTab's reschedule discipline); the old
+ * id's generations are bumped so any in-flight lint/run response for it is
+ * orphaned rather than landing on a tab id nobody reads anymore.
+ *
+ * `_lockDenied` is deliberately NOT carried: the only caller is the commit
+ * rebind, whose destination is an artifact we just created and nobody has ever
+ * refused us — it deletes the (impossible) entry explicitly instead. */
 function rekeySnippetTab(oldTab: string, newTab: string): void {
-	const conflict = _conflicts.get(oldTab);
-	if (conflict !== undefined) {
-		_conflicts.delete(oldTab);
-		_conflicts.set(newTab, conflict);
-	}
 	const lint = _lint.get(oldTab);
 	if (lint !== undefined) {
 		_lint.delete(oldTab);
@@ -313,7 +386,7 @@ function rekeySnippetTab(oldTab: string, newTab: string): void {
 						...run,
 						phase: 'idle',
 						runId: null,
-						notice: 'Run discarded — the snippet was saved while it was running. Re-run.'
+						notice: 'Run discarded — the snippet was committed while it was running. Re-run.'
 					}
 		);
 	}
@@ -327,70 +400,55 @@ function rekeySnippetTab(oldTab: string, newTab: string): void {
 	bump(_runGenerations, oldTab);
 }
 
+/**
+ * "Save" = STAGE an artifact op. Nothing is sent here; the op joins the staged
+ * batch that the DiffDrawer's Commit posts to `/commits`.
+ *
+ * An unsaved draft stages a `create_artifact` and adopts its TEMP id, but the
+ * TAB IS NOT RE-KEYED — a temp id is not an artifact id, and re-keying now
+ * would strand the tab (and every per-tab key hanging off it) on an id the
+ * server may never mint if the batch is discarded. The rebind to `snip:<id>`
+ * happens in the commit listener at the bottom of this file, driven by the
+ * commit's `id_map`.
+ *
+ * A saved draft stages a FULL-payload `update_artifact` (name + code);
+ * re-saving coalesces into that same entry (see `stageArtifactUpdate`). No
+ * `artifact_rev` is sent with either op: the `art:` lease taken at open time is
+ * the concurrency control, not OCC.
+ *
+ * `entryPoints` is untouched here on purpose — it is SERVER-derived (from the
+ * code's AST), so a staged snippet has none until its commit header supplies
+ * them.
+ */
 export async function saveSnippetDraft(tabId: string): Promise<void> {
 	const draft = _drafts.get(tabId);
 	if (!draft) return;
-	const payload = { schema_version: 1, language: 'python' as const, code: draft.code };
-	try {
-		if (draft.artifactId === null) {
-			const created = await createCodeSnippetArtifact(draft.name, payload);
-			bindTabToArtifact(tabId, created.id);
-			const newTab = `snip:${created.id}`;
-			_drafts.delete(tabId);
-			_drafts.set(newTab, {
-				...draft,
-				artifactId: created.id,
-				artifactRev: created.artifact_rev,
-				dirty: false,
-				entryPoints:
-					created.entry_points ?? payloadEntryPoints(created.payload as Record<string, unknown>)
-			});
-			rekeySnippetTab(tabId, newTab);
-		} else {
-			const updated = await artifactsApi.updateArtifact(draft.artifactId, {
-				artifact_rev: draft.artifactRev ?? 1,
-				name: draft.name,
-				payload
-			});
-			_drafts.set(tabId, {
-				...draft,
-				artifactRev: updated.artifact_rev,
-				dirty: false,
-				entryPoints:
-					updated.entry_points ?? payloadEntryPoints(updated.payload as Record<string, unknown>)
-			});
-			_conflicts.delete(tabId);
-			await loadArtifacts().catch(() => {});
-		}
-	} catch (err) {
-		// Same structural 409 discrimination as navigation-editor.saveDraft:
-		// only an object detail carrying a numeric current_rev is a REV
-		// conflict; the create/rename name-clash 409 has a string detail and
-		// must NOT enter conflict state (its recovery would wipe the draft).
-		if (err instanceof ConflictError) {
-			const detail = (err.body as { detail?: unknown } | undefined)?.detail;
-			if (
-				detail !== null &&
-				typeof detail === 'object' &&
-				typeof (detail as { current_rev?: unknown }).current_rev === 'number'
-			) {
-				_conflicts.set(tabId, (detail as { current_rev: number }).current_rev);
-			}
-		}
-		throw err;
+	const payload = { schema_version: 1, language: 'python', code: draft.code };
+	// Best-effort: the server's uniqueness check is authoritative and fires at
+	// preview/commit. Throws, and SnippetTab renders it as `saveError`.
+	assertNoNameClash('code_snippet', draft.name, draft.artifactId);
+	if (draft.artifactId === null) {
+		const tempId = stageArtifactCreate('code_snippet', draft.name, payload, tabId);
+		_drafts.set(tabId, { ...draft, artifactId: tempId, dirty: false });
+		repointTabArtifact(tabId, tempId); // tab RECORD follows the draft; tab KEY does not
+	} else {
+		stageArtifactUpdate(draft.artifactId, { name: draft.name, payload });
+		_drafts.set(tabId, { ...draft, dirty: false });
 	}
 }
 
-/** Discard the local draft and re-fetch the server copy (409 recovery). */
+/** Discard the local draft and re-fetch the server copy — the recovery path for
+ * a tab showing a stale payload (e.g. one opened read-only while a peer was
+ * editing). Re-runs `ensureSnippetDraft`, so it re-attempts the check-out too. */
 export async function reloadSnippetDraft(tabId: string): Promise<void> {
 	_drafts.delete(tabId);
-	_conflicts.delete(tabId);
 	await ensureSnippetDraft(tabId);
 }
 
 export function closeSnippetDraft(tabId: string): void {
+	const draft = _drafts.get(tabId); // read BEFORE the delete: it owns the lease
 	_drafts.delete(tabId);
-	_conflicts.delete(tabId);
+	_lockDenied.delete(tabId);
 	const timer = _lintTimers.get(tabId);
 	if (timer !== undefined) {
 		clearTimeout(timer);
@@ -400,13 +458,21 @@ export function closeSnippetDraft(tabId: string): void {
 	_runs.delete(tabId);
 	bump(_lintGenerations, tabId);
 	bump(_runGenerations, tabId);
+	// Give the check-out back: no editor is behind this lease any more. A NO-OP
+	// when a staged op still needs it (a saved-but-uncommitted edit must keep its
+	// lease or the commit 409s "required lock not held") — that is
+	// `releaseArtifactIfUnneeded`'s whole job. A temp id has no server-side row
+	// and therefore no lease.
+	if (draft?.artifactId && !isTempId(draft.artifactId)) {
+		void releaseArtifactIfUnneeded(draft.artifactId).catch(() => {});
+	}
 }
 
 export function resetSnippetEditors(): void {
 	for (const timer of _lintTimers.values()) clearTimeout(timer);
 	_lintTimers.clear();
 	_drafts.clear();
-	_conflicts.clear();
+	_lockDenied.clear();
 	_lint.clear();
 	_runs.clear();
 	// Bump (not clear) — mirrors navigation-editor.resetNavigationEditors: an
@@ -416,3 +482,95 @@ export function resetSnippetEditors(): void {
 	for (const tabId of _lintGenerations.keys()) bump(_lintGenerations, tabId);
 	for (const tabId of _runGenerations.keys()) bump(_runGenerations, tabId);
 }
+
+// ---------------------------------------------------------------------------
+// Staged-artifact listeners (module scope: registered once for the app's life)
+// ---------------------------------------------------------------------------
+
+/**
+ * The commit landed. Two things follow from the server's authoritative delta:
+ *
+ *  - a draft whose artifact was DELETED in the batch loses its tab — there is
+ *    nothing left to edit. A delete staged from the sidebar already closed the
+ *    tab eagerly (see the staged-delete listener below); this is the
+ *    authoritative backstop for any path that reaches commit without it;
+ *  - a draft still on a TEMP id is rebound to the canonical id the `id_map`
+ *    minted: the workspace tab is re-keyed (`bindTabToArtifact`) and every
+ *    per-tab key — lint state, run state, pending timers, generations — is
+ *    carried across by `rekeySnippetTab`, which is why the new draft must be in
+ *    `_drafts` before it is called.
+ *
+ * Either way the draft adopts the header's `artifact_rev` (display-only now
+ * that no save sends it back as an OCC precondition) AND its `entry_points` —
+ * which are SERVER-DERIVED from the code's AST, so the commit response is the
+ * first time a staged snippet learns them. A header carrying none leaves what
+ * the draft already knows in place rather than blanking it.
+ */
+onArtifactCommit(({ idMap, changed, deletedIds }) => {
+	for (const [tabId, draft] of [..._drafts]) {
+		if (draft.artifactId === null) continue; // unsaved: nothing committed
+		if (deletedIds.includes(draft.artifactId)) {
+			closeSnippetDraft(tabId);
+			closeTab(tabId);
+			continue;
+		}
+		if (isTempId(draft.artifactId)) {
+			const realId = idMap[draft.artifactId];
+			if (realId === undefined) continue; // not part of this batch
+			const artHeader = changed.find((h) => h.id === realId);
+			bindTabToArtifact(tabId, realId);
+			const newTab = `snip:${realId}`;
+			_drafts.delete(tabId);
+			_drafts.set(newTab, {
+				...draft,
+				artifactId: realId,
+				artifactRev: artHeader?.artifact_rev ?? null,
+				entryPoints: artHeader?.entry_points ?? draft.entryPoints
+			});
+			rekeySnippetTab(tabId, newTab);
+			_lockDenied.delete(tabId);
+		} else {
+			const artHeader = changed.find((h) => h.id === draft.artifactId);
+			if (artHeader) {
+				_drafts.set(tabId, {
+					...draft,
+					artifactRev: artHeader.artifact_rev,
+					entryPoints: artHeader.entry_points ?? draft.entryPoints
+				});
+			}
+		}
+	}
+});
+
+/**
+ * A staged op was DISCARDED — nothing was saved, so the draft goes back to
+ * holding unsaved work. A discarded CREATE additionally un-binds: its temp id
+ * will never exist, so the draft becomes the unsaved draft it was before Save.
+ *
+ * The tab KEY is deliberately left alone: a create staged from a draft tab is
+ * still sitting in `snip:draft:N`, which names no artifact and therefore cannot
+ * collide with the deterministic `snip:<id>` a sidebar reopen would mint.
+ */
+onArtifactStageDiscarded((id) => {
+	for (const [tabId, draft] of [..._drafts]) {
+		if (draft.artifactId !== id) continue;
+		if (isTempId(id)) {
+			_drafts.set(tabId, { ...draft, artifactId: null, artifactRev: null, dirty: true });
+			repointTabArtifact(tabId, null); // the record tracks the draft, both ways
+		} else {
+			_drafts.set(tabId, { ...draft, dirty: true });
+		}
+	}
+});
+
+/** A delete was STAGED (from the sidebar). Close the tab right away rather than
+ * leaving an editor open on an artifact the pending batch removes — the user
+ * has already decided it is going. */
+onArtifactStagedDelete((id) => {
+	for (const [tabId, draft] of [..._drafts]) {
+		if (draft.artifactId === id) {
+			closeSnippetDraft(tabId);
+			closeTab(tabId);
+		}
+	}
+});

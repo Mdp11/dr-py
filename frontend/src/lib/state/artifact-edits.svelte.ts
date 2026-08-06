@@ -143,6 +143,22 @@ export function stageArtifactCreate(
 }
 
 /**
+ * Re-point a staged create's `sourceTabId` after its editor re-keyed the tab it
+ * was staged from.
+ *
+ * The save-as forks (`saveAsDraft` / `saveAsTableDraft`) have to stage FIRST —
+ * the new tab key is `<prefix>:<tempId>`, so it does not exist until the temp
+ * id does — and then move the tab. Without this the entry would record a tab id
+ * that no longer exists and, once the original artifact is reopened, names a
+ * DIFFERENT tab entirely. No-op unless a CREATE is staged under `tempId`.
+ */
+export function repointStagedArtifactSourceTab(tempId: string, sourceTabId: string | null): void {
+	const existing = _staged.get(tempId);
+	if (existing?.kind !== 'create') return;
+	_staged.set(tempId, { ...existing, sourceTabId });
+}
+
+/**
  * Stage a name and/or payload change. Coalesces into whatever is already
  * staged for `id` (see module docstring):
  *   - staged create -> merge the patch into the create's name/payload.

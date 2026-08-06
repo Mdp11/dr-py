@@ -36,7 +36,8 @@ import {
 	notifyArtifactCommit,
 	resetArtifactEdits,
 	revertStagedArtifact,
-	stageArtifactDelete
+	stageArtifactDelete,
+	stagedCreateSourceTab
 } from '../artifact-edits.svelte';
 import { isCheckedOutByMe, resetCheckout, setProjectInfo } from '../checkout.svelte';
 import { isTempId } from '../ops';
@@ -175,6 +176,24 @@ describe('table-editor', () => {
 		await flush();
 		expect(spy).toHaveBeenCalled();
 		expect(getTablePage('tbl:draft:1')).toBeDefined();
+	});
+
+	it('treats a TEMP-id tab as an unsaved draft rather than fetching it', async () => {
+		// A save-as fork lives under `tbl:<tempId>`, which names nothing
+		// server-side: `getArtifact('tmp_…')` would 404 and, since our only caller
+		// is a fire-and-forget `$effect`, the rejection would strand the tab on
+		// "Loading…" forever. The `tbl:draft:` prefix alone does not catch it.
+		asEditor();
+		const acquire = mockAcquire();
+		const get = vi.spyOn(artifactsApi, 'getArtifact');
+		const evaluate = vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
+
+		const draft = await ensureTableDraft('tbl:tmp_abc');
+
+		expect(get).not.toHaveBeenCalled();
+		expect(acquire).not.toHaveBeenCalled();
+		expect(evaluate).not.toHaveBeenCalled();
+		expect(draft.artifactId).toBeNull();
 	});
 
 	it('setTableSort resets the loaded page offset', async () => {
@@ -979,6 +998,26 @@ describe('saveAsTableDraft', () => {
 		// The retired key keeps nothing (or a reopened original would inherit it).
 		expect(getTablePage('tbl:a1')).toBeUndefined();
 		expect(getTableSort('tbl:a1')).toBeUndefined();
+	});
+
+	it('records the POST-re-key tab as the staged create’s source', async () => {
+		// The entry has to be minted before the fork's key can be computed, so its
+		// sourceTabId starts out naming the tab that is about to be retired — and,
+		// once the original is reopened, a DIFFERENT tab entirely.
+		asEditor();
+		mockAcquire();
+		mockGetTable();
+		vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
+		vi.spyOn(checkoutApi, 'releaseLock').mockResolvedValue(undefined);
+		openArtifactTab('table', { artifactId: 'a1', title: 'Sensors' });
+		await ensureTableDraft('tbl:a1');
+
+		await saveAsTableDraft('tbl:a1', 'Copy');
+
+		const tempId = stagedTempId();
+		expect(stagedCreateSourceTab(tempId)).toBe(`tbl:${tempId}`);
+		// And that tab really is the one on screen.
+		expect(getDynamicTabs().map((t) => t.id)).toContain(stagedCreateSourceTab(tempId));
 	});
 
 	it('refuses a name another table already uses', async () => {

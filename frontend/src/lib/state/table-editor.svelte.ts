@@ -59,6 +59,7 @@ import {
 	onArtifactCommit,
 	onArtifactStageDiscarded,
 	onArtifactStagedDelete,
+	repointStagedArtifactSourceTab,
 	stageArtifactCreate,
 	stageArtifactUpdate
 } from './artifact-edits.svelte';
@@ -880,11 +881,15 @@ export function getTableLockHolder(tabId: string): string | null {
 
 /** Banner "Retry": re-attempt the check-out the tab was refused. A draft that
  * has no server-side row yet (unsaved, or a staged create under a temp id) has
- * nothing to lock, so it is silently skipped. */
+ * nothing to lock, so it is silently skipped. The `.catch` is load-bearing:
+ * `ensureCheckout` RETHROWS anything that is not a lock conflict and the banner
+ * calls this as `void retryTableLock(tabId)`, so a 500 would otherwise become an
+ * unhandled rejection. A failed retry just leaves the banner up. */
 export async function retryTableLock(tabId: string): Promise<void> {
 	const draft = _drafts.get(tabId);
 	if (!draft?.artifactId || isTempId(draft.artifactId)) return;
-	const res = await acquireArtifactLease(draft.artifactId, 'edit');
+	const res = await acquireArtifactLease(draft.artifactId, 'edit').catch(() => null);
+	if (res === null) return;
 	if (res.ok) _lockDenied.delete(tabId);
 	else if (res.reason === 'conflict') _lockDenied.set(tabId, lockHolderLabel(res));
 }
@@ -1048,7 +1053,14 @@ export function hasDirtyTableDrafts(): boolean {
 export async function ensureTableDraft(tabId: string): Promise<TableDraft> {
 	const existing = _drafts.get(tabId);
 	if (existing) return existing;
-	if (tabId.startsWith('tbl:draft:')) {
+	const id = tabId.slice('tbl:'.length);
+	// An unsaved draft tab is either the `tbl:draft:N` a New-table click mints or
+	// a `tbl:<tempId>` save-as fork. A temp id names nothing server-side, so it
+	// must never reach the lease/fetch branch below: `getArtifact('tmp_…')` 404s
+	// and our only caller is a fire-and-forget `$effect`, which would leave the
+	// tab on "Loading…" forever. The `tbl:draft:` prefix alone does not catch the
+	// fork shape.
+	if (tabId.startsWith('tbl:draft:') || isTempId(id)) {
 		const draft: TableDraft = {
 			name: 'New table',
 			artifactId: null,
@@ -1065,7 +1077,6 @@ export async function ensureTableDraft(tabId: string): Promise<TableDraft> {
 		// "Select all"/"Deselect all".
 		return draft;
 	}
-	const id = tabId.slice('tbl:'.length);
 	// Check the artifact out BEFORE showing an editable surface: an editor that
 	// lets the user rework a table someone else holds is exactly what the
 	// pessimistic lease exists to prevent. A denial does NOT refuse the tab — the
@@ -1516,6 +1527,13 @@ export async function saveAsTableDraft(tabId: string, name: string): Promise<voi
 	const tempId = stageArtifactCreate('table', name, payload, tabId);
 	bindTabToArtifact(tabId, tempId); // re-keys the tab id AND repoints its record
 	const newTab = `tbl:${tempId}`;
+	// The staged entry has to be minted before the new key can be computed, so
+	// its `sourceTabId` starts out naming the tab we are about to retire — and,
+	// once the original artifact is reopened, a DIFFERENT tab. Correct it.
+	repointStagedArtifactSourceTab(tempId, newTab);
+	// The staged entry has to be minted before the new key can be computed, so
+	// its `sourceTabId` starts out naming the tab we are about to retire — and,
+	// once the original artifact is reopened, a DIFFERENT tab. Correct it.
 	retitleTab(newTab, name);
 	_drafts.delete(tabId);
 	_drafts.set(newTab, { ...draft, name, artifactId: tempId, artifactRev: null, dirty: false });
