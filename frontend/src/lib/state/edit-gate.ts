@@ -15,14 +15,21 @@ function explain(res: Extract<CheckoutResult, { ok: false }>): string {
 	return `Locked by ${c.held_by_email || c.held_by}.`;
 }
 
-export async function acquireLocks(targets: LockTargetIn[], intent: LockIntent): Promise<boolean> {
-	const res = await ensureCheckout(targets, intent);
+/** Reduce a {@link CheckoutResult} to a boolean, routing the refusal (if any)
+ * to the GLOBAL lock notice. The shared tail of every notice-based gate in this
+ * module — the element gates below and the two sidebar artifact gates, which
+ * would otherwise each hand-roll `setLockNotice(explain(res))`. */
+function noticed(res: CheckoutResult): boolean {
 	if (res.ok) {
 		setLockNotice(null);
 		return true;
 	}
 	setLockNotice(explain(res));
 	return false;
+}
+
+export async function acquireLocks(targets: LockTargetIn[], intent: LockIntent): Promise<boolean> {
+	return noticed(await ensureCheckout(targets, intent));
 }
 
 export function editLock(id: string): Promise<boolean> {
@@ -58,16 +65,22 @@ export function acquireArtifactLease(
 	return ensureCheckout([{ resource_id: artifactId, mode: 'exclusive', type: 'artifact' }], intent);
 }
 
+/**
+ * Sidebar artifact-RENAME gate: notice-based like {@link editLock} (the sidebar
+ * row has no inline place to render a holder — that is the editor tab's job,
+ * which is why {@link acquireArtifactLease} returns the raw result instead).
+ * Sibling of {@link artifactDeleteLock}: the sidebar's two write surfaces report
+ * refusals through the SAME channel, so a user never gets an inline holder for
+ * one and a global toast for the other.
+ */
+export async function artifactEditLock(artifactId: string): Promise<boolean> {
+	return noticed(await acquireArtifactLease(artifactId, 'edit'));
+}
+
 /** Sidebar artifact-delete gate: notice-based like {@link editLock} /
  * {@link deleteLock} (the sidebar has no inline place to show a holder).
  * DELETE-intent exclusives conflict with ANY peer lease, shared pins included,
  * so this refuses while anyone else has the artifact open. */
 export async function artifactDeleteLock(artifactId: string): Promise<boolean> {
-	const res = await acquireArtifactLease(artifactId, 'delete');
-	if (res.ok) {
-		setLockNotice(null);
-		return true;
-	}
-	setLockNotice(explain(res));
-	return false;
+	return noticed(await acquireArtifactLease(artifactId, 'delete'));
 }

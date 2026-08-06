@@ -1,15 +1,25 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as api from '$lib/api/artifacts';
+import * as checkoutApi from '$lib/api/checkout';
 import * as viewApi from '$lib/api/view';
-import type { TableDefinition, View } from '$lib/api/types';
+import type { ArtifactHeader, View } from '$lib/api/types';
 import {
-	createTableArtifact,
 	getArtifactHeaders,
+	getCommittedArtifactHeaders,
+	artifactHeaderById,
 	loadArtifacts,
 	removeArtifact,
 	renameArtifact,
 	resetArtifacts
 } from '../artifacts.svelte';
+import {
+	getStagedArtifactEntries,
+	notifyArtifactCommit,
+	stageArtifactCreate,
+	stageArtifactUpdate,
+	stagedArtifactState
+} from '../artifact-edits.svelte';
+import { resetCheckout, setProjectInfo } from '../checkout.svelte';
 import { clearViewState, getView, pushView } from '../view.svelte';
 
 const HEADER = {
@@ -32,118 +42,70 @@ const TABLE_HEADER = {
 	entry_points: null
 };
 
+/** Mirror of the backend's lock canonicalization: targets go out with the bare
+ * id + `type: "artifact"`, leases come back keyed `art:<id>`. */
+function mockAcquire() {
+	return vi.spyOn(checkoutApi, 'acquireLocks').mockImplementation(async (req) => {
+		const token = `t_${req.targets[0].resource_id}`;
+		return {
+			token,
+			leases: req.targets.map((t) => ({
+				resource_id: t.type === 'artifact' ? `art:${t.resource_id}` : t.resource_id,
+				mode: t.mode,
+				holder: 'default-user',
+				token,
+				intent: req.intent,
+				expires_at: 1
+			}))
+		};
+	});
+}
+
+function mockAcquireConflict() {
+	return vi.spyOn(checkoutApi, 'acquireLocks').mockImplementation(async () => {
+		const { ConflictError } = await import('$lib/api/errors');
+		throw new ConflictError(
+			409,
+			{ conflicts: [{ resource_id: 'art:a1', held_by: 'bob', held_mode: 'exclusive' }] },
+			'lock conflict'
+		);
+	});
+}
+
+/** A view that places `a1` twice (nested folder + parent folder). */
+function viewPlacing(id: string): View {
+	return {
+		name: 'v',
+		folders: [
+			{
+				name: 'F',
+				folders: [
+					{ name: 'G', folders: [], elements: [], artifacts: [{ id, kind: 'navigation' }] }
+				],
+				elements: [],
+				artifacts: [{ id, kind: 'navigation' }]
+			}
+		],
+		artifacts: []
+	};
+}
+
 beforeEach(() => {
 	resetArtifacts();
+	resetCheckout();
 	clearViewState();
+	setProjectInfo({ role: 'editor', lockTtlSeconds: 300 });
 });
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+	resetCheckout(); // stops the heartbeat interval a granted lease starts
+	vi.restoreAllMocks();
+});
 
 describe('artifacts store', () => {
 	it('loads headers', async () => {
 		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [HEADER] });
 		await loadArtifacts();
 		expect(getArtifactHeaders()).toEqual([HEADER]);
-	});
-
-	it('rename uses the loaded rev and refreshes', async () => {
-		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [HEADER] });
-		await loadArtifacts();
-		const update = vi
-			.spyOn(api, 'updateArtifact')
-			.mockResolvedValue({ ...HEADER, name: 'N2', artifact_rev: 3, payload: {} });
-		await renameArtifact('a1', 'N2');
-		expect(update).toHaveBeenCalledWith('a1', { artifact_rev: 2, name: 'N2' });
-		expect(getArtifactHeaders()[0].name).toBe('N2');
-	});
-
-	it('remove deletes and drops the header', async () => {
-		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [HEADER] });
-		await loadArtifacts();
-		vi.spyOn(api, 'deleteArtifact').mockResolvedValue(undefined);
-		await removeArtifact('a1');
-		expect(getArtifactHeaders()).toEqual([]);
-	});
-
-	it('remove scrubs every placement of the artifact from the active view', async () => {
-		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [HEADER] });
-		await loadArtifacts();
-		vi.spyOn(api, 'deleteArtifact').mockResolvedValue(undefined);
-		const seedView: View = {
-			name: 'v',
-			folders: [
-				{
-					name: 'F',
-					folders: [
-						{
-							name: 'G',
-							folders: [],
-							elements: [],
-							artifacts: [{ id: 'a1', kind: 'navigation' }]
-						}
-					],
-					elements: [],
-					artifacts: [{ id: 'a1', kind: 'navigation' }]
-				}
-			],
-			artifacts: []
-		};
-		const put = vi
-			.spyOn(viewApi, 'putViewSnapshot')
-			.mockImplementation(async (v) => ({ view: v, warnings: [] }));
-		await pushView(seedView); // seed the "current view" the same way a load would
-		await removeArtifact('a1');
-		expect(put).toHaveBeenCalledTimes(2); // the seed push + the scrub push
-		const pushed = getView()!;
-		expect(pushed.folders[0].artifacts).toEqual([]);
-		expect(pushed.folders[0].folders[0].artifacts).toEqual([]);
-	});
-
-	it('remove is a no-op push when no view is loaded', async () => {
-		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [HEADER] });
-		await loadArtifacts();
-		vi.spyOn(api, 'deleteArtifact').mockResolvedValue(undefined);
-		const put = vi.spyOn(viewApi, 'putViewSnapshot');
-		expect(getView()).toBeNull();
-		await removeArtifact('a1');
-		expect(put).not.toHaveBeenCalled();
-	});
-
-	it('createTableArtifact creates a table-kind artifact and refreshes the list', async () => {
-		const payload: TableDefinition = {
-			schema_version: 1,
-			default_cell_mode: 'collapse',
-			show_row_numbers: false,
-			export_order: [],
-			row_source: { kind: 'scope', types: [], criteria: [] },
-			columns: [
-				{
-					kind: 'element',
-					source: { kind: 'row', chain_index: 0 },
-					header: '',
-					width_px: null,
-					hidden: false
-				}
-			]
-		};
-		const create = vi.spyOn(api, 'createArtifact').mockResolvedValue({
-			id: 't1',
-			kind: 'table',
-			name: 'Buildings table',
-			artifact_rev: 1,
-			updated_at: '2026-07-05T00:00:00Z',
-			updated_by: null,
-			entry_points: null,
-			payload: payload as unknown as Record<string, unknown>
-		});
-		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [TABLE_HEADER] });
-		const created = await createTableArtifact('Buildings table', payload);
-		expect(create).toHaveBeenCalledWith({
-			kind: 'table',
-			name: 'Buildings table',
-			payload: payload as unknown as Record<string, unknown>
-		});
-		expect(created.id).toBe('t1');
-		expect(getArtifactHeaders()).toEqual([TABLE_HEADER]);
 	});
 
 	it('getArtifactHeaders separates table headers from navigation headers by kind', async () => {
@@ -154,23 +116,228 @@ describe('artifacts store', () => {
 		expect(navigations).toEqual([HEADER]);
 		expect(tables).toEqual([TABLE_HEADER]);
 	});
+});
 
-	it('remove is a no-op push when the loaded view has no placement of the artifact', async () => {
+describe('staged overlay', () => {
+	it('getArtifactHeaders applies the staged overlay', async () => {
+		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [HEADER, TABLE_HEADER] });
+		await loadArtifacts();
+		stageArtifactUpdate('a1', { name: 'Sensors v2' });
+		stageArtifactCreate('table', 'Draft table', { schema_version: 1 }, 'tbl:draft:1');
+
+		const shown = getArtifactHeaders();
+		expect(shown.map((h) => h.name)).toEqual(['Sensors v2', 'Buildings table', 'Draft table']);
+		// server truth is untouched — the overlay is a display projection
+		expect(getCommittedArtifactHeaders()).toEqual([HEADER, TABLE_HEADER]);
+	});
+
+	it('hides a staged-deleted artifact from getArtifactHeaders', async () => {
+		mockAcquire();
+		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [HEADER, TABLE_HEADER] });
+		await loadArtifacts();
+		await removeArtifact('a1');
+		expect(getArtifactHeaders().map((h) => h.id)).toEqual(['t1']);
+		expect(getCommittedArtifactHeaders().map((h) => h.id)).toEqual(['a1', 't1']);
+	});
+
+	it('artifactHeaderById resolves staged creates and staged renames', async () => {
 		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [HEADER] });
 		await loadArtifacts();
-		vi.spyOn(api, 'deleteArtifact').mockResolvedValue(undefined);
-		const seedView: View = {
-			name: 'v',
-			folders: [{ name: 'F', folders: [], elements: [], artifacts: [] }],
-			artifacts: []
+		stageArtifactUpdate('a1', { name: 'Sensors v2' });
+		const tempId = stageArtifactCreate('navigation', 'Draft nav', {}, 'nav:draft:1');
+		expect(artifactHeaderById('a1')?.name).toBe('Sensors v2');
+		expect(artifactHeaderById(tempId)?.name).toBe('Draft nav');
+		expect(artifactHeaderById(tempId)?.kind).toBe('navigation');
+	});
+});
+
+describe('renameArtifact', () => {
+	it('stages a name-only update after acquiring the edit lease', async () => {
+		const acquire = mockAcquire();
+		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [HEADER] });
+		await loadArtifacts();
+		const update = vi.spyOn(api, 'updateArtifact');
+
+		await renameArtifact('a1', 'N2');
+
+		expect(acquire.mock.calls[0][0]).toMatchObject({
+			targets: [{ resource_id: 'a1', mode: 'exclusive', type: 'artifact' }],
+			intent: 'edit'
+		});
+		expect(update).not.toHaveBeenCalled();
+		expect(getStagedArtifactEntries()).toEqual([
+			{ kind: 'update', id: 'a1', name: 'N2', payload: undefined, header: null }
+		]);
+		expect(stagedArtifactState('a1')).toBe('edited');
+		expect(getArtifactHeaders()[0].name).toBe('N2');
+	});
+
+	it('refuses without staging when the lease is denied', async () => {
+		mockAcquireConflict();
+		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [HEADER] });
+		await loadArtifacts();
+
+		await renameArtifact('a1', 'N2');
+
+		expect(getStagedArtifactEntries()).toEqual([]);
+		expect(getArtifactHeaders()[0].name).toBe('Sensors');
+	});
+
+	it('folds into a staged create without any lock call', async () => {
+		const acquire = mockAcquire();
+		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [] });
+		await loadArtifacts();
+		const tempId = stageArtifactCreate('navigation', 'Draft nav', { a: 1 }, 'nav:draft:1');
+
+		await renameArtifact(tempId, 'Renamed draft');
+
+		expect(acquire).not.toHaveBeenCalled();
+		expect(getStagedArtifactEntries()).toEqual([
+			{
+				kind: 'create',
+				tempId,
+				artifactKind: 'navigation',
+				name: 'Renamed draft',
+				payload: { a: 1 },
+				sourceTabId: 'nav:draft:1'
+			}
+		]);
+	});
+
+	it('throws on an unknown artifact without acquiring anything', async () => {
+		const acquire = mockAcquire();
+		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [HEADER] });
+		await loadArtifacts();
+		await expect(renameArtifact('nope', 'X')).rejects.toThrow('Unknown artifact nope');
+		expect(acquire).not.toHaveBeenCalled();
+	});
+});
+
+describe('removeArtifact', () => {
+	it('reverts a staged create without any lock call', async () => {
+		const acquire = mockAcquire();
+		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [] });
+		await loadArtifacts();
+		const tempId = stageArtifactCreate('table', 'Draft table', {}, 'tbl:draft:1');
+
+		await removeArtifact(tempId);
+
+		expect(acquire).not.toHaveBeenCalled();
+		expect(getStagedArtifactEntries()).toEqual([]);
+		expect(getArtifactHeaders()).toEqual([]);
+	});
+
+	it('stages a delete under a delete-intent lease and leaves the view unscrubbed', async () => {
+		const acquire = mockAcquire();
+		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [HEADER] });
+		await loadArtifacts();
+		const del = vi.spyOn(api, 'deleteArtifact');
+		const put = vi
+			.spyOn(viewApi, 'putViewSnapshot')
+			.mockImplementation(async (v) => ({ view: v, warnings: [] }));
+		await pushView(viewPlacing('a1'));
+		put.mockClear();
+
+		await removeArtifact('a1');
+
+		expect(acquire.mock.calls[0][0]).toMatchObject({
+			targets: [{ resource_id: 'a1', mode: 'exclusive', type: 'artifact' }],
+			intent: 'delete'
+		});
+		expect(del).not.toHaveBeenCalled();
+		expect(getStagedArtifactEntries()).toEqual([{ kind: 'delete', id: 'a1', header: HEADER }]);
+		// The artifact still exists server-side until the commit lands, so its
+		// view placements must survive a discard — no scrub push here.
+		expect(put).not.toHaveBeenCalled();
+		expect(getView()!.folders[0].artifacts).toEqual([{ id: 'a1', kind: 'navigation' }]);
+	});
+
+	it('refuses without staging when the delete lease is denied', async () => {
+		mockAcquireConflict();
+		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [HEADER] });
+		await loadArtifacts();
+
+		await removeArtifact('a1');
+
+		expect(getStagedArtifactEntries()).toEqual([]);
+		expect(getArtifactHeaders()).toEqual([HEADER]);
+	});
+
+	it('releases the delete lease when the artifact vanished before it could be staged', async () => {
+		mockAcquire();
+		const release = vi.spyOn(checkoutApi, 'releaseLock').mockResolvedValue(undefined);
+		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [HEADER] });
+		await loadArtifacts();
+
+		// A stale sidebar row (a peer's delete landed between render and click):
+		// the DELETE-intent exclusive conflicts with ANY peer lease, so stranding
+		// it would block every other user for the full TTL.
+		await removeArtifact('ghost');
+
+		expect(getStagedArtifactEntries()).toEqual([]);
+		expect(release).toHaveBeenCalledWith('t_ghost', undefined);
+	});
+});
+
+describe('commit listener', () => {
+	it('upserts changed headers, drops deleted ids and scrubs the view', async () => {
+		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [HEADER, TABLE_HEADER] });
+		await loadArtifacts();
+		const put = vi
+			.spyOn(viewApi, 'putViewSnapshot')
+			.mockImplementation(async (v) => ({ view: v, warnings: [] }));
+		await pushView(viewPlacing('t1'));
+		put.mockClear();
+
+		const renamed: ArtifactHeader = { ...HEADER, name: 'Sensors v2', artifact_rev: 3 };
+		const created: ArtifactHeader = {
+			id: 'n9',
+			kind: 'navigation',
+			name: 'Fresh',
+			artifact_rev: 1,
+			updated_at: '2026-08-06T00:00:00Z',
+			updated_by: null,
+			entry_points: null
 		};
+		notifyArtifactCommit({
+			idMap: { tmp_x: 'n9' },
+			changed: [renamed, created],
+			deletedIds: ['t1']
+		});
+
+		expect(getCommittedArtifactHeaders()).toEqual([renamed, created]);
+		// scrub is async (fire-and-forget); let the microtask queue drain
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(put).toHaveBeenCalledTimes(1);
+		expect(getView()!.folders[0].artifacts).toEqual([]);
+		expect(getView()!.folders[0].folders[0].artifacts).toEqual([]);
+	});
+
+	it('does not push the view when the commit deleted nothing this view placed', async () => {
+		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [HEADER] });
+		await loadArtifacts();
 		vi.spyOn(viewApi, 'putViewSnapshot').mockImplementation(async (v) => ({
 			view: v,
 			warnings: []
 		}));
-		await pushView(seedView);
+		await pushView(viewPlacing('a1'));
 		const put = vi.spyOn(viewApi, 'putViewSnapshot');
-		await removeArtifact('a1');
+
+		notifyArtifactCommit({ idMap: {}, changed: [], deletedIds: ['t1'] });
+		await Promise.resolve();
+		await Promise.resolve();
 		expect(put).not.toHaveBeenCalled();
+	});
+});
+
+describe('resetArtifacts', () => {
+	it('clears the staged artifact buffer too', async () => {
+		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [HEADER] });
+		await loadArtifacts();
+		stageArtifactUpdate('a1', { name: 'N2' });
+		resetArtifacts();
+		expect(getStagedArtifactEntries()).toEqual([]);
+		expect(getArtifactHeaders()).toEqual([]);
 	});
 });

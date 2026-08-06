@@ -5,6 +5,7 @@ import {
 	deleteLock,
 	acquireArtifactLease,
 	artifactDeleteLock,
+	artifactEditLock,
 	lockHolderLabel
 } from '../edit-gate';
 import { setProjectInfo, resetCheckout } from '../index';
@@ -160,6 +161,34 @@ describe('artifact edit gate', () => {
 			intent: 'delete'
 		});
 		expect(getLockNotice()).toBe('Locked by bob.');
+	});
+
+	it('artifactEditLock uses edit intent and sets the lock notice on conflict', async () => {
+		const { ConflictError } = await import('$lib/api/errors');
+		const spy = vi
+			.spyOn(api, 'acquireLocks')
+			.mockRejectedValue(
+				new ConflictError(
+					409,
+					{ conflicts: [{ resource_id: 'art:a1', held_by: 'bob', held_mode: 'exclusive' }] },
+					'lock conflict'
+				)
+			);
+		expect(await artifactEditLock('a1')).toBe(false);
+		expect(spy.mock.calls[0][0]).toMatchObject({
+			targets: [{ resource_id: 'a1', mode: 'exclusive', type: 'artifact' }],
+			intent: 'edit'
+		});
+		// Same channel as artifactDeleteLock: the sidebar's two write surfaces
+		// must not report refusals differently.
+		expect(getLockNotice()).toBe('Locked by bob.');
+	});
+
+	it('artifactEditLock clears the notice on success', async () => {
+		setLockNotice('stale notice');
+		vi.spyOn(api, 'acquireLocks').mockResolvedValue({ token: 't', leases: [] });
+		expect(await artifactEditLock('a1')).toBe(true);
+		expect(getLockNotice()).toBe(null);
 	});
 
 	it('artifactDeleteLock clears the notice on success', async () => {

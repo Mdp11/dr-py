@@ -186,6 +186,7 @@ export {
 	acquireLocks,
 	acquireArtifactLease,
 	artifactDeleteLock,
+	artifactEditLock,
 	editLock,
 	connectLock,
 	deleteLock,
@@ -243,16 +244,13 @@ export type { ViewChange } from './view-diff';
 export {
 	artifactHeaderById,
 	assertNoNameClash,
-	createCodeSnippetArtifact,
-	createNavigationArtifact,
-	createTableArtifact,
 	getArtifactHeaders,
 	getArtifactsLoading,
+	getCommittedArtifactHeaders,
 	loadArtifacts,
 	removeArtifact,
 	renameArtifact,
-	resetArtifacts,
-	type CodeSnippetPayload
+	resetArtifacts
 } from './artifacts.svelte';
 export {
 	applyStructuralEdit,

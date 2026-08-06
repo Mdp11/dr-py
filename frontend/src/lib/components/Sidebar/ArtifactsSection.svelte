@@ -7,13 +7,17 @@
 		openArtifactTab,
 		openNavigationTab,
 		removeArtifact,
-		renameArtifact
+		renameArtifact,
+		setActiveTab,
+		stagedArtifactState,
+		stagedCreateSourceTab
 	} from '$lib/state';
 	// beginDrag/DragPayload live in tree-drag.svelte.ts, which is not re-exported
 	// from `$lib/state` — Search.svelte and ContainmentTree.svelte import it the
 	// same way (direct module path), so this mirrors the existing convention.
 	import { beginDrag } from '$lib/state/tree-drag.svelte';
 	import { confirm } from '$lib/state/confirm.svelte';
+	import { isTempId } from '$lib/state/ops';
 
 	type ArtifactKind = 'navigation' | 'table' | 'code_snippet';
 
@@ -60,6 +64,19 @@
 	});
 	const editable = $derived(canEdit());
 
+	// Staged badge, mirroring "Staged elements" (Sidebar/StagedSection.svelte).
+	// `deleted` is unreachable here — the overlay hides staged-deleted rows — but
+	// is mapped anyway so the record stays total against stagedArtifactState.
+	const STAGED_BADGE: Record<'new' | 'edited' | 'deleted', { label: string; cls: string }> = {
+		new: { label: 'new', cls: 'text-success' },
+		edited: { label: 'edited', cls: 'text-warning' },
+		deleted: { label: 'deleted', cls: 'text-destructive' }
+	};
+
+	// getArtifactHeaders() is the STAGED OVERLAY (see artifacts.svelte.ts), so
+	// these rows already include uncommitted creates (under their temp id, with
+	// their staged name) and exclude uncommitted deletes. Nothing below needs to
+	// consult the staged buffer to decide WHAT to render — only how to badge it.
 	function itemsFor(kind: ArtifactKind) {
 		return getArtifactHeaders().filter((a) => a.kind === kind);
 	}
@@ -68,6 +85,15 @@
 		cfg.open({ artifactId: null, title: `New ${cfg.singular}` });
 	}
 	function openExisting(cfg: SectionConfig, id: string, name: string): void {
+		// A staged create has no server-side row, so there is nothing for a fresh
+		// editor tab to load — but the draft it was staged from is still open.
+		// Focus that tab instead; if it is gone (closed since), do nothing rather
+		// than opening a tab that would 404 on its payload fetch.
+		if (isTempId(id)) {
+			const tab = stagedCreateSourceTab(id);
+			if (tab) setActiveTab(tab);
+			return;
+		}
 		cfg.open({ artifactId: id, title: name });
 	}
 	async function rename(cfg: SectionConfig, id: string, current: string): Promise<void> {
@@ -75,9 +101,13 @@
 		if (name && name !== current) await renameArtifact(id, name);
 	}
 	async function del(cfg: SectionConfig, id: string, name: string): Promise<void> {
+		// The copy is no longer "cannot be undone": a delete is STAGED, and
+		// discarding the batch brings the artifact — and its view placements —
+		// straight back. Confirm still runs BEFORE removeArtifact, so cancelling
+		// here never strands the delete-intent lease that staging would acquire.
 		const ok = await confirm({
 			title: `Delete ${cfg.singular}`,
-			description: `Delete "${name}"? This cannot be undone.`,
+			description: `Delete "${name}"? It is destroyed when you commit; discard the batch to undo.`,
 			confirmLabel: 'Delete',
 			variant: 'destructive'
 		});
@@ -86,6 +116,10 @@
 	const DRAG_THRESHOLD_PX = 4;
 	function onPointerDown(e: PointerEvent, cfg: SectionConfig, id: string): void {
 		if (e.button !== 0 || !e.isPrimary) return;
+		// Drag places the artifact in the view, which stores a bare {id, kind}
+		// ref. A temp id would persist a ref to an artifact that does not exist
+		// and — once the commit re-keys it to a real id — never will.
+		if (isTempId(id)) return;
 		const sx = e.clientX;
 		const sy = e.clientY;
 		let started = false;
@@ -138,6 +172,7 @@
 		{#if !collapsed[cfg.kind]}
 			<ul class="mt-1 space-y-0.5">
 				{#each items as item (item.id)}
+					{@const staged = stagedArtifactState(item.id)}
 					<li
 						data-artifact-id={item.id}
 						class="group flex cursor-default items-center gap-1.5 rounded px-1.5 py-0.5 text-xs text-foreground/80 transition-colors hover:bg-muted"
@@ -152,6 +187,14 @@
 							{#each (item.entry_points ?? []).filter((e) => e !== 'script') as ep (ep)}
 								<span class="rounded bg-muted px-1 text-[10px] text-muted-foreground">{ep}</span>
 							{/each}
+						{/if}
+						{#if staged !== null}
+							<span
+								data-staged-state={staged}
+								class="font-mono text-[10px] {STAGED_BADGE[staged].cls}"
+							>
+								{STAGED_BADGE[staged].label}
+							</span>
 						{/if}
 						{#if editable}
 							<button
