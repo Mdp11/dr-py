@@ -116,13 +116,11 @@ test('artifact lock → edit → commit round-trip', async ({ page }) => {
 	await page.keyboard.press('Escape');
 	await expect(historyDrawer).toBeHidden({ timeout: 5_000 });
 
-	// Close the editor tab before going on. Committing re-checks-out every open
-	// artifact tab (`reacquireOpenArtifactLeases`), so leaving this one open
-	// would leave an `art:` lease live server-side for its full TTL — the page
-	// reload at the end of this test abandons the client but not the lease, and
-	// the suite shares one project, so a later spec would see it. Closing
-	// releases it (nothing staged still needs it), and the rename below is a
-	// truer library-only edit for it.
+	// Close the editor tab so the rename below is a true library-only edit (the
+	// sidebar path, not the open editor's). The `art:` lease it releases on the
+	// way out is incidental: a lease left live here is harmless to later specs,
+	// since a model revert / metamodel rebind no longer counts `art:` leases as
+	// "the project is busy" (see `state/quiet.ts`).
 	await page.getByRole('button', { name: `Close ${name}` }).click();
 
 	// --- 4. Rename from the sidebar → staged again → commit → reload ---------

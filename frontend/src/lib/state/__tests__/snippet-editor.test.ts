@@ -323,7 +323,7 @@ describe('artifact lease on open', () => {
 		expect(getSnippetLockHolder('snip:s1')).toBeNull();
 	});
 
-	it('marks the tab read-only when the lease is denied, but still loads it', async () => {
+	it('marks the tab lock-denied (unsaveable) when the lease is refused, but still loads it', async () => {
 		asEditor();
 		vi.spyOn(checkoutApi, 'acquireLocks').mockRejectedValue(lockConflict('peer@x'));
 		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue(SNIPPET_ARTIFACT);
@@ -331,7 +331,7 @@ describe('artifact lease on open', () => {
 		const draft = await ensureSnippetDraft('snip:s1');
 
 		expect(getSnippetLockHolder('snip:s1')).toBe('peer@x');
-		// A denial must not refuse the tab — it opens read-only with the banner.
+		// A denial must not refuse the tab — it opens unsaveable with the banner.
 		expect(draft.name).toBe('My snippet');
 		expect(draft.code).toBe('print(1)\n');
 	});

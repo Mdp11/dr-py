@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
 	commitStaged,
 	discardAll,
+	discardArtifact,
 	emit,
 	ensureCheckout,
 	getHeldTokens,
@@ -254,6 +255,33 @@ describe('artifact delta', () => {
 		expect(getStagedArtifactOps()).toEqual([]);
 		expect(seen).toEqual([{ idMap: { tmp_x: 'a10' }, changed: [header], deletedIds: ['a7'] }]);
 	});
+
+	it('prunes the registry even when a commit listener throws', async () => {
+		// `notifyArtifactCommit` fans out to third-party callbacks (editor stores)
+		// and does not guard them. If one throws AFTER the registry prune, local
+		// lock state keeps tokens the server has already released and every later
+		// commitStaged 409s — for a commit that landed DURABLY. The prune must
+		// therefore happen before the notify.
+		mockAcquire();
+		await checkoutArtifact('a9');
+		stageArtifactUpdate('a9', { name: 'renamed' });
+		const renew = vi.spyOn(api, 'renewLock').mockResolvedValue({ ok: true });
+		vi.spyOn(api, 'commitChanges').mockResolvedValue(commitResponse());
+		const off = onArtifactCommit(() => {
+			throw new Error('listener blew up');
+		});
+
+		await expect(commitStaged('m', false)).rejects.toThrow('listener blew up');
+		off();
+
+		// The commit LANDED; the token it sent is gone server-side, so it must be
+		// gone here too — otherwise the next commit sends a dead token.
+		expect(getHeldTokens()).toEqual([]);
+		expect(isCheckedOutByMe('art:a9')).toBe(false);
+		// ...and the heartbeat must have stopped with the emptied registry.
+		await vi.advanceTimersByTimeAsync(200_000);
+		expect(renew).not.toHaveBeenCalled();
+	});
 });
 
 describe('releaseArtifactIfUnneeded', () => {
@@ -283,6 +311,88 @@ describe('releaseArtifactIfUnneeded', () => {
 	it('is a no-op for an artifact I hold no lease on', async () => {
 		const release = vi.spyOn(api, 'releaseLock').mockResolvedValue(undefined);
 		await releaseArtifactIfUnneeded('nope');
+		expect(release).not.toHaveBeenCalled();
+	});
+});
+
+describe('discardArtifact', () => {
+	it('releases the lease when nothing staged needs it and no tab is open', async () => {
+		mockAcquire();
+		await checkoutArtifact('a9');
+		stageArtifactUpdate('a9', { name: 'renamed' });
+		const release = vi.spyOn(api, 'releaseLock').mockResolvedValue(undefined);
+
+		await discardArtifact('a9');
+
+		expect(getStagedArtifactOps()).toEqual([]);
+		expect(release).toHaveBeenCalledWith('t_art_a9', undefined);
+		expect(isCheckedOutByMe('art:a9')).toBe(false);
+	});
+
+	it('KEEPS the lease while an editor tab is still bound to the artifact', async () => {
+		mockAcquire();
+		await checkoutArtifact('a9');
+		stageArtifactUpdate('a9', { name: 'renamed' });
+		openArtifactTab('table', { artifactId: 'a9', title: 'T' });
+		const release = vi.spyOn(api, 'releaseLock').mockResolvedValue(undefined);
+
+		await discardArtifact('a9');
+
+		// The row's edit is gone, but the user still has the editor open — the
+		// check-out they can SEE must survive (mirrors discardAll's keep rule).
+		expect(getStagedArtifactOps()).toEqual([]);
+		expect(release).not.toHaveBeenCalled();
+		expect(isCheckedOutByMe('art:a9')).toBe(true);
+	});
+
+	it('keeps the lease while another staged op still needs its token', async () => {
+		// The sidebar-delete hazard's inverse: one token covering two artifacts
+		// (a delete subtree), only one of which is being discarded.
+		vi.spyOn(api, 'acquireLocks').mockResolvedValue({
+			token: 'tSub',
+			leases: [
+				{
+					resource_id: 'art:a9',
+					mode: 'exclusive',
+					holder: 'default-user',
+					token: 'tSub',
+					intent: 'delete',
+					expires_at: 1
+				},
+				{
+					resource_id: 'art:a8',
+					mode: 'exclusive',
+					holder: 'default-user',
+					token: 'tSub',
+					intent: 'delete',
+					expires_at: 1
+				}
+			]
+		});
+		await ensureCheckout(
+			[
+				{ resource_id: 'a9', mode: 'exclusive', type: 'artifact' },
+				{ resource_id: 'a8', mode: 'exclusive', type: 'artifact' }
+			],
+			'delete'
+		);
+		stageArtifactUpdate('a9', { name: 'x' });
+		stageArtifactUpdate('a8', { name: 'y' });
+		const release = vi.spyOn(api, 'releaseLock').mockResolvedValue(undefined);
+
+		await discardArtifact('a9');
+
+		expect(release).not.toHaveBeenCalled();
+		expect(isCheckedOutByMe('art:a8')).toBe(true);
+	});
+
+	it('is a no-op for an artifact I hold no lease on', async () => {
+		stageArtifactUpdate('a9', { name: 'renamed' });
+		const release = vi.spyOn(api, 'releaseLock').mockResolvedValue(undefined);
+
+		await discardArtifact('a9');
+
+		expect(getStagedArtifactOps()).toEqual([]);
 		expect(release).not.toHaveBeenCalled();
 	});
 });

@@ -11,9 +11,7 @@
 	import {
 		getRole,
 		getModelRev,
-		getStagedArtifactDepth,
-		getStagedDepth,
-		getLockState,
+		isProjectQuiet,
 		setIssues,
 		setMetamodel,
 		setMetamodelFilename,
@@ -39,12 +37,10 @@
 	let rebindError = $state<string | null>(null);
 
 	const isOwner = $derived(getRole() === 'owner');
-	// Same quiet rule as the history drawer's revert gate: a rebind rewrites the
-	// model under everything uncommitted. Staged ARTIFACT ops count too — they
-	// ride the same commit batch, whose base_rev the rebind would invalidate.
-	const quiet = $derived(
-		getStagedDepth() === 0 && getStagedArtifactDepth() === 0 && getLockState().size === 0
-	);
+	// Literally the same rule as the history drawer's revert gate — one shared
+	// definition (`state/quiet.ts`), because a rebind and a revert invalidate
+	// uncommitted work in exactly the same way.
+	const quiet = $derived(isProjectQuiet());
 
 	function reset(): void {
 		step = 'pick';

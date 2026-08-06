@@ -1,11 +1,11 @@
 /**
- * The ONE definition of "put this artifact tab into lock-denied (read-only)
+ * The ONE definition of "put this artifact tab into lock-denied (unsaveable)
  * mode", dispatching on the workspace tab-id prefix to whichever editor store
  * owns the tab.
  *
  * Why a dispatcher at all: the three artifact editors each keep their own
  * private `_lockDenied` map (tabId -> holder label), because the banner, its
- * Retry and the read-only gating all live inside that editor. Their WRITERS are
+ * Retry and the save gating all live inside that editor. Their WRITERS are
  * normally internal (the open path and the banner's Retry). The one external
  * writer is the post-commit lease sweep: `POST /commits` releases every lock
  * token it is sent, so any still-open editor whose artifact was in the batch

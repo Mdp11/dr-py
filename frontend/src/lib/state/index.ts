@@ -152,6 +152,7 @@ export {
 	getLockFor,
 	getLockState,
 	getPresence,
+	hasModelLocks,
 	onLockEvent,
 	startRealtime,
 	stopRealtime
@@ -174,6 +175,7 @@ export {
 	handleRemoteLockEvent,
 	previewStaged,
 	commitStaged,
+	discardArtifact,
 	discardElement,
 	discardElementCascade,
 	discardAll,
@@ -438,3 +440,4 @@ export {
 	type StagedArtifactEntry
 } from './artifact-edits.svelte';
 export { markEditorLockDenied } from './artifact-lock-denied';
+export { isProjectQuiet } from './quiet';

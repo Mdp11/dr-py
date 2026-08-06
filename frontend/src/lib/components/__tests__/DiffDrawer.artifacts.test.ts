@@ -47,7 +47,7 @@ vi.mock('$lib/state', async (orig) => {
 		getCachedElements: vi.fn(() => new Map()),
 		viewChangeSegments: vi.fn(() => []),
 		getStagedArtifactEntries: vi.fn(() => artifactEntries),
-		revertStagedArtifact: vi.fn(),
+		discardArtifact: vi.fn(async () => {}),
 		artifactHeaderById: vi.fn(() => undefined),
 		reacquireOpenArtifactLeases: vi.fn(async () => {}),
 		markEditorLockDenied: vi.fn()
@@ -58,8 +58,8 @@ import {
 	artifactHeaderById,
 	commitStaged,
 	markEditorLockDenied,
-	reacquireOpenArtifactLeases,
-	revertStagedArtifact
+	discardArtifact,
+	reacquireOpenArtifactLeases
 } from '$lib/state';
 
 const mocked = <T>(fn: T): ReturnType<typeof vi.fn> => fn as unknown as ReturnType<typeof vi.fn>;
@@ -170,6 +170,10 @@ describe('DiffDrawer artifact changes', () => {
 		unmount(c);
 	});
 
+	// Through `discardArtifact`, NOT the raw `revertStagedArtifact`: only the
+	// former also releases the `art:` lease. Reverting the buffer alone stranded
+	// the lease for its full TTL — with no editor tab to release it on close and
+	// no token for `commitStaged` to send, nothing would ever clean it up.
 	it('discards a single staged artifact entry from its row', async () => {
 		artifactEntries = [UPDATE_ENTRY];
 
@@ -180,7 +184,7 @@ describe('DiffDrawer artifact changes', () => {
 		discardRow!.click();
 		flushSync();
 
-		expect(revertStagedArtifact).toHaveBeenCalledWith('a1');
+		expect(discardArtifact).toHaveBeenCalledWith('a1');
 
 		unmount(c);
 	});
@@ -257,7 +261,7 @@ describe('DiffDrawer artifact changes', () => {
 		unmount(c);
 	});
 
-	it('flips a denied tab read-only through markEditorLockDenied', async () => {
+	it('flips a denied tab to lock-denied through markEditorLockDenied', async () => {
 		artifactEntries = [UPDATE_ENTRY];
 		mocked(reacquireOpenArtifactLeases).mockImplementation(
 			async (onDenied: (tabId: string, holder: string) => void) => {

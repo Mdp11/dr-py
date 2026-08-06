@@ -11,11 +11,13 @@
  * (`artifact-edits.svelte.ts`), and nothing reaches the server until the
  * DiffDrawer's Commit sends the batch. Opening a SAVED navigation first checks
  * the artifact out (`art:<id>` exclusive lease); a denial does not refuse the
- * tab — it opens read-only with the holder banner (`_lockDenied`). The tab is
- * deliberately NOT re-keyed when a create is staged: the draft keeps living in
- * its `nav:draft:N` tab and is rebound to `nav:<id>` only when the commit's
- * `id_map` supplies a canonical id (see the module-scope listeners at the
- * bottom of this file).
+ * tab — it opens UNSAVEABLE behind the holder banner (`_lockDenied`): Save and
+ * Save as are disabled, while the definition-editing surface itself is NOT yet
+ * gated (see {@link ensureDraft} for the exact scope and the open follow-up).
+ * The tab is deliberately NOT re-keyed when a create is staged: the draft keeps
+ * living in its `nav:draft:N` tab and is rebound to `nav:<id>` only when the
+ * commit's `id_map` supplies a canonical id (see the module-scope listeners at
+ * the bottom of this file).
  *
  * Per-node keying: a navigation is a TREE (a Path, or a set expression over
  * nested definitions). Preview/generation/error/expand state is keyed PER NODE
@@ -129,10 +131,12 @@ const _drafts = new SvelteMap<string, NavDraft>();
 const _previews = new SvelteMap<string, NavPreview>();
 /**
  * tabId -> the peer holding the `art:` lease this tab was refused, as a display
- * label. Present == the tab is READ-ONLY: the payload loaded (a denial never
- * refuses the tab) but every write affordance is disabled and the banner offers
- * Retry. Absent for a VIEWER too — the whole workspace is already read-only for
- * them, so a per-tab "checked out by…" line would be noise.
+ * label. Present == the tab is UNSAVEABLE: the payload loaded (a denial never
+ * refuses the tab), the name input / Save / Save as are disabled and the banner
+ * offers Retry — but the definition-editing surface is NOT gated (see
+ * {@link ensureDraft}). Absent for a VIEWER too — the whole workspace is
+ * already read-only for them, so a per-tab "checked out by…" line would be
+ * noise.
  */
 const _lockDenied = new SvelteMap<string, string>();
 /** tabId -> the set of expanded node pathKeys. A node is previewed only while
@@ -432,8 +436,8 @@ export async function retryNavLock(tabId: string): Promise<void> {
  * `artifact-lock-denied.ts`). `POST /commits` releases every token it is sent,
  * so a still-open tab whose artifact was in the batch loses its lease; the
  * sweep re-checks it out, and when a peer got there first this is how the tab
- * flips read-only with the holder banner (and its Retry) instead of silently
- * accepting edits it could never commit. */
+ * flips to UNSAVEABLE with the holder banner (and its Retry) instead of
+ * silently accepting edits it could never commit. */
 export function setNavLockDenied(tabId: string, holder: string): void {
 	_lockDenied.set(tabId, holder);
 }
@@ -520,6 +524,29 @@ export function selectNode(tabId: string, path: NodePath): void {
 	_selected.set(tabId, pathKey(path));
 }
 
+/**
+ * Create (or return) the tab's draft, checking the artifact out on the way in.
+ *
+ * **What "lock-denied" actually gates today — the canonical statement, which
+ * `table-editor.svelte.ts` and `snippet-editor.svelte.ts` mirror by reference.**
+ * A refused check-out sets `_lockDenied`, which disables the NAME input, Save
+ * and Save as, and renders the holder banner with its Retry. It does NOT
+ * disable the definition-editing surface: PathCard/CombineFrame structural
+ * edits, the table Settings dialog and column editors, and the snippet
+ * CodeMirror document all stay live on `canEdit()` alone. So the honest
+ * description of a denied tab is **unsaveable**, not read-only — a user can
+ * still rebuild a whole navigation and only discover at Save that the artifact
+ * was never theirs, with Save AND Save-as both disabled.
+ *
+ * TODO (deliberate follow-up, not an oversight): gate the editing surface too.
+ * It was scoped out on purpose — the plan asked for the save buttons at
+ * minimum and the structural affordances "if cheap", and it is entangled with
+ * an unsettled UX question (whether Save-as should stay ENABLED on a denied
+ * tab so the user can fork their work rather than lose it). Until that is
+ * decided, every docstring, README line and banner string in this area must
+ * say "unsaveable"; claiming read-only is what makes a future reader trust a
+ * property the code does not have.
+ */
 export async function ensureDraft(tabId: string): Promise<NavDraft> {
 	const existing = _drafts.get(tabId);
 	if (existing) return existing;
@@ -543,11 +570,12 @@ export async function ensureDraft(tabId: string): Promise<NavDraft> {
 		pinRoot(tabId); // root pinned visible by default (empty draft: no run)
 		return draft;
 	} else {
-		// Check the artifact out BEFORE showing an editable surface: an editor
-		// that lets the user type into a navigation someone else holds is exactly
-		// what the pessimistic lease exists to prevent. A denial does NOT refuse
-		// the tab — the payload still loads and the tab opens read-only behind
-		// the holder banner (a viewer gets no banner: see `_lockDenied`).
+		// Check the artifact out on open, so the user learns who holds it BEFORE
+		// investing work in a tab whose edits can never land. A denial does NOT
+		// refuse the tab — the payload still loads and the tab opens UNSAVEABLE
+		// behind the holder banner (a viewer gets no banner: see `_lockDenied`).
+		// Unsaveable, NOT read-only: the definition-editing surface is still live
+		// — see this function's docstring for what is and is not gated, and why.
 		//
 		// The `.catch` is load-bearing, not defensive noise: `ensureCheckout`
 		// RETHROWS anything that is not a lock conflict, and our only caller is a
@@ -834,7 +862,7 @@ export async function saveAsDraft(tabId: string, name: string): Promise<void> {
 	_drafts.set(newTab, { ...draft, name, artifactId: tempId, artifactRev: null, dirty: false });
 	rekeyTab(tabId, newTab); // must run with the new draft already in place
 	// The fork is ours by construction (nothing exists server-side to hold), so
-	// any read-only banner inherited from the original does not carry over.
+	// any lock-denied banner inherited from the original does not carry over.
 	_lockDenied.delete(tabId);
 	if (prevId !== null && !isTempId(prevId)) {
 		void releaseArtifactIfUnneeded(prevId).catch(() => {});
@@ -842,7 +870,7 @@ export async function saveAsDraft(tabId: string, name: string): Promise<void> {
 }
 
 /** Discard the local draft and re-fetch the server copy — the recovery path for
- * a tab showing a stale payload (e.g. one opened read-only while a peer was
+ * a tab showing a stale payload (e.g. one opened lock-denied while a peer was
  * editing). Re-runs `ensureDraft`, so it re-attempts the check-out too. */
 export async function reloadDraft(tabId: string): Promise<void> {
 	clearTabKeys(tabId); // the definition is about to change: orphan in-flight runs

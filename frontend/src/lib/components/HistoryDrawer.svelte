@@ -16,14 +16,7 @@
 	import CompareDiff from './CompareDiff.svelte';
 	import { computeDiff, type Diff } from '$lib/state/diff';
 	import { revertToCommit } from '$lib/api/history';
-	import {
-		getRole,
-		getModelRev,
-		getStagedArtifactDepth,
-		getStagedDepth,
-		getLockState,
-		applyDelta
-	} from '$lib/state';
+	import { getRole, getModelRev, isProjectQuiet, applyDelta } from '$lib/state';
 	import { ConflictError, ValidationError } from '$lib/api';
 
 	type Props = { open: boolean };
@@ -85,11 +78,10 @@
 
 	const canWrite = $derived(getRole() === 'owner' || getRole() === 'editor');
 	// Revert rewrites history under everything uncommitted, so it is gated on a
-	// fully quiet workspace: no staged MODEL ops, no staged ARTIFACT ops (they
-	// ride the same commit batch), no live locks.
-	const quiet = $derived(
-		getStagedDepth() === 0 && getStagedArtifactDepth() === 0 && getLockState().size === 0
-	);
+	// quiet workspace. The three terms and why each one is there live in ONE
+	// place (`state/quiet.ts`) — the swap-metamodel drawer gates on exactly the
+	// same rule, and spelling it out twice is how it last went wrong.
+	const quiet = $derived(isProjectQuiet());
 
 	let confirmRev = $state<number | null>(null);
 	let revertMsg = $state('');

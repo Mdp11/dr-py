@@ -53,10 +53,14 @@
 	const lint = $derived(getSnippetLint(tabId));
 	const editable = $derived(canEdit());
 	/** Non-null while a peer holds this snippet's `art:` lease: the tab is
-	 * read-only until the check-out succeeds (banner "Retry"). */
+	 * UNSAVEABLE until the check-out succeeds — Save and Save as are disabled
+	 * behind the banner ("Retry"), while the editing surface itself stays live.
+	 * See `navigation-editor.svelte.ts`'s `ensureDraft` docstring. */
 	const lockHolder = $derived(getSnippetLockHolder(tabId));
-	/** A refused check-out disables the write affordances but keeps them
-	 * VISIBLE — paired with the banner, that is what explains why. */
+	/** A refused check-out disables the SAVE affordances (name, Save, Save as)
+	 * but keeps them VISIBLE — paired with the banner, that is what explains why.
+	 * It does NOT gate the editing surface; the banner copy says "you will not be
+	 * able to save" rather than "read-only" for exactly that reason. */
 	const locked = $derived(lockHolder !== null);
 	const vocab = $derived(vocabFromMetamodel(getMetamodel()));
 
@@ -81,7 +85,7 @@
 	// with no way to change it; the ratio now lives in a persisted store and the
 	// divider below drives it. Container height comes from a ResizeObserver
 	// rather than a one-shot read — the tab body changes height whenever a
-	// banner (save error, entry hint, read-only lock) appears above it.
+	// banner (save error, entry hint, lock-denied notice) appears above it.
 	let bodyEl: HTMLElement | null = $state(null);
 	let bodyH = $state(0);
 
@@ -237,7 +241,7 @@
 				class="flex items-center gap-2 bg-warning/15 px-3 py-1.5 text-xs text-warning"
 				role="status"
 			>
-				Checked out by {lockHolder} — read-only.
+				Checked out by {lockHolder} — you will not be able to save.
 				<button type="button" class="underline" onclick={() => void retrySnippetLock(tabId)}>
 					Retry
 				</button>

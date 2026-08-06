@@ -13,6 +13,7 @@
 		previewStaged,
 		commitStaged,
 		discardAll,
+		discardArtifact,
 		discardElement,
 		getIssues,
 		indexIssues,
@@ -21,7 +22,6 @@
 		getViewFileHandle,
 		getViewFilename,
 		reacquireOpenArtifactLeases,
-		revertStagedArtifact,
 		setViewFileHandle,
 		setViewFilename,
 		setViewBaseline,
@@ -410,10 +410,16 @@
 									<span class="ml-auto font-mono text-[10px] text-muted-foreground/70"
 										>{artifactEntryId(e)}</span
 									>
+									<!-- `discardArtifact`, never the raw `revertStagedArtifact`: this
+									     is the artifact sibling of the element rows' `discardElement`
+									     above, and it is the only path that also hands the `art:` lease
+									     back. Un-staging the entry alone strands the lease for the full
+									     TTL (worst for a sidebar Delete's DELETE-intent exclusive, which
+									     blocks every peer from even opening the artifact). -->
 									<button
 										type="button"
 										class="rounded border border-input px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:border-ring hover:text-foreground"
-										onclick={() => revertStagedArtifact(artifactEntryId(e))}
+										onclick={() => void discardArtifact(artifactEntryId(e))}
 									>
 										Discard
 									</button>

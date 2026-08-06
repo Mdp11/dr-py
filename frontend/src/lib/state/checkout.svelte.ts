@@ -34,7 +34,8 @@ import {
 	clearStagedArtifacts,
 	discardAllStagedArtifacts,
 	getStagedArtifactOps,
-	notifyArtifactCommit
+	notifyArtifactCommit,
+	revertStagedArtifact
 } from './artifact-edits.svelte';
 // workspace.svelte imports nothing from this module (or from any store) — no cycle.
 import { getDynamicTabs } from './workspace.svelte';
@@ -330,13 +331,28 @@ export async function commitStaged(message: string, ackErrors: boolean): Promise
 		{ baseRev: getModelRev(), ops, message, lockTokens: sent, ackErrors },
 		_clientConfig
 	);
-	// Clear BOTH staged buffers first so applyDelta's hasQueuedOpFor guard does
-	// not skip the committed elements — the server's canonical rev is the truth.
-	// The artifact buffer is cleared silently (no discard listeners): the edits
-	// were saved, not undone; notifyArtifactCommit below is what tells listeners
-	// the authoritative outcome.
+	// ORDERING, all of it load-bearing. The commit has LANDED durably by this
+	// point, so everything below is local reconciliation that must not become
+	// skippable by a failure further down.
+	//
+	// 1. Clear BOTH staged buffers first so applyDelta's hasQueuedOpFor guard
+	//    does not skip the committed elements — the server's canonical rev is
+	//    the truth. The artifact buffer is cleared silently (no discard
+	//    listeners): the edits were saved, not undone; notifyArtifactCommit
+	//    below is what tells listeners the authoritative outcome.
+	// 2. Drop the surrendered tokens BEFORE anything that can run third-party
+	//    code. The server released every token it was SENT, so a registry that
+	//    still claims them makes the next commitStaged send dead tokens and 409
+	//    — over a commit that already succeeded. `notifyArtifactCommit` fans out
+	//    to editor-store callbacks it does not guard (a bare `for … cb(info)`),
+	//    so one throwing listener used to strand exactly that state; applyDelta
+	//    is ordered after for the same reason.
 	clearStaged();
 	clearStagedArtifacts();
+	for (const [rid, lease] of [..._registry]) {
+		if (!kept.has(lease.token)) _registry.delete(rid);
+	}
+	if (_registry.size === 0) _stopHeartbeat();
 	applyDelta(res);
 	// Artifact half of the delta: header store + editors subscribe (listener
 	// registry — a direct import here would cycle through the editor modules).
@@ -345,10 +361,6 @@ export async function commitStaged(message: string, ackErrors: boolean): Promise
 		changed: res.changed_artifacts,
 		deletedIds: res.deleted_artifact_ids
 	});
-	for (const [rid, lease] of [..._registry]) {
-		if (!kept.has(lease.token)) _registry.delete(rid);
-	}
-	if (_registry.size === 0) _stopHeartbeat();
 	return res;
 }
 
@@ -358,6 +370,12 @@ export async function commitStaged(message: string, ackErrors: boolean): Promise
  * saved-but-uncommitted artifact edit must keep its lease or the commit would
  * 409 "required lock not held". Mirrors {@link _discardWith}'s release rule
  * without reverting anything. No-op when I hold no lease on `artifactId`.
+ *
+ * Does NOT apply {@link openArtifactResources}'s keep-what-is-open rule, and
+ * must not: its callers ARE the close/rebind of the only tab that could have
+ * been holding the lease open, so consulting the tab list would either be a
+ * tautology (the tab is already gone) or refuse the very release it was called
+ * to perform.
  */
 export async function releaseArtifactIfUnneeded(artifactId: string): Promise<void> {
 	const rid = artifactResource(artifactId);
@@ -372,11 +390,81 @@ export async function releaseArtifactIfUnneeded(artifactId: string): Promise<voi
 }
 
 /**
+ * The canonical `art:` resource ids of every artifact currently open in an
+ * editor tab — the "do not release this, the user can SEE it checked out" set.
+ *
+ * Extracted because two release surfaces must apply the identical rule:
+ * {@link discardAll} and {@link discardArtifact}. (The third and fourth views
+ * of the release rule, {@link _discardWith} and
+ * {@link releaseArtifactIfUnneeded}, deliberately do NOT consult it — see their
+ * docstrings.) Staged creates are excluded: a temp id names no server-side row,
+ * so there is no lease on it to keep.
+ *
+ * A plain `Set`, not a `SvelteSet`: this is ephemeral partition bookkeeping
+ * computed and thrown away inside one call, never held as reactive state.
+ */
+function openArtifactResources(): Set<string> {
+	return new Set(
+		getDynamicTabs()
+			.filter((t) => t.artifactId !== null && !isTempId(t.artifactId))
+			.map((t) => artifactResource(t.artifactId as string))
+	);
+}
+
+/**
+ * Per-artifact abandon: drop `id`'s ONE staged artifact entry and release its
+ * lease when nothing is left that needs it. The artifact sibling of
+ * {@link discardElement}, and the ONLY discard surface the commit review's
+ * per-artifact-row button may call — reverting the staged entry directly
+ * (`revertStagedArtifact`) strands the lease for the full TTL.
+ *
+ * That leak is worst for the sidebar's Delete, which takes a DELETE-intent
+ * exclusive: it conflicts with ANY peer lease, shared pins included, so a
+ * stranded one blocks every other user from even OPENING the artifact. There is
+ * no editor tab to release it on close and `commitStaged` never sees the token
+ * (its op is gone), so nothing else would ever clean it up.
+ *
+ * Two keep conditions, not one — this is where it differs from
+ * {@link _discardWith}:
+ *   - a REMAINING staged op still needs a resource the token covers (the
+ *     element rule; a token can cover a whole delete subtree), and
+ *   - an artifact the token covers is still OPEN in an editor tab
+ *     ({@link openArtifactResources}, the same rule {@link discardAll} applies).
+ *     Elements need no such term: they have no per-tab check-out. Without it,
+ *     discarding a row for an artifact whose editor is still on screen would
+ *     silently yank that editor's check-out out from under it.
+ *
+ * The release is best-effort (`.catch`), matching its artifact siblings
+ * {@link releaseArtifactIfUnneeded} and {@link discardAll}: the local buffer
+ * edit has already happened, and the caller is a fire-and-forget click handler
+ * that must not surface an unhandled rejection over a lease that will TTL out
+ * anyway.
+ */
+export async function discardArtifact(id: string): Promise<void> {
+	const rid = artifactResource(id);
+	const token = _registry.get(rid)?.token;
+	revertStagedArtifact(id);
+	if (token !== undefined) {
+		const stillNeeded = lockedResourcesNeededBy([...getStagedOps(), ...getStagedArtifactOps()]);
+		const keepOpen = openArtifactResources();
+		const tokenResources = [..._registry].filter(([, l]) => l.token === token).map(([r]) => r);
+		if (!tokenResources.some((r) => stillNeeded.has(r) || keepOpen.has(r))) {
+			_dropToken(token);
+			await releaseLock(token, _clientConfig).catch(() => {});
+		}
+	}
+	// Its staged edit was abandoned; the resource is no longer stale-blocked.
+	_stale.delete(rid);
+	if (_registry.size === 0) _stopHeartbeat();
+}
+
+/**
  * Re-check-out every artifact whose editor tab is still open but whose lease
  * the last commit surrendered (the batch needed it, so it was sent and the
  * server released it). Best-effort and sequential: a peer may have grabbed the
  * artifact in between, in which case `onDenied(tabId, holder)` lets the caller
- * put that tab into read-only mode instead of failing the whole sweep.
+ * put that tab into lock-denied (unsaveable) mode instead of failing the whole
+ * sweep.
  * Draft tabs (no artifact id) and staged creates (temp id — no server-side row
  * to lock yet) are skipped.
  */
@@ -520,13 +608,8 @@ export function discardElementCascade(id: string): Promise<void> {
 export async function discardAll(): Promise<void> {
 	revertAllStaged();
 	discardAllStagedArtifacts(); // fires per-entry discard listeners (drafts re-dirty)
+	const keepResources = openArtifactResources();
 	// ephemeral partition bookkeeping, not reactive state
-	// eslint-disable-next-line svelte/prefer-svelte-reactivity
-	const keepResources = new Set(
-		getDynamicTabs()
-			.filter((t) => t.artifactId !== null && !isTempId(t.artifactId))
-			.map((t) => artifactResource(t.artifactId as string))
-	);
 	// eslint-disable-next-line svelte/prefer-svelte-reactivity
 	const keepTokens = new Set(
 		[..._registry].filter(([rid]) => keepResources.has(rid)).map(([, l]) => l.token)

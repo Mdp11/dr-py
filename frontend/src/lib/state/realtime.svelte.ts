@@ -19,6 +19,7 @@ import {
 import { getActiveProjectId } from '$lib/state/active-project.svelte';
 import { applyDelta, getIssueCounts, getModelRev, refreshSummary } from './model.svelte';
 import { handleArtifactFeedEvent } from './artifacts.svelte';
+import { isArtifactResource } from './ops';
 import type { OpsResponse } from '$lib/api/types';
 
 let _connected = $state(false);
@@ -70,6 +71,30 @@ export function getPresence(): string[] {
 
 export function getLockState(): SvelteMap<string, LeaseLite> {
 	return _lockState;
+}
+
+/**
+ * True while ANY project-wide lease covers a MODEL-scope resource (elements,
+ * relationships, `mm`) — i.e. `getLockState()` minus the `art:` namespace.
+ *
+ * The distinction is load-bearing, not cosmetic. `getLockState()` is the whole
+ * project's lease table, and since artifact editing moved onto the
+ * lock→edit→commit flow EVERY open navigation/table/snippet tab holds an
+ * `art:` lease (taken on open, re-taken after each commit). Gating a
+ * model-scope operation on the raw map size would let one user's open editor
+ * tab disable that operation for EVERYONE for the full lock TTL. Model revert
+ * and metamodel rebind are model-scope by construction — the backend's
+ * `/commits/revert` 409s on any range containing artifact ops anyway — so an
+ * `art:` lease is orthogonal to them and must not count.
+ *
+ * Reactive: iterating a `SvelteMap`'s keys subscribes to it, so a `$derived`
+ * reading this re-runs on every lock feed event.
+ */
+export function hasModelLocks(): boolean {
+	for (const rid of _lockState.keys()) {
+		if (!isArtifactResource(rid)) return true;
+	}
+	return false;
 }
 
 export function getLockFor(id: string): LeaseLite | undefined {

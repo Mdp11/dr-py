@@ -834,7 +834,7 @@ describe('artifact lease on open', () => {
 		expect(getTableLockHolder('tbl:a1')).toBeNull();
 	});
 
-	it('marks the tab read-only when the lease is denied, but still loads it', async () => {
+	it('marks the tab lock-denied (unsaveable) when the lease is refused, but still loads it', async () => {
 		asEditor();
 		vi.spyOn(checkoutApi, 'acquireLocks').mockRejectedValue(lockConflict('peer@x'));
 		mockGetTable();
@@ -843,7 +843,7 @@ describe('artifact lease on open', () => {
 		const draft = await ensureTableDraft('tbl:a1');
 
 		expect(getTableLockHolder('tbl:a1')).toBe('peer@x');
-		// A denial must not refuse the tab — it opens read-only with the banner.
+		// A denial must not refuse the tab — it opens unsaveable with the banner.
 		expect(draft.name).toBe('Sensors');
 		expect(getTablePage('tbl:a1')).toBeDefined();
 	});

@@ -193,8 +193,16 @@ follows a pessimistic **check-out → stage → commit** loop (Spec B):
      delete), delete-over-update collapses to a bare delete.
    - **The lease is per editor tab.** Opening a saved artifact takes an
      `art:<id>` exclusive lease (`acquireArtifactLease`); a denial does not
-     refuse the open, it renders that tab **read-only** behind its holder
-     banner. Closing releases through `releaseArtifactIfUnneeded`, which
+     refuse the open, it renders that tab **unsaveable** behind its holder
+     banner ("Checked out by X — you will not be able to save"): the name
+     input, Save and Save as are disabled, while the definition-editing
+     surface (PathCard/CombineFrame, the table Settings dialog and column
+     editors, the snippet CodeMirror document) is **not** gated. Gating that
+     too is deliberate follow-up work — see the `ensureDraft` docstring in
+     `lib/state/navigation-editor.svelte.ts`, the canonical statement of the
+     scope and of the open UX question (whether Save-as should stay enabled so
+     a denied user can fork their work). Closing releases through
+     `releaseArtifactIfUnneeded`, which
      KEEPS the lease whenever a staged op still needs a resource that token
      covers — a saved-but-uncommitted edit whose lease lapsed would 409
      "required lock not held" at commit. The sidebar's two write surfaces
@@ -212,11 +220,13 @@ follows a pessimistic **check-out → stage → commit** loop (Spec B):
      batch needs is sent. Afterwards the DiffDrawer fires
      `reacquireOpenArtifactLeases` (fire-and-forget, `.catch`ed — the commit
      is already durable), re-checking-out every open artifact tab and
-     flipping to read-only via `markEditorLockDenied` any a peer grabbed in
-     between.
+     flipping to lock-denied (unsaveable) via `markEditorLockDenied` any a peer
+     grabbed in between.
    - **The DiffDrawer reviews them.** Staged artifact entries render as
      `+`/`~`/`-` rows in their own section, same glyph vocabulary as the
-     entity rows, each per-row revertable (`revertStagedArtifact`). They
+     entity rows, each per-row discardable through `discardArtifact` — the
+     artifact sibling of `discardElement`, which also hands the `art:` lease
+     back instead of stranding it for the full TTL. They
      count towards the drawer's `total`, which is what keeps Commit reachable
      for an artifact-ONLY batch and unreachable when nothing at all is staged
      — `commitStaged` throws on an empty batch, because the backend's
@@ -265,8 +275,9 @@ follows a pessimistic **check-out → stage → commit** loop (Spec B):
 `lib/state/navigation-editor.svelte.ts` holds the per-tab navigation drafts
 (one draft + one lock-denied marker per `tabId`) and drives the live chain
 preview. **Saving stages, it does not POST**: opening a saved navigation takes
-an `art:<id>` exclusive lease (a denial opens the tab read-only behind the
-`getNavLockHolder` banner rather than refusing it), `saveDraft`/`saveAsDraft`
+an `art:<id>` exclusive lease (a denial opens the tab UNSAVEABLE behind the
+`getNavLockHolder` banner rather than refusing it — Save/Save-as off, editing
+surface still live), `saveDraft`/`saveAsDraft`
 push a `create_artifact`/`update_artifact` op onto the staged-artifact buffer,
 and a create staged from a `nav:draft:N` tab is re-keyed to `nav:<id>` only when
 the commit's `id_map` arrives (module-scope `onArtifactCommit` listener) — its
@@ -399,7 +410,7 @@ toggle`), a collapsed disclosure that expands to the shared
   a response that saw pending values never reports `ready`, so the last poll
   always lands a clean, correctly-sorted page. `TableView` shows
   `Computing script columns {done}/{total}` (or the failure message) via
-  `getTableScriptStatus(tabId)`, as **fixed chrome** beside the read-only lock
+  `getTableScriptStatus(tabId)`, as **fixed chrome** beside the lock-denied
   and warnings strips — deliberately _not_ inside `TableGrid`, whose scroll
   container would both scroll the readout out of view on a long table and, as
   an in-flow element ahead of the `padTop` spacer, offset every row relative to

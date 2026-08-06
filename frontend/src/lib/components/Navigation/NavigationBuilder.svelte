@@ -25,11 +25,15 @@
 	});
 	const draft = $derived(getDraft(tabId));
 	/** Non-null while a peer holds this navigation's `art:` lease: the tab is
-	 * read-only until the check-out succeeds (banner "Retry"). */
+	 * UNSAVEABLE until the check-out succeeds — Save and Save as are disabled
+	 * behind the banner ("Retry"), while the editing surface itself stays live.
+	 * See `navigation-editor.svelte.ts`'s `ensureDraft` docstring. */
 	const lockHolder = $derived(getNavLockHolder(tabId));
 	const editable = $derived(canEdit());
-	/** A refused check-out disables the write affordances but keeps them
-	 * VISIBLE — paired with the banner, that is what explains why. */
+	/** A refused check-out disables the SAVE affordances (name, Save, Save as)
+	 * but keeps them VISIBLE — paired with the banner, that is what explains why.
+	 * It does NOT gate the editing surface; the banner copy says "you will not be
+	 * able to save" rather than "read-only" for exactly that reason. */
 	const locked = $derived(lockHolder !== null);
 	let saveError = $state<string | null>(null);
 	let dockHeight = $state(280);
@@ -119,7 +123,7 @@
 				class="flex items-center gap-2 bg-warning/15 px-3 py-1.5 text-xs text-warning"
 				role="status"
 			>
-				Checked out by {lockHolder} — read-only.
+				Checked out by {lockHolder} — you will not be able to save.
 				<button type="button" class="underline" onclick={() => void retryNavLock(tabId)}>
 					Retry
 				</button>

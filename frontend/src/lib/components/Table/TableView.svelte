@@ -1,6 +1,6 @@
 <script lang="ts">
 	// The table tab root: a slim chrome bar (name input, dirty dot, Settings,
-	// Export, Save/Save as…, read-only lock banner) above a full-height
+	// Export, Save/Save as…, lock-denied banner) above a full-height
 	// `TableGrid`.
 	// Definition editing (row source + columns) lives in a modal opened by the
 	// ⚙ Settings button so the grid gets the whole area — see
@@ -57,11 +57,15 @@
 	});
 	const draft = $derived(getTableDraft(tabId));
 	/** Non-null while a peer holds this table's `art:` lease: the tab is
-	 * read-only until the check-out succeeds (banner "Retry"). */
+	 * UNSAVEABLE until the check-out succeeds — Save and Save as are disabled
+	 * behind the banner ("Retry"), while the editing surface itself stays live.
+	 * See `navigation-editor.svelte.ts`'s `ensureDraft` docstring. */
 	const lockHolder = $derived(getTableLockHolder(tabId));
 	const editable = $derived(canEdit());
-	/** A refused check-out disables the write affordances but keeps them
-	 * VISIBLE — paired with the banner, that is what explains why. */
+	/** A refused check-out disables the SAVE affordances (name, Save, Save as)
+	 * but keeps them VISIBLE — paired with the banner, that is what explains why.
+	 * It does NOT gate the editing surface; the banner copy says "you will not be
+	 * able to save" rather than "read-only" for exactly that reason. */
 	const locked = $derived(lockHolder !== null);
 	const page = $derived(getTablePage(tabId));
 	const warnings = $derived(getTableWarnings(tabId));
@@ -523,7 +527,7 @@
 				class="flex items-center gap-2 bg-warning/15 px-3 py-1.5 text-xs text-warning"
 				role="status"
 			>
-				Checked out by {lockHolder} — read-only.
+				Checked out by {lockHolder} — you will not be able to save.
 				<button type="button" class="underline" onclick={() => void retryTableLock(tabId)}>
 					Retry
 				</button>

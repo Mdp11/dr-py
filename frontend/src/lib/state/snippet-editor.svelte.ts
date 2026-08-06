@@ -13,9 +13,12 @@
  * (`artifact-edits.svelte.ts`), and nothing reaches the server until the
  * DiffDrawer's Commit sends the batch. Opening a SAVED snippet first checks the
  * artifact out (`art:<id>` exclusive lease); a denial does not refuse the tab —
- * it opens read-only with the holder banner (`_lockDenied`). The tab is
- * deliberately NOT re-keyed when a create is staged: the draft keeps living in
- * its `snip:draft:N` tab and is rebound to `snip:<id>` only when the commit's
+ * it opens UNSAVEABLE behind the holder banner (`_lockDenied`): Save and Save
+ * as are disabled, while the definition-editing surface itself is NOT yet gated.
+ * `navigation-editor.svelte.ts`'s `ensureDraft` docstring is the canonical
+ * statement of that scope and of the open follow-up. The tab is deliberately
+ * NOT re-keyed when a create is staged: the draft keeps living in its
+ * `snip:draft:N` tab and is rebound to `snip:<id>` only when the commit's
  * `id_map` supplies a canonical id (see the module-scope listeners at the
  * bottom of this file).
  */
@@ -60,10 +63,12 @@ const DEFAULT_CODE = '';
 const _drafts = new SvelteMap<string, SnippetDraft>();
 /**
  * tabId -> the peer holding the `art:` lease this tab was refused, as a display
- * label. Present == the tab is READ-ONLY: the payload loaded (a denial never
- * refuses the tab) but every write affordance is disabled and the banner offers
- * Retry. Absent for a VIEWER too — the whole workspace is already read-only for
- * them, so a per-tab "checked out by…" line would be noise.
+ * label. Present == the tab is UNSAVEABLE: the payload loaded (a denial never
+ * refuses the tab), the name input / Save / Save as are disabled and the banner
+ * offers Retry — but the editing surface itself is NOT gated (see
+ * `navigation-editor.svelte.ts`'s `ensureDraft` docstring). Absent for a
+ * VIEWER too — the whole workspace is already read-only for them, so a per-tab
+ * "checked out by…" line would be noise.
  */
 const _lockDenied = new SvelteMap<string, string>();
 
@@ -275,8 +280,8 @@ export async function retrySnippetLock(tabId: string): Promise<void> {
  * `artifact-lock-denied.ts`). `POST /commits` releases every token it is sent,
  * so a still-open tab whose artifact was in the batch loses its lease; the
  * sweep re-checks it out, and when a peer got there first this is how the tab
- * flips read-only with the holder banner (and its Retry) instead of silently
- * accepting edits it could never commit. */
+ * flips to UNSAVEABLE with the holder banner (and its Retry) instead of
+ * silently accepting edits it could never commit. */
 export function setSnippetLockDenied(tabId: string, holder: string): void {
 	_lockDenied.set(tabId, holder);
 }
@@ -317,11 +322,13 @@ export async function ensureSnippetDraft(tabId: string): Promise<SnippetDraft> {
 			entryPoints: []
 		};
 	} else {
-		// Check the artifact out BEFORE showing an editable surface: an editor
-		// that lets the user type into a snippet someone else holds is exactly
-		// what the pessimistic lease exists to prevent. A denial does NOT refuse
-		// the tab — the payload still loads and the tab opens read-only behind the
-		// holder banner (a viewer gets no banner: see `_lockDenied`).
+		// Check the artifact out on open, so the user learns who holds it BEFORE
+		// investing work in a tab whose edits can never land. A denial does NOT
+		// refuse the tab — the payload still loads and the tab opens UNSAVEABLE
+		// behind the holder banner (a viewer gets no banner: see `_lockDenied`).
+		// Unsaveable, NOT read-only: the CodeMirror document stays editable —
+		// `navigation-editor.svelte.ts`'s `ensureDraft` docstring is the canonical
+		// statement of what is gated and of the open follow-up.
 		//
 		// The `.catch` is load-bearing, not defensive noise: `ensureCheckout`
 		// RETHROWS anything that is not a lock conflict, and our only caller is a
@@ -449,7 +456,7 @@ export async function saveSnippetDraft(tabId: string): Promise<void> {
 }
 
 /** Discard the local draft and re-fetch the server copy — the recovery path for
- * a tab showing a stale payload (e.g. one opened read-only while a peer was
+ * a tab showing a stale payload (e.g. one opened lock-denied while a peer was
  * editing). Re-runs `ensureSnippetDraft`, so it re-attempts the check-out too. */
 export async function reloadSnippetDraft(tabId: string): Promise<void> {
 	_drafts.delete(tabId);
