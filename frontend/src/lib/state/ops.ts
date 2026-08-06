@@ -46,7 +46,36 @@ export type RelationshipOp =
 	  }
 	| { kind: 'delete_relationship'; id: string };
 
-export type Op = ElementOp | RelationshipOp;
+/**
+ * Artifact-content ops (artefacts revamp Phase 1) — mirror of the backend's
+ * ArtifactOpIn (api/schemas.py). Applied to ArtifactRow DB rows by
+ * POST /commits, never to the in-memory model; /model/ops rejects them.
+ * `update_artifact.payload` is a FULL replacement (omitted = name-only
+ * change). The backend's optional `artifact_rev` OCC precondition is
+ * deliberately never sent: the art: lease is the concurrency control
+ * (CLAUDE.md "Lease rule"); OCC-on-ops is a deferred follow-up.
+ */
+export type ArtifactOp =
+	| {
+			kind: 'create_artifact';
+			temp_id: string;
+			artifact_kind: 'navigation' | 'table' | 'code_snippet';
+			name: string;
+			payload: Record<string, unknown>;
+	  }
+	| {
+			kind: 'update_artifact';
+			id: string;
+			name?: string;
+			payload?: Record<string, unknown>;
+	  }
+	| { kind: 'delete_artifact'; id: string };
+
+/** Model-content ops — the ONLY ops the model store's staged buffer may
+ * hold (mirrors the backend's ModelOpIn / assert_never split). */
+export type ModelOp = ElementOp | RelationshipOp;
+
+export type Op = ModelOp | ArtifactOp;
 
 export const TEMP_ID_PREFIX = 'tmp_';
 
@@ -71,4 +100,18 @@ export function createTempId(): string {
 
 export function isTempId(id: string): boolean {
 	return typeof id === 'string' && id.startsWith(TEMP_ID_PREFIX);
+}
+
+/** Client mirror of api/locking.py's ARTIFACT_PREFIX: artifact lock targets
+ * are REQUESTED with the bare id + type:"artifact", but granted leases come
+ * back canonicalized under this namespace, and the checkout registry keys on
+ * the canonical form. Elements stay bare (existing badges depend on it). */
+export const ARTIFACT_RESOURCE_PREFIX = 'art:';
+
+export function artifactResource(artifactId: string): string {
+	return ARTIFACT_RESOURCE_PREFIX + artifactId;
+}
+
+export function isArtifactResource(resourceId: string): boolean {
+	return resourceId.startsWith(ARTIFACT_RESOURCE_PREFIX);
 }

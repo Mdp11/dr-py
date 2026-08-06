@@ -11,7 +11,7 @@
  */
 import type { Element, Relationship, TreeItem } from '$lib/api/types';
 import type { Diff } from './diff';
-import { isTempId, type Op } from './ops';
+import { isTempId, type ModelOp } from './ops';
 import { elementDisplayName } from '$lib/util/element-name';
 
 export type StagedRowStatus = 'new' | 'modified' | 'deleted';
@@ -41,7 +41,7 @@ const STATUS_RANK: Record<StagedRowStatus, number> = { new: 0, modified: 1, dele
  * an endpoint of a staged relationship *op*, so the op buffer is the authority
  * and this set is the filter.
  */
-export function stagedRelationshipOpIds(ops: readonly Op[]): Set<string> {
+export function stagedRelationshipOpIds(ops: readonly ModelOp[]): Set<string> {
 	// Plain Set: computation scratch, never read reactively (and this is a plain
 	// .ts module, so the svelte reactivity lint doesn't apply).
 	const ids = new Set<string>();

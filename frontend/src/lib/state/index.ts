@@ -1,8 +1,13 @@
 export {
+	ARTIFACT_RESOURCE_PREFIX,
 	TEMP_ID_PREFIX,
+	artifactResource,
 	createTempId,
+	isArtifactResource,
 	isTempId,
+	type ArtifactOp,
 	type ElementOp,
+	type ModelOp,
 	type Op,
 	type RelationshipOp,
 	type Snapshot
