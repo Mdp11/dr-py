@@ -52,10 +52,14 @@ vi.mock('$lib/api/history', async (orig) => {
 import { loadFirstPage, modelAt } from '$lib/state/history.svelte';
 import { revertToCommit } from '$lib/api/history';
 import { applyDelta, getStagedDepth } from '$lib/state';
+// Left real by the `...actual` spread above so the revert gate is exercised
+// against the actual staged-artifact buffer.
+import { resetArtifactEdits, stageArtifactCreate } from '$lib/state/artifact-edits.svelte';
 import { ConflictError, ValidationError } from '$lib/api';
 
 afterEach(() => {
 	document.body.innerHTML = '';
+	resetArtifactEdits();
 	vi.clearAllMocks();
 });
 
@@ -207,6 +211,23 @@ describe('HistoryDrawer revert', () => {
 
 	it('blocks revert when there are staged edits', async () => {
 		vi.mocked(getStagedDepth).mockReturnValue(2);
+		const c = mount(HistoryDrawer, { target: document.body, props: { open: true } });
+		flushSync();
+		await Promise.resolve();
+		flushSync();
+		const revertBtn = Array.from(document.querySelectorAll('button')).find((b) =>
+			b.textContent?.includes('Revert')
+		)!;
+		revertBtn.click();
+		flushSync();
+		expect(document.body.textContent?.toLowerCase()).toContain('commit or discard');
+		expect(revertToCommit).not.toHaveBeenCalled();
+		unmount(c);
+	});
+
+	it('blocks revert when only artifact ops are staged', async () => {
+		vi.mocked(getStagedDepth).mockReturnValue(0);
+		stageArtifactCreate('table', 'T', {}, null);
 		const c = mount(HistoryDrawer, { target: document.body, props: { open: true } });
 		flushSync();
 		await Promise.resolve();

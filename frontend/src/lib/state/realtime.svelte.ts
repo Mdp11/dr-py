@@ -43,12 +43,19 @@ export function onLockEvent(cb: LockTap): () => void {
 	return () => _lockTaps.delete(cb);
 }
 
+/** What a commit tap is told about the commit that fired it. `scope` lists the
+ * content families the commit touched ("model" and/or "artifact"), so a
+ * subscriber whose work only matters for one of them can opt out of the other.
+ * It is NEVER empty: an event that arrives without a scope (older server, test
+ * fixture) is reported as `['model']`, the conservative reading. */
+type CommitTap = (info: { scope: string[] }) => void;
+
 // eslint-disable-next-line svelte/prefer-svelte-reactivity
-const _commitTaps = new Set<() => void>();
+const _commitTaps = new Set<CommitTap>();
 
 /** Register a tap fired after every commit/rebind feed event (the history
  * drawer uses this to refetch the first page while open). Returns unsubscribe. */
-export function onCommitEvent(cb: () => void): () => void {
+export function onCommitEvent(cb: CommitTap): () => void {
 	_commitTaps.add(cb);
 	return () => _commitTaps.delete(cb);
 }
@@ -113,6 +120,15 @@ export function handleFeedEvent(e: FeedEvent): void {
 			for (const tap of _lockTaps) tap(e.action, e.leases);
 			break;
 		case 'commit': {
+			// Absent scope => model-scoped. The transport does no validation, and a
+			// commit that we wrongly took for artifact-only would leave the model
+			// cache stale, so the defensive default is the one that does MORE work.
+			const scope = e.scope ?? ['model'];
+			// The delta synthesis + applyDelta below stay UNCONDITIONAL even for an
+			// artifact-only commit: `previewStaged`/`commitStaged` send our
+			// `model_rev` as `base_rev` and the backend's preview path compares it
+			// with STRICT equality, so a peer that declined to adopt artifact-only
+			// revs would 409 on its next preview. Only the taps get the scope.
 			const delta: OpsResponse = {
 				model_rev: e.rev,
 				id_map: {},
@@ -125,12 +141,14 @@ export function handleFeedEvent(e: FeedEvent): void {
 				issue_counts: getIssueCounts() ?? {}
 			};
 			applyDelta(delta);
-			for (const tap of _commitTaps) tap();
+			for (const tap of _commitTaps) tap({ scope });
 			break;
 		}
 		case 'rebind':
 			_pendingRebind = { rev: e.rev, count: e.validation_error_count };
-			for (const tap of _commitTaps) tap();
+			// A metamodel swap rewrites model content wholesale; artifacts are
+			// untouched by it, so this is model-scoped by construction.
+			for (const tap of _commitTaps) tap({ scope: ['model'] });
 			break;
 		case 'artifact':
 			handleArtifactFeedEvent();

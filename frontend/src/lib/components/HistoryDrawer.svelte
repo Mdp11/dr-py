@@ -16,7 +16,14 @@
 	import CompareDiff from './CompareDiff.svelte';
 	import { computeDiff, type Diff } from '$lib/state/diff';
 	import { revertToCommit } from '$lib/api/history';
-	import { getRole, getModelRev, getStagedDepth, getLockState, applyDelta } from '$lib/state';
+	import {
+		getRole,
+		getModelRev,
+		getStagedArtifactDepth,
+		getStagedDepth,
+		getLockState,
+		applyDelta
+	} from '$lib/state';
 	import { ConflictError, ValidationError } from '$lib/api';
 
 	type Props = { open: boolean };
@@ -77,7 +84,12 @@
 	}
 
 	const canWrite = $derived(getRole() === 'owner' || getRole() === 'editor');
-	const quiet = $derived(getStagedDepth() === 0 && getLockState().size === 0);
+	// Revert rewrites history under everything uncommitted, so it is gated on a
+	// fully quiet workspace: no staged MODEL ops, no staged ARTIFACT ops (they
+	// ride the same commit batch), no live locks.
+	const quiet = $derived(
+		getStagedDepth() === 0 && getStagedArtifactDepth() === 0 && getLockState().size === 0
+	);
 
 	let confirmRev = $state<number | null>(null);
 	let revertMsg = $state('');
@@ -132,6 +144,8 @@
 		if (open) {
 			resetHistory();
 			loadFirstPage();
+			// Scope-agnostic on purpose: artifact-only commits are commits too and
+			// show up in the journal, so the open list must refresh for them as well.
 			unsub = onCommitEvent(() => loadFirstPage());
 		} else {
 			unsub?.();

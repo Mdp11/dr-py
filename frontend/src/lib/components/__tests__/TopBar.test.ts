@@ -51,13 +51,33 @@ vi.mock('$lib/state/validate-action', () => ({
 vi.mock('$lib/api/model-read', () => ({ downloadModel: vi.fn(async () => new Response()) }));
 vi.mock('$lib/util/fileSave', () => ({ saveResponseToFile: vi.fn(async () => {}) }));
 
+// Imported AFTER the vi.mock factory above so these are the mocked bindings;
+// the artifact-edits store is deliberately NOT mocked (the `...actual` spread
+// keeps it real) so the Commit gate is exercised against the real staged
+// buffer rather than a stub.
+import { getModelSummary } from '$lib/state';
+import { resetArtifactEdits, stageArtifactCreate } from '$lib/state/artifact-edits.svelte';
+
+const SUMMARY = {
+	model_rev: 1,
+	element_count: 0,
+	relationship_count: 0,
+	elements_by_type: {},
+	issue_counts: null,
+	undo_depth: 0
+};
+
 function findButton(name: RegExp): HTMLButtonElement | undefined {
 	return [...document.querySelectorAll('button')].find((b) => name.test(b.textContent ?? ''));
 }
 
 afterEach(() => {
 	resetConfirm();
+	resetArtifactEdits();
 	document.body.innerHTML = '';
+	// clearAllMocks() only clears CALLS, not implementations, so a test that
+	// installed a non-null summary would leak it into the next one.
+	vi.mocked(getModelSummary).mockReturnValue(null);
 	vi.clearAllMocks();
 });
 
@@ -87,5 +107,34 @@ describe('TopBar', () => {
 		expect(goto).toHaveBeenCalledWith('/projects');
 
 		unmount(c);
+	});
+
+	describe('Commit gate', () => {
+		it('is disabled with nothing staged at all', () => {
+			vi.mocked(getModelSummary).mockReturnValue(SUMMARY as never);
+
+			const c = mount(TopBar, { target: document.body });
+			flushSync();
+
+			expect(findButton(/commit/i)?.disabled).toBe(true);
+
+			unmount(c);
+		});
+
+		it('an artifact-only staged batch enables Commit and counts as a change', () => {
+			// The whole slice hangs off this: an artifact edit stages nothing in the
+			// MODEL buffer, so a Commit gate that only summed getStagedChangeCount()
+			// would leave the drawer reachable only via the command palette.
+			vi.mocked(getModelSummary).mockReturnValue(SUMMARY as never);
+			stageArtifactCreate('navigation', 'N', {}, null);
+
+			const c = mount(TopBar, { target: document.body });
+			flushSync();
+
+			expect(findButton(/commit/i)?.disabled).toBe(false);
+			expect(document.body.textContent).toContain('● 1');
+
+			unmount(c);
+		});
 	});
 });

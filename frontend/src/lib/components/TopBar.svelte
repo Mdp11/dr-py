@@ -17,6 +17,7 @@
 		getModelGeneration,
 		getModelRev,
 		getModelSummary,
+		getStagedArtifactDepth,
 		getStagedChangeCount,
 		getStagedDepth,
 		getStrictMode,
@@ -47,9 +48,17 @@
 	const metamodelFilename = $derived(getMetamodelFilename());
 	const viewFilename = $derived(getViewFilename());
 	const totalChanges = $derived(getStagedChangeCount());
+	// Staged artifact ops are composed in HERE rather than folded into
+	// getStagedChangeCount(): that function is defined as the MODEL staged
+	// diff's counts (same source as the DiffDrawer's `getStagedDiff()`), and
+	// artifacts have no representation in that diff. Composing across stores at
+	// the call site is the pattern this bar already uses for `viewChanges`.
+	const artifactChanges = $derived(getStagedArtifactDepth());
 	const viewChanges = $derived(getViewChangesCount());
-	const combinedChanges = $derived(totalChanges + viewChanges);
-	// Enabled when the model OR the view has uncommitted/unsaved changes.
+	const combinedChanges = $derived(totalChanges + artifactChanges + viewChanges);
+	// Enabled when the model, an artifact, OR the view has uncommitted/unsaved
+	// changes — an artifact-only batch must reach the commit drawer from here,
+	// not only from the command palette.
 	const saveDisabled = $derived(summary === null || combinedChanges === 0);
 	const validating = $derived(isRunning());
 	const validateDisabled = $derived(validating || summary === null);
@@ -247,6 +256,8 @@
 				<dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
 					<dt class="text-muted-foreground/70">Uncommitted (model)</dt>
 					<dd class="text-right font-mono text-foreground/90">{totalChanges}</dd>
+					<dt class="text-muted-foreground/70">Uncommitted (artifacts)</dt>
+					<dd class="text-right font-mono text-foreground/90">{artifactChanges}</dd>
 					<dt class="text-muted-foreground/70">Unsaved (view)</dt>
 					<dd class="text-right font-mono text-foreground/90">{viewChanges}</dd>
 				</dl>

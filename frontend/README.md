@@ -547,7 +547,9 @@ browses the project's durable commit journal:
   renders the range diff. A warning banner is shown when the range spans a
   metamodel-swap (rebind) commit.
 - **Revert-to-commit** (`POST /commits/revert`) — gated on a clean staged
-  buffer (`getStagedDepth() === 0 && getLockState().size === 0`). Selecting
+  buffer, MODEL and ARTIFACT alike: `getStagedDepth()`,
+  `getStagedArtifactDepth()` and `getLockState().size` must all be 0 (the
+  metamodel-swap drawer gates on the same expression). Selecting
   "Revert to here" on a row shows an inline confirm panel with an optional
   message; submitting applies the compensating inverse ops as a new durable
   commit (history stays append-only, `model_rev` advances), broadcasts the
@@ -603,7 +605,12 @@ src/
                         feed transport store: connection status, presence
                         (string[]), lock state (SvelteMap resource_id →
                         LeaseLite), feed-termination state, applies remote
-                        commit deltas via applyDelta; checkout.svelte.ts — lock
+                        commit deltas via applyDelta (UNCONDITIONALLY — rev
+                        adoption is mandatory) and fans commits out to
+                        onCommitEvent taps with the event's {scope} (absent =
+                        ['model']), so an artifact-only commit skips
+                        model-only work like the table re-page;
+                        checkout.svelte.ts — lock
                         registry, ensureCheckout/heartbeat, preview/commit,
                         discard (discardElement / discardElementCascade),
                         role gating; staged-rows.ts — pure derivation of the
@@ -624,8 +631,9 @@ src/
                         50), pushed from select(), replayed with a re-entrancy
                         guard; per-direction dropdown slices resolve labels
                         lazily;
-                        unsaved.ts — hasUnsavedWork() (staged ops + dirty
-                        table/navigation drafts), input to the workspace
+                        unsaved.ts — hasUnsavedWork() (staged model ops +
+                        staged artifact ops + dirty table/navigation/snippet
+                        drafts), input to the workspace
                         unload guard (beforeNavigate in p/[projectId]/+page);
                         snippet-editor.svelte.ts — per-tab code-snippet
                         drafts, save lifecycle, debounced lint + run/stop

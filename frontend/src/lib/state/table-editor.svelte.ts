@@ -1679,7 +1679,13 @@ export function handleTableModelRevChanged(): void {
 // Register once at module load: the realtime store taps every commit/rebind
 // feed event and fans it out to registered listeners. This is a one-way
 // import (realtime.svelte.ts does not import table-editor), so no cycle.
-onCommitEvent(() => handleTableModelRevChanged());
+onCommitEvent(({ scope }) => {
+	// An artifact-only commit changes no model content and invalidates none of
+	// the server's cell-evaluation caches (artifact ops never reach the
+	// in-memory model), so re-paging every open table would be pure waste. We
+	// still adopt the rev — that happens unconditionally in the realtime store.
+	if (scope.includes('model')) handleTableModelRevChanged();
+});
 
 export function resetTableEditors(): void {
 	_drafts.clear();
