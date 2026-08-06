@@ -176,10 +176,20 @@ export {
 	discardElement,
 	discardElementCascade,
 	discardAll,
+	reacquireOpenArtifactLeases,
+	releaseArtifactIfUnneeded,
 	type CheckoutResult,
 	type LockConflictLite
 } from './checkout.svelte';
-export { acquireLocks, editLock, connectLock, deleteLock } from './edit-gate';
+export {
+	acquireLocks,
+	acquireArtifactLease,
+	artifactDeleteLock,
+	editLock,
+	connectLock,
+	deleteLock,
+	lockHolderLabel
+} from './edit-gate';
 export { stageSnippetOps, type StageOutcome } from './snippet-stage';
 export { lockBadgeFor, type LockBadge } from './lock-badge';
 export { getLockNotice, setLockNotice } from './lock-notice.svelte';

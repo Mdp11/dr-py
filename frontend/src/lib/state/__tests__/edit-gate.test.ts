@@ -1,5 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { editLock, connectLock, deleteLock } from '../edit-gate';
+import {
+	editLock,
+	connectLock,
+	deleteLock,
+	acquireArtifactLease,
+	artifactDeleteLock,
+	lockHolderLabel
+} from '../edit-gate';
 import { setProjectInfo, resetCheckout } from '../index';
 import { getLockNotice, setLockNotice } from '../lock-notice.svelte';
 import * as api from '$lib/api/checkout';
@@ -86,5 +93,90 @@ describe('edit-gate', () => {
 		);
 		expect(await editLock('e1')).toBe(false);
 		expect(getLockNotice()).toBe('Locked by bob@x.io.');
+	});
+});
+
+describe('artifact edit gate', () => {
+	it('acquireArtifactLease sends the bare id with type artifact', async () => {
+		const spy = vi.spyOn(api, 'acquireLocks').mockResolvedValue({
+			token: 't',
+			leases: [
+				{
+					resource_id: 'art:a1',
+					mode: 'exclusive',
+					holder: 'default-user',
+					token: 't',
+					intent: 'edit',
+					expires_at: 1
+				}
+			]
+		});
+		expect(await acquireArtifactLease('a1')).toEqual({ ok: true });
+		expect(spy.mock.calls[0][0]).toMatchObject({
+			targets: [{ resource_id: 'a1', mode: 'exclusive', type: 'artifact' }],
+			intent: 'edit'
+		});
+	});
+
+	it('acquireArtifactLease returns the conflict so the editor can render the holder', async () => {
+		const { ConflictError } = await import('$lib/api/errors');
+		vi.spyOn(api, 'acquireLocks').mockRejectedValue(
+			new ConflictError(
+				409,
+				{
+					conflicts: [
+						{
+							resource_id: 'art:a1',
+							held_by: 'bob-uuid',
+							held_by_email: 'bob@x.io',
+							held_mode: 'exclusive'
+						}
+					]
+				},
+				'lock conflict'
+			)
+		);
+		const res = await acquireArtifactLease('a1');
+		expect(res.ok).toBe(false);
+		// no global notice: the editor surfaces the holder inline
+		expect(getLockNotice()).toBe(null);
+		expect(lockHolderLabel(res as Extract<typeof res, { ok: false }>)).toBe('bob@x.io');
+	});
+
+	it('artifactDeleteLock uses delete intent and sets the lock notice on conflict', async () => {
+		const { ConflictError } = await import('$lib/api/errors');
+		const spy = vi
+			.spyOn(api, 'acquireLocks')
+			.mockRejectedValue(
+				new ConflictError(
+					409,
+					{ conflicts: [{ resource_id: 'art:a1', held_by: 'bob', held_mode: 'shared' }] },
+					'lock conflict'
+				)
+			);
+		expect(await artifactDeleteLock('a1')).toBe(false);
+		expect(spy.mock.calls[0][0]).toMatchObject({
+			targets: [{ resource_id: 'a1', mode: 'exclusive', type: 'artifact' }],
+			intent: 'delete'
+		});
+		expect(getLockNotice()).toBe('Locked by bob.');
+	});
+
+	it('artifactDeleteLock clears the notice on success', async () => {
+		setLockNotice('stale notice');
+		vi.spyOn(api, 'acquireLocks').mockResolvedValue({ token: 't', leases: [] });
+		expect(await artifactDeleteLock('a1')).toBe(true);
+		expect(getLockNotice()).toBe(null);
+	});
+
+	it('lockHolderLabel falls back when the 409 carried no conflict detail', () => {
+		expect(lockHolderLabel({ ok: false, reason: 'conflict' })).toBe('someone else');
+		expect(
+			lockHolderLabel({
+				ok: false,
+				reason: 'conflict',
+				conflicts: [{ resource_id: 'art:a1', held_by: 'bob-uuid', held_mode: 'exclusive' }]
+			})
+		).toBe('bob-uuid');
 	});
 });

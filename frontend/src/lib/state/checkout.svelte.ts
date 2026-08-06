@@ -20,6 +20,7 @@ import type {
 } from '$lib/api/types';
 import type { LeaseLite } from '$lib/api/feed';
 import type { Op } from './ops';
+import { artifactResource, isArtifactResource, isTempId } from './ops';
 import {
 	applyDelta,
 	clearStaged,
@@ -29,6 +30,14 @@ import {
 	revertStagedFor,
 	revertStagedForElement
 } from './model.svelte';
+import {
+	clearStagedArtifacts,
+	discardAllStagedArtifacts,
+	getStagedArtifactOps,
+	notifyArtifactCommit
+} from './artifact-edits.svelte';
+// workspace.svelte imports nothing from this module (or from any store) — no cycle.
+import { getDynamicTabs } from './workspace.svelte';
 
 /**
  * Checkout store (Spec B): the editing-session state layered over the model
@@ -129,10 +138,25 @@ export function _dropToken(token: string): void {
 	}
 }
 
+/**
+ * The registry key for a lock TARGET. Targets are sent with a BARE id plus a
+ * `type` discriminator; the server canonicalizes into its lock namespaces and
+ * hands the leases back under the canonical resource id, which is what
+ * {@link _recordLeases} stores. Without mirroring that mapping here, every
+ * `ensureCheckout` on an artifact would miss the registry and acquire a
+ * DUPLICATE lease on each editor re-open. Elements stay BARE (lock badges and
+ * the whole element half of the registry key on the raw element id).
+ */
+function canonicalResource(t: LockTargetIn): string {
+	if (t.type === 'artifact') return artifactResource(t.resource_id);
+	if (t.type === 'metamodel') return 'mm';
+	return t.resource_id;
+}
+
 /** True when the registry already covers (resource, mode): an exclusive hold
  * covers a shared requirement; a shared hold covers only shared. */
 function alreadyHeld(t: LockTargetIn): boolean {
-	const held = _registry.get(t.resource_id);
+	const held = _registry.get(canonicalResource(t));
 	if (held === undefined) return false;
 	if (t.mode === 'shared') return true; // any hold covers a pin
 	return held.mode === 'exclusive';
@@ -260,31 +284,127 @@ function _onTokenExpired(token: string): void {
 
 // --- preview / commit / discard --------------------------------------------
 
-/** Preview the staged batch at the live rev (kept current by the feed). */
+/** Preview the staged batch at the live rev (kept current by the feed). Model
+ * ops first, then artifact ops — one mixed batch, exactly as it will be
+ * committed (the backend splits the union itself). */
 export function previewStaged(): Promise<PreviewResponse> {
-	return previewCommit(getModelRev(), getStagedOps(), _clientConfig);
-}
-
-/** Commit all staged edits. On success the server releases the passed tokens,
- * so we apply the delta and clear the buffer + registry locally. */
-export async function commitStaged(message: string, ackErrors: boolean): Promise<CommitResponse> {
-	const res = await commitChanges(
-		{
-			baseRev: getModelRev(),
-			ops: getStagedOps(),
-			message,
-			lockTokens: getHeldTokens(),
-			ackErrors
-		},
+	return previewCommit(
+		getModelRev(),
+		[...getStagedOps(), ...getStagedArtifactOps()],
 		_clientConfig
 	);
-	// Clear the staged buffer first so applyDelta's hasQueuedOpFor guard does
+}
+
+/**
+ * Commit all staged edits — model ops and artifact ops in ONE batch. On
+ * success the server releases every token it was SENT, so we apply the delta
+ * and drop those tokens from the registry locally.
+ */
+export async function commitStaged(message: string, ackErrors: boolean): Promise<CommitResponse> {
+	const ops: Op[] = [...getStagedOps(), ...getStagedArtifactOps()];
+	if (ops.length === 0) {
+		// Never send an empty commit: the backend's empty-batch early return
+		// (routes/commits.py) skips its lock-release step, so lock_tokens sent
+		// with one are orphaned until TTL. The DiffDrawer's total===0 gate makes
+		// this unreachable from the UI; this guard keeps it unreachable, period.
+		throw new Error('nothing staged to commit');
+	}
+	// Token partition: an artifact-editor lease whose artifact is NOT in this
+	// batch belongs to a still-open editor and must survive the commit (the
+	// server releases every token it is sent). Everything else — all element
+	// tokens (commit ends the model editing session, as before) and artifact
+	// tokens the batch needs (the server verifies + releases them) — is sent.
+	const needed = lockedResourcesNeededBy(ops);
+	const sent: string[] = [];
+	// ephemeral partition bookkeeping, not reactive state
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity
+	const kept = new Set<string>();
+	for (const token of getHeldTokens()) {
+		const resources = [..._registry].filter(([, l]) => l.token === token).map(([rid]) => rid);
+		const artifactOnly = resources.every((rid) => isArtifactResource(rid));
+		const unneeded = resources.every((rid) => !needed.has(rid));
+		if (artifactOnly && unneeded) kept.add(token);
+		else sent.push(token);
+	}
+	const res = await commitChanges(
+		{ baseRev: getModelRev(), ops, message, lockTokens: sent, ackErrors },
+		_clientConfig
+	);
+	// Clear BOTH staged buffers first so applyDelta's hasQueuedOpFor guard does
 	// not skip the committed elements — the server's canonical rev is the truth.
+	// The artifact buffer is cleared silently (no discard listeners): the edits
+	// were saved, not undone; notifyArtifactCommit below is what tells listeners
+	// the authoritative outcome.
 	clearStaged();
+	clearStagedArtifacts();
 	applyDelta(res);
-	_registry.clear();
-	_stopHeartbeat();
+	// Artifact half of the delta: header store + editors subscribe (listener
+	// registry — a direct import here would cycle through the editor modules).
+	notifyArtifactCommit({
+		idMap: res.id_map,
+		changed: res.changed_artifacts,
+		deletedIds: res.deleted_artifact_ids
+	});
+	for (const [rid, lease] of [..._registry]) {
+		if (!kept.has(lease.token)) _registry.delete(rid);
+	}
+	if (_registry.size === 0) _stopHeartbeat();
 	return res;
+}
+
+/**
+ * Release my `art:<id>` lease on editor close / save-as rebind — UNLESS a
+ * staged op (either buffer) still needs a resource that token covers: a
+ * saved-but-uncommitted artifact edit must keep its lease or the commit would
+ * 409 "required lock not held". Mirrors {@link _discardWith}'s release rule
+ * without reverting anything. No-op when I hold no lease on `artifactId`.
+ */
+export async function releaseArtifactIfUnneeded(artifactId: string): Promise<void> {
+	const rid = artifactResource(artifactId);
+	const token = _registry.get(rid)?.token;
+	if (token === undefined) return;
+	const stillNeeded = lockedResourcesNeededBy([...getStagedOps(), ...getStagedArtifactOps()]);
+	const tokenResources = [..._registry].filter(([, l]) => l.token === token).map(([r]) => r);
+	if (tokenResources.some((r) => stillNeeded.has(r))) return;
+	_dropToken(token);
+	await releaseLock(token, _clientConfig).catch(() => {});
+	if (_registry.size === 0) _stopHeartbeat();
+}
+
+/**
+ * Re-check-out every artifact whose editor tab is still open but whose lease
+ * the last commit surrendered (the batch needed it, so it was sent and the
+ * server released it). Best-effort and sequential: a peer may have grabbed the
+ * artifact in between, in which case `onDenied(tabId, holder)` lets the caller
+ * put that tab into read-only mode instead of failing the whole sweep.
+ * Draft tabs (no artifact id) and staged creates (temp id — no server-side row
+ * to lock yet) are skipped.
+ */
+export async function reacquireOpenArtifactLeases(
+	onDenied: (tabId: string, holder: string) => void
+): Promise<void> {
+	if (!canEdit()) return;
+	for (const tab of getDynamicTabs()) {
+		if (tab.artifactId === null || isTempId(tab.artifactId)) continue;
+		if (_registry.has(artifactResource(tab.artifactId))) continue;
+		const res = await ensureCheckout(
+			[{ resource_id: tab.artifactId, mode: 'exclusive', type: 'artifact' }],
+			'edit'
+		);
+		if (!res.ok && res.reason === 'conflict') onDenied(tab.id, lockHolderLabel(res));
+	}
+}
+
+/**
+ * The display name of whoever holds the lock a {@link CheckoutResult} was
+ * refused over. Defined HERE rather than next to `edit-gate.ts`'s `explain`
+ * (which it resembles) because {@link reacquireOpenArtifactLeases} needs it and
+ * edit-gate imports this module — one definition, re-exported from edit-gate.
+ */
+export function lockHolderLabel(res: Extract<CheckoutResult, { ok: false }>): string {
+	const c = res.conflicts?.[0];
+	if (!c) return 'someone else';
+	return c.held_by_email || c.held_by;
 }
 
 /**
@@ -292,10 +412,14 @@ export async function commitStaged(message: string, ackErrors: boolean): Promise
  *   - update/delete element|relationship -> the op's `id`
  *   - create_relationship -> its `source_id` AND `target_id`
  *   - create_element -> its `temp_id`
+ *   - any artifact op -> its id/temp_id under the CANONICAL `art:` key, so the
+ *     result can be compared against registry keys directly. (A create needs no
+ *     server-side lock — nothing exists to lock — but naming its temp id keeps
+ *     an over-eager release from dropping a token the batch is about to use.)
  * Used by {@link discardElement} to avoid releasing a token that a REMAINING
  * staged op still depends on (e.g. a connect's create_relationship needs the
  * source's exclusive lock even after the source's own property edit is
- * discarded).
+ * discarded), and by {@link commitStaged}'s token partition.
  */
 function lockedResourcesNeededBy(ops: Op[]): Set<string> {
 	// eslint-disable-next-line svelte/prefer-svelte-reactivity
@@ -314,6 +438,13 @@ function lockedResourcesNeededBy(ops: Op[]): Set<string> {
 			case 'update_relationship':
 			case 'delete_relationship':
 				needed.add(op.id);
+				break;
+			case 'create_artifact':
+				needed.add(artifactResource(op.temp_id));
+				break;
+			case 'update_artifact':
+			case 'delete_artifact':
+				needed.add(artifactResource(op.id));
 				break;
 		}
 	}
@@ -379,13 +510,37 @@ export function discardElementCascade(id: string): Promise<void> {
 	return _discardWith(id, revertStagedForElement);
 }
 
-/** Abandon everything: revert all staged edits and release every token. */
+/**
+ * Abandon everything: revert all staged edits (both buffers) and release every
+ * token EXCEPT the leases of artifacts still open in an editor tab — "discard"
+ * abandons EDITS, not check-outs the user can see as open editors. A kept token
+ * must cover ONLY kept resources; a token that also covers something being
+ * released is sent, since release is by token, not by resource.
+ */
 export async function discardAll(): Promise<void> {
 	revertAllStaged();
-	const tokens = getHeldTokens();
-	_registry.clear();
+	discardAllStagedArtifacts(); // fires per-entry discard listeners (drafts re-dirty)
+	// ephemeral partition bookkeeping, not reactive state
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity
+	const keepResources = new Set(
+		getDynamicTabs()
+			.filter((t) => t.artifactId !== null && !isTempId(t.artifactId))
+			.map((t) => artifactResource(t.artifactId as string))
+	);
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity
+	const keepTokens = new Set(
+		[..._registry].filter(([rid]) => keepResources.has(rid)).map(([, l]) => l.token)
+	);
+	for (const token of [...keepTokens]) {
+		const resources = [..._registry].filter(([, l]) => l.token === token).map(([rid]) => rid);
+		if (!resources.every((rid) => keepResources.has(rid))) keepTokens.delete(token);
+	}
+	const tokens = getHeldTokens().filter((t) => !keepTokens.has(t));
+	for (const [rid, lease] of [..._registry]) {
+		if (!keepTokens.has(lease.token)) _registry.delete(rid);
+	}
 	_stale.clear();
-	_stopHeartbeat();
+	if (_registry.size === 0) _stopHeartbeat();
 	await Promise.all(tokens.map((t) => releaseLock(t, _clientConfig).catch(() => {})));
 }
 
