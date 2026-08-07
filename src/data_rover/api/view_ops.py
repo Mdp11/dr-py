@@ -481,6 +481,37 @@ def apply_view_ops(
     return res
 
 
+def apply_view_ops_atomic(
+    view: View,
+    ops: list[ViewOpIn],
+    *,
+    id_map: dict[str, str] | None = None,
+    restore: bool = False,
+) -> ViewBatchResult:
+    """``apply_view_ops`` with all-or-nothing semantics: on ANY failure the
+    already-applied prefix is rolled back via its own inverses before the
+    exception propagates. The commit/undo callers want exactly this — they
+    have no other handle on the partial result (see ``apply_view_ops``'s
+    docstring, which points forward to this function).
+
+    Applies op-by-op (rather than delegating the whole list to
+    ``apply_view_ops`` in one call) so a mid-batch failure's already-collected
+    ``inverse_units`` are available to roll back — ``apply_view_ops`` itself
+    keeps no such handle on a partial result once it raises.
+    """
+    res = ViewBatchResult(id_map=dict(id_map or {}))
+    try:
+        for op in ops:
+            step = apply_view_ops(view, [op], id_map=res.id_map, restore=restore)
+            res.canonical_ops.extend(step.canonical_ops)
+            res.inverse_units.extend(step.inverse_units)
+            res.id_map.update(step.id_map)
+    except Exception:
+        rollback_view(view, res.inverse_units)
+        raise
+    return res
+
+
 def rollback_view(view: View, inverse_units: list[list[ViewOpIn]]) -> None:
     """Undo an applied (possibly partial) batch: apply inverse units newest-
     first, each unit front-to-back, in restore mode. Inverses are exact by

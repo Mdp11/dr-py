@@ -21,6 +21,7 @@ from data_rover.api.schemas import (
 )
 from data_rover.api.view_ops import (
     apply_view_ops,
+    apply_view_ops_atomic,
     rollback_view,
     validate_view_ops,
     view_op_folder_ids,
@@ -202,6 +203,21 @@ def test_restore_mode_reinstates_exact_ids_and_tolerates_duplicates() -> None:
     recreated = restored.canonical_ops[0]
     assert isinstance(recreated, CreateFolderOp)
     assert recreated.temp_id == f["A"]
+
+
+def test_apply_view_ops_atomic_rolls_back_prefix() -> None:
+    v = _view()
+    f = _ids(v)
+    before = v.model_dump_json()
+    with pytest.raises(HTTPException):
+        apply_view_ops_atomic(
+            v,
+            [
+                RenameFolderOp(kind="rename_folder", id=f["B"], name="B2"),
+                RenameFolderOp(kind="rename_folder", id="missing", name="x"),
+            ],
+        )
+    assert v.model_dump_json() == before
 
 
 def test_validate_view_ops_is_dry() -> None:

@@ -56,6 +56,12 @@ from ..identity import get_current_user
 from ..invalidation import touched_keys
 from ..locking import ARTIFACT_PREFIX, required_locks
 from ..settings import get_settings
+from ..view_ops import (
+    ViewBatchResult,
+    apply_view_ops_atomic,
+    rollback_view,
+    validate_view_ops,
+)
 from ..schemas import (
     ArtifactOpIn,
     CommitDiffOut,
@@ -307,10 +313,6 @@ def preview_commit(
             content={"detail": "stale base_rev", "model_rev": session.model_rev},
         )
     model_ops, artifact_ops, view_ops = split_ops(payload.ops)
-    if view_ops:  # TEMPORARY (plan Task 7): the view applier does not exist yet
-        raise HTTPException(
-            status_code=422, detail="view ops are not yet supported here"
-        )
     # Artifact ops are DB rows, not model content: there is nothing to apply
     # into the model and roll back, so they are checked DRY (422 on an invalid
     # payload / unknown id / name clash, 409 on a stale artifact_rev) and
@@ -318,6 +320,11 @@ def preview_commit(
     # nothing and the model is untouched by it.
     validate_artifact_ops(db, project_id, artifact_ops)
     with session.write_mutex:
+        # View ops are validated DRY against a deep copy (views are small):
+        # nothing to roll back, and sharing the real applier means preview and
+        # commit cannot disagree. Inside the mutex because a concurrent commit
+        # mutates session.view in place.
+        validate_view_ops(session.view, view_ops)
         # _apply_batch raises 422 on a mutation-boundary structural error
         # (unknown type, missing endpoint, unknown property) — the safety net.
         res = _apply_batch(model, model_ops, restore=False)
@@ -483,25 +490,36 @@ def create_commit(
        b. Apply the model ops (422 on mutation-boundary error from
           _apply_batch), then the artifact ops (staged on this request's DB
           transaction).
-       c. Hard-reject structural blockers (422; rolls back).
+       b3. Apply the view half (all-or-nothing via apply_view_ops_atomic) —
+          auto-creating an empty view for a project that never had one.
+       c. Hard-reject structural blockers (422; rolls back all three halves).
        d. Splice conformance issues into the issue store, bump rev, record batch.
-       e. Persist to the durable journal (500 + full rollback on failure).
+       e. Persist to the durable journal (500 + full rollback on failure); the
+          view blob (if touched) is staged on the SAME DB transaction as the
+          Commit row, so both land or neither does.
        f. Periodic snapshot (mirrors apply_ops to bound replay tail).
        g. Release the caller's locks (explicit loop).
        h. Broadcast commit delta + artifact + lock-release events (inside mutex
           for enqueue-order == rev-order guarantee; broadcast is non-blocking).
     4. Return CommitResponse with full delta + commit metadata.
 
-    Mixed-batch atomicity (Phase 1 artefacts revamp)
-    ------------------------------------------------
-    A batch can span both content families, and the two halves live in
-    different places: model ops mutate the in-memory model IN PLACE, artifact
-    ops stage row changes on this request's DB transaction. So every failure
-    path after an apply has to undo BOTH — ``_rollback(model,
+    Mixed-batch atomicity (Phase 1 artefacts revamp; view half added Phase 2)
+    ---------------------------------------------------------------------
+    A batch can span all three content families, and each lives in a
+    different place: model ops mutate the in-memory model IN PLACE, artifact
+    ops stage row changes on this request's DB transaction, and view ops
+    mutate ``session.view`` IN PLACE plus (once accepted) stage a blob row on
+    the same DB transaction as the artifact rows. So every failure path after
+    an apply has to undo however many halves are live — ``_rollback(model,
     res.inverse_units)`` + ``session.invalidate_derived_caches()`` for the
-    model half, ``db.rollback()`` for the artifact half. ``apply_artifact_ops``
+    model half, ``db.rollback()`` for the artifact half (and the staged view
+    row, once one exists), and ``rollback_view(session.view,
+    view_res.inverse_units)`` for the view half. ``apply_artifact_ops``
     deliberately has no internal rollback path (it only flushes), so that
-    ``db.rollback()`` is the ONLY thing that discards staged artifact rows.
+    ``db.rollback()`` is the ONLY thing that discards staged artifact rows;
+    ``apply_view_ops_atomic`` DOES roll its own prefix back on failure (see its
+    docstring), so a failure raised BY it never needs an explicit
+    ``rollback_view`` call — only failures raised AFTER it succeeded do.
     """
     _, model = require_model(session)
     if payload.base_rev > session.model_rev:
@@ -551,10 +569,6 @@ def create_commit(
                 session.model_rev, "conflicting concurrent commits"
             )
     model_ops, artifact_ops, view_ops = split_ops(payload.ops)
-    if view_ops:  # TEMPORARY (plan Task 7): the view applier does not exist yet
-        raise HTTPException(
-            status_code=422, detail="view ops are not yet supported here"
-        )
     state = _ensure_validation_seeded(session, model)
     if not payload.ops:
         # Empty batch: nothing to apply. Mirrors apply_ops' and revert's
@@ -626,6 +640,29 @@ def create_commit(
             session.invalidate_derived_caches()  # rolled back in place; A1/I1
             db.rollback()  # discard staged artifact rows
             raise
+        # b3. apply the view half to session.view IN PLACE, all-or-nothing
+        #     (auto-creating an empty view for a project that never had one —
+        #     the ops path must be self-sufficient once the legacy PUT
+        #     retires). Seeded with both prior id_maps so a placement may
+        #     reference an element or artifact created earlier in the SAME
+        #     batch.
+        view_res: ViewBatchResult | None = None
+        if view_ops:
+            if session.view is None:
+                session.view = View(name="view")
+            try:
+                view_res = apply_view_ops_atomic(
+                    session.view,
+                    view_ops,
+                    id_map={**res.id_map, **art_res.id_map},
+                    restore=False,
+                )
+            except Exception:
+                # mirror b2's stance: never leave the model half applied.
+                _rollback(model, res.inverse_units)
+                session.invalidate_derived_caches()
+                db.rollback()
+                raise
         # c. hard-reject structural blockers. Model content only: an artifact
         #    op's own validity was settled at apply time (b2), and an artifact
         #    row can never make the MODEL structurally invalid.
@@ -634,6 +671,9 @@ def create_commit(
         if structural:
             _rollback(model, res.inverse_units)
             session.invalidate_derived_caches()  # rolled back in place; A1/I1
+            if view_res is not None:
+                assert session.view is not None
+                rollback_view(session.view, view_res.inverse_units)
             db.rollback()  # discard staged artifact rows
             return JSONResponse(
                 status_code=422,
@@ -653,6 +693,9 @@ def create_commit(
         if session.strict_mode and conformance:
             _rollback(model, res.inverse_units)
             session.invalidate_derived_caches()  # rolled back in place; A1/I1
+            if view_res is not None:
+                assert session.view is not None
+                rollback_view(session.view, view_res.inverse_units)
             db.rollback()  # discard staged artifact rows
             return JSONResponse(
                 status_code=422,
@@ -671,12 +714,28 @@ def create_commit(
             session.evict_touched_caches(touched_keys(model, model.metamodel, res))
         else:
             session.invalidate_derived_caches()  # legacy clear-all
-        # ONE journal entry per commit, spanning both families: model ops
-        # first, then artifact ops (the families are independent, so relative
-        # cross-family order carries no meaning — see split_ops).
-        merged_id_map = {**res.id_map, **art_res.id_map}
-        canonical_ops: list[OpIn] = [*res.canonical_ops, *art_res.canonical_ops]
-        inverse_ops: list[OpIn] = [*res.inverse_ops(), *art_res.inverse_ops()]
+        # ONE journal entry per commit, spanning all three families: model
+        # ops first, then artifact ops, then view ops (the families are
+        # independent, so relative cross-family order carries no meaning —
+        # see split_ops). The view id_map is seeded with the model+artifact
+        # maps (see b3), so view_res.id_map is already a superset — merging
+        # it last is correct and the other two spreads are redundant but
+        # harmless, kept for symmetry with undo.
+        merged_id_map = {
+            **res.id_map,
+            **art_res.id_map,
+            **(view_res.id_map if view_res else {}),
+        }
+        canonical_ops: list[OpIn] = [
+            *res.canonical_ops,
+            *art_res.canonical_ops,
+            *(view_res.canonical_ops if view_res else []),
+        ]
+        inverse_ops: list[OpIn] = [
+            *res.inverse_ops(),
+            *art_res.inverse_ops(),
+            *(view_res.inverse_ops() if view_res else []),
+        ]
         session.record_batch(
             AppliedBatch(
                 ops=canonical_ops,
@@ -684,9 +743,22 @@ def create_commit(
                 id_map=merged_id_map,
             )
         )
-        # e. persist to the durable journal; mirror apply_ops 500 pattern exactly
+        # e. persist to the durable journal; mirror apply_ops 500 pattern
+        #    exactly. The view blob (if touched) is staged HERE, on the same
+        #    DB transaction _persist_commit's own db.commit() will flush —
+        #    so the view row and the Commit row land or roll back together.
         commit_id = uuid.uuid4().hex
         issues_json = [IssueOut.from_core(i).model_dump() for i in conformance]
+        new_view_rev: int | None = None
+        if view_res is not None and view_res.canonical_ops:
+            assert session.view is not None
+            view_row = content.upsert_single_view(
+                db,
+                project_id,
+                name=session.view.name,
+                blob=session.view.model_dump_json(),
+            )
+            new_view_rev = view_row.view_rev
         try:
             persisted = _persist_commit(
                 db,
@@ -705,12 +777,15 @@ def create_commit(
             _rollback(model, res.inverse_units)
             session.model_rev -= 1
             session.invalidate_derived_caches()  # rolled back in place; A1/I1
+            if view_res is not None:
+                assert session.view is not None
+                rollback_view(session.view, view_res.inverse_units)
             session.op_log.pop()
-            db.rollback()  # also discards the staged artifact rows
+            db.rollback()  # also discards the staged artifact + view rows
             raise HTTPException(
                 status_code=500, detail="failed to persist commit"
             ) from exc
-        if artifact_ops and not persisted:
+        if (artifact_ops or view_ops) and not persisted:
             # No durable model row (in-memory-only legacy project), so
             # _persist_commit skipped its db.commit() — but artifact rows are
             # real DB state that must not silently vanish when the request
@@ -754,11 +829,12 @@ def create_commit(
             RelationshipOut.from_core(model.relationships[rid]).model_dump()
             for rid in res.changed_relationship_ids
         ]
-        # an empty batch touched neither family; report it as "model" so the
-        # scope list is never empty and peers keep their existing behaviour.
+        # an empty batch touched no family; report it as "model" so the scope
+        # list is never empty and peers keep their existing behaviour.
         scope = sorted(
             ({"model"} if model_ops else set())
             | ({"artifact"} if artifact_ops else set())
+            | ({"view"} if view_ops else set())
         ) or ["model"]
         session.hub.broadcast(
             commit_event(
@@ -811,6 +887,7 @@ def create_commit(
         validation_error_count=len(conformance),
         changed_artifacts=changed_artifact_headers,
         deleted_artifact_ids=[d["id"] for d in art_res.deleted],
+        view_rev=new_view_rev,
     )
 
 

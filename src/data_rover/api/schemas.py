@@ -778,6 +778,9 @@ class CommitResponse(OpsResponse):
     #: being required: every pre-artifact client keeps parsing the response.
     changed_artifacts: list[ArtifactHeaderOut] = Field(default_factory=list)
     deleted_artifact_ids: list[str] = Field(default_factory=list)
+    #: post-commit ViewRow.view_rev; None when the batch touched no view
+    #: content (Phase 2). Secondary/informational — see ViewRow.view_rev.
+    view_rev: int | None = None
 
 
 # ---------------------------------------------------------------------------
