@@ -240,14 +240,11 @@ export {
 	cloneView,
 	discardViewChanges,
 	getView,
-	getViewChanges,
-	getViewChangesCount,
 	getViewWarnings,
 	isViewResolved,
 	markViewUnresolved,
 	refreshView,
 	scrubArtifactFromView,
-	setViewBaseline,
 	stageClearView,
 	stageCreateFolder,
 	stageDeleteFolder,
@@ -260,7 +257,6 @@ export {
 	stageRenameFolder
 } from './view.svelte';
 export { isProjectOpening, setProjectOpening } from './project-open.svelte';
-export type { ViewChange } from './view-diff';
 export {
 	artifactHeaderById,
 	assertNoNameClash,
@@ -391,12 +387,6 @@ export {
 	clearAccessNotice,
 	reactToBootError
 } from './access-notice.svelte';
-export {
-	formatViewChange,
-	viewChangeSegments,
-	type ViewChangeSegment,
-	type ViewChangeSegmentKind
-} from './view-change-format';
 export {
 	startProgress,
 	updateProgress,

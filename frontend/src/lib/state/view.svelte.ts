@@ -27,14 +27,12 @@ import type { ArtifactRef, Folder, Issue, View } from '$lib/api/types';
 import {
 	applyViewOp,
 	artifactPlacementFolderIds,
-	cloneView,
 	elementHomeFolderId,
 	findFolderById,
 	findFolderContainer,
 	folderSubtreeIds,
 	isFolderIdAncestor
 } from './view-ops';
-import { diffViews, type ViewChange } from './view-diff';
 import { createTempId, VIEW_ROOT_ID, type ViewOp } from './ops';
 import { folderCreateLock, folderDeleteLock, folderEditLock } from './edit-gate';
 import { releaseFolderLeaseIfUnneeded } from './checkout.svelte';
@@ -53,11 +51,6 @@ export { cloneView } from './view-ops';
 
 let _view: View | null = $state(null);
 let _warnings: Issue[] = $state([]);
-// Deep clone of the view as last LOADED or SAVED. The view-change count and the
-// Save dialog's View tab diff `_view` against this. Set only at load/save
-// points (never on a mid-session edit), so edits accumulate against it.
-// KEPT for now (retired in Task 8 with the DiffDrawer/TopBar switch).
-let _baseline: View | null = $state(null);
 
 /**
  * Whether the active project's view question has been ANSWERED this session
@@ -91,27 +84,7 @@ function setState(view: View | null, warnings: Issue[]): void {
 
 export function clearViewState(): void {
 	setState(null, []);
-	_baseline = null;
 	resetViewEdits();
-}
-
-/**
- * Capture the current view as the saved/loaded baseline (deep clone). Call this
- * at load points (boot, reload, Load-files dialog) and after a
- * successful view file save, so the view-change count resets to 0 there.
- */
-export function setViewBaseline(view: View | null): void {
-	_baseline = view === null ? null : cloneView(view);
-}
-
-/** Structured diff of the live view against the saved/loaded baseline. */
-export function getViewChanges(): ViewChange[] {
-	return diffViews(_baseline, _view);
-}
-
-/** Number of view changes since load/save (drives the TopBar `View: y`). */
-export function getViewChangesCount(): number {
-	return getViewChanges().length;
 }
 
 /** Load the active view from the backend (e.g. on app boot, or as the
@@ -121,10 +94,8 @@ export async function refreshView(): Promise<void> {
 	try {
 		const res = await viewApi.getView();
 		setState(res.view, res.warnings);
-		setViewBaseline(res.view);
 	} catch {
 		setState(null, []);
-		_baseline = null;
 	} finally {
 		_viewResolved = true;
 	}

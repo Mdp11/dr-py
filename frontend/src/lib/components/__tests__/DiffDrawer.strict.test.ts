@@ -33,14 +33,13 @@ vi.mock('$lib/state', async (orig) => {
 		getIssues: vi.fn(() => []),
 		indexIssues: vi.fn(() => ({ byEntity: new Map(), all: [] })),
 		getView: vi.fn(() => null),
-		getViewChanges: vi.fn(() => []),
 		getViewFileHandle: vi.fn(() => null),
 		getViewFilename: vi.fn(() => null),
 		setViewFileHandle: vi.fn(),
 		setViewFilename: vi.fn(),
-		setViewBaseline: vi.fn(),
-		getCachedElements: vi.fn(() => new Map()),
-		viewChangeSegments: vi.fn(() => [])
+		getStagedViewEntries: vi.fn(() => []),
+		getStagedViewDepth: vi.fn(() => 0),
+		discardViewChanges: vi.fn(async () => {})
 	};
 });
 

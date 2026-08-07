@@ -11,7 +11,7 @@
 		if (view === null) return;
 		const ok = await confirm({
 			title: 'Clear view',
-			description: `Clear "${view.name}"? Folder structure is forgotten until reloaded.`,
+			description: `Stage removal of every folder in "${view.name}"? The change lands on your next commit.`,
 			confirmLabel: 'Clear',
 			variant: 'destructive'
 		});

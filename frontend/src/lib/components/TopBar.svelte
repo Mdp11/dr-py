@@ -20,8 +20,8 @@
 		getStagedArtifactDepth,
 		getStagedChangeCount,
 		getStagedDepth,
+		getStagedViewDepth,
 		getStrictMode,
-		getViewChangesCount,
 		isRunning,
 		popLastStaged,
 		refreshSummary,
@@ -54,7 +54,9 @@
 	// artifacts have no representation in that diff. Composing across stores at
 	// the call site is the pattern this bar already uses for `viewChanges`.
 	const artifactChanges = $derived(getStagedArtifactDepth());
-	const viewChanges = $derived(getViewChangesCount());
+	// Journal depth (staged view-op count), not a baseline diff — see
+	// view-edits.svelte.ts. Mirrors the DiffDrawer's own switch to the journal.
+	const viewChanges = $derived(getStagedViewDepth());
 	const combinedChanges = $derived(totalChanges + artifactChanges + viewChanges);
 	// Enabled when the model, an artifact, OR the view has uncommitted/unsaved
 	// changes — an artifact-only batch must reach the commit drawer from here,
