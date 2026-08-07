@@ -153,6 +153,33 @@ describe('DiffDrawer view changes', () => {
 		unmount(c);
 	});
 
+	// Regression: the Model tab is the default/active tab on open, and its
+	// four content sections (added/modified/deleted/artifacts) are all empty
+	// for a view-only batch — a naive `total === 0` fallback check leaves the
+	// pane fully blank even though the tab label and Commit button both show
+	// a nonzero count. A pointer message must render instead.
+	it('shows a pointer to the View tab on the Model tab for a view-only batch, and keeps Commit enabled', async () => {
+		viewEntries = [
+			{ op: { kind: 'delete_folder', id: 'f1' }, label: 'Deleted folder "Pumps"' },
+			{
+				op: { kind: 'rename_folder', id: 'f2', name: 'Valves' },
+				label: 'Renamed folder "Old" → "Valves"'
+			}
+		];
+
+		const c = await openDrawer();
+
+		// Collapse whitespace (the markup wraps mid-sentence) so the assertion
+		// isn't sensitive to exactly where Prettier breaks the template's lines.
+		const text = (document.body.textContent ?? '').replace(/\s+/g, ' ');
+		expect(text).not.toMatch(/No pending changes/i);
+		expect(text).toMatch(/2 staged view changes — see the View tab\./i);
+		expect(buttonMatching(/^\s*Commit/)!.disabled).toBe(false);
+		expect(buttonMatching(/^\s*Commit/)!.textContent?.trim()).toBe('Commit (2)');
+
+		unmount(c);
+	});
+
 	it('calls discardViewChanges exactly once from the single discard button', async () => {
 		viewEntries = [{ op: { kind: 'delete_folder', id: 'f1' }, label: 'Deleted folder "Pumps"' }];
 

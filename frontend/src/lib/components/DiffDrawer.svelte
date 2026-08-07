@@ -328,6 +328,16 @@
 						<p class="text-xs text-muted-foreground/70">Loading changes…</p>
 					{:else if total === 0}
 						<p class="text-xs text-muted-foreground/70">No pending changes.</p>
+					{:else if addedCount === 0 && modifiedCount === 0 && deletedCount === 0 && artifactCount === 0}
+						<!-- Unlike an artifact-only batch (whose Artifacts section renders
+						     right here), a view-only batch has nothing to show on THIS tab —
+						     the journal only renders on the View tab. Without this branch
+						     the pane would sit fully blank while the tab label and the
+						     Commit button both show a nonzero count. -->
+						<p class="text-xs text-muted-foreground/70">
+							{viewEntries.length} staged view change{viewEntries.length === 1 ? '' : 's'} — see the View
+							tab.
+						</p>
 					{/if}
 
 					{#if addedCount > 0}
