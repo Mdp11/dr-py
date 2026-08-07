@@ -80,7 +80,7 @@ def snapshot_view(
         )
         db.commit()
         view_rev = view_row.view_rev
-    known = {row.id for row in content.list_artifacts(db, project_id)}
+    known = content.list_artifact_ids(db, project_id)
     warnings = [
         IssueOut.from_core(i)
         for i in validate_view(view, model, known_artifact_ids=known)
@@ -102,7 +102,7 @@ def get_view(
     if view is None:
         return ViewStateResponse(view=None, warnings=[], view_rev=view_rev)
     _, model = require_model(session)
-    known = {row.id for row in content.list_artifacts(db, project_id)}
+    known = content.list_artifact_ids(db, project_id)
     warnings = [
         IssueOut.from_core(i)
         for i in validate_view(view, model, known_artifact_ids=known)
