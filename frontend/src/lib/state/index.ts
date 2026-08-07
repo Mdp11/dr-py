@@ -186,6 +186,7 @@ export {
 	discardAll,
 	reacquireOpenArtifactLeases,
 	releaseArtifactIfUnneeded,
+	releaseFolderLeaseIfUnneeded,
 	type CheckoutResult,
 	type LockConflictLite
 } from './checkout.svelte';

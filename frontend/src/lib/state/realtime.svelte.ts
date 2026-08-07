@@ -19,7 +19,7 @@ import {
 import { getActiveProjectId } from '$lib/state/active-project.svelte';
 import { applyDelta, getIssueCounts, getModelRev, refreshSummary } from './model.svelte';
 import { handleArtifactFeedEvent } from './artifacts.svelte';
-import { isArtifactResource } from './ops';
+import { isArtifactResource, isFolderResource } from './ops';
 import type { OpsResponse } from '$lib/api/types';
 
 let _connected = $state(false);
@@ -75,7 +75,8 @@ export function getLockState(): SvelteMap<string, LeaseLite> {
 
 /**
  * True while ANY project-wide lease covers a MODEL-scope resource (elements,
- * relationships, `mm`) — i.e. `getLockState()` minus the `art:` namespace.
+ * relationships, `mm`) — i.e. `getLockState()` minus the `art:` AND
+ * `folder:` namespaces.
  *
  * The distinction is load-bearing, not cosmetic. `getLockState()` is the whole
  * project's lease table, and since artifact editing moved onto the
@@ -84,15 +85,19 @@ export function getLockState(): SvelteMap<string, LeaseLite> {
  * model-scope operation on the raw map size would let one user's open editor
  * tab disable that operation for EVERYONE for the full lock TTL. Model revert
  * and metamodel rebind are model-scope by construction — the backend's
- * `/commits/revert` 409s on any range containing artifact ops anyway — so an
- * `art:` lease is orthogonal to them and must not count.
+ * `/commits/revert` 409s on any range containing artifact OR view ops anyway
+ * — so an `art:`/`folder:` lease is orthogonal to them and must not count.
+ * A `folder:` lease is VIEW-scope for the identical reason `art:` is
+ * artifact-scope: every sidebar drag/rename/create-child gesture takes one,
+ * so counting it would let one user's sidebar drag disable model revert for
+ * everyone.
  *
  * Reactive: iterating a `SvelteMap`'s keys subscribes to it, so a `$derived`
  * reading this re-runs on every lock feed event.
  */
 export function hasModelLocks(): boolean {
 	for (const rid of _lockState.keys()) {
-		if (!isArtifactResource(rid)) return true;
+		if (!isArtifactResource(rid) && !isFolderResource(rid)) return true;
 	}
 	return false;
 }
