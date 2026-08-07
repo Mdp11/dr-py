@@ -18,7 +18,7 @@ describe('in-folder order follows folder.elements (no name-sort)', () => {
 	it('keeps placement order even when names sort the other way', () => {
 		const view: View = {
 			name: 'v',
-			folders: [{ name: 'F', folders: [], elements: ['z', 'a'], artifacts: [] }],
+			folders: [{ id: 'F', name: 'F', folders: [], elements: ['z', 'a'], artifacts: [] }],
 			artifacts: []
 		};
 		const byId = new Map([
@@ -34,7 +34,7 @@ describe('flattenVisibleRows', () => {
 	it('emits a depth-carrying pre-order walk, skipping hidden and not descending stubs/collapsed', () => {
 		const view: View = {
 			name: 'v',
-			folders: [{ name: 'F', folders: [], elements: ['a'], artifacts: [] }],
+			folders: [{ id: 'F', name: 'F', folders: [], elements: ['a'], artifacts: [] }],
 			artifacts: []
 		};
 		const byId = new Map([['a', el('a')]]);
@@ -51,7 +51,7 @@ describe('flattenVisibleRows', () => {
 	it('does not descend into a collapsed folder', () => {
 		const view: View = {
 			name: 'v',
-			folders: [{ name: 'F', folders: [], elements: ['a'], artifacts: [] }],
+			folders: [{ id: 'F', name: 'F', folders: [], elements: ['a'], artifacts: [] }],
 			artifacts: []
 		};
 		const byId = new Map([['a', el('a')]]);
@@ -69,7 +69,7 @@ describe('computeVisibility treats unloaded element bodies as tentatively visibl
 		// the windowed body fetch can hydrate it in place (was: dropped -> stub).
 		const view: View = {
 			name: 'v',
-			folders: [{ name: 'F', folders: [], elements: ['pending'], artifacts: [] }],
+			folders: [{ id: 'F', name: 'F', folders: [], elements: ['pending'], artifacts: [] }],
 			artifacts: []
 		};
 		const byId = new Map<string, Element>();
@@ -83,7 +83,7 @@ describe('computeVisibility treats unloaded element bodies as tentatively visibl
 	it('collapses to a stub once the only placed id is confirmed missing', () => {
 		const view: View = {
 			name: 'v',
-			folders: [{ name: 'F', folders: [], elements: ['ghost'], artifacts: [] }],
+			folders: [{ id: 'F', name: 'F', folders: [], elements: ['ghost'], artifacts: [] }],
 			artifacts: []
 		};
 		const byId = new Map<string, Element>();
@@ -105,7 +105,7 @@ describe('registerExcludedRoots', () => {
 	it('exposes the excluded ids as a separate root region, registering unloaded ids as element nodes', () => {
 		const view: View = {
 			name: 'v',
-			folders: [{ name: 'F', folders: [], elements: ['placed'], artifacts: [] }],
+			folders: [{ id: 'F', name: 'F', folders: [], elements: ['placed'], artifacts: [] }],
 			artifacts: []
 		};
 		const byId = new Map([['placed', el('placed')]]); // excluded ids NOT loaded yet
@@ -121,7 +121,7 @@ describe('registerExcludedRoots', () => {
 	it('drops an id already placed in a folder (defensive complement)', () => {
 		const view: View = {
 			name: 'v',
-			folders: [{ name: 'F', folders: [], elements: ['placed'], artifacts: [] }],
+			folders: [{ id: 'F', name: 'F', folders: [], elements: ['placed'], artifacts: [] }],
 			artifacts: []
 		};
 		const byId = new Map([['placed', el('placed')]]);

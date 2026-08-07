@@ -8,6 +8,7 @@ import type { ArtifactRef, Folder, View } from '$lib/api/types';
 
 export function cloneFolder(f: Folder): Folder {
 	return {
+		id: f.id,
 		name: f.name,
 		folders: f.folders.map(cloneFolder),
 		elements: [...f.elements],
@@ -35,7 +36,7 @@ export function cloneView(v: View): View {
 export function findFolderByPath(view: View, path: string[]): Folder | null {
 	if (path.length === 0) {
 		// virtual root — we wrap it inline; mutate via separate branch
-		return { name: '', folders: view.folders, elements: [], artifacts: [] };
+		return { id: '', name: '', folders: view.folders, elements: [], artifacts: [] };
 	}
 	let folders = view.folders;
 	let found: Folder | null = null;

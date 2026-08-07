@@ -102,6 +102,7 @@ describe('TreeRow — dangling artifact refs', () => {
 			name: 'v',
 			folders: [
 				{
+					id: 'F',
 					name: 'F',
 					folders: [],
 					elements: [],

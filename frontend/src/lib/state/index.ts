@@ -1,16 +1,21 @@
 export {
 	ARTIFACT_RESOURCE_PREFIX,
+	FOLDER_RESOURCE_PREFIX,
 	TEMP_ID_PREFIX,
+	VIEW_ROOT_ID,
 	artifactResource,
 	createTempId,
+	folderResource,
 	isArtifactResource,
+	isFolderResource,
 	isTempId,
 	type ArtifactOp,
 	type ElementOp,
 	type ModelOp,
 	type Op,
 	type RelationshipOp,
-	type Snapshot
+	type Snapshot,
+	type ViewOp
 } from './ops';
 export { mergePatch } from './apply';
 export { computeDiff, deepEqual, type Diff, type EntityDiff, type EntityStatus } from './diff';

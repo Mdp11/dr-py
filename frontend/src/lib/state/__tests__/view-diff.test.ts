@@ -4,6 +4,7 @@ import type { View } from '$lib/api/types';
 
 const v = (folders: View['folders']): View => ({ name: 'V', folders, artifacts: [] });
 const f = (name: string, elements: string[] = [], folders: View['folders'] = []) => ({
+	id: name,
 	name,
 	elements,
 	folders,

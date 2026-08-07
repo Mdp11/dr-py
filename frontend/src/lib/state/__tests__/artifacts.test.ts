@@ -79,9 +79,16 @@ function viewPlacing(id: string): View {
 		name: 'v',
 		folders: [
 			{
+				id: 'F',
 				name: 'F',
 				folders: [
-					{ name: 'G', folders: [], elements: [], artifacts: [{ id, kind: 'navigation' }] }
+					{
+						id: 'G',
+						name: 'G',
+						folders: [],
+						elements: [],
+						artifacts: [{ id, kind: 'navigation' }]
+					}
 				],
 				elements: [],
 				artifacts: [{ id, kind: 'navigation' }]

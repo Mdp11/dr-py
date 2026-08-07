@@ -127,6 +127,9 @@ export interface ArtifactRef {
 }
 
 export interface Folder {
+	/** Stable uuid4-hex id, healed server-side on every read (Phase 2). Locally
+	 * staged folders carry a `tmp_` id until their commit's id_map lands. */
+	id: string;
 	name: string;
 	folders: Folder[];
 	elements: string[];
@@ -135,6 +138,7 @@ export interface Folder {
 
 export const FolderSchema: z.ZodType<Folder> = z.lazy(() =>
 	z.object({
+		id: z.string(),
 		name: z.string(),
 		folders: z.array(FolderSchema).default([]),
 		elements: z.array(z.string()).default([]),
@@ -219,9 +223,9 @@ export const LockTargetInSchema = z.object({
 	resource_id: z.string(),
 	mode: z.enum(['exclusive', 'shared']),
 	// what the id names; the backend canonicalizes ("artifact" -> "art:<id>",
-	// "metamodel" -> "mm"). Optional: absent means "element", so every
-	// pre-existing element call site is untouched.
-	type: z.enum(['element', 'artifact', 'metamodel']).optional()
+	// "metamodel" -> "mm", "folder" -> "folder:<id>"). Optional: absent means
+	// "element", so every pre-existing element call site is untouched.
+	type: z.enum(['element', 'artifact', 'metamodel', 'folder']).optional()
 });
 export type LockTargetIn = z.infer<typeof LockTargetInSchema>;
 

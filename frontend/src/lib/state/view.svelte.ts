@@ -12,6 +12,7 @@ import {
 	viewHasArtifactPlacement
 } from './view-ops';
 import { diffViews, type ViewChange } from './view-diff';
+import { createTempId } from './ops';
 
 export { cloneView } from './view-ops';
 
@@ -125,7 +126,10 @@ export async function createFolder(parentPath: string[], name: string): Promise<
 	if (collection.some((f) => f.name === name)) {
 		throw new Error(`Folder "${name}" already exists at this level`);
 	}
-	collection.push({ name, folders: [], elements: [], artifacts: [] });
+	// Legacy PUT /view/snapshot path (superseded by view.* ops in a later task):
+	// a locally-minted id is a placeholder — the server heals folder ids on
+	// write, so the next load/refresh replaces it with the durable one.
+	collection.push({ id: createTempId(), name, folders: [], elements: [], artifacts: [] });
 	await pushView(next);
 }
 

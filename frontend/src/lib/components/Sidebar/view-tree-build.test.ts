@@ -14,7 +14,7 @@ describe('buildUnifiedTree — curated scope', () => {
 	it('with a view, top-level roots are folders only (no unplaced roots)', () => {
 		const view: View = {
 			name: 'v',
-			folders: [{ name: 'F', folders: [], elements: ['a'], artifacts: [] }],
+			folders: [{ id: 'F', name: 'F', folders: [], elements: ['a'], artifacts: [] }],
 			artifacts: []
 		};
 		const tree = buildUnifiedTree(
@@ -40,7 +40,7 @@ describe('buildUnifiedTree — curated scope', () => {
 		// in placement order from the first build so bodies fill in place.
 		const view: View = {
 			name: 'v',
-			folders: [{ name: 'F', folders: [], elements: ['c', 'a', 'b'], artifacts: [] }],
+			folders: [{ id: 'F', name: 'F', folders: [], elements: ['c', 'a', 'b'], artifacts: [] }],
 			artifacts: []
 		};
 		const tree = buildUnifiedTree(
@@ -58,7 +58,7 @@ describe('buildUnifiedTree — curated scope', () => {
 	it('drops a placed id the server has confirmed missing (not merely unfetched)', () => {
 		const view: View = {
 			name: 'v',
-			folders: [{ name: 'F', folders: [], elements: ['a', 'gone', 'b'], artifacts: [] }],
+			folders: [{ id: 'F', name: 'F', folders: [], elements: ['a', 'gone', 'b'], artifacts: [] }],
 			artifacts: []
 		};
 		const tree = buildUnifiedTree(
@@ -92,7 +92,7 @@ describe('buildUnifiedTree — curated scope', () => {
 		const ref = { id: 'a1', kind: 'navigation' };
 		const view: View = {
 			name: 'v',
-			folders: [{ name: 'F', folders: [], elements: [], artifacts: [ref] }],
+			folders: [{ id: 'F', name: 'F', folders: [], elements: [], artifacts: [ref] }],
 			artifacts: []
 		};
 		const tree = buildUnifiedTree(view, [], new Map(), new Map(), new Set(), displayName);
@@ -106,7 +106,7 @@ describe('buildUnifiedTree — curated scope', () => {
 		const ref = { id: 'tbl1', kind: 'table' };
 		const view: View = {
 			name: 'v',
-			folders: [{ name: 'F', folders: [], elements: [], artifacts: [] }],
+			folders: [{ id: 'F', name: 'F', folders: [], elements: [], artifacts: [] }],
 			artifacts: [ref]
 		};
 		const tree = buildUnifiedTree(view, [], new Map(), new Map(), new Set(), displayName);

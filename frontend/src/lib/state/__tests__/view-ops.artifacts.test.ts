@@ -14,8 +14,9 @@ function view(): View {
 		name: 'v',
 		folders: [
 			{
+				id: 'F',
 				name: 'F',
-				folders: [{ name: 'G', folders: [], elements: [], artifacts: [] }],
+				folders: [{ id: 'G', name: 'G', folders: [], elements: [], artifacts: [] }],
 				elements: [],
 				artifacts: []
 			}
