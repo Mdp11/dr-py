@@ -64,7 +64,12 @@
 	 * has no ordinary Save-as) but keeps them VISIBLE — paired with the banner,
 	 * that is what explains why. It ALSO gates the editing surface: the
 	 * CodeMirror host below is wrapped in `inert={locked}` (see the markup), so
-	 * a denied tab cannot accumulate edits it will never be able to commit. */
+	 * a denied tab cannot accumulate edits it will never be able to commit. One
+	 * more code-mutating control lives OUTSIDE that host and needs its own
+	 * `disabled={locked}` because of it — the entry-hint bar's "Insert stub"
+	 * button, which is chrome sitting above the editor, not editor content, and
+	 * stays visible (and readable) while denied so the hint itself is still
+	 * useful; only the click is blocked. */
 	const locked = $derived(lockHolder !== null);
 	const vocab = $derived(vocabFromMetamodel(getMetamodel()));
 
@@ -245,10 +250,18 @@
 				class="flex items-center gap-2 bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground"
 			>
 				<span>{ENTRY_HINTS[run.entry as BoundEntry]}</span>
+				<!-- The hint stays VISIBLE on a denied tab (it's informational — a
+				     holder-locked user can still learn what shape is missing), but
+				     "Insert stub" is a code MUTATION and lives outside the
+				     `snippet-code-host` `inert` wrapper (it has to — it's chrome, not
+				     editor content), so it needs its own `disabled={locked}` guard or
+				     it would be the one click that reopens the exact gap this task
+				     closed. -->
 				<button
 					type="button"
 					data-testid="snippet-insert-stub"
-					class="shrink-0 rounded border border-input px-2 py-0.5 text-foreground/80 transition-colors hover:bg-muted"
+					class="shrink-0 rounded border border-input px-2 py-0.5 text-foreground/80 transition-colors hover:bg-muted disabled:opacity-40"
+					disabled={locked}
 					onclick={() =>
 						draft && updateSnippetCode(tabId, withStub(draft.code, run.entry as BoundEntry))}
 				>

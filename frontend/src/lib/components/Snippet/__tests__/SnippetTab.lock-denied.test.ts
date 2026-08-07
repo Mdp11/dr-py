@@ -16,6 +16,7 @@
 // same as every other snippet-editor.svelte.ts test.
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as snippetsApi from '$lib/api/snippets';
 import {
 	ensureSnippetDraft,
 	getDynamicTabs,
@@ -23,6 +24,7 @@ import {
 	openArtifactTab,
 	resetSnippetEditors,
 	resetWorkspaceTabs,
+	setSnippetEntry,
 	setSnippetLockDenied
 } from '$lib/state';
 import SnippetTab from '../SnippetTab.svelte';
@@ -98,11 +100,51 @@ describe('SnippetTab lock-denied', () => {
 			expect(forkTab).toBeDefined();
 			expect(forkTab!.id).not.toBe(tabId);
 
-			// The source tab is untouched: still on screen, still denied.
-			expect(document.body.contains(document.querySelector('[data-testid="snippet-editor"]'))).toBe(
-				true
-			);
+			// The source tab is untouched: still bound the same way it was before
+			// the fork (a real mutation would have re-keyed or unbound it — see
+			// `saveAsDraft`'s contrasting behavior, which this deliberately does not
+			// mirror).
 			expect(getSnippetDraft(tabId)?.artifactId).toBeNull();
+		} finally {
+			unmount(c);
+		}
+	});
+
+	// Critical fix (post-review): the entry-hint bar's "Insert stub" button is a
+	// code-mutating control that lives OUTSIDE `snippet-code-host` (it's chrome
+	// above the editor, not editor content), so the host's `inert` never reached
+	// it — a denied tab in `value`/`step` mode with a missing entry point could
+	// still click it and dirty the code, the exact gap this task closes.
+	it("disables the entry-hint bar's Insert stub while denied, and a click leaves the draft untouched", async () => {
+		const lint = vi
+			.spyOn(snippetsApi, 'lintSnippet')
+			.mockResolvedValue({ diagnostics: [], entry_points: ['script'] }); // no 'value' — the hint fires
+		const tabId = openArtifactTab('snippet', { artifactId: null, title: 'New snippet' });
+		await ensureSnippetDraft(tabId); // fires an immediate lintNow — await it below
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(lint).toHaveBeenCalled();
+		setSnippetEntry(tabId, 'value');
+		setSnippetLockDenied(tabId, 'peer@x');
+
+		const c = render(tabId);
+		try {
+			// The hint itself stays visible/readable while denied — only the
+			// mutating control is gated.
+			expect(document.querySelector('[data-testid="snippet-entry-hint"]')).not.toBeNull();
+			const btn = document.querySelector(
+				'[data-testid="snippet-insert-stub"]'
+			) as HTMLButtonElement;
+			expect(btn).not.toBeNull();
+			expect(btn.disabled).toBe(true);
+
+			const before = getSnippetDraft(tabId);
+			btn.click();
+			flushSync();
+
+			const after = getSnippetDraft(tabId);
+			expect(after?.code).toBe(before?.code);
+			expect(after?.dirty).toBe(false);
 		} finally {
 			unmount(c);
 		}

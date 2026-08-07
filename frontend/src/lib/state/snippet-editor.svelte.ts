@@ -78,9 +78,12 @@ const _drafts = new SvelteMap<string, SnippetDraft>();
  * tab has no ordinary Save-as), the CodeMirror document goes `inert`, and the
  * banner offers Retry plus "Save as copy" (`forkSnippetDraftAsCopy`) — see
  * `navigation-editor.svelte.ts`'s `ensureDraft` docstring for the canonical
- * statement of what a denial gates. Absent for a VIEWER too — the whole
- * workspace is already read-only for them, so a per-tab "checked out by…"
- * line would be noise.
+ * statement of what a denial gates. The entry-hint bar's "Insert stub" button
+ * is a second, separate code-mutating control — it sits above the editor as
+ * chrome, not inside the `inert` CodeMirror host, so SnippetTab disables it
+ * on `locked` explicitly rather than relying on the host's `inert` to catch
+ * it too. Absent for a VIEWER too — the whole workspace is already read-only
+ * for them, so a per-tab "checked out by…" line would be noise.
  */
 const _lockDenied = new SvelteMap<string, string>();
 
