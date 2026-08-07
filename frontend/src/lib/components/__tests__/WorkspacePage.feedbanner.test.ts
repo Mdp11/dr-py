@@ -23,8 +23,9 @@ vi.mock('$lib/state/realtime.svelte', async (orig) => {
 	};
 });
 
-// Stub @tanstack/svelte-query so child components (e.g. LoadFilesDialog via
-// TopBar) don't require a QueryClientProvider in the test context.
+// Stub @tanstack/svelte-query so any child component that reaches for it
+// doesn't require a QueryClientProvider in the test context (harmless to
+// keep even now that nothing under TopBar uses it directly).
 vi.mock('@tanstack/svelte-query', () => ({
 	createMutation: () => ({
 		state: { status: 'idle', data: undefined, error: null },

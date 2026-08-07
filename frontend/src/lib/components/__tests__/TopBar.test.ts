@@ -7,7 +7,6 @@ import { getPendingConfirm, resetConfirm } from '$lib/state/confirm.svelte';
 // Provide a minimal no-op stub for each dialog/drawer child of TopBar so we
 // don't need QueryClientProvider or other heavy contexts.
 vi.mock('../ApplyCrDialog.svelte', () => ({ default: () => {} }));
-vi.mock('../LoadFilesDialog.svelte', () => ({ default: () => {} }));
 vi.mock('../SwapMetamodelDrawer.svelte', () => ({ default: () => {} }));
 vi.mock('../SettingsDialog.svelte', () => ({ default: () => {} }));
 
