@@ -216,12 +216,21 @@ describe('releaseFolderLeaseIfUnneeded', () => {
 
 describe('lockedResourcesNeededBy covers the view op family', () => {
 	const cases: [string, ViewOp][] = [
-		['create_folder names its parent', { kind: 'create_folder', temp_id: 'tmp_f2', parent_id: 'f1', name: 'x' }],
+		[
+			'create_folder names its parent',
+			{ kind: 'create_folder', temp_id: 'tmp_f2', parent_id: 'f1', name: 'x' }
+		],
 		['rename_folder names itself', { kind: 'rename_folder', id: 'f1', name: 'x' }],
 		['delete_folder names itself', { kind: 'delete_folder', id: 'f1' }],
 		['move_folder names its destination', { kind: 'move_folder', id: 'f9', to_parent_id: 'f1' }],
-		['place_element names its folder', { kind: 'place_element', element_id: 'e1', folder_id: 'f1' }],
-		['remove_element names its folder', { kind: 'remove_element', element_id: 'e1', folder_id: 'f1' }],
+		[
+			'place_element names its folder',
+			{ kind: 'place_element', element_id: 'e1', folder_id: 'f1' }
+		],
+		[
+			'remove_element names its folder',
+			{ kind: 'remove_element', element_id: 'e1', folder_id: 'f1' }
+		],
 		[
 			'move_element names its destination folder',
 			{ kind: 'move_element', element_id: 'e1', from_folder_id: 'f9', to_folder_id: 'f1' }
@@ -230,7 +239,10 @@ describe('lockedResourcesNeededBy covers the view op family', () => {
 			'place_artifact names its folder',
 			{ kind: 'place_artifact', artifact_id: 'a1', artifact_kind: 'table', folder_id: 'f1' }
 		],
-		['remove_artifact names its folder', { kind: 'remove_artifact', artifact_id: 'a1', folder_id: 'f1' }],
+		[
+			'remove_artifact names its folder',
+			{ kind: 'remove_artifact', artifact_id: 'a1', folder_id: 'f1' }
+		],
 		[
 			'move_artifact names its destination folder',
 			{ kind: 'move_artifact', artifact_id: 'a1', from_folder_id: 'f9', to_folder_id: 'f1' }

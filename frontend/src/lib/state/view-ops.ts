@@ -148,7 +148,10 @@ export function artifactPlacementFolderIds(view: View, artifactId: string): stri
  * `VIEW_ROOT_ID` resolving to the view's own root lists — the client twin of
  * `api/view_ops.py`'s `_container`. Throws (mirroring the backend's 422)
  * when the id names no live folder. */
-function containerOf(next: View, folderId: string): { folders: Folder[]; artifacts: ArtifactRef[] } {
+function containerOf(
+	next: View,
+	folderId: string
+): { folders: Folder[]; artifacts: ArtifactRef[] } {
 	if (folderId === VIEW_ROOT_ID) return { folders: next.folders, artifacts: next.artifacts };
 	const f = findFolderById(next, folderId);
 	if (f === null) throw new Error(`Folder not found: ${folderId}`);
@@ -342,11 +345,3 @@ export function applyViewOp(view: View, op: ViewOp): View {
 	}
 	return next;
 }
-
-
-
-
-
-
-
-

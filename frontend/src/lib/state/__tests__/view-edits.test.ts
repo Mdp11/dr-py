@@ -15,11 +15,19 @@ beforeEach(() => resetViewEdits());
 
 describe('staged view journal', () => {
 	it('preserves insertion order — view ops are order-dependent', () => {
-		stageViewOp({ kind: 'create_folder', temp_id: 'tmp_a', parent_id: 'root', name: 'N' }, 'Created folder "N"');
-		stageViewOp({ kind: 'place_element', element_id: 'e1', folder_id: 'tmp_a' }, 'Placed e1 in "N"');
+		stageViewOp(
+			{ kind: 'create_folder', temp_id: 'tmp_a', parent_id: 'root', name: 'N' },
+			'Created folder "N"'
+		);
+		stageViewOp(
+			{ kind: 'place_element', element_id: 'e1', folder_id: 'tmp_a' },
+			'Placed e1 in "N"'
+		);
 		stageViewOp({ kind: 'rename_folder', id: 'tmp_a', name: 'M' }, 'Renamed folder "N" → "M"');
 		expect(getStagedViewOps().map((o) => o.kind)).toEqual([
-			'create_folder', 'place_element', 'rename_folder'
+			'create_folder',
+			'place_element',
+			'rename_folder'
 		]);
 		expect(getStagedViewDepth()).toBe(3);
 		expect(getStagedViewEntries()[2].label).toBe('Renamed folder "N" → "M"');

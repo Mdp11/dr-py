@@ -504,7 +504,6 @@ setTimeout(() => {
 	});
 }, 0);
 
-
 /**
  * Scrub every placement of `artifactId` from the active view.
  *
