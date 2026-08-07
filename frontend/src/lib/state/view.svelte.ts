@@ -467,12 +467,13 @@ export async function discardViewChanges(): Promise<void> {
 // module. The cycle is therefore unchanged in shape — only which names cross
 // the back-edge changed — so the deferral below still has to stay.
 // table-editor's tap, by contrast, has no back-edge into realtime.svelte.ts
-// at all. A hoisted FUNCTION
-// cycle, but `realtime.svelte.ts`'s `const _commitTaps` it reads is not
-// hoisted — if some OTHER import graph happens to reach realtime.svelte.ts
-// first (before view.svelte.ts), resolving that cycle re-enters this
-// module's top level from INSIDE realtime's own import of artifacts.svelte,
-// i.e. before realtime's `const _commitTaps = new Set()` line has run,
+// at all. A hoisted FUNCTION declaration (`onCommitEvent` itself) is safely
+// callable at any point in a cycle, but `realtime.svelte.ts`'s
+// `const _commitTaps` it reads is not hoisted — if some OTHER import graph
+// happens to reach realtime.svelte.ts first (before view.svelte.ts), resolving
+// that cycle re-enters this module's top level from INSIDE realtime's own
+// import of artifacts.svelte, i.e. before realtime's
+// `const _commitTaps = new Set()` line has run,
 // throwing a TDZ ReferenceError (reproduced by edit-gate.test.ts, whose
 // import graph happens to hit that ordering). `queueMicrotask` alone is NOT
 // enough — a dynamic `import()` elsewhere in the same worker (vitest module
