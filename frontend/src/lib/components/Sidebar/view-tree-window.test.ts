@@ -18,7 +18,7 @@ describe('in-folder order follows folder.elements (no name-sort)', () => {
 	it('keeps placement order even when names sort the other way', () => {
 		const view: View = {
 			name: 'v',
-			folders: [{ id: 'F', name: 'F', folders: [], elements: ['z', 'a'], artifacts: [] }],
+			folders: [{ id: 'fa', name: 'F', folders: [], elements: ['z', 'a'], artifacts: [] }],
 			artifacts: []
 		};
 		const byId = new Map([
@@ -26,7 +26,7 @@ describe('in-folder order follows folder.elements (no name-sort)', () => {
 			['a', el('a', 'Block', 'Apple')]
 		]);
 		const tree = buildUnifiedTree(view, [], byId, new Map(), new Set(), displayName);
-		expect(tree.children.get(folderKey(['F']))).toEqual(['z', 'a']);
+		expect(tree.children.get(folderKey('fa'))).toEqual(['z', 'a']);
 	});
 });
 
@@ -34,7 +34,7 @@ describe('flattenVisibleRows', () => {
 	it('emits a depth-carrying pre-order walk, skipping hidden and not descending stubs/collapsed', () => {
 		const view: View = {
 			name: 'v',
-			folders: [{ id: 'F', name: 'F', folders: [], elements: ['a'], artifacts: [] }],
+			folders: [{ id: 'fa', name: 'F', folders: [], elements: ['a'], artifacts: [] }],
 			artifacts: []
 		};
 		const byId = new Map([['a', el('a')]]);
@@ -42,23 +42,23 @@ describe('flattenVisibleRows', () => {
 		const vis = computeVisibility(tree, byId, new Set(['Block']));
 		const rows = flattenVisibleRows(tree, vis, new Set());
 		expect(rows.map((r) => r.depth)).toEqual([0, 1]);
-		expect(rows[0].key).toBe(folderKey(['F']));
+		expect(rows[0].key).toBe(folderKey('fa'));
 		expect(rows[0].parent).toBeNull();
 		expect(rows[1].key).toBe('a');
-		expect(rows[1].parent).toBe(folderKey(['F']));
+		expect(rows[1].parent).toBe(folderKey('fa'));
 	});
 
 	it('does not descend into a collapsed folder', () => {
 		const view: View = {
 			name: 'v',
-			folders: [{ id: 'F', name: 'F', folders: [], elements: ['a'], artifacts: [] }],
+			folders: [{ id: 'fa', name: 'F', folders: [], elements: ['a'], artifacts: [] }],
 			artifacts: []
 		};
 		const byId = new Map([['a', el('a')]]);
 		const tree = buildUnifiedTree(view, [], byId, new Map(), new Set(), displayName);
 		const vis = computeVisibility(tree, byId, new Set(['Block']));
-		const rows = flattenVisibleRows(tree, vis, new Set([folderKey(['F'])]));
-		expect(rows.map((r) => r.key)).toEqual([folderKey(['F'])]);
+		const rows = flattenVisibleRows(tree, vis, new Set([folderKey('fa')]));
+		expect(rows.map((r) => r.key)).toEqual([folderKey('fa')]);
 	});
 });
 
@@ -69,21 +69,21 @@ describe('computeVisibility treats unloaded element bodies as tentatively visibl
 		// the windowed body fetch can hydrate it in place (was: dropped -> stub).
 		const view: View = {
 			name: 'v',
-			folders: [{ id: 'F', name: 'F', folders: [], elements: ['pending'], artifacts: [] }],
+			folders: [{ id: 'fa', name: 'F', folders: [], elements: ['pending'], artifacts: [] }],
 			artifacts: []
 		};
 		const byId = new Map<string, Element>();
 		const tree = buildUnifiedTree(view, [], byId, new Map(), new Set(), displayName);
-		expect(tree.children.get(folderKey(['F']))).toEqual(['pending']);
+		expect(tree.children.get(folderKey('fa'))).toEqual(['pending']);
 		const vis = computeVisibility(tree, byId, new Set(['Block']));
-		expect(vis.get(folderKey(['F']))).toBe('full');
+		expect(vis.get(folderKey('fa'))).toBe('full');
 		expect(vis.get('pending')).toBe('full'); // skeleton, tentatively visible
 	});
 
 	it('collapses to a stub once the only placed id is confirmed missing', () => {
 		const view: View = {
 			name: 'v',
-			folders: [{ id: 'F', name: 'F', folders: [], elements: ['ghost'], artifacts: [] }],
+			folders: [{ id: 'fa', name: 'F', folders: [], elements: ['ghost'], artifacts: [] }],
 			artifacts: []
 		};
 		const byId = new Map<string, Element>();
@@ -97,7 +97,7 @@ describe('computeVisibility treats unloaded element bodies as tentatively visibl
 			new Set(['ghost'])
 		);
 		const vis = computeVisibility(tree, byId, new Set(['Block']));
-		expect(vis.get(folderKey(['F']))).toBe('stub');
+		expect(vis.get(folderKey('fa'))).toBe('stub');
 	});
 });
 
@@ -105,7 +105,7 @@ describe('registerExcludedRoots', () => {
 	it('exposes the excluded ids as a separate root region, registering unloaded ids as element nodes', () => {
 		const view: View = {
 			name: 'v',
-			folders: [{ id: 'F', name: 'F', folders: [], elements: ['placed'], artifacts: [] }],
+			folders: [{ id: 'fa', name: 'F', folders: [], elements: ['placed'], artifacts: [] }],
 			artifacts: []
 		};
 		const byId = new Map([['placed', el('placed')]]); // excluded ids NOT loaded yet
@@ -121,7 +121,7 @@ describe('registerExcludedRoots', () => {
 	it('drops an id already placed in a folder (defensive complement)', () => {
 		const view: View = {
 			name: 'v',
-			folders: [{ id: 'F', name: 'F', folders: [], elements: ['placed'], artifacts: [] }],
+			folders: [{ id: 'fa', name: 'F', folders: [], elements: ['placed'], artifacts: [] }],
 			artifacts: []
 		};
 		const byId = new Map([['placed', el('placed')]]);
@@ -144,38 +144,38 @@ describe('registerExcludedRoots', () => {
 
 describe('resolveElementDrop', () => {
 	it('folder header drop -> append into that folder (index at end)', () => {
-		const r = resolveElementDrop({ targetKind: 'folder', folderPath: ['F'], folderLen: 3 });
-		expect(r).toEqual({ path: ['F'], index: 3 });
+		const r = resolveElementDrop({ targetKind: 'folder', folderId: 'fa', folderLen: 3 });
+		expect(r).toEqual({ folderId: 'fa', index: 3 });
 	});
-	it('excluded-section drop -> exclude (empty path)', () => {
+	it('excluded-section drop -> exclude (folderId: null)', () => {
 		const r = resolveElementDrop({ targetKind: 'section' });
-		expect(r).toEqual({ path: [], index: 0 });
+		expect(r).toEqual({ folderId: null, index: 0 });
 	});
 	it('element-row drop, top half -> insert before the sibling', () => {
 		const r = resolveElementDrop({
 			targetKind: 'element',
-			folderPath: ['F'],
+			folderId: 'fa',
 			siblingIndex: 2,
 			half: 'top'
 		});
-		expect(r).toEqual({ path: ['F'], index: 2 });
+		expect(r).toEqual({ folderId: 'fa', index: 2 });
 	});
 	it('element-row drop, bottom half -> insert after the sibling', () => {
 		const r = resolveElementDrop({
 			targetKind: 'element',
-			folderPath: ['F'],
+			folderId: 'fa',
 			siblingIndex: 2,
 			half: 'bottom'
 		});
-		expect(r).toEqual({ path: ['F'], index: 3 });
+		expect(r).toEqual({ folderId: 'fa', index: 3 });
 	});
 	it('element-row drop in the excluded pool -> exclude (no reorder in the pool)', () => {
 		const r = resolveElementDrop({
 			targetKind: 'element',
-			folderPath: null,
+			folderId: null,
 			siblingIndex: 0,
 			half: 'top'
 		});
-		expect(r).toEqual({ path: [], index: 0 });
+		expect(r).toEqual({ folderId: null, index: 0 });
 	});
 });

@@ -14,7 +14,7 @@ describe('buildUnifiedTree — curated scope', () => {
 	it('with a view, top-level roots are folders only (no unplaced roots)', () => {
 		const view: View = {
 			name: 'v',
-			folders: [{ id: 'F', name: 'F', folders: [], elements: ['a'], artifacts: [] }],
+			folders: [{ id: 'fa', name: 'F', folders: [], elements: ['a'], artifacts: [] }],
 			artifacts: []
 		};
 		const tree = buildUnifiedTree(
@@ -26,10 +26,54 @@ describe('buildUnifiedTree — curated scope', () => {
 			displayName
 		);
 		expect(tree.roots.every(isFolderKey)).toBe(true);
-		expect(tree.roots).toEqual([folderKey(['F'])]);
+		expect(tree.roots).toEqual([folderKey('fa')]);
 		// placed element still appears under its folder
-		expect(tree.children.get(folderKey(['F']))).toEqual(['a']);
+		expect(tree.children.get(folderKey('fa'))).toEqual(['a']);
 		expect([...tree.placedElementIds]).toEqual(['a']);
+	});
+
+	it('keys a folder node by its id, NOT its name — the key must not change when the name does (Phase 2 point)', () => {
+		// Same folder id, two different names: the resulting node key is
+		// identical either way, and the display name (looked up separately via
+		// `folderName`) is the only thing that differs. This is the whole point
+		// of id-addressing — collapse/expand state, drag hover, and focus are
+		// keyed off something that survives a rename.
+		const before: View = {
+			name: 'v',
+			folders: [{ id: 'fa', name: 'Old Name', folders: [], elements: [], artifacts: [] }],
+			artifacts: []
+		};
+		const after: View = {
+			name: 'v',
+			folders: [{ id: 'fa', name: 'New Name', folders: [], elements: [], artifacts: [] }],
+			artifacts: []
+		};
+		const treeBefore = buildUnifiedTree(before, [], new Map(), new Map(), new Set(), displayName);
+		const treeAfter = buildUnifiedTree(after, [], new Map(), new Map(), new Set(), displayName);
+		expect(treeBefore.roots).toEqual([folderKey('fa')]);
+		expect(treeAfter.roots).toEqual([folderKey('fa')]);
+		expect(treeBefore.roots).toEqual(treeAfter.roots);
+		expect(treeBefore.folderName.get(folderKey('fa'))).toBe('Old Name');
+		expect(treeAfter.folderName.get(folderKey('fa'))).toBe('New Name');
+	});
+
+	it('records folderPathNames as ancestor + own display names, for picker labels only', () => {
+		const view: View = {
+			name: 'v',
+			folders: [
+				{
+					id: 'parent-id',
+					name: 'Parent',
+					folders: [{ id: 'child-id', name: 'Child', folders: [], elements: [], artifacts: [] }],
+					elements: [],
+					artifacts: []
+				}
+			],
+			artifacts: []
+		};
+		const tree = buildUnifiedTree(view, [], new Map(), new Map(), new Set(), displayName);
+		expect(tree.folderPathNames.get(folderKey('parent-id'))).toEqual(['Parent']);
+		expect(tree.folderPathNames.get(folderKey('child-id'))).toEqual(['Parent', 'Child']);
 	});
 
 	it('includes placed elements in placement order even when their bodies are NOT cached', () => {
@@ -40,7 +84,7 @@ describe('buildUnifiedTree — curated scope', () => {
 		// in placement order from the first build so bodies fill in place.
 		const view: View = {
 			name: 'v',
-			folders: [{ id: 'F', name: 'F', folders: [], elements: ['c', 'a', 'b'], artifacts: [] }],
+			folders: [{ id: 'fa', name: 'F', folders: [], elements: ['c', 'a', 'b'], artifacts: [] }],
 			artifacts: []
 		};
 		const tree = buildUnifiedTree(
@@ -51,14 +95,14 @@ describe('buildUnifiedTree — curated scope', () => {
 			new Set(),
 			displayName
 		);
-		expect(tree.children.get(folderKey(['F']))).toEqual(['c', 'a', 'b']);
+		expect(tree.children.get(folderKey('fa'))).toEqual(['c', 'a', 'b']);
 		expect([...tree.placedElementIds]).toEqual(['c', 'a', 'b']);
 	});
 
 	it('drops a placed id the server has confirmed missing (not merely unfetched)', () => {
 		const view: View = {
 			name: 'v',
-			folders: [{ id: 'F', name: 'F', folders: [], elements: ['a', 'gone', 'b'], artifacts: [] }],
+			folders: [{ id: 'fa', name: 'F', folders: [], elements: ['a', 'gone', 'b'], artifacts: [] }],
 			artifacts: []
 		};
 		const tree = buildUnifiedTree(
@@ -70,7 +114,7 @@ describe('buildUnifiedTree — curated scope', () => {
 			displayName,
 			new Set(['gone']) // confirmed missing
 		);
-		expect(tree.children.get(folderKey(['F']))).toEqual(['a', 'b']);
+		expect(tree.children.get(folderKey('fa'))).toEqual(['a', 'b']);
 	});
 
 	it('without a view, roots render in the given (server) order — no client re-sort', () => {
@@ -92,12 +136,12 @@ describe('buildUnifiedTree — curated scope', () => {
 		const ref = { id: 'a1', kind: 'navigation' };
 		const view: View = {
 			name: 'v',
-			folders: [{ id: 'F', name: 'F', folders: [], elements: [], artifacts: [ref] }],
+			folders: [{ id: 'fa', name: 'F', folders: [], elements: [], artifacts: [ref] }],
 			artifacts: []
 		};
 		const tree = buildUnifiedTree(view, [], new Map(), new Map(), new Set(), displayName);
 		const key = artifactKey('a1');
-		expect(tree.children.get(folderKey(['F']))).toEqual([key]);
+		expect(tree.children.get(folderKey('fa'))).toEqual([key]);
 		expect(tree.kind.get(key)).toBe('artifact');
 		expect(tree.artifactRef.get(key)).toEqual(ref);
 	});
@@ -106,12 +150,12 @@ describe('buildUnifiedTree — curated scope', () => {
 		const ref = { id: 'tbl1', kind: 'table' };
 		const view: View = {
 			name: 'v',
-			folders: [{ id: 'F', name: 'F', folders: [], elements: [], artifacts: [] }],
+			folders: [{ id: 'fa', name: 'F', folders: [], elements: [], artifacts: [] }],
 			artifacts: [ref]
 		};
 		const tree = buildUnifiedTree(view, [], new Map(), new Map(), new Set(), displayName);
 		const key = artifactKey('tbl1');
-		expect(tree.roots).toEqual([folderKey(['F']), key]);
+		expect(tree.roots).toEqual([folderKey('fa'), key]);
 		expect(tree.kind.get(key)).toBe('artifact');
 		expect(tree.artifactRef.get(key)).toEqual(ref);
 	});
