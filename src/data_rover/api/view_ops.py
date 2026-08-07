@@ -17,10 +17,16 @@ Tolerance stance (mirrors ``validate_view``): ids that merely DANGLE (an
 element not in the model, an artifact with no row) are legal — the view never
 owns what it references. 422 is reserved for ops that are IMPOSSIBLE against
 the current tree: unknown folder ids, cycle moves, duplicate/missing
-placements. Restore mode (undo) skips the duplicate-placement checks —
+placements. Restore mode (undo) skips the duplicate-PLACEMENT checks —
 replaying accepted history over a peer-modified view degrades to a
 first-placement-wins warning, never a failed undo — but still 422s on a
 missing folder (the compensating commit must not silently half-apply).
+The asymmetry is one-sided, though: restore mode does NOT skip the
+missing-PLACEMENT checks on ``remove_element``/``remove_artifact``/
+``move_artifact`` — replaying one of those inverses against a view where a
+peer already removed the placement it expects to find still 422s, same as a
+non-restore call. Only the "already placed" family degrades to tolerance;
+the "not placed" family does not.
 """
 
 from __future__ import annotations
@@ -173,10 +179,22 @@ def apply_view_ops(
     Canonical ops always carry resolved ids and CONCRETE indices — the journal
     must replay deterministically with no reference to live state.
 
-    There is NO internal rollback: a mid-batch failure leaves the already-
-    applied prefix in place and the caller undoes it by applying the partial
-    result's ``inverse_units`` in reverse (``rollback_view``), exactly the
-    ``_apply_batch``/``_rollback`` contract the model applier uses.
+    There is NO internal rollback, and on a mid-batch failure the raised
+    ``HTTPException`` carries no handle on what was already applied: the
+    local ``ViewBatchResult`` accumulating the applied prefix's
+    ``inverse_units`` is a plain local — it is never returned and never
+    attached to the exception — so the view is left mutated with the partial
+    result UNREACHABLE by design. (Contrast the model applier's
+    ``routes/ops.py::_apply_batch``, which is NOT a caller-rolls-back
+    contract: it wraps its own loop and calls ``_rollback`` INTERNALLY, in
+    its own ``except`` block, before re-raising — this function does not do
+    that.) Callers that need atomicity must therefore not call this directly
+    on a live view; the commit/undo wiring task adds
+    ``apply_view_ops_atomic``, which loops op-by-op, keeps the accumulated
+    ``inverse_units`` itself, and rolls them back via ``rollback_view`` before
+    re-raising. For a dry run with no mutation at all, use
+    ``validate_view_ops`` (deep-copy apply, discard) instead of trying to
+    recover from a failed direct call.
     """
     res = ViewBatchResult(id_map=dict(id_map or {}))
 
