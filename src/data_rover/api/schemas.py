@@ -215,11 +215,18 @@ class ViewIn(BaseModel):
 class ViewSnapshotResponse(BaseModel):
     view: ViewOut
     warnings: list[IssueOut] = Field(default_factory=list)
+    #: the row's ``view_rev`` after this write (always bumped by a PUT — see
+    #: ``ViewRow.view_rev``). 0 when no ``ModelRow`` exists yet, mirroring the
+    #: in-memory-only fallback that also skips persistence in that case.
+    view_rev: int = 0
 
 
 class ViewStateResponse(BaseModel):
     view: ViewOut | None = None
     warnings: list[IssueOut] = Field(default_factory=list)
+    #: None when no ``ViewRow`` exists for the project (nothing has ever been
+    #: saved); an int (possibly 0, pre-any-edit) once one does.
+    view_rev: int | None = None
 
 
 # ---------------------------------------------------------------------------

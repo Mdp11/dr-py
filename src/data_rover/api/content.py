@@ -232,14 +232,29 @@ def clear_history(db: Session, project_id: str) -> None:
 
 
 def upsert_single_view(
-    db: Session, project_id: str, *, name: str, blob: str
+    db: Session, project_id: str, *, name: str, blob: str, bump_rev: bool = True
 ) -> ViewRow:
+    """Create-or-update the project's one view row.
+
+    ``bump_rev`` distinguishes a real edit (the legacy PUT, and eventually the
+    view half of ``POST /commits``) from a NORMALIZATION write (lazy folder-id
+    healing at hydration/import): healing must not look like an edit, so it
+    passes ``bump_rev=False`` and ``view_rev`` is left untouched.
+    """
     row = get_single_view(db, project_id)
     if row is None:
-        row = ViewRow(id=uuid.uuid4().hex, project_id=project_id, name=name, blob=blob)
+        row = ViewRow(
+            id=uuid.uuid4().hex,
+            project_id=project_id,
+            name=name,
+            blob=blob,
+            view_rev=1 if bump_rev else 0,
+        )
         db.add(row)
     else:
         row.name, row.blob = name, blob
+        if bump_rev:
+            row.view_rev += 1
     db.flush()
     return row
 

@@ -145,3 +145,28 @@ def test_dangling_artifact_ref_warning_from_route(client: TestClient) -> None:
     r = client.put(papi("/view/snapshot"), json=body)
     assert r.status_code == 200
     assert any("unknown artifact" in w["message"] for w in r.json()["warnings"])
+
+
+def test_put_assigns_folder_ids_and_bumps_view_rev(client: TestClient) -> None:
+    _bootstrap(client)
+    body = {"name": "v", "folders": [{"name": "A", "folders": [{"name": "A1"}]}]}
+    r = client.put(papi("/view/snapshot"), json=body)
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["view_rev"] == 1
+    a = out["view"]["folders"][0]
+    assert len(a["id"]) == 32 and len(a["folders"][0]["id"]) == 32
+
+    # ids are STABLE across saves when the client echoes them back
+    r2 = client.put(papi("/view/snapshot"), json=out["view"])
+    assert r2.json()["view_rev"] == 2
+    assert r2.json()["view"]["folders"][0]["id"] == a["id"]
+
+    r3 = client.get(papi("/view"))
+    assert r3.json()["view_rev"] == 2
+
+
+def test_get_view_rev_none_without_row(client: TestClient) -> None:
+    r = client.get(papi("/view"))
+    assert r.status_code == 200
+    assert r.json()["view"] is None and r.json()["view_rev"] is None

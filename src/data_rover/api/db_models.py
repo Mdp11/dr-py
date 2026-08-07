@@ -189,6 +189,12 @@ class ViewRow(Base):
     )
     name: Mapped[str] = mapped_column(String, nullable=False, default="")
     blob: Mapped[str] = mapped_column(Text, nullable=False)
+    #: Rev of the last EDIT reflected by ``blob`` (both write paths bump it:
+    #: the legacy PUT and the view half of POST /commits — Phase 2). Secondary,
+    #: informational: staleness/conflicts are governed by the project rev +
+    #: leases, not this counter. Normalization writes (lazy folder-id healing)
+    #: deliberately do NOT bump it.
+    view_rev: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
 class Commit(Base):

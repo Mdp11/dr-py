@@ -3,12 +3,16 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
 from data_rover.api import content, db, hydration
 from data_rover.api.db_models import Project
+from data_rover.api.main import create_app
 from data_rover.api.storage import MemorySnapshotStore, set_snapshot_store
 from data_rover.api.session import Session
 from data_rover.core.metamodel.loader import load_metamodel_str
+
+from .conftest import AUTH_HEADERS, papi, seed_default_project
 
 MM_YAML = Path("examples/smart-city.metamodel.yaml").read_text(encoding="utf-8")
 
@@ -81,3 +85,57 @@ def _first_concrete_element_type(sess: Session) -> str:
         if not et.abstract:
             return et.name
     raise AssertionError("no concrete element type in smart-city metamodel")
+
+
+@pytest.fixture
+def client() -> TestClient:
+    """HTTP-driven fixture for the eviction/rehydration tests below: seeds the
+    DEFAULT project (distinct from ``_env``'s "p1") with a real metamodel +
+    empty model so a durable ``ModelRow`` exists — hydration's early
+    ``if model_row is None: return Session()`` would otherwise skip the view
+    entirely, defeating the point of the healing test."""
+    seed_default_project()
+    c = TestClient(create_app())
+    c.headers.update(AUTH_HEADERS)
+    c.post(
+        papi("/metamodel"),
+        content=MM_YAML,
+        headers={"content-type": "application/x-yaml"},
+    )
+    c.post(papi("/model"), json={"elements": [], "relationships": []})
+    return c
+
+
+def test_hydration_heals_missing_folder_ids(client: TestClient) -> None:
+    """An old blob (no folder ids) is healed at hydration and persisted back
+    WITHOUT consuming a view_rev — normalization is not an edit."""
+    from data_rover.api import content, db
+    from data_rover.api.session import DEFAULT_PROJECT_ID, get_registry
+
+    gen = db.get_db()
+    s = next(gen)
+    try:
+        content.upsert_single_view(
+            s,
+            DEFAULT_PROJECT_ID,
+            name="v",
+            blob='{"name": "v", "folders": [{"name": "A"}], "artifacts": []}',
+            bump_rev=False,
+        )
+        s.commit()
+    finally:
+        gen.close()
+
+    get_registry().evict(DEFAULT_PROJECT_ID)
+    r = client.get(papi("/view"))
+    assert r.status_code == 200
+    assert len(r.json()["view"]["folders"][0]["id"]) == 32
+    assert r.json()["view_rev"] == 0
+
+    gen = db.get_db()
+    s = next(gen)
+    try:
+        row = content.get_single_view(s, DEFAULT_PROJECT_ID)
+        assert row is not None and '"id"' in row.blob and row.view_rev == 0
+    finally:
+        gen.close()
