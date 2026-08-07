@@ -72,6 +72,33 @@ def _lock(c: TestClient, resource_id: str, *, type_: str = "element") -> str:
     return r.json()["token"]
 
 
+def _folder_lease(client: TestClient, fid: str, intent: str = "edit") -> str:
+    r = client.post(
+        papi("/locks"),
+        json={
+            "targets": [{"resource_id": fid, "mode": "exclusive", "type": "folder"}],
+            "intent": intent,
+        },
+    )
+    assert r.status_code == 200, r.text
+    token: str = r.json()["token"]
+    return token
+
+
+def _commit_rename(client: TestClient, fid: str, name: str) -> None:
+    token = _folder_lease(client, fid)
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": _rev(client),
+            "ops": [{"kind": "rename_folder", "id": fid, "name": name}],
+            "message": "m",
+            "lock_tokens": [token],
+        },
+    )
+    assert r.status_code == 200, r.text
+
+
 def test_non_overlapping_stale_commit_lands(client: TestClient) -> None:
     base = _rev(client)  # both clients start here
     r1 = _commit(client, [{"kind": "create_element", "temp_id": "tmp_a",
@@ -350,3 +377,98 @@ def test_id_keys_are_derived_from_the_op_models() -> None:
         label: str
 
     assert _id_field_names((_FutureOp,)) == frozenset({"id", "owner_id"})
+
+
+def test_stale_view_batch_overlapping_tail_409s(client) -> None:
+    r = client.put(
+        papi("/view/snapshot"),
+        json={"name": "v", "folders": [{"name": "A"}, {"name": "B"}]},
+    )
+    fa = r.json()["view"]["folders"][0]["id"]
+    stale_base = _rev(client)
+    _commit_rename(client, fa, "A2")  # tail commit touching folder:fa
+    token = _folder_lease(client, fa)
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": stale_base,
+            "ops": [{"kind": "rename_folder", "id": fa, "name": "A3"}],
+            "message": "m",
+            "lock_tokens": [token],
+        },
+    )
+    assert r.status_code == 409
+    assert r.json()["detail"] == "conflicting concurrent commits"
+
+
+def test_stale_view_batch_disjoint_from_tail_lands(client) -> None:
+    r = client.put(
+        papi("/view/snapshot"),
+        json={"name": "v", "folders": [{"name": "A"}, {"name": "B"}]},
+    )
+    fa = r.json()["view"]["folders"][0]["id"]
+    fb = r.json()["view"]["folders"][1]["id"]
+    stale_base = _rev(client)
+    _commit_rename(client, fa, "A2")  # tail touches only folder:fa
+    token = _folder_lease(client, fb)
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": stale_base,
+            "ops": [{"kind": "rename_folder", "id": fb, "name": "B2"}],
+            "message": "m",
+            "lock_tokens": [token],
+        },
+    )
+    assert r.status_code == 200, r.text
+
+
+def test_placement_subject_overlap_conflicts_across_folders(client) -> None:
+    """Two batches fighting over the SAME element's placement conflict even
+    though the folders they name are disjoint — the viewel: marker is the
+    only thing connecting them (folder leases never collided)."""
+    r = client.put(
+        papi("/view/snapshot"),
+        json={"name": "v", "folders": [{"name": "A"}, {"name": "C"}]},
+    )
+    fa = r.json()["view"]["folders"][0]["id"]
+    fc = r.json()["view"]["folders"][1]["id"]
+    # place e1 in A (a real commit, so the journal carries canonical ops)
+    tok = _folder_lease(client, fa)
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": _rev(client),
+            "ops": [{"kind": "place_element", "element_id": "e1", "folder_id": fa}],
+            "message": "m",
+            "lock_tokens": [tok],
+        },
+    )
+    assert r.status_code == 200, r.text
+    stale_base = _rev(client)
+    # tail: remove e1's placement (touches folder:fa + viewel:e1)
+    tok = _folder_lease(client, fa)
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": stale_base,
+            "ops": [{"kind": "remove_element", "element_id": "e1", "folder_id": fa}],
+            "message": "m",
+            "lock_tokens": [tok],
+        },
+    )
+    assert r.status_code == 200, r.text
+    # stale batch: place e1 into C — folder set {fc} is DISJOINT from the
+    # tail's {fa}; only viewel:e1 overlaps. Must 409, not land.
+    tok = _folder_lease(client, fc)
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": stale_base,
+            "ops": [{"kind": "place_element", "element_id": "e1", "folder_id": fc}],
+            "message": "m",
+            "lock_tokens": [tok],
+        },
+    )
+    assert r.status_code == 409
+    assert r.json()["detail"] == "conflicting concurrent commits"

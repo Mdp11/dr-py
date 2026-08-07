@@ -41,6 +41,7 @@ from fastapi import HTTPException
 from data_rover.core.view.ids import find_folder, locate_folder
 from data_rover.core.view.schema import VIEW_ROOT_ID, ArtifactRef, Folder, View
 
+from .locking import folder_resource
 from .schemas import (
     TEMP_ID_PREFIX,
     CreateFolderOp,
@@ -555,3 +556,45 @@ def view_op_folder_ids(ops: Sequence[ViewOpIn]) -> set[str]:
         else:
             assert_never(op)
     return ids
+
+
+#: Placement-subject namespaces for the conflict backstop ONLY (no lease ever
+#: carries them): two batches fighting over the same element's/artifact-ref's
+#: placement must conflict even when the folders they name are disjoint —
+#: folder leases cannot see that collision, the overlap check can.
+VIEW_ELEMENT_MARKER = "viewel:"
+VIEW_ARTIFACT_MARKER = "viewart:"
+
+
+def view_touched_resources(op: ViewOpIn) -> set[str]:
+    """The backstop resources one view op touches: every folder it names in
+    the ``folder:`` lease namespace (so the set compares directly against
+    lease ids and the tail's), plus a subject marker per placement. Folder
+    ids here may be temp ids in a CLIENT batch — the caller strips those; in
+    CANONICAL journal ops they are always real (the applier rewrote them)."""
+    if isinstance(op, CreateFolderOp):
+        return {folder_resource(op.temp_id), folder_resource(op.parent_id)}
+    if isinstance(op, (RenameFolderOp, DeleteFolderOp)):
+        # a delete's subtree victims surface via the INVERSE unit's create
+        # ops when _affected_ids scans both halves (same cascade rationale
+        # as delete_element).
+        return {folder_resource(op.id)}
+    if isinstance(op, MoveFolderOp):
+        return {folder_resource(op.id), folder_resource(op.to_parent_id)}
+    if isinstance(op, (PlaceElementOp, RemoveElementOp)):
+        return {folder_resource(op.folder_id), VIEW_ELEMENT_MARKER + op.element_id}
+    if isinstance(op, MoveElementOp):
+        return {
+            folder_resource(op.from_folder_id),
+            folder_resource(op.to_folder_id),
+            VIEW_ELEMENT_MARKER + op.element_id,
+        }
+    if isinstance(op, (PlaceArtifactOp, RemoveArtifactOp)):
+        return {folder_resource(op.folder_id), VIEW_ARTIFACT_MARKER + op.artifact_id}
+    if isinstance(op, MoveArtifactOp):
+        return {
+            folder_resource(op.from_folder_id),
+            folder_resource(op.to_folder_id),
+            VIEW_ARTIFACT_MARKER + op.artifact_id,
+        }
+    assert_never(op)

@@ -443,6 +443,11 @@ VIEW_OP_KINDS = frozenset(
 #: so the discriminated union round-trips.
 OPS_ADAPTER: TypeAdapter[list[OpIn]] = TypeAdapter(list[OpIn])
 
+#: validates ONE raw journal op dict into a typed view op (the conflict
+#: backstop deserializes only the view ops of tail commits; model/artifact
+#: ops are cheaper to scan as raw dicts, see routes/commits._affected_ids).
+VIEW_OP_ADAPTER: TypeAdapter[ViewOpIn] = TypeAdapter(ViewOpIn)
+
 
 class OpsRequest(BaseModel):
     #: the model revision the ops were computed against; mismatch -> 409

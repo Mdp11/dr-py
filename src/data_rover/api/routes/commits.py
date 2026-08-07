@@ -61,6 +61,7 @@ from ..view_ops import (
     apply_view_ops_atomic,
     rollback_view,
     validate_view_ops,
+    view_touched_resources,
 )
 from ..schemas import (
     ArtifactOpIn,
@@ -98,6 +99,7 @@ from ..schemas import (
     UpdateArtifactOp,
     UpdateElementOp,
     UpdateRelationshipOp,
+    VIEW_OP_ADAPTER,
     VIEW_OP_KINDS,
 )
 from ..session import AppliedBatch
@@ -169,12 +171,26 @@ def _affected_ids(commits: list[Commit]) -> set[str]:
     batch that touches a cascade victim slip past the overlap check here (and
     fail later, at the mutation boundary, as a 422 instead of a clean 409) —
     or, for revert's guard, let a peer's lease on a cascade victim go
-    unnoticed.
+    unnoticed. The same argument covers ``delete_folder``: its subtree
+    victims surface only via the inverse unit's ``create_folder`` ops (see
+    ``view_ops._recreate_ops``).
+
+    View ops are DESERIALIZED into typed models rather than scanned by raw
+    key, unlike the model/artifact branches above: ten op kinds carry
+    heterogeneous id-field namespaces (an ``element_id`` must land in the
+    ``viewel:`` marker namespace, not the bare ``folder:`` one an ``id`` or
+    ``folder_id`` field uses), so a single flat key-name scan would either
+    conflate them or miss the placement-subject markers entirely. Tail
+    commits are few and small, so the extra validation cost here is noise.
     """
     ids: set[str] = set()
     for c in commits:
         for op in (*c.ops, *c.inverse_ops):
-            if op.get("kind") in ARTIFACT_OP_KINDS:
+            kind = op.get("kind")
+            if kind in VIEW_OP_KINDS:
+                ids |= view_touched_resources(VIEW_OP_ADAPTER.validate_python(op))
+                continue
+            if kind in ARTIFACT_OP_KINDS:
                 for key in _ARTIFACT_ID_KEYS:
                     v = op.get(key)
                     if isinstance(v, str):
@@ -202,7 +218,11 @@ def _batch_touched_ids(model: Model, view: View | None, ops: list[OpIn]) -> set[
     so temp ids are filtered out at the end rather than tracked specially.
     ``view`` is threaded straight through to ``required_locks`` (Task 6) so
     folder-op lease derivation resolves correctly; the view ops themselves
-    still fall into the TEMPORARY no-op branch below until Task 9.
+    additionally run through ``view_ops.view_touched_resources`` below, which
+    contributes the placement-subject markers (``viewel:``/``viewart:``) no
+    lease ever carries — two batches fighting over the SAME element's/
+    artifact's placement must still conflict even when the folders they name
+    are disjoint.
 
     MUST be conservative: under-reporting a touched resource here is exactly
     the failure mode the backstop exists to prevent (a real conflict would
@@ -250,7 +270,9 @@ def _batch_touched_ids(model: Model, view: View | None, ops: list[OpIn]) -> set[
                 MoveArtifactOp,
             ),
         ):
-            pass  # TEMPORARY (plan Task 9): real touched-id derivation lands there
+            # delete_folder's subtree is already covered: required_locks
+            # expanded it against the live view above.
+            ids |= view_touched_resources(op)
         else:
             assert_never(op)
     # Strip batch-local temp ids: they never appear in _affected_ids (canonical
@@ -262,6 +284,12 @@ def _batch_touched_ids(model: Model, view: View | None, ops: list[OpIn]) -> set[
     # same-batch-created artifacts from needing a lease at all (see its
     # `created` set), so that id never reaches this filter in practice, and
     # even if it did, "art:tmp_x" still can't collide with a bare canonical id.
+    # A batch-local folder create similarly strips to "folder:tmp_x" /
+    # "viewel:tmp_x" (a placement into a folder created earlier in the SAME
+    # batch) — neither STARTS WITH tmp_ (the prefix check below looks at the
+    # whole string), so they survive this filter, but for the identical
+    # harmlessness reason: a namespaced batch-local id can never collide with
+    # a bare canonical journal id either.
     return {i for i in ids if not i.startswith(TEMP_ID_PREFIX)}
 
 
