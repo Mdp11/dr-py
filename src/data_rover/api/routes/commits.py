@@ -34,6 +34,7 @@ from sqlalchemy.orm import Session as DbSession
 from data_rover.core.model.model import Model
 from data_rover.core.validation.issue import IssueCategory
 from data_rover.core.validation.pipeline import default_pipeline
+from data_rover.core.view.schema import View
 
 from ..artifact_ops import (
     ARTIFACT_OP_KINDS,
@@ -180,7 +181,7 @@ def _affected_ids(commits: list[Commit]) -> set[str]:
     return ids
 
 
-def _batch_touched_ids(model: Model, ops: list[OpIn]) -> set[str]:
+def _batch_touched_ids(model: Model, view: View | None, ops: list[OpIn]) -> set[str]:
     """Conservative touched-set for the conflict backstop (spec 2026-07-29):
     a batch conflicts with the commit tail iff their touched-id sets overlap.
 
@@ -193,6 +194,9 @@ def _batch_touched_ids(model: Model, ops: list[OpIn]) -> set[str]:
     relationship) must still register as touching it. A create's temp id
     never appears in `_affected_ids` (canonical ops carry the assigned id),
     so temp ids are filtered out at the end rather than tracked specially.
+    ``view`` is threaded straight through to ``required_locks`` (Task 6) so
+    folder-op lease derivation resolves correctly; the view ops themselves
+    still fall into the TEMPORARY no-op branch below until Task 9.
 
     MUST be conservative: under-reporting a touched resource here is exactly
     the failure mode the backstop exists to prevent (a real conflict would
@@ -204,7 +208,7 @@ def _batch_touched_ids(model: Model, ops: list[OpIn]) -> set[str]:
     type error here rather than a silent hole (same discipline
     ``_apply_one``'s ``assert_never`` gives the applier).
     """
-    ids = {r.resource_id for r in required_locks(model, ops)}
+    ids = {r.resource_id for r in required_locks(model, view, ops)}
     for op in ops:
         if isinstance(
             op,
@@ -542,7 +546,7 @@ def create_commit(
             # against a metamodel/model that no longer matches what it was
             # computed against.
             return _conflict_response(session.model_rev, "stale base_rev")
-        if _affected_ids(tail) & _batch_touched_ids(model, payload.ops):
+        if _affected_ids(tail) & _batch_touched_ids(model, session.view, payload.ops):
             return _conflict_response(
                 session.model_rev, "conflicting concurrent commits"
             )
@@ -581,7 +585,7 @@ def create_commit(
         # a. verify the caller still holds every required lock. `payload.ops`
         #    (not `model_ops`) so the `art:`-namespaced leases artifact ops
         #    need are derived and checked too.
-        reqs = required_locks(model, payload.ops)
+        reqs = required_locks(model, session.view, payload.ops)
         missing = session.lock_table.verify_held(
             user.id, payload.lock_tokens, reqs, now=time.monotonic()
         )

@@ -681,9 +681,10 @@ class LockTargetIn(BaseModel):
     resource_id: str
     mode: Literal["exclusive", "shared"]
     #: what the id names; the route canonicalizes to the internal namespace
-    #: ("element" -> bare id, "artifact" -> "art:<id>", "metamodel" -> "mm").
-    #: Defaults to "element" so pre-existing clients are untouched.
-    type: Literal["element", "artifact", "metamodel"] = "element"
+    #: ("element" -> bare id, "artifact" -> "art:<id>", "metamodel" -> "mm",
+    #: "folder" -> "folder:<id>"). Defaults to "element" so pre-existing
+    #: clients are untouched.
+    type: Literal["element", "artifact", "metamodel", "folder"] = "element"
 
 
 class LockRequest(BaseModel):

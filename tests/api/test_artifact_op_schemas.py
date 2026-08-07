@@ -72,7 +72,7 @@ def test_required_locks_for_artifact_ops() -> None:
         {"kind": "update_artifact", "id": "tmp_x", "payload": {}},
         {"kind": "delete_artifact", "id": "tmp_x"},
     ])
-    reqs = required_locks(_model(), ops)
+    reqs = required_locks(_model(), None, ops)
     by_id = {r.resource_id: r for r in reqs}
     assert set(by_id) == {artifact_resource("a1"), artifact_resource("a2")}
     assert by_id["art:a1"].mode is LockMode.EXCLUSIVE

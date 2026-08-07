@@ -5,12 +5,32 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from data_rover.api import db as _db
+from data_rover.api.db_models import Role, User
 from data_rover.api.main import create_app
+from data_rover.api.session import DEFAULT_PROJECT_ID
+from data_rover.api.tenancy import add_member
 
 from .conftest import AUTH_HEADERS, papi, seed_default_project
 
 EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "example.metamodel.yaml"
 API = "/api/v1/projects/default"
+
+OTHER_HEADERS = {"x-user-id": "user-2", "x-user-email": "user2@example.com"}
+
+
+def _seed_second_member(user_id: str, email: str) -> None:
+    """Add *user_id* as an editor of the default project (mirrors the helper
+    of the same name in ``test_commits_artifact_ops.py``)."""
+    gen = _db.get_db()
+    s = next(gen)
+    try:
+        if s.get(User, user_id) is None:
+            s.add(User(id=user_id, email=email))
+            s.commit()
+        add_member(s, DEFAULT_PROJECT_ID, user_id, Role.editor)
+    finally:
+        gen.close()
 
 
 @pytest.fixture
@@ -170,3 +190,31 @@ def test_get_view_rev_none_without_row(client: TestClient) -> None:
     r = client.get(papi("/view"))
     assert r.status_code == 200
     assert r.json()["view"] is None and r.json()["view_rev"] is None
+
+
+def test_legacy_put_honors_peer_folder_lease(client: TestClient) -> None:
+    _bootstrap(client)
+    r = client.put(papi("/view/snapshot"), json={"name": "v", "folders": [{"name": "A"}]})
+    assert r.status_code == 200, r.text
+    fid = r.json()["view"]["folders"][0]["id"]
+    _seed_second_member("user-2", "user2@example.com")
+    r = client.post(
+        papi("/locks"),
+        json={
+            "targets": [{"resource_id": fid, "mode": "exclusive", "type": "folder"}],
+            "intent": "edit",
+        },
+        headers=OTHER_HEADERS,
+    )
+    assert r.status_code == 200, r.text
+    # my whole-document PUT would stomp the peer's checked-out folder → 409
+    r = client.put(papi("/view/snapshot"), json={"name": "v", "folders": []})
+    assert r.status_code == 409
+    assert "checked out" in r.json()["detail"]["message"]
+    # the PEER's own PUT is not blocked by their own lease
+    r = client.put(
+        papi("/view/snapshot"),
+        json={"name": "v", "folders": []},
+        headers=OTHER_HEADERS,
+    )
+    assert r.status_code == 200
