@@ -756,12 +756,37 @@ def undo(
             db.rollback()  # discard staged artifact rows
             raise
         view_res: ViewBatchResult | None = None
+        # True iff THIS request is the one that flipped session.view from
+        # None to an empty View (the "evicted + contentless resurrection"
+        # fallback below) — tracked exactly like create_commit's own
+        # ``created_view`` so every failure path can restore it to None
+        # rather than leaving a never-persisted empty View behind. A failed
+        # request must be externally invisible: before this undo attempt
+        # GET /view reported ``view: None``, and a 422/500 out of this
+        # branch must leave it reporting that again, not a materialized
+        # empty view with no ViewRow / view_rev to back it (final-review
+        # Finding 1 — mirrors create_commit's own created_view guard, which
+        # exists for the identical reason on the auto-create path).
+        created_view = False
+        # A single-user, no-peer sequence CAN still make this apply 422: the
+        # legacy PUT /view/snapshot (routes/view.py) bypasses op_log entirely
+        # (no Commit row) and, unlike POST /commits, only refuses a PEER's
+        # folder lease — the CALLER's own overwrite always goes through, even
+        # if it drops a folder/placement an already-journaled batch's inverse
+        # still expects to find. That is deliberate, not a bug this task
+        # closes: the outcome is a clean 422 with the model/artifact halves
+        # already rolled back and the batch re-pushed onto op_log (same shape
+        # as any other view-apply failure below), never a silently-wrong
+        # inverse applied over a view the caller has since replaced. Fixing
+        # it would mean teaching the unlocked legacy PUT about the op_log's
+        # expectations, which is out of this task's scope.
         if view_inv:
             if session.view is None:
                 # a batch that touched the view implies one existed; an
                 # evicted + contentless resurrection is the only way here —
                 # recreate.
                 session.view = View(name="view")
+                created_view = True
             try:
                 view_res = apply_view_ops_atomic(session.view, view_inv, restore=True)
             except Exception:
@@ -773,6 +798,8 @@ def undo(
                 # persist-failure branch below).
                 _rollback(model, res.inverse_units)
                 session.invalidate_derived_caches()
+                if created_view:
+                    session.view = None  # unwind the auto-create too — see above
                 session.op_log.append(batch)
                 db.rollback()  # discard staged artifact rows
                 raise
@@ -834,6 +861,8 @@ def undo(
             if view_res is not None:
                 assert session.view is not None
                 rollback_view(session.view, view_res.inverse_units)
+            if created_view:
+                session.view = None  # unwind the auto-create too — see above
             session.op_log.append(batch)  # re-push the batch so undo history is intact
             db.rollback()  # also discards the staged artifact + view rows
             raise HTTPException(

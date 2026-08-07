@@ -130,3 +130,134 @@ def test_undo_refuses_while_peer_holds_folder_lease(client: TestClient) -> None:
     r = client.get(papi("/locks"))
     peer_lease = next(le for le in r.json()["leases"] if le["resource_id"] == f"folder:{fid}")
     assert peer_lease["holder"] == "user-2"
+
+
+def test_undo_not_blocked_by_callers_own_folder_lease(client: TestClient) -> None:
+    """The mirror of the peer-refusal test above (final-review Finding 4):
+    ``peer_leases`` excludes the caller's own holder id, so a lease the
+    UNDOING user holds on the very folder being touched must never 409 —
+    only a PEER's lease should."""
+    r = client.put(papi("/view/snapshot"), json={"name": "v", "folders": [{"name": "A"}]})
+    fid = r.json()["view"]["folders"][0]["id"]
+    _commit_rename(client, fid, "A2")
+    # the rename's own lease was released by the commit; re-acquire a fresh
+    # one on the same folder, held by the CALLER of the undo below.
+    r = client.post(
+        papi("/locks"),
+        json={
+            "targets": [{"resource_id": fid, "mode": "exclusive", "type": "folder"}],
+            "intent": "edit",
+        },
+    )
+    assert r.status_code == 200, r.text
+    r = client.post(papi("/model/undo"))
+    assert r.status_code == 200, r.text
+    assert client.get(papi("/view")).json()["view"]["folders"][0]["name"] == "A"
+
+
+def test_failed_undo_after_view_cleared_leaves_view_null(client: TestClient) -> None:
+    """Regression for final-review Finding 1: the reviewer's exact repro.
+    ``DELETE /view`` is the existing unlocked legacy route that sets
+    ``session.view = None`` with no persistence and no lease check (a known,
+    out-of-scope pre-existing quirk); undo's own defensive "recreate an empty
+    View" fallback (for the unrelated evicted+contentless-resurrection case)
+    must not leak a materialized empty View into that state when the replay
+    then 422s on the folder DELETE /view just erased — GET /view must still
+    report ``view: None`` afterwards, byte-identical to before the failed
+    undo, not a phantom empty view with no ViewRow/view_rev to back it."""
+    r = client.put(papi("/view/snapshot"), json={"name": "v", "folders": [{"name": "A"}]})
+    fid = r.json()["view"]["folders"][0]["id"]
+    _commit_rename(client, fid, "A2")
+    assert client.delete(papi("/view")).status_code == 204
+    assert client.get(papi("/view")).json()["view"] is None
+
+    r = client.post(papi("/model/undo"))
+    assert r.status_code == 422, r.text
+
+    assert client.get(papi("/view")).json()["view"] is None
+    # undo history survives the failure: the batch was pushed back
+    summary = client.get(papi("/model/summary")).json()
+    assert summary["undo_depth"] == 1
+
+
+def test_undo_of_delete_folder_and_move_element_is_byte_identical(
+    client: TestClient,
+) -> None:
+    """Regression for final-review Finding 3: the applier's docstring
+    promises apply-then-inverse restores a byte-identical blob, but the
+    original suite only exercised ``rename_folder`` and only spot-checked one
+    field. This drives ``delete_folder`` (recreating a subtree with a nested
+    folder + placed element — the multi-op ``inverse_units`` shape) AND
+    ``move_element`` (a two-endpoint op) through one commit, then asserts the
+    FULL view blob returned by ``GET /view`` after undo deep-equals the one
+    captured before the commit ever ran."""
+    r = client.post(
+        papi("/model"),
+        json={
+            "elements": [
+                {"id": "eb", "type_name": "Node", "properties": {}},
+                {"id": "e2", "type_name": "Node", "properties": {}},
+            ],
+            "relationships": [],
+        },
+    )
+    assert r.status_code == 200, r.text
+    r = client.put(
+        papi("/view/snapshot"),
+        json={
+            "name": "v",
+            "folders": [
+                {"name": "A", "folders": [{"name": "AB", "elements": ["eb"]}]},
+                {"name": "C", "elements": ["e2"]},
+                {"name": "D"},
+            ],
+        },
+    )
+    assert r.status_code == 200, r.text
+    folders = r.json()["view"]["folders"]
+    a_id = folders[0]["id"]
+    c_id = folders[1]["id"]
+    d_id = folders[2]["id"]
+    before = client.get(papi("/view")).json()["view"]
+
+    delete_token = _folder_lease(client, a_id, intent="delete")
+    r = client.post(
+        papi("/locks"),
+        json={
+            "targets": [
+                {"resource_id": c_id, "mode": "exclusive", "type": "folder"},
+                {"resource_id": d_id, "mode": "exclusive", "type": "folder"},
+            ],
+            "intent": "edit",
+        },
+    )
+    assert r.status_code == 200, r.text
+    move_token = r.json()["token"]
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": _rev(client),
+            "ops": [
+                {"kind": "delete_folder", "id": a_id},
+                {
+                    "kind": "move_element",
+                    "element_id": "e2",
+                    "from_folder_id": c_id,
+                    "to_folder_id": d_id,
+                    "index": 0,
+                },
+            ],
+            "message": "m",
+            "lock_tokens": [delete_token, move_token],
+        },
+    )
+    assert r.status_code == 200, r.text
+    mid = client.get(papi("/view")).json()["view"]
+    assert [f["name"] for f in mid["folders"]] == ["C", "D"]  # A gone
+    assert mid["folders"][1]["elements"] == ["e2"]  # moved into D
+
+    r = client.post(papi("/model/undo"))
+    assert r.status_code == 200, r.text
+
+    after = client.get(papi("/view")).json()["view"]
+    assert after == before  # deep equality: the FULL tree, not a spot field
