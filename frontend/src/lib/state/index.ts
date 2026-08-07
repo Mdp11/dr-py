@@ -306,6 +306,7 @@ export {
 	clearSnippetElements,
 	closeSnippetDraft,
 	ensureSnippetDraft,
+	forkSnippetDraftAsCopy,
 	getSnippetDraft,
 	getSnippetLint,
 	getSnippetLockHolder,

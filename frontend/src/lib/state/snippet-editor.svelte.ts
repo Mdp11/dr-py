@@ -14,10 +14,12 @@
  * DiffDrawer's Commit sends the batch. Opening a SAVED snippet first checks the
  * artifact out (`art:<id>` exclusive lease); a denial does not refuse the tab —
  * it opens UNSAVEABLE behind the holder banner (`_lockDenied`): Save is
- * disabled (this tab has no Save-as), while the definition-editing surface
- * itself is NOT yet gated. `navigation-editor.svelte.ts`'s `ensureDraft`
- * docstring is the canonical statement of that scope and of the open
- * follow-up. The tab is deliberately
+ * disabled (this tab has no ordinary Save-as) and the CodeMirror document goes
+ * `inert` too. `navigation-editor.svelte.ts`'s `ensureDraft` docstring is the
+ * canonical statement of that scope. The escape hatch is `forkSnippetDraftAsCopy`
+ * — "Save as copy" on the banner — which stages a fresh CREATE under a temp id
+ * and opens it in a SEPARATE new tab, leaving this one exactly as it was. The
+ * tab is deliberately
  * NOT re-keyed when a create is staged: the draft keeps living in its
  * `snip:draft:N` tab and is rebound to `snip:<id>` only when the commit's
  * `id_map` supplies a canonical id (see the module-scope listeners at the
@@ -35,13 +37,20 @@ import {
 	onArtifactCommit,
 	onArtifactStageDiscarded,
 	onArtifactStagedDelete,
+	repointStagedArtifactSourceTab,
 	stageArtifactCreate,
 	stageArtifactUpdate
 } from './artifact-edits.svelte';
 import { releaseArtifactIfUnneeded } from './checkout.svelte';
 import { acquireArtifactLease, lockHolderLabel } from './edit-gate';
 import { isTempId } from './ops';
-import { bindTabToArtifact, closeTab, repointTabArtifact, retitleTab } from './workspace.svelte';
+import {
+	bindTabToArtifact,
+	closeTab,
+	openArtifactTab,
+	repointTabArtifact,
+	retitleTab
+} from './workspace.svelte';
 
 export interface SnippetDraft {
 	name: string;
@@ -64,13 +73,14 @@ const DEFAULT_CODE = '';
 const _drafts = new SvelteMap<string, SnippetDraft>();
 /**
  * tabId -> the peer holding the `art:` lease this tab was refused, as a display
- * label. Present == the tab is UNSAVEABLE: the payload loaded (a denial never
- * refuses the tab), the name input and Save are disabled (this tab has no
- * Save-as) and the banner offers Retry — but the editing surface itself is
- * NOT gated (see
- * `navigation-editor.svelte.ts`'s `ensureDraft` docstring). Absent for a
- * VIEWER too — the whole workspace is already read-only for them, so a per-tab
- * "checked out by…" line would be noise.
+ * label. Present == the tab is UNSAVEABLE AND READ-ONLY: the payload loaded (a
+ * denial never refuses the tab), the name input and Save are disabled (this
+ * tab has no ordinary Save-as), the CodeMirror document goes `inert`, and the
+ * banner offers Retry plus "Save as copy" (`forkSnippetDraftAsCopy`) — see
+ * `navigation-editor.svelte.ts`'s `ensureDraft` docstring for the canonical
+ * statement of what a denial gates. Absent for a VIEWER too — the whole
+ * workspace is already read-only for them, so a per-tab "checked out by…"
+ * line would be noise.
  */
 const _lockDenied = new SvelteMap<string, string>();
 
@@ -328,9 +338,9 @@ export async function ensureSnippetDraft(tabId: string): Promise<SnippetDraft> {
 		// investing work in a tab whose edits can never land. A denial does NOT
 		// refuse the tab — the payload still loads and the tab opens UNSAVEABLE
 		// behind the holder banner (a viewer gets no banner: see `_lockDenied`).
-		// Unsaveable, NOT read-only: the CodeMirror document stays editable —
-		// `navigation-editor.svelte.ts`'s `ensureDraft` docstring is the canonical
-		// statement of what is gated and of the open follow-up.
+		// Unsaveable AND read-only: SnippetTab wraps the CodeMirror host in
+		// `inert` while denied — `navigation-editor.svelte.ts`'s `ensureDraft`
+		// docstring is the canonical statement of what is gated.
 		//
 		// The `.catch` is load-bearing, not defensive noise: `ensureCheckout`
 		// RETHROWS anything that is not a lock conflict, and our only caller is a
@@ -455,6 +465,40 @@ export async function saveSnippetDraft(tabId: string): Promise<void> {
 		stageArtifactUpdate(draft.artifactId, { name: draft.name, payload });
 		_drafts.set(tabId, { ...draft, dirty: false });
 	}
+}
+
+/**
+ * Fork a (typically lock-denied) tab's draft into a staged CREATE under a
+ * fresh temp id and open it in a new tab — snippet's "Save as copy", the
+ * banner's escape hatch for a tab that can never save. Mirrors
+ * `saveAsDraft`/`saveAsTableDraft`'s stage-first-then-move-tab ordering
+ * (`navigation-editor.svelte.ts:844` — the new tab key is `snip:<tempId>`, so
+ * it cannot exist until the temp id does, hence `repointStagedArtifactSourceTab`
+ * running AFTER `openArtifactTab` mints it; see that function's docstring) with
+ * one deliberate difference: those two REKEY the source tab in place (the fork
+ * replaces what was open there), but this snippet had no Save-as to begin
+ * with, and the source tab may currently be READ-ONLY (a denied tab's whole
+ * editing surface goes `inert` — see `_lockDenied`'s docstring above), so
+ * retiring it out from under the user mid-denial would be a surprise, not a
+ * convenience. The source tab therefore keeps its draft, its denial state,
+ * and its artifact binding exactly as they were — "Save as copy" must NEVER
+ * mutate what the peer holds — and the fork opens as a SEPARATE tab instead.
+ * No lease is taken: a temp id names no server row, so there is nothing to
+ * check out.
+ */
+export async function forkSnippetDraftAsCopy(tabId: string, name: string): Promise<void> {
+	const draft = _drafts.get(tabId);
+	if (!draft) return;
+	const payload = { schema_version: 1, language: 'python', code: draft.code };
+	// A fork is always a brand-new artifact, so nothing is excluded from the
+	// clash check — not even the original it was forked from.
+	assertNoNameClash('code_snippet', name, null);
+	const tempId = stageArtifactCreate('code_snippet', name, payload, null);
+	// Also mints the tab (id `snip:${tempId}`, per PREFIX in workspace.svelte.ts)
+	// and activates it — the same helper every "open this artifact" call site uses.
+	const newTabId = openArtifactTab('snippet', { artifactId: tempId, title: name });
+	_drafts.set(newTabId, { ...draft, name, artifactId: tempId, artifactRev: null, dirty: false });
+	repointStagedArtifactSourceTab(tempId, newTabId);
 }
 
 /** Discard the local draft and re-fetch the server copy — the recovery path for

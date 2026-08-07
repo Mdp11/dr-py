@@ -58,14 +58,17 @@
 	const draft = $derived(getTableDraft(tabId));
 	/** Non-null while a peer holds this table's `art:` lease: the tab is
 	 * UNSAVEABLE until the check-out succeeds — Save and Save as are disabled
-	 * behind the banner ("Retry"), while the editing surface itself stays live.
-	 * See `navigation-editor.svelte.ts`'s `ensureDraft` docstring. */
+	 * behind the banner ("Retry"). See `navigation-editor.svelte.ts`'s
+	 * `ensureDraft` docstring. */
 	const lockHolder = $derived(getTableLockHolder(tabId));
 	const editable = $derived(canEdit());
 	/** A refused check-out disables the SAVE affordances (name, Save, Save as)
-	 * but keeps them VISIBLE — paired with the banner, that is what explains why.
-	 * It does NOT gate the editing surface; the banner copy says "you will not be
-	 * able to save" rather than "read-only" for exactly that reason. */
+	 * but keeps them VISIBLE — paired with the banner, that is what explains
+	 * why. It ALSO gates the editing surface: the grid (and its
+	 * column-manager/edit-column/add-column chrome) below is wrapped in
+	 * `inert={locked}` (see the markup), so a denied tab cannot accumulate
+	 * edits it will never be able to commit. The banner's "Save as copy" is the
+	 * escape hatch — it lives outside that `inert` container, on purpose. */
 	const locked = $derived(lockHolder !== null);
 	const page = $derived(getTablePage(tabId));
 	const warnings = $derived(getTableWarnings(tabId));
@@ -373,6 +376,24 @@
 		}
 	}
 
+	/** Banner-only escape hatch for a denied tab: the same fork the (disabled,
+	 * while locked) toolbar "Save as…" button uses, reached directly so it
+	 * works regardless of that button's own `disabled={locked}` gate — a fork
+	 * stages a brand-new CREATE, which needs no lease. Separate prompt copy
+	 * from `saveAs` (a "(copy)" default name) so the two affordances read as
+	 * distinct even though they call the same store function. */
+	async function saveAsCopy(): Promise<void> {
+		if (!draft) return;
+		const name = window.prompt('Save copy as', `${draft.name} (copy)`);
+		if (!name) return;
+		saveError = null;
+		try {
+			await saveAsTableDraft(tabId, name);
+		} catch (e) {
+			saveError = e instanceof Error ? e.message : 'Save failed';
+		}
+	}
+
 	async function exportTable(format: 'xlsx' | 'json'): Promise<void> {
 		if (exporting) return; // one export at a time — the trigger is disabled too
 		saveError = null;
@@ -534,6 +555,14 @@
 				<button type="button" class="underline" onclick={() => void reloadTableDraft(tabId)}>
 					Reload
 				</button>
+				<button
+					type="button"
+					data-testid="table-save-as-copy"
+					class="underline"
+					onclick={() => void saveAsCopy()}
+				>
+					Save as copy
+				</button>
 			</div>
 		{/if}
 		{#if warnings.length > 0}
@@ -666,7 +695,7 @@
 		{#if saveError}
 			<p class="px-3 py-1 text-xs text-destructive">{saveError}</p>
 		{/if}
-		<div class="min-h-0 flex-1">
+		<div class="min-h-0 flex-1" data-testid="table-grid-host" inert={locked}>
 			<TableGrid
 				{tabId}
 				onEditColumn={editable ? editColumn : undefined}
@@ -729,7 +758,11 @@
 				<!-- One body, no tab strip: the JSON export options moved out to the
 				     export dialog, where they sit beside the inclusion/order settings
 				     they share a file with. -->
-				<div class="min-h-0 flex-1 overflow-y-auto pr-1">
+				<div
+					class="min-h-0 flex-1 overflow-y-auto pr-1"
+					data-testid="column-manager-host"
+					inert={locked}
+				>
 					<ColumnManager {tabId} focusIndex={settingsFocus} />
 				</div>
 				<div class="flex shrink-0 items-center justify-end gap-2 border-t border-border pt-2">

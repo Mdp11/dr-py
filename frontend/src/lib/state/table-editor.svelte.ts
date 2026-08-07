@@ -34,9 +34,9 @@
  * DiffDrawer's Commit sends the batch. Opening a SAVED table first checks the
  * artifact out (`art:<id>` exclusive lease); a denial does not refuse the tab —
  * it opens UNSAVEABLE behind the holder banner (`_lockDenied`): Save and Save
- * as are disabled, while the definition-editing surface itself is NOT yet gated.
+ * as are disabled, and the column-manager/grid editing chrome goes `inert` too.
  * `navigation-editor.svelte.ts`'s `ensureDraft` docstring is the canonical
- * statement of that scope and of the open follow-up. The tab is deliberately
+ * statement of that scope. The tab is deliberately
  * NOT re-keyed when a create is staged from a `tbl:draft:N` tab: the draft
  * keeps living under that key and is rebound to `tbl:<id>` only when
  * the commit's `id_map` supplies a canonical id (see the module-scope listeners
@@ -158,12 +158,12 @@ const _loading = new SvelteMap<string, boolean>();
 const _errors = new SvelteMap<string, string>();
 /**
  * tabId -> the peer holding the `art:` lease this tab was refused, as a display
- * label. Present == the tab is UNSAVEABLE: the payload loaded (a denial never
- * refuses the tab), the name input / Save / Save as are disabled and the banner
- * offers Retry — but the editing surface itself is NOT gated (see
- * `navigation-editor.svelte.ts`'s `ensureDraft` docstring). Absent for a
- * VIEWER too — the whole workspace is already read-only for them, so a per-tab
- * "checked out by…" line would be noise.
+ * label. Present == the tab is UNSAVEABLE AND READ-ONLY: the payload loaded (a
+ * denial never refuses the tab), the name input / Save / Save as are disabled,
+ * the grid's column-manager/editing chrome goes `inert`, and the banner offers
+ * Retry plus "Save as copy" (see `navigation-editor.svelte.ts`'s `ensureDraft`
+ * docstring). Absent for a VIEWER too — the whole workspace is already
+ * read-only for them, so a per-tab "checked out by…" line would be noise.
  */
 const _lockDenied = new SvelteMap<string, string>();
 /**
@@ -1098,9 +1098,10 @@ export async function ensureTableDraft(tabId: string): Promise<TableDraft> {
 	// investing work in a tab whose edits can never land. A denial does NOT
 	// refuse the tab — the payload still loads and the tab opens UNSAVEABLE
 	// behind the holder banner (a viewer gets no banner: see `_lockDenied`).
-	// Unsaveable, NOT read-only: the Settings dialog and column editors are still
-	// live — `navigation-editor.svelte.ts`'s `ensureDraft` docstring is the
-	// canonical statement of what is gated and of the open follow-up.
+	// Unsaveable AND read-only: TableView wraps the grid (and, while a peer
+	// holds this table, the Settings dialog's column manager) in `inert` —
+	// `navigation-editor.svelte.ts`'s `ensureDraft` docstring is the canonical
+	// statement of what is gated.
 	//
 	// The `.catch` is load-bearing, not defensive noise: `ensureCheckout`
 	// RETHROWS anything that is not a lock conflict, and our only caller is a
