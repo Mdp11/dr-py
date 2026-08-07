@@ -702,6 +702,43 @@ def undo(
         # on this request's DB transaction once accepted — see the persist
         # step below).
         model_inv, artifact_inv, view_inv = split_ops(batch.inverse_ops)
+        # True iff THIS request is the one that flipped session.view from
+        # None to non-None via load_or_create_view — tracked exactly like
+        # create_commit's own ``created_view`` so every failure/rejection path
+        # below can restore it to None rather than leaving a never-persisted
+        # materialization behind. A failed OR REJECTED request must be
+        # externally invisible: before this undo attempt GET /view reported
+        # whatever it reported, and any early return out of this block must
+        # leave it reporting that again — for the genuinely-empty case, not a
+        # materialized empty view with no ViewRow / view_rev to back it
+        # (final-review Finding 1 — mirrors create_commit's own created_view
+        # guard, which exists for the identical reason on the auto-create
+        # path).
+        created_view = False
+        # Resolve the view ONCE, before the peer-lease guard below reads it
+        # (final-review round 2, Finding A): ``view_op_folder_ids`` degrades
+        # its delete_folder/move_folder subtree-and-current-parent expansion
+        # to a bare single-resource id when ``view`` is None (mirroring
+        # ``required_locks``'s own None-view degradation) — so undoing while
+        # session.view is COLD (e.g. a prior ``DELETE /view``, which clears
+        # only the cache and leaves ``ViewRow`` intact) would derive the
+        # guard's resource set against an ABSENT tree while the applier below
+        # goes on to mutate the REAL, hydrated one — reopening exactly the
+        # "peer lease on a child gets silently stomped" hole Fix 2 closed for
+        # the case where session.view was already warm. Guarded on
+        # `view_inv` (an inverse batch with no view ops needs no view at
+        # all) and wrapped so a raise here — DB error, e.g. — re-pushes the
+        # JUST-POPPED batch before propagating: nothing else in this request
+        # has touched anything yet, but the pop above already has, and an
+        # unre-pushed pop is a silently lost undo slot (final-review round 2,
+        # Finding B).
+        if view_inv and session.view is None:
+            try:
+                session.view = load_or_create_view(db, project_id)
+            except Exception:
+                session.op_log.append(batch)
+                raise
+            created_view = True
         # The MODEL half of this route stays deliberately unlocked (the
         # documented migration-window stance until the frontend moves to
         # check-out/commit). The ARTIFACT and VIEW halves cannot: artifact
@@ -715,8 +752,9 @@ def undo(
         # on purpose (a create's temp/parent id, both ends of a move) — a
         # spurious id can only produce a conservative 409, never hide a held
         # lease — but delete_folder/move_folder need ``session.view`` (the
-        # CURRENT, pre-undo-application state) to resolve the subtree/current-
-        # parent ids the op itself doesn't name (see its docstring).
+        # CURRENT, pre-undo-application, just-resolved-above state) to
+        # resolve the subtree/current-parent ids the op itself doesn't name
+        # (see its docstring).
         peer_resources = [
             artifact_resource(aid) for aid in artifact_op_ids(artifact_inv)
         ] + [
@@ -728,6 +766,11 @@ def undo(
         )
         if peer_held:
             session.op_log.append(batch)
+            if created_view:
+                # this request's own hydration must not leak into a REJECTED
+                # (409) response's visible state — see created_view's
+                # docstring above.
+                session.view = None
             return JSONResponse(
                 status_code=409,
                 content={
@@ -747,6 +790,8 @@ def undo(
             res = _apply_batch(model, model_inv, restore=True)
         except Exception:
             session.op_log.append(batch)  # _apply_batch already rolled back
+            if created_view:
+                session.view = None  # see created_view's docstring above
             raise
         try:
             # restore mode on all three halves: exact ids are reinstated and
@@ -763,21 +808,11 @@ def undo(
             _rollback(model, res.inverse_units)
             session.invalidate_derived_caches()  # rolled back in place; A1/I1
             session.op_log.append(batch)
+            if created_view:
+                session.view = None  # see created_view's docstring above
             db.rollback()  # discard staged artifact rows
             raise
         view_res: ViewBatchResult | None = None
-        # True iff THIS request is the one that flipped session.view from
-        # None to non-None via load_or_create_view — tracked exactly like
-        # create_commit's own ``created_view`` so every failure path can
-        # restore it to None rather than leaving a never-persisted
-        # materialization behind. A failed request must be externally
-        # invisible: before this undo attempt GET /view reported whatever it
-        # reported, and a 422/500 out of this branch must leave it reporting
-        # that again — for the genuinely-empty case, not a materialized empty
-        # view with no ViewRow / view_rev to back it (final-review Finding 1
-        # — mirrors create_commit's own created_view guard, which exists for
-        # the identical reason on the auto-create path).
-        created_view = False
         # A single-user, no-peer sequence CAN still make this apply 422: the
         # legacy PUT /view/snapshot (routes/view.py) bypasses op_log entirely
         # (no Commit row) and, unlike POST /commits, only refuses a PEER's
@@ -792,15 +827,16 @@ def undo(
         # expectations, which is out of this task's scope.
         if view_inv:
             if session.view is None:
-                # a batch that touched the view implies one existed. This is
-                # NOT necessarily an "evicted + contentless resurrection":
-                # DELETE /view (routes/view.py, out of scope for this fix)
-                # clears only the in-memory cache and leaves ViewRow durably
-                # intact, so load_or_create_view hydrates from the still-live
-                # row when one exists rather than always materializing an
-                # empty view (final-review Fix 1 — see its docstring). Only a
-                # session that ALSO has no durable row at all (the true
-                # evicted+contentless case) gets a fresh empty View.
+                # Defensive fallback only: the resolve-view block near the
+                # top of this function already hydrated/auto-created
+                # session.view whenever view_inv is non-empty, so this branch
+                # is dead in the ordinary single-request case. It stays for
+                # the one race that block cannot close: routes/view.py's
+                # ``DELETE /view`` is deliberately out of scope and takes no
+                # lock, so a peer's concurrent DELETE could null
+                # session.view again between this request's earlier resolve
+                # and here. Same load_or_create_view call, same rationale
+                # (a ViewRow that exists IS the view — see its docstring).
                 session.view = load_or_create_view(db, project_id)
                 created_view = True
             try:

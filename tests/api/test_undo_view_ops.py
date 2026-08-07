@@ -378,3 +378,96 @@ def test_undo_refuses_while_peer_holds_lease_on_delete_folder_subtree_child(
     summary = client.get(papi("/model/summary")).json()
     assert summary["undo_depth"] == 1
     assert client.get(papi("/view")).json()["view"]["folders"][0]["id"] == d_id
+
+
+def test_undo_refuses_while_peer_holds_lease_on_subtree_child_after_view_cleared(
+    client: TestClient,
+) -> None:
+    """Regression for final-review round 2, Finding A (the undo half of the
+    ordering hole Fix 1 reopened): the SAME repro as the test above, but
+    with a ``DELETE /view`` inserted right before the undo call — the exact
+    sequence the reviewer verified independently breaks the guard above if
+    the resolve-view-before-deriving-the-guard fix isn't ALSO applied to
+    the peer-lease derivation itself (not just to the later apply step).
+
+    Before this fix: ``peer_resources`` was computed from
+    ``view_op_folder_ids(session.view, view_inv)`` while ``session.view``
+    was still ``None`` (a prior ``DELETE /view`` clears only the cache, not
+    the durable ``ViewRow``) — ``view_op_folder_ids``'s ``DeleteFolderOp``
+    branch degrades to ``{op.id}`` alone against a ``None`` view (mirroring
+    ``folder_subtree``'s own total-ness fallback), so the peer's lease on
+    child C was never even considered, and ``POST /model/undo`` returned
+    200 instead of 409 — silently deleting C out from under P's live
+    check-out. After the fix, undo resolves session.view BEFORE computing
+    peer_resources, so the guard sees the REAL subtree and still 409s."""
+    token = _folder_lease(client, "root")
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": _rev(client),
+            "ops": [
+                {
+                    "kind": "create_folder",
+                    "temp_id": "tmp_d",
+                    "parent_id": "root",
+                    "name": "D",
+                }
+            ],
+            "message": "m",
+            "lock_tokens": [token],
+        },
+    )
+    assert r.status_code == 200, r.text
+    d_id = r.json()["id_map"]["tmp_d"]
+
+    _seed_second_member("user-2", "user2@example.com")
+    view = client.get(papi("/view")).json()["view"]
+    view["folders"][0]["folders"].append({"name": "C"})
+    r = client.put(papi("/view/snapshot"), json=view, headers=OTHER_HEADERS)
+    assert r.status_code == 200, r.text
+    c_id = r.json()["view"]["folders"][0]["folders"][0]["id"]
+
+    r = client.post(
+        papi("/locks"),
+        json={
+            "targets": [{"resource_id": c_id, "mode": "exclusive", "type": "folder"}],
+            "intent": "edit",
+        },
+        headers=OTHER_HEADERS,
+    )
+    assert r.status_code == 200, r.text
+
+    # The one addition relative to the test above: the CALLER's own cache
+    # goes cold right before undo. The durable row (D -> C) is untouched.
+    assert client.delete(papi("/view")).status_code == 204
+    assert client.get(papi("/view")).json()["view"] is None
+
+    r = client.post(papi("/model/undo"))
+    assert r.status_code == 409, r.text
+    assert f"folder:{c_id}" in [c["resource_id"] for c in r.json()["conflicts"]]
+    summary = client.get(papi("/model/summary")).json()
+    assert summary["undo_depth"] == 1
+
+    # the rejection is externally invisible too: GET /view still reports
+    # whatever it reported right before this undo attempt (null — the
+    # DELETE /view above, not a materialized-then-abandoned hydrate).
+    assert client.get(papi("/view")).json()["view"] is None
+
+    # ...and durably: read the row directly (not via evict-then-refetch —
+    # P's lease on C is still live, and eviction is a no-op while any lease
+    # is live — see SessionRegistry.evict) to prove D -> C survived intact.
+    import json
+
+    from data_rover.api import content, db
+    from data_rover.api.session import DEFAULT_PROJECT_ID
+
+    gen = db.get_db()
+    s = next(gen)
+    try:
+        row = content.get_single_view(s, DEFAULT_PROJECT_ID)
+        assert row is not None
+        blob = json.loads(row.blob)
+    finally:
+        gen.close()
+    assert blob["folders"][0]["id"] == d_id
+    assert blob["folders"][0]["folders"][0]["id"] == c_id

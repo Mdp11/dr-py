@@ -359,7 +359,25 @@ def preview_commit(
         # model-only preview, which is the common case — pure overhead with
         # nothing to validate.
         if view_ops:
-            validate_view_ops(session.view, view_ops)
+            # Resolve the SAME durable-vs-cached view create_commit's own
+            # pre-mutex resolve now uses (final-review round 2, Finding C):
+            # a None session.view does NOT mean "no durable view" — it can
+            # mean a prior DELETE /view merely cleared the cache while
+            # ViewRow survives (see load_or_create_view's docstring) — so
+            # validating against validate_view_ops' own None-view fallback
+            # (a FRESH EMPTY view) here would let preview 422 "unknown
+            # folder" on a batch the real commit, which hydrates the durable
+            # blob, actually accepts. Resolved into a LOCAL, never assigned
+            # to session.view: preview must stay side-effect-free (no
+            # persist, no rev bump, no cache mutation) — only create_commit
+            # is allowed to materialize the auto-create/hydrate into the
+            # session itself.
+            preview_view = (
+                session.view
+                if session.view is not None
+                else load_or_create_view(db, project_id)
+            )
+            validate_view_ops(preview_view, view_ops)
         # _apply_batch raises 422 on a mutation-boundary structural error
         # (unknown type, missing endpoint, unknown property) — the safety net.
         res = _apply_batch(model, model_ops, restore=False)
@@ -557,6 +575,18 @@ def create_commit(
     ``rollback_view`` call — only failures raised AFTER it succeeded do.
     """
     _, model = require_model(session)
+    model_ops, artifact_ops, view_ops = split_ops(payload.ops)
+    # True iff THIS request is the one that flipped session.view from None
+    # to non-None via load_or_create_view — tracked so every early-return OR
+    # failure path below can restore it to None rather than leaving a
+    # never-committed materialization behind. A REJECTED (409/422/500)
+    # request must be externally invisible: before this request GET /view
+    # reported whatever it reported, and any return out of this function
+    # must leave it reporting that again — for the genuinely-empty case, not
+    # a materialized empty view with no ViewRow / view_rev to back it
+    # (final-review Finding 1, and round 2's Finding A/B extend this same
+    # guard to the two new resolve-view call sites below).
+    created_view = False
     if payload.base_rev > session.model_rev:
         return _conflict_response(session.model_rev, "stale base_rev")
     if payload.base_rev < session.model_rev:
@@ -599,11 +629,42 @@ def create_commit(
             # against a metamodel/model that no longer matches what it was
             # computed against.
             return _conflict_response(session.model_rev, "stale base_rev")
+        # Resolve the view HERE, immediately before the one check in this
+        # block that needs it (final-review round 2, Finding A) — not any
+        # earlier, so the three fail-closed checks above (which never
+        # consult view content at all) can never trigger an unnecessary
+        # hydration on their own return paths. _batch_touched_ids ->
+        # required_locks' folder_subtree/locate_folder expansion degrades to
+        # a bare single-resource id against a ``None`` view, exactly like
+        # the applier itself would under-derive a lock against an unresolved
+        # tree — so without resolving first, a stale delete_folder/
+        # move_folder batch's conflict/touched-set here would be computed
+        # against the WRONG (empty/absent) tree relative to what the real,
+        # hydrated one actually contains. No try/except needed: this is the
+        # first thing in the whole request that could mutate anything, so a
+        # raise here has nothing to roll back (Finding B falls out of the
+        # ordering for free — contrast undo's version of this same hoist,
+        # which runs AFTER a batch has already been popped and so must
+        # explicitly re-push on failure).
+        if view_ops and session.view is None:
+            session.view = load_or_create_view(db, project_id)
+            created_view = True
         if _affected_ids(tail) & _batch_touched_ids(model, session.view, payload.ops):
+            if created_view:
+                # this request's own hydration must not leak into a
+                # REJECTED (409) response's visible state — see created_view's
+                # docstring above.
+                session.view = None
             return _conflict_response(
                 session.model_rev, "conflicting concurrent commits"
             )
-    model_ops, artifact_ops, view_ops = split_ops(payload.ops)
+    elif view_ops and session.view is None:
+        # payload.base_rev == session.model_rev (no staleness at all — the
+        # common path): required_locks, inside the mutex below, needs the
+        # SAME resolved view the `<` branch above would have produced had
+        # this request been stale — see that branch's comment.
+        session.view = load_or_create_view(db, project_id)
+        created_view = True
     state = _ensure_validation_seeded(session, model)
     if not payload.ops:
         # Empty batch: nothing to apply. Mirrors apply_ops' and revert's
@@ -639,6 +700,11 @@ def create_commit(
             user.id, payload.lock_tokens, reqs, now=time.monotonic()
         )
         if missing:
+            if created_view:
+                # this request's own pre-mutex hydration must not leak into
+                # a REJECTED (409) response's visible state — see
+                # created_view's docstring above the staleness checks.
+                session.view = None
             return JSONResponse(
                 status_code=409,
                 content={
@@ -651,8 +717,16 @@ def create_commit(
             )
         # b. apply the model half (422 on mutation-boundary error — let it
         #    propagate; _apply_batch already rolled itself back and nothing
-        #    artifact-side has been staged yet)
-        res = _apply_batch(model, model_ops, restore=False)
+        #    artifact-side has been staged yet). created_view may already be
+        #    True here (the pre-mutex resolve above), so this needs its own
+        #    guard too, unlike round 1's shape where hydration never
+        #    happened this early (final-review round 2, Finding B).
+        try:
+            res = _apply_batch(model, model_ops, restore=False)
+        except Exception:
+            if created_view:
+                session.view = None
+            raise
         # b2. apply the artifact half, staged on this request's DB transaction.
         #     Seeded with the model id_map so an artifact payload may reference
         #     an element created earlier in the SAME batch. On failure both
@@ -673,27 +747,27 @@ def create_commit(
             # model half-mutated. Undo both halves, then let it propagate.
             _rollback(model, res.inverse_units)
             session.invalidate_derived_caches()  # rolled back in place; A1/I1
+            if created_view:
+                session.view = None  # see created_view's docstring above
             db.rollback()  # discard staged artifact rows
             raise
         # b3. apply the view half to session.view IN PLACE, all-or-nothing
-        #     (resolving/auto-creating via load_or_create_view for a project
-        #     whose session has no view cached — the ops path must be
-        #     self-sufficient once the legacy PUT retires). Seeded with both
+        #     (session.view was already resolved before the mutex — see the
+        #     staleness-check section above — whenever view_ops is
+        #     non-empty; created_view was set there too). Seeded with both
         #     prior id_maps so a placement may reference an element or
         #     artifact created earlier in the SAME batch.
         view_res: ViewBatchResult | None = None
-        # True iff THIS request is the one that flipped session.view from
-        # None to non-None (via load_or_create_view — an empty View for a
-        # project that never had one, OR a hydrate of the still-durable
-        # ViewRow a prior DELETE /view merely uncached, see that function's
-        # docstring) — tracked so every failure path below can restore it to
-        # None rather than leaving a never-committed materialization behind.
-        # A view resolved by an earlier successful request must NOT be
-        # un-cached by a later request's failure, hence this is
-        # request-local, not view-derived.
-        created_view = False
         if view_ops:
             if session.view is None:
+                # Defensive fallback only: the pre-mutex resolve above
+                # already hydrated/auto-created session.view whenever
+                # view_ops is non-empty, so this branch is dead in the
+                # ordinary single-request case. It stays for the one race
+                # that block cannot close: routes/view.py's ``DELETE /view``
+                # is deliberately out of scope and takes no lock, so a
+                # peer's concurrent DELETE could null session.view again
+                # between this request's earlier resolve and here.
                 session.view = load_or_create_view(db, project_id)
                 created_view = True
             try:

@@ -13,6 +13,27 @@ from data_rover.api.main import create_app
 
 from .conftest import AUTH_HEADERS, feed_url, papi, seed_default_project
 
+OTHER_HEADERS = {"x-user-id": "user-2", "x-user-email": "user2@example.com"}
+
+
+def _seed_second_member(user_id: str, email: str) -> None:
+    """Mirrors the helper of the same name in test_commits_artifact_ops.py /
+    test_undo_view_ops.py."""
+    from data_rover.api import db
+    from data_rover.api.db_models import Role, User
+    from data_rover.api.session import DEFAULT_PROJECT_ID
+    from data_rover.api.tenancy import add_member
+
+    gen = db.get_db()
+    s = next(gen)
+    try:
+        if s.get(User, user_id) is None:
+            s.add(User(id=user_id, email=email))
+            s.commit()
+        add_member(s, DEFAULT_PROJECT_ID, user_id, Role.editor)
+    finally:
+        gen.close()
+
 #: Node + a containment relationship type, matching the pattern
 #: test_incremental_invalidation.py's CONTAINMENT_MM uses to provoke a
 #: STRUCTURAL "two containment parents" blocker (dangling endpoints would
@@ -166,8 +187,11 @@ def test_commit_after_view_cleared_hydrates_durable_view_not_an_empty_one(
         },
     )
     assert r.status_code == 200, r.text
-    # view_rev advanced from the PRIOR durable value, not started fresh at 1
-    # (an empty auto-create would have reported 1 here).
+    # view_rev advances from the PRIOR durable value either way (final-review
+    # round 2, Finding D: upsert_single_view finds the row by project_id
+    # alone and bumps whatever it finds — an empty auto-create would ALSO
+    # have reported prior_view_rev + 1 here, just with the wrong CONTENT).
+    # The real differentiator is the folder set asserted below.
     assert r.json()["view_rev"] == prior_view_rev + 1
 
     out = client.get(papi("/view")).json()
@@ -377,3 +401,102 @@ def test_commit_event_scope_includes_view(client: TestClient) -> None:
         while commit2["type"] != "commit":
             commit2 = ws.receive_json()
         assert commit2["scope"] == ["model", "view"]
+
+
+def test_delete_folder_commit_requires_lease_on_subtree_child_after_view_cleared(
+    client: TestClient,
+) -> None:
+    """Regression for final-review round 2, Finding A (the create_commit
+    half of the ordering hole Fix 1 reopened). create_commit's own
+    pre-mutex staleness/conflict derivations, and its lock-verification
+    step, used to run BEFORE session.view was resolved — so a
+    delete_folder op's lock requirement (required_locks -> folder_subtree)
+    degraded to the named folder alone whenever session.view started COLD,
+    e.g. right after DELETE /view, which clears only the in-memory cache
+    and leaves the durable ViewRow (and D's real child C) fully intact.
+
+    The reviewer's verified repro: P leases folder:C (child of D);
+    DELETE /view; the caller's own POST /locks request for a DELETE lease
+    on folder:D ALSO degrades — a separate, out-of-scope blind spot in
+    routes/locks.py's expand_targets, which sees the same None view at that
+    point — and is granted covering ONLY D, never C. Before this fix,
+    create_commit's OWN required_locks call also ran against that same None
+    view and agreed there was nothing more to check, so the commit
+    succeeded and the real (b3-hydrated) applier cascaded the delete
+    through C anyway — silently destroying a folder a peer had checked out.
+    After the fix, create_commit resolves the SAME hydrated view before its
+    lock derivation runs, independently re-derives the FULL {D, C}
+    requirement, finds C's lease missing from what the caller holds, and
+    409s instead — leaving D and C durably untouched."""
+    r = client.put(
+        papi("/view/snapshot"),
+        json={"name": "v", "folders": [{"name": "D", "folders": [{"name": "C"}]}]},
+    )
+    assert r.status_code == 200, r.text
+    d_id = r.json()["view"]["folders"][0]["id"]
+    c_id = r.json()["view"]["folders"][0]["folders"][0]["id"]
+
+    # P checks out C for editing.
+    _seed_second_member("user-2", "user2@example.com")
+    r = client.post(
+        papi("/locks"),
+        json={
+            "targets": [{"resource_id": c_id, "mode": "exclusive", "type": "folder"}],
+            "intent": "edit",
+        },
+        headers=OTHER_HEADERS,
+    )
+    assert r.status_code == 200, r.text
+
+    # The caller's cache goes cold; the durable row (D -> C) is untouched.
+    assert client.delete(papi("/view")).status_code == 204
+    assert client.get(papi("/view")).json()["view"] is None
+
+    # The caller's own lock request degrades too (session.view is None at
+    # this point in routes/locks.py as well — a separate, out-of-scope blind
+    # spot) and is granted covering ONLY D, not C. This call succeeding is
+    # part of the repro setup, not the thing under test.
+    r = client.post(
+        papi("/locks"),
+        json={
+            "targets": [{"resource_id": d_id, "mode": "exclusive", "type": "folder"}],
+            "intent": "delete",
+        },
+    )
+    assert r.status_code == 200, r.text
+    d_token = r.json()["token"]
+
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": _rev(client),
+            "ops": [{"kind": "delete_folder", "id": d_id}],
+            "message": "m",
+            "lock_tokens": [d_token],
+        },
+    )
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"] == "required lock not held"
+    assert f"folder:{c_id}" in [m["resource_id"] for m in r.json()["missing"]]
+
+    # nothing was applied: the lock check is the FIRST thing inside the
+    # mutex, so nothing ever got a chance to mutate OR persist before it
+    # failed. Read the durable row directly (not via evict-then-refetch:
+    # both peers still hold live leases at this point, and eviction is a
+    # no-op while any lease is live — see SessionRegistry.evict) to prove
+    # the ViewRow itself still shows D -> C.
+    import json
+
+    from data_rover.api import content, db
+    from data_rover.api.session import DEFAULT_PROJECT_ID
+
+    gen = db.get_db()
+    s = next(gen)
+    try:
+        row = content.get_single_view(s, DEFAULT_PROJECT_ID)
+        assert row is not None
+        blob = json.loads(row.blob)
+    finally:
+        gen.close()
+    assert blob["folders"][0]["id"] == d_id
+    assert blob["folders"][0]["folders"][0]["id"] == c_id
