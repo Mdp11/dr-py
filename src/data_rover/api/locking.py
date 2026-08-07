@@ -464,7 +464,11 @@ def required_locks(
             add(artifact_resource(op.id), LockMode.EXCLUSIVE, LockIntent.DELETE)
         elif isinstance(op, CreateFolderOp):
             created.add(folder_resource(op.temp_id))
-            add(folder_resource(op.parent_id), LockMode.EXCLUSIVE, LockIntent.CREATE_CHILD)
+            add(
+                folder_resource(op.parent_id),
+                LockMode.EXCLUSIVE,
+                LockIntent.CREATE_CHILD,
+            )
         elif isinstance(op, RenameFolderOp):
             add(folder_resource(op.id), LockMode.EXCLUSIVE, LockIntent.EDIT)
         elif isinstance(op, MoveFolderOp):

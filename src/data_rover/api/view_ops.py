@@ -225,7 +225,11 @@ def apply_view_ops(
             )
             res.canonical_ops.append(
                 op.model_copy(
-                    update={"temp_id": folder_id, "parent_id": parent_id, "index": index}
+                    update={
+                        "temp_id": folder_id,
+                        "parent_id": parent_id,
+                        "index": index,
+                    }
                 )
             )
         elif isinstance(op, RenameFolderOp):
@@ -264,7 +268,11 @@ def apply_view_ops(
             )
             res.canonical_ops.append(
                 op.model_copy(
-                    update={"id": moving.id, "to_parent_id": to_parent_id, "index": index}
+                    update={
+                        "id": moving.id,
+                        "to_parent_id": to_parent_id,
+                        "index": index,
+                    }
                 )
             )
         elif isinstance(op, DeleteFolderOp):
@@ -342,9 +350,7 @@ def apply_view_ops(
             src = _require_folder(view, rid(op.from_folder_id))
             dst = _require_folder(view, rid(op.to_folder_id))
             if element_id not in src.elements:
-                raise _422(
-                    f"element {element_id!r} is not placed in folder {src.id!r}"
-                )
+                raise _422(f"element {element_id!r} is not placed in folder {src.id!r}")
             old_index = src.elements.index(element_id)
             src.elements.pop(old_index)
             index = _clamped(op.index, len(dst.elements))

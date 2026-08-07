@@ -116,6 +116,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+
 def _id_field_names(op_types: Iterable[Any]) -> frozenset[str]:
     """Field names that carry a resource id, DERIVED from the op models.
 

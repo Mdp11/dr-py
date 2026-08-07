@@ -87,7 +87,12 @@ from ..identity import get_current_user
 from ..invalidation import touched_keys
 from ..locking import artifact_resource, folder_resource
 from ..settings import get_settings
-from ..view_ops import ViewBatchResult, apply_view_ops_atomic, rollback_view, view_op_folder_ids
+from ..view_ops import (
+    ViewBatchResult,
+    apply_view_ops_atomic,
+    rollback_view,
+    view_op_folder_ids,
+)
 from ..schemas import (
     TEMP_ID_PREFIX,
     CreateElementOp,
