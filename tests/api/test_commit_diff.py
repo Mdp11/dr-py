@@ -114,6 +114,19 @@ def _rev(c: TestClient) -> int:
     return rev
 
 
+def _folder_lease(client: TestClient, fid: str, intent: str = "edit") -> str:
+    r = client.post(
+        papi("/locks"),
+        json={
+            "targets": [{"resource_id": fid, "mode": "exclusive", "type": "folder"}],
+            "intent": intent,
+        },
+    )
+    assert r.status_code == 200, r.text
+    token: str = r.json()["token"]
+    return token
+
+
 def _lock(
     c: TestClient, resource_id: str, intent: str = "edit", rtype: str = "element"
 ) -> str:
@@ -389,3 +402,80 @@ def test_diff_of_element_update_and_delete(client: TestClient) -> None:
 
 def test_diff_unknown_rev_404(client: TestClient) -> None:
     assert client.get(papi("/commits/999/diff")).status_code == 404
+
+
+def test_view_commit_diff_renders_ops_with_prior_names(client) -> None:
+    r = client.put(papi("/view/snapshot"), json={"name": "v", "folders": [{"name": "A"}]})
+    fid = r.json()["view"]["folders"][0]["id"]
+    token = _folder_lease(client, fid)
+    base = _rev(client)
+    ops = [
+        {"kind": "rename_folder", "id": fid, "name": "A2"},
+        {"kind": "create_folder", "temp_id": "tmp_c", "parent_id": fid, "name": "C"},
+        {"kind": "place_element", "element_id": "e1", "folder_id": "tmp_c"},
+    ]
+    r = client.post(
+        papi("/commits"),
+        json={"base_rev": base, "ops": ops, "message": "m", "lock_tokens": [token]},
+    )
+    assert r.status_code == 200, r.text
+    cid = r.json()["id_map"]["tmp_c"]
+
+    r = client.get(papi(f"/commits/{base + 1}/diff"))
+    assert r.status_code == 200
+    out = r.json()
+    assert out["scope"] == ["view"]
+    entries = out["view"]
+    assert [e["kind"] for e in entries] == ["rename_folder", "create_folder", "place_element"]
+    assert entries[0] == {
+        **entries[0],
+        "folder_id": fid,
+        "name": "A2",
+        "name_before": "A",
+    }
+    assert entries[1]["folder_id"] == cid and entries[1]["parent_id"] == fid
+    assert entries[2]["element_id"] == "e1" and entries[2]["folder_id"] == cid
+    # model/artifact halves untouched by a pure-view commit
+    assert out["elements"] == {"added": [], "modified": [], "deleted": []}
+
+
+def test_delete_folder_diff_carries_prior_name(client) -> None:
+    r = client.put(papi("/view/snapshot"), json={"name": "v", "folders": [{"name": "A"}]})
+    fid = r.json()["view"]["folders"][0]["id"]
+    token = _folder_lease(client, fid, intent="delete")
+    base = _rev(client)
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": base,
+            "ops": [{"kind": "delete_folder", "id": fid}],
+            "message": "m",
+            "lock_tokens": [token],
+        },
+    )
+    assert r.status_code == 200, r.text
+    r = client.get(papi(f"/commits/{base + 1}/diff"))
+    e = r.json()["view"][0]
+    assert e["kind"] == "delete_folder" and e["name_before"] == "A"
+
+
+def test_mixed_commit_scope_lists_both(client) -> None:
+    r = client.put(papi("/view/snapshot"), json={"name": "v", "folders": [{"name": "A"}]})
+    fid = r.json()["view"]["folders"][0]["id"]
+    token = _folder_lease(client, fid)
+    base = _rev(client)
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": base,
+            "ops": [
+                {"kind": "create_element", "temp_id": "tmp_e", "type_name": "Node"},
+                {"kind": "rename_folder", "id": fid, "name": "A2"},
+            ],
+            "message": "m",
+            "lock_tokens": [token],
+        },
+    )
+    assert r.status_code == 200, r.text
+    r = client.get(papi(f"/commits/{base + 1}/diff"))
+    assert r.json()["scope"] == ["model", "view"]

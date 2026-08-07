@@ -881,14 +881,35 @@ class CommitArtifactDiffs(BaseModel):
     deleted: list[ArtifactDiffDeletedOut] = Field(default_factory=list)
 
 
+class ViewDiffEntryOut(BaseModel):
+    """One canonical view op, rendered for history. The view family is
+    fine-grained on the wire, so the ops ARE the diff — no before/after
+    reconstruction. ``name_before`` (rename/delete) comes from the commit's
+    inverse half. Folder ids referenced by other entries are NOT resolved to
+    names here (journal-only stance): the client resolves against its live
+    view and degrades to the bare id for folders deleted since."""
+
+    kind: str
+    folder_id: str | None = None
+    name: str | None = None
+    name_before: str | None = None
+    parent_id: str | None = None
+    index: int | None = None
+    from_folder_id: str | None = None
+    to_folder_id: str | None = None
+    element_id: str | None = None
+    artifact_id: str | None = None
+    artifact_kind: str | None = None
+
+
 class CommitDiffOut(BaseModel):
     """Everything one commit changed, across content families.
 
     Model entities reuse the change-request shapes (``CrElementOps`` /
     ``CrRelationshipOps``) rather than parallel ones, so a client renders a
     commit diff and a CR diff with the same component. ``scope`` mirrors the
-    commit feed event's field ("model" / "artifact"); ``is_rebind`` is true
-    when either metamodel FK is set, matching ``CommitSummaryOut``.
+    commit feed event's field ("model" / "artifact" / "view"); ``is_rebind``
+    is true when either metamodel FK is set, matching ``CommitSummaryOut``.
     """
 
     rev: int
@@ -901,6 +922,7 @@ class CommitDiffOut(BaseModel):
     elements: CrElementOps = Field(default_factory=CrElementOps)
     relationships: CrRelationshipOps = Field(default_factory=CrRelationshipOps)
     artifacts: CommitArtifactDiffs = Field(default_factory=CommitArtifactDiffs)
+    view: list[ViewDiffEntryOut] = Field(default_factory=list)
 
 
 class RevertRequest(BaseModel):
