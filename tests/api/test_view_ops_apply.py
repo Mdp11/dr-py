@@ -220,6 +220,30 @@ def test_apply_view_ops_atomic_rolls_back_prefix() -> None:
     assert v.model_dump_json() == before
 
 
+def test_apply_view_ops_atomic_rolls_back_multi_op_inverse_unit() -> None:
+    """Regression for final-review Fix 4b: the rollback-prefix test above
+    only exercises a ``rename_folder`` prefix, whose inverse is a single,
+    trivially-exact op. This drives a ``delete_folder`` on a NON-EMPTY folder
+    (``A``, which has a nested subfolder, two placed elements, and a placed
+    artifact ref — see ``_view()``) as the successful prefix, whose inverse is
+    the MULTI-OP ``_recreate_ops`` unit (the shape ``rollback_view`` actually
+    has to replay correctly, parent-before-children-before-placements),
+    followed by a failing op — and asserts the FULL blob is restored by deep
+    equality, not just a spot field."""
+    v = _view()
+    f = _ids(v)
+    before = v.model_dump_json()
+    with pytest.raises(HTTPException):
+        apply_view_ops_atomic(
+            v,
+            [
+                DeleteFolderOp(kind="delete_folder", id=f["A"]),
+                RenameFolderOp(kind="rename_folder", id="missing", name="x"),
+            ],
+        )
+    assert v.model_dump_json() == before
+
+
 def test_validate_view_ops_is_dry() -> None:
     v = _view()
     f = _ids(v)

@@ -139,3 +139,59 @@ def test_hydration_heals_missing_folder_ids(client: TestClient) -> None:
         assert row is not None and '"id"' in row.blob and row.view_rev == 0
     finally:
         gen.close()
+
+
+def test_view_op_commit_survives_eviction(client: TestClient) -> None:
+    """Regression for final-review Fix 4c: this is the test that would catch
+    a "wrong blob staged" bug. ``POST /commits``' view-op step 'e' stages the
+    resulting ``session.view`` blob on the SAME DB transaction as the
+    ``Commit`` row (see its docstring's atomicity note), but nothing else in
+    the suite proves that staged blob is what a COLD session actually reads
+    back. Commit a view batch, evict the session (dropping the in-memory
+    cache entirely — ``get_registry().evict`` mirrors
+    ``test_commits_revert.py::test_revert_survives_eviction`` and this
+    module's own folder-id-healing harness above), then re-read via
+    ``GET /view`` and assert it matches: hydration reads the durable
+    ``ViewRow`` directly (a materialized head, never replayed from the op
+    journal — view ops are explicitly SKIPPED on model replay), so this path
+    is the one thing that would catch a commit that staged the wrong blob."""
+    from data_rover.api.session import DEFAULT_PROJECT_ID, get_registry
+
+    r = client.put(
+        papi("/view/snapshot"),
+        json={"name": "v", "folders": [{"name": "A"}]},
+    )
+    assert r.status_code == 200, r.text
+    fid = r.json()["view"]["folders"][0]["id"]
+
+    r = client.post(
+        papi("/locks"),
+        json={
+            "targets": [{"resource_id": fid, "mode": "exclusive", "type": "folder"}],
+            "intent": "edit",
+        },
+    )
+    assert r.status_code == 200, r.text
+    token = r.json()["token"]
+    base = client.get(papi("/open")).json()["model_rev"]
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": base,
+            "ops": [{"kind": "rename_folder", "id": fid, "name": "A2"}],
+            "message": "m",
+            "lock_tokens": [token],
+        },
+    )
+    assert r.status_code == 200, r.text
+    expected_view_rev = r.json()["view_rev"]
+
+    before = client.get(papi("/view")).json()
+    assert before["view"]["folders"][0]["name"] == "A2"
+
+    get_registry().evict(DEFAULT_PROJECT_ID)  # snapshot-then-drop
+
+    after = client.get(papi("/view")).json()  # re-hydrate from the durable row
+    assert after == before
+    assert after["view"]["folders"][0]["name"] == "A2"
+    assert after["view_rev"] == expected_view_rev
