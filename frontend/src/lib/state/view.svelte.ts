@@ -12,7 +12,6 @@ import {
 	viewHasArtifactPlacement
 } from './view-ops';
 import { diffViews, type ViewChange } from './view-diff';
-import { createTempId } from './ops';
 
 export { cloneView } from './view-ops';
 
@@ -126,10 +125,13 @@ export async function createFolder(parentPath: string[], name: string): Promise<
 	if (collection.some((f) => f.name === name)) {
 		throw new Error(`Folder "${name}" already exists at this level`);
 	}
-	// Legacy PUT /view/snapshot path (superseded by view.* ops in a later task):
-	// a locally-minted id is a placeholder — the server heals folder ids on
-	// write, so the next load/refresh replaces it with the durable one.
-	collection.push({ id: createTempId(), name, folders: [], elements: [], artifacts: [] });
+	// Legacy PUT /view/snapshot path (superseded by view.* ops in a later
+	// task): '' is a placeholder — ensure_folder_ids (core/view/ids.py) heals
+	// any EMPTY id on write, reassigning a fresh server uuid. A non-empty id
+	// would be treated as already-usable and kept forever, so this must stay
+	// empty, not a locally-minted one (mirrors findFolderByPath's own
+	// virtual-root placeholder in view-ops.ts).
+	collection.push({ id: '', name, folders: [], elements: [], artifacts: [] });
 	await pushView(next);
 }
 
