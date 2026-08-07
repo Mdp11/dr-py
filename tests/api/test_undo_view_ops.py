@@ -155,21 +155,77 @@ def test_undo_not_blocked_by_callers_own_folder_lease(client: TestClient) -> Non
     assert client.get(papi("/view")).json()["view"]["folders"][0]["name"] == "A"
 
 
-def test_failed_undo_after_view_cleared_leaves_view_null(client: TestClient) -> None:
-    """Regression for final-review Finding 1: the reviewer's exact repro.
-    ``DELETE /view`` is the existing unlocked legacy route that sets
-    ``session.view = None`` with no persistence and no lease check (a known,
-    out-of-scope pre-existing quirk); undo's own defensive "recreate an empty
-    View" fallback (for the unrelated evicted+contentless-resurrection case)
-    must not leak a materialized empty View into that state when the replay
-    then 422s on the folder DELETE /view just erased — GET /view must still
-    report ``view: None`` afterwards, byte-identical to before the failed
-    undo, not a phantom empty view with no ViewRow/view_rev to back it."""
+def test_undo_after_view_cleared_hydrates_durable_view_and_succeeds(
+    client: TestClient,
+) -> None:
+    """Regression for the artefacts-revamp whole-branch-review Fix 1, which
+    SUPERSEDES this test's old expectation (previously
+    ``test_failed_undo_after_view_cleared_leaves_view_null``, final-review
+    Finding 1): that older fix only made the auto-create bookkeeping
+    (``created_view``) restore correctly on failure — it did not question
+    whether resurrecting an EMPTY view was ever the right thing to do here.
+    ``DELETE /view`` (``routes/view.py::clear_view``, out of scope for this
+    fix) clears ONLY the in-memory ``session.view`` cache; ``ViewRow`` — the
+    durable blob, still holding folder "A2" at this point — is untouched. So
+    when undo's inverse (rename back to "A") replays against a session with
+    no view CACHED, the correct outcome is for ``load_or_create_view`` to
+    hydrate the still-populated row and successfully rename the folder back —
+    not to materialize a phantom empty view and 422 on a folder that was
+    never actually deleted anywhere, durably or otherwise."""
     r = client.put(papi("/view/snapshot"), json={"name": "v", "folders": [{"name": "A"}]})
     fid = r.json()["view"]["folders"][0]["id"]
     _commit_rename(client, fid, "A2")
     assert client.delete(papi("/view")).status_code == 204
     assert client.get(papi("/view")).json()["view"] is None
+    durable_view_rev = client.get(papi("/view")).json()["view_rev"]
+
+    r = client.post(papi("/model/undo"))
+    assert r.status_code == 200, r.text
+
+    out = client.get(papi("/view")).json()
+    assert out["view"]["folders"][0]["id"] == fid
+    assert out["view"]["folders"][0]["name"] == "A"  # the durable folder survived
+    assert out["view_rev"] == durable_view_rev + 1  # advanced from the PRIOR rev, not 0/1
+    # the undo was consumed (not refused), so undo history is back to empty
+    summary = client.get(papi("/model/summary")).json()
+    assert summary["undo_depth"] == 0
+
+
+def test_failed_undo_with_no_durable_view_row_leaves_view_null(
+    client: TestClient,
+) -> None:
+    """Coverage for ``created_view``'s restore-to-None guard on undo's TRUE
+    "nothing to hydrate" fallback (final-review Fix 1): ``load_or_create_view``
+    only materializes a fresh empty ``View`` when NO ``ViewRow`` exists at all
+    — a state ``DELETE /view`` alone can no longer manufacture (see the
+    hydrate-and-succeed test above), since it never touches the durable row.
+    This test manufactures the genuine "no durable view" state directly (by
+    deleting the ``ViewRow``, which no route does) to prove the pre-existing
+    ``created_view`` bookkeeping still holds on undo's real empty-view path:
+    a materialized-then-rolled-back empty view must not leak into a state
+    that durably had none."""
+    r = client.put(papi("/view/snapshot"), json={"name": "v", "folders": [{"name": "A"}]})
+    fid = r.json()["view"]["folders"][0]["id"]
+    _commit_rename(client, fid, "A2")
+    assert client.delete(papi("/view")).status_code == 204  # clears the CACHE only
+    assert client.get(papi("/view")).json()["view"] is None
+
+    from sqlalchemy import select
+
+    from data_rover.api import db
+    from data_rover.api.db_models import ViewRow
+    from data_rover.api.session import DEFAULT_PROJECT_ID
+
+    gen = db.get_db()
+    s = next(gen)
+    try:
+        row = s.execute(
+            select(ViewRow).where(ViewRow.project_id == DEFAULT_PROJECT_ID)
+        ).scalar_one()
+        s.delete(row)
+        s.commit()
+    finally:
+        gen.close()
 
     r = client.post(papi("/model/undo"))
     assert r.status_code == 422, r.text
@@ -261,6 +317,8 @@ def test_undo_of_delete_folder_and_move_element_is_byte_identical(
 
     after = client.get(papi("/view")).json()["view"]
     assert after == before  # deep equality: the FULL tree, not a spot field
+
+
 def test_undo_refuses_while_peer_holds_lease_on_delete_folder_subtree_child(
     client: TestClient,
 ) -> None:

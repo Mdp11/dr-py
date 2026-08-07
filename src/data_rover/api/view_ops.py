@@ -9,9 +9,12 @@ API lean on. ``routes/commits.py`` is the write caller (apply under the write
 mutex, persist the blob on the commit's DB transaction); ``routes/ops.py``'s
 undo replays inverses in restore mode; ``/commits/preview`` validates dry.
 
-Unlike the artifact applier there is no DB here at all: rollback is
+Unlike the artifact applier there is almost no DB here: rollback is
 ``rollback_view`` (apply the collected inverse units in reverse), the same
-in-place shape as ``routes/ops.py::_rollback``.
+in-place shape as ``routes/ops.py::_rollback``. The one exception is
+``load_or_create_view``, a single read shared by both write callers' "session
+has no view cached" fallback (see its own docstring for why that state does
+NOT mean "no durable view exists").
 
 Tolerance stance (mirrors ``validate_view``): ids that merely DANGLE (an
 element not in the model, an artifact with no row) are legal — the view never
@@ -37,10 +40,12 @@ from dataclasses import dataclass, field
 from typing import assert_never
 
 from fastapi import HTTPException
+from sqlalchemy.orm import Session as DbSession
 
 from data_rover.core.view.ids import find_folder, folder_subtree, locate_folder
 from data_rover.core.view.schema import VIEW_ROOT_ID, ArtifactRef, Folder, View
 
+from . import content
 from .locking import folder_resource
 from .schemas import (
     TEMP_ID_PREFIX,
@@ -72,6 +77,31 @@ class ViewBatchResult:
     def inverse_ops(self) -> list[ViewOpIn]:
         """Flat inverse batch: applying it front-to-back undoes this batch."""
         return [op for unit in reversed(self.inverse_units) for op in unit]
+
+
+def load_or_create_view(db: DbSession, project_id: str) -> View:
+    """Resolve the view a write path should mutate when ``session.view`` is
+    ``None`` — the shared body of ``routes/commits.py``'s auto-create (b3) and
+    ``routes/ops.py::undo``'s evicted-resurrection fallback.
+
+    ``session.view is None`` does NOT mean "this project never had a view":
+    ``DELETE /view`` (``routes/view.py::clear_view``, deliberately out of
+    scope for this fix) sets ONLY the in-memory cache to ``None`` and never
+    touches ``ViewRow`` — the durable blob — and a cold/evicted session can
+    reach this same ``None`` state for an unrelated reason (cache miss, not
+    absence). A ``ViewRow`` that exists on disk IS the view regardless of
+    which of those put the cache in this state, exactly the read
+    ``hydration.hydrate_session`` already performs at session start; only a
+    project that has genuinely never committed a view gets a fresh empty one.
+
+    Getting this backwards is silent data loss (final-review Fix 1): the two
+    write callers apply the incoming batch to whatever this returns and then
+    unconditionally OVERWRITE ``ViewRow`` with the result — so materializing
+    an empty ``View`` here when a populated row exists doesn't just mis-render
+    once, it destroys every pre-existing folder the next time that (now
+    empty-based) state is persisted."""
+    row = content.get_single_view(db, project_id)
+    return View.model_validate_json(row.blob) if row is not None else View(name="view")
 
 
 def _422(detail: str) -> HTTPException:

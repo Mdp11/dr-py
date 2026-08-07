@@ -125,6 +125,57 @@ def test_commit_view_ops_without_existing_view_autocreates(client: TestClient) -
     assert r.json()["view"]["folders"][0]["name"] == "A"
 
 
+def test_commit_after_view_cleared_hydrates_durable_view_not_an_empty_one(
+    client: TestClient,
+) -> None:
+    """Regression for the artefacts-revamp whole-branch-review Fix 1:
+    ``session.view is None`` does NOT mean "this project never had a view" —
+    ``DELETE /view`` (routes/view.py, out of scope for this fix) clears ONLY
+    the in-memory cache and leaves ``ViewRow`` (12-ish pre-existing folders in
+    the reviewer's repro, two here) untouched. Before the fix, ``create_commit``
+    treated ``session.view is None`` as "auto-create an EMPTY view", so the
+    step 'e' unconditional overwrite of ``ViewRow`` with that empty-based
+    result durably destroyed every pre-existing folder — the journal
+    describing only the unrelated ``create_folder`` that actually ran. The fix
+    is to hydrate from the still-live row instead."""
+    r = client.put(
+        papi("/view/snapshot"),
+        json={"name": "v", "folders": [{"name": "A"}, {"name": "B"}]},
+    )
+    assert r.status_code == 200, r.text
+    prior_view_rev = r.json()["view_rev"]
+    assert client.delete(papi("/view")).status_code == 204
+    assert client.get(papi("/view")).json()["view"] is None
+
+    base = _rev(client)
+    token = _folder_lease(client, "root", intent="edit")
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": base,
+            "ops": [
+                {
+                    "kind": "create_folder",
+                    "temp_id": "tmp_c",
+                    "parent_id": "root",
+                    "name": "C",
+                }
+            ],
+            "message": "m",
+            "lock_tokens": [token],
+        },
+    )
+    assert r.status_code == 200, r.text
+    # view_rev advanced from the PRIOR durable value, not started fresh at 1
+    # (an empty auto-create would have reported 1 here).
+    assert r.json()["view_rev"] == prior_view_rev + 1
+
+    out = client.get(papi("/view")).json()
+    names = {f["name"] for f in out["view"]["folders"]}
+    assert names == {"A", "B", "C"}  # A and B DURABLY survived the round trip
+    assert out["view_rev"] == prior_view_rev + 1
+
+
 def test_mixed_batch_atomicity_view_rolls_back_with_model(client: TestClient) -> None:
     """A structural model blocker rolls back the ALREADY-APPLIED view half."""
     r = client.put(papi("/view/snapshot"), json={"name": "v", "folders": [{"name": "A"}]})

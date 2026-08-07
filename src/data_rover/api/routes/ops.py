@@ -69,7 +69,6 @@ from data_rover.core.validation.dirty import DirtyCollector, containment_closure
 from data_rover.core.validation.pipeline import default_pipeline
 from data_rover.core.validation.scope import Scope
 from data_rover.core.validation.state import ValidationState
-from data_rover.core.view.schema import View
 
 from .. import content
 from ..artifact_ops import (
@@ -90,6 +89,7 @@ from ..settings import get_settings
 from ..view_ops import (
     ViewBatchResult,
     apply_view_ops_atomic,
+    load_or_create_view,
     rollback_view,
     view_op_folder_ids,
 )
@@ -767,16 +767,16 @@ def undo(
             raise
         view_res: ViewBatchResult | None = None
         # True iff THIS request is the one that flipped session.view from
-        # None to an empty View (the "evicted + contentless resurrection"
-        # fallback below) — tracked exactly like create_commit's own
-        # ``created_view`` so every failure path can restore it to None
-        # rather than leaving a never-persisted empty View behind. A failed
-        # request must be externally invisible: before this undo attempt
-        # GET /view reported ``view: None``, and a 422/500 out of this
-        # branch must leave it reporting that again, not a materialized
-        # empty view with no ViewRow / view_rev to back it (final-review
-        # Finding 1 — mirrors create_commit's own created_view guard, which
-        # exists for the identical reason on the auto-create path).
+        # None to non-None via load_or_create_view — tracked exactly like
+        # create_commit's own ``created_view`` so every failure path can
+        # restore it to None rather than leaving a never-persisted
+        # materialization behind. A failed request must be externally
+        # invisible: before this undo attempt GET /view reported whatever it
+        # reported, and a 422/500 out of this branch must leave it reporting
+        # that again — for the genuinely-empty case, not a materialized empty
+        # view with no ViewRow / view_rev to back it (final-review Finding 1
+        # — mirrors create_commit's own created_view guard, which exists for
+        # the identical reason on the auto-create path).
         created_view = False
         # A single-user, no-peer sequence CAN still make this apply 422: the
         # legacy PUT /view/snapshot (routes/view.py) bypasses op_log entirely
@@ -792,10 +792,16 @@ def undo(
         # expectations, which is out of this task's scope.
         if view_inv:
             if session.view is None:
-                # a batch that touched the view implies one existed; an
-                # evicted + contentless resurrection is the only way here —
-                # recreate.
-                session.view = View(name="view")
+                # a batch that touched the view implies one existed. This is
+                # NOT necessarily an "evicted + contentless resurrection":
+                # DELETE /view (routes/view.py, out of scope for this fix)
+                # clears only the in-memory cache and leaves ViewRow durably
+                # intact, so load_or_create_view hydrates from the still-live
+                # row when one exists rather than always materializing an
+                # empty view (final-review Fix 1 — see its docstring). Only a
+                # session that ALSO has no durable row at all (the true
+                # evicted+contentless case) gets a fresh empty View.
+                session.view = load_or_create_view(db, project_id)
                 created_view = True
             try:
                 view_res = apply_view_ops_atomic(session.view, view_inv, restore=True)

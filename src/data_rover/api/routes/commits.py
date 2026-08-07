@@ -59,6 +59,7 @@ from ..settings import get_settings
 from ..view_ops import (
     ViewBatchResult,
     apply_view_ops_atomic,
+    load_or_create_view,
     rollback_view,
     validate_view_ops,
     view_touched_resources,
@@ -675,22 +676,25 @@ def create_commit(
             db.rollback()  # discard staged artifact rows
             raise
         # b3. apply the view half to session.view IN PLACE, all-or-nothing
-        #     (auto-creating an empty view for a project that never had one —
-        #     the ops path must be self-sufficient once the legacy PUT
-        #     retires). Seeded with both prior id_maps so a placement may
-        #     reference an element or artifact created earlier in the SAME
-        #     batch.
+        #     (resolving/auto-creating via load_or_create_view for a project
+        #     whose session has no view cached — the ops path must be
+        #     self-sufficient once the legacy PUT retires). Seeded with both
+        #     prior id_maps so a placement may reference an element or
+        #     artifact created earlier in the SAME batch.
         view_res: ViewBatchResult | None = None
         # True iff THIS request is the one that flipped session.view from
-        # None to an empty View (auto-create) — tracked so every failure
-        # path below can restore it to None rather than leaving a
-        # never-committed empty view behind. A view auto-created by an
-        # earlier successful request must NOT be un-created by a later
-        # request's failure, hence this is request-local, not view-derived.
+        # None to non-None (via load_or_create_view — an empty View for a
+        # project that never had one, OR a hydrate of the still-durable
+        # ViewRow a prior DELETE /view merely uncached, see that function's
+        # docstring) — tracked so every failure path below can restore it to
+        # None rather than leaving a never-committed materialization behind.
+        # A view resolved by an earlier successful request must NOT be
+        # un-cached by a later request's failure, hence this is
+        # request-local, not view-derived.
         created_view = False
         if view_ops:
             if session.view is None:
-                session.view = View(name="view")
+                session.view = load_or_create_view(db, project_id)
                 created_view = True
             try:
                 view_res = apply_view_ops_atomic(
