@@ -454,4 +454,16 @@ export {
 	type StagedArtifactEntry
 } from './artifact-edits.svelte';
 export { markEditorLockDenied } from './artifact-lock-denied';
+export {
+	clearStagedView,
+	discardStagedView,
+	getStagedViewDepth,
+	getStagedViewEntries,
+	getStagedViewOps,
+	notifyViewCommitted,
+	onViewCommitted,
+	resetViewEdits,
+	stageViewOp,
+	type StagedViewEntry
+} from './view-edits.svelte';
 export { isProjectQuiet } from './quiet';
