@@ -37,17 +37,29 @@ def snapshot_view(
             db, project_id, name=view.name, blob=view.model_dump_json()
         )
         db.commit()
-    warnings = [IssueOut.from_core(i) for i in validate_view(view, model)]
+    known = {row.id for row in content.list_artifacts(db, project_id)}
+    warnings = [
+        IssueOut.from_core(i)
+        for i in validate_view(view, model, known_artifact_ids=known)
+    ]
     return ViewSnapshotResponse(view=ViewOut.from_core(view), warnings=warnings)
 
 
 @router.get("/view")
-def get_view(session: Session = Depends(get_request_session)) -> ViewStateResponse:
+def get_view(
+    project_id: str,
+    session: Session = Depends(get_request_session),
+    db: DbSession = Depends(get_db),
+) -> ViewStateResponse:
     view = session.view
     if view is None:
         return ViewStateResponse(view=None, warnings=[])
     _, model = require_model(session)
-    warnings = [IssueOut.from_core(i) for i in validate_view(view, model)]
+    known = {row.id for row in content.list_artifacts(db, project_id)}
+    warnings = [
+        IssueOut.from_core(i)
+        for i in validate_view(view, model, known_artifact_ids=known)
+    ]
     return ViewStateResponse(view=ViewOut.from_core(view), warnings=warnings)
 
 

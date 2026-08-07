@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from data_rover.api.main import create_app
 
-from .conftest import AUTH_HEADERS, seed_default_project
+from .conftest import AUTH_HEADERS, papi, seed_default_project
 
 EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "example.metamodel.yaml"
 API = "/api/v1/projects/default"
@@ -123,3 +123,25 @@ def test_view_snapshot_round_trips_artifact_refs(client: TestClient) -> None:
     assert got.json()["view"]["folders"][0]["artifacts"] == [
         {"id": "a1", "kind": "navigation"}
     ]
+
+
+def test_root_artifacts_round_trip(client: TestClient) -> None:
+    _bootstrap(client)
+    body = {
+        "name": "v",
+        "folders": [{"name": "F"}],
+        "artifacts": [{"id": "a1", "kind": "table"}],
+    }
+    r = client.put(papi("/view/snapshot"), json=body)
+    assert r.status_code == 200, r.text
+    assert r.json()["view"]["artifacts"] == [{"id": "a1", "kind": "table"}]
+    r = client.get(papi("/view"))
+    assert r.json()["view"]["artifacts"] == [{"id": "a1", "kind": "table"}]
+
+
+def test_dangling_artifact_ref_warning_from_route(client: TestClient) -> None:
+    _bootstrap(client)
+    body = {"name": "v", "folders": [], "artifacts": [{"id": "nope", "kind": "table"}]}
+    r = client.put(papi("/view/snapshot"), json=body)
+    assert r.status_code == 200
+    assert any("unknown artifact" in w["message"] for w in r.json()["warnings"])

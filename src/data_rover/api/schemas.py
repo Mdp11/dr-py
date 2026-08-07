@@ -160,6 +160,10 @@ class ArtifactRefOut(BaseModel):
 
 
 class FolderOut(BaseModel):
+    #: mirrors `Folder.id`; "" means not yet assigned (legacy blob healed at
+    #: hydration/PUT/import time by Task 3 — this field just carries whatever
+    #: the core side already has).
+    id: str = ""
     name: str
     folders: list[FolderOut] = Field(default_factory=list)
     elements: list[str] = Field(default_factory=list)
@@ -168,6 +172,7 @@ class FolderOut(BaseModel):
     @classmethod
     def from_core(cls, folder: Folder) -> FolderOut:
         return cls(
+            id=folder.id,
             name=folder.name,
             folders=[FolderOut.from_core(f) for f in folder.folders],
             elements=list(folder.elements),
@@ -181,12 +186,18 @@ FolderOut.model_rebuild()
 class ViewOut(BaseModel):
     name: str
     folders: list[FolderOut] = Field(default_factory=list)
+    #: Root-level artifact refs. Before Phase 2 this field did not exist, so
+    #: `View.artifacts` was silently dropped on every wire response even
+    #: though the core model always carried it — this field is the fix.
+    #: Additive: old clients that don't know about it simply ignore it.
+    artifacts: list[ArtifactRefOut] = Field(default_factory=list)
 
     @classmethod
     def from_core(cls, view: View) -> ViewOut:
         return cls(
             name=view.name,
             folders=[FolderOut.from_core(f) for f in view.folders],
+            artifacts=[ArtifactRefOut(id=a.id, kind=a.kind) for a in view.artifacts],
         )
 
 
@@ -195,6 +206,7 @@ class ViewIn(BaseModel):
 
     name: str
     folders: list[FolderOut] = Field(default_factory=list)
+    artifacts: list[ArtifactRefOut] = Field(default_factory=list)
 
     def to_core(self) -> View:
         return View.model_validate(self.model_dump())
