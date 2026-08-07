@@ -352,8 +352,13 @@ def preview_commit(
         # View ops are validated DRY against a deep copy (views are small):
         # nothing to roll back, and sharing the real applier means preview and
         # commit cannot disagree. Inside the mutex because a concurrent commit
-        # mutates session.view in place.
-        validate_view_ops(session.view, view_ops)
+        # mutates session.view in place. Guarded on view_ops: an EMPTY batch
+        # would still deep-copy session.view (validate_view_ops' None-view
+        # short-circuit only helps a project with no view at all) on every
+        # model-only preview, which is the common case — pure overhead with
+        # nothing to validate.
+        if view_ops:
+            validate_view_ops(session.view, view_ops)
         # _apply_batch raises 422 on a mutation-boundary structural error
         # (unknown type, missing endpoint, unknown property) — the safety net.
         res = _apply_batch(model, model_ops, restore=False)
