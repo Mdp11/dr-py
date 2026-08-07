@@ -477,7 +477,7 @@ def test_surviving_cells_equal_fresh_recompute() -> None:
     verified = 0
     for _round in range(25):
         batch = _random_batch(rng, model)
-        model_ops, _artifact_ops = split_ops(OPS_ADAPTER.validate_python(batch))
+        model_ops, _artifact_ops, _view_ops = split_ops(OPS_ADAPTER.validate_python(batch))
         res = _apply_batch(model, model_ops, restore=False)
         rev += 1
         touched = touched_keys(model, model.metamodel, res)

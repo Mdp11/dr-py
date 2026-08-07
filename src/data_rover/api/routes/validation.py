@@ -90,7 +90,7 @@ def validate_model(
                 status_code=409,
                 content={"detail": "stale base_rev", "model_rev": session.model_rev},
             )
-        model_ops, artifact_ops = split_ops(payload.ops)
+        model_ops, artifact_ops, view_ops = split_ops(payload.ops)
         if artifact_ops:
             # PERMANENT rule, not a stub (CLAUDE.md, Phase 4 "Artifact ops"):
             # this endpoint validates MODEL content — it applies ops to the
@@ -103,6 +103,15 @@ def validate_model(
             raise HTTPException(
                 status_code=422,
                 detail="artifact ops are not supported on this endpoint; "
+                "use /commits/preview",
+            )
+        if view_ops:
+            # Same PERMANENT rule, view family: view ops are not model content
+            # either, and their own preconditions are dry-checked by
+            # POST /commits/preview once the view applier lands (Task 5).
+            raise HTTPException(
+                status_code=422,
+                detail="view ops are not supported on /model/validate; "
                 "use /commits/preview",
             )
         # committed baseline = the session's maintained issue store (seeded on first

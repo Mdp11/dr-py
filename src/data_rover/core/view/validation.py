@@ -1,16 +1,23 @@
 from __future__ import annotations
 
+from collections.abc import Collection
+
 from data_rover.core.model.model import Model
 from data_rover.core.validation.issue import Issue, Severity
 
-from .schema import Folder, View
+from .schema import ArtifactRef, Folder, View
 
 
 def _folder_path(parents: list[str], name: str) -> str:
     return "/".join([*parents, name])
 
 
-def validate_view(view: View, model: Model) -> list[Issue]:
+def validate_view(
+    view: View,
+    model: Model,
+    *,
+    known_artifact_ids: Collection[str] | None = None,
+) -> list[Issue]:
     """Return warnings about a view in the context of a model.
 
     Warnings emitted (all `Severity.WARNING`, view is never rejected):
@@ -20,14 +27,39 @@ def validate_view(view: View, model: Model) -> list[Issue]:
     - Element placed in more than one folder within the same view (later
       occurrences ignored).
     - Two sibling folders with the same name (later occurrences ignored).
+    - Artifact ref (folder-level or root-level) whose id is not among
+      `known_artifact_ids` — same tolerate-don't-prune stance as element
+      refs: renderers skip ids they cannot resolve rather than the view
+      being rejected. `known_artifact_ids=None` (the default) SKIPS this
+      check entirely: core stays DB-free (there is no model-side notion of
+      "known artifacts"), so only callers that can supply the live set
+      (the API routes, backed by `content.list_artifacts`) opt in; the
+      importer and other pure-core callers pass nothing.
     """
 
     issues: list[Issue] = []
     indexes = model.indexes
     placed: dict[str, str] = {}
 
+    def check_artifacts(refs: list[ArtifactRef], where: str) -> None:
+        if known_artifact_ids is None:
+            return
+        for ref in refs:
+            if ref.id not in known_artifact_ids:
+                issues.append(
+                    Issue(
+                        Severity.WARNING,
+                        (
+                            f"view {view.name!r}: {where} references "
+                            f"unknown artifact {ref.id!r}; renderers skip it"
+                        ),
+                    )
+                )
+
     def visit(folder: Folder, ancestor_names: list[str]) -> None:
         path = _folder_path(ancestor_names, folder.name)
+
+        check_artifacts(folder.artifacts, f"folder {path!r}")
 
         # duplicate sibling folder names
         seen: set[str] = set()
@@ -106,5 +138,7 @@ def validate_view(view: View, model: Model) -> list[Issue]:
             continue
         top_seen.add(folder.name)
         visit(folder, [])
+
+    check_artifacts(view.artifacts, "the view root")
 
     return issues

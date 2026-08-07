@@ -3,12 +3,16 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
 from data_rover.api import content, db, hydration
 from data_rover.api.db_models import Project
+from data_rover.api.main import create_app
 from data_rover.api.storage import MemorySnapshotStore, set_snapshot_store
 from data_rover.api.session import Session
 from data_rover.core.metamodel.loader import load_metamodel_str
+
+from .conftest import AUTH_HEADERS, papi, seed_default_project
 
 MM_YAML = Path("examples/smart-city.metamodel.yaml").read_text(encoding="utf-8")
 
@@ -81,3 +85,113 @@ def _first_concrete_element_type(sess: Session) -> str:
         if not et.abstract:
             return et.name
     raise AssertionError("no concrete element type in smart-city metamodel")
+
+
+@pytest.fixture
+def client() -> TestClient:
+    """HTTP-driven fixture for the eviction/rehydration tests below: seeds the
+    DEFAULT project (distinct from ``_env``'s "p1") with a real metamodel +
+    empty model so a durable ``ModelRow`` exists — hydration's early
+    ``if model_row is None: return Session()`` would otherwise skip the view
+    entirely, defeating the point of the healing test."""
+    seed_default_project()
+    c = TestClient(create_app())
+    c.headers.update(AUTH_HEADERS)
+    c.post(
+        papi("/metamodel"),
+        content=MM_YAML,
+        headers={"content-type": "application/x-yaml"},
+    )
+    c.post(papi("/model"), json={"elements": [], "relationships": []})
+    return c
+
+
+def test_hydration_heals_missing_folder_ids(client: TestClient) -> None:
+    """An old blob (no folder ids) is healed at hydration and persisted back
+    WITHOUT consuming a view_rev — normalization is not an edit."""
+    from data_rover.api import content, db
+    from data_rover.api.session import DEFAULT_PROJECT_ID, get_registry
+
+    gen = db.get_db()
+    s = next(gen)
+    try:
+        content.upsert_single_view(
+            s,
+            DEFAULT_PROJECT_ID,
+            name="v",
+            blob='{"name": "v", "folders": [{"name": "A"}], "artifacts": []}',
+            bump_rev=False,
+        )
+        s.commit()
+    finally:
+        gen.close()
+
+    get_registry().evict(DEFAULT_PROJECT_ID)
+    r = client.get(papi("/view"))
+    assert r.status_code == 200
+    assert len(r.json()["view"]["folders"][0]["id"]) == 32
+    assert r.json()["view_rev"] == 0
+
+    gen = db.get_db()
+    s = next(gen)
+    try:
+        row = content.get_single_view(s, DEFAULT_PROJECT_ID)
+        assert row is not None and '"id"' in row.blob and row.view_rev == 0
+    finally:
+        gen.close()
+
+
+def test_view_op_commit_survives_eviction(client: TestClient) -> None:
+    """Regression for final-review Fix 4c: this is the test that would catch
+    a "wrong blob staged" bug. ``POST /commits``' view-op step 'e' stages the
+    resulting ``session.view`` blob on the SAME DB transaction as the
+    ``Commit`` row (see its docstring's atomicity note), but nothing else in
+    the suite proves that staged blob is what a COLD session actually reads
+    back. Commit a view batch, evict the session (dropping the in-memory
+    cache entirely — ``get_registry().evict`` mirrors
+    ``test_commits_revert.py::test_revert_survives_eviction`` and this
+    module's own folder-id-healing harness above), then re-read via
+    ``GET /view`` and assert it matches: hydration reads the durable
+    ``ViewRow`` directly (a materialized head, never replayed from the op
+    journal — view ops are explicitly SKIPPED on model replay), so this path
+    is the one thing that would catch a commit that staged the wrong blob."""
+    from data_rover.api.session import DEFAULT_PROJECT_ID, get_registry
+
+    r = client.put(
+        papi("/view/snapshot"),
+        json={"name": "v", "folders": [{"name": "A"}]},
+    )
+    assert r.status_code == 200, r.text
+    fid = r.json()["view"]["folders"][0]["id"]
+
+    r = client.post(
+        papi("/locks"),
+        json={
+            "targets": [{"resource_id": fid, "mode": "exclusive", "type": "folder"}],
+            "intent": "edit",
+        },
+    )
+    assert r.status_code == 200, r.text
+    token = r.json()["token"]
+    base = client.get(papi("/open")).json()["model_rev"]
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": base,
+            "ops": [{"kind": "rename_folder", "id": fid, "name": "A2"}],
+            "message": "m",
+            "lock_tokens": [token],
+        },
+    )
+    assert r.status_code == 200, r.text
+    expected_view_rev = r.json()["view_rev"]
+
+    before = client.get(papi("/view")).json()
+    assert before["view"]["folders"][0]["name"] == "A2"
+
+    get_registry().evict(DEFAULT_PROJECT_ID)  # snapshot-then-drop
+
+    after = client.get(papi("/view")).json()  # re-hydrate from the durable row
+    assert after == before
+    assert after["view"]["folders"][0]["name"] == "A2"
+    assert after["view_rev"] == expected_view_rev

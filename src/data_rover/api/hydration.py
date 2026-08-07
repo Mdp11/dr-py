@@ -23,6 +23,7 @@ from typing import Any
 from data_rover.core.metamodel.loader import load_metamodel_str
 from data_rover.core.model.model import Model
 from data_rover.core.validation.state import ValidationState
+from data_rover.core.view.ids import ensure_folder_ids
 from data_rover.core.view.schema import View
 
 from . import content
@@ -118,10 +119,10 @@ def replay_commits_into(session: Session, commits: list[Commit]) -> None:
 
     assert session.model is not None
     for c in commits:
-        ops, _artifact_ops = split_ops(deserialize_ops(c.ops))
-        # artifact ops are SKIPPED on model replay: artifact rows are the
-        # materialized heads and already reflect them (spec: one journal,
-        # materialized heads).
+        ops, _artifact_ops, _view_ops = split_ops(deserialize_ops(c.ops))
+        # artifact AND view ops are SKIPPED on model replay: artifact rows and
+        # the view blob (ViewRow) are both materialized heads and already
+        # reflect them (spec: one journal, materialized heads).
         if ops:
             _apply_batch(session.model, ops, restore=True)
 
@@ -211,7 +212,19 @@ def _hydrate_session(project_id: str, progress: HydrationProgress) -> Session:
         )
         snap_key = snap.key if snap is not None else None
         view_row = content.get_single_view(s, project_id)
-        view_blob = view_row.blob if view_row is not None else None
+        view: View | None = None
+        if view_row is not None:
+            view = View.model_validate_json(view_row.blob)
+            if ensure_folder_ids(view):
+                # heal-and-persist: a pre-Phase-2 blob gets ids exactly once.
+                # bump_rev=False — normalization is not an edit.
+                content.upsert_single_view(
+                    s,
+                    project_id,
+                    name=view.name,
+                    blob=view.model_dump_json(),
+                    bump_rev=False,
+                )
 
     metamodel = load_metamodel_str(mm_row.blob)
     if snap_key is None:
@@ -241,8 +254,7 @@ def _hydrate_session(project_id: str, progress: HydrationProgress) -> Session:
     session.model_rev = model_rev
     progress.phase = "replay"
     replay_commits_into(session, tail)
-    if view_blob is not None:
-        session.view = View.model_validate_json(view_blob)
+    session.view = view
     session.validation = ValidationState()
     session.strict_mode = strict_mode
     start_validation_sweep(session)

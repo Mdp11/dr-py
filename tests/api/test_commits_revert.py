@@ -309,3 +309,54 @@ def test_revert_records_conformance_count(client: TestClient) -> None:
     assert isinstance(r.json()["validation_error_count"], int)
     top = client.get(papi("/commits"), headers=AUTH_HEADERS).json()["commits"][0]
     assert top["validation_error_count"] == r.json()["validation_error_count"]
+
+
+def _folder_lease(client: TestClient, fid: str, intent: str = "edit") -> str:
+    r = client.post(
+        papi("/locks"),
+        headers=AUTH_HEADERS,
+        json={
+            "targets": [{"resource_id": fid, "mode": "exclusive", "type": "folder"}],
+            "intent": intent,
+        },
+    )
+    assert r.status_code == 200, r.text
+    token: str = r.json()["token"]
+    return token
+
+
+def _commit_rename(client: TestClient, fid: str, name: str) -> None:
+    token = _folder_lease(client, fid)
+    r = client.post(
+        papi("/commits"),
+        headers=AUTH_HEADERS,
+        json={
+            "base_rev": model_rev(client),
+            "ops": [{"kind": "rename_folder", "id": fid, "name": name}],
+            "message": "m",
+            "lock_tokens": [token],
+        },
+    )
+    assert r.status_code == 200, r.text
+
+
+def test_revert_refuses_range_with_view_ops(client: TestClient) -> None:
+    # helpers as in test_undo_view_ops.py (_folder_lease/_rev/_commit_rename)
+    r = client.put(
+        papi("/view/snapshot"),
+        headers=AUTH_HEADERS,
+        json={"name": "v", "folders": [{"name": "A"}]},
+    )
+    assert r.status_code == 200, r.text
+    fid = r.json()["view"]["folders"][0]["id"]
+    target = model_rev(client)
+    _commit_rename(client, fid, "A2")
+    view_commit_rev = model_rev(client)
+    r = client.post(
+        papi("/commits/revert"),
+        headers=AUTH_HEADERS,
+        json={"base_rev": model_rev(client), "target_rev": target},
+    )
+    assert r.status_code == 409
+    assert r.json()["detail"] == "revert across view changes is not yet supported"
+    assert r.json()["view_commit_rev"] == view_commit_rev

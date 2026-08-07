@@ -1,4 +1,4 @@
-"""Per-commit diff rendering (Phase 1 artefacts revamp).
+"""Per-commit diff rendering (Phase 1 artefacts revamp; view section Phase 2).
 
 Model entities: reconstruct the model at rev-1 and rev (same machinery and
 cost class as GET /commits/{rev}/model) and compare only the entity ids the
@@ -15,6 +15,14 @@ cannot supply for an update-only commit is the artifact's KIND (neither an
 update op nor its inverse carries one), so that single field falls back to the
 row, and to ``"unknown"`` when a later commit deleted it.
 
+View: also journal-only, but unlike artifacts there is no before/after
+reconstruction at all — the view ops family is fine-grained enough on the
+wire that the canonical ops themselves ARE the diff. Only the "prior name"
+fields (rename/delete) need the inverse half, the same one-name-not-a-state
+narrowness the artifact section's ``kind`` fallback has. No ``ViewRow`` is
+ever read here, so an old commit's view diff stays correct after the folder
+in question has since been renamed again or deleted.
+
 This module is deliberately route-free: the future change-request workflow
 points these same functions at a draft instead of a commit, so nothing here
 may depend on FastAPI, a request, or a live ``Session``.
@@ -22,7 +30,7 @@ may depend on FastAPI, a request, or a live ``Session``.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, assert_never
 
 from sqlalchemy.orm import Session as DbSession
 
@@ -33,21 +41,33 @@ from .artifact_ops import ARTIFACT_OP_KINDS, split_ops
 from .db_models import Commit
 from .hydration import deserialize_ops, reconstruct_model_at
 from .schemas import (
+    VIEW_OP_KINDS,
     ArtifactDiffAddedOut,
     ArtifactDiffDeletedOut,
     ArtifactDiffModifiedOut,
     CommitArtifactDiffs,
     CommitDiffOut,
     CreateArtifactOp,
+    CreateFolderOp,
     CrElementOps,
     CrRelationshipOps,
     DeleteArtifactOp,
+    DeleteFolderOp,
     ElementOut,
     JsonChangeOut,
     ModifiedElementOut,
     ModifiedRelationshipOut,
+    MoveArtifactOp,
+    MoveElementOp,
+    MoveFolderOp,
+    PlaceArtifactOp,
+    PlaceElementOp,
     RelationshipOut,
+    RemoveArtifactOp,
+    RemoveElementOp,
+    RenameFolderOp,
     UpdateArtifactOp,
+    ViewDiffEntryOut,
 )
 
 #: raw journal ``kind`` tags per model-entity family (see ``_entity_ids``)
@@ -122,7 +142,7 @@ def _artifact_states(
     """
     before: dict[str, _ArtifactState] = {}
     kinds: dict[str, str] = {}
-    _, inverse_artifact_ops = split_ops(deserialize_ops(commit.inverse_ops))
+    _, inverse_artifact_ops, _ = split_ops(deserialize_ops(commit.inverse_ops))
     for op in inverse_artifact_ops:
         if isinstance(op, CreateArtifactOp):  # the forward op deleted it
             before[op.temp_id] = {"name": op.name, "payload": op.payload}
@@ -135,7 +155,7 @@ def _artifact_states(
         aid: (dict(state) if state is not None else None)
         for aid, state in before.items()
     }
-    _, forward_artifact_ops = split_ops(deserialize_ops(commit.ops))
+    _, forward_artifact_ops, _ = split_ops(deserialize_ops(commit.ops))
     for op in forward_artifact_ops:
         if isinstance(op, CreateArtifactOp):
             after[op.temp_id] = {"name": op.name, "payload": op.payload}
@@ -248,13 +268,112 @@ def _artifact_diffs(
     return out
 
 
+def _view_diffs(commit: Commit) -> list[ViewDiffEntryOut]:
+    """Render the view half journal-only (module docstring: same stance as
+    artifacts). Prior names come from the inverse half: a rename's inverse
+    carries the old name, and a delete's inverse unit RECREATES the subtree,
+    so its create ops name every deleted folder."""
+    _, _, forward = split_ops(deserialize_ops(commit.ops))
+    _, _, inverse = split_ops(deserialize_ops(commit.inverse_ops))
+    names_before: dict[str, str] = {}
+    for op in inverse:
+        if isinstance(op, RenameFolderOp):
+            # inverse units are stored reversed (undo order): the LAST write
+            # per id is the earliest unit == the true pre-batch name.
+            names_before[op.id] = op.name
+        elif isinstance(op, CreateFolderOp):
+            names_before[op.temp_id] = op.name
+
+    out: list[ViewDiffEntryOut] = []
+    for op in forward:
+        if isinstance(op, CreateFolderOp):
+            out.append(
+                ViewDiffEntryOut(
+                    kind=op.kind,
+                    folder_id=op.temp_id,  # canonical ops carry the real id
+                    name=op.name,
+                    parent_id=op.parent_id,
+                    index=op.index,
+                )
+            )
+        elif isinstance(op, RenameFolderOp):
+            out.append(
+                ViewDiffEntryOut(
+                    kind=op.kind,
+                    folder_id=op.id,
+                    name=op.name,
+                    name_before=names_before.get(op.id),
+                )
+            )
+        elif isinstance(op, MoveFolderOp):
+            out.append(
+                ViewDiffEntryOut(
+                    kind=op.kind,
+                    folder_id=op.id,
+                    to_folder_id=op.to_parent_id,
+                    index=op.index,
+                    name_before=names_before.get(op.id),
+                )
+            )
+        elif isinstance(op, DeleteFolderOp):
+            out.append(
+                ViewDiffEntryOut(
+                    kind=op.kind, folder_id=op.id, name_before=names_before.get(op.id)
+                )
+            )
+        elif isinstance(op, (PlaceElementOp, RemoveElementOp)):
+            out.append(
+                ViewDiffEntryOut(
+                    kind=op.kind,
+                    folder_id=op.folder_id,
+                    element_id=op.element_id,
+                    index=getattr(op, "index", None),
+                )
+            )
+        elif isinstance(op, MoveElementOp):
+            out.append(
+                ViewDiffEntryOut(
+                    kind=op.kind,
+                    element_id=op.element_id,
+                    from_folder_id=op.from_folder_id,
+                    to_folder_id=op.to_folder_id,
+                    index=op.index,
+                )
+            )
+        elif isinstance(op, (PlaceArtifactOp, RemoveArtifactOp)):
+            out.append(
+                ViewDiffEntryOut(
+                    kind=op.kind,
+                    folder_id=op.folder_id,
+                    artifact_id=op.artifact_id,
+                    artifact_kind=getattr(op, "artifact_kind", None),
+                    index=getattr(op, "index", None),
+                )
+            )
+        elif isinstance(op, MoveArtifactOp):
+            out.append(
+                ViewDiffEntryOut(
+                    kind=op.kind,
+                    artifact_id=op.artifact_id,
+                    from_folder_id=op.from_folder_id,
+                    to_folder_id=op.to_folder_id,
+                    index=op.index,
+                )
+            )
+        else:
+            assert_never(op)
+    return out
+
+
 def diff_commit(db: DbSession, project_id: str, commit: Commit) -> CommitDiffOut:
     """Render one commit's changes across content families.
 
-    Two mechanisms on purpose (see the module docstring): model entities are
+    Three mechanisms on purpose (see the module docstring): model entities are
     reconstructed at rev-1 and rev and compared, artifacts are read straight
-    out of the journal. Only the ids the commit's ops name are compared, so the
-    response size tracks the commit, not the model.
+    out of the journal (state simulated from the inverse-derived base), and
+    view ops are rendered as-is — the ops ARE the diff, no reconstruction at
+    all. Only the ids the commit's ops name are compared for the model half,
+    so the response size tracks the commit, not the model.
 
     A commit that names no model entity at all (a pure-artifact commit, an
     empty batch, a rebind) skips reconstruction entirely: the entity halves
@@ -285,10 +404,15 @@ def diff_commit(db: DbSession, project_id: str, commit: Commit) -> CommitDiffOut
         commit.from_metamodel_id is not None or commit.to_metamodel_id is not None
     )
     has_artifact = any(op.get("kind") in ARTIFACT_OP_KINDS for op in commit.ops)
-    has_model = any(op.get("kind") not in ARTIFACT_OP_KINDS for op in commit.ops)
+    has_view = any(op.get("kind") in VIEW_OP_KINDS for op in commit.ops)
+    has_model = any(
+        op.get("kind") not in ARTIFACT_OP_KINDS and op.get("kind") not in VIEW_OP_KINDS
+        for op in commit.ops
+    )
     scope = sorted(
         ({"model"} if has_model or is_rebind else set())
         | ({"artifact"} if has_artifact else set())
+        | ({"view"} if has_view else set())
     ) or ["model"]
 
     return CommitDiffOut(
@@ -302,4 +426,5 @@ def diff_commit(db: DbSession, project_id: str, commit: Commit) -> CommitDiffOut
         elements=_element_diffs(el_ids, b_el, a_el),
         relationships=_relationship_diffs(rel_ids, b_rel, a_rel),
         artifacts=_artifact_diffs(db, project_id, commit),
+        view=_view_diffs(commit),
     )

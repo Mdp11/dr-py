@@ -72,6 +72,33 @@ def _lock(c: TestClient, resource_id: str, *, type_: str = "element") -> str:
     return r.json()["token"]
 
 
+def _folder_lease(client: TestClient, fid: str, intent: str = "edit") -> str:
+    r = client.post(
+        papi("/locks"),
+        json={
+            "targets": [{"resource_id": fid, "mode": "exclusive", "type": "folder"}],
+            "intent": intent,
+        },
+    )
+    assert r.status_code == 200, r.text
+    token: str = r.json()["token"]
+    return token
+
+
+def _commit_rename(client: TestClient, fid: str, name: str) -> None:
+    token = _folder_lease(client, fid)
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": _rev(client),
+            "ops": [{"kind": "rename_folder", "id": fid, "name": name}],
+            "message": "m",
+            "lock_tokens": [token],
+        },
+    )
+    assert r.status_code == 200, r.text
+
+
 def test_non_overlapping_stale_commit_lands(client: TestClient) -> None:
     base = _rev(client)  # both clients start here
     r1 = _commit(client, [{"kind": "create_element", "temp_id": "tmp_a",
@@ -350,3 +377,252 @@ def test_id_keys_are_derived_from_the_op_models() -> None:
         label: str
 
     assert _id_field_names((_FutureOp,)) == frozenset({"id", "owner_id"})
+
+
+def test_stale_view_batch_overlapping_tail_409s(client) -> None:
+    r = client.put(
+        papi("/view/snapshot"),
+        json={"name": "v", "folders": [{"name": "A"}, {"name": "B"}]},
+    )
+    fa = r.json()["view"]["folders"][0]["id"]
+    stale_base = _rev(client)
+    _commit_rename(client, fa, "A2")  # tail commit touching folder:fa
+    token = _folder_lease(client, fa)
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": stale_base,
+            "ops": [{"kind": "rename_folder", "id": fa, "name": "A3"}],
+            "message": "m",
+            "lock_tokens": [token],
+        },
+    )
+    assert r.status_code == 409
+    assert r.json()["detail"] == "conflicting concurrent commits"
+
+
+def test_stale_view_batch_disjoint_from_tail_lands(client) -> None:
+    r = client.put(
+        papi("/view/snapshot"),
+        json={"name": "v", "folders": [{"name": "A"}, {"name": "B"}]},
+    )
+    fa = r.json()["view"]["folders"][0]["id"]
+    fb = r.json()["view"]["folders"][1]["id"]
+    stale_base = _rev(client)
+    _commit_rename(client, fa, "A2")  # tail touches only folder:fa
+    token = _folder_lease(client, fb)
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": stale_base,
+            "ops": [{"kind": "rename_folder", "id": fb, "name": "B2"}],
+            "message": "m",
+            "lock_tokens": [token],
+        },
+    )
+    assert r.status_code == 200, r.text
+
+
+def test_stale_batch_renaming_delete_folder_subtree_child_409s(client) -> None:
+    """Regression for final-review Fix 4a (the two "hardest kinds"):
+    ``_affected_ids`` reads BOTH a tail commit's forward AND inverse ops, so
+    a ``delete_folder D`` tail commit's cascade victims (here child C) surface
+    via the inverse unit's ``create_folder`` ops even though the forward op
+    only names D. A stale batch that renames C — never mentioning D at all —
+    must still 409."""
+    r = client.put(
+        papi("/view/snapshot"),
+        json={
+            "name": "v",
+            "folders": [{"name": "D", "folders": [{"name": "C"}]}],
+        },
+    )
+    d_id = r.json()["view"]["folders"][0]["id"]
+    c_id = r.json()["view"]["folders"][0]["folders"][0]["id"]
+    stale_base = _rev(client)
+
+    delete_token = _folder_lease(client, d_id, intent="delete")
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": stale_base,
+            "ops": [{"kind": "delete_folder", "id": d_id}],
+            "message": "m",
+            "lock_tokens": [delete_token],
+        },
+    )
+    assert r.status_code == 200, r.text
+
+    rename_token = _folder_lease(client, c_id)
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": stale_base,
+            "ops": [{"kind": "rename_folder", "id": c_id, "name": "C2"}],
+            "message": "m",
+            "lock_tokens": [rename_token],
+        },
+    )
+    assert r.status_code == 409
+    assert r.json()["detail"] == "conflicting concurrent commits"
+
+
+def test_stale_batch_creating_under_move_folders_old_parent_409s(client) -> None:
+    """Regression for final-review Fix 4a: a ``move_folder F`` tail commit's
+    canonical op only names F's DESTINATION parent (B) — its OLD parent (A)
+    surfaces only via the commit's own INVERSE op (``move_folder F`` back to
+    A), which ``_affected_ids`` also scans. A stale batch that creates a new
+    folder under A — the OLD parent, never named by the tail's forward op —
+    must still 409."""
+    r = client.put(
+        papi("/view/snapshot"),
+        json={"name": "v", "folders": [{"name": "A", "folders": [{"name": "F"}]}, {"name": "B"}]},
+    )
+    a_id = r.json()["view"]["folders"][0]["id"]
+    b_id = r.json()["view"]["folders"][1]["id"]
+    f_id = r.json()["view"]["folders"][0]["folders"][0]["id"]
+    stale_base = _rev(client)
+
+    # required_locks resolves F's CURRENT parent (A) itself — the op names
+    # only the destination (B) — so the leases needed are on A and B, not F.
+    move_token = _folder_lease(client, a_id)
+    move_token2 = _folder_lease(client, b_id)
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": stale_base,
+            "ops": [{"kind": "move_folder", "id": f_id, "to_parent_id": b_id}],
+            "message": "m",
+            "lock_tokens": [move_token, move_token2],
+        },
+    )
+    assert r.status_code == 200, r.text
+
+    create_token = _folder_lease(client, a_id, intent="edit")
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": stale_base,
+            "ops": [
+                {
+                    "kind": "create_folder",
+                    "temp_id": "tmp_new",
+                    "parent_id": a_id,
+                    "name": "New",
+                }
+            ],
+            "message": "m",
+            "lock_tokens": [create_token],
+        },
+    )
+    assert r.status_code == 409
+    assert r.json()["detail"] == "conflicting concurrent commits"
+
+
+def test_stale_delete_folder_batch_hydrates_view_for_overlap_check(client) -> None:
+    """Regression for final-review round 3: the pre-mutex overlap check
+    (``_batch_touched_ids``, inside the ``base_rev < model_rev`` staleness
+    block) resolves its OWN local view — never assigned to ``session.view``,
+    since this whole block runs before ``session.write_mutex`` — so a stale
+    batch's own ``delete_folder``/``move_folder`` ops are expanded against
+    the REAL durable tree, not an unhydrated ``None``.
+
+    The caller's lock is deliberately acquired while the cache is still WARM
+    (so ``expand_targets`` correctly grants a token covering the FULL {D, C}
+    subtree, not the narrower under-scoped grant round 2's finding covers) —
+    this isolates the pre-mutex overlap check as the ONLY thing that could
+    catch the conflict: the in-mutex ``required_locks``/``verify_held`` check
+    would find the caller's broad token sufficient regardless, so without
+    the local hydration fixed here, this batch would silently narrow its
+    touched-set to ``{folder:D}`` alone, miss the overlap with the tail's
+    rename of child C, sail through the lock check too, and land at 200 —
+    not a differently-worded 409, but a genuine lost update. (Verified by
+    literally deleting the local's hydration fallback and confirming this is
+    the one test in the whole suite that catches it — see the round 3
+    report for the exact experiment.)"""
+    r = client.put(
+        papi("/view/snapshot"),
+        json={"name": "v", "folders": [{"name": "D", "folders": [{"name": "C"}]}]},
+    )
+    assert r.status_code == 200, r.text
+    d_id = r.json()["view"]["folders"][0]["id"]
+    c_id = r.json()["view"]["folders"][0]["folders"][0]["id"]
+    stale_base = _rev(client)
+
+    _commit_rename(client, c_id, "C2")  # tail commit touching folder:c only
+
+    # Acquire the caller's DELETE lock on D while session.view is STILL
+    # warm (untouched since the PUT above) — expand_targets correctly
+    # expands over the real subtree here, granting a token covering BOTH
+    # D and C (folder ids survive the rename). This is deliberately NOT
+    # round 2's narrow-lock repro: the point here is that even a properly
+    # broad lock cannot save a stale batch from landing if the PRE-mutex
+    # overlap check itself fails to consult the real tree.
+    d_token = _folder_lease(client, d_id, intent="delete")
+
+    # NOW the cache goes cold; the durable row (D -> C2) is untouched.
+    assert client.delete(papi("/view")).status_code == 204
+    assert client.get(papi("/view")).json()["view"] is None
+
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": stale_base,
+            "ops": [{"kind": "delete_folder", "id": d_id}],
+            "message": "m",
+            "lock_tokens": [d_token],
+        },
+    )
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"] == "conflicting concurrent commits"
+
+
+def test_placement_subject_overlap_conflicts_across_folders(client) -> None:
+    """Two batches fighting over the SAME element's placement conflict even
+    though the folders they name are disjoint — the viewel: marker is the
+    only thing connecting them (folder leases never collided)."""
+    r = client.put(
+        papi("/view/snapshot"),
+        json={"name": "v", "folders": [{"name": "A"}, {"name": "C"}]},
+    )
+    fa = r.json()["view"]["folders"][0]["id"]
+    fc = r.json()["view"]["folders"][1]["id"]
+    # place e1 in A (a real commit, so the journal carries canonical ops)
+    tok = _folder_lease(client, fa)
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": _rev(client),
+            "ops": [{"kind": "place_element", "element_id": "e1", "folder_id": fa}],
+            "message": "m",
+            "lock_tokens": [tok],
+        },
+    )
+    assert r.status_code == 200, r.text
+    stale_base = _rev(client)
+    # tail: remove e1's placement (touches folder:fa + viewel:e1)
+    tok = _folder_lease(client, fa)
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": stale_base,
+            "ops": [{"kind": "remove_element", "element_id": "e1", "folder_id": fa}],
+            "message": "m",
+            "lock_tokens": [tok],
+        },
+    )
+    assert r.status_code == 200, r.text
+    # stale batch: place e1 into C — folder set {fc} is DISJOINT from the
+    # tail's {fa}; only viewel:e1 overlaps. Must 409, not land.
+    tok = _folder_lease(client, fc)
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": stale_base,
+            "ops": [{"kind": "place_element", "element_id": "e1", "folder_id": fc}],
+            "message": "m",
+            "lock_tokens": [tok],
+        },
+    )
+    assert r.status_code == 409
+    assert r.json()["detail"] == "conflicting concurrent commits"

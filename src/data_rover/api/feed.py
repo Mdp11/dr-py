@@ -129,10 +129,10 @@ def commit_event(
     deleted_relationship_ids: list[str],
 ) -> dict[str, Any]:
     """``scope`` says which content families the commit touched (``model`` /
-    ``artifact``) so clients refresh only what moved: a commit that only
-    renamed a saved table must not make every peer refetch model pages. It is
-    a REQUIRED keyword rather than a defaulted one so a new broadcast site
-    cannot silently claim the wrong scope."""
+    ``artifact`` / ``view``) so clients refresh only what moved: a commit that
+    only renamed a saved table must not make every peer refetch model pages.
+    It is a REQUIRED keyword rather than a defaulted one so a new broadcast
+    site cannot silently claim the wrong scope."""
     return {
         "type": "commit",
         "rev": rev,

@@ -30,10 +30,21 @@ from .schemas import (
     ArtifactHeaderOut,
     ArtifactOpIn,
     CreateArtifactOp,
+    CreateFolderOp,
     DeleteArtifactOp,
+    DeleteFolderOp,
     ModelOpIn,
+    MoveArtifactOp,
+    MoveElementOp,
+    MoveFolderOp,
     OpIn,
+    PlaceArtifactOp,
+    PlaceElementOp,
+    RemoveArtifactOp,
+    RemoveElementOp,
+    RenameFolderOp,
     UpdateArtifactOp,
+    ViewOpIn,
 )
 
 logger = logging.getLogger(__name__)
@@ -42,19 +53,38 @@ logger = logging.getLogger(__name__)
 ARTIFACT_OP_KINDS = frozenset({"create_artifact", "update_artifact", "delete_artifact"})
 
 
-def split_ops(ops: Sequence[OpIn]) -> tuple[list[ModelOpIn], list[ArtifactOpIn]]:
-    """Separate a mixed batch into (model ops, artifact ops), order-preserving
-    within each family. The families are independent (artifact payloads may
-    REFERENCE model ids, but tolerantly), so relative cross-family order
-    carries no meaning."""
+def split_ops(
+    ops: Sequence[OpIn],
+) -> tuple[list[ModelOpIn], list[ArtifactOpIn], list[ViewOpIn]]:
+    """Separate a mixed batch into (model, artifact, view) ops, order-
+    preserving within each family. The families are independent (payloads and
+    placements may REFERENCE ids across families, but tolerantly), so relative
+    cross-family order carries no meaning."""
     model_ops: list[ModelOpIn] = []
     artifact_ops: list[ArtifactOpIn] = []
+    view_ops: list[ViewOpIn] = []
     for op in ops:
         if isinstance(op, (CreateArtifactOp, UpdateArtifactOp, DeleteArtifactOp)):
             artifact_ops.append(op)
+        elif isinstance(
+            op,
+            (
+                CreateFolderOp,
+                RenameFolderOp,
+                MoveFolderOp,
+                DeleteFolderOp,
+                PlaceElementOp,
+                RemoveElementOp,
+                MoveElementOp,
+                PlaceArtifactOp,
+                RemoveArtifactOp,
+                MoveArtifactOp,
+            ),
+        ):
+            view_ops.append(op)
         else:
             model_ops.append(op)
-    return model_ops, artifact_ops
+    return model_ops, artifact_ops, view_ops
 
 
 def artifact_op_ids(ops: Sequence[ArtifactOpIn]) -> set[str]:

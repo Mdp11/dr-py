@@ -49,9 +49,10 @@ def test_split_ops_separates_families() -> None:
         {"kind": "create_element", "temp_id": "tmp_e", "type_name": "Node", "properties": {}},
         {"kind": "update_artifact", "id": "a1", "payload": {"code": "y"}},
     ])
-    model_ops, artifact_ops = split_ops(ops)
+    model_ops, artifact_ops, view_ops = split_ops(ops)
     assert [o.kind for o in model_ops] == ["create_element"]
     assert [o.kind for o in artifact_ops] == ["update_artifact"]
+    assert view_ops == []
 
 
 def test_required_locks_for_artifact_ops() -> None:
@@ -71,7 +72,7 @@ def test_required_locks_for_artifact_ops() -> None:
         {"kind": "update_artifact", "id": "tmp_x", "payload": {}},
         {"kind": "delete_artifact", "id": "tmp_x"},
     ])
-    reqs = required_locks(_model(), ops)
+    reqs = required_locks(_model(), None, ops)
     by_id = {r.resource_id: r for r in reqs}
     assert set(by_id) == {artifact_resource("a1"), artifact_resource("a2")}
     assert by_id["art:a1"].mode is LockMode.EXCLUSIVE

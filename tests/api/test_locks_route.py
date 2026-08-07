@@ -16,6 +16,8 @@ from data_rover.api.tenancy import add_member
 
 from .conftest import AUTH_HEADERS, papi, seed_default_project
 
+OTHER_HEADERS = {"x-user-id": "user-2", "x-user-email": "user2@example.com"}
+
 # Minimal metamodel: one concrete element type so we can create elements to lock.
 _LOCK_MM = """
 elements:
@@ -256,3 +258,29 @@ def test_renew_returns_false_for_unknown_token(client: TestClient) -> None:
         papi("/locks/renew"), headers=AUTH_HEADERS, json={"token": "bad-token"}
     )
     assert rn.status_code == 200 and rn.json()["ok"] is False
+
+
+def test_acquire_folder_lease_and_conflict(client: TestClient) -> None:
+    r = client.put(papi("/view/snapshot"), json={"name": "v", "folders": [{"name": "A"}]})
+    assert r.status_code == 200, r.text
+    fid = r.json()["view"]["folders"][0]["id"]
+    r = client.post(
+        papi("/locks"),
+        json={
+            "targets": [{"resource_id": fid, "mode": "exclusive", "type": "folder"}],
+            "intent": "edit",
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["leases"][0]["resource_id"] == f"folder:{fid}"
+    # a peer's exclusive on the same folder conflicts
+    _seed_second_member("user-2", "user2@example.com")
+    r2 = client.post(
+        papi("/locks"),
+        json={
+            "targets": [{"resource_id": fid, "mode": "exclusive", "type": "folder"}],
+            "intent": "edit",
+        },
+        headers=OTHER_HEADERS,
+    )
+    assert r2.status_code == 409

@@ -1,13 +1,19 @@
 from __future__ import annotations
 
+import time
+
 from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session as DbSession
 
+from data_rover.core.view.ids import ensure_folder_ids
 from data_rover.core.view.validation import validate_view
 
 from .. import content
 from ..db import get_db
+from ..db_models import User
 from ..deps import Session, get_request_session, require_model
+from ..identity import get_current_user
+from ..locking import FOLDER_PREFIX
 from ..schemas import (
     IssueOut,
     ViewIn,
@@ -25,30 +31,85 @@ def snapshot_view(
     project_id: str,
     session: Session = Depends(get_request_session),
     db: DbSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> ViewSnapshotResponse:
     _, model = require_model(session)
+    # Lease rule (Phase 1 stance, extended): every writer HONORS folder
+    # leases even though only POST /commits VERIFIES them. A whole-document
+    # PUT rewrites every folder, so ANY peer-held folder lease refuses it —
+    # the same "checked out by someone else" stance routes/artifacts.py takes
+    # for `art:` leases (see its `_reject_if_peer_locked`). The caller's OWN
+    # lease never blocks them (`LockTable.active_leases` + the holder != user
+    # filter below mirrors `peer_leases`).
+    now = time.monotonic()
+    peer_held = [
+        le
+        for le in session.lock_table.active_leases(now)
+        if le.resource_id.startswith(FOLDER_PREFIX) and le.holder != user.id
+    ]
+    if peer_held:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "view is checked out by someone else",
+                "conflicts": [
+                    {
+                        "resource_id": le.resource_id,
+                        "mode": le.mode.value,
+                        "holder_id": le.holder,
+                        "holder_email": le.holder_email,
+                    }
+                    for le in peer_held
+                ],
+            },
+        )
     try:
         view = payload.to_core()
     except Exception as exc:  # pydantic validation failure on nested data
         raise HTTPException(status_code=422, detail=f"Invalid view: {exc}") from exc
+    # Unconditional and idempotent: a client that already echoes ids back
+    # (the common case once every folder has one) gets no-op treatment, while
+    # a client still on an old, id-less shape gets healed right here — the PUT
+    # path is one of the three id-entry points alongside hydration/import.
+    ensure_folder_ids(view)
     session.view = view
+    view_rev = 0
     if content.get_model_row(db, project_id) is not None:
-        content.upsert_single_view(
+        view_row = content.upsert_single_view(
             db, project_id, name=view.name, blob=view.model_dump_json()
         )
         db.commit()
-    warnings = [IssueOut.from_core(i) for i in validate_view(view, model)]
-    return ViewSnapshotResponse(view=ViewOut.from_core(view), warnings=warnings)
+        view_rev = view_row.view_rev
+    known = content.list_artifact_ids(db, project_id)
+    warnings = [
+        IssueOut.from_core(i)
+        for i in validate_view(view, model, known_artifact_ids=known)
+    ]
+    return ViewSnapshotResponse(
+        view=ViewOut.from_core(view), warnings=warnings, view_rev=view_rev
+    )
 
 
 @router.get("/view")
-def get_view(session: Session = Depends(get_request_session)) -> ViewStateResponse:
+def get_view(
+    project_id: str,
+    session: Session = Depends(get_request_session),
+    db: DbSession = Depends(get_db),
+) -> ViewStateResponse:
+    view_row = content.get_single_view(db, project_id)
+    view_rev = view_row.view_rev if view_row is not None else None
     view = session.view
     if view is None:
-        return ViewStateResponse(view=None, warnings=[])
+        return ViewStateResponse(view=None, warnings=[], view_rev=view_rev)
     _, model = require_model(session)
-    warnings = [IssueOut.from_core(i) for i in validate_view(view, model)]
-    return ViewStateResponse(view=ViewOut.from_core(view), warnings=warnings)
+    known = content.list_artifact_ids(db, project_id)
+    warnings = [
+        IssueOut.from_core(i)
+        for i in validate_view(view, model, known_artifact_ids=known)
+    ]
+    return ViewStateResponse(
+        view=ViewOut.from_core(view), warnings=warnings, view_rev=view_rev
+    )
 
 
 @router.delete("/view", status_code=204)

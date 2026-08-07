@@ -3,7 +3,7 @@ from __future__ import annotations
 from data_rover.core.metamodel.loader import load_metamodel_str
 from data_rover.core.model.model import Model
 from data_rover.core.validation.issue import Severity
-from data_rover.core.view.schema import Folder, View
+from data_rover.core.view.schema import ArtifactRef, Folder, View
 from data_rover.core.view.validation import validate_view
 
 METAMODEL = """
@@ -40,6 +40,10 @@ def _model_with(block_ids: list[str], part_ids: list[tuple[str, str]]) -> Model:
     # dicts were populated directly, bypassing the mutation boundary
     m.indexes.rebuild()
     return m
+
+
+def _empty_model() -> Model:
+    return _model_with([], [])
 
 
 def test_clean_view_has_no_warnings() -> None:
@@ -113,3 +117,24 @@ def test_duplicate_nested_folder_warning() -> None:
     issues = validate_view(view, model)
     assert len(issues) == 1
     assert "duplicate folder 'X' under 'Top'" in issues[0].message
+
+
+def test_dangling_artifact_ref_warns() -> None:
+    view = View(
+        name="v",
+        folders=[
+            Folder(name="F", artifacts=[ArtifactRef(id="a-live", kind="table")])
+        ],
+        artifacts=[ArtifactRef(id="a-gone", kind="navigation")],
+    )
+    model = _empty_model()  # use/adapt this file's existing model helper
+    issues = validate_view(view, model, known_artifact_ids={"a-live"})
+    msgs = [i.message for i in issues]
+    assert any("unknown artifact 'a-gone'" in m for m in msgs)
+    assert not any("a-live" in m for m in msgs)
+
+
+def test_artifact_refs_skipped_without_known_set() -> None:
+    view = View(name="v", artifacts=[ArtifactRef(id="a-gone", kind="table")])
+    issues = validate_view(view, _empty_model())
+    assert not any("unknown artifact" in i.message for i in issues)

@@ -160,6 +160,10 @@ class ArtifactRefOut(BaseModel):
 
 
 class FolderOut(BaseModel):
+    #: mirrors `Folder.id`; "" means not yet assigned (legacy blob healed at
+    #: hydration/PUT/import time by Task 3 — this field just carries whatever
+    #: the core side already has).
+    id: str = ""
     name: str
     folders: list[FolderOut] = Field(default_factory=list)
     elements: list[str] = Field(default_factory=list)
@@ -168,6 +172,7 @@ class FolderOut(BaseModel):
     @classmethod
     def from_core(cls, folder: Folder) -> FolderOut:
         return cls(
+            id=folder.id,
             name=folder.name,
             folders=[FolderOut.from_core(f) for f in folder.folders],
             elements=list(folder.elements),
@@ -181,12 +186,18 @@ FolderOut.model_rebuild()
 class ViewOut(BaseModel):
     name: str
     folders: list[FolderOut] = Field(default_factory=list)
+    #: Root-level artifact refs. Before Phase 2 this field did not exist, so
+    #: `View.artifacts` was silently dropped on every wire response even
+    #: though the core model always carried it — this field is the fix.
+    #: Additive: old clients that don't know about it simply ignore it.
+    artifacts: list[ArtifactRefOut] = Field(default_factory=list)
 
     @classmethod
     def from_core(cls, view: View) -> ViewOut:
         return cls(
             name=view.name,
             folders=[FolderOut.from_core(f) for f in view.folders],
+            artifacts=[ArtifactRefOut(id=a.id, kind=a.kind) for a in view.artifacts],
         )
 
 
@@ -195,6 +206,7 @@ class ViewIn(BaseModel):
 
     name: str
     folders: list[FolderOut] = Field(default_factory=list)
+    artifacts: list[ArtifactRefOut] = Field(default_factory=list)
 
     def to_core(self) -> View:
         return View.model_validate(self.model_dump())
@@ -203,11 +215,18 @@ class ViewIn(BaseModel):
 class ViewSnapshotResponse(BaseModel):
     view: ViewOut
     warnings: list[IssueOut] = Field(default_factory=list)
+    #: the row's ``view_rev`` after this write (always bumped by a PUT — see
+    #: ``ViewRow.view_rev``). 0 when no ``ModelRow`` exists yet, mirroring the
+    #: in-memory-only fallback that also skips persistence in that case.
+    view_rev: int = 0
 
 
 class ViewStateResponse(BaseModel):
     view: ViewOut | None = None
     warnings: list[IssueOut] = Field(default_factory=list)
+    #: None when no ``ViewRow`` exists for the project (nothing has ever been
+    #: saved); an int (possibly 0, pre-any-edit) once one does.
+    view_rev: int | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -308,12 +327,126 @@ ModelOpIn = (
 #: api/artifact_ops.py to DB rows, never to the in-memory model.
 ArtifactOpIn = CreateArtifactOp | UpdateArtifactOp | DeleteArtifactOp
 
-OpIn = Annotated[ModelOpIn | ArtifactOpIn, Field(discriminator="kind")]
+
+class CreateFolderOp(BaseModel):
+    kind: Literal["create_folder"]
+    temp_id: str
+    parent_id: str
+    name: str
+    #: position among siblings, None = append; canonical stored ops always
+    #: carry the concrete index (referenced by the sibling view ops below).
+    index: int | None = None
+
+
+class RenameFolderOp(BaseModel):
+    kind: Literal["rename_folder"]
+    id: str
+    name: str
+
+
+class MoveFolderOp(BaseModel):
+    kind: Literal["move_folder"]
+    id: str
+    to_parent_id: str
+    index: int | None = None
+
+
+class DeleteFolderOp(BaseModel):
+    kind: Literal["delete_folder"]
+    id: str
+
+
+class PlaceElementOp(BaseModel):
+    kind: Literal["place_element"]
+    element_id: str
+    #: must be a real folder id, never VIEW_ROOT_ID — an unplaced element
+    #: already renders at the root (enforced by the applier, Task 5).
+    folder_id: str
+    index: int | None = None
+
+
+class RemoveElementOp(BaseModel):
+    kind: Literal["remove_element"]
+    element_id: str
+    folder_id: str
+
+
+class MoveElementOp(BaseModel):
+    kind: Literal["move_element"]
+    element_id: str
+    from_folder_id: str
+    to_folder_id: str
+    index: int | None = None
+
+
+class PlaceArtifactOp(BaseModel):
+    kind: Literal["place_artifact"]
+    artifact_id: str
+    #: plain str, NOT the artifact Literal — view refs are tolerant danglers;
+    #: a ref must outlive kind-registry evolution.
+    artifact_kind: str
+    folder_id: str
+    index: int | None = None
+
+
+class RemoveArtifactOp(BaseModel):
+    kind: Literal["remove_artifact"]
+    artifact_id: str
+    folder_id: str
+
+
+class MoveArtifactOp(BaseModel):
+    kind: Literal["move_artifact"]
+    artifact_id: str
+    from_folder_id: str
+    to_folder_id: str
+    index: int | None = None
+
+
+#: View-content ops (Phase 2 artefacts revamp) — applied by api/view_ops.py to
+#: the in-memory session.view, then the blob is persisted; never to the model.
+ViewOpIn = (
+    CreateFolderOp
+    | RenameFolderOp
+    | MoveFolderOp
+    | DeleteFolderOp
+    | PlaceElementOp
+    | RemoveElementOp
+    | MoveElementOp
+    | PlaceArtifactOp
+    | RemoveArtifactOp
+    | MoveArtifactOp
+)
+
+OpIn = Annotated[ModelOpIn | ArtifactOpIn | ViewOpIn, Field(discriminator="kind")]
+
+#: kind-tags of view ops, for raw journal dicts (mirrors ARTIFACT_OP_KINDS,
+#: which lives with ITS applier; this one lives here because schemas is the
+#: only module every consumer can import without cycles).
+VIEW_OP_KINDS = frozenset(
+    {
+        "create_folder",
+        "rename_folder",
+        "move_folder",
+        "delete_folder",
+        "place_element",
+        "remove_element",
+        "move_element",
+        "place_artifact",
+        "remove_artifact",
+        "move_artifact",
+    }
+)
 
 #: (de)serializes a list of ops to/from plain JSON for the durable commit
 #: journal (Commit.ops / inverse_ops). Mode "json" keeps Literal "kind" tags
 #: so the discriminated union round-trips.
 OPS_ADAPTER: TypeAdapter[list[OpIn]] = TypeAdapter(list[OpIn])
+
+#: validates ONE raw journal op dict into a typed view op (the conflict
+#: backstop deserializes only the view ops of tail commits; model/artifact
+#: ops are cheaper to scan as raw dicts, see routes/commits._affected_ids).
+VIEW_OP_ADAPTER: TypeAdapter[ViewOpIn] = TypeAdapter(ViewOpIn)
 
 
 class OpsRequest(BaseModel):
@@ -553,9 +686,10 @@ class LockTargetIn(BaseModel):
     resource_id: str
     mode: Literal["exclusive", "shared"]
     #: what the id names; the route canonicalizes to the internal namespace
-    #: ("element" -> bare id, "artifact" -> "art:<id>", "metamodel" -> "mm").
-    #: Defaults to "element" so pre-existing clients are untouched.
-    type: Literal["element", "artifact", "metamodel"] = "element"
+    #: ("element" -> bare id, "artifact" -> "art:<id>", "metamodel" -> "mm",
+    #: "folder" -> "folder:<id>"). Defaults to "element" so pre-existing
+    #: clients are untouched.
+    type: Literal["element", "artifact", "metamodel", "folder"] = "element"
 
 
 class LockRequest(BaseModel):
@@ -649,6 +783,9 @@ class CommitResponse(OpsResponse):
     #: being required: every pre-artifact client keeps parsing the response.
     changed_artifacts: list[ArtifactHeaderOut] = Field(default_factory=list)
     deleted_artifact_ids: list[str] = Field(default_factory=list)
+    #: post-commit ViewRow.view_rev; None when the batch touched no view
+    #: content (Phase 2). Secondary/informational — see ViewRow.view_rev.
+    view_rev: int | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -744,14 +881,35 @@ class CommitArtifactDiffs(BaseModel):
     deleted: list[ArtifactDiffDeletedOut] = Field(default_factory=list)
 
 
+class ViewDiffEntryOut(BaseModel):
+    """One canonical view op, rendered for history. The view family is
+    fine-grained on the wire, so the ops ARE the diff — no before/after
+    reconstruction. ``name_before`` (rename/delete) comes from the commit's
+    inverse half. Folder ids referenced by other entries are NOT resolved to
+    names here (journal-only stance): the client resolves against its live
+    view and degrades to the bare id for folders deleted since."""
+
+    kind: str
+    folder_id: str | None = None
+    name: str | None = None
+    name_before: str | None = None
+    parent_id: str | None = None
+    index: int | None = None
+    from_folder_id: str | None = None
+    to_folder_id: str | None = None
+    element_id: str | None = None
+    artifact_id: str | None = None
+    artifact_kind: str | None = None
+
+
 class CommitDiffOut(BaseModel):
     """Everything one commit changed, across content families.
 
     Model entities reuse the change-request shapes (``CrElementOps`` /
     ``CrRelationshipOps``) rather than parallel ones, so a client renders a
     commit diff and a CR diff with the same component. ``scope`` mirrors the
-    commit feed event's field ("model" / "artifact"); ``is_rebind`` is true
-    when either metamodel FK is set, matching ``CommitSummaryOut``.
+    commit feed event's field ("model" / "artifact" / "view"); ``is_rebind``
+    is true when either metamodel FK is set, matching ``CommitSummaryOut``.
     """
 
     rev: int
@@ -764,6 +922,7 @@ class CommitDiffOut(BaseModel):
     elements: CrElementOps = Field(default_factory=CrElementOps)
     relationships: CrRelationshipOps = Field(default_factory=CrRelationshipOps)
     artifacts: CommitArtifactDiffs = Field(default_factory=CommitArtifactDiffs)
+    view: list[ViewDiffEntryOut] = Field(default_factory=list)
 
 
 class RevertRequest(BaseModel):

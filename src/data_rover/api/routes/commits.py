@@ -34,6 +34,7 @@ from sqlalchemy.orm import Session as DbSession
 from data_rover.core.model.model import Model
 from data_rover.core.validation.issue import IssueCategory
 from data_rover.core.validation.pipeline import default_pipeline
+from data_rover.core.view.schema import View
 
 from ..artifact_ops import (
     ARTIFACT_OP_KINDS,
@@ -55,6 +56,14 @@ from ..identity import get_current_user
 from ..invalidation import touched_keys
 from ..locking import ARTIFACT_PREFIX, required_locks
 from ..settings import get_settings
+from ..view_ops import (
+    ViewBatchResult,
+    apply_view_ops_atomic,
+    load_or_create_view,
+    rollback_view,
+    validate_view_ops,
+    view_touched_resources,
+)
 from ..schemas import (
     ArtifactOpIn,
     CommitDiffOut,
@@ -64,23 +73,35 @@ from ..schemas import (
     CommitSummaryOut,
     CreateArtifactOp,
     CreateElementOp,
+    CreateFolderOp,
     CreateRelationshipOp,
     DeleteArtifactOp,
     DeleteElementOp,
+    DeleteFolderOp,
     DeleteRelationshipOp,
     ElementOut,
     IssueOut,
     ModelOpIn,
     ModelOut,
+    MoveArtifactOp,
+    MoveElementOp,
+    MoveFolderOp,
     OpenResponse,
     OpIn,
+    PlaceArtifactOp,
+    PlaceElementOp,
     PreviewRequest,
     PreviewResponse,
     RelationshipOut,
+    RemoveArtifactOp,
+    RemoveElementOp,
+    RenameFolderOp,
     RevertRequest,
     UpdateArtifactOp,
     UpdateElementOp,
     UpdateRelationshipOp,
+    VIEW_OP_ADAPTER,
+    VIEW_OP_KINDS,
 )
 from ..session import AppliedBatch
 from .ops import (
@@ -95,6 +116,7 @@ from .ops import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
 
 def _id_field_names(op_types: Iterable[Any]) -> frozenset[str]:
     """Field names that carry a resource id, DERIVED from the op models.
@@ -151,12 +173,26 @@ def _affected_ids(commits: list[Commit]) -> set[str]:
     batch that touches a cascade victim slip past the overlap check here (and
     fail later, at the mutation boundary, as a 422 instead of a clean 409) —
     or, for revert's guard, let a peer's lease on a cascade victim go
-    unnoticed.
+    unnoticed. The same argument covers ``delete_folder``: its subtree
+    victims surface only via the inverse unit's ``create_folder`` ops (see
+    ``view_ops._recreate_ops``).
+
+    View ops are DESERIALIZED into typed models rather than scanned by raw
+    key, unlike the model/artifact branches above: ten op kinds carry
+    heterogeneous id-field namespaces (an ``element_id`` must land in the
+    ``viewel:`` marker namespace, not the bare ``folder:`` one an ``id`` or
+    ``folder_id`` field uses), so a single flat key-name scan would either
+    conflate them or miss the placement-subject markers entirely. Tail
+    commits are few and small, so the extra validation cost here is noise.
     """
     ids: set[str] = set()
     for c in commits:
         for op in (*c.ops, *c.inverse_ops):
-            if op.get("kind") in ARTIFACT_OP_KINDS:
+            kind = op.get("kind")
+            if kind in VIEW_OP_KINDS:
+                ids |= view_touched_resources(VIEW_OP_ADAPTER.validate_python(op))
+                continue
+            if kind in ARTIFACT_OP_KINDS:
                 for key in _ARTIFACT_ID_KEYS:
                     v = op.get(key)
                     if isinstance(v, str):
@@ -169,7 +205,7 @@ def _affected_ids(commits: list[Commit]) -> set[str]:
     return ids
 
 
-def _batch_touched_ids(model: Model, ops: list[OpIn]) -> set[str]:
+def _batch_touched_ids(model: Model, view: View | None, ops: list[OpIn]) -> set[str]:
     """Conservative touched-set for the conflict backstop (spec 2026-07-29):
     a batch conflicts with the commit tail iff their touched-id sets overlap.
 
@@ -182,6 +218,13 @@ def _batch_touched_ids(model: Model, ops: list[OpIn]) -> set[str]:
     relationship) must still register as touching it. A create's temp id
     never appears in `_affected_ids` (canonical ops carry the assigned id),
     so temp ids are filtered out at the end rather than tracked specially.
+    ``view`` is threaded straight through to ``required_locks`` (Task 6) so
+    folder-op lease derivation resolves correctly; the view ops themselves
+    additionally run through ``view_ops.view_touched_resources`` below, which
+    contributes the placement-subject markers (``viewel:``/``viewart:``) no
+    lease ever carries — two batches fighting over the SAME element's/
+    artifact's placement must still conflict even when the folders they name
+    are disjoint.
 
     MUST be conservative: under-reporting a touched resource here is exactly
     the failure mode the backstop exists to prevent (a real conflict would
@@ -193,7 +236,7 @@ def _batch_touched_ids(model: Model, ops: list[OpIn]) -> set[str]:
     type error here rather than a silent hole (same discipline
     ``_apply_one``'s ``assert_never`` gives the applier).
     """
-    ids = {r.resource_id for r in required_locks(model, ops)}
+    ids = {r.resource_id for r in required_locks(model, view, ops)}
     for op in ops:
         if isinstance(
             op,
@@ -214,6 +257,24 @@ def _batch_touched_ids(model: Model, ops: list[OpIn]) -> set[str]:
             # deliberate no-op: a create names no id a PEER could also be
             # touching (its temp id is batch-local and stripped below).
             pass
+        elif isinstance(
+            op,
+            (
+                CreateFolderOp,
+                RenameFolderOp,
+                MoveFolderOp,
+                DeleteFolderOp,
+                PlaceElementOp,
+                RemoveElementOp,
+                MoveElementOp,
+                PlaceArtifactOp,
+                RemoveArtifactOp,
+                MoveArtifactOp,
+            ),
+        ):
+            # delete_folder's subtree is already covered: required_locks
+            # expanded it against the live view above.
+            ids |= view_touched_resources(op)
         else:
             assert_never(op)
     # Strip batch-local temp ids: they never appear in _affected_ids (canonical
@@ -225,6 +286,12 @@ def _batch_touched_ids(model: Model, ops: list[OpIn]) -> set[str]:
     # same-batch-created artifacts from needing a lease at all (see its
     # `created` set), so that id never reaches this filter in practice, and
     # even if it did, "art:tmp_x" still can't collide with a bare canonical id.
+    # A batch-local folder create similarly strips to "folder:tmp_x" /
+    # "viewel:tmp_x" (a placement into a folder created earlier in the SAME
+    # batch) — neither STARTS WITH tmp_ (the prefix check below looks at the
+    # whole string), so they survive this filter, but for the identical
+    # harmlessness reason: a namespaced batch-local id can never collide with
+    # a bare canonical journal id either.
     return {i for i in ids if not i.startswith(TEMP_ID_PREFIX)}
 
 
@@ -275,7 +342,7 @@ def preview_commit(
             status_code=409,
             content={"detail": "stale base_rev", "model_rev": session.model_rev},
         )
-    model_ops, artifact_ops = split_ops(payload.ops)
+    model_ops, artifact_ops, view_ops = split_ops(payload.ops)
     # Artifact ops are DB rows, not model content: there is nothing to apply
     # into the model and roll back, so they are checked DRY (422 on an invalid
     # payload / unknown id / name clash, 409 on a stale artifact_rev) and
@@ -283,6 +350,34 @@ def preview_commit(
     # nothing and the model is untouched by it.
     validate_artifact_ops(db, project_id, artifact_ops)
     with session.write_mutex:
+        # View ops are validated DRY against a deep copy (views are small):
+        # nothing to roll back, and sharing the real applier means preview and
+        # commit cannot disagree. Inside the mutex because a concurrent commit
+        # mutates session.view in place. Guarded on view_ops: an EMPTY batch
+        # would still deep-copy session.view (validate_view_ops' None-view
+        # short-circuit only helps a project with no view at all) on every
+        # model-only preview, which is the common case — pure overhead with
+        # nothing to validate.
+        if view_ops:
+            # Resolve the SAME durable-vs-cached view create_commit's own
+            # pre-mutex resolve now uses (final-review round 2, Finding C):
+            # a None session.view does NOT mean "no durable view" — it can
+            # mean a prior DELETE /view merely cleared the cache while
+            # ViewRow survives (see load_or_create_view's docstring) — so
+            # validating against validate_view_ops' own None-view fallback
+            # (a FRESH EMPTY view) here would let preview 422 "unknown
+            # folder" on a batch the real commit, which hydrates the durable
+            # blob, actually accepts. Resolved into a LOCAL, never assigned
+            # to session.view: preview must stay side-effect-free (no
+            # persist, no rev bump, no cache mutation) — only create_commit
+            # is allowed to materialize the auto-create/hydrate into the
+            # session itself.
+            preview_view = (
+                session.view
+                if session.view is not None
+                else load_or_create_view(db, project_id)
+            )
+            validate_view_ops(preview_view, view_ops)
         # _apply_batch raises 422 on a mutation-boundary structural error
         # (unknown type, missing endpoint, unknown property) — the safety net.
         res = _apply_batch(model, model_ops, restore=False)
@@ -448,27 +543,64 @@ def create_commit(
        b. Apply the model ops (422 on mutation-boundary error from
           _apply_batch), then the artifact ops (staged on this request's DB
           transaction).
-       c. Hard-reject structural blockers (422; rolls back).
+       b3. Apply the view half (all-or-nothing via apply_view_ops_atomic) —
+          auto-creating an empty view for a project that never had one.
+       c. Hard-reject structural blockers (422; rolls back all three halves).
        d. Splice conformance issues into the issue store, bump rev, record batch.
-       e. Persist to the durable journal (500 + full rollback on failure).
+       e. Persist to the durable journal (500 + full rollback on failure); the
+          view blob (if touched) is staged on the SAME DB transaction as the
+          Commit row, so both land or neither does.
        f. Periodic snapshot (mirrors apply_ops to bound replay tail).
        g. Release the caller's locks (explicit loop).
        h. Broadcast commit delta + artifact + lock-release events (inside mutex
           for enqueue-order == rev-order guarantee; broadcast is non-blocking).
     4. Return CommitResponse with full delta + commit metadata.
 
-    Mixed-batch atomicity (Phase 1 artefacts revamp)
-    ------------------------------------------------
-    A batch can span both content families, and the two halves live in
-    different places: model ops mutate the in-memory model IN PLACE, artifact
-    ops stage row changes on this request's DB transaction. So every failure
-    path after an apply has to undo BOTH — ``_rollback(model,
+    Mixed-batch atomicity (Phase 1 artefacts revamp; view half added Phase 2)
+    ---------------------------------------------------------------------
+    A batch can span all three content families, and each lives in a
+    different place: model ops mutate the in-memory model IN PLACE, artifact
+    ops stage row changes on this request's DB transaction, and view ops
+    mutate ``session.view`` IN PLACE plus (once accepted) stage a blob row on
+    the same DB transaction as the artifact rows. So every failure path after
+    an apply has to undo however many halves are live — ``_rollback(model,
     res.inverse_units)`` + ``session.invalidate_derived_caches()`` for the
-    model half, ``db.rollback()`` for the artifact half. ``apply_artifact_ops``
+    model half, ``db.rollback()`` for the artifact half (and the staged view
+    row, once one exists), and ``rollback_view(session.view,
+    view_res.inverse_units)`` for the view half. ``apply_artifact_ops``
     deliberately has no internal rollback path (it only flushes), so that
-    ``db.rollback()`` is the ONLY thing that discards staged artifact rows.
+    ``db.rollback()`` is the ONLY thing that discards staged artifact rows;
+    ``apply_view_ops_atomic`` DOES roll its own prefix back on failure (see its
+    docstring), so a failure raised BY it never needs an explicit
+    ``rollback_view`` call — only failures raised AFTER it succeeded do.
     """
     _, model = require_model(session)
+    model_ops, artifact_ops, view_ops = split_ops(payload.ops)
+    # True iff THIS request is the one that flipped session.view from None
+    # to non-None via load_or_create_view — tracked so every early-return OR
+    # failure path below can restore it to None rather than leaving a
+    # never-committed materialization behind. A REJECTED (409/422/500)
+    # request must be externally invisible: before this request GET /view
+    # reported whatever it reported, and any return out of this function
+    # must leave it reporting that again — for the genuinely-empty case, not
+    # a materialized empty view with no ViewRow / view_rev to back it
+    # (final-review Finding 1, and round 2's Finding A/B extend this same
+    # guard to the resolve-view call site inside the mutex below).
+    #
+    # INVARIANT (final-review round 3): every ASSIGNMENT to session.view in
+    # this function happens under session.write_mutex — the single point is
+    # just inside the mutex below, right before required_locks. A pre-mutex
+    # READ into a LOCAL (the overlap check just below needs one) is fine and
+    # does NOT violate this — only writing session.view itself, or resetting
+    # it, must wait for the mutex. Two concurrent view-op commits assigning
+    # session.view outside the mutex could otherwise race a check-then-set
+    # (a lost update: A reads ViewRow, is descheduled while B hydrates,
+    # commits and persists, then A assigns its now-stale View over B's,
+    # silently overwriting B's folders at A's own persist step) or have
+    # one request's pre-mutex reset (on a rejected/failed early return) null
+    # session.view out from under a DIFFERENT request already inside the
+    # mutex, tripping its own `assert session.view is not None` mid-flight.
+    created_view = False
     if payload.base_rev > session.model_rev:
         return _conflict_response(session.model_rev, "stale base_rev")
     if payload.base_rev < session.model_rev:
@@ -511,11 +643,31 @@ def create_commit(
             # against a metamodel/model that no longer matches what it was
             # computed against.
             return _conflict_response(session.model_rev, "stale base_rev")
-        if _affected_ids(tail) & _batch_touched_ids(model, payload.ops):
+        # Resolve a LOCAL view for the overlap check ONLY, immediately
+        # before the one check in this block that needs it (final-review
+        # round 2, Finding A) — not any earlier, so the three fail-closed
+        # checks above (which never consult view content at all) can never
+        # trigger an unnecessary hydration on their own return paths.
+        # _batch_touched_ids -> required_locks' folder_subtree/locate_folder
+        # expansion degrades to a bare single-resource id against a
+        # ``None`` view, exactly like the applier itself would under-derive
+        # a lock against an unresolved tree — so without resolving first, a
+        # stale delete_folder/move_folder batch's conflict/touched-set here
+        # would be computed against the WRONG (empty/absent) tree relative
+        # to what the real, hydrated one actually contains. NEVER assigned
+        # to session.view here (final-review round 3: this whole block runs
+        # BEFORE the mutex, so a write here would be the exact race the
+        # invariant note above create_commit's mutex now forbids) — mirrors
+        # preview_commit's own local, read-only resolve.
+        conflict_view = (
+            session.view
+            if session.view is not None
+            else load_or_create_view(db, project_id)
+        )
+        if _affected_ids(tail) & _batch_touched_ids(model, conflict_view, payload.ops):
             return _conflict_response(
                 session.model_rev, "conflicting concurrent commits"
             )
-    model_ops, artifact_ops = split_ops(payload.ops)
     state = _ensure_validation_seeded(session, model)
     if not payload.ops:
         # Empty batch: nothing to apply. Mirrors apply_ops' and revert's
@@ -543,14 +695,36 @@ def create_commit(
             validation_error_count=0,
         )
     with session.write_mutex:
+        # Resolve/auto-create session.view HERE — the ONLY place this
+        # function ever ASSIGNS to it (final-review round 3), now that the
+        # pre-mutex overlap check above uses its own read-only local
+        # instead. required_locks just below needs it resolved for the same
+        # reason that local did: against a ``None`` view, folder_subtree/
+        # locate_folder degrade to a bare single-resource id, under-
+        # deriving a delete_folder/move_folder's lock requirement relative
+        # to the real, hydrated tree the applier goes on to mutate. No
+        # try/except needed: this is still the first thing that could
+        # mutate anything once the mutex is held (mirrors the reasoning in
+        # created_view's docstring above — contrast undo's version of this
+        # hoist, which runs after a batch has already been popped).
+        if view_ops and session.view is None:
+            session.view = load_or_create_view(db, project_id)
+            created_view = True
         # a. verify the caller still holds every required lock. `payload.ops`
         #    (not `model_ops`) so the `art:`-namespaced leases artifact ops
         #    need are derived and checked too.
-        reqs = required_locks(model, payload.ops)
+        reqs = required_locks(model, session.view, payload.ops)
         missing = session.lock_table.verify_held(
             user.id, payload.lock_tokens, reqs, now=time.monotonic()
         )
         if missing:
+            if created_view:
+                # this request's own hydration must not leak into a
+                # REJECTED (409) response's visible state — see
+                # created_view's docstring above the staleness checks. Safe
+                # to reset here: still inside the mutex, so no concurrent
+                # request can be mid-flight on the SAME session.view object.
+                session.view = None
             return JSONResponse(
                 status_code=409,
                 content={
@@ -563,8 +737,16 @@ def create_commit(
             )
         # b. apply the model half (422 on mutation-boundary error — let it
         #    propagate; _apply_batch already rolled itself back and nothing
-        #    artifact-side has been staged yet)
-        res = _apply_batch(model, model_ops, restore=False)
+        #    artifact-side has been staged yet). created_view may already be
+        #    True here (the resolve just above), so this needs its own
+        #    guard too, unlike round 1's shape where hydration never
+        #    happened this early (final-review round 2, Finding B).
+        try:
+            res = _apply_batch(model, model_ops, restore=False)
+        except Exception:
+            if created_view:
+                session.view = None
+            raise
         # b2. apply the artifact half, staged on this request's DB transaction.
         #     Seeded with the model id_map so an artifact payload may reference
         #     an element created earlier in the SAME batch. On failure both
@@ -585,8 +767,51 @@ def create_commit(
             # model half-mutated. Undo both halves, then let it propagate.
             _rollback(model, res.inverse_units)
             session.invalidate_derived_caches()  # rolled back in place; A1/I1
+            if created_view:
+                session.view = None  # see created_view's docstring above
             db.rollback()  # discard staged artifact rows
             raise
+        # b3. apply the view half to session.view IN PLACE, all-or-nothing
+        #     (session.view was already resolved near the top of this SAME
+        #     mutex block whenever view_ops is non-empty; created_view was
+        #     set there too). Seeded with both prior id_maps so a placement
+        #     may reference an element or artifact created earlier in the
+        #     SAME batch.
+        view_res: ViewBatchResult | None = None
+        if view_ops:
+            if session.view is None:
+                # Defensive fallback only: the resolve near the top of this
+                # SAME mutex block already hydrated/auto-created
+                # session.view whenever view_ops is non-empty, so this
+                # branch is dead in the ordinary case. It stays for the one
+                # race that block cannot close even from inside the mutex:
+                # routes/view.py's ``DELETE /view`` is deliberately out of
+                # scope and takes NO lock at all (not even session.write_
+                # mutex), so a peer's concurrent DELETE could null
+                # session.view again between this request's own resolve and
+                # here, despite this request holding the mutex the entire
+                # time.
+                session.view = load_or_create_view(db, project_id)
+                created_view = True
+            try:
+                view_res = apply_view_ops_atomic(
+                    session.view,
+                    view_ops,
+                    id_map={**res.id_map, **art_res.id_map},
+                    restore=False,
+                )
+            except Exception:
+                # mirror b2's stance: never leave the model half applied.
+                _rollback(model, res.inverse_units)
+                session.invalidate_derived_caches()
+                if created_view:
+                    # apply_view_ops_atomic already rolled its own applied
+                    # prefix back (to the empty View this request created),
+                    # but the auto-create itself must unwind too: the
+                    # pre-batch state for THIS project was None, not "".
+                    session.view = None
+                db.rollback()
+                raise
         # c. hard-reject structural blockers. Model content only: an artifact
         #    op's own validity was settled at apply time (b2), and an artifact
         #    row can never make the MODEL structurally invalid.
@@ -595,6 +820,11 @@ def create_commit(
         if structural:
             _rollback(model, res.inverse_units)
             session.invalidate_derived_caches()  # rolled back in place; A1/I1
+            if view_res is not None:
+                assert session.view is not None
+                rollback_view(session.view, view_res.inverse_units)
+            if created_view:
+                session.view = None  # unwind the auto-create too — see b3
             db.rollback()  # discard staged artifact rows
             return JSONResponse(
                 status_code=422,
@@ -614,6 +844,11 @@ def create_commit(
         if session.strict_mode and conformance:
             _rollback(model, res.inverse_units)
             session.invalidate_derived_caches()  # rolled back in place; A1/I1
+            if view_res is not None:
+                assert session.view is not None
+                rollback_view(session.view, view_res.inverse_units)
+            if created_view:
+                session.view = None  # unwind the auto-create too — see b3
             db.rollback()  # discard staged artifact rows
             return JSONResponse(
                 status_code=422,
@@ -632,12 +867,28 @@ def create_commit(
             session.evict_touched_caches(touched_keys(model, model.metamodel, res))
         else:
             session.invalidate_derived_caches()  # legacy clear-all
-        # ONE journal entry per commit, spanning both families: model ops
-        # first, then artifact ops (the families are independent, so relative
-        # cross-family order carries no meaning — see split_ops).
-        merged_id_map = {**res.id_map, **art_res.id_map}
-        canonical_ops: list[OpIn] = [*res.canonical_ops, *art_res.canonical_ops]
-        inverse_ops: list[OpIn] = [*res.inverse_ops(), *art_res.inverse_ops()]
+        # ONE journal entry per commit, spanning all three families: model
+        # ops first, then artifact ops, then view ops (the families are
+        # independent, so relative cross-family order carries no meaning —
+        # see split_ops). The view id_map is seeded with the model+artifact
+        # maps (see b3), so view_res.id_map is already a superset — merging
+        # it last is correct and the other two spreads are redundant but
+        # harmless, kept for symmetry with undo.
+        merged_id_map = {
+            **res.id_map,
+            **art_res.id_map,
+            **(view_res.id_map if view_res else {}),
+        }
+        canonical_ops: list[OpIn] = [
+            *res.canonical_ops,
+            *art_res.canonical_ops,
+            *(view_res.canonical_ops if view_res else []),
+        ]
+        inverse_ops: list[OpIn] = [
+            *res.inverse_ops(),
+            *art_res.inverse_ops(),
+            *(view_res.inverse_ops() if view_res else []),
+        ]
         session.record_batch(
             AppliedBatch(
                 ops=canonical_ops,
@@ -645,10 +896,30 @@ def create_commit(
                 id_map=merged_id_map,
             )
         )
-        # e. persist to the durable journal; mirror apply_ops 500 pattern exactly
+        # e. persist to the durable journal; mirror apply_ops 500 pattern
+        #    exactly. The view blob (if touched) is staged INSIDE this same
+        #    try, on the same DB transaction _persist_commit's own
+        #    db.commit() will flush — so the view row and the Commit row
+        #    land or roll back together. It MUST be inside the try: staging
+        #    is a db.flush() (content.upsert_single_view), which can raise
+        #    on its own (FK/constraint/connection error) — the same failure
+        #    class this try/except exists to catch. Staging it outside would
+        #    let that exception escape every rollback below with model_rev
+        #    already bumped and the batch already in op_log (final-review
+        #    Finding 1).
         commit_id = uuid.uuid4().hex
         issues_json = [IssueOut.from_core(i).model_dump() for i in conformance]
+        new_view_rev: int | None = None
         try:
+            if view_res is not None and view_res.canonical_ops:
+                assert session.view is not None
+                view_row = content.upsert_single_view(
+                    db,
+                    project_id,
+                    name=session.view.name,
+                    blob=session.view.model_dump_json(),
+                )
+                new_view_rev = view_row.view_rev
             persisted = _persist_commit(
                 db,
                 project_id,
@@ -666,12 +937,17 @@ def create_commit(
             _rollback(model, res.inverse_units)
             session.model_rev -= 1
             session.invalidate_derived_caches()  # rolled back in place; A1/I1
+            if view_res is not None:
+                assert session.view is not None
+                rollback_view(session.view, view_res.inverse_units)
+            if created_view:
+                session.view = None  # unwind the auto-create too — see b3
             session.op_log.pop()
-            db.rollback()  # also discards the staged artifact rows
+            db.rollback()  # also discards the staged artifact + view rows
             raise HTTPException(
                 status_code=500, detail="failed to persist commit"
             ) from exc
-        if artifact_ops and not persisted:
+        if (artifact_ops or view_ops) and not persisted:
             # No durable model row (in-memory-only legacy project), so
             # _persist_commit skipped its db.commit() — but artifact rows are
             # real DB state that must not silently vanish when the request
@@ -715,11 +991,12 @@ def create_commit(
             RelationshipOut.from_core(model.relationships[rid]).model_dump()
             for rid in res.changed_relationship_ids
         ]
-        # an empty batch touched neither family; report it as "model" so the
-        # scope list is never empty and peers keep their existing behaviour.
+        # an empty batch touched no family; report it as "model" so the scope
+        # list is never empty and peers keep their existing behaviour.
         scope = sorted(
             ({"model"} if model_ops else set())
             | ({"artifact"} if artifact_ops else set())
+            | ({"view"} if view_ops else set())
         ) or ["model"]
         session.hub.broadcast(
             commit_event(
@@ -772,6 +1049,7 @@ def create_commit(
         validation_error_count=len(conformance),
         changed_artifacts=changed_artifact_headers,
         deleted_artifact_ids=[d["id"] for d in art_res.deleted],
+        view_rev=new_view_rev,
     )
 
 
@@ -853,6 +1131,20 @@ def revert_commit(
                         "artifact_commit_rev": c.rev,
                     },
                 )
+        for c in commits:
+            # PERMANENT refusal (not a Task-N stub, unlike the artifact one
+            # above): a range revert over view changes has the same row-
+            # identity collision hazard the artifact refusal exists for
+            # (folder ids reused after the target rev), and the view family
+            # has no plan to lift this boundary.
+            if any(op.get("kind") in VIEW_OP_KINDS for op in c.ops):
+                return JSONResponse(
+                    status_code=409,
+                    content={
+                        "detail": "revert across view changes is not yet supported",
+                        "view_commit_rev": c.rev,
+                    },
+                )
         affected = _affected_ids(commits)
         held = [
             le
@@ -876,21 +1168,21 @@ def revert_commit(
             )
         # apply inverse_ops newest-first; deserialize the stored JSON op dicts.
         # split_ops is here as the TYPE narrowing only (deserialize_ops answers
-        # the full OpIn union while _apply_batch takes model ops): the guard
-        # above already proved the artifact half empty, since an artifact op's
-        # inverse is always itself an artifact op.
-        combined, artifact_combined = split_ops(
+        # the full OpIn union while _apply_batch takes model ops): the guards
+        # above already proved the artifact AND view halves empty, since an
+        # op's inverse is always in its own family.
+        combined, artifact_combined, view_combined = split_ops(
             deserialize_ops([op for c in reversed(commits) for op in c.inverse_ops])
         )
-        if artifact_combined:
-            # Unreachable while the 409 guard above stands. An explicit raise
+        if artifact_combined or view_combined:
+            # Unreachable while the 409 guards above stand. An explicit raise
             # rather than an assert: `python -O` strips asserts, and silently
-            # dropping artifact ops on the floor is precisely the outcome the
-            # Phase-1 boundary exists to prevent, so a narrowed guard must fail
-            # loudly instead of half-reverting.
+            # dropping artifact/view ops on the floor is precisely the outcome
+            # the Phase-1 boundary exists to prevent, so a narrowed guard must
+            # fail loudly instead of half-reverting.
             raise HTTPException(
                 status_code=500,
-                detail="internal error: artifact ops reached the revert applier",
+                detail="artifact/view ops reached the revert applier",
             )
         res = _apply_batch(model, combined, restore=True)
         scoped = default_pipeline().validate(model, res.dirty.to_scope())

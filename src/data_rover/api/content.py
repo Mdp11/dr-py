@@ -232,14 +232,29 @@ def clear_history(db: Session, project_id: str) -> None:
 
 
 def upsert_single_view(
-    db: Session, project_id: str, *, name: str, blob: str
+    db: Session, project_id: str, *, name: str, blob: str, bump_rev: bool = True
 ) -> ViewRow:
+    """Create-or-update the project's one view row.
+
+    ``bump_rev`` distinguishes a real edit (the legacy PUT, and eventually the
+    view half of ``POST /commits``) from a NORMALIZATION write (lazy folder-id
+    healing at hydration/import): healing must not look like an edit, so it
+    passes ``bump_rev=False`` and ``view_rev`` is left untouched.
+    """
     row = get_single_view(db, project_id)
     if row is None:
-        row = ViewRow(id=uuid.uuid4().hex, project_id=project_id, name=name, blob=blob)
+        row = ViewRow(
+            id=uuid.uuid4().hex,
+            project_id=project_id,
+            name=name,
+            blob=blob,
+            view_rev=1 if bump_rev else 0,
+        )
         db.add(row)
     else:
         row.name, row.blob = name, blob
+        if bump_rev:
+            row.view_rev += 1
     db.flush()
     return row
 
@@ -311,6 +326,25 @@ def list_artifacts(
         q = q.where(ArtifactRow.kind == kind)
     q = q.order_by(ArtifactRow.kind, ArtifactRow.name)
     return list(db.execute(q).scalars())
+
+
+def list_artifact_ids(db: Session, project_id: str) -> set[str]:
+    """Ids-only projection of every artifact row in the project.
+
+    Callers that only need to know WHICH ids exist (``validate_view``'s
+    ``known_artifact_ids``, checked on every ``GET /view`` and
+    ``PUT /view/snapshot``) must not pay to deserialize each row's full
+    ``payload`` JSON via ``list_artifacts`` — a ``code_snippet`` payload alone
+    is capped at 64 KiB, so a project with a few hundred artifacts would
+    otherwise cost megabytes of JSON parsing on every view read purely to
+    build a membership set. ``select(ArtifactRow.id)`` projects only the id
+    column, so the payload/name/etc. columns are never fetched from the DB at
+    all, not just skipped after the fact."""
+    return set(
+        db.execute(
+            select(ArtifactRow.id).where(ArtifactRow.project_id == project_id)
+        ).scalars()
+    )
 
 
 def update_artifact(

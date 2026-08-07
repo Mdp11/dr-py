@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 from data_rover.core.metamodel.loader import load_metamodel_str
+from data_rover.core.view.ids import ensure_folder_ids
 from data_rover.core.view.schema import View
 
 from . import content, tenancy
@@ -56,8 +57,13 @@ def import_project(
         content.set_model_rev(s, project_id, 0)
         if view_json is not None:
             view = View.model_validate_json(view_json)
+            ensure_folder_ids(view)
             content.upsert_single_view(
-                s, project_id, name=view.name, blob=view.model_dump_json()
+                s,
+                project_id,
+                name=view.name,
+                blob=view.model_dump_json(),
+                bump_rev=False,  # a baseline import starts at rev 0, like model_rev
             )
 
     # build the model + write the rev-0 snapshot (outside the txn above; the
