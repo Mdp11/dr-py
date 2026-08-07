@@ -122,7 +122,7 @@ def _artifact_states(
     """
     before: dict[str, _ArtifactState] = {}
     kinds: dict[str, str] = {}
-    _, inverse_artifact_ops = split_ops(deserialize_ops(commit.inverse_ops))
+    _, inverse_artifact_ops, _ = split_ops(deserialize_ops(commit.inverse_ops))
     for op in inverse_artifact_ops:
         if isinstance(op, CreateArtifactOp):  # the forward op deleted it
             before[op.temp_id] = {"name": op.name, "payload": op.payload}
@@ -135,7 +135,7 @@ def _artifact_states(
         aid: (dict(state) if state is not None else None)
         for aid, state in before.items()
     }
-    _, forward_artifact_ops = split_ops(deserialize_ops(commit.ops))
+    _, forward_artifact_ops, _ = split_ops(deserialize_ops(commit.ops))
     for op in forward_artifact_ops:
         if isinstance(op, CreateArtifactOp):
             after[op.temp_id] = {"name": op.name, "payload": op.payload}

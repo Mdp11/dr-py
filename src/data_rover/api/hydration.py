@@ -119,10 +119,10 @@ def replay_commits_into(session: Session, commits: list[Commit]) -> None:
 
     assert session.model is not None
     for c in commits:
-        ops, _artifact_ops = split_ops(deserialize_ops(c.ops))
-        # artifact ops are SKIPPED on model replay: artifact rows are the
-        # materialized heads and already reflect them (spec: one journal,
-        # materialized heads).
+        ops, _artifact_ops, _view_ops = split_ops(deserialize_ops(c.ops))
+        # artifact AND view ops are SKIPPED on model replay: artifact rows and
+        # the view blob (ViewRow) are both materialized heads and already
+        # reflect them (spec: one journal, materialized heads).
         if ops:
             _apply_batch(session.model, ops, restore=True)
 

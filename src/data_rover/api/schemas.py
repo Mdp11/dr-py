@@ -327,7 +327,116 @@ ModelOpIn = (
 #: api/artifact_ops.py to DB rows, never to the in-memory model.
 ArtifactOpIn = CreateArtifactOp | UpdateArtifactOp | DeleteArtifactOp
 
-OpIn = Annotated[ModelOpIn | ArtifactOpIn, Field(discriminator="kind")]
+
+class CreateFolderOp(BaseModel):
+    kind: Literal["create_folder"]
+    temp_id: str
+    parent_id: str
+    name: str
+    #: position among siblings, None = append; canonical stored ops always
+    #: carry the concrete index (referenced by the sibling view ops below).
+    index: int | None = None
+
+
+class RenameFolderOp(BaseModel):
+    kind: Literal["rename_folder"]
+    id: str
+    name: str
+
+
+class MoveFolderOp(BaseModel):
+    kind: Literal["move_folder"]
+    id: str
+    to_parent_id: str
+    index: int | None = None
+
+
+class DeleteFolderOp(BaseModel):
+    kind: Literal["delete_folder"]
+    id: str
+
+
+class PlaceElementOp(BaseModel):
+    kind: Literal["place_element"]
+    element_id: str
+    #: must be a real folder id, never VIEW_ROOT_ID — an unplaced element
+    #: already renders at the root (enforced by the applier, Task 5).
+    folder_id: str
+    index: int | None = None
+
+
+class RemoveElementOp(BaseModel):
+    kind: Literal["remove_element"]
+    element_id: str
+    folder_id: str
+
+
+class MoveElementOp(BaseModel):
+    kind: Literal["move_element"]
+    element_id: str
+    from_folder_id: str
+    to_folder_id: str
+    index: int | None = None
+
+
+class PlaceArtifactOp(BaseModel):
+    kind: Literal["place_artifact"]
+    artifact_id: str
+    #: plain str, NOT the artifact Literal — view refs are tolerant danglers;
+    #: a ref must outlive kind-registry evolution.
+    artifact_kind: str
+    folder_id: str
+    index: int | None = None
+
+
+class RemoveArtifactOp(BaseModel):
+    kind: Literal["remove_artifact"]
+    artifact_id: str
+    folder_id: str
+
+
+class MoveArtifactOp(BaseModel):
+    kind: Literal["move_artifact"]
+    artifact_id: str
+    from_folder_id: str
+    to_folder_id: str
+    index: int | None = None
+
+
+#: View-content ops (Phase 2 artefacts revamp) — applied by api/view_ops.py to
+#: the in-memory session.view, then the blob is persisted; never to the model.
+ViewOpIn = (
+    CreateFolderOp
+    | RenameFolderOp
+    | MoveFolderOp
+    | DeleteFolderOp
+    | PlaceElementOp
+    | RemoveElementOp
+    | MoveElementOp
+    | PlaceArtifactOp
+    | RemoveArtifactOp
+    | MoveArtifactOp
+)
+
+OpIn = Annotated[ModelOpIn | ArtifactOpIn | ViewOpIn, Field(discriminator="kind")]
+
+#: kind-tags of view ops, for raw journal dicts (mirrors ARTIFACT_OP_KINDS,
+#: which lives with ITS applier; this one lives here because schemas is the
+#: only module every consumer can import without cycles).
+VIEW_OP_KINDS = frozenset(
+    {
+        "create_folder",
+        "rename_folder",
+        "move_folder",
+        "delete_folder",
+        "place_element",
+        "remove_element",
+        "move_element",
+        "place_artifact",
+        "remove_artifact",
+        "move_artifact",
+    }
+)
 
 #: (de)serializes a list of ops to/from plain JSON for the durable commit
 #: journal (Commit.ops / inverse_ops). Mode "json" keeps Literal "kind" tags

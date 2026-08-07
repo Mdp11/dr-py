@@ -64,23 +64,34 @@ from ..schemas import (
     CommitSummaryOut,
     CreateArtifactOp,
     CreateElementOp,
+    CreateFolderOp,
     CreateRelationshipOp,
     DeleteArtifactOp,
     DeleteElementOp,
+    DeleteFolderOp,
     DeleteRelationshipOp,
     ElementOut,
     IssueOut,
     ModelOpIn,
     ModelOut,
+    MoveArtifactOp,
+    MoveElementOp,
+    MoveFolderOp,
     OpenResponse,
     OpIn,
+    PlaceArtifactOp,
+    PlaceElementOp,
     PreviewRequest,
     PreviewResponse,
     RelationshipOut,
+    RemoveArtifactOp,
+    RemoveElementOp,
+    RenameFolderOp,
     RevertRequest,
     UpdateArtifactOp,
     UpdateElementOp,
     UpdateRelationshipOp,
+    VIEW_OP_KINDS,
 )
 from ..session import AppliedBatch
 from .ops import (
@@ -214,6 +225,22 @@ def _batch_touched_ids(model: Model, ops: list[OpIn]) -> set[str]:
             # deliberate no-op: a create names no id a PEER could also be
             # touching (its temp id is batch-local and stripped below).
             pass
+        elif isinstance(
+            op,
+            (
+                CreateFolderOp,
+                RenameFolderOp,
+                MoveFolderOp,
+                DeleteFolderOp,
+                PlaceElementOp,
+                RemoveElementOp,
+                MoveElementOp,
+                PlaceArtifactOp,
+                RemoveArtifactOp,
+                MoveArtifactOp,
+            ),
+        ):
+            pass  # TEMPORARY (plan Task 9): real touched-id derivation lands there
         else:
             assert_never(op)
     # Strip batch-local temp ids: they never appear in _affected_ids (canonical
@@ -275,7 +302,11 @@ def preview_commit(
             status_code=409,
             content={"detail": "stale base_rev", "model_rev": session.model_rev},
         )
-    model_ops, artifact_ops = split_ops(payload.ops)
+    model_ops, artifact_ops, view_ops = split_ops(payload.ops)
+    if view_ops:  # TEMPORARY (plan Task 7): the view applier does not exist yet
+        raise HTTPException(
+            status_code=422, detail="view ops are not yet supported here"
+        )
     # Artifact ops are DB rows, not model content: there is nothing to apply
     # into the model and roll back, so they are checked DRY (422 on an invalid
     # payload / unknown id / name clash, 409 on a stale artifact_rev) and
@@ -515,7 +546,11 @@ def create_commit(
             return _conflict_response(
                 session.model_rev, "conflicting concurrent commits"
             )
-    model_ops, artifact_ops = split_ops(payload.ops)
+    model_ops, artifact_ops, view_ops = split_ops(payload.ops)
+    if view_ops:  # TEMPORARY (plan Task 7): the view applier does not exist yet
+        raise HTTPException(
+            status_code=422, detail="view ops are not yet supported here"
+        )
     state = _ensure_validation_seeded(session, model)
     if not payload.ops:
         # Empty batch: nothing to apply. Mirrors apply_ops' and revert's
@@ -853,6 +888,20 @@ def revert_commit(
                         "artifact_commit_rev": c.rev,
                     },
                 )
+        for c in commits:
+            # PERMANENT refusal (not a Task-N stub, unlike the artifact one
+            # above): a range revert over view changes has the same row-
+            # identity collision hazard the artifact refusal exists for
+            # (folder ids reused after the target rev), and the view family
+            # has no plan to lift this boundary.
+            if any(op.get("kind") in VIEW_OP_KINDS for op in c.ops):
+                return JSONResponse(
+                    status_code=409,
+                    content={
+                        "detail": "revert across view changes is not yet supported",
+                        "view_commit_rev": c.rev,
+                    },
+                )
         affected = _affected_ids(commits)
         held = [
             le
@@ -876,21 +925,21 @@ def revert_commit(
             )
         # apply inverse_ops newest-first; deserialize the stored JSON op dicts.
         # split_ops is here as the TYPE narrowing only (deserialize_ops answers
-        # the full OpIn union while _apply_batch takes model ops): the guard
-        # above already proved the artifact half empty, since an artifact op's
-        # inverse is always itself an artifact op.
-        combined, artifact_combined = split_ops(
+        # the full OpIn union while _apply_batch takes model ops): the guards
+        # above already proved the artifact AND view halves empty, since an
+        # op's inverse is always in its own family.
+        combined, artifact_combined, view_combined = split_ops(
             deserialize_ops([op for c in reversed(commits) for op in c.inverse_ops])
         )
-        if artifact_combined:
-            # Unreachable while the 409 guard above stands. An explicit raise
+        if artifact_combined or view_combined:
+            # Unreachable while the 409 guards above stand. An explicit raise
             # rather than an assert: `python -O` strips asserts, and silently
-            # dropping artifact ops on the floor is precisely the outcome the
-            # Phase-1 boundary exists to prevent, so a narrowed guard must fail
-            # loudly instead of half-reverting.
+            # dropping artifact/view ops on the floor is precisely the outcome
+            # the Phase-1 boundary exists to prevent, so a narrowed guard must
+            # fail loudly instead of half-reverting.
             raise HTTPException(
                 status_code=500,
-                detail="internal error: artifact ops reached the revert applier",
+                detail="artifact/view ops reached the revert applier",
             )
         res = _apply_batch(model, combined, restore=True)
         scoped = default_pipeline().validate(model, res.dirty.to_scope())

@@ -339,22 +339,23 @@ def run_snippet(
             status_code=500, detail="runner emitted an invalid op batch"
         ) from None
 
-    _, artifact_ops = split_ops(validated_ops)
-    if artifact_ops:
+    _, artifact_ops, view_ops = split_ops(validated_ops)
+    if artifact_ops or view_ops:
         # SECURITY GATE, not a schema check. `bridge._op_record_op` appends a
         # guest-supplied op dict VERBATIM, and OPS_ADAPTER now accepts the
-        # artifact op family — so without this, a snippet could propose
-        # `update_artifact` rewriting ANOTHER snippet's code and have it staged
-        # for an editor who believes they are approving the data edits they
-        # asked for. `create_artifact` needs no lease at all, so nothing
-        # downstream would stop it landing, and /snippets/run is a read-only
-        # POST: the proposing author can be a VIEWER while the approver is an
-        # editor — a confused deputy. The guest facade has no artifact surface
-        # whatsoever, so an artifact op here is by definition not legitimate;
+        # artifact AND view op families — so without this, a snippet could
+        # propose `update_artifact` rewriting ANOTHER snippet's code, or a
+        # view op reshaping the folder tree, and have it staged for an editor
+        # who believes they are approving the data edits they asked for.
+        # `create_artifact` needs no lease at all, so nothing downstream would
+        # stop it landing, and /snippets/run is a read-only POST: the
+        # proposing author can be a VIEWER while the approver is an editor —
+        # a confused deputy. The guest facade has no artifact OR view surface
+        # whatsoever, so either op here is by definition not legitimate;
         # refused exactly like the malformed batch above (server-side fault,
         # never surfaced to the client for staging).
         logger.error(
-            "snippet run %s emitted artifact ops (not a guest capability): %r",
+            "snippet run %s emitted artifact/view ops (not a guest capability): %r",
             payload.run_id,
             res.ops,
         )

@@ -52,7 +52,7 @@ def _model() -> Model:
 
 
 def _apply(model: Model, ops: list[dict]) -> _BatchResult:
-    model_ops, _artifact_ops = split_ops(OPS_ADAPTER.validate_python(ops))
+    model_ops, _artifact_ops, _view_ops = split_ops(OPS_ADAPTER.validate_python(ops))
     return _apply_batch(model, model_ops, restore=False)
 
 

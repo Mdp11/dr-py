@@ -600,13 +600,18 @@ def apply_ops(
                 "model_rev": session.model_rev,
             },
         )
-    model_ops, artifact_ops = split_ops(payload.ops)
+    model_ops, artifact_ops, view_ops = split_ops(payload.ops)
     if artifact_ops:
         # The legacy unlocked path is model-only FOREVER: artifact edits go
         # through POST /commits (lock-verified) or legacy PUT /artifacts.
         raise HTTPException(
             status_code=422,
             detail="artifact ops are not supported on /model/ops; use /commits",
+        )
+    if view_ops:
+        raise HTTPException(
+            status_code=422,
+            detail="view ops are not supported on /model/ops; use /commits",
         )
     state = _ensure_validation_seeded(session, model)
     if not payload.ops:
@@ -680,7 +685,10 @@ def undo(
         # A batch recorded by POST /commits can span both content families, so
         # the undo replays each half through its own applier: the model half in
         # place, the artifact half staged on this request's DB transaction.
-        model_inv, artifact_inv = split_ops(batch.inverse_ops)
+        model_inv, artifact_inv, view_inv = split_ops(batch.inverse_ops)
+        if view_inv:  # TEMPORARY (plan Task 8): no view commit exists yet to undo
+            session.op_log.append(batch)
+            raise HTTPException(status_code=500, detail="view undo not wired yet")
         # The MODEL half of this route stays deliberately unlocked (the
         # documented migration-window stance until the frontend moves to
         # check-out/commit). The ARTIFACT half cannot: artifact rows are
