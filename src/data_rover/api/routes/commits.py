@@ -585,7 +585,21 @@ def create_commit(
     # must leave it reporting that again — for the genuinely-empty case, not
     # a materialized empty view with no ViewRow / view_rev to back it
     # (final-review Finding 1, and round 2's Finding A/B extend this same
-    # guard to the two new resolve-view call sites below).
+    # guard to the resolve-view call site inside the mutex below).
+    #
+    # INVARIANT (final-review round 3): every ASSIGNMENT to session.view in
+    # this function happens under session.write_mutex — the single point is
+    # just inside the mutex below, right before required_locks. A pre-mutex
+    # READ into a LOCAL (the overlap check just below needs one) is fine and
+    # does NOT violate this — only writing session.view itself, or resetting
+    # it, must wait for the mutex. Two concurrent view-op commits assigning
+    # session.view outside the mutex could otherwise race a check-then-set
+    # (a lost update: A reads ViewRow, is descheduled while B hydrates,
+    # commits and persists, then A assigns its now-stale View over B's,
+    # silently overwriting B's folders at A's own persist step) or have
+    # one request's pre-mutex reset (on a rejected/failed early return) null
+    # session.view out from under a DIFFERENT request already inside the
+    # mutex, tripping its own `assert session.view is not None` mid-flight.
     created_view = False
     if payload.base_rev > session.model_rev:
         return _conflict_response(session.model_rev, "stale base_rev")
@@ -629,42 +643,31 @@ def create_commit(
             # against a metamodel/model that no longer matches what it was
             # computed against.
             return _conflict_response(session.model_rev, "stale base_rev")
-        # Resolve the view HERE, immediately before the one check in this
-        # block that needs it (final-review round 2, Finding A) — not any
-        # earlier, so the three fail-closed checks above (which never
-        # consult view content at all) can never trigger an unnecessary
-        # hydration on their own return paths. _batch_touched_ids ->
-        # required_locks' folder_subtree/locate_folder expansion degrades to
-        # a bare single-resource id against a ``None`` view, exactly like
-        # the applier itself would under-derive a lock against an unresolved
-        # tree — so without resolving first, a stale delete_folder/
-        # move_folder batch's conflict/touched-set here would be computed
-        # against the WRONG (empty/absent) tree relative to what the real,
-        # hydrated one actually contains. No try/except needed: this is the
-        # first thing in the whole request that could mutate anything, so a
-        # raise here has nothing to roll back (Finding B falls out of the
-        # ordering for free — contrast undo's version of this same hoist,
-        # which runs AFTER a batch has already been popped and so must
-        # explicitly re-push on failure).
-        if view_ops and session.view is None:
-            session.view = load_or_create_view(db, project_id)
-            created_view = True
-        if _affected_ids(tail) & _batch_touched_ids(model, session.view, payload.ops):
-            if created_view:
-                # this request's own hydration must not leak into a
-                # REJECTED (409) response's visible state — see created_view's
-                # docstring above.
-                session.view = None
+        # Resolve a LOCAL view for the overlap check ONLY, immediately
+        # before the one check in this block that needs it (final-review
+        # round 2, Finding A) — not any earlier, so the three fail-closed
+        # checks above (which never consult view content at all) can never
+        # trigger an unnecessary hydration on their own return paths.
+        # _batch_touched_ids -> required_locks' folder_subtree/locate_folder
+        # expansion degrades to a bare single-resource id against a
+        # ``None`` view, exactly like the applier itself would under-derive
+        # a lock against an unresolved tree — so without resolving first, a
+        # stale delete_folder/move_folder batch's conflict/touched-set here
+        # would be computed against the WRONG (empty/absent) tree relative
+        # to what the real, hydrated one actually contains. NEVER assigned
+        # to session.view here (final-review round 3: this whole block runs
+        # BEFORE the mutex, so a write here would be the exact race the
+        # invariant note above create_commit's mutex now forbids) — mirrors
+        # preview_commit's own local, read-only resolve.
+        conflict_view = (
+            session.view
+            if session.view is not None
+            else load_or_create_view(db, project_id)
+        )
+        if _affected_ids(tail) & _batch_touched_ids(model, conflict_view, payload.ops):
             return _conflict_response(
                 session.model_rev, "conflicting concurrent commits"
             )
-    elif view_ops and session.view is None:
-        # payload.base_rev == session.model_rev (no staleness at all — the
-        # common path): required_locks, inside the mutex below, needs the
-        # SAME resolved view the `<` branch above would have produced had
-        # this request been stale — see that branch's comment.
-        session.view = load_or_create_view(db, project_id)
-        created_view = True
     state = _ensure_validation_seeded(session, model)
     if not payload.ops:
         # Empty batch: nothing to apply. Mirrors apply_ops' and revert's
@@ -692,6 +695,21 @@ def create_commit(
             validation_error_count=0,
         )
     with session.write_mutex:
+        # Resolve/auto-create session.view HERE — the ONLY place this
+        # function ever ASSIGNS to it (final-review round 3), now that the
+        # pre-mutex overlap check above uses its own read-only local
+        # instead. required_locks just below needs it resolved for the same
+        # reason that local did: against a ``None`` view, folder_subtree/
+        # locate_folder degrade to a bare single-resource id, under-
+        # deriving a delete_folder/move_folder's lock requirement relative
+        # to the real, hydrated tree the applier goes on to mutate. No
+        # try/except needed: this is still the first thing that could
+        # mutate anything once the mutex is held (mirrors the reasoning in
+        # created_view's docstring above — contrast undo's version of this
+        # hoist, which runs after a batch has already been popped).
+        if view_ops and session.view is None:
+            session.view = load_or_create_view(db, project_id)
+            created_view = True
         # a. verify the caller still holds every required lock. `payload.ops`
         #    (not `model_ops`) so the `art:`-namespaced leases artifact ops
         #    need are derived and checked too.
@@ -701,9 +719,11 @@ def create_commit(
         )
         if missing:
             if created_view:
-                # this request's own pre-mutex hydration must not leak into
-                # a REJECTED (409) response's visible state — see
-                # created_view's docstring above the staleness checks.
+                # this request's own hydration must not leak into a
+                # REJECTED (409) response's visible state — see
+                # created_view's docstring above the staleness checks. Safe
+                # to reset here: still inside the mutex, so no concurrent
+                # request can be mid-flight on the SAME session.view object.
                 session.view = None
             return JSONResponse(
                 status_code=409,
@@ -718,7 +738,7 @@ def create_commit(
         # b. apply the model half (422 on mutation-boundary error — let it
         #    propagate; _apply_batch already rolled itself back and nothing
         #    artifact-side has been staged yet). created_view may already be
-        #    True here (the pre-mutex resolve above), so this needs its own
+        #    True here (the resolve just above), so this needs its own
         #    guard too, unlike round 1's shape where hydration never
         #    happened this early (final-review round 2, Finding B).
         try:
@@ -752,22 +772,25 @@ def create_commit(
             db.rollback()  # discard staged artifact rows
             raise
         # b3. apply the view half to session.view IN PLACE, all-or-nothing
-        #     (session.view was already resolved before the mutex — see the
-        #     staleness-check section above — whenever view_ops is
-        #     non-empty; created_view was set there too). Seeded with both
-        #     prior id_maps so a placement may reference an element or
-        #     artifact created earlier in the SAME batch.
+        #     (session.view was already resolved near the top of this SAME
+        #     mutex block whenever view_ops is non-empty; created_view was
+        #     set there too). Seeded with both prior id_maps so a placement
+        #     may reference an element or artifact created earlier in the
+        #     SAME batch.
         view_res: ViewBatchResult | None = None
         if view_ops:
             if session.view is None:
-                # Defensive fallback only: the pre-mutex resolve above
-                # already hydrated/auto-created session.view whenever
-                # view_ops is non-empty, so this branch is dead in the
-                # ordinary single-request case. It stays for the one race
-                # that block cannot close: routes/view.py's ``DELETE /view``
-                # is deliberately out of scope and takes no lock, so a
-                # peer's concurrent DELETE could null session.view again
-                # between this request's earlier resolve and here.
+                # Defensive fallback only: the resolve near the top of this
+                # SAME mutex block already hydrated/auto-created
+                # session.view whenever view_ops is non-empty, so this
+                # branch is dead in the ordinary case. It stays for the one
+                # race that block cannot close even from inside the mutex:
+                # routes/view.py's ``DELETE /view`` is deliberately out of
+                # scope and takes NO lock at all (not even session.write_
+                # mutex), so a peer's concurrent DELETE could null
+                # session.view again between this request's own resolve and
+                # here, despite this request holding the mutex the entire
+                # time.
                 session.view = load_or_create_view(db, project_id)
                 created_view = True
             try:

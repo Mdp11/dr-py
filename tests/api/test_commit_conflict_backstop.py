@@ -519,6 +519,64 @@ def test_stale_batch_creating_under_move_folders_old_parent_409s(client) -> None
     assert r.json()["detail"] == "conflicting concurrent commits"
 
 
+def test_stale_delete_folder_batch_hydrates_view_for_overlap_check(client) -> None:
+    """Regression for final-review round 3: the pre-mutex overlap check
+    (``_batch_touched_ids``, inside the ``base_rev < model_rev`` staleness
+    block) resolves its OWN local view — never assigned to ``session.view``,
+    since this whole block runs before ``session.write_mutex`` — so a stale
+    batch's own ``delete_folder``/``move_folder`` ops are expanded against
+    the REAL durable tree, not an unhydrated ``None``.
+
+    The caller's lock is deliberately acquired while the cache is still WARM
+    (so ``expand_targets`` correctly grants a token covering the FULL {D, C}
+    subtree, not the narrower under-scoped grant round 2's finding covers) —
+    this isolates the pre-mutex overlap check as the ONLY thing that could
+    catch the conflict: the in-mutex ``required_locks``/``verify_held`` check
+    would find the caller's broad token sufficient regardless, so without
+    the local hydration fixed here, this batch would silently narrow its
+    touched-set to ``{folder:D}`` alone, miss the overlap with the tail's
+    rename of child C, sail through the lock check too, and land at 200 —
+    not a differently-worded 409, but a genuine lost update. (Verified by
+    literally deleting the local's hydration fallback and confirming this is
+    the one test in the whole suite that catches it — see the round 3
+    report for the exact experiment.)"""
+    r = client.put(
+        papi("/view/snapshot"),
+        json={"name": "v", "folders": [{"name": "D", "folders": [{"name": "C"}]}]},
+    )
+    assert r.status_code == 200, r.text
+    d_id = r.json()["view"]["folders"][0]["id"]
+    c_id = r.json()["view"]["folders"][0]["folders"][0]["id"]
+    stale_base = _rev(client)
+
+    _commit_rename(client, c_id, "C2")  # tail commit touching folder:c only
+
+    # Acquire the caller's DELETE lock on D while session.view is STILL
+    # warm (untouched since the PUT above) — expand_targets correctly
+    # expands over the real subtree here, granting a token covering BOTH
+    # D and C (folder ids survive the rename). This is deliberately NOT
+    # round 2's narrow-lock repro: the point here is that even a properly
+    # broad lock cannot save a stale batch from landing if the PRE-mutex
+    # overlap check itself fails to consult the real tree.
+    d_token = _folder_lease(client, d_id, intent="delete")
+
+    # NOW the cache goes cold; the durable row (D -> C2) is untouched.
+    assert client.delete(papi("/view")).status_code == 204
+    assert client.get(papi("/view")).json()["view"] is None
+
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": stale_base,
+            "ops": [{"kind": "delete_folder", "id": d_id}],
+            "message": "m",
+            "lock_tokens": [d_token],
+        },
+    )
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"] == "conflicting concurrent commits"
+
+
 def test_placement_subject_overlap_conflicts_across_folders(client) -> None:
     """Two batches fighting over the SAME element's placement conflict even
     though the folders they name are disjoint — the viewel: marker is the
