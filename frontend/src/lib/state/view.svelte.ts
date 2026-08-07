@@ -30,7 +30,6 @@ import {
 	cloneView,
 	elementHomeFolderId,
 	findFolderById,
-	findFolderByPath,
 	findFolderContainer,
 	folderSubtreeIds,
 	isFolderIdAncestor
@@ -505,91 +504,6 @@ setTimeout(() => {
 	});
 }, 0);
 
-// ----- TRANSITIONAL path-based shims -----
-//
-// @deprecated Phase 2: id addressing. Every export below resolves its
-// path(s) to a folder id against the CURRENT `_view` (name-walk, same as the
-// pre-Phase-2 lookups) and delegates to its `stage*` twin above. Deleted in
-// Task 7 once ContainmentTree/TreeRow/ViewSelector are rewired onto ids
-// directly — do not add new callers.
-
-function resolvePathId(path: string[]): string {
-	if (path.length === 0) return VIEW_ROOT_ID;
-	if (_view === null) throw new Error('No active view');
-	const folder = findFolderByPath(_view, path);
-	if (folder === null) throw new Error(`Folder not found: ${path.join('/')}`);
-	return folder.id;
-}
-
-/** @deprecated Phase 2: path-based; deleted in Task 7. */
-export async function createFolder(parentPath: string[], name: string): Promise<void> {
-	await stageCreateFolder(resolvePathId(parentPath), name);
-}
-
-/** @deprecated Phase 2: path-based; deleted in Task 7. */
-export async function renameFolder(path: string[], newName: string): Promise<void> {
-	await stageRenameFolder(resolvePathId(path), newName);
-}
-
-/** @deprecated Phase 2: path-based; deleted in Task 7. */
-export async function deleteFolder(path: string[]): Promise<void> {
-	await stageDeleteFolder(resolvePathId(path));
-}
-
-/** @deprecated Phase 2: path-based; deleted in Task 7. */
-export async function placeElement(path: string[], elementId: string): Promise<void> {
-	await placeElementsAt(path, [elementId], Number.MAX_SAFE_INTEGER);
-}
-
-/** @deprecated Phase 2: path-based; deleted in Task 7. */
-export async function placeElements(path: string[], ids: string[]): Promise<void> {
-	await placeElementsAt(path, ids, Number.MAX_SAFE_INTEGER);
-}
-
-/** @deprecated Phase 2: path-based; deleted in Task 7. Empty `path` excludes
- * the ids (mirrors the pre-Phase-2 behavior). */
-export async function placeElementsAt(path: string[], ids: string[], index: number): Promise<void> {
-	const folderId = path.length === 0 ? null : resolvePathId(path);
-	await stagePlaceElementsAt(folderId, ids, index);
-}
-
-/** @deprecated Phase 2: path-based; deleted in Task 7. */
-export async function removeElement(elementId: string): Promise<void> {
-	await stageRemoveElement(elementId);
-}
-
-/** @deprecated Phase 2: path-based; deleted in Task 7. */
-export async function moveFolder(sourcePath: string[], destParentPath: string[]): Promise<void> {
-	await stageMoveFolder(resolvePathId(sourcePath), resolvePathId(destParentPath));
-}
-
-/** @deprecated Phase 2: path-based; deleted in Task 7. */
-export async function placeArtifact(folderPath: string[], ref: ArtifactRef): Promise<void> {
-	await stagePlaceArtifact(resolvePathId(folderPath), ref);
-}
-
-/** @deprecated Phase 2: path-based; deleted in Task 7. */
-export async function moveArtifact(
-	fromPath: string[],
-	toPath: string[],
-	ref: ArtifactRef
-): Promise<void> {
-	await stageMoveArtifact(resolvePathId(fromPath), resolvePathId(toPath), ref);
-}
-
-/** @deprecated Phase 2: path-based; deleted in Task 7. */
-export async function removeArtifactFromFolder(
-	folderPath: string[],
-	artifactId: string
-): Promise<void> {
-	await stageRemoveArtifactRef(resolvePathId(folderPath), artifactId);
-}
-
-/** @deprecated Phase 2: deleted in Task 7 — ViewSelector still calls this
- * void-returning shape until it is rewired directly onto `stageClearView`. */
-export async function dropView(): Promise<void> {
-	await stageClearView();
-}
 
 /**
  * Scrub every placement of `artifactId` from the active view.

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button';
-	import { dropView, getView, getViewWarnings } from '$lib/state';
+	import { stageClearView, getView, getViewWarnings } from '$lib/state';
 	import { confirm } from '$lib/state/confirm.svelte';
 	import { AlertTriangle, X } from '@lucide/svelte';
 
@@ -17,7 +17,7 @@
 		});
 		if (!ok) return;
 		try {
-			await dropView();
+			await stageClearView();
 		} catch (err) {
 			console.error('Failed to clear view', err);
 		}
