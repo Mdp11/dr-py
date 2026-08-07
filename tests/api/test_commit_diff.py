@@ -479,3 +479,246 @@ def test_mixed_commit_scope_lists_both(client) -> None:
     assert r.status_code == 200, r.text
     r = client.get(papi(f"/commits/{base + 1}/diff"))
     assert r.json()["scope"] == ["model", "view"]
+
+
+def test_three_family_commit_renders_all_sections_without_leakage(
+    client: TestClient,
+) -> None:
+    """A single batch touching model, artifact, AND view content at once: the
+    scope union lists all three families, and each section renders exactly
+    its own family's change — nothing from one section leaks into another."""
+    r = client.put(papi("/view/snapshot"), json={"name": "v", "folders": [{"name": "A"}]})
+    fid = r.json()["view"]["folders"][0]["id"]
+    token = _folder_lease(client, fid)
+    base = _rev(client)
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": base,
+            "ops": [
+                {
+                    "kind": "create_element",
+                    "temp_id": "tmp_e",
+                    "type_name": "Node",
+                    "properties": {"label": "n1"},
+                },
+                {
+                    "kind": "create_artifact",
+                    "temp_id": "tmp_a",
+                    "artifact_kind": "code_snippet",
+                    "name": "s1",
+                    "payload": SNIP,
+                },
+                {"kind": "rename_folder", "id": fid, "name": "A2"},
+            ],
+            "message": "m",
+            "lock_tokens": [token],
+        },
+    )
+    assert r.status_code == 200, r.text
+    eid = r.json()["id_map"]["tmp_e"]
+    aid = r.json()["id_map"]["tmp_a"]
+    rev = r.json()["model_rev"]
+
+    d = client.get(papi(f"/commits/{rev}/diff"))
+    assert d.status_code == 200, d.text
+    body = d.json()
+    assert sorted(body["scope"]) == ["artifact", "model", "view"]
+
+    # model half: exactly the created element, nothing view-shaped in it
+    assert [e["id"] for e in body["elements"]["added"]] == [eid]
+    assert body["elements"]["modified"] == [] and body["elements"]["deleted"] == []
+    assert body["relationships"] == {"added": [], "modified": [], "deleted": []}
+
+    # artifact half: exactly the created artifact, unaffected by the view op
+    assert [a["id"] for a in body["artifacts"]["added"]] == [aid]
+    assert body["artifacts"]["added"][0]["kind"] == "code_snippet"
+    assert body["artifacts"]["modified"] == [] and body["artifacts"]["deleted"] == []
+
+    # view half: exactly the rename, unaffected by the model/artifact creates
+    assert [v["kind"] for v in body["view"]] == ["rename_folder"]
+    assert body["view"][0] == {
+        **body["view"][0],
+        "folder_id": fid,
+        "name": "A2",
+        "name_before": "A",
+    }
+
+
+def test_view_diff_covers_move_remove_and_placement_op_kinds(
+    client: TestClient,
+) -> None:
+    """Regression coverage for the six view op kinds no other test names:
+    move_folder, remove_element, remove_artifact, place_artifact,
+    move_element, move_artifact. Two sibling folders throughout so a
+    from/to or root/parent mix-up in ``_view_diffs`` would fail an assertion
+    below, and RemoveElementOp/RemoveArtifactOp are the ops that exercise
+    ``_view_diffs``'s ``getattr(op, "index"/"artifact_kind", None)``
+    fallbacks (those op models carry neither field)."""
+    r = client.put(
+        papi("/view/snapshot"),
+        json={"name": "v", "folders": [{"name": "A"}, {"name": "B"}]},
+    )
+    assert r.status_code == 200, r.text
+    folders = r.json()["view"]["folders"]
+    fa = next(f["id"] for f in folders if f["name"] == "A")
+    fb = next(f["id"] for f in folders if f["name"] == "B")
+
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": _rev(client),
+            "ops": [
+                {"kind": "create_element", "temp_id": "tmp_e", "type_name": "Node"},
+                {
+                    "kind": "create_artifact",
+                    "temp_id": "tmp_a",
+                    "artifact_kind": "code_snippet",
+                    "name": "s1",
+                    "payload": SNIP,
+                },
+            ],
+            "lock_tokens": [],
+        },
+    )
+    assert r.status_code == 200, r.text
+    eid = r.json()["id_map"]["tmp_e"]
+    aid = r.json()["id_map"]["tmp_a"]
+
+    # place_element + place_artifact into A
+    tok_fa = _folder_lease(client, fa)
+    base = _rev(client)
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": base,
+            "ops": [
+                {"kind": "place_element", "element_id": eid, "folder_id": fa},
+                {
+                    "kind": "place_artifact",
+                    "artifact_id": aid,
+                    "artifact_kind": "code_snippet",
+                    "folder_id": fa,
+                },
+            ],
+            "message": "m",
+            "lock_tokens": [tok_fa],
+        },
+    )
+    assert r.status_code == 200, r.text
+    d = client.get(papi(f"/commits/{base + 1}/diff"))
+    assert d.status_code == 200, d.text
+    entries = {e["kind"]: e for e in d.json()["view"]}
+    pe = entries["place_element"]
+    assert pe["folder_id"] == fa and pe["element_id"] == eid and pe["index"] == 0
+    pa = entries["place_artifact"]
+    assert (
+        pa["folder_id"] == fa
+        and pa["artifact_id"] == aid
+        and pa["artifact_kind"] == "code_snippet"
+        and pa["index"] == 0
+    )
+
+    # move_folder(B into A) + remove_element/remove_artifact(out of A), all in
+    # one batch — moving B out of the root requires a root lease too.
+    tok_fa = _folder_lease(client, fa)
+    tok_fb = _folder_lease(client, fb)
+    tok_root = _folder_lease(client, "root")
+    base = _rev(client)
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": base,
+            "ops": [
+                {"kind": "move_folder", "id": fb, "to_parent_id": fa, "index": 0},
+                {"kind": "remove_element", "element_id": eid, "folder_id": fa},
+                {"kind": "remove_artifact", "artifact_id": aid, "folder_id": fa},
+            ],
+            "message": "m",
+            "lock_tokens": [tok_fa, tok_fb, tok_root],
+        },
+    )
+    assert r.status_code == 200, r.text
+    rev = r.json()["model_rev"]
+    d = client.get(papi(f"/commits/{rev}/diff"))
+    assert d.status_code == 200, d.text
+    entries = {e["kind"]: e for e in d.json()["view"]}
+
+    mf = entries["move_folder"]
+    assert mf["folder_id"] == fb and mf["to_folder_id"] == fa and mf["index"] == 0
+
+    re_ = entries["remove_element"]
+    assert re_["folder_id"] == fa and re_["element_id"] == eid
+    assert re_["index"] is None  # RemoveElementOp carries no index
+
+    ra = entries["remove_artifact"]
+    assert ra["folder_id"] == fa and ra["artifact_id"] == aid
+    # RemoveArtifactOp carries neither field
+    assert ra["index"] is None and ra["artifact_kind"] is None
+
+    # place both back into B (now nested under A), then move both to A in one
+    # batch — two DIFFERENT folder ids on each end, so a from/to swap in
+    # _view_diffs's MoveElementOp/MoveArtifactOp branches would fail below.
+    tok_fb = _folder_lease(client, fb)
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": _rev(client),
+            "ops": [
+                {"kind": "place_element", "element_id": eid, "folder_id": fb},
+                {
+                    "kind": "place_artifact",
+                    "artifact_id": aid,
+                    "artifact_kind": "code_snippet",
+                    "folder_id": fb,
+                },
+            ],
+            "lock_tokens": [tok_fb],
+        },
+    )
+    assert r.status_code == 200, r.text
+
+    tok_fa = _folder_lease(client, fa)
+    tok_fb = _folder_lease(client, fb)
+    base = _rev(client)
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": base,
+            "ops": [
+                {
+                    "kind": "move_element",
+                    "element_id": eid,
+                    "from_folder_id": fb,
+                    "to_folder_id": fa,
+                },
+                {
+                    "kind": "move_artifact",
+                    "artifact_id": aid,
+                    "from_folder_id": fb,
+                    "to_folder_id": fa,
+                },
+            ],
+            "message": "m",
+            "lock_tokens": [tok_fa, tok_fb],
+        },
+    )
+    assert r.status_code == 200, r.text
+    rev2 = r.json()["model_rev"]
+    d = client.get(papi(f"/commits/{rev2}/diff"))
+    assert d.status_code == 200, d.text
+    entries = {e["kind"]: e for e in d.json()["view"]}
+
+    me = entries["move_element"]
+    assert (
+        me["element_id"] == eid
+        and me["from_folder_id"] == fb
+        and me["to_folder_id"] == fa
+    )
+
+    ma = entries["move_artifact"]
+    assert (
+        ma["artifact_id"] == aid
+        and ma["from_folder_id"] == fb
+        and ma["to_folder_id"] == fa
+    )
