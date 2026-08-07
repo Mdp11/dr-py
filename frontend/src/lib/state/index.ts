@@ -222,6 +222,15 @@ export {
 	updateSearchCriterion
 } from './advanced-search.svelte';
 export {
+	applyViewOp,
+	artifactPlacementFolderIds,
+	elementHomeFolderId,
+	findFolderById,
+	findFolderContainer,
+	folderSubtreeIds,
+	isFolderIdAncestor
+} from './view-ops';
+export {
 	clearViewState,
 	cloneView,
 	createFolder,

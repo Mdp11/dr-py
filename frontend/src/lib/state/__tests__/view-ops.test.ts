@@ -1,17 +1,132 @@
 import { describe, expect, it } from 'vitest';
 import type { Folder, View } from '$lib/api/types';
+import { VIEW_ROOT_ID } from '../ops';
 import {
+	applyViewOp,
+	artifactPlacementFolderIds,
+	elementHomeFolderId,
+	findFolderById,
+	findFolderContainer,
+	folderSubtreeIds,
+	isFolderIdAncestor,
 	isFolderPathAncestor,
 	moveFolderInView,
 	placeElementsInView,
 	placeElementsInViewAt
 } from '../view-ops';
 
+const view = (): View => ({
+	name: 'v',
+	folders: [
+		{
+			id: 'fa',
+			name: 'A',
+			elements: ['e1', 'e2'],
+			artifacts: [{ id: 'art1', kind: 'table' }],
+			folders: [{ id: 'fb', name: 'B', elements: ['e3'], artifacts: [], folders: [] }]
+		},
+		{ id: 'fc', name: 'C', elements: [], artifacts: [], folders: [] }
+	],
+	artifacts: [{ id: 'art2', kind: 'navigation' }]
+});
+
+describe('id addressing', () => {
+	it('finds folders and containers by id', () => {
+		expect(findFolderById(view(), 'fb')?.name).toBe('B');
+		expect(findFolderContainer(view(), 'fb')?.parentId).toBe('fa');
+		expect(findFolderContainer(view(), 'fa')?.parentId).toBe(VIEW_ROOT_ID);
+		expect(findFolderById(view(), 'nope')).toBeNull();
+	});
+	it('walks subtrees and ancestry', () => {
+		expect(folderSubtreeIds(view(), 'fa')).toEqual(['fa', 'fb']);
+		expect(isFolderIdAncestor(view(), 'fa', 'fb')).toBe(true);
+		expect(isFolderIdAncestor(view(), 'fa', 'fa')).toBe(true);
+		expect(isFolderIdAncestor(view(), 'fb', 'fa')).toBe(false);
+	});
+	it('locates element homes and artifact placements', () => {
+		expect(elementHomeFolderId(view(), 'e3')).toBe('fb');
+		expect(elementHomeFolderId(view(), 'unplaced')).toBeNull();
+		expect(artifactPlacementFolderIds(view(), 'art1')).toEqual(['fa']);
+		expect(artifactPlacementFolderIds(view(), 'art2')).toEqual([VIEW_ROOT_ID]);
+	});
+});
+
+describe('applyViewOp', () => {
+	it('creates a folder under root and under a parent', () => {
+		let v = applyViewOp(view(), {
+			kind: 'create_folder',
+			temp_id: 'tmp_x',
+			parent_id: VIEW_ROOT_ID,
+			name: 'N'
+		});
+		expect(v.folders.map((f) => f.id)).toContain('tmp_x');
+		v = applyViewOp(v, { kind: 'create_folder', temp_id: 'tmp_y', parent_id: 'tmp_x', name: 'M' });
+		expect(findFolderById(v, 'tmp_y')).not.toBeNull();
+	});
+	it('rejects sibling name clashes like the backend', () => {
+		expect(() =>
+			applyViewOp(view(), {
+				kind: 'create_folder',
+				temp_id: 'tmp_x',
+				parent_id: VIEW_ROOT_ID,
+				name: 'A'
+			})
+		).toThrow(/already exists/);
+	});
+	it('place_element refuses placed elements and the root', () => {
+		expect(() =>
+			applyViewOp(view(), { kind: 'place_element', element_id: 'e1', folder_id: 'fc' })
+		).toThrow(/already placed/);
+		expect(() =>
+			applyViewOp(view(), { kind: 'place_element', element_id: 'ex', folder_id: VIEW_ROOT_ID })
+		).toThrow(/root/);
+	});
+	it('move_element reorders within a folder with post-pop index math', () => {
+		// e1 at 0, e2 at 1: moving e1 below e2 means index 1 AFTER the pop.
+		const v = applyViewOp(view(), {
+			kind: 'move_element',
+			element_id: 'e1',
+			from_folder_id: 'fa',
+			to_folder_id: 'fa',
+			index: 1
+		});
+		expect(findFolderById(v, 'fa')?.elements).toEqual(['e2', 'e1']);
+	});
+	it('delete_folder drops the whole subtree', () => {
+		const v = applyViewOp(view(), { kind: 'delete_folder', id: 'fa' });
+		expect(findFolderById(v, 'fb')).toBeNull();
+		expect(v.folders.map((f) => f.id)).toEqual(['fc']);
+	});
+	it('move_folder rejects cycles', () => {
+		expect(() => applyViewOp(view(), { kind: 'move_folder', id: 'fa', to_parent_id: 'fb' })).toThrow(
+			/descendant/
+		);
+	});
+	it('artifact ops treat root as a real container', () => {
+		const v = applyViewOp(view(), {
+			kind: 'move_artifact',
+			artifact_id: 'art2',
+			from_folder_id: VIEW_ROOT_ID,
+			to_folder_id: 'fc'
+		});
+		expect(v.artifacts.some((a) => a.id === 'art2')).toBe(false);
+		expect(findFolderById(v, 'fc')?.artifacts.map((a) => a.id)).toEqual(['art2']);
+	});
+	it('does not mutate its input', () => {
+		const before = view();
+		const snapshot = JSON.stringify(before);
+		applyViewOp(before, { kind: 'rename_folder', id: 'fa', name: 'Z' });
+		expect(JSON.stringify(before)).toBe(snapshot);
+	});
+});
+
+// ----- deprecated path-based helpers (kept until Task 7 migrates callers) -----
+
 function folder(name: string, elements: string[] = [], folders: Folder[] = []): Folder {
 	return { id: name, name, folders, elements, artifacts: [] };
 }
 
-function view(...folders: Folder[]): View {
+function pathView(...folders: Folder[]): View {
 	return { name: 'v', folders, artifacts: [] };
 }
 
@@ -44,37 +159,37 @@ describe('isFolderPathAncestor', () => {
 
 describe('placeElementsInView', () => {
 	it('places multiple ids into the target folder', () => {
-		const v = view(folder('Group'));
+		const v = pathView(folder('Group'));
 		const next = placeElementsInView(v, ['Group'], ['e1', 'e2']);
 		expect(next.folders[0].elements).toEqual(['e1', 'e2']);
 	});
 
 	it('strips ids from any folder that previously held them (single-folder rule)', () => {
-		const v = view(folder('Old', ['e1']), folder('New'));
+		const v = pathView(folder('Old', ['e1']), folder('New'));
 		const next = placeElementsInView(v, ['New'], ['e1']);
 		expect(next.folders[0].elements).toEqual([]);
 		expect(next.folders[1].elements).toEqual(['e1']);
 	});
 
 	it('removes ids from all folders when path is empty (unplaced)', () => {
-		const v = view(folder('Group', ['e1', 'e2', 'keep']));
+		const v = pathView(folder('Group', ['e1', 'e2', 'keep']));
 		const next = placeElementsInView(v, [], ['e1', 'e2']);
 		expect(next.folders[0].elements).toEqual(['keep']);
 	});
 
 	it('does not duplicate an id already present in the target', () => {
-		const v = view(folder('Group', ['e1']));
+		const v = pathView(folder('Group', ['e1']));
 		const next = placeElementsInView(v, ['Group'], ['e1']);
 		expect(next.folders[0].elements).toEqual(['e1']);
 	});
 
 	it('throws when the target folder does not exist', () => {
-		const v = view(folder('Group'));
+		const v = pathView(folder('Group'));
 		expect(() => placeElementsInView(v, ['Missing'], ['e1'])).toThrow();
 	});
 
 	it('does not mutate the input view', () => {
-		const v = view(folder('Group'));
+		const v = pathView(folder('Group'));
 		placeElementsInView(v, ['Group'], ['e1']);
 		expect(v.folders[0].elements).toEqual([]);
 	});
@@ -82,45 +197,45 @@ describe('placeElementsInView', () => {
 
 describe('placeElementsInViewAt', () => {
 	it('inserts at the given index in the target folder', () => {
-		const v = view(folder('F', ['a', 'b', 'c']));
+		const v = pathView(folder('F', ['a', 'b', 'c']));
 		const out = placeElementsInViewAt(v, ['F'], ['x'], 1);
 		expect(out.folders[0].elements).toEqual(['a', 'x', 'b', 'c']);
 	});
 
 	it('reorders within a folder (strip then insert at new index)', () => {
-		const v = view(folder('F', ['a', 'b', 'c']));
+		const v = pathView(folder('F', ['a', 'b', 'c']));
 		// move 'c' to the front: after stripping -> [a,b], insert at 0
 		const out = placeElementsInViewAt(v, ['F'], ['c'], 0);
 		expect(out.folders[0].elements).toEqual(['c', 'a', 'b']);
 	});
 
 	it('moves an element from one folder to a position in another', () => {
-		const v = view(folder('F', ['a', 'b']), folder('G', ['x', 'y']));
+		const v = pathView(folder('F', ['a', 'b']), folder('G', ['x', 'y']));
 		const out = placeElementsInViewAt(v, ['G'], ['a'], 1);
 		expect(out.folders[0].elements).toEqual(['b']);
 		expect(out.folders[1].elements).toEqual(['x', 'a', 'y']);
 	});
 
 	it('clamps an out-of-range index to the end', () => {
-		const v = view(folder('F', ['a', 'b']));
+		const v = pathView(folder('F', ['a', 'b']));
 		const out = placeElementsInViewAt(v, ['F'], ['x'], 999);
 		expect(out.folders[0].elements).toEqual(['a', 'b', 'x']);
 	});
 
 	it('empty path strips from all folders (exclude from view)', () => {
-		const v = view(folder('F', ['a', 'b']));
+		const v = pathView(folder('F', ['a', 'b']));
 		const out = placeElementsInViewAt(v, [], ['a'], 0);
 		expect(out.folders[0].elements).toEqual(['b']);
 	});
 
 	it('does not mutate the input view', () => {
-		const v = view(folder('F', ['a', 'b']));
+		const v = pathView(folder('F', ['a', 'b']));
 		placeElementsInViewAt(v, ['F'], ['b'], 0);
 		expect(v.folders[0].elements).toEqual(['a', 'b']);
 	});
 
 	it('inserts multiple ids in order, de-duping the selection', () => {
-		const v = view(folder('F', ['a', 'b']));
+		const v = pathView(folder('F', ['a', 'b']));
 		const out = placeElementsInViewAt(v, ['F'], ['y', 'x', 'y'], 1);
 		expect(out.folders[0].elements).toEqual(['a', 'y', 'x', 'b']);
 	});
@@ -128,7 +243,7 @@ describe('placeElementsInViewAt', () => {
 
 describe('moveFolderInView', () => {
 	it('reparents a folder, preserving its subtree and elements', () => {
-		const v = view(folder('Src', ['e1'], [folder('Child', ['e2'])]), folder('Dest'));
+		const v = pathView(folder('Src', ['e1'], [folder('Child', ['e2'])]), folder('Dest'));
 		const next = moveFolderInView(v, ['Src'], ['Dest']);
 		expect(next.folders.map((f) => f.name)).toEqual(['Dest']);
 		const moved = next.folders[0].folders[0];
@@ -139,45 +254,45 @@ describe('moveFolderInView', () => {
 	});
 
 	it('moves a nested folder up to the top level', () => {
-		const v = view(folder('Parent', [], [folder('Inner')]));
+		const v = pathView(folder('Parent', [], [folder('Inner')]));
 		const next = moveFolderInView(v, ['Parent', 'Inner'], []);
 		expect(next.folders.map((f) => f.name).sort()).toEqual(['Inner', 'Parent']);
 		expect(next.folders.find((f) => f.name === 'Parent')!.folders).toEqual([]);
 	});
 
 	it('throws when moving a folder into itself', () => {
-		const v = view(folder('A'));
+		const v = pathView(folder('A'));
 		expect(() => moveFolderInView(v, ['A'], ['A'])).toThrow();
 	});
 
 	it('throws when moving a folder into one of its descendants', () => {
-		const v = view(folder('A', [], [folder('B')]));
+		const v = pathView(folder('A', [], [folder('B')]));
 		expect(() => moveFolderInView(v, ['A'], ['A', 'B'])).toThrow();
 	});
 
 	it('throws when moving the view root', () => {
-		const v = view(folder('A'));
+		const v = pathView(folder('A'));
 		expect(() => moveFolderInView(v, [], ['A'])).toThrow();
 	});
 
 	it('throws when a sibling with the same name already exists at the destination', () => {
-		const v = view(folder('A'), folder('Dest', [], [folder('A')]));
+		const v = pathView(folder('A'), folder('Dest', [], [folder('A')]));
 		expect(() => moveFolderInView(v, ['A'], ['Dest'])).toThrow();
 	});
 
 	it('throws when the source folder does not exist', () => {
-		const v = view(folder('Dest'));
+		const v = pathView(folder('Dest'));
 		expect(() => moveFolderInView(v, ['Missing'], ['Dest'])).toThrow();
 	});
 
 	it('is a no-op when the folder is already a direct child of the destination', () => {
-		const v = view(folder('Parent', [], [folder('Inner')]));
+		const v = pathView(folder('Parent', [], [folder('Inner')]));
 		const next = moveFolderInView(v, ['Parent', 'Inner'], ['Parent']);
 		expect(next.folders[0].folders.map((f) => f.name)).toEqual(['Inner']);
 	});
 
 	it('does not mutate the input view', () => {
-		const v = view(folder('Src'), folder('Dest'));
+		const v = pathView(folder('Src'), folder('Dest'));
 		moveFolderInView(v, ['Src'], ['Dest']);
 		expect(v.folders.map((f) => f.name)).toEqual(['Src', 'Dest']);
 	});
