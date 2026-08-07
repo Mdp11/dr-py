@@ -33,12 +33,18 @@ in-memory history), but with durable persistence each undo ALSO appends a
 compensating forward commit to the journal (append-only; ``model_rev`` moves
 forward) so hydration replays to the post-undo state.
 
-A batch recorded by POST /commits can span BOTH content families, so undo
-splits the inverse ops and replays the artifact half through
-``artifact_ops.apply_artifact_ops`` (also in restore mode): one compensating
-commit covers both, and every failure path unwinds both (in-memory rollback +
-``db.rollback()``) AND pushes the popped batch back so undo history is never
-silently eaten.
+A batch recorded by POST /commits can span all three content families, so
+undo splits the inverse ops and replays the artifact half through
+``artifact_ops.apply_artifact_ops`` and the view half through
+``view_ops.apply_view_ops_atomic`` (both in restore mode): one compensating
+commit covers all three, and every failure path unwinds every half that was
+live (in-memory model rollback + ``rollback_view`` + ``db.rollback()``) AND
+pushes the popped batch back so undo history is never silently eaten. The
+view blob (when touched) rides the SAME DB transaction as the compensating
+Commit row — see ``_persist_undo_commit``'s caller below, which stages it
+inside the same try/except for the same reason ``create_commit`` does (a
+staging failure must not escape with ``model_rev`` already bumped and the
+batch already off the op_log).
 
 Undo restores entity STATE (ids, types, endpoints, properties) but per-entity
 ``rev`` counters continue forward: nothing uses ``rev`` for conflict detection
@@ -63,6 +69,7 @@ from data_rover.core.validation.dirty import DirtyCollector, containment_closure
 from data_rover.core.validation.pipeline import default_pipeline
 from data_rover.core.validation.scope import Scope
 from data_rover.core.validation.state import ValidationState
+from data_rover.core.view.schema import View
 
 from .. import content
 from ..artifact_ops import (
@@ -78,8 +85,9 @@ from ..deps import Session, get_request_session, require_model
 from ..hydration import serialize_ops, write_snapshot
 from ..identity import get_current_user
 from ..invalidation import touched_keys
-from ..locking import artifact_resource
+from ..locking import artifact_resource, folder_resource
 from ..settings import get_settings
+from ..view_ops import ViewBatchResult, apply_view_ops_atomic, rollback_view, view_op_folder_ids
 from ..schemas import (
     TEMP_ID_PREFIX,
     CreateElementOp,
@@ -682,33 +690,38 @@ def undo(
     state = _ensure_validation_seeded(session, model)
     with session.write_mutex:
         batch = session.op_log.pop()
-        # A batch recorded by POST /commits can span both content families, so
-        # the undo replays each half through its own applier: the model half in
-        # place, the artifact half staged on this request's DB transaction.
+        # A batch recorded by POST /commits can span all three content
+        # families, so the undo replays each half through its own applier:
+        # the model half in place, the artifact half staged on this request's
+        # DB transaction, the view half in place on session.view (also staged
+        # on this request's DB transaction once accepted — see the persist
+        # step below).
         model_inv, artifact_inv, view_inv = split_ops(batch.inverse_ops)
-        if view_inv:  # TEMPORARY (plan Task 8): no view commit exists yet to undo
-            session.op_log.append(batch)
-            raise HTTPException(status_code=500, detail="view undo not wired yet")
         # The MODEL half of this route stays deliberately unlocked (the
         # documented migration-window stance until the frontend moves to
-        # check-out/commit). The ARTIFACT half cannot: artifact rows are
-        # ONLY ever protected by their `art:` lease — there is no per-request
-        # write_mutex ordering and no rev to conflict on — so replaying an
-        # artifact inverse over a peer's checked-out row would void, from
-        # this side, exactly the guarantee POST /commits and the legacy
-        # artifact CRUD routes enforce on theirs. Refuse instead, and push
-        # the batch BACK so a refusal never eats undo history.
+        # check-out/commit). The ARTIFACT and VIEW halves cannot: artifact
+        # rows and the view blob are ONLY ever protected by their `art:`/
+        # `folder:` leases — there is no per-request write_mutex ordering and
+        # no rev to conflict on — so replaying an artifact/view inverse over a
+        # peer's checked-out resource would void, from this side, exactly the
+        # guarantee POST /commits and the legacy artifact CRUD routes enforce
+        # on theirs. Refuse instead, and push the batch BACK so a refusal
+        # never eats undo history. ``view_op_folder_ids`` over-reports on
+        # purpose (a create's temp/parent id, both ends of a move) — a
+        # spurious id can only produce a conservative 409, never hide a held
+        # lease.
+        peer_resources = [
+            artifact_resource(aid) for aid in artifact_op_ids(artifact_inv)
+        ] + [folder_resource(fid) for fid in view_op_folder_ids(view_inv)]
         peer_held = session.lock_table.peer_leases(
-            [artifact_resource(aid) for aid in artifact_op_ids(artifact_inv)],
-            user.id,
-            now=time.monotonic(),
+            peer_resources, user.id, now=time.monotonic()
         )
         if peer_held:
             session.op_log.append(batch)
             return JSONResponse(
                 status_code=409,
                 content={
-                    "detail": "artifact is checked out by someone else",
+                    "detail": "resource is checked out by someone else",
                     "model_rev": session.model_rev,
                     "conflicts": [
                         {
@@ -726,8 +739,8 @@ def undo(
             session.op_log.append(batch)  # _apply_batch already rolled back
             raise
         try:
-            # restore mode on both halves: exact ids are reinstated and the
-            # already-accepted state is replayed without re-validation.
+            # restore mode on all three halves: exact ids are reinstated and
+            # the already-accepted state is replayed without re-validation.
             art_res = apply_artifact_ops(
                 db, project_id, artifact_inv, user_id=user.id, restore=True
             )
@@ -742,6 +755,27 @@ def undo(
             session.op_log.append(batch)
             db.rollback()  # discard staged artifact rows
             raise
+        view_res: ViewBatchResult | None = None
+        if view_inv:
+            if session.view is None:
+                # a batch that touched the view implies one existed; an
+                # evicted + contentless resurrection is the only way here —
+                # recreate.
+                session.view = View(name="view")
+            try:
+                view_res = apply_view_ops_atomic(session.view, view_inv, restore=True)
+            except Exception:
+                # mirror the artifact branch's stance: never leave the model
+                # or artifact halves applied. apply_view_ops_atomic already
+                # rolled its own applied prefix back internally (see its
+                # docstring), so there is no separate rollback_view call here
+                # — only a failure raised AFTER it succeeded needs one (the
+                # persist-failure branch below).
+                _rollback(model, res.inverse_units)
+                session.invalidate_derived_caches()
+                session.op_log.append(batch)
+                db.rollback()  # discard staged artifact rows
+                raise
         session.model_rev += 1
         if get_settings().snippet_incremental_invalidation:
             session.evict_touched_caches(touched_keys(model, model.metamodel, res))
@@ -749,12 +783,41 @@ def undo(
         # append-only journal: the undo is a NEW forward commit whose ops are
         # the inverse batch, so hydration replays to the post-undo state and
         # model_rev moves up (Phase 8 revert reuses this shape). ONE entry per
-        # undo, spanning both families: model ops first, then artifact ops (the
-        # families are independent, so cross-family order carries no meaning).
-        canonical_ops: list[OpIn] = [*res.canonical_ops, *art_res.canonical_ops]
-        inverse_ops: list[OpIn] = [*res.inverse_ops(), *art_res.inverse_ops()]
-        merged_id_map = {**res.id_map, **art_res.id_map}
+        # undo, spanning all three families: model ops first, then artifact
+        # ops, then view ops (the families are independent, so cross-family
+        # order carries no meaning — see split_ops).
+        canonical_ops: list[OpIn] = [
+            *res.canonical_ops,
+            *art_res.canonical_ops,
+            *(view_res.canonical_ops if view_res else []),
+        ]
+        inverse_ops: list[OpIn] = [
+            *res.inverse_ops(),
+            *art_res.inverse_ops(),
+            *(view_res.inverse_ops() if view_res else []),
+        ]
+        merged_id_map = {
+            **res.id_map,
+            **art_res.id_map,
+            **(view_res.id_map if view_res else {}),
+        }
         try:
+            # The view blob (when touched) is staged INSIDE this same try, on
+            # the same DB transaction _persist_undo_commit's own db.commit()
+            # will flush — so the view row and the compensating Commit row
+            # land or roll back together. It MUST be inside the try: staging
+            # is a db.flush() (content.upsert_single_view), which can raise on
+            # its own (FK/constraint/connection error) — the same failure
+            # class this try/except exists to catch (mirrors create_commit's
+            # step e).
+            if view_res is not None and view_res.canonical_ops:
+                assert session.view is not None
+                content.upsert_single_view(
+                    db,
+                    project_id,
+                    name=session.view.name,
+                    blob=session.view.model_dump_json(),
+                )
             persisted = _persist_undo_commit(
                 db,
                 project_id,
@@ -768,16 +831,20 @@ def undo(
             _rollback(model, res.inverse_units)  # undo the in-memory mutation
             session.model_rev -= 1
             session.invalidate_derived_caches()  # rev moved BACK; see apply_ops
+            if view_res is not None:
+                assert session.view is not None
+                rollback_view(session.view, view_res.inverse_units)
             session.op_log.append(batch)  # re-push the batch so undo history is intact
-            db.rollback()  # also discards the staged artifact rows
+            db.rollback()  # also discards the staged artifact + view rows
             raise HTTPException(
                 status_code=500, detail="failed to persist commit"
             ) from exc
-        if artifact_inv and not persisted:
+        if (artifact_inv or view_inv) and not persisted:
             # No durable model row (in-memory-only legacy project), so
             # _persist_undo_commit skipped its db.commit() — but the restored/
-            # removed artifact rows are real DB state that must not vanish when
-            # the request session closes (mirrors create_commit's same guard).
+            # removed artifact rows and the view blob are real DB state that
+            # must not vanish when the request session closes (mirrors
+            # create_commit's same guard).
             db.commit()
         if persisted:
             _maybe_periodic_snapshot(db, project_id, session, session.model_rev)
