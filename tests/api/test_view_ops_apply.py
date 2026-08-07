@@ -242,4 +242,45 @@ def test_view_op_folder_ids() -> None:
         ),
         CreateFolderOp(kind="create_folder", temp_id="tmp_c", parent_id="f3", name="x"),
     ]
-    assert view_op_folder_ids(ops) == {"f1", "f2", "f3", "tmp_c"}
+    # `view` is only consulted by the delete_folder/move_folder branches
+    # below; None is fine for op kinds that never need it.
+    assert view_op_folder_ids(None, ops) == {"f1", "f2", "f3", "tmp_c"}
+
+
+def test_view_op_folder_ids_delete_folder_expands_subtree() -> None:
+    """Regression for the artefacts-revamp final-review Fix 2: a
+    ``delete_folder`` op only NAMES its own id, but deleting it removes its
+    whole subtree — the undo route's peer-lease guard must see every
+    descendant too, or a peer's lease on a CHILD folder goes unenforced (the
+    docstring's old "over-reports on purpose, never hides a lease" claim was
+    false for exactly this op kind)."""
+    v = _view()
+    f = _ids(v)
+    assert view_op_folder_ids(v, [DeleteFolderOp(kind="delete_folder", id=f["A"])]) == {
+        f["A"],
+        f["A1"],
+    }
+
+
+def test_view_op_folder_ids_move_folder_resolves_current_parent() -> None:
+    """Regression for the artefacts-revamp final-review Fix 2: ``move_folder``
+    only names its DESTINATION parent in the op itself — the folder's CURRENT
+    parent (resolved by walking ``view``, exactly like ``required_locks``
+    does) must also be reported, or a peer's lease on the folder's old
+    container goes unenforced."""
+    v = _view()
+    f = _ids(v)
+    ids = view_op_folder_ids(
+        v, [MoveFolderOp(kind="move_folder", id=f["A1"], to_parent_id="root")]
+    )
+    assert ids == {f["A1"], "root", f["A"]}  # f["A"] is A1's CURRENT parent
+
+
+def test_view_op_folder_ids_delete_folder_falls_back_without_view() -> None:
+    """``folder_subtree`` degrades to a single-resource id when ``view`` is
+    None or the id is unknown (mirrors ``required_locks``'s own total-ness
+    guarantee) rather than raising — lock/guard derivation must never crash
+    on a stale or malformed op."""
+    assert view_op_folder_ids(None, [DeleteFolderOp(kind="delete_folder", id="x")]) == {
+        "x"
+    }

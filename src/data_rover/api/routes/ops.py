@@ -711,13 +711,18 @@ def undo(
         # peer's checked-out resource would void, from this side, exactly the
         # guarantee POST /commits and the legacy artifact CRUD routes enforce
         # on theirs. Refuse instead, and push the batch BACK so a refusal
-        # never eats undo history. ``view_op_folder_ids`` over-reports on
-        # purpose (a create's temp/parent id, both ends of a move) — a
+        # never eats undo history. ``view_op_folder_ids`` mostly over-reports
+        # on purpose (a create's temp/parent id, both ends of a move) — a
         # spurious id can only produce a conservative 409, never hide a held
-        # lease.
+        # lease — but delete_folder/move_folder need ``session.view`` (the
+        # CURRENT, pre-undo-application state) to resolve the subtree/current-
+        # parent ids the op itself doesn't name (see its docstring).
         peer_resources = [
             artifact_resource(aid) for aid in artifact_op_ids(artifact_inv)
-        ] + [folder_resource(fid) for fid in view_op_folder_ids(view_inv)]
+        ] + [
+            folder_resource(fid)
+            for fid in view_op_folder_ids(session.view, view_inv)
+        ]
         peer_held = session.lock_table.peer_leases(
             peer_resources, user.id, now=time.monotonic()
         )

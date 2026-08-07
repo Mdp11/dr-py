@@ -38,7 +38,7 @@ from typing import assert_never
 
 from fastapi import HTTPException
 
-from data_rover.core.view.ids import find_folder, locate_folder
+from data_rover.core.view.ids import find_folder, folder_subtree, locate_folder
 from data_rover.core.view.schema import VIEW_ROOT_ID, ArtifactRef, Folder, View
 
 from .locking import folder_resource
@@ -538,19 +538,51 @@ def validate_view_ops(view: View | None, ops: list[ViewOpIn]) -> None:
     apply_view_ops(base, ops, restore=False)
 
 
-def view_op_folder_ids(ops: Sequence[ViewOpIn]) -> set[str]:
+def view_op_folder_ids(view: View | None, ops: Sequence[ViewOpIn]) -> set[str]:
     """Every folder id (bare, un-namespaced) a batch references — the undo
-    route's peer-lease guard input. Over-reports on purpose (a create's
-    temp/parent id, both ends of a move): a spurious id can only produce a
-    conservative 409, never hide a held lease."""
+    route's peer-lease guard input.
+
+    Mostly over-reports on purpose (a create's temp/parent id, both ends of a
+    move): a spurious id can only produce a conservative 409, never hide a
+    held lease. But two op kinds need the SAME expansion ``required_locks``
+    (``locking.py``) performs for a forward batch, or a genuinely-held peer
+    lease goes unseen entirely — the false claim this docstring used to make
+    (final-review Fix 2):
+
+    - ``delete_folder`` only NAMES its own id, yet removes its whole subtree,
+      so a peer's lease on any DESCENDANT must also block the undo that would
+      delete it out from under them (``folder_subtree``, degrading to
+      ``{op.id}`` when ``view`` is None/stale — total, like
+      ``required_locks``'s own DELETE-intent expansion).
+    - ``move_folder`` only names its DESTINATION parent — the op carries no
+      field for where the folder currently lives — so a peer's lease on its
+      CURRENT parent (resolved by walking ``view`` via ``locate_folder``,
+      silently skipped if unresolvable) must also be reported.
+
+    ``view`` is the CURRENT (pre-undo-application) view, exactly the state
+    ``required_locks`` itself is evaluated against — the undo caller passes
+    ``session.view`` before applying anything. Deliberately NOT reimplemented
+    by delegating straight to ``required_locks``: that function's `created`
+    bookkeeping (a batch's own same-batch creates need no lock) is correct
+    for a FORWARD commit but wrong for a RESTORE-mode replay, where a
+    ``create_folder`` reinstates a REAL, previously-existing id (e.g. inside
+    a ``delete_folder``'s recreate unit) that a peer could still hold a lease
+    on — delegating would silently exclude it."""
     ids: set[str] = set()
     for op in ops:
         if isinstance(op, CreateFolderOp):
             ids |= {op.temp_id, op.parent_id}
-        elif isinstance(op, (RenameFolderOp, DeleteFolderOp)):
+        elif isinstance(op, RenameFolderOp):
             ids.add(op.id)
+        elif isinstance(op, DeleteFolderOp):
+            ids |= set(folder_subtree(view, op.id))
         elif isinstance(op, MoveFolderOp):
             ids |= {op.id, op.to_parent_id}
+            if view is not None:
+                located = locate_folder(view, op.id)
+                if located is not None:
+                    parent = located[0]
+                    ids.add(parent.id if isinstance(parent, Folder) else VIEW_ROOT_ID)
         elif isinstance(op, (PlaceElementOp, RemoveElementOp)):
             ids.add(op.folder_id)
         elif isinstance(op, MoveElementOp):

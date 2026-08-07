@@ -261,3 +261,62 @@ def test_undo_of_delete_folder_and_move_element_is_byte_identical(
 
     after = client.get(papi("/view")).json()["view"]
     assert after == before  # deep equality: the FULL tree, not a spot field
+def test_undo_refuses_while_peer_holds_lease_on_delete_folder_subtree_child(
+    client: TestClient,
+) -> None:
+    """Regression for final-review Fix 2: the reviewer's exact repro. U
+    commits ``create_folder D``; P adds a CHILD folder C under D via the
+    legacy (op-log-free) ``PUT /view/snapshot``; P takes an EDIT lease on
+    ``folder:C``; U undoes the ``create_folder D`` commit. The undo's inverse
+    is ``[delete_folder D]``, which deletes D's WHOLE SUBTREE (including C) —
+    the peer-lease guard must expand D over that subtree (mirroring
+    ``required_locks``'s own DELETE-intent expansion) and see C's lease, or
+    the undo silently deletes C out from under the peer's checked-out edit."""
+    token = _folder_lease(client, "root")
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": _rev(client),
+            "ops": [
+                {
+                    "kind": "create_folder",
+                    "temp_id": "tmp_d",
+                    "parent_id": "root",
+                    "name": "D",
+                }
+            ],
+            "message": "m",
+            "lock_tokens": [token],
+        },
+    )
+    assert r.status_code == 200, r.text
+    d_id = r.json()["id_map"]["tmp_d"]
+
+    # P adds a child folder C under D via the legacy whole-document PUT —
+    # this writes NO op_log entry and needs no lease (routes/view.py only
+    # refuses a PEER's held folder lease, and nobody holds one yet).
+    _seed_second_member("user-2", "user2@example.com")
+    view = client.get(papi("/view")).json()["view"]
+    view["folders"][0]["folders"].append({"name": "C"})
+    r = client.put(papi("/view/snapshot"), json=view, headers=OTHER_HEADERS)
+    assert r.status_code == 200, r.text
+    c_id = r.json()["view"]["folders"][0]["folders"][0]["id"]
+
+    # P checks out C for editing.
+    r = client.post(
+        papi("/locks"),
+        json={
+            "targets": [{"resource_id": c_id, "mode": "exclusive", "type": "folder"}],
+            "intent": "edit",
+        },
+        headers=OTHER_HEADERS,
+    )
+    assert r.status_code == 200, r.text
+
+    r = client.post(papi("/model/undo"))
+    assert r.status_code == 409, r.text
+    assert f"folder:{c_id}" in [c["resource_id"] for c in r.json()["conflicts"]]
+    # the refusal did not eat the undo slot, and D (+ C) are untouched.
+    summary = client.get(papi("/model/summary")).json()
+    assert summary["undo_depth"] == 1
+    assert client.get(papi("/view")).json()["view"]["folders"][0]["id"] == d_id
