@@ -155,6 +155,75 @@ def test_required_locks_folder_ops() -> None:
     assert not any(rid == "folder:tmp_c" for rid, _, _ in reqs)
 
 
+def test_required_locks_element_and_artifact_placement_ops() -> None:
+    """The six placement/move op kinds `test_required_locks_folder_ops` does
+    NOT exercise (its one `place_element` targets a same-batch-created temp
+    folder, asserting the EXEMPTION rather than the normal lock derivation).
+    Each op below targets a DIFFERENT real folder so the resulting set can
+    only contain a given `(resource_id, mode, intent)` tuple if THAT op
+    contributed it — a from/to field mix-up, a wrong-field read, or a
+    forgotten `add()` call on either endpoint of a move would each shrink the
+    asserted set and fail loudly, rather than being masked by another op
+    happening to touch the same folder."""
+    m = _model()
+    v = View(
+        name="v2",
+        folders=[Folder(name=n) for n in ("F1", "F2", "F3", "F4", "F5", "F6", "F7")],
+    )
+    ensure_folder_ids(v)
+    f1, f2, f3, f4, f5, f6, f7 = v.folders
+    ops = OPS_ADAPTER.validate_python(
+        [
+            {"kind": "place_element", "element_id": "e1", "folder_id": f1.id},
+            {"kind": "remove_element", "element_id": "e2", "folder_id": f2.id},
+            {
+                "kind": "move_element",
+                "element_id": "e3",
+                "from_folder_id": f3.id,
+                "to_folder_id": f4.id,
+            },
+            # artifacts have a real root list — root membership is a genuine
+            # lease target, not just an "unplaced" no-op like element root.
+            {
+                "kind": "place_artifact",
+                "artifact_id": "art1",
+                "artifact_kind": "table",
+                "folder_id": "root",
+            },
+            {"kind": "remove_artifact", "artifact_id": "art2", "folder_id": f5.id},
+            {
+                "kind": "move_artifact",
+                "artifact_id": "art3",
+                "from_folder_id": f6.id,
+                "to_folder_id": f7.id,
+            },
+        ]
+    )
+    reqs = {(r.resource_id, r.mode, r.intent) for r in required_locks(m, v, ops)}
+    assert (f"folder:{f1.id}", LockMode.EXCLUSIVE, LockIntent.EDIT) in reqs  # place_element
+    assert (f"folder:{f2.id}", LockMode.EXCLUSIVE, LockIntent.EDIT) in reqs  # remove_element
+    # move_element locks BOTH endpoints
+    assert (f"folder:{f3.id}", LockMode.EXCLUSIVE, LockIntent.EDIT) in reqs
+    assert (f"folder:{f4.id}", LockMode.EXCLUSIVE, LockIntent.EDIT) in reqs
+    # place_artifact into the root list locks folder:root, same as a real folder
+    assert ("folder:root", LockMode.EXCLUSIVE, LockIntent.EDIT) in reqs
+    assert (f"folder:{f5.id}", LockMode.EXCLUSIVE, LockIntent.EDIT) in reqs  # remove_artifact
+    # move_artifact locks BOTH endpoints
+    assert (f"folder:{f6.id}", LockMode.EXCLUSIVE, LockIntent.EDIT) in reqs
+    assert (f"folder:{f7.id}", LockMode.EXCLUSIVE, LockIntent.EDIT) in reqs
+    # exactly these eight resources — no extra, no missing
+    assert reqs == {
+        (f"folder:{f1.id}", LockMode.EXCLUSIVE, LockIntent.EDIT),
+        (f"folder:{f2.id}", LockMode.EXCLUSIVE, LockIntent.EDIT),
+        (f"folder:{f3.id}", LockMode.EXCLUSIVE, LockIntent.EDIT),
+        (f"folder:{f4.id}", LockMode.EXCLUSIVE, LockIntent.EDIT),
+        ("folder:root", LockMode.EXCLUSIVE, LockIntent.EDIT),
+        (f"folder:{f5.id}", LockMode.EXCLUSIVE, LockIntent.EDIT),
+        (f"folder:{f6.id}", LockMode.EXCLUSIVE, LockIntent.EDIT),
+        (f"folder:{f7.id}", LockMode.EXCLUSIVE, LockIntent.EDIT),
+    }
+
+
 def test_expand_targets_folder_delete_subtree() -> None:
     m = _model()
     v = _v()
