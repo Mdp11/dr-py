@@ -189,6 +189,72 @@ def test_mixed_batch_atomicity_view_rolls_back_with_model(client: TestClient) ->
     assert _rev(client) == base
 
 
+def test_failed_commit_with_no_prior_view_leaves_view_null(client: TestClient) -> None:
+    """Regression for final-review Finding 2: a batch that auto-creates an
+    empty view (project had none) and then hard-fails on its MODEL half must
+    not leave that auto-created empty view behind — GET /view still reports
+    ``view: null``, exactly as it did before the request, not a materialized
+    empty view with no ViewRow / view_rev to back it."""
+    assert client.get(papi("/view")).json()["view"] is None
+    r = client.post(
+        papi("/model"),
+        json={
+            "elements": [
+                {"id": "p1", "type_name": "Node", "properties": {}},
+                {"id": "p2", "type_name": "Node", "properties": {}},
+                {"id": "child", "type_name": "Node", "properties": {}},
+            ],
+            "relationships": [],
+        },
+    )
+    assert r.status_code == 200, r.text
+    r = client.post(
+        papi("/locks"),
+        json={
+            "targets": [
+                {"resource_id": "root", "mode": "exclusive", "type": "folder"},
+                {"resource_id": "p1", "mode": "exclusive"},
+                {"resource_id": "p2", "mode": "exclusive"},
+                {"resource_id": "child", "mode": "shared"},
+            ],
+            "intent": "edit",
+        },
+    )
+    assert r.status_code == 200, r.text
+    token = r.json()["token"]
+    base = _rev(client)
+    ops = [
+        # this leg auto-creates the view (there is none yet)...
+        {"kind": "create_folder", "temp_id": "tmp_c", "parent_id": "root", "name": "A"},
+        # ...and this leg is a STRUCTURAL "two containment parents" blocker,
+        # which fails the batch AFTER the view half already applied.
+        {
+            "kind": "create_relationship",
+            "temp_id": "tmp_r1",
+            "type_name": "Contains",
+            "source_id": "p1",
+            "target_id": "child",
+            "properties": {},
+        },
+        {
+            "kind": "create_relationship",
+            "temp_id": "tmp_r2",
+            "type_name": "Contains",
+            "source_id": "p2",
+            "target_id": "child",
+            "properties": {},
+        },
+    ]
+    r = client.post(
+        papi("/commits"),
+        json={"base_rev": base, "ops": ops, "message": "m", "lock_tokens": [token]},
+    )
+    assert r.status_code == 422, r.text
+    assert r.json()["structural_blockers"]
+    assert client.get(papi("/view")).json()["view"] is None
+    assert _rev(client) == base
+
+
 def test_preview_validates_view_ops_dry(client: TestClient) -> None:
     r = client.put(papi("/view/snapshot"), json={"name": "v", "folders": [{"name": "A"}]})
     fid = r.json()["view"]["folders"][0]["id"]

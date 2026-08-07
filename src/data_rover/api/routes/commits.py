@@ -647,9 +647,17 @@ def create_commit(
         #     reference an element or artifact created earlier in the SAME
         #     batch.
         view_res: ViewBatchResult | None = None
+        # True iff THIS request is the one that flipped session.view from
+        # None to an empty View (auto-create) — tracked so every failure
+        # path below can restore it to None rather than leaving a
+        # never-committed empty view behind. A view auto-created by an
+        # earlier successful request must NOT be un-created by a later
+        # request's failure, hence this is request-local, not view-derived.
+        created_view = False
         if view_ops:
             if session.view is None:
                 session.view = View(name="view")
+                created_view = True
             try:
                 view_res = apply_view_ops_atomic(
                     session.view,
@@ -661,6 +669,12 @@ def create_commit(
                 # mirror b2's stance: never leave the model half applied.
                 _rollback(model, res.inverse_units)
                 session.invalidate_derived_caches()
+                if created_view:
+                    # apply_view_ops_atomic already rolled its own applied
+                    # prefix back (to the empty View this request created),
+                    # but the auto-create itself must unwind too: the
+                    # pre-batch state for THIS project was None, not "".
+                    session.view = None
                 db.rollback()
                 raise
         # c. hard-reject structural blockers. Model content only: an artifact
@@ -674,6 +688,8 @@ def create_commit(
             if view_res is not None:
                 assert session.view is not None
                 rollback_view(session.view, view_res.inverse_units)
+            if created_view:
+                session.view = None  # unwind the auto-create too — see b3
             db.rollback()  # discard staged artifact rows
             return JSONResponse(
                 status_code=422,
@@ -696,6 +712,8 @@ def create_commit(
             if view_res is not None:
                 assert session.view is not None
                 rollback_view(session.view, view_res.inverse_units)
+            if created_view:
+                session.view = None  # unwind the auto-create too — see b3
             db.rollback()  # discard staged artifact rows
             return JSONResponse(
                 status_code=422,
@@ -744,22 +762,29 @@ def create_commit(
             )
         )
         # e. persist to the durable journal; mirror apply_ops 500 pattern
-        #    exactly. The view blob (if touched) is staged HERE, on the same
-        #    DB transaction _persist_commit's own db.commit() will flush —
-        #    so the view row and the Commit row land or roll back together.
+        #    exactly. The view blob (if touched) is staged INSIDE this same
+        #    try, on the same DB transaction _persist_commit's own
+        #    db.commit() will flush — so the view row and the Commit row
+        #    land or roll back together. It MUST be inside the try: staging
+        #    is a db.flush() (content.upsert_single_view), which can raise
+        #    on its own (FK/constraint/connection error) — the same failure
+        #    class this try/except exists to catch. Staging it outside would
+        #    let that exception escape every rollback below with model_rev
+        #    already bumped and the batch already in op_log (final-review
+        #    Finding 1).
         commit_id = uuid.uuid4().hex
         issues_json = [IssueOut.from_core(i).model_dump() for i in conformance]
         new_view_rev: int | None = None
-        if view_res is not None and view_res.canonical_ops:
-            assert session.view is not None
-            view_row = content.upsert_single_view(
-                db,
-                project_id,
-                name=session.view.name,
-                blob=session.view.model_dump_json(),
-            )
-            new_view_rev = view_row.view_rev
         try:
+            if view_res is not None and view_res.canonical_ops:
+                assert session.view is not None
+                view_row = content.upsert_single_view(
+                    db,
+                    project_id,
+                    name=session.view.name,
+                    blob=session.view.model_dump_json(),
+                )
+                new_view_rev = view_row.view_rev
             persisted = _persist_commit(
                 db,
                 project_id,
@@ -780,6 +805,8 @@ def create_commit(
             if view_res is not None:
                 assert session.view is not None
                 rollback_view(session.view, view_res.inverse_units)
+            if created_view:
+                session.view = None  # unwind the auto-create too — see b3
             session.op_log.pop()
             db.rollback()  # also discards the staged artifact + view rows
             raise HTTPException(
