@@ -312,8 +312,20 @@ export function applyViewOp(view: View, op: ViewOp): View {
 			if (pos < 0) {
 				throw new Error(`artifact ${op.artifact_id} is not placed in ${op.from_folder_id}`);
 			}
+			// Same-container detection must compare the underlying `artifacts`
+			// ARRAY reference, not the `containerOf` wrapper object: for a root
+			// target `containerOf` allocates a fresh `{folders, artifacts}`
+			// literal on every call (it has no folder object to return), so two
+			// root resolutions are `!==` as wrappers even though both point at
+			// the SAME `next.artifacts` array. A folder target returns the
+			// folder object itself, so its identity (and its `.artifacts`
+			// array's identity) is already stable across calls. Comparing
+			// `.artifacts` arrays is therefore the one check that holds for
+			// both cases and faithfully mirrors the backend's `src_c is not
+			// dst_c` (view_ops.py:485), where `_container` returns the literal
+			// `View` object both times for root.
 			if (
-				srcContainer !== dstContainer &&
+				srcContainer.artifacts !== dstContainer.artifacts &&
 				dstContainer.artifacts.some((a) => a.id === op.artifact_id)
 			) {
 				throw new Error(`artifact ${op.artifact_id} is already placed in ${op.to_folder_id}`);

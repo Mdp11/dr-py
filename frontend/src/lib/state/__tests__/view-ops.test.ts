@@ -112,6 +112,28 @@ describe('applyViewOp', () => {
 		expect(v.artifacts.some((a) => a.id === 'art2')).toBe(false);
 		expect(findFolderById(v, 'fc')?.artifacts.map((a) => a.id)).toEqual(['art2']);
 	});
+	it('move_artifact reorders within the root without a false "already placed"', () => {
+		// Root resolves through `containerOf` twice (once for `from`, once for
+		// `to`) — each call allocates a fresh wrapper object, so this exercises
+		// same-container detection that must NOT rely on wrapper identity (see
+		// `applyViewOp`'s `move_artifact` branch comment).
+		let v = view();
+		v = applyViewOp(v, {
+			kind: 'place_artifact',
+			artifact_id: 'art3',
+			artifact_kind: 'table',
+			folder_id: VIEW_ROOT_ID
+		});
+		expect(v.artifacts.map((a) => a.id)).toEqual(['art2', 'art3']);
+		v = applyViewOp(v, {
+			kind: 'move_artifact',
+			artifact_id: 'art2',
+			from_folder_id: VIEW_ROOT_ID,
+			to_folder_id: VIEW_ROOT_ID,
+			index: 1
+		});
+		expect(v.artifacts.map((a) => a.id)).toEqual(['art3', 'art2']);
+	});
 	it('does not mutate its input', () => {
 		const before = view();
 		const snapshot = JSON.stringify(before);
