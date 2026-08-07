@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { metamodel as metamodelApi, ApiError, ConflictError } from '$lib/api';
+	import { apiFetch } from '$lib/api/client';
 	import { uploadModelBody } from '$lib/api/model-ops';
-	import { ViewSchema, type View } from '$lib/api/types';
+	import { ViewSchema, ViewSnapshotResponseSchema, type View } from '$lib/api/types';
 	import { Button } from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import {
@@ -10,13 +11,12 @@
 		clearIssues,
 		clearViewState,
 		endProgress,
-		pushView,
+		refreshView,
 		resetModelStore,
 		setFileHandle,
 		setFilename,
 		setMetamodel,
 		setMetamodelFilename,
-		setViewBaseline,
 		setViewFilename,
 		startProgress,
 		updateProgress
@@ -99,13 +99,22 @@
 				clearIssues();
 				clearChangesBadge();
 
-				// 3. view (optional) — validated against the active model. Baseline
-				// from the SERVER-echoed view so the view-change count starts at 0
-				// even if the backend normalizes the snapshot.
+				// 3. view (optional) — validated against the active model. This is a
+				// one-shot INITIAL load with no editing session (and so no folder
+				// lease) to protect, so it goes straight at the legacy whole-snapshot
+				// PUT the backend keeps alive for exactly this migration window (see
+				// CLAUDE.md's "Legacy PUT /view/snapshot stays for the frontend
+				// migration window") rather than through the staged view.* op path.
+				// `refreshView()` afterward (not the PUT's own echoed body) is what
+				// sets `_view` AND the baseline together, from server truth.
 				if (vars.viewBody) {
-					const { view: storedView } = await pushView(vars.viewBody);
+					await apiFetch('/view/snapshot', {
+						method: 'PUT',
+						body: vars.viewBody,
+						schema: ViewSnapshotResponseSchema
+					});
 					setViewFilename(viewFilename);
-					setViewBaseline(storedView);
+					await refreshView();
 				} else {
 					// No view in this load: clear any view carried over from a prior
 					// session so the badge/View tab don't report a stale view as changes.
@@ -186,7 +195,7 @@
 		}
 	}
 
-	function clearView(): void {
+	function clearViewSelection(): void {
 		viewFilename = null;
 		viewBody = null;
 	}
@@ -279,7 +288,9 @@
 						{viewFilename ?? 'No file selected'}
 					</span>
 					{#if viewFilename}
-						<Button type="button" variant="ghost" size="sm" onclick={clearView}>Clear</Button>
+						<Button type="button" variant="ghost" size="sm" onclick={clearViewSelection}>
+							Clear
+						</Button>
 					{/if}
 					<input
 						bind:this={viewInputRef}

@@ -198,6 +198,10 @@ export {
 	editLock,
 	connectLock,
 	deleteLock,
+	folderCreateLock,
+	folderDeleteLock,
+	folderEditLock,
+	folderTargets,
 	lockHolderLabel
 } from './edit-gate';
 export { stageSnippetOps, type StageOutcome } from './snippet-stage';
@@ -236,6 +240,7 @@ export {
 	cloneView,
 	createFolder,
 	deleteFolder,
+	discardViewChanges,
 	dropView,
 	getView,
 	getViewChanges,
@@ -249,12 +254,22 @@ export {
 	placeElement,
 	placeElements,
 	placeElementsAt,
-	pushView,
 	refreshView,
 	removeArtifactFromFolder,
 	removeElement,
 	renameFolder,
-	setViewBaseline
+	scrubArtifactFromView,
+	setViewBaseline,
+	stageClearView,
+	stageCreateFolder,
+	stageDeleteFolder,
+	stageMoveArtifact,
+	stageMoveFolder,
+	stagePlaceArtifact,
+	stagePlaceElementsAt,
+	stageRemoveArtifactRef,
+	stageRemoveElement,
+	stageRenameFolder
 } from './view.svelte';
 export { isProjectOpening, setProjectOpening } from './project-open.svelte';
 export type { ViewChange } from './view-diff';

@@ -21,7 +21,7 @@ import {
 	stagedArtifactState
 } from '../artifact-edits.svelte';
 import { resetCheckout, setProjectInfo } from '../checkout.svelte';
-import { clearViewState, getView, pushView } from '../view.svelte';
+import { clearViewState, getView, refreshView } from '../view.svelte';
 
 const HEADER = {
 	id: 'a1',
@@ -71,6 +71,15 @@ function mockAcquireConflict() {
 			'lock conflict'
 		);
 	});
+}
+
+/** Seed the view store from a fixture, the way a real project open does
+ * (mock the GET /view the staged-op rewrite now reads through — the
+ * pre-Phase-2 whole-snapshot PUT wrapper is gone as of the artefacts
+ * revamp). */
+async function seedView(view: View): Promise<void> {
+	vi.spyOn(viewApi, 'getView').mockResolvedValue({ view, warnings: [] });
+	await refreshView();
 }
 
 /** A view that places `a1` twice (nested folder + parent folder). */
@@ -270,11 +279,7 @@ describe('removeArtifact', () => {
 		const acquire = mockAcquire();
 		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [HEADER] });
 		await loadArtifacts();
-		const put = vi
-			.spyOn(viewApi, 'putViewSnapshot')
-			.mockImplementation(async (v) => ({ view: v, warnings: [] }));
-		await pushView(viewPlacing('a1'));
-		put.mockClear();
+		await seedView(viewPlacing('a1'));
 
 		await removeArtifact('a1');
 
@@ -284,8 +289,7 @@ describe('removeArtifact', () => {
 		});
 		expect(getStagedArtifactEntries()).toEqual([{ kind: 'delete', id: 'a1', header: HEADER }]);
 		// The artifact still exists server-side until the commit lands, so its
-		// view placements must survive a discard — no scrub push here.
-		expect(put).not.toHaveBeenCalled();
+		// view placements must survive a discard — no scrub here.
 		expect(getView()!.folders[0].artifacts).toEqual([{ id: 'a1', kind: 'navigation' }]);
 	});
 
@@ -331,14 +335,10 @@ describe('removeArtifact', () => {
 });
 
 describe('commit listener', () => {
-	it('upserts changed headers, drops deleted ids and scrubs the view', async () => {
+	it('upserts changed headers and drops deleted ids; the view scrub is a Phase 2 no-op (Task 9 supersedes)', async () => {
 		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [HEADER, TABLE_HEADER] });
 		await loadArtifacts();
-		const put = vi
-			.spyOn(viewApi, 'putViewSnapshot')
-			.mockImplementation(async (v) => ({ view: v, warnings: [] }));
-		await pushView(viewPlacing('t1'));
-		put.mockClear();
+		await seedView(viewPlacing('t1'));
 
 		const renamed: ArtifactHeader = { ...HEADER, name: 'Sensors v2', artifact_rev: 3 };
 		const created: ArtifactHeader = {
@@ -360,9 +360,12 @@ describe('commit listener', () => {
 		// scrub is async (fire-and-forget); let the microtask queue drain
 		await Promise.resolve();
 		await Promise.resolve();
-		expect(put).toHaveBeenCalledTimes(1);
-		expect(getView()!.folders[0].artifacts).toEqual([]);
-		expect(getView()!.folders[0].folders[0].artifacts).toEqual([]);
+		// Nothing may PUT the view snapshot any more (that whole-snapshot
+		// wrapper is gone), so `scrubArtifactFromView` is an immediate no-op
+		// until Task 9 wires up a staged, leased scrub — the dangling ref
+		// persists; TreeRow already tolerates it (its "missing artifact" row).
+		expect(getView()!.folders[0].artifacts).toEqual([{ id: 't1', kind: 'navigation' }]);
+		expect(getView()!.folders[0].folders[0].artifacts).toEqual([{ id: 't1', kind: 'navigation' }]);
 	});
 
 	it('upserts a changed header IN PLACE and appends only genuinely new ids', async () => {
@@ -380,20 +383,19 @@ describe('commit listener', () => {
 		expect(getCommittedArtifactHeaders()).toEqual([renamed, TABLE_HEADER, third, created]);
 	});
 
-	it('does not push the view when the commit deleted nothing this view placed', async () => {
+	it('leaves the view untouched (reference-identical) when the deleted id was never placed', async () => {
 		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [HEADER] });
 		await loadArtifacts();
-		vi.spyOn(viewApi, 'putViewSnapshot').mockImplementation(async (v) => ({
-			view: v,
-			warnings: []
-		}));
-		await pushView(viewPlacing('a1'));
-		const put = vi.spyOn(viewApi, 'putViewSnapshot');
+		await seedView(viewPlacing('a1'));
+		const before = getView();
 
 		notifyArtifactCommit({ idMap: {}, changed: [], deletedIds: ['t1'] });
 		await Promise.resolve();
 		await Promise.resolve();
-		expect(put).not.toHaveBeenCalled();
+
+		// scrubArtifactFromView is a no-op regardless of match (Phase 2, until
+		// Task 9), so `_view` is never reassigned here either.
+		expect(getView()).toBe(before);
 	});
 });
 

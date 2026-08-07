@@ -84,3 +84,31 @@ export async function artifactEditLock(artifactId: string): Promise<boolean> {
 export async function artifactDeleteLock(artifactId: string): Promise<boolean> {
 	return noticed(await acquireArtifactLease(artifactId, 'delete'));
 }
+
+/** Folder lock targets: EXCLUSIVE, `type: "folder"`, deduped — a move whose
+ * source container IS the destination parent sends one target, not two. */
+export function folderTargets(folderIds: string[]): LockTargetIn[] {
+	return [...new Set(folderIds)].map((id) => ({
+		resource_id: id,
+		mode: 'exclusive' as const,
+		type: 'folder' as const
+	}));
+}
+
+/** Folder gates (Phase 2): notice-based like the element gates — the sidebar
+ * has no inline place to render a holder. Intent nuance (Decision 13):
+ * verify_held ignores intent, so `edit` fits every gesture except delete
+ * (DELETE-intent conflicts with ANY peer lease — the backend's semantics for
+ * a destructive claim over the subtree the CALLER walks and passes here) and
+ * create (`create_child` on the parent, mirroring required_locks). */
+export async function folderEditLock(folderIds: string[]): Promise<boolean> {
+	return acquireLocks(folderTargets(folderIds), 'edit');
+}
+
+export async function folderCreateLock(parentId: string): Promise<boolean> {
+	return acquireLocks(folderTargets([parentId]), 'create_child');
+}
+
+export async function folderDeleteLock(subtreeIds: string[]): Promise<boolean> {
+	return acquireLocks(folderTargets(subtreeIds), 'delete');
+}

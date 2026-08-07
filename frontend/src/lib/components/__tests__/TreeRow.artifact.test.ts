@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import * as viewApi from '$lib/api/view';
+import * as editGate from '$lib/state/edit-gate';
 import type { View } from '$lib/api/types';
-import { clearViewState, getView, indexIssues, pushView, resetArtifacts } from '$lib/state';
+import { clearViewState, getView, indexIssues, refreshView, resetArtifacts } from '$lib/state';
 import TreeRow from '../Sidebar/TreeRow.svelte';
 import {
 	artifactKey,
@@ -114,11 +115,9 @@ describe('TreeRow — dangling artifact refs', () => {
 			],
 			artifacts: []
 		};
-		vi.spyOn(viewApi, 'putViewSnapshot').mockImplementation(async (v) => ({
-			view: v,
-			warnings: []
-		}));
-		await pushView(seedView);
+		vi.spyOn(viewApi, 'getView').mockResolvedValue({ view: seedView, warnings: [] });
+		await refreshView();
+		vi.spyOn(editGate, 'folderEditLock').mockResolvedValue(true);
 
 		app = mount(TreeRow, {
 			target: host,
@@ -151,7 +150,8 @@ describe('TreeRow — dangling artifact refs', () => {
 		const removeBtn = host.querySelector('button[aria-label="Remove from folder"]');
 		expect(removeBtn).not.toBeNull();
 		removeBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-		// removeArtifactFromFolder is async (pushView round-trip) — flush the microtask.
+		// removeArtifactFromFolder resolves the path shim -> folderEditLock gate
+		// -> stageRemoveArtifactRef (async) — flush the microtask.
 		await Promise.resolve();
 		await Promise.resolve();
 		flushSync();

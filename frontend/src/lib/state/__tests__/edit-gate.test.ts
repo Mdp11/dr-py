@@ -6,6 +6,10 @@ import {
 	acquireArtifactLease,
 	artifactDeleteLock,
 	artifactEditLock,
+	folderCreateLock,
+	folderDeleteLock,
+	folderEditLock,
+	folderTargets,
 	lockHolderLabel
 } from '../edit-gate';
 import { setProjectInfo, resetCheckout } from '../index';
@@ -207,5 +211,63 @@ describe('artifact edit gate', () => {
 				conflicts: [{ resource_id: 'art:a1', held_by: 'bob-uuid', held_mode: 'exclusive' }]
 			})
 		).toBe('bob-uuid');
+	});
+});
+
+describe('folderTargets', () => {
+	it('sends exclusive type:folder targets, deduped', () => {
+		expect(folderTargets(['f1', 'f2', 'f1'])).toEqual([
+			{ resource_id: 'f1', mode: 'exclusive', type: 'folder' },
+			{ resource_id: 'f2', mode: 'exclusive', type: 'folder' }
+		]);
+	});
+});
+
+describe('folder edit gates', () => {
+	it('folderEditLock sends edit intent with type:folder targets', async () => {
+		const spy = vi.spyOn(api, 'acquireLocks').mockResolvedValue({ token: 't', leases: [] });
+		expect(await folderEditLock(['f1', 'f2'])).toBe(true);
+		expect(spy.mock.calls[0][0]).toMatchObject({
+			targets: [
+				{ resource_id: 'f1', mode: 'exclusive', type: 'folder' },
+				{ resource_id: 'f2', mode: 'exclusive', type: 'folder' }
+			],
+			intent: 'edit'
+		});
+	});
+
+	it('folderCreateLock sends create_child intent on the parent', async () => {
+		const spy = vi.spyOn(api, 'acquireLocks').mockResolvedValue({ token: 't', leases: [] });
+		expect(await folderCreateLock('f1')).toBe(true);
+		expect(spy.mock.calls[0][0]).toMatchObject({
+			targets: [{ resource_id: 'f1', mode: 'exclusive', type: 'folder' }],
+			intent: 'create_child'
+		});
+	});
+
+	it('folderDeleteLock sends delete intent over the whole subtree', async () => {
+		const spy = vi.spyOn(api, 'acquireLocks').mockResolvedValue({ token: 't', leases: [] });
+		expect(await folderDeleteLock(['f1', 'f1a', 'f1b'])).toBe(true);
+		expect(spy.mock.calls[0][0]).toMatchObject({
+			targets: [
+				{ resource_id: 'f1', mode: 'exclusive', type: 'folder' },
+				{ resource_id: 'f1a', mode: 'exclusive', type: 'folder' },
+				{ resource_id: 'f1b', mode: 'exclusive', type: 'folder' }
+			],
+			intent: 'delete'
+		});
+	});
+
+	it('routes a folder-lock refusal through the global lock notice', async () => {
+		const { ConflictError } = await import('$lib/api/errors');
+		vi.spyOn(api, 'acquireLocks').mockRejectedValue(
+			new ConflictError(
+				409,
+				{ conflicts: [{ resource_id: 'folder:f1', held_by: 'bob', held_mode: 'exclusive' }] },
+				'lock conflict'
+			)
+		);
+		expect(await folderEditLock(['f1'])).toBe(false);
+		expect(getLockNotice()).toBe('Locked by bob.');
 	});
 });
