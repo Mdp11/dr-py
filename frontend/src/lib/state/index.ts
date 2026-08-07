@@ -244,7 +244,6 @@ export {
 	isViewResolved,
 	markViewUnresolved,
 	refreshView,
-	scrubArtifactFromView,
 	stageClearView,
 	stageCreateFolder,
 	stageDeleteFolder,

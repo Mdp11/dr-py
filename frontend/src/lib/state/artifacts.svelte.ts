@@ -29,9 +29,10 @@ import {
 	stageArtifactUpdate
 } from './artifact-edits.svelte';
 import { releaseArtifactIfUnneeded } from './checkout.svelte';
-import { artifactDeleteLock, artifactEditLock } from './edit-gate';
+import { artifactDeleteLock, artifactEditLock, folderEditLock } from './edit-gate';
 import { isTempId } from './ops';
-import { scrubArtifactFromView } from './view.svelte';
+import { artifactPlacementFolderIds } from './view-ops';
+import { getView, stageRemoveArtifactRef } from './view.svelte';
 
 let _items = $state<ArtifactHeader[]>([]);
 let _loading = $state(false);
@@ -174,11 +175,23 @@ export async function renameArtifact(id: string, name: string): Promise<void> {
  * tokens the batch actually needed, so nothing else would ever clean it up:
  * every path that acquires without staging must release it explicitly.
  *
- * The view is NOT scrubbed here (it used to be, when the delete was immediate).
- * Until the delete commits, the artifact still exists server-side and the user
- * may still discard the batch — dropping the placements now would silently
- * destroy view content that the discard cannot bring back. The scrub moved to
- * the commit listener below.
+ * Decision 7 — the delete's commit carries its own scrub: rather than reacting
+ * to a completed commit (the old, now-deleted `onArtifactCommit` scrub call —
+ * see git history), this STAGES a `remove_artifact` view op per placement in
+ * the SAME batch as the `delete_artifact`, so the commit that destroys the
+ * artifact leaves no dangling refs behind at all — there is no longer a window
+ * where the view still names an artifact the server has already dropped.
+ *
+ * Folder EDIT leases are acquired as a SECOND step, after the `art:` delete
+ * lease — a peer's folder lock blocks the delete because the delete edits
+ * that folder's contents, so it needs the same lease any other placement
+ * change would. A single combined call is not an option: it would need ONE
+ * intent for every target, and giving the folders `delete` intent (the
+ * artifact's own intent) would subtree-expand each of them server-side
+ * (`expand_targets`) — locking every element and sub-folder underneath, far
+ * beyond what a placement-scrub actually touches. Denial of the folder step
+ * rolls the already-acquired `art:` lease back via
+ * {@link releaseArtifactIfUnneeded}, exactly like the raced-row case below.
  */
 export async function removeArtifact(id: string): Promise<void> {
 	if (isTempId(id)) {
@@ -198,6 +211,17 @@ export async function removeArtifact(id: string): Promise<void> {
 		// op still depends on the token.
 		await releaseArtifactIfUnneeded(id);
 		return;
+	}
+	const view = getView();
+	const placements = view ? artifactPlacementFolderIds(view, id) : [];
+	if (placements.length > 0) {
+		if (!(await folderEditLock(placements))) {
+			await releaseArtifactIfUnneeded(id);
+			return;
+		}
+		for (const folderId of placements) {
+			await stageRemoveArtifactRef(folderId, id, header.name);
+		}
 	}
 	stageArtifactDelete(id, header);
 }
@@ -230,17 +254,15 @@ export function resetArtifacts(): void {
  * would make a renamed artifact jump to the bottom of its sidebar section until
  * the next `artifact` feed event happened to refetch and reorder it.
  *
- * The view scrub happens HERE rather than at stage time: this is the first
- * moment the artifact is genuinely gone server-side, so it is the first moment
- * dropping its placements is not destroying recoverable content. Fire-and-forget
- * and error-swallowing on purpose — a failed view push must not surface as a
- * failed commit, and the dangling ref it leaves behind is already rendered
- * removably by TreeRow (see view-tree.ts).
+ * There is no view scrub here any more (Task 9): `removeArtifact` now stages
+ * every placement's `remove_artifact` op IN THE SAME BATCH as the
+ * `delete_artifact`, so by the time this listener sees `deletedIds` the view
+ * has already been scrubbed server-side, as part of the very commit that
+ * dropped the artifact — see `removeArtifact`'s docstring (Decision 7).
  */
 onArtifactCommit(({ changed, deletedIds }) => {
 	const kept = _items
 		.filter((a) => !deletedIds.includes(a.id))
 		.map((a) => changed.find((h) => h.id === a.id) ?? a);
 	_items = [...kept, ...changed.filter((h) => !kept.some((a) => a.id === h.id))];
-	for (const id of deletedIds) void scrubArtifactFromView(id).catch(() => {});
 });

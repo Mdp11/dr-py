@@ -517,6 +517,17 @@ function openArtifactResources(): Set<string> {
  * edit has already happened, and the caller is a fire-and-forget click handler
  * that must not surface an unhandled rejection over a lease that will TTL out
  * anyway.
+ *
+ * ACCEPTED WRINKLE (Decision 7): `removeArtifact` (artifacts.svelte.ts) stages
+ * the artifact's `remove_artifact` view-placement scrub ops ALONGSIDE its
+ * `delete_artifact` entry, but as separate entries in a separate journal
+ * (`view-edits.svelte.ts`). This function only reverts the ONE artifact entry
+ * — undoing a delete this way does NOT retract its scrub ops, so they would
+ * still commit even though the artifact they name no longer would. This is
+ * left as-is rather than threading a second discard through here: the scrub
+ * rows are visible and labelled (`Removed placement of "<name>"`, not a raw
+ * id), so a user who un-deletes an artifact can see and discard them
+ * individually via the same view-row discard the DiffDrawer already offers.
  */
 export async function discardArtifact(id: string): Promise<void> {
 	const rid = artifactResource(id);

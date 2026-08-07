@@ -343,12 +343,22 @@ export async function stageMoveArtifact(
 	return true;
 }
 
-/** Remove an artifact from a single folder (unlike `removeArtifact` in
+/**
+ * Remove an artifact from a single folder (unlike `removeArtifact` in
  * `artifacts.svelte.ts`, which deletes the artifact itself — this name stays
- * deliberately distinct to avoid colliding with that existing export). */
+ * deliberately distinct to avoid colliding with that existing export).
+ *
+ * `displayName`, when given, labels the staged entry by name instead of the
+ * raw id: `Removed placement of "<name>"` rather than `"<id>"`. The delete's
+ * in-batch scrub (`removeArtifact`, Decision 7) passes the artifact's
+ * COMMITTED header name, since it already looked one up to build the delete
+ * entry itself. Every other caller — the sidebar row's own "remove from
+ * folder" action — has no header handy and omits it, falling back to the id.
+ */
 export async function stageRemoveArtifactRef(
 	folderId: string,
-	artifactId: string
+	artifactId: string,
+	displayName?: string
 ): Promise<boolean> {
 	if (_view === null) throw new Error('No active view');
 	const container = folderArtifacts(_view, folderId);
@@ -357,7 +367,7 @@ export async function stageRemoveArtifactRef(
 		throw new Error(`artifact ${artifactId} is not placed in ${folderId}`);
 	}
 	if (!(await folderEditLock([folderId]))) return false; // gate showed the notice
-	const label = `Removed artifact "${artifactId}" from "${folderDisplayName(_view, folderId)}"`;
+	const label = `Removed placement of "${displayName ?? artifactId}" from "${folderDisplayName(_view, folderId)}"`;
 	const op: ViewOp = { kind: 'remove_artifact', artifact_id: artifactId, folder_id: folderId };
 	_view = applyViewOp(_view, op);
 	stageViewOp(op, label);
@@ -450,10 +460,14 @@ export async function discardViewChanges(): Promise<void> {
 // Registered at MODULE SCOPE (the table-editor.svelte.ts:1689 precedent) but
 // DEFERRED past a macrotask boundary, unlike that precedent — this module
 // sits in a REAL three-hop cycle (view.svelte.ts -> realtime.svelte.ts ->
-// artifacts.svelte.ts -> view.svelte.ts; the last edge is
-// `scrubArtifactFromView`, gone only in Task 9), whereas table-editor's tap
-// has no back-edge into realtime.svelte.ts at all. A hoisted FUNCTION
-// declaration (`onCommitEvent` itself) is safely callable at any point in a
+// artifacts.svelte.ts -> view.svelte.ts). Task 9 deleted the OLD last edge
+// (`scrubArtifactFromView`, imported by artifacts.svelte.ts) but immediately
+// recreated the SAME edge: `removeArtifact`'s in-batch delete scrub
+// (Decision 7) imports `getView`/`stageRemoveArtifactRef` straight from THIS
+// module. The cycle is therefore unchanged in shape — only which names cross
+// the back-edge changed — so the deferral below still has to stay.
+// table-editor's tap, by contrast, has no back-edge into realtime.svelte.ts
+// at all. A hoisted FUNCTION
 // cycle, but `realtime.svelte.ts`'s `const _commitTaps` it reads is not
 // hoisted — if some OTHER import graph happens to reach realtime.svelte.ts
 // first (before view.svelte.ts), resolving that cycle re-enters this
@@ -474,18 +488,3 @@ setTimeout(() => {
 		if (scope.includes('view')) void refreshView();
 	});
 }, 0);
-
-/**
- * Scrub every placement of `artifactId` from the active view.
- *
- * Phase 2: superseded by staged scrub (Task 9) — until the batch-delete scrub
- * lands (its own folder leases, wired up alongside the artifact delete's
- * staged op), nothing may PUT the view any more, so this is an immediate
- * no-op. Called by `removeArtifact`'s commit listener in `artifacts.svelte.ts`;
- * a deleted artifact's dangling refs persist in the view until Task 9 —
- * TreeRow already tolerates a dangling ref (its "missing artifact" row).
- */
-export async function scrubArtifactFromView(artifactId: string): Promise<void> {
-	// Phase 2: superseded by staged scrub (Task 9)
-	void artifactId;
-}

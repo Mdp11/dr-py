@@ -2,11 +2,14 @@
 	import type { Element } from '$lib/api/types';
 	import {
 		artifactHeaderById,
+		folderResource,
+		getLockFor,
 		indexIssues,
 		lockBadgeFor,
 		openArtifactTab,
 		openNavigationTab
 	} from '$lib/state';
+	import { getCurrentUserId } from '$lib/api/client';
 	import { confirm } from '$lib/state/confirm.svelte';
 	import {
 		AlertCircle,
@@ -155,6 +158,17 @@
 	);
 	const hasViewWarning = $derived(!isFolder && !isExcludedSection && warningsByElementId.has(key));
 	const badge = $derived(lockBadgeFor(key));
+
+	// Folder peer-lock badge (Task 9): mirrors the element badge above, but
+	// keyed directly off `getLockFor`/`folderResource` rather than
+	// `lockBadgeFor` — a folder lease is taken transiently by every sidebar
+	// gesture (rename/move/create-child/place), so there is no "checked out by
+	// you, still open" state worth rendering the way an artifact/element edit
+	// lease has; only a PEER's lease is ever worth surfacing here.
+	const folderLease = $derived(isFolder ? getLockFor(folderResource(folderId)) : undefined);
+	const folderLockedByPeer = $derived(
+		folderLease !== undefined && folderLease.holder_id !== getCurrentUserId()
+	);
 
 	// Lease-at-dialog-open pattern (Decision 2): acquire the lease BEFORE the
 	// prompt/confirm shows (fail-fast — a denial means the dialog never opens),
@@ -333,6 +347,12 @@
 		</span>
 		{#if myVisibility === 'stub'}
 			<span class="font-mono text-[10px] text-muted-foreground/70">empty</span>
+		{/if}
+		{#if folderLockedByPeer}
+			<Lock
+				class="h-3 w-3 shrink-0 text-warning"
+				title={`Locked by ${folderLease!.holder_email ?? folderLease!.holder_id}`}
+			/>
 		{/if}
 		<DropdownMenu.Root>
 			<DropdownMenu.Trigger
