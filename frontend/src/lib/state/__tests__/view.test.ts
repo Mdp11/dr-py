@@ -37,6 +37,8 @@ const {
 const { getStagedViewEntries, getStagedViewOps } = await import('../view-edits.svelte');
 const checkoutStore = await import('../checkout.svelte');
 const { getLockNotice, setLockNotice } = await import('../lock-notice.svelte');
+const { getViewDiscardNotice, clearViewDiscardNotice } =
+	await import('../view-discard-notice.svelte');
 
 function seedView(view: View): void {
 	vi.spyOn(viewApi, 'getView').mockResolvedValue({ view, warnings: [] });
@@ -597,6 +599,7 @@ describe('stagePlaceElementsAt — cursor advance on a same-folder multi-select'
 describe('refreshView re-applies the staged journal on top of server truth', () => {
 	beforeEach(() => {
 		setLockNotice(null);
+		clearViewDiscardNotice();
 		vi.spyOn(checkoutStore, 'releaseFolderLeaseIfUnneeded').mockResolvedValue(undefined);
 	});
 
@@ -635,8 +638,42 @@ describe('refreshView re-applies the staged journal on top of server truth', () 
 
 		expect(getStagedViewOps()).toHaveLength(0); // all-or-nothing, not per-op
 		expect(getView()!.folders.map((f) => f.name)).toEqual(['Folder 2']); // server truth
-		expect(getLockNotice()).toMatch(/view changed/i);
+		// The durable discard banner carries the message now...
+		expect(getViewDiscardNotice()).toMatch(/view changed/i);
+		// ...NOT the transient lock notice this replaced (Task 2: a destructive
+		// discard must not ride a channel the next successful lease clears).
+		expect(getLockNotice()).toBeNull();
 		expect(checkoutStore.releaseFolderLeaseIfUnneeded).toHaveBeenCalledWith('f1');
 		expect(checkoutStore.releaseFolderLeaseIfUnneeded).toHaveBeenCalledWith('f2');
+	});
+
+	it('the discard banner SURVIVES a subsequent successful lease acquisition — the exact path that clears the transient lock notice', async () => {
+		seedView(baseView());
+		await refreshView();
+		const editLockSpy = vi.spyOn(editGate, 'folderEditLock').mockResolvedValue(true);
+		await stageRenameFolder('f1', 'Mine1');
+
+		// peer DELETED f1 out from under us: the staged rename can no longer apply
+		const peerView = baseView();
+		peerView.folders.splice(0, 1);
+		seedView(peerView);
+		await refreshView(); // drops the journal, posts the discard banner
+
+		expect(getViewDiscardNotice()).toMatch(/view changed/i);
+
+		// Restore the REAL folder-lock gate (not the spy above) and drive a
+		// successful lease acquisition all the way down to edit-gate's own
+		// `noticed()` — the exact function that nulls the transient lock notice
+		// on ANY successful gate, mocking only the network boundary, exactly
+		// like edit-gate.test.ts's own "clears the notice on success" cases.
+		editLockSpy.mockRestore();
+		checkoutStore.resetCheckout();
+		checkoutStore.setProjectInfo({ role: 'editor', lockTtlSeconds: 300 });
+		const checkoutApi = await import('$lib/api/checkout');
+		vi.spyOn(checkoutApi, 'acquireLocks').mockResolvedValue({ token: 't2', leases: [] });
+
+		expect(await editGate.folderEditLock(['f2'])).toBe(true);
+		expect(getLockNotice()).toBeNull(); // transient channel: cleared, as always
+		expect(getViewDiscardNotice()).toMatch(/view changed/i); // durable banner: untouched
 	});
 });

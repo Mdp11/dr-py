@@ -40,6 +40,8 @@
 		getHistoryDrawerOpen,
 		getModelError,
 		getResultsPanelOpen,
+		getViewDiscardNotice,
+		clearViewDiscardNotice,
 		handleRemoteLockEvent,
 		initWorkspaceTabs,
 		loadArtifacts,
@@ -216,6 +218,12 @@
 		return null;
 	});
 
+	// View-discard banner: a peer's change made a staged view edit unreplayable,
+	// so `refreshView()` dropped the whole staged-view journal (Task 2). Unlike
+	// the other banners above this one has no recovery action — the edits are
+	// already gone — so it is purely informational, dismissed on read.
+	const viewDiscardNotice = $derived(getViewDiscardNotice());
+
 	// Rebind is non-destructive: only the metamodel pointer and conformance issues change;
 	// element ids and properties are untouched, so the cached element subset stays valid.
 	// Unlike onReloadModel, we do NOT reset the model store — only the metamodel, issues, and rev.
@@ -341,9 +349,10 @@
 		const errorBanner = modelError !== null ? 'auto ' : '';
 		const rebindBanner = pendingRebind !== null ? 'auto ' : '';
 		const feedBanner = feedTerminationView !== null ? 'auto ' : '';
+		const viewDiscardBanner = viewDiscardNotice !== null ? 'auto ' : '';
 		return panelOpen
-			? `auto ${errorBanner}${rebindBanner}${feedBanner}1fr auto ${panelHeight}px auto`
-			: `auto ${errorBanner}${rebindBanner}${feedBanner}1fr auto`;
+			? `auto ${errorBanner}${rebindBanner}${feedBanner}${viewDiscardBanner}1fr auto ${panelHeight}px auto`
+			: `auto ${errorBanner}${rebindBanner}${feedBanner}${viewDiscardBanner}1fr auto`;
 	});
 </script>
 
@@ -417,6 +426,23 @@
 					{feedTerminationView.label}
 				</button>
 			</div>
+		</div>
+	{/if}
+	{#if viewDiscardNotice !== null}
+		<div
+			class="col-span-5 flex items-center gap-3 bg-warning/15 px-3 py-1.5 text-xs text-warning"
+			role="alert"
+			in:slide={{ duration: dur(PANEL) }}
+		>
+			<span class="truncate">{viewDiscardNotice}</span>
+			<Button
+				size="sm"
+				variant="ghost"
+				class="ml-auto h-6 text-xs"
+				onclick={() => clearViewDiscardNotice()}
+			>
+				Dismiss
+			</Button>
 		</div>
 	{/if}
 	<Sidebar />

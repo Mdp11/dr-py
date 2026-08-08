@@ -44,7 +44,7 @@ import {
 	resetViewEdits,
 	stageViewOp
 } from './view-edits.svelte';
-import { setLockNotice } from './lock-notice.svelte';
+import { setViewDiscardNotice } from './view-discard-notice.svelte';
 import { onCommitEvent } from './realtime.svelte';
 import { getCachedElements } from './model.svelte';
 import { elementDisplayName } from '$lib/util/element-name';
@@ -158,21 +158,24 @@ export async function refreshView(): Promise<void> {
  * purpose — we are already inside a refetch, and the notifying wipe would
  * re-enter `refreshView` from its own listener.
  *
- * The notice goes out through `setLockNotice`, the global notice channel these
- * stores already share (edit-gate routes every lease refusal to it, and the
- * StatusBar renders it in warning colour). It is the right SURFACE — this is
- * exactly the "someone else got there first" family of message — but it is a
- * TRANSIENT line: the next successful gate clears it (`noticed()` in
- * edit-gate). That is a knowingly thin channel for a destructive event; a
- * dismissable banner alongside the conflict/rebind ones in the project page
- * would be better, and is deliberately left as a follow-up rather than a new
- * notice mechanism smuggled into a fix wave.
+ * The notice goes out through `setViewDiscardNotice`, a dedicated leaf store
+ * (`view-discard-notice.svelte.ts`) rendered as a dismissable banner alongside
+ * the conflict/rebind/feed-termination ones in the project page. This
+ * replaced an earlier version that reused `setLockNotice`, the global notice
+ * channel edit-gate routes every lease refusal to: that channel was the right
+ * SURFACE — this is exactly the "someone else got there first" family of
+ * message — but the wrong LIFETIME, since it is TRANSIENT by design (the next
+ * successful gate clears it via `noticed()` in edit-gate), too thin a channel
+ * for a destructive event the user may not be looking at the screen for. The
+ * banner store persists until the user explicitly dismisses it, surviving
+ * every later successful lease acquisition — see `view.test.ts`'s survival
+ * assertion for the exact scenario this fixes.
  */
 async function dropConflictedJournal(): Promise<void> {
 	const rids = stagedFolderLeaseIds();
 	resetViewEdits();
 	for (const id of rids) await releaseFolderLeaseIfUnneeded(id);
-	setLockNotice(
+	setViewDiscardNotice(
 		'The view changed while you were editing it — your unsaved folder changes were discarded.'
 	);
 }
