@@ -202,8 +202,24 @@ def derive_plan(
     # bundle re-import would propose copy for anything that references a peer.
     tentative = {art.id: row.id for art, _kind, row in valid if row is not None}
 
-    #: names already taken per kind — existing rows plus names this plan hands out
+    #: names already taken per kind — existing DB rows, PLUS every bundle
+    #: artifact's own name for that kind, plus names this plan hands out as it
+    #: goes. The bundle-side names are load-bearing, not just belt-and-braces:
+    #: a create-entry's name becomes a real (kind, name) row the moment this
+    #: plan is executed, so a LATER copy's dedupe_name must dodge it too, or
+    #: two entries in the same plan (one create, one copy) can propose the
+    #: same target name and collide on `uq_artifact_project_kind_name` when
+    #: both ops land. Seeding from `valid` (computed above, before this loop)
+    #: means the full bundle-side name set for a kind is known regardless of
+    #: which entry happens to be processed first.
     taken: dict[ArtifactKind, set[str]] = {}
+
+    def _taken_names(kind: ArtifactKind) -> set[str]:
+        if kind not in taken:
+            names = {r.name for r in content.list_artifacts(db, project_id, kind)}
+            names.update(a.name for a, k, _existing in valid if k == kind)
+            taken[kind] = names
+        return taken[kind]
 
     for art, kind, existing in valid:
         if existing is None:
@@ -230,10 +246,9 @@ def derive_plan(
                 )
             )
             continue
-        if kind not in taken:
-            taken[kind] = {r.name for r in content.list_artifacts(db, project_id, kind)}
-        copy_name = dedupe_name(taken[kind], art.name)
-        taken[kind].add(copy_name)
+        names = _taken_names(kind)
+        copy_name = dedupe_name(names, art.name)
+        names.add(copy_name)
         entries.append(
             PlanEntry(
                 bundle_id=art.id,

@@ -256,3 +256,33 @@ def test_plan_two_copies_same_base_name_get_distinct_names() -> None:
         )
         names = [e.copy_name for e in plan.entries]
         assert len(names) == 2 and len(set(names)) == 2
+
+
+def test_plan_create_and_copy_never_target_the_same_name() -> None:
+    # A has no DB clash, but its OWN name already looks like the dedupe
+    # suffix B's copy would otherwise be handed; B clashes (different
+    # payload) with an existing "s" row. Both entries would create/land a
+    # (kind, name) row when the plan executes, so they must not both target
+    # "s (2)" -- the dedupe pool has to know about A's name up front, not
+    # just about existing DB rows.
+    _setup()
+    other = {"schema_version": 1, "language": "python", "code": "def value(el):\n    return 1\n"}
+    with db.db_session() as s:
+        content.create_artifact(
+            s, "p1", kind=ArtifactKind.code_snippet, name="s", payload=SNIP, updated_by=None
+        )
+        plan = derive_plan(
+            s,
+            "p1",
+            _bundle(
+                [
+                    {"id": "a", "kind": "code_snippet", "name": "s (2)", "payload": SNIP},
+                    {"id": "b", "kind": "code_snippet", "name": "s", "payload": other},
+                ]
+            ),
+        )
+        by_id = {e.bundle_id: e for e in plan.entries}
+        assert by_id["a"].action == "create"
+        assert by_id["b"].action == "copy"
+        targets = {by_id["a"].name, by_id["b"].copy_name}
+        assert len(targets) == 2, "create and copy entries collided on the same target name"
