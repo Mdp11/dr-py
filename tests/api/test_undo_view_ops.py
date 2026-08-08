@@ -8,17 +8,21 @@ tests/api/test_commits_view_ops.py."""
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 from fastapi.testclient import TestClient
 
-from data_rover.api import db
+from data_rover.api import content, db
 from data_rover.api.db_models import Role, User
 from data_rover.api.feed import reset_loop
 from data_rover.api.main import create_app
-from data_rover.api.session import DEFAULT_PROJECT_ID
+from data_rover.api.session import DEFAULT_PROJECT_ID, get_session
 from data_rover.api.tenancy import add_member
+from data_rover.core.view.ids import find_folder
+from data_rover.core.view.schema import Folder
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import AUTH_HEADERS, create_folder_via_commit, papi, seed_default_project
 
 _MM = """
 elements:
@@ -75,6 +79,80 @@ def _rev(client: TestClient) -> int:
     return rev
 
 
+def _seed_view(client: TestClient, folders: list[dict]) -> dict[str, str]:
+    """Build a (possibly nested) folder tree, with elements placed into
+    folders, via ``POST /commits`` — the commit-flow replacement for the
+    retired ``PUT /view/snapshot`` one-shot setup harness these tests used
+    purely to seed a whole tree in one call. *folders* uses the same nested
+    shape the old PUT body did: ``[{"name": ..., "folders": [...],
+    "elements": [...]}, ...]``. Returns a flat {name: id} map (names are
+    unique per test). A single ``root`` lease covers the whole batch — ids
+    created earlier in the same batch need no lock to be referenced later."""
+    ops: list[dict] = []
+    counter = 0
+
+    def walk(spec: dict, parent_id: str) -> None:
+        nonlocal counter
+        counter += 1
+        temp_id = f"tmp_{counter}"
+        ops.append(
+            {
+                "kind": "create_folder",
+                "temp_id": temp_id,
+                "parent_id": parent_id,
+                "name": spec["name"],
+            }
+        )
+        for eid in spec.get("elements", []):
+            ops.append(
+                {"kind": "place_element", "element_id": eid, "folder_id": temp_id}
+            )
+        for child in spec.get("folders", []):
+            walk(child, temp_id)
+
+    for f in folders:
+        walk(f, "root")
+
+    token = _folder_lease(client, "root")
+    r = client.post(
+        papi("/commits"),
+        json={"base_rev": _rev(client), "ops": ops, "message": "setup", "lock_tokens": [token]},
+    )
+    assert r.status_code == 200, r.text
+    id_map = r.json()["id_map"]
+    return {op["name"]: id_map[op["temp_id"]] for op in ops if op["kind"] == "create_folder"}
+
+
+def _add_folder_bypassing_op_log(parent_id: str, name: str) -> str:
+    """Insert a folder directly into ``session.view`` and persist it to
+    ``ViewRow``, with NO ``op_log`` entry at all — reproduces exactly what
+    the retired, op-log-free ``PUT /view/snapshot`` route did for the two
+    "peer edits without journaling" tests below, now that the route itself
+    is gone. Going through a real ``POST /commits`` instead would push an
+    extra entry onto the SHARED (project-wide, not per-user) op_log stack,
+    which would break these tests' undo-targets-the-right-commit premise."""
+    session = get_session()
+    assert session.view is not None
+    container = session.view if parent_id == "root" else find_folder(session.view, parent_id)
+    assert container is not None
+    fid = uuid.uuid4().hex
+    container.folders.append(Folder(id=fid, name=name))
+
+    gen = db.get_db()
+    s = next(gen)
+    try:
+        content.upsert_single_view(
+            s,
+            DEFAULT_PROJECT_ID,
+            name=session.view.name,
+            blob=session.view.model_dump_json(),
+        )
+        s.commit()
+    finally:
+        gen.close()
+    return fid
+
+
 def _commit_rename(client: TestClient, fid: str, name: str) -> None:
     token = _folder_lease(client, fid)
     r = client.post(
@@ -90,8 +168,7 @@ def _commit_rename(client: TestClient, fid: str, name: str) -> None:
 
 
 def test_undo_restores_view_and_bumps_revs(client: TestClient) -> None:
-    r = client.put(papi("/view/snapshot"), json={"name": "v", "folders": [{"name": "A"}]})
-    fid = r.json()["view"]["folders"][0]["id"]
+    fid = create_folder_via_commit(client, "A")["id_map"]["tmp_setup"]
     _commit_rename(client, fid, "A2")
     base = _rev(client)
     view_rev = client.get(papi("/view")).json()["view_rev"]
@@ -110,8 +187,7 @@ def test_undo_restores_view_and_bumps_revs(client: TestClient) -> None:
 
 
 def test_undo_refuses_while_peer_holds_folder_lease(client: TestClient) -> None:
-    r = client.put(papi("/view/snapshot"), json={"name": "v", "folders": [{"name": "A"}]})
-    fid = r.json()["view"]["folders"][0]["id"]
+    fid = create_folder_via_commit(client, "A")["id_map"]["tmp_setup"]
     _commit_rename(client, fid, "A2")
     _seed_second_member("user-2", "user2@example.com")
     r = client.post(
@@ -137,8 +213,7 @@ def test_undo_not_blocked_by_callers_own_folder_lease(client: TestClient) -> Non
     ``peer_leases`` excludes the caller's own holder id, so a lease the
     UNDOING user holds on the very folder being touched must never 409 —
     only a PEER's lease should."""
-    r = client.put(papi("/view/snapshot"), json={"name": "v", "folders": [{"name": "A"}]})
-    fid = r.json()["view"]["folders"][0]["id"]
+    fid = create_folder_via_commit(client, "A")["id_map"]["tmp_setup"]
     _commit_rename(client, fid, "A2")
     # the rename's own lease was released by the commit; re-acquire a fresh
     # one on the same folder, held by the CALLER of the undo below.
@@ -164,18 +239,18 @@ def test_undo_after_view_cleared_hydrates_durable_view_and_succeeds(
     Finding 1): that older fix only made the auto-create bookkeeping
     (``created_view``) restore correctly on failure — it did not question
     whether resurrecting an EMPTY view was ever the right thing to do here.
-    ``DELETE /view`` (``routes/view.py::clear_view``, out of scope for this
-    fix) clears ONLY the in-memory ``session.view`` cache; ``ViewRow`` — the
-    durable blob, still holding folder "A2" at this point — is untouched. So
-    when undo's inverse (rename back to "A") replays against a session with
-    no view CACHED, the correct outcome is for ``load_or_create_view`` to
-    hydrate the still-populated row and successfully rename the folder back —
-    not to materialize a phantom empty view and 422 on a folder that was
-    never actually deleted anywhere, durably or otherwise."""
-    r = client.put(papi("/view/snapshot"), json={"name": "v", "folders": [{"name": "A"}]})
-    fid = r.json()["view"]["folders"][0]["id"]
+    Clearing ONLY the in-memory ``session.view`` cache (the retired
+    ``DELETE /view`` route's old behavior, reproduced directly below now
+    that it's gone) leaves ``ViewRow`` — the durable blob, still holding
+    folder "A2" at this point — untouched. So when undo's inverse (rename
+    back to "A") replays against a session with no view CACHED, the correct
+    outcome is for ``load_or_create_view`` to hydrate the still-populated row
+    and successfully rename the folder back — not to materialize a phantom
+    empty view and 422 on a folder that was never actually deleted anywhere,
+    durably or otherwise."""
+    fid = create_folder_via_commit(client, "A")["id_map"]["tmp_setup"]
     _commit_rename(client, fid, "A2")
-    assert client.delete(papi("/view")).status_code == 204
+    get_session().view = None  # clear ONLY the cache, mirroring DELETE /view
     assert client.get(papi("/view")).json()["view"] is None
     durable_view_rev = client.get(papi("/view")).json()["view_rev"]
 
@@ -186,9 +261,11 @@ def test_undo_after_view_cleared_hydrates_durable_view_and_succeeds(
     assert out["view"]["folders"][0]["id"] == fid
     assert out["view"]["folders"][0]["name"] == "A"  # the durable folder survived
     assert out["view_rev"] == durable_view_rev + 1  # advanced from the PRIOR rev, not 0/1
-    # the undo was consumed (not refused), so undo history is back to empty
+    # the undo was consumed (not refused), popping the rename batch off the
+    # top of the stack — the create_folder "A" setup commit underneath it
+    # (unlike the old op-log-free PUT setup) is still there.
     summary = client.get(papi("/model/summary")).json()
-    assert summary["undo_depth"] == 0
+    assert summary["undo_depth"] == 1
 
 
 def test_failed_undo_with_no_durable_view_row_leaves_view_null(
@@ -197,17 +274,17 @@ def test_failed_undo_with_no_durable_view_row_leaves_view_null(
     """Coverage for ``created_view``'s restore-to-None guard on undo's TRUE
     "nothing to hydrate" fallback (final-review Fix 1): ``load_or_create_view``
     only materializes a fresh empty ``View`` when NO ``ViewRow`` exists at all
-    — a state ``DELETE /view`` alone can no longer manufacture (see the
+    — a state clearing only the in-memory cache (the retired ``DELETE /view``
+    route's old behavior) can no longer manufacture (see the
     hydrate-and-succeed test above), since it never touches the durable row.
     This test manufactures the genuine "no durable view" state directly (by
     deleting the ``ViewRow``, which no route does) to prove the pre-existing
     ``created_view`` bookkeeping still holds on undo's real empty-view path:
     a materialized-then-rolled-back empty view must not leak into a state
     that durably had none."""
-    r = client.put(papi("/view/snapshot"), json={"name": "v", "folders": [{"name": "A"}]})
-    fid = r.json()["view"]["folders"][0]["id"]
+    fid = create_folder_via_commit(client, "A")["id_map"]["tmp_setup"]
     _commit_rename(client, fid, "A2")
-    assert client.delete(papi("/view")).status_code == 204  # clears the CACHE only
+    get_session().view = None  # clear ONLY the cache, mirroring DELETE /view
     assert client.get(papi("/view")).json()["view"] is None
 
     from sqlalchemy import select
@@ -231,9 +308,11 @@ def test_failed_undo_with_no_durable_view_row_leaves_view_null(
     assert r.status_code == 422, r.text
 
     assert client.get(papi("/view")).json()["view"] is None
-    # undo history survives the failure: the batch was pushed back
+    # undo history survives the failure: the rename batch was pushed back on
+    # top of the create_folder "A" setup commit underneath it (unlike the
+    # old op-log-free PUT setup, which left only one entry here).
     summary = client.get(papi("/model/summary")).json()
-    assert summary["undo_depth"] == 1
+    assert summary["undo_depth"] == 2
 
 
 def test_undo_of_delete_folder_and_move_element_is_byte_identical(
@@ -258,22 +337,17 @@ def test_undo_of_delete_folder_and_move_element_is_byte_identical(
         },
     )
     assert r.status_code == 200, r.text
-    r = client.put(
-        papi("/view/snapshot"),
-        json={
-            "name": "v",
-            "folders": [
-                {"name": "A", "folders": [{"name": "AB", "elements": ["eb"]}]},
-                {"name": "C", "elements": ["e2"]},
-                {"name": "D"},
-            ],
-        },
+    ids = _seed_view(
+        client,
+        [
+            {"name": "A", "folders": [{"name": "AB", "elements": ["eb"]}]},
+            {"name": "C", "elements": ["e2"]},
+            {"name": "D"},
+        ],
     )
-    assert r.status_code == 200, r.text
-    folders = r.json()["view"]["folders"]
-    a_id = folders[0]["id"]
-    c_id = folders[1]["id"]
-    d_id = folders[2]["id"]
+    a_id = ids["A"]
+    c_id = ids["C"]
+    d_id = ids["D"]
     before = client.get(papi("/view")).json()["view"]
 
     delete_token = _folder_lease(client, a_id, intent="delete")
@@ -323,13 +397,15 @@ def test_undo_refuses_while_peer_holds_lease_on_delete_folder_subtree_child(
     client: TestClient,
 ) -> None:
     """Regression for final-review Fix 2: the reviewer's exact repro. U
-    commits ``create_folder D``; P adds a CHILD folder C under D via the
-    legacy (op-log-free) ``PUT /view/snapshot``; P takes an EDIT lease on
-    ``folder:C``; U undoes the ``create_folder D`` commit. The undo's inverse
-    is ``[delete_folder D]``, which deletes D's WHOLE SUBTREE (including C) —
-    the peer-lease guard must expand D over that subtree (mirroring
-    ``required_locks``'s own DELETE-intent expansion) and see C's lease, or
-    the undo silently deletes C out from under the peer's checked-out edit."""
+    commits ``create_folder D``; P adds a CHILD folder C under D WITHOUT
+    journaling it (an un-journaled peer edit — the retired, op-log-free
+    ``PUT /view/snapshot`` route's old effect, reproduced directly now that
+    it's gone); P takes an EDIT lease on ``folder:C``; U undoes the
+    ``create_folder D`` commit. The undo's inverse is ``[delete_folder D]``,
+    which deletes D's WHOLE SUBTREE (including C) — the peer-lease guard must
+    expand D over that subtree (mirroring ``required_locks``'s own
+    DELETE-intent expansion) and see C's lease, or the undo silently deletes
+    C out from under the peer's checked-out edit."""
     token = _folder_lease(client, "root")
     r = client.post(
         papi("/commits"),
@@ -350,15 +426,10 @@ def test_undo_refuses_while_peer_holds_lease_on_delete_folder_subtree_child(
     assert r.status_code == 200, r.text
     d_id = r.json()["id_map"]["tmp_d"]
 
-    # P adds a child folder C under D via the legacy whole-document PUT —
-    # this writes NO op_log entry and needs no lease (routes/view.py only
-    # refuses a PEER's held folder lease, and nobody holds one yet).
+    # P adds a child folder C under D without journaling it — this writes NO
+    # op_log entry and needs no lease.
     _seed_second_member("user-2", "user2@example.com")
-    view = client.get(papi("/view")).json()["view"]
-    view["folders"][0]["folders"].append({"name": "C"})
-    r = client.put(papi("/view/snapshot"), json=view, headers=OTHER_HEADERS)
-    assert r.status_code == 200, r.text
-    c_id = r.json()["view"]["folders"][0]["folders"][0]["id"]
+    c_id = _add_folder_bypassing_op_log(d_id, "C")
 
     # P checks out C for editing.
     r = client.post(
@@ -385,16 +456,18 @@ def test_undo_refuses_while_peer_holds_lease_on_subtree_child_after_view_cleared
 ) -> None:
     """Regression for final-review round 2, Finding A (the undo half of the
     ordering hole Fix 1 reopened): the SAME repro as the test above, but
-    with a ``DELETE /view`` inserted right before the undo call — the exact
-    sequence the reviewer verified independently breaks the guard above if
-    the resolve-view-before-deriving-the-guard fix isn't ALSO applied to
-    the peer-lease derivation itself (not just to the later apply step).
+    with the caller's view cache cleared right before the undo call — the
+    exact sequence the reviewer verified independently breaks the guard
+    above if the resolve-view-before-deriving-the-guard fix isn't ALSO
+    applied to the peer-lease derivation itself (not just to the later
+    apply step).
 
     Before this fix: ``peer_resources`` was computed from
     ``view_op_folder_ids(session.view, view_inv)`` while ``session.view``
-    was still ``None`` (a prior ``DELETE /view`` clears only the cache, not
-    the durable ``ViewRow``) — ``view_op_folder_ids``'s ``DeleteFolderOp``
-    branch degrades to ``{op.id}`` alone against a ``None`` view (mirroring
+    was still ``None`` (clearing only the cache — the retired ``DELETE
+    /view`` route's old behavior — never touched the durable ``ViewRow``) —
+    ``view_op_folder_ids``'s ``DeleteFolderOp`` branch degrades to
+    ``{op.id}`` alone against a ``None`` view (mirroring
     ``folder_subtree``'s own total-ness fallback), so the peer's lease on
     child C was never even considered, and ``POST /model/undo`` returned
     200 instead of 409 — silently deleting C out from under P's live
@@ -420,12 +493,11 @@ def test_undo_refuses_while_peer_holds_lease_on_subtree_child_after_view_cleared
     assert r.status_code == 200, r.text
     d_id = r.json()["id_map"]["tmp_d"]
 
+    # P adds a child folder C under D without journaling it — see the test
+    # above for why a real commit here would break the undo-targets-the-
+    # right-commit premise.
     _seed_second_member("user-2", "user2@example.com")
-    view = client.get(papi("/view")).json()["view"]
-    view["folders"][0]["folders"].append({"name": "C"})
-    r = client.put(papi("/view/snapshot"), json=view, headers=OTHER_HEADERS)
-    assert r.status_code == 200, r.text
-    c_id = r.json()["view"]["folders"][0]["folders"][0]["id"]
+    c_id = _add_folder_bypassing_op_log(d_id, "C")
 
     r = client.post(
         papi("/locks"),
@@ -439,7 +511,11 @@ def test_undo_refuses_while_peer_holds_lease_on_subtree_child_after_view_cleared
 
     # The one addition relative to the test above: the CALLER's own cache
     # goes cold right before undo. The durable row (D -> C) is untouched.
-    assert client.delete(papi("/view")).status_code == 204
+    # Setting session.view directly mirrors exactly what the retired
+    # ``DELETE /view`` route used to do (clear ONLY the in-memory cache)
+    # without going through full-session eviction, which P's live lease on
+    # C would refuse (evict-with-live-locks guard).
+    get_session().view = None
     assert client.get(papi("/view")).json()["view"] is None
 
     r = client.post(papi("/model/undo"))
@@ -450,7 +526,7 @@ def test_undo_refuses_while_peer_holds_lease_on_subtree_child_after_view_cleared
 
     # the rejection is externally invisible too: GET /view still reports
     # whatever it reported right before this undo attempt (null — the
-    # DELETE /view above, not a materialized-then-abandoned hydrate).
+    # session.view clear above, not a materialized-then-abandoned hydrate).
     assert client.get(papi("/view")).json()["view"] is None
 
     # ...and durably: read the row directly (not via evict-then-refetch —

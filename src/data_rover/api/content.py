@@ -332,14 +332,13 @@ def list_artifact_ids(db: Session, project_id: str) -> set[str]:
     """Ids-only projection of every artifact row in the project.
 
     Callers that only need to know WHICH ids exist (``validate_view``'s
-    ``known_artifact_ids``, checked on every ``GET /view`` and
-    ``PUT /view/snapshot``) must not pay to deserialize each row's full
-    ``payload`` JSON via ``list_artifacts`` — a ``code_snippet`` payload alone
-    is capped at 64 KiB, so a project with a few hundred artifacts would
-    otherwise cost megabytes of JSON parsing on every view read purely to
-    build a membership set. ``select(ArtifactRow.id)`` projects only the id
-    column, so the payload/name/etc. columns are never fetched from the DB at
-    all, not just skipped after the fact."""
+    ``known_artifact_ids``, checked on every ``GET /view``) must not pay to
+    deserialize each row's full ``payload`` JSON via ``list_artifacts`` — a
+    ``code_snippet`` payload alone is capped at 64 KiB, so a project with a
+    few hundred artifacts would otherwise cost megabytes of JSON parsing on
+    every view read purely to build a membership set. ``select(ArtifactRow.id)``
+    projects only the id column, so the payload/name/etc. columns are never
+    fetched from the DB at all, not just skipped after the fact."""
     return set(
         db.execute(
             select(ArtifactRow.id).where(ArtifactRow.project_id == project_id)

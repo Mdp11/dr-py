@@ -14,7 +14,7 @@ from data_rover.api.main import create_app
 from data_rover.api.session import DEFAULT_PROJECT_ID
 from data_rover.api.tenancy import add_member
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import AUTH_HEADERS, create_folder_via_commit, papi, seed_default_project
 
 OTHER_HEADERS = {"x-user-id": "user-2", "x-user-email": "user2@example.com"}
 
@@ -261,9 +261,8 @@ def test_renew_returns_false_for_unknown_token(client: TestClient) -> None:
 
 
 def test_acquire_folder_lease_and_conflict(client: TestClient) -> None:
-    r = client.put(papi("/view/snapshot"), json={"name": "v", "folders": [{"name": "A"}]})
-    assert r.status_code == 200, r.text
-    fid = r.json()["view"]["folders"][0]["id"]
+    setup = create_folder_via_commit(client, "A")
+    fid = setup["id_map"]["tmp_setup"]
     r = client.post(
         papi("/locks"),
         json={

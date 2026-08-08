@@ -99,6 +99,46 @@ def _commit_rename(client: TestClient, fid: str, name: str) -> None:
     assert r.status_code == 200, r.text
 
 
+def _seed_view(client: TestClient, folders: list[dict]) -> dict[str, str]:
+    """Build a (possibly nested) folder tree via ``POST /commits`` — the
+    commit-flow replacement for the retired ``PUT /view/snapshot`` one-shot
+    setup harness these tests used purely to seed named folders with ids.
+    *folders* uses the same nested shape the old PUT body did:
+    ``[{"name": ..., "folders": [...]}, ...]``. Returns a flat {name: id} map
+    (names are unique per test, so a flat map is unambiguous even for
+    nested folders). A single ``root`` lease covers the whole batch — ids
+    created earlier in the same batch need no lock to be referenced later."""
+    ops: list[dict] = []
+    counter = 0
+
+    def walk(spec: dict, parent_id: str) -> None:
+        nonlocal counter
+        counter += 1
+        temp_id = f"tmp_{counter}"
+        ops.append(
+            {
+                "kind": "create_folder",
+                "temp_id": temp_id,
+                "parent_id": parent_id,
+                "name": spec["name"],
+            }
+        )
+        for child in spec.get("folders", []):
+            walk(child, temp_id)
+
+    for f in folders:
+        walk(f, "root")
+
+    token = _folder_lease(client, "root")
+    r = client.post(
+        papi("/commits"),
+        json={"base_rev": _rev(client), "ops": ops, "message": "setup", "lock_tokens": [token]},
+    )
+    assert r.status_code == 200, r.text
+    id_map = r.json()["id_map"]
+    return {op["name"]: id_map[op["temp_id"]] for op in ops}
+
+
 def test_non_overlapping_stale_commit_lands(client: TestClient) -> None:
     base = _rev(client)  # both clients start here
     r1 = _commit(client, [{"kind": "create_element", "temp_id": "tmp_a",
@@ -380,11 +420,8 @@ def test_id_keys_are_derived_from_the_op_models() -> None:
 
 
 def test_stale_view_batch_overlapping_tail_409s(client) -> None:
-    r = client.put(
-        papi("/view/snapshot"),
-        json={"name": "v", "folders": [{"name": "A"}, {"name": "B"}]},
-    )
-    fa = r.json()["view"]["folders"][0]["id"]
+    ids = _seed_view(client, [{"name": "A"}, {"name": "B"}])
+    fa = ids["A"]
     stale_base = _rev(client)
     _commit_rename(client, fa, "A2")  # tail commit touching folder:fa
     token = _folder_lease(client, fa)
@@ -402,12 +439,9 @@ def test_stale_view_batch_overlapping_tail_409s(client) -> None:
 
 
 def test_stale_view_batch_disjoint_from_tail_lands(client) -> None:
-    r = client.put(
-        papi("/view/snapshot"),
-        json={"name": "v", "folders": [{"name": "A"}, {"name": "B"}]},
-    )
-    fa = r.json()["view"]["folders"][0]["id"]
-    fb = r.json()["view"]["folders"][1]["id"]
+    ids = _seed_view(client, [{"name": "A"}, {"name": "B"}])
+    fa = ids["A"]
+    fb = ids["B"]
     stale_base = _rev(client)
     _commit_rename(client, fa, "A2")  # tail touches only folder:fa
     token = _folder_lease(client, fb)
@@ -430,15 +464,9 @@ def test_stale_batch_renaming_delete_folder_subtree_child_409s(client) -> None:
     via the inverse unit's ``create_folder`` ops even though the forward op
     only names D. A stale batch that renames C — never mentioning D at all —
     must still 409."""
-    r = client.put(
-        papi("/view/snapshot"),
-        json={
-            "name": "v",
-            "folders": [{"name": "D", "folders": [{"name": "C"}]}],
-        },
-    )
-    d_id = r.json()["view"]["folders"][0]["id"]
-    c_id = r.json()["view"]["folders"][0]["folders"][0]["id"]
+    ids = _seed_view(client, [{"name": "D", "folders": [{"name": "C"}]}])
+    d_id = ids["D"]
+    c_id = ids["C"]
     stale_base = _rev(client)
 
     delete_token = _folder_lease(client, d_id, intent="delete")
@@ -474,13 +502,10 @@ def test_stale_batch_creating_under_move_folders_old_parent_409s(client) -> None
     A), which ``_affected_ids`` also scans. A stale batch that creates a new
     folder under A — the OLD parent, never named by the tail's forward op —
     must still 409."""
-    r = client.put(
-        papi("/view/snapshot"),
-        json={"name": "v", "folders": [{"name": "A", "folders": [{"name": "F"}]}, {"name": "B"}]},
-    )
-    a_id = r.json()["view"]["folders"][0]["id"]
-    b_id = r.json()["view"]["folders"][1]["id"]
-    f_id = r.json()["view"]["folders"][0]["folders"][0]["id"]
+    ids = _seed_view(client, [{"name": "A", "folders": [{"name": "F"}]}, {"name": "B"}])
+    a_id = ids["A"]
+    b_id = ids["B"]
+    f_id = ids["F"]
     stale_base = _rev(client)
 
     # required_locks resolves F's CURRENT parent (A) itself — the op names
@@ -540,19 +565,15 @@ def test_stale_delete_folder_batch_hydrates_view_for_overlap_check(client) -> No
     literally deleting the local's hydration fallback and confirming this is
     the one test in the whole suite that catches it — see the round 3
     report for the exact experiment.)"""
-    r = client.put(
-        papi("/view/snapshot"),
-        json={"name": "v", "folders": [{"name": "D", "folders": [{"name": "C"}]}]},
-    )
-    assert r.status_code == 200, r.text
-    d_id = r.json()["view"]["folders"][0]["id"]
-    c_id = r.json()["view"]["folders"][0]["folders"][0]["id"]
+    ids = _seed_view(client, [{"name": "D", "folders": [{"name": "C"}]}])
+    d_id = ids["D"]
+    c_id = ids["C"]
     stale_base = _rev(client)
 
     _commit_rename(client, c_id, "C2")  # tail commit touching folder:c only
 
     # Acquire the caller's DELETE lock on D while session.view is STILL
-    # warm (untouched since the PUT above) — expand_targets correctly
+    # warm (untouched since the setup above) — expand_targets correctly
     # expands over the real subtree here, granting a token covering BOTH
     # D and C (folder ids survive the rename). This is deliberately NOT
     # round 2's narrow-lock repro: the point here is that even a properly
@@ -560,8 +581,12 @@ def test_stale_delete_folder_batch_hydrates_view_for_overlap_check(client) -> No
     # overlap check itself fails to consult the real tree.
     d_token = _folder_lease(client, d_id, intent="delete")
 
-    # NOW the cache goes cold; the durable row (D -> C2) is untouched.
-    assert client.delete(papi("/view")).status_code == 204
+    # NOW the cache goes cold; the durable row (D -> C2) is untouched. Setting
+    # session.view directly mirrors exactly what the retired ``DELETE /view``
+    # route used to do (clear ONLY the in-memory cache, leaving ViewRow
+    # intact) without going through full-session eviction, which the live
+    # d_token lease held above would refuse (evict-with-live-locks guard).
+    get_session().view = None
     assert client.get(papi("/view")).json()["view"] is None
 
     r = client.post(
@@ -581,12 +606,9 @@ def test_placement_subject_overlap_conflicts_across_folders(client) -> None:
     """Two batches fighting over the SAME element's placement conflict even
     though the folders they name are disjoint — the viewel: marker is the
     only thing connecting them (folder leases never collided)."""
-    r = client.put(
-        papi("/view/snapshot"),
-        json={"name": "v", "folders": [{"name": "A"}, {"name": "C"}]},
-    )
-    fa = r.json()["view"]["folders"][0]["id"]
-    fc = r.json()["view"]["folders"][1]["id"]
+    ids = _seed_view(client, [{"name": "A"}, {"name": "C"}])
+    fa = ids["A"]
+    fc = ids["C"]
     # place e1 in A (a real commit, so the journal carries canonical ops)
     tok = _folder_lease(client, fa)
     r = client.post(

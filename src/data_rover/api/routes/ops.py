@@ -757,10 +757,7 @@ def undo(
         # (see its docstring).
         peer_resources = [
             artifact_resource(aid) for aid in artifact_op_ids(artifact_inv)
-        ] + [
-            folder_resource(fid)
-            for fid in view_op_folder_ids(session.view, view_inv)
-        ]
+        ] + [folder_resource(fid) for fid in view_op_folder_ids(session.view, view_inv)]
         peer_held = session.lock_table.peer_leases(
             peer_resources, user.id, now=time.monotonic()
         )

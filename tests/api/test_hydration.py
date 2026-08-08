@@ -12,7 +12,7 @@ from data_rover.api.storage import MemorySnapshotStore, set_snapshot_store
 from data_rover.api.session import Session
 from data_rover.core.metamodel.loader import load_metamodel_str
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import AUTH_HEADERS, create_folder_via_commit, papi, seed_default_project
 
 MM_YAML = Path("examples/smart-city.metamodel.yaml").read_text(encoding="utf-8")
 
@@ -157,12 +157,8 @@ def test_view_op_commit_survives_eviction(client: TestClient) -> None:
     is the one thing that would catch a commit that staged the wrong blob."""
     from data_rover.api.session import DEFAULT_PROJECT_ID, get_registry
 
-    r = client.put(
-        papi("/view/snapshot"),
-        json={"name": "v", "folders": [{"name": "A"}]},
-    )
-    assert r.status_code == 200, r.text
-    fid = r.json()["view"]["folders"][0]["id"]
+    setup = create_folder_via_commit(client, "A")
+    fid = setup["id_map"]["tmp_setup"]
 
     r = client.post(
         papi("/locks"),

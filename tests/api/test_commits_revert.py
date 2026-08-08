@@ -12,6 +12,7 @@ from data_rover.api.routes.commits import _affected_ids
 from tests.api.conftest import (
     AUTH_HEADERS,
     commit_create,
+    create_folder_via_commit,
     element_count,
     feed_url,
     model_rev,
@@ -342,13 +343,7 @@ def _commit_rename(client: TestClient, fid: str, name: str) -> None:
 
 def test_revert_refuses_range_with_view_ops(client: TestClient) -> None:
     # helpers as in test_undo_view_ops.py (_folder_lease/_rev/_commit_rename)
-    r = client.put(
-        papi("/view/snapshot"),
-        headers=AUTH_HEADERS,
-        json={"name": "v", "folders": [{"name": "A"}]},
-    )
-    assert r.status_code == 200, r.text
-    fid = r.json()["view"]["folders"][0]["id"]
+    fid = create_folder_via_commit(client, "A")["id_map"]["tmp_setup"]
     target = model_rev(client)
     _commit_rename(client, fid, "A2")
     view_commit_rev = model_rev(client)

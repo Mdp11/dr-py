@@ -6,7 +6,12 @@ from fastapi.testclient import TestClient
 
 from data_rover.api.main import create_app
 from data_rover.api.session import get_registry
-from tests.api.conftest import AUTH_HEADERS, papi, seed_default_project
+from tests.api.conftest import (
+    AUTH_HEADERS,
+    create_folder_via_commit,
+    papi,
+    seed_default_project,
+)
 
 MM = Path("examples/smart-city.metamodel.yaml").read_text(encoding="utf-8")
 MODEL = Path("examples/smart-city.model.json").read_text(encoding="utf-8")
@@ -32,10 +37,9 @@ def test_view_persists_across_eviction() -> None:
     c = TestClient(create_app())
     c.post(papi("/metamodel"), content=MM, headers=AUTH_HEADERS)
     c.post(papi("/model/upload"), content=MODEL.encode(), headers=AUTH_HEADERS)
-    c.put(papi("/view/snapshot"),
-          json={"name": "My View", "folders": []}, headers=AUTH_HEADERS)
+    create_folder_via_commit(c, "My Folder")
 
     get_registry().evict("default")
 
     v = c.get(papi("/view"), headers=AUTH_HEADERS).json()
-    assert v["view"]["name"] == "My View"
+    assert v["view"]["folders"][0]["name"] == "My Folder"

@@ -1093,7 +1093,50 @@ def test_tree_items_endpoint_rejects_oversized_batch(client: TestClient) -> None
 
 
 def _put_view(client: TestClient, folders: list[dict]) -> None:
-    res = client.put(f"{API}/view/snapshot", json={"name": "v", "folders": folders})
+    """Build a view via POST /commits using the same nested folder-dict shape
+    the retired ``PUT /view/snapshot`` route accepted: each dict is
+    ``{"name": ..., "folders": [...], "elements": [...]}``. Folders created
+    within the batch need no lock to be referenced by later ops in the SAME
+    batch, so a single ``root`` lease covers the whole tree."""
+    ops: list[dict] = []
+    counter = 0
+
+    def walk(spec: dict, parent_id: str) -> None:
+        nonlocal counter
+        counter += 1
+        temp_id = f"tmp_{counter}"
+        ops.append(
+            {
+                "kind": "create_folder",
+                "temp_id": temp_id,
+                "parent_id": parent_id,
+                "name": spec["name"],
+            }
+        )
+        for eid in spec.get("elements", []):
+            ops.append(
+                {"kind": "place_element", "element_id": eid, "folder_id": temp_id}
+            )
+        for child in spec.get("folders", []):
+            walk(child, temp_id)
+
+    for f in folders:
+        walk(f, "root")
+
+    lease = client.post(
+        f"{API}/locks",
+        json={
+            "targets": [{"resource_id": "root", "mode": "exclusive", "type": "folder"}],
+            "intent": "edit",
+        },
+    )
+    assert lease.status_code == 200, lease.text
+    token = lease.json()["token"]
+    base = client.get(f"{API}/open").json()["model_rev"]
+    res = client.post(
+        f"{API}/commits",
+        json={"base_rev": base, "ops": ops, "message": "setup", "lock_tokens": [token]},
+    )
     assert res.status_code == 200, res.text
 
 

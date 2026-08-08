@@ -155,12 +155,6 @@ export const ViewSchema = z.object({
 });
 export type View = z.infer<typeof ViewSchema>;
 
-export const ViewSnapshotResponseSchema = z.object({
-	view: ViewSchema,
-	warnings: z.array(IssueSchema).default([])
-});
-export type ViewSnapshotResponse = z.infer<typeof ViewSnapshotResponseSchema>;
-
 export const ViewStateResponseSchema = z.object({
 	view: ViewSchema.nullable().default(null),
 	warnings: z.array(IssueSchema).default([])
