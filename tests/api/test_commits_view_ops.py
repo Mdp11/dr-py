@@ -535,3 +535,64 @@ def test_delete_folder_commit_requires_lease_on_subtree_child_after_view_cleared
         gen.close()
     assert blob["folders"][0]["id"] == d_id
     assert blob["folders"][0]["folders"][0]["id"] == c_id
+
+
+def test_persist_failure_rolls_back_all_halves_and_keeps_leases(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Characterization pin for create_commit's persist-failure (500) unwind —
+    the richest failure block: model rollback, rev decrement, view rollback,
+    auto-create unwind (project had no view), op_log pop, db rollback — and
+    the caller's leases must NOT be released (release is step g, strictly
+    after a durable commit). Mirrors test_apply_ops_rolls_back_in_memory_
+    on_persist_failure (tests/api/test_ops_persistence.py), which pins the
+    same seam for /model/ops."""
+    from data_rover.api import content as _content
+
+    assert client.get(papi("/view")).json()["view"] is None
+    r = client.post(
+        papi("/locks"),
+        json={
+            "targets": [{"resource_id": "root", "mode": "exclusive", "type": "folder"}],
+            "intent": "edit",
+        },
+    )
+    assert r.status_code == 200, r.text
+    token = r.json()["token"]
+    base = _rev(client)
+    session = get_session()
+    op_log_before = len(session.op_log)
+    elems_before = client.get(papi("/model/elements")).json()["total"]
+
+    def _boom(*_a: object, **_kw: object) -> None:
+        raise RuntimeError("simulated DB failure")
+
+    monkeypatch.setattr(_content, "append_commit", _boom)
+    ops = [
+        # model half (a create needs no lock) + view half (auto-creates the
+        # view — there is none yet), so BOTH in-place halves are live when
+        # the persist step blows up.
+        {"kind": "create_element", "temp_id": "tmp_e", "type_name": "Node",
+         "properties": {}},
+        {"kind": "create_folder", "temp_id": "tmp_c", "parent_id": "root",
+         "name": "A"},
+    ]
+    r = client.post(
+        papi("/commits"),
+        json={"base_rev": base, "ops": ops, "message": "m", "lock_tokens": [token]},
+    )
+    assert r.status_code == 500
+
+    # rev + undo history rolled back in-memory
+    assert session.model_rev == base
+    assert len(session.op_log) == op_log_before
+    # the auto-created view unwound to None, not a materialized empty view
+    assert session.view is None
+
+    monkeypatch.undo()  # restore append_commit so the probe requests work
+    assert client.get(papi("/view")).json()["view"] is None
+    assert client.get(papi("/model/elements")).json()["total"] == elems_before
+    assert _rev(client) == base
+    # leases survive a failed commit — release only follows a durable commit
+    held = {le["resource_id"] for le in client.get(papi("/locks")).json()["leases"]}
+    assert "folder:root" in held

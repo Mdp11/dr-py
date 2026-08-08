@@ -25,6 +25,7 @@ import logging
 import time
 import uuid
 from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import Any, assert_never, get_args
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -107,6 +108,7 @@ from ..session import AppliedBatch
 from .ops import (
     TEMP_ID_PREFIX,
     _apply_batch,
+    _BatchResult,
     _ensure_validation_seeded,
     _maybe_periodic_snapshot,
     _persist_commit,
@@ -309,6 +311,91 @@ def _conflict_response(model_rev: int, detail: str) -> JSONResponse:
         status_code=409,
         content={"detail": detail, "model_rev": model_rev},
     )
+
+
+@dataclass
+class _CommitUnwind:
+    """Progressive unwind ledger for ``create_commit``'s/``revert_commit``'s
+    failure paths.
+
+    A commit batch can span three content families living in three places
+    (see ``create_commit``'s "Mixed-batch atomicity" docstring): the model is
+    mutated IN PLACE, artifact rows are staged on this request's DB
+    transaction, and the view is mutated IN PLACE plus staged as a blob on
+    that same transaction. Every rejection/failure path therefore has to
+    undo *however many halves are live at that point* — which used to be
+    five hand-maintained, near-identical inline blocks whose contents had
+    to grow in lockstep with the flow (each new stage meant revisiting
+    every later block; the strict-mode gate and the Phase-2 view half both
+    did exactly that).
+
+    The ledger inverts the maintenance direction: each stage REGISTERS what
+    just went live, immediately after it goes live (``model_res`` after the
+    model apply, ``db_staged`` once DB staging begins, ``created_view`` when
+    this request materializes ``session.view`` from ``None``, ``view_res``
+    after the view apply, ``rev_bumped`` after the rev bump +
+    ``record_batch``), and every failure path calls ``unwind()`` exactly
+    once and then returns/raises. A new stage now touches ONE registration
+    site instead of every downstream block.
+
+    ``unwind()`` runs under ``session.write_mutex`` — every caller already
+    holds it (the sole pre-mutex failure paths register nothing and return
+    plain 409s without a ledger). Field-order invariants, preserved from the
+    inline blocks this replaces:
+
+    - ``model_res`` rollback first (restores the in-place model), then the
+      rev decrement, THEN ``invalidate_derived_caches()`` — that method
+      re-stamps the cell cache to the CURRENT ``model_rev`` (see its
+      docstring), so decrementing after it would stamp the wrong rev.
+      Invalidation is tied to ``model_res``: it exists because the in-place
+      apply-then-rollback leaves the model rev-identical but momentarily
+      different, so a lock-free concurrent ``/tables/evaluate`` could have
+      cached rows computed mid-flight (final-review A1/I1).
+    - ``view_res`` rollback needs ``session.view`` non-None: the view half
+      only ever applies to a resolved view, and nothing can null it
+      mid-request anymore (the retired ``DELETE /view`` was the last thing
+      that could — see the defensive-fallback comment at the b3 site).
+    - ``created_view`` reset LAST among the view steps: a rejected request
+      must be externally invisible, so the auto-create unwinds to the
+      genuinely-empty ``None``, not a materialized empty view with no
+      ViewRow behind it (final-review Finding 1 / round 2 A+B).
+    - ``op_log.pop()`` only when ``rev_bumped``: the batch enters the op
+      log at the same instant the rev bumps (step d), never earlier.
+    - ``db.rollback()`` last, and only once ``db_staged`` — the paths
+      before any staging (missing-lock 409, model-apply failure) never
+      rolled the request transaction back and still must not.
+
+    NOT part of the ledger, on purpose: lock release (leases survive a
+    failed commit — release is step g, strictly after a durable commit) and
+    the op-log/``model_rev`` bookkeeping of ``routes/ops.py::undo`` (its
+    unwind must re-PUSH a batch popped at entry — a different contract).
+    """
+
+    session: Session
+    db: DbSession
+    model: Model
+    model_res: _BatchResult | None = None
+    view_res: ViewBatchResult | None = None
+    created_view: bool = False
+    db_staged: bool = False
+    rev_bumped: bool = False
+
+    def unwind(self) -> None:
+        if self.model_res is not None:
+            _rollback(self.model, self.model_res.inverse_units)
+        if self.rev_bumped:
+            self.session.model_rev -= 1
+        if self.model_res is not None:
+            self.session.invalidate_derived_caches()
+        if self.view_res is not None:
+            assert self.session.view is not None
+            rollback_view(self.session.view, self.view_res.inverse_units)
+        if self.created_view:
+            self.session.view = None
+        if self.rev_bumped:
+            self.session.op_log.pop()
+        if self.db_staged:
+            self.db.rollback()
 
 
 @router.get("/open", response_model=None)
@@ -563,36 +650,44 @@ def create_commit(
     ops stage row changes on this request's DB transaction, and view ops
     mutate ``session.view`` IN PLACE plus (once accepted) stage a blob row on
     the same DB transaction as the artifact rows. So every failure path after
-    an apply has to undo however many halves are live — ``_rollback(model,
-    res.inverse_units)`` + ``session.invalidate_derived_caches()`` for the
-    model half, ``db.rollback()`` for the artifact half (and the staged view
-    row, once one exists), and ``rollback_view(session.view,
-    view_res.inverse_units)`` for the view half. ``apply_artifact_ops``
+    an apply has to undo however many halves are live at that point — which
+    is ``_CommitUnwind``'s job, not each site's: every stage registers what
+    it just made live on the ledger, and each failure path calls
+    ``unwind()`` once. See that class's docstring for the field-order
+    invariants (rev decrement before cache invalidation, the auto-created
+    view unwinding to ``None`` last, and so on).
+
+    What makes the ledger's field semantics correct: ``apply_artifact_ops``
     deliberately has no internal rollback path (it only flushes), so that
-    ``db.rollback()`` is the ONLY thing that discards staged artifact rows;
-    ``apply_view_ops_atomic`` DOES roll its own prefix back on failure (see its
-    docstring), so a failure raised BY it never needs an explicit
-    ``rollback_view`` call — only failures raised AFTER it succeeded do.
+    ``db.rollback()`` is the ONLY thing that discards staged artifact rows —
+    hence ``db_staged`` is registered BEFORE that call, not after it;
+    ``apply_view_ops_atomic`` DOES roll its own prefix back on failure (see
+    its docstring), so a failure raised BY it never needs an explicit
+    ``rollback_view`` call — hence ``view_res`` is registered only AFTER it
+    returns, and only failures raised after that point roll the view back.
     """
     _, model = require_model(session)
     model_ops, artifact_ops, view_ops = split_ops(payload.ops)
-    # True iff THIS request is the one that flipped session.view from None
-    # to non-None via load_or_create_view — tracked so every early-return OR
-    # failure path below can restore it to None rather than leaving a
-    # never-committed materialization behind. A REJECTED (409/422/500)
-    # request must be externally invisible: before this request GET /view
-    # reported whatever it reported, and any return out of this function
-    # must leave it reporting that again — for the genuinely-empty case, not
-    # a materialized empty view with no ViewRow / view_rev to back it
-    # (final-review Finding 1, and round 2's Finding A/B extend this same
+    # The unwind ledger every failure path below shares — see _CommitUnwind.
+    # Its ``created_view`` flag is the subtle one: it is True iff THIS request
+    # is the one that flipped session.view from None to non-None via
+    # load_or_create_view, so a rejected request restores it to None rather
+    # than leaving a never-committed materialization behind. A REJECTED
+    # (409/422/500) request must be externally invisible: before this request
+    # GET /view reported whatever it reported, and any return out of this
+    # function must leave it reporting that again — for the genuinely-empty
+    # case, not a materialized empty view with no ViewRow / view_rev to back
+    # it (final-review Finding 1, and round 2's Finding A/B extend this same
     # guard to the resolve-view call site inside the mutex below).
     #
     # INVARIANT (final-review round 3): every ASSIGNMENT to session.view in
     # this function happens under session.write_mutex — the single point is
-    # just inside the mutex below, right before required_locks. A pre-mutex
-    # READ into a LOCAL (the overlap check just below needs one) is fine and
-    # does NOT violate this — only writing session.view itself, or resetting
-    # it, must wait for the mutex. Two concurrent view-op commits assigning
+    # just inside the mutex below, right before required_locks; every ledger
+    # unwind() that resets it runs later inside that same mutex block. A
+    # pre-mutex READ into a LOCAL (the overlap check just below needs one)
+    # is fine and does NOT
+    # violate this — only writing session.view itself, or resetting it, must
+    # wait for the mutex. Two concurrent view-op commits assigning
     # session.view outside the mutex could otherwise race a check-then-set
     # (a lost update: A reads ViewRow, is descheduled while B hydrates,
     # commits and persists, then A assigns its now-stale View over B's,
@@ -600,7 +695,7 @@ def create_commit(
     # one request's pre-mutex reset (on a rejected/failed early return) null
     # session.view out from under a DIFFERENT request already inside the
     # mutex, tripping its own `assert session.view is not None` mid-flight.
-    created_view = False
+    unwind = _CommitUnwind(session, db, model)
     if payload.base_rev > session.model_rev:
         return _conflict_response(session.model_rev, "stale base_rev")
     if payload.base_rev < session.model_rev:
@@ -705,11 +800,11 @@ def create_commit(
         # to the real, hydrated tree the applier goes on to mutate. No
         # try/except needed: this is still the first thing that could
         # mutate anything once the mutex is held (mirrors the reasoning in
-        # created_view's docstring above — contrast undo's version of this
+        # the ledger's comment above — contrast undo's version of this
         # hoist, which runs after a batch has already been popped).
         if view_ops and session.view is None:
             session.view = load_or_create_view(db, project_id)
-            created_view = True
+            unwind.created_view = True
         # a. verify the caller still holds every required lock. `payload.ops`
         #    (not `model_ops`) so the `art:`-namespaced leases artifact ops
         #    need are derived and checked too.
@@ -718,13 +813,12 @@ def create_commit(
             user.id, payload.lock_tokens, reqs, now=time.monotonic()
         )
         if missing:
-            if created_view:
-                # this request's own hydration must not leak into a
-                # REJECTED (409) response's visible state — see
-                # created_view's docstring above the staleness checks. Safe
-                # to reset here: still inside the mutex, so no concurrent
-                # request can be mid-flight on the SAME session.view object.
-                session.view = None
+            # undo every live half — here that is at most this request's own
+            # hydration, which must not leak into a REJECTED (409) response's
+            # visible state (see _CommitUnwind). Safe to reset here: still
+            # inside the mutex, so no concurrent request can be mid-flight on
+            # the SAME session.view object.
+            unwind.unwind()
             return JSONResponse(
                 status_code=409,
                 content={
@@ -738,19 +832,23 @@ def create_commit(
         # b. apply the model half (422 on mutation-boundary error — let it
         #    propagate; _apply_batch already rolled itself back and nothing
         #    artifact-side has been staged yet). created_view may already be
-        #    True here (the resolve just above), so this needs its own
-        #    guard too, unlike round 1's shape where hydration never
+        #    True here (the resolve just above), so this needs the ledger's
+        #    unwind too, unlike round 1's shape where hydration never
         #    happened this early (final-review round 2, Finding B).
         try:
             res = _apply_batch(model, model_ops, restore=False)
         except Exception:
-            if created_view:
-                session.view = None
+            unwind.unwind()  # created_view may already be set (resolve above)
             raise
+        unwind.model_res = res
         # b2. apply the artifact half, staged on this request's DB transaction.
         #     Seeded with the model id_map so an artifact payload may reference
         #     an element created earlier in the SAME batch. On failure both
         #     halves are undone (see the docstring's atomicity note).
+        # DB staging begins here, so register it BEFORE the call: a partial
+        # apply_artifact_ops flush must be discarded even though art_res never
+        # got assigned.
+        unwind.db_staged = True
         try:
             art_res = apply_artifact_ops(
                 db,
@@ -765,11 +863,7 @@ def create_commit(
             # rejections are HTTPException 422/409, but an UNforeseen error
             # (a DB failure, a bug) must not be the one case that leaves the
             # model half-mutated. Undo both halves, then let it propagate.
-            _rollback(model, res.inverse_units)
-            session.invalidate_derived_caches()  # rolled back in place; A1/I1
-            if created_view:
-                session.view = None  # see created_view's docstring above
-            db.rollback()  # discard staged artifact rows
+            unwind.unwind()  # undo every live half — see _CommitUnwind
             raise
         # b3. apply the view half to session.view IN PLACE, all-or-nothing
         #     (session.view was already resolved near the top of this SAME
@@ -794,7 +888,7 @@ def create_commit(
                 # own auto-create on a later failure) — this branch survives
                 # purely as a cheap, harmless backstop.
                 session.view = load_or_create_view(db, project_id)
-                created_view = True
+                unwind.created_view = True
             try:
                 view_res = apply_view_ops_atomic(
                     session.view,
@@ -804,30 +898,21 @@ def create_commit(
                 )
             except Exception:
                 # mirror b2's stance: never leave the model half applied.
-                _rollback(model, res.inverse_units)
-                session.invalidate_derived_caches()
-                if created_view:
-                    # apply_view_ops_atomic already rolled its own applied
-                    # prefix back (to the empty View this request created),
-                    # but the auto-create itself must unwind too: the
-                    # pre-batch state for THIS project was None, not "".
-                    session.view = None
-                db.rollback()
+                # apply_view_ops_atomic already rolled its own applied prefix
+                # back (to the empty View this request may have created),
+                # which is exactly why view_res is still unregistered on the
+                # ledger here — but the auto-create itself must still unwind:
+                # the pre-batch state for THIS project was None, not "".
+                unwind.unwind()  # undo every live half — see _CommitUnwind
                 raise
+            unwind.view_res = view_res
         # c. hard-reject structural blockers. Model content only: an artifact
         #    op's own validity was settled at apply time (b2), and an artifact
         #    row can never make the MODEL structurally invalid.
         scoped = default_pipeline().validate(model, res.dirty.to_scope())
         structural = [i for i in scoped if i.category is IssueCategory.STRUCTURAL]
         if structural:
-            _rollback(model, res.inverse_units)
-            session.invalidate_derived_caches()  # rolled back in place; A1/I1
-            if view_res is not None:
-                assert session.view is not None
-                rollback_view(session.view, view_res.inverse_units)
-            if created_view:
-                session.view = None  # unwind the auto-create too — see b3
-            db.rollback()  # discard staged artifact rows
+            unwind.unwind()  # undo every live half — see _CommitUnwind
             return JSONResponse(
                 status_code=422,
                 content={
@@ -844,14 +929,7 @@ def create_commit(
         # pre-existing issues elsewhere never trip this. Rebind has its own route
         # and does not pass through here, so it stays exempt by construction.
         if session.strict_mode and conformance:
-            _rollback(model, res.inverse_units)
-            session.invalidate_derived_caches()  # rolled back in place; A1/I1
-            if view_res is not None:
-                assert session.view is not None
-                rollback_view(session.view, view_res.inverse_units)
-            if created_view:
-                session.view = None  # unwind the auto-create too — see b3
-            db.rollback()  # discard staged artifact rows
+            unwind.unwind()  # undo every live half — see _CommitUnwind
             return JSONResponse(
                 status_code=422,
                 content={
@@ -898,6 +976,7 @@ def create_commit(
                 id_map=merged_id_map,
             )
         )
+        unwind.rev_bumped = True
         # e. persist to the durable journal; mirror apply_ops 500 pattern
         #    exactly. The view blob (if touched) is staged INSIDE this same
         #    try, on the same DB transaction _persist_commit's own
@@ -936,16 +1015,10 @@ def create_commit(
                 _issues=issues_json,
             )
         except Exception as exc:
-            _rollback(model, res.inverse_units)
-            session.model_rev -= 1
-            session.invalidate_derived_caches()  # rolled back in place; A1/I1
-            if view_res is not None:
-                assert session.view is not None
-                rollback_view(session.view, view_res.inverse_units)
-            if created_view:
-                session.view = None  # unwind the auto-create too — see b3
-            session.op_log.pop()
-            db.rollback()  # also discards the staged artifact + view rows
+            # undo every live half — see _CommitUnwind. By this point that is
+            # all of them: the rev bump and op_log entry included, and the
+            # db.rollback() also discards the staged artifact + view rows.
+            unwind.unwind()
             raise HTTPException(
                 status_code=500, detail="failed to persist commit"
             ) from exc
@@ -1187,11 +1260,14 @@ def revert_commit(
                 detail="artifact/view ops reached the revert applier",
             )
         res = _apply_batch(model, combined, restore=True)
+        # Same ledger create_commit uses (see _CommitUnwind), narrowed to the
+        # model-only subset: revert refuses artifact/view batches above, so
+        # view_res/created_view stay at their defaults and are never touched.
+        unwind = _CommitUnwind(session, db, model, model_res=res)
         scoped = default_pipeline().validate(model, res.dirty.to_scope())
         structural = [i for i in scoped if i.category is IssueCategory.STRUCTURAL]
         if structural:
-            _rollback(model, res.inverse_units)
-            session.invalidate_derived_caches()  # rolled back in place; A1/I1
+            unwind.unwind()  # undo every live half — see _CommitUnwind
             return JSONResponse(
                 status_code=422,
                 content={
@@ -1216,9 +1292,11 @@ def revert_commit(
                 id_map=dict(res.id_map),
             )
         )
+        unwind.rev_bumped = True
         commit_id = uuid.uuid4().hex
         message = payload.message or f"Revert to rev {payload.target_rev}"
         issues_json = [IssueOut.from_core(i).model_dump() for i in conformance]
+        unwind.db_staged = True
         try:
             persisted = _persist_commit(
                 db,
@@ -1234,11 +1312,7 @@ def revert_commit(
                 _issues=issues_json,
             )
         except Exception as exc:
-            _rollback(model, res.inverse_units)
-            session.model_rev -= 1
-            session.invalidate_derived_caches()  # rolled back in place; A1/I1
-            session.op_log.pop()
-            db.rollback()
+            unwind.unwind()  # undo every live half — see _CommitUnwind
             raise HTTPException(
                 status_code=500, detail="failed to persist commit"
             ) from exc
