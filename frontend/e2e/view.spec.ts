@@ -1,8 +1,9 @@
-import { test, expect, type Locator, type Page, type Request } from '@playwright/test';
+import { test, expect, type Locator, type Page } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { loadFiles } from './helpers/load';
 import { openDefaultProject } from './helpers/auth';
+import { changeBadge, commitStaged } from './helpers/commit';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const METAMODEL_PATH = join(__dirname, '..', '..', 'examples', 'example.metamodel.yaml');
@@ -104,8 +105,6 @@ test('view referencing a missing element produces a warning in the Issues panel'
 // The helper below mirrors the one in dnd.spec.ts.
 // --------------------------------------------------------------------------
 
-type Folder = { name: string; folders: Folder[]; elements: string[] };
-
 /**
  * Bootstrap with the curation view loaded: "Grouped" holds Alpha (BLOCK_ONE_ID);
  * Beta stays in the pool.
@@ -152,13 +151,22 @@ async function expandFolder(page: Page, name: string): Promise<void> {
 	if (await expander.count()) await expander.click();
 }
 
-/** Resolves with the next PUT to /view/snapshot (the curation persistence call). */
-function viewPut(page: Page): Promise<Request> {
-	return page.waitForRequest((r) => r.method() === 'PUT' && r.url().endsWith('/view/snapshot'));
-}
-
-function findFolder(folders: Folder[], name: string): Folder | undefined {
-	return folders.find((f) => f.name === name);
+/**
+ * Names among `candidates` that currently render as tree rows, in DOM
+ * (i.e. visual top-to-bottom) order. Used to assert reorder/placement without
+ * inspecting network bodies — a drag no longer PUTs a whole-document snapshot
+ * (see the section header comment above), so the tree's own rendered order,
+ * which mirrors the optimistically-applied `_view` state, is the only signal
+ * left to read.
+ */
+async function visibleOrder(page: Page, candidates: string[]): Promise<string[]> {
+	const rows = await tree(page).getByRole('treeitem').allTextContents();
+	const found: string[] = [];
+	for (const text of rows) {
+		const hit = candidates.find((c) => text.includes(c));
+		if (hit !== undefined) found.push(hit);
+	}
+	return found;
 }
 
 /**
@@ -199,7 +207,7 @@ async function dragRowOnto(
 	await page.mouse.up();
 }
 
-test('view curation: include a pooled element into a folder (persists across reload)', async ({
+test('view curation: include a pooled element into a folder, commit with a message, and it persists across reload', async ({
 	page
 }) => {
 	test.setTimeout(120_000);
@@ -211,26 +219,43 @@ test('view curation: include a pooled element into a folder (persists across rel
 	await expandPool(page);
 	await expect(poolRow(page, 'Beta')).toBeVisible();
 
+	const badge = changeBadge(page);
+	await expect(badge).toContainText('0 change');
+
 	// Include: drag the Beta row (in the pool) onto the Grouped folder header.
-	const put = viewPut(page);
+	// This only STAGES a `place_element` view op (drop-time `folder:` lease,
+	// optimistic local apply) — nothing reaches the server until the commit
+	// below, so the badge — not a network request — is what confirms the
+	// gesture landed.
 	await dragRowOnto(page, poolRow(page, 'Beta'), row(page, 'Grouped'));
-	const body = (await put).postDataJSON() as { folders: Folder[] };
-	expect(findFolder(body.folders, 'Grouped')!.elements).toContain(BLOCK_TWO_ID);
+	await expect(badge).toContainText('1 change');
 
 	// Beta is now placed under Grouped (folders are not lazily paged); expand to see it.
 	await expandFolder(page, 'Grouped');
 	await expect(t.getByText('Beta')).toBeVisible();
 
-	// Persistence: the backend session holds the pushed view across a reload.
-	// A visible Beta alone is NOT proof — a pooled Beta is visible too — so assert
-	// against the freshly loaded snapshot (GET /view) that Beta is placed in Grouped.
+	// Commit with a message. This is the only path that reaches the server: a
+	// commit that carries view ops makes the client refetch `GET /view` once
+	// the batch lands, concretizing the change against server truth.
+	const commitMessage = `e2e view commit ${Date.now()}`;
+	await commitStaged(page, commitMessage);
+	await expect(badge).toContainText('0 change');
+
+	// Persistence: reload from scratch and assert the freshly loaded snapshot
+	// (GET /view) places Beta in Grouped. A visible Beta after reload alone
+	// would NOT be proof (a pooled Beta renders too) — read the actual
+	// response, mirroring the durability check the old whole-doc-PUT version
+	// of this test made, now against the commit path instead.
 	const reloaded = page.waitForResponse(
 		(r) => new URL(r.url()).pathname.endsWith('/view') && r.request().method() === 'GET'
 	);
 	await page.reload();
-	const loaded = (await (await reloaded).json()) as { view: { folders: Folder[] } | null };
+	const loaded = (await (await reloaded).json()) as {
+		view: { folders: { name: string; folders: unknown[]; elements: string[] }[] } | null;
+	};
 	expect(loaded.view).not.toBeNull();
-	expect(findFolder(loaded.view!.folders, 'Grouped')!.elements).toContain(BLOCK_TWO_ID);
+	const grouped = loaded.view!.folders.find((f) => f.name === 'Grouped');
+	expect(grouped?.elements).toContain(BLOCK_TWO_ID);
 
 	const t2 = tree(page);
 	await expect(t2.getByText('Grouped')).toBeVisible();
@@ -243,14 +268,26 @@ test('view curation: exclude a placed element back to the pool', async ({ page }
 	await loadView(page);
 	await expandFolder(page, 'Grouped'); // folders default collapsed; reveal Alpha to drag it
 
-	// Exclude: drag Alpha from Grouped onto the "Not in view" panel header.
-	const put = viewPut(page);
-	await dragRowOnto(page, row(page, 'Alpha'), poolHeader(page));
-	const body = (await put).postDataJSON() as { folders: Folder[] };
-	expect(findFolder(body.folders, 'Grouped')!.elements).not.toContain(BLOCK_ONE_ID);
+	const badge = changeBadge(page);
 
-	// Alpha now lives in the pool: expand and confirm it is listed there.
+	// Exclude: drag Alpha from Grouped onto the "Not in view" panel header.
+	// STAGES a `remove_element` op; no PUT fires any more (see the include test
+	// above for the full rationale).
+	await dragRowOnto(page, row(page, 'Alpha'), poolHeader(page));
+	await expect(badge).toContainText('1 change');
+
+	// Alpha left Grouped: the main tree no longer shows it at all. It does NOT
+	// yet appear in the "Not in view" pool — that panel's contents come from a
+	// server-fetched complement (`GET /model/containment/roots/excluded`) that
+	// only reflects COMMITTED placements, so a merely-staged `remove_element`
+	// leaves it stale until commit. Prove the real round trip through a commit
+	// instead of asserting the (currently absent) optimistic pool update.
+	await expect(tree(page).getByText('Alpha')).toHaveCount(0);
 	await expandPool(page);
+	await expect(poolRow(page, 'Alpha')).toHaveCount(0);
+
+	await commitStaged(page);
+	await expect(badge).toContainText('0 change');
 	await expect(poolRow(page, 'Alpha')).toBeVisible();
 });
 
@@ -258,28 +295,23 @@ test('view curation: reorder elements within a folder (upward)', async ({ page }
 	test.setTimeout(120_000);
 	await loadView(page);
 
+	const badge = changeBadge(page);
+
 	// Build a two-element folder: include Beta so Grouped = [Alpha, Beta].
 	await expandPool(page);
-	const include = viewPut(page);
 	await dragRowOnto(page, poolRow(page, 'Beta'), row(page, 'Grouped'));
-	const afterInclude = (await include).postDataJSON() as { folders: Folder[] };
-	expect(findFolder(afterInclude.folders, 'Grouped')!.elements).toEqual([
-		BLOCK_ONE_ID,
-		BLOCK_TWO_ID
-	]);
+	await expect(badge).toContainText('1 change');
 	await expandFolder(page, 'Grouped'); // reveal Alpha + Beta rows for the reorder drag
 	await expect(tree(page).getByText('Beta')).toBeVisible();
+	await expect.poll(() => visibleOrder(page, ['Alpha', 'Beta'])).toEqual(['Alpha', 'Beta']);
 
 	// Reorder UP: drag the SECOND element (Beta) onto the TOP half of the FIRST
 	// (Alpha) so it is inserted before it. (Downward same-folder reorder has a
 	// known off-by-one; we assert only the upward case.)
-	const reorder = viewPut(page);
 	await dragRowOnto(page, row(page, 'Beta'), row(page, 'Alpha'), { half: 'top' });
-	const afterReorder = (await reorder).postDataJSON() as { folders: Folder[] };
-	expect(findFolder(afterReorder.folders, 'Grouped')!.elements).toEqual([
-		BLOCK_TWO_ID,
-		BLOCK_ONE_ID
-	]);
+	// Two ops staged now: the include, then the reorder (a `move_element`).
+	await expect(badge).toContainText('2 change');
+	await expect.poll(() => visibleOrder(page, ['Alpha', 'Beta'])).toEqual(['Beta', 'Alpha']);
 });
 
 test('view curation: search result dragged into a folder is placed there', async ({ page }) => {
@@ -292,12 +324,13 @@ test('view curation: search result dragged into a folder is placed there', async
 	const result = dropdown.getByRole('button').filter({ hasText: 'Beta' }).first();
 	await expect(result).toBeVisible();
 
+	const badge = changeBadge(page);
+
 	// Drag the search result onto the Grouped folder header. The drag starts
-	// outside the tree (search-originated, bypassMovable) and the tree adopts it.
-	const put = viewPut(page);
+	// outside the tree (search-originated, bypassMovable) and the tree adopts
+	// it. STAGES a `place_element` op; no PUT fires.
 	await dragRowOnto(page, result, row(page, 'Grouped'));
-	const body = (await put).postDataJSON() as { folders: Folder[] };
-	expect(findFolder(body.folders, 'Grouped')!.elements).toContain(BLOCK_TWO_ID);
+	await expect(badge).toContainText('1 change');
 
 	await expandFolder(page, 'Grouped');
 	await expect(tree(page).getByText('Beta')).toBeVisible();
@@ -309,21 +342,18 @@ test('change badge increments on view edit, tooltip shows View row, Save dialog 
 	test.setTimeout(120_000);
 	await loadView(page);
 
-	// The badge is the span containing the bullet + count in the top-right of the
-	// header.  Its text nodes are "● ", the count, and "change(s)" — locate it by
-	// the bullet character so we're robust to exact whitespace between nodes.
-	const badge = page.locator('header span').filter({ hasText: /●/ }).first();
+	const badge = changeBadge(page);
 	await expect(badge).toBeVisible();
 
 	// A fresh loadView bootstraps with zero pending changes.
 	await expect(badge).toContainText('0 change');
 
 	// Make a view edit: drag Alpha (placed in Grouped) onto the pool header to
-	// exclude it.  This is the same mechanism used by the "exclude" curation test.
+	// exclude it. This is the same mechanism used by the "exclude" curation
+	// test. It only STAGES a `remove_element` op (optimistic local apply, no
+	// PUT), so the badge count is the only signal to wait on.
 	await expandFolder(page, 'Grouped'); // folders default collapsed; reveal Alpha to drag it
-	const put = viewPut(page);
 	await dragRowOnto(page, row(page, 'Alpha'), poolHeader(page));
-	await put; // wait for the PUT /view/snapshot to complete
 
 	// Excluding one element is exactly 1 view change; combined count must be 1.
 	await expect(badge).toContainText('1 change');
@@ -346,10 +376,14 @@ test('change badge increments on view edit, tooltip shows View row, Save dialog 
 	await expect(drawer).toBeVisible();
 
 	// Click the View tab and assert that at least one human-readable view-change
-	// line is shown (Alpha was moved out of Grouped so it is "removed from view"
-	// or "moved from '...' to '...'").
+	// line is shown. Alpha was excluded from "Grouped" via `stageRemoveElement`
+	// (`stagePlaceElementsAt`'s `folderId === null` branch), whose label reads
+	// `Removed <name> from "<folder>"` (see view.svelte.ts) — match that prefix
+	// rather than the whole vocabulary of labels the journal can produce
+	// (Created/Renamed/Deleted/Moved folder, Placed/Moved/Removed element or
+	// artifact).
 	await drawer.getByRole('tab', { name: /View/i }).click();
-	await expect(drawer.getByText(/moved from|added to|removed from view|Folder '/)).toBeVisible();
+	await expect(drawer.getByText(/^Removed .* from /)).toBeVisible();
 });
 
 test('excluded pool: collapsed by default (no fetch), expands, and state persists', async ({

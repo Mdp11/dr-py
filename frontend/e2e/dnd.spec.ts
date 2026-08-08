@@ -1,16 +1,15 @@
-import { test, expect, type Locator, type Page, type Request } from '@playwright/test';
+import { test, expect, type Locator, type Page } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { loadFiles } from './helpers/load';
 import { openDefaultProject } from './helpers/auth';
+import { changeBadge } from './helpers/commit';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const METAMODEL_PATH = join(__dirname, '..', '..', 'examples', 'example.metamodel.yaml');
 
 const ALPHA = 'dnd-block-alpha';
 const BETA = 'dnd-block-beta';
-
-type Folder = { name: string; folders: Folder[]; elements: string[] };
 
 /**
  * Load metamodel + a two-Block model + a view ("Grouped" holds Alpha, "Target"
@@ -56,6 +55,13 @@ async function bootstrap(page: Page): Promise<void> {
 	).toBeVisible();
 }
 
+/** The main containment tree (distinct from the "Not in view" pool's own tree). */
+function mainTree(page: Page): Locator {
+	return page.getByRole('tree', { name: /containment tree/i });
+}
+
+/** A tree row (treeitem) that contains the given text — matches EITHER the
+ * main tree or the excluded-pool tree, since both are `role="tree"`. */
 function row(page: Page, text: string): Locator {
 	return page.getByRole('treeitem').filter({ hasText: text }).first();
 }
@@ -106,10 +112,6 @@ async function pointerDragDrop(
 	await page.mouse.up();
 }
 
-function viewPut(page: Page): Promise<Request> {
-	return page.waitForRequest((r) => r.method() === 'PUT' && r.url().endsWith('/view/snapshot'));
-}
-
 /**
  * Expand the "Not in view" excluded-pool panel (collapsed by default; no fetch
  * while collapsed) and wait for its element tree to render. Idempotent enough
@@ -122,45 +124,65 @@ async function expandExcludedPool(page: Page): Promise<void> {
 	await expect(pool).toBeVisible();
 }
 
-function findFolder(folders: Folder[], name: string): Folder | undefined {
-	return folders.find((f) => f.name === name);
-}
-
 test.beforeEach(async ({ page }) => {
 	test.setTimeout(120_000);
 	await bootstrap(page);
 });
+
+// A drag no longer PUTs a whole-document snapshot: it stages a `view.*` op
+// (drop-time `folder:` lease, optimistic local apply — see view.svelte.ts)
+// that reaches the server only through a DiffDrawer commit. So a drag's
+// observable effects here are (1) the optimistic tree already shows the new
+// placement and (2) the TopBar's combined-changes counter picked up the
+// staged op(s) — persistence itself is covered end-to-end by view.spec.ts's
+// commit-and-reload test.
 
 test('drag an element into a folder places it there', async ({ page }) => {
 	// Beta is not placed in any folder, so it lives in the "Not in view" excluded
 	// pool — a separate panel that is collapsed by default (and unfetched while
 	// collapsed). Expand it so Beta renders as a draggable row.
 	await expandExcludedPool(page);
-	const put = viewPut(page);
+	const badge = changeBadge(page);
+	await expect(badge).toContainText('0 change');
 	await pointerDragDrop(page, row(page, 'Beta'), row(page, 'Target'));
-	const body = (await put).postDataJSON() as { folders: Folder[] };
-	expect(findFolder(body.folders, 'Target')!.elements).toContain(BETA);
+
+	await expect(badge).toContainText('1 change');
+	await expandFolder(page, 'Target');
+	// "Beta" now renders nested one level under "Target" (aria-level 2, not the
+	// top-level 1) — not merely visible somewhere, since it left the pool too.
+	await expect(row(page, 'Beta')).toHaveAttribute('aria-level', '2');
 });
 
 test('drag a placed element to the view root unplaces it', async ({ page }) => {
 	await expandFolder(page, 'Grouped'); // folders default collapsed; reveal Alpha to drag it
-	const put = viewPut(page);
+	const badge = changeBadge(page);
 	await pointerDragDrop(
 		page,
 		row(page, 'Alpha'),
 		page.getByRole('button', { name: 'Move to top level' }),
 		{ waitForTarget: true }
 	);
-	const body = (await put).postDataJSON() as { folders: Folder[] };
-	expect(findFolder(body.folders, 'Grouped')!.elements).not.toContain(ALPHA);
+
+	await expect(badge).toContainText('1 change');
+	// Alpha left "Grouped": the main tree no longer shows it at all. It does
+	// NOT (yet) reappear in the "Not in view" pool — that panel's contents
+	// come from a server-fetched complement (`GET /model/containment/roots/
+	// excluded`) that only reflects COMMITTED placements; a locally staged
+	// `remove_element` has no server-side effect until commit, so the pool
+	// stays stale until then (see view.spec.ts's "exclude" curation test for
+	// the full round trip through a commit).
+	await expect(mainTree(page).getByText('Alpha')).toHaveCount(0);
 });
 
 test('drag a folder onto another folder reparents it', async ({ page }) => {
-	const put = viewPut(page);
+	const badge = changeBadge(page);
 	await pointerDragDrop(page, row(page, 'Grouped'), row(page, 'Target'));
-	const body = (await put).postDataJSON() as { folders: Folder[] };
-	expect(findFolder(body.folders, 'Grouped')).toBeUndefined();
-	expect(findFolder(findFolder(body.folders, 'Target')!.folders, 'Grouped')).toBeDefined();
+
+	await expect(badge).toContainText('1 change');
+	// "Grouped" is no longer top-level; expanding "Target" reveals it nested one
+	// level down (aria-level 2 instead of the original top-level 1).
+	await expandFolder(page, 'Target');
+	await expect(row(page, 'Grouped')).toHaveAttribute('aria-level', '2');
 });
 
 test('multi-selected elements all move on a single drag', async ({ page }) => {
@@ -169,14 +191,18 @@ test('multi-selected elements all move on a single drag', async ({ page }) => {
 	// one row from each section before dragging.
 	await expandExcludedPool(page);
 	await expandFolder(page, 'Grouped'); // reveal placed Alpha in the in-view tree
-	const mainTree = page.getByRole('tree', { name: /containment tree/i });
 	const pool = page.getByRole('tree', { name: /excluded elements/i });
-	await mainTree.getByText('Alpha').click({ modifiers: ['ControlOrMeta'] });
+	await mainTree(page)
+		.getByText('Alpha')
+		.click({ modifiers: ['ControlOrMeta'] });
 	await pool.getByText('Beta').click({ modifiers: ['ControlOrMeta'] });
 
-	const put = viewPut(page);
+	const badge = changeBadge(page);
 	await pointerDragDrop(page, row(page, 'Beta'), row(page, 'Target'));
-	const body = (await put).postDataJSON() as { folders: Folder[] };
-	const target = findFolder(body.folders, 'Target')!;
-	expect(target.elements).toEqual(expect.arrayContaining([ALPHA, BETA]));
+
+	// Two elements moved in one gesture -> two staged view ops.
+	await expect(badge).toContainText('2 change');
+	await expandFolder(page, 'Target');
+	await expect(row(page, 'Alpha')).toHaveAttribute('aria-level', '2');
+	await expect(row(page, 'Beta')).toHaveAttribute('aria-level', '2');
 });
