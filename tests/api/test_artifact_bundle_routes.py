@@ -105,3 +105,64 @@ def test_viewer_can_export_and_preview(client: TestClient) -> None:
     # NOTE: a 403-vs-404 assertion on POST /artifacts/import belongs to Task 5
     # (the route doesn't exist yet); adding it here would make this test
     # order-dependent on route-mounting across tasks.
+
+
+def _bundle_body(artifacts: list[dict]) -> dict:
+    return {
+        "format": BUNDLE_FORMAT,
+        "exported_at": "2026-08-08T00:00:00+00:00",
+        "source_project": {"id": "src", "name": "Source"},
+        "roots": [a["id"] for a in artifacts],
+        "artifacts": artifacts,
+    }
+
+
+def test_import_plan_mixed_actions(client: TestClient) -> None:
+    _mk(client, "code_snippet", "s", SNIP)
+    other = {"schema_version": 1, "language": "python", "code": "def value(el):\n    return 1\n"}
+    r = client.post(
+        papi("/artifacts/import/plan"),
+        json=_bundle_body(
+            [
+                {"id": "b1", "kind": "code_snippet", "name": "s", "payload": SNIP},
+                {"id": "b2", "kind": "code_snippet", "name": "s2", "payload": other},
+                {"id": "b3", "kind": "hologram", "name": "h", "payload": {}},
+            ]
+        ),
+        headers=AUTH_HEADERS,
+    )
+    assert r.status_code == 200, r.text
+    plan = r.json()
+    actions = {e["bundle_id"]: e["action"] for e in plan["entries"]}
+    assert actions == {"b1": "reuse", "b2": "create"}
+    assert [sk["bundle_id"] for sk in plan["skipped"]] == ["b3"]
+
+
+def test_import_plan_malformed_envelope_422(client: TestClient) -> None:
+    r = client.post(
+        papi("/artifacts/import/plan"),
+        json={"format": "wrong/v9", "artifacts": []},
+        headers=AUTH_HEADERS,
+    )
+    assert r.status_code == 422
+
+
+def test_import_plan_is_a_write_for_viewers(client: TestClient) -> None:
+    # /artifacts/import/plan is NOT in the read-only allowlist (spec decision:
+    # planning is part of the write flow). Reuse the viewer helper from the
+    # Task 3 viewer test; expect 403.
+    gen = db.get_db()
+    s = next(gen)
+    try:
+        tenancy.upsert_user(s, "viewer-user", "")
+        tenancy.add_member(s, DEFAULT_PROJECT_ID, "viewer-user", Role.viewer)
+    finally:
+        gen.close()
+    viewer_headers = {"x-user-id": "viewer-user", "x-user-email": "viewer@example.com"}
+
+    r = client.post(
+        papi("/artifacts/import/plan"),
+        json=_bundle_body([]),
+        headers=viewer_headers,
+    )
+    assert r.status_code == 403, r.text

@@ -2,7 +2,10 @@
 
 Export/preview read ONLY artifact rows (never the in-memory model), so they
 take no session dependency and sit in the read-only POST allowlist — viewers
-may export. Import (plan + confirm) is Task 4/5."""
+may export. Import plan (this module) is advisory and also reads only, but
+deliberately sits OUTSIDE the read-only allowlist because planning is part
+of the write flow (a viewer must not be able to kick one off). Import
+confirm is Task 5."""
 
 from __future__ import annotations
 
@@ -11,11 +14,14 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session as DbSession
 
 from ..artifact_bundle import (
+    ArtifactBundle,
     ExportPreviewArtifact,
     ExportPreviewResponse,
     ExportRequest,
+    ImportPlan,
     build_bundle,
     compute_closure,
+    derive_plan,
 )
 from ..authz import require_membership
 from ..db import get_db
@@ -58,3 +64,15 @@ def export_preview(
         ],
         dangling_refs=closure.dangling_refs,
     )
+
+
+@router.post("/artifacts/import/plan", response_model=ImportPlan)
+def import_plan(
+    bundle: ArtifactBundle,
+    project_id: str,
+    _membership: Membership = Depends(require_membership),
+    db: DbSession = Depends(get_db),
+) -> ImportPlan:
+    """Advisory resolution plan; writes nothing. Deliberately NOT in the
+    read-only allowlist — planning an import is part of the write flow."""
+    return derive_plan(db, project_id, bundle)
