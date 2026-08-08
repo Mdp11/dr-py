@@ -1259,11 +1259,14 @@ def revert_commit(
                 detail="artifact/view ops reached the revert applier",
             )
         res = _apply_batch(model, combined, restore=True)
+        # Same ledger create_commit uses (see _CommitUnwind), narrowed to the
+        # model-only subset: revert refuses artifact/view batches above, so
+        # view_res/created_view stay at their defaults and are never touched.
+        unwind = _CommitUnwind(session, db, model, model_res=res)
         scoped = default_pipeline().validate(model, res.dirty.to_scope())
         structural = [i for i in scoped if i.category is IssueCategory.STRUCTURAL]
         if structural:
-            _rollback(model, res.inverse_units)
-            session.invalidate_derived_caches()  # rolled back in place; A1/I1
+            unwind.unwind()  # undo every live half — see _CommitUnwind
             return JSONResponse(
                 status_code=422,
                 content={
@@ -1288,9 +1291,11 @@ def revert_commit(
                 id_map=dict(res.id_map),
             )
         )
+        unwind.rev_bumped = True
         commit_id = uuid.uuid4().hex
         message = payload.message or f"Revert to rev {payload.target_rev}"
         issues_json = [IssueOut.from_core(i).model_dump() for i in conformance]
+        unwind.db_staged = True
         try:
             persisted = _persist_commit(
                 db,
@@ -1306,11 +1311,7 @@ def revert_commit(
                 _issues=issues_json,
             )
         except Exception as exc:
-            _rollback(model, res.inverse_units)
-            session.model_rev -= 1
-            session.invalidate_derived_caches()  # rolled back in place; A1/I1
-            session.op_log.pop()
-            db.rollback()
+            unwind.unwind()  # undo every live half — see _CommitUnwind
             raise HTTPException(
                 status_code=500, detail="failed to persist commit"
             ) from exc
