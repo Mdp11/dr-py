@@ -221,7 +221,9 @@
 	// View-discard banner: a peer's change made a staged view edit unreplayable,
 	// so `refreshView()` dropped the whole staged-view journal (Task 2). Unlike
 	// the other banners above this one has no recovery action — the edits are
-	// already gone — so it is purely informational, dismissed on read.
+	// already gone — so it is purely informational, dismissed by the user
+	// (the store keeps it live until the explicit Dismiss click; that survival
+	// across the interim is the whole point).
 	const viewDiscardNotice = $derived(getViewDiscardNotice());
 
 	// Rebind is non-destructive: only the metamodel pointer and conformance issues change;

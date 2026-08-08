@@ -287,10 +287,12 @@ gesture the app itself drives (folder create/rename/move/delete, element and
 artifact placement, drag-and-drop, the sidebar's Clear-view action): every
 structural change to the view goes out as a `ViewOp` and reaches the server
 only via `POST /commits`, the same endpoint model and artifact edits commit
-through. (`PUT /view/snapshot` and `DELETE /view` still exist server-side for
-the frontend migration window — see CLAUDE.md — but nothing in this client
-calls them any more except the e2e test harness's own fixture-loading helper,
-which talks to the API directly to seed a project's starting content.)
+through. (`PUT /view/snapshot` and `DELETE /view` are retired — see
+CLAUDE.md's "View ops (artefacts revamp Phase 2)" section — only `GET /view`
+remains. The e2e test harness's fixture-loading helper, which talks to the
+API directly to seed a project's starting content, seeds the view the same
+way the client does: a `view.*` op batch through `POST /commits`, under a
+`folder:root` lease.)
 
 - **Three staged buffers, three different shapes — and that difference is
   load-bearing, not incidental.** The model buffer (`lib/state/ops.ts`'s
