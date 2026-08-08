@@ -208,6 +208,11 @@ export { stageSnippetOps, type StageOutcome } from './snippet-stage';
 export { lockBadgeFor, type LockBadge } from './lock-badge';
 export { getLockNotice, setLockNotice } from './lock-notice.svelte';
 export {
+	getViewDiscardNotice,
+	setViewDiscardNotice,
+	clearViewDiscardNotice
+} from './view-discard-notice.svelte';
+export {
 	addSearchCriterion,
 	availableCriterionTypes,
 	clearSearchCriteria,

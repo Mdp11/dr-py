@@ -365,10 +365,14 @@ which talks to the API directly to seed a project's starting content.)
   peer's change genuinely conflicts — the folder we renamed is gone, …), the
   WHOLE journal is dropped, not the offending op: the journal is ordered, so a
   partial prefix is not a state the user ever asked for. The drop hands the
-  journal's `folder:` leases back and announces itself through the global lock
-  notice (`setLockNotice`, rendered by the StatusBar) — a knowingly transient
-  channel for a destructive event; a dismissable banner is the intended
-  follow-up. Both no-journal paths stay free: own-commit and discard each
+  journal's `folder:` leases back and announces itself through
+  `view-discard-notice.svelte.ts`, a dedicated leaf store rendered as a
+  dismissable banner on the project page (Task 2 of the artefacts-Phase-2
+  follow-ups) — it persists until the user dismisses it, unlike the global
+  lock notice (`setLockNotice`) it deliberately does NOT reuse: that channel
+  is TRANSIENT (the next successful lease gate clears it via `noticed()` in
+  edit-gate), too thin for a destructive event the user may not be looking at
+  the screen for. Both no-journal paths stay free: own-commit and discard each
   empty the journal BEFORE the refetch fires, so the replay is a no-op there.
 - **View discard is all-or-nothing**, unlike the model/artifact buffers'
   per-row revert: the DiffDrawer's View tab renders the journal read-only (no
@@ -870,6 +874,9 @@ src/
                         to its required locks and gates the mutation;
                         lock-badge.ts — per-row lock badge derivation;
                         lock-notice.svelte.ts — transient lock-conflict notice;
+                        view-discard-notice.svelte.ts — durable "staged view
+                        edits were discarded" banner notice (survives a
+                        successful lease acquisition, unlike lock-notice.svelte.ts);
                         api/checkout.ts — the locks + commits REST client;
                         history.svelte.ts — commit-list store (paged
                         GET /commits), rev→ModelOut reconstruction cache,
