@@ -36,6 +36,7 @@ const {
 } = await import('../view.svelte');
 const { getStagedViewEntries, getStagedViewOps } = await import('../view-edits.svelte');
 const checkoutStore = await import('../checkout.svelte');
+const { getLockNotice, setLockNotice } = await import('../lock-notice.svelte');
 
 function seedView(view: View): void {
 	vi.spyOn(viewApi, 'getView').mockResolvedValue({ view, warnings: [] });
@@ -486,5 +487,110 @@ describe('discardViewChanges', () => {
 		expect(getStagedViewOps()).toHaveLength(0);
 		expect(getSpy).toHaveBeenCalled();
 		expect(getView()!.folders[0].name).toBe('Folder 1'); // restored from server truth
+	});
+});
+
+describe('stagePlaceElementsAt — cursor advance on a same-folder multi-select', () => {
+	const fourEl = (): View => ({
+		name: 'v',
+		folders: [{ id: 'f1', name: 'F1', folders: [], elements: ['a', 'b', 'c', 'd'], artifacts: [] }],
+		artifacts: []
+	});
+
+	// Regression: `at` used to advance after EVERY emitted op, including one
+	// whose post-pop correction already advanced it — so the second id landed
+	// one slot short and, for the last id, did not move at all.
+	it('holds the cursor after a pre-cursor pop (the [a,d] → index 2 repro)', async () => {
+		seedView(fourEl());
+		await refreshView();
+		vi.spyOn(editGate, 'folderEditLock').mockResolvedValue(true);
+
+		const ok = await stagePlaceElementsAt('f1', ['a', 'd'], 2);
+
+		expect(ok).toBe(true);
+		expect(getStagedViewOps()).toEqual([
+			// a sat at 0, BELOW the cursor: post-pop index 1, and the cursor holds…
+			{ kind: 'move_element', element_id: 'a', from_folder_id: 'f1', to_folder_id: 'f1', index: 1 },
+			// …so d (now at 3, above the cursor) still targets slot 2, not 3.
+			{ kind: 'move_element', element_id: 'd', from_folder_id: 'f1', to_folder_id: 'f1', index: 2 }
+		]);
+		expect(getView()!.folders[0].elements).toEqual(['b', 'a', 'd', 'c']);
+	});
+
+	it('advances the cursor when the pop was AFTER it (no correction fired)', async () => {
+		seedView(fourEl());
+		await refreshView();
+		vi.spyOn(editGate, 'folderEditLock').mockResolvedValue(true);
+
+		const ok = await stagePlaceElementsAt('f1', ['c', 'd'], 0);
+
+		expect(ok).toBe(true);
+		expect(getStagedViewOps()).toEqual([
+			{ kind: 'move_element', element_id: 'c', from_folder_id: 'f1', to_folder_id: 'f1', index: 0 },
+			{ kind: 'move_element', element_id: 'd', from_folder_id: 'f1', to_folder_id: 'f1', index: 1 }
+		]);
+		expect(getView()!.folders[0].elements).toEqual(['c', 'd', 'a', 'b']);
+	});
+
+	it('omitting the index appends, and emits no `index` key at all', async () => {
+		seedView(fourEl());
+		await refreshView();
+		vi.spyOn(editGate, 'folderEditLock').mockResolvedValue(true);
+
+		const ok = await stagePlaceElementsAt('f1', ['x']);
+
+		expect(ok).toBe(true);
+		const op = getStagedViewOps()[0];
+		expect(op).toMatchObject({ kind: 'place_element', element_id: 'x', folder_id: 'f1' });
+		// the append sentinel is an ABSENT index, never a huge literal
+		expect(JSON.parse(JSON.stringify(op))).not.toHaveProperty('index');
+		expect(getView()!.folders[0].elements).toEqual(['a', 'b', 'c', 'd', 'x']);
+	});
+});
+
+describe('refreshView re-applies the staged journal on top of server truth', () => {
+	beforeEach(() => {
+		setLockNotice(null);
+		vi.spyOn(checkoutStore, 'releaseFolderLeaseIfUnneeded').mockResolvedValue(undefined);
+	});
+
+	it('keeps my staged ops applied when a peer touched a DIFFERENT folder', async () => {
+		seedView(baseView());
+		await refreshView();
+		vi.spyOn(editGate, 'folderEditLock').mockResolvedValue(true);
+		await stageRenameFolder('f1', 'Mine');
+		expect(getStagedViewOps()).toHaveLength(1);
+
+		// peer renamed f2 and committed; our refetch sees their truth
+		const peerView = baseView();
+		peerView.folders[1].name = 'Theirs';
+		seedView(peerView);
+		await refreshView();
+
+		expect(getView()!.folders[0].name).toBe('Mine'); // my staged rename survived
+		expect(getView()!.folders[1].name).toBe('Theirs'); // their commit landed
+		expect(getStagedViewOps()).toHaveLength(1); // journal intact
+		expect(getLockNotice()).toBeNull();
+	});
+
+	it('drops the WHOLE journal and notices when a staged op no longer applies', async () => {
+		seedView(baseView());
+		await refreshView();
+		vi.spyOn(editGate, 'folderEditLock').mockResolvedValue(true);
+		await stageRenameFolder('f1', 'Mine1');
+		await stageRenameFolder('f2', 'Mine2'); // this one WOULD still apply cleanly
+		expect(getStagedViewOps()).toHaveLength(2);
+
+		// peer DELETED f1 out from under us: the first rename can no longer apply
+		const peerView = baseView();
+		peerView.folders.splice(0, 1);
+		seedView(peerView);
+		await refreshView();
+
+		expect(getStagedViewOps()).toHaveLength(0); // all-or-nothing, not per-op
+		expect(getView()!.folders.map((f) => f.name)).toEqual(['Folder 2']); // server truth
+		expect(getLockNotice()).toMatch(/view changed/i);
+		expect(checkoutStore.releaseFolderLeaseIfUnneeded).toHaveBeenCalledWith('f1');
+		expect(checkoutStore.releaseFolderLeaseIfUnneeded).toHaveBeenCalledWith('f2');
 	});
 });

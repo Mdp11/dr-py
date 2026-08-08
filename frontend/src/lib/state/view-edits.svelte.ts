@@ -46,15 +46,50 @@ export function clearStagedView(): void {
 	_journal = [];
 }
 
-/** User-discard path. The journal has no per-entry listeners to notify
- * (no editor holds a view op open); the caller (view.svelte.ts's
- * discardViewChanges) refetches GET /view and releases folder leases. */
-export function discardStagedView(): void {
+/**
+ * User-discard path — the ONE wipe that also RECONCILES `_view`.
+ *
+ * The view store's optimistic applies are BAKED INTO its `_view` (see
+ * view.svelte.ts's header): dropping the journal without refetching leaves the
+ * sidebar showing folders/renames/placements that exist nowhere and are no
+ * longer staged, and the next gesture computes its guards and indices against
+ * that phantom tree — staging an op naming a folder id the server never saw,
+ * which 422s at commit long after the user was told the gesture succeeded.
+ *
+ * So the refetch is enforced HERE, in the store, not at the call sites: every
+ * discard surface (view.svelte.ts's `discardViewChanges`, checkout's
+ * `discardAll`, and any future third one) goes through this function and gets
+ * the reconciliation for free. Awaiting the listeners — rather than firing and
+ * forgetting — is what lets a caller `await discardStagedView()` and know the
+ * tree is server-truth again before it does anything else.
+ */
+export async function discardStagedView(): Promise<void> {
+	_journal = [];
+	for (const cb of [..._discardListeners]) await cb();
+}
+
+/** SILENT wipe: no discard listeners, no refetch. Only for callers that own
+ * the `_view` reconciliation themselves — project teardown (`clearViewState`,
+ * which nulls `_view` outright) and `refreshView`'s conflict-drop (already
+ * inside a refetch; notifying there would re-enter it). Every other discard
+ * surface wants {@link discardStagedView}. */
+export function resetViewEdits(): void {
 	_journal = [];
 }
 
-export function resetViewEdits(): void {
-	_journal = [];
+const _discardListeners: (() => void | Promise<void>)[] = [];
+
+/** Subscribe to {@link discardStagedView}. view.svelte.ts registers
+ * `refreshView` here (EAGERLY, at module scope — unlike the realtime tap it
+ * sits beside, this module has no back-edge into view.svelte.ts, so there is
+ * no cycle to defer past). Mirrors {@link onViewCommitted}'s shape; lives here
+ * for the same reason — checkout must never import the view store. */
+export function onViewDiscarded(cb: () => void | Promise<void>): () => void {
+	_discardListeners.push(cb);
+	return () => {
+		const i = _discardListeners.indexOf(cb);
+		if (i !== -1) _discardListeners.splice(i, 1);
+	};
 }
 
 const _commitListeners: (() => void)[] = [];

@@ -40,9 +40,11 @@ import {
 	discardStagedView,
 	getStagedViewOps,
 	onViewCommitted,
+	onViewDiscarded,
 	resetViewEdits,
 	stageViewOp
 } from './view-edits.svelte';
+import { setLockNotice } from './lock-notice.svelte';
 import { onCommitEvent } from './realtime.svelte';
 import { getCachedElements } from './model.svelte';
 import { elementDisplayName } from '$lib/util/element-name';
@@ -87,18 +89,92 @@ export function clearViewState(): void {
 	resetViewEdits();
 }
 
-/** Load the active view from the backend (e.g. on app boot, or as the
- * post-commit/post-discard reconciliation step — see the module-scope
- * subscriptions at the bottom of this file). */
+/**
+ * Load the active view from the backend (app boot, or the post-commit /
+ * post-discard reconciliation step — see the module-scope subscriptions at the
+ * bottom of this file) and REBUILD `_view` as `server truth + staged journal`.
+ *
+ * The re-apply is the point. `folder:` leases are PER FOLDER, so two users
+ * editing different folders concurrently is an explicitly supported scenario:
+ * a peer's `view` commit fires the realtime tap below and refetches, and a
+ * plain `setState(res.view, …)` would snap the sidebar back to server truth
+ * while THIS client's journal still held its own ops — the tree would disagree
+ * with what the user is about to commit, and the next mutator's guards would
+ * run against the reverted tree and emit an op the server 422s. Replaying the
+ * journal on top of the fresh blob keeps the two in step: `_view` is once again
+ * exactly "what the server has, plus what I have staged".
+ *
+ * When a replayed op THROWS, the peer's change genuinely conflicts with what we
+ * staged (the folder we renamed is gone, the element we moved was moved out
+ * from under us, …). We then drop the WHOLE journal, not the offending op:
+ * this is an ORDERED journal — `create_folder` then `place_element` into it
+ * then `rename_folder` — so plucking one op out of the middle is unsound, and a
+ * partially-replayed prefix is not a state the user ever asked for. The drop is
+ * announced through the global lock notice (see below) and the journal's folder
+ * leases are handed back.
+ *
+ * Both no-journal paths stay free: the own-commit path clears the journal
+ * BEFORE notifying (checkout's `clearStagedView()` precedes
+ * `notifyViewCommitted()`), and `discardStagedView` empties it before the
+ * discard listener fires — in both, `getStagedViewOps()` is already empty here
+ * and this is a plain `setState`.
+ */
 export async function refreshView(): Promise<void> {
 	try {
 		const res = await viewApi.getView();
-		setState(res.view, res.warnings);
+		const staged = getStagedViewOps();
+		let next = res.view;
+		// A null `res.view` (the project has no view at all) with a non-empty
+		// journal is the degenerate conflict: there is nothing left to replay
+		// onto, so the staged ops are unsalvageable by definition.
+		let conflicted = staged.length > 0 && next === null;
+		if (next !== null) {
+			try {
+				for (const op of staged) next = applyViewOp(next, op);
+			} catch {
+				// All-or-nothing: fall back to bare server truth and drop the journal.
+				next = res.view;
+				conflicted = true;
+			}
+		}
+		setState(next, res.warnings);
+		// Guarded on its own: a throw escaping here would land in the OUTER catch
+		// below, which nulls `_view` — turning a recoverable journal conflict into
+		// a blank sidebar. The unwind is best-effort by construction anyway (the
+		// journal is already gone by its first await).
+		if (conflicted) await dropConflictedJournal().catch(() => {});
 	} catch {
 		setState(null, []);
 	} finally {
 		_viewResolved = true;
 	}
+}
+
+/**
+ * The unwind half of {@link refreshView}'s conflict case: wipe the journal and
+ * release the folder leases it was holding, then tell the user.
+ *
+ * Uses the SILENT `resetViewEdits()` rather than `discardStagedView()` on
+ * purpose — we are already inside a refetch, and the notifying wipe would
+ * re-enter `refreshView` from its own listener.
+ *
+ * The notice goes out through `setLockNotice`, the global notice channel these
+ * stores already share (edit-gate routes every lease refusal to it, and the
+ * StatusBar renders it in warning colour). It is the right SURFACE — this is
+ * exactly the "someone else got there first" family of message — but it is a
+ * TRANSIENT line: the next successful gate clears it (`noticed()` in
+ * edit-gate). That is a knowingly thin channel for a destructive event; a
+ * dismissable banner alongside the conflict/rebind ones in the project page
+ * would be better, and is deliberately left as a follow-up rather than a new
+ * notice mechanism smuggled into a fix wave.
+ */
+async function dropConflictedJournal(): Promise<void> {
+	const rids = stagedFolderLeaseIds();
+	resetViewEdits();
+	for (const id of rids) await releaseFolderLeaseIfUnneeded(id);
+	setLockNotice(
+		'The view changed while you were editing it — your unsaved folder changes were discarded.'
+	);
 }
 
 // ----- id-addressed helpers shared by the mutators below -----
@@ -218,16 +294,33 @@ export async function stageMoveFolder(id: string, toParentId: string): Promise<b
  * every id in `ids` to `folderId` at `index`, or (`folderId === null`) exclude
  * every PLACED id (an already-unplaced id is skipped — nothing to exclude).
  *
+ * `index` is where the FIRST id lands; omit it to APPEND (the `ViewOp`-level
+ * sentinel — `applyViewOp`'s `clampIndex` reads `undefined` as "end of list",
+ * mirroring `api/view_ops.py`'s `_clamped`, and an omitted key is what goes out
+ * in the commit JSON). Never spell append as a huge literal index: the server
+ * would clamp it, but the raw number would be journaled forever.
+ *
  * Decision 11 index math: one op is emitted PER ID, applied locally between
  * emissions via `applyViewOp`, so each successive op's `index` reflects the
- * state the server will see replaying the batch in order. A same-folder
- * reorder additionally needs the POST-POP position: if the id's current index
- * is BELOW the requested index, popping it first shifts everything after it
- * up by one, so the requested index must be decremented by one to land in the
- * same visual slot the user dropped on (`applyViewOp`'s own `clampIndex` is a
- * distinct, out-of-range safety net — it does not replace this translation).
- * Successive ids in the selection insert at `index`, `index + 1`, `index + 2`,
- * … (an id that is skipped or excluded does not consume a slot).
+ * state the server will see replaying the batch in order. Two corrections ride
+ * on a SAME-FOLDER reorder, and they are two halves of one fact:
+ *
+ *  - POST-POP position. If the id's current index is BELOW the cursor, popping
+ *    it first shifts everything after it up by one, so the emitted index is
+ *    `at - 1` to land in the visual slot the user dropped on. (`clampIndex` is
+ *    a distinct out-of-range safety net — it does not replace this.)
+ *  - CURSOR HOLD. That same pop already advanced the cursor for us: the slot
+ *    the next id should take is still numbered `at`, so `at` must NOT be
+ *    incremented after such an op. Incrementing unconditionally is an
+ *    off-by-one that silently drops later ids of a multi-select one slot short
+ *    — folder `[a,b,c,d]`, select `[a,d]`, drop at 2 yields `[b,a,c,d]` (d
+ *    never moves) instead of `[b,a,d,c]`. Note the client mirror computes the
+ *    same wrong answer as the server would, so the commit SUCCEEDS: the only
+ *    symptom is a wrong result the user sees.
+ *
+ * Every other emission (a `place_element`, or a `move_element` from another
+ * folder / from below the cursor) does consume a slot, so `at` advances by one.
+ * An id that is skipped or excluded consumes nothing.
  *
  * Locking: ONE `folderEditLock` call up front, covering the destination (when
  * given) plus every DISTINCT home folder among the moving/excluded ids —
@@ -236,7 +329,7 @@ export async function stageMoveFolder(id: string, toParentId: string): Promise<b
 export async function stagePlaceElementsAt(
 	folderId: string | null,
 	ids: string[],
-	index: number
+	index?: number
 ): Promise<boolean> {
 	if (_view === null) throw new Error('No active view');
 	// preserve given order, drop duplicates within the incoming selection
@@ -252,9 +345,12 @@ export async function stagePlaceElementsAt(
 	if (!(await folderEditLock([...targets]))) return false; // gate showed the notice
 
 	const destName = folderId === null ? null : folderDisplayName(_view, folderId);
-	let at = index;
+	let at = index; // undefined = append; stays undefined for the whole batch
 	for (const id of selection) {
 		const home = homes.get(id) ?? null;
+		// True when this id's op popped it from BEFORE the cursor in the SAME
+		// folder — that pop already advanced the cursor, so `at` must hold.
+		let cursorHeld = false;
 		if (folderId === null) {
 			if (home === null) continue; // already unplaced: no-op for this id
 			const op: ViewOp = { kind: 'remove_element', element_id: id, folder_id: home };
@@ -269,9 +365,12 @@ export async function stagePlaceElementsAt(
 			stageViewOp(op, `Placed ${elLabel(id)} in "${destName}"`);
 		} else {
 			let requestedIndex = at;
-			if (home === folderId) {
+			if (home === folderId && at !== undefined) {
 				const oldIndex = findFolderById(_view, folderId)!.elements.indexOf(id);
-				if (oldIndex !== -1 && oldIndex < at) requestedIndex = at - 1; // post-pop math
+				if (oldIndex !== -1 && oldIndex < at) {
+					requestedIndex = at - 1; // post-pop math
+					cursorHeld = true; // …and the pop already advanced the cursor
+				}
 			}
 			const op: ViewOp = {
 				kind: 'move_element',
@@ -283,14 +382,14 @@ export async function stagePlaceElementsAt(
 			_view = applyViewOp(_view, op);
 			stageViewOp(op, `Moved ${elLabel(id)} to "${destName}"`);
 		}
-		at += 1;
+		if (at !== undefined && !cursorHeld) at += 1;
 	}
 	return true;
 }
 
 /** Sugar for excluding one element from wherever it is placed. */
 export async function stageRemoveElement(elementId: string): Promise<boolean> {
-	return stagePlaceElementsAt(null, [elementId], 0);
+	return stagePlaceElementsAt(null, [elementId]);
 }
 
 /**
@@ -427,28 +526,49 @@ function viewOpFolderIds(op: ViewOp): string[] {
 	}
 }
 
-/**
- * User-discard path: wipe the staged view-op journal, hand back every folder
- * lease it needed (that is no longer needed by anything else — model/artifact
- * staged ops never name a `folder:` resource, so this is unconditional in
- * practice), then refetch server truth. The optimistic applies are already
- * baked into `_view`, so `refreshView()` — not a local undo — is what restores
- * it.
- *
- * `rids` is captured BEFORE `discardStagedView()` empties the journal: once
- * empty, there is nothing left to walk for folder ids.
- */
-export async function discardViewChanges(): Promise<void> {
-	// ephemeral bookkeeping for this one call, not reactive state
+/** Every DISTINCT folder id the CURRENT journal holds a lease for — the set to
+ * hand back when the journal goes away. Must be read BEFORE the journal is
+ * wiped: once empty there is nothing left to walk. */
+function stagedFolderLeaseIds(): Set<string> {
+	// ephemeral bookkeeping for one call, not reactive state
 	// eslint-disable-next-line svelte/prefer-svelte-reactivity
 	const rids = new Set<string>();
 	for (const op of getStagedViewOps()) {
 		for (const id of viewOpFolderIds(op)) rids.add(id);
 	}
-	discardStagedView();
-	for (const id of rids) await releaseFolderLeaseIfUnneeded(id);
-	await refreshView();
+	return rids;
 }
+
+/**
+ * User-discard path: wipe the staged view-op journal, hand back every folder
+ * lease it needed (that is no longer needed by anything else — model/artifact
+ * staged ops never name a `folder:` resource, so this is unconditional in
+ * practice), and refetch server truth. The optimistic applies are already
+ * baked into `_view`, so a refetch — not a local undo — is what restores it.
+ *
+ * That refetch is NOT issued here: `discardStagedView()` fires the discard
+ * listener this module registers below, which is `refreshView`. Enforcing it
+ * in the journal store rather than at this one call site is what stops the
+ * OTHER discard surface (checkout's `discardAll`) from silently skipping it —
+ * see `discardStagedView`'s docstring.
+ */
+export async function discardViewChanges(): Promise<void> {
+	const rids = stagedFolderLeaseIds();
+	await discardStagedView(); // empties the journal, then refetches via onViewDiscarded
+	for (const id of rids) await releaseFolderLeaseIfUnneeded(id);
+}
+
+// Post-DISCARD reconciliation: registered EAGERLY, at module scope, unlike the
+// two commit taps below. Those are deferred past a macrotask because they touch
+// realtime.svelte.ts, which sits in a real import cycle with this module (see
+// the long comment below); view-edits.svelte.ts imports nothing from here — it
+// imports only the `ViewOp` TYPE from ops.ts — so it is fully evaluated before
+// this module's body runs and there is no TDZ hazard to defer past. Eager also
+// matters for correctness: `discardStagedView()` may be called synchronously in
+// the same tick as module load (a test, or a discard on a freshly-booted page),
+// and a listener still sitting in a pending setTimeout would miss it, silently
+// reinstating the very bug this registration exists to prevent.
+onViewDiscarded(() => refreshView());
 
 // Post-commit reconciliation (spec Decision 6): a commit that carried view
 // ops refetches server truth ONCE (concretizes tmp_ folder ids — no client

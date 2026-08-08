@@ -753,7 +753,12 @@ export function discardElementCascade(id: string): Promise<void> {
 export async function discardAll(): Promise<void> {
 	revertAllStaged();
 	discardAllStagedArtifacts(); // fires per-entry discard listeners (drafts re-dirty)
-	discardStagedView();
+	// AWAITED: the view journal's optimistic applies are baked into the view
+	// store's `_view`, so wiping the journal without refetching would leave the
+	// sidebar showing a tree that exists nowhere. `discardStagedView` fires the
+	// view store's discard listener (a GET /view) to reconcile — that is why it
+	// is async and why this must not be a bare fire-and-forget call.
+	await discardStagedView();
 	const keepResources = openArtifactResources();
 	// ephemeral partition bookkeeping, not reactive state
 	// eslint-disable-next-line svelte/prefer-svelte-reactivity

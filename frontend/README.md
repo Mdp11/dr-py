@@ -353,13 +353,50 @@ which talks to the API directly to seed a project's starting content.)
   realtime feed (`onCommitEvent`, gated on `scope.includes('view')`). An
   own-commit can fire both (the feed echoes back), which is harmless — just
   two small `GET /view` calls instead of one.
+- **`refreshView()` rebuilds `_view` as `server truth + staged journal`, on
+  EVERY refetch path.** This is what makes the peer-commit refetch above safe:
+  `folder:` leases are per folder, so two users editing DIFFERENT folders
+  concurrently is explicitly supported, and a bare `setState(res.view, …)`
+  would snap this client's sidebar back to server truth while its journal
+  still held its own ops — the tree would then disagree with what the user is
+  about to commit, and the next mutator's GUARD phase would run against the
+  reverted tree and emit an op the server 422s. So the journal is replayed
+  through `applyViewOp` on top of the fresh blob. If a replayed op THROWS (the
+  peer's change genuinely conflicts — the folder we renamed is gone, …), the
+  WHOLE journal is dropped, not the offending op: the journal is ordered, so a
+  partial prefix is not a state the user ever asked for. The drop hands the
+  journal's `folder:` leases back and announces itself through the global lock
+  notice (`setLockNotice`, rendered by the StatusBar) — a knowingly transient
+  channel for a destructive event; a dismissable banner is the intended
+  follow-up. Both no-journal paths stay free: own-commit and discard each
+  empty the journal BEFORE the refetch fires, so the replay is a no-op there.
 - **View discard is all-or-nothing**, unlike the model/artifact buffers'
   per-row revert: the DiffDrawer's View tab renders the journal read-only (no
   per-entry button) with ONE "Discard view changes" action
   (`discardViewChanges`), which wipes the whole journal, hands back every
   `folder:` lease it named, and refetches server truth — there is no local
   undo to fall back on, since the journal's entries are not independently
-  revertible (see the ordering rationale above).
+  revertible (see the ordering rationale above). **The refetch is enforced in
+  the STORE, not at the call site**: `discardStagedView()` is async and fires a
+  discard-listener registry (`onViewDiscarded`, which `view.svelte.ts`
+  subscribes to with `refreshView`), because the optimistic applies are baked
+  into `_view` and a discard surface that forgot to refetch would leave the
+  sidebar showing a tree that exists nowhere. There are two such surfaces —
+  `discardViewChanges` and checkout's global `discardAll()` — and the registry
+  is what keeps a third one from reintroducing the bug.
+- **Two page-level resets take the journal with them.** It is a module-scope
+  singleton whose ops name `folder:` ids that only mean anything for one
+  project at one rev, so `boot()` calls `clearViewState()` on every project
+  (re)entry (an in-SPA project switch must not offer project A's staged view
+  ops for commit into project B) and the conflict-recovery "Reload model"
+  handler calls `resetViewEdits()` alongside `resetCheckout()` (which drops
+  every `folder:` lease from the registry — a surviving journal would commit
+  with no folder tokens and take a hard 409 "required lock not held").
+- **`hasUnsavedWork()` counts the journal too** (`getStagedViewDepth()`).
+  Unlike tables/navigations/snippets, a view edit has no editor and therefore
+  no dirty DRAFT to be caught by — it goes straight from the gesture into the
+  journal — so without that term a view-only batch would slip past the
+  workspace unload guard that catches equivalent model and artifact batches.
 - **Deleting an artifact scrubs its view placements in the SAME commit
   batch.** `artifacts.svelte.ts`'s `removeArtifact` stages a `remove_artifact`
   view op per folder that currently places the artifact, ahead of the

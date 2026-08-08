@@ -1249,7 +1249,10 @@
 	async function onMoveToFolder(elementId: string, folderId: string | null): Promise<void> {
 		try {
 			if (folderId === null) await stageRemoveElement(elementId);
-			else await stagePlaceElementsAt(folderId, [elementId], Number.MAX_SAFE_INTEGER);
+			// No index: the context-menu "Move to folder…" has no drop position, so
+			// it APPENDS. Omitting the argument is the documented sentinel — passing
+			// a huge literal would be clamped by the server but journaled verbatim.
+			else await stagePlaceElementsAt(folderId, [elementId]);
 		} catch (err) {
 			console.error('Move element failed', err);
 		}

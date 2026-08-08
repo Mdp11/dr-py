@@ -171,6 +171,14 @@ test('drag a placed element to the view root unplaces it', async ({ page }) => {
 	// `remove_element` has no server-side effect until commit, so the pool
 	// stays stale until then (see view.spec.ts's "exclude" curation test for
 	// the full round trip through a commit).
+	//
+	// TODO(excluded-pool-gap): the SECOND half of that state is a known BUG this
+	// assertion PINS as current behaviour — Alpha is in neither the tree nor the
+	// pool, i.e. it has vanished from the UI until commit. This line stays
+	// `toHaveCount(0)` (Alpha correctly leaves the MAIN tree), but the sibling
+	// pool assertion in view.spec.ts must INVERT when the pool-injection fix
+	// lands, and this comment should go with it. Do not "fix" either test to
+	// keep it green — fix the pool.
 	await expect(mainTree(page).getByText('Alpha')).toHaveCount(0);
 });
 

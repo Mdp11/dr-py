@@ -456,6 +456,7 @@ export {
 	getStagedViewOps,
 	notifyViewCommitted,
 	onViewCommitted,
+	onViewDiscarded,
 	resetViewEdits,
 	stageViewOp,
 	type StagedViewEntry

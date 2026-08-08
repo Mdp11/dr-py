@@ -7,6 +7,7 @@ import {
 	emit,
 	getHeldTokens,
 	getStagedViewOps,
+	getView,
 	isCheckedOutByMe,
 	onViewCommitted,
 	openArtifactTab,
@@ -17,14 +18,18 @@ import {
 	resetCheckout,
 	resetModelStore,
 	resetViewEdits,
+	refreshView,
 	resetWorkspaceTabs,
 	seedElements,
 	setProjectInfo,
 	stageArtifactUpdate,
+	stageRenameFolder,
 	stageViewOp
 } from '../index';
 import * as api from '$lib/api/checkout';
-import type { CommitResponse } from '$lib/api/types';
+import * as viewApi from '$lib/api/view';
+import * as editGate from '../edit-gate';
+import type { CommitResponse, View } from '$lib/api/types';
 import type { ViewOp } from '../ops';
 
 /**
@@ -297,6 +302,34 @@ describe('discardAll wipes the view journal', () => {
 
 		expect(release).toHaveBeenCalledWith('t_folder_f1', undefined);
 		expect(getHeldTokens()).toEqual([]);
+	});
+
+	// Regression: `discardAll` used to wipe the journal and stop there. The view
+	// store's optimistic applies are BAKED INTO its `_view`, so the sidebar kept
+	// showing folders/renames/placements that were no longer staged and did not
+	// exist on the server — and the next gesture staged against that phantom
+	// tree, 422ing at commit. `discardStagedView` now owns the refetch (it fires
+	// the view store's discard listener), so every discard surface gets it.
+	it('refetches GET /view so `_view` stops showing the discarded ops', async () => {
+		mockAcquire();
+		vi.spyOn(api, 'releaseLock').mockResolvedValue(undefined);
+		const server: View = {
+			name: 'v',
+			folders: [{ id: 'f1', name: 'Original', folders: [], elements: [], artifacts: [] }],
+			artifacts: []
+		};
+		const getSpy = vi.spyOn(viewApi, 'getView').mockResolvedValue({ view: server, warnings: [] });
+		await refreshView();
+		vi.spyOn(editGate, 'folderEditLock').mockResolvedValue(true);
+		await stageRenameFolder('f1', 'Optimistic');
+		expect(getView()!.folders[0].name).toBe('Optimistic'); // baked in
+		getSpy.mockClear();
+
+		await discardAll();
+
+		expect(getSpy).toHaveBeenCalled();
+		expect(getStagedViewOps()).toEqual([]);
+		expect(getView()!.folders[0].name).toBe('Original'); // reconciled to server truth
 	});
 });
 

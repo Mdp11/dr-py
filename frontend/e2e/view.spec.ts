@@ -284,6 +284,12 @@ test('view curation: exclude a placed element back to the pool', async ({ page }
 	// instead of asserting the (currently absent) optimistic pool update.
 	await expect(tree(page).getByText('Alpha')).toHaveCount(0);
 	await expandPool(page);
+	// TODO(excluded-pool-gap): THIS ASSERTION PINS A KNOWN BUG AS CURRENT
+	// BEHAVIOUR. Between the staged `remove_element` and the commit, Alpha is
+	// in NEITHER the tree NOR the "Not in view" pool — it has vanished from the
+	// UI entirely, which is wrong. When the pool-injection fix lands (staged
+	// removals are injected into the pool client-side), this must INVERT to
+	// `toHaveCount(1)`. Do not "fix" the test to keep it green — fix the pool.
 	await expect(poolRow(page, 'Alpha')).toHaveCount(0);
 
 	await commitStaged(page);
