@@ -23,10 +23,10 @@ from __future__ import annotations
 
 import json
 from collections import deque
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session as DbSession
@@ -34,6 +34,7 @@ from sqlalchemy.orm import Session as DbSession
 from . import content
 from .artifact_kinds import extract_refs, get_spec
 from .db_models import ArtifactKind, ArtifactRow, Project
+from .schemas import TEMP_ID_PREFIX, CreateArtifactOp
 
 BUNDLE_FORMAT: Literal["datarover.artifact-bundle/v1"] = "datarover.artifact-bundle/v1"
 
@@ -141,6 +142,11 @@ class PlanEntry(BaseModel):
     name: str
     action: Literal["create", "reuse", "copy"]
     existing_id: str | None = None
+    #: the free name a COPY of this artifact would take. Set on reuse entries
+    #: too, not just copy ones: the client may flip reuse -> copy at confirm
+    #: time, and `build_import_ops` (which has no DB session) can only honor
+    #: that flip if the plan already reserved a DB-aware free name for it.
+    #: None only for "create", where the bundle's own name is already free.
     copy_name: str | None = None
 
 
@@ -246,6 +252,15 @@ def derive_plan(
         assert spec is not None  # filtered above
         normalized = _normalized_payload(kind, art.payload)
         rewritten = spec.rewrite_refs(normalized, tentative)
+        # Reserved for BOTH clash outcomes (see PlanEntry.copy_name): a reuse
+        # entry the user flips to copy needs a free name just as much as a
+        # proposed copy does, and only this loop can see the full name pool.
+        # Reserving unconditionally means an accepted reuse burns a suffix
+        # number nobody uses — harmless, and strictly safer than handing the
+        # same name to two entries that could both land.
+        names = _taken_names(kind)
+        copy_name = dedupe_name(names, art.name)
+        names.add(copy_name)
         # `existing.payload` is normalized too, not compared raw: real writes
         # already ran it through this same derive_metadata pass, so this is a
         # no-op for production rows, but it keeps the comparison honest for
@@ -258,12 +273,10 @@ def derive_plan(
                     name=art.name,
                     action="reuse",
                     existing_id=existing.id,
+                    copy_name=copy_name,
                 )
             )
             continue
-        names = _taken_names(kind)
-        copy_name = dedupe_name(names, art.name)
-        names.add(copy_name)
         entries.append(
             PlanEntry(
                 bundle_id=art.id,
@@ -275,3 +288,118 @@ def derive_plan(
             )
         )
     return ImportPlan(entries=entries, skipped=skipped)
+
+
+class StalePlanError(Exception):
+    """A decision references state the FRESH plan can't honor (target gone,
+    name newly clashing, unknown bundle id). The confirm route maps this to
+    409 + the fresh plan."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail)
+        self.detail = detail
+
+
+class ImportConfirmRequest(BaseModel):
+    bundle: ArtifactBundle
+    decisions: dict[str, Literal["create", "reuse", "copy"]] = Field(
+        default_factory=dict
+    )
+    copy_names: dict[str, str] = Field(default_factory=dict)
+    message: str = ""
+
+
+class CreatedEntry(BaseModel):
+    bundle_id: str
+    id: str
+    name: str
+
+
+class ReusedEntry(BaseModel):
+    bundle_id: str
+    existing_id: str
+
+
+class ImportConfirmResponse(BaseModel):
+    #: null when the import was a no-op (nothing to create)
+    rev: int | None
+    created: list[CreatedEntry] = Field(default_factory=list)
+    reused: list[ReusedEntry] = Field(default_factory=list)
+    skipped: list[SkippedEntry] = Field(default_factory=list)
+
+
+def build_import_ops(
+    plan: ImportPlan,
+    bundle: ArtifactBundle,
+    decisions: Mapping[str, str],
+    copy_names: Mapping[str, str],
+) -> tuple[list[CreateArtifactOp], list[ReusedEntry], dict[str, str]]:
+    """Turn a FRESH plan plus the client's decisions into one create batch.
+
+    Decide-and-pin: the plan the client decided against may be minutes old, so
+    every decision is re-checked against *plan* (re-derived at confirm time)
+    and anything it can no longer honor raises :class:`StalePlanError` rather
+    than being silently downgraded — the client re-renders and re-decides. The
+    "create" case is the load-bearing one: a peer claiming (kind, name) in the
+    meantime flips the fresh action to reuse/copy, and creating anyway would
+    trip ``uq_artifact_project_kind_name`` inside the commit.
+    """
+    entries = {e.bundle_id: e for e in plan.entries}
+    for bid in decisions:
+        if bid not in entries:
+            # Covers both "never in this bundle" and "the fresh plan SKIPPED
+            # it" (unknown/unregistered kind, invalid payload) — either way
+            # there is no entry to act on.
+            raise StalePlanError(f"decision for unknown/skipped artifact {bid!r}")
+
+    payloads = {a.id: a.payload for a in bundle.artifacts}
+    reused: list[ReusedEntry] = []
+    created: list[PlanEntry] = []
+    final_names: dict[str, str] = {}
+
+    for e in plan.entries:
+        action = decisions.get(e.bundle_id, e.action)
+        if action == "reuse":
+            if e.existing_id is None:
+                raise StalePlanError(f"no reuse target for {e.bundle_id!r}")
+            reused.append(ReusedEntry(bundle_id=e.bundle_id, existing_id=e.existing_id))
+        elif action == "create":
+            if e.action != "create":
+                raise StalePlanError(f"name for {e.bundle_id!r} now clashes")
+            created.append(e)
+            final_names[e.bundle_id] = e.name
+        else:  # copy
+            # An explicit client name wins; otherwise the plan's deduped
+            # proposal, which already dodged every name this plan hands out.
+            # `e.name` is the last resort only for a copy DECISION on an entry
+            # the plan proposed as create (no clash -> no copy_name), where the
+            # bundle's own name is by construction free.
+            name = copy_names.get(e.bundle_id) or e.copy_name or e.name
+            created.append(e)
+            final_names[e.bundle_id] = name
+
+    # created siblings resolve to temp ids (the commit applier maps them to
+    # fresh uuids and resolves refs via its id_map); reused ones resolve to
+    # the existing target. Skipped bundle ids stay unmapped -> dangling refs,
+    # the tolerant stance.
+    ref_map: dict[str, str] = {r.bundle_id: r.existing_id for r in reused}
+    ref_map.update({e.bundle_id: TEMP_ID_PREFIX + e.bundle_id for e in created})
+
+    ops: list[CreateArtifactOp] = []
+    for e in created:
+        kind = ArtifactKind(e.kind)
+        spec = get_spec(kind)
+        assert spec is not None  # plan entries only ever carry registered kinds
+        ops.append(
+            CreateArtifactOp(
+                kind="create_artifact",
+                temp_id=TEMP_ID_PREFIX + e.bundle_id,
+                # narrowing only: derive_plan drops every kind that isn't a
+                # registered ArtifactKind, so e.kind is always one of the
+                # literal members (re-proved by the get_spec assert above).
+                artifact_kind=cast(Any, e.kind),
+                name=final_names[e.bundle_id],
+                payload=spec.rewrite_refs(payloads[e.bundle_id], ref_map),
+            )
+        )
+    return ops, reused, final_names

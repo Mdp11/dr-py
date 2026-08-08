@@ -7,16 +7,21 @@ db.init_engine + create_all; rows created through content helpers so the
 
 from __future__ import annotations
 
+import pytest
+
 from data_rover.api import content, db
 from data_rover.api.artifact_bundle import (
     BUNDLE_FORMAT,
     ArtifactBundle,
+    StalePlanError,
     build_bundle,
+    build_import_ops,
     compute_closure,
     dedupe_name,
     derive_plan,
 )
 from data_rover.api.db_models import ArtifactKind, Project
+from data_rover.api.schemas import TEMP_ID_PREFIX
 
 SNIP = {"schema_version": 1, "language": "python", "code": "def value(el):\n    return el.name\n"}
 
@@ -173,6 +178,9 @@ def test_plan_identical_payload_proposes_reuse() -> None:
         e = plan.entries[0]
         assert e.action == "reuse"
         assert e.existing_id == existing.id
+        # a reuse entry still reserves a free copy name, so the client can
+        # flip it to "copy" at confirm time (see PlanEntry.copy_name)
+        assert e.copy_name == "s (2)"
 
 
 def test_plan_different_payload_proposes_copy_with_deduped_name() -> None:
@@ -286,3 +294,76 @@ def test_plan_create_and_copy_never_target_the_same_name() -> None:
         assert by_id["b"].action == "copy"
         targets = {by_id["a"].name, by_id["b"].copy_name}
         assert len(targets) == 2, "create and copy entries collided on the same target name"
+
+
+def test_build_ops_rewrites_sibling_and_reuse_refs() -> None:
+    _setup()
+    with db.db_session() as s:
+        ex_snip = content.create_artifact(
+            s, "p1", kind=ArtifactKind.code_snippet, name="s", payload=SNIP, updated_by=None
+        )
+        bundle = _bundle(
+            [
+                {"id": "bs", "kind": "code_snippet", "name": "s", "payload": SNIP},
+                {"id": "bn", "kind": "navigation", "name": "n", "payload": _nav("bs")},
+                {"id": "bm", "kind": "navigation", "name": "m", "payload": _nav("bn")},
+            ]
+        )
+        plan = derive_plan(s, "p1", bundle)
+        ops, reused, final_names = build_import_ops(plan, bundle, {}, {})
+        # bs proposed reuse -> no op; bn/bm created
+        assert [op.temp_id for op in ops] == [f"{TEMP_ID_PREFIX}bn", f"{TEMP_ID_PREFIX}bm"]
+        assert reused[0].existing_id == ex_snip.id
+        by_temp = {op.temp_id: op for op in ops}
+        # bn's ref to the reused snippet points at the EXISTING id
+        assert by_temp[f"{TEMP_ID_PREFIX}bn"].payload["operands"][0]["ref"] == ex_snip.id
+        # bm's ref to its created sibling points at the sibling's TEMP id
+        assert by_temp[f"{TEMP_ID_PREFIX}bm"].payload["operands"][0]["ref"] == f"{TEMP_ID_PREFIX}bn"
+        assert final_names == {"bn": "n", "bm": "m"}
+
+
+def test_build_ops_flip_reuse_to_copy_and_back() -> None:
+    _setup()
+    with db.db_session() as s:
+        content.create_artifact(
+            s, "p1", kind=ArtifactKind.code_snippet, name="s", payload=SNIP, updated_by=None
+        )
+        bundle = _bundle([{"id": "bs", "kind": "code_snippet", "name": "s", "payload": SNIP}])
+        plan = derive_plan(s, "p1", bundle)  # proposes reuse
+        ops, reused, final_names = build_import_ops(plan, bundle, {"bs": "copy"}, {})
+        assert len(ops) == 1 and reused == []
+        assert ops[0].name == "s (2)" and final_names == {"bs": "s (2)"}
+        # explicit copy_names override wins
+        ops2, _, names2 = build_import_ops(plan, bundle, {"bs": "copy"}, {"bs": "mine"})
+        assert ops2[0].name == "mine" and names2 == {"bs": "mine"}
+
+
+def test_build_ops_stale_decisions_raise() -> None:
+    _setup()
+    other = {"schema_version": 1, "language": "python", "code": "def value(el):\n    return 1\n"}
+    with db.db_session() as s:
+        bundle = _bundle([{"id": "bs", "kind": "code_snippet", "name": "s", "payload": SNIP}])
+        plan = derive_plan(s, "p1", bundle)  # fresh project -> proposes create
+        with pytest.raises(StalePlanError):
+            build_import_ops(plan, bundle, {"bs": "reuse"}, {})  # no reuse target
+        with pytest.raises(StalePlanError):
+            build_import_ops(plan, bundle, {"ghost": "create"}, {})  # unknown bundle id
+        # decide-and-pin: a "create" decision is only honorable while the name
+        # is still free. A peer claiming (kind, name) between plan and confirm
+        # flips the FRESH action to reuse (identical payload) or copy
+        # (different payload) — both must reject rather than silently create
+        # under a now-taken name and trip the unique constraint.
+        content.create_artifact(
+            s, "p1", kind=ArtifactKind.code_snippet, name="s", payload=SNIP, updated_by=None
+        )
+        reuse_plan = derive_plan(s, "p1", bundle)
+        assert reuse_plan.entries[0].action == "reuse"
+        with pytest.raises(StalePlanError):
+            build_import_ops(reuse_plan, bundle, {"bs": "create"}, {})
+        copy_bundle = _bundle(
+            [{"id": "bs", "kind": "code_snippet", "name": "s", "payload": other}]
+        )
+        copy_plan = derive_plan(s, "p1", copy_bundle)
+        assert copy_plan.entries[0].action == "copy"
+        with pytest.raises(StalePlanError):
+            build_import_ops(copy_plan, copy_bundle, {"bs": "create"}, {})
