@@ -21,6 +21,7 @@ Stances that are load-bearing here:
 
 from __future__ import annotations
 
+import json
 from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -32,7 +33,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from . import content
 from .artifact_kinds import extract_refs, get_spec
-from .db_models import ArtifactRow, Project
+from .db_models import ArtifactKind, ArtifactRow, Project
 
 BUNDLE_FORMAT: Literal["datarover.artifact-bundle/v1"] = "datarover.artifact-bundle/v1"
 
@@ -117,3 +118,130 @@ def build_bundle(
             for r in closure.rows
         ],
     )
+
+
+class PlanEntry(BaseModel):
+    bundle_id: str
+    kind: str
+    name: str
+    action: Literal["create", "reuse", "copy"]
+    existing_id: str | None = None
+    copy_name: str | None = None
+
+
+class SkippedEntry(BaseModel):
+    bundle_id: str
+    reason: str
+
+
+class ImportPlan(BaseModel):
+    entries: list[PlanEntry] = Field(default_factory=list)
+    skipped: list[SkippedEntry] = Field(default_factory=list)
+
+
+def _canonical(payload: Any) -> str:
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+
+def dedupe_name(taken: set[str], base: str) -> str:
+    """First free "base (N)" name, N starting at 2 (matches the copy-suffix
+    convention users see elsewhere)."""
+    n = 2
+    while f"{base} ({n})" in taken:
+        n += 1
+    return f"{base} ({n})"
+
+
+def _normalized_payload(kind: ArtifactKind, payload: dict[str, Any]) -> dict[str, Any]:
+    """The payload as a WRITE would store it: adapter-validated (caller has
+    already done that) + server-derived metadata rerun. Stored rows went
+    through exactly this in `artifact_ops._validated_payload`, so comparing
+    normalized-vs-stored is apples to apples (a bundle snippet with stale
+    `entry_points` still matches its unchanged original)."""
+    spec = get_spec(kind)
+    assert spec is not None  # callers only pass registered kinds
+    if spec.derive_metadata is not None:
+        payload = dict(payload)
+        spec.derive_metadata(payload)
+    return payload
+
+
+def derive_plan(
+    db: DbSession, project_id: str, bundle: ArtifactBundle
+) -> ImportPlan:
+    entries: list[PlanEntry] = []
+    skipped: list[SkippedEntry] = []
+    #: (bundle artifact, its ArtifactKind, its (kind,name) clash row or None)
+    valid: list[tuple[BundleArtifact, ArtifactKind, ArtifactRow | None]] = []
+
+    for art in bundle.artifacts:
+        try:
+            kind = ArtifactKind(art.kind)
+        except ValueError:
+            skipped.append(
+                SkippedEntry(bundle_id=art.id, reason=f"unknown kind {art.kind!r}")
+            )
+            continue
+        spec = get_spec(kind)
+        if spec is None:
+            skipped.append(
+                SkippedEntry(bundle_id=art.id, reason=f"unregistered kind {art.kind!r}")
+            )
+            continue
+        try:
+            spec.adapter.validate_python(art.payload)
+        except Exception as exc:  # pydantic ValidationError, kept broad on purpose
+            skipped.append(
+                SkippedEntry(bundle_id=art.id, reason=f"invalid payload: {exc}")
+            )
+            continue
+        valid.append((art, kind, content.find_artifact(db, project_id, kind, art.name)))
+
+    # Tentative reuse map covers EVERY clash: ref-normalizing a payload before
+    # comparison must see all of its siblings' potential reuse targets, or a
+    # bundle re-import would propose copy for anything that references a peer.
+    tentative = {art.id: row.id for art, _kind, row in valid if row is not None}
+
+    #: names already taken per kind — existing rows plus names this plan hands out
+    taken: dict[ArtifactKind, set[str]] = {}
+
+    for art, kind, existing in valid:
+        if existing is None:
+            entries.append(
+                PlanEntry(bundle_id=art.id, kind=art.kind, name=art.name, action="create")
+            )
+            continue
+        spec = get_spec(kind)
+        assert spec is not None  # filtered above
+        normalized = _normalized_payload(kind, art.payload)
+        rewritten = spec.rewrite_refs(normalized, tentative)
+        # `existing.payload` is normalized too, not compared raw: real writes
+        # already ran it through this same derive_metadata pass, so this is a
+        # no-op for production rows, but it keeps the comparison honest for
+        # rows a test (or a pre-derive_metadata-era import) wrote directly.
+        if _canonical(rewritten) == _canonical(_normalized_payload(kind, existing.payload)):
+            entries.append(
+                PlanEntry(
+                    bundle_id=art.id,
+                    kind=art.kind,
+                    name=art.name,
+                    action="reuse",
+                    existing_id=existing.id,
+                )
+            )
+            continue
+        if kind not in taken:
+            taken[kind] = {r.name for r in content.list_artifacts(db, project_id, kind)}
+        copy_name = dedupe_name(taken[kind], art.name)
+        taken[kind].add(copy_name)
+        entries.append(
+            PlanEntry(
+                bundle_id=art.id,
+                kind=art.kind,
+                name=art.name,
+                action="copy",
+                existing_id=existing.id,
+                copy_name=copy_name,
+            )
+        )
+    return ImportPlan(entries=entries, skipped=skipped)
