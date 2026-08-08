@@ -196,6 +196,22 @@ def derive_plan(
     valid: list[tuple[BundleArtifact, ArtifactKind, ArtifactRow | None]] = []
 
     for art in bundle.artifacts:
+        if not art.name:
+            # This loop is the ONLY filter between an untrusted uploaded
+            # bundle and the `CreateArtifactOp`s build_import_ops constructs,
+            # and that op's `name` is the one field carrying a pydantic
+            # constraint the bundle schema does not (`min_length=1` —
+            # `BundleArtifact.name` is a bare `str` on purpose, so a bundle
+            # from a newer server still parses). Without this skip an empty
+            # name reaches the op constructor and raises a ValidationError
+            # that escapes the confirm route UNCAUGHT as a 500, adding a
+            # fourth outcome to its 200/409/422 contract — and it would do so
+            # only at confirm, after the plan route had already answered 200
+            # for the same bundle. Skipping keeps the two answers consistent
+            # and matches the tolerant stance of the checks below: a
+            # malformed artifact is reported, never fatal to its siblings.
+            skipped.append(SkippedEntry(bundle_id=art.id, reason="empty name"))
+            continue
         try:
             kind = ArtifactKind(art.kind)
         except ValueError:

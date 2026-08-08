@@ -242,6 +242,27 @@ def test_plan_skips_unknown_kind_and_invalid_payload() -> None:
         assert "b1" in reasons and "b2" in reasons and "b3" in reasons
 
 
+def test_plan_skips_empty_name_so_the_op_constructor_is_never_reached() -> None:
+    # CreateArtifactOp.name is min_length=1 while BundleArtifact.name is a
+    # bare str, so an empty name in an uploaded bundle would blow up inside
+    # build_import_ops as an uncaught ValidationError (a 500). The plan is the
+    # filter that keeps that unreachable -- and its sibling must still import.
+    _setup()
+    with db.db_session() as s:
+        bundle = _bundle(
+            [
+                {"id": "b1", "kind": "code_snippet", "name": "", "payload": SNIP},
+                {"id": "b2", "kind": "code_snippet", "name": "ok", "payload": SNIP},
+            ]
+        )
+        plan = derive_plan(s, "p1", bundle)
+        assert [(sk.bundle_id, sk.reason) for sk in plan.skipped] == [("b1", "empty name")]
+        assert [e.bundle_id for e in plan.entries] == ["b2"]
+        ops, _reused, final_names = build_import_ops(plan, bundle, {}, {})
+        assert [op.name for op in ops] == ["ok"]
+        assert final_names == {"b2": "ok"}
+
+
 def test_plan_two_copies_same_base_name_get_distinct_names() -> None:
     # two bundle artifacts of the same kind whose names both clash with
     # existing rows must not be handed the SAME deduped name

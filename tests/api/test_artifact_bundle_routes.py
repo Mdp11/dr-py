@@ -291,6 +291,32 @@ def test_import_confirm_malformed_envelope_422(client: TestClient) -> None:
     assert r.status_code == 422
 
 
+def test_import_confirm_empty_name_is_skipped_not_500(client: TestClient) -> None:
+    # An uploaded bundle is untrusted input, and CreateArtifactOp.name carries
+    # a min_length=1 the bundle schema deliberately doesn't. Both routes must
+    # answer the SAME way (skipped), or confirm turns the plan's 200 into an
+    # uncontracted 500. The valid sibling still imports.
+    artifacts = [
+        {"id": "b1", "kind": "code_snippet", "name": "", "payload": SNIP},
+        {"id": "b2", "kind": "code_snippet", "name": "ok", "payload": SNIP},
+    ]
+    r = client.post(
+        papi("/artifacts/import/plan"), json=_bundle_body(artifacts), headers=AUTH_HEADERS
+    )
+    assert r.status_code == 200, r.text
+    assert [sk["bundle_id"] for sk in r.json()["skipped"]] == ["b1"]
+
+    r = client.post(
+        papi("/artifacts/import"), json=_import_body(artifacts), headers=AUTH_HEADERS
+    )
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert [(sk["bundle_id"], sk["reason"]) for sk in out["skipped"]] == [
+        ("b1", "empty name")
+    ]
+    assert [c["name"] for c in out["created"]] == ["ok"]
+
+
 def test_import_confirm_feed_scope_is_artifact(client: TestClient) -> None:
     """An import is announced as a pure-artifact commit, so a peer refreshes
     its library without refetching model content it knows did not move."""
