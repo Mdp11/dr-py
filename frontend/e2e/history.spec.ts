@@ -87,9 +87,21 @@ test('History: list, diff, and revert a commit', async ({ page }) => {
 
 	// 3. Edit the element again and make the SECOND commit.
 	//    Re-select the element from the tree so the Inspector is active.
+	// `loadFiles` gave no `view:`, but the project ALWAYS carries a view now
+	// (its no-view branch empties the existing view rather than nulling it —
+	// there is no supported API path back to `session.view === null` once a
+	// project has ever committed one; see `helpers/load.ts`'s `seedView`).
+	// So the Block, unplaced in any folder, renders in the collapsed
+	// "Not in view" pool rather than as a direct row in the main tree — expand
+	// it first (same pattern as view.spec.ts's `expandPool`).
 	const treeEl = page.getByRole('tree', { name: /containment tree/i });
 	await expect(treeEl).toBeVisible({ timeout: 10_000 });
-	const firstPickButton = treeEl.locator('button.flex-1').first();
+	const poolHeader = page.getByRole('button', { name: /not in view/i });
+	await expect(poolHeader).toBeVisible({ timeout: 10_000 });
+	await poolHeader.click();
+	const pool = page.getByRole('tree', { name: /excluded elements/i });
+	await expect(pool).toBeVisible({ timeout: 10_000 });
+	const firstPickButton = pool.locator('button.flex-1').first();
 	await expect(firstPickButton).toBeVisible({ timeout: 10_000 });
 	await firstPickButton.click();
 

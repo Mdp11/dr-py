@@ -69,17 +69,28 @@ test('relationship picker filters by metamodel and reveals all via escape hatch'
 	await page.keyboard.press('Escape');
 
 	// --- Select element Alpha (type A) in the containment tree ---
-	// The tree renders without a view file, so elements appear directly as root
-	// rows. Each row has a `button.flex-1` pick button showing the element name.
+	// `loadFiles` gave no `view:`, but the project ALWAYS carries a view now
+	// (its no-view branch empties the existing view rather than nulling it —
+	// there is no supported API path back to `session.view === null` once a
+	// project has ever committed one; see `helpers/load.ts`'s `seedView`).
+	// So Alpha and Bravo, unplaced in any folder, render in the collapsed
+	// "Not in view" pool rather than as direct rows in the main tree — expand
+	// it first (same pattern as view.spec.ts's `expandPool`).
 	const treeEl = page.getByRole('tree', { name: /containment tree/i });
 	await expect(treeEl).toBeVisible({ timeout: 15_000 });
 
+	const poolHeader = page.getByRole('button', { name: /not in view/i });
+	await expect(poolHeader).toBeVisible({ timeout: 15_000 });
+	await poolHeader.click();
+	const pool = page.getByRole('tree', { name: /excluded elements/i });
+	await expect(pool).toBeVisible({ timeout: 10_000 });
+
 	// Wait for at least one element row pick button to appear.
-	await expect(treeEl.locator('button.flex-1').first()).toBeVisible({ timeout: 15_000 });
+	await expect(pool.locator('button.flex-1').first()).toBeVisible({ timeout: 15_000 });
 
 	// Click the pick button for "Alpha". The pick button contains a whitespace-nowrap
 	// span with the element display name (see TreeRow.svelte line ~303).
-	const alphaPickButton = treeEl.locator('button.flex-1', { hasText: 'Alpha' }).first();
+	const alphaPickButton = pool.locator('button.flex-1', { hasText: 'Alpha' }).first();
 	await expect(alphaPickButton).toBeVisible({ timeout: 10_000 });
 	await alphaPickButton.click();
 
