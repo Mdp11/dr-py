@@ -9,6 +9,7 @@ import {
 	clearSnippetElements,
 	closeSnippetDraft,
 	ensureSnippetDraft,
+	forkSnippetDraftAsCopy,
 	getSnippetDraft,
 	getSnippetLint,
 	getSnippetLockHolder,
@@ -432,6 +433,60 @@ describe('artifact lease on open', () => {
 
 		expect(release).not.toHaveBeenCalled();
 		expect(isCheckedOutByMe('art:s1')).toBe(true);
+	});
+});
+
+describe('forkSnippetDraftAsCopy', () => {
+	it('stages a create with the current code under a new tab, leaving a denied source tab untouched', async () => {
+		asEditor();
+		vi.spyOn(checkoutApi, 'acquireLocks').mockRejectedValue(lockConflict('peer@x'));
+		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue(SNIPPET_ARTIFACT);
+		await ensureSnippetDraft('snip:s1');
+		expect(getSnippetLockHolder('snip:s1')).toBe('peer@x');
+		// A denied tab's document is only INERT in the component — the store
+		// itself has no gate, so a keystroke made before the UI catches up (or a
+		// stale event) still lands, and the fork must carry it faithfully.
+		updateSnippetCode('snip:s1', 'print(2)\n');
+
+		await forkSnippetDraftAsCopy('snip:s1', 'Copy');
+
+		const ops = getStagedArtifactOps();
+		expect(ops).toEqual([
+			{
+				kind: 'create_artifact',
+				temp_id: expect.stringMatching(/^tmp_/),
+				artifact_kind: 'code_snippet',
+				name: 'Copy',
+				payload: { schema_version: 1, language: 'python', code: 'print(2)\n' }
+			}
+		]);
+		const tempId = (ops[0] as { temp_id: string }).temp_id;
+		const newTabId = `snip:${tempId}`;
+
+		// The fork landed in a SEPARATE new tab, not in place of the source —
+		// `snip:s1` (never itself opened via `openArtifactTab` in this test, only
+		// its draft loaded) is untouched, and the fork gets its own record.
+		expect(getDynamicTabs().map((t) => t.id)).toContain(newTabId);
+		const forked = getSnippetDraft(newTabId)!;
+		expect(forked.name).toBe('Copy');
+		expect(forked.artifactId).toBe(tempId);
+		expect(forked.artifactRev).toBeNull();
+		expect(forked.code).toBe('print(2)\n');
+		expect(forked.dirty).toBe(false);
+
+		// The source tab is untouched: still denied, still dirty, still bound to
+		// the original artifact — "Save as copy" must never mutate what the peer
+		// holds.
+		expect(getSnippetLockHolder('snip:s1')).toBe('peer@x');
+		const source = getSnippetDraft('snip:s1')!;
+		expect(source.artifactId).toBe('s1');
+		expect(source.code).toBe('print(2)\n');
+		expect(source.dirty).toBe(true);
+	});
+
+	it('is a no-op when the tab has no draft', async () => {
+		await expect(forkSnippetDraftAsCopy('snip:nope', 'Copy')).resolves.toBeUndefined();
+		expect(getStagedArtifactOps()).toEqual([]);
 	});
 });
 

@@ -8,7 +8,7 @@
 
 export type DragPayload =
 	| { kind: 'element'; ids: string[] }
-	| { kind: 'folder'; path: string[] }
+	| { kind: 'folder'; id: string }
 	| { kind: 'artifact'; id: string; artifactKind: string };
 
 let _payload = $state<DragPayload | null>(null);

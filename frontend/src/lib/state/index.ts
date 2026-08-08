@@ -1,16 +1,21 @@
 export {
 	ARTIFACT_RESOURCE_PREFIX,
+	FOLDER_RESOURCE_PREFIX,
 	TEMP_ID_PREFIX,
+	VIEW_ROOT_ID,
 	artifactResource,
 	createTempId,
+	folderResource,
 	isArtifactResource,
+	isFolderResource,
 	isTempId,
 	type ArtifactOp,
 	type ElementOp,
 	type ModelOp,
 	type Op,
 	type RelationshipOp,
-	type Snapshot
+	type Snapshot,
+	type ViewOp
 } from './ops';
 export { mergePatch } from './apply';
 export { computeDiff, deepEqual, type Diff, type EntityDiff, type EntityStatus } from './diff';
@@ -181,6 +186,7 @@ export {
 	discardAll,
 	reacquireOpenArtifactLeases,
 	releaseArtifactIfUnneeded,
+	releaseFolderLeaseIfUnneeded,
 	type CheckoutResult,
 	type LockConflictLite
 } from './checkout.svelte';
@@ -192,6 +198,10 @@ export {
 	editLock,
 	connectLock,
 	deleteLock,
+	folderCreateLock,
+	folderDeleteLock,
+	folderEditLock,
+	folderTargets,
 	lockHolderLabel
 } from './edit-gate';
 export { stageSnippetOps, type StageOutcome } from './snippet-stage';
@@ -217,32 +227,35 @@ export {
 	updateSearchCriterion
 } from './advanced-search.svelte';
 export {
+	applyViewOp,
+	artifactPlacementFolderIds,
+	elementHomeFolderId,
+	findFolderById,
+	findFolderContainer,
+	folderSubtreeIds,
+	isFolderIdAncestor
+} from './view-ops';
+export {
 	clearViewState,
 	cloneView,
-	createFolder,
-	deleteFolder,
-	dropView,
+	discardViewChanges,
 	getView,
-	getViewChanges,
-	getViewChangesCount,
 	getViewWarnings,
 	isViewResolved,
 	markViewUnresolved,
-	moveArtifact,
-	moveFolder,
-	placeArtifact,
-	placeElement,
-	placeElements,
-	placeElementsAt,
-	pushView,
 	refreshView,
-	removeArtifactFromFolder,
-	removeElement,
-	renameFolder,
-	setViewBaseline
+	stageClearView,
+	stageCreateFolder,
+	stageDeleteFolder,
+	stageMoveArtifact,
+	stageMoveFolder,
+	stagePlaceArtifact,
+	stagePlaceElementsAt,
+	stageRemoveArtifactRef,
+	stageRemoveElement,
+	stageRenameFolder
 } from './view.svelte';
 export { isProjectOpening, setProjectOpening } from './project-open.svelte';
-export type { ViewChange } from './view-diff';
 export {
 	artifactHeaderById,
 	assertNoNameClash,
@@ -293,6 +306,7 @@ export {
 	clearSnippetElements,
 	closeSnippetDraft,
 	ensureSnippetDraft,
+	forkSnippetDraftAsCopy,
 	getSnippetDraft,
 	getSnippetLint,
 	getSnippetLockHolder,
@@ -374,12 +388,6 @@ export {
 	reactToBootError
 } from './access-notice.svelte';
 export {
-	formatViewChange,
-	viewChangeSegments,
-	type ViewChangeSegment,
-	type ViewChangeSegmentKind
-} from './view-change-format';
-export {
 	startProgress,
 	updateProgress,
 	setProgressLabel,
@@ -440,4 +448,17 @@ export {
 	type StagedArtifactEntry
 } from './artifact-edits.svelte';
 export { markEditorLockDenied } from './artifact-lock-denied';
+export {
+	clearStagedView,
+	discardStagedView,
+	getStagedViewDepth,
+	getStagedViewEntries,
+	getStagedViewOps,
+	notifyViewCommitted,
+	onViewCommitted,
+	onViewDiscarded,
+	resetViewEdits,
+	stageViewOp,
+	type StagedViewEntry
+} from './view-edits.svelte';
 export { isProjectQuiet } from './quiet';

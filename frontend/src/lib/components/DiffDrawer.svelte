@@ -6,36 +6,31 @@
 	import * as Tabs from '$lib/components/ui/tabs';
 	import {
 		artifactHeaderById,
-		ensureElement,
 		getStagedArtifactEntries,
 		getStagedDiff,
+		getStagedViewDepth,
+		getStagedViewEntries,
 		markEditorLockDenied,
 		previewStaged,
 		commitStaged,
 		discardAll,
 		discardArtifact,
 		discardElement,
+		discardViewChanges,
 		getIssues,
 		indexIssues,
 		getView,
-		getViewChanges,
 		getViewFileHandle,
 		getViewFilename,
 		reacquireOpenArtifactLeases,
 		setViewFileHandle,
 		setViewFilename,
-		setViewBaseline,
-		getCachedElements,
-		viewChangeSegments,
 		type Diff,
-		type StagedArtifactEntry,
-		type ViewChange,
-		type ViewChangeSegmentKind
+		type StagedArtifactEntry
 	} from '$lib/state';
 	import { ConflictError } from '$lib/api/errors';
 	import type { PreviewResponse } from '$lib/api/types';
 	import { saveJsonToFile } from '$lib/util/fileSave';
-	import { elementDisplayName } from '$lib/util/element-name';
 	import { AlertTriangle } from '@lucide/svelte';
 	import DiffRow from './DiffRow.svelte';
 
@@ -50,7 +45,6 @@
 	// preview's issue counts come from the server. The body runs untracked so
 	// reading store internals before the first await does not re-trigger the
 	// effect; the seq guard drops stale responses on rapid close/reopen.
-	// We still best-effort prefetch view-change element names for the View tab.
 	let loadSeq = 0;
 	let preview = $state<PreviewResponse | null>(null);
 	let previewError: string | null = $state(null);
@@ -62,17 +56,6 @@
 		preview = null;
 		previewError = null;
 		untrack(() => {
-			// Best-effort: fetch display names for any view-change element ids
-			// not already cached, so the View tab shows names rather than ids.
-			// eslint-disable-next-line svelte/prefer-svelte-reactivity
-			const ids = new Set<string>();
-			for (const c of getViewChanges()) {
-				if (c.kind !== 'folder-added' && c.kind !== 'folder-removed') ids.add(c.id);
-			}
-			const cache = getCachedElements();
-			for (const id of ids) {
-				if (!cache.has(id)) void ensureElement(id);
-			}
 			void (async () => {
 				try {
 					const p = await previewStaged();
@@ -97,8 +80,16 @@
 	// artifact-ONLY batch and unreachable when nothing at all is staged.
 	const artifactEntries = $derived<StagedArtifactEntry[]>(getStagedArtifactEntries());
 	const artifactCount = $derived(artifactEntries.length);
+	// Staged VIEW ops (folder/element/artifact-ref placement) ride in the same
+	// commit batch too (artefacts revamp Phase 2) — same reasoning as the
+	// artifact count above: a view-only batch must still reach a live Commit
+	// button, so its journal depth folds into the same total.
 	const total = $derived(
-		diff.counts.added + diff.counts.modified + diff.counts.deleted + artifactCount
+		diff.counts.added +
+			diff.counts.modified +
+			diff.counts.deleted +
+			artifactCount +
+			getStagedViewDepth()
 	);
 
 	const addedElements = $derived(diff.elements.filter((d) => d.status === 'added'));
@@ -194,36 +185,14 @@
 	let activeTab = $state<'model' | 'view'>('model');
 
 	const view = $derived(getView());
-	const viewChangeList = $derived(getViewChanges());
-	const viewChangeCount = $derived(viewChangeList.length);
+	// The staged view-op JOURNAL (artefacts revamp Phase 2 / Task 8), not a
+	// baseline diff: entries carry a pre-baked `label` string captured at
+	// stage time (see view-edits.svelte.ts's docstring for why — a deleted or
+	// renamed folder's prior name is unrecoverable from the blob after the
+	// optimistic apply), so the View tab renders them verbatim, in journal
+	// order, with no name resolution needed here.
+	const viewEntries = $derived(getStagedViewEntries());
 	const viewFilename = $derived(getViewFilename());
-
-	// Resolve element display names for the view preview from the model cache,
-	// falling back to the raw id. Uncached ids are best-effort fetched on open.
-	const resolveName = (id: string): string => {
-		const el = getCachedElements().get(id);
-		return el ? elementDisplayName(el) : id;
-	};
-
-	function changeKey(c: ViewChange): string {
-		if (c.kind === 'folder-added' || c.kind === 'folder-removed') {
-			return `${c.kind}:${c.path.join('/')}`;
-		}
-		return `${c.kind}:${c.id}`;
-	}
-
-	const viewLines = $derived(
-		viewChangeList.map((c) => ({ key: changeKey(c), segments: viewChangeSegments(c, resolveName) }))
-	);
-
-	// Tailwind colour per segment role, so each component of a change line stands
-	// out: element name, folder, and the from/to prepositions.
-	const SEGMENT_CLASS: Record<ViewChangeSegmentKind, string> = {
-		element: 'text-success',
-		folder: 'text-warning',
-		prep: 'text-info',
-		plain: 'text-muted-foreground'
-	};
 
 	// Save-view state and handler
 	let savingView = $state(false);
@@ -239,15 +208,21 @@
 			const res = await saveJsonToFile(current, suggested, getViewFileHandle());
 			setViewFilename(res.filename);
 			if (res.handle) setViewFileHandle(res.handle);
-			// Rebaseline: the file now matches the live view, so the count drops to 0.
-			setViewBaseline(current);
 		} catch (err) {
-			// AbortError = user cancelled the picker; leave the baseline untouched.
+			// AbortError = user cancelled the picker.
 			if (err instanceof DOMException && err.name === 'AbortError') return;
 			viewSaveError = err instanceof Error ? err.message : String(err);
 		} finally {
 			savingView = false;
 		}
+	}
+
+	// The View tab's ONE discard button (Decision 5 — see the comment beside
+	// the artifact rows' per-row `discardArtifact` above for why the journal
+	// gets no per-row equivalent). All-or-nothing: wipes the whole staged
+	// view-op journal, releases its folder leases, and refetches server truth.
+	async function onDiscardViewChanges(): Promise<void> {
+		await discardViewChanges();
 	}
 
 	function close(): void {
@@ -343,7 +318,7 @@
 				     which commit in the same batch but are not model content. -->
 				<Tabs.Trigger value="model" class="h-7 text-xs">Changes ({total})</Tabs.Trigger>
 				<Tabs.Trigger value="view" class="h-7 text-xs" disabled={view === null}>
-					View ({viewChangeCount})
+					View ({viewEntries.length})
 				</Tabs.Trigger>
 			</Tabs.List>
 
@@ -353,6 +328,16 @@
 						<p class="text-xs text-muted-foreground/70">Loading changes…</p>
 					{:else if total === 0}
 						<p class="text-xs text-muted-foreground/70">No pending changes.</p>
+					{:else if addedCount === 0 && modifiedCount === 0 && deletedCount === 0 && artifactCount === 0}
+						<!-- Unlike an artifact-only batch (whose Artifacts section renders
+						     right here), a view-only batch has nothing to show on THIS tab —
+						     the journal only renders on the View tab. Without this branch
+						     the pane would sit fully blank while the tab label and the
+						     Commit button both show a nonzero count. -->
+						<p class="text-xs text-muted-foreground/70">
+							{viewEntries.length} staged view change{viewEntries.length === 1 ? '' : 's'} — see the View
+							tab.
+						</p>
 					{/if}
 
 					{#if addedCount > 0}
@@ -415,7 +400,16 @@
 									     above, and it is the only path that also hands the `art:` lease
 									     back. Un-staging the entry alone strands the lease for the full
 									     TTL (worst for a sidebar Delete's DELETE-intent exclusive, which
-									     blocks every peer from even opening the artifact). -->
+									     blocks every peer from even opening the artifact).
+
+									     Deliberate CONTRAST with the View tab below: element/artifact
+									     rows each get their own per-row discard because unstaging one
+									     is sound in isolation. The staged VIEW-op journal is
+									     ORDER-DEPENDENT (e.g. create_folder, then place_element into
+									     it, then rename_folder) — plucking one entry out of the middle
+									     can leave the rest referencing an id that no longer exists, so
+									     the View tab offers only the all-or-nothing
+									     `discardViewChanges()`, never a per-row button. -->
 									<button
 										type="button"
 										class="rounded border border-input px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:border-ring hover:text-foreground"
@@ -502,15 +496,11 @@
 				<div class="flex max-h-[60vh] flex-col gap-1 overflow-y-auto pr-1">
 					{#if view === null}
 						<p class="text-xs text-muted-foreground/70">No view loaded.</p>
-					{:else if viewLines.length === 0}
+					{:else if viewEntries.length === 0}
 						<p class="text-xs text-muted-foreground/70">No view changes.</p>
 					{:else}
-						{#each viewLines as line (line.key)}
-							<p class="rounded bg-card px-2 py-1 font-mono text-[11px]">
-								{#each line.segments as seg, i (i)}<span class={SEGMENT_CLASS[seg.kind]}
-										>{seg.text}</span
-									>{/each}
-							</p>
+						{#each viewEntries as entry, i (i)}
+							<p class="rounded bg-card px-2 py-1 font-mono text-[11px]">{entry.label}</p>
 						{/each}
 					{/if}
 					{#if viewSaveError}
@@ -532,8 +522,16 @@
 			{#if activeTab === 'view'}
 				<Button
 					type="button"
+					variant="ghost"
+					onclick={() => void onDiscardViewChanges()}
+					disabled={savingView || viewEntries.length === 0}
+				>
+					Discard view changes
+				</Button>
+				<Button
+					type="button"
 					onclick={onSaveViewClick}
-					disabled={savingView || view === null || viewChangeCount === 0}
+					disabled={savingView || view === null || viewEntries.length === 0}
 				>
 					{savingView ? 'Saving...' : 'Save view'}
 				</Button>

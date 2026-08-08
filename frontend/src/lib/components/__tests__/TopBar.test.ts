@@ -7,7 +7,6 @@ import { getPendingConfirm, resetConfirm } from '$lib/state/confirm.svelte';
 // Provide a minimal no-op stub for each dialog/drawer child of TopBar so we
 // don't need QueryClientProvider or other heavy contexts.
 vi.mock('../ApplyCrDialog.svelte', () => ({ default: () => {} }));
-vi.mock('../LoadFilesDialog.svelte', () => ({ default: () => {} }));
 vi.mock('../SwapMetamodelDrawer.svelte', () => ({ default: () => {} }));
 vi.mock('../SettingsDialog.svelte', () => ({ default: () => {} }));
 
@@ -29,7 +28,7 @@ vi.mock('$lib/state', async (orig) => {
 		getModelRev: vi.fn(() => 0),
 		getModelGeneration: vi.fn(() => 0),
 		getStagedChangeCount: vi.fn(() => 0),
-		getViewChangesCount: vi.fn(() => 0),
+		getStagedViewDepth: vi.fn(() => 0),
 		getStagedDepth: vi.fn(() => 0),
 		isRunning: vi.fn(() => false),
 		getIssues: vi.fn(() => []),
@@ -55,7 +54,7 @@ vi.mock('$lib/util/fileSave', () => ({ saveResponseToFile: vi.fn(async () => {})
 // the artifact-edits store is deliberately NOT mocked (the `...actual` spread
 // keeps it real) so the Commit gate is exercised against the real staged
 // buffer rather than a stub.
-import { getModelSummary } from '$lib/state';
+import { getModelSummary, getStagedViewDepth } from '$lib/state';
 import { resetArtifactEdits, stageArtifactCreate } from '$lib/state/artifact-edits.svelte';
 
 const SUMMARY = {
@@ -78,6 +77,7 @@ afterEach(() => {
 	// clearAllMocks() only clears CALLS, not implementations, so a test that
 	// installed a non-null summary would leak it into the next one.
 	vi.mocked(getModelSummary).mockReturnValue(null);
+	vi.mocked(getStagedViewDepth).mockReturnValue(0);
 	vi.clearAllMocks();
 });
 
@@ -133,6 +133,24 @@ describe('TopBar', () => {
 
 			expect(findButton(/commit/i)?.disabled).toBe(false);
 			expect(document.body.textContent).toContain('● 1');
+
+			unmount(c);
+		});
+	});
+
+	describe('view change counter', () => {
+		// The badge composes the staged VIEW-OP JOURNAL's depth
+		// (`getStagedViewDepth`), not a baseline diff count — this is the
+		// TopBar half of the journal switch (DiffDrawer.view.test.ts covers
+		// the drawer half).
+		it('reflects the staged view-op journal depth', () => {
+			vi.mocked(getModelSummary).mockReturnValue(SUMMARY as never);
+			vi.mocked(getStagedViewDepth).mockReturnValue(3);
+
+			const c = mount(TopBar, { target: document.body });
+			flushSync();
+
+			expect(document.body.textContent).toContain('● 3');
 
 			unmount(c);
 		});

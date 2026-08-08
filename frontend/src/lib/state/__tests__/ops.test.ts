@@ -5,9 +5,13 @@ import {
 	artifactResource,
 	createTempId,
 	isArtifactResource,
-	isTempId
+	isTempId,
+	folderResource,
+	isFolderResource,
+	FOLDER_RESOURCE_PREFIX,
+	VIEW_ROOT_ID
 } from '../ops';
-import type { ArtifactOp, ModelOp, Op } from '../ops';
+import type { ArtifactOp, ModelOp, Op, ViewOp } from '../ops';
 
 describe('createTempId', () => {
 	it('returns a string that starts with the temp prefix', () => {
@@ -57,5 +61,23 @@ describe('artifact lock namespace', () => {
 		// @ts-expect-error - ArtifactOp is not assignable to ModelOp
 		const asModelOp: ModelOp = op;
 		void asModelOp;
+	});
+});
+
+describe('folder lock namespace', () => {
+	it('prefixes folder ids with folder:', () => {
+		expect(folderResource('f1')).toBe('folder:f1');
+		expect(folderResource(VIEW_ROOT_ID)).toBe('folder:root');
+		expect(FOLDER_RESOURCE_PREFIX).toBe('folder:');
+	});
+	it('classifies resource ids', () => {
+		expect(isFolderResource('folder:f1')).toBe(true);
+		expect(isFolderResource('art:f1')).toBe(false);
+		expect(isFolderResource('f1')).toBe(false);
+	});
+	it('view ops are assignable to Op', () => {
+		const op: ViewOp = { kind: 'rename_folder', id: 'f1', name: 'B' };
+		const asOp: Op = op; // compile-time check
+		expect(asOp.kind).toBe('rename_folder');
 	});
 });

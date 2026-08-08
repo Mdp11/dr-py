@@ -9,7 +9,6 @@ import TopBar from '../TopBar.svelte';
 // Provide a minimal no-op stub for each dialog/drawer child of TopBar so we
 // don't need QueryClientProvider or other heavy contexts.
 vi.mock('../ApplyCrDialog.svelte', () => ({ default: () => {} }));
-vi.mock('../LoadFilesDialog.svelte', () => ({ default: () => {} }));
 vi.mock('../SwapMetamodelDrawer.svelte', () => ({ default: () => {} }));
 vi.mock('../SettingsDialog.svelte', () => ({ default: () => {} }));
 
@@ -27,7 +26,7 @@ vi.mock('$lib/state', async (orig) => {
 		getModelRev: vi.fn(() => 0),
 		getModelGeneration: vi.fn(() => 0),
 		getStagedChangeCount: vi.fn(() => 0),
-		getViewChangesCount: vi.fn(() => 0),
+		getStagedViewDepth: vi.fn(() => 0),
 		getStagedDepth: vi.fn(() => 0),
 		isRunning: vi.fn(() => false),
 		getIssues: vi.fn(() => []),

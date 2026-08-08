@@ -12,8 +12,12 @@
  * DiffDrawer's Commit sends the batch. Opening a SAVED navigation first checks
  * the artifact out (`art:<id>` exclusive lease); a denial does not refuse the
  * tab — it opens UNSAVEABLE behind the holder banner (`_lockDenied`): Save and
- * Save as are disabled, while the definition-editing surface itself is NOT yet
- * gated (see {@link ensureDraft} for the exact scope and the open follow-up).
+ * Save as are disabled, and the whole definition-editing canvas goes `inert`
+ * too (see {@link ensureDraft} for the exact scope). The banner's escape hatch
+ * is "Save as copy" — `saveAsDraft` itself, called straight from the banner
+ * rather than through the (also-disabled) toolbar button — which forks the
+ * draft into a brand-new artifact and needs no lease of its own, since a
+ * staged CREATE never touches what the peer holds.
  * The tab is deliberately NOT re-keyed when a create is staged: the draft keeps
  * living in its `nav:draft:N` tab and is rebound to `nav:<id>` only when the
  * commit's `id_map` supplies a canonical id (see the module-scope listeners at
@@ -131,12 +135,12 @@ const _drafts = new SvelteMap<string, NavDraft>();
 const _previews = new SvelteMap<string, NavPreview>();
 /**
  * tabId -> the peer holding the `art:` lease this tab was refused, as a display
- * label. Present == the tab is UNSAVEABLE: the payload loaded (a denial never
- * refuses the tab), the name input / Save / Save as are disabled and the banner
- * offers Retry — but the definition-editing surface is NOT gated (see
- * {@link ensureDraft}). Absent for a VIEWER too — the whole workspace is
- * already read-only for them, so a per-tab "checked out by…" line would be
- * noise.
+ * label. Present == the tab is UNSAVEABLE AND READ-ONLY: the payload loaded (a
+ * denial never refuses the tab), the name input / Save / Save as are disabled,
+ * the definition-editing canvas goes `inert`, and the banner offers Retry plus
+ * "Save as copy" (see {@link ensureDraft}). Absent for a VIEWER too — the whole
+ * workspace is already read-only for them, so a per-tab "checked out by…" line
+ * would be noise.
  */
 const _lockDenied = new SvelteMap<string, string>();
 /** tabId -> the set of expanded node pathKeys. A node is previewed only while
@@ -531,23 +535,27 @@ export function selectNode(tabId: string, path: NodePath): void {
  * `table-editor.svelte.ts` and `snippet-editor.svelte.ts` mirror by reference.**
  * A refused check-out sets `_lockDenied`, which disables the NAME input and
  * every save affordance the tab has — Save here and in the table editor, plus
- * Save-as in both of those (the snippet tab has no Save-as; Save is its only
- * one) — and renders the holder banner with its Retry. It does NOT disable
- * the definition-editing surface: PathCard/CombineFrame structural edits, the
- * table Settings dialog and column editors, and the snippet CodeMirror
- * document all stay live on `canEdit()` alone. So the honest description of a
- * denied tab is **unsaveable**, not read-only — a user can still rebuild a
- * whole navigation and only discover at Save that the artifact was never
- * theirs, with every save affordance the tab has disabled.
+ * Save-as in both of those (the snippet tab has no ordinary Save-as; Save is
+ * its only one) — and renders the holder banner with its Retry. It ALSO
+ * disables the definition-editing surface itself: each editor wraps its own
+ * canvas/grid/CodeMirror host — never the banner, previews, consoles, or
+ * scrollable result panes around it — in `inert={lockHolder !== null}`, so
+ * PathCard/CombineFrame structural edits, the table's column-manager/grid
+ * chrome, and the snippet CodeMirror document all go unfocusable and
+ * unclickable the moment a peer's hold is discovered. A denied tab is
+ * therefore **read-only**, not merely unsaveable — there is no way to sink
+ * further work into an artifact the tab can never commit.
  *
- * TODO (deliberate follow-up, not an oversight): gate the editing surface too.
- * It was scoped out on purpose — the plan asked for the save buttons at
- * minimum and the structural affordances "if cheap", and it is entangled with
- * an unsettled UX question (whether Save-as should stay ENABLED on a denied
- * tab so the user can fork their work rather than lose it). Until that is
- * decided, every docstring, README line and banner string in this area must
- * say "unsaveable"; claiming read-only is what makes a future reader trust a
- * property the code does not have.
+ * The escape hatch lives on the banner itself (outside the `inert` container
+ * it guards, so it stays reachable): "Save as copy" forks the CURRENT draft
+ * into a brand-new artifact under a temp id — `saveAsDraft`/`saveAsTableDraft`,
+ * the same fork the ordinary (denial-free) toolbar "Save as…" button already
+ * used, called straight from the banner instead — or, for the snippet editor
+ * (which had no pre-existing Save-as to reuse), the purpose-built
+ * `forkSnippetDraftAsCopy`, which additionally leaves the SOURCE tab itself
+ * untouched rather than rekeying it in place (see that function's docstring).
+ * A fork stages a CREATE, which needs no lease, so it works regardless of who
+ * holds the original.
  */
 export async function ensureDraft(tabId: string): Promise<NavDraft> {
 	const existing = _drafts.get(tabId);
@@ -576,8 +584,9 @@ export async function ensureDraft(tabId: string): Promise<NavDraft> {
 		// investing work in a tab whose edits can never land. A denial does NOT
 		// refuse the tab — the payload still loads and the tab opens UNSAVEABLE
 		// behind the holder banner (a viewer gets no banner: see `_lockDenied`).
-		// Unsaveable, NOT read-only: the definition-editing surface is still live
-		// — see this function's docstring for what is and is not gated, and why.
+		// Unsaveable AND read-only: NavigationBuilder wraps the definition-editing
+		// canvas in `inert` while denied — see this function's docstring for what
+		// is gated and why.
 		//
 		// The `.catch` is load-bearing, not defensive noise: `ensureCheckout`
 		// RETHROWS anything that is not a lock conflict, and our only caller is a

@@ -2,11 +2,14 @@
 	import type { Element } from '$lib/api/types';
 	import {
 		artifactHeaderById,
+		folderResource,
+		getLockFor,
 		indexIssues,
 		lockBadgeFor,
 		openArtifactTab,
 		openNavigationTab
 	} from '$lib/state';
+	import { getCurrentUserId } from '$lib/api/client';
 	import { confirm } from '$lib/state/confirm.svelte';
 	import {
 		AlertCircle,
@@ -26,7 +29,7 @@
 	import {
 		artifactIdFromKey,
 		EXCLUDED_SECTION_KEY,
-		folderPathFromKey,
+		folderIdFromKey,
 		isArtifactKey,
 		isExcludedSectionKey,
 		isFolderKey,
@@ -35,15 +38,22 @@
 		type Visibility
 	} from './view-tree';
 	import {
-		createFolder,
-		deleteFolder,
+		folderCreateLock,
+		folderDeleteLock,
+		folderEditLock,
+		folderSubtreeIds,
+		getView,
 		isArtifactDirty,
-		removeArtifactFromFolder,
-		renameFolder
+		releaseFolderLeaseIfUnneeded,
+		stageCreateFolder,
+		stageDeleteFolder,
+		stageRemoveArtifactRef,
+		stageRenameFolder,
+		VIEW_ROOT_ID
 	} from '$lib/state';
 	import { elementDisplayName as displayName } from '$lib/util/element-name';
 
-	type FolderOption = { path: string[]; label: string };
+	type FolderOption = { id: string; label: string };
 
 	type Props = {
 		row: { key: string; depth: number };
@@ -64,8 +74,9 @@
 		selectedId: string | null;
 		multiSelectedIds: Set<string>;
 		focusedId?: string | null;
-		/** The containing folder path for an element row, or null (top-level / under section). */
-		parentFolderPath: string[] | null;
+		/** The containing folder id for an element/artifact row, or null
+		 * (top-level / under section). */
+		parentFolderId: string | null;
 		/** This element's index within its folder's elements (for reorder). */
 		siblingIndex: number;
 		/** A folder row's element count (for append index). */
@@ -75,7 +86,7 @@
 		dnd: DndContext;
 		onToggle: (key: string) => void;
 		onPick: (key: string, e: MouseEvent) => void;
-		onMoveToFolder: (elementId: string, path: string[] | null) => Promise<void> | void;
+		onMoveToFolder: (elementId: string, folderId: string | null) => Promise<void> | void;
 	};
 
 	let {
@@ -92,7 +103,7 @@
 		selectedId,
 		multiSelectedIds,
 		focusedId = null,
-		parentFolderPath,
+		parentFolderId,
 		siblingIndex,
 		folderLen,
 		movable,
@@ -108,8 +119,8 @@
 	const isExcludedSection = $derived(isExcludedSectionKey(key));
 	const isFolder = $derived(isFolderKey(key));
 	const isArtifact = $derived(isArtifactKey(key));
-	// folderPathFromKey throws for non-folder keys, so guard it.
-	const folderPath = $derived(isFolder ? folderPathFromKey(key) : []);
+	// folderIdFromKey throws for non-folder keys, so guard it.
+	const folderId = $derived(isFolder ? folderIdFromKey(key) : '');
 	const artifactId = $derived(isArtifact ? artifactIdFromKey(key) : '');
 	// Tolerate-dangling rule: an artifact id the library doesn't know about
 	// (deleted elsewhere, or not yet loaded) renders nothing rather than an
@@ -148,36 +159,68 @@
 	const hasViewWarning = $derived(!isFolder && !isExcludedSection && warningsByElementId.has(key));
 	const badge = $derived(lockBadgeFor(key));
 
+	// Folder peer-lock badge (Task 9): mirrors the element badge above, but
+	// keyed directly off `getLockFor`/`folderResource` rather than
+	// `lockBadgeFor` — a folder lease is taken transiently by every sidebar
+	// gesture (rename/move/create-child/place), so there is no "checked out by
+	// you, still open" state worth rendering the way an artifact/element edit
+	// lease has; only a PEER's lease is ever worth surfacing here.
+	const folderLease = $derived(isFolder ? getLockFor(folderResource(folderId)) : undefined);
+	const folderLockedByPeer = $derived(
+		folderLease !== undefined && folderLease.holder_id !== getCurrentUserId()
+	);
+
+	// Lease-at-dialog-open pattern (Decision 2): acquire the lease BEFORE the
+	// prompt/confirm shows (fail-fast — a denial means the dialog never opens),
+	// then hand it back via `releaseFolderLeaseIfUnneeded` on cancel/no-op close
+	// (the mutator's own gate call on the happy path is idempotent and cheap, so
+	// re-acquiring there costs nothing).
 	async function onNewFolder(): Promise<void> {
+		if (!(await folderCreateLock(folderId))) return; // fail-fast BEFORE the prompt
 		const name = window.prompt('New folder name');
-		if (name === null || name.trim() === '') return;
+		if (name === null || name.trim() === '') {
+			void releaseFolderLeaseIfUnneeded(folderId);
+			return;
+		}
 		try {
-			await createFolder(folderPath, name.trim());
+			await stageCreateFolder(folderId, name.trim());
 		} catch (err) {
 			alert(err instanceof Error ? err.message : 'Failed to create folder');
 		}
 	}
 
-	async function onRename(): Promise<void> {
+	async function onRenameFolder(): Promise<void> {
+		if (!(await folderEditLock([folderId]))) return; // fail-fast BEFORE the prompt
 		const next = window.prompt('Rename folder', folderName);
-		if (next === null || next.trim() === '' || next.trim() === folderName) return;
+		if (next === null || next.trim() === '' || next.trim() === folderName) {
+			// granted-then-cancelled: hand the lease back unless something staged needs it
+			void releaseFolderLeaseIfUnneeded(folderId);
+			return;
+		}
 		try {
-			await renameFolder(folderPath, next.trim());
+			await stageRenameFolder(folderId, next.trim());
 		} catch (err) {
 			alert(err instanceof Error ? err.message : 'Failed to rename folder');
 		}
 	}
 
 	async function onDelete(): Promise<void> {
+		const v = getView();
+		if (v === null) return;
+		const subtreeIds = folderSubtreeIds(v, folderId);
+		if (!(await folderDeleteLock(subtreeIds))) return; // fail-fast BEFORE the confirm dialog
 		const ok = await confirm({
 			title: 'Delete folder',
 			description: `Delete "${folderName}" and its nested folders? Elements remain.`,
 			confirmLabel: 'Delete',
 			variant: 'destructive'
 		});
-		if (!ok) return;
+		if (!ok) {
+			void releaseFolderLeaseIfUnneeded(folderId);
+			return;
+		}
 		try {
-			await deleteFolder(folderPath);
+			await stageDeleteFolder(folderId);
 		} catch (err) {
 			alert(err instanceof Error ? err.message : 'Failed to delete folder');
 		}
@@ -196,9 +239,9 @@
 
 	async function onRemoveArtifact(e: MouseEvent): Promise<void> {
 		e.stopPropagation(); // don't also fire the row's dblclick-to-open
-		if (parentFolderPath === null) return;
+		if (parentFolderId === null) return;
 		try {
-			await removeArtifactFromFolder(parentFolderPath, artifactId);
+			await stageRemoveArtifactRef(parentFolderId, artifactId);
 		} catch (err) {
 			console.error('Remove artifact failed', err);
 		}
@@ -220,7 +263,7 @@
 		style="padding-left: {depth * 12 + 4}px"
 		data-drop-key={EXCLUDED_SECTION_KEY}
 		data-drop-kind="section"
-		data-drop-path="null"
+		data-drop-folder-id="null"
 	>
 		{#if hasChildren}
 			<button
@@ -267,9 +310,9 @@
 		style="padding-left: {depth * 12 + 4}px; touch-action: none"
 		data-drop-key={key}
 		data-drop-kind="folder"
-		data-drop-path={JSON.stringify(folderPath)}
+		data-drop-folder-id={folderId}
 		data-folder-len={folderLen}
-		onpointerdown={(e) => dnd.onPointerDown(e, key, 'folder', folderPath)}
+		onpointerdown={(e) => dnd.onPointerDown(e, key, 'folder', folderId)}
 	>
 		{#if hasChildren}
 			<button
@@ -296,11 +339,20 @@
 				<FolderIcon class="h-3 w-3" />
 			{/if}
 		</span>
-		<span class="flex-1 truncate font-medium" title={folderPath.join(' / ')}>
+		<span
+			class="flex-1 truncate font-medium"
+			title={(tree.folderPathNames.get(key) ?? [folderName]).join(' / ')}
+		>
 			{folderName}
 		</span>
 		{#if myVisibility === 'stub'}
 			<span class="font-mono text-[10px] text-muted-foreground/70">empty</span>
+		{/if}
+		{#if folderLockedByPeer}
+			<Lock
+				class="h-3 w-3 shrink-0 text-warning"
+				title={`Locked by ${folderLease!.holder_email ?? folderLease!.holder_id}`}
+			/>
 		{/if}
 		<DropdownMenu.Root>
 			<DropdownMenu.Trigger
@@ -311,7 +363,7 @@
 			</DropdownMenu.Trigger>
 			<DropdownMenu.Content align="end" class="w-44">
 				<DropdownMenu.Item onSelect={onNewFolder}>New folder</DropdownMenu.Item>
-				<DropdownMenu.Item onSelect={onRename}>Rename…</DropdownMenu.Item>
+				<DropdownMenu.Item onSelect={onRenameFolder}>Rename…</DropdownMenu.Item>
 				<DropdownMenu.Separator />
 				<DropdownMenu.Item onSelect={onDelete}>Delete</DropdownMenu.Item>
 			</DropdownMenu.Content>
@@ -329,7 +381,7 @@
 			aria-level={depth + 1}
 			style="padding-left: {depth * 12 + 4}px; touch-action: none"
 			ondblclick={onOpenArtifact}
-			onpointerdown={(e) => dnd.onPointerDown(e, key, 'artifact', parentFolderPath ?? [])}
+			onpointerdown={(e) => dnd.onPointerDown(e, key, 'artifact', parentFolderId ?? VIEW_ROOT_ID)}
 		>
 			<span class="flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground/40"
 				>·</span
@@ -411,9 +463,9 @@
 		style="padding-left: {depth * 12 + 4}px; touch-action: {isMovable ? 'none' : 'auto'}"
 		data-drop-key={key}
 		data-drop-kind="element"
-		data-drop-path={JSON.stringify(parentFolderPath)}
+		data-drop-folder-id={parentFolderId === null ? 'null' : parentFolderId}
 		data-sibling-index={siblingIndex}
-		onpointerdown={(e) => dnd.onPointerDown(e, key, 'element', [])}
+		onpointerdown={(e) => dnd.onPointerDown(e, key, 'element', null)}
 	>
 		{#if hasChildren}
 			<button
@@ -469,8 +521,8 @@
 				<DropdownMenu.Content align="end" class="w-56">
 					{#if folderOptions.length > 0}
 						<DropdownMenu.Label>Move to folder</DropdownMenu.Label>
-						{#each folderOptions as opt (opt.label)}
-							<DropdownMenu.Item onSelect={() => onMoveToFolder(key, opt.path)}>
+						{#each folderOptions as opt (opt.id)}
+							<DropdownMenu.Item onSelect={() => onMoveToFolder(key, opt.id)}>
 								{opt.label}
 							</DropdownMenu.Item>
 						{/each}
@@ -496,7 +548,7 @@
 		style="padding-left: {depth * 12 + 4}px"
 		data-drop-key={key}
 		data-drop-kind="element"
-		data-drop-path={JSON.stringify(parentFolderPath)}
+		data-drop-folder-id={parentFolderId === null ? 'null' : parentFolderId}
 		data-sibling-index={siblingIndex}
 	>
 		<span class="flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground/40">•</span

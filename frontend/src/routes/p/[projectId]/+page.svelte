@@ -31,6 +31,7 @@
 		cancelOpenProgress,
 		clearModelError,
 		clearSelection,
+		clearViewState,
 		finishJourney,
 		getActiveProjectId,
 		reactToBootError,
@@ -53,6 +54,7 @@
 		resetModelStore,
 		resetSnippetEditors,
 		resetSnippetDocs,
+		resetViewEdits,
 		setDiffDrawerOpen,
 		setHistoryDrawerOpen,
 		setMetamodel,
@@ -127,6 +129,13 @@
 		try {
 			void trackOpenProgress(); // fire-and-forget: feeds the journey while the requests below hydrate
 			markViewUnresolved(); // reset the view-answered gate on every project (re)entry
+			// …and drop the previous project's view state with it. The view stores
+			// are module-scope singletons: an in-SPA project switch that left
+			// project A's staged view ops in place would offer them for commit into
+			// project B, naming folder ids B has never heard of. clearViewState()
+			// nulls `_view` AND resets the journal; the boot sequence's own
+			// refreshView() below repopulates it for this project.
+			clearViewState();
 			try {
 				setMetamodel(await metamodelApi.getMetamodel());
 			} catch (err) {
@@ -230,6 +239,13 @@
 			resetArtifacts();
 			resetSnippetEditors();
 			resetSnippetDocs();
+			// resetCheckout() above dropped the lock registry, so every `folder:`
+			// lease the staged view ops were relying on is gone from this client's
+			// bookkeeping. Leaving the journal populated would send those ops at the
+			// next commit with no folder tokens attached — a hard 409 "required lock
+			// not held" with no obvious way to unwind. A reload is a full resync;
+			// the view journal resyncs with everything else.
+			resetViewEdits();
 			clearSelection();
 			// Deliberately NOT resetInspectionHistory(): a reload is the same project,
 			// same ids, so the visit trail is still valid — unlike opening a different

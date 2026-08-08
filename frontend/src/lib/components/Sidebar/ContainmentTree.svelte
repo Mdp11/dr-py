@@ -11,12 +11,12 @@
 	import { NotFoundError } from '$lib/api/errors';
 	import {
 		artifactHeaderById,
-		createFolder,
 		createTempId,
 		dropTreeItems,
 		emit,
 		ensureTreeItems,
 		ensureTypeFilterInitialized,
+		folderCreateLock,
 		getTreeElements,
 		getIssues,
 		getMetamodel,
@@ -32,17 +32,19 @@
 		indexIssues,
 		isProjectOpening,
 		isViewResolved,
-		moveArtifact,
-		moveFolder,
 		openNavigationTab,
-		placeArtifact,
-		placeElement,
-		placeElementsAt,
-		removeElement,
+		releaseFolderLeaseIfUnneeded,
 		seedTreeItems,
 		select,
 		setTypeFilter,
-		toggleType
+		stageCreateFolder,
+		stageMoveArtifact,
+		stageMoveFolder,
+		stagePlaceArtifact,
+		stagePlaceElementsAt,
+		stageRemoveElement,
+		toggleType,
+		VIEW_ROOT_ID
 	} from '$lib/state';
 	import { ChevronDown, ChevronRight, Filter, FolderPlus, Plus } from '@lucide/svelte';
 	import { elementDisplayName as displayName } from '$lib/util/element-name';
@@ -72,7 +74,8 @@
 		computeVisibility,
 		EXCLUDED_SECTION_KEY,
 		flattenVisibleRows,
-		folderPathFromKey,
+		folderIdFromKey,
+		folderKey,
 		isArtifactKey,
 		isExcludedSectionKey,
 		isFolderKey,
@@ -84,7 +87,7 @@
 		type FlatRow,
 		type NodeKind
 	} from './view-tree';
-	import { findFolderByPath } from '../../state/view-ops';
+	import { findFolderById } from '../../state/view-ops';
 
 	const mm = $derived(getMetamodel());
 	const typeFilter = $derived(getTypeFilter());
@@ -435,7 +438,7 @@
 			if (v !== null) {
 				for (const key of expandedFolders) {
 					if (!isFolderKey(key)) continue;
-					const folder = findFolderByPath(v, folderPathFromKey(key));
+					const folder = findFolderById(v, folderIdFromKey(key));
 					if (folder) dropTreeItems(folder.elements);
 				}
 			}
@@ -699,7 +702,7 @@
 		const ids: string[] = [];
 		for (const key of expandedFolders) {
 			if (!isFolderKey(key)) continue;
-			const folder = findFolderByPath(v, folderPathFromKey(key));
+			const folder = findFolderById(v, folderIdFromKey(key));
 			if (folder) ids.push(...folder.elements);
 		}
 		if (ids.length > 0) void ensureTreeItems(ids);
@@ -892,28 +895,28 @@
 	// loop, which fails to start in some Chromium setups (drag never begins in
 	// Chrome/Edge while Firefox works). Pointer events are driven by the browser
 	// input pipeline, so they behave the same everywhere and support touch/pen.
-	// Drop targets tag themselves with data-drop-key / data-drop-path; we hit-test
-	// them with elementFromPoint rather than per-row dragover/drop handlers.
+	// Drop targets tag themselves with data-drop-key / data-drop-folder-id; we
+	// hit-test them with elementFromPoint rather than per-row dragover/drop handlers.
 
 	const movableIds = $derived(movableElementIds(tree));
 	const knownIds = $derived(new SvelteSet(elementsById.keys()));
 
 	// Per-row drop metadata passed to TreeRow so the controller can resolve a
 	// positional element drop (append/reorder/exclude) from the hovered row.
-	function dropParentFolderPath(row: FlatRow): string[] | null {
-		if (row.parent !== null && isFolderKey(row.parent)) return folderPathFromKey(row.parent);
+	function dropParentFolderId(row: FlatRow): string | null {
+		if (row.parent !== null && isFolderKey(row.parent)) return folderIdFromKey(row.parent);
 		return null; // top-level, under the excluded section, or under an element
 	}
 	function dropSiblingIndex(row: FlatRow): number {
 		if (view === null) return 0;
-		const p = dropParentFolderPath(row);
+		const p = dropParentFolderId(row);
 		if (p === null) return 0;
-		const folder = findFolderByPath(view, p);
+		const folder = findFolderById(view, p);
 		return folder ? folder.elements.indexOf(row.key) : 0;
 	}
 	function dropFolderLen(row: FlatRow): number {
 		if (view === null || !isFolderKey(row.key)) return 0;
-		const folder = findFolderByPath(view, folderPathFromKey(row.key));
+		const folder = findFolderById(view, folderIdFromKey(row.key));
 		return folder ? folder.elements.length : 0;
 	}
 
@@ -928,11 +931,12 @@
 	let startX = 0;
 	let startY = 0;
 	// Set alongside `pendingPayload` when the drag is an artifact picked up from
-	// a tree row (its containing folder path); left null for an artifact drag
-	// that began outside the tree (the ArtifactsSection sidebar). At drop time
-	// this distinguishes "reparent" (strip from the source folder first) from
-	// "place" (the sidebar has no source folder to strip from).
-	let dragSourceFolderPath: string[] | null = null;
+	// a tree row (its containing folder id, or VIEW_ROOT_ID for a root-placed
+	// artifact); left null for an artifact drag that began outside the tree (the
+	// ArtifactsSection sidebar). At drop time this distinguishes "reparent"
+	// (strip from the source folder first) from "place" (the sidebar has no
+	// source folder to strip from).
+	let dragSourceFolderId: string | null = null;
 	let dragging = $state(false);
 	let externalDrag = $state(false);
 	let dragX = $state(0);
@@ -951,8 +955,7 @@
 	const dragLabel = $derived.by((): string => {
 		if (draggingPayload === null) return '';
 		if (draggingPayload.kind === 'folder') {
-			const p = draggingPayload.path;
-			return p.length > 0 ? p[p.length - 1] : 'folder';
+			return tree.folderName.get(folderKey(draggingPayload.id)) ?? 'folder';
 		}
 		if (draggingPayload.kind === 'artifact') {
 			return artifactHeaderById(draggingPayload.id)?.name ?? draggingPayload.artifactKind;
@@ -966,7 +969,7 @@
 	});
 
 	function dropAllowed(
-		destPath: string[] | null,
+		destFolderId: string | null,
 		destKind: 'folder' | 'element' | 'section'
 	): boolean {
 		if (draggingPayload === null) return false;
@@ -982,17 +985,18 @@
 		if (draggingPayload.kind === 'artifact') {
 			return canDropArtifact(destKind);
 		}
-		return canDropFolder({ sourcePath: draggingPayload.path, destParentPath: destPath ?? [] }).ok;
+		if (view === null) return false; // folders only exist within a view
+		return canDropFolder({ view, sourceId: draggingPayload.id, destParentId: destFolderId }).ok;
 	}
 
-	/** Resolve the drop target under a viewport point to its key + destination path. */
+	/** Resolve the drop target under a viewport point to its key + destination folder id. */
 	function dropTargetAt(
 		x: number,
 		y: number
 	): {
 		key: string;
 		kind: 'folder' | 'element' | 'section';
-		path: string[] | null;
+		folderId: string | null;
 		folderLen: number;
 		siblingIndex: number;
 		half: 'top' | 'bottom';
@@ -1000,22 +1004,24 @@
 		const hit = document.elementFromPoint(x, y);
 		const el = hit?.closest<HTMLElement>('[data-drop-key]') ?? null;
 		if (el === null) return null;
-		const raw = el.dataset.dropPath ?? 'null';
-		const path = raw === 'null' ? null : (JSON.parse(raw) as string[]);
+		const raw = el.dataset.dropFolderId ?? 'null';
+		const folderId = raw === 'null' ? null : raw;
 		const rect = el.getBoundingClientRect();
 		const half: 'top' | 'bottom' = y < rect.top + rect.height / 2 ? 'top' : 'bottom';
 		return {
 			key: el.dataset.dropKey ?? '',
 			kind: (el.dataset.dropKind as 'folder' | 'element' | 'section') ?? 'folder',
-			path,
+			folderId,
 			folderLen: Number(el.dataset.folderLen ?? '0'),
 			siblingIndex: Number(el.dataset.siblingIndex ?? '0'),
 			half
 		};
 	}
 
-	function buildPayload(key: string, kind: NodeKind, folderPath: string[]): DragPayload | null {
-		if (kind === 'folder') return { kind: 'folder', path: folderPath };
+	function buildPayload(key: string, kind: NodeKind, folderId: string | null): DragPayload | null {
+		// TreeRow always passes its OWN id for a folder-kind press (see
+		// `DndContext.onPointerDown`'s doc comment), so `folderId` is never null here.
+		if (kind === 'folder') return { kind: 'folder', id: folderId! };
 		if (kind === 'artifact') {
 			const ref = tree.artifactRef.get(key);
 			if (!ref) return null;
@@ -1027,16 +1033,21 @@
 		return { kind: 'element', ids };
 	}
 
-	function onPointerDown(e: PointerEvent, key: string, kind: NodeKind, folderPath: string[]): void {
+	function onPointerDown(
+		e: PointerEvent,
+		key: string,
+		kind: NodeKind,
+		folderId: string | null
+	): void {
 		if (e.button !== 0 || !e.isPrimary) return;
 		suppressClick = false;
-		const payload = buildPayload(key, kind, folderPath);
+		const payload = buildPayload(key, kind, folderId);
 		if (payload === null) return; // nothing movable under this press
 		pendingPayload = payload;
-		// Only an artifact row picked up FROM the tree carries a source folder path
-		// (see `dragSourceFolderPath`'s doc comment) — the ArtifactsSection sidebar
+		// Only an artifact row picked up FROM the tree carries a source folder id
+		// (see `dragSourceFolderId`'s doc comment) — the ArtifactsSection sidebar
 		// begins its drag via `beginDrag` directly, bypassing this handler.
-		dragSourceFolderPath = payload.kind === 'artifact' ? folderPath : null;
+		dragSourceFolderId = payload.kind === 'artifact' ? folderId : null;
 		activePointerId = e.pointerId;
 		startX = e.clientX;
 		startY = e.clientY;
@@ -1059,7 +1070,7 @@
 		}
 		const target = dropTargetAt(e.clientX, e.clientY);
 		dragHoverKey = target?.key ?? null;
-		dragHoverValid = target !== null && dropAllowed(target.path, target.kind);
+		dragHoverValid = target !== null && dropAllowed(target.folderId, target.kind);
 		lastPointerX = e.clientX;
 		lastPointerY = e.clientY;
 		if (dragging && autoScrollRaf === 0) autoScrollRaf = requestAnimationFrame(tickAutoScroll);
@@ -1093,7 +1104,7 @@
 			else poolScrollTop = vp.scrollTop;
 			const t = dropTargetAt(lastPointerX, lastPointerY);
 			dragHoverKey = t?.key ?? null;
-			dragHoverValid = t !== null && dropAllowed(t.path, t.kind);
+			dragHoverValid = t !== null && dropAllowed(t.folderId, t.kind);
 		}
 		autoScrollRaf = requestAnimationFrame(tickAutoScroll);
 	}
@@ -1106,8 +1117,12 @@
 		}
 		const target = dropTargetAt(e.clientX, e.clientY);
 		const payload = draggingPayload;
-		const valid = target !== null && dropAllowed(target.path, target.kind);
-		const sourceFolderPath = dragSourceFolderPath;
+		const valid = target !== null && dropAllowed(target.folderId, target.kind);
+		// KNOWN ORDERING TRAP: everything the awaited mutators below need must be
+		// captured HERE, before `endGesture()` — it clears `draggingPayload` and
+		// `dragSourceFolderId`, so reading them after that call would silently see
+		// null/cleared state instead of this gesture's actual payload/source.
+		const sourceFolderId = dragSourceFolderId; // id now, not the pre-Phase-2 path
 		suppressClick = true;
 		endGesture();
 		if (!valid || payload === null || target === null) return;
@@ -1115,25 +1130,27 @@
 			if (payload.kind === 'element') {
 				const res = resolveElementDrop({
 					targetKind: target.kind,
-					folderPath: target.path,
+					folderId: target.folderId,
 					folderLen: target.folderLen,
 					siblingIndex: target.siblingIndex,
 					half: target.half
 				});
-				await placeElementsAt(res.path, payload.ids, res.index);
+				// The mutators run the drop-time lease acquire internally — a denial
+				// resolves `false` after showing the lock notice; no throw.
+				await stagePlaceElementsAt(res.folderId, payload.ids, res.index);
 			} else if (payload.kind === 'folder') {
-				await moveFolder(payload.path, target.path ?? []);
+				await stageMoveFolder(payload.id, target.folderId ?? VIEW_ROOT_ID);
 			} else {
 				// 'artifact': dropAllowed() already restricted the target to a folder
-				// row, so `target.path` is a real folder path here. A row picked up
-				// from a tree folder (`sourceFolderPath` set) reparents; one picked up
+				// row, so `target.folderId` is a real folder id here. A row picked up
+				// from a tree folder (`sourceFolderId` set) reparents; one picked up
 				// from the ArtifactsSection sidebar (no source folder) places anew.
-				const destPath = target.path ?? [];
+				const dest = target.folderId ?? VIEW_ROOT_ID;
 				const ref = { id: payload.id, kind: payload.artifactKind };
-				if (sourceFolderPath !== null) {
-					await moveArtifact(sourceFolderPath, destPath, ref);
+				if (sourceFolderId !== null) {
+					await stageMoveArtifact(sourceFolderId, dest, ref);
 				} else {
-					await placeArtifact(destPath, ref);
+					await stagePlaceArtifact(dest, ref);
 				}
 			}
 		} catch (err) {
@@ -1166,7 +1183,7 @@
 		}
 		pendingPayload = null;
 		activePointerId = null;
-		dragSourceFolderPath = null;
+		dragSourceFolderId = null;
 		dragging = false;
 		externalDrag = false;
 		endDrag();
@@ -1201,13 +1218,14 @@
 
 	// ----- folder targets for "Move to folder…" picker -----
 
-	type FolderOption = { path: string[]; label: string };
+	type FolderOption = { id: string; label: string };
 	const folderOptions = $derived.by<FolderOption[]>(() => {
 		const opts: FolderOption[] = [];
 		const walk = (key: string): void => {
 			if (!isFolderKey(key)) return;
-			const path = folderPathFromKey(key);
-			opts.push({ path, label: path.join(' / ') });
+			const id = folderIdFromKey(key);
+			const names = tree.folderPathNames.get(key) ?? [];
+			opts.push({ id, label: names.join(' / ') });
 			for (const c of tree.children.get(key) ?? []) walk(c);
 		};
 		for (const r of tree.roots) walk(r);
@@ -1215,19 +1233,26 @@
 	});
 
 	async function onNewRootFolder(): Promise<void> {
+		if (!(await folderCreateLock(VIEW_ROOT_ID))) return; // fail-fast BEFORE the prompt
 		const name = window.prompt('New top-level folder name');
-		if (name === null || name.trim() === '') return;
+		if (name === null || name.trim() === '') {
+			void releaseFolderLeaseIfUnneeded(VIEW_ROOT_ID);
+			return;
+		}
 		try {
-			await createFolder([], name.trim());
+			await stageCreateFolder(VIEW_ROOT_ID, name.trim());
 		} catch (err) {
 			alert(err instanceof Error ? err.message : 'Failed to create folder');
 		}
 	}
 
-	async function onMoveToFolder(elementId: string, path: string[] | null): Promise<void> {
+	async function onMoveToFolder(elementId: string, folderId: string | null): Promise<void> {
 		try {
-			if (path === null) await removeElement(elementId);
-			else await placeElement(path, elementId);
+			if (folderId === null) await stageRemoveElement(elementId);
+			// No index: the context-menu "Move to folder…" has no drop position, so
+			// it APPENDS. Omitting the argument is the documented sentinel — passing
+			// a huge literal would be clamped by the server but journaled verbatim.
+			else await stagePlaceElementsAt(folderId, [elementId]);
 		} catch (err) {
 			console.error('Move element failed', err);
 		}
@@ -1332,7 +1357,7 @@
 						class:border-destructive={isViewRootHover && !dragHoverValid}
 						data-drop-key={VIEW_ROOT_DROP_KEY}
 						data-drop-kind="section"
-						data-drop-path="null"
+						data-drop-folder-id="null"
 					>
 						Drop here to move to top level
 					</div>
@@ -1354,7 +1379,7 @@
 							selectedId={selection?.kind === 'element' ? selection.id : null}
 							multiSelectedIds={multiSelected}
 							{focusedId}
-							parentFolderPath={dropParentFolderPath(row)}
+							parentFolderId={dropParentFolderId(row)}
 							siblingIndex={dropSiblingIndex(row)}
 							folderLen={dropFolderLen(row)}
 							movable={movableIds.has(row.key)}
@@ -1380,7 +1405,7 @@
 			class:ring-destructive={dragHoverKey === EXCLUDED_SECTION_KEY && !dragHoverValid}
 			data-drop-key={EXCLUDED_SECTION_KEY}
 			data-drop-kind="section"
-			data-drop-path="null"
+			data-drop-folder-id="null"
 			onclick={() => (poolCollapsed = !poolCollapsed)}
 		>
 			{#if poolCollapsed}
@@ -1404,7 +1429,7 @@
 			onscroll={onPoolScroll}
 			data-drop-key={EXCLUDED_SECTION_KEY}
 			data-drop-kind="section"
-			data-drop-path="null"
+			data-drop-folder-id="null"
 		>
 			<div style="height: {poolWindow.padTop}px"></div>
 			<ul class="flex flex-col text-xs" role="group">
@@ -1423,7 +1448,7 @@
 						selectedId={selection?.kind === 'element' ? selection.id : null}
 						multiSelectedIds={multiSelected}
 						{focusedId}
-						parentFolderPath={dropParentFolderPath(row)}
+						parentFolderId={dropParentFolderId(row)}
 						siblingIndex={dropSiblingIndex(row)}
 						folderLen={dropFolderLen(row)}
 						movable={movableIds.has(row.key)}

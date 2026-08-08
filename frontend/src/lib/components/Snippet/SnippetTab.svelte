@@ -9,6 +9,7 @@
 		clearSnippetElements,
 		ensureSnippetDocs,
 		ensureSnippetDraft,
+		forkSnippetDraftAsCopy,
 		getMetamodel,
 		getSnippetDocs,
 		getSnippetDraft,
@@ -54,15 +55,21 @@
 	const editable = $derived(canEdit());
 	/** Non-null while a peer holds this snippet's `art:` lease: the tab is
 	 * UNSAVEABLE until the check-out succeeds — Save is disabled behind the
-	 * banner ("Retry"), while the editing surface itself stays live. This tab
-	 * has no Save-as. See `navigation-editor.svelte.ts`'s `ensureDraft`
-	 * docstring. */
+	 * banner ("Retry"). This tab has no ordinary Save-as; its escape hatch is
+	 * "Save as copy" (`forkSnippetDraftAsCopy`), which opens the fork in a
+	 * SEPARATE new tab rather than replacing this one. See
+	 * `navigation-editor.svelte.ts`'s `ensureDraft` docstring. */
 	const lockHolder = $derived(getSnippetLockHolder(tabId));
 	/** A refused check-out disables the SAVE affordances (name, Save — this tab
-	 * has no Save-as) but keeps them VISIBLE — paired with the banner, that is
-	 * what explains why. It does NOT gate the editing surface; the banner copy
-	 * says "you will not be able to save" rather than "read-only" for exactly
-	 * that reason. */
+	 * has no ordinary Save-as) but keeps them VISIBLE — paired with the banner,
+	 * that is what explains why. It ALSO gates the editing surface: the
+	 * CodeMirror host below is wrapped in `inert={locked}` (see the markup), so
+	 * a denied tab cannot accumulate edits it will never be able to commit. One
+	 * more code-mutating control lives OUTSIDE that host and needs its own
+	 * `disabled={locked}` because of it — the entry-hint bar's "Insert stub"
+	 * button, which is chrome sitting above the editor, not editor content, and
+	 * stays visible (and readable) while denied so the hint itself is still
+	 * useful; only the click is blocked. */
 	const locked = $derived(lockHolder !== null);
 	const vocab = $derived(vocabFromMetamodel(getMetamodel()));
 
@@ -78,6 +85,22 @@
 		saveError = null;
 		try {
 			await saveSnippetDraft(tabId);
+		} catch (e) {
+			saveError = e instanceof Error ? e.message : 'Save failed';
+		}
+	}
+
+	/** Banner-only escape hatch for a denied tab: forks the current code into a
+	 * brand-new snippet under a fresh tab, leaving this one (its draft, its
+	 * denial, its artifact binding) untouched — see
+	 * `forkSnippetDraftAsCopy`'s docstring. */
+	async function saveAsCopy(): Promise<void> {
+		if (!draft) return;
+		const name = window.prompt('Save copy as', `${draft.name} (copy)`);
+		if (!name) return;
+		saveError = null;
+		try {
+			await forkSnippetDraftAsCopy(tabId, name);
 		} catch (e) {
 			saveError = e instanceof Error ? e.message : 'Save failed';
 		}
@@ -227,10 +250,18 @@
 				class="flex items-center gap-2 bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground"
 			>
 				<span>{ENTRY_HINTS[run.entry as BoundEntry]}</span>
+				<!-- The hint stays VISIBLE on a denied tab (it's informational — a
+				     holder-locked user can still learn what shape is missing), but
+				     "Insert stub" is a code MUTATION and lives outside the
+				     `snippet-code-host` `inert` wrapper (it has to — it's chrome, not
+				     editor content), so it needs its own `disabled={locked}` guard or
+				     it would be the one click that reopens the exact gap this task
+				     closed. -->
 				<button
 					type="button"
 					data-testid="snippet-insert-stub"
-					class="shrink-0 rounded border border-input px-2 py-0.5 text-foreground/80 transition-colors hover:bg-muted"
+					class="shrink-0 rounded border border-input px-2 py-0.5 text-foreground/80 transition-colors hover:bg-muted disabled:opacity-40"
+					disabled={locked}
 					onclick={() =>
 						draft && updateSnippetCode(tabId, withStub(draft.code, run.entry as BoundEntry))}
 				>
@@ -250,6 +281,14 @@
 				<button type="button" class="underline" onclick={() => void reloadSnippetDraft(tabId)}>
 					Reload
 				</button>
+				<button
+					type="button"
+					data-testid="snippet-save-as-copy"
+					class="underline"
+					onclick={() => void saveAsCopy()}
+				>
+					Save as copy
+				</button>
 			</div>
 		{/if}
 		{#if run.entry !== 'script'}
@@ -262,7 +301,12 @@
 			/>
 		{/if}
 		<div bind:this={bodyEl} class="flex min-h-0 flex-1 flex-col">
-			<div class="min-h-0 overflow-hidden" style="height: {paneHeights.topH}px">
+			<div
+				class="min-h-0 overflow-hidden"
+				style="height: {paneHeights.topH}px"
+				data-testid="snippet-code-host"
+				inert={locked}
+			>
 				<CodeEditor
 					bind:this={editor}
 					code={draft.code}

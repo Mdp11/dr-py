@@ -71,11 +71,50 @@ export type ArtifactOp =
 	  }
 	| { kind: 'delete_artifact'; id: string };
 
+/**
+ * View-content ops (artefacts revamp Phase 2) — mirror of the backend's
+ * ViewOpIn (api/schemas.py). Applied by POST /commits to the session view
+ * blob (api/view_ops.py), never to the model; /model/ops rejects them.
+ * No `view_rev` precondition exists on any of these BY DECISION: the
+ * folder: lease is the concurrency control, exactly as `update_artifact`
+ * never sends `artifact_rev` (CLAUDE.md "Lease rule").
+ * `index` omitted = append (the server clamps + canonicalizes it).
+ */
+export type ViewOp =
+	| { kind: 'create_folder'; temp_id: string; parent_id: string; name: string; index?: number }
+	| { kind: 'rename_folder'; id: string; name: string }
+	| { kind: 'move_folder'; id: string; to_parent_id: string; index?: number }
+	| { kind: 'delete_folder'; id: string }
+	| { kind: 'place_element'; element_id: string; folder_id: string; index?: number }
+	| { kind: 'remove_element'; element_id: string; folder_id: string }
+	| {
+			kind: 'move_element';
+			element_id: string;
+			from_folder_id: string;
+			to_folder_id: string;
+			index?: number;
+	  }
+	| {
+			kind: 'place_artifact';
+			artifact_id: string;
+			artifact_kind: string;
+			folder_id: string;
+			index?: number;
+	  }
+	| { kind: 'remove_artifact'; artifact_id: string; folder_id: string }
+	| {
+			kind: 'move_artifact';
+			artifact_id: string;
+			from_folder_id: string;
+			to_folder_id: string;
+			index?: number;
+	  };
+
 /** Model-content ops — the ONLY ops the model store's staged buffer may
  * hold (mirrors the backend's ModelOpIn / assert_never split). */
 export type ModelOp = ElementOp | RelationshipOp;
 
-export type Op = ModelOp | ArtifactOp;
+export type Op = ModelOp | ArtifactOp | ViewOp;
 
 export const TEMP_ID_PREFIX = 'tmp_';
 
@@ -115,3 +154,23 @@ export function artifactResource(artifactId: string): string {
 export function isArtifactResource(resourceId: string): boolean {
 	return resourceId.startsWith(ARTIFACT_RESOURCE_PREFIX);
 }
+
+/** Client mirror of api/locking.py's FOLDER_PREFIX (same idiom as `art:`):
+ * folder lock targets are REQUESTED with the bare folder id + type:"folder",
+ * granted leases come back canonicalized under this namespace, and the
+ * checkout registry keys on the canonical form. */
+export const FOLDER_RESOURCE_PREFIX = 'folder:';
+
+export function folderResource(folderId: string): string {
+	return FOLDER_RESOURCE_PREFIX + folderId;
+}
+
+export function isFolderResource(resourceId: string): boolean {
+	return resourceId.startsWith(FOLDER_RESOURCE_PREFIX);
+}
+
+/** The view root's fixed folder id (backend core/view/ids.VIEW_ROOT_ID).
+ * Element ops may NEVER name it (an unplaced element already renders at the
+ * root — "move to root" is remove_element); artifact ops MAY (the root has a
+ * real artifacts list). `folder:root` is a genuine lease target. */
+export const VIEW_ROOT_ID = 'root';

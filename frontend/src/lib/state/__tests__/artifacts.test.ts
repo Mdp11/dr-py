@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as api from '$lib/api/artifacts';
 import * as checkoutApi from '$lib/api/checkout';
 import * as viewApi from '$lib/api/view';
+import * as editGate from '../edit-gate';
 import type { ArtifactHeader, View } from '$lib/api/types';
 import {
 	getArtifactHeaders,
@@ -20,8 +21,10 @@ import {
 	stageArtifactUpdate,
 	stagedArtifactState
 } from '../artifact-edits.svelte';
+import { getStagedViewOps } from '../view-edits.svelte';
 import { resetCheckout, setProjectInfo } from '../checkout.svelte';
-import { clearViewState, getView, pushView } from '../view.svelte';
+import { clearViewState, getView, refreshView } from '../view.svelte';
+import { VIEW_ROOT_ID } from '../ops';
 
 const HEADER = {
 	id: 'a1',
@@ -73,21 +76,50 @@ function mockAcquireConflict() {
 	});
 }
 
+/** Seed the view store from a fixture, the way a real project open does
+ * (mock the GET /view the staged-op rewrite now reads through — the
+ * pre-Phase-2 whole-snapshot PUT wrapper is gone as of the artefacts
+ * revamp). */
+async function seedView(view: View): Promise<void> {
+	vi.spyOn(viewApi, 'getView').mockResolvedValue({ view, warnings: [] });
+	await refreshView();
+}
+
 /** A view that places `a1` twice (nested folder + parent folder). */
 function viewPlacing(id: string): View {
 	return {
 		name: 'v',
 		folders: [
 			{
+				id: 'F',
 				name: 'F',
 				folders: [
-					{ name: 'G', folders: [], elements: [], artifacts: [{ id, kind: 'navigation' }] }
+					{
+						id: 'G',
+						name: 'G',
+						folders: [],
+						elements: [],
+						artifacts: [{ id, kind: 'navigation' }]
+					}
 				],
 				elements: [],
 				artifacts: [{ id, kind: 'navigation' }]
 			}
 		],
 		artifacts: []
+	};
+}
+
+/** A view that places `id` at the view root AND in one top-level folder
+ * (`fa`) — the fixture for {@link removeArtifact}'s in-batch scrub tests,
+ * covering both the root-list and a real-folder placement in one shot. */
+function viewPlacingAtFolderAndRoot(id: string): View {
+	return {
+		name: 'v',
+		folders: [
+			{ id: 'fa', name: 'FA', folders: [], elements: [], artifacts: [{ id, kind: 'navigation' }] }
+		],
+		artifacts: [{ id, kind: 'navigation' }]
 	};
 }
 
@@ -259,15 +291,12 @@ describe('removeArtifact', () => {
 		expect(getArtifactHeaders()).toEqual([]);
 	});
 
-	it('stages a delete under a delete-intent lease and leaves the view unscrubbed', async () => {
+	it('stages a delete under a delete-intent lease, plus a remove_artifact per placement, in the same batch (Decision 7)', async () => {
 		const acquire = mockAcquire();
 		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [HEADER] });
 		await loadArtifacts();
-		const put = vi
-			.spyOn(viewApi, 'putViewSnapshot')
-			.mockImplementation(async (v) => ({ view: v, warnings: [] }));
-		await pushView(viewPlacing('a1'));
-		put.mockClear();
+		await seedView(viewPlacing('a1'));
+		vi.spyOn(editGate, 'folderEditLock').mockResolvedValue(true);
 
 		await removeArtifact('a1');
 
@@ -276,10 +305,71 @@ describe('removeArtifact', () => {
 			intent: 'delete'
 		});
 		expect(getStagedArtifactEntries()).toEqual([{ kind: 'delete', id: 'a1', header: HEADER }]);
-		// The artifact still exists server-side until the commit lands, so its
-		// view placements must survive a discard — no scrub push here.
-		expect(put).not.toHaveBeenCalled();
+		// The delete's own batch scrubs every placement — F (parent) then G
+		// (nested) — so no dangling ref survives past this commit.
+		expect(getStagedViewOps()).toEqual([
+			{ kind: 'remove_artifact', artifact_id: 'a1', folder_id: 'F' },
+			{ kind: 'remove_artifact', artifact_id: 'a1', folder_id: 'G' }
+		]);
+		expect(getView()!.folders[0].artifacts).toEqual([]);
+		expect(getView()!.folders[0].folders[0].artifacts).toEqual([]);
+	});
+
+	it('removeArtifact stages the delete plus a remove_artifact per placement (root + folder)', async () => {
+		const acquire = mockAcquire();
+		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [HEADER] });
+		await loadArtifacts();
+		await seedView(viewPlacingAtFolderAndRoot('a1'));
+		const folderLock = vi.spyOn(editGate, 'folderEditLock').mockResolvedValue(true);
+
+		await removeArtifact('a1');
+
+		expect(acquire.mock.calls[0][0]).toMatchObject({
+			targets: [{ resource_id: 'a1', mode: 'exclusive', type: 'artifact' }],
+			intent: 'delete'
+		});
+		// ONE folderEditLock call covers every placement (Decision 7's two-step
+		// acquire) — the first call site is removeArtifact's own gate, ahead of
+		// the per-placement stageRemoveArtifactRef calls.
+		expect(folderLock.mock.calls[0][0]).toEqual([VIEW_ROOT_ID, 'fa']);
+		expect(getStagedArtifactEntries()).toEqual([{ kind: 'delete', id: 'a1', header: HEADER }]);
+		expect(getStagedViewOps()).toEqual([
+			{ kind: 'remove_artifact', artifact_id: 'a1', folder_id: VIEW_ROOT_ID },
+			{ kind: 'remove_artifact', artifact_id: 'a1', folder_id: 'fa' }
+		]);
+	});
+
+	it('rolls back the art: lease when a placement folder is denied', async () => {
+		const acquire = mockAcquire();
+		const release = vi.spyOn(checkoutApi, 'releaseLock').mockResolvedValue(undefined);
+		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [HEADER] });
+		await loadArtifacts();
+		await seedView(viewPlacingAtFolderAndRoot('a1'));
+		vi.spyOn(editGate, 'folderEditLock').mockResolvedValue(false);
+
+		await removeArtifact('a1');
+
+		expect(acquire).toHaveBeenCalled();
+		expect(getStagedArtifactEntries()).toEqual([]);
+		expect(getStagedViewOps()).toEqual([]);
+		// The `art:` delete lease acquired first must be handed straight back —
+		// nothing staged still needs it.
+		expect(release).toHaveBeenCalledWith('t_a1', undefined);
 		expect(getView()!.folders[0].artifacts).toEqual([{ id: 'a1', kind: 'navigation' }]);
+	});
+
+	it('removeArtifact with no placements stages only the delete (no folder lease call)', async () => {
+		mockAcquire();
+		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [HEADER] });
+		await loadArtifacts();
+		await seedView({ name: 'v', folders: [], artifacts: [] });
+		const folderLock = vi.spyOn(editGate, 'folderEditLock');
+
+		await removeArtifact('a1');
+
+		expect(folderLock).not.toHaveBeenCalled();
+		expect(getStagedArtifactEntries()).toEqual([{ kind: 'delete', id: 'a1', header: HEADER }]);
+		expect(getStagedViewOps()).toEqual([]);
 	});
 
 	it('records the COMMITTED header on the delete entry, not a staged rename', async () => {
@@ -324,14 +414,11 @@ describe('removeArtifact', () => {
 });
 
 describe('commit listener', () => {
-	it('upserts changed headers, drops deleted ids and scrubs the view', async () => {
+	it('upserts changed headers and drops deleted ids; no longer touches the view at all (Task 9)', async () => {
 		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [HEADER, TABLE_HEADER] });
 		await loadArtifacts();
-		const put = vi
-			.spyOn(viewApi, 'putViewSnapshot')
-			.mockImplementation(async (v) => ({ view: v, warnings: [] }));
-		await pushView(viewPlacing('t1'));
-		put.mockClear();
+		await seedView(viewPlacing('t1'));
+		const before = getView();
 
 		const renamed: ArtifactHeader = { ...HEADER, name: 'Sensors v2', artifact_rev: 3 };
 		const created: ArtifactHeader = {
@@ -350,12 +437,14 @@ describe('commit listener', () => {
 		});
 
 		expect(getCommittedArtifactHeaders()).toEqual([renamed, created]);
-		// scrub is async (fire-and-forget); let the microtask queue drain
 		await Promise.resolve();
 		await Promise.resolve();
-		expect(put).toHaveBeenCalledTimes(1);
-		expect(getView()!.folders[0].artifacts).toEqual([]);
-		expect(getView()!.folders[0].folders[0].artifacts).toEqual([]);
+		// The view scrub moved entirely into `removeArtifact`'s own staged batch
+		// (Decision 7): by the time a commit reaches this listener, any deleted
+		// artifact's placements were already scrubbed server-side as part of that
+		// SAME commit. This listener no longer reasons about the view at all —
+		// `_view` is reference-identical, not just content-equal.
+		expect(getView()).toBe(before);
 	});
 
 	it('upserts a changed header IN PLACE and appends only genuinely new ids', async () => {
@@ -373,20 +462,19 @@ describe('commit listener', () => {
 		expect(getCommittedArtifactHeaders()).toEqual([renamed, TABLE_HEADER, third, created]);
 	});
 
-	it('does not push the view when the commit deleted nothing this view placed', async () => {
+	it('leaves the view untouched (reference-identical) when the deleted id was never placed', async () => {
 		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [HEADER] });
 		await loadArtifacts();
-		vi.spyOn(viewApi, 'putViewSnapshot').mockImplementation(async (v) => ({
-			view: v,
-			warnings: []
-		}));
-		await pushView(viewPlacing('a1'));
-		const put = vi.spyOn(viewApi, 'putViewSnapshot');
+		await seedView(viewPlacing('a1'));
+		const before = getView();
 
 		notifyArtifactCommit({ idMap: {}, changed: [], deletedIds: ['t1'] });
 		await Promise.resolve();
 		await Promise.resolve();
-		expect(put).not.toHaveBeenCalled();
+
+		// The listener has no view-touching code path any more, so this holds
+		// regardless of whether the deleted id was ever placed.
+		expect(getView()).toBe(before);
 	});
 });
 

@@ -20,7 +20,7 @@ import type {
 } from '$lib/api/types';
 import type { LeaseLite } from '$lib/api/feed';
 import type { Op } from './ops';
-import { artifactResource, isArtifactResource, isTempId } from './ops';
+import { artifactResource, folderResource, isArtifactResource, isTempId } from './ops';
 import {
 	applyDelta,
 	clearStaged,
@@ -37,6 +37,12 @@ import {
 	notifyArtifactCommit,
 	revertStagedArtifact
 } from './artifact-edits.svelte';
+import {
+	clearStagedView,
+	discardStagedView,
+	getStagedViewOps,
+	notifyViewCommitted
+} from './view-edits.svelte';
 // workspace.svelte imports nothing from this module (or from any store) — no cycle.
 import { getDynamicTabs } from './workspace.svelte';
 
@@ -150,6 +156,7 @@ export function _dropToken(token: string): void {
  */
 function canonicalResource(t: LockTargetIn): string {
 	if (t.type === 'artifact') return artifactResource(t.resource_id);
+	if (t.type === 'folder') return folderResource(t.resource_id);
 	if (t.type === 'metamodel') return 'mm';
 	return t.resource_id;
 }
@@ -285,24 +292,30 @@ function _onTokenExpired(token: string): void {
 
 // --- preview / commit / discard --------------------------------------------
 
-/** Preview the staged batch at the live rev (kept current by the feed). Model
- * ops first, then artifact ops — one mixed batch, exactly as it will be
- * committed (the backend splits the union itself). */
+/** Preview the staged batch at the live rev (kept current by the feed).
+ * Model ops, then artifact ops, then view ops — VIEW LAST: a staged
+ * `place_artifact` may reference an artifact still identified by a temp id
+ * from the artifact half of this SAME batch, and the backend seeds the view
+ * applier's id_map from the earlier two halves, so a view op naming a temp
+ * id can only resolve if it comes after the create that mints it. One mixed
+ * batch, exactly as it will be committed (the backend splits the union
+ * itself). */
 export function previewStaged(): Promise<PreviewResponse> {
 	return previewCommit(
 		getModelRev(),
-		[...getStagedOps(), ...getStagedArtifactOps()],
+		[...getStagedOps(), ...getStagedArtifactOps(), ...getStagedViewOps()],
 		_clientConfig
 	);
 }
 
 /**
- * Commit all staged edits — model ops and artifact ops in ONE batch. On
- * success the server releases every token it was SENT, so we apply the delta
- * and drop those tokens from the registry locally.
+ * Commit all staged edits — model ops, artifact ops, and view ops in ONE
+ * batch (view LAST; see {@link previewStaged}). On success the server
+ * releases every token it was SENT, so we apply the delta and drop those
+ * tokens from the registry locally.
  */
 export async function commitStaged(message: string, ackErrors: boolean): Promise<CommitResponse> {
-	const ops: Op[] = [...getStagedOps(), ...getStagedArtifactOps()];
+	const ops: Op[] = [...getStagedOps(), ...getStagedArtifactOps(), ...getStagedViewOps()];
 	if (ops.length === 0) {
 		// Never send an empty commit: the backend's empty-batch early return
 		// (routes/commits.py) skips its lock-release step, so lock_tokens sent
@@ -310,11 +323,21 @@ export async function commitStaged(message: string, ackErrors: boolean): Promise
 		// this unreachable from the UI; this guard keeps it unreachable, period.
 		throw new Error('nothing staged to commit');
 	}
+	// Captured BEFORE any buffer is cleared below — the post-commit notify
+	// gate needs to know whether THIS batch carried view ops, and clearStaged
+	// happens before that notify fires.
+	const hadViewOps = getStagedViewOps().length > 0;
 	// Token partition: an artifact-editor lease whose artifact is NOT in this
 	// batch belongs to a still-open editor and must survive the commit (the
 	// server releases every token it is sent). Everything else — all element
-	// tokens (commit ends the model editing session, as before) and artifact
-	// tokens the batch needs (the server verifies + releases them) — is sent.
+	// tokens (commit ends the model editing session, as before), ALL folder
+	// tokens (dialogs are transient; there is no open-editor concept for a
+	// folder to protect — see {@link releaseFolderLeaseIfUnneeded}'s
+	// docstring), and artifact tokens the batch needs (the server verifies +
+	// releases them) — is sent. Folder tokens fall out of this partition for
+	// free: `isArtifactResource` is false for every `folder:` resource, so
+	// `artifactOnly` is false and the token lands in `sent` without any
+	// folder-specific branch — deliberately; do not special-case it here.
 	const needed = lockedResourcesNeededBy(ops);
 	const sent: string[] = [];
 	// ephemeral partition bookkeeping, not reactive state
@@ -335,11 +358,12 @@ export async function commitStaged(message: string, ackErrors: boolean): Promise
 	// point, so everything below is local reconciliation that must not become
 	// skippable by a failure further down.
 	//
-	// 1. Clear BOTH staged buffers first so applyDelta's hasQueuedOpFor guard
-	//    does not skip the committed elements — the server's canonical rev is
-	//    the truth. The artifact buffer is cleared silently (no discard
-	//    listeners): the edits were saved, not undone; notifyArtifactCommit
-	//    below is what tells listeners the authoritative outcome.
+	// 1. Clear ALL THREE staged buffers first so applyDelta's hasQueuedOpFor
+	//    guard does not skip the committed elements — the server's canonical
+	//    rev is the truth. The artifact and view buffers are cleared silently
+	//    (no discard listeners on either): the edits were saved, not undone;
+	//    notifyArtifactCommit/notifyViewCommitted below are what tell
+	//    listeners the authoritative outcome.
 	// 2. Drop the surrendered tokens BEFORE anything that can run third-party
 	//    code. The server released every token it was SENT, so a registry that
 	//    still claims them makes the next commitStaged send dead tokens and 409
@@ -349,6 +373,7 @@ export async function commitStaged(message: string, ackErrors: boolean): Promise
 	//    is ordered after for the same reason.
 	clearStaged();
 	clearStagedArtifacts();
+	clearStagedView();
 	for (const [rid, lease] of [..._registry]) {
 		if (!kept.has(lease.token)) _registry.delete(rid);
 	}
@@ -361,6 +386,12 @@ export async function commitStaged(message: string, ackErrors: boolean): Promise
 		changed: res.changed_artifacts,
 		deletedIds: res.deleted_artifact_ids
 	});
+	// View half: only when THIS batch actually carried view ops — a
+	// model-only (or model+artifact-only) commit must not trigger a needless
+	// GET /view refetch. Fired after notifyArtifactCommit for the same
+	// listener-ordering reason as applyDelta above (view.svelte.ts's listener
+	// is a plain callback too, not guarded here).
+	if (hadViewOps) notifyViewCommitted();
 	return res;
 }
 
@@ -381,7 +412,49 @@ export async function releaseArtifactIfUnneeded(artifactId: string): Promise<voi
 	const rid = artifactResource(artifactId);
 	const token = _registry.get(rid)?.token;
 	if (token === undefined) return;
-	const stillNeeded = lockedResourcesNeededBy([...getStagedOps(), ...getStagedArtifactOps()]);
+	// The three-buffer union, not just the two model+artifact buffers: an
+	// artifact lease and a folder lease can in principle share one token (a
+	// single gesture that checks out both), and the honest "everything
+	// staged" needed-set has to see a view op even though this function only
+	// ever releases an `art:` resource itself.
+	const stillNeeded = lockedResourcesNeededBy([
+		...getStagedOps(),
+		...getStagedArtifactOps(),
+		...getStagedViewOps()
+	]);
+	const tokenResources = [..._registry].filter(([, l]) => l.token === token).map(([r]) => r);
+	if (tokenResources.some((r) => stillNeeded.has(r))) return;
+	_dropToken(token);
+	await releaseLock(token, _clientConfig).catch(() => {});
+	if (_registry.size === 0) _stopHeartbeat();
+}
+
+/**
+ * Release my `folder:<id>` lease on dialog cancel / discard — UNLESS a
+ * staged view op still needs a resource that token covers (a
+ * granted-then-cancelled rename must hand its lease back; a
+ * granted-then-STAGED one must keep it or the commit would 409 "required
+ * lock not held"). Token-granularity, exactly like {@link
+ * releaseArtifactIfUnneeded}: a gesture token covering {source container,
+ * destination} (see {@link lockedResourcesNeededBy}'s `move_folder` note) is
+ * kept while ANY of its resources is still needed.
+ *
+ * Deliberately mirrors {@link releaseArtifactIfUnneeded}'s stance, not
+ * {@link discardArtifact}'s: there is no `openArtifactResources`-style
+ * open-tab rule for folders. A folder has no editor tab — the sidebar
+ * dialogs that acquire a folder lease (rename/move/create-child) are
+ * transient by construction, so "is it still open" is never a question this
+ * function needs to ask; only "is it still staged" is.
+ */
+export async function releaseFolderLeaseIfUnneeded(folderId: string): Promise<void> {
+	const rid = folderResource(folderId);
+	const token = _registry.get(rid)?.token;
+	if (token === undefined) return;
+	const stillNeeded = lockedResourcesNeededBy([
+		...getStagedOps(),
+		...getStagedArtifactOps(),
+		...getStagedViewOps()
+	]);
 	const tokenResources = [..._registry].filter(([, l]) => l.token === token).map(([r]) => r);
 	if (tokenResources.some((r) => stillNeeded.has(r))) return;
 	_dropToken(token);
@@ -444,13 +517,29 @@ function openArtifactResources(): Set<string> {
  * edit has already happened, and the caller is a fire-and-forget click handler
  * that must not surface an unhandled rejection over a lease that will TTL out
  * anyway.
+ *
+ * ACCEPTED WRINKLE (Decision 7): `removeArtifact` (artifacts.svelte.ts) stages
+ * the artifact's `remove_artifact` view-placement scrub ops ALONGSIDE its
+ * `delete_artifact` entry, but as separate entries in a separate journal
+ * (`view-edits.svelte.ts`). This function only reverts the ONE artifact entry
+ * — undoing a delete this way does NOT retract its scrub ops, so they would
+ * still commit even though the artifact they name no longer would. This is
+ * left as-is rather than threading a second discard through here: the scrub
+ * rows are visible and labelled (`Removed placement of "<name>"`, not a raw
+ * id), so a user who un-deletes an artifact can see and discard them
+ * individually via the same view-row discard the DiffDrawer already offers.
  */
 export async function discardArtifact(id: string): Promise<void> {
 	const rid = artifactResource(id);
 	const token = _registry.get(rid)?.token;
 	revertStagedArtifact(id);
 	if (token !== undefined) {
-		const stillNeeded = lockedResourcesNeededBy([...getStagedOps(), ...getStagedArtifactOps()]);
+		// Three-buffer union — see {@link releaseArtifactIfUnneeded}'s comment.
+		const stillNeeded = lockedResourcesNeededBy([
+			...getStagedOps(),
+			...getStagedArtifactOps(),
+			...getStagedViewOps()
+		]);
 		const keepOpen = openArtifactResources();
 		const tokenResources = [..._registry].filter(([, l]) => l.token === token).map(([r]) => r);
 		if (!tokenResources.some((r) => stillNeeded.has(r) || keepOpen.has(r))) {
@@ -509,10 +598,25 @@ export function lockHolderLabel(res: Extract<CheckoutResult, { ok: false }>): st
  *     result can be compared against registry keys directly. (A create needs no
  *     server-side lock — nothing exists to lock — but naming its temp id keeps
  *     an over-eager release from dropping a token the batch is about to use.)
+ *   - any view op -> the CANONICAL `folder:` key(s) of its CONTAINING
+ *     folder(s), same reasoning as the artifact `art:` key: a view op locks
+ *     its folder, not the element/artifact/folder it places or renames.
+ *     `create_folder` names its PARENT (the new folder itself has no lease —
+ *     nothing exists to lock, same as `create_artifact`'s temp id — and
+ *     nothing else needs one either, since the batch's own later ops can
+ *     reference the `temp_id` without a lock, exactly like a staged
+ *     `create_element`'s id). `move_folder` names only its DESTINATION
+ *     parent: the SOURCE container is never in the op payload at all (the
+ *     backend derives it from the current view state), so its lease is not,
+ *     and cannot be, tracked here — it rides the same gesture TOKEN as the
+ *     destination, and token-granularity keep/release (this function is
+ *     always consulted per-TOKEN, never per-resource in isolation) is what
+ *     keeps it held or lets it go, not this set.
  * Used by {@link discardElement} to avoid releasing a token that a REMAINING
  * staged op still depends on (e.g. a connect's create_relationship needs the
  * source's exclusive lock even after the source's own property edit is
- * discarded), and by {@link commitStaged}'s token partition.
+ * discarded), by {@link commitStaged}'s token partition, and by
+ * {@link releaseFolderLeaseIfUnneeded}/{@link releaseArtifactIfUnneeded}.
  */
 function lockedResourcesNeededBy(ops: Op[]): Set<string> {
 	// eslint-disable-next-line svelte/prefer-svelte-reactivity
@@ -538,6 +642,32 @@ function lockedResourcesNeededBy(ops: Op[]): Set<string> {
 			case 'update_artifact':
 			case 'delete_artifact':
 				needed.add(artifactResource(op.id));
+				break;
+			case 'create_folder':
+				needed.add(folderResource(op.parent_id));
+				break;
+			case 'rename_folder':
+			case 'delete_folder':
+				needed.add(folderResource(op.id));
+				break;
+			case 'move_folder':
+				needed.add(folderResource(op.to_parent_id));
+				break;
+			case 'place_element':
+			case 'remove_element':
+				needed.add(folderResource(op.folder_id));
+				break;
+			case 'move_element':
+				needed.add(folderResource(op.from_folder_id));
+				needed.add(folderResource(op.to_folder_id));
+				break;
+			case 'place_artifact':
+			case 'remove_artifact':
+				needed.add(folderResource(op.folder_id));
+				break;
+			case 'move_artifact':
+				needed.add(folderResource(op.from_folder_id));
+				needed.add(folderResource(op.to_folder_id));
 				break;
 		}
 	}
@@ -604,15 +734,31 @@ export function discardElementCascade(id: string): Promise<void> {
 }
 
 /**
- * Abandon everything: revert all staged edits (both buffers) and release every
- * token EXCEPT the leases of artifacts still open in an editor tab — "discard"
- * abandons EDITS, not check-outs the user can see as open editors. A kept token
- * must cover ONLY kept resources; a token that also covers something being
- * released is sent, since release is by token, not by resource.
+ * Abandon everything: revert all staged edits (all three buffers — the view
+ * journal is wiped too, via {@link discardStagedView}, alongside the model
+ * and artifact buffers) and release every token EXCEPT the leases of
+ * artifacts still open in an editor tab — "discard" abandons EDITS, not
+ * check-outs the user can see as open editors. A kept token must cover ONLY
+ * kept resources; a token that also covers something being released is
+ * sent, since release is by token, not by resource.
+ *
+ * Folder leases are NEVER kept open: {@link openArtifactResources} (this
+ * function's keep-set) only ever names `art:` resources, so every `folder:`
+ * token this function holds is, by construction, not in `keepTokens` and
+ * gets released — dialogs are transient, unlike an artifact editor tab, so
+ * there is no folder-side "still open, still visible to the user" case to
+ * protect. No folder-specific branch is needed here for the same reason the
+ * commit-time token partition needs none (see {@link commitStaged}).
  */
 export async function discardAll(): Promise<void> {
 	revertAllStaged();
 	discardAllStagedArtifacts(); // fires per-entry discard listeners (drafts re-dirty)
+	// AWAITED: the view journal's optimistic applies are baked into the view
+	// store's `_view`, so wiping the journal without refetching would leave the
+	// sidebar showing a tree that exists nowhere. `discardStagedView` fires the
+	// view store's discard listener (a GET /view) to reconcile — that is why it
+	// is async and why this must not be a bare fire-and-forget call.
+	await discardStagedView();
 	const keepResources = openArtifactResources();
 	// ephemeral partition bookkeeping, not reactive state
 	// eslint-disable-next-line svelte/prefer-svelte-reactivity

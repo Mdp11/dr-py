@@ -1,31 +1,34 @@
 /**
- * Minimal test suite for the feed-termination banner on the workspace page.
- * Mounts the full page component with stubbed API/state dependencies so we
- * can verify that terminal close codes map to the correct banner text without
- * spinning up a real backend.
+ * The two RESET paths that must take the staged-view-op journal with them.
+ *
+ * The journal (`view-edits.svelte.ts`) is a module-scope singleton, and its
+ * ops name `folder:` ids that only mean anything for one project at one rev.
+ * Two page-level resets therefore have to clear it, and neither used to:
+ *
+ *  - boot(): an in-SPA project switch would otherwise carry project A's staged
+ *    view ops into project B and offer them for commit there.
+ *  - onReloadModel(): the conflict-recovery "Reload model" banner resets the
+ *    checkout store, dropping every `folder:` lease from the registry — a
+ *    journal that survived that would be sent at the next commit with no
+ *    folder tokens attached, i.e. a hard 409 "required lock not held".
+ *
+ * Mounted with the same stub harness as WorkspacePage.feedbanner.test.ts (real
+ * state, faked network).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 
-// Mutable terminal code set before each test so the initial $derived reads it.
-let _termCode: number | null = null;
-
-// Mock $lib/state/realtime.svelte: preserve real exports but control getFeedTermination
-// and no-op startRealtime/stopRealtime/onLockEvent to prevent feed connections.
 vi.mock('$lib/state/realtime.svelte', async (orig) => {
 	const real = (await orig()) as typeof import('$lib/state/realtime.svelte');
 	return {
 		...real,
-		getFeedTermination: () => (_termCode !== null ? { code: _termCode } : null),
+		getFeedTermination: () => null,
 		startRealtime: () => {},
 		stopRealtime: () => {},
 		onLockEvent: () => () => {}
 	};
 });
 
-// Stub @tanstack/svelte-query so any child component that reaches for it
-// doesn't require a QueryClientProvider in the test context (harmless to
-// keep even now that nothing under TopBar uses it directly).
 vi.mock('@tanstack/svelte-query', () => ({
 	createMutation: () => ({
 		state: { status: 'idle', data: undefined, error: null },
@@ -44,7 +47,6 @@ vi.mock('@tanstack/svelte-query', () => ({
 vi.mock('$app/navigation', () => ({ goto: vi.fn(), beforeNavigate: vi.fn() }));
 vi.mock('$app/paths', () => ({ resolve: (p: string) => p, assets: '' }));
 vi.mock('$app/environment', () => ({ browser: false }));
-// Boot calls metamodelApi.getMetamodel(); reject so boot() exits early from the catch.
 vi.mock('$lib/api', () => ({
 	metamodel: { getMetamodel: () => Promise.reject(new Error('no mm')) }
 }));
@@ -55,8 +57,6 @@ vi.mock('$lib/state/validate-action', () => ({ runValidation: () => Promise.reso
 vi.mock('$lib/state/session-recovery', () => ({
 	recoverFromUnauthorized: () => Promise.resolve()
 }));
-// Override the parts of $lib/state that would make live network calls, but
-// preserve the real reactive state so child components render without throwing.
 vi.mock('$lib/state', async (orig) => {
 	const real = (await orig()) as typeof import('$lib/state');
 	return {
@@ -67,24 +67,31 @@ vi.mock('$lib/state', async (orig) => {
 		handleRemoteLockEvent: () => {},
 		refreshSummary: () => Promise.resolve(),
 		refreshView: () => Promise.resolve(),
-		// boot() fires `void trackOpenProgress()`, which polls GET /model/status;
-		// unstubbed it escapes to a real fetch (the rejection is swallowed, so the
-		// test still passes — it just floods the run with ECONNREFUSED).
 		trackOpenProgress: () => Promise.resolve(),
 		loadProjectInfo: () => Promise.resolve(),
+		loadArtifacts: () => Promise.resolve(),
 		reactToBootError: () => false,
 		setAccessNotice: () => {}
 	};
 });
 
 import Page from '../../../routes/p/[projectId]/+page.svelte';
+import { getStagedViewDepth, resetViewEdits, stageViewOp } from '$lib/state/view-edits.svelte';
+import { setModelError } from '$lib/state/model.svelte';
+
+function stageOne(): void {
+	stageViewOp({ kind: 'rename_folder', id: 'f1', name: 'Renamed' }, 'Renamed folder');
+}
 
 beforeEach(() => {
-	_termCode = null;
+	resetViewEdits();
+	setModelError(null);
 });
 
 afterEach(() => {
 	document.body.innerHTML = '';
+	setModelError(null);
+	resetViewEdits();
 	vi.clearAllMocks();
 });
 
@@ -93,29 +100,38 @@ async function settle() {
 	flushSync();
 }
 
-describe('workspace feed-termination banner', () => {
-	it('renders a "Realtime connection lost." fallback banner for terminal code 4408', async () => {
-		_termCode = 4408;
+describe('project (re)entry drops the staged view journal', () => {
+	it('boot() clears ops left behind by a previously-open project', async () => {
+		stageOne();
+		expect(getStagedViewDepth()).toBe(1);
+
 		const c = mount(Page, { target: document.body });
 		await settle();
-		expect(document.body.textContent).toContain('Realtime connection lost.');
+
+		expect(getStagedViewDepth()).toBe(0);
 		unmount(c);
 	});
+});
 
-	it('renders "Your session expired." for terminal code 4401', async () => {
-		_termCode = 4401;
+describe('conflict-recovery reload drops the staged view journal', () => {
+	it('onReloadModel() clears ops whose folder leases it just discarded', async () => {
+		setModelError({ kind: 'conflict', message: 'stale rev' });
 		const c = mount(Page, { target: document.body });
 		await settle();
-		expect(document.body.textContent).toContain('Your session expired.');
-		unmount(c);
-	});
 
-	it('renders no termination banner when the feed is healthy (null)', async () => {
-		_termCode = null;
-		const c = mount(Page, { target: document.body });
+		// Stage AFTER boot, so we are testing the reload path and not boot's own
+		// clear (boot ran on mount above and would have wiped anything earlier).
+		stageOne();
+		expect(getStagedViewDepth()).toBe(1);
+
+		const reload = [...document.querySelectorAll('button')].find(
+			(b) => b.textContent?.trim() === 'Reload model'
+		);
+		expect(reload).toBeDefined();
+		reload!.click();
 		await settle();
-		// The "Disconnected" label only appears when there is a termination.
-		expect(document.body.textContent).not.toContain('Disconnected');
+
+		expect(getStagedViewDepth()).toBe(0);
 		unmount(c);
 	});
 });

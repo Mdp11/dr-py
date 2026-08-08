@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import * as viewApi from '$lib/api/view';
+import * as editGate from '$lib/state/edit-gate';
 import type { View } from '$lib/api/types';
-import { clearViewState, getView, indexIssues, pushView, resetArtifacts } from '$lib/state';
+import { clearViewState, getView, indexIssues, refreshView, resetArtifacts } from '$lib/state';
 import TreeRow from '../Sidebar/TreeRow.svelte';
 import {
 	artifactKey,
@@ -18,6 +19,7 @@ function emptyTree(overrides: Partial<UnifiedTree> = {}): UnifiedTree {
 		children: new Map(),
 		kind: new Map(),
 		folderName: new Map(),
+		folderPathNames: new Map(),
 		placedElementIds: new Set(),
 		artifactRef: new Map(),
 		...overrides
@@ -67,7 +69,7 @@ describe('TreeRow — dangling artifact refs', () => {
 				selectedId: null,
 				multiSelectedIds: new Set<string>(),
 				focusedId: null,
-				parentFolderPath: ['F'],
+				parentFolderId: 'F',
 				siblingIndex: 0,
 				folderLen: 0,
 				movable: false,
@@ -102,6 +104,7 @@ describe('TreeRow — dangling artifact refs', () => {
 			name: 'v',
 			folders: [
 				{
+					id: 'F',
 					name: 'F',
 					folders: [],
 					elements: [],
@@ -113,11 +116,9 @@ describe('TreeRow — dangling artifact refs', () => {
 			],
 			artifacts: []
 		};
-		vi.spyOn(viewApi, 'putViewSnapshot').mockImplementation(async (v) => ({
-			view: v,
-			warnings: []
-		}));
-		await pushView(seedView);
+		vi.spyOn(viewApi, 'getView').mockResolvedValue({ view: seedView, warnings: [] });
+		await refreshView();
+		vi.spyOn(editGate, 'folderEditLock').mockResolvedValue(true);
 
 		app = mount(TreeRow, {
 			target: host,
@@ -135,7 +136,7 @@ describe('TreeRow — dangling artifact refs', () => {
 				selectedId: null,
 				multiSelectedIds: new Set<string>(),
 				focusedId: null,
-				parentFolderPath: ['F'],
+				parentFolderId: 'F',
 				siblingIndex: 0,
 				folderLen: 0,
 				movable: false,
@@ -150,7 +151,8 @@ describe('TreeRow — dangling artifact refs', () => {
 		const removeBtn = host.querySelector('button[aria-label="Remove from folder"]');
 		expect(removeBtn).not.toBeNull();
 		removeBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-		// removeArtifactFromFolder is async (pushView round-trip) — flush the microtask.
+		// removeArtifactFromFolder resolves the path shim -> folderEditLock gate
+		// -> stageRemoveArtifactRef (async) — flush the microtask.
 		await Promise.resolve();
 		await Promise.resolve();
 		flushSync();

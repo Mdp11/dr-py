@@ -193,15 +193,22 @@ follows a pessimistic **check-out → stage → commit** loop (Spec B):
      delete), delete-over-update collapses to a bare delete.
    - **The lease is per editor tab.** Opening a saved artifact takes an
      `art:<id>` exclusive lease (`acquireArtifactLease`); a denial does not
-     refuse the open, it renders that tab **unsaveable** behind its holder
-     banner ("Checked out by X — you will not be able to save"): the name
-     input, Save and Save as are disabled, while the definition-editing
-     surface (PathCard/CombineFrame, the table Settings dialog and column
-     editors, the snippet CodeMirror document) is **not** gated. Gating that
-     too is deliberate follow-up work — see the `ensureDraft` docstring in
-     `lib/state/navigation-editor.svelte.ts`, the canonical statement of the
-     scope and of the open UX question (whether Save-as should stay enabled so
-     a denied user can fork their work). Closing releases through
+     refuse the open, it renders that tab **unsaveable and read-only** behind
+     its holder banner ("Checked out by X — you will not be able to save"):
+     the name input, Save and Save as are disabled, AND the definition-editing
+     surface (PathCard/CombineFrame, the table's grid + column-manager chrome,
+     the snippet CodeMirror host) is wrapped `inert={locked}` so a denied tab
+     cannot accumulate edits it can never commit — previews, consoles and the
+     results dock stay live. The banner's escape hatch is "Save as copy",
+     wired to the existing `saveAsDraft`/`saveAsTableDraft` fork for
+     nav/table and to the purpose-built `forkSnippetDraftAsCopy` for snippets
+     (which had no prior Save-as): it stages a CREATE under a brand-new
+     artifact id, needs no lease of its own, and — for the snippet fork —
+     opens a SEPARATE tab, leaving the denied source tab's draft, denial
+     state and artifact binding untouched. See the `ensureDraft` docstring in
+     `lib/state/navigation-editor.svelte.ts` (mirrored by
+     `table-editor.svelte.ts` and `snippet-editor.svelte.ts`) for the
+     canonical statement of exactly what is gated. Closing releases through
      `releaseArtifactIfUnneeded`, which
      KEEPS the lease whenever a staged op still needs a resource that token
      covers — a saved-but-uncommitted edit whose lease lapsed would 409
@@ -269,6 +276,143 @@ follows a pessimistic **check-out → stage → commit** loop (Spec B):
    into a File System Access writable (or writes server-side via
    `POST /model/save`), so the browser never materializes the serialized model
    as a string. Export reflects the committed model, not the staged buffer.
+
+### View editing state (staged `view.*` ops)
+
+`lib/state/view.svelte.ts` holds `_view`: the LOCAL working copy — server
+truth as of the last `refreshView()`, with every staged `view.*` op already
+applied optimistically on top. **There is no more direct PUT path.** The
+pre-artefacts-Phase-2 whole-snapshot `PUT /view/snapshot` is gone from every
+gesture the app itself drives (folder create/rename/move/delete, element and
+artifact placement, drag-and-drop, the sidebar's Clear-view action): every
+structural change to the view goes out as a `ViewOp` and reaches the server
+only via `POST /commits`, the same endpoint model and artifact edits commit
+through. (`PUT /view/snapshot` and `DELETE /view` still exist server-side for
+the frontend migration window — see CLAUDE.md — but nothing in this client
+calls them any more except the e2e test harness's own fixture-loading helper,
+which talks to the API directly to seed a project's starting content.)
+
+- **Three staged buffers, three different shapes — and that difference is
+  load-bearing, not incidental.** The model buffer (`lib/state/ops.ts`'s
+  staged-edits store) and the artifact buffer (`artifact-edits.svelte.ts`)
+  are both **maps keyed by entity id**: a second edit to the same element or
+  the same artifact COALESCES into the existing entry (property updates
+  merge, an update-over-create merges into the create, and so on — see the
+  artifact bullet above). The view buffer (`view-edits.svelte.ts`) is
+  different in kind: an **ORDERED JOURNAL** (`StagedViewEntry[]`), append-only,
+  with no per-id coalescing and no per-entry revert. The reason is structural:
+  view ops are ORDER-DEPENDENT in a way model/artifact ops are not — a
+  `create_folder` naming a `temp_id`, followed by a `place_element` into that
+  same temp folder, followed by a `rename_folder` on it, only replays
+  correctly if the three ops stay in that exact sequence. Plucking or
+  reordering one from the middle (the kind of thing a coalescing map would
+  invite) is unsound, so the only unwind the journal offers is the
+  all-or-nothing `discardStagedView()` (see below), and each entry carries a
+  `label` string captured AT STAGE TIME — after the optimistic apply, a
+  deleted or renamed folder's prior name is unrecoverable from the blob
+  itself, so the label is the only record of what the user actually did, for
+  both undo-history display and the DiffDrawer's View tab.
+- **Every `stage*` mutator in `view.svelte.ts` follows the same three-phase
+  shape**: GUARD (client-side precondition checks — name clash, cycle,
+  no-op — mirroring `applyViewOp`'s own checks, so a doomed gesture never
+  reaches the lease step) → GATE (acquire the `folder:` lease(s) the op needs
+  via `folderEditLock`/`folderCreateLock`/`folderDeleteLock` — notice-based,
+  returns `false` on refusal having already shown the user why) → EMIT+APPLY+
+  STAGE (build the `ViewOp`, apply it to `_view` via `applyViewOp` for the
+  optimistic update, then `stageViewOp` to queue it). A mutator returns
+  `Promise<boolean>`: `true` for staged-or-legitimate-no-op, `false` for a
+  gate refusal that changed nothing.
+- **Lease timing differs by gesture, deliberately.** A drag-and-drop
+  placement (`stagePlaceElementsAt`, `stageMoveFolder`) acquires its
+  `folder:` lease at DROP time — inside the mutator, after the pointer
+  gesture already completed, since there is no earlier moment to fail fast
+  from. A sidebar dialog (create/rename/delete folder in `TreeRow.svelte` /
+  `ContainmentTree.svelte`) is the opposite: it acquires the lease BEFORE the
+  `window.prompt`/confirm dialog even opens ("Decision 2" in those
+  components' comments) — a denial means the dialog never shows at all,
+  rather than the user typing a name into a doomed rename. Cancelling the
+  prompt (or leaving it a no-op) hands the lease straight back via
+  `releaseFolderLeaseIfUnneeded`.
+- **`folder:` resources ride the SAME lock registry as `art:` and element
+  resources** (`checkout.svelte.ts`'s `_registry`, one token per acquired
+  lease-batch) — a single gesture can cover both an artifact lease and a
+  folder lease under one token (the artifact-delete scrub below is exactly
+  that case). At commit, the token partition that decides which locks the
+  server releases has NO folder-specific branch: `isArtifactResource` is
+  false for every `folder:` resource, so a folder token can never qualify for
+  the "keep — a still-open editor needs it" exemption artifact tokens get
+  (there is no such thing as an open folder editor) and is unconditionally
+  sent for release, same as an element token.
+- **A commit that carried view ops triggers exactly one post-commit
+  `GET /view` refetch.** Folder ids get no client-side `id_map` remap the way
+  element/artifact ids do — the refetch is what concretizes a freshly
+  created folder's `tmp_` id into its server-assigned one. Two independent
+  subscriptions call `refreshView()`: the committing client's own listener
+  (`onViewCommitted`, fired by `checkout.svelte.ts`'s `commitStaged` when
+  `getStagedViewOps().length > 0`) and a peer's commit observed over the
+  realtime feed (`onCommitEvent`, gated on `scope.includes('view')`). An
+  own-commit can fire both (the feed echoes back), which is harmless — just
+  two small `GET /view` calls instead of one.
+- **`refreshView()` rebuilds `_view` as `server truth + staged journal`, on
+  EVERY refetch path.** This is what makes the peer-commit refetch above safe:
+  `folder:` leases are per folder, so two users editing DIFFERENT folders
+  concurrently is explicitly supported, and a bare `setState(res.view, …)`
+  would snap this client's sidebar back to server truth while its journal
+  still held its own ops — the tree would then disagree with what the user is
+  about to commit, and the next mutator's GUARD phase would run against the
+  reverted tree and emit an op the server 422s. So the journal is replayed
+  through `applyViewOp` on top of the fresh blob. If a replayed op THROWS (the
+  peer's change genuinely conflicts — the folder we renamed is gone, …), the
+  WHOLE journal is dropped, not the offending op: the journal is ordered, so a
+  partial prefix is not a state the user ever asked for. The drop hands the
+  journal's `folder:` leases back and announces itself through the global lock
+  notice (`setLockNotice`, rendered by the StatusBar) — a knowingly transient
+  channel for a destructive event; a dismissable banner is the intended
+  follow-up. Both no-journal paths stay free: own-commit and discard each
+  empty the journal BEFORE the refetch fires, so the replay is a no-op there.
+- **View discard is all-or-nothing**, unlike the model/artifact buffers'
+  per-row revert: the DiffDrawer's View tab renders the journal read-only (no
+  per-entry button) with ONE "Discard view changes" action
+  (`discardViewChanges`), which wipes the whole journal, hands back every
+  `folder:` lease it named, and refetches server truth — there is no local
+  undo to fall back on, since the journal's entries are not independently
+  revertible (see the ordering rationale above). **The refetch is enforced in
+  the STORE, not at the call site**: `discardStagedView()` is async and fires a
+  discard-listener registry (`onViewDiscarded`, which `view.svelte.ts`
+  subscribes to with `refreshView`), because the optimistic applies are baked
+  into `_view` and a discard surface that forgot to refetch would leave the
+  sidebar showing a tree that exists nowhere. There are two such surfaces —
+  `discardViewChanges` and checkout's global `discardAll()` — and the registry
+  is what keeps a third one from reintroducing the bug.
+- **Two page-level resets take the journal with them.** It is a module-scope
+  singleton whose ops name `folder:` ids that only mean anything for one
+  project at one rev, so `boot()` calls `clearViewState()` on every project
+  (re)entry (an in-SPA project switch must not offer project A's staged view
+  ops for commit into project B) and the conflict-recovery "Reload model"
+  handler calls `resetViewEdits()` alongside `resetCheckout()` (which drops
+  every `folder:` lease from the registry — a surviving journal would commit
+  with no folder tokens and take a hard 409 "required lock not held").
+- **`hasUnsavedWork()` counts the journal too** (`getStagedViewDepth()`).
+  Unlike tables/navigations/snippets, a view edit has no editor and therefore
+  no dirty DRAFT to be caught by — it goes straight from the gesture into the
+  journal — so without that term a view-only batch would slip past the
+  workspace unload guard that catches equivalent model and artifact batches.
+- **Deleting an artifact scrubs its view placements in the SAME commit
+  batch.** `artifacts.svelte.ts`'s `removeArtifact` stages a `remove_artifact`
+  view op per folder that currently places the artifact, ahead of the
+  `delete_artifact` op itself, so the commit that destroys the artifact
+  leaves no dangling ref behind — there is no window where the view still
+  names an artifact the server has already dropped. This needs a SECOND lock
+  step after the artifact's own DELETE-intent lease: the folder edits it a
+  peer might also be touching, so `folderEditLock` runs over every placement
+  folder, and a refusal there rolls the already-acquired artifact lease back.
+- **The TopBar's combined-changes counter and the DiffDrawer both fold the
+  view journal in.** `getStagedChangeCount() + getStagedArtifactDepth() +
+getStagedViewDepth()` is what gates the header's Commit button and badges
+  the "● N changes" count; the DiffDrawer's `total` adds the same
+  `getStagedViewDepth()` so a view-only batch still reaches a live Commit —
+  its own "View (N)" tab is where the journal's entries actually render, in
+  order, using each entry's pre-baked `label`.
 
 ### Navigation editor state (per-node previews)
 

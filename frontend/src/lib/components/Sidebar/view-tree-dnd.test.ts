@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { View } from '$lib/api/types';
 import {
 	canDropArtifact,
 	canDropElement,
@@ -28,12 +29,8 @@ describe('element payload', () => {
 });
 
 describe('folder payload', () => {
-	it('round-trips a path array (including names with the join char)', () => {
-		expect(decodeFolderPayload(encodeFolderPayload(['a b', 'c']))).toEqual(['a b', 'c']);
-	});
-
-	it('round-trips the empty (root) path', () => {
-		expect(decodeFolderPayload(encodeFolderPayload([]))).toEqual([]);
+	it('round-trips a single folder id, wrapped in the same JSON-array wire shape as the element payload', () => {
+		expect(decodeFolderPayload(encodeFolderPayload('fa'))).toEqual(['fa']);
 	});
 
 	it('returns null for malformed json', () => {
@@ -52,6 +49,7 @@ function tree(partial: Partial<UnifiedTree>): UnifiedTree {
 		children: new Map(),
 		kind: new Map(),
 		folderName: new Map(),
+		folderPathNames: new Map(),
 		placedElementIds: new Set(),
 		artifactRef: new Map(),
 		...partial
@@ -61,7 +59,7 @@ function tree(partial: Partial<UnifiedTree>): UnifiedTree {
 describe('movableElementIds', () => {
 	it('is the union of non-folder roots and placed element ids', () => {
 		const t = tree({
-			roots: [folderKey(['Group']), 'rootEl'], // a folder key plus an unplaced element
+			roots: [folderKey('fgroup'), 'rootEl'], // a folder key plus an unplaced element
 			placedElementIds: new Set(['placed1', 'placed2'])
 		});
 		expect(movableElementIds(t)).toEqual(new Set(['rootEl', 'placed1', 'placed2']));
@@ -96,24 +94,36 @@ describe('canDropElement', () => {
 });
 
 describe('canDropFolder', () => {
+	// A -> B (nested); C is a sibling of A unrelated to the A/B subtree.
+	const view: View = {
+		name: 'v',
+		folders: [
+			{
+				id: 'A',
+				name: 'A',
+				folders: [{ id: 'B', name: 'B', folders: [], elements: [], artifacts: [] }],
+				elements: [],
+				artifacts: []
+			},
+			{ id: 'C', name: 'C', folders: [], elements: [], artifacts: [] }
+		],
+		artifacts: []
+	};
+
 	it('accepts moving a folder under an unrelated folder', () => {
-		expect(canDropFolder({ sourcePath: ['A'], destParentPath: ['B'] }).ok).toBe(true);
+		expect(canDropFolder({ view, sourceId: 'C', destParentId: 'A' }).ok).toBe(true);
 	});
 
-	it('accepts moving a folder to the top level', () => {
-		expect(canDropFolder({ sourcePath: ['A', 'B'], destParentPath: [] }).ok).toBe(true);
+	it('accepts moving a folder to the top level (null destParentId)', () => {
+		expect(canDropFolder({ view, sourceId: 'B', destParentId: null }).ok).toBe(true);
 	});
 
 	it('rejects dropping a folder onto itself', () => {
-		expect(canDropFolder({ sourcePath: ['A'], destParentPath: ['A'] }).ok).toBe(false);
+		expect(canDropFolder({ view, sourceId: 'A', destParentId: 'A' }).ok).toBe(false);
 	});
 
 	it('rejects dropping a folder into one of its descendants (cycle)', () => {
-		expect(canDropFolder({ sourcePath: ['A'], destParentPath: ['A', 'B'] }).ok).toBe(false);
-	});
-
-	it('rejects moving the view root', () => {
-		expect(canDropFolder({ sourcePath: [], destParentPath: ['A'] }).ok).toBe(false);
+		expect(canDropFolder({ view, sourceId: 'A', destParentId: 'B' }).ok).toBe(false);
 	});
 });
 

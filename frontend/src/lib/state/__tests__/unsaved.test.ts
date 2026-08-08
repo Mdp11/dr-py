@@ -24,6 +24,7 @@ import { hasUnsavedWork, isArtifactDirty, isTabDirty } from '../unsaved';
 import { openArtifactTab, resetWorkspaceTabs } from '../workspace.svelte';
 import { resetArtifacts } from '../artifacts.svelte';
 import { resetArtifactEdits, stageArtifactCreate } from '../artifact-edits.svelte';
+import { resetViewEdits, stageViewOp } from '../view-edits.svelte';
 
 const EMPTY_PAGE = {
 	columns: [],
@@ -43,6 +44,7 @@ beforeEach(() => {
 	resetWorkspaceTabs();
 	resetArtifacts();
 	resetArtifactEdits();
+	resetViewEdits();
 	vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
 	// ensureSnippetDraft()/updateSnippetCode() lint in the background; stub it so
 	// the dirty-tracking assertions here don't escape to a real fetch.
@@ -123,6 +125,20 @@ describe('hasUnsavedWork', () => {
 		// the whole batch leave silently.
 		stageArtifactCreate('navigation', 'N', {}, null);
 		expect(hasUnsavedWork()).toBe(true);
+	});
+
+	it('is true for a staged VIEW op with no draft anywhere', () => {
+		expect(hasUnsavedWork()).toBe(false);
+		// A folder rename/move/placement goes straight from the gesture into the
+		// view journal — there is no editor and therefore no draft to be dirty,
+		// so without the view-depth term a view-ONLY batch would walk out of the
+		// workspace past the unload guard while a model or artifact batch of the
+		// same size is caught.
+		stageViewOp({ kind: 'rename_folder', id: 'f1', name: 'Renamed' }, 'Renamed folder');
+		expect(hasUnsavedWork()).toBe(true);
+
+		resetViewEdits();
+		expect(hasUnsavedWork()).toBe(false);
 	});
 });
 

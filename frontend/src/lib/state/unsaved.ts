@@ -3,22 +3,29 @@ import { getSnippetDraft, hasDirtySnippetDrafts } from './snippet-editor.svelte'
 import { getTableDraft, hasDirtyTableDrafts } from './table-editor.svelte';
 import { hasStagedOps } from './model.svelte';
 import { getStagedArtifactDepth } from './artifact-edits.svelte';
+import { getStagedViewDepth } from './view-edits.svelte';
 
 /**
  * True when leaving the workspace would lose work the server has not seen:
- * staged (uncommitted) model edits, staged (uncommitted) ARTIFACT ops, or an
- * unsaved table / navigation / snippet draft. Drives the workspace unload
- * guard (`beforeNavigate` in the project page).
+ * staged (uncommitted) model edits, staged (uncommitted) ARTIFACT ops, staged
+ * (uncommitted) VIEW ops, or an unsaved table / navigation / snippet draft.
+ * Drives the workspace unload guard (`beforeNavigate` in the project page).
  *
  * The artifact term is not redundant with the draft terms: saving an artifact
  * editor CLEARS its draft's `dirty` flag and hands the work to the staged
  * artifact buffer, so a saved-but-uncommitted artifact is invisible to
  * `hasDirty*Drafts()` and would otherwise walk out the door unguarded.
+ *
+ * The view term has no draft counterpart AT ALL — folder renames/moves/
+ * placements go straight from the gesture into the journal, with no editor in
+ * between — so without it a view-ONLY batch (rename a folder, close the tab)
+ * walks out unguarded while the equivalent model or artifact batch is caught.
  */
 export function hasUnsavedWork(): boolean {
 	return (
 		hasStagedOps() ||
 		getStagedArtifactDepth() > 0 ||
+		getStagedViewDepth() > 0 ||
 		hasDirtyTableDrafts() ||
 		hasDirtyNavDrafts() ||
 		hasDirtySnippetDrafts()

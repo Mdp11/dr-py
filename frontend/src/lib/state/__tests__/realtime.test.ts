@@ -25,6 +25,7 @@ import {
 	getPresence,
 	getPendingRebind,
 	handleFeedEvent,
+	hasModelLocks,
 	onCommitEvent,
 	resetRealtime,
 	startRealtime
@@ -71,6 +72,21 @@ describe('realtime store reducers', () => {
 			leases: [{ resource_id: 'e1', mode: 'exclusive', holder_id: 'a' }]
 		});
 		expect(getLockState().has('e1')).toBe(false);
+	});
+
+	it('hasModelLocks ignores folder: leases like art:', () => {
+		handleFeedEvent({
+			type: 'lock',
+			action: 'acquired',
+			leases: [{ resource_id: 'folder:f1', mode: 'exclusive', holder_id: 'a' }]
+		});
+		expect(hasModelLocks()).toBe(false);
+		handleFeedEvent({
+			type: 'lock',
+			action: 'acquired',
+			leases: [{ resource_id: 'e1', mode: 'exclusive', holder_id: 'a' }]
+		});
+		expect(hasModelLocks()).toBe(true);
 	});
 
 	it('applies a commit delta into the model cache', () => {

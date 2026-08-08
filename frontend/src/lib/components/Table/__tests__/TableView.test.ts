@@ -28,7 +28,7 @@ vi.mock('$lib/api/tables', async () => ({
 // The whole `$lib/state` barrel is mocked below (`downloadTable: vi.fn(...)`)
 // — importing the name here resolves to that SAME mock instance, so calls
 // made through TableView's onclick handlers show up on it.
-import { downloadTable } from '$lib/state';
+import { downloadTable, saveAsTableDraft } from '$lib/state';
 import TableView from '../TableView.svelte';
 
 // Hoisted so the vi.mock factory (hoisted above imports) can reference it, and
@@ -45,6 +45,8 @@ const h = vi.hoisted(() => ({
 	/** Mirrors the store's `_recapKeys.has(tab)`: is there a settled page state
 	 * a recap could describe RIGHT NOW (false while a load is in flight). */
 	canCheckScriptErrors: true,
+	/** Task 10: non-null puts the tab in the lock-denied state. */
+	lockHolder: null as string | null,
 	/** Mirrors the store's evidence from the page on screen: why a script cell
 	 * holds no value, or null when they all do. */
 	uncomputedScriptCellReason: null as string | null,
@@ -76,7 +78,7 @@ vi.mock('$lib/state', () => ({
 	getMetamodel: () => null,
 	ensureTableDraft: vi.fn(async () => {}),
 	getTableDraft: () => h.draft,
-	getTableLockHolder: () => null,
+	getTableLockHolder: () => h.lockHolder,
 	retryTableLock: vi.fn(),
 	getTableWarnings: () => h.warnings,
 	downloadTable: vi.fn(async () => {}),
@@ -149,6 +151,7 @@ afterEach(() => {
 	h.scriptErrorsPhase = 'idle';
 	h.canCheckScriptErrors = true;
 	h.uncomputedScriptCellReason = null;
+	h.lockHolder = null;
 	h.requestScriptErrors.mockReset();
 	h.jump.mockReset();
 	h.revertSuspendedTableEdits.mockClear();
@@ -1341,6 +1344,60 @@ describe('TableView settings dialog body', () => {
 			expect(document.querySelector('[data-testid="settings-tab-json"]')).toBeNull();
 			// The JSON export options are the export dialog's now, not this one's.
 			expect(document.querySelector('[data-testid="json-snake-all"]')).toBeNull();
+		} finally {
+			unmount(c);
+		}
+	});
+});
+
+// Task 10: a lock-denied table tab used to leave the grid's column-manager/
+// edit-column/add-column chrome fully live — only the name input and Save/
+// Save-as were disabled. This pins the fix: the grid host (and, inside the
+// settings dialog, the column manager) goes `inert` while denied, and the
+// banner gains a "Save as copy" escape hatch that reuses `saveAsTableDraft` —
+// the same fork the (disabled-while-locked) toolbar "Save as…" button already
+// used.
+describe('TableView lock-denied banner', () => {
+	afterEach(() => {
+		vi.mocked(saveAsTableDraft).mockClear();
+	});
+
+	it('renders the grid host inert while denied', () => {
+		h.lockHolder = 'peer@x';
+		const c = render('tbl:draft:1');
+		try {
+			const host = document.querySelector('[data-testid="table-grid-host"]') as HTMLElement;
+			expect(host).not.toBeNull();
+			expect(host.inert).toBe(true);
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('is not inert once the tab is no longer denied', () => {
+		h.lockHolder = null;
+		const c = render('tbl:draft:1');
+		try {
+			const host = document.querySelector('[data-testid="table-grid-host"]') as HTMLElement;
+			expect(host.inert).toBe(false);
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('the banner offers Save as copy, which forks via saveAsTableDraft', async () => {
+		h.lockHolder = 'peer@x';
+		vi.spyOn(window, 'prompt').mockReturnValue('Copy of table');
+		const c = render('tbl:draft:1');
+		try {
+			const btn = document.querySelector('[data-testid="table-save-as-copy"]') as HTMLElement;
+			expect(btn).not.toBeNull();
+			btn.click();
+			flushSync();
+			await Promise.resolve();
+
+			expect(window.prompt).toHaveBeenCalledWith('Save copy as', 'My Table (copy)');
+			expect(saveAsTableDraft).toHaveBeenCalledWith('tbl:draft:1', 'Copy of table');
 		} finally {
 			unmount(c);
 		}
