@@ -362,8 +362,8 @@ def preview_commit(
             # Resolve the SAME durable-vs-cached view create_commit's own
             # pre-mutex resolve now uses (final-review round 2, Finding C):
             # a None session.view does NOT mean "no durable view" — it can
-            # mean a prior DELETE /view merely cleared the cache while
-            # ViewRow survives (see load_or_create_view's docstring) — so
+            # mean a cold/evicted session's cache miss while ViewRow
+            # survives (see load_or_create_view's docstring) — so
             # validating against validate_view_ops' own None-view fallback
             # (a FRESH EMPTY view) here would let preview 422 "unknown
             # folder" on a batch the real commit, which hydrates the durable

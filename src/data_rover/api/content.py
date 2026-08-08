@@ -236,10 +236,10 @@ def upsert_single_view(
 ) -> ViewRow:
     """Create-or-update the project's one view row.
 
-    ``bump_rev`` distinguishes a real edit (the legacy PUT, and eventually the
-    view half of ``POST /commits``) from a NORMALIZATION write (lazy folder-id
-    healing at hydration/import): healing must not look like an edit, so it
-    passes ``bump_rev=False`` and ``view_rev`` is left untouched.
+    ``bump_rev`` distinguishes a real edit (the view half of
+    ``POST /commits``) from a NORMALIZATION write (lazy folder-id healing at
+    hydration/import): healing must not look like an edit, so it passes
+    ``bump_rev=False`` and ``view_rev`` is left untouched.
     """
     row = get_single_view(db, project_id)
     if row is None:
