@@ -276,21 +276,21 @@ test('view curation: exclude a placed element back to the pool', async ({ page }
 	await dragRowOnto(page, row(page, 'Alpha'), poolHeader(page));
 	await expect(badge).toContainText('1 change');
 
-	// Alpha left Grouped: the main tree no longer shows it at all. It does NOT
-	// yet appear in the "Not in view" pool — that panel's contents come from a
-	// server-fetched complement (`GET /model/containment/roots/excluded`) that
-	// only reflects COMMITTED placements, so a merely-staged `remove_element`
-	// leaves it stale until commit. Prove the real round trip through a commit
-	// instead of asserting the (currently absent) optimistic pool update.
+	// Alpha left Grouped: the main tree no longer shows it at all. The "Not in
+	// view" pool's own contents come from a server-fetched complement
+	// (`GET /model/containment/roots/excluded`) that only reflects COMMITTED
+	// placements, so a merely-staged `remove_element` would leave it stale
+	// there — but `registerExcludedRoots` (view-tree.ts) client-side-injects
+	// staged-unplaced ids into the pool region, so Alpha shows up immediately
+	// anyway.
 	await expect(tree(page).getByText('Alpha')).toHaveCount(0);
 	await expandPool(page);
-	// TODO(excluded-pool-gap): THIS ASSERTION PINS A KNOWN BUG AS CURRENT
-	// BEHAVIOUR. Between the staged `remove_element` and the commit, Alpha is
-	// in NEITHER the tree NOR the "Not in view" pool — it has vanished from the
-	// UI entirely, which is wrong. When the pool-injection fix lands (staged
-	// removals are injected into the pool client-side), this must INVERT to
-	// `toHaveCount(1)`. Do not "fix" the test to keep it green — fix the pool.
-	await expect(poolRow(page, 'Alpha')).toHaveCount(0);
+	// RESOLVED(excluded-pool-gap): this assertion used to PIN the bug (Alpha
+	// stuck in neither region between the staged remove and the commit,
+	// reading as data loss). The excluded-pool injection fix closed the gap —
+	// Alpha now appears in the pool the instant the op is staged, well before
+	// any commit round trip.
+	await expect(poolRow(page, 'Alpha')).toBeVisible();
 
 	await commitStaged(page);
 	await expect(badge).toContainText('0 change');

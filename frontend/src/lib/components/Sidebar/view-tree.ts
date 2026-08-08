@@ -252,16 +252,54 @@ export function buildUnifiedTree(
 
 /**
  * Register the "Not in view" excluded-pool roots on a built tree. `excludedRootIds`
- * are the loaded complement roots (backend order). Ids already placed in a folder
+ * are the loaded complement roots (backend order, COMMITTED truth only — see
+ * `GET /model/containment/roots/excluded`). Ids already placed in a folder
  * are dropped (defensive — the complement endpoint already excludes them). Unloaded
  * ids are registered as empty element nodes so the windowed renderer can show
  * skeleton rows until `ensureElements` fills the body. The pool is exposed as
  * `tree.excludedRoots` (a SEPARATE region) and is deliberately NOT added to
  * `tree.roots`, so it renders in its own panel rather than inside the tree.
  * Mutates `tree` in place (consistent with how buildUnifiedTree seeds).
+ *
+ * Excluded-pool injection (Task 1, artefacts-Phase-2 follow-ups): `excludedRootIds`
+ * reflects the last COMMITTED view only, so an element the staged journal has
+ * since unplaced (a `remove_element` op, or a placement whose containing folder
+ * was staged-deleted) sits in NEITHER region until commit/discard — the committed
+ * endpoint doesn't know about it yet, and it's no longer in any folder of the
+ * (already-staged) `view` fed to `buildUnifiedTree` either. That reads as data
+ * loss, so `stagedRemovedIds` (the caller's collected staged-unplace payload —
+ * see `view-edits.svelte.ts`'s `StagedViewEntry.unplacedElementIds`) is mirrored
+ * into the pool here, subject to the SAME two membership rules the committed
+ * endpoint itself enforces:
+ *  - still unplaced: `tree.placedElementIds` reflects the CURRENT staged view,
+ *    so an id staging re-placed elsewhere afterwards is already excluded by
+ *    that check — no separate "was it re-placed" bookkeeping needed.
+ *  - containment ROOT only (mirrors the endpoint's `idx.iter_roots()` filter):
+ *    `containedIds` is the same "known to be a containment child" set already
+ *    threaded through `buildUnifiedTree`; an id in it must never mint a bogus
+ *    pool root, even though staging unplaced it (the "contained elsewhere"
+ *    case `ingestFolder` already treats as a warning, not a hard error). Like
+ *    the rest of this module's containment knowledge, this is best-effort over
+ *    the currently-FETCHED subset, not a full-model guarantee — consistent
+ *    with `computeVisibility`'s "unloaded body -> tentatively visible" stance.
+ * A `stagedRemovedIds` entry already present via `excludedRootIds` is not
+ * duplicated.
  */
-export function registerExcludedRoots(tree: UnifiedTree, excludedRootIds: string[]): void {
+export function registerExcludedRoots(
+	tree: UnifiedTree,
+	excludedRootIds: string[],
+	stagedRemovedIds: Iterable<string> = [],
+	containedIds: ReadonlySet<string> = new Set()
+): void {
 	const kids = excludedRootIds.filter((id) => !tree.placedElementIds.has(id));
+	const seen = new Set(kids);
+	for (const id of stagedRemovedIds) {
+		if (seen.has(id)) continue; // already surfaced via the committed pool
+		if (tree.placedElementIds.has(id)) continue; // re-placed elsewhere: not injected
+		if (containedIds.has(id)) continue; // non-root: never a pool row
+		seen.add(id);
+		kids.push(id);
+	}
 	for (const id of kids) {
 		if (!tree.kind.has(id)) tree.kind.set(id, 'element');
 		if (!tree.children.has(id)) tree.children.set(id, []);

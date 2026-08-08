@@ -24,6 +24,7 @@
 		getModelGeneration,
 		getModelSummary,
 		getMultiSelectedIds,
+		getStagedViewEntries,
 		getStructureRev,
 		getSelection,
 		getTypeFilter,
@@ -483,6 +484,24 @@
 
 	const missingElementIds = $derived(getMissingElementIds());
 
+	// Excluded-pool injection (Task 1, artefacts-Phase-2 follow-ups): the
+	// committed pool response (`excludedRoots`, fed to `registerExcludedRoots`
+	// below) only reflects the last COMMITTED view, so an id the staged
+	// journal has since unplaced — a `remove_element` op, or a placement whose
+	// containing folder was staged-deleted — sits in neither the tree (the
+	// staged `view` no longer places it) nor the pool (the committed endpoint
+	// doesn't know yet) until commit/discard, which reads as data loss. Every
+	// staged entry that unplaced an element carries its payload in
+	// `unplacedElementIds` (empty for every other op kind — see
+	// `StagedViewEntry`'s docstring); `registerExcludedRoots` itself decides
+	// membership (still-unplaced + containment-root checks), so this is just
+	// the flat candidate list.
+	const stagedRemovedIds = $derived.by(() => {
+		const out: string[] = [];
+		for (const entry of getStagedViewEntries()) out.push(...entry.unplacedElementIds);
+		return out;
+	});
+
 	const tree = $derived.by(() => {
 		const t = buildUnifiedTree(
 			view,
@@ -496,7 +515,9 @@
 		if (view !== null) {
 			registerExcludedRoots(
 				t,
-				excludedRoots.map((i) => i.id)
+				excludedRoots.map((i) => i.id),
+				stagedRemovedIds,
+				containedIds
 			);
 		}
 		return t;

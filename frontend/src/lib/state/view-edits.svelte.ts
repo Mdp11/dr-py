@@ -12,6 +12,16 @@
  * (which mutations `_view` immediately), a deleted or renamed folder's
  * prior name is unrecoverable from the blob — the label records what the
  * user just did, for undo history display and the DiffDrawer.
+ *
+ * `unplacedElementIds` is captured the same way, for the same reason (excluded-
+ * pool injection, Task 1 of the artefacts-Phase-2 follow-ups): a `remove_element`
+ * carries its own target on the op, but a `delete_folder` op's id is all that's
+ * left once the folder (and everything placed anywhere in its subtree) has
+ * popped out of `_view` — recovering "what did this op just unplace" from the
+ * blob afterwards is exactly as unrecoverable as the deleted folder's prior
+ * name, so the caller (`view.svelte.ts`) computes it BEFORE applying the op and
+ * hands it to `stageViewOp` alongside the label. Every other op kind places or
+ * reparents (never produces an unplaced id) and leaves this empty.
  */
 
 import type { ViewOp } from './ops';
@@ -19,12 +29,13 @@ import type { ViewOp } from './ops';
 export interface StagedViewEntry {
 	op: ViewOp;
 	label: string;
+	unplacedElementIds: string[];
 }
 
 let _journal = $state<StagedViewEntry[]>([]);
 
-export function stageViewOp(op: ViewOp, label: string): void {
-	_journal = [..._journal, { op, label }];
+export function stageViewOp(op: ViewOp, label: string, unplacedElementIds: string[] = []): void {
+	_journal = [..._journal, { op, label, unplacedElementIds }];
 }
 
 export function getStagedViewOps(): ViewOp[] {
