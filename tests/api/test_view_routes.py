@@ -5,32 +5,12 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from data_rover.api import db as _db
-from data_rover.api.db_models import Role, User
 from data_rover.api.main import create_app
-from data_rover.api.session import DEFAULT_PROJECT_ID
-from data_rover.api.tenancy import add_member
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import AUTH_HEADERS, create_folder_via_commit, papi, seed_default_project
 
 EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "example.metamodel.yaml"
 API = "/api/v1/projects/default"
-
-OTHER_HEADERS = {"x-user-id": "user-2", "x-user-email": "user2@example.com"}
-
-
-def _seed_second_member(user_id: str, email: str) -> None:
-    """Add *user_id* as an editor of the default project (mirrors the helper
-    of the same name in ``test_commits_artifact_ops.py``)."""
-    gen = _db.get_db()
-    s = next(gen)
-    try:
-        if s.get(User, user_id) is None:
-            s.add(User(id=user_id, email=email))
-            s.commit()
-        add_member(s, DEFAULT_PROJECT_ID, user_id, Role.editor)
-    finally:
-        gen.close()
 
 
 @pytest.fixture
@@ -69,152 +49,52 @@ def test_get_view_returns_null_when_unset(client: TestClient) -> None:
     assert body["warnings"] == []
 
 
-def test_put_view_snapshot_round_trip(client: TestClient) -> None:
-    a_id, _b_id = _bootstrap(client)
-    res = client.put(
-        f"{API}/view/snapshot",
-        json={
-            "name": "Operational",
-            "folders": [
-                {"name": "Group", "folders": [], "elements": [a_id]},
-            ],
-        },
-    )
-    assert res.status_code == 200, res.text
-    body = res.json()
-    assert body["view"]["name"] == "Operational"
-    assert body["view"]["folders"][0]["elements"] == [a_id]
-    assert body["warnings"] == []
-
-    res = client.get(f"{API}/view")
-    assert res.status_code == 200
-    assert res.json()["view"]["name"] == "Operational"
-
-    # element b_id never placed; it stays implicit at root — view warnings are silent
-    res = client.delete(f"{API}/view")
-    assert res.status_code == 204
-    assert client.get(f"{API}/view").json()["view"] is None
-
-
-def test_put_view_with_missing_element_warns(client: TestClient) -> None:
-    _bootstrap(client)
-    res = client.put(
-        f"{API}/view/snapshot",
-        json={
-            "name": "V",
-            "folders": [{"name": "G", "folders": [], "elements": ["does_not_exist"]}],
-        },
-    )
-    assert res.status_code == 200, res.text
-    body = res.json()
-    assert len(body["warnings"]) == 1
-    assert body["warnings"][0]["severity"] == "warning"
-    assert "does_not_exist" in body["warnings"][0]["message"]
-
-
-def test_put_view_requires_loaded_model(client: TestClient) -> None:
-    res = client.put(
-        f"{API}/view/snapshot",
-        json={"name": "V", "folders": []},
-    )
-    assert res.status_code == 404
-
-
-def test_put_view_rejects_invalid_payload(client: TestClient) -> None:
-    _bootstrap(client)
-    res = client.put(f"{API}/view/snapshot", json={"folders": []})
-    assert res.status_code == 422
-
-
-def test_view_snapshot_round_trips_artifact_refs(client: TestClient) -> None:
-    _bootstrap(client)
-    res = client.put(
-        f"{API}/view/snapshot",
-        json={"name": "V", "folders": [{
-            "name": "F", "folders": [], "elements": [],
-            "artifacts": [{"id": "a1", "kind": "navigation"}],
-        }]},
-    )
-    assert res.status_code == 200, res.text
-    assert res.json()["view"]["folders"][0]["artifacts"] == [
-        {"id": "a1", "kind": "navigation"}
-    ]
-    got = client.get(f"{API}/view")
-    assert got.json()["view"]["folders"][0]["artifacts"] == [
-        {"id": "a1", "kind": "navigation"}
-    ]
-
-
-def test_root_artifacts_round_trip(client: TestClient) -> None:
-    _bootstrap(client)
-    body = {
-        "name": "v",
-        "folders": [{"name": "F"}],
-        "artifacts": [{"id": "a1", "kind": "table"}],
-    }
-    r = client.put(papi("/view/snapshot"), json=body)
-    assert r.status_code == 200, r.text
-    assert r.json()["view"]["artifacts"] == [{"id": "a1", "kind": "table"}]
-    r = client.get(papi("/view"))
-    assert r.json()["view"]["artifacts"] == [{"id": "a1", "kind": "table"}]
-
-
-def test_dangling_artifact_ref_warning_from_route(client: TestClient) -> None:
-    _bootstrap(client)
-    body = {"name": "v", "folders": [], "artifacts": [{"id": "nope", "kind": "table"}]}
-    r = client.put(papi("/view/snapshot"), json=body)
-    assert r.status_code == 200
-    assert any("unknown artifact" in w["message"] for w in r.json()["warnings"])
-
-
-def test_put_assigns_folder_ids_and_bumps_view_rev(client: TestClient) -> None:
-    _bootstrap(client)
-    body = {"name": "v", "folders": [{"name": "A", "folders": [{"name": "A1"}]}]}
-    r = client.put(papi("/view/snapshot"), json=body)
-    assert r.status_code == 200, r.text
-    out = r.json()
-    assert out["view_rev"] == 1
-    a = out["view"]["folders"][0]
-    assert len(a["id"]) == 32 and len(a["folders"][0]["id"]) == 32
-
-    # ids are STABLE across saves when the client echoes them back
-    r2 = client.put(papi("/view/snapshot"), json=out["view"])
-    assert r2.json()["view_rev"] == 2
-    assert r2.json()["view"]["folders"][0]["id"] == a["id"]
-
-    r3 = client.get(papi("/view"))
-    assert r3.json()["view_rev"] == 2
-
-
 def test_get_view_rev_none_without_row(client: TestClient) -> None:
     r = client.get(papi("/view"))
     assert r.status_code == 200
     assert r.json()["view"] is None and r.json()["view_rev"] is None
 
 
-def test_legacy_put_honors_peer_folder_lease(client: TestClient) -> None:
+def test_get_view_surfaces_validate_view_warnings(client: TestClient) -> None:
+    """Wire-level coverage for GET /view surfacing ``validate_view`` warnings
+    (``IssueOut.from_core`` serialization) now that the only other exerciser
+    of this response shape — the retired ``PUT /view/snapshot`` route — is
+    gone. ``validate_view`` itself is unit-tested in depth at
+    tests/view/test_validation.py; this only proves the wire response still
+    carries its findings through GET /view."""
     _bootstrap(client)
-    r = client.put(papi("/view/snapshot"), json={"name": "v", "folders": [{"name": "A"}]})
-    assert r.status_code == 200, r.text
-    fid = r.json()["view"]["folders"][0]["id"]
-    _seed_second_member("user-2", "user2@example.com")
-    r = client.post(
+    setup = create_folder_via_commit(client, "F")
+    fid = setup["id_map"]["tmp_setup"]
+    token = client.post(
         papi("/locks"),
         json={
             "targets": [{"resource_id": fid, "mode": "exclusive", "type": "folder"}],
             "intent": "edit",
         },
-        headers=OTHER_HEADERS,
+    ).json()["token"]
+    base = client.get(papi("/open")).json()["model_rev"]
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": base,
+            "ops": [
+                {"kind": "place_element", "element_id": "does_not_exist", "folder_id": fid},
+                {
+                    "kind": "place_artifact",
+                    "artifact_id": "nope",
+                    "artifact_kind": "table",
+                    "folder_id": fid,
+                },
+            ],
+            "message": "m",
+            "lock_tokens": [token],
+        },
     )
     assert r.status_code == 200, r.text
-    # my whole-document PUT would stomp the peer's checked-out folder → 409
-    r = client.put(papi("/view/snapshot"), json={"name": "v", "folders": []})
-    assert r.status_code == 409
-    assert "checked out" in r.json()["detail"]["message"]
-    # the PEER's own PUT is not blocked by their own lease
-    r = client.put(
-        papi("/view/snapshot"),
-        json={"name": "v", "folders": []},
-        headers=OTHER_HEADERS,
-    )
-    assert r.status_code == 200
+
+    res = client.get(f"{API}/view")
+    assert res.status_code == 200
+    warnings = res.json()["warnings"]
+    messages = [w["message"] for w in warnings]
+    assert any("does_not_exist" in m for m in messages)
+    assert any("unknown artifact" in m for m in messages)

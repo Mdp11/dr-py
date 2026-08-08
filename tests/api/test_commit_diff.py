@@ -17,7 +17,7 @@ from data_rover.api.commit_diff import _artifact_states, json_structural_diff
 from data_rover.api.db_models import Commit
 from data_rover.api.main import create_app
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .conftest import AUTH_HEADERS, create_folder_via_commit, papi, seed_default_project
 
 _MM = """
 elements:
@@ -405,8 +405,7 @@ def test_diff_unknown_rev_404(client: TestClient) -> None:
 
 
 def test_view_commit_diff_renders_ops_with_prior_names(client) -> None:
-    r = client.put(papi("/view/snapshot"), json={"name": "v", "folders": [{"name": "A"}]})
-    fid = r.json()["view"]["folders"][0]["id"]
+    fid = create_folder_via_commit(client, "A")["id_map"]["tmp_setup"]
     token = _folder_lease(client, fid)
     base = _rev(client)
     ops = [
@@ -440,8 +439,7 @@ def test_view_commit_diff_renders_ops_with_prior_names(client) -> None:
 
 
 def test_delete_folder_diff_carries_prior_name(client) -> None:
-    r = client.put(papi("/view/snapshot"), json={"name": "v", "folders": [{"name": "A"}]})
-    fid = r.json()["view"]["folders"][0]["id"]
+    fid = create_folder_via_commit(client, "A")["id_map"]["tmp_setup"]
     token = _folder_lease(client, fid, intent="delete")
     base = _rev(client)
     r = client.post(
@@ -460,8 +458,7 @@ def test_delete_folder_diff_carries_prior_name(client) -> None:
 
 
 def test_mixed_commit_scope_lists_both(client) -> None:
-    r = client.put(papi("/view/snapshot"), json={"name": "v", "folders": [{"name": "A"}]})
-    fid = r.json()["view"]["folders"][0]["id"]
+    fid = create_folder_via_commit(client, "A")["id_map"]["tmp_setup"]
     token = _folder_lease(client, fid)
     base = _rev(client)
     r = client.post(
@@ -487,8 +484,7 @@ def test_three_family_commit_renders_all_sections_without_leakage(
     """A single batch touching model, artifact, AND view content at once: the
     scope union lists all three families, and each section renders exactly
     its own family's change — nothing from one section leaks into another."""
-    r = client.put(papi("/view/snapshot"), json={"name": "v", "folders": [{"name": "A"}]})
-    fid = r.json()["view"]["folders"][0]["id"]
+    fid = create_folder_via_commit(client, "A")["id_map"]["tmp_setup"]
     token = _folder_lease(client, fid)
     base = _rev(client)
     r = client.post(
@@ -555,14 +551,8 @@ def test_view_diff_covers_move_remove_and_placement_op_kinds(
     below, and RemoveElementOp/RemoveArtifactOp are the ops that exercise
     ``_view_diffs``'s ``getattr(op, "index"/"artifact_kind", None)``
     fallbacks (those op models carry neither field)."""
-    r = client.put(
-        papi("/view/snapshot"),
-        json={"name": "v", "folders": [{"name": "A"}, {"name": "B"}]},
-    )
-    assert r.status_code == 200, r.text
-    folders = r.json()["view"]["folders"]
-    fa = next(f["id"] for f in folders if f["name"] == "A")
-    fb = next(f["id"] for f in folders if f["name"] == "B")
+    fa = create_folder_via_commit(client, "A")["id_map"]["tmp_setup"]
+    fb = create_folder_via_commit(client, "B")["id_map"]["tmp_setup"]
 
     r = client.post(
         papi("/commits"),

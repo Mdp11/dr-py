@@ -34,6 +34,11 @@ def test_import_creates_project_baseline_and_hydrates() -> None:
         sess = hydration.hydrate_session("proj")
         assert sess.model is not None and len(sess.model.elements) > 0
         assert sess.view is not None
+        # the fixture's folders carry no ids at all (an un-migrated blob
+        # shape); the importer's ensure_folder_ids call heals them at import
+        # time, one of its two entry points alongside hydration
+        # (tests/api/test_hydration.py::test_hydration_heals_missing_folder_ids).
+        assert all(len(f.id) == 32 for f in sess.view.folders)
     finally:
         set_snapshot_store(None)
 

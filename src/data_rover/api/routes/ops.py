@@ -720,12 +720,13 @@ def undo(
         # its delete_folder/move_folder subtree-and-current-parent expansion
         # to a bare single-resource id when ``view`` is None (mirroring
         # ``required_locks``'s own None-view degradation) — so undoing while
-        # session.view is COLD (e.g. a prior ``DELETE /view``, which clears
-        # only the cache and leaves ``ViewRow`` intact) would derive the
-        # guard's resource set against an ABSENT tree while the applier below
-        # goes on to mutate the REAL, hydrated one — reopening exactly the
-        # "peer lease on a child gets silently stomped" hole Fix 2 closed for
-        # the case where session.view was already warm. Guarded on
+        # session.view is COLD (e.g. a cold/evicted session's cache miss,
+        # which leaves ``ViewRow`` intact — see ``load_or_create_view``'s
+        # docstring) would derive the guard's resource set against an
+        # ABSENT tree while the applier below goes on to mutate the REAL,
+        # hydrated one — reopening exactly the "peer lease on a child gets
+        # silently stomped" hole Fix 2 closed for the case where
+        # session.view was already warm. Guarded on
         # `view_inv` (an inverse batch with no view ops needs no view at
         # all) and wrapped so a raise here — DB error, e.g. — re-pushes the
         # JUST-POPPED batch before propagating: nothing else in this request
@@ -757,10 +758,7 @@ def undo(
         # (see its docstring).
         peer_resources = [
             artifact_resource(aid) for aid in artifact_op_ids(artifact_inv)
-        ] + [
-            folder_resource(fid)
-            for fid in view_op_folder_ids(session.view, view_inv)
-        ]
+        ] + [folder_resource(fid) for fid in view_op_folder_ids(session.view, view_inv)]
         peer_held = session.lock_table.peer_leases(
             peer_resources, user.id, now=time.monotonic()
         )
@@ -813,30 +811,32 @@ def undo(
             db.rollback()  # discard staged artifact rows
             raise
         view_res: ViewBatchResult | None = None
-        # A single-user, no-peer sequence CAN still make this apply 422: the
-        # legacy PUT /view/snapshot (routes/view.py) bypasses op_log entirely
-        # (no Commit row) and, unlike POST /commits, only refuses a PEER's
-        # folder lease — the CALLER's own overwrite always goes through, even
-        # if it drops a folder/placement an already-journaled batch's inverse
-        # still expects to find. That is deliberate, not a bug this task
-        # closes: the outcome is a clean 422 with the model/artifact halves
-        # already rolled back and the batch re-pushed onto op_log (same shape
-        # as any other view-apply failure below), never a silently-wrong
-        # inverse applied over a view the caller has since replaced. Fixing
-        # it would mean teaching the unlocked legacy PUT about the op_log's
-        # expectations, which is out of this task's scope.
+        # This apply step used to be able to 422 even in a single-user,
+        # no-peer sequence: the now-retired legacy PUT /view/snapshot
+        # bypassed op_log entirely (no Commit row) and, unlike POST
+        # /commits, only refused a PEER's folder lease — the CALLER's own
+        # overwrite always went through, even if it dropped a
+        # folder/placement an already-journaled batch's inverse still
+        # expected to find. That route is gone, and every remaining view
+        # writer (POST /commits) is lock-verified and journaled, so this
+        # specific race is structurally gone too — the exception handling
+        # below survives purely as a general backstop, never a
+        # silently-wrong inverse applied over a view the caller has since
+        # replaced.
         if view_inv:
             if session.view is None:
                 # Defensive fallback only: the resolve-view block near the
                 # top of this function already hydrated/auto-created
                 # session.view whenever view_inv is non-empty, so this branch
-                # is dead in the ordinary single-request case. It stays for
-                # the one race that block cannot close: routes/view.py's
-                # ``DELETE /view`` is deliberately out of scope and takes no
-                # lock, so a peer's concurrent DELETE could null
-                # session.view again between this request's earlier resolve
-                # and here. Same load_or_create_view call, same rationale
-                # (a ViewRow that exists IS the view — see its docstring).
+                # is dead in the ordinary single-request case. It used to
+                # also guard a real race: the now-retired ``DELETE /view``
+                # took no lock at all, so a peer's concurrent DELETE could
+                # null session.view again between this request's earlier
+                # resolve and here. That route is gone, and nothing else can
+                # null session.view mid-request anymore — this branch
+                # survives purely as a cheap, harmless backstop. Same
+                # load_or_create_view call, same rationale (a ViewRow that
+                # exists IS the view — see its docstring).
                 session.view = load_or_create_view(db, project_id)
                 created_view = True
             try:

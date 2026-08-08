@@ -156,6 +156,56 @@ def commit_create(c: TestClient, label: str | None = None) -> str:
     return r.json()["id_map"]["tmp_n"]
 
 
+def create_folder_via_commit(
+    c: TestClient,
+    name: str,
+    *,
+    parent_id: str = "root",
+    headers: dict | None = None,
+) -> dict:
+    """Create one folder via ``POST /commits`` and return the full commit
+    response body (``id_map``, ``view_rev``, etc).
+
+    The commit-flow replacement for the retired ``PUT /view/snapshot``
+    one-shot setup harness that many view-op tests used purely to seed an
+    initial named folder with an id. Acquires (and lets the commit release)
+    its own lease on *parent_id* — ``"root"`` by default.
+    """
+    hdrs = headers if headers is not None else AUTH_HEADERS
+    lease = c.post(
+        papi("/locks"),
+        json={
+            "targets": [
+                {"resource_id": parent_id, "mode": "exclusive", "type": "folder"}
+            ],
+            "intent": "edit",
+        },
+        headers=hdrs,
+    )
+    assert lease.status_code == 200, lease.text
+    token = lease.json()["token"]
+    base = c.get(papi("/open"), headers=hdrs).json()["model_rev"]
+    r = c.post(
+        papi("/commits"),
+        json={
+            "base_rev": base,
+            "ops": [
+                {
+                    "kind": "create_folder",
+                    "temp_id": "tmp_setup",
+                    "parent_id": parent_id,
+                    "name": name,
+                }
+            ],
+            "message": "setup",
+            "lock_tokens": [token],
+        },
+        headers=hdrs,
+    )
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
 def feed_url(user: str = TEST_USER_ID) -> str:
     """WebSocket feed URL with dev-identity query params for ``user``."""
     return papi(f"/feed?x-user-id={user}&x-user-email={user}@example.com")

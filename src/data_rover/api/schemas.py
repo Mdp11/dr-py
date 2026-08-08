@@ -161,8 +161,8 @@ class ArtifactRefOut(BaseModel):
 
 class FolderOut(BaseModel):
     #: mirrors `Folder.id`; "" means not yet assigned (legacy blob healed at
-    #: hydration/PUT/import time by Task 3 — this field just carries whatever
-    #: the core side already has).
+    #: hydration/import time — this field just carries whatever the core
+    #: side already has).
     id: str = ""
     name: str
     folders: list[FolderOut] = Field(default_factory=list)
@@ -199,26 +199,6 @@ class ViewOut(BaseModel):
             folders=[FolderOut.from_core(f) for f in view.folders],
             artifacts=[ArtifactRefOut(id=a.id, kind=a.kind) for a in view.artifacts],
         )
-
-
-class ViewIn(BaseModel):
-    """Inbound view snapshot. Accepts the same shape as ViewOut."""
-
-    name: str
-    folders: list[FolderOut] = Field(default_factory=list)
-    artifacts: list[ArtifactRefOut] = Field(default_factory=list)
-
-    def to_core(self) -> View:
-        return View.model_validate(self.model_dump())
-
-
-class ViewSnapshotResponse(BaseModel):
-    view: ViewOut
-    warnings: list[IssueOut] = Field(default_factory=list)
-    #: the row's ``view_rev`` after this write (always bumped by a PUT — see
-    #: ``ViewRow.view_rev``). 0 when no ``ModelRow`` exists yet, mirroring the
-    #: in-memory-only fallback that also skips persistence in that case.
-    view_rev: int = 0
 
 
 class ViewStateResponse(BaseModel):
