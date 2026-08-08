@@ -140,6 +140,88 @@ describe('registerExcludedRoots', () => {
 		const rows = flattenVisibleRows(tree, vis, new Set(), tree.excludedRoots);
 		expect(rows.map((r) => r.key)).toEqual(['x1']);
 	});
+
+	describe('staged-removal injection (excluded-pool gap fix)', () => {
+		it('injects an id staged out of a folder (remove_element) that the committed pool does not know about yet', () => {
+			// Committed truth: 'a' is still placed in 'fa' (buildUnifiedTree sees it
+			// there), so the committed pool response omits it. The staged journal
+			// has since unplaced it — 'a' no longer appears in the CURRENT view's
+			// folder.elements — but here we model that via the injection arg, since
+			// buildUnifiedTree is fed the (already-staged) view directly in the real
+			// caller. What this test pins is: an id NOT in the committed excluded
+			// list, and NOT currently placed, gets added to the pool.
+			const view: View = { name: 'v', folders: [], artifacts: [] }; // 'a' unplaced in current (staged) view
+			const byId = new Map([['a', el('a')]]);
+			const tree = buildUnifiedTree(view, [], byId, new Map(), new Set(), displayName);
+			registerExcludedRoots(tree, [], ['a']); // committed pool omits 'a'; staging unplaced it
+			expect(tree.excludedRoots).toEqual(['a']);
+		});
+
+		it('does not inject a staged-removed id that staging re-placed elsewhere afterwards', () => {
+			// 'a' was removed from one folder and placed into another later in the
+			// same journal — the CURRENT staged view (fed to buildUnifiedTree) has
+			// it placed in 'fb', so `placedElementIds` already contains it.
+			const view: View = {
+				name: 'v',
+				folders: [{ id: 'fb', name: 'B', folders: [], elements: ['a'], artifacts: [] }],
+				artifacts: []
+			};
+			const byId = new Map([['a', el('a')]]);
+			const tree = buildUnifiedTree(view, [], byId, new Map(), new Set(), displayName);
+			registerExcludedRoots(tree, [], ['a']);
+			expect(tree.excludedRoots).toEqual([]);
+		});
+
+		it('injects every element that was placed in a staged-deleted folder', () => {
+			const view: View = { name: 'v', folders: [], artifacts: [] }; // folder + placements already gone
+			const byId = new Map([
+				['a', el('a')],
+				['b', el('b')]
+			]);
+			const tree = buildUnifiedTree(view, [], byId, new Map(), new Set(), displayName);
+			registerExcludedRoots(tree, [], ['a', 'b']);
+			expect(tree.excludedRoots).toEqual(['a', 'b']);
+		});
+
+		it('does not inject a staged-removed id that is not a containment root', () => {
+			// 'c' is a containment CHILD of some other element (present in
+			// `containedIds`), so it must never mint a bogus pool root even though
+			// staging unplaced it — mirrors GET /model/containment/roots/excluded's
+			// roots-only membership rule.
+			const view: View = { name: 'v', folders: [], artifacts: [] };
+			const byId = new Map([['c', el('c')]]);
+			const tree = buildUnifiedTree(
+				view,
+				[],
+				byId,
+				new Map([['parent', ['c']]]),
+				new Set(['c']),
+				displayName
+			);
+			registerExcludedRoots(tree, [], ['c'], new Set(['c']));
+			expect(tree.excludedRoots).toEqual([]);
+		});
+
+		it('does not duplicate an id the committed pool already lists', () => {
+			const view: View = { name: 'v', folders: [], artifacts: [] };
+			const byId = new Map([['a', el('a')]]);
+			const tree = buildUnifiedTree(view, [], byId, new Map(), new Set(), displayName);
+			registerExcludedRoots(tree, ['a'], ['a']);
+			expect(tree.excludedRoots).toEqual(['a']);
+		});
+
+		it('with no staging, output is identical to today (pure filter behavior unchanged)', () => {
+			const view: View = {
+				name: 'v',
+				folders: [{ id: 'fa', name: 'F', folders: [], elements: ['placed'], artifacts: [] }],
+				artifacts: []
+			};
+			const byId = new Map([['placed', el('placed')]]);
+			const tree = buildUnifiedTree(view, [], byId, new Map(), new Set(), displayName);
+			registerExcludedRoots(tree, ['placed', 'x1']);
+			expect(tree.excludedRoots).toEqual(['x1']);
+		});
+	});
 });
 
 describe('resolveElementDrop', () => {

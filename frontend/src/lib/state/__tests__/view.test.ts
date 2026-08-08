@@ -147,6 +147,44 @@ describe('stageDeleteFolder', () => {
 		expect(getStagedViewOps()).toEqual([{ kind: 'delete_folder', id: 'f1' }]);
 		expect(getView()!.folders.map((f) => f.id)).toEqual(['f2']);
 	});
+
+	// Excluded-pool injection payload (Task 1, artefacts-Phase-2 follow-ups):
+	// the entry must carry every element that was placed anywhere in the
+	// deleted subtree, captured BEFORE the pop (see `subtreeElementIds`'s
+	// docstring) — ContainmentTree.svelte mirrors this into the "Not in view"
+	// pool client-side, ahead of any commit.
+	it('stages the deleted subtree\'s placed elements as the injection payload', async () => {
+		seedView(baseView()); // f1 = ['e1', 'e2'], its nested f1a is empty
+		await refreshView();
+		vi.spyOn(editGate, 'folderDeleteLock').mockResolvedValue(true);
+
+		await stageDeleteFolder('f1');
+
+		expect(getStagedViewEntries()[0].unplacedElementIds).toEqual(['e1', 'e2']);
+	});
+
+	it('collects elements placed in a NESTED descendant folder too', async () => {
+		const view: View = {
+			name: 'v',
+			folders: [
+				{
+					id: 'f1',
+					name: 'F1',
+					elements: ['e1'],
+					artifacts: [],
+					folders: [{ id: 'f1a', name: 'Nested', folders: [], elements: ['e2'], artifacts: [] }]
+				}
+			],
+			artifacts: []
+		};
+		seedView(view);
+		await refreshView();
+		vi.spyOn(editGate, 'folderDeleteLock').mockResolvedValue(true);
+
+		await stageDeleteFolder('f1');
+
+		expect(getStagedViewEntries()[0].unplacedElementIds).toEqual(['e1', 'e2']);
+	});
 });
 
 describe('stageMoveFolder', () => {
@@ -310,6 +348,9 @@ describe('stageRemoveElement', () => {
 		expect(getStagedViewOps()).toEqual([
 			{ kind: 'remove_element', element_id: 'e1', folder_id: 'f1' }
 		]);
+		// Excluded-pool injection payload (Task 1): a remove_element entry
+		// carries its own target id.
+		expect(getStagedViewEntries()[0].unplacedElementIds).toEqual(['e1']);
 	});
 });
 
@@ -414,6 +455,11 @@ describe('stageClearView', () => {
 			{ kind: 'remove_artifact', artifact_id: 'root-art', folder_id: 'root' }
 		]);
 		expect(getView()).toEqual({ name: 'v', folders: [], artifacts: [] });
+		// Excluded-pool injection payload (Task 1): each delete_folder entry
+		// carries its own subtree's placed elements; f2 has none.
+		const entries = getStagedViewEntries();
+		expect(entries[0].unplacedElementIds).toEqual(['e1', 'e2']);
+		expect(entries[1].unplacedElementIds).toEqual([]);
 	});
 
 	it('is a no-op on an already-empty view', async () => {

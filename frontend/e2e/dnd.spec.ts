@@ -164,22 +164,20 @@ test('drag a placed element to the view root unplaces it', async ({ page }) => {
 	);
 
 	await expect(badge).toContainText('1 change');
-	// Alpha left "Grouped": the main tree no longer shows it at all. It does
-	// NOT (yet) reappear in the "Not in view" pool — that panel's contents
-	// come from a server-fetched complement (`GET /model/containment/roots/
-	// excluded`) that only reflects COMMITTED placements; a locally staged
-	// `remove_element` has no server-side effect until commit, so the pool
-	// stays stale until then (see view.spec.ts's "exclude" curation test for
-	// the full round trip through a commit).
-	//
-	// TODO(excluded-pool-gap): the SECOND half of that state is a known BUG this
-	// assertion PINS as current behaviour — Alpha is in neither the tree nor the
-	// pool, i.e. it has vanished from the UI until commit. This line stays
-	// `toHaveCount(0)` (Alpha correctly leaves the MAIN tree), but the sibling
-	// pool assertion in view.spec.ts must INVERT when the pool-injection fix
-	// lands, and this comment should go with it. Do not "fix" either test to
-	// keep it green — fix the pool.
+	// Alpha left "Grouped": the main tree no longer shows it at all. This line
+	// stays `toHaveCount(0)` (Alpha correctly leaves the MAIN tree) — see
+	// view.spec.ts's "exclude" curation test for the full round trip through
+	// a commit.
 	await expect(mainTree(page).getByText('Alpha')).toHaveCount(0);
+	// RESOLVED(excluded-pool-gap): this used to be the SECOND half of a known
+	// BUG — Alpha sat in neither the tree nor the "Not in view" pool between
+	// the staged `remove_element` and the commit, i.e. it had vanished from
+	// the UI entirely. The excluded-pool injection fix (`registerExcludedRoots`
+	// in view-tree.ts) client-side-injects a staged-unplaced id into the pool
+	// immediately, ahead of any server round trip, so Alpha now appears there
+	// right away.
+	await expandExcludedPool(page);
+	await expect(row(page, 'Alpha')).toBeVisible();
 });
 
 test('drag a folder onto another folder reparents it', async ({ page }) => {

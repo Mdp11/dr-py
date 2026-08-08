@@ -211,6 +211,19 @@ function elLabel(id: string): string {
 	return el ? elementDisplayName(el) : id;
 }
 
+/** Every element id placed anywhere within `folder`'s own subtree (itself plus
+ * every descendant folder) — the excluded-pool injection payload for a staged
+ * `delete_folder` (Task 1, artefacts-Phase-2 follow-ups). MUST be captured
+ * from the live `_view` BEFORE the op pops the folder out: `applyViewOp`
+ * detaches the folder (and its `elements`/`folders` lists with it) from the
+ * tree, so this is unrecoverable afterwards — same shape as `label` capturing
+ * a folder's prior name before a rename/delete. */
+function subtreeElementIds(folder: Folder): string[] {
+	const out: string[] = [...folder.elements];
+	for (const sub of folder.folders) out.push(...subtreeElementIds(sub));
+	return out;
+}
+
 // ----- STAGE mutators (artefacts revamp Phase 2) -----
 
 export async function stageCreateFolder(parentId: string, name: string): Promise<boolean> {
@@ -253,9 +266,10 @@ export async function stageDeleteFolder(id: string): Promise<boolean> {
 	const subtreeIds = folderSubtreeIds(_view, id);
 	if (!(await folderDeleteLock(subtreeIds))) return false; // gate showed the notice
 	const label = `Deleted folder "${folder.name}"`;
+	const unplacedElementIds = subtreeElementIds(folder); // capture BEFORE the pop — see docstring
 	const op: ViewOp = { kind: 'delete_folder', id };
 	_view = applyViewOp(_view, op);
-	stageViewOp(op, label);
+	stageViewOp(op, label, unplacedElementIds);
 	return true;
 }
 
@@ -356,7 +370,7 @@ export async function stagePlaceElementsAt(
 			const op: ViewOp = { kind: 'remove_element', element_id: id, folder_id: home };
 			const label = `Removed ${elLabel(id)} from "${folderDisplayName(_view, home)}"`;
 			_view = applyViewOp(_view, op);
-			stageViewOp(op, label);
+			stageViewOp(op, label, [id]); // excluded-pool injection payload (Task 1)
 			continue;
 		}
 		if (home === null) {
@@ -488,8 +502,9 @@ export async function stageClearView(): Promise<boolean> {
 	if (!(await folderDeleteLock(allIds))) return false; // gate showed the notice
 	for (const f of [..._view.folders]) {
 		const op: ViewOp = { kind: 'delete_folder', id: f.id };
+		const unplacedElementIds = subtreeElementIds(f); // capture BEFORE the pop
 		_view = applyViewOp(_view, op);
-		stageViewOp(op, `Deleted folder "${f.name}"`);
+		stageViewOp(op, `Deleted folder "${f.name}"`, unplacedElementIds);
 	}
 	for (const ref of [..._view.artifacts]) {
 		const op: ViewOp = { kind: 'remove_artifact', artifact_id: ref.id, folder_id: VIEW_ROOT_ID };
