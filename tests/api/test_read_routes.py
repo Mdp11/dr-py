@@ -1092,7 +1092,7 @@ def test_tree_items_endpoint_rejects_oversized_batch(client: TestClient) -> None
 # ---------------------------------------------------------------------------
 
 
-def _put_view(client: TestClient, folders: list[dict]) -> None:
+def _seed_view(client: TestClient, folders: list[dict]) -> None:
     """Build a view via POST /commits using the same nested folder-dict shape
     the retired ``PUT /view/snapshot`` route accepted: each dict is
     ``{"name": ..., "folders": [...], "elements": [...]}``. Folders created
@@ -1142,7 +1142,7 @@ def _put_view(client: TestClient, folders: list[dict]) -> None:
 
 def test_excluded_roots_omits_placed(client: TestClient) -> None:
     _load_model(client, [_item("a", "A"), _item("b", "B"), _item("c", "C")], [])
-    _put_view(client, [{"name": "F", "folders": [], "elements": ["b"]}])
+    _seed_view(client, [{"name": "F", "folders": [], "elements": ["b"]}])
     res = client.get(f"{API}/model/containment/roots/excluded")
     assert res.status_code == 200, res.text
     body = res.json()
@@ -1152,7 +1152,7 @@ def test_excluded_roots_omits_placed(client: TestClient) -> None:
 
 def test_excluded_roots_nested_folder_placement(client: TestClient) -> None:
     _load_model(client, [_item("a", "A"), _item("b", "B")], [])
-    _put_view(
+    _seed_view(
         client,
         [
             {
@@ -1187,7 +1187,7 @@ def test_excluded_roots_paging_over_filtered_subset(client: TestClient) -> None:
     # Placed ids must be subtracted BEFORE paging: with i0 and i2 in the view,
     # the excluded pool is [i1, i3, i4], so limit=2/offset=1 -> [i3, i4].
     _load_model(client, [_item(f"i{n}", f"n{n}") for n in range(5)], [])
-    _put_view(client, [{"name": "F", "folders": [], "elements": ["i0", "i2"]}])
+    _seed_view(client, [{"name": "F", "folders": [], "elements": ["i0", "i2"]}])
     res = client.get(
         f"{API}/model/containment/roots/excluded", params={"limit": 2, "offset": 1}
     )

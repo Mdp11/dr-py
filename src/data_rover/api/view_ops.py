@@ -85,14 +85,16 @@ def load_or_create_view(db: DbSession, project_id: str) -> View:
     ``routes/ops.py::undo``'s evicted-resurrection fallback.
 
     ``session.view is None`` does NOT mean "this project never had a view":
-    ``DELETE /view`` (``routes/view.py::clear_view``, deliberately out of
-    scope for this fix) sets ONLY the in-memory cache to ``None`` and never
-    touches ``ViewRow`` — the durable blob — and a cold/evicted session can
-    reach this same ``None`` state for an unrelated reason (cache miss, not
-    absence). A ``ViewRow`` that exists on disk IS the view regardless of
-    which of those put the cache in this state, exactly the read
-    ``hydration.hydrate_session`` already performs at session start; only a
-    project that has genuinely never committed a view gets a fresh empty one.
+    a cold/evicted session reaches this ``None`` state on a cache miss,
+    never touching ``ViewRow`` — the durable blob — which can still hold a
+    populated tree. (The legacy ``PUT /view/snapshot`` / ``DELETE /view``
+    routes used to be a second source of this same ambiguity — ``clear_view``
+    nulled only the in-memory cache too — but both are retired now; a
+    cache-miss on a cold session is the only way here left.) A ``ViewRow``
+    that exists on disk IS the view regardless of why the cache reads empty,
+    exactly the read ``hydration.hydrate_session`` already performs at
+    session start; only a project that has genuinely never committed a view
+    gets a fresh empty one.
 
     Getting this backwards is silent data loss (final-review Fix 1): the two
     write callers apply the incoming batch to whatever this returns and then

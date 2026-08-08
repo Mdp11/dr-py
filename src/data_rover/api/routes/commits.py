@@ -783,14 +783,16 @@ def create_commit(
                 # Defensive fallback only: the resolve near the top of this
                 # SAME mutex block already hydrated/auto-created
                 # session.view whenever view_ops is non-empty, so this
-                # branch is dead in the ordinary case. It stays for the one
-                # race that block cannot close even from inside the mutex:
-                # routes/view.py's ``DELETE /view`` is deliberately out of
-                # scope and takes NO lock at all (not even session.write_
-                # mutex), so a peer's concurrent DELETE could null
-                # session.view again between this request's own resolve and
-                # here, despite this request holding the mutex the entire
-                # time.
+                # branch is dead in the ordinary case. It used to also guard
+                # a real race: the now-retired ``DELETE /view`` took NO lock
+                # at all (not even session.write_mutex), so a peer's
+                # concurrent DELETE could null session.view again between
+                # this request's own resolve and here, despite this request
+                # holding the mutex the entire time. That route is gone, and
+                # nothing else can null session.view mid-request anymore
+                # (every other assignment is this SAME request unwinding its
+                # own auto-create on a later failure) — this branch survives
+                # purely as a cheap, harmless backstop.
                 session.view = load_or_create_view(db, project_id)
                 created_view = True
             try:

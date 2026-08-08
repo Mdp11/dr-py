@@ -827,13 +827,15 @@ def undo(
                 # Defensive fallback only: the resolve-view block near the
                 # top of this function already hydrated/auto-created
                 # session.view whenever view_inv is non-empty, so this branch
-                # is dead in the ordinary single-request case. It stays for
-                # the one race that block cannot close: routes/view.py's
-                # ``DELETE /view`` is deliberately out of scope and takes no
-                # lock, so a peer's concurrent DELETE could null
-                # session.view again between this request's earlier resolve
-                # and here. Same load_or_create_view call, same rationale
-                # (a ViewRow that exists IS the view — see its docstring).
+                # is dead in the ordinary single-request case. It used to
+                # also guard a real race: the now-retired ``DELETE /view``
+                # took no lock at all, so a peer's concurrent DELETE could
+                # null session.view again between this request's earlier
+                # resolve and here. That route is gone, and nothing else can
+                # null session.view mid-request anymore — this branch
+                # survives purely as a cheap, harmless backstop. Same
+                # load_or_create_view call, same rationale (a ViewRow that
+                # exists IS the view — see its docstring).
                 session.view = load_or_create_view(db, project_id)
                 created_view = True
             try:
