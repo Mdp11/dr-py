@@ -682,8 +682,8 @@ def create_commit(
     #
     # INVARIANT (final-review round 3): every ASSIGNMENT to session.view in
     # this function happens under session.write_mutex — the single point is
-    # just inside the mutex below, right before required_locks, and the
-    # ledger's own reset only ever runs from there too. A pre-mutex READ into
+    # just inside the mutex below, right before required_locks; every ledger
+    # unwind() that resets it runs later inside that same mutex block. A
     # a LOCAL (the overlap check just below needs one) is fine and does NOT
     # violate this — only writing session.view itself, or resetting it, must
     # wait for the mutex. Two concurrent view-op commits assigning
