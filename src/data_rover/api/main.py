@@ -17,6 +17,7 @@ from .errors import register_exception_handlers
 from .feed import lock_event
 from .routes import (
     admin,
+    artifact_bundle,
     artifacts,
     auth,
     change_request,
@@ -293,6 +294,7 @@ def create_app() -> FastAPI:
     app.include_router(locks.router, prefix=proj, tags=["locks"])
     app.include_router(commits.router, prefix=proj, tags=["commits"])
     app.include_router(artifacts.router, prefix=proj, tags=["artifacts"])
+    app.include_router(artifact_bundle.router, prefix=proj, tags=["artifacts"])
     app.include_router(tables.router, prefix=proj, tags=["tables"])
     app.include_router(snippets.router, prefix=proj, tags=["snippets"])
     app.include_router(settings_routes.router, prefix=proj, tags=["settings"])

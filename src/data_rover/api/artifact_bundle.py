@@ -120,6 +120,21 @@ def build_bundle(
     )
 
 
+class ExportRequest(BaseModel):
+    root_ids: list[str] = Field(default_factory=list)
+
+
+class ExportPreviewArtifact(BaseModel):
+    id: str
+    kind: str
+    name: str
+
+
+class ExportPreviewResponse(BaseModel):
+    artifacts: list[ExportPreviewArtifact] = Field(default_factory=list)
+    dangling_refs: list[str] = Field(default_factory=list)
+
+
 class PlanEntry(BaseModel):
     bundle_id: str
     kind: str
