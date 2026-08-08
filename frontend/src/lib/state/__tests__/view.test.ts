@@ -153,7 +153,7 @@ describe('stageDeleteFolder', () => {
 	// deleted subtree, captured BEFORE the pop (see `subtreeElementIds`'s
 	// docstring) — ContainmentTree.svelte mirrors this into the "Not in view"
 	// pool client-side, ahead of any commit.
-	it('stages the deleted subtree\'s placed elements as the injection payload', async () => {
+	it("stages the deleted subtree's placed elements as the injection payload", async () => {
 		seedView(baseView()); // f1 = ['e1', 'e2'], its nested f1a is empty
 		await refreshView();
 		vi.spyOn(editGate, 'folderDeleteLock').mockResolvedValue(true);

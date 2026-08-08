@@ -134,7 +134,11 @@ describe('DiffDrawer view changes', () => {
 
 	it("counts staged view entries into the commit gate's total", async () => {
 		viewEntries = [
-			{ op: { kind: 'delete_folder', id: 'f1' }, label: 'Deleted folder "Pumps"', unplacedElementIds: [] }
+			{
+				op: { kind: 'delete_folder', id: 'f1' },
+				label: 'Deleted folder "Pumps"',
+				unplacedElementIds: []
+			}
 		];
 
 		const c = await openDrawer();
@@ -149,7 +153,11 @@ describe('DiffDrawer view changes', () => {
 
 	it('a view-only staged batch enables Commit', async () => {
 		viewEntries = [
-			{ op: { kind: 'delete_folder', id: 'f1' }, label: 'Deleted folder "Pumps"', unplacedElementIds: [] }
+			{
+				op: { kind: 'delete_folder', id: 'f1' },
+				label: 'Deleted folder "Pumps"',
+				unplacedElementIds: []
+			}
 		];
 
 		const c = await openDrawer();
@@ -166,7 +174,11 @@ describe('DiffDrawer view changes', () => {
 	// a nonzero count. A pointer message must render instead.
 	it('shows a pointer to the View tab on the Model tab for a view-only batch, and keeps Commit enabled', async () => {
 		viewEntries = [
-			{ op: { kind: 'delete_folder', id: 'f1' }, label: 'Deleted folder "Pumps"', unplacedElementIds: [] },
+			{
+				op: { kind: 'delete_folder', id: 'f1' },
+				label: 'Deleted folder "Pumps"',
+				unplacedElementIds: []
+			},
 			{
 				op: { kind: 'rename_folder', id: 'f2', name: 'Valves' },
 				label: 'Renamed folder "Old" → "Valves"',
@@ -189,7 +201,11 @@ describe('DiffDrawer view changes', () => {
 
 	it('calls discardViewChanges exactly once from the single discard button', async () => {
 		viewEntries = [
-			{ op: { kind: 'delete_folder', id: 'f1' }, label: 'Deleted folder "Pumps"', unplacedElementIds: [] }
+			{
+				op: { kind: 'delete_folder', id: 'f1' },
+				label: 'Deleted folder "Pumps"',
+				unplacedElementIds: []
+			}
 		];
 
 		const c = await openDrawer();
