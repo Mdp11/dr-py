@@ -102,11 +102,11 @@
 	}
 
 	function actionExportArtifacts(): void {
-		setCommandPaletteOpen(false);
+		close();
 		openExportArtifacts();
 	}
 	function actionImportArtifacts(): void {
-		setCommandPaletteOpen(false);
+		close();
 		openImportArtifacts();
 	}
 
