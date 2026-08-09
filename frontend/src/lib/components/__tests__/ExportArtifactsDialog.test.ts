@@ -274,6 +274,62 @@ describe('ExportArtifactsDialog', () => {
 		expect(rowCheckbox('s1').checked).toBe(false);
 	});
 
+	// Regression for review finding #4: GET /artifacts returns EVERY kind,
+	// including legacy/unregistered ones (`diagram`) SECTIONS has no row for.
+	// Before the fix, `headers` was unfiltered, so `allVisibleChecked` could
+	// never become true (the diagram row could never be checked) — "Select
+	// all" was permanently unreachable and `toggleAll` a one-way add that
+	// would silently promote the diagram row to an export root.
+	it('filters out unregistered artifact kinds so "Select all" is reachable and never exports them', async () => {
+		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({
+			items: [
+				...HEADERS,
+				{
+					id: 'd1',
+					kind: 'diagram',
+					name: 'Legacy diagram',
+					artifact_rev: 1,
+					updated_at: '',
+					updated_by: null,
+					entry_points: null
+				}
+			]
+		});
+		await loadArtifacts();
+		vi.spyOn(bundleApi, 'exportPreview').mockResolvedValue({ artifacts: [], dangling_refs: [] });
+		const exp = vi.spyOn(bundleApi, 'exportBundle').mockResolvedValue(new Response('{}'));
+		vi.spyOn(fileSave, 'saveResponseToFile').mockResolvedValue({
+			filename: 'artifacts.bundle.json',
+			handle: null
+		});
+		open();
+
+		// The legacy kind renders no row at all — nothing to check.
+		expect(document.body.querySelector('[data-testid="export-row-d1"]')).toBeNull();
+
+		const selectAll = document.body.querySelector<HTMLInputElement>(
+			'[data-testid="export-select-all"]'
+		)!;
+		selectAll.click();
+		flushSync();
+		// Reachable: the checkbox itself now reads checked (the bug made this
+		// permanently false), with every renderable row checked.
+		expect(selectAll.checked).toBe(true);
+		expect(rowCheckbox('n1').checked).toBe(true);
+		expect(rowCheckbox('t1').checked).toBe(true);
+		expect(rowCheckbox('s1').checked).toBe(true);
+
+		await vi.advanceTimersByTimeAsync(350);
+		flushSync();
+		const btn = document.body.querySelector<HTMLButtonElement>('[data-testid="export-submit"]')!;
+		btn.click();
+		await vi.advanceTimersByTimeAsync(0);
+		flushSync();
+		// Never silently promoted to an export root.
+		expect(exp).toHaveBeenCalledWith(expect.arrayContaining(['n1', 't1', 's1']));
+		expect(exp.mock.calls[0][0]).not.toContain('d1');
+	});
+
 	it('shows a note when there are uncommitted artifact changes', () => {
 		vi.spyOn(bundleApi, 'exportPreview').mockResolvedValue({ artifacts: [], dangling_refs: [] });
 		stageArtifactUpdate('n1', { name: 'Renamed' });
@@ -305,6 +361,26 @@ describe('ExportArtifactsDialog', () => {
 		// outlived by a dialog that no longer renders it.
 		await vi.advanceTimersByTimeAsync(350);
 		flushSync();
+		expect(preview).not.toHaveBeenCalled();
+	});
+
+	// Regression for review finding #7 (hygiene #1): a mounted-but-never-closed
+	// dialog (e.g. a caller that unmounts it directly, or a test) must not
+	// leak its pending debounce timer past the component's own lifetime.
+	it('clears the pending debounce timer on unmount even if the dialog was never closed', async () => {
+		const preview = vi
+			.spyOn(bundleApi, 'exportPreview')
+			.mockResolvedValue({ artifacts: [], dangling_refs: [] });
+		open();
+		rowCheckbox('n1').click();
+		flushSync();
+		expect(preview).not.toHaveBeenCalled(); // debounce armed but not yet fired
+
+		unmount(app!);
+		app = null;
+
+		// If the timer had leaked, it would still fire and call exportPreview.
+		await vi.advanceTimersByTimeAsync(350);
 		expect(preview).not.toHaveBeenCalled();
 	});
 });

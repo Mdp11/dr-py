@@ -35,7 +35,15 @@
 	// onOpenChange while an external assignment (our effect below, or Cancel)
 	// does not re-trigger it — see the comment on that effect.
 	let open = $state(false);
-	const headers = $derived(getCommittedArtifactHeaders());
+	// GET /artifacts (behind getCommittedArtifactHeaders) returns every kind,
+	// including legacy/unregistered ones like `diagram`/`diagram_kind` this
+	// dialog has no section for. Filter down to the three kinds SECTIONS
+	// covers ONCE, here, and derive everything else (visible, allVisibleChecked,
+	// toggleAll, …) from the filtered list — otherwise a stray unrenderable row
+	// can never be checked, which makes "Select all" permanently unreachable
+	// and would silently promote that row to an export ROOT via toggleAll.
+	const SECTION_KINDS: ReadonlySet<string> = new Set(SECTIONS.map((s) => s.kind));
+	const headers = $derived(getCommittedArtifactHeaders().filter((h) => SECTION_KINDS.has(h.kind)));
 	const hasStaged = $derived(getStagedArtifactDepth() > 0);
 
 	const checked = new SvelteSet<string>();
@@ -109,6 +117,18 @@
 			timer = null;
 			gen++;
 		}
+	});
+
+	// A bare mount/unmount effect: it reads nothing reactive, so it runs once
+	// and its cleanup fires only on component destroy. That is what makes this
+	// dialog safe to mount TRANSIENTLY (e.g. a test, or an unmount mid-debounce)
+	// without leaking a pending `setTimeout` past the component's lifetime —
+	// the close-branch cleanup above only guards the open/close transition, not
+	// an unmount that skips it entirely.
+	$effect(() => {
+		return () => {
+			if (timer !== null) clearTimeout(timer);
+		};
 	});
 
 	async function runPreview(): Promise<void> {
@@ -262,9 +282,11 @@
 					{preview?.artifacts.length ?? checked.size} artifacts
 				</p>
 				{#if preview && preview.dangling_refs.length > 0}
-					<p class="flex items-center gap-1 text-warning">
+					<p class="flex items-center gap-1 text-warning" data-testid="export-dangling-refs">
 						<TriangleAlert class="size-3.5" />
-						{preview.dangling_refs.length} dangling ref(s)
+						{preview.dangling_refs.length} dangling reference{preview.dangling_refs.length === 1
+							? ''
+							: 's'} — these ids are referenced but not part of this project; they export as-is
 					</p>
 				{/if}
 				{#if previewError}

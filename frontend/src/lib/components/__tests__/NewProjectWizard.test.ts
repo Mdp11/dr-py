@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mount, unmount, flushSync } from 'svelte';
 import NewProjectWizard from '../projects/NewProjectWizard.svelte';
+import NewProjectWizardHost from './NewProjectWizardHost.svelte';
 import { ValidationError } from '$lib/api/errors';
 import { resetJourney } from '$lib/state/open-journey';
 import { getActiveProgress, resetProgress } from '$lib/state/progress.svelte';
@@ -168,6 +169,91 @@ describe('NewProjectWizard', () => {
 			.querySelector('form')!
 			.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
 		await vi.waitFor(() => expect(onCreated).toHaveBeenCalledWith('p9'));
+		unmount(c);
+	});
+
+	// Regression for review finding #5: closing used to reset only
+	// artifacts/skipped/createdId, leaving name/metamodel/model/view showing
+	// the PREVIOUS attempt on reopen (with the artifacts slot alone blank —
+	// an inconsistent, confusing state). Drive an actual close→reopen cycle
+	// via NewProjectWizardHost (see its own comment for why a host is needed:
+	// `open` is a plain $bindable prop, not a store, so a top-level `mount()`
+	// cannot toggle it from the test directly).
+	it('resets name and every file slot on close, not just the artifacts slot', async () => {
+		const onCreated = vi.fn();
+		const c = mount(NewProjectWizardHost, { target: document.body, props: { onCreated } });
+		flushSync();
+
+		const name = document.querySelector('input[name="project-name"]') as HTMLInputElement;
+		name.value = 'Abandoned';
+		name.dispatchEvent(new Event('input', { bubbles: true }));
+		setFile(
+			document.querySelector('input[data-testid="mm-input"]') as HTMLInputElement,
+			new File(['types: []'], 'mm.yaml')
+		);
+		flushSync();
+		// The FileSlot renders the picked filename once a file is set.
+		expect(document.body.textContent).toContain('mm.yaml');
+
+		const toggle = document.body.querySelector<HTMLButtonElement>(
+			'[data-testid="host-toggle-open"]'
+		)!;
+		toggle.click(); // close
+		flushSync();
+		toggle.click(); // reopen
+		flushSync();
+
+		const reopenedName = document.querySelector('input[name="project-name"]') as HTMLInputElement;
+		expect(reopenedName.value).toBe('');
+		expect(document.body.textContent).not.toContain('mm.yaml');
+		unmount(c);
+	});
+
+	// Regression for review finding #7 (hygiene #2): the "Open project" click
+	// handler is fire-and-forget; a rejecting `onCreated` must not become an
+	// unhandled promise rejection. Deliberately NOT a `vi.fn()` mock: Vitest's
+	// spy instrumentation attaches its own internal `.then`/`.catch` to record
+	// `mock.results`, which would swallow the rejection regardless of whether
+	// the component itself handles it — masking exactly the bug this test
+	// exists to catch. A plain closure has no such side channel, so an
+	// uncaught rejection here can only come from the component's own handler,
+	// and Vitest fails the overall run (nonzero exit, an "Unhandled Errors"
+	// section) on an uncaught one — the absence of that IS the assertion.
+	it('does not produce an unhandled rejection when onCreated rejects from the skipped-artifacts panel', async () => {
+		createProject.mockResolvedValue({
+			id: 'p9',
+			name: 'P',
+			role: 'owner',
+			skipped_artifacts: [{ bundle_id: 'd1', reason: 'unknown kind' }]
+		});
+		let calledWith: string | null = null;
+		const onCreated = (id: string): Promise<void> => {
+			calledWith = id;
+			return Promise.reject(new Error('navigation failed'));
+		};
+		const c = mount(NewProjectWizard, { target: document.body, props: { open: true, onCreated } });
+		flushSync();
+		const name = document.querySelector('input[name="project-name"]') as HTMLInputElement;
+		name.value = 'P';
+		name.dispatchEvent(new Event('input', { bubbles: true }));
+		setFile(
+			document.querySelector('input[data-testid="mm-input"]') as HTMLInputElement,
+			new File(['types: []'], 'mm.yaml')
+		);
+		flushSync();
+		document
+			.querySelector('form')!
+			.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+		await vi.waitFor(() =>
+			expect(
+				document.body.querySelector<HTMLButtonElement>('[data-testid="wizard-open-anyway"]')
+			).not.toBeNull()
+		);
+		document.body.querySelector<HTMLButtonElement>('[data-testid="wizard-open-anyway"]')!.click();
+		await vi.waitFor(() => expect(calledWith).toBe('p9'));
+		// Let the rejected promise's `.catch` settle before the test ends —
+		// this is exactly the window an uncaught rejection would surface in.
+		await new Promise((r) => setTimeout(r, 0));
 		unmount(c);
 	});
 });

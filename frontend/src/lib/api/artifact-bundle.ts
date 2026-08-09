@@ -138,7 +138,18 @@ export async function importConfirm(
 }
 
 /** Parse a picked bundle file's text. Throws on bad JSON or a wrong shape —
- * the dialog catches and shows an inline error instead of a server 422. */
+ * the dialog catches and shows an inline error instead of a server 422.
+ *
+ * NOTE: `.parse()` returns the zod-STRIPPED object — any key on the file
+ * that isn't in `ArtifactBundleSchema` is silently dropped — and it is that
+ * stripped object, not the raw file text, that later gets re-posted to
+ * `/artifacts/import/plan` and `/artifacts/import`. So an older frontend
+ * build talking to a newer backend that has grown an extra bundle field
+ * quietly forwards a bundle with that field missing, rather than passing it
+ * through untouched. Acceptable for now (the backend tolerates it), but it
+ * is why this client can never be a transparent pass-through for a bundle
+ * it didn't fully model.
+ */
 export function parseBundleText(text: string): ArtifactBundle {
 	return ArtifactBundleSchema.parse(JSON.parse(text));
 }

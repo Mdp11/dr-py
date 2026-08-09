@@ -26,12 +26,20 @@
 
 	// The project is created either way; when the importer reported-and-skipped
 	// artifacts, navigation is DEFERRED until the user clicks through the
-	// warning panel below. Reset when the dialog closes so a re-open starts fresh.
+	// warning panel below. Reset EVERYTHING when the dialog closes so a
+	// re-open starts fresh — a partial reset (just the artifacts/skipped/
+	// createdId trio) left the name and the other three file slots showing
+	// the PREVIOUS attempt's values while the artifacts slot alone went
+	// mysteriously blank, which is not a state a fresh wizard should ever show.
 	$effect(() => {
 		if (!open) {
+			name = '';
+			metamodel = null;
+			model = null;
+			view = null;
+			artifacts = null;
 			skipped = null;
 			createdId = null;
-			artifacts = null;
 		}
 	});
 
@@ -96,7 +104,14 @@
 				<Button
 					type="button"
 					data-testid="wizard-open-anyway"
-					onclick={() => createdId !== null && void onCreated(createdId)}
+					onclick={() => {
+						// Hygiene, not a behavior change: the parent already closes the
+						// dialog synchronously on this click, so a rejecting navigation
+						// has nowhere useful to surface — but left uncaught it becomes an
+						// unhandled promise rejection. `Promise.resolve(...)` copes with
+						// onCreated returning either `void` or a `Promise<void>`.
+						if (createdId !== null) Promise.resolve(onCreated(createdId)).catch(() => {});
+					}}
 				>
 					Open project
 				</Button>

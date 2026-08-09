@@ -51,16 +51,27 @@
 	let result = $state<ImportConfirmResponse | null>(null);
 	let fileInputRef = $state<HTMLInputElement | null>(null);
 
+	// Bumped on every open/close transition; `onFilePicked`/`onConfirm` each
+	// capture it before their first await and refuse to write any state after
+	// an await if it no longer matches — this is what protects a close (or a
+	// close-then-reopen) that happens BEFORE an in-flight request settles, a
+	// hole `reset()` alone cannot close: `reset()` only clears what already
+	// exists, it cannot stop a stale continuation from writing OVER a fresh
+	// reopened state a moment later.
+	let gen = 0;
+
 	// Sync the local mirror from the store on every store change, and reset ALL
-	// local state on a close transition (including bits-ui's own Escape/overlay
-	// close, which writes the store via onOpenChange below and so still lands
-	// here). This effect depends ONLY on getImportArtifactsOpen() — nothing
-	// else is read reactively — so it never reruns for reasons unrelated to
-	// open/close.
+	// local state on BOTH the open and close transitions (including bits-ui's
+	// own Escape/overlay close, which writes the store via onOpenChange below
+	// and so still lands here) — a reopen must be unconditionally fresh, not
+	// just a close. This effect depends ONLY on getImportArtifactsOpen() —
+	// nothing else is read reactively — so it never reruns for reasons
+	// unrelated to open/close.
 	$effect(() => {
 		const isOpen = getImportArtifactsOpen();
 		open = isOpen;
-		if (!isOpen) reset();
+		gen++;
+		reset();
 	});
 
 	function reset(): void {
@@ -107,27 +118,33 @@
 
 	async function onFilePicked(f: File | null | undefined): Promise<void> {
 		if (!f) return;
+		const g = gen;
 		parseError = null;
+		banner = null; // a stale banner from a previous (now-abandoned) import must not survive onto this pick
 		let parsed: ArtifactBundle;
 		try {
 			parsed = parseBundleText(await f.text());
 		} catch {
+			if (g !== gen) return; // dialog was closed (and maybe reopened) while text()/parse was in flight
 			parseError = 'Not a valid artifact bundle file.';
 			return;
 		}
+		if (g !== gen) return;
 		fileName = f.name;
 		bundle = parsed;
 		busy = true;
 		try {
 			const p = await importPlan(parsed);
+			if (g !== gen) return; // dialog was closed (and maybe reopened) while the plan request was in flight
 			decisions = {};
 			copyNames = {};
 			adoptPlan(p);
 			phase = 'review';
 		} catch (err) {
+			if (g !== gen) return;
 			parseError = err instanceof Error ? err.message : 'Could not plan the import.';
 		} finally {
-			busy = false;
+			if (g === gen) busy = false;
 		}
 	}
 
@@ -145,6 +162,7 @@
 
 	async function onConfirm(): Promise<void> {
 		if (bundle === null || plan === null) return;
+		const g = gen;
 		banner = null;
 		busy = true;
 		try {
@@ -156,25 +174,30 @@
 				copyNames,
 				message: message.trim()
 			});
+			if (g !== gen) return; // dialog was closed (and maybe reopened) while the confirm request was in flight
 			result = res;
 			phase = 'result';
 			void loadArtifacts().catch(() => {});
 		} catch (err) {
+			if (g !== gen) return;
 			if (err instanceof StalePlanImportError) {
 				adoptPlan(err.plan);
 				banner = err.detail;
 			} else if (err instanceof ConflictError && bundle !== null) {
 				try {
-					adoptPlan(await importPlan(bundle));
+					const fresh = await importPlan(bundle);
+					if (g !== gen) return;
+					adoptPlan(fresh);
 					banner = 'The project changed concurrently — the plan was refreshed.';
 				} catch {
+					if (g !== gen) return;
 					banner = 'The project changed concurrently. Close and retry.';
 				}
 			} else {
 				banner = err instanceof Error ? err.message : 'Import failed.';
 			}
 		} finally {
-			busy = false;
+			if (g === gen) busy = false;
 		}
 	}
 </script>
@@ -207,7 +230,14 @@
 					accept=".json"
 					data-testid="import-file"
 					class="hidden"
-					onchange={(e) => void onFilePicked((e.currentTarget as HTMLInputElement).files?.[0])}
+					onchange={(e) => {
+						const input = e.currentTarget as HTMLInputElement;
+						void onFilePicked(input.files?.[0]);
+						// Clear the input's value so re-picking the SAME filename after a
+						// parse/plan error still fires a `change` event — the browser
+						// treats an unchanged `value` as a no-op and never re-dispatches.
+						input.value = '';
+					}}
 				/>
 				{#if parseError}
 					<p data-testid="import-parse-error" role="alert" class="text-xs text-destructive">
@@ -260,7 +290,12 @@
 							{#if action === 'reuse'}
 								<p class="text-muted-foreground">identical already exists</p>
 							{:else if action === 'copy'}
-								<p class="text-muted-foreground">differs from existing</p>
+								{#if e.action === 'copy'}
+									<!-- Gated on the PLAN's own action, not the effective one: a
+									     `create`/`reuse` row flipped to Copy by the user has no
+									     existing row to differ from, so this hint would be false. -->
+									<p class="text-muted-foreground">differs from existing</p>
+								{/if}
 								<input
 									type="text"
 									data-testid={`import-name-${e.bundle_id}`}
