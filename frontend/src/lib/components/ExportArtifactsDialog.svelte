@@ -92,7 +92,12 @@
 		const seed = getExportArtifactsSeed();
 		open = isOpen;
 		if (isOpen) {
-			const ids = new Set(untrack(() => getCommittedArtifactHeaders()).map((h) => h.id));
+			// The FILTERED `headers`, not the raw store: a seed id whose kind has
+			// no section (legacy `diagram`) must be dropped here, or it enters
+			// `checked` without ever rendering a row — an invisible selection
+			// that would silently become an export root. `headers` is a $derived
+			// over the same reactive store, so it too goes through `untrack()`.
+			const ids = new Set(untrack(() => headers).map((h) => h.id));
 			checked.clear();
 			let anySeeded = false;
 			for (const id of seed) {

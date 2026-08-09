@@ -330,6 +330,43 @@ describe('ExportArtifactsDialog', () => {
 		expect(exp.mock.calls[0][0]).not.toContain('d1');
 	});
 
+	// Companion to the finding-#4 regression above, for the SEED path: the
+	// open-transition effect validates seed ids against a membership set that
+	// must be built from the same filtered `headers` the rows render from. An
+	// unregistered-kind id (e.g. legacy `diagram`) present in the committed
+	// store would otherwise pass validation and enter `checked` while never
+	// rendering a row — an invisible selection that silently becomes an
+	// export root.
+	it('a seeded unregistered-kind id is dropped, not silently checked', async () => {
+		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({
+			items: [
+				...HEADERS,
+				{
+					id: 'd1',
+					kind: 'diagram',
+					name: 'Legacy diagram',
+					artifact_rev: 1,
+					updated_at: '',
+					updated_by: null,
+					entry_points: null
+				}
+			]
+		});
+		await loadArtifacts();
+		const preview = vi
+			.spyOn(bundleApi, 'exportPreview')
+			.mockResolvedValue({ artifacts: [], dangling_refs: [] });
+		open(['n1', 'd1']);
+		await vi.advanceTimersByTimeAsync(0);
+		flushSync();
+		// Only the renderable seed survives; d1 never enters the selection.
+		expect(preview).toHaveBeenCalledWith(['n1']);
+		expect(rowCheckbox('n1').checked).toBe(true);
+		// With the bug, d1 sat checked-but-rowless and surfaced here as a
+		// phantom "+1 selected not shown".
+		expect(document.body.textContent).not.toContain('selected not shown');
+	});
+
 	it('shows a note when there are uncommitted artifact changes', () => {
 		vi.spyOn(bundleApi, 'exportPreview').mockResolvedValue({ artifacts: [], dangling_refs: [] });
 		stageArtifactUpdate('n1', { name: 'Renamed' });
