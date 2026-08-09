@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { FileCode, Route, Table, TriangleAlert } from '@lucide/svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
@@ -61,17 +62,32 @@
 	const allVisibleChecked = $derived(visible.length > 0 && visible.every((h) => checked.has(h.id)));
 
 	// Open/close lifecycle: seed the selection and fire the first preview
-	// immediately; closing resets every piece of local state. Reads the STORE
-	// (not the local `open`) and writes the local `open` — never the reverse —
-	// so this can never be the write side of a read/write loop with itself.
+	// immediately on an open TRANSITION. Reads the STORE (not the local
+	// `open`) and writes the local `open` — never the reverse — so this can
+	// never be the write side of a read/write loop with itself. The close
+	// branch only cancels the pending debounce and bumps the generation
+	// counter; the rest of the local state (`checked`, `filter`, `preview`,
+	// …) is left as-is and gets reset on the NEXT open, not here.
+	//
+	// This effect must depend ONLY on `getExportArtifactsOpen()` and
+	// `getExportArtifactsSeed()` — both read directly below, un-wrapped — so
+	// it reruns only on an actual open/seed change. `getCommittedArtifactHeaders()`
+	// is read through `untrack()` on purpose: it is genuinely reactive
+	// (`artifacts.svelte.ts`'s `_items` $state) and changes on ANY committed
+	// artifact create/rename/delete, including a peer's commit arriving over
+	// the realtime feed while this dialog is open. Without `untrack()`, that
+	// unrelated change would rerun this whole effect and wipe every checkbox
+	// the user had toggled since opening, re-seeding from the ORIGINAL seed
+	// array as if the dialog had just reopened.
 	$effect(() => {
 		const isOpen = getExportArtifactsOpen();
+		const seed = getExportArtifactsSeed();
 		open = isOpen;
 		if (isOpen) {
-			const ids = new Set(getCommittedArtifactHeaders().map((h) => h.id));
+			const ids = new Set(untrack(() => getCommittedArtifactHeaders()).map((h) => h.id));
 			checked.clear();
 			let anySeeded = false;
-			for (const id of getExportArtifactsSeed()) {
+			for (const id of seed) {
 				if (ids.has(id)) {
 					checked.add(id);
 					anySeeded = true;
@@ -135,8 +151,13 @@
 	}
 
 	function toggleAll(): void {
+		// Snapshot BEFORE the loop: `allVisibleChecked` is a $derived over
+		// `checked`, so reading it fresh on each iteration would see it flip
+		// false the moment the first delete below makes it no longer true,
+		// turning every subsequent iteration's delete into a re-add instead.
+		const wasAllChecked = allVisibleChecked;
 		for (const h of visible) {
-			if (allVisibleChecked) checked.delete(h.id);
+			if (wasAllChecked) checked.delete(h.id);
 			else checked.add(h.id);
 		}
 		schedulePreview();
@@ -183,7 +204,12 @@
 					class="flex-1"
 				/>
 				<label class="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
-					<input type="checkbox" checked={allVisibleChecked} onchange={toggleAll} />
+					<input
+						type="checkbox"
+						data-testid="export-select-all"
+						checked={allVisibleChecked}
+						onchange={toggleAll}
+					/>
 					Select all
 				</label>
 			</div>
@@ -197,6 +223,7 @@
 							<label class="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
 								<input
 									type="checkbox"
+									data-testid={`export-section-all-${section.kind}`}
 									checked={sectionAllChecked}
 									onchange={() => toggleSection(section.kind)}
 								/>
