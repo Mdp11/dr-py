@@ -60,12 +60,21 @@
 	// Ids in the preview closure (checked roots + pulled-in dependencies).
 	const closureIds = $derived(new Set((preview?.artifacts ?? []).map((a) => a.id)));
 
+	// The EFFECTIVE selection: `checked` intersected with the live filtered
+	// headers. `checked` is only ever ADDED to by user or seed action, but the
+	// headers can shrink underneath it — a peer's delete commit over the
+	// realtime feed removes the row while the untracked open-effect
+	// (correctly) never reruns. Every consumer (hidden count, preview,
+	// export, the submit gate) reads THIS, so a dead id can neither linger as
+	// a phantom "+N selected not shown" nor be POSTed as an export root.
+	const selected = $derived([...checked].filter((id) => headers.some((h) => h.id === id)));
+
 	const visible = $derived.by(() => {
 		const q = filter.trim().toLowerCase();
 		return headers.filter((h) => q === '' || h.name.toLowerCase().includes(q));
 	});
 	const hiddenSelected = $derived(
-		[...checked].filter((id) => !visible.some((h) => h.id === id)).length
+		selected.filter((id) => !visible.some((h) => h.id === id)).length
 	);
 	const allVisibleChecked = $derived(visible.length > 0 && visible.every((h) => checked.has(h.id)));
 
@@ -138,13 +147,13 @@
 
 	async function runPreview(): Promise<void> {
 		const g = ++gen;
-		if (checked.size === 0) {
+		if (selected.length === 0) {
 			preview = null;
 			previewError = null;
 			return;
 		}
 		try {
-			const res = await exportPreview([...checked]);
+			const res = await exportPreview(selected);
 			if (g !== gen) return; // stale response
 			preview = res;
 			previewError = null;
@@ -192,7 +201,7 @@
 		exportError = null;
 		saving = true;
 		try {
-			const resp = await exportBundle([...checked]);
+			const resp = await exportBundle(selected);
 			await saveResponseToFile(resp, BUNDLE_FILENAME);
 			setExportArtifactsOpen(false);
 		} catch (err) {
@@ -284,7 +293,7 @@
 
 			<div class="flex flex-col gap-1 border-t border-border pt-2 text-xs">
 				<p class="text-muted-foreground">
-					{preview?.artifacts.length ?? checked.size} artifacts
+					{preview?.artifacts.length ?? selected.length} artifacts
 				</p>
 				{#if preview && preview.dangling_refs.length > 0}
 					<p class="flex items-center gap-1 text-warning" data-testid="export-dangling-refs">
@@ -310,7 +319,7 @@
 			<Button
 				type="button"
 				data-testid="export-submit"
-				disabled={checked.size === 0 || saving}
+				disabled={selected.length === 0 || saving}
 				onclick={() => void onExport()}
 			>
 				{saving ? 'Exporting…' : 'Export bundle'}

@@ -43,6 +43,26 @@ const HEADERS = [
 	}
 ];
 
+// An unregistered legacy kind the dialog has no section for — shared by the
+// two sibling regressions (row filtering and seed validation) for the same
+// review finding, so a fixture-shape change cannot make them diverge.
+const LEGACY_DIAGRAM = {
+	id: 'd1',
+	kind: 'diagram',
+	name: 'Legacy diagram',
+	artifact_rev: 1,
+	updated_at: '',
+	updated_by: null,
+	entry_points: null
+};
+
+async function loadWithLegacyDiagram() {
+	vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({
+		items: [...HEADERS, LEGACY_DIAGRAM]
+	});
+	await loadArtifacts();
+}
+
 let host: HTMLElement;
 let app: ReturnType<typeof mount> | null = null;
 
@@ -281,21 +301,7 @@ describe('ExportArtifactsDialog', () => {
 	// all" was permanently unreachable and `toggleAll` a one-way add that
 	// would silently promote the diagram row to an export root.
 	it('filters out unregistered artifact kinds so "Select all" is reachable and never exports them', async () => {
-		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({
-			items: [
-				...HEADERS,
-				{
-					id: 'd1',
-					kind: 'diagram',
-					name: 'Legacy diagram',
-					artifact_rev: 1,
-					updated_at: '',
-					updated_by: null,
-					entry_points: null
-				}
-			]
-		});
-		await loadArtifacts();
+		await loadWithLegacyDiagram();
 		vi.spyOn(bundleApi, 'exportPreview').mockResolvedValue({ artifacts: [], dangling_refs: [] });
 		const exp = vi.spyOn(bundleApi, 'exportBundle').mockResolvedValue(new Response('{}'));
 		vi.spyOn(fileSave, 'saveResponseToFile').mockResolvedValue({
@@ -338,21 +344,7 @@ describe('ExportArtifactsDialog', () => {
 	// rendering a row — an invisible selection that silently becomes an
 	// export root.
 	it('a seeded unregistered-kind id is dropped, not silently checked', async () => {
-		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({
-			items: [
-				...HEADERS,
-				{
-					id: 'd1',
-					kind: 'diagram',
-					name: 'Legacy diagram',
-					artifact_rev: 1,
-					updated_at: '',
-					updated_by: null,
-					entry_points: null
-				}
-			]
-		});
-		await loadArtifacts();
+		await loadWithLegacyDiagram();
 		const preview = vi
 			.spyOn(bundleApi, 'exportPreview')
 			.mockResolvedValue({ artifacts: [], dangling_refs: [] });
@@ -365,6 +357,44 @@ describe('ExportArtifactsDialog', () => {
 		// With the bug, d1 sat checked-but-rowless and surfaced here as a
 		// phantom "+1 selected not shown".
 		expect(document.body.textContent).not.toContain('selected not shown');
+	});
+
+	// Review finding on the seed fix: `checked` is only ever ADDED to by user
+	// or seed action, but the committed headers can shrink underneath it — a
+	// peer's delete commit over the realtime feed removes the row while the
+	// untracked open-effect (correctly) never reruns. The dead id must not
+	// linger as a phantom "+N selected not shown" nor be POSTed as an export
+	// root; the EFFECTIVE selection is `checked` ∩ live headers.
+	it('a peer delete of a checked artifact drops it from the effective selection', async () => {
+		vi.spyOn(bundleApi, 'exportPreview').mockResolvedValue({ artifacts: [], dangling_refs: [] });
+		const exp = vi.spyOn(bundleApi, 'exportBundle').mockResolvedValue(new Response('{}'));
+		vi.spyOn(fileSave, 'saveResponseToFile').mockResolvedValue({
+			filename: 'artifacts.bundle.json',
+			handle: null
+		});
+		open();
+		rowCheckbox('n1').click();
+		rowCheckbox('t1').click();
+		await vi.advanceTimersByTimeAsync(350);
+		flushSync();
+
+		// A peer's delete commit lands: n1 vanishes from the committed store.
+		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({
+			items: HEADERS.filter((h) => h.id !== 'n1')
+		});
+		await loadArtifacts();
+		flushSync();
+		expect(document.body.querySelector('[data-testid="export-row-n1"]')).toBeNull();
+
+		// No phantom hidden selection the user cannot clear...
+		expect(document.body.textContent).not.toContain('selected not shown');
+
+		// ...and the dead id is not exported as a root.
+		const btn = document.body.querySelector<HTMLButtonElement>('[data-testid="export-submit"]')!;
+		btn.click();
+		await vi.advanceTimersByTimeAsync(0);
+		flushSync();
+		expect(exp).toHaveBeenCalledWith(['t1']);
 	});
 
 	it('shows a note when there are uncommitted artifact changes', () => {
