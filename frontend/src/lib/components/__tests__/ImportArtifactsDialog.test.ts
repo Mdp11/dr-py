@@ -134,6 +134,17 @@ describe('ImportArtifactsDialog', () => {
 		const arg = confirm.mock.calls[0][0];
 		expect(arg.copyNames).toEqual({}); // untouched proposal NOT sent
 		expect(arg.decisions).toEqual({ n1: 'create', s1: 'copy' });
+
+		// The normal (non-null-rev) success render: created NAME LIST, reused
+		// COUNT, and the skipped list repeat — the three things the contract
+		// names for phase `result`. A regression that silently dropped the
+		// "Created" heading, the name list, or the "N reused" text must fail
+		// here rather than only being caught by the separate rev:null test.
+		const resultText = document.body.querySelector('[data-testid="import-result"]')?.textContent;
+		expect(resultText).toContain('Bus routes'); // created[0].name
+		expect(resultText).toContain('helpers (2)'); // created[1].name
+		expect(resultText).toContain('0 reused'); // reused.length
+		expect(resultText).toContain('d1 — unknown kind'); // skipped list repeat
 	});
 
 	it('re-renders from the fresh plan on a stale-plan 409', async () => {
