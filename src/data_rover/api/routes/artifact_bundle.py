@@ -59,9 +59,7 @@ def export_artifacts(
     bundle = build_bundle(project, closure, body.root_ids)
     return JSONResponse(
         content=bundle.model_dump(),
-        headers={
-            "Content-Disposition": 'attachment; filename="artifacts.bundle.json"'
-        },
+        headers={"Content-Disposition": 'attachment; filename="artifacts.bundle.json"'},
     )
 
 

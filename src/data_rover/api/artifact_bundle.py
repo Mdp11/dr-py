@@ -187,9 +187,7 @@ def _normalized_payload(kind: ArtifactKind, payload: dict[str, Any]) -> dict[str
     return payload
 
 
-def derive_plan(
-    db: DbSession, project_id: str, bundle: ArtifactBundle
-) -> ImportPlan:
+def derive_plan(db: DbSession, project_id: str, bundle: ArtifactBundle) -> ImportPlan:
     entries: list[PlanEntry] = []
     skipped: list[SkippedEntry] = []
     #: (bundle artifact, its ArtifactKind, its (kind,name) clash row or None)
@@ -261,7 +259,9 @@ def derive_plan(
     for art, kind, existing in valid:
         if existing is None:
             entries.append(
-                PlanEntry(bundle_id=art.id, kind=art.kind, name=art.name, action="create")
+                PlanEntry(
+                    bundle_id=art.id, kind=art.kind, name=art.name, action="create"
+                )
             )
             continue
         spec = get_spec(kind)
@@ -281,7 +281,9 @@ def derive_plan(
         # already ran it through this same derive_metadata pass, so this is a
         # no-op for production rows, but it keeps the comparison honest for
         # rows a test (or a pre-derive_metadata-era import) wrote directly.
-        if _canonical(rewritten) == _canonical(_normalized_payload(kind, existing.payload)):
+        if _canonical(rewritten) == _canonical(
+            _normalized_payload(kind, existing.payload)
+        ):
             entries.append(
                 PlanEntry(
                     bundle_id=art.id,

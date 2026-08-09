@@ -144,7 +144,9 @@ def main(argv: list[str] | None = None) -> int:
         metamodel_yaml=args.metamodel.read_text(encoding="utf-8"),
         model_json=args.model.read_text(encoding="utf-8"),
         view_json=args.view.read_text(encoding="utf-8") if args.view else None,
-        artifact_bundle=args.artifacts.read_text(encoding="utf-8") if args.artifacts else None,
+        artifact_bundle=args.artifacts.read_text(encoding="utf-8")
+        if args.artifacts
+        else None,
     )
     print(f"Imported project {args.project_id!r}")
     return 0
