@@ -22,7 +22,19 @@
 	const MAX_RESULTS = 50;
 	const DEBOUNCE_MS = 200;
 
-	const open = $derived(getCommandPaletteOpen());
+	// A local $state mirror of the store's open flag, bound two-way to
+	// Command.Dialog — the same bind:open shape every other dialog here uses
+	// (see the comment in ExportArtifactsDialog). Neither lint-preferred
+	// alternative works: a $derived (writable or not) — bound or passed as a
+	// plain prop — leaves bits-ui's Dialog.Content unrendered under the test
+	// environment, so the palette's items were untestable in that shape.
+	// Verified empirically by CommandPalette.test.ts, which fails wholesale
+	// on either $derived form.
+	// eslint-disable-next-line svelte/prefer-writable-derived
+	let open = $state(false);
+	$effect(() => {
+		open = getCommandPaletteOpen();
+	});
 
 	let query = $state('');
 
@@ -117,7 +129,7 @@
 </script>
 
 <Command.Dialog
-	{open}
+	bind:open
 	{onOpenChange}
 	title="Command Palette"
 	description="Search entities, run actions, or switch tabs."
