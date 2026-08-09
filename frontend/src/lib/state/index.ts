@@ -146,9 +146,16 @@ export {
 export {
 	getCommandPaletteOpen,
 	getDiffDrawerOpen,
+	getExportArtifactsOpen,
+	getExportArtifactsSeed,
 	getHistoryDrawerOpen,
+	getImportArtifactsOpen,
+	openExportArtifacts,
+	openImportArtifacts,
 	setCommandPaletteOpen,
 	setDiffDrawerOpen,
+	setExportArtifactsOpen,
+	setImportArtifactsOpen,
 	setHistoryDrawerOpen
 } from './ui.svelte';
 export {
