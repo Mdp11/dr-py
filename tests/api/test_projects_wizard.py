@@ -178,6 +178,46 @@ def test_wizard_rejects_bad_artifact_bundle_422_no_orphan() -> None:
     assert all(p["name"] != "BadBundle" for p in c.get("/api/v1/projects").json())
 
 
+def test_wizard_create_reports_skipped_artifacts() -> None:
+    """The create response carries the importer's skip list; a clean bundle
+    reports an empty one, and the list/get routes always default to []."""
+    c = _as_admin()
+    with _MM.open("rb") as fh:
+        r = c.post(
+            "/api/v1/projects",
+            data={"name": "Skippy"},
+            files={
+                "metamodel": ("mm.yaml", fh, "application/yaml"),
+                "artifacts": ("b.json", _hostile_bundle_bytes(), "application/json"),
+            },
+            headers=CSRF,
+        )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    skipped = body["skipped_artifacts"]
+    assert len(skipped) >= 1
+    assert all(s["bundle_id"] and s["reason"] for s in skipped)
+    # list/get keep the empty default
+    listed = next(p for p in c.get("/api/v1/projects").json() if p["id"] == body["id"])
+    assert listed["skipped_artifacts"] == []
+
+
+def test_wizard_create_clean_bundle_reports_no_skips() -> None:
+    c = _as_admin()
+    with _MM.open("rb") as fh:
+        r = c.post(
+            "/api/v1/projects",
+            data={"name": "Clean"},
+            files={
+                "metamodel": ("mm.yaml", fh, "application/yaml"),
+                "artifacts": ("b.json", _bundle_bytes(), "application/json"),
+            },
+            headers=CSRF,
+        )
+    assert r.status_code == 201, r.text
+    assert r.json()["skipped_artifacts"] == []
+
+
 def test_admin_sees_all_projects() -> None:
     c = _as_admin()
     # a project the admin is NOT a member of

@@ -3,8 +3,11 @@
 	import type { Element } from '$lib/api/types';
 	import { listElementsPage } from '$lib/api/model-read';
 	import {
+		canEdit,
 		getCommandPaletteOpen,
 		getModelSummary,
+		openExportArtifacts,
+		openImportArtifacts,
 		popLastStaged,
 		seedElements,
 		select,
@@ -98,6 +101,15 @@
 		popLastStaged();
 	}
 
+	function actionExportArtifacts(): void {
+		close();
+		openExportArtifacts();
+	}
+	function actionImportArtifacts(): void {
+		close();
+		openImportArtifacts();
+	}
+
 	function onOpenChange(v: boolean): void {
 		setCommandPaletteOpen(v);
 		if (!v) query = '';
@@ -137,6 +149,14 @@
 			<Command.Item value="action:undo" onSelect={actionUndo}>
 				<span class="text-destructive">Undo last change</span>
 			</Command.Item>
+			<Command.Item value="action:export-artifacts" onSelect={actionExportArtifacts}>
+				<span>Export artifacts…</span>
+			</Command.Item>
+			{#if canEdit()}
+				<Command.Item value="action:import-artifacts" onSelect={actionImportArtifacts}>
+					<span>Import artifacts…</span>
+				</Command.Item>
+			{/if}
 		</Command.Group>
 
 		<Command.Separator />

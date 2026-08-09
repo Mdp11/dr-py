@@ -33,3 +33,42 @@ export function getHistoryDrawerOpen(): boolean {
 export function setHistoryDrawerOpen(open: boolean): void {
 	_historyDrawerOpen = open;
 }
+
+// Artifact export/import dialogs (mounted once in ArtifactsMenu, opened from
+// three surfaces: the TopBar menu, the command palette, and the workspace tab
+// strip's per-artifact export button — which passes a seed selection).
+let _exportArtifactsOpen: boolean = $state(false);
+let _exportArtifactsSeed: string[] = $state([]);
+let _importArtifactsOpen: boolean = $state(false);
+
+export function getExportArtifactsOpen(): boolean {
+	return _exportArtifactsOpen;
+}
+
+export function getExportArtifactsSeed(): string[] {
+	return _exportArtifactsSeed;
+}
+
+/** Open the export dialog, pre-checking `seedRootIds` (unknown ids are
+ * ignored by the dialog itself — it intersects with committed headers). */
+export function openExportArtifacts(seedRootIds: string[] = []): void {
+	_exportArtifactsSeed = seedRootIds;
+	_exportArtifactsOpen = true;
+}
+
+export function setExportArtifactsOpen(open: boolean): void {
+	_exportArtifactsOpen = open;
+	if (!open) _exportArtifactsSeed = [];
+}
+
+export function getImportArtifactsOpen(): boolean {
+	return _importArtifactsOpen;
+}
+
+export function setImportArtifactsOpen(open: boolean): void {
+	_importArtifactsOpen = open;
+}
+
+export function openImportArtifacts(): void {
+	_importArtifactsOpen = true;
+}

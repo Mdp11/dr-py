@@ -25,7 +25,7 @@ from fastapi import (
     Response,
     UploadFile,
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from data_rover.core.metamodel.loader import load_metamodel_str
@@ -47,10 +47,23 @@ router = APIRouter()
 EMPTY_MODEL_JSON = '{"elements": [], "relationships": []}'
 
 
+class SkippedArtifactOut(BaseModel):
+    """One bundle artifact the importer reported-and-skipped (mirrors the
+    importer's SkippedEntry — kept as its own wire type so the projects
+    router does not leak the bundle module's internal model)."""
+
+    bundle_id: str
+    reason: str
+
+
 class ProjectOut(BaseModel):
     id: str
     name: str
     role: Role
+    #: Populated ONLY by the create route (the one caller that runs the
+    #: importer); list/get/clone leave the default so existing consumers
+    #: see an additive, always-present field.
+    skipped_artifacts: list[SkippedArtifactOut] = Field(default_factory=list)
 
 
 class CloneIn(BaseModel):
@@ -116,7 +129,7 @@ def create_project(
             ) from exc
 
     project_id = uuid.uuid4().hex
-    importer.import_project(
+    skipped = importer.import_project(
         project_id=project_id,
         name=name,
         owner_id=admin.id,
@@ -125,7 +138,14 @@ def create_project(
         view_json=view_json,
         artifact_bundle=artifact_bundle,
     )
-    return ProjectOut(id=project_id, name=name, role=Role.owner)
+    return ProjectOut(
+        id=project_id,
+        name=name,
+        role=Role.owner,
+        skipped_artifacts=[
+            SkippedArtifactOut(bundle_id=s.bundle_id, reason=s.reason) for s in skipped
+        ],
+    )
 
 
 @router.get("/projects/{project_id}", response_model=ProjectOut)

@@ -34,6 +34,7 @@
 	import { runValidation } from '$lib/state/validate-action';
 	import { Ellipsis, AlertCircle, AlertTriangle, Info, RefreshCw, Undo2 } from '@lucide/svelte';
 	import ApplyCrDialog from './ApplyCrDialog.svelte';
+	import ArtifactsMenu from './ArtifactsMenu.svelte';
 	import SwapMetamodelDrawer from './SwapMetamodelDrawer.svelte';
 	import SettingsDialog from './SettingsDialog.svelte';
 
@@ -164,6 +165,11 @@
 				</dl>
 			</div>
 		</div>
+
+		<div class="h-5 w-px bg-border" aria-hidden="true"></div>
+		<nav aria-label="Toolbar" class="flex items-center gap-1">
+			<ArtifactsMenu />
+		</nav>
 	</div>
 
 	<div class="flex items-center gap-2">
