@@ -55,7 +55,10 @@ The UI is a fixed grid:
 - **TopBar** — load a metamodel from file, load a model from file, Undo the
   last staged edit, trigger validation, open the Commit review (`DiffDrawer`),
   browse the durable commit history (`HistoryDrawer`), and open **Settings**
-  (`SettingsDialog`) where an owner can toggle **strict mode**.
+  (`SettingsDialog`) where an owner can toggle **strict mode**. A growable
+  toolbar `<nav>` sits next to the logo; its first (and so far only) occupant
+  is the **Artifacts** menu (`ArtifactsMenu.svelte`) — Export…/Import…, with
+  Import hidden for viewers.
 - **Sidebar** — fuzzy search, type filter (each concrete type has a `+` button
   to create a new element of that type), containment tree with keyboard nav and
   per-row lock badges.
@@ -276,6 +279,45 @@ follows a pessimistic **check-out → stage → commit** loop (Spec B):
    into a File System Access writable (or writes server-side via
    `POST /model/save`), so the browser never materializes the serialized model
    as a string. Export reflects the committed model, not the staged buffer.
+
+### Artifact import/export (bundle export/preview/import)
+
+The TopBar's toolbar `<nav>` (see Layout above) hosts an **Artifacts** menu
+(`ArtifactsMenu.svelte`) with two dialogs mounted once beside it; both are
+also reachable from the command palette (`CommandPalette.svelte`'s
+`action:export-artifacts` / `action:import-artifacts`). The API client for the
+four bundle routes is `lib/api/artifact-bundle.ts`.
+
+- **Export** (`ExportArtifactsDialog.svelte`) — viewer-allowed. The user
+  checks navigations/tables/snippets in a filterable, sectioned list; a
+  300ms-debounced `POST /artifacts/export/preview` computes the
+  referenced-artifact closure live, badging pulled-in dependencies
+  (`dependency`) and surfacing a dangling-ref count. The name filter hides
+  non-matching rows without unchecking them (`+N selected not shown`).
+  Confirming streams `POST /artifacts/export` to a saved
+  `datarover.artifact-bundle/v1` JSON file. The workspace tab strip's per-tab
+  export button (`Workspace.svelte`) opens the same dialog pre-seeded with
+  the active tab's artifact (`openExportArtifacts([seedId])`); the seed
+  clears when the dialog closes.
+- **Import** (`ImportArtifactsDialog.svelte`) — hidden from viewers in the
+  Artifacts menu. Picking or dropping a bundle file runs
+  `POST /artifacts/import/plan` for a stateless per-artifact plan
+  (`create`/`reuse`/`copy`); a review screen lets each row's action be
+  changed (restricted to the legal actions for that entry, mirroring the
+  backend's matrix) and a `copy` row's name edited, then
+  `POST /artifacts/import` lands the whole plan as ONE commit. Two 409 shapes
+  are recovered inline: a typed `StalePlanImportError` (carries a
+  freshly-derived plan) re-renders from the server's plan with a banner, and
+  a bare `ConflictError` re-fetches the plan from scratch. A `rev: null`
+  response (everything already existed) renders as a successful no-op, not
+  an error.
+- Imported artifacts land ONLY in the project's flat artifacts list — import
+  never places anything into the view.
+- The New Project wizard (`NewProjectWizard.svelte`) gained a fourth
+  `FileSlot` accepting a bundle file alongside metamodel/model/view; when the
+  backend's `ProjectOut.skipped_artifacts` comes back non-empty, the wizard
+  defers navigating to the new project and shows a warning panel listing each
+  skipped bundle id and reason first.
 
 ### View editing state (staged `view.*` ops)
 
@@ -835,6 +877,12 @@ src/
                         above); the legacy POST/PUT/DELETE /artifacts wrappers
                         were deleted so no regression can reintroduce an
                         unjournalled write
+    api/artifact-bundle.ts  Bundle export/preview/import client (zod schemas
+                        for ExportPreview / ImportPlan / ImportConfirmResponse)
+                        with typed stale-plan 409 discrimination
+                        (StalePlanImportError carries the server's
+                        freshly-derived plan; a planless 409 stays a bare
+                        ConflictError)
     state/              model.svelte.ts (staged-edit store) / changes (server
                         change-set badge) / selection / ui / filters /
                         metamodel / workspace / validation / file (filename
@@ -943,6 +991,9 @@ src/
                         DiffDrawer, HistoryDrawer, SettingsDialog,
                         CommandPalette, AppHeader, dialogs, and ui/ shadcn
                         primitives (button, dialog, dropdown-menu, …);
+                        ArtifactsMenu.svelte — the TopBar toolbar's
+                        Export…/Import… dropdown, mounting
+                        Export/ImportArtifactsDialog.svelte once beside it;
                         auth/LoginForm, projects/{ProjectCard,NewProjectWizard},
                         admin/{UsersTab,ProjectMembersTab}
     keyboard.ts         Pure shortcut matcher
