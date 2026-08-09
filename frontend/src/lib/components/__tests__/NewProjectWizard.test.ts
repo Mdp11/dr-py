@@ -247,6 +247,94 @@ describe('NewProjectWizard', () => {
 		unmount(c);
 	});
 
+	// Review findings on the close-reset fix above: a createProject still in
+	// flight when the dialog closes must be ABANDONED — its settlement may
+	// neither write error/skipped/createdId onto the fresh form nor navigate
+	// via onCreated, and its `pending` must not freeze a reopened wizard.
+	it('a submit that fails after the dialog closed leaves the reopened wizard pristine and unfrozen', async () => {
+		let rejectCreate!: (e: unknown) => void;
+		createProject.mockImplementation(
+			() =>
+				new Promise((_, rej) => {
+					rejectCreate = rej;
+				})
+		);
+		const c = mount(NewProjectWizardHost, { target: document.body, props: { onCreated: vi.fn() } });
+		flushSync();
+		const name = document.querySelector('input[name="project-name"]') as HTMLInputElement;
+		name.value = 'Slow';
+		name.dispatchEvent(new Event('input', { bubbles: true }));
+		setFile(
+			document.querySelector('input[data-testid="mm-input"]') as HTMLInputElement,
+			new File(['types: []'], 'mm.yaml')
+		);
+		flushSync();
+		document
+			.querySelector('form')!
+			.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+		flushSync();
+
+		const toggle = document.body.querySelector<HTMLButtonElement>(
+			'[data-testid="host-toggle-open"]'
+		)!;
+		toggle.click(); // close while the upload is in flight
+		flushSync();
+		toggle.click(); // reopen immediately, before it settles
+		flushSync();
+
+		// The abandoned request's `pending` must not freeze the fresh form
+		// (Cancel and every FileSlot render disabled={pending}; the hidden
+		// file inputs themselves are never disabled, so assert on Cancel).
+		const cancel = [...document.querySelectorAll('button')].find(
+			(b) => b.textContent?.trim() === 'Cancel'
+		)!;
+		expect(cancel.disabled).toBe(false);
+
+		// The late failure must not surface on the fresh form either.
+		rejectCreate(new ValidationError(422, { detail: 'invalid metamodel' }, 'invalid metamodel'));
+		await new Promise((r) => setTimeout(r, 0));
+		flushSync();
+		expect(document.body.querySelector('[role="alert"]')).toBeNull();
+		unmount(c);
+	});
+
+	it('a submit that succeeds after the dialog closed does not navigate', async () => {
+		let resolveCreate!: (v: unknown) => void;
+		createProject.mockImplementation(
+			() =>
+				new Promise((res) => {
+					resolveCreate = res;
+				})
+		);
+		const onCreated = vi.fn();
+		const c = mount(NewProjectWizardHost, { target: document.body, props: { onCreated } });
+		flushSync();
+		const name = document.querySelector('input[name="project-name"]') as HTMLInputElement;
+		name.value = 'Slow';
+		name.dispatchEvent(new Event('input', { bubbles: true }));
+		setFile(
+			document.querySelector('input[data-testid="mm-input"]') as HTMLInputElement,
+			new File(['types: []'], 'mm.yaml')
+		);
+		flushSync();
+		document
+			.querySelector('form')!
+			.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+		flushSync();
+
+		document.body.querySelector<HTMLButtonElement>('[data-testid="host-toggle-open"]')!.click(); // close while in flight
+		flushSync();
+
+		resolveCreate({ id: 'p9', name: 'Slow', role: 'owner', skipped_artifacts: [] });
+		await new Promise((r) => setTimeout(r, 0));
+		flushSync();
+		// The user cancelled this attempt: no navigation into the project...
+		expect(onCreated).not.toHaveBeenCalled();
+		// ...and the journey bar is torn down, not left running forever.
+		expect(getActiveProgress()).toBeNull();
+		unmount(c);
+	});
+
 	// Regression for review finding #7 (hygiene #2): the "Open project" click
 	// handler is fire-and-forget; a rejecting `onCreated` must not become an
 	// unhandled promise rejection. Deliberately NOT a `vi.fn()` mock: Vitest's

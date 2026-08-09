@@ -24,6 +24,14 @@
 
 	const canSubmit = $derived(name.trim().length > 0 && metamodel !== null);
 
+	// Bumped on every close: a createProject still in flight when the dialog
+	// closes is ABANDONED — its settlement compares its captured generation
+	// and, when stale, neither writes error/skipped/createdId onto the fresh
+	// form nor navigates via onCreated (a late success would otherwise drop
+	// the user into a project they cancelled). Same pattern as
+	// ImportArtifactsDialog's post-await guards.
+	let submitGen = 0;
+
 	// The project is created either way; when the importer reported-and-skipped
 	// artifacts, navigation is DEFERRED until the user clicks through the
 	// warning panel below. Reset EVERYTHING when the dialog closes so a
@@ -31,14 +39,19 @@
 	// createdId trio) left the name and the other three file slots showing
 	// the PREVIOUS attempt's values while the artifacts slot alone went
 	// mysteriously blank, which is not a state a fresh wizard should ever show.
+	// `pending` is reset here too (the abandoned request must not freeze a
+	// reopened wizard); the stale flight's own `finally` is gen-guarded so it
+	// cannot clobber a NEWER submit's pending afterwards.
 	$effect(() => {
 		if (!open) {
+			submitGen++;
 			name = '';
 			metamodel = null;
 			model = null;
 			view = null;
 			artifacts = null;
 			error = null;
+			pending = false;
 			skipped = null;
 			createdId = null;
 		}
@@ -49,6 +62,7 @@
 		if (!canSubmit || !metamodel) return;
 		error = null;
 		pending = true;
+		const gen = submitGen;
 		// Start the single journey bar now (on the click). It survives the goto()
 		// into the workspace, where boot() adopts the same journey (beginJourney is
 		// idempotent) and drives it through hydration/validation to 100%.
@@ -60,6 +74,13 @@
 					journeyUpload(loaded, total);
 				}
 			);
+			if (gen !== submitGen) {
+				// The dialog closed mid-flight: the project now exists server-side,
+				// but the user cancelled this attempt — tear the bar down and do
+				// NOT navigate them into it.
+				cancelJourney();
+				return;
+			}
 			if (created.skipped_artifacts.length > 0) {
 				// Show the warning BEFORE entering the project: the journey bar is
 				// torn down (boot() starts its own when the user proceeds).
@@ -71,11 +92,14 @@
 			// Do NOT end the journey here — boot() continues it after navigation.
 			await onCreated(created.id);
 		} catch (err) {
-			cancelJourney(); // tear the bar down on failure
+			cancelJourney(); // tear the bar down on failure, stale or not
+			if (gen !== submitGen) return; // abandoned attempt: keep the fresh form pristine
 			error =
 				err instanceof ApiError ? err.message : 'Could not create the project. Check the files.';
 		} finally {
-			pending = false;
+			// The close-reset already cleared `pending` for a stale flight, and by
+			// then it may belong to a newer submit — only the live flight owns it.
+			if (gen === submitGen) pending = false;
 		}
 	}
 </script>
