@@ -102,9 +102,11 @@ def create_project(
         raise HTTPException(status_code=422, detail=f"invalid upload: {exc}") from exc
     # Same stance for the bundle envelope: the importer parses it only after
     # committing the project row, so an unparseable upload would otherwise
-    # leave an orphan project behind. Envelope-only — per-artifact validity is
-    # deliberately NOT gated here (the importer's verbatim-copy stance carries
-    # unregistered kinds through untouched).
+    # leave an orphan project behind. ENVELOPE-only, and deliberately so: a
+    # malformed envelope is the whole upload being wrong, while a per-artifact
+    # problem must not cost the user the rest of the bundle — the importer's
+    # untrusted path (this route passes no `trust_artifacts`) validates each
+    # artifact and reports-and-skips the bad ones.
     if artifact_bundle is not None:
         try:
             ArtifactBundle.model_validate_json(artifact_bundle)
@@ -197,6 +199,10 @@ def clone_project(
         model_json=model_json,
         view_json=view_row.blob if view_row is not None else None,
         artifact_bundle=artifact_bundle,
+        # the ONE trusted caller: this bundle was built from rows two
+        # statements ago, so validating it could only reject data a clone is
+        # obliged to carry (see importer._landable_artifacts)
+        trust_artifacts=True,
     )
     return ProjectOut(id=new_id, name=new_name, role=Role.owner)
 

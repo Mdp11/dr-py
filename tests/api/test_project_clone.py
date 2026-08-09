@@ -3,8 +3,8 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from data_rover.api import db
-from data_rover.api.db_models import Membership, Project, Role, User
+from data_rover.api import content, db
+from data_rover.api.db_models import ArtifactKind, Membership, Project, Role, User
 from data_rover.api.main import create_app
 from data_rover.api.session import get_registry
 
@@ -134,6 +134,51 @@ def test_clone_carries_artifacts_with_remapped_refs(client: TestClient) -> None:
         headers=_h("owner1"),
     ).json()
     assert full_nav["payload"]["steps"][0]["snippet"]["ref"] == by_name["s"]["id"]
+
+
+#: deliberately not a `ref` anywhere: this asserts BYTE-intactness, and a ref
+#: would (correctly) be remapped. Mixed scalar types so a re-serialization
+#: through some schema would show up as a diff.
+_DIAGRAM_PAYLOAD = {
+    "nodes": [{"x": 1.5, "y": -2, "label": "a", "pinned": True, "note": None}],
+    "edges": [],
+    "zoom": 1,
+}
+
+
+def test_clone_carries_unregistered_diagram_payload_byte_intact(
+    client: TestClient,
+) -> None:
+    """A clone must never lose data. `diagram` is a valid enum with NO
+    registered spec, so no adapter can vet it and no write route will create
+    it — clone is the only path that carries such a row forward, and it must
+    hand the payload through untouched, not merely keep the name."""
+    _seed("src", "owner1")
+    _load_content(client, "src", "owner1")
+    gen = db.get_db()
+    s = next(gen)
+    try:
+        content.create_artifact(
+            s, "src", kind=ArtifactKind.diagram, name="d",
+            payload=_DIAGRAM_PAYLOAD, updated_by=None,
+        )
+        s.commit()
+    finally:
+        gen.close()
+
+    new_id = client.post(
+        "/api/v1/projects/src/clone", json={}, headers=_h("owner1")
+    ).json()["id"]
+    arts = client.get(
+        f"/api/v1/projects/{new_id}/artifacts", headers=_h("owner1")
+    ).json()["items"]
+    by_name = {a["name"]: a for a in arts}
+    assert set(by_name) == {"d"}
+    full = client.get(
+        f"/api/v1/projects/{new_id}/artifacts/{by_name['d']['id']}", headers=_h("owner1")
+    ).json()
+    assert full["kind"] == "diagram"
+    assert full["payload"] == _DIAGRAM_PAYLOAD
 
 
 def test_cloned_artifacts_survive_eviction(client: TestClient) -> None:

@@ -116,6 +116,52 @@ def test_wizard_creates_project_with_artifact_bundle() -> None:
     assert nav["payload"]["steps"][0]["snippet"]["ref"] == by_name["s"]["id"]
 
 
+def _hostile_bundle_bytes() -> bytes:
+    """A PARSEABLE envelope whose artifacts are individually hostile: the
+    wizard takes an arbitrary uploaded file, so every one of these must be
+    skipped rather than landed (or raised on)."""
+    return json.dumps(
+        {
+            "format": "datarover.artifact-bundle/v1",
+            "exported_at": "2026-08-08T00:00:00+00:00",
+            "source_project": {"id": "src", "name": "Src"},
+            "roots": [],
+            "artifacts": [
+                {"id": "ok", "kind": "code_snippet", "name": "s",
+                 "payload": {"schema_version": 1, "language": "python",
+                             "code": "def value(el):\n    return el.name\n",
+                             "entry_points": ["script", "bogus"]}},
+                # a schema-invalid table row 500s EVERY GET /tables read for it
+                {"id": "bad", "kind": "table", "name": "t", "payload": {"nope": 1}},
+                # duplicate (kind, name) -> IntegrityError -> 500 if landed
+                {"id": "dup", "kind": "code_snippet", "name": "s",
+                 "payload": {"schema_version": 1, "language": "python", "code": "x = 1\n"}},
+            ],
+        }
+    ).encode()
+
+
+def test_wizard_skips_invalid_artifacts_instead_of_landing_them() -> None:
+    c = _as_admin()
+    with _MM.open("rb") as fh:
+        r = c.post(
+            "/api/v1/projects",
+            data={"name": "Hostile"},
+            files={
+                "metamodel": ("mm.yaml", fh, "application/yaml"),
+                "artifacts": ("b.json", _hostile_bundle_bytes(), "application/json"),
+            },
+            headers=CSRF,
+        )
+    assert r.status_code == 201, r.text
+    pid = r.json()["id"]
+    items = c.get(f"/api/v1/projects/{pid}/artifacts").json()["items"]
+    assert [a["name"] for a in items] == ["s"]
+    got = c.get(f"/api/v1/projects/{pid}/artifacts/{items[0]['id']}").json()
+    # server-derived, never client-trusted
+    assert got["payload"]["entry_points"] == ["script", "value"]
+
+
 def test_wizard_rejects_bad_artifact_bundle_422_no_orphan() -> None:
     c = _as_admin()
     with _MM.open("rb") as fh:
