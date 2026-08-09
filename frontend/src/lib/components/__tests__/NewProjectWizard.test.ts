@@ -209,6 +209,44 @@ describe('NewProjectWizard', () => {
 		unmount(c);
 	});
 
+	// Companion to the close-reset regression above: the reset cleared the five
+	// inputs plus skipped/createdId but left `error` (and `pending`) behind, so
+	// a failed attempt's error message reappeared on a fresh reopen.
+	it("does not resurrect the previous attempt's error message on reopen", async () => {
+		createProject.mockRejectedValue(
+			new ValidationError(422, { detail: 'invalid metamodel' }, 'invalid metamodel')
+		);
+		const c = mount(NewProjectWizardHost, { target: document.body, props: { onCreated: vi.fn() } });
+		flushSync();
+		const name = document.querySelector('input[name="project-name"]') as HTMLInputElement;
+		name.value = 'Bad';
+		name.dispatchEvent(new Event('input', { bubbles: true }));
+		setFile(
+			document.querySelector('input[data-testid="mm-input"]') as HTMLInputElement,
+			new File(['bad'], 'bad.yaml')
+		);
+		flushSync();
+		document
+			.querySelector('form')!
+			.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+		await vi.waitFor(() =>
+			expect(document.body.querySelector('[role="alert"]')?.textContent).toContain(
+				'invalid metamodel'
+			)
+		);
+
+		const toggle = document.body.querySelector<HTMLButtonElement>(
+			'[data-testid="host-toggle-open"]'
+		)!;
+		toggle.click(); // close
+		flushSync();
+		toggle.click(); // reopen
+		flushSync();
+
+		expect(document.body.querySelector('[role="alert"]')).toBeNull();
+		unmount(c);
+	});
+
 	// Regression for review finding #7 (hygiene #2): the "Open project" click
 	// handler is fire-and-forget; a rejecting `onCreated` must not become an
 	// unhandled promise rejection. Deliberately NOT a `vi.fn()` mock: Vitest's

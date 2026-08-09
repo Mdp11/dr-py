@@ -38,6 +38,7 @@
 			model = null;
 			view = null;
 			artifacts = null;
+			error = null;
 			skipped = null;
 			createdId = null;
 		}
