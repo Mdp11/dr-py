@@ -31,6 +31,7 @@ from sqlalchemy.orm import Session
 from data_rover.core.metamodel.loader import load_metamodel_str
 
 from .. import content, importer, tenancy
+from ..artifact_bundle import ArtifactBundle, ClosureResult, build_bundle
 from ..authz import require_admin, require_membership
 from ..db import get_db
 from ..db_models import Membership, Project, Role, User
@@ -78,6 +79,7 @@ def create_project(
     metamodel: UploadFile = File(...),
     model: UploadFile | None = File(default=None),
     view: UploadFile | None = File(default=None),
+    artifacts: UploadFile | None = File(default=None),
     admin: User = Depends(require_admin),
 ) -> ProjectOut:
     metamodel_yaml = metamodel.file.read().decode("utf-8")
@@ -85,6 +87,9 @@ def create_project(
         model.file.read().decode("utf-8") if model is not None else EMPTY_MODEL_JSON
     )
     view_json = view.file.read().decode("utf-8") if view is not None else None
+    artifact_bundle = (
+        artifacts.file.read().decode("utf-8") if artifacts is not None else None
+    )
 
     # Pre-validate BEFORE import_project (which commits rows before it parses):
     # a bad metamodel/model must 422 without leaving an orphan project.
@@ -95,6 +100,20 @@ def create_project(
         raise  # build_model_from_dicts already raises 422 with a precise detail
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"invalid upload: {exc}") from exc
+    # Same stance for the bundle envelope: the importer parses it only after
+    # committing the project row, so an unparseable upload would otherwise
+    # leave an orphan project behind. ENVELOPE-only, and deliberately so: a
+    # malformed envelope is the whole upload being wrong, while a per-artifact
+    # problem must not cost the user the rest of the bundle — the importer's
+    # untrusted path (this route passes no `trust_artifacts`) validates each
+    # artifact and reports-and-skips the bad ones.
+    if artifact_bundle is not None:
+        try:
+            ArtifactBundle.model_validate_json(artifact_bundle)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=422, detail=f"invalid artifact bundle: {exc}"
+            ) from exc
 
     project_id = uuid.uuid4().hex
     importer.import_project(
@@ -104,6 +123,7 @@ def create_project(
         metamodel_yaml=metamodel_yaml,
         model_json=model_json,
         view_json=view_json,
+        artifact_bundle=artifact_bundle,
     )
     return ProjectOut(id=project_id, name=name, role=Role.owner)
 
@@ -133,8 +153,8 @@ def clone_project(
 ) -> ProjectOut:
     """Clone the CURRENT state of a project into a brand-new project owned by
     the caller. Any member may clone (``require_membership``). The clone copies
-    metamodel + current model + view as a fresh rev-0 baseline via the importer;
-    commit history is NOT carried over."""
+    metamodel + current model + view + artifacts as a fresh rev-0 baseline via
+    the importer; commit history is NOT carried over."""
     src = db.get(Project, project_id)
     if src is None:  # require_membership already proved existence
         raise HTTPException(status_code=404, detail="project not found")
@@ -153,6 +173,22 @@ def clone_project(
         raise HTTPException(status_code=409, detail="project has no content to clone")
     model_json = "".join(iter_model_json(session.model))
 
+    # Every artifact row rides along, VERBATIM: a clone is a copy, not a
+    # validation gate, so this deliberately does NOT run `compute_closure` —
+    # a closure walk is pointless when every row is a root anyway, and it
+    # would drop rows the registry doesn't know (legacy `diagram`). The
+    # importer lands each one under a fresh id and remaps payload/view refs.
+    rows = content.list_artifacts(db, project_id)
+    artifact_bundle = (
+        build_bundle(
+            src,
+            ClosureResult(rows=rows, dangling_refs=[]),
+            roots=[r.id for r in rows],
+        ).model_dump_json()
+        if rows
+        else None
+    )
+
     new_name = body.name if body and body.name else f"{src.name} (copy)"
     new_id = uuid.uuid4().hex
     importer.import_project(
@@ -162,6 +198,11 @@ def clone_project(
         metamodel_yaml=mm_row.blob,
         model_json=model_json,
         view_json=view_row.blob if view_row is not None else None,
+        artifact_bundle=artifact_bundle,
+        # the ONE trusted caller: this bundle was built from rows two
+        # statements ago, so validating it could only reject data a clone is
+        # obliged to carry (see importer._landable_artifacts)
+        trust_artifacts=True,
     )
     return ProjectOut(id=new_id, name=new_name, role=Role.owner)
 

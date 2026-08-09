@@ -51,6 +51,11 @@ _WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 #: viewer who is allowed to start a run must also be allowed to cancel their
 #: own run, so it is allowlisted too rather than left to fall through as a
 #: write.
+#:
+#: ``/artifacts/export`` and ``/artifacts/export/preview`` read ONLY artifact
+#: DB rows (never the in-memory model, no session touched at all), so a
+#: viewer may export. ``/artifacts/import/plan`` is deliberately NOT here —
+#: planning is part of the write flow (spec decision).
 _READ_ONLY_POST_SUFFIXES = (
     "/model/search",
     "/model/elements/batch",
@@ -68,6 +73,8 @@ _READ_ONLY_POST_SUFFIXES = (
     "/snippets/lint",
     "/snippets/format",
     "/snippets/cancel",
+    "/artifacts/export",
+    "/artifacts/export/preview",
 )
 
 
