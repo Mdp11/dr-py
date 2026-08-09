@@ -187,7 +187,26 @@ def _normalized_payload(kind: ArtifactKind, payload: dict[str, Any]) -> dict[str
     return payload
 
 
+@dataclass(frozen=True)
+class PlanResult:
+    plan: ImportPlan
+    #: per-kind names a NEW row cannot take once this plan lands: rows already
+    #: in the project, every bundle-side name, and every copy name the plan
+    #: handed out. It exists for ``build_import_ops``, which has no DB session
+    #: and therefore cannot otherwise vet the client's ``copy_names`` override
+    #: against a row that isn't mentioned anywhere in the bundle.
+    taken_names: dict[ArtifactKind, set[str]]
+
+
 def derive_plan(db: DbSession, project_id: str, bundle: ArtifactBundle) -> ImportPlan:
+    """The plan alone, for callers (the ``/import/plan`` route, the confirm
+    route's 409 body) that only need something to render."""
+    return derive_plan_ex(db, project_id, bundle).plan
+
+
+def derive_plan_ex(
+    db: DbSession, project_id: str, bundle: ArtifactBundle
+) -> PlanResult:
     entries: list[PlanEntry] = []
     skipped: list[SkippedEntry] = []
     #: (bundle artifact, its ArtifactKind, its (kind,name) clash row or None)
@@ -256,8 +275,40 @@ def derive_plan(db: DbSession, project_id: str, bundle: ArtifactBundle) -> Impor
             taken[kind] = names
         return taken[kind]
 
+    #: names this plan has already handed to an entry, per kind. Distinct from
+    #: `taken` on purpose: `taken` is pre-seeded with EVERY bundle-side name,
+    #: so it can answer "is this name in the bundle?" but never "did a sibling
+    #: already claim it?" — which is the only question the create branch has.
+    claimed: dict[ArtifactKind, set[str]] = {}
+
     for art, kind, existing in valid:
+        # Unconditional, not just on the clash path it used to serve: the pool
+        # this builds is also PlanResult.taken_names, which build_import_ops
+        # vets `copy_names` against, and a create-only kind is exactly the case
+        # where a client rename can collide with a row the bundle never
+        # mentions. Costs one indexed SELECT per DISTINCT kind in the bundle.
+        names = _taken_names(kind)
+        mine = claimed.setdefault(kind, set())
         if existing is None:
+            if art.name in mine:
+                # Two bundle artifacts sharing (kind, name) with nothing in the
+                # DB to clash against: both would propose create under the same
+                # name and the second op would trip
+                # uq_artifact_project_kind_name when the batch lands — surfacing
+                # as an applier 422 the confirm route can only report as a
+                # whole-plan 409 the client cannot act on. A legitimate export
+                # cannot produce this (the source DB constraint forbids it), so
+                # there is no user intent to preserve: the later one is
+                # reported-and-skipped, like the empty-name case above, rather
+                # than silently renamed to something nobody asked for. First
+                # occurrence in bundle order wins.
+                skipped.append(
+                    SkippedEntry(
+                        bundle_id=art.id, reason="duplicate (kind, name) in bundle"
+                    )
+                )
+                continue
+            mine.add(art.name)
             entries.append(
                 PlanEntry(
                     bundle_id=art.id, kind=art.kind, name=art.name, action="create"
@@ -273,8 +324,10 @@ def derive_plan(db: DbSession, project_id: str, bundle: ArtifactBundle) -> Impor
         # proposed copy does, and only this loop can see the full name pool.
         # Reserving unconditionally means an accepted reuse burns a suffix
         # number nobody uses — harmless, and strictly safer than handing the
-        # same name to two entries that could both land.
-        names = _taken_names(kind)
+        # same name to two entries that could both land. (No `claimed` entry
+        # for it: `names` already holds every bundle-side name, so a deduped
+        # copy name can never equal a sibling's own name, and the create
+        # branch's duplicate check has nothing to learn from it.)
         copy_name = dedupe_name(names, art.name)
         names.add(copy_name)
         # `existing.payload` is normalized too, not compared raw: real writes
@@ -305,7 +358,9 @@ def derive_plan(db: DbSession, project_id: str, bundle: ArtifactBundle) -> Impor
                 copy_name=copy_name,
             )
         )
-    return ImportPlan(entries=entries, skipped=skipped)
+    return PlanResult(
+        plan=ImportPlan(entries=entries, skipped=skipped), taken_names=taken
+    )
 
 
 class StalePlanError(Exception):
@@ -351,6 +406,7 @@ def build_import_ops(
     bundle: ArtifactBundle,
     decisions: Mapping[str, str],
     copy_names: Mapping[str, str],
+    taken_names: Mapping[ArtifactKind, set[str]] | None = None,
 ) -> tuple[list[CreateArtifactOp], list[ReusedEntry], dict[str, str]]:
     """Turn a FRESH plan plus the client's decisions into one create batch.
 
@@ -361,6 +417,20 @@ def build_import_ops(
     "create" case is the load-bearing one: a peer claiming (kind, name) in the
     meantime flips the fresh action to reuse/copy, and creating anyway would
     trip ``uq_artifact_project_kind_name`` inside the commit.
+
+    ``copy_names`` gets the same treatment, and needs it MORE than the
+    decisions do: it is the one field no plan ever vetted (the client types it
+    into a rename box), so an entry renamed onto a name that is already taken
+    would otherwise reach the applier as a 422 the confirm route can only
+    report as a whole-plan 409 — carrying a freshly derived plan byte-identical
+    to the one the client just decided against, i.e. an unrecoverable loop.
+    Rejecting here names the offending value instead.
+
+    *taken_names* is :attr:`PlanResult.taken_names`; passing it is what lets
+    that check see a clashing row the bundle never mentions. Omitting it (unit
+    callers) narrows the check to the names the plan itself reveals — never
+    widens what is accepted past the applier, whose own clash check stays the
+    backstop in both cases.
     """
     entries = {e.bundle_id: e for e in plan.entries}
     for bid in decisions:
@@ -369,6 +439,34 @@ def build_import_ops(
             # it" (unknown/unregistered kind, invalid payload) — either way
             # there is no entry to act on.
             raise StalePlanError(f"decision for unknown/skipped artifact {bid!r}")
+
+    # Per-kind pool of names a new row may NOT take, widened from the plan
+    # itself so an omitted `taken_names` still catches everything the plan can
+    # see: a clash entry's `name` belongs to the row it clashed with, a create
+    # entry's `name` is one this very batch is about to claim, and every
+    # `copy_name` is earmarked for its own entry.
+    pool: dict[str, set[str]] = {
+        kind.value: set(names) for kind, names in (taken_names or {}).items()
+    }
+    for e in plan.entries:
+        kind_pool = pool.setdefault(e.kind, set())
+        kind_pool.add(e.name)
+        if e.copy_name is not None:
+            kind_pool.add(e.copy_name)
+    #: names this batch has actually handed out, per kind
+    used: dict[str, set[str]] = {}
+
+    def claim(e: PlanEntry, name: str) -> str:
+        # The entry's OWN earmark is not a clash with itself: a create entry
+        # owns `e.name` (the plan proved it free), a clash entry owns the
+        # `copy_name` reserved for it — and only that one, since `e.name` there
+        # is precisely the taken name that made it a clash.
+        reserved = {e.name} if e.action == "create" else {e.copy_name}
+        mine = used.setdefault(e.kind, set())
+        if (name in pool[e.kind] and name not in reserved) or name in mine:
+            raise StalePlanError(f"name {name!r} is already taken")
+        mine.add(name)
+        return name
 
     payloads = {a.id: a.payload for a in bundle.artifacts}
     reused: list[ReusedEntry] = []
@@ -385,7 +483,7 @@ def build_import_ops(
             if e.action != "create":
                 raise StalePlanError(f"name for {e.bundle_id!r} now clashes")
             created.append(e)
-            final_names[e.bundle_id] = e.name
+            final_names[e.bundle_id] = claim(e, e.name)
         else:  # copy
             # An explicit client name wins; otherwise the plan's deduped
             # proposal, which already dodged every name this plan hands out.
@@ -394,7 +492,7 @@ def build_import_ops(
             # bundle's own name is by construction free.
             name = copy_names.get(e.bundle_id) or e.copy_name or e.name
             created.append(e)
-            final_names[e.bundle_id] = name
+            final_names[e.bundle_id] = claim(e, name)
 
     # created siblings resolve to temp ids (the commit applier maps them to
     # fresh uuids and resolves refs via its id_map); reused ones resolve to

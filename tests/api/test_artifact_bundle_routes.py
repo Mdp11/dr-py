@@ -282,6 +282,56 @@ def test_import_confirm_stale_decision_409_with_fresh_plan(client: TestClient) -
     assert _rev(client) == rev0  # a rejected confirm writes nothing
 
 
+def test_import_confirm_rejects_a_copy_name_that_is_already_taken(
+    client: TestClient,
+) -> None:
+    # The rename box of the (not yet built) import dialog is the normal way to
+    # reach this: a copy renamed onto a row that already exists. Before the
+    # check moved into build_import_ops this reached the applier, came back as
+    # "import plan is stale" + a plan byte-identical to the one the client had
+    # already decided against, and re-submitting looped forever.
+    other = {"schema_version": 1, "language": "python", "code": "def value(el):\n    return 1\n"}
+    _mk(client, "code_snippet", "s", SNIP)
+    _mk(client, "code_snippet", "taken", other)
+    rev0 = _rev(client)
+    body = _import_body(
+        [{"id": "bs", "kind": "code_snippet", "name": "s", "payload": other}],
+        decisions={"bs": "copy"},
+        copy_names={"bs": "taken"},
+    )
+    r = client.post(papi("/artifacts/import"), json=body, headers=AUTH_HEADERS)
+    assert r.status_code == 409, r.text
+    detail = r.json()
+    assert "taken" in detail["detail"]  # names the offending value...
+    assert detail["plan"]["entries"][0]["action"] == "copy"  # ...fresh plan still rides along
+    assert _rev(client) == rev0  # a rejected confirm writes nothing
+
+
+def test_import_confirm_409_carries_the_appliers_own_detail(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The applier 422 stays reachable under genuine concurrency (a peer
+    # claiming (kind, name) between our re-derive and the commit). Flattening
+    # it to a bare "import plan is stale" hid the only description of what
+    # actually happened; the cause must ride along.
+    from fastapi import HTTPException
+
+    from data_rover.api.routes import artifact_bundle as route_mod
+
+    def boom(*_a: object, **_k: object) -> None:
+        raise HTTPException(status_code=422, detail="a code_snippet named 'n' already exists")
+
+    monkeypatch.setattr(route_mod, "create_commit", boom)
+    r = client.post(
+        papi("/artifacts/import"),
+        json=_import_body([{"id": "bn", "kind": "navigation", "name": "n", "payload": _nav("x")}]),
+        headers=AUTH_HEADERS,
+    )
+    assert r.status_code == 409, r.text
+    assert "already exists" in r.json()["detail"]
+    assert "plan" in r.json()
+
+
 def test_import_confirm_malformed_envelope_422(client: TestClient) -> None:
     r = client.post(
         papi("/artifacts/import"),

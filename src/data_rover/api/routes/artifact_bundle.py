@@ -34,6 +34,7 @@ from ..artifact_bundle import (
     build_import_ops,
     compute_closure,
     derive_plan,
+    derive_plan_ex,
 )
 from ..authz import require_membership
 from ..db import get_db
@@ -125,10 +126,17 @@ def import_confirm(
             content={"detail": detail, "plan": fresh.model_dump()},
         )
 
-    plan = derive_plan(db, project_id, body.bundle)
+    derived = derive_plan_ex(db, project_id, body.bundle)
+    plan = derived.plan
     try:
         ops, reused, final_names = build_import_ops(
-            plan, body.bundle, body.decisions, body.copy_names
+            plan,
+            body.bundle,
+            body.decisions,
+            body.copy_names,
+            # the DB-derived name pool: without it a `copy_names` rename onto a
+            # row the bundle never mentions would sail past into the applier
+            derived.taken_names,
         )
     except StalePlanError as exc:
         return stale_conflict(exc.detail)
@@ -160,12 +168,17 @@ def import_confirm(
     except HTTPException as exc:
         if exc.status_code == 422:
             # The batch was built from a plan derived moments ago against
-            # these same rows, so the only 422 reachable here is the
-            # applier's (kind, name) clash check firing on a name a peer
-            # claimed in between — a stale plan by another name. (The
-            # DB-level IntegrityError is unreachable for exactly that
-            # reason: the clash check runs first, and turns it into this.)
-            return stale_conflict("import plan is stale")
+            # these same rows, so the only 422 expected here is the applier's
+            # (kind, name) clash check firing on a name a peer claimed in
+            # between — a stale plan by another name. (The DB-level
+            # IntegrityError is unreachable for exactly that reason: the clash
+            # check runs first, and turns it into this.) The applier's own
+            # detail is CARRIED, not swallowed: it is the only description of
+            # what actually happened, and if this 422 ever has a cause other
+            # than the one guessed above, a flattened message would leave the
+            # client re-submitting a plan that can never succeed with no hint
+            # why.
+            return stale_conflict(f"import plan is stale: {exc.detail}")
         raise
     if isinstance(result, JSONResponse):
         # create_commit's own conflict responses (staleness / missing lease).

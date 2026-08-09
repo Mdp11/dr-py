@@ -19,6 +19,7 @@ from data_rover.api.artifact_bundle import (
     compute_closure,
     dedupe_name,
     derive_plan,
+    derive_plan_ex,
 )
 from data_rover.api.db_models import ArtifactKind, Project
 from data_rover.api.schemas import TEMP_ID_PREFIX
@@ -388,3 +389,118 @@ def test_build_ops_stale_decisions_raise() -> None:
         assert copy_plan.entries[0].action == "copy"
         with pytest.raises(StalePlanError):
             build_import_ops(copy_plan, copy_bundle, {"bs": "create"}, {})
+
+
+def test_plan_skips_duplicate_kind_name_inside_the_bundle() -> None:
+    # Two bundle artifacts sharing (kind, name) with NOTHING in the DB to
+    # clash against: the `existing is None` branch never consults the dedupe
+    # pool, so both would propose "create" under the same name and the second
+    # op would trip uq_artifact_project_kind_name when the batch lands (a 422
+    # the confirm route can only report as an unactionable 409). A legitimate
+    # export cannot produce this — the source DB constraint forbids it — so
+    # the later one is reported-and-skipped like every other per-artifact
+    # problem in an untrusted bundle.
+    _setup()
+    other = {"schema_version": 1, "language": "python", "code": "def value(el):\n    return 1\n"}
+    with db.db_session() as s:
+        bundle = _bundle(
+            [
+                {"id": "b1", "kind": "code_snippet", "name": "dup", "payload": SNIP},
+                {"id": "b2", "kind": "code_snippet", "name": "dup", "payload": other},
+            ]
+        )
+        plan = derive_plan(s, "p1", bundle)
+        assert [(e.bundle_id, e.action, e.name) for e in plan.entries] == [("b1", "create", "dup")]
+        assert [(sk.bundle_id, sk.reason) for sk in plan.skipped] == [
+            ("b2", "duplicate (kind, name) in bundle")
+        ]
+        # ...and the batch that plan builds carries the name exactly once
+        ops, _reused, final_names = build_import_ops(plan, bundle, {}, {})
+        assert [op.name for op in ops] == ["dup"]
+        assert final_names == {"b1": "dup"}
+
+
+def test_plan_duplicate_is_scoped_per_kind() -> None:
+    # the claim set is per (kind, name), not per name: a snippet and a
+    # navigation may legitimately share a name
+    _setup()
+    with db.db_session() as s:
+        plan = derive_plan(
+            s,
+            "p1",
+            _bundle(
+                [
+                    {"id": "b1", "kind": "code_snippet", "name": "x", "payload": SNIP},
+                    {"id": "b2", "kind": "navigation", "name": "x", "payload": _nav("b1")},
+                ]
+            ),
+        )
+        assert [e.action for e in plan.entries] == ["create", "create"]
+        assert plan.skipped == []
+
+
+def test_build_ops_rejects_a_copy_name_that_is_already_taken() -> None:
+    # `copy_names` is the ONE field no plan ever vetted (the client types it
+    # into the rename box). Passing it through unchecked hands the applier a
+    # guaranteed (kind, name) clash, which the confirm route can only report
+    # as a whole-plan 409 whose freshly-derived plan is byte-identical to the
+    # one the client already decided against — an unrecoverable loop. Rejected
+    # here instead, naming the offending value.
+    _setup()
+    other = {"schema_version": 1, "language": "python", "code": "def value(el):\n    return 1\n"}
+    with db.db_session() as s:
+        content.create_artifact(
+            s, "p1", kind=ArtifactKind.code_snippet, name="s", payload=SNIP, updated_by=None
+        )
+        # a row that is NOT in the bundle, so only the DB-derived pool the plan
+        # hands over can know its name is taken
+        content.create_artifact(
+            s, "p1", kind=ArtifactKind.code_snippet, name="taken", payload=other, updated_by=None
+        )
+        bundle = _bundle([{"id": "bs", "kind": "code_snippet", "name": "s", "payload": other}])
+        res = derive_plan_ex(s, "p1", bundle)
+        assert res.plan.entries[0].action == "copy"
+        with pytest.raises(StalePlanError, match="taken"):
+            build_import_ops(res.plan, bundle, {}, {"bs": "taken"}, res.taken_names)
+        # the plan's own proposal is of course still honored
+        _ops, _reused, names = build_import_ops(res.plan, bundle, {}, {}, res.taken_names)
+        assert names == {"bs": "s (2)"}
+
+
+def test_build_ops_rejects_two_copies_renamed_onto_the_same_name() -> None:
+    # batch-local collision: catchable without any DB pool at all
+    _setup()
+    other1 = {"schema_version": 1, "language": "python", "code": "def value(el):\n    return 1\n"}
+    other2 = {"schema_version": 1, "language": "python", "code": "def value(el):\n    return 2\n"}
+    with db.db_session() as s:
+        content.create_artifact(
+            s, "p1", kind=ArtifactKind.code_snippet, name="s", payload=SNIP, updated_by=None
+        )
+        bundle = _bundle(
+            [
+                {"id": "b1", "kind": "code_snippet", "name": "s", "payload": other1},
+                {"id": "b2", "kind": "code_snippet", "name": "s", "payload": other2},
+            ]
+        )
+        plan = derive_plan(s, "p1", bundle)
+        with pytest.raises(StalePlanError, match="mine"):
+            build_import_ops(plan, bundle, {}, {"b1": "mine", "b2": "mine"})
+
+
+def test_build_ops_leaves_refs_to_skipped_artifacts_dangling() -> None:
+    # The tolerant-dangler stance, end to end: a payload ref whose target the
+    # plan SKIPPED keeps the bundle's literal id. Nothing to point at is not
+    # an error — the referencing artifact still imports.
+    _setup()
+    with db.db_session() as s:
+        bundle = _bundle(
+            [
+                # valid enum, unregistered kind -> skipped by the plan
+                {"id": "bd", "kind": "diagram", "name": "d", "payload": {}},
+                {"id": "bn", "kind": "navigation", "name": "n", "payload": _nav("bd")},
+            ]
+        )
+        plan = derive_plan(s, "p1", bundle)
+        assert [sk.bundle_id for sk in plan.skipped] == ["bd"]
+        ops, _reused, _names = build_import_ops(plan, bundle, {}, {})
+        assert [op.payload["operands"][0]["ref"] for op in ops] == ["bd"]
