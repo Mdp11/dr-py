@@ -49,8 +49,10 @@ export function getExportArtifactsSeed(): string[] {
 	return _exportArtifactsSeed;
 }
 
-/** Open the export dialog, pre-checking `seedRootIds` (unknown ids are
- * ignored by the dialog itself — it intersects with committed headers). */
+/** Open the export dialog, pre-checking `seedRootIds`. Unknown ids are
+ * ignored by the dialog itself — it intersects the seed with the committed
+ * headers of the kinds it renders, so an id of an unregistered kind (legacy
+ * `diagram`) is dropped just like an unknown one. */
 export function openExportArtifacts(seedRootIds: string[] = []): void {
 	_exportArtifactsSeed = seedRootIds;
 	_exportArtifactsOpen = true;

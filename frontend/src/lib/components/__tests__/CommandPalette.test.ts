@@ -2,9 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import * as modelRead from '$lib/api/model-read';
 import {
+	adoptSummary,
 	getCommandPaletteOpen,
 	getExportArtifactsOpen,
 	getImportArtifactsOpen,
+	resetModelStore,
 	setCommandPaletteOpen,
 	setExportArtifactsOpen,
 	setImportArtifactsOpen,
@@ -18,9 +20,9 @@ let app: ReturnType<typeof mount> | null = null;
 
 beforeEach(() => {
 	resetCheckout();
-	// No model is loaded in these tests (getModelSummary() is null), so the
-	// palette's entity-search effect never fires — the spy is a guard, not a
-	// fixture.
+	resetModelStore();
+	// The entity-search effect fires whenever the palette is open with a
+	// model loaded; an empty page keeps the Entities group unrendered.
 	vi.spyOn(modelRead, 'listElementsPage').mockResolvedValue({ items: [], total: 0 });
 	host = document.createElement('div');
 	document.body.appendChild(host);
@@ -32,12 +34,23 @@ afterEach(() => {
 	setCommandPaletteOpen(false);
 	setExportArtifactsOpen(false);
 	setImportArtifactsOpen(false);
+	resetModelStore();
 	host.remove();
 	vi.restoreAllMocks();
 });
 
-function openPalette(role: 'editor' | 'viewer') {
+function openPalette(role: 'editor' | 'viewer', { withModel = true } = {}) {
 	setProjectInfo({ role, lockTtlSeconds: 300 });
+	if (withModel) {
+		adoptSummary({
+			model_rev: 1,
+			element_count: 0,
+			relationship_count: 0,
+			elements_by_type: {},
+			issue_counts: null,
+			undo_depth: 0
+		});
+	}
 	app = mount(CommandPalette, { target: host });
 	setCommandPaletteOpen(true);
 	flushSync();
@@ -80,5 +93,17 @@ describe('CommandPalette', () => {
 		flushSync();
 		expect(getCommandPaletteOpen()).toBe(false);
 		expect(getImportArtifactsOpen()).toBe(true);
+	});
+
+	// The palette mounts in the ROOT layout (Cmd+K works on /projects too),
+	// but the export/import dialogs mount only inside the workspace TopBar.
+	// Selecting either action with no dialog mounted would latch the
+	// module-level open flag with nothing to reset it, popping the dialog
+	// open unprompted on the next project entry — so the items must not
+	// exist outside a loaded project.
+	it('offers no artifact actions when no model is loaded', () => {
+		openPalette('editor', { withModel: false });
+		expect(itemByValue('action:export-artifacts')).toBeNull();
+		expect(itemByValue('action:import-artifacts')).toBeNull();
 	});
 });
