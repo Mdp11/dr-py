@@ -389,6 +389,15 @@ describe('ExportArtifactsDialog', () => {
 		// No phantom hidden selection the user cannot clear...
 		expect(document.body.textContent).not.toContain('selected not shown');
 
+		// ...the preview is recomputed for the shrunken selection rather than
+		// left advertising the deleted artifact's closure...
+		const preview = vi.mocked(bundleApi.exportPreview);
+		const callsBefore = preview.mock.calls.length;
+		await vi.advanceTimersByTimeAsync(350);
+		flushSync();
+		expect(preview.mock.calls.length).toBeGreaterThan(callsBefore);
+		expect(preview).toHaveBeenLastCalledWith(['t1']);
+
 		// ...and the dead id is not exported as a root.
 		const btn = document.body.querySelector<HTMLButtonElement>('[data-testid="export-submit"]')!;
 		btn.click();

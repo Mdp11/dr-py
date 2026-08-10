@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { FileCode, Route, Table, TriangleAlert } from '@lucide/svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
@@ -78,59 +77,59 @@
 	);
 	const allVisibleChecked = $derived(visible.length > 0 && visible.every((h) => checked.has(h.id)));
 
-	// Open/close lifecycle: seed the selection and fire the first preview
-	// immediately on an open TRANSITION. Reads the STORE (not the local
-	// `open`) and writes the local `open` — never the reverse — so this can
-	// never be the write side of a read/write loop with itself. The close
-	// branch only cancels the pending debounce and bumps the generation
-	// counter; the rest of the local state (`checked`, `filter`, `preview`,
-	// …) is left as-is and gets reset on the NEXT open, not here.
+	// Open/close lifecycle: seed the selection on an open TRANSITION. Reads
+	// the STORE (not the local `open`) and writes the local `open` — never
+	// the reverse — so this can never be the write side of a read/write loop
+	// with itself. The close branch only cancels the pending debounce and
+	// bumps the generation counter; the rest of the local state (`checked`,
+	// `filter`, `preview`, …) is left as-is and gets reset on the NEXT open,
+	// not here.
 	//
-	// This effect must depend ONLY on `getExportArtifactsOpen()` and
-	// `getExportArtifactsSeed()` — both read directly below, un-wrapped — so
-	// it reruns only on an actual open/seed change. `getCommittedArtifactHeaders()`
-	// is read through `untrack()` on purpose: it is genuinely reactive
-	// (`artifacts.svelte.ts`'s `_items` $state) and changes on ANY committed
-	// artifact create/rename/delete, including a peer's commit arriving over
-	// the realtime feed while this dialog is open. Without `untrack()`, that
-	// unrelated change would rerun this whole effect and wipe every checkbox
-	// the user had toggled since opening, re-seeding from the ORIGINAL seed
-	// array as if the dialog had just reopened.
+	// This effect depends ONLY on `getExportArtifactsOpen()` and
+	// `getExportArtifactsSeed()`, so it reruns only on an actual open/seed
+	// change — deliberately NOT on the committed headers, which change on ANY
+	// artifact commit (including a peer's, over the realtime feed) and must
+	// not wipe the user's in-progress selection. Seed ids go into `checked`
+	// unvalidated: every consumer that matters reads `selected` (above),
+	// which intersects with the live headers, so an unknown or
+	// unregistered-kind seed id can surface nowhere.
 	$effect(() => {
 		const isOpen = getExportArtifactsOpen();
 		const seed = getExportArtifactsSeed();
 		open = isOpen;
 		if (isOpen) {
-			// The FILTERED `headers`, not the raw store: a seed id whose kind has
-			// no section (legacy `diagram`) must be dropped here, or it enters
-			// `checked` without ever rendering a row — an invisible selection
-			// that would silently become an export root. `headers` is a $derived
-			// over the same reactive store, so it too goes through `untrack()`.
-			const ids = new Set(untrack(() => headers).map((h) => h.id));
 			checked.clear();
-			let anySeeded = false;
-			for (const id of seed) {
-				if (ids.has(id)) {
-					checked.add(id);
-					anySeeded = true;
-				}
-			}
+			for (const id of seed) checked.add(id);
 			filter = '';
 			preview = null;
 			previewError = null;
 			exportError = null;
-			// Schedule rather than call runPreview() synchronously: runPreview
-			// reads `checked` (a piece of state this effect just wrote), and
-			// reading state an effect also writes within the same synchronous
-			// run trips Svelte's effect_update_depth_exceeded guard. Routing
-			// through the same setTimeout plumbing as the debounced path (with
-			// delay 0 for "immediate") keeps the read outside any active effect.
-			if (anySeeded) schedulePreview(0);
 		} else {
 			if (timer !== null) clearTimeout(timer);
 			timer = null;
 			gen++;
 		}
+	});
+
+	// Preview scheduling: ONE place reacts to the effective selection, so a
+	// change from ANY source — a user toggle, the open-transition seeding
+	// above, or a peer's commit shrinking `headers` underneath `checked` —
+	// reschedules the preview; the toggle handlers don't schedule themselves.
+	// The first observation after an open previews immediately (a seeded open
+	// must not wait out the debounce; `null` is the just-opened sentinel),
+	// later ones debounce. Scheduling (never calling runPreview synchronously)
+	// keeps the `checked` read outside any active effect — see schedulePreview.
+	let lastSelectedKey: string | null = null;
+	$effect(() => {
+		if (!open) {
+			lastSelectedKey = null;
+			return;
+		}
+		const key = selected.join('\u0000');
+		if (key === lastSelectedKey) return;
+		const immediate = lastSelectedKey === null;
+		lastSelectedKey = key;
+		schedulePreview(immediate ? 0 : undefined);
 	});
 
 	// A bare mount/unmount effect: it reads nothing reactive, so it runs once
@@ -171,7 +170,6 @@
 	function toggle(id: string): void {
 		if (checked.has(id)) checked.delete(id);
 		else checked.add(id);
-		schedulePreview();
 	}
 
 	function toggleSection(kind: ArtifactKind): void {
@@ -181,7 +179,6 @@
 			if (allChecked) checked.delete(h.id);
 			else checked.add(h.id);
 		}
-		schedulePreview();
 	}
 
 	function toggleAll(): void {
@@ -194,7 +191,6 @@
 			if (wasAllChecked) checked.delete(h.id);
 			else checked.add(h.id);
 		}
-		schedulePreview();
 	}
 
 	async function onExport(): Promise<void> {
