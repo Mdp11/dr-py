@@ -66,7 +66,8 @@
 	// (correctly) never reruns. Every consumer (hidden count, preview,
 	// export, the submit gate) reads THIS, so a dead id can neither linger as
 	// a phantom "+N selected not shown" nor be POSTed as an export root.
-	const selected = $derived([...checked].filter((id) => headers.some((h) => h.id === id)));
+	const headerIds = $derived(new Set(headers.map((h) => h.id)));
+	const selected = $derived([...checked].filter((id) => headerIds.has(id)));
 
 	const visible = $derived.by(() => {
 		const q = filter.trim().toLowerCase();
