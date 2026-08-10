@@ -11,7 +11,10 @@
 	// that parent, doing nothing but what `+page.svelte` already does.
 	import NewProjectWizard from '../projects/NewProjectWizard.svelte';
 
-	let { onCreated }: { onCreated: (id: string) => void | Promise<void> } = $props();
+	let {
+		onCreated,
+		onListChanged
+	}: { onCreated: (id: string) => void | Promise<void>; onListChanged?: () => void } = $props();
 
 	let open = $state(true);
 </script>
@@ -19,4 +22,4 @@
 <button type="button" data-testid="host-toggle-open" onclick={() => (open = !open)}>
 	toggle
 </button>
-<NewProjectWizard bind:open {onCreated} />
+<NewProjectWizard bind:open {onCreated} {onListChanged} />
