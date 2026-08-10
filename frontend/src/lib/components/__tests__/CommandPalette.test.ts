@@ -2,11 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import * as modelRead from '$lib/api/model-read';
 import {
-	adoptSummary,
 	getCommandPaletteOpen,
 	getExportArtifactsOpen,
 	getImportArtifactsOpen,
-	resetModelStore,
+	setArtifactDialogsHosted,
 	setCommandPaletteOpen,
 	setExportArtifactsOpen,
 	setImportArtifactsOpen,
@@ -20,9 +19,9 @@ let app: ReturnType<typeof mount> | null = null;
 
 beforeEach(() => {
 	resetCheckout();
-	resetModelStore();
-	// The entity-search effect fires whenever the palette is open with a
-	// model loaded; an empty page keeps the Entities group unrendered.
+	// No model is loaded in these tests (getModelSummary() is null), so the
+	// palette's entity-search effect never fires — the spy is a guard, not a
+	// fixture.
 	vi.spyOn(modelRead, 'listElementsPage').mockResolvedValue({ items: [], total: 0 });
 	host = document.createElement('div');
 	document.body.appendChild(host);
@@ -34,23 +33,17 @@ afterEach(() => {
 	setCommandPaletteOpen(false);
 	setExportArtifactsOpen(false);
 	setImportArtifactsOpen(false);
-	resetModelStore();
+	setArtifactDialogsHosted(false);
 	host.remove();
 	vi.restoreAllMocks();
 });
 
-function openPalette(role: 'editor' | 'viewer', { withModel = true } = {}) {
+function openPalette(role: 'editor' | 'viewer', { hosted = true } = {}) {
 	setProjectInfo({ role, lockTtlSeconds: 300 });
-	if (withModel) {
-		adoptSummary({
-			model_rev: 1,
-			element_count: 0,
-			relationship_count: 0,
-			elements_by_type: {},
-			issue_counts: null,
-			undo_depth: 0
-		});
-	}
+	// In the app, ArtifactsMenu (workspace TopBar) registers itself as the
+	// host of the export/import dialogs while mounted; the palette's artifact
+	// actions exist only then.
+	setArtifactDialogsHosted(hosted);
 	app = mount(CommandPalette, { target: host });
 	setCommandPaletteOpen(true);
 	flushSync();
@@ -99,10 +92,13 @@ describe('CommandPalette', () => {
 	// but the export/import dialogs mount only inside the workspace TopBar.
 	// Selecting either action with no dialog mounted would latch the
 	// module-level open flag with nothing to reset it, popping the dialog
-	// open unprompted on the next project entry — so the items must not
-	// exist outside a loaded project.
-	it('offers no artifact actions when no model is loaded', () => {
-		openPalette('editor', { withModel: false });
+	// open unprompted on the next project entry — so the items exist only
+	// while ArtifactsMenu (the dialogs' host) is mounted. Gating on "a model
+	// is loaded" would be wrong in both directions: the model store is never
+	// reset on leaving a project, and a metamodel-only project has no
+	// summary while its menu is mounted and export works.
+	it('offers no artifact actions while no dialog host is mounted', () => {
+		openPalette('editor', { hosted: false });
 		expect(itemByValue('action:export-artifacts')).toBeNull();
 		expect(itemByValue('action:import-artifacts')).toBeNull();
 	});

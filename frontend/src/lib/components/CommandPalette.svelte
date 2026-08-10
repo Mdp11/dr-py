@@ -4,6 +4,7 @@
 	import { listElementsPage } from '$lib/api/model-read';
 	import {
 		canEdit,
+		getArtifactDialogsHosted,
 		getCommandPaletteOpen,
 		getModelSummary,
 		openExportArtifacts,
@@ -162,13 +163,16 @@
 			<Command.Item value="action:undo" onSelect={actionUndo}>
 				<span class="text-destructive">Undo last change</span>
 			</Command.Item>
-			<!-- Gated on a loaded model: this palette mounts in the ROOT layout
-			     (Cmd+K works on /projects too), but the export/import dialogs
-			     mount only inside the workspace TopBar. Selecting either action
-			     with no dialog mounted would latch the module-level open flag
-			     with nothing to reset it, popping the dialog open unprompted on
-			     the next project entry. -->
-			{#if hasModel}
+			<!-- Gated on the dialogs' host being mounted: this palette mounts in
+			     the ROOT layout (Cmd+K works on /projects too), but the
+			     export/import dialogs mount only inside the workspace TopBar's
+			     ArtifactsMenu, which registers itself as their host. Selecting
+			     either action with no dialog mounted would latch the
+			     module-level open flag with nothing to reset it. NOT gated on
+			     hasModel: the model store is never reset on leaving a project
+			     (stale-truthy on /projects), and a metamodel-only project has
+			     no summary while its menu is mounted and export works. -->
+			{#if getArtifactDialogsHosted()}
 				<Command.Item value="action:export-artifacts" onSelect={actionExportArtifacts}>
 					<span>Export artifacts…</span>
 				</Command.Item>
