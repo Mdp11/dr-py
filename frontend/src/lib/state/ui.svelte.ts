@@ -37,6 +37,26 @@ export function setHistoryDrawerOpen(open: boolean): void {
 // Artifact export/import dialogs (mounted once in ArtifactsMenu, opened from
 // three surfaces: the TopBar menu, the command palette, and the workspace tab
 // strip's per-artifact export button — which passes a seed selection).
+// True while ArtifactsMenu — the workspace TopBar component that hosts
+// ExportArtifactsDialog/ImportArtifactsDialog — is mounted. The command
+// palette mounts in the ROOT layout (Cmd+K works on /projects too) and gates
+// its artifact actions on this: the open flags below are module state, so
+// setting them while no dialog is mounted would latch them with nothing to
+// reset them, popping the dialog open unprompted on the next project entry.
+// Gating on "a model is loaded" is NOT equivalent: the model store is never
+// reset on leaving a project (so it stays truthy on /projects after any
+// visit), and a metamodel-only project has no summary while its menu and
+// dialogs are mounted and export works.
+let _artifactDialogsHosted: boolean = $state(false);
+
+export function getArtifactDialogsHosted(): boolean {
+	return _artifactDialogsHosted;
+}
+
+export function setArtifactDialogsHosted(hosted: boolean): void {
+	_artifactDialogsHosted = hosted;
+}
+
 let _exportArtifactsOpen: boolean = $state(false);
 let _exportArtifactsSeed: string[] = $state([]);
 let _importArtifactsOpen: boolean = $state(false);
@@ -49,8 +69,10 @@ export function getExportArtifactsSeed(): string[] {
 	return _exportArtifactsSeed;
 }
 
-/** Open the export dialog, pre-checking `seedRootIds` (unknown ids are
- * ignored by the dialog itself — it intersects with committed headers). */
+/** Open the export dialog, pre-checking `seedRootIds`. Unknown ids are
+ * ignored by the dialog itself — it intersects the seed with the committed
+ * headers of the kinds it renders, so an id of an unregistered kind (legacy
+ * `diagram`) is dropped just like an unknown one. */
 export function openExportArtifacts(seedRootIds: string[] = []): void {
 	_exportArtifactsSeed = seedRootIds;
 	_exportArtifactsOpen = true;

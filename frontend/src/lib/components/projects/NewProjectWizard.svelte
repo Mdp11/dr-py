@@ -9,8 +9,17 @@
 
 	let {
 		open = $bindable(false),
-		onCreated
-	}: { open?: boolean; onCreated: (id: string) => void | Promise<void> } = $props();
+		onCreated,
+		onListChanged
+	}: {
+		open?: boolean;
+		onCreated: (id: string) => void | Promise<void>;
+		/** A createProject abandoned by closing the dialog can still succeed
+		 * server-side; this tells the parent the projects list changed so the
+		 * orphan shows up without a full reload (else the user re-submits the
+		 * same files and creates a duplicate). */
+		onListChanged?: () => void;
+	} = $props();
 
 	let name = $state('');
 	let metamodel = $state<File | null>(null);
@@ -24,6 +33,24 @@
 
 	const canSubmit = $derived(name.trim().length > 0 && metamodel !== null);
 
+	// Bumped on every close: a createProject still in flight when the dialog
+	// closes is ABANDONED — its settlement compares its captured generation
+	// and, when stale, neither writes error/skipped/createdId onto the fresh
+	// form nor navigates via onCreated (a late success would otherwise drop
+	// the user into a project they cancelled). Same pattern as
+	// ImportArtifactsDialog's post-await guards.
+	let submitGen = 0;
+
+	// True from just before `await onCreated` (navigation into the created
+	// project) until the close-reset runs. The parent closes the dialog
+	// BEFORE the goto resolves, so the close-reset fires during a SUCCESSFUL
+	// hand-off too — this flag is what lets it tell that apart from a user
+	// abandoning an in-flight submit, where the journey bar must die at close
+	// (boot() adopts the bar on success; nothing would ever tear it down on
+	// an abandon, and the singleton beginJourney would hand the orphan to the
+	// next attempt).
+	let navigating = false;
+
 	// The project is created either way; when the importer reported-and-skipped
 	// artifacts, navigation is DEFERRED until the user clicks through the
 	// warning panel below. Reset EVERYTHING when the dialog closes so a
@@ -31,13 +58,26 @@
 	// createdId trio) left the name and the other three file slots showing
 	// the PREVIOUS attempt's values while the artifacts slot alone went
 	// mysteriously blank, which is not a state a fresh wizard should ever show.
+	// `pending` is reset here too (the abandoned request must not freeze a
+	// reopened wizard); the stale flight's own `finally` is gen-guarded so it
+	// cannot clobber a NEWER submit's pending afterwards.
 	$effect(() => {
 		if (!open) {
+			// A user abandoning an in-flight submit kills its journey bar NOW —
+			// not whenever the request settles (possibly never, on a hung
+			// connection). Guarded so the successful hand-off (parent closes
+			// while `await onCreated` navigates; boot() adopts the bar) is
+			// left alone.
+			if (pending && !navigating) cancelJourney();
+			navigating = false;
+			submitGen++;
 			name = '';
 			metamodel = null;
 			model = null;
 			view = null;
 			artifacts = null;
+			error = null;
+			pending = false;
 			skipped = null;
 			createdId = null;
 		}
@@ -48,6 +88,8 @@
 		if (!canSubmit || !metamodel) return;
 		error = null;
 		pending = true;
+		navigating = false; // a previous attempt's failed onCreated must not leak the flag
+		const gen = submitGen;
 		// Start the single journey bar now (on the click). It survives the goto()
 		// into the workspace, where boot() adopts the same journey (beginJourney is
 		// idempotent) and drives it through hydration/validation to 100%.
@@ -59,6 +101,15 @@
 					journeyUpload(loaded, total);
 				}
 			);
+			if (gen !== submitGen) {
+				// The dialog closed mid-flight: the user cancelled this attempt,
+				// and the close already tore its journey bar down (touching the
+				// singleton journey here could clobber a NEWER attempt's bar).
+				// The project now exists server-side though — do NOT navigate
+				// into it, but do tell the parent so the list shows the orphan.
+				onListChanged?.();
+				return;
+			}
 			if (created.skipped_artifacts.length > 0) {
 				// Show the warning BEFORE entering the project: the journey bar is
 				// torn down (boot() starts its own when the user proceeds).
@@ -68,13 +119,20 @@
 				return;
 			}
 			// Do NOT end the journey here — boot() continues it after navigation.
+			navigating = true;
 			await onCreated(created.id);
 		} catch (err) {
+			// Abandoned attempt: the close already cancelled ITS journey, and the
+			// live journey (if any) belongs to a newer attempt — leave it alone
+			// and keep the fresh form pristine.
+			if (gen !== submitGen) return;
 			cancelJourney(); // tear the bar down on failure
 			error =
 				err instanceof ApiError ? err.message : 'Could not create the project. Check the files.';
 		} finally {
-			pending = false;
+			// The close-reset already cleared `pending` for a stale flight, and by
+			// then it may belong to a newer submit — only the live flight owns it.
+			if (gen === submitGen) pending = false;
 		}
 	}
 </script>

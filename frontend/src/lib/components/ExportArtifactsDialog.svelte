@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import { FileCode, Route, Table, TriangleAlert } from '@lucide/svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
@@ -60,63 +59,78 @@
 	// Ids in the preview closure (checked roots + pulled-in dependencies).
 	const closureIds = $derived(new Set((preview?.artifacts ?? []).map((a) => a.id)));
 
+	// The EFFECTIVE selection: `checked` intersected with the live filtered
+	// headers. `checked` is only ever ADDED to by user or seed action, but the
+	// headers can shrink underneath it — a peer's delete commit over the
+	// realtime feed removes the row while the untracked open-effect
+	// (correctly) never reruns. Every consumer (hidden count, preview,
+	// export, the submit gate) reads THIS, so a dead id can neither linger as
+	// a phantom "+N selected not shown" nor be POSTed as an export root.
+	const headerIds = $derived(new Set(headers.map((h) => h.id)));
+	const selected = $derived([...checked].filter((id) => headerIds.has(id)));
+
 	const visible = $derived.by(() => {
 		const q = filter.trim().toLowerCase();
 		return headers.filter((h) => q === '' || h.name.toLowerCase().includes(q));
 	});
 	const hiddenSelected = $derived(
-		[...checked].filter((id) => !visible.some((h) => h.id === id)).length
+		selected.filter((id) => !visible.some((h) => h.id === id)).length
 	);
 	const allVisibleChecked = $derived(visible.length > 0 && visible.every((h) => checked.has(h.id)));
 
-	// Open/close lifecycle: seed the selection and fire the first preview
-	// immediately on an open TRANSITION. Reads the STORE (not the local
-	// `open`) and writes the local `open` — never the reverse — so this can
-	// never be the write side of a read/write loop with itself. The close
-	// branch only cancels the pending debounce and bumps the generation
-	// counter; the rest of the local state (`checked`, `filter`, `preview`,
-	// …) is left as-is and gets reset on the NEXT open, not here.
+	// Open/close lifecycle: seed the selection on an open TRANSITION. Reads
+	// the STORE (not the local `open`) and writes the local `open` — never
+	// the reverse — so this can never be the write side of a read/write loop
+	// with itself. The close branch only cancels the pending debounce and
+	// bumps the generation counter; the rest of the local state (`checked`,
+	// `filter`, `preview`, …) is left as-is and gets reset on the NEXT open,
+	// not here.
 	//
-	// This effect must depend ONLY on `getExportArtifactsOpen()` and
-	// `getExportArtifactsSeed()` — both read directly below, un-wrapped — so
-	// it reruns only on an actual open/seed change. `getCommittedArtifactHeaders()`
-	// is read through `untrack()` on purpose: it is genuinely reactive
-	// (`artifacts.svelte.ts`'s `_items` $state) and changes on ANY committed
-	// artifact create/rename/delete, including a peer's commit arriving over
-	// the realtime feed while this dialog is open. Without `untrack()`, that
-	// unrelated change would rerun this whole effect and wipe every checkbox
-	// the user had toggled since opening, re-seeding from the ORIGINAL seed
-	// array as if the dialog had just reopened.
+	// This effect depends ONLY on `getExportArtifactsOpen()` and
+	// `getExportArtifactsSeed()`, so it reruns only on an actual open/seed
+	// change — deliberately NOT on the committed headers, which change on ANY
+	// artifact commit (including a peer's, over the realtime feed) and must
+	// not wipe the user's in-progress selection. Seed ids go into `checked`
+	// unvalidated: every consumer that matters reads `selected` (above),
+	// which intersects with the live headers, so an unknown or
+	// unregistered-kind seed id can surface nowhere.
 	$effect(() => {
 		const isOpen = getExportArtifactsOpen();
 		const seed = getExportArtifactsSeed();
 		open = isOpen;
 		if (isOpen) {
-			const ids = new Set(untrack(() => getCommittedArtifactHeaders()).map((h) => h.id));
 			checked.clear();
-			let anySeeded = false;
-			for (const id of seed) {
-				if (ids.has(id)) {
-					checked.add(id);
-					anySeeded = true;
-				}
-			}
+			for (const id of seed) checked.add(id);
 			filter = '';
 			preview = null;
 			previewError = null;
 			exportError = null;
-			// Schedule rather than call runPreview() synchronously: runPreview
-			// reads `checked` (a piece of state this effect just wrote), and
-			// reading state an effect also writes within the same synchronous
-			// run trips Svelte's effect_update_depth_exceeded guard. Routing
-			// through the same setTimeout plumbing as the debounced path (with
-			// delay 0 for "immediate") keeps the read outside any active effect.
-			if (anySeeded) schedulePreview(0);
 		} else {
 			if (timer !== null) clearTimeout(timer);
 			timer = null;
 			gen++;
 		}
+	});
+
+	// Preview scheduling: ONE place reacts to the effective selection, so a
+	// change from ANY source — a user toggle, the open-transition seeding
+	// above, or a peer's commit shrinking `headers` underneath `checked` —
+	// reschedules the preview; the toggle handlers don't schedule themselves.
+	// The first observation after an open previews immediately (a seeded open
+	// must not wait out the debounce; `null` is the just-opened sentinel),
+	// later ones debounce. Scheduling (never calling runPreview synchronously)
+	// keeps the `checked` read outside any active effect — see schedulePreview.
+	let lastSelectedKey: string | null = null;
+	$effect(() => {
+		if (!open) {
+			lastSelectedKey = null;
+			return;
+		}
+		const key = selected.join('\u0000');
+		if (key === lastSelectedKey) return;
+		const immediate = lastSelectedKey === null;
+		lastSelectedKey = key;
+		schedulePreview(immediate ? 0 : undefined);
 	});
 
 	// A bare mount/unmount effect: it reads nothing reactive, so it runs once
@@ -133,13 +147,13 @@
 
 	async function runPreview(): Promise<void> {
 		const g = ++gen;
-		if (checked.size === 0) {
+		if (selected.length === 0) {
 			preview = null;
 			previewError = null;
 			return;
 		}
 		try {
-			const res = await exportPreview([...checked]);
+			const res = await exportPreview(selected);
 			if (g !== gen) return; // stale response
 			preview = res;
 			previewError = null;
@@ -157,7 +171,6 @@
 	function toggle(id: string): void {
 		if (checked.has(id)) checked.delete(id);
 		else checked.add(id);
-		schedulePreview();
 	}
 
 	function toggleSection(kind: ArtifactKind): void {
@@ -167,7 +180,6 @@
 			if (allChecked) checked.delete(h.id);
 			else checked.add(h.id);
 		}
-		schedulePreview();
 	}
 
 	function toggleAll(): void {
@@ -180,14 +192,13 @@
 			if (wasAllChecked) checked.delete(h.id);
 			else checked.add(h.id);
 		}
-		schedulePreview();
 	}
 
 	async function onExport(): Promise<void> {
 		exportError = null;
 		saving = true;
 		try {
-			const resp = await exportBundle([...checked]);
+			const resp = await exportBundle(selected);
 			await saveResponseToFile(resp, BUNDLE_FILENAME);
 			setExportArtifactsOpen(false);
 		} catch (err) {
@@ -279,7 +290,7 @@
 
 			<div class="flex flex-col gap-1 border-t border-border pt-2 text-xs">
 				<p class="text-muted-foreground">
-					{preview?.artifacts.length ?? checked.size} artifacts
+					{preview?.artifacts.length ?? selected.length} artifacts
 				</p>
 				{#if preview && preview.dangling_refs.length > 0}
 					<p class="flex items-center gap-1 text-warning" data-testid="export-dangling-refs">
@@ -305,7 +316,7 @@
 			<Button
 				type="button"
 				data-testid="export-submit"
-				disabled={checked.size === 0 || saving}
+				disabled={selected.length === 0 || saving}
 				onclick={() => void onExport()}
 			>
 				{saving ? 'Exporting…' : 'Export bundle'}

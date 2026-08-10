@@ -4,6 +4,7 @@
 	import { listElementsPage } from '$lib/api/model-read';
 	import {
 		canEdit,
+		getArtifactDialogsHosted,
 		getCommandPaletteOpen,
 		getModelSummary,
 		openExportArtifacts,
@@ -22,7 +23,19 @@
 	const MAX_RESULTS = 50;
 	const DEBOUNCE_MS = 200;
 
-	const open = $derived(getCommandPaletteOpen());
+	// A local $state mirror of the store's open flag, bound two-way to
+	// Command.Dialog — the same bind:open shape every other dialog here uses
+	// (see the comment in ExportArtifactsDialog). Neither lint-preferred
+	// alternative works: a $derived (writable or not) — bound or passed as a
+	// plain prop — leaves bits-ui's Dialog.Content unrendered under the test
+	// environment, so the palette's items were untestable in that shape.
+	// Verified empirically by CommandPalette.test.ts, which fails wholesale
+	// on either $derived form.
+	// eslint-disable-next-line svelte/prefer-writable-derived
+	let open = $state(false);
+	$effect(() => {
+		open = getCommandPaletteOpen();
+	});
 
 	let query = $state('');
 
@@ -66,9 +79,10 @@
 		return () => clearTimeout(timer);
 	});
 
+	// Item-select dismissal delegates to the same handler bits-ui calls for
+	// Escape/overlay dismissal, so close-time teardown cannot diverge by path.
 	function close(): void {
-		setCommandPaletteOpen(false);
-		query = '';
+		onOpenChange(false);
 	}
 
 	function pickEntity(id: string): void {
@@ -117,7 +131,7 @@
 </script>
 
 <Command.Dialog
-	{open}
+	bind:open
 	{onOpenChange}
 	title="Command Palette"
 	description="Search entities, run actions, or switch tabs."
@@ -149,13 +163,24 @@
 			<Command.Item value="action:undo" onSelect={actionUndo}>
 				<span class="text-destructive">Undo last change</span>
 			</Command.Item>
-			<Command.Item value="action:export-artifacts" onSelect={actionExportArtifacts}>
-				<span>Export artifacts…</span>
-			</Command.Item>
-			{#if canEdit()}
-				<Command.Item value="action:import-artifacts" onSelect={actionImportArtifacts}>
-					<span>Import artifacts…</span>
+			<!-- Gated on the dialogs' host being mounted: this palette mounts in
+			     the ROOT layout (Cmd+K works on /projects too), but the
+			     export/import dialogs mount only inside the workspace TopBar's
+			     ArtifactsMenu, which registers itself as their host. Selecting
+			     either action with no dialog mounted would latch the
+			     module-level open flag with nothing to reset it. NOT gated on
+			     hasModel: the model store is never reset on leaving a project
+			     (stale-truthy on /projects), and a metamodel-only project has
+			     no summary while its menu is mounted and export works. -->
+			{#if getArtifactDialogsHosted()}
+				<Command.Item value="action:export-artifacts" onSelect={actionExportArtifacts}>
+					<span>Export artifacts…</span>
 				</Command.Item>
+				{#if canEdit()}
+					<Command.Item value="action:import-artifacts" onSelect={actionImportArtifacts}>
+						<span>Import artifacts…</span>
+					</Command.Item>
+				{/if}
 			{/if}
 		</Command.Group>
 

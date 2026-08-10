@@ -81,5 +81,8 @@
 </div>
 
 {#if isAdmin()}
-	<NewProjectWizard bind:open={wizardOpen} {onCreated} />
+	<!-- onListChanged: an abandoned (closed mid-flight) creation that still
+	     succeeded server-side refreshes the list so the orphan project shows
+	     up instead of inviting a duplicate re-submit. -->
+	<NewProjectWizard bind:open={wizardOpen} {onCreated} onListChanged={() => void refresh()} />
 {/if}

@@ -144,6 +144,7 @@ export {
 	toggleType
 } from './filters.svelte';
 export {
+	getArtifactDialogsHosted,
 	getCommandPaletteOpen,
 	getDiffDrawerOpen,
 	getExportArtifactsOpen,
@@ -152,6 +153,7 @@ export {
 	getImportArtifactsOpen,
 	openExportArtifacts,
 	openImportArtifacts,
+	setArtifactDialogsHosted,
 	setCommandPaletteOpen,
 	setDiffDrawerOpen,
 	setExportArtifactsOpen,
