@@ -117,6 +117,42 @@ describe('MetamodelTab', () => {
 		}
 	});
 
+	it('disables Discard changes while a rebind is in flight', async () => {
+		setProjectInfo({ role: 'owner', lockTtlSeconds: 300 });
+		vi.spyOn(mmApi, 'lintMetamodel').mockResolvedValue({ ok: true, errors: [] });
+		vi.spyOn(lockApi, 'acquireLocks').mockResolvedValue(LEASE);
+		vi.spyOn(lockApi, 'releaseLock').mockResolvedValue(undefined);
+		vi.spyOn(mmApi, 'diffMetamodel').mockResolvedValue(DIFF);
+		// Never resolves: the assertions below are about the in-flight window.
+		vi.spyOn(mmApi, 'rebindMetamodel').mockImplementation(() => new Promise<Rebind>(() => {}));
+
+		const c = mount(MetamodelTab, { target: document.body });
+		await settle();
+		try {
+			editMetamodelBuffer(`${BASE}candidate: true\n`);
+			await previewMetamodelChanges();
+			await settle();
+
+			const discard = (): HTMLButtonElement | undefined =>
+				[...document.body.querySelectorAll('button')].find(
+					(b) => b.textContent?.trim() === 'Discard changes'
+				);
+			expect(discard()?.hasAttribute('disabled')).toBe(false);
+
+			[...document.body.querySelectorAll('button')]
+				.find((b) => b.textContent?.trim() === 'Rebind')
+				?.click();
+			await settle();
+
+			// Adopting the baseline over a buffer whose rebind is in flight has
+			// no coherent meaning — the surface refuses the interleaving rather
+			// than leaving the state module to reconcile it.
+			expect(discard()?.hasAttribute('disabled')).toBe(true);
+		} finally {
+			unmount(c);
+		}
+	});
+
 	it('surfaces a failed post-rebind refresh instead of showing stale state, without throwing', async () => {
 		setProjectInfo({ role: 'owner', lockTtlSeconds: 300 });
 		vi.spyOn(mmApi, 'lintMetamodel').mockResolvedValue({ ok: true, errors: [] });

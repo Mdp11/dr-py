@@ -337,6 +337,98 @@ describe('commitMetamodelRebind', () => {
 		expect(release).toHaveBeenCalledWith('t-mm', undefined);
 	});
 
+	it('upgrades a degraded "serialized" source to "stored" once a rebind stored a blob', async () => {
+		vi.spyOn(mmApi, 'getMetamodelRaw').mockResolvedValue({ blob: BASE, source: 'serialized' });
+		vi.spyOn(lockApi, 'releaseLock').mockResolvedValue(undefined);
+		await initEditedAndPreviewed();
+		expect(getMetamodelEditor().source).toBe('serialized');
+		vi.spyOn(mmApi, 'rebindMetamodel').mockResolvedValue(REBIND);
+
+		await commitMetamodelRebind('swap it');
+
+		// The rebind DID store a blob, so the "re-serialized source" chip must
+		// stop claiming otherwise without waiting for the tab to be reopened.
+		expect(getMetamodelEditor().source).toBe('stored');
+	});
+
+	it('refuses edits and discards at the surface while a rebind is in flight', async () => {
+		vi.spyOn(lockApi, 'releaseLock').mockResolvedValue(undefined);
+		await initEditedAndPreviewed();
+		const slow = deferred<Rebind>();
+		vi.spyOn(mmApi, 'rebindMetamodel').mockImplementation(() => slow.promise);
+		expect(getMetamodelEditor().readOnly).toBe(false);
+
+		const rebinding = commitMetamodelRebind('m');
+
+		// Read-only for the WHOLE flight: the CodeMirror compartment and the
+		// tab's buttons both key off this, so no keystroke and no Discard can
+		// be aimed at a document whose adoption is already in flight.
+		expect(getMetamodelEditor().readOnly).toBe(true);
+		slow.resolve(REBIND);
+		await rebinding;
+
+		expect(getMetamodelEditor().readOnly).toBe(false);
+	});
+
+	it('keeps a buffer typed DURING the flight dirty instead of adopting it as the baseline', async () => {
+		vi.useFakeTimers();
+		vi.spyOn(lockApi, 'releaseLock').mockResolvedValue(undefined);
+		await initEditedAndPreviewed();
+		const slow = deferred<Rebind>();
+		const rebind = vi.spyOn(mmApi, 'rebindMetamodel').mockImplementation(() => slow.promise);
+		const SENT = `${BASE}candidate: true\n`;
+		const TYPED = `${SENT}typed: mid-flight\n`;
+
+		const rebinding = commitMetamodelRebind('m');
+		// A straggler that raced CodeMirror's read-only reconfigure: the state
+		// layer keeps it (the editor's document holds it either way) — dropping
+		// it would desync the buffer from what the user is looking at.
+		editMetamodelBuffer(TYPED);
+		slow.resolve(REBIND);
+		expect(await rebinding).not.toBeNull();
+
+		// The server bound the PRE-typing text...
+		expect(rebind).toHaveBeenCalledWith(SENT, { baseRev: 0, message: 'm' });
+		const v = getMetamodelEditor();
+		// ...so the typed lines are unreviewed local changes on top of it, not
+		// something the rebind saved.
+		expect(v.buffer).toBe(TYPED);
+		expect(v.dirty).toBe(true);
+		// Flushed immediately, not on the debounce: a tab closed before the
+		// timer fires must not take the work with it.
+		expect(localStorage.getItem(DRAFT_KEY)).toBe(TYPED);
+		// Coherent, not merely non-lossy: the spent preview is gone, so Rebind
+		// is dead until the user previews what they now have.
+		expect(v.preview).toBeNull();
+		expect(v.previewCurrent).toBe(false);
+		expect(v.draftRestored).toBe(false);
+		expect(v.rebindError).toBeNull();
+		expect(v.rebinding).toBe(false);
+	});
+
+	it('leaves a discard DURING the flight as dirty pre-rebind text, not as the new baseline', async () => {
+		vi.useFakeTimers();
+		vi.spyOn(lockApi, 'releaseLock').mockResolvedValue(undefined);
+		await initEditedAndPreviewed();
+		const slow = deferred<Rebind>();
+		vi.spyOn(mmApi, 'rebindMetamodel').mockImplementation(() => slow.promise);
+
+		const rebinding = commitMetamodelRebind('m');
+		// The surface disables this button while `rebinding`; if it is reached
+		// anyway, the resolving rebind must NOT re-adopt the old text as the
+		// baseline — that would present the pre-rebind YAML as current with
+		// nothing marking it stale.
+		discardMetamodelDraft();
+		slow.resolve(REBIND);
+		expect(await rebinding).not.toBeNull();
+
+		const v = getMetamodelEditor();
+		expect(v.buffer).toBe(BASE);
+		expect(v.dirty).toBe(true);
+		expect(localStorage.getItem(DRAFT_KEY)).toBe(BASE);
+		expect(v.previewCurrent).toBe(false);
+	});
+
 	it('maps each 409 refusal shape and a 422 to its own message', async () => {
 		await initEditedAndPreviewed();
 		const rebind = vi.spyOn(mmApi, 'rebindMetamodel').mockResolvedValue(REBIND);

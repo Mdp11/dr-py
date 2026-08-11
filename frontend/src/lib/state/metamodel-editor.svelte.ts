@@ -26,9 +26,11 @@ import { isProjectQuiet } from './quiet';
  *
  * Draft safety: the dirty buffer mirrors to localStorage per project
  * (`ui.metamodel.draft.<projectId>`), debounced; it survives refreshes and
- * is cleared only by a successful rebind or an explicit discard. The lease
- * does NOT survive a refresh — it re-acquires on the next edit, so a
- * restored draft under a peer's lease opens read-only instead of fighting.
+ * is cleared only by a successful rebind that adopted it, or an explicit
+ * discard. The lease does NOT survive a refresh — it re-acquires on the next
+ * edit, so a restored draft opens EDITABLE even under a peer's lease; the
+ * first keystroke's acquire is what discovers the conflict, and only then
+ * does the editor turn read-only (keeping the characters already typed).
  */
 
 export const METAMODEL_LINT_DEBOUNCE_MS = 500;
@@ -119,8 +121,23 @@ export function isMetamodelEditorDirty(): boolean {
 	return _phase === 'ready' && _buffer !== _baseline;
 }
 
-function isReadOnly(): boolean {
+/** Whether a keystroke that ALREADY happened may land in the buffer.
+ * Deliberately does NOT include `_rebinding`: the surface is already
+ * read-only for that reason (see {@link isReadOnly}), so the only change that
+ * can still arrive is a straggler that raced CodeMirror's read-only
+ * reconfigure — and those characters live in the editor's document either
+ * way. Dropping them here would desync the buffer from what the user sees;
+ * `commitMetamodelRebind` instead keeps a moved buffer safe. */
+function isEditBlocked(): boolean {
 	return _phase !== 'ready' || getRole() !== 'owner' || _lockedBy !== null;
+}
+
+/** The SURFACE's read-only state: what the tab renders and what CodeMirror
+ * enforces. Folds in `_rebinding` — typing into (or discarding) a document
+ * whose adoption is mid-flight has no coherent meaning, and the interleaving
+ * is far better refused than reconciled. */
+function isReadOnly(): boolean {
+	return isEditBlocked() || _rebinding;
 }
 
 export function getMetamodelEditor(): MetamodelEditorView {
@@ -221,7 +238,7 @@ function scheduleDraftWrite(): void {
 }
 
 export function editMetamodelBuffer(code: string): void {
-	if (isReadOnly()) return;
+	if (isEditBlocked()) return;
 	_buffer = code;
 	_rebindError = null;
 	scheduleDraftWrite();
@@ -287,16 +304,41 @@ export async function commitMetamodelRebind(message: string): Promise<Rebind | n
 		return null;
 	}
 	const gen = _gen;
+	// Capture the text that is actually SENT before the await (the precedent
+	// is previewMetamodelChanges' `const buf`). `_buffer` can move while the
+	// request is in flight — a straggler keystroke that raced the read-only
+	// reconfigure, or a Discard — and adopting the POST-await buffer as the
+	// baseline would call that moved text "saved" when the server never saw
+	// it: dirty flips false, the tab loses its Discard button, and the draft
+	// key is deleted, leaving the work in the CodeMirror doc alone.
+	const sent = _buffer;
 	_rebinding = true;
 	_rebindError = null;
 	try {
-		const res = await rebindMetamodelApi(_buffer, { baseRev: getModelRev(), message });
+		const res = await rebindMetamodelApi(sent, { baseRev: getModelRev(), message });
 		if (gen !== _gen) return null;
-		_baseline = _buffer;
+		// What the project is bound to now is `sent`, whatever the buffer holds.
+		_baseline = sent;
+		// A rebind always stores a blob, so a session that loaded through the
+		// degraded "serialized" fallback is no longer looking at one.
+		_source = 'stored';
+		// The preview described `sent` against the PREVIOUS metamodel — it is
+		// spent in either branch, so Rebind goes dead until a fresh preview.
 		_preview = null;
 		_previewFor = null;
+		// Not a draft restored from a past session in either branch: any
+		// remaining divergence was typed in this one.
 		_draftRestored = false;
-		clearDraftStorage();
+		if (_buffer === sent) {
+			clearDraftStorage();
+		} else {
+			// The buffer moved mid-flight: those characters are unreviewed local
+			// changes ON TOP of the freshly bound metamodel, so the editor stays
+			// dirty and keeps its draft. Flush it NOW rather than waiting for the
+			// debounce — a mid-flight Discard actively removed the key, and a
+			// close before the timer fires would otherwise take the work with it.
+			writeDraftNow();
+		}
 		_leaseHeld = false;
 		void dropMetamodelLease();
 		return res;

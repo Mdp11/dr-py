@@ -114,7 +114,13 @@
 					{ed.rebinding ? 'Rebinding…' : 'Rebind'}
 				</Button>
 				{#if ed.dirty}
-					<Button size="sm" variant="ghost" onclick={discardMetamodelDraft}>Discard changes</Button>
+					<!-- Disabled while a rebind is in flight: adopting the baseline
+					     over the buffer has no coherent meaning while the buffer is
+					     being bound, and the interleaving is better refused than
+					     reconciled (the state module survives it either way). -->
+					<Button size="sm" variant="ghost" disabled={ed.rebinding} onclick={discardMetamodelDraft}>
+						Discard changes
+					</Button>
 				{/if}
 			{:else}
 				<p class="text-muted-foreground/70">
