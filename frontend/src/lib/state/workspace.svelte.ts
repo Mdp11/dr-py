@@ -17,12 +17,12 @@ export const BUILTIN_TABS = ['detail', 'graph', 'issues'] as const;
 
 export interface DynamicTab {
 	id: string;
-	kind: 'navigation' | 'table' | 'snippet';
+	kind: 'navigation' | 'table' | 'snippet' | 'metamodel';
 	artifactId: string | null;
 	title: string;
 }
 
-const PREFIX = { navigation: 'nav', table: 'tbl', snippet: 'snip' } as const;
+const PREFIX = { navigation: 'nav', table: 'tbl', snippet: 'snip', metamodel: 'mm' } as const;
 
 let _activeTab: string = $state('detail');
 let _tabs = $state<DynamicTab[]>([]);
@@ -62,6 +62,26 @@ export function openArtifactTab(
 
 export function openNavigationTab(opts: { artifactId: string | null; title: string }): string {
 	return openArtifactTab('navigation', opts);
+}
+
+const METAMODEL_TAB_ID = 'mm:editor';
+
+/** Open (or focus) the singleton metamodel editor tab. Not artifact-backed;
+ * dedupe is by KIND, which is why it does not go through openArtifactTab. */
+export function openMetamodelTab(): string {
+	const existing = _tabs.find((t) => t.kind === 'metamodel');
+	if (existing) {
+		_activeTab = existing.id;
+		persist();
+		return existing.id;
+	}
+	_tabs = [
+		..._tabs,
+		{ id: METAMODEL_TAB_ID, kind: 'metamodel', artifactId: null, title: 'Metamodel' }
+	];
+	_activeTab = METAMODEL_TAB_ID;
+	persist();
+	return METAMODEL_TAB_ID;
 }
 
 export function closeTab(id: string): void {
@@ -110,6 +130,9 @@ function storageKey(): string | null {
 /** True when a tab is worth persisting: it is bound to an artifact the SERVER
  * knows about. See the module docstring for why a temp id is not one. */
 function persistable(t: DynamicTab): boolean {
+	// The metamodel tab has no artifact but is a stable singleton — restoring
+	// it is cheap and its draft persists independently (ui.metamodel.draft.*).
+	if (t.kind === 'metamodel') return true;
 	return t.artifactId !== null && !isTempId(t.artifactId);
 }
 

@@ -125,6 +125,7 @@ export {
 	getDynamicTabs,
 	initWorkspaceTabs,
 	openArtifactTab,
+	openMetamodelTab,
 	openNavigationTab,
 	repointTabArtifact,
 	resetWorkspaceTabs,
