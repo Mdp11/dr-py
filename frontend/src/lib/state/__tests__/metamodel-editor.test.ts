@@ -351,7 +351,7 @@ describe('commitMetamodelRebind', () => {
 		expect(getMetamodelEditor().source).toBe('stored');
 	});
 
-	it('refuses edits and discards at the surface while a rebind is in flight', async () => {
+	it('flips the surface readOnly flag for the whole rebind flight', async () => {
 		vi.spyOn(lockApi, 'releaseLock').mockResolvedValue(undefined);
 		await initEditedAndPreviewed();
 		const slow = deferred<Rebind>();

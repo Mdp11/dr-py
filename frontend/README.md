@@ -847,10 +847,14 @@ browses the project's durable commit journal:
 Editing the metamodel is a **workspace tab**, not a dialog: the TopBar's "Edit
 Metamodel" item (and the command palette's equivalent) calls
 `openMetamodelTab()`, which focuses the existing tab or opens the singleton
-`{ kind: 'metamodel', id: 'mm', artifactId: null }` one. It is the only tab
-kind with no artifact behind it, and the only one restored on reload without a
-server round-trip (its content is a draft, not an artifact row). It replaces
-the old `SwapMetamodelDrawer`, whose whole interaction was picking a file.
+`{ kind: 'metamodel', id: METAMODEL_TAB_ID, artifactId: null }` one —
+`METAMODEL_TAB_ID` is `'mm:editor'`, distinct from both the `'mm'` tab-id
+prefix in the same file's `PREFIX` map and the `mm` lease resource id below.
+It is the only persisted tab kind with no artifact behind it: `persistable()`
+requires a real `artifactId` for every other kind, while this one is a stable
+singleton whose draft persists independently in
+`ui.metamodel.draft.<projectId>`. It replaces the old `SwapMetamodelDrawer`,
+whose whole interaction was picking a file.
 
 `state/metamodel-editor.svelte.ts` owns everything the tab renders, exposed as
 one `MetamodelEditorView` snapshot from `getMetamodelEditor()`:
