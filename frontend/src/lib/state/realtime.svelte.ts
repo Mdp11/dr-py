@@ -75,8 +75,8 @@ export function getLockState(): SvelteMap<string, LeaseLite> {
 
 /**
  * True while ANY project-wide lease covers a MODEL-scope resource (elements,
- * relationships, `mm`) — i.e. `getLockState()` minus the `art:` AND
- * `folder:` namespaces.
+ * relationships) — i.e. `getLockState()` minus the `art:`, `folder:`, and
+ * `mm` namespaces.
  *
  * The distinction is load-bearing, not cosmetic. `getLockState()` is the whole
  * project's lease table, and since artifact editing moved onto the
@@ -90,14 +90,20 @@ export function getLockState(): SvelteMap<string, LeaseLite> {
  * A `folder:` lease is VIEW-scope for the identical reason `art:` is
  * artifact-scope: every sidebar drag/rename/create-child gesture takes one,
  * so counting it would let one user's sidebar drag disable model revert for
- * everyone.
+ * everyone. `mm` is excluded too — see the comment on its check below.
  *
  * Reactive: iterating a `SvelteMap`'s keys subscribes to it, so a `$derived`
  * reading this re-runs on every lock feed event.
  */
 export function hasModelLocks(): boolean {
 	for (const rid of _lockState.keys()) {
-		if (!isArtifactResource(rid) && !isFolderResource(rid)) return true;
+		// `mm` mirrors the backend's `is_model_resource` (locking.py): the
+		// metamodel lease is NOT a model-scope lease there either. Rebind's own
+		// quiescence check ignores it server-side (a peer holding `mm` gets its
+		// own 409-with-email from the metamodel writer, independent of this
+		// predicate), and counting it here would make the swap drawer's own
+		// `mm` lease disable its own Rebind button the moment it opens.
+		if (rid !== 'mm' && !isArtifactResource(rid) && !isFolderResource(rid)) return true;
 	}
 	return false;
 }

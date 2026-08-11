@@ -196,9 +196,15 @@ export {
 	reacquireOpenArtifactLeases,
 	releaseArtifactIfUnneeded,
 	releaseFolderLeaseIfUnneeded,
+	releaseMetamodelLease,
 	type CheckoutResult,
 	type LockConflictLite
 } from './checkout.svelte';
+export {
+	acquireMetamodelLease,
+	dropMetamodelLease,
+	getMetamodelLockHolder
+} from './metamodel-lease.svelte';
 export {
 	acquireLocks,
 	acquireArtifactLease,

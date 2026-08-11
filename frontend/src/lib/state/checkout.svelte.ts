@@ -463,6 +463,23 @@ export async function releaseFolderLeaseIfUnneeded(folderId: string): Promise<vo
 }
 
 /**
+ * Release my `mm` lease (metamodel surface close). Best-effort like its
+ * artifact/folder siblings ({@link releaseArtifactIfUnneeded},
+ * {@link releaseFolderLeaseIfUnneeded}). Unlike them it needs no staged-ops
+ * check: the `mm` lease is always acquired standalone by the metamodel
+ * surface (its own `/locks` call, its own token — see
+ * `metamodel-lease.svelte.ts`) and {@link lockedResourcesNeededBy} never
+ * emits `mm`, so no staged op can require it.
+ */
+export async function releaseMetamodelLease(): Promise<void> {
+	const token = _registry.get('mm')?.token;
+	if (token === undefined) return;
+	_dropToken(token);
+	await releaseLock(token, _clientConfig).catch(() => {});
+	if (_registry.size === 0) _stopHeartbeat();
+}
+
+/**
  * The canonical `art:` resource ids of every artifact currently open in an
  * editor tab — the "do not release this, the user can SEE it checked out" set.
  *

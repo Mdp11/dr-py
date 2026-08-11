@@ -60,9 +60,12 @@ describe('hasModelLocks', () => {
 		snapshotWithLocks('art:a9', 'e1');
 		expect(hasModelLocks()).toBe(true);
 
-		// `mm` (the metamodel lock namespace) is model scope too.
+		// `mm` is EXCLUDED, mirroring the backend's `is_model_resource`
+		// (locking.py), which does not count the metamodel lease as a
+		// model-scope lease. Counting it here would let the swap drawer's
+		// OWN `mm` lease disable its own Rebind button.
 		snapshotWithLocks('mm');
-		expect(hasModelLocks()).toBe(true);
+		expect(hasModelLocks()).toBe(false);
 	});
 });
 
