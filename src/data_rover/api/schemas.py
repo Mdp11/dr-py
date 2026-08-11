@@ -148,6 +148,24 @@ class RawMetamodelResponse(BaseModel):
     source: Literal["stored", "serialized"]
 
 
+class LintErrorOut(BaseModel):
+    """One metamodel lint finding. Position is best-effort: YAML syntax
+    errors carry a 1-based line/column from the parser mark; schema errors
+    (``MetamodelError``) are message-only."""
+
+    message: str
+    line: int | None = None
+    column: int | None = None
+
+
+class MetamodelLintResponse(BaseModel):
+    """Cheap parse/schema check for the live editor (Phase 5). Always 200 —
+    a failed parse is the RESULT, not an error."""
+
+    ok: bool
+    errors: list[LintErrorOut] = Field(default_factory=list)
+
+
 class MetamodelDiffResponse(BaseModel):
     """Read-only sandbox conformance diff (Phase 6B) + structural document
     diff (Phase 4). now_failing = issues the candidate metamodel introduces;
