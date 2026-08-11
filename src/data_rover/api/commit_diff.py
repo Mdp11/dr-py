@@ -288,7 +288,7 @@ def _metamodel_structural(
         return diff_metamodels(
             load_metamodel_str(before.blob), load_metamodel_str(after.blob)
         )
-    except (MetamodelError, yaml.YAMLError):
+    except MetamodelError, yaml.YAMLError:
         return None
 
 

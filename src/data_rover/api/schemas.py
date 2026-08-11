@@ -177,9 +177,7 @@ class MetamodelDiffResponse(BaseModel):
     unchanged_count: int
     current_error_count: int
     candidate_error_count: int
-    structural: MetamodelStructuralDiff = Field(
-        default_factory=MetamodelStructuralDiff
-    )
+    structural: MetamodelStructuralDiff = Field(default_factory=MetamodelStructuralDiff)
 
 
 class RebindResponse(BaseModel):
