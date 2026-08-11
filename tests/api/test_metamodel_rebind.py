@@ -214,3 +214,75 @@ def test_rebind_survives_eviction(client: TestClient) -> None:
         f"Node element {node_id!r} was lost after eviction+rehydration; "
         f"elements present: {ids_after}"
     )
+
+
+def _add_editor(user_id: str, email: str) -> None:
+    gen = db.get_db()
+    s = next(gen)
+    try:
+        from data_rover.api.db_models import User
+        s.add(User(id=user_id, email=email))
+        add_member(s, DEFAULT_PROJECT_ID, user_id, Role.editor)
+        s.commit()
+    finally:
+        gen.close()
+
+
+_PEER = {"x-user-id": "peer", "x-user-email": "peer@example.com"}
+
+
+def _acquire_mm(c: TestClient, headers: dict[str, str]) -> None:
+    r = c.post(
+        papi("/locks"), headers=headers,
+        json={
+            "targets": [
+                {"resource_id": "mm", "mode": "exclusive", "type": "metamodel"}
+            ],
+            "intent": "edit",
+        },
+    )
+    assert r.status_code == 200, r.text
+
+
+def test_rebind_409_when_peer_holds_mm_lease(client: TestClient) -> None:
+    _add_editor("peer", "peer@example.com")
+    _acquire_mm(client, _PEER)
+    r = client.post(
+        papi("/metamodel/rebind") + f"?base_rev={_rev(client)}",
+        content=_MM_RENAMED,
+        headers={"content-type": "application/x-yaml", **AUTH_HEADERS},
+    )
+    assert r.status_code == 409
+    body = r.json()
+    assert body["detail"] == "metamodel locked"
+    assert body["holder_email"] == "peer@example.com"
+
+
+def test_rebind_proceeds_when_caller_holds_mm_lease(client: TestClient) -> None:
+    _acquire_mm(client, AUTH_HEADERS)
+    r = client.post(
+        papi("/metamodel/rebind") + f"?base_rev={_rev(client)}",
+        content=_MM_RENAMED,
+        headers={"content-type": "application/x-yaml", **AUTH_HEADERS},
+    )
+    assert r.status_code == 200, r.text
+
+
+def test_upload_409_when_peer_holds_mm_lease(client: TestClient) -> None:
+    _add_editor("peer", "peer@example.com")
+    _acquire_mm(client, _PEER)
+    r = client.post(
+        papi("/metamodel"),
+        content=_MM,
+        headers={"content-type": "application/x-yaml", **AUTH_HEADERS},
+    )
+    assert r.status_code == 409
+    assert r.json()["detail"] == "metamodel locked"
+
+
+def test_clear_409_when_peer_holds_mm_lease(client: TestClient) -> None:
+    _add_editor("peer", "peer@example.com")
+    _acquire_mm(client, _PEER)
+    r = client.delete(papi("/metamodel"), headers=AUTH_HEADERS)
+    assert r.status_code == 409
+    assert r.json()["detail"] == "metamodel locked"

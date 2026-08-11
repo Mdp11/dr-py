@@ -126,7 +126,12 @@ const diffPayload = {
 	now_passing: [],
 	unchanged_count: 3,
 	current_error_count: 3,
-	candidate_error_count: 4
+	candidate_error_count: 4,
+	structural: {
+		enums: { added: [], removed: [], changed: [] },
+		element_types: { added: [], removed: [], changed: [] },
+		relationship_types: { added: [], removed: [], changed: [] }
+	}
 };
 
 const rebindPayload = {

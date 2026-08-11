@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session as DbSession
 
+from data_rover.core.metamodel.diff import diff_metamodels
 from data_rover.core.metamodel.loader import MetamodelError, load_metamodel_str
 from data_rover.core.model.model import build_rebind_view
 from data_rover.core.validation.issue import Issue
@@ -34,6 +35,7 @@ from ..hydration import write_snapshot
 from ..identity import get_current_user
 from ..locking import is_model_resource
 from ..schemas import IssueOut, MetamodelDiffResponse, RebindResponse
+from .metamodel import _peer_mm_conflict
 from .ops import _ensure_validation_seeded
 
 logger = logging.getLogger(__name__)
@@ -74,8 +76,12 @@ async def diff_metamodel(
     session: Session = Depends(get_request_session),
     membership: Membership = Depends(require_membership),
 ) -> MetamodelDiffResponse:
-    _, model = require_model(session)
+    current_mm, model = require_model(session)
     candidate = _load_candidate(await _read_metamodel_blob(request))
+    # Both metamodels are immutable (schema.py), so the structural diff needs
+    # no lock — only the sandbox validation below touches the live model and
+    # must stay inside the write_mutex.
+    structural = diff_metamodels(current_mm, candidate)
     with session.write_mutex:
         current = _ensure_validation_seeded(session, model).all_issues()
         candidate_issues = default_pipeline().validate(
@@ -92,6 +98,7 @@ async def diff_metamodel(
         unchanged_count=unchanged,
         current_error_count=len(current),
         candidate_error_count=len(candidate_issues),
+        structural=structural,
     )
 
 
@@ -114,6 +121,14 @@ async def rebind_metamodel(
     invalidate an open element/relationship check-out. Mirrors the commit
     route's durable-failure pattern: a DB error fully restores in-memory state.
 
+    Also honors the ``mm`` lease (Phase 4 honor rule, see
+    ``metamodel._peer_mm_conflict``): the caller's own lease is fine, but a
+    PEER's live ``mm`` lease 409s with the holder's email before anything
+    else runs. This is the same honor-don't-require contract as the model
+    quiescence check below — the request carries no lock token, so there is
+    no verification, and the server does NOT release the caller's lease on
+    success; the client surface releases its own.
+
     Correction A applied: persists the original request blob rather than a
     pydantic re-serialization, avoiding any round-trip mismatch on hydration.
 
@@ -133,6 +148,9 @@ async def rebind_metamodel(
     candidate = _load_candidate(raw_blob)
     state = _ensure_validation_seeded(session, model)
     with session.write_mutex:
+        conflict = _peer_mm_conflict(session, user.id)
+        if conflict is not None:
+            return conflict
         model_leases = [
             le
             for le in session.lock_table.active_leases(time.monotonic())

@@ -32,11 +32,15 @@ from __future__ import annotations
 
 from typing import Any, assert_never
 
+import yaml
 from sqlalchemy.orm import Session as DbSession
 
+from data_rover.core.metamodel.diff import MetamodelStructuralDiff, diff_metamodels
+from data_rover.core.metamodel.loader import MetamodelError, load_metamodel_str
 from data_rover.core.model.element import Element
 from data_rover.core.model.relationship import Relationship
 
+from . import content
 from .artifact_ops import ARTIFACT_OP_KINDS, split_ops
 from .db_models import Commit
 from .hydration import deserialize_ops, reconstruct_model_at
@@ -185,12 +189,11 @@ def _kind_from_row(db: DbSession, project_id: str, artifact_id: str) -> str:
     but a bare PK lookup is still the wrong SHAPE — the scoping is what keeps
     it unreachable BY CONSTRUCTION rather than by id entropy.
 
-    Imported locally: this module must stay route-free and content.py is a
-    service module, but the import is kept out of the header so the dependency
-    reads as "one narrow fallback", not a structural one.
+    ``content`` is a service module (no FastAPI/route dependency), so a
+    module-level import keeps this module's route-free stance (see the module
+    docstring) intact — it is also used at the top level by
+    ``_metamodel_structural`` below.
     """
-    from . import content
-
     row = content.get_artifact(db, artifact_id)
     if row is None or row.project_id != project_id:
         return "unknown"
@@ -266,6 +269,27 @@ def _artifact_diffs(
                 )
             )
     return out
+
+
+def _metamodel_structural(
+    db: DbSession, commit: Commit
+) -> MetamodelStructuralDiff | None:
+    """The rebind commit's document diff, recomputed from the two immutable
+    MetamodelRow blobs (spec: recompute, never store). Total: any missing id,
+    missing row, or unparseable blob degrades to None — a broken historical
+    blob must not 500 the whole commit diff."""
+    if commit.from_metamodel_id is None or commit.to_metamodel_id is None:
+        return None
+    before = content.get_metamodel_row(db, commit.from_metamodel_id)
+    after = content.get_metamodel_row(db, commit.to_metamodel_id)
+    if before is None or after is None:
+        return None
+    try:
+        return diff_metamodels(
+            load_metamodel_str(before.blob), load_metamodel_str(after.blob)
+        )
+    except (MetamodelError, yaml.YAMLError):
+        return None
 
 
 def _view_diffs(commit: Commit) -> list[ViewDiffEntryOut]:
@@ -427,4 +451,5 @@ def diff_commit(db: DbSession, project_id: str, commit: Commit) -> CommitDiffOut
         relationships=_relationship_diffs(rel_ids, b_rel, a_rel),
         artifacts=_artifact_diffs(db, project_id, commit),
         view=_view_diffs(commit),
+        metamodel=_metamodel_structural(db, commit) if is_rebind else None,
     )

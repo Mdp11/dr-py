@@ -6,6 +6,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
+from data_rover.core.metamodel.diff import MetamodelStructuralDiff
 from data_rover.core.model.change_request import (
     ChangeRequest as CoreChangeRequest,
     ModifiedElement as CoreModifiedElement,
@@ -134,14 +135,19 @@ class IssueOut(BaseModel):
 
 
 class MetamodelDiffResponse(BaseModel):
-    """Read-only sandbox conformance diff (Phase 6B). now_failing = issues the
-    candidate metamodel introduces; now_passing = issues it resolves."""
+    """Read-only sandbox conformance diff (Phase 6B) + structural document
+    diff (Phase 4). now_failing = issues the candidate metamodel introduces;
+    now_passing = issues it resolves; structural = what changed in the
+    document itself (one differ, also rendered by the commit-diff API)."""
 
     now_failing: list[IssueOut]
     now_passing: list[IssueOut]
     unchanged_count: int
     current_error_count: int
     candidate_error_count: int
+    structural: MetamodelStructuralDiff = Field(
+        default_factory=MetamodelStructuralDiff
+    )
 
 
 class RebindResponse(BaseModel):
@@ -890,6 +896,9 @@ class CommitDiffOut(BaseModel):
     commit diff and a CR diff with the same component. ``scope`` mirrors the
     commit feed event's field ("model" / "artifact" / "view"); ``is_rebind``
     is true when either metamodel FK is set, matching ``CommitSummaryOut``.
+    ``metamodel`` is the structural document diff, recomputed from the two
+    immutable MetamodelRow blobs — only for rebind commits, and None when
+    either blob is missing/unparseable (degraded, never failed).
     """
 
     rev: int
@@ -903,6 +912,7 @@ class CommitDiffOut(BaseModel):
     relationships: CrRelationshipOps = Field(default_factory=CrRelationshipOps)
     artifacts: CommitArtifactDiffs = Field(default_factory=CommitArtifactDiffs)
     view: list[ViewDiffEntryOut] = Field(default_factory=list)
+    metamodel: MetamodelStructuralDiff | None = None
 
 
 class RevertRequest(BaseModel):
