@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import SwapMetamodelDrawer from '../SwapMetamodelDrawer.svelte';
 import { ApiError } from '$lib/api';
@@ -20,11 +20,24 @@ vi.mock('$lib/state', async (orig) => {
 		setIssues: vi.fn(),
 		setMetamodel: vi.fn(),
 		setMetamodelFilename: vi.fn(),
-		refreshSummary: vi.fn(async () => {})
+		refreshSummary: vi.fn(async () => {}),
+		// The `mm` lease seam (Task 6). The drawer imports it from the same
+		// `$lib/state` barrel as everything else, so it is mocked here rather
+		// than through a second `vi.mock` of the underlying module.
+		acquireMetamodelLease: vi.fn(async () => true),
+		dropMetamodelLease: vi.fn(async () => {}),
+		getMetamodelLockHolder: vi.fn((): string | null => null)
 	};
 });
 
-import { getRole, setIssues, refreshSummary } from '$lib/state';
+import {
+	getRole,
+	setIssues,
+	refreshSummary,
+	acquireMetamodelLease,
+	dropMetamodelLease,
+	getMetamodelLockHolder
+} from '$lib/state';
 // The quiet gate (`isProjectQuiet`) is left REAL by the `...actual` spread, so
 // these tests drive its three terms through the actual stores: the staged model
 // buffer, the staged artifact buffer, and the feed's lock table.
@@ -46,6 +59,15 @@ function seedLocks(...resourceIds: string[]): void {
 		connected: []
 	});
 }
+
+// `vi.clearAllMocks()` wipes call records but NOT implementations, so a
+// per-test `mockResolvedValue`/`mockReturnValue` on the lease seam would leak
+// into every later test. Re-pin the grant-and-no-holder default up front.
+beforeEach(() => {
+	(acquireMetamodelLease as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+	(getMetamodelLockHolder as ReturnType<typeof vi.fn>).mockReturnValue(null);
+	(dropMetamodelLease as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+});
 
 afterEach(() => {
 	document.body.innerHTML = '';
@@ -335,7 +357,7 @@ describe('SwapMetamodelDrawer rebind path', () => {
 
 	it('shows an active-locks message on 409 with lock detail', async () => {
 		(getRole as ReturnType<typeof vi.fn>).mockReturnValue('owner');
-		// detail contains "lock" → component shows the active-locks message, not stale-rev
+		// detail starts with "active locks" → the not-quiet branch, not stale-rev.
 		const err = new ApiError(
 			409,
 			{ detail: 'active locks; rebind requires a quiet project' },
@@ -356,6 +378,193 @@ describe('SwapMetamodelDrawer rebind path', () => {
 			btn!.click();
 			await waitFor(() => /not quiet|lock is active/i.test(bodyText()));
 			expect(/not quiet|lock is active/i.test(bodyText())).toBe(true);
+		} finally {
+			unmount(component);
+		}
+	});
+
+	it('names the holder on a 409 "metamodel locked" rebind refusal', async () => {
+		(getRole as ReturnType<typeof vi.fn>).mockReturnValue('owner');
+		const err = new ApiError(
+			409,
+			{ detail: 'metamodel locked', holder_email: 'p@x.io' },
+			'metamodel locked'
+		);
+		(rebindMetamodel as ReturnType<typeof vi.fn>).mockRejectedValue(err);
+		const component = mount(SwapMetamodelDrawer, {
+			target: document.body,
+			props: { open: true }
+		});
+		try {
+			flushSync();
+			await pickAndDiff();
+			const btn = Array.from(document.querySelectorAll('button')).find((b) =>
+				/rebind/i.test(b.textContent ?? '')
+			) as HTMLButtonElement | undefined;
+			expect(btn).toBeTruthy();
+			btn!.click();
+			await waitFor(() => /metamodel locked by p@x\.io/i.test(bodyText()));
+			expect(/metamodel locked by p@x\.io/i.test(bodyText())).toBe(true);
+			// The not-quiet copy must NOT be what a metamodel-lease conflict shows.
+			expect(/not quiet/i.test(bodyText())).toBe(false);
+		} finally {
+			unmount(component);
+		}
+	});
+});
+
+describe('SwapMetamodelDrawer mm-lease lifecycle', () => {
+	/** A diff response whose structural half carries one added element type. */
+	function diffWithStructural(): unknown {
+		return {
+			now_failing: [],
+			now_passing: [],
+			unchanged_count: 3,
+			current_error_count: 0,
+			candidate_error_count: 0,
+			structural: {
+				enums: { added: [], removed: [], changed: [] },
+				element_types: { added: [{ name: 'Sensor' }], removed: [], changed: [] },
+				relationship_types: { added: [], removed: [], changed: [] }
+			}
+		};
+	}
+
+	it('an owner acquires the mm lease BEFORE spending the diff, then reviews', async () => {
+		(getRole as ReturnType<typeof vi.fn>).mockReturnValue('owner');
+		(diffMetamodel as ReturnType<typeof vi.fn>).mockResolvedValue(diffWithStructural());
+		const component = mount(SwapMetamodelDrawer, {
+			target: document.body,
+			props: { open: true }
+		});
+		try {
+			flushSync();
+			await triggerFilePick(file('elements: []\n'));
+			await waitFor(() => /3 unchanged/i.test(bodyText()));
+			expect(acquireMetamodelLease).toHaveBeenCalledTimes(1);
+			expect(diffMetamodel).toHaveBeenCalledTimes(1);
+			// Order, not just co-occurrence: the lease must be settled first.
+			const acquireOrder = (acquireMetamodelLease as ReturnType<typeof vi.fn>).mock
+				.invocationCallOrder[0];
+			const diffOrder = (diffMetamodel as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0];
+			expect(acquireOrder).toBeLessThan(diffOrder);
+			// The structural section renders above the validation-impact sections.
+			expect(/structural changes/i.test(bodyText())).toBe(true);
+			expect(/Sensor/.test(bodyText())).toBe(true);
+		} finally {
+			unmount(component);
+		}
+	});
+
+	it('renders the structural empty state when nothing structural changed', async () => {
+		(getRole as ReturnType<typeof vi.fn>).mockReturnValue('owner');
+		(diffMetamodel as ReturnType<typeof vi.fn>).mockResolvedValue({
+			now_failing: [],
+			now_passing: [],
+			unchanged_count: 4,
+			current_error_count: 0,
+			candidate_error_count: 0,
+			structural: {
+				enums: { added: [], removed: [], changed: [] },
+				element_types: { added: [], removed: [], changed: [] },
+				relationship_types: { added: [], removed: [], changed: [] }
+			}
+		});
+		const component = mount(SwapMetamodelDrawer, {
+			target: document.body,
+			props: { open: true }
+		});
+		try {
+			flushSync();
+			await triggerFilePick(file('elements: []\n'));
+			await waitFor(() => /4 unchanged/i.test(bodyText()));
+			expect(/no structural changes\./i.test(bodyText())).toBe(true);
+		} finally {
+			unmount(component);
+		}
+	});
+
+	it('a peer conflict stops on the pick step and never spends the diff', async () => {
+		(getRole as ReturnType<typeof vi.fn>).mockReturnValue('owner');
+		(acquireMetamodelLease as ReturnType<typeof vi.fn>).mockResolvedValue(false);
+		(getMetamodelLockHolder as ReturnType<typeof vi.fn>).mockReturnValue('peer@x.io');
+		(diffMetamodel as ReturnType<typeof vi.fn>).mockResolvedValue(diffWithStructural());
+		const component = mount(SwapMetamodelDrawer, {
+			target: document.body,
+			props: { open: true }
+		});
+		try {
+			flushSync();
+			await triggerFilePick(file('elements: []\n'));
+			await waitFor(() => /metamodel locked by peer@x\.io/i.test(bodyText()));
+			expect(diffMetamodel).not.toHaveBeenCalled();
+			// Still on the pick step: no review content, no diffing spinner.
+			expect(/unchanged/i.test(bodyText())).toBe(false);
+			expect(/running diff/i.test(bodyText())).toBe(false);
+		} finally {
+			unmount(component);
+		}
+	});
+
+	it('a NON-conflict acquire refusal falls through and still runs the diff', async () => {
+		(getRole as ReturnType<typeof vi.fn>).mockReturnValue('owner');
+		(acquireMetamodelLease as ReturnType<typeof vi.fn>).mockResolvedValue(false);
+		(getMetamodelLockHolder as ReturnType<typeof vi.fn>).mockReturnValue(null);
+		(diffMetamodel as ReturnType<typeof vi.fn>).mockResolvedValue(diffWithStructural());
+		const component = mount(SwapMetamodelDrawer, {
+			target: document.body,
+			props: { open: true }
+		});
+		try {
+			flushSync();
+			await triggerFilePick(file('elements: []\n'));
+			await waitFor(() => /3 unchanged/i.test(bodyText()));
+			expect(diffMetamodel).toHaveBeenCalledTimes(1);
+			expect(/metamodel locked by/i.test(bodyText())).toBe(false);
+		} finally {
+			unmount(component);
+		}
+	});
+
+	it('a non-owner never acquires, but still gets the read-only review', async () => {
+		(getRole as ReturnType<typeof vi.fn>).mockReturnValue('editor');
+		(diffMetamodel as ReturnType<typeof vi.fn>).mockResolvedValue(diffWithStructural());
+		const component = mount(SwapMetamodelDrawer, {
+			target: document.body,
+			props: { open: true }
+		});
+		try {
+			flushSync();
+			await triggerFilePick(file('elements: []\n'));
+			await waitFor(() => /3 unchanged/i.test(bodyText()));
+			expect(acquireMetamodelLease).not.toHaveBeenCalled();
+			expect(diffMetamodel).toHaveBeenCalledTimes(1);
+			expect(/read-only for your role/i.test(bodyText())).toBe(true);
+		} finally {
+			unmount(component);
+		}
+	});
+
+	// bits-ui's OWN close (Escape) is the path that must release the lease.
+	// `cancelable: true` is load-bearing — bits-ui clones the event via
+	// `new KeyboardEvent(e.type, e)` before dispatching it internally, so a
+	// non-cancelable event turns its own `preventDefault()` into a no-op.
+	it('closing the drawer drops the mm lease', async () => {
+		(getRole as ReturnType<typeof vi.fn>).mockReturnValue('owner');
+		(diffMetamodel as ReturnType<typeof vi.fn>).mockResolvedValue(diffWithStructural());
+		const component = mount(SwapMetamodelDrawer, {
+			target: document.body,
+			props: { open: true }
+		});
+		try {
+			flushSync();
+			await triggerFilePick(file('elements: []\n'));
+			await waitFor(() => /3 unchanged/i.test(bodyText()));
+			expect(dropMetamodelLease).not.toHaveBeenCalled();
+			document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }));
+			flushSync();
+			await waitFor(() => (dropMetamodelLease as ReturnType<typeof vi.fn>).mock.calls.length > 0);
+			expect(dropMetamodelLease).toHaveBeenCalled();
 		} finally {
 			unmount(component);
 		}

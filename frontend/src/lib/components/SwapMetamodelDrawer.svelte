@@ -8,6 +8,7 @@
 	} from '$lib/api/metamodel';
 	import type { MetamodelDiff, IssueOut } from '$lib/api/types';
 	import { AlertCircle, AlertTriangle } from '@lucide/svelte';
+	import MetamodelStructuralDiff from './MetamodelStructuralDiff.svelte';
 	import {
 		getRole,
 		getModelRev,
@@ -15,7 +16,10 @@
 		setIssues,
 		setMetamodel,
 		setMetamodelFilename,
-		refreshSummary
+		refreshSummary,
+		acquireMetamodelLease,
+		dropMetamodelLease,
+		getMetamodelLockHolder
 	} from '$lib/state';
 	import { ApiError } from '$lib/api';
 	import type { Issue } from '$lib/api/types';
@@ -35,6 +39,9 @@
 	let message = $state('');
 	let rebinding = $state(false);
 	let rebindError = $state<string | null>(null);
+	/** Peer holding the `mm` lease, when acquisition was refused over a
+	 * conflict. Drives the pick-step notice. */
+	let lockedBy = $state<string | null>(null);
 
 	const isOwner = $derived(getRole() === 'owner');
 	// Literally the same rule as the history drawer's revert gate — one shared
@@ -51,6 +58,7 @@
 		message = '';
 		rebindError = null;
 		rebinding = false;
+		lockedBy = null;
 	}
 
 	async function onPick(ev: Event): Promise<void> {
@@ -59,10 +67,28 @@
 		if (!f) return;
 		step = 'diffing';
 		errorMsg = null;
+		lockedBy = null;
 		try {
 			const text = await f.text();
 			blob = text;
 			candidateName = f.name;
+			// Owners only. An editor's review is read-only, so taking the `mm`
+			// lease for them would lock the one person who can rebind out of
+			// their own project.
+			if (isOwner) {
+				const granted = await acquireMetamodelLease();
+				if (!granted) {
+					const holder = getMetamodelLockHolder();
+					if (holder) {
+						// A peer is mid-review: stop before spending the diff.
+						lockedBy = holder;
+						step = 'pick';
+						return;
+					}
+					// Non-conflict refusal (e.g. transient): fall through — the
+					// rebind itself still honors the lease server-side.
+				}
+			}
 			diff = await diffMetamodel(text);
 			step = 'review';
 		} catch (e) {
@@ -95,13 +121,26 @@
 			open = false;
 		} catch (e) {
 			if (e instanceof ApiError && e.status === 409) {
-				const detail =
-					typeof e.body === 'object' && e.body && 'detail' in e.body
-						? String((e.body as { detail: unknown }).detail)
-						: '';
-				rebindError = detail.includes('lock')
-					? 'The project is not quiet (a lock is active). Try again once edits are committed.'
-					: 'The model changed since you ran the diff — re-run the diff and try again.';
+				// Three distinct server refusals share one status; a loose
+				// `detail.includes('lock')` conflated the `mm` lease conflict
+				// with the not-quiet gate, so branch on the exact detail.
+				const body = (typeof e.body === 'object' && e.body ? e.body : {}) as {
+					detail?: unknown;
+					holder_email?: unknown;
+				};
+				const detail = typeof body.detail === 'string' ? body.detail : '';
+				if (detail === 'metamodel locked') {
+					const who =
+						typeof body.holder_email === 'string' && body.holder_email
+							? body.holder_email
+							: 'another user';
+					rebindError = `Metamodel locked by ${who}. Try again when they finish.`;
+				} else if (detail.startsWith('active locks')) {
+					rebindError =
+						'The project is not quiet (a lock is active). Try again once edits are committed.';
+				} else {
+					rebindError = 'The model changed since you ran the diff — re-run the diff and try again.';
+				}
 			} else if (e instanceof ApiError && e.status === 422) {
 				rebindError = 'The candidate metamodel is invalid.';
 			} else {
@@ -116,7 +155,13 @@
 <Dialog.Root
 	bind:open
 	onOpenChange={(o) => {
-		if (!o) reset();
+		if (!o) {
+			reset();
+			// A successful rebind sets `open = false` itself, so this one path
+			// releases on cancel AND on success — there is deliberately no
+			// server-side release.
+			void dropMetamodelLease();
+		}
 	}}
 >
 	<Dialog.Content class="max-w-2xl">
@@ -138,6 +183,12 @@
 				/>
 			</label>
 
+			{#if lockedBy}
+				<p class="rounded border border-warning/40 bg-warning/15 px-2 py-1.5 text-xs text-warning">
+					Metamodel locked by {lockedBy}. Try again when they finish.
+				</p>
+			{/if}
+
 			{#if step === 'diffing'}
 				<p class="text-muted-foreground">Running diff…</p>
 			{/if}
@@ -151,6 +202,13 @@
 			{/if}
 
 			{#if step === 'review' && diff}
+				<section class="flex flex-col gap-1">
+					<h3 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+						Structural changes
+					</h3>
+					<MetamodelStructuralDiff diff={diff.structural} />
+				</section>
+
 				<div class="flex flex-wrap items-center gap-3 text-xs">
 					<span class="text-destructive">{diff.now_failing.length} now failing</span>
 					<span class="text-success">{diff.now_passing.length} now passing</span>
