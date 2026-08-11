@@ -54,7 +54,8 @@ The UI is a fixed grid:
 
 - **TopBar** — load a metamodel from file, load a model from file, Undo the
   last staged edit, trigger validation, open the Commit review (`DiffDrawer`),
-  browse the durable commit history (`HistoryDrawer`), and open **Settings**
+  browse the durable commit history (`HistoryDrawer`), open the live
+  **metamodel editor** tab ("Edit Metamodel"), and open **Settings**
   (`SettingsDialog`) where an owner can toggle **strict mode**. A growable
   toolbar `<nav>` sits next to the logo; its first (and so far only) occupant
   is the **Artifacts** menu (`ArtifactsMenu.svelte`) — Export…/Import…, with
@@ -64,7 +65,9 @@ The UI is a fixed grid:
   per-row lock badges.
 - **Workspace** — tabbed Detail / Graph / Issues view of the current
   selection, plus **snippet** tabs (`SnippetTab`) hosting a CodeMirror editor
-  and run console for server-executed Python snippets against the live model.
+  and run console for server-executed Python snippets against the live model,
+  and the singleton **metamodel** tab (`MetamodelTab`) — a YAML editor for the
+  live metamodel with lint, preview and rebind.
 - **Inspector** — property form + relationships list + new-relationship
   picker for the selected entity (gated when the resource is locked by a peer).
   A back/forward arrow cluster (`Inspector/HistoryNav`) sits above it, replaying
@@ -829,14 +832,75 @@ browses the project's durable commit journal:
   revisions A and B; the same `computeDiff` path reconstructs both models and
   renders the range diff. A warning banner is shown when the range spans a
   metamodel-swap (rebind) commit.
-- **Revert-to-commit** (`POST /commits/revert`) — gated on a clean staged
-  buffer, MODEL and ARTIFACT alike: `getStagedDepth()`,
-  `getStagedArtifactDepth()` and `getLockState().size` must all be 0 (the
-  metamodel-swap drawer gates on the same expression). Selecting
-  "Revert to here" on a row shows an inline confirm panel with an optional
-  message; submitting applies the compensating inverse ops as a new durable
-  commit (history stays append-only, `model_rev` advances), broadcasts the
-  delta via the feed, and reloads the history list.
+- **Revert-to-commit** (`POST /commits/revert`) — gated on a quiet project:
+  `state/quiet.ts`'s `isProjectQuiet()` (no staged MODEL ops, no staged
+  ARTIFACT ops, no model-scope lease anywhere — the `mm` lease is deliberately
+  not one). The metamodel editor's Rebind reads the SAME predicate, which is
+  why it lives in its own module rather than being spelled out in each
+  caller. Selecting "Revert to here" on a row shows an inline confirm panel
+  with an optional message; submitting applies the compensating inverse ops as
+  a new durable commit (history stays append-only, `model_rev` advances),
+  broadcasts the delta via the feed, and reloads the history list.
+
+### Live metamodel editing (metamodel tab)
+
+Editing the metamodel is a **workspace tab**, not a dialog: the TopBar's "Edit
+Metamodel" item (and the command palette's equivalent) calls
+`openMetamodelTab()`, which focuses the existing tab or opens the singleton
+`{ kind: 'metamodel', id: 'mm', artifactId: null }` one. It is the only tab
+kind with no artifact behind it, and the only one restored on reload without a
+server round-trip (its content is a draft, not an artifact row). It replaces
+the old `SwapMetamodelDrawer`, whose whole interaction was picking a file.
+
+`state/metamodel-editor.svelte.ts` owns everything the tab renders, exposed as
+one `MetamodelEditorView` snapshot from `getMetamodelEditor()`:
+
+- **Load** — `GET /metamodel/raw` on mount. `source: 'stored'` is the author's
+  own YAML (comments and formatting intact); `'serialized'` is the degraded
+  fallback for a session whose metamodel never landed in a durable row, and
+  the tab flags it with a "re-serialized source" chip so nobody is surprised
+  when their comments are gone. A failed load is its own `error` phase with a
+  Retry button — never an empty buffer, which would look like an empty
+  metamodel one keystroke away from being rebound.
+- **Baseline vs buffer** — `dirty` is `buffer !== baseline`, and the baseline
+  only ever moves on a load or a successful rebind. The dirty buffer mirrors
+  to `localStorage` under `ui.metamodel.draft.<projectId>` (debounced 500 ms,
+  flushed on close), so a refresh or an accidental tab close cannot lose work;
+  it is cleared only by an explicit Discard or by a rebind **that adopted it**.
+- **Lint** — a debounced `POST /metamodel/lint` (500 ms) per edit. It is
+  advisory in both directions: positioned errors become CodeMirror gutter
+  diagnostics, message-only errors become the strip under the editor, and a
+  failed lint call clears the gutter rather than blocking anything.
+- **Preview** — on demand, never on a timer: `POST /metamodel/diff` sandboxes
+  the candidate and returns which model issues would start/stop failing plus a
+  structural diff (`MetamodelPreviewPanel`). The result is recorded **against
+  the exact buffer it was computed for** (`previewCurrent`), so a preview goes
+  stale the moment the next character is typed and the panel says so.
+- **Rebind** — `POST /metamodel/rebind`, gated on owner + `isProjectQuiet()` +
+  `previewCurrent`: you cannot rebind something you have not looked at the
+  consequences of. The text SENT is captured before the await, and the
+  baseline adopts _that_ text — a buffer that moved mid-flight (a straggler
+  keystroke, a Discard) stays dirty, keeps its draft, and drops its now-spent
+  preview, so the user lands on "unreviewed local changes on top of the newly
+  bound metamodel" rather than a screen that claims to be saved. The surface
+  refuses the interleaving up front too: `readOnly` folds in `rebinding` and
+  the Discard button disables with it. The tab then refreshes the metamodel /
+  issues / summary, and reports a failed refresh in its own words — the durable
+  rebind already landed, so that copy must never read as a failed rebind.
+- **Lease** — composed, never re-implemented: `state/metamodel-lease.svelte.ts`
+  (the `mm` lease module that outlived the drawer it was written for) acquires
+  the EXCLUSIVE `mm` lease on the **first divergent edit** and drops it on
+  close, discard, or a successful rebind — unconditionally, because an acquire
+  still in flight is exactly the leak this guards. A peer conflict turns the
+  editor read-only with the holder's email and a Retry, keeping every character
+  already typed; a restored draft therefore opens editable and only discovers a
+  peer's lease on the first keystroke. `mm` is excluded from `isProjectQuiet()`
+  (mirroring the backend's `is_model_resource`), or the editor's own lease
+  would disable its own Rebind button.
+
+The module's `_gen` guard covers only its OWN async (load / lint / preview /
+rebind) against a closed tab; the lease module keeps its own generation for
+lease calls, and neither wraps the other — one generation guard per concern.
 
 ### Where to find things
 
@@ -948,7 +1012,13 @@ src/
                         snippet-docs.svelte.ts — fetch-once cache of the
                         facade docs payload (ensureSnippetDocs/
                         getSnippetDocs), silent-degrade on fetch failure,
-                        reset at onReloadModel
+                        reset at onReloadModel;
+                        metamodel-editor.svelte.ts — the metamodel tab's
+                        buffer/baseline, localStorage draft, debounced lint,
+                        on-demand preview and rebind (see "Live metamodel
+                        editing" above); metamodel-lease.svelte.ts — the `mm`
+                        lease lifecycle it composes, surface-agnostic and
+                        generation-guarded on its own
     editor/completion-source.ts  dr./Element/Relationship/stereotype-name CM6 completions +
                         hover logic (vocabFromMetamodel, computeCompletions,
                         resolveDocAt); pure, CM-agnostic, unit-tested
@@ -994,6 +1064,12 @@ src/
                         ArtifactsMenu.svelte — the TopBar toolbar's
                         Export…/Import… dropdown, mounting
                         Export/ImportArtifactsDialog.svelte once beside it;
+                        Metamodel/{MetamodelTab,MetamodelYamlEditor,
+                        MetamodelPreviewPanel}.svelte — the metamodel tab,
+                        its CodeMirror YAML host (readOnly compartment +
+                        externalReplace annotation so a programmatic doc
+                        swap never echoes back as a keystroke) and the
+                        issue + structural preview panel;
                         auth/LoginForm, projects/{ProjectCard,NewProjectWizard},
                         admin/{UsersTab,ProjectMembersTab}
     keyboard.ts         Pure shortcut matcher
