@@ -91,7 +91,12 @@ describe('SwapMetamodelDrawer read path', () => {
 			now_passing: [],
 			unchanged_count: 5,
 			current_error_count: 5,
-			candidate_error_count: 6
+			candidate_error_count: 6,
+			structural: {
+				enums: { added: [], removed: [], changed: [] },
+				element_types: { added: [], removed: [], changed: [] },
+				relationship_types: { added: [], removed: [], changed: [] }
+			}
 		});
 		const component = mount(SwapMetamodelDrawer, {
 			target: document.body,
@@ -121,7 +126,12 @@ describe('SwapMetamodelDrawer read path', () => {
 			now_passing: [],
 			unchanged_count: 0,
 			current_error_count: 0,
-			candidate_error_count: 250
+			candidate_error_count: 250,
+			structural: {
+				enums: { added: [], removed: [], changed: [] },
+				element_types: { added: [], removed: [], changed: [] },
+				relationship_types: { added: [], removed: [], changed: [] }
+			}
 		});
 		const component = mount(SwapMetamodelDrawer, {
 			target: document.body,
@@ -162,7 +172,12 @@ describe('SwapMetamodelDrawer rebind path', () => {
 			now_passing: [],
 			unchanged_count: 2,
 			current_error_count: 2,
-			candidate_error_count: 2
+			candidate_error_count: 2,
+			structural: {
+				enums: { added: [], removed: [], changed: [] },
+				element_types: { added: [], removed: [], changed: [] },
+				relationship_types: { added: [], removed: [], changed: [] }
+			}
 		});
 		await triggerFilePick(file('elements: []\n'));
 		await waitFor(() => /2 unchanged/i.test(bodyText()));

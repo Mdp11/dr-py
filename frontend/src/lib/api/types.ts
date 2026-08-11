@@ -118,6 +118,77 @@ export const MetamodelSchema = z.object({
 });
 export type Metamodel = z.infer<typeof MetamodelSchema>;
 
+// --- structural metamodel diff (Phase 4) -----------------------------------
+export const FieldChangeSchema = z.object({
+	field: z.string(),
+	from: z.unknown(),
+	to: z.unknown()
+});
+export type FieldChange = z.infer<typeof FieldChangeSchema>;
+
+const EnumEntrySchema = z.object({ name: z.string(), literals: z.array(z.string()).default([]) });
+const EnumChangeSchema = z.object({
+	name: z.string(),
+	added: z.array(z.string()).default([]),
+	removed: z.array(z.string()).default([])
+});
+const EnumsDiffSchema = z.object({
+	added: z.array(EnumEntrySchema).default([]),
+	removed: z.array(EnumEntrySchema).default([]),
+	changed: z.array(EnumChangeSchema).default([])
+});
+
+const PropertyChangeSchema = z.object({
+	name: z.string(),
+	fields: z.array(FieldChangeSchema).default([])
+});
+const PropertiesDiffSchema = z.object({
+	added: z.array(PropertyDefSchema).default([]),
+	removed: z.array(PropertyDefSchema).default([]),
+	changed: z.array(PropertyChangeSchema).default([])
+});
+
+const ElementTypeChangeSchema = z.object({
+	name: z.string(),
+	attributes: z.array(FieldChangeSchema).default([]),
+	properties: PropertiesDiffSchema
+});
+const ElementTypesDiffSchema = z.object({
+	added: z.array(ElementTypeSchema).default([]),
+	removed: z.array(ElementTypeSchema).default([]),
+	changed: z.array(ElementTypeChangeSchema).default([])
+});
+
+// An added/removed ABSTRACT relationship type can have null source/target
+// (the shorthand mirrors mappings[0], which may not exist), so the diff
+// entries relax RelationshipTypeSchema's non-null endpoints.
+const RelationshipTypeDiffEntrySchema = RelationshipTypeSchema.extend({
+	source: z.string().nullable().default(null),
+	target: z.string().nullable().default(null)
+});
+const MappingsDiffSchema = z.object({
+	added: z.array(MappingSchema).default([]),
+	removed: z.array(MappingSchema).default([])
+});
+const RelationshipTypeChangeSchema = z.object({
+	name: z.string(),
+	attributes: z.array(FieldChangeSchema).default([]),
+	properties: PropertiesDiffSchema,
+	mappings: MappingsDiffSchema
+});
+const RelationshipTypesDiffSchema = z.object({
+	added: z.array(RelationshipTypeDiffEntrySchema).default([]),
+	removed: z.array(RelationshipTypeDiffEntrySchema).default([]),
+	changed: z.array(RelationshipTypeChangeSchema).default([])
+});
+
+export const MetamodelStructuralDiffSchema = z.object({
+	enums: EnumsDiffSchema,
+	element_types: ElementTypesDiffSchema,
+	relationship_types: RelationshipTypesDiffSchema
+});
+export type MetamodelStructuralDiff = z.infer<typeof MetamodelStructuralDiffSchema>;
+
 export const RelationshipListSchema = z.array(RelationshipSchema);
 export const IssueListSchema = z.array(IssueSchema);
 
@@ -277,7 +348,8 @@ export const MetamodelDiffSchema = z.object({
 	now_passing: z.array(IssueOutSchema).default([]),
 	unchanged_count: z.number().int(),
 	current_error_count: z.number().int(),
-	candidate_error_count: z.number().int()
+	candidate_error_count: z.number().int(),
+	structural: MetamodelStructuralDiffSchema
 });
 export type MetamodelDiff = z.infer<typeof MetamodelDiffSchema>;
 
