@@ -6,6 +6,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
+from data_rover.core.metamodel.diff import MetamodelStructuralDiff
 from data_rover.core.model.change_request import (
     ChangeRequest as CoreChangeRequest,
     ModifiedElement as CoreModifiedElement,
@@ -134,14 +135,19 @@ class IssueOut(BaseModel):
 
 
 class MetamodelDiffResponse(BaseModel):
-    """Read-only sandbox conformance diff (Phase 6B). now_failing = issues the
-    candidate metamodel introduces; now_passing = issues it resolves."""
+    """Read-only sandbox conformance diff (Phase 6B) + structural document
+    diff (Phase 4). now_failing = issues the candidate metamodel introduces;
+    now_passing = issues it resolves; structural = what changed in the
+    document itself (one differ, also rendered by the commit-diff API)."""
 
     now_failing: list[IssueOut]
     now_passing: list[IssueOut]
     unchanged_count: int
     current_error_count: int
     candidate_error_count: int
+    structural: MetamodelStructuralDiff = Field(
+        default_factory=MetamodelStructuralDiff
+    )
 
 
 class RebindResponse(BaseModel):

@@ -98,3 +98,51 @@ def test_viewer_can_call_diff(client: TestClient) -> None:
         },
     )
     assert r.status_code == 200, r.text
+
+
+# Candidate for the STRUCTURAL diff: Node renamed to Widget (remove+add).
+_MM_STRUCT_RENAMED = """
+elements:
+  - name: Widget
+relationships:
+  - name: Link
+    source: Widget
+    target: Widget
+"""
+# Candidate that only tightens Link's source multiplicity (one FieldChange).
+_MM_STRUCT_MULT = """
+elements:
+  - name: Node
+relationships:
+  - name: Link
+    source: Node
+    target: Node
+    source_multiplicity: "1..1"
+"""
+
+
+def test_diff_returns_structural_section(client: TestClient) -> None:
+    r = client.post(papi("/metamodel/diff"), content=_MM_STRUCT_RENAMED,
+                    headers={"content-type": "application/x-yaml"})
+    assert r.status_code == 200, r.text
+    structural = r.json()["structural"]
+    assert [t["name"] for t in structural["element_types"]["added"]] == ["Widget"]
+    assert [t["name"] for t in structural["element_types"]["removed"]] == ["Node"]
+    # Link's endpoints changed => mappings diff only, no attribute noise
+    (chg,) = structural["relationship_types"]["changed"]
+    assert chg["name"] == "Link"
+    assert chg["attributes"] == []
+    assert [(m["source"], m["target"]) for m in chg["mappings"]["added"]] == [
+        ("Widget", "Widget")
+    ]
+    # unchanged sections are present-and-empty, not missing
+    assert structural["enums"] == {"added": [], "removed": [], "changed": []}
+
+
+def test_diff_structural_field_change_uses_from_alias(client: TestClient) -> None:
+    r = client.post(papi("/metamodel/diff"), content=_MM_STRUCT_MULT,
+                    headers={"content-type": "application/x-yaml"})
+    assert r.status_code == 200, r.text
+    (chg,) = r.json()["structural"]["relationship_types"]["changed"]
+    (fc,) = chg["attributes"]
+    assert fc == {"field": "source_multiplicity", "from": "0..*", "to": "1..1"}

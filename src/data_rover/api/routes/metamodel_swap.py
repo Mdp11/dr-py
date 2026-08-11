@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session as DbSession
 
+from data_rover.core.metamodel.diff import diff_metamodels
 from data_rover.core.metamodel.loader import MetamodelError, load_metamodel_str
 from data_rover.core.model.model import build_rebind_view
 from data_rover.core.validation.issue import Issue
@@ -74,8 +75,12 @@ async def diff_metamodel(
     session: Session = Depends(get_request_session),
     membership: Membership = Depends(require_membership),
 ) -> MetamodelDiffResponse:
-    _, model = require_model(session)
+    current_mm, model = require_model(session)
     candidate = _load_candidate(await _read_metamodel_blob(request))
+    # Both metamodels are immutable (schema.py), so the structural diff needs
+    # no lock — only the sandbox validation below touches the live model and
+    # must stay inside the write_mutex.
+    structural = diff_metamodels(current_mm, candidate)
     with session.write_mutex:
         current = _ensure_validation_seeded(session, model).all_issues()
         candidate_issues = default_pipeline().validate(
@@ -92,6 +97,7 @@ async def diff_metamodel(
         unchanged_count=unchanged,
         current_error_count=len(current),
         candidate_error_count=len(candidate_issues),
+        structural=structural,
     )
 
 
