@@ -118,10 +118,24 @@ async def lint_metamodel(
     deliberately takes no ``Session`` dependency, so a cold project is not
     even hydrated. NOT in the read-only-POST allowlist: only the
     owner-gated editing flow calls it, and viewers have nothing to lint.
+
+    ``_read_metamodel_blob`` itself is called INSIDE this try block, not
+    before it: the helper is shared with ``diff_metamodel`` (a frozen
+    Phase 1-4 route whose contract is 422-on-bad-input, not always-200) so it
+    must not be changed to swallow its own decode errors. An undecodable body
+    (bad UTF-8, or malformed JSON under a JSON content-type) is exactly as
+    much "the candidate text is bad" as a YAML/schema error, so it must land
+    in the same always-200 result here.
     """
-    blob = await _read_metamodel_blob(request)
     try:
+        blob = await _read_metamodel_blob(request)
         load_metamodel_str(blob)
+    except ValueError as exc:
+        # Covers UnicodeDecodeError (bytes.decode("utf-8")) and
+        # json.JSONDecodeError (request.json()) raised by
+        # _read_metamodel_blob before load_metamodel_str even runs — both
+        # are ValueError subclasses, and both mean "candidate text is bad".
+        return MetamodelLintResponse(ok=False, errors=[LintErrorOut(message=str(exc))])
     except yaml.YAMLError as exc:
         mark = getattr(exc, "problem_mark", None)
         return MetamodelLintResponse(

@@ -72,6 +72,35 @@ def test_lint_works_without_a_bound_metamodel() -> None:
     assert r.status_code == 200
 
 
+def test_lint_undecodable_utf8_body_is_ok_false_not_500() -> None:
+    """A body that isn't even valid UTF-8 must still land inside the
+    always-200 contract, not escape as an unhandled 500."""
+    r = _client().post(
+        papi("/metamodel/lint"), content=b"\xff\xfe elements:", headers=_YAML
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["ok"] is False
+    (err,) = body["errors"]
+    assert err["message"]
+
+
+def test_lint_malformed_json_body_is_ok_false_not_500() -> None:
+    """A malformed body under a JSON content-type must also stay inside the
+    always-200 contract (the JSON decode happens inside _read_metamodel_blob,
+    before load_metamodel_str even runs)."""
+    r = _client().post(
+        papi("/metamodel/lint"),
+        content="{not valid json",
+        headers={"content-type": "application/json"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["ok"] is False
+    (err,) = body["errors"]
+    assert err["message"]
+
+
 def test_viewer_gets_403() -> None:
     """Deliberately NOT in the read-only-POST allowlist."""
     c = _client()
