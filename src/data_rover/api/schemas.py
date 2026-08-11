@@ -896,6 +896,9 @@ class CommitDiffOut(BaseModel):
     commit diff and a CR diff with the same component. ``scope`` mirrors the
     commit feed event's field ("model" / "artifact" / "view"); ``is_rebind``
     is true when either metamodel FK is set, matching ``CommitSummaryOut``.
+    ``metamodel`` is the structural document diff, recomputed from the two
+    immutable MetamodelRow blobs — only for rebind commits, and None when
+    either blob is missing/unparseable (degraded, never failed).
     """
 
     rev: int
@@ -909,6 +912,7 @@ class CommitDiffOut(BaseModel):
     relationships: CrRelationshipOps = Field(default_factory=CrRelationshipOps)
     artifacts: CommitArtifactDiffs = Field(default_factory=CommitArtifactDiffs)
     view: list[ViewDiffEntryOut] = Field(default_factory=list)
+    metamodel: MetamodelStructuralDiff | None = None
 
 
 class RevertRequest(BaseModel):

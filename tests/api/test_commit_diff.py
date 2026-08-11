@@ -8,14 +8,17 @@ re-edited or deleted since — the tests below pin exactly that.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
-from data_rover.api.commit_diff import _artifact_states, json_structural_diff
+from data_rover.api import db
+from data_rover.api.commit_diff import _artifact_states, diff_commit, json_structural_diff
 from data_rover.api.db_models import Commit
 from data_rover.api.main import create_app
+from data_rover.api.session import DEFAULT_PROJECT_ID
 
 from .conftest import AUTH_HEADERS, create_folder_via_commit, papi, seed_default_project
 
@@ -712,3 +715,97 @@ def test_view_diff_covers_move_remove_and_placement_op_kinds(
         and ma["from_folder_id"] == fb
         and ma["to_folder_id"] == fa
     )
+
+
+# Rebind candidate: Node renamed to Widget, label property gone with it.
+_MM_REBOUND = """
+elements:
+  - name: Widget
+"""
+
+
+def _model_rev(c: TestClient) -> int:
+    return c.get(papi("/model/summary")).json()["model_rev"]
+
+
+def test_rebind_commit_diff_carries_structural_metamodel_diff(
+    client: TestClient,
+) -> None:
+    before = _model_rev(client)
+    r = client.post(
+        papi("/metamodel/rebind") + f"?base_rev={before}&message=swap",
+        content=_MM_REBOUND,
+        headers={"content-type": "application/x-yaml"},
+    )
+    assert r.status_code == 200, r.text
+    rev = r.json()["model_rev"]
+    d = client.get(papi(f"/commits/{rev}/diff"))
+    assert d.status_code == 200, d.text
+    body = d.json()
+    assert body["is_rebind"] is True
+    mm = body["metamodel"]
+    assert [t["name"] for t in mm["element_types"]["added"]] == ["Widget"]
+    assert [t["name"] for t in mm["element_types"]["removed"]] == ["Node"]
+    # removed side carries the full definition, including its property
+    assert mm["element_types"]["removed"][0]["properties"][0]["name"] == "label"
+
+
+def test_non_rebind_commit_diff_has_null_metamodel(client: TestClient) -> None:
+    # any ordinary ops commit will do — land one element create
+    ops_r = client.post(
+        papi("/model/ops"),
+        json={
+            "base_rev": _model_rev(client),
+            "ops": [
+                {"kind": "create_element", "temp_id": "tmp_x", "type_name": "Node"}
+            ],
+        },
+    )
+    assert ops_r.status_code == 200, ops_r.text
+    rev = ops_r.json()["model_rev"]
+    d = client.get(papi(f"/commits/{rev}/diff"))
+    assert d.status_code == 200, d.text
+    assert d.json()["is_rebind"] is False
+    assert d.json()["metamodel"] is None
+
+
+def test_rebind_commit_diff_degrades_to_null_on_missing_blob(
+    client: TestClient,
+) -> None:
+    """A rebind commit whose metamodel ids point nowhere: degraded to null,
+    never a 500.
+
+    Deviates from a straight HTTP round-trip on purpose: ``Commit.from_``/
+    ``to_metamodel_id`` carry a real FK (``ON DELETE SET NULL``) to
+    ``metamodels.id``, and this test suite runs with ``PRAGMA
+    foreign_keys=ON`` (see ``db.py``), so a PERSISTED commit can never
+    actually reference a missing metamodel row — inserting one with
+    dangling ids fails with an IntegrityError before ``diff_commit`` is ever
+    reached, and deleting a real row would auto-null the column via the
+    cascade rather than leave it dangling. This shape is exactly as
+    unreachable through ``POST /commits`` as the one
+    ``test_artifact_states_of_create_then_delete_in_one_commit`` documents
+    above, so it gets the same treatment: call ``diff_commit`` directly
+    against an in-memory (unpersisted) ``Commit``. The reader must still be
+    correct for it, since a broken/rolled-back historical blob is a real
+    failure mode this guards against.
+    """
+    commit = Commit(
+        project_id=DEFAULT_PROJECT_ID,
+        rev=999,
+        commit_id="deadbeef",
+        ts=datetime.now(UTC),
+        message="",
+        ops=[],
+        inverse_ops=[],
+        from_metamodel_id="missing-a",
+        to_metamodel_id="missing-b",
+    )
+    gen = db.get_db()
+    s = next(gen)
+    try:
+        out = diff_commit(s, DEFAULT_PROJECT_ID, commit)
+    finally:
+        gen.close()
+    assert out.is_rebind is True
+    assert out.metamodel is None
