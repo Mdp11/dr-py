@@ -207,6 +207,21 @@ export {
 	getMetamodelLockHolder
 } from './metamodel-lease.svelte';
 export {
+	closeMetamodelEditor,
+	commitMetamodelRebind,
+	discardMetamodelDraft,
+	editMetamodelBuffer,
+	getMetamodelEditor,
+	initMetamodelEditor,
+	isMetamodelEditorDirty,
+	METAMODEL_DRAFT_DEBOUNCE_MS,
+	METAMODEL_LINT_DEBOUNCE_MS,
+	previewMetamodelChanges,
+	resetMetamodelEditor,
+	retryMetamodelLease,
+	type MetamodelEditorView
+} from './metamodel-editor.svelte';
+export {
 	acquireLocks,
 	acquireArtifactLease,
 	artifactDeleteLock,
