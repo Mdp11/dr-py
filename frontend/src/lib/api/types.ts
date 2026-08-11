@@ -339,7 +339,8 @@ export const IssueOutSchema = z.object({
 	severity: z.string(),
 	message: z.string(),
 	target_ids: z.array(z.string()).default([]),
-	category: z.string().default('conformance')
+	category: z.string().default('conformance'),
+	origin: z.string().default('on_server')
 });
 export type IssueOut = z.infer<typeof IssueOutSchema>;
 
@@ -361,6 +362,25 @@ export const RebindSchema = z.object({
 	issues: z.array(IssueOutSchema).default([])
 });
 export type Rebind = z.infer<typeof RebindSchema>;
+
+export const RawMetamodelSchema = z.object({
+	blob: z.string(),
+	source: z.enum(['stored', 'serialized'])
+});
+export type RawMetamodel = z.infer<typeof RawMetamodelSchema>;
+
+export const MetamodelLintErrorSchema = z.object({
+	message: z.string(),
+	line: z.number().int().nullable().default(null),
+	column: z.number().int().nullable().default(null)
+});
+export type MetamodelLintError = z.infer<typeof MetamodelLintErrorSchema>;
+
+export const MetamodelLintSchema = z.object({
+	ok: z.boolean(),
+	errors: z.array(MetamodelLintErrorSchema).default([])
+});
+export type MetamodelLint = z.infer<typeof MetamodelLintSchema>;
 
 export const PreviewResponseSchema = z.object({
 	conformance_error_count: z.number().int(),

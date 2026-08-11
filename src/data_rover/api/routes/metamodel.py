@@ -17,6 +17,7 @@ from ..db_models import User
 from ..deps import Session, get_request_session, require_metamodel
 from ..identity import get_current_user
 from ..locking import METAMODEL_RESOURCE
+from ..schemas import RawMetamodelResponse
 
 router = APIRouter()
 
@@ -91,6 +92,30 @@ async def upload_metamodel(
 @router.get("/metamodel")
 def get_metamodel(session: Session = Depends(get_request_session)) -> Metamodel:
     return require_metamodel(session)
+
+
+@router.get("/metamodel/raw")
+def get_metamodel_raw(
+    project_id: str,
+    session: Session = Depends(get_request_session),
+    db: DbSession = Depends(get_db),
+) -> RawMetamodelResponse:
+    """The current metamodel's source YAML for the live editor (Phase 5).
+
+    Prefers the stored blob (author's comments/formatting intact); a session
+    whose metamodel never landed in a durable row (legacy/test setups)
+    degrades to re-serializing the in-memory object rather than failing.
+    """
+    metamodel = require_metamodel(session)
+    model_row = content.get_model_row(db, project_id)
+    if model_row is not None and model_row.metamodel_id is not None:
+        mm_row = content.get_metamodel_row(db, model_row.metamodel_id)
+        if mm_row is not None:
+            return RawMetamodelResponse(blob=mm_row.blob, source="stored")
+    blob = yaml.safe_dump(
+        metamodel.model_dump(mode="json", exclude_none=True), sort_keys=False
+    )
+    return RawMetamodelResponse(blob=blob, source="serialized")
 
 
 @router.delete("/metamodel", status_code=204, response_model=None)

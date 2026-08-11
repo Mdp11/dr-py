@@ -23,6 +23,7 @@
 		getStagedViewDepth,
 		getStrictMode,
 		isRunning,
+		openMetamodelTab,
 		popLastStaged,
 		refreshSummary,
 		setDiffDrawerOpen,
@@ -35,11 +36,9 @@
 	import { Ellipsis, AlertCircle, AlertTriangle, Info, RefreshCw, Undo2 } from '@lucide/svelte';
 	import ApplyCrDialog from './ApplyCrDialog.svelte';
 	import ArtifactsMenu from './ArtifactsMenu.svelte';
-	import SwapMetamodelDrawer from './SwapMetamodelDrawer.svelte';
 	import SettingsDialog from './SettingsDialog.svelte';
 
 	let applyCrOpen = $state(false);
-	let swapOpen = $state(false);
 	let settingsOpen = $state(false);
 	const view = $derived(getView());
 
@@ -289,8 +288,8 @@
 					{/snippet}
 				</DropdownMenu.Item>
 				<DropdownMenu.Item onclick={() => (applyCrOpen = true)}>Apply CR</DropdownMenu.Item>
-				<DropdownMenu.Item disabled={metamodel === null} onclick={() => (swapOpen = true)}>
-					Swap Metamodel
+				<DropdownMenu.Item disabled={metamodel === null} onclick={() => openMetamodelTab()}>
+					Edit Metamodel
 				</DropdownMenu.Item>
 				<DropdownMenu.Separator />
 				<DropdownMenu.Item disabled={summary === null} onclick={() => void onExport()}>
@@ -305,5 +304,4 @@
 </header>
 
 <ApplyCrDialog bind:open={applyCrOpen} />
-<SwapMetamodelDrawer bind:open={swapOpen} />
 <SettingsDialog bind:open={settingsOpen} />

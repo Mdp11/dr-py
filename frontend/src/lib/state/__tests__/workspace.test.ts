@@ -6,6 +6,7 @@ import {
 	getDynamicTabs,
 	initWorkspaceTabs,
 	openArtifactTab,
+	openMetamodelTab,
 	openNavigationTab,
 	repointTabArtifact,
 	resetWorkspaceTabs,
@@ -115,5 +116,34 @@ describe('dynamic workspace tabs', () => {
 		expect(b).toBe(a);
 		const draft = openArtifactTab('snippet', { artifactId: null, title: 'New snippet' });
 		expect(draft).toMatch(/^snip:draft:/);
+	});
+});
+
+describe('metamodel singleton tab', () => {
+	it('opens once and focuses on reopen', () => {
+		initWorkspaceTabs('p1');
+		const id = openMetamodelTab();
+		expect(id).toBe('mm:editor');
+		expect(getDynamicTabs()).toHaveLength(1);
+		setActiveTab('detail');
+		expect(openMetamodelTab()).toBe(id);
+		expect(getDynamicTabs()).toHaveLength(1);
+		expect(getActiveTab()).toBe(id);
+	});
+
+	it('persists across init despite having no artifact', () => {
+		initWorkspaceTabs('p1');
+		openMetamodelTab();
+		resetWorkspaceTabs();
+		initWorkspaceTabs('p1');
+		expect(getDynamicTabs().map((t) => t.kind)).toContain('metamodel');
+	});
+
+	it('closes like any tab', () => {
+		initWorkspaceTabs('p1');
+		const id = openMetamodelTab();
+		closeTab(id);
+		expect(getDynamicTabs()).toEqual([]);
+		expect(getActiveTab()).toBe('detail');
 	});
 });

@@ -34,7 +34,13 @@ from ..feed import rebind_event
 from ..hydration import write_snapshot
 from ..identity import get_current_user
 from ..locking import is_model_resource
-from ..schemas import IssueOut, MetamodelDiffResponse, RebindResponse
+from ..schemas import (
+    IssueOut,
+    LintErrorOut,
+    MetamodelDiffResponse,
+    MetamodelLintResponse,
+    RebindResponse,
+)
 from .metamodel import _peer_mm_conflict
 from .ops import _ensure_validation_seeded
 
@@ -100,6 +106,51 @@ async def diff_metamodel(
         candidate_error_count=len(candidate_issues),
         structural=structural,
     )
+
+
+@router.post("/metamodel/lint")
+async def lint_metamodel(
+    request: Request,
+    membership: Membership = Depends(require_membership),
+) -> MetamodelLintResponse:
+    """Parse + metamodel-schema check ONLY — no session, no model, no
+    ``write_mutex`` — cheap enough for the editor's debounced calls. It
+    deliberately takes no ``Session`` dependency, so a cold project is not
+    even hydrated. NOT in the read-only-POST allowlist: only the
+    owner-gated editing flow calls it, and viewers have nothing to lint.
+
+    ``_read_metamodel_blob`` itself is called INSIDE this try block, not
+    before it: the helper is shared with ``diff_metamodel`` (a frozen
+    Phase 1-4 route whose contract is 422-on-bad-input, not always-200) so it
+    must not be changed to swallow its own decode errors. An undecodable body
+    (bad UTF-8, or malformed JSON under a JSON content-type) is exactly as
+    much "the candidate text is bad" as a YAML/schema error, so it must land
+    in the same always-200 result here.
+    """
+    try:
+        blob = await _read_metamodel_blob(request)
+        load_metamodel_str(blob)
+    except ValueError as exc:
+        # Covers UnicodeDecodeError (bytes.decode("utf-8")) and
+        # json.JSONDecodeError (request.json()) raised by
+        # _read_metamodel_blob before load_metamodel_str even runs — both
+        # are ValueError subclasses, and both mean "candidate text is bad".
+        return MetamodelLintResponse(ok=False, errors=[LintErrorOut(message=str(exc))])
+    except yaml.YAMLError as exc:
+        mark = getattr(exc, "problem_mark", None)
+        return MetamodelLintResponse(
+            ok=False,
+            errors=[
+                LintErrorOut(
+                    message=str(exc),
+                    line=mark.line + 1 if mark is not None else None,
+                    column=mark.column + 1 if mark is not None else None,
+                )
+            ],
+        )
+    except MetamodelError as exc:
+        return MetamodelLintResponse(ok=False, errors=[LintErrorOut(message=str(exc))])
+    return MetamodelLintResponse(ok=True)
 
 
 @router.post("/metamodel/rebind", response_model=None)

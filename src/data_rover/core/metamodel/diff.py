@@ -210,7 +210,9 @@ def _element_types_diff(
         attrs = _field_changes(old_by[n], new_by[n], _EL_ATTRS)
         props = _props_diff(old_by[n].properties, new_by[n].properties)
         if attrs or not props.is_empty:
-            changed.append(ElementTypeChange(name=n, attributes=attrs, properties=props))
+            changed.append(
+                ElementTypeChange(name=n, attributes=attrs, properties=props)
+            )
     return ElementTypesDiff(
         added=[new_by[n] for n in sorted(new_by.keys() - old_by.keys())],
         removed=[old_by[n] for n in sorted(old_by.keys() - new_by.keys())],

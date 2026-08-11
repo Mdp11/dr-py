@@ -1,5 +1,6 @@
 import { getDraft, hasDirtyNavDrafts } from './navigation-editor.svelte';
 import { getSnippetDraft, hasDirtySnippetDrafts } from './snippet-editor.svelte';
+import { isMetamodelEditorDirty } from './metamodel-editor.svelte';
 import { getTableDraft, hasDirtyTableDrafts } from './table-editor.svelte';
 import { hasStagedOps } from './model.svelte';
 import { getStagedArtifactDepth } from './artifact-edits.svelte';
@@ -20,6 +21,10 @@ import { getStagedViewDepth } from './view-edits.svelte';
  * placements go straight from the gesture into the journal, with no editor in
  * between — so without it a view-ONLY batch (rename a folder, close the tab)
  * walks out unguarded while the equivalent model or artifact batch is caught.
+ *
+ * There is deliberately NO metamodel-editor term: that draft mirrors to
+ * localStorage and is restored on the next open, so navigating away loses
+ * nothing and prompting for it would be a false alarm.
  */
 export function hasUnsavedWork(): boolean {
 	return (
@@ -36,8 +41,16 @@ export function hasUnsavedWork(): boolean {
  * True when the workspace tab `tabId` holds work the server has not seen: an
  * edited draft (`dirty`) or a draft that was never saved at all (artifactId
  * null). Drives the unsaved `*` marker on tab labels.
+ *
+ * The metamodel tab is the one kind with no per-tab draft record — it is a
+ * singleton editor with module-level state — so it answers from its own
+ * buffer-vs-baseline check instead of the draft lookup below.
  */
-export function isTabDirty(kind: 'navigation' | 'table' | 'snippet', tabId: string): boolean {
+export function isTabDirty(
+	kind: 'navigation' | 'table' | 'snippet' | 'metamodel',
+	tabId: string
+): boolean {
+	if (kind === 'metamodel') return isMetamodelEditorDirty();
 	const draft =
 		kind === 'table'
 			? getTableDraft(tabId)

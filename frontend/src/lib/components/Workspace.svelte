@@ -3,6 +3,7 @@
 	import * as Tabs from '$lib/components/ui/tabs';
 	import {
 		closeDraft,
+		closeMetamodelEditor,
 		closeSnippetDraft,
 		closeTab,
 		closeTableDraft,
@@ -19,6 +20,7 @@
 	import NavigationBuilder from './Navigation/NavigationBuilder.svelte';
 	import TableView from './Table/TableView.svelte';
 	import SnippetTab from './Snippet/SnippetTab.svelte';
+	import MetamodelTab from './Metamodel/MetamodelTab.svelte';
 
 	const activeTab = $derived(getActiveTab());
 	const dynamicTabs = $derived(getDynamicTabs());
@@ -49,6 +51,11 @@
 							e.stopPropagation();
 							if (tab.kind === 'table') closeTableDraft(tab.id);
 							else if (tab.kind === 'snippet') closeSnippetDraft(tab.id);
+							// Also run by MetamodelTab's own unmount teardown (closing
+							// the tab unmounts it). The double call is idempotent — the
+							// second sees no lease held and an already-idle phase — and
+							// keeps this close path symmetric with the other kinds.
+							else if (tab.kind === 'metamodel') closeMetamodelEditor();
 							else closeDraft(tab.id);
 							closeTab(tab.id);
 						}}
@@ -89,6 +96,8 @@
 					<TableView tabId={tab.id} />
 				{:else if tab.kind === 'snippet'}
 					<SnippetTab tabId={tab.id} />
+				{:else if tab.kind === 'metamodel'}
+					<MetamodelTab />
 				{:else}
 					<NavigationBuilder tabId={tab.id} />
 				{/if}

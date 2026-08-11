@@ -26,7 +26,24 @@
 {#if empty}
 	<p class="text-xs text-muted-foreground">No structural changes.</p>
 {:else}
+	{@const counts = [
+		['element types', diff.element_types],
+		['relationship types', diff.relationship_types],
+		['enums', diff.enums]
+	] as const}
 	<div class="flex flex-col gap-2 text-xs">
+		<p class="text-[10px] text-muted-foreground">
+			{#each counts as [label, d] (label)}
+				{#if d.added.length + d.removed.length + d.changed.length > 0}
+					<span class="mr-3">
+						{label}:
+						{#if d.added.length}<span class="text-success">+{d.added.length}</span>{/if}
+						{#if d.removed.length}<span class="text-destructive">−{d.removed.length}</span>{/if}
+						{#if d.changed.length}<span class="text-foreground/80">~{d.changed.length}</span>{/if}
+					</span>
+				{/if}
+			{/each}
+		</p>
 		{@render typeSection('Element types', diff.element_types.added, diff.element_types.removed)}
 		{#each diff.element_types.changed as chg (chg.name)}
 			{@render changedType(chg.name, chg.attributes, chg.properties, null)}
@@ -40,7 +57,7 @@
 			{@render changedType(chg.name, chg.attributes, chg.properties, chg.mappings)}
 		{/each}
 		{#if diff.enums.added.length || diff.enums.removed.length || diff.enums.changed.length}
-			<section class="flex flex-col gap-1">
+			<section class="flex flex-col gap-0.5 rounded border border-border bg-muted/40 px-2 py-1.5">
 				<h4 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
 					Enums
 				</h4>
@@ -67,7 +84,7 @@
 
 {#snippet typeSection(title: string, added: { name: string }[], removed: { name: string }[])}
 	{#if added.length || removed.length}
-		<section class="flex flex-col gap-1">
+		<section class="flex flex-col gap-0.5 rounded border border-border bg-muted/40 px-2 py-1.5">
 			<h4 class="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
 				{title}
 			</h4>
@@ -99,7 +116,10 @@
 	<section class="flex flex-col gap-0.5 rounded border border-border bg-muted/40 px-2 py-1.5">
 		<p class="font-mono font-semibold">{name}</p>
 		{#each attributes as a (a.field)}
-			<p class="pl-2">{a.field}: {fmt(a.from)} → {fmt(a.to)}</p>
+			<p class="pl-2">
+				{a.field}: <span class="font-mono">{fmt(a.from)}</span> →
+				<span class="font-mono">{fmt(a.to)}</span>
+			</p>
 		{/each}
 		{#each properties.added as p (p.name)}
 			<p class="pl-2"><span class="text-success">+ property</span> {p.name}</p>
@@ -109,7 +129,10 @@
 		{/each}
 		{#each properties.changed as p (p.name)}
 			{#each p.fields as f (f.field)}
-				<p class="pl-2">{p.name}.{f.field}: {fmt(f.from)} → {fmt(f.to)}</p>
+				<p class="pl-2">
+					{p.name}.{f.field}: <span class="font-mono">{fmt(f.from)}</span> →
+					<span class="font-mono">{fmt(f.to)}</span>
+				</p>
 			{/each}
 		{/each}
 		{#if mappings}

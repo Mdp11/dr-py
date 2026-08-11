@@ -101,8 +101,8 @@ export function hasModelLocks(): boolean {
 		// metamodel lease is NOT a model-scope lease there either. Rebind's own
 		// quiescence check ignores it server-side (a peer holding `mm` gets its
 		// own 409-with-email from the metamodel writer, independent of this
-		// predicate), and counting it here would make the swap drawer's own
-		// `mm` lease disable its own Rebind button the moment it opens.
+		// predicate), and counting it here would make the metamodel editor's
+		// own `mm` lease disable its own Rebind button the moment it opens.
 		if (rid !== 'mm' && !isArtifactResource(rid) && !isFolderResource(rid)) return true;
 	}
 	return false;
