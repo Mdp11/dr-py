@@ -6,16 +6,24 @@ from __future__ import annotations
 
 import time
 
+import pytest
+from fastapi.testclient import TestClient
+
 from data_rover.api.lock_mirror import (
     MemoryLeaseMirror,
     MirroredLease,
     NullLeaseMirror,
     build_mirror_from_settings,
+    get_lease_mirror,
+    set_lease_mirror,
     to_leases,
     to_mirrored,
 )
 from data_rover.api.locking import Lease, LockIntent, LockMode
+from data_rover.api.main import create_app
 from data_rover.api.settings import Settings
+
+from .conftest import AUTH_HEADERS, papi, seed_default_project
 
 
 def _lease(rid: str = "e1", *, expires_at: float, token: str = "tok1") -> Lease:
@@ -71,3 +79,118 @@ def test_null_mirror_is_inert() -> None:
 def test_build_from_settings_empty_url_is_null() -> None:
     s = Settings(redis_url="")
     assert isinstance(build_mirror_from_settings(s), NullLeaseMirror)
+
+
+_MM = """
+elements:
+  - name: Node
+relationships:
+  - name: Contains
+    containment: true
+    source: Node
+    target: Node
+"""
+
+
+@pytest.fixture
+def client() -> TestClient:
+    seed_default_project()
+    c = TestClient(create_app())
+    c.headers.update(AUTH_HEADERS)
+    r = c.post(
+        papi("/metamodel"), content=_MM,
+        headers={"content-type": "application/x-yaml"},
+    )
+    assert r.status_code == 200, r.text
+    r = c.post(papi("/model"), json={"elements": [], "relationships": []})
+    assert r.status_code == 200, r.text
+    return c
+
+
+def _rev(c: TestClient) -> int:
+    return c.get(papi("/model/summary")).json()["model_rev"]
+
+
+def _create_element(c: TestClient) -> str:
+    r = c.post(
+        papi("/model/ops"),
+        json={
+            "base_rev": _rev(c),
+            "ops": [{"kind": "create_element", "temp_id": "tmp_n",
+                     "type_name": "Node", "properties": {}}],
+        },
+    )
+    assert r.status_code == 200, r.text
+    return r.json()["id_map"]["tmp_n"]
+
+
+def _acquire(c: TestClient, eid: str) -> str:
+    r = c.post(
+        papi("/locks"),
+        json={"targets": [{"resource_id": eid, "mode": "exclusive"}],
+              "intent": "edit"},
+    )
+    assert r.status_code == 200, r.text
+    return r.json()["token"]
+
+
+def test_acquire_release_write_through(client: TestClient) -> None:
+    eid = _create_element(client)
+    token = _acquire(client, eid)
+    mirrored = get_lease_mirror().load("default")
+    assert [(m.resource_id, m.token, m.mode) for m in mirrored] == [
+        (eid, token, "exclusive")
+    ]
+    r = client.post(papi("/locks/release"), json={"token": token})
+    assert r.status_code == 200 and r.json()["released"] == 1
+    assert get_lease_mirror().load("default") == []
+
+
+def test_renew_write_through_extends_epoch(client: TestClient) -> None:
+    eid = _create_element(client)
+    _acquire(client, eid)
+    [before] = get_lease_mirror().load("default")
+    token = before.token
+    r = client.post(papi("/locks/renew"), json={"token": token})
+    assert r.status_code == 200 and r.json()["ok"] is True
+    [after] = get_lease_mirror().load("default")
+    # strict >: renew recomputes expiry from a LATER wall clock than acquire
+    # did, so the mirrored epoch must strictly increase. If this were `>=`,
+    # deleting the write-through call from renew_locks would still pass
+    # (load() would just return the untouched acquire-time entry unchanged —
+    # X >= X). Strict > is the only assertion that actually pins the wiring.
+    assert after.expires_at_epoch > before.expires_at_epoch
+
+
+def test_commit_release_write_through(client: TestClient) -> None:
+    # stage an update to an existing element: needs an edit lease, and the
+    # commit (sent the token) must release it in the mirror too
+    eid = _create_element(client)
+    token = _acquire(client, eid)
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": _rev(client),
+            "ops": [{"kind": "update_element", "id": eid,
+                     "properties_patch": {}}],
+            "message": "noop-ish edit",
+            "lock_tokens": [token],
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert get_lease_mirror().load("default") == []
+
+
+def test_mirror_failure_never_fails_the_route(client: TestClient) -> None:
+    class ExplodingMirror:
+        def write(self, project_id, leases):  # noqa: ANN001
+            raise RuntimeError("redis is on fire")
+
+        def load(self, project_id):  # noqa: ANN001
+            raise RuntimeError("redis is on fire")
+
+    eid = _create_element(client)
+    set_lease_mirror(ExplodingMirror())
+    token = _acquire(client, eid)  # 200 despite the exploding mirror
+    r = client.post(papi("/locks/release"), json={"token": token})
+    assert r.status_code == 200

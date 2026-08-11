@@ -29,6 +29,7 @@ from data_rover.api import db  # noqa: E402
 from data_rover.api import db_models  # noqa: E402,F401  (registers ORM tables)
 from data_rover.api.db_models import Membership, Project, Role, User  # noqa: E402
 from data_rover.api.identity import set_identity_provider  # noqa: E402
+from data_rover.api.lock_mirror import MemoryLeaseMirror, set_lease_mirror  # noqa: E402
 from data_rover.api.script_sweep import reset_global_slots  # noqa: E402
 from data_rover.api.session import (  # noqa: E402
     DEFAULT_PROJECT_ID,
@@ -48,6 +49,7 @@ def _fresh_db() -> Iterator[None]:
     # sweep semaphore instead of one another test lazily sized
     reset_global_slots()
     set_snapshot_store(MemorySnapshotStore())
+    set_lease_mirror(MemoryLeaseMirror())
     install_persistent_registry()  # get() now hydrates from the (empty) DB
     set_identity_provider(None)  # forget any provider a test swapped in
     try:
@@ -57,6 +59,7 @@ def _fresh_db() -> Iterator[None]:
         reset_session()
         reset_global_slots()
         set_snapshot_store(None)
+        set_lease_mirror(None)
         set_identity_provider(None)
 
 

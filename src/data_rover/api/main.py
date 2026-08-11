@@ -15,6 +15,7 @@ from .csrf import CSRFMiddleware
 from .db import create_all, db_session, init_engine
 from .errors import register_exception_handlers
 from .feed import lock_event
+from .lock_mirror import mirror_session_leases
 from .routes import (
     admin,
     artifact_bundle,
@@ -134,7 +135,7 @@ def _sweep_expired_locks(now: float) -> int:
     Broadcasts lock{expired} for each session whose leases were swept,
     outside the write_mutex (enqueue is non-blocking; no mutex needed)."""
     released = 0
-    for _pid, session in get_registry().warm_items():
+    for pid, session in get_registry().warm_items():
         with session.write_mutex:
             expired = session.lock_table.sweep_expired(now)
         if expired:
@@ -152,6 +153,7 @@ def _sweep_expired_locks(now: float) -> int:
                     ],
                 )
             )
+            mirror_session_leases(pid, session)
         released += len(expired)
     return released
 
