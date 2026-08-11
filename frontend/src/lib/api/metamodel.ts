@@ -3,9 +3,13 @@ import {
 	MetamodelSchema,
 	MetamodelDiffSchema,
 	RebindSchema,
+	RawMetamodelSchema,
+	MetamodelLintSchema,
 	type Metamodel,
 	type MetamodelDiff,
-	type Rebind
+	type Rebind,
+	type RawMetamodel,
+	type MetamodelLint
 } from './types';
 
 /**
@@ -67,4 +71,18 @@ export function rebindMetamodel(
 		query: { base_rev: opts.baseRev, message: opts.message }
 	};
 	return apiFetch('/metamodel/rebind', init, cfg);
+}
+
+export function getMetamodelRaw(cfg?: ClientConfig): Promise<RawMetamodel> {
+	return apiFetch('/metamodel/raw', { method: 'GET', schema: RawMetamodelSchema }, cfg);
+}
+
+export function lintMetamodel(body: string, cfg?: ClientConfig): Promise<MetamodelLint> {
+	const init: ApiFetchInit = {
+		method: 'POST',
+		body,
+		schema: MetamodelLintSchema,
+		headers: { 'Content-Type': 'application/x-yaml' }
+	};
+	return apiFetch('/metamodel/lint', init, cfg);
 }

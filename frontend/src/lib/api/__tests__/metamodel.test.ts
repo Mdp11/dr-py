@@ -5,6 +5,8 @@ import {
 	clearMetamodel,
 	diffMetamodel,
 	getMetamodel,
+	getMetamodelRaw,
+	lintMetamodel,
 	rebindMetamodel,
 	uploadMetamodel
 } from '../metamodel';
@@ -111,6 +113,33 @@ describe('metamodel client', () => {
 		const result = await clearMetamodel(cfg);
 		expect(called).toBe(true);
 		expect(result).toBeUndefined();
+	});
+
+	it('getMetamodelRaw parses blob + source', async () => {
+		server.use(
+			http.get(`${BASE}/metamodel/raw`, () =>
+				HttpResponse.json({ blob: '# hi\nelements: []\n', source: 'stored' })
+			)
+		);
+		const res = await getMetamodelRaw(cfg);
+		expect(res.blob).toContain('# hi');
+		expect(res.source).toBe('stored');
+	});
+
+	it('lintMetamodel posts YAML and parses errors with nullable position', async () => {
+		server.use(
+			http.post(`${BASE}/metamodel/lint`, async ({ request }) => {
+				expect(request.headers.get('content-type')).toContain('application/x-yaml');
+				expect(await request.text()).toBe('elements: [ {');
+				return HttpResponse.json({
+					ok: false,
+					errors: [{ message: 'bad flow mapping', line: 1, column: 13 }]
+				});
+			})
+		);
+		const res = await lintMetamodel('elements: [ {', cfg);
+		expect(res.ok).toBe(false);
+		expect(res.errors[0].line).toBe(1);
 	});
 });
 
