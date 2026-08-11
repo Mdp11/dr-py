@@ -70,6 +70,12 @@ class Settings(BaseSettings):
     #: When non-empty, the GCS client talks to this emulator endpoint
     #: (e.g. "http://localhost:4443") instead of real GCS — set for local dev.
     storage_emulator_host: str = ""
+    #: Redis URL for the lease mirror (Phase 7, scoped), e.g.
+    #: ``redis://localhost:6379/0``. Empty (the default) disables mirroring
+    #: entirely (NullLeaseMirror): locks are in-process only — exactly the
+    #: pre-mirror behavior. When set, mirroring is still best-effort: a down
+    #: Redis degrades (warn + cooldown), it never fails a lock operation.
+    redis_url: str = ""
     #: A full-model snapshot is written every Nth commit (bounds hydration
     #: replay length). A snapshot is ALSO always written on eviction.
     snapshot_every: int = 200
