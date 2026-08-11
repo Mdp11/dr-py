@@ -134,6 +134,20 @@ class IssueOut(BaseModel):
         )
 
 
+class RawMetamodelResponse(BaseModel):
+    """The current metamodel's SOURCE text (Phase 5 editor baseline).
+
+    ``blob`` is the stored ``MetamodelRow`` YAML verbatim — comments and
+    formatting intact (the rebind route's persist-the-original-blob
+    invariant made visible). ``source`` is ``"serialized"`` only on the
+    degraded fallback where no durable row resolves and the in-memory
+    metamodel is re-serialized instead.
+    """
+
+    blob: str
+    source: Literal["stored", "serialized"]
+
+
 class MetamodelDiffResponse(BaseModel):
     """Read-only sandbox conformance diff (Phase 6B) + structural document
     diff (Phase 4). now_failing = issues the candidate metamodel introduces;
