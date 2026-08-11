@@ -6,9 +6,11 @@
 		canEdit,
 		getArtifactDialogsHosted,
 		getCommandPaletteOpen,
+		getMetamodel,
 		getModelSummary,
 		openExportArtifacts,
 		openImportArtifacts,
+		openMetamodelTab,
 		popLastStaged,
 		seedElements,
 		select,
@@ -124,6 +126,11 @@
 		openImportArtifacts();
 	}
 
+	function actionEditMetamodel(): void {
+		close();
+		openMetamodelTab();
+	}
+
 	function onOpenChange(v: boolean): void {
 		setCommandPaletteOpen(v);
 		if (!v) query = '';
@@ -179,6 +186,14 @@
 				{#if canEdit()}
 					<Command.Item value="action:import-artifacts" onSelect={actionImportArtifacts}>
 						<span>Import artifacts…</span>
+					</Command.Item>
+				{/if}
+				<!-- Under the same workspace-is-mounted gate: the metamodel tab
+				     lives in the workspace tab strip, so offering it from
+				     /projects would open a tab nobody can see. -->
+				{#if getMetamodel() !== null}
+					<Command.Item value="action:edit-metamodel" onSelect={actionEditMetamodel}>
+						<span>Edit Metamodel</span>
 					</Command.Item>
 				{/if}
 			{/if}

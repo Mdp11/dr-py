@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import TopBar from '../TopBar.svelte';
 import { getPendingConfirm, resetConfirm } from '$lib/state/confirm.svelte';
@@ -7,7 +7,6 @@ import { getPendingConfirm, resetConfirm } from '$lib/state/confirm.svelte';
 // Provide a minimal no-op stub for each dialog/drawer child of TopBar so we
 // don't need QueryClientProvider or other heavy contexts.
 vi.mock('../ApplyCrDialog.svelte', () => ({ default: () => {} }));
-vi.mock('../SwapMetamodelDrawer.svelte', () => ({ default: () => {} }));
 vi.mock('../SettingsDialog.svelte', () => ({ default: () => {} }));
 
 const goto = vi.fn();
@@ -54,8 +53,11 @@ vi.mock('$lib/util/fileSave', () => ({ saveResponseToFile: vi.fn(async () => {})
 // the artifact-edits store is deliberately NOT mocked (the `...actual` spread
 // keeps it real) so the Commit gate is exercised against the real staged
 // buffer rather than a stub.
-import { getModelSummary, getStagedViewDepth } from '$lib/state';
+import { getMetamodel, getModelSummary, getStagedViewDepth } from '$lib/state';
 import { resetArtifactEdits, stageArtifactCreate } from '$lib/state/artifact-edits.svelte';
+// The workspace tab store is deliberately NOT mocked (the `...actual` spread
+// keeps it real), so the menu item is asserted through the tab it opens.
+import { getDynamicTabs, resetWorkspaceTabs } from '$lib/state/workspace.svelte';
 
 const SUMMARY = {
 	model_rev: 1,
@@ -70,14 +72,20 @@ function findButton(name: RegExp): HTMLButtonElement | undefined {
 	return [...document.querySelectorAll('button')].find((b) => name.test(b.textContent ?? ''));
 }
 
+beforeEach(() => {
+	resetWorkspaceTabs();
+});
+
 afterEach(() => {
 	resetConfirm();
 	resetArtifactEdits();
+	resetWorkspaceTabs();
 	document.body.innerHTML = '';
 	// clearAllMocks() only clears CALLS, not implementations, so a test that
 	// installed a non-null summary would leak it into the next one.
 	vi.mocked(getModelSummary).mockReturnValue(null);
 	vi.mocked(getStagedViewDepth).mockReturnValue(0);
+	vi.mocked(getMetamodel).mockReturnValue(null);
 	vi.clearAllMocks();
 });
 
@@ -133,6 +141,50 @@ describe('TopBar', () => {
 
 			expect(findButton(/commit/i)?.disabled).toBe(false);
 			expect(document.body.textContent).toContain('● 1');
+
+			unmount(c);
+		});
+	});
+
+	// The old "Swap Metamodel" drawer is gone; the overflow menu now opens the
+	// in-app metamodel editor tab instead.
+	describe('Edit Metamodel item', () => {
+		function openOverflowMenu(): void {
+			document.querySelector<HTMLButtonElement>('[aria-label="More actions"]')!.click();
+			flushSync();
+		}
+
+		function metamodelItem(): HTMLElement | undefined {
+			return [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+				(n) => n.textContent?.trim() === 'Edit Metamodel'
+			);
+		}
+
+		it('opens the metamodel tab and offers no Swap Metamodel entry', () => {
+			vi.mocked(getMetamodel).mockReturnValue({ elements: [], relationships: [] } as never);
+
+			const c = mount(TopBar, { target: document.body });
+			flushSync();
+			openOverflowMenu();
+
+			expect(document.body.textContent).toContain('Edit Metamodel');
+			expect(document.body.textContent).not.toContain('Swap Metamodel');
+			expect(getDynamicTabs()).toHaveLength(0);
+
+			metamodelItem()!.click();
+			flushSync();
+
+			expect(getDynamicTabs().some((t) => t.kind === 'metamodel')).toBe(true);
+
+			unmount(c);
+		});
+
+		it('is disabled with no metamodel loaded', () => {
+			const c = mount(TopBar, { target: document.body });
+			flushSync();
+			openOverflowMenu();
+
+			expect(metamodelItem()?.getAttribute('aria-disabled')).toBe('true');
 
 			unmount(c);
 		});

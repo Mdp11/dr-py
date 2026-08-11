@@ -2,9 +2,9 @@ import { ensureCheckout, lockHolderLabel, releaseMetamodelLease } from './checko
 
 /**
  * The `mm` lease lifecycle, keyed to whichever surface is editing the
- * metamodel — the SwapMetamodelDrawer today, the Phase 5 metamodel editor
- * tomorrow. Lives OUTSIDE the drawer, deliberately, so it survives the
- * drawer's removal: nothing here may import anything drawer-specific.
+ * metamodel — the metamodel editor tab today. Lives OUTSIDE that surface,
+ * deliberately, so it outlived the swap drawer it was first written for:
+ * nothing here may import anything surface-specific.
  *
  * Generation-guarded (house async-dialog rule): a surface that closes while
  * an acquire is in flight bumps the generation, and the late grant — if one

@@ -257,8 +257,8 @@ export async function previewMetamodelChanges(): Promise<void> {
 }
 
 function rebindErrorMessage(e: unknown): string {
-	// Ported verbatim from SwapMetamodelDrawer: three distinct 409 refusals
-	// share one status, so branch on the exact structured detail.
+	// Three distinct 409 refusals share one status, so branch on the exact
+	// structured detail rather than a loose `detail.includes('lock')`.
 	if (e instanceof ApiError && e.status === 409) {
 		const body = (typeof e.body === 'object' && e.body ? e.body : {}) as {
 			detail?: unknown;
