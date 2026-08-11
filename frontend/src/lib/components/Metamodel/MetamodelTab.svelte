@@ -31,6 +31,9 @@
 	const stripError = $derived(ed.lintErrors.find((e) => e.line === null) ?? null);
 
 	let message = $state('');
+	/** The rebind itself already succeeded by the time this can fire — the
+	 * copy below must never read as a failed rebind, only as a stale view. */
+	let refreshError = $state<string | null>(null);
 
 	function init(): void {
 		const pid = getActiveProjectId();
@@ -54,13 +57,23 @@
 	}
 
 	async function onRebind(): Promise<void> {
+		refreshError = null;
 		const res = await commitMetamodelRebind(message);
 		if (res === null) return;
-		const mm = await fetchMetamodel();
-		setMetamodel(mm);
-		setIssues(res.issues.map(toIssue));
-		await refreshSummary();
+		// The commit consumed the message regardless of what the refresh below
+		// does next.
 		message = '';
+		try {
+			const mm = await fetchMetamodel();
+			setMetamodel(mm);
+			setIssues(res.issues.map(toIssue));
+			await refreshSummary();
+		} catch {
+			// The durable rebind already landed — this is a stale VIEW, not a
+			// failed rebind, so it must never reuse rebindError's copy or flow.
+			refreshError =
+				'Rebind succeeded, but the view could not refresh. Reload the page to see the latest metamodel.';
+		}
 	}
 </script>
 
@@ -169,6 +182,12 @@
 				class="rounded border border-destructive/40 bg-destructive/15 px-2 py-1.5 text-xs text-destructive"
 			>
 				{ed.previewError}
+			</p>
+		{/if}
+
+		{#if refreshError}
+			<p class="rounded border border-warning/40 bg-warning/15 px-2 py-1.5 text-xs text-warning">
+				{refreshError}
 			</p>
 		{/if}
 
