@@ -440,10 +440,18 @@ def install_persistent_registry() -> None:
     (``hydration`` imports both); unit tests that want the empty-Session
     fallback simply don't call this."""
     from .hydration import hydrate_session, write_snapshot
+    from .lock_mirror import restore_leases
+
+    def _load(project_id: str) -> Session:
+        sess = hydrate_session(project_id)
+        # Phase 7 (scoped): re-install still-live mirrored leases so tokens
+        # survive a restart. Best-effort — a mirror failure is a cold start.
+        restore_leases(project_id, sess.lock_table)
+        return sess
 
     def _evict(project_id: str, sess: Session) -> None:
         if sess.model is not None:
             write_snapshot(project_id, sess, sess.model_rev)
 
-    _registry.set_loader(hydrate_session)
+    _registry.set_loader(_load)
     _registry.set_evict_hook(_evict)

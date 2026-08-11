@@ -5,6 +5,7 @@ integration-marked test in test_lock_mirror_redis.py."""
 from __future__ import annotations
 
 import time
+import time as _time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -21,6 +22,7 @@ from data_rover.api.lock_mirror import (
 )
 from data_rover.api.locking import Lease, LockIntent, LockMode
 from data_rover.api.main import create_app
+from data_rover.api.session import reset_session
 from data_rover.api.settings import Settings
 
 from .conftest import AUTH_HEADERS, papi, seed_default_project
@@ -194,3 +196,80 @@ def test_mirror_failure_never_fails_the_route(client: TestClient) -> None:
     token = _acquire(client, eid)  # 200 despite the exploding mirror
     r = client.post(papi("/locks/release"), json={"token": token})
     assert r.status_code == 200
+
+
+OTHER_HEADERS = {"x-user-id": "user-2", "x-user-email": "user2@example.com"}
+
+
+def _add_member(user_id: str, email: str) -> None:
+    from data_rover.api import db as _db
+    from data_rover.api.db_models import Role, User
+    from data_rover.api.session import DEFAULT_PROJECT_ID
+    from data_rover.api.tenancy import add_member
+
+    gen = _db.get_db()
+    s = next(gen)
+    try:
+        s.add(User(id=user_id, email=email))
+        s.commit()
+        add_member(s, DEFAULT_PROJECT_ID, user_id, Role.editor)
+    finally:
+        gen.close()
+
+
+def test_leases_survive_restart(client: TestClient) -> None:
+    """The point of the phase: acquire -> 'restart' -> same token still works,
+    peers still conflict."""
+    eid = _create_element(client)
+    token = _acquire(client, eid)
+
+    # simulate a backend restart: drop every in-memory session; the process-
+    # global MemoryLeaseMirror survives (it plays the role of Redis)
+    reset_session()
+
+    # next request re-hydrates through the persistent loader -> restore
+    r = client.post(papi("/locks/renew"), json={"token": token})
+    assert r.status_code == 200 and r.json()["ok"] is True
+
+    listed = client.get(papi("/locks")).json()["leases"]
+    assert [(le["resource_id"], le["token"]) for le in listed] == [(eid, token)]
+
+    # a peer editor still conflicts with the restored exclusive lease
+    _add_member("user-2", "user2@example.com")
+    r = client.post(
+        papi("/locks"),
+        json={"targets": [{"resource_id": eid, "mode": "exclusive"}],
+              "intent": "edit"},
+        headers=OTHER_HEADERS,
+    )
+    assert r.status_code == 409, r.text
+    assert r.json()["conflicts"][0]["resource_id"] == eid
+
+
+def test_expired_mirrored_lease_not_restored(client: TestClient) -> None:
+    eid = _create_element(client)
+    _acquire(client, eid)
+    # rewrite the mirror entry as long-expired, then "restart"
+    get_lease_mirror().write(
+        "default",
+        [MirroredLease(eid, "exclusive", "test-user", "tok-old", "edit",
+                       _time.time() - 5.0)],
+    )
+    reset_session()
+    assert client.get(papi("/locks")).json()["leases"] == []
+
+
+def test_restore_failure_degrades_to_cold_start(client: TestClient) -> None:
+    class ExplodingLoad:
+        def write(self, project_id, leases):  # noqa: ANN001
+            return None
+
+        def load(self, project_id):  # noqa: ANN001
+            raise RuntimeError("redis is on fire")
+
+    eid = _create_element(client)
+    _acquire(client, eid)
+    set_lease_mirror(ExplodingLoad())
+    reset_session()
+    # hydration succeeds; table is simply empty (today's cold start)
+    assert client.get(papi("/locks")).json()["leases"] == []
