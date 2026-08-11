@@ -1,6 +1,6 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 
-import { resetCheckout, setProjectInfo } from '../checkout.svelte';
+import { isCheckedOutByMe, resetCheckout, setProjectInfo } from '../checkout.svelte';
 import {
 	closeMetamodelEditor,
 	commitMetamodelRebind,
@@ -404,5 +404,102 @@ describe('closeMetamodelEditor', () => {
 		expect(v.phase).toBe('idle');
 		expect(v.buffer).toBe('');
 		expect(v.loadError).toBeNull();
+	});
+
+	it('releases a HELD lease', async () => {
+		stubLintOk();
+		vi.spyOn(lockApi, 'acquireLocks').mockResolvedValue(LEASE);
+		const release = vi.spyOn(lockApi, 'releaseLock').mockResolvedValue(undefined);
+		await initMetamodelEditor(PROJECT);
+		editMetamodelBuffer(`${BASE}x`);
+		await vi.waitFor(() => expect(isCheckedOutByMe('mm')).toBe(true));
+
+		closeMetamodelEditor();
+
+		expect(release).toHaveBeenCalledWith('t-mm', undefined);
+		expect(isCheckedOutByMe('mm')).toBe(false);
+	});
+
+	it('releases a lease granted AFTER the close, instead of leaking it forever', async () => {
+		stubLintOk();
+		const grant = deferred<LockResponse>();
+		vi.spyOn(lockApi, 'acquireLocks').mockImplementation(() => grant.promise);
+		const release = vi.spyOn(lockApi, 'releaseLock').mockResolvedValue(undefined);
+		await initMetamodelEditor(PROJECT);
+
+		editMetamodelBuffer(`${BASE}x`); // starts the acquire...
+		closeMetamodelEditor(); // ...which is still in flight here.
+		grant.resolve(LEASE);
+
+		// The lease module's generation guard hands the late grant back — but
+		// ONLY because the close dropped it unconditionally. A leak here is
+		// not TTL-bounded: the registry entry keeps the checkout heartbeat
+		// renewing it for the rest of the session.
+		await vi.waitFor(() => expect(release).toHaveBeenCalledWith('t-mm', undefined));
+		expect(isCheckedOutByMe('mm')).toBe(false);
+	});
+
+	it('clears the in-flight preview and rebind flags so a reopen is not wedged', async () => {
+		stubLintOk();
+		vi.spyOn(lockApi, 'acquireLocks').mockResolvedValue(LEASE);
+		vi.spyOn(lockApi, 'releaseLock').mockResolvedValue(undefined);
+		const slowDiff = deferred<MetamodelDiff>();
+		const diff = vi.spyOn(mmApi, 'diffMetamodel').mockImplementation(() => slowDiff.promise);
+		await initMetamodelEditor(PROJECT);
+		editMetamodelBuffer(`${BASE}x`);
+
+		const previewing = previewMetamodelChanges();
+		expect(getMetamodelEditor().previewing).toBe(true);
+		closeMetamodelEditor();
+		slowDiff.resolve(DIFF);
+		await previewing;
+
+		expect(getMetamodelEditor().previewing).toBe(false);
+
+		// The reopened editor can actually preview and rebind again.
+		diff.mockResolvedValue(DIFF);
+		const slowRebind = deferred<Rebind>();
+		vi.spyOn(mmApi, 'rebindMetamodel').mockImplementation(() => slowRebind.promise);
+		await initMetamodelEditor(PROJECT);
+		editMetamodelBuffer(`${BASE}y`);
+		await previewMetamodelChanges();
+		expect(getMetamodelEditor().previewCurrent).toBe(true);
+
+		const rebinding = commitMetamodelRebind('m');
+		expect(getMetamodelEditor().rebinding).toBe(true);
+		closeMetamodelEditor();
+		slowRebind.resolve(REBIND);
+
+		expect(await rebinding).toBeNull(); // the close discarded the result
+		expect(getMetamodelEditor().rebinding).toBe(false);
+	});
+
+	it('keeps the stored draft when the editor closes before the baseline loaded', async () => {
+		const DRAFT = `${BASE}unsaved work\n`;
+		localStorage.setItem(DRAFT_KEY, DRAFT);
+		const slow = deferred<RawMetamodel>();
+		vi.spyOn(mmApi, 'getMetamodelRaw').mockImplementation(() => slow.promise);
+
+		const inflight = initMetamodelEditor(PROJECT);
+		expect(getMetamodelEditor().phase).toBe('loading');
+		closeMetamodelEditor();
+
+		// Neither a successful rebind nor an explicit discard happened, so the
+		// draft is still the user's only copy of that work.
+		expect(localStorage.getItem(DRAFT_KEY)).toBe(DRAFT);
+		slow.resolve({ blob: BASE, source: 'stored' });
+		await inflight;
+		expect(localStorage.getItem(DRAFT_KEY)).toBe(DRAFT);
+
+		// Same for a load that FAILED outright.
+		vi.spyOn(mmApi, 'getMetamodelRaw').mockRejectedValue(new Error('offline'));
+		await initMetamodelEditor(PROJECT);
+		expect(getMetamodelEditor().phase).toBe('error');
+
+		closeMetamodelEditor();
+
+		expect(localStorage.getItem(DRAFT_KEY)).toBe(DRAFT);
+		// The stale load error does not survive into the next open either.
+		expect(getMetamodelEditor().loadError).toBeNull();
 	});
 });

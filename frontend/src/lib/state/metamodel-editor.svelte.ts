@@ -317,28 +317,43 @@ export function discardMetamodelDraft(): void {
 	_previewFor = null;
 	_rebindError = null;
 	clearDraftStorage();
-	if (_leaseHeld) {
-		_leaseHeld = false;
-		void dropMetamodelLease();
-	}
+	// UNCONDITIONAL, not `if (_leaseHeld)` — see closeMetamodelEditor.
+	_leaseHeld = false;
+	void dropMetamodelLease();
 }
 
 /** Tab close / unmount: flush the pending draft write, release the lease,
  * reset to idle. The DRAFT deliberately survives (localStorage). */
 export function closeMetamodelEditor(): void {
-	writeDraftNow();
+	// Flush ONLY from `ready`. In `loading`/`error` the baseline is still ''
+	// and equals the buffer, which sends writeDraftNow down its removeItem
+	// branch — deleting a draft the user neither rebound nor discarded, just
+	// because they closed a tab whose load was slow or failed.
+	if (_phase === 'ready') writeDraftNow();
 	_gen++;
 	clearTimers();
-	if (_leaseHeld) {
-		_leaseHeld = false;
-		void dropMetamodelLease();
-	}
+	// UNCONDITIONAL, not `if (_leaseHeld)`: an acquire IN FLIGHT is exactly
+	// the window this exists for, and `_leaseHeld` is false throughout it.
+	// `dropMetamodelLease` is what bumps the lease module's generation, and
+	// that bump is the only thing that makes a late grant hand itself back.
+	// Skip it and the grant lands in the checkout registry with nobody left
+	// to release it — and it is NOT bounded by the server TTL, because a
+	// non-empty registry keeps the checkout heartbeat renewing it for the
+	// rest of the session, locking every peer out of the metamodel.
+	_leaseHeld = false;
+	void dropMetamodelLease();
 	_phase = 'idle';
+	_loadError = null;
 	_lockedBy = null;
 	_draftRestored = false;
 	_preview = null;
 	_previewFor = null;
+	// Both async `finally`s are generation-guarded, so a close mid-flight
+	// never runs them: reset here or the flags latch true and every later
+	// preview/rebind early-returns for the rest of the session.
+	_previewing = false;
 	_previewError = null;
+	_rebinding = false;
 	_rebindError = null;
 	_lintErrors = [];
 	_acquiring = false;
