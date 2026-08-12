@@ -5,6 +5,7 @@ import { isProjectQuiet } from '../quiet';
 import { hasModelLocks, handleFeedEvent, resetRealtime } from '../realtime.svelte';
 import { emit, getStagedDepth, resetModelStore, seedElements } from '../model.svelte';
 import { resetArtifactEdits, stageArtifactCreate } from '../artifact-edits.svelte';
+import { resetViewEdits, stageViewOp } from '../view-edits.svelte';
 import type { LeaseLite } from '$lib/api/feed';
 
 /**
@@ -36,6 +37,7 @@ beforeEach(() => {
 	resetRealtime();
 	resetModelStore();
 	resetArtifactEdits();
+	resetViewEdits();
 	// A snapshot ahead of the cached rev fires a fire-and-forget summary
 	// refresh; keep it off the network.
 	vi.spyOn(modelReadApi, 'getModelSummary').mockResolvedValue({
@@ -98,6 +100,12 @@ describe('isProjectQuiet', () => {
 		// Artifact ops ride the same commit batch, so a rev bump invalidates them
 		// exactly like a model op — this term must survive the art:-lease fix.
 		stageArtifactCreate('table', 'T', {}, null);
+		expect(isProjectQuiet()).toBe(false);
+	});
+
+	it('is not quiet with only staged VIEW ops (F-3)', () => {
+		expect(isProjectQuiet()).toBe(true);
+		stageViewOp({ kind: 'rename_folder', id: 'f1', name: 'New name' }, 'Rename folder');
 		expect(isProjectQuiet()).toBe(false);
 	});
 });

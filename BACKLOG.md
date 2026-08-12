@@ -358,7 +358,7 @@ caller, not a live defect. The fix pattern already exists in `MetamodelYamlEdito
 (tag own transactions with an `externalReplace` annotation, filter in the
 `updateListener`).
 
-### F-3 · `quiet.ts` omits staged view depth from the quiet predicate · `open` · *2026-08-12*
+### F-3 · `quiet.ts` omits staged view depth from the quiet predicate · `done` · *2026-08-12*
 `frontend/src/lib/state/quiet.ts:33` doesn't include `getStagedViewDepth()`, so a project
 with only staged **view** changes reports as quiet.
 
