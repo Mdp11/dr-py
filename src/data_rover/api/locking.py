@@ -281,6 +281,16 @@ class LockTable:
             if le.expires_at > now
         ]
 
+    def seed(self, leases: list[Lease]) -> None:
+        """Bulk-install restored leases (hydration-time mirror restore ONLY).
+
+        No conflict checking on purpose: the mirror holds a snapshot of a
+        table that was internally consistent when written, and seeding runs
+        inside the registry loader before the session serves any request —
+        there is nothing to conflict with yet."""
+        for le in leases:
+            self._by_resource.setdefault(le.resource_id, []).append(le)
+
 
 # --- lock-scope expansion (spec §8 rules) ---------------------------------
 # Imported lazily-ish at module scope: Model/View are core types (no cycle),

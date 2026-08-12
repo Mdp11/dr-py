@@ -55,6 +55,7 @@ from ..deps import Session, get_request_session, require_model
 from ..hydration import deserialize_ops, reconstruct_model_at
 from ..identity import get_current_user
 from ..invalidation import touched_keys
+from ..lock_mirror import mirror_session_leases
 from ..locking import ARTIFACT_PREFIX, required_locks
 from ..settings import get_settings
 from ..view_ops import (
@@ -1104,6 +1105,11 @@ def create_commit(
                     ],
                 )
             )
+    # write-through the post-release lease set (outside the mutex: the helper
+    # re-takes it briefly for the snapshot; Redis I/O must not sit inside a
+    # commit's critical section)
+    if released:
+        mirror_session_leases(project_id, session)
     return CommitResponse(
         model_rev=session.model_rev,
         id_map=merged_id_map,  # both families' temp ids in one map

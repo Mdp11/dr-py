@@ -1,15 +1,19 @@
 # Local infrastructure for the production-faithful stack: Postgres (tenancy +
-# content + commit journal, schema owned by Alembic) and a GCS-protocol blob
-# store (fake-gcs-server) for model snapshots. The backend and frontend run via
-# pixi (`pixi run backend-start` / `frontend-start`) against these services.
+# content + commit journal, schema owned by Alembic), a GCS-protocol blob
+# store (fake-gcs-server) for model snapshots, and Redis as the optional
+# lease-mirror coordination plane. The backend and frontend run via pixi
+# (`pixi run backend-start` / `frontend-start`) against these services.
 #
 #   pixi run services-start      # start + wait for healthy
 #   pixi run services-stop    # stop (keeps data volumes)
 #   pixi run services-reset   # stop + wipe data volumes
 #
-# Both services match the app defaults: Postgres at the default DATA_ROVER_
-# DATABASE_URL, fake-gcs reachable at http://localhost:4443. Data persists in
-# named volumes across restarts.
+# Postgres and fake-gcs match the app defaults (DATA_ROVER_DATABASE_URL,
+# fake-gcs reachable at http://localhost:4443); redis does NOT — the app's
+# redis_url default is empty (mirroring off) until DATA_ROVER_REDIS_URL is
+# set, so this service starts either way but sits unused by default. Data
+# persists in named volumes across restarts (redis is deliberately
+# volume-less; see its service comment below).
 #
 # This file owns CONTAINERS ONLY. Their contents belong to the app: Alembic
 # owns the Postgres schema, and the backend creates the snapshot bucket at boot
@@ -56,6 +60,22 @@ services:
       - "4443:4443"
     volumes:
       - gcsdata:/storage
+
+  # Coordination plane (Phase 7, scoped): the backend mirrors resource leases
+  # here (DATA_ROVER_REDIS_URL=redis://localhost:6379/0) so they survive a
+  # backend restart. Deliberately volume-less: every lease is TTL-bounded
+  # (<= lock_ttl_seconds), so a Redis restart is indistinguishable from
+  # ordinary lease expiry and persistence would buy nothing.
+  redis:
+    image: redis:7
+    container_name: data-rover-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
 
 volumes:
   pgdata:

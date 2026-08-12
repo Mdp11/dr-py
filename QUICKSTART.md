@@ -22,6 +22,10 @@ pixi run backend-start      # http://127.0.0.1:8000
 pixi run frontend-start     # http://localhost:5173  (separate terminal)
 ```
 
+Redis backs the optional lease mirror; set
+`DATA_ROVER_REDIS_URL=redis://localhost:6379/0` to enable it — the backend
+runs fine without it (locks are then in-process only).
+
 ### One-shot workflow (shortcut)
 
 The steps above are bundled into three commands (docker + backend + frontend, via

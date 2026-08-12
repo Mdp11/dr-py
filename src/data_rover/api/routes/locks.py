@@ -16,6 +16,7 @@ from ..deps import Session, get_request_session, require_model
 from ..feed import lock_event
 from ..identity import get_current_user
 from ..db_models import User
+from ..lock_mirror import mirror_session_leases
 from ..locking import (
     METAMODEL_RESOURCE,
     Lease,
@@ -65,6 +66,7 @@ def _lease_out(le: Lease) -> LeaseOut:
 
 @router.post("/locks", response_model=None)
 def acquire_locks(
+    project_id: str,
     payload: LockRequest,
     session: Session = Depends(get_request_session),
     user: User = Depends(get_current_user),
@@ -110,11 +112,13 @@ def acquire_locks(
             },
         )
     session.hub.broadcast(lock_event("acquired", _lease_event_dicts(leases)))
+    mirror_session_leases(project_id, session)
     return LockResponse(token=token, leases=[_lease_out(le) for le in leases])
 
 
 @router.post("/locks/release")
 def release_locks(
+    project_id: str,
     payload: ReleaseRequest,
     session: Session = Depends(get_request_session),
     user: User = Depends(get_current_user),
@@ -123,11 +127,13 @@ def release_locks(
         released = session.lock_table.release(user.id, payload.token)
     if released:
         session.hub.broadcast(lock_event("released", _lease_event_dicts(released)))
+        mirror_session_leases(project_id, session)
     return {"released": len(released)}
 
 
 @router.post("/locks/renew")
 def renew_locks(
+    project_id: str,
     payload: RenewRequest,
     session: Session = Depends(get_request_session),
     user: User = Depends(get_current_user),
@@ -136,6 +142,8 @@ def renew_locks(
     ttl = float(get_settings().lock_ttl_seconds)
     with session.write_mutex:
         ok = session.lock_table.renew(user.id, payload.token, now=now, ttl=ttl)
+    if ok:
+        mirror_session_leases(project_id, session)
     return RenewResponse(ok=ok)
 
 
