@@ -29,9 +29,16 @@ import {
 	hasModelLocks,
 	onCommitEvent,
 	resetRealtime,
-	startRealtime
+	startRealtime,
+	stopRealtime
 } from '../realtime.svelte';
-import { getCachedElements, getModelRev, resetModelStore, seedElements } from '../model.svelte';
+import {
+	adoptSummary,
+	getCachedElements,
+	getModelRev,
+	resetModelStore,
+	seedElements
+} from '../model.svelte';
 import { setActiveProject } from '../active-project.svelte';
 
 beforeEach(() => {
@@ -48,6 +55,15 @@ beforeEach(() => {
 		elements_by_type: {},
 		issue_counts: null,
 		undo_depth: 0
+	});
+	// Every snapshot/commit event also arms the 300 ms issue-refetch debounce,
+	// so the same "must not escape to a real fetch" rule applies to GET
+	// /model/issues — including in the suites that never assert on it.
+	vi.spyOn(validationApi, 'getModelIssues').mockResolvedValue({
+		model_rev: 1,
+		issues: [],
+		counts: {},
+		truncated: false
 	});
 });
 afterEach(() => vi.restoreAllMocks());
@@ -241,17 +257,50 @@ describe('issue refetch triggers', () => {
 		expect(spy).toHaveBeenCalledTimes(1); // two events, one refetch
 	});
 
-	it('a feed snapshot (reconnect) schedules a refetch too', async () => {
+	it('a feed snapshot refetches issues UNCONDITIONALLY, even behind our rev', async () => {
 		vi.useFakeTimers();
-		const spy = vi.spyOn(validationApi, 'getModelIssues').mockResolvedValue({
-			model_rev: 0,
+		const issuesSpy = vi.spyOn(validationApi, 'getModelIssues').mockResolvedValue({
+			model_rev: 3,
 			issues: [],
 			counts: {},
 			truncated: false
 		});
-		handleFeedEvent({ type: 'snapshot', model_rev: 0, locks: [], connected: [] });
+		const summarySpy = vi.spyOn(modelReadApi, 'getModelSummary');
+		// Our cached rev is AHEAD of the snapshot's, so the `e.model_rev >
+		// getModelRev()` guard that gates the summary refresh is false. The issue
+		// refetch must NOT share that guard: the background validation sweep grows
+		// the server's issue store without bumping model_rev, so a reconnect that
+		// lands after the sweep finished is exactly the case a rev guard would
+		// wrongly skip. (Regressing this is a correctness bug, per the spec.)
+		adoptSummary({
+			model_rev: 9,
+			element_count: 0,
+			relationship_count: 0,
+			elements_by_type: {},
+			issue_counts: {},
+			undo_depth: 0
+		});
+		summarySpy.mockClear();
+
+		handleFeedEvent({ type: 'snapshot', model_rev: 3, locks: [], connected: [] });
 		await vi.advanceTimersByTimeAsync(350);
-		expect(spy).toHaveBeenCalledTimes(1);
+
+		expect(issuesSpy).toHaveBeenCalledTimes(1);
+		expect(summarySpy).not.toHaveBeenCalled(); // the guarded sibling stayed put
+	});
+
+	it('stopRealtime disarms a pending refetch (project unmount / logout)', async () => {
+		vi.useFakeTimers();
+		const spy = vi.spyOn(validationApi, 'getModelIssues').mockResolvedValue({
+			model_rev: 2,
+			issues: [],
+			counts: {},
+			truncated: false
+		});
+		handleFeedEvent(commitEvent(2));
+		stopRealtime();
+		await vi.advanceTimersByTimeAsync(350);
+		expect(spy).not.toHaveBeenCalled();
 	});
 });
 

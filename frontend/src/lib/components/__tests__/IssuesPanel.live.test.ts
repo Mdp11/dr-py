@@ -57,10 +57,25 @@ describe('IssuesPanel live mode', () => {
 
 	it('shows the truncation notice when the server capped the list', () => {
 		boot();
-		adoptIssues([issue('a', 'e1')], { error: 5001 }, 1, true);
+		adoptIssues([issue('a', 'e1'), issue('b', 'e2')], { error: 5001 }, 1, true);
 		const c = mount(IssuesPanel, { target: document.body });
 		flushSync();
-		expect(document.body.textContent).toMatch(/showing first .* of 5001/i);
+		// The numerator is the LIVE list we actually hold (2), not the exact
+		// total — pinned literally so a wrong numerator cannot pass.
+		expect(document.body.textContent).toMatch(/showing first 2 of 5001 issues/i);
+		unmount(c);
+	});
+
+	it('an EMPTY overlay stays in overlay mode — [] is an overlay, only null is live', () => {
+		boot();
+		adoptIssues([issue('live boom', 'e1')], { error: 1 }, 1);
+		setOverlay([]); // a Validate run that found nothing
+		const c = mount(IssuesPanel, { target: document.body });
+		flushSync();
+		const text = document.body.textContent ?? '';
+		expect(text).not.toContain('live boom'); // must NOT fall through to live
+		expect(text).toContain('No issues (validated'); // the overlay's own empty state
+		expect(text).toContain('last run'); // overlay header
 		unmount(c);
 	});
 

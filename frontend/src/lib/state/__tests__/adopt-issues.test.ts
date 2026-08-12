@@ -113,6 +113,18 @@ describe('applyDelta clears the Validate overlay', () => {
 	});
 });
 
+describe('resetModelStore clears the Validate overlay', () => {
+	it('a different model is being installed, so the staged snapshot is moot', () => {
+		summaryAtRev(1);
+		setOverlay([issue('project A staged', 'e1')]);
+		resetModelStore();
+		// The overlay WINS over the live map in every consumer, so surviving the
+		// reset would render project A's issues across project B's whole UI —
+		// permanently if B's best-effort refetch fails.
+		expect(getOverlay()).toBeNull();
+	});
+});
+
 describe('refetchIssues', () => {
 	it('fetches GET /model/issues and adopts the result', async () => {
 		summaryAtRev(1);
@@ -133,5 +145,31 @@ describe('refetchIssues', () => {
 		vi.spyOn(validationApi, 'getModelIssues').mockRejectedValue(new Error('down'));
 		await refetchIssues();
 		expect(getLiveIssues()[0].message).toBe('kept');
+	});
+
+	it('drops a response that lands after a store reset (project switch)', async () => {
+		summaryAtRev(7);
+		let release!: () => void;
+		const gate = new Promise<void>((r) => (release = r));
+		vi.spyOn(validationApi, 'getModelIssues').mockImplementation(async () => {
+			await gate;
+			return {
+				model_rev: 7,
+				issues: [issue('project A', 'e1')],
+				counts: { error: 1 },
+				truncated: false
+			};
+		});
+
+		const inFlight = refetchIssues();
+		resetModelStore(); // switched to project B mid-flight
+		release();
+		await inFlight;
+
+		// The rev guard in adoptIssues cannot catch this — the reset put the
+		// store's rev back to 0, so ANY response rev passes it. The generation
+		// capture is what drops it.
+		expect(getLiveIssues()).toHaveLength(0);
+		expect(getIssueCounts()).toBeNull();
 	});
 });
