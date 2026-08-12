@@ -7,19 +7,16 @@ caller mirrors the project's ENTIRE live lease set wholesale
 (:func:`mirror_session_leases`); on session hydration the fresh table is
 seeded back (:func:`restore_leases`) with the ORIGINAL tokens, so a client
 that outlived the restart keeps renewing the token it already holds. Whole-set
-rewrite is idempotent and self-healing IN ONE DIRECTION: a mirror that lagged
-truth during a Redis outage re-converges on the next mutation, and the client
-renew heartbeat guarantees one within ttl/2 for any lease still held. The
-OTHER direction — a released/expired lease still sitting in the mirror — is
-NOT actively re-converged: two concurrent write-throughs for one project can
-land out of order (e.g. an acquire snapshot and a later release's snapshot
-race, and the acquire's write lands last), leaving the mirror holding a
-phantom lease truth no longer has. Nobody heartbeats a lease that was just
-released, so that phantom persists until its own TTL expires — if the
-process restarts inside that window, the phantom is restored and blocks a
-peer for up to ``lock_ttl_seconds``. This is accepted (spec: the mirror may
-briefly lag truth) rather than fixed with a serializing per-project mirror
-lock, which was considered and deliberately deferred to a follow-up.
+rewrite is idempotent and self-healing: a mirror that lagged truth during a
+Redis outage re-converges on the next mutation, and the client renew
+heartbeat guarantees one within ttl/2 for any lease still held. Write-throughs
+for one project are serialized by ``Session.mirror_mutex`` (held across
+snapshot AND write), so they land in snapshot order — two racing calls can
+no longer leave the mirror holding a released lease. The one remaining
+phantom window is an outage, not a race: a release whose write-through was
+skipped during the Redis cooldown leaves the released lease mirrored until
+the next mutation rewrites the set (or its own TTL expires); a restart
+inside that window restores it, TTL-bounded.
 
 Clock mapping: ``Lease.expires_at`` is ``time.monotonic()`` — meaningless
 across processes. Conversion to/from wall clock (``time.time()``) happens in
@@ -228,24 +225,24 @@ def build_mirror_from_settings(settings: Settings) -> LeaseMirror:
 def mirror_session_leases(project_id: str, session: Session) -> None:
     """Best-effort write-through: snapshot the live lease set and mirror it.
 
-    Call AFTER the mutating ``with session.write_mutex:`` block has exited.
-    ``session.write_mutex`` is an ``RLock`` (reentrant), so re-entering it
-    here would be safe either way — that is NOT why this is split out. The
-    real reason: this helper re-takes the mutex only briefly, for a coherent
-    snapshot, then does mirror I/O (a network round trip to Redis) OUTSIDE
-    it, so a slow or down Redis never extends a lock route's or commit's
-    critical section. Two racing calls can write out of order; see the
-    module docstring for exactly what that costs (self-healing on the
-    lagged-truth side, a TTL-bounded phantom lease on the other) — that
-    asymmetry is accepted, not fixed here.
+    Call AFTER the mutating ``with session.write_mutex:`` block has exited —
+    ``session.mirror_mutex`` is acquired here, and its ordering contract is
+    that it is never taken while ``write_mutex`` is held (see the field's
+    docstring in session.py). The mutex pair does two jobs: ``write_mutex``
+    is re-taken only briefly, for a coherent snapshot, so mirror I/O (a
+    network round trip to Redis) never extends a lock route's or commit's
+    critical section; ``mirror_mutex`` is held across snapshot AND write so
+    two racing write-throughs land in snapshot order — the out-of-order
+    phantom-lease window this helper used to document is gone.
 
     Never raises: a mirror failure must not fail a lock operation."""
     try:
-        mono_now = time.monotonic()
-        with session.write_mutex:
-            leases = session.lock_table.active_leases(mono_now)
-        payload = to_mirrored(leases, mono_now=mono_now, wall_now=time.time())
-        get_lease_mirror().write(project_id, payload)
+        with session.mirror_mutex:
+            mono_now = time.monotonic()
+            with session.write_mutex:
+                leases = session.lock_table.active_leases(mono_now)
+            payload = to_mirrored(leases, mono_now=mono_now, wall_now=time.time())
+            get_lease_mirror().write(project_id, payload)
     except Exception:
         logger.warning(
             "lease mirror write failed for project %s", project_id, exc_info=True

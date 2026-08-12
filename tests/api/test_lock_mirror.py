@@ -292,6 +292,65 @@ def test_mirror_failure_never_fails_the_route(client: TestClient) -> None:
     assert r.status_code == 200
 
 
+def test_write_throughs_are_serialized_in_snapshot_order() -> None:
+    """B-3: snapshot+write are atomic w.r.t. each other, so a slow earlier
+    write-through can never land AFTER a later one and leave the mirror
+    holding a released lease (the restart-phantom source). Deterministic, not
+    a race reproduction: the first write blocks on a gate; the second
+    write-through must wait for it rather than overtake it."""
+    from data_rover.api.lock_mirror import mirror_session_leases
+    from data_rover.api.session import Session
+
+    class GatedRecordingMirror:
+        def __init__(self) -> None:
+            self.writes: list[list[MirroredLease]] = []
+            self.entered = threading.Event()
+            self.gate = threading.Event()
+            self._first = True
+
+        def write(self, project_id: str, leases: list[MirroredLease]) -> None:
+            if self._first:
+                self._first = False
+                self.entered.set()
+                assert self.gate.wait(timeout=5)
+            self.writes.append(list(leases))
+
+        def load(self, project_id: str) -> list[MirroredLease]:
+            return []
+
+    mirror = GatedRecordingMirror()
+    set_lease_mirror(mirror)
+    try:
+        session = Session()
+        lease = _lease(expires_at=time.monotonic() + 60.0)
+        session.lock_table.seed([lease])
+
+        t1 = threading.Thread(
+            target=mirror_session_leases, args=("p1", session), daemon=True
+        )
+        t1.start()
+        assert mirror.entered.wait(timeout=5)  # t1 snapshotted {lease}, now gated
+
+        # a later mutation + write-through: must queue behind t1, not overtake
+        with session.write_mutex:
+            session.lock_table.release("test-user", lease.token)
+        t2 = threading.Thread(
+            target=mirror_session_leases, args=("p1", session), daemon=True
+        )
+        t2.start()
+        assert not mirror.gate.is_set()
+        mirror.gate.set()
+        t1.join(timeout=5)
+        t2.join(timeout=5)
+        assert not t1.is_alive() and not t2.is_alive()
+
+        # in-order: the release's (empty) snapshot landed LAST — the mirror
+        # ends holding truth, not the phantom
+        assert [len(w) for w in mirror.writes] == [1, 0]
+    finally:
+        set_lease_mirror(None)
+
+
 OTHER_HEADERS = {"x-user-id": "user-2", "x-user-email": "user2@example.com"}
 
 

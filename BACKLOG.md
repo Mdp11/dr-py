@@ -252,7 +252,7 @@ Parked during the final review because `to_leases` is a pure function and clampi
 give it a settings dependency — do it in `restore_leases` instead, where settings are
 already reachable. Damage is bounded and self-heals at TTL.
 
-### B-3 · Concurrent write-throughs can leave a phantom lease in the mirror · `open` · small
+### B-3 · Concurrent write-throughs can leave a phantom lease in the mirror · `done` (2026-08-12, fix/lease-mirror-hardening)
 Two write-throughs on one project can land out of order (acquire on r1 snapshots
 `{r1,r2}`; release of r2 snapshots `{r1}`; the first write lands last), leaving the mirror
 holding a lease truth no longer has. No Redis outage required. The renew-heartbeat
