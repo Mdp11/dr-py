@@ -326,7 +326,7 @@ client does after it. Start at `src/data_rover/api/routes/projects.py:231`
 500 comes from a follow-up refresh hitting the just-deleted project rather than from
 `DELETE` itself.
 
-### U-8 · Issues tab stays empty after project creation until "Validate" is clicked · `open`
+### U-8 · Issues tab stays empty after project creation until "Validate" is clicked · `done`
 Creating a project validates everything and the bottom bar shows the error count, but the
 Issues tab renders empty until an explicit **Validate**, which then reports the *same*
 count. So the count and the list read from different places. Almost certainly the same
@@ -362,7 +362,7 @@ caller, not a live defect. The fix pattern already exists in `MetamodelYamlEdito
 `frontend/src/lib/state/quiet.ts:33` doesn't include `getStagedViewDepth()`, so a project
 with only staged **view** changes reports as quiet.
 
-### F-4 · Validation issue list never refreshes after a commit · `open` · *2026-08-12*
+### F-4 · Validation issue list never refreshes after a commit · `done` · *2026-08-12*
 `frontend/src/lib/state/validation.svelte.ts` — only `validate-action.ts` refreshes it, so
 the issue list goes stale after a commit lands.
 

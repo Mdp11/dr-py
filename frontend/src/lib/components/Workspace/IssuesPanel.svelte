@@ -5,9 +5,11 @@
 		getCachedElements,
 		getCachedRelationships,
 		getEffectiveIssues,
+		getIssuesTruncatedTotal,
 		getLastError,
 		getLastRunAt,
 		getModelSummary,
+		getOverlay,
 		getViewWarnings,
 		isRunning,
 		select
@@ -16,7 +18,10 @@
 	import { nameProp } from '$lib/util/element-name';
 	import { AlertCircle, AlertTriangle, RefreshCw } from '@lucide/svelte';
 
+	const overlay = $derived(getOverlay());
+	const overlayMode = $derived(overlay !== null);
 	const modelIssues = $derived(getEffectiveIssues());
+	const truncatedTotal = $derived(getIssuesTruncatedTotal());
 	const viewWarnings = $derived(getViewWarnings());
 	const issues = $derived<readonly Issue[]>([...modelIssues, ...viewWarnings]);
 	const lastRunAt = $derived(getLastRunAt());
@@ -28,6 +33,12 @@
 
 	type OriginFilter = 'all' | 'uncommitted' | 'on_server' | 'resolved';
 	let filter = $state<OriginFilter>('all');
+
+	// A user parked on "Fixed" would otherwise strand the live view showing
+	// nothing — live issues are never `resolved`.
+	$effect(() => {
+		if (!overlayMode) filter = 'all';
+	});
 
 	function originBadge(o: Issue['origin']): { label: string; cls: string } {
 		if (o === 'uncommitted') return { label: 'new', cls: 'bg-info/15 text-info' };
@@ -135,9 +146,7 @@
 	<header class="flex items-center justify-between border-b border-border px-3 py-2 text-xs">
 		<div class="flex flex-col gap-0.5">
 			<div class="flex items-center gap-2 text-foreground/80">
-				{#if lastRunAt === null}
-					<span class="text-muted-foreground/70">Not validated yet.</span>
-				{:else if errors.length === 0 && warnings.length === 0}
+				{#if errors.length === 0 && warnings.length === 0}
 					<span class="text-success"
 						>No issues{resolved.length > 0 ? ` · ${resolved.length} fixed` : ''}</span
 					>
@@ -152,7 +161,7 @@
 					</span>
 				{/if}
 			</div>
-			{#if lastRunAt !== null}
+			{#if overlayMode}
 				<span class="text-[10px] text-muted-foreground/70">last run {relativeTime(lastRunAt)}</span>
 			{/if}
 		</div>
@@ -177,28 +186,32 @@
 	{/if}
 
 	<div class="flex-1 overflow-auto px-3 py-2 text-xs">
-		{#if lastRunAt === null}
-			<div class="flex flex-col items-center gap-1 py-6 text-center">
-				<p class="font-display text-base font-light text-muted-foreground">Not yet validated</p>
-				<p class="text-xs text-muted-foreground/70">Run Validate to check for issues.</p>
-			</div>
-		{:else if issues.length === 0}
-			<p class="text-success">No issues (validated {relativeTime(lastRunAt)}).</p>
+		{#if !overlayMode && truncatedTotal !== null}
+			<p class="mb-2 text-[10px] text-muted-foreground">
+				Showing first {issues.length - viewWarnings.length} of {truncatedTotal} issues.
+			</p>
+		{/if}
+		{#if issues.length === 0}
+			<p class="text-success">
+				No issues{overlayMode ? ` (validated ${relativeTime(lastRunAt)}).` : '.'}
+			</p>
 		{:else}
-			<div class="mb-2 flex flex-wrap gap-1">
-				{#each [['all', 'All'], ['uncommitted', 'New'], ['on_server', 'On server'], ['resolved', 'Fixed']] as [val, label] (val)}
-					<button
-						type="button"
-						class="rounded px-2 py-0.5 text-[10px] transition-colors {filter === val
-							? 'bg-primary text-primary-foreground'
-							: 'bg-muted text-muted-foreground hover:text-foreground'}"
-						disabled={val === 'resolved' && !hasResolved}
-						onclick={() => (filter = val as OriginFilter)}
-					>
-						{label}
-					</button>
-				{/each}
-			</div>
+			{#if overlayMode}
+				<div class="mb-2 flex flex-wrap gap-1">
+					{#each [['all', 'All'], ['uncommitted', 'New'], ['on_server', 'On server'], ['resolved', 'Fixed']] as [val, label] (val)}
+						<button
+							type="button"
+							class="rounded px-2 py-0.5 text-[10px] transition-colors {filter === val
+								? 'bg-primary text-primary-foreground'
+								: 'bg-muted text-muted-foreground hover:text-foreground'}"
+							disabled={val === 'resolved' && !hasResolved}
+							onclick={() => (filter = val as OriginFilter)}
+						>
+							{label}
+						</button>
+					{/each}
+				</div>
+			{/if}
 			{#if filtered.length === 0}
 				<p class="text-muted-foreground/70">No issues match this filter.</p>
 			{:else}
