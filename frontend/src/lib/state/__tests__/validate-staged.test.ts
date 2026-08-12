@@ -12,7 +12,7 @@ import {
 	getIssuesByOwner,
 	getIssueCounts
 } from '../model.svelte';
-import { getLastError, getOverlay } from '../validation.svelte';
+import { clearOverlay, getLastError, getOverlay } from '../validation.svelte';
 import { runValidation } from '../validate-action';
 
 const BASE = 'http://api.test/api/v1';
@@ -21,6 +21,7 @@ beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => {
 	server.resetHandlers();
 	resetModelStore();
+	clearOverlay();
 });
 afterAll(() => server.close());
 

@@ -12,7 +12,14 @@ import {
 	refetchIssues,
 	resetModelStore
 } from '../model.svelte';
-import { clearOverlay, getLastRunAt, setOverlay } from '../validation.svelte';
+import {
+	clearOverlay,
+	getLastError,
+	getLastRunAt,
+	getOverlay,
+	setLastError,
+	setOverlay
+} from '../validation.svelte';
 
 function issue(message: string, owner: string): Issue {
 	return { severity: 'error', message, target_ids: [owner], origin: 'on_server' };
@@ -72,6 +79,18 @@ describe('adoptIssues', () => {
 		expect(getLastRunAt()).not.toBeNull();
 		adoptIssues([], {}, 1);
 		expect(getLastRunAt()).toBeNull();
+	});
+});
+
+describe('clearOverlay keeps lastError (a failed Validate must survive a peer commit)', () => {
+	it('drops the overlay and lastRunAt but not lastError', () => {
+		summaryAtRev(1);
+		setOverlay([issue('snapshot', 'e1')]);
+		setLastError('validate failed: boom');
+		clearOverlay();
+		expect(getOverlay()).toBeNull();
+		expect(getLastRunAt()).toBeNull();
+		expect(getLastError()).toBe('validate failed: boom');
 	});
 });
 
