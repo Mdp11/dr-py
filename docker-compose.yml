@@ -8,9 +8,12 @@
 #   pixi run services-stop    # stop (keeps data volumes)
 #   pixi run services-reset   # stop + wipe data volumes
 #
-# Both services match the app defaults: Postgres at the default DATA_ROVER_
-# DATABASE_URL, fake-gcs reachable at http://localhost:4443. Data persists in
-# named volumes across restarts.
+# Postgres and fake-gcs match the app defaults (DATA_ROVER_DATABASE_URL,
+# fake-gcs reachable at http://localhost:4443); redis does NOT — the app's
+# redis_url default is empty (mirroring off) until DATA_ROVER_REDIS_URL is
+# set, so this service starts either way but sits unused by default. Data
+# persists in named volumes across restarts (redis is deliberately
+# volume-less; see its service comment below).
 #
 # This file owns CONTAINERS ONLY. Their contents belong to the app: Alembic
 # owns the Postgres schema, and the backend creates the snapshot bucket at boot
