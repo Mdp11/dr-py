@@ -20,11 +20,12 @@ describe('trackOpenProgress feeds the journey', () => {
 	});
 	afterEach(() => resetJourney());
 
-	it('advances the journey bar toward the validate slice, then refreshes the summary at ready', async () => {
+	it('advances the journey bar toward the validate slice, then refreshes the summary and refetches issues at ready', async () => {
 		let release!: () => void;
 		const gate = new Promise<void>((resolve) => (release = resolve));
 		let calls = 0;
 		let summaryFetched = false;
+		let issuesFetched = false;
 		server.use(
 			http.get(`${BASE}/model/status`, async () => {
 				calls++;
@@ -47,6 +48,14 @@ describe('trackOpenProgress feeds the journey', () => {
 					issue_counts: {},
 					undo_depth: 0
 				});
+			}),
+			// sawWork => the post-sweep block also refetches the live issue map (a
+			// background sweep grows the server's issue store WITHOUT bumping
+			// model_rev, so the summary refresh alone would not surface newly
+			// landed issues).
+			http.get(`${BASE}/model/issues`, () => {
+				issuesFetched = true;
+				return HttpResponse.json({ model_rev: 1, issues: [], counts: {}, truncated: false });
 			})
 		);
 		beginJourney('open'); // boot() owns beginJourney in production; the loop only feeds it
@@ -56,6 +65,7 @@ describe('trackOpenProgress feeds the journey', () => {
 		release();
 		await done;
 		expect(summaryFetched).toBe(true);
+		expect(issuesFetched).toBe(true);
 	});
 
 	it('never starts a bar when no journey is active (loop is a silent feeder)', async () => {

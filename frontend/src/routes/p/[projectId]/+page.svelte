@@ -48,6 +48,7 @@
 		loadProjectInfo,
 		markViewUnresolved,
 		onLockEvent,
+		refetchIssues,
 		refreshSummary,
 		refreshView,
 		resetArtifacts,
@@ -161,6 +162,11 @@
 			} catch {
 				return; // metamodel but no model
 			}
+			// Seed the live issue map immediately so a freshly opened project shows
+			// its committed issues without waiting for a Validate click. Best-effort
+			// like loadArtifacts below: a miss just means the sweep-completion or
+			// next feed event heals it.
+			void refetchIssues();
 			try {
 				await loadProjectInfo();
 			} catch {

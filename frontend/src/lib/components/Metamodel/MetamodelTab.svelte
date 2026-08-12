@@ -6,6 +6,7 @@
 	import { getMetamodel as fetchMetamodel } from '$lib/api/metamodel';
 	import type { Issue } from '$lib/api/types';
 	import {
+		adoptIssues,
 		closeMetamodelEditor,
 		commitMetamodelRebind,
 		discardMetamodelDraft,
@@ -18,7 +19,6 @@
 		previewMetamodelChanges,
 		refreshSummary,
 		retryMetamodelLease,
-		setOverlay,
 		setMetamodel
 	} from '$lib/state';
 
@@ -66,7 +66,10 @@
 		try {
 			const mm = await fetchMetamodel();
 			setMetamodel(mm);
-			setOverlay(res.issues.map(toIssue));
+			// The rebind response already carries a full authoritative issue list
+			// (+ counts + rev), so adopt it directly as the live map rather than
+			// paying for a separate refetch.
+			adoptIssues(res.issues.map(toIssue), res.issue_counts, res.model_rev);
 			await refreshSummary();
 		} catch {
 			// The durable rebind already landed — this is a stale VIEW, not a

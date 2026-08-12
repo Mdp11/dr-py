@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FeedConfig } from '$lib/api/feed';
 import * as modelReadApi from '$lib/api/model-read';
+import * as validationApi from '$lib/api/validation';
 
 // Capture the config startRealtime hands connectFeed so a test can drive the
 // onTerminal callback the way the transport would on a permanent close. The rest
@@ -198,6 +199,59 @@ describe('rebind event', () => {
 		});
 		clearPendingRebind();
 		expect(getPendingRebind()).toBeNull();
+	});
+});
+
+describe('issue refetch triggers', () => {
+	// Local commit-event builder mirroring the one in 'commit event scope'
+	// above (kept separate: that one is scoped to its own describe and this
+	// suite only needs the rev, not the scope variants).
+	function commitEvent(rev: number) {
+		return {
+			type: 'commit' as const,
+			rev,
+			commit_id: `c${rev}`,
+			author_id: 'peer',
+			message: 'm',
+			validation_error_count: 0,
+			changed_elements: [],
+			changed_relationships: [],
+			deleted_element_ids: [],
+			deleted_relationship_ids: []
+		};
+	}
+
+	afterEach(() => {
+		resetRealtime();
+		vi.useRealTimers();
+	});
+
+	it('a peer commit event schedules ONE debounced GET /model/issues', async () => {
+		vi.useFakeTimers();
+		const spy = vi.spyOn(validationApi, 'getModelIssues').mockResolvedValue({
+			model_rev: 2,
+			issues: [],
+			counts: {},
+			truncated: false
+		});
+		handleFeedEvent(commitEvent(2));
+		handleFeedEvent(commitEvent(3));
+		expect(spy).not.toHaveBeenCalled(); // debounced, not immediate
+		await vi.advanceTimersByTimeAsync(350);
+		expect(spy).toHaveBeenCalledTimes(1); // two events, one refetch
+	});
+
+	it('a feed snapshot (reconnect) schedules a refetch too', async () => {
+		vi.useFakeTimers();
+		const spy = vi.spyOn(validationApi, 'getModelIssues').mockResolvedValue({
+			model_rev: 0,
+			issues: [],
+			counts: {},
+			truncated: false
+		});
+		handleFeedEvent({ type: 'snapshot', model_rev: 0, locks: [], connected: [] });
+		await vi.advanceTimersByTimeAsync(350);
+		expect(spy).toHaveBeenCalledTimes(1);
 	});
 });
 
