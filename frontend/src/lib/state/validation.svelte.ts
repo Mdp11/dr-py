@@ -46,10 +46,12 @@ export function setLastError(message: string | null): void {
 	_lastError = message;
 }
 
-/** Drop the overlay: called by `adoptIssues`/`applyDelta` in model.svelte.ts
- * whenever committed truth moves, since the staged snapshot it describes no
- * longer matches reality. Keeps `_lastError`: a failed Validate's error strip
- * must survive a peer commit. */
+/** Drop the overlay. Three callers, all "the model this snapshot described is
+ * gone": `adoptIssues`/`applyDelta` in model.svelte.ts (committed truth moved),
+ * `resetModelStore` (a different model is being installed), and `boot()` in the
+ * project page (an in-SPA project switch, which does not reset the store).
+ * Keeps `_lastError`: a failed Validate's error strip must survive a peer
+ * commit. */
 export function clearOverlay(): void {
 	_overlay = null;
 	_lastRunAt = null;

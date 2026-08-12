@@ -157,6 +157,11 @@ function scheduleIssuesRefetch(): void {
 	}, 300);
 }
 
+function cancelIssuesRefetch(): void {
+	if (_issuesRefetchTimer !== null) clearTimeout(_issuesRefetchTimer);
+	_issuesRefetchTimer = null;
+}
+
 /** Exported for unit tests; also the single dispatch point for `connectFeed`. */
 export function handleFeedEvent(e: FeedEvent): void {
 	switch (e.type) {
@@ -249,9 +254,13 @@ export function stopRealtime(): void {
 	_conn = null;
 	_connected = false;
 	_feedTermination = null;
+	// Teardown is a real production path (project unmount, logout, session
+	// recovery), not just test isolation: a still-armed debounce would fire a
+	// GET /model/issues up to 300 ms after the project we were watching is gone.
+	cancelIssuesRefetch();
 }
 
-/** Test isolation. */
+/** Test isolation. (The issue-refetch debounce is cleared by stopRealtime.) */
 export function resetRealtime(): void {
 	stopRealtime();
 	_presence = [];
@@ -259,8 +268,4 @@ export function resetRealtime(): void {
 	_lockTaps.clear();
 	_commitTaps.clear();
 	_pendingRebind = null;
-	if (_issuesRefetchTimer !== null) {
-		clearTimeout(_issuesRefetchTimer);
-		_issuesRefetchTimer = null;
-	}
 }

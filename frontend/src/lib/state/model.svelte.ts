@@ -1043,8 +1043,15 @@ export function adoptIssues(
  * caller is a background refresh (boot, peer commit, sweep completion,
  * feed reconnect) where a miss just means the next event heals. */
 export async function refetchIssues(): Promise<void> {
+	// Same guard every other in-flight read in this store relies on
+	// (`_generation`): a boot refetch for project A that lands after a switch
+	// to project B must NOT be adopted into B. The rev guard in adoptIssues
+	// cannot catch it — resetModelStore put `_modelRev` back to 0, so any rev
+	// passes it.
+	const gen = _generation;
 	try {
 		const res = await getModelIssues(_clientConfig);
+		if (gen !== _generation) return; // a different model was installed mid-flight
 		adoptIssues(res.issues, res.counts, res.model_rev, res.truncated);
 	} catch {
 		// keep the current map; the next commit delta or refetch heals
@@ -1055,9 +1062,17 @@ export async function refetchIssues(): Promise<void> {
  * Drop every cache, counter, queue, and error — for tests and for replacing
  * the model (load/upload flows call this, then refreshSummary()). In-flight
  * responses from before the reset are ignored when they land.
+ *
+ * The Validate OVERLAY goes with them: it is origin-tagged against the model
+ * being dropped, and since the overlay WINS over the live map in every issue
+ * consumer, leaving it would render the old project's staged issues across the
+ * new one's whole UI — indefinitely, if the new project's best-effort issue
+ * refetch fails (a failed refetch never reaches adoptIssues, so nothing else
+ * would clear it).
  */
 export function resetModelStore(): void {
 	_generation += 1;
+	clearOverlay();
 	_pendingElementFetches.clear();
 	_inFlightBatchIds.clear();
 	_missingElementIds.clear();
