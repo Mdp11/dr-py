@@ -75,6 +75,19 @@ class Settings(BaseSettings):
     #: entirely (NullLeaseMirror): locks are in-process only — exactly the
     #: pre-mirror behavior. When set, mirroring is still best-effort: a down
     #: Redis degrades (warn + cooldown), it never fails a lock operation.
+    #:
+    #: Two deployment notes, since what lands in Redis is otherwise
+    #: undocumented: (1) the mirrored payload carries lock tokens plus holder
+    #: user ids/emails (PII) in plaintext — network-isolate this Redis (a
+    #: ``rediss://`` scheme is supported by the client for TLS) rather than
+    #: exposing it. A stolen token alone is not a capability, though:
+    #: ``LockTable.release``/``renew``/``verify_held`` (locking.py) all
+    #: additionally require ``holder == `` the authenticated caller, so using
+    #: a leaked token still means authenticating as its holder. (2) the key
+    #: (``dr:leases:{project_id}``) carries no deployment namespace, so two
+    #: backends sharing one Redis DB will clobber each other's lease sets and
+    #: cross-restore phantom leases for same-named projects (e.g.
+    #: ``default``) — give each deployment its own Redis DB or instance.
     redis_url: str = ""
     #: A full-model snapshot is written every Nth commit (bounds hydration
     #: replay length). A snapshot is ALSO always written on eviction.
