@@ -144,7 +144,7 @@ class RedisLeaseMirror:
                 )
                 return []
             return [MirroredLease(**entry) for entry in doc["leases"]]
-        except (ValueError, TypeError, KeyError) as exc:
+        except (ValueError, TypeError, KeyError, AttributeError) as exc:
             logger.warning(
                 "lease mirror: undecodable payload for project %s: %s",
                 project_id,

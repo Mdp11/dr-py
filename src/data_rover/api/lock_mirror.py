@@ -7,9 +7,19 @@ caller mirrors the project's ENTIRE live lease set wholesale
 (:func:`mirror_session_leases`); on session hydration the fresh table is
 seeded back (:func:`restore_leases`) with the ORIGINAL tokens, so a client
 that outlived the restart keeps renewing the token it already holds. Whole-set
-rewrite is idempotent and self-healing: a mirror that lagged truth during an
-outage re-converges on the next mutation, and the client renew heartbeat
-guarantees one within ttl/2 for any lease still held.
+rewrite is idempotent and self-healing IN ONE DIRECTION: a mirror that lagged
+truth during a Redis outage re-converges on the next mutation, and the client
+renew heartbeat guarantees one within ttl/2 for any lease still held. The
+OTHER direction — a released/expired lease still sitting in the mirror — is
+NOT actively re-converged: two concurrent write-throughs for one project can
+land out of order (e.g. an acquire snapshot and a later release's snapshot
+race, and the acquire's write lands last), leaving the mirror holding a
+phantom lease truth no longer has. Nobody heartbeats a lease that was just
+released, so that phantom persists until its own TTL expires — if the
+process restarts inside that window, the phantom is restored and blocks a
+peer for up to ``lock_ttl_seconds``. This is accepted (spec: the mirror may
+briefly lag truth) rather than fixed with a serializing per-project mirror
+lock, which was considered and deliberately deferred to a follow-up.
 
 Clock mapping: ``Lease.expires_at`` is ``time.monotonic()`` — meaningless
 across processes. Conversion to/from wall clock (``time.time()``) happens in
@@ -153,12 +163,31 @@ _mirror: LeaseMirror | None = None
 
 
 def get_lease_mirror() -> LeaseMirror:
-    """Process-global mirror, built from settings on first use."""
+    """Process-global mirror, built from settings on first use.
+
+    A build failure (bad ``redis_url`` scheme, unimportable ``redis``) is
+    memoized as a permanent fallback to :class:`NullLeaseMirror` rather than
+    retried on the next call: every lock acquire/release/renew, every commit
+    release and every cold hydration calls in here, so an unmemoized failure
+    would re-attempt (and re-log) the same broken construction on every one
+    of those forever — degraded-but-quiet is the goal, not a warning-log
+    firehose. The stickiness lives in ``_mirror`` itself (bound to the Null
+    instance) rather than a separate "already failed" flag, so
+    :func:`set_lease_mirror`\\ (None) — the test reset — is still free to
+    force a rebuild attempt on the next call."""
     global _mirror
     if _mirror is None:
         from .settings import get_settings
 
-        _mirror = build_mirror_from_settings(get_settings())
+        try:
+            _mirror = build_mirror_from_settings(get_settings())
+        except Exception:
+            logger.warning(
+                "lease mirror: failed to build from settings, "
+                "falling back to no-op mirror for the rest of this process",
+                exc_info=True,
+            )
+            _mirror = NullLeaseMirror()
     return _mirror
 
 
@@ -181,12 +210,16 @@ def build_mirror_from_settings(settings: Settings) -> LeaseMirror:
 def mirror_session_leases(project_id: str, session: Session) -> None:
     """Best-effort write-through: snapshot the live lease set and mirror it.
 
-    Call AFTER the mutating ``with session.write_mutex:`` block has exited —
-    this helper briefly takes the (non-reentrant) mutex itself for a coherent
-    snapshot, then does mirror I/O OUTSIDE it so a slow Redis never extends a
-    lock route's critical section. Two racing calls can write out of order;
-    that is accepted (spec: the mirror may briefly lag truth) because the
-    next mutation — at latest the renew heartbeat at ttl/2 — re-converges it.
+    Call AFTER the mutating ``with session.write_mutex:`` block has exited.
+    ``session.write_mutex`` is an ``RLock`` (reentrant), so re-entering it
+    here would be safe either way — that is NOT why this is split out. The
+    real reason: this helper re-takes the mutex only briefly, for a coherent
+    snapshot, then does mirror I/O (a network round trip to Redis) OUTSIDE
+    it, so a slow or down Redis never extends a lock route's or commit's
+    critical section. Two racing calls can write out of order; see the
+    module docstring for exactly what that costs (self-healing on the
+    lagged-truth side, a TTL-bounded phantom lease on the other) — that
+    asymmetry is accepted, not fixed here.
 
     Never raises: a mirror failure must not fail a lock operation."""
     try:

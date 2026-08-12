@@ -58,3 +58,16 @@ def test_load_tolerates_unknown_envelope_version(raw_redis) -> None:
         assert mirror.load(pid) == []
     finally:
         raw_redis.delete(lease_key(pid))
+
+
+def test_load_tolerates_valid_json_non_object_payload(raw_redis) -> None:
+    # A bare JSON array (e.g. hand-written via redis-cli) decodes fine but
+    # has no .get() — this must be caught as an undecodable payload (the
+    # AttributeError case), not escape to the restore_leases catch-all.
+    mirror = RedisLeaseMirror(_URL)
+    pid = f"it-{uuid.uuid4().hex[:8]}"
+    try:
+        raw_redis.set(lease_key(pid), "[1, 2, 3]")
+        assert mirror.load(pid) == []
+    finally:
+        raw_redis.delete(lease_key(pid))

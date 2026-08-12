@@ -83,6 +83,58 @@ def test_build_from_settings_empty_url_is_null() -> None:
     assert isinstance(build_mirror_from_settings(s), NullLeaseMirror)
 
 
+def test_get_lease_mirror_sticky_fallback_on_build_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A build failure (bad DATA_ROVER_REDIS_URL, unimportable ``redis``)
+    must be memoized: the second call must return the SAME Null fallback
+    instance rather than re-attempting (and re-logging) the broken build,
+    which would spam a traceback on every acquire/release/renew/commit and
+    every cold hydration forever.
+
+    Counts calls to the module's ``logger.warning`` directly rather than
+    using ``caplog``: ``alembic.command.upgrade`` (exercised by
+    test_alembic.py, which can run earlier in the same session) calls
+    ``logging.config.fileConfig``, whose default ``disable_existing_loggers``
+    permanently disables every logger not in its own config — including this
+    module's — for the rest of the process. That is an unrelated pytest-
+    ordering hazard, not a variable of what this test is pinning, so the
+    counting stub sidesteps it entirely instead of racing it."""
+    import data_rover.api.lock_mirror as lm
+
+    call_count = 0
+
+    def _boom(settings):  # noqa: ANN001
+        nonlocal call_count
+        call_count += 1
+        raise RuntimeError("boom: bad DATA_ROVER_REDIS_URL")
+
+    warn_calls: list[object] = []
+    monkeypatch.setattr(lm, "build_mirror_from_settings", _boom)
+    monkeypatch.setattr(lm.logger, "warning", lambda *a, **kw: warn_calls.append(a))
+    set_lease_mirror(None)  # force the rebuild path this test exercises
+    try:
+        first = get_lease_mirror()
+        second = get_lease_mirror()
+        assert isinstance(first, NullLeaseMirror)
+        assert first is second  # same fallback instance -> no per-call retry
+        assert call_count == 1  # build was attempted exactly once, not twice
+        assert len(warn_calls) == 1  # logged once, not once per call
+    finally:
+        set_lease_mirror(None)  # process-global singleton: reset for other tests
+
+
+def test_build_from_settings_redis_url_is_redis_mirror() -> None:
+    # Pins the single line that decides whether the feature is on in
+    # production. redis.Redis.from_url on a valid scheme constructs lazily —
+    # no socket is opened — so this is hermetic even though the port refuses
+    # connections (same dead-port address the degradation test above uses).
+    from data_rover.api.lock_mirror_redis import RedisLeaseMirror
+
+    s = Settings(redis_url="redis://127.0.0.1:1/0")
+    assert isinstance(build_mirror_from_settings(s), RedisLeaseMirror)
+
+
 _MM = """
 elements:
   - name: Node
@@ -302,18 +354,23 @@ def test_concurrent_calls_use_a_single_lock_for_transition_bookkeeping() -> None
     entered = threading.Event()
     done = threading.Event()
 
-    mirror._state_lock.acquire()  # simulate "inside the critical section"
-
     def worker() -> None:
         entered.set()
         mirror._mark_down(RuntimeError("boom"))  # must block on the held lock
         done.set()
 
-    t = threading.Thread(target=worker)
-    t.start()
-    assert entered.wait(timeout=2)
-    # The worker is blocked acquiring _state_lock; it must NOT have finished.
-    assert not done.wait(timeout=0.2)
-    mirror._state_lock.release()
+    # daemon=True: if an assertion below fails before the lock is released,
+    # the process must still be able to exit rather than hang forever on a
+    # non-daemon thread blocked acquiring _state_lock.
+    t = threading.Thread(target=worker, daemon=True)
+    mirror._state_lock.acquire()  # simulate "inside the critical section"
+    try:
+        t.start()
+        assert entered.wait(timeout=2)
+        # The worker is blocked acquiring _state_lock; it must NOT have
+        # finished.
+        assert not done.wait(timeout=0.2)
+    finally:
+        mirror._state_lock.release()
     t.join(timeout=2)
     assert done.is_set()  # released -> the worker's call completed
