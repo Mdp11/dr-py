@@ -225,7 +225,7 @@ worth filing as a specific `U`-item rather than re-running the phase.
 
 ## 3. From the Redis lock-mirroring phase (2026-08-12)
 
-### B-1 · The app never configures logging, so `logger.info` is invisible · `open` · **high value, small**
+### B-1 · The app never configures logging, so `logger.info` is invisible · `done` (2026-08-12, fix/lease-mirror-hardening)
 Neither `basicConfig` nor `dictConfig` is called anywhere in `src/data_rover/`. Python
 falls back to `logging.lastResort`, which emits **WARNING and above only**. All three
 `logger.info` calls in the codebase are therefore silently dropped in a normal backend
@@ -244,7 +244,7 @@ Fix: configure logging once at app startup (uvicorn's `log_config`, or a `dictCo
 `main.py`) so `data_rover.*` emits INFO. Pre-existing app-wide gap, not introduced by the
 mirror — but the mirror is what made it matter.
 
-### B-2 · `to_leases` doesn't clamp restored lease lifetime against clock jumps · `open` · small
+### B-2 · `to_leases` doesn't clamp restored lease lifetime against clock jumps · `done` (2026-08-12, fix/lease-mirror-hardening)
 `lock_mirror.to_leases` computes `remaining = expires_at_epoch - wall_now` with no
 ceiling. A backward NTP correction between mirror-write and restore yields a restored
 lease living longer than `lock_ttl_seconds`; a forward jump silently drops live leases.
@@ -252,7 +252,7 @@ Parked during the final review because `to_leases` is a pure function and clampi
 give it a settings dependency — do it in `restore_leases` instead, where settings are
 already reachable. Damage is bounded and self-heals at TTL.
 
-### B-3 · Concurrent write-throughs can leave a phantom lease in the mirror · `open` · small
+### B-3 · Concurrent write-throughs can leave a phantom lease in the mirror · `done` (2026-08-12, fix/lease-mirror-hardening)
 Two write-throughs on one project can land out of order (acquire on r1 snapshots
 `{r1,r2}`; release of r2 snapshots `{r1}`; the first write lands last), leaving the mirror
 holding a lease truth no longer has. No Redis outage required. The renew-heartbeat
@@ -266,7 +266,7 @@ cheap real fix: serialize snapshot+write per session with a dedicated mirror loc
 (NOT `write_mutex`), which eliminates reordering entirely at negligible cost given
 mutation frequency — and would let the module docstring drop the "may briefly lag" caveat.
 
-### B-4 · `dr:leases:{project_id}` has no deployment namespace · `open` · small
+### B-4 · `dr:leases:{project_id}` has no deployment namespace · `done` (2026-08-12, fix/lease-mirror-hardening)
 Two backends pointed at one Redis DB will clobber each other's lease sets and
 cross-restore phantom leases for same-named projects (e.g. `default`). Documented in the
 `redis_url` setting docstring as an operational caveat; a key prefix setting would remove
@@ -575,8 +575,6 @@ can't be reversed by an implementer acting alone.
 
 ## 11. Ideas — unvalidated, no commitment
 
-- **Key-prefix setting for the lease mirror** (see B-4) — turns a documented footgun into
-  a configuration knob, and is a prerequisite for a shared-Redis multi-deployment setup.
 - **Surface mirror health in the UI** — the realtime feed already carries lock events;
   a "leases are not being mirrored" indicator would make B-1's degradation visible to
   users rather than only to log readers.

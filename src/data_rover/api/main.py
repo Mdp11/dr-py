@@ -48,6 +48,24 @@ from .storage import build_store_from_settings, set_snapshot_store
 logger = logging.getLogger(__name__)
 
 
+def _configure_logging() -> None:
+    """Give the app's own loggers a working INFO path (backlog B-1).
+
+    Nothing else in the process configures logging: uvicorn's default log
+    config wires only its own ``uvicorn.*`` loggers, so everything under
+    ``data_rover.*`` fell through to ``logging.lastResort``, which emits
+    WARNING and above only — every ``logger.info`` in the codebase (notably
+    the lease mirror's operator signals: "restored N mirrored lease(s)",
+    "lease mirror: Redis recovered") was silently dropped.
+
+    ``basicConfig`` is a no-op when the root logger already has handlers, so
+    an operator-supplied config (or pytest's capture handler) is never
+    stomped; the ``data_rover`` level is set unconditionally either way,
+    which is harmless (a level, not a handler)."""
+    logging.basicConfig(format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logging.getLogger("data_rover").setLevel(logging.INFO)
+
+
 def _ensure_dev_seed(settings: Settings) -> None:
     """Dev/SQLite convenience: create the tenancy + content schema so local
     dev works without Alembic (Postgres schema is Alembic-owned). Gated by
@@ -221,6 +239,7 @@ def _start_lock_sweeper(interval: float) -> tuple[threading.Thread, threading.Ev
 
 
 def create_app() -> FastAPI:
+    _configure_logging()
     settings = get_settings()
     init_engine(settings.database_url)
     set_snapshot_store(build_store_from_settings(settings))

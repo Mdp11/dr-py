@@ -87,8 +87,17 @@ class Settings(BaseSettings):
     #: (``dr:leases:{project_id}``) carries no deployment namespace, so two
     #: backends sharing one Redis DB will clobber each other's lease sets and
     #: cross-restore phantom leases for same-named projects (e.g.
-    #: ``default``) — give each deployment its own Redis DB or instance.
+    #: ``default``) — set ``redis_key_prefix`` per deployment (or give each
+    #: its own Redis DB or instance).
     redis_url: str = ""
+    #: Namespace prepended VERBATIM to every lease-mirror Redis key
+    #: (``{prefix}dr:leases:{project_id}``), e.g. ``"site-a:"``. Set a
+    #: distinct prefix per deployment when several backends share one Redis
+    #: DB, so their lease sets can't clobber each other or cross-restore
+    #: phantom leases for same-named projects (``default``). Empty (the
+    #: default) keeps the historical unprefixed keys, so an existing
+    #: deployment still finds its own mirror across an upgrade.
+    redis_key_prefix: str = ""
     #: A full-model snapshot is written every Nth commit (bounds hydration
     #: replay length). A snapshot is ALSO always written on eviction.
     snapshot_every: int = 200

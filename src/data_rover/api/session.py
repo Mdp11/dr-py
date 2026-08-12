@@ -97,6 +97,15 @@ class Session:
     #: lifespan sweeper; consulted by the commit route (lock verification) and
     #: by ``SessionRegistry.evict`` (never evict a session with live leases).
     lock_table: LockTable = field(default_factory=LockTable, repr=False)
+    #: serializes the lease-mirror write-through for THIS project (B-3):
+    #: snapshot + mirror write happen atomically w.r.t. each other, so two
+    #: racing write-throughs can no longer land out of order and leave a
+    #: phantom lease in the mirror. Deliberately NOT write_mutex — the mirror
+    #: does network I/O that must never sit inside a route's critical
+    #: section. Ordering rule: only ever acquired when write_mutex is NOT
+    #: held (mirror_session_leases is called after the mutating block
+    #: exits), so mirror_mutex → write_mutex is the one legal nesting.
+    mirror_mutex: threading.Lock = field(default_factory=threading.Lock, repr=False)
     #: per-project realtime feed subscribers (Phase 5). Populated by the WS
     #: endpoint; broadcast to at the commit/lock sites. The eviction guard
     #: refuses to drop a session while it has connected clients.

@@ -16,6 +16,7 @@ from data_rover.api.lock_mirror import (
     NullLeaseMirror,
     build_mirror_from_settings,
     get_lease_mirror,
+    lease_key,
     set_lease_mirror,
     to_leases,
     to_mirrored,
@@ -60,6 +61,48 @@ def test_expired_entries_dropped_on_both_conversions() -> None:
     assert to_mirrored([_lease(expires_at=mono - 1.0)], mono_now=mono, wall_now=wall) == []
     stale = MirroredLease("e1", "exclusive", "u", "t", "edit", wall - 1.0)
     assert to_leases([stale], mono_now=mono, wall_now=wall) == []
+
+
+def test_to_leases_clamps_remaining_to_max() -> None:
+    # backward wall-clock jump between mirror-write and restore: the entry
+    # claims 900s remaining but a lease can never legitimately outlive the
+    # TTL it was granted with
+    m = MirroredLease("e1", "exclusive", "u", "t", "edit", 5000.0 + 900.0)
+    [le] = to_leases([m], mono_now=100.0, wall_now=5000.0, max_remaining_s=300.0)
+    assert le.expires_at == 100.0 + 300.0
+
+
+def test_to_leases_no_clamp_by_default_and_ignores_nonpositive_cap() -> None:
+    m = MirroredLease("e1", "exclusive", "u", "t", "edit", 5000.0 + 900.0)
+    [default] = to_leases([m], mono_now=100.0, wall_now=5000.0)
+    assert default.expires_at == 100.0 + 900.0
+    # a 0 TTL means "TTL disabled" elsewhere in settings — it must mean
+    # "no cap" here too, never "drop every restored lease"
+    [uncapped] = to_leases([m], mono_now=100.0, wall_now=5000.0, max_remaining_s=0.0)
+    assert uncapped.expires_at == 100.0 + 900.0
+
+
+def test_restore_leases_clamps_to_lock_ttl(monkeypatch: pytest.MonkeyPatch) -> None:
+    # end-to-end wiring: restore_leases must pass settings.lock_ttl_seconds
+    # as the cap
+    from data_rover.api.lock_mirror import restore_leases
+    from data_rover.api.locking import LockTable
+
+    monkeypatch.setenv("DATA_ROVER_LOCK_TTL_SECONDS", "60")
+    mirror = MemoryLeaseMirror()
+    mirror.write(
+        "p1",
+        [MirroredLease("e1", "exclusive", "u", "t", "edit", time.time() + 900.0)],
+    )
+    set_lease_mirror(mirror)
+    try:
+        table = LockTable()
+        restore_leases("p1", table)
+        now = time.monotonic()
+        [le] = table.active_leases(now)
+        assert le.expires_at - now <= 60.0 + 1.0  # clamped, +1s slop
+    finally:
+        set_lease_mirror(None)
 
 
 def test_memory_mirror_write_load_and_empty_deletes() -> None:
@@ -133,6 +176,20 @@ def test_build_from_settings_redis_url_is_redis_mirror() -> None:
 
     s = Settings(redis_url="redis://127.0.0.1:1/0")
     assert isinstance(build_mirror_from_settings(s), RedisLeaseMirror)
+
+
+def test_lease_key_prefix() -> None:
+    assert lease_key("p1") == "dr:leases:p1"
+    assert lease_key("p1", prefix="site-a:") == "site-a:dr:leases:p1"
+
+
+def test_build_from_settings_wires_key_prefix() -> None:
+    from data_rover.api.lock_mirror_redis import RedisLeaseMirror
+
+    s = Settings(redis_url="redis://127.0.0.1:1/0", redis_key_prefix="site-a:")
+    mirror = build_mirror_from_settings(s)
+    assert isinstance(mirror, RedisLeaseMirror)
+    assert mirror._key("p1") == "site-a:dr:leases:p1"
 
 
 _MM = """
@@ -248,6 +305,65 @@ def test_mirror_failure_never_fails_the_route(client: TestClient) -> None:
     token = _acquire(client, eid)  # 200 despite the exploding mirror
     r = client.post(papi("/locks/release"), json={"token": token})
     assert r.status_code == 200
+
+
+def test_write_throughs_are_serialized_in_snapshot_order() -> None:
+    """B-3: snapshot+write are atomic w.r.t. each other, so a slow earlier
+    write-through can never land AFTER a later one and leave the mirror
+    holding a released lease (the restart-phantom source). Deterministic, not
+    a race reproduction: the first write blocks on a gate; the second
+    write-through must wait for it rather than overtake it."""
+    from data_rover.api.lock_mirror import mirror_session_leases
+    from data_rover.api.session import Session
+
+    class GatedRecordingMirror:
+        def __init__(self) -> None:
+            self.writes: list[list[MirroredLease]] = []
+            self.entered = threading.Event()
+            self.gate = threading.Event()
+            self._first = True
+
+        def write(self, project_id: str, leases: list[MirroredLease]) -> None:
+            if self._first:
+                self._first = False
+                self.entered.set()
+                assert self.gate.wait(timeout=5)
+            self.writes.append(list(leases))
+
+        def load(self, project_id: str) -> list[MirroredLease]:
+            return []
+
+    mirror = GatedRecordingMirror()
+    set_lease_mirror(mirror)
+    try:
+        session = Session()
+        lease = _lease(expires_at=time.monotonic() + 60.0)
+        session.lock_table.seed([lease])
+
+        t1 = threading.Thread(
+            target=mirror_session_leases, args=("p1", session), daemon=True
+        )
+        t1.start()
+        assert mirror.entered.wait(timeout=5)  # t1 snapshotted {lease}, now gated
+
+        # a later mutation + write-through: must queue behind t1, not overtake
+        with session.write_mutex:
+            session.lock_table.release("test-user", lease.token)
+        t2 = threading.Thread(
+            target=mirror_session_leases, args=("p1", session), daemon=True
+        )
+        t2.start()
+        assert not mirror.gate.is_set()
+        mirror.gate.set()
+        t1.join(timeout=5)
+        t2.join(timeout=5)
+        assert not t1.is_alive() and not t2.is_alive()
+
+        # in-order: the release's (empty) snapshot landed LAST — the mirror
+        # ends holding truth, not the phantom
+        assert [len(w) for w in mirror.writes] == [1, 0]
+    finally:
+        set_lease_mirror(None)
 
 
 OTHER_HEADERS = {"x-user-id": "user-2", "x-user-email": "user2@example.com"}

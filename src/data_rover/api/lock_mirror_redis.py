@@ -18,7 +18,8 @@ promise above holds even when several threads observe a failing Redis at the
 same instant; without it, every thread blocked in the same outage would each
 read the pre-transition state and each log.
 
-Data model: one key per project (``dr:leases:{project_id}``) holding a JSON
+Data model: one key per project (``dr:leases:{project_id}``, prepended by
+the ``redis_key_prefix`` deployment namespace when set) holding a JSON
 envelope ``{"v": 1, "leases": [...]}`` written wholesale, with a key TTL of
 (latest lease expiry - now) + 60s slack so an orphaned mirror self-cleans; an
 empty set is a DEL. Leases are TTL-bounded (<= lock_ttl_seconds), so Redis
@@ -47,6 +48,7 @@ class RedisLeaseMirror:
         *,
         cooldown_s: float = 30.0,
         socket_timeout_s: float = 1.0,
+        key_prefix: str = "",
     ) -> None:
         import redis
 
@@ -66,6 +68,10 @@ class RedisLeaseMirror:
         # every thread caught in the same outage observe the pre-transition
         # state and each log — breaking the "exactly once" contract above.
         self._state_lock = threading.Lock()
+        self._key_prefix = key_prefix
+
+    def _key(self, project_id: str) -> str:
+        return lease_key(project_id, prefix=self._key_prefix)
 
     # ---- degradation bookkeeping -----------------------------------------
 
@@ -95,7 +101,7 @@ class RedisLeaseMirror:
     def write(self, project_id: str, leases: list[MirroredLease]) -> None:
         if self._in_cooldown():
             return
-        key = lease_key(project_id)
+        key = self._key(project_id)
         try:
             if not leases:
                 self._client.delete(key)
@@ -127,7 +133,7 @@ class RedisLeaseMirror:
             # clients (``ResponseT`` includes ``Awaitable``); this instance is
             # always sync (decode_responses=True), so the real runtime type
             # is `str | None`.
-            raw = cast("str | None", self._client.get(lease_key(project_id)))
+            raw = cast("str | None", self._client.get(self._key(project_id)))
             self._mark_up()
         except self._errors as exc:
             self._mark_down(exc)
