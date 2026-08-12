@@ -10,6 +10,9 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+from data_rover.api import tenancy
+from data_rover.api.db import db_session
+from data_rover.api.db_models import Role
 from data_rover.api.main import create_app
 from data_rover.api.routes import validation as validation_routes
 from data_rover.api.session import get_session
@@ -116,6 +119,79 @@ def test_truncation_caps_issues_but_not_counts(
     assert body["truncated"] is True
     assert len(body["issues"]) == 2
     assert body["counts"] == {"error": 3}  # counts stay exact past the cap
+
+
+def test_reseeds_a_nulled_store_under_the_mutex(client: TestClient) -> None:
+    """``touch_model``/``metamodel_swap`` null the store; the next read seeds it.
+
+    Seeding moved INSIDE ``session.write_mutex`` so that N clients
+    debounce-refetching off one feed event cannot each launch their own full
+    pipeline run. Reentrancy is safe (``write_mutex`` is an ``RLock``) and
+    ``_ensure_validation_seeded`` takes no lock of its own.
+    """
+    res = _post_ops(
+        client,
+        [{"kind": "create_element", "temp_id": "tmp_1", "type_name": "Item",
+          "properties": {}}],
+    )
+    assert res.status_code == 200, res.text
+    get_session().validation = None
+
+    body = client.get(f"{API}/model/issues").json()
+    assert body["counts"] == {"error": 1}
+    assert len(body["issues"]) == 1
+    assert get_session().validation is not None  # seeded, and stayed seeded
+
+
+def test_truncation_never_materializes_more_than_the_cap(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The cap bounds the SERVER-side copy, not just the wire list.
+
+    The route slices ``iter_issues()`` lazily under the write mutex, so a
+    store far larger than the cap is never listed out in full. Pinned by
+    counting how many issues the generator actually yields.
+    """
+    monkeypatch.setattr(validation_routes, "ISSUES_RESPONSE_MAX", 2)
+    ops = [
+        {"kind": "create_element", "temp_id": f"tmp_{i}", "type_name": "Item",
+         "properties": {"tag": f"t{i}"}}
+        for i in range(10)
+    ]
+    assert _post_ops(client, ops).status_code == 200
+
+    state = get_session().validation
+    assert state is not None
+    real_iter = type(state).iter_issues
+    yielded = 0
+
+    def counting_iter(self):  # type: ignore[no-untyped-def]
+        nonlocal yielded
+        for issue in real_iter(self):
+            yielded += 1
+            yield issue
+
+    monkeypatch.setattr(type(state), "iter_issues", counting_iter)
+    body = client.get(f"{API}/model/issues").json()
+    assert body["truncated"] is True
+    assert len(body["issues"]) == 2
+    assert body["counts"] == {"error": 10}  # exact past the cap
+    # cap + 1: one extra item is what proves truncation, and no more.
+    assert yielded == 3
+
+
+def test_viewer_may_read_issues(client: TestClient) -> None:
+    """A viewer sees the issue list: it is a plain GET, and the panel is a
+    read-only surface every role gets (spec, 2026-08-12)."""
+    with db_session() as s:
+        tenancy.upsert_user(s, user_id="viewer-1", email="v@example.com")
+        tenancy.add_member(s, project_id="default", user_id="viewer-1", role=Role.viewer)
+    res = client.get(
+        f"{API}/model/issues",
+        headers={"x-user-id": "viewer-1", "x-user-email": "v@example.com"},
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["issues"] == []
 
 
 def test_membership_enforced(client: TestClient) -> None:

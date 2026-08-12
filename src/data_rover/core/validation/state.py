@@ -21,7 +21,7 @@ issue order, so :meth:`all_issues` is stable for a given operation history
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 
 from .issue import Issue, IssueCategory
 
@@ -76,6 +76,17 @@ class ValidationState:
         for issue in new_issues:
             self.issues_by_owner.setdefault(issue_owner(issue), []).append(issue)
         return IssuesDelta(removed_owner_ids=removed, added=list(new_issues))
+
+    def iter_issues(self) -> Iterator[Issue]:
+        """Lazy :meth:`all_issues` — same order, nothing materialized.
+
+        For readers that only want a BOUNDED prefix (``GET /model/issues``
+        caps its wire list): building the whole list just to slice it would
+        allocate one entry per issue in the store, and that reader holds the
+        session write mutex while it does so.
+        """
+        for issues in self.issues_by_owner.values():
+            yield from issues
 
     def all_issues(self) -> list[Issue]:
         out: list[Issue] = []

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from itertools import islice
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
@@ -74,20 +75,30 @@ def list_issues(
 ) -> IssueListOut:
     """Snapshot the maintained issue store — the panel's cheap live read.
 
-    Snapshotting happens under the write mutex on purpose: this route is
-    called WHILE the background sweep is splicing chunks into
-    ``issues_by_owner`` (project open), and ``all_issues()`` iterates that
-    dict. The guarded section is a list copy — microseconds.
+    Everything happens under the write mutex on purpose. This route is called
+    WHILE the background sweep is splicing chunks into ``issues_by_owner``
+    (project open), and it iterates that dict; the seeding call is in there
+    too so that N clients debounce-refetching off the same feed event cannot
+    each start their own full ``Scope.all()`` pipeline run for a session whose
+    store was nulled (``Session.touch_model``, ``metamodel_swap``) — the first
+    caller seeds, the rest see the seeded store.
+
+    Cost of the guarded section, for a session that already has its store:
+    a BOUNDED slice (``ISSUES_RESPONSE_MAX + 1`` items, never the whole
+    store — the cap protects the server, not just the wire) plus one
+    read-only counting walk. ``counts`` must stay EXACT past the cap — that
+    is the entire point of the cap design — so it is the one part that is
+    unavoidably O(issues), and it allocates nothing per issue.
     """
     _, current = require_model(session)
-    state = _ensure_validation_seeded(session, current)
     with session.write_mutex:
-        issues = state.all_issues()
+        state = _ensure_validation_seeded(session, current)
+        issues = list(islice(state.iter_issues(), ISSUES_RESPONSE_MAX + 1))
         counts = state.counts()
         rev = session.model_rev
     truncated = len(issues) > ISSUES_RESPONSE_MAX
     if truncated:
-        issues = issues[:ISSUES_RESPONSE_MAX]
+        del issues[ISSUES_RESPONSE_MAX:]
     return IssueListOut(
         model_rev=rev,
         issues=[IssueOut.from_core(i) for i in issues],
