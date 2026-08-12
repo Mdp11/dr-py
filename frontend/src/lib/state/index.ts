@@ -63,6 +63,10 @@ export {
 	getCachedTreeItems,
 	getIssueCounts,
 	getIssuesByOwner,
+	getIssuesTruncatedTotal,
+	getLiveIssues,
+	adoptIssues,
+	refetchIssues,
 	getModelError,
 	getMissingElementIds,
 	getModelGeneration,
@@ -107,15 +111,16 @@ export {
 	type SelectionKind
 } from './selection.svelte';
 export {
-	clearIssues,
-	getIssues,
+	clearOverlay,
+	getOverlay,
 	getLastError,
 	getLastRunAt,
 	isRunning,
-	setIssues,
+	setOverlay,
 	setLastError,
 	setRunning
 } from './validation.svelte';
+export { getEffectiveIssues } from './issue-source';
 export { indexIssues, worstSeverityFor, type IssueIndex } from './validation-index';
 export {
 	BUILTIN_TABS,

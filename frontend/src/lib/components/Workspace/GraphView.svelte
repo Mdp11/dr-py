@@ -5,7 +5,7 @@
 	import { AlertTriangle } from '@lucide/svelte';
 
 	import {
-		getIssues,
+		getEffectiveIssues,
 		getMetamodel,
 		getModelGeneration,
 		getModelSummary,
@@ -138,7 +138,7 @@
 		return positions;
 	}
 
-	const issueIndex = $derived(indexIssues(getIssues()));
+	const issueIndex = $derived(indexIssues(getEffectiveIssues()));
 
 	// Palette mirrors the app tokens in app.css (canvas/SVG can't read CSS vars).
 	const GRAPH_BACKGROUND = '#101311';

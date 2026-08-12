@@ -21,7 +21,7 @@ import { isTempId, type ModelOp } from './ops';
 import { nameProp } from '$lib/util/element-name';
 import { remapProperties } from './remap';
 import { getSelection, select } from './selection.svelte';
-import { clearIssues } from './validation.svelte';
+import { clearOverlay } from './validation.svelte';
 
 /**
  * Staged-commit model store (Spec B).
@@ -425,7 +425,7 @@ export function applyDelta(d: OpsResponse): void {
 
 	for (const owner of d.issues_removed_owner_ids) _issuesByOwner.delete(owner);
 	for (const issue of d.issues_added) addIssueToOwner(issue);
-	clearIssues(); // committed truth moved; any Validate snapshot is moot
+	clearOverlay(); // committed truth moved; any Validate snapshot is moot
 
 	_modelRev = d.model_rev;
 	if (structural) _structureRev += 1;
@@ -1003,27 +1003,17 @@ export function seedRelationships(rels: readonly Relationship[]): void {
  * /model/validate, which applies them against the committed model, validates,
  * rolls back, and tags each issue's origin (on_server / uncommitted / resolved).
  * With an empty buffer it is a plain committed-model validation (all on_server).
- * Resets `issuesByOwner` and the counts from the result.
  *
- * Resolved issues are returned in the result array but intentionally excluded
- * from `_issuesByOwner` and the counts (they are not active problems); IssuesPanel
- * reads the full returned array via `getIssues()`, so it still renders them.
+ * A pure fetch: it does NOT mutate `_issuesByOwner`/`_issueCounts` (those hold
+ * the LIVE committed issue list — see `adoptIssues`/`applyDelta`). The caller
+ * (`validate-action.ts`'s `runValidation`) stores the origin-tagged result as
+ * the Validate OVERLAY via `setOverlay`; that overlay, not this function, is
+ * what lets resolved/uncommitted issues surface in the panel.
  */
 export async function validateAll(): Promise<Issue[]> {
 	const staged = getStagedOps();
 	const options = staged.length > 0 ? { ops: staged, baseRev: _modelRev } : undefined;
-	const issues = await validateModel(options, _clientConfig);
-	_issuesByOwner.clear();
-	const counts: IssueCounts = {};
-	for (const issue of issues) {
-		// resolved issues are not active problems — keep them out of the counts
-		if (issue.origin === 'resolved') continue;
-		addIssueToOwner(issue);
-		counts[issue.severity] = (counts[issue.severity] ?? 0) + 1;
-	}
-	_issueCounts = counts;
-	if (_summary !== null) _summary = { ..._summary, issue_counts: counts };
-	return issues;
+	return validateModel(options, _clientConfig);
 }
 
 /**
@@ -1046,7 +1036,7 @@ export function adoptIssues(
 	_issueCounts = counts;
 	if (_summary !== null) _summary = { ..._summary, issue_counts: counts };
 	_issuesTruncatedTotal = truncated ? Object.values(counts).reduce((a, b) => a + b, 0) : null;
-	clearIssues();
+	clearOverlay();
 }
 
 /** Fetch GET /model/issues and adopt it. Best-effort by contract: every

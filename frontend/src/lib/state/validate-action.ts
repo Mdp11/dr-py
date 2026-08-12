@@ -1,15 +1,17 @@
 import { getModelSummary, validateAll } from './model.svelte';
 import { setActiveTab } from './workspace.svelte';
-import { isRunning, setIssues, setLastError, setRunning } from './validation.svelte';
+import { isRunning, setOverlay, setLastError, setRunning } from './validation.svelte';
 import { ConflictError } from '$lib/api/errors';
 import { setModelError } from './model.svelte';
 
 /**
  * Run a full validation that INCLUDES staged (uncommitted) edits via the store's
  * `validateAll()`. On success: switch the workspace tab to "issues" and store the
- * origin-tagged result. A 409 (the committed rev advanced under us, e.g. a peer
- * commit) marks the store conflicted so the UI prompts a reload. Other errors are
- * stored as the panel's lastError. No-op if no model is loaded or a run is in flight.
+ * origin-tagged result as the Validate overlay (`setOverlay`) — the one view that
+ * can show 'uncommitted'/'resolved' issues. A 409 (the committed rev advanced
+ * under us, e.g. a peer commit) marks the store conflicted so the UI prompts a
+ * reload. Other errors are stored as the panel's lastError. No-op if no model is
+ * loaded or a run is in flight.
  */
 export async function runValidation(): Promise<void> {
 	if (getModelSummary() === null) return;
@@ -18,7 +20,7 @@ export async function runValidation(): Promise<void> {
 	setLastError(null);
 	try {
 		const issues = await validateAll();
-		setIssues(issues);
+		setOverlay(issues);
 		setActiveTab('issues');
 	} catch (err) {
 		if (err instanceof ConflictError) {

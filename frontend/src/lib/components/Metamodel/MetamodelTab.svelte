@@ -18,7 +18,7 @@
 		previewMetamodelChanges,
 		refreshSummary,
 		retryMetamodelLease,
-		setIssues,
+		setOverlay,
 		setMetamodel
 	} from '$lib/state';
 
@@ -66,7 +66,7 @@
 		try {
 			const mm = await fetchMetamodel();
 			setMetamodel(mm);
-			setIssues(res.issues.map(toIssue));
+			setOverlay(res.issues.map(toIssue));
 			await refreshSummary();
 		} catch {
 			// The durable rebind already landed — this is a stale VIEW, not a

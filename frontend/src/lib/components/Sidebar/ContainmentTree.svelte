@@ -18,7 +18,7 @@
 		ensureTypeFilterInitialized,
 		folderCreateLock,
 		getTreeElements,
-		getIssues,
+		getEffectiveIssues,
 		getMetamodel,
 		getMissingElementIds,
 		getModelGeneration,
@@ -702,7 +702,7 @@
 	});
 
 	// Prebuilt issue index, hoisted so TreeRow rows share one build per render.
-	const issueIndex = $derived(indexIssues(getIssues()));
+	const issueIndex = $derived(indexIssues(getEffectiveIssues()));
 
 	// Windowed body fetch: pull only the on-screen element bodies into cache.
 	$effect(() => {

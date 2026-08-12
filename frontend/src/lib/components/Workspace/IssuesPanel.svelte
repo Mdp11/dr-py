@@ -4,7 +4,7 @@
 	import {
 		getCachedElements,
 		getCachedRelationships,
-		getIssues,
+		getEffectiveIssues,
 		getLastError,
 		getLastRunAt,
 		getModelSummary,
@@ -16,7 +16,7 @@
 	import { nameProp } from '$lib/util/element-name';
 	import { AlertCircle, AlertTriangle, RefreshCw } from '@lucide/svelte';
 
-	const modelIssues = $derived(getIssues());
+	const modelIssues = $derived(getEffectiveIssues());
 	const viewWarnings = $derived(getViewWarnings());
 	const issues = $derived<readonly Issue[]>([...modelIssues, ...viewWarnings]);
 	const lastRunAt = $derived(getLastRunAt());

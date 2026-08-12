@@ -12,7 +12,7 @@ import {
 	refetchIssues,
 	resetModelStore
 } from '../model.svelte';
-import { clearIssues, getLastRunAt, setIssues } from '../validation.svelte';
+import { clearOverlay, getLastRunAt, setOverlay } from '../validation.svelte';
 
 function issue(message: string, owner: string): Issue {
 	return { severity: 'error', message, target_ids: [owner], origin: 'on_server' };
@@ -31,7 +31,7 @@ function summaryAtRev(rev: number): void {
 
 beforeEach(() => {
 	resetModelStore();
-	clearIssues();
+	clearOverlay();
 	vi.restoreAllMocks();
 });
 
@@ -68,7 +68,7 @@ describe('adoptIssues', () => {
 
 	it('clears the Validate overlay (committed truth moved)', () => {
 		summaryAtRev(1);
-		setIssues([issue('snapshot', 'e1')]);
+		setOverlay([issue('snapshot', 'e1')]);
 		expect(getLastRunAt()).not.toBeNull();
 		adoptIssues([], {}, 1);
 		expect(getLastRunAt()).toBeNull();
@@ -78,7 +78,7 @@ describe('adoptIssues', () => {
 describe('applyDelta clears the Validate overlay', () => {
 	it('a commit delta invalidates the staged snapshot', () => {
 		summaryAtRev(1);
-		setIssues([issue('snapshot', 'e1')]);
+		setOverlay([issue('snapshot', 'e1')]);
 		applyDelta({
 			model_rev: 2,
 			id_map: {},
