@@ -244,7 +244,7 @@ Fix: configure logging once at app startup (uvicorn's `log_config`, or a `dictCo
 `main.py`) so `data_rover.*` emits INFO. Pre-existing app-wide gap, not introduced by the
 mirror — but the mirror is what made it matter.
 
-### B-2 · `to_leases` doesn't clamp restored lease lifetime against clock jumps · `open` · small
+### B-2 · `to_leases` doesn't clamp restored lease lifetime against clock jumps · `done` (2026-08-12, fix/lease-mirror-hardening)
 `lock_mirror.to_leases` computes `remaining = expires_at_epoch - wall_now` with no
 ceiling. A backward NTP correction between mirror-write and restore yields a restored
 lease living longer than `lock_ttl_seconds`; a forward jump silently drops live leases.

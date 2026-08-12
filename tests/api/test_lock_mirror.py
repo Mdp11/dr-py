@@ -62,6 +62,48 @@ def test_expired_entries_dropped_on_both_conversions() -> None:
     assert to_leases([stale], mono_now=mono, wall_now=wall) == []
 
 
+def test_to_leases_clamps_remaining_to_max() -> None:
+    # backward wall-clock jump between mirror-write and restore: the entry
+    # claims 900s remaining but a lease can never legitimately outlive the
+    # TTL it was granted with
+    m = MirroredLease("e1", "exclusive", "u", "t", "edit", 5000.0 + 900.0)
+    [le] = to_leases([m], mono_now=100.0, wall_now=5000.0, max_remaining_s=300.0)
+    assert le.expires_at == 100.0 + 300.0
+
+
+def test_to_leases_no_clamp_by_default_and_ignores_nonpositive_cap() -> None:
+    m = MirroredLease("e1", "exclusive", "u", "t", "edit", 5000.0 + 900.0)
+    [default] = to_leases([m], mono_now=100.0, wall_now=5000.0)
+    assert default.expires_at == 100.0 + 900.0
+    # a 0 TTL means "TTL disabled" elsewhere in settings — it must mean
+    # "no cap" here too, never "drop every restored lease"
+    [uncapped] = to_leases([m], mono_now=100.0, wall_now=5000.0, max_remaining_s=0.0)
+    assert uncapped.expires_at == 100.0 + 900.0
+
+
+def test_restore_leases_clamps_to_lock_ttl(monkeypatch: pytest.MonkeyPatch) -> None:
+    # end-to-end wiring: restore_leases must pass settings.lock_ttl_seconds
+    # as the cap
+    from data_rover.api.lock_mirror import restore_leases
+    from data_rover.api.locking import LockTable
+
+    monkeypatch.setenv("DATA_ROVER_LOCK_TTL_SECONDS", "60")
+    mirror = MemoryLeaseMirror()
+    mirror.write(
+        "p1",
+        [MirroredLease("e1", "exclusive", "u", "t", "edit", time.time() + 900.0)],
+    )
+    set_lease_mirror(mirror)
+    try:
+        table = LockTable()
+        restore_leases("p1", table)
+        now = time.monotonic()
+        [le] = table.active_leases(now)
+        assert le.expires_at - now <= 60.0 + 1.0  # clamped, +1s slop
+    finally:
+        set_lease_mirror(None)
+
+
 def test_memory_mirror_write_load_and_empty_deletes() -> None:
     m = MemoryLeaseMirror()
     lease = MirroredLease("e1", "exclusive", "u", "t", "edit", time.time() + 60)

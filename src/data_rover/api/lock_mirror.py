@@ -23,7 +23,10 @@ lock, which was considered and deliberately deferred to a follow-up.
 
 Clock mapping: ``Lease.expires_at`` is ``time.monotonic()`` — meaningless
 across processes. Conversion to/from wall clock (``time.time()``) happens in
-:func:`to_mirrored` / :func:`to_leases` and nowhere else.
+:func:`to_mirrored` / :func:`to_leases` and nowhere else; on restore the
+remaining lifetime is additionally clamped to ``lock_ttl_seconds`` so a
+backward wall-clock jump between write and restore cannot mint a lease that
+outlives the TTL it was granted with.
 
 One Protocol, three impls: ``RedisLeaseMirror`` (lock_mirror_redis.py — the
 real one, import isolated like storage_gcs), :class:`MemoryLeaseMirror`
@@ -135,16 +138,31 @@ def to_mirrored(
 
 
 def to_leases(
-    mirrored: list[MirroredLease], *, mono_now: float, wall_now: float
+    mirrored: list[MirroredLease],
+    *,
+    mono_now: float,
+    wall_now: float,
+    max_remaining_s: float | None = None,
 ) -> list[Lease]:
     """Wall clock → monotonic; entries that expired while we were down are
     dropped here rather than restored-then-swept, so a restored table never
-    contains a lease the conflict matrix would have to re-check."""
+    contains a lease the conflict matrix would have to re-check.
+
+    ``max_remaining_s`` (when positive) caps each restored lease's remaining
+    lifetime: the mirrored epoch was computed from a different process's wall
+    clock, so a backward NTP correction between mirror-write and restore
+    would otherwise restore a lease outliving ``lock_ttl_seconds``. The cap
+    is a parameter, not a settings read, so this stays a pure function — the
+    settings-aware call site is :func:`restore_leases`. (A forward jump
+    silently shortens or drops leases; that direction is unfixable from
+    here and self-heals via the client renew heartbeat.)"""
     out: list[Lease] = []
     for m in mirrored:
         remaining = m.expires_at_epoch - wall_now
         if remaining <= 0:
             continue
+        if max_remaining_s is not None and max_remaining_s > 0:
+            remaining = min(remaining, max_remaining_s)
         out.append(
             Lease(
                 resource_id=m.resource_id,
@@ -246,7 +264,14 @@ def restore_leases(project_id: str, table: LockTable) -> None:
         mirrored = get_lease_mirror().load(project_id)
         if not mirrored:
             return
-        leases = to_leases(mirrored, mono_now=time.monotonic(), wall_now=time.time())
+        from .settings import get_settings
+
+        leases = to_leases(
+            mirrored,
+            mono_now=time.monotonic(),
+            wall_now=time.time(),
+            max_remaining_s=float(get_settings().lock_ttl_seconds),
+        )
         table.seed(leases)
         if leases:
             logger.info(
