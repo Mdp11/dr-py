@@ -13,7 +13,7 @@ import type {
 import { getElement } from '../api/elements';
 import { NotFoundError } from '../api/errors';
 import * as modelReadApi from '../api/model-read';
-import { validateModel } from '../api/validation';
+import { getModelIssues, validateModel } from '../api/validation';
 import { mergePatch } from './apply';
 import { computeDiff, type Diff } from './diff';
 import { remapVisitIds } from './inspection-history.svelte';
@@ -21,6 +21,7 @@ import { isTempId, type ModelOp } from './ops';
 import { nameProp } from '$lib/util/element-name';
 import { remapProperties } from './remap';
 import { getSelection, select } from './selection.svelte';
+import { clearIssues } from './validation.svelte';
 
 /**
  * Staged-commit model store (Spec B).
@@ -102,6 +103,9 @@ let _modelRev = $state(0);
  * relationships) — see {@link getStructureRev}. */
 let _structureRev = $state(0);
 let _issueCounts: IssueCounts | null = $state(null);
+/** Exact total issue count when the last adoptIssues() was truncated at the
+ * server cap; null when the live map is complete. Rendered by IssuesPanel. */
+let _issuesTruncatedTotal: number | null = $state(null);
 let _error: ModelStoreError | null = $state(null);
 
 let _queue: QueuedOp[] = $state([]);
@@ -180,6 +184,18 @@ export function getCachedRelationships(): ReadonlyMap<string, Relationship> {
 
 export function getIssuesByOwner(): ReadonlyMap<string, Issue[]> {
 	return _issuesByOwner;
+}
+
+/** The live committed issue list: `_issuesByOwner` flattened in insertion
+ * order (deterministic — mirrors the server store's owner ordering). */
+export function getLiveIssues(): Issue[] {
+	const out: Issue[] = [];
+	for (const issues of _issuesByOwner.values()) out.push(...issues);
+	return out;
+}
+
+export function getIssuesTruncatedTotal(): number | null {
+	return _issuesTruncatedTotal;
 }
 
 export function getModelSummary(): ModelSummary | null {
@@ -409,6 +425,7 @@ export function applyDelta(d: OpsResponse): void {
 
 	for (const owner of d.issues_removed_owner_ids) _issuesByOwner.delete(owner);
 	for (const issue of d.issues_added) addIssueToOwner(issue);
+	clearIssues(); // committed truth moved; any Validate snapshot is moot
 
 	_modelRev = d.model_rev;
 	if (structural) _structureRev += 1;
@@ -1010,6 +1027,41 @@ export async function validateAll(): Promise<Issue[]> {
 }
 
 /**
+ * Adopt a committed-issue snapshot (GET /model/issues, rebind response) as
+ * the live store. Ignores a response STRICTLY older than the cached rev (it
+ * lost a race with a commit splice; the next delta or refetch heals) —
+ * equal-rev responses are adopted because the background sweep grows the
+ * server store WITHOUT bumping model_rev. Clears the Validate overlay:
+ * committed truth moved, so any staged snapshot is moot.
+ */
+export function adoptIssues(
+	issues: Issue[],
+	counts: IssueCounts,
+	modelRev: number,
+	truncated = false
+): void {
+	if (modelRev < _modelRev) return;
+	_issuesByOwner.clear();
+	for (const issue of issues) addIssueToOwner(issue);
+	_issueCounts = counts;
+	if (_summary !== null) _summary = { ..._summary, issue_counts: counts };
+	_issuesTruncatedTotal = truncated ? Object.values(counts).reduce((a, b) => a + b, 0) : null;
+	clearIssues();
+}
+
+/** Fetch GET /model/issues and adopt it. Best-effort by contract: every
+ * caller is a background refresh (boot, peer commit, sweep completion,
+ * feed reconnect) where a miss just means the next event heals. */
+export async function refetchIssues(): Promise<void> {
+	try {
+		const res = await getModelIssues(_clientConfig);
+		adoptIssues(res.issues, res.counts, res.model_rev, res.truncated);
+	} catch {
+		// keep the current map; the next commit delta or refetch heals
+	}
+}
+
+/**
  * Drop every cache, counter, queue, and error — for tests and for replacing
  * the model (load/upload flows call this, then refreshSummary()). In-flight
  * responses from before the reset are ignored when they land.
@@ -1027,6 +1079,7 @@ export function resetModelStore(): void {
 	_modelRev = 0;
 	_structureRev = 0;
 	_issueCounts = null;
+	_issuesTruncatedTotal = null;
 	_error = null;
 	_queue = [];
 }
