@@ -1,6 +1,13 @@
+import { z } from 'zod';
 import { apiFetch, type ClientConfig } from './client';
 import type { ModelOp } from '$lib/state/ops';
-import { IssueListSchema, type InlineModel, type Issue } from './types';
+import {
+	IssueCountsSchema,
+	IssueListSchema,
+	IssueSchema,
+	type InlineModel,
+	type Issue
+} from './types';
 
 export interface ValidateOptions {
 	inline?: InlineModel;
@@ -21,4 +28,19 @@ export function validateModel(options?: ValidateOptions, cfg?: ClientConfig): Pr
 		body = { inline: options.inline, scope: options.scope };
 	}
 	return apiFetch('/model/validate', { method: 'POST', body, schema: IssueListSchema }, cfg);
+}
+
+/** GET /model/issues — snapshot of the server's maintained issue store.
+ * Cheap by contract (never a pipeline run); `counts` is exact even when
+ * `issues` is truncated at the server-side cap. */
+export const IssueListOutSchema = z.object({
+	model_rev: z.number().int(),
+	issues: z.array(IssueSchema).default([]),
+	counts: IssueCountsSchema.default({}),
+	truncated: z.boolean().default(false)
+});
+export type IssueList = z.infer<typeof IssueListOutSchema>;
+
+export function getModelIssues(cfg?: ClientConfig): Promise<IssueList> {
+	return apiFetch('/model/issues', { method: 'GET', schema: IssueListOutSchema }, cfg);
 }

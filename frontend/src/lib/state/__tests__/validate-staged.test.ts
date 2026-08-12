@@ -8,9 +8,11 @@ import {
 	resetModelStore,
 	adoptSummary,
 	setModelApiConfig,
-	getModelError
+	getModelError,
+	getIssuesByOwner,
+	getIssueCounts
 } from '../model.svelte';
-import { getLastError } from '../validation.svelte';
+import { clearOverlay, getLastError, getOverlay } from '../validation.svelte';
 import { runValidation } from '../validate-action';
 
 const BASE = 'http://api.test/api/v1';
@@ -19,6 +21,7 @@ beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => {
 	server.resetHandlers();
 	resetModelStore();
+	clearOverlay();
 });
 afterAll(() => server.close());
 
@@ -49,6 +52,44 @@ describe('validateAll with staged ops', () => {
 		expect(body?.base_rev).toBe(4);
 		expect(body?.ops).toHaveLength(1);
 		expect(issues[0].origin).toBe('uncommitted');
+	});
+});
+
+describe('runValidation stores the origin-tagged run as the overlay, not the live map', () => {
+	it('setOverlay (via runValidation) does not touch issuesByOwner/counts', async () => {
+		setModelApiConfig({ baseUrl: BASE });
+		adoptSummary({
+			model_rev: 1,
+			element_count: 0,
+			relationship_count: 0,
+			elements_by_type: {},
+			issue_counts: { error: 1 },
+			undo_depth: 0
+		});
+		emit({ kind: 'create_element', temp_id: 'tmp3', type_name: 'Block', properties: {} });
+
+		server.use(
+			http.post(`${BASE}/model/validate`, () =>
+				HttpResponse.json([
+					{
+						severity: 'error',
+						message: 'staged issue',
+						target_ids: ['tmp3'],
+						origin: 'uncommitted'
+					}
+				])
+			)
+		);
+
+		await runValidation();
+
+		// The overlay carries the origin-tagged run result...
+		expect(getOverlay()?.map((i) => i.message)).toEqual(['staged issue']);
+		expect(getOverlay()?.[0].origin).toBe('uncommitted');
+		// ...while the live committed map/counts are untouched (validateAll is a
+		// pure fetch; StatusBar keeps reading committed truth throughout).
+		expect(getIssuesByOwner().size).toBe(0);
+		expect(getIssueCounts()).toEqual({ error: 1 });
 	});
 });
 

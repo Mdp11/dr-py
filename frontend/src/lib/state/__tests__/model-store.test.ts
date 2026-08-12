@@ -519,7 +519,7 @@ describe('reads and lifecycle', () => {
 		expect(getStagedDepth()).toBe(0);
 	});
 
-	it('validateAll resets issuesByOwner and counts from the full run', async () => {
+	it('validateAll is a pure fetch — the live issuesByOwner/counts are untouched', async () => {
 		server.use(
 			http.post(`${BASE}/model/validate`, () =>
 				HttpResponse.json([
@@ -538,11 +538,15 @@ describe('reads and lifecycle', () => {
 			})
 		);
 		const issues = await validateAll();
+		// The returned array is the origin-tagged result of the run — callers
+		// (runValidation) store it as the Validate overlay via setOverlay.
 		expect(issues).toHaveLength(3);
-		expect(getIssuesByOwner().has('gone')).toBe(false);
-		expect(getIssuesByOwner().get('e1')).toHaveLength(2);
-		expect(getIssuesByOwner().get('e2')).toHaveLength(1);
-		expect(getIssueCounts()).toEqual({ error: 1, warning: 2 });
+		// The LIVE committed map is untouched by validateAll: it still reflects
+		// applyDelta's committed truth, not the (possibly staged) validate run.
+		expect(getIssuesByOwner().has('gone')).toBe(true);
+		expect(getIssuesByOwner().has('e1')).toBe(false);
+		expect(getIssuesByOwner().has('e2')).toBe(false);
+		expect(getIssueCounts()).toEqual({ error: 1 });
 	});
 
 	it('resetModelStore clears caches, counters, queue, and errors', async () => {

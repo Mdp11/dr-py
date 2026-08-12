@@ -17,7 +17,7 @@
 		discardArtifact,
 		discardElement,
 		discardViewChanges,
-		getIssues,
+		getEffectiveIssues,
 		indexIssues,
 		getView,
 		getViewFileHandle,
@@ -165,7 +165,7 @@
 	const wouldBlock = $derived(preview?.would_block ?? false);
 	const commitBlocked = $derived(structuralBlockers.length > 0 || wouldBlock);
 
-	const issueIndex = $derived(indexIssues(getIssues()));
+	const issueIndex = $derived(indexIssues(getEffectiveIssues()));
 	const pendingEntityIds = $derived.by(() => {
 		const ids = new SvelteSet<string>();
 		for (const d of diff.elements) ids.add(d.id);

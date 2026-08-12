@@ -1,12 +1,12 @@
 <script lang="ts">
 	import { SvelteMap, SvelteSet } from 'svelte/reactivity';
-	import type { Element, Issue, Relationship } from '$lib/api/types';
+	import type { Element, Relationship } from '$lib/api/types';
 	import {
 		emit,
 		ensureElement,
 		getCachedElements,
 		getCachedRelationships,
-		getIssuesByOwner,
+		getEffectiveIssues,
 		getModelGeneration,
 		getStructureRev,
 		indexIssues,
@@ -28,13 +28,10 @@
 	const elements = $derived(getCachedElements());
 	const relationships = $derived(getCachedRelationships());
 
-	// Issues come from the store's issue mirror (kept exact by ops deltas and
-	// full validateAll runs), indexed over every target id like before.
-	const issueIndex = $derived.by(() => {
-		const all: Issue[] = [];
-		for (const issues of getIssuesByOwner().values()) all.push(...issues);
-		return indexIssues(all);
-	});
+	// Same selector every other issue view reads: the Validate overlay when one
+	// is active (so relationship badges agree with the panel/tree/graph/diff
+	// drawer during a staged run), else the live committed issue map.
+	const issueIndex = $derived(indexIssues(getEffectiveIssues()));
 
 	// Seed policy: fetch this element's incident-relationship page on mount and
 	// after every STRUCTURAL acked delta (structureRev bump — property-only

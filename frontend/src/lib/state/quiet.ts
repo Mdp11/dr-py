@@ -10,17 +10,21 @@
 
 import { getStagedDepth } from './model.svelte';
 import { getStagedArtifactDepth } from './artifact-edits.svelte';
+import { getStagedViewDepth } from './view-edits.svelte';
 import { hasModelLocks } from './realtime.svelte';
 
 /**
  * True when nothing uncommitted or checked-out stands in the way of rewriting
- * the model wholesale. Three terms, each for its own reason:
+ * the model wholesale. Four terms, each for its own reason:
  *
  *  - **no staged MODEL ops** — a revert/rebind moves `model_rev` under them,
  *    so the next `POST /commits` would 409 on a stale `base_rev`.
  *  - **no staged ARTIFACT ops** — they ride the SAME commit batch (one mixed
  *    `POST /commits`), so they are invalidated by exactly the same rev bump.
  *    This term stays even though artifact CONTENT is untouched by a revert.
+ *  - **no staged VIEW ops** — folder renames/moves/placements ride the SAME
+ *    `POST /commits` batch too, so a revert/rebind invalidates them by the
+ *    same rev bump as staged model/artifact ops.
  *  - **no MODEL-scope lease anywhere in the project** — a peer mid-edit would
  *    have the ground moved under them. Deliberately {@link hasModelLocks} and
  *    not `getLockState().size`: an `art:` lease means some user has an artifact
@@ -31,5 +35,10 @@ import { hasModelLocks } from './realtime.svelte';
  *    the full lock TTL every time anyone opened a table.
  */
 export function isProjectQuiet(): boolean {
-	return getStagedDepth() === 0 && getStagedArtifactDepth() === 0 && !hasModelLocks();
+	return (
+		getStagedDepth() === 0 &&
+		getStagedArtifactDepth() === 0 &&
+		getStagedViewDepth() === 0 &&
+		!hasModelLocks()
+	);
 }

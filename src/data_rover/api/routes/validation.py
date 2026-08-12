@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from itertools import islice
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
@@ -12,11 +13,15 @@ from data_rover.core.validation.state import ValidationState, issue_owner
 
 from ..artifact_ops import split_ops
 from ..deps import Session, get_request_session, require_model
-from ..schemas import IssueOut, ValidateRequest
+from ..schemas import IssueListOut, IssueOut, ValidateRequest
 from ._snapshot import _build_model_from_payload
 from .ops import _apply_batch, _ensure_validation_seeded, _rollback
 
 router = APIRouter()
+
+#: max issues returned by GET /model/issues; counts stay exact past the cap.
+#: One flat panel list is the consumer — paging buys nothing (spec, 2026-08-12).
+ISSUES_RESPONSE_MAX = 5000
 
 
 def _issue_key(issue: Issue) -> tuple[str, str, tuple[str, ...], str]:
@@ -62,6 +67,44 @@ def classify_issue_origins(
             remaining[key] -= 1
             out.append(IssueOut.from_core(issue, origin="resolved"))
     return out
+
+
+@router.get("/model/issues")
+def list_issues(
+    session: Session = Depends(get_request_session),
+) -> IssueListOut:
+    """Snapshot the maintained issue store — the panel's cheap live read.
+
+    Everything happens under the write mutex on purpose. This route is called
+    WHILE the background sweep is splicing chunks into ``issues_by_owner``
+    (project open), and it iterates that dict; the seeding call is in there
+    too so that N clients debounce-refetching off the same feed event cannot
+    each start their own full ``Scope.all()`` pipeline run for a session whose
+    store was nulled (``Session.touch_model``, ``metamodel_swap``) — the first
+    caller seeds, the rest see the seeded store.
+
+    Cost of the guarded section, for a session that already has its store:
+    a BOUNDED slice (``ISSUES_RESPONSE_MAX + 1`` items, never the whole
+    store — the cap protects the server, not just the wire) plus one
+    read-only counting walk. ``counts`` must stay EXACT past the cap — that
+    is the entire point of the cap design — so it is the one part that is
+    unavoidably O(issues), and it allocates nothing per issue.
+    """
+    _, current = require_model(session)
+    with session.write_mutex:
+        state = _ensure_validation_seeded(session, current)
+        issues = list(islice(state.iter_issues(), ISSUES_RESPONSE_MAX + 1))
+        counts = state.counts()
+        rev = session.model_rev
+    truncated = len(issues) > ISSUES_RESPONSE_MAX
+    if truncated:
+        del issues[ISSUES_RESPONSE_MAX:]
+    return IssueListOut(
+        model_rev=rev,
+        issues=[IssueOut.from_core(i) for i in issues],
+        counts=counts,
+        truncated=truncated,
+    )
 
 
 @router.post("/model/validate", response_model=None)

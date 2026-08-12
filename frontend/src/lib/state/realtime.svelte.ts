@@ -17,7 +17,13 @@ import {
 	type LeaseLite
 } from '$lib/api/feed';
 import { getActiveProjectId } from '$lib/state/active-project.svelte';
-import { applyDelta, getIssueCounts, getModelRev, refreshSummary } from './model.svelte';
+import {
+	applyDelta,
+	getIssueCounts,
+	getModelRev,
+	refetchIssues,
+	refreshSummary
+} from './model.svelte';
 import { handleArtifactFeedEvent } from './artifacts.svelte';
 import { isArtifactResource, isFolderResource } from './ops';
 import type { OpsResponse } from '$lib/api/types';
@@ -134,6 +140,28 @@ function clearLeases(leases: LeaseLite[]): void {
 	for (const le of leases) _lockState.delete(le.resource_id);
 }
 
+// Debounce for issue refetches: peer commits and reconnect snapshots can
+// arrive in bursts (a multi-op batch, a flaky connection reconnecting
+// several times); the GET is cheap but one call per burst is enough. The
+// refetch corrects what the synthesized peer-commit delta below cannot know
+// — the feed event carries no issue delta, by design (spec Decisions #3:
+// refetch was chosen over shipping deltas on the wire because reconnect
+// needs the refetch path anyway).
+let _issuesRefetchTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleIssuesRefetch(): void {
+	if (_issuesRefetchTimer !== null) clearTimeout(_issuesRefetchTimer);
+	_issuesRefetchTimer = setTimeout(() => {
+		_issuesRefetchTimer = null;
+		void refetchIssues();
+	}, 300);
+}
+
+function cancelIssuesRefetch(): void {
+	if (_issuesRefetchTimer !== null) clearTimeout(_issuesRefetchTimer);
+	_issuesRefetchTimer = null;
+}
+
 /** Exported for unit tests; also the single dispatch point for `connectFeed`. */
 export function handleFeedEvent(e: FeedEvent): void {
 	switch (e.type) {
@@ -145,6 +173,13 @@ export function handleFeedEvent(e: FeedEvent): void {
 			// Spec A keeps this light: refresh the model-wide summary counters.
 			// (Spec B wires a full reload of the affected subset.)
 			if (e.model_rev > getModelRev()) refreshSummary().catch(() => {});
+			// Unconditional, unlike the summary refresh above: the background
+			// validation sweep grows the server's issue store WITHOUT bumping
+			// model_rev, so an `e.model_rev > getModelRev()` guard here would
+			// wrongly skip a reconnect that landed after the sweep finished but
+			// before our rev moved. One extra cheap debounced GET after a clean
+			// reconnect is the accepted cost.
+			scheduleIssuesRefetch();
 			break;
 		}
 		case 'presence':
@@ -177,6 +212,10 @@ export function handleFeedEvent(e: FeedEvent): void {
 				issue_counts: getIssueCounts() ?? {}
 			};
 			applyDelta(delta);
+			// The delta synthesized above always carries EMPTY issue arrays and
+			// stale counts (the feed event has no issue delta, by design) — this
+			// debounced refetch corrects the live map ~300ms later.
+			scheduleIssuesRefetch();
 			for (const tap of _commitTaps) tap({ scope });
 			break;
 		}
@@ -215,9 +254,13 @@ export function stopRealtime(): void {
 	_conn = null;
 	_connected = false;
 	_feedTermination = null;
+	// Teardown is a real production path (project unmount, logout, session
+	// recovery), not just test isolation: a still-armed debounce would fire a
+	// GET /model/issues up to 300 ms after the project we were watching is gone.
+	cancelIssuesRefetch();
 }
 
-/** Test isolation. */
+/** Test isolation. (The issue-refetch debounce is cleared by stopRealtime.) */
 export function resetRealtime(): void {
 	stopRealtime();
 	_presence = [];

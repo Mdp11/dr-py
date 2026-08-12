@@ -13,7 +13,7 @@ import type {
 import { getElement } from '../api/elements';
 import { NotFoundError } from '../api/errors';
 import * as modelReadApi from '../api/model-read';
-import { validateModel } from '../api/validation';
+import { getModelIssues, validateModel } from '../api/validation';
 import { mergePatch } from './apply';
 import { computeDiff, type Diff } from './diff';
 import { remapVisitIds } from './inspection-history.svelte';
@@ -21,6 +21,7 @@ import { isTempId, type ModelOp } from './ops';
 import { nameProp } from '$lib/util/element-name';
 import { remapProperties } from './remap';
 import { getSelection, select } from './selection.svelte';
+import { clearOverlay } from './validation.svelte';
 
 /**
  * Staged-commit model store (Spec B).
@@ -102,6 +103,9 @@ let _modelRev = $state(0);
  * relationships) — see {@link getStructureRev}. */
 let _structureRev = $state(0);
 let _issueCounts: IssueCounts | null = $state(null);
+/** Exact total issue count when the last adoptIssues() was truncated at the
+ * server cap; null when the live map is complete. Rendered by IssuesPanel. */
+let _issuesTruncatedTotal: number | null = $state(null);
 let _error: ModelStoreError | null = $state(null);
 
 let _queue: QueuedOp[] = $state([]);
@@ -180,6 +184,18 @@ export function getCachedRelationships(): ReadonlyMap<string, Relationship> {
 
 export function getIssuesByOwner(): ReadonlyMap<string, Issue[]> {
 	return _issuesByOwner;
+}
+
+/** The live committed issue list: `_issuesByOwner` flattened in insertion
+ * order (deterministic — mirrors the server store's owner ordering). */
+export function getLiveIssues(): Issue[] {
+	const out: Issue[] = [];
+	for (const issues of _issuesByOwner.values()) out.push(...issues);
+	return out;
+}
+
+export function getIssuesTruncatedTotal(): number | null {
+	return _issuesTruncatedTotal;
 }
 
 export function getModelSummary(): ModelSummary | null {
@@ -409,6 +425,7 @@ export function applyDelta(d: OpsResponse): void {
 
 	for (const owner of d.issues_removed_owner_ids) _issuesByOwner.delete(owner);
 	for (const issue of d.issues_added) addIssueToOwner(issue);
+	clearOverlay(); // committed truth moved; any Validate snapshot is moot
 
 	_modelRev = d.model_rev;
 	if (structural) _structureRev += 1;
@@ -986,36 +1003,76 @@ export function seedRelationships(rels: readonly Relationship[]): void {
  * /model/validate, which applies them against the committed model, validates,
  * rolls back, and tags each issue's origin (on_server / uncommitted / resolved).
  * With an empty buffer it is a plain committed-model validation (all on_server).
- * Resets `issuesByOwner` and the counts from the result.
  *
- * Resolved issues are returned in the result array but intentionally excluded
- * from `_issuesByOwner` and the counts (they are not active problems); IssuesPanel
- * reads the full returned array via `getIssues()`, so it still renders them.
+ * A pure fetch: it does NOT mutate `_issuesByOwner`/`_issueCounts` (those hold
+ * the LIVE committed issue list — see `adoptIssues`/`applyDelta`). The caller
+ * (`validate-action.ts`'s `runValidation`) stores the origin-tagged result as
+ * the Validate OVERLAY via `setOverlay`; that overlay, not this function, is
+ * what lets resolved/uncommitted issues surface in the panel.
  */
 export async function validateAll(): Promise<Issue[]> {
 	const staged = getStagedOps();
 	const options = staged.length > 0 ? { ops: staged, baseRev: _modelRev } : undefined;
-	const issues = await validateModel(options, _clientConfig);
+	return validateModel(options, _clientConfig);
+}
+
+/**
+ * Adopt a committed-issue snapshot (GET /model/issues, rebind response) as
+ * the live store. Ignores a response STRICTLY older than the cached rev (it
+ * lost a race with a commit splice; the next delta or refetch heals) —
+ * equal-rev responses are adopted because the background sweep grows the
+ * server store WITHOUT bumping model_rev. Clears the Validate overlay:
+ * committed truth moved, so any staged snapshot is moot.
+ */
+export function adoptIssues(
+	issues: Issue[],
+	counts: IssueCounts,
+	modelRev: number,
+	truncated = false
+): void {
+	if (modelRev < _modelRev) return;
 	_issuesByOwner.clear();
-	const counts: IssueCounts = {};
-	for (const issue of issues) {
-		// resolved issues are not active problems — keep them out of the counts
-		if (issue.origin === 'resolved') continue;
-		addIssueToOwner(issue);
-		counts[issue.severity] = (counts[issue.severity] ?? 0) + 1;
-	}
+	for (const issue of issues) addIssueToOwner(issue);
 	_issueCounts = counts;
 	if (_summary !== null) _summary = { ..._summary, issue_counts: counts };
-	return issues;
+	_issuesTruncatedTotal = truncated ? Object.values(counts).reduce((a, b) => a + b, 0) : null;
+	clearOverlay();
+}
+
+/** Fetch GET /model/issues and adopt it. Best-effort by contract: every
+ * caller is a background refresh (boot, peer commit, sweep completion,
+ * feed reconnect) where a miss just means the next event heals. */
+export async function refetchIssues(): Promise<void> {
+	// Same guard every other in-flight read in this store relies on
+	// (`_generation`): a boot refetch for project A that lands after a switch
+	// to project B must NOT be adopted into B. The rev guard in adoptIssues
+	// cannot catch it — resetModelStore put `_modelRev` back to 0, so any rev
+	// passes it.
+	const gen = _generation;
+	try {
+		const res = await getModelIssues(_clientConfig);
+		if (gen !== _generation) return; // a different model was installed mid-flight
+		adoptIssues(res.issues, res.counts, res.model_rev, res.truncated);
+	} catch {
+		// keep the current map; the next commit delta or refetch heals
+	}
 }
 
 /**
  * Drop every cache, counter, queue, and error — for tests and for replacing
  * the model (load/upload flows call this, then refreshSummary()). In-flight
  * responses from before the reset are ignored when they land.
+ *
+ * The Validate OVERLAY goes with them: it is origin-tagged against the model
+ * being dropped, and since the overlay WINS over the live map in every issue
+ * consumer, leaving it would render the old project's staged issues across the
+ * new one's whole UI — indefinitely, if the new project's best-effort issue
+ * refetch fails (a failed refetch never reaches adoptIssues, so nothing else
+ * would clear it).
  */
 export function resetModelStore(): void {
 	_generation += 1;
+	clearOverlay();
 	_pendingElementFetches.clear();
 	_inFlightBatchIds.clear();
 	_missingElementIds.clear();
@@ -1027,6 +1084,7 @@ export function resetModelStore(): void {
 	_modelRev = 0;
 	_structureRev = 0;
 	_issueCounts = null;
+	_issuesTruncatedTotal = null;
 	_error = null;
 	_queue = [];
 }

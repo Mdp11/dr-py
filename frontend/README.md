@@ -283,6 +283,57 @@ follows a pessimistic **check-out → stage → commit** loop (Spec B):
    `POST /model/save`), so the browser never materializes the serialized model
    as a string. Export reflects the committed model, not the staged buffer.
 
+#### Validation issues: one live map, one optional overlay
+
+There are **two** issue stores, and every consumer reads exactly one selector.
+
+- **Live** — `_issuesByOwner` in `model.svelte.ts`, keyed by owner
+  (`issue.target_ids[0]`), mirroring the backend's maintained `ValidationState`.
+  It is the DEFAULT source: it holds committed truth and is kept fresh without
+  anyone clicking anything.
+- **Overlay** — `validation.svelte.ts` holds the origin-tagged snapshot of the
+  last EXPLICIT Validate run. That run is the only view that can show
+  `uncommitted` / `resolved` issues, because it is the only one that validated
+  the staged buffer. `null` means "no overlay: render live". **`[]` is still an
+  overlay** — a Validate that found nothing renders its own empty state, not the
+  live list. `overlayMode = getOverlay() !== null` in `IssuesPanel.svelte` is the
+  one place that distinction changes rendering.
+- **`issue-source.ts`** is the selector: `getEffectiveIssues() = getOverlay() ??
+getLiveIssues()`. All six consumers (issues panel, containment tree, graph,
+  diff drawer, inspector relationships list, top bar) read it, so they can never
+  disagree. It is **its own module** because it imports BOTH stores — folding it
+  into either creates the model ↔ validation import cycle.
+
+The live map is refilled by `adoptIssues(issues, counts, rev, truncated)`, which
+drops only **strictly older** revs: an EQUAL rev must be adopted, because the
+backend's background validation sweep grows the server's store _without_ bumping
+`model_rev`. `refetchIssues()` is the best-effort `GET /model/issues` wrapper
+around it (generation-guarded, so a response for the project we just left is
+dropped). Triggers, all of them best-effort:
+
+| trigger                       | where                                                                                             |
+| ----------------------------- | ------------------------------------------------------------------------------------------------- |
+| project boot                  | `boot()` in `routes/p/[projectId]/+page.svelte`                                                   |
+| in-app model reload           | `onReloadModel()`, same file                                                                      |
+| peer-rebind banner reload     | `onReloadRebind()`, same file (**never** a full validate)                                         |
+| background-sweep completion   | `open-progress.svelte.ts`                                                                         |
+| peer commit (300 ms debounce) | `realtime.svelte.ts`                                                                              |
+| feed reconnect snapshot       | `realtime.svelte.ts` — **unconditional**, deliberately NOT rev-guarded (see the sweep note above) |
+| local metamodel rebind        | `MetamodelTab.svelte` adopts the rebind response's own issue list instead of refetching           |
+
+Refetch, not feed deltas: commit feed events deliberately carry **no** issue
+delta, because reconnect needs the refetch path anyway.
+
+Adopting committed truth **clears the overlay** (`adoptIssues`, `applyDelta`) —
+the stage it described no longer matches reality. So do `resetModelStore()` and
+`boot()`, which install a different model entirely. `clearOverlay()` keeps
+`_lastError`: a failed Validate's error strip must survive a peer commit.
+
+The founding constraint behind all of this: **no open/commit path may run the
+full validation pipeline.** `POST /model/validate` with no ops is an O(model)
+sweep over what can be an ~80 MB model, so it stays reachable only from an
+explicit user click. `GET /model/issues` is the cheap read that replaced it.
+
 ### Artifact import/export (bundle export/preview/import)
 
 The TopBar's toolbar `<nav>` (see Layout above) hosts an **Artifacts** menu

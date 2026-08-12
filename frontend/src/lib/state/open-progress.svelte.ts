@@ -12,7 +12,7 @@
 
 import { getModelStatus } from '$lib/api/model-status';
 import { getActiveProjectId } from './active-project.svelte';
-import { refreshSummary } from './model.svelte';
+import { refetchIssues, refreshSummary } from './model.svelte';
 import { journeyStatus } from './open-journey';
 
 // Consecutive 'cold' polls tolerated before giving up (~20s at the default
@@ -57,5 +57,11 @@ export async function trackOpenProgress(pollMs = 400): Promise<void> {
 	}
 	journeyStatus({ state: 'ready', model_rev: null });
 	// issue counts (and possibly the model itself) landed while we watched
-	if (sawWork) await refreshSummary().catch(() => {});
+	if (sawWork) {
+		await refreshSummary().catch(() => {});
+		// The background sweep splices issues into the server's store WITHOUT
+		// bumping model_rev, so refreshSummary's counters alone can go stale —
+		// pull the full live map now that the sweep is done.
+		await refetchIssues();
+	}
 }

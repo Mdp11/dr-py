@@ -7,8 +7,8 @@
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import {
 		getActiveProjectId,
+		getEffectiveIssues,
 		getFilename,
-		getIssues,
 		getLastError,
 		getLastRunAt,
 		getMetamodel,
@@ -65,7 +65,7 @@
 	const validating = $derived(isRunning());
 	const validateDisabled = $derived(validating || summary === null);
 	const undoDisabled = $derived(summary === null || getStagedDepth() === 0);
-	const issues = $derived(getIssues());
+	const issues = $derived(getEffectiveIssues());
 	const lastRunAt = $derived(getLastRunAt());
 	const lastValidateError = $derived(getLastError());
 	const strictOn = $derived(getStrictMode());

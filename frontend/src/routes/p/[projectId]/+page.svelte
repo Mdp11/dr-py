@@ -24,12 +24,12 @@
 	import { recoverFromUnauthorized } from '$lib/state/session-recovery';
 	import { getMetamodel as fetchMetamodel } from '$lib/api/metamodel';
 	import { hasUnsavedWork } from '$lib/state/unsaved';
-	import { runValidation } from '$lib/state/validate-action';
 	import {
 		beginJourney,
 		cancelJourney,
 		cancelOpenProgress,
 		clearModelError,
+		clearOverlay,
 		clearSelection,
 		clearViewState,
 		finishJourney,
@@ -48,6 +48,7 @@
 		loadProjectInfo,
 		markViewUnresolved,
 		onLockEvent,
+		refetchIssues,
 		refreshSummary,
 		refreshView,
 		resetArtifacts,
@@ -138,6 +139,12 @@
 			// nulls `_view` AND resets the journal; the boot sequence's own
 			// refreshView() below repopulates it for this project.
 			clearViewState();
+			// Same class of leak, issue side: the Validate overlay is a module-scope
+			// singleton that WINS over the live issue map in every consumer, and boot
+			// deliberately does not call resetModelStore(). Project A's origin-tagged
+			// staged issues would render across project B's whole UI until B's
+			// best-effort refetch below lands — forever, if it fails.
+			clearOverlay();
 			try {
 				setMetamodel(await metamodelApi.getMetamodel());
 			} catch (err) {
@@ -161,6 +168,11 @@
 			} catch {
 				return; // metamodel but no model
 			}
+			// Seed the live issue map immediately so a freshly opened project shows
+			// its committed issues without waiting for a Validate click. Best-effort
+			// like loadArtifacts below: a miss just means the sweep-completion or
+			// next feed event heals it.
+			void refetchIssues();
 			try {
 				await loadProjectInfo();
 			} catch {
@@ -233,7 +245,14 @@
 		const mm = await fetchMetamodel();
 		setMetamodel(mm);
 		await refreshSummary();
-		await runValidation();
+		// The cheap read of the server's maintained issue store — NOT
+		// runValidation(), which is POST /model/validate with no ops, i.e. the
+		// full pipeline over a model that can be ~80 MB. (It would also install a
+		// Validate overlay from a run the user never asked for, switching the
+		// whole UI into overlay mode after someone else's rebind.) The local
+		// rebind in MetamodelTab adopts the rebind response's issue list for the
+		// same reason; this path has no such response, so it refetches.
+		await refetchIssues();
 		clearPendingRebind();
 	}
 
@@ -274,6 +293,13 @@
 			// unresolved gate.
 			await refreshView();
 			await refreshSummary();
+			// resetModelStore() above emptied the live issue map while
+			// refreshSummary() just restored the exact issue COUNTS — without this
+			// the StatusBar reads "12 errors" over an IssuesPanel showing a green
+			// "No issues.", the exact disagreement F-4/U-8 close, and nothing in
+			// this path restarts the feed to heal it. Same best-effort call boot()
+			// makes, same placement.
+			void refetchIssues();
 			try {
 				// resetCheckout() reset the role to 'viewer'; re-adopt role + lock TTL
 				// from /open (mirrors boot()'s placement after refreshSummary), best-

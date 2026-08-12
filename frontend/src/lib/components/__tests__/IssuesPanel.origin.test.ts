@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 
 import IssuesPanel from '../Workspace/IssuesPanel.svelte';
-import { setIssues, clearIssues } from '$lib/state/validation.svelte';
+import { setOverlay, clearOverlay } from '$lib/state/validation.svelte';
 import { adoptSummary, resetModelStore } from '$lib/state/model.svelte';
 
 // Stub child components / actions that IssuesPanel depends on
@@ -13,7 +13,7 @@ vi.mock('$lib/state/validate-action', () => ({
 
 afterEach(() => {
 	document.body.innerHTML = '';
-	clearIssues();
+	clearOverlay();
 	resetModelStore();
 	vi.clearAllMocks();
 });
@@ -27,7 +27,7 @@ function seedIssues() {
 		issue_counts: {},
 		undo_depth: 0
 	});
-	setIssues([
+	setOverlay([
 		{ severity: 'error', message: 'new boom', target_ids: ['a'], origin: 'uncommitted' },
 		{ severity: 'error', message: 'old boom', target_ids: ['b'], origin: 'on_server' },
 		{ severity: 'warning', message: 'now fixed', target_ids: ['c'], origin: 'resolved' }
@@ -77,7 +77,7 @@ describe('IssuesPanel origin', () => {
 			issue_counts: {},
 			undo_depth: 0
 		});
-		setIssues([
+		setOverlay([
 			{ severity: 'error', message: 'was broken', target_ids: ['x'], origin: 'resolved' },
 			{ severity: 'warning', message: 'also fixed', target_ids: ['y'], origin: 'resolved' }
 		]);
