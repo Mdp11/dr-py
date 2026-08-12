@@ -12,11 +12,15 @@ from data_rover.core.validation.state import ValidationState, issue_owner
 
 from ..artifact_ops import split_ops
 from ..deps import Session, get_request_session, require_model
-from ..schemas import IssueOut, ValidateRequest
+from ..schemas import IssueListOut, IssueOut, ValidateRequest
 from ._snapshot import _build_model_from_payload
 from .ops import _apply_batch, _ensure_validation_seeded, _rollback
 
 router = APIRouter()
+
+#: max issues returned by GET /model/issues; counts stay exact past the cap.
+#: One flat panel list is the consumer — paging buys nothing (spec, 2026-08-12).
+ISSUES_RESPONSE_MAX = 5000
 
 
 def _issue_key(issue: Issue) -> tuple[str, str, tuple[str, ...], str]:
@@ -62,6 +66,34 @@ def classify_issue_origins(
             remaining[key] -= 1
             out.append(IssueOut.from_core(issue, origin="resolved"))
     return out
+
+
+@router.get("/model/issues")
+def list_issues(
+    session: Session = Depends(get_request_session),
+) -> IssueListOut:
+    """Snapshot the maintained issue store — the panel's cheap live read.
+
+    Snapshotting happens under the write mutex on purpose: this route is
+    called WHILE the background sweep is splicing chunks into
+    ``issues_by_owner`` (project open), and ``all_issues()`` iterates that
+    dict. The guarded section is a list copy — microseconds.
+    """
+    _, current = require_model(session)
+    state = _ensure_validation_seeded(session, current)
+    with session.write_mutex:
+        issues = state.all_issues()
+        counts = state.counts()
+        rev = session.model_rev
+    truncated = len(issues) > ISSUES_RESPONSE_MAX
+    if truncated:
+        issues = issues[:ISSUES_RESPONSE_MAX]
+    return IssueListOut(
+        model_rev=rev,
+        issues=[IssueOut.from_core(i) for i in issues],
+        counts=counts,
+        truncated=truncated,
+    )
 
 
 @router.post("/model/validate", response_model=None)

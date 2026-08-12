@@ -134,6 +134,23 @@ class IssueOut(BaseModel):
         )
 
 
+class IssueListOut(BaseModel):
+    """Snapshot of the session's maintained issue store (GET /model/issues).
+
+    A cheap read — never a pipeline run: the store is seeded at load/hydrate,
+    streamed into by the background sweep, and spliced by every commit.
+    ``counts`` is exact even when ``issues`` is truncated, so a client can
+    always render true totals.
+    """
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    model_rev: int
+    issues: list[IssueOut] = Field(default_factory=list)
+    counts: dict[str, int] = Field(default_factory=dict)
+    truncated: bool = False
+
+
 class RawMetamodelResponse(BaseModel):
     """The current metamodel's SOURCE text (Phase 5 editor baseline).
 
