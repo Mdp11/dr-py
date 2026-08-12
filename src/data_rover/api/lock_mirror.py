@@ -173,12 +173,7 @@ def set_lease_mirror(mirror: LeaseMirror | None) -> None:
 def build_mirror_from_settings(settings: Settings) -> LeaseMirror:
     if not settings.redis_url:
         return NullLeaseMirror()
-    # lock_mirror_redis.py lands in a later task (Phase 7 Task 4); the module
-    # does not exist yet, so both type checkers are told this deliberately —
-    # the branch is unreachable in any checkout today (redis_url unset).
-    from .lock_mirror_redis import (  # type: ignore[import-not-found]  # pyright: ignore[reportMissingImports]
-        RedisLeaseMirror,
-    )
+    from .lock_mirror_redis import RedisLeaseMirror
 
     return RedisLeaseMirror(settings.redis_url)
 

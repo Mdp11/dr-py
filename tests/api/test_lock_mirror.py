@@ -5,7 +5,6 @@ integration-marked test in test_lock_mirror_redis.py."""
 from __future__ import annotations
 
 import time
-import time as _time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -253,7 +252,7 @@ def test_expired_mirrored_lease_not_restored(client: TestClient) -> None:
     get_lease_mirror().write(
         "default",
         [MirroredLease(eid, "exclusive", "test-user", "tok-old", "edit",
-                       _time.time() - 5.0)],
+                       time.time() - 5.0)],
     )
     reset_session()
     assert client.get(papi("/locks")).json()["leases"] == []
@@ -273,3 +272,14 @@ def test_restore_failure_degrades_to_cold_start(client: TestClient) -> None:
     reset_session()
     # hydration succeeds; table is simply empty (today's cold start)
     assert client.get(papi("/locks")).json()["leases"] == []
+
+
+def test_unreachable_redis_degrades_without_raising() -> None:
+    from data_rover.api.lock_mirror_redis import RedisLeaseMirror
+
+    # port 1 refuses instantly; cooldown makes the second call a pure no-op
+    mirror = RedisLeaseMirror("redis://127.0.0.1:1/0", socket_timeout_s=0.2)
+    lease = MirroredLease("e1", "exclusive", "u", "t", "edit", time.time() + 60)
+    mirror.write("p1", [lease])   # must not raise
+    assert mirror.load("p1") == []  # must not raise
+    mirror.write("p1", [lease])   # inside cooldown: skipped, still no raise
