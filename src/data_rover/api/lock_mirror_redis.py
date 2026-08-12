@@ -5,8 +5,18 @@ Degrade-graceful by construction (spec posture: optional mirror): short
 socket timeouts so a down Redis costs at most ~1s once, then a cooldown so it
 costs nothing for the next ~30s; up→down and down→up transitions each log
 exactly once, never per call. Errors are swallowed HERE as well as in the
-``mirror_session_leases`` catch-all — two layers on purpose, so neither a
-route nor hydration can ever fail because of the mirror.
+``mirror_session_leases`` (write path) / ``restore_leases`` (load path)
+catch-alls — two layers on purpose, so neither a route nor hydration can ever
+fail because of the mirror.
+
+This instance is installed as a process-global singleton
+(``get_lease_mirror()``) and called concurrently from many request threads
+across many projects (``mirror_session_leases``, ``restore_leases``). The
+down/up transition bookkeeping (``_down``, ``_down_until``) is therefore
+guarded by a small lock — see ``_state_lock`` — so the "log exactly once"
+promise above holds even when several threads observe a failing Redis at the
+same instant; without it, every thread blocked in the same outage would each
+read the pre-transition state and each log.
 
 Data model: one key per project (``dr:leases:{project_id}``) holding a JSON
 envelope ``{"v": 1, "leases": [...]}`` written wholesale, with a key TTL of
@@ -20,6 +30,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import threading
 import time
 from dataclasses import asdict
 from typing import cast
@@ -49,21 +60,34 @@ class RedisLeaseMirror:
         self._cooldown_s = cooldown_s
         self._down_until = 0.0  # monotonic; 0 == not in cooldown
         self._down = False
+        # Guards ONLY the bookkeeping below (never a Redis call): this mirror
+        # is a process-global singleton hit by many request threads at once,
+        # so a plain read-check-then-write on `_down`/`_down_until` would let
+        # every thread caught in the same outage observe the pre-transition
+        # state and each log — breaking the "exactly once" contract above.
+        self._state_lock = threading.Lock()
 
     # ---- degradation bookkeeping -----------------------------------------
 
     def _in_cooldown(self) -> bool:
-        return time.monotonic() < self._down_until
+        with self._state_lock:
+            return time.monotonic() < self._down_until
 
     def _mark_down(self, exc: Exception) -> None:
-        self._down_until = time.monotonic() + self._cooldown_s
-        if not self._down:
+        with self._state_lock:
+            self._down_until = time.monotonic() + self._cooldown_s
+            first_transition = not self._down
             self._down = True
+        # Logging happens OUTSIDE the lock: it does no socket I/O, but there
+        # is no reason to hold a lock across it either.
+        if first_transition:
             logger.warning("lease mirror: Redis unavailable, degrading: %s", exc)
 
     def _mark_up(self) -> None:
-        if self._down:
+        with self._state_lock:
+            first_transition = self._down
             self._down = False
+        if first_transition:
             logger.info("lease mirror: Redis recovered")
 
     # ---- LeaseMirror ------------------------------------------------------

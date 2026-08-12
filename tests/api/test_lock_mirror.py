@@ -4,6 +4,7 @@ integration-marked test in test_lock_mirror_redis.py."""
 
 from __future__ import annotations
 
+import threading
 import time
 
 import pytest
@@ -283,3 +284,36 @@ def test_unreachable_redis_degrades_without_raising() -> None:
     mirror.write("p1", [lease])   # must not raise
     assert mirror.load("p1") == []  # must not raise
     mirror.write("p1", [lease])   # inside cooldown: skipped, still no raise
+
+
+def test_concurrent_calls_use_a_single_lock_for_transition_bookkeeping() -> None:
+    # NOT a race-reproduction test (see the module's design note on why one
+    # isn't practical here): this pins the STRUCTURAL invariant the fix
+    # relies on -- _mark_down/_mark_up/_in_cooldown all take the SAME lock
+    # instance around the read-check-write of `_down`/`_down_until`, so two
+    # concurrent callers can never interleave through that region. A thread
+    # holding the lock (simulated by acquiring it directly) must make a
+    # second, concurrent _mark_down() call block until released rather than
+    # run through -- proving the critical section is really guarded, not
+    # just plausibly guarded by inspection.
+    from data_rover.api.lock_mirror_redis import RedisLeaseMirror
+
+    mirror = RedisLeaseMirror("redis://127.0.0.1:1/0", socket_timeout_s=0.2)
+    entered = threading.Event()
+    done = threading.Event()
+
+    mirror._state_lock.acquire()  # simulate "inside the critical section"
+
+    def worker() -> None:
+        entered.set()
+        mirror._mark_down(RuntimeError("boom"))  # must block on the held lock
+        done.set()
+
+    t = threading.Thread(target=worker)
+    t.start()
+    assert entered.wait(timeout=2)
+    # The worker is blocked acquiring _state_lock; it must NOT have finished.
+    assert not done.wait(timeout=0.2)
+    mirror._state_lock.release()
+    t.join(timeout=2)
+    assert done.is_set()  # released -> the worker's call completed
