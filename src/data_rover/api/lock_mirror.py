@@ -57,8 +57,10 @@ ENVELOPE_VERSION = 1
 KEY_TTL_SLACK_S = 60.0
 
 
-def lease_key(project_id: str) -> str:
-    return _LEASE_KEY.format(project_id=project_id)
+def lease_key(project_id: str, *, prefix: str = "") -> str:
+    """``prefix`` is the deployment namespace (``settings.redis_key_prefix``),
+    prepended verbatim; empty keeps the historical unprefixed key."""
+    return prefix + _LEASE_KEY.format(project_id=project_id)
 
 
 @dataclass(frozen=True)
@@ -219,7 +221,7 @@ def build_mirror_from_settings(settings: Settings) -> LeaseMirror:
         return NullLeaseMirror()
     from .lock_mirror_redis import RedisLeaseMirror
 
-    return RedisLeaseMirror(settings.redis_url)
+    return RedisLeaseMirror(settings.redis_url, key_prefix=settings.redis_key_prefix)
 
 
 def mirror_session_leases(project_id: str, session: Session) -> None:

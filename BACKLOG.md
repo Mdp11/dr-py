@@ -266,7 +266,7 @@ cheap real fix: serialize snapshot+write per session with a dedicated mirror loc
 (NOT `write_mutex`), which eliminates reordering entirely at negligible cost given
 mutation frequency — and would let the module docstring drop the "may briefly lag" caveat.
 
-### B-4 · `dr:leases:{project_id}` has no deployment namespace · `open` · small
+### B-4 · `dr:leases:{project_id}` has no deployment namespace · `done` (2026-08-12, fix/lease-mirror-hardening)
 Two backends pointed at one Redis DB will clobber each other's lease sets and
 cross-restore phantom leases for same-named projects (e.g. `default`). Documented in the
 `redis_url` setting docstring as an operational caveat; a key prefix setting would remove
@@ -575,8 +575,6 @@ can't be reversed by an implementer acting alone.
 
 ## 11. Ideas — unvalidated, no commitment
 
-- **Key-prefix setting for the lease mirror** (see B-4) — turns a documented footgun into
-  a configuration knob, and is a prerequisite for a shared-Redis multi-deployment setup.
 - **Surface mirror health in the UI** — the realtime feed already carries lock events;
   a "leases are not being mirrored" indicator would make B-1's degradation visible to
   users rather than only to log readers.

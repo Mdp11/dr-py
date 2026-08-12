@@ -16,6 +16,7 @@ from data_rover.api.lock_mirror import (
     NullLeaseMirror,
     build_mirror_from_settings,
     get_lease_mirror,
+    lease_key,
     set_lease_mirror,
     to_leases,
     to_mirrored,
@@ -175,6 +176,20 @@ def test_build_from_settings_redis_url_is_redis_mirror() -> None:
 
     s = Settings(redis_url="redis://127.0.0.1:1/0")
     assert isinstance(build_mirror_from_settings(s), RedisLeaseMirror)
+
+
+def test_lease_key_prefix() -> None:
+    assert lease_key("p1") == "dr:leases:p1"
+    assert lease_key("p1", prefix="site-a:") == "site-a:dr:leases:p1"
+
+
+def test_build_from_settings_wires_key_prefix() -> None:
+    from data_rover.api.lock_mirror_redis import RedisLeaseMirror
+
+    s = Settings(redis_url="redis://127.0.0.1:1/0", redis_key_prefix="site-a:")
+    mirror = build_mirror_from_settings(s)
+    assert isinstance(mirror, RedisLeaseMirror)
+    assert mirror._key("p1") == "site-a:dr:leases:p1"
 
 
 _MM = """

@@ -50,6 +50,24 @@ def test_write_load_roundtrip_ttl_and_delete(raw_redis) -> None:
         raw_redis.delete(lease_key(pid))
 
 
+def test_key_prefix_namespaces_deployments(raw_redis) -> None:
+    pid = f"it-{uuid.uuid4().hex[:8]}"
+    a = RedisLeaseMirror(_URL, key_prefix="site-a:")
+    b = RedisLeaseMirror(_URL, key_prefix="site-b:")
+    lease = MirroredLease(
+        resource_id="e1", mode="exclusive", holder="u1", token="tok1",
+        intent="edit", expires_at_epoch=time.time() + 120.0,
+    )
+    try:
+        a.write(pid, [lease])
+        assert a.load(pid) == [lease]
+        assert b.load(pid) == []  # site-b never sees site-a's leases
+        assert raw_redis.get(lease_key(pid, prefix="site-a:")) is not None
+        assert raw_redis.get(lease_key(pid)) is None  # unprefixed untouched
+    finally:
+        raw_redis.delete(lease_key(pid, prefix="site-a:"))
+
+
 def test_load_tolerates_unknown_envelope_version(raw_redis) -> None:
     mirror = RedisLeaseMirror(_URL)
     pid = f"it-{uuid.uuid4().hex[:8]}"
