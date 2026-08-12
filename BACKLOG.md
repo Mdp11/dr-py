@@ -225,7 +225,7 @@ worth filing as a specific `U`-item rather than re-running the phase.
 
 ## 3. From the Redis lock-mirroring phase (2026-08-12)
 
-### B-1 · The app never configures logging, so `logger.info` is invisible · `open` · **high value, small**
+### B-1 · The app never configures logging, so `logger.info` is invisible · `done` (2026-08-12, fix/lease-mirror-hardening)
 Neither `basicConfig` nor `dictConfig` is called anywhere in `src/data_rover/`. Python
 falls back to `logging.lastResort`, which emits **WARNING and above only**. All three
 `logger.info` calls in the codebase are therefore silently dropped in a normal backend
