@@ -33,9 +33,11 @@
 			<span class="mm-stereotype">«enumeration»</span>
 			<span class="mm-name">{d.name}</span>
 		</div>
+		<!-- `nodrag`: see ElementTypeNode — the mousedown would otherwise start a
+		     node drag under the cursor. -->
 		<button
 			type="button"
-			class="mm-toggle"
+			class="mm-toggle nodrag"
 			title={d.collapsed ? `Expand ${d.name}` : `Collapse ${d.name}`}
 			aria-label={d.collapsed ? `Expand ${d.name}` : `Collapse ${d.name}`}
 			aria-expanded={!d.collapsed}

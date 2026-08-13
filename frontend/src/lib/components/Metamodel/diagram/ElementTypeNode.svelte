@@ -15,8 +15,12 @@
 	 *
 	 * The node's WIDTH is not set here: `MetamodelDiagram` puts `nodeSize()` on
 	 * the flow node's style so the box and the elk layout can never disagree
-	 * about its footprint. Height stays content-driven, with the attribute
-	 * compartment capped at the same row budget `nodeSize` reserves.
+	 * about its footprint. HEIGHT is content-driven but adds up to the same
+	 * number by construction — the header is `HEADER_HEIGHT`, every attribute
+	 * row is `ROW_HEIGHT`, the compartment carries no vertical padding, and it
+	 * scrolls at `MAX_ROWS` — so an expanded box occupies exactly the space elk
+	 * reserved for it. Change any of those three CSS values and `nodeSize` in
+	 * diagram-build.ts has to move with it.
 	 */
 
 	interface Data {
@@ -55,9 +59,12 @@
 	<div class="mm-header" class:divided={!d.collapsed && d.properties.length > 0}>
 		<span class="mm-dot"></span>
 		<span class="mm-name" class:italic={d.abstract}>{d.name}</span>
+		<!-- `nodrag` is xyflow's opt-out: without it the mousedown that opens this
+		     button ALSO starts a node drag, so the box slides out from under the
+		     cursor before the click lands. -->
 		<button
 			type="button"
-			class="mm-toggle"
+			class="mm-toggle nodrag"
 			title={d.collapsed ? `Expand ${d.name}` : `Collapse ${d.name}`}
 			aria-label={d.collapsed ? `Expand ${d.name}` : `Collapse ${d.name}`}
 			aria-expanded={!d.collapsed}
@@ -176,10 +183,13 @@
 	}
 
 	.mm-compartment {
-		padding: 4px 14px 8px;
+		/* NO vertical padding, on purpose: the box's height has to be exactly
+		   `nodeSize`'s HEADER_HEIGHT + rows × ROW_HEIGHT, and each row's 22px
+		   line box already carries its own leading. 12 rows is MAX_ROWS — past
+		   the cap the compartment scrolls internally rather than growing past
+		   the space elk reserved for it. */
+		padding: 0 14px;
 		font-size: 11.5px;
-		/* 12 rows is MAX_ROWS in diagram-build.ts: past the cap the box scrolls
-		   internally rather than growing past the space elk reserved for it. */
 		max-height: calc(12 * 22px);
 		overflow-y: auto;
 	}

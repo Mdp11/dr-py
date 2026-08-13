@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Background, SvelteFlow, useSvelteFlow, type Edge, type Node } from '@xyflow/svelte';
+	import { SvelteFlow, useSvelteFlow, type Edge, type Node } from '@xyflow/svelte';
 	import '@xyflow/svelte/dist/style.css';
 
 	import { Button } from '$lib/components/ui/button';
@@ -61,6 +61,16 @@
 	/** Layout: everyone but a viewer (see the module note above). */
 	const canDragLayout = $derived(getRole() !== 'viewer');
 
+	/** The mockup's canvas ground: the app background under one ambient jade
+	 * radial glow at 25%/15%, and NO dot grid — xyflow's `<Background />` is
+	 * deliberately not mounted, because the approved design has bare ground and
+	 * a grid competes with the hairline boxes it is meant to sit behind. The
+	 * `7%` is the mockup's own alpha on `--ring`, which is the token its
+	 * `oklch(0.74 0.06 155)` literal came from. It rides the flow's own wrapper,
+	 * so it stays put while the diagram pans under it. */
+	const CANVAS_GROUND =
+		'background: radial-gradient(ellipse at 25% 15%, color-mix(in oklab, var(--ring) 7%, transparent), transparent 55%), var(--background);';
+
 	const nodeTypes = {
 		elementType: ElementTypeNode,
 		enumType: EnumTypeNode,
@@ -105,6 +115,25 @@
 		flowNodes = built.nodes.map(specToNode);
 	});
 
+	/** Relationship types whose edges must read as CONTAINMENT.
+	 *
+	 * `buildDiagram` puts `containment` on the half that carries the diamond —
+	 * the `assoc-in` (owner → box) half — and not on the `assoc-out` half, which
+	 * is correct for the MARKER (a composition diamond belongs at the whole end,
+	 * once) but would leave one relationship drawn in two colours. So the
+	 * STYLING is propagated per relationship name here, at render time, while
+	 * `data.containment` keeps owning the marker. Doing it here rather than in
+	 * `diagram-build.ts` keeps the shipped data shape (and its tests) untouched:
+	 * this is a presentation rule, and the canvas is where presentation lives. */
+	const containmentRels = $derived(
+		new Set(
+			built.edges
+				.filter((e) => e.data.containment === true)
+				.map((e) => e.data.relName)
+				.filter((name): name is string => name !== undefined)
+		)
+	);
+
 	$effect(() => {
 		// A selected relationship highlights ALL of its edges: a mapping list, or
 		// an association class's two tether halves, is one relationship type in
@@ -118,7 +147,10 @@
 			source: e.source,
 			target: e.target,
 			type: e.type,
-			data: { ...e.data },
+			data: {
+				...e.data,
+				containmentRel: e.data.relName !== undefined && containmentRels.has(e.data.relName)
+			},
 			selected: relName !== null && e.data.relName === relName
 		}));
 	});
@@ -264,7 +296,7 @@
 					nodesConnectable={!readOnly}
 					elementsSelectable
 					panOnDrag
-					style="background: var(--background);"
+					style={CANVAS_GROUND}
 					onnodeclick={({ node }) => selectDiagramNode(selectionForNodeId(node.id))}
 					onedgeclick={({ edge }) => {
 						const relName = (edge.data as { relName?: string } | undefined)?.relName;
@@ -274,9 +306,7 @@
 						for (const n of nodes) moveNode(n.id, n.position);
 					}}
 					onpaneclick={() => selectDiagramNode(null)}
-				>
-					<Background />
-				</SvelteFlow>
+				></SvelteFlow>
 			</div>
 		</div>
 	</div>

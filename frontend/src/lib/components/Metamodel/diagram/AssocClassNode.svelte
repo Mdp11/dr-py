@@ -46,9 +46,11 @@
 	<div class="mm-header" class:divided={!d.collapsed && d.properties.length > 0}>
 		<span class="mm-dot"></span>
 		<span class="mm-name" class:italic={d.abstract}>{d.name}</span>
+		<!-- `nodrag`: see ElementTypeNode — the mousedown would otherwise start a
+		     node drag under the cursor. -->
 		<button
 			type="button"
-			class="mm-toggle"
+			class="mm-toggle nodrag"
 			title={d.collapsed ? `Expand ${d.name}` : `Collapse ${d.name}`}
 			aria-label={d.collapsed ? `Expand ${d.name}` : `Collapse ${d.name}`}
 			aria-expanded={!d.collapsed}
@@ -163,7 +165,9 @@
 	}
 
 	.mm-compartment {
-		padding: 4px 14px 8px;
+		/* No vertical padding — see ElementTypeNode: the drawn height must equal
+		   `nodeSize`'s HEADER_HEIGHT + rows × ROW_HEIGHT exactly. */
+		padding: 0 14px;
 		font-size: 11.5px;
 		max-height: calc(12 * 22px);
 		overflow-y: auto;

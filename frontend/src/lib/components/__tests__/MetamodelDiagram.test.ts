@@ -13,6 +13,13 @@ import type { MetamodelDiagramView, MetamodelEditorView } from '$lib/state';
  * The YAML editor is stubbed out (CodeMirror needs a real layout engine and has
  * nothing to do with the toggle); the diagram half is deliberately NOT stubbed,
  * so the tab test proves the real canvas mounts.
+ *
+ * **Nodes render here, EDGES DO NOT.** Svelte Flow only draws an edge once both
+ * endpoint nodes have been measured, and happy-dom reports every element as
+ * 0x0, so `.svelte-flow__edge` is always empty (verified: 0 elements with a
+ * three-node diagram whose edges are all well-formed). Anything about edge
+ * geometry, markers or stroke has to be asserted somewhere other than a mounted
+ * canvas — don't write it here and conclude the component is broken.
  */
 
 vi.mock('../Metamodel/MetamodelYamlEditor.svelte', () => ({ default: () => {} }));
@@ -186,7 +193,7 @@ describe('MetamodelDiagram', () => {
 		diagramView = {
 			...DIAGRAM,
 			mm: null,
-			parseErrors: [{ message: 'bad indent', line: 3, column: 1 }]
+			parseErrors: [{ message: 'bad indent', line: 3 }]
 		};
 
 		const c = mount(DiagramHost, { target: document.body });

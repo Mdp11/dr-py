@@ -23,7 +23,13 @@
 	interface Data {
 		relName?: string;
 		label?: string;
+		/** Draws the diamond — set on the ONE half that owns the whole end. */
 		containment?: boolean;
+		/** Belongs to a containment relationship, whichever half this is. Added by
+		 * `MetamodelDiagram` (see the note there): a relationship drawn through an
+		 * association-class box is two edges, and both must read the same colour
+		 * or one relationship type looks like two. */
+		containmentRel?: boolean;
 		sourceMult?: string;
 		targetMult?: string;
 		arrow?: boolean;
@@ -76,15 +82,18 @@
 	const targetLabelAt = $derived(inset(targetPosition, targetX, targetY));
 
 	// Containment reads as structure (the app's muted hairline); a plain
-	// association reads as navigation (the editor's jade), per the mockup.
+	// association reads as navigation (the editor's jade), per the mockup. Keyed
+	// off `containmentRel`, not `containment`, so BOTH halves of a boxed
+	// containment take the same colour — the marker is the half-specific part.
+	const structural = $derived(d.containmentRel ?? d.containment ?? false);
 	const stroke = $derived(
 		selected
 			? 'var(--primary)'
-			: d.containment
+			: structural
 				? 'color-mix(in oklab, var(--muted-foreground) 70%, transparent)'
 				: 'color-mix(in oklab, var(--ring) 85%, transparent)'
 	);
-	const labelColor = $derived(d.containment ? 'var(--muted-foreground)' : 'var(--cm-string)');
+	const labelColor = $derived(structural ? 'var(--muted-foreground)' : 'var(--cm-string)');
 </script>
 
 <BaseEdge
