@@ -111,9 +111,10 @@ export interface MetamodelDiagramView {
 	collapsed: ReadonlySet<string>;
 	canUndo: boolean;
 	/** Lint errors attributed to the type block whose line range contains them
-	 * — a red badge on that node. **Expect this to be EMPTY in practice**; see
-	 * {@link attributeLintErrors}. Render `unattributedErrorCount` as the
-	 * primary error surface and treat a per-node badge as the rare extra. */
+	 * — a red badge on that node. **Empty in every reachable state**; see
+	 * {@link attributeLintErrors} for why the server contract makes it so.
+	 * `unattributedErrorCount` is THE error surface; do not build (or test) a
+	 * per-node badge against this set expecting it to be populated. */
 	errorNodeIds: ReadonlySet<string>;
 	/** Every lint error that could not be pinned to a drawn node — in practice
 	 * all of them. This is THE error surface (a toolbar badge), so an error can
@@ -362,9 +363,28 @@ function clonePositions(src: Positions): Positions {
 	return out;
 }
 
-/** The node ids the CURRENT draft actually defines, or null when it does not
- * parse (nothing can be validated against an unparseable draft, so callers
- * skip their filter rather than discarding state they cannot check). */
+/**
+ * The node ids the CURRENT draft defines, or null for "no usable evidence" —
+ * in which case callers SKIP their pruning filter rather than discarding state
+ * they cannot check. Two ways to get null, and the second is not obvious:
+ *
+ * 1. The draft does not parse. Nothing can be validated against it.
+ * 2. The editor is not `ready`. An EMPTY buffer parses perfectly well —
+ *    `parseDocument('')` reports no errors and `toJS()` is `null`, so zod's
+ *    three `.default()`s turn `{}` into `{enums:{},elements:[],relationships:[]}`
+ *    — which would read as "the draft defines nothing" and prune EVERY
+ *    deferral. And an empty buffer is exactly what `initMetamodelEditor` leaves
+ *    behind when the metamodel load fails (`phase: 'error'`), a state
+ *    `MetamodelTab.init()` still calls into here from. Pruning there destroys a
+ *    map the user's draft (restored on Retry) still needs, and the next drag
+ *    then writes a draft-local key into the SHARED blob.
+ */
+function liveNodeIdsForDraft(): ReadonlySet<string> | null {
+	const ed = getMetamodelEditor();
+	if (ed.phase !== 'ready') return null;
+	return liveNodeIds(parseCurrent(ed.buffer).mm);
+}
+
 function liveNodeIds(mm: Metamodel | null): ReadonlySet<string> | null {
 	if (mm === null) return null;
 	// Built without mutation: a mutable `Set` in a `.svelte.ts` module is what
@@ -385,7 +405,7 @@ function liveNodeIds(mm: Metamodel | null): ReadonlySet<string> | null {
  * position alive. It is dropped only when something LIVE already occupies that
  * baseline key — the name-reuse case, where the real node must win. */
 function liveRenames(): { toServer: Record<string, string>; servers: ReadonlySet<string> } {
-	const live = liveNodeIds(parseCurrent(getMetamodelEditor().buffer).mm);
+	const live = liveNodeIdsForDraft();
 	const toServer: Record<string, string> = {};
 	const servers: string[] = [];
 	for (const [server, local] of _pendingRenames) {
@@ -495,13 +515,19 @@ export async function initMetamodelDiagram(projectId: string): Promise<void> {
 	// is documented as running after `initMetamodelEditor` has resolved — a
 	// draft that has not landed yet would validate every entry away.
 	restoreRenames(projectId);
+	// Whether the GET actually ANSWERED, which is what separates "nobody has
+	// arranged this yet" from "I could not read what everyone arranged".
+	let layoutRead = false;
 	try {
 		const layout = await getMetamodelLayout();
 		if (gen !== _gen) return;
+		layoutRead = true;
 		_positions = localPositions(layout.positions);
 	} catch {
-		// No stored layout / transient failure: fall through to the auto-arrange
-		// below rather than showing a canvas with everything stacked at 0,0.
+		// A FAILURE ONLY: a project with no stored layout answers 200 with
+		// `{positions: {}}` (routes/metamodel_layout.py), so it lands above, not
+		// here. This is a 500 / network blip / backend restart, and it leaves us
+		// unable to tell an unarranged project from an unreadable one.
 		if (gen !== _gen) return;
 	}
 	if (Object.keys(_positions).length > 0) return;
@@ -510,6 +536,12 @@ export async function initMetamodelDiagram(projectId: string): Promise<void> {
 	const arranged = await autoArrange(built.nodes, built.edges, _collapsed);
 	if (gen !== _gen) return;
 	_positions = arranged;
+	// Arrange either way — a local canvas beats stacking every box at (0,0) —
+	// but PERSIST only when the read succeeded. The PUT replaces the entire
+	// shared blob, so saving an arrangement derived from a layout we failed to
+	// read would silently wipe every peer's positions for every node, with the
+	// undo stack already emptied above and the PUT failure swallowed.
+	if (!layoutRead) return;
 	// First open of a never-arranged diagram: persist it so peers (and the next
 	// session) open on the same picture. Viewers arrange locally and save nothing.
 	scheduleSave();
@@ -546,12 +578,15 @@ function persistRenames(): void {
  * backs — the staleness guard that stands in for the discard/other-tab hooks
  * this module has no way to observe (module docstring). The pruned map is
  * written straight back, so a dead entry is gone for good rather than
- * re-validated on every open. */
+ * re-validated on every open. Which is exactly why the pruning runs only on
+ * EVIDENCE: `liveNodeIdsForDraft()` returns null (no filter, map restored
+ * whole) whenever the draft cannot be read, including the failed-load case
+ * where the buffer is empty and parses into an empty metamodel. */
 function restoreRenames(projectId: string): void {
 	_pendingRenames.clear();
 	const raw = readStored(renamesKey(projectId));
 	if (raw === null) return;
-	const live = liveNodeIds(parseCurrent(getMetamodelEditor().buffer).mm);
+	const live = liveNodeIdsForDraft();
 	try {
 		const parsed: unknown = JSON.parse(raw);
 		if (!Array.isArray(parsed)) return;
@@ -659,6 +694,14 @@ function applyKeyMove(move: { from: string; to: string | null }): void {
 		// Deleted: drop any deferral pointing at it. The server keeps its stale
 		// key until the next successful save, which is harmless — a position for
 		// a type that no longer exists is simply never read.
+		//
+		// Note the ASYMMETRY with a rename, which is deliberate: a delete is NOT
+		// deferred. The key leaves `_positions` immediately, so the next
+		// whole-blob PUT drops that position for peers who still have the type
+		// (this draft may never be rebound). Accepted rather than fixed: the
+		// damage is one box on a canvas the peer can re-drag, it self-heals the
+		// moment anyone arranges again, and deferring a delete would mean
+		// keeping a phantom key alive with no node to hang it on.
 		for (const [server, local] of _pendingRenames) {
 			if (local === move.from) _pendingRenames.delete(server);
 		}
@@ -672,6 +715,15 @@ function applyKeyMove(move: { from: string; to: string | null }): void {
 			_pendingRenames.delete(s);
 			break;
 		}
+	}
+	// Injectivity in the OTHER direction: a dead entry may already claim
+	// `move.to` as its local key (a CodeMirror Ctrl+Z over a diagram rename, a
+	// hand YAML rename, or a draft discard all leave one behind), and a rename
+	// INTO that name would then leave two server keys pointing at one local key.
+	// `serverPositions` reads that map forward, so one of the two would silently
+	// vanish from every PUT while the other node's position landed on its key.
+	for (const [s, local] of _pendingRenames) {
+		if (local === move.to) _pendingRenames.delete(s);
 	}
 	if (server !== move.to) _pendingRenames.set(server, move.to);
 	persistRenames();
@@ -708,7 +760,21 @@ export function applyDiagramEdit(cmd: YamlEditCommand): boolean {
 	return true;
 }
 
+/**
+ * Pop one step. Guarded on `readOnly` exactly like {@link applyDiagramEdit},
+ * and for a sharper reason than symmetry: the key half below is applied
+ * UNCONDITIONALLY while the buffer half goes through `editMetamodelBuffer`,
+ * which silently drops the write when the editor's own `isEditBlocked()` says
+ * so. Without this guard the two halves desync — reachable, because the editor
+ * acquires the `mm` lease asynchronously on the first divergent edit, so a
+ * diagram rename can land and only THEN lose the lease race to a peer. The
+ * rollback would drop the deferral while the draft kept the rename, and the
+ * next drag would write a draft-local key into the SHARED blob. `readOnly` also
+ * folds in `_rebinding` (which `isEditBlocked()` does not), so an undo cannot
+ * slip past the undo-stack clear an in-flight rebind is about to perform.
+ */
 export function undoDiagramEdit(): void {
+	if (getMetamodelEditor().readOnly) return;
 	const entry = _undo.pop();
 	_canUndo = _undo.length > 0;
 	if (entry === undefined) return;
@@ -761,6 +827,11 @@ export async function runAutoArrange(): Promise<void> {
  * project, and "undo" is no longer a local operation on it.
  */
 export function onMetamodelRebound(): void {
+	// Every other public entry here is project-guarded; this one was not.
+	// Unreachable today (the tab only calls it while mounted), but running it
+	// after `closeMetamodelDiagram` would `saveNow()` an emptied `_positions` —
+	// a PUT of `{positions: {}}` that wipes the whole project's layout.
+	if (_projectId === null) return;
 	_pendingRenames.clear();
 	persistRenames();
 	_undo = [];
