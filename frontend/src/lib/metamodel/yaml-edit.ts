@@ -167,6 +167,13 @@ export class YamlEditError extends Error {}
  * only within themselves (an element and a relationship MAY share a name). */
 export type TypeRef = { kind: 'element' | 'relationship'; name: string };
 
+/** A `TypeRef`'s `kind` names the same concept `SectionKey` names for the
+ * YAML section it lives in — just spelled the way callers building a command
+ * from a diagram node think about it. */
+function sectionOf(owner: TypeRef): SectionKey {
+	return owner.kind === 'element' ? 'elements' : 'relationships';
+}
+
 export type YamlEditCommand =
 	| { kind: 'addElementType'; name: string }
 	| { kind: 'removeElementType'; name: string }
@@ -289,6 +296,34 @@ function renameElementRefs(doc: Document, from: string, to: string): void {
 	});
 }
 
+/** Find a property row by name on an element/relationship's `properties` seq,
+ * or throw. Used by `updateProperty`, which — unlike `addProperty`/
+ * `removeProperty` — needs the row itself (not just the seq) to mutate its
+ * fields in place and keep any per-row comment. */
+function mustPropMap(doc: Document, owner: TypeRef, propName: string): YAMLMap {
+	const m = mustTypeMap(doc, sectionOf(owner), owner.name);
+	const props = m.get('properties');
+	if (isSeq(props)) {
+		for (const it of (props as YAMLSeq).items) {
+			if (isMap(it) && (it as YAMLMap).get('name') === propName) return it as YAMLMap;
+		}
+	}
+	throw new YamlEditError(`unknown property: ${propName}`);
+}
+
+/** Emit the author idiom for a property row: a flow map, schema defaults
+ * omitted (`multiplicity` at `'0..1'`, null facets) so a newly-added property
+ * reads the same as one a human would have typed by hand. */
+function propNode(doc: Document, p: PropertyDef): YAMLMap {
+	const o: Record<string, unknown> = { name: p.name, datatype: p.datatype };
+	if (p.multiplicity !== '0..1') o.multiplicity = p.multiplicity;
+	if (p.min !== null) o.min = p.min;
+	if (p.max !== null) o.max = p.max;
+	if (p.pattern !== null) o.pattern = p.pattern;
+	if (p.max_length !== null) o.max_length = p.max_length;
+	return flowNode(doc, o) as YAMLMap;
+}
+
 /** Dispatches one semantic edit command onto a parsed `Document` in place.
  * Every command either mutates the AST surgically (preserving comments and
  * untouched lines on the next `serializeDraft`) or throws `YamlEditError`
@@ -389,6 +424,45 @@ export function applyEdit(doc: Document, cmd: YamlEditCommand): void {
 			const enums = doc.get('enums');
 			if (!isMap(enums) || !(enums as YAMLMap).delete(cmd.name))
 				throw new YamlEditError(`unknown enum: ${cmd.name}`);
+			return;
+		}
+		case 'addProperty': {
+			const m = mustTypeMap(doc, sectionOf(cmd.owner), cmd.owner.name);
+			let props = m.get('properties');
+			if (!isSeq(props)) {
+				m.set('properties', doc.createNode([]));
+				props = m.get('properties');
+			}
+			(props as YAMLSeq).add(propNode(doc, cmd.prop));
+			return;
+		}
+		case 'updateProperty': {
+			const row = mustPropMap(doc, cmd.owner, cmd.propName);
+			row.set('name', cmd.prop.name);
+			row.set('datatype', cmd.prop.datatype);
+			if (cmd.prop.multiplicity === '0..1') row.delete('multiplicity');
+			else row.set('multiplicity', cmd.prop.multiplicity);
+			for (const [key, value] of [
+				['min', cmd.prop.min],
+				['max', cmd.prop.max],
+				['pattern', cmd.prop.pattern],
+				['max_length', cmd.prop.max_length]
+			] as const) {
+				if (value === null) row.delete(key);
+				else row.set(key, value);
+			}
+			return;
+		}
+		case 'removeProperty': {
+			const m = mustTypeMap(doc, sectionOf(cmd.owner), cmd.owner.name);
+			const props = m.get('properties');
+			if (!isSeq(props)) throw new YamlEditError(`no properties on ${cmd.owner.name}`);
+			const idx = (props as YAMLSeq).items.findIndex(
+				(it) => isMap(it) && (it as YAMLMap).get('name') === cmd.propName
+			);
+			if (idx < 0) throw new YamlEditError(`unknown property: ${cmd.propName}`);
+			(props as YAMLSeq).items.splice(idx, 1);
+			if ((props as YAMLSeq).items.length === 0) m.delete('properties');
 			return;
 		}
 		default:
