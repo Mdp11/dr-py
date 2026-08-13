@@ -29,6 +29,7 @@
 
 	import AssocClassNode from './diagram/AssocClassNode.svelte';
 	import AssociationEdge from './diagram/AssociationEdge.svelte';
+	import ConnectionPopover from './diagram/ConnectionPopover.svelte';
 	import ElementTypeNode from './diagram/ElementTypeNode.svelte';
 	import EnumTypeNode from './diagram/EnumTypeNode.svelte';
 	import GeneralizationEdge from './diagram/GeneralizationEdge.svelte';
@@ -200,6 +201,32 @@
 		}
 	}
 
+	// --- connections -----------------------------------------------------------
+
+	/** The element-type pair a completed drag proposed, awaiting the popover's
+	 * answer. Names, not node ids: everything downstream speaks metamodel. */
+	let pendingConnection = $state<{ source: string; target: string } | null>(null);
+
+	/**
+	 * `onbeforeconnect`, deliberately, NOT `onconnect`: Svelte Flow's handle
+	 * calls this first and skips `store.addEdge` entirely when it returns
+	 * false. Every edge on this canvas is DERIVED from the YAML, so an edge the
+	 * flow adds on its own is a lie the user cannot undo — it would survive a
+	 * cancelled popover and disappear only on the next unrelated rebuild.
+	 *
+	 * A connection whose ends are not both element types (a drag onto an
+	 * association-class box) is refused the same way, with no popover: none of
+	 * the three answers below has a meaning for it.
+	 */
+	function onBeforeConnect(connection: { source: string; target: string }): false {
+		const from = selectionForNodeId(connection.source);
+		const to = selectionForNodeId(connection.target);
+		if (!readOnly && from?.kind === 'element' && to?.kind === 'element') {
+			pendingConnection = { source: from.name, target: to.name };
+		}
+		return false;
+	}
+
 	function onKeydown(e: KeyboardEvent): void {
 		if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
 			e.preventDefault();
@@ -300,8 +327,18 @@
 					onnodedragstop={({ nodes }) => {
 						for (const n of nodes) moveNode(n.id, n.position);
 					}}
+					onbeforeconnect={onBeforeConnect}
 					onpaneclick={() => selectDiagramNode(null)}
 				></SvelteFlow>
+
+				{#if pendingConnection !== null && view.mm !== null}
+					<ConnectionPopover
+						mm={view.mm}
+						source={pendingConnection.source}
+						target={pendingConnection.target}
+						onclose={() => (pendingConnection = null)}
+					/>
+				{/if}
 			</div>
 
 			<!-- The attribute half of the surface. Fixed 320px and independently

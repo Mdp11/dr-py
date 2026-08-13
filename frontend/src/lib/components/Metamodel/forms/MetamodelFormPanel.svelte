@@ -1,8 +1,12 @@
 <script lang="ts">
 	import { Plus } from '@lucide/svelte';
+	import type { DiagramSelection } from '$lib/metamodel/diagram-build';
 	import { uniqueTypeName } from '$lib/metamodel/helpers';
 	import { applyDiagramEdit, getMetamodelDiagramView, selectDiagramNode } from '$lib/state';
+	import DeleteTypeDialog from './DeleteTypeDialog.svelte';
 	import ElementTypeForm from './ElementTypeForm.svelte';
+	import EnumForm from './EnumForm.svelte';
+	import RelationshipTypeForm from './RelationshipTypeForm.svelte';
 	import { addBtnCls, headingCls } from './field-classes';
 
 	/**
@@ -17,8 +21,9 @@
 	 * and unreachable. Both are click-to-select, which is the only way to reach
 	 * a mapless relationship's form at all.
 	 *
-	 * Task 12 adds the relationship/enum forms and the delete-consequence
-	 * dialog to the dispatch below.
+	 * The delete dialog lives HERE rather than inside each form: it is the same
+	 * confirmation for all three kinds, and the panel is what has to clear the
+	 * selection afterwards (the form it would have belonged to is gone by then).
 	 */
 
 	let { readOnly }: { readOnly: boolean } = $props();
@@ -48,6 +53,11 @@
 	}
 
 	const linkCls = 'w-full truncate rounded px-1 py-0.5 text-left text-[11px] hover:bg-muted';
+
+	/** The type a Delete button asked about, or null. Captured as a full
+	 * `DiagramSelection` (not just a name) so the dialog can be rendered from
+	 * one place for all three kinds. */
+	let pendingDelete = $state<DiagramSelection | null>(null);
 </script>
 
 {#if mm !== null}
@@ -115,12 +125,40 @@
 				{/if}
 			</div>
 		{:else if sel.kind === 'element'}
-			<ElementTypeForm {mm} name={sel.name} {readOnly} onRequestDelete={() => {}} />
+			<ElementTypeForm
+				{mm}
+				name={sel.name}
+				{readOnly}
+				onRequestDelete={(name) => (pendingDelete = { kind: 'element', name })}
+			/>
+		{:else if sel.kind === 'relationship'}
+			<RelationshipTypeForm
+				{mm}
+				name={sel.name}
+				{readOnly}
+				onRequestDelete={(name) => (pendingDelete = { kind: 'relationship', name })}
+			/>
 		{:else}
-			<!-- Task 12 mounts RelationshipTypeForm / EnumForm here. -->
-			<p class="text-[11px] italic text-muted-foreground/70">
-				{sel.name}
-			</p>
+			<EnumForm
+				{mm}
+				name={sel.name}
+				{readOnly}
+				onRequestDelete={(name) => (pendingDelete = { kind: 'enum', name })}
+			/>
 		{/if}
 	</div>
+
+	{#if pendingDelete !== null}
+		<DeleteTypeDialog
+			sel={pendingDelete}
+			{mm}
+			onConfirm={() => {
+				pendingDelete = null;
+				// The type is gone; leaving the selection pointing at it would leave
+				// the panel on a form for something the draft no longer defines.
+				selectDiagramNode(null);
+			}}
+			onCancel={() => (pendingDelete = null)}
+		/>
+	{/if}
 {/if}

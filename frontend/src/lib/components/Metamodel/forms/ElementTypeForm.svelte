@@ -131,10 +131,8 @@
 				<p class="{headingCls} mb-1">Danger zone</p>
 				<button
 					type="button"
-					class="inline-flex items-center gap-1 rounded border border-destructive/40 px-2 py-0.5 text-[11px] text-destructive transition-colors hover:bg-destructive/15 disabled:cursor-not-allowed disabled:opacity-60"
+					class="inline-flex items-center gap-1 rounded border border-destructive/40 px-2 py-0.5 text-[11px] text-destructive transition-colors hover:bg-destructive/15"
 					data-testid="mm-form-delete"
-					disabled
-					title="wired in the next task"
 					onclick={() => onRequestDelete(name)}
 				>
 					<Trash2 class="h-3 w-3" /> Delete {name}
