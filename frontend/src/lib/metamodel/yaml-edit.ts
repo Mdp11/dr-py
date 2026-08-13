@@ -251,25 +251,31 @@ export function syncShorthand(m: YAMLMap): void {
 	m.delete('target');
 }
 
+/** Rename every `datatype: <from>` on a type's properties to `<to>`. Shared by
+ * both element-type rename (a datatype can name an element, for a reference
+ * property) and enum rename (a datatype can name an enum) — the predicate,
+ * iteration and mutation are identical either way, so one helper covers
+ * both call sites rather than duplicating the loop per caller. */
+function renameDatatypeRefs(m: YAMLMap, from: string, to: string): void {
+	const props = m.get('properties');
+	if (!isSeq(props)) return;
+	for (const p of (props as YAMLSeq).items) {
+		if (isMap(p) && (p as YAMLMap).get('datatype') === from) (p as YAMLMap).set('datatype', to);
+	}
+}
+
 /** Rename cascade for an element type: `extends` pointers, relationship
  * shorthand/`mappings` endpoints, and property `datatype`s across BOTH
  * sections. This is the auto-fixed half of the rename contract (spec §3);
  * anything the cascade can't reach (e.g. a `key` entry naming a relationship
  * end that no longer exists) is left for the lint pass to surface. */
 function renameElementRefs(doc: Document, from: string, to: string): void {
-	const renameDatatypes = (m: YAMLMap): void => {
-		const props = m.get('properties');
-		if (!isSeq(props)) return;
-		for (const p of (props as YAMLSeq).items) {
-			if (isMap(p) && (p as YAMLMap).get('datatype') === from) (p as YAMLMap).set('datatype', to);
-		}
-	};
 	eachTypeMap(doc, 'elements', (m) => {
 		if (m.get('extends') === from) m.set('extends', to);
-		renameDatatypes(m);
+		renameDatatypeRefs(m, from, to);
 	});
 	eachTypeMap(doc, 'relationships', (m) => {
-		renameDatatypes(m);
+		renameDatatypeRefs(m, from, to);
 		if (m.get('source') === from) m.set('source', to);
 		if (m.get('target') === from) m.set('target', to);
 		const maps = m.get('mappings');
@@ -281,14 +287,6 @@ function renameElementRefs(doc: Document, from: string, to: string): void {
 			}
 		}
 	});
-}
-
-function renameEnumDatatype(m: YAMLMap, from: string, to: string): void {
-	const props = m.get('properties');
-	if (!isSeq(props)) return;
-	for (const p of (props as YAMLSeq).items) {
-		if (isMap(p) && (p as YAMLMap).get('datatype') === from) (p as YAMLMap).set('datatype', to);
-	}
 }
 
 /** Dispatches one semantic edit command onto a parsed `Document` in place.
@@ -304,11 +302,16 @@ export function applyEdit(doc: Document, cmd: YamlEditCommand): void {
 			return;
 		}
 		case 'removeElementType': {
-			const seq = ensureSection(doc, 'elements');
-			const idx = seq.items.findIndex(
-				(it) => isMap(it) && (it as YAMLMap).get('name') === cmd.name
-			);
-			if (idx < 0) throw new YamlEditError(`unknown elements type: ${cmd.name}`);
+			// Use the non-creating `section()` accessor, not `ensureSection`: a
+			// throw must never leave a mutation behind, and `ensureSection`
+			// would otherwise plant a stray `elements: []` into a draft that
+			// has no elements section at all before we ever get to the throw.
+			const seq = section(doc, 'elements');
+			const idx =
+				seq === null
+					? -1
+					: seq.items.findIndex((it) => isMap(it) && (it as YAMLMap).get('name') === cmd.name);
+			if (seq === null || idx < 0) throw new YamlEditError(`unknown elements type: ${cmd.name}`);
 			seq.items.splice(idx, 1);
 			// Cascade (spec §3): mappings touching it and extends pointing at it
 			// are auto-fixed; property datatypes / keys stay for lint to flag.
@@ -371,8 +374,8 @@ export function applyEdit(doc: Document, cmd: YamlEditCommand): void {
 			// comments — a `set` on the map would create a brand-new pair at
 			// the end, losing the inline `# comment` the test asserts on.
 			(pair.key as Scalar).value = cmd.to;
-			eachTypeMap(doc, 'elements', (m) => renameEnumDatatype(m, cmd.from, cmd.to));
-			eachTypeMap(doc, 'relationships', (m) => renameEnumDatatype(m, cmd.from, cmd.to));
+			eachTypeMap(doc, 'elements', (m) => renameDatatypeRefs(m, cmd.from, cmd.to));
+			eachTypeMap(doc, 'relationships', (m) => renameDatatypeRefs(m, cmd.from, cmd.to));
 			return;
 		}
 		case 'setEnumLiterals': {

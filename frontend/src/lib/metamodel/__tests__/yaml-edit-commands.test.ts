@@ -51,6 +51,13 @@ describe('element type commands', () => {
 		expect(monitors.mappings).toEqual([]);
 	});
 
+	it('removeElementType throws without mutating when there is no elements section', () => {
+		const buffer = 'enums:\n  Status: [Draft, Active]\n';
+		const { doc } = parseDraft(buffer);
+		expect(() => applyEdit(doc, { kind: 'removeElementType', name: 'Zone' })).toThrow();
+		expect(serializeDraft(doc)).toBe(buffer);
+	});
+
 	it('setElementKey writes a flow list and null removes it', () => {
 		let out = run(FIXTURE, [
 			{ kind: 'setElementKey', name: 'Zone', key: ['name', 'out:Contains'] }
