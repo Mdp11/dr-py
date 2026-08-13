@@ -371,10 +371,11 @@ unregistered-kind id (e.g. legacy `diagram`) enters `checked` while never render
 Unreachable today: the only seed caller sources ids from `dynamicTabs`, which exist only
 for registered kinds.
 
-### F-6 · New Project wizard close-reset misses `error`/`pending` · `open` · *2026-08-09*
-`NewProjectWizard.svelte:34-44` clears five inputs plus `skipped`/`createdId`, but not
-`error` (`:20`) or `pending` (`:21`) — so a failed attempt's error message reappears when
-the dialog is reopened.
+### F-6 · New Project wizard close-reset misses `error`/`pending` · `done` (already fixed)
+Verified 2026-08-12: fixed by `36843c6` ("fix(ui): clear the previous attempt's error on
+wizard close", 2026-08-10) and the subsequent wizard rework — the close-reset now clears
+`error` AND `pending` under a submit-generation guard, with a close→reopen test in
+`NewProjectWizard.test.ts`. The backlog entry predated the fix.
 
 ### F-7 · Frontend import cycle worked around with `setTimeout(…, 0)` · `open` · *2026-08-08*
 `view → realtime → artifacts → view`, papered over in `view.svelte.ts`. Works, but it's a
