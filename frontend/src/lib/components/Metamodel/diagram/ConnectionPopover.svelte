@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import type { Metamodel } from '$lib/api/types';
-	import { isSubtype, uniqueTypeName } from '$lib/metamodel/helpers';
+	import { isSubtype, typeNameCollision, uniqueTypeName } from '$lib/metamodel/helpers';
 	import { blockBtnCls, inputCls, selectCls } from '../forms/field-classes';
 	import { applyDiagramEdit, selectDiagramNode } from '$lib/state';
 
@@ -48,9 +48,19 @@
 	let containment = $state(false);
 	let chosen = $state(untrack(() => existing[0] ?? ''));
 
+	/** The default name is generated free, but this field is free TEXT — so the
+	 * same collision guard the rename forms use has to run here too, or the one
+	 * create path a user can type into stays the way to mint a duplicate. */
+	let nameError = $state<string | null>(null);
+
 	function createType(): void {
 		const name = newName.trim();
 		if (name === '') return;
+		const collision = typeNameCollision(mm, 'relationship', name);
+		if (collision !== null) {
+			nameError = collision;
+			return;
+		}
 		if (
 			applyDiagramEdit({
 				kind: 'addRelationshipType',
@@ -109,9 +119,15 @@
 				class={inputCls}
 				data-testid="mm-conn-name"
 				value={newName}
-				oninput={(e) => (newName = e.currentTarget.value)}
+				oninput={(e) => {
+					newName = e.currentTarget.value;
+					nameError = null;
+				}}
 				aria-label="Name"
 			/>
+			{#if nameError !== null}
+				<p class="text-[10px] text-destructive" data-testid="mm-conn-name-error">{nameError}</p>
+			{/if}
 			<label class="flex items-center gap-2 text-[11px] text-foreground/90">
 				<input
 					type="checkbox"

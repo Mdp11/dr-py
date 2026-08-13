@@ -10,7 +10,7 @@
 		selectionForNodeId,
 		type DiagramNodeSpec
 	} from '$lib/metamodel/diagram-build';
-	import { uniqueTypeName } from '$lib/metamodel/helpers';
+	import { datatypeNamespace, uniqueTypeName } from '$lib/metamodel/helpers';
 	import {
 		applyDiagramEdit,
 		getMetamodelDiagramView,
@@ -209,9 +209,15 @@
 		selectDiagramNode(selectionForNodeId(hit.id));
 	}
 
+	// Both create buttons pick a name free across the WHOLE datatype space
+	// (element types + enums + primitives), not just their own section: a
+	// created name that collides is the create-side twin of the rename guard —
+	// `addElementType` would append a second same-named block that every later
+	// lookup resolves first-wins past, and `addEnum` would silently OVERWRITE
+	// the existing enum's literals (`yaml-edit`'s enums are a YAML mapping).
 	function createElementType(): void {
 		if (view.mm === null) return;
-		const name = uniqueTypeName('NewType', new Set(view.mm.elements.map((el) => el.name)));
+		const name = uniqueTypeName('NewType', datatypeNamespace(view.mm));
 		// Select on success so the form panel (Task 11) opens on the new type
 		// instead of leaving the user to hunt for the box that just appeared.
 		if (applyDiagramEdit({ kind: 'addElementType', name })) {
@@ -221,7 +227,7 @@
 
 	function createEnum(): void {
 		if (view.mm === null) return;
-		const name = uniqueTypeName('NewEnum', new Set(Object.keys(view.mm.enums)));
+		const name = uniqueTypeName('NewEnum', datatypeNamespace(view.mm));
 		if (applyDiagramEdit({ kind: 'addEnum', name, literals: [] })) {
 			selectDiagramNode({ kind: 'enum', name });
 		}

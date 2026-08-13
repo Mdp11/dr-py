@@ -158,6 +158,63 @@ describe('ElementTypeForm', () => {
 		unmount(c);
 	});
 
+	it('refuses a rename onto a name the datatype space already holds', () => {
+		const c = mount(ElementTypeForm, {
+			target: document.body,
+			props: { mm: MM, name: 'Zone', readOnly: false, onRequestDelete: () => {} }
+		});
+		flushSync();
+
+		const input = byId<HTMLInputElement>('mm-form-name');
+
+		// Another element type. Nothing downstream would report this: `typeMap`
+		// resolves first-wins, and so does the backend's own cache — there is no
+		// duplicate check in `check_metamodel` — so every later edit to "Building"
+		// would silently rewrite the other one.
+		input.value = 'Building';
+		fire(input, 'blur');
+		expect(applyDiagramEdit).not.toHaveBeenCalled();
+		expect(byId('mm-form-name-error').textContent).toContain('element type');
+
+		// An ENUM: the same space, because both are things a `datatype` can name.
+		input.value = 'Status';
+		fire(input, 'blur');
+		expect(applyDiagramEdit).not.toHaveBeenCalled();
+		expect(byId('mm-form-name-error').textContent).toContain('enum');
+
+		// A primitive, which the loader reserves.
+		input.value = 'date';
+		fire(input, 'blur');
+		expect(applyDiagramEdit).not.toHaveBeenCalled();
+		expect(byId('mm-form-name-error').textContent).toContain('built-in');
+
+		unmount(c);
+	});
+
+	it('allows a rename onto a RELATIONSHIP type name — a separate space', () => {
+		// Guarding across all three would block a valid edit: `check_metamodel`
+		// has no element∩relationship rule, and `TypeRef` exists because the two
+		// sections are addressed separately.
+		const c = mount(ElementTypeForm, {
+			target: document.body,
+			props: { mm: MM, name: 'Zone', readOnly: false, onRequestDelete: () => {} }
+		});
+		flushSync();
+
+		const input = byId<HTMLInputElement>('mm-form-name');
+		input.value = 'Monitors';
+		fire(input, 'blur');
+
+		expect(applyDiagramEdit).toHaveBeenCalledWith({
+			kind: 'renameElementType',
+			from: 'Zone',
+			to: 'Monitors'
+		});
+		expect(document.querySelector('[data-testid="mm-form-name-error"]')).toBeNull();
+
+		unmount(c);
+	});
+
 	it('offers only extends targets that cannot cycle', () => {
 		const c = mount(ElementTypeForm, {
 			target: document.body,

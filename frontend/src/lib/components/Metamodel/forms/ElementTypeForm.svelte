@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { Trash2 } from '@lucide/svelte';
 	import type { Metamodel } from '$lib/api/types';
-	import { isSubtype } from '$lib/metamodel/helpers';
+	import { isSubtype, typeNameCollision } from '$lib/metamodel/helpers';
 	import { applyDiagramEdit, selectDiagramNode } from '$lib/state';
 	import { dangerBtnCls, headingCls, inputCls, labelCls, selectCls } from './field-classes';
 	import KeyBuilder from './KeyBuilder.svelte';
@@ -44,10 +44,26 @@
 		mm.elements.filter((o) => !isSubtype(mm, o.name, name)).map((o) => o.name)
 	);
 
+	/** A rename onto a name the datatype space already holds, refused with the
+	 * same inline-error interaction the property editor uses (see its
+	 * name-uniqueness note): the typed text stays, because this is a correctable
+	 * validation error rather than a rejected command. */
+	let nameError = $state<string | null>(null);
+
 	function commitRename(input: HTMLInputElement): void {
 		const to = input.value.trim();
+		nameError = null;
 		if (to === name) return;
-		if (to === '' || !applyDiagramEdit({ kind: 'renameElementType', from: name, to })) {
+		if (to === '') {
+			input.value = name;
+			return;
+		}
+		const collision = typeNameCollision(mm, 'element', to);
+		if (collision !== null) {
+			nameError = collision;
+			return;
+		}
+		if (!applyDiagramEdit({ kind: 'renameElementType', from: name, to })) {
 			input.value = name;
 			return;
 		}
@@ -77,6 +93,9 @@
 					}}
 				/>
 			</label>
+			{#if nameError !== null}
+				<p class="text-[10px] text-destructive" data-testid="mm-form-name-error">{nameError}</p>
+			{/if}
 			<p class="text-[10px] text-muted-foreground/70">
 				Renaming re-types instances on rebind (shows as remove + add in Preview).
 			</p>

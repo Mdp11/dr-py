@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { Plus, Trash2 } from '@lucide/svelte';
 	import type { Metamodel } from '$lib/api/types';
-	import { relationshipAncestors } from '$lib/metamodel/helpers';
+	import { relationshipAncestors, typeNameCollision } from '$lib/metamodel/helpers';
 	import { applyDiagramEdit, selectDiagramNode } from '$lib/state';
 	import {
 		addBtnCls,
@@ -53,10 +53,26 @@
 	let newSource = $state('');
 	let newTarget = $state('');
 
+	/** Same collision guard and same inline-error interaction as the element
+	 * form — one naming rule, three surfaces. Relationship types have their OWN
+	 * name space (see `typeNameCollision`), so this only refuses another
+	 * relationship type. */
+	let nameError = $state<string | null>(null);
+
 	function commitRename(input: HTMLInputElement): void {
 		const to = input.value.trim();
+		nameError = null;
 		if (to === name) return;
-		if (to === '' || !applyDiagramEdit({ kind: 'renameRelationshipType', from: name, to })) {
+		if (to === '') {
+			input.value = name;
+			return;
+		}
+		const collision = typeNameCollision(mm, 'relationship', to);
+		if (collision !== null) {
+			nameError = collision;
+			return;
+		}
+		if (!applyDiagramEdit({ kind: 'renameRelationshipType', from: name, to })) {
 			input.value = name;
 			return;
 		}
@@ -114,6 +130,9 @@
 					onkeydown={onEnter}
 				/>
 			</label>
+			{#if nameError !== null}
+				<p class="text-[10px] text-destructive" data-testid="mm-rel-name-error">{nameError}</p>
+			{/if}
 			<p class="text-[10px] text-muted-foreground/70">
 				Renaming re-types instances on rebind (shows as remove + add in Preview).
 			</p>

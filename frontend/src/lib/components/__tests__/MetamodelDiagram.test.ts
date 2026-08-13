@@ -147,7 +147,12 @@ vi.mock('$lib/state', async (orig) => {
 });
 
 // Imported AFTER the factory so these are the mocked bindings.
-import { initMetamodelDiagram, selectDiagramNode, setMetamodelView } from '$lib/state';
+import {
+	applyDiagramEdit,
+	initMetamodelDiagram,
+	selectDiagramNode,
+	setMetamodelView
+} from '$lib/state';
 import MetamodelTab from '../Metamodel/MetamodelTab.svelte';
 import DiagramHost from './MetamodelDiagramHost.svelte';
 
@@ -248,6 +253,35 @@ describe('MetamodelDiagram', () => {
 
 		expect(nodeByText('Zone')?.querySelectorAll('.mm-row')).toHaveLength(2);
 		expect(nodeByText('Contains')?.querySelectorAll('.mm-row')).toHaveLength(2);
+
+		unmount(c);
+	});
+
+	it('creates types with a name free across the WHOLE datatype space', () => {
+		// The create-side twin of the rename guard: `addElementType` appends a
+		// second same-named block that every later lookup resolves first-wins
+		// past, and `addEnum` silently OVERWRITES (enums are a YAML mapping). So
+		// a generated name must dodge the element types AND the enums, not just
+		// its own section.
+		diagramView = {
+			...DIAGRAM,
+			mm: { ...MM, enums: { ...MM.enums, NewType: ['a'], NewEnum: ['b'] } }
+		};
+
+		const c = mount(DiagramHost, { target: document.body });
+		flushSync();
+
+		findButton(/element type/i)!.click();
+		flushSync();
+		expect(applyDiagramEdit).toHaveBeenCalledWith({ kind: 'addElementType', name: 'NewType2' });
+
+		findButton(/^\+ enum$/i)!.click();
+		flushSync();
+		expect(applyDiagramEdit).toHaveBeenCalledWith({
+			kind: 'addEnum',
+			name: 'NewEnum2',
+			literals: []
+		});
 
 		unmount(c);
 	});

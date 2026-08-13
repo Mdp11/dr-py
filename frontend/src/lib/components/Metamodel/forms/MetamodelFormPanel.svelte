@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { Plus } from '@lucide/svelte';
 	import type { DiagramSelection } from '$lib/metamodel/diagram-build';
-	import { uniqueTypeName } from '$lib/metamodel/helpers';
+	import { datatypeNamespace, uniqueTypeName } from '$lib/metamodel/helpers';
 	import { applyDiagramEdit, getMetamodelDiagramView, selectDiagramNode } from '$lib/state';
 	import DeleteTypeDialog from './DeleteTypeDialog.svelte';
 	import ElementTypeForm from './ElementTypeForm.svelte';
@@ -46,7 +46,8 @@
 
 	function createEnum(): void {
 		if (mm === null) return;
-		const name = uniqueTypeName('NewEnum', new Set(Object.keys(mm.enums)));
+		// Free across the whole datatype space — see MetamodelDiagram's create pair.
+		const name = uniqueTypeName('NewEnum', datatypeNamespace(mm));
 		if (applyDiagramEdit({ kind: 'addEnum', name, literals: [] })) {
 			selectDiagramNode({ kind: 'enum', name });
 		}

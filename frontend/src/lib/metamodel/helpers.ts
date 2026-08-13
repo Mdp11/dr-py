@@ -32,14 +32,71 @@ export const PRIMITIVE_DATATYPES: ReadonlySet<string> = new Set([
 ]);
 
 /** First free name in the `base`, `base2`, `base3`… series. Used wherever the
- * UI has to invent a type name (toolbar "+ Element type", the connection
- * popover's default relationship), because a duplicate name is a lint error
- * the user did not ask for. */
+ * UI has to invent a name (toolbar "+ Element type", the connection popover's
+ * default relationship, "+ Property"), paired with the right namespace from
+ * {@link datatypeNamespace} or the relationship-type names. */
 export function uniqueTypeName(base: string, taken: ReadonlySet<string>): string {
 	if (!taken.has(base)) return base;
 	let i = 2;
 	while (taken.has(`${base}${i}`)) i++;
 	return `${base}${i}`;
+}
+
+/**
+ * Which name space a metamodel type lives in. There are exactly **two**, and
+ * the backend is explicit about it (`core/metamodel/check.py:73-78`):
+ * element types, enums and the five primitives share ONE space — all three are
+ * things a `datatype` string can name, so a collision makes a property's type
+ * ambiguous and `check_metamodel` rejects it outright — while relationship
+ * types have their own, with no cross-check against either. `yaml-edit`'s
+ * `TypeRef` says the same thing from the other side: an element and a
+ * relationship MAY share a name.
+ */
+export type TypeNamespace = 'element' | 'enum' | 'relationship';
+
+/** Every name the datatype space already holds: the primitives, the element
+ * types and the enums. The set a `+ Element type` / `+ Enum` button must pick a
+ * free name out of. */
+export function datatypeNamespace(mm: Metamodel): ReadonlySet<string> {
+	return new Set([
+		...PRIMITIVE_DATATYPES,
+		...mm.elements.map((e) => e.name),
+		...Object.keys(mm.enums)
+	]);
+}
+
+/**
+ * Why `name` cannot be used for a type in `namespace`, as a sentence to show
+ * the user — or null when it is free.
+ *
+ * This is the metamodel editor's ONE naming rule, shared by all three rename
+ * forms so they cannot drift into three different behaviours. It matters more
+ * than a tidy-input check: `yaml-edit`'s `typeMap` resolves a type by FIRST
+ * NAME MATCH, and so does the backend (`schema.py:249-255` builds its caches
+ * "first-wins on duplicate names, matching the original linear scans"), so a
+ * second `Zone` does not error anywhere — `check_metamodel` has no
+ * duplicate-within-a-section check at all. Every later edit to "Zone" would
+ * silently rewrite the FIRST one, with nothing to tell the user. Refusing the
+ * rename is the only signal available.
+ */
+export function typeNameCollision(
+	mm: Metamodel,
+	namespace: TypeNamespace,
+	name: string
+): string | null {
+	if (namespace === 'relationship') {
+		return mm.relationships.some((r) => r.name === name)
+			? `The metamodel already has a relationship type called “${name}”.`
+			: null;
+	}
+	if (PRIMITIVE_DATATYPES.has(name)) return `“${name}” is a built-in datatype.`;
+	if (mm.elements.some((e) => e.name === name)) {
+		return `The metamodel already has an element type called “${name}”.`;
+	}
+	if (Object.prototype.hasOwnProperty.call(mm.enums, name)) {
+		return `The metamodel already has an enum called “${name}”.`;
+	}
+	return null;
 }
 
 /** Look up a concrete or abstract element type by name. */

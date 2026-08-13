@@ -94,6 +94,28 @@ describe('RelationshipTypeForm', () => {
 		unmount(c);
 	});
 
+	it('refuses a rename onto another relationship type, but not onto an element type', () => {
+		const c = mountForm('Contains');
+		const input = byId<HTMLInputElement>('mm-rel-name');
+
+		input.value = 'Monitors';
+		fire(input, 'blur');
+		expect(applyDiagramEdit).not.toHaveBeenCalled();
+		expect(byId('mm-rel-name-error').textContent).toContain('relationship type');
+
+		// `Zone` is an ELEMENT type, and relationship types have their own name
+		// space — refusing this would block a valid edit.
+		input.value = 'Zone';
+		fire(input, 'blur');
+		expect(applyDiagramEdit).toHaveBeenCalledWith({
+			kind: 'renameRelationshipType',
+			from: 'Contains',
+			to: 'Zone'
+		});
+
+		unmount(c);
+	});
+
 	it('removes a mapping by its exact pair', () => {
 		const c = mountForm('Contains');
 
@@ -158,6 +180,27 @@ describe('EnumForm', () => {
 			name: 'Status',
 			literals: ['Proposed', 'Active']
 		});
+
+		unmount(c);
+	});
+
+	it('refuses a rename onto an element type name', () => {
+		// Enums share the datatype space with element types. A duplicate is worse
+		// here than a first-wins lookup: `enums` is a YAML MAPPING, so a second
+		// key of the same name stops the draft parsing at all.
+		const c = mount(EnumForm, {
+			target: document.body,
+			props: { mm: MM, name: 'Status', readOnly: false, onRequestDelete: () => {} }
+		});
+		flushSync();
+
+		const input = byId<HTMLInputElement>('mm-enum-name');
+		input.value = 'Zone';
+		fire(input, 'blur');
+
+		expect(applyDiagramEdit).not.toHaveBeenCalled();
+		expect(byId('mm-enum-name-error').textContent).toContain('element type');
+		expect(input.value).toBe('Zone');
 
 		unmount(c);
 	});
@@ -249,6 +292,27 @@ describe('ConnectionPopover', () => {
 			mapping: { source: 'Zone', target: 'Building' }
 		});
 		expect(selectDiagramNode).toHaveBeenCalledWith({ kind: 'relationship', name: 'Relates' });
+
+		unmount(c);
+	});
+
+	it('refuses to create a relationship type whose name is taken', () => {
+		// The default name is generated free, but the field is free TEXT — the one
+		// create path a user can type into must run the same guard.
+		const c = mount(ConnectionPopover, {
+			target: document.body,
+			props: { mm: MM, source: 'Zone', target: 'Building', onclose: () => {} }
+		});
+		flushSync();
+
+		const input = byId<HTMLInputElement>('mm-conn-name');
+		input.value = 'Contains';
+		fire(input, 'input');
+		byId('mm-conn-create').click();
+		flushSync();
+
+		expect(applyDiagramEdit).not.toHaveBeenCalled();
+		expect(byId('mm-conn-name-error').textContent).toContain('relationship type');
 
 		unmount(c);
 	});

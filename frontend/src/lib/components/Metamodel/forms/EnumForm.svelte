@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { ChevronDown, ChevronUp, Plus, Trash2 } from '@lucide/svelte';
 	import type { Metamodel } from '$lib/api/types';
+	import { typeNameCollision } from '$lib/metamodel/helpers';
 	import { applyDiagramEdit, selectDiagramNode } from '$lib/state';
 	import {
 		addBtnCls,
@@ -44,10 +45,27 @@
 		return applyDiagramEdit({ kind: 'setEnumLiterals', name, literals: next });
 	}
 
+	/** Same collision guard and same inline-error interaction as the two type
+	 * forms. An enum shares its name space with the element types (both are
+	 * things a `datatype` can name), and a duplicate here is worse than a
+	 * first-wins lookup: `enums` is a YAML MAPPING, so a second key of the same
+	 * name makes the draft stop parsing outright. */
+	let nameError = $state<string | null>(null);
+
 	function commitRename(input: HTMLInputElement): void {
 		const to = input.value.trim();
+		nameError = null;
 		if (to === name) return;
-		if (to === '' || !applyDiagramEdit({ kind: 'renameEnum', from: name, to })) {
+		if (to === '') {
+			input.value = name;
+			return;
+		}
+		const collision = typeNameCollision(mm, 'enum', to);
+		if (collision !== null) {
+			nameError = collision;
+			return;
+		}
+		if (!applyDiagramEdit({ kind: 'renameEnum', from: name, to })) {
 			input.value = name;
 			return;
 		}
@@ -97,6 +115,9 @@
 				}}
 			/>
 		</label>
+		{#if nameError !== null}
+			<p class="text-[10px] text-destructive" data-testid="mm-enum-name-error">{nameError}</p>
+		{/if}
 
 		<div class="flex flex-col gap-1.5">
 			<p class={headingCls}>Literals</p>
