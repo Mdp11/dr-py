@@ -167,30 +167,11 @@ describe('custom export drafts', () => {
 		expect(entry.show_row_numbers).toBe(false); // unaffected by the later mutation
 	});
 
-	it('KNOWN GAP: entryForTable copies a column export object BY REFERENCE — mutating the source column in place after add DOES leak into the entry', async () => {
-		// Requested in code review to prove copy-at-add independence at the
-		// per-column export-OBJECT level — the scalar test above (show_row_numbers)
-		// proves nothing, since a primitive is unconditionally read by value.
-		// Running this one reveals that Task 10's `overridesFromDefinition`
-		// ($lib/table/custom-export.ts) stores `col.export`/`col.json_export` BY
-		// REFERENCE, not by clone: `export: col.export ?? null` copies the array
-		// of ColumnOverride wrappers but not the export-options object each one
-		// points at. So this assertion documents the CURRENT (leaky) behavior
-		// rather than an invariant that holds unconditionally.
-		//
-		// It is harmless in production ONLY because every call site that edits a
-		// column's export options (`setColumnExportOptions`/`setColumnJsonOptions`
-		// in `$lib/table/columns.ts`) is PURE and REPLACES the object rather than
-		// mutating it in place — confirmed by a repo-wide grep for in-place
-		// `.export.<field> =` / `.json_export.<field> =` assignment (none found
-		// anywhere in `frontend/src`). If a future call site ever mutates
-		// `col.export`/`col.json_export` in place instead of replacing it, an
-		// open custom-export draft's entry would silently drift with it.
-		//
-		// Flagged to the coordinator as a design question for Task 10's helper —
-		// deliberately NOT fixed here (see task-11-report.md, "Fix round 1",
-		// finding 3 — fixing another task's helper without a design decision was
-		// explicitly out of scope for this round).
+	it('add copies a column export object — mutating the source column IN PLACE after add does not leak into the entry', async () => {
+		// Defends copy-at-add at the OBJECT level, not just the scalar/array
+		// level the test above covers: entryForTable's entry is STAGED and
+		// PERSISTED, so overridesFromDefinition ($lib/table/custom-export.ts)
+		// must clone col.export/col.json_export rather than alias them.
 		const tabId = 'exp:draft:1';
 		await ensureCustomExportDraft(tabId);
 		const defn: TableDefinition = {
@@ -207,7 +188,7 @@ describe('custom export drafts', () => {
 		defn.columns[0].export!.header = 'Mutated'; // in-place mutation, not a replace
 
 		const entry = getCustomExportDraft(tabId)!.entries[0];
-		expect(entry.columns[0].export?.header).toBe('Mutated'); // ⚠ proves the leak — see comment above
+		expect(entry.columns[0].export?.header).toBe('Original'); // unaffected
 	});
 
 	it('removeExportEntry drops the entry at the given index and dirties the draft', async () => {

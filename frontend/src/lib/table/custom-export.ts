@@ -16,7 +16,19 @@ export function applyEntryOverrides(defn: TableDefinition, entry: ExportEntry): 
 		...defn,
 		columns: defn.columns.map((col, i) => {
 			const ov = byIndex.get(i);
-			return { ...col, export: ov?.export ?? null, json_export: ov?.json_export ?? null };
+			// Clone, don't alias, the entry's option objects — the sibling of the
+			// same clone in overridesFromDefinition below. This display defn is
+			// exactly the shape a table-settings dialog edits through the ordinary
+			// column mutators (setColumnExportOptions/setColumnJsonOptions in
+			// columns.ts), which are pure and REPLACE the object; nothing here
+			// stops a future non-pure editor from doing `col.export.header = x`
+			// in place instead, which — unaliased — would rewrite the entry's
+			// STORED options out from under it.
+			return {
+				...col,
+				export: ov?.export ? { ...ov.export } : null,
+				json_export: ov?.json_export ? { ...ov.json_export } : null
+			};
 		}),
 		export_order: [...entry.export_order],
 		show_row_numbers: entry.show_row_numbers,
@@ -36,8 +48,15 @@ export function overridesFromDefinition(
 		if (col.export != null || col.json_export != null)
 			columns.push({
 				index,
-				export: col.export ?? null,
-				json_export: col.json_export ?? null
+				// Clone, don't alias, the column's option objects: this entry is
+				// STAGED and PERSISTED as the custom_export artifact's payload (see
+				// entryForTable below), unlike applyEntryOverrides' display-only
+				// output. Aliasing col.export/col.json_export here would let a LATER
+				// in-place edit of the source table silently rewrite an
+				// already-committed entry — copy-at-add has to mean copy, all the
+				// way down to the objects a column carries, not just the arrays.
+				export: col.export ? { ...col.export } : null,
+				json_export: col.json_export ? { ...col.json_export } : null
 			});
 	});
 	return {
