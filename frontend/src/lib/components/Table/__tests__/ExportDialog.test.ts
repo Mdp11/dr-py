@@ -579,4 +579,35 @@ describe('ExportDialog', () => {
 			vi.useRealTimers();
 		}
 	});
+
+	// --- json_split (P-13): one file per element, zipped ----------------------
+
+	it('json mode shows the split section and persists json_split', async () => {
+		await open('json');
+		const box = input('json-split-enabled');
+		box.checked = true;
+		box.dispatchEvent(new Event('change', { bubbles: true }));
+		flushSync();
+		type('json-split-template', 'DataFor${name}');
+		expect(current().json_split).toEqual({
+			enabled: true,
+			filename_template: 'DataFor${name}'
+		});
+	});
+
+	it('a tokenless template disables confirm and shows the hint', async () => {
+		await open('json');
+		const box = input('json-split-enabled');
+		box.checked = true;
+		box.dispatchEvent(new Event('change', { bubbles: true }));
+		flushSync();
+		type('json-split-template', 'static');
+		expect((byTestId(document, 'export-confirm') as HTMLButtonElement).disabled).toBe(true);
+		expect(byTestId(document, 'json-split-error').textContent).toContain('${name}');
+	});
+
+	it('xlsx mode hides the split section entirely', async () => {
+		await open('xlsx');
+		expect(byTestId(document, 'json-split-enabled')).toBeNull();
+	});
 });

@@ -30,12 +30,15 @@
 		updateTableExportSettings
 	} from '$lib/state';
 	import {
+		DEFAULT_JSON_SPLIT,
 		defaultJsonKeys,
 		moveExportEntry,
 		setColumnExportOptions,
 		setColumnJsonOptions,
+		setJsonSplitOptions,
 		setRowNumberExportOptions,
-		snakeCaseKey
+		snakeCaseKey,
+		templateIsValid
 	} from '$lib/table/columns';
 	import { ROW_NUMBER_SLOT, exportEntries, type ExportEntry } from '$lib/table/export-layout';
 	import { createColumnDrag } from '$lib/table/column-dnd.svelte';
@@ -124,6 +127,20 @@
 		if (!defn) return;
 		updateTableExportSettings(tabId, setRowNumberExportOptions(defn, p));
 	}
+
+	function patchSplit(p: Parameters<typeof setJsonSplitOptions>[1]): void {
+		if (!defn) return;
+		updateTableExportSettings(tabId, setJsonSplitOptions(defn, p));
+	}
+
+	// Belt-and-braces: the server still 422s a tokenless template
+	// (core/table/split.py::validate_template) — this only saves a round trip
+	// by disabling Export before the request is ever sent.
+	const splitTemplateInvalid = $derived(
+		format === 'json' &&
+			(defn?.json_split?.enabled ?? false) &&
+			!templateIsValid(defn?.json_split?.filename_template ?? '')
+	);
 
 	function toggleInclude(entry: ExportEntry): void {
 		if (entry.index === ROW_NUMBER_SLOT) patchRowNumber({ include: !entry.included });
@@ -336,6 +353,39 @@
 						One worksheet row per table row. Hiding a column here changes the file, never the grid.
 					{/if}
 				</p>
+
+				{#if format === 'json'}
+					{@const split = defn.json_split ?? DEFAULT_JSON_SPLIT}
+					<div
+						class="mb-2 flex flex-col gap-1.5 rounded border border-border/70 bg-muted/30 p-1.5 text-xs"
+					>
+						<label class="flex items-center gap-1.5">
+							<input
+								type="checkbox"
+								data-testid="json-split-enabled"
+								checked={split.enabled}
+								onchange={(e) => patchSplit({ enabled: e.currentTarget.checked })}
+							/>
+							One file per element (zip)
+						</label>
+						{#if split.enabled}
+							<input
+								type="text"
+								data-testid="json-split-template"
+								class="w-full rounded border border-input bg-card px-2 py-1"
+								placeholder={'DataFor${name}'}
+								value={split.filename_template}
+								oninput={(e) => patchSplit({ filename_template: e.currentTarget.value })}
+							/>
+							{#if !templateIsValid(split.filename_template)}
+								<p data-testid="json-split-error" class="text-destructive">
+									The template must contain {'${name}'}.
+								</p>
+							{/if}
+						{/if}
+					</div>
+				{/if}
+
 				<div class="flex flex-col gap-1">
 					{#each entries as entry, pos (entry.index)}
 						{@const col = entry.index === ROW_NUMBER_SLOT ? null : defn.columns[entry.index]}
@@ -474,7 +524,8 @@
 			<button
 				type="button"
 				data-testid="export-confirm"
-				class="rounded bg-primary px-3 py-1 text-xs text-primary-foreground transition-colors hover:bg-primary/80"
+				class="rounded bg-primary px-3 py-1 text-xs text-primary-foreground transition-colors hover:bg-primary/80 disabled:opacity-40"
+				disabled={splitTemplateInvalid}
 				onclick={runExport}
 			>
 				Export

@@ -29,6 +29,7 @@ import type {
 	ColumnExportOptions,
 	ColumnSource,
 	JsonColumnOptions,
+	JsonSplitOptions,
 	NavigationDefinition,
 	RowNumberExportOptions,
 	TableDefinition
@@ -428,6 +429,29 @@ export function setRowNumberExportOptions(
 ): TableDefinition {
 	const current = defn.export_row_number ?? DEFAULT_ROW_NUMBER_OPTIONS;
 	return { ...clone(defn), export_row_number: { ...current, ...patch } };
+}
+
+export const DEFAULT_JSON_SPLIT: JsonSplitOptions = {
+	enabled: false,
+	filename_template: ''
+};
+
+export const SPLIT_TOKEN = '${name}';
+
+/** Mirrors core/table/split.py::validate_template — the dialog blocks saving
+ * a tokenless template; the server 422 stays as backstop. */
+export function templateIsValid(template: string): boolean {
+	return template.includes(SPLIT_TOKEN);
+}
+
+/** Merge a patch into the JSON per-element split options, materializing the
+ *  options object if the definition had none. Pure — returns a new definition. */
+export function setJsonSplitOptions(
+	defn: TableDefinition,
+	patch: Partial<JsonSplitOptions>
+): TableDefinition {
+	const current = defn.json_split ?? DEFAULT_JSON_SPLIT;
+	return { ...clone(defn), json_split: { ...current, ...patch } };
 }
 
 /** Reorder the EXPORT list. `from`/`to` are positions in `exportEntries`, not

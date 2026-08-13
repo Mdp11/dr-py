@@ -20,7 +20,9 @@ import {
 	snakeCaseKey,
 	setColumnExportOptions,
 	setRowNumberExportOptions,
-	moveExportEntry
+	moveExportEntry,
+	setJsonSplitOptions,
+	templateIsValid
 } from '$lib/table/columns';
 import { ROW_NUMBER_SLOT } from '$lib/table/export-layout';
 import { ColumnSchema, TableDefinitionSchema } from '$lib/api/types';
@@ -792,5 +794,23 @@ describe('export_order bookkeeping', () => {
 			header: 'No.',
 			key: ''
 		});
+	});
+});
+
+describe('json_split', () => {
+	it('setJsonSplitOptions patches immutably with defaults', () => {
+		const d = defn(); // the file's existing factory
+		const on = setJsonSplitOptions(d, { enabled: true });
+		expect(on.json_split).toEqual({ enabled: true, filename_template: '' });
+		expect(d.json_split ?? null).toBeNull(); // input untouched
+		const named = setJsonSplitOptions(on, { filename_template: 'DataFor${name}' });
+		expect(named.json_split).toEqual({
+			enabled: true,
+			filename_template: 'DataFor${name}'
+		});
+	});
+	it('templateIsValid requires ${name}', () => {
+		expect(templateIsValid('DataFor${name}')).toBe(true);
+		expect(templateIsValid('static')).toBe(false);
 	});
 });

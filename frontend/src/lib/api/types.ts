@@ -927,6 +927,15 @@ export const ColumnSchema = z.discriminatedUnion('kind', [
 	ScriptColumnSchema
 ]);
 
+/** Per-element split for JSON export: one file per base element, zipped.
+ *  Mirrors core/table/split.py. `filename_template` must contain the
+ *  `${name}` token — validated by `templateIsValid` in `$lib/table/columns`. */
+export const JsonSplitOptionsSchema = z.object({
+	enabled: z.boolean().default(false),
+	filename_template: z.string().default('')
+});
+export type JsonSplitOptions = z.infer<typeof JsonSplitOptionsSchema>;
+
 export const TableDefinitionSchema = z.object({
 	schema_version: z.number().int().default(1),
 	row_source: RowSourceSchema,
@@ -934,7 +943,8 @@ export const TableDefinitionSchema = z.object({
 	default_cell_mode: z.enum(['collapse', 'expand']).default('collapse'),
 	show_row_numbers: z.boolean().default(false),
 	export_order: z.array(z.number().int()).default([]),
-	export_row_number: RowNumberExportOptionsSchema.nullish()
+	export_row_number: RowNumberExportOptionsSchema.nullish(),
+	json_split: JsonSplitOptionsSchema.nullish()
 });
 export type TableDefinition = z.infer<typeof TableDefinitionSchema>;
 export type Column = z.infer<typeof ColumnSchema>;
