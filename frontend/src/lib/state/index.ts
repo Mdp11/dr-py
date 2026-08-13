@@ -374,6 +374,22 @@ export {
 } from './snippet-editor.svelte';
 export { ensureSnippetDocs, getSnippetDocs, resetSnippetDocs } from './snippet-docs.svelte';
 export {
+	addExportEntry,
+	closeCustomExportDraft,
+	ensureCustomExportDraft,
+	getCustomExportDraft,
+	getCustomExportLockHolder,
+	hasDirtyCustomExportDrafts,
+	moveExportEntryInList,
+	removeExportEntry,
+	resetCustomExportEditors,
+	saveCustomExportDraft,
+	setCustomExportLockDenied,
+	setCustomExportName,
+	updateExportEntry,
+	type CustomExportDraft
+} from './custom-export-editor.svelte';
+export {
 	abandonTableEvaluationSuspension,
 	canRequestScriptErrors,
 	closeTableDraft,

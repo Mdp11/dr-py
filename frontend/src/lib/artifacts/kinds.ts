@@ -3,22 +3,24 @@
  * component that filters, labels, or icons artifact kinds reads from here.
  * Mirrors the backend registry in src/data_rover/api/artifact_kinds.py.
  */
-import { FileCode, Route, Table } from '@lucide/svelte';
+import { FileCode, FolderOutput, Route, Table } from '@lucide/svelte';
 
-export const REGISTERED_KINDS = ['navigation', 'table', 'code_snippet'] as const;
+export const REGISTERED_KINDS = ['navigation', 'table', 'code_snippet', 'custom_export'] as const;
 
 export type ArtifactKind = (typeof REGISTERED_KINDS)[number];
 
 export const KIND_ICONS: Record<ArtifactKind, typeof Route> = {
 	navigation: Route,
 	table: Table,
-	code_snippet: FileCode
+	code_snippet: FileCode,
+	custom_export: FolderOutput
 };
 
 export const KIND_LABEL: Record<ArtifactKind, string> = {
 	navigation: 'Navigation',
 	table: 'Table',
-	code_snippet: 'Snippet'
+	code_snippet: 'Snippet',
+	custom_export: 'Custom export'
 };
 
 /** Filter for headers whose kind is registered (unregistered kinds like the

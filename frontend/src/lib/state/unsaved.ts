@@ -1,4 +1,5 @@
 import type { ArtifactKind } from '$lib/artifacts/kinds';
+import { getCustomExportDraft, hasDirtyCustomExportDrafts } from './custom-export-editor.svelte';
 import { getDraft, hasDirtyNavDrafts } from './navigation-editor.svelte';
 import { getSnippetDraft, hasDirtySnippetDrafts } from './snippet-editor.svelte';
 import { isMetamodelEditorDirty } from './metamodel-editor.svelte';
@@ -34,7 +35,8 @@ export function hasUnsavedWork(): boolean {
 		getStagedViewDepth() > 0 ||
 		hasDirtyTableDrafts() ||
 		hasDirtyNavDrafts() ||
-		hasDirtySnippetDrafts()
+		hasDirtySnippetDrafts() ||
+		hasDirtyCustomExportDrafts()
 	);
 }
 
@@ -48,7 +50,7 @@ export function hasUnsavedWork(): boolean {
  * buffer-vs-baseline check instead of the draft lookup below.
  */
 export function isTabDirty(
-	kind: 'navigation' | 'table' | 'snippet' | 'metamodel',
+	kind: 'navigation' | 'table' | 'snippet' | 'metamodel' | 'custom_export',
 	tabId: string
 ): boolean {
 	if (kind === 'metamodel') return isMetamodelEditorDirty();
@@ -57,7 +59,9 @@ export function isTabDirty(
 			? getTableDraft(tabId)
 			: kind === 'snippet'
 				? getSnippetDraft(tabId)
-				: getDraft(tabId);
+				: kind === 'custom_export'
+					? getCustomExportDraft(tabId)
+					: getDraft(tabId);
 	if (!draft) return false;
 	return draft.dirty || draft.artifactId === null;
 }
@@ -65,10 +69,11 @@ export function isTabDirty(
 /**
  * `isTabDirty` addressed by artifact id — sidebar rows only know the artifact.
  * A saved artifact's tab id is deterministic (`tbl:<id>` / `nav:<id>` /
- * `snip:<id>`), and only an OPEN artifact has a draft, so a closed artifact is
- * never dirty.
+ * `snip:<id>` / `exp:<id>`), and only an OPEN artifact has a draft, so a
+ * closed artifact is never dirty.
  */
 export function isArtifactDirty(kind: ArtifactKind, artifactId: string): boolean {
 	if (kind === 'code_snippet') return isTabDirty('snippet', `snip:${artifactId}`);
+	if (kind === 'custom_export') return isTabDirty('custom_export', `exp:${artifactId}`);
 	return isTabDirty(kind, `${kind === 'table' ? 'tbl' : 'nav'}:${artifactId}`);
 }

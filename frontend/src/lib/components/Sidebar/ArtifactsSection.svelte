@@ -57,10 +57,15 @@
 		}
 	];
 
+	// `custom_export` has no entry in SECTIONS yet (that section's browse/open/
+	// rename/delete chrome lands with the custom-export editor components), but
+	// this record must stay TOTAL over ArtifactKind so a future section slots in
+	// without a silent gap here.
 	let collapsed = $state<Record<ArtifactKind, boolean>>({
 		navigation: false,
 		table: false,
-		code_snippet: false
+		code_snippet: false,
+		custom_export: false
 	});
 	const editable = $derived(canEdit());
 

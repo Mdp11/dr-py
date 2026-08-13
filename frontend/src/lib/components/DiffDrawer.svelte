@@ -125,7 +125,8 @@
 	const ARTIFACT_KIND_LABEL: Record<ArtifactKind, string> = {
 		navigation: 'navigation',
 		table: 'table',
-		code_snippet: 'code snippet'
+		code_snippet: 'code snippet',
+		custom_export: 'custom export'
 	};
 
 	function artifactEntryId(e: StagedArtifactEntry): string {

@@ -117,6 +117,12 @@ describe('dynamic workspace tabs', () => {
 		const draft = openArtifactTab('snippet', { artifactId: null, title: 'New snippet' });
 		expect(draft).toMatch(/^snip:draft:/);
 	});
+
+	it('opens custom_export tabs under the exp prefix', () => {
+		const id = openArtifactTab('custom_export', { artifactId: 'a', title: 't' });
+		expect(id).toBe('exp:a');
+		expect(getDynamicTabs().find((t) => t.id === id)?.kind).toBe('custom_export');
+	});
 });
 
 describe('metamodel singleton tab', () => {
