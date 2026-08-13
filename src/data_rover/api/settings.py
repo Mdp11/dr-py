@@ -112,6 +112,12 @@ class Settings(BaseSettings):
     #: bounded per-client feed queue. A client whose queue overflows is dropped
     #: and reconnects (Phase 5). Large enough to absorb a burst of commits.
     feed_queue_max: int = 256
+    #: xlsx export autofit ceiling, in pixels (U-2): one huge cell must not
+    #: blow a column out to an unusable width, but 300 (~43 chars) proved too
+    #: tight in practice. ~86 chars by default; Excel's own hard cap is 1790.
+    #: Definition ``width_px`` values stay deliberately ignored on export —
+    #: on-screen widths are a display preference, the export always autofits.
+    xlsx_autofit_max_px: int = 600
     #: run the background validation sweep inline (synchronously) on the
     #: load/upload/hydrate paths. False in production; the API test conftest
     #: pins it true so tests keep deterministic "seeded after load" semantics.

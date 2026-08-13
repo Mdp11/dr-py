@@ -289,13 +289,12 @@ already carry `IssueCategory` (STRUCTURAL / CONFORMANCE) plus a per-validator id
 for a user-facing filter; the validator (endpoint typing / multiplicity / facets /
 uniqueness / …) is probably the right one.
 
-### U-2 · xlsx autofit stops at a ceiling · `open` · **confirmed** · one-line
-Not a bug — a deliberate cap. `AUTOFIT_MAX_PX = 300` (~43 characters) in
-`src/data_rover/api/table_export.py:43`, applied at `:188` via `ws.autofit(AUTOFIT_MAX_PX)`
-so one huge cell can't blow a column out (Excel's own hard cap is 1790px). Also relevant:
-the export **deliberately ignores** each definition's on-screen `width_px`. Fix is a
-choice, not an investigation — raise the constant, make it a setting, or honour per-column
-widths for columns that ask for it.
+### U-2 · xlsx autofit stops at a ceiling · `done` (2026-08-12)
+The `AUTOFIT_MAX_PX = 300` constant became the `xlsx_autofit_max_px` setting
+(`DATA_ROVER_XLSX_AUTOFIT_MAX_PX`) with the default raised to **600px** (~86 chars;
+Excel's hard cap is 1790). Read per call in `build_workbook`, so a fresh env value takes
+effect without a restart. The export still deliberately ignores per-definition
+`width_px` — that half was left as-is (display preference, not export layout).
 
 ### U-3 · Snippet autocomplete: Tab doesn't accept the first suggestion · `open`
 `frontend/src/lib/components/Snippet/` (CodeMirror). Wanted: Tab accepts the top

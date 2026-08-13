@@ -200,6 +200,45 @@ def test_export_styling_autofit_filters_borders(client):
     assert w is not None and 0 < w < 90
 
 
+def _export_long_name_col_width(client: TestClient) -> float:
+    """One Block whose name is 200 chars; export a one-column table and
+    return column A's autofitted width in char units (~px/7)."""
+    _bootstrap_model(client)
+    client.post(
+        papi("/model/elements"),
+        json={"type": "Block", "properties": {"name": "x" * 200, "mass": 1.0}},
+        headers=AUTH_HEADERS,
+    )
+    body = {
+        "definition": {
+            "row_source": {"kind": "scope", "types": ["Block"]},
+            "columns": [{"kind": "element", "source": {"kind": "row"}, "header": "Block"}],
+        }
+    }
+    r = client.post(papi("/tables/export"), json=body, headers=AUTH_HEADERS)
+    assert r.status_code == 200, r.text
+    ws = load_workbook(io.BytesIO(r.content)).active
+    assert ws is not None
+    w = ws.column_dimensions["A"].width
+    assert w is not None
+    return w
+
+
+def test_autofit_cap_default_allows_wider_columns(client):
+    # U-2: the cap default moved from 300px (~43 chars — the ceiling the owner
+    # kept hitting) to 600px (~86 chars). A 200-char cell must clamp near the
+    # NEW ceiling, well past the old one.
+    w = _export_long_name_col_width(client)
+    assert 50 < w <= 90, w
+
+
+def test_autofit_cap_is_a_setting(client, monkeypatch):
+    # U-2: DATA_ROVER_XLSX_AUTOFIT_MAX_PX tunes the cap (~px/7 char units).
+    monkeypatch.setenv("DATA_ROVER_XLSX_AUTOFIT_MAX_PX", "150")
+    w = _export_long_name_col_width(client)
+    assert 0 < w < 25, w
+
+
 def test_export_row_numbers_column(client):
     # Item 10: `show_row_numbers` prepends a 1-based "#" column, numbered in
     # export row order (which follows the current sort).

@@ -27,6 +27,7 @@ from collections.abc import Callable, Iterable
 
 import xlsxwriter  # type: ignore[import-untyped]
 
+from data_rover.api.settings import get_settings
 from data_rover.core.model.model import Model
 from data_rover.core.model.naming import display_name
 from data_rover.core.table.cells import (
@@ -39,9 +40,10 @@ from data_rover.core.table.cells import (
     ValuesCell,
 )
 
-#: Autofit cap, in pixels (~43 characters): one huge cell must not blow a
-#: column out to an unusable width. Excel's own hard cap is 1790px.
-AUTOFIT_MAX_PX = 300
+#: The autofit ceiling lives in settings as ``xlsx_autofit_max_px`` (U-2):
+#: one huge cell must not blow a column out to an unusable width, but the cap
+#: is an operator's taste, not an invariant. Read per call in
+#: ``build_workbook``, so a fresh env value takes effect without a restart.
 
 #: xlsx forbids these in a sheet name; the old openpyxl builder let them
 #: bubble up as a 422 (`ValueError`), xlsxwriter would raise a non-ValueError
@@ -95,9 +97,10 @@ def build_workbook(
 ) -> bytes:
     """Render `row_iter` into a single-sheet workbook: bold bordered header
     row with filter dropdowns and frozen panes, thin borders on every data
-    cell, and column widths autofitted to content (capped at
-    `AUTOFIT_MAX_PX`; definition `width_px` values are deliberately ignored —
-    on-screen widths are a display preference, the export always autofits).
+    cell, and column widths autofitted to content (capped at the
+    `xlsx_autofit_max_px` setting; definition `width_px` values are
+    deliberately ignored — on-screen widths are a display preference, the
+    export always autofits).
 
     `notice_provider`, if given, is called AFTER `row_iter` is fully consumed
     (not before) — callers whose "should there be a notice" flag only settles
@@ -183,9 +186,9 @@ def build_workbook(
 
         # autofit measures whatever has been written so far, so it must run
         # BEFORE the notice row: the notice text (~130 chars) is not data and
-        # must not drive column A's width to the AUTOFIT_MAX_PX cap regardless
+        # must not drive column A's width to the autofit cap regardless
         # of column A's actual content.
-        ws.autofit(AUTOFIT_MAX_PX)
+        ws.autofit(get_settings().xlsx_autofit_max_px)
 
         if notice_provider is not None:
             text = notice_provider()
