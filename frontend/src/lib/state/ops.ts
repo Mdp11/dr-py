@@ -1,3 +1,4 @@
+import type { ArtifactKind } from '$lib/artifacts/kinds';
 import type { Element, Relationship } from '$lib/api/types';
 
 /**
@@ -59,7 +60,7 @@ export type ArtifactOp =
 	| {
 			kind: 'create_artifact';
 			temp_id: string;
-			artifact_kind: 'navigation' | 'table' | 'code_snippet';
+			artifact_kind: ArtifactKind;
 			name: string;
 			payload: Record<string, unknown>;
 	  }

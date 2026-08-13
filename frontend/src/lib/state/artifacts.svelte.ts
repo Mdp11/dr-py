@@ -20,6 +20,7 @@
  */
 import * as api from '$lib/api/artifacts';
 import type { ArtifactHeader } from '$lib/api/types';
+import type { ArtifactKind } from '$lib/artifacts/kinds';
 import {
 	onArtifactCommit,
 	overlayArtifactHeaders,
@@ -93,9 +94,7 @@ export function artifactHeaderById(id: string): ArtifactHeader | undefined {
  * than filtering {@link getArtifactHeaders} by hand, so the next picker added
  * inherits it instead of re-discovering the hazard.
  */
-export function referenceableArtifactHeaders(
-	kind: 'navigation' | 'table' | 'code_snippet'
-): ArtifactHeader[] {
+export function referenceableArtifactHeaders(kind: ArtifactKind): ArtifactHeader[] {
 	return getArtifactHeaders().filter((h) => h.kind === kind && !isTempId(h.id));
 }
 
@@ -115,7 +114,7 @@ export function referenceableArtifactHeaders(
  * brand-new one), so re-saving one under its own name is fine.
  */
 export function assertNoNameClash(
-	kind: 'navigation' | 'table' | 'code_snippet',
+	kind: ArtifactKind,
 	name: string,
 	excludeId: string | null
 ): void {

@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { FileCode, Route, Table } from '@lucide/svelte';
+	import { Route } from '@lucide/svelte';
+	import { KIND_ICONS, type ArtifactKind } from '$lib/artifacts/kinds';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -19,11 +20,6 @@
 	type Action = 'create' | 'reuse' | 'copy';
 	type Phase = 'pick' | 'review' | 'result';
 
-	const ICONS: Record<string, typeof Route> = {
-		navigation: Route,
-		table: Table,
-		code_snippet: FileCode
-	};
 	const ACTION_LABEL: Record<Action, string> = {
 		create: 'Create',
 		reuse: 'Reuse existing',
@@ -264,7 +260,7 @@
 
 				<div class="flex max-h-72 flex-col gap-2 overflow-y-auto">
 					{#each plan?.entries ?? [] as e (e.bundle_id)}
-						{@const Icon = ICONS[e.kind] ?? Route}
+						{@const Icon = KIND_ICONS[e.kind as ArtifactKind] ?? Route}
 						{@const action = effectiveAction(e)}
 						<div
 							data-testid={`import-row-${e.bundle_id}`}

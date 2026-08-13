@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { ChevronDown, ChevronRight, FileCode, Plus, Route, Table } from '@lucide/svelte';
+	import { ChevronDown, ChevronRight, Plus, Route } from '@lucide/svelte';
+	import { KIND_ICONS, type ArtifactKind } from '$lib/artifacts/kinds';
 	import {
 		canEdit,
 		getArtifactHeaders,
@@ -20,8 +21,6 @@
 	import { confirm } from '$lib/state/confirm.svelte';
 	import { isTempId } from '$lib/state/ops';
 
-	type ArtifactKind = 'navigation' | 'table' | 'code_snippet';
-
 	type SectionConfig = {
 		kind: ArtifactKind;
 		title: string;
@@ -39,21 +38,21 @@
 			kind: 'navigation',
 			title: 'Navigations',
 			singular: 'navigation',
-			icon: Route,
+			icon: KIND_ICONS.navigation,
 			open: (o) => openNavigationTab(o)
 		},
 		{
 			kind: 'table',
 			title: 'Tables',
 			singular: 'table',
-			icon: Table,
+			icon: KIND_ICONS.table,
 			open: (o) => openArtifactTab('table', o)
 		},
 		{
 			kind: 'code_snippet',
 			title: 'Snippets',
 			singular: 'snippet',
-			icon: FileCode,
+			icon: KIND_ICONS.code_snippet,
 			open: (o) => openArtifactTab('snippet', o)
 		}
 	];

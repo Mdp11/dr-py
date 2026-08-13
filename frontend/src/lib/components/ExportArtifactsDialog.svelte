@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { SvelteSet } from 'svelte/reactivity';
-	import { FileCode, Route, Table, TriangleAlert } from '@lucide/svelte';
+	import { Route, TriangleAlert } from '@lucide/svelte';
+	import { KIND_ICONS, SECTION_KINDS, type ArtifactKind } from '$lib/artifacts/kinds';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -19,12 +20,10 @@
 	} from '$lib/api/artifact-bundle';
 	import { saveResponseToFile } from '$lib/util/fileSave';
 
-	type ArtifactKind = 'navigation' | 'table' | 'code_snippet';
-
 	const SECTIONS: { kind: ArtifactKind; title: string; icon: typeof Route }[] = [
-		{ kind: 'navigation', title: 'Navigations', icon: Route },
-		{ kind: 'table', title: 'Tables', icon: Table },
-		{ kind: 'code_snippet', title: 'Snippets', icon: FileCode }
+		{ kind: 'navigation', title: 'Navigations', icon: KIND_ICONS.navigation },
+		{ kind: 'table', title: 'Tables', icon: KIND_ICONS.table },
+		{ kind: 'code_snippet', title: 'Snippets', icon: KIND_ICONS.code_snippet }
 	];
 
 	// A local mirror of the store's open flag, bound two-way to Dialog.Root —
@@ -41,7 +40,6 @@
 	// toggleAll, …) from the filtered list — otherwise a stray unrenderable row
 	// can never be checked, which makes "Select all" permanently unreachable
 	// and would silently promote that row to an export ROOT via toggleAll.
-	const SECTION_KINDS: ReadonlySet<string> = new Set(SECTIONS.map((s) => s.kind));
 	const headers = $derived(getCommittedArtifactHeaders().filter((h) => SECTION_KINDS.has(h.kind)));
 	const hasStaged = $derived(getStagedArtifactDepth() > 0);
 

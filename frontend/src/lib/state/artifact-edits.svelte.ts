@@ -41,12 +41,13 @@ import { SvelteMap } from 'svelte/reactivity';
 import { createTempId } from './ops';
 import type { ArtifactOp } from './ops';
 import type { ArtifactHeader } from '$lib/api/types';
+import type { ArtifactKind } from '$lib/artifacts/kinds';
 
 export type StagedArtifactEntry =
 	| {
 			kind: 'create';
 			tempId: string;
-			artifactKind: 'navigation' | 'table' | 'code_snippet';
+			artifactKind: ArtifactKind;
 			name: string;
 			payload: Record<string, unknown>;
 			sourceTabId: string | null;
@@ -132,7 +133,7 @@ export function onArtifactStagedDelete(cb: (id: string) => void): () => void {
  * into, since the temp id is minted here). Returns the temp id so the caller
  * can bind its editor tab to it. */
 export function stageArtifactCreate(
-	kind: 'navigation' | 'table' | 'code_snippet',
+	kind: ArtifactKind,
 	name: string,
 	payload: Record<string, unknown>,
 	sourceTabId: string | null

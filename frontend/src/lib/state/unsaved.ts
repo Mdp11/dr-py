@@ -1,3 +1,4 @@
+import type { ArtifactKind } from '$lib/artifacts/kinds';
 import { getDraft, hasDirtyNavDrafts } from './navigation-editor.svelte';
 import { getSnippetDraft, hasDirtySnippetDrafts } from './snippet-editor.svelte';
 import { isMetamodelEditorDirty } from './metamodel-editor.svelte';
@@ -67,10 +68,7 @@ export function isTabDirty(
  * `snip:<id>`), and only an OPEN artifact has a draft, so a closed artifact is
  * never dirty.
  */
-export function isArtifactDirty(
-	kind: 'navigation' | 'table' | 'code_snippet',
-	artifactId: string
-): boolean {
+export function isArtifactDirty(kind: ArtifactKind, artifactId: string): boolean {
 	if (kind === 'code_snippet') return isTabDirty('snippet', `snip:${artifactId}`);
 	return isTabDirty(kind, `${kind === 'table' ? 'tbl' : 'nav'}:${artifactId}`);
 }
