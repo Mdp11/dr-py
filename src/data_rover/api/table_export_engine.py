@@ -38,6 +38,12 @@ from data_rover.core.table.export_layout import (
 from data_rover.core.table.json_export import render_json
 from data_rover.core.table.resolve import table_has_script
 from data_rover.core.table.schema import TableDefinition
+from data_rover.core.table.split import (
+    partition_label,
+    render_filenames,
+    split_partitions,
+    validate_template,
+)
 
 from .deps import Session
 from .schemas import ScriptStatusOut
@@ -101,6 +107,13 @@ ZIP_DATE_TIME = (1980, 1, 1, 0, 0, 0)
 
 
 def build_zip(files: list[tuple[str, bytes]]) -> bytes:
+    """Zip `files` (name, blob) pairs with every member timestamp pinned to
+    `ZIP_DATE_TIME`. `zipfile` otherwise stamps each entry with the current
+    wall-clock time, which would make two exports of IDENTICAL content
+    produce DIFFERENT bytes — the same determinism stance the WASM snippet
+    runner takes for its own output (see `core/script/README.md`). Pinning
+    the timestamp is what makes a byte-equality test on the zip exact rather
+    than merely "same entries"."""
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for filename, blob in files:
@@ -149,9 +162,9 @@ def run_table_export(
     the background sweep and answers `ExportPending` (the callers translate that
     to 202 + `Retry-After: 1`) rather than shipping a half-computed file. The
     202-vs-ship decision is made by RE-PROBING the cache after the kick/join
-    (decision table at the call site): a finished sweep does not imply a
-    complete cache, so "would a retry help" — not "is the job over" — is the
-    discriminator. When it would not (a terminal sweep that still left holes,
+    (decision table below, in this function's body): a finished sweep does not
+    imply a complete cache, so "would a retry help" — not "is the job over" —
+    is the discriminator. When it would not (a terminal sweep that still left holes,
     or no runner at all) the file still ships with pending cells surfaced —
     but the two formats carry that differently. The `.xlsx` branch renders
     each affected cell `#ERROR` and appends a trailing notice row; the `.json`
@@ -160,6 +173,14 @@ def run_table_export(
     `core/table/json_export.py`). Both branches still set `degraded=True` on
     the returned `ExportFiles` when this happens, so a caller can detect
     degradation without parsing the body."""
+    split = render_defn.json_split
+    split_on = format == "json" and split is not None and split.enabled
+    if split_on:
+        assert split is not None  # split_on implies this; narrows for mypy
+        # Strict by decision (spec §2): the ONE export setting that rejects
+        # rather than normalizes. Before any evaluation — a bad template must
+        # not cost a whole-table pass. ValueError -> the routes' 422 mapping.
+        validate_template(split.filename_template)
     script_ctx = None
     acquired = False
     try:
@@ -378,6 +399,43 @@ def run_table_export(
             # export-effective definition at all, which is the render-only
             # boundary made visible instead of merely argued.
             eff = export_definition(render_defn)
+            rn = (
+                (layout.row_number_pos, layout.row_number_key)
+                if layout.row_number_pos is not None
+                else None
+            )
+            if split_on:
+                assert split is not None  # split_on implies this
+                # Split sits ABOVE the renderer, not inside it: each partition
+                # goes through the SAME `render_json` call with the SAME
+                # layout arguments as the unsplit path, so every split file is
+                # an ARRAY and concatenating them reproduces the unsplit
+                # export byte-for-byte (see the module docstring on
+                # `core/table/split.py`).
+                parts = split_partitions(ordered, all_rows)
+                labels = [partition_label(model, b) for b, _ in parts]
+                stems = render_filenames(split.filename_template, labels)
+                files = []
+                for stem, (_, pairs) in zip(stems, parts, strict=True):
+                    part_docs = render_json(
+                        model,
+                        eff,
+                        [rk for rk, _ in pairs],
+                        (cells for _, cells in pairs),
+                        build.base_slots,
+                        order=layout.rank,
+                        row_number=rn,
+                    )
+                    part_blob = json.dumps(
+                        part_docs, ensure_ascii=False, indent=2
+                    ).encode("utf-8")
+                    files.append((f"{stem}.json", part_blob))
+                return ExportFiles(
+                    files=files,
+                    truncated=truncated,
+                    degraded=_degraded(),
+                    archive=True,
+                )
             # `render_json` indexes cells by DEFINITION column index, so it
             # gets the UNFILTERED rows — excluded columns are dropped inside it
             # by their `None` key, not by pre-slicing the row like the xlsx
@@ -389,9 +447,7 @@ def run_table_export(
                 all_rows,
                 build.base_slots,
                 order=layout.rank,
-                row_number=(layout.row_number_pos, layout.row_number_key)
-                if layout.row_number_pos is not None
-                else None,
+                row_number=rn,
             )
             blob = json.dumps(docs, ensure_ascii=False, indent=2).encode("utf-8")
             filename = f"{name}.json"
