@@ -37,6 +37,20 @@ export type ExportResult =
 	| { kind: 'ready'; blob: Blob; filename: string }
 	| { kind: 'preparing'; done: number; total: number | null };
 
+/**
+ * Parse the `filename` parameter out of a response's `Content-Disposition`
+ * header (e.g. `attachment; filename="table.xlsx"`). Returns `undefined` when
+ * the header is absent or unparseable — callers supply their own fallback
+ * name. Shared by every download-shaped route ({@link exportTable},
+ * `api/exports.ts`'s `runCustomExport`) so attachment parsing lives in
+ * exactly one place.
+ */
+export function parseAttachmentFilename(res: Response): string | undefined {
+	const disp = res.headers.get('content-disposition') ?? '';
+	const m = /filename="([^"]+)"/.exec(disp);
+	return m?.[1];
+}
+
 /** Export the current definition (or saved artifact) as `.xlsx` or `.json`.
  * Resolves to `{ kind: 'ready' }` with the Blob once the backend has it, or
  * `{ kind: 'preparing' }` while the script-cache sweep is still filling in
@@ -68,12 +82,10 @@ export async function exportTable(
 		const body = (await res.json()) as { done?: number; total?: number | null };
 		return { kind: 'preparing', done: body.done ?? 0, total: body.total ?? null };
 	}
-	const disp = res.headers.get('content-disposition') ?? '';
-	const m = /filename="([^"]+)"/.exec(disp);
 	return {
 		kind: 'ready',
 		blob: await res.blob(),
-		filename: m?.[1] ?? `table.${args.format ?? 'xlsx'}`
+		filename: parseAttachmentFilename(res) ?? `table.${args.format ?? 'xlsx'}`
 	};
 }
 

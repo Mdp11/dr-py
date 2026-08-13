@@ -951,6 +951,36 @@ export type Column = z.infer<typeof ColumnSchema>;
 export type RowSource = z.infer<typeof RowSourceSchema>;
 export type ColumnSource = z.infer<typeof ColumnSourceSchema>;
 
+// ---- Custom export (kind='custom_export' artifact payload) -----------------
+// Wire mirror of core/table/custom_export.py. A named collection of table
+// exports whose presentation overrides live IN the artifact, keyed by column
+// index against each source table's CURRENT definition (see
+// $lib/table/custom-export.ts for the apply/copy helpers).
+export const ColumnOverrideSchema = z.object({
+	index: z.number().int().nonnegative(),
+	export: ColumnExportOptionsSchema.nullish(),
+	json_export: JsonColumnOptionsSchema.nullish()
+});
+export type ColumnOverride = z.infer<typeof ColumnOverrideSchema>;
+
+export const ExportEntrySchema = z.object({
+	source: z.object({ ref: z.string() }),
+	name: z.string().default(''),
+	format: z.enum(['xlsx', 'json']).default('xlsx'),
+	columns: z.array(ColumnOverrideSchema).default([]),
+	export_order: z.array(z.number().int()).default([]),
+	show_row_numbers: z.boolean().default(false),
+	export_row_number: RowNumberExportOptionsSchema.nullish(),
+	json_split: JsonSplitOptionsSchema.nullish()
+});
+export type ExportEntry = z.infer<typeof ExportEntrySchema>;
+
+export const CustomExportDefinitionSchema = z.object({
+	schema_version: z.number().default(1),
+	entries: z.array(ExportEntrySchema).default([])
+});
+export type CustomExportDefinition = z.infer<typeof CustomExportDefinitionSchema>;
+
 // ---- Table page (evaluate response) ----------------------------------------
 export const TableColumnSchema = z.object({
 	kind: z.string(),
