@@ -191,6 +191,25 @@ describe('custom export drafts', () => {
 		expect(entry.columns[0].export?.header).toBe('Original'); // unaffected
 	});
 
+	it('add copies the definition-level json_split object — mutating it IN PLACE after add does not leak into the entry', async () => {
+		// Same invariant as the column export-object test above, at the
+		// definition level: export_row_number and json_split are flat option
+		// objects too, and overridesFromDefinition must clone them for the same
+		// reason (the entry is staged and persisted).
+		const tabId = 'exp:draft:1';
+		await ensureCustomExportDraft(tabId);
+		const defn: TableDefinition = {
+			...TABLE_DEFN,
+			json_split: { enabled: true, filename_template: 'original-${name}' }
+		};
+
+		addExportEntry(tabId, 'tbl-1', 'Alpha', defn);
+		defn.json_split!.filename_template = 'mutated-${name}'; // in-place, not a replace
+
+		const entry = getCustomExportDraft(tabId)!.entries[0];
+		expect(entry.json_split?.filename_template).toBe('original-${name}'); // unaffected
+	});
+
 	it('removeExportEntry drops the entry at the given index and dirties the draft', async () => {
 		const tabId = 'exp:draft:1';
 		await ensureCustomExportDraft(tabId);

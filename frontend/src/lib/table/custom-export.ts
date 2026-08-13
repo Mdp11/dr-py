@@ -32,8 +32,10 @@ export function applyEntryOverrides(defn: TableDefinition, entry: ExportEntry): 
 		}),
 		export_order: [...entry.export_order],
 		show_row_numbers: entry.show_row_numbers,
-		export_row_number: entry.export_row_number ?? null,
-		json_split: entry.json_split ?? null
+		// Same clone-not-alias reasoning as columns' export/json_export above:
+		// both are flat plain option objects the entry owns.
+		export_row_number: entry.export_row_number ? { ...entry.export_row_number } : null,
+		json_split: entry.json_split ? { ...entry.json_split } : null
 	};
 }
 
@@ -63,8 +65,13 @@ export function overridesFromDefinition(
 		columns,
 		export_order: [...defn.export_order],
 		show_row_numbers: defn.show_row_numbers,
-		export_row_number: defn.export_row_number ?? null,
-		json_split: defn.json_split ?? null
+		// Same clone-not-alias reasoning as columns' export/json_export above:
+		// both are flat plain option objects (RowNumberExportOptions,
+		// JsonSplitOptions) on the DEFINITION, and this entry is staged and
+		// persisted — a later in-place edit of the table's row-number or
+		// json-split settings must not rewrite an already-committed entry.
+		export_row_number: defn.export_row_number ? { ...defn.export_row_number } : null,
+		json_split: defn.json_split ? { ...defn.json_split } : null
 	};
 }
 
