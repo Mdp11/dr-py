@@ -484,7 +484,8 @@ export function applyEdit(doc: Document, cmd: YamlEditCommand): void {
 				seq === null
 					? -1
 					: seq.items.findIndex((it) => isMap(it) && (it as YAMLMap).get('name') === cmd.name);
-			if (seq === null || idx < 0) throw new YamlEditError(`unknown relationships type: ${cmd.name}`);
+			if (seq === null || idx < 0)
+				throw new YamlEditError(`unknown relationships type: ${cmd.name}`);
 			seq.items.splice(idx, 1);
 			// Cascade (spec §3): extends pointing at it is auto-cleared; key DSL
 			// `out:`/`in:` entries naming it are left dangling for lint to flag —

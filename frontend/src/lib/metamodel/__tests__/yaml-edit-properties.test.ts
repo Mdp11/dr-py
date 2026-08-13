@@ -73,7 +73,11 @@ describe('property commands', () => {
 	it('unknown property throws', () => {
 		const { doc } = parseDraft(FIXTURE);
 		expect(() =>
-			applyEdit(doc, { kind: 'removeProperty', owner: { kind: 'element', name: 'Zone' }, propName: 'nope' })
+			applyEdit(doc, {
+				kind: 'removeProperty',
+				owner: { kind: 'element', name: 'Zone' },
+				propName: 'nope'
+			})
 		).toThrow();
 	});
 });

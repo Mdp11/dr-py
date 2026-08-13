@@ -81,7 +81,10 @@ function ownKeyProps(key: string[] | null): string[] {
 	return (key ?? []).filter((k) => !k.startsWith('out:') && !k.startsWith('in:'));
 }
 
-export function buildDiagram(mm: Metamodel): { nodes: DiagramNodeSpec[]; edges: DiagramEdgeSpec[] } {
+export function buildDiagram(mm: Metamodel): {
+	nodes: DiagramNodeSpec[];
+	edges: DiagramEdgeSpec[];
+} {
 	const nodes: DiagramNodeSpec[] = [];
 
 	for (const el of mm.elements) {
@@ -98,7 +101,11 @@ export function buildDiagram(mm: Metamodel): { nodes: DiagramNodeSpec[]; edges: 
 		});
 	}
 	for (const [name, literals] of Object.entries(mm.enums)) {
-		nodes.push({ id: nodeIdFor({ kind: 'enum', name }), type: 'enumType', data: { name, literals } });
+		nodes.push({
+			id: nodeIdFor({ kind: 'enum', name }),
+			type: 'enumType',
+			data: { name, literals }
+		});
 	}
 	const boxed = new Set(mm.relationships.filter((r) => needsAssocBox(r, mm)).map((r) => r.name));
 	for (const rel of mm.relationships) {
@@ -206,7 +213,10 @@ const MAX_ROWS = 12;
  * this so the two never compute different sizes for the same node). Row
  * count is capped so a type with dozens of properties doesn't blow out the
  * layout — the node scrolls internally past the cap rather than growing. */
-export function nodeSize(spec: DiagramNodeSpec, collapsed: boolean): { width: number; height: number } {
+export function nodeSize(
+	spec: DiagramNodeSpec,
+	collapsed: boolean
+): { width: number; height: number } {
 	const width = spec.type === 'enumType' ? 200 : 240;
 	if (collapsed) return { width, height: HEADER_HEIGHT };
 	const rows =

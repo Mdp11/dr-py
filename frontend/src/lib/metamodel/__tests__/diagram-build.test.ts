@@ -25,14 +25,23 @@ describe('buildDiagram', () => {
 	it('emits generalization edges for element extends', () => {
 		const { edges } = buildDiagram(mm());
 		expect(edges).toContainEqual(
-			expect.objectContaining({ id: 'gen:el:Zone', source: 'el:Zone', target: 'el:NamedElement', type: 'generalization' })
+			expect.objectContaining({
+				id: 'gen:el:Zone',
+				source: 'el:Zone',
+				target: 'el:NamedElement',
+				type: 'generalization'
+			})
 		);
 	});
 
 	it('a plain relationship renders as one association edge per mapping', () => {
 		const { edges, nodes } = buildDiagram(mm());
 		const contains = edges.find((e) => e.data.relName === 'Contains')!;
-		expect(contains).toMatchObject({ source: 'el:Zone', target: 'el:Building', type: 'association' });
+		expect(contains).toMatchObject({
+			source: 'el:Zone',
+			target: 'el:Building',
+			type: 'association'
+		});
 		expect(contains.data.containment).toBe(true);
 		expect(contains.data.sourceMult).toBe('1');
 		expect(nodes.some((n) => n.id === 'rel:Contains')).toBe(false);
@@ -53,14 +62,21 @@ describe('buildDiagram', () => {
 		const { nodes, edges } = buildDiagram(mm());
 		expect(nodes.some((n) => n.id === 'rel:Observes')).toBe(true);
 		expect(edges).toContainEqual(
-			expect.objectContaining({ id: 'gen:rel:Monitors', source: 'rel:Monitors', target: 'rel:Observes' })
+			expect.objectContaining({
+				id: 'gen:rel:Monitors',
+				source: 'rel:Monitors',
+				target: 'rel:Observes'
+			})
 		);
 	});
 
 	it('skips edges whose endpoint types do not exist (mid-edit dangling refs)', () => {
-		const broken = { ...mm(), relationships: mm().relationships.map((r) =>
-			r.name === 'Contains' ? { ...r, mappings: [{ source: 'Zone', target: 'Ghost' }] } : r
-		)};
+		const broken = {
+			...mm(),
+			relationships: mm().relationships.map((r) =>
+				r.name === 'Contains' ? { ...r, mappings: [{ source: 'Zone', target: 'Ghost' }] } : r
+			)
+		};
 		const { edges } = buildDiagram(broken);
 		expect(edges.some((e) => e.data.relName === 'Contains')).toBe(false);
 	});

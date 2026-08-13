@@ -22,7 +22,9 @@ describe('relationship commands', () => {
 	});
 
 	it('addRelationshipType with no mapping emits only the name (abstract-authorable)', () => {
-		const out = run(FIXTURE, [{ kind: 'addRelationshipType', name: 'Feeds', containment: false, mapping: null }]);
+		const out = run(FIXTURE, [
+			{ kind: 'addRelationshipType', name: 'Feeds', containment: false, mapping: null }
+		]);
 		const rel = parseDraft(out).mm!.relationships.find((r) => r.name === 'Feeds')!;
 		expect(rel.mappings).toEqual([]);
 	});
@@ -53,8 +55,12 @@ describe('relationship commands', () => {
 		expect(out).toContain('key: [name, out:Watches]');
 		const child = parseDraft(out).mm!.relationships.find((r) => r.name === 'Watches')!;
 		expect(child.extends).toBe('Observes');
-		const renamedBase = run(out, [{ kind: 'renameRelationshipType', from: 'Observes', to: 'Sees' }]);
-		expect(parseDraft(renamedBase).mm!.relationships.find((r) => r.name === 'Watches')!.extends).toBe('Sees');
+		const renamedBase = run(out, [
+			{ kind: 'renameRelationshipType', from: 'Observes', to: 'Sees' }
+		]);
+		expect(
+			parseDraft(renamedBase).mm!.relationships.find((r) => r.name === 'Watches')!.extends
+		).toBe('Sees');
 	});
 
 	it('setEndMultiplicity and containment toggles round-trip', () => {
