@@ -5,9 +5,9 @@
  */
 import { FileCode, Route, Table } from '@lucide/svelte';
 
-export type ArtifactKind = 'navigation' | 'table' | 'code_snippet';
-
 export const REGISTERED_KINDS = ['navigation', 'table', 'code_snippet'] as const;
+
+export type ArtifactKind = (typeof REGISTERED_KINDS)[number];
 
 export const KIND_ICONS: Record<ArtifactKind, typeof Route> = {
 	navigation: Route,

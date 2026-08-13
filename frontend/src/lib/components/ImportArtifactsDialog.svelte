@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { Route } from '@lucide/svelte';
-	import { KIND_ICONS, type ArtifactKind } from '$lib/artifacts/kinds';
+	import { KIND_ICONS, isRegisteredKind } from '$lib/artifacts/kinds';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -260,7 +260,7 @@
 
 				<div class="flex max-h-72 flex-col gap-2 overflow-y-auto">
 					{#each plan?.entries ?? [] as e (e.bundle_id)}
-						{@const Icon = KIND_ICONS[e.kind as ArtifactKind] ?? Route}
+						{@const Icon = isRegisteredKind(e.kind) ? KIND_ICONS[e.kind] : Route}
 						{@const action = effectiveAction(e)}
 						<div
 							data-testid={`import-row-${e.bundle_id}`}
