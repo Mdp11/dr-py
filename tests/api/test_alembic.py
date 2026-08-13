@@ -5,6 +5,9 @@ from pathlib import Path
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect
+from sqlalchemy.orm import Session
+
+from data_rover.api.db_models import ArtifactKind, ArtifactRow, Project
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -59,3 +62,59 @@ def test_migration_adds_validation_policy_column(tmp_path: Path) -> None:
     command.downgrade(cfg, "0004")
     cols = {c["name"] for c in inspect(engine).get_columns("models")}
     assert "validation_policy" not in cols
+
+
+def test_migration_0010_widens_kind_and_preserves_fks_and_unique(
+    tmp_path: Path,
+) -> None:
+    # 0010 (`custom_export`) rebuilds project_artifacts via batch mode on
+    # SQLite (a plain `ALTER COLUMN ... TYPE` isn't valid SQLite DDL). A batch
+    # recreate is a real risk to everything else riding on that table -- this
+    # pins that the two FKs (with their ondelete behavior) and the named
+    # unique constraint all survive the rebuild, and that the actual reason
+    # the migration exists -- a 13-char kind value -- can be inserted.
+    db_path = tmp_path / "t4.db"
+    url = f"sqlite:///{db_path}"
+    cfg = Config(str(REPO_ROOT / "alembic.ini"))
+    cfg.set_main_option("script_location", str(REPO_ROOT / "alembic"))
+    cfg.set_main_option("sqlalchemy.url", url)
+
+    command.upgrade(cfg, "head")
+
+    engine = create_engine(url)
+    insp = inspect(engine)
+
+    # SQLite reflection doesn't name unnamed FKs, so key by constrained column.
+    fks = {
+        fk["constrained_columns"][0]: fk
+        for fk in insp.get_foreign_keys("project_artifacts")
+    }
+    assert fks["project_id"]["referred_table"] == "projects"
+    assert fks["project_id"].get("options", {}).get("ondelete") == "CASCADE"
+    assert fks["updated_by"]["referred_table"] == "users"
+    assert fks["updated_by"].get("options", {}).get("ondelete") == "SET NULL"
+
+    uniques = {u["name"]: u for u in insp.get_unique_constraints("project_artifacts")}
+    assert uniques["uq_artifact_project_kind_name"]["column_names"] == [
+        "project_id",
+        "kind",
+        "name",
+    ]
+
+    # the entire reason 0010 exists: "custom_export" (13 chars) must fit.
+    with Session(engine) as s:
+        s.add(Project(id="p1", name="P1"))
+        s.add(
+            ArtifactRow(
+                id="a1",
+                project_id="p1",
+                kind=ArtifactKind.custom_export,
+                name="n",
+                payload={},
+                artifact_rev=1,
+            )
+        )
+        s.commit()
+        row = s.get(ArtifactRow, "a1")
+        assert row is not None
+        assert row.kind == ArtifactKind.custom_export

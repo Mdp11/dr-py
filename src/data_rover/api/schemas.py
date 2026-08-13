@@ -322,7 +322,12 @@ class CreateArtifactOp(BaseModel):
     kind: Literal["create_artifact"]
     temp_id: str
     artifact_kind: Literal[
-        "navigation", "table", "diagram", "diagram_kind", "code_snippet", "custom_export"
+        "navigation",
+        "table",
+        "diagram",
+        "diagram_kind",
+        "code_snippet",
+        "custom_export",
     ]
     name: str = Field(min_length=1)
     payload: dict[str, Any] = Field(default_factory=dict)
@@ -1002,7 +1007,12 @@ class ArtifactListOut(BaseModel):
 
 class ArtifactCreateIn(BaseModel):
     kind: Literal[
-        "navigation", "table", "diagram", "diagram_kind", "code_snippet", "custom_export"
+        "navigation",
+        "table",
+        "diagram",
+        "diagram_kind",
+        "code_snippet",
+        "custom_export",
     ]
     name: str = Field(min_length=1)
     payload: dict[str, Any] = Field(default_factory=dict)
