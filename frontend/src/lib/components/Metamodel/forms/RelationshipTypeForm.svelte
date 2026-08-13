@@ -166,7 +166,7 @@
 					})}
 			>
 				<option value="">— none —</option>
-				{#each extendsOptions as opt (opt)}<option value={opt}>{opt}</option>{/each}
+				{#each extendsOptions as opt, i (`${i}:${opt}`)}<option value={opt}>{opt}</option>{/each}
 				{#if rel.extends !== null && !extendsOptions.includes(rel.extends)}
 					<option value={rel.extends}>{rel.extends} (unknown)</option>
 				{/if}
@@ -205,7 +205,7 @@
 					No endpoints — nothing anchors this type on the canvas.
 				</p>
 			{/if}
-			{#each rel.mappings as m (`${m.source}→${m.target}`)}
+			{#each rel.mappings as m, i (`${i}:${m.source}→${m.target}`)}
 				<div class="flex items-center gap-1 text-[11px]" data-testid="mm-map-row">
 					<span class="min-w-0 flex-1 truncate text-foreground/90">
 						{m.source} → {m.target}
@@ -235,7 +235,7 @@
 							value={newSource}
 							onchange={(e) => (newSource = e.currentTarget.value)}
 						>
-							{#each elementNames as n (n)}<option value={n}>{n}</option>{/each}
+							{#each elementNames as n, j (`${j}:${n}`)}<option value={n}>{n}</option>{/each}
 						</select>
 						<span class="text-[11px] text-muted-foreground/70">→</span>
 						<select
@@ -245,7 +245,7 @@
 							value={newTarget}
 							onchange={(e) => (newTarget = e.currentTarget.value)}
 						>
-							{#each elementNames as n (n)}<option value={n}>{n}</option>{/each}
+							{#each elementNames as n, j (`${j}:${n}`)}<option value={n}>{n}</option>{/each}
 						</select>
 						<button
 							type="button"

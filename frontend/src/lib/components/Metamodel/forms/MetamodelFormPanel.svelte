@@ -107,7 +107,7 @@
 						<p class="text-[10px] text-muted-foreground/70">
 							Nothing anchors them on the canvas — select one here to give it endpoints.
 						</p>
-						{#each mapless as rel (rel.name)}
+						{#each mapless as rel, i (`${i}:${rel.name}`)}
 							<button
 								type="button"
 								class={linkCls}

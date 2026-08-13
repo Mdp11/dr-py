@@ -112,7 +112,7 @@
 		<p class="text-[11px] italic text-muted-foreground/70">No properties.</p>
 	{/if}
 
-	{#each properties as p (p.name)}
+	{#each properties as p, i (`${i}:${p.name}`)}
 		<div class="rounded border border-border/60 bg-card/40">
 			<div class="flex items-center gap-1 px-1.5 py-1">
 				<button
@@ -164,13 +164,14 @@
 							onchange={(e) => commit(p, { datatype: e.currentTarget.value })}
 						>
 							<optgroup label="Primitives">
-								{#each primitives as dt (dt)}<option value={dt}>{dt}</option>{/each}
+								{#each primitives as dt, j (`${j}:${dt}`)}<option value={dt}>{dt}</option>{/each}
 							</optgroup>
 							<optgroup label="Enums">
-								{#each enums as name (name)}<option value={name}>{name}</option>{/each}
+								{#each enums as name, j (`${j}:${name}`)}<option value={name}>{name}</option>{/each}
 							</optgroup>
 							<optgroup label="Element types">
-								{#each elementTypes as name (name)}<option value={name}>{name}</option>{/each}
+								{#each elementTypes as name, j (`${j}:${name}`)}<option value={name}>{name}</option
+									>{/each}
 							</optgroup>
 							<!-- A datatype the draft no longer defines (a renamed enum the
 							     cascade could not reach) would otherwise leave the select

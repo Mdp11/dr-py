@@ -80,7 +80,7 @@
 					value={row.value}
 					onchange={(e) => replace(i, e.currentTarget.value)}
 				>
-					{#each propNames as p (p)}<option value={p}>{p}</option>{/each}
+					{#each propNames as p, j (`${j}:${p}`)}<option value={p}>{p}</option>{/each}
 					<!-- A key entry naming a property the draft dropped stays visible
 					     rather than silently re-pointing at whatever sorts first. -->
 					{#if !propNames.includes(row.value)}
@@ -105,7 +105,7 @@
 					value={row.value}
 					onchange={(e) => replace(i, `${row.dir}:${e.currentTarget.value}`)}
 				>
-					{#each relNames as r (r)}<option value={r}>{r}</option>{/each}
+					{#each relNames as r, j (`${j}:${r}`)}<option value={r}>{r}</option>{/each}
 					{#if !relNames.includes(row.value)}
 						<option value={row.value}>{row.value} (unknown)</option>
 					{/if}

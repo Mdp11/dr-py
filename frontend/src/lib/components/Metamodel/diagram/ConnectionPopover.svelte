@@ -145,7 +145,7 @@
 					onchange={(e) => (chosen = e.currentTarget.value)}
 					aria-label="Relationship type"
 				>
-					{#each existing as name (name)}<option value={name}>{name}</option>{/each}
+					{#each existing as name, i (`${i}:${name}`)}<option value={name}>{name}</option>{/each}
 				</select>
 				<button
 					type="button"

@@ -260,6 +260,29 @@ describe('PropertyListEditor', () => {
 		unmount(c);
 	});
 
+	it('survives duplicate property names', () => {
+		// Two clicks of "+ Property" produce two rows called `new_property`, and a
+		// draft is allowed to be invalid mid-edit — so the row list must not key
+		// on the name alone, or Svelte throws `each_key_duplicate` and the whole
+		// panel dies on a state the user reaches in two clicks.
+		const dup: Metamodel = {
+			...MM,
+			elements: MM.elements.map((e) =>
+				e.name === 'Zone' ? { ...e, properties: [e.properties[0], e.properties[0]] } : e
+			)
+		};
+
+		const c = mount(PropertyListEditor, {
+			target: document.body,
+			props: { mm: dup, owner, readOnly: false }
+		});
+		flushSync();
+
+		expect(allById('mm-prop-row')).toHaveLength(2);
+
+		unmount(c);
+	});
+
 	it('groups the datatype options into primitives, enums and element types', () => {
 		const c = mount(PropertyListEditor, {
 			target: document.body,

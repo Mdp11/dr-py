@@ -113,7 +113,7 @@
 					})}
 			>
 				<option value="">— none —</option>
-				{#each extendsOptions as opt (opt)}<option value={opt}>{opt}</option>{/each}
+				{#each extendsOptions as opt, i (`${i}:${opt}`)}<option value={opt}>{opt}</option>{/each}
 				<!-- A supertype the draft dropped: keep it selectable rather than
 				     silently re-pointing `extends` at the first surviving option. -->
 				{#if el.extends !== null && !extendsOptions.includes(el.extends)}

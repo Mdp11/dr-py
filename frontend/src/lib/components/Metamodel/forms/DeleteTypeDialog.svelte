@@ -127,7 +127,7 @@
 			<div class="flex flex-col gap-0.5" data-testid="mm-delete-updated">
 				<p class="text-[11px] font-medium text-foreground/90">Will be updated:</p>
 				<ul class="flex flex-col gap-0.5 text-[11px] text-muted-foreground">
-					{#each consequences.updated as line (line)}
+					{#each consequences.updated as line, i (`${i}:${line}`)}
 						<li>{line}</li>
 					{/each}
 				</ul>
@@ -138,7 +138,7 @@
 			<div class="flex flex-col gap-0.5" data-testid="mm-delete-dangling">
 				<p class="text-[11px] font-medium text-warning">Will be left for the linter:</p>
 				<ul class="flex flex-col gap-0.5 text-[11px] text-muted-foreground">
-					{#each consequences.dangling as line (line)}
+					{#each consequences.dangling as line, i (`${i}:${line}`)}
 						<li>{line}</li>
 					{/each}
 				</ul>
