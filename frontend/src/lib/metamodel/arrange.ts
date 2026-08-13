@@ -2,8 +2,11 @@ import ELK from 'elkjs/lib/elk.bundled.js';
 import { nodeSize, type DiagramEdgeSpec, type DiagramNodeSpec } from './diagram-build';
 
 /** One-shot layered layout for the Auto-arrange button and first-open (spec
- * §5). elkjs runs client-side; the bundled build embeds its own worker
- * (no separate worker file to serve), so `new ELK()` here is enough. */
+ * §5). elkjs runs client-side and the bundled build needs no separate worker
+ * file to serve, so `new ELK()` here is enough. It does NOT run off the main
+ * thread, though: with no `workerUrl` elkjs falls back to a synchronous
+ * in-process fake worker, so this function BLOCKS despite being `async` —
+ * relevant if the diagram ever grows enough for the arrange to be felt. */
 export async function autoArrange(
 	nodes: DiagramNodeSpec[],
 	edges: DiagramEdgeSpec[],
