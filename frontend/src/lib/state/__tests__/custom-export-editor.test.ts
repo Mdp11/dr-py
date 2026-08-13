@@ -167,6 +167,49 @@ describe('custom export drafts', () => {
 		expect(entry.show_row_numbers).toBe(false); // unaffected by the later mutation
 	});
 
+	it('KNOWN GAP: entryForTable copies a column export object BY REFERENCE — mutating the source column in place after add DOES leak into the entry', async () => {
+		// Requested in code review to prove copy-at-add independence at the
+		// per-column export-OBJECT level — the scalar test above (show_row_numbers)
+		// proves nothing, since a primitive is unconditionally read by value.
+		// Running this one reveals that Task 10's `overridesFromDefinition`
+		// ($lib/table/custom-export.ts) stores `col.export`/`col.json_export` BY
+		// REFERENCE, not by clone: `export: col.export ?? null` copies the array
+		// of ColumnOverride wrappers but not the export-options object each one
+		// points at. So this assertion documents the CURRENT (leaky) behavior
+		// rather than an invariant that holds unconditionally.
+		//
+		// It is harmless in production ONLY because every call site that edits a
+		// column's export options (`setColumnExportOptions`/`setColumnJsonOptions`
+		// in `$lib/table/columns.ts`) is PURE and REPLACES the object rather than
+		// mutating it in place — confirmed by a repo-wide grep for in-place
+		// `.export.<field> =` / `.json_export.<field> =` assignment (none found
+		// anywhere in `frontend/src`). If a future call site ever mutates
+		// `col.export`/`col.json_export` in place instead of replacing it, an
+		// open custom-export draft's entry would silently drift with it.
+		//
+		// Flagged to the coordinator as a design question for Task 10's helper —
+		// deliberately NOT fixed here (see task-11-report.md, "Fix round 1",
+		// finding 3 — fixing another task's helper without a design decision was
+		// explicitly out of scope for this round).
+		const tabId = 'exp:draft:1';
+		await ensureCustomExportDraft(tabId);
+		const defn: TableDefinition = {
+			...TABLE_DEFN,
+			columns: [
+				{
+					...TABLE_DEFN.columns[0],
+					export: { include: true, header: 'Original' }
+				}
+			]
+		};
+
+		addExportEntry(tabId, 'tbl-1', 'Alpha', defn);
+		defn.columns[0].export!.header = 'Mutated'; // in-place mutation, not a replace
+
+		const entry = getCustomExportDraft(tabId)!.entries[0];
+		expect(entry.columns[0].export?.header).toBe('Mutated'); // ⚠ proves the leak — see comment above
+	});
+
 	it('removeExportEntry drops the entry at the given index and dirties the draft', async () => {
 		const tabId = 'exp:draft:1';
 		await ensureCustomExportDraft(tabId);
@@ -223,6 +266,28 @@ describe('custom export drafts', () => {
 		expect(d.artifactRev).toBe(3);
 		expect(d.entries).toHaveLength(1);
 		expect(d.entries[0].source.ref).toBe('tbl-1');
+		expect(d.dirty).toBe(false);
+	});
+
+	it('a malformed payload fails OPEN with an empty entry list instead of throwing', async () => {
+		// The wire payload is parsed through CustomExportDefinitionSchema, but
+		// the parse must never THROW: this module's only caller is a
+		// fire-and-forget `$effect` (see ensureCustomExportDraft's comment), so
+		// an unhandled rejection here would strand the tab on "Loading…" forever
+		// exactly like an unguarded lease/fetch rejection would.
+		asEditor();
+		mockAcquire();
+		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue({
+			...CUSTOM_EXPORT_ARTIFACT,
+			payload: { schema_version: 1, entries: 'not-an-array' } // malformed
+		});
+		const tabId = openArtifactTab('custom_export', { artifactId: 'e1', title: 'My export' });
+
+		await expect(ensureCustomExportDraft(tabId)).resolves.toBeUndefined();
+
+		const d = getCustomExportDraft(tabId)!;
+		expect(d.artifactId).toBe('e1'); // the tab still opens, name/rev intact
+		expect(d.entries).toEqual([]); // degrades to empty rather than refusing
 		expect(d.dirty).toBe(false);
 	});
 
@@ -289,7 +354,7 @@ describe('saving a custom export draft', () => {
 		setCustomExportName(tabId, 'Taken');
 
 		expect(() => saveCustomExportDraft(tabId)).toThrow(
-			/custom_export named "Taken" already exists/
+			/custom export named "Taken" already exists/
 		);
 		expect(getStagedArtifactOps()).toEqual([]);
 		expect(getCustomExportDraft(tabId)?.artifactId).toBeNull();

@@ -23,7 +23,8 @@
 	const SECTIONS: { kind: ArtifactKind; title: string; icon: typeof Route }[] = [
 		{ kind: 'navigation', title: 'Navigations', icon: KIND_ICONS.navigation },
 		{ kind: 'table', title: 'Tables', icon: KIND_ICONS.table },
-		{ kind: 'code_snippet', title: 'Snippets', icon: KIND_ICONS.code_snippet }
+		{ kind: 'code_snippet', title: 'Snippets', icon: KIND_ICONS.code_snippet },
+		{ kind: 'custom_export', title: 'Custom exports', icon: KIND_ICONS.custom_export }
 	];
 
 	// A local mirror of the store's open flag, bound two-way to Dialog.Root —
@@ -35,11 +36,15 @@
 	let open = $state(false);
 	// GET /artifacts (behind getCommittedArtifactHeaders) returns every kind,
 	// including legacy/unregistered ones like `diagram`/`diagram_kind` this
-	// dialog has no section for. Filter down to the three kinds SECTIONS
-	// covers ONCE, here, and derive everything else (visible, allVisibleChecked,
+	// dialog has no section for. Filter down to the kinds SECTIONS covers
+	// ONCE, here, and derive everything else (visible, allVisibleChecked,
 	// toggleAll, …) from the filtered list — otherwise a stray unrenderable row
 	// can never be checked, which makes "Select all" permanently unreachable
 	// and would silently promote that row to an export ROOT via toggleAll.
+	// SECTIONS and SECTION_KINDS (kinds.ts's REGISTERED_KINDS mirror) must stay
+	// in lockstep — SECTION_KINDS is derived from ArtifactKind so the type
+	// checker cannot catch SECTIONS falling behind it; adding a kind there
+	// requires a matching entry here BY HAND (see kinds.ts's registry docstring).
 	const headers = $derived(getCommittedArtifactHeaders().filter((h) => SECTION_KINDS.has(h.kind)));
 	const hasStaged = $derived(getStagedArtifactDepth() > 0);
 

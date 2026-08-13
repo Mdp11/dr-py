@@ -118,13 +118,19 @@ export async function ensureCustomExportDraft(tabId: string): Promise<void> {
 		}
 		const artifact = await artifactsApi.getArtifact(id);
 		// The wire payload is never trusted as-is: parse it through the same
-		// schema the server validates writes against.
-		const parsed = CustomExportDefinitionSchema.parse(artifact.payload);
+		// schema the server validates writes against. `safeParse`, not `parse` —
+		// our only caller is a fire-and-forget `$effect` (see the lease comment
+		// above), so a THROW here would strand the tab on "Loading…" forever
+		// exactly like an unhandled lease/fetch rejection would. A malformed
+		// payload therefore degrades to an EMPTY entry list rather than refusing
+		// the tab: the draft still opens (name + rev intact), and re-saving from
+		// there simply overwrites the corrupt payload with a valid one.
+		const result = CustomExportDefinitionSchema.safeParse(artifact.payload);
 		draft = {
 			name: artifact.name,
 			artifactId: artifact.id,
 			artifactRev: artifact.artifact_rev,
-			entries: parsed.entries,
+			entries: result.success ? result.data.entries : [],
 			dirty: false
 		};
 	}
