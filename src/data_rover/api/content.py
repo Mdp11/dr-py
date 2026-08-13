@@ -16,10 +16,12 @@ from .db_models import (
     ArtifactKind,
     ArtifactRow,
     Commit,
+    MetamodelLayoutRow,
     MetamodelRow,
     ModelRow,
     Snapshot,
     ViewRow,
+    _utcnow,
 )
 
 
@@ -373,3 +375,26 @@ def update_artifact(
 def delete_artifact(db: Session, row: ArtifactRow) -> None:
     db.delete(row)
     db.flush()
+
+
+def get_metamodel_layout(db: Session, project_id: str) -> dict | None:
+    """The stored canvas-layout blob, or None if never saved."""
+    row = db.get(MetamodelLayoutRow, project_id)
+    return row.blob if row is not None else None
+
+
+def put_metamodel_layout(db: Session, project_id: str, blob: dict) -> None:
+    """Upsert the canvas-layout blob (last-write-wins; see MetamodelLayoutRow).
+
+    Presentation-only content (spec 2026-08-13 §5): unlike every other write
+    in this module, this commits directly rather than leaving the unit of
+    work to the caller — there is no lease, no op batch and no commit journal
+    entry wrapping it, so there is no larger transaction for it to join.
+    """
+    row = db.get(MetamodelLayoutRow, project_id)
+    if row is None:
+        db.add(MetamodelLayoutRow(project_id=project_id, blob=blob))
+    else:
+        row.blob = blob
+        row.updated_at = _utcnow()
+    db.commit()

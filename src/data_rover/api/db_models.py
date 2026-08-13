@@ -197,6 +197,23 @@ class ViewRow(Base):
     view_rev: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
+class MetamodelLayoutRow(Base):
+    """Shared diagram positions for a project's metamodel canvas (one row per
+    project). Presentation only, by explicit decision (spec 2026-08-13 §5):
+    last-write-wins, no lease, never journaled — a lost drag is re-dragged,
+    unlike model content where a lost write is corruption."""
+
+    __tablename__ = "metamodel_layouts"
+
+    project_id: Mapped[str] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True
+    )
+    blob: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+
+
 class Commit(Base):
     """One accepted ops batch == one revision == one journal row (spec §7).
 
