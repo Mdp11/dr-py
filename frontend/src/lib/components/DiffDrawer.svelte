@@ -29,6 +29,7 @@
 		type StagedArtifactEntry
 	} from '$lib/state';
 	import { ConflictError } from '$lib/api/errors';
+	import type { ArtifactKind } from '$lib/artifacts/kinds';
 	import type { PreviewResponse } from '$lib/api/types';
 	import { saveJsonToFile } from '$lib/util/fileSave';
 	import { AlertTriangle } from '@lucide/svelte';
@@ -112,7 +113,16 @@
 	//   - delete: the COMMITTED header, so an artifact that was renamed and then
 	//     deleted shows the name the server actually holds, not one that only
 	//     ever existed in this client's buffer.
-	const ARTIFACT_KIND_LABEL: Record<'navigation' | 'table' | 'code_snippet', string> = {
+	// Deliberately LOCAL values, not `$lib/artifacts/kinds`' KIND_LABEL: these
+	// are lowercase nouns that read inline inside a sentence ("new code
+	// snippet"), not the shared title-case display labels ("Snippet") used by
+	// sidebar/section headers and badges — the two vocabularies solve
+	// different display problems and their values must not be unified. The
+	// TYPE is still shared so this map stays exhaustive over every artifact
+	// kind: adding a kind to `ArtifactKind` will fail `frontend-check` right
+	// here until this map (and its prose) grows to match, rather than
+	// silently leaving `e.artifactKind` able to miss it.
+	const ARTIFACT_KIND_LABEL: Record<ArtifactKind, string> = {
 		navigation: 'navigation',
 		table: 'table',
 		code_snippet: 'code snippet'
