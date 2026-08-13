@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { Handle, Position, type NodeProps } from '@xyflow/svelte';
 	import type { PropertyDef } from '$lib/api/types';
+	// Same reference tint as ElementTypeNode, off the same shared set.
+	import { PRIMITIVE_DATATYPES } from '$lib/metamodel/helpers';
 
 	/**
 	 * The box for a relationship type that UML draws as an ASSOCIATION CLASS —
@@ -27,8 +29,6 @@
 
 	let { id, data, selected = false }: NodeProps = $props();
 	const d = $derived(data as unknown as Data);
-
-	const PRIMITIVES = new Set(['string', 'integer', 'float', 'boolean', 'date', 'datetime']);
 </script>
 
 <div
@@ -72,7 +72,7 @@
 				<div class="mm-row">
 					<span class="mm-prop">{p.name}</span><span class="mm-punct">: </span><span
 						class="mm-type"
-						class:ref={!PRIMITIVES.has(p.datatype)}>{p.datatype}</span
+						class:ref={!PRIMITIVE_DATATYPES.has(p.datatype)}>{p.datatype}</span
 					>
 					<span class="mm-mult">[{p.multiplicity}]</span>
 				</div>

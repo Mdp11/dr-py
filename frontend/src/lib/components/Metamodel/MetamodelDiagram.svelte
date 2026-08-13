@@ -10,6 +10,7 @@
 		selectionForNodeId,
 		type DiagramNodeSpec
 	} from '$lib/metamodel/diagram-build';
+	import { uniqueTypeName } from '$lib/metamodel/helpers';
 	import {
 		applyDiagramEdit,
 		getMetamodelDiagramView,
@@ -23,6 +24,8 @@
 		toggleNodeCollapsed,
 		undoDiagramEdit
 	} from '$lib/state';
+
+	import MetamodelFormPanel from './forms/MetamodelFormPanel.svelte';
 
 	import AssocClassNode from './diagram/AssocClassNode.svelte';
 	import AssociationEdge from './diagram/AssociationEdge.svelte';
@@ -179,16 +182,9 @@
 		selectDiagramNode(selectionForNodeId(hit.id));
 	}
 
-	function uniqueName(base: string, taken: ReadonlySet<string>): string {
-		if (!taken.has(base)) return base;
-		let i = 2;
-		while (taken.has(`${base}${i}`)) i++;
-		return `${base}${i}`;
-	}
-
 	function createElementType(): void {
 		if (view.mm === null) return;
-		const name = uniqueName('NewType', new Set(view.mm.elements.map((el) => el.name)));
+		const name = uniqueTypeName('NewType', new Set(view.mm.elements.map((el) => el.name)));
 		// Select on success so the form panel (Task 11) opens on the new type
 		// instead of leaving the user to hunt for the box that just appeared.
 		if (applyDiagramEdit({ kind: 'addElementType', name })) {
@@ -198,7 +194,7 @@
 
 	function createEnum(): void {
 		if (view.mm === null) return;
-		const name = uniqueName('NewEnum', new Set(Object.keys(view.mm.enums)));
+		const name = uniqueTypeName('NewEnum', new Set(Object.keys(view.mm.enums)));
 		if (applyDiagramEdit({ kind: 'addEnum', name, literals: [] })) {
 			selectDiagramNode({ kind: 'enum', name });
 		}
@@ -271,7 +267,6 @@
 			{/if}
 		</div>
 
-		<!-- Task 11 docks the 320px form panel as a sibling of the canvas here. -->
 		<div class="flex min-h-0 flex-1">
 			<!-- `application` is the honest role for a canvas whose own keys matter,
 			     and it is what lets Ctrl/Cmd+Z reach the canvas WITHOUT a window-level
@@ -308,6 +303,13 @@
 					onpaneclick={() => selectDiagramNode(null)}
 				></SvelteFlow>
 			</div>
+
+			<!-- The attribute half of the surface. Fixed 320px and independently
+			     scrollable: the canvas must keep the whole remaining width no matter
+			     how tall a type's property list gets. -->
+			<aside class="w-80 shrink-0 overflow-y-auto border-l border-border">
+				<MetamodelFormPanel {readOnly} />
+			</aside>
 		</div>
 	</div>
 {/if}

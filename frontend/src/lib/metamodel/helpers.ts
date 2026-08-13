@@ -10,6 +10,38 @@ import type {
 	RelationshipType
 } from '$lib/api/types';
 
+/**
+ * The datatypes the metamodel schema defines itself — the client mirror of
+ * `PRIMITIVES` in `src/data_rover/core/metamodel/schema.py`. Anything a
+ * `datatype` names that is NOT in here has to resolve to an enum or an element
+ * type, or the loader rejects it, so this one set answers both questions the UI
+ * asks: which options the property editor offers under "Primitives", and
+ * whether a canvas row's datatype should be tinted as a reference.
+ *
+ * It lives here rather than beside either consumer because the two had already
+ * drifted: the canvas boxes shipped a private six-item copy that included
+ * `datetime`, which the backend does NOT accept — so a `datetime` property was
+ * drawn as a settled primitive when it is in fact a dangling reference.
+ */
+export const PRIMITIVE_DATATYPES: ReadonlySet<string> = new Set([
+	'string',
+	'integer',
+	'float',
+	'boolean',
+	'date'
+]);
+
+/** First free name in the `base`, `base2`, `base3`… series. Used wherever the
+ * UI has to invent a type name (toolbar "+ Element type", the connection
+ * popover's default relationship), because a duplicate name is a lint error
+ * the user did not ask for. */
+export function uniqueTypeName(base: string, taken: ReadonlySet<string>): string {
+	if (!taken.has(base)) return base;
+	let i = 2;
+	while (taken.has(`${base}${i}`)) i++;
+	return `${base}${i}`;
+}
+
 /** Look up a concrete or abstract element type by name. */
 export function elementType(mm: Metamodel, name: string): ElementType | undefined {
 	return mm.elements.find((e) => e.name === name);

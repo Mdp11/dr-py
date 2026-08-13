@@ -1,6 +1,11 @@
 <script lang="ts">
 	import { Handle, Position, type NodeProps } from '@xyflow/svelte';
 	import type { PropertyDef } from '$lib/api/types';
+	// A datatype outside the schema's OWN set names an enum or an element type,
+	// and is tinted as a reference (mockup: `Zone` in the editor's accent blue
+	// against `string` in sand). Shared with the form panel's datatype picker so
+	// the canvas and the picker can never disagree about what a primitive is.
+	import { PRIMITIVE_DATATYPES } from '$lib/metamodel/helpers';
 
 	/**
 	 * UML class box for an element type — the canvas's primary shape.
@@ -37,11 +42,6 @@
 	let { id, data, selected = false }: NodeProps = $props();
 	const d = $derived(data as unknown as Data);
 	const keyProps = $derived(new Set(d.keyProps));
-
-	/** Datatypes the metamodel schema defines itself; anything else names an
-	 * enum or an element type and is tinted as a reference (mockup: `Zone` in
-	 * the editor's accent blue against `string` in sand). */
-	const PRIMITIVES = new Set(['string', 'integer', 'float', 'boolean', 'date', 'datetime']);
 </script>
 
 <div
@@ -88,7 +88,7 @@
 				<div class="mm-row">
 					<span class="mm-prop">{p.name}</span><span class="mm-punct">: </span><span
 						class="mm-type"
-						class:ref={!PRIMITIVES.has(p.datatype)}>{p.datatype}</span
+						class:ref={!PRIMITIVE_DATATYPES.has(p.datatype)}>{p.datatype}</span
 					>
 					<span class="mm-mult">[{p.multiplicity}]</span>
 					{#if keyProps.has(p.name)}<span class="mm-key">{'{id}'}</span>{/if}
