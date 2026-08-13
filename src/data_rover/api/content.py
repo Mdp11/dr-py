@@ -10,6 +10,7 @@ import uuid
 from typing import Any
 
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .db_models import (
@@ -390,11 +391,31 @@ def put_metamodel_layout(db: Session, project_id: str, blob: dict) -> None:
     in this module, this commits directly rather than leaving the unit of
     work to the caller — there is no lease, no op batch and no commit journal
     entry wrapping it, so there is no larger transaction for it to join.
+
+    The check-then-insert below is not atomic: this is a *shared* collaborative
+    canvas with no lease guarding it (see MetamodelLayoutRow's docstring), so
+    two users can both drag an element on the SAME never-before-saved diagram
+    at once. Both requests see ``get() is None`` and both attempt an INSERT;
+    the loser hits an ``IntegrityError`` on the primary key. Once the row
+    exists this is moot (concurrent UPDATEs just have one win, which is the
+    documented last-write-wins contract) — the race is narrow but real only
+    at this first-write instant. Mirrors ``tenancy.upsert_user``'s handling of
+    the identical shape of race on `users.id`: catch the collision, roll back
+    the failed INSERT, and retry as an UPDATE against the row the winner just
+    committed, so the loser's write still lands (last-write-wins) instead of
+    surfacing as a 500.
     """
     row = db.get(MetamodelLayoutRow, project_id)
     if row is None:
-        db.add(MetamodelLayoutRow(project_id=project_id, blob=blob))
-    else:
-        row.blob = blob
-        row.updated_at = _utcnow()
+        try:
+            db.add(MetamodelLayoutRow(project_id=project_id, blob=blob))
+            db.commit()
+            return
+        except IntegrityError:
+            db.rollback()
+            row = db.get(MetamodelLayoutRow, project_id)
+            if row is None:
+                raise  # should never happen; re-raise if it does
+    row.blob = blob
+    row.updated_at = _utcnow()
     db.commit()
