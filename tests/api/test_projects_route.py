@@ -88,3 +88,38 @@ def test_delete_project_is_admin_only(client: TestClient) -> None:
         client.delete(f"/api/v1/projects/{pid}", headers=_h("boss")).status_code == 204
     )
     assert client.get(f"/api/v1/projects/{pid}", headers=_h("u1")).status_code == 404
+
+
+def test_delete_hydrated_project_discards_session_without_snapshot(
+    client: TestClient,
+) -> None:
+    """U-7: deleting a project whose in-memory session holds a model must 204.
+
+    The DB delete commits before the registry is asked to drop the session, so
+    the snapshot-on-evict hook must NOT run here — it would insert a Snapshot
+    row whose project FK was just deleted (IntegrityError -> 500 after the
+    delete already succeeded, which is exactly the symptom the owner saw:
+    error under the card, project gone on reload).
+    """
+    from pathlib import Path
+
+    from data_rover.api.session import get_registry
+
+    pid = _seed_project("P", "u1")
+    mm = Path("examples/smart-city.metamodel.yaml").read_text(encoding="utf-8")
+    model = Path("examples/smart-city.model.json").read_bytes()
+    base = f"/api/v1/projects/{pid}"
+    assert (
+        client.post(f"{base}/metamodel", content=mm, headers=_h("u1")).status_code
+        == 200
+    )
+    assert (
+        client.post(f"{base}/model/upload", content=model, headers=_h("u1")).status_code
+        == 200
+    )
+    assert pid in get_registry().project_ids()
+
+    _seed_user("boss", is_admin=True)
+    assert client.delete(base, headers=_h("boss")).status_code == 204
+    assert pid not in get_registry().project_ids()
+    assert client.get(base, headers=_h("u1")).status_code == 404

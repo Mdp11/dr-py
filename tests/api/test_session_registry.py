@@ -181,6 +181,42 @@ def test_idle_lists_stale_projects() -> None:
     assert reg.idle(now=now + 10.0, ttl=10.0) == ["p1"]  # ttl elapsed -> idle
 
 
+def test_discard_drops_session_without_hook_even_when_guarded() -> None:
+    """discard() is the delete-project path: the project's DB rows are already
+    gone, so the snapshot hook must NOT run, and the evict guard (live leases,
+    connected feed clients) must NOT keep a dead project's session registered.
+    """
+    import asyncio
+    import time as _time
+
+    from data_rover.api.feed import ClientConn
+    from data_rover.api.locking import LockIntent, LockMode, RequiredLock
+
+    hook_calls: list[str] = []
+    reg = SessionRegistry()
+    reg.set_loader(lambda pid: Session())
+    reg.set_evict_hook(lambda pid, s: hook_calls.append(pid))
+
+    sess = reg.get("p1")
+    # arm BOTH conditions evict() refuses on: a live lease and a feed client
+    sess.lock_table.acquire(
+        "u1",
+        [RequiredLock(resource_id="e1", mode=LockMode.EXCLUSIVE, intent=LockIntent.EDIT)],
+        now=_time.monotonic(),
+        ttl=300.0,
+    )
+    sess.hub.register(ClientConn(user_id="u1", queue=asyncio.Queue(maxsize=8)))
+
+    reg.discard("p1")
+    assert hook_calls == []  # snapshot hook must not run for a deleted project
+    assert reg.project_ids() == []
+
+
+def test_discard_unknown_id_is_noop() -> None:
+    reg = SessionRegistry()
+    reg.discard("never-created")  # must not raise
+
+
 def test_evict_skips_session_with_live_locks() -> None:
     import time as _time
 

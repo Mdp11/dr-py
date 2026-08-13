@@ -234,5 +234,8 @@ def delete_project(
     db: Session = Depends(get_db),
 ) -> Response:
     tenancy.delete_project(db, project_id)
-    get_registry().evict(project_id)  # drop the in-memory session, if any
+    # discard, NOT evict: the DB rows are gone (committed), so the snapshot
+    # hook would hit a dangling project FK, and the live-leases/feed-clients
+    # guard would keep a dead project's session registered forever (U-7).
+    get_registry().discard(project_id)
     return Response(status_code=204)

@@ -379,6 +379,35 @@ class SessionRegistry:
             with self._guard:
                 self._sessions.pop(project_id, None)
 
+    def discard(self, project_id: str) -> None:
+        """Drop a session WITHOUT snapshotting and WITHOUT the evict guard.
+
+        The delete-project path (U-7): by the time the registry is asked to
+        drop the session, the project's durable rows are already deleted and
+        committed, so the snapshot hook must not run — ``write_snapshot``
+        would insert a ``Snapshot`` row whose project FK no longer exists
+        (IntegrityError -> 500 *after* the delete succeeded). The evict
+        guard must not apply either: a live lease or a connected feed client
+        would otherwise keep a dead project's session registered forever
+        (the guard re-checks on every idle-sweep retry and never gives up).
+
+        Feed clients of a deleted project are deliberately left to die on
+        their own: the orphaned session's hub simply never broadcasts again,
+        the socket closes on client disconnect, and a reconnect gets 4404
+        because the project row is gone.
+
+        Takes ``write_mutex`` to serialise against an in-flight commit
+        (same rationale — and same lock ordering vs ``_guard`` — as
+        ``evict``)."""
+        with self._guard:
+            session = self._sessions.get(project_id)
+        if session is None:
+            return
+        with session.write_mutex:
+            session.script_sweeps.cancel_all()
+            with self._guard:
+                self._sessions.pop(project_id, None)
+
     def touch(self, project_id: str) -> None:
         with self._guard:
             session = self._sessions.get(project_id)

@@ -317,14 +317,15 @@ resolves and shows its name, but clicking does nothing — it should navigate to
 element's details. `frontend/src/lib/components/Inspector/PropertyField.svelte`.
 Same underlying need as U-5; likely one shared "navigate to element" affordance.
 
-### U-7 · Deleting a project leaves the card behind with a 500 · `open`
-The card stays in the list with a 500 error under it; a page reload shows it correctly
-gone — so the **delete itself succeeds** and the failure is in the response or in what the
-client does after it. Start at `src/data_rover/api/routes/projects.py:231`
-(`delete_project`) and `tenancy.py:242`, then
-`frontend/src/lib/components/projects/ProjectCard.svelte:45`. Worth checking whether the
-500 comes from a follow-up refresh hitting the just-deleted project rather than from
-`DELETE` itself.
+### U-7 · Deleting a project leaves the card behind with a 500 · `done` (2026-08-12)
+Root cause: `delete_project` committed the DB delete, then `SessionRegistry.evict` ran
+the snapshot-on-evict hook for the hot session — `write_snapshot` inserted a `Snapshot`
+row whose project FK was just deleted → `IntegrityError` → 500 *after* the delete
+succeeded (hence "gone on reload"). Same path also risked zombie sessions: the evict
+guard (live leases / feed clients) would skip a dead project's session forever.
+Fixed with `SessionRegistry.discard` (drop without snapshot, without guard), called from
+`delete_project`; pinned by `test_delete_hydrated_project_discards_session_without_snapshot`
+and two registry-level `discard` tests.
 
 ### U-8 · Issues tab stays empty after project creation until "Validate" is clicked · `done`
 Creating a project validates everything and the bottom bar shows the error count, but the
