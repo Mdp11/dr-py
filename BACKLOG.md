@@ -341,15 +341,13 @@ fix them together in `frontend/src/lib/state/validation.svelte.ts`.
 All diagnosed (not suspected) in prior sessions and judged non-blocking at the time.
 **Unverified against current code.**
 
-### F-1 · Stale preview re-arms Rebind · `open` · one-line fix · *2026-08-11*
-`MetamodelTab.svelte`'s Rebind button isn't gated on `ed.previewing`, and
-`previewMetamodelChanges` has no `_rebinding` guard. Sequence: Preview → Preview again
-(in flight) → Rebind → rebind resolves and nulls `_preview` → the second preview resolves
-and sets `previewCurrent` back to true. The panel then shows a diff computed against the
-**pre-rebind** metamodel with no staleness warning, and Rebind re-arms for a redundant
-identical-text rebind — which journals a commit and bumps `model_rev`.
-Fix: `if (gen !== _gen || _rebinding) return;` after the diff await, or `|| ed.previewing`
-on the button.
+### F-1 · Stale preview re-arms Rebind · `done` (2026-08-12)
+Fixed by making preview and rebind **mutually exclusive in flight** (the diagnosed
+one-liner — guard after the diff await — misses the rebind-resolves-first timeline, where
+`_rebinding` is already false again by the time the stale preview lands):
+`previewMetamodelChanges` refuses while `_rebinding`, `commitMetamodelRebind` refuses
+while `_previewing`, and the Rebind button gates on `ed.previewing`. Pinned by two tests
+in `metamodel-editor.test.ts`.
 
 ### F-2 · `Snippet/CodeEditor.svelte` external-replace echo bug · `open` · latent · *2026-08-11*
 ~lines 208-221 carry the identical bug that was fixed in `MetamodelYamlEditor`: an

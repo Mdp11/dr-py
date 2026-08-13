@@ -110,7 +110,7 @@
 				/>
 				<Button
 					size="sm"
-					disabled={!quiet || !ed.previewCurrent || ed.rebinding || ed.readOnly}
+					disabled={!quiet || !ed.previewCurrent || ed.previewing || ed.rebinding || ed.readOnly}
 					aria-busy={ed.rebinding}
 					onclick={() => void onRebind()}
 				>

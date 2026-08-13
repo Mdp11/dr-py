@@ -302,6 +302,28 @@ describe('previewMetamodelChanges', () => {
 		// The stale diff is kept on screen, just no longer current.
 		expect(v.preview).toEqual(DIFF);
 	});
+
+	it('does not start a preview while a rebind is in flight (F-1)', async () => {
+		// The stale-preview race: a preview launched (or resolving) around a
+		// rebind would compute against the PRE-rebind metamodel, then re-arm
+		// Rebind with that stale diff after the rebind nulled it. Preview and
+		// rebind are mutually exclusive in flight, so the preview must refuse.
+		await initEditedAndPreviewed();
+		const slow = deferred<Rebind>();
+		vi.spyOn(mmApi, 'rebindMetamodel').mockImplementation(() => slow.promise);
+		const diff = vi.spyOn(mmApi, 'diffMetamodel').mockResolvedValue(DIFF);
+		diff.mockClear();
+
+		const rebinding = commitMetamodelRebind('msg');
+		await previewMetamodelChanges(); // must be a no-op mid-rebind
+		expect(diff).not.toHaveBeenCalled();
+
+		slow.resolve(REBIND);
+		await rebinding;
+		// The rebind spent the old preview and no stale one snuck back in:
+		// Rebind stays dead until a fresh preview.
+		expect(getMetamodelEditor().previewCurrent).toBe(false);
+	});
 });
 
 describe('commitMetamodelRebind', () => {
@@ -477,6 +499,27 @@ describe('commitMetamodelRebind', () => {
 		// A silent refusal: the button is simply not live, it is not an error.
 		expect(getMetamodelEditor().rebindError).toBeNull();
 		expect(isMetamodelEditorDirty()).toBe(true);
+	});
+
+	it('refuses while a preview is in flight and sends nothing (F-1)', async () => {
+		// previewCurrent is still true from the LAST preview while a new one is
+		// in flight, so without an explicit `previewing` guard the rebind would
+		// launch — and the in-flight diff would later re-arm Rebind against the
+		// pre-rebind metamodel.
+		await initEditedAndPreviewed();
+		const slow = deferred<MetamodelDiff>();
+		vi.spyOn(mmApi, 'diffMetamodel').mockImplementation(() => slow.promise);
+		const rebind = vi.spyOn(mmApi, 'rebindMetamodel').mockResolvedValue(REBIND);
+
+		const previewing = previewMetamodelChanges(); // second preview, in flight
+		expect(await commitMetamodelRebind('m')).toBeNull();
+		expect(rebind).not.toHaveBeenCalled();
+
+		slow.resolve(DIFF);
+		await previewing;
+		// No rebind happened, so the resolved preview is still against the
+		// CURRENT metamodel and may arm Rebind normally.
+		expect(getMetamodelEditor().previewCurrent).toBe(true);
 	});
 });
 

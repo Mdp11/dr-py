@@ -252,7 +252,10 @@ export function retryMetamodelLease(): void {
 }
 
 export async function previewMetamodelChanges(): Promise<void> {
-	if (_phase !== 'ready' || _previewing) return;
+	// `_rebinding` (F-1): preview and rebind are mutually exclusive in flight.
+	// A preview overlapping a rebind computes against the PRE-rebind metamodel
+	// and would re-arm Rebind with that stale diff after the rebind spent it.
+	if (_phase !== 'ready' || _previewing || _rebinding) return;
 	const gen = _gen;
 	const buf = _buffer;
 	_previewing = true;
@@ -300,7 +303,17 @@ function rebindErrorMessage(e: unknown): string {
 
 export async function commitMetamodelRebind(message: string): Promise<Rebind | null> {
 	const view = getMetamodelEditor();
-	if (getRole() !== 'owner' || !isProjectQuiet() || !view.previewCurrent || _rebinding) {
+	// `_previewing` (F-1, the other direction): previewCurrent is still true
+	// from the LAST preview while a fresh one is in flight, so without this
+	// guard the rebind launches and the in-flight diff later re-arms Rebind
+	// against the metamodel the rebind just replaced.
+	if (
+		getRole() !== 'owner' ||
+		!isProjectQuiet() ||
+		!view.previewCurrent ||
+		_rebinding ||
+		_previewing
+	) {
 		return null;
 	}
 	const gen = _gen;
