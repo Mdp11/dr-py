@@ -185,7 +185,6 @@ export type YamlEditCommand =
 	| { kind: 'renameEnum'; from: string; to: string }
 	| { kind: 'setEnumLiterals'; name: string; literals: string[] }
 	| { kind: 'removeEnum'; name: string }
-	// Task 3 adds the property commands; Task 4 the relationship commands.
 	| { kind: 'addProperty'; owner: TypeRef; prop: PropertyDef }
 	| { kind: 'updateProperty'; owner: TypeRef; propName: string; prop: PropertyDef }
 	| { kind: 'removeProperty'; owner: TypeRef; propName: string }
@@ -465,9 +464,127 @@ export function applyEdit(doc: Document, cmd: YamlEditCommand): void {
 			if ((props as YAMLSeq).items.length === 0) m.delete('properties');
 			return;
 		}
+		case 'addRelationshipType': {
+			const o: Record<string, unknown> = { name: cmd.name };
+			if (cmd.containment) o.containment = true;
+			if (cmd.mapping !== null) {
+				o.source = cmd.mapping.source;
+				o.target = cmd.mapping.target;
+			}
+			ensureSection(doc, 'relationships').add(doc.createNode(o));
+			return;
+		}
+		case 'removeRelationshipType': {
+			// Non-creating `section()`, matching `removeElementType`: a throw must
+			// never leave a stray `relationships: []` behind in a draft that had
+			// no relationships section at all (see the mutate-or-throw contract
+			// on `removeElementType` above).
+			const seq = section(doc, 'relationships');
+			const idx =
+				seq === null
+					? -1
+					: seq.items.findIndex((it) => isMap(it) && (it as YAMLMap).get('name') === cmd.name);
+			if (seq === null || idx < 0) throw new YamlEditError(`unknown relationships type: ${cmd.name}`);
+			seq.items.splice(idx, 1);
+			// Cascade (spec §3): extends pointing at it is auto-cleared; key DSL
+			// `out:`/`in:` entries naming it are left dangling for lint to flag —
+			// unlike rename below, which CAN follow the name across.
+			eachTypeMap(doc, 'relationships', (m) => {
+				if (m.get('extends') === cmd.name) m.delete('extends');
+			});
+			return;
+		}
+		case 'renameRelationshipType': {
+			mustTypeMap(doc, 'relationships', cmd.from).set('name', cmd.to);
+			eachTypeMap(doc, 'relationships', (m) => {
+				if (m.get('extends') === cmd.from) m.set('extends', cmd.to);
+			});
+			// Key DSL: scalar entries `out:<Rel>` / `in:<Rel>` inside an element's
+			// `key` list name a relationship end. Rename CAN follow these (the
+			// referent still exists under the new name); delete cannot, so those
+			// entries are left for lint instead (see removeRelationshipType).
+			eachTypeMap(doc, 'elements', (m) => {
+				const key = m.get('key');
+				if (!isSeq(key)) return;
+				for (const entry of (key as YAMLSeq).items) {
+					if (!isScalar(entry)) continue;
+					const v = (entry as Scalar).value;
+					if (v === `out:${cmd.from}`) (entry as Scalar).value = `out:${cmd.to}`;
+					if (v === `in:${cmd.from}`) (entry as Scalar).value = `in:${cmd.to}`;
+				}
+			});
+			return;
+		}
+		case 'setRelationshipAbstract':
+			setBoolAttr(mustTypeMap(doc, 'relationships', cmd.name), 'abstract', cmd.value, false);
+			return;
+		case 'setRelationshipContainment':
+			setBoolAttr(mustTypeMap(doc, 'relationships', cmd.name), 'containment', cmd.value, false);
+			return;
+		case 'setRelationshipExtends':
+			setOrDelete(mustTypeMap(doc, 'relationships', cmd.name), 'extends', cmd.value);
+			return;
+		case 'setEndMultiplicity': {
+			const m = mustTypeMap(doc, 'relationships', cmd.name);
+			const key = cmd.end === 'source' ? 'source_multiplicity' : 'target_multiplicity';
+			// Drop the key at '0..*' (the schema default), same terseness rule
+			// `setBoolAttr` applies to booleans.
+			if (cmd.value === '0..*') m.delete(key);
+			else m.set(key, cmd.value);
+			return;
+		}
+		case 'addMapping': {
+			const m = mustTypeMap(doc, 'relationships', cmd.name);
+			const existing = m.get('mappings');
+			if (isSeq(existing)) {
+				(existing as YAMLSeq).add(flowNode(doc, cmd.mapping));
+				syncShorthand(m);
+			} else if (m.has('source') && m.has('target')) {
+				// Second pair: materialize the explicit list, as a BLOCK seq of
+				// FLOW maps (`- {source: .., target: ..}` per line) matching the
+				// authored idiom (see e.g. `properties`). The shorthand keeps
+				// mirroring mappings[0] (unchanged, still the first pair) — see
+				// the module docstring's endpoint policy. This is a ONE-WAY door:
+				// once materialized, a list is never collapsed back to shorthand
+				// even if it shrinks to one entry, because converting back would
+				// have to choose which entry's comments to keep.
+				const seq = doc.createNode([
+					{ source: m.get('source'), target: m.get('target') },
+					cmd.mapping
+				]) as YAMLSeq;
+				for (const it of seq.items) if (isMap(it)) (it as YAMLMap).flow = true;
+				m.set('mappings', seq);
+			} else {
+				m.set('source', cmd.mapping.source);
+				m.set('target', cmd.mapping.target);
+			}
+			return;
+		}
+		case 'removeMapping': {
+			const m = mustTypeMap(doc, 'relationships', cmd.name);
+			const maps = m.get('mappings');
+			if (isSeq(maps)) {
+				const idx = (maps as YAMLSeq).items.findIndex(
+					(it) =>
+						isMap(it) &&
+						(it as YAMLMap).get('source') === cmd.mapping.source &&
+						(it as YAMLMap).get('target') === cmd.mapping.target
+				);
+				if (idx < 0) throw new YamlEditError('unknown mapping');
+				(maps as YAMLSeq).items.splice(idx, 1);
+				syncShorthand(m);
+			} else if (m.get('source') === cmd.mapping.source && m.get('target') === cmd.mapping.target) {
+				m.delete('source');
+				m.delete('target');
+			} else {
+				throw new YamlEditError('unknown mapping');
+			}
+			return;
+		}
 		default:
-			// Property + relationship commands land in Tasks 3-4; reaching here
-			// with one of them is a wiring bug, not a user error.
+			// Every `YamlEditCommand` variant has a case above; reaching here
+			// means the switch and the union type have drifted apart — a wiring
+			// bug, not a user error.
 			throw new YamlEditError(`unhandled command: ${(cmd as { kind: string }).kind}`);
 	}
 }
