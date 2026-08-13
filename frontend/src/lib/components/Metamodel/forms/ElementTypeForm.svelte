@@ -3,7 +3,7 @@
 	import type { Metamodel } from '$lib/api/types';
 	import { isSubtype } from '$lib/metamodel/helpers';
 	import { applyDiagramEdit, selectDiagramNode } from '$lib/state';
-	import { headingCls, inputCls, labelCls, selectCls } from './field-classes';
+	import { dangerBtnCls, headingCls, inputCls, labelCls, selectCls } from './field-classes';
 	import KeyBuilder from './KeyBuilder.svelte';
 	import PropertyListEditor from './PropertyListEditor.svelte';
 
@@ -88,12 +88,15 @@
 				data-testid="mm-form-abstract"
 				disabled={readOnly}
 				checked={el.abstract}
-				onchange={(e) =>
-					applyDiagramEdit({
-						kind: 'setElementAbstract',
-						name,
-						value: e.currentTarget.checked
-					})}
+				onchange={(e) => {
+					// A checkbox owns its own DOM state, so a REFUSED command has to be
+					// undrawn by hand or the box sits flipped against an unchanged draft.
+					if (
+						!applyDiagramEdit({ kind: 'setElementAbstract', name, value: e.currentTarget.checked })
+					) {
+						e.currentTarget.checked = el.abstract;
+					}
+				}}
 			/>
 			Abstract
 		</label>
@@ -105,12 +108,13 @@
 				data-testid="mm-form-extends"
 				disabled={readOnly}
 				value={el.extends ?? ''}
-				onchange={(e) =>
-					applyDiagramEdit({
-						kind: 'setElementExtends',
-						name,
-						value: e.currentTarget.value === '' ? null : e.currentTarget.value
-					})}
+				onchange={(e) => {
+					// Same rollback as the checkbox: the select holds its own value.
+					const value = e.currentTarget.value === '' ? null : e.currentTarget.value;
+					if (!applyDiagramEdit({ kind: 'setElementExtends', name, value })) {
+						e.currentTarget.value = el.extends ?? '';
+					}
+				}}
 			>
 				<option value="">— none —</option>
 				{#each extendsOptions as opt, i (`${i}:${opt}`)}<option value={opt}>{opt}</option>{/each}
@@ -131,7 +135,7 @@
 				<p class="{headingCls} mb-1">Danger zone</p>
 				<button
 					type="button"
-					class="inline-flex items-center gap-1 rounded border border-destructive/40 px-2 py-0.5 text-[11px] text-destructive transition-colors hover:bg-destructive/15"
+					class={dangerBtnCls}
 					data-testid="mm-form-delete"
 					onclick={() => onRequestDelete(name)}
 				>

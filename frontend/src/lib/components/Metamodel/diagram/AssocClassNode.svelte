@@ -68,7 +68,7 @@
 	</div>
 	{#if !d.collapsed && d.properties.length > 0}
 		<div class="mm-compartment">
-			{#each d.properties as p (p.name)}
+			{#each d.properties as p, i (`${i}:${p.name}`)}
 				<div class="mm-row">
 					<span class="mm-prop">{p.name}</span><span class="mm-punct">: </span><span
 						class="mm-type"

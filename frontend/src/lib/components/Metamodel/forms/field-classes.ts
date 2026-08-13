@@ -30,3 +30,14 @@ export const addBtnCls =
  * entry). Muted until hovered — a list of rows should not read as a list of
  * delete buttons. */
 export const rowRemoveCls = 'text-muted-foreground transition-colors hover:text-destructive';
+
+/** A destructive TEXT action (“Delete Zone”, “No key”). Distinct from
+ * {@link addBtnCls} on purpose: a clear-all sitting next to two `+` buttons in
+ * the add-button's own styling reads as a third way to add something. */
+export const dangerBtnCls =
+	'inline-flex w-fit items-center gap-1 rounded border border-destructive/40 px-2 py-0.5 text-[11px] text-destructive transition-colors hover:bg-destructive/15';
+
+/** A full-width action inside a narrow overlay (the connection popover's three
+ * choices), where the button IS the row rather than sitting at the end of one. */
+export const blockBtnCls =
+	'w-full rounded border border-border bg-card px-2 py-1 text-[11px] text-foreground/90 transition-colors hover:bg-muted';

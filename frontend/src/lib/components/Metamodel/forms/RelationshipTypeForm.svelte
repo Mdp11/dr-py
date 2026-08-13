@@ -5,6 +5,7 @@
 	import { applyDiagramEdit, selectDiagramNode } from '$lib/state';
 	import {
 		addBtnCls,
+		dangerBtnCls,
 		headingCls,
 		inputCls,
 		labelCls,
@@ -125,12 +126,19 @@
 					data-testid="mm-rel-abstract"
 					disabled={readOnly}
 					checked={rel.abstract}
-					onchange={(e) =>
-						applyDiagramEdit({
-							kind: 'setRelationshipAbstract',
-							name,
-							value: e.currentTarget.checked
-						})}
+					onchange={(e) => {
+						// A checkbox owns its own DOM state, so a REFUSED command has to be
+						// undrawn by hand or the box sits flipped against an unchanged draft.
+						if (
+							!applyDiagramEdit({
+								kind: 'setRelationshipAbstract',
+								name,
+								value: e.currentTarget.checked
+							})
+						) {
+							e.currentTarget.checked = rel.abstract;
+						}
+					}}
 				/>
 				Abstract
 			</label>
@@ -140,12 +148,17 @@
 					data-testid="mm-rel-containment"
 					disabled={readOnly}
 					checked={rel.containment}
-					onchange={(e) =>
-						applyDiagramEdit({
-							kind: 'setRelationshipContainment',
-							name,
-							value: e.currentTarget.checked
-						})}
+					onchange={(e) => {
+						if (
+							!applyDiagramEdit({
+								kind: 'setRelationshipContainment',
+								name,
+								value: e.currentTarget.checked
+							})
+						) {
+							e.currentTarget.checked = rel.containment;
+						}
+					}}
 				/>
 				Containment
 			</label>
@@ -158,12 +171,13 @@
 				data-testid="mm-rel-extends"
 				disabled={readOnly}
 				value={rel.extends ?? ''}
-				onchange={(e) =>
-					applyDiagramEdit({
-						kind: 'setRelationshipExtends',
-						name,
-						value: e.currentTarget.value === '' ? null : e.currentTarget.value
-					})}
+				onchange={(e) => {
+					// Same rollback as the checkboxes: the select holds its own value.
+					const value = e.currentTarget.value === '' ? null : e.currentTarget.value;
+					if (!applyDiagramEdit({ kind: 'setRelationshipExtends', name, value })) {
+						e.currentTarget.value = rel.extends ?? '';
+					}
+				}}
 			>
 				<option value="">— none —</option>
 				{#each extendsOptions as opt, i (`${i}:${opt}`)}<option value={opt}>{opt}</option>{/each}
@@ -285,7 +299,7 @@
 				<p class="{headingCls} mb-1">Danger zone</p>
 				<button
 					type="button"
-					class="inline-flex items-center gap-1 rounded border border-destructive/40 px-2 py-0.5 text-[11px] text-destructive transition-colors hover:bg-destructive/15"
+					class={dangerBtnCls}
 					data-testid="mm-rel-delete"
 					onclick={() => onRequestDelete(name)}
 				>

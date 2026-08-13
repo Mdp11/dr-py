@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { Plus, Trash2 } from '@lucide/svelte';
 	import type { Metamodel, PropertyDef } from '$lib/api/types';
-	import { PRIMITIVE_DATATYPES } from '$lib/metamodel/helpers';
+	import { PRIMITIVE_DATATYPES, uniqueTypeName } from '$lib/metamodel/helpers';
 	import type { TypeRef } from '$lib/metamodel/yaml-edit';
 	import { applyDiagramEdit } from '$lib/state';
 	import { addBtnCls, headingCls, inputCls, rowRemoveCls, selectCls } from './field-classes';
@@ -16,9 +16,19 @@
 	 * ones at their schema default), so a partial def would silently erase the
 	 * facets the user did not touch.
 	 *
+	 * **Property names are kept unique HERE, at the form boundary**, and that is
+	 * load-bearing rather than cosmetic: `yaml-edit`'s `updateProperty` and
+	 * `removeProperty` address a row by FIRST NAME MATCH, so two rows sharing a
+	 * name would make an edit to the second silently rewrite the first. Two
+	 * doors lead there and both are shut — `+ Property` picks a free default
+	 * name instead of a fixed one, and a rename that would collide is refused
+	 * with an inline error. A duplicate can therefore only arrive from
+	 * hand-edited YAML, where the linter reports it and the canvas (keyed by
+	 * INDEX, like the rows below) renders it rather than throwing.
+	 *
 	 * Rows collapse to `name — datatype — mult` and open one at a time. The open
-	 * row is tracked by NAME, so a rename has to move it (see `commit`) or the
-	 * row the user is editing would fold shut under them.
+	 * row is tracked by INDEX: a name is neither stable across a rename nor
+	 * guaranteed unique in a mid-edit draft.
 	 */
 
 	let {
@@ -44,7 +54,10 @@
 	const enums = $derived(Object.keys(mm.enums));
 	const elementTypes = $derived(mm.elements.map((e) => e.name));
 
-	let open = $state<string | null>(null);
+	let open = $state<number | null>(null);
+	/** The open row's rename error, if any. One slot is enough because one row
+	 * is open at a time; it is cleared whenever the open row changes. */
+	let nameError = $state<string | null>(null);
 
 	const DEFAULT_PROP: PropertyDef = {
 		name: 'new_property',
@@ -56,23 +69,57 @@
 		max_length: null
 	};
 
+	function toggleOpen(index: number): void {
+		open = open === index ? null : index;
+		nameError = null;
+	}
+
+	function addProperty(): void {
+		// NOT the literal `new_property` every time: a second click would then
+		// produce a row that shadows the first for every later edit (see the
+		// name-uniqueness note above).
+		const name = uniqueTypeName('new_property', new Set(properties.map((p) => p.name)));
+		applyDiagramEdit({ kind: 'addProperty', owner, prop: { ...DEFAULT_PROP, name } });
+	}
+
+	function removeProperty(p: PropertyDef): void {
+		if (applyDiagramEdit({ kind: 'removeProperty', owner, propName: p.name })) {
+			// `open` is an INDEX into a list that just shifted under it — anything
+			// after the removed row would otherwise expand its neighbour.
+			open = null;
+			nameError = null;
+		}
+	}
+
 	function commit(p: PropertyDef, patch: Partial<PropertyDef>): boolean {
 		const next = { ...p, ...patch };
-		const ok = applyDiagramEdit({ kind: 'updateProperty', owner, propName: p.name, prop: next });
-		// Follow the rename: `open` keys on the property name, and the row is
-		// re-rendered from the new draft the moment this returns.
-		if (ok && next.name !== p.name) open = next.name;
-		return ok;
+		return applyDiagramEdit({ kind: 'updateProperty', owner, propName: p.name, prop: next });
 	}
 
 	/** Text commits on blur (or Enter), never per keystroke: `updateProperty`
 	 * rewrites the YAML and re-lints, and doing that per character would make
 	 * every rename cascade once per letter. */
-	function commitText(p: PropertyDef, field: 'name' | 'multiplicity', el: HTMLInputElement): void {
+	function commitText(
+		index: number,
+		p: PropertyDef,
+		field: 'name' | 'multiplicity',
+		el: HTMLInputElement
+	): void {
 		const value = el.value.trim();
 		const current = p[field];
+		if (field === 'name') nameError = null;
 		if (value === current) return;
-		if (value === '' || !commit(p, { [field]: value })) el.value = current;
+		if (value === '') {
+			el.value = current;
+			return;
+		}
+		if (field === 'name' && properties.some((o, j) => j !== index && o.name === value)) {
+			// Deliberately keeps the typed text: this is an inline validation
+			// error the user is expected to correct, not a rejected command.
+			nameError = `${owner.name} already has a property called “${value}”.`;
+			return;
+		}
+		if (!commit(p, { [field]: value })) el.value = current;
 	}
 
 	/** An empty facet input means "no facet", i.e. the key is dropped from the
@@ -88,16 +135,14 @@
 			return;
 		}
 		const n = field === 'max_length' ? Number.parseInt(raw, 10) : Number.parseFloat(raw);
-		if (!Number.isFinite(n)) {
+		if (!Number.isFinite(n) || !commit(p, { [field]: n })) {
 			el.value = p[field] === null ? '' : String(p[field]);
-			return;
 		}
-		commit(p, { [field]: n });
 	}
 
 	function commitPattern(p: PropertyDef, el: HTMLInputElement): void {
 		const raw = el.value;
-		commit(p, { pattern: raw === '' ? null : raw });
+		if (!commit(p, { pattern: raw === '' ? null : raw })) el.value = p.pattern ?? '';
 	}
 
 	function onEnter(e: KeyboardEvent): void {
@@ -119,8 +164,8 @@
 					type="button"
 					class="min-w-0 flex-1 truncate text-left text-[11px]"
 					data-testid="mm-prop-row"
-					aria-expanded={open === p.name}
-					onclick={() => (open = open === p.name ? null : p.name)}
+					aria-expanded={open === i}
+					onclick={() => toggleOpen(i)}
 				>
 					<span class="text-foreground/90">{p.name}</span>
 					<span class="text-muted-foreground/70"> — </span>
@@ -134,14 +179,14 @@
 						data-testid="mm-prop-remove"
 						title={`Remove ${p.name}`}
 						aria-label={`Remove ${p.name}`}
-						onclick={() => applyDiagramEdit({ kind: 'removeProperty', owner, propName: p.name })}
+						onclick={() => removeProperty(p)}
 					>
 						<Trash2 class="h-3 w-3" />
 					</button>
 				{/if}
 			</div>
 
-			{#if open === p.name}
+			{#if open === i}
 				<div class="grid grid-cols-2 gap-1.5 border-t border-border/60 px-1.5 py-1.5">
 					<label class="col-span-2 flex flex-col gap-0.5">
 						<span class="text-[10px] text-muted-foreground/70">Name</span>
@@ -150,9 +195,14 @@
 							data-testid="mm-prop-name"
 							disabled={readOnly}
 							value={p.name}
-							onblur={(e) => commitText(p, 'name', e.currentTarget)}
+							onblur={(e) => commitText(i, p, 'name', e.currentTarget)}
 							onkeydown={onEnter}
 						/>
+						{#if nameError !== null}
+							<span class="text-[10px] text-destructive" data-testid="mm-prop-name-error">
+								{nameError}
+							</span>
+						{/if}
 					</label>
 					<label class="flex flex-col gap-0.5">
 						<span class="text-[10px] text-muted-foreground/70">Datatype</span>
@@ -161,7 +211,13 @@
 							data-testid="mm-prop-datatype"
 							disabled={readOnly}
 							value={p.datatype}
-							onchange={(e) => commit(p, { datatype: e.currentTarget.value })}
+							onchange={(e) => {
+								// The select holds its own value, so a refused command has to
+								// be undrawn by hand (same rule as every control here).
+								if (!commit(p, { datatype: e.currentTarget.value })) {
+									e.currentTarget.value = p.datatype;
+								}
+							}}
 						>
 							<optgroup label="Primitives">
 								{#each primitives as dt, j (`${j}:${dt}`)}<option value={dt}>{dt}</option>{/each}
@@ -188,7 +244,7 @@
 							data-testid="mm-prop-multiplicity"
 							disabled={readOnly}
 							value={p.multiplicity}
-							onblur={(e) => commitText(p, 'multiplicity', e.currentTarget)}
+							onblur={(e) => commitText(i, p, 'multiplicity', e.currentTarget)}
 							onkeydown={onEnter}
 						/>
 					</label>
@@ -245,12 +301,7 @@
 	{/each}
 
 	{#if !readOnly}
-		<button
-			type="button"
-			class={addBtnCls}
-			data-testid="mm-prop-add"
-			onclick={() => applyDiagramEdit({ kind: 'addProperty', owner, prop: DEFAULT_PROP })}
-		>
+		<button type="button" class={addBtnCls} data-testid="mm-prop-add" onclick={addProperty}>
 			<Plus class="h-3 w-3" /> Property
 		</button>
 	{/if}

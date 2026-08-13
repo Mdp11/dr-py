@@ -223,6 +223,35 @@ describe('MetamodelDiagram', () => {
 		unmount(c);
 	});
 
+	it('draws an expanded box whose type declares the same property name twice', () => {
+		// `+ Property` used to emit a fixed `new_property`, so two clicks put two
+		// identically-named rows on one type — and a draft is allowed to be
+		// invalid mid-edit anyway (hand-edited YAML reaches the same state). A
+		// box keyed on `p.name` throws `each_key_duplicate` in the PRODUCTION
+		// build, not just dev, taking the canvas down beside a panel that
+		// survives. Both box kinds are covered: `Contains` carries properties
+		// here, so the association-class rule gives it a box too.
+		const prop = MM.elements[0].properties[0];
+		diagramView = {
+			...DIAGRAM,
+			mm: {
+				...MM,
+				elements: MM.elements.map((el) =>
+					el.name === 'Zone' ? { ...el, properties: [prop, prop] } : el
+				),
+				relationships: MM.relationships.map((rel) => ({ ...rel, properties: [prop, prop] }))
+			}
+		};
+
+		const c = mount(DiagramHost, { target: document.body });
+		flushSync();
+
+		expect(nodeByText('Zone')?.querySelectorAll('.mm-row')).toHaveLength(2);
+		expect(nodeByText('Contains')?.querySelectorAll('.mm-row')).toHaveLength(2);
+
+		unmount(c);
+	});
+
 	it('counts unattributed lint errors in the toolbar and sends the click to the YAML view', () => {
 		// `errorNodeIds` is empty in every reachable state (see the state module:
 		// a line-bearing lint error implies a buffer that does not parse, which

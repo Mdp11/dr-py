@@ -2,6 +2,7 @@
 	import { untrack } from 'svelte';
 	import type { Metamodel } from '$lib/api/types';
 	import { isSubtype, uniqueTypeName } from '$lib/metamodel/helpers';
+	import { blockBtnCls, inputCls, selectCls } from '../forms/field-classes';
 	import { applyDiagramEdit, selectDiagramNode } from '$lib/state';
 
 	/**
@@ -73,11 +74,6 @@
 		applyDiagramEdit({ kind: 'setElementExtends', name: source, value: target });
 		onclose();
 	}
-
-	const fieldCls =
-		'h-7 w-full rounded border border-border bg-card px-2 text-xs text-foreground outline-none focus:border-ring';
-	const actionCls =
-		'w-full rounded border border-border bg-card px-2 py-1 text-[11px] text-foreground/90 transition-colors hover:bg-muted';
 </script>
 
 <svelte:window
@@ -110,7 +106,7 @@
 				New relationship type
 			</p>
 			<input
-				class={fieldCls}
+				class={inputCls}
 				data-testid="mm-conn-name"
 				value={newName}
 				oninput={(e) => (newName = e.currentTarget.value)}
@@ -125,7 +121,7 @@
 				/>
 				Containment
 			</label>
-			<button type="button" class={actionCls} data-testid="mm-conn-create" onclick={createType}>
+			<button type="button" class={blockBtnCls} data-testid="mm-conn-create" onclick={createType}>
 				Create
 			</button>
 		</div>
@@ -139,7 +135,7 @@
 				     form panel's controls: every input in this feature is committed by
 				     an event handler, so there is one way to read a control. -->
 				<select
-					class={fieldCls}
+					class={selectCls}
 					data-testid="mm-conn-existing"
 					value={chosen}
 					onchange={(e) => (chosen = e.currentTarget.value)}
@@ -149,7 +145,7 @@
 				</select>
 				<button
 					type="button"
-					class={actionCls}
+					class={blockBtnCls}
 					data-testid="mm-conn-add-mapping"
 					onclick={addMapping}
 				>
@@ -163,7 +159,12 @@
 				<p class="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">
 					Generalization
 				</p>
-				<button type="button" class={actionCls} data-testid="mm-conn-extends" onclick={setExtends}>
+				<button
+					type="button"
+					class={blockBtnCls}
+					data-testid="mm-conn-extends"
+					onclick={setExtends}
+				>
 					{source} extends {target}
 				</button>
 			</div>

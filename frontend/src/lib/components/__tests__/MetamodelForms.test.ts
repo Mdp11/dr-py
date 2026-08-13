@@ -260,6 +260,69 @@ describe('PropertyListEditor', () => {
 		unmount(c);
 	});
 
+	it('picks a free default name so a second add cannot shadow the first', () => {
+		// `updateProperty`/`removeProperty` address a row by FIRST NAME MATCH, so
+		// two `new_property` rows would make every later edit to the second
+		// silently rewrite the first. The add button closes that door.
+		const withDefault: Metamodel = {
+			...MM,
+			elements: MM.elements.map((e) =>
+				e.name === 'Zone' ? { ...e, properties: [{ ...e.properties[0], name: 'new_property' }] } : e
+			)
+		};
+
+		const c = mount(PropertyListEditor, {
+			target: document.body,
+			props: { mm: withDefault, owner, readOnly: false }
+		});
+		flushSync();
+
+		byId('mm-prop-add').click();
+		flushSync();
+
+		expect(applyDiagramEdit).toHaveBeenCalledWith(
+			expect.objectContaining({
+				kind: 'addProperty',
+				prop: expect.objectContaining({ name: 'new_property2' })
+			})
+		);
+
+		unmount(c);
+	});
+
+	it('refuses a rename onto a sibling property name, with an inline error', () => {
+		// The other door to the same first-name-match corruption: rename `area` to
+		// `size` and every later edit to `size` would hit `area` instead.
+		const twoProps: Metamodel = {
+			...MM,
+			elements: MM.elements.map((e) =>
+				e.name === 'Zone'
+					? { ...e, properties: [e.properties[0], { ...e.properties[0], name: 'size' }] }
+					: e
+			)
+		};
+
+		const c = mount(PropertyListEditor, {
+			target: document.body,
+			props: { mm: twoProps, owner, readOnly: false }
+		});
+		flushSync();
+		allById('mm-prop-row')[0].click();
+		flushSync();
+
+		const input = byId<HTMLInputElement>('mm-prop-name');
+		input.value = 'size';
+		fire(input, 'blur');
+
+		expect(applyDiagramEdit).not.toHaveBeenCalled();
+		expect(byId('mm-prop-name-error').textContent).toContain('size');
+		// The typed text stays put: this is a correctable validation error, not a
+		// rejected command.
+		expect(input.value).toBe('size');
+
+		unmount(c);
+	});
+
 	it('survives duplicate property names', () => {
 		// Two clicks of "+ Property" produce two rows called `new_property`, and a
 		// draft is allowed to be invalid mid-edit — so the row list must not key

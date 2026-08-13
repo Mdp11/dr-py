@@ -3,7 +3,7 @@
 	import type { Metamodel } from '$lib/api/types';
 	import { effectiveProperties } from '$lib/metamodel/helpers';
 	import { applyDiagramEdit } from '$lib/state';
-	import { addBtnCls, headingCls, rowRemoveCls, selectCls } from './field-classes';
+	import { addBtnCls, dangerBtnCls, headingCls, rowRemoveCls, selectCls } from './field-classes';
 
 	/**
 	 * An element type's `key` — the uniqueness DSL, built as rows instead of
@@ -52,13 +52,16 @@
 	}
 
 	/** An emptied key is `null` (the key is DROPPED from the YAML), never `[]`:
-	 * a declared key with no entries would key every instance on nothing. */
-	function emit(next: string[]): void {
-		applyDiagramEdit({ kind: 'setElementKey', name, key: next.length === 0 ? null : next });
+	 * a declared key with no entries would key every instance on nothing.
+	 * Returns whether the draft took it — the row SELECTS hold their own DOM
+	 * value and must be rolled back when it did not. The add/remove buttons own
+	 * no DOM state, so they simply re-render from the unchanged draft. */
+	function emit(next: string[]): boolean {
+		return applyDiagramEdit({ kind: 'setElementKey', name, key: next.length === 0 ? null : next });
 	}
 
-	function replace(index: number, entry: string): void {
-		emit(entries.map((e, i) => (i === index ? entry : e)));
+	function replace(index: number, entry: string, el: HTMLSelectElement, previous: string): void {
+		if (!emit(entries.map((e, i) => (i === index ? entry : e)))) el.value = previous;
 	}
 </script>
 
@@ -78,7 +81,7 @@
 					data-testid="mm-key-property"
 					disabled={readOnly}
 					value={row.value}
-					onchange={(e) => replace(i, e.currentTarget.value)}
+					onchange={(e) => replace(i, e.currentTarget.value, e.currentTarget, row.value)}
 				>
 					{#each propNames as p, j (`${j}:${p}`)}<option value={p}>{p}</option>{/each}
 					<!-- A key entry naming a property the draft dropped stays visible
@@ -88,12 +91,16 @@
 					{/if}
 				</select>
 			{:else}
+				<!-- `row.dir` is non-null in this branch by construction; the local
+				     says so in a form the template's type-checker can see. -->
+				{@const dir = row.dir ?? 'out'}
 				<select
 					class="{selectCls} w-20 flex-none"
 					data-testid="mm-key-direction"
 					disabled={readOnly}
-					value={row.dir}
-					onchange={(e) => replace(i, `${e.currentTarget.value}:${row.value}`)}
+					value={dir}
+					onchange={(e) =>
+						replace(i, `${e.currentTarget.value}:${row.value}`, e.currentTarget, dir)}
 				>
 					<option value="out">out</option>
 					<option value="in">in</option>
@@ -103,7 +110,8 @@
 					data-testid="mm-key-relationship"
 					disabled={readOnly}
 					value={row.value}
-					onchange={(e) => replace(i, `${row.dir}:${e.currentTarget.value}`)}
+					onchange={(e) =>
+						replace(i, `${dir}:${e.currentTarget.value}`, e.currentTarget, row.value)}
 				>
 					{#each relNames as r, j (`${j}:${r}`)}<option value={r}>{r}</option>{/each}
 					{#if !relNames.includes(row.value)}
@@ -149,7 +157,13 @@
 				<Plus class="h-3 w-3" /> relationship entry
 			</button>
 			{#if entries.length > 0}
-				<button type="button" class={addBtnCls} data-testid="mm-key-clear" onclick={() => emit([])}>
+				<button
+					type="button"
+					class={dangerBtnCls}
+					data-testid="mm-key-clear"
+					title="Drop the key entirely — instances stop being unique"
+					onclick={() => emit([])}
+				>
 					No key
 				</button>
 			{/if}

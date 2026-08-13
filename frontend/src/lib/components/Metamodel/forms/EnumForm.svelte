@@ -2,7 +2,14 @@
 	import { ChevronDown, ChevronUp, Plus, Trash2 } from '@lucide/svelte';
 	import type { Metamodel } from '$lib/api/types';
 	import { applyDiagramEdit, selectDiagramNode } from '$lib/state';
-	import { addBtnCls, headingCls, inputCls, labelCls, rowRemoveCls } from './field-classes';
+	import {
+		addBtnCls,
+		dangerBtnCls,
+		headingCls,
+		inputCls,
+		labelCls,
+		rowRemoveCls
+	} from './field-classes';
 
 	/**
 	 * An enum: a name and an ORDERED list of literals. Order is meaningful —
@@ -29,8 +36,12 @@
 	const literals = $derived<string[]>(mm.enums[name] ?? []);
 	const known = $derived(Object.prototype.hasOwnProperty.call(mm.enums, name));
 
-	function emit(next: string[]): void {
-		applyDiagramEdit({ kind: 'setEnumLiterals', name, literals: next });
+	/** Returns whether the draft actually took it: the literal INPUTS hold their
+	 * own DOM value, so a refused edit has to be rolled back by hand. The
+	 * button-driven gestures (add/remove/reorder) need no rollback — they own no
+	 * DOM state and simply re-render from the unchanged draft. */
+	function emit(next: string[]): boolean {
+		return applyDiagramEdit({ kind: 'setEnumLiterals', name, literals: next });
 	}
 
 	function commitRename(input: HTMLInputElement): void {
@@ -46,11 +57,9 @@
 	function commitLiteral(index: number, input: HTMLInputElement): void {
 		const value = input.value.trim();
 		if (value === literals[index]) return;
-		if (value === '') {
+		if (value === '' || !emit(literals.map((l, i) => (i === index ? value : l)))) {
 			input.value = literals[index];
-			return;
 		}
-		emit(literals.map((l, i) => (i === index ? value : l)));
 	}
 
 	/** Swap with the neighbour rather than splice-and-insert: the two are the
@@ -159,7 +168,7 @@
 				<p class="{headingCls} mb-1">Danger zone</p>
 				<button
 					type="button"
-					class="inline-flex items-center gap-1 rounded border border-destructive/40 px-2 py-0.5 text-[11px] text-destructive transition-colors hover:bg-destructive/15"
+					class={dangerBtnCls}
 					data-testid="mm-enum-delete"
 					onclick={() => onRequestDelete(name)}
 				>
