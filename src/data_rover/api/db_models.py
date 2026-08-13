@@ -272,6 +272,7 @@ class ArtifactKind(enum.StrEnum):
     diagram = "diagram"
     diagram_kind = "diagram_kind"
     code_snippet = "code_snippet"
+    custom_export = "custom_export"
 
 
 class ArtifactRow(Base):
