@@ -75,6 +75,7 @@ _READ_ONLY_POST_SUFFIXES = (
     "/snippets/cancel",
     "/artifacts/export",
     "/artifacts/export/preview",
+    "/exports/run",
 )
 
 

@@ -1,0 +1,173 @@
+"""Run a custom_export artifact: every entry's table export, one zip.
+
+Read-only (viewer-callable): running an export commits nothing — only edits
+to the artifact's DEFINITION go through POST /commits.
+Spec: docs/superpowers/specs/2026-08-13-table-export-split-and-custom-export-design.md §4.3
+"""
+
+from __future__ import annotations
+
+from typing import Literal
+
+from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi.responses import JSONResponse
+from sqlalchemy.orm import Session as DbSession
+
+from data_rover.core.navigation.resolve import NavigationResolveError
+from data_rover.core.script.runner import ScriptRunner
+from data_rover.core.table.custom_export import (
+    CUSTOM_EXPORT_ADAPTER,
+    CustomExportDefinition,
+    overridden_table,
+)
+
+from .. import content
+from ..db import get_db
+from ..db_models import ArtifactKind, ArtifactRow
+from ..deps import Session, get_request_session, require_model
+from ..schemas import EvaluateTableIn, RunExportIn, ScriptStatusOut
+from ..script_runner import get_runner
+from ..settings import Settings, get_settings
+from ..table_export_engine import (
+    ExportFiles,
+    ExportPending,
+    build_zip,
+    run_table_export,
+)
+from .tables import _resolve_table
+
+router = APIRouter()
+
+
+def _dedupe(stem: str, taken: set[str]) -> str:
+    candidate, n = stem, 2
+    while candidate in taken:
+        candidate = f"{stem}_{n}"
+        n += 1
+    taken.add(candidate)
+    return candidate
+
+
+@router.post("/exports/run")
+def run_export(
+    payload: RunExportIn,
+    project_id: str,
+    session: Session = Depends(get_request_session),
+    db: DbSession = Depends(get_db),
+    runner: ScriptRunner | None = Depends(get_runner),
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    metamodel, model = require_model(session)
+    row = content.get_artifact(db, payload.artifact_id)
+    if (
+        row is None
+        or row.project_id != project_id
+        or row.kind is not ArtifactKind.custom_export
+    ):
+        raise HTTPException(
+            status_code=404, detail=f"unknown custom export {payload.artifact_id}"
+        )
+    cdef: CustomExportDefinition = CUSTOM_EXPORT_ADAPTER.validate_python(row.payload)
+    if not cdef.entries:
+        raise HTTPException(status_code=422, detail="custom export has no entries")
+
+    # Resolve every table up front: an export artefact with a hole fails
+    # LOUDLY (422 naming the entries) rather than shipping a partial zip that
+    # looks complete — deliberate divergence from the bundle's
+    # tolerant-dangler stance (spec §4.3).
+    missing: list[str] = []
+    tables: list[ArtifactRow | None] = []
+    for entry in cdef.entries:
+        t = content.get_artifact(db, entry.source.ref)
+        if t is None or t.project_id != project_id or t.kind is not ArtifactKind.table:
+            missing.append(entry.name or entry.source.ref)
+            tables.append(None)
+        else:
+            tables.append(t)
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail="missing table(s) for entries: " + ", ".join(missing),
+        )
+
+    try:
+        results = []
+        for entry, t in zip(cdef.entries, tables, strict=True):
+            assert t is not None
+            defn = _resolve_table(
+                EvaluateTableIn(artifact_id=t.id, offset=0, limit=100),
+                project_id,
+                db,
+            )
+            out_name = entry.name or t.name
+            results.append(
+                (
+                    entry,
+                    out_name,
+                    run_table_export(
+                        session=session,
+                        settings=settings,
+                        runner=runner,
+                        metamodel=metamodel,
+                        model=model,
+                        defn=defn,
+                        render_defn=overridden_table(defn, entry),
+                        name=out_name,
+                        format=entry.format,
+                        sort=None,
+                    ),
+                )
+            )
+    except LookupError as exc:
+        raise HTTPException(status_code=422, detail=f"unknown artifact {exc}") from exc
+    except (NavigationResolveError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    pending = [r.status for _, _, r in results if isinstance(r, ExportPending)]
+    if pending:
+        # ONE aggregate 202. Every entry already ran (kicking every pending
+        # table's sweep, so they fill concurrently); the retry re-reads the
+        # cache. `computing` wins over `failed` for the same reason as the
+        # per-table FIX B: a retry that will succeed must not be told to
+        # abandon the download.
+        state: Literal["computing", "failed"] = (
+            "computing" if any(s.state == "computing" for s in pending) else "failed"
+        )
+        agg = ScriptStatusOut(
+            state=state,
+            done=sum(s.done for s in pending),
+            total=sum(s.total or 0 for s in pending),
+        )
+        return JSONResponse(
+            status_code=202,
+            content=agg.model_dump(),
+            headers={"Retry-After": "1"},
+        )
+
+    files: list[tuple[str, bytes]] = []
+    taken: set[str] = set()
+    truncated = degraded = False
+    for _entry, out_name, res in results:
+        assert isinstance(res, ExportFiles)
+        truncated |= res.truncated
+        degraded |= res.degraded
+        if res.archive:
+            # A split entry keeps its per-element files together under one
+            # folder named by the entry; root-name collisions dedupe `_2`.
+            folder = _dedupe(out_name, taken)
+            files.extend((f"{folder}/{fn}", blob) for fn, blob in res.files)
+        else:
+            fn, blob = res.files[0]
+            stem, dot, ext = fn.rpartition(".")
+            files.append((f"{_dedupe(stem, taken)}{dot}{ext}", blob))
+
+    resp_headers = {"Content-Disposition": f'attachment; filename="{row.name}.zip"'}
+    if truncated:
+        resp_headers["X-Table-Truncated"] = "true"
+    if degraded:
+        resp_headers["X-Table-Script-Errors"] = "true"
+    return Response(
+        content=build_zip(files),
+        media_type="application/zip",
+        headers=resp_headers,
+    )

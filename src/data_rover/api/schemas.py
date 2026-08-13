@@ -1272,6 +1272,14 @@ class ExportTableIn(EvaluateTableIn):
     format: Literal["xlsx", "json"] = "xlsx"
 
 
+class RunExportIn(BaseModel):
+    """`POST /exports/run` body. The id travels in the BODY, not the path:
+    `authz._READ_ONLY_POST_SUFFIXES` matches fixed path suffixes, and this
+    route must be viewer-callable like `/tables/export`."""
+
+    artifact_id: str
+
+
 class JsonPreviewOut(BaseModel):
     """A bounded, already-rendered JSON sample for the export settings UI.
 

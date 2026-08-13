@@ -24,6 +24,7 @@ from .routes import (
     change_request,
     commits,
     elements,
+    exports,
     feed,
     health,
     locks,
@@ -317,6 +318,7 @@ def create_app() -> FastAPI:
     app.include_router(artifacts.router, prefix=proj, tags=["artifacts"])
     app.include_router(artifact_bundle.router, prefix=proj, tags=["artifacts"])
     app.include_router(tables.router, prefix=proj, tags=["tables"])
+    app.include_router(exports.router, prefix=proj, tags=["exports"])
     app.include_router(snippets.router, prefix=proj, tags=["snippets"])
     app.include_router(settings_routes.router, prefix=proj, tags=["settings"])
     app.include_router(feed.router, prefix=proj, tags=["feed"])

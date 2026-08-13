@@ -101,6 +101,15 @@ def test_viewer_can_call_readonly_post_tree_items(client: TestClient) -> None:
     assert r.status_code == 200
 
 
+def test_viewer_can_call_readonly_post_exports_run(client: TestClient) -> None:
+    pid = _seed()
+    r = client.post(
+        f"/projects/{pid}/exports/run", headers=_h("viewer"),
+        json={"artifact_id": "x"},
+    )
+    assert r.status_code != 403  # authz passes; 404 comes from the route
+
+
 def test_require_owner_rejects_editor(client: TestClient) -> None:
     pid = _seed(member="ed", role=Role.editor)
     r = client.delete(f"/projects/{pid}/owned", headers=_h("ed"))
