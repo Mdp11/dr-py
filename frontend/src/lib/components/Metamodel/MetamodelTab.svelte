@@ -1,28 +1,38 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { SvelteFlowProvider } from '@xyflow/svelte';
 	import { Button } from '$lib/components/ui/button';
 	import MetamodelYamlEditor from './MetamodelYamlEditor.svelte';
 	import MetamodelPreviewPanel from './MetamodelPreviewPanel.svelte';
+	import MetamodelDiagram from './MetamodelDiagram.svelte';
 	import { getMetamodel as fetchMetamodel } from '$lib/api/metamodel';
 	import type { Issue } from '$lib/api/types';
 	import {
 		adoptIssues,
+		closeMetamodelDiagram,
 		closeMetamodelEditor,
 		commitMetamodelRebind,
 		discardMetamodelDraft,
 		editMetamodelBuffer,
 		getActiveProjectId,
+		getMetamodelDiagramView,
 		getMetamodelEditor,
 		getRole,
+		initMetamodelDiagram,
 		initMetamodelEditor,
 		isProjectQuiet,
+		onMetamodelRebound,
 		previewMetamodelChanges,
 		refreshSummary,
 		retryMetamodelLease,
-		setMetamodel
+		setMetamodel,
+		setMetamodelView
 	} from '$lib/state';
 
 	const ed = $derived(getMetamodelEditor());
+	/** Which surface the tab shows. Owned by the diagram state module (it
+	 * persists the choice per project), so the toggle below is a pure command. */
+	const surface = $derived(getMetamodelDiagramView().view);
 	const isOwner = $derived(getRole() === 'owner');
 	// Same shared quiet rule as history Revert / the old swap drawer.
 	const quiet = $derived(isProjectQuiet());
@@ -30,21 +40,36 @@
 	 * editor; positioned errors render in the gutter instead. */
 	const stripError = $derived(ed.lintErrors.find((e) => e.line === null) ?? null);
 
+	/** `as const` so the ids stay the literal union `setMetamodelView` takes. */
+	const SURFACES = [
+		{ id: 'yaml', label: 'YAML' },
+		{ id: 'diagram', label: 'Diagram' }
+	] as const;
+
 	let message = $state('');
 	/** The rebind itself already succeeded by the time this can fire — the
 	 * copy below must never read as a failed rebind, only as a stale view. */
 	let refreshError = $state<string | null>(null);
 
-	function init(): void {
+	/** The diagram init is CHAINED, not raced: it reads the editor's buffer to
+	 * auto-arrange a never-arranged metamodel, so an empty buffer would leave it
+	 * with nothing to place (see initMetamodelDiagram's docstring). */
+	async function init(): Promise<void> {
 		const pid = getActiveProjectId();
-		if (pid !== null) void initMetamodelEditor(pid);
+		if (pid === null) return;
+		await initMetamodelEditor(pid);
+		await initMetamodelDiagram(pid);
 	}
 
 	onMount(() => {
-		init();
+		void init();
 		// Unmount without a close transition must release the lease too — the
 		// old drawer's known leak, fixed here by pairing mount with teardown.
-		return () => closeMetamodelEditor();
+		// The diagram closes first: its teardown flushes a pending layout PUT.
+		return () => {
+			closeMetamodelDiagram();
+			closeMetamodelEditor();
+		};
 	});
 
 	function toIssue(o: { severity: string; message: string; target_ids: string[] }): Issue {
@@ -63,6 +88,11 @@
 		// The commit consumed the message regardless of what the refresh below
 		// does next.
 		message = '';
+		// The draft's names ARE the project's names now, so every deferred layout
+		// key rewrite becomes true at once. Before the refresh, deliberately: the
+		// window where the shared layout blob still speaks the old names should be
+		// as short as possible, and the refresh below can fail.
+		onMetamodelRebound();
 		try {
 			const mm = await fetchMetamodel();
 			setMetamodel(mm);
@@ -90,10 +120,28 @@
 			>
 				Couldn't load the metamodel: {ed.loadError}
 			</p>
-			<Button size="sm" variant="outline" onclick={init}>Retry</Button>
+			<Button size="sm" variant="outline" onclick={() => void init()}>Retry</Button>
 		</div>
 	{:else}
 		<div class="flex flex-wrap items-center gap-2 text-xs">
+			<div
+				class="flex items-center gap-0.5 rounded border border-border bg-card p-0.5"
+				role="group"
+				aria-label="Metamodel surface"
+			>
+				{#each SURFACES as opt (opt.id)}
+					<button
+						type="button"
+						class="rounded px-2 py-0.5 text-[11px] {surface === opt.id
+							? 'bg-primary text-primary-foreground'
+							: 'text-muted-foreground hover:text-foreground'}"
+						aria-pressed={surface === opt.id}
+						onclick={() => setMetamodelView(opt.id)}
+					>
+						{opt.label}
+					</button>
+				{/each}
+			</div>
 			{#if isOwner}
 				<Button
 					size="sm"
@@ -127,7 +175,7 @@
 				{/if}
 			{:else}
 				<p class="text-muted-foreground/70">
-					The metamodel is read-only for your role. Only an owner can edit and rebind.
+					The metamodel is read-only for your role — the diagram stays browsable.
 				</p>
 			{/if}
 			{#if ed.source === 'serialized'}
@@ -162,12 +210,21 @@
 		{/if}
 
 		<div class="min-h-0 flex-1">
-			<MetamodelYamlEditor
-				code={ed.buffer}
-				errors={ed.lintErrors}
-				readOnly={ed.readOnly}
-				onChange={editMetamodelBuffer}
-			/>
+			{#if surface === 'diagram'}
+				<!-- The provider has to sit ABOVE the canvas component: `useSvelteFlow()`
+				     resolves context where it is CALLED, and MetamodelDiagram's toolbar
+				     calls it (Fit view, search pan) outside of `<SvelteFlow>`. -->
+				<SvelteFlowProvider>
+					<MetamodelDiagram />
+				</SvelteFlowProvider>
+			{:else}
+				<MetamodelYamlEditor
+					code={ed.buffer}
+					errors={ed.lintErrors}
+					readOnly={ed.readOnly}
+					onChange={editMetamodelBuffer}
+				/>
+			{/if}
 		</div>
 
 		{#if stripError}

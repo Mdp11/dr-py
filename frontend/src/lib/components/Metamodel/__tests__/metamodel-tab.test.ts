@@ -58,6 +58,12 @@ beforeEach(() => {
 	resetMetamodelEditor();
 	setActiveProject('p1');
 	vi.spyOn(mmApi, 'getMetamodelRaw').mockResolvedValue({ blob: BASE, source: 'stored' });
+	// The tab now boots the diagram half alongside the editor, and that fetches
+	// (and, after a rebind, PUTs) the shared layout blob. The module swallows
+	// both failures by design, so leaving them unmocked costs nothing but a wall
+	// of connection-refused noise over every test in this file.
+	vi.spyOn(mmApi, 'getMetamodelLayout').mockResolvedValue({ positions: {} });
+	vi.spyOn(mmApi, 'putMetamodelLayout').mockResolvedValue(undefined);
 });
 
 afterEach(() => {
