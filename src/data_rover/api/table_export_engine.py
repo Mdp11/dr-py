@@ -1,0 +1,417 @@
+"""Shared table-export engine: the 202-vs-ship logic behind
+`POST /tables/export` and `POST /exports/run`.
+
+Extracted from `routes/tables.py::export_table` so both routes share ONE
+completeness probe, ONE decision table, ONE zip builder. The long FIX A /
+FIX B comments moved here VERBATIM — they are load-bearing; do not trim.
+
+`run_table_export` takes TWO definitions: `defn` (evaluation — always the
+original) and `render_defn` (presentation — an `overridden_table` copy for a
+custom-export entry, the same object otherwise). This is the RENDER ONLY
+boundary from `core/table/export_layout.py` made into a parameter.
+"""
+
+from __future__ import annotations
+
+import io
+import json
+import zipfile
+from collections.abc import Iterator
+from dataclasses import dataclass
+
+from data_rover.core.metamodel.schema import Metamodel
+from data_rover.core.model.model import Model
+from data_rover.core.script.runner import ScriptRunner
+from data_rover.core.table.cells import Cell
+from data_rover.core.table.evaluate import (
+    SortSpec,
+    TableLimits,
+    build_rows_ex,
+    iter_export_rows,
+    order_rows,
+)
+from data_rover.core.table.export_layout import (
+    export_definition,
+    export_header,
+    export_layout,
+)
+from data_rover.core.table.json_export import render_json
+from data_rover.core.table.resolve import table_has_script
+from data_rover.core.table.schema import TableDefinition
+
+from .deps import Session
+from .schemas import ScriptStatusOut
+from .script_eval import close_script_context, open_script_context
+from .script_sweep import SweepJob, kick_or_join_sweep
+from .settings import Settings
+from .table_export import build_workbook
+
+
+@dataclass(frozen=True)
+class ExportPending:
+    status: ScriptStatusOut
+
+
+@dataclass(frozen=True)
+class ExportFiles:
+    files: list[tuple[str, bytes]]  # (filename WITH extension, blob)
+    truncated: bool
+    degraded: bool
+    archive: bool  # True => ship as zip even if len==1
+
+
+def _drain(rows: Iterator[list[Cell]]) -> None:
+    """Consume a lazy row stream for its SIDE EFFECTS only (the script calls
+    each cell makes), discarding the cells chunk-by-chunk. Used by the export's
+    completeness probe, where materializing the list would defeat the very
+    bounded-peak-memory property `iter_export_rows` exists to provide."""
+    for _ in rows:
+        pass
+
+
+def status_from_job(job: SweepJob) -> ScriptStatusOut:
+    """Map a `SweepJob` onto the wire status of the request that kicked/joined it.
+
+    CALLERS ONLY REACH THIS AFTER PENDING WAS SEEN (in the cache-only
+    whole-table pass, in the visible-window pass, or both) — that is the
+    function's whole precondition, and it is why no branch here can return
+    `ready`. This response was already assembled before those values existed
+    (possibly degraded to build order, possibly carrying `pending` cells), so
+    even a sync/racing sweep that FINISHED during this very request must report
+    `computing`: the client polls once more and gets the clean page from the
+    now-full cache.
+
+    Both DEAD job states collapse onto `failed`. `cancelled` is not a
+    pathology (a rev change or an eviction cancelled it, never the snippet),
+    but no thread is behind it any more, so reporting `computing` would strand
+    the poller forever — `failed` is the honest terminal answer, and the cause
+    of a cancel is always something (a commit) that re-keys the sweep registry
+    and gets a fresh job kicked on the next request anyway.
+    """
+    if job.state in ("failed", "cancelled"):
+        return ScriptStatusOut(
+            state="failed", done=job.done, total=job.total, message=job.message
+        )
+    return ScriptStatusOut(state="computing", done=job.done, total=job.total)
+
+
+#: Fixed member timestamp: identical content zips byte-identically (the
+#: determinism stance the WASM runner takes for snippet output).
+ZIP_DATE_TIME = (1980, 1, 1, 0, 0, 0)
+
+
+def build_zip(files: list[tuple[str, bytes]]) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for filename, blob in files:
+            info = zipfile.ZipInfo(filename, date_time=ZIP_DATE_TIME)
+            info.compress_type = zipfile.ZIP_DEFLATED
+            zf.writestr(info, blob)
+    return buf.getvalue()
+
+
+def run_table_export(
+    *,
+    session: Session,
+    settings: Settings,
+    runner: ScriptRunner | None,
+    metamodel: Metamodel,
+    model: Model,
+    defn: TableDefinition,  # evaluation — the ORIGINAL definition
+    render_defn: TableDefinition,  # presentation — same object for /tables/export
+    name: str,
+    format: str,  # "xlsx" | "json"
+    sort: SortSpec | None,
+) -> ExportPending | ExportFiles:
+    """Exports the WHOLE table (every row `build_rows`/`order_rows` produce,
+    honoring `max_rows` and the requested sort) — unlike `/tables/evaluate`,
+    there is no `offset`/`limit` windowing here. `format` picks the shape:
+    `"xlsx"` ships a single-sheet
+    `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`
+    workbook via `build_workbook`; `"json"` ships `application/json` via
+    `render_json`, one object per (possibly grouped) row — see
+    `core/table/json_export.py` for the grouping rules.
+
+    Cells are evaluated with `max_cell_elements` overridden to effectively
+    unbounded (10**9): the interactive page route caps a navigation cell's
+    element list at `cell_cap` purely for on-screen display, but an export
+    must contain the COMPLETE reached set for every navigation cell — capping
+    it here would silently drop data the user asked to export. Row count is
+    still governed by `TableLimits.max_rows`; `truncated` is set when
+    `build_rows` reports an incomplete row set (its own `max_rows` cap, or an
+    underlying navigation that hit its `max_chains`/`max_visited` budget),
+    never for cell-level capping (which cannot happen with this override).
+
+    Script columns (spec §4.4): an export is the one route that MUST touch every
+    row, so running it inline would be exactly the O(rows) guest grind Phase B
+    exists to remove. Instead the whole thing runs CACHE-ONLY and this function
+    probes for completeness first; if anything is still uncomputed it kicks/joins
+    the background sweep and answers `ExportPending` (the callers translate that
+    to 202 + `Retry-After: 1`) rather than shipping a half-computed file. The
+    202-vs-ship decision is made by RE-PROBING the cache after the kick/join
+    (decision table at the call site): a finished sweep does not imply a
+    complete cache, so "would a retry help" — not "is the job over" — is the
+    discriminator. When it would not (a terminal sweep that still left holes,
+    or no runner at all) the file still ships with pending cells surfaced —
+    but the two formats carry that differently. The `.xlsx` branch renders
+    each affected cell `#ERROR` and appends a trailing notice row; the `.json`
+    branch has no sheet and no notice row to append, so it marks each affected
+    cell in-band with a `{"$error": ...}` object instead (see `render_cell` in
+    `core/table/json_export.py`). Both branches still set `degraded=True` on
+    the returned `ExportFiles` when this happens, so a caller can detect
+    degradation without parsing the body."""
+    script_ctx = None
+    acquired = False
+    try:
+        # Export never caps cells: lift the server-wide ceiling AND drop each
+        # navigation column's per-column `cell_cap` display preference.
+        limits = TableLimits(max_cell_elements=10**9, ignore_cell_caps=True)
+        rev = session.model_rev
+        script_ctx, acquired = open_script_context(
+            runner,
+            model,
+            settings,
+            needs_script=table_has_script(defn),
+            cell_cache=session.script_cell_cache,
+            rev=rev,
+        )
+        # Every whole-table pass below (build, order, the completeness probe AND
+        # the export render itself) runs CACHE-ONLY: an export must never drive
+        # the guest O(rows) times inline (spec §4.4). The flag is set once here
+        # and deliberately never cleared.
+        if script_ctx is not None:
+            script_ctx.cache_only = True
+        build = build_rows_ex(metamodel, model, defn, limits, script=script_ctx)
+        keys, truncated = build.keys, build.truncated
+        ordered = order_rows(
+            metamodel, model, defn, keys, sort, limits, script=script_ctx
+        )
+        if script_ctx is not None:
+            # COMPLETENESS PROBE — do not "optimize" this pass away.
+            #
+            # `build_rows`/`order_rows` only invoke a script column's `value()`
+            # when that column FILTERS (`keep_empty=False`), is the SORT column,
+            # or is an EXPAND column. A plain collapse `keep_empty=True` DISPLAY
+            # column is invisible to both, so judging completeness from those two
+            # passes alone reports `pending_misses == 0` on a stone-cold cache —
+            # and the export 200s with a silent `#ERROR` in every row of that
+            # column. Rendering every row here is what makes the check honest.
+            #
+            # It is cheap: cache-only means dict lookups and no guest work, and
+            # the per-request memo makes the later `iter_export_rows` render
+            # nearly free. The rows are streamed and DISCARDED chunk-by-chunk
+            # (`for _ in ...: pass`) exactly like the real render, so the probe
+            # never materializes 50 000 rows x every column just to throw them
+            # away — it makes the same calls at a bounded peak memory.
+            _drain(
+                iter_export_rows(
+                    metamodel, model, defn, ordered, limits, script=script_ctx
+                )
+            )
+            if script_ctx.pending_misses > 0 and runner is not None:
+                # Lock stance: this route holds NO session lock (no write_mutex —
+                # same benign-race stance as /tables/evaluate), so kicking is
+                # safe even in the sync sweep mode where `kick_or_join_sweep`
+                # runs the whole sweep on this thread. We never BLOCK on a job.
+                job = kick_or_join_sweep(
+                    session, metamodel, model, defn, runner, settings, rev
+                )
+                status = status_from_job(job)
+                # Terminality is read off the WIRE state, which collapses both
+                # DEAD job states (`failed` and `cancelled`) onto `failed` (no
+                # thread is behind either), PLUS the `done` job state — which
+                # `status_from_job` deliberately reports as `computing` and so
+                # cannot be recovered from `status` alone.
+                terminal = status.state == "failed" or job.state == "done"
+                #
+                # The honest question, once a job exists, is not "did the job
+                # finish" but "would a RETRY ACTUALLY HELP", i.e. is the cache
+                # complete NOW — and a RE-PROBE (below) is how that gets
+                # answered. But the re-probe is only ever CONSULTED for a
+                # terminal job:
+                #
+                #   job state       | re-probe? | answer
+                #   ----------------+-----------+------------------------------
+                #   running         | SKIPPED   | 202 unconditionally (FIX A) —
+                #                   |           | work is genuinely in flight,
+                #                   |           | and nothing a re-probe could
+                #                   |           | find changes that answer, so
+                #                   |           | running it would just be an
+                #                   |           | O(rows) navigation-column
+                #                   |           | re-walk paid for nothing:
+                #                   |           | non-script columns are NOT
+                #                   |           | memoized, so this cost would
+                #                   |           | repeat every second of a poll
+                #                   |           | loop that already knows its
+                #                   |           | answer.
+                #   terminal, none  | consulted | 202 — the cache IS complete
+                #   re-probe misses |           | but THIS request's `ordered`
+                #                   |           | predates it (sync sweeps fill
+                #                   |           | the cache after the build), so
+                #                   |           | retry for correct order and
+                #                   |           | real values. The wire `state`
+                #                   |           | in the body is forced to
+                #                   |           | `computing` here (FIX B) even
+                #                   |           | when `job.state` is a DEAD
+                #                   |           | `failed`/`cancelled` — the
+                #                   |           | retry WILL succeed (the values
+                #                   |           | are already in the cache), so
+                #                   |           | reporting the job's own dead
+                #                   |           | state would tell the client to
+                #                   |           | abandon a download the very
+                #                   |           | next poll would deliver.
+                #   terminal, some  | consulted | fall through — nothing will
+                #   re-probe misses |           | ever fill those cells at this
+                #                   |           | rev (`ScriptCellCache.put`
+                #                   |           | refuses non-deterministic
+                #                   |           | error kinds while the sweep
+                #                   |           | only aborts on a CONSECUTIVE
+                #                   |           | run of them, so one
+                #                   |           | intermittently-timing-out cell
+                #                   |           | leaves a permanent hole in an
+                #                   |           | otherwise `done` sweep), so
+                #                   |           | ship the honest terminal
+                #                   |           | export (`#ERROR`). Answering
+                #                   |           | 202 off `state != "failed"`
+                #                   |           | alone would loop forever here
+                #                   |           | (same rev => failed-job memory
+                #                   |           | hands back the same `done` job
+                #                   |           | => `computing` => 202 => ...).
+                if not terminal:
+                    return ExportPending(status=status)
+                # RE-PROBE (terminal jobs only — see table above). The
+                # re-reading is TRUTHFUL despite reusing this context: a
+                # `pending` result is never memoized and never written to the
+                # cell cache (see `ScriptEvalContext.call`), so every cell that
+                # missed the first time re-consults the (now sweep-filled) cell
+                # cache instead of being served a stale pending from the memo.
+                # Only genuine HITS are memoized, and those were not misses in
+                # the first probe either. A fresh miss counter baseline is all
+                # that is needed to keep the first probe's misses out of it.
+                miss_baseline = script_ctx.pending_misses
+                _drain(
+                    iter_export_rows(
+                        metamodel, model, defn, ordered, limits, script=script_ctx
+                    )
+                )
+                still_pending = script_ctx.pending_misses > miss_baseline
+                if not still_pending:
+                    # FIX B: the wire body must not say `state: "failed"` here.
+                    # This 202 means "the cache filled in behind this request —
+                    # retry and you'll get real data", which is true REGARDLESS
+                    # of what killed the job (a `done` sweep already reports
+                    # `computing` via `status_from_job`; a `failed`/`cancelled`
+                    # one does not, and that mismatch is exactly the bug: the
+                    # job is dead, but the DATA it needed is not, because those
+                    # cells were satisfied some other way — pre-warmed, or
+                    # computed before the abort landed). `ScriptStatusOut`'s own
+                    # docstring defines `failed` as work that "will not finish
+                    # on its own"; that is false here, so the body must not
+                    # claim it. Status code, `Retry-After`, and `done`/`total`
+                    # are untouched — only the wire `state` is overridden.
+                    return ExportPending(
+                        status=status.model_copy(update={"state": "computing"})
+                    )
+            # Fall through on a terminal-but-incomplete sweep (or no runner at
+            # all) and export with pending rendered as `#ERROR` — the honest
+            # terminal answer.
+
+        # Export settings are PRESENTATION: the layout says what the file
+        # contains and in what order. It is for the RENDER only —
+        # `iter_export_rows` below keeps the ORIGINAL `defn`, so cell values,
+        # row order, and every script cache key are exactly what they would be
+        # without any of this. (`export_definition`, the other half of that
+        # boundary, is built inside the JSON branch and nowhere else — see
+        # there.)
+        layout = export_layout(render_defn)
+        headers = [export_header(render_defn, i) for i in layout.order]
+        if layout.row_number_pos is not None:
+            headers.insert(layout.row_number_pos, layout.row_number_header)
+        all_rows = iter_export_rows(
+            metamodel, model, defn, ordered, limits, script=script_ctx
+        )
+        # Baseline for the RENDER's own pending misses (see `_degraded` below).
+        # Sampled here, after every probe pass, so only cells that the workbook
+        # actually rendered as `#ERROR: not computed` are counted.
+        render_miss_baseline = script_ctx.pending_misses if script_ctx else 0
+
+        def _degraded() -> bool:
+            """Did this workbook ship any `#ERROR` cell?
+
+            `errored` alone is NOT the answer. A cache-only `pending` result is
+            a deliberate non-error (it must not poison the row-order cache, so
+            `ScriptEvalContext.call` leaves `errored` False by design) — but
+            `table_export.py` still renders it `#ERROR: not computed`. On the
+            terminal fall-through above, and on the runner-unavailable path
+            (whose context is cache-only too, so its cells come back `pending`
+            rather than `unavailable`), EVERY affected cell is `#ERROR` while
+            `errored` stays False. Signalling nothing there hands the user a
+            workbook that looks authoritative and is entirely `#ERROR`, and a
+            programmatic client a clean 200. So OR in the misses the render
+            itself recorded. `errored`'s meaning is left untouched."""
+            if script_ctx is None:
+                return False
+            return (
+                script_ctx.errored or script_ctx.pending_misses > render_miss_baseline
+            )
+
+        def _notice() -> str | None:
+            # `row_iter` (and therefore any script column's `value()` calls)
+            # is consumed lazily INSIDE `build_workbook` — the flags `_degraded`
+            # reads are only fully settled once that consumption finishes, so
+            # this must be a callable invoked AFTER the row loop, not a value
+            # computed up front.
+            if _degraded():
+                return (
+                    "Some script cells failed, could not be computed, or "
+                    "exceeded the evaluation budget; affected cells are "
+                    "marked #ERROR."
+                )
+            return None
+
+        if format == "json":
+            # `export_definition` restates inclusion as `hidden` so
+            # `json_export`'s existing hidden-column and group-nesting logic is
+            # reused rather than reimplemented. Built HERE rather than beside
+            # `layout` above because only this branch renders through it: the
+            # xlsx path slices rows by `layout.order` and never sees an
+            # export-effective definition at all, which is the render-only
+            # boundary made visible instead of merely argued.
+            eff = export_definition(render_defn)
+            # `render_json` indexes cells by DEFINITION column index, so it
+            # gets the UNFILTERED rows — excluded columns are dropped inside it
+            # by their `None` key, not by pre-slicing the row like the xlsx
+            # path does.
+            docs = render_json(
+                model,
+                eff,
+                ordered,
+                all_rows,
+                build.base_slots,
+                order=layout.rank,
+                row_number=(layout.row_number_pos, layout.row_number_key)
+                if layout.row_number_pos is not None
+                else None,
+            )
+            blob = json.dumps(docs, ensure_ascii=False, indent=2).encode("utf-8")
+            filename = f"{name}.json"
+            # No JSON analogue of the xlsx trailing notice row: the `$error`
+            # markers are in-band and the header below carries the summary.
+        else:
+            blob = build_workbook(
+                model,
+                headers,
+                name,
+                ([row[i] for i in layout.order] for row in all_rows),
+                notice_provider=_notice,
+                row_number_col=layout.row_number_pos,
+            )
+            filename = f"{name}.xlsx"
+        return ExportFiles(
+            files=[(filename, blob)],
+            truncated=truncated,
+            degraded=_degraded(),
+            archive=False,
+        )
+    finally:
+        close_script_context(script_ctx, acquired)
