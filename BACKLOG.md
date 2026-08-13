@@ -444,6 +444,30 @@ list alone gives you *what changed*, not *what it changed from* — so before/af
 still need the journal. Alternative designs welcome; this one is just the cheapest.
 Folds naturally into R-2.
 
+### K-7 · Duplicate type names are silently accepted by the whole stack · `open` · *2026-08-13*
+`core/metamodel/check.py`'s `check_metamodel` builds `element_names = {e.name for e in
+mm.elements}` — a **set** — and never compares its cardinality to `len(mm.elements)`. So a
+metamodel defining two element types with the same name produces **zero** validation
+errors. `core/metamodel/schema.py` then builds its lookup caches **first-wins**
+(`types_by_name.setdefault(et.name, et)`, `rel_types_by_name.setdefault(...)`, ~:250-255),
+and the frontend's `metamodel/yaml-edit.ts` `typeMap` resolves first-wins too (it returns
+the first `name`-matching map in the section).
+
+Consequence: the duplicate is accepted everywhere, and every edit addressed **by name**
+resolves to the FIRST definition while the diagram canvas — which keys nodes into xyflow's
+`nodeLookup`, last-wins — renders the SECOND. The second type silently absorbs nothing and
+the first silently absorbs everything.
+
+Ruled a pre-existing engine gap and out of scope during the metamodel diagram editor work
+(`feat/metamodel-diagram-editor`), on condition it be filed here. The diagram's forms now
+prevent it at the form boundary (`metamodel/helpers.ts` `typeNameCollision`), so it is only
+reachable by hand-editing YAML — but that is **one toggle away in the same tab**, not an
+external-file scenario, which is why it is worth closing properly.
+
+Fix is roughly four lines: a cardinality check in `check_metamodel` over `mm.elements` and
+`mm.relationships`, reporting each repeated name. Cheap; the only question is whether any
+existing fixture/example metamodel would start failing.
+
 ---
 
 ## 7. Cleanups & dead code

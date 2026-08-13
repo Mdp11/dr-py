@@ -1048,6 +1048,87 @@ restructured to accommodate this.
   anywhere: `typeMap` and the backend's caches both resolve first-wins, so a
   second `Zone` would silently absorb every later edit to the first.
 
+#### Manual smoke checklist — the diagram surface
+
+The four gestures where the client and the layout route have to agree (drag →
+reload → persisted; connection → popover → YAML; rename → cascade with comments
+intact; rebind → positions survive under the new names) have **no e2e coverage**
+— see `BACKLOG.md` T-7. Until they do, this is the pass that stands in for it.
+Run it before shipping a change to `state/metamodel-diagram.svelte.ts`,
+`metamodel/yaml-edit.ts`, or `routes/metamodel_layout.py`. Steps 2, 6, 7 and 13
+are the load-bearing ones.
+
+**Setup**
+
+```sh
+# terminal 1 — needs a dev DB; DATA_ROVER_DEV_SEED with a sqlite DSN works
+pixi run backend-start
+# terminal 2
+pixi run frontend-start
+```
+
+Open http://localhost:5173, log in, and open a project — import `smart-city` via
+the New Project wizard if you have none. Then **TopBar → Edit Metamodel**, and
+click the **Diagram** toggle in the tab's toolbar.
+
+1. **Rendering.** Boxes appear for every element type and enum, laid out (not
+   stacked at the origin). Generalization edges end in a hollow triangle at the
+   supertype; `Contains` draws a filled diamond at the owner end, and both
+   halves of that relationship are the same colour. Multiplicities read at the
+   ends. Association-class relationships (ones with properties, or abstract, or
+   in an `extends` chain) get their own box with two half-edges through it.
+2. **Drag persists, and is shared.** Drag two boxes somewhere memorable, wait a
+   second (the PUT is debounced 800 ms), reload the page, reopen the tab →
+   they are where you left them. In a second browser profile signed in as
+   another member of the same project, the same positions appear.
+3. **Auto-arrange.** Click **Auto-arrange** → the graph re-lays out top-down.
+   Press **Ctrl/Cmd-Z** with the canvas focused → the previous positions come
+   back.
+4. **Collapse / find / fit.** **Collapse all** shrinks every box to its header;
+   **Expand all** restores. Type a type name into **Find type…** and press Enter
+   → the canvas pans to it and selects it. **Fit view** frames everything.
+5. **Create a type.** Click **+ Element type** → a `NewType` box appears and the
+   right-hand form panel opens on it. Rename it in the form to something free →
+   the box and the YAML both follow. Try renaming it to `Zone` (or to `string`)
+   → the form refuses with a message naming the collision.
+6. **Draw a connection.** Drag from one element box's handle to another → a
+   popover asks what you meant. Pick **new relationship type**, name it, choose
+   containment or not → a new edge appears and the YAML gains the relationship
+   with its `mappings`. Cancel the popover on a second drag → **no edge is left
+   behind**.
+7. **Rename cascades with comments intact.** Select `Zone`, rename it to
+   `District` in the form. Switch to the **YAML** view: every `extends`,
+   `mapping`, `datatype` and key reference to `Zone` has moved to `District`,
+   and **the file's comments and formatting are untouched** — only the changed
+   lines differ. Switch back to Diagram: the box kept its position.
+8. **Property editing.** On any element type, add a property (name, datatype,
+   multiplicity), edit one, remove one → the box's row list and the YAML both
+   track. Adding a property whose name already exists on that type is refused.
+   Build a key with the key builder → it appears in the YAML.
+9. **Delete consequences.** Delete a type that others reference → the
+   confirmation dialog lists what will be updated and what will dangle. Confirm,
+   then check the YAML matches what it promised.
+10. **Broken YAML fallback.** Switch to YAML, break the syntax by hand (delete a
+    colon). Switch to Diagram → you get the "draft has syntax errors" placeholder
+    with an **Open the YAML view** button, **not** a stale diagram, and the
+    toolbar is gone. Fix the YAML → the diagram returns.
+11. **Issue badge.** With a _semantically_ invalid but parseable draft (e.g. a
+    `datatype` naming nothing), the toolbar shows an **"N issues"** badge on the
+    right. Click it → it jumps to the YAML view.
+12. **Preview + Rebind still work end-to-end.** With a real change staged, click
+    **Preview changes** → the structural diff and now-failing/now-passing lists
+    render. Then **Rebind** → it succeeds and the app refreshes.
+13. **Positions survive a rebind under new names.** This is the rename-deferral
+    payoff. Rename a type in the diagram, drag its box somewhere distinctive,
+    **Preview**, **Rebind**, then reload → the box is still where you put it,
+    now keyed by the new name. Check a peer's session too: they should see the
+    same position, not a box jumped to the origin.
+14. **Roles.** As an **editor** (not owner): the canvas is browsable, dragging
+    still works and persists, but the create buttons and form inputs are gone
+    and a note says metamodel edits are owner-only. As a **viewer**: dragging is
+    disabled too, and the note says layout changes are not saved. With a peer
+    holding the `mm` lease: the surface goes read-only and names the holder.
+
 ### Where to find things
 
 ```
