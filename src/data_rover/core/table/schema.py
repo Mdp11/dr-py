@@ -167,6 +167,20 @@ class RowNumberExportOptions(BaseModel):
     key: str = ""
 
 
+class JsonSplitOptions(BaseModel):
+    """Split the JSON export into one file per base element (spec:
+    docs/superpowers/specs/2026-08-13-table-export-split-and-custom-export-design.md).
+
+    Presentation-only, like `export_order`: never consulted during evaluation.
+    `filename_template` must contain `${name}` — enforced at EXPORT time
+    (`core/table/split.validate_template`), deliberately not here, so a stored
+    bad template cannot block saving or evaluating the table."""
+
+    enabled: bool = False
+    #: `${name}` is replaced by each base element's display name.
+    filename_template: str = ""
+
+
 class ElementColumn(BaseModel):
     kind: Literal["element"] = "element"
     source: ColumnSource = Field(default_factory=RowSlot)
@@ -276,6 +290,9 @@ class TableDefinition(BaseModel):
     #: sensible order, not 422 the whole export.
     export_order: list[int] = Field(default_factory=list)
     export_row_number: RowNumberExportOptions | None = None
+    #: JSON-export split settings; `None` = single-document export (today's
+    #: behavior, and the no-migration guarantee for existing payloads).
+    json_split: JsonSplitOptions | None = None
 
     @model_validator(mode="after")
     def _validate_sources(self) -> TableDefinition:

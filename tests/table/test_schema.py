@@ -179,3 +179,31 @@ def test_chain_index_nonzero_ok_with_chains_source():
     source = t.columns[0].source
     assert isinstance(source, RowSlot)
     assert source.chain_index == 2
+
+
+def test_json_split_defaults_to_none_and_roundtrips():
+    from data_rover.core.table.schema import TABLE_ADAPTER, JsonSplitOptions
+
+    doc = {
+        "row_source": {"kind": "scope", "types": ["Block"]},
+        "columns": [{"kind": "element", "source": {"kind": "row"}}],
+    }
+    assert TABLE_ADAPTER.validate_python(doc).json_split is None  # old payloads
+    doc["json_split"] = {"enabled": True, "filename_template": "DataFor${name}"}
+    defn = TABLE_ADAPTER.validate_python(doc)
+    assert defn.json_split == JsonSplitOptions(
+        enabled=True, filename_template="DataFor${name}"
+    )
+    dumped = defn.model_dump()
+    assert dumped["json_split"] == {
+        "enabled": True,
+        "filename_template": "DataFor${name}",
+    }
+
+
+def test_json_split_accepts_any_template_at_schema_level():
+    # Strictness is EXPORT-time (spec §3.1): a stored bad template must not
+    # 422 unrelated saves/evaluates of the table.
+    from data_rover.core.table.schema import JsonSplitOptions
+
+    assert JsonSplitOptions(enabled=True, filename_template="no-token").enabled
