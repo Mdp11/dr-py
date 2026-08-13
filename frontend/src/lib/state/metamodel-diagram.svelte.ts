@@ -53,18 +53,32 @@ import { editMetamodelBuffer, getMetamodelEditor } from './metamodel-editor.svel
  * keeps speaking the baseline name — otherwise a draft that is later discarded,
  * or that a peer never sees, scrambles their canvases. `_pendingRenames` maps
  * server key → local key (composed transitively across chained renames);
- * `serverPositions` inverts local positions through it before every PUT, and
+ * `serverPositions` inverts local positions through it before every PUT,
+ * `localPositions` applies it forward to a freshly fetched blob, and
  * `onMetamodelRebound` — called once a rebind has actually landed, i.e. once
- * the local names ARE everyone's names — clears the map and PUTs the local
- * keys as-is.
+ * the local names ARE everyone's names — clears the map, drops the pre-rebind
+ * undo history (see there) and PUTs the local keys as-is.
  *
- * Known limits of that deferral, both self-healing and deliberately not worth
- * more machinery: the map is in-memory, so a page refresh with a restored
- * draft loses it (the renamed node reads as unpositioned and gets placed by
- * the heuristic); and `discardMetamodelDraft` is not observable from here, so a
- * discarded rename leaves the position under the local key until the next open.
- * Neither can corrupt a peer's canvas — the worst case is one type landing at a
- * heuristic position.
+ * The map is a property of the DRAFT, not of the session, so it persists
+ * alongside it (`ui.metamodel.renames.<projectId>`) and `initMetamodelDiagram`
+ * restores it. Without that, a refresh left the draft saying `District` while
+ * the map was gone, so the next drag wrote `positions['el:District']` straight
+ * into the SHARED blob — a draft-local key on the wire, which is exactly what
+ * the deferral exists to prevent.
+ *
+ * The restore is SELF-VALIDATING, and that is what stands in for the hooks this
+ * module does not have (`discardMetamodelDraft` is not observable from here,
+ * and neither is a draft edited in another tab): an entry survives the restore
+ * only while the current draft still defines the LOCAL name it describes —
+ * against an incoming server-keyed blob, a deferral nothing backs can only
+ * mis-key it. Every PUT re-checks the same thing, but with the position map in
+ * hand it can be kinder: a dead entry is still honoured (that stale local key
+ * holds the position of a box peers DO see, under its baseline name) unless a
+ * live node already occupies the baseline key. That last case is name reuse —
+ * rename `Zone → District`, then create a fresh `Zone` — and it is the one that
+ * must never collapse two boxes onto one key last-write-wins, so both rewrite
+ * directions resolve it explicitly: the deferral wins, and the reused name has
+ * no server counterpart until a rebind lands.
  *
  * Reactivity note: `$state` is never written from `getMetamodelDiagramView()`
  * (that would trip `state_unsafe_mutation` mid-render), so the memoization
@@ -96,11 +110,14 @@ export interface MetamodelDiagramView {
 	positions: Positions;
 	collapsed: ReadonlySet<string>;
 	canUndo: boolean;
-	/** Lint errors attributed to the type block whose line range contains
-	 * them — a red badge on that node. */
+	/** Lint errors attributed to the type block whose line range contains them
+	 * — a red badge on that node. **Expect this to be EMPTY in practice**; see
+	 * {@link attributeLintErrors}. Render `unattributedErrorCount` as the
+	 * primary error surface and treat a per-node badge as the rare extra. */
 	errorNodeIds: ReadonlySet<string>;
-	/** Lint errors with no line, or none that lands on a drawn node: the
-	 * toolbar badge, so an error can never go unshown. */
+	/** Every lint error that could not be pinned to a drawn node — in practice
+	 * all of them. This is THE error surface (a toolbar badge), so an error can
+	 * never go unshown. */
 	unattributedErrorCount: number;
 }
 
@@ -136,7 +153,8 @@ let _canUndo = $state(false);
 let _undo: UndoEntry[] = [];
 let _saveTimer: ReturnType<typeof setTimeout> | null = null;
 
-// --- localStorage (view + collapse are PERSONAL; positions are shared) -----
+// --- localStorage (view + collapse are PERSONAL, the rename deferral belongs
+// to the DRAFT; positions are shared and live on the server) ----------------
 // try/catch rather than a `browser` guard, matching metamodel-editor.svelte.ts.
 
 function viewKey(projectId: string): string {
@@ -145,6 +163,10 @@ function viewKey(projectId: string): string {
 
 function collapsedKey(projectId: string): string {
 	return `ui.metamodel.collapsed.${projectId}`;
+}
+
+function renamesKey(projectId: string): string {
+	return `ui.metamodel.renames.${projectId}`;
 }
 
 function readStored(key: string): string | null {
@@ -160,6 +182,14 @@ function writeStored(key: string, value: string): void {
 		localStorage.setItem(key, value);
 	} catch {
 		/* storage full/denied: the preference simply doesn't persist */
+	}
+}
+
+function removeStored(key: string): void {
+	try {
+		localStorage.removeItem(key);
+	} catch {
+		/* ignore */
 	}
 }
 
@@ -216,17 +246,42 @@ interface Attribution {
 	unattributed: number;
 }
 
-/** Attribute each lint error to the node whose YAML block encloses its line.
+/**
+ * Attribute each lint error to the node whose YAML block encloses its line.
  * Anything without a line, or landing on something the canvas doesn't draw
  * (a boxless relationship type, an enum — `lineRangeForType` only spans the
  * two type sections), counts toward the toolbar badge instead, so no error is
- * ever silently dropped. */
+ * ever silently dropped.
+ *
+ * **In practice that catch-all is the ONLY output**, and the reason is a
+ * server contract: `POST /metamodel/lint` attaches a `line` **only** to a YAML
+ * *syntax* error (off the parser's `problem_mark`); a schema error — the
+ * realistic class here: dangling `extends`, duplicate names, anything that
+ * clears the client's looser zod shape but fails the real loader — is
+ * message-only (`api/schemas.py` `LintErrorOut`, `routes/metamodel_swap.py`).
+ * So a line-bearing error implies a buffer that does not parse, which implies
+ * `parsed.mm === null`, which leaves nothing drawn to badge.
+ *
+ * Hence the guard below, which exists to kill a MISattribution rather than to
+ * enable an attribution: `_lintErrors` is not cleared on keystroke (only when
+ * the next debounced lint resolves), so right after a syntax error is fixed
+ * the stale line-bearing error is still in the array. If the local parse of
+ * THIS buffer succeeds, that error provably describes an older one — the
+ * server only emits a line for a syntax error, and the local parse just proved
+ * this text has none — so its line must not be allowed to badge whichever node
+ * happens to span it. The narrow cost is a lint that JS `yaml` accepts and
+ * PyYAML rejects (parser-strictness divergence, e.g. duplicate keys); those
+ * fall back to the toolbar badge, which is the honest place for an error the
+ * canvas cannot localise.
+ */
 function attributeLintErrors(
 	buffer: string,
 	parsed: ParsedDraft,
 	errors: readonly { line: number | null }[]
 ): Attribution {
 	if (errors.length === 0) return { nodeIds: new Set<string>(), unattributed: 0 };
+	if (parsed.errors.length === 0)
+		return { nodeIds: new Set<string>(), unattributed: errors.length };
 	const built = builtDiagram(parsed.mm);
 	const drawn = new Set((built?.nodes ?? []).map((n) => n.id));
 	const ranges: { start: number; end: number; id: string }[] = [];
@@ -307,15 +362,83 @@ function clonePositions(src: Positions): Positions {
 	return out;
 }
 
+/** The node ids the CURRENT draft actually defines, or null when it does not
+ * parse (nothing can be validated against an unparseable draft, so callers
+ * skip their filter rather than discarding state they cannot check). */
+function liveNodeIds(mm: Metamodel | null): ReadonlySet<string> | null {
+	if (mm === null) return null;
+	// Built without mutation: a mutable `Set` in a `.svelte.ts` module is what
+	// `svelte/prefer-svelte-reactivity` bans (see the reactivity note above).
+	return new Set([
+		...mm.elements.map((el) => nodeIdFor({ kind: 'element', name: el.name })),
+		...mm.relationships.map((rel) => nodeIdFor({ kind: 'relationship', name: rel.name })),
+		...Object.keys(mm.enums).map((name) => nodeIdFor({ kind: 'enum', name }))
+	]);
+}
+
+/** The deferrals a PUT should honour, and the baseline keys they claim.
+ *
+ * A deferral whose LOCAL name the draft no longer defines is not automatically
+ * junk: a discard, an undo outside this module, or a delete typed into the YAML
+ * view leaves the position parked under a local key while the box itself is
+ * still `server` for every peer, so rewriting it back is what keeps their
+ * position alive. It is dropped only when something LIVE already occupies that
+ * baseline key — the name-reuse case, where the real node must win. */
+function liveRenames(): { toServer: Record<string, string>; servers: ReadonlySet<string> } {
+	const live = liveNodeIds(parseCurrent(getMetamodelEditor().buffer).mm);
+	const toServer: Record<string, string> = {};
+	const servers: string[] = [];
+	for (const [server, local] of _pendingRenames) {
+		if (live !== null && !live.has(local) && _positions[server] !== undefined) continue;
+		toServer[local] = server;
+		servers.push(server);
+	}
+	return { toServer, servers: new Set(servers) };
+}
+
 /** Local positions expressed in the SERVER's key space: every key that a
  * draft-only rename moved is written back under the baseline name it still has
  * for everyone else. See the rename key-deferral note in the module docstring. */
 function serverPositions(): Positions {
 	if (_pendingRenames.size === 0) return clonePositions(_positions);
-	const toServer: Record<string, string> = {};
-	for (const [server, local] of _pendingRenames) toServer[local] = server;
+	const { toServer, servers } = liveRenames();
 	const out: Positions = {};
-	for (const [id, p] of Object.entries(_positions)) out[toServer[id] ?? id] = { x: p.x, y: p.y };
+	for (const [id, p] of Object.entries(_positions)) {
+		const server = toServer[id];
+		if (server !== undefined) {
+			out[server] = { x: p.x, y: p.y };
+			continue;
+		}
+		// The draft re-used a baseline name the deferral still owns (rename
+		// `Zone → District`, then create a fresh `Zone`). Two local keys would
+		// otherwise land on one server key, last-`Object.entries`-wins. The
+		// deferral wins — it describes a box peers can actually see — and the
+		// re-used name has no server counterpart until a rebind lands.
+		if (servers.has(id)) continue;
+		out[id] = { x: p.x, y: p.y };
+	}
+	return out;
+}
+
+/** The inverse: a blob fetched in the SERVER's key space, re-keyed to the
+ * draft's names so a restored rename does not read as an unpositioned node and
+ * jump to a heuristic slot. Same collision rule as `serverPositions` — the
+ * deferral wins the contested key. Called only from `initMetamodelDiagram`,
+ * immediately after `restoreRenames` has pruned the map against the draft, so
+ * it needs no validity filter of its own. */
+function localPositions(src: Positions): Positions {
+	if (_pendingRenames.size === 0) return clonePositions(src);
+	const targets = new Set(_pendingRenames.values());
+	const out: Positions = {};
+	for (const [id, p] of Object.entries(src)) {
+		const local = _pendingRenames.get(id);
+		if (local !== undefined) {
+			out[local] = { x: p.x, y: p.y };
+			continue;
+		}
+		if (targets.has(id)) continue;
+		out[id] = { x: p.x, y: p.y };
+	}
 	return out;
 }
 
@@ -367,11 +490,15 @@ export async function initMetamodelDiagram(projectId: string): Promise<void> {
 	_positions = {};
 	_undo = [];
 	_canUndo = false;
-	_pendingRenames.clear();
+	// BEFORE the fetch: the restored map is what re-keys the incoming blob into
+	// the draft's names. Reads the editor's buffer, which is why this function
+	// is documented as running after `initMetamodelEditor` has resolved — a
+	// draft that has not landed yet would validate every entry away.
+	restoreRenames(projectId);
 	try {
 		const layout = await getMetamodelLayout();
 		if (gen !== _gen) return;
-		_positions = clonePositions(layout.positions);
+		_positions = localPositions(layout.positions);
 	} catch {
 		// No stored layout / transient failure: fall through to the auto-arrange
 		// below rather than showing a canvas with everything stacked at 0,0.
@@ -406,10 +533,46 @@ function persistCollapsed(): void {
 	writeStored(collapsedKey(_projectId), JSON.stringify([..._collapsed]));
 }
 
+/** Mirror the deferral map next to the draft it belongs to. Called from every
+ * writer of `_pendingRenames` EXCEPT `closeMetamodelDiagram`, which drops the
+ * in-memory copy while the draft (and therefore the deferral) lives on. */
+function persistRenames(): void {
+	if (_projectId === null) return;
+	if (_pendingRenames.size === 0) removeStored(renamesKey(_projectId));
+	else writeStored(renamesKey(_projectId), JSON.stringify([..._pendingRenames]));
+}
+
+/** Restore the deferral map, dropping every entry the CURRENT draft no longer
+ * backs — the staleness guard that stands in for the discard/other-tab hooks
+ * this module has no way to observe (module docstring). The pruned map is
+ * written straight back, so a dead entry is gone for good rather than
+ * re-validated on every open. */
+function restoreRenames(projectId: string): void {
+	_pendingRenames.clear();
+	const raw = readStored(renamesKey(projectId));
+	if (raw === null) return;
+	const live = liveNodeIds(parseCurrent(getMetamodelEditor().buffer).mm);
+	try {
+		const parsed: unknown = JSON.parse(raw);
+		if (!Array.isArray(parsed)) return;
+		for (const entry of parsed) {
+			if (!Array.isArray(entry) || entry.length !== 2) continue;
+			const [server, local]: unknown[] = entry;
+			if (typeof server !== 'string' || typeof local !== 'string') continue;
+			if (live !== null && !live.has(local)) continue;
+			_pendingRenames.set(server, local);
+		}
+	} catch {
+		/* corrupt entry: the draft simply loses its deferrals */
+	}
+	persistRenames();
+}
+
 /** Tab close / unmount: flush the pending PUT before dropping the positions it
- * would have sent, then reset. The persisted view + collapse state survive in
- * localStorage; the undo stack and the rename deferral map do not (both
- * describe a session's in-flight editing, not the draft). */
+ * would have sent, then reset. The persisted view, collapse and rename-deferral
+ * state survive in localStorage (the last of those belongs to the draft, which
+ * also survives — `initMetamodelDiagram` restores and re-validates it); the
+ * undo stack does not, since it describes a session's in-flight editing. */
 export function closeMetamodelDiagram(): void {
 	flushSave();
 	_gen++;
@@ -499,6 +662,7 @@ function applyKeyMove(move: { from: string; to: string | null }): void {
 		for (const [server, local] of _pendingRenames) {
 			if (local === move.from) _pendingRenames.delete(server);
 		}
+		persistRenames();
 		return;
 	}
 	let server = move.from;
@@ -510,6 +674,7 @@ function applyKeyMove(move: { from: string; to: string | null }): void {
 		}
 	}
 	if (server !== move.to) _pendingRenames.set(server, move.to);
+	persistRenames();
 }
 
 /**
@@ -551,6 +716,7 @@ export function undoDiagramEdit(): void {
 		_positions = entry.keys.positions;
 		_pendingRenames.clear();
 		for (const [server, local] of entry.keys.renames) _pendingRenames.set(server, local);
+		persistRenames();
 		scheduleSave();
 	}
 	// Through the same seam as any other edit: the restored text lands in the
@@ -582,9 +748,23 @@ export async function runAutoArrange(): Promise<void> {
  * deferred key rewrite becomes true at once. Clears the deferral map and PUTs
  * the local keys immediately (not debounced — the window where the shared blob
  * still points at names nobody uses should be as short as possible).
+ *
+ * The UNDO STACK goes with it, because a rebind moves the baseline the stack's
+ * snapshots were taken against. Undoing across it would restore a `keys` half
+ * captured before the rename landed and then PUT it: rename `Zone → District`,
+ * drag, rebind (peers now see `District` at the new spot), undo — and without
+ * this the next PUT sends `el:Zone`, a name the server no longer has, which
+ * strips every peer's `el:District` position and re-places the box by
+ * heuristic. That is precisely the peer-canvas corruption the deferral exists
+ * to prevent. Dropping the history is also what the user means: the buffer
+ * halves describe pre-rebind text that has since been committed to the
+ * project, and "undo" is no longer a local operation on it.
  */
 export function onMetamodelRebound(): void {
 	_pendingRenames.clear();
+	persistRenames();
+	_undo = [];
+	_canUndo = false;
 	if (_saveTimer !== null) {
 		clearTimeout(_saveTimer);
 		_saveTimer = null;
