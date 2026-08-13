@@ -53,9 +53,9 @@
 	 * be too late). `MetamodelTab` supplies it — that is why the toolbar can
 	 * drive Fit view and the search pan from outside `<SvelteFlow>`.
 	 *
-	 * Tasks 11-13 extend this file: the form panel docks in the flex row below
-	 * the toolbar, a connection popover mounts over the canvas from `onconnect`,
-	 * and the lint badge joins the toolbar.
+	 * The canvas is only half the surface: `MetamodelFormPanel` docks to its
+	 * right and owns everything a box cannot show, and `ConnectionPopover`
+	 * mounts over it to ask what a dragged connection meant.
 	 */
 
 	const view = $derived(getMetamodelDiagramView());
@@ -64,6 +64,32 @@
 	const readOnly = $derived(ed.readOnly);
 	/** Layout: everyone but a viewer (see the module note above). */
 	const canDragLayout = $derived(getRole() !== 'viewer');
+
+	/**
+	 * The lint surface. `errorNodeIds` is empty in every reachable state — the
+	 * server attaches a `line` only to a YAML *syntax* error, which also fails
+	 * the local parse, which means nothing is drawn to badge (the state module's
+	 * `attributeLintErrors` documents this in full) — so the COUNT, not a
+	 * per-node marker, is what guarantees an error is never silently dropped.
+	 * The set is still added in rather than ignored: if attribution ever starts
+	 * producing hits, a badged node must not also vanish from this total.
+	 */
+	const issueCount = $derived(view.unattributedErrorCount + view.errorNodeIds.size);
+
+	/**
+	 * Why the editing affordances are missing, in the three-way split this
+	 * surface actually has: a peer's lease and an in-flight rebind are temporary
+	 * and name their cause, an EDITOR keeps the layout half (positions are
+	 * presentation, saved without the `mm` lease), and a VIEWER keeps neither.
+	 * Without this the toolbar just quietly loses its buttons.
+	 */
+	const readOnlyNote = $derived.by((): string | null => {
+		if (!readOnly) return null;
+		if (ed.rebinding) return 'Rebinding — editing is paused.';
+		if (ed.lockedBy !== null) return `Locked by ${ed.lockedBy} — browsing only.`;
+		if (!canDragLayout) return 'Read-only — layout changes are not saved.';
+		return 'Metamodel edits are owner-only — you can still rearrange the layout.';
+	});
 
 	/** The mockup's canvas ground: the app background under one ambient jade
 	 * radial glow at 25%/15%, and NO dot grid — xyflow's `<Background />` is
@@ -286,12 +312,29 @@
 					if (e.key === 'Enter') findAndCenter();
 				}}
 			/>
-			{#if !readOnly}
-				<div class="ml-auto flex items-center gap-2">
+			<div class="ml-auto flex items-center gap-2">
+				{#if issueCount > 0}
+					<!-- The errors live in the YAML, and only the YAML view can show
+					     WHERE, so the badge is a jump rather than a tooltip. -->
+					<button
+						type="button"
+						class="rounded border border-destructive/40 bg-destructive/15 px-2 py-0.5 text-[11px] text-destructive"
+						data-testid="mm-issue-badge"
+						title="Open the YAML view to see the lint errors"
+						onclick={() => setMetamodelView('yaml')}
+					>
+						{issueCount} issue{issueCount === 1 ? '' : 's'}
+					</button>
+				{/if}
+				{#if readOnly}
+					<span class="text-muted-foreground/70" data-testid="mm-readonly-note">
+						{readOnlyNote}
+					</span>
+				{:else}
 					<Button size="sm" onclick={createElementType}>+ Element type</Button>
 					<Button size="sm" variant="outline" onclick={createEnum}>+ Enum</Button>
-				</div>
-			{/if}
+				{/if}
+			</div>
 		</div>
 
 		<div class="flex min-h-0 flex-1">

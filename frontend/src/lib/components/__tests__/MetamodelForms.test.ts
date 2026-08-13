@@ -104,6 +104,20 @@ describe('MetamodelFormPanel', () => {
 		unmount(c);
 	});
 
+	it('says why the fields are inert on a read-only surface', () => {
+		const c = mount(MetamodelFormPanel, {
+			target: document.body,
+			props: { readOnly: true }
+		});
+		flushSync();
+
+		// The panel scrolls away from the toolbar that carries the reason, so it
+		// repeats the fact locally rather than showing unexplained dead controls.
+		expect(byId('mm-panel-readonly').textContent).toContain('Read-only');
+
+		unmount(c);
+	});
+
 	it('dispatches to the element form for an element selection', () => {
 		panelView = { ...BASE_VIEW, selection: { kind: 'element', name: 'Zone' } };
 

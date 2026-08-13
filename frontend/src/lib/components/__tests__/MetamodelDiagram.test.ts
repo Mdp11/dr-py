@@ -223,6 +223,70 @@ describe('MetamodelDiagram', () => {
 		unmount(c);
 	});
 
+	it('counts unattributed lint errors in the toolbar and sends the click to the YAML view', () => {
+		// `errorNodeIds` is empty in every reachable state (see the state module:
+		// a line-bearing lint error implies a buffer that does not parse, which
+		// leaves nothing drawn to badge), so the COUNT is the whole error
+		// surface — an error can never go unshown just because it has no home.
+		diagramView = { ...DIAGRAM, unattributedErrorCount: 3 };
+
+		const c = mount(DiagramHost, { target: document.body });
+		flushSync();
+
+		const badge = document.querySelector<HTMLButtonElement>('[data-testid="mm-issue-badge"]')!;
+		expect(badge.textContent).toContain('3 issues');
+
+		badge.click();
+		flushSync();
+		expect(setMetamodelView).toHaveBeenCalledWith('yaml');
+
+		unmount(c);
+	});
+
+	it('shows no issue badge when the draft lints clean', () => {
+		const c = mount(DiagramHost, { target: document.body });
+		flushSync();
+
+		expect(document.querySelector('[data-testid="mm-issue-badge"]')).toBeNull();
+
+		unmount(c);
+	});
+
+	it('explains a read-only surface differently for an editor and a viewer', () => {
+		editorView = { ...EDITOR, readOnly: true };
+		role = 'editor';
+
+		const c = mount(DiagramHost, { target: document.body });
+		flushSync();
+		// An editor may still rearrange: layout is presentation, and its gate is
+		// separate from the owner-only buffer gate.
+		expect(document.querySelector('[data-testid="mm-readonly-note"]')?.textContent).toContain(
+			'rearrange'
+		);
+		unmount(c);
+
+		role = 'viewer';
+		const v = mount(DiagramHost, { target: document.body });
+		flushSync();
+		expect(document.querySelector('[data-testid="mm-readonly-note"]')?.textContent).toContain(
+			'not saved'
+		);
+		unmount(v);
+	});
+
+	it('names the lease holder when a peer holds the metamodel', () => {
+		editorView = { ...EDITOR, readOnly: true, lockedBy: 'peer@example.com' };
+
+		const c = mount(DiagramHost, { target: document.body });
+		flushSync();
+
+		expect(document.querySelector('[data-testid="mm-readonly-note"]')?.textContent).toContain(
+			'peer@example.com'
+		);
+
+		unmount(c);
+	});
+
 	it('selects the metamodel type behind a clicked node', () => {
 		const c = mount(DiagramHost, { target: document.body });
 		flushSync();

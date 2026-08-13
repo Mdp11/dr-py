@@ -62,6 +62,13 @@
 
 {#if mm !== null}
 	<div class="flex flex-col gap-3 p-2.5" data-testid="mm-form-panel">
+		{#if readOnly}
+			<!-- The panel scrolls independently of the toolbar that says WHY, and a
+			     column of greyed-out fields with no explanation reads as broken. -->
+			<p class="text-[10px] text-muted-foreground/70" data-testid="mm-panel-readonly">
+				Read-only — these fields show the draft, but cannot change it.
+			</p>
+		{/if}
 		{#if sel === null}
 			<div class="flex flex-col gap-3" data-testid="mm-panel-overview">
 				<div class="flex flex-col gap-0.5">
