@@ -8,6 +8,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from data_rover.api.main import create_app
+from data_rover.api.routes.exports import _aggregate_pending
+from data_rover.api.schemas import ScriptStatusOut
 
 from .conftest import AUTH_HEADERS, papi, seed_default_project
 from .test_artifacts_routes import _bootstrap_model
@@ -137,3 +139,62 @@ def test_empty_entries_422_and_wrong_kind_404(client):
     t = _mk_table(client, "zeta")
     assert _run(client, t).status_code == 404          # a table, not a custom_export
     assert _run(client, "nope").status_code == 404
+
+
+def test_colliding_entry_names_dedupe_with_a_suffix_in_entry_order(client):
+    _bootstrap_model(client)
+    t1, t2 = _mk_table(client, "eta"), _mk_table(client, "theta")
+    art = _mk_export(
+        client,
+        [
+            {"source": {"ref": t1}, "name": "sheet", "format": "json"},
+            {"source": {"ref": t2}, "name": "sheet", "format": "json"},
+        ],
+    )
+    r = _run(client, art)
+    assert r.status_code == 200
+    names = zipfile.ZipFile(io.BytesIO(r.content)).namelist()
+    # entry order: t1's entry lands first and keeps the bare name; t2's
+    # entry collides and gets the `_2` suffix — never the reverse.
+    assert names == ["sheet.json", "sheet_2.json"]
+
+
+# --- _aggregate_pending: pure, so hand-built ScriptStatusOut values are
+# enough — no DB, no app fixture, no runner (see task-7-report.md, Finding 2
+# of the fix round). ---------------------------------------------------
+
+
+def test_aggregate_pending_prefers_computing_over_failed():
+    statuses = [
+        ScriptStatusOut(state="failed", done=1, total=2, message="dead"),
+        ScriptStatusOut(state="computing", done=3, total=5),
+    ]
+    agg = _aggregate_pending(statuses)
+    assert agg.state == "computing"
+    assert agg.done == 4
+    assert agg.total == 7
+
+
+def test_aggregate_pending_all_failed_is_failed():
+    statuses = [
+        ScriptStatusOut(state="failed", done=1, total=2, message="dead-1"),
+        ScriptStatusOut(state="failed", done=2, total=3, message="dead-2"),
+    ]
+    agg = _aggregate_pending(statuses)
+    assert agg.state == "failed"
+    assert agg.done == 3
+    assert agg.total == 5
+
+
+def test_aggregate_pending_sums_done_and_total_across_entries():
+    statuses = [
+        ScriptStatusOut(state="computing", done=1, total=10),
+        ScriptStatusOut(state="computing", done=2, total=None),
+        ScriptStatusOut(state="computing", done=3, total=4),
+    ]
+    agg = _aggregate_pending(statuses)
+    assert agg.state == "computing"
+    assert agg.done == 6
+    # `total=None` (an entry whose row count is not yet known) contributes 0,
+    # never breaks the sum — same `or 0` narrowing as the route itself.
+    assert agg.total == 14

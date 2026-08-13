@@ -29,6 +29,10 @@ def app() -> FastAPI:
     def tree_items(m: Membership = Depends(require_membership)) -> dict[str, str]:
         return {"role": m.role.value}
 
+    @app.post("/projects/{project_id}/exports/run")
+    def exports_run(m: Membership = Depends(require_membership)) -> dict[str, str]:
+        return {"role": m.role.value}
+
     @app.delete("/projects/{project_id}/owned", status_code=204, response_model=None)
     def owned(m: Membership = Depends(require_owner)) -> None:
         return None
@@ -107,7 +111,12 @@ def test_viewer_can_call_readonly_post_exports_run(client: TestClient) -> None:
         f"/projects/{pid}/exports/run", headers=_h("viewer"),
         json={"artifact_id": "x"},
     )
-    assert r.status_code != 403  # authz passes; 404 comes from the route
+    # The fixture app registers a real stub for this path (see `app` above),
+    # so a 403 here can ONLY come from `require_membership`'s viewer-write
+    # gate — unlike a bare `!= 403` against an unmatched route (which Starlette
+    # 404s before authz ever runs), this assertion can actually fail if
+    # "/exports/run" is ever dropped from `_READ_ONLY_POST_SUFFIXES`.
+    assert r.status_code == 200
 
 
 def test_require_owner_rejects_editor(client: TestClient) -> None:

@@ -48,6 +48,33 @@ def _dedupe(stem: str, taken: set[str]) -> str:
     return candidate
 
 
+def _aggregate_pending(statuses: list[ScriptStatusOut]) -> ScriptStatusOut:
+    """Combine every still-pending entry's `ScriptStatusOut` into the ONE
+    aggregate 202 the whole zip answers with.
+
+    `computing` wins over `failed` even when another entry is dead: a
+    retryable in-flight state must never be reported as terminal, because
+    this is a single response covering MULTIPLE entries — if even one of
+    them will still fill in on its own, the honest answer for the whole
+    request is "poll again", not "give up" (same reasoning as the per-table
+    FIX B in `table_export_engine.status_from_job`: a client told `failed`
+    abandons the download the very next poll would have delivered). Only
+    when EVERY entry is dead does the aggregate report `failed`.
+
+    `done`/`total` are summed across entries so a client rendering one
+    progress bar for the whole export sees genuine combined progress rather
+    than only the last entry's numbers.
+    """
+    state: Literal["computing", "failed"] = (
+        "computing" if any(s.state == "computing" for s in statuses) else "failed"
+    )
+    return ScriptStatusOut(
+        state=state,
+        done=sum(s.done for s in statuses),
+        total=sum(s.total or 0 for s in statuses),
+    )
+
+
 @router.post("/exports/run")
 def run_export(
     payload: RunExportIn,
@@ -127,17 +154,9 @@ def run_export(
     if pending:
         # ONE aggregate 202. Every entry already ran (kicking every pending
         # table's sweep, so they fill concurrently); the retry re-reads the
-        # cache. `computing` wins over `failed` for the same reason as the
-        # per-table FIX B: a retry that will succeed must not be told to
-        # abandon the download.
-        state: Literal["computing", "failed"] = (
-            "computing" if any(s.state == "computing" for s in pending) else "failed"
-        )
-        agg = ScriptStatusOut(
-            state=state,
-            done=sum(s.done for s in pending),
-            total=sum(s.total or 0 for s in pending),
-        )
+        # cache. See `_aggregate_pending` for why `computing` wins over
+        # `failed`.
+        agg = _aggregate_pending(pending)
         return JSONResponse(
             status_code=202,
             content=agg.model_dump(),
