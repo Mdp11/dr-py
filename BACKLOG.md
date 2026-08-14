@@ -27,7 +27,7 @@ spec's phase table (`R`). Anything older than the last few sessions is **unverif
 against current code** — confirm before acting on it. Line numbers drift; treat them as
 hints.
 
-Last updated: 2026-08-12 · repo head at time of writing: `a510171`
+Last updated: 2026-08-14 · repo head at time of writing: `29727af`
 
 ---
 
@@ -48,8 +48,9 @@ most recent work is **Phase 7 (scoped): Redis lock mirroring** — merged at `a5
 | **7. HA / horizontal scale** | **partial — lease mirroring only (see R-1)** |
 | **8. History & revert** | **not started (see R-2)** |
 
-Test baseline on `main`: `core-test` 1739 passed / 29 deselected · `frontend-test`
-1863 passed (193 files) · `dr-tidy` clean · Redis integration 3 passed.
+Test baseline on `main`: `core-test` 1811 passed / 30 deselected · `frontend-test`
+2049 passed (213 files) · `dr-tidy` clean. (Measured on `29727af`, 2026-08-14; the
+opt-in Redis integration suite was not re-run.)
 
 ---
 
@@ -411,6 +412,31 @@ The backend endpoint exists and renders full before/after reconstruction; the dr
 doesn't use it. No client-side commit-diff schema exists yet. Parked repeatedly in favour
 of other work — folds naturally into R-2.
 
+### F-10 · Invalid `${name}` template blocks Export, not Save · `open` · spec divergence · *2026-08-14*
+Spec §5.1 of the split/custom-export design says a `${name}`-less `json_split.filename_template`
+blocks **Save**; what shipped blocks **Export** (`ExportDialog.svelte:195` disables the Export
+button, `EntryLayoutDialog.svelte:48-52` disables its Save). Nothing gates the *table draft's*
+Save, so an invalid template can be committed into a table definition and then copied into a
+custom-export entry at add time. User-visible behaviour is fine — the server 422s
+(`core/table/split.py::validate_template`) and the inline hint shows — so this is a divergence
+to close deliberately or to amend in the spec, not a bug report. From the P-13/P-14 final review.
+
+### F-11 · Custom-export picker forbids the same table twice · `open` · limitation · *2026-08-14*
+`CustomExportTab.svelte:47-50` filters the add-table dropdown by `usedRefs`, so a table already
+in the export cannot be added again. Nothing in the spec requires uniqueness, and the **server
+clearly anticipates duplicates**: `routes/exports.py::_dedupe` exists to suffix colliding entry
+names and `test_colliding_entry_names_dedupe_with_a_suffix_in_entry_order` pins that behaviour.
+"Export table A as a wide xlsx *and* as split-per-element JSON" is a natural use of the feature
+that the UI cannot currently express. Either drop the filter or document it as deliberate.
+
+### F-12 · `ensure*Draft` close race is shared by all four editors · `open` · class fix · *2026-08-14*
+Closing a tab mid-`ensure…Draft` resurrects the draft after its lease was released: `ensure`
+sets `_drafts` unconditionally after both awaits. Present identically in
+`snippet-editor.svelte.ts`, `table-editor.svelte.ts`, `metamodel-editor.svelte.ts` and
+`custom-export-editor.svelte.ts` — the custom-export one inherited it by following the pattern,
+which is why it was not fixed locally during P-14 (fixing one would make the family
+inconsistent). Worth **one** fix across all four, with a shared guard, rather than four patches.
+
 ---
 
 ## 6. Diagnosed issues — backend
@@ -496,6 +522,7 @@ existing fixture/example metamodel would start failing.
 | C-7 | `inspection-history.svelte.ts` — `backEntries`/`forwardEntries` are near-identical mirrored loops. | SDD ledger |
 | C-8 | `HistoryNav.svelte` — ~30 duplicated lines between the Back and Forward dropdown blocks, differing in ~6 tokens. Awkward to extract because `bind:open` needs a distinct `$state` per menu. | SDD ledger |
 | C-9 | `DropdownMenu.Item` uses `onclick` at 6 sites where `onSelect` is the repo majority (16 sites); `onSelect` also fires for keyboard selection. | SDD ledger |
+| C-10 | Two different `ExportEntry` types now coexist: `frontend/src/lib/table/export-layout.ts:16` (a layout row, `{index, included}`) and `frontend/src/lib/api/types.ts:985` (the custom-export wire entry). `ExportSettingsPanel.svelte` imports one and `CustomExportTab.svelte` the other, from the same feature directory. Rename the wire one to `CustomExportEntry`. | P-14 final review, 2026-08-14 |
 
 ---
 
