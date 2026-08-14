@@ -124,6 +124,25 @@ def test_entry_overrides_apply_without_touching_the_table(client):
     assert "Mass" in json.loads(r2.content)[0]
 
 
+def test_tokenless_split_template_is_a_422_naming_the_entry(client):
+    """The dialog only gates a bad template while `format === 'json'`
+    (EntryLayoutDialog's Save gate) — an entry saved under xlsx and later
+    flipped to json can still carry a tokenless `json_split.filename_template`.
+    The route must 422 by ENTRY NAME rather than an anonymous failure."""
+    _bootstrap_model(client)
+    t = _mk_table(client, "lambda_t")
+    art = _mk_export(
+        client,
+        [{
+            "source": {"ref": t}, "name": "no-token", "format": "json",
+            "json_split": {"enabled": True, "filename_template": "static"},
+        }],
+    )
+    r = _run(client, art)
+    assert r.status_code == 422
+    assert "no-token" in r.json()["detail"]
+
+
 def test_dangling_ref_is_a_422_naming_the_entry(client):
     _bootstrap_model(client)
     art = _mk_export(client, [{"source": {"ref": "gone"}, "name": "lost"}])
@@ -139,6 +158,48 @@ def test_empty_entries_422_and_wrong_kind_404(client):
     t = _mk_table(client, "zeta")
     assert _run(client, t).status_code == 404          # a table, not a custom_export
     assert _run(client, "nope").status_code == 404
+
+
+def test_traversal_entry_name_cannot_escape_the_archive_root_single_file(client):
+    """A single-file entry (`json_split` off) names its zip member from
+    `entry.name`/`t.name` — free-form text with no charset constraint at the
+    API layer. `sanitize_stem` must neutralize the path separators before
+    `_dedupe`, or `../../evil` writes a member that unzips OUTSIDE the
+    archive root."""
+    _bootstrap_model(client)
+    t = _mk_table(client, "iota")
+    art = _mk_export(
+        client, [{"source": {"ref": t}, "name": "../../evil", "format": "json"}]
+    )
+    r = _run(client, art)
+    assert r.status_code == 200
+    names = zipfile.ZipFile(io.BytesIO(r.content)).namelist()
+    assert names == [".._.._evil.json"]
+    assert all(not n.startswith("/") and ".." not in n.split("/") for n in names)
+
+
+def test_traversal_entry_name_cannot_escape_the_archive_root_split(client):
+    """Same hazard for a split entry, where the sanitized name becomes a ZIP
+    FOLDER — a raw path segment, not just a filename stem. A stem of bare
+    dots (`".."`) is not defanged by stripping separators alone (there are
+    none to strip), so `sanitize_stem` must also neutralize an all-dots
+    result or the folder itself IS the traversal token (`"../x.json"`)."""
+    _bootstrap_model(client)
+    t = _mk_table(client, "kappa")
+    art = _mk_export(
+        client,
+        [{
+            "source": {"ref": t}, "name": "..", "format": "json",
+            "json_split": {"enabled": True, "filename_template": "${name}"},
+        }],
+    )
+    r = _run(client, art)
+    assert r.status_code == 200
+    names = zipfile.ZipFile(io.BytesIO(r.content)).namelist()
+    assert names  # at least the split's "root" partition
+    for n in names:
+        assert not n.startswith("/")
+        assert ".." not in n.split("/")
 
 
 def test_colliding_entry_names_dedupe_with_a_suffix_in_entry_order(client):

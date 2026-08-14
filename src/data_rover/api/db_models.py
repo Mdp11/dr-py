@@ -280,9 +280,27 @@ class Snapshot(Base):
 
 
 class ArtifactKind(enum.StrEnum):
-    """Kinds of project artifacts. All four mega-plan kinds are declared up
-    front (the column is VARCHAR+CHECK, so this costs nothing); Stage 1 only
-    accepts `navigation` payloads at the route layer."""
+    """Kinds of project artifacts — six today (`diagram`/`diagram_kind` stay
+    unregistered in `api/artifact_kinds.py` and 422 on write; see that
+    module for which kinds routes actually accept).
+
+    `SAEnum(..., native_enum=False)` below stores this as a plain VARCHAR —
+    NOT VARCHAR+CHECK: `native_enum=False` defaults `create_constraint` to
+    False, so there is no database-level check constraint at all. Nothing
+    stops an out-of-band write (a manual `UPDATE`, a future migration) from
+    putting an arbitrary string in the column; only application code
+    validates membership. That false premise (assuming a CHECK existed) is
+    exactly why the column needed migration `0011` — SQLAlchemy sizes an
+    unwidened VARCHAR to the longest member at the time the model was
+    written, and `custom_export` (13 chars) overran the original VARCHAR(12)
+    on Postgres, which rejects an overlong VARCHAR insert outright — migration
+    `0011` widened the real column to VARCHAR(32), but this class's `SAEnum`
+    had no explicit `length` so SQLAlchemy kept inferring 13 (the longest
+    member) from the enum itself, leaving the model's notion of the column
+    silently out of step with the schema it actually described.
+    `length=32` below matches `0011` so the model and the migration state
+    the same fact; the next kind longer than 32 chars will need another
+    migration AND another bump here."""
 
     navigation = "navigation"
     table = "table"
@@ -312,7 +330,7 @@ class ArtifactRow(Base):
         ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
     kind: Mapped[ArtifactKind] = mapped_column(
-        SAEnum(ArtifactKind, name="artifact_kind", native_enum=False),
+        SAEnum(ArtifactKind, name="artifact_kind", native_enum=False, length=32),
         nullable=False,
     )
     name: Mapped[str] = mapped_column(String, nullable=False)

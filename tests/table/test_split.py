@@ -11,6 +11,7 @@ from data_rover.core.table.cells import ValueCell
 from data_rover.core.table.split import (
     SPLIT_TOKEN,
     render_filenames,
+    sanitize_stem,
     split_partitions,
     validate_template,
 )
@@ -59,3 +60,27 @@ def test_empty_render_falls_back_to_the_id_then_to_element():
 def test_render_filenames_rejects_a_tokenless_template():
     with pytest.raises(ValueError):
         render_filenames("static", [("e1", "x")])
+
+
+def test_sanitize_stem_strips_path_separators_and_control_chars():
+    assert sanitize_stem("a/b\\c:d*e?f\"g<h>i|j") == "a_b_c_d_e_f_g_h_i_j"
+    assert sanitize_stem("a\tb") == "a_b"
+
+
+def test_sanitize_stem_neutralizes_an_all_dots_stem():
+    """`sanitize_stem` is used as a raw PATH SEGMENT, not just a filename
+    stem (exports.py's split-entry zip folder name) — `".."` on its own has
+    no separator to strip, but left as `".."` it IS the parent-directory
+    traversal token once followed by `/`. Must not collide with a fresh,
+    unrelated stem of literal underscores."""
+    assert sanitize_stem("..") == "__"
+    assert sanitize_stem(".") == "_"
+    assert sanitize_stem("...") == "___"
+    # embedded dots (not a whole all-dots stem) are untouched
+    assert sanitize_stem("a.b..c") == "a.b..c"
+
+
+def test_sanitize_stem_leaves_empty_input_empty():
+    # empty must NOT become "_" — render_filenames's `or fallback or
+    # "element"` chain depends on an empty sanitize result staying falsy.
+    assert sanitize_stem("") == ""

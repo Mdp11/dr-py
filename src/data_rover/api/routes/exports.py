@@ -20,6 +20,7 @@ from data_rover.core.table.custom_export import (
     CustomExportDefinition,
     overridden_table,
 )
+from data_rover.core.table.split import sanitize_stem, validate_template
 
 from .. import content
 from ..db import get_db
@@ -103,6 +104,7 @@ def run_export(
     # looks complete — deliberate divergence from the bundle's
     # tolerant-dangler stance (spec §4.3).
     missing: list[str] = []
+    bad_templates: list[str] = []
     tables: list[ArtifactRow | None] = []
     for entry in cdef.entries:
         t = content.get_artifact(db, entry.source.ref)
@@ -111,10 +113,26 @@ def run_export(
             tables.append(None)
         else:
             tables.append(t)
+        # Same up-front, name-the-entry stance as the missing-table check:
+        # a bad `${name}` template must not 422 the whole export anonymously
+        # (dialog gating only covers json-mode saves — an entry saved under
+        # xlsx then flipped to json can carry a tokenless template).
+        split = entry.json_split
+        if entry.format == "json" and split is not None and split.enabled:
+            try:
+                validate_template(split.filename_template)
+            except ValueError:
+                bad_templates.append(entry.name or entry.source.ref)
     if missing:
         raise HTTPException(
             status_code=422,
             detail="missing table(s) for entries: " + ", ".join(missing),
+        )
+    if bad_templates:
+        raise HTTPException(
+            status_code=422,
+            detail="invalid split filename template for entries: "
+            + ", ".join(bad_templates),
         )
 
     try:
@@ -173,12 +191,22 @@ def run_export(
         if res.archive:
             # A split entry keeps its per-element files together under one
             # folder named by the entry; root-name collisions dedupe `_2`.
-            folder = _dedupe(out_name, taken)
+            # `sanitize_stem` guards the zip-slip boundary here: `out_name`
+            # is free-form user text (`entry.name`/`t.name`, no charset
+            # constraint at the API layer) that is about to become an
+            # archive member's path prefix — `zipfile.ZipInfo` writes
+            # whatever it's given verbatim, so an unsanitized `../../evil`
+            # would unzip outside the archive root.
+            folder = _dedupe(sanitize_stem(out_name), taken)
             files.extend((f"{folder}/{fn}", blob) for fn, blob in res.files)
         else:
             fn, blob = res.files[0]
             stem, dot, ext = fn.rpartition(".")
-            files.append((f"{_dedupe(stem, taken)}{dot}{ext}", blob))
+            # Same zip-slip guard as the branch above: `stem` traces back to
+            # the same unsanitized `out_name` (run_table_export names the
+            # single-file case `f"{name}.<ext>"`), so it needs the identical
+            # treatment before it becomes a zip member's path.
+            files.append((f"{_dedupe(sanitize_stem(stem), taken)}{dot}{ext}", blob))
 
     resp_headers = {"Content-Disposition": f'attachment; filename="{row.name}.zip"'}
     if truncated:

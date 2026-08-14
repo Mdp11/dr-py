@@ -166,8 +166,9 @@ every commit is a foot-gun with no escape hatch.
 ### P-13 · JSON export: one file per base element, with a name template · `done` (2026-08-14)
 Landed as `json_split`: `core/table/split.py` groups rows by the leading `RowKey` slot
 and renders each group through the existing `render_json`, zipped up behind
-`POST /exports/run`, with the strict `${name}` name template (collision/unsafe-char
-handling included).
+`POST /tables/export`, with the strict `${name}` name template (collision/unsafe-char
+handling included). (`POST /exports/run` is P-14's custom-export-artifact runner, a
+separate route that also zips — see below.)
 
 Today `POST /tables/export` returns **one** JSON document for the whole table
 (`routes/tables.py:815`, `filename = f"{name}.json"`). Wanted: when a column is expanded

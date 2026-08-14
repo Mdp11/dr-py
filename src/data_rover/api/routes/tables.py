@@ -482,44 +482,19 @@ def export_table(
     settings: Settings = Depends(get_settings),
 ) -> Response:
     """Read-only (viewer-callable; listed in authz._READ_ONLY_POST_SUFFIXES).
-    Exports the WHOLE table (every row `build_rows`/`order_rows` produce,
-    honoring `max_rows` and the requested sort) — unlike `/tables/evaluate`,
-    there is no `offset`/`limit` windowing here. `payload.format` picks the
-    shape: `"xlsx"` (default) ships a single-sheet
-    `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`
-    workbook via `build_workbook`; `"json"` ships `application/json` via
-    `render_json`, one object per (possibly grouped) row — see
-    `core/table/json_export.py` for the grouping rules.
+    Thin route: resolves the table/sort, names the file from the artifact
+    (falling back to `"table"`), and delegates the actual export to
+    `table_export_engine.run_table_export` — see that function's docstring
+    for the evaluation/pending/degradation mechanics shared with
+    `POST /exports/run`.
 
-    Cells are evaluated with `max_cell_elements` overridden to effectively
-    unbounded (10**9): the interactive page route caps a navigation cell's
-    element list at `cell_cap` purely for on-screen display, but an export
-    must contain the COMPLETE reached set for every navigation cell — capping
-    it here would silently drop data the user asked to export. Row count is
-    still governed by `TableLimits.max_rows`; `X-Table-Truncated` is set when
-    `build_rows` reports an incomplete row set (its own `max_rows` cap, or an
-    underlying navigation that hit its `max_chains`/`max_visited` budget),
-    never for cell-level capping (which cannot happen with this override).
-
-    Script columns (spec §4.4): an export is the one route that MUST touch every
-    row, so running it inline would be exactly the O(rows) guest grind Phase B
-    exists to remove. Instead the whole thing runs CACHE-ONLY and the route
-    probes for completeness first; if anything is still uncomputed it kicks/joins
-    the background sweep and answers **202 + `Retry-After: 1`** with a
-    `ScriptStatusOut` body (the frontend retries on that exact shape) rather than
-    downloading a half-computed workbook. The 202-vs-ship decision is made by
-    RE-PROBING the cache after the kick/join (decision table at the call site):
-    a finished sweep does not imply a complete cache, so "would a retry help"
-    — not "is the job over" — is the discriminator. When it would not (a
-    terminal sweep that still left holes, or no runner at all) the file still
-    ships with pending cells surfaced — but the two formats carry that
-    differently. The `.xlsx` branch renders each affected cell `#ERROR` and
-    appends a trailing notice row; the `.json` branch has no sheet and no
-    notice row to append, so it marks each affected cell in-band with a
-    `{"$error": ...}` object instead (see `render_cell` in
-    `core/table/json_export.py`). Both branches still set the
-    `X-Table-Script-Errors` response header when this happens, so a
-    programmatic client can detect degradation without parsing the body."""
+    `payload.format` (default `"xlsx"`) picks what ships: a single `.xlsx`
+    workbook, a single `.json` document, OR — when `json_split` is enabled
+    on the table (P-13) and produced more than one file — an
+    `application/zip` named `{name}.zip` bundling them (`build_zip`; same
+    zip shape `/exports/run` uses for a whole custom-export bundle). An
+    `ExportPending` result short-circuits to the shared 202 protocol:
+    `Retry-After: 1` with a `ScriptStatusOut` body the frontend polls on."""
     metamodel, model = require_model(session)
     try:
         defn = _resolve_table(payload, project_id, db)
