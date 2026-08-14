@@ -70,7 +70,14 @@ import { releaseArtifactIfUnneeded } from './checkout.svelte';
 import { acquireArtifactLease, lockHolderLabel } from './edit-gate';
 import { isTempId } from './ops';
 import { onCommitEvent } from './realtime.svelte';
+import { retryAndDownload, type ExportProgress } from '$lib/util/export-download';
 import { bindTabToArtifact, closeTab, repointTabArtifact, retitleTab } from './workspace.svelte';
+
+// Re-exported so `$lib/state`'s barrel (and TableView.svelte, which imports
+// the type through it) need no change: the retry-and-download loop itself
+// moved to `$lib/util/export-download.ts` (P-14 task 12) so `/exports/run`
+// (`CustomExportTab.svelte`) can share it instead of copying it.
+export type { ExportProgress };
 
 /** Chunk size for both full loads and lazy range fills. */
 const PAGE = 100;
@@ -93,12 +100,6 @@ const RECAP_RETRY_MS = 1_000;
  * "we could not check", which is the honest answer — and the user can ask
  * again. */
 const RECAP_MAX_ATTEMPTS = 120;
-/** Delay between two export retries while the sweep is still computing
- * (the backend answers 202 with `Retry-After: 1`). */
-const EXPORT_RETRY_MS = 1_000;
-/** Bound on export retries so a stuck sweep surfaces an error instead of
- * spinning silently forever (~2 minutes at EXPORT_RETRY_MS). */
-const EXPORT_MAX_ATTEMPTS = 120;
 
 export interface TableDraft {
 	name: string;
@@ -1604,14 +1605,6 @@ export function closeTableDraft(tabId: string): void {
 	}
 }
 
-/** Progress of an export that is waiting on the background script sweep. */
-export interface ExportProgress {
-	done: number;
-	total: number | null;
-	/** 1-based retry number, so a caller can show "still preparing". */
-	attempt: number;
-}
-
 /**
  * Export the current definition (or saved artifact) as an `.xlsx` or `.json`
  * and trigger a browser download via a synthetic anchor click.
@@ -1621,9 +1614,10 @@ export interface ExportProgress {
  * client as `{ kind: 'preparing' }`) instead of the file. THE STATUS CODE IS
  * THE RETRY SIGNAL: retry until the call resolves `ready`, reporting each wait
  * through `onProgress` so the caller can keep the user informed, and stop early
- * when `signal` aborts (the tab was closed / the user navigated away). Retries
- * are bounded (`EXPORT_MAX_ATTEMPTS`) so a wedged sweep ends in a visible error
- * rather than an invisible infinite loop.
+ * when `signal` aborts (the tab was closed / the user navigated away). The
+ * retry/download loop itself is `$lib/util/export-download.ts`'s
+ * `retryAndDownload`, shared with `/exports/run` (`CustomExportTab.svelte`) —
+ * this function's only job is producing the args `exportTable` needs.
  */
 export async function downloadTable(
 	tabId: string,
@@ -1637,23 +1631,7 @@ export async function downloadTable(
 	if (!draft) return;
 	const sort = _sortFor(tabId, draft);
 	const args = { ..._evaluateSource(draft), sort, format: opts?.format ?? 'xlsx' };
-	let result = await exportTable(args);
-	for (let attempt = 1; result.kind === 'preparing'; attempt++) {
-		if (opts?.signal?.aborted) return;
-		if (attempt > EXPORT_MAX_ATTEMPTS) {
-			throw new Error('Export is still being prepared — try again shortly.');
-		}
-		opts?.onProgress?.({ done: result.done, total: result.total, attempt });
-		await new Promise((r) => setTimeout(r, EXPORT_RETRY_MS));
-		if (opts?.signal?.aborted) return;
-		result = await exportTable(args);
-	}
-	const url = URL.createObjectURL(result.blob);
-	const a = document.createElement('a');
-	a.href = url;
-	a.download = result.filename;
-	a.click();
-	URL.revokeObjectURL(url);
+	await retryAndDownload(() => exportTable(args), opts);
 }
 
 /**
