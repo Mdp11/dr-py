@@ -163,7 +163,12 @@ splits STRUCTURAL (hard-fails a commit, 422) from CONFORMANCE (counted, never bl
 User-authored rules almost certainly must be CONFORMANCE — a user rule that can block
 every commit is a foot-gun with no escape hatch.
 
-### P-13 · JSON export: one file per base element, with a name template · `open`
+### P-13 · JSON export: one file per base element, with a name template · `done` (2026-08-14)
+Landed as `json_split`: `core/table/split.py` groups rows by the leading `RowKey` slot
+and renders each group through the existing `render_json`, zipped up behind
+`POST /exports/run`, with the strict `${name}` name template (collision/unsafe-char
+handling included).
+
 Today `POST /tables/export` returns **one** JSON document for the whole table
 (`routes/tables.py:815`, `filename = f"{name}.json"`). Wanted: when a column is expanded
 and `json_export.group` rolls those rows back into an array, also be able to emit **one
@@ -192,7 +197,14 @@ Presentation-only, so it must respect the **RENDER ONLY** rule in `export_layout
 row order, cell values and every script cache key stay computed from the original
 definition.
 
-### P-14 · New artefact kind: custom export · `open` · **needs brainstorming**
+### P-14 · New artefact kind: custom export · `done` (2026-08-14)
+Landed as the `custom_export` artefact kind: `core/table/custom_export.py` (per-entry
+override model), engine `api/table_export_engine.py`, and `POST /exports/run` — a named
+collection of table exports with their own layout overrides, registered in
+`api/artifact_kinds.py` with its table refs under the standard `"ref"` key so the
+registry's generic `extract_deps`/`rewrite_refs` walk carries it through bundle
+import/export unchanged.
+
 A user-defined export artefact: a named **collection of table exports** whose export
 settings live **in the artefact**, leaving each table's own standalone export settings
 untouched. So one artefact can say "export tables A, B, C, each with *these* columns,
@@ -479,7 +491,7 @@ existing fixture/example metamodel would start failing.
 | C-3 | `_seed_view` conftest duplication across 4 test files — consolidate. | 2026-08-08 |
 | C-4 | `routes/ops.py::undo` never migrated onto `_CommitUnwind` (the commit path's shared unwind helper). | 2026-08-09 |
 | C-5 | `bindableOpen(get, set)` helper to collapse five store↔dialog open-mirrors. Declined once as a 5-file zero-behaviour-change refactor. | 2026-08-10 |
-| C-6 | `SECTION_KINDS` / registered-kind selector duplicated across the export dialog, `ArtifactsSection`, `ImportArtifactsDialog` ICONS and the state unions — extract a shared selector. | 2026-08-10 |
+| C-6 | `done` (2026-08-14) — extracted to `frontend/src/lib/artifacts/kinds.ts` (`REGISTERED_KINDS`/`KIND_ICONS`/`SECTION_KINDS`), now the single source consumed by `ExportArtifactsDialog`, `ImportArtifactsDialog`, `ArtifactsSection`, `TreeRow`, `DiffDrawer` and the state unions. | 2026-08-10 |
 | C-7 | `inspection-history.svelte.ts` — `backEntries`/`forwardEntries` are near-identical mirrored loops. | SDD ledger |
 | C-8 | `HistoryNav.svelte` — ~30 duplicated lines between the Back and Forward dropdown blocks, differing in ~6 tokens. Awkward to extract because `bind:open` needs a distinct `$state` per menu. | SDD ledger |
 | C-9 | `DropdownMenu.Item` uses `onclick` at 6 sites where `onSelect` is the repo majority (16 sites); `onSelect` also fires for keyboard selection. | SDD ledger |

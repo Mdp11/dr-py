@@ -89,7 +89,9 @@ def overridden_table(defn: TableDefinition, entry: ExportEntry) -> TableDefiniti
             col.model_copy(
                 update={
                     "export": override.export if override is not None else None,
-                    "json_export": override.json_export if override is not None else None,
+                    "json_export": override.json_export
+                    if override is not None
+                    else None,
                 }
             )
         )

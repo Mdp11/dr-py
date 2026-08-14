@@ -175,9 +175,10 @@ follows a pessimistic **check-out → stage → commit** loop (Spec B):
    element's own ops PLUS every staged relationship op incident to it — a
    surviving rel pointing at a reverted temp id would 422 the commit) and then
    releases the element's lock token when no remaining staged op still needs it.
-6. **Artifacts ride the same loop.** Saved navigations, tables and code
-   snippets are project artifacts rather than model entities, but their
-   editing is the identical check-out → stage → commit shape, so the client
+6. **Artifacts ride the same loop.** Saved navigations, tables, code
+   snippets and custom exports are project artifacts rather than model
+   entities, but their editing is the identical check-out → stage → commit
+   shape, so the client
    holds **no artifact write wrapper at all**: `lib/api/artifacts.ts` is
    read-only (`listArtifacts`, `getArtifact`, `evaluateNavigation`). The
    backend's legacy `POST/PUT/DELETE /artifacts` routes still exist and still
@@ -197,6 +198,23 @@ follows a pessimistic **check-out → stage → commit** loop (Spec B):
      update-over-update keeps whichever fields the later call omits,
      delete-over-create drops both ops (nothing exists server-side to
      delete), delete-over-update collapses to a bare delete.
+   - **Custom exports are workspace tabs too**, keyed like every other
+     artifact editor by a kind-prefixed tab id — `nav:`/`snip:` and now
+     `exp:` (`exp:draft:<n>` for an unsaved draft, `exp:<artifactId>` once
+     saved). `state/custom-export-editor.svelte.ts` is the `exp:` sibling of
+     `snippet-editor.svelte.ts`: the same per-tab draft map, lock-denied
+     banner, save-stages-not-posts flow, and commit/discard/staged-delete
+     listener trio that rebinds a `exp:draft:N` tab to `exp:<id>` off the
+     commit's `id_map` rather than re-keying eagerly. Its one kind-specific
+     idea is **copy-at-add**: `addExportEntry` (`Export/CustomExportTab.svelte`'s
+     add-table picker) builds each `ExportEntry` via `entryForTable`, which
+     COPIES the source table's current export settings rather than
+     referencing them — from that instant the entry and the table are
+     independent, so a later edit to either does not follow the other. An
+     entry's overrides can still be re-derived against the table's _current_
+     definition on demand (`applyEntryOverrides`/`overridesFromDefinition`,
+     used by `Export/EntryLayoutDialog.svelte` — see "Table export settings"
+     below), but nothing keeps the two in sync automatically.
    - **The lease is per editor tab.** Opening a saved artifact takes an
      `art:<id>` exclusive lease (`acquireArtifactLease`); a denial does not
      refuse the open, it renders that tab **unsaveable and read-only** behind
@@ -816,6 +834,22 @@ keeps its per-column extras (`json_export: {key, item_key, value, group}`) and
 its live sample pane. The overrides are part of the saved definition, so a table
 exported the same way every week is configured once.
 
+**The settings markup is split from its hosts (P-14 step 1).** `ExportDialog`
+itself now owns only open/snapshot/cancel semantics, the format toggle and
+confirm — every editing surface (the entry list, JSON options, the split
+section, the preview pane) lives in `Export/ExportSettingsPanel.svelte`, a
+host-agnostic panel the dialog drives over the table draft via `onChange`.
+`Export/EntryLayoutDialog.svelte` is the **second host**: it edits ONE
+custom-export entry's overrides over the exact same panel markup, but writes
+to a local working copy instead of the table draft. Its `effective` value is
+the entry's overrides re-applied onto the table's CURRENT definition
+(`applyEntryOverrides`) — what the entry would render today, not a frozen
+snapshot from when it was added — and saving diffs the edited result back
+against the table's definition (`overridesFromDefinition`) to produce the
+entry's patch: the entry stores DRIFT from the table, never the table's
+settings themselves. It passes no `sort` to the panel — a custom-export entry
+has no live grid to inherit a sort from, and its download is sort-less too.
+
 - **`lib/table/export-layout.ts`** mirrors `core/table/export_layout.py`'s
   normalizer — `ROW_NUMBER_SLOT` (`-1`), `columnIncluded` (tri-state `include`:
   `null` follows `hidden`) and `exportEntries`. DISPLAY ONLY, like
@@ -1228,9 +1262,9 @@ src/
                         guard; per-direction dropdown slices resolve labels
                         lazily;
                         unsaved.ts — hasUnsavedWork() (staged model ops + staged
-                        artifact ops + dirty table/navigation/snippet drafts),
-                        input to the workspace unload guard (beforeNavigate in
-                        p/[projectId]/+page);
+                        artifact ops + dirty table/navigation/snippet/
+                        custom-export drafts), input to the workspace unload
+                        guard (beforeNavigate in p/[projectId]/+page);
                         snippet-editor.svelte.ts — per-tab code-snippet
                         drafts, save lifecycle, debounced lint + run/stop
                         state; snippet-stage.ts — folds a snippet run's op
@@ -1240,6 +1274,13 @@ src/
                         facade docs payload (ensureSnippetDocs/
                         getSnippetDocs), silent-degrade on fetch failure,
                         reset at onReloadModel;
+                        custom-export-editor.svelte.ts — per-tab
+                        (`exp:draft:<n>` / `exp:<id>`) custom-export drafts:
+                        the same draft/lease/save-stages-not-posts shape as
+                        snippet-editor.svelte.ts, plus copy-at-add
+                        (addExportEntry -> entryForTable copies a table's
+                        export settings into the entry once, then the two
+                        drift independently);
                         metamodel-editor.svelte.ts — the metamodel tab's
                         buffer/baseline, localStorage draft, debounced lint,
                         on-demand preview and rebind (see "Live metamodel

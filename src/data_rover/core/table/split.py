@@ -57,9 +57,7 @@ def partition_label(model: Model, binding: Binding) -> tuple[str, str]:
 
 
 def _sanitize(name: str) -> str:
-    cleaned = "".join(
-        "_" if ch in _UNSAFE or ord(ch) < 32 else ch for ch in name
-    )
+    cleaned = "".join("_" if ch in _UNSAFE or ord(ch) < 32 else ch for ch in name)
     return cleaned.strip()[:MAX_FILENAME_LEN].strip()
 
 

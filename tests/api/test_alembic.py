@@ -64,10 +64,10 @@ def test_migration_adds_validation_policy_column(tmp_path: Path) -> None:
     assert "validation_policy" not in cols
 
 
-def test_migration_0010_widens_kind_and_preserves_fks_and_unique(
+def test_migration_0011_widens_kind_and_preserves_fks_and_unique(
     tmp_path: Path,
 ) -> None:
-    # 0010 (`custom_export`) rebuilds project_artifacts via batch mode on
+    # 0011 (`custom_export`) rebuilds project_artifacts via batch mode on
     # SQLite (a plain `ALTER COLUMN ... TYPE` isn't valid SQLite DDL). A batch
     # recreate is a real risk to everything else riding on that table -- this
     # pins that the two FKs (with their ondelete behavior) and the named
@@ -101,7 +101,7 @@ def test_migration_0010_widens_kind_and_preserves_fks_and_unique(
         "name",
     ]
 
-    # the entire reason 0010 exists: "custom_export" (13 chars) must fit.
+    # the entire reason 0011 exists: "custom_export" (13 chars) must fit.
     with Session(engine) as s:
         s.add(Project(id="p1", name="P1"))
         s.add(

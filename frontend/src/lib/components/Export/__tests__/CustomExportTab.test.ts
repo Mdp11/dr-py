@@ -41,7 +41,10 @@ const EXPORT_ARTIFACT = {
 	updated_at: new Date().toISOString(),
 	updated_by: null,
 	entry_points: null,
-	payload: { schema_version: 1, entries: [{ source: { ref: 'tbl-1' }, name: 'Alpha', format: 'json' }] }
+	payload: {
+		schema_version: 1,
+		entries: [{ source: { ref: 'tbl-1' }, name: 'Alpha', format: 'json' }]
+	}
 };
 
 const TABLE_HEADER = {
@@ -186,15 +189,11 @@ describe('CustomExportTab', () => {
 		await vi.waitFor(() =>
 			expect(document.querySelector('[data-testid="export-entry-0"]')).toBeTruthy()
 		);
-		const name = document.querySelector<HTMLInputElement>(
-			'[data-testid="export-entry-0"] input'
-		)!;
+		const name = document.querySelector<HTMLInputElement>('[data-testid="export-entry-0"] input')!;
 		name.value = 'Renamed';
 		name.dispatchEvent(new Event('input', { bubbles: true }));
 		flushSync();
-		document
-			.querySelector<HTMLButtonElement>('[data-testid="custom-export-save"]')!
-			.click();
+		document.querySelector<HTMLButtonElement>('[data-testid="custom-export-save"]')!.click();
 		flushSync();
 		// `{kind: 'update_artifact'}` alone would pass even if the name input
 		// were never wired to `updateExportEntry` (saveCustomExportDraft stages
@@ -237,21 +236,15 @@ describe('CustomExportTab', () => {
 			expect(document.querySelector('[data-testid="export-entry-0"]')).toBeTruthy()
 		);
 
-		const name = document.querySelector<HTMLInputElement>(
-			'[data-testid="export-entry-0"] input'
-		)!;
-		const runBtn = document.querySelector<HTMLButtonElement>(
-			'[data-testid="custom-export-run"]'
-		)!;
+		const name = document.querySelector<HTMLInputElement>('[data-testid="export-entry-0"] input')!;
+		const runBtn = document.querySelector<HTMLButtonElement>('[data-testid="custom-export-run"]')!;
 
 		name.value = 'Renamed';
 		name.dispatchEvent(new Event('input', { bubbles: true }));
 		flushSync();
 		expect(runBtn.disabled).toBe(true);
 
-		document
-			.querySelector<HTMLButtonElement>('[data-testid="custom-export-save"]')!
-			.click();
+		document.querySelector<HTMLButtonElement>('[data-testid="custom-export-save"]')!.click();
 		flushSync();
 		expect(runBtn.disabled).toBe(false);
 
@@ -286,9 +279,7 @@ describe('CustomExportTab', () => {
 		);
 
 		expect(document.body.textContent).toContain('Checked out by peer@x');
-		const name = document.querySelector<HTMLInputElement>(
-			'[data-testid="export-entry-0"] input'
-		)!;
+		const name = document.querySelector<HTMLInputElement>('[data-testid="export-entry-0"] input')!;
 		expect(name.disabled).toBe(true);
 	});
 
@@ -297,9 +288,7 @@ describe('CustomExportTab', () => {
 		await vi.waitFor(() =>
 			expect(document.querySelector('[data-testid="custom-export-save"]')).toBeTruthy()
 		);
-		const runBtn = document.querySelector<HTMLButtonElement>(
-			'[data-testid="custom-export-run"]'
-		)!;
+		const runBtn = document.querySelector<HTMLButtonElement>('[data-testid="custom-export-run"]')!;
 		expect(runBtn.disabled).toBe(true); // never saved at all: artifactId null
 
 		document.querySelector<HTMLButtonElement>('[data-testid="custom-export-save"]')!.click();
@@ -339,12 +328,8 @@ describe('CustomExportTab', () => {
 
 		// Both clicks land before EITHER fetch resolves — nothing is open yet
 		// to block the second click.
-		document
-			.querySelector<HTMLButtonElement>('[data-testid="export-entry-0-layout"]')!
-			.click();
-		document
-			.querySelector<HTMLButtonElement>('[data-testid="export-entry-1-layout"]')!
-			.click();
+		document.querySelector<HTMLButtonElement>('[data-testid="export-entry-0-layout"]')!.click();
+		document.querySelector<HTMLButtonElement>('[data-testid="export-entry-1-layout"]')!.click();
 
 		// Entry 0's fetch (table A, 1 column) resolves FIRST — this is what
 		// used to open the dialog prematurely on the stale entry.

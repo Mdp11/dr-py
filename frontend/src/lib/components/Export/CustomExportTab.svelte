@@ -246,11 +246,7 @@
 				role="status"
 			>
 				Checked out by {lockHolder} — you will not be able to save.
-				<button
-					type="button"
-					class="underline"
-					onclick={() => void retryCustomExportLock(tabId)}
-				>
+				<button type="button" class="underline" onclick={() => void retryCustomExportLock(tabId)}>
 					Retry
 				</button>
 			</div>
@@ -285,8 +281,7 @@
 							placeholder={tableName(entry.source.ref)}
 							value={entry.name}
 							disabled={disabledEntry}
-							oninput={(e) =>
-								updateExportEntry(tabId, i, { name: e.currentTarget.value })}
+							oninput={(e) => updateExportEntry(tabId, i, { name: e.currentTarget.value })}
 						/>
 						<span class="shrink-0 truncate text-muted-foreground" title={entry.source.ref}>
 							{tableName(entry.source.ref)}

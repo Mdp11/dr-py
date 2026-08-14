@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { markEditorLockDenied } from '../artifact-lock-denied';
-import { getCustomExportLockHolder, resetCustomExportEditors } from '../custom-export-editor.svelte';
+import {
+	getCustomExportLockHolder,
+	resetCustomExportEditors
+} from '../custom-export-editor.svelte';
 import { getNavLockHolder, resetNavigationEditors } from '../navigation-editor.svelte';
 import { getTableLockHolder, resetTableEditors } from '../table-editor.svelte';
 import { getSnippetLockHolder, resetSnippetEditors } from '../snippet-editor.svelte';
