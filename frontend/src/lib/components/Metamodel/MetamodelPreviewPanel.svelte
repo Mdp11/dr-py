@@ -41,7 +41,9 @@
 				{title} ({issues.length})
 			</h3>
 			<ul class="flex max-h-48 flex-col gap-1 overflow-auto">
-				{#each issues.slice(0, CAP) as it (it.message + it.target_ids.join(','))}
+				<!-- Keyed by index: two issues can be byte-identical (same message, same
+				     targets), and a duplicate `each` key throws in production too. -->
+				{#each issues.slice(0, CAP) as it, i (`${i}:${it.message}`)}
 					<li
 						class="flex flex-col gap-1 rounded border border-border bg-muted/40 px-2 py-1.5 text-xs"
 					>
@@ -55,7 +57,7 @@
 						</div>
 						{#if it.target_ids.length > 0}
 							<div class="flex flex-wrap gap-1 pl-5">
-								{#each it.target_ids as tid (tid)}
+								{#each it.target_ids as tid, ti (`${ti}:${tid}`)}
 									<span
 										class="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground/80"
 										title={tid}

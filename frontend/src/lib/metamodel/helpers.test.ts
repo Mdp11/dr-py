@@ -12,7 +12,9 @@ import {
 	isSubtype,
 	parseMultiplicity,
 	propertyStepTargetTypes,
-	relationshipAncestors
+	relationshipAncestors,
+	datatypeNamespace,
+	typeNameCollision
 } from './helpers';
 
 const mm: Metamodel = {
@@ -413,5 +415,42 @@ describe('frontierTypesAt', () => {
 
 	it('clamps index to steps.length when index exceeds it', () => {
 		expect(frontierTypesAt(smartCityMm, node, 5)).toEqual([]);
+	});
+});
+
+describe('type name spaces', () => {
+	// The metamodel has exactly TWO name spaces, and the backend says which:
+	// `core/metamodel/check.py:73-78` errors on element∩enum, element∩PRIMITIVES
+	// and enum∩PRIMITIVES — all three are things a `datatype` can name — and has
+	// NO element∩relationship check at all.
+	it('treats element types, enums and primitives as one space', () => {
+		expect(typeNameCollision(mm, 'element', 'Status')).toContain('enum');
+		expect(typeNameCollision(mm, 'enum', 'Requirement')).toContain('element type');
+		expect(typeNameCollision(mm, 'element', 'string')).toContain('built-in');
+		expect(typeNameCollision(mm, 'enum', 'date')).toContain('built-in');
+	});
+
+	it('gives relationship types a space of their own', () => {
+		// An element type and a relationship type MAY share a name: nothing in
+		// check_metamodel forbids it, and `TypeRef` in yaml-edit exists precisely
+		// because the two sections are addressed separately.
+		expect(typeNameCollision(mm, 'element', 'Contains')).toBeNull();
+		expect(typeNameCollision(mm, 'relationship', 'Requirement')).toBeNull();
+		expect(typeNameCollision(mm, 'relationship', 'Contains')).toContain('relationship type');
+		// A relationship type is not a datatype, so the primitives do not bind it.
+		expect(typeNameCollision(mm, 'relationship', 'string')).toBeNull();
+	});
+
+	it('reports a free name as free', () => {
+		expect(typeNameCollision(mm, 'element', 'Zone')).toBeNull();
+		expect(typeNameCollision(mm, 'enum', 'Phase')).toBeNull();
+	});
+
+	it('collects the whole datatype space for name generation', () => {
+		const space = datatypeNamespace(mm);
+		expect(space.has('Requirement')).toBe(true);
+		expect(space.has('Status')).toBe(true);
+		expect(space.has('string')).toBe(true);
+		expect(space.has('Contains')).toBe(false);
 	});
 });

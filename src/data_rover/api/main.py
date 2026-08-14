@@ -29,6 +29,7 @@ from .routes import (
     health,
     locks,
     metamodel,
+    metamodel_layout,
     metamodel_swap,
     model,
     ops,
@@ -304,6 +305,7 @@ def create_app() -> FastAPI:
     app.include_router(projects.router, prefix="/api/v1", tags=["projects"])
     proj = "/api/v1/projects/{project_id}"
     app.include_router(metamodel.router, prefix=proj, tags=["metamodel"])
+    app.include_router(metamodel_layout.router, prefix=proj, tags=["metamodel"])
     app.include_router(metamodel_swap.router, prefix=proj, tags=["metamodel"])
     app.include_router(model.router, prefix=proj, tags=["model"])
     app.include_router(ops.router, prefix=proj, tags=["ops"])

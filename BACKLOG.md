@@ -134,10 +134,16 @@ Users can add views; a control lists available views and selects one. This was p
 supersedes that. Schema impact: `ViewRow` is 1:1 with `Project` today, and `view_rev` is
 per-project, so this is a data-model change, not just UI.
 
-### P-9 · Metamodel visualization and editing from the frontend · `open` · **supersedes a prior decision**
-Editing partly exists (the live YAML metamodel tab). The **UI-assisted/form-based**
-half was explicitly deferred during Phase 5 brainstorming — this note supersedes that
-decision. **Visualization** is entirely new and probably the bigger piece.
+### P-9 · Metamodel visualization and editing from the frontend · `done` (2026-08-13, feat/metamodel-diagram-editor)
+Shipped as a second surface on the existing metamodel tab: an editable UML class
+diagram (xyflow canvas + form panel) over the same YAML draft, with comment-preserving
+writeback (`frontend/src/lib/metamodel/yaml-edit.ts`), elkjs auto-arrange, and shared
+node positions behind `GET/PUT /metamodel/layout` (`metamodel_layouts`, Alembic `0010`).
+Layout is presentation — no `mm` lease, no commit journal entry, last-write-wins, and
+gated at `role != viewer` rather than owner. Spec:
+`docs/superpowers/specs/2026-08-13-metamodel-diagram-editor-design.md`; architecture
+notes in `frontend/README.md` ("Live metamodel editing" → "The diagram surface") and
+`CLAUDE.md`. **e2e coverage is still missing — see T-7.**
 
 ### P-10 · Top bar restructure · `open`
 Main sections move to the top bar, and all editing moves inside tabs — so while creating
@@ -438,6 +444,30 @@ list alone gives you *what changed*, not *what it changed from* — so before/af
 still need the journal. Alternative designs welcome; this one is just the cheapest.
 Folds naturally into R-2.
 
+### K-7 · Duplicate type names are silently accepted by the whole stack · `open` · *2026-08-13*
+`core/metamodel/check.py`'s `check_metamodel` builds `element_names = {e.name for e in
+mm.elements}` — a **set** — and never compares its cardinality to `len(mm.elements)`. So a
+metamodel defining two element types with the same name produces **zero** validation
+errors. `core/metamodel/schema.py` then builds its lookup caches **first-wins**
+(`types_by_name.setdefault(et.name, et)`, `rel_types_by_name.setdefault(...)`, ~:250-255),
+and the frontend's `metamodel/yaml-edit.ts` `typeMap` resolves first-wins too (it returns
+the first `name`-matching map in the section).
+
+Consequence: the duplicate is accepted everywhere, and every edit addressed **by name**
+resolves to the FIRST definition while the diagram canvas — which keys nodes into xyflow's
+`nodeLookup`, last-wins — renders the SECOND. The second type silently absorbs nothing and
+the first silently absorbs everything.
+
+Ruled a pre-existing engine gap and out of scope during the metamodel diagram editor work
+(`feat/metamodel-diagram-editor`), on condition it be filed here. The diagram's forms now
+prevent it at the form boundary (`metamodel/helpers.ts` `typeNameCollision`), so it is only
+reachable by hand-editing YAML — but that is **one toggle away in the same tab**, not an
+external-file scenario, which is why it is worth closing properly.
+
+Fix is roughly four lines: a cardinality check in `check_metamodel` over `mm.elements` and
+`mm.relationships`, reporting each repeated name. Cheap; the only question is whether any
+existing fixture/example metamodel would start failing.
+
 ---
 
 ## 7. Cleanups & dead code
@@ -495,7 +525,14 @@ it. Judged outside the contract's scope when raised.
 
 ### T-7 · No e2e coverage for recent features · `open`
 Live metamodel editing and the artifacts import/export flows have no e2e tests. Deferred
-every time they've come up.
+every time they've come up. **The metamodel diagram surface (P-9) joins them**: it is
+unit-covered (yaml-edit round-trips, `diagram-build`, `arrange`, the state module's
+rename deferral, the canvas and form components), but nothing exercises the gestures
+end-to-end — drag a node → reload → position persisted; draw a connection → popover →
+relationship in the YAML; rename in the form → cascade with comments intact; rebind →
+positions survive under the new names. Those four are exactly the paths where the
+frontend and the layout route have to agree, and they are currently verified only by a
+manual browser pass.
 
 ---
 

@@ -227,6 +227,22 @@ export {
 	type MetamodelEditorView
 } from './metamodel-editor.svelte';
 export {
+	applyDiagramEdit,
+	closeMetamodelDiagram,
+	getMetamodelDiagramView,
+	initMetamodelDiagram,
+	LAYOUT_SAVE_DEBOUNCE_MS,
+	moveNode,
+	onMetamodelRebound,
+	runAutoArrange,
+	selectDiagramNode,
+	setAllCollapsed,
+	setMetamodelView,
+	toggleNodeCollapsed,
+	undoDiagramEdit,
+	type MetamodelDiagramView
+} from './metamodel-diagram.svelte';
+export {
 	acquireLocks,
 	acquireArtifactLease,
 	artifactDeleteLock,

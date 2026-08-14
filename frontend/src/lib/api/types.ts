@@ -382,6 +382,15 @@ export const MetamodelLintSchema = z.object({
 });
 export type MetamodelLint = z.infer<typeof MetamodelLintSchema>;
 
+// Shared canvas positions for the diagram editor (spec §5): presentation-only,
+// last-write-wins, no lease — a missing row from GET /metamodel/layout comes
+// back as `{}` rather than 404, so `positions` defaults empty here too.
+export const LayoutPositionSchema = z.object({ x: z.number(), y: z.number() });
+export const MetamodelLayoutSchema = z.object({
+	positions: z.record(z.string(), LayoutPositionSchema).default({})
+});
+export type MetamodelLayout = z.infer<typeof MetamodelLayoutSchema>;
+
 export const PreviewResponseSchema = z.object({
 	conformance_error_count: z.number().int(),
 	structural_blockers: z.array(IssueOutSchema).default([]),

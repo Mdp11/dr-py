@@ -5,11 +5,13 @@ import {
 	RebindSchema,
 	RawMetamodelSchema,
 	MetamodelLintSchema,
+	MetamodelLayoutSchema,
 	type Metamodel,
 	type MetamodelDiff,
 	type Rebind,
 	type RawMetamodel,
-	type MetamodelLint
+	type MetamodelLint,
+	type MetamodelLayout
 } from './types';
 
 /**
@@ -85,4 +87,15 @@ export function lintMetamodel(body: string, cfg?: ClientConfig): Promise<Metamod
 		headers: { 'Content-Type': 'application/x-yaml' }
 	};
 	return apiFetch('/metamodel/lint', init, cfg);
+}
+
+/** Shared canvas positions (presentation-only; last-write-wins, no lease). */
+export function getMetamodelLayout(cfg?: ClientConfig): Promise<MetamodelLayout> {
+	return apiFetch('/metamodel/layout', { method: 'GET', schema: MetamodelLayoutSchema }, cfg);
+}
+
+/** PUT replaces the whole positions map; the backend answers 204 with no
+ * body, so `apiFetch` returns `undefined` here without attempting a parse. */
+export function putMetamodelLayout(body: MetamodelLayout, cfg?: ClientConfig): Promise<void> {
+	return apiFetch('/metamodel/layout', { method: 'PUT', body }, cfg);
 }

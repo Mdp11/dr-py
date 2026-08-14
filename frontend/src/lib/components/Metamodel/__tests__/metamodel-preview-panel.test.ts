@@ -71,4 +71,26 @@ describe('MetamodelPreviewPanel', () => {
 			unmount(c);
 		}
 	});
+
+	it('renders two byte-identical issues without an each_key_duplicate crash', () => {
+		const dupe = {
+			severity: 'error' as const,
+			message: 'missing required label',
+			target_ids: ['el-1', 'el-1'],
+			category: 'conformance' as const,
+			origin: 'on_server' as const
+		};
+		const c = mount(MetamodelPreviewPanel, {
+			target: document.body,
+			props: { diff: makeDiff({ now_failing: [dupe, { ...dupe }] }) }
+		});
+		flushSync();
+		try {
+			const text = document.body.textContent ?? '';
+			expect(text).toContain('Now failing (2)');
+			expect(text.match(/missing required label/g)).toHaveLength(2);
+		} finally {
+			unmount(c);
+		}
+	});
 });

@@ -957,6 +957,178 @@ The module's `_gen` guard covers only its OWN async (load / lint / preview /
 rebind) against a closed tab; the lease module keeps its own generation for
 lease calls, and neither wraps the other — one generation guard per concern.
 
+#### The diagram surface
+
+The same tab has a second surface: an editable UML class diagram over the same
+draft, picked by a YAML/Diagram toggle in the tab's toolbar (persisted per
+project — the choice is personal, like collapse state). The whole lifecycle
+above is untouched by it. `state/metamodel-diagram.svelte.ts` **owns no draft
+state**: every canvas gesture becomes `parseDraft → applyEdit → serializeDraft`
+over the CURRENT `getMetamodelEditor().buffer`, and the resulting text goes back
+in through `editMetamodelBuffer` — the same seam a keystroke uses, so lease
+acquisition, debounced lint, the localStorage draft, `dirty`, preview and rebind
+all keep working with no diagram-specific branch anywhere in the editor module.
+It is composed through that module's existing exports only; it was not
+restructured to accommodate this.
+
+- **`metamodel/yaml-edit.ts`** — the comment-preserving edit core, built on the
+  `yaml` package's Document API rather than round-tripping a plain object
+  (which would drop every comment the `GET /metamodel/raw` `stored` source
+  exists to preserve). A 22-member `YamlEditCommand` union covers every gesture;
+  `applyEdit` mutates surgically or throws without touching the doc, so a
+  rejected command leaves the draft as it was. Its `STRINGIFY_OPTS` pair —
+  `lineWidth: 0` and `flowCollectionPadding: false` — is **load-bearing**:
+  without the padding flag the emitter rewrites `{name: x}` as `{ name: x }` on
+  serialize, and a no-op round-trip of `examples/smart-city.metamodel.yaml`
+  rewrites 126 of its 455 lines. A test round-trips that real file
+  byte-for-byte; keep it.
+  Booleans are dropped at their schema default and `mappings[0]` is mirrored back
+  into the `source`/`target` shorthand (`syncShorthand`), so an edited file still
+  reads the way it was authored.
+- **`metamodel/diagram-build.ts`** — pure metamodel → `DiagramNodeSpec[]` /
+  `DiagramEdgeSpec[]`. Endpoints come from `rel.mappings` **only**, never the
+  `source`/`target` shorthand, which is a serialization mirror that can go stale.
+  A relationship that carries properties, is abstract, extends, or is extended
+  gets its own `rel:` box with two half-edges through it (UML's association
+  class); a plain one is a single boxless edge. `nodeSize` is the ONE place a
+  box's footprint is decided — the canvas styles from it and elk lays out
+  against it, so drawn width can never disagree with reserved space.
+- **`metamodel/arrange.ts`** — `autoArrange` (elkjs `layered`, bundled build so
+  there is no worker file to serve) for the Auto-arrange button and first open,
+  and `placeUnpositioned`, an incremental heuristic that places a node next to
+  its nearest positioned neighbour and **never moves an already-positioned
+  one** — a peer's new type must not re-layout the canvas under you.
+- **Layout is presentation, not content.** Positions live in a shared
+  per-project blob behind `GET/PUT /api/v1/projects/{id}/metamodel/layout`
+  (table `metamodel_layouts`, Alembic `0010`): no `mm` lease, no commit journal
+  entry, last-write-wins, PUT debounced 800 ms and flushed on close. So the
+  canvas has **two independent gates**: draft edits follow the editor module's
+  owner-only `readOnly`, while dragging is gated on `getRole() !== 'viewer'` —
+  an editor may rearrange the picture without being able to edit the metamodel.
+  A failed PUT is swallowed; a lost drag is re-dragged, and a presentation
+  detail must never surface as an error over a metamodel edit.
+- **The rename deferral** is the subtle part. Node ids (`el:`/`rel:`/`enum:` +
+  type name) double as the layout blob's position keys, and that blob is SHARED
+  with peers who still render the baseline names. A rename that exists only in
+  this client's draft therefore moves the key **locally** while
+  `serverPositions()` inverts it back through `_pendingRenames` on every PUT, so
+  the wire always speaks the baseline key space. The map belongs to the draft,
+  persists with it (`ui.metamodel.renames.<projectId>`) and **self-validates on
+  restore** — an entry survives only while the draft still defines the local
+  name it describes — which is what stands in for the hooks this module does not
+  have (a discard in another tab is not observable from here). `onMetamodelRebound()`,
+  called from the tab once a rebind has actually landed, clears the map, drops the
+  pre-rebind undo stack and PUTs the local keys as-is.
+- **Undo** is a bounded (50) stack of buffer snapshots paired with a key
+  snapshot (positions + deferral map), because a rename moves both and undoing
+  one without the other leaves the map describing a rename the buffer no longer
+  contains. Ctrl/Cmd-Z on the canvas pops it; the restored text goes through
+  `editMetamodelBuffer` like any other edit.
+- **Error surface.** `MetamodelDiagramView.errorNodeIds` is **empty in every
+  reachable state** — the server attaches a `line` only to a YAML _syntax_
+  error, which also fails the local parse, which means nothing is drawn to badge
+  — so the toolbar renders `unattributedErrorCount` as a clickable "N issues"
+  badge that jumps to the YAML view, and a non-parsing buffer replaces the whole
+  canvas with a placeholder plus a jump button (never a stale last-good diagram).
+  The set is still summed into the count so that if attribution ever starts
+  producing hits, a badged node cannot also vanish from the total.
+- **Forms and connections.** `components/Metamodel/forms/MetamodelFormPanel.svelte`
+  docks right of the canvas and owns everything a box cannot show (properties,
+  keys, multiplicities, mappings, enum literals), falling back to an overview
+  that surfaces the two things the canvas cannot draw: enums, and relationship
+  types with no mappings — which have no endpoints to anchor an edge and would
+  otherwise be unreachable. A dragged connection is refused by `onbeforeconnect`
+  (every edge here is DERIVED from the YAML, so a flow-added edge would be a lie
+  the user cannot undo) and answered by `ConnectionPopover` instead.
+- **Name guards.** The forms cannot create a duplicate type or property name.
+  There are exactly **two** namespaces, not three (`metamodel/helpers.ts`,
+  mirroring `core/metamodel/check.py`): element types, enums and the five
+  primitives share one — all are things a `datatype` can name — and relationship
+  types have their own. The guard matters because a duplicate does not error
+  anywhere: `typeMap` and the backend's caches both resolve first-wins, so a
+  second `Zone` would silently absorb every later edit to the first.
+
+#### Manual smoke checklist — the diagram surface
+
+The four gestures where the client and the layout route have to agree (drag →
+reload → persisted; connection → popover → YAML; rename → cascade with comments
+intact; rebind → positions survive under the new names) have **no e2e coverage**
+— see `BACKLOG.md` T-7. Until they do, this is the pass that stands in for it.
+Run it before shipping a change to `state/metamodel-diagram.svelte.ts`,
+`metamodel/yaml-edit.ts`, or `routes/metamodel_layout.py`. Steps 2, 6, 7 and 13
+are the load-bearing ones.
+
+**Setup**
+
+```sh
+# terminal 1 — needs a dev DB; DATA_ROVER_DEV_SEED with a sqlite DSN works
+pixi run backend-start
+# terminal 2
+pixi run frontend-start
+```
+
+Open http://localhost:5173, log in, and open a project — import `smart-city` via
+the New Project wizard if you have none. Then **TopBar → Edit Metamodel**, and
+click the **Diagram** toggle in the tab's toolbar.
+
+1. **Rendering.** Boxes appear for every element type and enum, laid out (not
+   stacked at the origin). Generalization edges end in a hollow triangle at the
+   supertype; `Contains` draws a filled diamond at the owner end, and both
+   halves of that relationship are the same colour. Multiplicities read at the
+   ends. Association-class relationships (ones with properties, or abstract, or
+   in an `extends` chain) get their own box with two half-edges through it.
+2. **Drag persists, and is shared.** Drag two boxes somewhere memorable, wait a
+   second (the PUT is debounced 800 ms), reload the page, reopen the tab →
+   they are where you left them. In a second browser profile signed in as
+   another member of the same project, the same positions appear.
+3. **Auto-arrange.** Click **Auto-arrange** → the graph re-lays out top-down.
+   Press **Ctrl/Cmd-Z** with the canvas focused → the previous positions come
+   back.
+4. **Collapse / find / fit.** **Collapse all** shrinks every box to its header;
+   **Expand all** restores. Type a type name into **Find type…** and press Enter
+   → the canvas pans to it and selects it. **Fit view** frames everything.
+5. **Create a type.** Click **+ Element type** → a `NewType` box appears and the
+   right-hand form panel opens on it. Rename it in the form to something free →
+   the box and the YAML both follow. Try renaming it to `Zone` (or to `string`)
+   → the form refuses with a message naming the collision.
+6. **Draw a connection.** Drag from one element box's handle to another → a
+   popover asks what you meant. Pick **new relationship type**, name it, choose
+   containment or not → a new edge appears and the YAML gains the relationship
+   with its `mappings`. Cancel the popover on a second drag → **no edge is left
+   behind**.
+7. **Rename cascades with comments intact.** Select `Zone`, rename it to
+   `District` in the form. Switch to the **YAML** view: every `extends`,
+   `mapping`, `datatype` and key reference to `Zone` has moved to `District`,
+   and **the file's comments and formatting are untouched** — only the changed
+   lines differ. Switch back to Diagram: the box kept its position.
+8. **Property editing.** On any element type, add a property (name, datatype,
+   multiplicity), edit one, remove one → the box's row list and the YAML both
+   track. Adding a property whose name already exists on that type is refused.
+   Build a key with the key builder → it appears in the YAML.
+9. **Delete consequences.** Delete a type that others reference → the
+   confirmation dialog lists what will be updated and what will dangle. Confirm,
+   then check the YAML matches what it promised.
+10. **Broken YAML fallback.** Switch to YAML, break the syntax by hand (delete a
+    colon). Switch to Diagram → you get the "draft has syntax errors" placeholder
+    with an **Open the YAML view** button, **not** a stale diagram, and the
+    toolbar is gone. Fix the YAML → the diagram returns.
+11. **Issue badge.** With a _semantically_ invalid but parseable draft (e.g. a
+    `datatype` naming nothing), the toolbar shows an **"N issues"** badge on the
+    right. Click it → it jumps to the YAML view.
+12. **Preview + Rebind still work end-to-end.** With a real change staged, click
+    **Preview changes** → the structural diff and now-failing/now-passing lists
+    render. Then **Rebind** → it succeeds and the app refreshes.
+13. **Positions survive a rebind under new names.** This is the rename-deferral
+    payoff. Rename a type in the diagram, drag its box somewhere distinctive,
+    **Preview**, **Rebind**, then reload → the box is still where you put it,
+    now keyed by the new name. Check a peer's session too: they should see the
+    same position, not a box jumped to the origin.
+14. **Roles.** As an **editor** (not owner): the canvas is browsable, dragging
+    still works and persists, but the create buttons and form inputs are gone
+    and a note says metamodel edits are owner-only. As a **viewer**: dragging is
+    disabled too, and the note says layout changes are not saved. With a peer
+    holding the `mm` lease: the surface goes read-only and names the holder.
+
 ### Where to find things
 
 ```
@@ -1073,7 +1245,12 @@ src/
                         on-demand preview and rebind (see "Live metamodel
                         editing" above); metamodel-lease.svelte.ts — the `mm`
                         lease lifecycle it composes, surface-agnostic and
-                        generation-guarded on its own
+                        generation-guarded on its own;
+                        metamodel-diagram.svelte.ts — the diagram surface's
+                        state (view toggle, selection, collapse, shared
+                        positions + debounced PUT, bounded undo, the rename
+                        key-deferral); owns no draft state, edits through
+                        editMetamodelBuffer
     editor/completion-source.ts  dr./Element/Relationship/stereotype-name CM6 completions +
                         hover logic (vocabFromMetamodel, computeCompletions,
                         resolveDocAt); pure, CM-agnostic, unit-tested
@@ -1111,7 +1288,12 @@ src/
                         (groupFacade, formatSeconds/formatBytes, type +
                         relationship summaries); mirrors console-view.ts
     metamodel/          Pure helpers (effective properties, multiplicity,
-                        containment, subtype) mirroring the Python schema
+                        containment, subtype) mirroring the Python schema;
+                        connection-rules.ts (creatable relationship types from
+                        a source); the diagram editor's three pure modules —
+                        yaml-edit.ts (comment-preserving YamlEditCommand core),
+                        diagram-build.ts (metamodel → UML nodes/edges),
+                        arrange.ts (elkjs layout + incremental placement)
     components/         TopBar, Sidebar, Workspace, Inspector, StatusBar,
                         DiffDrawer, HistoryDrawer, SettingsDialog,
                         CommandPalette, AppHeader, dialogs, and ui/ shadcn
@@ -1125,6 +1307,11 @@ src/
                         externalReplace annotation so a programmatic doc
                         swap never echoes back as a keystroke) and the
                         issue + structural preview panel;
+                        Metamodel/MetamodelDiagram.svelte — the canvas
+                        (xyflow) plus Metamodel/diagram/ (UML node + edge
+                        components, ConnectionPopover) and Metamodel/forms/
+                        (element/relationship/enum forms, PropertyListEditor,
+                        KeyBuilder, DeleteTypeDialog, shared field-classes);
                         auth/LoginForm, projects/{ProjectCard,NewProjectWizard},
                         admin/{UsersTab,ProjectMembersTab}
     keyboard.ts         Pure shortcut matcher
