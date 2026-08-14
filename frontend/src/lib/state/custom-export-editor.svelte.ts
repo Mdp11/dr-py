@@ -70,6 +70,22 @@ export function getCustomExportLockHolder(tabId: string): string | undefined {
 	return _lockDenied.get(tabId);
 }
 
+/** Banner "Retry": re-attempt the check-out the tab was refused. A draft that
+ * has no server-side row yet (unsaved, or a staged create under a temp id) has
+ * nothing to lock, so it is silently skipped. The `.catch` is load-bearing:
+ * `ensureCheckout` RETHROWS anything that is not a lock conflict and the banner
+ * calls this as `void retryCustomExportLock(tabId)`, so a 500 would otherwise
+ * become an unhandled rejection. A failed retry just leaves the banner up.
+ * Mirrors `retrySnippetLock`/`retryTableLock` exactly. */
+export async function retryCustomExportLock(tabId: string): Promise<void> {
+	const draft = _drafts.get(tabId);
+	if (!draft?.artifactId || isTempId(draft.artifactId)) return;
+	const res = await acquireArtifactLease(draft.artifactId, 'edit').catch(() => null);
+	if (res === null) return;
+	if (res.ok) _lockDenied.delete(tabId);
+	else if (res.reason === 'conflict') _lockDenied.set(tabId, lockHolderLabel(res));
+}
+
 /** Mark this tab lock-denied from OUTSIDE the editor — the only such writer is
  * the post-commit lease sweep (`reacquireOpenArtifactLeases`, dispatched by
  * `artifact-lock-denied.ts`). See `setSnippetLockDenied`'s docstring for the

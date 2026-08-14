@@ -2,6 +2,7 @@
 	import { FileUp, X } from '@lucide/svelte';
 	import * as Tabs from '$lib/components/ui/tabs';
 	import {
+		closeCustomExportDraft,
 		closeDraft,
 		closeMetamodelEditor,
 		closeSnippetDraft,
@@ -21,6 +22,7 @@
 	import TableView from './Table/TableView.svelte';
 	import SnippetTab from './Snippet/SnippetTab.svelte';
 	import MetamodelTab from './Metamodel/MetamodelTab.svelte';
+	import CustomExportTab from './Export/CustomExportTab.svelte';
 
 	const activeTab = $derived(getActiveTab());
 	const dynamicTabs = $derived(getDynamicTabs());
@@ -49,6 +51,13 @@
 						class="rounded p-0.5 opacity-50 transition-[color,background-color,border-color,opacity] hover:bg-muted hover:opacity-100"
 						onclick={(e) => {
 							e.stopPropagation();
+							// Explicit per-kind dispatch (R14, carried from Task 11's
+							// review): a bare `else` here used to catch `custom_export`
+							// too and run `closeDraft` — the NAVIGATION closer, which
+							// releases a `nav:` lease that was never acquired and leaves
+							// the export's own draft (and its `art:` lease) behind. One
+							// arm per DynamicTab kind, so an unhandled kind is a silent
+							// no-op rather than a wrong-editor close.
 							if (tab.kind === 'table') closeTableDraft(tab.id);
 							else if (tab.kind === 'snippet') closeSnippetDraft(tab.id);
 							// Also run by MetamodelTab's own unmount teardown (closing
@@ -56,7 +65,8 @@
 							// second sees no lease held and an already-idle phase — and
 							// keeps this close path symmetric with the other kinds.
 							else if (tab.kind === 'metamodel') closeMetamodelEditor();
-							else closeDraft(tab.id);
+							else if (tab.kind === 'custom_export') closeCustomExportDraft(tab.id);
+							else if (tab.kind === 'navigation') closeDraft(tab.id);
 							closeTab(tab.id);
 						}}
 					>
@@ -98,7 +108,9 @@
 					<SnippetTab tabId={tab.id} />
 				{:else if tab.kind === 'metamodel'}
 					<MetamodelTab />
-				{:else}
+				{:else if tab.kind === 'custom_export'}
+					<CustomExportTab tabId={tab.id} />
+				{:else if tab.kind === 'navigation'}
 					<NavigationBuilder tabId={tab.id} />
 				{/if}
 			</Tabs.Content>

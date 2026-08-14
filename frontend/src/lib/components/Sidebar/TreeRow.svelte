@@ -11,6 +11,7 @@
 	} from '$lib/state';
 	import { getCurrentUserId } from '$lib/api/client';
 	import { confirm } from '$lib/state/confirm.svelte';
+	import { isRegisteredKind } from '$lib/artifacts/kinds';
 	import {
 		AlertCircle,
 		AlertTriangle,
@@ -19,6 +20,7 @@
 		FileCode,
 		Folder as FolderIcon,
 		FolderOpen,
+		FolderOutput,
 		Lock,
 		MoreHorizontal,
 		Route,
@@ -228,11 +230,20 @@
 
 	function onOpenArtifact(): void {
 		if (!artifactHeader) return;
+		// Explicit per-kind dispatch (R14, carried from Task 11's review): a
+		// bare `else` here used to catch `custom_export` too and open it as a
+		// NavigationBuilder — wrong editor, wrong draft store, and on close it
+		// would never release the export's `art:` lease (NavigationBuilder
+		// releases a NAVIGATION lease, not this artifact's). One arm per kind,
+		// so a future kind missing from this switch is a silent bug instead of
+		// a loud one — same reasoning as `ArtifactKind`-typed Records elsewhere.
 		if (artifactHeader.kind === 'table') {
 			openArtifactTab('table', { artifactId, title: artifactHeader.name });
 		} else if (artifactHeader.kind === 'code_snippet') {
 			openArtifactTab('snippet', { artifactId, title: artifactHeader.name });
-		} else {
+		} else if (artifactHeader.kind === 'custom_export') {
+			openArtifactTab('custom_export', { artifactId, title: artifactHeader.name });
+		} else if (artifactHeader.kind === 'navigation') {
 			openNavigationTab({ artifactId, title: artifactHeader.name });
 		}
 	}
@@ -391,14 +402,14 @@
 					<Table class="h-3 w-3" />
 				{:else if artifactHeader.kind === 'code_snippet'}
 					<FileCode class="h-3 w-3" />
+				{:else if artifactHeader.kind === 'custom_export'}
+					<FolderOutput class="h-3 w-3" />
 				{:else}
 					<Route class="h-3 w-3" />
 				{/if}
 			</span>
 			<span class="flex-1 truncate" title={artifactHeader.name}>
-				{artifactHeader.name}{(artifactHeader.kind === 'table' ||
-					artifactHeader.kind === 'navigation' ||
-					artifactHeader.kind === 'code_snippet') &&
+				{artifactHeader.name}{isRegisteredKind(artifactHeader.kind) &&
 				isArtifactDirty(artifactHeader.kind, artifactId)
 					? ' *'
 					: ''}

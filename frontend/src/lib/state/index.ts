@@ -383,6 +383,7 @@ export {
 	moveExportEntryInList,
 	removeExportEntry,
 	resetCustomExportEditors,
+	retryCustomExportLock,
 	saveCustomExportDraft,
 	setCustomExportLockDenied,
 	setCustomExportName,

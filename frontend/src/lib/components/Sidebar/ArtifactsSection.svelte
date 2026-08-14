@@ -54,13 +54,16 @@
 			singular: 'snippet',
 			icon: KIND_ICONS.code_snippet,
 			open: (o) => openArtifactTab('snippet', o)
+		},
+		{
+			kind: 'custom_export',
+			title: 'Custom exports',
+			singular: 'custom export',
+			icon: KIND_ICONS.custom_export,
+			open: (o) => openArtifactTab('custom_export', o)
 		}
 	];
 
-	// `custom_export` has no entry in SECTIONS yet (that section's browse/open/
-	// rename/delete chrome lands with the custom-export editor components), but
-	// this record must stay TOTAL over ArtifactKind so a future section slots in
-	// without a silent gap here.
 	let collapsed = $state<Record<ArtifactKind, boolean>>({
 		navigation: false,
 		table: false,
