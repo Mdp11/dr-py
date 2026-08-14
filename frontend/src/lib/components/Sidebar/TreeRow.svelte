@@ -11,20 +11,17 @@
 	} from '$lib/state';
 	import { getCurrentUserId } from '$lib/api/client';
 	import { confirm } from '$lib/state/confirm.svelte';
-	import { isRegisteredKind } from '$lib/artifacts/kinds';
+	import { KIND_ICONS, isRegisteredKind } from '$lib/artifacts/kinds';
 	import {
 		AlertCircle,
 		AlertTriangle,
 		ChevronDown,
 		ChevronRight,
-		FileCode,
 		Folder as FolderIcon,
 		FolderOpen,
-		FolderOutput,
 		Lock,
 		MoreHorizontal,
 		Route,
-		Table,
 		X
 	} from '@lucide/svelte';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
@@ -382,6 +379,7 @@
 	</div>
 {:else if isArtifact}
 	{#if artifactHeader}
+		{@const Icon = isRegisteredKind(artifactHeader.kind) ? KIND_ICONS[artifactHeader.kind] : Route}
 		<div
 			class="group flex h-6 select-none items-center gap-1 rounded px-1 py-0.5 text-foreground/90"
 			class:ring-1={isFocused}
@@ -398,15 +396,7 @@
 				>·</span
 			>
 			<span class="flex h-4 w-4 shrink-0 items-center justify-center text-info">
-				{#if artifactHeader.kind === 'table'}
-					<Table class="h-3 w-3" />
-				{:else if artifactHeader.kind === 'code_snippet'}
-					<FileCode class="h-3 w-3" />
-				{:else if artifactHeader.kind === 'custom_export'}
-					<FolderOutput class="h-3 w-3" />
-				{:else}
-					<Route class="h-3 w-3" />
-				{/if}
+				<Icon class="h-3 w-3" />
 			</span>
 			<span class="flex-1 truncate" title={artifactHeader.name}>
 				{artifactHeader.name}{isRegisteredKind(artifactHeader.kind) &&

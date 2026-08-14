@@ -91,17 +91,39 @@
 	let editDefinition = $state<TableDefinition | null>(null);
 	let editLayoutOpen = $state(false);
 	let editError = $state<string | null>(null);
+	// Monotonic guard against overlapping "Edit layout" clicks — mirrors
+	// ExportSettingsPanel's preview-fetch token (`token`/`mine`, :179-199
+	// there). Two rows' "Edit layout" buttons clicked before either fetch
+	// resolves race two `openEditLayout` calls; without this guard, whichever
+	// resolves LAST wins `editDefinition`/`editEntryIndex`, but if
+	// `editLayoutOpen` was already flipped true by the FIRST resolution,
+	// Svelte only updates the already-mounted `EntryLayoutDialog`'s PROPS —
+	// it does not remount it — so the dialog's `effective`/`format` `$state`
+	// (captured once, BY DESIGN — see that component's own doc) stays frozen
+	// on the first entry while the title/entry prop shows the second. Save
+	// then writes the FIRST entry's edited layout into the SECOND entry's
+	// slot: a persisted cross-wire, not a display glitch (see
+	// `saveEditLayout` below). Discarding every resolution but the most
+	// recently REQUESTED one (not the most recently ARRIVED one) makes the
+	// dialog track the user's LAST click regardless of network ordering, and
+	// — since a stale resolution never touches `editLayoutOpen` at all — a
+	// genuine mount only ever happens once, for the request that was still
+	// current when it resolved.
+	let editRequest = 0;
 
 	async function openEditLayout(i: number): Promise<void> {
 		const entry = draft?.entries[i];
 		if (!entry) return;
 		editError = null;
+		const mine = ++editRequest;
 		try {
 			const art = await artifactsApi.getArtifact(entry.source.ref);
+			if (mine !== editRequest) return; // superseded by a newer "Edit layout" click
 			editDefinition = TableDefinitionSchema.parse(art.payload);
 			editEntryIndex = i;
 			editLayoutOpen = true;
 		} catch (err) {
+			if (mine !== editRequest) return;
 			editError = err instanceof Error ? err.message : 'Failed to load table';
 		}
 	}

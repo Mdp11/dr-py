@@ -13,6 +13,7 @@ import {
 	moveExportEntryInList,
 	removeExportEntry,
 	resetCustomExportEditors,
+	retryCustomExportLock,
 	saveCustomExportDraft,
 	setCustomExportName,
 	updateExportEntry
@@ -415,6 +416,48 @@ describe('artifact lease on open', () => {
 
 		expect(get).toHaveBeenCalledWith('e1');
 		expect(getCustomExportLockHolder('exp:e1')).toBeUndefined();
+	});
+
+	it('retryCustomExportLock clears the banner once the peer releases', async () => {
+		asEditor();
+		const acquire = mockAcquire();
+		acquire.mockRejectedValueOnce(lockConflict('peer@x'));
+		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue(CUSTOM_EXPORT_ARTIFACT);
+		await ensureCustomExportDraft('exp:e1');
+		expect(getCustomExportLockHolder('exp:e1')).toBe('peer@x');
+
+		await retryCustomExportLock('exp:e1');
+
+		expect(getCustomExportLockHolder('exp:e1')).toBeUndefined();
+		expect(isCheckedOutByMe('art:e1')).toBe(true);
+	});
+
+	it('retryCustomExportLock keeps the banner and does not reject on a non-conflict error', async () => {
+		// The banner's onclick is `void retryCustomExportLock(tabId)`: an
+		// unguarded rethrow from ensureCheckout would surface as an unhandled
+		// rejection.
+		asEditor();
+		const acquire = mockAcquire();
+		acquire.mockRejectedValueOnce(lockConflict('peer@x'));
+		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue(CUSTOM_EXPORT_ARTIFACT);
+		await ensureCustomExportDraft('exp:e1');
+		acquire.mockRejectedValueOnce(new Error('boom'));
+
+		await expect(retryCustomExportLock('exp:e1')).resolves.toBeUndefined();
+
+		expect(getCustomExportLockHolder('exp:e1')).toBe('peer@x'); // still refused
+	});
+
+	it('retryCustomExportLock is a no-op for an unsaved (temp-id) draft', async () => {
+		asEditor();
+		const acquire = mockAcquire();
+		const tabId = openArtifactTab('custom_export', { artifactId: null, title: 'New export' });
+		await ensureCustomExportDraft(tabId);
+		saveCustomExportDraft(tabId); // draft.artifactId is now a temp id
+
+		await retryCustomExportLock(tabId);
+
+		expect(acquire).not.toHaveBeenCalled();
 	});
 
 	it('closeCustomExportDraft releases the lease when nothing staged needs it', async () => {

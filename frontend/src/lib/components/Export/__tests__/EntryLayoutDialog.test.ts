@@ -106,7 +106,7 @@ describe('EntryLayoutDialog', () => {
 		expect(include.getAttribute('aria-label')).toBe('Include in export');
 	});
 
-	it('Save emits {format, ...overridesFromDefinition(editedCopy)} — toggling the override off drops it', () => {
+	it('Save emits {format, ...overridesFromDefinition(editedCopy)} — toggling both the format and the include state', () => {
 		const onSave = vi.fn();
 		render({
 			tableDefinition: baseDefinition(),
@@ -114,6 +114,10 @@ describe('EntryLayoutDialog', () => {
 			onSave,
 			onClose: () => {}
 		});
+		// Exercise the format toggle too — a hard-coded 'xlsx' in the emitted
+		// patch would otherwise pass unnoticed, since the entry's own starting
+		// format ('xlsx') matches it by coincidence.
+		document.querySelector<HTMLButtonElement>('[data-testid="entry-layout-format-json"]')!.click();
 		document
 			.querySelector<HTMLButtonElement>(`[data-testid="export-include-${posOf(1)}"]`)!
 			.click();
@@ -123,8 +127,14 @@ describe('EntryLayoutDialog', () => {
 
 		expect(onSave).toHaveBeenCalledTimes(1);
 		const patch = onSave.mock.calls[0][0] as Partial<ExportEntry>;
-		expect(patch.format).toBe('xlsx');
-		expect(patch.columns?.some((c) => c.index === 1 && c.export?.include === false)).toBe(false);
+		expect(patch.format).toBe('json');
+		// Positive form: column 1's override now says INCLUDED (true), not
+		// merely "not excluded" — `.some(... include === false)` toBe(false)
+		// would also pass if overridesFromDefinition had been handed the
+		// UNEDITED `tableDefinition` (columns: [], no override at all).
+		expect(patch.columns).toEqual([
+			{ index: 1, export: { include: true, header: '' }, json_export: null }
+		]);
 	});
 
 	it('disables Save under a tokenless json_split template and re-enables once ${name} is typed', async () => {
