@@ -202,6 +202,73 @@ def test_traversal_entry_name_cannot_escape_the_archive_root_split(client):
         assert ".." not in n.split("/")
 
 
+def test_whitespace_entry_name_falls_back_rather_than_producing_an_absolute_member(
+    client,
+):
+    """`sanitize_stem(" ") == ""` by design (its docstring: empty stays
+    empty so callers reach their own fallback). The single-file branch must
+    supply that fallback itself, or `f"{stem}{dot}{ext}"` with an empty stem
+    writes a member like `.json` — and the split branch's
+    `f"{folder}/{fn}"` would write `"/{fn}"`, an ABSOLUTE zip member (a
+    naive `os.path.join(dest, member.filename)` extractor honors that as an
+    override of the destination — the same zip-slip hazard class as the
+    `../../evil` case, via a different mechanism)."""
+    _bootstrap_model(client)
+    t = _mk_table(client, "mu")
+    art = _mk_export(
+        client, [{"source": {"ref": t}, "name": " ", "format": "json"}]
+    )
+    r = _run(client, art)
+    assert r.status_code == 200
+    names = zipfile.ZipFile(io.BytesIO(r.content)).namelist()
+    assert names == ["export.json"]
+    assert all(not n.startswith("/") and ".." not in n.split("/") for n in names)
+
+
+def test_whitespace_entry_name_split_falls_back_rather_than_producing_a_root_member(
+    client,
+):
+    """Same hazard as above, one level up: a whitespace-only entry name on a
+    SPLIT entry must not leave the archive folder name empty, or every
+    member in the entry lands at the archive ROOT with a leading `/`."""
+    _bootstrap_model(client)
+    t = _mk_table(client, "nu")
+    art = _mk_export(
+        client,
+        [{
+            "source": {"ref": t}, "name": " ", "format": "json",
+            "json_split": {"enabled": True, "filename_template": "${name}"},
+        }],
+    )
+    r = _run(client, art)
+    assert r.status_code == 200
+    names = zipfile.ZipFile(io.BytesIO(r.content)).namelist()
+    assert names  # at least the split's "root" partition
+    for n in names:
+        assert n.startswith("export/")
+        assert not n.startswith("/")
+        assert ".." not in n.split("/")
+
+
+def test_colliding_whitespace_entry_names_dedupe_the_shared_fallback_stem(client):
+    """Multiple entries that all sanitize to empty must not collide silently
+    on the SAME literal member name — `_dedupe` has to suffix the shared
+    fallback exactly like any other collision."""
+    _bootstrap_model(client)
+    t1, t2 = _mk_table(client, "xi"), _mk_table(client, "omicron")
+    art = _mk_export(
+        client,
+        [
+            {"source": {"ref": t1}, "name": " ", "format": "json"},
+            {"source": {"ref": t2}, "name": "   ", "format": "json"},
+        ],
+    )
+    r = _run(client, art)
+    assert r.status_code == 200
+    names = zipfile.ZipFile(io.BytesIO(r.content)).namelist()
+    assert names == ["export.json", "export_2.json"]
+
+
 def test_colliding_entry_names_dedupe_with_a_suffix_in_entry_order(client):
     _bootstrap_model(client)
     t1, t2 = _mk_table(client, "eta"), _mk_table(client, "theta")

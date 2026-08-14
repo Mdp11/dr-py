@@ -196,8 +196,13 @@ def run_export(
             # constraint at the API layer) that is about to become an
             # archive member's path prefix — `zipfile.ZipInfo` writes
             # whatever it's given verbatim, so an unsanitized `../../evil`
-            # would unzip outside the archive root.
-            folder = _dedupe(sanitize_stem(out_name), taken)
+            # would unzip outside the archive root. `sanitize_stem` returns
+            # "" for whitespace-only input BY DESIGN (its docstring: callers
+            # fall back through `... or fallback or "element"`) — this
+            # caller is that fallback site: an empty folder name becomes
+            # `f"{folder}/{fn}"` == `"/{fn}"`, an absolute-path zip member,
+            # the same zip-slip hazard class under a different mechanism.
+            folder = _dedupe(sanitize_stem(out_name) or "export", taken)
             files.extend((f"{folder}/{fn}", blob) for fn, blob in res.files)
         else:
             fn, blob = res.files[0]
@@ -205,8 +210,11 @@ def run_export(
             # Same zip-slip guard as the branch above: `stem` traces back to
             # the same unsanitized `out_name` (run_table_export names the
             # single-file case `f"{name}.<ext>"`), so it needs the identical
-            # treatment before it becomes a zip member's path.
-            files.append((f"{_dedupe(sanitize_stem(stem), taken)}{dot}{ext}", blob))
+            # treatment before it becomes a zip member's path — including
+            # the empty-stem fallback (see comment above).
+            files.append(
+                (f"{_dedupe(sanitize_stem(stem) or 'export', taken)}{dot}{ext}", blob)
+            )
 
     resp_headers = {"Content-Disposition": f'attachment; filename="{row.name}.zip"'}
     if truncated:
