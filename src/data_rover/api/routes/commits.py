@@ -356,13 +356,17 @@ class _CommitUnwind:
     did exactly that).
 
     The ledger inverts the maintenance direction: each stage REGISTERS what
-    just went live, immediately after it goes live (``model_res`` after the
-    model apply, ``db_staged`` once DB staging begins, ``created_view`` when
-    this request materializes ``session.view`` from ``None``, ``view_res``
-    after the view apply, ``rev_bumped`` after the rev bump +
-    ``record_batch``), and every failure path calls ``unwind()`` exactly
-    once and then returns/raises. A new stage now touches ONE registration
-    site instead of every downstream block.
+    went live, at the moment it goes live and NEVER LATER (``model_res``
+    after the model apply, ``created_view`` when this request materializes
+    ``session.view`` from ``None``, ``view_res`` after the view apply,
+    ``rev_bumped`` after the rev bump + ``record_batch``; ``db_staged``
+    BEFORE the first call that stages rows, and ``prior_metamodel`` DURING
+    ``apply_metamodel_ops`` via its ``on_swap`` callback — those last two
+    register ahead of the state going live because the very statement that
+    makes it live can itself raise, and a handle registered after the fact
+    would be missing on exactly that path), and every failure path calls
+    ``unwind()`` exactly once and then returns/raises. A new stage touches
+    ONE registration site instead of every downstream block.
 
     ``unwind()`` runs under ``session.write_mutex`` — every caller already
     holds it (the sole pre-mutex failure paths register nothing and return
@@ -755,9 +759,17 @@ def create_commit(
     ``rollback_view`` call — hence ``view_res`` is registered only AFTER it
     returns, and only failures raised after that point roll the view back;
     ``apply_metamodel_ops`` follows the ARTIFACT stance (no internal rollback
-    at all — see its module docstring), so ``db_staged`` is registered before
-    the call and ``prior_metamodel`` only after it returns with the swap
-    handle it captured.
+    at all — see its module docstring), so ``db_staged`` is likewise
+    registered BEFORE the call — but ``prior_metamodel`` is registered from
+    that applier's ``on_swap`` callback, i.e. DURING the call, at the instant
+    of the swap: after the candidate blob parses (so an invalid blob's 422
+    costs no unwind work — nothing was swapped) and immediately before
+    ``session.metamodel`` is reassigned. Registering it from the return value
+    instead would be too late: the applier's row staging runs AFTER the
+    in-memory swap and goes through ``db.flush()``, which can raise, and
+    ``db.rollback()`` discards staged rows while restoring NOTHING in memory
+    — the ledger would have no handle and the session would keep serving the
+    candidate schema against a DB still bound to the old one.
     """
     _, model = require_model(session)
     model_ops, artifact_ops, view_ops, metamodel_ops = split_ops(payload.ops)

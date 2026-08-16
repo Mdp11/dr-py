@@ -57,11 +57,20 @@ from .schemas import MetamodelNodePos, MetamodelOpIn, MoveMetamodelNodeOp, Rebin
 @dataclass
 class MetamodelBatchResult:
     """Everything one metamodel-op batch produced (twin of the other three
-    ``*BatchResult`` types). ``prior_metamodel`` is the unwind handle for the
-    in-memory swap; the two row ids feed ``_persist_commit``'s
-    ``from/to_metamodel_id`` columns so every reader keyed off them
-    (staleness guard, history ``is_rebind``, ``first_rebind_after``,
-    ``_metamodel_structural``) keeps working unchanged."""
+    ``*BatchResult`` types).
+
+    ``prior_metamodel`` records the swapped-out metamodel for INSPECTION —
+    it is NOT the channel an unwinding caller should register from. This
+    object only exists once ``apply_metamodel_ops`` RETURNS, and the window
+    between the swap and that return is precisely where a ``db.flush()`` can
+    raise; a caller that must be able to undo the swap takes its handle from
+    the ``on_swap`` callback instead (see the module docstring, and
+    ``routes/commits.py``'s a3 step).
+
+    The two row ids feed ``_persist_commit``'s ``from/to_metamodel_id``
+    columns so every reader keyed off them (staleness guard, history
+    ``is_rebind``, ``first_rebind_after``, ``_metamodel_structural``) keeps
+    working unchanged."""
 
     canonical_ops: list[MetamodelOpIn] = field(default_factory=list)
     inverse_units: list[list[MetamodelOpIn]] = field(default_factory=list)
