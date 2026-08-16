@@ -49,6 +49,13 @@
 	 * metamodel (a viewer's drags stay local and stage nothing).
 	 * Viewers pan, zoom, select and collapse — a read-only canvas, not a picture.
 	 *
+	 * What the ROLE split does NOT extend to is the lease: a staged move needs
+	 * the same singleton `mm` lease a rebind does (the backend verifies it for
+	 * the whole `metamodel.*` family), so the state module acquires it on the
+	 * first drag — for an editor as much as an owner. A drag while a PEER holds
+	 * it stays local and stages nothing, and the `lockedBy` note below is how
+	 * that surfaces.
+	 *
 	 * **`useSvelteFlow()` needs a provider ABOVE this component** (a hook binds
 	 * context at ITS call site, so a `<SvelteFlowProvider>` rendered here would
 	 * be too late). `MetamodelTab` supplies it — that is why the toolbar can
@@ -79,10 +86,13 @@
 
 	/**
 	 * Why the editing affordances are missing, in the split this surface
-	 * actually has: a peer's lease is temporary and names its cause, an EDITOR
-	 * keeps the layout half (positions are presentation, saved without the `mm`
-	 * lease), and a VIEWER keeps neither. Without this the toolbar just quietly
-	 * loses its buttons.
+	 * actually has: a peer's lease is temporary and names its cause (and takes
+	 * the layout half with it — the staged move needs that same lease, so under
+	 * a peer's hold a drag is local and nothing is proposed), an EDITOR keeps
+	 * the layout half (positions are presentation, so they are committable
+	 * without the OWNER role — the `mm` lease is still acquired for them), and a
+	 * VIEWER keeps neither. Without this the toolbar just quietly loses its
+	 * buttons.
 	 *
 	 * There is no "Rebinding — editing is paused" case any more (spec
 	 * 2026-08-16): a rebind is an op in the commit batch rather than a flight

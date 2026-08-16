@@ -19,14 +19,21 @@ import {
 	type YamlEditCommand
 } from '$lib/metamodel/yaml-edit';
 import { SvelteSet } from 'svelte/reactivity';
-import { getRole } from './checkout.svelte';
-import { editMetamodelBuffer, getMetamodelEditor } from './metamodel-editor.svelte';
+import { getRole, isCheckedOutByMe } from './checkout.svelte';
 import {
+	editMetamodelBuffer,
+	getMetamodelEditor,
+	noteMetamodelLockConflict
+} from './metamodel-editor.svelte';
+import { acquireMetamodelLease, getMetamodelLockHolder } from './metamodel-lease.svelte';
+import {
+	discardStagedNodeMoves,
 	getStagedNodeMoves,
 	initMetamodelStage,
 	onMetamodelCommitted,
 	stageNodeMove
 } from './metamodel-stage.svelte';
+import { METAMODEL_RESOURCE } from './ops';
 import { onCommitEvent } from './realtime.svelte';
 
 /**
@@ -51,7 +58,11 @@ import { onCommitEvent } from './realtime.svelte';
  * materialized baseline; `PUT /metamodel/layout` is gone. The STAGING gate is
  * `getRole() !== 'viewer'` — editors stage too, unlike buffer editing which
  * stays owner-only through the editor module's own `isEditBlocked()` — so a
- * viewer still drags, purely locally, with nothing to commit.
+ * viewer still drags, purely locally, with nothing to commit. Staging also
+ * ACQUIRES the singleton `mm` lease (the backend verifies it for the whole
+ * `metamodel.*` family, not just the rebind), which is why this module
+ * composes `metamodel-lease.svelte.ts` at all — see {@link stageMove} and
+ * {@link maybeAcquireLayoutLease}.
  *
  * **There is no rename key-deferral any more**, and its deletion is the point
  * of that change: a staged position and the staged `metamodel.rebind` that
@@ -316,9 +327,96 @@ export function setMetamodelView(v: 'yaml' | 'diagram'): void {
 
 /** Editors AND owners stage positions; only viewers are shut out (spec §5 —
  * layout is presentation, so it deliberately does NOT follow the owner-only
- * gate that buffer edits use). A viewer's drags stay local to their canvas. */
+ * gate that buffer edits use). A viewer's drags stay local to their canvas.
+ *
+ * The second term is the peer-lease one: `metamodel.move_node` needs the `mm`
+ * lease at commit time exactly as a rebind does (`api/locking.py`'s
+ * `required_locks` covers the whole family), so once a peer is known to hold
+ * it there is nothing worth staging — the batch could only 409. Read from the
+ * editor module rather than mirrored here so a Retry there re-enables the
+ * canvas too; see {@link maybeAcquireLayoutLease}. */
 function canStageLayout(): boolean {
-	return getRole() !== 'viewer';
+	return getRole() !== 'viewer' && getMetamodelEditor().lockedBy === null;
+}
+
+/** True while a layout acquire is in flight. A drag burst is dozens of pointer
+ * moves; this is what keeps them to ONE `/locks` call.
+ *
+ * Deliberately NOT reset by {@link initMetamodelDiagram} /
+ * {@link closeMetamodelDiagram}: it tracks a request, not a surface, so
+ * clearing it under an in-flight acquire would only add a redundant second
+ * call (harmless since `acquireMetamodelLease` coalesces, but pointless).
+ * Every settle path below clears it, so a closed surface leaves nothing
+ * latched. */
+let _acquiringLayoutLease = false;
+
+/**
+ * Ask for the `mm` lease because something is about to be staged.
+ *
+ * WHY (final-review Finding 1): a staged move is committed content, and
+ * `create_commit` hard-verifies the singleton `mm` lease for EVERY op in the
+ * `metamodel.*` family. The editor's own `maybeAcquireLease` cannot cover this
+ * — it is owner-gated and fires only on a buffer edit, while an EDITOR may
+ * stage layout moves and never touch the YAML. Without this a drag produced an
+ * op nothing held a lease for, and the next `POST /commits` 409'd the WHOLE
+ * mixed batch (model + artifact + view edits included), repeatedly, because the
+ * move survives in localStorage until the user finds the drawer's discard.
+ *
+ * FIRE-AND-FORGET, never awaited: a pointer move is synchronous and must not
+ * wait on a round trip. The move is staged optimistically alongside this call
+ * and un-staged below if the answer is a conflict.
+ *
+ * "Already held" is read from the CHECKOUT REGISTRY, not from a local flag,
+ * and that is deliberate: the registry is the same source `ensureCheckout`
+ * consults, so a lease surrendered underneath this module — a commit (the
+ * server releases every token it is sent), a Discard-all, a tab close — re-arms
+ * the acquire automatically. A cached `held` boolean would go stale at exactly
+ * those three points and let the next drag stage a move with no lease behind
+ * it, which is the very bug being fixed.
+ */
+function maybeAcquireLayoutLease(): void {
+	if (_acquiringLayoutLease || isCheckedOutByMe(METAMODEL_RESOURCE)) return;
+	_acquiringLayoutLease = true;
+	const gen = _gen;
+	void acquireMetamodelLease().then(
+		(ok) => {
+			_acquiringLayoutLease = false;
+			if (ok || gen !== _gen) return;
+			const holder = getMetamodelLockHolder();
+			// A NON-conflict refusal (viewer, transient network) leaves everything
+			// as it is: the next stage retries, and the server honors the lease as
+			// the backstop — the same stance the editor's acquire takes.
+			if (holder === null) return;
+			// A peer holds it. Report it through the editor module (one holder,
+			// one Retry, one "locked by" strip) and DROP the moves staged in the
+			// optimistic window: they can never satisfy the commit's lock check,
+			// so leaving them would poison every later batch. The canvas keeps
+			// them in `_positions` — the drag stays LOCAL, exactly like the
+			// editor keeping the characters typed before its own refusal — until
+			// the next baseline refetch re-derives from the server.
+			noteMetamodelLockConflict(holder);
+			discardStagedNodeMoves();
+		},
+		() => {
+			// `ensureCheckout` re-raises anything that is not a 409. Nothing to
+			// record: the lease is simply not held, and the next stage retries.
+			_acquiringLayoutLease = false;
+		}
+	);
+}
+
+/**
+ * THE staging choke point — the only caller of `stageNodeMove` in this module,
+ * which is the point of it. Four gestures stage positions ({@link moveNode},
+ * {@link runAutoArrange}, {@link applyKeyMove}, {@link stagePositionDelta}) and
+ * every one of them needs the same two things: the permission check and the
+ * lease. Putting them at one seam means a fifth staging path cannot be added
+ * that forgets the acquire, and the burst dedupe has a single home.
+ */
+function stageMove(node: string, pos: XY | null): void {
+	if (!canStageLayout()) return;
+	maybeAcquireLayoutLease();
+	stageNodeMove(node, pos);
 }
 
 function clonePositions(src: Positions): Positions {
@@ -367,14 +465,16 @@ async function refetchBaselineLayout(): Promise<void> {
  * before/after diff with no baseline knowledge of its own.
  */
 function stagePositionDelta(from: Positions, to: Positions): void {
+	// The early return is a cheap short-circuit only — `stageMove` re-checks the
+	// same predicate, so this cannot be the path that forgets a guard.
 	if (!canStageLayout()) return;
 	for (const [id, p] of Object.entries(to)) {
 		const prev = from[id];
 		if (prev !== undefined && prev.x === p.x && prev.y === p.y) continue;
-		stageNodeMove(id, p);
+		stageMove(id, p);
 	}
 	for (const id of Object.keys(from)) {
-		if (to[id] === undefined) stageNodeMove(id, null);
+		if (to[id] === undefined) stageMove(id, null);
 	}
 }
 
@@ -546,14 +646,14 @@ function applyKeyMove(move: { from: string; to: string | null }): void {
 	delete next[move.from];
 	if (move.to !== null && pos !== undefined) next[move.to] = pos;
 	_positions = next;
-	if (!canStageLayout()) return;
 	// The layout key migrates WITH the rename, in the SAME commit: the old key
 	// is dropped and the new one claims the position, and neither is visible to
 	// a peer until the `metamodel.rebind` that renames the type lands beside
 	// them. A delete just drops the key. This is what makes the old rename
-	// key-deferral unnecessary (module docstring).
-	stageNodeMove(move.from, null);
-	if (move.to !== null && pos !== undefined) stageNodeMove(move.to, pos);
+	// key-deferral unnecessary (module docstring). Through {@link stageMove}
+	// like every other staging path — the permission check moved in there.
+	stageMove(move.from, null);
+	if (move.to !== null && pos !== undefined) stageMove(move.to, pos);
 }
 
 /**
@@ -592,9 +692,9 @@ export function applyDiagramEdit(cmd: YamlEditCommand): boolean {
  * and for a sharper reason than symmetry: the key half below is applied
  * UNCONDITIONALLY while the buffer half goes through `editMetamodelBuffer`,
  * which silently drops the write when the editor's own `isEditBlocked()` says
- * so. Without this guard the two halves desync — reachable, because the editor
- * acquires the `mm` lease asynchronously on the first divergent edit, so a
- * diagram rename can land and only THEN lose the lease race to a peer. The
+ * so. Without this guard the two halves desync — reachable, because the `mm`
+ * lease is acquired asynchronously on the first divergent keystroke or node
+ * drag, so a diagram rename can land and only THEN lose the race to a peer. The
  * rollback would re-stage the pre-rename layout keys while the draft kept the
  * rename, so the commit would publish positions for names it never sends.
  *
@@ -619,8 +719,10 @@ export function undoDiagramEdit(): void {
 }
 
 export function moveNode(nodeId: string, pos: XY): void {
+	// The canvas moves FIRST and unconditionally: a viewer's drag, and a drag
+	// made while a peer holds the `mm` lease, are still local navigation.
 	_positions = { ..._positions, [nodeId]: { x: pos.x, y: pos.y } };
-	if (canStageLayout()) stageNodeMove(nodeId, { x: pos.x, y: pos.y });
+	stageMove(nodeId, { x: pos.x, y: pos.y });
 }
 
 /** Re-run the layered layout over the whole diagram. Undoable because it is
@@ -635,8 +737,9 @@ export async function runAutoArrange(): Promise<void> {
 	if (gen !== _gen) return;
 	pushUndo({ buffer: null, keys: snapshotKeys() });
 	_positions = arranged;
-	if (!canStageLayout()) return;
-	for (const [id, p] of Object.entries(arranged)) stageNodeMove(id, p);
+	// One acquire for the whole arrangement, not one per node: the in-flight
+	// flag inside {@link maybeAcquireLayoutLease} collapses the burst.
+	for (const [id, p] of Object.entries(arranged)) stageMove(id, p);
 }
 
 /**

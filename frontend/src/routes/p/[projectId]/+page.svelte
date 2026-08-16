@@ -55,6 +55,7 @@
 		resetArtifacts,
 		resetCheckout,
 		resetInspectionHistory,
+		resetMetamodelEditor,
 		resetModelStore,
 		resetSnippetEditors,
 		resetSnippetDocs,
@@ -151,6 +152,20 @@
 			// A's localStorage mirror intact, so switching back restores that work
 			// instead of destroying it.
 			closeMetamodelStage();
+			// The DRAFT half of that same family, and the last of the four staged
+			// families to get this guard (final-review Finding 3). The editor's
+			// `_baseline`/`_buffer`/`_phase` are module-scope too, and the provider it
+			// registers with the stage is read UNCONDITIONALLY at batch-build time —
+			// so a tab that survives an in-SPA switch would offer project A's YAML
+			// as a `metamodel.rebind` inside project B's batch. `resetMetamodelEditor()`
+			// is the exact analogue of `closeMetamodelStage()` above: it drops the
+			// IN-MEMORY copy and un-points the project, while A's draft stays in
+			// localStorage (`ui.metamodel.draft.<projectId>`, written by the tab's own
+			// unmount and by the edit debounce) so switching back restores it. Like
+			// its three siblings it deliberately does NOT touch the checkout registry:
+			// no family resets its tokens here, and a cross-project release would send
+			// A's token at B's URL.
+			resetMetamodelEditor();
 			// Same class of leak, issue side: the Validate overlay is a module-scope
 			// singleton that WINS over the live issue map in every consumer, and boot
 			// deliberately does not call resetModelStore(). Project A's origin-tagged

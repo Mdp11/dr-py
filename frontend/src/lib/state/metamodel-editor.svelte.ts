@@ -16,7 +16,11 @@ import {
 /**
  * The live metamodel editor's state (Phase 5) — buffer, draft, lint,
  * preview. COMPOSES the `mm` lease module: the lease is acquired on
- * the first divergent edit and released on close/discard/committed rebind.
+ * the first divergent keystroke and released on close/discard/committed rebind.
+ * It is NOT the only acquirer — `metamodel-diagram.svelte.ts` takes the same
+ * lease on the first node drag (layout moves are staged by editors, who never
+ * pass this module's owner gate) and reports a peer conflict back here through
+ * {@link noteMetamodelLockConflict}.
  * This module never re-implements lease logic and adds no competing guard
  * around lease calls (the lease module's generation guard is the only one
  * for that concern); `_gen` below guards only this module's OWN async
@@ -233,6 +237,28 @@ export function editMetamodelBuffer(code: string): void {
 	maybeAcquireLease();
 }
 
+/**
+ * "A peer holds the `mm` lease" — reported by a surface OTHER than this buffer.
+ * The DIAGRAM's layout acquire is the only caller (final-review Finding 1):
+ * layout moves are staged by EDITORS too, so the canvas acquires the same
+ * singleton lease and can be the first to learn it is taken.
+ *
+ * The holder lives here, and is not duplicated in the diagram module, because
+ * `_lockedBy` is ONE fact about the metamodel rather than a per-surface one:
+ * it is what {@link isEditBlocked} reads, what the tab's "locked by" strip
+ * renders, and — decisively — what {@link retryMetamodelLease} clears. A second
+ * copy next door would keep the canvas refusing to stage after a Retry that
+ * this module already considers resolved.
+ */
+export function noteMetamodelLockConflict(holder: string): void {
+	_lockedBy = holder;
+	// Provably not held by us: `ensureCheckout` answers a held resource from the
+	// registry without a request, so only a session holding nothing can be
+	// refused. Clearing the flag keeps the next edit's `maybeAcquireLease` (and
+	// `retryMetamodelLease`) able to re-attempt.
+	_leaseHeld = false;
+}
+
 export function retryMetamodelLease(): void {
 	_lockedBy = null;
 	maybeAcquireLease();
@@ -377,7 +403,21 @@ onMetamodelCommitted(({ rebound, blob }) => {
 // the two surfaces cannot drift.
 onMetamodelDiscardAll(() => discardMetamodelDraft());
 
-/** Full reset for tests (does NOT touch the checkout registry). */
+/**
+ * Full reset: forget the buffer, the baseline, the project and the phase.
+ *
+ * Two callers. Tests use it for isolation, and PROJECT (RE)ENTRY uses it —
+ * `p/[projectId]/+page.svelte`'s `boot()`, right beside `closeMetamodelStage()`
+ * — because this module is a singleton whose text belongs to ONE project: a tab
+ * that survives an in-SPA switch would otherwise keep contributing project A's
+ * YAML through {@link registerMetamodelDraftProvider} to project B's commit
+ * batch (final-review Finding 3).
+ *
+ * Does NOT touch the checkout registry, and does not flush: the draft's
+ * localStorage mirror is written by the edit debounce and by
+ * {@link closeMetamodelEditor} on the tab's own unmount, so the persisted copy
+ * survives this and a return to A restores it.
+ */
 export function resetMetamodelEditor(): void {
 	_gen++;
 	clearTimers();

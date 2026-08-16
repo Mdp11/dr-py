@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import * as lockApi from '$lib/api/checkout';
+import { ConflictError } from '$lib/api/errors';
 import * as mmApi from '$lib/api/metamodel';
+import type { LockResponse } from '$lib/api/types';
 import { FIXTURE } from '$lib/metamodel/__tests__/fixtures';
 import { lineRangeForType, parseDraft } from '$lib/metamodel/yaml-edit';
-import { resetCheckout, setProjectInfo } from '../checkout.svelte';
+import { isCheckedOutByMe, resetCheckout, setProjectInfo } from '../checkout.svelte';
 import {
 	clearStagedNodeMoves,
 	getStagedMetamodelOps,
@@ -41,6 +44,11 @@ import {
 const editorState = vi.hoisted(() => ({
 	buffer: '',
 	readOnly: false,
+	/** The peer holding the `mm` lease, as the real module reports it. The
+	 * diagram READS this (a staged move needs the same lease) and WRITES it
+	 * through `noteMetamodelLockConflict` when its own layout acquire is the
+	 * one that discovers the conflict. */
+	lockedBy: null as string | null,
 	/** The real module's load phase. `'error'` (with an EMPTY buffer) is the
 	 * shape a failed metamodel load leaves behind, and `MetamodelTab.init()`
 	 * calls `initMetamodelDiagram` in it regardless. */
@@ -58,8 +66,12 @@ vi.mock('../metamodel-editor.svelte', () => ({
 		buffer: editorState.buffer,
 		readOnly: editorState.readOnly,
 		phase: editorState.phase,
+		lockedBy: editorState.lockedBy,
 		lintErrors: editorState.lintErrors
 	}),
+	noteMetamodelLockConflict: (holder: string) => {
+		editorState.lockedBy = holder;
+	},
 	editMetamodelBuffer: (code: string) => {
 		editorState.writes++;
 		// Mirrors the real module's `isEditBlocked()` early return, so the stub
@@ -77,6 +89,32 @@ function stagedMoves(): { node: string; pos: { x: number; y: number } | null }[]
 		.map((o) => ({ node: o.node, pos: o.pos }));
 }
 
+/** Mirrors metamodel-editor.test.ts's fixture: one exclusive `mm` lease, each
+ * lease carrying its own token (what `LeaseOut` declares and what
+ * `checkout.svelte`'s `_recordLeases` stores). */
+const LEASE: LockResponse = {
+	token: 't-mm',
+	leases: [
+		{
+			resource_id: 'mm',
+			mode: 'exclusive',
+			holder: 'default-user',
+			holder_email: 'default@example.com',
+			token: 't-mm',
+			intent: 'edit',
+			expires_at: 1
+		}
+	]
+};
+const CONFLICT = new ConflictError(
+	409,
+	{
+		detail: 'lock conflict',
+		conflicts: [{ resource_id: 'mm', held_by: 'u2', held_by_email: 'peer@example.com' }]
+	},
+	'conflict'
+);
+
 beforeEach(() => {
 	localStorage.clear();
 	resetCheckout();
@@ -86,9 +124,14 @@ beforeEach(() => {
 	clearStagedNodeMoves();
 	editorState.buffer = FIXTURE;
 	editorState.readOnly = false;
+	editorState.lockedBy = null;
 	editorState.phase = 'ready';
 	editorState.writes = 0;
 	editorState.lintErrors = [];
+	// Staging a move now acquires the `mm` lease (final-review Finding 1), so
+	// every case that drags would otherwise reach the network. Granted by
+	// default; the conflict cases below re-spy with a 409.
+	vi.spyOn(lockApi, 'acquireLocks').mockResolvedValue(LEASE);
 });
 
 afterEach(() => {
@@ -221,6 +264,78 @@ describe('moveNode', () => {
 		// The route is gone (`PUT /metamodel/layout`, spec 2026-08-16), and so is
 		// the client wrapper — a re-introduced live save would have to re-add it.
 		expect('putMetamodelLayout' in mmApi).toBe(false);
+	});
+});
+
+describe('the layout lease', () => {
+	/**
+	 * The merge-blocking half of the final review: `required_locks`
+	 * (api/locking.py) derives an EXCLUSIVE `mm` lease for BOTH members of the
+	 * `metamodel.*` family, so a staged move with no lease behind it 409s the
+	 * WHOLE next commit — including unrelated model/artifact/view edits — and
+	 * keeps doing so until the user finds the drawer's discard. The editor's
+	 * own acquire cannot cover this: it is owner-gated, and an EDITOR is
+	 * allowed to stage moves.
+	 */
+	it('acquires the mm lease on the first staged move, once per drag burst', async () => {
+		const acquire = vi.spyOn(lockApi, 'acquireLocks').mockResolvedValue(LEASE);
+
+		moveNode('el:Zone', { x: 10, y: 20 });
+		// Synchronous: a drag never waits on the acquire (a pointer-move must
+		// not block on a round trip).
+		expect(stagedMoves()).toEqual([{ node: 'el:Zone', pos: { x: 10, y: 20 } }]);
+		moveNode('el:Zone', { x: 11, y: 21 });
+		moveNode('el:Ward', { x: 1, y: 2 });
+
+		await vi.waitFor(() => expect(isCheckedOutByMe('mm')).toBe(true));
+		expect(acquire).toHaveBeenCalledOnce(); // ONE call for the whole burst
+		expect(acquire.mock.calls[0]?.[0]).toEqual({
+			targets: [{ resource_id: 'mm', mode: 'exclusive', type: 'metamodel' }],
+			intent: 'edit',
+			steal: false
+		});
+
+		// Held now: further drags add nothing.
+		moveNode('el:Ward', { x: 3, y: 4 });
+		await Promise.resolve();
+		expect(acquire).toHaveBeenCalledOnce();
+	});
+
+	it('acquires it for an auto-arrange too, and for the undo that re-stages', async () => {
+		const acquire = vi.spyOn(lockApi, 'acquireLocks').mockResolvedValue(LEASE);
+		vi.spyOn(mmApi, 'getMetamodelLayout').mockResolvedValue({
+			positions: { 'el:Zone': { x: 0, y: 0 } }
+		});
+		await initMetamodelDiagram('p1');
+
+		await runAutoArrange();
+
+		await vi.waitFor(() => expect(isCheckedOutByMe('mm')).toBe(true));
+		// One acquire for the whole arrangement, not one per arranged node.
+		expect(acquire).toHaveBeenCalledOnce();
+	});
+
+	it('stages nothing — and drops what it optimistically staged — when a peer holds it', async () => {
+		vi.spyOn(lockApi, 'acquireLocks').mockRejectedValue(CONFLICT);
+
+		moveNode('el:Zone', { x: 10, y: 20 });
+		// Optimistic until the refusal lands: the acquire is async and the drag is
+		// not allowed to wait for it.
+		expect(stagedMoves()).toEqual([{ node: 'el:Zone', pos: { x: 10, y: 20 } }]);
+
+		await vi.waitFor(() => expect(editorState.lockedBy).toBe('peer@example.com'));
+
+		// NOTHING staged: a move op that can never hold the lease it requires is
+		// exactly the trap this fix is about.
+		expect(stagedMoves()).toEqual([]);
+		// ...but the canvas still responded to the drag — the position is LOCAL,
+		// mirroring the editor's read-only fallback (which keeps typed characters).
+		expect(getMetamodelDiagramView().positions['el:Zone']).toEqual({ x: 10, y: 20 });
+
+		// And a further drag stays local too, with no second acquire attempt.
+		moveNode('el:Zone', { x: 30, y: 40 });
+		expect(stagedMoves()).toEqual([]);
+		expect(getMetamodelDiagramView().positions['el:Zone']).toEqual({ x: 30, y: 40 });
 	});
 });
 

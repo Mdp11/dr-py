@@ -997,12 +997,32 @@ and lands through the same **Commit** button as model/artifact/view edits:
   server-side at commit) and hard-verifies the `mm` lease server-side.
 - **Lease** — composed, never re-implemented: `state/metamodel-lease.svelte.ts`
   (the `mm` lease module that outlived the drawer it was written for) acquires
-  the EXCLUSIVE `mm` lease on the **first divergent edit** and drops it on
+  the EXCLUSIVE `mm` lease on the **first divergent keystroke _or_ first node
+  drag** and drops it on
   close, discard, or **the commit that surrendered it** — unconditionally,
-  because an acquire still in flight is exactly the leak this guards. A peer
+  because an acquire still in flight is exactly the leak this guards. Both
+  surfaces acquire because the backend hard-verifies the lease for the WHOLE
+  `metamodel.*` family: a staged `metamodel.move_node` with no lease behind it
+  409s the entire mixed batch, and the editor's own acquire cannot stand in for
+  it (that one is owner-gated, while an EDITOR may stage layout moves).
+  `metamodel-diagram.svelte.ts` funnels all four of its staging gestures
+  (drag, auto-arrange, rename/delete key migration, undo) through one private
+  `stageMove` choke point that fires the acquire — fire-and-forget, deduped by
+  an in-flight flag, so a drag burst costs one `/locks` call and never blocks on
+  it — and reads "already held" from the checkout registry rather than a local
+  flag, so a lease surrendered by a commit/discard/close re-arms it.
+  `acquireMetamodelLease` itself COALESCES concurrent flights, because one
+  gesture reaches both surfaces (a diagram rename migrates a layout key AND
+  writes the buffer): two in-flight acquires would bump the module generation
+  past each other and mint two server-side leases on the singleton resource,
+  one of which never reaches the registry and so could never be released. A peer
   conflict turns the editor read-only with the holder's email and a Retry,
   keeping every character already typed; a restored draft therefore opens
-  editable and only discovers a peer's lease on the first keystroke. `mm` is
+  editable and only discovers a peer's lease on the first keystroke. On the
+  layout half the same conflict keeps the drag LOCAL and **un-stages** the moves
+  the optimistic window recorded (an op that can never hold its lease would
+  poison every later batch); the holder is reported through the editor module,
+  so there is one `lockedBy`, one strip, and one Retry for both surfaces. `mm` is
   excluded from `isProjectQuiet()`'s lock term (mirroring the backend's
   `is_model_resource`), or the editor's own lease would disable Revert-to-commit
   the moment someone opened the tab. `checkout.svelte.ts`'s
