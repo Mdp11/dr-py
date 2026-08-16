@@ -1,25 +1,22 @@
-import {
-	diffMetamodel,
-	getMetamodelRaw,
-	lintMetamodel,
-	rebindMetamodel as rebindMetamodelApi
-} from '$lib/api/metamodel';
+import { diffMetamodel, getMetamodelRaw, lintMetamodel } from '$lib/api/metamodel';
 import { ApiError } from '$lib/api/errors';
-import type { MetamodelDiff, MetamodelLintError, Rebind } from '$lib/api/types';
+import type { MetamodelDiff, MetamodelLintError } from '$lib/api/types';
 import {
 	acquireMetamodelLease,
 	dropMetamodelLease,
 	getMetamodelLockHolder
 } from './metamodel-lease.svelte';
 import { getRole } from './checkout.svelte';
-import { getModelRev } from './model.svelte';
-import { onMetamodelCommitted, registerMetamodelDraftProvider } from './metamodel-stage.svelte';
-import { isProjectQuiet } from './quiet';
+import {
+	onMetamodelCommitted,
+	onMetamodelDiscardAll,
+	registerMetamodelDraftProvider
+} from './metamodel-stage.svelte';
 
 /**
  * The live metamodel editor's state (Phase 5) — buffer, draft, lint,
- * preview, rebind. COMPOSES the `mm` lease module: the lease is acquired on
- * the first divergent edit and released on close/discard/successful rebind.
+ * preview. COMPOSES the `mm` lease module: the lease is acquired on
+ * the first divergent edit and released on close/discard/committed rebind.
  * This module never re-implements lease logic and adds no competing guard
  * around lease calls (the lease module's generation guard is the only one
  * for that concern); `_gen` below guards only this module's OWN async
@@ -27,7 +24,7 @@ import { isProjectQuiet } from './quiet';
  *
  * Draft safety: the dirty buffer mirrors to localStorage per project
  * (`ui.metamodel.draft.<projectId>`), debounced; it survives refreshes and
- * is cleared only by a successful rebind that adopted it, or an explicit
+ * is cleared only by a committed rebind that adopted it, or an explicit
  * discard. The lease does NOT survive a refresh — it re-acquires on the next
  * edit, so a restored draft opens EDITABLE even under a peer's lease; the
  * first keystroke's acquire is what discovers the conflict, and only then
@@ -70,6 +67,14 @@ let _preview = $state<MetamodelDiff | null>(null);
 let _previewFor = $state<string | null>(null);
 let _previewing = $state(false);
 let _previewError = $state<string | null>(null);
+// VESTIGIAL since the rebind moved onto the commit batch (spec 2026-08-16):
+// nothing sets either of these any more. `commitStaged` owns the flight, and a
+// failed commit reports itself in the commit drawer (`friendlyCommitError`),
+// not here. They are still READ by everything that composed them —
+// {@link isReadOnly}, and through it `metamodel-diagram.svelte.ts`'s edit/undo
+// guards and `MetamodelDiagram.svelte`'s "editing is paused" label — so
+// retiring them is a cleanup of its own rather than part of deleting the dead
+// rebind route's caller.
 let _rebinding = $state(false);
 let _rebindError = $state<string | null>(null);
 let _lockedBy = $state<string | null>(null);
@@ -128,7 +133,9 @@ export function isMetamodelEditorDirty(): boolean {
  * can still arrive is a straggler that raced CodeMirror's read-only
  * reconfigure — and those characters live in the editor's document either
  * way. Dropping them here would desync the buffer from what the user sees;
- * `commitMetamodelRebind` instead keeps a moved buffer safe. */
+ * the commit path instead keeps a moved buffer safe (`commitStaged` captures
+ * the blob it SENDS, and the {@link onMetamodelCommitted} listener below
+ * adopts only that text as the new baseline). */
 function isEditBlocked(): boolean {
 	return _phase !== 'ready' || getRole() !== 'owner' || _lockedBy !== null;
 }
@@ -253,9 +260,10 @@ export function retryMetamodelLease(): void {
 }
 
 export async function previewMetamodelChanges(): Promise<void> {
-	// `_rebinding` (F-1): preview and rebind are mutually exclusive in flight.
-	// A preview overlapping a rebind computes against the PRE-rebind metamodel
-	// and would re-arm Rebind with that stale diff after the rebind spent it.
+	// `_rebinding` (F-1): preview and an in-flight rebind were mutually
+	// exclusive, because a preview overlapping one computes against the
+	// PRE-rebind metamodel. The flag is vestigial now (see its declaration) —
+	// the guard is kept as-is rather than half-removed with it.
 	if (_phase !== 'ready' || _previewing || _rebinding) return;
 	const gen = _gen;
 	const buf = _buffer;
@@ -277,104 +285,13 @@ export async function previewMetamodelChanges(): Promise<void> {
 	}
 }
 
-function rebindErrorMessage(e: unknown): string {
-	// Three distinct 409 refusals share one status, so branch on the exact
-	// structured detail rather than a loose `detail.includes('lock')`.
-	if (e instanceof ApiError && e.status === 409) {
-		const body = (typeof e.body === 'object' && e.body ? e.body : {}) as {
-			detail?: unknown;
-			holder_email?: unknown;
-		};
-		const detail = typeof body.detail === 'string' ? body.detail : '';
-		if (detail === 'metamodel locked') {
-			const who =
-				typeof body.holder_email === 'string' && body.holder_email
-					? body.holder_email
-					: 'another user';
-			return `Metamodel locked by ${who}. Try again when they finish.`;
-		}
-		if (detail.startsWith('active locks')) {
-			return 'The project is not quiet (a lock is active). Try again once edits are committed.';
-		}
-		return 'The model changed since you previewed — re-run the preview and try again.';
-	}
-	if (e instanceof ApiError && e.status === 422) return 'The candidate metamodel is invalid.';
-	return 'Rebind failed; no changes were applied.';
-}
-
 /**
- * SUPERSEDED (spec 2026-08-16) by the commit flow: a dirty buffer is staged as
- * a `metamodel.rebind` op (see the provider registration at the bottom of this
- * module) and lands through `POST /commits`. The route this calls is GONE, so
- * every call now 404s. It survives only until Task 12 deletes MetamodelTab's
- * Rebind button — its one caller — after which this function, its
- * `rebindMetamodelApi` import and the `_rebinding`/`_rebindError` flags go with
- * it. Its success body has already been ported to the `onMetamodelCommitted`
- * listener below; do not extend it, and do not call it from anything new.
+ * Abandon the draft: adopt the baseline, drop the stored copy, hand the lease
+ * back. Called from the metamodel tab's "Discard changes" (paired there with
+ * `discardStagedNodeMoves`, the moves half of the same family) and, through
+ * the {@link onMetamodelDiscardAll} registration at the bottom of this module,
+ * from the commit drawer's Discard-all and its Metamodel section's button.
  */
-export async function commitMetamodelRebind(message: string): Promise<Rebind | null> {
-	const view = getMetamodelEditor();
-	// `_previewing` (F-1, the other direction): previewCurrent is still true
-	// from the LAST preview while a fresh one is in flight, so without this
-	// guard the rebind launches and the in-flight diff later re-arms Rebind
-	// against the metamodel the rebind just replaced.
-	if (
-		getRole() !== 'owner' ||
-		!isProjectQuiet() ||
-		!view.previewCurrent ||
-		_rebinding ||
-		_previewing
-	) {
-		return null;
-	}
-	const gen = _gen;
-	// Capture the text that is actually SENT before the await (the precedent
-	// is previewMetamodelChanges' `const buf`). `_buffer` can move while the
-	// request is in flight — a straggler keystroke that raced the read-only
-	// reconfigure, or a Discard — and adopting the POST-await buffer as the
-	// baseline would call that moved text "saved" when the server never saw
-	// it: dirty flips false, the tab loses its Discard button, and the draft
-	// key is deleted, leaving the work in the CodeMirror doc alone.
-	const sent = _buffer;
-	_rebinding = true;
-	_rebindError = null;
-	try {
-		const res = await rebindMetamodelApi(sent, { baseRev: getModelRev(), message });
-		if (gen !== _gen) return null;
-		// What the project is bound to now is `sent`, whatever the buffer holds.
-		_baseline = sent;
-		// A rebind always stores a blob, so a session that loaded through the
-		// degraded "serialized" fallback is no longer looking at one.
-		_source = 'stored';
-		// The preview described `sent` against the PREVIOUS metamodel — it is
-		// spent in either branch, so Rebind goes dead until a fresh preview.
-		_preview = null;
-		_previewFor = null;
-		// Not a draft restored from a past session in either branch: any
-		// remaining divergence was typed in this one.
-		_draftRestored = false;
-		if (_buffer === sent) {
-			clearDraftStorage();
-		} else {
-			// The buffer moved mid-flight: those characters are unreviewed local
-			// changes ON TOP of the freshly bound metamodel, so the editor stays
-			// dirty and keeps its draft. Flush it NOW rather than waiting for the
-			// debounce — a mid-flight Discard actively removed the key, and a
-			// close before the timer fires would otherwise take the work with it.
-			writeDraftNow();
-		}
-		_leaseHeld = false;
-		void dropMetamodelLease();
-		return res;
-	} catch (e) {
-		if (gen !== _gen) return null;
-		_rebindError = rebindErrorMessage(e);
-		return null;
-	} finally {
-		if (gen === _gen) _rebinding = false;
-	}
-}
-
 export function discardMetamodelDraft(): void {
 	_buffer = _baseline;
 	_draftRestored = false;
@@ -439,8 +356,8 @@ export function closeMetamodelEditor(): void {
 // --- commit-flow seam (spec 2026-08-16) ------------------------------------
 //
 // The buffer is staged commit CONTENT now: a dirty draft becomes a
-// `metamodel.rebind` op in the next `POST /commits` batch. Both halves are
-// REGISTRATIONS on `metamodel-stage.svelte.ts` rather than direct calls,
+// `metamodel.rebind` op in the next `POST /commits` batch. All three halves
+// are REGISTRATIONS on `metamodel-stage.svelte.ts` rather than direct calls,
 // because checkout is what builds and lands that batch and it must never
 // import this module (`checkout → stage → editor → checkout`). Module scope,
 // not `initMetamodelEditor`: the stage may be asked for the batch before —
@@ -454,8 +371,8 @@ registerMetamodelDraftProvider(() => ({
 }));
 
 onMetamodelCommitted(({ rebound, blob }) => {
-	// The commit-flow port of the superseded commitMetamodelRebind's success
-	// body: the server has adopted `blob`, whatever the buffer holds now.
+	// The commit-flow port of the deleted rebind route's success body: the
+	// server has adopted `blob`, whatever the buffer holds now.
 	if (blob === null || _phase !== 'ready') return;
 	_baseline = blob;
 	// A rebind always stores a blob, so a session that loaded through the
@@ -476,6 +393,13 @@ onMetamodelCommitted(({ rebound, blob }) => {
 	_leaseHeld = false; // the commit surrendered the mm token server-side
 	void rebound; // metamodel/issue refetch is checkout's adoptReboundMetamodel
 });
+
+// Discard-all (the commit drawer's button, via `checkout.svelte.ts`'s
+// `discardAll`). The moves half is wiped by checkout directly — it lives in the
+// stage module — and this listener is how the DRAFT half is reached without
+// checkout importing this module. Same call the tab's own Discard makes, so
+// the two surfaces cannot drift.
+onMetamodelDiscardAll(() => discardMetamodelDraft());
 
 /** Full reset for tests (does NOT touch the checkout registry). */
 export function resetMetamodelEditor(): void {

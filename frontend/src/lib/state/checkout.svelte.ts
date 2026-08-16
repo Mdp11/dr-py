@@ -44,9 +44,11 @@ import {
 import { setMetamodel } from './metamodel.svelte';
 import {
 	clearStagedNodeMoves,
+	discardStagedNodeMoves,
 	getStagedMetamodelDepth,
 	getStagedMetamodelOps,
-	notifyMetamodelCommitted
+	notifyMetamodelCommitted,
+	notifyMetamodelDiscardAll
 } from './metamodel-stage.svelte';
 import {
 	clearStagedArtifacts,
@@ -350,8 +352,8 @@ export async function commitStaged(message: string, ackErrors: boolean): Promise
 	// text after the await — a straggler keystroke, a Discard. Everything
 	// downstream (the lock set, the request, and the post-success notify that
 	// tells the editor which blob became the baseline) must describe the ops
-	// that were actually SENT, which is exactly what the superseded
-	// `commitMetamodelRebind` used its own `sent` capture for. On the FAILURE
+	// that were actually SENT, which is exactly what the retired rebind route's
+	// caller used its own `sent` capture for. On the FAILURE
 	// path nothing below runs at all, so a commit that never landed can never
 	// clear a buffer it did not adopt.
 	const mmOps = getStagedMetamodelOps();
@@ -841,8 +843,8 @@ export function discardElementCascade(id: string): Promise<void> {
 }
 
 /**
- * Abandon everything: revert all staged edits (all three buffers — the view
- * journal is wiped too, via {@link discardStagedView}, alongside the model
+ * Abandon everything: revert all staged edits (all FOUR families — the view
+ * journal and the metamodel draft/moves are wiped too, alongside the model
  * and artifact buffers) and release every token EXCEPT the leases of
  * artifacts still open in an editor tab — "discard" abandons EDITS, not
  * check-outs the user can see as open editors. A kept token must cover ONLY
@@ -866,6 +868,15 @@ export async function discardAll(): Promise<void> {
 	// view store's discard listener (a GET /view) to reconcile — that is why it
 	// is async and why this must not be a bare fire-and-forget call.
 	await discardStagedView();
+	// Metamodel family, MOVES FIRST. The draft half is reached through a
+	// listener the editor registers (a direct call would close the cycle
+	// checkout → stage → editor → checkout — see metamodel-stage's docstring),
+	// and that listener bottoms out in `dropMetamodelLease`, whose
+	// {@link releaseMetamodelLease} refuses while `getStagedMetamodelDepth() > 0`.
+	// Notifying before the moves were wiped would therefore leave the `mm` lease
+	// held by a session with nothing staged to justify it.
+	discardStagedNodeMoves();
+	notifyMetamodelDiscardAll();
 	const keepResources = openArtifactResources();
 	// ephemeral partition bookkeeping, not reactive state
 	// eslint-disable-next-line svelte/prefer-svelte-reactivity

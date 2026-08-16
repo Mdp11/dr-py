@@ -7,11 +7,13 @@ import { getTableDraft, hasDirtyTableDrafts } from './table-editor.svelte';
 import { hasStagedOps } from './model.svelte';
 import { getStagedArtifactDepth } from './artifact-edits.svelte';
 import { getStagedViewDepth } from './view-edits.svelte';
+import { getStagedMetamodelDepth } from './metamodel-stage.svelte';
 
 /**
  * True when leaving the workspace would lose work the server has not seen:
  * staged (uncommitted) model edits, staged (uncommitted) ARTIFACT ops, staged
- * (uncommitted) VIEW ops, or an unsaved table / navigation / snippet draft.
+ * (uncommitted) VIEW ops, staged (uncommitted) METAMODEL ops, or an unsaved
+ * table / navigation / snippet draft.
  * Drives the workspace unload guard (`beforeNavigate` in the project page).
  *
  * The artifact term is not redundant with the draft terms: saving an artifact
@@ -24,15 +26,22 @@ import { getStagedViewDepth } from './view-edits.svelte';
  * between — so without it a view-ONLY batch (rename a folder, close the tab)
  * walks out unguarded while the equivalent model or artifact batch is caught.
  *
- * There is deliberately NO metamodel-editor term: that draft mirrors to
- * localStorage and is restored on the next open, so navigating away loses
- * nothing and prompting for it would be a false alarm.
+ * The metamodel term is NEW (spec 2026-08-16) and reverses the note that used
+ * to stand here ("deliberately NO metamodel-editor term: the draft mirrors to
+ * localStorage, so navigating away loses nothing"). Both halves of that family
+ * — the YAML buffer and the diagram's staged node moves — are commit CONTENT
+ * now: they ride the next `POST /commits` batch exactly like a staged model,
+ * artifact or view op. They do still restore from localStorage, but so would a
+ * table draft; what the guard is really about is that leaving the workspace
+ * abandons an uncommitted batch, and answering differently for one of the four
+ * families is the inconsistency, not the prompt.
  */
 export function hasUnsavedWork(): boolean {
 	return (
 		hasStagedOps() ||
 		getStagedArtifactDepth() > 0 ||
 		getStagedViewDepth() > 0 ||
+		getStagedMetamodelDepth() > 0 ||
 		hasDirtyTableDrafts() ||
 		hasDirtyNavDrafts() ||
 		hasDirtySnippetDrafts() ||
@@ -47,13 +56,16 @@ export function hasUnsavedWork(): boolean {
  *
  * The metamodel tab is the one kind with no per-tab draft record — it is a
  * singleton editor with module-level state — so it answers from its own
- * buffer-vs-baseline check instead of the draft lookup below.
+ * buffer-vs-baseline check instead of the draft lookup below, PLUS the staged
+ * depth: a user who only dragged diagram nodes has uncommitted metamodel work
+ * that the buffer check alone reports as clean (the moves live in
+ * `metamodel-stage.svelte.ts`, not in the editor's buffer).
  */
 export function isTabDirty(
 	kind: 'navigation' | 'table' | 'snippet' | 'metamodel' | 'custom_export',
 	tabId: string
 ): boolean {
-	if (kind === 'metamodel') return isMetamodelEditorDirty();
+	if (kind === 'metamodel') return isMetamodelEditorDirty() || getStagedMetamodelDepth() > 0;
 	const draft =
 		kind === 'table'
 			? getTableDraft(tabId)

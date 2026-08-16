@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
 	commitStaged,
+	discardAll,
 	isCheckedOutByMe,
 	releaseMetamodelLease,
 	resetCheckout,
@@ -18,6 +19,7 @@ import {
 	getStagedNodeMoves,
 	initMetamodelStage,
 	onMetamodelCommitted,
+	onMetamodelDiscardAll,
 	registerMetamodelDraftProvider,
 	stageNodeMove
 } from '../metamodel-stage.svelte';
@@ -301,6 +303,34 @@ describe('the metamodel half of the commit batch', () => {
 
 		expect(fetchMm).not.toHaveBeenCalled();
 		expect(getActiveMetamodel()).toBeNull();
+	});
+});
+
+describe('discardAll (metamodel half)', () => {
+	it('wipes staged moves and fires the discard listener the editor registers', async () => {
+		vi.spyOn(api, 'acquireLocks').mockResolvedValue(MM_LEASE);
+		vi.spyOn(api, 'releaseLock').mockResolvedValue(undefined);
+		await acquireMetamodelLease();
+		// Stand-in for `metamodel-editor.svelte.ts`'s registration: checkout must
+		// reach the YAML draft through a LISTENER, never a direct import (the
+		// editor imports checkout, so a direct call closes the cycle
+		// checkout → stage → editor → checkout).
+		let dirty = true;
+		registerMetamodelDraftProvider(() => ({ dirty, blob: 'elements: []\n' }));
+		const off = onMetamodelDiscardAll(() => {
+			dirty = false;
+		});
+		stageNodeMove('el:A', { x: 1, y: 2 });
+
+		await discardAll();
+		off();
+
+		expect(getStagedNodeMoves().size).toBe(0);
+		expect(dirty).toBe(false);
+		expect(getStagedMetamodelOps()).toEqual([]);
+		// Nothing metamodel-shaped is staged any more, so the `mm` lease goes
+		// back with every other token the discard released.
+		expect(isCheckedOutByMe('mm')).toBe(false);
 	});
 });
 

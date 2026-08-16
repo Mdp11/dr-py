@@ -11,11 +11,12 @@
 import { getStagedDepth } from './model.svelte';
 import { getStagedArtifactDepth } from './artifact-edits.svelte';
 import { getStagedViewDepth } from './view-edits.svelte';
+import { getStagedMetamodelDepth } from './metamodel-stage.svelte';
 import { hasModelLocks } from './realtime.svelte';
 
 /**
  * True when nothing uncommitted or checked-out stands in the way of rewriting
- * the model wholesale. Four terms, each for its own reason:
+ * the model wholesale. Five terms, each for its own reason:
  *
  *  - **no staged MODEL ops** — a revert/rebind moves `model_rev` under them,
  *    so the next `POST /commits` would 409 on a stale `base_rev`.
@@ -25,6 +26,11 @@ import { hasModelLocks } from './realtime.svelte';
  *  - **no staged VIEW ops** — folder renames/moves/placements ride the SAME
  *    `POST /commits` batch too, so a revert/rebind invalidates them by the
  *    same rev bump as staged model/artifact ops.
+ *  - **no staged METAMODEL ops** — the YAML draft and the diagram's node moves
+ *    ride the same commit batch (spec 2026-08-16), so a revert invalidates
+ *    them by the same rev bump. The draft half answers through the provider
+ *    the metamodel editor registers, so a CLOSED tab contributes nothing;
+ *    staged moves outlive the tab and keep counting.
  *  - **no MODEL-scope lease anywhere in the project** — a peer mid-edit would
  *    have the ground moved under them. Deliberately {@link hasModelLocks} and
  *    not `getLockState().size`: an `art:` lease means some user has an artifact
@@ -39,6 +45,7 @@ export function isProjectQuiet(): boolean {
 		getStagedDepth() === 0 &&
 		getStagedArtifactDepth() === 0 &&
 		getStagedViewDepth() === 0 &&
+		getStagedMetamodelDepth() === 0 &&
 		!hasModelLocks()
 	);
 }

@@ -25,6 +25,12 @@ import { openArtifactTab, resetWorkspaceTabs } from '../workspace.svelte';
 import { resetArtifacts } from '../artifacts.svelte';
 import { resetArtifactEdits, stageArtifactCreate } from '../artifact-edits.svelte';
 import { resetViewEdits, stageViewOp } from '../view-edits.svelte';
+import {
+	clearStagedNodeMoves,
+	initMetamodelStage,
+	registerMetamodelDraftProvider,
+	stageNodeMove
+} from '../metamodel-stage.svelte';
 
 const EMPTY_PAGE = {
 	columns: [],
@@ -45,6 +51,11 @@ beforeEach(() => {
 	resetArtifacts();
 	resetArtifactEdits();
 	resetViewEdits();
+	// Clear BEFORE re-opening the stage: `initMetamodelStage` restores whatever
+	// the previous case left in the localStorage mirror.
+	localStorage.clear();
+	initMetamodelStage('p1');
+	clearStagedNodeMoves();
 	vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
 	// ensureSnippetDraft()/updateSnippetCode() lint in the background; stub it so
 	// the dirty-tracking assertions here don't escape to a real fetch.
@@ -140,6 +151,28 @@ describe('hasUnsavedWork', () => {
 		resetViewEdits();
 		expect(hasUnsavedWork()).toBe(false);
 	});
+
+	it('is true for a staged METAMODEL node move (spec 2026-08-16)', () => {
+		// Staged moves outlive the metamodel tab (they live in the stage module,
+		// not behind the editor's provider), so a drag-then-close leaves work the
+		// server has never seen with no draft anywhere to mark it — exactly the
+		// hole the view term closes for folder gestures.
+		expect(hasUnsavedWork()).toBe(false);
+		stageNodeMove('el:Pump', { x: 1, y: 2 });
+		expect(hasUnsavedWork()).toBe(true);
+
+		clearStagedNodeMoves();
+		expect(hasUnsavedWork()).toBe(false);
+	});
+
+	it('is true for a dirty metamodel YAML draft', () => {
+		// The draft mirrors to localStorage, but so does every other staged
+		// family's buffer now; the guard is what keeps leaving the workspace
+		// consistent across all four.
+		registerMetamodelDraftProvider(() => ({ dirty: true, blob: 'elements: []\n' }));
+		expect(hasUnsavedWork()).toBe(true);
+		registerMetamodelDraftProvider(() => ({ dirty: false, blob: '' }));
+	});
 });
 
 describe('isTabDirty / isArtifactDirty', () => {
@@ -174,6 +207,15 @@ describe('isTabDirty / isArtifactDirty', () => {
 		expect(isArtifactDirty('table', 'a1')).toBe(false); // open but pristine
 		updateTableDefinition('tbl:a1', template.definition);
 		expect(isArtifactDirty('table', 'a1')).toBe(true); // edited
+	});
+
+	it('the metamodel tab is dirty while a node move is staged, with no dirty buffer', () => {
+		// The tab marker has to cover BOTH halves of the family: a user who only
+		// dragged nodes has uncommitted metamodel work, and the buffer-vs-baseline
+		// check alone reports it clean.
+		expect(isTabDirty('metamodel', 'metamodel')).toBe(false);
+		stageNodeMove('el:Pump', { x: 4, y: 5 });
+		expect(isTabDirty('metamodel', 'metamodel')).toBe(true);
 	});
 
 	it('snippet drafts drive isTabDirty/isArtifactDirty/hasUnsavedWork', async () => {

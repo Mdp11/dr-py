@@ -7,7 +7,6 @@ import {
 	getMetamodel,
 	getMetamodelRaw,
 	lintMetamodel,
-	rebindMetamodel,
 	uploadMetamodel
 } from '../metamodel';
 import { server } from './server';
@@ -163,21 +162,6 @@ const diffPayload = {
 	}
 };
 
-const rebindPayload = {
-	model_rev: 8,
-	metamodel_id: 'mm-2',
-	validation_error_count: 1,
-	issue_counts: { conformance: 1 },
-	issues: [
-		{
-			severity: 'error',
-			message: 'x is an instance of unknown type',
-			target_ids: ['x'],
-			category: 'conformance'
-		}
-	]
-};
-
 describe('metamodel swap client', () => {
 	it('diffMetamodel posts the blob as YAML and parses the diff', async () => {
 		let ct: string | null = null;
@@ -195,24 +179,5 @@ describe('metamodel swap client', () => {
 		expect(result.now_failing[0].target_ids).toEqual(['x']);
 		expect(result.unchanged_count).toBe(3);
 		expect(result.candidate_error_count).toBe(4);
-	});
-
-	it('rebindMetamodel sends base_rev + message as query params', async () => {
-		let url: URL | null = null;
-		let text = '';
-		server.use(
-			http.post(`${BASE}/metamodel/rebind`, async ({ request }) => {
-				url = new URL(request.url);
-				text = await request.text();
-				return HttpResponse.json(rebindPayload);
-			})
-		);
-		const result = await rebindMetamodel('elements: []\n', { baseRev: 7, message: 'swap' }, cfg);
-		expect(url!.searchParams.get('base_rev')).toBe('7');
-		expect(url!.searchParams.get('message')).toBe('swap');
-		expect(text).toBe('elements: []\n');
-		expect(result.model_rev).toBe(8);
-		expect(result.metamodel_id).toBe('mm-2');
-		expect(result.issues[0].category).toBe('conformance');
 	});
 });

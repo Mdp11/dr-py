@@ -3,7 +3,6 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { isCheckedOutByMe, resetCheckout, setProjectInfo } from '../checkout.svelte';
 import {
 	closeMetamodelEditor,
-	commitMetamodelRebind,
 	discardMetamodelDraft,
 	editMetamodelBuffer,
 	getMetamodelEditor,
@@ -15,10 +14,11 @@ import {
 	resetMetamodelEditor,
 	retryMetamodelLease
 } from '../metamodel-editor.svelte';
+import { getStagedMetamodelOps, notifyMetamodelDiscardAll } from '../metamodel-stage.svelte';
 import * as mmApi from '$lib/api/metamodel';
 import * as lockApi from '$lib/api/checkout';
-import { ApiError, ConflictError } from '$lib/api/errors';
-import type { LockResponse, MetamodelDiff, RawMetamodel, Rebind } from '$lib/api/types';
+import { ConflictError } from '$lib/api/errors';
+import type { LockResponse, MetamodelDiff, RawMetamodel } from '$lib/api/types';
 
 /**
  * The live metamodel editor's state module (Phase 5). Mirrors
@@ -70,14 +70,6 @@ const DIFF: MetamodelDiff = {
 		relationship_types: { added: [], removed: [], changed: [] }
 	}
 };
-const REBIND: Rebind = {
-	model_rev: 5,
-	metamodel_id: 'mm2',
-	validation_error_count: 0,
-	issue_counts: {},
-	issues: []
-};
-
 function deferred<T>(): {
 	promise: Promise<T>;
 	resolve: (v: T) => void;
@@ -96,17 +88,6 @@ function deferred<T>(): {
  * network when a timer happens to fire. */
 function stubLintOk(): void {
 	vi.spyOn(mmApi, 'lintMetamodel').mockResolvedValue({ ok: true, errors: [] });
-}
-
-/** The shared pre-state for the rebind cases: ready, edited, lease granted,
- * and previewed for the CURRENT buffer (which is what unlocks a rebind). */
-async function initEditedAndPreviewed(): Promise<void> {
-	stubLintOk();
-	vi.spyOn(lockApi, 'acquireLocks').mockResolvedValue(LEASE);
-	vi.spyOn(mmApi, 'diffMetamodel').mockResolvedValue(DIFF);
-	await initMetamodelEditor(PROJECT);
-	editMetamodelBuffer(`${BASE}candidate: true\n`);
-	await previewMetamodelChanges();
 }
 
 beforeEach(() => {
@@ -302,224 +283,39 @@ describe('previewMetamodelChanges', () => {
 		// The stale diff is kept on screen, just no longer current.
 		expect(v.preview).toEqual(DIFF);
 	});
-
-	it('does not start a preview while a rebind is in flight (F-1)', async () => {
-		// The stale-preview race: a preview launched (or resolving) around a
-		// rebind would compute against the PRE-rebind metamodel, then re-arm
-		// Rebind with that stale diff after the rebind nulled it. Preview and
-		// rebind are mutually exclusive in flight, so the preview must refuse.
-		await initEditedAndPreviewed();
-		const slow = deferred<Rebind>();
-		vi.spyOn(mmApi, 'rebindMetamodel').mockImplementation(() => slow.promise);
-		const diff = vi.spyOn(mmApi, 'diffMetamodel').mockResolvedValue(DIFF);
-		diff.mockClear();
-
-		const rebinding = commitMetamodelRebind('msg');
-		await previewMetamodelChanges(); // must be a no-op mid-rebind
-		expect(diff).not.toHaveBeenCalled();
-
-		slow.resolve(REBIND);
-		await rebinding;
-		// The rebind spent the old preview and no stale one snuck back in:
-		// Rebind stays dead until a fresh preview.
-		expect(getMetamodelEditor().previewCurrent).toBe(false);
-	});
 });
 
-describe('commitMetamodelRebind', () => {
-	it('adopts the buffer as the new baseline, clears the draft and releases the lease', async () => {
-		vi.useFakeTimers();
+describe('the commit-flow seam (spec 2026-08-16)', () => {
+	it('stages the dirty buffer as the rebind blob through the registered provider', async () => {
 		stubLintOk();
 		vi.spyOn(lockApi, 'acquireLocks').mockResolvedValue(LEASE);
-		const release = vi.spyOn(lockApi, 'releaseLock').mockResolvedValue(undefined);
-		vi.spyOn(mmApi, 'diffMetamodel').mockResolvedValue(DIFF);
-		const rebind = vi.spyOn(mmApi, 'rebindMetamodel').mockResolvedValue(REBIND);
 		await initMetamodelEditor(PROJECT);
+		expect(getStagedMetamodelOps()).toEqual([]);
 
 		editMetamodelBuffer(`${BASE}candidate: true\n`);
-		await vi.advanceTimersByTimeAsync(METAMODEL_DRAFT_DEBOUNCE_MS);
-		expect(localStorage.getItem(DRAFT_KEY)).toBe(`${BASE}candidate: true\n`);
-		await previewMetamodelChanges();
 
-		const res = await commitMetamodelRebind('swap it');
-
-		expect(res?.model_rev).toBe(5);
-		expect(rebind).toHaveBeenCalledWith(`${BASE}candidate: true\n`, {
-			baseRev: 0,
-			message: 'swap it'
-		});
-		const v = getMetamodelEditor();
-		expect(v.dirty).toBe(false);
-		expect(v.buffer).toBe(`${BASE}candidate: true\n`);
-		expect(v.preview).toBeNull();
-		expect(v.previewCurrent).toBe(false);
-		expect(v.rebinding).toBe(false);
-		expect(v.rebindError).toBeNull();
-		expect(localStorage.getItem(DRAFT_KEY)).toBeNull();
-		expect(release).toHaveBeenCalledWith('t-mm', undefined);
+		expect(getStagedMetamodelOps()).toEqual([
+			{ kind: 'metamodel.rebind', blob: `${BASE}candidate: true\n` }
+		]);
 	});
 
-	it('upgrades a degraded "serialized" source to "stored" once a rebind stored a blob', async () => {
-		vi.spyOn(mmApi, 'getMetamodelRaw').mockResolvedValue({ blob: BASE, source: 'serialized' });
-		vi.spyOn(lockApi, 'releaseLock').mockResolvedValue(undefined);
-		await initEditedAndPreviewed();
-		expect(getMetamodelEditor().source).toBe('serialized');
-		vi.spyOn(mmApi, 'rebindMetamodel').mockResolvedValue(REBIND);
-
-		await commitMetamodelRebind('swap it');
-
-		// The rebind DID store a blob, so the "re-serialized source" chip must
-		// stop claiming otherwise without waiting for the tab to be reopened.
-		expect(getMetamodelEditor().source).toBe('stored');
-	});
-
-	it('flips the surface readOnly flag for the whole rebind flight', async () => {
-		vi.spyOn(lockApi, 'releaseLock').mockResolvedValue(undefined);
-		await initEditedAndPreviewed();
-		const slow = deferred<Rebind>();
-		vi.spyOn(mmApi, 'rebindMetamodel').mockImplementation(() => slow.promise);
-		expect(getMetamodelEditor().readOnly).toBe(false);
-
-		const rebinding = commitMetamodelRebind('m');
-
-		// Read-only for the WHOLE flight: the CodeMirror compartment and the
-		// tab's buttons both key off this, so no keystroke and no Discard can
-		// be aimed at a document whose adoption is already in flight.
-		expect(getMetamodelEditor().readOnly).toBe(true);
-		slow.resolve(REBIND);
-		await rebinding;
-
-		expect(getMetamodelEditor().readOnly).toBe(false);
-	});
-
-	it('keeps a buffer typed DURING the flight dirty instead of adopting it as the baseline', async () => {
-		vi.useFakeTimers();
-		vi.spyOn(lockApi, 'releaseLock').mockResolvedValue(undefined);
-		await initEditedAndPreviewed();
-		const slow = deferred<Rebind>();
-		const rebind = vi.spyOn(mmApi, 'rebindMetamodel').mockImplementation(() => slow.promise);
-		const SENT = `${BASE}candidate: true\n`;
-		const TYPED = `${SENT}typed: mid-flight\n`;
-
-		const rebinding = commitMetamodelRebind('m');
-		// A straggler that raced CodeMirror's read-only reconfigure: the state
-		// layer keeps it (the editor's document holds it either way) — dropping
-		// it would desync the buffer from what the user is looking at.
-		editMetamodelBuffer(TYPED);
-		slow.resolve(REBIND);
-		expect(await rebinding).not.toBeNull();
-
-		// The server bound the PRE-typing text...
-		expect(rebind).toHaveBeenCalledWith(SENT, { baseRev: 0, message: 'm' });
-		const v = getMetamodelEditor();
-		// ...so the typed lines are unreviewed local changes on top of it, not
-		// something the rebind saved.
-		expect(v.buffer).toBe(TYPED);
-		expect(v.dirty).toBe(true);
-		// Flushed immediately, not on the debounce: a tab closed before the
-		// timer fires must not take the work with it.
-		expect(localStorage.getItem(DRAFT_KEY)).toBe(TYPED);
-		// Coherent, not merely non-lossy: the spent preview is gone, so Rebind
-		// is dead until the user previews what they now have.
-		expect(v.preview).toBeNull();
-		expect(v.previewCurrent).toBe(false);
-		expect(v.draftRestored).toBe(false);
-		expect(v.rebindError).toBeNull();
-		expect(v.rebinding).toBe(false);
-	});
-
-	it('leaves a discard DURING the flight as dirty pre-rebind text, not as the new baseline', async () => {
-		vi.useFakeTimers();
-		vi.spyOn(lockApi, 'releaseLock').mockResolvedValue(undefined);
-		await initEditedAndPreviewed();
-		const slow = deferred<Rebind>();
-		vi.spyOn(mmApi, 'rebindMetamodel').mockImplementation(() => slow.promise);
-
-		const rebinding = commitMetamodelRebind('m');
-		// The surface disables this button while `rebinding`; if it is reached
-		// anyway, the resolving rebind must NOT re-adopt the old text as the
-		// baseline — that would present the pre-rebind YAML as current with
-		// nothing marking it stale.
-		discardMetamodelDraft();
-		slow.resolve(REBIND);
-		expect(await rebinding).not.toBeNull();
-
-		const v = getMetamodelEditor();
-		expect(v.buffer).toBe(BASE);
-		expect(v.dirty).toBe(true);
-		expect(localStorage.getItem(DRAFT_KEY)).toBe(BASE);
-		expect(v.previewCurrent).toBe(false);
-	});
-
-	it('maps each 409 refusal shape and a 422 to its own message', async () => {
-		await initEditedAndPreviewed();
-		const rebind = vi.spyOn(mmApi, 'rebindMetamodel').mockResolvedValue(REBIND);
-
-		rebind.mockRejectedValue(
-			new ConflictError(409, { detail: 'metamodel locked', holder_email: 'p@x.com' }, 'conflict')
-		);
-		expect(await commitMetamodelRebind('m')).toBeNull();
-		expect(getMetamodelEditor().rebindError).toContain('p@x.com');
-
-		rebind.mockRejectedValue(
-			new ConflictError(
-				409,
-				{ detail: 'active locks; rebind requires a quiet project' },
-				'conflict'
-			)
-		);
-		expect(await commitMetamodelRebind('m')).toBeNull();
-		expect(getMetamodelEditor().rebindError).toContain('not quiet');
-
-		rebind.mockRejectedValue(
-			new ConflictError(409, { detail: 'stale base_rev', model_rev: 9 }, 'conflict')
-		);
-		expect(await commitMetamodelRebind('m')).toBeNull();
-		expect(getMetamodelEditor().rebindError).toContain('re-run');
-
-		rebind.mockRejectedValue(new ApiError(422, { detail: 'bad yaml' }, 'unprocessable'));
-		expect(await commitMetamodelRebind('m')).toBeNull();
-		expect(getMetamodelEditor().rebindError).toContain('invalid');
-
-		// Every refusal left the editor rebindable again, not wedged.
-		expect(getMetamodelEditor().rebinding).toBe(false);
-		expect(getMetamodelEditor().previewCurrent).toBe(true);
-	});
-
-	it('refuses without a preview of the CURRENT buffer and sends nothing', async () => {
+	it('discards the draft when checkout announces a discard-all', async () => {
+		// The DISCARD half of the seam: `checkout.svelte.ts`'s `discardAll` can
+		// only reach this module through the listener registered at the bottom of
+		// it (a direct import would close checkout → stage → editor → checkout),
+		// so the registration itself is the thing under test.
 		stubLintOk();
 		vi.spyOn(lockApi, 'acquireLocks').mockResolvedValue(LEASE);
-		const rebind = vi.spyOn(mmApi, 'rebindMetamodel').mockResolvedValue(REBIND);
+		vi.spyOn(lockApi, 'releaseLock').mockResolvedValue(undefined);
 		await initMetamodelEditor(PROJECT);
-		editMetamodelBuffer(`${BASE}unpreviewed`);
-
-		expect(await commitMetamodelRebind('m')).toBeNull();
-
-		expect(rebind).not.toHaveBeenCalled();
-		// A silent refusal: the button is simply not live, it is not an error.
-		expect(getMetamodelEditor().rebindError).toBeNull();
+		editMetamodelBuffer(`${BASE}candidate: true\n`);
 		expect(isMetamodelEditorDirty()).toBe(true);
-	});
 
-	it('refuses while a preview is in flight and sends nothing (F-1)', async () => {
-		// previewCurrent is still true from the LAST preview while a new one is
-		// in flight, so without an explicit `previewing` guard the rebind would
-		// launch — and the in-flight diff would later re-arm Rebind against the
-		// pre-rebind metamodel.
-		await initEditedAndPreviewed();
-		const slow = deferred<MetamodelDiff>();
-		vi.spyOn(mmApi, 'diffMetamodel').mockImplementation(() => slow.promise);
-		const rebind = vi.spyOn(mmApi, 'rebindMetamodel').mockResolvedValue(REBIND);
+		notifyMetamodelDiscardAll();
 
-		const previewing = previewMetamodelChanges(); // second preview, in flight
-		expect(await commitMetamodelRebind('m')).toBeNull();
-		expect(rebind).not.toHaveBeenCalled();
-
-		slow.resolve(DIFF);
-		await previewing;
-		// No rebind happened, so the resolved preview is still against the
-		// CURRENT metamodel and may arm Rebind normally.
-		expect(getMetamodelEditor().previewCurrent).toBe(true);
+		expect(isMetamodelEditorDirty()).toBe(false);
+		expect(getMetamodelEditor().buffer).toBe(BASE);
+		expect(getStagedMetamodelOps()).toEqual([]);
 	});
 });
 
@@ -574,7 +370,7 @@ describe('closeMetamodelEditor', () => {
 		expect(isCheckedOutByMe('mm')).toBe(false);
 	});
 
-	it('clears the in-flight preview and rebind flags so a reopen is not wedged', async () => {
+	it('clears the in-flight preview flag so a reopen is not wedged', async () => {
 		stubLintOk();
 		vi.spyOn(lockApi, 'acquireLocks').mockResolvedValue(LEASE);
 		vi.spyOn(lockApi, 'releaseLock').mockResolvedValue(undefined);
@@ -591,22 +387,14 @@ describe('closeMetamodelEditor', () => {
 
 		expect(getMetamodelEditor().previewing).toBe(false);
 
-		// The reopened editor can actually preview and rebind again.
+		// The reopened editor can actually preview again — the latched flag was
+		// the whole failure mode, since every async `finally` here is
+		// generation-guarded and a close mid-flight skips it.
 		diff.mockResolvedValue(DIFF);
-		const slowRebind = deferred<Rebind>();
-		vi.spyOn(mmApi, 'rebindMetamodel').mockImplementation(() => slowRebind.promise);
 		await initMetamodelEditor(PROJECT);
 		editMetamodelBuffer(`${BASE}y`);
 		await previewMetamodelChanges();
 		expect(getMetamodelEditor().previewCurrent).toBe(true);
-
-		const rebinding = commitMetamodelRebind('m');
-		expect(getMetamodelEditor().rebinding).toBe(true);
-		closeMetamodelEditor();
-		slowRebind.resolve(REBIND);
-
-		expect(await rebinding).toBeNull(); // the close discarded the result
-		expect(getMetamodelEditor().rebinding).toBe(false);
 	});
 
 	it('keeps the stored draft when the editor closes before the baseline loaded', async () => {

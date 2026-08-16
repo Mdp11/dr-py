@@ -16,8 +16,13 @@
 		discardAll,
 		discardArtifact,
 		discardElement,
+		discardMetamodelDraft,
+		discardStagedNodeMoves,
 		discardViewChanges,
 		getEffectiveIssues,
+		getStagedMetamodelDepth,
+		getStagedNodeMoves,
+		isMetamodelEditorDirty,
 		indexIssues,
 		getView,
 		getViewFileHandle,
@@ -85,12 +90,28 @@
 	// commit batch too (artefacts revamp Phase 2) — same reasoning as the
 	// artifact count above: a view-only batch must still reach a live Commit
 	// button, so its journal depth folds into the same total.
+	//
+	// Staged METAMODEL ops (spec 2026-08-16) are the fourth family, and fold in
+	// for the same reason again. Two rows at most: the store counts a dirty YAML
+	// draft as one plus one per moved node, and the section below renders the
+	// moves as a single summary line.
+	//
+	// KNOWN, and deliberate: a CLOSED metamodel tab contributes 0 for the draft
+	// half — the editor's provider gates `dirty` on `phase === 'ready'` — so a
+	// closed-but-dirty draft neither shows here nor rides the next commit, while
+	// its localStorage copy survives for the next open. Staged node MOVES do
+	// count when the tab is closed; they live in the stage module, not behind
+	// the provider.
+	const mmDepth = $derived(getStagedMetamodelDepth());
+	const mmDraftDirty = $derived(isMetamodelEditorDirty());
+	const stagedMoveCount = $derived(getStagedNodeMoves().size);
 	const total = $derived(
 		diff.counts.added +
 			diff.counts.modified +
 			diff.counts.deleted +
 			artifactCount +
-			getStagedViewDepth()
+			getStagedViewDepth() +
+			mmDepth
 	);
 
 	const addedElements = $derived(diff.elements.filter((d) => d.status === 'added'));
@@ -236,6 +257,16 @@
 		await discardViewChanges();
 	}
 
+	// The Metamodel section's ONE discard, for the same reason the View tab has
+	// one: the family commits as a unit, so it is abandoned as a unit. Identical
+	// pair to MetamodelTab's own "Discard changes" — the buffer half adopts the
+	// baseline and hands the `mm` lease back, the moves half wipes the staged
+	// positions (and their localStorage mirror).
+	function onDiscardMetamodel(): void {
+		discardMetamodelDraft();
+		discardStagedNodeMoves();
+	}
+
 	function close(): void {
 		open = false;
 	}
@@ -339,12 +370,16 @@
 						<p class="text-xs text-muted-foreground/70">Loading changes…</p>
 					{:else if total === 0}
 						<p class="text-xs text-muted-foreground/70">No pending changes.</p>
-					{:else if addedCount === 0 && modifiedCount === 0 && deletedCount === 0 && artifactCount === 0}
+					{:else if addedCount === 0 && modifiedCount === 0 && deletedCount === 0 && artifactCount === 0 && mmDepth === 0}
 						<!-- Unlike an artifact-only batch (whose Artifacts section renders
 						     right here), a view-only batch has nothing to show on THIS tab —
 						     the journal only renders on the View tab. Without this branch
 						     the pane would sit fully blank while the tab label and the
-						     Commit button both show a nonzero count. -->
+						     Commit button both show a nonzero count.
+						     `mmDepth === 0` is part of the condition because the Metamodel
+						     section DOES render here: without it a metamodel-only batch
+						     would print "0 staged view changes — see the View tab." above
+						     its own rows. -->
 						<p class="text-xs text-muted-foreground/70">
 							{viewEntries.length} staged view change{viewEntries.length === 1 ? '' : 's'} — see the View
 							tab.
@@ -430,6 +465,42 @@
 									</button>
 								</div>
 							{/each}
+						</section>
+					{/if}
+
+					<!-- Metamodel (spec 2026-08-16). At most TWO rows, never one per
+					     move: the family discards all-or-nothing like the View tab (a
+					     lone node move is meaningless to un-stage on its own, and the
+					     YAML draft is a single buffer), so per-row controls would
+					     promise a granularity the store does not have. -->
+					{#if mmDepth > 0}
+						<section class="flex flex-col gap-1">
+							<h3 class="text-xs font-semibold text-info">Metamodel ({mmDepth})</h3>
+							{#if mmDraftDirty}
+								<div
+									class="flex items-center gap-2 rounded border border-border bg-muted/40 px-2 py-1.5 text-xs"
+								>
+									<span class="w-3 font-mono text-warning">~</span>
+									<span class="font-mono text-foreground">metamodel schema (YAML edited)</span>
+								</div>
+							{/if}
+							{#if stagedMoveCount > 0}
+								<div
+									class="flex items-center gap-2 rounded border border-border bg-muted/40 px-2 py-1.5 text-xs"
+								>
+									<span class="w-3 font-mono text-warning">~</span>
+									<span class="font-mono text-foreground">
+										{stagedMoveCount} diagram node{stagedMoveCount === 1 ? '' : 's'} moved
+									</span>
+								</div>
+							{/if}
+							<button
+								type="button"
+								class="self-start rounded border border-input px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:border-ring hover:text-foreground"
+								onclick={onDiscardMetamodel}
+							>
+								Discard metamodel changes
+							</button>
 						</section>
 					{/if}
 				</div>

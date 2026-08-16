@@ -5,27 +5,21 @@
 	import MetamodelYamlEditor from './MetamodelYamlEditor.svelte';
 	import MetamodelPreviewPanel from './MetamodelPreviewPanel.svelte';
 	import MetamodelDiagram from './MetamodelDiagram.svelte';
-	import { getMetamodel as fetchMetamodel } from '$lib/api/metamodel';
-	import type { Issue } from '$lib/api/types';
 	import {
-		adoptIssues,
 		closeMetamodelDiagram,
 		closeMetamodelEditor,
-		commitMetamodelRebind,
 		discardMetamodelDraft,
+		discardStagedNodeMoves,
 		editMetamodelBuffer,
 		getActiveProjectId,
 		getMetamodelDiagramView,
 		getMetamodelEditor,
 		getRole,
+		getStagedNodeMoves,
 		initMetamodelDiagram,
 		initMetamodelEditor,
-		isProjectQuiet,
-		onMetamodelRebound,
 		previewMetamodelChanges,
-		refreshSummary,
 		retryMetamodelLease,
-		setMetamodel,
 		setMetamodelView
 	} from '$lib/state';
 
@@ -34,8 +28,11 @@
 	 * persists the choice per project), so the toggle below is a pure command. */
 	const surface = $derived(getMetamodelDiagramView().view);
 	const isOwner = $derived(getRole() === 'owner');
-	// Same shared quiet rule as history Revert / the old swap drawer.
-	const quiet = $derived(isProjectQuiet());
+	/** The moves half of the staged metamodel family. It lives in the stage
+	 * module rather than in this tab's editor, so it survives a close — which is
+	 * why the hint and the discard below have to read it separately from
+	 * `ed.dirty`. */
+	const stagedMoveCount = $derived(getStagedNodeMoves().size);
 	/** First message-only lint error (no line anchor) for the strip below the
 	 * editor; positioned errors render in the gutter instead. */
 	const stripError = $derived(ed.lintErrors.find((e) => e.line === null) ?? null);
@@ -45,11 +42,6 @@
 		{ id: 'yaml', label: 'YAML' },
 		{ id: 'diagram', label: 'Diagram' }
 	] as const;
-
-	let message = $state('');
-	/** The rebind itself already succeeded by the time this can fire — the
-	 * copy below must never read as a failed rebind, only as a stale view. */
-	let refreshError = $state<string | null>(null);
 
 	/** The diagram init is CHAINED, not raced: it reads the editor's buffer to
 	 * auto-arrange a never-arranged metamodel, so an empty buffer would leave it
@@ -73,40 +65,16 @@
 		};
 	});
 
-	function toIssue(o: { severity: string; message: string; target_ids: string[] }): Issue {
-		return {
-			severity: o.severity === 'warning' ? 'warning' : 'error',
-			message: o.message,
-			target_ids: o.target_ids,
-			origin: 'on_server'
-		};
-	}
-
-	async function onRebind(): Promise<void> {
-		refreshError = null;
-		const res = await commitMetamodelRebind(message);
-		if (res === null) return;
-		// The commit consumed the message regardless of what the refresh below
-		// does next.
-		message = '';
-		// The draft's names ARE the project's names now, so the undo stack (whose
-		// snapshots were taken against the old baseline) is no longer replayable.
-		// Before the refresh, deliberately: the refresh below can fail.
-		onMetamodelRebound();
-		try {
-			const mm = await fetchMetamodel();
-			setMetamodel(mm);
-			// The rebind response already carries a full authoritative issue list
-			// (+ counts + rev), so adopt it directly as the live map rather than
-			// paying for a separate refetch.
-			adoptIssues(res.issues.map(toIssue), res.issue_counts, res.model_rev);
-			await refreshSummary();
-		} catch {
-			// The durable rebind already landed — this is a stale VIEW, not a
-			// failed rebind, so it must never reuse rebindError's copy or flow.
-			refreshError =
-				'Rebind succeeded, but the view could not refresh. Reload the page to see the latest metamodel.';
-		}
+	/**
+	 * ONE discard for the whole family, matching the commit drawer's Metamodel
+	 * section button (and `discardAll`): the YAML draft and the staged node
+	 * moves are staged TOGETHER into one batch, and leaving the moves behind
+	 * would keep the `mm` lease alive (`releaseMetamodelLease` refuses while
+	 * anything metamodel-shaped is staged) over work the user just abandoned.
+	 */
+	function onDiscard(): void {
+		discardMetamodelDraft();
+		discardStagedNodeMoves();
 	}
 </script>
 
@@ -151,25 +119,15 @@
 				>
 					{ed.previewing ? 'Previewing…' : 'Preview changes'}
 				</Button>
-				<input
-					class="rounded bg-card px-2 py-1 text-xs text-foreground"
-					bind:value={message}
-					placeholder="Commit message (optional)"
-				/>
-				<Button
-					size="sm"
-					disabled={!quiet || !ed.previewCurrent || ed.previewing || ed.rebinding || ed.readOnly}
-					aria-busy={ed.rebinding}
-					onclick={() => void onRebind()}
-				>
-					{ed.rebinding ? 'Rebinding…' : 'Rebind'}
-				</Button>
 				{#if ed.dirty}
-					<!-- Disabled while a rebind is in flight: adopting the baseline
-					     over the buffer has no coherent meaning while the buffer is
-					     being bound, and the interleaving is better refused than
-					     reconciled (the state module survives it either way). -->
-					<Button size="sm" variant="ghost" disabled={ed.rebinding} onclick={discardMetamodelDraft}>
+					<!-- Rendered on `ed.dirty` alone, not on the staged depth: this is
+					     the BUFFER's discard button, sitting beside the editor it
+					     belongs to. A moves-only stage is discarded from the commit
+					     drawer's Metamodel section, which owns the whole family.
+					     `ed.rebinding` is vestigial (nothing sets it since the rebind
+					     moved onto the commit batch) but harmless; see its declaration
+					     in state/metamodel-editor.svelte.ts. -->
+					<Button size="sm" variant="ghost" disabled={ed.rebinding} onclick={onDiscard}>
 						Discard changes
 					</Button>
 				{/if}
@@ -203,9 +161,13 @@
 			</p>
 		{/if}
 
-		{#if isOwner && !quiet && ed.dirty}
-			<p class="text-xs text-warning">
-				Commit or discard staged edits first — rebind needs a quiet project (no active locks).
+		<!-- Where the Rebind button used to be. Metamodel edits are staged commit
+		     content (spec 2026-08-16), so this tab has no commit control of its
+		     own; both halves of the family arm the hint, since staged moves alone
+		     are just as committable as a dirty buffer. -->
+		{#if ed.dirty || stagedMoveCount > 0}
+			<p class="text-xs text-muted-foreground">
+				Metamodel changes are staged — review and commit them from the Commit drawer.
 			</p>
 		{/if}
 
@@ -248,12 +210,6 @@
 				class="rounded border border-destructive/40 bg-destructive/15 px-2 py-1.5 text-xs text-destructive"
 			>
 				{ed.previewError}
-			</p>
-		{/if}
-
-		{#if refreshError}
-			<p class="rounded border border-warning/40 bg-warning/15 px-2 py-1.5 text-xs text-warning">
-				{refreshError}
 			</p>
 		{/if}
 

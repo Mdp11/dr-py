@@ -214,3 +214,29 @@ export function onMetamodelCommitted(cb: (info: MetamodelCommitInfo) => void): (
 export function notifyMetamodelCommitted(info: MetamodelCommitInfo): void {
 	for (const cb of [..._commitListeners]) cb(info);
 }
+
+// --- discard-all listeners --------------------------------------------------
+
+const _discardListeners: (() => void)[] = [];
+
+/**
+ * Subscribe to "the user discarded EVERYTHING staged" (the commit drawer's
+ * Discard all, i.e. `checkout.svelte.ts`'s `discardAll`). Same registration
+ * shape, and same reason, as {@link onMetamodelCommitted}: the YAML draft is
+ * owned by `metamodel-editor.svelte.ts`, which imports checkout, so checkout
+ * calling `discardMetamodelDraft()` directly would close the cycle
+ * `checkout → stage → editor → checkout`. The editor registers its own discard
+ * here instead; the MOVES half `discardAll` wipes directly, since it lives in
+ * this module.
+ */
+export function onMetamodelDiscardAll(cb: () => void): () => void {
+	_discardListeners.push(cb);
+	return () => {
+		const i = _discardListeners.indexOf(cb);
+		if (i !== -1) _discardListeners.splice(i, 1);
+	};
+}
+
+export function notifyMetamodelDiscardAll(): void {
+	for (const cb of [..._discardListeners]) cb();
+}

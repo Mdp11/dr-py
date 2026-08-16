@@ -6,6 +6,12 @@ import { hasModelLocks, handleFeedEvent, resetRealtime } from '../realtime.svelt
 import { emit, getStagedDepth, resetModelStore, seedElements } from '../model.svelte';
 import { resetArtifactEdits, stageArtifactCreate } from '../artifact-edits.svelte';
 import { resetViewEdits, stageViewOp } from '../view-edits.svelte';
+import {
+	clearStagedNodeMoves,
+	initMetamodelStage,
+	registerMetamodelDraftProvider,
+	stageNodeMove
+} from '../metamodel-stage.svelte';
 import type { LeaseLite } from '$lib/api/feed';
 
 /**
@@ -38,6 +44,13 @@ beforeEach(() => {
 	resetModelStore();
 	resetArtifactEdits();
 	resetViewEdits();
+	// The metamodel stage is a module singleton with a localStorage mirror:
+	// clear the store BEFORE re-opening it, or a previous case's staged moves
+	// are restored straight back into the next one.
+	localStorage.clear();
+	initMetamodelStage('p1');
+	clearStagedNodeMoves();
+	registerMetamodelDraftProvider(() => ({ dirty: false, blob: '' }));
 	// A snapshot ahead of the cached rev fires a fire-and-forget summary
 	// refresh; keep it off the network.
 	vi.spyOn(modelReadApi, 'getModelSummary').mockResolvedValue({
@@ -106,6 +119,23 @@ describe('isProjectQuiet', () => {
 	it('is not quiet with only staged VIEW ops (F-3)', () => {
 		expect(isProjectQuiet()).toBe(true);
 		stageViewOp({ kind: 'rename_folder', id: 'f1', name: 'New name' }, 'Rename folder');
+		expect(isProjectQuiet()).toBe(false);
+	});
+
+	it('is not quiet with only a staged diagram node MOVE (spec 2026-08-16)', () => {
+		// Metamodel ops ride the same `POST /commits` batch as everything else,
+		// so a whole-model rewrite invalidates them by the same rev bump — the
+		// identical argument the artifact and view terms rest on.
+		expect(isProjectQuiet()).toBe(true);
+		stageNodeMove('el:Pump', { x: 10, y: 20 });
+		expect(isProjectQuiet()).toBe(false);
+	});
+
+	it('is not quiet while the metamodel YAML draft is dirty', () => {
+		// The draft half of the same family: the editor registers a provider on
+		// the stage module, and a dirty buffer is a staged `metamodel.rebind`.
+		expect(isProjectQuiet()).toBe(true);
+		registerMetamodelDraftProvider(() => ({ dirty: true, blob: 'elements: []\n' }));
 		expect(isProjectQuiet()).toBe(false);
 	});
 });

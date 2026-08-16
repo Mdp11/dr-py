@@ -32,6 +32,7 @@
 		clearOverlay,
 		clearSelection,
 		clearViewState,
+		closeMetamodelStage,
 		finishJourney,
 		getActiveProjectId,
 		reactToBootError,
@@ -139,6 +140,17 @@
 			// nulls `_view` AND resets the journal; the boot sequence's own
 			// refreshView() below repopulates it for this project.
 			clearViewState();
+			// Same leak, metamodel side (spec 2026-08-16): the staged-move store is
+			// a module-scope singleton too, and `commitStaged` reads it
+			// unconditionally. It is re-pointed only by `initMetamodelStage`, which
+			// the metamodel TAB's init calls — so switching from project A to B
+			// without ever opening B's metamodel tab would carry A's
+			// `metamodel.move_node` ops into the next commit in B, naming diagram
+			// nodes B has never heard of. `closeMetamodelStage()` and not
+			// `discardStagedNodeMoves()`: it drops the in-memory copy while LEAVING
+			// A's localStorage mirror intact, so switching back restores that work
+			// instead of destroying it.
+			closeMetamodelStage();
 			// Same class of leak, issue side: the Validate overlay is a module-scope
 			// singleton that WINS over the live issue map in every consumer, and boot
 			// deliberately does not call resetModelStore(). Project A's origin-tagged

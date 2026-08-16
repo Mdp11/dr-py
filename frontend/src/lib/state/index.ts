@@ -213,7 +213,6 @@ export {
 } from './metamodel-lease.svelte';
 export {
 	closeMetamodelEditor,
-	commitMetamodelRebind,
 	discardMetamodelDraft,
 	editMetamodelBuffer,
 	getMetamodelEditor,
@@ -235,7 +234,9 @@ export {
 	getStagedNodeMoves,
 	initMetamodelStage,
 	notifyMetamodelCommitted,
+	notifyMetamodelDiscardAll,
 	onMetamodelCommitted,
+	onMetamodelDiscardAll,
 	registerMetamodelDraftProvider,
 	stageNodeMove,
 	type MetamodelCommitInfo,

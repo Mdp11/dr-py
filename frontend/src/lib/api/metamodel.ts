@@ -2,13 +2,11 @@ import { apiFetch, type ApiFetchInit, type ClientConfig } from './client';
 import {
 	MetamodelSchema,
 	MetamodelDiffSchema,
-	RebindSchema,
 	RawMetamodelSchema,
 	MetamodelLintSchema,
 	MetamodelLayoutSchema,
 	type Metamodel,
 	type MetamodelDiff,
-	type Rebind,
 	type RawMetamodel,
 	type MetamodelLint,
 	type MetamodelLayout
@@ -56,29 +54,10 @@ export function diffMetamodel(body: string, cfg?: ClientConfig): Promise<Metamod
 	return apiFetch('/metamodel/diff', init, cfg);
 }
 
-/**
- * Adopt a candidate metamodel via a non-destructive journaled rebind (owner
- * only). `baseRev`/`message` ride query params; the raw body is the blob.
- *
- * DEAD ROUTE (spec 2026-08-16): `POST /metamodel/rebind` no longer exists —
- * a rebind is a `metamodel.rebind` op on `POST /commits`. Its ONE remaining
- * caller is `commitMetamodelRebind`, behind MetamodelTab's Rebind button,
- * which Task 12 deletes; this function goes with it. Nothing new may call it.
- */
-export function rebindMetamodel(
-	body: string,
-	opts: { baseRev: number; message: string },
-	cfg?: ClientConfig
-): Promise<Rebind> {
-	const init: ApiFetchInit = {
-		method: 'POST',
-		body,
-		schema: RebindSchema,
-		headers: { 'Content-Type': 'application/x-yaml' },
-		query: { base_rev: opts.baseRev, message: opts.message }
-	};
-	return apiFetch('/metamodel/rebind', init, cfg);
-}
+// NOTE (spec 2026-08-16): there is no `rebindMetamodel` here any more.
+// `POST /metamodel/rebind` was retired server-side; a rebind is a
+// `metamodel.rebind` op staged into the next `POST /commits` batch
+// (`state/metamodel-stage.svelte.ts` → `commitStaged`).
 
 export function getMetamodelRaw(cfg?: ClientConfig): Promise<RawMetamodel> {
 	return apiFetch('/metamodel/raw', { method: 'GET', schema: RawMetamodelSchema }, cfg);

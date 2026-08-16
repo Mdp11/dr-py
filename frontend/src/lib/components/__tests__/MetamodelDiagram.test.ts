@@ -127,7 +127,6 @@ vi.mock('$lib/state', async (orig) => {
 		editMetamodelBuffer: vi.fn(),
 		discardMetamodelDraft: vi.fn(),
 		previewMetamodelChanges: vi.fn(async () => {}),
-		commitMetamodelRebind: vi.fn(async () => null),
 		retryMetamodelLease: vi.fn(),
 		setMetamodel: vi.fn(),
 		adoptIssues: vi.fn(),
