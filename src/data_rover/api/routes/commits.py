@@ -824,12 +824,11 @@ def create_commit(
     # widens the feed scope) without re-scanning the family each time.
     rebind_op, mm_moves = split_rebind(metamodel_ops)
     if rebind_op is not None and membership.role is not Role.owner:
-        # Same gate the standalone POST /metamodel/rebind carries
-        # (require_owner) and which it will take with it when Task 9 retires
-        # it: a schema swap retypes the whole model. Layout moves are
-        # deliberately NOT owner-gated — presentation data, editor+ like
-        # PUT /metamodel/layout. ``require_membership`` has already rejected a
-        # viewer for this write.
+        # Same gate the retired standalone POST /metamodel/rebind route used
+        # to carry (require_owner): a schema swap retypes the whole model.
+        # Layout moves are deliberately NOT owner-gated — presentation data,
+        # editor+ like the retired PUT /metamodel/layout route was.
+        # ``require_membership`` has already rejected a viewer for this write.
         raise HTTPException(
             status_code=403, detail="metamodel changes require the owner role"
         )
@@ -1011,9 +1010,7 @@ def create_commit(
                 unwind.unwind()  # at most this request's own view hydration
                 return JSONResponse(
                     status_code=409,
-                    content={
-                        "detail": "active locks; rebind requires a quiet project"
-                    },
+                    content={"detail": "active locks; rebind requires a quiet project"},
                 )
         # a3. apply the metamodel half FIRST — the hoist that makes a migration
         #     batch atomic: everything below validates against the CANDIDATE
@@ -1320,9 +1317,7 @@ def create_commit(
                     # and would otherwise replay pre-rebind ops under it).
                     write_snapshot(project_id, session, session.model_rev)
                 else:
-                    _maybe_periodic_snapshot(
-                        db, project_id, session, session.model_rev
-                    )
+                    _maybe_periodic_snapshot(db, project_id, session, session.model_rev)
             except Exception:
                 logger.warning(
                     "post-commit snapshot failed for project %s at rev %s; "

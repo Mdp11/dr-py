@@ -807,7 +807,10 @@ def undo(
         # (see its docstring).
         peer_resources = (
             [artifact_resource(aid) for aid in artifact_op_ids(artifact_inv)]
-            + [folder_resource(fid) for fid in view_op_folder_ids(session.view, view_inv)]
+            + [
+                folder_resource(fid)
+                for fid in view_op_folder_ids(session.view, view_inv)
+            ]
             # metamodel_inv here is layout-only (a rebind-carrying batch was
             # already refused above) — the ``mm`` lease is the layout's only
             # concurrency control, the same honor rule as ``art:``/``folder:``.

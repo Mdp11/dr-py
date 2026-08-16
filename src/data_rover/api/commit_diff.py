@@ -23,6 +23,20 @@ narrowness the artifact section's ``kind`` fallback has. No ``ViewRow`` is
 ever read here, so an old commit's view diff stays correct after the folder
 in question has since been renamed again or deleted.
 
+Metamodel + layout (spec 2026-08-16): a rebind-carrying commit's structural
+half is rendered neither from the model reconstruction nor from the ops
+journal, but recomputed from the two immutable ``MetamodelRow`` blobs named
+by the commit's ``from_metamodel_id``/``to_metamodel_id`` columns
+(``_metamodel_structural``) — the same "recompute, never store" stance as the
+model half, but off metamodel rows instead of model revs, since the rebind op
+itself carries only the raw YAML, not a structural diff. The layout half is
+journal-only like artifacts/view, but reads the FORWARD ops alone
+(``_layout_moves``): a ``metamodel.move_node`` write has no cascade, so the
+inverse side adds nothing the forward op doesn't already name, and the
+surface promises "N nodes moved", not per-coordinate before/after. The two
+halves are independent and can both be present on one commit (a rebind that
+also repositions nodes it renamed).
+
 This module is deliberately route-free: the future change-request workflow
 points these same functions at a draft instead of a commit, so nothing here
 may depend on FastAPI, a request, or a live ``Session``.
@@ -422,12 +436,15 @@ def _layout_moves(commit: Commit) -> list[LayoutMoveOut]:
 def diff_commit(db: DbSession, project_id: str, commit: Commit) -> CommitDiffOut:
     """Render one commit's changes across content families.
 
-    Three mechanisms on purpose (see the module docstring): model entities are
+    Four mechanisms on purpose (see the module docstring): model entities are
     reconstructed at rev-1 and rev and compared, artifacts are read straight
-    out of the journal (state simulated from the inverse-derived base), and
-    view ops are rendered as-is — the ops ARE the diff, no reconstruction at
-    all. Only the ids the commit's ops name are compared for the model half,
-    so the response size tracks the commit, not the model.
+    out of the journal (state simulated from the inverse-derived base), view
+    ops are rendered as-is — the ops ARE the diff, no reconstruction at all —
+    and the metamodel/layout half (spec 2026-08-16) is its own pair: the
+    rebind's structural diff is recomputed from the two immutable metamodel
+    rows the commit names, while layout moves are read journal-only off the
+    forward ops. Only the ids the commit's ops name are compared for the model
+    half, so the response size tracks the commit, not the model.
 
     A commit that names no model entity at all (a pure-artifact commit, an
     empty batch, a rebind) skips reconstruction entirely: the entity halves

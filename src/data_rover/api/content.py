@@ -399,5 +399,3 @@ def stage_metamodel_layout(db: Session, project_id: str, blob: dict) -> None:
         row.blob = blob
         row.updated_at = _utcnow()
     db.flush()
-
-

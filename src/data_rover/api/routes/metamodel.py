@@ -29,8 +29,10 @@ def _peer_mm_conflict(session: Session, user_id: str) -> JSONResponse | None:
     Honor-don't-require (spec 2026-08-10): the caller's own lease never
     blocks, and no lease at all is fine — the lease is a guarantee only if
     every metamodel writer honors it, exactly like the artifact writers
-    honor ``art:`` leases. Callers: upload/clear here, rebind in
-    metamodel_swap.py.
+    honor ``art:`` leases. Callers: upload/clear here. The rebind path
+    (spec 2026-08-16) went the other way — `metamodel.rebind` ops hard-verify
+    the `mm` lease at `POST /commits` — so this honor-only check now covers
+    only the two routes left in this module.
     """
     peers = session.lock_table.peer_leases(
         [METAMODEL_RESOURCE], user_id, now=time.monotonic()
@@ -61,11 +63,12 @@ async def upload_metamodel(
         return conflict
     # Phase 6B: this destructive path is initial-bind only. Once a model has
     # content, a metamodel change must go through the non-destructive,
-    # journaled POST /metamodel/rebind (this one clears the model + history).
+    # journaled `metamodel.rebind` op via POST /commits (this route clears
+    # the model + history).
     if session.model is not None and session.model.elements:
         raise HTTPException(
             status_code=409,
-            detail="model not empty; use POST /metamodel/rebind",
+            detail="model not empty; stage a metamodel.rebind op and commit it via POST /commits",
         )
     body = (await request.body()).decode("utf-8")
     content_type = request.headers.get("content-type", "")

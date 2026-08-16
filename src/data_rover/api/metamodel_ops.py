@@ -51,7 +51,12 @@ from data_rover.core.metamodel.schema import Metamodel
 
 from . import content
 from .deps import Session
-from .schemas import MetamodelNodePos, MetamodelOpIn, MoveMetamodelNodeOp, RebindMetamodelOp
+from .schemas import (
+    MetamodelNodePos,
+    MetamodelOpIn,
+    MoveMetamodelNodeOp,
+    RebindMetamodelOp,
+)
 
 
 @dataclass

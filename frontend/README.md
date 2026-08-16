@@ -67,7 +67,7 @@ The UI is a fixed grid:
   selection, plus **snippet** tabs (`SnippetTab`) hosting a CodeMirror editor
   and run console for server-executed Python snippets against the live model,
   and the singleton **metamodel** tab (`MetamodelTab`) — a YAML editor for the
-  live metamodel with lint, preview and rebind.
+  live metamodel with lint, preview and staged (commit-through) edits.
 - **Inspector** — property form + relationships list + new-relationship
   picker for the selected entity (gated when the resource is locked by a peer).
   A back/forward arrow cluster (`Inspector/HistoryNav`) sits above it, replaying
@@ -329,15 +329,15 @@ backend's background validation sweep grows the server's store _without_ bumping
 around it (generation-guarded, so a response for the project we just left is
 dropped). Triggers, all of them best-effort:
 
-| trigger                       | where                                                                                             |
-| ----------------------------- | ------------------------------------------------------------------------------------------------- |
-| project boot                  | `boot()` in `routes/p/[projectId]/+page.svelte`                                                   |
-| in-app model reload           | `onReloadModel()`, same file                                                                      |
-| peer-rebind banner reload     | `onReloadRebind()`, same file (**never** a full validate)                                         |
-| background-sweep completion   | `open-progress.svelte.ts`                                                                         |
-| peer commit (300 ms debounce) | `realtime.svelte.ts`                                                                              |
-| feed reconnect snapshot       | `realtime.svelte.ts` — **unconditional**, deliberately NOT rev-guarded (see the sweep note above) |
-| local metamodel rebind        | `MetamodelTab.svelte` adopts the rebind response's own issue list instead of refetching           |
+| trigger                       | where                                                                                              |
+| ----------------------------- | -------------------------------------------------------------------------------------------------- |
+| project boot                  | `boot()` in `routes/p/[projectId]/+page.svelte`                                                    |
+| in-app model reload           | `onReloadModel()`, same file                                                                       |
+| peer-rebind banner reload     | `onReloadRebind()`, same file (**never** a full validate)                                          |
+| background-sweep completion   | `open-progress.svelte.ts`                                                                          |
+| peer commit (300 ms debounce) | `realtime.svelte.ts`                                                                               |
+| feed reconnect snapshot       | `realtime.svelte.ts` — **unconditional**, deliberately NOT rev-guarded (see the sweep note above)  |
+| own-commit rebind adoption    | `checkout.svelte.ts`'s `adoptReboundMetamodel()` — refetches metamodel + issues + summary in place |
 
 Refetch, not feed deltas: commit feed events deliberately carry **no** issue
 delta, because reconnect needs the refetch path anyway.
@@ -894,9 +894,11 @@ exposes project-level configuration:
   relationships the commit batch touched (no whole-model re-validation), so it
   is safe to enable on an already-non-conforming project: pre-existing issues
   elsewhere do not block a commit.
-- **Rebind is exempt** — `POST /commits/metamodel-swap` (rebind) never passes
-  through the strict gate; swapping the metamodel always succeeds regardless of
-  the setting.
+- **Rebind is exempt** — a `POST /commits` batch carrying a `metamodel.rebind`
+  op never passes through the strict gate (the backend runs a full-model sweep
+  for a rebind batch and is deliberately exempt from the conformance
+  hard-reject there); swapping the metamodel always succeeds regardless of the
+  setting. Structural blockers still hard-reject as usual.
 
 ### Commit history browser (History drawer)
 
@@ -916,15 +918,24 @@ browses the project's durable commit journal:
 - **Two-commit compare** — the "Compare" toggle lets the user select any two
   revisions A and B; the same `computeDiff` path reconstructs both models and
   renders the range diff. A warning banner is shown when the range spans a
-  metamodel-swap (rebind) commit.
+  rebind-carrying commit.
 - **Revert-to-commit** (`POST /commits/revert`) — gated on a quiet project:
-  `state/quiet.ts`'s `isProjectQuiet()` (no staged MODEL ops, no staged
-  ARTIFACT ops, no model-scope lease anywhere — the `mm` lease is deliberately
-  not one). The metamodel editor's Rebind reads the SAME predicate, which is
-  why it lives in its own module rather than being spelled out in each
-  caller. Selecting "Revert to here" on a row shows an inline confirm panel
-  with an optional message; submitting applies the compensating inverse ops as
-  a new durable commit (history stays append-only, `model_rev` advances),
+  `state/quiet.ts`'s `isProjectQuiet()`, a five-term predicate (no staged
+  MODEL ops, no staged ARTIFACT ops, no staged VIEW ops, no staged METAMODEL
+  ops — the YAML draft and the diagram's staged node moves — and no
+  model-scope lease anywhere; the `mm` lease is deliberately not one, since a
+  peer's metamodel editor tab is orthogonal to a model rewrite). The predicate
+  lives in its own module because two callers used to spell the same
+  expression out verbatim, which is exactly how a lease-term regression got
+  into both at once; nothing in the metamodel editor reads it any more — the
+  Rebind button and its `isProjectQuiet()` precondition are gone, replaced by
+  the server's quiet-peers guard + hard-verified `mm` lease at commit (see
+  "Live metamodel editing" below). `POST /commits/revert` also answers a flat
+  409 for any range containing a `metamodel.*` op, regardless of quiescence —
+  see that section's undo/revert paragraph. Selecting "Revert to here" on a
+  row shows an inline confirm panel with an optional message; submitting
+  applies the compensating inverse ops as a new durable commit (history stays
+  append-only, `model_rev` advances),
   broadcasts the delta via the feed, and reloads the history list.
 
 ### Live metamodel editing (metamodel tab)
@@ -942,7 +953,9 @@ singleton whose draft persists independently in
 whose whole interaction was picking a file.
 
 `state/metamodel-editor.svelte.ts` owns everything the tab renders, exposed as
-one `MetamodelEditorView` snapshot from `getMetamodelEditor()`:
+one `MetamodelEditorView` snapshot from `getMetamodelEditor()`. There is no
+Rebind button any more (spec 2026-08-16) — the buffer is staged commit CONTENT
+and lands through the same **Commit** button as model/artifact/view edits:
 
 - **Load** — `GET /metamodel/raw` on mount. `source: 'stored'` is the author's
   own YAML (comments and formatting intact); `'serialized'` is the degraded
@@ -950,12 +963,13 @@ one `MetamodelEditorView` snapshot from `getMetamodelEditor()`:
   the tab flags it with a "re-serialized source" chip so nobody is surprised
   when their comments are gone. A failed load is its own `error` phase with a
   Retry button — never an empty buffer, which would look like an empty
-  metamodel one keystroke away from being rebound.
+  metamodel one keystroke away from being staged.
 - **Baseline vs buffer** — `dirty` is `buffer !== baseline`, and the baseline
-  only ever moves on a load or a successful rebind. The dirty buffer mirrors
-  to `localStorage` under `ui.metamodel.draft.<projectId>` (debounced 500 ms,
-  flushed on close), so a refresh or an accidental tab close cannot lose work;
-  it is cleared only by an explicit Discard or by a rebind **that adopted it**.
+  only ever moves on a load or a commit that carried this buffer's
+  `metamodel.rebind` op. The dirty buffer mirrors to `localStorage` under
+  `ui.metamodel.draft.<projectId>` (debounced 500 ms, flushed on close), so a
+  refresh or an accidental tab close cannot lose work; it is cleared only by
+  an explicit Discard or by a commit **that adopted it**.
 - **Lint** — a debounced `POST /metamodel/lint` (500 ms) per edit. It is
   advisory in both directions: positioned errors become CodeMirror gutter
   diagnostics, message-only errors become the strip under the editor, and a
@@ -964,32 +978,56 @@ one `MetamodelEditorView` snapshot from `getMetamodelEditor()`:
   the candidate and returns which model issues would start/stop failing plus a
   structural diff (`MetamodelPreviewPanel`). The result is recorded **against
   the exact buffer it was computed for** (`previewCurrent`), so a preview goes
-  stale the moment the next character is typed and the panel says so.
-- **Rebind** — `POST /metamodel/rebind`, gated on owner + `isProjectQuiet()` +
-  `previewCurrent`: you cannot rebind something you have not looked at the
-  consequences of. The text SENT is captured before the await, and the
-  baseline adopts _that_ text — a buffer that moved mid-flight (a straggler
-  keystroke, a Discard) stays dirty, keeps its draft, and drops its now-spent
-  preview, so the user lands on "unreviewed local changes on top of the newly
-  bound metamodel" rather than a screen that claims to be saved. The surface
-  refuses the interleaving up front too: `readOnly` folds in `rebinding` and
-  the Discard button disables with it. The tab then refreshes the metamodel /
-  issues / summary, and reports a failed refresh in its own words — the durable
-  rebind already landed, so that copy must never read as a failed rebind.
+  stale the moment the next character is typed and the panel says so. Preview
+  is advisory only now — nothing gates commit on having run one.
+- **Staging** — a dirty draft registers with `metamodel-stage.svelte.ts` as the
+  fourth staged family's draft half (`registerMetamodelDraftProvider`), and
+  `getStagedMetamodelDepth()` counts it as one row in the commit drawer's
+  total, `hasUnsavedWork()`'s guard, and `isProjectQuiet()`'s five-term
+  predicate. `getStagedMetamodelOps()` turns it into one `metamodel.rebind`
+  op, hoisted first in the batch by the server regardless of client order.
+- **Commit** — `commitStaged` (`checkout.svelte.ts`) captures the buffer's text
+  at batch-build time and sends it as the `metamodel.rebind` op; on success the
+  `onMetamodelCommitted` listener adopts **that captured text** as the new
+  baseline — a buffer that moved mid-flight (a straggler keystroke) stays
+  dirty, keeps its draft, and drops its now-spent preview, so the user lands on
+  "unreviewed local changes on top of the newly committed metamodel" rather
+  than a screen that claims to be saved. A rebind-carrying commit requires the
+  **owner** role (403 otherwise, checked both client-side before staging and
+  server-side at commit) and hard-verifies the `mm` lease server-side.
 - **Lease** — composed, never re-implemented: `state/metamodel-lease.svelte.ts`
   (the `mm` lease module that outlived the drawer it was written for) acquires
   the EXCLUSIVE `mm` lease on the **first divergent edit** and drops it on
-  close, discard, or a successful rebind — unconditionally, because an acquire
-  still in flight is exactly the leak this guards. A peer conflict turns the
-  editor read-only with the holder's email and a Retry, keeping every character
-  already typed; a restored draft therefore opens editable and only discovers a
-  peer's lease on the first keystroke. `mm` is excluded from `isProjectQuiet()`
-  (mirroring the backend's `is_model_resource`), or the editor's own lease
-  would disable its own Rebind button.
+  close, discard, or **the commit that surrendered it** — unconditionally,
+  because an acquire still in flight is exactly the leak this guards. A peer
+  conflict turns the editor read-only with the holder's email and a Retry,
+  keeping every character already typed; a restored draft therefore opens
+  editable and only discovers a peer's lease on the first keystroke. `mm` is
+  excluded from `isProjectQuiet()`'s lock term (mirroring the backend's
+  `is_model_resource`), or the editor's own lease would disable Revert-to-commit
+  the moment someone opened the tab. `checkout.svelte.ts`'s
+  `releaseMetamodelLease` refuses to release while
+  `getStagedMetamodelDepth() > 0` — closing the tab over a dirty draft must not
+  hand the lease back while a staged rebind still needs it; closing over a
+  CLEAN draft does release it (see the known limitation below).
 
-The module's `_gen` guard covers only its OWN async (load / lint / preview /
-rebind) against a closed tab; the lease module keeps its own generation for
-lease calls, and neither wraps the other — one generation guard per concern.
+The module's `_gen` guard covers only its OWN async (load / lint / preview)
+against a closed tab; the lease module keeps its own generation for lease
+calls, and neither wraps the other — one generation guard per concern.
+
+**Known limitation: a CLOSED tab contributes 0 to the staged depth for the
+DRAFT half.** `registerMetamodelDraftProvider`'s callback reads
+`isMetamodelEditorDirty()`, which is `_phase === 'ready' && buffer !== baseline`
+— and `closeMetamodelEditor` resets `_phase` to `'idle'`. So a dirty draft in a
+closed metamodel tab vanishes from the DiffDrawer's Metamodel section and does
+**not** ride the next `POST /commits` batch, even though the same user's staged
+model/artifact/view edits do. The draft itself is never lost — it survives in
+`localStorage` and reopening the tab restores it dirty — but this is a real
+inconsistency with how the other three staged families behave (their staged
+ops live independent of any open tab). Staged diagram node MOVES do **not**
+share this gap: they live in `metamodel-stage.svelte.ts` itself, not behind the
+editor's phase gate, so they keep counting — and keep riding the next commit —
+after the tab closes.
 
 #### The diagram surface
 
@@ -1000,9 +1038,9 @@ above is untouched by it. `state/metamodel-diagram.svelte.ts` **owns no draft
 state**: every canvas gesture becomes `parseDraft → applyEdit → serializeDraft`
 over the CURRENT `getMetamodelEditor().buffer`, and the resulting text goes back
 in through `editMetamodelBuffer` — the same seam a keystroke uses, so lease
-acquisition, debounced lint, the localStorage draft, `dirty`, preview and rebind
-all keep working with no diagram-specific branch anywhere in the editor module.
-It is composed through that module's existing exports only; it was not
+acquisition, debounced lint, the localStorage draft, `dirty` and preview all
+keep working with no diagram-specific branch anywhere in the editor module. It
+is composed through that module's existing exports only; it was not
 restructured to accommodate this.
 
 - **`metamodel/yaml-edit.ts`** — the comment-preserving edit core, built on the
@@ -1032,32 +1070,47 @@ restructured to accommodate this.
   and `placeUnpositioned`, an incremental heuristic that places a node next to
   its nearest positioned neighbour and **never moves an already-positioned
   one** — a peer's new type must not re-layout the canvas under you.
-- **Layout is presentation, not content.** Positions live in a shared
-  per-project blob behind `GET/PUT /api/v1/projects/{id}/metamodel/layout`
-  (table `metamodel_layouts`, Alembic `0010`): no `mm` lease, no commit journal
-  entry, last-write-wins, PUT debounced 800 ms and flushed on close. So the
-  canvas has **two independent gates**: draft edits follow the editor module's
-  owner-only `readOnly`, while dragging is gated on `getRole() !== 'viewer'` —
-  an editor may rearrange the picture without being able to edit the metamodel.
-  A failed PUT is swallowed; a lost drag is re-dragged, and a presentation
-  detail must never surface as an error over a metamodel edit.
-- **The rename deferral** is the subtle part. Node ids (`el:`/`rel:`/`enum:` +
-  type name) double as the layout blob's position keys, and that blob is SHARED
-  with peers who still render the baseline names. A rename that exists only in
-  this client's draft therefore moves the key **locally** while
-  `serverPositions()` inverts it back through `_pendingRenames` on every PUT, so
-  the wire always speaks the baseline key space. The map belongs to the draft,
-  persists with it (`ui.metamodel.renames.<projectId>`) and **self-validates on
-  restore** — an entry survives only while the draft still defines the local
-  name it describes — which is what stands in for the hooks this module does not
-  have (a discard in another tab is not observable from here). `onMetamodelRebound()`,
-  called from the tab once a rebind has actually landed, clears the map, drops the
-  pre-rebind undo stack and PUTs the local keys as-is.
-- **Undo** is a bounded (50) stack of buffer snapshots paired with a key
-  snapshot (positions + deferral map), because a rename moves both and undoing
-  one without the other leaves the map describing a rename the buffer no longer
-  contains. Ctrl/Cmd-Z on the canvas pops it; the restored text goes through
-  `editMetamodelBuffer` like any other edit.
+- **Layout is presentation, but staged commit CONTENT** (spec 2026-08-16). A
+  drag no longer PUTs a shared blob live — `PUT /metamodel/layout` is gone —
+  it stages a `metamodel.move_node` op through `metamodel-stage.svelte.ts`
+  (`stageNodeMove`, coalescing per node: the last position staged for a node
+  is the only one that matters) and lands on the next `POST /commits` with
+  everything else in the batch. `GET /metamodel/layout` survives as the read
+  of the materialized baseline (table `metamodel_layouts`, unchanged), and the
+  canvas overlays this session's still-uncommitted staged moves on top of it
+  (`withStagedMoves`) so a pending drag never snaps back on a baseline
+  refetch. The canvas still has **two independent gates**: draft edits follow
+  the editor module's owner-only `readOnly`, while dragging (and staging a
+  move) is gated on `getRole() !== 'viewer'` — an editor may rearrange the
+  picture without being able to edit the metamodel; a viewer's drags stay
+  purely local, with nothing staged. Staged moves persist to `localStorage`
+  under `ui.metamodel.layoutdraft.<projectId>` (`metamodel-stage.svelte.ts`),
+  beside the YAML draft's own key next door — a refresh loses neither half of
+  an uncommitted metamodel edit.
+- **There is no rename key-deferral any more**, and its removal is the point
+  of the change above: node ids (`el:`/`rel:`/`enum:` + type name) double as
+  the layout blob's position keys, and a rename that exists only in the local
+  draft used to move the key locally while a live PUT inverted it back to the
+  baseline key space on the wire (`_pendingRenames`, `serverPositions()`) —
+  the whole deferral machine this paragraph used to document, plus its own
+  `ui.metamodel.renames.<projectId>` localStorage key. None of that exists any
+  more: a staged position and the staged `metamodel.rebind` that renamed its
+  node ride the **same** commit batch, so the keys ever published are
+  atomically the ones the draft's own (new) names produce — there is no wire
+  moment where the blob and the draft's names can disagree. `_positions` is
+  plain draft-key space end to end; `applyKeyMove` moves the position locally
+  on a rename/delete and stages the corresponding `metamodel.move_node` pair
+  (old key `→ null`, new key `→` the position) in the same gesture.
+- **Undo** is a bounded (50) stack of buffer snapshots paired with a position
+  snapshot, because a rename moves both and undoing one without the other
+  would leave the staged batch describing a rename the buffer no longer
+  contains — `undoDiagramEdit` restores the position half by re-staging the
+  minimal before/after delta (`stagePositionDelta`), so the pending commit
+  moves back in step with the canvas. Ctrl/Cmd-Z on the canvas pops it; the
+  restored text goes through `editMetamodelBuffer` like any other edit. A
+  commit carrying a `metamodel.rebind` op drops the whole stack (its
+  snapshots describe pre-commit text, which is meaningless to "undo" against
+  the newly committed buffer); a layout-only commit leaves it intact.
 - **Error surface.** `MetamodelDiagramView.errorNodeIds` is **empty in every
   reachable state** — the server attaches a `line` only to a YAML _syntax_
   error, which also fails the local parse, which means nothing is drawn to badge
@@ -1084,13 +1137,14 @@ restructured to accommodate this.
 
 #### Manual smoke checklist — the diagram surface
 
-The four gestures where the client and the layout route have to agree (drag →
-reload → persisted; connection → popover → YAML; rename → cascade with comments
-intact; rebind → positions survive under the new names) have **no e2e coverage**
-— see `BACKLOG.md` T-7. Until they do, this is the pass that stands in for it.
-Run it before shipping a change to `state/metamodel-diagram.svelte.ts`,
-`metamodel/yaml-edit.ts`, or `routes/metamodel_layout.py`. Steps 2, 6, 7 and 13
-are the load-bearing ones.
+The four gestures where the client and the commit flow have to agree (drag →
+stage → commit → persisted; connection → popover → YAML; rename → cascade with
+comments intact; commit → positions survive under the new names) have **no
+e2e coverage** — see `BACKLOG.md` T-7. Until they do, this is the pass that
+stands in for it. Run it before shipping a change to
+`state/metamodel-diagram.svelte.ts`, `state/metamodel-stage.svelte.ts`,
+`metamodel/yaml-edit.ts`, `routes/metamodel_layout.py`, or `api/metamodel_ops.py`.
+Steps 2, 6, 7 and 13 are the load-bearing ones.
 
 **Setup**
 
@@ -1111,10 +1165,12 @@ click the **Diagram** toggle in the tab's toolbar.
    halves of that relationship are the same colour. Multiplicities read at the
    ends. Association-class relationships (ones with properties, or abstract, or
    in an `extends` chain) get their own box with two half-edges through it.
-2. **Drag persists, and is shared.** Drag two boxes somewhere memorable, wait a
-   second (the PUT is debounced 800 ms), reload the page, reopen the tab →
-   they are where you left them. In a second browser profile signed in as
-   another member of the same project, the same positions appear.
+2. **Drag stages, commits, and is shared.** Drag two boxes somewhere memorable
+   → the commit drawer's Metamodel section shows the staged move count. Open
+   the drawer and **Commit** → reload the page, reopen the tab → they are
+   where you left them. In a second browser profile signed in as another
+   member of the same project, the same positions appear once that commit has
+   landed (before committing, only your own session sees the drag).
 3. **Auto-arrange.** Click **Auto-arrange** → the graph re-lays out top-down.
    Press **Ctrl/Cmd-Z** with the canvas focused → the previous positions come
    back.
@@ -1149,14 +1205,18 @@ click the **Diagram** toggle in the tab's toolbar.
 11. **Issue badge.** With a _semantically_ invalid but parseable draft (e.g. a
     `datatype` naming nothing), the toolbar shows an **"N issues"** badge on the
     right. Click it → it jumps to the YAML view.
-12. **Preview + Rebind still work end-to-end.** With a real change staged, click
-    **Preview changes** → the structural diff and now-failing/now-passing lists
-    render. Then **Rebind** → it succeeds and the app refreshes.
-13. **Positions survive a rebind under new names.** This is the rename-deferral
-    payoff. Rename a type in the diagram, drag its box somewhere distinctive,
-    **Preview**, **Rebind**, then reload → the box is still where you put it,
-    now keyed by the new name. Check a peer's session too: they should see the
-    same position, not a box jumped to the origin.
+12. **Preview + Commit still work end-to-end.** With a real change staged,
+    click **Preview changes** → the structural diff and now-failing/now-passing
+    lists render. Then open the commit drawer and **Commit** → it succeeds, the
+    app refreshes (`rebind_event`, not a normal commit delta), and the
+    metamodel tab's baseline adopts the committed YAML.
+13. **Positions survive a rebind under new names.** This is the key-deferral
+    removal's whole payoff. Rename a type in the diagram, drag its box
+    somewhere distinctive, **Preview**, then **Commit** the batch (rebind +
+    move land in ONE commit), then reload → the box is still where you put it,
+    now keyed by the new name. Check a peer's session too: once they've
+    reloaded past the `rebind_event` banner, they see the same position, not a
+    box jumped to the origin.
 14. **Roles.** As an **editor** (not owner): the canvas is browsable, dragging
     still works and persists, but the create buttons and form inputs are gone
     and a note says metamodel edits are owner-only. As a **viewer**: dragging is
@@ -1283,15 +1343,19 @@ src/
                         drift independently);
                         metamodel-editor.svelte.ts — the metamodel tab's
                         buffer/baseline, localStorage draft, debounced lint,
-                        on-demand preview and rebind (see "Live metamodel
-                        editing" above); metamodel-lease.svelte.ts — the `mm`
+                        on-demand preview, and its draft-provider registration
+                        with metamodel-stage (see "Live metamodel editing"
+                        above); metamodel-lease.svelte.ts — the `mm`
                         lease lifecycle it composes, surface-agnostic and
                         generation-guarded on its own;
                         metamodel-diagram.svelte.ts — the diagram surface's
                         state (view toggle, selection, collapse, shared
-                        positions + debounced PUT, bounded undo, the rename
-                        key-deferral); owns no draft state, edits through
-                        editMetamodelBuffer
+                        positions + staged moves, bounded undo); owns no draft
+                        state, edits through editMetamodelBuffer;
+                        metamodel-stage.svelte.ts — the fourth staged commit
+                        family: the draft provider registration + coalesced
+                        staged node moves, localStorage-mirrored, read by
+                        checkout.svelte.ts to build the batch
     editor/completion-source.ts  dr./Element/Relationship/stereotype-name CM6 completions +
                         hover logic (vocabFromMetamodel, computeCompletions,
                         resolveDocAt); pure, CM-agnostic, unit-tested

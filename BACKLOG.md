@@ -27,7 +27,8 @@ spec's phase table (`R`). Anything older than the last few sessions is **unverif
 against current code** — confirm before acting on it. Line numbers drift; treat them as
 hints.
 
-Last updated: 2026-08-14 · repo head at time of writing: `29727af`
+Last updated: 2026-08-16 · repo head at time of writing: metamodel commit-flow feature
+branch (`feature/metamodel-commit-flow`), final task
 
 ---
 
@@ -52,6 +53,15 @@ Test baseline on `main`: `core-test` 1811 passed / 30 deselected · `frontend-te
 2049 passed (213 files) · `dr-tidy` clean. (Measured on `29727af`, 2026-08-14; the
 opt-in Redis integration suite was not re-run.)
 
+Test baseline on the metamodel commit-flow branch (final task, 2026-08-16): `dr-tidy`
+clean (ruff reformatted 5 pre-existing backend files this branch's own diff never
+touched — formatting only, no logic change); `core-test` 1835 passed / 30 deselected
+(1 flake, `test_projects_wizard.py`, see T-4); `frontend-test` 2078 passed (216
+files); `frontend-test-e2e` 41/41 passed on a clean run (one earlier run hit a single
+"invalid session" failure in `helpers/load.ts`, likely the same e2e auth/session
+flake family T-4 already tracks — passed in isolation and on the clean full-suite
+rerun).
+
 ---
 
 ## 1. Roadmap — named future phases
@@ -65,11 +75,20 @@ no acquire/release vocabulary, so ownership leases extend it rather than fight i
 Source: master spec §12; 2026-08-11 design doc. Size: large.
 
 ### R-2 · Phase 8: history & revert · `open`
-Commit-history browser, revert-to-commit, optional strict mode. Two known blockers
-already in the code: `/commits/revert` answers 409 across any range containing
-**artifact ops**, and likewise across **metamodel rebind** ranges. Also folds in F-9
-(HistoryDrawer consuming `GET /commits/{rev}/diff`), which has been parked three times.
-Source: master spec §12; handoffs 2026-08-09 → 2026-08-11. Size: large.
+Commit-history browser, revert-to-commit, optional strict mode. Known blockers already in
+the code: `/commits/revert` answers 409 across any range containing **artifact ops**, and
+likewise across any range containing **`metamodel.*` ops** (both `metamodel.rebind` and
+`metamodel.move_node` — extended by the metamodel commit-flow feature, spec 2026-08-16,
+from "metamodel rebind ranges" to the whole op family). `POST /model/undo` also 409s with
+push-back specifically on a rebind-carrying batch (layout-only `move_node` undo IS
+supported) — see that spec's "Amendments" section for the rationale: restore-mode model
+inverses are schema-checked at the core mutation boundary, so no single replay order is
+valid on both sides of a schema swap without teaching the core a schema-independent restore
+mode (deferred, not designed away — the journal already carries the full-state rebind-back
+inverse a future phase would need to lift the 409). Also folds in F-9 (HistoryDrawer
+consuming `GET /commits/{rev}/diff`), which has been parked three times.
+Source: master spec §12; handoffs 2026-08-09 → 2026-08-11; 2026-08-16 metamodel commit-flow
+design. Size: large.
 
 ---
 
@@ -437,6 +456,22 @@ sets `_drafts` unconditionally after both awaits. Present identically in
 which is why it was not fixed locally during P-14 (fixing one would make the family
 inconsistent). Worth **one** fix across all four, with a shared guard, rather than four patches.
 
+### F-13 · `onReloadModel()`/`boot()` clear staged node moves but not the YAML draft · `open` · deliberate · *2026-08-16*
+Both reload paths clear `metamodel-stage.svelte.ts`'s staged node moves, but leave the
+metamodel editor's YAML draft untouched. So an open metamodel tab with a dirty draft, after a
+reload path calls `resetCheckout()` (which wipes the `mm` lease token client-side), can still
+send a `metamodel.rebind` op on the next commit attempt with a token the server no longer
+honors — one recoverable 409 (the commit fails cleanly, the draft is untouched, the user
+retries and the lease re-acquires). Deliberately not fixed: clearing the draft on reload would
+mean silently discarding a user's typed YAML, which is worse than one 409.
+
+### F-14 · Discarding staged metamodel moves doesn't re-derive the canvas · `open` · cosmetic · *2026-08-16*
+"Discard metamodel changes" in the DiffDrawer's Metamodel section wipes the staged ops
+(`discardStagedNodeMoves`), so the next commit is correct, but does not re-run the diagram's
+position derivation — a dragged node visibly stays at its dragged position until the
+metamodel tab is closed and reopened (which re-derives `_positions` from the baseline +
+now-empty staged overlay). Purely visual; no staged data survives the discard.
+
 ---
 
 ## 6. Diagnosed issues — backend
@@ -507,6 +542,26 @@ Fix is roughly four lines: a cardinality check in `check_metamodel` over `mm.ele
 `mm.relationships`, reporting each repeated name. Cheap; the only question is whether any
 existing fixture/example metamodel would start failing.
 
+### K-8 · A rebound commit persists the whole model's conformance issues, uncapped · `open` · *2026-08-16*
+A rebind-carrying `POST /commits` batch replaces the dirty-scope validation splice with a
+full `Scope.all()` sweep and splices the RESULT into `Commit.issues` (JSON) at persist time —
+the whole model's conformance issue list, with no cap. This mirrors the retired standalone
+`POST /metamodel/rebind` route exactly, so it is **not a regression** introduced by the
+metamodel commit-flow feature; it's the same precedent `ISSUES_RESPONSE_MAX` (5000) already
+exists for on the live `GET /model/issues` read path (see CLAUDE.md's note on that cap), just
+never applied to the persisted commit row. Worth revisiting alongside K-6 (history diff cost)
+since both are about a rebind-scale commit paying whole-model costs.
+
+### K-9 · `POST /metamodel` / `DELETE /metamodel` mutate `session.metamodel` without `write_mutex` · `open` · pre-existing · *2026-08-16*
+Both routes (`routes/metamodel.py`) rely on the honor-only `_peer_mm_conflict` lease check
+alone — no `session.write_mutex` is held around the read-then-mutate. Racing either against a
+`POST /commits/preview` or `POST /commits` mid-flight could observe (or leave) `session.metamodel`
+`None` between a pre-mutex read and the mutex-held restore in `create_commit`'s unwind path.
+`create_commit` itself already carries the identical exposure elsewhere in its own preamble
+(read before mutex), so this is not a new risk introduced by the metamodel commit-flow
+feature — filed here because it was noticed while auditing that path's mutex discipline for
+this feature, not because anything here changed.
+
 ---
 
 ## 7. Cleanups & dead code
@@ -523,6 +578,7 @@ existing fixture/example metamodel would start failing.
 | C-8 | `HistoryNav.svelte` — ~30 duplicated lines between the Back and Forward dropdown blocks, differing in ~6 tokens. Awkward to extract because `bind:open` needs a distinct `$state` per menu. | SDD ledger |
 | C-9 | `DropdownMenu.Item` uses `onclick` at 6 sites where `onSelect` is the repo majority (16 sites); `onSelect` also fires for keyboard selection. | SDD ledger |
 | C-10 | Two different `ExportEntry` types now coexist: `frontend/src/lib/table/export-layout.ts:16` (a layout row, `{index, included}`) and `frontend/src/lib/api/types.ts:985` (the custom-export wire entry). `ExportSettingsPanel.svelte` imports one and `CustomExportTab.svelte` the other, from the same feature directory. Rename the wire one to `CustomExportEntry`. | P-14 final review, 2026-08-14 |
+| C-11 | `pixi run -e core-dev ruff check tests/api/` reports 5 errors in files this branch never touched. No pixi task lints `tests/` at all (`core-lint` only covers `src/`), so this debt is invisible to the normal toolchain — it was found only by running the linter against the test tree by hand. Pre-existing, confirmed 2026-08-16. | metamodel commit-flow final review |
 
 ---
 
@@ -547,10 +603,15 @@ component is now an option (it wasn't when the finding was raised).
 ### T-4 · Known flakes · `open` · *re-run and move on*
 - e2e auth/session family — `frontend/e2e/helpers/auth.ts:33`.
 - `tests/model/test_search_index.py::test_string_properties_indexed_non_strings_ignored`
-  (~0.8% failure rate).
+  (~0.8% failure rate; **root cause confirmed 2026-08-16, pre-existing on the tree before
+  the metamodel commit-flow branch**: the test's `"123"` trigram probe is all-hex, so it
+  collides with random UUIDv7 element ids at a measured ~0.29% rate — not a search-index
+  bug, a fixture that shares an alphabet with the ids it's searching among).
 - `tests/api/test_projects_wizard.py::test_wizard_create_reports_skipped_artifacts` —
   order-dependent, observed once on 2026-08-12 (`TypeError: string indices must be
-  integers`), passes in isolation and on re-run. Unconfirmed whether it predates that date.
+  integers`), passes in isolation and on re-run. **Reconfirmed 2026-08-16, pre-existing**:
+  flakes roughly 1 run in 30 even in isolation, so "passes in isolation" above was an
+  under-sample, not a clean bill of health.
 
 ### T-5 · a11y: HistoryNav announces a popup that can't be opened · `open`
 The trigger keeps `aria-haspopup`/`aria-expanded` from bits-ui's `{...props}` spread while
@@ -611,7 +672,15 @@ can't be reversed by an implementer acting alone.
   the tab entry stays disabled with no metamodel bound.
 - **Server-side drafts** — rejected in favour of localStorage.
 - **Rename detection in the metamodel differ** — remove+add is the chosen identity rule.
-- **Hard-verify (token-required) rebind** — honor-don't-require was chosen explicitly.
+- ~~**Hard-verify (token-required) rebind**~~ — honor-don't-require was chosen explicitly
+  (spec 2026-08-10). **Reversed 2026-08-16** for the commit path only: the metamodel
+  commit-flow feature flips the `mm` lease from honor-only to hard-verified at
+  `POST /commits` for any batch carrying a `metamodel.*` op (spec
+  `2026-08-16-metamodel-commit-flow-design.md` §3) — the honor-only contract existed
+  specifically for the standalone `POST /metamodel/rebind` route, which has since retired.
+  `POST /metamodel` and `DELETE /metamodel` keep the original honor-only
+  `_peer_mm_conflict` check (`routes/metamodel.py`), since they're the only callers left of
+  the old contract.
 - **Real CR workflow**, **metamodel partial-edit ops**, **fine-grained ops inside artifact
   payloads** — out of scope per the artefacts revamp spec
   (`2026-07-29-artefacts-revamp-design.md:104`).
@@ -630,9 +699,14 @@ can't be reversed by an implementer acting alone.
 - **Retiring the legacy `/model/ops`, `/model/undo` and direct-mutation routes** — the
   frontend has fully migrated off them, but the routes stay for tests/scripts pending a
   dedicated retirement phase.
-- **A `hasUnsavedWork()` term for the metamodel buffer** — deliberate: the draft persists
-  to localStorage and survives navigation, so leaving loses nothing. (`isTabDirty` *does*
-  have a metamodel arm.)
+- ~~**A `hasUnsavedWork()` term for the metamodel buffer**~~ — deliberate: the draft
+  persisted to localStorage and survived navigation, so leaving lost nothing. (`isTabDirty`
+  already had a metamodel arm.) **Reversed 2026-08-16**: the metamodel commit-flow feature
+  makes the YAML buffer and the diagram's staged node moves commit CONTENT — they ride the
+  next `POST /commits` batch exactly like a staged model/artifact/view op — so leaving the
+  workspace now abandons an uncommitted batch just like the other three families, and
+  answering differently for the metamodel term was the inconsistency, not the prompt.
+  `state/unsaved.ts`'s `hasUnsavedWork()` now has a `getStagedMetamodelDepth() > 0` term.
 - **Lint via a mode flag on `/metamodel/diff`**, and client-side YAML re-serialization for
   the baseline — both rejected in favour of the two dedicated routes.
 - **A global store for dialogs, or route-based flows** — thin-client + component-local

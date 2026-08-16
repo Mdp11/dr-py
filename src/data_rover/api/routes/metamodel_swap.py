@@ -140,4 +140,3 @@ async def lint_metamodel(
     except MetamodelError as exc:
         return MetamodelLintResponse(ok=False, errors=[LintErrorOut(message=str(exc))])
     return MetamodelLintResponse(ok=True)
-

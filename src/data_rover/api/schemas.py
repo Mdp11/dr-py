@@ -980,7 +980,7 @@ class ViewDiffEntryOut(BaseModel):
 
 class LayoutMoveOut(BaseModel):
     """One diagram-layout key write, journal-only SUMMARY form (spec
-    2026-08-16 Task 8): a moved node's destination, not its pixel history.
+    2026-08-16): a moved node's destination, not its pixel history.
     ``x``/``y`` both ``None`` means the key was REMOVED (``pos: None`` on the
     forward ``metamodel.move_node`` op) — deliberately no before/after per
     coordinate, since the diff surface promises "N nodes moved", not a replay
