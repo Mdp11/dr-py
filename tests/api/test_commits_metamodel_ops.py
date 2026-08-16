@@ -213,6 +213,26 @@ def test_migration_batch_lands_atomically(client: TestClient) -> None:
     mm_token = _acquire_mm(client)
     el_token = _acquire_element(client, eid)
     base = _rev(client)
+    # NEGATIVE first, so this test proves the hoist on its own rather than in
+    # combination with its sibling: the identical patch WITHOUT the rebind is
+    # rejected under V1, where `owner_name` does not exist.
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": base,
+            "ops": [
+                {
+                    "kind": "update_element",
+                    "id": eid,
+                    "properties_patch": {"owner_name": "ada"},
+                }
+            ],
+            "message": "no rebind",
+            "lock_tokens": [el_token],
+        },
+    )
+    assert r.status_code == 422, r.text
+    assert _rev(client) == base
     r = client.post(
         papi("/commits"),
         json={
@@ -528,12 +548,13 @@ def test_strict_mode_exempts_rebind_batches(client: TestClient) -> None:
     assert r.json()["validation_error_count"] >= 1
 
 
-def test_strict_mode_still_blocks_a_layout_only_batch_with_issues(
-    client: TestClient,
-) -> None:
-    """The strict-mode exemption is scoped to REBIND batches only — a
-    layout-only batch keeps the ordinary gate. Nothing here mints an issue,
-    so this pins the shape, not a rejection: it must simply land."""
+def test_layout_only_batch_lands_under_strict_mode(client: TestClient) -> None:
+    """A layout-only batch has an empty dirty scope, so it mints no
+    conformance issue and the strict gate is unreachable for it — it simply
+    lands. Named for what it actually pins: the gate's SCOPING (exempt when
+    ``rebound``, not when ``metamodel_ops``) is proved by
+    ``test_strict_mode_blocks_a_mixed_layout_batch_with_issues`` below, which
+    is the case where the two conditions differ observably."""
     get_session().strict_mode = True
     token = _acquire_mm(client)
     base = _rev(client)
@@ -548,3 +569,185 @@ def test_strict_mode_still_blocks_a_layout_only_batch_with_issues(
     )
     assert r.status_code == 200, r.text
     assert r.json()["model_rev"] == base + 1
+
+
+def test_strict_mode_blocks_a_mixed_layout_batch_with_issues(
+    client: TestClient,
+) -> None:
+    """The strict-mode exemption is `not rebound`, NOT `not metamodel_ops`:
+    a batch carrying layout moves but no rebind keeps the ordinary gate.
+
+    This is the case where the two candidate conditions differ observably —
+    the layout-only test above stays green under either spelling because a
+    pure layout batch never mints a conformance issue at all.
+    """
+    eid = _create_node(client, "x")
+    get_session().strict_mode = True
+    mm_token = _acquire_mm(client)
+    el_token = _acquire_element(client, eid)
+    base = _rev(client)
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": base,
+            "ops": [
+                # `label` is a string in V1; 123 is a type-conformance issue
+                {
+                    "kind": "update_element",
+                    "id": eid,
+                    "properties_patch": {"label": 123},
+                },
+                {
+                    "kind": "metamodel.move_node",
+                    "node": "el:Node",
+                    "pos": {"x": 9, "y": 9},
+                },
+            ],
+            "message": "",
+            "lock_tokens": [mm_token, el_token],
+        },
+    )
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"] == "strict-mode conformance blocker"
+    # full unwind: no rev, and the staged layout row was rolled back too
+    assert _rev(client) == base
+    assert client.get(papi("/metamodel/layout")).json()["positions"] == {}
+
+
+def test_swap_is_unwound_when_post_swap_persistence_raises(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression (review Important 1): ``apply_metamodel_ops`` swaps the
+    in-memory metamodel and only THEN stages MetamodelRow/ModelRow via
+    db.flush(), either of which can raise. ``db.rollback()`` discards the
+    staged rows but restores NOTHING in memory, so the unwind handle must be
+    registered at the instant of the swap (the ``on_swap`` callback), not from
+    the applier's return value. Registering late left the process-wide session
+    serving the CANDIDATE schema against a DB still bound to the old one.
+    """
+    from data_rover.api import metamodel_ops
+
+    before = get_session().metamodel
+    assert before is not None
+    base = _rev(client)
+
+    def _boom(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("staging blew up")
+
+    # patched on the applier's own module reference, which is what it calls
+    monkeypatch.setattr(metamodel_ops.content, "create_metamodel", _boom)
+    token = _acquire_mm(client)
+    with pytest.raises(RuntimeError):
+        client.post(
+            papi("/commits"),
+            json={
+                "base_rev": base,
+                "ops": [{"kind": "metamodel.rebind", "blob": MM_V2}],
+                "message": "",
+                "lock_tokens": [token],
+            },
+        )
+    session = get_session()
+    # the OLD metamodel object is back, identically — not a reparse
+    assert session.metamodel is before
+    assert session.model is not None
+    assert session.model.metamodel is before
+    assert before.effective_element_properties("Node")  # V1, not the candidate
+    assert session.model_rev == base
+    assert session.validation is None  # nulled -> next read re-seeds
+    monkeypatch.undo()
+    assert client.get(papi("/metamodel/raw")).json()["blob"] == MM_V1
+
+
+def test_rebind_commit_forces_a_snapshot_at_the_new_rev(client: TestClient) -> None:
+    """The forced snapshot is the ONLY thing keeping the replay tail off a
+    schema boundary (hydration binds the CURRENT metamodel and would replay
+    pre-rebind ops under it), and the periodic policy would not fire here."""
+    from data_rover.api import db as _db
+    from data_rover.api.session import DEFAULT_PROJECT_ID
+
+    token = _acquire_mm(client)
+    base = _rev(client)
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": base,
+            "ops": [{"kind": "metamodel.rebind", "blob": MM_V2}],
+            "message": "",
+            "lock_tokens": [token],
+        },
+    )
+    assert r.status_code == 200, r.text
+    new_rev = base + 1
+    gen = _db.get_db()
+    s = next(gen)
+    try:
+        snap = content.latest_snapshot(s, DEFAULT_PROJECT_ID, new_rev)
+    finally:
+        gen.close()
+    assert snap is not None and snap.rev == new_rev
+
+
+def test_rebind_broadcasts_rebind_event_not_commit_event(client: TestClient) -> None:
+    """Peers cannot apply a delta across a schema swap, so a rebound commit
+    must emit `rebind_event` INSTEAD of `commit_event`. Nothing else asserts
+    that create_commit picks it (test_rebind_event.py only covers the builder
+    against the standalone route)."""
+    events: list[dict] = []
+    session = get_session()
+    monkey = session.hub.broadcast
+    session.hub.broadcast = events.append  # type: ignore[method-assign]
+    try:
+        token = _acquire_mm(client)
+        r = client.post(
+            papi("/commits"),
+            json={
+                "base_rev": _rev(client),
+                "ops": [{"kind": "metamodel.rebind", "blob": MM_V2}],
+                "message": "",
+                "lock_tokens": [token],
+            },
+        )
+        assert r.status_code == 200, r.text
+    finally:
+        session.hub.broadcast = monkey  # type: ignore[method-assign]
+    types = [e["type"] for e in events]
+    assert "rebind" in types
+    assert "commit" not in types
+    rebind = next(e for e in events if e["type"] == "rebind")
+    assert rebind["rev"] == r.json()["model_rev"]
+    assert rebind["to_metamodel_id"] == r.json()["to_metamodel_id"]
+
+
+def test_layout_only_commit_broadcasts_the_metamodel_layout_scope(
+    client: TestClient,
+) -> None:
+    """An open diagram refetches positions off this scope value; a layout
+    commit that reported only the default ["model"] would leave every peer's
+    canvas stale."""
+    events: list[dict] = []
+    session = get_session()
+    monkey = session.hub.broadcast
+    session.hub.broadcast = events.append  # type: ignore[method-assign]
+    try:
+        token = _acquire_mm(client)
+        r = client.post(
+            papi("/commits"),
+            json={
+                "base_rev": _rev(client),
+                "ops": [
+                    {
+                        "kind": "metamodel.move_node",
+                        "node": "el:Node",
+                        "pos": {"x": 1, "y": 2},
+                    }
+                ],
+                "message": "",
+                "lock_tokens": [token],
+            },
+        )
+        assert r.status_code == 200, r.text
+    finally:
+        session.hub.broadcast = monkey  # type: ignore[method-assign]
+    commit = next(e for e in events if e["type"] == "commit")
+    assert commit["scope"] == ["metamodel-layout"]

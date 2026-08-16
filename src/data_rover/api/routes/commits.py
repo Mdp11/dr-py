@@ -390,7 +390,7 @@ class _CommitUnwind:
       ``session.validation`` rather than restoring it: a rebind-carrying batch
       may already have called ``ValidationState.set_full`` by the time a
       failure lands, so the only safe state is "force a re-seed on next read"
-      (mirrors the retired rebind route's own failure path).
+      (mirrors the standalone rebind route's own failure path).
     - ``view_res`` rollback needs ``session.view`` non-None: the view half
       only ever applies to a resolved view, and nothing can null it
       mid-request anymore (the retired ``DELETE /view`` was the last thing
@@ -417,10 +417,13 @@ class _CommitUnwind:
     model_res: _BatchResult | None = None
     view_res: ViewBatchResult | None = None
     created_view: bool = False
-    #: the metamodel this request swapped OUT, set only when the batch
-    #: carried a ``metamodel.rebind`` that actually applied. Layout-only
-    #: metamodel batches leave it None: they hold no in-memory state at all
-    #: (``db.rollback()`` alone discards the staged ``metamodel_layouts`` row).
+    #: the metamodel this request swapped OUT. Registered from
+    #: ``apply_metamodel_ops``' ``on_swap`` callback — i.e. at the instant the
+    #: swap happens, NOT from the applier's return value, because everything
+    #: between the two can raise (see the a3 comment in ``create_commit``).
+    #: Layout-only metamodel batches leave it None: they hold no in-memory
+    #: state at all (``db.rollback()`` alone discards the staged
+    #: ``metamodel_layouts`` row).
     prior_metamodel: Metamodel | None = None
     db_staged: bool = False
     rev_bumped: bool = False
@@ -765,9 +768,10 @@ def create_commit(
     # widens the feed scope) without re-scanning the family each time.
     rebind_op, mm_moves = split_rebind(metamodel_ops)
     if rebind_op is not None and membership.role is not Role.owner:
-        # Same gate the retired POST /metamodel/rebind carried (require_owner):
-        # a schema swap retypes the whole model. Layout moves are deliberately
-        # NOT owner-gated — presentation data, editor+ like the retired
+        # Same gate the standalone POST /metamodel/rebind carries
+        # (require_owner) and which it will take with it when Task 9 retires
+        # it: a schema swap retypes the whole model. Layout moves are
+        # deliberately NOT owner-gated — presentation data, editor+ like
         # PUT /metamodel/layout. ``require_membership`` has already rejected a
         # viewer for this write.
         raise HTTPException(
@@ -960,16 +964,32 @@ def create_commit(
         #     schema. It stages rows via db.flush() and has no internal
         #     rollback (module docstring), so db_staged is registered BEFORE
         #     the call, exactly like the artifact half at b2.
+        #
+        #     The swap handle is registered from the applier's ``on_swap``
+        #     callback, NOT from its return value, and this is load-bearing:
+        #     the applier swaps the in-memory metamodel and THEN stages
+        #     MetamodelRow/ModelRow via db.flush(), which can raise. Assigning
+        #     after the call would leave that failure path with
+        #     prior_metamodel still None — db.rollback() would discard the
+        #     rows while the process-wide session went on serving the
+        #     CANDIDATE schema against a DB that still points at the old one.
+        #     The callback fires at the exact instant the state goes dirty, so
+        #     registration is neither early (an invalid-candidate 422 swapped
+        #     nothing and pays no O(model) indexes.rebuild()) nor late.
         mm_res: MetamodelBatchResult | None = None
         if metamodel_ops:
+
+            def _register_swap(prior: Metamodel) -> None:
+                unwind.prior_metamodel = prior
+
             unwind.db_staged = True
             try:
-                mm_res = apply_metamodel_ops(db, project_id, session, metamodel_ops)
+                mm_res = apply_metamodel_ops(
+                    db, project_id, session, metamodel_ops, on_swap=_register_swap
+                )
             except Exception:
                 unwind.unwind()  # undo every live half — see _CommitUnwind
                 raise
-            # None for a layout-only batch: nothing in memory to restore.
-            unwind.prior_metamodel = mm_res.prior_metamodel
         # b. apply the model half against the (possibly just-swapped) schema.
         #    _apply_batch already rolled ITSELF back on a mutation-boundary
         #    error, but the ledger still has to run: created_view may be True
@@ -1056,7 +1076,7 @@ def create_commit(
             # WHOLE model, not just this batch's touched entities: an element
             # nobody edited can start (or stop) conforming purely because the
             # type it instantiates changed. So re-validate everything — the
-            # same O(model) cost the retired rebind route paid — and REPLACE
+            # same O(model) cost the standalone rebind route pays — and REPLACE
             # the issue store below rather than splicing into it.
             scoped = default_pipeline().validate(model, Scope.all())
         else:
@@ -1112,7 +1132,7 @@ def create_commit(
             issues_added = [IssueOut.from_core(i) for i in delta.added]
         session.model_rev += 1
         if rebound:
-            # Mirrors the retired rebind route: EVERY derived row order and
+            # Mirrors the standalone rebind route: EVERY derived row order and
             # script cell value was computed against the old schema, so
             # selective eviction has nothing to preserve — clear the lot and
             # re-stamp the cell cache to the new rev.
@@ -1124,10 +1144,21 @@ def create_commit(
         else:
             session.invalidate_derived_caches()  # legacy clear-all
         # ONE journal entry per commit, spanning all four families: model
-        # ops first, then artifact ops, then view ops, then metamodel ops (the
-        # families are independent, so relative cross-family order carries no
-        # meaning — see split_ops; metamodel stays LAST so front-to-back
-        # readers of the stored list see the pre-existing prefix unchanged).
+        # ops first, then artifact ops, then view ops, then metamodel ops.
+        # The first three are mutually independent (see split_ops), so their
+        # relative order carries no meaning — but metamodel LAST in the
+        # INVERSE list is LOAD-BEARING, not cosmetic. Apply order is
+        # metamodel -> model -> artifact -> view (the rebind is hoisted so the
+        # model ops validate against the new schema), an inverse batch is
+        # replayed front-to-back, and an unwind must reverse apply order — so
+        # the metamodel inverse has to be the LAST thing undo applies. Move it
+        # earlier and undo would restore the OLD schema first and then run the
+        # model inverse against it, which is a 422 on exactly the migration
+        # batches this feature exists for. The FORWARD list keeps metamodel
+        # last purely for symmetry: no replay path applies metamodel ops at
+        # all (hydration skips the family, revert 409s across it), so its
+        # position there is inert today — but do not "tidy" the inverse list
+        # to match some other order.
         # The view id_map is seeded with the model+artifact maps (see b3), so
         # view_res.id_map is already a superset — merging it last is correct
         # and the other two spreads are redundant but harmless, kept for
@@ -1278,7 +1309,7 @@ def create_commit(
             # rebind_event INSTEAD of commit_event: there is no applyable
             # delta across a schema swap (every peer's cached elements are
             # typed by a metamodel that no longer exists), so peers get the
-            # reload banner — exactly what the retired rebind route emitted.
+            # reload banner — exactly what the standalone rebind route emits.
             # A migration batch's model delta is therefore deliberately NOT
             # broadcast; the reload subsumes it.
             session.hub.broadcast(

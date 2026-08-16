@@ -27,10 +27,19 @@ There is NO internal rollback: the in-memory swap is undone by
 ``_CommitUnwind``'s metamodel stage (restore ``prior_metamodel`` + rebuild
 indexes + null the validation state), and ``db.rollback()`` discards the
 staged rows — the same split of responsibilities as the artifact applier.
+
+That split only works if the caller's ledger learns about the swap at the
+INSTANT it happens, not when this function returns: the row staging that
+follows the swap goes through ``db.flush()`` and can raise, and
+``db.rollback()`` discards staged rows but restores NOTHING in memory. Hence
+``on_swap`` — a callback invoked with the outgoing metamodel immediately
+before ``session.metamodel`` is reassigned. It is the applier's whole
+contribution to unwind correctness; everything else stays the caller's job.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import yaml
@@ -85,7 +94,7 @@ def split_rebind(
 
 def load_candidate(blob: str) -> Metamodel:
     """Parse+schema-check a candidate blob; 422 on anything bad (mirrors the
-    retired rebind route's ``_load_candidate``)."""
+    standalone rebind route's ``_load_candidate``, which Task 9 retires)."""
     try:
         return load_metamodel_str(blob)
     except (MetamodelError, yaml.YAMLError) as exc:
@@ -119,12 +128,27 @@ def current_blob(db: DbSession, project_id: str, session: Session) -> str:
 
 
 def apply_metamodel_ops(
-    db: DbSession, project_id: str, session: Session, ops: list[MetamodelOpIn]
+    db: DbSession,
+    project_id: str,
+    session: Session,
+    ops: list[MetamodelOpIn],
+    *,
+    on_swap: Callable[[Metamodel], None] | None = None,
 ) -> MetamodelBatchResult:
     """Apply the metamodel family: rebind first (in-memory swap + staged
     rows), then layout moves (staged blob rewrite). Caller holds the
     ``write_mutex`` and owns the transaction; see the module docstring for
-    the no-rollback contract."""
+    the no-rollback contract.
+
+    ``on_swap`` is called with the OUTGOING metamodel at the last instant
+    before the in-memory swap, and therefore before any of the staging that
+    can raise. Callers that must be able to unwind the swap (``create_commit``)
+    register their handle from it rather than from this function's return
+    value: everything between the swap and the return can fail, and by then
+    the return value does not exist. Registration is EXACT — nothing before
+    the swap point (a bad candidate, an unreadable prior blob) fires it, so a
+    422 on a YAML typo never pays for an unwind that has nothing to undo.
+    """
     res = MetamodelBatchResult()
     rebind, moves = split_rebind(ops)
     if rebind is not None:
@@ -139,6 +163,11 @@ def apply_metamodel_ops(
             prior = content.get_metamodel_row(db, from_id)
             prior_version = prior.version if prior is not None else 0
         res.prior_metamodel = session.metamodel
+        # LAST statement before the in-memory state goes dirty: from here on,
+        # a raise leaves a swapped session that only the caller's ledger can
+        # put back (db.rollback() restores no in-memory state whatsoever).
+        if on_swap is not None:
+            on_swap(session.metamodel)
         session.metamodel = candidate
         model.metamodel = candidate
         model.indexes.rebuild()  # containment flags + key groups are mm-derived

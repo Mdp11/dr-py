@@ -129,10 +129,15 @@ def commit_event(
     deleted_relationship_ids: list[str],
 ) -> dict[str, Any]:
     """``scope`` says which content families the commit touched (``model`` /
-    ``artifact`` / ``view``) so clients refresh only what moved: a commit that
-    only renamed a saved table must not make every peer refetch model pages.
-    It is a REQUIRED keyword rather than a defaulted one so a new broadcast
-    site cannot silently claim the wrong scope."""
+    ``artifact`` / ``view`` / ``metamodel-layout``) so clients refresh only
+    what moved: a commit that only renamed a saved table must not make every
+    peer refetch model pages. It is a REQUIRED keyword rather than a defaulted
+    one so a new broadcast site cannot silently claim the wrong scope.
+
+    There is deliberately no scope value for a metamodel REBIND: a schema swap
+    has no applyable delta, so it rides ``rebind_event`` instead of this one
+    (see ``routes/commits.py``'s broadcast step). ``metamodel-layout`` is the
+    diagram-position half only."""
     return {
         "type": "commit",
         "rev": rev,
