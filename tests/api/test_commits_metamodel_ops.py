@@ -896,3 +896,100 @@ def test_undo_refuses_rebind_batches_and_keeps_history(client: TestClient) -> No
     r = client.post(papi("/model/undo"))
     assert r.status_code == 409
     assert "metamodel" in r.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# Final whole-branch review: the preview owner gate + the orphan-DB-state
+# commit's unwind
+# ---------------------------------------------------------------------------
+
+
+def test_viewer_may_preview_an_ordinary_batch(client: TestClient) -> None:
+    """The gate added below must be the REBIND ARM ONLY. ``/commits/preview``
+    is a read-only POST (``authz._READ_ONLY_POST_SUFFIXES``) precisely so any
+    member can see what a batch would do before proposing it; a viewer
+    previewing model ops keeps working exactly as before."""
+    eid = _create_node(client, "hello")
+    _seed_second_member("viewer-1", "viewer1@example.com", "viewer")
+    r = client.post(
+        papi("/commits/preview"),
+        json={
+            "base_rev": _rev(client),
+            "ops": [
+                {
+                    "kind": "update_element",
+                    "id": eid,
+                    "properties_patch": {"label": "bye"},
+                }
+            ],
+        },
+        headers={"x-user-id": "viewer-1", "x-user-email": "viewer1@example.com"},
+    )
+    assert r.status_code == 200, r.text
+
+
+@pytest.mark.parametrize("role", ["viewer", "editor"])
+def test_non_owner_rebind_preview_is_403(client: TestClient, role: str) -> None:
+    """A rebind preview does the same O(model) work a rebind commit does — two
+    ``indexes.rebuild()`` sweeps plus a full ``Scope.all()`` validation, all
+    under ``session.write_mutex`` — so it carries the same owner gate
+    ``create_commit`` applies to the op itself. Without it any member (a
+    VIEWER included) can block every commit in the project at will."""
+    user = f"{role}-1"
+    _seed_second_member(user, f"{user}@example.com", role)
+    r = client.post(
+        papi("/commits/preview"),
+        json={
+            "base_rev": _rev(client),
+            "ops": [{"kind": "metamodel.rebind", "blob": MM_V2}],
+        },
+        headers={"x-user-id": user, "x-user-email": f"{user}@example.com"},
+    )
+    assert r.status_code == 403, r.text
+    assert "owner" in r.json()["detail"]
+
+
+def test_orphan_db_commit_failure_unwinds_the_batch(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The layout-only branch that commits orphan DB state on a project with
+    no durable model row must unwind like every other persist step.
+
+    ``_persist_commit`` is stubbed to report "nothing journalled" (the
+    in-memory-only project's shape) so the route reaches its
+    ``if (artifact_ops or view_ops or metamodel_ops) and not persisted:``
+    branch, and the DB session's ``commit`` is made to raise there. Without
+    the try/except the raise escapes with ``model_rev`` already bumped and
+    the batch already in ``op_log``.
+    """
+    import sqlalchemy.orm as sa_orm
+
+    import data_rover.api.routes.commits as commits_mod
+
+    session = get_session()
+    token = _acquire_mm(client)
+    base = _rev(client)
+    log_depth = len(session.op_log)
+
+    monkeypatch.setattr(commits_mod, "_persist_commit", lambda *a, **k: False)
+
+    def _boom(self: object) -> None:
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(sa_orm.Session, "commit", _boom)
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": base,
+            "ops": [
+                {"kind": "metamodel.move_node", "node": "el:Node", "pos": {"x": 1, "y": 2}}
+            ],
+            "message": "",
+            "lock_tokens": [token],
+        },
+    )
+    monkeypatch.undo()  # before the assertions below re-read through the DB
+
+    assert r.status_code == 500, r.text
+    assert session.model_rev == base  # rev bump unwound
+    assert len(session.op_log) == log_depth  # batch not left undoable

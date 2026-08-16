@@ -490,6 +490,7 @@ def preview_commit(
     project_id: str,
     session: Session = Depends(get_request_session),
     db: DbSession = Depends(get_db),
+    membership: Membership = Depends(require_membership),
 ) -> PreviewResponse | JSONResponse:
     _, model = require_model(session)
     if payload.base_rev != session.model_rev:
@@ -505,6 +506,21 @@ def preview_commit(
     # that is the whole contract for a dry-run preview (the same stance
     # ARTIFACT ops take a few lines down).
     rebind_op, _mm_moves = split_rebind(metamodel_ops)
+    if rebind_op is not None and membership.role is not Role.owner:
+        # The SAME owner gate ``create_commit`` puts on the rebind op, and for a
+        # reason preview does not share with any other arm of this route: a
+        # rebind preview is the only batch here that costs O(model). It swaps
+        # the candidate in, rebuilds the whole index twice, and runs a full
+        # ``Scope.all()`` validation — all under ``session.write_mutex``, i.e.
+        # every commit in the project is blocked for the duration. Because
+        # ``/commits/preview`` is a read-only POST (``authz``'s allowlist), a
+        # VIEWER reaches it, so without this gate any member could stall an
+        # ~80 MB project at will. Scoped to the rebind arm ONLY: previewing
+        # model/artifact/view batches stays open to every member, which is the
+        # whole point of the allowlist entry.
+        raise HTTPException(
+            status_code=403, detail="metamodel changes require the owner role"
+        )
     candidate = load_candidate(rebind_op.blob) if rebind_op is not None else None
     # Artifact ops are DB rows, not model content: there is nothing to apply
     # into the model and roll back, so they are checked DRY (422 on an invalid
@@ -1301,7 +1317,21 @@ def create_commit(
             # forgoes. (A rebind cannot actually reach here: its applier calls
             # upsert_model_row, which self-creates the missing row — but the
             # layout-only case can, and the guard costs nothing.)
-            db.commit()
+            #
+            # Inside the SAME try/except shape as the persist step above, and
+            # for the same reason (final-review Finding 4): this is still a
+            # db.commit(), it can still raise on its own (constraint,
+            # connection), and by this point model_rev is bumped and the batch
+            # is in op_log — an escaping raise would leave both standing with
+            # nothing rolled back. The ledger's db.rollback() also discards the
+            # staged artifact/view/metamodel rows this commit was flushing.
+            try:
+                db.commit()
+            except Exception as exc:
+                unwind.unwind()  # undo every live half — see _CommitUnwind
+                raise HTTPException(
+                    status_code=500, detail="failed to persist commit"
+                ) from exc
         # f. snapshot — periodic normally (mirrors apply_ops so a hot
         #    commit-only project doesn't accumulate an unbounded replay tail),
         #    FORCED after a rebind. The durable commit has
