@@ -1,0 +1,181 @@
+"""Metamodel-op plumbing (spec 2026-08-16 metamodel commit flow).
+
+The metamodel and the diagram layout are MATERIALIZED HEADS
+(``ModelRow.metamodel_id`` -> immutable ``MetamodelRow`` versions;
+``metamodel_layouts``), so metamodel ops must never reach the model applier.
+This module is their applier — the fourth sibling of ``routes/ops.py``'s
+model applier, ``artifact_ops`` and ``view_ops``:
+
+- ``metamodel.rebind`` swaps the IN-MEMORY metamodel (``session.metamodel``,
+  ``model.metamodel``, ``model.indexes.rebuild()`` — the index is
+  metamodel-derived) and stages the durable rows (new ``MetamodelRow`` at
+  ``prior_version + 1`` carrying the author's verbatim blob, ``ModelRow``
+  repointed) on the caller's DB transaction. The caller (``create_commit``)
+  applies this module FIRST so the batch's model ops validate against the
+  candidate schema — the whole point of a migration batch.
+- ``metamodel.move_node`` ops rewrite the layout blob; ``pos: None`` removes
+  a key. Presentation data: no validation beyond schema shape.
+
+Inverses carry FULL PRIOR STATE (the prior YAML blob; a node's prior
+position), never patches — the journal alone answers undo and diff, exactly
+like artifact inverses. There is NO restore-mode parameter: a rebind's
+"restore" is just another forward rebind to the prior blob (a fresh
+``MetamodelRow`` version — the journal stays append-only), and a move's
+inverse is just another move.
+
+There is NO internal rollback: the in-memory swap is undone by
+``_CommitUnwind``'s metamodel stage (restore ``prior_metamodel`` + rebuild
+indexes + null the validation state), and ``db.rollback()`` discards the
+staged rows — the same split of responsibilities as the artifact applier.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+import yaml
+from fastapi import HTTPException
+from sqlalchemy.orm import Session as DbSession
+
+from data_rover.core.metamodel.loader import MetamodelError, load_metamodel_str
+from data_rover.core.metamodel.schema import Metamodel
+
+from . import content
+from .deps import Session
+from .schemas import MetamodelNodePos, MetamodelOpIn, MoveMetamodelNodeOp, RebindMetamodelOp
+
+
+@dataclass
+class MetamodelBatchResult:
+    """Everything one metamodel-op batch produced (twin of the other three
+    ``*BatchResult`` types). ``prior_metamodel`` is the unwind handle for the
+    in-memory swap; the two row ids feed ``_persist_commit``'s
+    ``from/to_metamodel_id`` columns so every reader keyed off them
+    (staleness guard, history ``is_rebind``, ``first_rebind_after``,
+    ``_metamodel_structural``) keeps working unchanged."""
+
+    canonical_ops: list[MetamodelOpIn] = field(default_factory=list)
+    inverse_units: list[list[MetamodelOpIn]] = field(default_factory=list)
+    rebound: bool = False
+    prior_metamodel: Metamodel | None = None
+    from_metamodel_id: str | None = None
+    to_metamodel_id: str | None = None
+    layout_touched: bool = False
+
+    def inverse_ops(self) -> list[MetamodelOpIn]:
+        """Flat inverse batch: applying it front-to-back undoes this batch."""
+        return [op for unit in reversed(self.inverse_units) for op in unit]
+
+
+def split_rebind(
+    ops: list[MetamodelOpIn],
+) -> tuple[RebindMetamodelOp | None, list[MoveMetamodelNodeOp]]:
+    """At most ONE rebind per batch (422): two schema swaps in one rev have
+    no meaning the journal could represent (which candidate did the model
+    ops validate against?), and the inverse would be ambiguous."""
+    rebinds = [op for op in ops if isinstance(op, RebindMetamodelOp)]
+    moves = [op for op in ops if isinstance(op, MoveMetamodelNodeOp)]
+    if len(rebinds) > 1:
+        raise HTTPException(
+            status_code=422,
+            detail="a batch may contain at most one metamodel.rebind op",
+        )
+    return (rebinds[0] if rebinds else None), moves
+
+
+def load_candidate(blob: str) -> Metamodel:
+    """Parse+schema-check a candidate blob; 422 on anything bad (mirrors the
+    retired rebind route's ``_load_candidate``)."""
+    try:
+        return load_metamodel_str(blob)
+    except (MetamodelError, yaml.YAMLError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+def serialize_metamodel_blob(metamodel: Metamodel) -> str:
+    """Re-serialize an in-memory metamodel to YAML — the degraded fallback
+    used when no durable ``MetamodelRow`` blob is available (a session whose
+    metamodel never landed in a durable row: legacy/test setups, uploads
+    that predate content tables). Shared by ``GET /metamodel/raw`` and this
+    module's ``current_blob`` so the two never drift on what "degraded"
+    means."""
+    return yaml.safe_dump(
+        metamodel.model_dump(mode="json", exclude_none=True), sort_keys=False
+    )
+
+
+def current_blob(db: DbSession, project_id: str, session: Session) -> str:
+    """The blob the rebind inverse must carry: the STORED source when a
+    durable row exists (byte-exact, the author's comments included), else a
+    re-serialization of the in-memory metamodel — the same degradation
+    ``GET /metamodel/raw`` documents for legacy in-memory-only sessions."""
+    row = content.get_model_row(db, project_id)
+    if row is not None:
+        mm_row = content.get_metamodel_row(db, row.metamodel_id)
+        if mm_row is not None:
+            return mm_row.blob
+    assert session.metamodel is not None
+    return serialize_metamodel_blob(session.metamodel)
+
+
+def apply_metamodel_ops(
+    db: DbSession, project_id: str, session: Session, ops: list[MetamodelOpIn]
+) -> MetamodelBatchResult:
+    """Apply the metamodel family: rebind first (in-memory swap + staged
+    rows), then layout moves (staged blob rewrite). Caller holds the
+    ``write_mutex`` and owns the transaction; see the module docstring for
+    the no-rollback contract."""
+    res = MetamodelBatchResult()
+    rebind, moves = split_rebind(ops)
+    if rebind is not None:
+        model = session.model
+        assert model is not None and session.metamodel is not None
+        candidate = load_candidate(rebind.blob)
+        prior_blob = current_blob(db, project_id, session)
+        model_row = content.get_model_row(db, project_id)
+        from_id = model_row.metamodel_id if model_row is not None else None
+        prior_version = 0
+        if from_id is not None:
+            prior = content.get_metamodel_row(db, from_id)
+            prior_version = prior.version if prior is not None else 0
+        res.prior_metamodel = session.metamodel
+        session.metamodel = candidate
+        model.metamodel = candidate
+        model.indexes.rebuild()  # containment flags + key groups are mm-derived
+        if model_row is not None:
+            mm_row = content.create_metamodel(
+                db, name="", version=prior_version + 1, blob=rebind.blob
+            )
+            content.upsert_model_row(db, project_id, metamodel_id=mm_row.id)
+            res.from_metamodel_id = from_id
+            res.to_metamodel_id = mm_row.id
+        res.rebound = True
+        res.canonical_ops.append(rebind)
+        res.inverse_units.append(
+            [RebindMetamodelOp(kind="metamodel.rebind", blob=prior_blob)]
+        )
+    if moves:
+        blob = content.get_metamodel_layout(db, project_id) or {}
+        positions: dict = dict(blob.get("positions") or {})
+        for op in moves:
+            prior = positions.get(op.node)
+            if op.pos is None:
+                positions.pop(op.node, None)
+            else:
+                positions[op.node] = {"x": op.pos.x, "y": op.pos.y}
+            inv_pos = (
+                None
+                if prior is None
+                else MetamodelNodePos(x=float(prior["x"]), y=float(prior["y"]))
+            )
+            res.inverse_units.append(
+                [
+                    MoveMetamodelNodeOp(
+                        kind="metamodel.move_node", node=op.node, pos=inv_pos
+                    )
+                ]
+            )
+            res.canonical_ops.append(op)
+        content.stage_metamodel_layout(db, project_id, {"positions": positions})
+        res.layout_touched = True
+    return res

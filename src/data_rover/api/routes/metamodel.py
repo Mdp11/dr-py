@@ -17,6 +17,7 @@ from ..db_models import User
 from ..deps import Session, get_request_session, require_metamodel
 from ..identity import get_current_user
 from ..locking import METAMODEL_RESOURCE
+from ..metamodel_ops import serialize_metamodel_blob
 from ..schemas import RawMetamodelResponse
 
 router = APIRouter()
@@ -112,10 +113,9 @@ def get_metamodel_raw(
         mm_row = content.get_metamodel_row(db, model_row.metamodel_id)
         if mm_row is not None:
             return RawMetamodelResponse(blob=mm_row.blob, source="stored")
-    blob = yaml.safe_dump(
-        metamodel.model_dump(mode="json", exclude_none=True), sort_keys=False
+    return RawMetamodelResponse(
+        blob=serialize_metamodel_blob(metamodel), source="serialized"
     )
-    return RawMetamodelResponse(blob=blob, source="serialized")
 
 
 @router.delete("/metamodel", status_code=204, response_model=None)
