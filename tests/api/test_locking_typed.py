@@ -20,6 +20,7 @@ from data_rover.api.session import DEFAULT_PROJECT_ID
 from data_rover.api.tenancy import add_member
 
 from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .test_commits_metamodel_ops import _acquire_mm
 
 _MM = """
 elements:
@@ -133,9 +134,14 @@ def test_rebind_ignores_artifact_leases(client: TestClient) -> None:
     )
     assert r.status_code == 200
     rev = client.get(papi("/model/summary")).json()["model_rev"]
+    token = _acquire_mm(client)
     r = client.post(
-        papi(f"/metamodel/rebind?base_rev={rev}"),
-        content=_MM,
-        headers={"content-type": "application/x-yaml"},
+        papi("/commits"),
+        json={
+            "base_rev": rev,
+            "ops": [{"kind": "metamodel.rebind", "blob": _MM}],
+            "message": "",
+            "lock_tokens": [token],
+        },
     )
     assert r.status_code == 200, r.text

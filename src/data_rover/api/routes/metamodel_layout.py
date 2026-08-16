@@ -1,16 +1,22 @@
-"""GET/PUT /metamodel/layout — shared metamodel-canvas positions.
+"""GET /metamodel/layout — shared metamodel-canvas positions.
 
 Deliberately does NOT depend on ``get_request_session``: reading a layout
 must not hydrate a cold project's model. Membership is enforced directly by
-``authz.require_membership`` (method-based: any member GETs, editors+ PUT).
-No lease, no journal — presentation only (spec 2026-08-13 §5/§6): layout is
-last-write-wins because a lost drag is re-dragged, unlike model content
-where a lost write is corruption.
+``authz.require_membership`` (method-based: any member GETs). No lease, no
+journal — presentation only (spec 2026-08-13 §5/§6): layout is last-write-wins
+because a lost drag is re-dragged, unlike model content where a lost write is
+corruption.
+
+The write side used to be a standalone ``PUT`` here; it is now the
+``metamodel.move_node`` op under ``POST /commits`` (``content.
+stage_metamodel_layout``, ``metamodel_ops.py``), which persists to the same
+``MetamodelLayoutRow`` this route reads — the standalone ``PUT`` was retired
+with no legacy window (spec 2026-08-16, Task 9).
 """
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session as DbSession
 
@@ -41,14 +47,3 @@ def get_metamodel_layout(
     if blob is None:
         return MetamodelLayoutPayload()
     return MetamodelLayoutPayload.model_validate(blob)
-
-
-@router.put("/metamodel/layout", status_code=204)
-def put_metamodel_layout(
-    project_id: str,
-    payload: MetamodelLayoutPayload,
-    db: DbSession = Depends(get_db),
-    _membership: Membership = Depends(require_membership),
-) -> Response:
-    content.put_metamodel_layout(db, project_id, payload.model_dump())
-    return Response(status_code=204)

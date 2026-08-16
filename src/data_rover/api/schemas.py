@@ -197,16 +197,6 @@ class MetamodelDiffResponse(BaseModel):
     structural: MetamodelStructuralDiff = Field(default_factory=MetamodelStructuralDiff)
 
 
-class RebindResponse(BaseModel):
-    """Result of a non-destructive metamodel rebind (Phase 6B)."""
-
-    model_rev: int
-    metamodel_id: str
-    validation_error_count: int
-    issue_counts: dict[str, int]
-    issues: list[IssueOut]
-
-
 class ArtifactRefOut(BaseModel):
     id: str
     kind: str

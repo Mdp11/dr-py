@@ -1,50 +1,39 @@
-"""Phase 6B metamodel swap: read-only sandbox diff + non-destructive rebind.
+"""Phase 6B metamodel swap: read-only sandbox diff + lint.
 
 ``/metamodel/diff`` validates the live model against a CANDIDATE metamodel via
 a no-copy ``build_rebind_view`` (shares the instance payload, rebuilds indexes)
-and returns a conformance diff. ``/metamodel/rebind`` (Task 6) changes the
-model's metamodel binding as a journaled commit. Both run under the per-project
-``write_mutex`` so the validation sweep can't race a concurrent commit.
+and returns a conformance diff, running under the per-project ``write_mutex``
+so the validation sweep can't race a concurrent commit. ``/metamodel/lint``
+is a cheap parse + schema check with no session/model/mutex at all.
+
+The non-destructive rebind itself (Phase 6B originally, then Task 9) now
+lands ONLY through the ``metamodel.rebind`` op family under ``POST
+/commits`` (``routes/commits.py`` + ``metamodel_ops.py``) — the standalone
+``POST /metamodel/rebind`` route this module used to carry was retired with
+no legacy window (spec 2026-08-16, Task 9).
 """
 
 from __future__ import annotations
 
-import logging
-import time
-import uuid
-
 import yaml
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import JSONResponse
-from sqlalchemy.orm import Session as DbSession
 
 from data_rover.core.metamodel.diff import diff_metamodels
 from data_rover.core.metamodel.loader import MetamodelError, load_metamodel_str
 from data_rover.core.model.model import build_rebind_view
 from data_rover.core.validation.issue import Issue
 from data_rover.core.validation.pipeline import default_pipeline
-from data_rover.core.validation.scope import Scope
 
-from .. import content
-from ..authz import require_membership, require_owner
-from ..db import get_db
-from ..db_models import Membership, User
+from ..authz import require_membership
+from ..db_models import Membership
 from ..deps import Session, get_request_session, require_model
-from ..feed import rebind_event
-from ..hydration import write_snapshot
-from ..identity import get_current_user
-from ..locking import is_model_resource
 from ..schemas import (
     IssueOut,
     LintErrorOut,
     MetamodelDiffResponse,
     MetamodelLintResponse,
-    RebindResponse,
 )
-from .metamodel import _peer_mm_conflict
 from .ops import _ensure_validation_seeded
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -152,164 +141,3 @@ async def lint_metamodel(
         return MetamodelLintResponse(ok=False, errors=[LintErrorOut(message=str(exc))])
     return MetamodelLintResponse(ok=True)
 
-
-@router.post("/metamodel/rebind", response_model=None)
-async def rebind_metamodel(
-    request: Request,
-    project_id: str,
-    base_rev: int,
-    message: str = "",
-    session: Session = Depends(get_request_session),
-    db: DbSession = Depends(get_db),
-    user: User = Depends(get_current_user),
-    membership: Membership = Depends(require_owner),
-) -> RebindResponse | JSONResponse:
-    """Owner-only, non-destructive metamodel rebind journaled as a commit.
-
-    Refuses (409) when any MODEL lease is active (artifact/folder leases
-    don't block — affected artifacts degrade tolerantly under the new
-    metamodel) — a rebind retypes the whole model and must not silently
-    invalidate an open element/relationship check-out. Mirrors the commit
-    route's durable-failure pattern: a DB error fully restores in-memory state.
-
-    Also honors the ``mm`` lease (Phase 4 honor rule, see
-    ``metamodel._peer_mm_conflict``): the caller's own lease is fine, but a
-    PEER's live ``mm`` lease 409s with the holder's email before anything
-    else runs. This is the same honor-don't-require contract as the model
-    quiescence check below — the request carries no lock token, so there is
-    no verification, and the server does NOT release the caller's lease on
-    success; the client surface releases its own.
-
-    Correction A applied: persists the original request blob rather than a
-    pydantic re-serialization, avoiding any round-trip mismatch on hydration.
-
-    Note: rebind bumps ``model_rev`` and journals a ``Commit`` row but
-    intentionally does NOT append to the in-memory ``session.op_log`` (the
-    legacy undo stack) — rebind revert is deferred to Phase 8 via the
-    ``from_metamodel_id``/``to_metamodel_id`` commit columns.
-    """
-    _, model = require_model(session)
-    if base_rev != session.model_rev:
-        return JSONResponse(
-            status_code=409,
-            content={"detail": "stale base_rev", "model_rev": session.model_rev},
-        )
-    # Correction A: capture raw blob BEFORE parsing; persist the original source.
-    raw_blob = await _read_metamodel_blob(request)
-    candidate = _load_candidate(raw_blob)
-    state = _ensure_validation_seeded(session, model)
-    with session.write_mutex:
-        conflict = _peer_mm_conflict(session, user.id)
-        if conflict is not None:
-            return conflict
-        model_leases = [
-            le
-            for le in session.lock_table.active_leases(time.monotonic())
-            if is_model_resource(le.resource_id)
-        ]
-        if model_leases:
-            return JSONResponse(
-                status_code=409,
-                content={"detail": "active locks; rebind requires a quiet project"},
-            )
-        # capture rollback state — session.metamodel is guaranteed non-None
-        # because require_model() already verified the model is loaded, which
-        # requires a prior metamodel upload (session.set_metamodel called first).
-        old_mm = session.metamodel
-        assert old_mm is not None, "metamodel must be set before rebind"
-        old_rev = session.model_rev
-        model_row = content.get_model_row(db, project_id)
-        from_id = model_row.metamodel_id if model_row is not None else None
-
-        # persist the candidate as a new metamodel version (using the original blob)
-        prior_version = 0
-        if from_id is not None:
-            prior = content.get_metamodel_row(db, from_id)
-            prior_version = prior.version if prior is not None else 0
-        mm_row = content.create_metamodel(
-            db, name="", version=prior_version + 1, blob=raw_blob
-        )
-
-        # swap live metamodel + rebuild indexes + re-validate the whole model
-        session.metamodel = candidate
-        model.metamodel = candidate
-        model.indexes.rebuild()
-        issues = default_pipeline().validate(model, Scope.all())
-        state.set_full(issues)
-        session.validation = state
-        session.model_rev += 1
-        # Mirrors touch_model: the metamodel (and therefore every derived row
-        # order / script cell value) changed under the caches. The rev bump
-        # alone makes stale entries unreachable; clearing reclaims them now and
-        # re-stamps the cell cache to the new rev.
-        session.invalidate_derived_caches()
-
-        commit_id = uuid.uuid4().hex
-        issues_json = [IssueOut.from_core(i).model_dump() for i in issues]
-        try:
-            content.upsert_model_row(db, project_id, metamodel_id=mm_row.id)
-            content.set_model_rev(db, project_id, session.model_rev)
-            content.append_commit(
-                db,
-                project_id,
-                rev=session.model_rev,
-                commit_id=commit_id,
-                author_id=user.id,
-                ops=[],
-                inverse_ops=[],
-                id_map={},
-                message=message,
-                validation_error_count=len(issues),
-                issues=issues_json,
-                from_metamodel_id=from_id,
-                to_metamodel_id=mm_row.id,
-            )
-            db.commit()
-        except Exception as exc:
-            db.rollback()
-            session.metamodel = old_mm
-            model.metamodel = old_mm
-            model.indexes.rebuild()
-            session.model_rev = old_rev
-            # The rev moves BACKWARDS here (and the metamodel itself was
-            # swapped in place and back), so both derived caches may hold
-            # entries computed against the discarded state — and the cell
-            # cache may already be STAMPED at the higher rev by a concurrent
-            # lock-free /tables/evaluate, which would brick it (final-review
-            # I1). Re-stamp to the restored rev and cancel the sweeps.
-            session.invalidate_derived_caches()
-            session.validation = None  # force a re-seed on next read
-            raise HTTPException(
-                status_code=500, detail="failed to persist rebind"
-            ) from exc
-
-        # The durable commit has already landed (db.commit above). Forcing a
-        # snapshot here keeps the replay tail from spanning a rebind boundary,
-        # but a failure is recoverable — hydration rebuilds the snapshot on the
-        # next cache-miss. Log and proceed rather than raising a 500 that would
-        # mislead the client into thinking the rebind failed.
-        try:
-            write_snapshot(project_id, session, session.model_rev)
-        except Exception:
-            logger.warning(
-                "post-rebind snapshot failed for project %s at rev %s; "
-                "rebind is durable, hydration will rebuild",
-                project_id,
-                session.model_rev,
-                exc_info=True,
-            )
-        session.hub.broadcast(
-            rebind_event(
-                rev=session.model_rev,
-                from_metamodel_id=from_id,
-                to_metamodel_id=mm_row.id,
-                validation_error_count=len(issues),
-            )
-        )
-    return RebindResponse(
-        model_rev=session.model_rev,
-        metamodel_id=mm_row.id,
-        validation_error_count=len(issues),
-        issue_counts=state.counts(),
-        issues=[IssueOut.from_core(i) for i in issues],
-    )

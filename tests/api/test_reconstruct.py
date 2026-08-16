@@ -14,6 +14,7 @@ from tests.api.conftest import (
     papi,
     seed_default_project,
 )
+from tests.api.test_commits_metamodel_ops import _acquire_mm
 
 _MM = """
 elements:
@@ -81,9 +82,15 @@ def test_reconstruct_before_a_rebind_uses_prior_metamodel() -> None:
     c = _client()
     commit_create(c, "A")          # Node element under the original metamodel
     r1 = model_rev(c)
+    token = _acquire_mm(c)
     rebind = c.post(
-        papi("/metamodel/rebind") + f"?base_rev={model_rev(c)}&message=swap",
-        content=_MM_RENAMED, headers={"content-type": "application/x-yaml"},
+        papi("/commits"),
+        json={
+            "base_rev": model_rev(c),
+            "ops": [{"kind": "metamodel.rebind", "blob": _MM_RENAMED}],
+            "message": "swap",
+            "lock_tokens": [token],
+        },
     )
     assert rebind.status_code == 200, rebind.text
     # reconstructing at r1 (pre-swap) must still yield the Node element and not

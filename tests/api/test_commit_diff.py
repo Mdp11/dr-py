@@ -733,10 +733,15 @@ def test_rebind_commit_diff_carries_structural_metamodel_diff(
     client: TestClient,
 ) -> None:
     before = _model_rev(client)
+    token = _acquire_mm(client)
     r = client.post(
-        papi("/metamodel/rebind") + f"?base_rev={before}&message=swap",
-        content=_MM_REBOUND,
-        headers={"content-type": "application/x-yaml"},
+        papi("/commits"),
+        json={
+            "base_rev": before,
+            "ops": [{"kind": "metamodel.rebind", "blob": _MM_REBOUND}],
+            "message": "swap",
+            "lock_tokens": [token],
+        },
     )
     assert r.status_code == 200, r.text
     rev = r.json()["model_rev"]

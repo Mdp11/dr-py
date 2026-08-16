@@ -43,3 +43,71 @@ def test_upload_on_nonempty_model_409(client: TestClient) -> None:
                     headers={"content-type": "application/x-yaml"})
     assert r.status_code == 409
     assert "rebind" in r.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# `_peer_mm_conflict` honor rule (routes/metamodel.py): ported from
+# test_metamodel_rebind.py (Task 9) when POST /metamodel/rebind retired —
+# these exercise POST /metamodel (upload) and DELETE /metamodel (clear),
+# which stay alive and share the helper with the now-gone standalone rebind
+# route; the commit-flow ``metamodel.rebind`` op replaced the honor check
+# with hard lock verification instead (test_commits_metamodel_ops.py), so
+# this file is the only remaining coverage for the honor-rule callers.
+# ---------------------------------------------------------------------------
+
+_PEER = {"x-user-id": "peer", "x-user-email": "peer@example.com"}
+
+
+def _add_editor(user_id: str, email: str) -> None:
+    from data_rover.api import db
+    from data_rover.api.db_models import Role, User
+    from data_rover.api.session import DEFAULT_PROJECT_ID
+    from data_rover.api.tenancy import add_member
+
+    gen = db.get_db()
+    s = next(gen)
+    try:
+        s.add(User(id=user_id, email=email))
+        add_member(s, DEFAULT_PROJECT_ID, user_id, Role.editor)
+        s.commit()
+    finally:
+        gen.close()
+
+
+def _acquire_mm(c: TestClient, headers: dict[str, str]) -> None:
+    r = c.post(
+        papi("/locks"), headers=headers,
+        json={
+            "targets": [
+                {"resource_id": "mm", "mode": "exclusive", "type": "metamodel"}
+            ],
+            "intent": "edit",
+        },
+    )
+    assert r.status_code == 200, r.text
+
+
+def test_upload_409_when_peer_holds_mm_lease(client: TestClient) -> None:
+    assert client.post(papi("/metamodel"), content=_MM,
+                       headers={"content-type": "application/x-yaml"}).status_code == 200
+    assert client.post(papi("/model"), json={"elements": [], "relationships": []}).status_code == 200
+    _add_editor("peer", "peer@example.com")
+    _acquire_mm(client, _PEER)
+    r = client.post(
+        papi("/metamodel"),
+        content=_MM,
+        headers={"content-type": "application/x-yaml", **AUTH_HEADERS},
+    )
+    assert r.status_code == 409
+    assert r.json()["detail"] == "metamodel locked"
+
+
+def test_clear_409_when_peer_holds_mm_lease(client: TestClient) -> None:
+    assert client.post(papi("/metamodel"), content=_MM,
+                       headers={"content-type": "application/x-yaml"}).status_code == 200
+    assert client.post(papi("/model"), json={"elements": [], "relationships": []}).status_code == 200
+    _add_editor("peer", "peer@example.com")
+    _acquire_mm(client, _PEER)
+    r = client.delete(papi("/metamodel"), headers=AUTH_HEADERS)
+    assert r.status_code == 409
+    assert r.json()["detail"] == "metamodel locked"

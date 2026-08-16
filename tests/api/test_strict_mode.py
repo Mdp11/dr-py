@@ -16,6 +16,7 @@ from data_rover.api.storage import (
 )
 
 from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .test_commits_metamodel_ops import _acquire_mm
 
 
 #: a minimal but VALID metamodel blob — Task 2's hydration test re-parses it
@@ -260,9 +261,15 @@ def test_rebind_exempt_from_strict_mode(client) -> None:
     })
     client.patch(papi("/settings"), headers=AUTH_HEADERS, json={"strict_mode": True})
     before = _rev(client)
+    token = _acquire_mm(client)
     r = client.post(
-        papi("/metamodel/rebind") + f"?base_rev={before}&message=swap",
-        content=_MM_RENAMED, headers={"content-type": "application/x-yaml"},
+        papi("/commits"),
+        json={
+            "base_rev": before,
+            "ops": [{"kind": "metamodel.rebind", "blob": _MM_RENAMED}],
+            "message": "swap",
+            "lock_tokens": [token],
+        },
     )
     assert r.status_code == 200, r.text  # rebind exempt even under strict mode
     assert r.json()["validation_error_count"] >= 1

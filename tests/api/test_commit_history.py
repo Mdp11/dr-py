@@ -14,6 +14,7 @@ from .conftest import (
     papi,
     seed_default_project,
 )
+from .test_commits_metamodel_ops import _acquire_mm
 
 _MM = """
 elements:
@@ -80,9 +81,15 @@ relationships:
 
 def test_history_marks_rebind_commit(client: TestClient) -> None:
     commit_create(client)
+    token = _acquire_mm(client)
     r = client.post(
-        papi("/metamodel/rebind") + f"?base_rev={model_rev(client)}&message=swap",
-        content=_MM_RENAMED, headers={"content-type": "application/x-yaml"},
+        papi("/commits"),
+        json={
+            "base_rev": model_rev(client),
+            "ops": [{"kind": "metamodel.rebind", "blob": _MM_RENAMED}],
+            "message": "swap",
+            "lock_tokens": [token],
+        },
     )
     assert r.status_code == 200, r.text
     body = client.get(papi("/commits"), headers=AUTH_HEADERS).json()

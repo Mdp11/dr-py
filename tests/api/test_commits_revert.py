@@ -215,9 +215,15 @@ relationships:
 def test_revert_across_rebind_409(client: TestClient) -> None:
     commit_create(client, "A")            # rev 1
     target = model_rev(client)                  # 1
+    token = _acquire_mm(client)
     rebind = client.post(
-        papi("/metamodel/rebind") + f"?base_rev={model_rev(client)}&message=swap",
-        content=_MM_RENAMED, headers={"content-type": "application/x-yaml"},
+        papi("/commits"),
+        json={
+            "base_rev": model_rev(client),
+            "ops": [{"kind": "metamodel.rebind", "blob": _MM_RENAMED}],
+            "message": "swap",
+            "lock_tokens": [token],
+        },
     )
     assert rebind.status_code == 200, rebind.text
     rebind_rev = model_rev(client)              # 2

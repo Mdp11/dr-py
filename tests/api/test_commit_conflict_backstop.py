@@ -320,10 +320,15 @@ def test_rebind_in_tail_always_conflicts(client: TestClient) -> None:
     fallbacks catches it — its own dedicated check must, since the client's
     ops were computed against a metamodel that no longer exists."""
     base = _rev(client)
+    token = _lock(client, "mm", type_="metamodel")
     r = client.post(
-        papi("/metamodel/rebind") + f"?base_rev={base}&message=swap",
-        content=_MM_RENAMED,
-        headers={"content-type": "application/x-yaml"},
+        papi("/commits"),
+        json={
+            "base_rev": base,
+            "ops": [{"kind": "metamodel.rebind", "blob": _MM_RENAMED}],
+            "message": "swap",
+            "lock_tokens": [token],
+        },
     )
     assert r.status_code == 200, r.text
 

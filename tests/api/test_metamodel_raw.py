@@ -5,6 +5,7 @@ from data_rover.api.session import get_session
 from data_rover.core.metamodel.loader import load_metamodel_str
 
 from .conftest import AUTH_HEADERS, papi, seed_default_project
+from .test_commits_metamodel_ops import _acquire_mm
 
 # Leading comment + odd spacing are the point: raw must be byte-identical.
 _MM = """\
@@ -62,11 +63,15 @@ def test_raw_returns_rebound_blob_verbatim() -> None:
     c = _client()
     assert c.post(papi("/metamodel"), content=_MM, headers=_YAML).status_code == 200
     assert c.post(papi("/model"), json={"elements": [], "relationships": []}).status_code == 200
+    token = _acquire_mm(c)
     r = c.post(
-        papi("/metamodel/rebind"),
-        content=_MM2,
-        headers=_YAML,
-        params={"base_rev": _rev(c), "message": "adopt v2"},
+        papi("/commits"),
+        json={
+            "base_rev": _rev(c),
+            "ops": [{"kind": "metamodel.rebind", "blob": _MM2}],
+            "message": "adopt v2",
+            "lock_tokens": [token],
+        },
     )
     assert r.status_code == 200, r.text
     raw = c.get(papi("/metamodel/raw"))
