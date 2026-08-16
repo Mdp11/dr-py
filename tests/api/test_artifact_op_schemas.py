@@ -49,7 +49,7 @@ def test_split_ops_separates_families() -> None:
         {"kind": "create_element", "temp_id": "tmp_e", "type_name": "Node", "properties": {}},
         {"kind": "update_artifact", "id": "a1", "payload": {"code": "y"}},
     ])
-    model_ops, artifact_ops, view_ops = split_ops(ops)
+    model_ops, artifact_ops, view_ops, _metamodel_ops = split_ops(ops)
     assert [o.kind for o in model_ops] == ["create_element"]
     assert [o.kind for o in artifact_ops] == ["update_artifact"]
     assert view_ops == []

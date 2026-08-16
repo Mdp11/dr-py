@@ -92,7 +92,7 @@ def test_split_ops_three_ways() -> None:
             *RAW_VIEW_OPS[:1],
         ]
     )
-    model_ops, artifact_ops, view_ops = split_ops(ops)
+    model_ops, artifact_ops, view_ops, _metamodel_ops = split_ops(ops)
     assert isinstance(model_ops[0], CreateElementOp)
     assert isinstance(artifact_ops[0], CreateArtifactOp)
     assert len(view_ops) == 1 and view_ops[0].kind == "create_folder"

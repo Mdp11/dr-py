@@ -430,7 +430,12 @@ def preview_commit(
             status_code=409,
             content={"detail": "stale base_rev", "model_rev": session.model_rev},
         )
-    model_ops, artifact_ops, view_ops = split_ops(payload.ops)
+    model_ops, artifact_ops, view_ops, metamodel_ops = split_ops(payload.ops)
+    if metamodel_ops:
+        # TEMPORARY (Task 2): the metamodel applier lands in Task 6, which
+        # removes this stub. Until then a preview containing metamodel ops
+        # must refuse rather than silently ignore them.
+        raise HTTPException(status_code=422, detail="metamodel ops not yet supported")
     # Artifact ops are DB rows, not model content: there is nothing to apply
     # into the model and roll back, so they are checked DRY (422 on an invalid
     # payload / unknown id / name clash, 409 on a stale artifact_rev) and
@@ -668,7 +673,12 @@ def create_commit(
     returns, and only failures raised after that point roll the view back.
     """
     _, model = require_model(session)
-    model_ops, artifact_ops, view_ops = split_ops(payload.ops)
+    model_ops, artifact_ops, view_ops, metamodel_ops = split_ops(payload.ops)
+    if metamodel_ops:
+        # TEMPORARY (Task 2): the metamodel applier lands in Task 5, which
+        # removes this stub. Until then a commit containing metamodel ops
+        # must refuse rather than silently dropping them.
+        raise HTTPException(status_code=422, detail="metamodel ops not yet supported")
     # The unwind ledger every failure path below shares — see _CommitUnwind.
     # Its ``created_view`` flag is the subtle one: it is True iff THIS request
     # is the one that flipped session.view from None to non-None via
@@ -1252,18 +1262,18 @@ def revert_commit(
         # the full OpIn union while _apply_batch takes model ops): the guards
         # above already proved the artifact AND view halves empty, since an
         # op's inverse is always in its own family.
-        combined, artifact_combined, view_combined = split_ops(
+        combined, artifact_combined, view_combined, metamodel_combined = split_ops(
             deserialize_ops([op for c in reversed(commits) for op in c.inverse_ops])
         )
-        if artifact_combined or view_combined:
+        if artifact_combined or view_combined or metamodel_combined:
             # Unreachable while the 409 guards above stand. An explicit raise
             # rather than an assert: `python -O` strips asserts, and silently
-            # dropping artifact/view ops on the floor is precisely the outcome
-            # the Phase-1 boundary exists to prevent, so a narrowed guard must
-            # fail loudly instead of half-reverting.
+            # dropping artifact/view/metamodel ops on the floor is precisely
+            # the outcome the Phase-1 boundary exists to prevent, so a
+            # narrowed guard must fail loudly instead of half-reverting.
             raise HTTPException(
                 status_code=500,
-                detail="artifact/view ops reached the revert applier",
+                detail="artifact/view/metamodel ops reached the revert applier",
             )
         res = _apply_batch(model, combined, restore=True)
         # Same ledger create_commit uses (see _CommitUnwind), narrowed to the

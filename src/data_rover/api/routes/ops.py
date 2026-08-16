@@ -613,7 +613,7 @@ def apply_ops(
                 "model_rev": session.model_rev,
             },
         )
-    model_ops, artifact_ops, view_ops = split_ops(payload.ops)
+    model_ops, artifact_ops, view_ops, metamodel_ops = split_ops(payload.ops)
     if artifact_ops:
         # The legacy unlocked path is model-only FOREVER: artifact edits go
         # through POST /commits (lock-verified) or legacy PUT /artifacts.
@@ -625,6 +625,11 @@ def apply_ops(
         raise HTTPException(
             status_code=422,
             detail="view ops are not supported on /model/ops; use /commits",
+        )
+    if metamodel_ops:
+        raise HTTPException(
+            status_code=422,
+            detail="metamodel ops are not supported on /model/ops; use /commits",
         )
     state = _ensure_validation_seeded(session, model)
     if not payload.ops:
@@ -701,7 +706,16 @@ def undo(
         # DB transaction, the view half in place on session.view (also staged
         # on this request's DB transaction once accepted — see the persist
         # step below).
-        model_inv, artifact_inv, view_inv = split_ops(batch.inverse_ops)
+        model_inv, artifact_inv, view_inv, metamodel_inv = split_ops(batch.inverse_ops)
+        if metamodel_inv:
+            session.op_log.append(batch)
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "detail": "undo across metamodel changes is not yet supported",
+                    "model_rev": session.model_rev,
+                },
+            )
         # True iff THIS request is the one that flipped session.view from
         # None to non-None via load_or_create_view — tracked exactly like
         # create_commit's own ``created_view`` so every failure/rejection path

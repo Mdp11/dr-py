@@ -33,13 +33,16 @@ from .schemas import (
     CreateFolderOp,
     DeleteArtifactOp,
     DeleteFolderOp,
+    MetamodelOpIn,
     ModelOpIn,
     MoveArtifactOp,
     MoveElementOp,
     MoveFolderOp,
+    MoveMetamodelNodeOp,
     OpIn,
     PlaceArtifactOp,
     PlaceElementOp,
+    RebindMetamodelOp,
     RemoveArtifactOp,
     RemoveElementOp,
     RenameFolderOp,
@@ -55,17 +58,21 @@ ARTIFACT_OP_KINDS = frozenset({"create_artifact", "update_artifact", "delete_art
 
 def split_ops(
     ops: Sequence[OpIn],
-) -> tuple[list[ModelOpIn], list[ArtifactOpIn], list[ViewOpIn]]:
-    """Separate a mixed batch into (model, artifact, view) ops, order-
-    preserving within each family. The families are independent (payloads and
-    placements may REFERENCE ids across families, but tolerantly), so relative
-    cross-family order carries no meaning."""
+) -> tuple[list[ModelOpIn], list[ArtifactOpIn], list[ViewOpIn], list[MetamodelOpIn]]:
+    """Separate a mixed batch into (model, artifact, view, metamodel) ops,
+    order-preserving within each family. The metamodel arm is matched
+    EXPLICITLY — the trailing else is the model-applier fallthrough, and an
+    op family that silently lands there reaches ``_apply_one``'s
+    ``assert_never`` as a 500 instead of its own applier."""
     model_ops: list[ModelOpIn] = []
     artifact_ops: list[ArtifactOpIn] = []
     view_ops: list[ViewOpIn] = []
+    metamodel_ops: list[MetamodelOpIn] = []
     for op in ops:
         if isinstance(op, (CreateArtifactOp, UpdateArtifactOp, DeleteArtifactOp)):
             artifact_ops.append(op)
+        elif isinstance(op, (RebindMetamodelOp, MoveMetamodelNodeOp)):
+            metamodel_ops.append(op)
         elif isinstance(
             op,
             (
@@ -84,7 +91,7 @@ def split_ops(
             view_ops.append(op)
         else:
             model_ops.append(op)
-    return model_ops, artifact_ops, view_ops
+    return model_ops, artifact_ops, view_ops, metamodel_ops
 
 
 def artifact_op_ids(ops: Sequence[ArtifactOpIn]) -> set[str]:
