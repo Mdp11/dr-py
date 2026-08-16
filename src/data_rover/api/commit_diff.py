@@ -45,6 +45,7 @@ from .artifact_ops import ARTIFACT_OP_KINDS, split_ops
 from .db_models import Commit
 from .hydration import deserialize_ops, reconstruct_model_at
 from .schemas import (
+    METAMODEL_OP_KINDS,
     VIEW_OP_KINDS,
     ArtifactDiffAddedOut,
     ArtifactDiffDeletedOut,
@@ -59,11 +60,13 @@ from .schemas import (
     DeleteFolderOp,
     ElementOut,
     JsonChangeOut,
+    LayoutMoveOut,
     ModifiedElementOut,
     ModifiedRelationshipOut,
     MoveArtifactOp,
     MoveElementOp,
     MoveFolderOp,
+    MoveMetamodelNodeOp,
     PlaceArtifactOp,
     PlaceElementOp,
     RelationshipOut,
@@ -389,6 +392,33 @@ def _view_diffs(commit: Commit) -> list[ViewDiffEntryOut]:
     return out
 
 
+def _layout_moves(commit: Commit) -> list[LayoutMoveOut]:
+    """Journal-only summary of the layout half — a moved node's destination
+    (x/y None = key removed). Deliberately no before/after per coordinate:
+    the diff surface promises "N nodes moved", not pixel history.
+
+    Reads the FORWARD ops only (unlike the model/artifact/view halves above):
+    a layout write carries no cascade, so there is nothing the inverse side
+    would add that the forward ops don't already name. ``split_ops`` returns
+    a 4-tuple here (model, artifact, view, metamodel); this helper wants only
+    the fourth slot, a rebind-carrying batch's own ``metamodel.rebind`` op
+    simply isn't a ``MoveMetamodelNodeOp`` and is filtered out by the
+    ``isinstance`` check below — so a mixed rebind+move commit still renders
+    just its moves here, with the structural rebind half rendered separately
+    by ``_metamodel_structural``.
+    """
+    _, _, _, forward = split_ops(deserialize_ops(commit.ops))
+    return [
+        LayoutMoveOut(
+            node=op.node,
+            x=op.pos.x if op.pos is not None else None,
+            y=op.pos.y if op.pos is not None else None,
+        )
+        for op in forward
+        if isinstance(op, MoveMetamodelNodeOp)
+    ]
+
+
 def diff_commit(db: DbSession, project_id: str, commit: Commit) -> CommitDiffOut:
     """Render one commit's changes across content families.
 
@@ -429,14 +459,18 @@ def diff_commit(db: DbSession, project_id: str, commit: Commit) -> CommitDiffOut
     )
     has_artifact = any(op.get("kind") in ARTIFACT_OP_KINDS for op in commit.ops)
     has_view = any(op.get("kind") in VIEW_OP_KINDS for op in commit.ops)
+    has_layout = any(op.get("kind") == "metamodel.move_node" for op in commit.ops)
     has_model = any(
-        op.get("kind") not in ARTIFACT_OP_KINDS and op.get("kind") not in VIEW_OP_KINDS
+        op.get("kind") not in ARTIFACT_OP_KINDS
+        and op.get("kind") not in VIEW_OP_KINDS
+        and op.get("kind") not in METAMODEL_OP_KINDS
         for op in commit.ops
     )
     scope = sorted(
         ({"model"} if has_model or is_rebind else set())
         | ({"artifact"} if has_artifact else set())
         | ({"view"} if has_view else set())
+        | ({"metamodel-layout"} if has_layout else set())
     ) or ["model"]
 
     return CommitDiffOut(
@@ -452,4 +486,5 @@ def diff_commit(db: DbSession, project_id: str, commit: Commit) -> CommitDiffOut
         artifacts=_artifact_diffs(db, project_id, commit),
         view=_view_diffs(commit),
         metamodel=_metamodel_structural(db, commit) if is_rebind else None,
+        layout_moves=_layout_moves(commit),
     )

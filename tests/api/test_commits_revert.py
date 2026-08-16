@@ -19,6 +19,7 @@ from tests.api.conftest import (
     papi,
     seed_default_project,
 )
+from tests.api.test_commits_metamodel_ops import _acquire_mm
 
 _MM = """
 elements:
@@ -355,3 +356,39 @@ def test_revert_refuses_range_with_view_ops(client: TestClient) -> None:
     assert r.status_code == 409
     assert r.json()["detail"] == "revert across view changes is not yet supported"
     assert r.json()["view_commit_rev"] == view_commit_rev
+
+
+def test_revert_409s_across_metamodel_ops(client: TestClient) -> None:
+    # A layout-only commit carries no rebind FK columns at all (the standalone
+    # rebind loop above would miss it), so this pins the NEW op-kind guard
+    # specifically: land a layout-only commit at rev N, then try to revert
+    # across it.
+    commit_create(client, "A")  # rev fixture+1
+    target = model_rev(client)
+    mm_token = _acquire_mm(client)
+    r = client.post(
+        papi("/commits"),
+        headers=AUTH_HEADERS,
+        json={
+            "base_rev": model_rev(client),
+            "ops": [
+                {
+                    "kind": "metamodel.move_node",
+                    "node": "el:Node",
+                    "pos": {"x": 1, "y": 2},
+                }
+            ],
+            "message": "move",
+            "lock_tokens": [mm_token],
+        },
+    )
+    assert r.status_code == 200, r.text
+    layout_rev = model_rev(client)
+    rr = client.post(
+        papi("/commits/revert"),
+        headers=AUTH_HEADERS,
+        json={"target_rev": target, "base_rev": model_rev(client)},
+    )
+    assert rr.status_code == 409
+    assert "metamodel" in rr.json()["detail"]
+    assert rr.json()["metamodel_commit_rev"] == layout_rev

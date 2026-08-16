@@ -21,6 +21,7 @@ from data_rover.api.main import create_app
 from data_rover.api.session import DEFAULT_PROJECT_ID
 
 from .conftest import AUTH_HEADERS, create_folder_via_commit, papi, seed_default_project
+from .test_commits_metamodel_ops import _acquire_mm
 
 _MM = """
 elements:
@@ -809,3 +810,71 @@ def test_rebind_commit_diff_degrades_to_null_on_missing_blob(
         gen.close()
     assert out.is_rebind is True
     assert out.metamodel is None
+
+
+def test_diff_renders_layout_moves_and_scope(client: TestClient) -> None:
+    token = _acquire_mm(client)
+    base = _rev(client)
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": base,
+            "ops": [
+                {
+                    "kind": "metamodel.move_node",
+                    "node": "el:Node",
+                    "pos": {"x": 5.0, "y": 6.0},
+                }
+            ],
+            "message": "move",
+            "lock_tokens": [token],
+        },
+    )
+    assert r.status_code == 200, r.text
+    rev = r.json()["model_rev"]
+    d = client.get(papi(f"/commits/{rev}/diff"))
+    assert d.status_code == 200, d.text
+    body = d.json()
+    assert body["scope"] == ["metamodel-layout"]
+    assert body["layout_moves"] == [{"node": "el:Node", "x": 5.0, "y": 6.0}]
+    assert body["is_rebind"] is False
+
+
+def test_diff_of_mixed_layout_and_rebind_renders_both_halves(
+    client: TestClient,
+) -> None:
+    """A rebind-carrying batch may also move a node in the SAME commit
+    (spec 2026-08-16 lets a migration batch carry any number of
+    ``metamodel.move_node`` ops alongside its one rebind): the structural
+    rebind rendering and the layout-moves summary must both fire on one
+    page, and the scope union must carry ``model`` (the rebind) AND
+    ``metamodel-layout`` (the move) rather than either alone."""
+    token = _acquire_mm(client)
+    base = _rev(client)
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": base,
+            "ops": [
+                {"kind": "metamodel.rebind", "blob": _MM_REBOUND},
+                {
+                    "kind": "metamodel.move_node",
+                    "node": "el:Widget",
+                    "pos": {"x": 3.0, "y": 4.0},
+                },
+            ],
+            "message": "migrate + move",
+            "lock_tokens": [token],
+        },
+    )
+    assert r.status_code == 200, r.text
+    rev = r.json()["model_rev"]
+    d = client.get(papi(f"/commits/{rev}/diff"))
+    assert d.status_code == 200, d.text
+    body = d.json()
+    assert body["is_rebind"] is True
+    assert sorted(body["scope"]) == ["metamodel-layout", "model"]
+    assert body["layout_moves"] == [{"node": "el:Widget", "x": 3.0, "y": 4.0}]
+    assert [t["name"] for t in body["metamodel"]["element_types"]["added"]] == [
+        "Widget"
+    ]

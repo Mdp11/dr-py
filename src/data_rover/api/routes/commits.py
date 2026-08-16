@@ -1531,6 +1531,24 @@ def revert_commit(
                         "view_commit_rev": c.rev,
                     },
                 )
+        for c in commits:
+            # Same permanent boundary as the view family: a range revert
+            # across a schema swap is exactly the undo refusal (Task 7), and
+            # layout rows share the artifact family's row-identity hazard.
+            # Checked on op KIND, not the from/to_metamodel_id FK columns the
+            # rebind loop above already handles — a layout-only commit
+            # (``metamodel.move_node``) carries no FK at all, so without this
+            # separate check it would fall through to the defensive
+            # "artifact/view/metamodel ops reached the revert applier" 500
+            # below instead of a clean, explainable 409.
+            if any(op.get("kind") in METAMODEL_OP_KINDS for op in c.ops):
+                return JSONResponse(
+                    status_code=409,
+                    content={
+                        "detail": "revert across metamodel changes is not supported",
+                        "metamodel_commit_rev": c.rev,
+                    },
+                )
         affected = _affected_ids(commits)
         held = [
             le
@@ -1555,8 +1573,8 @@ def revert_commit(
         # apply inverse_ops newest-first; deserialize the stored JSON op dicts.
         # split_ops is here as the TYPE narrowing only (deserialize_ops answers
         # the full OpIn union while _apply_batch takes model ops): the guards
-        # above already proved the artifact AND view halves empty, since an
-        # op's inverse is always in its own family.
+        # above already proved the artifact, view AND metamodel halves empty,
+        # since an op's inverse is always in its own family.
         combined, artifact_combined, view_combined, metamodel_combined = split_ops(
             deserialize_ops([op for c in reversed(commits) for op in c.inverse_ops])
         )

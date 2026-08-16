@@ -988,17 +988,34 @@ class ViewDiffEntryOut(BaseModel):
     artifact_kind: str | None = None
 
 
+class LayoutMoveOut(BaseModel):
+    """One diagram-layout key write, journal-only SUMMARY form (spec
+    2026-08-16 Task 8): a moved node's destination, not its pixel history.
+    ``x``/``y`` both ``None`` means the key was REMOVED (``pos: None`` on the
+    forward ``metamodel.move_node`` op) — deliberately no before/after per
+    coordinate, since the diff surface promises "N nodes moved", not a replay
+    of every intermediate drag."""
+
+    node: str
+    x: float | None = None
+    y: float | None = None
+
+
 class CommitDiffOut(BaseModel):
     """Everything one commit changed, across content families.
 
     Model entities reuse the change-request shapes (``CrElementOps`` /
     ``CrRelationshipOps``) rather than parallel ones, so a client renders a
     commit diff and a CR diff with the same component. ``scope`` mirrors the
-    commit feed event's field ("model" / "artifact" / "view"); ``is_rebind``
-    is true when either metamodel FK is set, matching ``CommitSummaryOut``.
-    ``metamodel`` is the structural document diff, recomputed from the two
-    immutable MetamodelRow blobs — only for rebind commits, and None when
-    either blob is missing/unparseable (degraded, never failed).
+    commit feed event's field ("model" / "artifact" / "view" /
+    "metamodel-layout"); ``is_rebind`` is true when either metamodel FK is
+    set, matching ``CommitSummaryOut``. ``metamodel`` is the structural
+    document diff, recomputed from the two immutable MetamodelRow blobs —
+    only for rebind commits, and None when either blob is missing/unparseable
+    (degraded, never failed). ``layout_moves`` is the journal-only summary of
+    the layout half (see ``LayoutMoveOut``) and is independent of
+    ``metamodel``/``is_rebind`` — a single commit can carry a rebind AND a
+    handful of node moves, in which case both render on this one page.
     """
 
     rev: int
@@ -1013,6 +1030,7 @@ class CommitDiffOut(BaseModel):
     artifacts: CommitArtifactDiffs = Field(default_factory=CommitArtifactDiffs)
     view: list[ViewDiffEntryOut] = Field(default_factory=list)
     metamodel: MetamodelStructuralDiff | None = None
+    layout_moves: list[LayoutMoveOut] = Field(default_factory=list)
 
 
 class RevertRequest(BaseModel):
