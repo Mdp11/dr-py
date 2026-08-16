@@ -851,3 +851,48 @@ def test_preview_restores_schema_when_model_ops_fail_mid_preview(
     assert session.model.metamodel is session.metamodel
     assert session.model.elements[eid].properties["label"] == "x"
     assert client.get(papi("/metamodel/raw")).json()["blob"] == MM_V1
+
+
+# ---------------------------------------------------------------------------
+# Task 7: POST /model/undo — layout ops replay; rebind batches refuse cleanly
+# ---------------------------------------------------------------------------
+
+
+def test_undo_restores_layout_positions(client: TestClient) -> None:
+    token = _acquire_mm(client)
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": _rev(client),
+            "ops": [
+                {"kind": "metamodel.move_node", "node": "el:Node", "pos": {"x": 5, "y": 6}}
+            ],
+            "message": "",
+            "lock_tokens": [token],
+        },
+    )
+    assert r.status_code == 200, r.text
+    r = client.post(papi("/model/undo"))
+    assert r.status_code == 200, r.text
+    layout = client.get(papi("/metamodel/layout")).json()
+    assert "el:Node" not in layout["positions"]  # prior state: key absent
+
+
+def test_undo_refuses_rebind_batches_and_keeps_history(client: TestClient) -> None:
+    token = _acquire_mm(client)
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": _rev(client),
+            "ops": [{"kind": "metamodel.rebind", "blob": MM_V2}],
+            "message": "",
+            "lock_tokens": [token],
+        },
+    )
+    assert r.status_code == 200, r.text
+    r = client.post(papi("/model/undo"))
+    assert r.status_code == 409
+    # push-back: a second undo attempt hits the same refusal, not "Nothing to undo"
+    r = client.post(papi("/model/undo"))
+    assert r.status_code == 409
+    assert "metamodel" in r.json()["detail"]
