@@ -456,7 +456,46 @@ ViewOpIn = (
     | MoveArtifactOp
 )
 
-OpIn = Annotated[ModelOpIn | ArtifactOpIn | ViewOpIn, Field(discriminator="kind")]
+
+class MetamodelNodePos(BaseModel):
+    """Diagram node's canvas position in client-defined units, opaque to the
+    backend (never interpreted server-side — only stored and echoed)."""
+
+    x: float
+    y: float
+
+
+class RebindMetamodelOp(BaseModel):
+    """Whole-metamodel swap as a batch member (spec 2026-08-16). ``blob`` is
+    the author's YAML SOURCE, persisted verbatim as a new immutable
+    ``MetamodelRow`` (Correction A: never a pydantic round-trip). At most one
+    per batch; the commit applier hoists it FIRST so every other op in the
+    batch validates against the candidate schema. The inverse op carries the
+    PRIOR blob — full-state, so the journal alone answers undo/diff."""
+
+    kind: Literal["metamodel.rebind"]
+    blob: str = Field(min_length=1)
+
+
+class MoveMetamodelNodeOp(BaseModel):
+    """One diagram-layout key write against ``metamodel_layouts``. ``node``
+    is a layout key (``el:<Name>`` / ``rel:<Name>`` / ``enum:<Name>``);
+    ``pos: None`` REMOVES the key (a rename migrates a position as two ops:
+    old key -> None, new key -> pos). The inverse carries the prior position
+    (or None). Presentation data: no validation beyond this schema."""
+
+    kind: Literal["metamodel.move_node"]
+    node: str = Field(min_length=1)
+    pos: MetamodelNodePos | None = None
+
+
+#: Metamodel-family ops (spec 2026-08-16) — applied by api/metamodel_ops.py
+#: to the in-memory metamodel + content tables, never to the model.
+MetamodelOpIn = RebindMetamodelOp | MoveMetamodelNodeOp
+
+OpIn = Annotated[
+    ModelOpIn | ArtifactOpIn | ViewOpIn | MetamodelOpIn, Field(discriminator="kind")
+]
 
 #: kind-tags of view ops, for raw journal dicts (mirrors ARTIFACT_OP_KINDS,
 #: which lives with ITS applier; this one lives here because schemas is the
@@ -475,6 +514,10 @@ VIEW_OP_KINDS = frozenset(
         "move_artifact",
     }
 )
+
+#: kind-tags of metamodel ops, for raw journal dicts (lives here for the same
+#: no-cycle reason VIEW_OP_KINDS does).
+METAMODEL_OP_KINDS = frozenset({"metamodel.rebind", "metamodel.move_node"})
 
 #: (de)serializes a list of ops to/from plain JSON for the durable commit
 #: journal (Commit.ops / inverse_ops). Mode "json" keeps Literal "kind" tags
