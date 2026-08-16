@@ -407,7 +407,14 @@ export const CommitResponseSchema = OpsResponseSchema.extend({
 	// refetches nothing: the staged payload it just committed IS the payload).
 	// Defaults keep every pre-artifact fixture parsing.
 	changed_artifacts: z.array(ArtifactHeaderSchema).default([]),
-	deleted_artifact_ids: z.array(z.string()).default([])
+	deleted_artifact_ids: z.array(z.string()).default([]),
+	// metamodel half (spec 2026-08-16): true when the batch carried a
+	// `metamodel.rebind`, in which case the project is bound to a NEW
+	// metamodel row named by `to_metamodel_id`. Optional rather than
+	// defaulted so a fixture that omits them stays distinguishable from one
+	// that says "no rebind" — every reader treats absent as false/null.
+	rebound: z.boolean().optional(),
+	to_metamodel_id: z.string().nullable().optional()
 });
 export type CommitResponse = z.infer<typeof CommitResponseSchema>;
 

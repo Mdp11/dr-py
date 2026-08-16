@@ -59,6 +59,11 @@ export function diffMetamodel(body: string, cfg?: ClientConfig): Promise<Metamod
 /**
  * Adopt a candidate metamodel via a non-destructive journaled rebind (owner
  * only). `baseRev`/`message` ride query params; the raw body is the blob.
+ *
+ * DEAD ROUTE (spec 2026-08-16): `POST /metamodel/rebind` no longer exists —
+ * a rebind is a `metamodel.rebind` op on `POST /commits`. Its ONE remaining
+ * caller is `commitMetamodelRebind`, behind MetamodelTab's Rebind button,
+ * which Task 12 deletes; this function goes with it. Nothing new may call it.
  */
 export function rebindMetamodel(
 	body: string,
@@ -95,7 +100,14 @@ export function getMetamodelLayout(cfg?: ClientConfig): Promise<MetamodelLayout>
 }
 
 /** PUT replaces the whole positions map; the backend answers 204 with no
- * body, so `apiFetch` returns `undefined` here without attempting a parse. */
+ * body, so `apiFetch` returns `undefined` here without attempting a parse.
+ *
+ * DEAD ROUTE (spec 2026-08-16): `PUT /metamodel/layout` no longer exists — a
+ * node position is a `metamodel.move_node` op on `POST /commits`, staged
+ * through `metamodel-stage.svelte.ts`. Its ONE remaining caller is
+ * `metamodel-diagram.svelte.ts`'s debounced save, which Task 11 deletes; this
+ * function goes with it. `getMetamodelLayout` above stays — the baseline read
+ * is untouched. Nothing new may call this. */
 export function putMetamodelLayout(body: MetamodelLayout, cfg?: ClientConfig): Promise<void> {
 	return apiFetch('/metamodel/layout', { method: 'PUT', body }, cfg);
 }

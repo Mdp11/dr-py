@@ -19,17 +19,35 @@ import type {
 	PreviewResponse
 } from '$lib/api/types';
 import type { LeaseLite } from '$lib/api/feed';
+import { getMetamodel } from '$lib/api/metamodel';
 import type { Op } from './ops';
-import { artifactResource, folderResource, isArtifactResource, isTempId } from './ops';
+import {
+	artifactResource,
+	folderResource,
+	isArtifactResource,
+	isTempId,
+	METAMODEL_RESOURCE
+} from './ops';
 import {
 	applyDelta,
 	clearStaged,
 	getModelRev,
 	getStagedOps,
+	refetchIssues,
+	refreshSummary,
 	revertAllStaged,
 	revertStagedFor,
 	revertStagedForElement
 } from './model.svelte';
+// The active-metamodel mirror is a leaf store (no imports of its own beyond
+// api types), so importing it here closes no cycle.
+import { setMetamodel } from './metamodel.svelte';
+import {
+	clearStagedNodeMoves,
+	getStagedMetamodelDepth,
+	getStagedMetamodelOps,
+	notifyMetamodelCommitted
+} from './metamodel-stage.svelte';
 import {
 	clearStagedArtifacts,
 	discardAllStagedArtifacts,
@@ -157,7 +175,7 @@ export function _dropToken(token: string): void {
 function canonicalResource(t: LockTargetIn): string {
 	if (t.type === 'artifact') return artifactResource(t.resource_id);
 	if (t.type === 'folder') return folderResource(t.resource_id);
-	if (t.type === 'metamodel') return 'mm';
+	if (t.type === 'metamodel') return METAMODEL_RESOURCE;
 	return t.resource_id;
 }
 
@@ -293,29 +311,51 @@ function _onTokenExpired(token: string): void {
 // --- preview / commit / discard --------------------------------------------
 
 /** Preview the staged batch at the live rev (kept current by the feed).
- * Model ops, then artifact ops, then view ops — VIEW LAST: a staged
- * `place_artifact` may reference an artifact still identified by a temp id
- * from the artifact half of this SAME batch, and the backend seeds the view
- * applier's id_map from the earlier two halves, so a view op naming a temp
- * id can only resolve if it comes after the create that mints it. One mixed
- * batch, exactly as it will be committed (the backend splits the union
- * itself). */
+ * Metamodel ops FIRST, then model ops, then artifact ops, then view ops.
+ *
+ * METAMODEL FIRST is presentation, not protocol: the server hoists the
+ * `metamodel.rebind` to the head of the batch itself regardless of what order
+ * it arrives in, so this only fixes the drawer's mental model — schema, then
+ * the data expressed in it.
+ *
+ * VIEW LAST is protocol: a staged `place_artifact` may reference an artifact
+ * still identified by a temp id from the artifact half of this SAME batch, and
+ * the backend seeds the view applier's id_map from the earlier halves, so a
+ * view op naming a temp id can only resolve if it comes after the create that
+ * mints it. One mixed batch, exactly as it will be committed (the backend
+ * splits the union itself). */
 export function previewStaged(): Promise<PreviewResponse> {
 	return previewCommit(
 		getModelRev(),
-		[...getStagedOps(), ...getStagedArtifactOps(), ...getStagedViewOps()],
+		[
+			...getStagedMetamodelOps(),
+			...getStagedOps(),
+			...getStagedArtifactOps(),
+			...getStagedViewOps()
+		],
 		_clientConfig
 	);
 }
 
 /**
- * Commit all staged edits — model ops, artifact ops, and view ops in ONE
- * batch (view LAST; see {@link previewStaged}). On success the server
- * releases every token it was SENT, so we apply the delta and drop those
- * tokens from the registry locally.
+ * Commit all staged edits — metamodel ops, model ops, artifact ops, and view
+ * ops in ONE batch (metamodel first, view LAST; see {@link previewStaged}). On
+ * success the server releases every token it was SENT, so we apply the delta
+ * and drop those tokens from the registry locally.
  */
 export async function commitStaged(message: string, ackErrors: boolean): Promise<CommitResponse> {
-	const ops: Op[] = [...getStagedOps(), ...getStagedArtifactOps(), ...getStagedViewOps()];
+	// Captured ONCE, here at the top, and never re-read below. The metamodel
+	// half is a live VIEW of the editor's buffer (the stage module reads it
+	// through a provider), so `getStagedMetamodelOps()` can return DIFFERENT
+	// text after the await — a straggler keystroke, a Discard. Everything
+	// downstream (the lock set, the request, and the post-success notify that
+	// tells the editor which blob became the baseline) must describe the ops
+	// that were actually SENT, which is exactly what the superseded
+	// `commitMetamodelRebind` used its own `sent` capture for. On the FAILURE
+	// path nothing below runs at all, so a commit that never landed can never
+	// clear a buffer it did not adopt.
+	const mmOps = getStagedMetamodelOps();
+	const ops: Op[] = [...mmOps, ...getStagedOps(), ...getStagedArtifactOps(), ...getStagedViewOps()];
 	if (ops.length === 0) {
 		// Never send an empty commit: the backend's empty-batch early return
 		// (routes/commits.py) skips its lock-release step, so lock_tokens sent
@@ -327,6 +367,11 @@ export async function commitStaged(message: string, ackErrors: boolean): Promise
 	// gate needs to know whether THIS batch carried view ops, and clearStaged
 	// happens before that notify fires.
 	const hadViewOps = getStagedViewOps().length > 0;
+	// The blob THIS batch carried, from the capture above — not from the buffer,
+	// which may have moved since. Null when the batch staged only node moves.
+	const mmBlob =
+		(mmOps.find((o) => o.kind === 'metamodel.rebind') as { blob?: string } | undefined)?.blob ??
+		null;
 	// Token partition: an artifact-editor lease whose artifact is NOT in this
 	// batch belongs to a still-open editor and must survive the commit (the
 	// server releases every token it is sent). Everything else — all element
@@ -392,7 +437,29 @@ export async function commitStaged(message: string, ackErrors: boolean): Promise
 	// listener-ordering reason as applyDelta above (view.svelte.ts's listener
 	// is a plain callback too, not guarded here).
 	if (hadViewOps) notifyViewCommitted();
+	// Metamodel half. The moves have landed durably, so the staged copy (and its
+	// localStorage mirror) goes; the notify then tells the editor which blob is
+	// the new baseline and the diagram to re-derive its positions. Both are
+	// listener registrations for the same reason as the two above: checkout must
+	// never import the editor or the diagram (see metamodel-stage's docstring).
+	clearStagedNodeMoves();
+	notifyMetamodelCommitted({ rebound: res.rebound === true, blob: mmBlob });
+	if (res.rebound === true) void adoptReboundMetamodel();
 	return res;
+}
+
+/** Own-commit rebind adoption (the port of MetamodelTab's old onRebind):
+ * peers get the rebind_event reload banner; the committer refetches in
+ * place. Best-effort — the commit is durable either way. */
+async function adoptReboundMetamodel(): Promise<void> {
+	try {
+		const mm = await getMetamodel(_clientConfig);
+		setMetamodel(mm);
+		await refetchIssues();
+		await refreshSummary();
+	} catch {
+		/* stale view only; the workspace's pendingRebind/reload path still exists */
+	}
 }
 
 /**
@@ -465,14 +532,27 @@ export async function releaseFolderLeaseIfUnneeded(folderId: string): Promise<vo
 /**
  * Release my `mm` lease (metamodel surface close). Best-effort like its
  * artifact/folder siblings ({@link releaseArtifactIfUnneeded},
- * {@link releaseFolderLeaseIfUnneeded}). Unlike them it needs no staged-ops
- * check: the `mm` lease is always acquired standalone by the metamodel
- * surface (its own `/locks` call, its own token — see
- * `metamodel-lease.svelte.ts`) and {@link lockedResourcesNeededBy} never
- * emits `mm`, so no staged op can require it.
+ * {@link releaseFolderLeaseIfUnneeded}) — and, since the metamodel became a
+ * staged commit family (spec 2026-08-16), guarded like them too.
+ *
+ * The guard used to be absent because {@link lockedResourcesNeededBy} never
+ * emitted `mm`, so no staged op could require the lease. That is no longer
+ * true: a dirty YAML draft and every staged node move ride the SAME
+ * `POST /commits` batch as model/artifact/view edits, and the backend
+ * hard-verifies the `mm` lease on any batch carrying a rebind. Closing the
+ * metamodel tab over a dirty draft would otherwise hand the lease back and
+ * turn the user's next commit into a 409 "required lock not held" — with the
+ * draft still on screen, still staged, and no surface left to re-acquire from.
+ *
+ * Depth rather than the resource set (the shape the artifact/folder siblings
+ * use) because the `mm` lease is always acquired STANDALONE by the metamodel
+ * surface — its own `/locks` call, its own token (`metamodel-lease.svelte.ts`)
+ * — so its token can only ever cover `mm`, and "is any metamodel work staged"
+ * is the whole question.
  */
 export async function releaseMetamodelLease(): Promise<void> {
-	const token = _registry.get('mm')?.token;
+	if (getStagedMetamodelDepth() > 0) return; // staged metamodel work still needs the lease
+	const token = _registry.get(METAMODEL_RESOURCE)?.token;
 	if (token === undefined) return;
 	_dropToken(token);
 	await releaseLock(token, _clientConfig).catch(() => {});
@@ -629,6 +709,12 @@ export function lockHolderLabel(res: Extract<CheckoutResult, { ok: false }>): st
  *     destination, and token-granularity keep/release (this function is
  *     always consulted per-TOKEN, never per-resource in isolation) is what
  *     keeps it held or lets it go, not this set.
+ *   - any metamodel op -> the singleton `mm` resource. Both kinds, not just
+ *     the rebind: the backend hard-verifies the lease only for a rebind batch
+ *     (a layout-only one needs editor+ and nothing more), but naming `mm` for
+ *     a staged move too is what keeps {@link releaseMetamodelLease} from
+ *     handing back a lease the very next commit is about to need — the same
+ *     over-eager-release guard a `create_artifact`'s temp id provides.
  * Used by {@link discardElement} to avoid releasing a token that a REMAINING
  * staged op still depends on (e.g. a connect's create_relationship needs the
  * source's exclusive lock even after the source's own property edit is
@@ -685,6 +771,10 @@ function lockedResourcesNeededBy(ops: Op[]): Set<string> {
 			case 'move_artifact':
 				needed.add(folderResource(op.from_folder_id));
 				needed.add(folderResource(op.to_folder_id));
+				break;
+			case 'metamodel.rebind':
+			case 'metamodel.move_node':
+				needed.add(METAMODEL_RESOURCE);
 				break;
 		}
 	}

@@ -227,6 +227,21 @@ export {
 	type MetamodelEditorView
 } from './metamodel-editor.svelte';
 export {
+	clearStagedNodeMoves,
+	closeMetamodelStage,
+	discardStagedNodeMoves,
+	getStagedMetamodelDepth,
+	getStagedMetamodelOps,
+	getStagedNodeMoves,
+	initMetamodelStage,
+	notifyMetamodelCommitted,
+	onMetamodelCommitted,
+	registerMetamodelDraftProvider,
+	stageNodeMove,
+	type MetamodelCommitInfo,
+	type NodePos
+} from './metamodel-stage.svelte';
+export {
 	applyDiagramEdit,
 	closeMetamodelDiagram,
 	getMetamodelDiagramView,

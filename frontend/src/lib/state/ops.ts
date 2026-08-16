@@ -111,11 +111,22 @@ export type ViewOp =
 			index?: number;
 	  };
 
+/**
+ * Metamodel-family ops (spec 2026-08-16) — mirror of the backend's
+ * MetamodelOpIn (api/schemas.py). Applied by POST /commits to the session
+ * metamodel + metamodel_layouts blob; /model/ops rejects them. At most one
+ * rebind per batch (the server hoists it first); `pos: null` removes a
+ * layout key.
+ */
+export type MetamodelOp =
+	| { kind: 'metamodel.rebind'; blob: string }
+	| { kind: 'metamodel.move_node'; node: string; pos: { x: number; y: number } | null };
+
 /** Model-content ops — the ONLY ops the model store's staged buffer may
  * hold (mirrors the backend's ModelOpIn / assert_never split). */
 export type ModelOp = ElementOp | RelationshipOp;
 
-export type Op = ModelOp | ArtifactOp | ViewOp;
+export type Op = ModelOp | ArtifactOp | ViewOp | MetamodelOp;
 
 export const TEMP_ID_PREFIX = 'tmp_';
 
@@ -169,6 +180,13 @@ export function folderResource(folderId: string): string {
 export function isFolderResource(resourceId: string): boolean {
 	return resourceId.startsWith(FOLDER_RESOURCE_PREFIX);
 }
+
+/** Client mirror of api/locking.py's METAMODEL_RESOURCE (singleton lease).
+ * Unlike `art:`/`folder:` this is not a prefix but the whole resource id:
+ * there is exactly ONE metamodel per project, so the lease has nothing to be
+ * keyed by. Requested as `{resource_id: 'mm', type: 'metamodel'}` and granted
+ * back under this same id, so no canonicalization is involved either. */
+export const METAMODEL_RESOURCE = 'mm';
 
 /** The view root's fixed folder id (backend core/view/ids.VIEW_ROOT_ID).
  * Element ops may NEVER name it (an unplaced element already renders at the

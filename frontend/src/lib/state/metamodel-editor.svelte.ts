@@ -13,6 +13,7 @@ import {
 } from './metamodel-lease.svelte';
 import { getRole } from './checkout.svelte';
 import { getModelRev } from './model.svelte';
+import { onMetamodelCommitted, registerMetamodelDraftProvider } from './metamodel-stage.svelte';
 import { isProjectQuiet } from './quiet';
 
 /**
@@ -301,6 +302,16 @@ function rebindErrorMessage(e: unknown): string {
 	return 'Rebind failed; no changes were applied.';
 }
 
+/**
+ * SUPERSEDED (spec 2026-08-16) by the commit flow: a dirty buffer is staged as
+ * a `metamodel.rebind` op (see the provider registration at the bottom of this
+ * module) and lands through `POST /commits`. The route this calls is GONE, so
+ * every call now 404s. It survives only until Task 12 deletes MetamodelTab's
+ * Rebind button — its one caller — after which this function, its
+ * `rebindMetamodelApi` import and the `_rebinding`/`_rebindError` flags go with
+ * it. Its success body has already been ported to the `onMetamodelCommitted`
+ * listener below; do not extend it, and do not call it from anything new.
+ */
 export async function commitMetamodelRebind(message: string): Promise<Rebind | null> {
 	const view = getMetamodelEditor();
 	// `_previewing` (F-1, the other direction): previewCurrent is still true
@@ -387,6 +398,18 @@ export function closeMetamodelEditor(): void {
 	if (_phase === 'ready') writeDraftNow();
 	_gen++;
 	clearTimers();
+	// BEFORE the lease drop, and that ordering is load-bearing since the
+	// metamodel became a staged commit family (spec 2026-08-16).
+	// `releaseMetamodelLease` now refuses to release while
+	// `getStagedMetamodelDepth() > 0`, and this module's contribution to that
+	// depth is `isMetamodelEditorDirty()`, which is false outside `ready`. A
+	// CLOSED tab therefore stages no rebind op — so it must not keep the `mm`
+	// lease either, or a close over a dirty draft strands a lease nothing
+	// staged needs, with the checkout heartbeat renewing it for the rest of
+	// the session and every peer locked out (the exact leak the comment below
+	// exists to prevent). Staged NODE MOVES still hold it, correctly: they
+	// outlive the tab and do stage ops.
+	_phase = 'idle';
 	// UNCONDITIONAL, not `if (_leaseHeld)`: an acquire IN FLIGHT is exactly
 	// the window this exists for, and `_leaseHeld` is false throughout it.
 	// `dropMetamodelLease` is what bumps the lease module's generation, and
@@ -397,7 +420,6 @@ export function closeMetamodelEditor(): void {
 	// rest of the session, locking every peer out of the metamodel.
 	_leaseHeld = false;
 	void dropMetamodelLease();
-	_phase = 'idle';
 	_loadError = null;
 	_lockedBy = null;
 	_draftRestored = false;
@@ -413,6 +435,47 @@ export function closeMetamodelEditor(): void {
 	_lintErrors = [];
 	_acquiring = false;
 }
+
+// --- commit-flow seam (spec 2026-08-16) ------------------------------------
+//
+// The buffer is staged commit CONTENT now: a dirty draft becomes a
+// `metamodel.rebind` op in the next `POST /commits` batch. Both halves are
+// REGISTRATIONS on `metamodel-stage.svelte.ts` rather than direct calls,
+// because checkout is what builds and lands that batch and it must never
+// import this module (`checkout → stage → editor → checkout`). Module scope,
+// not `initMetamodelEditor`: the stage may be asked for the batch before —
+// or after — any particular tab mount, and the provider's own `_phase` guard
+// (via {@link isMetamodelEditorDirty}) already answers "nothing staged" for
+// every non-`ready` state.
+
+registerMetamodelDraftProvider(() => ({
+	dirty: isMetamodelEditorDirty(),
+	blob: _buffer
+}));
+
+onMetamodelCommitted(({ rebound, blob }) => {
+	// The commit-flow port of the superseded commitMetamodelRebind's success
+	// body: the server has adopted `blob`, whatever the buffer holds now.
+	if (blob === null || _phase !== 'ready') return;
+	_baseline = blob;
+	// A rebind always stores a blob, so a session that loaded through the
+	// degraded "serialized" fallback is no longer looking at one.
+	_source = 'stored';
+	// The preview described `blob` against the PREVIOUS metamodel — spent.
+	_preview = null;
+	_previewFor = null;
+	// Any remaining divergence was typed in THIS session, not restored.
+	_draftRestored = false;
+	if (_buffer === blob) clearDraftStorage();
+	// The buffer moved mid-flight: those characters are unreviewed local changes
+	// ON TOP of the freshly bound metamodel, so the editor stays dirty and keeps
+	// its draft. Flushed NOW rather than on the debounce — a mid-flight Discard
+	// actively removed the key, and a close before the timer fires would
+	// otherwise take the work with it.
+	else writeDraftNow();
+	_leaseHeld = false; // the commit surrendered the mm token server-side
+	void rebound; // metamodel/issue refetch is checkout's adoptReboundMetamodel
+});
 
 /** Full reset for tests (does NOT touch the checkout registry). */
 export function resetMetamodelEditor(): void {
