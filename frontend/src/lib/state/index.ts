@@ -246,7 +246,6 @@ export {
 	closeMetamodelDiagram,
 	getMetamodelDiagramView,
 	initMetamodelDiagram,
-	LAYOUT_SAVE_DEBOUNCE_MS,
 	moveNode,
 	onMetamodelRebound,
 	runAutoArrange,

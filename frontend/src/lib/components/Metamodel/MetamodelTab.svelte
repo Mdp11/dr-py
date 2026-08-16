@@ -65,7 +65,8 @@
 		void init();
 		// Unmount without a close transition must release the lease too — the
 		// old drawer's known leak, fixed here by pairing mount with teardown.
-		// The diagram closes first: its teardown flushes a pending layout PUT.
+		// The diagram closes first: its teardown drops the peer-commit tap, and
+		// the editor's close then decides the lease against what is still staged.
 		return () => {
 			closeMetamodelDiagram();
 			closeMetamodelEditor();
@@ -88,10 +89,9 @@
 		// The commit consumed the message regardless of what the refresh below
 		// does next.
 		message = '';
-		// The draft's names ARE the project's names now, so every deferred layout
-		// key rewrite becomes true at once. Before the refresh, deliberately: the
-		// window where the shared layout blob still speaks the old names should be
-		// as short as possible, and the refresh below can fail.
+		// The draft's names ARE the project's names now, so the undo stack (whose
+		// snapshots were taken against the old baseline) is no longer replayable.
+		// Before the refresh, deliberately: the refresh below can fail.
 		onMetamodelRebound();
 		try {
 			const mm = await fetchMetamodel();

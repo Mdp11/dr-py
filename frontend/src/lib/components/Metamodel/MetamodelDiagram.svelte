@@ -43,9 +43,10 @@
 	 * **Two independent gates, deliberately.** `readOnly` comes from the editor
 	 * module (owner-only, plus a peer's lease and an in-flight rebind) and hides
 	 * every affordance that would CHANGE THE DRAFT. Dragging is gated separately
-	 * on `getRole() !== 'viewer'`, because node positions are presentation: they
-	 * live in a shared layout blob with no lease and no journal entry, so an
-	 * editor may rearrange the picture without being able to edit the metamodel.
+	 * on `getRole() !== 'viewer'`, because node positions are presentation: a
+	 * drag stages a `metamodel.move_node` op rather than editing the draft, so
+	 * an editor may rearrange the picture without being able to edit the
+	 * metamodel (a viewer's drags stay local and stage nothing).
 	 * Viewers pan, zoom, select and collapse — a read-only canvas, not a picture.
 	 *
 	 * **`useSvelteFlow()` needs a provider ABOVE this component** (a hook binds

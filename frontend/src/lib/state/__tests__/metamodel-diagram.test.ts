@@ -5,29 +5,37 @@ import { FIXTURE } from '$lib/metamodel/__tests__/fixtures';
 import { lineRangeForType, parseDraft } from '$lib/metamodel/yaml-edit';
 import { resetCheckout, setProjectInfo } from '../checkout.svelte';
 import {
+	clearStagedNodeMoves,
+	getStagedMetamodelOps,
+	notifyMetamodelCommitted
+} from '../metamodel-stage.svelte';
+import {
 	applyDiagramEdit,
 	closeMetamodelDiagram,
 	getMetamodelDiagramView,
 	initMetamodelDiagram,
-	LAYOUT_SAVE_DEBOUNCE_MS,
 	moveNode,
 	onMetamodelRebound,
+	runAutoArrange,
 	undoDiagramEdit
 } from '../metamodel-diagram.svelte';
 
 /**
- * The diagram half of the metamodel tab (Task 9). This module owns NO draft
- * state: it parses the editor module's buffer, applies one semantic YAML
- * command, and writes the text back through `editMetamodelBuffer`. So the
- * editor module is MOCKED down to the two functions that seam touches — a
- * tiny in-test buffer store — which keeps these tests about the diagram
- * module's own behaviour (commands, undo, shared layout, rename deferral)
- * rather than about the lease/lint/draft lifecycle that already has its own
- * suite (`metamodel-editor.test.ts`).
+ * The diagram half of the metamodel tab (Task 9; restaged by spec 2026-08-16).
+ * This module owns NO draft state: it parses the editor module's buffer,
+ * applies one semantic YAML command, and writes the text back through
+ * `editMetamodelBuffer`. So the editor module is MOCKED down to the two
+ * functions that seam touches — a tiny in-test buffer store — which keeps these
+ * tests about the diagram module's own behaviour (commands, undo, staged
+ * positions) rather than about the lease/lint/draft lifecycle that already has
+ * its own suite (`metamodel-editor.test.ts`).
  *
- * The layout API is spied rather than whole-module mocked (the precedent in
- * `metamodel-editor.test.ts`): nothing reaches the network, and the real
- * `getRole()` from `checkout.svelte` decides who may save.
+ * Positions are STAGED, not PUT: a drag becomes a `metamodel.move_node` op in
+ * `metamodel-stage.svelte.ts` and lands through `POST /commits`. So the
+ * assertions below read the staged op list rather than a layout PUT spy; the
+ * only layout call left is the baseline `GET`, which is spied (the precedent in
+ * `metamodel-editor.test.ts`) so nothing reaches the network. The real
+ * `getRole()` from `checkout.svelte` decides who may stage.
  */
 
 const editorState = vi.hoisted(() => ({
@@ -35,8 +43,7 @@ const editorState = vi.hoisted(() => ({
 	readOnly: false,
 	/** The real module's load phase. `'error'` (with an EMPTY buffer) is the
 	 * shape a failed metamodel load leaves behind, and `MetamodelTab.init()`
-	 * calls `initMetamodelDiagram` in it regardless — see the
-	 * "metamodel that failed to load" block below. */
+	 * calls `initMetamodelDiagram` in it regardless. */
 	phase: 'ready' as 'idle' | 'loading' | 'ready' | 'error',
 	/** Every ATTEMPTED write, counted before the early return below. The stub
 	 * mirrors the real module's `isEditBlocked()`, which means the resulting
@@ -62,10 +69,21 @@ vi.mock('../metamodel-editor.svelte', () => ({
 	}
 }));
 
+/** Only the move ops — the staged batch also carries a `metamodel.rebind` when
+ * a draft provider is registered, which no test in this file does. */
+function stagedMoves(): { node: string; pos: { x: number; y: number } | null }[] {
+	return getStagedMetamodelOps()
+		.filter((o) => o.kind === 'metamodel.move_node')
+		.map((o) => ({ node: o.node, pos: o.pos }));
+}
+
 beforeEach(() => {
 	localStorage.clear();
 	resetCheckout();
 	setProjectInfo({ role: 'owner', lockTtlSeconds: 300 });
+	// The stage is a module singleton shared with every other suite in this
+	// worker; a leftover move would otherwise leak into the next case.
+	clearStagedNodeMoves();
 	editorState.buffer = FIXTURE;
 	editorState.readOnly = false;
 	editorState.phase = 'ready';
@@ -74,9 +92,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-	// Reset BEFORE restoring the spies: close flushes a pending layout PUT, and
-	// that flush must land on the mock, never on the real client.
 	closeMetamodelDiagram();
+	clearStagedNodeMoves();
 	vi.useRealTimers();
 	vi.restoreAllMocks();
 });
@@ -135,27 +152,39 @@ describe('undoDiagramEdit', () => {
 		expect(getMetamodelDiagramView().canUndo).toBe(false);
 		expect(getMetamodelDiagramView().mm?.elements.map((e) => e.name)).not.toContain('Sensor');
 	});
+
+	it('re-stages the positions it restored, so the commit matches the canvas', () => {
+		moveNode('el:Zone', { x: 5, y: 6 });
+		expect(applyDiagramEdit({ kind: 'renameElementType', from: 'Zone', to: 'District' })).toBe(
+			true
+		);
+		expect(stagedMoves()).toContainEqual({ node: 'el:District', pos: { x: 5, y: 6 } });
+
+		undoDiagramEdit();
+
+		// The canvas is back on `el:Zone`, and so is the staged batch — without
+		// the re-stage the commit would still publish `el:District`.
+		expect(getMetamodelDiagramView().positions['el:Zone']).toEqual({ x: 5, y: 6 });
+		expect(stagedMoves()).toContainEqual({ node: 'el:Zone', pos: { x: 5, y: 6 } });
+		expect(stagedMoves()).toContainEqual({ node: 'el:District', pos: null });
+	});
 });
 
 describe('undoDiagramEdit read-only guard', () => {
 	/**
 	 * `applyDiagramEdit` guards on `readOnly`; the undo has to as well, and for
-	 * a sharper reason than symmetry. It rolls back `_positions` and
-	 * `_pendingRenames` unconditionally, but the buffer half goes through
-	 * `editMetamodelBuffer`, which SILENTLY DROPS the write when the editor is
-	 * blocked. Reachable: the `mm` lease is acquired asynchronously on the first
-	 * divergent edit, so a rename can land and only then lose the race to a
-	 * peer's lease.
+	 * a sharper reason than symmetry. It rolls `_positions` (and the staged
+	 * moves derived from them) back unconditionally, but the buffer half goes
+	 * through `editMetamodelBuffer`, which SILENTLY DROPS the write when the
+	 * editor is blocked. Reachable: the `mm` lease is acquired asynchronously on
+	 * the first divergent edit, so a rename can land and only then lose the race
+	 * to a peer's lease.
 	 */
-	it('refuses while the surface is read-only, so the keys cannot desync from the draft', async () => {
-		vi.useFakeTimers();
-		const put = vi.spyOn(mmApi, 'putMetamodelLayout').mockResolvedValue(undefined);
+	it('refuses while the surface is read-only, so the keys cannot desync from the draft', () => {
 		moveNode('el:Zone', { x: 5, y: 6 });
 		expect(applyDiagramEdit({ kind: 'renameElementType', from: 'Zone', to: 'District' })).toBe(
 			true
 		);
-		await vi.advanceTimersByTimeAsync(LAYOUT_SAVE_DEBOUNCE_MS);
-		put.mockClear();
 		editorState.writes = 0;
 
 		// The lease acquire lost to a peer: the rename is already in the draft,
@@ -171,132 +200,33 @@ describe('undoDiagramEdit read-only guard', () => {
 		expect(editorState.buffer).toContain('- name: District');
 		expect(getMetamodelDiagramView().positions['el:District']).toEqual({ x: 5, y: 6 });
 		expect(getMetamodelDiagramView().canUndo).toBe(true);
-
-		await vi.advanceTimersByTimeAsync(LAYOUT_SAVE_DEBOUNCE_MS * 2);
-		// Without the guard this PUTs `el:Zone` — a rolled-back deferral against
-		// a draft that kept the rename.
-		expect(put).not.toHaveBeenCalled();
-	});
-});
-
-describe('a metamodel that failed to load', () => {
-	const DISTRICT_DRAFT = FIXTURE.replaceAll('Zone', 'District');
-
-	/**
-	 * `MetamodelTab.init()` awaits `initMetamodelEditor` and then calls
-	 * `initMetamodelDiagram` UNCONDITIONALLY, including when the load failed and
-	 * left `phase: 'error'` with an empty buffer. An empty buffer parses cleanly
-	 * into an empty metamodel, so a naive liveness check reads it as "the draft
-	 * defines nothing" and prunes the whole deferral map — permanently, since
-	 * `restoreRenames` writes the pruned map straight back.
-	 */
-	it('keeps the persisted rename map instead of pruning it against an empty buffer', async () => {
-		const stored = JSON.stringify([['el:Zone', 'el:District']]);
-		localStorage.setItem('ui.metamodel.renames.p1', stored);
-		editorState.phase = 'error';
-		editorState.buffer = '';
-		const put = vi.spyOn(mmApi, 'putMetamodelLayout').mockResolvedValue(undefined);
-		vi.spyOn(mmApi, 'getMetamodelLayout').mockResolvedValue({
-			positions: { 'el:Zone': { x: 3, y: 4 } }
-		});
-
-		await initMetamodelDiagram('p1');
-
-		expect(localStorage.getItem('ui.metamodel.renames.p1')).toBe(stored);
-
-		// The user hits Retry and the draft comes back saying District.
-		editorState.phase = 'ready';
-		editorState.buffer = DISTRICT_DRAFT;
-
-		vi.useFakeTimers();
-		moveNode('el:District', { x: 9, y: 9 });
-		await vi.advanceTimersByTimeAsync(LAYOUT_SAVE_DEBOUNCE_MS);
-
-		// Still the baseline key space. Without the guard the map is gone, and
-		// this PUT writes the draft-local `el:District` into the SHARED blob.
-		expect(put).toHaveBeenCalledTimes(1);
-		const sent = put.mock.calls[0][0].positions;
-		expect(sent['el:Zone']).toEqual({ x: 9, y: 9 });
-		expect(sent['el:District']).toBeUndefined();
-	});
-});
-
-describe('a failed layout GET', () => {
-	/**
-	 * "No stored layout" is NOT an error: `routes/metamodel_layout.py` answers
-	 * 200 with `{positions: {}}`. So the catch path is a genuine failure, where
-	 * the client cannot tell an unarranged project from an unreadable one — and
-	 * a PUT there replaces the ENTIRE shared blob for every member.
-	 */
-	/** REAL timers throughout, deliberately: elkjs runs during init, and the
-	 * bug being pinned is a save SCHEDULED there. Swapping to fake timers after
-	 * the init would leave that real timer pending and un-advanceable, so the
-	 * "no PUT" assertion would pass whether or not the fix is present. */
-	const settleDebounce = (): Promise<void> =>
-		new Promise((resolve) => setTimeout(resolve, LAYOUT_SAVE_DEBOUNCE_MS + 50));
-
-	it('arranges locally but persists nothing, so no peer position is overwritten', async () => {
-		const put = vi.spyOn(mmApi, 'putMetamodelLayout').mockResolvedValue(undefined);
-		vi.spyOn(mmApi, 'getMetamodelLayout').mockRejectedValue(new Error('boom'));
-
-		await initMetamodelDiagram('p1');
-		await settleDebounce();
-
-		expect(put).not.toHaveBeenCalled();
-
-		// The arrange itself still happened — a local canvas beats stacking every
-		// box at the origin. Proven by what a later DELIBERATE drag sends: the
-		// whole arranged blob, not just the dragged node. (That drag persisting
-		// is the accepted residual — a user gesture re-establishes intent.)
-		moveNode('el:Zone', { x: 1, y: 1 });
-		await settleDebounce();
-		expect(put).toHaveBeenCalledTimes(1);
-		expect(Object.keys(put.mock.calls[0][0].positions).length).toBeGreaterThan(1);
-	});
-
-	it('does persist the first arrangement when the GET answered with an empty blob', async () => {
-		const put = vi.spyOn(mmApi, 'putMetamodelLayout').mockResolvedValue(undefined);
-		vi.spyOn(mmApi, 'getMetamodelLayout').mockResolvedValue({ positions: {} });
-
-		await initMetamodelDiagram('p1');
-		await settleDebounce();
-
-		expect(put).toHaveBeenCalledTimes(1);
+		// And the staged batch was not rolled back either.
+		expect(stagedMoves()).toContainEqual({ node: 'el:District', pos: { x: 5, y: 6 } });
 	});
 });
 
 describe('moveNode', () => {
-	it('moves the node immediately and PUTs the layout once the debounce elapses', async () => {
-		vi.useFakeTimers();
-		const put = vi.spyOn(mmApi, 'putMetamodelLayout').mockResolvedValue(undefined);
-
+	it('a drag stages a coalesced move op instead of PUTting', () => {
 		moveNode('el:Zone', { x: 10, y: 20 });
+		moveNode('el:Zone', { x: 11, y: 21 });
 
-		expect(getMetamodelDiagramView().positions['el:Zone']).toEqual({ x: 10, y: 20 });
-		expect(put).not.toHaveBeenCalled();
+		expect(getMetamodelDiagramView().positions['el:Zone']).toEqual({ x: 11, y: 21 });
+		// Coalesced: the last position for a node is the only one that matters.
+		expect(getStagedMetamodelOps()).toEqual([
+			{ kind: 'metamodel.move_node', node: 'el:Zone', pos: { x: 11, y: 21 } }
+		]);
+	});
 
-		await vi.advanceTimersByTimeAsync(LAYOUT_SAVE_DEBOUNCE_MS);
-
-		expect(put).toHaveBeenCalledTimes(1);
-		expect(put.mock.calls[0][0].positions['el:Zone']).toEqual({ x: 10, y: 20 });
+	it('has no layout PUT left to make', () => {
+		// The route is gone (`PUT /metamodel/layout`, spec 2026-08-16), and so is
+		// the client wrapper — a re-introduced live save would have to re-add it.
+		expect('putMetamodelLayout' in mmApi).toBe(false);
 	});
 });
 
-describe('rename key-deferral', () => {
-	it('moves the local position key at once but keeps PUTting the baseline key until rebind', async () => {
-		const put = vi.spyOn(mmApi, 'putMetamodelLayout').mockResolvedValue(undefined);
-		// `onMetamodelRebound` is project-guarded like every other entry point,
-		// so the surface has to be open. A NON-EMPTY stored blob makes the init
-		// return before the auto-arrange, so no elk run and no pending timer.
-		vi.spyOn(mmApi, 'getMetamodelLayout').mockResolvedValue({
-			positions: { 'el:Zone': { x: 0, y: 0 } }
-		});
-		await initMetamodelDiagram('p1');
-
-		vi.useFakeTimers();
+describe('a diagram rename', () => {
+	it('migrates the layout key as two staged ops', () => {
 		moveNode('el:Zone', { x: 5, y: 6 });
-		await vi.advanceTimersByTimeAsync(LAYOUT_SAVE_DEBOUNCE_MS);
-		put.mockClear();
 
 		expect(applyDiagramEdit({ kind: 'renameElementType', from: 'Zone', to: 'District' })).toBe(
 			true
@@ -307,24 +237,143 @@ describe('rename key-deferral', () => {
 		expect(v.positions['el:District']).toEqual({ x: 5, y: 6 });
 		expect(v.positions['el:Zone']).toBeUndefined();
 
-		// ...but the SHARED blob is still keyed by the baseline name, because
-		// peers render `Zone` until this draft is actually rebound.
-		moveNode('el:District', { x: 7, y: 8 });
-		await vi.advanceTimersByTimeAsync(LAYOUT_SAVE_DEBOUNCE_MS);
-		expect(put).toHaveBeenCalledTimes(1);
-		const deferred = put.mock.calls[0][0].positions;
-		expect(deferred['el:Zone']).toEqual({ x: 7, y: 8 });
-		expect(deferred['el:District']).toBeUndefined();
+		// ...and the key migrates WITH the rename, in the same commit batch: the
+		// old key is dropped and the new one claims the position. No deferral.
+		const ops = getStagedMetamodelOps().filter((o) => o.kind === 'metamodel.move_node');
+		expect(ops).toContainEqual({ kind: 'metamodel.move_node', node: 'el:Zone', pos: null });
+		expect(ops.find((o) => o.node === 'el:District')?.pos).toEqual({ x: 5, y: 6 });
+	});
 
-		// The rebind landed: the rename is now everyone's truth, so the key
-		// rewrite goes out.
-		put.mockClear();
+	it('stages a bare key drop for a deleted type', () => {
+		moveNode('el:Building', { x: 3, y: 4 });
+
+		expect(applyDiagramEdit({ kind: 'removeElementType', name: 'Building' })).toBe(true);
+
+		expect(stagedMoves()).toContainEqual({ node: 'el:Building', pos: null });
+		expect(stagedMoves().find((o) => o.node === 'el:Building')?.pos).toBeNull();
+	});
+});
+
+describe('initMetamodelDiagram', () => {
+	it('overlays restored staged moves on the fetched baseline', async () => {
+		localStorage.setItem(
+			'ui.metamodel.layoutdraft.p1',
+			JSON.stringify([
+				['el:Zone', { x: -500, y: -700 }],
+				['el:Building', null]
+			])
+		);
+		vi.spyOn(mmApi, 'getMetamodelLayout').mockResolvedValue({
+			positions: { 'el:Zone': { x: 1, y: 1 }, 'el:Building': { x: 2, y: 2 } }
+		});
+
+		await initMetamodelDiagram('p1');
+
+		const v = getMetamodelDiagramView();
+		// The staged position wins over the baseline...
+		expect(v.positions['el:Zone']).toEqual({ x: -500, y: -700 });
+		// ...and a staged key DROP removes the baseline entry (the node is then
+		// placed heuristically by `placeUnpositioned`, never left at (2,2)).
+		expect(v.positions['el:Building']).not.toEqual({ x: 2, y: 2 });
+		// The restored moves are still staged — init must not consume them.
+		expect(stagedMoves()).toContainEqual({ node: 'el:Zone', pos: { x: -500, y: -700 } });
+		expect(stagedMoves()).toContainEqual({ node: 'el:Building', pos: null });
+	});
+
+	/**
+	 * A never-arranged diagram auto-arranges on first open. That arrangement is
+	 * LOCAL ONLY: if it staged, merely OPENING the tab would manufacture a
+	 * pending commit (and a dirty commit drawer) out of nothing the user did.
+	 */
+	it('auto-arranges a never-arranged diagram without staging anything', async () => {
+		vi.spyOn(mmApi, 'getMetamodelLayout').mockResolvedValue({ positions: {} });
+
+		await initMetamodelDiagram('p1');
+
+		expect(Object.keys(getMetamodelDiagramView().positions).length).toBeGreaterThan(0);
+		expect(getStagedMetamodelOps()).toEqual([]);
+	});
+
+	it('stages nothing when the baseline GET fails either', async () => {
+		vi.spyOn(mmApi, 'getMetamodelLayout').mockRejectedValue(new Error('boom'));
+
+		await initMetamodelDiagram('p1');
+
+		// The arrange still happened — a local canvas beats stacking every box at
+		// the origin — but nothing is proposed for commit.
+		expect(Object.keys(getMetamodelDiagramView().positions).length).toBeGreaterThan(0);
+		expect(getStagedMetamodelOps()).toEqual([]);
+	});
+});
+
+describe('runAutoArrange', () => {
+	it('stages every arranged node (it is a deliberate user gesture)', async () => {
+		vi.spyOn(mmApi, 'getMetamodelLayout').mockResolvedValue({
+			positions: { 'el:Zone': { x: 0, y: 0 } }
+		});
+		await initMetamodelDiagram('p1');
+		expect(getStagedMetamodelOps()).toEqual([]);
+
+		await runAutoArrange();
+
+		const positions = getMetamodelDiagramView().positions;
+		const moves = stagedMoves();
+		expect(moves.length).toBeGreaterThan(1);
+		for (const m of moves) expect(positions[m.node]).toEqual(m.pos);
+	});
+});
+
+describe('a landed commit', () => {
+	it('re-derives the positions from the refetched baseline', async () => {
+		const get = vi
+			.spyOn(mmApi, 'getMetamodelLayout')
+			.mockResolvedValue({ positions: { 'el:Zone': { x: 1, y: 1 } } });
+		await initMetamodelDiagram('p1');
+		get.mockResolvedValue({ positions: { 'el:Zone': { x: 8, y: 9 } } });
+		// checkout clears the staged copy before it notifies.
+		clearStagedNodeMoves();
+
+		notifyMetamodelCommitted({ rebound: false, blob: null });
+		await vi.waitFor(() =>
+			expect(getMetamodelDiagramView().positions['el:Zone']).toEqual({ x: 8, y: 9 })
+		);
+	});
+
+	it('drops the undo history when the commit carried a rebind', async () => {
+		vi.spyOn(mmApi, 'getMetamodelLayout').mockResolvedValue({
+			positions: { 'el:Zone': { x: 1, y: 1 } }
+		});
+		await initMetamodelDiagram('p1');
+		expect(applyDiagramEdit({ kind: 'renameElementType', from: 'Zone', to: 'District' })).toBe(
+			true
+		);
+		expect(getMetamodelDiagramView().canUndo).toBe(true);
+
+		notifyMetamodelCommitted({ rebound: true, blob: 'whatever' });
+
+		// The stack's snapshots were taken against a baseline the rebind moved.
+		expect(getMetamodelDiagramView().canUndo).toBe(false);
+	});
+});
+
+describe('onMetamodelRebound', () => {
+	it('drops the undo history a landed rebind invalidated', async () => {
+		vi.spyOn(mmApi, 'getMetamodelLayout').mockResolvedValue({
+			positions: { 'el:Zone': { x: 1, y: 1 } }
+		});
+		await initMetamodelDiagram('p1');
+		moveNode('el:Zone', { x: 1, y: 2 });
+		expect(applyDiagramEdit({ kind: 'renameElementType', from: 'Zone', to: 'District' })).toBe(
+			true
+		);
+		expect(getMetamodelDiagramView().canUndo).toBe(true);
+
 		onMetamodelRebound();
 
-		expect(put).toHaveBeenCalledTimes(1);
-		const rebound = put.mock.calls[0][0].positions;
-		expect(rebound['el:District']).toEqual({ x: 7, y: 8 });
-		expect(rebound['el:Zone']).toBeUndefined();
+		expect(getMetamodelDiagramView().canUndo).toBe(false);
+		undoDiagramEdit();
+		expect(getMetamodelDiagramView().positions['el:District']).toEqual({ x: 1, y: 2 });
+		expect(editorState.buffer).toContain('- name: District');
 	});
 });
 
@@ -377,131 +426,21 @@ describe('lint-error attribution', () => {
 	});
 });
 
-describe('rebind clears the undo stack', () => {
-	it('cannot undo across a landed rebind, so no dead key reaches the shared blob', async () => {
-		const put = vi.spyOn(mmApi, 'putMetamodelLayout').mockResolvedValue(undefined);
-		// Non-empty stored blob: opens the surface (so the project guard on
-		// `onMetamodelRebound` passes) without triggering the auto-arrange.
-		vi.spyOn(mmApi, 'getMetamodelLayout').mockResolvedValue({
-			positions: { 'el:Zone': { x: 0, y: 0 } }
-		});
-		await initMetamodelDiagram('p1');
-
-		vi.useFakeTimers();
-		moveNode('el:Zone', { x: 1, y: 2 });
-		await vi.advanceTimersByTimeAsync(LAYOUT_SAVE_DEBOUNCE_MS);
-		expect(applyDiagramEdit({ kind: 'renameElementType', from: 'Zone', to: 'District' })).toBe(
-			true
-		);
-		expect(getMetamodelDiagramView().canUndo).toBe(true);
-
-		onMetamodelRebound();
-		put.mockClear();
-
-		// The undo entry snapshotted `{el:Zone}` + an empty rename map. Replaying
-		// it after the rebind would PUT `el:Zone` — a name the server no longer
-		// has — wiping every peer's `el:District` position.
-		expect(getMetamodelDiagramView().canUndo).toBe(false);
-		undoDiagramEdit();
-		await vi.advanceTimersByTimeAsync(LAYOUT_SAVE_DEBOUNCE_MS * 2);
-
-		expect(put).not.toHaveBeenCalled();
-		expect(getMetamodelDiagramView().positions['el:District']).toEqual({ x: 1, y: 2 });
-		expect(editorState.buffer).toContain('- name: District');
-	});
-});
-
-describe('rename deferral across a page refresh', () => {
-	const DISTRICT_DRAFT = FIXTURE.replaceAll('Zone', 'District');
-
-	it('restores the persisted map, re-keys the fetched blob, and still PUTs the baseline key', async () => {
-		// A previous session renamed Zone → District: the draft (restored by the
-		// editor module) says District, the shared blob still says Zone.
-		localStorage.setItem('ui.metamodel.renames.p1', JSON.stringify([['el:Zone', 'el:District']]));
-		editorState.buffer = DISTRICT_DRAFT;
-		const put = vi.spyOn(mmApi, 'putMetamodelLayout').mockResolvedValue(undefined);
-		vi.spyOn(mmApi, 'getMetamodelLayout').mockResolvedValue({
-			positions: { 'el:Zone': { x: 3, y: 4 } }
-		});
-
-		await initMetamodelDiagram('p1');
-
-		// The box keeps its place instead of falling to a heuristic slot...
-		expect(getMetamodelDiagramView().positions['el:District']).toEqual({ x: 3, y: 4 });
-
-		vi.useFakeTimers();
-		moveNode('el:District', { x: 9, y: 9 });
-		await vi.advanceTimersByTimeAsync(LAYOUT_SAVE_DEBOUNCE_MS);
-
-		// ...and the wire still speaks the baseline key space. Without the
-		// restored map this PUT sends `el:District` (a draft-local key) and drops
-		// `el:Zone` entirely, re-placing the box on every peer's canvas.
-		expect(put).toHaveBeenCalledTimes(1);
-		const sent = put.mock.calls[0][0].positions;
-		expect(sent['el:Zone']).toEqual({ x: 9, y: 9 });
-		expect(sent['el:District']).toBeUndefined();
-	});
-
-	it('drops a restored deferral the draft no longer backs (discarded rename)', async () => {
-		// Same stored map, but the draft is back to the baseline — the shape a
-		// `discardMetamodelDraft` leaves behind, which this module cannot observe.
-		localStorage.setItem('ui.metamodel.renames.p1', JSON.stringify([['el:Zone', 'el:District']]));
-		editorState.buffer = FIXTURE;
-		const put = vi.spyOn(mmApi, 'putMetamodelLayout').mockResolvedValue(undefined);
-		vi.spyOn(mmApi, 'getMetamodelLayout').mockResolvedValue({
-			positions: { 'el:Zone': { x: 3, y: 4 } }
-		});
-
-		await initMetamodelDiagram('p1');
-
-		expect(getMetamodelDiagramView().positions['el:Zone']).toEqual({ x: 3, y: 4 });
-		// Pruned for good, not re-validated on every open.
-		expect(localStorage.getItem('ui.metamodel.renames.p1')).toBeNull();
-
-		vi.useFakeTimers();
-		moveNode('el:Zone', { x: 1, y: 1 });
-		await vi.advanceTimersByTimeAsync(LAYOUT_SAVE_DEBOUNCE_MS);
-
-		expect(put.mock.calls[0][0].positions).toEqual({ 'el:Zone': { x: 1, y: 1 } });
-	});
-
-	it('lets the deferral win a baseline key the draft re-used', async () => {
-		vi.useFakeTimers();
-		const put = vi.spyOn(mmApi, 'putMetamodelLayout').mockResolvedValue(undefined);
-		moveNode('el:Zone', { x: 1, y: 1 });
-		applyDiagramEdit({ kind: 'renameElementType', from: 'Zone', to: 'District' });
-		// The freed name is taken by a BRAND NEW type: two local keys now want
-		// the single server key `el:Zone`.
-		applyDiagramEdit({ kind: 'addElementType', name: 'Zone' });
-		moveNode('el:Zone', { x: 2, y: 2 });
-
-		await vi.advanceTimersByTimeAsync(LAYOUT_SAVE_DEBOUNCE_MS);
-
-		// The deferral wins — it describes the box peers can actually see. The
-		// re-used name has no server counterpart until a rebind lands. (Before
-		// the injectivity guard the last `Object.entries` key won: {x:2,y:2}.)
-		expect(put.mock.calls[0][0].positions['el:Zone']).toEqual({ x: 1, y: 1 });
-	});
-});
-
 describe('viewers', () => {
-	it('arranges and drags locally but never PUTs a layout', async () => {
+	it('arrange and drag locally but stage nothing', async () => {
 		setProjectInfo({ role: 'viewer', lockTtlSeconds: 300 });
-		const put = vi.spyOn(mmApi, 'putMetamodelLayout').mockResolvedValue(undefined);
 		vi.spyOn(mmApi, 'getMetamodelLayout').mockResolvedValue({ positions: {} });
 
-		// Real timers here: elkjs runs during init. Fake timers go in afterwards,
-		// only to drive the save debounce that must never fire.
 		await initMetamodelDiagram('p1');
 
 		expect(Object.keys(getMetamodelDiagramView().positions).length).toBeGreaterThan(0);
-		expect(put).not.toHaveBeenCalled();
+		expect(getStagedMetamodelOps()).toEqual([]);
 
-		vi.useFakeTimers();
 		moveNode('el:Zone', { x: 1, y: 2 });
 		expect(getMetamodelDiagramView().positions['el:Zone']).toEqual({ x: 1, y: 2 });
-		await vi.advanceTimersByTimeAsync(LAYOUT_SAVE_DEBOUNCE_MS * 2);
+		expect(getStagedMetamodelOps()).toEqual([]);
 
-		expect(put).not.toHaveBeenCalled();
+		await runAutoArrange();
+		expect(getStagedMetamodelOps()).toEqual([]);
 	});
 });

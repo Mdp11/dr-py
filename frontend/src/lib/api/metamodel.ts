@@ -98,16 +98,3 @@ export function lintMetamodel(body: string, cfg?: ClientConfig): Promise<Metamod
 export function getMetamodelLayout(cfg?: ClientConfig): Promise<MetamodelLayout> {
 	return apiFetch('/metamodel/layout', { method: 'GET', schema: MetamodelLayoutSchema }, cfg);
 }
-
-/** PUT replaces the whole positions map; the backend answers 204 with no
- * body, so `apiFetch` returns `undefined` here without attempting a parse.
- *
- * DEAD ROUTE (spec 2026-08-16): `PUT /metamodel/layout` no longer exists — a
- * node position is a `metamodel.move_node` op on `POST /commits`, staged
- * through `metamodel-stage.svelte.ts`. Its ONE remaining caller is
- * `metamodel-diagram.svelte.ts`'s debounced save, which Task 11 deletes; this
- * function goes with it. `getMetamodelLayout` above stays — the baseline read
- * is untouched. Nothing new may call this. */
-export function putMetamodelLayout(body: MetamodelLayout, cfg?: ClientConfig): Promise<void> {
-	return apiFetch('/metamodel/layout', { method: 'PUT', body }, cfg);
-}
