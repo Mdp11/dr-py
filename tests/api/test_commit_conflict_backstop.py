@@ -419,6 +419,25 @@ def test_id_keys_are_derived_from_the_op_models() -> None:
     assert _id_field_names((_FutureOp,)) == frozenset({"id", "owner_id"})
 
 
+def test_affected_ids_reports_mm_for_metamodel_ops() -> None:
+    """metamodel.* ops carry no model/artifact/view id at all — the whole
+    family collapses onto the singleton `mm` marker (see required_locks),
+    so the raw-journal-dict scan must special-case METAMODEL_OP_KINDS rather
+    than fall into the bare-id-field scan meant for model ops."""
+    from data_rover.api.db_models import Commit
+    from data_rover.api.routes.commits import _affected_ids
+
+    commits = [
+        Commit(
+            project_id="p", rev=1, commit_id="c1", author_id=None,
+            ops=[{"kind": "metamodel.move_node", "node": "el:A", "pos": None}],
+            inverse_ops=[{"kind": "metamodel.rebind", "blob": "x: 1\n"}],
+            id_map={}, message="",
+        ),
+    ]
+    assert _affected_ids(commits) == {"mm"}
+
+
 def test_stale_view_batch_overlapping_tail_409s(client) -> None:
     ids = _seed_view(client, [{"name": "A"}, {"name": "B"}])
     fa = ids["A"]

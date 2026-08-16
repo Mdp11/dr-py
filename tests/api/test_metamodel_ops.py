@@ -11,7 +11,12 @@ from data_rover.api.main import create_app
 from data_rover.api import content, db
 from data_rover.api.db_models import ModelRow
 from data_rover.api.metamodel_ops import apply_metamodel_ops, split_rebind
-from data_rover.api.schemas import MetamodelNodePos, MoveMetamodelNodeOp, RebindMetamodelOp
+from data_rover.api.schemas import (
+    MetamodelNodePos,
+    MetamodelOpIn,
+    MoveMetamodelNodeOp,
+    RebindMetamodelOp,
+)
 from data_rover.api.session import DEFAULT_PROJECT_ID, get_session
 
 from .conftest import AUTH_HEADERS, papi, seed_default_project
@@ -48,7 +53,11 @@ def _db():
 
 
 def test_split_rebind_rejects_two_rebinds() -> None:
-    ops = [
+    # Explicitly typed as the union (not the narrower list[RebindMetamodelOp]
+    # pyright would infer from the literal): list is invariant, so a narrower
+    # list type is not assignable where split_rebind's list[MetamodelOpIn]
+    # parameter is expected.
+    ops: list[MetamodelOpIn] = [
         RebindMetamodelOp(kind="metamodel.rebind", blob="a: 1\n"),
         RebindMetamodelOp(kind="metamodel.rebind", blob="b: 2\n"),
     ]
@@ -73,10 +82,13 @@ def test_apply_rebind_swaps_memory_and_stages_rows(client: TestClient) -> None:
         assert not session.metamodel.effective_element_properties("Node")
         # inverse carries the PRIOR stored blob byte-identically
         inv = res.inverse_ops()
-        assert len(inv) == 1 and inv[0].blob == MM_V1
+        assert len(inv) == 1
+        assert isinstance(inv[0], RebindMetamodelOp)
+        assert inv[0].blob == MM_V1
         # staged rows: new MetamodelRow version, ModelRow repointed
         row = content.get_model_row(s, DEFAULT_PROJECT_ID)
         assert row is not None and row.metamodel_id == res.to_metamodel_id
+        assert res.to_metamodel_id is not None
         mm_row = content.get_metamodel_row(s, res.to_metamodel_id)
         assert mm_row is not None and mm_row.blob == MM_V2 and mm_row.version == 2
     finally:
@@ -147,6 +159,8 @@ def test_apply_moves_updates_layout_blob_with_inverses(client: TestClient) -> No
         }
         inv = res.inverse_ops()
         # reversed units: Fresh's inverse removes it (no prior), Node's restores
+        assert isinstance(inv[0], MoveMetamodelNodeOp)
+        assert isinstance(inv[1], MoveMetamodelNodeOp)
         assert inv[0].node == "el:Fresh" and inv[0].pos is None
         assert inv[1].node == "el:Node" and inv[1].pos is not None
         assert inv[1].pos.x == 1.0 and inv[1].pos.y == 2.0

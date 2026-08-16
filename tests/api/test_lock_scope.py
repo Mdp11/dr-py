@@ -236,3 +236,23 @@ def test_expand_targets_folder_delete_subtree() -> None:
     )
     ids = {r.resource_id for r in reqs}
     assert ids == {f"folder:{a.id}", f"folder:{a.folders[0].id}"}
+
+
+def test_metamodel_ops_require_the_mm_exclusive_lease() -> None:
+    from data_rover.api.locking import LockIntent, LockMode, required_locks
+    from data_rover.api.schemas import MoveMetamodelNodeOp, RebindMetamodelOp
+    from data_rover.core.metamodel.loader import load_metamodel_str
+    from data_rover.core.model.model import Model
+
+    model = Model(load_metamodel_str("elements:\n  - name: A\n"))
+    reqs = required_locks(
+        model,
+        None,
+        [
+            RebindMetamodelOp(kind="metamodel.rebind", blob="x: 1\n"),
+            MoveMetamodelNodeOp(kind="metamodel.move_node", node="el:A", pos=None),
+        ],
+    )
+    assert [(r.resource_id, r.mode, r.intent) for r in reqs] == [
+        ("mm", LockMode.EXCLUSIVE, LockIntent.EDIT)
+    ]

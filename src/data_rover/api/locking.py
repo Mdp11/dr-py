@@ -316,8 +316,10 @@ from .schemas import (  # noqa: E402
     MoveArtifactOp,
     MoveElementOp,
     MoveFolderOp,
+    MoveMetamodelNodeOp,
     PlaceArtifactOp,
     PlaceElementOp,
+    RebindMetamodelOp,
     RemoveArtifactOp,
     RemoveElementOp,
     RenameFolderOp,
@@ -504,4 +506,11 @@ def required_locks(
         elif isinstance(op, MoveArtifactOp):
             add(folder_resource(op.from_folder_id), LockMode.EXCLUSIVE, LockIntent.EDIT)
             add(folder_resource(op.to_folder_id), LockMode.EXCLUSIVE, LockIntent.EDIT)
+        elif isinstance(op, (RebindMetamodelOp, MoveMetamodelNodeOp)):
+            # The whole family serializes on the singleton `mm` lease: a
+            # rebind rewrites what every node/key MEANS, so per-node layout
+            # granularity could never change an outcome (spec 2026-08-16,
+            # amended) — and the diagram + YAML editor already share one
+            # surface lease.
+            add(METAMODEL_RESOURCE, LockMode.EXCLUSIVE, LockIntent.EDIT)
     return reqs

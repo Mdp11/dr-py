@@ -56,7 +56,7 @@ from ..hydration import deserialize_ops, reconstruct_model_at
 from ..identity import get_current_user
 from ..invalidation import touched_keys
 from ..lock_mirror import mirror_session_leases
-from ..locking import ARTIFACT_PREFIX, required_locks
+from ..locking import ARTIFACT_PREFIX, METAMODEL_RESOURCE, required_locks
 from ..settings import get_settings
 from ..view_ops import (
     ViewBatchResult,
@@ -83,17 +83,20 @@ from ..schemas import (
     DeleteRelationshipOp,
     ElementOut,
     IssueOut,
+    METAMODEL_OP_KINDS,
     ModelOpIn,
     ModelOut,
     MoveArtifactOp,
     MoveElementOp,
     MoveFolderOp,
+    MoveMetamodelNodeOp,
     OpenResponse,
     OpIn,
     PlaceArtifactOp,
     PlaceElementOp,
     PreviewRequest,
     PreviewResponse,
+    RebindMetamodelOp,
     RelationshipOut,
     RemoveArtifactOp,
     RemoveElementOp,
@@ -195,6 +198,12 @@ def _affected_ids(commits: list[Commit]) -> set[str]:
             if kind in VIEW_OP_KINDS:
                 ids |= view_touched_resources(VIEW_OP_ADAPTER.validate_python(op))
                 continue
+            if kind in METAMODEL_OP_KINDS:
+                # One resource for the whole family (see required_locks): the
+                # exclusive `mm` lease already serializes every metamodel
+                # writer, so the backstop only needs mm-vs-mm overlap.
+                ids.add(METAMODEL_RESOURCE)
+                continue
             if kind in ARTIFACT_OP_KINDS:
                 for key in _ARTIFACT_ID_KEYS:
                     v = op.get(key)
@@ -278,6 +287,10 @@ def _batch_touched_ids(model: Model, view: View | None, ops: list[OpIn]) -> set[
             # delete_folder's subtree is already covered: required_locks
             # expanded it against the live view above.
             ids |= view_touched_resources(op)
+        elif isinstance(op, (RebindMetamodelOp, MoveMetamodelNodeOp)):
+            # required_locks already derived `mm` above; the explicit branch
+            # keeps the assert_never chain exhaustive.
+            ids.add(METAMODEL_RESOURCE)
         else:
             assert_never(op)
     # Strip batch-local temp ids: they never appear in _affected_ids (canonical
