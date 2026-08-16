@@ -867,6 +867,11 @@ class CommitResponse(OpsResponse):
     #: post-commit ViewRow.view_rev; None when the batch touched no view
     #: content (Phase 2). Secondary/informational — see ViewRow.view_rev.
     view_rev: int | None = None
+    #: True when this commit carried a metamodel.rebind: the client must
+    #: refetch the metamodel + issues (there is no applyable schema delta).
+    rebound: bool = False
+    #: the new MetamodelRow id when ``rebound``, else None.
+    to_metamodel_id: str | None = None
 
 
 # ---------------------------------------------------------------------------

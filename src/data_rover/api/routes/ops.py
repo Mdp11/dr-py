@@ -499,6 +499,8 @@ def _persist_commit(
     _message: str = "",
     _validation_error_count: int = 0,
     _issues: list | None = None,
+    _from_metamodel_id: str | None = None,
+    _to_metamodel_id: str | None = None,
 ) -> bool:
     """Append the accepted batch to the durable journal and advance model_rev.
 
@@ -521,6 +523,14 @@ def _persist_commit(
     commit endpoint (``POST /commits``); the plain ``/model/ops`` path omits
     them and gets the same defaults as before (append-only, no message/issues).
 
+    ``_from_metamodel_id``/``_to_metamodel_id`` are the rebind FK columns
+    (spec 2026-08-16): a ``metamodel.rebind`` op in the batch sets both, and
+    every reader keyed off them — the staleness guard's unconditional-conflict
+    branch, ``content.first_rebind_after``, history's ``is_rebind``,
+    ``commit_diff``'s metamodel arm — is what MAKES a journal row a rebind.
+    Passing them through here (rather than journaling the swap as an op alone)
+    is why the retired standalone rebind route needed no schema change.
+
     Returns True if a durable row existed and the commit was persisted,
     False when the project has no model row (in-memory-only legacy flow)."""
     if content.get_model_row(db, project_id) is None:
@@ -537,6 +547,8 @@ def _persist_commit(
         message=_message,
         validation_error_count=_validation_error_count,
         issues=_issues or [],
+        from_metamodel_id=_from_metamodel_id,
+        to_metamodel_id=_to_metamodel_id,
     )
     content.set_model_rev(db, project_id, rev)
     db.commit()

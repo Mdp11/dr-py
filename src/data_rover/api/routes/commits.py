@@ -32,9 +32,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session as DbSession
 
+from data_rover.core.metamodel.schema import Metamodel
 from data_rover.core.model.model import Model
 from data_rover.core.validation.issue import IssueCategory
 from data_rover.core.validation.pipeline import default_pipeline
+from data_rover.core.validation.scope import Scope
 from data_rover.core.view.schema import View
 
 from ..artifact_ops import (
@@ -47,16 +49,26 @@ from ..artifact_ops import (
 )
 from ..authz import require_membership
 from ..commit_diff import diff_commit
-from ..feed import commit_event, lock_event
+from ..feed import commit_event, lock_event, rebind_event
 from .. import content
 from ..db import get_db
-from ..db_models import Commit, Membership, User
+from ..db_models import Commit, Membership, Role, User
 from ..deps import Session, get_request_session, require_model
-from ..hydration import deserialize_ops, reconstruct_model_at
+from ..hydration import deserialize_ops, reconstruct_model_at, write_snapshot
 from ..identity import get_current_user
 from ..invalidation import touched_keys
 from ..lock_mirror import mirror_session_leases
-from ..locking import ARTIFACT_PREFIX, METAMODEL_RESOURCE, required_locks
+from ..locking import (
+    ARTIFACT_PREFIX,
+    METAMODEL_RESOURCE,
+    is_model_resource,
+    required_locks,
+)
+from ..metamodel_ops import (
+    MetamodelBatchResult,
+    apply_metamodel_ops,
+    split_rebind,
+)
 from ..settings import get_settings
 from ..view_ops import (
     ViewBatchResult,
@@ -358,13 +370,27 @@ class _CommitUnwind:
     inline blocks this replaces:
 
     - ``model_res`` rollback first (restores the in-place model), then the
-      rev decrement, THEN ``invalidate_derived_caches()`` — that method
-      re-stamps the cell cache to the CURRENT ``model_rev`` (see its
-      docstring), so decrementing after it would stamp the wrong rev.
+      metamodel swap, then the rev decrement, THEN
+      ``invalidate_derived_caches()`` — that method re-stamps the cell cache
+      to the CURRENT ``model_rev`` (see its docstring), so decrementing after
+      it would stamp the wrong rev.
       Invalidation is tied to ``model_res``: it exists because the in-place
       apply-then-rollback leaves the model rev-identical but momentarily
       different, so a lock-free concurrent ``/tables/evaluate`` could have
       cached rows computed mid-flight (final-review A1/I1).
+    - ``prior_metamodel`` (spec 2026-08-16) unwinds AFTER ``model_res``,
+      reversing apply order: the rebind is HOISTED to apply first (so the
+      batch's model ops validate against the candidate schema), therefore it
+      unwinds last among the in-memory halves. It restores the same four
+      pieces the swap touched — ``session.metamodel``, ``model.metamodel``,
+      ``model.indexes`` (containment flags + key groups are metamodel-derived)
+      and ``session.validation`` — plus derived-cache invalidation, which it
+      shares with the ``model_res`` step rather than doing itself precisely
+      BECAUSE of the rev-decrement ordering above. It nulls
+      ``session.validation`` rather than restoring it: a rebind-carrying batch
+      may already have called ``ValidationState.set_full`` by the time a
+      failure lands, so the only safe state is "force a re-seed on next read"
+      (mirrors the retired rebind route's own failure path).
     - ``view_res`` rollback needs ``session.view`` non-None: the view half
       only ever applies to a resolved view, and nothing can null it
       mid-request anymore (the retired ``DELETE /view`` was the last thing
@@ -391,15 +417,35 @@ class _CommitUnwind:
     model_res: _BatchResult | None = None
     view_res: ViewBatchResult | None = None
     created_view: bool = False
+    #: the metamodel this request swapped OUT, set only when the batch
+    #: carried a ``metamodel.rebind`` that actually applied. Layout-only
+    #: metamodel batches leave it None: they hold no in-memory state at all
+    #: (``db.rollback()`` alone discards the staged ``metamodel_layouts`` row).
+    prior_metamodel: Metamodel | None = None
     db_staged: bool = False
     rev_bumped: bool = False
 
     def unwind(self) -> None:
         if self.model_res is not None:
             _rollback(self.model, self.model_res.inverse_units)
+        if self.prior_metamodel is not None:
+            # Reverse of apply order: the swap went in first, so it unwinds
+            # after the model ops that were applied on top of it. See the
+            # class docstring for why validation is NULLED (not restored) and
+            # why cache invalidation is deferred to the shared step below.
+            self.session.metamodel = self.prior_metamodel
+            self.model.metamodel = self.prior_metamodel
+            self.model.indexes.rebuild()
+            self.session.validation = None
         if self.rev_bumped:
             self.session.model_rev -= 1
-        if self.model_res is not None:
+        if self.model_res is not None or self.prior_metamodel is not None:
+            # Runs AFTER the rev decrement by the invariant above. The
+            # metamodel arm matters as much as the model one: every derived
+            # row order / script cell key computed between the swap and this
+            # failure was built against the CANDIDATE schema, so leaving them
+            # live after restoring the prior metamodel would serve
+            # schema-mismatched rows.
             self.session.invalidate_derived_caches()
         if self.view_res is not None:
             assert self.session.view is not None
@@ -607,6 +653,7 @@ def create_commit(
     session: Session = Depends(get_request_session),
     db: DbSession = Depends(get_db),
     user: User = Depends(get_current_user),
+    membership: Membership = Depends(require_membership),
 ) -> CommitResponse | JSONResponse:
     """Lock-verified, structural-gated commit (Phase 4 spec §7).
 
@@ -646,29 +693,49 @@ def create_commit(
     2. Seed the validation baseline.
     3. Under the write mutex:
        a. Verify the caller still holds every required lock (409 if any gone).
+       a2. Quiet-peers guard for rebind-carrying batches (409 while a PEER
+          holds a model-scope lease).
+       a3. Apply the metamodel half FIRST (spec 2026-08-16): the schema swap
+          is hoisted ahead of every other family so the batch's model ops
+          validate against the NEW schema — that is what makes an atomic
+          migration batch a migration batch.
        b. Apply the model ops (422 on mutation-boundary error from
           _apply_batch), then the artifact ops (staged on this request's DB
           transaction).
        b3. Apply the view half (all-or-nothing via apply_view_ops_atomic) —
           auto-creating an empty view for a project that never had one.
-       c. Hard-reject structural blockers (422; rolls back all three halves).
-       d. Splice conformance issues into the issue store, bump rev, record batch.
+       c. Hard-reject structural blockers (422; rolls back every half). A
+          rebind-carrying batch validates the FULL model (Scope.all()) here
+          instead of the dirty scope — a schema change invalidates the
+          dirty-scope premise for the whole model.
+       d. Splice conformance issues into the issue store (a rebind REPLACES it
+          wholesale via set_full), bump rev, record batch. Rebind batches are
+          exempt from the strict-mode conformance reject.
        e. Persist to the durable journal (500 + full rollback on failure); the
-          view blob (if touched) is staged on the SAME DB transaction as the
-          Commit row, so both land or neither does.
-       f. Periodic snapshot (mirrors apply_ops to bound replay tail).
+          view blob (if touched) and the layout blob (ditto) are staged on the
+          SAME DB transaction as the Commit row, so all land or none do. A
+          rebind additionally sets the row's from/to_metamodel_id columns.
+       f. Snapshot: periodic normally, FORCED after a rebind (so the replay
+          tail never spans a schema boundary).
        g. Release the caller's locks (explicit loop).
        h. Broadcast commit delta + artifact + lock-release events (inside mutex
           for enqueue-order == rev-order guarantee; broadcast is non-blocking).
+          A rebind broadcasts ``rebind_event`` INSTEAD of ``commit_event``:
+          peers cannot apply a delta across a schema swap, so they get the
+          reload banner.
     4. Return CommitResponse with full delta + commit metadata.
 
-    Mixed-batch atomicity (Phase 1 artefacts revamp; view half added Phase 2)
+    Mixed-batch atomicity (Phase 1 artefacts revamp; view half added Phase 2;
+    metamodel half added spec 2026-08-16)
     ---------------------------------------------------------------------
-    A batch can span all three content families, and each lives in a
+    A batch can span all four content families, and each lives in a
     different place: model ops mutate the in-memory model IN PLACE, artifact
-    ops stage row changes on this request's DB transaction, and view ops
+    ops stage row changes on this request's DB transaction, view ops
     mutate ``session.view`` IN PLACE plus (once accepted) stage a blob row on
-    the same DB transaction as the artifact rows. So every failure path after
+    the same DB transaction as the artifact rows, and metamodel ops do BOTH at
+    once (a rebind swaps ``session.metamodel``/``model.metamodel`` in place AND
+    stages a new ``MetamodelRow`` + repointed ``ModelRow``; layout moves stage
+    the ``metamodel_layouts`` blob only). So every failure path after
     an apply has to undo however many halves are live at that point — which
     is ``_CommitUnwind``'s job, not each site's: every stage registers what
     it just made live on the ledger, and each failure path calls
@@ -683,15 +750,29 @@ def create_commit(
     ``apply_view_ops_atomic`` DOES roll its own prefix back on failure (see
     its docstring), so a failure raised BY it never needs an explicit
     ``rollback_view`` call — hence ``view_res`` is registered only AFTER it
-    returns, and only failures raised after that point roll the view back.
+    returns, and only failures raised after that point roll the view back;
+    ``apply_metamodel_ops`` follows the ARTIFACT stance (no internal rollback
+    at all — see its module docstring), so ``db_staged`` is registered before
+    the call and ``prior_metamodel`` only after it returns with the swap
+    handle it captured.
     """
     _, model = require_model(session)
     model_ops, artifact_ops, view_ops, metamodel_ops = split_ops(payload.ops)
-    if metamodel_ops:
-        # TEMPORARY (Task 2): the metamodel applier lands in Task 5, which
-        # removes this stub. Until then a commit containing metamodel ops
-        # must refuse rather than silently dropping them.
-        raise HTTPException(status_code=422, detail="metamodel ops not yet supported")
+    # Pre-mutex, because both are pure rejections that touch nothing: the
+    # one-rebind-per-batch 422 (split_rebind) and the owner gate. Splitting
+    # here also gives the guards below the two halves they need to branch on
+    # (`rebind_op` gates quiescence/validation/snapshot/feed, `mm_moves` only
+    # widens the feed scope) without re-scanning the family each time.
+    rebind_op, mm_moves = split_rebind(metamodel_ops)
+    if rebind_op is not None and membership.role is not Role.owner:
+        # Same gate the retired POST /metamodel/rebind carried (require_owner):
+        # a schema swap retypes the whole model. Layout moves are deliberately
+        # NOT owner-gated — presentation data, editor+ like the retired
+        # PUT /metamodel/layout. ``require_membership`` has already rejected a
+        # viewer for this write.
+        raise HTTPException(
+            status_code=403, detail="metamodel changes require the owner role"
+        )
     # The unwind ledger every failure path below shares — see _CommitUnwind.
     # Its ``created_view`` flag is the subtle one: it is True iff THIS request
     # is the one that flipped session.view from None to non-None via
@@ -853,12 +934,48 @@ def create_commit(
                     ],
                 },
             )
-        # b. apply the model half (422 on mutation-boundary error — let it
-        #    propagate; _apply_batch already rolled itself back and nothing
-        #    artifact-side has been staged yet). created_view may already be
-        #    True here (the resolve just above), so this needs the ledger's
-        #    unwind too, unlike round 1's shape where hydration never
-        #    happened this early (final-review round 2, Finding B).
+        # a2. quiet-peers guard (rebind batches only). Today's rebind
+        #     guarantee, scoped to PEERS: a schema swap must not invalidate
+        #     someone else's open model check-out. The CALLER's own leases are
+        #     the point of a migration batch — it holds locks on the very
+        #     elements it is fixing — so only OTHER holders block. Artifact/
+        #     folder/mm leases never block (artifacts degrade tolerantly under
+        #     a new metamodel; the mm lease is the one this caller holds).
+        if rebind_op is not None:
+            peer_model = [
+                le
+                for le in session.lock_table.active_leases(time.monotonic())
+                if le.holder != user.id and is_model_resource(le.resource_id)
+            ]
+            if peer_model:
+                unwind.unwind()  # at most this request's own view hydration
+                return JSONResponse(
+                    status_code=409,
+                    content={
+                        "detail": "active locks; rebind requires a quiet project"
+                    },
+                )
+        # a3. apply the metamodel half FIRST — the hoist that makes a migration
+        #     batch atomic: everything below validates against the CANDIDATE
+        #     schema. It stages rows via db.flush() and has no internal
+        #     rollback (module docstring), so db_staged is registered BEFORE
+        #     the call, exactly like the artifact half at b2.
+        mm_res: MetamodelBatchResult | None = None
+        if metamodel_ops:
+            unwind.db_staged = True
+            try:
+                mm_res = apply_metamodel_ops(db, project_id, session, metamodel_ops)
+            except Exception:
+                unwind.unwind()  # undo every live half — see _CommitUnwind
+                raise
+            # None for a layout-only batch: nothing in memory to restore.
+            unwind.prior_metamodel = mm_res.prior_metamodel
+        # b. apply the model half against the (possibly just-swapped) schema.
+        #    _apply_batch already rolled ITSELF back on a mutation-boundary
+        #    error, but the ledger still has to run: created_view may be True
+        #    (the resolve near the top — final-review round 2, Finding B) and
+        #    since spec 2026-08-16 the metamodel half may already be live in
+        #    memory AND staged in the transaction (a3).
         try:
             res = _apply_batch(model, model_ops, restore=False)
         except Exception:
@@ -933,7 +1050,17 @@ def create_commit(
         # c. hard-reject structural blockers. Model content only: an artifact
         #    op's own validity was settled at apply time (b2), and an artifact
         #    row can never make the MODEL structurally invalid.
-        scoped = default_pipeline().validate(model, res.dirty.to_scope())
+        rebound = mm_res is not None and mm_res.rebound
+        if rebound:
+            # A schema change invalidates the dirty-scope premise for the
+            # WHOLE model, not just this batch's touched entities: an element
+            # nobody edited can start (or stop) conforming purely because the
+            # type it instantiates changed. So re-validate everything — the
+            # same O(model) cost the retired rebind route paid — and REPLACE
+            # the issue store below rather than splicing into it.
+            scoped = default_pipeline().validate(model, Scope.all())
+        else:
+            scoped = default_pipeline().validate(model, res.dirty.to_scope())
         structural = [i for i in scoped if i.category is IssueCategory.STRUCTURAL]
         if structural:
             unwind.unwind()  # undo every live half — see _CommitUnwind
@@ -950,9 +1077,18 @@ def create_commit(
         conformance = [i for i in scoped if i.category is IssueCategory.CONFORMANCE]
         # strict-mode gate: an owner-enabled project promotes scoped conformance
         # issues to a hard reject (spec: strict mode). Scoped to res.dirty only —
-        # pre-existing issues elsewhere never trip this. Rebind has its own route
-        # and does not pass through here, so it stays exempt by construction.
-        if session.strict_mode and conformance:
+        # pre-existing issues elsewhere never trip this.
+        #
+        # Rebind batches are exempt BY DECISION (spec 2026-08-16, carrying
+        # forward Phase 6B's "the engine stays inspectable"): a schema
+        # migration must not be impossible on a strict project, and the
+        # rebind's own sweep above is whole-model, so gating on it would let
+        # ANY pre-existing conformance issue anywhere veto every future schema
+        # change. The count is still reported on the commit and the issue
+        # store still gets the full truth — the batch simply lands. It used to
+        # be exempt "by construction" (rebind had its own route); now it is
+        # exempt by this clause.
+        if session.strict_mode and conformance and not rebound:
             unwind.unwind()  # undo every live half — see _CommitUnwind
             return JSONResponse(
                 status_code=422,
@@ -963,21 +1099,39 @@ def create_commit(
                     ],
                 },
             )
-        delta = state.replace(res.dirty.ids, scoped)
+        if rebound:
+            # Whole-store REPLACE, matching the whole-model sweep above: a
+            # dirty-scope splice would leave issues minted under the OLD
+            # schema behind for every entity this batch did not touch.
+            state.set_full(scoped)
+            issues_removed: list[str] = []
+            issues_added = [IssueOut.from_core(i) for i in scoped]
+        else:
+            delta = state.replace(res.dirty.ids, scoped)
+            issues_removed = delta.removed_owner_ids
+            issues_added = [IssueOut.from_core(i) for i in delta.added]
         session.model_rev += 1
-        if get_settings().snippet_incremental_invalidation:
+        if rebound:
+            # Mirrors the retired rebind route: EVERY derived row order and
+            # script cell value was computed against the old schema, so
+            # selective eviction has nothing to preserve — clear the lot and
+            # re-stamp the cell cache to the new rev.
+            session.invalidate_derived_caches()
+        elif get_settings().snippet_incremental_invalidation:
             # Selective eviction: cells this commit provably did not touch
             # stay warm at the new rev (spec 2026-07-21 Phase B).
             session.evict_touched_caches(touched_keys(model, model.metamodel, res))
         else:
             session.invalidate_derived_caches()  # legacy clear-all
-        # ONE journal entry per commit, spanning all three families: model
-        # ops first, then artifact ops, then view ops (the families are
-        # independent, so relative cross-family order carries no meaning —
-        # see split_ops). The view id_map is seeded with the model+artifact
-        # maps (see b3), so view_res.id_map is already a superset — merging
-        # it last is correct and the other two spreads are redundant but
-        # harmless, kept for symmetry with undo.
+        # ONE journal entry per commit, spanning all four families: model
+        # ops first, then artifact ops, then view ops, then metamodel ops (the
+        # families are independent, so relative cross-family order carries no
+        # meaning — see split_ops; metamodel stays LAST so front-to-back
+        # readers of the stored list see the pre-existing prefix unchanged).
+        # The view id_map is seeded with the model+artifact maps (see b3), so
+        # view_res.id_map is already a superset — merging it last is correct
+        # and the other two spreads are redundant but harmless, kept for
+        # symmetry with undo. The metamodel family mints no ids at all.
         merged_id_map = {
             **res.id_map,
             **art_res.id_map,
@@ -987,11 +1141,13 @@ def create_commit(
             *res.canonical_ops,
             *art_res.canonical_ops,
             *(view_res.canonical_ops if view_res else []),
+            *(mm_res.canonical_ops if mm_res else []),
         ]
         inverse_ops: list[OpIn] = [
             *res.inverse_ops(),
             *art_res.inverse_ops(),
             *(view_res.inverse_ops() if view_res else []),
+            *(mm_res.inverse_ops() if mm_res else []),
         ]
         session.record_batch(
             AppliedBatch(
@@ -1037,31 +1193,49 @@ def create_commit(
                 _message=payload.message,
                 _validation_error_count=len(conformance),
                 _issues=issues_json,
+                # The FK columns are what MARK this row a rebind for every
+                # downstream reader (staleness guard, is_rebind, diff); they
+                # are set from the applier's captured ids, not re-derived.
+                _from_metamodel_id=mm_res.from_metamodel_id if mm_res else None,
+                _to_metamodel_id=mm_res.to_metamodel_id if mm_res else None,
             )
         except Exception as exc:
             # undo every live half — see _CommitUnwind. By this point that is
             # all of them: the rev bump and op_log entry included, and the
-            # db.rollback() also discards the staged artifact + view rows.
+            # db.rollback() also discards the staged artifact + view +
+            # metamodel/layout rows.
             unwind.unwind()
             raise HTTPException(
                 status_code=500, detail="failed to persist commit"
             ) from exc
-        if (artifact_ops or view_ops) and not persisted:
+        if (artifact_ops or view_ops or metamodel_ops) and not persisted:
             # No durable model row (in-memory-only legacy project), so
-            # _persist_commit skipped its db.commit() — but artifact rows are
-            # real DB state that must not silently vanish when the request
-            # session closes. Commit them on their own; the journal entry is
-            # the only thing this project forgoes.
+            # _persist_commit skipped its db.commit() — but artifact rows,
+            # view blobs and metamodel/layout rows are real DB state that must
+            # not silently vanish when the request session closes. Commit them
+            # on their own; the journal entry is the only thing this project
+            # forgoes. (A rebind cannot actually reach here: its applier calls
+            # upsert_model_row, which self-creates the missing row — but the
+            # layout-only case can, and the guard costs nothing.)
             db.commit()
-        # f. periodic snapshot: mirrors apply_ops so a hot commit-only project
-        #    doesn't accumulate an unbounded replay tail. The durable commit has
+        # f. snapshot — periodic normally (mirrors apply_ops so a hot
+        #    commit-only project doesn't accumulate an unbounded replay tail),
+        #    FORCED after a rebind. The durable commit has
         #    already landed; a snapshot failure here is recoverable (hydration
         #    rebuilds the snapshot on the next cache-miss), so we log and proceed
         #    rather than returning a 500 that would mislead the client into
         #    thinking the commit failed.
         if persisted:
             try:
-                _maybe_periodic_snapshot(db, project_id, session, session.model_rev)
+                if rebound:
+                    # FORCED, not periodic: keeps "the replay tail never spans
+                    # a rebind boundary" (hydration binds the CURRENT metamodel
+                    # and would otherwise replay pre-rebind ops under it).
+                    write_snapshot(project_id, session, session.model_rev)
+                else:
+                    _maybe_periodic_snapshot(
+                        db, project_id, session, session.model_rev
+                    )
             except Exception:
                 logger.warning(
                     "post-commit snapshot failed for project %s at rev %s; "
@@ -1092,25 +1266,44 @@ def create_commit(
         ]
         # an empty batch touched no family; report it as "model" so the scope
         # list is never empty and peers keep their existing behaviour.
+        # "metamodel-layout" is the LAYOUT half only — a rebind never rides a
+        # commit_event at all (see below), so there is no schema scope value.
         scope = sorted(
             ({"model"} if model_ops else set())
             | ({"artifact"} if artifact_ops else set())
             | ({"view"} if view_ops else set())
+            | ({"metamodel-layout"} if mm_moves else set())
         ) or ["model"]
-        session.hub.broadcast(
-            commit_event(
-                rev=session.model_rev,
-                commit_id=commit_id,
-                author_id=user.id,
-                message=payload.message,
-                validation_error_count=len(conformance),
-                scope=scope,
-                changed_elements=changed_elements,
-                changed_relationships=changed_relationships,
-                deleted_element_ids=list(res.deleted_element_ids),
-                deleted_relationship_ids=list(res.deleted_relationship_ids),
+        if rebound:
+            # rebind_event INSTEAD of commit_event: there is no applyable
+            # delta across a schema swap (every peer's cached elements are
+            # typed by a metamodel that no longer exists), so peers get the
+            # reload banner — exactly what the retired rebind route emitted.
+            # A migration batch's model delta is therefore deliberately NOT
+            # broadcast; the reload subsumes it.
+            session.hub.broadcast(
+                rebind_event(
+                    rev=session.model_rev,
+                    from_metamodel_id=mm_res.from_metamodel_id if mm_res else None,
+                    to_metamodel_id=(mm_res.to_metamodel_id or "") if mm_res else "",
+                    validation_error_count=len(conformance),
+                )
             )
-        )
+        else:
+            session.hub.broadcast(
+                commit_event(
+                    rev=session.model_rev,
+                    commit_id=commit_id,
+                    author_id=user.id,
+                    message=payload.message,
+                    validation_error_count=len(conformance),
+                    scope=scope,
+                    changed_elements=changed_elements,
+                    changed_relationships=changed_relationships,
+                    deleted_element_ids=list(res.deleted_element_ids),
+                    deleted_relationship_ids=list(res.deleted_relationship_ids),
+                )
+            )
         broadcast_artifact_events(
             session.hub, changed_artifact_headers, created_artifact_ids, art_res.deleted
         )
@@ -1145,8 +1338,8 @@ def create_commit(
         ],
         deleted_element_ids=list(res.deleted_element_ids),
         deleted_relationship_ids=list(res.deleted_relationship_ids),
-        issues_removed_owner_ids=delta.removed_owner_ids,
-        issues_added=[IssueOut.from_core(i) for i in delta.added],
+        issues_removed_owner_ids=issues_removed,
+        issues_added=issues_added,
         issue_counts=state.counts(),
         commit_id=commit_id,
         message=payload.message,
@@ -1154,6 +1347,8 @@ def create_commit(
         changed_artifacts=changed_artifact_headers,
         deleted_artifact_ids=[d["id"] for d in art_res.deleted],
         view_rev=new_view_rev,
+        rebound=rebound,
+        to_metamodel_id=mm_res.to_metamodel_id if mm_res else None,
     )
 
 
