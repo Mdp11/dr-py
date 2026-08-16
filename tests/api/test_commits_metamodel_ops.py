@@ -751,3 +751,103 @@ def test_layout_only_commit_broadcasts_the_metamodel_layout_scope(
         session.hub.broadcast = monkey  # type: ignore[method-assign]
     commit = next(e for e in events if e["type"] == "commit")
     assert commit["scope"] == ["metamodel-layout"]
+
+
+# ---------------------------------------------------------------------------
+# Task 6: POST /commits/preview dry-runs metamodel batches
+# ---------------------------------------------------------------------------
+
+
+def test_preview_dry_runs_a_migration_batch(client: TestClient) -> None:
+    """Direction note (see the task report): the brief wrote this scenario as
+    "drop `label` from the schema + strip it from the element", which is
+    inexpressible — the rebind is hoisted first, so by the time the model op
+    runs the CANDIDATE schema no longer declares `label` and
+    `_check_patch_keys` rejects the patch key (design spec §1: "model ops
+    that need the outgoing schema belong in a prior commit"). This mirrors
+    ``test_migration_batch_lands_atomically``'s supported direction instead:
+    add a mandatory-looking property (``MM_V4``) and patch it in the SAME
+    batch — legal only once the rebind has swapped the candidate in, which
+    also proves the hoist happens under preview exactly as it does under a
+    real commit.
+    """
+    eid = _create_node(client, "hello")
+    base = _rev(client)
+    r = client.post(
+        papi("/commits/preview"),
+        json={
+            "base_rev": base,
+            "ops": [
+                {
+                    "kind": "update_element",
+                    "id": eid,
+                    "properties_patch": {"owner_name": "ada"},
+                },
+                {"kind": "metamodel.rebind", "blob": MM_V4},
+            ],
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["would_block"] is False
+    # side-effect free: old schema still live, rev unchanged, raw blob
+    # unchanged, and the element's property patch never survived the
+    # rollback (owner_name is not even a V1 property, so its presence would
+    # itself prove the swap leaked past the preview).
+    session = get_session()
+    assert session.model_rev == base
+    assert session.metamodel is not None
+    assert {
+        p.name for p in session.metamodel.effective_element_properties("Node")
+    } == {"label"}
+    assert client.get(papi("/metamodel/raw")).json()["blob"] == MM_V1
+    assert session.model is not None
+    assert session.model.elements[eid].properties.get("label") == "hello"
+    assert "owner_name" not in session.model.elements[eid].properties
+
+
+def test_preview_422s_a_bad_candidate(client: TestClient) -> None:
+    r = client.post(
+        papi("/commits/preview"),
+        json={"base_rev": _rev(client), "ops": [{"kind": "metamodel.rebind", "blob": ": ["}]},
+    )
+    assert r.status_code == 422
+
+
+def test_preview_restores_schema_when_model_ops_fail_mid_preview(
+    client: TestClient,
+) -> None:
+    """Proves the restore holds when ``_apply_batch`` itself raises mid-preview
+    (a mutation-boundary error), not only on the happy path where the model
+    ops succeed and only validation surfaces issues afterward. Mirrors
+    ``test_mid_batch_model_failure_restores_the_old_schema`` for the commit
+    route: rebind to V2 (which drops `label`), then patch `label` on the
+    existing element — legal under V1, a mutation-boundary 422 under the
+    swapped-in V2 candidate. That 422 has to propagate THROUGH the preview
+    route's ``finally``, so the schema/model/rev restore is exercised on the
+    exception path, not just the normal return path.
+    """
+    eid = _create_node(client, "x")
+    base = _rev(client)
+    r = client.post(
+        papi("/commits/preview"),
+        json={
+            "base_rev": base,
+            "ops": [
+                {"kind": "metamodel.rebind", "blob": MM_V2},
+                {
+                    "kind": "update_element",
+                    "id": eid,
+                    "properties_patch": {"label": "y"},
+                },
+            ],
+        },
+    )
+    assert r.status_code == 422, r.text
+    session = get_session()
+    assert session.model_rev == base
+    assert session.metamodel is not None
+    assert session.metamodel.effective_element_properties("Node")  # V1 restored
+    assert session.model is not None
+    assert session.model.metamodel is session.metamodel
+    assert session.model.elements[eid].properties["label"] == "x"
+    assert client.get(papi("/metamodel/raw")).json()["blob"] == MM_V1

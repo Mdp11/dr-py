@@ -67,6 +67,7 @@ from ..locking import (
 from ..metamodel_ops import (
     MetamodelBatchResult,
     apply_metamodel_ops,
+    load_candidate,
     split_rebind,
 )
 from ..settings import get_settings
@@ -497,11 +498,14 @@ def preview_commit(
             content={"detail": "stale base_rev", "model_rev": session.model_rev},
         )
     model_ops, artifact_ops, view_ops, metamodel_ops = split_ops(payload.ops)
-    if metamodel_ops:
-        # TEMPORARY (Task 2): the metamodel applier lands in Task 6, which
-        # removes this stub. Until then a preview containing metamodel ops
-        # must refuse rather than silently ignore them.
-        raise HTTPException(status_code=422, detail="metamodel ops not yet supported")
+    # Pre-mutex, mirroring create_commit's own hoist (spec 2026-08-16 §7): both
+    # calls raise their 422s (more-than-one-rebind, an unparseable/schema-bad
+    # candidate blob) before any lock or mutation work runs. Move-node ops
+    # need nothing further here — pydantic already checked their shape, and
+    # that is the whole contract for a dry-run preview (the same stance
+    # ARTIFACT ops take a few lines down).
+    rebind_op, _mm_moves = split_rebind(metamodel_ops)
+    candidate = load_candidate(rebind_op.blob) if rebind_op is not None else None
     # Artifact ops are DB rows, not model content: there is nothing to apply
     # into the model and roll back, so they are checked DRY (422 on an invalid
     # payload / unknown id / name clash, 409 on a stale artifact_rev) and
@@ -537,13 +541,50 @@ def preview_commit(
                 else load_or_create_view(db, project_id)
             )
             validate_view_ops(preview_view, view_ops)
-        # _apply_batch raises 422 on a mutation-boundary structural error
-        # (unknown type, missing endpoint, unknown property) — the safety net.
-        res = _apply_batch(model, model_ops, restore=False)
+        prior_mm = session.metamodel
+        if candidate is not None:
+            # In-memory ONLY (no DB writes — preview must stay side-effect
+            # free): swap so the model ops validate against the candidate,
+            # exactly as the real commit will.
+            assert prior_mm is not None
+            session.metamodel = candidate
+            model.metamodel = candidate
+            model.indexes.rebuild()
         try:
-            scoped = default_pipeline().validate(model, res.dirty.to_scope())
+            # _apply_batch raises 422 on a mutation-boundary structural error
+            # (unknown type, missing endpoint, unknown property) — the safety
+            # net. It self-rolls-back anything it already applied before
+            # raising, so a raise here leaves the MODEL clean; only the
+            # metamodel swap above still needs undoing, which the outer
+            # `finally` below does unconditionally.
+            res = _apply_batch(model, model_ops, restore=False)
+            try:
+                # A rebind batch validates the FULL model, like create_commit
+                # does: a schema swap can mint issues on elements the batch's
+                # own ops never touched, which the dirty-scope shortcut a
+                # non-rebind batch uses would miss entirely.
+                scope_arg = (
+                    Scope.all() if candidate is not None else res.dirty.to_scope()
+                )
+                scoped = default_pipeline().validate(model, scope_arg)
+            finally:
+                _rollback(model, res.inverse_units)  # always restore the model
         finally:
-            _rollback(model, res.inverse_units)  # always restore the model
+            # Unconditional across every exit from the try above — the happy
+            # path, a validation-pipeline exception, and an `_apply_batch`
+            # mutation-boundary 422 alike — because a preview that leaves the
+            # session on the candidate schema is a correctness bug, not a
+            # degraded-but-safe state: preview is supposed to be the SAFE,
+            # read-only path.
+            if candidate is not None:
+                # candidate is only ever set once the pre-swap `assert
+                # prior_mm is not None` above already held, but mypy cannot
+                # carry that narrowing across the `try` boundary into this
+                # `finally` — re-assert rather than silence the checker.
+                assert prior_mm is not None
+                session.metamodel = prior_mm
+                model.metamodel = prior_mm
+                model.indexes.rebuild()
             # The in-place apply-then-rollback leaves model_rev unchanged, so a
             # concurrent lock-free /tables/evaluate could have cached rows AND
             # script cell values computed mid-preview at this rev (final-review
@@ -555,7 +596,10 @@ def preview_commit(
         conformance_error_count=len(conformance),
         structural_blockers=[IssueOut.from_core(i) for i in structural],
         issues=[IssueOut.from_core(i) for i in scoped],
-        would_block=session.strict_mode and len(conformance) > 0,
+        # Rebind batches are strict-exempt, mirroring create_commit: the
+        # engine must stay inspectable across a migration even under strict
+        # mode, so a rebind preview never reports would_block.
+        would_block=session.strict_mode and len(conformance) > 0 and rebind_op is None,
     )
 
 
