@@ -142,13 +142,18 @@ def apply_metamodel_ops(
         session.metamodel = candidate
         model.metamodel = candidate
         model.indexes.rebuild()  # containment flags + key groups are mm-derived
-        if model_row is not None:
-            mm_row = content.create_metamodel(
-                db, name="", version=prior_version + 1, blob=rebind.blob
-            )
-            content.upsert_model_row(db, project_id, metamodel_id=mm_row.id)
-            res.from_metamodel_id = from_id
-            res.to_metamodel_id = mm_row.id
+        # Persist unconditionally, even when the project has no ModelRow yet:
+        # upsert_model_row self-creates one (content.py), so gating this on
+        # model_row's presence bought nothing but a rebind with NULL
+        # from/to_metamodel_id — invisible to the staleness guard's
+        # unconditional-conflict branch, first_rebind_after, history's
+        # is_rebind, and _metamodel_structural's diff rendering.
+        mm_row = content.create_metamodel(
+            db, name="", version=prior_version + 1, blob=rebind.blob
+        )
+        content.upsert_model_row(db, project_id, metamodel_id=mm_row.id)
+        res.from_metamodel_id = from_id
+        res.to_metamodel_id = mm_row.id
         res.rebound = True
         res.canonical_ops.append(rebind)
         res.inverse_units.append(

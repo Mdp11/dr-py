@@ -5,14 +5,12 @@ from __future__ import annotations
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from sqlalchemy import delete
 
 from data_rover.api.main import create_app
 from data_rover.api import content, db
-from data_rover.api.metamodel_ops import (
-    MetamodelBatchResult,
-    apply_metamodel_ops,
-    split_rebind,
-)
+from data_rover.api.db_models import ModelRow
+from data_rover.api.metamodel_ops import apply_metamodel_ops, split_rebind
 from data_rover.api.schemas import MetamodelNodePos, MoveMetamodelNodeOp, RebindMetamodelOp
 from data_rover.api.session import DEFAULT_PROJECT_ID, get_session
 
@@ -81,6 +79,35 @@ def test_apply_rebind_swaps_memory_and_stages_rows(client: TestClient) -> None:
         assert row is not None and row.metamodel_id == res.to_metamodel_id
         mm_row = content.get_metamodel_row(s, res.to_metamodel_id)
         assert mm_row is not None and mm_row.blob == MM_V2 and mm_row.version == 2
+    finally:
+        s.rollback()
+        gen.close()
+
+
+def test_apply_rebind_persists_even_with_no_prior_model_row(client: TestClient) -> None:
+    """A project whose ModelRow was never created (e.g. content tables that
+    predate this session, or a row lost some other way) must still get a
+    persisted rebind: upsert_model_row self-creates the missing row, so
+    gating the persist on the row's presence would silently leave
+    from/to_metamodel_id NULL on a rebind that IS otherwise fully applied."""
+    session = get_session()
+    s, gen = _db()
+    try:
+        s.execute(delete(ModelRow).where(ModelRow.project_id == DEFAULT_PROJECT_ID))
+        s.flush()
+        assert content.get_model_row(s, DEFAULT_PROJECT_ID) is None
+
+        res = apply_metamodel_ops(
+            s,
+            DEFAULT_PROJECT_ID,
+            session,
+            [RebindMetamodelOp(kind="metamodel.rebind", blob=MM_V2)],
+        )
+        assert res.rebound and res.to_metamodel_id is not None
+        mm_row = content.get_metamodel_row(s, res.to_metamodel_id)
+        assert mm_row is not None and mm_row.version == 1 and mm_row.blob == MM_V2
+        row = content.get_model_row(s, DEFAULT_PROJECT_ID)
+        assert row is not None and row.metamodel_id == res.to_metamodel_id
     finally:
         s.rollback()
         gen.close()

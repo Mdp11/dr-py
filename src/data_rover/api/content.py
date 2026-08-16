@@ -385,15 +385,14 @@ def get_metamodel_layout(db: Session, project_id: str) -> dict | None:
 
 
 def stage_metamodel_layout(db: Session, project_id: str, blob: dict) -> None:
-    """Flush-only upsert of the canvas-layout blob, for writers that own a
-    larger unit of work (the metamodel half of ``POST /commits`` and undo —
-    the caller's transaction lands or discards it together with the
-    ``Commit`` row, unlike ``put_metamodel_layout`` below which commits on
-    its own). No PK race is possible here the way it is there: this path
-    runs only from a metamodel-op batch under the per-session
-    ``write_mutex``, so two writers can never both observe
-    ``get(MetamodelLayoutRow, project_id) is None`` at once and race an
-    INSERT."""
+    """Flush-only upsert of the canvas-layout blob, for a writer that owns a
+    larger unit of work (the metamodel half of ``POST /commits`` and undo):
+    the caller's own transaction lands or discards this write together with
+    its ``Commit`` row, so this function must never commit on its own. It
+    also never needs to guard the check-then-insert below against a
+    concurrent first write: every caller reaches this only from a
+    metamodel-op batch applied under the per-session ``write_mutex``, so no
+    second writer can ever observe the same missing row at the same time."""
     row = db.get(MetamodelLayoutRow, project_id)
     if row is None:
         db.add(MetamodelLayoutRow(project_id=project_id, blob=blob))
