@@ -84,16 +84,19 @@ import {
 	initMetamodelStage,
 	stageNodeMove
 } from '$lib/state/metamodel-stage.svelte';
+import { setModelError } from '$lib/state/model.svelte';
 
 beforeEach(() => {
 	localStorage.clear();
 	closeMetamodelStage();
+	setModelError(null);
 });
 
 afterEach(() => {
 	document.body.innerHTML = '';
 	localStorage.clear();
 	closeMetamodelStage();
+	setModelError(null);
 	vi.clearAllMocks();
 });
 
@@ -128,6 +131,35 @@ describe('project (re)entry drops the staged metamodel node moves', () => {
 		initMetamodelStage('project-a');
 		expect(getStagedNodeMoves().size).toBe(1);
 
+		unmount(c);
+	});
+});
+
+describe('conflict-recovery reload drops the staged metamodel node moves', () => {
+	it('onReloadModel() clears moves whose mm lease it just discarded', async () => {
+		// The SECOND door onto the same 409. `resetCheckout()` empties the lock
+		// registry, and the `mm` token goes with the `folder:` ones the view
+		// journal is reset for — so staged moves that survived a reload would be
+		// sent at the next commit with no `mm` token attached, i.e. a hard
+		// "required lock not held".
+		setModelError({ kind: 'conflict', message: 'stale rev' });
+		const c = mount(Page, { target: document.body });
+		await settle();
+
+		// Stage AFTER boot, so this exercises the reload path and not boot's own
+		// clear (boot ran on mount above and would have wiped anything earlier).
+		initMetamodelStage('project-a');
+		stageNodeMove('el:Pump', { x: 10, y: 20 });
+		expect(getStagedNodeMoves().size).toBe(1);
+
+		const reload = [...document.querySelectorAll('button')].find(
+			(b) => b.textContent?.trim() === 'Reload model'
+		);
+		expect(reload).toBeDefined();
+		reload!.click();
+		await settle();
+
+		expect(getStagedNodeMoves().size).toBe(0);
 		unmount(c);
 	});
 });

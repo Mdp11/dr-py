@@ -196,4 +196,29 @@ describe('DiffDrawer metamodel changes', () => {
 
 		unmount(c);
 	});
+
+	it('wipes the staged MOVES before discarding the draft (lease-release ordering)', async () => {
+		// Not cosmetic ordering: `discardMetamodelDraft` ends in
+		// `void dropMetamodelLease()`, and `releaseMetamodelLease` refuses to hand
+		// the `mm` lease back while `getStagedMetamodelDepth() > 0` — a check it
+		// makes SYNCHRONOUSLY, before this composite's next statement runs. Draft
+		// first therefore strands the exclusive lease whenever both halves are
+		// staged. `discardAll` already learned this; the two component composites
+		// have to match it. Asserted by invocation order because the drawer's
+		// state is mocked here — the lease itself is pinned in
+		// `Metamodel/__tests__/metamodel-tab.test.ts` against the real store.
+		draftDirty = true;
+		moves = new Map([['el:Pump', { x: 1, y: 2 }]]);
+
+		const c = await openDrawer();
+
+		buttonMatching(/Discard metamodel changes/i)!.click();
+		flushSync();
+
+		const movesAt = mocked(discardStagedNodeMoves).mock.invocationCallOrder[0];
+		const draftAt = mocked(discardMetamodelDraft).mock.invocationCallOrder[0];
+		expect(movesAt).toBeLessThan(draftAt);
+
+		unmount(c);
+	});
 });

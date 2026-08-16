@@ -287,6 +287,14 @@
 			// not held" with no obvious way to unwind. A reload is a full resync;
 			// the view journal resyncs with everything else.
 			resetViewEdits();
+			// The staged metamodel MOVES go for exactly the same reason: the `mm`
+			// token left the registry with the `folder:` ones above, so moves that
+			// survived a reload would be sent at the next commit with no `mm`
+			// token attached — the identical 409. `closeMetamodelStage()` rather
+			// than `discardStagedNodeMoves()`, matching boot(): the persisted
+			// mirror stays on disk, so re-opening the metamodel tab after the
+			// resync restores the positions instead of losing them.
+			closeMetamodelStage();
 			clearSelection();
 			// Deliberately NOT resetInspectionHistory(): a reload is the same project,
 			// same ids, so the visit trail is still valid — unlike opening a different

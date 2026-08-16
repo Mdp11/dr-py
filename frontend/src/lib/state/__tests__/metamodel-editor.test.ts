@@ -14,7 +14,11 @@ import {
 	resetMetamodelEditor,
 	retryMetamodelLease
 } from '../metamodel-editor.svelte';
-import { getStagedMetamodelOps, notifyMetamodelDiscardAll } from '../metamodel-stage.svelte';
+import {
+	getStagedMetamodelOps,
+	notifyMetamodelCommitted,
+	notifyMetamodelDiscardAll
+} from '../metamodel-stage.svelte';
 import * as mmApi from '$lib/api/metamodel';
 import * as lockApi from '$lib/api/checkout';
 import { ConflictError } from '$lib/api/errors';
@@ -297,6 +301,77 @@ describe('the commit-flow seam (spec 2026-08-16)', () => {
 		expect(getStagedMetamodelOps()).toEqual([
 			{ kind: 'metamodel.rebind', blob: `${BASE}candidate: true\n` }
 		]);
+	});
+
+	it('adopts the COMMITTED blob as the new baseline and clears the stored draft', async () => {
+		// The committed-listener is where the deleted `commitMetamodelRebind`'s
+		// success body now lives, and it is reachable only through this
+		// registration — `checkout.svelte.ts` fires the notify and never imports
+		// this module, so nothing in checkout's own tests exercises this handler.
+		vi.useFakeTimers();
+		stubLintOk();
+		vi.spyOn(lockApi, 'acquireLocks').mockResolvedValue(LEASE);
+		vi.spyOn(lockApi, 'releaseLock').mockResolvedValue(undefined);
+		await initMetamodelEditor(PROJECT);
+		const SENT = `${BASE}candidate: true\n`;
+		editMetamodelBuffer(SENT);
+		await vi.advanceTimersByTimeAsync(METAMODEL_DRAFT_DEBOUNCE_MS);
+		expect(localStorage.getItem(DRAFT_KEY)).toBe(SENT);
+
+		notifyMetamodelCommitted({ rebound: true, blob: SENT });
+
+		const v = getMetamodelEditor();
+		expect(v.dirty).toBe(false); // the buffer IS the baseline now
+		expect(v.buffer).toBe(SENT);
+		expect(v.preview).toBeNull();
+		expect(v.previewCurrent).toBe(false);
+		expect(v.draftRestored).toBe(false);
+		// The draft key would otherwise restore work the server already holds.
+		expect(localStorage.getItem(DRAFT_KEY)).toBeNull();
+		expect(getStagedMetamodelOps()).toEqual([]);
+	});
+
+	it('upgrades a degraded "serialized" source to "stored" once a commit stored a blob', async () => {
+		vi.spyOn(mmApi, 'getMetamodelRaw').mockResolvedValue({ blob: BASE, source: 'serialized' });
+		stubLintOk();
+		vi.spyOn(lockApi, 'acquireLocks').mockResolvedValue(LEASE);
+		vi.spyOn(lockApi, 'releaseLock').mockResolvedValue(undefined);
+		await initMetamodelEditor(PROJECT);
+		expect(getMetamodelEditor().source).toBe('serialized');
+		editMetamodelBuffer(`${BASE}candidate: true\n`);
+
+		notifyMetamodelCommitted({ rebound: true, blob: `${BASE}candidate: true\n` });
+
+		// A rebind DID store a blob, so the "re-serialized source" chip must stop
+		// claiming otherwise without waiting for the tab to be reopened.
+		expect(getMetamodelEditor().source).toBe('stored');
+	});
+
+	it('keeps a buffer typed DURING the commit dirty instead of adopting it', async () => {
+		vi.useFakeTimers();
+		stubLintOk();
+		vi.spyOn(lockApi, 'acquireLocks').mockResolvedValue(LEASE);
+		vi.spyOn(lockApi, 'releaseLock').mockResolvedValue(undefined);
+		await initMetamodelEditor(PROJECT);
+		const SENT = `${BASE}candidate: true\n`;
+		const TYPED = `${SENT}typed: mid-flight\n`;
+		editMetamodelBuffer(SENT);
+		// A straggler keystroke that landed while `POST /commits` was in flight.
+		editMetamodelBuffer(TYPED);
+
+		// `commitStaged` captures the blob it SENDS, so the notify carries `SENT`
+		// even though the buffer has moved on.
+		notifyMetamodelCommitted({ rebound: true, blob: SENT });
+
+		const v = getMetamodelEditor();
+		// The typed lines are unreviewed local changes ON TOP of the freshly
+		// bound metamodel, not something the commit saved.
+		expect(v.buffer).toBe(TYPED);
+		expect(v.dirty).toBe(true);
+		// Flushed NOW, not on the debounce: a mid-flight Discard actively removes
+		// the key, and a close before the timer fires would take the work with it.
+		expect(localStorage.getItem(DRAFT_KEY)).toBe(TYPED);
+		expect(getStagedMetamodelOps()).toEqual([{ kind: 'metamodel.rebind', blob: TYPED }]);
 	});
 
 	it('discards the draft when checkout announces a discard-all', async () => {

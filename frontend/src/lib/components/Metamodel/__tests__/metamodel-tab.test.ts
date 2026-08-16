@@ -2,7 +2,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import MetamodelTab from '../MetamodelTab.svelte';
-import { resetCheckout, setProjectInfo } from '../../../state/checkout.svelte';
+import { isCheckedOutByMe, resetCheckout, setProjectInfo } from '../../../state/checkout.svelte';
 import {
 	editMetamodelBuffer,
 	getMetamodelEditor,
@@ -220,6 +220,40 @@ describe('MetamodelTab', () => {
 			// lease alive and re-offer them in the next commit batch.
 			expect(getMetamodelEditor().dirty).toBe(false);
 			expect(getStagedNodeMoves().size).toBe(0);
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('hands the `mm` lease back when BOTH halves are discarded together', async () => {
+		setProjectInfo({ role: 'owner', lockTtlSeconds: 300 });
+		vi.spyOn(mmApi, 'lintMetamodel').mockResolvedValue({ ok: true, errors: [] });
+		vi.spyOn(lockApi, 'acquireLocks').mockResolvedValue(LEASE);
+		const release = vi.spyOn(lockApi, 'releaseLock').mockResolvedValue(undefined);
+
+		const c = mount(MetamodelTab, { target: document.body });
+		await settleInit();
+		try {
+			editMetamodelBuffer(`${BASE}candidate: true\n`);
+			stageNodeMove('el:Pump', { x: 1, y: 2 });
+			await vi.waitFor(() => expect(isCheckedOutByMe('mm')).toBe(true));
+			release.mockClear();
+
+			[...document.body.querySelectorAll('button')]
+				.find((b) => b.textContent?.trim() === 'Discard changes')
+				?.click();
+			await settle();
+
+			// ORDER-SENSITIVE, and invisible to a "did it clear the buffers" test:
+			// `discardMetamodelDraft` ends in `void dropMetamodelLease()`, which
+			// reaches `releaseMetamodelLease`'s `getStagedMetamodelDepth() > 0`
+			// guard SYNCHRONOUSLY — before the composite's next statement runs. Wipe
+			// the moves second and that guard sees them, refuses the release, and
+			// leaves the exclusive `mm` lease held over work the user just
+			// abandoned, with the checkout heartbeat renewing it for the rest of
+			// the session and every peer locked out of the metamodel.
+			await vi.waitFor(() => expect(release).toHaveBeenCalledWith('t-mm', undefined));
+			expect(isCheckedOutByMe('mm')).toBe(false);
 		} finally {
 			unmount(c);
 		}

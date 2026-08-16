@@ -20,7 +20,7 @@ import {
  * This module never re-implements lease logic and adds no competing guard
  * around lease calls (the lease module's generation guard is the only one
  * for that concern); `_gen` below guards only this module's OWN async
- * (init/lint/preview/rebind) against a closed surface.
+ * (init/lint/preview) against a closed surface.
  *
  * Draft safety: the dirty buffer mirrors to localStorage per project
  * (`ui.metamodel.draft.<projectId>`), debounced; it survives refreshes and
@@ -50,8 +50,6 @@ export interface MetamodelEditorView {
 	previewCurrent: boolean;
 	previewing: boolean;
 	previewError: string | null;
-	rebinding: boolean;
-	rebindError: string | null;
 }
 
 let _gen = 0;
@@ -67,16 +65,6 @@ let _preview = $state<MetamodelDiff | null>(null);
 let _previewFor = $state<string | null>(null);
 let _previewing = $state(false);
 let _previewError = $state<string | null>(null);
-// VESTIGIAL since the rebind moved onto the commit batch (spec 2026-08-16):
-// nothing sets either of these any more. `commitStaged` owns the flight, and a
-// failed commit reports itself in the commit drawer (`friendlyCommitError`),
-// not here. They are still READ by everything that composed them —
-// {@link isReadOnly}, and through it `metamodel-diagram.svelte.ts`'s edit/undo
-// guards and `MetamodelDiagram.svelte`'s "editing is paused" label — so
-// retiring them is a cleanup of its own rather than part of deleting the dead
-// rebind route's caller.
-let _rebinding = $state(false);
-let _rebindError = $state<string | null>(null);
 let _lockedBy = $state<string | null>(null);
 let _leaseHeld = false;
 let _acquiring = false;
@@ -127,25 +115,19 @@ export function isMetamodelEditorDirty(): boolean {
 	return _phase === 'ready' && _buffer !== _baseline;
 }
 
-/** Whether a keystroke that ALREADY happened may land in the buffer.
- * Deliberately does NOT include `_rebinding`: the surface is already
- * read-only for that reason (see {@link isReadOnly}), so the only change that
- * can still arrive is a straggler that raced CodeMirror's read-only
- * reconfigure — and those characters live in the editor's document either
- * way. Dropping them here would desync the buffer from what the user sees;
- * the commit path instead keeps a moved buffer safe (`commitStaged` captures
- * the blob it SENDS, and the {@link onMetamodelCommitted} listener below
- * adopts only that text as the new baseline). */
+/**
+ * Whether the metamodel may be edited at all — BOTH the gate on a keystroke
+ * that already happened and the SURFACE's read-only state (what the tab
+ * renders and what CodeMirror enforces). One predicate, not two: the pair
+ * differed only by the rebind-in-flight flag, and there is no such flight any
+ * more (spec 2026-08-16 — a rebind is an op in the commit batch, and
+ * `commitStaged` neither blocks the buffer nor needs it frozen: it captures
+ * the blob it SENDS, and the {@link onMetamodelCommitted} listener adopts only
+ * that text as the new baseline, so a straggler keystroke stays dirty local
+ * work rather than being silently called saved).
+ */
 function isEditBlocked(): boolean {
 	return _phase !== 'ready' || getRole() !== 'owner' || _lockedBy !== null;
-}
-
-/** The SURFACE's read-only state: what the tab renders and what CodeMirror
- * enforces. Folds in `_rebinding` — typing into (or discarding) a document
- * whose adoption is mid-flight has no coherent meaning, and the interleaving
- * is far better refused than reconciled. */
-function isReadOnly(): boolean {
-	return isEditBlocked() || _rebinding;
 }
 
 export function getMetamodelEditor(): MetamodelEditorView {
@@ -155,16 +137,14 @@ export function getMetamodelEditor(): MetamodelEditorView {
 		source: _source,
 		buffer: _buffer,
 		dirty: isMetamodelEditorDirty(),
-		readOnly: isReadOnly(),
+		readOnly: isEditBlocked(),
 		lockedBy: _lockedBy,
 		draftRestored: _draftRestored,
 		lintErrors: _lintErrors,
 		preview: _preview,
 		previewCurrent: _preview !== null && _previewFor === _buffer,
 		previewing: _previewing,
-		previewError: _previewError,
-		rebinding: _rebinding,
-		rebindError: _rebindError
+		previewError: _previewError
 	};
 }
 
@@ -248,7 +228,6 @@ function scheduleDraftWrite(): void {
 export function editMetamodelBuffer(code: string): void {
 	if (isEditBlocked()) return;
 	_buffer = code;
-	_rebindError = null;
 	scheduleDraftWrite();
 	scheduleLint();
 	maybeAcquireLease();
@@ -260,11 +239,11 @@ export function retryMetamodelLease(): void {
 }
 
 export async function previewMetamodelChanges(): Promise<void> {
-	// `_rebinding` (F-1): preview and an in-flight rebind were mutually
-	// exclusive, because a preview overlapping one computes against the
-	// PRE-rebind metamodel. The flag is vestigial now (see its declaration) —
-	// the guard is kept as-is rather than half-removed with it.
-	if (_phase !== 'ready' || _previewing || _rebinding) return;
+	// `_previewing`: one preview at a time. (The other half of the old F-1 pair
+	// — refusing while a rebind was in flight — went with the rebind flight
+	// itself: a rebind is an op in the commit batch now, so there is no window
+	// in which a preview could compute against a metamodel that is mid-swap.)
+	if (_phase !== 'ready' || _previewing) return;
 	const gen = _gen;
 	const buf = _buffer;
 	_previewing = true;
@@ -298,7 +277,6 @@ export function discardMetamodelDraft(): void {
 	_lintErrors = [];
 	_preview = null;
 	_previewFor = null;
-	_rebindError = null;
 	clearDraftStorage();
 	// UNCONDITIONAL, not `if (_leaseHeld)` — see closeMetamodelEditor.
 	_leaseHeld = false;
@@ -342,13 +320,11 @@ export function closeMetamodelEditor(): void {
 	_draftRestored = false;
 	_preview = null;
 	_previewFor = null;
-	// Both async `finally`s are generation-guarded, so a close mid-flight
-	// never runs them: reset here or the flags latch true and every later
-	// preview/rebind early-returns for the rest of the session.
+	// The preview's async `finally` is generation-guarded, so a close mid-flight
+	// never runs it: reset here or the flag latches true and every later preview
+	// early-returns for the rest of the session.
 	_previewing = false;
 	_previewError = null;
-	_rebinding = false;
-	_rebindError = null;
 	_lintErrors = [];
 	_acquiring = false;
 }
@@ -417,8 +393,6 @@ export function resetMetamodelEditor(): void {
 	_previewFor = null;
 	_previewing = false;
 	_previewError = null;
-	_rebinding = false;
-	_rebindError = null;
 	_lockedBy = null;
 	_leaseHeld = false;
 	_acquiring = false;

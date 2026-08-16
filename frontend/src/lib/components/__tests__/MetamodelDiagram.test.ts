@@ -75,9 +75,7 @@ const EDITOR: MetamodelEditorView = {
 	preview: null,
 	previewCurrent: false,
 	previewing: false,
-	previewError: null,
-	rebinding: false,
-	rebindError: null
+	previewError: null
 };
 
 const DIAGRAM: MetamodelDiagramView = {

@@ -41,7 +41,7 @@
 	 * this component owns rendering and nothing else.
 	 *
 	 * **Two independent gates, deliberately.** `readOnly` comes from the editor
-	 * module (owner-only, plus a peer's lease and an in-flight rebind) and hides
+	 * module (owner-only, plus a peer's lease) and hides
 	 * every affordance that would CHANGE THE DRAFT. Dragging is gated separately
 	 * on `getRole() !== 'viewer'`, because node positions are presentation: a
 	 * drag stages a `metamodel.move_node` op rather than editing the draft, so
@@ -78,15 +78,18 @@
 	const issueCount = $derived(view.unattributedErrorCount + view.errorNodeIds.size);
 
 	/**
-	 * Why the editing affordances are missing, in the three-way split this
-	 * surface actually has: a peer's lease and an in-flight rebind are temporary
-	 * and name their cause, an EDITOR keeps the layout half (positions are
-	 * presentation, saved without the `mm` lease), and a VIEWER keeps neither.
-	 * Without this the toolbar just quietly loses its buttons.
+	 * Why the editing affordances are missing, in the split this surface
+	 * actually has: a peer's lease is temporary and names its cause, an EDITOR
+	 * keeps the layout half (positions are presentation, saved without the `mm`
+	 * lease), and a VIEWER keeps neither. Without this the toolbar just quietly
+	 * loses its buttons.
+	 *
+	 * There is no "Rebinding — editing is paused" case any more (spec
+	 * 2026-08-16): a rebind is an op in the commit batch rather than a flight
+	 * this surface has to freeze for.
 	 */
 	const readOnlyNote = $derived.by((): string | null => {
 		if (!readOnly) return null;
-		if (ed.rebinding) return 'Rebinding — editing is paused.';
 		if (ed.lockedBy !== null) return `Locked by ${ed.lockedBy} — browsing only.`;
 		if (!canDragLayout) return 'Read-only — layout changes are not saved.';
 		return 'Metamodel edits are owner-only — you can still rearrange the layout.';

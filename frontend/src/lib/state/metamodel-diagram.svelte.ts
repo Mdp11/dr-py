@@ -597,8 +597,10 @@ export function applyDiagramEdit(cmd: YamlEditCommand): boolean {
  * diagram rename can land and only THEN lose the lease race to a peer. The
  * rollback would re-stage the pre-rename layout keys while the draft kept the
  * rename, so the commit would publish positions for names it never sends.
- * `readOnly` also folds in `_rebinding` (which `isEditBlocked()` does not), so
- * an undo cannot slip past the undo-stack clear an in-flight rebind performs.
+ *
+ * `readOnly` and the editor's own `isEditBlocked()` are ONE predicate now (spec
+ * 2026-08-16): they differed only by the rebind-in-flight flag, and a rebind is
+ * an op in the commit batch rather than a flight the surface freezes for.
  */
 export function undoDiagramEdit(): void {
 	if (getMetamodelEditor().readOnly) return;

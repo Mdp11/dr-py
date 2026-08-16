@@ -259,12 +259,19 @@
 
 	// The Metamodel section's ONE discard, for the same reason the View tab has
 	// one: the family commits as a unit, so it is abandoned as a unit. Identical
-	// pair to MetamodelTab's own "Discard changes" — the buffer half adopts the
-	// baseline and hands the `mm` lease back, the moves half wipes the staged
-	// positions (and their localStorage mirror).
+	// pair to MetamodelTab's own "Discard changes" — the moves half wipes the
+	// staged positions (and their localStorage mirror), the buffer half adopts
+	// the baseline and hands the `mm` lease back.
+	//
+	// MOVES FIRST, exactly as in that tab and in `discardAll`:
+	// `discardMetamodelDraft` ends in `void dropMetamodelLease()`, whose
+	// `releaseMetamodelLease` refuses to release while
+	// `getStagedMetamodelDepth() > 0` — a check made SYNCHRONOUSLY, before the
+	// next statement here. Draft first strands the exclusive `mm` lease over
+	// work the user just abandoned, and the heartbeat then renews it all session.
 	function onDiscardMetamodel(): void {
-		discardMetamodelDraft();
 		discardStagedNodeMoves();
+		discardMetamodelDraft();
 	}
 
 	function close(): void {

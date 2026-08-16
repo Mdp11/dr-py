@@ -68,13 +68,20 @@
 	/**
 	 * ONE discard for the whole family, matching the commit drawer's Metamodel
 	 * section button (and `discardAll`): the YAML draft and the staged node
-	 * moves are staged TOGETHER into one batch, and leaving the moves behind
-	 * would keep the `mm` lease alive (`releaseMetamodelLease` refuses while
-	 * anything metamodel-shaped is staged) over work the user just abandoned.
+	 * moves are staged TOGETHER into one batch, so they are abandoned together.
+	 *
+	 * MOVES FIRST, and that ordering is load-bearing — the same rule
+	 * `discardAll` follows. `discardMetamodelDraft` ends in
+	 * `void dropMetamodelLease()`, which reaches `releaseMetamodelLease`'s
+	 * `getStagedMetamodelDepth() > 0` guard SYNCHRONOUSLY, before the next
+	 * statement here runs. Discard the draft first and that guard still sees the
+	 * staged moves, refuses the release, and strands the exclusive `mm` lease on
+	 * a session with nothing staged — renewed by the checkout heartbeat for the
+	 * rest of the session, with every peer locked out of the metamodel.
 	 */
 	function onDiscard(): void {
-		discardMetamodelDraft();
 		discardStagedNodeMoves();
+		discardMetamodelDraft();
 	}
 </script>
 
@@ -124,12 +131,11 @@
 					     the BUFFER's discard button, sitting beside the editor it
 					     belongs to. A moves-only stage is discarded from the commit
 					     drawer's Metamodel section, which owns the whole family.
-					     `ed.rebinding` is vestigial (nothing sets it since the rebind
-					     moved onto the commit batch) but harmless; see its declaration
-					     in state/metamodel-editor.svelte.ts. -->
-					<Button size="sm" variant="ghost" disabled={ed.rebinding} onclick={onDiscard}>
-						Discard changes
-					</Button>
+					     Never disabled: the rebind-in-flight window it used to be
+					     gated on no longer exists (a rebind is an op in the commit
+					     batch), and a discard is safe against a commit either way —
+					     `commitStaged` sends the blob it captured, not the buffer. -->
+					<Button size="sm" variant="ghost" onclick={onDiscard}>Discard changes</Button>
 				{/if}
 			{:else}
 				<p class="text-muted-foreground/70">
@@ -197,14 +203,6 @@
 			</p>
 		{/if}
 
-		{#if ed.rebindError}
-			<p
-				class="rounded border border-destructive/40 bg-destructive/15 px-2 py-1.5 text-xs text-destructive"
-			>
-				{ed.rebindError}
-			</p>
-		{/if}
-
 		{#if ed.previewError}
 			<p
 				class="rounded border border-destructive/40 bg-destructive/15 px-2 py-1.5 text-xs text-destructive"
@@ -217,7 +215,7 @@
 			<div class="max-h-72 overflow-auto border-t border-border pt-2">
 				{#if !ed.previewCurrent}
 					<p class="mb-1 text-[10px] text-muted-foreground/70">
-						The buffer changed since this preview — re-run Preview before rebinding.
+						The buffer changed since this preview — re-run Preview before committing.
 					</p>
 				{/if}
 				<MetamodelPreviewPanel diff={ed.preview} />
