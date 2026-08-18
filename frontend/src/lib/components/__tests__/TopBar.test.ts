@@ -132,7 +132,7 @@ describe('TopBar', () => {
 		it('an artifact-only staged batch enables Commit and counts as a change', () => {
 			// The whole slice hangs off this: an artifact edit stages nothing in the
 			// MODEL buffer, so a Commit gate that only summed getStagedChangeCount()
-			// would leave the drawer reachable only via the command palette.
+			// would leave the commit drawer unreachable for such a batch.
 			vi.mocked(getModelSummary).mockReturnValue(SUMMARY as never);
 			stageArtifactCreate('navigation', 'N', {}, null);
 
@@ -179,8 +179,8 @@ describe('TopBar', () => {
 	});
 
 	// P-10.3: the three-dots overflow menu is retired — its items are now
-	// flat first-class controls in the left nav, and the ⌘K hint is gone
-	// along with it (the command palette trigger, not just its label).
+	// flat first-class controls in the left nav, and the ⌘K hint is gone from
+	// this bar along with the palette it used to advertise.
 	describe('promoted overflow-menu controls (P-10.3)', () => {
 		it('renders the promoted controls and no overflow menu', () => {
 			const c = mount(TopBar, { target: document.body });

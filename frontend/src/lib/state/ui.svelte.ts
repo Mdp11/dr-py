@@ -27,12 +27,12 @@ export function setHistoryDrawerOpen(open: boolean): void {
 }
 
 // Artifact export/import dialogs (mounted once in ArtifactsMenu, opened from
-// two surfaces: the TopBar Artifacts menu and the workspace tab strip's
-// per-artifact export button — which passes a seed selection). Both surfaces
+// two surfaces: the TopBar Artifacts menu and each artifact editor's own
+// toolbar export button — which passes a seed selection). Both surfaces
 // live inside the workspace, so the dialogs are only ever opened while
 // ArtifactsMenu is mounted; the open flags below are still module state
-// (not local to ArtifactsMenu) purely so the tab strip's export button can
-// reach them without prop-drilling through the workspace tree.
+// (not local to ArtifactsMenu) purely so an editor toolbar's export button
+// can reach them without prop-drilling through the workspace tree.
 //
 // ArtifactsMenu owns the flags' lifecycle regardless: it clears both on
 // mount (a flag latched by a stale render before the dialogs existed must

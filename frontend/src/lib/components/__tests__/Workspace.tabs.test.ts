@@ -1,10 +1,9 @@
 // Render tests for the dynamic-only Workspace tab strip (P-10.1/P-10.2):
 // the empty placeholder when no tab is open, and the Issues tab opening as a
 // closable dynamic tab. Follows the repo's established Svelte-5 render
-// convention (mount/unmount/flushSync — see `Workspace.export-button.test.ts`,
-// which renders the same component) rather than the brief's literal
-// `@testing-library/svelte` snippet — that package is not a project
-// dependency.
+// convention (mount/unmount/flushSync — see `ArtifactExportButton.test.ts`)
+// rather than the brief's literal `@testing-library/svelte` snippet — that
+// package is not a project dependency.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import Workspace from '../Workspace.svelte';

@@ -1,5 +1,5 @@
 // Render tests for the custom-export tab (P-14 task 12b step 3/5). Mirrors the
-// mount scaffolding of `Workspace.export-button.test.ts` (artifact/checkout
+// mount scaffolding the artifact-editor tab tests use (artifact/checkout
 // mocks, `setProjectInfo`) and `SnippetTab.lock-denied.test.ts` (the
 // conflict-shape lease stub).
 import { flushSync, mount, unmount } from 'svelte';

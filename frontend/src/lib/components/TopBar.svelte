@@ -78,8 +78,8 @@
 	const viewChanges = $derived(getStagedViewDepth());
 	const combinedChanges = $derived(totalChanges + artifactChanges + viewChanges);
 	// Enabled when the model, an artifact, OR the view has uncommitted/unsaved
-	// changes — an artifact-only batch must reach the commit drawer from here,
-	// not only from the command palette.
+	// changes — this Commit button is the ONLY way to the commit drawer, so an
+	// artifact-only batch has to enable it too.
 	const saveDisabled = $derived(summary === null || combinedChanges === 0);
 	const validating = $derived(isRunning());
 	const validateDisabled = $derived(validating || summary === null);

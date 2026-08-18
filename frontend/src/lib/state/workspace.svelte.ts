@@ -108,10 +108,11 @@ export function openIssuesTab(): string {
 }
 
 /**
- * Close a tab. If it was active, focus the tab that now sits at its former
- * index in strip order (clamped to the start), mirroring how browser/editor
- * tab strips keep focus near where the closed tab was rather than jumping to
- * a fixed home. An empty strip leaves the active tab `null` — "nothing open".
+ * Close a tab. If it was active, focus its PREDECESSOR in strip order — the
+ * tab at index-1, clamped to the start so closing the first tab focuses the
+ * new first. This mirrors how browser/editor tab strips keep focus near where
+ * the closed tab was rather than jumping to a fixed home. An empty strip
+ * leaves the active tab `null` — "nothing open".
  */
 export function closeTab(id: string): void {
 	const idx = _tabs.findIndex((t) => t.id === id);

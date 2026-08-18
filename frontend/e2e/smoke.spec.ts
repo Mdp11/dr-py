@@ -35,7 +35,11 @@ test('load metamodel + empty model -> create element -> see in diff', async ({ p
 	// --- 3. Create a Block element via the Tree "New element" popover --------
 	await page.getByRole('button', { name: 'New element' }).click();
 	await page.getByRole('button', { name: 'Block', exact: true }).click();
-	await expect(page.getByRole('heading', { name: 'Block' })).toBeVisible();
+	// The stereotype now reads off the Inspector header. It is deliberately a
+	// <p>, not a heading (the Properties section below owns the only heading in
+	// that column), so this asserts the testid rather than a heading role — the
+	// <h2> it used to match belonged to the retired DetailView tab.
+	await expect(page.getByTestId('inspector-stereotype')).toHaveText('Block');
 
 	// --- 4. Edit its `name` --------------------------------------------------
 	const inspector = page.getByTestId('inspector');
@@ -87,10 +91,9 @@ test('Export button downloads the model as a .json file', async ({ page }) => {
 	const downloads: Download[] = [];
 	page.on('download', (d) => downloads.push(d));
 
-	// Click the TopBar "Export" action, now folded into the overflow menu —
-	// downloads the active model JSON.
-	await page.getByRole('button', { name: 'More actions' }).click();
-	await page.getByRole('menuitem', { name: 'Export', exact: true }).click();
+	// Click the TopBar "Export" control (a first-class top bar button since the
+	// overflow menu was retired) — downloads the active model JSON.
+	await page.getByRole('button', { name: 'Export', exact: true }).click();
 
 	await expect.poll(() => downloads.length, { timeout: 10_000 }).toBe(1);
 
