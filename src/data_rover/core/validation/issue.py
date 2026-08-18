@@ -33,3 +33,10 @@ class Issue:
     #: commit-time tier; defaults to CONFORMANCE so only the few structural
     #: call sites (containment cycle/two-parents, dangling reference) opt in.
     category: IssueCategory = IssueCategory.CONFORMANCE
+    #: producing validator's stable name ("multiplicity", "facets", ...);
+    #: stamped centrally by the ValidationPipeline from each validator's
+    #: `check_name`, so construction sites stay unchanged. "" = not from a
+    #: pipeline validator (the UI buckets those as "Other"); view-tree
+    #: warnings carry "view" (stamped at their construction sites — they
+    #: never pass through the pipeline).
+    check: str = ""

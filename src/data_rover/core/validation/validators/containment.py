@@ -23,6 +23,8 @@ def _walk_reaches_cycle(indexes, start: str, safe: set[str]) -> bool:
 
 
 class ContainmentValidator(EntityValidator):
+    check_name = "containment"
+
     def validate_element(self, model, el) -> list[Issue]:
         # single-parent: each element contained at most once
         parents = model.indexes.parents_of(el.id)

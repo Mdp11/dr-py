@@ -119,6 +119,11 @@ class IssueOut(BaseModel):
     message: str
     target_ids: list[str] = Field(default_factory=list)
     category: str = "conformance"
+    #: producing validator's stable name (e.g. "multiplicity", "facets", or
+    #: "view" for view-tree warnings); "" for issues with no known producer.
+    #: Defaults so pre-existing durable `Commit.issues` JSON rows (persisted
+    #: before this field existed) still parse.
+    check: str = ""
     #: relationship to the committed model: "on_server" (pre-existing),
     #: "uncommitted" (introduced by staged edits), or "resolved" (fixed by them).
     origin: str = "on_server"
@@ -130,6 +135,7 @@ class IssueOut(BaseModel):
             message=issue.message,
             target_ids=list(issue.target_ids),
             category=issue.category.value,
+            check=issue.check,
             origin=origin,
         )
 

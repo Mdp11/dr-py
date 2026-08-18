@@ -9,6 +9,8 @@ _Decision = tuple[bool, bool, bool]
 
 
 class EndpointTypingValidator(EntityValidator):
+    check_name = "endpoint_typing"
+
     def __init__(self) -> None:
         # decision memo per (rel type, source type, target type) — the number
         # of distinct combinations is metamodel-sized, so per-relationship

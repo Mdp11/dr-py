@@ -8,6 +8,8 @@ from ..pipeline import EntityValidator, MetamodelMemo
 
 
 class FacetsValidator(EntityValidator):
+    check_name = "facets"
+
     def __init__(self) -> None:
         # per-type memo of the properties that actually carry a facet (most
         # carry none, so most entities are skipped with one dict lookup);

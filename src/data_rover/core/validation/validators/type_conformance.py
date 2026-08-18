@@ -40,6 +40,8 @@ def value_conforms(value, datatype: str, metamodel: Metamodel) -> bool:
 
 
 class TypeConformanceValidator(EntityValidator):
+    check_name = "type_conformance"
+
     def __init__(self) -> None:
         # per-type memo of {prop name: (datatype, is element reference)},
         # keeping the per-entity hot path free of metamodel lookups (which go

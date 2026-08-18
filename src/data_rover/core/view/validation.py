@@ -53,6 +53,7 @@ def validate_view(
                             f"view {view.name!r}: {where} references "
                             f"unknown artifact {ref.id!r}; renderers skip it"
                         ),
+                        check="view",
                     )
                 )
 
@@ -74,6 +75,7 @@ def validate_view(
                             f"{child.name!r} under {where}; later "
                             "occurrence ignored"
                         ),
+                        check="view",
                     )
                 )
                 continue
@@ -90,6 +92,7 @@ def validate_view(
                             f"unknown element {element_id!r}"
                         ),
                         [element_id],
+                        check="view",
                     )
                 )
                 continue
@@ -103,6 +106,7 @@ def validate_view(
                             f"{path!r}; placement ignored"
                         ),
                         [element_id],
+                        check="view",
                     )
                 )
                 continue
@@ -117,6 +121,7 @@ def validate_view(
                             f"{path!r}); first placement wins"
                         ),
                         [element_id],
+                        check="view",
                     )
                 )
                 continue
@@ -133,6 +138,7 @@ def validate_view(
                         f"view {view.name!r}: duplicate top-level folder "
                         f"{folder.name!r}; later occurrence ignored"
                     ),
+                    check="view",
                 )
             )
             continue

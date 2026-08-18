@@ -15,6 +15,7 @@ from data_rover.api.db import db_session
 from data_rover.api.db_models import Role
 from data_rover.api.main import create_app
 from data_rover.api.routes import validation as validation_routes
+from data_rover.api.schemas import IssueOut
 from data_rover.api.session import get_session
 
 from .conftest import AUTH_HEADERS, seed_default_project
@@ -192,6 +193,28 @@ def test_viewer_may_read_issues(client: TestClient) -> None:
     )
     assert res.status_code == 200, res.text
     assert res.json()["issues"] == []
+
+
+def test_issue_carries_producing_validator_check_name(client: TestClient) -> None:
+    """Each wire issue names its producing validator (U-1's chip filter)."""
+    res = _post_ops(
+        client,
+        [{"kind": "create_element", "temp_id": "tmp_1", "type_name": "Item",
+          "properties": {}}],
+    )
+    assert res.status_code == 200, res.text
+
+    body = client.get(f"{API}/model/issues").json()
+    issue = body["issues"][0]
+    assert issue["check"] == "multiplicity"
+
+
+def test_issue_out_parses_legacy_json_without_check() -> None:
+    """Pre-existing `Commit.issues` JSON rows have no `check` key; `check`
+    must still default so those durable rows keep parsing after this field
+    is added."""
+    out = IssueOut.model_validate({"severity": "error", "message": "m", "target_ids": []})
+    assert out.check == ""
 
 
 def test_membership_enforced(client: TestClient) -> None:
