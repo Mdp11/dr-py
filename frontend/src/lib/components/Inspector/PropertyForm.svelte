@@ -65,8 +65,8 @@
 	{:else}
 		<!-- `disabled` on the fieldset natively disables every descendant form
 		     control (inputs, selects, textareas, and the pickers' buttons), so a
-		     peer-locked entity cannot be edited from either the Inspector or the
-		     DetailView. min-w-0/border-0/p-0/m-0 strip the fieldset's default box. -->
+		     peer-locked entity cannot be edited from the Inspector.
+		     min-w-0/border-0/p-0/m-0 strip the fieldset's default box. -->
 		<fieldset disabled={lockedByOther} class="m-0 flex min-w-0 flex-col gap-3 border-0 p-0">
 			{#each propDefs as pd (pd.name)}
 				<PropertyField

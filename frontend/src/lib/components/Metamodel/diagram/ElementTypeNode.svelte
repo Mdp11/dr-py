@@ -14,7 +14,7 @@
 	 * a name compartment over an attribute compartment, an abstract type set in
 	 * italic behind a dashed border, and the `{id}` key marker in the code
 	 * editor's gold. Every colour is a CSS token, never a hex literal — these
-	 * are real DOM nodes (unlike the SVG canvas in GraphView.svelte, which has
+	 * are real DOM nodes (unlike a hand-rolled SVG canvas, which would have
 	 * to mirror the palette by hand), so `var(--…)` resolves normally and the
 	 * boxes follow the theme for free.
 	 *

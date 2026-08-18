@@ -807,7 +807,7 @@ export async function ensureElement(id: string): Promise<Element | null> {
 			return e;
 		} catch (err) {
 			if (err instanceof NotFoundError) {
-				// Record the confirmed miss so consumers (Inspector/DetailView) can
+				// Record the confirmed miss so consumers (e.g. the Inspector) can
 				// distinguish "fetch in flight" (show loading) from "the server said
 				// this id does not exist" (show not-found).
 				_missingElementIds.add(id);
