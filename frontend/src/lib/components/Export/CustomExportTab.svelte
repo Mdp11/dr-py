@@ -26,6 +26,7 @@
 	import { TableDefinitionSchema, type ExportEntry, type TableDefinition } from '$lib/api/types';
 	import { createColumnDrag } from '$lib/table/column-dnd.svelte';
 	import EntryLayoutDialog from './EntryLayoutDialog.svelte';
+	import ArtifactExportButton from '$lib/components/ArtifactExportButton.svelte';
 
 	let { tabId }: { tabId: string } = $props();
 
@@ -225,6 +226,7 @@
 					Save{draft.dirty ? ' *' : ''}
 				</button>
 			{/if}
+			<ArtifactExportButton {tabId} />
 		</div>
 
 		{#if saveError}

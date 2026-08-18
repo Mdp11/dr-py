@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { FileUp, X } from '@lucide/svelte';
+	import { X } from '@lucide/svelte';
 	import * as Tabs from '$lib/components/ui/tabs';
 	import {
 		closeCustomExportDraft,
@@ -11,10 +11,8 @@
 		getActiveTab,
 		getDynamicTabs,
 		isTabDirty,
-		openExportArtifacts,
 		setActiveTab
 	} from '$lib/state';
-	import { isTempId } from '$lib/state/ops';
 	import IssuesPanel from './Workspace/IssuesPanel.svelte';
 	import NavigationBuilder from './Navigation/NavigationBuilder.svelte';
 	import TableView from './Table/TableView.svelte';
@@ -76,22 +74,6 @@
 					</button>
 				</Tabs.Trigger>
 			{/each}
-			{@const activeArtifact = dynamicTabs.find(
-				(t) => t.id === activeTab && t.artifactId !== null && !isTempId(t.artifactId)
-			)}
-			{#if activeArtifact && activeArtifact.artifactId !== null}
-				{@const seedId = activeArtifact.artifactId}
-				<button
-					type="button"
-					data-testid="tab-export"
-					aria-label={`Export ${activeArtifact.title}…`}
-					title={`Export ${activeArtifact.title}…`}
-					class="ml-auto flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-					onclick={() => openExportArtifacts([seedId])}
-				>
-					<FileUp class="size-3.5" />
-				</button>
-			{/if}
 		</Tabs.List>
 		{#each dynamicTabs as tab (tab.id)}
 			<Tabs.Content value={tab.id} class="flex-1 overflow-hidden">

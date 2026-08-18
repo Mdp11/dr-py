@@ -367,10 +367,15 @@ four bundle routes is `lib/api/artifact-bundle.ts`.
   (`dependency`) and surfacing a dangling-ref count. The name filter hides
   non-matching rows without unchecking them (`+N selected not shown`).
   Confirming streams `POST /artifacts/export` to a saved
-  `datarover.artifact-bundle/v1` JSON file. The workspace tab strip's per-tab
-  export button (`Workspace.svelte`) opens the same dialog pre-seeded with
-  the active tab's artifact (`openExportArtifacts([seedId])`); the seed
-  clears when the dialog closes.
+  `datarover.artifact-bundle/v1` JSON file. Each artifact editor's own
+  toolbar carries a per-artifact export trigger (`ArtifactExportButton.svelte`,
+  dropped into `Table/TableView.svelte`, `Snippet/SnippetTab.svelte`,
+  `Navigation/NavigationBuilder.svelte` and `Export/CustomExportTab.svelte`;
+  the metamodel tab has none — it isn't artifact-backed) that opens the same
+  dialog pre-seeded with the tab's artifact (`openExportArtifacts([artifactId])`);
+  it renders only once the tab's artifact is committed (hidden for a draft or
+  a temp-id staged create — the export dialog intersects with COMMITTED
+  headers), and the seed clears when the dialog closes.
 - **Import** (`ImportArtifactsDialog.svelte`) — hidden from viewers in the
   Artifacts menu. Picking or dropping a bundle file runs
   `POST /artifacts/import/plan` for a stateless per-artifact plan

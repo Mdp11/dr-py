@@ -39,6 +39,7 @@
 	import SnippetConsole from './SnippetConsole.svelte';
 	import ElementContextRow from './ElementContextRow.svelte';
 	import SnippetDocsDialog from './SnippetDocsDialog.svelte';
+	import ArtifactExportButton from '$lib/components/ArtifactExportButton.svelte';
 
 	let { tabId }: { tabId: string } = $props();
 
@@ -240,6 +241,7 @@
 					Save{draft.dirty ? ' *' : ''}
 				</button>
 			{/if}
+			<ArtifactExportButton {tabId} />
 		</div>
 		{#if saveError}
 			<p class="px-3 py-1 text-xs text-destructive">{saveError}</p>

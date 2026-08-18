@@ -18,6 +18,7 @@
 	import NavigationNode from './NavigationNode.svelte';
 	import ResultsDock from './ResultsDock.svelte';
 	import ResizeHandle from '$lib/components/ResizeHandle.svelte';
+	import ArtifactExportButton from '$lib/components/ArtifactExportButton.svelte';
 
 	let { tabId }: { tabId: string } = $props();
 	$effect(() => {
@@ -135,6 +136,7 @@
 					>
 						Save as…
 					</button>
+					<ArtifactExportButton {tabId} />
 				</div>
 			{/if}
 		</div>
