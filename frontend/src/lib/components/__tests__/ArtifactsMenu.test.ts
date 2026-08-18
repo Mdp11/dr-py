@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import * as artifactsApi from '$lib/api/artifacts';
 import {
-	getArtifactDialogsHosted,
 	getExportArtifactsOpen,
 	getImportArtifactsOpen,
 	openExportArtifacts,
@@ -59,23 +58,10 @@ describe('ArtifactsMenu', () => {
 	});
 
 	// The export/import open flags are MODULE state and this menu is the only
-	// place their dialogs mount (workspace TopBar) — while the command palette
-	// mounts in the ROOT layout and can set the flags from anywhere. The menu
-	// therefore owns the flags' lifecycle: it registers as their host, clears
-	// any flag latched while no dialog was mounted, and closes its dialogs on
-	// the way out (browser Back with a dialog open) so nothing latches across
-	// project entries.
-	it('registers as the artifact-dialogs host while mounted', () => {
-		expect(getArtifactDialogsHosted()).toBe(false);
-		setProjectInfo({ role: 'editor', lockTtlSeconds: 300 });
-		app = mount(ArtifactsMenu, { target: host });
-		flushSync();
-		expect(getArtifactDialogsHosted()).toBe(true);
-		unmount(app);
-		app = null;
-		expect(getArtifactDialogsHosted()).toBe(false);
-	});
-
+	// place their dialogs mount (workspace TopBar), so it owns the flags'
+	// lifecycle: it clears any flag latched while no dialog was mounted, and
+	// closes its dialogs on the way out (browser Back with a dialog open) so
+	// nothing latches across project entries.
 	it('mounting clears dialog-open flags latched while no dialog was mounted', () => {
 		openExportArtifacts(['stale-seed']);
 		openImportArtifacts();

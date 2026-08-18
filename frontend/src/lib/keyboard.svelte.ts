@@ -6,20 +6,18 @@
  * destroy.
  *
  * Shortcuts:
- *   Cmd/Ctrl+K      open the command palette
  *   Cmd/Ctrl+S      open the diff drawer (save)
  *   Cmd/Ctrl+E      run validation
- *   Cmd/Ctrl+1/2/3  switch to Detail / Graph / Issues tabs
  *
  * When focus is inside an <input>, <textarea>, or [contenteditable], most
- * shortcuts are suppressed so they don't interfere with typing. Cmd+K and
- * Cmd+S are kept active everywhere (per task spec).
+ * shortcuts are suppressed so they don't interfere with typing. Cmd+S is
+ * kept active everywhere (per task spec).
  *
  * Pure matching helpers live in `./keyboard.ts` so they can be unit-tested
  * without dragging the Svelte rune compiler into vitest.
  */
 
-import { setActiveTab, setCommandPaletteOpen, setDiffDrawerOpen } from './state';
+import { setDiffDrawerOpen } from './state';
 import { isEditableTarget, matchShortcut, shortcutWorksInInputs } from './keyboard';
 import { runValidation } from './state/validate-action';
 
@@ -35,17 +33,11 @@ function handle(e: KeyboardEvent): void {
 	e.preventDefault();
 
 	switch (action.kind) {
-		case 'palette':
-			setCommandPaletteOpen(true);
-			return;
 		case 'save':
 			setDiffDrawerOpen(true);
 			return;
 		case 'validate':
 			void runValidation();
-			return;
-		case 'tab':
-			setActiveTab(action.tab);
 			return;
 	}
 }

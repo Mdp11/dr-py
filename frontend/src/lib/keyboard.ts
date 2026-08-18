@@ -6,8 +6,6 @@
  * `keyboard.svelte.ts` next to this file.
  */
 
-import type { WorkspaceTab } from './state';
-
 const EDITABLE_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT']);
 
 /**
@@ -21,11 +19,7 @@ export function isEditableTarget(el: Element | null): boolean {
 	return false;
 }
 
-export type ShortcutAction =
-	| { kind: 'palette' }
-	| { kind: 'save' }
-	| { kind: 'validate' }
-	| { kind: 'tab'; tab: WorkspaceTab };
+export type ShortcutAction = { kind: 'save' } | { kind: 'validate' };
 
 /**
  * Decide what shortcut (if any) the given event maps to.
@@ -36,19 +30,15 @@ export function matchShortcut(e: KeyboardEvent): ShortcutAction | null {
 	if (!mod) return null;
 	if (e.altKey) return null;
 	const k = e.key.toLowerCase();
-	if (k === 'k') return { kind: 'palette' };
 	if (k === 's') return { kind: 'save' };
 	if (k === 'e') return { kind: 'validate' };
-	if (k === '1') return { kind: 'tab', tab: 'detail' };
-	if (k === '2') return { kind: 'tab', tab: 'graph' };
-	if (k === '3') return { kind: 'tab', tab: 'issues' };
 	return null;
 }
 
 /**
  * True if the given shortcut should still fire when focus is in an editable
- * element. Cmd+S (save) and Cmd+K (palette) are the only two.
+ * element. Cmd+S (save) is the only one.
  */
 export function shortcutWorksInInputs(action: ShortcutAction): boolean {
-	return action.kind === 'palette' || action.kind === 'save';
+	return action.kind === 'save';
 }
