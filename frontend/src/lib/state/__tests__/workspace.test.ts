@@ -179,6 +179,19 @@ describe('nullable active tab', () => {
 		expect(getActiveTab()).toBe(c); // index-1 clamped to 0 of what remains
 	});
 
+	it('closing a non-edge active tab focuses its true predecessor, not the first tab', () => {
+		// Discriminates the idx-1 rule from a naive "always focus index 0"
+		// implementation: closing c (index 2) out of [a,b,c,d] must land on b,
+		// not a — a naive always-first rule would wrongly return a here.
+		openArtifactTab('table', { artifactId: 'A', title: 'A' });
+		const b = openArtifactTab('table', { artifactId: 'B', title: 'B' });
+		const c = openArtifactTab('table', { artifactId: 'C', title: 'C' });
+		openArtifactTab('table', { artifactId: 'D', title: 'D' });
+		setActiveTab(c);
+		closeTab(c);
+		expect(getActiveTab()).toBe(b);
+	});
+
 	it('closing the last tab yields null', () => {
 		const a = openArtifactTab('table', { artifactId: 'A', title: 'A' });
 		closeTab(a);
