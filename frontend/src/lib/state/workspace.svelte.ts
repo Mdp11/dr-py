@@ -1,8 +1,8 @@
 /**
- * Workspace tab strip: three fixed built-ins (detail/graph/issues) plus
- * dynamic closable tabs (navigation and table editors; diagrams later).
- * The active id is either a built-in literal or a dynamic tab id, so existing
- * `setActiveTab('detail')` call sites are untouched. Saved-artifact tabs are
+ * Workspace tab strip: dynamic-tabs-only (navigation and table editors, the
+ * metamodel editor, and the Issues panel — all closable). There is no fixed
+ * built-in tab any more: a `null` active id means "nothing open", and the
+ * Workspace renders a placeholder in that state. Saved-artifact tabs are
  * persisted per project under `ui.workspace.tabs.<projectId>`; DRAFT tabs are
  * memory-only by design — that means `artifactId === null` AND a TEMP id (a
  * staged-but-uncommitted create, see {@link repointTabArtifact}): the staged
@@ -13,11 +13,10 @@
 import { isTempId } from './ops';
 
 export type WorkspaceTab = string;
-export const BUILTIN_TABS = ['detail', 'graph', 'issues'] as const;
 
 export interface DynamicTab {
 	id: string;
-	kind: 'navigation' | 'table' | 'snippet' | 'metamodel' | 'custom_export';
+	kind: 'navigation' | 'table' | 'snippet' | 'metamodel' | 'custom_export' | 'issues';
 	artifactId: string | null;
 	title: string;
 }
@@ -27,15 +26,16 @@ const PREFIX = {
 	table: 'tbl',
 	snippet: 'snip',
 	metamodel: 'mm',
-	custom_export: 'exp'
+	custom_export: 'exp',
+	issues: 'issues'
 } as const;
 
-let _activeTab: string = $state('detail');
+let _activeTab: string | null = $state(null);
 let _tabs = $state<DynamicTab[]>([]);
 let _projectId: string | null = null;
 let _draftSeq = 0;
 
-export function getActiveTab(): string {
+export function getActiveTab(): string | null {
 	return _activeTab;
 }
 export function setActiveTab(t: string): void {
@@ -90,9 +90,36 @@ export function openMetamodelTab(): string {
 	return METAMODEL_TAB_ID;
 }
 
+const ISSUES_TAB_ID = 'issues:panel';
+
+/** Open (or focus) the singleton Issues tab. Not artifact-backed; dedupe is
+ * by KIND, mirroring openMetamodelTab. */
+export function openIssuesTab(): string {
+	const existing = _tabs.find((t) => t.kind === 'issues');
+	if (existing) {
+		_activeTab = existing.id;
+		persist();
+		return existing.id;
+	}
+	_tabs = [..._tabs, { id: ISSUES_TAB_ID, kind: 'issues', artifactId: null, title: 'Issues' }];
+	_activeTab = ISSUES_TAB_ID;
+	persist();
+	return ISSUES_TAB_ID;
+}
+
+/**
+ * Close a tab. If it was active, focus its PREDECESSOR in strip order — the
+ * tab at index-1, clamped to the start so closing the first tab focuses the
+ * new first. This mirrors how browser/editor tab strips keep focus near where
+ * the closed tab was rather than jumping to a fixed home. An empty strip
+ * leaves the active tab `null` — "nothing open".
+ */
 export function closeTab(id: string): void {
+	const idx = _tabs.findIndex((t) => t.id === id);
 	_tabs = _tabs.filter((t) => t.id !== id);
-	if (_activeTab === id) _activeTab = 'detail';
+	if (_activeTab === id) {
+		_activeTab = _tabs.length > 0 ? _tabs[Math.max(0, idx - 1)].id : null;
+	}
 	persist();
 }
 
@@ -136,9 +163,10 @@ function storageKey(): string | null {
 /** True when a tab is worth persisting: it is bound to an artifact the SERVER
  * knows about. See the module docstring for why a temp id is not one. */
 function persistable(t: DynamicTab): boolean {
-	// The metamodel tab has no artifact but is a stable singleton — restoring
-	// it is cheap and its draft persists independently (ui.metamodel.draft.*).
-	if (t.kind === 'metamodel') return true;
+	// The metamodel and issues tabs have no artifact but are stable singletons
+	// — restoring them is cheap (the metamodel draft persists independently
+	// via ui.metamodel.draft.*; the issues tab has no draft of its own).
+	if (t.kind === 'metamodel' || t.kind === 'issues') return true;
 	return t.artifactId !== null && !isTempId(t.artifactId);
 }
 
@@ -159,26 +187,23 @@ export function initWorkspaceTabs(projectId: string): void {
 		const raw = localStorage.getItem(`ui.workspace.tabs.${projectId}`);
 		if (!raw) {
 			_tabs = [];
-			_activeTab = 'detail';
+			_activeTab = null;
 			return;
 		}
-		const parsed = JSON.parse(raw) as { active?: string; tabs?: DynamicTab[] };
+		const parsed = JSON.parse(raw) as { active?: string | null; tabs?: DynamicTab[] };
 		_tabs = (parsed.tabs ?? [])
 			.filter(persistable)
 			.map((t) => ({ ...t, kind: t.kind ?? 'navigation' }));
-		const active = parsed.active ?? 'detail';
-		_activeTab =
-			(BUILTIN_TABS as readonly string[]).includes(active) || _tabs.some((t) => t.id === active)
-				? active
-				: 'detail';
+		const active = parsed.active ?? null;
+		_activeTab = active !== null && _tabs.some((t) => t.id === active) ? active : null;
 	} catch {
 		_tabs = [];
-		_activeTab = 'detail';
+		_activeTab = null;
 	}
 }
 
 export function resetWorkspaceTabs(): void {
-	_activeTab = 'detail';
+	_activeTab = null;
 	_tabs = [];
 	_projectId = null;
 	_draftSeq = 0;

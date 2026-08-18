@@ -6,6 +6,7 @@ import {
 	getDynamicTabs,
 	initWorkspaceTabs,
 	openArtifactTab,
+	openIssuesTab,
 	openMetamodelTab,
 	openNavigationTab,
 	repointTabArtifact,
@@ -19,11 +20,6 @@ beforeEach(() => {
 });
 
 describe('dynamic workspace tabs', () => {
-	it('defaults to detail with no dynamic tabs', () => {
-		expect(getActiveTab()).toBe('detail');
-		expect(getDynamicTabs()).toEqual([]);
-	});
-
 	it('opens, activates, and dedupes navigation tabs by artifact', () => {
 		initWorkspaceTabs('p1');
 		const id = openNavigationTab({ artifactId: 'a1', title: 'Sensors' });
@@ -47,11 +43,11 @@ describe('dynamic workspace tabs', () => {
 		expect(getDynamicTabs().find((t) => t.artifactId === 'saved1')?.id).toBe('tbl:saved1');
 	});
 
-	it('closing the active tab falls back to detail', () => {
+	it('closing the active tab yields null when it was the only tab', () => {
 		initWorkspaceTabs('p1');
 		const id = openNavigationTab({ artifactId: null, title: 'New navigation' });
 		closeTab(id);
-		expect(getActiveTab()).toBe('detail');
+		expect(getActiveTab()).toBeNull();
 		expect(getDynamicTabs()).toEqual([]);
 	});
 
@@ -83,7 +79,7 @@ describe('dynamic workspace tabs', () => {
 		// module-level state must not leak from p1 into p2.
 		initWorkspaceTabs('p2');
 		expect(getDynamicTabs()).toEqual([]);
-		expect(getActiveTab()).toBe('detail');
+		expect(getActiveTab()).toBeNull();
 	});
 
 	it('repointTabArtifact moves the record without moving the tab key', () => {
@@ -131,9 +127,10 @@ describe('metamodel singleton tab', () => {
 		const id = openMetamodelTab();
 		expect(id).toBe('mm:editor');
 		expect(getDynamicTabs()).toHaveLength(1);
-		setActiveTab('detail');
+		const other = openNavigationTab({ artifactId: 'a1', title: 'Other' });
+		setActiveTab(other);
 		expect(openMetamodelTab()).toBe(id);
-		expect(getDynamicTabs()).toHaveLength(1);
+		expect(getDynamicTabs()).toHaveLength(2);
 		expect(getActiveTab()).toBe(id);
 	});
 
@@ -150,6 +147,76 @@ describe('metamodel singleton tab', () => {
 		const id = openMetamodelTab();
 		closeTab(id);
 		expect(getDynamicTabs()).toEqual([]);
-		expect(getActiveTab()).toBe('detail');
+		expect(getActiveTab()).toBeNull();
+	});
+});
+
+describe('issues tab', () => {
+	it('openIssuesTab creates a singleton and focuses it', () => {
+		const id = openIssuesTab();
+		expect(id).toBe('issues:panel');
+		expect(getActiveTab()).toBe('issues:panel');
+		const again = openIssuesTab();
+		expect(again).toBe('issues:panel');
+		expect(getDynamicTabs().filter((t) => t.kind === 'issues')).toHaveLength(1);
+	});
+});
+
+describe('nullable active tab', () => {
+	it('starts with no active tab', () => {
+		expect(getActiveTab()).toBeNull();
+		expect(getDynamicTabs()).toEqual([]);
+	});
+
+	it('closing the active tab focuses the previous tab in strip order', () => {
+		const a = openArtifactTab('table', { artifactId: 'A', title: 'A' });
+		const b = openArtifactTab('table', { artifactId: 'B', title: 'B' });
+		const c = openArtifactTab('table', { artifactId: 'C', title: 'C' });
+		setActiveTab(b);
+		closeTab(b);
+		expect(getActiveTab()).toBe(a);
+		closeTab(a);
+		expect(getActiveTab()).toBe(c); // index-1 clamped to 0 of what remains
+	});
+
+	it('closing a non-edge active tab focuses its true predecessor, not the first tab', () => {
+		// Discriminates the idx-1 rule from a naive "always focus index 0"
+		// implementation: closing c (index 2) out of [a,b,c,d] must land on b,
+		// not a — a naive always-first rule would wrongly return a here.
+		openArtifactTab('table', { artifactId: 'A', title: 'A' });
+		const b = openArtifactTab('table', { artifactId: 'B', title: 'B' });
+		const c = openArtifactTab('table', { artifactId: 'C', title: 'C' });
+		openArtifactTab('table', { artifactId: 'D', title: 'D' });
+		setActiveTab(c);
+		closeTab(c);
+		expect(getActiveTab()).toBe(b);
+	});
+
+	it('closing the last tab yields null', () => {
+		const a = openArtifactTab('table', { artifactId: 'A', title: 'A' });
+		closeTab(a);
+		expect(getActiveTab()).toBeNull();
+	});
+
+	it('closing an inactive tab leaves the active tab alone', () => {
+		const a = openArtifactTab('table', { artifactId: 'A', title: 'A' });
+		const b = openArtifactTab('table', { artifactId: 'B', title: 'B' });
+		expect(getActiveTab()).toBe(b);
+		closeTab(a);
+		expect(getActiveTab()).toBe(b);
+	});
+
+	it('restore of a legacy builtin active id falls back to null', () => {
+		localStorage.setItem('ui.workspace.tabs.p1', JSON.stringify({ active: 'detail', tabs: [] }));
+		initWorkspaceTabs('p1');
+		expect(getActiveTab()).toBeNull();
+	});
+
+	it('the issues tab persists and restores', () => {
+		initWorkspaceTabs('p2');
+		openIssuesTab();
+		resetWorkspaceTabs();
+		initWorkspaceTabs('p2');
+		expect(getDynamicTabs().some((t) => t.kind === 'issues')).toBe(true);
 	});
 });

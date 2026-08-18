@@ -27,7 +27,7 @@ describe('validateModel', () => {
 		const result = await validateModel({ inline }, cfg);
 		expect(body).toEqual({ inline, scope: undefined });
 		expect(result).toEqual([
-			{ severity: 'error', message: 'oops', target_ids: ['e1'], origin: 'on_server' }
+			{ severity: 'error', message: 'oops', target_ids: ['e1'], check: '', origin: 'on_server' }
 		]);
 	});
 

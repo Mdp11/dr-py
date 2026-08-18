@@ -75,7 +75,10 @@ test('History: list, diff, and revert a commit', async ({ page }) => {
 	// 2. Create a Block element and make the FIRST commit.
 	await page.getByRole('button', { name: 'New element' }).click();
 	await page.getByRole('button', { name: 'Block', exact: true }).click();
-	await expect(page.getByRole('heading', { name: 'Block' })).toBeVisible();
+	// The new element's stereotype shows in the Inspector header, which is
+	// deliberately a <p> rather than a heading — the <h2> this used to match
+	// belonged to the retired DetailView tab.
+	await expect(page.getByTestId('inspector-stereotype')).toHaveText('Block');
 
 	const inspector = page.getByTestId('inspector');
 	const nameInput = inspector.locator('input[type="text"]').first();
@@ -112,9 +115,8 @@ test('History: list, diff, and revert a commit', async ({ page }) => {
 	await commitStaged();
 	// commit B is now at model_rev N
 
-	// 4. Open the History drawer via the TopBar overflow menu's "History" item.
-	await page.getByRole('button', { name: 'More actions' }).click();
-	await page.getByRole('menuitem', { name: 'History', exact: true }).click();
+	// 4. Open the History drawer via the TopBar's "History" control.
+	await page.getByRole('button', { name: 'History', exact: true }).click();
 
 	const historyDrawer = page.getByRole('dialog', { name: /commit history/i });
 	await expect(historyDrawer).toBeVisible({ timeout: 10_000 });

@@ -45,6 +45,7 @@
 		newPropertyColumn,
 		newScriptColumn
 	} from '$lib/table/columns';
+	import ArtifactExportButton from '$lib/components/ArtifactExportButton.svelte';
 	import ColumnManager from './ColumnManager.svelte';
 	import ExportDialog from './ExportDialog.svelte';
 	import ScriptErrorsPanel from './ScriptErrorsPanel.svelte';
@@ -506,6 +507,7 @@
 						</DropdownMenu.Item>
 					</DropdownMenu.Content>
 				</DropdownMenu.Root>
+				<ArtifactExportButton {tabId} />
 				{#if editable}
 					<button
 						type="button"

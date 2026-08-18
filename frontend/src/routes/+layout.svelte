@@ -3,7 +3,6 @@
 	import { page } from '$app/stores';
 	import { QueryClient, QueryClientProvider } from '@tanstack/svelte-query';
 	import AppHeader from '$lib/components/AppHeader.svelte';
-	import CommandPalette from '$lib/components/CommandPalette.svelte';
 	import ConfirmHost from '$lib/components/ConfirmHost.svelte';
 	import ProgressOverlay from '$lib/components/ProgressOverlay.svelte';
 	import { installKeyboardShortcuts } from '$lib/keyboard.svelte';
@@ -39,7 +38,6 @@
 		<AppHeader />
 	{/if}
 	{@render children()}
-	<CommandPalette />
 	<ConfirmHost />
 	<ProgressOverlay />
 </QueryClientProvider>

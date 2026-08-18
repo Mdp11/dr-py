@@ -17,55 +17,43 @@ function fakeKey(opts: {
 
 describe('matchShortcut', () => {
 	it('returns null for plain key with no modifier', () => {
-		expect(matchShortcut(fakeKey({ key: 'k' }))).toBeNull();
-	});
-
-	it('matches Cmd+K to palette', () => {
-		expect(matchShortcut(fakeKey({ key: 'k', meta: true }))).toEqual({ kind: 'palette' });
-	});
-
-	it('matches Ctrl+K to palette', () => {
-		expect(matchShortcut(fakeKey({ key: 'k', ctrl: true }))).toEqual({ kind: 'palette' });
+		expect(matchShortcut(fakeKey({ key: 's' }))).toBeNull();
 	});
 
 	it('matches Cmd+S to save', () => {
 		expect(matchShortcut(fakeKey({ key: 's', meta: true }))).toEqual({ kind: 'save' });
 	});
 
+	it('matches Ctrl+S to save', () => {
+		expect(matchShortcut(fakeKey({ key: 's', ctrl: true }))).toEqual({ kind: 'save' });
+	});
+
 	it('matches Cmd+E to validate', () => {
 		expect(matchShortcut(fakeKey({ key: 'e', meta: true }))).toEqual({ kind: 'validate' });
 	});
 
-	it('matches Cmd+1/2/3 to tab switches', () => {
-		expect(matchShortcut(fakeKey({ key: '1', meta: true }))).toEqual({
-			kind: 'tab',
-			tab: 'detail'
-		});
-		expect(matchShortcut(fakeKey({ key: '2', meta: true }))).toEqual({ kind: 'tab', tab: 'graph' });
-		expect(matchShortcut(fakeKey({ key: '3', meta: true }))).toEqual({
-			kind: 'tab',
-			tab: 'issues'
-		});
-	});
-
 	it('ignores alt-modified keys', () => {
-		expect(matchShortcut(fakeKey({ key: 'k', meta: true, alt: true }))).toBeNull();
+		expect(matchShortcut(fakeKey({ key: 's', meta: true, alt: true }))).toBeNull();
 	});
 
 	it('is case insensitive', () => {
-		expect(matchShortcut(fakeKey({ key: 'K', meta: true }))).toEqual({ kind: 'palette' });
+		expect(matchShortcut(fakeKey({ key: 'S', meta: true }))).toEqual({ kind: 'save' });
+	});
+
+	it('does not match the removed shortcuts', () => {
+		for (const key of ['k', '1', '2', '3']) {
+			expect(matchShortcut(new KeyboardEvent('keydown', { key, metaKey: true }))).toBeNull();
+		}
 	});
 });
 
 describe('shortcutWorksInInputs', () => {
-	it('returns true for palette and save', () => {
-		expect(shortcutWorksInInputs({ kind: 'palette' })).toBe(true);
+	it('returns true for save', () => {
 		expect(shortcutWorksInInputs({ kind: 'save' })).toBe(true);
 	});
 
-	it('returns false for validate and tab', () => {
+	it('returns false for validate', () => {
 		expect(shortcutWorksInInputs({ kind: 'validate' })).toBe(false);
-		expect(shortcutWorksInInputs({ kind: 'tab', tab: 'detail' })).toBe(false);
 	});
 });
 

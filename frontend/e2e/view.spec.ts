@@ -91,6 +91,9 @@ test('view referencing a missing element produces a warning in the Issues panel'
 	});
 
 	await page.getByRole('button', { name: 'Validate' }).click();
+	// Issues is a CLOSABLE workspace tab now, not a fixed one: it does not exist
+	// until the top bar's Issues control opens it.
+	await page.getByRole('button', { name: 'Issues', exact: true }).click();
 	await page.getByRole('tab', { name: 'Issues' }).click();
 	await expect(page.getByText(/does-not-exist/).first()).toBeVisible();
 });

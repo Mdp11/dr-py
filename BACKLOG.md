@@ -27,8 +27,11 @@ spec's phase table (`R`). Anything older than the last few sessions is **unverif
 against current code** — confirm before acting on it. Line numbers drift; treat them as
 hints.
 
-Last updated: 2026-08-16 · repo head at time of writing: metamodel commit-flow feature
-branch (`feature/metamodel-commit-flow`), final task
+Last updated: 2026-08-18 · repo head at time of writing: `feat/top-bar-restructure`
+(metamodel commit-flow merged, plus the top-bar-restructure wave: P-10 and U-1 shipped,
+T-1 deleted). The 2026-08-18 additions are a batch of owner notes: P-10 gained five
+concrete sub-items, P-15 → P-21 and U-9 are new, and T-1 was retired as stale while
+verifying them.
 
 ---
 
@@ -165,9 +168,7 @@ gated at `role != viewer` rather than owner. Spec:
 notes in `frontend/README.md` ("Live metamodel editing" → "The diagram surface") and
 `CLAUDE.md`. **e2e coverage is still missing — see T-7.**
 
-### P-10 · Top bar restructure · `open`
-Main sections move to the top bar, and all editing moves inside tabs — so while creating
-a navigation or editing a table column, element browsing and search stay usable.
+### P-10 · Top bar restructure · `done` (2026-08-18, `feat/top-bar-restructure`) — all five sub-items shipped: the fixed Detail/Graph workspace tabs are deleted, Issues is now a closable singleton workspace tab opened from the top bar (with U-1's filter, below), the overflow menu emptied into eight flat top-bar controls (Artifacts · Issues · Compare · Apply CR · Edit Metamodel · Export · History · Settings), the command palette is deleted, and the per-artifact export button moved into each artifact editor's own toolbar.
 
 ### P-11 · Derived properties · `open` · design-heavy
 Properties attached to a stereotype whose value is **computed** from a navigation or a
@@ -246,6 +247,105 @@ change underneath it (P-4's generalization is adjacent); whether output is a zip
 that composes with P-13's per-element splitting; and whether it can reference navigations
 or only tables.
 
+### P-15 · Custom export: picker, file name and folder paths · `open` · follows P-14
+Three follow-ups on the shipped `custom_export` artefact (owner notes, 2026-08-18).
+Independent of each other: .1 is frontend-only, .2 and .3 touch the wire schema and
+`POST /exports/run`.
+
+**P-15.1 · A real add-table picker.** `Export/CustomExportTab.svelte:336-346` is a bare
+`<select>` with one `<option>` per table. Wanted: the visual treatment of
+`ExportArtifactsDialog.svelte`, plus **search-by-name with autocomplete** the way element
+search already works (`Sidebar/Search.svelte` is the typeahead to mirror). **F-11** lives
+in the same four lines — `usedRefs` (`:47-50`) filters out already-added tables, forbidding
+the duplicate entries the server explicitly supports — so settle it in the same pass.
+
+**P-15.2 · Override the exported file name.** `routes/exports.py:219` hardcodes
+`Content-Disposition: attachment; filename="{row.name}.zip"` — always the artefact's own
+name. Wanted: an explicit override in the custom export's options, defaulting to today's
+behaviour.
+
+**P-15.3 · A folder path per entry inside the zip.** An entry configured with
+`asd/qwe/ciao` lands its export under that path in the zip; unset means the archive root;
+entries sharing a prefix share the folders (free — zip members are flat path strings).
+`routes/exports.py:191-217` already builds prefixed members, so the mechanism exists: a
+split entry nests under a folder named for the entry today. The care is entirely in the
+guard rails that code already documents at length — `sanitize_stem` is the **zip-slip
+boundary** and today sanitizes a single stem, not a multi-segment path, so a user-supplied
+path needs per-segment sanitizing plus `..`/absolute rejection, and `_dedupe` has to
+dedupe *within* a folder rather than globally.
+
+### P-16 · Export artefacts without committing · `open`
+Both a custom export run (owner item 8.3) and an ordinary artefact **bundle** export
+(item 10) should work against **staged, uncommitted** state. Today neither can: both read
+committed `ArtifactRow`s on the request's DB transaction, so an artefact that has never
+been committed cannot be exported at all, and an edited one silently exports its last
+committed version — the worse of the two failure modes. This is a design question rather
+than a patch: either the export routes learn to accept a client-supplied draft payload
+(and then must not trust it any more than any other client input — see how
+`importer.trust_artifacts` splits its two callers), or the client renders locally. Decide
+it alongside P-15, since "a custom export whose entries are still drafts" is exactly the
+case that prompted the note.
+
+### P-17 · Metamodel diagram: unbounded zoom-out with a level-of-detail mode · `open`
+On a big metamodel the canvas cannot be zoomed out far enough to see everything, and it
+should be able to — however small it gets. **Confirmed cause:**
+`Metamodel/MetamodelDiagram.svelte:373` renders `<SvelteFlow>` with no `minZoom`, so
+xyflow's default floor of `0.5` applies. Lowering/removing that floor is a one-prop fix
+and is worth doing regardless of the rest.
+
+The owner's preferred design goes further: past a zoom threshold, stop drawing full node
+detail and render each block as **just the stereotype name** plus its relationships, then
+show the hovered block's or arrow's name in a **tooltip near the cursor**. That is a
+render-mode switch inside the custom node/edge components keyed off the live viewport
+zoom, and it shares hit-testing and label lookup with **P-18** — build the two together.
+
+### P-18 · Metamodel diagram: hover highlighting · `open`
+Hovering a block highlights the block **and every arrow starting or ending on it**;
+hovering a relationship highlights that arrow **and the blocks at both of its ends**.
+Pure canvas presentation — no YAML write, no `mm` lease, no commit — so it stays inside
+`Metamodel/MetamodelDiagram.svelte` and the components under `Metamodel/diagram/`. The
+adjacency it needs is a by-product of work already done: `diagram-build.ts` derives every
+edge's endpoints from `rel.mappings` (never the `source`/`target` shorthand), so a
+block → arrows index falls out of the build rather than needing new derivation. Pairs with
+P-17.
+
+### P-19 · Collapsible sidebar sections · `open`
+The **Tree** panel should collapse: `Sidebar/ContainmentTree.svelte:1285` is a plain
+`<h2 class="microlabel">Tree</h2>` with no toggle. When a view is in place, the view tree
+and the not-in-view element pool should collapse too — the **"Not in view" pool already
+does** (`poolCollapsed`, persisted at `ui.treePoolCollapsed`, default collapsed, `:1437`),
+so half the request may already be satisfied and the rest has a local pattern to copy
+(`Sidebar/StagedSection.svelte:134-147` is a second example of the same header-button
+idiom). One caveat worth carrying over from the pool: collapsing is wired into paging
+(`sectionCollapsed` gates the fetch at `:645-651`), so a new collapse toggle on the tree
+proper has to decide whether it also stops the tree's own auto-load.
+
+### P-20 · "Staged elements" becomes a structured, collapsible Staging area · `open`
+`Sidebar/StagedSection.svelte` renders one flat **"Staged elements"** list (`:145`).
+Wanted:
+
+- renamed **Staging area**;
+- a subsection **Elements**, and a subsection **Artefacts** with one child section per
+  artefact kind — tables, navigations, snippets, custom exports — **including the
+  metamodel**;
+- every section **collapsible**, and rendered **only when it has at least one child**:
+  edit only elements and the panel shows only Elements; edit only tables and it shows only
+  Artefacts → Tables.
+
+Mostly a presentation refactor over selectors that already exist and already split this
+way — `DiffDrawer.svelte:80-113` derives exactly these families for the commit dialog
+(`getStagedDiff`, `getStagedArtifactEntries`, `getStagedViewEntries`,
+`getStagedMetamodelDepth` + `getStagedNodeMoves`), and `artifacts/kinds.ts` (C-6) is the
+per-kind label/icon source. Two things to decide: whether staged **view** ops become a
+fifth section (the owner's list doesn't name them, but they are a staged family and F-3
+was exactly the bug of forgetting them), and whether the commit dialog should render the
+same component so the two section lists cannot drift.
+
+### P-21 · More reticulating splines · `open` · no detail captured
+Verbatim from the owner's 2026-08-18 notes; no surface, scope or acceptance criterion was
+given, and I did not invent one. Filed so it isn't lost — needs a sentence from the owner
+before it can be sized.
+
 ### Already shipped — from the notes, no action needed
 - **Artefact leases** ("extend the Phase 4 lease mechanism so users can lock artifacts"):
   done end-to-end. `art:<id>` leases in `api/locking.py`, lock-verified through
@@ -320,13 +420,7 @@ the app**: the symptom is trustworthy, the cause is not established. Reproduce b
 fixing. Where I confirmed a cause against the code, the item says **confirmed** and names
 the line.
 
-### U-1 · Issues tab has no per-category filter or summary · `open` · enhancement
-Wanted: filter the issue list by error category, with a summary count per category across
-the top. `frontend/src/lib/components/Workspace/IssuesPanel.svelte`. Note that issues
-already carry `IssueCategory` (STRUCTURAL / CONFORMANCE) plus a per-validator identity, so
-"category" needs a definition first — the two-tier commit gate is probably the wrong axis
-for a user-facing filter; the validator (endpoint typing / multiplicity / facets /
-uniqueness / …) is probably the right one.
+### U-1 · Issues tab has no per-category filter or summary · `done` (2026-08-18, `feat/top-bar-restructure`) — issues now carry a `check` (producing-validator identity), and `IssuesPanel.svelte` (now the closable top-bar-opened Issues tab, P-10.2) renders a per-validator chip filter with counts alongside the existing origin filter.
 
 ### U-2 · xlsx autofit stops at a ceiling · `done` (2026-08-12)
 The `AUTOFIT_MAX_PX = 300` constant became the `xlsx_autofit_max_px` setting
@@ -371,6 +465,16 @@ Issues tab renders empty until an explicit **Validate**, which then reports the 
 count. So the count and the list read from different places. Almost certainly the same
 root cause as **F-4** (the issue list is only ever refreshed by `validate-action.ts`) —
 fix them together in `frontend/src/lib/state/validation.svelte.ts`.
+
+### U-9 · Commit panel content overflows its bounds · `open` · *2026-08-18*
+When there are validation issues — and per the owner possibly in other cases not yet
+pinned down — text and controls in the commit panel spill **outside** the panel instead of
+the panel growing to fit. `DiffDrawer.svelte:356` fixes the dialog at `max-w-2xl` and its
+two scroll regions at `max-h-[60vh]` (`:375`, `:585`), so any unwrapped long string — an
+issue message, a bare id, a `friendlyCommitError` sentence — has nowhere to go
+horizontally. Likely a missing `break-words`/`min-w-0` on the issue and entry rows plus a
+wider or content-sized dialog; reproduce with a commit carrying conformance issues, then
+check the other sections (long artefact names, long commit errors) for the same class.
 
 ---
 
@@ -583,10 +687,6 @@ this feature, not because anything here changed.
 ---
 
 ## 8. Test gaps, flakes, and a11y
-
-### T-1 · No `CommandPalette` test file exists at all · `open`
-Nothing matching in `frontend/src/lib/components/__tests__/`. The palette's
-`{#if canEdit()}` gating on `action:import-artifacts` ships with zero coverage.
 
 ### T-2 · Untested branches · `open`
 - `Workspace.svelte` close-path metamodel branch (redundant by design with the

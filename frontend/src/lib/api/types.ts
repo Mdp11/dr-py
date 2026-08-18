@@ -28,6 +28,7 @@ export const IssueSchema = z.object({
 	severity: z.enum(['error', 'warning']),
 	message: z.string(),
 	target_ids: z.array(z.string()),
+	check: z.string().default(''),
 	origin: z.enum(['on_server', 'uncommitted', 'resolved']).default('on_server')
 });
 export type Issue = z.infer<typeof IssueSchema>;

@@ -22,7 +22,7 @@ import {
 } from '../validation.svelte';
 
 function issue(message: string, owner: string): Issue {
-	return { severity: 'error', message, target_ids: [owner], origin: 'on_server' };
+	return { severity: 'error', message, target_ids: [owner], check: '', origin: 'on_server' };
 }
 
 function summaryAtRev(rev: number): void {

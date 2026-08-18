@@ -123,13 +123,13 @@ export {
 export { getEffectiveIssues } from './issue-source';
 export { indexIssues, worstSeverityFor, type IssueIndex } from './validation-index';
 export {
-	BUILTIN_TABS,
 	bindTabToArtifact,
 	closeTab,
 	getActiveTab,
 	getDynamicTabs,
 	initWorkspaceTabs,
 	openArtifactTab,
+	openIssuesTab,
 	openMetamodelTab,
 	openNavigationTab,
 	repointTabArtifact,
@@ -150,8 +150,6 @@ export {
 	toggleType
 } from './filters.svelte';
 export {
-	getArtifactDialogsHosted,
-	getCommandPaletteOpen,
 	getDiffDrawerOpen,
 	getExportArtifactsOpen,
 	getExportArtifactsSeed,
@@ -159,8 +157,6 @@ export {
 	getImportArtifactsOpen,
 	openExportArtifacts,
 	openImportArtifacts,
-	setArtifactDialogsHosted,
-	setCommandPaletteOpen,
 	setDiffDrawerOpen,
 	setExportArtifactsOpen,
 	setImportArtifactsOpen,

@@ -1,12 +1,12 @@
 /**
- * UI open-state store for cross-component dialogs (diff drawer, command palette).
+ * UI open-state store for cross-component dialogs (diff drawer, artifact
+ * export/import dialogs, history drawer).
  *
  * Exposed as accessor functions to match the convention used in the other
  * `*.svelte.ts` stores in this folder.
  */
 
 let _diffDrawerOpen: boolean = $state(false);
-let _commandPaletteOpen: boolean = $state(false);
 
 export function getDiffDrawerOpen(): boolean {
 	return _diffDrawerOpen;
@@ -14,14 +14,6 @@ export function getDiffDrawerOpen(): boolean {
 
 export function setDiffDrawerOpen(open: boolean): void {
 	_diffDrawerOpen = open;
-}
-
-export function getCommandPaletteOpen(): boolean {
-	return _commandPaletteOpen;
-}
-
-export function setCommandPaletteOpen(open: boolean): void {
-	_commandPaletteOpen = open;
 }
 
 let _historyDrawerOpen: boolean = $state(false);
@@ -35,28 +27,19 @@ export function setHistoryDrawerOpen(open: boolean): void {
 }
 
 // Artifact export/import dialogs (mounted once in ArtifactsMenu, opened from
-// three surfaces: the TopBar menu, the command palette, and the workspace tab
-// strip's per-artifact export button — which passes a seed selection).
-// True while ArtifactsMenu — the workspace TopBar component that hosts
-// ExportArtifactsDialog/ImportArtifactsDialog — is mounted. The command
-// palette mounts in the ROOT layout (Cmd+K works on /projects too) and gates
-// its artifact actions on this: the open flags below are module state, so
-// setting them while no dialog is mounted would latch them with nothing to
-// reset them, popping the dialog open unprompted on the next project entry.
-// Gating on "a model is loaded" is NOT equivalent: the model store is never
-// reset on leaving a project (so it stays truthy on /projects after any
-// visit), and a metamodel-only project has no summary while its menu and
-// dialogs are mounted and export works.
-let _artifactDialogsHosted: boolean = $state(false);
-
-export function getArtifactDialogsHosted(): boolean {
-	return _artifactDialogsHosted;
-}
-
-export function setArtifactDialogsHosted(hosted: boolean): void {
-	_artifactDialogsHosted = hosted;
-}
-
+// two surfaces: the TopBar Artifacts menu and each artifact editor's own
+// toolbar export button — which passes a seed selection). Both surfaces
+// live inside the workspace, so the dialogs are only ever opened while
+// ArtifactsMenu is mounted; the open flags below are still module state
+// (not local to ArtifactsMenu) purely so an editor toolbar's export button
+// can reach them without prop-drilling through the workspace tree.
+//
+// ArtifactsMenu owns the flags' lifecycle regardless: it clears both on
+// mount (a flag latched by a stale render before the dialogs existed must
+// not pop a dialog open on project entry) and again on unmount (leaving the
+// workspace with a dialog open — e.g. browser Back — must not carry the
+// open flag into the next project entry). See the lifecycle comment in
+// ArtifactsMenu.svelte; that guard is unchanged and still load-bearing.
 let _exportArtifactsOpen: boolean = $state(false);
 let _exportArtifactsSeed: string[] = $state([]);
 let _importArtifactsOpen: boolean = $state(false);

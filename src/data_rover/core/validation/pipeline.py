@@ -21,6 +21,12 @@ class Validator(Protocol):
     :meth:`validate_global`, which runs once per validation run.
     """
 
+    #: stable identity stamped onto every issue this validator produces
+    #: (see `_stamped`); one of the registered check names, e.g.
+    #: "multiplicity", "facets" — Task 7's per-validator chip filter keys
+    #: off this exact string.
+    check_name: str
+
     def validate_element(self, model, el) -> list[Issue]: ...
     def validate_relationship(self, model, rel) -> list[Issue]: ...
     def validate_global(self, model, scope: Scope) -> list[Issue]: ...
@@ -70,6 +76,10 @@ class EntityValidator:
     must not be shared concurrently across models with different metamodels.
     """
 
+    #: "" (unset) for anonymous/test validators; a concrete validator that
+    #: wants its issues stamped declares this as a class attribute.
+    check_name: str = ""
+
     def validate_element(self, model, el) -> list[Issue]:
         return []
 
@@ -81,6 +91,20 @@ class EntityValidator:
 
     def validate(self, model, scope: Scope | None = None) -> list[Issue]:
         return ValidationPipeline([self]).validate(model, scope)
+
+
+def _stamped(validator: Validator, issues: list[Issue]) -> list[Issue]:
+    """Stamp the producing validator's identity onto unset `check` fields.
+
+    Central so the ~20 Issue construction sites stay untouched and a new
+    validator gets stamping for free by declaring `check_name`.
+    """
+    name = getattr(validator, "check_name", "")
+    if name:
+        for issue in issues:
+            if not issue.check:
+                issue.check = name
+    return issues
 
 
 class ValidationPipeline:
@@ -113,25 +137,35 @@ class ValidationPipeline:
         if scope.ids is None:
             for el in model.elements.values():
                 for validator in validators:
-                    issues.extend(validator.validate_element(model, el))
+                    issues.extend(
+                        _stamped(validator, validator.validate_element(model, el))
+                    )
             for rel in model.relationships.values():
                 for validator in validators:
-                    issues.extend(validator.validate_relationship(model, rel))
+                    issues.extend(
+                        _stamped(validator, validator.validate_relationship(model, rel))
+                    )
         else:
             for entity_id in scope.ids:
                 el = model.elements.get(entity_id)
                 if el is not None:
                     for validator in validators:
-                        issues.extend(validator.validate_element(model, el))
+                        issues.extend(
+                            _stamped(validator, validator.validate_element(model, el))
+                        )
                     continue
                 rel = model.relationships.get(entity_id)
                 if rel is not None:
                     for validator in validators:
-                        issues.extend(validator.validate_relationship(model, rel))
+                        issues.extend(
+                            _stamped(
+                                validator, validator.validate_relationship(model, rel)
+                            )
+                        )
                 # ids resolving to neither are silently skipped (the entity may
                 # have been deleted since the scope was computed)
         for validator in validators:
-            issues.extend(validator.validate_global(model, scope))
+            issues.extend(_stamped(validator, validator.validate_global(model, scope)))
         return issues
 
 

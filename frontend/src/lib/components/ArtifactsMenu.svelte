@@ -5,7 +5,6 @@
 		canEdit,
 		openExportArtifacts,
 		openImportArtifacts,
-		setArtifactDialogsHosted,
 		setExportArtifactsOpen,
 		setImportArtifactsOpen
 	} from '$lib/state';
@@ -15,23 +14,20 @@
 	const editable = $derived(canEdit());
 
 	// This menu is the ONLY place the export/import dialogs mount, but their
-	// open flags are module state writable from anywhere (command palette in
-	// the root layout, the per-tab export button) — so this component owns
-	// the flags' lifecycle. Clearing them here in INIT (synchronously, before
-	// the child dialogs below are even created) guarantees a flag latched
-	// while no dialog was mounted cannot pop a dialog open on project entry;
-	// no legitimate flow opens these dialogs before this menu mounts.
+	// open flags are module state writable from anywhere (the per-tab export
+	// button) — so this component owns the flags' lifecycle. Clearing them
+	// here in INIT (synchronously, before the child dialogs below are even
+	// created) guarantees a flag latched while no dialog was mounted cannot
+	// pop a dialog open on project entry; no legitimate flow opens these
+	// dialogs before this menu mounts.
 	setExportArtifactsOpen(false);
 	setImportArtifactsOpen(false);
 
 	// …and clear them again on the way OUT: leaving the workspace with a
 	// dialog open (browser Back) must not carry the open flag into the next
-	// project entry. The hosted signal is what the command palette gates its
-	// artifact actions on.
+	// project entry.
 	$effect(() => {
-		setArtifactDialogsHosted(true);
 		return () => {
-			setArtifactDialogsHosted(false);
 			setExportArtifactsOpen(false);
 			setImportArtifactsOpen(false);
 		};

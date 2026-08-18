@@ -18,6 +18,7 @@
 	import NavigationNode from './NavigationNode.svelte';
 	import ResultsDock from './ResultsDock.svelte';
 	import ResizeHandle from '$lib/components/ResizeHandle.svelte';
+	import ArtifactExportButton from '$lib/components/ArtifactExportButton.svelte';
 
 	let { tabId }: { tabId: string } = $props();
 	$effect(() => {
@@ -117,6 +118,7 @@
 			>
 				Open as table
 			</button>
+			<ArtifactExportButton {tabId} />
 			{#if editable}
 				<div class="flex items-center gap-2">
 					<button

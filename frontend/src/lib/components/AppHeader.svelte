@@ -30,10 +30,6 @@
 		{/if}
 	</div>
 	<div class="flex items-center gap-3">
-		<kbd
-			class="rounded border border-border px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/70"
-			title="Command palette">⌘K</kbd
-		>
 		<span class="text-xs text-muted-foreground">{user?.email}</span>
 		<Button variant="ghost" size="sm" class="h-7 text-xs" onclick={onLogout}>Sign out</Button>
 	</div>

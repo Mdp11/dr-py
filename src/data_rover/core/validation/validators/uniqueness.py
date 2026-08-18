@@ -23,6 +23,8 @@ class UniquenessValidator(EntityValidator):
     the group member that comes first in ``model.elements`` insertion order.
     """
 
+    check_name = "uniqueness"
+
     def validate_global(self, model, scope: Scope) -> list[Issue]:
         indexes = model.indexes
         if not indexes.duplicate_keys:

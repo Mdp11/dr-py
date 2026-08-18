@@ -77,6 +77,14 @@ vi.mock('$lib/state', () => ({
 	canEdit: () => h.editable,
 	getMetamodel: () => null,
 	ensureTableDraft: vi.fn(async () => {}),
+	// ArtifactExportButton's dependencies — the toolbar mounts it unconditionally
+	// now that the tab-strip export button is gone (Task 5). Mirrors h.draft's
+	// static id/artifactId/name (typed `unknown` above, so restated as literals
+	// rather than read off it).
+	getDynamicTabs: () => [
+		{ id: 'tbl:draft:1', kind: 'table' as const, artifactId: 'a1', title: 'My Table' }
+	],
+	openExportArtifacts: vi.fn(),
 	getTableDraft: () => h.draft,
 	getTableLockHolder: () => h.lockHolder,
 	retryTableLock: vi.fn(),

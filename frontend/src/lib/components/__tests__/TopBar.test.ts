@@ -132,7 +132,7 @@ describe('TopBar', () => {
 		it('an artifact-only staged batch enables Commit and counts as a change', () => {
 			// The whole slice hangs off this: an artifact edit stages nothing in the
 			// MODEL buffer, so a Commit gate that only summed getStagedChangeCount()
-			// would leave the drawer reachable only via the command palette.
+			// would leave the commit drawer unreachable for such a batch.
 			vi.mocked(getModelSummary).mockReturnValue(SUMMARY as never);
 			stageArtifactCreate('navigation', 'N', {}, null);
 
@@ -146,32 +146,21 @@ describe('TopBar', () => {
 		});
 	});
 
-	// The old "Swap Metamodel" drawer is gone; the overflow menu now opens the
-	// in-app metamodel editor tab instead.
-	describe('Edit Metamodel item', () => {
-		function openOverflowMenu(): void {
-			document.querySelector<HTMLButtonElement>('[aria-label="More actions"]')!.click();
-			flushSync();
-		}
-
-		function metamodelItem(): HTMLElement | undefined {
-			return [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
-				(n) => n.textContent?.trim() === 'Edit Metamodel'
-			);
-		}
-
+	// The old "Swap Metamodel" drawer is gone; the flat Edit Metamodel button
+	// (promoted from the retired overflow menu — P-10.3) opens the in-app
+	// metamodel editor tab instead.
+	describe('Edit Metamodel button', () => {
 		it('opens the metamodel tab and offers no Swap Metamodel entry', () => {
 			vi.mocked(getMetamodel).mockReturnValue({ elements: [], relationships: [] } as never);
 
 			const c = mount(TopBar, { target: document.body });
 			flushSync();
-			openOverflowMenu();
 
 			expect(document.body.textContent).toContain('Edit Metamodel');
 			expect(document.body.textContent).not.toContain('Swap Metamodel');
 			expect(getDynamicTabs()).toHaveLength(0);
 
-			metamodelItem()!.click();
+			findButton(/edit metamodel/i)!.click();
 			flushSync();
 
 			expect(getDynamicTabs().some((t) => t.kind === 'metamodel')).toBe(true);
@@ -182,9 +171,57 @@ describe('TopBar', () => {
 		it('is disabled with no metamodel loaded', () => {
 			const c = mount(TopBar, { target: document.body });
 			flushSync();
-			openOverflowMenu();
 
-			expect(metamodelItem()?.getAttribute('aria-disabled')).toBe('true');
+			expect(findButton(/edit metamodel/i)?.disabled).toBe(true);
+
+			unmount(c);
+		});
+	});
+
+	// P-10.3: the three-dots overflow menu is retired — its items are now
+	// flat first-class controls in the left nav, and the ⌘K hint is gone from
+	// this bar along with the palette it used to advertise.
+	describe('promoted overflow-menu controls (P-10.3)', () => {
+		it('renders the promoted controls and no overflow menu', () => {
+			const c = mount(TopBar, { target: document.body });
+			flushSync();
+
+			for (const label of [
+				'Issues',
+				'Compare',
+				'Apply CR',
+				'Edit Metamodel',
+				'Export',
+				'History',
+				'Settings'
+			]) {
+				expect(document.body.textContent).toContain(label);
+			}
+			expect(document.querySelector('[aria-label="More actions"]')).toBeNull();
+			expect(document.querySelector('[title="Command palette"]')).toBeNull();
+
+			unmount(c);
+		});
+
+		it('Issues opens the issues tab', () => {
+			const c = mount(TopBar, { target: document.body });
+			flushSync();
+
+			findButton(/issues/i)!.click();
+			flushSync();
+
+			expect(getDynamicTabs().some((t) => t.kind === 'issues')).toBe(true);
+
+			unmount(c);
+		});
+
+		it('Edit Metamodel and Export are disabled without a metamodel/model', () => {
+			// getMetamodel/getModelSummary default to null via the afterEach reset.
+			const c = mount(TopBar, { target: document.body });
+			flushSync();
+
+			expect(findButton(/edit metamodel/i)?.disabled).toBe(true);
+			expect(findButton(/export/i)?.disabled).toBe(true);
 
 			unmount(c);
 		});

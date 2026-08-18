@@ -18,6 +18,8 @@ def _count(value) -> int:
 
 
 class MultiplicityValidator(EntityValidator):
+    check_name = "multiplicity"
+
     def __init__(self) -> None:
         # per-type memos keeping the per-entity hot path free of metamodel
         # lookups (which go through pydantic private-attribute access);

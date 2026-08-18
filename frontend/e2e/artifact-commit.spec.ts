@@ -106,8 +106,7 @@ test('artifact lock → edit → commit round-trip', async ({ page }) => {
 	await expect(row.locator('[data-staged-state]')).toHaveCount(0);
 
 	// The commit reached the journal under our message.
-	await page.getByRole('button', { name: 'More actions' }).click();
-	await page.getByRole('menuitem', { name: 'History', exact: true }).click();
+	await page.getByRole('button', { name: 'History', exact: true }).click();
 	const historyDrawer = page.getByRole('dialog', { name: /commit history/i });
 	await expect(historyDrawer.locator('[data-testid="commit-row"]').first()).toContainText(
 		commitMessage,
