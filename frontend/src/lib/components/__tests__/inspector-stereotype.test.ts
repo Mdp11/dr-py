@@ -46,6 +46,13 @@ it('shows the selected element stereotype (type_name) in the header', () => {
 });
 
 it('shows the selected relationship stereotype in the header', () => {
+	// Seed the endpoints too: a relationship selection now renders source/target
+	// navigation buttons, whose cache-or-fetch would otherwise hit the network
+	// (the MSW server runs with onUnhandledRequest: 'error').
+	seedElements([
+		{ id: 'e1', type_name: 'Pump', properties: { name: 'P-101' }, rev: 1 },
+		{ id: 'e2', type_name: 'Tank', properties: { name: 'T-9' }, rev: 1 }
+	]);
 	seedRelationships([
 		{ id: 'r1', type_name: 'Feeds', source_id: 'e1', target_id: 'e2', properties: {}, rev: 1 }
 	]);

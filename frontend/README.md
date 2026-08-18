@@ -89,6 +89,14 @@ The UI is a fixed grid:
   (`editLock`); **Unlock** releases my lease (`discardElement`), confirming first
   when the element has staged edits (they are discarded); a peer's lock shows as
   a disabled "Locked by …" badge.
+  Beside it sits the **Delete** action — the only element-deletion trigger in
+  the app: confirm → `deleteLock` (DELETE intent) → staged `delete_element`,
+  then deselect. It is disabled for viewers and while a peer holds the
+  element's lock, since neither can take the lease the delete needs.
+  A relationship selection instead gets a **source → target** pair of buttons
+  under the stereotype header: the Relationships section is element-only, so
+  without them a relationship reached from an issue row would be a
+  navigational dead end.
 - **StatusBar** — model size, staged-change counter, validation summary,
   live/presence indicator, current model filename.
 
