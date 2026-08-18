@@ -5,7 +5,7 @@ import { adoptIssues, adoptSummary, resetModelStore } from '../model.svelte';
 import { clearOverlay, setOverlay } from '../validation.svelte';
 
 function issue(message: string, origin: Issue['origin'] = 'on_server'): Issue {
-	return { severity: 'error', message, target_ids: ['e1'], origin };
+	return { severity: 'error', message, target_ids: ['e1'], check: '', origin };
 }
 
 beforeEach(() => {

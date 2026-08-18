@@ -28,9 +28,9 @@ function seedIssues() {
 		undo_depth: 0
 	});
 	setOverlay([
-		{ severity: 'error', message: 'new boom', target_ids: ['a'], origin: 'uncommitted' },
-		{ severity: 'error', message: 'old boom', target_ids: ['b'], origin: 'on_server' },
-		{ severity: 'warning', message: 'now fixed', target_ids: ['c'], origin: 'resolved' }
+		{ severity: 'error', message: 'new boom', target_ids: ['a'], check: '', origin: 'uncommitted' },
+		{ severity: 'error', message: 'old boom', target_ids: ['b'], check: '', origin: 'on_server' },
+		{ severity: 'warning', message: 'now fixed', target_ids: ['c'], check: '', origin: 'resolved' }
 	]);
 }
 
@@ -78,8 +78,20 @@ describe('IssuesPanel origin', () => {
 			undo_depth: 0
 		});
 		setOverlay([
-			{ severity: 'error', message: 'was broken', target_ids: ['x'], origin: 'resolved' },
-			{ severity: 'warning', message: 'also fixed', target_ids: ['y'], origin: 'resolved' }
+			{
+				severity: 'error',
+				message: 'was broken',
+				target_ids: ['x'],
+				check: '',
+				origin: 'resolved'
+			},
+			{
+				severity: 'warning',
+				message: 'also fixed',
+				target_ids: ['y'],
+				check: '',
+				origin: 'resolved'
+			}
 		]);
 		const c = mount(IssuesPanel, { target: document.body });
 		flushSync();

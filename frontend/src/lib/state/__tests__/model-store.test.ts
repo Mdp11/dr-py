@@ -216,9 +216,27 @@ describe('applyDelta', () => {
 		applyDelta(
 			delta({
 				issues_added: [
-					{ severity: 'error', message: 'broken', target_ids: ['e1'], origin: 'on_server' },
-					{ severity: 'warning', message: 'meh', target_ids: ['e1', 'e2'], origin: 'on_server' },
-					{ severity: 'warning', message: 'other', target_ids: ['e2'], origin: 'on_server' }
+					{
+						severity: 'error',
+						message: 'broken',
+						target_ids: ['e1'],
+						check: '',
+						origin: 'on_server'
+					},
+					{
+						severity: 'warning',
+						message: 'meh',
+						target_ids: ['e1', 'e2'],
+						check: '',
+						origin: 'on_server'
+					},
+					{
+						severity: 'warning',
+						message: 'other',
+						target_ids: ['e2'],
+						check: '',
+						origin: 'on_server'
+					}
 				],
 				issue_counts: { error: 1, warning: 2 }
 			})
@@ -230,7 +248,13 @@ describe('applyDelta', () => {
 			delta({
 				issues_removed_owner_ids: ['e1'],
 				issues_added: [
-					{ severity: 'error', message: 'still broken', target_ids: ['e1'], origin: 'on_server' }
+					{
+						severity: 'error',
+						message: 'still broken',
+						target_ids: ['e1'],
+						check: '',
+						origin: 'on_server'
+					}
 				],
 				issue_counts: { error: 1, warning: 1 }
 			})
@@ -532,7 +556,13 @@ describe('reads and lifecycle', () => {
 		applyDelta(
 			delta({
 				issues_added: [
-					{ severity: 'error', message: 'stale', target_ids: ['gone'], origin: 'on_server' }
+					{
+						severity: 'error',
+						message: 'stale',
+						target_ids: ['gone'],
+						check: '',
+						origin: 'on_server'
+					}
 				],
 				issue_counts: { error: 1 }
 			})
@@ -557,7 +587,7 @@ describe('reads and lifecycle', () => {
 				changed_elements: [el('e1')],
 				changed_relationships: [rel('r1', 'e1', 'e1')],
 				issues_added: [
-					{ severity: 'error', message: 'x', target_ids: ['e1'], origin: 'on_server' }
+					{ severity: 'error', message: 'x', target_ids: ['e1'], check: '', origin: 'on_server' }
 				],
 				issue_counts: { error: 1 }
 			})

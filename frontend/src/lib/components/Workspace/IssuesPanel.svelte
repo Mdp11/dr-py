@@ -33,11 +33,15 @@
 
 	type OriginFilter = 'all' | 'uncommitted' | 'on_server' | 'resolved';
 	let filter = $state<OriginFilter>('all');
+	let checkFilter = $state<string | null>(null); // null = All
 
-	// A user parked on "Fixed" would otherwise strand the live view showing
-	// nothing — live issues are never `resolved`.
+	// A user parked on "Fixed" (or a since-vanished check) would otherwise
+	// strand the live view showing nothing — live issues are never `resolved`.
 	$effect(() => {
-		if (!overlayMode) filter = 'all';
+		if (!overlayMode) {
+			filter = 'all';
+			checkFilter = null;
+		}
 	});
 
 	function originBadge(o: Issue['origin']): { label: string; cls: string } {
@@ -46,18 +50,58 @@
 		return { label: 'on server', cls: 'bg-muted text-muted-foreground' };
 	}
 
+	// The producing validator's identity (Task 6's IssueOut.check), stamped
+	// centrally by the pipeline for the six core validators, server-side at
+	// the view-tree's own construction sites for "view", and "" for any other
+	// producer — bucketed here as "Other".
+	const CHECK_LABELS: Record<string, string> = {
+		type_conformance: 'Type conformance',
+		multiplicity: 'Multiplicity',
+		facets: 'Facets',
+		endpoint_typing: 'Endpoint typing',
+		containment: 'Containment',
+		uniqueness: 'Uniqueness',
+		view: 'View'
+	};
+	function checkLabel(check: string): string {
+		return CHECK_LABELS[check] ?? (check === '' ? 'Other' : check);
+	}
+
 	const filtered = $derived(filter === 'all' ? issues : issues.filter((i) => i.origin === filter));
+	// Counts over the ORIGIN-filtered set: the check-chip row composes with
+	// (rather than replaces) the origin filter above it, and resolved rows
+	// are excluded — same rule as the header summary.
+	const checkCounts = $derived.by(() => {
+		// A plain Map built fresh on every recompute (never mutated after
+		// return) — not persistent state, so SvelteMap's overhead buys nothing.
+		// eslint-disable-next-line svelte/prefer-svelte-reactivity
+		const m = new Map<string, number>();
+		for (const i of filtered) {
+			if (i.origin === 'resolved') continue;
+			m.set(i.check, (m.get(i.check) ?? 0) + 1);
+		}
+		return m;
+	});
+	const checkFiltered = $derived(
+		checkFilter === null ? filtered : filtered.filter((i) => i.check === checkFilter)
+	);
+	// A check that disappears from the live set (e.g. its last issue got
+	// resolved) must never strand the user on an empty view.
+	$effect(() => {
+		if (checkFilter !== null && !checkCounts.has(checkFilter)) checkFilter = null;
+	});
+
 	// Active = not resolved. Resolved rows are shown (when in view) but never
 	// counted as problems and render struck-through. A single errors/warnings
-	// pair scoped to `filtered` feeds BOTH the header summary and the body
+	// pair scoped to `checkFiltered` feeds BOTH the header summary and the body
 	// sections, so the two always agree under any active filter.
 	const errors = $derived(
-		filtered.filter((i) => i.severity === 'error' && i.origin !== 'resolved')
+		checkFiltered.filter((i) => i.severity === 'error' && i.origin !== 'resolved')
 	);
 	const warnings = $derived(
-		filtered.filter((i) => i.severity === 'warning' && i.origin !== 'resolved')
+		checkFiltered.filter((i) => i.severity === 'warning' && i.origin !== 'resolved')
 	);
-	const resolved = $derived(filtered.filter((i) => i.origin === 'resolved'));
+	const resolved = $derived(checkFiltered.filter((i) => i.origin === 'resolved'));
 	// Global (not filter-scoped): gates the "Fixed" filter button.
 	const hasResolved = $derived(issues.some((i) => i.origin === 'resolved'));
 
@@ -99,9 +143,11 @@
 	}
 
 	async function rerun(): Promise<void> {
-		// Reset the filter so a re-run never strands the user on an empty view
-		// (e.g. sitting on "Fixed" when this run has no resolved issues).
+		// Reset the filters so a re-run never strands the user on an empty view
+		// (e.g. sitting on "Fixed" when this run has no resolved issues, or on
+		// a check that this run no longer produces).
 		filter = 'all';
+		checkFilter = null;
 		await runValidation();
 	}
 </script>
@@ -196,6 +242,28 @@
 				No issues{overlayMode ? ` (validated ${relativeTime(lastRunAt)}).` : '.'}
 			</p>
 		{:else}
+			<div class="mb-2 flex flex-wrap gap-1" data-testid="check-chips">
+				<button
+					type="button"
+					class="rounded px-2 py-0.5 text-[10px] transition-colors {checkFilter === null
+						? 'bg-primary text-primary-foreground'
+						: 'bg-muted text-muted-foreground hover:text-foreground'}"
+					onclick={() => (checkFilter = null)}
+				>
+					All
+				</button>
+				{#each [...checkCounts.entries()] as [check, count] (check)}
+					<button
+						type="button"
+						class="rounded px-2 py-0.5 text-[10px] transition-colors {checkFilter === check
+							? 'bg-primary text-primary-foreground'
+							: 'bg-muted text-muted-foreground hover:text-foreground'}"
+						onclick={() => (checkFilter = check)}
+					>
+						{checkLabel(check)} ({count})
+					</button>
+				{/each}
+			</div>
 			{#if overlayMode}
 				<div class="mb-2 flex flex-wrap gap-1">
 					{#each [['all', 'All'], ['uncommitted', 'New'], ['on_server', 'On server'], ['resolved', 'Fixed']] as [val, label] (val)}
@@ -212,7 +280,7 @@
 					{/each}
 				</div>
 			{/if}
-			{#if filtered.length === 0}
+			{#if checkFiltered.length === 0}
 				<p class="text-muted-foreground/70">No issues match this filter.</p>
 			{:else}
 				<div class="flex flex-col gap-3">

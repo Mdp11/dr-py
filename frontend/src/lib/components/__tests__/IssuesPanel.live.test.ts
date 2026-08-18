@@ -29,7 +29,7 @@ function boot(rev = 1): void {
 }
 
 function issue(message: string, owner: string): Issue {
-	return { severity: 'error', message, target_ids: [owner], origin: 'on_server' };
+	return { severity: 'error', message, target_ids: [owner], check: '', origin: 'on_server' };
 }
 
 describe('IssuesPanel live mode', () => {
@@ -83,7 +83,13 @@ describe('IssuesPanel live mode', () => {
 		boot();
 		adoptIssues([issue('live boom', 'e1')], { error: 1 }, 1);
 		setOverlay([
-			{ severity: 'error', message: 'staged boom', target_ids: ['e2'], origin: 'uncommitted' }
+			{
+				severity: 'error',
+				message: 'staged boom',
+				target_ids: ['e2'],
+				check: '',
+				origin: 'uncommitted'
+			}
 		]);
 		const c = mount(IssuesPanel, { target: document.body });
 		flushSync();
