@@ -137,7 +137,9 @@ class ValidationPipeline:
         if scope.ids is None:
             for el in model.elements.values():
                 for validator in validators:
-                    issues.extend(_stamped(validator, validator.validate_element(model, el)))
+                    issues.extend(
+                        _stamped(validator, validator.validate_element(model, el))
+                    )
             for rel in model.relationships.values():
                 for validator in validators:
                     issues.extend(
@@ -156,7 +158,9 @@ class ValidationPipeline:
                 if rel is not None:
                     for validator in validators:
                         issues.extend(
-                            _stamped(validator, validator.validate_relationship(model, rel))
+                            _stamped(
+                                validator, validator.validate_relationship(model, rel)
+                            )
                         )
                 # ids resolving to neither are silently skipped (the entity may
                 # have been deleted since the scope was computed)

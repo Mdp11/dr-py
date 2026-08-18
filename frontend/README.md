@@ -44,30 +44,41 @@ The UI is a fixed grid:
 ├────────────┬─────────────────────────┬───────────────────┤
 │  Sidebar   │  Workspace              │  Inspector        │
 │  Search    │  ┌────────────────────┐ │  Properties       │
-│  Types  +  │  │ Detail / Graph /   │ │  Relationships    │
-│  Tree      │  │ Issues             │ │                   │
+│  Types  +  │  │ tables / nav /     │ │  Relationships    │
+│  Tree      │  │ snippets / issues  │ │                   │
 │            │  └────────────────────┘ │                   │
 ├────────────┴─────────────────────────┴───────────────────┤
 │  StatusBar   n elements · n staged · errors/warn · rev   │
 └──────────────────────────────────────────────────────────┘
 ```
 
-- **TopBar** — load a metamodel from file, load a model from file, Undo the
-  last staged edit, trigger validation, open the Commit review (`DiffDrawer`),
-  browse the durable commit history (`HistoryDrawer`), open the live
-  **metamodel editor** tab ("Edit Metamodel"), and open **Settings**
-  (`SettingsDialog`) where an owner can toggle **strict mode**. A growable
-  toolbar `<nav>` sits next to the logo; its first (and so far only) occupant
-  is the **Artifacts** menu (`ArtifactsMenu.svelte`) — Export…/Import…, with
-  Import hidden for viewers.
+- **TopBar** — a growable toolbar `<nav>` next to the logo holds **eight flat
+  icon+text controls**, in this order: **Artifacts** (`ArtifactsMenu.svelte`
+  — Export…/Import…, with Import hidden for viewers), **Issues** (opens the
+  singleton Issues tab), **Compare** (the two-model compare screen),
+  **Apply CR**, **Edit Metamodel** (opens the live metamodel editor tab),
+  **Export** (downloads the current model), **History** (`HistoryDrawer`),
+  and **Settings** (`SettingsDialog`, where an owner can toggle **strict
+  mode**). There is no overflow/three-dots menu — these were promoted out of
+  one. The right side is unchanged: the validation chip, **Undo** the last
+  staged edit, **Validate**, **Commit** (opens `DiffDrawer`), the strict-mode
+  badge, and the staged-changes counter.
 - **Sidebar** — fuzzy search, type filter (each concrete type has a `+` button
   to create a new element of that type), containment tree with keyboard nav and
   per-row lock badges.
-- **Workspace** — tabbed Detail / Graph / Issues view of the current
-  selection, plus **snippet** tabs (`SnippetTab`) hosting a CodeMirror editor
-  and run console for server-executed Python snippets against the live model,
-  and the singleton **metamodel** tab (`MetamodelTab`) — a YAML editor for the
-  live metamodel with lint, preview and staged (commit-through) edits.
+- **Workspace** — a **dynamic-tabs-only** strip: opening an artifact from the
+  sidebar or Issues from the top bar adds a closable tab, and the strip
+  carries no fixed tabs of its own. With zero tabs open it renders a quiet
+  centered placeholder ("Open an artifact from the sidebar, or Issues from
+  the top bar."). Closing the active tab focuses the previous tab in strip
+  order; closing the last one leaves the placeholder. Tab kinds: **table**
+  (`TableView`), **snippet** (`SnippetTab`) hosting a CodeMirror editor and
+  run console for server-executed Python snippets against the live model,
+  **navigation** (`NavigationBuilder`), **custom_export** (`CustomExportTab`),
+  the singleton **metamodel** tab (`MetamodelTab`) — a YAML editor for the
+  live metamodel with lint, preview and staged (commit-through) edits — and
+  the singleton, closable **issues** tab (`IssuesPanel`), opened from the top
+  bar's Issues button and deduped by kind exactly like the metamodel tab.
 - **Inspector** — property form + relationships list + new-relationship
   picker for the selected entity (gated when the resource is locked by a peer).
   A back/forward arrow cluster (`Inspector/HistoryNav`) sits above it, replaying
@@ -85,18 +96,15 @@ The UI is a fixed grid:
 
 | Shortcut           | Action                             |
 | ------------------ | ---------------------------------- |
-| `Cmd/Ctrl+K`       | Open the command palette           |
 | `Cmd/Ctrl+S`       | Open the Commit review             |
 | `Cmd/Ctrl+E`       | Run validation                     |
-| `Cmd/Ctrl+1`       | Switch to Detail tab               |
-| `Cmd/Ctrl+2`       | Switch to Graph tab                |
-| `Cmd/Ctrl+3`       | Switch to Issues tab               |
 | `Arrow Up/Down`    | Move focus in the containment tree |
 | `Arrow Left/Right` | Collapse / expand tree row         |
 | `Enter` / `Space`  | Select focused tree row            |
 
-`Cmd+K` and `Cmd+S` fire even when focus is inside an input; the others are
-suppressed while typing.
+Only these two survive the command palette's deletion (`keyboard.ts` /
+`keyboard.svelte.ts`). `Cmd+S` fires even when focus is inside an input;
+`Cmd+E` is suppressed while typing.
 
 ## Architecture
 
@@ -317,7 +325,7 @@ There are **two** issue stores, and every consumer reads exactly one selector.
   live list. `overlayMode = getOverlay() !== null` in `IssuesPanel.svelte` is the
   one place that distinction changes rendering.
 - **`issue-source.ts`** is the selector: `getEffectiveIssues() = getOverlay() ??
-getLiveIssues()`. All six consumers (issues panel, containment tree, graph,
+getLiveIssues()`. All five consumers (issues panel, containment tree,
   diff drawer, inspector relationships list, top bar) read it, so they can never
   disagree. It is **its own module** because it imports BOTH stores — folding it
   into either creates the model ↔ validation import cycle.
@@ -355,10 +363,8 @@ explicit user click. `GET /model/issues` is the cheap read that replaced it.
 ### Artifact import/export (bundle export/preview/import)
 
 The TopBar's toolbar `<nav>` (see Layout above) hosts an **Artifacts** menu
-(`ArtifactsMenu.svelte`) with two dialogs mounted once beside it; both are
-also reachable from the command palette (`CommandPalette.svelte`'s
-`action:export-artifacts` / `action:import-artifacts`). The API client for the
-four bundle routes is `lib/api/artifact-bundle.ts`.
+(`ArtifactsMenu.svelte`) with two dialogs mounted once beside it. The API
+client for the four bundle routes is `lib/api/artifact-bundle.ts`.
 
 - **Export** (`ExportArtifactsDialog.svelte`) — viewer-allowed. The user
   checks navigations/tables/snippets in a filterable, sectioned list; a
@@ -946,10 +952,9 @@ browses the project's durable commit journal:
 ### Live metamodel editing (metamodel tab)
 
 Editing the metamodel is a **workspace tab**, not a dialog: the TopBar's "Edit
-Metamodel" item (and the command palette's equivalent) calls
-`openMetamodelTab()`, which focuses the existing tab or opens the singleton
-`{ kind: 'metamodel', id: METAMODEL_TAB_ID, artifactId: null }` one —
-`METAMODEL_TAB_ID` is `'mm:editor'`, distinct from both the `'mm'` tab-id
+Metamodel" item calls `openMetamodelTab()`, which focuses the existing tab or
+opens the singleton `{ kind: 'metamodel', id: METAMODEL_TAB_ID, artifactId: null }`
+one — `METAMODEL_TAB_ID` is `'mm:editor'`, distinct from both the `'mm'` tab-id
 prefix in the same file's `PREFIX` map and the `mm` lease resource id below.
 It is the only persisted tab kind with no artifact behind it: `persistable()`
 requires a real `artifactId` for every other kind, while this one is a stable
@@ -1426,7 +1431,7 @@ src/
                         arrange.ts (elkjs layout + incremental placement)
     components/         TopBar, Sidebar, Workspace, Inspector, StatusBar,
                         DiffDrawer, HistoryDrawer, SettingsDialog,
-                        CommandPalette, AppHeader, dialogs, and ui/ shadcn
+                        AppHeader, dialogs, and ui/ shadcn
                         primitives (button, dialog, dropdown-menu, …);
                         ArtifactsMenu.svelte — the TopBar toolbar's
                         Export…/Import… dropdown, mounting

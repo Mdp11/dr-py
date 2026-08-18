@@ -207,10 +207,7 @@ describe('nullable active tab', () => {
 	});
 
 	it('restore of a legacy builtin active id falls back to null', () => {
-		localStorage.setItem(
-			'ui.workspace.tabs.p1',
-			JSON.stringify({ active: 'detail', tabs: [] })
-		);
+		localStorage.setItem('ui.workspace.tabs.p1', JSON.stringify({ active: 'detail', tabs: [] }));
 		initWorkspaceTabs('p1');
 		expect(getActiveTab()).toBeNull();
 	});
