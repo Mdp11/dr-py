@@ -4,7 +4,6 @@
 	import { resolve, assets } from '$app/paths';
 	import { goto } from '$app/navigation';
 	import { Button } from '$lib/components/ui/button';
-	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import {
 		getActiveProjectId,
 		getEffectiveIssues,
@@ -23,6 +22,7 @@
 		getStagedViewDepth,
 		getStrictMode,
 		isRunning,
+		openIssuesTab,
 		openMetamodelTab,
 		popLastStaged,
 		refreshSummary,
@@ -33,10 +33,29 @@
 	import { saveResponseToFile } from '$lib/util/fileSave';
 	import { getView } from '$lib/state';
 	import { runValidation } from '$lib/state/validate-action';
-	import { Ellipsis, AlertCircle, AlertTriangle, Info, RefreshCw, Undo2 } from '@lucide/svelte';
+	import {
+		AlertCircle,
+		AlertTriangle,
+		Download,
+		FileInput,
+		GitCompareArrows,
+		History,
+		Info,
+		ListChecks,
+		RefreshCw,
+		Settings,
+		Shapes,
+		Undo2
+	} from '@lucide/svelte';
 	import ApplyCrDialog from './ApplyCrDialog.svelte';
 	import ArtifactsMenu from './ArtifactsMenu.svelte';
 	import SettingsDialog from './SettingsDialog.svelte';
+
+	// Shared trigger style for every flat left-nav control (the promoted
+	// overflow-menu actions plus Issues — P-10.3). Kept as one constant so the
+	// eight controls stay visually identical without repeating the class list.
+	const barBtn =
+		'flex h-7 items-center gap-1 rounded px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50';
 
 	let applyCrOpen = $state(false);
 	let settingsOpen = $state(false);
@@ -168,6 +187,37 @@
 		<div class="h-5 w-px bg-border" aria-hidden="true"></div>
 		<nav aria-label="Toolbar" class="flex items-center gap-1">
 			<ArtifactsMenu />
+			<button type="button" class={barBtn} onclick={() => openIssuesTab()}>
+				<ListChecks class="h-3.5 w-3.5" /> Issues
+			</button>
+			<a class={barBtn} href={resolve(`/p/${getActiveProjectId()}/compare`)}>
+				<GitCompareArrows class="h-3.5 w-3.5" /> Compare
+			</a>
+			<button type="button" class={barBtn} onclick={() => (applyCrOpen = true)}>
+				<FileInput class="h-3.5 w-3.5" /> Apply CR
+			</button>
+			<button
+				type="button"
+				class={barBtn}
+				disabled={metamodel === null}
+				onclick={() => openMetamodelTab()}
+			>
+				<Shapes class="h-3.5 w-3.5" /> Edit Metamodel
+			</button>
+			<button
+				type="button"
+				class={barBtn}
+				disabled={summary === null}
+				onclick={() => void onExport()}
+			>
+				<Download class="h-3.5 w-3.5" /> Export
+			</button>
+			<button type="button" class={barBtn} onclick={() => setHistoryDrawerOpen(true)}>
+				<History class="h-3.5 w-3.5" /> History
+			</button>
+			<button type="button" class={barBtn} onclick={() => (settingsOpen = true)}>
+				<Settings class="h-3.5 w-3.5" /> Settings
+			</button>
 		</nav>
 	</div>
 
@@ -270,36 +320,6 @@
 				</dl>
 			</div>
 		</div>
-		<kbd
-			class="rounded border border-border px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/70"
-			title="Command palette">⌘K</kbd
-		>
-		<DropdownMenu.Root>
-			<DropdownMenu.Trigger
-				class="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-				aria-label="More actions"
-			>
-				<Ellipsis class="h-4 w-4" />
-			</DropdownMenu.Trigger>
-			<DropdownMenu.Content align="end" class="w-48">
-				<DropdownMenu.Item>
-					{#snippet child({ props })}
-						<a {...props} href={resolve(`/p/${getActiveProjectId()}/compare`)}>Compare</a>
-					{/snippet}
-				</DropdownMenu.Item>
-				<DropdownMenu.Item onclick={() => (applyCrOpen = true)}>Apply CR</DropdownMenu.Item>
-				<DropdownMenu.Item disabled={metamodel === null} onclick={() => openMetamodelTab()}>
-					Edit Metamodel
-				</DropdownMenu.Item>
-				<DropdownMenu.Separator />
-				<DropdownMenu.Item disabled={summary === null} onclick={() => void onExport()}>
-					Export
-				</DropdownMenu.Item>
-				<DropdownMenu.Item onclick={() => setHistoryDrawerOpen(true)}>History</DropdownMenu.Item>
-				<DropdownMenu.Separator />
-				<DropdownMenu.Item onclick={() => (settingsOpen = true)}>Settings</DropdownMenu.Item>
-			</DropdownMenu.Content>
-		</DropdownMenu.Root>
 	</div>
 </header>
 
