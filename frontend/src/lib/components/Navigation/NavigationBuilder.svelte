@@ -118,6 +118,7 @@
 			>
 				Open as table
 			</button>
+			<ArtifactExportButton {tabId} />
 			{#if editable}
 				<div class="flex items-center gap-2">
 					<button
@@ -136,7 +137,6 @@
 					>
 						Save as…
 					</button>
-					<ArtifactExportButton {tabId} />
 				</div>
 			{/if}
 		</div>
