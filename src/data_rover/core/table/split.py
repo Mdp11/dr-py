@@ -10,19 +10,16 @@ Spec: docs/superpowers/specs/2026-08-19-custom-export-v2-design.md
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
 from data_rover.core.model.model import Model
 from data_rover.core.model.naming import display_name
 
 from .cells import Cell
 from .evaluate import Binding, RowKey
+from .naming import sanitize_stem, substitute
 
 SPLIT_TOKEN = "${name}"
-#: Sanitized-stem length cap. Well under every filesystem's 255-byte limit
-#: even after the `.json` extension and a `_NN` dedupe suffix.
-MAX_FILENAME_LEN = 120
-_UNSAFE = set('/\\:*?"<>|')
 
 _Pair = tuple[RowKey, list[Cell]]
 
@@ -57,58 +54,36 @@ def partition_label(model: Model, binding: Binding) -> tuple[str, str]:
     return str(binding), str(binding)
 
 
-def sanitize_stem(name: str) -> str:
-    """Neutralize a filename STEM before it reaches any archive-member or
-    filesystem path — the boundary where free-form user text (an artifact
-    name, a `${name}`-templated element name) turns into a path component an
-    unpacking tool will honor verbatim. `zipfile.ZipInfo` does not sanitize
-    its `filename`, so an uncleaned stem becomes a zip-slip: unzipping walks
-    OUTSIDE the archive root. Two independent hazards, both closed here:
-
-    1. An EMBEDDED separator (`/`, `\\`) turns one path segment into several
-       — stripped along with the other filesystem-unsafe characters.
-    2. A stem that is nothing BUT dots (`"."`, `".."`, `"..."`, ...) is
-       indistinguishable from a self/parent-directory reference once it is
-       used as a whole path segment — as this module's own callers do for a
-       `stem.ext` filename (harmless: `"..".ext` is just an odd filename,
-       never a directory token) but as split-entry ZIP FOLDER names are NOT
-       (`"../evil.json"` walks up a directory for real). Since this function
-       cannot know which shape its caller will build, it neutralizes the
-       all-dots case unconditionally rather than trusting every caller to
-       reason about it — the cost is a same-length run of `_` in the rare
-       case a stem really was all dots, in exchange for the property that
-       output is NEVER `"."`/`".."`-equivalent as a lone path segment.
-       Empty input stays empty (`""` is not "all dots" — no dots at all) so
-       callers that fall back through `... or fallback or "element"` still
-       reach that fallback.
-    """
-    cleaned = "".join("_" if ch in _UNSAFE or ord(ch) < 32 else ch for ch in name)
-    cleaned = cleaned.strip()[:MAX_FILENAME_LEN].strip()
-    if cleaned and not cleaned.strip("."):
-        cleaned = "_" * len(cleaned)
-    return cleaned
-
-
 # Module-private alias: keeps this module's own call sites (below) unchanged
 # while `sanitize_stem` is the public name callers outside this module use.
+# `sanitize_stem` itself now lives in `.naming` (imported above) — re-exported
+# here so external callers (`routes/exports.py`, `table_export_engine.py`,
+# `tests/table/test_split.py`) keep importing it from this module unchanged.
 _sanitize = sanitize_stem
 
 
-def render_filenames(template: str, items: list[tuple[str, str]]) -> list[str]:
+def render_filenames(
+    template: str,
+    items: list[tuple[str, str]],
+    *,
+    extra: Mapping[str, str] | None = None,
+) -> list[str]:
     """One filename STEM per `(fallback_id, name)` item, deduplicated `_2`,
-    `_3`, ... in row order. The extension is appended by the CALLER after
-    dedup, so `a` and a literal `a_2` can never merge. Loop (not a single
-    suffix) for the same reason `resolve_json_keys` loops: a produced `_2`
-    can collide with a literal name."""
+    `_3`, ... in row order. Per-item vars are `name` (display name) and `id`
+    (the fallback id); `extra` carries the run-level context tokens
+    (rev/date/project). The extension is appended by the CALLER after dedup,
+    so `a` and a literal `a_2` can never merge. Loop (not a single suffix)
+    for the same reason `resolve_json_keys` loops: a produced `_2` can
+    collide with a literal name."""
     validate_template(template)
+    base_vars = dict(extra or {})
     taken: set[str] = set()
     out: list[str] = []
     for fallback, name in items:
-        base = (
-            _sanitize(template.replace(SPLIT_TOKEN, name))
-            or _sanitize(fallback)
-            or "element"
+        rendered = substitute(
+            template, {**base_vars, "name": name, "id": fallback}
         )
+        base = _sanitize(rendered) or _sanitize(fallback) or "element"
         candidate, n = base, 2
         while candidate in taken:
             candidate = f"{base}_{n}"

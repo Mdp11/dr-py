@@ -84,3 +84,17 @@ def test_sanitize_stem_leaves_empty_input_empty():
     # empty must NOT become "_" — render_filenames's `or fallback or
     # "element"` chain depends on an empty sanitize result staying falsy.
     assert sanitize_stem("") == ""
+
+
+def test_render_filenames_extra_vars_reach_every_item():
+    out = render_filenames(
+        "${name}-${rev}",
+        [("id1", "a"), ("id2", "b")],
+        extra={"rev": "9"},
+    )
+    assert out == ["a-9", "b-9"]
+
+
+def test_render_filenames_id_token_uses_the_fallback_id():
+    out = render_filenames("${name}_${id}", [("abc", "el")])
+    assert out == ["el_abc"]
