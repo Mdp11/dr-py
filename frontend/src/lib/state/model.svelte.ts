@@ -410,7 +410,12 @@ export function applyDelta(d: OpsResponse): void {
 		_missingElementIds.delete(e.id); // a (re)created/restored id is no longer missing
 	}
 	for (const r of d.changed_relationships) {
-		if (hasQueuedOpFor(r.id)) continue;
+		// The cascade check matters for PEER deltas only: a peer commit touching
+		// a relationship my staged delete_element cascade-removed must not
+		// resurrect it (my commit deletes it server-side anyway). Own-commit acks
+		// clear the staged buffer before calling applyDelta, so both guards are
+		// inert there.
+		if (hasQueuedOpFor(r.id) || isStagedDeletedRelationship(r.id)) continue;
 		_relationships.set(r.id, r);
 	}
 	for (const id of d.deleted_element_ids) {
@@ -797,11 +802,18 @@ export async function ensureElement(id: string): Promise<Element | null> {
 	const cached = _elements.get(id);
 	if (cached !== undefined) return cached;
 	if (isTempId(id)) return null;
+	// Locally deleted: the server would still return it (the delete is only
+	// staged), but caching that response would resurrect the element and erase
+	// its row from the staged diff. Not marked confirmed-missing — the server
+	// never said it doesn't exist. See isStagedDeleted.
+	if (isStagedDeleted(id)) return null;
 	const pending = _pendingElementFetches.get(id);
 	if (pending !== undefined) return pending;
 	const fetchPromise = (async (): Promise<Element | null> => {
 		try {
 			const e = await getElement(id, _clientConfig);
+			// Deleted locally while the fetch was in flight — same rule as above.
+			if (isStagedDeleted(e.id)) return null;
 			_elements.set(e.id, e);
 			_missingElementIds.delete(e.id);
 			return e;
@@ -840,12 +852,15 @@ export async function ensureElements(ids: readonly string[]): Promise<void> {
 	for (const id of ids) {
 		if (seen.has(id)) continue;
 		seen.add(id);
-		// skip ids already cached, temp (server never heard of them), already in
-		// flight via either fetch path, or already confirmed missing (re-requesting
-		// a dangling placement on every window recompute would hammer the endpoint).
+		// skip ids already cached, temp (server never heard of them), staged-
+		// deleted (locally deleted; fetching would resurrect — see
+		// isStagedDeleted), already in flight via either fetch path, or already
+		// confirmed missing (re-requesting a dangling placement on every window
+		// recompute would hammer the endpoint).
 		if (
 			_elements.has(id) ||
 			isTempId(id) ||
+			isStagedDeleted(id) ||
 			_missingElementIds.has(id) ||
 			_inFlightBatchIds.has(id) ||
 			_pendingElementFetches.has(id)
@@ -859,7 +874,9 @@ export async function ensureElements(ids: readonly string[]): Promise<void> {
 		for (let i = 0; i < want.length; i += modelReadApi.READ_PAGE_LIMIT) {
 			const chunk = want.slice(i, i + modelReadApi.READ_PAGE_LIMIT);
 			const fetched = await modelReadApi.getElementsBatch(chunk, _clientConfig);
-			for (const e of fetched) _elements.set(e.id, e);
+			// The staged-delete re-check covers deletes staged while the chunk
+			// was in flight (same rule as ensureElement's post-await guard).
+			for (const e of fetched) if (!isStagedDeleted(e.id)) _elements.set(e.id, e);
 			// Ids the server omitted from this chunk do not exist (deleted/unknown):
 			// record them so the view tree drops the dangling placement instead of
 			// holding a skeleton row forever. A later create/restore of the same id
@@ -892,6 +909,7 @@ export async function ensureTreeItems(ids: readonly string[]): Promise<void> {
 			_elements.has(id) ||
 			_treeItems.has(id) ||
 			isTempId(id) ||
+			isStagedDeleted(id) ||
 			_missingElementIds.has(id) ||
 			_inFlightBatchIds.has(id) ||
 			_pendingElementFetches.has(id)
@@ -905,7 +923,8 @@ export async function ensureTreeItems(ids: readonly string[]): Promise<void> {
 		for (let i = 0; i < want.length; i += modelReadApi.READ_PAGE_LIMIT) {
 			const chunk = want.slice(i, i + modelReadApi.READ_PAGE_LIMIT);
 			const fetched = await modelReadApi.getTreeItemsBatch(chunk, _clientConfig);
-			seedTreeItems(fetched);
+			// mid-flight staged deletes re-checked, as in ensureElements
+			seedTreeItems(fetched.filter((t) => !isStagedDeleted(t.id)));
 			// eslint-disable-next-line svelte/prefer-svelte-reactivity
 			const returned = new Set(fetched.map((t) => t.id));
 			for (const id of chunk) if (!returned.has(id)) _missingElementIds.add(id);
@@ -955,6 +974,37 @@ export function adoptSummary(s: ModelSummary): void {
 	_issueCounts = s.issue_counts;
 }
 
+/**
+ * True when a staged (uncommitted) `delete_element` targets `id`. Such an id
+ * is LOCALLY DELETED: absent from the cache while the server still returns it,
+ * so cache-or-fetch reads must not fetch it back — re-inserting it would
+ * silently erase the delete from the staged diff (badge + DiffDrawer) and
+ * re-render the element everywhere while the queued delete still commits.
+ * Exported for the Inspector, which renders a staged-deleted selection as
+ * not-found rather than loading-forever.
+ */
+export function isStagedDeleted(id: string): boolean {
+	return _queue.some((q) => q.op.kind === 'delete_element' && q.op.id === id);
+}
+
+/**
+ * Relationship counterpart of {@link isStagedDeleted}: a staged
+ * `delete_relationship` targeting `id`, OR a staged `delete_element` whose
+ * optimistic cascade removed `id`. The cascade case is the subtle one — those
+ * relationships have NO queued op of their own (only the delete_element's
+ * journal entries record them), so `hasQueuedOpFor` misses them and every
+ * server read that includes them (incident-relationship pages, neighborhoods,
+ * peer-commit deltas) would resurrect them without this check.
+ */
+function isStagedDeletedRelationship(id: string): boolean {
+	return _queue.some(
+		(q) =>
+			(q.op.kind === 'delete_relationship' && q.op.id === id) ||
+			(q.op.kind === 'delete_element' &&
+				q.revert.some((r) => r.entity === 'relationship' && r.id === id))
+	);
+}
+
 /** True when any queued (unflushed) op targets `id` — such an entity's cache
  * entry is optimistic local state that read results must not clobber. */
 function hasQueuedOpFor(id: string): boolean {
@@ -987,10 +1037,12 @@ export function seedElements(els: readonly Element[]): void {
 	}
 }
 
-/** Relationship counterpart of {@link seedElements}; same guards. */
+/** Relationship counterpart of {@link seedElements}; same guards, plus the
+ * cascade-delete guard (hasQueuedOpFor cannot see a relationship a staged
+ * delete_element cascade removed — see isStagedDeletedRelationship). */
 export function seedRelationships(rels: readonly Relationship[]): void {
 	for (const r of rels) {
-		if (hasQueuedOpFor(r.id)) continue;
+		if (hasQueuedOpFor(r.id) || isStagedDeletedRelationship(r.id)) continue;
 		const cached = _relationships.get(r.id);
 		if (cached !== undefined && cached.rev > r.rev) continue;
 		_relationships.set(r.id, r);

@@ -69,6 +69,7 @@ export {
 	refetchIssues,
 	getModelError,
 	getMissingElementIds,
+	isStagedDeleted,
 	getModelGeneration,
 	getModelRev,
 	getModelSummary,

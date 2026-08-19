@@ -310,6 +310,22 @@ follows a pessimistic **check-out → stage → commit** loop (Spec B):
    (`/model/elements`), containment tree roots/children
    (`/model/containment/*`), and BFS neighborhoods for the graph view
    (`/model/elements/{id}/neighborhood`).
+   **Every read fill-path must honor the staged-delete guard.** A staged
+   delete removes the entity from the local caches while the server still
+   returns it (nothing is committed yet), so a read result that re-inserts it
+   would silently resurrect it — the staged diff row vanishes from the badge
+   and DiffDrawer while the queued delete op still commits, and edits staged
+   against the phantom 422 the eventual batch. `isStagedDeleted` /
+   `isStagedDeletedRelationship` in `model.svelte.ts` are the predicates
+   (the relationship flavor also catches a `delete_element` cascade's victims,
+   which have journal entries but NO queued op of their own, so
+   `hasQueuedOpFor` misses them); `ensureElement`/`ensureElements`/
+   `ensureTreeItems` skip such ids (and re-check after the `await` for deletes
+   staged mid-flight), and `seedRelationships`/`applyDelta` skip such
+   relationships. A staged-deleted id is NOT added to `_missingElementIds` —
+   that set means "the server confirmed it doesn't exist", and the Inspector
+   checks `isStagedDeleted` separately to render not-found instead of an
+   eternal skeleton.
 8. **Export** streams the last committed session state to a file: a picked
    file goes up as a raw `fetch` body (`POST /model/upload`, no JS-side parse)
    or by server path (`POST /model/load`); export pipes `GET /model/download`

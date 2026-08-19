@@ -9,6 +9,7 @@
 		getCachedRelationships,
 		getMissingElementIds,
 		getSelection,
+		isStagedDeleted,
 		isTempId,
 		lockBadgeFor,
 		select
@@ -40,13 +41,16 @@
 	});
 
 	// An uncached element selection is LOADING until the cache-or-fetch settles:
-	// only a confirmed miss (404 / deleted — tracked in the missing-ids set) or
-	// an uncached temp id (the server never heard of it) is truly "not found".
+	// only a confirmed miss (404 / deleted — tracked in the missing-ids set), an
+	// uncached temp id (the server never heard of it), or a staged-deleted id
+	// (locally deleted; ensureElement refuses to fetch it back, so waiting would
+	// spin forever) is truly "not found".
 	const loading = $derived(
 		entity === null &&
 			selection?.kind === 'element' &&
 			!getMissingElementIds().has(selection.id) &&
-			!isTempId(selection.id)
+			!isTempId(selection.id) &&
+			!isStagedDeleted(selection.id)
 	);
 
 	// --- Relationship endpoint navigation -------------------------------------
