@@ -373,9 +373,7 @@ describe('ExporterTab', () => {
 			expect(document.querySelector('[data-testid="export-entry-0"]')).toBeTruthy()
 		);
 
-		const filename = document.querySelector<HTMLInputElement>(
-			'[data-testid="exporter-filename"]'
-		)!;
+		const filename = document.querySelector<HTMLInputElement>('[data-testid="exporter-filename"]')!;
 		expect(filename.placeholder).toBe('Drop'); // the artifact's name
 		filename.value = 'release-${rev}';
 		filename.dispatchEvent(new Event('input', { bubbles: true }));
@@ -384,9 +382,7 @@ describe('ExporterTab', () => {
 		document.querySelector<HTMLButtonElement>('[data-testid="exporter-mode-bare"]')!.click();
 		flushSync();
 
-		const manifest = document.querySelector<HTMLInputElement>(
-			'[data-testid="exporter-manifest"]'
-		)!;
+		const manifest = document.querySelector<HTMLInputElement>('[data-testid="exporter-manifest"]')!;
 		expect(manifest.checked).toBe(true); // schema default
 		manifest.checked = false;
 		manifest.dispatchEvent(new Event('change', { bubbles: true }));
@@ -437,9 +433,7 @@ describe('ExporterTab', () => {
 
 		// The just-used table must still be selectable — F-11 drops the
 		// usedRefs filter entirely; duplicate entries are legal.
-		const optionsAfterFirstAdd = Array.from(select.querySelectorAll('option')).map(
-			(o) => o.value
-		);
+		const optionsAfterFirstAdd = Array.from(select.querySelectorAll('option')).map((o) => o.value);
 		expect(optionsAfterFirstAdd).toContain('tbl-2');
 
 		select.value = 'tbl-2';

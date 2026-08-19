@@ -32,7 +32,9 @@ Last updated: 2026-08-19 · repo head at time of writing: `main` at `1c95ba3`
 gained five concrete sub-items, P-15 → P-21 and U-9 are new, and T-1 was retired as stale
 while verifying them. The 2026-08-19 additions are two more owner notes: P-22 (top bar
 reorder + Model dropdown, a P-10 follow-up) and P-23 (Apply CR against the loaded model,
-staged not committed, multiple CRs).
+staged not committed, multiple CRs). A same-day pass on `feat/exporter-v2-phase1` (Exporter
+v2 Phase 1) closes P-15.2, P-15.3, F-10, F-11 and C-10, leaves P-15.1 open (scheduled for
+Exporter v2 Phase 3), and marks P-16 in progress.
 
 ---
 
@@ -103,6 +105,11 @@ unscoped, unestimated, and most need a brainstorm or a spec before they're actio
 Where the codebase already contains part of the answer, the item says so — several of
 these are smaller than they look, and two turned out to be already shipped (see the end
 of this section).
+
+**2026-08-19:** the `custom_export` artifact kind is now `exporter` (Exporter v2 Phase 1,
+end-to-end backend + frontend rename); items below still say `custom_export`/"custom
+export" where that was the shipped name at the time and are unedited beyond the specific
+sub-items closed in this pass.
 
 ### P-1 · Additional inputs for `value` / `step` entry points · `open` · design-heavy
 Today both entry points receive only the element(s) they act on. Wanted:
@@ -253,29 +260,28 @@ Three follow-ups on the shipped `custom_export` artefact (owner notes, 2026-08-1
 Independent of each other: .1 is frontend-only, .2 and .3 touch the wire schema and
 `POST /exports/run`.
 
-**P-15.1 · A real add-table picker.** `Export/CustomExportTab.svelte:336-346` is a bare
+**P-15.1 · A real add-table picker.** `open` · scheduled: Exporter v2 Phase 3.
+`Export/CustomExportTab.svelte:336-346` is a bare
 `<select>` with one `<option>` per table. Wanted: the visual treatment of
 `ExportArtifactsDialog.svelte`, plus **search-by-name with autocomplete** the way element
 search already works (`Sidebar/Search.svelte` is the typeahead to mirror). **F-11** lives
 in the same four lines — `usedRefs` (`:47-50`) filters out already-added tables, forbidding
 the duplicate entries the server explicitly supports — so settle it in the same pass.
 
-**P-15.2 · Override the exported file name.** `routes/exports.py:219` hardcodes
-`Content-Disposition: attachment; filename="{row.name}.zip"` — always the artefact's own
-name. Wanted: an explicit override in the custom export's options, defaulting to today's
-behaviour.
+**P-15.2 · Override the exported file name.** `done` (2026-08-19, feat/exporter-v2-phase1).
+Landed as `ExporterDefinition.output.filename`, a per-artefact template rendered through
+`core/table/naming.py`'s engine (`NAME_TOKENS`), defaulting to today's behaviour when unset.
 
-**P-15.3 · A folder path per entry inside the zip.** An entry configured with
-`asd/qwe/ciao` lands its export under that path in the zip; unset means the archive root;
-entries sharing a prefix share the folders (free — zip members are flat path strings).
-`routes/exports.py:191-217` already builds prefixed members, so the mechanism exists: a
-split entry nests under a folder named for the entry today. The care is entirely in the
-guard rails that code already documents at length — `sanitize_stem` is the **zip-slip
-boundary** and today sanitizes a single stem, not a multi-segment path, so a user-supplied
-path needs per-segment sanitizing plus `..`/absolute rejection, and `_dedupe` has to
-dedupe *within* a folder rather than globally.
+**P-15.3 · A folder path per entry inside the zip.** `done` (2026-08-19, feat/exporter-v2-phase1).
+Landed as `ExporterEntry.folder`: a per-segment-sanitized, `..`/absolute-rejecting template
+path (the zip-slip guard rail this item called out), with `_dedupe` now deduping *within*
+each folder — keyed on the full member path — rather than globally, exactly as specced.
 
-### P-16 · Export artefacts without committing · `open`
+### P-16 · Export artefacts without committing · `in progress`
+Design settled in `docs/superpowers/specs/2026-08-19-custom-export-v2-design.md` §9.1
+(exporter half: draft runs / run-by-name on `POST /exports/run`) and §10 (bundle-draft
+export half, phased last); lands in Exporter v2 Phases 3/5.
+
 Both a custom export run (owner item 8.3) and an ordinary artefact **bundle** export
 (item 10) should work against **staged, uncommitted** state. Today neither can: both read
 committed `ArtifactRow`s on the request's DB transaction, so an artefact that has never
@@ -571,22 +577,17 @@ The backend endpoint exists and renders full before/after reconstruction; the dr
 doesn't use it. No client-side commit-diff schema exists yet. Parked repeatedly in favour
 of other work — folds naturally into R-2.
 
-### F-10 · Invalid `${name}` template blocks Export, not Save · `open` · spec divergence · *2026-08-14*
-Spec §5.1 of the split/custom-export design says a `${name}`-less `json_split.filename_template`
-blocks **Save**; what shipped blocks **Export** (`ExportDialog.svelte:195` disables the Export
-button, `EntryLayoutDialog.svelte:48-52` disables its Save). Nothing gates the *table draft's*
-Save, so an invalid template can be committed into a table definition and then copied into a
-custom-export entry at add time. User-visible behaviour is fine — the server 422s
-(`core/table/split.py::validate_template`) and the inline hint shows — so this is a divergence
-to close deliberately or to amend in the spec, not a bug report. From the P-13/P-14 final review.
+### F-10 · Invalid `${name}` template blocks Export, not Save · `done` (2026-08-19, feat/exporter-v2-phase1) · spec divergence · *2026-08-14*
+Resolved by amending the spec rather than changing behaviour: the shipped stance (block
+**Export** with a 422, never Save) is now the documented contract — see the Amendments
+block appended to `docs/superpowers/specs/2026-08-13-table-export-split-and-custom-export-design.md`
+(gitignored, not in this commit) — and Exporter v2 §4 extends export-time template
+strictness uniformly across every template. From the P-13/P-14 final review.
 
-### F-11 · Custom-export picker forbids the same table twice · `open` · limitation · *2026-08-14*
-`CustomExportTab.svelte:47-50` filters the add-table dropdown by `usedRefs`, so a table already
-in the export cannot be added again. Nothing in the spec requires uniqueness, and the **server
-clearly anticipates duplicates**: `routes/exports.py::_dedupe` exists to suffix colliding entry
-names and `test_colliding_entry_names_dedupe_with_a_suffix_in_entry_order` pins that behaviour.
-"Export table A as a wide xlsx *and* as split-per-element JSON" is a natural use of the feature
-that the UI cannot currently express. Either drop the filter or document it as deliberate.
+### F-11 · Custom-export picker forbids the same table twice · `done` (2026-08-19, feat/exporter-v2-phase1) · *2026-08-14*
+Fixed: the add-table filter (`usedRefs`) is dropped, so a table can be added to an exporter
+more than once — "export table A as a wide xlsx *and* as split-per-element JSON" is now
+expressible, matching what the server already supported via `_dedupe`.
 
 ### F-12 · `ensure*Draft` close race is shared by all four editors · `open` · class fix · *2026-08-14*
 Closing a tab mid-`ensure…Draft` resurrects the draft after its lease was released: `ensure`
@@ -702,6 +703,19 @@ alone — no `session.write_mutex` is held around the read-then-mutate. Racing e
 feature — filed here because it was noticed while auditing that path's mutex discipline for
 this feature, not because anything here changed.
 
+### K-10 · `POST /tables/export`'s `json_split.filename_template` skips token validation · `open` · *2026-08-19*
+The two export routes are asymmetric on naming strictness: `POST /exports/run` validates
+every template's `${...}` tokens up front and 422s on an unknown one, but
+`POST /tables/export` renders a table's own `json_split.filename_template` through the same
+context-token substitution with **no** `validate_tokens` pass (see `routes/tables.py` vs.
+`routes/exports.py:167-174`) — so a typo'd `${revv}` there ships verbatim into filenames
+instead of failing loudly. Pre-dates Exporter v2 (the old code literal-replaced `${name}`
+and left everything else verbatim); Exporter v2 Phase 1 scoped `routes/tables.py` to the
+`template_vars` thread-through only. Closing it means running the standalone route's split
+template through `naming.validate_tokens(..., SPLIT_TOKENS)` and mapping the `ValueError`
+to a 422. Surfaced during the Exporter v2 Phase 1 Task 5 review and deliberately parked as
+out of scope for that pass.
+
 ---
 
 ## 7. Cleanups & dead code
@@ -717,7 +731,7 @@ this feature, not because anything here changed.
 | C-7 | `inspection-history.svelte.ts` — `backEntries`/`forwardEntries` are near-identical mirrored loops. | SDD ledger |
 | C-8 | `HistoryNav.svelte` — ~30 duplicated lines between the Back and Forward dropdown blocks, differing in ~6 tokens. Awkward to extract because `bind:open` needs a distinct `$state` per menu. | SDD ledger |
 | C-9 | `DropdownMenu.Item` uses `onclick` at 6 sites where `onSelect` is the repo majority (16 sites); `onSelect` also fires for keyboard selection. | SDD ledger |
-| C-10 | Two different `ExportEntry` types now coexist: `frontend/src/lib/table/export-layout.ts:16` (a layout row, `{index, included}`) and `frontend/src/lib/api/types.ts:985` (the custom-export wire entry). `ExportSettingsPanel.svelte` imports one and `CustomExportTab.svelte` the other, from the same feature directory. Rename the wire one to `CustomExportEntry`. | P-14 final review, 2026-08-14 |
+| C-10 | `done` (2026-08-19, feat/exporter-v2-phase1) — the wire entry was renamed `ExporterEntry` (not `CustomExportEntry`, per the `custom_export` → `exporter` kind rename that landed in the same pass) alongside `export-layout.ts`'s `ExportEntry` layout row, resolving the naming collision. | P-14 final review, 2026-08-14 |
 | C-11 | `pixi run -e core-dev ruff check tests/api/` reports 5 errors in files this branch never touched. No pixi task lints `tests/` at all (`core-lint` only covers `src/`), so this debt is invisible to the normal toolchain — it was found only by running the linter against the test tree by hand. Pre-existing, confirmed 2026-08-16. | metamodel commit-flow final review |
 
 ---

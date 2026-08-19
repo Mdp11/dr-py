@@ -129,9 +129,7 @@ def run_export(
     try:
         validate_tokens(cdef.output.filename, NAME_TOKENS)
     except ValueError as exc:
-        raise HTTPException(
-            status_code=422, detail=f"output filename: {exc}"
-        ) from exc
+        raise HTTPException(status_code=422, detail=f"output filename: {exc}") from exc
 
     # Resolve every table up front: an export artefact with a hole fails
     # LOUDLY (422 naming the entries) rather than shipping a partial zip that
@@ -295,7 +293,9 @@ def run_export(
             # `folder_segments`).
             folder = _dedupe_path(prefix, sanitize_stem(out_name) or "export", taken)
             entry_paths = [f"{prefix}{folder}/{fn}" for fn, _blob in res.files]
-            files.extend(zip(entry_paths, (blob for _fn, blob in res.files), strict=True))
+            files.extend(
+                zip(entry_paths, (blob for _fn, blob in res.files), strict=True)
+            )
         else:
             fn, blob = res.files[0]
             stem, dot, ext = fn.rpartition(".")

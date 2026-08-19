@@ -80,9 +80,7 @@ def render_filenames(
     taken: set[str] = set()
     out: list[str] = []
     for fallback, name in items:
-        rendered = substitute(
-            template, {**base_vars, "name": name, "id": fallback}
-        )
+        rendered = substitute(template, {**base_vars, "name": name, "id": fallback})
         base = _sanitize(rendered) or _sanitize(fallback) or "element"
         candidate, n = base, 2
         while candidate in taken:

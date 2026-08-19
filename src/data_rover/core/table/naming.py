@@ -38,9 +38,7 @@ _UNSAFE = set('/\\:*?"<>|')
 
 def validate_tokens(template: str, allowed: Iterable[str]) -> None:
     allowed_set = set(allowed)
-    unknown = sorted(
-        {m.group(1) for m in TOKEN_RE.finditer(template)} - allowed_set
-    )
+    unknown = sorted({m.group(1) for m in TOKEN_RE.finditer(template)} - allowed_set)
     if unknown:
         listed = ", ".join("${" + t + "}" for t in unknown)
         raise ValueError(f"unknown template token(s): {listed}")
