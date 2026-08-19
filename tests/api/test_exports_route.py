@@ -64,6 +64,19 @@ def _run(client, artifact_id):
     )
 
 
+def _names(resp) -> list[str]:
+    """Zip member names MINUS `manifest.json`. Most of this module's tests
+    pin exact entry-naming/dedupe mechanics that predate the manifest
+    (Task 7) — output.manifest defaults True, so every run now carries a
+    root-level manifest member alongside the entries these tests actually
+    exercise; filtering it out here keeps those assertions about entry
+    naming, not about the manifest (which has its own tests below)."""
+    return [
+        n for n in zipfile.ZipFile(io.BytesIO(resp.content)).namelist()
+        if n != "manifest.json"
+    ]
+
+
 def test_mixed_format_entries_land_in_one_zip(client):
     _bootstrap_model(client)
     t1, t2 = _mk_table(client, "alpha"), _mk_table(client, "beta")
@@ -78,7 +91,7 @@ def test_mixed_format_entries_land_in_one_zip(client):
     assert r.status_code == 200
     assert r.headers["content-type"] == "application/zip"
     assert r.headers["content-disposition"] == 'attachment; filename="drop.zip"'
-    names = zipfile.ZipFile(io.BytesIO(r.content)).namelist()
+    names = _names(r)
     assert sorted(names) == ["doc.json", "sheet.xlsx"]
 
 
@@ -94,7 +107,7 @@ def test_split_entry_lands_in_a_folder(client):
     )
     r = _run(client, art)
     assert r.status_code == 200
-    names = zipfile.ZipFile(io.BytesIO(r.content)).namelist()
+    names = _names(r)
     assert names and all(n.startswith("per-el/") and n.endswith(".json") for n in names)
 
 
@@ -102,7 +115,7 @@ def test_entry_name_falls_back_to_the_table_name(client):
     _bootstrap_model(client)
     t = _mk_table(client, "delta")
     art = _mk_export(client, [{"source": {"ref": t}, "format": "json"}])
-    names = zipfile.ZipFile(io.BytesIO(_run(client, art).content)).namelist()
+    names = _names(_run(client, art))
     assert names == ["delta.json"]
 
 
@@ -176,7 +189,7 @@ def test_traversal_entry_name_cannot_escape_the_archive_root_single_file(client)
     )
     r = _run(client, art)
     assert r.status_code == 200
-    names = zipfile.ZipFile(io.BytesIO(r.content)).namelist()
+    names = _names(r)
     assert names == [".._.._evil.json"]
     assert all(not n.startswith("/") and ".." not in n.split("/") for n in names)
 
@@ -223,7 +236,7 @@ def test_whitespace_entry_name_falls_back_rather_than_producing_an_absolute_memb
     )
     r = _run(client, art)
     assert r.status_code == 200
-    names = zipfile.ZipFile(io.BytesIO(r.content)).namelist()
+    names = _names(r)
     assert names == ["export.json"]
     assert all(not n.startswith("/") and ".." not in n.split("/") for n in names)
 
@@ -245,7 +258,7 @@ def test_whitespace_entry_name_split_falls_back_rather_than_producing_a_root_mem
     )
     r = _run(client, art)
     assert r.status_code == 200
-    names = zipfile.ZipFile(io.BytesIO(r.content)).namelist()
+    names = _names(r)
     assert names  # at least the split's "root" partition
     for n in names:
         assert n.startswith("export/")
@@ -268,7 +281,7 @@ def test_colliding_whitespace_entry_names_dedupe_the_shared_fallback_stem(client
     )
     r = _run(client, art)
     assert r.status_code == 200
-    names = zipfile.ZipFile(io.BytesIO(r.content)).namelist()
+    names = _names(r)
     assert names == ["export.json", "export_2.json"]
 
 
@@ -284,7 +297,7 @@ def test_colliding_entry_names_dedupe_with_a_suffix_in_entry_order(client):
     )
     r = _run(client, art)
     assert r.status_code == 200
-    names = zipfile.ZipFile(io.BytesIO(r.content)).namelist()
+    names = _names(r)
     # entry order: t1's entry lands first and keeps the bare name; t2's
     # entry collides and gets the `_2` suffix — never the reverse.
     assert names == ["sheet.json", "sheet_2.json"]
@@ -406,7 +419,7 @@ def test_context_tokens_render_in_entry_names(client) -> None:
         client,
         [{"source": {"ref": t}, "name": "${name}_r${rev}_${date}_${project}"}],
     )
-    names = zipfile.ZipFile(io.BytesIO(_run(client, art).content)).namelist()
+    names = _names(_run(client, art))
     assert not any("${" in n for n in names)
     assert names == [f"T_r{rev}_{date}_default.xlsx"]
 
@@ -478,3 +491,40 @@ def test_unknown_zip_filename_token_is_422(client) -> None:
     assert resp.status_code == 422
     assert "output filename" in resp.json()["detail"]
     assert "${typo}" in resp.json()["detail"]
+
+
+# --- manifest.json ---------------------------------------------------------
+
+
+def test_manifest_lands_at_the_zip_root_by_default(client) -> None:
+    _bootstrap_model(client)
+    t = _mk_table(client, "T")
+    art = _mk_export(client, _entries(t), name="M")
+    zf = zipfile.ZipFile(io.BytesIO(_run(client, art).content))
+    doc = json.loads(zf.read("manifest.json"))
+    assert doc["artifact_name"] == "M"
+    assert doc["entries"][0]["files"] == ["T.xlsx"]
+
+
+def test_manifest_off_omits_the_member(client) -> None:
+    _bootstrap_model(client)
+    t = _mk_table(client, "T")
+    art = _mk_export(client, _entries(t), output={"manifest": False})
+    names = zipfile.ZipFile(io.BytesIO(_run(client, art).content)).namelist()
+    assert "manifest.json" not in names
+
+
+def test_user_file_named_manifest_dedupes_against_the_reserved_root_name(client) -> None:
+    _bootstrap_model(client)
+    t = _mk_table(client, "T")
+    art = _mk_export(client, [{"source": {"ref": t}, "name": "manifest", "format": "json"}])
+    names = set(zipfile.ZipFile(io.BytesIO(_run(client, art).content)).namelist())
+    assert "manifest.json" in names          # the real manifest
+    assert "manifest_2.json" in names        # the user's file, deduped
+
+
+def test_two_runs_at_one_rev_are_byte_identical(client) -> None:
+    _bootstrap_model(client)
+    t = _mk_table(client, "T")
+    art = _mk_export(client, _entries(t))
+    assert _run(client, art).content == _run(client, art).content

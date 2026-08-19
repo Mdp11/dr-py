@@ -34,6 +34,7 @@ from .. import content
 from ..db import get_db
 from ..db_models import ArtifactKind, ArtifactRow
 from ..deps import Session, get_request_session, require_model
+from ..export_manifest import MANIFEST_NAME, ManifestEntry, build_manifest
 from ..schemas import EvaluateTableIn, RunExportIn, ScriptStatusOut
 from ..script_runner import get_runner
 from ..settings import Settings, get_settings
@@ -202,6 +203,8 @@ def run_export(
             )
             results.append(
                 (
+                    entry,
+                    t,
                     segments,
                     out_name,
                     run_table_export(
@@ -224,7 +227,7 @@ def run_export(
     except (NavigationResolveError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    pending = [r.status for _, _, r in results if isinstance(r, ExportPending)]
+    pending = [r.status for *_, r in results if isinstance(r, ExportPending)]
     if pending:
         # ONE aggregate 202. Every entry already ran (kicking every pending
         # table's sweep, so they fill concurrently); the retry re-reads the
@@ -237,11 +240,29 @@ def run_export(
             headers={"Retry-After": "1"},
         )
 
+    # Spec §5: the manifest is a zip-mode-only convenience — bare's whole
+    # point is exactly one file, so a bare run neither seeds "manifest"
+    # against the user's own filename nor injects a second member (which
+    # would turn every bare run into the len(files) != 1 422 below).
+    want_manifest = cdef.output.manifest and cdef.output.mode == "zip"
+
     files: list[tuple[str, bytes]] = []
     taken: set[str] = set()
+    # Seeded BEFORE assembly so a user entry whose stem renders to
+    # "manifest" dedupes to "manifest_2" against the reserved root name —
+    # `taken` stores extension-less `prefix + stem` paths (see
+    # `_dedupe_path`), so this is the same seeding shape a real entry would
+    # produce. Known, accepted consequence: an entry named "manifest"
+    # exporting as `.xlsx` still gets suffixed even though `manifest.xlsx`
+    # would never collide with `manifest.json` on disk — `taken` is not
+    # extension-aware, and it should not be made so for this one case.
+    if want_manifest:
+        taken.add("manifest")
+    manifest_entries: list[ManifestEntry] = []
     truncated = degraded = False
-    for segments, out_name, res in results:
+    for entry, t, segments, out_name, res in results:
         assert isinstance(res, ExportFiles)
+        assert t is not None
         truncated |= res.truncated
         degraded |= res.degraded
         # `prefix` is the entry's user-chosen folder path, ALREADY validated
@@ -273,7 +294,8 @@ def run_export(
             # like `prefix`'s own segments already are (guaranteed by
             # `folder_segments`).
             folder = _dedupe_path(prefix, sanitize_stem(out_name) or "export", taken)
-            files.extend((f"{prefix}{folder}/{fn}", blob) for fn, blob in res.files)
+            entry_paths = [f"{prefix}{folder}/{fn}" for fn, _blob in res.files]
+            files.extend(zip(entry_paths, (blob for _fn, blob in res.files), strict=True))
         else:
             fn, blob = res.files[0]
             stem, dot, ext = fn.rpartition(".")
@@ -284,7 +306,35 @@ def run_export(
             # the empty-stem fallback (see comment above). `prefix` needs no
             # further sanitizing here (see the note above the branch).
             deduped = _dedupe_path(prefix, sanitize_stem(stem) or "export", taken)
-            files.append((f"{prefix}{deduped}{dot}{ext}", blob))
+            entry_paths = [f"{prefix}{deduped}{dot}{ext}"]
+            files.append((entry_paths[0], blob))
+        if want_manifest:
+            manifest_entries.append(
+                ManifestEntry(
+                    name=out_name,
+                    table_ref=entry.source.ref,
+                    table_name=t.name,
+                    format=entry.format,
+                    truncated=res.truncated,
+                    degraded=res.degraded,
+                    files=entry_paths,
+                )
+            )
+
+    if want_manifest:
+        files.insert(
+            0,
+            (
+                MANIFEST_NAME,
+                build_manifest(
+                    project_id=project_id,
+                    artifact_id=row.id,
+                    artifact_name=row.name,
+                    model_rev=session.model_rev,
+                    entries=manifest_entries,
+                ),
+            ),
+        )
 
     zip_stem = (
         sanitize_stem(substitute(cdef.output.filename, {"name": row.name, **ctx}))
