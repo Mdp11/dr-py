@@ -130,10 +130,12 @@ def run_export(
     # LOUDLY (422 naming the entries) rather than shipping a partial zip that
     # looks complete — deliberate divergence from the bundle's
     # tolerant-dangler stance (spec §4.3). Template/folder validation is
-    # merged into this SAME pass (rather than a second loop) so `folders`
-    # stays index-aligned with `cdef.entries` on every path, including the
-    # error one: a `bad_templates` entry still appends `folders.append([])`
-    # to hold the slot.
+    # merged into this SAME pass (rather than a second loop): each iteration
+    # appends EXACTLY ONE slot to `folders` — on success the rendered
+    # segments, on a `ValueError` an empty list — so `folders` stays
+    # index-aligned with `cdef.entries` BY CONSTRUCTION on every path, not
+    # merely because the `bad_templates` check below 422s before the later
+    # `zip(..., strict=True)` would ever see a misalignment.
     missing: list[str] = []
     bad_templates: list[str] = []
     tables: list[ArtifactRow | None] = []
@@ -153,18 +155,20 @@ def run_export(
         # anonymously (dialog gating only covers json-mode saves — an entry
         # saved under xlsx then flipped to json can carry a tokenless
         # template).
+        segs: list[str] = []
         try:
             validate_tokens(entry.name, NAME_TOKENS)
             validate_tokens(entry.folder, NAME_TOKENS)
             rendered_folder = substitute(entry.folder, {"name": table_name, **ctx})
-            folders.append(folder_segments(rendered_folder))
+            segs = folder_segments(rendered_folder)
             split = entry.json_split
             if entry.format == "json" and split is not None and split.enabled:
                 validate_template(split.filename_template)
                 validate_tokens(split.filename_template, SPLIT_TOKENS)
         except ValueError as exc:
             bad_templates.append(f"{entry.name or entry.source.ref}: {exc}")
-            folders.append([])
+            segs = []
+        folders.append(segs)
     if missing:
         raise HTTPException(
             status_code=422,
@@ -254,11 +258,14 @@ def run_export(
             # "" for whitespace-only input BY DESIGN (its docstring: callers
             # fall back through `... or fallback or "element"`) — this
             # caller is that fallback site: an empty folder name becomes
-            # `f"{prefix}{folder}/{fn}"` with `folder == ""`, i.e. a member
-            # starting with `//`, which — same hazard class as an absolute
-            # path — a naive extractor can still misinterpret; the `"export"`
-            # fallback keeps this segment non-empty exactly like `prefix`'s
-            # own segments already are (guaranteed by `folder_segments`).
+            # `f"{prefix}{folder}/{fn}"` with `folder == ""`, which collapses
+            # to `{prefix}/{fn}` — an ABSOLUTE member (leading `/`) when
+            # `prefix` is itself empty (the no-folder case, still the common
+            # one), or a `//` run mid-path when `prefix` is non-empty; both
+            # are the same hazard class a naive extractor can misinterpret.
+            # The `"export"` fallback keeps this segment non-empty exactly
+            # like `prefix`'s own segments already are (guaranteed by
+            # `folder_segments`).
             folder = _dedupe_path(prefix, sanitize_stem(out_name) or "export", taken)
             files.extend((f"{prefix}{folder}/{fn}", blob) for fn, blob in res.files)
         else:

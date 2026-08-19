@@ -3,6 +3,7 @@
 import io
 import json
 import zipfile
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -391,9 +392,37 @@ def test_unknown_template_token_is_422_naming_the_entry(client) -> None:
 
 
 def test_context_tokens_render_in_entry_names(client) -> None:
+    """Pins ACTUAL rendering, not merely `${name}` substitution: a template
+    that ships `${rev}`/`${date}`/`${project}` verbatim would still satisfy
+    a loose `startswith("T_r")` check, so this asserts the exact rendered
+    name against independently-computed expected values (the rev read off
+    `GET /open`, the date computed the same way `export_context_vars` does)
+    and that no `${...}` token survives anywhere in the zip."""
     _bootstrap_model(client)
     t = _mk_table(client, "T")
-    art = _mk_export(client, [{"source": {"ref": t}, "name": "${name}_r${rev}"}])
+    rev = client.get(papi("/open"), headers=AUTH_HEADERS).json()["model_rev"]
+    date = datetime.now(UTC).strftime("%Y%m%d")
+    art = _mk_export(
+        client,
+        [{"source": {"ref": t}, "name": "${name}_r${rev}_${date}_${project}"}],
+    )
     names = zipfile.ZipFile(io.BytesIO(_run(client, art).content)).namelist()
-    # rev is 0-or-more commits in the seeded project; just assert the shape
-    assert any(n.startswith("T_r") and n.endswith(".xlsx") for n in names)
+    assert not any("${" in n for n in names)
+    assert names == [f"T_r{rev}_{date}_default.xlsx"]
+
+
+def test_token_in_folder_template_renders_and_gets_sanitized(client) -> None:
+    """`entry.folder`'s `${name}` substitution is the ACTUAL zip-slip
+    surface (unlike a literal folder string): a hostile table name must
+    still land under sanitized segments, never escape via `/` or `..`."""
+    _bootstrap_model(client)
+    t = _mk_table(client, "../x")
+    art = _mk_export(
+        client, [{"source": {"ref": t}, "name": "f", "folder": "${name}"}]
+    )
+    names = zipfile.ZipFile(io.BytesIO(_run(client, art).content)).namelist()
+    # naming.folder_segments -> sanitize_stem(".." ) turns the all-dots
+    # segment into "__" (its length-preserving neutralization), "x" passes
+    # through unchanged.
+    assert "__/x/f.xlsx" in names
+    assert all(not n.startswith("/") and ".." not in n.split("/") for n in names)
