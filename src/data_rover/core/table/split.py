@@ -5,6 +5,7 @@ per-document; this module sits ABOVE it and decides which rows land in which
 file and what that file is called.
 
 Spec: docs/superpowers/specs/2026-08-13-table-export-split-and-custom-export-design.md
+Spec: docs/superpowers/specs/2026-08-19-custom-export-v2-design.md
 """
 
 from __future__ import annotations

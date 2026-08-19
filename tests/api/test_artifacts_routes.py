@@ -520,25 +520,25 @@ def test_viewer_can_evaluate_but_not_create(client: TestClient) -> None:
     assert denied.status_code == 403
 
 
-def test_create_custom_export_artifact(client: TestClient) -> None:
+def test_create_exporter_artifact(client: TestClient) -> None:
     r = client.post(
         papi("/artifacts"),
         json={
-            "kind": "custom_export",
+            "kind": "exporter",
             "name": "release drop",
             "payload": {"entries": [{"source": {"ref": "tbl-1"}}]},
         },
         headers=AUTH_HEADERS,
     )
     assert r.status_code == 201, r.text
-    assert r.json()["kind"] == "custom_export"
+    assert r.json()["kind"] == "exporter"
 
 
-def test_custom_export_payload_is_validated_on_create(client: TestClient) -> None:
+def test_exporter_payload_is_validated_on_create(client: TestClient) -> None:
     r = client.post(
         papi("/artifacts"),
         json={
-            "kind": "custom_export",
+            "kind": "exporter",
             "name": "bad",
             "payload": {"entries": [{"format": "csv"}]},  # no source, bad format
         },

@@ -1,4 +1,4 @@
-"""POST /exports/run — the custom_export artifact's zip assembly (spec §4.3)."""
+"""POST /exports/run — the exporter artifact's zip assembly (spec §4.3)."""
 
 import io
 import json
@@ -46,7 +46,7 @@ def _mk_table(client, name):
 def _mk_export(client, entries, name="drop"):
     r = client.post(
         papi("/artifacts"),
-        json={"kind": "custom_export", "name": name,
+        json={"kind": "exporter", "name": name,
               "payload": {"entries": entries}},
         headers=AUTH_HEADERS,
     )
@@ -156,7 +156,7 @@ def test_empty_entries_422_and_wrong_kind_404(client):
     empty = _mk_export(client, [])
     assert _run(client, empty).status_code == 422
     t = _mk_table(client, "zeta")
-    assert _run(client, t).status_code == 404          # a table, not a custom_export
+    assert _run(client, t).status_code == 404          # a table, not an exporter
     assert _run(client, "nope").status_code == 404
 
 

@@ -1,10 +1,10 @@
-"""The custom_export payload schema and the presentation-override application
+"""The exporter payload schema and the presentation-override application
 (spec §3.3/§3.4). `overridden_table` output is RENDER ONLY — these tests pin
 that it never touches structural fields and never mutates its input."""
 
-from data_rover.core.table.custom_export import (
-    CUSTOM_EXPORT_ADAPTER,
-    ExportEntry,
+from data_rover.core.table.exporter import (
+    EXPORTER_ADAPTER,
+    ExporterEntry,
     TableRef,
     overridden_table,
 )
@@ -34,11 +34,11 @@ def _defn():
 def _entry(**over):
     doc = {"source": {"ref": "tbl-1"}, "name": "out", "format": "json"}
     doc.update(over)
-    return ExportEntry.model_validate(doc)
+    return ExporterEntry.model_validate(doc)
 
 
 def test_payload_roundtrips_and_defaults():
-    cdef = CUSTOM_EXPORT_ADAPTER.validate_python(
+    cdef = EXPORTER_ADAPTER.validate_python(
         {"entries": [{"source": {"ref": "tbl-1"}}]}
     )
     e = cdef.entries[0]

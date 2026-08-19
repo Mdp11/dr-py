@@ -67,12 +67,14 @@ def test_migration_adds_validation_policy_column(tmp_path: Path) -> None:
 def test_migration_0011_widens_kind_and_preserves_fks_and_unique(
     tmp_path: Path,
 ) -> None:
-    # 0011 (`custom_export`) rebuilds project_artifacts via batch mode on
-    # SQLite (a plain `ALTER COLUMN ... TYPE` isn't valid SQLite DDL). A batch
-    # recreate is a real risk to everything else riding on that table -- this
-    # pins that the two FKs (with their ondelete behavior) and the named
-    # unique constraint all survive the rebuild, and that the actual reason
-    # the migration exists -- a 13-char kind value -- can be inserted.
+    # 0011 (`custom_export`, since renamed to `exporter` by 0012) rebuilds
+    # project_artifacts via batch mode on SQLite (a plain
+    # `ALTER COLUMN ... TYPE` isn't valid SQLite DDL). A batch recreate is a
+    # real risk to everything else riding on that table -- this pins that the
+    # two FKs (with their ondelete behavior) and the named unique constraint
+    # all survive the rebuild, and that a kind value round-trips through the
+    # widened column (the actual reason the migration exists: the
+    # then-13-char `custom_export` literal).
     db_path = tmp_path / "t4.db"
     url = f"sqlite:///{db_path}"
     cfg = Config(str(REPO_ROOT / "alembic.ini"))
@@ -101,14 +103,15 @@ def test_migration_0011_widens_kind_and_preserves_fks_and_unique(
         "name",
     ]
 
-    # the entire reason 0011 exists: "custom_export" (13 chars) must fit.
+    # the entire reason 0011 exists: "custom_export" (13 chars) had to fit
+    # (the kind is now named `exporter`, 0012 renamed the stored literal).
     with Session(engine) as s:
         s.add(Project(id="p1", name="P1"))
         s.add(
             ArtifactRow(
                 id="a1",
                 project_id="p1",
-                kind=ArtifactKind.custom_export,
+                kind=ArtifactKind.exporter,
                 name="n",
                 payload={},
                 artifact_rev=1,
@@ -117,4 +120,4 @@ def test_migration_0011_widens_kind_and_preserves_fks_and_unique(
         s.commit()
         row = s.get(ArtifactRow, "a1")
         assert row is not None
-        assert row.kind == ArtifactKind.custom_export
+        assert row.kind == ArtifactKind.exporter

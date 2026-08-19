@@ -1,8 +1,9 @@
-"""Run a custom_export artifact: every entry's table export, one zip.
+"""Run an exporter artifact: every entry's table export, one zip.
 
 Read-only (viewer-callable): running an export commits nothing — only edits
 to the artifact's DEFINITION go through POST /commits.
 Spec: docs/superpowers/specs/2026-08-13-table-export-split-and-custom-export-design.md §4.3
+Spec: docs/superpowers/specs/2026-08-19-custom-export-v2-design.md
 """
 
 from __future__ import annotations
@@ -15,9 +16,9 @@ from sqlalchemy.orm import Session as DbSession
 
 from data_rover.core.navigation.resolve import NavigationResolveError
 from data_rover.core.script.runner import ScriptRunner
-from data_rover.core.table.custom_export import (
-    CUSTOM_EXPORT_ADAPTER,
-    CustomExportDefinition,
+from data_rover.core.table.exporter import (
+    EXPORTER_ADAPTER,
+    ExporterDefinition,
     overridden_table,
 )
 from data_rover.core.table.split import sanitize_stem, validate_template
@@ -90,14 +91,14 @@ def run_export(
     if (
         row is None
         or row.project_id != project_id
-        or row.kind is not ArtifactKind.custom_export
+        or row.kind is not ArtifactKind.exporter
     ):
         raise HTTPException(
-            status_code=404, detail=f"unknown custom export {payload.artifact_id}"
+            status_code=404, detail=f"unknown exporter {payload.artifact_id}"
         )
-    cdef: CustomExportDefinition = CUSTOM_EXPORT_ADAPTER.validate_python(row.payload)
+    cdef: ExporterDefinition = EXPORTER_ADAPTER.validate_python(row.payload)
     if not cdef.entries:
-        raise HTTPException(status_code=422, detail="custom export has no entries")
+        raise HTTPException(status_code=422, detail="exporter has no entries")
 
     # Resolve every table up front: an export artefact with a hole fails
     # LOUDLY (422 naming the entries) rather than shipping a partial zip that

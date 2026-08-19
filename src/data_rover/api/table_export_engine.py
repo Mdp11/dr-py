@@ -7,7 +7,7 @@ FIX B comments moved here VERBATIM — they are load-bearing; do not trim.
 
 `run_table_export` takes TWO definitions: `defn` (evaluation — always the
 original) and `render_defn` (presentation — an `overridden_table` copy for a
-custom-export entry, the same object otherwise). This is the RENDER ONLY
+exporter entry, the same object otherwise). This is the RENDER ONLY
 boundary from `core/table/export_layout.py` made into a parameter.
 """
 

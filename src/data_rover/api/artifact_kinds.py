@@ -25,7 +25,7 @@ from pydantic import TypeAdapter
 from data_rover.core.navigation.schema import NAVIGATION_ADAPTER
 from data_rover.core.script.lint import derive_entry_points
 from data_rover.core.script.schema import SNIPPET_ADAPTER
-from data_rover.core.table.custom_export import CUSTOM_EXPORT_ADAPTER
+from data_rover.core.table.exporter import EXPORTER_ADAPTER
 from data_rover.core.table.schema import TABLE_ADAPTER
 
 from .db_models import ArtifactKind
@@ -102,8 +102,8 @@ _REGISTRY: dict[ArtifactKind, ArtifactKindSpec] = {
         derive_metadata=_derive_snippet_metadata,
         surfaces_entry_points=True,
     ),
-    ArtifactKind.custom_export: ArtifactKindSpec(
-        kind=ArtifactKind.custom_export, adapter=CUSTOM_EXPORT_ADAPTER
+    ArtifactKind.exporter: ArtifactKindSpec(
+        kind=ArtifactKind.exporter, adapter=EXPORTER_ADAPTER
     ),
 }
 

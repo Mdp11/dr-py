@@ -295,12 +295,14 @@ class ArtifactKind(enum.StrEnum):
     validates membership. That false premise (assuming a CHECK existed) is
     exactly why the column needed migration `0011` — SQLAlchemy sizes an
     unwidened VARCHAR to the longest member at the time the model was
-    written, and `custom_export` (13 chars) overran the original VARCHAR(12)
-    on Postgres, which rejects an overlong VARCHAR insert outright — migration
-    `0011` widened the real column to VARCHAR(32), but this class's `SAEnum`
-    had no explicit `length` so SQLAlchemy kept inferring 13 (the longest
-    member) from the enum itself, leaving the model's notion of the column
-    silently out of step with the schema it actually described.
+    written, and `custom_export` (13 chars, historical — the kind was
+    renamed `exporter` by data-only migration `0012`) overran the original
+    VARCHAR(12) on Postgres, which rejects an overlong VARCHAR insert
+    outright — migration `0011` widened the real column to VARCHAR(32), but
+    this class's `SAEnum` had no explicit `length` so SQLAlchemy kept
+    inferring 13 (the longest member at the time) from the enum itself,
+    leaving the model's notion of the column silently out of step with the
+    schema it actually described.
     `length=32` below matches `0011` so the model and the migration state
     the same fact; the next kind longer than 32 chars will need another
     migration AND another bump here."""
@@ -310,7 +312,7 @@ class ArtifactKind(enum.StrEnum):
     diagram = "diagram"
     diagram_kind = "diagram_kind"
     code_snippet = "code_snippet"
-    custom_export = "custom_export"
+    exporter = "exporter"
 
 
 class ArtifactRow(Base):

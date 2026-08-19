@@ -492,7 +492,7 @@ def export_table(
     workbook, a single `.json` document, OR — when `json_split` is enabled
     on the table (P-13) and produced more than one file — an
     `application/zip` named `{name}.zip` bundling them (`build_zip`; same
-    zip shape `/exports/run` uses for a whole custom-export bundle). An
+    zip shape `/exports/run` uses for a whole exporter bundle). An
     `ExportPending` result short-circuits to the shared 202 protocol:
     `Retry-After: 1` with a `ScriptStatusOut` body the frontend polls on."""
     metamodel, model = require_model(session)

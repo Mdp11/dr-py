@@ -1,4 +1,4 @@
-"""The `kind='custom_export'` artifact payload: a named collection of table
+"""The `kind='exporter'` artifact payload: a named collection of table
 exports whose presentation lives IN the artefact (spec §3.3).
 
 `overridden_table` is the override mechanism: a copy of the table definition
@@ -9,6 +9,7 @@ order and script cache keys are independent of the artefact (the
 `export_definition` boundary, applied from a different source).
 
 Spec: docs/superpowers/specs/2026-08-13-table-export-split-and-custom-export-design.md
+Spec: docs/superpowers/specs/2026-08-19-custom-export-v2-design.md
 """
 
 from __future__ import annotations
@@ -46,7 +47,7 @@ class ColumnOverride(BaseModel):
     json_export: JsonColumnOptions | None = None
 
 
-class ExportEntry(BaseModel):
+class ExporterEntry(BaseModel):
     source: TableRef
     #: Output base name in the zip; "" falls back to the table's name.
     name: str = ""
@@ -58,17 +59,15 @@ class ExportEntry(BaseModel):
     json_split: JsonSplitOptions | None = None
 
 
-class CustomExportDefinition(BaseModel):
+class ExporterDefinition(BaseModel):
     schema_version: int = 1
-    entries: list[ExportEntry] = Field(default_factory=list)
+    entries: list[ExporterEntry] = Field(default_factory=list)
 
 
-CUSTOM_EXPORT_ADAPTER: TypeAdapter[CustomExportDefinition] = TypeAdapter(
-    CustomExportDefinition
-)
+EXPORTER_ADAPTER: TypeAdapter[ExporterDefinition] = TypeAdapter(ExporterDefinition)
 
 
-def overridden_table(defn: TableDefinition, entry: ExportEntry) -> TableDefinition:
+def overridden_table(defn: TableDefinition, entry: ExporterEntry) -> TableDefinition:
     """A copy of `defn` whose presentation restates `entry`.
 
     Columns the entry does not mention get DEFAULT presentation (`export=None`

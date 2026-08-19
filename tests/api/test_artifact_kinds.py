@@ -54,7 +54,7 @@ def test_all_current_kinds_are_registered() -> None:
         ArtifactKind.navigation,
         ArtifactKind.table,
         ArtifactKind.code_snippet,
-        ArtifactKind.custom_export,
+        ArtifactKind.exporter,
     ):
         assert get_spec(kind) is not None
     assert get_spec(ArtifactKind.diagram) is None
@@ -99,7 +99,7 @@ def test_snippet_spec_derives_entry_points() -> None:
     assert "value" in payload["entry_points"]
 
 
-CUSTOM_EXPORT_PAYLOAD = {
+EXPORTER_PAYLOAD = {
     "schema_version": 1,
     "entries": [
         {"source": {"ref": "tbl-artifact-1"}, "name": "a", "format": "xlsx"},
@@ -113,21 +113,21 @@ CUSTOM_EXPORT_PAYLOAD = {
 }
 
 
-def test_custom_export_is_registered_and_roundtrips():
-    spec = get_spec(ArtifactKind.custom_export)
+def test_exporter_is_registered_and_roundtrips():
+    spec = get_spec(ArtifactKind.exporter)
     assert spec is not None
-    obj = spec.adapter.validate_python(CUSTOM_EXPORT_PAYLOAD)
+    obj = spec.adapter.validate_python(EXPORTER_PAYLOAD)
     assert [e.source.ref for e in obj.entries] == ["tbl-artifact-1", "tbl-artifact-2"]
 
 
-def test_custom_export_refs_extract_and_rewrite():
-    spec = get_spec(ArtifactKind.custom_export)
+def test_exporter_refs_extract_and_rewrite():
+    spec = get_spec(ArtifactKind.exporter)
     assert spec is not None
-    assert spec.extract_deps(CUSTOM_EXPORT_PAYLOAD) == {
+    assert spec.extract_deps(EXPORTER_PAYLOAD) == {
         "tbl-artifact-1",
         "tbl-artifact-2",
     }
-    out = spec.rewrite_refs(CUSTOM_EXPORT_PAYLOAD, {"tbl-artifact-1": "NEW"})
+    out = spec.rewrite_refs(EXPORTER_PAYLOAD, {"tbl-artifact-1": "NEW"})
     assert out["entries"][0]["source"]["ref"] == "NEW"
     assert out["entries"][1]["source"]["ref"] == "tbl-artifact-2"  # tolerant
-    assert CUSTOM_EXPORT_PAYLOAD["entries"][0]["source"]["ref"] == "tbl-artifact-1"
+    assert EXPORTER_PAYLOAD["entries"][0]["source"]["ref"] == "tbl-artifact-1"

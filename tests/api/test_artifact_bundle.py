@@ -112,7 +112,7 @@ _TABLE_PAYLOAD = {
 }
 
 
-def test_custom_export_root_pulls_its_tables_into_the_closure() -> None:
+def test_exporter_root_pulls_its_tables_into_the_closure() -> None:
     _setup()
     with db.db_session() as s:
         s.add(Project(id="p2", name="P2"))
@@ -124,42 +124,42 @@ def test_custom_export_root_pulls_its_tables_into_the_closure() -> None:
         t2 = content.create_artifact(
             s, "p1", kind=ArtifactKind.table, name="t2", payload=_TABLE_PAYLOAD, updated_by=None
         )
-        ce_payload = {
+        exporter_payload = {
             "schema_version": 1,
             "entries": [
                 {"source": {"ref": t1.id}, "name": "a", "format": "xlsx"},
                 {"source": {"ref": t2.id}, "name": "b", "format": "json"},
             ],
         }
-        custom_export = content.create_artifact(
-            s, "p1", kind=ArtifactKind.custom_export, name="export", payload=ce_payload,
+        exporter = content.create_artifact(
+            s, "p1", kind=ArtifactKind.exporter, name="export", payload=exporter_payload,
             updated_by=None,
         )
 
-        # the custom_export as the ONLY root still pulls both tables in
-        # (extract_deps's generic "ref"-key walk over CustomExportDefinition)
-        res = compute_closure(s, "p1", [custom_export.id])
-        assert {r.id for r in res.rows} == {custom_export.id, t1.id, t2.id}
+        # the exporter as the ONLY root still pulls both tables in
+        # (extract_deps's generic "ref"-key walk over ExporterDefinition)
+        res = compute_closure(s, "p1", [exporter.id])
+        assert {r.id for r in res.rows} == {exporter.id, t1.id, t2.id}
         assert res.dangling_refs == []
 
         project = s.get(Project, "p1")
         assert project is not None
-        bundle = build_bundle(project, res, [custom_export.id])
+        bundle = build_bundle(project, res, [exporter.id])
 
         # importing that bundle into a FRESH project (p2, nothing to reuse)
-        # proposes "create" for all three and rewrites the custom_export's
+        # proposes "create" for all three and rewrites the exporter's
         # entries[].source.ref off the sibling tables' temp ids
         plan = derive_plan(s, "p2", bundle)
         assert {e.action for e in plan.entries} == {"create"}
         ops, _reused, _final_names = build_import_ops(plan, bundle, {}, {})
 
         by_bundle_id = {op.temp_id.removeprefix(TEMP_ID_PREFIX): op for op in ops}
-        ce_op = by_bundle_id[custom_export.id]
-        assert ce_op.artifact_kind == "custom_export"
+        exporter_op = by_bundle_id[exporter.id]
+        assert exporter_op.artifact_kind == "exporter"
         t1_temp = by_bundle_id[t1.id].temp_id
         t2_temp = by_bundle_id[t2.id].temp_id
 
-        refs = {entry["source"]["ref"] for entry in ce_op.payload["entries"]}
+        refs = {entry["source"]["ref"] for entry in exporter_op.payload["entries"]}
         assert refs == {t1_temp, t2_temp}
         # no ref left pointing at the source project's ids
         assert t1.id not in refs and t2.id not in refs

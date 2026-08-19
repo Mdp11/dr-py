@@ -6,6 +6,8 @@ then-longest member — VARCHAR(12) — with NO CHECK constraint
 Postgres needs the widen; 32 leaves headroom for future kinds. SQLite is
 untyped-length and unaffected (tests use create_all anyway).
 
+(kind since renamed to `exporter`, see 0012)
+
 Revision ID: 0011
 Revises: 0010
 """

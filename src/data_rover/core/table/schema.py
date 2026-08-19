@@ -169,7 +169,8 @@ class RowNumberExportOptions(BaseModel):
 
 class JsonSplitOptions(BaseModel):
     """Split the JSON export into one file per base element (spec:
-    docs/superpowers/specs/2026-08-13-table-export-split-and-custom-export-design.md).
+    docs/superpowers/specs/2026-08-13-table-export-split-and-custom-export-design.md,
+    docs/superpowers/specs/2026-08-19-custom-export-v2-design.md).
 
     Presentation-only, like `export_order`: never consulted during evaluation.
     `filename_template` must contain `${name}` — enforced at EXPORT time
