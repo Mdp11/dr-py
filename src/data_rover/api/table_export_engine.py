@@ -6,8 +6,8 @@ completeness probe, ONE decision table, ONE zip builder. The long FIX A /
 FIX B comments moved here VERBATIM — they are load-bearing; do not trim.
 
 `run_table_export` takes TWO definitions: `defn` (evaluation — always the
-original) and `render_defn` (presentation — an `overridden_table` copy for a
-exporter entry, the same object otherwise). This is the RENDER ONLY
+original) and `render_defn` (presentation — an `overridden_table` copy for
+an exporter entry, the same object otherwise). This is the RENDER ONLY
 boundary from `core/table/export_layout.py` made into a parameter.
 """
 

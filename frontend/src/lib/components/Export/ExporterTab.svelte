@@ -237,6 +237,7 @@
 			>
 				<input
 					data-testid="exporter-filename"
+					aria-label="Output filename template"
 					class="w-56 rounded border border-input bg-card px-2 py-1"
 					placeholder={draft.name}
 					value={draft.output.filename}

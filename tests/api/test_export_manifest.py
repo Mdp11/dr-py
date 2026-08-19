@@ -17,12 +17,19 @@ def _entry(**kw: object) -> ManifestEntry:
 def test_manifest_shape_and_aggregates():
     blob = build_manifest(
         project_id="p", artifact_id="a", artifact_name="Exp", model_rev=7,
-        entries=[_entry(), _entry(name="f", degraded=True, files=["g/f.json"], format="json")],
+        entries=[
+            _entry(truncated=True),
+            _entry(name="f", degraded=True, files=["g/f.json"], format="json"),
+        ],
     )
     doc = json.loads(blob)
     assert doc["manifest_version"] == 1
     assert doc["model_rev"] == 7
-    assert doc["truncated"] is False and doc["degraded"] is True
+    # Both aggregates pinned true: `truncated`/`degraded` are each set on a
+    # DIFFERENT entry (never both, so a builder that OR'd the wrong field
+    # together could not accidentally pass), and a hardcoded `False` for
+    # either aggregate would fail this exact assertion — see FIX 6.
+    assert doc["truncated"] is True and doc["degraded"] is True
     assert doc["entries"][1]["files"] == ["g/f.json"]
     assert doc["entries"][0]["transform"] is None
     assert "generated_at" not in doc  # determinism: no wall clock, by spec

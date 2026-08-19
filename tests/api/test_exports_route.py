@@ -512,6 +512,10 @@ def test_manifest_off_omits_the_member(client) -> None:
     art = _mk_export(client, _entries(t), output={"manifest": False})
     names = zipfile.ZipFile(io.BytesIO(_run(client, art).content)).namelist()
     assert "manifest.json" not in names
+    # Positive assertion, not just absence: an empty (or entry-less) zip
+    # would also satisfy the line above, so this pins that the entry's own
+    # file still shipped rather than the whole assembly silently vanishing.
+    assert names == ["T.xlsx"]
 
 
 def test_user_file_named_manifest_dedupes_against_the_reserved_root_name(client) -> None:
@@ -528,3 +532,49 @@ def test_two_runs_at_one_rev_are_byte_identical(client) -> None:
     t = _mk_table(client, "T")
     art = _mk_export(client, _entries(t))
     assert _run(client, art).content == _run(client, art).content
+
+
+def test_split_entry_member_path_reserves_against_a_sibling_entry(client) -> None:
+    """A split entry's PRODUCED member paths must occupy the dedupe
+    namespace, not merely its `prefix + folder` reservation slot: entry A
+    (`folder=""`, `name="X"`, split json) writes `X/root.json` (its one
+    partition is the single Block named "root"), and entry B
+    (`folder="X"`, `name="root"`, plain json) independently renders to the
+    SAME member `X/root.json`. Before the fix, `taken` only ever held `"X"`
+    for entry A (never the actual `"X/root"` path its file landed at), so
+    `_dedupe_path` for entry B saw no collision and both entries wrote the
+    byte-identical zip member — `zipfile` warns and extraction is
+    last-wins. This must fail RED before the fix (both members present,
+    `len(names) != len(set(names))`) and pass GREEN after (entry B's
+    `root.json` deduped to `root_2.json`)."""
+    _bootstrap_model(client)
+    scoped_payload = {
+        "row_source": {
+            "kind": "scope", "types": ["Block"],
+            "criteria": [{"type": "name_id", "field": "name", "op": "equals", "value": "root"}],
+        },
+        "columns": [{"kind": "element", "source": {"kind": "row"}, "header": "Block"}],
+    }
+    r = client.post(
+        papi("/artifacts"),
+        json={"kind": "table", "name": "solo", "payload": scoped_payload},
+        headers=AUTH_HEADERS,
+    )
+    assert r.status_code == 201
+    t = r.json()["id"]
+    art = _mk_export(
+        client,
+        [
+            {
+                "source": {"ref": t}, "name": "X", "folder": "", "format": "json",
+                "json_split": {"enabled": True, "filename_template": "${name}"},
+            },
+            {"source": {"ref": t}, "name": "root", "folder": "X", "format": "json"},
+        ],
+        output={"manifest": False},
+    )
+    resp = _run(client, art)
+    assert resp.status_code == 200
+    names = zipfile.ZipFile(io.BytesIO(resp.content)).namelist()
+    assert len(names) == len(set(names)), f"duplicate zip member(s) in {names}"
+    assert set(names) == {"X/root.json", "X/root_2.json"}

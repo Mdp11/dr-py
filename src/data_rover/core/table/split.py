@@ -19,6 +19,21 @@ from .cells import Cell
 from .evaluate import Binding, RowKey
 from .naming import sanitize_stem, substitute
 
+#: `sanitize_stem` now lives in `.naming` (imported above) and is re-exported
+#: here purely for backward compatibility — external callers
+#: (`routes/exports.py`, `tests/table/test_split.py`) import it FROM this
+#: module, not from `.naming`, for historical reasons predating the
+#: naming-engine extraction. Declared explicitly in `__all__` rather than
+#: left to look like an unused import, so ruff's re-export lint has
+#: something to trust instead of a diff-minimization alias standing in for it.
+__all__ = [
+    "sanitize_stem",
+    "render_filenames",
+    "split_partitions",
+    "partition_label",
+    "validate_template",
+]
+
 SPLIT_TOKEN = "${name}"
 
 _Pair = tuple[RowKey, list[Cell]]
@@ -54,14 +69,6 @@ def partition_label(model: Model, binding: Binding) -> tuple[str, str]:
     return str(binding), str(binding)
 
 
-# Module-private alias: keeps this module's own call sites (below) unchanged
-# while `sanitize_stem` is the public name callers outside this module use.
-# `sanitize_stem` itself now lives in `.naming` (imported above) — re-exported
-# here so external callers (`routes/exports.py`, `table_export_engine.py`,
-# `tests/table/test_split.py`) keep importing it from this module unchanged.
-_sanitize = sanitize_stem
-
-
 def render_filenames(
     template: str,
     items: list[tuple[str, str]],
@@ -81,7 +88,7 @@ def render_filenames(
     out: list[str] = []
     for fallback, name in items:
         rendered = substitute(template, {**base_vars, "name": name, "id": fallback})
-        base = _sanitize(rendered) or _sanitize(fallback) or "element"
+        base = sanitize_stem(rendered) or sanitize_stem(fallback) or "element"
         candidate, n = base, 2
         while candidate in taken:
             candidate = f"{base}_{n}"

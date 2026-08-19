@@ -261,12 +261,13 @@ Independent of each other: .1 is frontend-only, .2 and .3 touch the wire schema 
 `POST /exports/run`.
 
 **P-15.1 · A real add-table picker.** `open` · scheduled: Exporter v2 Phase 3.
-`Export/CustomExportTab.svelte:336-346` is a bare
-`<select>` with one `<option>` per table. Wanted: the visual treatment of
+`Export/ExporterTab.svelte:393-407` (renamed from `CustomExportTab.svelte` in the rename
+sweep) is a bare `<select>` with one `<option>` per table. Wanted: the visual treatment of
 `ExportArtifactsDialog.svelte`, plus **search-by-name with autocomplete** the way element
-search already works (`Sidebar/Search.svelte` is the typeahead to mirror). **F-11** lives
-in the same four lines — `usedRefs` (`:47-50`) filters out already-added tables, forbidding
-the duplicate entries the server explicitly supports — so settle it in the same pass.
+search already works (`Sidebar/Search.svelte` is the typeahead to mirror). **F-11** (already
+resolved, see below) lived in the same file's `usedRefs` filter, which forbade the duplicate
+entries the server explicitly supports — that part is settled; only the picker's visual
+treatment and search remain open here.
 
 **P-15.2 · Override the exported file name.** `done` (2026-08-19, feat/exporter-v2-phase1).
 Landed as `ExporterDefinition.output.filename`, a per-artefact template rendered through
@@ -582,7 +583,16 @@ Resolved by amending the spec rather than changing behaviour: the shipped stance
 **Export** with a 422, never Save) is now the documented contract — see the Amendments
 block appended to `docs/superpowers/specs/2026-08-13-table-export-split-and-custom-export-design.md`
 (gitignored, not in this commit) — and Exporter v2 §4 extends export-time template
-strictness uniformly across every template. From the P-13/P-14 final review.
+strictness uniformly across every template. Precisely: the exporter artifact's OWN Save
+(`ExporterTab.svelte`'s Save button, staging `update_artifact`/`create_artifact`) is never
+gated on template validity — an entry with a bad `${...}` template saves fine and only
+422s at `POST /exports/run`. `Export/EntryLayoutDialog.svelte:48-52`'s `splitTemplateInvalid`
+still disables THAT dialog's own local Save (`:122`) when its working copy's split template
+is tokenless — a pre-flight check on a dialog-scoped edit buffer, not a Save-time block on
+the artifact itself, so the two are not in tension: this is belt-and-braces on top of the
+export-time 422, saving a round trip when the check is cheap and already in hand, not a
+second enforcement point that could reject a payload Save would otherwise accept. From the
+P-13/P-14 final review.
 
 ### F-11 · Custom-export picker forbids the same table twice · `done` (2026-08-19, feat/exporter-v2-phase1) · *2026-08-14*
 Fixed: the add-table filter (`usedRefs`) is dropped, so a table can be added to an exporter

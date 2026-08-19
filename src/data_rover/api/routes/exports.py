@@ -63,7 +63,18 @@ def _dedupe_path(prefix: str, stem: str, taken: set[str]) -> str:
     entries that render to the same name in DIFFERENT folders never force a
     suffix on each other — only a collision within the same `prefix` does.
     Returns the (possibly suffixed) stem alone; the caller still prepends
-    `prefix` to build the actual archive member path."""
+    `prefix` to build the actual archive member path.
+
+    A split entry's own produced member paths (`{prefix}{folder}/{stem}`,
+    one per partition) also get reserved into `taken` — see the assembly
+    loop below — using this same extension-less shape, so a plain entry
+    that happens to render into a split entry's folder (e.g. split entry
+    "X" writing `X/root.json`, a sibling entry named "root" landing in
+    folder "X") collides here instead of silently overwriting a zip member.
+    Before folders existed a non-split member could never contain `/` and
+    so could never equal a split member's path; folders make that equality
+    reachable, which is what makes this reservation load-bearing rather than
+    defensive."""
     candidate, n = stem, 2
     while f"{prefix}{candidate}" in taken:
         candidate = f"{stem}_{n}"
@@ -255,7 +266,7 @@ def run_export(
     # would never collide with `manifest.json` on disk — `taken` is not
     # extension-aware, and it should not be made so for this one case.
     if want_manifest:
-        taken.add("manifest")
+        taken.add(MANIFEST_NAME.rpartition(".")[0])
     manifest_entries: list[ManifestEntry] = []
     truncated = degraded = False
     for entry, t, segments, out_name, res in results:
@@ -296,6 +307,17 @@ def run_export(
             files.extend(
                 zip(entry_paths, (blob for _fn, blob in res.files), strict=True)
             )
+            # Reserve every member this split entry ACTUALLY writes, not
+            # merely its `{prefix}{folder}` folder-name slot: `taken` is
+            # `_dedupe_path`'s dedupe namespace, and a later entry's own
+            # `_dedupe_path` call only ever compares against what's in
+            # `taken` — the folder-name reservation above never touched the
+            # per-file paths below it, so a sibling entry rendering into
+            # `{folder}/` (e.g. an entry with `folder="X"` when this split
+            # entry wrote `X/...`) saw no collision and both entries wrote
+            # the same zip member. Stored extension-less, matching every
+            # other `taken` entry's shape (`_dedupe_path`'s own docstring).
+            taken.update(path.rpartition(".")[0] for path in entry_paths)
         else:
             fn, blob = res.files[0]
             stem, dot, ext = fn.rpartition(".")

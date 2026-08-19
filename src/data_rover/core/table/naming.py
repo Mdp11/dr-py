@@ -1,16 +1,43 @@
 """The `${token}` template engine behind export naming (spec 2026-08-19 §4).
 
 One vocabulary, four contexts (zip filename, entry name, folder path, split
-filename). Two-phase by design: `validate_tokens` runs UP FRONT at the route
-(unknown tokens are a 422 naming the entry — a typo silently shipped verbatim
-into a filename contract is worse than a loud failure), while `substitute`
-never raises and leaves unknown tokens verbatim, so it stays safe to call on
+filename) — but `${name}` BINDS to something different in each one, and that
+mapping otherwise lives only in the gitignored spec, so it is reproduced here
+in the module that owns the vocabulary:
+
+| Token       | zip filename | entry name | folder path | split filename        |
+|-------------|:---:|:---:|:---:|-----------------------|
+| `${name}`   | artifact name | table name | table name | element display name (required — `split.validate_template`) |
+| `${id}`     | —   | —   | —   | element id             |
+| `${rev}`    | ✓   | ✓   | ✓   | ✓                      |
+| `${date}`   | ✓   | ✓   | ✓   | ✓                      |
+| `${project}`| ✓   | ✓   | ✓   | ✓                      |
+
+`${rev}` is `session.model_rev`, `${date}` is the run's UTC date as
+`YYYYMMDD`, and `${project}` is the project **id** (machine-oriented, stable
+across a rename — deliberately not the display name). All three are computed
+ONCE per run (`export_context_vars`, `routes/exports.py`) and shared by every
+context in that run, so the same `${rev}`/`${date}`/`${project}` land in the
+zip filename, every entry name, every folder path, and every split filename
+in one response. `${name}`/`${id}` are per-item instead: the zip filename's
+`${name}` is the exporter artifact's own name, an entry's `${name}` is its
+table's name, and a split filename's `${name}`/`${id}` are the partition's
+base element — three different vocabularies sharing one substitution engine,
+which is exactly why `NAME_TOKENS`/`SPLIT_TOKENS` are separate constants
+rather than one context-blind set.
+
+Two-phase by design: `validate_tokens` runs UP FRONT at the route (unknown
+tokens are a 422 naming the entry — a typo silently shipped verbatim into a
+filename contract is worse than a loud failure), while `substitute` never
+raises and leaves unknown tokens verbatim, so it stays safe to call on
 already-validated input without re-deriving the context's vocabulary.
 
 This module OWNS `sanitize_stem` — the character-level cleanup that turns
-free-form user text into a safe filename/path-segment STEM — but the
-*application* of it to a rendered template stays at the archive boundary in
-`routes/exports.py`, the same zip-slip seam that module documents.
+free-form user text into a safe filename/path-segment STEM — but its
+*application* to a rendered template has TWO call sites, not one:
+`routes/exports.py`'s archive-member assembly (the zip-slip seam that module
+documents) and `split.render_filenames`, which sanitizes each partition's
+own per-item filename before this module's caller ever sees it.
 `folder_segments` is the one exception here: it must reason about path
 SEGMENTS (absolute/empty/traversal), which a per-stem sanitizer cannot, so it
 owns the segment rules and delegates the per-segment character cleaning to

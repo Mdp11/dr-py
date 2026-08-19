@@ -231,6 +231,26 @@ follows a pessimistic **check-out → stage → commit** loop (Spec B):
      definition on demand (`applyEntryOverrides`/`overridesFromDefinition`,
      used by `Export/EntryLayoutDialog.svelte` — see "Table export settings"
      below), but nothing keeps the two in sync automatically.
+   - **The output-settings bar** (`ExporterTab.svelte`, visible only
+     `{#if editable}` — a viewer gets no editing surface at all here, same as
+     everywhere else in the tab) edits `draft.output` directly via
+     `updateExporterOutput`: a filename-template input (`${token}`s, backend
+     `naming.py` vocabulary), a zip/bare mode toggle, and an
+     "Include manifest" checkbox. Below it, each entry row carries its own
+     **folder** input (`entry.folder`, also a `${token}` template) alongside
+     its name/format controls — `updateExporterEntry(tabId, i, { folder })`.
+     Neither input validates client-side: per the strict-at-export /
+     never-block-Save rule, a bad token or an absolute/traversal folder saves
+     fine and only 422s at `POST /exports/run`, naming the offending entry.
+   - **F-11 (deliberate): no `usedRefs` filter on the add-table picker.**
+     `ExporterTab.svelte`'s `availableTables` lists every table with no
+     already-added filter, so the same table can be added more than once —
+     e.g. once as a wide `.xlsx` and again as split-per-element JSON. This
+     looks like a missing filter; it is not. The server has always deduped
+     colliding output names/folders at export time
+     (`routes/exports.py`'s `_dedupe_path`), so a duplicate entry was already
+     legal server-side — the picker's old `usedRefs` filter was blocking a
+     case the backend explicitly supported. Do not reintroduce it.
    - **The lease is per editor tab.** Opening a saved artifact takes an
      `art:<id>` exclusive lease (`acquireArtifactLease`); a denial does not
      refuse the open, it renders that tab **unsaveable and read-only** behind
