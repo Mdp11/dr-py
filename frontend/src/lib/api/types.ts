@@ -984,6 +984,7 @@ export const ExporterEntrySchema = z.object({
 	source: z.object({ ref: z.string() }),
 	name: z.string().default(''),
 	format: z.enum(['xlsx', 'json']).default('xlsx'),
+	folder: z.string().default(''),
 	columns: z.array(ColumnOverrideSchema).default([]),
 	export_order: z.array(z.number().int()).default([]),
 	show_row_numbers: z.boolean().default(false),
@@ -992,8 +993,21 @@ export const ExporterEntrySchema = z.object({
 });
 export type ExporterEntry = z.infer<typeof ExporterEntrySchema>;
 
+/** Zip-level output settings for an exporter artifact. `filename` and each
+ *  entry's `folder` are `${token}` templates rendered server-side at export
+ *  time (`${name}`/`${rev}`/`${date}`/`${project}`) — an unknown token, a bad
+ *  path, or bare-mode-with-many-files is a 422 from `POST /exports/run`, not
+ *  a client-side validation error. Never validate these client-side. */
+export const OutputOptionsSchema = z.object({
+	mode: z.enum(['zip', 'bare']).default('zip'),
+	filename: z.string().default(''),
+	manifest: z.boolean().default(true)
+});
+export type OutputOptions = z.infer<typeof OutputOptionsSchema>;
+
 export const ExporterDefinitionSchema = z.object({
 	schema_version: z.number().default(1),
+	output: OutputOptionsSchema.default({ mode: 'zip', filename: '', manifest: true }),
 	entries: z.array(ExporterEntrySchema).default([])
 });
 export type ExporterDefinition = z.infer<typeof ExporterDefinitionSchema>;

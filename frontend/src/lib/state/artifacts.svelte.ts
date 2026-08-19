@@ -133,7 +133,9 @@ export function assertNoNameClash(
 		(h) => h.kind === kind && h.name === name && h.id !== excludeId
 	);
 	if (clash) {
-		throw new Error(`a ${NAME_CLASH_LABEL[kind]} named "${name}" already exists`);
+		const label = NAME_CLASH_LABEL[kind];
+		const article = /^[aeiou]/i.test(label) ? 'an' : 'a';
+		throw new Error(`${article} ${label} named "${name}" already exists`);
 	}
 }
 

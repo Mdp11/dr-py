@@ -23,7 +23,13 @@
  */
 import { SvelteMap } from 'svelte/reactivity';
 import * as artifactsApi from '$lib/api/artifacts';
-import { ExporterDefinitionSchema, type ExporterEntry, type TableDefinition } from '$lib/api/types';
+import {
+	ExporterDefinitionSchema,
+	OutputOptionsSchema,
+	type ExporterEntry,
+	type OutputOptions,
+	type TableDefinition
+} from '$lib/api/types';
 import { entryForTable } from '$lib/table/exporter';
 import { assertNoNameClash } from './artifacts.svelte';
 import {
@@ -42,6 +48,7 @@ export interface ExporterDraft {
 	name: string;
 	artifactId: string | null;
 	artifactRev: number | null;
+	output: OutputOptions;
 	entries: ExporterEntry[];
 	dirty: boolean;
 }
@@ -110,6 +117,7 @@ export async function ensureExporterDraft(tabId: string): Promise<void> {
 			name: 'New exporter',
 			artifactId: null,
 			artifactRev: null,
+			output: OutputOptionsSchema.parse({}),
 			entries: [],
 			dirty: false
 		};
@@ -142,6 +150,7 @@ export async function ensureExporterDraft(tabId: string): Promise<void> {
 			name: artifact.name,
 			artifactId: artifact.id,
 			artifactRev: artifact.artifact_rev,
+			output: result.success ? result.data.output : OutputOptionsSchema.parse({}),
 			entries: result.success ? result.data.entries : [],
 			dirty: false
 		};
@@ -204,6 +213,16 @@ export function updateExporterEntry(
 	_drafts.set(tabId, { ...draft, entries, dirty: true });
 }
 
+/** Patches the zip-level output settings (mode/filename/manifest). Mirrors
+ * `updateExporterEntry`: marks the draft dirty, no validation — strictness
+ * (unknown tokens, bad paths, bare-mode-with-many-files) lives at export
+ * time only (`POST /exports/run`), never here. */
+export function updateExporterOutput(tabId: string, patch: Partial<OutputOptions>): void {
+	const draft = _drafts.get(tabId);
+	if (!draft) return;
+	_drafts.set(tabId, { ...draft, output: { ...draft.output, ...patch }, dirty: true });
+}
+
 /**
  * "Save" = STAGE an artifact op. Nothing is sent here; the op joins the
  * staged batch that the DiffDrawer's Commit posts to `/commits`.
@@ -219,7 +238,7 @@ export function updateExporterEntry(
 export function saveExporterDraft(tabId: string): void {
 	const draft = _drafts.get(tabId);
 	if (!draft) return;
-	const payload = { schema_version: 1, entries: draft.entries };
+	const payload = { schema_version: 1, output: draft.output, entries: draft.entries };
 	// Best-effort: the server's uniqueness check is authoritative and fires at
 	// preview/commit. Throws, and the caller's Save handler renders it as an error.
 	assertNoNameClash('exporter', draft.name, draft.artifactId);

@@ -365,4 +365,90 @@ describe('ExporterTab', () => {
 		// must be untouched.
 		expect(draft.entries[0].columns).toEqual([]);
 	});
+
+	it('renders output controls and stages edits through them', async () => {
+		getArtifactSpy.mockResolvedValue(EXPORT_ARTIFACT);
+		render('exp:art-1');
+		await vi.waitFor(() =>
+			expect(document.querySelector('[data-testid="export-entry-0"]')).toBeTruthy()
+		);
+
+		const filename = document.querySelector<HTMLInputElement>(
+			'[data-testid="exporter-filename"]'
+		)!;
+		expect(filename.placeholder).toBe('Drop'); // the artifact's name
+		filename.value = 'release-${rev}';
+		filename.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+
+		document.querySelector<HTMLButtonElement>('[data-testid="exporter-mode-bare"]')!.click();
+		flushSync();
+
+		const manifest = document.querySelector<HTMLInputElement>(
+			'[data-testid="exporter-manifest"]'
+		)!;
+		expect(manifest.checked).toBe(true); // schema default
+		manifest.checked = false;
+		manifest.dispatchEvent(new Event('change', { bubbles: true }));
+		flushSync();
+
+		expect(getExporterDraft('exp:art-1')!.output).toEqual({
+			mode: 'bare',
+			filename: 'release-${rev}',
+			manifest: false
+		});
+	});
+
+	it('renders a folder input per entry', async () => {
+		getArtifactSpy.mockResolvedValue(EXPORT_ARTIFACT);
+		render('exp:art-1');
+		await vi.waitFor(() =>
+			expect(document.querySelector('[data-testid="export-entry-0"]')).toBeTruthy()
+		);
+
+		const folder = document.querySelector<HTMLInputElement>(
+			'[data-testid="export-entry-0-folder"]'
+		)!;
+		expect(folder.placeholder).toBe('folder/in/zip');
+		folder.value = 'nested/path';
+		folder.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+
+		expect(getExporterDraft('exp:art-1')!.entries[0].folder).toBe('nested/path');
+	});
+
+	it('allows adding the same table twice (F-11)', async () => {
+		getArtifactSpy.mockImplementation((id: string) =>
+			id === 'art-1' ? Promise.resolve(EXPORT_ARTIFACT) : Promise.resolve(TABLE_ARTIFACT)
+		);
+		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({ items: [TABLE_HEADER] });
+		await loadArtifacts();
+
+		render('exp:art-1');
+		await vi.waitFor(() =>
+			expect(document.querySelector('[data-testid="export-entry-0"]')).toBeTruthy()
+		);
+
+		const select = document.querySelector<HTMLSelectElement>('[data-testid="add-table-select"]')!;
+		select.value = 'tbl-2';
+		select.dispatchEvent(new Event('change', { bubbles: true }));
+		flushSync();
+		await vi.waitFor(() => expect(getExporterDraft('exp:art-1')!.entries.length).toBe(2));
+
+		// The just-used table must still be selectable — F-11 drops the
+		// usedRefs filter entirely; duplicate entries are legal.
+		const optionsAfterFirstAdd = Array.from(select.querySelectorAll('option')).map(
+			(o) => o.value
+		);
+		expect(optionsAfterFirstAdd).toContain('tbl-2');
+
+		select.value = 'tbl-2';
+		select.dispatchEvent(new Event('change', { bubbles: true }));
+		flushSync();
+		await vi.waitFor(() => expect(getExporterDraft('exp:art-1')!.entries.length).toBe(3));
+
+		expect(
+			getExporterDraft('exp:art-1')!.entries.filter((e) => e.source.ref === 'tbl-2')
+		).toHaveLength(2);
+	});
 });

@@ -16,7 +16,8 @@ import {
 	retryExporterLock,
 	saveExporterDraft,
 	setExporterName,
-	updateExporterEntry
+	updateExporterEntry,
+	updateExporterOutput
 } from '../exporter-editor.svelte';
 import { getDynamicTabs, openArtifactTab, resetWorkspaceTabs } from '../workspace.svelte';
 import { loadArtifacts, resetArtifacts } from '../artifacts.svelte';
@@ -339,7 +340,11 @@ describe('saving an exporter draft', () => {
 				kind: 'update_artifact',
 				id: 'e1',
 				name: 'Renamed',
-				payload: { schema_version: 1, entries: EXPORTER_ARTIFACT.payload.entries }
+				payload: {
+					schema_version: 1,
+					output: { mode: 'zip', filename: '', manifest: true },
+					entries: EXPORTER_ARTIFACT.payload.entries.map((e) => ({ ...e, folder: '' }))
+				}
 			}
 		]);
 		expect(getExporterDraft(tabId)?.dirty).toBe(false);
@@ -358,6 +363,63 @@ describe('saving an exporter draft', () => {
 		expect(getStagedArtifactOps()).toEqual([]);
 		expect(getExporterDraft(tabId)?.artifactId).toBeNull();
 		expect(getExporterDraft(tabId)?.dirty).toBe(true);
+	});
+});
+
+describe('exporter output settings', () => {
+	it('seeds output from the payload and defaults it when absent', async () => {
+		asEditor();
+		mockAcquire();
+		const get = vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValueOnce({
+			...EXPORTER_ARTIFACT,
+			payload: {
+				...EXPORTER_ARTIFACT.payload,
+				output: { mode: 'bare', filename: 'drop-${date}', manifest: false }
+			}
+		});
+		const tabWithOutput = openArtifactTab('exporter', { artifactId: 'e1', title: 'My export' });
+		await ensureExporterDraft(tabWithOutput);
+		expect(getExporterDraft(tabWithOutput)?.output).toEqual({
+			mode: 'bare',
+			filename: 'drop-${date}',
+			manifest: false
+		});
+
+		get.mockResolvedValueOnce(EXPORTER_ARTIFACT); // payload has no `output` key at all
+		const tabWithout = openArtifactTab('exporter', { artifactId: 'e2', title: 'Other' });
+		await ensureExporterDraft(tabWithout);
+		expect(getExporterDraft(tabWithout)?.output).toEqual({
+			mode: 'zip',
+			filename: '',
+			manifest: true
+		});
+	});
+
+	it('updateExporterOutput patches and dirties', async () => {
+		const tabId = 'exp:draft:1';
+		await ensureExporterDraft(tabId);
+		expect(getExporterDraft(tabId)?.dirty).toBe(false);
+
+		updateExporterOutput(tabId, { mode: 'bare' });
+
+		const d = getExporterDraft(tabId)!;
+		expect(d.output.mode).toBe('bare');
+		expect(d.dirty).toBe(true);
+	});
+
+	it('saveExporterDraft stages output alongside entries', async () => {
+		const tabId = openArtifactTab('exporter', { artifactId: null, title: 'New export' });
+		await ensureExporterDraft(tabId);
+		setExporterName(tabId, 'Release drop');
+		updateExporterOutput(tabId, { mode: 'bare', filename: 'x', manifest: false });
+
+		saveExporterDraft(tabId);
+
+		const ops = getStagedArtifactOps();
+		expect(ops[0]).toMatchObject({
+			kind: 'create_artifact',
+			payload: { output: { mode: 'bare', filename: 'x', manifest: false }, entries: [] }
+		});
 	});
 });
 

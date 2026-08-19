@@ -80,6 +80,7 @@ export function entryForTable(tableId: string, defn: TableDefinition, name: stri
 		source: { ref: tableId },
 		name,
 		format: 'xlsx',
+		folder: '',
 		...overridesFromDefinition(defn)
 	};
 }

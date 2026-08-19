@@ -416,6 +416,7 @@ export {
 	setExporterLockDenied,
 	setExporterName,
 	updateExporterEntry,
+	updateExporterOutput,
 	type ExporterDraft
 } from './exporter-editor.svelte';
 export {

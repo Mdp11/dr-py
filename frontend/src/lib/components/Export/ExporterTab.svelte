@@ -21,7 +21,8 @@
 		retryExporterLock,
 		saveExporterDraft,
 		setExporterName,
-		updateExporterEntry
+		updateExporterEntry,
+		updateExporterOutput
 	} from '$lib/state';
 	import { TableDefinitionSchema, type ExporterEntry, type TableDefinition } from '$lib/api/types';
 	import { createColumnDrag } from '$lib/table/column-dnd.svelte';
@@ -45,10 +46,11 @@
 	const editable = $derived(canEdit());
 	const disabledEntry = $derived(!editable || locked);
 
-	const usedRefs = $derived(new Set((draft?.entries ?? []).map((e) => e.source.ref)));
-	const availableTables = $derived(
-		referenceableArtifactHeaders('table').filter((h) => !usedRefs.has(h.id))
-	);
+	// F-11: no usedRefs filter — a table may be added more than once (e.g.
+	// "table A as a wide xlsx AND as a split JSON"). The server dedupes
+	// colliding output names/folders at export time (routes/exports.py's
+	// _dedupe_path), so a duplicate entry is legal, not an error.
+	const availableTables = $derived(referenceableArtifactHeaders('table'));
 
 	function tableName(ref: string): string {
 		return artifactHeaderById(ref)?.name ?? ref;
@@ -229,6 +231,53 @@
 			<ArtifactExportButton {tabId} />
 		</div>
 
+		{#if editable}
+			<div
+				class="flex flex-wrap items-center gap-2 border-b border-border/70 bg-muted/20 px-3 py-1.5 text-xs"
+			>
+				<input
+					data-testid="exporter-filename"
+					class="w-56 rounded border border-input bg-card px-2 py-1"
+					placeholder={draft.name}
+					value={draft.output.filename}
+					disabled={locked}
+					oninput={(e) => updateExporterOutput(tabId, { filename: e.currentTarget.value })}
+				/>
+				<div class="flex shrink-0 items-center gap-1">
+					<button
+						type="button"
+						data-testid="exporter-mode-zip"
+						aria-pressed={draft.output.mode === 'zip'}
+						class="rounded px-1.5 py-0.5 text-muted-foreground transition-colors hover:bg-muted aria-pressed:bg-muted aria-pressed:text-foreground"
+						disabled={locked}
+						onclick={() => updateExporterOutput(tabId, { mode: 'zip' })}
+					>
+						zip
+					</button>
+					<button
+						type="button"
+						data-testid="exporter-mode-bare"
+						aria-pressed={draft.output.mode === 'bare'}
+						class="rounded px-1.5 py-0.5 text-muted-foreground transition-colors hover:bg-muted aria-pressed:bg-muted aria-pressed:text-foreground"
+						disabled={locked}
+						onclick={() => updateExporterOutput(tabId, { mode: 'bare' })}
+					>
+						bare
+					</button>
+				</div>
+				<label class="flex items-center gap-1.5 text-muted-foreground">
+					<input
+						type="checkbox"
+						data-testid="exporter-manifest"
+						checked={draft.output.manifest}
+						disabled={locked}
+						onchange={(e) => updateExporterOutput(tabId, { manifest: e.currentTarget.checked })}
+					/>
+					Include manifest
+				</label>
+			</div>
+		{/if}
+
 		{#if saveError}
 			<p class="px-3 py-1 text-xs text-destructive">{saveError}</p>
 		{/if}
@@ -284,6 +333,14 @@
 							value={entry.name}
 							disabled={disabledEntry}
 							oninput={(e) => updateExporterEntry(tabId, i, { name: e.currentTarget.value })}
+						/>
+						<input
+							data-testid="export-entry-{i}-folder"
+							class="min-w-32 flex-1 rounded border border-input bg-card px-2 py-1"
+							placeholder="folder/in/zip"
+							value={entry.folder}
+							disabled={disabledEntry}
+							oninput={(e) => updateExporterEntry(tabId, i, { folder: e.currentTarget.value })}
 						/>
 						<span class="shrink-0 truncate text-muted-foreground" title={entry.source.ref}>
 							{tableName(entry.source.ref)}
