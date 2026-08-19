@@ -36,6 +36,8 @@
 	import {
 		AlertCircle,
 		AlertTriangle,
+		ChevronDown,
+		Database,
 		Download,
 		FileInput,
 		GitCompareArrows,
@@ -47,13 +49,14 @@
 		Shapes,
 		Undo2
 	} from '@lucide/svelte';
+	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import ApplyCrDialog from './ApplyCrDialog.svelte';
 	import ArtifactsMenu from './ArtifactsMenu.svelte';
 	import SettingsDialog from './SettingsDialog.svelte';
 
-	// Shared trigger style for every flat left-nav control (the promoted
-	// overflow-menu actions plus Issues — P-10.3). Kept as one constant so the
-	// eight controls stay visually identical without repeating the class list.
+	// Shared trigger style for every flat left-nav control (P-10.3, reordered
+	// and consolidated by P-22). Kept as one constant so the six controls stay
+	// visually identical without repeating the class list.
 	const barBtn =
 		'flex h-7 items-center gap-1 rounded px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50';
 
@@ -186,35 +189,41 @@
 
 		<div class="h-5 w-px bg-border" aria-hidden="true"></div>
 		<nav aria-label="Toolbar" class="flex items-center gap-1">
-			<ArtifactsMenu />
-			<button type="button" class={barBtn} onclick={() => openIssuesTab()}>
-				<ListChecks class="h-3.5 w-3.5" /> Issues
-			</button>
-			<a class={barBtn} href={resolve(`/p/${getActiveProjectId()}/compare`)}>
-				<GitCompareArrows class="h-3.5 w-3.5" /> Compare
-			</a>
-			<button type="button" class={barBtn} onclick={() => (applyCrOpen = true)}>
-				<FileInput class="h-3.5 w-3.5" /> Apply CR
-			</button>
 			<button
 				type="button"
 				class={barBtn}
 				disabled={metamodel === null}
 				onclick={() => openMetamodelTab()}
 			>
-				<Shapes class="h-3.5 w-3.5" /> Edit Metamodel
+				<Shapes class="h-3.5 w-3.5" /> Metamodel
 			</button>
-			<button
-				type="button"
-				class={barBtn}
-				disabled={summary === null}
-				onclick={() => void onExport()}
-			>
-				<Download class="h-3.5 w-3.5" /> Export
+			<button type="button" class={barBtn} onclick={() => openIssuesTab()}>
+				<ListChecks class="h-3.5 w-3.5" /> Issues
 			</button>
-			<button type="button" class={barBtn} onclick={() => setHistoryDrawerOpen(true)}>
-				<History class="h-3.5 w-3.5" /> History
+			<ArtifactsMenu />
+			<button type="button" class={barBtn} onclick={() => (applyCrOpen = true)}>
+				<FileInput class="h-3.5 w-3.5" /> Apply CR
 			</button>
+			<DropdownMenu.Root>
+				<DropdownMenu.Trigger data-testid="model-menu-trigger" class={barBtn}>
+					<Database class="h-3.5 w-3.5" />
+					Model
+					<ChevronDown class="h-3 w-3" />
+				</DropdownMenu.Trigger>
+				<DropdownMenu.Content align="start" class="w-40">
+					<DropdownMenu.Item onSelect={() => setHistoryDrawerOpen(true)}>
+						<History class="h-3.5 w-3.5" /> History
+					</DropdownMenu.Item>
+					<DropdownMenu.Item
+						onSelect={() => void goto(resolve(`/p/${getActiveProjectId()}/compare`))}
+					>
+						<GitCompareArrows class="h-3.5 w-3.5" /> Compare
+					</DropdownMenu.Item>
+					<DropdownMenu.Item disabled={summary === null} onSelect={() => void onExport()}>
+						<Download class="h-3.5 w-3.5" /> Export
+					</DropdownMenu.Item>
+				</DropdownMenu.Content>
+			</DropdownMenu.Root>
 			<button type="button" class={barBtn} onclick={() => (settingsOpen = true)}>
 				<Settings class="h-3.5 w-3.5" /> Settings
 			</button>

@@ -105,8 +105,10 @@ test('artifact lock → edit → commit round-trip', async ({ page }) => {
 	await expect(row).toBeVisible();
 	await expect(row.locator('[data-staged-state]')).toHaveCount(0);
 
-	// The commit reached the journal under our message.
-	await page.getByRole('button', { name: 'History', exact: true }).click();
+	// The commit reached the journal under our message (History lives in the
+	// TopBar's Model dropdown — P-22).
+	await page.getByTestId('model-menu-trigger').click();
+	await page.getByRole('menuitem', { name: 'History', exact: true }).click();
 	const historyDrawer = page.getByRole('dialog', { name: /commit history/i });
 	await expect(historyDrawer.locator('[data-testid="commit-row"]').first()).toContainText(
 		commitMessage,

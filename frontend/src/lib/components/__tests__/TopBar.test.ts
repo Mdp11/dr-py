@@ -53,7 +53,13 @@ vi.mock('$lib/util/fileSave', () => ({ saveResponseToFile: vi.fn(async () => {})
 // the artifact-edits store is deliberately NOT mocked (the `...actual` spread
 // keeps it real) so the Commit gate is exercised against the real staged
 // buffer rather than a stub.
-import { getMetamodel, getModelSummary, getStagedViewDepth } from '$lib/state';
+import {
+	getMetamodel,
+	getModelSummary,
+	getStagedViewDepth,
+	setHistoryDrawerOpen
+} from '$lib/state';
+import { downloadModel } from '$lib/api/model-read';
 import { resetArtifactEdits, stageArtifactCreate } from '$lib/state/artifact-edits.svelte';
 // The workspace tab store is deliberately NOT mocked (the `...actual` spread
 // keeps it real), so the menu item is asserted through the tab it opens.
@@ -70,6 +76,17 @@ const SUMMARY = {
 
 function findButton(name: RegExp): HTMLButtonElement | undefined {
 	return [...document.querySelectorAll('button')].find((b) => name.test(b.textContent ?? ''));
+}
+
+function openModelMenu(): void {
+	document.querySelector<HTMLButtonElement>('[data-testid="model-menu-trigger"]')!.click();
+	flushSync();
+}
+
+function menuItem(label: string): HTMLElement | undefined {
+	return [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+		(i) => i.textContent?.trim() === label
+	);
 }
 
 beforeEach(() => {
@@ -146,21 +163,21 @@ describe('TopBar', () => {
 		});
 	});
 
-	// The old "Swap Metamodel" drawer is gone; the flat Edit Metamodel button
-	// (promoted from the retired overflow menu — P-10.3) opens the in-app
-	// metamodel editor tab instead.
-	describe('Edit Metamodel button', () => {
+	// P-22 renamed the flat control "Edit Metamodel" → "Metamodel" and moved it
+	// first; it still opens the in-app metamodel editor tab (P-10.3 killed the
+	// old "Swap Metamodel" drawer).
+	describe('Metamodel button', () => {
 		it('opens the metamodel tab and offers no Swap Metamodel entry', () => {
 			vi.mocked(getMetamodel).mockReturnValue({ elements: [], relationships: [] } as never);
 
 			const c = mount(TopBar, { target: document.body });
 			flushSync();
 
-			expect(document.body.textContent).toContain('Edit Metamodel');
+			expect(document.body.textContent).not.toContain('Edit Metamodel');
 			expect(document.body.textContent).not.toContain('Swap Metamodel');
 			expect(getDynamicTabs()).toHaveLength(0);
 
-			findButton(/edit metamodel/i)!.click();
+			findButton(/metamodel/i)!.click();
 			flushSync();
 
 			expect(getDynamicTabs().some((t) => t.kind === 'metamodel')).toBe(true);
@@ -172,31 +189,23 @@ describe('TopBar', () => {
 			const c = mount(TopBar, { target: document.body });
 			flushSync();
 
-			expect(findButton(/edit metamodel/i)?.disabled).toBe(true);
+			expect(findButton(/metamodel/i)?.disabled).toBe(true);
 
 			unmount(c);
 		});
 	});
 
-	// P-10.3: the three-dots overflow menu is retired — its items are now
-	// flat first-class controls in the left nav, and the ⌘K hint is gone from
-	// this bar along with the palette it used to advertise.
-	describe('promoted overflow-menu controls (P-10.3)', () => {
-		it('renders the promoted controls and no overflow menu', () => {
+	// P-22: six left-nav controls in a fixed order, with Compare/Export/History
+	// folded into the Model dropdown. The P-10.3 guarantees (no overflow menu,
+	// no command palette) still hold.
+	describe('top bar layout (P-22)', () => {
+		it('renders Metamodel · Issues · Artifacts · Apply CR · Model · Settings, in order', () => {
 			const c = mount(TopBar, { target: document.body });
 			flushSync();
 
-			for (const label of [
-				'Issues',
-				'Compare',
-				'Apply CR',
-				'Edit Metamodel',
-				'Export',
-				'History',
-				'Settings'
-			]) {
-				expect(document.body.textContent).toContain(label);
-			}
+			const nav = document.querySelector('nav[aria-label="Toolbar"]')!;
+			const labels = [...nav.querySelectorAll('button, a')].map((n) => n.textContent?.trim());
+			expect(labels).toEqual(['Metamodel', 'Issues', 'Artifacts', 'Apply CR', 'Model', 'Settings']);
 			expect(document.querySelector('[aria-label="More actions"]')).toBeNull();
 			expect(document.querySelector('[title="Command palette"]')).toBeNull();
 
@@ -214,14 +223,74 @@ describe('TopBar', () => {
 
 			unmount(c);
 		});
+	});
 
-		it('Edit Metamodel and Export are disabled without a metamodel/model', () => {
-			// getMetamodel/getModelSummary default to null via the afterEach reset.
+	// P-22: History, Compare and Export live in the Model dropdown (same
+	// treatment as the Artifacts menu), no longer as flat controls.
+	describe('Model menu (P-22)', () => {
+		it('offers History, Compare and Export, in order', () => {
 			const c = mount(TopBar, { target: document.body });
 			flushSync();
 
-			expect(findButton(/edit metamodel/i)?.disabled).toBe(true);
-			expect(findButton(/export/i)?.disabled).toBe(true);
+			openModelMenu();
+
+			const items = [...document.querySelectorAll('[role="menuitem"]')].map((n) =>
+				n.textContent?.trim()
+			);
+			expect(items).toEqual(['History', 'Compare', 'Export']);
+
+			unmount(c);
+		});
+
+		it('History opens the history drawer', () => {
+			const c = mount(TopBar, { target: document.body });
+			flushSync();
+
+			openModelMenu();
+			menuItem('History')!.click();
+			flushSync();
+
+			expect(setHistoryDrawerOpen).toHaveBeenCalledWith(true);
+
+			unmount(c);
+		});
+
+		it('Compare navigates to the compare page', () => {
+			const c = mount(TopBar, { target: document.body });
+			flushSync();
+
+			openModelMenu();
+			menuItem('Compare')!.click();
+			flushSync();
+
+			expect(goto).toHaveBeenCalledWith('/p/p1/compare');
+
+			unmount(c);
+		});
+
+		it('Export is disabled without a model', () => {
+			const c = mount(TopBar, { target: document.body });
+			flushSync();
+
+			openModelMenu();
+
+			expect(menuItem('Export')!.getAttribute('aria-disabled')).toBe('true');
+
+			unmount(c);
+		});
+
+		it('Export downloads the model when one is loaded', async () => {
+			vi.mocked(getModelSummary).mockReturnValue(SUMMARY as never);
+
+			const c = mount(TopBar, { target: document.body });
+			flushSync();
+
+			openModelMenu();
+			menuItem('Export')!.click();
+			flushSync();
+			await new Promise((r) => setTimeout(r, 0));
+
+			expect(downloadModel).toHaveBeenCalled();
 
 			unmount(c);
 		});

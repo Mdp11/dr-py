@@ -91,9 +91,10 @@ test('Export button downloads the model as a .json file', async ({ page }) => {
 	const downloads: Download[] = [];
 	page.on('download', (d) => downloads.push(d));
 
-	// Click the TopBar "Export" control (a first-class top bar button since the
-	// overflow menu was retired) — downloads the active model JSON.
-	await page.getByRole('button', { name: 'Export', exact: true }).click();
+	// Export lives in the TopBar's Model dropdown (P-22) — open the menu, then
+	// pick Export to download the active model JSON.
+	await page.getByTestId('model-menu-trigger').click();
+	await page.getByRole('menuitem', { name: 'Export', exact: true }).click();
 
 	await expect.poll(() => downloads.length, { timeout: 10_000 }).toBe(1);
 

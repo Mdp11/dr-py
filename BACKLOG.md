@@ -27,11 +27,12 @@ spec's phase table (`R`). Anything older than the last few sessions is **unverif
 against current code** — confirm before acting on it. Line numbers drift; treat them as
 hints.
 
-Last updated: 2026-08-18 · repo head at time of writing: `feat/top-bar-restructure`
-(metamodel commit-flow merged, plus the top-bar-restructure wave: P-10 and U-1 shipped,
-T-1 deleted). The 2026-08-18 additions are a batch of owner notes: P-10 gained five
-concrete sub-items, P-15 → P-21 and U-9 are new, and T-1 was retired as stale while
-verifying them.
+Last updated: 2026-08-19 · repo head at time of writing: `main` at `1c95ba3`
+(top-bar-restructure merged). The 2026-08-18 additions were a batch of owner notes: P-10
+gained five concrete sub-items, P-15 → P-21 and U-9 are new, and T-1 was retired as stale
+while verifying them. The 2026-08-19 additions are two more owner notes: P-22 (top bar
+reorder + Model dropdown, a P-10 follow-up) and P-23 (Apply CR against the loaded model,
+staged not committed, multiple CRs).
 
 ---
 
@@ -345,6 +346,41 @@ same component so the two section lists cannot drift.
 Verbatim from the owner's 2026-08-18 notes; no surface, scope or acceptance criterion was
 given, and I did not invent one. Filed so it isn't lost — needs a sentence from the owner
 before it can be sized.
+
+### P-22 · Top bar reorder: "Metamodel" first, a "Model" dropdown · `done` (2026-08-19)
+Shipped: "Edit Metamodel" renamed to **Metamodel** and moved first; **Compare, Export
+and History** collapsed into a **Model** dropdown (inline `DropdownMenu` in
+`TopBar.svelte`, mirroring the Artifacts menu, trigger testid `model-menu-trigger`)
+with items History · Compare · Export (Export stays gated on a loaded model, now at the
+item level). Final order: **Metamodel · Issues · Artifacts · Apply CR · Model ·
+Settings** — pinned by an order test in `TopBar.test.ts`. The three e2e call sites that
+clicked the flat History/Export buttons (`smoke`, `history`, `artifact-commit` specs)
+now go through the menu.
+
+### P-23 · Apply CR against the loaded model, staged not committed, multiple CRs · `open` · design-heavy
+Three changes to the Apply CR flow (owner notes, 2026-08-19):
+
+- **No model file upload.** `ApplyCrDialog.svelte` today drives the legacy/inline mode of
+  `POST /model/apply-cr` — the user picks a model file *and* a CR file, and the result is
+  saved back out as a new file. Wanted: the CR applies to the **currently loaded model**.
+  Half the answer already exists: the route's **session mode** (`routes/change_request.py`
+  — `model` field absent) applies the CR to the session model. But session mode
+  **replaces the session model and bumps `model_rev` directly**, which conflicts with the
+  next point, so it is a starting point, not the answer.
+- **Staged, not committed.** After apply, every change the CR produced should land in the
+  **staged buffers** (the client's checkout/commit flow), for the user to review and
+  commit — not as an already-durable mutation. That means the CR has to come back to the
+  client as **op proposals** (the `OpIn` vocabulary) rather than being applied
+  server-side — closer in spirit to how snippet runs *propose* ops than to today's
+  apply-cr. Probably a preview/dry-run shape: server applies the CR transiently, derives
+  the op batch + conflicts, rolls back, and the client stages the ops.
+- **Multiple CRs at once.** Apply several CR files in one go. Needs a decision on
+  ordering and cross-CR conflict semantics (two CRs touching the same element: sequential
+  apply with the second seeing the first's result, or reject as a conflict?).
+
+Adjacent to (but not the same as) the **"Real CR workflow"** entry in §10's deferred
+list — that was the full authoring/review lifecycle; this is a UX + staging rework of
+the existing apply endpoint. Still worth a re-ask if scope creeps toward workflow.
 
 ### Already shipped — from the notes, no action needed
 - **Artefact leases** ("extend the Phase 4 lease mechanism so users can lock artifacts"):
