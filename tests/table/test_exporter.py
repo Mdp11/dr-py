@@ -96,3 +96,21 @@ def test_structural_fields_and_the_input_are_untouched():
     assert defn.columns[0].export == ColumnExportOptions(include=False)
     assert defn.columns[1].json_export == JsonColumnOptions(key="own_key")
     assert defn.export_order == [1, 0]
+
+
+def test_output_options_default_and_roundtrip():
+    d = EXPORTER_ADAPTER.validate_python({"entries": []})
+    assert d.output.mode == "zip"
+    assert d.output.filename == ""
+    assert d.output.manifest is True
+
+    d2 = EXPORTER_ADAPTER.validate_python(
+        {
+            "output": {"mode": "bare", "filename": "x_${rev}", "manifest": False},
+            "entries": [{"source": {"ref": "t1"}, "folder": "a/b"}],
+        }
+    )
+    assert d2.output.mode == "bare"
+    assert d2.entries[0].folder == "a/b"
+    dumped = d2.model_dump()
+    assert EXPORTER_ADAPTER.validate_python(dumped) == d2

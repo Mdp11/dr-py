@@ -47,10 +47,19 @@ class ColumnOverride(BaseModel):
     json_export: JsonColumnOptions | None = None
 
 
+class OutputOptions(BaseModel):
+    mode: Literal["zip", "bare"] = "zip"
+    #: Zip filename template; "" = the artifact's name. NAME_TOKENS vocabulary.
+    filename: str = ""
+    manifest: bool = True
+
+
 class ExporterEntry(BaseModel):
     source: TableRef
-    #: Output base name in the zip; "" falls back to the table's name.
+    #: Output base-name template; "" = the table's name. NAME_TOKENS vocabulary.
     name: str = ""
+    #: Folder path template inside the zip; "" = archive root. Multi-segment.
+    folder: str = ""
     format: Literal["xlsx", "json"] = "xlsx"
     columns: list[ColumnOverride] = Field(default_factory=list)
     export_order: list[int] = Field(default_factory=list)
@@ -61,6 +70,7 @@ class ExporterEntry(BaseModel):
 
 class ExporterDefinition(BaseModel):
     schema_version: int = 1
+    output: OutputOptions = Field(default_factory=OutputOptions)
     entries: list[ExporterEntry] = Field(default_factory=list)
 
 
