@@ -16,8 +16,9 @@ from __future__ import annotations
 import io
 import json
 import zipfile
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from data_rover.core.metamodel.schema import Metamodel
 from data_rover.core.model.model import Model
@@ -123,6 +124,21 @@ def build_zip(files: list[tuple[str, bytes]]) -> bytes:
     return buf.getvalue()
 
 
+def export_context_vars(session: Session, project_id: str) -> dict[str, str]:
+    """The RUN-LEVEL `${...}` template context (`naming.CONTEXT_TOKENS`):
+    `${rev}`/`${date}`/`${project}`. Defined ONCE here so `routes/exports.py`
+    and `routes/tables.py`'s standalone `/tables/export` share identical
+    values for the same request rather than each deriving its own — `date`
+    in particular must not drift between an exporter's several entries
+    rendered within one call. `project` is the project ID (machine-oriented
+    naming input), never the display name."""
+    return {
+        "rev": str(session.model_rev),
+        "date": datetime.now(UTC).strftime("%Y%m%d"),
+        "project": project_id,
+    }
+
+
 def run_table_export(
     *,
     session: Session,
@@ -135,6 +151,7 @@ def run_table_export(
     name: str,
     format: str,  # "xlsx" | "json"
     sort: SortSpec | None,
+    template_vars: Mapping[str, str] | None = None,
 ) -> ExportPending | ExportFiles:
     """Exports the WHOLE table (every row `build_rows`/`order_rows` produce,
     honoring `max_rows` and the requested sort) — unlike `/tables/evaluate`,
@@ -414,7 +431,9 @@ def run_table_export(
                 # `core/table/split.py`).
                 parts = split_partitions(ordered, all_rows)
                 labels = [partition_label(model, b) for b, _ in parts]
-                stems = render_filenames(split.filename_template, labels)
+                stems = render_filenames(
+                    split.filename_template, labels, extra=template_vars
+                )
                 files = []
                 for stem, (_, pairs) in zip(stems, parts, strict=True):
                     part_docs = render_json(

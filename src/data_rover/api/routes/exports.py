@@ -21,6 +21,13 @@ from data_rover.core.table.exporter import (
     ExporterDefinition,
     overridden_table,
 )
+from data_rover.core.table.naming import (
+    NAME_TOKENS,
+    SPLIT_TOKENS,
+    folder_segments,
+    substitute,
+    validate_tokens,
+)
 from data_rover.core.table.split import sanitize_stem, validate_template
 
 from .. import content
@@ -34,6 +41,7 @@ from ..table_export_engine import (
     ExportFiles,
     ExportPending,
     build_zip,
+    export_context_vars,
     run_table_export,
 )
 from .tables import _resolve_table
@@ -41,12 +49,19 @@ from .tables import _resolve_table
 router = APIRouter()
 
 
-def _dedupe(stem: str, taken: set[str]) -> str:
+def _dedupe_path(prefix: str, stem: str, taken: set[str]) -> str:
+    """Dedupe `stem` against every OTHER entry landing in the same folder.
+
+    `taken` holds FULL `prefix + stem` member paths (extension-less), so two
+    entries that render to the same name in DIFFERENT folders never force a
+    suffix on each other — only a collision within the same `prefix` does.
+    Returns the (possibly suffixed) stem alone; the caller still prepends
+    `prefix` to build the actual archive member path."""
     candidate, n = stem, 2
-    while candidate in taken:
+    while f"{prefix}{candidate}" in taken:
         candidate = f"{stem}_{n}"
         n += 1
-    taken.add(candidate)
+    taken.add(f"{prefix}{candidate}")
     return candidate
 
 
@@ -100,30 +115,56 @@ def run_export(
     if not cdef.entries:
         raise HTTPException(status_code=422, detail="exporter has no entries")
 
+    # Run-level `${rev}`/`${date}`/`${project}` context, shared by every
+    # entry's name/folder template and by the zip filename (Task 6) — ONE
+    # `date` for the whole request, not one per entry.
+    ctx = export_context_vars(session, project_id)
+    try:
+        validate_tokens(cdef.output.filename, NAME_TOKENS)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422, detail=f"output filename: {exc}"
+        ) from exc
+
     # Resolve every table up front: an export artefact with a hole fails
     # LOUDLY (422 naming the entries) rather than shipping a partial zip that
     # looks complete — deliberate divergence from the bundle's
-    # tolerant-dangler stance (spec §4.3).
+    # tolerant-dangler stance (spec §4.3). Template/folder validation is
+    # merged into this SAME pass (rather than a second loop) so `folders`
+    # stays index-aligned with `cdef.entries` on every path, including the
+    # error one: a `bad_templates` entry still appends `folders.append([])`
+    # to hold the slot.
     missing: list[str] = []
     bad_templates: list[str] = []
     tables: list[ArtifactRow | None] = []
+    folders: list[list[str]] = []
     for entry in cdef.entries:
         t = content.get_artifact(db, entry.source.ref)
         if t is None or t.project_id != project_id or t.kind is not ArtifactKind.table:
             missing.append(entry.name or entry.source.ref)
             tables.append(None)
+            table_name = entry.source.ref
         else:
             tables.append(t)
+            table_name = t.name
         # Same up-front, name-the-entry stance as the missing-table check:
-        # a bad `${name}` template must not 422 the whole export anonymously
-        # (dialog gating only covers json-mode saves — an entry saved under
-        # xlsx then flipped to json can carry a tokenless template).
-        split = entry.json_split
-        if entry.format == "json" and split is not None and split.enabled:
-            try:
+        # a bad `${...}` token, an absolute/empty-segment folder, or a
+        # tokenless split template must not 422 the whole export
+        # anonymously (dialog gating only covers json-mode saves — an entry
+        # saved under xlsx then flipped to json can carry a tokenless
+        # template).
+        try:
+            validate_tokens(entry.name, NAME_TOKENS)
+            validate_tokens(entry.folder, NAME_TOKENS)
+            rendered_folder = substitute(entry.folder, {"name": table_name, **ctx})
+            folders.append(folder_segments(rendered_folder))
+            split = entry.json_split
+            if entry.format == "json" and split is not None and split.enabled:
                 validate_template(split.filename_template)
-            except ValueError:
-                bad_templates.append(entry.name or entry.source.ref)
+                validate_tokens(split.filename_template, SPLIT_TOKENS)
+        except ValueError as exc:
+            bad_templates.append(f"{entry.name or entry.source.ref}: {exc}")
+            folders.append([])
     if missing:
         raise HTTPException(
             status_code=422,
@@ -132,23 +173,26 @@ def run_export(
     if bad_templates:
         raise HTTPException(
             status_code=422,
-            detail="invalid split filename template for entries: "
-            + ", ".join(bad_templates),
+            detail="invalid template for entries: " + ", ".join(bad_templates),
         )
 
     try:
         results = []
-        for entry, t in zip(cdef.entries, tables, strict=True):
+        for entry, t, segments in zip(cdef.entries, tables, folders, strict=True):
             assert t is not None
             defn = _resolve_table(
                 EvaluateTableIn(artifact_id=t.id, offset=0, limit=100),
                 project_id,
                 db,
             )
-            out_name = entry.name or t.name
+            out_name = (
+                substitute(entry.name, {"name": t.name, **ctx})
+                if entry.name
+                else t.name
+            )
             results.append(
                 (
-                    entry,
+                    segments,
                     out_name,
                     run_table_export(
                         session=session,
@@ -161,6 +205,7 @@ def run_export(
                         name=out_name,
                         format=entry.format,
                         sort=None,
+                        template_vars=ctx,
                     ),
                 )
             )
@@ -185,13 +230,21 @@ def run_export(
     files: list[tuple[str, bytes]] = []
     taken: set[str] = set()
     truncated = degraded = False
-    for _entry, out_name, res in results:
+    for segments, out_name, res in results:
         assert isinstance(res, ExportFiles)
         truncated |= res.truncated
         degraded |= res.degraded
+        # `prefix` is the entry's user-chosen folder path, ALREADY validated
+        # and sanitized segment-by-segment by `folder_segments` in the
+        # up-front pass above — it is safe to splice verbatim ahead of the
+        # entry's own member name below. Dedupe is scoped to `prefix`
+        # (`_dedupe_path` keys on the FULL member path), so two entries
+        # landing in different folders never force a suffix on each other.
+        prefix = "/".join(segments) + "/" if segments else ""
         if res.archive:
             # A split entry keeps its per-element files together under one
-            # folder named by the entry; root-name collisions dedupe `_2`.
+            # folder named by the entry, now nested BENEATH the user
+            # folder; root-name collisions within that folder dedupe `_2`.
             # `sanitize_stem` guards the zip-slip boundary here: `out_name`
             # is free-form user text (`entry.name`/`t.name`, no charset
             # constraint at the API layer) that is about to become an
@@ -201,10 +254,13 @@ def run_export(
             # "" for whitespace-only input BY DESIGN (its docstring: callers
             # fall back through `... or fallback or "element"`) — this
             # caller is that fallback site: an empty folder name becomes
-            # `f"{folder}/{fn}"` == `"/{fn}"`, an absolute-path zip member,
-            # the same zip-slip hazard class under a different mechanism.
-            folder = _dedupe(sanitize_stem(out_name) or "export", taken)
-            files.extend((f"{folder}/{fn}", blob) for fn, blob in res.files)
+            # `f"{prefix}{folder}/{fn}"` with `folder == ""`, i.e. a member
+            # starting with `//`, which — same hazard class as an absolute
+            # path — a naive extractor can still misinterpret; the `"export"`
+            # fallback keeps this segment non-empty exactly like `prefix`'s
+            # own segments already are (guaranteed by `folder_segments`).
+            folder = _dedupe_path(prefix, sanitize_stem(out_name) or "export", taken)
+            files.extend((f"{prefix}{folder}/{fn}", blob) for fn, blob in res.files)
         else:
             fn, blob = res.files[0]
             stem, dot, ext = fn.rpartition(".")
@@ -212,10 +268,10 @@ def run_export(
             # the same unsanitized `out_name` (run_table_export names the
             # single-file case `f"{name}.<ext>"`), so it needs the identical
             # treatment before it becomes a zip member's path — including
-            # the empty-stem fallback (see comment above).
-            files.append(
-                (f"{_dedupe(sanitize_stem(stem) or 'export', taken)}{dot}{ext}", blob)
-            )
+            # the empty-stem fallback (see comment above). `prefix` needs no
+            # further sanitizing here (see the note above the branch).
+            deduped = _dedupe_path(prefix, sanitize_stem(stem) or "export", taken)
+            files.append((f"{prefix}{deduped}{dot}{ext}", blob))
 
     resp_headers = {"Content-Disposition": f'attachment; filename="{row.name}.zip"'}
     if truncated:

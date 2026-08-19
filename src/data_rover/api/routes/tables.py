@@ -72,6 +72,7 @@ from ..table_cache import table_fingerprint
 from ..table_export_engine import (
     ExportPending,
     build_zip,
+    export_context_vars,
     run_table_export,
 )
 from ..table_export_engine import status_from_job as _status_from_job
@@ -524,6 +525,7 @@ def export_table(
             name=name,
             format=payload.format,
             sort=sort,
+            template_vars=export_context_vars(session, project_id),
         )
         if isinstance(result, ExportPending):
             return JSONResponse(

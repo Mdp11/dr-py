@@ -43,11 +43,13 @@ def _mk_table(client, name):
     return r.json()["id"]
 
 
-def _mk_export(client, entries, name="drop"):
+def _mk_export(client, entries, name="drop", output=None):
+    payload = {"entries": entries}
+    if output is not None:
+        payload["output"] = output
     r = client.post(
         papi("/artifacts"),
-        json={"kind": "exporter", "name": name,
-              "payload": {"entries": entries}},
+        json={"kind": "exporter", "name": name, "payload": payload},
         headers=AUTH_HEADERS,
     )
     assert r.status_code == 201
@@ -326,3 +328,72 @@ def test_aggregate_pending_sums_done_and_total_across_entries():
     # `total=None` (an entry whose row count is not yet known) contributes 0,
     # never breaks the sum — same `or 0` narrowing as the route itself.
     assert agg.total == 14
+
+
+# --- entry-name/folder templating + per-folder dedupe -------------------
+
+
+def _entries(*tables: str, **extra: object) -> list[dict[str, object]]:
+    return [{"source": {"ref": t}, **extra} for t in tables]
+
+
+def test_folder_template_nests_entry_files(client) -> None:
+    _bootstrap_model(client)
+    t = _mk_table(client, "T")
+    art = _mk_export(client, [{"source": {"ref": t}, "name": "f", "folder": "grp/sub"}])
+    resp = _run(client, art)
+    assert resp.status_code == 200
+    names = zipfile.ZipFile(io.BytesIO(resp.content)).namelist()
+    assert "grp/sub/f.xlsx" in names
+
+
+def test_shared_folder_prefix_and_per_folder_dedupe(client) -> None:
+    _bootstrap_model(client)
+    t = _mk_table(client, "T")
+    art = _mk_export(
+        client,
+        [
+            {"source": {"ref": t}, "name": "same", "folder": "a"},
+            {"source": {"ref": t}, "name": "same", "folder": "a"},
+            {"source": {"ref": t}, "name": "same", "folder": "b"},
+        ],
+    )
+    names = zipfile.ZipFile(io.BytesIO(_run(client, art).content)).namelist()
+    # dedupe scoped to the folder: b/same needs no suffix
+    assert {"a/same.xlsx", "a/same_2.xlsx", "b/same.xlsx"} <= set(names)
+
+
+def test_folder_traversal_and_absolute_are_422(client) -> None:
+    _bootstrap_model(client)
+    t = _mk_table(client, "T")
+    for bad in ("/abs", "a//b", "a/   /b"):
+        art = _mk_export(client, [{"source": {"ref": t}, "folder": bad}], name=f"e-{bad!r}")
+        resp = _run(client, art)
+        assert resp.status_code == 422, bad
+        assert "folder" in resp.json()["detail"]
+
+
+def test_dotdot_folder_segment_is_neutralized_not_traversal(client) -> None:
+    _bootstrap_model(client)
+    t = _mk_table(client, "T")
+    art = _mk_export(client, [{"source": {"ref": t}, "name": "f", "folder": "../up"}])
+    names = zipfile.ZipFile(io.BytesIO(_run(client, art).content)).namelist()
+    assert "__/up/f.xlsx" in names  # sanitize_stem turns ".." into "__"
+
+
+def test_unknown_template_token_is_422_naming_the_entry(client) -> None:
+    _bootstrap_model(client)
+    t = _mk_table(client, "T")
+    art = _mk_export(client, [{"source": {"ref": t}, "name": "x${typo}"}])
+    resp = _run(client, art)
+    assert resp.status_code == 422
+    assert "${typo}" in resp.json()["detail"]
+
+
+def test_context_tokens_render_in_entry_names(client) -> None:
+    _bootstrap_model(client)
+    t = _mk_table(client, "T")
+    art = _mk_export(client, [{"source": {"ref": t}, "name": "${name}_r${rev}"}])
+    names = zipfile.ZipFile(io.BytesIO(_run(client, art).content)).namelist()
+    # rev is 0-or-more commits in the seeded project; just assert the shape
+    assert any(n.startswith("T_r") and n.endswith(".xlsx") for n in names)
