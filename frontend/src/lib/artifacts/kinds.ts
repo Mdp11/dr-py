@@ -5,7 +5,7 @@
  */
 import { FileCode, FolderOutput, Route, Table } from '@lucide/svelte';
 
-export const REGISTERED_KINDS = ['navigation', 'table', 'code_snippet', 'custom_export'] as const;
+export const REGISTERED_KINDS = ['navigation', 'table', 'code_snippet', 'exporter'] as const;
 
 export type ArtifactKind = (typeof REGISTERED_KINDS)[number];
 
@@ -13,14 +13,14 @@ export const KIND_ICONS: Record<ArtifactKind, typeof Route> = {
 	navigation: Route,
 	table: Table,
 	code_snippet: FileCode,
-	custom_export: FolderOutput
+	exporter: FolderOutput
 };
 
 export const KIND_LABEL: Record<ArtifactKind, string> = {
 	navigation: 'Navigation',
 	table: 'Table',
 	code_snippet: 'Snippet',
-	custom_export: 'Custom export'
+	exporter: 'Exporter'
 };
 
 /** Filter for headers whose kind is registered (unregistered kinds like the

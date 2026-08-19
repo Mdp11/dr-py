@@ -1,4 +1,4 @@
-// Render tests for the custom-export tab (P-14 task 12b step 3/5). Mirrors the
+// Render tests for the exporter tab (P-14 task 12b step 3/5). Mirrors the
 // mount scaffolding the artifact-editor tab tests use (artifact/checkout
 // mocks, `setProjectInfo`) and `SnippetTab.lock-denied.test.ts` (the
 // conflict-shape lease stub).
@@ -10,18 +10,18 @@ import * as exportsApi from '$lib/api/exports';
 import { ConflictError } from '$lib/api/errors';
 import { EXPORT_RETRY_MS } from '$lib/util/export-download';
 import {
-	getCustomExportDraft,
+	getExporterDraft,
 	getStagedArtifactOps,
 	isTempId,
 	loadArtifacts,
 	resetArtifactEdits,
 	resetArtifacts,
 	resetCheckout,
-	resetCustomExportEditors,
+	resetExporterEditors,
 	resetWorkspaceTabs,
 	setProjectInfo
 } from '$lib/state';
-import CustomExportTab from '../CustomExportTab.svelte';
+import ExporterTab from '../ExporterTab.svelte';
 
 /** A promise plus its own resolver, for driving two concurrent fetches to
  *  resolve in a chosen order (the Important-fix regression test below). */
@@ -35,7 +35,7 @@ function deferred<T>(): { promise: Promise<T>; resolve: (v: T) => void } {
 
 const EXPORT_ARTIFACT = {
 	id: 'art-1',
-	kind: 'custom_export',
+	kind: 'exporter',
 	name: 'Drop',
 	artifact_rev: 3,
 	updated_at: new Date().toISOString(),
@@ -74,7 +74,7 @@ const TABLE_ARTIFACT = {
  *  would make the two tables indistinguishable in the SAVED patch alone. */
 const RACE_ARTIFACT = {
 	id: 'art-1',
-	kind: 'custom_export',
+	kind: 'exporter',
 	name: 'Drop',
 	artifact_rev: 3,
 	updated_at: new Date().toISOString(),
@@ -139,7 +139,7 @@ beforeEach(() => {
 	resetArtifacts();
 	resetWorkspaceTabs();
 	resetCheckout();
-	resetCustomExportEditors();
+	resetExporterEditors();
 	resetArtifactEdits();
 	setProjectInfo({ role: 'editor', lockTtlSeconds: 300 });
 	vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({ items: [] });
@@ -164,7 +164,7 @@ afterEach(() => {
 	for (const m of mounted) unmount(m);
 	mounted = [];
 	document.body.innerHTML = '';
-	resetCustomExportEditors();
+	resetExporterEditors();
 	resetArtifactEdits();
 	resetWorkspaceTabs();
 	resetArtifacts();
@@ -173,16 +173,16 @@ afterEach(() => {
 });
 
 function render(tabId: string): HTMLElement {
-	const host = mount(CustomExportTab, { target: document.body, props: { tabId } });
+	const host = mount(ExporterTab, { target: document.body, props: { tabId } });
 	mounted.push(host);
 	flushSync();
 	return document.body;
 }
 
-describe('CustomExportTab', () => {
+describe('ExporterTab', () => {
 	it('renders entries from a saved artifact and stages edits on save', async () => {
 		getArtifactSpy.mockResolvedValue(EXPORT_ARTIFACT);
-		const host = mount(CustomExportTab, {
+		const host = mount(ExporterTab, {
 			target: document.body,
 			props: { tabId: 'exp:art-1' }
 		});
@@ -193,10 +193,10 @@ describe('CustomExportTab', () => {
 		name.value = 'Renamed';
 		name.dispatchEvent(new Event('input', { bubbles: true }));
 		flushSync();
-		document.querySelector<HTMLButtonElement>('[data-testid="custom-export-save"]')!.click();
+		document.querySelector<HTMLButtonElement>('[data-testid="exporter-save"]')!.click();
 		flushSync();
 		// `{kind: 'update_artifact'}` alone would pass even if the name input
-		// were never wired to `updateExportEntry` (saveCustomExportDraft stages
+		// were never wired to `updateExporterEntry` (saveExporterDraft stages
 		// unconditionally) — assert the payload actually carries the edit.
 		expect(getStagedArtifactOps()[0]).toMatchObject({
 			kind: 'update_artifact',
@@ -223,8 +223,8 @@ describe('CustomExportTab', () => {
 		select.dispatchEvent(new Event('change', { bubbles: true }));
 		flushSync();
 
-		await vi.waitFor(() => expect(getCustomExportDraft('exp:art-1')!.entries.length).toBe(2));
-		expect(getCustomExportDraft('exp:art-1')!.entries[1].columns).toEqual([
+		await vi.waitFor(() => expect(getExporterDraft('exp:art-1')!.entries.length).toBe(2));
+		expect(getExporterDraft('exp:art-1')!.entries[1].columns).toEqual([
 			{ index: 0, export: { include: false, header: '' }, json_export: null }
 		]);
 	});
@@ -237,21 +237,21 @@ describe('CustomExportTab', () => {
 		);
 
 		const name = document.querySelector<HTMLInputElement>('[data-testid="export-entry-0"] input')!;
-		const runBtn = document.querySelector<HTMLButtonElement>('[data-testid="custom-export-run"]')!;
+		const runBtn = document.querySelector<HTMLButtonElement>('[data-testid="exporter-run"]')!;
 
 		name.value = 'Renamed';
 		name.dispatchEvent(new Event('input', { bubbles: true }));
 		flushSync();
 		expect(runBtn.disabled).toBe(true);
 
-		document.querySelector<HTMLButtonElement>('[data-testid="custom-export-save"]')!.click();
+		document.querySelector<HTMLButtonElement>('[data-testid="exporter-save"]')!.click();
 		flushSync();
 		expect(runBtn.disabled).toBe(false);
 
 		vi.useFakeTimers();
 		const blob = new Blob(['x'], { type: 'application/zip' });
 		const runSpy = vi
-			.spyOn(exportsApi, 'runCustomExport')
+			.spyOn(exportsApi, 'runExporter')
 			.mockResolvedValueOnce({ kind: 'preparing', done: 1, total: 2 })
 			.mockResolvedValueOnce({ kind: 'ready', blob, filename: 'Drop.zip' });
 		vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock');
@@ -286,15 +286,15 @@ describe('CustomExportTab', () => {
 	it('keeps the export button disabled for a saved-but-uncommitted (temp-id) draft', async () => {
 		render('exp:draft:1');
 		await vi.waitFor(() =>
-			expect(document.querySelector('[data-testid="custom-export-save"]')).toBeTruthy()
+			expect(document.querySelector('[data-testid="exporter-save"]')).toBeTruthy()
 		);
-		const runBtn = document.querySelector<HTMLButtonElement>('[data-testid="custom-export-run"]')!;
+		const runBtn = document.querySelector<HTMLButtonElement>('[data-testid="exporter-run"]')!;
 		expect(runBtn.disabled).toBe(true); // never saved at all: artifactId null
 
-		document.querySelector<HTMLButtonElement>('[data-testid="custom-export-save"]')!.click();
+		document.querySelector<HTMLButtonElement>('[data-testid="exporter-save"]')!.click();
 		flushSync();
 
-		const draft = getCustomExportDraft('exp:draft:1')!;
+		const draft = getExporterDraft('exp:draft:1')!;
 		expect(draft.dirty).toBe(false);
 		expect(draft.artifactId).not.toBeNull();
 		// A staged create's id names nothing server-side until the batch
@@ -357,7 +357,7 @@ describe('CustomExportTab', () => {
 		document.querySelector<HTMLButtonElement>('[data-testid="entry-layout-save"]')!.click();
 		flushSync();
 
-		const draft = getCustomExportDraft('exp:art-1')!;
+		const draft = getExporterDraft('exp:art-1')!;
 		expect(draft.entries[1].columns).toEqual([
 			{ index: 1, export: { include: false, header: '' }, json_export: null }
 		]);

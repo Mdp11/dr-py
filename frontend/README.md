@@ -74,7 +74,7 @@ The UI is a fixed grid:
   order; closing the last one leaves the placeholder. Tab kinds: **table**
   (`TableView`), **snippet** (`SnippetTab`) hosting a CodeMirror editor and
   run console for server-executed Python snippets against the live model,
-  **navigation** (`NavigationBuilder`), **custom_export** (`CustomExportTab`),
+  **navigation** (`NavigationBuilder`), **exporter** (`ExporterTab`),
   the singleton **metamodel** tab (`MetamodelTab`) — a YAML editor for the
   live metamodel with lint, preview and staged (commit-through) edits — and
   the singleton, closable **issues** tab (`IssuesPanel`), opened from the top
@@ -192,7 +192,7 @@ follows a pessimistic **check-out → stage → commit** loop (Spec B):
    surviving rel pointing at a reverted temp id would 422 the commit) and then
    releases the element's lock token when no remaining staged op still needs it.
 6. **Artifacts ride the same loop.** Saved navigations, tables, code
-   snippets and custom exports are project artifacts rather than model
+   snippets and exporters are project artifacts rather than model
    entities, but their editing is the identical check-out → stage → commit
    shape, so the client
    holds **no artifact write wrapper at all**: `lib/api/artifacts.ts` is
@@ -214,16 +214,16 @@ follows a pessimistic **check-out → stage → commit** loop (Spec B):
      update-over-update keeps whichever fields the later call omits,
      delete-over-create drops both ops (nothing exists server-side to
      delete), delete-over-update collapses to a bare delete.
-   - **Custom exports are workspace tabs too**, keyed like every other
+   - **Exporters are workspace tabs too**, keyed like every other
      artifact editor by a kind-prefixed tab id — `nav:`/`snip:` and now
      `exp:` (`exp:draft:<n>` for an unsaved draft, `exp:<artifactId>` once
-     saved). `state/custom-export-editor.svelte.ts` is the `exp:` sibling of
+     saved). `state/exporter-editor.svelte.ts` is the `exp:` sibling of
      `snippet-editor.svelte.ts`: the same per-tab draft map, lock-denied
      banner, save-stages-not-posts flow, and commit/discard/staged-delete
      listener trio that rebinds a `exp:draft:N` tab to `exp:<id>` off the
      commit's `id_map` rather than re-keying eagerly. Its one kind-specific
-     idea is **copy-at-add**: `addExportEntry` (`Export/CustomExportTab.svelte`'s
-     add-table picker) builds each `ExportEntry` via `entryForTable`, which
+     idea is **copy-at-add**: `addExporterEntry` (`Export/ExporterTab.svelte`'s
+     add-table picker) builds each `ExporterEntry` via `entryForTable`, which
      COPIES the source table's current export settings rather than
      referencing them — from that instant the entry and the table are
      independent, so a later edit to either does not follow the other. An
@@ -400,7 +400,7 @@ client for the four bundle routes is `lib/api/artifact-bundle.ts`.
   `datarover.artifact-bundle/v1` JSON file. Each artifact editor's own
   toolbar carries a per-artifact export trigger (`ArtifactExportButton.svelte`,
   dropped into `Table/TableView.svelte`, `Snippet/SnippetTab.svelte`,
-  `Navigation/NavigationBuilder.svelte` and `Export/CustomExportTab.svelte`;
+  `Navigation/NavigationBuilder.svelte` and `Export/ExporterTab.svelte`;
   the metamodel tab has none — it isn't artifact-backed) that opens the same
   dialog pre-seeded with the tab's artifact (`openExportArtifacts([artifactId])`);
   it renders only once the tab's artifact is committed (hidden for a draft or
@@ -875,14 +875,14 @@ confirm — every editing surface (the entry list, JSON options, the split
 section, the preview pane) lives in `Export/ExportSettingsPanel.svelte`, a
 host-agnostic panel the dialog drives over the table draft via `onChange`.
 `Export/EntryLayoutDialog.svelte` is the **second host**: it edits ONE
-custom-export entry's overrides over the exact same panel markup, but writes
+exporter entry's overrides over the exact same panel markup, but writes
 to a local working copy instead of the table draft. Its `effective` value is
 the entry's overrides re-applied onto the table's CURRENT definition
 (`applyEntryOverrides`) — what the entry would render today, not a frozen
 snapshot from when it was added — and saving diffs the edited result back
 against the table's definition (`overridesFromDefinition`) to produce the
 entry's patch: the entry stores DRIFT from the table, never the table's
-settings themselves. It passes no `sort` to the panel — a custom-export entry
+settings themselves. It passes no `sort` to the panel — an exporter entry
 has no live grid to inherit a sort from, and its download is sort-less too.
 
 - **`lib/table/export-layout.ts`** mirrors `core/table/export_layout.py`'s
@@ -1377,7 +1377,7 @@ src/
                         lazily;
                         unsaved.ts — hasUnsavedWork() (staged model ops + staged
                         artifact ops + dirty table/navigation/snippet/
-                        custom-export drafts), input to the workspace unload
+                        exporter drafts), input to the workspace unload
                         guard (beforeNavigate in p/[projectId]/+page);
                         snippet-editor.svelte.ts — per-tab code-snippet
                         drafts, save lifecycle, debounced lint + run/stop
@@ -1388,11 +1388,11 @@ src/
                         facade docs payload (ensureSnippetDocs/
                         getSnippetDocs), silent-degrade on fetch failure,
                         reset at onReloadModel;
-                        custom-export-editor.svelte.ts — per-tab
-                        (`exp:draft:<n>` / `exp:<id>`) custom-export drafts:
+                        exporter-editor.svelte.ts — per-tab
+                        (`exp:draft:<n>` / `exp:<id>`) exporter drafts:
                         the same draft/lease/save-stages-not-posts shape as
                         snippet-editor.svelte.ts, plus copy-at-add
-                        (addExportEntry -> entryForTable copies a table's
+                        (addExporterEntry -> entryForTable copies a table's
                         export settings into the entry once, then the two
                         drift independently);
                         metamodel-editor.svelte.ts — the metamodel tab's

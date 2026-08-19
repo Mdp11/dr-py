@@ -4,20 +4,20 @@ import * as checkoutApi from '$lib/api/checkout';
 import { ConflictError } from '$lib/api/errors';
 import type { ArtifactHeader, TableDefinition } from '$lib/api/types';
 import {
-	addExportEntry,
-	closeCustomExportDraft,
-	ensureCustomExportDraft,
-	getCustomExportDraft,
-	getCustomExportLockHolder,
-	hasDirtyCustomExportDrafts,
-	moveExportEntryInList,
-	removeExportEntry,
-	resetCustomExportEditors,
-	retryCustomExportLock,
-	saveCustomExportDraft,
-	setCustomExportName,
-	updateExportEntry
-} from '../custom-export-editor.svelte';
+	addExporterEntry,
+	closeExporterDraft,
+	ensureExporterDraft,
+	getExporterDraft,
+	getExporterLockHolder,
+	hasDirtyExporterDrafts,
+	moveExporterEntryInList,
+	removeExporterEntry,
+	resetExporterEditors,
+	retryExporterLock,
+	saveExporterDraft,
+	setExporterName,
+	updateExporterEntry
+} from '../exporter-editor.svelte';
 import { getDynamicTabs, openArtifactTab, resetWorkspaceTabs } from '../workspace.svelte';
 import { loadArtifacts, resetArtifacts } from '../artifacts.svelte';
 import {
@@ -30,9 +30,9 @@ import {
 import { isCheckedOutByMe, resetCheckout, setProjectInfo } from '../checkout.svelte';
 import { isTempId } from '../ops';
 
-const CUSTOM_EXPORT_ARTIFACT = {
+const EXPORTER_ARTIFACT = {
 	id: 'e1',
-	kind: 'custom_export',
+	kind: 'exporter',
 	name: 'My export',
 	artifact_rev: 3,
 	updated_at: '2026-07-17T00:00:00Z',
@@ -79,7 +79,7 @@ const TABLE_DEFN: TableDefinition = {
 function header(id: string, name: string, rev = 1): ArtifactHeader {
 	return {
 		id,
-		kind: 'custom_export',
+		kind: 'exporter',
 		name,
 		artifact_rev: rev,
 		updated_at: '',
@@ -127,7 +127,7 @@ function asEditor() {
 }
 
 beforeEach(() => {
-	resetCustomExportEditors();
+	resetExporterEditors();
 	resetWorkspaceTabs();
 	resetArtifacts();
 	resetArtifactEdits();
@@ -135,22 +135,22 @@ beforeEach(() => {
 	vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({ items: [] });
 });
 afterEach(() => {
-	resetCustomExportEditors();
+	resetExporterEditors();
 	resetWorkspaceTabs();
 	resetArtifacts();
 	vi.restoreAllMocks();
 });
 
-describe('custom export drafts', () => {
+describe('exporter drafts', () => {
 	it('a draft tab starts empty and add copies the table settings', async () => {
-		const tabId = openArtifactTab('custom_export', { artifactId: null, title: 'New export' });
-		await ensureCustomExportDraft(tabId);
-		expect(getCustomExportDraft(tabId)?.entries).toEqual([]);
-		expect(hasDirtyCustomExportDrafts()).toBe(false);
+		const tabId = openArtifactTab('exporter', { artifactId: null, title: 'New export' });
+		await ensureExporterDraft(tabId);
+		expect(getExporterDraft(tabId)?.entries).toEqual([]);
+		expect(hasDirtyExporterDrafts()).toBe(false);
 
-		addExportEntry(tabId, 'tbl-1', 'Alpha', TABLE_DEFN);
+		addExporterEntry(tabId, 'tbl-1', 'Alpha', TABLE_DEFN);
 
-		const d = getCustomExportDraft(tabId)!;
+		const d = getExporterDraft(tabId)!;
 		expect(d.entries).toHaveLength(1);
 		expect(d.entries[0].name).toBe('Alpha');
 		expect(d.entries[0].source.ref).toBe('tbl-1');
@@ -159,22 +159,22 @@ describe('custom export drafts', () => {
 
 	it('add copies the table definition — later edits to either do not follow the other', async () => {
 		const tabId = 'exp:draft:1';
-		await ensureCustomExportDraft(tabId);
+		await ensureExporterDraft(tabId);
 		const defn = { ...TABLE_DEFN };
-		addExportEntry(tabId, 'tbl-1', 'Alpha', defn);
+		addExporterEntry(tabId, 'tbl-1', 'Alpha', defn);
 		defn.show_row_numbers = true; // mutate the source AFTER the copy-at-add moment
 
-		const entry = getCustomExportDraft(tabId)!.entries[0];
+		const entry = getExporterDraft(tabId)!.entries[0];
 		expect(entry.show_row_numbers).toBe(false); // unaffected by the later mutation
 	});
 
 	it('add copies a column export object — mutating the source column IN PLACE after add does not leak into the entry', async () => {
 		// Defends copy-at-add at the OBJECT level, not just the scalar/array
 		// level the test above covers: entryForTable's entry is STAGED and
-		// PERSISTED, so overridesFromDefinition ($lib/table/custom-export.ts)
+		// PERSISTED, so overridesFromDefinition ($lib/table/exporter.ts)
 		// must clone col.export/col.json_export rather than alias them.
 		const tabId = 'exp:draft:1';
-		await ensureCustomExportDraft(tabId);
+		await ensureExporterDraft(tabId);
 		const defn: TableDefinition = {
 			...TABLE_DEFN,
 			columns: [
@@ -185,10 +185,10 @@ describe('custom export drafts', () => {
 			]
 		};
 
-		addExportEntry(tabId, 'tbl-1', 'Alpha', defn);
+		addExporterEntry(tabId, 'tbl-1', 'Alpha', defn);
 		defn.columns[0].export!.header = 'Mutated'; // in-place mutation, not a replace
 
-		const entry = getCustomExportDraft(tabId)!.entries[0];
+		const entry = getExporterDraft(tabId)!.entries[0];
 		expect(entry.columns[0].export?.header).toBe('Original'); // unaffected
 	});
 
@@ -198,71 +198,71 @@ describe('custom export drafts', () => {
 		// objects too, and overridesFromDefinition must clone them for the same
 		// reason (the entry is staged and persisted).
 		const tabId = 'exp:draft:1';
-		await ensureCustomExportDraft(tabId);
+		await ensureExporterDraft(tabId);
 		const defn: TableDefinition = {
 			...TABLE_DEFN,
 			json_split: { enabled: true, filename_template: 'original-${name}' }
 		};
 
-		addExportEntry(tabId, 'tbl-1', 'Alpha', defn);
+		addExporterEntry(tabId, 'tbl-1', 'Alpha', defn);
 		defn.json_split!.filename_template = 'mutated-${name}'; // in-place, not a replace
 
-		const entry = getCustomExportDraft(tabId)!.entries[0];
+		const entry = getExporterDraft(tabId)!.entries[0];
 		expect(entry.json_split?.filename_template).toBe('original-${name}'); // unaffected
 	});
 
-	it('removeExportEntry drops the entry at the given index and dirties the draft', async () => {
+	it('removeExporterEntry drops the entry at the given index and dirties the draft', async () => {
 		const tabId = 'exp:draft:1';
-		await ensureCustomExportDraft(tabId);
-		addExportEntry(tabId, 'tbl-1', 'Alpha', TABLE_DEFN);
-		addExportEntry(tabId, 'tbl-2', 'Beta', TABLE_DEFN);
+		await ensureExporterDraft(tabId);
+		addExporterEntry(tabId, 'tbl-1', 'Alpha', TABLE_DEFN);
+		addExporterEntry(tabId, 'tbl-2', 'Beta', TABLE_DEFN);
 
-		removeExportEntry(tabId, 0);
+		removeExporterEntry(tabId, 0);
 
-		const d = getCustomExportDraft(tabId)!;
+		const d = getExporterDraft(tabId)!;
 		expect(d.entries).toHaveLength(1);
 		expect(d.entries[0].name).toBe('Beta');
 	});
 
-	it('moveExportEntryInList reorders entries', async () => {
+	it('moveExporterEntryInList reorders entries', async () => {
 		const tabId = 'exp:draft:1';
-		await ensureCustomExportDraft(tabId);
-		addExportEntry(tabId, 'tbl-1', 'Alpha', TABLE_DEFN);
-		addExportEntry(tabId, 'tbl-2', 'Beta', TABLE_DEFN);
+		await ensureExporterDraft(tabId);
+		addExporterEntry(tabId, 'tbl-1', 'Alpha', TABLE_DEFN);
+		addExporterEntry(tabId, 'tbl-2', 'Beta', TABLE_DEFN);
 
-		moveExportEntryInList(tabId, 0, 1);
+		moveExporterEntryInList(tabId, 0, 1);
 
-		const names = getCustomExportDraft(tabId)!.entries.map((e) => e.name);
+		const names = getExporterDraft(tabId)!.entries.map((e) => e.name);
 		expect(names).toEqual(['Beta', 'Alpha']);
 	});
 
-	it('updateExportEntry patches the entry at the given index', async () => {
+	it('updateExporterEntry patches the entry at the given index', async () => {
 		const tabId = 'exp:draft:1';
-		await ensureCustomExportDraft(tabId);
-		addExportEntry(tabId, 'tbl-1', 'Alpha', TABLE_DEFN);
+		await ensureExporterDraft(tabId);
+		addExporterEntry(tabId, 'tbl-1', 'Alpha', TABLE_DEFN);
 
-		updateExportEntry(tabId, 0, { format: 'json' });
+		updateExporterEntry(tabId, 0, { format: 'json' });
 
-		expect(getCustomExportDraft(tabId)!.entries[0].format).toBe('json');
+		expect(getExporterDraft(tabId)!.entries[0].format).toBe('json');
 	});
 
 	it('a fresh never-saved draft does not count as dirty until edited', async () => {
 		const tabId = 'exp:draft:9';
-		await ensureCustomExportDraft(tabId);
-		expect(hasDirtyCustomExportDrafts()).toBe(false);
-		setCustomExportName(tabId, 'Named');
-		expect(hasDirtyCustomExportDrafts()).toBe(true);
+		await ensureExporterDraft(tabId);
+		expect(hasDirtyExporterDrafts()).toBe(false);
+		setExporterName(tabId, 'Named');
+		expect(hasDirtyExporterDrafts()).toBe(true);
 	});
 
 	it('loads a saved artifact draft and parses its payload through the schema', async () => {
 		asEditor();
 		mockAcquire();
-		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue(CUSTOM_EXPORT_ARTIFACT);
-		const tabId = openArtifactTab('custom_export', { artifactId: 'e1', title: 'My export' });
+		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue(EXPORTER_ARTIFACT);
+		const tabId = openArtifactTab('exporter', { artifactId: 'e1', title: 'My export' });
 
-		await ensureCustomExportDraft(tabId);
+		await ensureExporterDraft(tabId);
 
-		const d = getCustomExportDraft(tabId)!;
+		const d = getExporterDraft(tabId)!;
 		expect(d.artifactId).toBe('e1');
 		expect(d.artifactRev).toBe(3);
 		expect(d.entries).toHaveLength(1);
@@ -271,52 +271,52 @@ describe('custom export drafts', () => {
 	});
 
 	it('a malformed payload fails OPEN with an empty entry list instead of throwing', async () => {
-		// The wire payload is parsed through CustomExportDefinitionSchema, but
+		// The wire payload is parsed through ExporterDefinitionSchema, but
 		// the parse must never THROW: this module's only caller is a
-		// fire-and-forget `$effect` (see ensureCustomExportDraft's comment), so
+		// fire-and-forget `$effect` (see ensureExporterDraft's comment), so
 		// an unhandled rejection here would strand the tab on "Loading…" forever
 		// exactly like an unguarded lease/fetch rejection would.
 		asEditor();
 		mockAcquire();
 		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue({
-			...CUSTOM_EXPORT_ARTIFACT,
+			...EXPORTER_ARTIFACT,
 			payload: { schema_version: 1, entries: 'not-an-array' } // malformed
 		});
-		const tabId = openArtifactTab('custom_export', { artifactId: 'e1', title: 'My export' });
+		const tabId = openArtifactTab('exporter', { artifactId: 'e1', title: 'My export' });
 
-		await expect(ensureCustomExportDraft(tabId)).resolves.toBeUndefined();
+		await expect(ensureExporterDraft(tabId)).resolves.toBeUndefined();
 
-		const d = getCustomExportDraft(tabId)!;
+		const d = getExporterDraft(tabId)!;
 		expect(d.artifactId).toBe('e1'); // the tab still opens, name/rev intact
 		expect(d.entries).toEqual([]); // degrades to empty rather than refusing
 		expect(d.dirty).toBe(false);
 	});
 
 	it('close drops the draft', async () => {
-		const tabId = openArtifactTab('custom_export', { artifactId: null, title: 'New export' });
-		await ensureCustomExportDraft(tabId);
-		closeCustomExportDraft(tabId);
-		expect(getCustomExportDraft(tabId)).toBeUndefined();
+		const tabId = openArtifactTab('exporter', { artifactId: null, title: 'New export' });
+		await ensureExporterDraft(tabId);
+		closeExporterDraft(tabId);
+		expect(getExporterDraft(tabId)).toBeUndefined();
 	});
 });
 
-describe('saving a custom export draft', () => {
+describe('saving an exporter draft', () => {
 	it('saving a new draft stages a create and repoints the tab', async () => {
-		const tabId = openArtifactTab('custom_export', { artifactId: null, title: 'New export' });
-		await ensureCustomExportDraft(tabId);
-		addExportEntry(tabId, 'tbl-1', 'Alpha', TABLE_DEFN);
-		setCustomExportName(tabId, 'Release drop');
+		const tabId = openArtifactTab('exporter', { artifactId: null, title: 'New export' });
+		await ensureExporterDraft(tabId);
+		addExporterEntry(tabId, 'tbl-1', 'Alpha', TABLE_DEFN);
+		setExporterName(tabId, 'Release drop');
 
-		saveCustomExportDraft(tabId);
+		saveExporterDraft(tabId);
 
 		const ops = getStagedArtifactOps();
 		expect(ops).toHaveLength(1);
 		expect(ops[0]).toMatchObject({
 			kind: 'create_artifact',
-			artifact_kind: 'custom_export',
+			artifact_kind: 'exporter',
 			name: 'Release drop'
 		});
-		const draft = getCustomExportDraft(tabId)!;
+		const draft = getExporterDraft(tabId)!;
 		expect(draft.dirty).toBe(false);
 		expect(isTempId(draft.artifactId!)).toBe(true);
 		// The tab KEY is NOT re-keyed at stage time.
@@ -327,39 +327,37 @@ describe('saving a custom export draft', () => {
 	it('saving a saved artifact draft stages a full-payload update', async () => {
 		asEditor();
 		mockAcquire();
-		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue(CUSTOM_EXPORT_ARTIFACT);
-		const tabId = openArtifactTab('custom_export', { artifactId: 'e1', title: 'My export' });
-		await ensureCustomExportDraft(tabId);
-		setCustomExportName(tabId, 'Renamed');
+		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue(EXPORTER_ARTIFACT);
+		const tabId = openArtifactTab('exporter', { artifactId: 'e1', title: 'My export' });
+		await ensureExporterDraft(tabId);
+		setExporterName(tabId, 'Renamed');
 
-		saveCustomExportDraft(tabId);
+		saveExporterDraft(tabId);
 
 		expect(getStagedArtifactOps()).toEqual([
 			{
 				kind: 'update_artifact',
 				id: 'e1',
 				name: 'Renamed',
-				payload: { schema_version: 1, entries: CUSTOM_EXPORT_ARTIFACT.payload.entries }
+				payload: { schema_version: 1, entries: EXPORTER_ARTIFACT.payload.entries }
 			}
 		]);
-		expect(getCustomExportDraft(tabId)?.dirty).toBe(false);
+		expect(getExporterDraft(tabId)?.dirty).toBe(false);
 	});
 
-	it('saveCustomExportDraft refuses a name another custom export already uses', async () => {
+	it('saveExporterDraft refuses a name another exporter already uses', async () => {
 		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({
 			items: [header('e2', 'Taken')]
 		});
 		await loadArtifacts();
-		const tabId = openArtifactTab('custom_export', { artifactId: null, title: 'New export' });
-		await ensureCustomExportDraft(tabId);
-		setCustomExportName(tabId, 'Taken');
+		const tabId = openArtifactTab('exporter', { artifactId: null, title: 'New export' });
+		await ensureExporterDraft(tabId);
+		setExporterName(tabId, 'Taken');
 
-		expect(() => saveCustomExportDraft(tabId)).toThrow(
-			/custom export named "Taken" already exists/
-		);
+		expect(() => saveExporterDraft(tabId)).toThrow(/exporter named "Taken" already exists/);
 		expect(getStagedArtifactOps()).toEqual([]);
-		expect(getCustomExportDraft(tabId)?.artifactId).toBeNull();
-		expect(getCustomExportDraft(tabId)?.dirty).toBe(true);
+		expect(getExporterDraft(tabId)?.artifactId).toBeNull();
+		expect(getExporterDraft(tabId)?.dirty).toBe(true);
 	});
 });
 
@@ -367,9 +365,9 @@ describe('artifact lease on open', () => {
 	it('acquires the art: lease before fetching the payload', async () => {
 		asEditor();
 		const acquire = mockAcquire();
-		const get = vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue(CUSTOM_EXPORT_ARTIFACT);
+		const get = vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue(EXPORTER_ARTIFACT);
 
-		await ensureCustomExportDraft('exp:e1');
+		await ensureExporterDraft('exp:e1');
 
 		expect(acquire.mock.calls[0][0]).toMatchObject({
 			targets: [{ resource_id: 'e1', mode: 'exclusive', type: 'artifact' }],
@@ -378,18 +376,18 @@ describe('artifact lease on open', () => {
 		expect(acquire.mock.invocationCallOrder[0]).toBeLessThan(get.mock.invocationCallOrder[0]);
 		expect(get).toHaveBeenCalledWith('e1');
 		expect(isCheckedOutByMe('art:e1')).toBe(true);
-		expect(getCustomExportLockHolder('exp:e1')).toBeUndefined();
+		expect(getExporterLockHolder('exp:e1')).toBeUndefined();
 	});
 
 	it('opening a saved artifact acquires the lease and hydrates entries', async () => {
 		asEditor();
 		const acquireSpy = mockAcquire();
-		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue(CUSTOM_EXPORT_ARTIFACT);
+		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue(EXPORTER_ARTIFACT);
 
-		await ensureCustomExportDraft('exp:e1');
+		await ensureExporterDraft('exp:e1');
 
 		expect(acquireSpy).toHaveBeenCalled();
-		const d = getCustomExportDraft('exp:e1')!;
+		const d = getExporterDraft('exp:e1')!;
 		expect(d.artifactId).toBe('e1');
 		expect(d.entries[0].source.ref).toBe('tbl-1');
 		expect(d.dirty).toBe(false);
@@ -398,76 +396,76 @@ describe('artifact lease on open', () => {
 	it('a lease conflict marks the tab read-only', async () => {
 		asEditor();
 		vi.spyOn(checkoutApi, 'acquireLocks').mockRejectedValue(lockConflict('ada@example.com'));
-		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue(CUSTOM_EXPORT_ARTIFACT);
+		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue(EXPORTER_ARTIFACT);
 
-		await ensureCustomExportDraft('exp:e1');
+		await ensureExporterDraft('exp:e1');
 
-		expect(getCustomExportLockHolder('exp:e1')).toBe('ada@example.com');
+		expect(getExporterLockHolder('exp:e1')).toBe('ada@example.com');
 		// A denial must not refuse the tab — it opens unsaveable with the banner.
-		expect(getCustomExportDraft('exp:e1')?.name).toBe('My export');
+		expect(getExporterDraft('exp:e1')?.name).toBe('My export');
 	});
 
 	it('fails OPEN when POST /locks errors for a non-conflict reason', async () => {
 		asEditor();
 		vi.spyOn(checkoutApi, 'acquireLocks').mockRejectedValue(new Error('boom'));
-		const get = vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue(CUSTOM_EXPORT_ARTIFACT);
+		const get = vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue(EXPORTER_ARTIFACT);
 
-		await ensureCustomExportDraft('exp:e1');
+		await ensureExporterDraft('exp:e1');
 
 		expect(get).toHaveBeenCalledWith('e1');
-		expect(getCustomExportLockHolder('exp:e1')).toBeUndefined();
+		expect(getExporterLockHolder('exp:e1')).toBeUndefined();
 	});
 
-	it('retryCustomExportLock clears the banner once the peer releases', async () => {
+	it('retryExporterLock clears the banner once the peer releases', async () => {
 		asEditor();
 		const acquire = mockAcquire();
 		acquire.mockRejectedValueOnce(lockConflict('peer@x'));
-		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue(CUSTOM_EXPORT_ARTIFACT);
-		await ensureCustomExportDraft('exp:e1');
-		expect(getCustomExportLockHolder('exp:e1')).toBe('peer@x');
+		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue(EXPORTER_ARTIFACT);
+		await ensureExporterDraft('exp:e1');
+		expect(getExporterLockHolder('exp:e1')).toBe('peer@x');
 
-		await retryCustomExportLock('exp:e1');
+		await retryExporterLock('exp:e1');
 
-		expect(getCustomExportLockHolder('exp:e1')).toBeUndefined();
+		expect(getExporterLockHolder('exp:e1')).toBeUndefined();
 		expect(isCheckedOutByMe('art:e1')).toBe(true);
 	});
 
-	it('retryCustomExportLock keeps the banner and does not reject on a non-conflict error', async () => {
-		// The banner's onclick is `void retryCustomExportLock(tabId)`: an
+	it('retryExporterLock keeps the banner and does not reject on a non-conflict error', async () => {
+		// The banner's onclick is `void retryExporterLock(tabId)`: an
 		// unguarded rethrow from ensureCheckout would surface as an unhandled
 		// rejection.
 		asEditor();
 		const acquire = mockAcquire();
 		acquire.mockRejectedValueOnce(lockConflict('peer@x'));
-		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue(CUSTOM_EXPORT_ARTIFACT);
-		await ensureCustomExportDraft('exp:e1');
+		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue(EXPORTER_ARTIFACT);
+		await ensureExporterDraft('exp:e1');
 		acquire.mockRejectedValueOnce(new Error('boom'));
 
-		await expect(retryCustomExportLock('exp:e1')).resolves.toBeUndefined();
+		await expect(retryExporterLock('exp:e1')).resolves.toBeUndefined();
 
-		expect(getCustomExportLockHolder('exp:e1')).toBe('peer@x'); // still refused
+		expect(getExporterLockHolder('exp:e1')).toBe('peer@x'); // still refused
 	});
 
-	it('retryCustomExportLock is a no-op for an unsaved (temp-id) draft', async () => {
+	it('retryExporterLock is a no-op for an unsaved (temp-id) draft', async () => {
 		asEditor();
 		const acquire = mockAcquire();
-		const tabId = openArtifactTab('custom_export', { artifactId: null, title: 'New export' });
-		await ensureCustomExportDraft(tabId);
-		saveCustomExportDraft(tabId); // draft.artifactId is now a temp id
+		const tabId = openArtifactTab('exporter', { artifactId: null, title: 'New export' });
+		await ensureExporterDraft(tabId);
+		saveExporterDraft(tabId); // draft.artifactId is now a temp id
 
-		await retryCustomExportLock(tabId);
+		await retryExporterLock(tabId);
 
 		expect(acquire).not.toHaveBeenCalled();
 	});
 
-	it('closeCustomExportDraft releases the lease when nothing staged needs it', async () => {
+	it('closeExporterDraft releases the lease when nothing staged needs it', async () => {
 		asEditor();
 		mockAcquire();
-		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue(CUSTOM_EXPORT_ARTIFACT);
+		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue(EXPORTER_ARTIFACT);
 		const release = vi.spyOn(checkoutApi, 'releaseLock').mockResolvedValue(undefined);
-		await ensureCustomExportDraft('exp:e1');
+		await ensureExporterDraft('exp:e1');
 
-		closeCustomExportDraft('exp:e1');
+		closeExporterDraft('exp:e1');
 		await Promise.resolve();
 
 		expect(release).toHaveBeenCalledWith('t_e1', undefined);
@@ -477,12 +475,12 @@ describe('artifact lease on open', () => {
 
 describe('staged-artifact listeners', () => {
 	it('a commit rebinds a temp draft to its canonical id', async () => {
-		const tabId = openArtifactTab('custom_export', { artifactId: null, title: 'New export' });
-		await ensureCustomExportDraft(tabId);
-		addExportEntry(tabId, 'tbl-1', 'Alpha', TABLE_DEFN);
-		setCustomExportName(tabId, 'Mine');
-		saveCustomExportDraft(tabId);
-		const tempId = getCustomExportDraft(tabId)!.artifactId!;
+		const tabId = openArtifactTab('exporter', { artifactId: null, title: 'New export' });
+		await ensureExporterDraft(tabId);
+		addExporterEntry(tabId, 'tbl-1', 'Alpha', TABLE_DEFN);
+		setExporterName(tabId, 'Mine');
+		saveExporterDraft(tabId);
+		const tempId = getExporterDraft(tabId)!.artifactId!;
 
 		notifyArtifactCommit({
 			idMap: { [tempId]: 'e9' },
@@ -490,8 +488,8 @@ describe('staged-artifact listeners', () => {
 			deletedIds: []
 		});
 
-		expect(getCustomExportDraft(tabId)).toBeUndefined();
-		const bound = getCustomExportDraft('exp:e9')!;
+		expect(getExporterDraft(tabId)).toBeUndefined();
+		const bound = getExporterDraft('exp:e9')!;
 		expect(bound.artifactId).toBe('e9');
 		expect(bound.artifactRev).toBe(7);
 		expect(bound.entries).toHaveLength(1);
@@ -501,55 +499,55 @@ describe('staged-artifact listeners', () => {
 	it('a committed delete closes the artifact’s open tab', async () => {
 		asEditor();
 		mockAcquire();
-		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue(CUSTOM_EXPORT_ARTIFACT);
+		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue(EXPORTER_ARTIFACT);
 		vi.spyOn(checkoutApi, 'releaseLock').mockResolvedValue(undefined);
-		openArtifactTab('custom_export', { artifactId: 'e1', title: 'My export' });
-		await ensureCustomExportDraft('exp:e1');
+		openArtifactTab('exporter', { artifactId: 'e1', title: 'My export' });
+		await ensureExporterDraft('exp:e1');
 
 		notifyArtifactCommit({ idMap: {}, changed: [], deletedIds: ['e1'] });
 
-		expect(getCustomExportDraft('exp:e1')).toBeUndefined();
+		expect(getExporterDraft('exp:e1')).toBeUndefined();
 		expect(getDynamicTabs()).toEqual([]);
 	});
 
 	it('a staged delete closes the artifact’s open tab immediately', async () => {
 		asEditor();
 		mockAcquire();
-		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue(CUSTOM_EXPORT_ARTIFACT);
+		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue(EXPORTER_ARTIFACT);
 		vi.spyOn(checkoutApi, 'releaseLock').mockResolvedValue(undefined);
-		openArtifactTab('custom_export', { artifactId: 'e1', title: 'My export' });
-		await ensureCustomExportDraft('exp:e1');
+		openArtifactTab('exporter', { artifactId: 'e1', title: 'My export' });
+		await ensureExporterDraft('exp:e1');
 
 		stageArtifactDelete('e1', header('e1', 'My export', 3));
 
-		expect(getCustomExportDraft('exp:e1')).toBeUndefined();
+		expect(getExporterDraft('exp:e1')).toBeUndefined();
 		expect(getDynamicTabs()).toEqual([]);
 	});
 
 	it('discarding a staged update re-dirties the draft', async () => {
 		asEditor();
 		mockAcquire();
-		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue(CUSTOM_EXPORT_ARTIFACT);
-		await ensureCustomExportDraft('exp:e1');
-		saveCustomExportDraft('exp:e1');
-		expect(getCustomExportDraft('exp:e1')?.dirty).toBe(false);
+		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue(EXPORTER_ARTIFACT);
+		await ensureExporterDraft('exp:e1');
+		saveExporterDraft('exp:e1');
+		expect(getExporterDraft('exp:e1')?.dirty).toBe(false);
 
 		revertStagedArtifact('e1');
 
-		expect(getCustomExportDraft('exp:e1')?.dirty).toBe(true);
-		expect(getCustomExportDraft('exp:e1')?.artifactId).toBe('e1');
+		expect(getExporterDraft('exp:e1')?.dirty).toBe(true);
+		expect(getExporterDraft('exp:e1')?.artifactId).toBe('e1');
 	});
 
 	it('discarding a staged create unbinds the draft back to unsaved', async () => {
-		const tabId = openArtifactTab('custom_export', { artifactId: null, title: 'New export' });
-		await ensureCustomExportDraft(tabId);
-		setCustomExportName(tabId, 'Mine');
-		saveCustomExportDraft(tabId);
-		const tempId = getCustomExportDraft(tabId)!.artifactId!;
+		const tabId = openArtifactTab('exporter', { artifactId: null, title: 'New export' });
+		await ensureExporterDraft(tabId);
+		setExporterName(tabId, 'Mine');
+		saveExporterDraft(tabId);
+		const tempId = getExporterDraft(tabId)!.artifactId!;
 
 		revertStagedArtifact(tempId);
 
-		const draft = getCustomExportDraft(tabId)!;
+		const draft = getExporterDraft(tabId)!;
 		expect(draft.artifactId).toBeNull();
 		expect(draft.dirty).toBe(true);
 		expect(getDynamicTabs()[0].id).toBe(tabId);

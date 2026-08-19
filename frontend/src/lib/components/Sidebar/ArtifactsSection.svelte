@@ -56,11 +56,11 @@
 			open: (o) => openArtifactTab('snippet', o)
 		},
 		{
-			kind: 'custom_export',
-			title: 'Custom exports',
-			singular: 'custom export',
-			icon: KIND_ICONS.custom_export,
-			open: (o) => openArtifactTab('custom_export', o)
+			kind: 'exporter',
+			title: 'Exporters',
+			singular: 'exporter',
+			icon: KIND_ICONS.exporter,
+			open: (o) => openArtifactTab('exporter', o)
 		}
 	];
 
@@ -68,7 +68,7 @@
 		navigation: false,
 		table: false,
 		code_snippet: false,
-		custom_export: false
+		exporter: false
 	});
 	const editable = $derived(canEdit());
 

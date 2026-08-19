@@ -16,7 +16,7 @@ export type WorkspaceTab = string;
 
 export interface DynamicTab {
 	id: string;
-	kind: 'navigation' | 'table' | 'snippet' | 'metamodel' | 'custom_export' | 'issues';
+	kind: 'navigation' | 'table' | 'snippet' | 'metamodel' | 'exporter' | 'issues';
 	artifactId: string | null;
 	title: string;
 }
@@ -26,7 +26,7 @@ const PREFIX = {
 	table: 'tbl',
 	snippet: 'snip',
 	metamodel: 'mm',
-	custom_export: 'exp',
+	exporter: 'exp',
 	issues: 'issues'
 } as const;
 
@@ -47,7 +47,7 @@ export function getDynamicTabs(): DynamicTab[] {
 }
 
 export function openArtifactTab(
-	kind: 'navigation' | 'table' | 'snippet' | 'custom_export',
+	kind: 'navigation' | 'table' | 'snippet' | 'exporter',
 	opts: { artifactId: string | null; title: string }
 ): string {
 	const p = PREFIX[kind];

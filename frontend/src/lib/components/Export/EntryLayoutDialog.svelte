@@ -1,5 +1,5 @@
 <script lang="ts">
-	// One custom-export entry's presentation overrides, edited over the SAME
+	// One exporter entry's presentation overrides, edited over the SAME
 	// `ExportSettingsPanel` markup `Table/ExportDialog.svelte` drives — the
 	// panel is host-agnostic (P-14 step 1), so this dialog only supplies a
 	// different write target: a local working copy instead of the table draft.
@@ -11,16 +11,16 @@
 	// (`overridesFromDefinition`) is exactly the copy-at-add shape: the entry
 	// stores DRIFT from the table, never the table's settings themselves.
 	//
-	// No `sort` prop is passed to the panel: a custom-export entry has no live
+	// No `sort` prop is passed to the panel: an exporter entry has no live
 	// grid to inherit a sort from, and its download is sort-less too (see
 	// `ExportSettingsPanel`'s own `sort` doc) — leaving it unset is correct
 	// here, not an oversight.
 	import { untrack } from 'svelte';
-	import { applyEntryOverrides, overridesFromDefinition } from '$lib/table/custom-export';
+	import { applyEntryOverrides, overridesFromDefinition } from '$lib/table/exporter';
 	import { templateIsValid } from '$lib/table/columns';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import ExportSettingsPanel from './ExportSettingsPanel.svelte';
-	import type { ExportEntry, TableDefinition } from '$lib/api/types';
+	import type { ExporterEntry, TableDefinition } from '$lib/api/types';
 
 	let {
 		open = $bindable(),
@@ -31,8 +31,8 @@
 	}: {
 		open: boolean;
 		tableDefinition: TableDefinition;
-		entry: ExportEntry;
-		onSave: (patch: Partial<ExportEntry>) => void;
+		entry: ExporterEntry;
+		onSave: (patch: Partial<ExporterEntry>) => void;
 		onClose: () => void;
 	} = $props();
 

@@ -2,7 +2,7 @@ import { apiFetchRaw, type ClientConfig } from './client';
 import { parseAttachmentFilename, type ExportResult } from './tables';
 
 /**
- * Run a saved `kind='custom_export'` artifact (`POST /exports/run`) and
+ * Run a saved `kind='exporter'` artifact (`POST /exports/run`) and
  * return its zip. The artifact id travels in the request BODY, not the path
  * — `authz._READ_ONLY_POST_SUFFIXES` matches fixed path suffixes, so an id in
  * the path would make the route unmatched and therefore not viewer-callable;
@@ -12,10 +12,7 @@ import { parseAttachmentFilename, type ExportResult } from './tables';
  * SIGNAL, never the body's `state` — a 202 means the background script-cache
  * sweep hasn't finished computing every cell across the bundled tables yet.
  */
-export async function runCustomExport(
-	artifactId: string,
-	cfg?: ClientConfig
-): Promise<ExportResult> {
+export async function runExporter(artifactId: string, cfg?: ClientConfig): Promise<ExportResult> {
 	const res = await apiFetchRaw(
 		'/exports/run',
 		{ method: 'POST', body: { artifact_id: artifactId } },

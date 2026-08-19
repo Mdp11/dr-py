@@ -113,15 +113,15 @@ export function referenceableArtifactHeaders(kind: ArtifactKind): ArtifactHeader
  * staged delete does not. `excludeId` is the artifact being saved (null for a
  * brand-new one), so re-saving one under its own name is fine.
  */
-// Lowercase noun for the error sentence below ("a code snippet named…", "a
-// custom export named…") — a Record so the type checker (not a ternary
+// Lowercase noun for the error sentence below ("a code snippet named…", "an
+// exporter named…") — a Record so the type checker (not a ternary
 // fallback that would silently print the raw kind string, e.g.
-// "custom_export") forces this to grow with ArtifactKind.
+// "exporter") forces this to grow with ArtifactKind.
 const NAME_CLASH_LABEL: Record<ArtifactKind, string> = {
 	navigation: 'navigation',
 	table: 'table',
 	code_snippet: 'code snippet',
-	custom_export: 'custom export'
+	exporter: 'exporter'
 };
 
 export function assertNoNameClash(

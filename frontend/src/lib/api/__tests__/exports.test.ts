@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, it, expect } from 'vitest';
 import { http, HttpResponse } from 'msw';
-import { runCustomExport } from '../exports';
+import { runExporter } from '../exports';
 import { server } from './server';
 
 const BASE = 'http://api.test/api/v1';
@@ -10,7 +10,7 @@ beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
-describe('runCustomExport', () => {
+describe('runExporter', () => {
 	it('returns a preparing result on a 202 (script-cache sweep still running)', async () => {
 		server.use(
 			http.post(`${BASE}/exports/run`, () =>
@@ -20,7 +20,7 @@ describe('runCustomExport', () => {
 				)
 			)
 		);
-		const result = await runCustomExport('a1', cfg);
+		const result = await runExporter('a1', cfg);
 		expect(result).toEqual({ kind: 'preparing', done: 1, total: 4 });
 	});
 
@@ -32,7 +32,7 @@ describe('runCustomExport', () => {
 				})
 			)
 		);
-		const result = await runCustomExport('a1', cfg);
+		const result = await runExporter('a1', cfg);
 		expect(result.kind).toBe('ready');
 		expect(result.kind === 'ready' && result.filename).toBe('drop.zip');
 	});
@@ -47,13 +47,13 @@ describe('runCustomExport', () => {
 				});
 			})
 		);
-		await runCustomExport('art-42', cfg);
+		await runExporter('art-42', cfg);
 		expect(seen).toEqual({ artifact_id: 'art-42' });
 	});
 
 	it('falls back to export.zip when content-disposition is missing', async () => {
 		server.use(http.post(`${BASE}/exports/run`, () => new HttpResponse('zip')));
-		const result = await runCustomExport('a1', cfg);
+		const result = await runExporter('a1', cfg);
 		expect(result.kind === 'ready' && result.filename).toBe('export.zip');
 	});
 });

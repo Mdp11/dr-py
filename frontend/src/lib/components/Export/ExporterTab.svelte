@@ -1,29 +1,29 @@
 <script lang="ts">
-	// The custom-export tab: an entry list (one per bundled table), an
+	// The exporter tab: an entry list (one per bundled table), an
 	// add-table picker, Save (stage) and Export (run the COMMITTED artifact)
-	// — the custom_export sibling of `Snippet/SnippetTab.svelte` and
-	// `Table/TableView.svelte`. See `state/custom-export-editor.svelte.ts`'s
+	// — the exporter sibling of `Snippet/SnippetTab.svelte` and
+	// `Table/TableView.svelte`. See `state/exporter-editor.svelte.ts`'s
 	// module docstring for the draft/lease/staging model this drives.
 	import * as artifactsApi from '$lib/api/artifacts';
-	import { runCustomExport } from '$lib/api/exports';
+	import { runExporter } from '$lib/api/exports';
 	import { retryAndDownload, type ExportProgress } from '$lib/util/export-download';
 	import {
-		addExportEntry,
+		addExporterEntry,
 		artifactHeaderById,
 		canEdit,
-		ensureCustomExportDraft,
-		getCustomExportDraft,
-		getCustomExportLockHolder,
+		ensureExporterDraft,
+		getExporterDraft,
+		getExporterLockHolder,
 		isTempId,
-		moveExportEntryInList,
+		moveExporterEntryInList,
 		referenceableArtifactHeaders,
-		removeExportEntry,
-		retryCustomExportLock,
-		saveCustomExportDraft,
-		setCustomExportName,
-		updateExportEntry
+		removeExporterEntry,
+		retryExporterLock,
+		saveExporterDraft,
+		setExporterName,
+		updateExporterEntry
 	} from '$lib/state';
-	import { TableDefinitionSchema, type ExportEntry, type TableDefinition } from '$lib/api/types';
+	import { TableDefinitionSchema, type ExporterEntry, type TableDefinition } from '$lib/api/types';
 	import { createColumnDrag } from '$lib/table/column-dnd.svelte';
 	import EntryLayoutDialog from './EntryLayoutDialog.svelte';
 	import ArtifactExportButton from '$lib/components/ArtifactExportButton.svelte';
@@ -31,16 +31,16 @@
 	let { tabId }: { tabId: string } = $props();
 
 	$effect(() => {
-		void ensureCustomExportDraft(tabId);
+		void ensureExporterDraft(tabId);
 	});
 
-	const draft = $derived(getCustomExportDraft(tabId));
+	const draft = $derived(getExporterDraft(tabId));
 	/** Non-null while a peer holds this export's `art:` lease: the tab is
 	 *  UNSAVEABLE until the check-out succeeds — see
-	 *  `custom-export-editor.svelte.ts`'s `_lockDenied` doc and
+	 *  `exporter-editor.svelte.ts`'s `_lockDenied` doc and
 	 *  `navigation-editor.svelte.ts`'s `ensureDraft` for the canonical
 	 *  statement of what a denial gates. */
-	const lockHolder = $derived(getCustomExportLockHolder(tabId));
+	const lockHolder = $derived(getExporterLockHolder(tabId));
 	const locked = $derived(lockHolder !== undefined);
 	const editable = $derived(canEdit());
 	const disabledEntry = $derived(!editable || locked);
@@ -58,7 +58,7 @@
 	async function save(): Promise<void> {
 		saveError = null;
 		try {
-			saveCustomExportDraft(tabId);
+			saveExporterDraft(tabId);
 		} catch (e) {
 			saveError = e instanceof Error ? e.message : 'Save failed';
 		}
@@ -77,7 +77,7 @@
 		try {
 			const art = await artifactsApi.getArtifact(id);
 			const defn = TableDefinitionSchema.parse(art.payload);
-			addExportEntry(tabId, id, header.name, defn);
+			addExporterEntry(tabId, id, header.name, defn);
 		} catch (err) {
 			addTableError = err instanceof Error ? err.message : 'Failed to load table';
 		}
@@ -135,9 +135,9 @@
 		editDefinition = null;
 	}
 
-	function saveEditLayout(patch: Partial<ExportEntry>): void {
+	function saveEditLayout(patch: Partial<ExporterEntry>): void {
 		if (editEntryIndex === null) return;
-		updateExportEntry(tabId, editEntryIndex, patch);
+		updateExporterEntry(tabId, editEntryIndex, patch);
 	}
 
 	// --- Reorder -------------------------------------------------------------
@@ -145,7 +145,7 @@
 		attr: 'data-export-entry-drop',
 		axis: 'y',
 		validate: () => true,
-		onDrop: (from, to) => moveExportEntryInList(tabId, from, to)
+		onDrop: (from, to) => moveExporterEntryInList(tabId, from, to)
 	});
 
 	// --- Export: run the COMMITTED artifact, 202-poll, download ------------
@@ -169,7 +169,7 @@
 		exporting = true;
 		exportAbort = new AbortController();
 		try {
-			await retryAndDownload(() => runCustomExport(id), {
+			await retryAndDownload(() => runExporter(id), {
 				onProgress: (p) => (exportProgress = p),
 				signal: exportAbort.signal
 			});
@@ -192,12 +192,12 @@
 				class="w-56 rounded border border-input bg-card px-2 py-1 text-xs"
 				value={draft.name}
 				disabled={!editable || locked}
-				oninput={(e) => setCustomExportName(tabId, e.currentTarget.value)}
+				oninput={(e) => setExporterName(tabId, e.currentTarget.value)}
 			/>
 			<span class="flex-1"></span>
 			<button
 				type="button"
-				data-testid="custom-export-run"
+				data-testid="exporter-run"
 				class="flex items-center gap-1.5 rounded border border-input px-2 py-1 text-xs text-foreground/80 transition-colors hover:bg-muted disabled:opacity-40"
 				disabled={exportDisabled || exporting}
 				title={exportDisabled
@@ -218,7 +218,7 @@
 			{#if editable}
 				<button
 					type="button"
-					data-testid="custom-export-save"
+					data-testid="exporter-save"
 					class="rounded border border-input px-2 py-1 text-xs text-foreground/80 transition-colors hover:bg-muted disabled:opacity-40"
 					disabled={locked}
 					onclick={() => void save()}
@@ -248,7 +248,7 @@
 				role="status"
 			>
 				Checked out by {lockHolder} — you will not be able to save.
-				<button type="button" class="underline" onclick={() => void retryCustomExportLock(tabId)}>
+				<button type="button" class="underline" onclick={() => void retryExporterLock(tabId)}>
 					Retry
 				</button>
 			</div>
@@ -283,7 +283,7 @@
 							placeholder={tableName(entry.source.ref)}
 							value={entry.name}
 							disabled={disabledEntry}
-							oninput={(e) => updateExportEntry(tabId, i, { name: e.currentTarget.value })}
+							oninput={(e) => updateExporterEntry(tabId, i, { name: e.currentTarget.value })}
 						/>
 						<span class="shrink-0 truncate text-muted-foreground" title={entry.source.ref}>
 							{tableName(entry.source.ref)}
@@ -295,7 +295,7 @@
 								aria-pressed={entry.format === 'xlsx'}
 								class="rounded px-1.5 py-0.5 text-muted-foreground transition-colors hover:bg-muted aria-pressed:bg-muted aria-pressed:text-foreground"
 								disabled={disabledEntry}
-								onclick={() => updateExportEntry(tabId, i, { format: 'xlsx' })}
+								onclick={() => updateExporterEntry(tabId, i, { format: 'xlsx' })}
 							>
 								xlsx
 							</button>
@@ -305,7 +305,7 @@
 								aria-pressed={entry.format === 'json'}
 								class="rounded px-1.5 py-0.5 text-muted-foreground transition-colors hover:bg-muted aria-pressed:bg-muted aria-pressed:text-foreground"
 								disabled={disabledEntry}
-								onclick={() => updateExportEntry(tabId, i, { format: 'json' })}
+								onclick={() => updateExporterEntry(tabId, i, { format: 'json' })}
 							>
 								json
 							</button>
@@ -325,7 +325,7 @@
 							aria-label="Remove entry"
 							class="shrink-0 rounded border border-input px-1.5 py-0.5 text-foreground/80 transition-colors hover:bg-muted disabled:opacity-40"
 							disabled={disabledEntry}
-							onclick={() => removeExportEntry(tabId, i)}
+							onclick={() => removeExporterEntry(tabId, i)}
 						>
 							Remove
 						</button>

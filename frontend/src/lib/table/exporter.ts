@@ -1,12 +1,12 @@
 /**
- * Client mirror of core/table/custom_export.py::overridden_table — used by
+ * Client mirror of core/table/exporter.py::overridden_table — used by
  * the entry layout dialog and the json-preview call. Display-only; the
  * backend re-applies overrides itself at /exports/run time, so drift here
  * cannot corrupt an export (same stance as table/export-layout.ts).
  */
-import type { ColumnOverride, ExportEntry, TableDefinition } from '$lib/api/types';
+import type { ColumnOverride, ExporterEntry, TableDefinition } from '$lib/api/types';
 
-export function applyEntryOverrides(defn: TableDefinition, entry: ExportEntry): TableDefinition {
+export function applyEntryOverrides(defn: TableDefinition, entry: ExporterEntry): TableDefinition {
 	const byIndex = new Map<number, ColumnOverride>();
 	for (const ov of entry.columns) {
 		if (ov.index >= 0 && ov.index < defn.columns.length && !byIndex.has(ov.index))
@@ -42,7 +42,7 @@ export function applyEntryOverrides(defn: TableDefinition, entry: ExportEntry): 
 export function overridesFromDefinition(
 	defn: TableDefinition
 ): Pick<
-	ExportEntry,
+	ExporterEntry,
 	'columns' | 'export_order' | 'show_row_numbers' | 'export_row_number' | 'json_split'
 > {
 	const columns: ColumnOverride[] = [];
@@ -51,7 +51,7 @@ export function overridesFromDefinition(
 			columns.push({
 				index,
 				// Clone, don't alias, the column's option objects: this entry is
-				// STAGED and PERSISTED as the custom_export artifact's payload (see
+				// STAGED and PERSISTED as the exporter artifact's payload (see
 				// entryForTable below), unlike applyEntryOverrides' display-only
 				// output. Aliasing col.export/col.json_export here would let a LATER
 				// in-place edit of the source table silently rewrite an
@@ -75,7 +75,7 @@ export function overridesFromDefinition(
 	};
 }
 
-export function entryForTable(tableId: string, defn: TableDefinition, name: string): ExportEntry {
+export function entryForTable(tableId: string, defn: TableDefinition, name: string): ExporterEntry {
 	return {
 		source: { ref: tableId },
 		name,

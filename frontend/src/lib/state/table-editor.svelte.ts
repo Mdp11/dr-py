@@ -76,7 +76,7 @@ import { bindTabToArtifact, closeTab, repointTabArtifact, retitleTab } from './w
 // Re-exported so `$lib/state`'s barrel (and TableView.svelte, which imports
 // the type through it) need no change: the retry-and-download loop itself
 // moved to `$lib/util/export-download.ts` (P-14 task 12) so `/exports/run`
-// (`CustomExportTab.svelte`) can share it instead of copying it.
+// (`ExporterTab.svelte`) can share it instead of copying it.
 export type { ExportProgress };
 
 /** Chunk size for both full loads and lazy range fills. */
@@ -1616,7 +1616,7 @@ export function closeTableDraft(tabId: string): void {
  * through `onProgress` so the caller can keep the user informed, and stop early
  * when `signal` aborts (the tab was closed / the user navigated away). The
  * retry/download loop itself is `$lib/util/export-download.ts`'s
- * `retryAndDownload`, shared with `/exports/run` (`CustomExportTab.svelte`) —
+ * `retryAndDownload`, shared with `/exports/run` (`ExporterTab.svelte`) —
  * this function's only job is producing the args `exportTable` needs.
  */
 export async function downloadTable(

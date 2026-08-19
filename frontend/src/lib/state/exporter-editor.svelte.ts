@@ -1,17 +1,17 @@
 /**
- * Per-tab custom-export drafts, keyed by workspace tab id (`exp:draft:<n>` /
- * `exp:<artifactId>`) — the custom_export sibling of snippet-editor.svelte.ts.
- * A custom_export artifact bundles many tables' exports into one zip; each
- * `ExportEntry` carries its own presentation overrides, copied (never
+ * Per-tab exporter drafts, keyed by workspace tab id (`exp:draft:<n>` /
+ * `exp:<artifactId>`) — the exporter sibling of snippet-editor.svelte.ts.
+ * An exporter artifact bundles many tables' exports into one zip; each
+ * `ExporterEntry` carries its own presentation overrides, copied (never
  * referenced) from the source table's definition at the moment it is added
- * (`addExportEntry` -> `entryForTable`, spec §5.2) — from that instant the
+ * (`addExporterEntry` -> `entryForTable`, spec §5.2) — from that instant the
  * entry and the table are independent, so later edits to either do not
  * follow the other.
  *
- * Saving STAGES, it does not POST: `saveCustomExportDraft` pushes a
+ * Saving STAGES, it does not POST: `saveExporterDraft` pushes a
  * `create_artifact`/`update_artifact` op onto the staged-artifact buffer
  * (`artifact-edits.svelte.ts`), and nothing reaches the server until the
- * DiffDrawer's Commit sends the batch. Opening a SAVED custom export first
+ * DiffDrawer's Commit sends the batch. Opening a SAVED exporter first
  * checks the artifact out (`art:<id>` exclusive lease); a denial does not
  * refuse the tab — it opens UNSAVEABLE behind the holder banner
  * (`_lockDenied`), mirroring every other artifact editor (see
@@ -23,12 +23,8 @@
  */
 import { SvelteMap } from 'svelte/reactivity';
 import * as artifactsApi from '$lib/api/artifacts';
-import {
-	CustomExportDefinitionSchema,
-	type ExportEntry,
-	type TableDefinition
-} from '$lib/api/types';
-import { entryForTable } from '$lib/table/custom-export';
+import { ExporterDefinitionSchema, type ExporterEntry, type TableDefinition } from '$lib/api/types';
+import { entryForTable } from '$lib/table/exporter';
 import { assertNoNameClash } from './artifacts.svelte';
 import {
 	onArtifactCommit,
@@ -42,15 +38,15 @@ import { acquireArtifactLease, lockHolderLabel } from './edit-gate';
 import { isTempId } from './ops';
 import { bindTabToArtifact, closeTab, repointTabArtifact, retitleTab } from './workspace.svelte';
 
-export interface CustomExportDraft {
+export interface ExporterDraft {
 	name: string;
 	artifactId: string | null;
 	artifactRev: number | null;
-	entries: ExportEntry[];
+	entries: ExporterEntry[];
 	dirty: boolean;
 }
 
-const _drafts = new SvelteMap<string, CustomExportDraft>();
+const _drafts = new SvelteMap<string, ExporterDraft>();
 /**
  * tabId -> the peer holding the `art:` lease this tab was refused, as a
  * display label. Present == the tab is UNSAVEABLE: the payload loaded (a
@@ -60,13 +56,13 @@ const _drafts = new SvelteMap<string, CustomExportDraft>();
  */
 const _lockDenied = new SvelteMap<string, string>();
 
-export function getCustomExportDraft(tabId: string): CustomExportDraft | undefined {
+export function getExporterDraft(tabId: string): ExporterDraft | undefined {
 	return _drafts.get(tabId);
 }
 
 /** The peer holding this tab's artifact, or undefined when the tab is
  * editable (lease granted, or the user is a viewer — see `_lockDenied`). */
-export function getCustomExportLockHolder(tabId: string): string | undefined {
+export function getExporterLockHolder(tabId: string): string | undefined {
 	return _lockDenied.get(tabId);
 }
 
@@ -74,10 +70,10 @@ export function getCustomExportLockHolder(tabId: string): string | undefined {
  * has no server-side row yet (unsaved, or a staged create under a temp id) has
  * nothing to lock, so it is silently skipped. The `.catch` is load-bearing:
  * `ensureCheckout` RETHROWS anything that is not a lock conflict and the banner
- * calls this as `void retryCustomExportLock(tabId)`, so a 500 would otherwise
+ * calls this as `void retryExporterLock(tabId)`, so a 500 would otherwise
  * become an unhandled rejection. A failed retry just leaves the banner up.
  * Mirrors `retrySnippetLock`/`retryTableLock` exactly. */
-export async function retryCustomExportLock(tabId: string): Promise<void> {
+export async function retryExporterLock(tabId: string): Promise<void> {
 	const draft = _drafts.get(tabId);
 	if (!draft?.artifactId || isTempId(draft.artifactId)) return;
 	const res = await acquireArtifactLease(draft.artifactId, 'edit').catch(() => null);
@@ -90,19 +86,19 @@ export async function retryCustomExportLock(tabId: string): Promise<void> {
  * the post-commit lease sweep (`reacquireOpenArtifactLeases`, dispatched by
  * `artifact-lock-denied.ts`). See `setSnippetLockDenied`'s docstring for the
  * full rationale. */
-export function setCustomExportLockDenied(tabId: string, holder: string): void {
+export function setExporterLockDenied(tabId: string, holder: string): void {
 	_lockDenied.set(tabId, holder);
 }
 
 /** Mirrors hasDirtySnippetDrafts: only the `dirty` flag matters. */
-export function hasDirtyCustomExportDrafts(): boolean {
+export function hasDirtyExporterDrafts(): boolean {
 	for (const d of _drafts.values()) if (d.dirty) return true;
 	return false;
 }
 
-export async function ensureCustomExportDraft(tabId: string): Promise<void> {
+export async function ensureExporterDraft(tabId: string): Promise<void> {
 	if (_drafts.has(tabId)) return;
-	let draft: CustomExportDraft;
+	let draft: ExporterDraft;
 	const id = tabId.slice('exp:'.length);
 	// An unsaved draft tab is the `exp:draft:N` a New-export click mints — or a
 	// `exp:<tempId>` shape reachable in principle from a future save-as. A temp
@@ -111,7 +107,7 @@ export async function ensureCustomExportDraft(tabId: string): Promise<void> {
 	// fire-and-forget `$effect`, which would leave the tab on "Loading…" forever.
 	if (tabId.startsWith('exp:draft:') || isTempId(id)) {
 		draft = {
-			name: 'New custom export',
+			name: 'New exporter',
 			artifactId: null,
 			artifactRev: null,
 			entries: [],
@@ -141,7 +137,7 @@ export async function ensureCustomExportDraft(tabId: string): Promise<void> {
 		// payload therefore degrades to an EMPTY entry list rather than refusing
 		// the tab: the draft still opens (name + rev intact), and re-saving from
 		// there simply overwrites the corrupt payload with a valid one.
-		const result = CustomExportDefinitionSchema.safeParse(artifact.payload);
+		const result = ExporterDefinitionSchema.safeParse(artifact.payload);
 		draft = {
 			name: artifact.name,
 			artifactId: artifact.id,
@@ -153,7 +149,7 @@ export async function ensureCustomExportDraft(tabId: string): Promise<void> {
 	_drafts.set(tabId, draft);
 }
 
-export function setCustomExportName(tabId: string, name: string): void {
+export function setExporterName(tabId: string, name: string): void {
 	const draft = _drafts.get(tabId);
 	if (!draft) return;
 	_drafts.set(tabId, { ...draft, name, dirty: true });
@@ -164,7 +160,7 @@ export function setCustomExportName(tabId: string, name: string): void {
  * copy-at-add moment. From this instant the entry and the table are
  * independent: later edits to the table's definition must not follow the
  * entry, and later edits to the entry must not follow the table. */
-export function addExportEntry(
+export function addExporterEntry(
 	tabId: string,
 	tableId: string,
 	tableName: string,
@@ -176,7 +172,7 @@ export function addExportEntry(
 	_drafts.set(tabId, { ...draft, entries: [...draft.entries, entry], dirty: true });
 }
 
-export function removeExportEntry(tabId: string, index: number): void {
+export function removeExporterEntry(tabId: string, index: number): void {
 	const draft = _drafts.get(tabId);
 	if (!draft || index < 0 || index >= draft.entries.length) return;
 	_drafts.set(tabId, {
@@ -186,7 +182,7 @@ export function removeExportEntry(tabId: string, index: number): void {
 	});
 }
 
-export function moveExportEntryInList(tabId: string, from: number, to: number): void {
+export function moveExporterEntryInList(tabId: string, from: number, to: number): void {
 	const draft = _drafts.get(tabId);
 	if (!draft) return;
 	const n = draft.entries.length;
@@ -197,7 +193,11 @@ export function moveExportEntryInList(tabId: string, from: number, to: number): 
 	_drafts.set(tabId, { ...draft, entries, dirty: true });
 }
 
-export function updateExportEntry(tabId: string, index: number, patch: Partial<ExportEntry>): void {
+export function updateExporterEntry(
+	tabId: string,
+	index: number,
+	patch: Partial<ExporterEntry>
+): void {
 	const draft = _drafts.get(tabId);
 	if (!draft || index < 0 || index >= draft.entries.length) return;
 	const entries = draft.entries.map((e, i) => (i === index ? { ...e, ...patch } : e));
@@ -216,15 +216,15 @@ export function updateExportEntry(tabId: string, index: number, patch: Partial<E
  * `artifact_rev` is sent with either op: the `art:` lease taken at open time
  * is the concurrency control, not OCC.
  */
-export function saveCustomExportDraft(tabId: string): void {
+export function saveExporterDraft(tabId: string): void {
 	const draft = _drafts.get(tabId);
 	if (!draft) return;
 	const payload = { schema_version: 1, entries: draft.entries };
 	// Best-effort: the server's uniqueness check is authoritative and fires at
 	// preview/commit. Throws, and the caller's Save handler renders it as an error.
-	assertNoNameClash('custom_export', draft.name, draft.artifactId);
+	assertNoNameClash('exporter', draft.name, draft.artifactId);
 	if (draft.artifactId === null) {
-		const tempId = stageArtifactCreate('custom_export', draft.name, payload, tabId);
+		const tempId = stageArtifactCreate('exporter', draft.name, payload, tabId);
 		_drafts.set(tabId, { ...draft, artifactId: tempId, dirty: false });
 		repointTabArtifact(tabId, tempId); // tab RECORD follows the draft; tab KEY does not
 	} else {
@@ -233,7 +233,7 @@ export function saveCustomExportDraft(tabId: string): void {
 	}
 }
 
-export function closeCustomExportDraft(tabId: string): void {
+export function closeExporterDraft(tabId: string): void {
 	const draft = _drafts.get(tabId); // read BEFORE the delete: it owns the lease
 	_drafts.delete(tabId);
 	_lockDenied.delete(tabId);
@@ -247,7 +247,7 @@ export function closeCustomExportDraft(tabId: string): void {
 	}
 }
 
-export function resetCustomExportEditors(): void {
+export function resetExporterEditors(): void {
 	_drafts.clear();
 	_lockDenied.clear();
 }
@@ -274,7 +274,7 @@ onArtifactCommit(({ idMap, changed, deletedIds }) => {
 	for (const [tabId, draft] of [..._drafts]) {
 		if (draft.artifactId === null) continue; // unsaved: nothing committed
 		if (deletedIds.includes(draft.artifactId)) {
-			closeCustomExportDraft(tabId);
+			closeExporterDraft(tabId);
 			closeTab(tabId);
 			continue;
 		}
@@ -323,7 +323,7 @@ onArtifactStageDiscarded((id) => {
 onArtifactStagedDelete((id) => {
 	for (const [tabId, draft] of [..._drafts]) {
 		if (draft.artifactId === id) {
-			closeCustomExportDraft(tabId);
+			closeExporterDraft(tabId);
 			closeTab(tabId);
 		}
 	}

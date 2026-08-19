@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyEntryOverrides, entryForTable, overridesFromDefinition } from '../custom-export';
+import { applyEntryOverrides, entryForTable, overridesFromDefinition } from '../exporter';
 import type { TableDefinition } from '$lib/api/types';
 
 const defn: TableDefinition = {
@@ -32,7 +32,7 @@ const defn: TableDefinition = {
 	json_split: null
 };
 
-describe('custom-export helpers', () => {
+describe('exporter helpers', () => {
 	it('entryForTable copies the table settings at add time', () => {
 		const e = entryForTable('tbl-1', defn, 'My table');
 		expect(e.source).toEqual({ ref: 'tbl-1' });

@@ -2,8 +2,8 @@
 	import { X } from '@lucide/svelte';
 	import * as Tabs from '$lib/components/ui/tabs';
 	import {
-		closeCustomExportDraft,
 		closeDraft,
+		closeExporterDraft,
 		closeMetamodelEditor,
 		closeSnippetDraft,
 		closeTab,
@@ -18,7 +18,7 @@
 	import TableView from './Table/TableView.svelte';
 	import SnippetTab from './Snippet/SnippetTab.svelte';
 	import MetamodelTab from './Metamodel/MetamodelTab.svelte';
-	import CustomExportTab from './Export/CustomExportTab.svelte';
+	import ExporterTab from './Export/ExporterTab.svelte';
 
 	const activeTab = $derived(getActiveTab());
 	const dynamicTabs = $derived(getDynamicTabs());
@@ -50,7 +50,7 @@
 						onclick={(e) => {
 							e.stopPropagation();
 							// Explicit per-kind dispatch (R14, carried from Task 11's
-							// review): a bare `else` here used to catch `custom_export`
+							// review): a bare `else` here used to catch `exporter`
 							// too and run `closeDraft` — the NAVIGATION closer, which
 							// releases a `nav:` lease that was never acquired and leaves
 							// the export's own draft (and its `art:` lease) behind. One
@@ -65,7 +65,7 @@
 							// second sees no lease held and an already-idle phase — and
 							// keeps this close path symmetric with the other kinds.
 							else if (tab.kind === 'metamodel') closeMetamodelEditor();
-							else if (tab.kind === 'custom_export') closeCustomExportDraft(tab.id);
+							else if (tab.kind === 'exporter') closeExporterDraft(tab.id);
 							else if (tab.kind === 'navigation') closeDraft(tab.id);
 							closeTab(tab.id);
 						}}
@@ -83,8 +83,8 @@
 					<SnippetTab tabId={tab.id} />
 				{:else if tab.kind === 'metamodel'}
 					<MetamodelTab />
-				{:else if tab.kind === 'custom_export'}
-					<CustomExportTab tabId={tab.id} />
+				{:else if tab.kind === 'exporter'}
+					<ExporterTab tabId={tab.id} />
 				{:else if tab.kind === 'navigation'}
 					<NavigationBuilder tabId={tab.id} />
 				{:else if tab.kind === 'issues'}

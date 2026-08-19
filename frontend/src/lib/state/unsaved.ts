@@ -1,5 +1,5 @@
 import type { ArtifactKind } from '$lib/artifacts/kinds';
-import { getCustomExportDraft, hasDirtyCustomExportDrafts } from './custom-export-editor.svelte';
+import { getExporterDraft, hasDirtyExporterDrafts } from './exporter-editor.svelte';
 import { getDraft, hasDirtyNavDrafts } from './navigation-editor.svelte';
 import { getSnippetDraft, hasDirtySnippetDrafts } from './snippet-editor.svelte';
 import { isMetamodelEditorDirty } from './metamodel-editor.svelte';
@@ -45,7 +45,7 @@ export function hasUnsavedWork(): boolean {
 		hasDirtyTableDrafts() ||
 		hasDirtyNavDrafts() ||
 		hasDirtySnippetDrafts() ||
-		hasDirtyCustomExportDrafts()
+		hasDirtyExporterDrafts()
 	);
 }
 
@@ -62,7 +62,7 @@ export function hasUnsavedWork(): boolean {
  * `metamodel-stage.svelte.ts`, not in the editor's buffer).
  */
 export function isTabDirty(
-	kind: 'navigation' | 'table' | 'snippet' | 'metamodel' | 'custom_export',
+	kind: 'navigation' | 'table' | 'snippet' | 'metamodel' | 'exporter',
 	tabId: string
 ): boolean {
 	if (kind === 'metamodel') return isMetamodelEditorDirty() || getStagedMetamodelDepth() > 0;
@@ -71,8 +71,8 @@ export function isTabDirty(
 			? getTableDraft(tabId)
 			: kind === 'snippet'
 				? getSnippetDraft(tabId)
-				: kind === 'custom_export'
-					? getCustomExportDraft(tabId)
+				: kind === 'exporter'
+					? getExporterDraft(tabId)
 					: getDraft(tabId);
 	if (!draft) return false;
 	return draft.dirty || draft.artifactId === null;
@@ -86,6 +86,6 @@ export function isTabDirty(
  */
 export function isArtifactDirty(kind: ArtifactKind, artifactId: string): boolean {
 	if (kind === 'code_snippet') return isTabDirty('snippet', `snip:${artifactId}`);
-	if (kind === 'custom_export') return isTabDirty('custom_export', `exp:${artifactId}`);
+	if (kind === 'exporter') return isTabDirty('exporter', `exp:${artifactId}`);
 	return isTabDirty(kind, `${kind === 'table' ? 'tbl' : 'nav'}:${artifactId}`);
 }

@@ -42,7 +42,7 @@ export type ExportResult =
  * header (e.g. `attachment; filename="table.xlsx"`). Returns `undefined` when
  * the header is absent or unparseable — callers supply their own fallback
  * name. Shared by every download-shaped route ({@link exportTable},
- * `api/exports.ts`'s `runCustomExport`) so attachment parsing lives in
+ * `api/exports.ts`'s `runExporter`) so attachment parsing lives in
  * exactly one place.
  */
 export function parseAttachmentFilename(res: Response): string | undefined {

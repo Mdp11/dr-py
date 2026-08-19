@@ -8,7 +8,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as tablesApi from '$lib/api/tables';
-import type { ExportEntry, TableDefinition } from '$lib/api/types';
+import type { ExporterEntry, TableDefinition } from '$lib/api/types';
 import EntryLayoutDialog from '../EntryLayoutDialog.svelte';
 
 function baseDefinition(): TableDefinition {
@@ -41,7 +41,7 @@ function baseDefinition(): TableDefinition {
 	} as TableDefinition;
 }
 
-function entryOverridingColumn1(): ExportEntry {
+function entryOverridingColumn1(): ExporterEntry {
 	return {
 		source: { ref: 'tbl-1' },
 		name: 'My entry',
@@ -69,8 +69,8 @@ afterEach(() => {
 
 function render(props: {
 	tableDefinition: TableDefinition;
-	entry: ExportEntry;
-	onSave: (patch: Partial<ExportEntry>) => void;
+	entry: ExporterEntry;
+	onSave: (patch: Partial<ExporterEntry>) => void;
 	onClose: () => void;
 }): HTMLElement {
 	const target = document.createElement('div');
@@ -126,7 +126,7 @@ describe('EntryLayoutDialog', () => {
 		flushSync();
 
 		expect(onSave).toHaveBeenCalledTimes(1);
-		const patch = onSave.mock.calls[0][0] as Partial<ExportEntry>;
+		const patch = onSave.mock.calls[0][0] as Partial<ExporterEntry>;
 		expect(patch.format).toBe('json');
 		// Positive form: column 1's override now says INCLUDED (true), not
 		// merely "not excluded" — `.some(... include === false)` toBe(false)
@@ -138,7 +138,7 @@ describe('EntryLayoutDialog', () => {
 	});
 
 	it('disables Save under a tokenless json_split template and re-enables once ${name} is typed', async () => {
-		const entry: ExportEntry = {
+		const entry: ExporterEntry = {
 			source: { ref: 'tbl-1' },
 			name: 'Split entry',
 			format: 'json',

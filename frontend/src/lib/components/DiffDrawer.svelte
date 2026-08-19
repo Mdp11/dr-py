@@ -147,7 +147,7 @@
 		navigation: 'navigation',
 		table: 'table',
 		code_snippet: 'code snippet',
-		custom_export: 'custom export'
+		exporter: 'exporter'
 	};
 
 	function artifactEntryId(e: StagedArtifactEntry): string {

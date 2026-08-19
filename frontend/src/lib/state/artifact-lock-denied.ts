@@ -20,7 +20,7 @@
  * from a best-effort, fire-and-forget sweep after a commit that already
  * SUCCEEDED, and an unknown tab must not turn that into a visible failure.
  */
-import { setCustomExportLockDenied } from './custom-export-editor.svelte';
+import { setExporterLockDenied } from './exporter-editor.svelte';
 import { setNavLockDenied } from './navigation-editor.svelte';
 import { setSnippetLockDenied } from './snippet-editor.svelte';
 import { setTableLockDenied } from './table-editor.svelte';
@@ -29,5 +29,5 @@ export function markEditorLockDenied(tabId: string, holder: string): void {
 	if (tabId.startsWith('nav:')) setNavLockDenied(tabId, holder);
 	else if (tabId.startsWith('tbl:')) setTableLockDenied(tabId, holder);
 	else if (tabId.startsWith('snip:')) setSnippetLockDenied(tabId, holder);
-	else if (tabId.startsWith('exp:')) setCustomExportLockDenied(tabId, holder);
+	else if (tabId.startsWith('exp:')) setExporterLockDenied(tabId, holder);
 }

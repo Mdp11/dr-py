@@ -2,7 +2,7 @@
  * Shared 202/`Retry-After` retry-and-download loop for every export that
  * reads the backend's cache-only script pass: `/tables/export`
  * (`downloadTable` in `state/table-editor.svelte.ts`) and `/exports/run`
- * (`runExport` in `Export/CustomExportTab.svelte`). THE STATUS CODE
+ * (`runExport` in `Export/ExporterTab.svelte`). THE STATUS CODE
  * IS THE RETRY SIGNAL, never the body's `state` — see either caller's
  * docstring for the full rationale; this module only owns the polling shape,
  * not why it exists.

@@ -968,11 +968,11 @@ export type Column = z.infer<typeof ColumnSchema>;
 export type RowSource = z.infer<typeof RowSourceSchema>;
 export type ColumnSource = z.infer<typeof ColumnSourceSchema>;
 
-// ---- Custom export (kind='custom_export' artifact payload) -----------------
-// Wire mirror of core/table/custom_export.py. A named collection of table
+// ---- Exporter (kind='exporter' artifact payload) ----------------------------
+// Wire mirror of core/table/exporter.py. A named collection of table
 // exports whose presentation overrides live IN the artifact, keyed by column
 // index against each source table's CURRENT definition (see
-// $lib/table/custom-export.ts for the apply/copy helpers).
+// $lib/table/exporter.ts for the apply/copy helpers).
 export const ColumnOverrideSchema = z.object({
 	index: z.number().int().nonnegative(),
 	export: ColumnExportOptionsSchema.nullish(),
@@ -980,7 +980,7 @@ export const ColumnOverrideSchema = z.object({
 });
 export type ColumnOverride = z.infer<typeof ColumnOverrideSchema>;
 
-export const ExportEntrySchema = z.object({
+export const ExporterEntrySchema = z.object({
 	source: z.object({ ref: z.string() }),
 	name: z.string().default(''),
 	format: z.enum(['xlsx', 'json']).default('xlsx'),
@@ -990,13 +990,13 @@ export const ExportEntrySchema = z.object({
 	export_row_number: RowNumberExportOptionsSchema.nullish(),
 	json_split: JsonSplitOptionsSchema.nullish()
 });
-export type ExportEntry = z.infer<typeof ExportEntrySchema>;
+export type ExporterEntry = z.infer<typeof ExporterEntrySchema>;
 
-export const CustomExportDefinitionSchema = z.object({
+export const ExporterDefinitionSchema = z.object({
 	schema_version: z.number().default(1),
-	entries: z.array(ExportEntrySchema).default([])
+	entries: z.array(ExporterEntrySchema).default([])
 });
-export type CustomExportDefinition = z.infer<typeof CustomExportDefinitionSchema>;
+export type ExporterDefinition = z.infer<typeof ExporterDefinitionSchema>;
 
 // ---- Table page (evaluate response) ----------------------------------------
 export const TableColumnSchema = z.object({

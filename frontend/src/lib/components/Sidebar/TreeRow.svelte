@@ -228,7 +228,7 @@
 	function onOpenArtifact(): void {
 		if (!artifactHeader) return;
 		// Explicit per-kind dispatch (R14, carried from Task 11's review): a
-		// bare `else` here used to catch `custom_export` too and open it as a
+		// bare `else` here used to catch `exporter` too and open it as a
 		// NavigationBuilder — wrong editor, wrong draft store, and on close it
 		// would never release the export's `art:` lease (NavigationBuilder
 		// releases a NAVIGATION lease, not this artifact's). One arm per kind,
@@ -238,8 +238,8 @@
 			openArtifactTab('table', { artifactId, title: artifactHeader.name });
 		} else if (artifactHeader.kind === 'code_snippet') {
 			openArtifactTab('snippet', { artifactId, title: artifactHeader.name });
-		} else if (artifactHeader.kind === 'custom_export') {
-			openArtifactTab('custom_export', { artifactId, title: artifactHeader.name });
+		} else if (artifactHeader.kind === 'exporter') {
+			openArtifactTab('exporter', { artifactId, title: artifactHeader.name });
 		} else if (artifactHeader.kind === 'navigation') {
 			openNavigationTab({ artifactId, title: artifactHeader.name });
 		}

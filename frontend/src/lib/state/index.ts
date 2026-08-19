@@ -402,22 +402,22 @@ export {
 } from './snippet-editor.svelte';
 export { ensureSnippetDocs, getSnippetDocs, resetSnippetDocs } from './snippet-docs.svelte';
 export {
-	addExportEntry,
-	closeCustomExportDraft,
-	ensureCustomExportDraft,
-	getCustomExportDraft,
-	getCustomExportLockHolder,
-	hasDirtyCustomExportDrafts,
-	moveExportEntryInList,
-	removeExportEntry,
-	resetCustomExportEditors,
-	retryCustomExportLock,
-	saveCustomExportDraft,
-	setCustomExportLockDenied,
-	setCustomExportName,
-	updateExportEntry,
-	type CustomExportDraft
-} from './custom-export-editor.svelte';
+	addExporterEntry,
+	closeExporterDraft,
+	ensureExporterDraft,
+	getExporterDraft,
+	getExporterLockHolder,
+	hasDirtyExporterDrafts,
+	moveExporterEntryInList,
+	removeExporterEntry,
+	resetExporterEditors,
+	retryExporterLock,
+	saveExporterDraft,
+	setExporterLockDenied,
+	setExporterName,
+	updateExporterEntry,
+	type ExporterDraft
+} from './exporter-editor.svelte';
 export {
 	abandonTableEvaluationSuspension,
 	canRequestScriptErrors,

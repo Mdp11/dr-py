@@ -2,7 +2,7 @@
 	// The export settings panel: one unified column list that adapts to the
 	// selected format, plus (for JSON) the live sample. Extracted verbatim out
 	// of `Table/ExportDialog.svelte` (P-14 step 1) so a second host —
-	// `EntryLayoutDialog`, editing one custom-export entry's overrides — can
+	// `EntryLayoutDialog`, editing one exporter entry's overrides — can
 	// reuse the exact same markup and mutators over a different definition and
 	// a different write target. PRESENTATIONAL ONLY: every edit below produces
 	// a next `TableDefinition` and hands it to `onChange`; this component never
@@ -55,7 +55,7 @@
 		/** The active grid sort, folded into the preview request so grouped
 		 *  output matches the download exactly (see the preview effect below).
 		 *  `EntryLayoutDialog` has no live grid sort to offer and leaves this
-		 *  unset — a custom-export entry's preview is sort-less, same as its
+		 *  unset — an exporter entry's preview is sort-less, same as its
 		 *  download. */
 		sort?: TableSort;
 	} = $props();
