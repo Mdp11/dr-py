@@ -426,3 +426,55 @@ def test_token_in_folder_template_renders_and_gets_sanitized(client) -> None:
     # through unchanged.
     assert "__/x/f.xlsx" in names
     assert all(not n.startswith("/") and ".." not in n.split("/") for n in names)
+
+
+# --- zip filename template + bare (unzipped) output mode -----------------
+
+
+def test_zip_filename_template(client) -> None:
+    _bootstrap_model(client)
+    t = _mk_table(client, "T")
+    art = _mk_export(
+        client, _entries(t), name="MyExport",
+        output={"filename": "bundle_${name}_${project}"},
+    )
+    resp = _run(client, art)
+    cd = resp.headers["content-disposition"]
+    assert 'filename="bundle_MyExport_default.zip"' in cd
+
+
+def test_bare_mode_ships_the_single_file_directly(client) -> None:
+    _bootstrap_model(client)
+    t = _mk_table(client, "T")
+    art = _mk_export(
+        client, [{"source": {"ref": t}, "name": "solo", "format": "json"}],
+        output={"mode": "bare"},
+    )
+    resp = _run(client, art)
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("application/json")
+    assert 'filename="solo.json"' in resp.headers["content-disposition"]
+    json.loads(resp.content)  # it's the document, not a zip
+
+
+def test_bare_mode_with_multiple_files_is_422(client) -> None:
+    _bootstrap_model(client)
+    t = _mk_table(client, "T")
+    art = _mk_export(client, _entries(t, t), output={"mode": "bare"})
+    resp = _run(client, art)
+    assert resp.status_code == 422
+    assert "bare" in resp.json()["detail"]
+
+
+def test_unknown_zip_filename_token_is_422(client) -> None:
+    """The zip filename template goes through the SAME `validate_tokens`
+    up-front pass as an entry's `name`/`folder` (see
+    `test_unknown_template_token_is_422_naming_the_entry`) — this pins that
+    it actually fires for `cdef.output.filename`, not just entry fields."""
+    _bootstrap_model(client)
+    t = _mk_table(client, "T")
+    art = _mk_export(client, _entries(t), output={"filename": "x${typo}"})
+    resp = _run(client, art)
+    assert resp.status_code == 422
+    assert "output filename" in resp.json()["detail"]
+    assert "${typo}" in resp.json()["detail"]

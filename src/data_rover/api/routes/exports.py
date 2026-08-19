@@ -48,6 +48,12 @@ from .tables import _resolve_table
 
 router = APIRouter()
 
+#: Bare-mode `Content-Type`, keyed by the sole shipped member's extension.
+_MEDIA_TYPES = {
+    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "json": "application/json",
+}
+
 
 def _dedupe_path(prefix: str, stem: str, taken: set[str]) -> str:
     """Dedupe `stem` against every OTHER entry landing in the same folder.
@@ -280,11 +286,37 @@ def run_export(
             deduped = _dedupe_path(prefix, sanitize_stem(stem) or "export", taken)
             files.append((f"{prefix}{deduped}{dot}{ext}", blob))
 
-    resp_headers = {"Content-Disposition": f'attachment; filename="{row.name}.zip"'}
+    zip_stem = (
+        sanitize_stem(substitute(cdef.output.filename, {"name": row.name, **ctx}))
+        or sanitize_stem(row.name)
+        or "export"
+    )
+    resp_headers = {"Content-Disposition": f'attachment; filename="{zip_stem}.zip"'}
     if truncated:
         resp_headers["X-Table-Truncated"] = "true"
     if degraded:
         resp_headers["X-Table-Script-Errors"] = "true"
+
+    if cdef.output.mode == "bare":
+        # Spec §9.3: bare is a CONTRACT (exactly one file), not best-effort —
+        # a silent fallback to zip would change the content type under a
+        # consuming script. Never blocks Save; enforced only here.
+        if len(files) != 1:
+            raise HTTPException(
+                status_code=422,
+                detail=f"bare output requires a single file (this run produced {len(files)})",
+            )
+        member, blob = files[0]
+        ext = member.rpartition(".")[2]
+        return Response(
+            content=blob,
+            media_type=_MEDIA_TYPES.get(ext, "application/octet-stream"),
+            headers={
+                "Content-Disposition": f'attachment; filename="{member.rpartition("/")[2]}"',
+                **{k: v for k, v in resp_headers.items() if k != "Content-Disposition"},
+            },
+        )
+
     return Response(
         content=build_zip(files),
         media_type="application/zip",
