@@ -255,6 +255,20 @@ export {
 	type MetamodelDiagramView
 } from './metamodel-diagram.svelte';
 export {
+	getDiagramHighlight,
+	getDiagramHover,
+	getDiagramHoverLabel,
+	getHoverCursor,
+	getLodActive,
+	LOD_ENTER,
+	LOD_EXIT,
+	noteZoom,
+	resetMetamodelCanvas,
+	setDiagramAdjacency,
+	setDiagramHover,
+	setHoverCursor
+} from './metamodel-canvas.svelte';
+export {
 	acquireLocks,
 	acquireArtifactLease,
 	artifactDeleteLock,
