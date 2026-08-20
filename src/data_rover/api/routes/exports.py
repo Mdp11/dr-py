@@ -39,6 +39,7 @@ from ..schemas import EvaluateTableIn, RunExportIn, ScriptStatusOut
 from ..script_runner import get_runner
 from ..settings import Settings, get_settings
 from ..table_export_engine import (
+    MEDIA_TYPES,
     ExportFiles,
     ExportPending,
     build_zip,
@@ -48,12 +49,6 @@ from ..table_export_engine import (
 from .tables import _resolve_table
 
 router = APIRouter()
-
-#: Bare-mode `Content-Type`, keyed by the sole shipped member's extension.
-_MEDIA_TYPES = {
-    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "json": "application/json",
-}
 
 
 def _dedupe_path(prefix: str, stem: str, taken: set[str]) -> str:
@@ -178,7 +173,11 @@ def run_export(
             rendered_folder = substitute(entry.folder, {"name": table_name, **ctx})
             segs = folder_segments(rendered_folder)
             split = entry.json_split
-            if entry.format == "json" and split is not None and split.enabled:
+            if (
+                entry.format in ("json", "jsonl")
+                and split is not None
+                and split.enabled
+            ):
                 validate_template(split.filename_template)
                 validate_tokens(split.filename_template, SPLIT_TOKENS)
         except ValueError as exc:
@@ -228,6 +227,7 @@ def run_export(
                         format=entry.format,
                         sort=None,
                         template_vars=ctx,
+                        json_doc=entry.json_doc,
                     ),
                 )
             )
@@ -382,7 +382,7 @@ def run_export(
         ext = member.rpartition(".")[2]
         return Response(
             content=blob,
-            media_type=_MEDIA_TYPES.get(ext, "application/octet-stream"),
+            media_type=MEDIA_TYPES.get(ext, "application/octet-stream"),
             headers={
                 "Content-Disposition": f'attachment; filename="{member.rpartition("/")[2]}"',
                 **{k: v for k, v in resp_headers.items() if k != "Content-Disposition"},

@@ -27,6 +27,31 @@ from .schema import (
 )
 
 
+#: The four wire formats an export can ship as. One vocabulary for
+#: `ExporterEntry.format` and the standalone route's `ExportTableIn.format`
+#: (spec §6: extending both is nearly free — the engine branch is shared).
+type ExportFormat = Literal["xlsx", "json", "csv", "jsonl"]
+
+
+class JsonDocumentOptions(BaseModel):
+    """Document shaping for the `json` branch (spec §7): applied after
+    `render_json`, before serialization. Exporter-entry-only by decision —
+    `TableDefinition` never grows this. On `jsonl`, `shape`/`pretty` are
+    ignored with tolerance; `on_error` applies. On `xlsx`/`csv` the whole
+    object is tolerated-and-ignored (presentation settings never block)."""
+
+    shape: Literal["array", "object"] = "array"
+    #: Definition column index whose rendered value keys each member when
+    #: shape == "object". Strict at EXPORT time (missing/out-of-range/empty/
+    #: duplicate -> 422 naming the entry); never blocks Save.
+    key_column: int | None = None
+    pretty: bool = True  # indent=2 vs compact separators
+    #: "fail": any cell that would ship as {"$error": ...} turns the export
+    #: into a 422 — a script consumer can demand a clean document or nothing.
+    #: The default "emit" keeps the degraded-not-failed stance.
+    on_error: Literal["emit", "fail"] = "emit"
+
+
 class TableRef(BaseModel):
     """Serialized as a dict under the literal key `"ref"` — the shape
     artifact_kinds.extract_refs's generic walk already understands, so the
@@ -60,12 +85,13 @@ class ExporterEntry(BaseModel):
     name: str = ""
     #: Folder path template inside the zip; "" = archive root. Multi-segment.
     folder: str = ""
-    format: Literal["xlsx", "json"] = "xlsx"
+    format: ExportFormat = "xlsx"
     columns: list[ColumnOverride] = Field(default_factory=list)
     export_order: list[int] = Field(default_factory=list)
     show_row_numbers: bool = False
     export_row_number: RowNumberExportOptions | None = None
     json_split: JsonSplitOptions | None = None
+    json_doc: JsonDocumentOptions | None = None
 
 
 class ExporterDefinition(BaseModel):

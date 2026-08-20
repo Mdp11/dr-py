@@ -5,6 +5,7 @@ that it never touches structural fields and never mutates its input."""
 from data_rover.core.table.exporter import (
     EXPORTER_ADAPTER,
     ExporterEntry,
+    JsonDocumentOptions,
     TableRef,
     overridden_table,
 )
@@ -114,3 +115,39 @@ def test_output_options_default_and_roundtrip():
     assert d2.entries[0].folder == "a/b"
     dumped = d2.model_dump()
     assert EXPORTER_ADAPTER.validate_python(dumped) == d2
+
+
+def test_entry_accepts_all_four_formats_and_json_doc():
+    for fmt in ("xlsx", "json", "csv", "jsonl"):
+        d = EXPORTER_ADAPTER.validate_python(
+            {"entries": [{"source": {"ref": "t1"}, "format": fmt}]}
+        )
+        assert d.entries[0].format == fmt
+    d = EXPORTER_ADAPTER.validate_python(
+        {
+            "entries": [
+                {
+                    "source": {"ref": "t1"},
+                    "format": "json",
+                    "json_doc": {"shape": "object", "key_column": 2,
+                                 "pretty": False, "on_error": "fail"},
+                }
+            ]
+        }
+    )
+    doc = d.entries[0].json_doc
+    assert doc is not None
+    assert (doc.shape, doc.key_column, doc.pretty, doc.on_error) == (
+        "object", 2, False, "fail",
+    )
+
+
+def test_json_doc_defaults_preserve_todays_behavior():
+    d = EXPORTER_ADAPTER.validate_python(
+        {"entries": [{"source": {"ref": "t1"}}]}
+    )
+    assert d.entries[0].json_doc is None  # no-migration guarantee
+    opts = JsonDocumentOptions()
+    assert (opts.shape, opts.key_column, opts.pretty, opts.on_error) == (
+        "array", None, True, "emit",
+    )

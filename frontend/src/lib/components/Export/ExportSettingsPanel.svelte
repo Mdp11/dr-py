@@ -36,7 +36,7 @@
 	import { createColumnDrag } from '$lib/table/column-dnd.svelte';
 	import { previewTableJson } from '$lib/api/tables';
 	import { Eye, EyeOff } from '@lucide/svelte';
-	import type { Column, TableDefinition, TableSort } from '$lib/api/types';
+	import type { Column, ExportFormat, TableDefinition, TableSort } from '$lib/api/types';
 
 	let {
 		definition,
@@ -46,7 +46,10 @@
 		sort
 	}: {
 		definition: TableDefinition;
-		format: 'xlsx' | 'json';
+		// Every branch below only distinguishes the json FAMILY (json + jsonl,
+		// see `jsonFamily`) from "everything else" (xlsx + csv); Task 10 adds the
+		// format-specific (json_doc) controls this panel doesn't have yet.
+		format: ExportFormat;
 		onChange: (next: TableDefinition) => void;
 		/** What the JSON preview builds from, when it must diverge from
 		 *  `definition` itself — unused by every host today (both preview the
@@ -65,6 +68,13 @@
 	// keeps them.
 	const entries = $derived(exportEntries(definition));
 	const keys = $derived(defaultJsonKeys(definition));
+
+	// JSONL renders through the same `render_json` document list as JSON (one
+	// document per line instead of one array), so JSON key naming, value
+	// modes, grouping, split and the preview all apply to it unchanged; CSV
+	// renders through the xlsx *layout* path, so it takes the xlsx-side
+	// behavior everywhere by falling into the `!jsonFamily` arm.
+	const jsonFamily = $derived(format === 'json' || format === 'jsonl');
 
 	/** A column whose cells can hold element references — the only place the
 	 *  name/id/object choice means anything. A property column never does. */
@@ -104,16 +114,16 @@
 	function nameOf(entry: ExportEntry): string {
 		if (entry.index === ROW_NUMBER_SLOT) {
 			const rn = definition.export_row_number;
-			return (format === 'json' ? rn?.key : rn?.header) ?? '';
+			return (jsonFamily ? rn?.key : rn?.header) ?? '';
 		}
 		const col = definition.columns[entry.index];
-		return (format === 'json' ? col?.json_export?.key : col?.export?.header) ?? '';
+		return (jsonFamily ? col?.json_export?.key : col?.export?.header) ?? '';
 	}
 
 	function setName(entry: ExportEntry, value: string): void {
 		if (entry.index === ROW_NUMBER_SLOT) {
-			patchRowNumber(format === 'json' ? { key: value } : { header: value });
-		} else if (format === 'json') {
+			patchRowNumber(jsonFamily ? { key: value } : { header: value });
+		} else if (jsonFamily) {
 			patchJson(entry.index, { key: value });
 		} else {
 			patchExport(entry.index, { header: value });
@@ -124,9 +134,9 @@
 	 *  for xlsx, the derived JSON key otherwise (blank only for an EXCLUDED
 	 *  entry, which is emitted nowhere — see `defaultJsonKeys`). */
 	function placeholderOf(entry: ExportEntry): string {
-		if (entry.index === ROW_NUMBER_SLOT) return format === 'json' ? 'row_number' : '#';
+		if (entry.index === ROW_NUMBER_SLOT) return jsonFamily ? 'row_number' : '#';
 		const col = definition.columns[entry.index];
-		if (format === 'json') return keys[entry.index] ?? '';
+		if (jsonFamily) return keys[entry.index] ?? '';
 		return col ? col.header || col.kind : '';
 	}
 
@@ -178,7 +188,7 @@
 	let previewError = $state<string | null>(null);
 	let token = 0;
 	$effect(() => {
-		if (format !== 'json') return;
+		if (!jsonFamily) return;
 		const d = previewDefinition ?? definition;
 		const s = sort;
 		const mine = ++token;
@@ -200,14 +210,14 @@
 </script>
 
 <p class="pb-2 text-xs text-muted-foreground">
-	{#if format === 'json'}
+	{#if jsonFamily}
 		One JSON object per row. Grouping an expanded column rolls its rows back into an array.
 	{:else}
 		One worksheet row per table row. Hiding a column here changes the file, never the grid.
 	{/if}
 </p>
 
-{#if format === 'json'}
+{#if jsonFamily}
 	<button
 		type="button"
 		data-testid="json-snake-all"
@@ -218,7 +228,7 @@
 	</button>
 {/if}
 
-{#if format === 'json'}
+{#if jsonFamily}
 	{@const split = definition.json_split ?? DEFAULT_JSON_SPLIT}
 	<div class="mb-2 flex flex-col gap-1.5 rounded border border-border/70 bg-muted/30 p-1.5 text-xs">
 		<label class="flex items-center gap-1.5">
@@ -287,7 +297,7 @@
 				{entry.index === ROW_NUMBER_SLOT ? 'Row number' : col!.header || col!.kind}
 			</span>
 			<label class="flex min-w-40 flex-1 items-center gap-1">
-				{#if format === 'json' && grouped}
+				{#if jsonFamily && grouped}
 					<span class="w-9 shrink-0 text-[10px] uppercase text-muted-foreground/70"> array </span>
 				{/if}
 				<input
@@ -298,7 +308,7 @@
 					oninput={(e) => setName(entry, e.currentTarget.value)}
 				/>
 			</label>
-			{#if format === 'json' && col}
+			{#if jsonFamily && col}
 				{#if grouped}
 					<label class="flex items-center gap-1">
 						<span class="w-9 shrink-0 text-[10px] uppercase text-muted-foreground/70"> item </span>
@@ -345,7 +355,7 @@
 	{/each}
 </div>
 
-{#if format === 'json'}
+{#if jsonFamily}
 	<div class="flex flex-col gap-1 pt-3">
 		<div class="flex items-center gap-2">
 			<span class="text-xs text-muted-foreground">Preview</span>

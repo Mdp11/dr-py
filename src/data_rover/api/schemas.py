@@ -18,6 +18,7 @@ from data_rover.core.model.relationship import Relationship
 from data_rover.core.navigation.schema import NavigationDefinition
 from data_rover.core.script.schema import SNIPPET_MAX_CODE_BYTES
 from data_rover.core.script.warnings import ScriptWarning
+from data_rover.core.table.exporter import ExportFormat
 from data_rover.core.table.schema import TableDefinition
 from data_rover.core.validation.issue import Issue
 from data_rover.core.view.schema import Folder, View
@@ -1331,7 +1332,7 @@ class ExportTableIn(EvaluateTableIn):
     export is always whole-table.
     """
 
-    format: Literal["xlsx", "json"] = "xlsx"
+    format: ExportFormat = "xlsx"
 
 
 class RunExportIn(BaseModel):

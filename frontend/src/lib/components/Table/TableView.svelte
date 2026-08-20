@@ -35,6 +35,7 @@
 		updateTableDefinition,
 		type ExportProgress
 	} from '$lib/state';
+	import type { ExportFormat } from '$lib/api/types';
 	import { AlertTriangle, Check, Search, Settings, X } from '@lucide/svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
@@ -177,7 +178,7 @@
 	// order overrides and runs the download itself. `exportFormat` is bound, so
 	// switching format inside the dialog is remembered for the next opening.
 	let exportOpen = $state(false);
-	let exportFormat = $state<'xlsx' | 'json'>('xlsx');
+	let exportFormat = $state<ExportFormat>('xlsx');
 	$effect(() => () => exportAbort?.abort());
 	// Unmounting with the settings dialog still open would leave the tab
 	// suspended forever (nothing else clears that key), so the tab would silently
@@ -395,7 +396,7 @@
 		}
 	}
 
-	async function exportTable(format: 'xlsx' | 'json'): Promise<void> {
+	async function exportTable(format: ExportFormat): Promise<void> {
 		if (exporting) return; // one export at a time — the trigger is disabled too
 		saveError = null;
 		exporting = true;
@@ -504,6 +505,24 @@
 							}}
 						>
 							JSON (.json)
+						</DropdownMenu.Item>
+						<DropdownMenu.Item
+							data-testid="table-export-csv"
+							onSelect={() => {
+								exportFormat = 'csv';
+								exportOpen = true;
+							}}
+						>
+							CSV (.csv)
+						</DropdownMenu.Item>
+						<DropdownMenu.Item
+							data-testid="table-export-jsonl"
+							onSelect={() => {
+								exportFormat = 'jsonl';
+								exportOpen = true;
+							}}
+						>
+							JSON Lines (.jsonl)
 						</DropdownMenu.Item>
 					</DropdownMenu.Content>
 				</DropdownMenu.Root>

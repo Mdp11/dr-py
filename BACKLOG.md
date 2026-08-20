@@ -37,7 +37,12 @@ v2 Phase 1) closes P-15.2, P-15.3, F-10, F-11 and C-10, leaves P-15.1 open (sche
 Exporter v2 Phase 3), and marks P-16 in progress. The 2026-08-20 metamodel-navigation pass
 on `feat/metamodel-navigation` closes P-17 and P-18, and also ships the two owner-requested
 navigation features (search autocomplete, collapsible panel) recorded in the same day's
-spec.
+spec. A follow-up pass on `feat/exporter-v2-phase2` (Exporter v2 Phase 2) ships two more
+export formats — CSV and JSON Lines, joining xlsx/JSON on both `POST /tables/export` and
+`POST /exports/run` — plus per-entry `json_doc` document shaping (array/object shape with
+a data-derived key column, pretty-print, on-error strictness); Phases 3–5 (the real
+add-table picker, draft/uncommitted export, the `transform` hook, bundle-draft export)
+remain open, see P-15.1/P-16.
 
 ---
 
@@ -698,6 +703,18 @@ Shipped, all eleven:
   "search result dragged into a folder"`), which also re-verifies the row drag off the new
   markup in a real browser.
 
+### F-16 · `EntryLayoutDialog`'s Save gate on a bad split template — tension with never-block-Save · `open` · *2026-08-20*
+`Export/EntryLayoutDialog.svelte`'s `splitTemplateInvalid` disables its own Save button while
+the working copy's split filename template is tokenless — F-10 (above) already argued this is
+belt-and-braces on a dialog-scoped edit buffer, not a Save-time block on the artifact itself,
+and not a second enforcement point that could reject a payload Save would otherwise accept.
+Exporter v2 Phase 2 widens the same gate from `format === 'json'` to the whole json family
+(`json || jsonl`), so it now also disables Save for a `jsonl` entry with a bad split template.
+Noting it here rather than re-litigating F-10: it still sits in tension with "never block
+Save; all strictness is a 422 at export time" as a general principle, and the standalone
+table dialog's equivalent gate lives on **Export**, not Save — a different action on a
+different surface. Worth revisiting whether the entry dialog's gate belongs on Save at all.
+
 ---
 
 ## 6. Diagnosed issues — backend
@@ -805,6 +822,27 @@ and left everything else verbatim); Exporter v2 Phase 1 scoped `routes/tables.py
 template through `naming.validate_tokens(..., SPLIT_TOKENS)` and mapping the `ValueError`
 to a 422. Surfaced during the Exporter v2 Phase 1 Task 5 review and deliberately parked as
 out of scope for that pass.
+
+### K-11 · CSV export writes untrusted cell text through `csv.writer` unmitigated · `open` · deliberate · *2026-08-20*
+`core/table/csv_export.py`'s `render_csv` puts `cell_text`'s raw model-property output
+straight through `csv.writer` with no formula-injection mitigation. `api/table_export.py`'s
+xlsx writer, three files away, hardens the identical untrusted content with
+`"strings_to_formulas": False` and an explicit comment calling out the risk — so an
+element or property named e.g. `=HYPERLINK("http://evil","click")` ships as inert text in
+the xlsx but becomes a LIVE formula the moment the CSV is opened in Excel/LibreOffice/
+Sheets, and a CSV is if anything MORE likely to be double-clicked into a spreadsheet than
+an xlsx is.
+
+Ruled a deliberate, documented posture rather than a bug during the Exporter v2 Phase 2
+final review: the standard mitigation (a leading `'`/tab/space before anything
+formula-shaped) MUTATES the field for the machine consumers — `csv.reader`, pandas, a data
+pipeline — the CSV format exists to serve, and RFC-4180 has no formula concept for a
+mitigation to appeal to in the first place. xlsx has no such non-spreadsheet reader to
+protect, which is why hardening it is free and hardening CSV is not. The asymmetry is now
+recorded rather than silent — see `csv_export.py`'s module docstring (the "Formula
+injection" paragraph, added alongside this entry) for the full reasoning both ways. Worth
+revisiting if a consumer ever reports opening exported CSVs directly in a spreadsheet tool
+as a primary workflow rather than an edge case.
 
 ---
 

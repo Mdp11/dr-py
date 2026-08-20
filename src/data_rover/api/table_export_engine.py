@@ -31,12 +31,18 @@ from data_rover.core.table.evaluate import (
     iter_export_rows,
     order_rows,
 )
+from data_rover.core.table.csv_export import render_csv
 from data_rover.core.table.export_layout import (
     export_definition,
     export_header,
     export_layout,
 )
-from data_rover.core.table.json_export import render_json
+from data_rover.core.table.exporter import JsonDocumentOptions
+from data_rover.core.table.json_export import (
+    contains_error_marker,
+    jsonl_bytes,
+    render_json_ex,
+)
 from data_rover.core.table.naming import SPLIT_TOKENS, validate_tokens
 from data_rover.core.table.resolve import table_has_script
 from data_rover.core.table.schema import TableDefinition
@@ -108,6 +114,18 @@ def status_from_job(job: SweepJob) -> ScriptStatusOut:
 ZIP_DATE_TIME = (1980, 1, 1, 0, 0, 0)
 
 
+#: Content type per shipped file extension. One map for the standalone
+#: route's single-file response, `/exports/run`'s bare mode, and anything
+#: else that needs to name a format's media type — extending a format means
+#: extending THIS, once.
+MEDIA_TYPES: dict[str, str] = {
+    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "json": "application/json",
+    "csv": "text/csv; charset=utf-8",
+    "jsonl": "application/x-ndjson",
+}
+
+
 def build_zip(files: list[tuple[str, bytes]]) -> bytes:
     """Zip `files` (name, blob) pairs with every member timestamp pinned to
     `ZIP_DATE_TIME`. `zipfile` otherwise stamps each entry with the current
@@ -150,9 +168,10 @@ def run_table_export(
     defn: TableDefinition,  # evaluation — the ORIGINAL definition
     render_defn: TableDefinition,  # presentation — same object for /tables/export
     name: str,
-    format: str,  # "xlsx" | "json"
+    format: str,  # "xlsx" | "json" | "csv" | "jsonl"
     sort: SortSpec | None,
     template_vars: Mapping[str, str] | None = None,
+    json_doc: JsonDocumentOptions | None = None,
 ) -> ExportPending | ExportFiles:
     """Exports the WHOLE table (every row `build_rows`/`order_rows` produce,
     honoring `max_rows` and the requested sort) — unlike `/tables/evaluate`,
@@ -160,8 +179,21 @@ def run_table_export(
     `"xlsx"` ships a single-sheet
     `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`
     workbook via `build_workbook`; `"json"` ships `application/json` via
-    `render_json`, one object per (possibly grouped) row — see
-    `core/table/json_export.py` for the grouping rules.
+    `render_json_ex`, one object per (possibly grouped) row — see
+    `core/table/json_export.py` for the grouping rules; `"csv"` ships
+    `text/csv` via `render_csv`, sharing xlsx's cell display text through
+    `core/table/cell_text.py` so the two formats cannot drift; `"jsonl"`
+    ships `application/x-ndjson` via `jsonl_bytes`, one compact object per
+    line — the JSON-family renderer (`render_json_ex`) underneath both
+    `"json"` and `"jsonl"`.
+
+    `json_doc` (spec §7) is entry-level document shaping — object vs. array
+    shape (with a `key_column`), compact vs. pretty printing, and whether an
+    in-band `{"$error": ...}` marker anywhere in the export turns into a
+    422 instead of shipping. It is consulted ONLY inside the json/jsonl
+    branch: `None` for the standalone route and for xlsx/csv, and `shape`/
+    `pretty` are ignored with tolerance on `jsonl` (only `on_error` applies
+    there) — see `JsonDocumentOptions`'s own docstring.
 
     Cells are evaluated with `max_cell_elements` overridden to effectively
     unbounded (10**9): the interactive page route caps a navigation cell's
@@ -184,15 +216,21 @@ def run_table_export(
     imply a complete cache, so "would a retry help" — not "is the job over" —
     is the discriminator. When it would not (a terminal sweep that still left holes,
     or no runner at all) the file still ships with pending cells surfaced —
-    but the two formats carry that differently. The `.xlsx` branch renders
+    but the four formats carry that differently. The `.xlsx` branch renders
     each affected cell `#ERROR` and appends a trailing notice row; the `.json`
     branch has no sheet and no notice row to append, so it marks each affected
     cell in-band with a `{"$error": ...}` object instead (see `render_cell` in
-    `core/table/json_export.py`). Both branches still set `degraded=True` on
-    the returned `ExportFiles` when this happens, so a caller can detect
-    degradation without parsing the body."""
+    `core/table/json_export.py`). `.csv` reuses the SAME `#ERROR:` cell text as
+    xlsx (both go through `core/table/cell_text.py`) but ships no trailing
+    notice row either — to a CSV parser a notice would be one more data row —
+    so a CSV consumer's only degradation signals are the in-band `#ERROR:`
+    text and the `X-Table-Script-Errors` response header. `.jsonl` inherits
+    json's in-band `{"$error": ...}` markers, one per line, since both formats
+    render through the same `render_json_ex`. Every branch still sets
+    `degraded=True` on the returned `ExportFiles` when this happens, so a
+    caller can detect degradation without parsing the body."""
     split = render_defn.json_split
-    split_on = format == "json" and split is not None and split.enabled
+    split_on = format in ("json", "jsonl") and split is not None and split.enabled
     if split_on:
         assert split is not None  # split_on implies this; narrows for mypy
         # Strict by decision (spec §2): the ONE export setting that rejects
@@ -412,7 +450,7 @@ def run_table_export(
                 )
             return None
 
-        if format == "json":
+        if format in ("json", "jsonl"):
             # `export_definition` restates inclusion as `hidden` so
             # `json_export`'s existing hidden-column and group-nesting logic is
             # reused rather than reimplemented. Built HERE rather than beside
@@ -426,14 +464,66 @@ def run_table_export(
                 if layout.row_number_pos is not None
                 else None
             )
+            # Object-shape key column: json only (jsonl ignores shape with
+            # tolerance, spec §6). Checked BEFORE rendering — the range half
+            # is knowable now, and `render_json_ex` re-checks it anyway.
+            key_col: int | None = None
+            if format == "json" and json_doc is not None and json_doc.shape == "object":
+                if json_doc.key_column is None:
+                    raise ValueError(
+                        f"{name}: json_doc.shape 'object' requires key_column"
+                    )
+                if not 0 <= json_doc.key_column < len(defn.columns):
+                    raise ValueError(
+                        f"{name}: json_doc.key_column {json_doc.key_column} out "
+                        f"of range (table has {len(defn.columns)} columns)"
+                    )
+                key_col = json_doc.key_column
+
+            def _check_on_error(docs: list[dict[str, object]]) -> None:
+                # Spec §7: under "fail" a machine consumer gets a clean
+                # document or nothing — scanned per FILE, after render,
+                # before serialization. ValueError -> the routes' 422.
+                if (
+                    json_doc is not None
+                    and json_doc.on_error == "fail"
+                    and any(contains_error_marker(d) for d in docs)
+                ):
+                    raise ValueError(
+                        f"{name}: export contains error cells and "
+                        "json_doc.on_error is 'fail'"
+                    )
+
+            def _serialize(
+                docs: list[dict[str, object]], doc_keys: list[str] | None
+            ) -> bytes:
+                if format == "jsonl":
+                    return jsonl_bytes(docs)
+                payload: object = (
+                    dict(zip(doc_keys, docs, strict=True))
+                    if doc_keys is not None
+                    else docs
+                )
+                if json_doc is not None and not json_doc.pretty:
+                    return json.dumps(
+                        payload, ensure_ascii=False, separators=(",", ":")
+                    ).encode("utf-8")
+                return json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+
             if split_on:
                 assert split is not None  # split_on implies this
                 # Split sits ABOVE the renderer, not inside it: each partition
-                # goes through the SAME `render_json` call with the SAME
-                # layout arguments as the unsplit path, so every split file is
-                # an ARRAY and concatenating them reproduces the unsplit
-                # export byte-for-byte (see the module docstring on
-                # `core/table/split.py`).
+                # goes through the SAME `render_json_ex` call with the SAME
+                # layout arguments as the unsplit path, so a split file is
+                # exactly the rows its partition contributes, rendered and
+                # shaped identically to how the unsplit export renders them
+                # (see the module docstring on `core/table/split.py`). This is
+                # NOT "concatenating every split file reproduces the unsplit
+                # export byte-for-byte" — that claim is false under
+                # `shape: "object"` (concatenating keyed objects does not
+                # reconstruct one array or one object), and even under the
+                # array shape each partition is a strict subset of the whole,
+                # not the whole itself.
                 parts = split_partitions(ordered, all_rows)
                 labels = [partition_label(model, b) for b, _ in parts]
                 stems = render_filenames(
@@ -441,7 +531,7 @@ def run_table_export(
                 )
                 files = []
                 for stem, (_, pairs) in zip(stems, parts, strict=True):
-                    part_docs = render_json(
+                    part_docs, part_keys = render_json_ex(
                         model,
                         eff,
                         [rk for rk, _ in pairs],
@@ -449,22 +539,21 @@ def run_table_export(
                         build.base_slots,
                         order=layout.rank,
                         row_number=rn,
+                        key_column=key_col,
                     )
-                    part_blob = json.dumps(
-                        part_docs, ensure_ascii=False, indent=2
-                    ).encode("utf-8")
-                    files.append((f"{stem}.json", part_blob))
+                    _check_on_error(part_docs)
+                    files.append((f"{stem}.{format}", _serialize(part_docs, part_keys)))
                 return ExportFiles(
                     files=files,
                     truncated=truncated,
                     degraded=_degraded(),
                     archive=True,
                 )
-            # `render_json` indexes cells by DEFINITION column index, so it
+            # `render_json_ex` indexes cells by DEFINITION column index, so it
             # gets the UNFILTERED rows — excluded columns are dropped inside it
             # by their `None` key, not by pre-slicing the row like the xlsx
             # path does.
-            docs = render_json(
+            docs, doc_keys = render_json_ex(
                 model,
                 eff,
                 ordered,
@@ -472,11 +561,26 @@ def run_table_export(
                 build.base_slots,
                 order=layout.rank,
                 row_number=rn,
+                key_column=key_col,
             )
-            blob = json.dumps(docs, ensure_ascii=False, indent=2).encode("utf-8")
-            filename = f"{name}.json"
+            _check_on_error(docs)
+            blob = _serialize(docs, doc_keys)
+            filename = f"{name}.{format}"
             # No JSON analogue of the xlsx trailing notice row: the `$error`
             # markers are in-band and the header below carries the summary.
+        elif format == "csv":
+            # Same layout slicing as the xlsx branch (headers already carry
+            # the row-number header at its position); cell text shared via
+            # core/table/cell_text so the two formats cannot drift (spec §6).
+            # No split, no json_doc — both tolerantly ignored, like
+            # json_split already is on xlsx.
+            blob = render_csv(
+                model,
+                headers,
+                ([row[i] for i in layout.order] for row in all_rows),
+                row_number_col=layout.row_number_pos,
+            )
+            filename = f"{name}.csv"
         else:
             blob = build_workbook(
                 model,

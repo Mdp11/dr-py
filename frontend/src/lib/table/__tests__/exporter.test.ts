@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { applyEntryOverrides, entryForTable, overridesFromDefinition } from '../exporter';
+import { ExporterEntrySchema } from '$lib/api/types';
 import type { TableDefinition } from '$lib/api/types';
 
 const defn: TableDefinition = {
@@ -75,5 +76,26 @@ describe('exporter helpers', () => {
 			'json_split',
 			'show_row_numbers'
 		]);
+	});
+});
+
+describe('phase 2 wire schema', () => {
+	it('parses all four formats and json_doc, defaulting json_doc off', () => {
+		for (const format of ['xlsx', 'json', 'csv', 'jsonl']) {
+			const e = ExporterEntrySchema.parse({ source: { ref: 't1' }, format });
+			expect(e.format).toBe(format);
+		}
+		const e = ExporterEntrySchema.parse({
+			source: { ref: 't1' },
+			format: 'json',
+			json_doc: { shape: 'object', key_column: 1, pretty: false, on_error: 'fail' }
+		});
+		expect(e.json_doc).toEqual({
+			shape: 'object',
+			key_column: 1,
+			pretty: false,
+			on_error: 'fail'
+		});
+		expect(ExporterEntrySchema.parse({ source: { ref: 't1' } }).json_doc).toBeUndefined();
 	});
 });

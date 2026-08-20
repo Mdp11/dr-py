@@ -25,7 +25,12 @@
 		updateExporterEntry,
 		updateExporterOutput
 	} from '$lib/state';
-	import { TableDefinitionSchema, type ExporterEntry, type TableDefinition } from '$lib/api/types';
+	import {
+		EXPORT_FORMATS,
+		TableDefinitionSchema,
+		type ExporterEntry,
+		type TableDefinition
+	} from '$lib/api/types';
 	import { createColumnDrag } from '$lib/table/column-dnd.svelte';
 	import EntryLayoutDialog from './EntryLayoutDialog.svelte';
 	import ArtifactExportButton from '$lib/components/ArtifactExportButton.svelte';
@@ -358,26 +363,18 @@
 							{tableName(entry.source.ref)}
 						</span>
 						<div class="flex shrink-0 items-center gap-1">
-							<button
-								type="button"
-								data-testid="export-entry-{i}-format-xlsx"
-								aria-pressed={entry.format === 'xlsx'}
-								class="rounded px-1.5 py-0.5 text-muted-foreground transition-colors hover:bg-muted aria-pressed:bg-muted aria-pressed:text-foreground"
-								disabled={disabledEntry}
-								onclick={() => updateExporterEntry(tabId, i, { format: 'xlsx' })}
-							>
-								xlsx
-							</button>
-							<button
-								type="button"
-								data-testid="export-entry-{i}-format-json"
-								aria-pressed={entry.format === 'json'}
-								class="rounded px-1.5 py-0.5 text-muted-foreground transition-colors hover:bg-muted aria-pressed:bg-muted aria-pressed:text-foreground"
-								disabled={disabledEntry}
-								onclick={() => updateExporterEntry(tabId, i, { format: 'json' })}
-							>
-								json
-							</button>
+							{#each EXPORT_FORMATS as fmt (fmt)}
+								<button
+									type="button"
+									data-testid="export-entry-{i}-format-{fmt}"
+									aria-pressed={entry.format === fmt}
+									class="rounded px-1.5 py-0.5 text-muted-foreground transition-colors hover:bg-muted aria-pressed:bg-muted aria-pressed:text-foreground"
+									disabled={disabledEntry}
+									onclick={() => updateExporterEntry(tabId, i, { format: fmt })}
+								>
+									{fmt}
+								</button>
+							{/each}
 						</div>
 						<button
 							type="button"

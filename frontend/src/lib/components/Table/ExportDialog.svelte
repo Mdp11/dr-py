@@ -23,7 +23,14 @@
 	import { templateIsValid } from '$lib/table/columns';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import ExportSettingsPanel from '../Export/ExportSettingsPanel.svelte';
-	import type { TableDefinition } from '$lib/api/types';
+	import { EXPORT_FORMATS, type ExportFormat, type TableDefinition } from '$lib/api/types';
+
+	const FORMAT_LABELS: Record<ExportFormat, string> = {
+		xlsx: 'Excel (.xlsx)',
+		json: 'JSON (.json)',
+		csv: 'CSV (.csv)',
+		jsonl: 'JSON Lines (.jsonl)'
+	};
 
 	let {
 		tabId,
@@ -34,14 +41,14 @@
 	}: {
 		tabId: string;
 		open: boolean;
-		format: 'xlsx' | 'json';
+		format: ExportFormat;
 		onClose: () => void;
 		/** How the download is actually run — required, never defaulted: the
 		 *  table tab's wrapper is what keeps the 202-retry loop reporting
 		 *  through the chrome's Export button and aborting when the tab
 		 *  unmounts. This dialog decides WHAT is exported, not how the waiting
 		 *  is surfaced, and it is closed long before the wait is over. */
-		onExport: (format: 'xlsx' | 'json') => Promise<void>;
+		onExport: (format: ExportFormat) => Promise<void>;
 	} = $props();
 
 	const draft = $derived(getTableDraft(tabId));
@@ -79,7 +86,7 @@
 	// (core/table/split.py::validate_template) — this only saves a round trip
 	// by disabling Export before the request is ever sent.
 	const splitTemplateInvalid = $derived(
-		format === 'json' &&
+		(format === 'json' || format === 'jsonl') &&
 			(defn?.json_split?.enabled ?? false) &&
 			!templateIsValid(defn?.json_split?.filename_template ?? '')
 	);
@@ -148,24 +155,17 @@
 		<Dialog.Title class="font-display text-lg font-light tracking-wide">Export table</Dialog.Title>
 
 		<div class="flex shrink-0 items-center gap-1 border-b border-border pb-1">
-			<button
-				type="button"
-				data-testid="export-format-xlsx"
-				aria-pressed={format === 'xlsx'}
-				class="rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted/60 aria-pressed:bg-muted aria-pressed:text-foreground"
-				onclick={() => (format = 'xlsx')}
-			>
-				Excel (.xlsx)
-			</button>
-			<button
-				type="button"
-				data-testid="export-format-json"
-				aria-pressed={format === 'json'}
-				class="rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted/60 aria-pressed:bg-muted aria-pressed:text-foreground"
-				onclick={() => (format = 'json')}
-			>
-				JSON (.json)
-			</button>
+			{#each EXPORT_FORMATS as fmt (fmt)}
+				<button
+					type="button"
+					data-testid="export-format-{fmt}"
+					aria-pressed={format === fmt}
+					class="rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted/60 aria-pressed:bg-muted aria-pressed:text-foreground"
+					onclick={() => (format = fmt)}
+				>
+					{FORMAT_LABELS[fmt]}
+				</button>
+			{/each}
 		</div>
 
 		{#if open && defn}

@@ -7,6 +7,8 @@ cells — a hand-rolled cell cannot catch a slot-index mistake."""
 import copy
 from typing import cast
 
+import pytest
+
 from data_rover.core.metamodel.schema import (
     ElementType,
     Metamodel,
@@ -26,8 +28,11 @@ from data_rover.core.table.cells import (
 from data_rover.core.table.evaluate import TableLimits, build_rows_ex, iter_export_rows
 from data_rover.core.table.json_export import (
     build_group_plan,
+    contains_error_marker,
+    jsonl_bytes,
     render_cell,
     render_json,
+    render_json_ex,
     resolve_item_keys,
     resolve_json_keys,
 )
@@ -1436,3 +1441,111 @@ def test_render_json_omits_the_row_number_inside_groups():
         {"Component": "Part 1", "Component Mass": 12},
         {"Component": "Part 2", "Component Mass": 9},
     ]
+
+
+# ---- JSONL serialization + on_error probe (Exporter v2 Phase 2) -----------
+
+
+def test_jsonl_is_one_compact_object_per_line_newline_terminated():
+    blob = jsonl_bytes([{"a": 1, "b": [1, 2]}, {"a": "é"}])
+    assert blob == b'{"a":1,"b":[1,2]}\n' + '{"a":"é"}\n'.encode()
+
+
+def test_jsonl_of_nothing_is_empty_bytes():
+    assert jsonl_bytes([]) == b""
+
+
+def test_error_marker_found_at_any_depth():
+    assert contains_error_marker({"$error": "boom"})
+    assert contains_error_marker({"a": [{"b": {"$error": "x"}}]})
+    assert contains_error_marker([1, {"nested": [{"$error": "x"}]}])
+    assert not contains_error_marker({"a": [1, "x", None, {"b": 2}]})
+    assert not contains_error_marker("plain")
+
+
+# ---- Object-shape document keys (Exporter v2 Phase 2, spec §7) -------------
+
+
+def _keys_doc(key_header_hidden: bool = False) -> dict:
+    return {
+        "row_source": {"kind": "scope", "types": ["Block"], "criteria": []},
+        "columns": [
+            {
+                "kind": "property",
+                "source": {"kind": "row"},
+                "name": "name",
+                "header": "Name",
+                "hidden": key_header_hidden,
+            },
+            {
+                "kind": "property",
+                "source": {"kind": "row"},
+                "name": "mass",
+                "header": "Mass",
+            },
+        ],
+    }
+
+
+def _render_ex(mm, model, doc, **kw):
+    defn = TABLE_ADAPTER.validate_python(doc)
+    build = build_rows_ex(mm, model, defn)
+    return render_json_ex(
+        model,
+        defn,
+        build.keys,
+        iter_export_rows(mm, model, defn, build.keys),
+        build.base_slots,
+        **kw,
+    )
+
+
+def test_doc_keys_render_one_string_key_per_document():
+    mm = _parts_mm()
+    model = _parts_model(mm)
+    docs, keys = _render_ex(mm, model, _keys_doc(), key_column=0)
+    assert keys == ["Root", "Part 1", "Part 2", "Lonely"]
+    assert keys is not None
+    assert len(docs) == len(keys)
+
+
+def test_doc_keys_work_for_a_hidden_key_column():
+    # Hidden = evaluated but never emitted; the key reads the CELL, not the
+    # rendered doc, so include/hidden state is irrelevant (spec §7).
+    mm = _parts_mm()
+    model = _parts_model(mm)
+    docs, keys = _render_ex(mm, model, _keys_doc(key_header_hidden=True), key_column=0)
+    assert keys == ["Root", "Part 1", "Part 2", "Lonely"]
+    assert all("Name" not in d for d in docs)
+
+
+def test_doc_keys_none_when_no_key_column_requested():
+    mm = _parts_mm()
+    model = _parts_model(mm)
+    docs, keys = _render_ex(mm, model, _keys_doc())
+    assert keys is None
+    assert docs  # array path untouched
+
+
+def test_doc_key_out_of_range_raises():
+    mm = _parts_mm()
+    model = _parts_model(mm)
+    with pytest.raises(ValueError, match="key_column"):
+        _render_ex(mm, model, _keys_doc(), key_column=9)
+
+
+def test_doc_key_empty_value_raises():
+    mm = _parts_mm()
+    model = _parts_model(mm)
+    # mass is unset on Root and Lonely -> renders null -> empty key
+    with pytest.raises(ValueError, match="empty"):
+        _render_ex(mm, model, _keys_doc(), key_column=1)
+
+
+def test_doc_key_duplicates_raise():
+    mm = _parts_mm()
+    model = _parts_model(mm)
+    dup = model.create_element("Block")
+    model.set_property(dup, "name", "Root")  # second "Root"
+    with pytest.raises(ValueError, match="duplicate"):
+        _render_ex(mm, model, _keys_doc(), key_column=0)
