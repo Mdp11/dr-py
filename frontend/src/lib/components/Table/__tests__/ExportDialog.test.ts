@@ -22,7 +22,7 @@ import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } fr
 
 import * as artifactsApi from '$lib/api/artifacts';
 import * as tablesApi from '$lib/api/tables';
-import type { TableDefinition } from '$lib/api/types';
+import type { ExportFormat, TableDefinition } from '$lib/api/types';
 import {
 	closeTableDraft,
 	ensureTableDraft,
@@ -119,7 +119,7 @@ let mounted: ReturnType<typeof mount>[] = [];
 interface MountOpts {
 	tabId?: string;
 	onClose?: () => void;
-	onExport?: (format: 'xlsx' | 'json') => Promise<void>;
+	onExport?: (format: ExportFormat) => Promise<void>;
 }
 
 /** Mount the dialog over whatever the draft currently holds. Kept apart from
@@ -128,7 +128,7 @@ interface MountOpts {
  *  is observable. `onExport` has no default in the component (the tab owns the
  *  waiting and the progress reporting), so every mount supplies one. */
 function mountDialog(
-	format: 'xlsx' | 'json',
+	format: ExportFormat,
 	opts: MountOpts = {}
 ): { target: HTMLElement; component: ReturnType<typeof mount> } {
 	const target = document.createElement('div');
@@ -157,7 +157,7 @@ function closeAll(): void {
 }
 
 async function open(
-	format: 'xlsx' | 'json' = 'xlsx',
+	format: ExportFormat = 'xlsx',
 	over: Partial<TableDefinition> = {},
 	opts: MountOpts = {}
 ): Promise<{ target: HTMLElement; component: ReturnType<typeof mount> }> {
@@ -171,7 +171,7 @@ async function open(
  *  `dirty: false` with real columns, and `artifactId` non-null is what makes
  *  the dirty flag load-bearing (`_evaluateSource` switches away from the
  *  backend's per-artifact order cache the moment it flips). */
-async function openSaved(format: 'xlsx' | 'json' = 'xlsx'): Promise<void> {
+async function openSaved(format: ExportFormat = 'xlsx'): Promise<void> {
 	vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue({
 		id: 'art-export-dialog',
 		kind: 'table',
@@ -356,7 +356,7 @@ describe('ExportDialog', () => {
 	});
 
 	it('Export hands the selected format to the tab that owns the download', async () => {
-		const formats: ('xlsx' | 'json')[] = [];
+		const formats: ExportFormat[] = [];
 		await open('json', {}, { onExport: async (f) => void formats.push(f) });
 		byTestId(document, 'export-confirm').click();
 		flushSync();
@@ -609,5 +609,29 @@ describe('ExportDialog', () => {
 	it('xlsx mode hides the split section entirely', async () => {
 		await open('xlsx');
 		expect(byTestId(document, 'json-split-enabled')).toBeNull();
+	});
+
+	// --- format toggle: csv/jsonl (exporter-v2 phase 2) ------------------------
+
+	it('offers all four formats and switches to CSV', async () => {
+		await open('xlsx');
+		expect(byTestId(document, 'export-format-csv')).toBeTruthy();
+		expect(byTestId(document, 'export-format-jsonl')).toBeTruthy();
+		byTestId(document, 'export-format-csv').click();
+		flushSync();
+		expect(byTestId(document, 'export-format-csv').getAttribute('aria-pressed')).toBe('true');
+	});
+
+	// JSONL renders through the same render_json document list as JSON, so the
+	// json-only sections (split, snake_case-all, preview) must all appear for it
+	// too — the exact markers the json-format tests above assert on.
+	it('keeps the JSON-only sections for jsonl (json family)', async () => {
+		await open('json');
+		byTestId(document, 'export-format-jsonl').click();
+		flushSync();
+		expect(byTestId(document, 'json-snake-all')).toBeTruthy();
+		expect(byTestId(document, 'json-split-enabled')).toBeTruthy();
+		await waitFor(() => previewSpy.mock.calls.length > 0);
+		expect(byTestId(document, 'json-preview')).toBeTruthy();
 	});
 });
