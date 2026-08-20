@@ -29,16 +29,8 @@ import xlsxwriter  # type: ignore[import-untyped]
 
 from data_rover.api.settings import get_settings
 from data_rover.core.model.model import Model
-from data_rover.core.model.naming import display_name
-from data_rover.core.table.cells import (
-    Cell,
-    ElementCell,
-    ElementsCell,
-    ErrorCell,
-    PendingCell,
-    ValueCell,
-    ValuesCell,
-)
+from data_rover.core.table.cells import Cell
+from data_rover.core.table.cell_text import cell_text
 
 #: The autofit ceiling lives in settings as ``xlsx_autofit_max_px`` (U-2):
 #: one huge cell must not blow a column out to an unusable width, but the cap
@@ -60,30 +52,6 @@ def _sheet_title(name: str) -> str:
     # `except (NavigationResolveError, ValueError)` misses it and the request
     # 500s instead of the 422 this helper exists to guarantee.
     return cleaned[:31].strip("'") or "Table"
-
-
-def _display(model: Model, eid: str) -> str:
-    # shared case-insensitive `name` lookup — same label the grid displays
-    return display_name(model.elements[eid])
-
-
-def _cell_text(model: Model, cell: Cell) -> object:
-    """Map one core cell dataclass to the xlsx value it should render as."""
-    if isinstance(cell, ElementCell):
-        return _display(model, cell.element_id) if cell.element_id else ""
-    if isinstance(cell, ValueCell):
-        return "" if not cell.present or cell.value is None else cell.value
-    if isinstance(cell, ValuesCell):
-        return "; ".join(str(v) for v in cell.values)
-    if isinstance(cell, ErrorCell):
-        return f"#ERROR: {cell.message}"
-    if isinstance(cell, PendingCell):
-        # Only reachable when exporting after a FAILED sweep (Task 8): a
-        # completed sweep leaves no pending cells, so this path is a
-        # last-resort rendering rather than an expected export outcome.
-        return "#ERROR: not computed"
-    assert isinstance(cell, ElementsCell)
-    return "; ".join(_display(model, e) for e in cell.element_ids)
 
 
 def build_workbook(
@@ -179,7 +147,7 @@ def build_workbook(
                 if col == row_number_col:
                     ws.write_number(r, col, r, cell_fmt)
                 else:
-                    ws.write(r, col, _cell_text(model, next(cells)), cell_fmt)
+                    ws.write(r, col, cell_text(model, next(cells)), cell_fmt)
 
         if headers:
             ws.autofilter(0, 0, r, len(headers) - 1)
