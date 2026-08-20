@@ -136,11 +136,29 @@
 	};
 	const edgeTypes = { generalization: GeneralizationEdge, association: AssociationEdge };
 
-	const built = $derived(view.mm === null ? { nodes: [], edges: [] } : buildDiagram(view.mm));
+	/**
+	 * The parsed metamodel, hoisted into its OWN `$derived` — the one thing
+	 * standing between a canvas click and an O(metamodel) rebuild.
+	 *
+	 * `getMetamodelDiagramView()` returns a fresh object literal on every
+	 * recompute, and it recomputes whenever selection, collapse, undo depth,
+	 * positions or the buffer change. So `buildDiagram(view.mm)` written inline
+	 * would re-run on all of those. The state module memoizes the parse by
+	 * buffer identity, which makes `view.mm` referentially STABLE across every
+	 * change that isn't a buffer edit; reading it through a derived of its own
+	 * lets Svelte's equality check find the value unchanged and leave `built`
+	 * — and everything downstream of it — alone. At ~300 types that is the
+	 * difference between a click costing a full rebuild and costing nothing.
+	 */
+	const parsedMm = $derived(view.mm);
+	const built = $derived(parsedMm === null ? { nodes: [], edges: [] } : buildDiagram(parsedMm));
 	const selectedNodeId = $derived(view.selection === null ? null : nodeIdFor(view.selection));
 
 	// The adjacency the hover store needs: rebuilt only when the parsed
-	// metamodel changes (`built` is memoized on it), NEVER on hover. The
+	// metamodel changes — `built` hangs off `parsedMm` above, so a selection, a
+	// collapse or a drag leaves it alone — and NEVER on hover, since hover
+	// state is written into `metamodel-canvas.svelte.ts` and read back only
+	// inside the node/edge components, never by anything on this line. The
 	// cleanup keeps a closed canvas from leaving stale hover state behind for
 	// the next mount.
 	$effect(() => {

@@ -24,6 +24,13 @@
 	 * template whitespace literally, and a stray newline between them would
 	 * inject a space into the middle of the rendered name.
 	 *
+	 * The `{#each}` key carries the row INDEX ahead of the identity, because a
+	 * metamodel draft may legitimately hold two same-named blocks (`mm.elements`
+	 * is a plain array and nothing dedupes it) and Svelte throws
+	 * `each_key_duplicate` — in prod as well as dev — on a repeated key, which
+	 * would take the whole toolbar down on the first query that matched both.
+	 * The panel's TOC keys its rows the same way, for the same reason.
+	 *
 	 * `onReveal` is a test seam: production leaves it unset and the default
 	 * routes through `revealSelection` with this component's flow context.
 	 */
@@ -119,7 +126,7 @@
 				{#if hits.length === 0}
 					<li class="px-1 py-0.5 text-muted-foreground/50">No matches.</li>
 				{:else}
-					{#each hits as hit, i (`${hit.kind}:${hit.name}`)}
+					{#each hits as hit, i (`${i}:${hit.kind}:${hit.name}`)}
 						<li>
 							<button
 								type="button"

@@ -102,6 +102,12 @@
 	const labelColor = $derived(structural ? 'var(--muted-foreground)' : 'var(--cm-string)');
 </script>
 
+<!-- The dim transition carries a 120ms DELAY, matching `.mm-node.mm-dim`'s
+     `transition-delay` in the three node components: a cursor sweeping across
+     the canvas must not strobe the whole picture on its way to a target, and an
+     edge that dimmed instantly while the boxes held steady was the worst of
+     both. Un-dimming keeps a 0ms delay, so the neighbourhood lights up the
+     moment the pointer lands. -->
 <BaseEdge
 	path={path[0]}
 	label={lod ? undefined : d.label}
@@ -112,9 +118,9 @@
 	markerEnd={d.arrow ? 'url(#uml-arrow)' : undefined}
 	style="stroke: {stroke}; stroke-width: {selected || vis === 'hot'
 		? 2
-		: 1.5}px; opacity: {edgeOpacity}; transition: opacity 140ms ease;{tethered
-		? ' stroke-dasharray: 5 4;'
-		: ''}"
+		: 1.5}px; opacity: {edgeOpacity}; transition: opacity 140ms ease {vis === 'dim'
+		? '120ms'
+		: '0ms'};{tethered ? ' stroke-dasharray: 5 4;' : ''}"
 />
 
 {#if !lod && d.sourceMult}

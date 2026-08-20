@@ -9,6 +9,16 @@ import { resetCheckout, setProjectInfo } from '../../../state/checkout.svelte';
 import { initMetamodelEditor, resetMetamodelEditor } from '../../../state/metamodel-editor.svelte';
 import MetamodelSearchHost from './MetamodelSearchHost.svelte';
 
+/** A metamodel draft carrying TWO `Zone` element blocks. `mm.elements` is a
+ * plain `z.array` (yaml-edit.ts), so a duplicated same-named block survives
+ * parsing intact — and hand-editing the YAML, which is the entire point of
+ * this surface, reaches that state with one copy-paste. The dropdown has to
+ * render it, not die on it. */
+const DUP_FIXTURE = FIXTURE.replace(
+	'  - name: Building\n    extends: NamedElement\n',
+	'  - name: Building\n    extends: NamedElement\n  - name: Zone\n    extends: NamedElement\n'
+);
+
 /** Same seeding recipe as metamodel-tab.test.ts: the search reads
  * `getMetamodelDiagramView().mm`, which parses the REAL editor module's
  * buffer, so the editor is initialized with the fixture over spied APIs. */
@@ -106,6 +116,32 @@ describe('MetamodelSearch', () => {
 			type('zone');
 			press('Escape');
 			expect(rows()).toHaveLength(0);
+		} finally {
+			unmount(c);
+		}
+	});
+
+	/**
+	 * A duplicated type name is a reachable draft state, not a malformed one
+	 * (see DUP_FIXTURE), and Svelte THROWS `each_key_duplicate` in dev and prod
+	 * alike — so keying the dropdown on `kind:name` alone took the whole
+	 * toolbar, and everything rendered under it, down with the first query that
+	 * matched both blocks. The index is part of the key for exactly this
+	 * reason, the same way the panel's TOC keys its rows.
+	 */
+	it('renders duplicate same-named types instead of throwing', async () => {
+		resetMetamodelEditor();
+		vi.spyOn(mmApi, 'getMetamodelRaw').mockResolvedValue({ blob: DUP_FIXTURE, source: 'stored' });
+		await initMetamodelEditor('p1');
+
+		const c = mount(MetamodelSearchHost, { target: document.body, props: {} });
+		flushSync();
+		try {
+			type('zone');
+			const r = rows();
+			expect(r).toHaveLength(2);
+			expect(r[0]).toContain('Zone');
+			expect(r[1]).toContain('Zone');
 		} finally {
 			unmount(c);
 		}

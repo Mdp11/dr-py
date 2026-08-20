@@ -324,7 +324,9 @@ block → arrows index falls out of the build rather than needing new derivation
 P-17.
 
 Shipped: hover lights the neighborhood (gens included) and dims the rest; adjacency
-derived per diagram build in frontend/src/lib/metamodel/diagram-adjacency.ts.
+derived per diagram build in frontend/src/lib/metamodel/diagram-adjacency.ts. The branch's
+final review deferred eleven refinements across all four navigation features — one roll-up
+entry, **F-15**.
 
 ### P-19 · Collapsible sidebar sections · `open`
 The **Tree** panel should collapse: `Sidebar/ContainmentTree.svelte:1285` is a plain
@@ -631,6 +633,43 @@ mean silently discarding a user's typed YAML, which is worse than one 409.
 position derivation — a dragged node visibly stays at its dragged position until the
 metamodel tab is closed and reopened (which re-derives `_positions` from the baseline +
 now-empty staged overlay). Purely visual; no staged data survives the discard.
+
+### F-15 · Metamodel diagram navigation — deferred refinements · `open` · *2026-08-20*
+Eleven findings triaged LEAVE by the final review of `feat/metamodel-navigation` (the branch
+that closed **P-17**/**P-18** and shipped the type search and the collapsible TOC panel). None
+is a correctness bug; each is a refinement the shipped surface can carry as-is.
+
+- **Edge hover target is ~3 screen-px wide in LOD.** `BaseEdge`'s `interactionWidth` defaults
+  to 20 *flow* units, so it shrinks with zoom — exactly the state the LOD tooltip exists to
+  serve. Candidate fix: `interactionWidth={lod ? 60 : 20}` in both edge components.
+- **The LOD cursor is tracked on every `pointermove` while LOD is active**, hovered or not;
+  the spec says only while the tooltip is visible. `&& getDiagramHover() !== null` matches it,
+  and subsumes the separate observation that `_cursor` is never cleared when LOD deactivates.
+- **The LOD tooltip has no viewport-edge flip** — `left: clientX + 12` runs off-screen near
+  the right edge, which is precisely where the form panel and rail sit.
+- **Hover is never cleared when the diagram rebuilds.** If the hovered node disappears (undo,
+  a peer's rebind), `_hover` points at a dead id and the canvas stays fully dimmed until the
+  next pointer event. Clearing `_hover` inside `setDiagramAdjacency` closes it.
+- **`searchTypes` truncates silently at `limit = 20`** — at 300 types a two-letter query drops
+  most matches with no "+N more" affordance.
+- **Tab doesn't close the search dropdown** (only Escape and an outside `pointerdown` do), so
+  tabbing out of the toolbar leaves an orphaned list floating over the canvas.
+- **a11y: neither typeahead implements the full combobox pattern** — `role="listbox"`,
+  `aria-activedescendant`, DOM focus following the active row. The metamodel type search and
+  the pre-existing `Sidebar/Search.svelte` element typeahead share the gap, so it is one
+  app-wide item rather than one per surface. Nothing incorrect is asserted today; this is an
+  enhancement, not a false claim.
+- **Untested branches** (companion to T-2): `metamodel-canvas.test.ts`'s memo-invalidation
+  test only ever changes the hover, never the adjacency, so `_hlFor.adj !== _adjacency` is
+  unexercised; and `metamodel-panel.svelte.ts`'s non-array-JSON and unrecognized-key read
+  paths have no dedicated test.
+- **`MetamodelSearch.svelte` resolves its dropdown for the outside-click check via a hardcoded
+  `document.getElementById('mm-search-dropdown')`** — safe while the toolbar is a singleton,
+  would cross-match the moment two mount at once.
+- **The LOD edge tooltip could name both endpoints.** Both tether halves of a boxed
+  relationship carry the mapping index (`assoc-in:<Rel>:<i>` / `assoc-out:<Rel>:<i>`), so the
+  outer endpoints of a hovered half are recoverable — `Monitors: Building → Zone` instead of
+  today's bare `Monitors`.
 
 ---
 
