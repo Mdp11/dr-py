@@ -35,6 +35,7 @@
 	} from '$lib/state';
 
 	import MetamodelFormPanel from './forms/MetamodelFormPanel.svelte';
+	import MetamodelSearch from './MetamodelSearch.svelte';
 
 	import AssocClassNode from './diagram/AssocClassNode.svelte';
 	import AssociationEdge from './diagram/AssociationEdge.svelte';
@@ -227,26 +228,6 @@
 
 	// --- toolbar ---------------------------------------------------------------
 
-	let query = $state('');
-
-	/** Pan to the first type whose name matches, centred on its box. Uses the
-	 * stored position + `nodeSize` rather than the measured node, so it works
-	 * for a node the viewport has never rendered. */
-	function findAndCenter(): void {
-		const q = query.trim().toLowerCase();
-		if (q === '') return;
-		const hit = built.nodes.find((n) =>
-			String(n.data.name ?? '')
-				.toLowerCase()
-				.includes(q)
-		);
-		if (hit === undefined) return;
-		const pos = view.positions[hit.id] ?? { x: 0, y: 0 };
-		const size = nodeSize(hit, view.collapsed.has(hit.id));
-		flow.setCenter(pos.x + size.width / 2, pos.y + size.height / 2, { zoom: 1.2, duration: 300 });
-		selectDiagramNode(selectionForNodeId(hit.id));
-	}
-
 	// Both create buttons pick a name free across the WHOLE datatype space
 	// (element types + enums + primitives), not just their own section: a
 	// created name that collides is the create-side twin of the rename guard —
@@ -347,15 +328,7 @@
 			<Button size="sm" variant="outline" onclick={() => void flow.fitView()}>Fit view</Button>
 			<Button size="sm" variant="ghost" onclick={() => setAllCollapsed(true)}>Collapse all</Button>
 			<Button size="sm" variant="ghost" onclick={() => setAllCollapsed(false)}>Expand all</Button>
-			<input
-				class="rounded bg-card px-2 py-1 text-xs text-foreground"
-				bind:value={query}
-				aria-label="Find a type"
-				placeholder="Find type…"
-				onkeydown={(e) => {
-					if (e.key === 'Enter') findAndCenter();
-				}}
-			/>
+			<MetamodelSearch />
 			<div class="ml-auto flex items-center gap-2">
 				{#if issueCount > 0}
 					<!-- The errors live in the YAML, and only the YAML view can show
