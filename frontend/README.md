@@ -881,8 +881,9 @@ toggle`), a collapsed disclosure that expands to the shared
 
 ### Table export settings
 
-The Export button is a dropdown (Excel `.xlsx` / JSON `.json`). Neither item
-downloads directly: both open `components/Table/ExportDialog.svelte` with that
+The Export button is a dropdown of the four `EXPORT_FORMATS` (Excel `.xlsx` /
+JSON `.json` / CSV `.csv` / JSON Lines `.jsonl`). No item
+downloads directly: all four open `components/Table/ExportDialog.svelte` with that
 format preselected, and a segmented control switches format in place. Confirming
 runs the same `downloadTable` retry loop as before — the backend's 202 +
 `Retry-After` protocol is format-agnostic — and the dialog **closes first and
@@ -896,7 +897,12 @@ shared across formats; only the rename differs (xlsx writes `export.header`,
 JSON writes `json_export.key`, so one row never shows two rename boxes). JSON
 keeps its per-column extras (`json_export: {key, item_key, value, group}`) and
 its live sample pane. The overrides are part of the saved definition, so a table
-exported the same way every week is configured once.
+exported the same way every week is configured once. `ExportSettingsPanel`
+gates every JSON-only control on a derived `jsonFamily` (`format === 'json' ||
+format === 'jsonl'`) rather than `format === 'json'` alone, since JSONL renders
+through the same per-column extras and live sample pane as JSON while CSV
+follows xlsx's plain-header path — the panel itself has no format-specific
+controls beyond that split.
 
 **The settings markup is split from its hosts (P-14 step 1).** `ExportDialog`
 itself now owns only open/snapshot/cancel semantics, the format toggle and
@@ -913,6 +919,15 @@ against the table's definition (`overridesFromDefinition`) to produce the
 entry's patch: the entry stores DRIFT from the table, never the table's
 settings themselves. It passes no `sort` to the panel — an exporter entry
 has no live grid to inherit a sort from, and its download is sort-less too.
+Its own addition beyond the panel is a `json_doc` control group — `shape` +
+`key_column` + `pretty` shown only for `json` (mirroring the backend's
+tolerant-ignore of shape/pretty on `jsonl`), `on_error` shown for the whole
+json family — read/written directly against the entry's `json_doc` rather
+than through the panel; the live sample below them still renders the array
+shape regardless of `shape`, since `POST /tables/json-preview` predates
+document shaping. Per the strict-at-export / never-block-Save rule, Save is
+never gated on a missing `key_column` under the object shape; the inline hint
+plus the export-time 422 is the entire contract.
 
 - **`lib/table/export-layout.ts`** mirrors `core/table/export_layout.py`'s
   normalizer — `ROW_NUMBER_SLOT` (`-1`), `columnIncluded` (tri-state `include`:

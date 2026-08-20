@@ -173,7 +173,11 @@ def run_export(
             rendered_folder = substitute(entry.folder, {"name": table_name, **ctx})
             segs = folder_segments(rendered_folder)
             split = entry.json_split
-            if entry.format in ("json", "jsonl") and split is not None and split.enabled:
+            if (
+                entry.format in ("json", "jsonl")
+                and split is not None
+                and split.enabled
+            ):
                 validate_template(split.filename_template)
                 validate_tokens(split.filename_template, SPLIT_TOKENS)
         except ValueError as exc:

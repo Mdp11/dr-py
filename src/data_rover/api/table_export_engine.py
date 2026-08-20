@@ -462,11 +462,7 @@ def run_table_export(
             # tolerance, spec §6). Checked BEFORE rendering — the range half
             # is knowable now, and `render_json_ex` re-checks it anyway.
             key_col: int | None = None
-            if (
-                format == "json"
-                and json_doc is not None
-                and json_doc.shape == "object"
-            ):
+            if format == "json" and json_doc is not None and json_doc.shape == "object":
                 if json_doc.key_column is None:
                     raise ValueError(
                         f"{name}: json_doc.shape 'object' requires key_column"
@@ -506,9 +502,7 @@ def run_table_export(
                     return json.dumps(
                         payload, ensure_ascii=False, separators=(",", ":")
                     ).encode("utf-8")
-                return json.dumps(payload, ensure_ascii=False, indent=2).encode(
-                    "utf-8"
-                )
+                return json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
 
             if split_on:
                 assert split is not None  # split_on implies this
@@ -535,9 +529,7 @@ def run_table_export(
                         key_column=key_col,
                     )
                     _check_on_error(part_docs)
-                    files.append(
-                        (f"{stem}.{format}", _serialize(part_docs, part_keys))
-                    )
+                    files.append((f"{stem}.{format}", _serialize(part_docs, part_keys)))
                 return ExportFiles(
                     files=files,
                     truncated=truncated,
