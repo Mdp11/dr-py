@@ -172,8 +172,7 @@ def jsonl_bytes(docs: list[dict[str, object]]) -> bytes:
     `json_doc.shape`/`pretty` are ignored with tolerance for this format —
     only `on_error` (see `contains_error_marker`) applies."""
     return b"".join(
-        json.dumps(d, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-        + b"\n"
+        json.dumps(d, ensure_ascii=False, separators=(",", ":")).encode("utf-8") + b"\n"
         for d in docs
     )
 
@@ -389,8 +388,10 @@ def render_json_ex(
         seen: set[str] = set()
         for b in buckets:
             rendered = render_cell(model, b[0][1][key_column], mode)
-            if rendered is None or rendered == "" or not isinstance(
-                rendered, str | int | float | bool
+            if (
+                rendered is None
+                or rendered == ""
+                or not isinstance(rendered, str | int | float | bool)
             ):
                 raise ValueError(
                     "json_doc.key_column renders an empty or non-scalar key "

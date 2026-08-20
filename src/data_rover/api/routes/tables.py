@@ -70,6 +70,7 @@ from ..script_sweep import kick_or_join_sweep
 from ..settings import Settings, get_settings
 from ..table_cache import table_fingerprint
 from ..table_export_engine import (
+    MEDIA_TYPES,
     ExportPending,
     build_zip,
     export_context_vars,
@@ -539,10 +540,8 @@ def export_table(
             filename = f"{name}.zip"
         else:
             filename, blob = result.files[0]
-            media_type = (
-                "application/json"
-                if filename.endswith(".json")
-                else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            media_type = MEDIA_TYPES.get(
+                filename.rpartition(".")[2], "application/octet-stream"
             )
         resp_headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
         if result.truncated:
