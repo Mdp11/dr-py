@@ -482,4 +482,20 @@ describe('ExporterTab', () => {
 			getExporterDraft('exp:art-1')!.entries.filter((e) => e.source.ref === 'tbl-2')
 		).toHaveLength(2);
 	});
+
+	it('renders csv/jsonl format toggles per entry and stages the picked format', async () => {
+		getArtifactSpy.mockResolvedValue(EXPORT_ARTIFACT);
+		render('exp:art-1');
+		await vi.waitFor(() =>
+			expect(document.querySelector('[data-testid="export-entry-0"]')).toBeTruthy()
+		);
+
+		expect(document.querySelector('[data-testid="export-entry-0-format-csv"]')).not.toBeNull();
+		expect(document.querySelector('[data-testid="export-entry-0-format-jsonl"]')).not.toBeNull();
+
+		document.querySelector<HTMLButtonElement>('[data-testid="export-entry-0-format-csv"]')!.click();
+		flushSync();
+
+		expect(getExporterDraft('exp:art-1')!.entries[0].format).toBe('csv');
+	});
 });

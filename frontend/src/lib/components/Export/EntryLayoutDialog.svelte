@@ -15,12 +15,41 @@
 	// grid to inherit a sort from, and its download is sort-less too (see
 	// `ExportSettingsPanel`'s own `sort` doc) — leaving it unset is correct
 	// here, not an oversight.
+	//
+	// The `json_doc` controls below are this dialog's own addition (the panel
+	// has no format-specific controls yet, see its own `format` prop doc) —
+	// they read/write the entry's `json_doc` directly, not through the panel.
+	// The live sample below them still renders the ARRAY shape regardless:
+	// `POST /tables/json-preview` predates document shaping, and previewing
+	// the object shape is deliberately out of this phase's scope.
 	import { untrack } from 'svelte';
 	import { applyEntryOverrides, overridesFromDefinition } from '$lib/table/exporter';
 	import { templateIsValid } from '$lib/table/columns';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import ExportSettingsPanel from './ExportSettingsPanel.svelte';
-	import type { ExportFormat, ExporterEntry, TableDefinition } from '$lib/api/types';
+	import {
+		EXPORT_FORMATS,
+		type ExportFormat,
+		type ExporterEntry,
+		type JsonDocumentOptions,
+		type TableDefinition
+	} from '$lib/api/types';
+
+	// Duplicated from `Table/ExportDialog.svelte`'s own const — four strings
+	// are not worth sharing a module over.
+	const FORMAT_LABELS: Record<ExportFormat, string> = {
+		xlsx: 'Excel (.xlsx)',
+		json: 'JSON (.json)',
+		csv: 'CSV (.csv)',
+		jsonl: 'JSON Lines (.jsonl)'
+	};
+
+	const JSON_DOC_DEFAULTS: JsonDocumentOptions = {
+		shape: 'array',
+		key_column: null,
+		pretty: true,
+		on_error: 'emit'
+	};
 
 	let {
 		open = $bindable(),
@@ -42,21 +71,30 @@
 	// open is the right lifecycle here, mirroring `ExportDialog`'s snapshot).
 	let effective = $state(untrack(() => applyEntryOverrides(tableDefinition, entry)));
 	let format = $state<ExportFormat>(untrack(() => entry.format));
+	let jsonDoc = $state<JsonDocumentOptions | null>(untrack(() => entry.json_doc ?? null));
 
 	// Same belt-and-braces stance as ExportDialog: the server still 422s a
-	// tokenless template — this only saves a round trip.
+	// tokenless template — this only saves a round trip. Widened to the
+	// whole json family (json + jsonl), same as ExportDialog.
 	const splitTemplateInvalid = $derived(
-		format === 'json' &&
+		(format === 'json' || format === 'jsonl') &&
 			(effective.json_split?.enabled ?? false) &&
 			!templateIsValid(effective.json_split?.filename_template ?? '')
 	);
+
+	// Deliberately no Save gating on a missing key column under the object
+	// shape (spec §13) — the inline hint below plus the export-time 422 is
+	// the entire contract. Never add a check here that disables Save.
+	function patchDoc(p: Partial<JsonDocumentOptions>): void {
+		jsonDoc = { ...JSON_DOC_DEFAULTS, ...jsonDoc, ...p };
+	}
 
 	function cancel(): void {
 		onClose();
 	}
 
 	function save(): void {
-		onSave({ format, ...overridesFromDefinition(effective) });
+		onSave({ format, json_doc: jsonDoc, ...overridesFromDefinition(effective) });
 		onClose();
 	}
 </script>
@@ -77,25 +115,82 @@
 		</Dialog.Title>
 
 		<div class="flex shrink-0 items-center gap-1 border-b border-border pb-1">
-			<button
-				type="button"
-				data-testid="entry-layout-format-xlsx"
-				aria-pressed={format === 'xlsx'}
-				class="rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted/60 aria-pressed:bg-muted aria-pressed:text-foreground"
-				onclick={() => (format = 'xlsx')}
-			>
-				Excel (.xlsx)
-			</button>
-			<button
-				type="button"
-				data-testid="entry-layout-format-json"
-				aria-pressed={format === 'json'}
-				class="rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted/60 aria-pressed:bg-muted aria-pressed:text-foreground"
-				onclick={() => (format = 'json')}
-			>
-				JSON (.json)
-			</button>
+			{#each EXPORT_FORMATS as fmt (fmt)}
+				<button
+					type="button"
+					data-testid="entry-layout-format-{fmt}"
+					aria-pressed={format === fmt}
+					class="rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted/60 aria-pressed:bg-muted aria-pressed:text-foreground"
+					onclick={() => (format = fmt)}
+				>
+					{FORMAT_LABELS[fmt]}
+				</button>
+			{/each}
 		</div>
+
+		{#if format === 'json' || format === 'jsonl'}
+			<div class="flex shrink-0 flex-wrap items-center gap-3 text-xs" data-testid="entry-json-doc">
+				{#if format === 'json'}
+					<label class="flex items-center gap-1">
+						Document
+						<select
+							data-testid="entry-json-doc-shape"
+							class="rounded border border-input bg-card px-1.5 py-0.5"
+							value={jsonDoc?.shape ?? 'array'}
+							onchange={(e) => patchDoc({ shape: e.currentTarget.value as 'array' | 'object' })}
+						>
+							<option value="array">Array</option>
+							<option value="object">Keyed object</option>
+						</select>
+					</label>
+					{#if (jsonDoc?.shape ?? 'array') === 'object'}
+						<label class="flex items-center gap-1">
+							Key column
+							<select
+								data-testid="entry-json-doc-key-column"
+								class="rounded border border-input bg-card px-1.5 py-0.5"
+								value={jsonDoc?.key_column ?? ''}
+								onchange={(e) =>
+									patchDoc({
+										key_column: e.currentTarget.value === '' ? null : Number(e.currentTarget.value)
+									})}
+							>
+								<option value="">— pick a column —</option>
+								{#each tableDefinition.columns as col, ci (ci)}
+									<option value={ci}>{col.header || `${col.kind} ${ci}`}</option>
+								{/each}
+							</select>
+						</label>
+					{/if}
+					<label class="flex items-center gap-1">
+						<input
+							type="checkbox"
+							data-testid="entry-json-doc-pretty"
+							checked={jsonDoc?.pretty ?? true}
+							onchange={(e) => patchDoc({ pretty: e.currentTarget.checked })}
+						/>
+						Pretty-print
+					</label>
+				{/if}
+				<label class="flex items-center gap-1">
+					On error cells
+					<select
+						data-testid="entry-json-doc-on-error"
+						class="rounded border border-input bg-card px-1.5 py-0.5"
+						value={jsonDoc?.on_error ?? 'emit'}
+						onchange={(e) => patchDoc({ on_error: e.currentTarget.value as 'emit' | 'fail' })}
+					>
+						<option value="emit">Emit markers</option>
+						<option value="fail">Fail the export</option>
+					</select>
+				</label>
+				{#if (jsonDoc?.shape ?? 'array') === 'object' && jsonDoc?.key_column == null}
+					<span class="text-muted-foreground/70"
+						>object shape needs a key column (checked at export)</span
+					>
+				{/if}
+			</div>
+		{/if}
 
 		{#if open}
 			<div class="min-h-0 flex-1 overflow-y-auto pr-1">

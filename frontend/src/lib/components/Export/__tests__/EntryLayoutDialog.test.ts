@@ -164,4 +164,60 @@ describe('EntryLayoutDialog', () => {
 
 		expect(save.disabled).toBe(false);
 	});
+
+	it('offers four formats and saves json_doc for the object shape', () => {
+		const onSave = vi.fn();
+		render({
+			tableDefinition: baseDefinition(),
+			entry: { ...entryOverridingColumn1(), format: 'json' },
+			onSave,
+			onClose: () => {}
+		});
+
+		for (const fmt of ['xlsx', 'json', 'csv', 'jsonl']) {
+			expect(document.querySelector(`[data-testid="entry-layout-format-${fmt}"]`)).not.toBeNull();
+		}
+
+		document.querySelector<HTMLButtonElement>('[data-testid="entry-layout-format-jsonl"]')!.click();
+		flushSync();
+		document.querySelector<HTMLButtonElement>('[data-testid="entry-layout-format-json"]')!.click();
+		flushSync();
+
+		const shapeSelect = document.querySelector<HTMLSelectElement>(
+			'[data-testid="entry-json-doc-shape"]'
+		)!;
+		shapeSelect.value = 'object';
+		shapeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+		flushSync();
+
+		const keyColumnSelect = document.querySelector<HTMLSelectElement>(
+			'[data-testid="entry-json-doc-key-column"]'
+		)!;
+		keyColumnSelect.value = '0';
+		keyColumnSelect.dispatchEvent(new Event('change', { bubbles: true }));
+		flushSync();
+
+		document.querySelector<HTMLButtonElement>('[data-testid="entry-layout-save"]')!.click();
+		flushSync();
+
+		expect(onSave).toHaveBeenCalledTimes(1);
+		const patch = onSave.mock.calls[0][0] as Partial<ExporterEntry>;
+		expect(patch.format).toBe('json');
+		expect(patch.json_doc).toMatchObject({ shape: 'object', key_column: 0 });
+	});
+
+	it('shows only the on-error control for jsonl', () => {
+		render({
+			tableDefinition: baseDefinition(),
+			entry: { ...entryOverridingColumn1(), format: 'json' },
+			onSave: () => {},
+			onClose: () => {}
+		});
+
+		document.querySelector<HTMLButtonElement>('[data-testid="entry-layout-format-jsonl"]')!.click();
+		flushSync();
+
+		expect(document.querySelector('[data-testid="entry-json-doc-shape"]')).toBeNull();
+		expect(document.querySelector('[data-testid="entry-json-doc-on-error"]')).not.toBeNull();
+	});
 });
