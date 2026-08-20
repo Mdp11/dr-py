@@ -13,6 +13,11 @@
 	} from '$lib/metamodel/diagram-build';
 	import { datatypeNamespace, uniqueTypeName } from '$lib/metamodel/helpers';
 	import {
+		LOD_TOOLTIP_MAX_W,
+		lodTooltipAnchor,
+		tooltipStyle
+	} from '$lib/metamodel/diagram-tooltip';
+	import {
 		applyDiagramEdit,
 		getDiagramHoverLabel,
 		getHoverCursor,
@@ -22,6 +27,7 @@
 		getMetamodelPanel,
 		getRole,
 		moveNode,
+		noteHoverCursor,
 		noteZoom,
 		resetMetamodelCanvas,
 		runAutoArrange,
@@ -29,7 +35,6 @@
 		setAllCollapsed,
 		setDiagramAdjacency,
 		setDiagramHover,
-		setHoverCursor,
 		setMetamodelPanelCollapsed,
 		setMetamodelView,
 		toggleNodeCollapsed,
@@ -388,9 +393,7 @@
 				aria-label="Metamodel diagram"
 				tabindex="-1"
 				onkeydown={onKeydown}
-				onpointermove={(e) => {
-					if (getLodActive()) setHoverCursor({ x: e.clientX, y: e.clientY });
-				}}
+				onpointermove={(e) => noteHoverCursor({ x: e.clientX, y: e.clientY })}
 			>
 				<SvelteFlow
 					bind:nodes={flowNodes}
@@ -438,10 +441,24 @@
 
 				{#if lodTooltip !== null && hoverCursor !== null}
 					<!-- ONE overlay owned here, fed by the hover store — not a per-node
-					     tooltip (spec §4). `fixed` + clientX/Y sidesteps canvas-space math. -->
+					     tooltip (spec §4). `fixed` + clientX/Y sidesteps canvas-space math,
+					     and `lodTooltipAnchor` flips it to the other side of the cursor
+					     near a window edge — which on this surface means the RIGHT edge,
+					     where the form panel and the collapsed rail sit. The window size is
+					     read at position time rather than tracked, so a resize with the
+					     pointer parked leaves the tooltip on its previous anchor until the
+					     next move corrects it — cheaper than a resize listener for a
+					     transient that only exists while a pointer is over the canvas.
+					     `max-width` is what makes `LOD_TOOLTIP_MAX_W` the honest worst case
+					     the flip decides against. -->
 					<div
 						class="pointer-events-none fixed z-50 rounded border border-border bg-popover px-2 py-1 text-xs text-foreground shadow-lg"
-						style="left: {hoverCursor.x + 12}px; top: {hoverCursor.y + 12}px;"
+						style="max-width: {LOD_TOOLTIP_MAX_W}px; {tooltipStyle(
+							lodTooltipAnchor(hoverCursor, {
+								width: window.innerWidth,
+								height: window.innerHeight
+							})
+						)}"
 						data-testid="mm-lod-tooltip"
 					>
 						{lodTooltip}

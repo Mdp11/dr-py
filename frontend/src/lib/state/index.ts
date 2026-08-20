@@ -255,6 +255,8 @@ export {
 	type MetamodelDiagramView
 } from './metamodel-diagram.svelte';
 export {
+	EDGE_HIT_WIDTH,
+	EDGE_HIT_WIDTH_LOD,
 	getDiagramHighlight,
 	getDiagramHover,
 	getDiagramHoverLabel,
@@ -262,11 +264,11 @@ export {
 	getLodActive,
 	LOD_ENTER,
 	LOD_EXIT,
+	noteHoverCursor,
 	noteZoom,
 	resetMetamodelCanvas,
 	setDiagramAdjacency,
-	setDiagramHover,
-	setHoverCursor
+	setDiagramHover
 } from './metamodel-canvas.svelte';
 export {
 	closeMetamodelPanel,

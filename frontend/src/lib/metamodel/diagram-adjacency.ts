@@ -93,6 +93,22 @@ export function highlightFor(hover: DiagramHover, adj: DiagramAdjacency): Highli
 	return { nodes, edges };
 }
 
+const TETHER_IN = 'assoc-in:';
+const TETHER_OUT = 'assoc-out:';
+
+/** The id of the OTHER half of a boxed relationship's tether pair, or null if
+ * the id is not a tether half at all.
+ *
+ * The two halves of one mapping differ by their prefix alone
+ * (`assoc-in:<Rel>:<i>` / `assoc-out:<Rel>:<i>` in `diagram-build.ts`), so
+ * swapping it is exact — no parsing of the rel name, which may itself contain
+ * a colon, and no re-deriving of the mapping index. */
+function siblingTetherId(id: string): string | null {
+	if (id.startsWith(TETHER_IN)) return TETHER_OUT + id.slice(TETHER_IN.length);
+	if (id.startsWith(TETHER_OUT)) return TETHER_IN + id.slice(TETHER_OUT.length);
+	return null;
+}
+
 /** Tooltip copy for the LOD cursor tooltip (spec §4): the hovered thing's
  * name, at whatever level of detail its kind supports.
  *
@@ -106,13 +122,16 @@ export function highlightFor(hover: DiagramHover, adj: DiagramAdjacency): Highli
  *   viewer can read what the edge connects.
  * - A TETHER HALF of a boxed relationship (either endpoint resolves to a
  *   `relationship`-kind selection, i.e. it's the `rel:<Name>` box itself) →
- *   just the bare rel name. `buildDiagram` splits a boxed relationship's
- *   mapping into two edges — `source → rel:Name` and `rel:Name → target` —
- *   so applying `Source → Target` to either HALF alone would print nonsense
- *   like `Monitors: Building → Monitors` (the box, not the real target,
- *   showing up as one side). Collapsing to the bare name keeps the tooltip
- *   honest about what a single tether half actually is: one leg of a
- *   three-node relationship, not a two-endpoint mapping in its own right.
+ *   the same `Rel: Source → Target`, recovered ACROSS the box.
+ *   `buildDiagram` splits a boxed relationship's mapping into two edges —
+ *   `source → rel:Name` and `rel:Name → target` — so reading a single half's
+ *   own endpoints would print the box as one side (`Monitors: Building →
+ *   Monitors`). {@link siblingTetherId} pairs the halves instead, and the
+ *   mapping's real ends are the IN half's source and the OUT half's target.
+ *   Falls back to the bare rel name when the pair is incomplete: a half is
+ *   emitted only when both of ITS ends exist, so a mapping onto an undeclared
+ *   type leaves one half with no partner and there is no second endpoint to
+ *   name.
  *
  * Null when nothing nameable (unindexed id, or an endpoint the index lost
  * track of) — the tooltip simply doesn't render. Never throws on an id the
@@ -131,7 +150,26 @@ export function hoverLabel(hover: DiagramHover, adj: DiagramAdjacency): string |
 	const sourceSel = selectionForNodeId(ends[0]);
 	const targetSel = selectionForNodeId(ends[1]);
 	if (sourceSel?.kind === 'relationship' || targetSel?.kind === 'relationship') {
-		return hover.relName;
+		const siblingId = siblingTetherId(hover.id);
+		const siblingEnds = siblingId === null ? undefined : adj.edgeEndpoints.get(siblingId);
+		if (siblingEnds === undefined) return hover.relName;
+		const isIn = hover.id.startsWith(TETHER_IN);
+		const outer = {
+			source: selectionForNodeId((isIn ? ends : siblingEnds)[0]),
+			target: selectionForNodeId((isIn ? siblingEnds : ends)[1])
+		};
+		// Both outer ends are element boxes in every shape `buildDiagram` emits;
+		// the kind check is what keeps a future edge shape from printing a box's
+		// name as an endpoint rather than degrading to the bare name.
+		if (
+			outer.source === null ||
+			outer.target === null ||
+			outer.source.kind === 'relationship' ||
+			outer.target.kind === 'relationship'
+		) {
+			return hover.relName;
+		}
+		return `${hover.relName}: ${outer.source.name} → ${outer.target.name}`;
 	}
 	if (sourceSel === null || targetSel === null) return null;
 	return `${hover.relName}: ${sourceSel.name} → ${targetSel.name}`;

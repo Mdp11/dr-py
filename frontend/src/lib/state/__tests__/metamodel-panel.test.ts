@@ -63,4 +63,30 @@ describe('metamodel panel preferences', () => {
 			enums: false
 		});
 	});
+
+	// The stored value is a JSON ARRAY of folded keys, but localStorage is
+	// shared, hand-editable and outlives any given build of this app, so `init`
+	// treats what it reads as untrusted. Both rejections below fall through to
+	// the defaults rather than throwing or half-applying: a preference is worth
+	// exactly nothing next to the panel rendering at all.
+	it('ignores a well-formed entry that is not an array', () => {
+		localStorage.setItem('ui.metamodel.panelSections.p1', '{"enums":true}');
+		initMetamodelPanel('p1');
+		expect(getMetamodelPanel().sections).toEqual({
+			elements: false,
+			relationships: false,
+			enums: false
+		});
+	});
+
+	it('skips unrecognized keys and non-strings, keeping the ones it knows', () => {
+		// A key from a future (or removed) section, and a non-string entry.
+		localStorage.setItem('ui.metamodel.panelSections.p1', '["enums","datatypes",7,null]');
+		initMetamodelPanel('p1');
+		expect(getMetamodelPanel().sections).toEqual({
+			elements: false,
+			relationships: false,
+			enums: true
+		});
+	});
 });

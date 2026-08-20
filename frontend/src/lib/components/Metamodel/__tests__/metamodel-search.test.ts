@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as mmApi from '$lib/api/metamodel';
 import { FIXTURE } from '$lib/metamodel/__tests__/fixtures';
 import type { DiagramSelection } from '$lib/metamodel/diagram-build';
+import { TYPE_SEARCH_LIMIT } from '$lib/metamodel/diagram-search';
 import { setActiveProject } from '../../../state/active-project.svelte';
 import { resetCheckout, setProjectInfo } from '../../../state/checkout.svelte';
 import { initMetamodelEditor, resetMetamodelEditor } from '../../../state/metamodel-editor.svelte';
@@ -17,6 +18,19 @@ import MetamodelSearchHost from './MetamodelSearchHost.svelte';
 const DUP_FIXTURE = FIXTURE.replace(
 	'  - name: Building\n    extends: NamedElement\n',
 	'  - name: Building\n    extends: NamedElement\n  - name: Zone\n    extends: NamedElement\n'
+);
+
+/** The fixture plus 25 extra ELEMENT types all matching `wide` — more than
+ * `TYPE_SEARCH_LIMIT`, which is the state a real 300-type metamodel reaches on
+ * a two-letter query. Spliced in before `relationships:` rather than appended,
+ * since appending would land them in the relationship list instead. */
+const WIDE_COUNT = 25;
+const WIDE_FIXTURE = FIXTURE.replace(
+	'relationships:',
+	Array.from(
+		{ length: WIDE_COUNT },
+		(_, i) => `  - name: Wide${i}\n    extends: NamedElement\n`
+	).join('') + 'relationships:'
 );
 
 /** Same seeding recipe as metamodel-tab.test.ts: the search reads
@@ -142,6 +156,107 @@ describe('MetamodelSearch', () => {
 			expect(r).toHaveLength(2);
 			expect(r[0]).toContain('Zone');
 			expect(r[1]).toContain('Zone');
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('Tab closes the dropdown on the way out of the toolbar', () => {
+		const c = mount(MetamodelSearchHost, { target: document.body, props: {} });
+		flushSync();
+		try {
+			type('zone');
+			expect(rows()).toHaveLength(1);
+			// Not prevented — focus still leaves; the list just doesn't stay
+			// floating over the canvas behind it.
+			press('Tab');
+			expect(rows()).toHaveLength(0);
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('closes on an outside pointerdown but not on one inside its own dropdown', () => {
+		const c = mount(MetamodelSearchHost, { target: document.body, props: {} });
+		flushSync();
+		try {
+			type('o');
+			expect(rows().length).toBeGreaterThan(0);
+
+			// Inside the dropdown: picking a row must not be pre-empted by the
+			// outside-click close. Resolved through the component's own bound
+			// reference, so a second search mounted alongside could not answer for
+			// this one.
+			const row = document.querySelector('[data-testid="mm-search-hit"]');
+			row?.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+			flushSync();
+			expect(rows().length).toBeGreaterThan(0);
+
+			document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+			flushSync();
+			expect(rows()).toHaveLength(0);
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('says how many matches the cap dropped', async () => {
+		resetMetamodelEditor();
+		vi.spyOn(mmApi, 'getMetamodelRaw').mockResolvedValue({ blob: WIDE_FIXTURE, source: 'stored' });
+		await initMetamodelEditor('p1');
+
+		const c = mount(MetamodelSearchHost, { target: document.body, props: {} });
+		flushSync();
+		try {
+			type('wide');
+			expect(rows()).toHaveLength(TYPE_SEARCH_LIMIT);
+			// Every row is an element type, i.e. the splice above landed where it
+			// meant to and the count below is over the right list.
+			expect(rows().every((r) => r.includes('type'))).toBe(true);
+			const note = document.querySelector('[data-testid="mm-search-overflow"]');
+			expect(note?.textContent).toContain(`+${WIDE_COUNT - TYPE_SEARCH_LIMIT} more`);
+
+			// A query inside the cap says nothing.
+			type('zone');
+			expect(document.querySelector('[data-testid="mm-search-overflow"]')).toBeNull();
+		} finally {
+			unmount(c);
+		}
+	});
+
+	/**
+	 * The ARIA combobox wiring, which `Sidebar/Search.svelte` mirrors: focus
+	 * stays on the input and the active row is named by `aria-activedescendant`,
+	 * so a screen reader announces the row the arrows landed on without the
+	 * caret ever leaving the field.
+	 */
+	it('wires the combobox pattern and moves aria-activedescendant with the arrows', () => {
+		const c = mount(MetamodelSearchHost, { target: document.body, props: {} });
+		flushSync();
+		try {
+			const el = input();
+			expect(el.getAttribute('role')).toBe('combobox');
+			expect(el.getAttribute('aria-autocomplete')).toBe('list');
+			expect(el.getAttribute('aria-expanded')).toBe('false');
+
+			type('o');
+			const listbox = document.querySelector('[role="listbox"]');
+			expect(listbox).not.toBeNull();
+			expect(el.getAttribute('aria-expanded')).toBe('true');
+			// `aria-controls` must resolve THIS instance's listbox.
+			expect(el.getAttribute('aria-controls')).toBe(listbox?.id);
+
+			const options = [...document.querySelectorAll('[role="option"]')];
+			expect(options).toHaveLength(4);
+			expect(el.getAttribute('aria-activedescendant')).toBe(options[0].id);
+			expect(options[0].getAttribute('aria-selected')).toBe('true');
+			expect(options[1].getAttribute('aria-selected')).toBe('false');
+
+			press('ArrowDown');
+			expect(el.getAttribute('aria-activedescendant')).toBe(options[1].id);
+			expect(
+				[...document.querySelectorAll('[role="option"]')][1].getAttribute('aria-selected')
+			).toBe('true');
 		} finally {
 			unmount(c);
 		}

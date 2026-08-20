@@ -11,6 +11,14 @@ import type { DiagramSelection } from './diagram-build';
  * Each hit also carries the matched substring's position within `name` so
  * the dropdown can render it highlighted (spec §6) without re-deriving the
  * match itself.
+ *
+ * The result reports the FULL match count beside the capped page of hits.
+ * Returning the truncated list alone was silently lossy: at 300 types a
+ * two-letter query drops most of what matched, and a dropdown that shows
+ * twenty rows with no note looks exactly like a dropdown that found twenty
+ * things. The count is the whole cost of telling those apart — the cap itself
+ * stays, since the answer to "there are 180 matches" is a better query, not a
+ * longer list.
  */
 
 export interface TypeSearchHit {
@@ -26,9 +34,24 @@ export interface TypeSearchHit {
 	matchLength: number;
 }
 
-export function searchTypes(mm: Metamodel, query: string, limit = 20): TypeSearchHit[] {
+export interface TypeSearchResult {
+	/** At most `limit` hits, ranked. */
+	hits: TypeSearchHit[];
+	/** How many matched in total, BEFORE the cap — `total > hits.length` is
+	 * exactly the condition the dropdown's "+N more" note renders on. */
+	total: number;
+}
+
+/** How many hits the dropdown shows before deferring to a better query. */
+export const TYPE_SEARCH_LIMIT = 20;
+
+export function searchTypes(
+	mm: Metamodel,
+	query: string,
+	limit = TYPE_SEARCH_LIMIT
+): TypeSearchResult {
 	const q = query.trim().toLowerCase();
-	if (q === '') return [];
+	if (q === '') return { hits: [], total: 0 };
 	// `rank` is a sort-only key, kept out of the returned hit shape rather than
 	// destructured off it, so eslint's no-unused-vars has nothing to flag.
 	const ranked: { hit: TypeSearchHit; rank: number }[] = [];
@@ -44,5 +67,5 @@ export function searchTypes(mm: Metamodel, query: string, limit = 20): TypeSearc
 	for (const rel of mm.relationships) consider(rel.name, 'relationship', rel.mappings.length === 0);
 	for (const name of Object.keys(mm.enums)) consider(name, 'enum');
 	ranked.sort((a, b) => a.rank - b.rank || a.hit.name.localeCompare(b.hit.name));
-	return ranked.slice(0, limit).map((r) => r.hit);
+	return { hits: ranked.slice(0, limit).map((r) => r.hit), total: ranked.length };
 }

@@ -15,6 +15,20 @@
 	import { elementDisplayName } from '$lib/util/element-name';
 	import AdvancedSearchDialog from './AdvancedSearchDialog.svelte';
 
+	/**
+	 * The sidebar element typeahead. Server-backed (debounced, out-of-order
+	 * responses dropped), unlike the metamodel tab's type search — but the two
+	 * are the same WIDGET, and `Metamodel/MetamodelSearch.svelte` carries the
+	 * fuller note on the ARIA combobox pattern they now share: focus stays on
+	 * the input, the active row is announced via `aria-activedescendant`, and
+	 * the options are non-interactive `<li role="option">` because the listbox
+	 * pattern forbids interactive descendants inside an option. Fixing one of
+	 * the two would have left the app teaching the same widget twice.
+	 *
+	 * Keyboard: ↑/↓ move the active row, Enter selects it, Escape closes and
+	 * blurs, Tab closes on the way out so the list is not left floating over the
+	 * tree with nothing focused pointing at it.
+	 */
 	const MAX_RESULTS = 50;
 	const DEBOUNCE_MS = 250;
 
@@ -22,6 +36,14 @@
 
 	let isOpen = $state(false);
 	let inputEl = $state<HTMLElement | null>(null);
+	let dropdownEl = $state<HTMLElement | null>(null);
+	let active = $state(0);
+
+	/** Per-instance id root for the listbox and its options — `aria-*` wiring
+	 * must resolve THIS instance's nodes, never a second one's. */
+	const uid = $props.id();
+	const listboxId = `${uid}-listbox`;
+	const optionId = (i: number): string => `${uid}-option-${i}`;
 
 	// Server-side search: GET /model/elements?q=... ranks by the same score
 	// the old client loop used. Debounced; out-of-order responses dropped.
@@ -57,6 +79,22 @@
 	});
 
 	const showDropdown = $derived(isOpen && searchText.trim() !== '');
+	/** Clamped for the window between a new result page landing and the active
+	 * row being reset — a shorter page must never leave `active` past its end. */
+	const activeIndex = $derived(results.length === 0 ? 0 : Math.min(active, results.length - 1));
+
+	// A new query starts back at the top hit.
+	$effect(() => {
+		void searchText;
+		active = 0;
+	});
+
+	// Focus never moves off the input, so nothing scrolls the active row into
+	// view on its own once the list is longer than its 288px max height.
+	$effect(() => {
+		if (!showDropdown) return;
+		document.getElementById(optionId(activeIndex))?.scrollIntoView?.({ block: 'nearest' });
+	});
 
 	function onInput(e: Event): void {
 		setSearchText((e.currentTarget as HTMLInputElement).value);
@@ -71,6 +109,24 @@
 		if (e.key === 'Escape') {
 			isOpen = false;
 			(e.currentTarget as HTMLInputElement).blur();
+			return;
+		}
+		// Not prevented: the focus move is what the user asked for, closing is
+		// only the cleanup riding along with it.
+		if (e.key === 'Tab') {
+			isOpen = false;
+			return;
+		}
+		if (!showDropdown || results.length === 0) return;
+		if (e.key === 'ArrowDown') {
+			e.preventDefault();
+			active = (activeIndex + 1) % results.length;
+		} else if (e.key === 'ArrowUp') {
+			e.preventDefault();
+			active = (activeIndex - 1 + results.length) % results.length;
+		} else if (e.key === 'Enter') {
+			e.preventDefault();
+			onPick(results[activeIndex].id);
 		}
 	}
 
@@ -109,8 +165,9 @@
 		const target = e.target as Node | null;
 		if (!target) return;
 		if (inputEl && inputEl.contains(target)) return;
-		const dropdown = document.getElementById('sidebar-search-dropdown');
-		if (dropdown && dropdown.contains(target)) return;
+		// The bound reference, not a document-wide id lookup: an id is a global
+		// name and would cross-match the moment a second search mounted.
+		if (dropdownEl && dropdownEl.contains(target)) return;
 		isOpen = false;
 	}
 
@@ -127,6 +184,11 @@
 			bind:ref={inputEl}
 			type="text"
 			placeholder="Filter by name, type, id…"
+			role="combobox"
+			aria-expanded={showDropdown}
+			aria-controls={listboxId}
+			aria-autocomplete="list"
+			aria-activedescendant={showDropdown && results.length > 0 ? optionId(activeIndex) : undefined}
 			value={searchText}
 			oninput={onInput}
 			onfocus={onFocusOrClick}
@@ -145,39 +207,59 @@
 		</button>
 	</div>
 	{#if showDropdown}
+		<!-- The id stays as a stable handle for the e2e spec and the row tests;
+		     the outside-click check above is scoped by reference instead. -->
 		<div
+			bind:this={dropdownEl}
 			id="sidebar-search-dropdown"
 			class="absolute left-3 right-3 top-full z-20 mt-1 max-h-72 overflow-y-auto rounded border border-border bg-popover shadow-lg"
 		>
-			<ul class="flex flex-col gap-0.5 p-1 text-xs">
-				{#if results.length === 0}
-					<li class="px-1 py-0.5 text-muted-foreground/50">
-						{searching ? 'Searching…' : 'No matches.'}
+			{#if results.length === 0}
+				<!-- Outside the listbox: a status line is not an option, and an option
+				     is the only thing a listbox may contain. -->
+				<p class="px-2 py-1 text-xs text-muted-foreground/50">
+					{searching ? 'Searching…' : 'No matches.'}
+				</p>
+			{/if}
+			<!-- svelte-ignore a11y_click_events_have_key_events -->
+			<ul
+				id={listboxId}
+				role="listbox"
+				aria-label="Matching elements"
+				class="flex flex-col gap-0.5 p-1 text-xs"
+			>
+				{#each results as el, i (el.id)}
+					<!-- The pointer handlers live on the OPTION itself: the listbox
+					     pattern forbids interactive descendants inside an option, and
+					     the keyboard equivalent is the input's own ↑/↓/Enter — which is
+					     where a combobox's keyboard belongs, and why the rule above is
+					     suppressed rather than answered with a key handler on an element
+					     that can never hold focus. -->
+					<li
+						id={optionId(i)}
+						role="option"
+						aria-selected={i === activeIndex}
+						class="flex w-full cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-left transition-colors hover:bg-muted {i ===
+						activeIndex
+							? 'bg-muted'
+							: ''}"
+						style="touch-action: none"
+						onpointerdown={(e) => onResultPointerDown(e, el.id)}
+						onpointerenter={() => (active = i)}
+						onclick={() => onPick(el.id)}
+						title={el.id}
+					>
+						<!-- "<name> <stereotype>"; displayName falls back to the id when
+						     the element has no usable name property. The raw id stays
+						     reachable via the row's title tooltip. -->
+						<span class="truncate text-foreground/90">{elementDisplayName(el)}</span>
+						<span
+							class="ml-auto shrink-0 rounded bg-muted px-1 font-mono text-[10px] text-muted-foreground"
+						>
+							{el.type_name}
+						</span>
 					</li>
-				{:else}
-					{#each results as el (el.id)}
-						<li>
-							<button
-								type="button"
-								class="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-								style="touch-action: none"
-								onpointerdown={(e) => onResultPointerDown(e, el.id)}
-								onclick={() => onPick(el.id)}
-								title={el.id}
-							>
-								<!-- "<name> <stereotype>"; displayName falls back to the id when
-								     the element has no usable name property. The raw id stays
-								     reachable via the row's title tooltip. -->
-								<span class="truncate text-foreground/90">{elementDisplayName(el)}</span>
-								<span
-									class="ml-auto shrink-0 rounded bg-muted px-1 font-mono text-[10px] text-muted-foreground"
-								>
-									{el.type_name}
-								</span>
-							</button>
-						</li>
-					{/each}
-				{/if}
+				{/each}
 			</ul>
 		</div>
 	{/if}

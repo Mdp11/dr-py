@@ -330,7 +330,8 @@ test('view curation: search result dragged into a folder is placed there', async
 	// Type a known element's name; wait for its row in the search dropdown.
 	await page.getByPlaceholder('Filter by name, type, id…').fill('Beta');
 	const dropdown = page.locator('#sidebar-search-dropdown');
-	const result = dropdown.getByRole('button').filter({ hasText: 'Beta' }).first();
+	// Rows are `<li role="option">` (the ARIA combobox pattern), not buttons.
+	const result = dropdown.getByRole('option').filter({ hasText: 'Beta' }).first();
 	await expect(result).toBeVisible();
 
 	const badge = changeBadge(page);

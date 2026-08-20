@@ -634,10 +634,11 @@ position derivation — a dragged node visibly stays at its dragged position unt
 metamodel tab is closed and reopened (which re-derives `_positions` from the baseline +
 now-empty staged overlay). Purely visual; no staged data survives the discard.
 
-### F-15 · Metamodel diagram navigation — deferred refinements · `open` · *2026-08-20*
+### F-15 · Metamodel diagram navigation — deferred refinements · `done` (2026-08-20, feat/f15-diagram-nav-refinements)
 Eleven findings triaged LEAVE by the final review of `feat/metamodel-navigation` (the branch
 that closed **P-17**/**P-18** and shipped the type search and the collapsible TOC panel). None
-is a correctness bug; each is a refinement the shipped surface can carry as-is.
+was a correctness bug; each was a refinement the shipped surface carried as-is. All eleven are
+now done — the list below is kept for the rationale each fix was made against.
 
 - **Edge hover target is ~3 screen-px wide in LOD.** `BaseEdge`'s `interactionWidth` defaults
   to 20 *flow* units, so it shrinks with zoom — exactly the state the LOD tooltip exists to
@@ -670,6 +671,32 @@ is a correctness bug; each is a refinement the shipped surface can carry as-is.
   relationship carry the mapping index (`assoc-in:<Rel>:<i>` / `assoc-out:<Rel>:<i>`), so the
   outer endpoints of a hovered half are recoverable — `Monitors: Building → Zone` instead of
   today's bare `Monitors`.
+
+Shipped, all eleven:
+- `EDGE_HIT_WIDTH_LOD` (60 flow units) widens both edge components' `interactionWidth` under
+  LOD; `noteHoverCursor` in `state/metamodel-canvas.svelte.ts` replaces the raw setter on the
+  canvas's `pointermove` and records only while the tooltip could be showing, clearing
+  otherwise; `setDiagramAdjacency` drops the hover so a rebuild cannot leave the canvas dimmed
+  against a dead id; Tab closes both dropdowns.
+- `metamodel/diagram-tooltip.ts` is a new pure anchor function that flips the LOD tooltip to
+  the far side of the cursor near a window edge (anchoring `right`/`bottom`, so the gap stays
+  exact whatever the label measures). `searchTypes` now returns `{hits, total}` and the
+  dropdown renders `+N more`. Both typeaheads resolve their dropdown by BOUND reference for
+  the outside-click check instead of `document.getElementById`.
+- Both untested branches are covered: the memo's `_hlFor.adj !== _adjacency` clause
+  (`metamodel-canvas.test.ts`) and the non-array-JSON / unrecognized-key read paths
+  (`metamodel-panel.test.ts`). `hoverLabel` crosses the association-class box via
+  `siblingTetherId`, so either tether half reads `Monitors: Building → Zone`.
+- The a11y item took BOTH typeaheads, per the reviewer's all-or-nothing call: `role="combobox"`
+  + `aria-expanded`/`aria-controls`/`aria-autocomplete` on each input, `role="listbox"` on the
+  list, non-interactive `<li role="option">` rows with per-instance `$props.id()` ids, and
+  `aria-activedescendant` following the active row (focus stays on the input; an `$effect`
+  scrolls the row into view). `Sidebar/Search.svelte` had NO keyboard navigation at all before
+  this and gained ↑/↓/Enter along with it. One consequence outside the frontend unit suite:
+  its rows stopped being `<button>`s, so `e2e/view.spec.ts`'s search-drag locator moved to
+  `getByRole('option')` — that one spec was run and passes (`frontend-test-e2e -- -- -g
+  "search result dragged into a folder"`), which also re-verifies the row drag off the new
+  markup in a real browser.
 
 ---
 

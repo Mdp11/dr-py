@@ -1230,13 +1230,30 @@ gates above stay confined to what CHANGES the draft.
   metamodel. `built` itself hangs off a hoisted `parsedMm` derived rather than
   off the view snapshot (which is a fresh object literal on every recompute),
   so a selection, a collapse or a drag does not re-run `buildDiagram` either.
+  Installing a new adjacency CLEARS the hover: a rebuild (undo, a peer's
+  rebind, any draft edit) can retire the hovered id, and a hover left pointing
+  at an id the new index never saw resolves to an EMPTY highlight — which
+  `visualState` reads as "dim everything but the selection", greying the whole
+  canvas until the pointer happens to move again.
 - **LOD hides content with `visibility: hidden`, never `display: none` or a
   DOM removal.** Below zoom 0.4 (back out at 0.5 — the hysteresis gap is what
   stops the boundary flickering while the user sits on it) a box renders as
   its name alone and edge labels are suppressed. The compartments stay in the
   DOM and keep their space, so a box's height is byte-identical in both modes
   — which is what keeps the edge anchors from jumping the moment the mode
-  flips. `nodeSize` and elk never learn LOD exists.
+  flips. `nodeSize` and elk never learn LOD exists. What DOES branch on the
+  mode is everything serving the cursor tooltip, which at that zoom is the
+  only way to read what a box or an edge is: an edge's `interactionWidth`
+  widens to `EDGE_HIT_WIDTH_LOD`, because that prop is in FLOW units and the
+  xyflow default of 20 comes out around three screen pixels down there; the
+  cursor is recorded only while the tooltip could actually be showing
+  (`noteHoverCursor` — simplified mode on AND something hovered, else the last
+  position is cleared rather than left to outlive the mode that produced it);
+  and the tooltip places through `metamodel/diagram-tooltip.ts`, a pure anchor
+  function that flips to the far side of the cursor near a window edge. The
+  flip anchors `right`/`bottom` instead of subtracting an assumed width, so
+  the gap to the cursor stays exact whatever the label measures, and the
+  `LOD_TOOLTIP_MAX_*` constants are only the decision threshold.
 - **The memo caches in these `.svelte.ts` modules are plain `let`, never
   `$state`.** `getDiagramHighlight()` is called from every node and edge
   render, so it memoizes on the `(hover, adjacency)` pair — but writing
@@ -1261,6 +1278,24 @@ gates above stay confined to what CHANGES the draft.
   stance (a denied storage just means the preference doesn't survive a
   reload). `revealSelection` reopens a collapsed panel because navigating BY
   NAME implies wanting the form; a plain canvas click deliberately does not.
+- **The two typeaheads implement ONE combobox pattern.** The metamodel type
+  search and the pre-existing `Sidebar/Search.svelte` element search are the
+  same widget over different data (one client-side over the parsed draft, one
+  server-backed and debounced), so they share the wiring down to the attribute
+  set: `role="combobox"` + `aria-expanded`/`aria-controls`/`aria-autocomplete`
+  on the input, `role="listbox"` on the list, non-interactive
+  `<li role="option">` rows, and `aria-activedescendant` naming the active one.
+  Focus never leaves the input — which is why the rows are `<li>` and not
+  `<button>` (the listbox pattern forbids interactive descendants in an
+  option), why each carries a `$props.id()`-derived id rather than a hardcoded
+  one, and why an `$effect` scrolls the active row into view: nothing else
+  will. Keyboard on both: ↑/↓, Enter, Escape, and Tab — which closes on the
+  way out so a list is never left floating with nothing focused pointing at
+  it. Outside-click closes through the dropdown's BOUND reference, never a
+  `document.getElementById`, so two mounted at once cannot answer for each
+  other. `searchTypes` returns `{hits, total}` rather than a bare array
+  precisely so a capped list can say `+N more` instead of looking like a
+  complete one.
 - **The floor is `minZoom` 0.05**, not xyflow's default 0.5 — the original
   complaint was simply that a big metamodel could not be zoomed out far enough
   to see at all, and everything above is what makes the resulting picture

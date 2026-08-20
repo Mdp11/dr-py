@@ -1,7 +1,12 @@
 <script lang="ts">
 	import { BaseEdge, EdgeLabel, getSmoothStepPath, Position, type EdgeProps } from '@xyflow/svelte';
 	import { visualState } from '$lib/metamodel/diagram-adjacency';
-	import { getDiagramHighlight, getLodActive } from '$lib/state';
+	import {
+		EDGE_HIT_WIDTH,
+		EDGE_HIT_WIDTH_LOD,
+		getDiagramHighlight,
+		getLodActive
+	} from '$lib/state';
 
 	/**
 	 * UML association: the relationship name at the midpoint, end multiplicities
@@ -102,7 +107,11 @@
 	const labelColor = $derived(structural ? 'var(--muted-foreground)' : 'var(--cm-string)');
 </script>
 
-<!-- The dim transition carries a 120ms DELAY, matching `.mm-node.mm-dim`'s
+<!-- `interactionWidth` is in FLOW units, so the hit area shrinks with the zoom;
+     it is widened under LOD because that is the mode whose whole point is
+     hovering an edge to read what it connects (see EDGE_HIT_WIDTH_LOD).
+
+     The dim transition carries a 120ms DELAY, matching `.mm-node.mm-dim`'s
      `transition-delay` in the three node components: a cursor sweeping across
      the canvas must not strobe the whole picture on its way to a target, and an
      edge that dimmed instantly while the boxes held steady was the worst of
@@ -110,6 +119,7 @@
      moment the pointer lands. -->
 <BaseEdge
 	path={path[0]}
+	interactionWidth={lod ? EDGE_HIT_WIDTH_LOD : EDGE_HIT_WIDTH}
 	label={lod ? undefined : d.label}
 	labelX={path[1]}
 	labelY={path[2]}

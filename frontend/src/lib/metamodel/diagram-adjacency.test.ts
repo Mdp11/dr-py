@@ -113,17 +113,50 @@ describe('highlightFor', () => {
 describe('hoverLabel', () => {
 	const adj = buildAdjacency(EDGES);
 
-	it('names the hovered thing: node name, an ordinary mapping edge as `Rel: Source → Target`, a tether half as the bare rel name, or sub ▷ super', () => {
+	it('names the hovered thing: node name, a mapping edge as `Rel: Source → Target`, or sub ▷ super', () => {
 		expect(hoverLabel({ kind: 'node', id: 'el:Zone' }, adj)).toBe('Zone');
 		expect(hoverLabel({ kind: 'edge', id: 'assoc:Contains:0', relName: 'Contains' }, adj)).toBe(
 			'Contains: Zone → Building'
 		);
-		expect(hoverLabel({ kind: 'edge', id: 'assoc-in:Monitors:0', relName: 'Monitors' }, adj)).toBe(
-			'Monitors'
-		);
 		expect(hoverLabel({ kind: 'edge', id: 'gen:el:Zone', relName: null }, adj)).toBe(
 			'Zone ▷ NamedElement'
 		);
+	});
+
+	/**
+	 * A boxed relationship's mapping is drawn as two edges through the
+	 * association-class box, and either half alone names the BOX as one of its
+	 * endpoints — `Monitors: Building → Monitors` reading off the in-half. So
+	 * the label crosses the box: the in-half's source and the out-half's target
+	 * are the mapping's real endpoints, and the two halves are the same id with
+	 * the prefix swapped.
+	 */
+	it('names both outer endpoints of a boxed relationship from either half', () => {
+		expect(hoverLabel({ kind: 'edge', id: 'assoc-in:Monitors:0', relName: 'Monitors' }, adj)).toBe(
+			'Monitors: Building → Zone'
+		);
+		expect(hoverLabel({ kind: 'edge', id: 'assoc-out:Monitors:0', relName: 'Monitors' }, adj)).toBe(
+			'Monitors: Building → Zone'
+		);
+	});
+
+	it('falls back to the bare rel name when the other tether half is missing', () => {
+		// `buildDiagram` emits a half only when BOTH its ends exist, so a mapping
+		// onto a type the draft does not declare yields one half and no partner —
+		// there is no second endpoint to name, and inventing one would be worse
+		// than saying less.
+		const halfOnly = buildAdjacency([
+			{
+				id: 'assoc-in:Monitors:0',
+				source: 'el:Building',
+				target: 'rel:Monitors',
+				type: 'association',
+				data: { relName: 'Monitors' }
+			}
+		]);
+		expect(
+			hoverLabel({ kind: 'edge', id: 'assoc-in:Monitors:0', relName: 'Monitors' }, halfOnly)
+		).toBe('Monitors');
 	});
 
 	it('returns null for an unindexed generalization edge', () => {
