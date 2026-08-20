@@ -26,6 +26,8 @@ from data_rover.core.table.cells import (
 from data_rover.core.table.evaluate import TableLimits, build_rows_ex, iter_export_rows
 from data_rover.core.table.json_export import (
     build_group_plan,
+    contains_error_marker,
+    jsonl_bytes,
     render_cell,
     render_json,
     resolve_item_keys,
@@ -1436,3 +1438,23 @@ def test_render_json_omits_the_row_number_inside_groups():
         {"Component": "Part 1", "Component Mass": 12},
         {"Component": "Part 2", "Component Mass": 9},
     ]
+
+
+# ---- JSONL serialization + on_error probe (Exporter v2 Phase 2) -----------
+
+
+def test_jsonl_is_one_compact_object_per_line_newline_terminated():
+    blob = jsonl_bytes([{"a": 1, "b": [1, 2]}, {"a": "é"}])
+    assert blob == b'{"a":1,"b":[1,2]}\n' + '{"a":"é"}\n'.encode()
+
+
+def test_jsonl_of_nothing_is_empty_bytes():
+    assert jsonl_bytes([]) == b""
+
+
+def test_error_marker_found_at_any_depth():
+    assert contains_error_marker({"$error": "boom"})
+    assert contains_error_marker({"a": [{"b": {"$error": "x"}}]})
+    assert contains_error_marker([1, {"nested": [{"$error": "x"}]}])
+    assert not contains_error_marker({"a": [1, "x", None, {"b": 2}]})
+    assert not contains_error_marker("plain")

@@ -8,6 +8,7 @@ Spec: docs/superpowers/specs/2026-07-25-table-json-export-design.md
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
@@ -163,6 +164,33 @@ def render_cell(model: Model, cell: Cell, mode: str) -> object:
         return {"$error": cell.message}
     assert isinstance(cell, PendingCell)
     return {"$error": NOT_COMPUTED_MESSAGE}
+
+
+def jsonl_bytes(docs: list[dict[str, object]]) -> bytes:
+    """One compact object per line, `\\n`-terminated (spec §6). A stream of
+    objects is inherently compact and array-like, which is why
+    `json_doc.shape`/`pretty` are ignored with tolerance for this format —
+    only `on_error` (see `contains_error_marker`) applies."""
+    return b"".join(
+        json.dumps(d, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        + b"\n"
+        for d in docs
+    )
+
+
+def contains_error_marker(value: object) -> bool:
+    """True when a rendered document carries any `{"$error": ...}` marker at
+    any depth — the `on_error: "fail"` probe (spec §7). Walks exactly the
+    shapes `render_json` emits (dicts, lists, scalars). A user column whose
+    resolved JSON key is literally `$error` would trip this too — accepted:
+    strictness may over-fire on a pathological name, never under-fire."""
+    if isinstance(value, dict):
+        return "$error" in value or any(
+            contains_error_marker(v) for v in value.values()
+        )
+    if isinstance(value, list):
+        return any(contains_error_marker(v) for v in value)
+    return False
 
 
 def _mode_of(col: Column) -> str:
