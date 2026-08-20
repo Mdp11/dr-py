@@ -27,14 +27,17 @@ spec's phase table (`R`). Anything older than the last few sessions is **unverif
 against current code** — confirm before acting on it. Line numbers drift; treat them as
 hints.
 
-Last updated: 2026-08-19 · repo head at time of writing: `main` at `1c95ba3`
+Last updated: 2026-08-20 · repo head at time of writing: `main` at `1c95ba3`
 (top-bar-restructure merged). The 2026-08-18 additions were a batch of owner notes: P-10
 gained five concrete sub-items, P-15 → P-21 and U-9 are new, and T-1 was retired as stale
 while verifying them. The 2026-08-19 additions are two more owner notes: P-22 (top bar
 reorder + Model dropdown, a P-10 follow-up) and P-23 (Apply CR against the loaded model,
 staged not committed, multiple CRs). A same-day pass on `feat/exporter-v2-phase1` (Exporter
 v2 Phase 1) closes P-15.2, P-15.3, F-10, F-11 and C-10, leaves P-15.1 open (scheduled for
-Exporter v2 Phase 3), and marks P-16 in progress.
+Exporter v2 Phase 3), and marks P-16 in progress. The 2026-08-20 metamodel-navigation pass
+on `feat/metamodel-navigation` closes P-17 and P-18, and also ships the two owner-requested
+navigation features (search autocomplete, collapsible panel) recorded in the same day's
+spec.
 
 ---
 
@@ -294,7 +297,7 @@ than a patch: either the export routes learn to accept a client-supplied draft p
 it alongside P-15, since "a custom export whose entries are still drafts" is exactly the
 case that prompted the note.
 
-### P-17 · Metamodel diagram: unbounded zoom-out with a level-of-detail mode · `open`
+### P-17 · Metamodel diagram: unbounded zoom-out with a level-of-detail mode · `done` (2026-08-20, feat/metamodel-navigation)
 On a big metamodel the canvas cannot be zoomed out far enough to see everything, and it
 should be able to — however small it gets. **Confirmed cause:**
 `Metamodel/MetamodelDiagram.svelte:373` renders `<SvelteFlow>` with no `minZoom`, so
@@ -307,7 +310,10 @@ show the hovered block's or arrow's name in a **tooltip near the cursor**. That 
 render-mode switch inside the custom node/edge components keyed off the live viewport
 zoom, and it shares hit-testing and label lookup with **P-18** — build the two together.
 
-### P-18 · Metamodel diagram: hover highlighting · `open`
+Shipped: minZoom 0.05, LOD name-only render below zoom 0.4 (hysteresis to 0.5) with a
+cursor tooltip; spec docs/superpowers/specs/2026-08-20-metamodel-navigation-at-scale-design.md.
+
+### P-18 · Metamodel diagram: hover highlighting · `done` (2026-08-20, feat/metamodel-navigation)
 Hovering a block highlights the block **and every arrow starting or ending on it**;
 hovering a relationship highlights that arrow **and the blocks at both of its ends**.
 Pure canvas presentation — no YAML write, no `mm` lease, no commit — so it stays inside
@@ -316,6 +322,9 @@ adjacency it needs is a by-product of work already done: `diagram-build.ts` deri
 edge's endpoints from `rel.mappings` (never the `source`/`target` shorthand), so a
 block → arrows index falls out of the build rather than needing new derivation. Pairs with
 P-17.
+
+Shipped: hover lights the neighborhood (gens included) and dims the rest; adjacency
+derived per diagram build in frontend/src/lib/metamodel/diagram-adjacency.ts.
 
 ### P-19 · Collapsible sidebar sections · `open`
 The **Tree** panel should collapse: `Sidebar/ContainmentTree.svelte:1285` is a plain
@@ -798,7 +807,8 @@ end-to-end — drag a node → reload → position persisted; draw a connection 
 relationship in the YAML; rename in the form → cascade with comments intact; rebind →
 positions survive under the new names. Those four are exactly the paths where the
 frontend and the layout route have to agree, and they are currently verified only by a
-manual browser pass.
+manual browser pass. The 2026-08-20 metamodel-navigation features (LOD, hover
+highlighting, type search, panel TOC/collapse) join this list — unit-covered, no e2e.
 
 ---
 
