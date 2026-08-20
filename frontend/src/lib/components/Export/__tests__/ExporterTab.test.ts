@@ -19,7 +19,8 @@ import {
 	resetCheckout,
 	resetExporterEditors,
 	resetWorkspaceTabs,
-	setProjectInfo
+	setProjectInfo,
+	stageArtifactCreate
 } from '$lib/state';
 import ExporterTab from '../ExporterTab.svelte';
 
@@ -411,6 +412,42 @@ describe('ExporterTab', () => {
 		flushSync();
 
 		expect(getExporterDraft('exp:art-1')!.entries[0].folder).toBe('nested/path');
+	});
+
+	// A disabled <select> swallows clicks with no event and no console output —
+	// exactly the "Add table… does not work" report against a project with no
+	// committed tables. The empty picker must SAY why it is dead, and
+	// distinguish "no tables at all" from "your table is staged but not
+	// committed yet" (temp ids are filtered by design — see
+	// referenceableArtifactHeaders).
+	it('explains the disabled add-table picker when the project has no tables', async () => {
+		render('exp:draft:1');
+		await vi.waitFor(() =>
+			expect(document.querySelector('[data-testid="add-table-select"]')).toBeTruthy()
+		);
+		const select = document.querySelector<HTMLSelectElement>('[data-testid="add-table-select"]')!;
+		expect(select.disabled).toBe(true);
+		const hint = document.querySelector('[data-testid="add-table-empty-hint"]')!;
+		expect(hint).not.toBeNull();
+		expect(hint.textContent).toMatch(/no tables/i);
+	});
+
+	it('explains the disabled add-table picker when the only tables are staged, uncommitted creates', async () => {
+		stageArtifactCreate(
+			'table',
+			'Staged table',
+			{ schema_version: 1, row_source: { kind: 'scope' }, columns: [{ kind: 'element' }] },
+			null
+		);
+		render('exp:draft:1');
+		await vi.waitFor(() =>
+			expect(document.querySelector('[data-testid="add-table-select"]')).toBeTruthy()
+		);
+		const select = document.querySelector<HTMLSelectElement>('[data-testid="add-table-select"]')!;
+		expect(select.disabled).toBe(true);
+		const hint = document.querySelector('[data-testid="add-table-empty-hint"]')!;
+		expect(hint).not.toBeNull();
+		expect(hint.textContent).toMatch(/commit/i);
 	});
 
 	it('allows adding the same table twice (F-11)', async () => {

@@ -251,6 +251,15 @@ follows a pessimistic **check-out → stage → commit** loop (Spec B):
      (`routes/exports.py`'s `_dedupe_path`), so a duplicate entry was already
      legal server-side — the picker's old `usedRefs` filter was blocking a
      case the backend explicitly supported. Do not reintroduce it.
+   - **The empty picker explains itself.** `availableTables` goes through
+     `referenceableArtifactHeaders`, which drops staged-but-uncommitted
+     creates (temp ids must never reach a payload), and a project can simply
+     have no tables — either way the select is disabled, and a disabled
+     `<select>` swallows clicks with no event and no console output, which
+     reads as "the button is broken". A hint beside it
+     (`add-table-empty-hint`) says why, distinguishing "no tables in this
+     project yet" from "your tables are staged — commit them first" (the
+     latter detected via the overlay list, temp ids included).
    - **The lease is per editor tab.** Opening a saved artifact takes an
      `art:<id>` exclusive lease (`acquireArtifactLease`); a denial does not
      refuse the open, it renders that tab **unsaveable and read-only** behind

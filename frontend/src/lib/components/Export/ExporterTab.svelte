@@ -11,6 +11,7 @@
 		addExporterEntry,
 		artifactHeaderById,
 		canEdit,
+		getArtifactHeaders,
 		ensureExporterDraft,
 		getExporterDraft,
 		getExporterLockHolder,
@@ -51,6 +52,16 @@
 	// colliding output names/folders at export time (routes/exports.py's
 	// _dedupe_path), so a duplicate entry is legal, not an error.
 	const availableTables = $derived(referenceableArtifactHeaders('table'));
+	// The picker excludes staged-but-uncommitted creates (temp ids must never
+	// reach a payload — see referenceableArtifactHeaders). When that filter —
+	// or a simply table-less project — leaves the select empty it is DISABLED,
+	// and a disabled select swallows clicks with no event and no console
+	// output, which reads as "the button is broken". Say why instead, and
+	// distinguish the two states: the overlay list (temp ids included) tells a
+	// user whose table is only staged that COMMITTING is the missing step.
+	const stagedOnlyTables = $derived(
+		availableTables.length === 0 && getArtifactHeaders().some((h) => h.kind === 'table')
+	);
 
 	function tableName(ref: string): string {
 		return artifactHeaderById(ref)?.name ?? ref;
@@ -397,6 +408,9 @@
 						data-testid="add-table-select"
 						class="rounded border border-input bg-card px-2 py-1 text-xs"
 						disabled={locked || availableTables.length === 0}
+						title={availableTables.length === 0
+							? 'Only committed tables can be added to an exporter'
+							: undefined}
 						onchange={(e) => void onAddTableChange(e)}
 					>
 						<option value="">Add table…</option>
@@ -404,6 +418,15 @@
 							<option value={h.id}>{h.name}</option>
 						{/each}
 					</select>
+					{#if availableTables.length === 0}
+						<p data-testid="add-table-empty-hint" class="text-xs text-muted-foreground/70">
+							{#if stagedOnlyTables}
+								Tables staged in the current batch can be added once you commit them.
+							{:else}
+								No tables in this project yet — save and commit a table first.
+							{/if}
+						</p>
+					{/if}
 				</div>
 			{/if}
 		</div>
