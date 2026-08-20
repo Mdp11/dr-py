@@ -1,13 +1,17 @@
 <script lang="ts">
 	import { Plus } from '@lucide/svelte';
+	import { useSvelteFlow } from '@xyflow/svelte';
+
 	import type { DiagramSelection } from '$lib/metamodel/diagram-build';
 	import { datatypeNamespace, uniqueTypeName } from '$lib/metamodel/helpers';
 	import { applyDiagramEdit, getMetamodelDiagramView, selectDiagramNode } from '$lib/state';
 	import DeleteTypeDialog from './DeleteTypeDialog.svelte';
 	import ElementTypeForm from './ElementTypeForm.svelte';
 	import EnumForm from './EnumForm.svelte';
+	import PanelSection from './PanelSection.svelte';
 	import RelationshipTypeForm from './RelationshipTypeForm.svelte';
 	import { addBtnCls, headingCls } from './field-classes';
+	import { revealSelection } from '../reveal-action';
 
 	/**
 	 * The attribute half of the diagram surface: the canvas owns TOPOLOGY, this
@@ -15,24 +19,35 @@
 	 * click a node, edit what it declares — and falls back to a metamodel-level
 	 * overview when nothing is selected, so the panel is never a blank column.
 	 *
-	 * The overview deliberately surfaces the two things the CANVAS cannot draw:
-	 * enums (drawn, but easy to lose) and relationship types with NO mappings,
-	 * which have no endpoints to anchor an edge and would otherwise be invisible
-	 * and unreachable. Both are click-to-select, which is the only way to reach
-	 * a mapless relationship's form at all.
+	 * With no selection, the panel becomes a table of contents (spec
+	 * 2026-08-20 §7.1): every element type, relationship type and enum,
+	 * grouped into collapsible sections, each row a reveal action. This is
+	 * one of only two places relationship types with NO mappings are
+	 * reachable at all (the other is the toolbar search, Task 9) — they have
+	 * no endpoints to anchor an edge, so the canvas cannot draw them — and it
+	 * doubles as a click-to-navigate index for everything else, which the
+	 * canvas alone cannot offer once a metamodel outgrows what fits on
+	 * screen.
 	 *
 	 * The delete dialog lives HERE rather than inside each form: it is the same
 	 * confirmation for all three kinds, and the panel is what has to clear the
 	 * selection afterwards (the form it would have belonged to is gone by then).
 	 */
 
-	let { readOnly }: { readOnly: boolean } = $props();
+	let { readOnly, onReveal }: { readOnly: boolean; onReveal?: (sel: DiagramSelection) => void } =
+		$props();
 
 	const view = $derived(getMetamodelDiagramView());
 	const mm = $derived(view.mm);
 	const sel = $derived(view.selection);
 
-	const mapless = $derived((mm?.relationships ?? []).filter((r) => r.mappings.length === 0));
+	const flow = useSvelteFlow();
+
+	/** TOC rows navigate — select AND pan — through the shared action (spec
+	 * §7.1), so the panel and search cannot drift. `onReveal` is the test seam. */
+	function reveal(target: DiagramSelection): void {
+		(onReveal ?? ((s: DiagramSelection) => revealSelection(flow, view, s)))(target);
+	}
 
 	function createRelationshipType(): void {
 		if (mm === null) return;
@@ -80,12 +95,54 @@
 						).length} enums
 					</p>
 					<p class="text-[10px] text-muted-foreground/70">
-						Select a box on the canvas to edit what it declares.
+						Select a box on the canvas — or a row below — to edit what it declares.
 					</p>
 				</div>
 
-				<div class="flex flex-col gap-0.5">
-					<p class={headingCls}>Enums</p>
+				<PanelSection title="Element types" count={mm.elements.length} section="elements">
+					{#if mm.elements.length === 0}
+						<p class="text-[11px] italic text-muted-foreground/70">None.</p>
+					{:else}
+						{#each mm.elements as el, i (`${i}:${el.name}`)}
+							<button
+								type="button"
+								class={linkCls}
+								data-testid="mm-toc-row"
+								onclick={() => reveal({ kind: 'element', name: el.name })}
+							>
+								<span class="text-foreground/90">{el.name}</span>
+								{#if el.abstract}<span class="text-muted-foreground/70"> — abstract</span>{/if}
+							</button>
+						{/each}
+					{/if}
+				</PanelSection>
+
+				<PanelSection
+					title="Relationship types"
+					count={mm.relationships.length}
+					section="relationships"
+				>
+					{#if mm.relationships.length === 0}
+						<p class="text-[11px] italic text-muted-foreground/70">None.</p>
+					{:else}
+						{#each mm.relationships as rel, i (`${i}:${rel.name}`)}
+							<button
+								type="button"
+								class={linkCls}
+								data-testid="mm-toc-row"
+								onclick={() => reveal({ kind: 'relationship', name: rel.name })}
+							>
+								<span class="text-foreground/90">{rel.name}</span>
+								{#if rel.abstract}<span class="text-muted-foreground/70"> — abstract</span>{/if}
+								{#if rel.mappings.length === 0}
+									<span class="text-muted-foreground/70"> — no mappings</span>
+								{/if}
+							</button>
+						{/each}
+					{/if}
+				</PanelSection>
+
+				<PanelSection title="Enums" count={Object.keys(mm.enums).length} section="enums">
 					{#if Object.keys(mm.enums).length === 0}
 						<p class="text-[11px] italic text-muted-foreground/70">None.</p>
 					{:else}
@@ -93,33 +150,15 @@
 							<button
 								type="button"
 								class={linkCls}
-								onclick={() => selectDiagramNode({ kind: 'enum', name })}
+								data-testid="mm-toc-row"
+								onclick={() => reveal({ kind: 'enum', name })}
 							>
 								<span class="text-foreground/90">{name}</span>
 								<span class="text-muted-foreground/70"> — {literals.length} literals</span>
 							</button>
 						{/each}
 					{/if}
-				</div>
-
-				{#if mapless.length > 0}
-					<div class="flex flex-col gap-0.5">
-						<p class={headingCls}>Relationship types with no mappings</p>
-						<p class="text-[10px] text-muted-foreground/70">
-							Nothing anchors them on the canvas — select one here to give it endpoints.
-						</p>
-						{#each mapless as rel, i (`${i}:${rel.name}`)}
-							<button
-								type="button"
-								class={linkCls}
-								onclick={() => selectDiagramNode({ kind: 'relationship', name: rel.name })}
-							>
-								<span class="text-foreground/90">{rel.name}</span>
-								{#if rel.abstract}<span class="text-muted-foreground/70"> — abstract</span>{/if}
-							</button>
-						{/each}
-					</div>
-				{/if}
+				</PanelSection>
 
 				{#if !readOnly}
 					<div class="flex flex-wrap items-center gap-1.5 border-t border-border pt-2">

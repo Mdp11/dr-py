@@ -217,8 +217,12 @@ describe('MetamodelDiagram', () => {
 		const c = mount(DiagramHost, { target: document.body });
 		flushSync();
 
-		expect(findButton(/element type/i)).toBeUndefined();
-		expect(findButton(/enum/i)).toBeUndefined();
+		// Loose `/element type/i`/`/enum/i` would also match the panel TOC's
+		// section headers, which stay up on a read-only surface (task 10:
+		// navigation is a read affordance, not gated on `readOnly`) — so these
+		// pin the literal "+ ..." create-button text instead.
+		expect(findButton(/^\+ element type$/i)).toBeUndefined();
+		expect(findButton(/^\+ enum$/i)).toBeUndefined();
 		// Browsing affordances stay: read-only is not view-only.
 		expect(findButton(/auto-arrange/i)).toBeDefined();
 
