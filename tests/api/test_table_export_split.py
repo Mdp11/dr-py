@@ -71,6 +71,13 @@ def test_tokenless_template_answers_422_before_evaluating(client):
     assert "${name}" in r.json()["detail"]
 
 
+def test_unknown_token_in_split_template_answers_422(client):
+    _bootstrap_model(client)
+    r = _post(client, _body({"enabled": True, "filename_template": "${name}-${revv}"}))
+    assert r.status_code == 422
+    assert "${revv}" in r.json()["detail"]
+
+
 def test_disabled_split_and_xlsx_format_ignore_the_setting(client):
     _bootstrap_model(client)
     r = _post(client, _body({"enabled": False, "filename_template": "${name}"}))

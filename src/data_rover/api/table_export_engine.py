@@ -37,6 +37,7 @@ from data_rover.core.table.export_layout import (
     export_layout,
 )
 from data_rover.core.table.json_export import render_json
+from data_rover.core.table.naming import SPLIT_TOKENS, validate_tokens
 from data_rover.core.table.resolve import table_has_script
 from data_rover.core.table.schema import TableDefinition
 from data_rover.core.table.split import (
@@ -197,7 +198,11 @@ def run_table_export(
         # Strict by decision (spec §2): the ONE export setting that rejects
         # rather than normalizes. Before any evaluation — a bad template must
         # not cost a whole-table pass. ValueError -> the routes' 422 mapping.
+        # Token strictness lives here, not only in /exports/run's per-entry
+        # pass, so the standalone /tables/export route rejects a typo'd
+        # `${revv}` too instead of shipping it verbatim in filenames (K-10).
         validate_template(split.filename_template)
+        validate_tokens(split.filename_template, SPLIT_TOKENS)
     script_ctx = None
     acquired = False
     try:

@@ -713,7 +713,12 @@ alone — no `session.write_mutex` is held around the read-then-mutate. Racing e
 feature — filed here because it was noticed while auditing that path's mutex discipline for
 this feature, not because anything here changed.
 
-### K-10 · `POST /tables/export`'s `json_split.filename_template` skips token validation · `open` · *2026-08-19*
+### K-10 · `POST /tables/export`'s `json_split.filename_template` skips token validation · `done` (2026-08-20) · *2026-08-19*
+Closed in the shared engine rather than the route: `table_export_engine.run_table_export`
+now runs `validate_tokens(split.filename_template, SPLIT_TOKENS)` beside the existing
+`validate_template` call, so BOTH callers (`/tables/export` and `/exports/run`) reject an
+unknown token — the standalone route's existing `ValueError → 422` mapping carries it.
+Pinned by `test_unknown_token_in_split_template_answers_422`.
 The two export routes are asymmetric on naming strictness: `POST /exports/run` validates
 every template's `${...}` tokens up front and 422s on an unknown one, but
 `POST /tables/export` renders a table's own `json_split.filename_template` through the same
