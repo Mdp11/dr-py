@@ -310,7 +310,7 @@ class JsonKeys:
 _Pair = tuple[RowKey, list[Cell]]
 
 
-def render_json(
+def render_json_ex(
     model: Model,
     defn: TableDefinition,
     row_keys: list[RowKey],
@@ -319,8 +319,10 @@ def render_json(
     *,
     order: Sequence[int] | None = None,
     row_number: tuple[int, str] | None = None,
-) -> list[dict[str, object]]:
-    """The whole table as a list of JSON objects.
+    key_column: int | None = None,
+) -> tuple[list[dict[str, object]], list[str] | None]:
+    """The whole table as a list of JSON objects, plus optional per-document
+    keys for the object shape (spec §7).
 
     `row_iter` yields cells in `row_keys` order (that is `iter_export_rows`'
     contract), so the two zip positionally.
@@ -340,6 +342,21 @@ def render_json(
     objects only: inside a grouped array the entries are not rows, so a row
     number there would have no referent. The number is the object's 1-based
     position in the returned list, which follows the requested sort.
+
+    With `key_column` given, the second element carries ONE string key per
+    returned document, positionally aligned. The key is read from the
+    bucket's FIRST row's CELL at `key_column` — never from the rendered
+    doc — so a hidden key column works (it is data, not presentation of the
+    member list). A plain key column is constant across a grouped bucket by
+    the same argument `_render_level` makes for plain columns; a key column
+    that VARIES within a bucket (it reads a grouped slot) contributes
+    whatever the bucket's first row carried, and the duplicate-key guard is
+    what keeps that honest.
+
+    Strict by decision, all `ValueError` (the routes' 422 mapping):
+    `key_column` out of range; a key rendering `None`/`""`/non-scalar (an
+    error cell renders a dict and lands here too); a duplicate key —
+    filenames dedupe, data keys never do (spec §7).
     """
     plan = build_group_plan(defn, base_slots)
     keys = JsonKeys.resolve(defn)
@@ -360,20 +377,73 @@ def render_json(
         # document in the requested sort's order.
         buckets = list(merged.values())
 
-    return [
-        _render_level(
-            model,
-            defn,
-            keys,
-            plan,
-            plan.top_columns,
-            plan.top_groups,
-            b,
-            order=order,
-            row_number=(row_number[0], row_number[1], n) if row_number else None,
-        )
-        for n, b in enumerate(buckets, start=1)
-    ]
+    doc_keys: list[str] | None = None
+    if key_column is not None:
+        if not 0 <= key_column < len(defn.columns):
+            raise ValueError(
+                f"json_doc.key_column {key_column} out of range "
+                f"(table has {len(defn.columns)} columns)"
+            )
+        mode = _mode_of(defn.columns[key_column])
+        doc_keys = []
+        seen: set[str] = set()
+        for b in buckets:
+            rendered = render_cell(model, b[0][1][key_column], mode)
+            if rendered is None or rendered == "" or not isinstance(
+                rendered, str | int | float | bool
+            ):
+                raise ValueError(
+                    "json_doc.key_column renders an empty or non-scalar key "
+                    f"for document {len(doc_keys) + 1}"
+                )
+            key = str(rendered)
+            if key in seen:
+                raise ValueError(f"json_doc: duplicate document key {key!r}")
+            seen.add(key)
+            doc_keys.append(key)
+
+    return (
+        [
+            _render_level(
+                model,
+                defn,
+                keys,
+                plan,
+                plan.top_columns,
+                plan.top_groups,
+                b,
+                order=order,
+                row_number=(row_number[0], row_number[1], n) if row_number else None,
+            )
+            for n, b in enumerate(buckets, start=1)
+        ],
+        doc_keys,
+    )
+
+
+def render_json(
+    model: Model,
+    defn: TableDefinition,
+    row_keys: list[RowKey],
+    row_iter: Iterable[list[Cell]],
+    base_slots: int,
+    *,
+    order: Sequence[int] | None = None,
+    row_number: tuple[int, str] | None = None,
+) -> list[dict[str, object]]:
+    """The whole table as a list of JSON objects. See `render_json_ex` for
+    the object-shape key variant; everything else about the contract lives
+    there now (this is a delegate kept for the many key-less call sites)."""
+    docs, _ = render_json_ex(
+        model,
+        defn,
+        row_keys,
+        row_iter,
+        base_slots,
+        order=order,
+        row_number=row_number,
+    )
+    return docs
 
 
 def _render_level(
