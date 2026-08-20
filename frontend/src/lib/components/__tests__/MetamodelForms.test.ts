@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import type { Metamodel } from '$lib/api/types';
 import { FIXTURE } from '$lib/metamodel/__tests__/fixtures';
+import type { DiagramSelection } from '$lib/metamodel/diagram-build';
 import { parseDraft } from '$lib/metamodel/yaml-edit';
 import type { MetamodelDiagramView } from '$lib/state';
 
@@ -45,6 +46,17 @@ vi.mock('$lib/state', async (orig) => {
 	};
 });
 
+// `MetamodelFormPanel` calls `useSvelteFlow()` unconditionally (task 10, for
+// its TOC rows' reveal action), which throws outside a `<SvelteFlowProvider>`.
+// This file mounts the panel bare, so the hook is stubbed rather than wrapping
+// every mount in a provider neither the panel nor its forms otherwise need.
+vi.mock('@xyflow/svelte', () => ({
+	useSvelteFlow: () => ({
+		setCenter: vi.fn(async () => true),
+		fitBounds: vi.fn(async () => true)
+	})
+}));
+
 // Imported AFTER the factory so these are the mocked bindings.
 import { applyDiagramEdit, selectDiagramNode } from '$lib/state';
 import ElementTypeForm from '../Metamodel/forms/ElementTypeForm.svelte';
@@ -80,26 +92,31 @@ afterEach(() => {
 });
 
 describe('MetamodelFormPanel', () => {
-	it('lists enums and mapless relationship types, and selects the one clicked', () => {
+	it('lists every kind as a TOC, badges the mapless relationship, and reveals the one clicked', () => {
+		const picked: DiagramSelection[] = [];
 		const c = mount(MetamodelFormPanel, {
 			target: document.body,
-			props: { readOnly: false }
+			props: { readOnly: false, onReveal: (sel: DiagramSelection) => picked.push(sel) }
 		});
 		flushSync();
 
 		const overview = byId('mm-panel-overview');
 		expect(overview.textContent).toContain('3 element types');
 		// `Observes` is abstract with no mappings: no edge anchors it, so this
-		// list is the only way to reach its form.
+		// TOC row is the only way to reach its form at all.
 		expect(overview.textContent).toContain('Observes');
-		expect(overview.textContent).not.toContain('Contains');
+		expect(overview.textContent).toContain('no mappings');
+		// task 10: element types and mapped relationships are now listed too,
+		// not just the enums/mapless rows the old overview singled out.
+		expect(overview.textContent).toContain('Zone');
+		expect(overview.textContent).toContain('Contains');
 
 		[...overview.querySelectorAll('button')]
 			.find((b) => (b.textContent ?? '').includes('Status'))!
 			.click();
 		flushSync();
 
-		expect(selectDiagramNode).toHaveBeenCalledWith({ kind: 'enum', name: 'Status' });
+		expect(picked).toEqual([{ kind: 'enum', name: 'Status' }]);
 
 		unmount(c);
 	});

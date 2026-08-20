@@ -3,6 +3,7 @@
 	import '@xyflow/svelte/dist/style.css';
 
 	import { Button } from '$lib/components/ui/button';
+	import { buildAdjacency } from '$lib/metamodel/diagram-adjacency';
 	import {
 		buildDiagram,
 		nodeIdFor,
@@ -13,19 +14,31 @@
 	import { datatypeNamespace, uniqueTypeName } from '$lib/metamodel/helpers';
 	import {
 		applyDiagramEdit,
+		getDiagramHoverLabel,
+		getHoverCursor,
+		getLodActive,
 		getMetamodelDiagramView,
 		getMetamodelEditor,
+		getMetamodelPanel,
 		getRole,
 		moveNode,
+		noteZoom,
+		resetMetamodelCanvas,
 		runAutoArrange,
 		selectDiagramNode,
 		setAllCollapsed,
+		setDiagramAdjacency,
+		setDiagramHover,
+		setHoverCursor,
+		setMetamodelPanelCollapsed,
 		setMetamodelView,
 		toggleNodeCollapsed,
 		undoDiagramEdit
 	} from '$lib/state';
+	import { ChevronsLeft, ChevronsRight } from '@lucide/svelte';
 
 	import MetamodelFormPanel from './forms/MetamodelFormPanel.svelte';
+	import MetamodelSearch from './MetamodelSearch.svelte';
 
 	import AssocClassNode from './diagram/AssocClassNode.svelte';
 	import AssociationEdge from './diagram/AssociationEdge.svelte';
@@ -67,6 +80,7 @@
 	 */
 
 	const view = $derived(getMetamodelDiagramView());
+	const panel = $derived(getMetamodelPanel());
 	const ed = $derived(getMetamodelEditor());
 	/** Draft edits: owner-only, via the editor module's own gate. */
 	const readOnly = $derived(ed.readOnly);
@@ -122,8 +136,41 @@
 	};
 	const edgeTypes = { generalization: GeneralizationEdge, association: AssociationEdge };
 
-	const built = $derived(view.mm === null ? { nodes: [], edges: [] } : buildDiagram(view.mm));
+	/**
+	 * The parsed metamodel, hoisted into its OWN `$derived` — the one thing
+	 * standing between a canvas click and an O(metamodel) rebuild.
+	 *
+	 * `getMetamodelDiagramView()` returns a fresh object literal on every
+	 * recompute, and it recomputes whenever selection, collapse, undo depth,
+	 * positions or the buffer change. So `buildDiagram(view.mm)` written inline
+	 * would re-run on all of those. The state module memoizes the parse by
+	 * buffer identity, which makes `view.mm` referentially STABLE across every
+	 * change that isn't a buffer edit; reading it through a derived of its own
+	 * lets Svelte's equality check find the value unchanged and leave `built`
+	 * — and everything downstream of it — alone. At ~300 types that is the
+	 * difference between a click costing a full rebuild and costing nothing.
+	 */
+	const parsedMm = $derived(view.mm);
+	const built = $derived(parsedMm === null ? { nodes: [], edges: [] } : buildDiagram(parsedMm));
 	const selectedNodeId = $derived(view.selection === null ? null : nodeIdFor(view.selection));
+
+	// The adjacency the hover store needs: rebuilt only when the parsed
+	// metamodel changes — `built` hangs off `parsedMm` above, so a selection, a
+	// collapse or a drag leaves it alone — and NEVER on hover, since hover
+	// state is written into `metamodel-canvas.svelte.ts` and read back only
+	// inside the node/edge components, never by anything on this line. The
+	// cleanup keeps a closed canvas from leaving stale hover state behind for
+	// the next mount.
+	$effect(() => {
+		setDiagramAdjacency(buildAdjacency(built.edges));
+	});
+	$effect(() => {
+		return () => resetMetamodelCanvas();
+	});
+
+	const lodActive = $derived(getLodActive());
+	const lodTooltip = $derived(lodActive ? getDiagramHoverLabel() : null);
+	const hoverCursor = $derived(getHoverCursor());
 
 	function specToNode(spec: DiagramNodeSpec): Node {
 		const collapsed = view.collapsed.has(spec.id);
@@ -202,26 +249,6 @@
 	const flow = useSvelteFlow();
 
 	// --- toolbar ---------------------------------------------------------------
-
-	let query = $state('');
-
-	/** Pan to the first type whose name matches, centred on its box. Uses the
-	 * stored position + `nodeSize` rather than the measured node, so it works
-	 * for a node the viewport has never rendered. */
-	function findAndCenter(): void {
-		const q = query.trim().toLowerCase();
-		if (q === '') return;
-		const hit = built.nodes.find((n) =>
-			String(n.data.name ?? '')
-				.toLowerCase()
-				.includes(q)
-		);
-		if (hit === undefined) return;
-		const pos = view.positions[hit.id] ?? { x: 0, y: 0 };
-		const size = nodeSize(hit, view.collapsed.has(hit.id));
-		flow.setCenter(pos.x + size.width / 2, pos.y + size.height / 2, { zoom: 1.2, duration: 300 });
-		selectDiagramNode(selectionForNodeId(hit.id));
-	}
 
 	// Both create buttons pick a name free across the WHOLE datatype space
 	// (element types + enums + primitives), not just their own section: a
@@ -323,15 +350,7 @@
 			<Button size="sm" variant="outline" onclick={() => void flow.fitView()}>Fit view</Button>
 			<Button size="sm" variant="ghost" onclick={() => setAllCollapsed(true)}>Collapse all</Button>
 			<Button size="sm" variant="ghost" onclick={() => setAllCollapsed(false)}>Expand all</Button>
-			<input
-				class="rounded bg-card px-2 py-1 text-xs text-foreground"
-				bind:value={query}
-				aria-label="Find a type"
-				placeholder="Find type…"
-				onkeydown={(e) => {
-					if (e.key === 'Enter') findAndCenter();
-				}}
-			/>
+			<MetamodelSearch />
 			<div class="ml-auto flex items-center gap-2">
 				{#if issueCount > 0}
 					<!-- The errors live in the YAML, and only the YAML view can show
@@ -369,6 +388,9 @@
 				aria-label="Metamodel diagram"
 				tabindex="-1"
 				onkeydown={onKeydown}
+				onpointermove={(e) => {
+					if (getLodActive()) setHoverCursor({ x: e.clientX, y: e.clientY });
+				}}
 			>
 				<SvelteFlow
 					bind:nodes={flowNodes}
@@ -376,6 +398,7 @@
 					{nodeTypes}
 					{edgeTypes}
 					fitView
+					minZoom={0.05}
 					colorMode="dark"
 					nodesDraggable={canDragLayout}
 					nodesConnectable={!readOnly}
@@ -392,6 +415,16 @@
 					}}
 					onbeforeconnect={onBeforeConnect}
 					onpaneclick={() => selectDiagramNode(null)}
+					onmove={(_, viewport) => noteZoom(viewport.zoom)}
+					onnodepointerenter={({ node }) => setDiagramHover({ kind: 'node', id: node.id })}
+					onnodepointerleave={() => setDiagramHover(null)}
+					onedgepointerenter={({ edge }) =>
+						setDiagramHover({
+							kind: 'edge',
+							id: edge.id,
+							relName: (edge.data as { relName?: string } | undefined)?.relName ?? null
+						})}
+					onedgepointerleave={() => setDiagramHover(null)}
 				></SvelteFlow>
 
 				{#if pendingConnection !== null && view.mm !== null}
@@ -402,14 +435,70 @@
 						onclose={() => (pendingConnection = null)}
 					/>
 				{/if}
+
+				{#if lodTooltip !== null && hoverCursor !== null}
+					<!-- ONE overlay owned here, fed by the hover store — not a per-node
+					     tooltip (spec §4). `fixed` + clientX/Y sidesteps canvas-space math. -->
+					<div
+						class="pointer-events-none fixed z-50 rounded border border-border bg-popover px-2 py-1 text-xs text-foreground shadow-lg"
+						style="left: {hoverCursor.x + 12}px; top: {hoverCursor.y + 12}px;"
+						data-testid="mm-lod-tooltip"
+					>
+						{lodTooltip}
+					</div>
+				{/if}
 			</div>
 
-			<!-- The attribute half of the surface. Fixed 320px and independently
-			     scrollable: the canvas must keep the whole remaining width no matter
-			     how tall a type's property list gets. -->
-			<aside class="w-80 shrink-0 overflow-y-auto border-l border-border">
-				<MetamodelFormPanel {readOnly} />
-			</aside>
+			{#if !panel.collapsed}
+				<!-- The attribute half of the surface. Fixed 320px; the aside itself
+				     is a flex column so the Hide-panel button sits OUTSIDE the
+				     scrolling region below (an absolutely-positioned child of a
+				     scroll container scrolls away with it — `top`/`right` resolve
+				     before the scroll offset applies) and stays reachable no matter
+				     how tall a type's property list gets. Collapsible (spec §7.2):
+				     hidden, the canvas takes the full width and the rail below
+				     stands in. -->
+				<aside class="relative flex w-80 shrink-0 flex-col border-l border-border">
+					<button
+						type="button"
+						class="absolute right-1.5 top-1.5 z-10 rounded p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+						title="Hide panel"
+						aria-label="Hide panel"
+						data-testid="mm-panel-hide"
+						onclick={() => setMetamodelPanelCollapsed(true)}
+					>
+						<ChevronsRight class="h-3.5 w-3.5" />
+					</button>
+					<!-- `min-h-0` lets this pane shrink below its content's height inside
+					     the flex column above, which is what makes `overflow-y-auto`
+					     actually engage instead of the column growing to fit. -->
+					<div class="flex-1 min-h-0 overflow-y-auto">
+						<MetamodelFormPanel {readOnly} />
+					</div>
+				</aside>
+			{:else}
+				<!-- Collapsed rail. A selection landing from a CANVAS click does not
+				     force the panel open (spec §7.2) — the dot is the hint that one
+				     is waiting; search/TOC picks reopen via revealSelection. -->
+				<div class="flex shrink-0 flex-col items-center border-l border-border px-0.5 pt-1.5">
+					<button
+						type="button"
+						class="relative rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+						title="Show panel"
+						aria-label="Show panel"
+						data-testid="mm-panel-show"
+						onclick={() => setMetamodelPanelCollapsed(false)}
+					>
+						<ChevronsLeft class="h-3.5 w-3.5" />
+						{#if view.selection !== null}
+							<span
+								class="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-primary"
+								data-testid="mm-panel-selection-dot"
+							></span>
+						{/if}
+					</button>
+				</div>
+			{/if}
 		</div>
 	</div>
 {/if}

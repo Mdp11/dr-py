@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { BaseEdge, getSmoothStepPath, type EdgeProps } from '@xyflow/svelte';
+	import { visualState } from '$lib/metamodel/diagram-adjacency';
+	import { getDiagramHighlight } from '$lib/state';
 
 	/**
 	 * UML generalization: a solid line from the subtype to the supertype,
@@ -10,6 +12,7 @@
 	 */
 
 	let {
+		id,
 		sourceX,
 		sourceY,
 		targetX,
@@ -29,12 +32,23 @@
 			targetPosition
 		})
 	);
+
+	const vis = $derived(visualState(id, 'edge', selected, getDiagramHighlight()));
 </script>
 
+<!-- The dim transition carries a 120ms DELAY, matching `.mm-node.mm-dim`'s
+     `transition-delay` in the three node components: a cursor sweeping across
+     the canvas must not strobe the whole picture on its way to a target, and an
+     edge that dimmed instantly while the boxes held steady was the worst of
+     both. Un-dimming keeps a 0ms delay, so the neighbourhood lights up the
+     moment the pointer lands. -->
 <BaseEdge
 	path={path[0]}
 	markerEnd="url(#uml-gen)"
-	style={selected
+	style="{selected || vis === 'hot'
 		? 'stroke: var(--ring); stroke-width: 2px;'
-		: 'stroke: color-mix(in oklab, var(--muted-foreground) 80%, transparent); stroke-width: 1.5px;'}
+		: 'stroke: color-mix(in oklab, var(--muted-foreground) 80%, transparent); stroke-width: 1.5px;'} opacity: {vis ===
+	'dim'
+		? 0.2
+		: 1}; transition: opacity 140ms ease {vis === 'dim' ? '120ms' : '0ms'};"
 />

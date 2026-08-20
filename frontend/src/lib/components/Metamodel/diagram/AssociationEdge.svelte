@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { BaseEdge, EdgeLabel, getSmoothStepPath, Position, type EdgeProps } from '@xyflow/svelte';
+	import { visualState } from '$lib/metamodel/diagram-adjacency';
+	import { getDiagramHighlight, getLodActive } from '$lib/state';
 
 	/**
 	 * UML association: the relationship name at the midpoint, end multiplicities
@@ -36,6 +38,7 @@
 	}
 
 	let {
+		id,
 		source,
 		target,
 		data,
@@ -50,6 +53,9 @@
 
 	const d = $derived((data ?? {}) as unknown as Data);
 	const tethered = $derived(source.startsWith('rel:') || target.startsWith('rel:'));
+	const lod = $derived(getLodActive());
+	const vis = $derived(visualState(id, 'edge', selected, getDiagramHighlight()));
+	const edgeOpacity = $derived(vis === 'dim' ? 0.2 : 1);
 
 	const path = $derived(
 		getSmoothStepPath({
@@ -96,20 +102,28 @@
 	const labelColor = $derived(structural ? 'var(--muted-foreground)' : 'var(--cm-string)');
 </script>
 
+<!-- The dim transition carries a 120ms DELAY, matching `.mm-node.mm-dim`'s
+     `transition-delay` in the three node components: a cursor sweeping across
+     the canvas must not strobe the whole picture on its way to a target, and an
+     edge that dimmed instantly while the boxes held steady was the worst of
+     both. Un-dimming keeps a 0ms delay, so the neighbourhood lights up the
+     moment the pointer lands. -->
 <BaseEdge
 	path={path[0]}
-	label={d.label}
+	label={lod ? undefined : d.label}
 	labelX={path[1]}
 	labelY={path[2]}
 	labelStyle="color: {labelColor}; font-size: 11px; font-weight: 600;"
 	markerStart={d.containment ? 'url(#uml-diamond)' : undefined}
 	markerEnd={d.arrow ? 'url(#uml-arrow)' : undefined}
-	style="stroke: {stroke}; stroke-width: {selected ? 2 : 1.5}px;{tethered
-		? ' stroke-dasharray: 5 4;'
-		: ''}"
+	style="stroke: {stroke}; stroke-width: {selected || vis === 'hot'
+		? 2
+		: 1.5}px; opacity: {edgeOpacity}; transition: opacity 140ms ease {vis === 'dim'
+		? '120ms'
+		: '0ms'};{tethered ? ' stroke-dasharray: 5 4;' : ''}"
 />
 
-{#if d.sourceMult}
+{#if !lod && d.sourceMult}
 	<EdgeLabel
 		x={sourceLabelAt.x}
 		y={sourceLabelAt.y}
@@ -119,7 +133,7 @@
 		{d.sourceMult}
 	</EdgeLabel>
 {/if}
-{#if d.targetMult}
+{#if !lod && d.targetMult}
 	<EdgeLabel
 		x={targetLabelAt.x}
 		y={targetLabelAt.y}

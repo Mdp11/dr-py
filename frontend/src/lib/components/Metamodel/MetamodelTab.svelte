@@ -8,6 +8,7 @@
 	import {
 		closeMetamodelDiagram,
 		closeMetamodelEditor,
+		closeMetamodelPanel,
 		discardMetamodelDraft,
 		discardStagedNodeMoves,
 		editMetamodelBuffer,
@@ -18,6 +19,7 @@
 		getStagedNodeMoves,
 		initMetamodelDiagram,
 		initMetamodelEditor,
+		initMetamodelPanel,
 		previewMetamodelChanges,
 		retryMetamodelLease,
 		setMetamodelView
@@ -45,10 +47,16 @@
 
 	/** The diagram init is CHAINED, not raced: it reads the editor's buffer to
 	 * auto-arrange a never-arranged metamodel, so an empty buffer would leave it
-	 * with nothing to place (see initMetamodelDiagram's docstring). */
+	 * with nothing to place (see initMetamodelDiagram's docstring).
+	 *
+	 * The panel preferences go FIRST, before either await: they are a
+	 * synchronous localStorage read that depends on nothing being fetched, and
+	 * restoring them after the round-trips meant a user who collapsed the panel
+	 * watched it render expanded and snap shut once the metamodel landed. */
 	async function init(): Promise<void> {
 		const pid = getActiveProjectId();
 		if (pid === null) return;
+		initMetamodelPanel(pid);
 		await initMetamodelEditor(pid);
 		await initMetamodelDiagram(pid);
 	}
@@ -62,6 +70,7 @@
 		return () => {
 			closeMetamodelDiagram();
 			closeMetamodelEditor();
+			closeMetamodelPanel();
 		};
 	});
 

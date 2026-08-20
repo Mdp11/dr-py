@@ -1,5 +1,7 @@
 <script lang="ts">
 	import type { NodeProps } from '@xyflow/svelte';
+	import { visualState } from '$lib/metamodel/diagram-adjacency';
+	import { getDiagramHighlight, getLodActive } from '$lib/state';
 
 	/**
 	 * The `«enumeration»` chip — UML's stereotyped classifier for an enum, in
@@ -25,9 +27,18 @@
 
 	let { id, data, selected = false }: NodeProps = $props();
 	const d = $derived(data as unknown as Data);
+	const lod = $derived(getLodActive());
+	const vis = $derived(visualState(id, 'node', selected, getDiagramHighlight()));
 </script>
 
-<div class="mm-node" class:selected data-testid="mm-node-enum">
+<div
+	class="mm-node"
+	class:selected
+	class:mm-lod={lod}
+	class:mm-dim={vis === 'dim'}
+	class:mm-hot={vis === 'hot'}
+	data-testid="mm-node-enum"
+>
 	<div class="mm-header">
 		<div class="mm-titles">
 			<span class="mm-stereotype">«enumeration»</span>
@@ -56,10 +67,14 @@
 	{#if !d.collapsed && d.literals.length > 0}
 		<div class="mm-literals">{d.literals.join(' · ')}</div>
 	{/if}
+	{#if lod}
+		<span class="mm-lod-name">{d.name}</span>
+	{/if}
 </div>
 
 <style>
 	.mm-node {
+		position: relative;
 		border-radius: 10px;
 		background: linear-gradient(
 			165deg,
@@ -69,12 +84,25 @@
 		border: 1px solid color-mix(in oklab, var(--cm-keyword) 30%, transparent);
 		box-shadow: 0 6px 20px oklch(0 0 0 / 40%);
 		overflow: hidden;
+		transition: opacity 140ms ease;
 	}
 	.mm-node.selected {
 		border-color: color-mix(in oklab, var(--ring) 45%, transparent);
 		box-shadow:
 			0 6px 28px oklch(0 0 0 / 50%),
 			0 0 0 3px color-mix(in oklab, var(--ring) 8%, transparent);
+	}
+
+	/* Hover neighborhood (spec §5): the hovered thing and its neighbors stay
+	   full-strength while everything else dims. The transition-delay applies
+	   only on the way INTO dim, so sweeping the cursor across the canvas
+	   doesn't strobe; un-dim is immediate. */
+	.mm-node.mm-dim {
+		opacity: 0.25;
+		transition-delay: 120ms;
+	}
+	.mm-node.mm-hot {
+		border-color: color-mix(in oklab, var(--ring) 55%, transparent);
 	}
 
 	.mm-header {
@@ -127,5 +155,30 @@
 		color: var(--cm-property);
 		max-height: calc(12 * 22px);
 		overflow-y: auto;
+	}
+
+	/* LOD (spec §4): see ElementTypeNode's identical block for the rationale
+	   (`visibility`, not removal, keeps the DOM height — and every edge
+	   anchor — byte-identical in both modes). The enum name keeps its gold
+	   token rather than switching to the neutral foreground the other two
+	   node shapes use. */
+	.mm-node.mm-lod .mm-header,
+	.mm-node.mm-lod .mm-literals {
+		visibility: hidden;
+	}
+	.mm-lod-name {
+		position: absolute;
+		inset: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0 10px;
+		font-family: var(--font-display);
+		font-weight: 600;
+		font-size: 20px;
+		color: var(--cm-keyword);
+		overflow: hidden;
+		white-space: nowrap;
+		text-overflow: ellipsis;
 	}
 </style>

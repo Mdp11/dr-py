@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import { SvelteMap } from 'svelte/reactivity';
 import type { Metamodel } from '$lib/api/types';
+import type { DiagramSelection } from '$lib/metamodel/diagram-build';
 import type { MetamodelDiagramView, MetamodelEditorView } from '$lib/state';
 
 /**
@@ -106,6 +107,25 @@ let role: 'owner' | 'editor' | 'viewer' = 'owner';
  */
 const surface = new SvelteMap<'view', 'yaml' | 'diagram'>();
 
+/** Same trick for the selection: a canvas click changes it, and the point of
+ * the test below is what that click costs. */
+const selection = new SvelteMap<'sel', DiagramSelection | null>();
+
+/** Counts real `buildDiagram` calls. `vi.hoisted` because the `vi.mock` factory
+ * is lifted above every import. */
+const builds = vi.hoisted(() => ({ n: 0 }));
+
+vi.mock('$lib/metamodel/diagram-build', async (orig) => {
+	const actual = await orig<typeof import('$lib/metamodel/diagram-build')>();
+	return {
+		...actual,
+		buildDiagram: (mm: Metamodel) => {
+			builds.n += 1;
+			return actual.buildDiagram(mm);
+		}
+	};
+});
+
 vi.mock('$lib/state', async (orig) => {
 	const actual = await orig<typeof import('$lib/state')>();
 	return {
@@ -117,7 +137,8 @@ vi.mock('$lib/state', async (orig) => {
 		getMetamodelDiagramView: vi.fn(
 			(): MetamodelDiagramView => ({
 				...diagramView,
-				view: surface.get('view') ?? diagramView.view
+				view: surface.get('view') ?? diagramView.view,
+				selection: selection.get('sel') ?? diagramView.selection
 			})
 		),
 		initMetamodelEditor: vi.fn(async () => {}),
@@ -167,6 +188,8 @@ beforeEach(() => {
 	editorView = EDITOR;
 	diagramView = DIAGRAM;
 	surface.clear();
+	selection.clear();
+	builds.n = 0;
 	role = 'owner';
 	document.body.innerHTML = '';
 	vi.clearAllMocks();
@@ -187,6 +210,33 @@ describe('MetamodelDiagram', () => {
 		expect(nodeByText('Building')).toBeDefined();
 		expect(nodeByText('Status')).toBeDefined();
 		expect(document.querySelectorAll('.svelte-flow__node')).toHaveLength(3);
+
+		unmount(c);
+	});
+
+	/**
+	 * The premise of the whole navigation feature set: `getMetamodelDiagramView`
+	 * hands back a FRESH object literal on every recompute, so a plain canvas
+	 * click — which changes only `selection` — used to invalidate `built` and
+	 * re-run `buildDiagram` *and* `buildAdjacency` over the entire metamodel.
+	 * Fine at twenty types, wrong at three hundred. The component hoists the
+	 * parsed metamodel into its own `$derived`, and because the state module
+	 * memoizes the parse by buffer identity that derived's VALUE is unchanged,
+	 * which is what lets Svelte's equality check stop the rebuild here.
+	 */
+	it('does not rebuild the diagram when only the selection changes', () => {
+		const c = mount(DiagramHost, { target: document.body });
+		flushSync();
+		const afterMount = builds.n;
+		expect(afterMount).toBeGreaterThan(0);
+
+		selection.set('sel', { kind: 'element', name: 'Zone' });
+		flushSync();
+
+		// The click really landed (otherwise the count below proves nothing):
+		// Svelte Flow marks the selected node.
+		expect(nodeByText('Zone')?.classList.contains('selected')).toBe(true);
+		expect(builds.n).toBe(afterMount);
 
 		unmount(c);
 	});
@@ -217,8 +267,12 @@ describe('MetamodelDiagram', () => {
 		const c = mount(DiagramHost, { target: document.body });
 		flushSync();
 
-		expect(findButton(/element type/i)).toBeUndefined();
-		expect(findButton(/enum/i)).toBeUndefined();
+		// Loose `/element type/i`/`/enum/i` would also match the panel TOC's
+		// section headers, which stay up on a read-only surface (task 10:
+		// navigation is a read affordance, not gated on `readOnly`) — so these
+		// pin the literal "+ ..." create-button text instead.
+		expect(findButton(/^\+ element type$/i)).toBeUndefined();
+		expect(findButton(/^\+ enum$/i)).toBeUndefined();
 		// Browsing affordances stay: read-only is not view-only.
 		expect(findButton(/auto-arrange/i)).toBeDefined();
 
@@ -268,7 +322,7 @@ describe('MetamodelDiagram', () => {
 		const c = mount(DiagramHost, { target: document.body });
 		flushSync();
 
-		findButton(/element type/i)!.click();
+		findButton(/^\+ element type$/i)!.click();
 		flushSync();
 		expect(applyDiagramEdit).toHaveBeenCalledWith({ kind: 'addElementType', name: 'NewType2' });
 

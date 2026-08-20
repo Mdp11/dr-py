@@ -1209,6 +1209,63 @@ restructured to accommodate this.
   anywhere: `typeMap` and the backend's caches both resolve first-wins, so a
   second `Zone` would silently absorb every later edit to the first.
 
+#### Diagram navigation (LOD / hover / search / TOC)
+
+At ~20 types the canvas is a picture; at ~300 it is a map, and four read
+affordances make it navigable (spec 2026-08-20). None of them consults
+`readOnly` or the role: a viewer zooms, hovers, searches and jumps exactly
+like an owner — reading the metamodel is not an editing privilege, and the
+gates above stay confined to what CHANGES the draft.
+
+- **Hover must never rebuild `flowNodes`/`flowEdges`.** This is the premise
+  the whole set is built on, not a micro-optimization: a pointer crossing a
+  canvas fires continuously, and rebuilding two arrays of ~300 flow objects
+  per frame is fine at twenty boxes and unusable at three hundred. So hover
+  goes into `$state` in `state/metamodel-canvas.svelte.ts`, and each node and
+  edge component `$derived`s its OWN class from it (`visualState`); the two
+  `$effect`s in `MetamodelDiagram.svelte` that produce the flow arrays never
+  read that store. `metamodel/diagram-adjacency.ts` is the other half —
+  `buildAdjacency` runs once per `buildDiagram` result and `highlightFor`
+  answers a hover in O(neighbourhood), so nothing on the hover path walks the
+  metamodel. `built` itself hangs off a hoisted `parsedMm` derived rather than
+  off the view snapshot (which is a fresh object literal on every recompute),
+  so a selection, a collapse or a drag does not re-run `buildDiagram` either.
+- **LOD hides content with `visibility: hidden`, never `display: none` or a
+  DOM removal.** Below zoom 0.4 (back out at 0.5 — the hysteresis gap is what
+  stops the boundary flickering while the user sits on it) a box renders as
+  its name alone and edge labels are suppressed. The compartments stay in the
+  DOM and keep their space, so a box's height is byte-identical in both modes
+  — which is what keeps the edge anchors from jumping the moment the mode
+  flips. `nodeSize` and elk never learn LOD exists.
+- **The memo caches in these `.svelte.ts` modules are plain `let`, never
+  `$state`.** `getDiagramHighlight()` is called from every node and edge
+  render, so it memoizes on the `(hover, adjacency)` pair — but writing
+  `$state` from a getter that runs mid-render trips `state_unsafe_mutation`.
+  The same pattern, for the same reason, as the parse/build memos in
+  `metamodel-diagram.svelte.ts`.
+- **`revealSelection` takes the flow helpers as a parameter.**
+  `components/Metamodel/reveal-action.ts` is the ONE navigate path — the
+  toolbar's type search (`MetamodelSearch.svelte`, a client-side ranked
+  substring match over the parsed draft: no API call, no debounce, no
+  staleness protocol) and the form panel's TOC rows both go through it, so
+  select → reopen the panel → pan/fit can never drift between them. It stays
+  a plain function because `useSvelteFlow()` binds context at ITS call site:
+  the caller under `<SvelteFlowProvider>` owns the hook, and a test hands the
+  function a fake flow. The geometry is `metamodel/diagram-reveal.ts`'s pure
+  `revealTarget` (center a box, fit the union rect of a relationship's boxes,
+  or `none` for a mapless one, which selects without panning).
+- **The form panel doubles as the table of contents**, and its collapse state
+  is PERSONAL, not shared: `state/metamodel-panel.svelte.ts` keeps the whole
+  column's collapse and each section's fold per project in `localStorage`,
+  next to the diagram's own view/collapse keys and with the same try/catch
+  stance (a denied storage just means the preference doesn't survive a
+  reload). `revealSelection` reopens a collapsed panel because navigating BY
+  NAME implies wanting the form; a plain canvas click deliberately does not.
+- **The floor is `minZoom` 0.05**, not xyflow's default 0.5 — the original
+  complaint was simply that a big metamodel could not be zoomed out far enough
+  to see at all, and everything above is what makes the resulting picture
+  readable once it is.
+
 #### Manual smoke checklist — the diagram surface
 
 The four gestures where the client and the commit flow have to agree (drag →
@@ -1429,7 +1486,16 @@ src/
                         metamodel-stage.svelte.ts — the fourth staged commit
                         family: the draft provider registration + coalesced
                         staged node moves, localStorage-mirrored, read by
-                        checkout.svelte.ts to build the batch
+                        checkout.svelte.ts to build the batch;
+                        metamodel-canvas.svelte.ts — per-frame canvas
+                        ephemera the node/edge components read directly
+                        (hover, the built adjacency, the LOD flag with its
+                        zoom hysteresis, the LOD tooltip's cursor); nothing
+                        persists and MetamodelDiagram resets it on unmount;
+                        metamodel-panel.svelte.ts — the form panel's PERSONAL
+                        preferences (whole-column collapse + per-TOC-section
+                        folds), per project in localStorage, same try/catch
+                        stance as the diagram's own view/collapse keys
     editor/completion-source.ts  dr./Element/Relationship/stereotype-name CM6 completions +
                         hover logic (vocabFromMetamodel, computeCompletions,
                         resolveDocAt); pure, CM-agnostic, unit-tested
