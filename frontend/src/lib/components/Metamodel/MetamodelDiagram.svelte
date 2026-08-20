@@ -19,6 +19,7 @@
 		getLodActive,
 		getMetamodelDiagramView,
 		getMetamodelEditor,
+		getMetamodelPanel,
 		getRole,
 		moveNode,
 		noteZoom,
@@ -29,10 +30,12 @@
 		setDiagramAdjacency,
 		setDiagramHover,
 		setHoverCursor,
+		setMetamodelPanelCollapsed,
 		setMetamodelView,
 		toggleNodeCollapsed,
 		undoDiagramEdit
 	} from '$lib/state';
+	import { ChevronsLeft, ChevronsRight } from '@lucide/svelte';
 
 	import MetamodelFormPanel from './forms/MetamodelFormPanel.svelte';
 	import MetamodelSearch from './MetamodelSearch.svelte';
@@ -77,6 +80,7 @@
 	 */
 
 	const view = $derived(getMetamodelDiagramView());
+	const panel = $derived(getMetamodelPanel());
 	const ed = $derived(getMetamodelEditor());
 	/** Draft edits: owner-only, via the editor module's own gate. */
 	const readOnly = $derived(ed.readOnly);
@@ -427,12 +431,56 @@
 				{/if}
 			</div>
 
-			<!-- The attribute half of the surface. Fixed 320px and independently
-			     scrollable: the canvas must keep the whole remaining width no matter
-			     how tall a type's property list gets. -->
-			<aside class="w-80 shrink-0 overflow-y-auto border-l border-border">
-				<MetamodelFormPanel {readOnly} />
-			</aside>
+			{#if !panel.collapsed}
+				<!-- The attribute half of the surface. Fixed 320px; the aside itself
+				     is a flex column so the Hide-panel button sits OUTSIDE the
+				     scrolling region below (an absolutely-positioned child of a
+				     scroll container scrolls away with it — `top`/`right` resolve
+				     before the scroll offset applies) and stays reachable no matter
+				     how tall a type's property list gets. Collapsible (spec §7.2):
+				     hidden, the canvas takes the full width and the rail below
+				     stands in. -->
+				<aside class="relative flex w-80 shrink-0 flex-col border-l border-border">
+					<button
+						type="button"
+						class="absolute right-1.5 top-1.5 z-10 rounded p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+						title="Hide panel"
+						aria-label="Hide panel"
+						data-testid="mm-panel-hide"
+						onclick={() => setMetamodelPanelCollapsed(true)}
+					>
+						<ChevronsRight class="h-3.5 w-3.5" />
+					</button>
+					<!-- `min-h-0` lets this pane shrink below its content's height inside
+					     the flex column above, which is what makes `overflow-y-auto`
+					     actually engage instead of the column growing to fit. -->
+					<div class="flex-1 min-h-0 overflow-y-auto">
+						<MetamodelFormPanel {readOnly} />
+					</div>
+				</aside>
+			{:else}
+				<!-- Collapsed rail. A selection landing from a CANVAS click does not
+				     force the panel open (spec §7.2) — the dot is the hint that one
+				     is waiting; search/TOC picks reopen via revealSelection. -->
+				<div class="flex shrink-0 flex-col items-center border-l border-border px-0.5 pt-1.5">
+					<button
+						type="button"
+						class="relative rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+						title="Show panel"
+						aria-label="Show panel"
+						data-testid="mm-panel-show"
+						onclick={() => setMetamodelPanelCollapsed(false)}
+					>
+						<ChevronsLeft class="h-3.5 w-3.5" />
+						{#if view.selection !== null}
+							<span
+								class="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-primary"
+								data-testid="mm-panel-selection-dot"
+							></span>
+						{/if}
+					</button>
+				</div>
+			{/if}
 		</div>
 	</div>
 {/if}
