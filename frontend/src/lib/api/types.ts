@@ -980,16 +980,35 @@ export const ColumnOverrideSchema = z.object({
 });
 export type ColumnOverride = z.infer<typeof ColumnOverrideSchema>;
 
+/** The four wire formats an export can ship as — mirror of
+ *  core/table/exporter.py::ExportFormat. */
+export const EXPORT_FORMATS = ['xlsx', 'json', 'csv', 'jsonl'] as const;
+export type ExportFormat = (typeof EXPORT_FORMATS)[number];
+
+/** Document shaping for JSON exports (spec §7) — exporter-entry-only.
+ *  `shape`/`pretty` apply to `json`; `on_error` to `json` and `jsonl`;
+ *  ignored elsewhere. All strictness (missing/out-of-range/duplicate keys,
+ *  on_error 'fail') is a 422 from POST /exports/run — never validated
+ *  client-side, never blocks Save. */
+export const JsonDocumentOptionsSchema = z.object({
+	shape: z.enum(['array', 'object']).default('array'),
+	key_column: z.number().int().nullish(),
+	pretty: z.boolean().default(true),
+	on_error: z.enum(['emit', 'fail']).default('emit')
+});
+export type JsonDocumentOptions = z.infer<typeof JsonDocumentOptionsSchema>;
+
 export const ExporterEntrySchema = z.object({
 	source: z.object({ ref: z.string() }),
 	name: z.string().default(''),
-	format: z.enum(['xlsx', 'json']).default('xlsx'),
+	format: z.enum(EXPORT_FORMATS).default('xlsx'),
 	folder: z.string().default(''),
 	columns: z.array(ColumnOverrideSchema).default([]),
 	export_order: z.array(z.number().int()).default([]),
 	show_row_numbers: z.boolean().default(false),
 	export_row_number: RowNumberExportOptionsSchema.nullish(),
-	json_split: JsonSplitOptionsSchema.nullish()
+	json_split: JsonSplitOptionsSchema.nullish(),
+	json_doc: JsonDocumentOptionsSchema.nullish()
 });
 export type ExporterEntry = z.infer<typeof ExporterEntrySchema>;
 

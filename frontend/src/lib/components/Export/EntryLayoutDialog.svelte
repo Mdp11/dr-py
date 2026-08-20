@@ -20,7 +20,7 @@
 	import { templateIsValid } from '$lib/table/columns';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import ExportSettingsPanel from './ExportSettingsPanel.svelte';
-	import type { ExporterEntry, TableDefinition } from '$lib/api/types';
+	import type { ExportFormat, ExporterEntry, TableDefinition } from '$lib/api/types';
 
 	let {
 		open = $bindable(),
@@ -41,7 +41,7 @@
 	// reusing one instance across entries, so a fresh `$state` initializer per
 	// open is the right lifecycle here, mirroring `ExportDialog`'s snapshot).
 	let effective = $state(untrack(() => applyEntryOverrides(tableDefinition, entry)));
-	let format = $state<'xlsx' | 'json'>(untrack(() => entry.format));
+	let format = $state<ExportFormat>(untrack(() => entry.format));
 
 	// Same belt-and-braces stance as ExportDialog: the server still 422s a
 	// tokenless template — this only saves a round trip.

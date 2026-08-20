@@ -36,7 +36,7 @@
 	import { createColumnDrag } from '$lib/table/column-dnd.svelte';
 	import { previewTableJson } from '$lib/api/tables';
 	import { Eye, EyeOff } from '@lucide/svelte';
-	import type { Column, TableDefinition, TableSort } from '$lib/api/types';
+	import type { Column, ExportFormat, TableDefinition, TableSort } from '$lib/api/types';
 
 	let {
 		definition,
@@ -46,7 +46,10 @@
 		sort
 	}: {
 		definition: TableDefinition;
-		format: 'xlsx' | 'json';
+		// Every branch below only distinguishes 'json' from "everything else",
+		// so csv/jsonl fall through the xlsx-shaped branches unchanged; Task 10
+		// adds the format-specific (json_doc) controls this panel doesn't have yet.
+		format: ExportFormat;
 		onChange: (next: TableDefinition) => void;
 		/** What the JSON preview builds from, when it must diverge from
 		 *  `definition` itself — unused by every host today (both preview the

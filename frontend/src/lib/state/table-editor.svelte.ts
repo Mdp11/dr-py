@@ -47,6 +47,7 @@ import * as api from '$lib/api/artifacts';
 import { evaluateTable, exportTable, fetchScriptErrors } from '$lib/api/tables';
 import {
 	TableDefinitionSchema,
+	type ExportFormat,
 	type ScriptErrorsRecap,
 	type ScriptStatus,
 	type ScriptWarning,
@@ -1606,7 +1607,7 @@ export function closeTableDraft(tabId: string): void {
 }
 
 /**
- * Export the current definition (or saved artifact) as an `.xlsx` or `.json`
+ * Export the current definition (or saved artifact) in any `ExportFormat`
  * and trigger a browser download via a synthetic anchor click.
  *
  * While the backend's script-cache sweep is still filling in a script column's
@@ -1622,7 +1623,7 @@ export function closeTableDraft(tabId: string): void {
 export async function downloadTable(
 	tabId: string,
 	opts?: {
-		format?: 'xlsx' | 'json';
+		format?: ExportFormat;
 		onProgress?: (p: ExportProgress) => void;
 		signal?: AbortSignal;
 	}

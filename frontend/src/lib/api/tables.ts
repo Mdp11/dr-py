@@ -1,6 +1,7 @@
 import { apiFetch, apiFetchRaw, type ClientConfig } from './client';
 import {
 	TablePageSchema,
+	type ExportFormat,
 	type ScriptErrorsRecap,
 	type TableDefinition,
 	type TablePage,
@@ -51,17 +52,17 @@ export function parseAttachmentFilename(res: Response): string | undefined {
 	return m?.[1];
 }
 
-/** Export the current definition (or saved artifact) as `.xlsx` or `.json`.
+/** Export the current definition (or saved artifact) in any `ExportFormat`.
  * Resolves to `{ kind: 'ready' }` with the Blob once the backend has it, or
  * `{ kind: 'preparing' }` while the script-cache sweep is still filling in
  * cells for this table (backend 202 + Retry-After). The 202 protocol is
- * format-agnostic — the backend runs the identical preamble for both. */
+ * format-agnostic — the backend runs the identical preamble for every format. */
 export async function exportTable(
 	args: {
 		definition?: TableDefinition;
 		artifactId?: string;
 		sort?: TableSort;
-		format?: 'xlsx' | 'json';
+		format?: ExportFormat;
 	},
 	cfg?: ClientConfig
 ): Promise<ExportResult> {
