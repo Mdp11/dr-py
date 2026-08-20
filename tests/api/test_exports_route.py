@@ -578,3 +578,146 @@ def test_split_entry_member_path_reserves_against_a_sibling_entry(client) -> Non
     names = zipfile.ZipFile(io.BytesIO(resp.content)).namelist()
     assert len(names) == len(set(names)), f"duplicate zip member(s) in {names}"
     assert set(names) == {"X/root.json", "X/root_2.json"}
+
+
+# ---- Phase 2: csv/jsonl entries + json_doc --------------------------------
+#
+# `on_error: "fail"` end-to-end is deliberately NOT tested here: exercising
+# it needs an actual `{"$error": ...}` cell, which this fixture model (plain
+# Block/mass rows, no snippet columns) cannot produce cheaply. The policy
+# itself is covered at the core/engine level (`contains_error_marker` +
+# `table_export_engine` tests) — see Task 7 brief.
+
+
+def test_csv_and_jsonl_entries_land_in_the_zip(client):
+    _bootstrap_model(client)
+    t = _mk_table(client, "parts")
+    x = _mk_export(
+        client,
+        [
+            {"source": {"ref": t}, "name": "as-csv", "format": "csv"},
+            {"source": {"ref": t}, "name": "as-jsonl", "format": "jsonl"},
+        ],
+    )
+    r = _run(client, x)
+    assert r.status_code == 200
+    assert sorted(_names(r)) == ["as-csv.csv", "as-jsonl.jsonl"]
+
+
+def test_json_doc_object_shape_keys_documents_by_column(client):
+    _bootstrap_model(client)
+    t = _mk_table(client, "parts")
+    x = _mk_export(
+        client,
+        [
+            {
+                "source": {"ref": t},
+                "name": "keyed",
+                "format": "json",
+                # column 0 is the element column -> display name keys
+                "json_doc": {"shape": "object", "key_column": 0, "pretty": False},
+            }
+        ],
+    )
+    r = _run(client, x)
+    assert r.status_code == 200
+    blob = zipfile.ZipFile(io.BytesIO(r.content)).read("keyed.json")
+    doc = json.loads(blob)
+    assert isinstance(doc, dict)
+    assert set(doc) == {"root", "p1", "p2"}
+    assert b"\n  " not in blob  # pretty=false -> compact
+
+
+def test_json_doc_object_without_key_column_422s_naming_the_entry(client):
+    _bootstrap_model(client)
+    t = _mk_table(client, "parts")
+    x = _mk_export(
+        client,
+        [
+            {
+                "source": {"ref": t},
+                "name": "broken",
+                "format": "json",
+                "json_doc": {"shape": "object"},
+            }
+        ],
+    )
+    r = _run(client, x)
+    assert r.status_code == 422
+    assert "broken" in r.json()["detail"]
+    assert "key_column" in r.json()["detail"]
+
+
+def test_json_doc_key_column_out_of_range_422s(client):
+    _bootstrap_model(client)
+    t = _mk_table(client, "parts")
+    x = _mk_export(
+        client,
+        [
+            {
+                "source": {"ref": t},
+                "name": "broken",
+                "format": "json",
+                "json_doc": {"shape": "object", "key_column": 99},
+            }
+        ],
+    )
+    r = _run(client, x)
+    assert r.status_code == 422
+    assert "out of range" in r.json()["detail"]
+
+
+def test_json_doc_on_xlsx_entry_is_tolerated_and_ignored(client):
+    _bootstrap_model(client)
+    t = _mk_table(client, "parts")
+    x = _mk_export(
+        client,
+        [
+            {
+                "source": {"ref": t},
+                "name": "sheet",
+                "format": "xlsx",
+                "json_doc": {"shape": "object", "key_column": 99},
+            }
+        ],
+    )
+    r = _run(client, x)
+    assert r.status_code == 200
+    assert _names(r) == ["sheet.xlsx"]
+
+
+def test_bare_mode_ships_csv_and_jsonl_media_types(client):
+    _bootstrap_model(client)
+    t = _mk_table(client, "parts")
+    for fmt, ctype in [("csv", "text/csv"), ("jsonl", "application/x-ndjson")]:
+        x = _mk_export(
+            client,
+            [{"source": {"ref": t}, "name": f"solo-{fmt}", "format": fmt}],
+            name=f"bare-{fmt}",
+            output={"mode": "bare"},
+        )
+        r = _run(client, x)
+        assert r.status_code == 200
+        assert r.headers["content-type"].startswith(ctype)
+        assert r.headers["content-disposition"].endswith(f'solo-{fmt}.{fmt}"')
+
+
+def test_jsonl_entry_split_files_nest_under_the_entry_folder(client):
+    _bootstrap_model(client)
+    t = _mk_table(client, "parts")
+    x = _mk_export(
+        client,
+        [
+            {
+                "source": {"ref": t},
+                "name": "per-el",
+                "format": "jsonl",
+                "json_split": {"enabled": True, "filename_template": "${name}"},
+            }
+        ],
+    )
+    r = _run(client, x)
+    assert r.status_code == 200
+    names = _names(r)
+    assert all(n.startswith("per-el/") and n.endswith(".jsonl") for n in names)
+    assert len(names) == 3
