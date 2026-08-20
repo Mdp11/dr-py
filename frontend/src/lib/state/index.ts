@@ -269,6 +269,13 @@ export {
 	setHoverCursor
 } from './metamodel-canvas.svelte';
 export {
+	closeMetamodelPanel,
+	getMetamodelPanel,
+	initMetamodelPanel,
+	setMetamodelPanelCollapsed,
+	toggleMetamodelPanelSection
+} from './metamodel-panel.svelte';
+export {
 	acquireLocks,
 	acquireArtifactLease,
 	artifactDeleteLock,

@@ -8,6 +8,7 @@
 	import {
 		closeMetamodelDiagram,
 		closeMetamodelEditor,
+		closeMetamodelPanel,
 		discardMetamodelDraft,
 		discardStagedNodeMoves,
 		editMetamodelBuffer,
@@ -18,6 +19,7 @@
 		getStagedNodeMoves,
 		initMetamodelDiagram,
 		initMetamodelEditor,
+		initMetamodelPanel,
 		previewMetamodelChanges,
 		retryMetamodelLease,
 		setMetamodelView
@@ -51,6 +53,7 @@
 		if (pid === null) return;
 		await initMetamodelEditor(pid);
 		await initMetamodelDiagram(pid);
+		initMetamodelPanel(pid);
 	}
 
 	onMount(() => {
@@ -62,6 +65,7 @@
 		return () => {
 			closeMetamodelDiagram();
 			closeMetamodelEditor();
+			closeMetamodelPanel();
 		};
 	});
 
