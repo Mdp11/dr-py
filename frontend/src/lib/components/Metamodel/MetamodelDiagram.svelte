@@ -3,6 +3,7 @@
 	import '@xyflow/svelte/dist/style.css';
 
 	import { Button } from '$lib/components/ui/button';
+	import { buildAdjacency } from '$lib/metamodel/diagram-adjacency';
 	import {
 		buildDiagram,
 		nodeIdFor,
@@ -13,14 +14,21 @@
 	import { datatypeNamespace, uniqueTypeName } from '$lib/metamodel/helpers';
 	import {
 		applyDiagramEdit,
+		getDiagramHoverLabel,
+		getHoverCursor,
+		getLodActive,
 		getMetamodelDiagramView,
 		getMetamodelEditor,
 		getRole,
 		moveNode,
 		noteZoom,
+		resetMetamodelCanvas,
 		runAutoArrange,
 		selectDiagramNode,
 		setAllCollapsed,
+		setDiagramAdjacency,
+		setDiagramHover,
+		setHoverCursor,
 		setMetamodelView,
 		toggleNodeCollapsed,
 		undoDiagramEdit
@@ -125,6 +133,21 @@
 
 	const built = $derived(view.mm === null ? { nodes: [], edges: [] } : buildDiagram(view.mm));
 	const selectedNodeId = $derived(view.selection === null ? null : nodeIdFor(view.selection));
+
+	// The adjacency the hover store needs: rebuilt only when the parsed
+	// metamodel changes (`built` is memoized on it), NEVER on hover. The
+	// cleanup keeps a closed canvas from leaving stale hover state behind for
+	// the next mount.
+	$effect(() => {
+		setDiagramAdjacency(buildAdjacency(built.edges));
+	});
+	$effect(() => {
+		return () => resetMetamodelCanvas();
+	});
+
+	const lodActive = $derived(getLodActive());
+	const lodTooltip = $derived(lodActive ? getDiagramHoverLabel() : null);
+	const hoverCursor = $derived(getHoverCursor());
 
 	function specToNode(spec: DiagramNodeSpec): Node {
 		const collapsed = view.collapsed.has(spec.id);
@@ -370,6 +393,9 @@
 				aria-label="Metamodel diagram"
 				tabindex="-1"
 				onkeydown={onKeydown}
+				onpointermove={(e) => {
+					if (getLodActive()) setHoverCursor({ x: e.clientX, y: e.clientY });
+				}}
 			>
 				<SvelteFlow
 					bind:nodes={flowNodes}
@@ -395,6 +421,15 @@
 					onbeforeconnect={onBeforeConnect}
 					onpaneclick={() => selectDiagramNode(null)}
 					onmove={(_, viewport) => noteZoom(viewport.zoom)}
+					onnodepointerenter={({ node }) => setDiagramHover({ kind: 'node', id: node.id })}
+					onnodepointerleave={() => setDiagramHover(null)}
+					onedgepointerenter={({ edge }) =>
+						setDiagramHover({
+							kind: 'edge',
+							id: edge.id,
+							relName: (edge.data as { relName?: string } | undefined)?.relName ?? null
+						})}
+					onedgepointerleave={() => setDiagramHover(null)}
 				></SvelteFlow>
 
 				{#if pendingConnection !== null && view.mm !== null}
@@ -404,6 +439,18 @@
 						target={pendingConnection.target}
 						onclose={() => (pendingConnection = null)}
 					/>
+				{/if}
+
+				{#if lodTooltip !== null && hoverCursor !== null}
+					<!-- ONE overlay owned here, fed by the hover store — not a per-node
+					     tooltip (spec §4). `fixed` + clientX/Y sidesteps canvas-space math. -->
+					<div
+						class="pointer-events-none fixed z-50 rounded border border-border bg-popover px-2 py-1 text-xs text-foreground shadow-lg"
+						style="left: {hoverCursor.x + 12}px; top: {hoverCursor.y + 12}px;"
+						data-testid="mm-lod-tooltip"
+					>
+						{lodTooltip}
+					</div>
 				{/if}
 			</div>
 

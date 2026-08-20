@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { NodeProps } from '@xyflow/svelte';
-	import { getLodActive } from '$lib/state';
+	import { visualState } from '$lib/metamodel/diagram-adjacency';
+	import { getDiagramHighlight, getLodActive } from '$lib/state';
 
 	/**
 	 * The `«enumeration»` chip — UML's stereotyped classifier for an enum, in
@@ -27,9 +28,17 @@
 	let { id, data, selected = false }: NodeProps = $props();
 	const d = $derived(data as unknown as Data);
 	const lod = $derived(getLodActive());
+	const vis = $derived(visualState(id, 'node', selected, getDiagramHighlight()));
 </script>
 
-<div class="mm-node" class:selected class:mm-lod={lod} data-testid="mm-node-enum">
+<div
+	class="mm-node"
+	class:selected
+	class:mm-lod={lod}
+	class:mm-dim={vis === 'dim'}
+	class:mm-hot={vis === 'hot'}
+	data-testid="mm-node-enum"
+>
 	<div class="mm-header">
 		<div class="mm-titles">
 			<span class="mm-stereotype">«enumeration»</span>
@@ -75,12 +84,25 @@
 		border: 1px solid color-mix(in oklab, var(--cm-keyword) 30%, transparent);
 		box-shadow: 0 6px 20px oklch(0 0 0 / 40%);
 		overflow: hidden;
+		transition: opacity 140ms ease;
 	}
 	.mm-node.selected {
 		border-color: color-mix(in oklab, var(--ring) 45%, transparent);
 		box-shadow:
 			0 6px 28px oklch(0 0 0 / 50%),
 			0 0 0 3px color-mix(in oklab, var(--ring) 8%, transparent);
+	}
+
+	/* Hover neighborhood (spec §5): the hovered thing and its neighbors stay
+	   full-strength while everything else dims. The transition-delay applies
+	   only on the way INTO dim, so sweeping the cursor across the canvas
+	   doesn't strobe; un-dim is immediate. */
+	.mm-node.mm-dim {
+		opacity: 0.25;
+		transition-delay: 120ms;
+	}
+	.mm-node.mm-hot {
+		border-color: color-mix(in oklab, var(--ring) 55%, transparent);
 	}
 
 	.mm-header {

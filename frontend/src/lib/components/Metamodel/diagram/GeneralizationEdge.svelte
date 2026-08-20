@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { BaseEdge, getSmoothStepPath, type EdgeProps } from '@xyflow/svelte';
+	import { visualState } from '$lib/metamodel/diagram-adjacency';
+	import { getDiagramHighlight } from '$lib/state';
 
 	/**
 	 * UML generalization: a solid line from the subtype to the supertype,
@@ -10,6 +12,7 @@
 	 */
 
 	let {
+		id,
 		sourceX,
 		sourceY,
 		targetX,
@@ -29,12 +32,17 @@
 			targetPosition
 		})
 	);
+
+	const vis = $derived(visualState(id, 'edge', selected, getDiagramHighlight()));
 </script>
 
 <BaseEdge
 	path={path[0]}
 	markerEnd="url(#uml-gen)"
-	style={selected
+	style="{selected || vis === 'hot'
 		? 'stroke: var(--ring); stroke-width: 2px;'
-		: 'stroke: color-mix(in oklab, var(--muted-foreground) 80%, transparent); stroke-width: 1.5px;'}
+		: 'stroke: color-mix(in oklab, var(--muted-foreground) 80%, transparent); stroke-width: 1.5px;'} opacity: {vis ===
+	'dim'
+		? 0.2
+		: 1}; transition: opacity 140ms ease;"
 />

@@ -1,12 +1,13 @@
 <script lang="ts">
 	import { Handle, Position, type NodeProps } from '@xyflow/svelte';
 	import type { PropertyDef } from '$lib/api/types';
+	import { visualState } from '$lib/metamodel/diagram-adjacency';
 	// A datatype outside the schema's OWN set names an enum or an element type,
 	// and is tinted as a reference (mockup: `Zone` in the editor's accent blue
 	// against `string` in sand). Shared with the form panel's datatype picker so
 	// the canvas and the picker can never disagree about what a primitive is.
 	import { PRIMITIVE_DATATYPES } from '$lib/metamodel/helpers';
-	import { getLodActive } from '$lib/state';
+	import { getDiagramHighlight, getLodActive } from '$lib/state';
 
 	/**
 	 * UML class box for an element type — the canvas's primary shape.
@@ -44,6 +45,7 @@
 	const d = $derived(data as unknown as Data);
 	const keyProps = $derived(new Set(d.keyProps));
 	const lod = $derived(getLodActive());
+	const vis = $derived(visualState(id, 'node', selected, getDiagramHighlight()));
 </script>
 
 <div
@@ -52,6 +54,8 @@
 	class:selected
 	class:error={d.hasError}
 	class:mm-lod={lod}
+	class:mm-dim={vis === 'dim'}
+	class:mm-hot={vis === 'hot'}
 	data-testid="mm-node-element"
 >
 	<Handle
@@ -123,6 +127,7 @@
 			0 6px 24px oklch(0 0 0 / 45%),
 			inset 0 1px 0 color-mix(in oklab, var(--foreground) 4%, transparent);
 		overflow: hidden;
+		transition: opacity 140ms ease;
 	}
 	.mm-node.abstract {
 		border-style: dashed;
@@ -137,6 +142,18 @@
 	}
 	.mm-node.error {
 		border-color: var(--destructive);
+	}
+
+	/* Hover neighborhood (spec §5): the hovered thing and its neighbors stay
+	   full-strength while everything else dims. The transition-delay applies
+	   only on the way INTO dim, so sweeping the cursor across the canvas
+	   doesn't strobe; un-dim is immediate. */
+	.mm-node.mm-dim {
+		opacity: 0.25;
+		transition-delay: 120ms;
+	}
+	.mm-node.mm-hot {
+		border-color: color-mix(in oklab, var(--ring) 55%, transparent);
 	}
 
 	.mm-header {

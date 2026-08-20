@@ -1,9 +1,10 @@
 <script lang="ts">
 	import { Handle, Position, type NodeProps } from '@xyflow/svelte';
 	import type { PropertyDef } from '$lib/api/types';
+	import { visualState } from '$lib/metamodel/diagram-adjacency';
 	// Same reference tint as ElementTypeNode, off the same shared set.
 	import { PRIMITIVE_DATATYPES } from '$lib/metamodel/helpers';
-	import { getLodActive } from '$lib/state';
+	import { getDiagramHighlight, getLodActive } from '$lib/state';
 
 	/**
 	 * The box for a relationship type that UML draws as an ASSOCIATION CLASS —
@@ -31,6 +32,7 @@
 	let { id, data, selected = false }: NodeProps = $props();
 	const d = $derived(data as unknown as Data);
 	const lod = $derived(getLodActive());
+	const vis = $derived(visualState(id, 'node', selected, getDiagramHighlight()));
 </script>
 
 <div
@@ -39,6 +41,8 @@
 	class:selected
 	class:error={d.hasError}
 	class:mm-lod={lod}
+	class:mm-dim={vis === 'dim'}
+	class:mm-hot={vis === 'hot'}
 	data-testid="mm-node-assoc"
 >
 	<Handle
@@ -106,6 +110,7 @@
 		border: 1px solid color-mix(in oklab, var(--cm-number) 30%, transparent);
 		box-shadow: 0 6px 20px oklch(0 0 0 / 40%);
 		overflow: hidden;
+		transition: opacity 140ms ease;
 	}
 	.mm-node.abstract {
 		border-style: dashed;
@@ -119,6 +124,18 @@
 	}
 	.mm-node.error {
 		border-color: var(--destructive);
+	}
+
+	/* Hover neighborhood (spec §5): the hovered thing and its neighbors stay
+	   full-strength while everything else dims. The transition-delay applies
+	   only on the way INTO dim, so sweeping the cursor across the canvas
+	   doesn't strobe; un-dim is immediate. */
+	.mm-node.mm-dim {
+		opacity: 0.25;
+		transition-delay: 120ms;
+	}
+	.mm-node.mm-hot {
+		border-color: color-mix(in oklab, var(--ring) 55%, transparent);
 	}
 
 	.mm-header {

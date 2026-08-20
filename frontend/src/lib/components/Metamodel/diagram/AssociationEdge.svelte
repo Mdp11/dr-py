@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { BaseEdge, EdgeLabel, getSmoothStepPath, Position, type EdgeProps } from '@xyflow/svelte';
-	import { getLodActive } from '$lib/state';
+	import { visualState } from '$lib/metamodel/diagram-adjacency';
+	import { getDiagramHighlight, getLodActive } from '$lib/state';
 
 	/**
 	 * UML association: the relationship name at the midpoint, end multiplicities
@@ -37,6 +38,7 @@
 	}
 
 	let {
+		id,
 		source,
 		target,
 		data,
@@ -52,6 +54,8 @@
 	const d = $derived((data ?? {}) as unknown as Data);
 	const tethered = $derived(source.startsWith('rel:') || target.startsWith('rel:'));
 	const lod = $derived(getLodActive());
+	const vis = $derived(visualState(id, 'edge', selected, getDiagramHighlight()));
+	const edgeOpacity = $derived(vis === 'dim' ? 0.2 : 1);
 
 	const path = $derived(
 		getSmoothStepPath({
@@ -106,7 +110,9 @@
 	labelStyle="color: {labelColor}; font-size: 11px; font-weight: 600;"
 	markerStart={d.containment ? 'url(#uml-diamond)' : undefined}
 	markerEnd={d.arrow ? 'url(#uml-arrow)' : undefined}
-	style="stroke: {stroke}; stroke-width: {selected ? 2 : 1.5}px;{tethered
+	style="stroke: {stroke}; stroke-width: {selected || vis === 'hot'
+		? 2
+		: 1.5}px; opacity: {edgeOpacity}; transition: opacity 140ms ease;{tethered
 		? ' stroke-dasharray: 5 4;'
 		: ''}"
 />
