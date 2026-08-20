@@ -7,6 +7,24 @@ for), stdlib `excel` dialect (RFC-4180 quoting, CRLF row terminator). No
 trailing notice row — to a CSV parser a notice would be one more data row;
 degradation is signalled by `#ERROR:` cell text and the response headers.
 
+Formula injection: `cell_text` renders raw model property values, and this
+writer puts them through `csv.writer` UNMITIGATED — an element or property
+named e.g. `=HYPERLINK("http://evil","click")` becomes a LIVE formula the
+instant the file is opened in Excel/LibreOffice/Sheets, exactly the risk
+`api/table_export.py`'s xlsx writer calls out by name and hardens against
+(`strings_to_formulas: False`, see the comment on its `Workbook(...)` call).
+CSV takes the OPPOSITE choice deliberately, not by omission: the standard
+mitigation is prefixing a leading `'`/tab/space before anything that looks
+like a formula, but that MUTATES the field for every consumer, and CSV is a
+machine-oriented format read at least as often by `csv.reader`/`pandas`/a
+data pipeline as by a spreadsheet — for those readers an added `'` is not a
+neutralized formula, it is corrupted data, and RFC-4180 itself has no
+formula concept for a mitigation to appeal to. xlsx, in contrast, has no
+non-spreadsheet reader to protect: hardening it costs nothing a real
+consumer would ever notice. This is a deliberate, revisitable posture, not
+a settled one — see BACKLOG.md K-11 for the open question and its
+reasoning in full.
+
 Spec: docs/superpowers/specs/2026-08-19-custom-export-v2-design.md §6
 """
 

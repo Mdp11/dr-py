@@ -84,9 +84,19 @@ def test_jsonl_split_zips_one_jsonl_per_base_element(client):
     r = client.post(papi("/tables/export"), json=body, headers=AUTH_HEADERS)
     assert r.status_code == 200
     assert r.headers["content-type"] == "application/zip"
-    names = zipfile.ZipFile(io.BytesIO(r.content)).namelist()
+    zf = zipfile.ZipFile(io.BytesIO(r.content))
+    names = zf.namelist()
     assert len(names) == 3
     assert all(n.endswith(".jsonl") for n in names)
+    # Each partition file holds ONLY its own base element's row(s), not the
+    # whole unsplit export — a member's stem is that element's display name
+    # (the `${name}` template), so its one line's own "Block" field must
+    # echo it back.
+    for member in names:
+        lines = zf.read(member).decode("utf-8").splitlines()
+        assert len(lines) == 1
+        doc = json.loads(lines[0])
+        assert doc["Block"] == member.removesuffix(".jsonl")
 
 
 def test_csv_ignores_json_split_with_tolerance(client):
@@ -98,6 +108,11 @@ def test_csv_ignores_json_split_with_tolerance(client):
     r = client.post(papi("/tables/export"), json=body, headers=AUTH_HEADERS)
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("text/csv")  # single file, no zip
+    # `json_split` must be fully ignored, not partially honored: the body is
+    # still the WHOLE unsplit export (header + all 3 rows), not one
+    # partition's worth under a misleadingly plain `text/csv` header.
+    rows = list(csv.reader(io.StringIO(r.content.decode("utf-8"))))
+    assert len(rows) == 4  # header + root, p1, p2
 
 
 def test_unknown_format_is_rejected(client):

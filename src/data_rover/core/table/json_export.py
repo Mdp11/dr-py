@@ -399,7 +399,7 @@ def render_json_ex(
                 )
             key = str(rendered)
             if key in seen:
-                raise ValueError(f"json_doc: duplicate document key {key!r}")
+                raise ValueError(f"json_doc.key_column: duplicate document key {key!r}")
             seen.add(key)
             doc_keys.append(key)
 

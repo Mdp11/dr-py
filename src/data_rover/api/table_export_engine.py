@@ -118,7 +118,7 @@ ZIP_DATE_TIME = (1980, 1, 1, 0, 0, 0)
 #: route's single-file response, `/exports/run`'s bare mode, and anything
 #: else that needs to name a format's media type — extending a format means
 #: extending THIS, once.
-MEDIA_TYPES = {
+MEDIA_TYPES: dict[str, str] = {
     "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "json": "application/json",
     "csv": "text/csv; charset=utf-8",
@@ -216,13 +216,19 @@ def run_table_export(
     imply a complete cache, so "would a retry help" — not "is the job over" —
     is the discriminator. When it would not (a terminal sweep that still left holes,
     or no runner at all) the file still ships with pending cells surfaced —
-    but the two formats carry that differently. The `.xlsx` branch renders
+    but the four formats carry that differently. The `.xlsx` branch renders
     each affected cell `#ERROR` and appends a trailing notice row; the `.json`
     branch has no sheet and no notice row to append, so it marks each affected
     cell in-band with a `{"$error": ...}` object instead (see `render_cell` in
-    `core/table/json_export.py`). Both branches still set `degraded=True` on
-    the returned `ExportFiles` when this happens, so a caller can detect
-    degradation without parsing the body."""
+    `core/table/json_export.py`). `.csv` reuses the SAME `#ERROR:` cell text as
+    xlsx (both go through `core/table/cell_text.py`) but ships no trailing
+    notice row either — to a CSV parser a notice would be one more data row —
+    so a CSV consumer's only degradation signals are the in-band `#ERROR:`
+    text and the `X-Table-Script-Errors` response header. `.jsonl` inherits
+    json's in-band `{"$error": ...}` markers, one per line, since both formats
+    render through the same `render_json_ex`. Every branch still sets
+    `degraded=True` on the returned `ExportFiles` when this happens, so a
+    caller can detect degradation without parsing the body."""
     split = render_defn.json_split
     split_on = format in ("json", "jsonl") and split is not None and split.enabled
     if split_on:
@@ -508,9 +514,16 @@ def run_table_export(
                 assert split is not None  # split_on implies this
                 # Split sits ABOVE the renderer, not inside it: each partition
                 # goes through the SAME `render_json_ex` call with the SAME
-                # layout arguments as the unsplit path, so every split file
-                # reproduces the unsplit export byte-for-byte (see the module
-                # docstring on `core/table/split.py`).
+                # layout arguments as the unsplit path, so a split file is
+                # exactly the rows its partition contributes, rendered and
+                # shaped identically to how the unsplit export renders them
+                # (see the module docstring on `core/table/split.py`). This is
+                # NOT "concatenating every split file reproduces the unsplit
+                # export byte-for-byte" — that claim is false under
+                # `shape: "object"` (concatenating keyed objects does not
+                # reconstruct one array or one object), and even under the
+                # array shape each partition is a strict subset of the whole,
+                # not the whole itself.
                 parts = split_partitions(ordered, all_rows)
                 labels = [partition_label(model, b) for b, _ in parts]
                 stems = render_filenames(

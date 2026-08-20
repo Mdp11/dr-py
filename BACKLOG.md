@@ -823,6 +823,27 @@ template through `naming.validate_tokens(..., SPLIT_TOKENS)` and mapping the `Va
 to a 422. Surfaced during the Exporter v2 Phase 1 Task 5 review and deliberately parked as
 out of scope for that pass.
 
+### K-11 · CSV export writes untrusted cell text through `csv.writer` unmitigated · `open` · deliberate · *2026-08-20*
+`core/table/csv_export.py`'s `render_csv` puts `cell_text`'s raw model-property output
+straight through `csv.writer` with no formula-injection mitigation. `api/table_export.py`'s
+xlsx writer, three files away, hardens the identical untrusted content with
+`"strings_to_formulas": False` and an explicit comment calling out the risk — so an
+element or property named e.g. `=HYPERLINK("http://evil","click")` ships as inert text in
+the xlsx but becomes a LIVE formula the moment the CSV is opened in Excel/LibreOffice/
+Sheets, and a CSV is if anything MORE likely to be double-clicked into a spreadsheet than
+an xlsx is.
+
+Ruled a deliberate, documented posture rather than a bug during the Exporter v2 Phase 2
+final review: the standard mitigation (a leading `'`/tab/space before anything
+formula-shaped) MUTATES the field for the machine consumers — `csv.reader`, pandas, a data
+pipeline — the CSV format exists to serve, and RFC-4180 has no formula concept for a
+mitigation to appeal to in the first place. xlsx has no such non-spreadsheet reader to
+protect, which is why hardening it is free and hardening CSV is not. The asymmetry is now
+recorded rather than silent — see `csv_export.py`'s module docstring (the "Formula
+injection" paragraph, added alongside this entry) for the full reasoning both ways. Worth
+revisiting if a consumer ever reports opening exported CSVs directly in a spreadsheet tool
+as a primary workflow rather than an edge case.
+
 ---
 
 ## 7. Cleanups & dead code

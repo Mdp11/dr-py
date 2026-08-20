@@ -44,6 +44,36 @@ def _mk_table(client, name):
     return r.json()["id"]
 
 
+# A script column with no runner configured in this test app comes back
+# `pending` and renders `{"$error": ...}` (see
+# `test_table_export_json.py::test_uncomputed_script_cells_become_error_markers`,
+# whose mechanism this is copied from) — the one cheap way to produce an
+# in-band error marker for `json_doc.on_error` to react to.
+SCRIPT_TABLE_PAYLOAD = {
+    "row_source": {"kind": "scope", "types": ["Block"]},
+    "columns": [
+        {"kind": "element", "source": {"kind": "row"}, "header": "Block"},
+        {
+            "kind": "script",
+            "snippet": {
+                "definition": {"code": "def value(elements):\n    return 1\n"}
+            },
+            "header": "Computed",
+        },
+    ],
+}
+
+
+def _mk_script_table(client, name):
+    r = client.post(
+        papi("/artifacts"),
+        json={"kind": "table", "name": name, "payload": SCRIPT_TABLE_PAYLOAD},
+        headers=AUTH_HEADERS,
+    )
+    assert r.status_code == 201
+    return r.json()["id"]
+
+
 def _mk_export(client, entries, name="drop", output=None):
     payload = {"entries": entries}
     if output is not None:
@@ -582,11 +612,17 @@ def test_split_entry_member_path_reserves_against_a_sibling_entry(client) -> Non
 
 # ---- Phase 2: csv/jsonl entries + json_doc --------------------------------
 #
-# `on_error: "fail"` end-to-end is deliberately NOT tested here: exercising
-# it needs an actual `{"$error": ...}` cell, which this fixture model (plain
-# Block/mass rows, no snippet columns) cannot produce cheaply. The policy
-# itself is covered at the core/engine level (`contains_error_marker` +
-# `table_export_engine` tests) — see Task 7 brief.
+# Coverage note on `on_error` (corrected during the Phase 2 final review — an
+# earlier version of this comment claimed engine-level coverage that does not
+# exist): `contains_error_marker` itself has unit tests
+# (`tests/table/test_json_export.py`) and `JsonDocumentOptions.on_error` has
+# schema/round-trip tests (`tests/table/test_exporter.py`), but nothing
+# exercised `table_export_engine._check_on_error` — the function that actually
+# applies the policy to a rendered export — until the two tests below, which
+# use `SCRIPT_TABLE_PAYLOAD` (a script column with no runner configured, the
+# same mechanism `test_table_export_json.py`'s
+# `test_uncomputed_script_cells_become_error_markers` uses) to produce a real
+# `{"$error": ...}` cell through `/exports/run` end to end.
 
 
 def test_csv_and_jsonl_entries_land_in_the_zip(client):
@@ -684,6 +720,98 @@ def test_json_doc_on_xlsx_entry_is_tolerated_and_ignored(client):
     r = _run(client, x)
     assert r.status_code == 200
     assert _names(r) == ["sheet.xlsx"]
+
+
+def test_json_doc_on_csv_entry_is_tolerated_and_ignored(client):
+    """Plan: "CSV: no split, no `json_doc`". Same `key_column: 99` probe as
+    the xlsx sibling above — a value that would 422 if `json_doc` were
+    actually consulted on this format."""
+    _bootstrap_model(client)
+    t = _mk_table(client, "parts")
+    x = _mk_export(
+        client,
+        [
+            {
+                "source": {"ref": t},
+                "name": "flat",
+                "format": "csv",
+                "json_doc": {"shape": "object", "key_column": 99},
+            }
+        ],
+    )
+    r = _run(client, x)
+    assert r.status_code == 200
+    assert _names(r) == ["flat.csv"]
+
+
+def test_json_doc_shape_and_pretty_are_ignored_on_jsonl_entries(client):
+    """Plan + spec §6: on jsonl, `shape`/`pretty` are "ignored with
+    tolerance" but `on_error` still applies. The same `key_column: 99` probe
+    as the two siblings above pins that `shape: "object"` (and the key column
+    it would otherwise require/validate) never reaches jsonl's rendering at
+    all — a real consult would 422 on the out-of-range column exactly like
+    `test_json_doc_key_column_out_of_range_422s` does for json."""
+    _bootstrap_model(client)
+    t = _mk_table(client, "parts")
+    x = _mk_export(
+        client,
+        [
+            {
+                "source": {"ref": t},
+                "name": "lines",
+                "format": "jsonl",
+                "json_doc": {"shape": "object", "key_column": 99},
+            }
+        ],
+    )
+    r = _run(client, x)
+    assert r.status_code == 200
+    assert _names(r) == ["lines.jsonl"]
+
+
+def test_json_doc_on_error_fail_422s_when_export_contains_error_cells(client):
+    """`on_error: "fail"` is the one exporter policy this branch shipped with
+    zero end-to-end coverage of before this test (see the module comment
+    above `test_csv_and_jsonl_entries_land_in_the_zip`). `SCRIPT_TABLE_PAYLOAD`
+    produces a real in-band `{"$error": ...}` cell (no runner configured in
+    this test app), which `_check_on_error` must catch and turn into a 422
+    naming the offending entry — never a silently-shipped document."""
+    _bootstrap_model(client)
+    t = _mk_script_table(client, "flaky")
+    x = _mk_export(
+        client,
+        [
+            {
+                "source": {"ref": t},
+                "name": "strict",
+                "format": "json",
+                "json_doc": {"on_error": "fail"},
+            }
+        ],
+    )
+    r = _run(client, x)
+    assert r.status_code == 422
+    assert "strict" in r.json()["detail"]
+
+
+def test_json_doc_default_on_error_still_ships_error_markers_in_band(client):
+    """The other half of the same pair, on the SAME error-producing table:
+    the default policy (`on_error: "emit"`, i.e. `json_doc` omitted
+    entirely) must still ship 200 with the `$error` markers in-band. Without
+    this, `test_json_doc_on_error_fail_422s_...` alone would only pin the
+    failure branch — this pins that the policy actually branches on
+    `on_error` rather than always rejecting an errored export."""
+    _bootstrap_model(client)
+    t = _mk_script_table(client, "flaky")
+    x = _mk_export(
+        client,
+        [{"source": {"ref": t}, "name": "lenient", "format": "json"}],
+    )
+    r = _run(client, x)
+    assert r.status_code == 200
+    blob = zipfile.ZipFile(io.BytesIO(r.content)).read("lenient.json")
+    docs = json.loads(blob)
+    assert set(docs[0]["Computed"]) == {"$error"}
 
 
 def test_bare_mode_ships_csv_and_jsonl_media_types(client):
