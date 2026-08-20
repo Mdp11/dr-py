@@ -6,6 +6,7 @@
 	// against `string` in sand). Shared with the form panel's datatype picker so
 	// the canvas and the picker can never disagree about what a primitive is.
 	import { PRIMITIVE_DATATYPES } from '$lib/metamodel/helpers';
+	import { getLodActive } from '$lib/state';
 
 	/**
 	 * UML class box for an element type — the canvas's primary shape.
@@ -42,6 +43,7 @@
 	let { id, data, selected = false }: NodeProps = $props();
 	const d = $derived(data as unknown as Data);
 	const keyProps = $derived(new Set(d.keyProps));
+	const lod = $derived(getLodActive());
 </script>
 
 <div
@@ -49,6 +51,7 @@
 	class:abstract={d.abstract}
 	class:selected
 	class:error={d.hasError}
+	class:mm-lod={lod}
 	data-testid="mm-node-element"
 >
 	<Handle
@@ -96,6 +99,9 @@
 			{/each}
 		</div>
 	{/if}
+	{#if lod}
+		<span class="mm-lod-name" class:italic={d.abstract}>{d.name}</span>
+	{/if}
 	<Handle
 		type="source"
 		position={Position.Right}
@@ -105,6 +111,7 @@
 
 <style>
 	.mm-node {
+		position: relative;
 		border-radius: 10px;
 		background: linear-gradient(
 			165deg,
@@ -219,5 +226,33 @@
 		color: var(--cm-keyword);
 		font-size: 9.5px;
 		font-weight: 600;
+	}
+
+	/* LOD (spec §4): past the zoom threshold the box shows ONLY its name. The
+	   full content is hidden with `visibility` — NOT removed — so the DOM
+	   height, and therefore every edge anchor, is byte-identical in both
+	   modes. `visibility: hidden` also disables the collapse toggle's hit
+	   target, which at 0.3× zoom is unusable anyway. */
+	.mm-node.mm-lod .mm-header,
+	.mm-node.mm-lod .mm-compartment {
+		visibility: hidden;
+	}
+	.mm-lod-name {
+		position: absolute;
+		inset: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0 10px;
+		font-family: var(--font-display);
+		font-weight: 600;
+		font-size: 24px;
+		color: var(--foreground);
+		overflow: hidden;
+		white-space: nowrap;
+		text-overflow: ellipsis;
+	}
+	.mm-lod-name.italic {
+		font-style: italic;
 	}
 </style>

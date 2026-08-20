@@ -17,6 +17,7 @@
 		getMetamodelEditor,
 		getRole,
 		moveNode,
+		noteZoom,
 		runAutoArrange,
 		selectDiagramNode,
 		setAllCollapsed,
@@ -376,6 +377,7 @@
 					{nodeTypes}
 					{edgeTypes}
 					fitView
+					minZoom={0.05}
 					colorMode="dark"
 					nodesDraggable={canDragLayout}
 					nodesConnectable={!readOnly}
@@ -392,6 +394,7 @@
 					}}
 					onbeforeconnect={onBeforeConnect}
 					onpaneclick={() => selectDiagramNode(null)}
+					onmove={(_, viewport) => noteZoom(viewport.zoom)}
 				></SvelteFlow>
 
 				{#if pendingConnection !== null && view.mm !== null}

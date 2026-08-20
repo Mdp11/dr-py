@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { NodeProps } from '@xyflow/svelte';
+	import { getLodActive } from '$lib/state';
 
 	/**
 	 * The `«enumeration»` chip — UML's stereotyped classifier for an enum, in
@@ -25,9 +26,10 @@
 
 	let { id, data, selected = false }: NodeProps = $props();
 	const d = $derived(data as unknown as Data);
+	const lod = $derived(getLodActive());
 </script>
 
-<div class="mm-node" class:selected data-testid="mm-node-enum">
+<div class="mm-node" class:selected class:mm-lod={lod} data-testid="mm-node-enum">
 	<div class="mm-header">
 		<div class="mm-titles">
 			<span class="mm-stereotype">«enumeration»</span>
@@ -56,10 +58,14 @@
 	{#if !d.collapsed && d.literals.length > 0}
 		<div class="mm-literals">{d.literals.join(' · ')}</div>
 	{/if}
+	{#if lod}
+		<span class="mm-lod-name">{d.name}</span>
+	{/if}
 </div>
 
 <style>
 	.mm-node {
+		position: relative;
 		border-radius: 10px;
 		background: linear-gradient(
 			165deg,
@@ -127,5 +133,30 @@
 		color: var(--cm-property);
 		max-height: calc(12 * 22px);
 		overflow-y: auto;
+	}
+
+	/* LOD (spec §4): see ElementTypeNode's identical block for the rationale
+	   (`visibility`, not removal, keeps the DOM height — and every edge
+	   anchor — byte-identical in both modes). The enum name keeps its gold
+	   token rather than switching to the neutral foreground the other two
+	   node shapes use. */
+	.mm-node.mm-lod .mm-header,
+	.mm-node.mm-lod .mm-literals {
+		visibility: hidden;
+	}
+	.mm-lod-name {
+		position: absolute;
+		inset: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0 10px;
+		font-family: var(--font-display);
+		font-weight: 600;
+		font-size: 20px;
+		color: var(--cm-keyword);
+		overflow: hidden;
+		white-space: nowrap;
+		text-overflow: ellipsis;
 	}
 </style>

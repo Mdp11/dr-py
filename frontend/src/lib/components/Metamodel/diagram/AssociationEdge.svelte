@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { BaseEdge, EdgeLabel, getSmoothStepPath, Position, type EdgeProps } from '@xyflow/svelte';
+	import { getLodActive } from '$lib/state';
 
 	/**
 	 * UML association: the relationship name at the midpoint, end multiplicities
@@ -50,6 +51,7 @@
 
 	const d = $derived((data ?? {}) as unknown as Data);
 	const tethered = $derived(source.startsWith('rel:') || target.startsWith('rel:'));
+	const lod = $derived(getLodActive());
 
 	const path = $derived(
 		getSmoothStepPath({
@@ -98,7 +100,7 @@
 
 <BaseEdge
 	path={path[0]}
-	label={d.label}
+	label={lod ? undefined : d.label}
 	labelX={path[1]}
 	labelY={path[2]}
 	labelStyle="color: {labelColor}; font-size: 11px; font-weight: 600;"
@@ -109,7 +111,7 @@
 		: ''}"
 />
 
-{#if d.sourceMult}
+{#if !lod && d.sourceMult}
 	<EdgeLabel
 		x={sourceLabelAt.x}
 		y={sourceLabelAt.y}
@@ -119,7 +121,7 @@
 		{d.sourceMult}
 	</EdgeLabel>
 {/if}
-{#if d.targetMult}
+{#if !lod && d.targetMult}
 	<EdgeLabel
 		x={targetLabelAt.x}
 		y={targetLabelAt.y}
