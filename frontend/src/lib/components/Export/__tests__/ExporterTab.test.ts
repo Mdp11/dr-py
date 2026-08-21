@@ -8,8 +8,10 @@ import * as artifactsApi from '$lib/api/artifacts';
 import * as checkoutApi from '$lib/api/checkout';
 import * as exportsApi from '$lib/api/exports';
 import { ConflictError } from '$lib/api/errors';
+import { TableDefinitionSchema } from '$lib/api/types';
 import { EXPORT_RETRY_MS } from '$lib/util/export-download';
 import {
+	addExporterEntry,
 	getExporterDraft,
 	getStagedArtifactOps,
 	isTempId,
@@ -60,6 +62,37 @@ const TABLE_HEADER = {
 
 const TABLE_ARTIFACT = {
 	...TABLE_HEADER,
+	payload: {
+		schema_version: 1,
+		row_source: { kind: 'scope', types: [], criteria: [] },
+		columns: [{ kind: 'element', export: { include: false } }]
+	}
+};
+
+/** Two headers with names chosen so "par" matches one and not the other —
+ *  the add-table picker's typeahead test fixture (P-15.1). */
+const PARTS_HEADER = {
+	id: 'tbl-parts',
+	kind: 'table',
+	name: 'parts',
+	artifact_rev: 1,
+	updated_at: '',
+	updated_by: null,
+	entry_points: null
+};
+
+const BUILDINGS_HEADER = {
+	id: 'tbl-buildings',
+	kind: 'table',
+	name: 'buildings',
+	artifact_rev: 1,
+	updated_at: '',
+	updated_by: null,
+	entry_points: null
+};
+
+const PARTS_ARTIFACT = {
+	...PARTS_HEADER,
 	payload: {
 		schema_version: 1,
 		row_source: { kind: 'scope', types: [], criteria: [] },
@@ -218,10 +251,12 @@ describe('ExporterTab', () => {
 			expect(document.querySelector('[data-testid="export-entry-0"]')).toBeTruthy()
 		);
 
-		const select = document.querySelector<HTMLSelectElement>('[data-testid="add-table-select"]')!;
-		expect(select).not.toBeNull();
-		select.value = 'tbl-2';
-		select.dispatchEvent(new Event('change', { bubbles: true }));
+		const input = document.querySelector<HTMLInputElement>('[data-testid="add-table-input"]')!;
+		expect(input).not.toBeNull();
+		input.value = 'Beta';
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+		input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
 		flushSync();
 
 		await vi.waitFor(() => expect(getExporterDraft('exp:art-1')!.entries.length).toBe(2));
@@ -230,7 +265,7 @@ describe('ExporterTab', () => {
 		]);
 	});
 
-	it('gates the export button on a dirty/unsaved draft and runs the 202-retry download loop once clean', async () => {
+	it('runs the 202-retry download loop for a clean committed draft (Export stays enabled while dirty)', async () => {
 		getArtifactSpy.mockResolvedValue(EXPORT_ARTIFACT);
 		render('exp:art-1');
 		await vi.waitFor(() =>
@@ -243,7 +278,9 @@ describe('ExporterTab', () => {
 		name.value = 'Renamed';
 		name.dispatchEvent(new Event('input', { bubbles: true }));
 		flushSync();
-		expect(runBtn.disabled).toBe(true);
+		// Spec §11: Export is UNGATED on dirty/uncommitted state — only
+		// emptiness disables it, and this draft still has its one entry.
+		expect(runBtn.disabled).toBe(false);
 
 		document.querySelector<HTMLButtonElement>('[data-testid="exporter-save"]')!.click();
 		flushSync();
@@ -284,13 +321,13 @@ describe('ExporterTab', () => {
 		expect(name.disabled).toBe(true);
 	});
 
-	it('keeps the export button disabled for a saved-but-uncommitted (temp-id) draft', async () => {
+	it('keeps the export button disabled for a saved-but-uncommitted (temp-id) draft with no entries', async () => {
 		render('exp:draft:1');
 		await vi.waitFor(() =>
 			expect(document.querySelector('[data-testid="exporter-save"]')).toBeTruthy()
 		);
 		const runBtn = document.querySelector<HTMLButtonElement>('[data-testid="exporter-run"]')!;
-		expect(runBtn.disabled).toBe(true); // never saved at all: artifactId null
+		expect(runBtn.disabled).toBe(true); // no entries yet — the one remaining gate
 
 		document.querySelector<HTMLButtonElement>('[data-testid="exporter-save"]')!.click();
 		flushSync();
@@ -299,7 +336,9 @@ describe('ExporterTab', () => {
 		expect(draft.dirty).toBe(false);
 		expect(draft.artifactId).not.toBeNull();
 		// A staged create's id names nothing server-side until the batch
-		// commits — clean AND non-null is not enough; it must be a REAL id.
+		// commits, but temp-id state no longer gates Export at all (spec §11:
+		// ungated on dirty/uncommitted) — the button stays disabled here only
+		// because the draft still has zero entries.
 		expect(isTempId(draft.artifactId!)).toBe(true);
 		expect(runBtn.disabled).toBe(true);
 	});
@@ -414,7 +453,7 @@ describe('ExporterTab', () => {
 		expect(getExporterDraft('exp:art-1')!.entries[0].folder).toBe('nested/path');
 	});
 
-	// A disabled <select> swallows clicks with no event and no console output —
+	// A disabled input swallows clicks with no event and no console output —
 	// exactly the "Add table… does not work" report against a project with no
 	// committed tables. The empty picker must SAY why it is dead, and
 	// distinguish "no tables at all" from "your table is staged but not
@@ -423,10 +462,10 @@ describe('ExporterTab', () => {
 	it('explains the disabled add-table picker when the project has no tables', async () => {
 		render('exp:draft:1');
 		await vi.waitFor(() =>
-			expect(document.querySelector('[data-testid="add-table-select"]')).toBeTruthy()
+			expect(document.querySelector('[data-testid="add-table-input"]')).toBeTruthy()
 		);
-		const select = document.querySelector<HTMLSelectElement>('[data-testid="add-table-select"]')!;
-		expect(select.disabled).toBe(true);
+		const input = document.querySelector<HTMLInputElement>('[data-testid="add-table-input"]')!;
+		expect(input.disabled).toBe(true);
 		const hint = document.querySelector('[data-testid="add-table-empty-hint"]')!;
 		expect(hint).not.toBeNull();
 		expect(hint.textContent).toMatch(/no tables/i);
@@ -441,10 +480,10 @@ describe('ExporterTab', () => {
 		);
 		render('exp:draft:1');
 		await vi.waitFor(() =>
-			expect(document.querySelector('[data-testid="add-table-select"]')).toBeTruthy()
+			expect(document.querySelector('[data-testid="add-table-input"]')).toBeTruthy()
 		);
-		const select = document.querySelector<HTMLSelectElement>('[data-testid="add-table-select"]')!;
-		expect(select.disabled).toBe(true);
+		const input = document.querySelector<HTMLInputElement>('[data-testid="add-table-input"]')!;
+		expect(input.disabled).toBe(true);
 		const hint = document.querySelector('[data-testid="add-table-empty-hint"]')!;
 		expect(hint).not.toBeNull();
 		expect(hint.textContent).toMatch(/commit/i);
@@ -462,19 +501,22 @@ describe('ExporterTab', () => {
 			expect(document.querySelector('[data-testid="export-entry-0"]')).toBeTruthy()
 		);
 
-		const select = document.querySelector<HTMLSelectElement>('[data-testid="add-table-select"]')!;
-		select.value = 'tbl-2';
-		select.dispatchEvent(new Event('change', { bubbles: true }));
+		const input = document.querySelector<HTMLInputElement>('[data-testid="add-table-input"]')!;
+		input.value = 'Beta';
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+		input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
 		flushSync();
 		await vi.waitFor(() => expect(getExporterDraft('exp:art-1')!.entries.length).toBe(2));
 
-		// The just-used table must still be selectable — F-11 drops the
-		// usedRefs filter entirely; duplicate entries are legal.
-		const optionsAfterFirstAdd = Array.from(select.querySelectorAll('option')).map((o) => o.value);
-		expect(optionsAfterFirstAdd).toContain('tbl-2');
+		// The just-used table must still be offered by the picker — F-11 drops
+		// the usedRefs filter entirely; duplicate entries are legal.
+		input.value = 'Beta';
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+		expect(document.querySelector('[data-testid="add-table-option-tbl-2"]')).not.toBeNull();
 
-		select.value = 'tbl-2';
-		select.dispatchEvent(new Event('change', { bubbles: true }));
+		input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
 		flushSync();
 		await vi.waitFor(() => expect(getExporterDraft('exp:art-1')!.entries.length).toBe(3));
 
@@ -497,5 +539,197 @@ describe('ExporterTab', () => {
 		flushSync();
 
 		expect(getExporterDraft('exp:art-1')!.entries[0].format).toBe('csv');
+	});
+
+	// Spec §11: Export loses its dirty/temp-id gating — a dirty or
+	// never-committed draft exports by sending `definition` inline instead.
+	it('exports a dirty draft by sending the definition inline', async () => {
+		getArtifactSpy.mockResolvedValue(EXPORT_ARTIFACT);
+		render('exp:art-1');
+		await vi.waitFor(() =>
+			expect(document.querySelector('[data-testid="export-entry-0"]')).toBeTruthy()
+		);
+
+		const name = document.querySelector<HTMLInputElement>('[data-testid="export-entry-0"] input')!;
+		name.value = 'Renamed';
+		name.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+		expect(getExporterDraft('exp:art-1')!.dirty).toBe(true);
+
+		const runBtn = document.querySelector<HTMLButtonElement>('[data-testid="exporter-run"]')!;
+		expect(runBtn.disabled).toBe(false);
+
+		const blob = new Blob(['x'], { type: 'application/zip' });
+		const draftSpy = vi
+			.spyOn(exportsApi, 'runExporterDraft')
+			.mockResolvedValue({ kind: 'ready', blob, filename: 'Drop.zip' });
+		const runSpy = vi.spyOn(exportsApi, 'runExporter');
+		vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock');
+		vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+		vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+
+		runBtn.click();
+		await Promise.resolve();
+		await Promise.resolve();
+		flushSync();
+
+		expect(runSpy).not.toHaveBeenCalled();
+		expect(draftSpy).toHaveBeenCalledTimes(1);
+		const [definitionArg, nameArg] = draftSpy.mock.calls[0];
+		expect(definitionArg.entries.length).toBe(1);
+		// The whole point of the draft path: the uncommitted rename actually
+		// travels in the sent definition, not just the entry count.
+		expect(definitionArg.entries[0].name).toBe('Renamed');
+		expect(nameArg).toBe(getExporterDraft('exp:art-1')!.name);
+	});
+
+	// A clean, committed draft still runs by artifact id — identical content,
+	// but the manifest then carries the real artifact id (spec §11).
+	it('exports a clean committed draft by artifact id', async () => {
+		getArtifactSpy.mockResolvedValue(EXPORT_ARTIFACT);
+		render('exp:art-1');
+		await vi.waitFor(() =>
+			expect(document.querySelector('[data-testid="export-entry-0"]')).toBeTruthy()
+		);
+		expect(getExporterDraft('exp:art-1')!.dirty).toBe(false);
+		expect(isTempId(getExporterDraft('exp:art-1')!.artifactId!)).toBe(false);
+
+		const runBtn = document.querySelector<HTMLButtonElement>('[data-testid="exporter-run"]')!;
+		expect(runBtn.disabled).toBe(false);
+
+		const blob = new Blob(['x'], { type: 'application/zip' });
+		const runSpy = vi
+			.spyOn(exportsApi, 'runExporter')
+			.mockResolvedValue({ kind: 'ready', blob, filename: 'Drop.zip' });
+		const draftSpy = vi.spyOn(exportsApi, 'runExporterDraft');
+		vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock');
+		vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+		vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+
+		runBtn.click();
+		await Promise.resolve();
+		await Promise.resolve();
+		flushSync();
+
+		expect(draftSpy).not.toHaveBeenCalled();
+		expect(runSpy).toHaveBeenCalledTimes(1);
+		expect(runSpy).toHaveBeenCalledWith('art-1');
+	});
+
+	it('disables Export only while the draft has no entries', async () => {
+		getArtifactSpy.mockImplementation((id: string) =>
+			id === 'art-1' ? Promise.resolve(EXPORT_ARTIFACT) : Promise.resolve(TABLE_ARTIFACT)
+		);
+		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({ items: [TABLE_HEADER] });
+		await loadArtifacts();
+
+		render('exp:draft:1');
+		await vi.waitFor(() =>
+			expect(document.querySelector('[data-testid="exporter-save"]')).toBeTruthy()
+		);
+		const runBtn = document.querySelector<HTMLButtonElement>('[data-testid="exporter-run"]')!;
+		expect(runBtn.disabled).toBe(true);
+		expect(runBtn.title).toBe('Add at least one table first');
+
+		addExporterEntry(
+			'exp:draft:1',
+			'tbl-2',
+			'Beta',
+			TableDefinitionSchema.parse(TABLE_ARTIFACT.payload)
+		);
+		flushSync();
+
+		const draft = getExporterDraft('exp:draft:1')!;
+		expect(draft.entries.length).toBe(1);
+		expect(draft.dirty).toBe(true); // still dirty/uncommitted…
+		expect(runBtn.disabled).toBe(false); // …but that no longer gates Export
+		expect(runBtn.title).toBe('');
+	});
+
+	// P-15.1: the bare <select> is replaced by a searchable typeahead
+	// (AddTablePicker.svelte) that filters client-side over the in-memory
+	// committed-table headers.
+	it('filters the add-table picker as the user types', async () => {
+		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({
+			items: [PARTS_HEADER, BUILDINGS_HEADER]
+		});
+		await loadArtifacts();
+
+		render('exp:draft:1');
+		await vi.waitFor(() =>
+			expect(document.querySelector('[data-testid="add-table-input"]')).toBeTruthy()
+		);
+
+		const input = document.querySelector<HTMLInputElement>('[data-testid="add-table-input"]')!;
+		input.value = 'par';
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+
+		expect(document.querySelector('[data-testid="add-table-option-tbl-parts"]')).not.toBeNull();
+		expect(document.querySelector('[data-testid="add-table-option-tbl-buildings"]')).toBeNull();
+	});
+
+	it('adds the active option on Enter and allows a duplicate add', async () => {
+		getArtifactSpy.mockImplementation((id: string) =>
+			id === 'tbl-parts'
+				? Promise.resolve(PARTS_ARTIFACT)
+				: Promise.reject(new Error(`unexpected id ${id}`))
+		);
+		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({
+			items: [PARTS_HEADER, BUILDINGS_HEADER]
+		});
+		await loadArtifacts();
+
+		render('exp:draft:1');
+		await vi.waitFor(() =>
+			expect(document.querySelector('[data-testid="add-table-input"]')).toBeTruthy()
+		);
+		const input = document.querySelector<HTMLInputElement>('[data-testid="add-table-input"]')!;
+
+		input.value = 'par';
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+		input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+		flushSync();
+
+		await vi.waitFor(() => expect(getExporterDraft('exp:draft:1')!.entries.length).toBe(1));
+		expect(document.querySelector('[data-testid="export-entry-0"]')).not.toBeNull();
+
+		// F-11: duplicates are legal and useful — the same table added twice.
+		input.value = 'par';
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+		input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+		flushSync();
+
+		await vi.waitFor(() => expect(getExporterDraft('exp:draft:1')!.entries.length).toBe(2));
+		expect(document.querySelector('[data-testid="export-entry-1"]')).not.toBeNull();
+		expect(
+			getExporterDraft('exp:draft:1')!.entries.filter((e) => e.source.ref === 'tbl-parts')
+		).toHaveLength(2);
+	});
+
+	it('closes the picker on Escape without adding', async () => {
+		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({
+			items: [PARTS_HEADER, BUILDINGS_HEADER]
+		});
+		await loadArtifacts();
+
+		render('exp:draft:1');
+		await vi.waitFor(() =>
+			expect(document.querySelector('[data-testid="add-table-input"]')).toBeTruthy()
+		);
+		const input = document.querySelector<HTMLInputElement>('[data-testid="add-table-input"]')!;
+
+		input.value = 'par';
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+		expect(document.querySelector('[data-testid="add-table-option-tbl-parts"]')).not.toBeNull();
+
+		input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+		flushSync();
+
+		expect(document.querySelector('[data-testid="add-table-option-tbl-parts"]')).toBeNull();
+		expect(getExporterDraft('exp:draft:1')!.entries.length).toBe(0);
 	});
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { applyEntryOverrides, entryForTable, overridesFromDefinition } from '../exporter';
-import { ExporterEntrySchema } from '$lib/api/types';
+import { ExporterEntrySchema, isJsonFamily } from '$lib/api/types';
 import type { TableDefinition } from '$lib/api/types';
 
 const defn: TableDefinition = {
@@ -97,5 +97,14 @@ describe('phase 2 wire schema', () => {
 			on_error: 'fail'
 		});
 		expect(ExporterEntrySchema.parse({ source: { ref: 't1' } }).json_doc).toBeUndefined();
+	});
+});
+
+describe('isJsonFamily', () => {
+	it('is true exactly for json and jsonl', () => {
+		expect(isJsonFamily('json')).toBe(true);
+		expect(isJsonFamily('jsonl')).toBe(true);
+		expect(isJsonFamily('xlsx')).toBe(false);
+		expect(isJsonFamily('csv')).toBe(false);
 	});
 });

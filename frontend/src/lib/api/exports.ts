@@ -1,5 +1,18 @@
 import { apiFetchRaw, type ClientConfig } from './client';
 import { parseAttachmentFilename, type ExportResult } from './tables';
+import type { ExporterDefinition } from './types';
+
+async function handleRunResponse(res: Response): Promise<ExportResult> {
+	if (res.status === 202) {
+		const body = (await res.json()) as { done?: number; total?: number | null };
+		return { kind: 'preparing', done: body.done ?? 0, total: body.total ?? null };
+	}
+	return {
+		kind: 'ready',
+		blob: await res.blob(),
+		filename: parseAttachmentFilename(res) ?? 'export.zip'
+	};
+}
 
 /**
  * Run a saved `kind='exporter'` artifact (`POST /exports/run`) and
@@ -18,13 +31,26 @@ export async function runExporter(artifactId: string, cfg?: ClientConfig): Promi
 		{ method: 'POST', body: { artifact_id: artifactId } },
 		cfg
 	);
-	if (res.status === 202) {
-		const body = (await res.json()) as { done?: number; total?: number | null };
-		return { kind: 'preparing', done: body.done ?? 0, total: body.total ?? null };
-	}
-	return {
-		kind: 'ready',
-		blob: await res.blob(),
-		filename: parseAttachmentFilename(res) ?? 'export.zip'
-	};
+	return handleRunResponse(res);
+}
+
+/**
+ * Run a STAGED exporter draft (`POST /exports/run` with an inline
+ * `definition`, spec §9.1) — how the Export button works for a dirty or
+ * never-committed draft. `name` stands in for the artifact name (zip-stem
+ * fallback, manifest `artifact_name`). Same 202 protocol as `runExporter`;
+ * the server validates the draft exactly like a committed payload, so the
+ * 422s (missing table, bad template) surface identically.
+ */
+export async function runExporterDraft(
+	definition: ExporterDefinition,
+	name: string,
+	cfg?: ClientConfig
+): Promise<ExportResult> {
+	const res = await apiFetchRaw(
+		'/exports/run',
+		{ method: 'POST', body: { definition, name } },
+		cfg
+	);
+	return handleRunResponse(res);
 }

@@ -36,7 +36,13 @@
 	import { createColumnDrag } from '$lib/table/column-dnd.svelte';
 	import { previewTableJson } from '$lib/api/tables';
 	import { Eye, EyeOff } from '@lucide/svelte';
-	import type { Column, ExportFormat, TableDefinition, TableSort } from '$lib/api/types';
+	import {
+		isJsonFamily,
+		type Column,
+		type ExportFormat,
+		type TableDefinition,
+		type TableSort
+	} from '$lib/api/types';
 
 	let {
 		definition,
@@ -74,7 +80,7 @@
 	// modes, grouping, split and the preview all apply to it unchanged; CSV
 	// renders through the xlsx *layout* path, so it takes the xlsx-side
 	// behavior everywhere by falling into the `!jsonFamily` arm.
-	const jsonFamily = $derived(format === 'json' || format === 'jsonl');
+	const jsonFamily = $derived(isJsonFamily(format));
 
 	/** A column whose cells can hold element references — the only place the
 	 *  name/id/object choice means anything. A property column never does. */

@@ -18,7 +18,7 @@ from data_rover.core.model.relationship import Relationship
 from data_rover.core.navigation.schema import NavigationDefinition
 from data_rover.core.script.schema import SNIPPET_MAX_CODE_BYTES
 from data_rover.core.script.warnings import ScriptWarning
-from data_rover.core.table.exporter import ExportFormat
+from data_rover.core.table.exporter import ExporterDefinition, ExportFormat
 from data_rover.core.table.schema import TableDefinition
 from data_rover.core.validation.issue import Issue
 from data_rover.core.view.schema import Folder, View
@@ -1338,9 +1338,22 @@ class ExportTableIn(EvaluateTableIn):
 class RunExportIn(BaseModel):
     """`POST /exports/run` body. The id travels in the BODY, not the path:
     `authz._READ_ONLY_POST_SUFFIXES` matches fixed path suffixes, and this
-    route must be viewer-callable like `/tables/export`."""
+    route must be viewer-callable like `/tables/export`.
 
-    artifact_id: str
+    Exactly one of `artifact_id`/`definition` is required (the route 422s
+    otherwise). A `definition` is a staged DRAFT (spec §9.1): it is validated
+    by this field's own `ExporterDefinition` typing — the same shape
+    `EXPORTER_ADAPTER` enforces on a committed payload — and flows through
+    the identical run guards, so a draft is render-only client input, no more
+    trusted than a committed row. Referenced tables always evaluate from
+    their COMMITTED definitions: presentation drafts export live; evaluation
+    drafts still require commit."""
+
+    artifact_id: str | None = None
+    definition: ExporterDefinition | None = None
+    #: Stands in for the artifact name on a draft run: feeds the zip-stem
+    #: fallback and the manifest's `artifact_name`; "" -> "export".
+    name: str = ""
 
 
 class JsonPreviewOut(BaseModel):

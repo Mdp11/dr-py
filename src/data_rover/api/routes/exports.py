@@ -19,6 +19,7 @@ from data_rover.core.script.runner import ScriptRunner
 from data_rover.core.table.exporter import (
     EXPORTER_ADAPTER,
     ExporterDefinition,
+    JSON_FAMILY,
     overridden_table,
 )
 from data_rover.core.table.naming import (
@@ -114,17 +115,102 @@ def run_export(
     runner: ScriptRunner | None = Depends(get_runner),
     settings: Settings = Depends(get_settings),
 ) -> Response:
-    metamodel, model = require_model(session)
-    row = content.get_artifact(db, payload.artifact_id)
-    if (
-        row is None
-        or row.project_id != project_id
-        or row.kind is not ArtifactKind.exporter
-    ):
+    # Spec §9.1: exactly one source for the definition. Checked here, not on
+    # the model, so the 422 detail is one plain sentence rather than a
+    # pydantic error tree — this is a contract line for CI scripts.
+    if (payload.artifact_id is None) == (payload.definition is None):
         raise HTTPException(
-            status_code=404, detail=f"unknown exporter {payload.artifact_id}"
+            status_code=422,
+            detail="exactly one of artifact_id and definition is required",
         )
+    if payload.artifact_id is not None:
+        row = content.get_artifact(db, payload.artifact_id)
+        if (
+            row is None
+            or row.project_id != project_id
+            or row.kind is not ArtifactKind.exporter
+        ):
+            raise HTTPException(
+                status_code=404, detail=f"unknown exporter {payload.artifact_id}"
+            )
+        cdef: ExporterDefinition = EXPORTER_ADAPTER.validate_python(row.payload)
+        run_name, artifact_id = row.name, row.id
+    else:
+        assert payload.definition is not None  # the XOR check above
+        cdef = payload.definition
+        # `name` stands in for the artifact name (spec §9.1): ${name} in the
+        # zip filename template, the stem fallback, and the manifest's
+        # `artifact_name` all read it. `artifact_id: None` is the manifest's
+        # draft marker.
+        run_name, artifact_id = payload.name or "export", None
+    return _execute_export(
+        cdef,
+        run_name=run_name,
+        artifact_id=artifact_id,
+        project_id=project_id,
+        session=session,
+        db=db,
+        runner=runner,
+        settings=settings,
+    )
+
+
+@router.get("/exports/run-by-name")
+def run_export_by_name(
+    name: str,
+    project_id: str,
+    session: Session = Depends(get_request_session),
+    db: DbSession = Depends(get_db),
+    runner: ScriptRunner | None = Depends(get_runner),
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    """CI ergonomics (spec §9.2): run a committed exporter by NAME with one
+    `curl`. A QUERY parameter, not a path segment — artifact names are
+    free-form text. GET is read-only by `authz`'s method-based write
+    detection, so membership auth (header or cookie) works unchanged and the
+    route is viewer-callable like the POST. Response contract identical to
+    `POST /exports/run` — both delegate to `_execute_export`, including the
+    aggregate `202 + Retry-After: 1` while sweeps fill."""
+    rows = content.find_artifacts_by_name(db, project_id, ArtifactKind.exporter, name)
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"unknown exporter {name!r}")
+    if len(rows) > 1:
+        raise HTTPException(
+            status_code=409,
+            detail=f"ambiguous exporter name {name!r}; candidates: {', '.join(r.id for r in rows)}",
+        )
+    row = rows[0]
     cdef: ExporterDefinition = EXPORTER_ADAPTER.validate_python(row.payload)
+    return _execute_export(
+        cdef,
+        run_name=row.name,
+        artifact_id=row.id,
+        project_id=project_id,
+        session=session,
+        db=db,
+        runner=runner,
+        settings=settings,
+    )
+
+
+def _execute_export(
+    cdef: ExporterDefinition,
+    *,
+    run_name: str,
+    artifact_id: str | None,
+    project_id: str,
+    session: Session,
+    db: DbSession,
+    runner: ScriptRunner | None,
+    settings: Settings,
+) -> Response:
+    """The whole run pipeline behind BOTH entry points (`POST /exports/run`
+    with an id or a draft definition, `GET /exports/run-by-name`), so the
+    202/zip/bare/manifest contract cannot drift between them. `run_name` is
+    the artifact's name for a committed run and the request's `name` for a
+    draft (`artifact_id` None marks the draft in the manifest, spec §9.1);
+    everything downstream is source-agnostic."""
+    metamodel, model = require_model(session)
     if not cdef.entries:
         raise HTTPException(status_code=422, detail="exporter has no entries")
 
@@ -173,11 +259,7 @@ def run_export(
             rendered_folder = substitute(entry.folder, {"name": table_name, **ctx})
             segs = folder_segments(rendered_folder)
             split = entry.json_split
-            if (
-                entry.format in ("json", "jsonl")
-                and split is not None
-                and split.enabled
-            ):
+            if entry.format in JSON_FAMILY and split is not None and split.enabled:
                 validate_template(split.filename_template)
                 validate_tokens(split.filename_template, SPLIT_TOKENS)
         except ValueError as exc:
@@ -350,8 +432,8 @@ def run_export(
                 MANIFEST_NAME,
                 build_manifest(
                     project_id=project_id,
-                    artifact_id=row.id,
-                    artifact_name=row.name,
+                    artifact_id=artifact_id,
+                    artifact_name=run_name,
                     model_rev=session.model_rev,
                     entries=manifest_entries,
                 ),
@@ -359,8 +441,8 @@ def run_export(
         )
 
     zip_stem = (
-        sanitize_stem(substitute(cdef.output.filename, {"name": row.name, **ctx}))
-        or sanitize_stem(row.name)
+        sanitize_stem(substitute(cdef.output.filename, {"name": run_name, **ctx}))
+        or sanitize_stem(run_name)
         or "export"
     )
     resp_headers = {"Content-Disposition": f'attachment; filename="{zip_stem}.zip"'}

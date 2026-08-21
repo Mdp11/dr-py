@@ -37,7 +37,11 @@ from data_rover.core.table.export_layout import (
     export_header,
     export_layout,
 )
-from data_rover.core.table.exporter import JsonDocumentOptions
+from data_rover.core.table.exporter import (
+    ExportFormat,
+    JSON_FAMILY,
+    JsonDocumentOptions,
+)
 from data_rover.core.table.json_export import (
     contains_error_marker,
     jsonl_bytes,
@@ -168,7 +172,7 @@ def run_table_export(
     defn: TableDefinition,  # evaluation — the ORIGINAL definition
     render_defn: TableDefinition,  # presentation — same object for /tables/export
     name: str,
-    format: str,  # "xlsx" | "json" | "csv" | "jsonl"
+    format: ExportFormat,
     sort: SortSpec | None,
     template_vars: Mapping[str, str] | None = None,
     json_doc: JsonDocumentOptions | None = None,
@@ -230,7 +234,7 @@ def run_table_export(
     `degraded=True` on the returned `ExportFiles` when this happens, so a
     caller can detect degradation without parsing the body."""
     split = render_defn.json_split
-    split_on = format in ("json", "jsonl") and split is not None and split.enabled
+    split_on = format in JSON_FAMILY and split is not None and split.enabled
     if split_on:
         assert split is not None  # split_on implies this; narrows for mypy
         # Strict by decision (spec §2): the ONE export setting that rejects
@@ -450,7 +454,7 @@ def run_table_export(
                 )
             return None
 
-        if format in ("json", "jsonl"):
+        if format in JSON_FAMILY:
             # `export_definition` restates inclusion as `hidden` so
             # `json_export`'s existing hidden-column and group-nesting logic is
             # reused rather than reimplemented. Built HERE rather than beside

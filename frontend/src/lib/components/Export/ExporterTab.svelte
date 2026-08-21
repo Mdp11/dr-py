@@ -1,11 +1,12 @@
 <script lang="ts">
 	// The exporter tab: an entry list (one per bundled table), an
-	// add-table picker, Save (stage) and Export (run the COMMITTED artifact)
+	// add-table picker, Save (stage) and Export (run the committed artifact,
+	// or the draft inline when dirty/uncommitted — spec §9.1)
 	// — the exporter sibling of `Snippet/SnippetTab.svelte` and
 	// `Table/TableView.svelte`. See `state/exporter-editor.svelte.ts`'s
 	// module docstring for the draft/lease/staging model this drives.
 	import * as artifactsApi from '$lib/api/artifacts';
-	import { runExporter } from '$lib/api/exports';
+	import { runExporter, runExporterDraft } from '$lib/api/exports';
 	import { retryAndDownload, type ExportProgress } from '$lib/util/export-download';
 	import {
 		addExporterEntry,
@@ -33,6 +34,7 @@
 	} from '$lib/api/types';
 	import { createColumnDrag } from '$lib/table/column-dnd.svelte';
 	import EntryLayoutDialog from './EntryLayoutDialog.svelte';
+	import AddTablePicker from './AddTablePicker.svelte';
 	import ArtifactExportButton from '$lib/components/ArtifactExportButton.svelte';
 
 	let { tabId }: { tabId: string } = $props();
@@ -59,11 +61,12 @@
 	const availableTables = $derived(referenceableArtifactHeaders('table'));
 	// The picker excludes staged-but-uncommitted creates (temp ids must never
 	// reach a payload — see referenceableArtifactHeaders). When that filter —
-	// or a simply table-less project — leaves the select empty it is DISABLED,
-	// and a disabled select swallows clicks with no event and no console
-	// output, which reads as "the button is broken". Say why instead, and
-	// distinguish the two states: the overlay list (temp ids included) tells a
-	// user whose table is only staged that COMMITTING is the missing step.
+	// or a simply table-less project — leaves the picker input empty it is
+	// DISABLED, and a disabled input swallows clicks with no event and no
+	// console output, which reads as "the button is broken". Say why instead,
+	// and distinguish the two states: the overlay list (temp ids included)
+	// tells a user whose table is only staged that COMMITTING is the missing
+	// step.
 	const stagedOnlyTables = $derived(
 		availableTables.length === 0 && getArtifactHeaders().some((h) => h.kind === 'table')
 	);
@@ -82,13 +85,9 @@
 		}
 	}
 
-	// --- Add-table picker -------------------------------------------------
+	// --- Add-table picker (P-15.1) ----------------------------------------
 	let addTableError = $state<string | null>(null);
-	async function onAddTableChange(e: Event): Promise<void> {
-		const select = e.currentTarget as HTMLSelectElement;
-		const id = select.value;
-		select.value = '';
-		if (!id) return;
+	async function addTable(id: string): Promise<void> {
 		const header = availableTables.find((h) => h.id === id);
 		if (!header) return;
 		addTableError = null;
@@ -166,28 +165,40 @@
 		onDrop: (from, to) => moveExporterEntryInList(tabId, from, to)
 	});
 
-	// --- Export: run the COMMITTED artifact, 202-poll, download ------------
+	// --- Export: run the committed artifact or the draft inline, 202-poll, download ---
 	let exporting = $state(false);
 	let exportProgress = $state<ExportProgress | null>(null);
 	let exportError = $state<string | null>(null);
 	let exportAbort: AbortController | null = null;
 	$effect(() => () => exportAbort?.abort());
 
-	// The export always runs the server's last COMMITTED payload (see the
-	// tooltip below) — a temp id names nothing server-side at all, so it is
-	// gated exactly like "not saved yet" rather than merely "dirty".
-	const exportDisabled = $derived(
-		!draft || draft.dirty || draft.artifactId === null || isTempId(draft.artifactId)
-	);
+	// Spec §9.1/§11: the Export button is UNGATED on dirty/uncommitted state — a
+	// clean committed draft runs by artifact id (the committed payload), anything
+	// else ships its definition inline as a draft run. Referenced tables still
+	// evaluate from their COMMITTED definitions either way; only this exporter's
+	// own presentation travels as a draft. The one remaining gate is emptiness:
+	// the server 422s "exporter has no entries", so disable with a hint instead.
+	const exportDisabled = $derived(!draft || draft.entries.length === 0);
 
 	async function runExport(): Promise<void> {
-		if (exportDisabled || !draft?.artifactId || exporting) return;
-		const id = draft.artifactId;
+		const d = draft;
+		if (!d || d.entries.length === 0 || exporting) return;
+		// `id` is a const so the ternary's true branch narrows it to string and
+		// the closure keeps the narrowing — no non-null assertion needed.
+		const id = d.artifactId;
+		const start =
+			!d.dirty && id !== null && !isTempId(id)
+				? () => runExporter(id)
+				: () =>
+						runExporterDraft(
+							{ schema_version: 1, output: d.output, entries: d.entries },
+							d.name || 'export'
+						);
 		exportError = null;
 		exporting = true;
 		exportAbort = new AbortController();
 		try {
-			await retryAndDownload(() => runExporter(id), {
+			await retryAndDownload(start, {
 				onProgress: (p) => (exportProgress = p),
 				signal: exportAbort.signal
 			});
@@ -218,9 +229,7 @@
 				data-testid="exporter-run"
 				class="flex items-center gap-1.5 rounded border border-input px-2 py-1 text-xs text-foreground/80 transition-colors hover:bg-muted disabled:opacity-40"
 				disabled={exportDisabled || exporting}
-				title={exportDisabled
-					? 'Save and commit first — the export runs the committed definition'
-					: undefined}
+				title={exportDisabled ? 'Add at least one table first' : undefined}
 				onclick={() => void runExport()}
 			>
 				{#if exporting}
@@ -401,20 +410,11 @@
 
 			{#if editable}
 				<div class="mt-2 flex items-center gap-2">
-					<select
-						data-testid="add-table-select"
-						class="rounded border border-input bg-card px-2 py-1 text-xs"
+					<AddTablePicker
+						tables={availableTables}
 						disabled={locked || availableTables.length === 0}
-						title={availableTables.length === 0
-							? 'Only committed tables can be added to an exporter'
-							: undefined}
-						onchange={(e) => void onAddTableChange(e)}
-					>
-						<option value="">Add table…</option>
-						{#each availableTables as h (h.id)}
-							<option value={h.id}>{h.name}</option>
-						{/each}
-					</select>
+						onPick={(id) => void addTable(id)}
+					/>
 					{#if availableTables.length === 0}
 						<p data-testid="add-table-empty-hint" class="text-xs text-muted-foreground/70">
 							{#if stagedOnlyTables}

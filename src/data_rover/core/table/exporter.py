@@ -32,6 +32,12 @@ from .schema import (
 #: (spec §6: extending both is nearly free — the engine branch is shared).
 type ExportFormat = Literal["xlsx", "json", "csv", "jsonl"]
 
+#: The two formats that render through the JSON document list — ONE spelling
+#: for every "json family" gate (the engine's split/render branches, the run
+#: route's split-template validation). csv/xlsx take the layout path. The
+#: frontend mirror is `isJsonFamily` in `frontend/src/lib/api/types.ts`.
+JSON_FAMILY: frozenset[ExportFormat] = frozenset({"json", "jsonl"})
+
 
 class JsonDocumentOptions(BaseModel):
     """Document shaping for the `json` branch (spec §7): applied after

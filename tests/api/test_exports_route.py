@@ -8,12 +8,14 @@ from datetime import UTC, datetime
 import pytest
 from fastapi.testclient import TestClient
 
+from data_rover.api import db
+from data_rover.api.db_models import Membership, Project, Role
 from data_rover.api.main import create_app
 from data_rover.api.routes.exports import _aggregate_pending
 from data_rover.api.schemas import ScriptStatusOut
 
-from .conftest import AUTH_HEADERS, papi, seed_default_project
-from .test_artifacts_routes import _bootstrap_model
+from .conftest import AUTH_HEADERS, TEST_USER_ID, papi, seed_default_project
+from .test_artifacts_routes import EXAMPLE, _bootstrap_model
 
 
 @pytest.fixture
@@ -849,3 +851,275 @@ def test_jsonl_entry_split_files_nest_under_the_entry_folder(client):
     names = _names(r)
     assert all(n.startswith("per-el/") and n.endswith(".jsonl") for n in names)
     assert len(names) == 3
+
+
+# ---- Phase 3: draft runs (spec §9.1) --------------------------------------
+
+
+def _run_draft(client, definition, name="draft"):
+    return client.post(
+        papi("/exports/run"),
+        json={"definition": definition, "name": name},
+        headers=AUTH_HEADERS,
+    )
+
+
+def test_draft_run_exports_without_a_committed_artifact(client):
+    _bootstrap_model(client)
+    t = _mk_table(client, "parts")
+    r = _run_draft(
+        client,
+        {"entries": [{"source": {"ref": t}, "name": "as-json", "format": "json"}]},
+        name="my-draft",
+    )
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/zip"
+    # The request's `name` feeds the zip-stem fallback (no output.filename).
+    assert r.headers["content-disposition"].endswith('my-draft.zip"')
+    assert _names(r) == ["as-json.json"]
+
+
+def test_draft_run_manifest_reports_null_artifact_id_and_request_name(client):
+    _bootstrap_model(client)
+    t = _mk_table(client, "parts")
+    r = _run_draft(
+        client,
+        {"entries": [{"source": {"ref": t}, "name": "e1", "format": "json"}]},
+        name="my-draft",
+    )
+    assert r.status_code == 200
+    manifest = json.loads(
+        zipfile.ZipFile(io.BytesIO(r.content)).read("manifest.json")
+    )
+    assert manifest["artifact_id"] is None
+    assert manifest["artifact_name"] == "my-draft"
+
+
+def test_draft_run_default_name_is_export(client):
+    _bootstrap_model(client)
+    t = _mk_table(client, "parts")
+    r = client.post(
+        papi("/exports/run"),
+        json={"definition": {"entries": [{"source": {"ref": t}, "format": "json"}]}},
+        headers=AUTH_HEADERS,
+    )
+    assert r.status_code == 200
+    assert r.headers["content-disposition"].endswith('export.zip"')
+
+
+def test_exactly_one_of_artifact_id_and_definition_is_required(client):
+    _bootstrap_model(client)
+    t = _mk_table(client, "parts")
+    x = _mk_export(client, [{"source": {"ref": t}, "format": "json"}])
+    neither = client.post(papi("/exports/run"), json={}, headers=AUTH_HEADERS)
+    assert neither.status_code == 422
+    both = client.post(
+        papi("/exports/run"),
+        json={
+            "artifact_id": x,
+            "definition": {"entries": [{"source": {"ref": t}, "format": "json"}]},
+        },
+        headers=AUTH_HEADERS,
+    )
+    assert both.status_code == 422
+    assert "exactly one" in both.json()["detail"]
+
+
+def test_draft_run_flows_through_the_same_guards(client):
+    _bootstrap_model(client)
+    # Missing table: project scoping via the existing missing-table 422.
+    r = _run_draft(
+        client,
+        {"entries": [{"source": {"ref": "no-such-table"}, "name": "ghost"}]},
+    )
+    assert r.status_code == 422
+    assert "missing table" in r.json()["detail"]
+    assert "ghost" in r.json()["detail"]
+    # Templates validate up front, naming the entry.
+    t = _mk_table(client, "parts")
+    r = _run_draft(
+        client,
+        {"entries": [{"source": {"ref": t}, "name": "bad", "folder": "${bogus}"}]},
+    )
+    assert r.status_code == 422
+    assert "invalid template" in r.json()["detail"]
+    assert "bad" in r.json()["detail"]
+
+
+def test_draft_run_with_no_entries_422s(client):
+    _bootstrap_model(client)
+    r = _run_draft(client, {"entries": []})
+    assert r.status_code == 422
+    assert "no entries" in r.json()["detail"]
+
+
+# ---- Phase 3: run-by-name (spec §9.2) -------------------------------------
+
+
+def _run_by_name(client, name):
+    return client.get(
+        papi("/exports/run-by-name"), params={"name": name}, headers=AUTH_HEADERS
+    )
+
+
+def test_run_by_name_matches_the_post_contract(client):
+    _bootstrap_model(client)
+    t = _mk_table(client, "parts")
+    x = _mk_export(
+        client, [{"source": {"ref": t}, "name": "e1", "format": "json"}], name="nightly"
+    )
+    by_name = _run_by_name(client, "nightly")
+    by_id = _run(client, x)
+    assert by_name.status_code == by_id.status_code == 200
+    assert by_name.headers["content-type"] == "application/zip"
+    assert _names(by_name) == _names(by_id) == ["e1.json"]
+    assert by_name.headers["content-disposition"].endswith('nightly.zip"')
+
+
+def test_run_by_name_unknown_404s(client):
+    _bootstrap_model(client)
+    r = _run_by_name(client, "no-such-exporter")
+    assert r.status_code == 404
+
+
+def test_run_by_name_ignores_other_kinds(client):
+    _bootstrap_model(client)
+    _mk_table(client, "shadow")  # a TABLE named like the query
+    r = _run_by_name(client, "shadow")
+    assert r.status_code == 404
+
+
+def test_run_by_name_ambiguous_409s_listing_candidates(client, monkeypatch):
+    _bootstrap_model(client)
+    t = _mk_table(client, "parts")
+    x1 = _mk_export(client, [{"source": {"ref": t}, "format": "json"}], name="dup")
+    # The brief's premise (a raw content-layer insert can slip a duplicate
+    # (kind, name) past the create/rename routes' 409) does not hold today:
+    # `project_artifacts` carries a genuine DB-level UNIQUE constraint on
+    # (project_id, kind, name) (Alembic 0008, `db_models.ArtifactRow`), so
+    # ANY insert of a second "exporter"/"dup" row — through `content.
+    # create_artifact` or raw SQL alike — raises `IntegrityError`; a true
+    # duplicate is unreachable through any write path against this schema.
+    # The route's ambiguity handling is still worth proving deterministic
+    # (schema invariants can drift — a future migration, a manual DB edit),
+    # so this simulates ambiguity at the query seam instead of the DB: a
+    # second, genuinely distinct exporter is created normally, then
+    # `find_artifacts_by_name` is patched to answer as if both rows matched
+    # the same name. This still exercises the real route logic end to end
+    # (status code, `detail` contents) — only the "how did two rows come to
+    # share a name" premise is faked.
+    x2 = _mk_export(client, [{"source": {"ref": t}, "format": "json"}], name="dup2")
+    from data_rover.api import content
+    from data_rover.api.routes import exports as exports_routes
+
+    real_find = content.find_artifacts_by_name
+
+    def fake_find(db, project_id, kind, name):
+        if name == "dup":
+            rows = real_find(db, project_id, kind, "dup") + real_find(
+                db, project_id, kind, "dup2"
+            )
+            return sorted(rows, key=lambda r: r.id)
+        return real_find(db, project_id, kind, name)
+
+    monkeypatch.setattr(exports_routes.content, "find_artifacts_by_name", fake_find)
+    r = _run_by_name(client, "dup")
+    assert r.status_code == 409
+    assert x1 in r.json()["detail"]
+    assert x2 in r.json()["detail"]
+
+
+# ---- Phase 3: project scoping on the two newly reachable paths -----------
+#
+# The code is already correct (`t.project_id != project_id` in
+# `_execute_export`; `ArtifactRow.project_id == project_id` in
+# `content.find_artifacts_by_name`) — these pin it against a genuine second
+# project owned by the SAME test user, same pattern as `test_multi_project.py`.
+
+OTHER_PROJECT_ID = "other"
+
+
+def _seed_other_project() -> None:
+    """A second project, owned by the same TEST_USER_ID, so one AUTH_HEADERS
+    client can reach both projects' data routes."""
+    gen = db.get_db()
+    s = next(gen)
+    try:
+        if s.get(Project, OTHER_PROJECT_ID) is None:
+            s.add(Project(id=OTHER_PROJECT_ID, name="Other Project"))
+            s.add(
+                Membership(
+                    user_id=TEST_USER_ID, project_id=OTHER_PROJECT_ID, role=Role.owner
+                )
+            )
+            s.commit()
+    finally:
+        gen.close()
+
+
+def _other_papi(path: str) -> str:
+    return f"/api/v1/projects/{OTHER_PROJECT_ID}{path}"
+
+
+def _bootstrap_other_model(client) -> None:
+    """Same metamodel/model bootstrap as `_bootstrap_model`, scoped to
+    OTHER_PROJECT_ID instead of the default project."""
+    client.post(
+        _other_papi("/metamodel"),
+        content=EXAMPLE.read_text(encoding="utf-8"),
+        headers={"content-type": "application/x-yaml"},
+    )
+    client.post(_other_papi("/model"), json={"elements": [], "relationships": []})
+
+
+def _mk_table_other(client, name):
+    r = client.post(
+        _other_papi("/artifacts"),
+        json={"kind": "table", "name": name, "payload": TABLE_PAYLOAD},
+        headers=AUTH_HEADERS,
+    )
+    assert r.status_code == 201
+    return r.json()["id"]
+
+
+def _mk_export_other(client, entries, name="drop"):
+    r = client.post(
+        _other_papi("/artifacts"),
+        json={"kind": "exporter", "name": name, "payload": {"entries": entries}},
+        headers=AUTH_HEADERS,
+    )
+    assert r.status_code == 201
+    return r.json()["id"]
+
+
+def test_draft_entry_referencing_another_projects_table_is_the_missing_table_422(
+    client,
+):
+    """A table id that is perfectly valid — just in a DIFFERENT project —
+    must 422 exactly like a dangling ref (`t.project_id != project_id` in
+    `_execute_export`), never resolve across the project boundary."""
+    _bootstrap_model(client)
+    _seed_other_project()
+    _bootstrap_other_model(client)
+    other_table = _mk_table_other(client, "elsewhere")
+    r = _run_draft(
+        client,
+        {"entries": [{"source": {"ref": other_table}, "name": "leak"}]},
+    )
+    assert r.status_code == 422
+    assert "missing table" in r.json()["detail"]
+    assert "leak" in r.json()["detail"]
+
+
+def test_run_by_name_ignores_an_exporter_of_the_same_name_in_another_project(client):
+    """A `name` that only resolves to an exporter in a DIFFERENT project must
+    404 exactly like a genuinely unknown name (`content.find_artifacts_by_name`
+    filters on `project_id`), never run the other project's artifact."""
+    _seed_other_project()
+    _bootstrap_other_model(client)
+    t = _mk_table_other(client, "parts")
+    _mk_export_other(
+        client, [{"source": {"ref": t}, "name": "e1", "format": "json"}], name="only-there"
+    )
+    r = _run_by_name(client, "only-there")
+    assert r.status_code == 404

@@ -985,6 +985,13 @@ export type ColumnOverride = z.infer<typeof ColumnOverrideSchema>;
 export const EXPORT_FORMATS = ['xlsx', 'json', 'csv', 'jsonl'] as const;
 export type ExportFormat = (typeof EXPORT_FORMATS)[number];
 
+/** ONE spelling for the "json family" gate — json + jsonl render through the
+ *  same document list; csv/xlsx take the layout path. Mirror of
+ *  core/table/exporter.py::JSON_FAMILY. */
+export function isJsonFamily(format: ExportFormat): boolean {
+	return format === 'json' || format === 'jsonl';
+}
+
 /** Document shaping for JSON exports (spec §7) — exporter-entry-only.
  *  `shape`/`pretty` apply to `json`; `on_error` to `json` and `jsonl`;
  *  ignored elsewhere. All strictness (missing/out-of-range/duplicate keys,
