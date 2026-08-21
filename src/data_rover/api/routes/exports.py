@@ -19,6 +19,7 @@ from data_rover.core.script.runner import ScriptRunner
 from data_rover.core.table.exporter import (
     EXPORTER_ADAPTER,
     ExporterDefinition,
+    JSON_FAMILY,
     overridden_table,
 )
 from data_rover.core.table.naming import (
@@ -174,7 +175,7 @@ def run_export(
             segs = folder_segments(rendered_folder)
             split = entry.json_split
             if (
-                entry.format in ("json", "jsonl")
+                entry.format in JSON_FAMILY
                 and split is not None
                 and split.enabled
             ):

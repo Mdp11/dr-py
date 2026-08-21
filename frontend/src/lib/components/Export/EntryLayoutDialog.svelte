@@ -29,6 +29,7 @@
 	import ExportSettingsPanel from './ExportSettingsPanel.svelte';
 	import {
 		EXPORT_FORMATS,
+		isJsonFamily,
 		type ExportFormat,
 		type ExporterEntry,
 		type JsonDocumentOptions,
@@ -77,7 +78,7 @@
 	// tokenless template — this only saves a round trip. Widened to the
 	// whole json family (json + jsonl), same as ExportDialog.
 	const splitTemplateInvalid = $derived(
-		(format === 'json' || format === 'jsonl') &&
+		isJsonFamily(format) &&
 			(effective.json_split?.enabled ?? false) &&
 			!templateIsValid(effective.json_split?.filename_template ?? '')
 	);

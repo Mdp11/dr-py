@@ -23,7 +23,7 @@
 	import { templateIsValid } from '$lib/table/columns';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import ExportSettingsPanel from '../Export/ExportSettingsPanel.svelte';
-	import { EXPORT_FORMATS, type ExportFormat, type TableDefinition } from '$lib/api/types';
+	import { EXPORT_FORMATS, isJsonFamily, type ExportFormat, type TableDefinition } from '$lib/api/types';
 
 	const FORMAT_LABELS: Record<ExportFormat, string> = {
 		xlsx: 'Excel (.xlsx)',
@@ -86,7 +86,7 @@
 	// (core/table/split.py::validate_template) — this only saves a round trip
 	// by disabling Export before the request is ever sent.
 	const splitTemplateInvalid = $derived(
-		(format === 'json' || format === 'jsonl') &&
+		isJsonFamily(format) &&
 			(defn?.json_split?.enabled ?? false) &&
 			!templateIsValid(defn?.json_split?.filename_template ?? '')
 	);
