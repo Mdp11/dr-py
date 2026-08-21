@@ -138,7 +138,7 @@ describe('EntryLayoutDialog', () => {
 		]);
 	});
 
-	it('disables Save under a tokenless json_split template and re-enables once ${name} is typed', async () => {
+	it('warns under a tokenless json_split template and clears once ${name} is typed, without ever disabling Save', async () => {
 		const entry: ExporterEntry = {
 			source: { ref: 'tbl-1' },
 			name: 'Split entry',
@@ -153,7 +153,8 @@ describe('EntryLayoutDialog', () => {
 		render({ tableDefinition: baseDefinition(), entry, onSave: () => {}, onClose: () => {} });
 
 		const save = document.querySelector<HTMLButtonElement>('[data-testid="entry-layout-save"]')!;
-		expect(save.disabled).toBe(true);
+		expect(save.disabled).toBe(false);
+		expect(document.querySelector('[data-testid="entry-split-template-warning"]')).not.toBeNull();
 
 		const template = document.querySelector<HTMLInputElement>(
 			'[data-testid="json-split-template"]'
@@ -163,6 +164,52 @@ describe('EntryLayoutDialog', () => {
 		flushSync();
 
 		expect(save.disabled).toBe(false);
+		expect(document.querySelector('[data-testid="entry-split-template-warning"]')).toBeNull();
+	});
+
+	it('saves even while the split filename template is invalid (F-16)', () => {
+		const onSave = vi.fn();
+		const entry: ExporterEntry = {
+			source: { ref: 'tbl-1' },
+			name: 'Split entry',
+			format: 'json',
+			folder: '',
+			columns: [],
+			export_order: [],
+			show_row_numbers: false,
+			export_row_number: null,
+			json_split: { enabled: true, filename_template: 'static' }
+		};
+		render({ tableDefinition: baseDefinition(), entry, onSave, onClose: () => {} });
+
+		expect(document.querySelector('[data-testid="entry-split-template-warning"]')).not.toBeNull();
+		const save = document.querySelector<HTMLButtonElement>('[data-testid="entry-layout-save"]')!;
+		expect(save.disabled).toBe(false);
+		save.click();
+		flushSync();
+
+		// The invalid template is PERSISTED (never-block-Save): the patch
+		// carries json_split with the tokenless template.
+		expect(onSave).toHaveBeenCalledTimes(1);
+		const patch = onSave.mock.calls[0][0] as Partial<ExporterEntry>;
+		expect(patch.json_split?.filename_template).not.toContain('${name}');
+	});
+
+	it('shows no split-template warning when the template is valid', () => {
+		const entry: ExporterEntry = {
+			source: { ref: 'tbl-1' },
+			name: 'Split entry',
+			format: 'json',
+			folder: '',
+			columns: [],
+			export_order: [],
+			show_row_numbers: false,
+			export_row_number: null,
+			json_split: { enabled: true, filename_template: 'DataFor${name}' }
+		};
+		render({ tableDefinition: baseDefinition(), entry, onSave: () => {}, onClose: () => {} });
+
+		expect(document.querySelector('[data-testid="entry-split-template-warning"]')).toBeNull();
 	});
 
 	it('offers four formats and saves json_doc for the object shape', () => {

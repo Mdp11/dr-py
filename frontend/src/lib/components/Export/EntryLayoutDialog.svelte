@@ -74,9 +74,13 @@
 	let format = $state<ExportFormat>(untrack(() => entry.format));
 	let jsonDoc = $state<JsonDocumentOptions | null>(untrack(() => entry.json_doc ?? null));
 
-	// Same belt-and-braces stance as ExportDialog: the server still 422s a
-	// tokenless template — this only saves a round trip. Widened to the
-	// whole json family (json + jsonl), same as ExportDialog.
+	// F-16 (resolved 2026-08-20): this used to DISABLE Save, contradicting
+	// never-block-Save — a presentation setting persists freely and the run is
+	// where the contract is enforced (the export-time 422 names the entry, same
+	// stance as every other template rule; see spec §12's F-10 resolution for
+	// the governing principle). Now it only drives the inline warning below.
+	// The belt-and-braces framing still holds: the server 422s a tokenless
+	// template regardless — the warning just saves a round trip.
 	const splitTemplateInvalid = $derived(
 		isJsonFamily(format) &&
 			(effective.json_split?.enabled ?? false) &&
@@ -84,8 +88,9 @@
 	);
 
 	// Deliberately no Save gating on a missing key column under the object
-	// shape (spec §13) — the inline hint below plus the export-time 422 is
-	// the entire contract. Never add a check here that disables Save.
+	// shape (spec §13), nor on an invalid split filename template (F-16) —
+	// the inline hints (here and below) plus the export-time 422 are the
+	// entire contract. Never add a check here that disables Save.
 	function patchDoc(p: Partial<JsonDocumentOptions>): void {
 		jsonDoc = { ...JSON_DOC_DEFAULTS, ...jsonDoc, ...p };
 	}
@@ -129,7 +134,7 @@
 			{/each}
 		</div>
 
-		{#if format === 'json' || format === 'jsonl'}
+		{#if isJsonFamily(format)}
 			<div class="flex shrink-0 flex-wrap items-center gap-3 text-xs" data-testid="entry-json-doc">
 				{#if format === 'json'}
 					<label class="flex items-center gap-1">
@@ -204,6 +209,11 @@
 		{/if}
 
 		<div class="flex shrink-0 items-center justify-end gap-2 border-t border-border pt-2">
+			{#if splitTemplateInvalid}
+				<span data-testid="entry-split-template-warning" class="text-xs text-muted-foreground/70">
+					split filename template needs {'${name}'} (checked at export)
+				</span>
+			{/if}
 			<button
 				type="button"
 				data-testid="entry-layout-cancel"
@@ -215,8 +225,7 @@
 			<button
 				type="button"
 				data-testid="entry-layout-save"
-				class="rounded bg-primary px-3 py-1 text-xs text-primary-foreground transition-colors hover:bg-primary/80 disabled:opacity-40"
-				disabled={splitTemplateInvalid}
+				class="rounded bg-primary px-3 py-1 text-xs text-primary-foreground transition-colors hover:bg-primary/80"
 				onclick={save}
 			>
 				Save
