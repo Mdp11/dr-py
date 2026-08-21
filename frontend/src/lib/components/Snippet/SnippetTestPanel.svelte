@@ -22,7 +22,7 @@
 	import { ApiError } from '$lib/api/errors';
 	import { getModelRev, type SnippetBoundElement, type SnippetRunPhase } from '$lib/state';
 	import { isResultStale } from '$lib/snippet/console-view';
-	import { entryAvailable, type BoundEntry } from '$lib/snippet/entry-stubs';
+	import { entryAvailable, type ConsoleEntry } from '$lib/snippet/entry-stubs';
 	import type { SnippetSource } from '$lib/api/types';
 	import ElementContextRow from './ElementContextRow.svelte';
 	import SnippetResultView from './SnippetResultView.svelte';
@@ -34,7 +34,7 @@
 		onGoToLine = () => {}
 	}: {
 		snippet: SnippetSource;
-		entry: BoundEntry;
+		entry: ConsoleEntry;
 		entryPoints: string[];
 		onGoToLine?: (line: number) => void;
 	} = $props();

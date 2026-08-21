@@ -953,6 +953,13 @@ export const JsonSplitOptionsSchema = z.object({
 });
 export type JsonSplitOptions = z.infer<typeof JsonSplitOptionsSchema>;
 
+/** A `{ref}` artifact reference — mirror of core/table/schema.py::TableRef.
+ *  For `transform` this is ref-ONLY by design (no inline code, unlike
+ *  SnippetSourceSchema): the snippet must be a committed code_snippet
+ *  artifact defining a one-arg top-level transform(doc). */
+export const TableRefSchema = z.object({ ref: z.string() });
+export type TableRef = z.infer<typeof TableRefSchema>;
+
 export const TableDefinitionSchema = z.object({
 	schema_version: z.number().int().default(1),
 	row_source: RowSourceSchema,
@@ -961,7 +968,11 @@ export const TableDefinitionSchema = z.object({
 	show_row_numbers: z.boolean().default(false),
 	export_order: z.array(z.number().int()).default([]),
 	export_row_number: RowNumberExportOptionsSchema.nullish(),
-	json_split: JsonSplitOptionsSchema.nullish()
+	json_split: JsonSplitOptionsSchema.nullish(),
+	// JSON-family only (json/jsonl); strict at export time (422/503/429 from
+	// POST /exports/run), never validated client-side, never blocks Save.
+	// `null` means "no transform" — never "inherit the table's" (no-bleed).
+	transform: TableRefSchema.nullish()
 });
 export type TableDefinition = z.infer<typeof TableDefinitionSchema>;
 export type Column = z.infer<typeof ColumnSchema>;
@@ -1015,7 +1026,11 @@ export const ExporterEntrySchema = z.object({
 	show_row_numbers: z.boolean().default(false),
 	export_row_number: RowNumberExportOptionsSchema.nullish(),
 	json_split: JsonSplitOptionsSchema.nullish(),
-	json_doc: JsonDocumentOptionsSchema.nullish()
+	json_doc: JsonDocumentOptionsSchema.nullish(),
+	// JSON-family only (json/jsonl); strict at export time (422/503/429 from
+	// POST /exports/run), never validated client-side, never blocks Save.
+	// `null` means "no transform" — never "inherit the table's" (no-bleed).
+	transform: TableRefSchema.nullish()
 });
 export type ExporterEntry = z.infer<typeof ExporterEntrySchema>;
 

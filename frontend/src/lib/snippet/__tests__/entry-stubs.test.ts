@@ -40,3 +40,15 @@ describe('ENTRY_HINTS', () => {
 		expect(ENTRY_HINTS.step).toContain('def step(el):');
 	});
 });
+
+describe('transform entry', () => {
+	it('is gated on entry_points like value/step', () => {
+		expect(entryAvailable('transform', ['script', 'transform'])).toBe(true);
+		expect(entryAvailable('transform', ['script', 'value'])).toBe(false);
+		expect(entryAvailable('transform', undefined)).toBe(false);
+	});
+	it('has a hint and a one-arg stub', () => {
+		expect(ENTRY_HINTS.transform).toContain('transform');
+		expect(withStub('', 'transform')).toContain('def transform(doc):');
+	});
+});

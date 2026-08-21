@@ -12,7 +12,7 @@
 	import { getCachedElements, getMultiSelectedIds, getSelection } from '$lib/state';
 	import { listElementsPage } from '$lib/api/model-read';
 	import { elementDisplayName } from '$lib/util/element-name';
-	import type { BoundEntry } from '$lib/snippet/entry-stubs';
+	import type { ConsoleEntry } from '$lib/snippet/entry-stubs';
 	import type { SnippetBoundElement } from '$lib/state';
 	import type { Element } from '$lib/api/types';
 
@@ -26,7 +26,7 @@
 		onRemove,
 		onClear
 	}: {
-		entry: BoundEntry;
+		entry: ConsoleEntry;
 		elements: SnippetBoundElement[];
 		onAdd: (id: string, label: string) => void;
 		onRemove: (id: string) => void;

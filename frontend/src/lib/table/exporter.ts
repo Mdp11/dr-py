@@ -42,6 +42,10 @@ export function applyEntryOverrides(defn: TableDefinition, entry: ExporterEntry)
 export function overridesFromDefinition(
 	defn: TableDefinition
 ): Pick<
+	// `transform` deliberately excluded: it is a functional contract owned by
+	// the entry-row picker, not table presentation, and this Pick<> feeds the
+	// layout dialog's save patch — including it here would let a layout save
+	// clobber an entry's already-picked transform. See entryForTable below.
 	ExporterEntry,
 	'columns' | 'export_order' | 'show_row_numbers' | 'export_row_number' | 'json_split'
 > {
@@ -81,6 +85,10 @@ export function entryForTable(tableId: string, defn: TableDefinition, name: stri
 		name,
 		format: 'xlsx',
 		folder: '',
+		// Deliberately NOT copied from the table at add time: a transform is a
+		// functional contract, not cosmetic presentation, and entry `null`
+		// means "no transform" (no-bleed; §8).
+		transform: null,
 		...overridesFromDefinition(defn)
 	};
 }
