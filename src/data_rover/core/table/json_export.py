@@ -166,11 +166,15 @@ def render_cell(model: Model, cell: Cell, mode: str) -> object:
     return {"$error": NOT_COMPUTED_MESSAGE}
 
 
-def jsonl_bytes(docs: list[dict[str, object]]) -> bytes:
-    """One compact object per line, `\\n`-terminated (spec §6). A stream of
+def jsonl_bytes(docs: list[object]) -> bytes:
+    """One compact value per line, `\\n`-terminated (spec §6). A stream of
     objects is inherently compact and array-like, which is why
     `json_doc.shape`/`pretty` are ignored with tolerance for this format —
-    only `on_error` (see `contains_error_marker`) applies."""
+    only `on_error` (see `contains_error_marker`) applies. `docs` is typed
+    `list[object]`, not `list[dict]`: pre-transform every element is a
+    rendered row object, but a Phase 4 `transform(doc)` (spec §8) may
+    return a list of ANY JSON value — `json.dumps` handles that fine, and a
+    post-transform line need not be an object."""
     return b"".join(
         json.dumps(d, ensure_ascii=False, separators=(",", ":")).encode("utf-8") + b"\n"
         for d in docs
