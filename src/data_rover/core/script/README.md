@@ -328,9 +328,9 @@ call loop reading newline-JSON frames from the host:
   `NotFoundError` a direct fetch always produced. `"doc"` (Exporter v2 Phase
   4, additive; always present in the frame) carries a `"transform"` call's
   input document — the already-rendered/shaped export payload, JSON-decoded
-  host-side before it is sent — and is `null` for a `"value"`/`"step"` call,
-  which carries `[]` for `"element_ids"` on a `"transform"` call instead (the
-  snippet reads `doc`, never bound elements). The whole per-call sequence — priming the read
+  host-side before it is sent. `"doc"` is `null` for a `"value"`/`"step"`
+  call; conversely `"element_ids"` is always `[]` on a `"transform"` call
+  (the snippet reads `doc`, never bound elements). The whole per-call sequence — priming the read
   memo from `"elements"`, resolving the named entry function, for `value`/
   `step` fetching any remaining `Element`s by id and invoking it (`value`
   gets the whole list, `step` gets the single bound element) or for

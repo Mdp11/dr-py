@@ -188,6 +188,16 @@
 							})}
 					/>
 				</span>
+			{:else if defn?.transform}
+				<!-- A transform left behind by a format flip: the server 422s it at run
+				     time (a functional contract is never tolerate-and-ignored, spec §8),
+				     so surface it rather than hiding the state. Never blocks Export. -->
+				<span
+					class="ml-auto shrink-0 text-xs text-warning"
+					data-testid="table-export-transform-warning"
+				>
+					transform needs a JSON format
+				</span>
 			{/if}
 		</div>
 

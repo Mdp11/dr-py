@@ -164,10 +164,15 @@ class TransformHost:
         if self._released:
             return
         self._released = True
-        for s in self._sessions.values():
-            s.close()
-        self._sessions.clear()
-        concurrency_guard.release_global()
+        # try/finally: a raising session.close() must not leak the global
+        # interactive slot forever (`_released` is already set above, so a
+        # retry after a raise here would silently no-op and never release).
+        try:
+            for s in self._sessions.values():
+                s.close()
+            self._sessions.clear()
+        finally:
+            concurrency_guard.release_global()
 
 
 def open_transform_host(

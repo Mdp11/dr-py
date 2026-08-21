@@ -100,6 +100,88 @@ def test_missing_transform_snippet_is_422_up_front(client):
     assert "doc" in r.json()["detail"]
 
 
+# §17.4 regression pin ("a transform must not be able to launder an error
+# marker past `_check_on_error` by transforming it away") — see
+# `table_export_engine.run_table_export`'s docstring. `SCRIPT_TABLE_PAYLOAD`
+# from `test_exports_route.py` produces a clean-with-no-runner error cell,
+# but this module's `client` fixture DOES install a TrustedRunner (needed
+# for the transform itself to run), so a script column that just returns a
+# value would compute cleanly here. Instead this uses the
+# conditional/unconditional-raise pattern from
+# `test_script_embedding_routes.py` (`def value(els): raise RuntimeError(...)`)
+# to produce a real in-band `{"$error": ...}` cell even WITH a working
+# runner in play.
+STRIP_PAYLOAD = {
+    "row_source": {"kind": "scope", "types": ["Block"]},
+    "columns": [
+        {"kind": "element", "source": {"kind": "row"}, "header": "Block"},
+        {
+            "kind": "script",
+            "snippet": {
+                "definition": {
+                    "code": "def value(elements):\n    raise RuntimeError('boom')\n"
+                }
+            },
+            "header": "Computed",
+        },
+    ],
+}
+
+
+def _mk_erroring_table(client, name):
+    r = client.post(
+        papi("/artifacts"),
+        json={"kind": "table", "name": name, "payload": STRIP_PAYLOAD},
+        headers=AUTH_HEADERS,
+    )
+    assert r.status_code == 201
+    return r.json()["id"]
+
+
+STRIP = "def transform(doc):\n    return []\n"
+
+
+def test_on_error_fail_check_runs_before_transform_strips_markers(
+    client, monkeypatch: pytest.MonkeyPatch
+):
+    """A transform that strips every `{"$error": ...}` marker (returns `[]`)
+    must not launder a `json_doc.on_error: "fail"` export into a clean 200 —
+    `_check_on_error` must run on the RENDERED document BEFORE the transform
+    gets a chance to touch it (spec §17.4).
+
+    Pins `snippet_sweep_sync=True` (the idiom `test_tables_script_errors.py`
+    and friends use) so the erroring cell's sweep settles inline on the
+    request thread instead of leaving the export's completeness probe
+    reporting 202/pending — this test is about the on_error/transform
+    ordering, not about the sweep's own async lifecycle."""
+    monkeypatch.setenv("DATA_ROVER_SNIPPET_SWEEP_SYNC", "true")
+    monkeypatch.setenv("DATA_ROVER_SNIPPET_SWEEP_WORKERS", "1")
+    _bootstrap_model(client)
+    t = _mk_erroring_table(client, "flaky")
+    snip = _mk_snippet(client, "strip", STRIP)
+    art = _mk_export(
+        client,
+        [{
+            "source": {"ref": t}, "name": "strict", "format": "json",
+            "json_doc": {"on_error": "fail"}, "transform": {"ref": snip},
+        }],
+    )
+    # The first response is a 202 even in sync-sweep mode: the export's
+    # completeness probe runs BEFORE the (inline) sweep populates the cache,
+    # so the sweep's own fill only lands in time for a RETRY (see
+    # `run_table_export`'s "FIX B" comment) — same poll-until-settled idiom
+    # `_evaluate_until_ready` uses elsewhere.
+    for _ in range(10):
+        r = _run(client, art)
+        if r.status_code != 202:
+            break
+    else:
+        raise AssertionError("export never settled")
+    assert r.status_code == 422
+    assert "strict" in r.json()["detail"]
+    assert "error" in r.json()["detail"].lower()
+
+
 def test_split_entry_transform_called_once_per_file(client):
     _bootstrap_model(client)  # 3 Block elements -> 3 split files
     t = _mk_table(client, "eps")

@@ -44,6 +44,7 @@ from data_rover.core.table.export_layout import (
     export_definition,
     export_layout,
 )
+from data_rover.core.table.exporter import JSON_FAMILY
 from data_rover.core.table.json_export import render_json
 from data_rover.core.table.resolve import resolve_table_refs, table_has_script
 from data_rover.core.table.schema import TABLE_ADAPTER, TableDefinition
@@ -553,9 +554,26 @@ def export_table(
                 name = row.name
         transform_code: str | None = None
         if defn.transform is not None:
+            # Cheap pre-check, mirroring `exports.py`'s per-entry pass: a
+            # format the engine would reject anyway must not first cost a DB
+            # hit (`_resolve_transform_code`) or an interactive concurrency
+            # slot (`open_transform_host`) — the engine's own guard inside
+            # `run_table_export` stays as defense in depth.
+            if payload.format not in JSON_FAMILY:
+                raise ValueError(
+                    f"{name}: transform is only supported for JSON-family "
+                    f"formats, not {payload.format!r}"
+                )
             transform_code = _resolve_transform_code(
                 db, project_id, defn.transform.ref, name
             )
+            # Two-slot reality: this holds one interactive slot for the
+            # transform run itself, while `run_table_export`'s own
+            # `open_script_context` below may draw a SECOND slot for the
+            # table's script columns. No deadlock — a script context
+            # degrades to unavailable/cache-only rather than blocking on a
+            # slot — but a transform-bearing export of a scripted table
+            # consumes two of `snippet_concurrency`.
             transform_host = open_transform_host(runner, model, settings)
         result = run_table_export(
             session=session,

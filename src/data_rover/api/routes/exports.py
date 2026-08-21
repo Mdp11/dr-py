@@ -313,6 +313,13 @@ def _execute_export(
     transform_host = None
     if any(c is not None for c in transform_codes):
         try:
+            # Two-slot reality: this holds one interactive slot for the
+            # whole run's transform calls, while each entry's own
+            # `run_table_export` -> `open_script_context` may draw a SECOND
+            # slot for that table's script columns. No deadlock — a script
+            # context degrades to unavailable/cache-only rather than
+            # blocking on a slot — but a transform-bearing export of a
+            # scripted table consumes two of `snippet_concurrency`.
             transform_host = open_transform_host(runner, model, settings)
         except TransformUnavailableError as exc:
             raise HTTPException(

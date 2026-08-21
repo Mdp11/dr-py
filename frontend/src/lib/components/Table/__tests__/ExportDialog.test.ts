@@ -679,6 +679,15 @@ describe('ExportDialog', () => {
 		expect(byTestId(document, 'transform-picker')).toBeNull();
 	});
 
+	// Parity with ExporterTab's per-entry warning (Task 9): a format flip away
+	// from JSON-family must not silently hide a transform the server will 422
+	// at run time (spec §8) — surface it instead.
+	it('shows a warning instead of the picker when xlsx carries a leftover transform', async () => {
+		await open('xlsx', { transform: { ref: 'snip-1' } });
+		expect(byTestId(document, 'transform-picker')).toBeNull();
+		expect(byTestId(document, 'table-export-transform-warning')).toBeTruthy();
+	});
+
 	it('Cancel restores the transform captured when the dialog opened', async () => {
 		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({
 			items: [TRANSFORM_SNIPPET_HEADER]
