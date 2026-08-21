@@ -294,10 +294,15 @@ would have just trained users to ignore the warnings badge.
 sandbox-agnostic session handle: `boot_error: ScriptError | None` (set if the
 facade+module `exec` itself failed at open, or set LATER if the guest dies
 mid-session — either way every subsequent call must report that same
-error), `call(entry, element_ids) -> CallResult`, and an idempotent
-`close()` ("discards the underlying instance (never pooled again)").
-`CallResult.value` is the already-validated tagged wire payload (never a
-repr string); it is `None` iff `.error` is set.
+error), `call(entry, element_ids, *, doc=None) -> CallResult`, and an
+idempotent `close()` ("discards the underlying instance (never pooled
+again)"). `CallResult.value` is the already-validated tagged wire payload
+(never a repr string); it is `None` iff `.error` is set. The keyword-only
+`doc` (Exporter v2 Phase 4) is the `"transform"` entry's input document — any
+already-JSON-decoded value — and is ignored for `"value"`/`"step"` calls;
+`element_ids` is always empty for a `"transform"` call (the snippet reads
+`doc`, not bound elements). The export engine's `TransformHost`
+(`api/table_export_engine.py`) is the only caller that ever passes it.
 
 **`mode: "embedded"` start message.** `_WasmSnippetSession.__init__`
 (`api/script_runner.py`) pops a warm pool instance and sends ONE start
@@ -310,20 +315,27 @@ see above), emits a boot ack
 (`{"boot": true, "error": ...}`), and — if the exec didn't raise — enters a
 call loop reading newline-JSON frames from the host:
 
-- `{"call": {"entry": "value"|"step", "element_ids": [...], "elements":
-  [<projection>, ...]}}` — the additive `"elements"` field is the root
-  piggyback (trip-collapse): the host projects each bound root it can still
-  find in the live model (`bridge.py`'s `project_roots`) and ships those
-  projections alongside the ids, so a property-math cell that never
-  navigates past its bound element(s) costs zero bridge round trips. An id
-  the host could not project (e.g. a benign race — the root was deleted
-  between binding the call and running it) is simply ABSENT from
-  `"elements"`, never a `None` placeholder; the guest's own fetch for that
-  id then goes to the bridge and raises the same `NotFoundError` a direct
-  fetch always produced. The whole per-call sequence — priming the read
-  memo from `"elements"`, resolving the named entry function, fetching any
-  remaining `Element`s by id, invoking it (`value` gets the whole list;
-  `step` gets the single bound element), and serializing the result via
+- `{"call": {"entry": "value"|"step"|"transform", "element_ids": [...],
+  "elements": [<projection>, ...], "doc": <any JSON value> | null}}` — the
+  additive `"elements"` field is the root piggyback (trip-collapse): the host
+  projects each bound root it can still find in the live model (`bridge.py`'s
+  `project_roots`) and ships those projections alongside the ids, so a
+  property-math cell that never navigates past its bound element(s) costs
+  zero bridge round trips. An id the host could not project (e.g. a benign
+  race — the root was deleted between binding the call and running it) is
+  simply ABSENT from `"elements"`, never a `None` placeholder; the guest's
+  own fetch for that id then goes to the bridge and raises the same
+  `NotFoundError` a direct fetch always produced. `"doc"` (Exporter v2 Phase
+  4, additive; always present in the frame) carries a `"transform"` call's
+  input document — the already-rendered/shaped export payload, JSON-decoded
+  host-side before it is sent — and is `null` for a `"value"`/`"step"` call,
+  which carries `[]` for `"element_ids"` on a `"transform"` call instead (the
+  snippet reads `doc`, never bound elements). The whole per-call sequence — priming the read
+  memo from `"elements"`, resolving the named entry function, for `value`/
+  `step` fetching any remaining `Element`s by id and invoking it (`value`
+  gets the whole list, `step` gets the single bound element) or for
+  `transform` invoking it with `doc` directly (no element fetch at all —
+  `element_ids` is always empty), and serializing the result via
   `_dr_serialize_entry_result` — is driven by ONE guest-side function,
   `facade_src.py`'s `_dr_call_entry`, called by BOTH hosts (the WASM
   bootstrap loop above and `tests/script/trusted_runner.py`'s
@@ -357,6 +369,7 @@ the other must change with it:
 | `value`, list of scalars | `{"kind": "scalars", "values": [...]}` |
 | `value`, single `Element` | `{"kind": "element", "id": str}` |
 | `value`, list of `Element`s | `{"kind": "elements", "ids": [str, ...]}` |
+| `transform` | `{"kind": "json", "value": <any JSON value>}` — the replacement document `transform(doc)` returns (dict/list/str/int/float/bool/None, nested up to 100 deep; tuples admitted and serialized as arrays); guest-side `_dr_check_json` recurses the return value BEFORE tagging it, so a bad shape (a non-str dict key, an unsupported type) raises `ValueError` guest-side and surfaces as a `"runtime"` `CallResult.error` rather than crashing the transport on `json.dumps`. `"json"` is TRANSFORM-EXCLUSIVE on the host side too: `decode_call_payload` only accepts the `"json"` tag when `entry == "transform"` — `value`/`step` keep their own closed tag sets, so a hostile guest cannot smuggle an arbitrary structure into an element/scalar consumer by claiming `"kind": "json"` on a `value`/`step` call. Size limits (`snippet_transform_max_bytes`, both directions) are the HOST's concern (`TransformHost` in `api/table_export_engine.py`), not this wire-shape check. |
 
 `decode_call_payload` re-validates every field's shape on the host — the
 guest is untrusted input, same stance as every other bridge response — and
@@ -372,7 +385,11 @@ parameter at all). Any `dr.create`/`connect`/`disconnect`/`Element.set`/
 `dr.ReadOnlyError` in the guest, exactly like a console `"value"`/`"step"`
 run (see "The read-only / dry-run stance" above) — the entry-point calling
 convention is otherwise identical between a console run and a session call,
-just invoked once per run there vs. repeatedly per warm session here.
+just invoked once per run there vs. repeatedly per warm session here. A
+`"transform"` call is read-only for the identical reason: `TransformHost`
+(`api/table_export_engine.py`) opens its sessions through the same
+`open_session`, so a `transform(doc)` snippet may still call `dr.*` reads
+normally (spec §8) but any write raises `dr.ReadOnlyError` too.
 
 **`ScriptEvalContext`** (`core/script/embed.py`) is the per-request state
 that ties embedded evaluation together: one instance is built per top-level

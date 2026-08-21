@@ -242,6 +242,26 @@ follows a pessimistic **check-out → stage → commit** loop (Spec B):
      Neither input validates client-side: per the strict-at-export /
      never-block-Save rule, a bad token or an absolute/traversal folder saves
      fine and only 422s at `POST /exports/run`, naming the offending entry.
+   - **The transform hook (Exporter v2 Phase 4).** Each JSON-family entry row
+     (`isJsonFamily(entry.format)`) shows `Export/TransformPicker.svelte`, a
+     ref-only combobox (the reusable core of `SnippetSourceEditor`'s ref mode,
+     without its inline-code half — `transform` is `TableRef`-only by schema)
+     over `entry.transform`; its options are committed `code_snippet`
+     artifacts whose server-derived `entry_points` include `'transform'`
+     (`entryAvailable`, `referenceableArtifactHeaders` — staged temp ids never
+     reach a payload). Flipping an entry to `xlsx`/`csv` while it still holds
+     a `transform` does not clear it (the server 422s it at run time — a
+     functional contract is never tolerate-and-ignored, spec §8) — the row
+     shows a `export-entry-{i}-transform-warning` hint instead of silently
+     dropping state the user might restore by flipping the format back.
+     `entryForTable` deliberately does NOT copy the source table's own
+     `transform` at add time (`transform: null`): a transform is a functional
+     contract, not cosmetic presentation, so no-bleed applies at add-time too,
+     not just at render time. In `lib/snippet/entry-stubs.ts`,
+     `BoundEntry = 'value' | 'step' | 'transform'` gained the third member and
+     `ConsoleEntry = Exclude<BoundEntry, 'transform'>` carves out the subset a
+     console/embedded run (`POST /snippets/run`) still supports — a console
+     run has no document to bind `transform` against.
    - **F-11 (deliberate): no `usedRefs` filter on the add-table picker.**
      `ExporterTab.svelte`'s `availableTables` lists every table with no
      already-added filter, so the same table can be added more than once —
@@ -914,7 +934,13 @@ shared across formats; only the rename differs (xlsx writes `export.header`,
 JSON writes `json_export.key`, so one row never shows two rename boxes). JSON
 keeps its per-column extras (`json_export: {key, item_key, value, group}`) and
 its live sample pane. The overrides are part of the saved definition, so a table
-exported the same way every week is configured once. `ExportSettingsPanel`
+exported the same way every week is configured once. When the selected format is
+JSON-family, the format-toggle row also shows a `TransformPicker` (Exporter v2
+Phase 4) bound to the table's OWN `TableDefinition.transform` — a SEPARATE field
+from any exporter entry's `transform`: an exporter entry built from this table
+never inherits it (`entryForTable` sets `transform: null`, not a copy), and this
+picker never reflects an entry's choice either — the no-bleed rule holds in both
+directions, same as every other `overridden_table` field. `ExportSettingsPanel`
 gates every JSON-only control on a derived `jsonFamily` (`format === 'json' ||
 format === 'jsonl'`) rather than `format === 'json'` alone, since JSONL renders
 through the same per-column extras and live sample pane as JSON while CSV
