@@ -250,16 +250,33 @@ follows a pessimistic **check-out → stage → commit** loop (Spec B):
      colliding output names/folders at export time
      (`routes/exports.py`'s `_dedupe_path`), so a duplicate entry was already
      legal server-side — the picker's old `usedRefs` filter was blocking a
-     case the backend explicitly supported. Do not reintroduce it.
+     case the backend explicitly supported. Do not reintroduce it. The picker
+     itself is `Export/AddTablePicker.svelte` (P-15.1): a client-side
+     searchable combobox (`add-table-input`/`add-table-option-{id}` testids)
+     that replaced the bare `<select>` — same ARIA pattern as
+     `Sidebar/Search.svelte`, but candidates are the in-memory committed-table
+     headers so there is no debounce and it shows every table on focus; it
+     stays deliberately unfiltered against already-added entries, per F-11
+     above.
    - **The empty picker explains itself.** `availableTables` goes through
      `referenceableArtifactHeaders`, which drops staged-but-uncommitted
      creates (temp ids must never reach a payload), and a project can simply
-     have no tables — either way the select is disabled, and a disabled
-     `<select>` swallows clicks with no event and no console output, which
+     have no tables — either way the picker input is disabled, and a disabled
+     input swallows clicks with no event and no console output, which
      reads as "the button is broken". A hint beside it
      (`add-table-empty-hint`) says why, distinguishing "no tables in this
      project yet" from "your tables are staged — commit them first" (the
      latter detected via the overlay list, temp ids included).
+   - **The Export button is ungated (Exporter v2 Phase 3).** It no longer
+     requires a clean, committed draft: `exportDisabled` only checks for zero
+     entries (disabled with the title "Add at least one table first"). A
+     clean committed draft still runs by `artifact_id` (`runExporter`); any
+     dirty or never-committed draft ships its `{schema_version, output,
+entries}` inline as a `definition` via `runExporterDraft`
+     (`lib/api/exports.ts`), which the backend validates and runs exactly
+     like a committed payload (`RunExportIn.definition`, spec §9.1).
+     Referenced tables still evaluate from their own COMMITTED definitions
+     either way — only the exporter's own presentation travels as a draft.
    - **The lease is per editor tab.** Opening a saved artifact takes an
      `art:<id>` exclusive lease (`acquireArtifactLease`); a denial does not
      refuse the open, it renders that tab **unsaveable and read-only** behind
@@ -926,8 +943,11 @@ json family — read/written directly against the entry's `json_doc` rather
 than through the panel; the live sample below them still renders the array
 shape regardless of `shape`, since `POST /tables/json-preview` predates
 document shaping. Per the strict-at-export / never-block-Save rule, Save is
-never gated on a missing `key_column` under the object shape; the inline hint
-plus the export-time 422 is the entire contract.
+never gated on a missing `key_column` under the object shape, nor (F-16,
+resolved) on an invalid `json_split` filename template — that check used to
+disable the Save button and now only drives an inline
+`entry-split-template-warning` hint next to it; the inline hint plus the
+export-time 422 is the entire contract.
 
 - **`lib/table/export-layout.ts`** mirrors `core/table/export_layout.py`'s
   normalizer — `ROW_NUMBER_SLOT` (`-1`), `columnIncluded` (tri-state `include`:

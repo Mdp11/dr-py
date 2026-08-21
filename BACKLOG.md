@@ -27,7 +27,7 @@ spec's phase table (`R`). Anything older than the last few sessions is **unverif
 against current code** — confirm before acting on it. Line numbers drift; treat them as
 hints.
 
-Last updated: 2026-08-20 · repo head at time of writing: `main` at `1c95ba3`
+Last updated: 2026-08-21 · repo head at time of writing: `main` at `1c95ba3`
 (top-bar-restructure merged). The 2026-08-18 additions were a batch of owner notes: P-10
 gained five concrete sub-items, P-15 → P-21 and U-9 are new, and T-1 was retired as stale
 while verifying them. The 2026-08-19 additions are two more owner notes: P-22 (top bar
@@ -42,7 +42,13 @@ export formats — CSV and JSON Lines, joining xlsx/JSON on both `POST /tables/e
 `POST /exports/run` — plus per-entry `json_doc` document shaping (array/object shape with
 a data-derived key column, pretty-print, on-error strictness); Phases 3–5 (the real
 add-table picker, draft/uncommitted export, the `transform` hook, bundle-draft export)
-remain open, see P-15.1/P-16.
+remain open, see P-15.1/P-16. A follow-up pass on `feat/exporter-v2-phase3` (Exporter v2
+Phase 3) ships the automation surface: draft exporter runs (`RunExportIn.definition`),
+`GET /exports/run-by-name` for CI, the P-15.1 add-table picker (`AddTablePicker.svelte`),
+an ungated Export button (dirty/uncommitted drafts run inline), and the F-16 fix (Save no
+longer blocks on a bad split template) — closing P-15.1, the exporter half of P-16, and F-16.
+Phases 4–5 (the `transform` hook, bundle-draft export) remain open; Phase 5 needs
+re-confirmation from the owner before starting.
 
 ---
 
@@ -268,14 +274,14 @@ Three follow-ups on the shipped `custom_export` artefact (owner notes, 2026-08-1
 Independent of each other: .1 is frontend-only, .2 and .3 touch the wire schema and
 `POST /exports/run`.
 
-**P-15.1 · A real add-table picker.** `open` · scheduled: Exporter v2 Phase 3.
-`Export/ExporterTab.svelte:393-407` (renamed from `CustomExportTab.svelte` in the rename
-sweep) is a bare `<select>` with one `<option>` per table. Wanted: the visual treatment of
-`ExportArtifactsDialog.svelte`, plus **search-by-name with autocomplete** the way element
-search already works (`Sidebar/Search.svelte` is the typeahead to mirror). **F-11** (already
-resolved, see below) lived in the same file's `usedRefs` filter, which forbade the duplicate
-entries the server explicitly supports — that part is settled; only the picker's visual
-treatment and search remain open here.
+**P-15.1 · A real add-table picker.** `done` (2026-08-21, feat/exporter-v2-phase3).
+Landed as `Export/AddTablePicker.svelte`: a client-side searchable combobox (same ARIA
+pattern as `Sidebar/Search.svelte`, no debounce since candidates are already in memory)
+replacing the bare `<select>` that used to live at `Export/ExporterTab.svelte:393-407`
+(renamed from `CustomExportTab.svelte` in the rename sweep). **F-11** (already resolved,
+see below) lived in the same file's `usedRefs` filter, which forbade the duplicate
+entries the server explicitly supports — that part was already settled, and the new
+picker stays deliberately unfiltered against already-added entries per the same note.
 
 **P-15.2 · Override the exported file name.** `done` (2026-08-19, feat/exporter-v2-phase1).
 Landed as `ExporterDefinition.output.filename`, a per-artefact template rendered through
@@ -290,6 +296,15 @@ each folder — keyed on the full member path — rather than globally, exactly 
 Design settled in `docs/superpowers/specs/2026-08-19-custom-export-v2-design.md` §9.1
 (exporter half: draft runs / run-by-name on `POST /exports/run`) and §10 (bundle-draft
 export half, phased last); lands in Exporter v2 Phases 3/5.
+
+**Exporter half (§9.1) `done` (2026-08-21, feat/exporter-v2-phase3).** `RunExportIn` now
+takes exactly one of `artifact_id`/`definition` (422 otherwise) so a dirty or
+never-committed draft runs inline through `POST /exports/run`; `GET
+/exports/run-by-name?name=` runs a committed exporter by name for CI (404 unknown, 409 with
+candidate ids on ambiguity); both share `_execute_export`. The frontend's Export button is
+now ungated on the picker side too — see P-15.1. The bundle-draft export half (§10) remains
+open, scheduled for Phase 5 (see the Phase 3 changelog note below: Phase 5 needs
+re-confirmation before starting).
 
 Both a custom export run (owner item 8.3) and an ordinary artefact **bundle** export
 (item 10) should work against **staged, uncommitted** state. Today neither can: both read
@@ -703,17 +718,16 @@ Shipped, all eleven:
   "search result dragged into a folder"`), which also re-verifies the row drag off the new
   markup in a real browser.
 
-### F-16 · `EntryLayoutDialog`'s Save gate on a bad split template — tension with never-block-Save · `open` · *2026-08-20*
-`Export/EntryLayoutDialog.svelte`'s `splitTemplateInvalid` disables its own Save button while
+### F-16 · `EntryLayoutDialog`'s Save gate on a bad split template — tension with never-block-Save · `done` (2026-08-21, feat/exporter-v2-phase3)
+`Export/EntryLayoutDialog.svelte`'s `splitTemplateInvalid` disabled its own Save button while
 the working copy's split filename template is tokenless — F-10 (above) already argued this is
 belt-and-braces on a dialog-scoped edit buffer, not a Save-time block on the artifact itself,
 and not a second enforcement point that could reject a payload Save would otherwise accept.
-Exporter v2 Phase 2 widens the same gate from `format === 'json'` to the whole json family
-(`json || jsonl`), so it now also disables Save for a `jsonl` entry with a bad split template.
-Noting it here rather than re-litigating F-10: it still sits in tension with "never block
-Save; all strictness is a 422 at export time" as a general principle, and the standalone
-table dialog's equivalent gate lives on **Export**, not Save — a different action on a
-different surface. Worth revisiting whether the entry dialog's gate belongs on Save at all.
+Exporter v2 Phase 2 widened the same gate from `format === 'json'` to the whole json family
+(`json || jsonl`), so it also disabled Save for a `jsonl` entry with a bad split template.
+Resolved in Phase 3: Save no longer blocks on it (matching F-10's principle and the object-shape
+`key_column` hint's stance) — an inline `entry-split-template-warning` next to Save replaces the
+gate, and enforcement stays the export-time 422.
 
 ---
 
@@ -843,6 +857,10 @@ recorded rather than silent — see `csv_export.py`'s module docstring (the "For
 injection" paragraph, added alongside this entry) for the full reasoning both ways. Worth
 revisiting if a consumer ever reports opening exported CSVs directly in a spreadsheet tool
 as a primary workflow rather than an edge case.
+
+The owner confirmed this keep-unsanitized posture on 2026-08-20 (Exporter v2 Phase 3 review):
+the decision is closed, not merely recorded — no mitigation is planned unless the "revisiting"
+trigger above actually fires.
 
 ---
 
