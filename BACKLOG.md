@@ -873,11 +873,12 @@ built client-side with an unbounded `entries` list. Each entry evaluates a whole
 synchronously, in one request: an attacker-sized `entries` array could chain N such evaluations
 into a single call with no server-side ceiling. Fixed in Exporter v2 Phase 4 by capping
 `ExporterDefinition.entries` at `MAX_EXPORTER_ENTRIES = 50` (`core/table/exporter.py`,
-`Field(max_length=50)`, spec §17.1) — a schema bound in the `SNIPPET_MAX_CODE_BYTES` tradition,
-enforced at artifact-save validation, deliberately NOT an export-time strictness rule (it rejects
-a `POST /artifacts` save, unlike every other exporter guard in this file, which is strict only at
-export time and never blocks Save — the never-block-Save rule governs strictness only export-time
-rendering can detect, and an oversized entry list is detectable at save). Surfaced during the
+`Field(max_length=50)`, spec §17.1) — a schema bound in the `SNIPPET_MAX_CODE_BYTES` tradition:
+it rejects at `POST /artifacts` save AND at `RunExportIn.definition` request-parse time (both go
+through the same `ExporterDefinition` type), deliberately NOT an export-time strictness rule,
+unlike every other exporter guard in this file — the never-block-Save rule governs strictness
+only export-time rendering can detect, and an oversized entry list is detectable earlier than
+that on both paths. Surfaced during the
 Exporter v2 Phase 3 review; closed as the first task of Phase 4.
 
 ---
