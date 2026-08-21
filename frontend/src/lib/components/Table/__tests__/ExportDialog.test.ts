@@ -28,6 +28,8 @@ import {
 	ensureTableDraft,
 	getTableDraft,
 	getTableLoading,
+	loadArtifacts,
+	resetArtifacts,
 	setTableSort,
 	updateTableDefinition
 } from '$lib/state';
@@ -39,6 +41,19 @@ const TAB_ID = 'tbl:draft:export-dialog-test';
  *  draft can be clean AND carry real columns — and the shape the dirty-flag
  *  regression actually hurts (see the Cancel tests). */
 const SAVED_TAB_ID = 'tbl:art-export-dialog';
+
+/** A committed code_snippet artifact whose server-derived entry_points cover
+ *  `transform` — the transform picker's option pool (Phase 4 task 10), same
+ *  fixture shape as `ExporterTab.test.ts`'s `TRANSFORM_SNIPPET_HEADER`. */
+const TRANSFORM_SNIPPET_HEADER = {
+	id: 'snip-1',
+	kind: 'code_snippet',
+	name: 'Redact PII',
+	artifact_rev: 1,
+	updated_at: '',
+	updated_by: null,
+	entry_points: ['script', 'transform']
+};
 
 const EMPTY_PAGE = {
 	columns: [],
@@ -96,6 +111,7 @@ function defn(): TableDefinition {
 // run is free of real, unmocked network calls against the (absent) dev backend.
 let previewSpy: MockInstance<typeof tablesApi.previewTableJson>;
 beforeEach(() => {
+	resetArtifacts();
 	vi.spyOn(tablesApi, 'evaluateTable').mockResolvedValue(EMPTY_PAGE);
 	previewSpy = vi
 		.spyOn(tablesApi, 'previewTableJson')
@@ -209,6 +225,7 @@ afterEach(() => {
 	// otherwise land on the real, absent dev backend.
 	closeTableDraft(TAB_ID);
 	closeTableDraft(SAVED_TAB_ID);
+	resetArtifacts();
 	vi.restoreAllMocks();
 });
 
@@ -633,5 +650,52 @@ describe('ExportDialog', () => {
 		expect(byTestId(document, 'json-split-enabled')).toBeTruthy();
 		await waitFor(() => previewSpy.mock.calls.length > 0);
 		expect(byTestId(document, 'json-preview')).toBeTruthy();
+	});
+
+	// --- transform picker (exporter-v2 phase 4 task 10) ------------------------
+	//
+	// This edits the table's OWN `transform` (standalone `POST /tables/export`
+	// only — an exporter entry never inherits it, no-bleed §8); strictness is
+	// server-side at export time.
+
+	it('shows the transform picker for a JSON-family format and picking one writes transform', async () => {
+		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({
+			items: [TRANSFORM_SNIPPET_HEADER]
+		});
+		await loadArtifacts();
+		await open('json');
+		const picker = byTestId(document, 'transform-picker') as HTMLSelectElement;
+		expect(picker).toBeTruthy();
+
+		picker.value = 'snip-1';
+		picker.dispatchEvent(new Event('change', { bubbles: true }));
+		flushSync();
+
+		expect(current().transform).toEqual({ ref: 'snip-1' });
+	});
+
+	it('hides the transform picker for xlsx', async () => {
+		await open('xlsx');
+		expect(byTestId(document, 'transform-picker')).toBeNull();
+	});
+
+	it('Cancel restores the transform captured when the dialog opened', async () => {
+		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({
+			items: [TRANSFORM_SNIPPET_HEADER]
+		});
+		await loadArtifacts();
+		await open('json');
+		const before = current().transform ?? null;
+		expect(before).toBeNull();
+
+		const picker = byTestId(document, 'transform-picker') as HTMLSelectElement;
+		picker.value = 'snip-1';
+		picker.dispatchEvent(new Event('change', { bubbles: true }));
+		flushSync();
+		expect(current().transform).toEqual({ ref: 'snip-1' });
+
+		byTestId(document, 'export-cancel').click();
+		flushSync();
+		expect(current().transform ?? null).toBe(before);
 	});
 });
