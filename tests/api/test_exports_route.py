@@ -849,3 +849,103 @@ def test_jsonl_entry_split_files_nest_under_the_entry_folder(client):
     names = _names(r)
     assert all(n.startswith("per-el/") and n.endswith(".jsonl") for n in names)
     assert len(names) == 3
+
+
+# ---- Phase 3: draft runs (spec §9.1) --------------------------------------
+
+
+def _run_draft(client, definition, name="draft"):
+    return client.post(
+        papi("/exports/run"),
+        json={"definition": definition, "name": name},
+        headers=AUTH_HEADERS,
+    )
+
+
+def test_draft_run_exports_without_a_committed_artifact(client):
+    _bootstrap_model(client)
+    t = _mk_table(client, "parts")
+    r = _run_draft(
+        client,
+        {"entries": [{"source": {"ref": t}, "name": "as-json", "format": "json"}]},
+        name="my-draft",
+    )
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/zip"
+    # The request's `name` feeds the zip-stem fallback (no output.filename).
+    assert r.headers["content-disposition"].endswith('my-draft.zip"')
+    assert _names(r) == ["as-json.json"]
+
+
+def test_draft_run_manifest_reports_null_artifact_id_and_request_name(client):
+    _bootstrap_model(client)
+    t = _mk_table(client, "parts")
+    r = _run_draft(
+        client,
+        {"entries": [{"source": {"ref": t}, "name": "e1", "format": "json"}]},
+        name="my-draft",
+    )
+    assert r.status_code == 200
+    manifest = json.loads(
+        zipfile.ZipFile(io.BytesIO(r.content)).read("manifest.json")
+    )
+    assert manifest["artifact_id"] is None
+    assert manifest["artifact_name"] == "my-draft"
+
+
+def test_draft_run_default_name_is_export(client):
+    _bootstrap_model(client)
+    t = _mk_table(client, "parts")
+    r = client.post(
+        papi("/exports/run"),
+        json={"definition": {"entries": [{"source": {"ref": t}, "format": "json"}]}},
+        headers=AUTH_HEADERS,
+    )
+    assert r.status_code == 200
+    assert r.headers["content-disposition"].endswith('export.zip"')
+
+
+def test_exactly_one_of_artifact_id_and_definition_is_required(client):
+    _bootstrap_model(client)
+    t = _mk_table(client, "parts")
+    x = _mk_export(client, [{"source": {"ref": t}, "format": "json"}])
+    neither = client.post(papi("/exports/run"), json={}, headers=AUTH_HEADERS)
+    assert neither.status_code == 422
+    both = client.post(
+        papi("/exports/run"),
+        json={
+            "artifact_id": x,
+            "definition": {"entries": [{"source": {"ref": t}, "format": "json"}]},
+        },
+        headers=AUTH_HEADERS,
+    )
+    assert both.status_code == 422
+    assert "exactly one" in both.json()["detail"]
+
+
+def test_draft_run_flows_through_the_same_guards(client):
+    _bootstrap_model(client)
+    # Missing table: project scoping via the existing missing-table 422.
+    r = _run_draft(
+        client,
+        {"entries": [{"source": {"ref": "no-such-table"}, "name": "ghost"}]},
+    )
+    assert r.status_code == 422
+    assert "missing table" in r.json()["detail"]
+    assert "ghost" in r.json()["detail"]
+    # Templates validate up front, naming the entry.
+    t = _mk_table(client, "parts")
+    r = _run_draft(
+        client,
+        {"entries": [{"source": {"ref": t}, "name": "bad", "folder": "${bogus}"}]},
+    )
+    assert r.status_code == 422
+    assert "invalid template" in r.json()["detail"]
+    assert "bad" in r.json()["detail"]
+
+
+def test_draft_run_with_no_entries_422s(client):
+    _bootstrap_model(client)
+    r = _run_draft(client, {"entries": []})
+    assert r.status_code == 422
+    assert "no entries" in r.json()["detail"]
