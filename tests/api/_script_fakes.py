@@ -67,7 +67,11 @@ class _CountingSession:
         self._runner = runner
 
     def call(
-        self, entry: Literal["value", "step"], element_ids: list[str]
+        self,
+        entry: Literal["value", "step", "transform"],
+        element_ids: list[str],
+        *,
+        doc: object | None = None,
     ) -> CallResult:
         with self._runner.lock:
             self._runner.calls += 1
@@ -115,7 +119,11 @@ class _ScriptedSession:
         self._runner = runner
 
     def call(
-        self, entry: Literal["value", "step"], element_ids: list[str]
+        self,
+        entry: Literal["value", "step", "transform"],
+        element_ids: list[str],
+        *,
+        doc: object | None = None,
     ) -> CallResult:
         # Only the index hand-out is serialized; `outcome_fn` runs outside the
         # lock so a scripted callback that blocks cannot serialize the workers.
@@ -170,7 +178,11 @@ class _BlockingSession:
         self._runner = runner
 
     def call(
-        self, entry: Literal["value", "step"], element_ids: list[str]
+        self,
+        entry: Literal["value", "step", "transform"],
+        element_ids: list[str],
+        *,
+        doc: object | None = None,
     ) -> CallResult:
         with self._runner.lock:
             self._runner.calls[0] += 1
@@ -250,7 +262,11 @@ class _BarrierSession:
         self._waited = False
 
     def call(
-        self, entry: Literal["value", "step"], element_ids: list[str]
+        self,
+        entry: Literal["value", "step", "transform"],
+        element_ids: list[str],
+        *,
+        doc: object | None = None,
     ) -> CallResult:
         if not self._waited:
             # Only the FIRST call of each session waits: the barrier has one

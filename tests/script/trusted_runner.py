@@ -230,7 +230,7 @@ class _TrustedSession:
                     traceback=_format_guest_traceback(),
                 )
 
-    def call(self, entry: str, element_ids: list[str]) -> CallResult:
+    def call(self, entry: str, element_ids: list[str], *, doc: object | None = None) -> CallResult:
         start = time.monotonic()
         if self.boot_error is not None:
             return CallResult(value=None, error=self.boot_error, duration_ms=0)
@@ -238,17 +238,23 @@ class _TrustedSession:
         # (read_memo_max <= 0): `_memo_put` no-ops on a non-positive cap, so
         # projecting every root would be pure wasted work for zero payoff.
         # Doesn't change results, only whether we bother -- mirrors the
-        # WASM host's identical guard in `api/script_runner.py`.
+        # WASM host's identical guard in `api/script_runner.py`. `transform`
+        # never has element_ids to project (empty by contract), so skip it
+        # the same way regardless of the memo cap.
         elements = (
-            project_roots(self._dispatcher.model, element_ids)
-            if self._limits.read_memo_max > 0
-            else []
+            []
+            if entry == "transform"
+            else (
+                project_roots(self._dispatcher.model, element_ids)
+                if self._limits.read_memo_max > 0
+                else []
+            )
         )
         stdout = _CappedStdout(self._limits.stdout_bytes)
         with contextlib.redirect_stdout(stdout):  # type: ignore[type-var]
             try:
                 res = self._namespace["_dr_call_entry"](
-                    entry, element_ids, elements
+                    entry, element_ids, elements, doc
                 )
             except Exception:
                 return CallResult(
