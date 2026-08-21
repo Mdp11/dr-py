@@ -29,12 +29,14 @@
 	import {
 		EXPORT_FORMATS,
 		TableDefinitionSchema,
+		isJsonFamily,
 		type ExporterEntry,
 		type TableDefinition
 	} from '$lib/api/types';
 	import { createColumnDrag } from '$lib/table/column-dnd.svelte';
 	import EntryLayoutDialog from './EntryLayoutDialog.svelte';
 	import AddTablePicker from './AddTablePicker.svelte';
+	import TransformPicker from './TransformPicker.svelte';
 	import ArtifactExportButton from '$lib/components/ArtifactExportButton.svelte';
 
 	let { tabId }: { tabId: string } = $props();
@@ -385,6 +387,21 @@
 								</button>
 							{/each}
 						</div>
+						{#if isJsonFamily(entry.format)}
+							<TransformPicker
+								value={entry.transform?.ref ?? null}
+								disabled={disabledEntry}
+								onChange={(ref) =>
+									updateExporterEntry(tabId, i, { transform: ref ? { ref } : null })}
+							/>
+						{:else if entry.transform}
+							<!-- A transform left behind by a format flip: the server 422s it at run
+							     time (a functional contract is never tolerate-and-ignored, spec §8),
+							     so surface it rather than hiding the state. Never blocks Save. -->
+							<span class="shrink-0 text-warning" data-testid="export-entry-{i}-transform-warning">
+								transform needs a JSON format
+							</span>
+						{/if}
 						<button
 							type="button"
 							data-testid="export-entry-{i}-layout"

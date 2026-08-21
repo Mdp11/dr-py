@@ -207,3 +207,12 @@ def test_json_split_accepts_any_template_at_schema_level():
     from data_rover.core.table.schema import JsonSplitOptions
 
     assert JsonSplitOptions(enabled=True, filename_template="no-token").enabled
+
+
+def test_table_definition_transform_field_optional():
+    from data_rover.core.table.schema import TableRef
+
+    d = _table()
+    assert d.transform is None
+    d2 = d.model_copy(update={"transform": TableRef(ref="s1")})
+    assert d2.transform is not None and d2.transform.ref == "s1"

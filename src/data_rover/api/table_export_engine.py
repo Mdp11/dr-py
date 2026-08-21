@@ -22,7 +22,12 @@ from datetime import UTC, datetime
 
 from data_rover.core.metamodel.schema import Metamodel
 from data_rover.core.model.model import Model
-from data_rover.core.script.runner import ScriptRunner
+from data_rover.core.script.runner import (
+    RunLimits,
+    ScriptBudget,
+    ScriptRunner,
+    SnippetSession,
+)
 from data_rover.core.table.cells import Cell
 from data_rover.core.table.evaluate import (
     SortSpec,
@@ -60,8 +65,10 @@ from data_rover.core.table.split import (
 from .deps import Session
 from .schemas import ScriptStatusOut
 from .script_eval import close_script_context, open_script_context
+from .script_runner import run_limits_from_settings
 from .script_sweep import SweepJob, kick_or_join_sweep
 from .settings import Settings
+from .snippet_concurrency import concurrency_guard
 from .table_export import build_workbook
 
 
@@ -76,6 +83,117 @@ class ExportFiles:
     truncated: bool
     degraded: bool
     archive: bool  # True => ship as zip even if len==1
+
+
+class TransformUnavailableError(Exception):
+    """A transform-bearing export cannot run AT ALL: no runner constructed,
+    or no interactive concurrency slot free. The ONE exception to this
+    engine's degraded-not-failed stance (spec §17.2): silently skipping a
+    transform ships untransformed data — a functional-contract breach, not a
+    cosmetic degradation — and 422 would mislabel a transient condition as a
+    definition error. Routes map busy=False -> 503, busy=True -> 429,
+    matching the snippet-console precedent."""
+
+    def __init__(self, message: str, *, busy: bool) -> None:
+        super().__init__(message)
+        self.busy = busy
+
+
+class TransformHost:
+    """One export run's transform executor: one warm SnippetSession per
+    DISTINCT transform code, shared across every entry/file that uses the
+    same snippet (spec §8), one global interactive slot for the whole run
+    (spec §17.2), one ScriptBudget shared by every call. Construct through
+    `open_transform_host`; always `close()` in a finally."""
+
+    def __init__(
+        self,
+        runner: ScriptRunner,
+        model: Model,
+        limits: RunLimits,
+        budget: ScriptBudget,
+        max_bytes: int,
+    ) -> None:
+        self._runner = runner
+        self._model = model
+        self._limits = limits
+        self._budget = budget
+        self._max_bytes = max_bytes
+        self._sessions: dict[str, SnippetSession] = {}
+        self._released = False
+
+    def apply(self, code: str, doc: object, name: str) -> object:
+        """Run `transform(doc)` and return the replacement document.
+
+        Failure = failure (spec §8): a boot error, a raise, a timeout, an
+        unserializable return, or a size breach raises ValueError naming
+        `name` — the routes' existing ValueError -> 422 mapping carries it,
+        so a machine consumer never receives a half-transformed 200."""
+        blob = json.dumps(doc, ensure_ascii=False, separators=(",", ":"))
+        if len(blob.encode("utf-8")) > self._max_bytes:
+            raise ValueError(
+                f"{name}: transform document exceeds "
+                f"snippet_transform_max_bytes ({self._max_bytes})"
+            )
+        session = self._sessions.get(code)
+        if session is None:
+            session = self._runner.open_session(
+                self._model, code, self._limits, budget=self._budget
+            )
+            self._sessions[code] = session
+        if session.boot_error is not None:
+            raise ValueError(
+                f"{name}: transform failed to load: {session.boot_error.message}"
+            )
+        res = session.call("transform", [], doc=doc)
+        if res.error is not None:
+            raise ValueError(
+                f"{name}: transform failed ({res.error.kind}): {res.error.message}"
+            )
+        assert res.value is not None  # decode contract: value xor error
+        out = res.value["value"]
+        out_blob = json.dumps(out, ensure_ascii=False, separators=(",", ":"))
+        if len(out_blob.encode("utf-8")) > self._max_bytes:
+            raise ValueError(
+                f"{name}: transform result exceeds "
+                f"snippet_transform_max_bytes ({self._max_bytes})"
+            )
+        return out
+
+    def close(self) -> None:
+        if self._released:
+            return
+        self._released = True
+        # try/finally: a raising session.close() must not leak the global
+        # interactive slot forever (`_released` is already set above, so a
+        # retry after a raise here would silently no-op and never release).
+        try:
+            for s in self._sessions.values():
+                s.close()
+            self._sessions.clear()
+        finally:
+            concurrency_guard.release_global()
+
+
+def open_transform_host(
+    runner: ScriptRunner | None, model: Model, settings: Settings
+) -> TransformHost:
+    """Acquire ONE interactive slot and build the run's TransformHost.
+    Raises TransformUnavailableError (busy=False no runner / busy=True no
+    slot) — see that class's docstring for why this is not a degradation."""
+    if runner is None:
+        raise TransformUnavailableError("script runner unavailable", busy=False)
+    if not concurrency_guard.try_acquire_global(
+        global_limit=settings.snippet_concurrency
+    ):
+        raise TransformUnavailableError("snippet runner busy", busy=True)
+    return TransformHost(
+        runner,
+        model,
+        run_limits_from_settings(settings),
+        ScriptBudget.start(settings.snippet_eval_budget_s),
+        settings.snippet_transform_max_bytes,
+    )
 
 
 def _drain(rows: Iterator[list[Cell]]) -> None:
@@ -176,6 +294,8 @@ def run_table_export(
     sort: SortSpec | None,
     template_vars: Mapping[str, str] | None = None,
     json_doc: JsonDocumentOptions | None = None,
+    transform_code: str | None = None,  # resolved snippet code (never a ref)
+    transform_host: TransformHost | None = None,  # run-owned; NOT closed here
 ) -> ExportPending | ExportFiles:
     """Exports the WHOLE table (every row `build_rows`/`order_rows` produce,
     honoring `max_rows` and the requested sort) — unlike `/tables/evaluate`,
@@ -198,6 +318,24 @@ def run_table_export(
     branch: `None` for the standalone route and for xlsx/csv, and `shape`/
     `pretty` are ignored with tolerance on `jsonl` (only `on_error` applies
     there) — see `JsonDocumentOptions`'s own docstring.
+
+    `transform_code`/`transform_host` (spec §8) are the export-transform
+    hook: a `transform(doc)` snippet run once the document is otherwise
+    ready to ship. Supported on BOTH surfaces (the standalone
+    `/tables/export` route and each `/exports/run` entry), JSON-family
+    formats only (`format not in JSON_FAMILY` with `transform_code` set is a
+    422 — see the guard right below). It sits at the END of the pipeline —
+    shape, THEN transform, THEN serialize — so it sees exactly the
+    array/object/row-list a consumer would otherwise receive, never the raw
+    row cells. On the split path it runs ONCE PER FILE (one call per
+    partition, not once for the whole export), after `_check_on_error` has
+    already scanned that file's rendered docs (spec §17.4: a transform must
+    not be able to launder an error marker past that check by transforming
+    it away). `transform_host` is caller-owned — this function calls
+    `.apply()` but never `.close()`s it, since one host is shared across
+    however many `run_table_export` calls one export request makes (every
+    entry of an `/exports/run` batch, or the split files of one standalone
+    export).
 
     Cells are evaluated with `max_cell_elements` overridden to effectively
     unbounded (10**9): the interactive page route caps a navigation cell's
@@ -245,6 +383,13 @@ def run_table_export(
         # `${revv}` too instead of shipping it verbatim in filenames (K-10).
         validate_template(split.filename_template)
         validate_tokens(split.filename_template, SPLIT_TOKENS)
+    if transform_code is not None and format not in JSON_FAMILY:
+        # A functional contract, not presentation (spec §8): silently
+        # skipping ships untransformed data, so no tolerate-and-ignore.
+        raise ValueError(
+            f"{name}: transform is only supported for JSON-family formats, "
+            f"not {format!r}"
+        )
     script_ctx = None
     acquired = False
     try:
@@ -498,16 +643,35 @@ def run_table_export(
                         "json_doc.on_error is 'fail'"
                     )
 
-            def _serialize(
+            def _shape(
                 docs: list[dict[str, object]], doc_keys: list[str] | None
-            ) -> bytes:
+            ) -> object:
                 if format == "jsonl":
-                    return jsonl_bytes(docs)
-                payload: object = (
+                    return docs
+                return (
                     dict(zip(doc_keys, docs, strict=True))
                     if doc_keys is not None
                     else docs
                 )
+
+            def _transformed(payload: object) -> object:
+                if transform_code is None:
+                    return payload
+                assert transform_host is not None  # routes pair them
+                out = transform_host.apply(transform_code, payload, name)
+                if format == "jsonl" and not isinstance(out, list):
+                    # §17.3: jsonl is newline-delimited; a non-list return
+                    # has no honest line serialization.
+                    raise ValueError(
+                        f"{name}: transform must return a list for jsonl; "
+                        f"got {type(out).__name__}"
+                    )
+                return out
+
+            def _to_bytes(payload: object) -> bytes:
+                if format == "jsonl":
+                    assert isinstance(payload, list)  # _transformed enforced it
+                    return jsonl_bytes(payload)
                 if json_doc is not None and not json_doc.pretty:
                     return json.dumps(
                         payload, ensure_ascii=False, separators=(",", ":")
@@ -546,7 +710,12 @@ def run_table_export(
                         key_column=key_col,
                     )
                     _check_on_error(part_docs)
-                    files.append((f"{stem}.{format}", _serialize(part_docs, part_keys)))
+                    files.append(
+                        (
+                            f"{stem}.{format}",
+                            _to_bytes(_transformed(_shape(part_docs, part_keys))),
+                        )
+                    )
                 return ExportFiles(
                     files=files,
                     truncated=truncated,
@@ -568,7 +737,7 @@ def run_table_export(
                 key_column=key_col,
             )
             _check_on_error(docs)
-            blob = _serialize(docs, doc_keys)
+            blob = _to_bytes(_transformed(_shape(docs, doc_keys)))
             filename = f"{name}.{format}"
             # No JSON analogue of the xlsx trailing notice row: the `$error`
             # markers are in-band and the header below carries the summary.

@@ -676,7 +676,7 @@ dr = _Dr()
 _WIRE_SCALARS = (str, int, float, bool)
 
 
-def _dr_call_entry(entry, element_ids, elements=None):
+def _dr_call_entry(entry, element_ids, elements=None, doc=None):
     # Single per-call driver for embedded sessions (M2/M3): prime the read
     # memo with the host-projected roots, build handles, invoke the entry
     # point, serialize, and report the call's read-set (boot reads union
@@ -706,8 +706,11 @@ def _dr_call_entry(entry, element_ids, elements=None):
         fn = globals().get(entry)
         if fn is None or not callable(fn):
             raise NameError("entry function " + repr(entry) + " is not defined")
-        els = [_fetch_element(i) for i in element_ids]
-        value = fn(els if entry == "value" else (els[0] if els else None))
+        if entry == "transform":
+            value = fn(doc)
+        else:
+            els = [_fetch_element(i) for i in element_ids]
+            value = fn(els if entry == "value" else (els[0] if els else None))
         payload = _dr_serialize_entry_result(entry, value)
         if _boot_overflow[0] or _call_overflow[0]:
             reads = None
@@ -738,6 +741,9 @@ def _dr_serialize_entry_result(entry, value):
     # with runner.decode_call_payload. Unsupported shapes raise ValueError;
     # the session loop reports that as the call's error. NOT part of the
     # documented dr API (underscored on purpose).
+    if entry == "transform":
+        _dr_check_json(value)
+        return {"kind": "json", "value": value}
     if entry == "step":
         # Nodes are UNTAGGED: JSON's own types carry the only distinction the
         # host needs. A string stays ambiguous ON PURPOSE — the host resolves
@@ -797,5 +803,33 @@ def _dr_serialize_entry_result(entry, value):
     raise ValueError(
         "value() must return a scalar, a list of scalars, an Element, "
         "or a list of Elements"
+    )
+
+
+def _dr_check_json(value, _depth=0):
+    # transform() returns the REPLACEMENT DOCUMENT (spec §8): any JSON value.
+    # Checked recursively here so a bad return produces a teaching error
+    # instead of a json.dumps crash in the transport (which would kill the
+    # whole session rather than fail the one call). Tuples are admitted —
+    # json.dumps serializes them as arrays, matching author intuition.
+    if _depth > 100:
+        raise ValueError("transform() return value nests too deeply (max 100)")
+    if value is None or isinstance(value, _WIRE_SCALARS):
+        return
+    if isinstance(value, (list, tuple)):
+        for v in value:
+            _dr_check_json(v, _depth + 1)
+        return
+    if isinstance(value, dict):
+        for k, v in value.items():
+            if not isinstance(k, str):
+                raise ValueError(
+                    "transform() dict keys must be strings; got " + type(k).__name__
+                )
+            _dr_check_json(v, _depth + 1)
+        return
+    raise ValueError(
+        "transform() must return a JSON-serializable value "
+        "(dict/list/str/int/float/bool/None); got " + type(value).__name__
     )
 '''

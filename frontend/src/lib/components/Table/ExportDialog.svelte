@@ -23,6 +23,7 @@
 	import { templateIsValid } from '$lib/table/columns';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import ExportSettingsPanel from '../Export/ExportSettingsPanel.svelte';
+	import TransformPicker from '../Export/TransformPicker.svelte';
 	import {
 		EXPORT_FORMATS,
 		isJsonFamily,
@@ -171,6 +172,33 @@
 					{FORMAT_LABELS[fmt]}
 				</button>
 			{/each}
+
+			<!-- This edits the table's OWN `transform` (standalone `POST /tables/export`
+			     only — an exporter entry never inherits it, no-bleed §8); strictness
+			     is server-side at export time. -->
+			{#if isJsonFamily(format) && defn}
+				<span class="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground">
+					Transform
+					<TransformPicker
+						value={defn.transform?.ref ?? null}
+						onChange={(ref) =>
+							updateTableExportSettings(tabId, {
+								...defn,
+								transform: ref ? { ref } : null
+							})}
+					/>
+				</span>
+			{:else if defn?.transform}
+				<!-- A transform left behind by a format flip: the server 422s it at run
+				     time (a functional contract is never tolerate-and-ignored, spec §8),
+				     so surface it rather than hiding the state. Never blocks Export. -->
+				<span
+					class="ml-auto shrink-0 text-xs text-warning"
+					data-testid="table-export-transform-warning"
+				>
+					transform needs a JSON format
+				</span>
+			{/if}
 		</div>
 
 		{#if open && defn}

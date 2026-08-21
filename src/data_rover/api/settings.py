@@ -164,6 +164,13 @@ class Settings(BaseSettings):
     snippet_stdout_bytes: int = 256 * 1024
     #: Mirrors ``RunLimits.result_repr_bytes``.
     snippet_result_repr_bytes: int = 64 * 1024
+    #: Cap on the export-transform document, BOTH directions (spec §8): the
+    #: serialized doc handed to transform() and the serialized replacement it
+    #: returns. Host-side (TransformHost) — deliberately NOT a RunLimits
+    #: field, since the guest never enforces it. Breach -> 422 naming the
+    #: entry, never a truncation: a machine consumer must not receive a
+    #: silently clipped document.
+    snippet_transform_max_bytes: int = 8 * 1024 * 1024
     #: Mirrors ``RunLimits.max_ops``.
     snippet_max_ops: int = 1000
     #: Mirrors ``RunLimits.max_op_bytes``.

@@ -195,12 +195,20 @@ class SnippetSession(Protocol):
     timeout kill, guest crash) — either way the session is unusable and every
     subsequent ``call`` must return that error. Sessions are read-only by
     construction: their dispatcher is built with ``record_ops=False``.
+
+    ``doc`` is the transform entry's input document (any JSON value, already
+    decoded); ignored for ``value``/``step``. ``element_ids`` is empty for
+    ``transform``.
     """
 
     boot_error: ScriptError | None
 
     def call(
-        self, entry: Literal["value", "step"], element_ids: list[str]
+        self,
+        entry: Literal["value", "step", "transform"],
+        element_ids: list[str],
+        *,
+        doc: object | None = None,
     ) -> CallResult: ...
 
     def close(self) -> None:
@@ -312,10 +320,23 @@ def decode_call_payload(entry: str, payload: object) -> tuple[dict | None, str |
 
     Returns ``(validated payload, None)`` or ``(None, error message)``. The
     accepted shapes mirror the facade's ``_dr_serialize_entry_result`` exactly
-    — the two must agree by construction (same tags, same scalar set).
+    — the two must agree by construction (same tags, same scalar set). The
+    ``"json"`` tag is transform-exclusive: ``value``/``step`` keep their own
+    closed tag sets, so a hostile guest cannot smuggle an arbitrary structure
+    into an element/scalar consumer by claiming the ``"json"`` tag on a
+    ``value``/``step`` call.
     """
     if not isinstance(payload, dict):
         return None, "malformed call result payload"
+    if entry == "transform":
+        # Arbitrary JSON by contract (spec §8): the payload came through
+        # json.loads, so it is structurally JSON already — the only
+        # validation is the envelope. Size is the HOST's concern
+        # (snippet_transform_max_bytes, enforced in TransformHost), not a
+        # wire-shape concern.
+        if payload.get("kind") == "json" and "value" in payload:
+            return {"kind": "json", "value": payload["value"]}, None
+        return None, "malformed transform() result payload"
     if entry == "step":
         nodes = payload.get("nodes")
         # `_WIRE_SCALARS` deliberately admits values as well as ids: the

@@ -2,10 +2,14 @@
 (spec §3.3/§3.4). `overridden_table` output is RENDER ONLY — these tests pin
 that it never touches structural fields and never mutates its input."""
 
+import pytest
+from pydantic import ValidationError
+
 from data_rover.core.table.exporter import (
     EXPORTER_ADAPTER,
     ExporterEntry,
     JsonDocumentOptions,
+    MAX_EXPORTER_ENTRIES,
     TableRef,
     overridden_table,
 )
@@ -151,3 +155,31 @@ def test_json_doc_defaults_preserve_todays_behavior():
     assert (opts.shape, opts.key_column, opts.pretty, opts.on_error) == (
         "array", None, True, "emit",
     )
+
+
+def test_entry_transform_defaults_none_and_roundtrips():
+    e = ExporterEntry(source=TableRef(ref="t1"))
+    assert e.transform is None
+    e2 = ExporterEntry(source=TableRef(ref="t1"), transform=TableRef(ref="s1"))
+    assert e2.transform is not None and e2.transform.ref == "s1"
+
+
+def test_entries_capped_at_50():
+    entries = [{"source": {"ref": f"t{i}"}} for i in range(MAX_EXPORTER_ENTRIES + 1)]
+    with pytest.raises(ValidationError):
+        EXPORTER_ADAPTER.validate_python({"entries": entries})
+    ok = EXPORTER_ADAPTER.validate_python(
+        {"entries": entries[:MAX_EXPORTER_ENTRIES]}
+    )
+    assert len(ok.entries) == MAX_EXPORTER_ENTRIES
+
+
+def test_overridden_table_restates_entry_transform():
+    sample_defn = _defn()
+    entry = ExporterEntry(source=TableRef(ref="t1"), transform=TableRef(ref="s1"))
+    out = overridden_table(sample_defn, entry)
+    assert out.transform is not None and out.transform.ref == "s1"
+    # no-bleed: an entry WITHOUT a transform must not inherit the table's
+    tainted = sample_defn.model_copy(update={"transform": TableRef(ref="tbl-own")})
+    out2 = overridden_table(tainted, ExporterEntry(source=TableRef(ref="t1")))
+    assert out2.transform is None

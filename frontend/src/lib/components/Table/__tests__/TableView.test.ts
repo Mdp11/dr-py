@@ -128,7 +128,11 @@ vi.mock('$lib/state', () => ({
 	closeDraft: vi.fn(),
 	ensureEmbeddedDraft: vi.fn(),
 	getArtifactHeaders: () => [],
-	getDraft: () => undefined
+	getDraft: () => undefined,
+	// ExportDialog's transform picker (exporter-v2 phase 4 task 10) — mounted
+	// unconditionally for a JSON-family export format, so its dependency must
+	// be present even though these tests never pick a transform.
+	referenceableArtifactHeaders: () => []
 }));
 
 function render(tabId: string) {

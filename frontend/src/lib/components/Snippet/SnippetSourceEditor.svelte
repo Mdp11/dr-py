@@ -19,7 +19,7 @@
 	} from '$lib/state';
 	import ResizeHandle from '$lib/components/ResizeHandle.svelte';
 	import { INLINE_MAX_H, INLINE_MIN_H } from '$lib/editor/editor-size';
-	import { entryAvailable, withStub, type BoundEntry } from '$lib/snippet/entry-stubs';
+	import { entryAvailable, withStub, type ConsoleEntry } from '$lib/snippet/entry-stubs';
 	import type { SnippetDiagnostic, SnippetSource } from '$lib/api/types';
 	import CodeEditor from './CodeEditor.svelte';
 	import SnippetTestPanel from './SnippetTestPanel.svelte';
@@ -31,7 +31,7 @@
 		collapseKey
 	}: {
 		snippet: SnippetSource;
-		entry: BoundEntry;
+		entry: ConsoleEntry;
 		onChange: (next: SnippetSource) => void;
 		/** When set, the editor renders behind a chevron disclosure (default
 		 * collapsed) whose expansion state lives in the snippet-collapse store

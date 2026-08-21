@@ -24,7 +24,18 @@ from .schema import (
     JsonSplitOptions,
     RowNumberExportOptions,
     TableDefinition,
+    TableRef as TableRef,  # re-export: TableRef lives in schema.py (schema.py
+    # cannot import from exporter.py, which imports from schema.py, without a
+    # cycle) but every existing importer reaches it via exporter.py.
 )
+
+#: Hard cap on entries per exporter (spec §17.1). A schema bound in the
+#: tradition of SNIPPET_MAX_CODE_BYTES — enforced at validation (so it does
+#: reject at artifact save), NOT an export-time strictness rule. It closes
+#: the Phase-3 finding: POST /exports/run accepts viewer-supplied draft
+#: definitions, and an unbounded list let one request chain N whole-table
+#: exports (each O(model)) synchronously.
+MAX_EXPORTER_ENTRIES = 50
 
 
 #: The four wire formats an export can ship as. One vocabulary for
@@ -56,14 +67,6 @@ class JsonDocumentOptions(BaseModel):
     #: into a 422 — a script consumer can demand a clean document or nothing.
     #: The default "emit" keeps the degraded-not-failed stance.
     on_error: Literal["emit", "fail"] = "emit"
-
-
-class TableRef(BaseModel):
-    """Serialized as a dict under the literal key `"ref"` — the shape
-    artifact_kinds.extract_refs's generic walk already understands, so the
-    bundle deps closure and id rewriting need zero per-kind code."""
-
-    ref: str
 
 
 class ColumnOverride(BaseModel):
@@ -98,12 +101,20 @@ class ExporterEntry(BaseModel):
     export_row_number: RowNumberExportOptions | None = None
     json_split: JsonSplitOptions | None = None
     json_doc: JsonDocumentOptions | None = None
+    #: Per-entry snippet post-processor (spec §8): a `code_snippet` artifact
+    #: ref whose `transform(doc)` runs render -> shape -> TRANSFORM ->
+    #: serialize, JSON-family formats only. Ref-only by design (no inline
+    #: code, unlike SnippetSource). None means "no transform", never
+    #: "inherit the table's own" — the no-bleed rule, both directions.
+    transform: TableRef | None = None
 
 
 class ExporterDefinition(BaseModel):
     schema_version: int = 1
     output: OutputOptions = Field(default_factory=OutputOptions)
-    entries: list[ExporterEntry] = Field(default_factory=list)
+    entries: list[ExporterEntry] = Field(
+        default_factory=list, max_length=MAX_EXPORTER_ENTRIES
+    )
 
 
 EXPORTER_ADAPTER: TypeAdapter[ExporterDefinition] = TypeAdapter(ExporterDefinition)
@@ -143,5 +154,10 @@ def overridden_table(defn: TableDefinition, entry: ExporterEntry) -> TableDefini
             "show_row_numbers": entry.show_row_numbers,
             "export_row_number": entry.export_row_number,
             "json_split": entry.json_split,
+            # The export engine reads its resolved code via an explicit
+            # parameter (Task 5), not off this copy — this restatement exists
+            # so the render copy carries the entry's presentation completely,
+            # the no-bleed rule made structural.
+            "transform": entry.transform,
         }
     )

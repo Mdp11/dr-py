@@ -485,6 +485,25 @@ def test_wasm_step_single_element_return(wasm_runner: WasmScriptRunner, small_mo
     sess.close()
 
 
+def test_wasm_transform_call_roundtrip(wasm_runner: WasmScriptRunner, small_model) -> None:
+    """Real-sandbox leg of the Phase 4 `transform(doc)` hook: `call("transform",
+    [], doc=...)` skips the (empty-anyway) element projection and round-trips
+    an arbitrary JSON `doc` through the guest via the "json" wire tag."""
+    from data_rover.core.script.runner import RunLimits, ScriptBudget
+
+    sess = wasm_runner.open_session(
+        small_model,
+        "def transform(doc):\n    return {'n': len(doc), 'doc': doc}\n",
+        RunLimits(),
+        budget=ScriptBudget.start(30),
+    )
+    assert sess.boot_error is None
+    res = sess.call("transform", [], doc=[1, 2, 3])
+    sess.close()
+    assert res.error is None
+    assert res.value == {"kind": "json", "value": {"n": 3, "doc": [1, 2, 3]}}
+
+
 def test_embedded_session_trip_collapse_wasm(
     wasm_runner: WasmScriptRunner, monkeypatch: pytest.MonkeyPatch
 ) -> None:

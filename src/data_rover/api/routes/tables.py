@@ -16,6 +16,7 @@ from data_rover.core.model.naming import display_name
 from data_rover.core.navigation.resolve import NavigationResolveError
 from data_rover.core.navigation.schema import NAVIGATION_ADAPTER, NavigationDefinition
 from data_rover.core.script.embed import ScriptEvalContext
+from data_rover.core.script.lint import derive_entry_points
 from data_rover.core.script.runner import ScriptRunner
 from data_rover.core.script.schema import SNIPPET_ADAPTER, SnippetDefinition
 from data_rover.core.script.warnings import ScriptWarningCode
@@ -43,6 +44,7 @@ from data_rover.core.table.export_layout import (
     export_definition,
     export_layout,
 )
+from data_rover.core.table.exporter import JSON_FAMILY
 from data_rover.core.table.json_export import render_json
 from data_rover.core.table.resolve import resolve_table_refs, table_has_script
 from data_rover.core.table.schema import TABLE_ADAPTER, TableDefinition
@@ -72,8 +74,10 @@ from ..table_cache import table_fingerprint
 from ..table_export_engine import (
     MEDIA_TYPES,
     ExportPending,
+    TransformUnavailableError,
     build_zip,
     export_context_vars,
+    open_transform_host,
     run_table_export,
 )
 from ..table_export_engine import status_from_job as _status_from_job
@@ -125,6 +129,33 @@ def _resolve_table(
         return SNIPPET_ADAPTER.validate_python(r.payload)
 
     return resolve_table_refs(defn, _fetch, snippet_fetch=_fetch_snippet)
+
+
+def _resolve_transform_code(db: DbSession, project_id: str, ref: str, name: str) -> str:
+    """Resolve a transform ref (spec §8) to its snippet CODE, strictly.
+
+    Deliberately NOT the tolerant `_fetch_snippet`/resolve path script
+    columns use: a dangling script-column ref degrades to error cells, but a
+    dangling transform is a functional-contract hole — silently skipping it
+    ships untransformed data — so every failure is a ValueError naming
+    `name` (the routes' 422 mapping). The entry point is RE-DERIVED from the
+    code, never read off the stored `entry_points` (advisory metadata only —
+    core/script/schema.py — and stale for any snippet last written before
+    "transform" joined _ENTRY_NAMES)."""
+    r = content.get_artifact(db, ref)
+    if (
+        r is None
+        or r.project_id != project_id
+        or r.kind is not ArtifactKind.code_snippet
+    ):
+        raise ValueError(f"{name}: unknown transform snippet {ref}")
+    snippet = SNIPPET_ADAPTER.validate_python(r.payload)
+    if "transform" not in derive_entry_points(snippet.code):
+        raise ValueError(
+            f"{name}: snippet {ref} does not define a one-argument "
+            "top-level transform(doc)"
+        )
+    return snippet.code
 
 
 def _cell_out(model: Model, cell: Cell) -> TableCellOut:
@@ -496,8 +527,14 @@ def export_table(
     `application/zip` named `{name}.zip` bundling them (`build_zip`; same
     zip shape `/exports/run` uses for a whole exporter bundle). An
     `ExportPending` result short-circuits to the shared 202 protocol:
-    `Retry-After: 1` with a `ScriptStatusOut` body the frontend polls on."""
+    `Retry-After: 1` with a `ScriptStatusOut` body the frontend polls on.
+
+    `defn.transform` (spec §8) is the table's OWN transform, applied ONLY
+    here: an `/exports/run` entry over the same table artifact renders
+    UNtransformed (no-bleed — the entry's own `transform: None` unless it
+    sets one, Task 7's concern, not this route's)."""
     metamodel, model = require_model(session)
+    transform_host = None
     try:
         defn = _resolve_table(payload, project_id, db)
         sort = (
@@ -515,6 +552,29 @@ def export_table(
             row = content.get_artifact(db, payload.artifact_id)
             if row is not None:
                 name = row.name
+        transform_code: str | None = None
+        if defn.transform is not None:
+            # Cheap pre-check, mirroring `exports.py`'s per-entry pass: a
+            # format the engine would reject anyway must not first cost a DB
+            # hit (`_resolve_transform_code`) or an interactive concurrency
+            # slot (`open_transform_host`) — the engine's own guard inside
+            # `run_table_export` stays as defense in depth.
+            if payload.format not in JSON_FAMILY:
+                raise ValueError(
+                    f"{name}: transform is only supported for JSON-family "
+                    f"formats, not {payload.format!r}"
+                )
+            transform_code = _resolve_transform_code(
+                db, project_id, defn.transform.ref, name
+            )
+            # Two-slot reality: this holds one interactive slot for the
+            # transform run itself, while `run_table_export`'s own
+            # `open_script_context` below may draw a SECOND slot for the
+            # table's script columns. No deadlock — a script context
+            # degrades to unavailable/cache-only rather than blocking on a
+            # slot — but a transform-bearing export of a scripted table
+            # consumes two of `snippet_concurrency`.
+            transform_host = open_transform_host(runner, model, settings)
         result = run_table_export(
             session=session,
             settings=settings,
@@ -527,6 +587,8 @@ def export_table(
             format=payload.format,
             sort=sort,
             template_vars=export_context_vars(session, project_id),
+            transform_code=transform_code,
+            transform_host=transform_host,
         )
         if isinstance(result, ExportPending):
             return JSONResponse(
@@ -553,6 +615,13 @@ def export_table(
         raise HTTPException(status_code=422, detail=f"unknown artifact {exc}") from exc
     except (NavigationResolveError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except TransformUnavailableError as exc:
+        raise HTTPException(
+            status_code=429 if exc.busy else 503, detail=str(exc)
+        ) from exc
+    finally:
+        if transform_host is not None:
+            transform_host.close()
 
 
 #: Rows the preview renders before it stops. Read as a module global at call

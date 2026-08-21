@@ -47,8 +47,10 @@ Phase 3) ships the automation surface: draft exporter runs (`RunExportIn.definit
 `GET /exports/run-by-name` for CI, the P-15.1 add-table picker (`AddTablePicker.svelte`),
 an ungated Export button (dirty/uncommitted drafts run inline), and the F-16 fix (Save no
 longer blocks on a bad split template) — closing P-15.1, the exporter half of P-16, and F-16.
-Phases 4–5 (the `transform` hook, bundle-draft export) remain open; Phase 5 needs
-re-confirmation from the owner before starting.
+A follow-up pass on `feat/exporter-v2-phase4` (Exporter v2 Phase 4) ships the
+`transform(doc)` snippet hook on both export surfaces (`ExporterEntry.transform` and
+`TableDefinition.transform`, spec §8) plus the entries cap fix below; Phase 5 (bundle-draft
+export) remains open and needs re-confirmation from the owner before starting.
 
 ---
 
@@ -863,6 +865,21 @@ as a primary workflow rather than an edge case.
 The owner confirmed this keep-unsanitized posture on 2026-08-20 (Exporter v2 Phase 3 review):
 the decision is closed, not merely recorded — no mitigation is planned unless the "revisiting"
 trigger above actually fires.
+
+### K-12 · `RunExportIn.definition` had no cap on entry count · `done` (2026-08-21, feat/exporter-v2-phase4) · *2026-08-21*
+`POST /exports/run` is a viewer-callable, read-only-by-`authz` POST, and `RunExportIn.definition`
+(P-16, Exporter v2 Phase 3) let it run an arbitrary, ungated `ExporterDefinition` — including one
+built client-side with an unbounded `entries` list. Each entry evaluates a whole table (O(model)),
+synchronously, in one request: an attacker-sized `entries` array could chain N such evaluations
+into a single call with no server-side ceiling. Fixed in Exporter v2 Phase 4 by capping
+`ExporterDefinition.entries` at `MAX_EXPORTER_ENTRIES = 50` (`core/table/exporter.py`,
+`Field(max_length=50)`, spec §17.1) — a schema bound in the `SNIPPET_MAX_CODE_BYTES` tradition:
+it rejects at `POST /artifacts` save AND at `RunExportIn.definition` request-parse time (both go
+through the same `ExporterDefinition` type), deliberately NOT an export-time strictness rule,
+unlike every other exporter guard in this file — the never-block-Save rule governs strictness
+only export-time rendering can detect, and an oversized entry list is detectable earlier than
+that on both paths. Surfaced during the
+Exporter v2 Phase 3 review; closed as the first task of Phase 4.
 
 ---
 
