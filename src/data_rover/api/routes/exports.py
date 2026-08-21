@@ -177,10 +177,7 @@ def run_export_by_name(
     if len(rows) > 1:
         raise HTTPException(
             status_code=409,
-            detail=(
-                f"ambiguous exporter name {name!r}; candidates: "
-                + ", ".join(r.id for r in rows)
-            ),
+            detail=f"ambiguous exporter name {name!r}; candidates: {', '.join(r.id for r in rows)}",
         )
     row = rows[0]
     cdef: ExporterDefinition = EXPORTER_ADAPTER.validate_python(row.payload)
@@ -262,11 +259,7 @@ def _execute_export(
             rendered_folder = substitute(entry.folder, {"name": table_name, **ctx})
             segs = folder_segments(rendered_folder)
             split = entry.json_split
-            if (
-                entry.format in JSON_FAMILY
-                and split is not None
-                and split.enabled
-            ):
+            if entry.format in JSON_FAMILY and split is not None and split.enabled:
                 validate_template(split.filename_template)
                 validate_tokens(split.filename_template, SPLIT_TOKENS)
         except ValueError as exc:

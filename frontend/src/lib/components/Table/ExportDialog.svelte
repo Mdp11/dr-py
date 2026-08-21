@@ -23,7 +23,12 @@
 	import { templateIsValid } from '$lib/table/columns';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import ExportSettingsPanel from '../Export/ExportSettingsPanel.svelte';
-	import { EXPORT_FORMATS, isJsonFamily, type ExportFormat, type TableDefinition } from '$lib/api/types';
+	import {
+		EXPORT_FORMATS,
+		isJsonFamily,
+		type ExportFormat,
+		type TableDefinition
+	} from '$lib/api/types';
 
 	const FORMAT_LABELS: Record<ExportFormat, string> = {
 		xlsx: 'Excel (.xlsx)',

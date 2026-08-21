@@ -577,6 +577,9 @@ describe('ExporterTab', () => {
 		expect(draftSpy).toHaveBeenCalledTimes(1);
 		const [definitionArg, nameArg] = draftSpy.mock.calls[0];
 		expect(definitionArg.entries.length).toBe(1);
+		// The whole point of the draft path: the uncommitted rename actually
+		// travels in the sent definition, not just the entry count.
+		expect(definitionArg.entries[0].name).toBe('Renamed');
 		expect(nameArg).toBe(getExporterDraft('exp:art-1')!.name);
 	});
 

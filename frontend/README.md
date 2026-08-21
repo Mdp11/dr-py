@@ -271,8 +271,8 @@ follows a pessimistic **check-out → stage → commit** loop (Spec B):
      requires a clean, committed draft: `exportDisabled` only checks for zero
      entries (disabled with the title "Add at least one table first"). A
      clean committed draft still runs by `artifact_id` (`runExporter`); any
-     dirty or never-committed draft ships its `{schema_version, output,
-entries}` inline as a `definition` via `runExporterDraft`
+     dirty or never-committed draft ships its `{schema_version, output, entries}`
+     inline as a `definition` via `runExporterDraft`
      (`lib/api/exports.ts`), which the backend validates and runs exactly
      like a committed payload (`RunExportIn.definition`, spec §9.1).
      Referenced tables still evaluate from their own COMMITTED definitions

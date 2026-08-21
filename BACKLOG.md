@@ -27,7 +27,7 @@ spec's phase table (`R`). Anything older than the last few sessions is **unverif
 against current code** — confirm before acting on it. Line numbers drift; treat them as
 hints.
 
-Last updated: 2026-08-21 · repo head at time of writing: `main` at `1c95ba3`
+Last updated: 2026-08-21 · repo head at time of writing: `main` at `3b31492`
 (top-bar-restructure merged). The 2026-08-18 additions were a batch of owner notes: P-10
 gained five concrete sub-items, P-15 → P-21 and U-9 are new, and T-1 was retired as stale
 while verifying them. The 2026-08-19 additions are two more owner notes: P-22 (top bar
@@ -269,7 +269,7 @@ change underneath it (P-4's generalization is adjacent); whether output is a zip
 that composes with P-13's per-element splitting; and whether it can reference navigations
 or only tables.
 
-### P-15 · Custom export: picker, file name and folder paths · `open` · follows P-14
+### P-15 · Custom export: picker, file name and folder paths · `done` (2026-08-21, feat/exporter-v2-phase3) — all three sub-items shipped: the searchable add-table picker (.1), the per-artefact output filename template (.2, feat/exporter-v2-phase1), and the per-entry zip folder path (.3, feat/exporter-v2-phase1). Follows P-14.
 Three follow-ups on the shipped `custom_export` artefact (owner notes, 2026-08-18).
 Independent of each other: .1 is frontend-only, .2 and .3 touch the wire schema and
 `POST /exports/run`.
@@ -306,16 +306,18 @@ now ungated on the picker side too — see P-15.1. The bundle-draft export half 
 open, scheduled for Phase 5 (see the Phase 3 changelog note below: Phase 5 needs
 re-confirmation before starting).
 
-Both a custom export run (owner item 8.3) and an ordinary artefact **bundle** export
-(item 10) should work against **staged, uncommitted** state. Today neither can: both read
-committed `ArtifactRow`s on the request's DB transaction, so an artefact that has never
-been committed cannot be exported at all, and an edited one silently exports its last
-committed version — the worse of the two failure modes. This is a design question rather
-than a patch: either the export routes learn to accept a client-supplied draft payload
-(and then must not trust it any more than any other client input — see how
+Original note (2026-08-18), now scoped to the bundle half only — the exporter half it
+also described is resolved above. Both a custom export run (owner item 8.3) and an
+ordinary artefact **bundle** export (item 10) should work against **staged, uncommitted**
+state. At the time, neither could: both read committed `ArtifactRow`s on the request's
+DB transaction, so an artefact that had never been committed could not be exported at
+all, and an edited one silently exported its last committed version — the worse of the
+two failure modes. For the bundle half this remains a design question rather than a
+patch: either the export routes learn to accept a client-supplied draft payload (and
+then must not trust it any more than any other client input — see how
 `importer.trust_artifacts` splits its two callers), or the client renders locally. Decide
-it alongside P-15, since "a custom export whose entries are still drafts" is exactly the
-case that prompted the note.
+it alongside Phase 5, since "a bundle export whose entries are still drafts" is exactly
+the case that prompted the note.
 
 ### P-17 · Metamodel diagram: unbounded zoom-out with a level-of-detail mode · `done` (2026-08-20, feat/metamodel-navigation)
 On a big metamodel the canvas cannot be zoomed out far enough to see everything, and it

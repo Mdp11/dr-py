@@ -36,7 +36,7 @@ type ExportFormat = Literal["xlsx", "json", "csv", "jsonl"]
 #: for every "json family" gate (the engine's split/render branches, the run
 #: route's split-template validation). csv/xlsx take the layout path. The
 #: frontend mirror is `isJsonFamily` in `frontend/src/lib/api/types.ts`.
-JSON_FAMILY: frozenset[str] = frozenset({"json", "jsonl"})
+JSON_FAMILY: frozenset[ExportFormat] = frozenset({"json", "jsonl"})
 
 
 class JsonDocumentOptions(BaseModel):

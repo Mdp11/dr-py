@@ -36,7 +36,13 @@
 	import { createColumnDrag } from '$lib/table/column-dnd.svelte';
 	import { previewTableJson } from '$lib/api/tables';
 	import { Eye, EyeOff } from '@lucide/svelte';
-	import { isJsonFamily, type Column, type ExportFormat, type TableDefinition, type TableSort } from '$lib/api/types';
+	import {
+		isJsonFamily,
+		type Column,
+		type ExportFormat,
+		type TableDefinition,
+		type TableSort
+	} from '$lib/api/types';
 
 	let {
 		definition,
