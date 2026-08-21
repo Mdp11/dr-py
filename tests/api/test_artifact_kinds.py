@@ -131,3 +131,14 @@ def test_exporter_refs_extract_and_rewrite():
     assert out["entries"][0]["source"]["ref"] == "NEW"
     assert out["entries"][1]["source"]["ref"] == "tbl-artifact-2"  # tolerant
     assert EXPORTER_PAYLOAD["entries"][0]["source"]["ref"] == "tbl-artifact-1"
+
+
+def test_transform_ref_is_walked_for_deps_and_rewrite():
+    payload = {
+        "entries": [
+            {"source": {"ref": "tbl-1"}, "transform": {"ref": "snip-1"}},
+        ]
+    }
+    assert "snip-1" in extract_refs(payload)
+    rewritten = rewrite_refs(payload, {"snip-1": "snip-2"})
+    assert rewritten["entries"][0]["transform"]["ref"] == "snip-2"

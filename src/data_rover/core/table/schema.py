@@ -182,6 +182,14 @@ class JsonSplitOptions(BaseModel):
     filename_template: str = ""
 
 
+class TableRef(BaseModel):
+    """Serialized as a dict under the literal key `"ref"` — the shape
+    artifact_kinds.extract_refs's generic walk already understands, so the
+    bundle deps closure and id rewriting need zero per-kind code."""
+
+    ref: str
+
+
 class ElementColumn(BaseModel):
     kind: Literal["element"] = "element"
     source: ColumnSource = Field(default_factory=RowSlot)
@@ -294,6 +302,12 @@ class TableDefinition(BaseModel):
     #: JSON-export split settings; `None` = single-document export (today's
     #: behavior, and the no-migration guarantee for existing payloads).
     json_split: JsonSplitOptions | None = None
+    #: Standalone-export snippet post-processor (spec §8): applies to
+    #: POST /tables/export in JSON-family formats ONLY — an exporter entry
+    #: never consults it (no-bleed). Presentation-family: never consulted
+    #: during evaluation; cell values, row order and script cache keys are
+    #: unaffected (the transform runs after rendering).
+    transform: TableRef | None = None
 
     @model_validator(mode="after")
     def _validate_sources(self) -> TableDefinition:
