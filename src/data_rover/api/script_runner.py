@@ -426,12 +426,13 @@ def _run_embedded(start):
         entry = call["entry"]
         element_ids = call["element_ids"]
         elements = call.get("elements")
+        doc = call.get("doc")
         cerr = None
         payload = None
         reads = None
         sys.stdout = stdout
         try:
-            res = namespace["_dr_call_entry"](entry, element_ids, elements)
+            res = namespace["_dr_call_entry"](entry, element_ids, elements, doc)
             payload = res["payload"]
             reads = res["reads"]
         except MemoryError:
@@ -1221,7 +1222,11 @@ class _WasmSnippetSession:
         return self._runner._map_guest_death(self._inst, self._limits, wall_deadline)
 
     def call(
-        self, entry: Literal["value", "step"], element_ids: list[str]
+        self,
+        entry: Literal["value", "step", "transform"],
+        element_ids: list[str],
+        *,
+        doc: object | None = None,
     ) -> CallResult:
         t0 = time.perf_counter()
         if self.boot_error is not None or self._closed:
@@ -1238,10 +1243,18 @@ class _WasmSnippetSession:
         # (read_memo_max <= 0): `_memo_put` no-ops on a non-positive cap, so
         # projecting + serializing every root would be pure wasted work for
         # zero payoff. Doesn't change results, only whether we bother.
+        # `transform` never has element_ids to project (empty by contract),
+        # so skip it the same way regardless of the memo cap -- mirrors the
+        # trusted (in-process) runner's identical guard in
+        # `tests/script/trusted_runner.py`.
         elements = (
-            project_roots(self._dispatcher.model, element_ids)
-            if self._limits.read_memo_max > 0
-            else []
+            []
+            if entry == "transform"
+            else (
+                project_roots(self._dispatcher.model, element_ids)
+                if self._limits.read_memo_max > 0
+                else []
+            )
         )
         frame = (
             json.dumps(
@@ -1250,6 +1263,7 @@ class _WasmSnippetSession:
                         "entry": entry,
                         "element_ids": element_ids,
                         "elements": elements,
+                        "doc": doc,
                     }
                 }
             )
