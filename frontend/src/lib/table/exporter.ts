@@ -39,9 +39,7 @@ export function applyEntryOverrides(defn: TableDefinition, entry: ExporterEntry)
 	};
 }
 
-export function overridesFromDefinition(
-	defn: TableDefinition
-): Pick<
+export function overridesFromDefinition(defn: TableDefinition): Pick<
 	// `transform` deliberately excluded: it is a functional contract owned by
 	// the entry-row picker, not table presentation, and this Pick<> feeds the
 	// layout dialog's save patch — including it here would let a layout save

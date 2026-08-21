@@ -130,9 +130,7 @@ def _resolve_table(
     return resolve_table_refs(defn, _fetch, snippet_fetch=_fetch_snippet)
 
 
-def _resolve_transform_code(
-    db: DbSession, project_id: str, ref: str, name: str
-) -> str:
+def _resolve_transform_code(db: DbSession, project_id: str, ref: str, name: str) -> str:
     """Resolve a transform ref (spec §8) to its snippet CODE, strictly.
 
     Deliberately NOT the tolerant `_fetch_snippet`/resolve path script
@@ -144,7 +142,11 @@ def _resolve_transform_code(
     core/script/schema.py — and stale for any snippet last written before
     "transform" joined _ENTRY_NAMES)."""
     r = content.get_artifact(db, ref)
-    if r is None or r.project_id != project_id or r.kind is not ArtifactKind.code_snippet:
+    if (
+        r is None
+        or r.project_id != project_id
+        or r.kind is not ArtifactKind.code_snippet
+    ):
         raise ValueError(f"{name}: unknown transform snippet {ref}")
     snippet = SNIPPET_ADAPTER.validate_python(r.payload)
     if "transform" not in derive_entry_points(snippet.code):

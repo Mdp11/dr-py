@@ -41,7 +41,7 @@
 >
 	<option value="">No transform</option>
 	{#if missing}
-		<option value={value}>saved snippet (missing)</option>
+		<option {value}>saved snippet (missing)</option>
 	{/if}
 	{#each options as h (h.id)}
 		<option value={h.id}>{h.name}</option>

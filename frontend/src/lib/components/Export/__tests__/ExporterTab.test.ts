@@ -779,7 +779,9 @@ describe('ExporterTab', () => {
 			expect(document.querySelector('[data-testid="export-entry-0"]')).toBeTruthy()
 		);
 
-		document.querySelector<HTMLButtonElement>('[data-testid="export-entry-0-format-xlsx"]')!.click();
+		document
+			.querySelector<HTMLButtonElement>('[data-testid="export-entry-0-format-xlsx"]')!
+			.click();
 		flushSync();
 
 		expect(document.querySelector('[data-testid="transform-picker"]')).toBeNull();
@@ -803,7 +805,9 @@ describe('ExporterTab', () => {
 		flushSync();
 		expect(getExporterDraft('exp:art-1')!.entries[0].transform).toEqual({ ref: 'snip-1' });
 
-		document.querySelector<HTMLButtonElement>('[data-testid="export-entry-0-format-xlsx"]')!.click();
+		document
+			.querySelector<HTMLButtonElement>('[data-testid="export-entry-0-format-xlsx"]')!
+			.click();
 		flushSync();
 
 		expect(document.querySelector('[data-testid="transform-picker"]')).toBeNull();
