@@ -27,10 +27,15 @@ IMPORT_ALLOWLIST: frozenset[str] = frozenset(
     }
 )
 DR_NAMES: frozenset[str] = frozenset({"dr"})
-_ENTRY_NAMES = ("value", "step")
+_ENTRY_NAMES = ("value", "step", "transform")
 #: What the single argument means, per entry — `value` receives the full list
-#: of bound elements; `step` receives its one simulated element.
-_ENTRY_ARG_DESC = {"value": "the list of elements", "step": "the element"}
+#: of bound elements; `step` receives its one simulated element; `transform`
+#: receives the rendered export document (spec §8).
+_ENTRY_ARG_DESC = {
+    "value": "the list of elements",
+    "step": "the element",
+    "transform": "the document",
+}
 
 
 @dataclass(frozen=True)

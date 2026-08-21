@@ -56,3 +56,18 @@ def test_bad_entry_signature_is_warning():
 def test_except_binding_is_known():
     code = "try:\n    x = 1\nexcept Exception as e:\n    print(e)\n"
     assert lint_code(code) == []
+
+
+def test_derive_transform_entry_point():
+    eps = derive_entry_points("def transform(doc):\n    return doc\n")
+    assert eps == ["script", "transform"]
+
+
+def test_transform_wrong_arity_warns_not_derived():
+    code = "def transform(a, b):\n    return a\n"
+    assert "transform" not in derive_entry_points(code)
+    diags = lint_code(code)
+    assert any(
+        d.severity == "warning" and "transform() must take exactly one argument" in d.message
+        for d in diags
+    )
