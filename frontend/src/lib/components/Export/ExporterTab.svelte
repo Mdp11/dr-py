@@ -34,6 +34,7 @@
 	} from '$lib/api/types';
 	import { createColumnDrag } from '$lib/table/column-dnd.svelte';
 	import EntryLayoutDialog from './EntryLayoutDialog.svelte';
+	import AddTablePicker from './AddTablePicker.svelte';
 	import ArtifactExportButton from '$lib/components/ArtifactExportButton.svelte';
 
 	let { tabId }: { tabId: string } = $props();
@@ -60,11 +61,12 @@
 	const availableTables = $derived(referenceableArtifactHeaders('table'));
 	// The picker excludes staged-but-uncommitted creates (temp ids must never
 	// reach a payload — see referenceableArtifactHeaders). When that filter —
-	// or a simply table-less project — leaves the select empty it is DISABLED,
-	// and a disabled select swallows clicks with no event and no console
-	// output, which reads as "the button is broken". Say why instead, and
-	// distinguish the two states: the overlay list (temp ids included) tells a
-	// user whose table is only staged that COMMITTING is the missing step.
+	// or a simply table-less project — leaves the picker input empty it is
+	// DISABLED, and a disabled input swallows clicks with no event and no
+	// console output, which reads as "the button is broken". Say why instead,
+	// and distinguish the two states: the overlay list (temp ids included)
+	// tells a user whose table is only staged that COMMITTING is the missing
+	// step.
 	const stagedOnlyTables = $derived(
 		availableTables.length === 0 && getArtifactHeaders().some((h) => h.kind === 'table')
 	);
@@ -83,13 +85,9 @@
 		}
 	}
 
-	// --- Add-table picker -------------------------------------------------
+	// --- Add-table picker (P-15.1) ----------------------------------------
 	let addTableError = $state<string | null>(null);
-	async function onAddTableChange(e: Event): Promise<void> {
-		const select = e.currentTarget as HTMLSelectElement;
-		const id = select.value;
-		select.value = '';
-		if (!id) return;
+	async function addTable(id: string): Promise<void> {
 		const header = availableTables.find((h) => h.id === id);
 		if (!header) return;
 		addTableError = null;
@@ -412,20 +410,11 @@
 
 			{#if editable}
 				<div class="mt-2 flex items-center gap-2">
-					<select
-						data-testid="add-table-select"
-						class="rounded border border-input bg-card px-2 py-1 text-xs"
+					<AddTablePicker
+						tables={availableTables}
 						disabled={locked || availableTables.length === 0}
-						title={availableTables.length === 0
-							? 'Only committed tables can be added to an exporter'
-							: undefined}
-						onchange={(e) => void onAddTableChange(e)}
-					>
-						<option value="">Add table…</option>
-						{#each availableTables as h (h.id)}
-							<option value={h.id}>{h.name}</option>
-						{/each}
-					</select>
+						onPick={(id) => void addTable(id)}
+					/>
 					{#if availableTables.length === 0}
 						<p data-testid="add-table-empty-hint" class="text-xs text-muted-foreground/70">
 							{#if stagedOnlyTables}

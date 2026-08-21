@@ -69,6 +69,37 @@ const TABLE_ARTIFACT = {
 	}
 };
 
+/** Two headers with names chosen so "par" matches one and not the other —
+ *  the add-table picker's typeahead test fixture (P-15.1). */
+const PARTS_HEADER = {
+	id: 'tbl-parts',
+	kind: 'table',
+	name: 'parts',
+	artifact_rev: 1,
+	updated_at: '',
+	updated_by: null,
+	entry_points: null
+};
+
+const BUILDINGS_HEADER = {
+	id: 'tbl-buildings',
+	kind: 'table',
+	name: 'buildings',
+	artifact_rev: 1,
+	updated_at: '',
+	updated_by: null,
+	entry_points: null
+};
+
+const PARTS_ARTIFACT = {
+	...PARTS_HEADER,
+	payload: {
+		schema_version: 1,
+		row_source: { kind: 'scope', types: [], criteria: [] },
+		columns: [{ kind: 'element', export: { include: false } }]
+	}
+};
+
 /** Two-entry artifact for the overlapping-"Edit layout"-clicks regression
  *  test: entry 0 points at a 1-column table, entry 1 at a 2-column table, so
  *  the dialog's rendered column count is a direct, DOM-visible tell for
@@ -220,10 +251,12 @@ describe('ExporterTab', () => {
 			expect(document.querySelector('[data-testid="export-entry-0"]')).toBeTruthy()
 		);
 
-		const select = document.querySelector<HTMLSelectElement>('[data-testid="add-table-select"]')!;
-		expect(select).not.toBeNull();
-		select.value = 'tbl-2';
-		select.dispatchEvent(new Event('change', { bubbles: true }));
+		const input = document.querySelector<HTMLInputElement>('[data-testid="add-table-input"]')!;
+		expect(input).not.toBeNull();
+		input.value = 'Beta';
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+		input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
 		flushSync();
 
 		await vi.waitFor(() => expect(getExporterDraft('exp:art-1')!.entries.length).toBe(2));
@@ -420,7 +453,7 @@ describe('ExporterTab', () => {
 		expect(getExporterDraft('exp:art-1')!.entries[0].folder).toBe('nested/path');
 	});
 
-	// A disabled <select> swallows clicks with no event and no console output —
+	// A disabled input swallows clicks with no event and no console output —
 	// exactly the "Add table… does not work" report against a project with no
 	// committed tables. The empty picker must SAY why it is dead, and
 	// distinguish "no tables at all" from "your table is staged but not
@@ -429,10 +462,10 @@ describe('ExporterTab', () => {
 	it('explains the disabled add-table picker when the project has no tables', async () => {
 		render('exp:draft:1');
 		await vi.waitFor(() =>
-			expect(document.querySelector('[data-testid="add-table-select"]')).toBeTruthy()
+			expect(document.querySelector('[data-testid="add-table-input"]')).toBeTruthy()
 		);
-		const select = document.querySelector<HTMLSelectElement>('[data-testid="add-table-select"]')!;
-		expect(select.disabled).toBe(true);
+		const input = document.querySelector<HTMLInputElement>('[data-testid="add-table-input"]')!;
+		expect(input.disabled).toBe(true);
 		const hint = document.querySelector('[data-testid="add-table-empty-hint"]')!;
 		expect(hint).not.toBeNull();
 		expect(hint.textContent).toMatch(/no tables/i);
@@ -447,10 +480,10 @@ describe('ExporterTab', () => {
 		);
 		render('exp:draft:1');
 		await vi.waitFor(() =>
-			expect(document.querySelector('[data-testid="add-table-select"]')).toBeTruthy()
+			expect(document.querySelector('[data-testid="add-table-input"]')).toBeTruthy()
 		);
-		const select = document.querySelector<HTMLSelectElement>('[data-testid="add-table-select"]')!;
-		expect(select.disabled).toBe(true);
+		const input = document.querySelector<HTMLInputElement>('[data-testid="add-table-input"]')!;
+		expect(input.disabled).toBe(true);
 		const hint = document.querySelector('[data-testid="add-table-empty-hint"]')!;
 		expect(hint).not.toBeNull();
 		expect(hint.textContent).toMatch(/commit/i);
@@ -468,19 +501,22 @@ describe('ExporterTab', () => {
 			expect(document.querySelector('[data-testid="export-entry-0"]')).toBeTruthy()
 		);
 
-		const select = document.querySelector<HTMLSelectElement>('[data-testid="add-table-select"]')!;
-		select.value = 'tbl-2';
-		select.dispatchEvent(new Event('change', { bubbles: true }));
+		const input = document.querySelector<HTMLInputElement>('[data-testid="add-table-input"]')!;
+		input.value = 'Beta';
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+		input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
 		flushSync();
 		await vi.waitFor(() => expect(getExporterDraft('exp:art-1')!.entries.length).toBe(2));
 
-		// The just-used table must still be selectable — F-11 drops the
-		// usedRefs filter entirely; duplicate entries are legal.
-		const optionsAfterFirstAdd = Array.from(select.querySelectorAll('option')).map((o) => o.value);
-		expect(optionsAfterFirstAdd).toContain('tbl-2');
+		// The just-used table must still be offered by the picker — F-11 drops
+		// the usedRefs filter entirely; duplicate entries are legal.
+		input.value = 'Beta';
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+		expect(document.querySelector('[data-testid="add-table-option-tbl-2"]')).not.toBeNull();
 
-		select.value = 'tbl-2';
-		select.dispatchEvent(new Event('change', { bubbles: true }));
+		input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
 		flushSync();
 		await vi.waitFor(() => expect(getExporterDraft('exp:art-1')!.entries.length).toBe(3));
 
@@ -605,5 +641,92 @@ describe('ExporterTab', () => {
 		expect(draft.dirty).toBe(true); // still dirty/uncommitted…
 		expect(runBtn.disabled).toBe(false); // …but that no longer gates Export
 		expect(runBtn.title).toBe('');
+	});
+
+	// P-15.1: the bare <select> is replaced by a searchable typeahead
+	// (AddTablePicker.svelte) that filters client-side over the in-memory
+	// committed-table headers.
+	it('filters the add-table picker as the user types', async () => {
+		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({
+			items: [PARTS_HEADER, BUILDINGS_HEADER]
+		});
+		await loadArtifacts();
+
+		render('exp:draft:1');
+		await vi.waitFor(() =>
+			expect(document.querySelector('[data-testid="add-table-input"]')).toBeTruthy()
+		);
+
+		const input = document.querySelector<HTMLInputElement>('[data-testid="add-table-input"]')!;
+		input.value = 'par';
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+
+		expect(document.querySelector('[data-testid="add-table-option-tbl-parts"]')).not.toBeNull();
+		expect(document.querySelector('[data-testid="add-table-option-tbl-buildings"]')).toBeNull();
+	});
+
+	it('adds the active option on Enter and allows a duplicate add', async () => {
+		getArtifactSpy.mockImplementation((id: string) =>
+			id === 'tbl-parts'
+				? Promise.resolve(PARTS_ARTIFACT)
+				: Promise.reject(new Error(`unexpected id ${id}`))
+		);
+		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({
+			items: [PARTS_HEADER, BUILDINGS_HEADER]
+		});
+		await loadArtifacts();
+
+		render('exp:draft:1');
+		await vi.waitFor(() =>
+			expect(document.querySelector('[data-testid="add-table-input"]')).toBeTruthy()
+		);
+		const input = document.querySelector<HTMLInputElement>('[data-testid="add-table-input"]')!;
+
+		input.value = 'par';
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+		input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+		flushSync();
+
+		await vi.waitFor(() => expect(getExporterDraft('exp:draft:1')!.entries.length).toBe(1));
+		expect(document.querySelector('[data-testid="export-entry-0"]')).not.toBeNull();
+
+		// F-11: duplicates are legal and useful — the same table added twice.
+		input.value = 'par';
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+		input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+		flushSync();
+
+		await vi.waitFor(() => expect(getExporterDraft('exp:draft:1')!.entries.length).toBe(2));
+		expect(document.querySelector('[data-testid="export-entry-1"]')).not.toBeNull();
+		expect(
+			getExporterDraft('exp:draft:1')!.entries.filter((e) => e.source.ref === 'tbl-parts')
+		).toHaveLength(2);
+	});
+
+	it('closes the picker on Escape without adding', async () => {
+		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({
+			items: [PARTS_HEADER, BUILDINGS_HEADER]
+		});
+		await loadArtifacts();
+
+		render('exp:draft:1');
+		await vi.waitFor(() =>
+			expect(document.querySelector('[data-testid="add-table-input"]')).toBeTruthy()
+		);
+		const input = document.querySelector<HTMLInputElement>('[data-testid="add-table-input"]')!;
+
+		input.value = 'par';
+		input.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+		expect(document.querySelector('[data-testid="add-table-option-tbl-parts"]')).not.toBeNull();
+
+		input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+		flushSync();
+
+		expect(document.querySelector('[data-testid="add-table-option-tbl-parts"]')).toBeNull();
+		expect(getExporterDraft('exp:draft:1')!.entries.length).toBe(0);
 	});
 });

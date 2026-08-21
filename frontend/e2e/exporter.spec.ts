@@ -18,7 +18,7 @@
  *      must be gone before the third add lands at index 1.
  *
  * The empty-picker states (no tables at all / staged-only tables → disabled
- * select + explanatory hint) are covered by ExporterTab.test.ts instead: the
+ * input + explanatory hint) are covered by ExporterTab.test.ts instead: the
  * suite shares one backend project across spec files (`workers: 1`), so this
  * spec cannot assume a table-less library at any point.
  *
@@ -78,18 +78,24 @@ test('add-table picker works on a draft, after the commit rebind, and on a sideb
 	const expPanel = page.getByRole('tabpanel');
 	const nameInput = expPanel.getByRole('textbox').first();
 	await nameInput.fill(exporterName);
-	const select = expPanel.getByTestId('add-table-select');
-	await expect(select).toBeEnabled({ timeout: 15_000 });
-	await select.selectOption({ label: tableName });
+	const input = expPanel.getByTestId('add-table-input');
+	await expect(input).toBeEnabled({ timeout: 15_000 });
+	await input.fill(tableName);
+	await expect(expPanel.getByRole('option', { name: tableName })).toBeVisible({ timeout: 10_000 });
+	await input.press('Enter');
 	await expect(expPanel.getByTestId('export-entry-0')).toBeVisible({ timeout: 10_000 });
 
 	// --- 3. Save + commit (the tab is re-keyed from exp:draft:N to
 	// exp:<realId>), then add again on the re-keyed tab.
 	await expPanel.getByTestId('exporter-save').click();
 	await commitStaged(page);
-	const select2 = page.getByRole('tabpanel').getByTestId('add-table-select');
-	await expect(select2).toBeEnabled({ timeout: 15_000 });
-	await select2.selectOption({ label: tableName });
+	const input2 = page.getByRole('tabpanel').getByTestId('add-table-input');
+	await expect(input2).toBeEnabled({ timeout: 15_000 });
+	await input2.fill(tableName);
+	await expect(page.getByRole('tabpanel').getByRole('option', { name: tableName })).toBeVisible({
+		timeout: 10_000
+	});
+	await input2.press('Enter');
 	await expect(page.getByRole('tabpanel').getByTestId('export-entry-1')).toBeVisible({
 		timeout: 10_000
 	});
@@ -103,10 +109,12 @@ test('add-table picker works on a draft, after the commit rebind, and on a sideb
 		.filter({ has: page.locator('span.flex-1', { hasText: exporterName }) });
 	await exporterItem.dblclick();
 	const reopened = page.getByRole('tabpanel');
-	const select3 = reopened.getByTestId('add-table-select');
-	await expect(select3).toBeEnabled({ timeout: 15_000 });
+	const input3 = reopened.getByTestId('add-table-input');
+	await expect(input3).toBeEnabled({ timeout: 15_000 });
 	await expect(reopened.getByTestId('export-entry-0')).toBeVisible({ timeout: 10_000 });
 	await expect(reopened.getByTestId('export-entry-1')).toHaveCount(0);
-	await select3.selectOption({ label: tableName });
+	await input3.fill(tableName);
+	await expect(reopened.getByRole('option', { name: tableName })).toBeVisible({ timeout: 10_000 });
+	await input3.press('Enter');
 	await expect(reopened.getByTestId('export-entry-1')).toBeVisible({ timeout: 10_000 });
 });
