@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, it, expect } from 'vitest';
 import { http, HttpResponse } from 'msw';
-import { runExporter } from '../exports';
+import { runExporter, runExporterDraft } from '../exports';
 import { server } from './server';
 
 const BASE = 'http://api.test/api/v1';
@@ -55,5 +55,27 @@ describe('runExporter', () => {
 		server.use(http.post(`${BASE}/exports/run`, () => new HttpResponse('zip')));
 		const result = await runExporter('a1', cfg);
 		expect(result.kind === 'ready' && result.filename).toBe('export.zip');
+	});
+});
+
+describe('runExporterDraft', () => {
+	it('sends {definition, name} in the request body, with no artifact_id key', async () => {
+		let seen: unknown = null;
+		server.use(
+			http.post(`${BASE}/exports/run`, async ({ request }) => {
+				seen = await request.json();
+				return new HttpResponse('zip', {
+					headers: { 'content-disposition': 'attachment; filename="drop.zip"' }
+				});
+			})
+		);
+		const definition = {
+			schema_version: 1 as const,
+			output: { mode: 'zip' as const, filename: '', manifest: true },
+			entries: []
+		};
+		await runExporterDraft(definition, 'x', cfg);
+		expect(seen).toEqual({ definition, name: 'x' });
+		expect(seen).not.toHaveProperty('artifact_id');
 	});
 });
