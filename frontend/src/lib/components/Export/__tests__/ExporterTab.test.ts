@@ -8,8 +8,10 @@ import * as artifactsApi from '$lib/api/artifacts';
 import * as checkoutApi from '$lib/api/checkout';
 import * as exportsApi from '$lib/api/exports';
 import { ConflictError } from '$lib/api/errors';
+import { TableDefinitionSchema } from '$lib/api/types';
 import { EXPORT_RETRY_MS } from '$lib/util/export-download';
 import {
+	addExporterEntry,
 	getExporterDraft,
 	getStagedArtifactOps,
 	isTempId,
@@ -230,7 +232,7 @@ describe('ExporterTab', () => {
 		]);
 	});
 
-	it('gates the export button on a dirty/unsaved draft and runs the 202-retry download loop once clean', async () => {
+	it('runs the 202-retry download loop for a clean committed draft (Export stays enabled while dirty)', async () => {
 		getArtifactSpy.mockResolvedValue(EXPORT_ARTIFACT);
 		render('exp:art-1');
 		await vi.waitFor(() =>
@@ -243,7 +245,9 @@ describe('ExporterTab', () => {
 		name.value = 'Renamed';
 		name.dispatchEvent(new Event('input', { bubbles: true }));
 		flushSync();
-		expect(runBtn.disabled).toBe(true);
+		// Spec §11: Export is UNGATED on dirty/uncommitted state — only
+		// emptiness disables it, and this draft still has its one entry.
+		expect(runBtn.disabled).toBe(false);
 
 		document.querySelector<HTMLButtonElement>('[data-testid="exporter-save"]')!.click();
 		flushSync();
@@ -284,13 +288,13 @@ describe('ExporterTab', () => {
 		expect(name.disabled).toBe(true);
 	});
 
-	it('keeps the export button disabled for a saved-but-uncommitted (temp-id) draft', async () => {
+	it('keeps the export button disabled for a saved-but-uncommitted (temp-id) draft with no entries', async () => {
 		render('exp:draft:1');
 		await vi.waitFor(() =>
 			expect(document.querySelector('[data-testid="exporter-save"]')).toBeTruthy()
 		);
 		const runBtn = document.querySelector<HTMLButtonElement>('[data-testid="exporter-run"]')!;
-		expect(runBtn.disabled).toBe(true); // never saved at all: artifactId null
+		expect(runBtn.disabled).toBe(true); // no entries yet — the one remaining gate
 
 		document.querySelector<HTMLButtonElement>('[data-testid="exporter-save"]')!.click();
 		flushSync();
@@ -299,7 +303,9 @@ describe('ExporterTab', () => {
 		expect(draft.dirty).toBe(false);
 		expect(draft.artifactId).not.toBeNull();
 		// A staged create's id names nothing server-side until the batch
-		// commits — clean AND non-null is not enough; it must be a REAL id.
+		// commits, but temp-id state no longer gates Export at all (spec §11:
+		// ungated on dirty/uncommitted) — the button stays disabled here only
+		// because the draft still has zero entries.
 		expect(isTempId(draft.artifactId!)).toBe(true);
 		expect(runBtn.disabled).toBe(true);
 	});
@@ -497,5 +503,107 @@ describe('ExporterTab', () => {
 		flushSync();
 
 		expect(getExporterDraft('exp:art-1')!.entries[0].format).toBe('csv');
+	});
+
+	// Spec §11: Export loses its dirty/temp-id gating — a dirty or
+	// never-committed draft exports by sending `definition` inline instead.
+	it('exports a dirty draft by sending the definition inline', async () => {
+		getArtifactSpy.mockResolvedValue(EXPORT_ARTIFACT);
+		render('exp:art-1');
+		await vi.waitFor(() =>
+			expect(document.querySelector('[data-testid="export-entry-0"]')).toBeTruthy()
+		);
+
+		const name = document.querySelector<HTMLInputElement>('[data-testid="export-entry-0"] input')!;
+		name.value = 'Renamed';
+		name.dispatchEvent(new Event('input', { bubbles: true }));
+		flushSync();
+		expect(getExporterDraft('exp:art-1')!.dirty).toBe(true);
+
+		const runBtn = document.querySelector<HTMLButtonElement>('[data-testid="exporter-run"]')!;
+		expect(runBtn.disabled).toBe(false);
+
+		const blob = new Blob(['x'], { type: 'application/zip' });
+		const draftSpy = vi
+			.spyOn(exportsApi, 'runExporterDraft')
+			.mockResolvedValue({ kind: 'ready', blob, filename: 'Drop.zip' });
+		const runSpy = vi.spyOn(exportsApi, 'runExporter');
+		vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock');
+		vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+		vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+
+		runBtn.click();
+		await Promise.resolve();
+		await Promise.resolve();
+		flushSync();
+
+		expect(runSpy).not.toHaveBeenCalled();
+		expect(draftSpy).toHaveBeenCalledTimes(1);
+		const [definitionArg, nameArg] = draftSpy.mock.calls[0];
+		expect(definitionArg.entries.length).toBe(1);
+		expect(nameArg).toBe(getExporterDraft('exp:art-1')!.name);
+	});
+
+	// A clean, committed draft still runs by artifact id — identical content,
+	// but the manifest then carries the real artifact id (spec §11).
+	it('exports a clean committed draft by artifact id', async () => {
+		getArtifactSpy.mockResolvedValue(EXPORT_ARTIFACT);
+		render('exp:art-1');
+		await vi.waitFor(() =>
+			expect(document.querySelector('[data-testid="export-entry-0"]')).toBeTruthy()
+		);
+		expect(getExporterDraft('exp:art-1')!.dirty).toBe(false);
+		expect(isTempId(getExporterDraft('exp:art-1')!.artifactId!)).toBe(false);
+
+		const runBtn = document.querySelector<HTMLButtonElement>('[data-testid="exporter-run"]')!;
+		expect(runBtn.disabled).toBe(false);
+
+		const blob = new Blob(['x'], { type: 'application/zip' });
+		const runSpy = vi
+			.spyOn(exportsApi, 'runExporter')
+			.mockResolvedValue({ kind: 'ready', blob, filename: 'Drop.zip' });
+		const draftSpy = vi.spyOn(exportsApi, 'runExporterDraft');
+		vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock');
+		vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+		vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+
+		runBtn.click();
+		await Promise.resolve();
+		await Promise.resolve();
+		flushSync();
+
+		expect(draftSpy).not.toHaveBeenCalled();
+		expect(runSpy).toHaveBeenCalledTimes(1);
+		expect(runSpy).toHaveBeenCalledWith('art-1');
+	});
+
+	it('disables Export only while the draft has no entries', async () => {
+		getArtifactSpy.mockImplementation((id: string) =>
+			id === 'art-1' ? Promise.resolve(EXPORT_ARTIFACT) : Promise.resolve(TABLE_ARTIFACT)
+		);
+		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({ items: [TABLE_HEADER] });
+		await loadArtifacts();
+
+		render('exp:draft:1');
+		await vi.waitFor(() =>
+			expect(document.querySelector('[data-testid="exporter-save"]')).toBeTruthy()
+		);
+		const runBtn = document.querySelector<HTMLButtonElement>('[data-testid="exporter-run"]')!;
+		expect(runBtn.disabled).toBe(true);
+		expect(runBtn.title).toBe('Add at least one table first');
+
+		addExporterEntry(
+			'exp:draft:1',
+			'tbl-2',
+			'Beta',
+			TableDefinitionSchema.parse(TABLE_ARTIFACT.payload)
+		);
+		flushSync();
+
+		const draft = getExporterDraft('exp:draft:1')!;
+		expect(draft.entries.length).toBe(1);
+		expect(draft.dirty).toBe(true); // still dirty/uncommitted…
+		expect(runBtn.disabled).toBe(false); // …but that no longer gates Export
+		expect(runBtn.title).toBe('');
 	});
 });
