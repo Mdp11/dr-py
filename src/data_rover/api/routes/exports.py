@@ -155,6 +155,47 @@ def run_export(
     )
 
 
+@router.get("/exports/run-by-name")
+def run_export_by_name(
+    name: str,
+    project_id: str,
+    session: Session = Depends(get_request_session),
+    db: DbSession = Depends(get_db),
+    runner: ScriptRunner | None = Depends(get_runner),
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    """CI ergonomics (spec §9.2): run a committed exporter by NAME with one
+    `curl`. A QUERY parameter, not a path segment — artifact names are
+    free-form text. GET is read-only by `authz`'s method-based write
+    detection, so membership auth (header or cookie) works unchanged and the
+    route is viewer-callable like the POST. Response contract identical to
+    `POST /exports/run` — both delegate to `_execute_export`, including the
+    aggregate `202 + Retry-After: 1` while sweeps fill."""
+    rows = content.find_artifacts_by_name(db, project_id, ArtifactKind.exporter, name)
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"unknown exporter {name!r}")
+    if len(rows) > 1:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"ambiguous exporter name {name!r}; candidates: "
+                + ", ".join(r.id for r in rows)
+            ),
+        )
+    row = rows[0]
+    cdef: ExporterDefinition = EXPORTER_ADAPTER.validate_python(row.payload)
+    return _execute_export(
+        cdef,
+        run_name=row.name,
+        artifact_id=row.id,
+        project_id=project_id,
+        session=session,
+        db=db,
+        runner=runner,
+        settings=settings,
+    )
+
+
 def _execute_export(
     cdef: ExporterDefinition,
     *,

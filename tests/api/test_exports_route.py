@@ -949,3 +949,79 @@ def test_draft_run_with_no_entries_422s(client):
     r = _run_draft(client, {"entries": []})
     assert r.status_code == 422
     assert "no entries" in r.json()["detail"]
+
+
+# ---- Phase 3: run-by-name (spec §9.2) -------------------------------------
+
+
+def _run_by_name(client, name):
+    return client.get(
+        papi("/exports/run-by-name"), params={"name": name}, headers=AUTH_HEADERS
+    )
+
+
+def test_run_by_name_matches_the_post_contract(client):
+    _bootstrap_model(client)
+    t = _mk_table(client, "parts")
+    x = _mk_export(
+        client, [{"source": {"ref": t}, "name": "e1", "format": "json"}], name="nightly"
+    )
+    by_name = _run_by_name(client, "nightly")
+    by_id = _run(client, x)
+    assert by_name.status_code == by_id.status_code == 200
+    assert by_name.headers["content-type"] == "application/zip"
+    assert _names(by_name) == _names(by_id) == ["e1.json"]
+    assert by_name.headers["content-disposition"].endswith('nightly.zip"')
+
+
+def test_run_by_name_unknown_404s(client):
+    _bootstrap_model(client)
+    r = _run_by_name(client, "no-such-exporter")
+    assert r.status_code == 404
+
+
+def test_run_by_name_ignores_other_kinds(client):
+    _bootstrap_model(client)
+    _mk_table(client, "shadow")  # a TABLE named like the query
+    r = _run_by_name(client, "shadow")
+    assert r.status_code == 404
+
+
+def test_run_by_name_ambiguous_409s_listing_candidates(client, monkeypatch):
+    _bootstrap_model(client)
+    t = _mk_table(client, "parts")
+    x1 = _mk_export(client, [{"source": {"ref": t}, "format": "json"}], name="dup")
+    # The brief's premise (a raw content-layer insert can slip a duplicate
+    # (kind, name) past the create/rename routes' 409) does not hold today:
+    # `project_artifacts` carries a genuine DB-level UNIQUE constraint on
+    # (project_id, kind, name) (Alembic 0008, `db_models.ArtifactRow`), so
+    # ANY insert of a second "exporter"/"dup" row — through `content.
+    # create_artifact` or raw SQL alike — raises `IntegrityError`; a true
+    # duplicate is unreachable through any write path against this schema.
+    # The route's ambiguity handling is still worth proving deterministic
+    # (schema invariants can drift — a future migration, a manual DB edit),
+    # so this simulates ambiguity at the query seam instead of the DB: a
+    # second, genuinely distinct exporter is created normally, then
+    # `find_artifacts_by_name` is patched to answer as if both rows matched
+    # the same name. This still exercises the real route logic end to end
+    # (status code, `detail` contents) — only the "how did two rows come to
+    # share a name" premise is faked.
+    x2 = _mk_export(client, [{"source": {"ref": t}, "format": "json"}], name="dup2")
+    from data_rover.api import content
+    from data_rover.api.routes import exports as exports_routes
+
+    real_find = content.find_artifacts_by_name
+
+    def fake_find(db, project_id, kind, name):
+        if name == "dup":
+            rows = real_find(db, project_id, kind, "dup") + real_find(
+                db, project_id, kind, "dup2"
+            )
+            return sorted(rows, key=lambda r: r.id)
+        return real_find(db, project_id, kind, name)
+
+    monkeypatch.setattr(exports_routes.content, "find_artifacts_by_name", fake_find)
+    r = _run_by_name(client, "dup")
+    assert r.status_code == 409
+    assert x1 in r.json()["detail"]
+    assert x2 in r.json()["detail"]
