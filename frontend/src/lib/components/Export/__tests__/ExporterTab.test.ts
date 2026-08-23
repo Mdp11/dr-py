@@ -289,7 +289,7 @@ describe('ExporterTab', () => {
 		name.value = 'Renamed';
 		name.dispatchEvent(new Event('input', { bubbles: true }));
 		flushSync();
-		// Spec §11: Export is UNGATED on dirty/uncommitted state — only
+		// Export is deliberately ungated on dirty/uncommitted state — only
 		// emptiness disables it, and this draft still has its one entry.
 		expect(runBtn.disabled).toBe(false);
 
@@ -552,7 +552,7 @@ describe('ExporterTab', () => {
 		expect(getExporterDraft('exp:art-1')!.entries[0].format).toBe('csv');
 	});
 
-	// Spec §11: Export loses its dirty/temp-id gating — a dirty or
+	// Export is deliberately ungated on dirty/temp-id state — a dirty or
 	// never-committed draft exports by sending `definition` inline instead.
 	it('exports a dirty draft by sending the definition inline', async () => {
 		getArtifactSpy.mockResolvedValue(EXPORT_ARTIFACT);

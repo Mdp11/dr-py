@@ -46,9 +46,9 @@ vi.mock('$lib/state', async (orig) => {
 	};
 });
 
-// `MetamodelFormPanel` calls `useSvelteFlow()` unconditionally (task 10, for
-// its TOC rows' reveal action), which throws outside a `<SvelteFlowProvider>`.
-// This file mounts the panel bare, so the hook is stubbed rather than wrapping
+// `MetamodelFormPanel` calls `useSvelteFlow()` unconditionally (for its TOC
+// rows' reveal action), which throws outside a `<SvelteFlowProvider>`. This
+// file mounts the panel bare, so the hook is stubbed rather than wrapping
 // every mount in a provider neither the panel nor its forms otherwise need.
 vi.mock('@xyflow/svelte', () => ({
 	useSvelteFlow: () => ({
@@ -106,8 +106,8 @@ describe('MetamodelFormPanel', () => {
 		// TOC row is the only way to reach its form at all.
 		expect(overview.textContent).toContain('Observes');
 		expect(overview.textContent).toContain('no mappings');
-		// task 10: element types and mapped relationships are now listed too,
-		// not just the enums/mapless rows the old overview singled out.
+		// Element types and mapped relationships are listed too, not just
+		// enums/mapless rows.
 		expect(overview.textContent).toContain('Zone');
 		expect(overview.textContent).toContain('Contains');
 

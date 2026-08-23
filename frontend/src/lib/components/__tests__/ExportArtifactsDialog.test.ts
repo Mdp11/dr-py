@@ -327,7 +327,7 @@ describe('ExportArtifactsDialog', () => {
 		expect(exp.mock.calls[0][0]).not.toContain('d1');
 	});
 
-	// Companion to the finding-#4 regression above, for the SEED path: the
+	// Companion to the filtering test above, for the SEED path: the
 	// open-transition effect validates seed ids against a membership set that
 	// must be built from the same filtered `headers` the rows render from. An
 	// unregistered-kind id (e.g. legacy `diagram`) present in the committed
@@ -345,17 +345,17 @@ describe('ExportArtifactsDialog', () => {
 		// Only the renderable seed survives; d1 never enters the selection.
 		expect(preview).toHaveBeenCalledWith(['n1']);
 		expect(rowCheckbox('n1').checked).toBe(true);
-		// With the bug, d1 sat checked-but-rowless and surfaced here as a
+		// d1 must not sit checked-but-rowless, which would surface here as a
 		// phantom "+1 selected not shown".
 		expect(document.body.textContent).not.toContain('selected not shown');
 	});
 
-	// Review finding on the seed fix: `checked` is only ever ADDED to by user
-	// or seed action, but the committed headers can shrink underneath it — a
-	// peer's delete commit over the realtime feed removes the row while the
-	// untracked open-effect (correctly) never reruns. The dead id must not
-	// linger as a phantom "+N selected not shown" nor be POSTed as an export
-	// root; the EFFECTIVE selection is `checked` ∩ live headers.
+	// `checked` is only ever ADDED to by user or seed action, but the
+	// committed headers can shrink underneath it — a peer's delete commit
+	// over the realtime feed removes the row while the untracked open-effect
+	// (correctly) never reruns. The dead id must not linger as a phantom "+N
+	// selected not shown" nor be POSTed as an export root; the EFFECTIVE
+	// selection is `checked` ∩ live headers.
 	it('a peer delete of a checked artifact drops it from the effective selection', async () => {
 		vi.spyOn(bundleApi, 'exportPreview').mockResolvedValue({ artifacts: [], dangling_refs: [] });
 		const exp = vi.spyOn(bundleApi, 'exportBundle').mockResolvedValue(new Response('{}'));

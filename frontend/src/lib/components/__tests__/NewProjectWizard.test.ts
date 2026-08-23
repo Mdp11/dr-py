@@ -247,10 +247,10 @@ describe('NewProjectWizard', () => {
 		unmount(c);
 	});
 
-	// Review findings on the close-reset fix above: a createProject still in
-	// flight when the dialog closes must be ABANDONED — its settlement may
-	// neither write error/skipped/createdId onto the fresh form nor navigate
-	// via onCreated, and its `pending` must not freeze a reopened wizard.
+	// A createProject still in flight when the dialog closes must be
+	// ABANDONED — its settlement may neither write error/skipped/createdId
+	// onto the fresh form nor navigate via onCreated, and its `pending` must
+	// not freeze a reopened wizard.
 	it('a submit that fails after the dialog closed leaves the reopened wizard pristine and unfrozen', async () => {
 		let rejectCreate!: (e: unknown) => void;
 		createProject.mockImplementation(
