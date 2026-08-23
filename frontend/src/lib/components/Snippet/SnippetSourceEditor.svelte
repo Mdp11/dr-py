@@ -1,7 +1,7 @@
 <script lang="ts">
 	// Shared ref/inline editor for a `SnippetSource` ({ ref?, definition? }) —
-	// consumed embedded in a table's script column (F4) and a navigation
-	// script step (F6). Mirrors NavigationColumnEditor's ref/inline toggle
+	// consumed embedded in a table's script column and a navigation
+	// script step. Mirrors NavigationColumnEditor's ref/inline toggle
 	// (mode derived from `definition != null`; ref mode otherwise, including
 	// the unconfigured `{}`), but stays deliberately simpler: a code string
 	// has no embedded-draft mirror machinery to maintain, so this component

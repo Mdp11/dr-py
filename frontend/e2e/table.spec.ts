@@ -281,7 +281,7 @@ test('lazy loads rows while scrolling a large scope table', async ({ page }) => 
 });
 
 /**
- * E2E for inline navigation/row-source definitions (Stage 2 Tasks 4–5):
+ * E2E for inline navigation/row-source definitions:
  * a navigation column or a chains row source can carry its OWN navigation
  * definition — edited in place with the real navigation builder (PathCard /
  * StatusChip), embedded in the column panel via an embedded draft — instead

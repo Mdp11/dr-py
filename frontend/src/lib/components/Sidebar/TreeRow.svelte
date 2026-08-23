@@ -169,7 +169,7 @@
 		folderLease !== undefined && folderLease.holder_id !== getCurrentUserId()
 	);
 
-	// Lease-at-dialog-open pattern (Decision 2): acquire the lease BEFORE the
+	// Lease-at-dialog-open pattern: acquire the lease BEFORE the
 	// prompt/confirm shows (fail-fast — a denial means the dialog never opens),
 	// then hand it back via `releaseFolderLeaseIfUnneeded` on cancel/no-op close
 	// (the mutator's own gate call on the happy path is idempotent and cheap, so

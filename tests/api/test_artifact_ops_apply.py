@@ -181,8 +181,8 @@ def test_restore_create_into_taken_name_422(dbs) -> None:
     assert e.value.status_code == 422
     # the applier has NO internal rollback path (see its docstring): a DB
     # IntegrityError leaves the session's transaction needing an explicit
-    # rollback before further use — exactly the contract Tasks 5/6 (the real
-    # callers) fulfil via db.rollback() on any HTTPException from apply.
+    # rollback before further use — exactly the contract real callers
+    # fulfil via db.rollback() on any HTTPException from apply.
     dbs.rollback()
 
 

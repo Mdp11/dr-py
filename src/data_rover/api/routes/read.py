@@ -600,7 +600,7 @@ def list_containment_children(
 
 # ---------------------------------------------------------------------------
 # GET /model/changes — op log compacted into a datarover.cr/v1 document
-# (compaction engine lives in api/changes.py, shared with the C3 save flow)
+# (compaction engine lives in api/changes.py, shared with the save flow)
 # ---------------------------------------------------------------------------
 
 

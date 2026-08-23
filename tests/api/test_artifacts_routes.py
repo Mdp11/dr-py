@@ -1,5 +1,5 @@
 """Artifacts CRUD: project-scoped, membership-authorized, optimistic-rev
-guarded, payload-validated per kind (Stage 1: navigation only)."""
+guarded, payload-validated per kind."""
 
 from __future__ import annotations
 

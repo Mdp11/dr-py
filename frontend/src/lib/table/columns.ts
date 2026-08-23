@@ -1,5 +1,5 @@
 /**
- * Pure column-edit helpers over a TableDefinition (Stage 2 tables). Every
+ * Pure column-edit helpers over a TableDefinition. Every
  * mutator returns a NEW TableDefinition — the input is never mutated. No
  * Svelte, no store, no I/O — fully unit-testable, mirroring
  * `lib/navigation/tree.ts`.

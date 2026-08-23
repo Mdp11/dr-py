@@ -249,9 +249,9 @@
 		}
 	}
 
-	// The View tab's ONE discard button (Decision 5 — see the comment beside
+	// The View tab's ONE discard button — see the comment beside
 	// the artifact rows' per-row `discardArtifact` above for why the journal
-	// gets no per-row equivalent). All-or-nothing: wipes the whole staged
+	// gets no per-row equivalent. All-or-nothing: wipes the whole staged
 	// view-op journal, releases its folder leases, and refetches server truth.
 	async function onDiscardViewChanges(): Promise<void> {
 		await discardViewChanges();

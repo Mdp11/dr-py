@@ -148,7 +148,7 @@ export function isCheckedOutByMe(resourceId: string): boolean {
 	return _registry.has(resourceId);
 }
 
-/** Internal: record granted leases under their token. Exported for Tasks 6-8. */
+/** Internal: record granted leases under their token. Exported for tests. */
 export function _recordLeases(leases: LeaseOut[]): void {
 	for (const le of leases) {
 		_registry.set(le.resource_id, {

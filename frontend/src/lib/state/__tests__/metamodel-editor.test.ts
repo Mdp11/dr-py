@@ -34,12 +34,11 @@ import type { LockResponse, MetamodelDiff, RawMetamodel } from '$lib/api/types';
 const PROJECT = 'p1';
 const DRAFT_KEY = `ui.metamodel.draft.${PROJECT}`;
 const BASE = '# base\nelements: []\n';
-// NOTE (deviation from the task brief's skeleton): each lease carries its OWN
-// `token` and an `expires_at` — that is what `LeaseOut` declares and what
-// `checkout.svelte`'s `_recordLeases` stores. Without the per-lease token,
-// `releaseMetamodelLease` finds `undefined` in the registry and returns
-// without ever calling `releaseLock`, so cases 7 and 10 could not observe the
-// release at all.
+// Each lease carries its OWN `token` and an `expires_at` — that is what
+// `LeaseOut` declares and what `checkout.svelte`'s `_recordLeases` stores.
+// Without the per-lease token, `releaseMetamodelLease` finds `undefined` in
+// the registry and returns without ever calling `releaseLock`, so cases 7
+// and 10 could not observe the release at all.
 const LEASE: LockResponse = {
 	token: 't-mm',
 	leases: [

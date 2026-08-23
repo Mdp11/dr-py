@@ -91,8 +91,8 @@ def _resolve_table(
 ) -> TableDefinition:
     """The table's own definition (from `artifact_id` or inline), with every
     embedded navigation ref AND `ScriptColumn`/`ScriptStep` snippet ref
-    inlined via `resolve_table_refs` — the core evaluator (Tasks 4-6, 9-10)
-    assumes a fully ref-free definition. A dangling snippet ref is left in
+    inlined via `resolve_table_refs` — the core evaluator assumes a fully
+    ref-free definition. A dangling snippet ref is left in
     place (degrades to an error cell at evaluation time); a dangling
     navigation ref still raises `LookupError` (422)."""
     if payload.artifact_id is not None:

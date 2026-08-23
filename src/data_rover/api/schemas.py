@@ -1223,7 +1223,7 @@ class SnippetDocsOut(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Navigation evaluation (Stage 1: POST /navigations/evaluate)
+# Navigation evaluation (POST /navigations/evaluate)
 # ---------------------------------------------------------------------------
 
 
@@ -1295,7 +1295,7 @@ class ChainPageOut(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Table evaluation (Stage 2: POST /tables/evaluate)
+# Table evaluation (POST /tables/evaluate)
 # ---------------------------------------------------------------------------
 
 

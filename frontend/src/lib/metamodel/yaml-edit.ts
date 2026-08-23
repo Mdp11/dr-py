@@ -119,7 +119,7 @@ export function serializeDraft(doc: Document): string {
 	return doc.toString(STRINGIFY_OPTS);
 }
 
-// --- shared traversal helpers (used by the command handlers, Tasks 2-4) ----
+// --- shared traversal helpers (used by the command handlers) ----
 
 export type SectionKey = 'elements' | 'relationships';
 

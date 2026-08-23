@@ -539,9 +539,9 @@ way the client does: a `view.*` op batch through `POST /commits`, under a
   gesture already completed, since there is no earlier moment to fail fast
   from. A sidebar dialog (create/rename/delete folder in `TreeRow.svelte` /
   `ContainmentTree.svelte`) is the opposite: it acquires the lease BEFORE the
-  `window.prompt`/confirm dialog even opens ("Decision 2" in those
-  components' comments) — a denial means the dialog never shows at all,
-  rather than the user typing a name into a doomed rename. Cancelling the
+  `window.prompt`/confirm dialog even opens — a denial means the dialog
+  never shows at all, rather than the user typing a name into a doomed
+  rename. Cancelling the
   prompt (or leaving it a no-op) hands the lease straight back via
   `releaseFolderLeaseIfUnneeded`.
 - **`folder:` resources ride the SAME lock registry as `art:` and element

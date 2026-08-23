@@ -1,8 +1,8 @@
 /**
- * E2E: embedded script evaluation (Code execution M2/M3 frontend, Task F8) —
- * script table columns (`ScriptColumn`) and navigation script steps
- * (`NavScriptStep`) driven against the real WASM sandbox, following the
- * conventions of `snippet-flow.spec.ts` (setCode / runner-availability skip)
+ * E2E: embedded script evaluation — script table columns (`ScriptColumn`)
+ * and navigation script steps (`NavScriptStep`) driven against the real
+ * WASM sandbox, following the conventions of `snippet-flow.spec.ts`
+ * (setCode / runner-availability skip)
  * and `table.spec.ts` (nav -> "Open as table", the ColumnManager's "Table
  * settings" dialog, its documented selectors).
  *
@@ -97,7 +97,7 @@ test('script column: ref snippet computes values + error cell + sorts; inline sc
 	await loadFiles(page, { metamodel: METAMODEL_PATH, model: MODEL_PATH, view: VIEW_PATH });
 	await expectLiveFeed(page, 60_000);
 
-	// --- 0. Save a code_snippet artifact defining value() (F1/M1 flow, as
+	// --- 0. Save a code_snippet artifact defining value() (as
 	// snippet-flow.spec.ts does), so the script column below can reference it
 	// by ref. entry_points are SERVER-DERIVED from the AST on save — defining
 	// value(...) alone is enough to unlock the `value` entry regardless of the

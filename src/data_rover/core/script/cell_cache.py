@@ -50,12 +50,11 @@ _CACHEABLE_ERROR_KINDS = frozenset({"runtime", "syntax"})
 #: (default 50 000) cells; nothing bounds the aggregate, and a realistic
 #: pathological cell -- a multi-hop snippet charging dozens of keys per cell
 #: over a big table -- is already hundreds of MB of pure bookkeeping. `None`
-#: already means "evict on every commit"
-#: (the conservative, always-correct direction), so collapsing an oversized
-#: set to `None` here costs only extra recompute for that one cell; it can
-#: NEVER cause a stale value, only extra work. Deliberately far below
-#: `_MAX_READS`: this bounds steady-state cache memory, not a single call's
-#: worst case.
+#: already means "evict on every commit" (the conservative, always-correct
+#: direction), so collapsing an oversized set to `None` here costs only
+#: extra recompute for that one cell; it can NEVER cause a stale value,
+#: only extra work. Deliberately far below `_MAX_READS`: this bounds
+#: steady-state cache memory, not a single call's worst case.
 _MAX_STORED_READS = 128
 
 
@@ -92,7 +91,7 @@ class ScriptCellCache:
             # Degrade to "depends on everything" rather than storing a huge
             # read-set: correctness-neutral (None is already the always-evict
             # direction), just forfeits the recompute savings for this one
-            # pathological cell. See _MAX_STORED_READS's docstring.
+            # pathological cell. See _MAX_STORED_READS's comment.
             reads = None
         with self._lock:
             if rev < self._stamp:

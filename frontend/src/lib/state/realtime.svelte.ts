@@ -144,9 +144,9 @@ function clearLeases(leases: LeaseLite[]): void {
 // arrive in bursts (a multi-op batch, a flaky connection reconnecting
 // several times); the GET is cheap but one call per burst is enough. The
 // refetch corrects what the synthesized peer-commit delta below cannot know
-// — the feed event carries no issue delta, by design (spec Decisions #3:
-// refetch was chosen over shipping deltas on the wire because reconnect
-// needs the refetch path anyway).
+// — the feed event carries no issue delta by design: refetch is preferred
+// over shipping deltas on the wire because reconnect needs the refetch
+// path anyway.
 let _issuesRefetchTimer: ReturnType<typeof setTimeout> | null = null;
 
 function scheduleIssuesRefetch(): void {

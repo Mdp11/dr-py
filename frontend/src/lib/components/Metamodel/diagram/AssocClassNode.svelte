@@ -15,9 +15,9 @@
 	 *
 	 * Deliberately a sibling of `ElementTypeNode` rather than a variant of it:
 	 * the two shapes read differently on purpose (amber tint vs jade, no key
-	 * markers here — a relationship's `key` DSL lives on the element side), and
-	 * Tasks 11-13 extend the element box on its own. See that file for the
-	 * shared conventions (token-only colours, width owned by `nodeSize`).
+	 * markers here — a relationship's `key` DSL lives on the element side).
+	 * See that file for the shared conventions (token-only colours, width
+	 * owned by `nodeSize`).
 	 */
 
 	interface Data {

@@ -15,9 +15,9 @@ export function isResultStale(
 	return result.stale || result.model_rev !== currentRev;
 }
 
-/** M1 runners only produce syntax/runtime/timeout/memory; cancelled/limit are
- * declared-but-unemitted (backend M2) and still render sensibly if they ever
- * appear — the console must not switch on an incomplete union. */
+/** The runner only produces syntax/runtime/timeout/memory today; cancelled/limit
+ * are declared-but-unemitted and still render sensibly if they ever appear —
+ * the console must not switch on an incomplete union. */
 export function errorKindLabel(kind: SnippetError['kind']): string {
 	switch (kind) {
 		case 'syntax':

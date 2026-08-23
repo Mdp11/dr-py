@@ -207,9 +207,9 @@ def test_undo_refuses_while_peer_holds_folder_lease(client: TestClient) -> None:
 
 def test_undo_not_blocked_by_callers_own_folder_lease(client: TestClient) -> None:
     """The mirror of the peer-refusal test above: ``peer_leases`` excludes
-    the caller's own holder id, so a lease the
-    UNDOING user holds on the very folder being touched must never 409 —
-    only a PEER's lease should."""
+    the caller's own holder id, so a lease the UNDOING user holds on the
+    very folder being touched must never 409 — only a PEER's lease
+    should."""
     fid = create_folder_via_commit(client, "A")["id_map"]["tmp_setup"]
     _commit_rename(client, fid, "A2")
     # the rename's own lease was released by the commit; re-acquire a fresh

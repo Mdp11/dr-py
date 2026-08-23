@@ -238,8 +238,8 @@ export async function runSnippetTab(tabId: string): Promise<void> {
 	}
 }
 
-/** Honest Stop (spec D3): the M1 abort is a no-op server-side — the run ends
- * only at wall_timeout_s. We cancel (deregisters + authorizes), orphan the
+/** Honest Stop: the server-side abort is a no-op — the run ends only at
+ * wall_timeout_s. We cancel (deregisters + authorizes), orphan the
  * in-flight response via the generation bump, and say so. Until the server
  * slot frees, a new run may 429 (per-user cap) — that is honest too. */
 export async function stopSnippetTab(tabId: string): Promise<void> {

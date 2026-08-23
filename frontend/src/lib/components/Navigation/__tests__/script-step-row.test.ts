@@ -1,5 +1,5 @@
-// Render tests for the per-step editor of a `script`-kind navigation step
-// (Task F6). Follows the repo's Svelte-5 mount/flushSync/unmount convention
+// Render tests for the per-step editor of a `script`-kind navigation step.
+// Follows the repo's Svelte-5 mount/flushSync/unmount convention
 // (see Table/__tests__/ScriptColumnEditor.test.ts) rather than
 // @testing-library/svelte (not a project dependency). The step starts in
 // ref mode (`snippet: {}`) so SnippetSourceEditor never needs the

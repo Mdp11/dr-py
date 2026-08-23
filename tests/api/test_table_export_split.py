@@ -1,4 +1,4 @@
-"""POST /tables/export with json_split enabled (P-13)."""
+"""POST /tables/export with json_split enabled."""
 
 import io
 import json

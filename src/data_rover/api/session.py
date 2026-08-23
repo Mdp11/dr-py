@@ -162,7 +162,7 @@ class Session:
         Called by ``set_model``/``touch_model`` after they bump the rev, and —
         this is the load-bearing part — by every route that mutates the model
         IN PLACE and then rolls it back (``routes/commits.py``,
-        ``routes/ops.py``, ``routes/metamodel_swap.py``).
+        ``routes/ops.py``).
 
         Table routes take NO ``write_mutex``, so a concurrent
         ``/tables/evaluate`` can sample the rev mid-mutation and write results
@@ -220,7 +220,7 @@ class Session:
         """Replace (or clear) the model and invalidate model-derived state.
 
         ``validation``: callers that already computed a fresh/spliced
-        ``ValidationState`` for the NEW model (the C3 load endpoints seed at
+        ``ValidationState`` for the NEW model (the load endpoints seed at
         load time; session-mode apply-cr splices the CR's dirty set) pass it
         here so it is installed in the same step instead of cleared.
         """
@@ -337,9 +337,10 @@ class SessionRegistry:
 
     def evict(self, project_id: str) -> None:
         # Peek (do NOT pop) under the guard so the session stays registered
-        # while we inspect it. Popping first opened a window where a concurrent
-        # get() could hydrate a second session and then lose either the new or
-        # the re-registered live-leased session when we re-inserted.
+        # while we inspect it. Popping first would open a window where a
+        # concurrent get() could hydrate a second session and then lose
+        # either the new or the re-registered live-leased session when we
+        # re-inserted.
         with self._guard:
             session = self._sessions.get(project_id)
         if session is None:

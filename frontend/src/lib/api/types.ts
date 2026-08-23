@@ -483,7 +483,7 @@ export const TreeItemPageSchema = z.object({
 export type TreeItemPage = z.infer<typeof TreeItemPageSchema>;
 
 // ---------------------------------------------------------------------------
-// Project artifacts (Stage 1: saved navigations; tables/diagrams later)
+// Project artifacts
 // ---------------------------------------------------------------------------
 
 export const ArtifactListSchema = z.object({
@@ -798,7 +798,7 @@ export const ProjectSettingsSchema = z.object({
 export type ProjectSettings = z.infer<typeof ProjectSettingsSchema>;
 
 // ---------------------------------------------------------------------------
-// Table definition (Stage 2) — mirrors core/table/schema.py. Navigation
+// Table definition — mirrors core/table/schema.py. Navigation
 // sources reuse NavigationDefinitionSchema (above); row/column criteria reuse
 // the loose `unknown[]` convention NavScope/NavFilterStep already use for
 // search Criterion objects (typed at the editor layer, not here).

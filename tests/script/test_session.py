@@ -80,7 +80,7 @@ def test_decode_step_payloads() -> None:
         assert decoded is None and msg is not None
 
 
-# --- Facade-side serialization (guest-side, M2/M3) -----
+# --- Facade-side serialization (guest-side) -----
 
 
 def _facade_ns(model) -> dict:
@@ -262,7 +262,7 @@ def test_step_bad_return_message_teaches_none(session_model) -> None:
     assert "object" in res.error.message
 
 
-# --- ScriptEvalContext tests (M2+M3) -----
+# --- ScriptEvalContext tests -----
 
 
 def _ctx(model, **kw) -> ScriptEvalContext:

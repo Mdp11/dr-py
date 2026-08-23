@@ -1,5 +1,5 @@
-// Render tests for the shared ref/inline SnippetSource editor (Task F3),
-// consumed by ScriptColumnEditor (F4) and ScriptStepRow (F6). Follows the
+// Render tests for the shared ref/inline SnippetSource editor,
+// consumed by ScriptColumnEditor and ScriptStepRow. Follows the
 // repo's Svelte-5 mount/flushSync/unmount convention (see
 // Table/__tests__/ColumnManager.test.ts) rather than @testing-library/svelte
 // (not a project dependency). Artifact headers are seeded through the REAL

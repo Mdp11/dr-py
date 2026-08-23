@@ -852,7 +852,7 @@ def undo(
             # must not be the one case that leaves the model half-undone.
             # Undo BOTH halves and re-push the batch so undo history survives.
             _rollback(model, res.inverse_units)
-            session.invalidate_derived_caches()  # rolled back in place; A1/I1
+            session.invalidate_derived_caches()  # rolled back in place
             session.op_log.append(batch)
             if created_view:
                 session.view = None  # see created_view's docstring above
