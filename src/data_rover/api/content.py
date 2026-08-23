@@ -325,12 +325,12 @@ def find_artifacts_by_name(
 ) -> list[ArtifactRow]:
     """Every row sharing `(kind, name)` — unlike `find_artifact`, which
     `scalar_one_or_none`s and would RAISE on a duplicate. `project_artifacts`
-    carries a DB-level `UNIQUE (project_id, kind, name)` (Alembic `0008`),
-    so >1 row is unreachable through any write path against today's schema;
-    but this query makes no such assumption, and `GET /exports/run-by-name`'s
-    ambiguity contract (spec §9.2: 409 listing candidates) must answer
-    deterministically should that invariant ever be relaxed. Ordered by id
-    for a stable detail."""
+    carries a DB-level `UNIQUE (project_id, kind, name)` constraint, so >1
+    row is unreachable through any write path against today's schema; but
+    this query makes no such assumption, and `GET /exports/run-by-name`'s
+    ambiguity contract (409 listing candidates) must answer deterministically
+    should that invariant ever be relaxed. Ordered by id for a stable
+    detail."""
     return list(
         db.execute(
             select(ArtifactRow)

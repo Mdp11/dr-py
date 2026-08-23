@@ -51,7 +51,7 @@ logger = logging.getLogger(__name__)
 
 
 def _configure_logging() -> None:
-    """Give the app's own loggers a working INFO path (backlog B-1).
+    """Give the app's own loggers a working INFO path.
 
     Nothing else in the process configures logging: uvicorn's default log
     config wires only its own ``uvicorn.*`` loggers, so everything under
@@ -179,7 +179,7 @@ def _sweep_expired_locks(now: float) -> int:
 
 
 def _boot_script_runner(settings: Settings) -> None:
-    """Construct the process-wide `ScriptRunner` (Task 10) at lifespan
+    """Construct the process-wide `ScriptRunner` at lifespan
     startup and install it via `script_runner.set_runner`.
 
     Lazy-construction policy: a `WasmScriptRunner` boots
@@ -191,7 +191,7 @@ def _boot_script_runner(settings: Settings) -> None:
     artifact fetched by the `scripts/ensure_guest.sh` pixi activation hook (or
     by hand via `spikes/code_exec/fetch_python_wasi.sh`), so a checkout where
     that never ran -- no network, or a deployment that does not go through
-    pixi -- must boot cleanly with the runner left `None`; Task 11's routes are
+    pixi -- must boot cleanly with the runner left `None`; the routes are
     expected to 503 on that, not crash startup.
 
     The `snippet_runner="trusted"` RCE tripwire lives in

@@ -70,7 +70,7 @@ class Settings(BaseSettings):
     #: When non-empty, the GCS client talks to this emulator endpoint
     #: (e.g. "http://localhost:4443") instead of real GCS — set for local dev.
     storage_emulator_host: str = ""
-    #: Redis URL for the lease mirror (Phase 7, scoped), e.g.
+    #: Redis URL for the lease mirror, e.g.
     #: ``redis://localhost:6379/0``. Empty (the default) disables mirroring
     #: entirely (NullLeaseMirror): locks are in-process only — exactly the
     #: pre-mirror behavior. When set, mirroring is still best-effort: a down
@@ -95,8 +95,8 @@ class Settings(BaseSettings):
     #: distinct prefix per deployment when several backends share one Redis
     #: DB, so their lease sets can't clobber each other or cross-restore
     #: phantom leases for same-named projects (``default``). Empty (the
-    #: default) keeps the historical unprefixed keys, so an existing
-    #: deployment still finds its own mirror across an upgrade.
+    #: default) keeps unprefixed keys, so an existing deployment still finds
+    #: its own mirror across an upgrade.
     redis_key_prefix: str = ""
     #: A full-model snapshot is written every Nth commit (bounds hydration
     #: replay length). A snapshot is ALSO always written on eviction.
@@ -104,15 +104,15 @@ class Settings(BaseSettings):
     #: Idle sessions (no request for this many seconds) are snapshotted and
     #: evicted by the background sweeper. 0 disables the sweeper (tests).
     idle_evict_seconds: int = 1800
-    #: lease lifetime; renewed by client heartbeat (spec §8). Must be well
+    #: lease lifetime; renewed by client heartbeat. Must be well
     #: under idle_evict_seconds so an idle session has no live leases to strand.
     lock_ttl_seconds: int = 300
     #: lifespan sweeper interval for auto-releasing expired leases. 0 disables.
     lock_sweep_seconds: int = 60
     #: bounded per-client feed queue. A client whose queue overflows is dropped
-    #: and reconnects (Phase 5). Large enough to absorb a burst of commits.
+    #: and reconnects. Large enough to absorb a burst of commits.
     feed_queue_max: int = 256
-    #: xlsx export autofit ceiling, in pixels (U-2): one huge cell must not
+    #: xlsx export autofit ceiling, in pixels: one huge cell must not
     #: blow a column out to an unusable width, but 300 (~43 chars) proved too
     #: tight in practice. ~86 chars by default; Excel's own hard cap is 1790.
     #: Definition ``width_px`` values stay deliberately ignored on export —
@@ -142,7 +142,7 @@ class Settings(BaseSettings):
     #: pool_size`). More instances absorb concurrent runs without a cold
     #: boot, at the cost of one idle CPython-WASI interpreter per slot.
     #:
-    #: SIZED FOR THE SHARDED SWEEP (spec 2026-07-20 §4.3): a background sweep
+    #: SIZED FOR THE SHARDED SWEEP: a background sweep
     #: fans its cell work out across ``snippet_sweep_workers`` (4) guest
     #: sessions, and it draws from its OWN process-wide semaphore — it does
     #: NOT take a slot from the interactive ``snippet_concurrency`` guard. So
@@ -150,11 +150,9 @@ class Settings(BaseSettings):
     #: a pool of 2 and degrade those interactive calls to ``unavailable``.
     #: 4 sweep workers + 2 interactive headroom = 6.
     snippet_pool_size: int = 6
-    #: Global cap on concurrently executing snippet runs. Settings-only here;
-    #: enforcement lands in Task 11.
+    #: Global cap on concurrently executing snippet runs.
     snippet_concurrency: int = 4
-    #: Per-user cap on concurrently executing snippet runs. Settings-only
-    #: here; enforcement lands in Task 11.
+    #: Per-user cap on concurrently executing snippet runs.
     snippet_per_user_concurrency: int = 1
     #: Mirrors ``RunLimits.wall_timeout_s`` (see ``run_limits_from_settings``).
     snippet_wall_timeout_s: float = 10
@@ -164,7 +162,7 @@ class Settings(BaseSettings):
     snippet_stdout_bytes: int = 256 * 1024
     #: Mirrors ``RunLimits.result_repr_bytes``.
     snippet_result_repr_bytes: int = 64 * 1024
-    #: Cap on the export-transform document, BOTH directions (spec §8): the
+    #: Cap on the export-transform document, BOTH directions: the
     #: serialized doc handed to transform() and the serialized replacement it
     #: returns. Host-side (TransformHost) — deliberately NOT a RunLimits
     #: field, since the guest never enforces it. Breach -> 422 naming the
@@ -181,16 +179,16 @@ class Settings(BaseSettings):
     #: Generous for a <=64 KiB file; a breach means something is wrong with the
     #: host, which the route reports as 503 rather than hanging the editor.
     snippet_format_timeout_s: float = 5.0
-    #: Capacity (entries) of the guest facade's session-lifetime read memo
-    #: (spec 2026-07-21 Phase A'). One entry is one memoized bridge read
-    #: response (element projection / adjacency list / type info). 0 disables.
+    #: Capacity (entries) of the guest facade's session-lifetime read memo.
+    #: One entry is one memoized bridge read response (element projection /
+    #: adjacency list / type info). 0 disables.
     snippet_read_memo_max: int = 4096
     #: Total wall budget (seconds) for ALL embedded snippet work one
-    #: evaluate/export request triggers (``ScriptBudget``, M2/M3 script
+    #: evaluate/export request triggers (``ScriptBudget``, script
     #: columns/steps) — shared across every script column/step call the
     #: request transitively makes, not a per-call timeout.
     snippet_eval_budget_s: float = 30.0
-    #: Capacity of each session's ``ScriptCellCache`` (spec 2026-07-20 §3).
+    #: Capacity of each session's ``ScriptCellCache``.
     #: Consumed at ``Session`` CONSTRUCTION: the ``script_cell_cache`` field's
     #: ``default_factory`` reads this via ``get_settings()`` so every
     #: construction path (the empty-fallback ``Session()`` and hydration's
@@ -217,11 +215,11 @@ class Settings(BaseSettings):
     #: production; tests pin it true (``DATA_ROVER_SNIPPET_SWEEP_SYNC``) so a
     #: sweep completes deterministically within the calling test.
     snippet_sweep_sync: bool = False
-    #: Incremental cell-cache invalidation on the op-delta commit paths
-    #: (spec 2026-07-21 Phase B). True: a commit evicts only the cells whose
-    #: recorded read-sets intersect its touched keys, and survivors stay
-    #: warm at the new rev. False: legacy behavior (clear-all semantics via
-    #: rev-stamp mismatch). Escape hatch, default on.
+    #: Incremental cell-cache invalidation on the op-delta commit paths.
+    #: True: a commit evicts only the cells whose recorded read-sets
+    #: intersect its touched keys, and survivors stay warm at the new rev.
+    #: False: clear-all semantics via rev-stamp mismatch. Escape hatch,
+    #: default on.
     snippet_incremental_invalidation: bool = True
 
 

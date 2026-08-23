@@ -1,4 +1,4 @@
-"""Background whole-table script evaluation (spec 2026-07-20 §4.3).
+"""Background whole-table script evaluation.
 
 A SweepJob computes every script-column cell of ONE resolved table definition
 at ONE model rev, writing results into the session's ScriptCellCache. The job
@@ -16,7 +16,7 @@ Reads run lock-free (benign-race stance): the job aborts when
 session.model_rev moves, and cache writes are rev-stamped, so a raced commit
 merely wastes the job's remaining work, never poisons anything.
 
-Sharding (spec §4.3): the row BUILD stays serial — it may itself call the
+Sharding: the row BUILD stays serial — it may itself call the
 guest to resolve expand columns or script-as-source columns, and every later
 stage depends on its output — but the per-cell work after it is fanned out
 across up to `settings.snippet_sweep_workers` threads, each driving its OWN
@@ -219,9 +219,9 @@ def _cancelled(job: SweepJob) -> None:
     job.message = "sweep cancelled"
 
 
-#: Process-wide bound on concurrently RUNNING sweep jobs (spec §4.3: sweeps
+#: Process-wide bound on concurrently RUNNING sweep jobs: sweeps
 #: get their own pool, bounded across ALL sessions — N open projects must not
-#: mean N×workers guest instances). Lazily sized from settings on first use.
+#: mean N×workers guest instances. Lazily sized from settings on first use.
 _global_slots: threading.BoundedSemaphore | None = None
 _global_slots_lock = threading.Lock()
 

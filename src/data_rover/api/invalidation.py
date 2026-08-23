@@ -1,5 +1,4 @@
-"""Translate one applied op batch into the read-keys it touches (Phase B,
-spec 2026-07-21).
+"""Translate one applied op batch into the read-keys it touches.
 
 `touched_keys` is the commit-side half of incremental cell-cache
 invalidation: the guest facade records what each cell READ (`ReadKey`

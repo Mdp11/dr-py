@@ -1,4 +1,4 @@
-"""Metamodel-op plumbing (spec 2026-08-16 metamodel commit flow).
+"""Metamodel-op plumbing.
 
 The metamodel and the diagram layout are MATERIALIZED HEADS
 (``ModelRow.metamodel_id`` -> immutable ``MetamodelRow`` versions;
@@ -107,8 +107,7 @@ def split_rebind(
 
 
 def load_candidate(blob: str) -> Metamodel:
-    """Parse+schema-check a candidate blob; 422 on anything bad (mirrors the
-    standalone rebind route's ``_load_candidate``, which Task 9 retires)."""
+    """Parse+schema-check a candidate blob; 422 on anything bad."""
     try:
         return load_metamodel_str(blob)
     except (MetamodelError, yaml.YAMLError) as exc:

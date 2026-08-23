@@ -46,8 +46,8 @@ class AppliedBatch:
     applier. ``id_map`` is the temp-id resolution the batch produced.
     """
 
-    #: Typed over the FULL ``OpIn`` union (model + artifact ops): as of
-    #: Phase 1 Task 5, ``POST /commits`` accepts mixed batches and records
+    #: Typed over the FULL ``OpIn`` union (model + artifact ops):
+    #: ``POST /commits`` accepts mixed batches and records
     #: the merged canonical/inverse lists here, so the log genuinely can
     #: hold artifact ops. ``/model/ops`` still rejects them (that path is
     #: model-only forever), but the log is shared.
@@ -69,7 +69,7 @@ class Session:
     model: Model | None = None
     view: View | None = None
     #: issue store seeded by the last FULL validation of `model`; incremental
-    #: paths (Phase C) delta from it via ValidationState.replace
+    #: paths delta from it via ValidationState.replace
     validation: ValidationState | None = None
     #: revision counter of the session model: bumped on every accepted ops
     #: batch / undo and on every model load-replace. Clients echo it as
@@ -84,20 +84,21 @@ class Session:
     #: GET /model/changes reports ``complete: false``. Reset together with
     #: ``op_log`` (model replacement / out-of-protocol mutation).
     op_log_dropped: int = 0
-    #: serializes commit-persist and eviction for THIS project (spec §11
-    #: write-mutex). An RLock so the ops path can take it around a block that
-    #: also calls helpers which assume it is held. Phase 4 widens its role
-    #: (preview/commit); Phase 3 only guards "apply+persist" vs "evict".
+    #: serializes commit-persist and eviction for THIS project. An RLock so
+    #: the ops path can take it around a block that also calls helpers which
+    #: assume it is held; its role spans preview/commit as well as
+    #: apply+persist vs evict.
     write_mutex: threading.RLock = field(default_factory=threading.RLock, repr=False)
     #: monotonic timestamp of the last registry access; the idle sweeper
-    #: (Task 11) evicts sessions whose last_access is older than the TTL.
+    #: evicts sessions whose last_access is older than the TTL.
     last_access: float = field(default_factory=time.monotonic, repr=False)
-    #: per-project resource leases (Phase 4 check-out/commit). In-session only
-    #: this phase (Redis mirroring is Phase 7). Swept of expired leases by the
+    #: per-project resource leases for check-out/commit. In-session, and
+    #: write-through mirrored to Redis when configured (see lock_mirror.py).
+    #: Swept of expired leases by the
     #: lifespan sweeper; consulted by the commit route (lock verification) and
     #: by ``SessionRegistry.evict`` (never evict a session with live leases).
     lock_table: LockTable = field(default_factory=LockTable, repr=False)
-    #: serializes the lease-mirror write-through for THIS project (B-3):
+    #: serializes the lease-mirror write-through for THIS project:
     #: snapshot + mirror write happen atomically w.r.t. each other, so two
     #: racing write-throughs can no longer land out of order and leave a
     #: phantom lease in the mirror. Deliberately NOT write_mutex — the mirror
@@ -106,7 +107,7 @@ class Session:
     #: held (mirror_session_leases is called after the mutating block
     #: exits), so mirror_mutex → write_mutex is the one legal nesting.
     mirror_mutex: threading.Lock = field(default_factory=threading.Lock, repr=False)
-    #: per-project realtime feed subscribers (Phase 5). Populated by the WS
+    #: per-project realtime feed subscribers. Populated by the WS
     #: endpoint; broadcast to at the commit/lock sites. The eviction guard
     #: refuses to drop a session while it has connected clients.
     hub: FeedHub = field(default_factory=FeedHub, repr=False)
@@ -116,12 +117,12 @@ class Session:
     #: owner-gated PATCH /settings route under the write-mutex. Default False
     #: keeps the engine's inspectable behaviour for every untouched project.
     strict_mode: bool = False
-    #: progress of the in-flight background validation sweep (spec: interactive
-    #: -path hardening §3), installed by validation_sweep.start_validation_sweep;
+    #: progress of the in-flight background validation sweep, installed by
+    #: validation_sweep.start_validation_sweep;
     #: stays set after completion (running=False) so /model/status can report
     #: "ready". Replaced wholesale by the next sweep.
     validation_sweep: SweepProgress | None = field(default=None, repr=False)
-    #: per-session cache of ordered table row keys (Task 7), keyed by
+    #: per-session cache of ordered table row keys, keyed by
     #: (resolved-definition fingerprint, sort). A stored entry's model_rev
     #: pins it to the model state it was computed against; both model
     #: replacement and out-of-protocol mutation invalidate the whole cache
@@ -129,8 +130,8 @@ class Session:
     table_order_cache: TableOrderCache = field(
         default_factory=TableOrderCache, repr=False
     )
-    #: per-session cache of embedded snippet call results (spec 2026-07-20
-    #: §3). Rev-stamped; cleared by the same two invalidation points as
+    #: per-session cache of embedded snippet call results.
+    #: Rev-stamped; cleared by the same two invalidation points as
     #: table_order_cache. Sound because of the runner determinism guarantee.
     #: Its capacity comes from ``settings.snippet_cell_cache_max``: the factory
     #: reads ``get_settings()`` so BOTH construction paths — the empty-fallback
@@ -143,7 +144,7 @@ class Session:
         ),
         repr=False,
     )
-    #: per-session background script-sweep jobs (spec 2026-07-20 §4.3). One
+    #: per-session background script-sweep jobs. One
     #: ``SweepJob`` per resolved-definition fingerprint, with FAILED-JOB
     #: memory: an aborted job stays registered at its ``(fingerprint, rev)`` so
     #: a polling client never restarts the grind. Cancelled+cleared by the same
@@ -277,19 +278,19 @@ class Session:
 #: Project id for the no-request-context ``get_session()`` (internal/test
 #: callers, and the dev seed). Request-scoped routes resolve ``project_id`` from
 #: the ``/api/v1/projects/{project_id}`` URL path instead — there is no implicit
-#: header fallback (Phase 1's ``X-Project-Id`` mechanism was replaced in Phase 2).
+#: header fallback.
 DEFAULT_PROJECT_ID = "default"
 
 
 class SessionRegistry:
     """Holds one live :class:`Session` per project id, hydrated on first access.
 
-    On a cache-miss ``get`` calls the injected ``loader`` (Phase 3:
-    ``hydration.hydrate_session``) under a per-project init-once lock so two
-    concurrent requests for a cold project hydrate exactly once. ``evict`` runs
-    the injected ``evict_hook`` (Phase 3: snapshot-then-drop) before removing the
-    session. With no loader installed the registry falls back to an empty
-    ``Session`` — the pre-Phase-3 behaviour used by unit tests that don't need
+    On a cache-miss ``get`` calls the injected ``loader`` (``hydration.
+    hydrate_session`` in production) under a per-project init-once lock so
+    two concurrent requests for a cold project hydrate exactly once.
+    ``evict`` runs the injected ``evict_hook`` (snapshot-then-drop) before
+    removing the session. With no loader installed the registry falls back
+    to an empty ``Session``, used by unit tests that don't need
     persistence."""
 
     def __init__(self) -> None:
@@ -314,7 +315,7 @@ class SessionRegistry:
                 return session
             key_lock = self._key_locks.setdefault(project_id, threading.Lock())
         # hydrate outside the global guard, but serialized per project id so a
-        # cold project is built exactly once (init-once guard, spec §11).
+        # cold project is built exactly once (init-once guard).
         with key_lock:
             with self._guard:
                 session = self._sessions.get(project_id)
@@ -343,7 +344,7 @@ class SessionRegistry:
             session = self._sessions.get(project_id)
         if session is None:
             return
-        # Serialise vs an in-flight commit (spec §11 evict-during-commit guard).
+        # Serialise vs an in-flight commit (evict-during-commit guard).
         with session.write_mutex:
             if (
                 session.lock_table.active_leases(time.monotonic())
@@ -382,7 +383,7 @@ class SessionRegistry:
     def discard(self, project_id: str) -> None:
         """Drop a session WITHOUT snapshotting and WITHOUT the evict guard.
 
-        The delete-project path (U-7): by the time the registry is asked to
+        For the delete-project path: by the time the registry is asked to
         drop the session, the project's durable rows are already deleted and
         committed, so the snapshot hook must not run — ``write_snapshot``
         would insert a ``Snapshot`` row whose project FK no longer exists
@@ -461,11 +462,11 @@ def reset_session() -> None:
     A fresh ``Session`` is created on the next ``get`` for any id, so this is
     field-agnostic — adding a ``Session`` field can never leak across resets.
 
-    Unlike the former in-place field-copy reset, this replaces sessions by
-    identity: a caller holding a reference to a pre-reset ``Session`` keeps
-    seeing the old object and must call ``get_session()`` again for the live
-    one. All current callers (request-scoped ``Depends``; tests that reset then
-    re-fetch) already re-fetch, so this is safe.
+    Replaces sessions by identity: a caller holding a reference to a
+    pre-reset ``Session`` keeps seeing the old object and must call
+    ``get_session()`` again for the live one. All current callers
+    (request-scoped ``Depends``; tests that reset then re-fetch) already
+    re-fetch, so this is safe.
     """
     _registry.reset()
 
@@ -482,8 +483,8 @@ def install_persistent_registry() -> None:
 
     def _load(project_id: str) -> Session:
         sess = hydrate_session(project_id)
-        # Phase 7 (scoped): re-install still-live mirrored leases so tokens
-        # survive a restart. Best-effort — a mirror failure is a cold start.
+        # Re-install still-live mirrored leases so tokens survive a restart.
+        # Best-effort — a mirror failure is a cold start.
         restore_leases(project_id, sess.lock_table)
         return sess
 

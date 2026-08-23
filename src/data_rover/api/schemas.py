@@ -159,7 +159,7 @@ class IssueListOut(BaseModel):
 
 
 class RawMetamodelResponse(BaseModel):
-    """The current metamodel's SOURCE text (Phase 5 editor baseline).
+    """The current metamodel's SOURCE text.
 
     ``blob`` is the stored ``MetamodelRow`` YAML verbatim — comments and
     formatting intact (the rebind route's persist-the-original-blob
@@ -183,7 +183,7 @@ class LintErrorOut(BaseModel):
 
 
 class MetamodelLintResponse(BaseModel):
-    """Cheap parse/schema check for the live editor (Phase 5). Always 200 —
+    """Cheap parse/schema check for the live editor. Always 200 —
     a failed parse is the RESULT, not an error."""
 
     ok: bool
@@ -191,8 +191,8 @@ class MetamodelLintResponse(BaseModel):
 
 
 class MetamodelDiffResponse(BaseModel):
-    """Read-only sandbox conformance diff (Phase 6B) + structural document
-    diff (Phase 4). now_failing = issues the candidate metamodel introduces;
+    """Read-only sandbox conformance diff + structural document
+    diff. now_failing = issues the candidate metamodel introduces;
     now_passing = issues it resolves; structural = what changed in the
     document itself (one differ, also rendered by the commit-diff API)."""
 
@@ -236,10 +236,8 @@ FolderOut.model_rebuild()
 class ViewOut(BaseModel):
     name: str
     folders: list[FolderOut] = Field(default_factory=list)
-    #: Root-level artifact refs. Before Phase 2 this field did not exist, so
-    #: `View.artifacts` was silently dropped on every wire response even
-    #: though the core model always carried it — this field is the fix.
-    #: Additive: old clients that don't know about it simply ignore it.
+    #: Root-level artifact refs, mirroring `View.artifacts` on the core
+    #: model. Additive: old clients that don't know about it simply ignore it.
     artifacts: list[ArtifactRefOut] = Field(default_factory=list)
 
     @classmethod
@@ -269,9 +267,8 @@ class ViewStateResponse(BaseModel):
 #: the op union it belongs to, because it is part of that wire contract and
 #: every module that reasons about ops needs it: ``routes/ops.py`` (re-exported
 #: from there for its long-standing importers), ``artifact_ops.py`` and
-#: ``locking.py``. It used to be copied literally into each — a copy is exactly
-#: how the applier and the lock-scope derivation could come to disagree about
-#: which ids are "not yet shared".
+#: ``locking.py``. A copy in each would risk the applier and the lock-scope
+#: derivation disagreeing about which ids are "not yet shared".
 TEMP_ID_PREFIX = "tmp_"
 
 
@@ -358,7 +355,7 @@ ModelOpIn = (
     | DeleteRelationshipOp
 )
 
-#: Artifact-row ops (Phase 1 artefacts revamp) — applied by
+#: Artifact-row ops — applied by
 #: api/artifact_ops.py to DB rows, never to the in-memory model.
 ArtifactOpIn = CreateArtifactOp | UpdateArtifactOp | DeleteArtifactOp
 
@@ -395,7 +392,7 @@ class PlaceElementOp(BaseModel):
     kind: Literal["place_element"]
     element_id: str
     #: must be a real folder id, never VIEW_ROOT_ID — an unplaced element
-    #: already renders at the root (enforced by the applier, Task 5).
+    #: already renders at the root (enforced by the applier).
     folder_id: str
     index: int | None = None
 
@@ -438,7 +435,7 @@ class MoveArtifactOp(BaseModel):
     index: int | None = None
 
 
-#: View-content ops (Phase 2 artefacts revamp) — applied by api/view_ops.py to
+#: View-content ops — applied by api/view_ops.py to
 #: the in-memory session.view, then the blob is persisted; never to the model.
 ViewOpIn = (
     CreateFolderOp
@@ -463,9 +460,9 @@ class MetamodelNodePos(BaseModel):
 
 
 class RebindMetamodelOp(BaseModel):
-    """Whole-metamodel swap as a batch member (spec 2026-08-16). ``blob`` is
+    """Whole-metamodel swap as a batch member. ``blob`` is
     the author's YAML SOURCE, persisted verbatim as a new immutable
-    ``MetamodelRow`` (Correction A: never a pydantic round-trip). At most one
+    ``MetamodelRow`` — never a pydantic round-trip. At most one
     per batch; the commit applier hoists it FIRST so every other op in the
     batch validates against the candidate schema. The inverse op carries the
     PRIOR blob — full-state, so the journal alone answers undo/diff."""
@@ -486,7 +483,7 @@ class MoveMetamodelNodeOp(BaseModel):
     pos: MetamodelNodePos | None = None
 
 
-#: Metamodel-family ops (spec 2026-08-16) — applied by api/metamodel_ops.py
+#: Metamodel-family ops — applied by api/metamodel_ops.py
 #: to the in-memory metamodel + content tables, never to the model.
 MetamodelOpIn = RebindMetamodelOp | MoveMetamodelNodeOp
 
@@ -646,7 +643,7 @@ class ChangeRequestIn(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Paged/on-demand read schemas (Phase C2-read; see routes/read.py)
+# Paged/on-demand read schemas (see routes/read.py)
 # ---------------------------------------------------------------------------
 
 
@@ -736,7 +733,7 @@ class ApplyCrResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Streaming load/save schemas (Phase C3; see routes/model.py)
+# Streaming load/save schemas (see routes/model.py)
 # ---------------------------------------------------------------------------
 
 
@@ -757,7 +754,7 @@ class SaveModelResponse(BaseModel):
     bytes_written: int
 
 
-# --- Phase 4: check-out / commit + locking --------------------------------
+# --- check-out / commit + locking ------------------------------------------
 
 
 class LockTargetIn(BaseModel):
@@ -773,7 +770,7 @@ class LockTargetIn(BaseModel):
 class LockRequest(BaseModel):
     targets: list[LockTargetIn]
     intent: Literal["edit", "create_child", "connect", "delete"]
-    #: peer/admin override — evict a conflicting holder's leases (spec §8).
+    #: peer/admin override — evict a conflicting holder's leases.
     steal: bool = False
 
 
@@ -862,7 +859,7 @@ class CommitResponse(OpsResponse):
     changed_artifacts: list[ArtifactHeaderOut] = Field(default_factory=list)
     deleted_artifact_ids: list[str] = Field(default_factory=list)
     #: post-commit ViewRow.view_rev; None when the batch touched no view
-    #: content (Phase 2). Secondary/informational — see ViewRow.view_rev.
+    #: content. Secondary/informational — see ViewRow.view_rev.
     view_rev: int | None = None
     #: True when this commit carried a metamodel.rebind: the client must
     #: refetch the metamodel + issues (there is no applyable schema delta).
@@ -872,7 +869,7 @@ class CommitResponse(OpsResponse):
 
 
 # ---------------------------------------------------------------------------
-# Durable commit-history schemas (Phase 8: GET /commits)
+# Durable commit-history schemas (GET /commits)
 # ---------------------------------------------------------------------------
 
 
@@ -908,7 +905,7 @@ class CommitHistoryResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Per-commit diff schemas (Phase 1 artefacts revamp: GET /commits/{rev}/diff)
+# Per-commit diff schemas (GET /commits/{rev}/diff)
 # ---------------------------------------------------------------------------
 
 
@@ -986,8 +983,8 @@ class ViewDiffEntryOut(BaseModel):
 
 
 class LayoutMoveOut(BaseModel):
-    """One diagram-layout key write, journal-only SUMMARY form (spec
-    2026-08-16): a moved node's destination, not its pixel history.
+    """One diagram-layout key write, journal-only SUMMARY form:
+    a moved node's destination, not its pixel history.
     ``x``/``y`` both ``None`` means the key was REMOVED (``pos: None`` on the
     forward ``metamodel.move_node`` op) — deliberately no before/after per
     coordinate, since the diff surface promises "N nodes moved", not a replay
@@ -1031,7 +1028,7 @@ class CommitDiffOut(BaseModel):
 
 
 class RevertRequest(BaseModel):
-    """Revert the model to the state at ``target_rev`` (Phase 8).
+    """Revert the model to the state at ``target_rev``.
 
     ``base_rev`` is the client's last-seen ``model_rev`` for optimistic-
     concurrency (409 on mismatch). ``target_rev`` must be in ``[0, model_rev]``.
@@ -1046,7 +1043,7 @@ class ArtifactHeaderOut(BaseModel):
     """Artifact list row: everything the sidebar renders, payload omitted.
 
     `entry_points` is the ONE payload-derived field surfaced on headers: the
-    sidebar's entry-point badges (and the M2/M3 embedding pickers) filter on
+    sidebar's entry-point badges (and the embedding pickers) filter on
     it, and it is server-owned anyway (`_apply_derived_metadata` recomputes it
     on every write). None for non-snippet kinds; a (possibly empty) list for
     `code_snippet` rows."""
@@ -1088,7 +1085,7 @@ class ArtifactUpdateIn(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Snippet execution (Task 11: POST /snippets/run|lint|cancel)
+# Snippet execution (POST /snippets/run|lint|cancel)
 # ---------------------------------------------------------------------------
 
 
@@ -1341,7 +1338,7 @@ class RunExportIn(BaseModel):
     route must be viewer-callable like `/tables/export`.
 
     Exactly one of `artifact_id`/`definition` is required (the route 422s
-    otherwise). A `definition` is a staged DRAFT (spec §9.1): it is validated
+    otherwise). A `definition` is a staged DRAFT: it is validated
     by this field's own `ExporterDefinition` typing — the same shape
     `EXPORTER_ADAPTER` enforces on a committed payload — and flows through
     the identical run guards, so a draft is render-only client input, no more
@@ -1399,7 +1396,7 @@ class TableRowOut(BaseModel):
 
 
 class ScriptStatusOut(BaseModel):
-    """Progress of script-column computation for this table (spec §4.2).
+    """Progress of script-column computation for this table.
 
     `ready`: NOTHING IS PENDING COMPUTATION — the rows in this response are
     final for this model rev and polling again would not change them. It does

@@ -1,10 +1,9 @@
-"""Tenancy ORM models: who exists, what projects exist, who can touch them.
+"""Tenancy ORM models (who exists, what projects exist, who can touch them)
+plus the durable model/metamodel/view content tables.
 
-These rows are the authorization source of truth. They are deliberately small
-— the model/metamodel/view data is NOT stored here in Phase 2 (durable model
-persistence is Phase 3); the in-memory ``Session`` still holds it. A ``User``'s
-``id`` is the external identity subject (from the IdentityProvider), so a real
-SSO swap reuses the same primary key space.
+The tenancy rows are the authorization source of truth. A ``User``'s ``id``
+is the external identity subject (from the IdentityProvider), so a real SSO
+swap reuses the same primary key space.
 """
 
 from __future__ import annotations
@@ -87,7 +86,7 @@ class User(Base):
 
 
 class Project(Base):
-    """One project = one model + N views (Phase 3). Ownership is per-project.
+    """One project = one model + N views. Ownership is per-project.
 
     The ``id`` is caller-supplied (the tenancy service generates a uuid; tests
     and the dev-seed pin stable ids), not autoincremented, so it is stable in
@@ -137,7 +136,7 @@ def _utcnow() -> datetime:
 class MetamodelRow(Base):
     """A versioned, shareable metamodel. ``blob`` is the YAML source text
     (re-parsed via ``load_metamodel_str`` on hydrate). Immutable per version:
-    a new metamodel is a new row, never an in-place mutation (Phase 6)."""
+    a new metamodel is a new row, never an in-place mutation."""
 
     __tablename__ = "metamodels"
 
@@ -179,7 +178,7 @@ class ModelRow(Base):
 
 class ViewRow(Base):
     """A user-defined folder overlay. ``blob`` is the view JSON
-    (``View.model_dump_json``). N per project (Phase 3 frontend uses one)."""
+    (``View.model_dump_json``). N per project (the frontend uses one)."""
 
     __tablename__ = "views"
 
@@ -190,7 +189,7 @@ class ViewRow(Base):
     name: Mapped[str] = mapped_column(String, nullable=False, default="")
     blob: Mapped[str] = mapped_column(Text, nullable=False)
     #: Rev of the last EDIT reflected by ``blob`` (the view half of
-    #: POST /commits bumps it — Phase 2). Secondary, informational:
+    #: POST /commits bumps it). Secondary, informational:
     #: staleness/conflicts are governed by the project rev + leases, not this
     #: counter. Normalization writes (lazy folder-id healing) deliberately do
     #: NOT bump it.
@@ -199,9 +198,9 @@ class ViewRow(Base):
 
 class MetamodelLayoutRow(Base):
     """Shared diagram positions for a project's metamodel canvas (one row per
-    project). Presentation only, by explicit decision (spec 2026-08-13 §5):
-    last-write-wins, no lease, never journaled — a lost drag is re-dragged,
-    unlike model content where a lost write is corruption."""
+    project). Presentation only: last-write-wins, no lease, never journaled —
+    a lost drag is re-dragged, unlike model content where a lost write is
+    corruption."""
 
     __tablename__ = "metamodel_layouts"
 
@@ -215,7 +214,7 @@ class MetamodelLayoutRow(Base):
 
 
 class Commit(Base):
-    """One accepted ops batch == one revision == one journal row (spec §7).
+    """One accepted ops batch == one revision == one journal row.
 
     ``ops``/``inverse_ops`` are the canonical op lists in the same format as
     ``frontend/.../ops.ts`` (serialized via ``schemas.OPS_ADAPTER``);
@@ -239,7 +238,7 @@ class Commit(Base):
     ops: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     inverse_ops: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     id_map: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
-    #: optional human commit message (spec §7). Empty for the legacy
+    #: optional human commit message. Empty for the legacy
     #: /model/ops + /model/undo paths (they pass no message).
     message: Mapped[str] = mapped_column(Text, nullable=False, default="")
     #: number of CONFORMANCE-tier issues over the dirty set at commit time
@@ -249,11 +248,9 @@ class Commit(Base):
     )
     #: the conformance issue list recorded at commit (IssueOut dicts).
     issues: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
-    #: metamodel rebind (Phase 6B, columns kept by spec 2026-08-16): the
-    #: model's metamodel_id before/after this commit. Both NULL for ordinary
-    #: edit commits; set only by a rebind-carrying POST /commits batch (a
-    #: `metamodel.rebind` op) — the old standalone POST /metamodel/rebind
-    #: route is retired.
+    #: metamodel rebind: the model's metamodel_id before/after this commit.
+    #: Both NULL for ordinary edit commits; set only by a rebind-carrying
+    #: POST /commits batch (a `metamodel.rebind` op).
     #: SET NULL on metamodel delete so history survives a retired metamodel.
     from_metamodel_id: Mapped[str | None] = mapped_column(
         ForeignKey("metamodels.id", ondelete="SET NULL"), nullable=True
@@ -292,20 +289,13 @@ class ArtifactKind(enum.StrEnum):
     False, so there is no database-level check constraint at all. Nothing
     stops an out-of-band write (a manual `UPDATE`, a future migration) from
     putting an arbitrary string in the column; only application code
-    validates membership. That false premise (assuming a CHECK existed) is
-    exactly why the column needed migration `0011` — SQLAlchemy sizes an
-    unwidened VARCHAR to the longest member at the time the model was
-    written, and `custom_export` (13 chars, historical — the kind was
-    renamed `exporter` by data-only migration `0012`) overran the original
-    VARCHAR(12) on Postgres, which rejects an overlong VARCHAR insert
-    outright — migration `0011` widened the real column to VARCHAR(32), but
-    this class's `SAEnum` had no explicit `length` so SQLAlchemy kept
-    inferring 13 (the longest member at the time) from the enum itself,
-    leaving the model's notion of the column silently out of step with the
-    schema it actually described.
-    `length=32` below matches `0011` so the model and the migration state
-    the same fact; the next kind longer than 32 chars will need another
-    migration AND another bump here."""
+    validates membership.
+
+    `length=32` on `ArtifactRow.kind`'s `SAEnum` must track the actual
+    column width: SQLAlchemy otherwise infers a VARCHAR width from the
+    longest enum member, which silently diverges from the real column size
+    once a migration widens it independently. The next kind longer than 32
+    chars needs both a migration widening the column and a bump here."""
 
     navigation = "navigation"
     table = "table"

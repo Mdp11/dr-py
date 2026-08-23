@@ -1,10 +1,9 @@
 """The artifact-kind registry — the ONE place per-kind knowledge lives.
 
 Adding a kind = one `ArtifactKindSpec` entry (plus its schema module).
-Everything else (`routes/artifacts.py` CRUD, artifact ops in Task 4, the
-Phase 3 export closure) is generic over this registry. `diagram` /
-`diagram_kind` stay unregistered on purpose: unregistered kinds 422 on
-write, exactly as before.
+Everything else (`routes/artifacts.py` CRUD, artifact ops, the export
+closure) is generic over this registry. `diagram` / `diagram_kind` stay
+unregistered on purpose: unregistered kinds 422 on write.
 
 Dependency extraction / ref rewriting use a generic walk: in every
 registered payload schema an artifact reference is a dict entry under the
@@ -71,7 +70,7 @@ def rewrite_refs(payload: Any, id_map: Mapping[str, str]) -> Any:
 
 def _derive_snippet_metadata(payload: dict[str, Any]) -> None:
     """entry_points is server-owned: recomputed from the code AST on every
-    write, overwriting any client-supplied value (M1 contract)."""
+    write, overwriting any client-supplied value."""
     payload["entry_points"] = derive_entry_points(payload.get("code", ""))
 
 

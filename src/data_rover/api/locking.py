@@ -1,13 +1,14 @@
-"""In-session resource leases — the Phase 4 pessimistic-locking primitive.
+"""In-session resource leases — the pessimistic-locking primitive.
 
 A lease is a TTL grant on one resource (element or relationship id). Leases
-are held in the per-project ``Session`` (single-instance Phase 4; Redis
-mirroring is deferred to Phase 7) and renewed by client heartbeat; the
-lifespan sweeper auto-releases expired leases. ``acquire`` is all-or-nothing:
-either every requested lock is granted under one token, or nothing is and the
-blocking leases are returned as conflicts.
+are held in the per-project ``Session`` (single-instance in-process;
+write-through mirrored to Redis when configured — see lock_mirror.py) and
+renewed by client heartbeat; the lifespan sweeper auto-releases expired
+leases. ``acquire`` is all-or-nothing: either every requested lock is
+granted under one token, or nothing is and the blocking leases are returned
+as conflicts.
 
-Conflict matrix (spec §8). "Other holder" means a live lease whose ``holder``
+Conflict matrix. "Other holder" means a live lease whose ``holder``
 differs from the acquirer:
 - request SHARED            -> never conflicts (many concurrent pins OK).
 - request EXCLUSIVE, non-DELETE intent -> conflicts only with another
@@ -19,7 +20,7 @@ differs from the acquirer:
 
 The scope helpers (``expand_targets`` / ``required_locks``) turn a lock
 request or an op batch into the concrete ``RequiredLock`` set, applying the
-per-op rules in spec §8 (delete -> subtree, connect -> source exclusive +
+per-op rules (delete -> subtree, connect -> source exclusive +
 target shared pin); they live with the table because they share its types.
 """
 
@@ -43,13 +44,13 @@ class LockIntent(Enum):
     DELETE = "delete"
 
 
-#: Resource-id namespace (spec 2026-07-29, locking section). Elements and
+#: Resource-id namespace. Elements and
 #: relationships keep BARE ids — the pre-existing wire format the frontend's
 #: lock badges key on — so only non-model resources carry a prefix. Element
 #: ids are uuid-hex / user ids that never contain ':', so prefix collision
 #: is not a practical concern; all writers go through the helpers below.
 ARTIFACT_PREFIX = "art:"
-#: Phase 2 (view folders) — a live member of the namespace: lock requests
+#: view folders — a live member of the namespace: lock requests
 #: accept `type: "folder"`, `folder_resource` mints the wire id, and
 #: `expand_targets`/`required_locks` both derive folder leases (see below).
 FOLDER_PREFIX = "folder:"
@@ -292,7 +293,7 @@ class LockTable:
             self._by_resource.setdefault(le.resource_id, []).append(le)
 
 
-# --- lock-scope expansion (spec §8 rules) ---------------------------------
+# --- lock-scope expansion --------------------------------------------------
 # Imported lazily-ish at module scope: Model/View are core types (no cycle),
 # the op union lives in schemas (no cycle back to locking). folder_subtree /
 # locate_folder are called at RUNTIME (folder delete-expansion, move-folder's
@@ -361,7 +362,7 @@ def expand_targets(
 
     A DELETE-intent exclusive target additionally locks its whole subtree:
     containment descendants for a model resource (via `containment_subtree`),
-    or nested folders for a `folder:` resource (via `folder_subtree`, Task 1)
+    or nested folders for a `folder:` resource (via `folder_subtree`)
     — so the cascade can't delete/reparent something another editor holds.
     `view` is consulted ONLY for the folder arm; a model-resource or
     artifact/metamodel target ignores it entirely (and a folder delete against
@@ -410,7 +411,7 @@ def required_locks(
     Ids created earlier in the same batch (temp ids) are not yet shared, so
     they require no lock; relationships are locked via their source element.
 
-    Folder ops (Task 6): `create_folder` locks its PARENT (CREATE_CHILD, so a
+    Folder ops: `create_folder` locks its PARENT (CREATE_CHILD, so a
     peer creating a sibling and a peer deleting the parent both get caught);
     `rename_folder`/single-folder placement ops lock the folder/containing
     folder itself (EDIT); `delete_folder` expands over the whole subtree
@@ -420,7 +421,7 @@ def required_locks(
     all — only the destination is — so it is resolved by walking the CURRENT
     `view` via `locate_folder`. A missing view or unknown folder id skips
     that half silently rather than raising: the op will 422 at apply time
-    regardless (Task 5's applier re-derives the same thing against the same
+    regardless (the applier re-derives the same thing against the same
     view), and lock derivation must stay total so a stale/malformed op can
     never crash the lock-verification step itself.
 
@@ -509,8 +510,7 @@ def required_locks(
         elif isinstance(op, (RebindMetamodelOp, MoveMetamodelNodeOp)):
             # The whole family serializes on the singleton `mm` lease: a
             # rebind rewrites what every node/key MEANS, so per-node layout
-            # granularity could never change an outcome (spec 2026-08-16,
-            # amended) — and the diagram + YAML editor already share one
-            # surface lease.
+            # granularity could never change an outcome — and the diagram +
+            # YAML editor already share one surface lease.
             add(METAMODEL_RESOURCE, LockMode.EXCLUSIVE, LockIntent.EDIT)
     return reqs

@@ -1,7 +1,7 @@
 """Redis ``LeaseMirror`` — isolates the ``redis`` import the way
 ``storage_gcs.py`` isolates ``google-cloud-storage``.
 
-Degrade-graceful by construction (spec posture: optional mirror): short
+Degrade-graceful by construction (the mirror is optional): short
 socket timeouts so a down Redis costs at most ~1s once, then a cooldown so it
 costs nothing for the next ~30s; up→down and down→up transitions each log
 exactly once, never per call. Errors are swallowed HERE as well as in the

@@ -1,5 +1,5 @@
-"""Realtime feed plumbing (Phase 5). A per-``Session`` ``FeedHub`` fans
-server-side events out to connected WebSocket clients.
+"""Realtime feed plumbing. A per-``Session`` ``FeedHub`` fans server-side
+events out to connected WebSocket clients.
 
 The mutation path is SYNCHRONOUS (threadpool + write_mutex); WebSockets are
 ASYNC. ``broadcast`` bridges the two by enqueuing onto each client's bounded
@@ -173,7 +173,7 @@ def rebind_event(
     to_metamodel_id: str,
     validation_error_count: int,
 ) -> dict[str, Any]:
-    """Whole-model metamodel rebind (Phase 6B): peers should reload."""
+    """Whole-model metamodel rebind: peers should reload."""
     return {
         "type": "rebind",
         "rev": rev,

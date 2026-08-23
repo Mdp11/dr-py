@@ -2,8 +2,8 @@
 
 Shared API-layer logic (sibling of :mod:`.session`, following the
 ``routes/_snapshot.py`` precedent): GET /model/changes and /model/changes/
-summary render its output today, and the Phase C3 save-with-CR flow reuses
-it to persist the pending change set alongside a saved model.
+summary render its output, and the save-with-CR flow reuses it to persist
+the pending change set alongside a saved model.
 """
 
 from __future__ import annotations

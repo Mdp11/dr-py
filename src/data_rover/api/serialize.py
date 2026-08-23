@@ -1,4 +1,4 @@
-"""Chunked JSON serialization of the session model (Phase C3 save/download).
+"""Chunked JSON serialization of the session model for save/download.
 
 The save-file contract is what the frontend writes today:
 ``JSON.stringify({elements, relationships}, null, 2)`` of the snapshot-shaped
@@ -10,8 +10,8 @@ properties, rev``), 2-space indentation, no trailing newline.
 ``json.dumps(obj, indent=2, ensure_ascii=False)`` produces byte-identical
 output to ``JSON.stringify(obj, null, 2)`` for this data (same item/key
 separators, same empty-container collapsing; ``ensure_ascii=False`` because
-JS does not \\u-escape non-ASCII), so existing save files keep loading and
-saved files keep opening in the old frontend reader.
+JS does not \\u-escape non-ASCII), so save files stay interchangeable with
+the frontend reader.
 
 Why a generator instead of one ``json.dumps`` of the whole model: the
 serialized form of a large model is ~80 MB+, and the model already lives in

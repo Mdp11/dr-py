@@ -1,4 +1,4 @@
-"""Deterministic `manifest.json` for an exporter run's zip (spec §5).
+"""Deterministic `manifest.json` for an exporter run's zip.
 
 The manifest records what an export produced — which entry rendered to
 which table, under which format, and which final archive member paths it
@@ -43,10 +43,8 @@ class ManifestEntry:
     truncated: bool
     degraded: bool
     files: list[str]  # final member paths
-    #: The entry's `transform` snippet artifact id (spec §8, Phase 4), or
-    #: `None` when the entry has no transform. Live since Phase 4 — this was
-    #: a deliberate wire slot (spec §5) reserved ahead of that phase, not
-    #: dead code.
+    #: The entry's `transform` snippet artifact id, or `None` when the entry
+    #: has no transform.
     transform: str | None = None
 
 

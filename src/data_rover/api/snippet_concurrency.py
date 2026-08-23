@@ -1,7 +1,7 @@
-"""Process-wide snippet-run concurrency guard (Task 10).
+"""Process-wide snippet-run concurrency guard.
 
 Shared by the interactive console (``routes/snippets.py``) and embedded
-evaluation (``script_eval.py``, M2/M3 script columns/steps) — the global cap
+evaluation (``script_eval.py``, script columns/steps) — the global cap
 covers BOTH so a burst of table/navigation evaluation work can't starve (or
 be starved by) console runs.
 """
@@ -49,7 +49,7 @@ class ConcurrencyGuard:
                 self._per_user_count[user_id] = remaining
 
     def try_acquire_global(self, *, global_limit: int) -> bool:
-        """Global-only slot for EMBEDDED evaluation (script columns/steps):
+        """Global-only slot for embedded evaluation (script columns/steps):
         one slot per evaluate/export request, no per-user cap (the per-user
         cap protects the interactive console; a table view is not an
         interactive run). Fail-fast like `try_acquire` — the caller degrades

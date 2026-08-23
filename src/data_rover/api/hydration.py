@@ -7,9 +7,9 @@ applier the ops route uses. Persist = write the model snapshot via the
 streaming serializer + record the row; a baseline reset additionally clears
 old history and writes the rev-0 commit + snapshot.
 
-A contentless project (no ``ModelRow``) hydrates to an EMPTY ``Session`` — the
-exact pre-Phase-3 behaviour, so projects that haven't been given content yet
-behave identically and the existing test suite stays green.
+A contentless project (no ``ModelRow``) hydrates to an EMPTY ``Session``, so
+projects that haven't been given content yet behave identically and the
+existing test suite stays green.
 """
 
 from __future__ import annotations
@@ -124,14 +124,14 @@ def replay_commits_into(session: Session, commits: list[Commit]) -> None:
         )
         # artifact AND view ops are SKIPPED on model replay: artifact rows and
         # the view blob (ViewRow) are both materialized heads and already
-        # reflect them (spec: one journal, materialized heads). metamodel ops
-        # are materialized heads too (ModelRow.metamodel_id / metamodel_layouts).
+        # reflect them. metamodel ops are materialized heads too
+        # (ModelRow.metamodel_id / metamodel_layouts).
         if ops:
             _apply_batch(session.model, ops, restore=True)
 
 
 def reconstruct_model_at(project_id: str, rev: int) -> Model | None:
-    """Build the model as it existed at ``rev`` (Phase 8 history diffs).
+    """Build the model as it existed at ``rev``.
 
     Mirrors ``hydrate_session`` but bounded to ``rev`` and returning a
     THROWAWAY core ``Model`` — it never touches the registry session or any
@@ -189,9 +189,9 @@ def reconstruct_model_at(project_id: str, rev: int) -> Model | None:
 def hydrate_session(project_id: str) -> Session:
     """Build the live ``Session`` for a project from durable storage.
 
-    No ``ModelRow`` -> empty ``Session`` (pre-Phase-3 behaviour). Progress is
-    published in ``_hydration_progress`` for GET /model/status while this
-    runs (the registry's init-once lock guarantees one hydration per id)."""
+    No ``ModelRow`` -> empty ``Session``. Progress is published in
+    ``_hydration_progress`` for GET /model/status while this runs (the
+    registry's init-once lock guarantees one hydration per id)."""
     progress = HydrationProgress()
     _hydration_progress[project_id] = progress
     try:
@@ -219,8 +219,8 @@ def _hydrate_session(project_id: str, progress: HydrationProgress) -> Session:
         if view_row is not None:
             view = View.model_validate_json(view_row.blob)
             if ensure_folder_ids(view):
-                # heal-and-persist: a pre-Phase-2 blob gets ids exactly once.
-                # bump_rev=False — normalization is not an edit.
+                # heal-and-persist: a blob missing folder ids gets them exactly
+                # once. bump_rev=False — normalization is not an edit.
                 content.upsert_single_view(
                     s,
                     project_id,
@@ -247,8 +247,8 @@ def _hydrate_session(project_id: str, progress: HydrationProgress) -> Session:
             progress.done, progress.total = done, total
 
         # strict=False: hydration tolerates unknown types so a project rebound
-        # onto a type-removing metamodel (Phase 6B) survives eviction; the
-        # validation pipeline reports the conformance issues.
+        # onto a type-removing metamodel survives eviction; the validation
+        # pipeline reports the conformance issues.
         model = build_model_from_dicts(
             metamodel, raw, strict=False, on_progress=_on_build
         )

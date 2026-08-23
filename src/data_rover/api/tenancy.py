@@ -225,10 +225,9 @@ def _owner_count(db: Session, project_id: str) -> int:
 def remove_member(db: Session, project_id: str, user_id: str) -> None:
     """Remove a member. Refuses to remove the last remaining owner.
 
-    The count-then-delete check is not atomic against a concurrent removal;
-    serializing project writes (so two owners can't both pass the guard) is a
-    Phase 4 concern (the per-project write-mutex). Until then writes are
-    effectively single-threaded.
+    The count-then-delete check is not atomic against a concurrent removal:
+    there is no serializing guard on project membership writes, so two
+    owners could in principle both pass the check at once.
     """
     m = get_membership(db, user_id, project_id)
     if m is None:

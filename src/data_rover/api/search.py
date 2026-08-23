@@ -1,10 +1,10 @@
 """Server-side advanced-search engine + request/response schemas.
 
 A faithful port of ``frontend/src/lib/search/evaluate.ts``. The advanced-search
-dialog historically evaluated criteria in the browser over only the *fetched
-subset* of the lazily-loaded model, so any match outside the loaded page was
-silently missed (see ``POST /model/search`` in ``routes/read.py``). This module
-runs the same query semantics over the WHOLE :class:`~data_rover.core.model.Model`.
+dialog in the browser only evaluates criteria over the *fetched subset* of the
+lazily-loaded model, so a match outside the loaded page is silently missed
+(see ``POST /model/search`` in ``routes/read.py``). This module runs the same
+query semantics over the WHOLE :class:`~data_rover.core.model.Model`.
 
 It is pure and read-only. Per-entity evaluation is O(criteria): the
 relationship-aware criteria (``relation_count``, ``orphan``,
@@ -17,9 +17,9 @@ floats without a trailing ``.0``) and ``Number(...)`` for numeric comparisons
 (missing → NaN → no match; ``null`` → 0; blank string → 0).
 
 The criterion models and matchers themselves live in
-:mod:`data_rover.core.search.criteria` (moved there so the core-layer
-navigation engine can reuse them); this module re-exports them so the public
-surface and the ``/model/search`` wire format stay unchanged.
+:mod:`data_rover.core.search.criteria` so the core-layer navigation engine can
+reuse them; this module re-exports them so the public surface and the
+``/model/search`` wire format stay unchanged.
 """
 
 from __future__ import annotations

@@ -5,7 +5,7 @@ project exists (404) and the current user is a member (403 — except global
 admins, who get implicit owner access to every project), and rejects writes
 by viewers (403). ``require_owner`` further restricts to owners (membership
 management). These are wired into every project-scoped route transitively via
-``deps.get_request_session`` (Task 8), so route handlers need no changes.
+``deps.get_request_session``, so route handlers need no changes.
 
 Write detection is by HTTP method, with an allowlist of POST endpoints that are
 actually reads (search / batch fetch / validate) so viewers can use them.
@@ -55,7 +55,7 @@ _WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 #: ``/artifacts/export`` and ``/artifacts/export/preview`` read ONLY artifact
 #: DB rows (never the in-memory model, no session touched at all), so a
 #: viewer may export. ``/artifacts/import/plan`` is deliberately NOT here —
-#: planning is part of the write flow (spec decision).
+#: planning is part of the write flow.
 _READ_ONLY_POST_SUFFIXES = (
     "/model/search",
     "/model/elements/batch",

@@ -1,10 +1,10 @@
 """Authentication seam.
 
 The backend trusts a *verified* identity and exposes one interface:
-``IdentityProvider.identify(request) -> Identity``. Phase 2 ships a dev
-provider that trusts ``X-User-Id`` / ``X-User-Email`` request headers (suitable
-behind a header-injecting gateway, or for local dev). A real OIDC/SAML client
-is a later swap via ``set_identity_provider`` — no caller changes.
+``IdentityProvider.identify(request) -> Identity``. The dev provider trusts
+``X-User-Id`` / ``X-User-Email`` request headers (suitable behind a
+header-injecting gateway, or for local dev). A real OIDC/SAML client is a
+later swap via ``set_identity_provider`` — no caller changes.
 
 Authentication (who you are) is delegated here; authorization (what you may do)
 lives in ``authz`` against the ``Membership`` table.

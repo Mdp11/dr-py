@@ -1,4 +1,4 @@
-"""Blob store for full-model snapshots (Phase 3 durable persistence).
+"""Blob store for full-model snapshots.
 
 The model is ~80 MB, so writes stream (``put`` takes an iterable of byte
 chunks straight from ``serialize.iter_model_json``) and reads buffer the whole

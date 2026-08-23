@@ -1,20 +1,17 @@
 """xlsx writer for table export. Lives in the API layer (core stays xlsx-free).
 Consumes core cell dataclasses and produces workbook bytes.
 
-xlsxwriter in normal mode, NOT the old openpyxl write-only streaming:
-`worksheet.autofit()` needs the whole sheet's cell data to measure
-(xlsxwriter itself warns and no-ops in `constant_memory` mode, and openpyxl
-has no working autofit at all — its `bestFit` flag is ignored by Excel). The
-bounded-peak-memory property the old streaming builder had is consciously
-traded away for the export path (spec:
-docs/superpowers/specs/2026-07-24-table-panel-polish-pack-design.md, item 11);
-`iter_export_rows` still feeds this chunk-by-chunk, xlsxwriter accumulates.
-This trade-off is about `constant_memory` only — the `Workbook` options below
-deliberately do NOT set `in_memory`, which is an orthogonal knob controlling
-whether generated worksheet XML is buffered in RAM or spilled to temp files;
-setting it `True` would stack a second full sheet copy on top of what
-autofit already forces, for no benefit `constant_memory` doesn't already
-give up.
+xlsxwriter runs in normal (not `constant_memory`) mode: `worksheet.autofit()`
+needs the whole sheet's cell data to measure (xlsxwriter itself warns and
+no-ops in `constant_memory` mode, and openpyxl has no working autofit at all —
+its `bestFit` flag is ignored by Excel). Bounded peak memory is consciously
+traded away for autofit on the export path; `iter_export_rows` still feeds
+this chunk-by-chunk, xlsxwriter accumulates. This trade-off is about
+`constant_memory` only — the `Workbook` options below deliberately do NOT set
+`in_memory`, which is an orthogonal knob controlling whether generated
+worksheet XML is buffered in RAM or spilled to temp files; setting it `True`
+would stack a second full sheet copy on top of what autofit already forces,
+for no benefit `constant_memory` doesn't already give up.
 
 openpyxl remains a test-suite dependency (it READS workbooks back; xlsxwriter
 is write-only).
@@ -32,14 +29,13 @@ from data_rover.core.model.model import Model
 from data_rover.core.table.cells import Cell
 from data_rover.core.table.cell_text import cell_text
 
-#: The autofit ceiling lives in settings as ``xlsx_autofit_max_px`` (U-2):
+#: The autofit ceiling lives in settings as ``xlsx_autofit_max_px``:
 #: one huge cell must not blow a column out to an unusable width, but the cap
 #: is an operator's taste, not an invariant. Read per call in
 #: ``build_workbook``, so a fresh env value takes effect without a restart.
 
-#: xlsx forbids these in a sheet name; the old openpyxl builder let them
-#: bubble up as a 422 (`ValueError`), xlsxwriter would raise a non-ValueError
-#: and 500 — sanitizing is strictly kinder than either.
+#: xlsx forbids these in a sheet name; xlsxwriter raises a non-ValueError for
+#: them, which would 500 — sanitizing turns that into a clean 422 instead.
 _INVALID_SHEET_CHARS = set("[]:*?/\\")
 
 
@@ -93,9 +89,7 @@ def build_workbook(
     wrap this in `except (NavigationResolveError, ValueError)` and answer a
     422; the same reasoning `_sheet_title` documents for preferring a
     sanitize-or-raise-`ValueError` failure over a raw exception that would
-    500 instead. This contract only bites once a caller computes
-    `row_number_col` dynamically (Task 4) rather than passing the constant
-    `0`/`None` the sole caller uses today."""
+    500 instead."""
     if row_number_col is not None and not 0 <= row_number_col < len(headers):
         raise ValueError(
             f"row_number_col={row_number_col} is out of range for "

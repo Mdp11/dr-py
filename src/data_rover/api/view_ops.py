@@ -1,4 +1,4 @@
-"""View-op plumbing (Phase 2 artefacts revamp).
+"""View-op plumbing.
 
 The view is a materialized head (``session.view`` in memory, ``ViewRow.blob``
 durable), so view ops must never reach the model applier. This module is the
@@ -87,16 +87,13 @@ def load_or_create_view(db: DbSession, project_id: str) -> View:
     ``session.view is None`` does NOT mean "this project never had a view":
     a cold/evicted session reaches this ``None`` state on a cache miss,
     never touching ``ViewRow`` — the durable blob — which can still hold a
-    populated tree. (The legacy ``PUT /view/snapshot`` / ``DELETE /view``
-    routes used to be a second source of this same ambiguity — ``clear_view``
-    nulled only the in-memory cache too — but both are retired now; a
-    cache-miss on a cold session is the only way here left.) A ``ViewRow``
+    populated tree. A ``ViewRow``
     that exists on disk IS the view regardless of why the cache reads empty,
     exactly the read ``hydration.hydrate_session`` already performs at
     session start; only a project that has genuinely never committed a view
     gets a fresh empty one.
 
-    Getting this backwards is silent data loss (final-review Fix 1): the two
+    Getting this backwards is silent data loss: the two
     write callers apply the incoming batch to whatever this returns and then
     unconditionally OVERWRITE ``ViewRow`` with the result — so materializing
     an empty ``View`` here when a populated row exists doesn't just mis-render
@@ -222,10 +219,10 @@ def apply_view_ops(
     contract: it wraps its own loop and calls ``_rollback`` INTERNALLY, in
     its own ``except`` block, before re-raising — this function does not do
     that.) Callers that need atomicity must therefore not call this directly
-    on a live view; the commit/undo wiring task adds
-    ``apply_view_ops_atomic``, which loops op-by-op, keeps the accumulated
-    ``inverse_units`` itself, and rolls them back via ``rollback_view`` before
-    re-raising. For a dry run with no mutation at all, use
+    on a live view; use ``apply_view_ops_atomic`` instead, which loops
+    op-by-op, keeps the accumulated ``inverse_units`` itself, and rolls them
+    back via ``rollback_view`` before re-raising. For a dry run with no
+    mutation at all, use
     ``validate_view_ops`` (deep-copy apply, discard) instead of trying to
     recover from a failed direct call.
     """
@@ -578,8 +575,7 @@ def view_op_folder_ids(view: View | None, ops: Sequence[ViewOpIn]) -> set[str]:
     move): a spurious id can only produce a conservative 409, never hide a
     held lease. But two op kinds need the SAME expansion ``required_locks``
     (``locking.py``) performs for a forward batch, or a genuinely-held peer
-    lease goes unseen entirely — the false claim this docstring used to make
-    (final-review Fix 2):
+    lease goes unseen entirely:
 
     - ``delete_folder`` only NAMES its own id, yet removes its whole subtree,
       so a peer's lease on any DESCENDANT must also block the undo that would

@@ -1,4 +1,4 @@
-"""Chunked background full-model validation (spec §3).
+"""Chunked background full-model validation.
 
 The load/upload/hydrate paths install the model with a PRESENT-but-EMPTY
 ``ValidationState`` and start this sweep instead of validating inline. The
@@ -12,19 +12,19 @@ Locking: each chunk (validate + splice) runs under ``session.write_mutex``,
 released between chunks, so an ops batch is never starved for longer than one
 chunk. Abort conditions checked per chunk under the mutex: the session's model
 was replaced (``session.model is not model``), the validation state was
-cleared, or ``progress.cancel`` was set (today exercised by tests only; the
-eviction path currently SKIPS eviction while a sweep is running — see the
-``SessionRegistry.evict`` guard in ``session.py`` — so ``cancel`` is reserved
-for future eviction wiring, not yet driven by it).
+cleared, or ``progress.cancel`` was set (exercised by tests only; the eviction
+path skips eviction while a sweep is running — see the
+``SessionRegistry.evict`` guard in ``session.py`` — so ``cancel`` is not
+currently triggered from there).
 
 Because a PRESENT ``ValidationState`` is installed up front,
 ``_ensure_validation_seeded`` (routes/ops.py) never re-runs a synchronous
 full sweep mid-edit — issue counts simply grow as chunks land.
 
 Reporting-granularity note: a scoped run reports one containment-cycle issue
-PER swept element whose parent chain reaches a cycle, where the historical
-full sweep reported a single representative issue (see the spec's design
-deltas; cycles are pathological structural blockers).
+PER swept element whose parent chain reaches a cycle, rather than one
+representative issue for the whole model (cycles are pathological structural
+blockers).
 """
 
 from __future__ import annotations
@@ -57,8 +57,7 @@ class SweepProgress:
     running: bool = True
     cancel: threading.Event = field(default_factory=threading.Event)
     #: set True if the sweep died on an unexpected exception (see `_run`'s
-    #: catch-all). Not yet surfaced by GET /model/status; observable here for
-    #: future UI wiring.
+    #: catch-all). Not surfaced by GET /model/status.
     error: bool = False
 
 
@@ -110,10 +109,9 @@ def _run(session: Session, model: Model, progress: SweepProgress) -> None:
                 state.replace(chunk, issues)
             progress.done = min(start + CHUNK_SIZE, len(ids))
     except Exception:
-        # Pre-branch a raising validator failed the load request loudly (the
-        # sweep ran inline). Now it runs on a background daemon thread, so an
-        # uncaught exception here would die silently and leave the issue
-        # store permanently partial with zero signal. Log loudly and flag it.
+        # This runs on a background daemon thread: an uncaught exception here
+        # would die silently and leave the issue store permanently partial
+        # with zero signal. Log loudly and flag it.
         logger.exception(
             "validation sweep failed for project session; issue store left partial"
         )

@@ -1,4 +1,4 @@
-"""Per-commit diff rendering (Phase 1 artefacts revamp; view section Phase 2).
+"""Per-commit diff rendering.
 
 Model entities: reconstruct the model at rev-1 and rev (same machinery and
 cost class as GET /commits/{rev}/model) and compare only the entity ids the
@@ -23,7 +23,7 @@ narrowness the artifact section's ``kind`` fallback has. No ``ViewRow`` is
 ever read here, so an old commit's view diff stays correct after the folder
 in question has since been renamed again or deleted.
 
-Metamodel + layout (spec 2026-08-16): a rebind-carrying commit's structural
+Metamodel + layout: a rebind-carrying commit's structural
 half is rendered neither from the model reconstruction nor from the ops
 journal, but recomputed from the two immutable ``MetamodelRow`` blobs named
 by the commit's ``from_metamodel_id``/``to_metamodel_id`` columns
@@ -292,7 +292,7 @@ def _metamodel_structural(
     db: DbSession, commit: Commit
 ) -> MetamodelStructuralDiff | None:
     """The rebind commit's document diff, recomputed from the two immutable
-    MetamodelRow blobs (spec: recompute, never store). Total: any missing id,
+    MetamodelRow blobs — never stored. Total: any missing id,
     missing row, or unparseable blob degrades to None — a broken historical
     blob must not 500 the whole commit diff."""
     if commit.from_metamodel_id is None or commit.to_metamodel_id is None:
@@ -440,7 +440,7 @@ def diff_commit(db: DbSession, project_id: str, commit: Commit) -> CommitDiffOut
     reconstructed at rev-1 and rev and compared, artifacts are read straight
     out of the journal (state simulated from the inverse-derived base), view
     ops are rendered as-is — the ops ARE the diff, no reconstruction at all —
-    and the metamodel/layout half (spec 2026-08-16) is its own pair: the
+    and the metamodel/layout half is its own pair: the
     rebind's structural diff is recomputed from the two immutable metamodel
     rows the commit names, while layout moves are read journal-only off the
     forward ops. Only the ids the commit's ops name are compared for the model

@@ -1,9 +1,9 @@
 """Shared table-export engine: the 202-vs-ship logic behind
 `POST /tables/export` and `POST /exports/run`.
 
-Extracted from `routes/tables.py::export_table` so both routes share ONE
-completeness probe, ONE decision table, ONE zip builder. The long FIX A /
-FIX B comments moved here VERBATIM — they are load-bearing; do not trim.
+Both `POST /tables/export` and `POST /exports/run` share ONE completeness
+probe, ONE decision table, ONE zip builder here. The FIX A / FIX B comments
+below are load-bearing; do not trim them.
 
 `run_table_export` takes TWO definitions: `defn` (evaluation — always the
 original) and `render_defn` (presentation — an `overridden_table` copy for
@@ -88,7 +88,7 @@ class ExportFiles:
 class TransformUnavailableError(Exception):
     """A transform-bearing export cannot run AT ALL: no runner constructed,
     or no interactive concurrency slot free. The ONE exception to this
-    engine's degraded-not-failed stance (spec §17.2): silently skipping a
+    engine's degraded-not-failed stance: silently skipping a
     transform ships untransformed data — a functional-contract breach, not a
     cosmetic degradation — and 422 would mislabel a transient condition as a
     definition error. Routes map busy=False -> 503, busy=True -> 429,
@@ -102,8 +102,8 @@ class TransformUnavailableError(Exception):
 class TransformHost:
     """One export run's transform executor: one warm SnippetSession per
     DISTINCT transform code, shared across every entry/file that uses the
-    same snippet (spec §8), one global interactive slot for the whole run
-    (spec §17.2), one ScriptBudget shared by every call. Construct through
+    same snippet, one global interactive slot for the whole run,
+    one ScriptBudget shared by every call. Construct through
     `open_transform_host`; always `close()` in a finally."""
 
     def __init__(
@@ -125,7 +125,7 @@ class TransformHost:
     def apply(self, code: str, doc: object, name: str) -> object:
         """Run `transform(doc)` and return the replacement document.
 
-        Failure = failure (spec §8): a boot error, a raise, a timeout, an
+        Failure = failure: a boot error, a raise, a timeout, an
         unserializable return, or a size breach raises ValueError naming
         `name` — the routes' existing ValueError -> 422 mapping carries it,
         so a machine consumer never receives a half-transformed 200."""
@@ -311,7 +311,7 @@ def run_table_export(
     line — the JSON-family renderer (`render_json_ex`) underneath both
     `"json"` and `"jsonl"`.
 
-    `json_doc` (spec §7) is entry-level document shaping — object vs. array
+    `json_doc` is entry-level document shaping — object vs. array
     shape (with a `key_column`), compact vs. pretty printing, and whether an
     in-band `{"$error": ...}` marker anywhere in the export turns into a
     422 instead of shipping. It is consulted ONLY inside the json/jsonl
@@ -319,7 +319,7 @@ def run_table_export(
     `pretty` are ignored with tolerance on `jsonl` (only `on_error` applies
     there) — see `JsonDocumentOptions`'s own docstring.
 
-    `transform_code`/`transform_host` (spec §8) are the export-transform
+    `transform_code`/`transform_host` are the export-transform
     hook: a `transform(doc)` snippet run once the document is otherwise
     ready to ship. Supported on BOTH surfaces (the standalone
     `/tables/export` route and each `/exports/run` entry), JSON-family
@@ -329,7 +329,7 @@ def run_table_export(
     array/object/row-list a consumer would otherwise receive, never the raw
     row cells. On the split path it runs ONCE PER FILE (one call per
     partition, not once for the whole export), after `_check_on_error` has
-    already scanned that file's rendered docs (spec §17.4: a transform must
+    already scanned that file's rendered docs (a transform must
     not be able to launder an error marker past that check by transforming
     it away). `transform_host` is caller-owned — this function calls
     `.apply()` but never `.close()`s it, since one host is shared across
@@ -347,9 +347,9 @@ def run_table_export(
     underlying navigation that hit its `max_chains`/`max_visited` budget),
     never for cell-level capping (which cannot happen with this override).
 
-    Script columns (spec §4.4): an export is the one route that MUST touch every
-    row, so running it inline would be exactly the O(rows) guest grind Phase B
-    exists to remove. Instead the whole thing runs CACHE-ONLY and this function
+    Script columns: an export is the one route that MUST touch every
+    row, so running it inline would be exactly the O(rows) guest grind
+    background sweeping exists to remove. Instead the whole thing runs CACHE-ONLY and this function
     probes for completeness first; if anything is still uncomputed it kicks/joins
     the background sweep and answers `ExportPending` (the callers translate that
     to 202 + `Retry-After: 1`) rather than shipping a half-computed file. The
@@ -375,16 +375,16 @@ def run_table_export(
     split_on = format in JSON_FAMILY and split is not None and split.enabled
     if split_on:
         assert split is not None  # split_on implies this; narrows for mypy
-        # Strict by decision (spec §2): the ONE export setting that rejects
+        # Strict by decision: the ONE export setting that rejects
         # rather than normalizes. Before any evaluation — a bad template must
         # not cost a whole-table pass. ValueError -> the routes' 422 mapping.
         # Token strictness lives here, not only in /exports/run's per-entry
         # pass, so the standalone /tables/export route rejects a typo'd
-        # `${revv}` too instead of shipping it verbatim in filenames (K-10).
+        # `${revv}` too instead of shipping it verbatim in filenames.
         validate_template(split.filename_template)
         validate_tokens(split.filename_template, SPLIT_TOKENS)
     if transform_code is not None and format not in JSON_FAMILY:
-        # A functional contract, not presentation (spec §8): silently
+        # A functional contract, not presentation: silently
         # skipping ships untransformed data, so no tolerate-and-ignore.
         raise ValueError(
             f"{name}: transform is only supported for JSON-family formats, "
@@ -407,7 +407,7 @@ def run_table_export(
         )
         # Every whole-table pass below (build, order, the completeness probe AND
         # the export render itself) runs CACHE-ONLY: an export must never drive
-        # the guest O(rows) times inline (spec §4.4). The flag is set once here
+        # the guest O(rows) times inline. The flag is set once here
         # and deliberately never cleared.
         if script_ctx is not None:
             script_ctx.cache_only = True
@@ -614,7 +614,7 @@ def run_table_export(
                 else None
             )
             # Object-shape key column: json only (jsonl ignores shape with
-            # tolerance, spec §6). Checked BEFORE rendering — the range half
+            # tolerance). Checked BEFORE rendering — the range half
             # is knowable now, and `render_json_ex` re-checks it anyway.
             key_col: int | None = None
             if format == "json" and json_doc is not None and json_doc.shape == "object":
@@ -630,7 +630,7 @@ def run_table_export(
                 key_col = json_doc.key_column
 
             def _check_on_error(docs: list[dict[str, object]]) -> None:
-                # Spec §7: under "fail" a machine consumer gets a clean
+                # Under "fail" a machine consumer gets a clean
                 # document or nothing — scanned per FILE, after render,
                 # before serialization. ValueError -> the routes' 422.
                 if (
@@ -660,7 +660,7 @@ def run_table_export(
                 assert transform_host is not None  # routes pair them
                 out = transform_host.apply(transform_code, payload, name)
                 if format == "jsonl" and not isinstance(out, list):
-                    # §17.3: jsonl is newline-delimited; a non-list return
+                    # jsonl is newline-delimited; a non-list return
                     # has no honest line serialization.
                     raise ValueError(
                         f"{name}: transform must return a list for jsonl; "
@@ -744,7 +744,7 @@ def run_table_export(
         elif format == "csv":
             # Same layout slicing as the xlsx branch (headers already carry
             # the row-number header at its position); cell text shared via
-            # core/table/cell_text so the two formats cannot drift (spec §6).
+            # core/table/cell_text so the two formats cannot drift.
             # No split, no json_doc — both tolerantly ignored, like
             # json_split already is on xlsx.
             blob = render_csv(

@@ -1,5 +1,5 @@
-"""Route-layer glue for embedded snippet evaluation (M2/M3): build/tear down
-the per-request ScriptEvalContext, including the degraded modes (no runner /
+"""Route-layer glue for embedded snippet evaluation: build/tear down the
+per-request ScriptEvalContext, including the degraded modes (no runner /
 no concurrency slot → unavailable-mode context; the request still 200s with
 error cells / warnings)."""
 

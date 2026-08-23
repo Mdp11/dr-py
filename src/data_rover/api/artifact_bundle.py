@@ -282,7 +282,7 @@ def derive_plan_ex(
     claimed: dict[ArtifactKind, set[str]] = {}
 
     for art, kind, existing in valid:
-        # Unconditional, not just on the clash path it used to serve: the pool
+        # Unconditional, not scoped to just the clash path: the pool
         # this builds is also PlanResult.taken_names, which build_import_ops
         # vets `copy_names` against, and a create-only kind is exactly the case
         # where a client rename can collide with a row the bundle never

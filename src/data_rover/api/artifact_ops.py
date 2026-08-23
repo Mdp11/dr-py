@@ -1,4 +1,4 @@
-"""Artifact-op plumbing (Phase 1 artefacts revamp).
+"""Artifact-op plumbing.
 
 Artifacts are materialized DB rows, not model content, so their ops must
 never reach the model applier (routes/ops.py::_apply_one). ``split_ops`` is
@@ -116,7 +116,7 @@ def artifact_op_ids(ops: Sequence[ArtifactOpIn]) -> set[str]:
 
 
 # ---------------------------------------------------------------------------
-# Artifact op applier (Task 4) — the DB-side twin of routes/ops.py::_apply_batch
+# Artifact op applier — the DB-side twin of routes/ops.py::_apply_batch
 # ---------------------------------------------------------------------------
 #
 # Architecture: one journal, materialized heads. Artifact state lives in
@@ -131,7 +131,7 @@ def artifact_op_ids(ops: Sequence[ArtifactOpIn]) -> set[str]:
 # There is NO internal rollback path (contrast routes/ops.py::_apply_batch,
 # which rolls the live model back via inverses on a mid-batch failure): a
 # failed batch here just stops, and the caller's db.rollback() discards every
-# staged row change made so far. Tasks 5/6 own that transaction boundary.
+# staged row change made so far. The caller owns that transaction boundary.
 
 
 def _resolve_json(value: Any, id_map: dict[str, str]) -> Any:

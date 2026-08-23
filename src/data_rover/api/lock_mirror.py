@@ -1,5 +1,5 @@
-"""Write-through lease mirror (Phase 7, scoped): leases survive a backend
-restart and are observable from outside the process (redis-cli).
+"""Write-through lease mirror: leases survive a backend restart and are
+observable from outside the process (redis-cli).
 
 ``LockTable`` (locking.py) stays the ONLY authority for conflict decisions;
 the mirror never participates in one. After each successful lease mutation the
@@ -59,7 +59,7 @@ KEY_TTL_SLACK_S = 60.0
 
 def lease_key(project_id: str, *, prefix: str = "") -> str:
     """``prefix`` is the deployment namespace (``settings.redis_key_prefix``),
-    prepended verbatim; empty keeps the historical unprefixed key."""
+    prepended verbatim; empty keeps the unprefixed key."""
     return prefix + _LEASE_KEY.format(project_id=project_id)
 
 
@@ -80,8 +80,7 @@ class LeaseMirror(Protocol):
     """Two methods only, on purpose: the mirror receives snapshots of truth
     and answers them back. It has no acquire/release/renew vocabulary and
     never participates in a conflict decision — which is what keeps it
-    trivially correct and what the future ownership-lease work (full HA
-    phase) extends rather than fights."""
+    trivially correct."""
 
     def write(self, project_id: str, leases: list[MirroredLease]) -> None: ...
     def load(self, project_id: str) -> list[MirroredLease]: ...
@@ -234,8 +233,7 @@ def mirror_session_leases(project_id: str, session: Session) -> None:
     is re-taken only briefly, for a coherent snapshot, so mirror I/O (a
     network round trip to Redis) never extends a lock route's or commit's
     critical section; ``mirror_mutex`` is held across snapshot AND write so
-    two racing write-throughs land in snapshot order — the out-of-order
-    phantom-lease window this helper used to document is gone.
+    two racing write-throughs land in snapshot order.
 
     Never raises: a mirror failure must not fail a lock operation."""
     try:

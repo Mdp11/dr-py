@@ -31,8 +31,7 @@ numbers this design leans on):
   slurp-then-run), so a guest blocked on `sys.stdin` is served as the host
   writes.
 
-**The bridge loop (Task 9).** `run()` now drives the REAL guest<->host
-protocol, replacing Task 8's provisional `exec`/`quit` loop:
+**The bridge loop.** `run()` drives the REAL guest<->host protocol:
 
 1. `run()` pops a warm instance (its guest is parked on `sys.stdin` after the
    boot handshake), arms the per-run wall deadline on the instance's `Store`
@@ -73,7 +72,7 @@ in a way epoch cannot reach (e.g. blocked in a WASI call) still unblocks the
 host at the deadline; teardown then closes the FIFOs so both sides die and
 the instance is discarded (never returned to the pool).
 
-**Error mapping (M0 findings, `FINDINGS.md` rows 4-5):**
+**Error mapping (`FINDINGS.md` rows 4-5):**
 
 | outcome                                             | `ScriptError.kind` |
 |-----------------------------------------------------|--------------------|
@@ -1272,9 +1271,9 @@ class _WasmSnippetSession:
         # Arm the epoch deadline as late as possible -- immediately before
         # the write that hands control to the guest -- so host-side work
         # above (projection, frame serialization) is never deducted from the
-        # guest's own wall budget (it was previously armed before this
-        # block, skewing this deadline against `wall_deadline` below, which
-        # is read from the clock AFTER that host-side work).
+        # guest's own wall budget; arming any earlier would skew this
+        # deadline against `wall_deadline` below, which is read from the
+        # clock AFTER that host-side work.
         self._arm(deadline_s)
         self._inst.host_in.write(frame)
         self._inst.host_in.flush()
@@ -1336,10 +1335,10 @@ class _WasmSnippetSession:
 
 # -- settings integration + process-wide singleton ---------------------------
 #
-# Everything below is Task 10 scope: turning `Settings` into a `RunLimits` /
+# Everything below turns `Settings` into a `RunLimits` /
 # `ScriptRunner`, the RCE tripwire that keeps `TrustedRunner` out of real
 # deployments, and the `get_runner`/`set_runner` seam `main.py`'s lifespan
-# wires up and Task 11's routes will depend on (via FastAPI's
+# wires up and routes depend on (via FastAPI's
 # `Depends(get_runner)`, overridable through `app.dependency_overrides`).
 
 
@@ -1416,7 +1415,7 @@ def build_runner_from_settings(settings: Settings) -> ScriptRunner:
 
 #: Process-wide runner singleton. `None` until `main.py`'s lifespan startup
 #: constructs one (or leaves it unset if the wasm guest binary is absent --
-#: see the module docstring in `main.py`'s lifespan wiring). Task 11's routes
+#: see the module docstring in `main.py`'s lifespan wiring). Routes
 #: read this through `get_runner` as a FastAPI dependency and must treat
 #: `None` as "runner unavailable" (503), not crash.
 _runner: ScriptRunner | None = None
@@ -1424,7 +1423,7 @@ _runner: ScriptRunner | None = None
 
 def get_runner() -> ScriptRunner | None:
     """Process-wide `ScriptRunner` singleton accessor. A plain zero-arg
-    callable on purpose: Task 11 wires it in as a FastAPI dependency
+    callable on purpose: routes wire it in as a FastAPI dependency
     (`Depends(get_runner)`) and tests override it via
     `app.dependency_overrides[get_runner] = ...`. Returns `None` if no
     runner has been constructed yet (e.g. the wasm guest binary is not
