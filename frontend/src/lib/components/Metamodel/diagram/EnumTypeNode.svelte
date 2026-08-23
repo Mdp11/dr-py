@@ -93,7 +93,7 @@
 			0 0 0 3px color-mix(in oklab, var(--ring) 8%, transparent);
 	}
 
-	/* Hover neighborhood (spec §5): the hovered thing and its neighbors stay
+	/* Hover neighborhood: the hovered thing and its neighbors stay
 	   full-strength while everything else dims. The transition-delay applies
 	   only on the way INTO dim, so sweeping the cursor across the canvas
 	   doesn't strobe; un-dim is immediate. */
@@ -157,7 +157,7 @@
 		overflow-y: auto;
 	}
 
-	/* LOD (spec §4): see ElementTypeNode's identical block for the rationale
+	/* LOD: see ElementTypeNode's identical block for the rationale
 	   (`visibility`, not removal, keeps the DOM height — and every edge
 	   anchor — byte-identical in both modes). The enum name keeps its gold
 	   token rather than switching to the neutral foreground the other two

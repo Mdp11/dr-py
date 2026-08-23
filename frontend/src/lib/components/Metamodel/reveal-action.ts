@@ -5,7 +5,7 @@ import { selectDiagramNode } from '$lib/state/metamodel-diagram.svelte';
 import { setMetamodelPanelCollapsed } from '$lib/state/metamodel-panel.svelte';
 
 /**
- * THE shared navigate action (spec 2026-08-20 §6/§7.1): search picks and the
+ * THE shared navigate action: search picks and the
  * panel TOC rows both come through here, which is what keeps their behaviour
  * from drifting — select, reopen the panel (navigating by name implies
  * wanting the form; a plain canvas click deliberately does not reopen), then

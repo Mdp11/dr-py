@@ -21,8 +21,7 @@
 	// "Staged elements" section: the navigation path to elements touched by
 	// the staged-edits buffer (snippet-staged or manual). The tree renders only
 	// server-paged rows, so staged temp elements appear NOWHERE else until
-	// commit — this section is derived purely from client state. See
-	// docs/superpowers/specs/2026-07-22-staged-elements-sidebar-section-design.md.
+	// commit — this section is derived purely from client state.
 
 	const LS_COLLAPSED = 'ui.stagedSectionCollapsed';
 

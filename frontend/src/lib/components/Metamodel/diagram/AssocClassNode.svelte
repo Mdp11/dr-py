@@ -126,7 +126,7 @@
 		border-color: var(--destructive);
 	}
 
-	/* Hover neighborhood (spec §5): the hovered thing and its neighbors stay
+	/* Hover neighborhood: the hovered thing and its neighbors stay
 	   full-strength while everything else dims. The transition-delay applies
 	   only on the way INTO dim, so sweeping the cursor across the canvas
 	   doesn't strobe; un-dim is immediate. */
@@ -219,7 +219,7 @@
 		color: var(--cm-comment);
 	}
 
-	/* LOD (spec §4): past the zoom threshold the box shows ONLY its name. The
+	/* LOD: past the zoom threshold the box shows ONLY its name. The
 	   full content is hidden with `visibility` — NOT removed — so the DOM
 	   height, and therefore every edge anchor, is byte-identical in both
 	   modes. `visibility: hidden` also disables the collapse toggle's hit

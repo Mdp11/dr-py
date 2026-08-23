@@ -13,7 +13,7 @@
 	// result to another. The cost — collapsing the panel discards the last
 	// result — is accepted: this is a scratch test, not a saved artifact.
 	//
-	// There is no Stop button on purpose. M1's POST /snippets/cancel performs
+	// There is no Stop button on purpose. POST /snippets/cancel performs
 	// a real registry + ownership check but the abort itself is a no-op: a run
 	// still ends only at wall_timeout_s (10s default). Offering Stop here
 	// would be a lie in a panel this small.

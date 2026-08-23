@@ -9,9 +9,8 @@ const NUL = ' ';
  * key spaces never collide (an id can never start with NUL either — this
  * holds for a folder's own uuid id just as much as it did for a name-path).
  *
- * Phase 2: keyed by the folder's stable `id`, not its name-path. This is the
- * whole point of the id-addressing migration — a folder's key no longer
- * changes when the folder (or an ancestor) is renamed, so collapse/expand
+ * Keyed by the folder's stable `id`, not its name-path, so the key never
+ * changes when the folder (or an ancestor) is renamed — collapse/expand
  * state, focus, and drag hover survive a rename untouched.
  */
 export const FOLDER_KEY_PREFIX = NUL + 'F' + NUL;
@@ -36,7 +35,7 @@ export function isExcludedSectionKey(key: string): boolean {
 }
 
 /** Strip a folder node key back down to its bare folder id. Throws on a
- * non-folder key (mirrors the pre-Phase-2 path-keyed helper's contract). */
+ * non-folder key. */
 export function folderIdFromKey(key: string): string {
 	if (!isFolderKey(key)) throw new Error(`Not a folder key: ${key}`);
 	return key.slice(FOLDER_KEY_PREFIX.length);
@@ -261,8 +260,8 @@ export function buildUnifiedTree(
  * `tree.roots`, so it renders in its own panel rather than inside the tree.
  * Mutates `tree` in place (consistent with how buildUnifiedTree seeds).
  *
- * Excluded-pool injection (Task 1, artefacts-Phase-2 follow-ups): `excludedRootIds`
- * reflects the last COMMITTED view only, so an element the staged journal has
+ * Excluded-pool injection: `excludedRootIds` reflects the last COMMITTED
+ * view only, so an element the staged journal has
  * since unplaced (a `remove_element` op, or a placement whose containing folder
  * was staged-deleted) sits in NEITHER region until commit/discard — the committed
  * endpoint doesn't know about it yet, and it's no longer in any folder of the
@@ -447,8 +446,8 @@ export const decodeFolderPayload = decodeStringArray;
 export function movableElementIds(tree: UnifiedTree): Set<string> {
 	const out = new Set<string>(tree.placedElementIds);
 	for (const key of tree.roots) {
-		// The excluded-pool sentinel is no longer a tree root (it lives in
-		// `tree.excludedRoots`), so only folder keys need filtering here.
+		// The excluded-pool sentinel lives in `tree.excludedRoots`, not `tree.roots`,
+		// so only folder keys need filtering here.
 		if (!isFolderKey(key)) out.add(key);
 	}
 	// excluded-pool roots are draggable: dragging one into a folder includes it.

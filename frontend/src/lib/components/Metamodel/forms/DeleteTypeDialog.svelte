@@ -7,7 +7,7 @@
 
 	/**
 	 * Delete confirmation that shows the CASCADE, split the way `yaml-edit`
-	 * actually behaves (spec §3): some references are auto-fixed by the remove
+	 * actually behaves: some references are auto-fixed by the remove
 	 * handler, and the rest are deliberately left in the YAML for the linter to
 	 * flag rather than silently rewritten.
 	 *

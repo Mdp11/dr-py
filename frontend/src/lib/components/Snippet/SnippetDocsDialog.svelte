@@ -1,9 +1,8 @@
 <script lang="ts">
-	// Tabbed snippet-docs modal (replaces the old 320px SnippetDocsPanel
-	// sidebar): API Reference / Project / Limits & rules, with a shared filter
-	// box above the tab panels (inert on the Limits tab). All list
-	// shaping/filtering is pure ($lib/snippet/docs-view); this stays a thin
-	// template.
+	// Tabbed snippet-docs modal: API Reference / Project / Limits & rules,
+	// with a shared filter box above the tab panels (inert on the Limits
+	// tab). All list shaping/filtering is pure ($lib/snippet/docs-view); this
+	// stays a thin template.
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Tabs from '$lib/components/ui/tabs';
 	import { getMetamodel, getSnippetDocs } from '$lib/state';

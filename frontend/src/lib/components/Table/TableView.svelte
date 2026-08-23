@@ -3,8 +3,7 @@
 	// Export, Save/Save as…, lock-denied banner) above a full-height
 	// `TableGrid`.
 	// Definition editing (row source + columns) lives in a modal opened by the
-	// ⚙ Settings button so the grid gets the whole area — see
-	// docs/superpowers/specs/2026-07-13-table-settings-popup-design.md.
+	// ⚙ Settings button so the grid gets the whole area.
 	import {
 		abandonTableEvaluationSuspension,
 		canEdit,
@@ -173,10 +172,10 @@
 	let exporting = $state(false);
 	let exportProgress = $state<ExportProgress | null>(null);
 	let exportAbort: AbortController | null = null;
-	// The Export ▾ items no longer download: they open the export settings
-	// dialog on the chosen format, which owns the per-column include/rename/
-	// order overrides and runs the download itself. `exportFormat` is bound, so
-	// switching format inside the dialog is remembered for the next opening.
+	// The Export ▾ items open the export settings dialog on the chosen
+	// format, which owns the per-column include/rename/order overrides and
+	// runs the download itself. `exportFormat` is bound, so switching format
+	// inside the dialog is remembered for the next opening.
 	let exportOpen = $state(false);
 	let exportFormat = $state<ExportFormat>('xlsx');
 	$effect(() => () => exportAbort?.abort());
@@ -186,11 +185,9 @@
 	// for a view that is going away is exactly what we don't want.
 	$effect(() => () => abandonTableEvaluationSuspension(tabId));
 	// Anything the table is doing that the user did not just get a result for.
-	// Surfaced as an always-visible bar in the tab's FIXED chrome: a page
-	// request, a background script sweep and an export retry loop all used to
-	// be reported only by muted text (or, for a re-fetch over an existing page,
-	// by a line at the very BOTTOM of a scrolled grid) — which is why a long
-	// computation read as a frozen table.
+	// Surfaced as an always-visible bar in the tab's FIXED chrome — muted text
+	// or a line at the bottom of a scrolled grid would let a long computation
+	// read as a frozen table.
 	const busy = $derived(loading || scriptStatus?.state === 'computing' || exporting);
 	let settingsOpen = $state(false);
 	// Which column the settings dialog is scoped to — null shows the whole
@@ -760,7 +757,7 @@
 				showCloseButton={false}
 				onEscapeKeydown={(e) => {
 					// Gate Escape rather than letting the primitive close: a stray
-					// Escape used to bin a fully composed script column silently.
+					// Escape would otherwise bin a fully composed script column silently.
 					if (hasSuspendedTableEdits(tabId)) {
 						e.preventDefault();
 						confirmDiscardOpen = true;

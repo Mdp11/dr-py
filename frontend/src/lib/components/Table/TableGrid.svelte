@@ -302,7 +302,7 @@
 		return col?.kind === 'property' ? col.name : undefined;
 	}
 
-	// Header-cell drag-to-reorder (Task 10): the same pointer-driven controller
+	// Header-cell drag-to-reorder: the same pointer-driven controller
 	// as ColumnManager's grip, hit-testing DEFINITION indices via
 	// `data-col-hdr-drop` so a drop onto a visible header still resolves to the
 	// right column even with hidden columns compacting the DOM order.

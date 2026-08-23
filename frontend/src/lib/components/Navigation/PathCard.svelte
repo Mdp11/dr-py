@@ -106,9 +106,9 @@
 	// UI disclosure: a collapsed card keeps its header (title, status, chips)
 	// plus a one-line summary and hides the editing body. Store-keyed (NOT
 	// component-local $state) so it survives a remount — an auto-wrap into a
-	// combination, a dialog reopen, or an index-keyed editor reuse used to
-	// silently reset it back to expanded. It is also deliberately NOT the
-	// store's `_expanded` set, which tracks node VISIBILITY for preview
+	// combination, a dialog reopen, or an index-keyed editor reuse would
+	// otherwise silently reset it back to expanded. It is also deliberately
+	// NOT the store's `_expanded` set, which tracks node VISIBILITY for preview
 	// auto-runs (see navigation-editor.svelte.ts) — previews/status stay live
 	// while collapsed. The default (no explicit choice yet) is collapsed for
 	// embedded (table-settings) drafts and expanded for standalone navigation

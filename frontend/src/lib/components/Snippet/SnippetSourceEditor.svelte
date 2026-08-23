@@ -99,7 +99,7 @@
 	let editor: CodeEditor | undefined = $state();
 	let testPanel: SnippetTestPanel | undefined = $state();
 
-	// Component-local lint state — NOT the M1 store's embedded-draft
+	// Component-local lint state — NOT the store's embedded-draft
 	// machinery (snippet-editor.svelte.ts): this editor just holds a code
 	// string, so a plain debounced call is enough.
 	let diagnostics: SnippetDiagnostic[] = $state([]);

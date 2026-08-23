@@ -1,5 +1,5 @@
 <script lang="ts">
-	// Editable value cell (Task 6). Stages a `set_property`-shaped
+	// Editable value cell. Stages a `set_property`-shaped
 	// `update_element` op through exactly the Inspector's checkout path
 	// (`editLock` -> `emit`) — this component never commits. Commit happens
 	// through the app-wide DiffDrawer once the op lands in the staged queue.

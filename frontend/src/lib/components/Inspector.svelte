@@ -109,10 +109,10 @@
 	async function onDeleteElement(): Promise<void> {
 		if (entity === null || selection?.kind !== 'element') return;
 		// Pin the id BEFORE awaiting: `entity` is derived from the live selection,
-		// and the confirmation is not the blocking browser dialog it used to be —
-		// the realtime feed or a keyboard shortcut can move the selection while it
-		// is open. Deleting whatever happens to be selected on the way back out is
-		// not what the user was asked about.
+		// and the confirmation dialog is non-blocking — the realtime feed or a
+		// keyboard shortcut can move the selection while it is open. Deleting
+		// whatever happens to be selected on the way back out is not what the
+		// user was asked about.
 		const targetId = entity.id;
 		const confirmed = await confirm({
 			title: 'Delete element',

@@ -4,9 +4,8 @@
  *
  * On a warm open the global progress overlay never shows (GET /model/status is
  * 'ready' immediately) while boot() still loads metamodel → view → summary
- * sequentially; without the 'skeleton' state the tree walks through
- * "Load a metamodel…" → "Model is empty." → blank rows before content lands
- * (spec §5's "shows loading state" clause).
+ * sequentially; without the 'skeleton' state the tree would walk through
+ * "Load a metamodel…" → "Model is empty." → blank rows before content lands.
  */
 
 export type TreeBodyState = 'onboarding' | 'skeleton' | 'empty' | 'rows';

@@ -19,12 +19,12 @@
 	 * click a node, edit what it declares — and falls back to a metamodel-level
 	 * overview when nothing is selected, so the panel is never a blank column.
 	 *
-	 * With no selection, the panel becomes a table of contents (spec
-	 * 2026-08-20 §7.1): every element type, relationship type and enum,
-	 * grouped into collapsible sections, each row a reveal action. This is
-	 * one of only two places relationship types with NO mappings are
-	 * reachable at all (the other is the toolbar search, Task 9) — they have
-	 * no endpoints to anchor an edge, so the canvas cannot draw them — and it
+	 * With no selection, the panel becomes a table of contents: every element
+	 * type, relationship type and enum, grouped into collapsible sections,
+	 * each row a reveal action. This is one of only two places relationship
+	 * types with NO mappings are reachable at all (the other is the toolbar
+	 * search) — they have no endpoints to anchor an edge, so the canvas
+	 * cannot draw them — and it
 	 * doubles as a click-to-navigate index for everything else, which the
 	 * canvas alone cannot offer once a metamodel outgrows what fits on
 	 * screen.
@@ -43,8 +43,8 @@
 
 	const flow = useSvelteFlow();
 
-	/** TOC rows navigate — select AND pan — through the shared action (spec
-	 * §7.1), so the panel and search cannot drift. `onReveal` is the test seam. */
+	/** TOC rows navigate — select AND pan — through the shared action, so the
+	 * panel and search cannot drift. `onReveal` is the test seam. */
 	function reveal(target: DiagramSelection): void {
 		(onReveal ?? ((s: DiagramSelection) => revealSelection(flow, view, s)))(target);
 	}

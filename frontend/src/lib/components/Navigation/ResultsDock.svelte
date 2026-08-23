@@ -1,9 +1,8 @@
 <script lang="ts">
 	// The single always-live results panel for the whole navigation tree: one
 	// node picker (mirroring `nodeEntries`'s depth-first, lettered listing) plus
-	// the chosen node's chain table. Replaces the old per-node nested preview
-	// card — there is exactly one results surface per tab now, and
-	// selecting a card (see PathCard/CombineFrame/RefCard's `onCardClick`)
+	// the chosen node's chain table — exactly one results surface per tab.
+	// Selecting a card (see PathCard/CombineFrame/RefCard's `onCardClick`)
 	// moves it here via `selectNode`. The dock never registers/unregisters
 	// visibility itself: every node in the tree is always rendered by its own
 	// card (no collapse toggle — see navigation-editor.svelte.ts), so the

@@ -87,14 +87,14 @@
 	const artifactEntries = $derived<StagedArtifactEntry[]>(getStagedArtifactEntries());
 	const artifactCount = $derived(artifactEntries.length);
 	// Staged VIEW ops (folder/element/artifact-ref placement) ride in the same
-	// commit batch too (artefacts revamp Phase 2) — same reasoning as the
-	// artifact count above: a view-only batch must still reach a live Commit
-	// button, so its journal depth folds into the same total.
+	// commit batch too — same reasoning as the artifact count above: a
+	// view-only batch must still reach a live Commit button, so its journal
+	// depth folds into the same total.
 	//
-	// Staged METAMODEL ops (spec 2026-08-16) are the fourth family, and fold in
-	// for the same reason again. Two rows at most: the store counts a dirty YAML
-	// draft as one plus one per moved node, and the section below renders the
-	// moves as a single summary line.
+	// Staged METAMODEL ops are the fourth family, and fold in for the same
+	// reason again. Two rows at most: the store counts a dirty YAML draft as
+	// one plus one per moved node, and the section below renders the moves as
+	// a single summary line.
 	//
 	// KNOWN, and deliberate: a CLOSED metamodel tab contributes 0 for the draft
 	// half — the editor's provider gates `dirty` on `phase === 'ready'` — so a
@@ -217,8 +217,8 @@
 	let activeTab = $state<'model' | 'view'>('model');
 
 	const view = $derived(getView());
-	// The staged view-op JOURNAL (artefacts revamp Phase 2 / Task 8), not a
-	// baseline diff: entries carry a pre-baked `label` string captured at
+	// The staged view-op JOURNAL, not a baseline diff: entries carry a
+	// pre-baked `label` string captured at
 	// stage time (see view-edits.svelte.ts's docstring for why — a deleted or
 	// renamed folder's prior name is unrecoverable from the blob after the
 	// optimistic apply), so the View tab renders them verbatim, in journal
@@ -448,7 +448,7 @@
 									<span class="ml-auto font-mono text-[10px] text-muted-foreground/70"
 										>{artifactEntryId(e)}</span
 									>
-									<!-- `discardArtifact`, never the raw `revertStagedArtifact`: this
+									<!-- `discardArtifact`, never the raw `revertStagedArtifact` — this
 									     is the artifact sibling of the element rows' `discardElement`
 									     above, and it is the only path that also hands the `art:` lease
 									     back. Un-staging the entry alone strands the lease for the full
@@ -475,7 +475,7 @@
 						</section>
 					{/if}
 
-					<!-- Metamodel (spec 2026-08-16). At most TWO rows, never one per
+					<!-- Metamodel. At most TWO rows, never one per
 					     move: the family discards all-or-nothing like the View tab (a
 					     lone node move is meaningless to un-stage on its own, and the
 					     YAML draft is a single buffer), so per-row controls would

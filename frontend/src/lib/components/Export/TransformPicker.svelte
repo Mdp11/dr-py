@@ -1,6 +1,6 @@
 <script lang="ts">
-	// Ref-only snippet picker for the export transform hook (spec §8/§11):
-	// the reusable core of SnippetSourceEditor's ref mode (refOptions +
+	// Ref-only snippet picker for the export transform hook: the reusable
+	// core of SnippetSourceEditor's ref mode (refOptions +
 	// refMissing) without its inline-code half — transform is TableRef-only
 	// by schema. Options are committed code_snippet artifacts whose
 	// server-derived entry_points include 'transform'

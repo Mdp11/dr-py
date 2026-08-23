@@ -1,7 +1,7 @@
 <script lang="ts">
 	// The export settings panel: one unified column list that adapts to the
 	// selected format, plus (for JSON) the live sample. Extracted verbatim out
-	// of `Table/ExportDialog.svelte` (P-14 step 1) so a second host —
+	// of `Table/ExportDialog.svelte` so a second host —
 	// `EntryLayoutDialog`, editing one exporter entry's overrides — can
 	// reuse the exact same markup and mutators over a different definition and
 	// a different write target. PRESENTATIONAL ONLY: every edit below produces
@@ -53,8 +53,8 @@
 	}: {
 		definition: TableDefinition;
 		// Every branch below only distinguishes the json FAMILY (json + jsonl,
-		// see `jsonFamily`) from "everything else" (xlsx + csv); Task 10 adds the
-		// format-specific (json_doc) controls this panel doesn't have yet.
+		// see `jsonFamily`) from "everything else" (xlsx + csv); this panel has
+		// no per-format (json_doc) controls yet.
 		format: ExportFormat;
 		onChange: (next: TableDefinition) => void;
 		/** What the JSON preview builds from, when it must diverge from

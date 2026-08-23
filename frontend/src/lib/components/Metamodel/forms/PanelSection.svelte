@@ -6,7 +6,7 @@
 	import type { PanelSectionKey } from '$lib/state/metamodel-panel.svelte';
 
 	/**
-	 * One collapsible TOC section (spec 2026-08-20 §7.1) — the
+	 * One collapsible TOC section — the
 	 * `Sidebar/StagedSection.svelte` header-button idiom over the panel
 	 * module's persisted per-section state.
 	 */

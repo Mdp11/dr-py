@@ -7,8 +7,8 @@
 	//
 	// `options === null` means the definition is unknown (nothing picked yet, or
 	// a saved ref still in flight): there is nothing to list, so the field
-	// degrades to the free numeric input these fields used to be — the backend
-	// still 422s an out-of-range index.
+	// degrades to a free numeric input — the backend still 422s an
+	// out-of-range index.
 	//
 	// Fully controlled: emits the new index (or null) via `onChange`.
 	import type { ChainStepOption } from '$lib/table/chain-steps';

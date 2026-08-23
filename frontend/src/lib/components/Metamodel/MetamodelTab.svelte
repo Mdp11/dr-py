@@ -140,9 +140,7 @@
 					     the BUFFER's discard button, sitting beside the editor it
 					     belongs to. A moves-only stage is discarded from the commit
 					     drawer's Metamodel section, which owns the whole family.
-					     Never disabled: the rebind-in-flight window it used to be
-					     gated on no longer exists (a rebind is an op in the commit
-					     batch), and a discard is safe against a commit either way —
+					     Never disabled: a discard is safe against a commit either way —
 					     `commitStaged` sends the blob it captured, not the buffer. -->
 					<Button size="sm" variant="ghost" onclick={onDiscard}>Discard changes</Button>
 				{/if}
@@ -176,10 +174,9 @@
 			</p>
 		{/if}
 
-		<!-- Where the Rebind button used to be. Metamodel edits are staged commit
-		     content (spec 2026-08-16), so this tab has no commit control of its
-		     own; both halves of the family arm the hint, since staged moves alone
-		     are just as committable as a dirty buffer. -->
+		<!-- Metamodel edits are staged commit content, so this tab has no commit
+		     control of its own; both halves of the family arm the hint, since
+		     staged moves alone are just as committable as a dirty buffer. -->
 		{#if ed.dirty || stagedMoveCount > 0}
 			<p class="text-xs text-muted-foreground">
 				Metamodel changes are staged — review and commit them from the Commit drawer.

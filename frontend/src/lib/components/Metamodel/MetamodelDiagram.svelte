@@ -113,9 +113,8 @@
 	 * VIEWER keeps neither. Without this the toolbar just quietly loses its
 	 * buttons.
 	 *
-	 * There is no "Rebinding — editing is paused" case any more (spec
-	 * 2026-08-16): a rebind is an op in the commit batch rather than a flight
-	 * this surface has to freeze for.
+	 * There is no "Rebinding — editing is paused" case: a rebind is an op in
+	 * the commit batch rather than a flight this surface has to freeze for.
 	 */
 	const readOnlyNote = $derived.by((): string | null => {
 		if (!readOnly) return null;
@@ -187,7 +186,7 @@
 				...spec.data,
 				collapsed,
 				// Always empty in practice (see MetamodelDiagramView.errorNodeIds);
-				// the node styles it, Task 13 owns the surrounding error surface.
+				// the node just styles it, based on error state owned elsewhere.
 				hasError: view.errorNodeIds.has(spec.id),
 				onToggleCollapse: toggleNodeCollapsed
 			},
@@ -264,8 +263,8 @@
 	function createElementType(): void {
 		if (view.mm === null) return;
 		const name = uniqueTypeName('NewType', datatypeNamespace(view.mm));
-		// Select on success so the form panel (Task 11) opens on the new type
-		// instead of leaving the user to hunt for the box that just appeared.
+		// Select on success so the form panel opens on the new type instead of
+		// leaving the user to hunt for the box that just appeared.
 		if (applyDiagramEdit({ kind: 'addElementType', name })) {
 			selectDiagramNode({ kind: 'element', name });
 		}
@@ -441,7 +440,7 @@
 
 				{#if lodTooltip !== null && hoverCursor !== null}
 					<!-- ONE overlay owned here, fed by the hover store — not a per-node
-					     tooltip (spec §4). `fixed` + clientX/Y sidesteps canvas-space math,
+					     tooltip. `fixed` + clientX/Y sidesteps canvas-space math,
 					     and `lodTooltipAnchor` flips it to the other side of the cursor
 					     near a window edge — which on this surface means the RIGHT edge,
 					     where the form panel and the collapsed rail sit. The window size is
@@ -472,9 +471,8 @@
 				     scrolling region below (an absolutely-positioned child of a
 				     scroll container scrolls away with it — `top`/`right` resolve
 				     before the scroll offset applies) and stays reachable no matter
-				     how tall a type's property list gets. Collapsible (spec §7.2):
-				     hidden, the canvas takes the full width and the rail below
-				     stands in. -->
+				     how tall a type's property list gets. Collapsible: hidden, the
+				     canvas takes the full width and the rail below stands in. -->
 				<aside class="relative flex w-80 shrink-0 flex-col border-l border-border">
 					<button
 						type="button"
@@ -495,8 +493,8 @@
 				</aside>
 			{:else}
 				<!-- Collapsed rail. A selection landing from a CANVAS click does not
-				     force the panel open (spec §7.2) — the dot is the hint that one
-				     is waiting; search/TOC picks reopen via revealSelection. -->
+				     force the panel open — the dot is the hint that one is waiting;
+				     search/TOC picks reopen via revealSelection. -->
 				<div class="flex shrink-0 flex-col items-center border-l border-border px-0.5 pt-1.5">
 					<button
 						type="button"

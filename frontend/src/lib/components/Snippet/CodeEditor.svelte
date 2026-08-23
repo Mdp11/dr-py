@@ -126,7 +126,7 @@
 	// `onChange` — docs arriving after mount simply start returning results,
 	// no reconfigure needed. Registered as a Python language-data source so it
 	// COEXISTS with lang-python's keyword/local-variable sources (an
-	// autocompletion({override}) would suppress them — that was the old bug).
+	// autocompletion({override}) would suppress them).
 	function completionSource(ctx: CompletionContext): CompletionResult | null {
 		const line = ctx.state.doc.lineAt(ctx.pos);
 		const before = line.text.slice(0, ctx.pos - line.from);

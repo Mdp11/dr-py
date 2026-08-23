@@ -54,9 +54,8 @@
 	import ArtifactsMenu from './ArtifactsMenu.svelte';
 	import SettingsDialog from './SettingsDialog.svelte';
 
-	// Shared trigger style for every flat left-nav control (P-10.3, reordered
-	// and consolidated by P-22). Kept as one constant so the six controls stay
-	// visually identical without repeating the class list.
+	// Shared trigger style for every flat left-nav control, kept as one
+	// constant so the six controls stay visually identical.
 	const barBtn =
 		'flex h-7 items-center gap-1 rounded px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50';
 
@@ -111,12 +110,12 @@
 	});
 
 	// Async because the confirmation is an in-app dialog rather than the browser's
-	// blocking one, so leaving is now a two-frame flow: prompt, then navigate.
-	// Safe here in a way it would not be inside the workspace's `beforeNavigate`
+	// blocking one, so leaving is a two-frame flow: prompt, then navigate. Safe
+	// here in a way it would not be inside the workspace's `beforeNavigate`
 	// unload guard: this gate runs BEFORE `goto`, with nothing waiting on its
 	// answer, whereas `beforeNavigate` has to call `nav.cancel()` synchronously.
 	// (That guard still fires on the `goto` below, so a user with unsaved work
-	// can see both prompts — the same double-gating as before this change.)
+	// can see both prompts.)
 	async function confirmDiscardChanges(): Promise<boolean> {
 		if (combinedChanges === 0) return true;
 		return await confirm({

@@ -337,7 +337,7 @@
 
 	// View gate: never paint (or fetch) the first roots page until the view
 	// question is answered — painting raw roots and collapsing to the view a
-	// beat later is the "flash of all elements" bug (spec §5).
+	// beat later is the "flash of all elements" bug.
 	const viewResolved = $derived(isViewResolved());
 
 	// Model swap: a different model starts from the default page size again.
@@ -419,8 +419,8 @@
 		else void refreshExcluded(seq, exLimit, rev, gen, v);
 	});
 
-	// Child levels are no longer refetched by the roots effect (expanding a row
-	// must not pay for a full roots refetch). A structural delta or model swap
+	// Child levels are not refetched by the roots effect (expanding a row must
+	// not pay for a full roots refetch). A structural delta or model swap
 	// instead invalidates every loaded child level here; the prefetch effect then
 	// refills them from the new structure. Bumping `childLoadSeq` drops any
 	// in-flight child fetch that lands after the invalidation.
@@ -484,8 +484,8 @@
 
 	const missingElementIds = $derived(getMissingElementIds());
 
-	// Excluded-pool injection (Task 1, artefacts-Phase-2 follow-ups): the
-	// committed pool response (`excludedRoots`, fed to `registerExcludedRoots`
+	// Excluded-pool injection: the committed pool response (`excludedRoots`,
+	// fed to `registerExcludedRoots`
 	// below) only reflects the last COMMITTED view, so an id the staged
 	// journal has since unplaced — a `remove_element` op, or a placement whose
 	// containing folder was staged-deleted — sits in neither the tree (the
@@ -1143,7 +1143,7 @@
 		// captured HERE, before `endGesture()` — it clears `draggingPayload` and
 		// `dragSourceFolderId`, so reading them after that call would silently see
 		// null/cleared state instead of this gesture's actual payload/source.
-		const sourceFolderId = dragSourceFolderId; // id now, not the pre-Phase-2 path
+		const sourceFolderId = dragSourceFolderId;
 		suppressClick = true;
 		endGesture();
 		if (!valid || payload === null || target === null) return;

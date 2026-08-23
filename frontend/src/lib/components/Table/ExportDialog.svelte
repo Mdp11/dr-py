@@ -1,9 +1,9 @@
 <script lang="ts">
 	// The export settings modal chrome: open/snapshot/cancel semantics, the
 	// format toggle, and confirm/cancel — everything about EDITING the export
-	// settings (the entry list, json options, split section, preview pane) now
-	// lives in `Export/ExportSettingsPanel.svelte` (P-14 step 1 extraction),
-	// which this dialog drives over the table draft via `onChange`.
+	// settings (the entry list, json options, split section, preview pane)
+	// lives in `Export/ExportSettingsPanel.svelte`, which this dialog drives
+	// over the table draft via `onChange`.
 	//
 	// No evaluation-suspension machinery (`suspendTableEvaluation` and
 	// friends), unlike the Settings dialog — but NOT because a stray
@@ -189,9 +189,9 @@
 					/>
 				</span>
 			{:else if defn?.transform}
-				<!-- A transform left behind by a format flip: the server 422s it at run
-				     time (a functional contract is never tolerate-and-ignored, spec §8),
-				     so surface it rather than hiding the state. Never blocks Export. -->
+				<!-- A transform left behind by a format flip: the server 422s it at
+				     run time, so surface it rather than hiding the state. Never blocks
+				     Export. -->
 				<span
 					class="ml-auto shrink-0 text-xs text-warning"
 					data-testid="table-export-transform-warning"

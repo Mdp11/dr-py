@@ -8,14 +8,14 @@
 	import { revealSelection } from './reveal-action';
 
 	/**
-	 * The toolbar typeahead (spec 2026-08-20 §6): substring match over element
+	 * The toolbar typeahead: substring match over element
 	 * types, relationship types and enums, keyboard-driven (↑/↓/Enter/Esc), and
 	 * on pick the canvas navigates through the shared `revealSelection` action.
 	 * Mirrors `Sidebar/Search.svelte`'s dropdown treatment, minus the debounce
 	 * and staleness protocol — this search is pure client-side over the parsed
 	 * draft, so results are synchronous. It is also a READ affordance available
-	 * to every role (spec's viewer-can-navigate stance): it never consults
-	 * `readOnly` or `getRole()`, only `getMetamodelDiagramView()`.
+	 * to every role: it never consults `readOnly` or `getRole()`, only
+	 * `getMetamodelDiagramView()`.
 	 *
 	 * **The ARIA combobox pattern**, matched by `Sidebar/Search.svelte` down to
 	 * the same attribute set — the two typeaheads are the same widget over
@@ -34,7 +34,7 @@
 	 * shortcut — hence the one a11y suppression on the list, whose justification
 	 * is written at its use site.
 	 *
-	 * Each row highlights the matched substring (spec §6) by splitting
+	 * Each row highlights the matched substring by splitting
 	 * `hit.name` at `matchStart`/`matchLength` — positions `searchTypes` already
 	 * computed, so the view never re-derives the match. The three text pieces
 	 * are written with NO intervening whitespace in the markup: Svelte renders
@@ -115,10 +115,10 @@
 			open = false;
 			return;
 		}
-		// Tab is a real exit, not just a blur: leaving the toolbar by keyboard
-		// used to leave the list floating over the canvas with nothing focused
-		// pointing at it. Deliberately NOT prevented — the focus move is the
-		// user's intent, closing is only the cleanup that has to ride along.
+		// Tab is a real exit, not just a blur: without this, leaving the toolbar
+		// by keyboard leaves the list floating over the canvas with nothing
+		// focused pointing at it. Deliberately NOT prevented — the focus move is
+		// the user's intent, closing is only the cleanup that has to ride along.
 		if (e.key === 'Tab') {
 			open = false;
 			return;

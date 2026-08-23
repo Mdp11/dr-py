@@ -158,7 +158,7 @@
 	const hasViewWarning = $derived(!isFolder && !isExcludedSection && warningsByElementId.has(key));
 	const badge = $derived(lockBadgeFor(key));
 
-	// Folder peer-lock badge (Task 9): mirrors the element badge above, but
+	// Folder peer-lock badge: mirrors the element badge above, but
 	// keyed directly off `getLockFor`/`folderResource` rather than
 	// `lockBadgeFor` — a folder lease is taken transiently by every sidebar
 	// gesture (rename/move/create-child/place), so there is no "checked out by
@@ -227,13 +227,12 @@
 
 	function onOpenArtifact(): void {
 		if (!artifactHeader) return;
-		// Explicit per-kind dispatch (R14, carried from Task 11's review): a
-		// bare `else` here used to catch `exporter` too and open it as a
-		// NavigationBuilder — wrong editor, wrong draft store, and on close it
-		// would never release the export's `art:` lease (NavigationBuilder
-		// releases a NAVIGATION lease, not this artifact's). One arm per kind,
-		// so a future kind missing from this switch is a silent bug instead of
-		// a loud one — same reasoning as `ArtifactKind`-typed Records elsewhere.
+		// Explicit per-kind dispatch: a bare fallback `else` would risk opening
+		// the wrong editor with the wrong draft store — e.g. an `exporter`
+		// artifact in NavigationBuilder, which releases a NAVIGATION lease on
+		// close, never the export's `art:` lease. One arm per kind, so a
+		// future kind missing from this switch is a silent bug instead of a
+		// loud one — same reasoning as `ArtifactKind`-typed Records elsewhere.
 		if (artifactHeader.kind === 'table') {
 			openArtifactTab('table', { artifactId, title: artifactHeader.name });
 		} else if (artifactHeader.kind === 'code_snippet') {

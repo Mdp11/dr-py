@@ -50,7 +50,7 @@
 		return { label: 'on server', cls: 'bg-muted text-muted-foreground' };
 	}
 
-	// The producing validator's identity (Task 6's IssueOut.check), stamped
+	// The producing validator's identity (IssueOut.check), stamped
 	// centrally by the pipeline for the six core validators, server-side at
 	// the view-tree's own construction sites for "view", and "" for any other
 	// producer — bucketed here as "Other".

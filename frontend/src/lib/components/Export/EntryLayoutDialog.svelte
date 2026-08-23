@@ -1,8 +1,8 @@
 <script lang="ts">
 	// One exporter entry's presentation overrides, edited over the SAME
 	// `ExportSettingsPanel` markup `Table/ExportDialog.svelte` drives — the
-	// panel is host-agnostic (P-14 step 1), so this dialog only supplies a
-	// different write target: a local working copy instead of the table draft.
+	// panel is host-agnostic, so this dialog only supplies a different write
+	// target: a local working copy instead of the table draft.
 	//
 	// `effective` is the entry's overrides re-applied onto the table's CURRENT
 	// definition (`applyEntryOverrides`) — what the entry would render today,
@@ -74,13 +74,10 @@
 	let format = $state<ExportFormat>(untrack(() => entry.format));
 	let jsonDoc = $state<JsonDocumentOptions | null>(untrack(() => entry.json_doc ?? null));
 
-	// F-16 (resolved 2026-08-20): this used to DISABLE Save, contradicting
-	// never-block-Save — a presentation setting persists freely and the run is
-	// where the contract is enforced (the export-time 422 names the entry, same
-	// stance as every other template rule; see spec §12's F-10 resolution for
-	// the governing principle). Now it only drives the inline warning below.
-	// The belt-and-braces framing still holds: the server 422s a tokenless
-	// template regardless — the warning just saves a round trip.
+	// Never blocks Save: a presentation setting persists freely and the run is
+	// where the contract is enforced (the export-time 422 names the entry).
+	// This only drives the inline warning below — the server 422s a tokenless
+	// template regardless, so the warning just saves a round trip.
 	const splitTemplateInvalid = $derived(
 		isJsonFamily(format) &&
 			(effective.json_split?.enabled ?? false) &&
@@ -88,9 +85,9 @@
 	);
 
 	// Deliberately no Save gating on a missing key column under the object
-	// shape (spec §13), nor on an invalid split filename template (F-16) —
-	// the inline hints (here and below) plus the export-time 422 are the
-	// entire contract. Never add a check here that disables Save.
+	// shape, nor on an invalid split filename template — the inline hints
+	// (here and below) plus the export-time 422 are the entire contract.
+	// Never add a check here that disables Save.
 	function patchDoc(p: Partial<JsonDocumentOptions>): void {
 		jsonDoc = { ...JSON_DOC_DEFAULTS, ...jsonDoc, ...p };
 	}

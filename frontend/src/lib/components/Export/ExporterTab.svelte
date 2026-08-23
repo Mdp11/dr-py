@@ -1,10 +1,10 @@
 <script lang="ts">
 	// The exporter tab: an entry list (one per bundled table), an
 	// add-table picker, Save (stage) and Export (run the committed artifact,
-	// or the draft inline when dirty/uncommitted — spec §9.1)
-	// — the exporter sibling of `Snippet/SnippetTab.svelte` and
-	// `Table/TableView.svelte`. See `state/exporter-editor.svelte.ts`'s
-	// module docstring for the draft/lease/staging model this drives.
+	// or the draft inline when dirty/uncommitted) — the exporter sibling of
+	// `Snippet/SnippetTab.svelte` and `Table/TableView.svelte`. See
+	// `state/exporter-editor.svelte.ts`'s module docstring for the
+	// draft/lease/staging model this drives.
 	import * as artifactsApi from '$lib/api/artifacts';
 	import { runExporter, runExporterDraft } from '$lib/api/exports';
 	import { retryAndDownload, type ExportProgress } from '$lib/util/export-download';
@@ -56,10 +56,10 @@
 	const editable = $derived(canEdit());
 	const disabledEntry = $derived(!editable || locked);
 
-	// F-11: no usedRefs filter — a table may be added more than once (e.g.
+	// No usedRefs filter — a table may be added more than once (e.g.
 	// "table A as a wide xlsx AND as a split JSON"). The server dedupes
-	// colliding output names/folders at export time (routes/exports.py's
-	// _dedupe_path), so a duplicate entry is legal, not an error.
+	// colliding output names/folders at export time, so a duplicate entry
+	// is legal, not an error.
 	const availableTables = $derived(referenceableArtifactHeaders('table'));
 	// The picker excludes staged-but-uncommitted creates (temp ids must never
 	// reach a payload — see referenceableArtifactHeaders). When that filter —
@@ -87,7 +87,7 @@
 		}
 	}
 
-	// --- Add-table picker (P-15.1) ----------------------------------------
+	// --- Add-table picker ---------------------------------------------------
 	let addTableError = $state<string | null>(null);
 	async function addTable(id: string): Promise<void> {
 		const header = availableTables.find((h) => h.id === id);
@@ -174,8 +174,8 @@
 	let exportAbort: AbortController | null = null;
 	$effect(() => () => exportAbort?.abort());
 
-	// Spec §9.1/§11: the Export button is UNGATED on dirty/uncommitted state — a
-	// clean committed draft runs by artifact id (the committed payload), anything
+	// The Export button is UNGATED on dirty/uncommitted state — a clean
+	// committed draft runs by artifact id (the committed payload), anything
 	// else ships its definition inline as a draft run. Referenced tables still
 	// evaluate from their COMMITTED definitions either way; only this exporter's
 	// own presentation travels as a draft. The one remaining gate is emptiness:
@@ -395,9 +395,9 @@
 									updateExporterEntry(tabId, i, { transform: ref ? { ref } : null })}
 							/>
 						{:else if entry.transform}
-							<!-- A transform left behind by a format flip: the server 422s it at run
-							     time (a functional contract is never tolerate-and-ignored, spec §8),
-							     so surface it rather than hiding the state. Never blocks Save. -->
+							<!-- A transform left behind by a format flip: the server 422s it at
+							     run time, so surface it rather than hiding the state. Never
+							     blocks Save. -->
 							<span class="shrink-0 text-warning" data-testid="export-entry-{i}-transform-warning">
 								transform needs a JSON format
 							</span>

@@ -114,10 +114,10 @@
 		if (name && name !== current) await renameArtifact(id, name);
 	}
 	async function del(cfg: SectionConfig, id: string, name: string): Promise<void> {
-		// The copy is no longer "cannot be undone": a delete is STAGED, and
-		// discarding the batch brings the artifact — and its view placements —
-		// straight back. Confirm still runs BEFORE removeArtifact, so cancelling
-		// here never strands the delete-intent lease that staging would acquire.
+		// A delete is STAGED, not immediate: discarding the batch brings the
+		// artifact — and its view placements — straight back. Confirm still
+		// runs BEFORE removeArtifact, so cancelling here never strands the
+		// delete-intent lease that staging would acquire.
 		const ok = await confirm({
 			title: `Delete ${cfg.singular}`,
 			description: `Delete "${name}"? It is destroyed when you commit; discard the batch to undo.`,

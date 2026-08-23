@@ -81,15 +81,11 @@
 		apply(renameColumn(defn, index, header));
 	}
 
-	// Header typing used to be debounced 400ms, because every applied
-	// definition edit re-evaluated the whole table and committing per keystroke
-	// refetched the grid once per character. This panel only ever renders
-	// inside the settings dialog, which now STAGES definition edits until it
-	// closes (see TableView's openSettings / table-editor's `_suspended`), so a
-	// per-keystroke apply costs a draft object and nothing else — and dropping
-	// the timer removes its one sharp edge: a rename typed and then Escaped
-	// within the debounce window was silently discarded, since `change` never
-	// fires for an input that is unmounted while still focused.
+	// Header typing applies on every keystroke, undebounced: this panel only
+	// ever renders inside the settings dialog, which STAGES definition edits
+	// until it closes (see TableView's openSettings / table-editor's
+	// `_suspended`), so a per-keystroke apply costs a draft object and
+	// nothing else.
 
 	// remove/move shift column indices, so the active sort must be remapped in
 	// the same breath (the remap runs only after the mutator succeeds — a
@@ -246,8 +242,8 @@
 						<!-- The header band: the column's identity (kind + name) set off
 						     from the editor body below it, which is otherwise a wall of
 						     controls in the same visual register. `rounded-t` (not just
-						     `border-b`) matches the card's own `rounded` corners now that
-						     the card no longer clips to them via `overflow-hidden` — see
+						     `border-b`) matches the card's own `rounded` corners since
+						     the card does not clip to them via `overflow-hidden` — see
 						     the why-comment on the card above. An `element` column has no
 						     editor body (the guard below never renders one), so the band
 						     IS the whole card for that kind: it also picks up `rounded-b`

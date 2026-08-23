@@ -49,15 +49,13 @@
 						class="rounded p-0.5 opacity-50 transition-[color,background-color,border-color,opacity] hover:bg-muted hover:opacity-100"
 						onclick={(e) => {
 							e.stopPropagation();
-							// Explicit per-kind dispatch (R14, carried from Task 11's
-							// review): a bare `else` here used to catch `exporter`
-							// too and run `closeDraft` — the NAVIGATION closer, which
-							// releases a `nav:` lease that was never acquired and leaves
-							// the export's own draft (and its `art:` lease) behind. One
-							// arm per DynamicTab kind, so an unhandled kind is a silent
-							// no-op rather than a wrong-editor close. `issues` needs no
-							// arm at all: the singleton Issues tab has no draft and
-							// holds no lease, so `closeTab` alone is a complete close.
+							// Explicit per-kind dispatch: each kind's own closer releases
+							// its own draft/lease, so a bare fallback `else` would risk
+							// running the wrong closer (e.g. the navigation closer's
+							// `nav:` lease release for an `exporter` tab). An unhandled
+							// kind is a silent no-op rather than a wrong-editor close.
+							// `issues` needs no arm: the singleton Issues tab has no
+							// draft and holds no lease, so `closeTab` alone suffices.
 							if (tab.kind === 'table') closeTableDraft(tab.id);
 							else if (tab.kind === 'snippet') closeSnippetDraft(tab.id);
 							// Also run by MetamodelTab's own unmount teardown (closing

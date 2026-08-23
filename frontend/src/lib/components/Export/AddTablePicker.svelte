@@ -1,7 +1,7 @@
 <script lang="ts">
 	/**
-	 * The exporter tab's searchable add-table typeahead (P-15.1) — the
-	 * CLIENT-SIDE sibling of `Sidebar/Search.svelte`: same ARIA combobox
+	 * The exporter tab's searchable add-table typeahead — the CLIENT-SIDE
+	 * sibling of `Sidebar/Search.svelte`: same ARIA combobox
 	 * pattern (focus stays on the input, the active row is announced via
 	 * `aria-activedescendant`, options are non-interactive `<li role="option">`
 	 * — `Metamodel/MetamodelSearch.svelte` carries the fuller note), but the
@@ -10,7 +10,7 @@
 	 * (a picker is for browsing too, not only for narrowing).
 	 *
 	 * Deliberately NOT filtered against already-added entries: duplicates are
-	 * legal and useful (F-11 — "table A as a wide xlsx AND as a split JSON");
+	 * legal and useful ("table A as a wide xlsx AND as a split JSON");
 	 * the server dedupes colliding output names at export time.
 	 */
 	let {
