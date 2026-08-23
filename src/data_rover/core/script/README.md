@@ -24,13 +24,12 @@ already bound; see "Bridge wire contract" below). Both the WASM guest and
 what a snippet author gets in either environment.
 
 The facade and the snippet are **two separate compilation units** — the facade
-under the filename `<facade>`, the snippet under `<snippet>`. Concatenating
-them (as this code originally did) offset every traceback frame and every
-`SyntaxError` by the facade's ~300 lines, so a three-line snippet reported
-errors on line 300-something; and it made facade internals appear as snippet
-frames. Splitting them means `line N` is the line the author sees in the
-editor, and `_format_guest_traceback`'s `<snippet>`-only filter now strips
-facade frames as well as harness frames.
+under the filename `<facade>`, the snippet under `<snippet>`. Keeping them
+separate means `line N` is the line the author sees in the editor, and
+`_format_guest_traceback`'s `<snippet>`-only filter strips facade frames as
+well as harness frames. Concatenating them would offset every traceback frame
+and every `SyntaxError` by the facade's ~300 lines and make facade internals
+appear as snippet frames.
 
 Module-level exceptions (all subclass `dr.BridgeError`, itself
 `Exception`):
@@ -58,7 +57,7 @@ Top-level functions/attributes on `dr`:
 |---|---|
 | `dr.element(element_id) -> Element` | Fetch one element by id. Raises `dr.NotFoundError` if it doesn't exist. |
 | `dr.elements(stereotypes=None) -> Iterator[Element]` | Lazily iterate all elements, optionally filtered by stereotype. `stereotypes` is `None` (no filter), a single name, or a list of names; each name is expanded HOST-side through `Metamodel.element_descendants` (so a filter matches that stereotype **or any subtype**) and the expansions are unioned. An empty list is a real filter matching nothing — distinct from `None`. An unknown name expands to the empty set and therefore silently matches nothing here (unlike the hop filters below, which raise `dr.NotFoundError` on a typo — `_op_elements_page` expands names itself and never validates them). Pages transparently via the bridge's `elements_page` op (the facade requests 500 per page, clamped host-side to `page_limit`; see limits table) — a snippet never sees pagination. |
-| `dr.create(stereotype, properties=None) -> str` | Records a `create_element` op (dry-run — see below) and returns a client-side temp id (`"tmp_1"`, `"tmp_2"`, ...) usable as a `source_id`/`target_id` in a later `dr.connect()` call within the same run. The recorded op's wire key is still `"type_name"` — only the snippet-visible parameter is spelled `stereotype`. |
+| `dr.create(stereotype, properties=None) -> str` | Records a `create_element` op (dry-run — see below) and returns a client-side temp id (`"tmp_1"`, `"tmp_2"`, ...) usable as a `source_id`/`target_id` in a later `dr.connect()` call within the same run. The recorded op's wire key is `"type_name"`; the snippet-visible parameter is spelled `stereotype`. |
 | `dr.connect(stereotype, source_id, target_id, properties=None) -> str` | Records a `create_relationship` op (wire key `"type_name"` likewise); returns a temp id the same way. |
 | `dr.disconnect(rel_id)` | Records a `delete_relationship` op. Returns `None`. |
 
@@ -88,7 +87,7 @@ live `_memo` entry):
 
 | member | semantics |
 |---|---|
-| `.id` / `.stereotype` | The relationship's id and stereotype (type) name. The wire key stays `"type"` — only the snippet-visible spelling changed. `repr(rel)` is `Relationship(id=..., stereotype=...)`. |
+| `.id` / `.stereotype` | The relationship's id and stereotype (type) name. The wire key is `"type"`; the snippet-visible spelling is `.stereotype`. `repr(rel)` is `Relationship(id=..., stereotype=...)`. |
 | `rel[key]` | `properties[key]` — a plain (not `dr.`) `KeyError` if absent, same reasoning as `el[key]`. |
 | `rel.get(key, default=None)` | `properties.get(key, default)`. |
 | `rel.props() -> dict` | A shallow copy of the full property bag. |
@@ -141,10 +140,9 @@ Entry-point calling convention: a `"value"` run calls the snippet's
 top-level `value(elements)` with a **list of `Element` handles** — one per
 id in the request's `element_ids`, in that order (validated non-empty at the
 route); a `"step"` run calls `step(el)` with its single bound element. The
-arity rule for both is unchanged — exactly one argument; for `value` that
-one argument is the list. This is the same calling convention an embedded
-session (see "Evaluation sessions (M2/M3)" below) uses for its `value`/`step`
-calls — the only difference is that a console run boots a fresh guest per
+arity rule for both is exactly one argument; for `value` that one argument is
+the list. This is the same calling convention an embedded session (see
+"Evaluation sessions" below) uses for its `value`/`step` calls — the only difference is that a console run boots a fresh guest per
 call, while a session boots once and serves many calls off the same warm
 instance.
 
@@ -200,8 +198,8 @@ produces byte-identical output across runs:
   hash) is stable across runs too.
 
 Net effect for snippet authors: two runs of the same code against the same
-model produce identical `stdout`/`result_repr` — useful for caching (a later
-milestone) and for reasoning about a snippet's output without re-running it.
+model produce identical `stdout`/`result_repr` — useful for caching and for
+reasoning about a snippet's output without re-running it.
 It also means `time.time()`/`random.random()`/`hash(...)` are **not**
 sources of real entropy inside a snippet — don't rely on them to vary.
 
@@ -249,7 +247,7 @@ implementations actually produce today:
 | `"runtime"` | Any other unhandled exception during `exec`/entry-call, including a `dr.BridgeError`/`dr.ReadOnlyError`/`dr.NotFoundError`/`dr.CardinalityError` raised by facade code, and (WASM only) a nonzero guest exit whose stderr doesn't mention `MemoryError`. |
 | `"timeout"` | (WASM only) the epoch kill trips (`Trap.trap_code == TrapCode.INTERRUPT`) or the host's wall-bounded read hits its deadline with no final message. |
 | `"memory"` | (WASM only) a nonzero guest exit whose stderr contains `MemoryError`, or a non-`INTERRUPT` `Trap` (the portability path for wasmtime builds that trap-on-allocation instead of raising `MemoryError` guest-side). |
-| `"cancelled"` | **Not currently produced by either runner.** `POST /snippets/cancel`'s abort hook (`_noop_cancel` in `routes/snippets.py`) is a documented no-op in M1 — a "cancelled" run still only terminates via `wall_timeout_s`, surfacing as `"timeout"`. |
+| `"cancelled"` | **Not currently produced by either runner.** `POST /snippets/cancel`'s abort hook (`_noop_cancel` in `routes/snippets.py`) is a documented no-op — a "cancelled" run only terminates via `wall_timeout_s`, surfacing as `"timeout"`. |
 | `"limit"` | **Not currently produced by either runner.** An op-count/byte-cap breach raises `BridgeLimitError` inside `bridge.py`, which `BridgeDispatcher.dispatch` maps to a generic error string; the facade's `_raise_for_error` doesn't recognize that prefix, so it re-raises as a plain `dr.BridgeError` in guest code — which is then caught by the outer handler and reported as `kind="runtime"`. |
 
 ## Bridge wire contract (brief)
@@ -267,7 +265,7 @@ this contract, including the exact read-op parameter/response shapes and the
 `BridgeDispatcher` construction knobs (`record_ops`, `max_ops`,
 `max_op_bytes`, `page_limit`).
 
-## Evaluation sessions (M2/M3)
+## Evaluation sessions
 
 Table columns (`ScriptColumn`) and navigation steps (`ScriptStep`) call a
 snippet's entry point once per row/hop against the live model, but unlike a
@@ -283,12 +281,11 @@ that persistence bites.
 
 A `ScriptStep`'s cycle guard (`core/navigation/evaluate.py`) drops an id
 already visited earlier in the chain exactly like a relationship hop's
-revisit, and — unlike an earlier revision of this guard — does so SILENTLY
-for script steps too, with no warning. That silence is deliberate: the
-natural `def step(el): return [el]` idiom for a filtering step returns an
-already-visited id on purpose ("keep this element"), so a warning there
-would have fired on ordinary, correct usage rather than on a mistake, and
-would have just trained users to ignore the warnings badge.
+revisit, SILENTLY for script steps too, with no warning. That silence is
+deliberate: the natural `def step(el): return [el]` idiom for a filtering
+step returns an already-visited id on purpose ("keep this element"), so a
+warning there would fire on ordinary, correct usage rather than on a
+mistake, and would only train users to ignore the warnings badge.
 
 **The `SnippetSession` protocol** (`core/script/runner.py`) is the
 sandbox-agnostic session handle: `boot_error: ScriptError | None` (set if the
@@ -298,7 +295,7 @@ error), `call(entry, element_ids, *, doc=None) -> CallResult`, and an
 idempotent `close()` ("discards the underlying instance (never pooled
 again)"). `CallResult.value` is the already-validated tagged wire payload
 (never a repr string); it is `None` iff `.error` is set. The keyword-only
-`doc` (Exporter v2 Phase 4) is the `"transform"` entry's input document — any
+`doc` is the `"transform"` entry's input document — any
 already-JSON-decoded value — and is ignored for `"value"`/`"step"` calls;
 `element_ids` is always empty for a `"transform"` call (the snippet reads
 `doc`, not bound elements). The export engine's `TransformHost`
@@ -325,9 +322,8 @@ call loop reading newline-JSON frames from the host:
   race — the root was deleted between binding the call and running it) is
   simply ABSENT from `"elements"`, never a `None` placeholder; the guest's
   own fetch for that id then goes to the bridge and raises the same
-  `NotFoundError` a direct fetch always produced. `"doc"` (Exporter v2 Phase
-  4, additive; always present in the frame) carries a `"transform"` call's
-  input document — the already-rendered/shaped export payload, JSON-decoded
+  `NotFoundError` a direct fetch produces. `"doc"` (always present in the
+  frame) carries a `"transform"` call's input document — the already-rendered/shaped export payload, JSON-decoded
   host-side before it is sent. `"doc"` is `null` for a `"value"`/`"step"`
   call; conversely `"element_ids"` is always `[]` on a `"transform"` call
   (the snippet reads `doc`, never bound elements). The whole per-call sequence — priming the read
@@ -343,15 +339,15 @@ call loop reading newline-JSON frames from the host:
   two hosts cannot drift. `_dr_call_entry` returns `{"payload", "reads"}` —
   the guest replies with `{"call_result": {"payload": ..., "error": ...,
   "reads": <sorted list of [tag, id_or_null] 2-lists> | null}}`. `reads` is
-  the call's recorded read-set (Phase B — see `runner.py`'s `ReadKey` and
+  the call's recorded read-set (see `runner.py`'s `ReadKey` and
   `CallResult.reads`), decoded host-side via `decode_reads`; `null` means
   "depends on everything" (recording overflowed, or the call errored).
   `print()` output during the call is still captured
   through the same size-capped `_CappedStdout` console runs use, but the
   buffer is never included in `call_result` — **embedded calls' stdout is
   captured and discarded**, by design; only the tagged wire payload, the
-  read-set, and, in a future write-enabled mode, recorded ops (sessions are
-  read-only in M2/M3, see below) reach the caller.
+  read-set, and, in a write-enabled mode, recorded ops (sessions are
+  read-only — see below) reach the caller.
 - `{"close": true}` — the loop returns, ending the guest's `_start`; the host
   then tears the instance down (never pooled again, same lifecycle as a
   console run's single-use instance).
@@ -389,7 +385,7 @@ just invoked once per run there vs. repeatedly per warm session here. A
 `"transform"` call is read-only for the identical reason: `TransformHost`
 (`api/table_export_engine.py`) opens its sessions through the same
 `open_session`, so a `transform(doc)` snippet may still call `dr.*` reads
-normally (spec §8) but any write raises `dr.ReadOnlyError` too.
+normally but any write raises `dr.ReadOnlyError` too.
 
 **`ScriptEvalContext`** (`core/script/embed.py`) is the per-request state
 that ties embedded evaluation together: one instance is built per top-level
@@ -438,7 +434,7 @@ fresh one.
   structured degradation channel (`core/script/warnings.py`). Entries are
   aggregated by `(code, detail)`, NOT by rendered text: `occurrences` counts
   firings and `total` sums the subject quantity, so ten chains each dropping
-  one id report 10, not the "1" that dedup-by-message used to report. Capped
+  one id report 10, not the 1 a dedup-by-message channel would report. Capped
   at `MAX_SCRIPT_WARNINGS` (20) DISTINCT KINDS; a new kind past the cap is
   dropped, but kinds already present keep counting. User-facing copy lives
   client-side, keyed off `code`. `.warning_snapshot()` / `.warnings_since()`
@@ -470,7 +466,7 @@ call — a column that burns most of the budget leaves later columns/steps in
 the same request a shrinking window rather than each getting a fresh
 `wall_timeout_s`.
 
-### Trip collapse (Phase A', spec 2026-07-21)
+### Trip collapse
 
 Embedded sessions minimize guest<->host round trips three ways, all invisible
 to snippet authors: (1) the facade memoizes bridge reads for the session's
@@ -494,7 +490,7 @@ what a snippet holds — see the invariant comment above `_memo` in
 `facade_src.py` and the regression test
 `test_memoized_element_does_not_alias_list_valued_property`.
 
-### Incremental invalidation (Phase B, spec 2026-07-21)
+### Incremental invalidation
 
 Each embedded call records the read-keys it USED — memo hits and piggybacked
 roots included, via `facade_src.py`'s `_note_read` threaded into
@@ -504,24 +500,23 @@ evicted, e.g. an errored call or a read-set that overflowed `_READS_CAP`/
 `_MAX_READS`). On the op-delta commit paths (`/model/ops`, `/model/undo`,
 `/commits`), `api/invalidation.touched_keys` translates the applied batch
 into the same `ReadKey` vocabulary and `ScriptCellCache.evict_touched` drops
-only intersecting cells, re-stamping survivors to the new rev — one edit no
-longer recomputes a 3k-row table. Paths with no op delta (`touch_model`,
+only intersecting cells, re-stamping survivors to the new rev, so one edit
+does not recompute a 3k-row table. Paths with no op delta (`touch_model`,
 uploads, hydration, metamodel swap, every rollback) keep clear-all — the
-same safe default the cell cache already used everywhere before this phase.
+safe default.
 Escape hatch: `DATA_ROVER_SNIPPET_INCREMENTAL_INVALIDATION=false`. See
 "Build lookup indexes at module top level, never lazily" above for the one
 way a snippet author can make this optimization observe a stale value
 despite `touched_keys` being correct — the read-set capture itself, not the
 commit-side translation, is the thing that misses a dependency in that case.
 
-**The tag vocabulary is fixed and did not follow the facade's rename.** A
+**The tag vocabulary is fixed and independent of the facade's spelling.** A
 read key is a `(tag, id_or_None)` pair; the tags are `"scan"`, `"el"`,
 `"out"`, `"in"`, `"children"`, `"parent"` — in particular `el.outgoing()`
-records `"out"` and `el.incoming()` records `"in"`, deliberately keeping the
-short spellings `api/invalidation.py`'s `touched_keys` emits even though the
-method and memo/op names are now the longer `outgoing`/`incoming`. Renaming
-either half silently breaks incremental invalidation. Two rules worth
-knowing:
+records `"out"` and `el.incoming()` records `"in"`: the short spellings
+`api/invalidation.py`'s `touched_keys` emits, deliberately unlike the longer
+method and memo/op names. Renaming either half silently breaks incremental
+invalidation. Two rules worth knowing:
 
 - **A scan records one `("scan", name)` per REQUESTED stereotype name** —
   not one per expanded subtype, and never the list object itself. This is
@@ -554,8 +549,8 @@ the relationship stereotype when it is selective enough.
 ### Cell cache + background sweep (whole-table work)
 
 A warm session makes one cell cheap (~0.5 ms round trip), but a table has as
-many cells as it has rows: evaluating 3,000 of them inline took ~49 s and
-froze the UI for the whole of it. The fix is not a faster cell — it is that
+many cells as it has rows: evaluating 3,000 of them inline takes ~49 s and
+freezes the UI for the whole of it. The answer is not a faster cell — it is that
 **no request ever computes a whole table**. A request serves what is already
 cached and returns; a background job computes the rest; the client polls.
 
@@ -667,11 +662,11 @@ a cell's value is a pure function of (code, model, element ids), the cell
 cache is internally locked, and the pathology counters are job-global.
 
 > **DON'T rely on module-global state inside a snippet.** Mutating a module
-> global between `value()` calls was already outside the determinism guarantee
-> (see the memo caveat above), but sharding makes it reachable in a NEW way:
-> two cells of the same table can now land on different guest instances, so
-> "accumulate into a global across cells" no longer even sees a single
-> interpreter. Snippet entry points must be pure functions of their arguments.
+> global between `value()` calls is outside the determinism guarantee (see the
+> memo caveat above), and sharding widens the hole: two cells of the same table
+> can land on different guest instances, so "accumulate into a global across
+> cells" does not even see a single interpreter. Snippet entry points must be
+> pure functions of their arguments.
 
 **Route contracts** (`api/routes/tables.py`) — the client-visible half:
 
@@ -682,7 +677,7 @@ cache is internally locked, and the pathology counters are job-global.
 - **A sort that would need an UNCOVERED navigation `ScriptStep` falls back
   instead of pending.** The sweep never calls `order_rows`, so a `step()` cell
   that ONLY the sort wants is filled by nothing, ever. Driving the context for
-  it under cache-only produced one `pending` per off-window row, a page
+  it under cache-only would yield one `pending` per off-window row, a page
   permanently degraded to build order, and `script_status: failed` for the life
   of the rev behind a once-a-second poll loop. `core/table/evaluate.py`'s
   `_sort_script` therefore hands the sort pass a `None` context for exactly

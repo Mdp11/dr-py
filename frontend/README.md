@@ -59,10 +59,9 @@ The UI is a fixed grid:
   **Apply CR**, **Edit Metamodel** (opens the live metamodel editor tab),
   **Export** (downloads the current model), **History** (`HistoryDrawer`),
   and **Settings** (`SettingsDialog`, where an owner can toggle **strict
-  mode**). There is no overflow/three-dots menu — these were promoted out of
-  one. The right side is unchanged: the validation chip, **Undo** the last
-  staged edit, **Validate**, **Commit** (opens `DiffDrawer`), the strict-mode
-  badge, and the staged-changes counter.
+  mode**). There is no overflow/three-dots menu. The right side holds the
+  validation chip, **Undo** the last staged edit, **Validate**, **Commit**
+  (opens `DiffDrawer`), the strict-mode badge, and the staged-changes counter.
 - **Sidebar** — fuzzy search, type filter (each concrete type has a `+` button
   to create a new element of that type), containment tree with keyboard nav and
   per-row lock badges.
@@ -110,9 +109,9 @@ The UI is a fixed grid:
 | `Arrow Left/Right` | Collapse / expand tree row         |
 | `Enter` / `Space`  | Select focused tree row            |
 
-Only these two survive the command palette's deletion (`keyboard.ts` /
-`keyboard.svelte.ts`). `Cmd+S` fires even when focus is inside an input;
-`Cmd+E` is suppressed while typing.
+There is no command palette; these are the only global shortcuts
+(`keyboard.ts` / `keyboard.svelte.ts`). `Cmd+S` fires even when focus is
+inside an input; `Cmd+E` is suppressed while typing.
 
 ## Architecture
 
@@ -155,7 +154,7 @@ Access is **cookie-based** and project-scoped. The shape:
 
 The **backend session model is the source of truth**; the client never holds
 the whole model. The central store is `lib/state/model.svelte.ts`, and editing
-follows a pessimistic **check-out → stage → commit** loop (Spec B):
+follows a pessimistic **check-out → stage → commit** loop:
 
 1. The store caches only the **fetched subset** of the model — entities
    brought in by paged reads, searches, neighborhoods, and commit deltas —
@@ -242,7 +241,7 @@ follows a pessimistic **check-out → stage → commit** loop (Spec B):
      Neither input validates client-side: per the strict-at-export /
      never-block-Save rule, a bad token or an absolute/traversal folder saves
      fine and only 422s at `POST /exports/run`, naming the offending entry.
-   - **The transform hook (Exporter v2 Phase 4).** Each JSON-family entry row
+   - **The transform hook.** Each JSON-family entry row
      (`isJsonFamily(entry.format)`) shows `Export/TransformPicker.svelte`, a
      ref-only combobox (the reusable core of `SnippetSourceEditor`'s ref mode,
      without its inline-code half — `transform` is `TableRef`-only by schema)
@@ -251,33 +250,30 @@ follows a pessimistic **check-out → stage → commit** loop (Spec B):
      (`entryAvailable`, `referenceableArtifactHeaders` — staged temp ids never
      reach a payload). Flipping an entry to `xlsx`/`csv` while it still holds
      a `transform` does not clear it (the server 422s it at run time — a
-     functional contract is never tolerate-and-ignored, spec §8) — the row
+     functional contract is never tolerate-and-ignored) — the row
      shows a `export-entry-{i}-transform-warning` hint instead of silently
      dropping state the user might restore by flipping the format back.
      `entryForTable` deliberately does NOT copy the source table's own
      `transform` at add time (`transform: null`): a transform is a functional
      contract, not cosmetic presentation, so no-bleed applies at add-time too,
      not just at render time. In `lib/snippet/entry-stubs.ts`,
-     `BoundEntry = 'value' | 'step' | 'transform'` gained the third member and
+     `BoundEntry = 'value' | 'step' | 'transform'` names all three and
      `ConsoleEntry = Exclude<BoundEntry, 'transform'>` carves out the subset a
-     console/embedded run (`POST /snippets/run`) still supports — a console
+     console/embedded run (`POST /snippets/run`) supports — a console
      run has no document to bind `transform` against.
-   - **F-11 (deliberate): no `usedRefs` filter on the add-table picker.**
-     `ExporterTab.svelte`'s `availableTables` lists every table with no
-     already-added filter, so the same table can be added more than once —
-     e.g. once as a wide `.xlsx` and again as split-per-element JSON. This
-     looks like a missing filter; it is not. The server has always deduped
-     colliding output names/folders at export time
-     (`routes/exports.py`'s `_dedupe_path`), so a duplicate entry was already
-     legal server-side — the picker's old `usedRefs` filter was blocking a
-     case the backend explicitly supported. Do not reintroduce it. The picker
-     itself is `Export/AddTablePicker.svelte` (P-15.1): a client-side
-     searchable combobox (`add-table-input`/`add-table-option-{id}` testids)
-     that replaced the bare `<select>` — same ARIA pattern as
-     `Sidebar/Search.svelte`, but candidates are the in-memory committed-table
-     headers so there is no debounce and it shows every table on focus; it
-     stays deliberately unfiltered against already-added entries, per F-11
-     above.
+   - **No already-added filter on the add-table picker — deliberate.**
+     `ExporterTab.svelte`'s `availableTables` lists every table, so the same
+     table can be added more than once — e.g. once as a wide `.xlsx` and
+     again as split-per-element JSON. This looks like a missing filter; it is
+     not. The server dedupes colliding output names/folders at export time
+     (`routes/exports.py`'s `_dedupe_path`), so a duplicate entry is legal
+     server-side and a `usedRefs` filter would block a case the backend
+     explicitly supports. Do not add one. The picker itself is
+     `Export/AddTablePicker.svelte`: a client-side searchable combobox
+     (`add-table-input`/`add-table-option-{id}` testids) — same ARIA pattern
+     as `Sidebar/Search.svelte`, but candidates are the in-memory
+     committed-table headers so there is no debounce and it shows every table
+     on focus.
    - **The empty picker explains itself.** `availableTables` goes through
      `referenceableArtifactHeaders`, which drops staged-but-uncommitted
      creates (temp ids must never reach a payload), and a project can simply
@@ -287,14 +283,14 @@ follows a pessimistic **check-out → stage → commit** loop (Spec B):
      (`add-table-empty-hint`) says why, distinguishing "no tables in this
      project yet" from "your tables are staged — commit them first" (the
      latter detected via the overlay list, temp ids included).
-   - **The Export button is ungated (Exporter v2 Phase 3).** It no longer
-     requires a clean, committed draft: `exportDisabled` only checks for zero
+   - **The Export button is ungated.** It does not require a clean,
+     committed draft: `exportDisabled` only checks for zero
      entries (disabled with the title "Add at least one table first"). A
-     clean committed draft still runs by `artifact_id` (`runExporter`); any
+     clean committed draft runs by `artifact_id` (`runExporter`); any
      dirty or never-committed draft ships its `{schema_version, output, entries}`
      inline as a `definition` via `runExporterDraft`
      (`lib/api/exports.ts`), which the backend validates and runs exactly
-     like a committed payload (`RunExportIn.definition`, spec §9.1).
+     like a committed payload (`RunExportIn.definition`).
      Referenced tables still evaluate from their own COMMITTED definitions
      either way — only the exporter's own presentation travels as a draft.
    - **The lease is per editor tab.** Opening a saved artifact takes an
@@ -441,14 +437,14 @@ Refetch, not feed deltas: commit feed events deliberately carry **no** issue
 delta, because reconnect needs the refetch path anyway.
 
 Adopting committed truth **clears the overlay** (`adoptIssues`, `applyDelta`) —
-the stage it described no longer matches reality. So do `resetModelStore()` and
+the staged state it described has been superseded. So do `resetModelStore()` and
 `boot()`, which install a different model entirely. `clearOverlay()` keeps
 `_lastError`: a failed Validate's error strip must survive a peer commit.
 
 The founding constraint behind all of this: **no open/commit path may run the
 full validation pipeline.** `POST /model/validate` with no ops is an O(model)
 sweep over what can be an ~80 MB model, so it stays reachable only from an
-explicit user click. `GET /model/issues` is the cheap read that replaced it.
+explicit user click. `GET /model/issues` is the cheap read used everywhere else.
 
 ### Artifact import/export (bundle export/preview/import)
 
@@ -486,7 +482,7 @@ client for the four bundle routes is `lib/api/artifact-bundle.ts`.
   an error.
 - Imported artifacts land ONLY in the project's flat artifacts list — import
   never places anything into the view.
-- The New Project wizard (`NewProjectWizard.svelte`) gained a fourth
+- The New Project wizard (`NewProjectWizard.svelte`) has a fourth
   `FileSlot` accepting a bundle file alongside metamodel/model/view; when the
   backend's `ProjectOut.skipped_artifacts` comes back non-empty, the wizard
   defers navigating to the new project and shows a warning panel listing each
@@ -496,15 +492,13 @@ client for the four bundle routes is `lib/api/artifact-bundle.ts`.
 
 `lib/state/view.svelte.ts` holds `_view`: the LOCAL working copy — server
 truth as of the last `refreshView()`, with every staged `view.*` op already
-applied optimistically on top. **There is no more direct PUT path.** The
-pre-artefacts-Phase-2 whole-snapshot `PUT /view/snapshot` is gone from every
-gesture the app itself drives (folder create/rename/move/delete, element and
-artifact placement, drag-and-drop, the sidebar's Clear-view action): every
-structural change to the view goes out as a `ViewOp` and reaches the server
-only via `POST /commits`, the same endpoint model and artifact edits commit
-through. (`PUT /view/snapshot` and `DELETE /view` are retired — see
-CLAUDE.md's "View ops (artefacts revamp Phase 2)" section — only `GET /view`
-remains. The e2e test harness's fixture-loading helper, which talks to the
+applied optimistically on top. **There is no direct PUT path.** Every
+structural change the app drives (folder create/rename/move/delete, element
+and artifact placement, drag-and-drop, the sidebar's Clear-view action) goes
+out as a `ViewOp` and reaches the server only via `POST /commits`, the same
+endpoint model and artifact edits commit through; `GET /view` is the only
+other view route the backend exposes.
+(The e2e test harness's fixture-loading helper, which talks to the
 API directly to seed a project's starting content, seeds the view the same
 way the client does: a `view.*` op batch through `POST /commits`, under a
 `folder:root` lease.)
@@ -584,8 +578,8 @@ way the client does: a `view.*` op batch through `POST /commits`, under a
   partial prefix is not a state the user ever asked for. The drop hands the
   journal's `folder:` leases back and announces itself through
   `view-discard-notice.svelte.ts`, a dedicated leaf store rendered as a
-  dismissable banner on the project page (Task 2 of the artefacts-Phase-2
-  follow-ups) — it persists until the user dismisses it, unlike the global
+  dismissable banner on the project page — it persists until the user
+  dismisses it, unlike the global
   lock notice (`setLockNotice`) it deliberately does NOT reuse: that channel
   is TRANSIENT (the next successful lease gate clears it via `noticed()` in
   edit-gate), too thin for a destructive event the user may not be looking at
@@ -604,7 +598,7 @@ way the client does: a `view.*` op batch through `POST /commits`, under a
   into `_view` and a discard surface that forgot to refetch would leave the
   sidebar showing a tree that exists nowhere. There are two such surfaces —
   `discardViewChanges` and checkout's global `discardAll()` — and the registry
-  is what keeps a third one from reintroducing the bug.
+  is what keeps a third one from missing the refetch.
 - **Two page-level resets take the journal with them.** It is a module-scope
   singleton whose ops name `folder:` ids that only mean anything for one
   project at one rev, so `boot()` calls `clearViewState()` on every project
@@ -669,14 +663,14 @@ per tab:
   `updateDefinition` reschedules a **debounced** run for **every expanded node**
   (`AUTO_RUN_DEBOUNCE_MS`), re-reading `nodeAt(currentDraft, path)` at fire time
   (a later edit resets that node's timer _and_ supplies the node sent); a node
-  whose address no longer resolves is dropped from the expanded set. Each node
+  whose address fails to resolve is dropped from the expanded set. Each node
   carries its own **generation counter**: any edit / newer run / collapse /
   `closeDraft` / reset bumps it, and the async preview functions capture it
   before their await and drop a stale response (or one whose draft is gone), so
   a slow round-trip can never revive a cleared node preview or clobber a fresher
   one. A **still-current** failure sets that node's `_evalError` flag, which
   `ChainPreview` surfaces. `nodeAt` returns null for a **ref** operand — refs
-  get no per-node preview this iteration and are skipped.
+  get no per-node preview and are skipped.
 - **Accessors are node-scoped** (`getPreview`/`getEvalError`/`isExpanded`/
   `runPreview`/`loadMorePreview` all take `(tabId, path)`, `path` defaulting to
   the root `[]`); `getDraft`/`getNavLockHolder`/`updateDefinition`/`saveDraft`
@@ -684,7 +678,7 @@ per tab:
   key for the tab (expanded set plus any lingering keys), cancel all timers, and
   bump generations so nothing leaks.
 
-### Script columns & steps (M2/M3)
+### Script columns & steps
 
 Table script columns (`ScriptColumnEditor.svelte`, kind `'script'`) and
 navigation script steps (`Navigation/ScriptStepRow.svelte`) both embed a
@@ -698,8 +692,8 @@ SnippetSourceEditor.svelte`, bound to a `SnippetSource` (`{ ref?, definition?
   `{}`. **Ref mode** narrows the saved-snippet dropdown (`snippet-ref-select`)
   to `code_snippet` artifacts whose (server-derived) `entry_points` actually
   cover the bound entry (`entryAvailable`, `lib/snippet/entry-stubs.ts`); a
-  selected ref that later falls out of that filter (the artifact's snippet no
-  longer defines the entry, or was deleted) surfaces as `snippet-ref-missing`
+  selected ref that later falls out of that filter (the artifact's snippet
+  stopped defining the entry, or was deleted) surfaces as `snippet-ref-missing`
   rather than being silently cleared — the user might be mid-edit of that
   snippet elsewhere. **Inline mode** is a plain `CodeEditor` over
   `snippet.definition.code`, seeded from the previously-selected ref's code (or
@@ -730,8 +724,8 @@ SnippetSourceEditor.svelte`, bound to a `SnippetSource` (`{ ref?, definition?
     (`ruff format`, `indent-width=4`). The document is replaced in ONE
     transaction so a reformat is a single undo step, with the cursor kept on
     the same line number. The local tab expansion is applied **even when the
-    server refuses** (422 unparseable, 503 no ruff) — that is the old "Fix
-    indentation" behaviour this control absorbed. A 503 latches the control
+    server refuses** (422 unparseable, 503 no ruff), so the control still
+    fixes indentation with no backend behind it. A 503 latches the control
     disabled rather than letting the user pump a dead endpoint.
 - **Test panel.** Both modes render `SnippetTestPanel.svelte` (`snippet-test-
 toggle`), a collapsed disclosure that expands to the shared
@@ -752,8 +746,7 @@ toggle`), a collapsed disclosure that expands to the shared
   reorder. Recorded ops are listed but **never stageable** — embedded
   `value()`/`step()` evaluation is read-only, so the panel says so
   (`snippet-test-ops-readonly`) instead of offering a Stage button. There is
-  no Stop button: M1's cancel is a server-side no-op and the wall timeout is
-  10s.
+  no Stop button: cancel is a server-side no-op and the wall timeout is 10s.
 - **Error cells.** A script column's `value()` call failing server-side
   (`core/script/embed.py`'s `ScriptEvalContext` — degraded, not failed: a
   missing runner, a full concurrency slot, or a snippet exception) renders
@@ -761,7 +754,7 @@ toggle`), a collapsed disclosure that expands to the shared
   `ValueCell`, showing `cell.message` with `cell.traceback ?? cell.message` as
   the hover title. The row otherwise renders normally — one bad cell never
   blanks the row, and sorting/paging keep working around it.
-- **Pending cells + the sweep poll.** Whole-table script passes no longer run
+- **Pending cells + the sweep poll.** Whole-table script passes do not run
   inline: `/tables/evaluate` reads a per-session value cache a **background
   sweep** fills, so uncomputed cells come back as `{kind:'pending'}` (rendered
   by `Table/Cell/PendingCell.svelte`, the same pulsing bar as an un-fetched
@@ -836,14 +829,13 @@ toggle`), a collapsed disclosure that expands to the shared
   script-error recap covered), only when the recap came back EMPTY (a real count
   is a stronger statement and is never downgraded), and `&&`-short-circuited so
   no other table pays for the scan.
-  **WHY on demand** (this is not a UX preference — fetching on settle was the
-  original design and had to be undone): the recap route renders the whole
+  **WHY on demand** (this is not a UX preference): the recap route renders the whole
   table CACHE-ONLY, and for the commonest shape — an unsorted `collapse` script
   column with `keep_empty` — the page route makes **zero** `value()` calls (the
   build pass skips it, the order pass short-circuits with no sort) and computes
   only the visible window live, so the page reports `ready` **without ever
   kicking a sweep**. The recap then misses on every row outside that window and
-  kicks a full background sweep. Fetching it automatically would have turned
+  kicks a full background sweep. Fetching it automatically would turn
   "open a table with a script column" into "sweep the whole table", plus up to
   120 once-a-second retries each re-paying a full build + order + render.
   `/tables/export` has the identical loop, but only behind an explicit click —
@@ -860,7 +852,7 @@ toggle`), a collapsed disclosure that expands to the shared
   _currently_ showing, and a sort or definition edit reorders every row at a
   CONSTANT `model_rev` — keyed without the generation the tab would keep
   showing the recap built for the previous order, and jump-to-cell would scroll
-  to the row that used to be there. The recap is also dropped whenever the table
+  to whatever row now sits at that index. The recap is also dropped whenever the table
   stops being settled (which also hides the badge). A **202** (sweep still
   filling the cache — the STATUS CODE is the retry signal, as for export)
   schedules exactly ONE delayed retry per tab, bounded like the sweep poll;
@@ -870,8 +862,8 @@ toggle`), a collapsed disclosure that expands to the shared
 - **Staged definition edits (the settings dialog).** `updateTableDefinition`
   normally re-evaluates the whole table — a fresh backend cache key, and for a
   script column a fresh sweep. Inside the settings dialog the user is
-  _composing_ (typing a snippet, trying a chain, undoing it), and each
-  intermediate state used to pay for that, on a grid the modal was covering
+  _composing_ (typing a snippet, trying a chain, undoing it), and every
+  intermediate state would pay for that, on a grid the modal is covering
   anyway. So `TableView.openSettings` calls `suspendTableEvaluation(tabId)`
   **before the first edit** (the header "+" menu appends the new column _then_
   opens the dialog — that append is itself an edit), which snapshots the
@@ -889,10 +881,10 @@ toggle`), a collapsed disclosure that expands to the shared
   `abandonTableEvaluationSuspension` (TableView unmount, close/reload/reset)
   drops a suspension _without_ evaluating, so a suspension can never outlive
   its dialog and silently freeze a tab. This is also why `ColumnManager`'s
-  header input no longer debounces: per-keystroke applies now cost a draft
-  object and nothing else, and the old 400ms timer silently discarded a rename
-  that was typed and then Escaped inside the window (`change` never fires for
-  an input unmounted while still focused).
+  header input does not debounce: per-keystroke applies cost a draft object
+  and nothing else, while a debounce timer would silently discard a rename
+  typed and then Escaped inside its window (`change` never fires for an input
+  unmounted while still focused).
 - **`warnings` threading.** Both evaluation paths share one
   `ScriptEvalContext` per request and report through its `.warnings` list, but
   the warnings themselves are **structured**, not message strings: each one is
@@ -922,7 +914,7 @@ The Export button is a dropdown of the four `EXPORT_FORMATS` (Excel `.xlsx` /
 JSON `.json` / CSV `.csv` / JSON Lines `.jsonl`). No item
 downloads directly: all four open `components/Table/ExportDialog.svelte` with that
 format preselected, and a segmented control switches format in place. Confirming
-runs the same `downloadTable` retry loop as before — the backend's 202 +
+runs the `downloadTable` retry loop — the backend's 202 +
 `Retry-After` protocol is format-agnostic — and the dialog **closes first and
 does not await it**, because that loop can run for minutes while a script sweep
 fills the cell cache and the progress belongs on the chrome's Export button, not
@@ -935,8 +927,8 @@ JSON writes `json_export.key`, so one row never shows two rename boxes). JSON
 keeps its per-column extras (`json_export: {key, item_key, value, group}`) and
 its live sample pane. The overrides are part of the saved definition, so a table
 exported the same way every week is configured once. When the selected format is
-JSON-family, the format-toggle row also shows a `TransformPicker` (Exporter v2
-Phase 4) bound to the table's OWN `TableDefinition.transform` — a SEPARATE field
+JSON-family, the format-toggle row also shows a `TransformPicker` bound to the
+table's OWN `TableDefinition.transform` — a SEPARATE field
 from any exporter entry's `transform`: an exporter entry built from this table
 never inherits it (`entryForTable` sets `transform: null`, not a copy), and this
 picker never reflects an entry's choice either — the no-bleed rule holds in both
@@ -947,8 +939,8 @@ through the same per-column extras and live sample pane as JSON while CSV
 follows xlsx's plain-header path — the panel itself has no format-specific
 controls beyond that split.
 
-**The settings markup is split from its hosts (P-14 step 1).** `ExportDialog`
-itself now owns only open/snapshot/cancel semantics, the format toggle and
+**The settings markup is split from its hosts.** `ExportDialog`
+itself owns only open/snapshot/cancel semantics, the format toggle and
 confirm — every editing surface (the entry list, JSON options, the split
 section, the preview pane) lives in `Export/ExportSettingsPanel.svelte`, a
 host-agnostic panel the dialog drives over the table draft via `onChange`.
@@ -969,10 +961,9 @@ json family — read/written directly against the entry's `json_doc` rather
 than through the panel; the live sample below them still renders the array
 shape regardless of `shape`, since `POST /tables/json-preview` predates
 document shaping. Per the strict-at-export / never-block-Save rule, Save is
-never gated on a missing `key_column` under the object shape, nor (F-16,
-resolved) on an invalid `json_split` filename template — that check used to
-disable the Save button and now only drives an inline
-`entry-split-template-warning` hint next to it; the inline hint plus the
+never gated on a missing `key_column` under the object shape, nor on an
+invalid `json_split` filename template — that check only drives an inline
+`entry-split-template-warning` hint beside Save; the inline hint plus the
 export-time 422 is the entire contract.
 
 - **`lib/table/export-layout.ts`** mirrors `core/table/export_layout.py`'s
@@ -1050,11 +1041,10 @@ browses the project's durable commit journal:
   ops — the YAML draft and the diagram's staged node moves — and no
   model-scope lease anywhere; the `mm` lease is deliberately not one, since a
   peer's metamodel editor tab is orthogonal to a model rewrite). The predicate
-  lives in its own module because two callers used to spell the same
-  expression out verbatim, which is exactly how a lease-term regression got
-  into both at once; nothing in the metamodel editor reads it any more — the
-  Rebind button and its `isProjectQuiet()` precondition are gone, replaced by
-  the server's quiet-peers guard + hard-verified `mm` lease at commit (see
+  lives in its own module so its callers cannot spell the same expression out
+  verbatim and drift apart on a lease term. Nothing in the metamodel editor
+  reads it: metamodel commits are gated instead by the server's quiet-peers
+  guard + hard-verified `mm` lease at commit (see
   "Live metamodel editing" below). `POST /commits/revert` also answers a flat
   409 for any range containing a `metamodel.*` op, regardless of quiescence —
   see that section's undo/revert paragraph. Selecting "Revert to here" on a
@@ -1073,13 +1063,12 @@ prefix in the same file's `PREFIX` map and the `mm` lease resource id below.
 It is the only persisted tab kind with no artifact behind it: `persistable()`
 requires a real `artifactId` for every other kind, while this one is a stable
 singleton whose draft persists independently in
-`ui.metamodel.draft.<projectId>`. It replaces the old `SwapMetamodelDrawer`,
-whose whole interaction was picking a file.
+`ui.metamodel.draft.<projectId>`.
 
 `state/metamodel-editor.svelte.ts` owns everything the tab renders, exposed as
 one `MetamodelEditorView` snapshot from `getMetamodelEditor()`. There is no
-Rebind button any more (spec 2026-08-16) — the buffer is staged commit CONTENT
-and lands through the same **Commit** button as model/artifact/view edits:
+Rebind button — the buffer is staged commit CONTENT and lands through the same
+**Commit** button as model/artifact/view edits:
 
 - **Load** — `GET /metamodel/raw` on mount. `source: 'stored'` is the author's
   own YAML (comments and formatting intact); `'serialized'` is the degraded
@@ -1103,7 +1092,7 @@ and lands through the same **Commit** button as model/artifact/view edits:
   structural diff (`MetamodelPreviewPanel`). The result is recorded **against
   the exact buffer it was computed for** (`previewCurrent`), so a preview goes
   stale the moment the next character is typed and the panel says so. Preview
-  is advisory only now — nothing gates commit on having run one.
+  is advisory — nothing gates commit on having run one.
 - **Staging** — a dirty draft registers with `metamodel-stage.svelte.ts` as the
   fourth staged family's draft half (`registerMetamodelDraftProvider`), and
   `getStagedMetamodelDepth()` counts it as one row in the commit drawer's
@@ -1120,7 +1109,7 @@ and lands through the same **Commit** button as model/artifact/view edits:
   **owner** role (403 otherwise, checked both client-side before staging and
   server-side at commit) and hard-verifies the `mm` lease server-side.
 - **Lease** — composed, never re-implemented: `state/metamodel-lease.svelte.ts`
-  (the `mm` lease module that outlived the drawer it was written for) acquires
+  (the surface-agnostic `mm` lease module) acquires
   the EXCLUSIVE `mm` lease on the **first divergent keystroke _or_ first node
   drag** and drops it on
   close, discard, or **the commit that surrendered it** — unconditionally,
@@ -1184,8 +1173,7 @@ over the CURRENT `getMetamodelEditor().buffer`, and the resulting text goes back
 in through `editMetamodelBuffer` — the same seam a keystroke uses, so lease
 acquisition, debounced lint, the localStorage draft, `dirty` and preview all
 keep working with no diagram-specific branch anywhere in the editor module. It
-is composed through that module's existing exports only; it was not
-restructured to accommodate this.
+is composed through that module's public exports only.
 
 - **`metamodel/yaml-edit.ts`** — the comment-preserving edit core, built on the
   `yaml` package's Document API rather than round-tripping a plain object
@@ -1214,16 +1202,15 @@ restructured to accommodate this.
   and `placeUnpositioned`, an incremental heuristic that places a node next to
   its nearest positioned neighbour and **never moves an already-positioned
   one** — a peer's new type must not re-layout the canvas under you.
-- **Layout is presentation, but staged commit CONTENT** (spec 2026-08-16). A
-  drag no longer PUTs a shared blob live — `PUT /metamodel/layout` is gone —
-  it stages a `metamodel.move_node` op through `metamodel-stage.svelte.ts`
+- **Layout is presentation, but staged commit CONTENT.** A drag does not PUT
+  a shared blob live; it stages a `metamodel.move_node` op through `metamodel-stage.svelte.ts`
   (`stageNodeMove`, coalescing per node: the last position staged for a node
   is the only one that matters) and lands on the next `POST /commits` with
-  everything else in the batch. `GET /metamodel/layout` survives as the read
-  of the materialized baseline (table `metamodel_layouts`, unchanged), and the
+  everything else in the batch. `GET /metamodel/layout` is the read of the
+  materialized baseline (table `metamodel_layouts`), and the
   canvas overlays this session's still-uncommitted staged moves on top of it
   (`withStagedMoves`) so a pending drag never snaps back on a baseline
-  refetch. The canvas still has **two independent gates**: draft edits follow
+  refetch. The canvas has **two independent gates**: draft edits follow
   the editor module's owner-only `readOnly`, while dragging (and staging a
   move) is gated on `getRole() !== 'viewer'` — an editor may rearrange the
   picture without being able to edit the metamodel; a viewer's drags stay
@@ -1231,15 +1218,11 @@ restructured to accommodate this.
   under `ui.metamodel.layoutdraft.<projectId>` (`metamodel-stage.svelte.ts`),
   beside the YAML draft's own key next door — a refresh loses neither half of
   an uncommitted metamodel edit.
-- **There is no rename key-deferral any more**, and its removal is the point
-  of the change above: node ids (`el:`/`rel:`/`enum:` + type name) double as
-  the layout blob's position keys, and a rename that exists only in the local
-  draft used to move the key locally while a live PUT inverted it back to the
-  baseline key space on the wire (`_pendingRenames`, `serverPositions()`) —
-  the whole deferral machine this paragraph used to document, plus its own
-  `ui.metamodel.renames.<projectId>` localStorage key. None of that exists any
-  more: a staged position and the staged `metamodel.rebind` that renamed its
-  node ride the **same** commit batch, so the keys ever published are
+- **There is no rename key deferral**, and the staged-commit shape above is
+  what makes it unnecessary: node ids (`el:`/`rel:`/`enum:` + type name)
+  double as the layout blob's position keys, and a staged position rides the
+  **same** commit batch as the staged `metamodel.rebind` that renamed its
+  node, so the keys ever published are
   atomically the ones the draft's own (new) names produce — there is no wire
   moment where the blob and the draft's names can disagree. `_positions` is
   plain draft-key space end to end; `applyKeyMove` moves the position locally
@@ -1247,8 +1230,8 @@ restructured to accommodate this.
   (old key `→ null`, new key `→` the position) in the same gesture.
 - **Undo** is a bounded (50) stack of buffer snapshots paired with a position
   snapshot, because a rename moves both and undoing one without the other
-  would leave the staged batch describing a rename the buffer no longer
-  contains — `undoDiagramEdit` restores the position half by re-staging the
+  would leave the staged batch describing a rename the buffer does not
+  contain — `undoDiagramEdit` restores the position half by re-staging the
   minimal before/after delta (`stagePositionDelta`), so the pending commit
   moves back in step with the canvas. Ctrl/Cmd-Z on the canvas pops it; the
   restored text goes through `editMetamodelBuffer` like any other edit. A
@@ -1282,7 +1265,7 @@ restructured to accommodate this.
 #### Diagram navigation (LOD / hover / search / TOC)
 
 At ~20 types the canvas is a picture; at ~300 it is a map, and four read
-affordances make it navigable (spec 2026-08-20). None of them consults
+affordances make it navigable. None of them consults
 `readOnly` or the role: a viewer zooms, hovers, searches and jumps exactly
 like an owner — reading the metamodel is not an editing privilege, and the
 gates above stay confined to what CHANGES the draft.
@@ -1366,18 +1349,17 @@ gates above stay confined to what CHANGES the draft.
   other. `searchTypes` returns `{hits, total}` rather than a bare array
   precisely so a capped list can say `+N more` instead of looking like a
   complete one.
-- **The floor is `minZoom` 0.05**, not xyflow's default 0.5 — the original
-  complaint was simply that a big metamodel could not be zoomed out far enough
-  to see at all, and everything above is what makes the resulting picture
-  readable once it is.
+- **The floor is `minZoom` 0.05**, not xyflow's default 0.5 — a big metamodel
+  cannot otherwise be zoomed out far enough to see at all, and everything
+  above is what makes the resulting picture readable once it is.
 
 #### Manual smoke checklist — the diagram surface
 
 The four gestures where the client and the commit flow have to agree (drag →
 stage → commit → persisted; connection → popover → YAML; rename → cascade with
 comments intact; commit → positions survive under the new names) have **no
-e2e coverage** — see `BACKLOG.md` T-7. Until they do, this is the pass that
-stands in for it. Run it before shipping a change to
+e2e coverage**; this manual pass stands in for it. Run it before shipping a
+change to
 `state/metamodel-diagram.svelte.ts`, `state/metamodel-stage.svelte.ts`,
 `metamodel/yaml-edit.ts`, `routes/metamodel_layout.py`, or `api/metamodel_ops.py`.
 Steps 2, 6, 7 and 13 are the load-bearing ones.
@@ -1446,8 +1428,8 @@ click the **Diagram** toggle in the tab's toolbar.
     lists render. Then open the commit drawer and **Commit** → it succeeds, the
     app refreshes (`rebind_event`, not a normal commit delta), and the
     metamodel tab's baseline adopts the committed YAML.
-13. **Positions survive a rebind under new names.** This is the key-deferral
-    removal's whole payoff. Rename a type in the diagram, drag its box
+13. **Positions survive a rebind under new names.** Rename a type in the
+    diagram, drag its box
     somewhere distinctive, **Preview**, then **Commit** the batch (rebind +
     move land in ONE commit), then reload → the box is still where you put it,
     now keyed by the new name. Check a peer's session too: once they've
@@ -1495,9 +1477,9 @@ src/
     api/artifacts.ts    READ-ONLY by design: listArtifacts / getArtifact /
                         evaluateNavigation. Artifact writes travel as staged
                         ops through POST /commits (see the staged-commit flow
-                        above); the legacy POST/PUT/DELETE /artifacts wrappers
-                        were deleted so no regression can reintroduce an
-                        unjournalled write
+                        above); there are deliberately no POST/PUT/DELETE
+                        /artifacts wrappers, so no unjournalled write can
+                        slip in
     api/artifact-bundle.ts  Bundle export/preview/import client (zod schemas
                         for ExportPreview / ImportPlan / ImportConfirmResponse)
                         with typed stale-plan 409 discrimination
@@ -1608,9 +1590,8 @@ src/
                         CPython rejects mixed indentation with TabError and
                         the author cannot see which is which. expandTabs()
                         is column-aware (next tab stop, not blind 4×);
-                        hasTabs() now tints CodeEditor's Reformat control
-                        (which absorbed the old "Fix indentation" button)
-                        rather than gating a separate one.
+                        hasTabs() tints CodeEditor's Reformat control rather
+                        than gating a separate one.
                         indent-extension.ts is the CM6 half: indentUnit +
                         tabSize of 4, Tab/Shift-Tab bound to one full level
                         (CM's DEFAULT unit is TWO spaces — with it Shift-Tab
@@ -1698,7 +1679,7 @@ disable strict mode → assert the same batch can now commit; the snippet
 workspace tab (`snippet-flow.spec.ts`): lint gutter surfaces a sandbox-import
 warning, run prints to the console via the real WASM sandbox, and stage +
 commit a snippet run's op batch; and embedded script evaluation
-(`script-embedding.spec.ts`, M2/M3): a table script column bound to a saved
+(`script-embedding.spec.ts`): a table script column bound to a saved
 snippet renders computed values alongside an `error-cell` for a row that
 raises and survives sorting, an inline script column computes a constant, and
 a navigation script step follows real `el.outgoing()` neighbors into non-empty
