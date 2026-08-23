@@ -653,7 +653,7 @@ describe('ExporterTab', () => {
 		const draft = getExporterDraft('exp:draft:1')!;
 		expect(draft.entries.length).toBe(1);
 		expect(draft.dirty).toBe(true); // still dirty/uncommitted…
-		expect(runBtn.disabled).toBe(false); // …but that no longer gates Export
+		expect(runBtn.disabled).toBe(false); // …which does not gate Export
 		expect(runBtn.title).toBe('');
 	});
 

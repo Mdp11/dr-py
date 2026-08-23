@@ -25,7 +25,7 @@ replicas, a limitation shared with ``LockTable``):
 
   **Collision semantics**: the key is the
   *pair* ``(project_id, run_id)``, not bare ``run_id`` — two different
-  projects reusing the same client-chosen run_id no longer collide.
+  projects reusing the same client-chosen run_id do not collide.
   Registration is last-register-wins: if the same key is registered twice
   before the first is deregistered (e.g. a client reuses a run_id while an
   earlier run with that id is still in flight), the second call silently

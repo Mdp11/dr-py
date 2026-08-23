@@ -67,10 +67,10 @@
 
 	const shown = $derived(stagedValue !== undefined ? stagedValue.value : cell.value);
 
-	// Read-only text: the `cell.present` gate is exact per the brief (a
-	// not-present cell renders empty, never a leftover staged value), while
-	// `shown` stays staged-aware so a present, editable cell's fallback text
-	// still reflects an in-flight edit.
+	// Read-only text: the `cell.present` gate is exact (a not-present cell
+	// renders empty, never a leftover staged value), while `shown` stays
+	// staged-aware so a present, editable cell's fallback text still
+	// reflects an in-flight edit.
 	const text = $derived(cell.present ? String(shown ?? '') : '');
 
 	async function commitEdit(next: unknown): Promise<void> {
@@ -79,8 +79,7 @@
 		// `_elements` (unlike the Inspector/tree), so an uncommitted edit here
 		// can target an element `applyOptimistic` has never cached. Loading it
 		// first guarantees the revert journal is populated and the edit flows
-		// into the staged diff/Commit badge instead of vanishing silently
-		// (final-review A2).
+		// into the staged diff/Commit badge instead of vanishing silently.
 		const loaded = await ensureElement(cell.element_id);
 		if (loaded === null) return; // element unknown/deleted
 		if (!(await editLock(cell.element_id))) return;

@@ -50,7 +50,6 @@ def _reject_reserved_id(entity_id: str, *, element: bool) -> None:
 # ---------------------------------------------------------------------------
 
 
-
 def _guard_element(
     metamodel: Metamodel,
     seen_ids: set[str],

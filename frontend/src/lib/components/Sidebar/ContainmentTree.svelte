@@ -903,7 +903,6 @@
 		select({ kind: 'element', id: key });
 	}
 
-	// Drop ids that no longer exist (model swap / element deletion).
 	$effect(() => {
 		for (const id of [...multiSelected]) {
 			if (!knownIds.has(id)) multiSelected.delete(id);

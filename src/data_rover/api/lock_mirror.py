@@ -12,7 +12,7 @@ Redis outage re-converges on the next mutation, and the client renew
 heartbeat guarantees one within ttl/2 for any lease still held. Write-throughs
 for one project are serialized by ``Session.mirror_mutex`` (held across
 snapshot AND write), so they land in snapshot order — two racing calls can
-no longer leave the mirror holding a released lease. The one remaining
+never leave the mirror holding a released lease. The one remaining
 phantom window is an outage, not a race: a release whose write-through was
 skipped during the Redis cooldown leaves the released lease mirrored until
 the next mutation rewrites the set (or its own TTL expires); a restart

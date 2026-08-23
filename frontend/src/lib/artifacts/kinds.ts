@@ -1,7 +1,7 @@
 /**
- * The one client-side registry of artifact kinds (backlog C-6): every
- * component that filters, labels, or icons artifact kinds reads from here.
- * Mirrors the backend registry in src/data_rover/api/artifact_kinds.py.
+ * The one client-side registry of artifact kinds: every component that
+ * filters, labels, or icons artifact kinds reads from here. Mirrors the
+ * backend registry in src/data_rover/api/artifact_kinds.py.
  */
 import { FileCode, FolderOutput, Route, Table } from '@lucide/svelte';
 

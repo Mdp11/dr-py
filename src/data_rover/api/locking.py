@@ -274,7 +274,7 @@ class LockTable:
         ``_by_resource``. Compaction is left to ``sweep_expired`` (which runs
         under the write_mutex); this method is called from ``evict`` (which
         also holds the mutex) and from the GET /locks route (no mutex needed
-        because it no longer writes back)."""
+        since a pure read never writes back)."""
         return [
             le
             for leases in self._by_resource.values()

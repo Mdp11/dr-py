@@ -41,8 +41,8 @@ dict literals used in this task's own test suite) has no way to carry two
 values under the same repeated key — `{"id": 3, "op": "record_op", "op":
 {...}}` collapses to a single `"op"` key holding the dict, last-write-wins,
 before it ever reaches `dispatch()`. Rather than invent a second field name
-nothing in the brief specifies, the dispatcher treats that collapse as the
-wire format: a dict `"op"` *is* the write request.
+for this case, the dispatcher treats that collapse as the wire format: a
+dict `"op"` *is* the write request.
 """
 
 from __future__ import annotations

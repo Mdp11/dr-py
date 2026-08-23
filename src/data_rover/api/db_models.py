@@ -251,7 +251,8 @@ class Commit(Base):
     #: metamodel rebind: the model's metamodel_id before/after this commit.
     #: Both NULL for ordinary edit commits; set only by a rebind-carrying
     #: POST /commits batch (a `metamodel.rebind` op).
-    #: SET NULL on metamodel delete so history survives a retired metamodel.
+    #: SET NULL on metamodel delete so history survives deletion of a
+    #: superseded metamodel.
     from_metamodel_id: Mapped[str | None] = mapped_column(
         ForeignKey("metamodels.id", ondelete="SET NULL"), nullable=True
     )

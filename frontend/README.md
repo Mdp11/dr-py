@@ -841,9 +841,9 @@ toggle`), a collapsed disclosure that expands to the shared
   `/tables/export` has the identical loop, but only behind an explicit click —
   so the recap is behind one too, and the up-front error count is deliberately
   given up.
-  **Fetch-ONCE per page state**: the recap is still keyed by
-  `"<status>:<model_rev>:<generation>"`, now as the signature of the page state
-  on screen — background chunk fills as the user scrolls change none of the
+  **Fetch-ONCE per page state**: the recap is keyed by
+  `"<status>:<model_rev>:<generation>"`, the signature of the page state on
+  screen — background chunk fills as the user scrolls change none of the
   three, so they neither re-fetch nor drop the recap already paid for, while a
   peer's commit (new rev) **and** a sort change, a definition edit or a reload
   (all of which bump the tab's page-load **generation**) DROP it on the spot,
@@ -1041,10 +1041,9 @@ browses the project's durable commit journal:
   ops — the YAML draft and the diagram's staged node moves — and no
   model-scope lease anywhere; the `mm` lease is deliberately not one, since a
   peer's metamodel editor tab is orthogonal to a model rewrite). The predicate
-  lives in its own module so its callers cannot spell the same expression out
-  verbatim and drift apart on a lease term. Nothing in the metamodel editor
-  reads it: metamodel commits are gated instead by the server's quiet-peers
-  guard + hard-verified `mm` lease at commit (see
+  lives in its own module so the one lease-term expression it spells out
+  cannot drift across consumers. Metamodel commits are gated separately, by
+  the server's quiet-peers guard + hard-verified `mm` lease at commit (see
   "Live metamodel editing" below). `POST /commits/revert` also answers a flat
   409 for any range containing a `metamodel.*` op, regardless of quiescence —
   see that section's undo/revert paragraph. Selecting "Revert to here" on a

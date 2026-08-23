@@ -96,9 +96,9 @@ class ScriptWarningLog:
         `MAX_SCRIPT_WARNINGS` caps distinct KINDS. Once full, a new kind is
         dropped but kinds already present keep counting — a cap that stopped
         counting would understate exactly the numbers this channel exists to
-        report. Overflow is unlikely: keys are bounded by ~5 codes times
-        distinct details, and only `NAV_STEP_FAILED` / `NAV_SNIPPET_NOT_FOUND`
-        carry unbounded details.
+        report. Overflow is unlikely: keys are bounded by the 4 codes in
+        `ScriptWarningCode` times distinct details, and only
+        `NAV_STEP_FAILED` / `NAV_SNIPPET_NOT_FOUND` carry unbounded details.
         """
         key = (code, detail)
         entry = self._by_key.get(key)
