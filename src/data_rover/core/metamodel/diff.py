@@ -1,11 +1,11 @@
-"""Structural metamodel diff (artefacts revamp, Phase 4).
+"""Structural metamodel diff.
 
 One pure differ, two API surfaces: ``POST /metamodel/diff`` (pre-rebind
 review) and the commit-diff renderer (post-hoc history of rebind commits).
 Lives in core because it compares two core ``Metamodel`` objects and core has
 no api imports.
 
-Rules (spec 2026-08-10):
+Rules:
 - Identity is the NAME everywhere (types, properties, enums); a rename is
   remove+add. No rename detection.
 - The diff mirrors the RAW document — ``extends`` chains are not flattened

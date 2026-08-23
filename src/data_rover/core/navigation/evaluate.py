@@ -380,8 +380,8 @@ def _hop_script(
     instead of vanishing. That mirrors a scalar `PropertyStep` exactly, and is
     the only sane rule available here: unlike a property, a snippet declares
     no return type, so the model — not the metamodel — decides per value.
-    (This is why there is no unknown-id warning: with every string either
-    hopping or displaying, "unknown id" is no longer a failure mode.)
+    (This is why there is no unknown-id warning: every string either hops or
+    displays, so "unknown id" is never a failure mode.)
 
     A non-finite float (`inf`/`-inf`/`nan`) becomes its repr — a plain string
     terminal — HERE, at the producer, rather than at any serialization

@@ -9,7 +9,7 @@ a :class:`~data_rover.core.validation.state.ValidationState`.
 Two entry points:
 
 * :class:`DirtyCollector` — hook-style API for live mutations through the
-  Model mutation boundary (also the Phase-C ops endpoint). Prefer the
+  Model mutation boundary (also the ops endpoint). Prefer the
   mutate-and-collect WRAPPERS, which call the Model method with the correct
   before/after hooks around it (snapshotting whatever the after-hook needs)
   so hooks cannot be mispaired:

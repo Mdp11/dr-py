@@ -163,9 +163,8 @@ class Model:
         rel = self.relationships.pop(rel_id)
         self.indexes.on_relationship_deleted(rel)
 
-    # NOTE: the index-backed helpers below return relationships in set
-    # iteration order (unspecified), not in `relationships` dict insertion
-    # order as the previous linear scans did. No caller depends on the order.
+    # The index-backed helpers below return relationships in unspecified set
+    # iteration order; no caller depends on the order.
     def relationships_from(self, element_id: str) -> list[Relationship]:
         rel_ids = self.indexes.out_rels.get(element_id) or ()
         return [self.relationships[rid] for rid in rel_ids]

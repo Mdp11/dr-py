@@ -1,7 +1,7 @@
 """Navigation definitions: walk chains of relationships from a filtered
 start set, or combine navigation results with set operations.
 
-Format contract (Stage 1 of the navigation/tables/diagrams mega-plan):
+Format contract:
 
 - The document is VERSIONED (`schema_version`) and branch-READY: every
   relationship step carries a `children` slot so branching can be added later
@@ -52,7 +52,7 @@ class RelationshipStep(BaseModel):
     """A hop: traverse `relationship_type` (subtype-inclusive) in `direction`,
     landing on `target_types` (subtype-inclusive; empty = any). Carries NO
     criteria — filtering lives in `FilterStep`. `children` is reserved for
-    post-Stage-1 branching and MUST be empty in schema v2."""
+    future branching and MUST be empty in schema v2."""
 
     kind: Literal["relationship"] = "relationship"
     relationship_type: str
@@ -144,9 +144,9 @@ class PathNavigation(BaseModel):
     name: str | None = None
     start: StartNode
     steps: list[StepItem] = Field(default_factory=list)
-    #: cycle guard: when True (default, prior behavior), a chain skips any
-    #: element already in its own prefix; when False, chains may revisit
-    #: elements (still terminates — chain length is capped at len(steps)+1).
+    #: cycle guard: when True (default), a chain skips any element already in
+    #: its own prefix; when False, chains may revisit elements (still
+    #: terminates — chain length is capped at len(steps)+1).
     exclude_visited: bool = True
 
     @model_validator(mode="after")

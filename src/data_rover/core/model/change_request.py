@@ -92,7 +92,6 @@ def apply_change_request(model: Model, cr: ChangeRequest) -> Model:
 
     # --- Phase A: validate ---
 
-    # Elements added: id must NOT already exist
     for e in cr.elements_added:
         if e.id in model.elements:
             conflicts.append(
@@ -104,7 +103,6 @@ def apply_change_request(model: Model, cr: ChangeRequest) -> Model:
                 )
             )
 
-    # Elements modified: id must exist; before must match (ignoring rev)
     for me in cr.elements_modified:
         current = model.elements.get(me.id)
         if current is None:
@@ -126,7 +124,6 @@ def apply_change_request(model: Model, cr: ChangeRequest) -> Model:
                 )
             )
 
-    # Elements deleted: id must exist; snapshot must match (ignoring rev)
     for e in cr.elements_deleted:
         current = model.elements.get(e.id)
         if current is None:
@@ -148,7 +145,6 @@ def apply_change_request(model: Model, cr: ChangeRequest) -> Model:
                 )
             )
 
-    # Relationships added: id must NOT already exist
     for r in cr.relationships_added:
         if r.id in model.relationships:
             conflicts.append(
@@ -160,7 +156,6 @@ def apply_change_request(model: Model, cr: ChangeRequest) -> Model:
                 )
             )
 
-    # Relationships modified: id must exist; before must match (ignoring rev)
     for mr in cr.relationships_modified:
         current_r = model.relationships.get(mr.id)
         if current_r is None:
@@ -182,7 +177,6 @@ def apply_change_request(model: Model, cr: ChangeRequest) -> Model:
                 )
             )
 
-    # Relationships deleted: id must exist; snapshot must match (ignoring rev)
     for r in cr.relationships_deleted:
         current_r = model.relationships.get(r.id)
         if current_r is None:
@@ -209,7 +203,6 @@ def apply_change_request(model: Model, cr: ChangeRequest) -> Model:
 
     # --- Phase B: materialize ---
 
-    # Build new element dict from copies of current state
     new_elements: dict[str, Element] = {
         eid: Element(
             id=e.id,
@@ -220,7 +213,6 @@ def apply_change_request(model: Model, cr: ChangeRequest) -> Model:
         for eid, e in model.elements.items()
     }
 
-    # Build new relationship dict from copies of current state
     new_relationships: dict[str, Relationship] = {
         rid: Relationship(
             id=r.id,
@@ -233,7 +225,6 @@ def apply_change_request(model: Model, cr: ChangeRequest) -> Model:
         for rid, r in model.relationships.items()
     }
 
-    # Insert added elements
     for e in cr.elements_added:
         new_elements[e.id] = Element(
             id=e.id,
@@ -242,7 +233,6 @@ def apply_change_request(model: Model, cr: ChangeRequest) -> Model:
             rev=e.rev,
         )
 
-    # Replace modified elements (rev = current.rev + 1)
     for me in cr.elements_modified:
         current_rev = new_elements[me.id].rev
         new_elements[me.id] = Element(
@@ -252,11 +242,9 @@ def apply_change_request(model: Model, cr: ChangeRequest) -> Model:
             rev=current_rev + 1,
         )
 
-    # Remove deleted elements
     for e in cr.elements_deleted:
         del new_elements[e.id]
 
-    # Insert added relationships
     for r in cr.relationships_added:
         new_relationships[r.id] = Relationship(
             id=r.id,
@@ -267,7 +255,6 @@ def apply_change_request(model: Model, cr: ChangeRequest) -> Model:
             rev=r.rev,
         )
 
-    # Replace modified relationships (rev = current.rev + 1)
     for mr in cr.relationships_modified:
         current_rev = new_relationships[mr.id].rev
         new_relationships[mr.id] = Relationship(
@@ -279,11 +266,9 @@ def apply_change_request(model: Model, cr: ChangeRequest) -> Model:
             rev=current_rev + 1,
         )
 
-    # Remove deleted relationships
     for r in cr.relationships_deleted:
         del new_relationships[r.id]
 
-    # Assemble new Model
     result = Model(model.metamodel)
     result.elements = new_elements
     result.relationships = new_relationships

@@ -1,13 +1,12 @@
 """Shared entity-filter vocabulary: criterion models + matchers.
 
-Historically these lived in ``api/search.py``; they moved to core so the
-navigation engine (``core/navigation``) can filter start sets and hop targets
-with the exact same semantics (and wire format) as ``POST /model/search``.
-``api/search.py`` re-exports everything, so the API surface is unchanged.
-Matching is pure and O(criteria) per entity; relationship-aware criteria go
-through ``model.indexes``, never a scan. Criteria combine with AND at every
-call site; the single OR construct is ``AnyOfCriterion`` (a flat, leaf-only
-group).
+Lives in core so the navigation engine (``core/navigation``) can filter start
+sets and hop targets with the exact same semantics (and wire format) as
+``POST /model/search``. ``api/search.py`` re-exports everything, keeping the
+API surface unchanged. Matching is pure and O(criteria) per entity;
+relationship-aware criteria go through ``model.indexes``, never a scan.
+Criteria combine with AND at every call site; the single OR construct is
+``AnyOfCriterion`` (a flat, leaf-only group).
 
 Coercion mirrors JavaScript so results match the client reference exactly:
 ``String(raw ?? '')`` for text ops (``true``/``false`` lower-cased, integral

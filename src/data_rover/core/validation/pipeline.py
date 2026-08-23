@@ -23,7 +23,7 @@ class Validator(Protocol):
 
     #: stable identity stamped onto every issue this validator produces
     #: (see `_stamped`); one of the registered check names, e.g.
-    #: "multiplicity", "facets" — Task 7's per-validator chip filter keys
+    #: "multiplicity", "facets" — the UI's per-validator chip filter keys
     #: off this exact string.
     check_name: str
 

@@ -10,15 +10,14 @@ class Severity(Enum):
 
 
 class IssueCategory(Enum):
-    """Commit-time validation tier (spec §9).
+    """Commit-time validation tier.
 
     STRUCTURAL — model-graph corruption (dangling reference, containment
     cycle, two parents). At commit these HARD-fail with 422: a well-behaved
     client never produces one (the mutation boundary + frontend prevent them).
     CONFORMANCE — schema-rule violations (endpoint typing, multiplicity,
-    uniqueness, facets, scalar type). Counted and surfaced, never block a
-    commit (the engine "stays inspectable"); a Phase 8 strict mode may later
-    promote a configurable subset to hard rejects.
+    uniqueness, facets, scalar type). Counted and surfaced, never blocks a
+    commit (the engine "stays inspectable").
     """
 
     STRUCTURAL = "structural"

@@ -13,11 +13,11 @@ navigation refs. A dangling `Operand.ref` makes the whole definition
 unevaluable (`RefNotFoundError`, 422 at the API layer): a navigation with a
 step missing is nonsense. A dangling `ScriptStep.snippet.ref`, by contrast, is
 left in place as a DANGLING MARKER and never raises here — the evaluator
-(Task 9) prunes that one chain step with a warning instead, matching the
+prunes that one chain step with a warning instead, matching the
 degraded-content stance PropertyStep already takes for a missing property def.
 `snippet_fetch` is optional (defaults to `None`) so callers that never resolve
-navigations carrying script steps (none exist yet pre-Task-9/11) don't need
-to thread a snippet fetcher through.
+navigations carrying script steps don't need to thread a snippet fetcher
+through.
 """
 
 from __future__ import annotations

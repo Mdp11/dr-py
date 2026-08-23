@@ -1,4 +1,4 @@
-"""Folder identity helpers (artefacts revamp Phase 2).
+"""Folder identity helpers.
 
 Folder ids are assigned LAZILY: old blobs parse with ``Folder.id == ""`` and
 are healed by ``ensure_folder_ids`` at hydration / import time — there is
