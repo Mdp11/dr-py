@@ -249,7 +249,7 @@ def test_dr_types_and_dr_type_are_gone():
     assert "types" in res.error.message
     res = r.run(tiny_model(), RunRequest(code="result = dr.type('Building')"),
                 RunLimits(), record_ops=False, rev=0)
-    # `type` is no longer an attribute of `_Dr` at all, so the failure is the
+    # `type` is not an attribute of `_Dr` at all, so the failure is the
     # attribute lookup itself (AttributeError), never a call-time TypeError.
     assert res.error is not None and res.error.kind == "runtime"
     assert "AttributeError" in res.error.message, res.error.message

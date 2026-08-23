@@ -74,9 +74,9 @@ def test_wasm_standalone_print(wasm_runner: WasmScriptRunner) -> None:
 
 
 def test_wasm_standalone_read(wasm_runner: WasmScriptRunner) -> None:
-    """The brief's original read test: `dr.elements()` iterates the model
-    through the real facade+bridge, dispatched host-side by a per-run
-    `BridgeDispatcher` against `tiny_model()`."""
+    """`dr.elements()` iterates the model through the real facade+bridge,
+    dispatched host-side by a per-run `BridgeDispatcher` against
+    `tiny_model()`."""
     from data_rover.core.script.runner import RunLimits, RunRequest
 
     from tests.script.conftest import tiny_model

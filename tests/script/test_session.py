@@ -73,7 +73,7 @@ def test_decode_step_payloads() -> None:
         {"nodes": "a"},
         {"nodes": [{"a": 1}]},
         {"nodes": [None]},
-        {"ids": ["a"]},  # the pre-`nodes` shape is no longer accepted
+        {"ids": ["a"]},  # {"ids": ...} is not a recognized payload shape
         {"kind": "scalar", "value": 1},
     ):
         decoded, msg = decode_call_payload("step", bad)
@@ -252,9 +252,8 @@ def test_step_indexed_child_style_return(session_model) -> None:
 
 
 def test_step_bad_return_message_teaches_none(session_model) -> None:
-    # `int` is no longer a bad return (non-string scalars ride the wire as
-    # terminal values), so this regresses against a shape that is still
-    # genuinely invalid: a bare non-iterable object.
+    # int is a valid terminal return (non-string scalars ride the wire); this
+    # uses a genuinely invalid shape: a bare non-iterable object.
     model, eid = session_model
     sess = _open(model, "def step(el): return object()")
     res = sess.call("step", [eid])

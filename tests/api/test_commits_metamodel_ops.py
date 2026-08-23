@@ -51,15 +51,12 @@ def client() -> TestClient:
         headers={"Content-Type": "application/x-yaml"},
     )
     assert r.status_code == 200, r.text
-    # The brief's fixture stops after the metamodel upload, but
-    # ``set_metamodel`` clears ``session.model`` to None (session.py), and
-    # every sibling commit-flow test fixture (test_commits_artifact_ops.py,
-    # test_commits_view_ops.py, ...) follows the metamodel upload with an
-    # empty-model POST for exactly that reason — without it, ``require_model``
-    # 404s "No model loaded" before any op-family check ever runs. Added here
-    # to match that established pattern (same category as the
-    # MetamodelNodePos dict-literal ruling: verbatim brief text needing a
-    # small, obviously-required fix to actually run).
+    # ``set_metamodel`` clears ``session.model`` to None (session.py), so an
+    # empty-model POST is needed too — every sibling commit-flow test
+    # fixture (test_commits_artifact_ops.py, test_commits_view_ops.py, ...)
+    # follows the metamodel upload with one for exactly that reason: without
+    # it, ``require_model`` 404s "No model loaded" before any op-family
+    # check ever runs.
     r = c.post(papi("/model"), json={"elements": [], "relationships": []})
     assert r.status_code == 200, r.text
     return c

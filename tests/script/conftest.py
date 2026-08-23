@@ -44,10 +44,9 @@ def tiny_model() -> Model:
 
     Element ids are pinned via `Model.restore_element` (the fixed-id insertion
     path used by undo/restore) rather than the default id generator, so tests
-    can address elements by the literal ids (`"b1"`, ...) the task-5 brief's
-    test file uses. `b3` is left both parent- and child-less so tests can
-    assert the empty-containment edges (`parent`/`children` on a leaf with no
-    owner).
+    can address elements by the literal ids (`"b1"`, ...). `b3` is left both
+    parent- and child-less so tests can assert the empty-containment edges
+    (`parent`/`children` on a leaf with no owner).
     """
     model = Model(_metamodel())
     b1 = model.restore_element("b1", "Building")

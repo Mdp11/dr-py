@@ -7,9 +7,9 @@ guest's `_transport` global. There is no sandbox here: no wasmtime, no
 subprocess, no seccomp, no resource ceiling beyond the soft stdout cap this
 module implements itself. That is fine for a test harness exercising
 `facade_src.FACADE_SOURCE` against a `Model` built in the same test process,
-but it is exactly the shape of bug this project is trying to design *out* of
-production execution (Tasks 8/9 replace `_transport` with a call across a
-WASM guest boundary instead of a bare Python callable). If you are tempted
+but it is exactly the shape of bug this project is trying to design *out* of:
+production execution instead calls across a WASM guest boundary rather than
+a bare Python callable. If you are tempted
 to promote this file into `src/data_rover/...` as a "quick" runner for the
 real API, don't — that would hand every snippet author the full permissions
 of the API process. It lives under `tests/` on purpose, and only imports

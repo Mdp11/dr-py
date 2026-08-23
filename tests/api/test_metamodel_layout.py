@@ -8,8 +8,8 @@ Positions land ONLY through ``POST /commits`` via the ``metamodel.move_node``
 op (``content.stage_metamodel_layout``, exercised end-to-end by
 ``test_commits_metamodel_ops.py``). This file keeps the GET-only read
 surface plus ``test_get_layout_reflects_a_commit_flow_move``, which proves
-GET reflects a layout landed through the commit flow. ``PUT
-/metamodel/layout`` no longer exists.
+GET reflects a layout landed through the commit flow. There is no ``PUT
+/metamodel/layout`` route; positions land only through ``POST /commits``.
 """
 
 from __future__ import annotations
