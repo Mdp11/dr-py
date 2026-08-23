@@ -298,16 +298,16 @@ def test_demote_and_delete_one_of_two_admins_succeeds() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Fix 2: get_user_by_email graceful duplicate-email handling
+# get_user_by_email graceful duplicate-email handling
 # ---------------------------------------------------------------------------
 
 
 def test_duplicate_nonempty_email_raises_integrity_error() -> None:
     """The partial unique index rejects two rows with the same non-empty email.
 
-    get_user_by_email's MultipleResultsFound catch is now a defensive dead-code
-    path (the index prevents the duplicate from ever reaching the DB), but we
-    keep it for belt-and-braces safety.
+    get_user_by_email's MultipleResultsFound catch is a defensive dead-code
+    path (the index prevents the duplicate from ever reaching the DB), kept
+    for belt-and-braces safety.
     """
     s = _session()
     s.add(User(id="dup1", email="dup@x.com", is_admin=False))

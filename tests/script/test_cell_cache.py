@@ -1,4 +1,4 @@
-"""ScriptCellCache: rev stamping, LRU, error-kind filtering (spec §3.1)."""
+"""ScriptCellCache: rev stamping, LRU, error-kind filtering."""
 
 from data_rover.core.script.cell_cache import _MAX_STORED_READS, ScriptCellCache
 from data_rover.core.script.runner import CallResult, ScriptError

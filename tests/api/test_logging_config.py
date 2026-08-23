@@ -1,6 +1,6 @@
-"""B-1: the app configures logging at create_app() so ``data_rover.*``
-INFO records are actually emitted (previously they fell through to
-``logging.lastResort``, which drops everything below WARNING)."""
+"""The app configures logging at create_app() so ``data_rover.*``
+INFO records are actually emitted, rather than falling through to
+``logging.lastResort``, which drops everything below WARNING."""
 
 from __future__ import annotations
 

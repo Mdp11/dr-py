@@ -1,4 +1,4 @@
-"""Split-export partitioning and the filename policy (spec §3.2).
+"""Split-export partitioning and the filename policy.
 
 Partitioning is pure slot-0 bucketing, so hand-rolled RowKey/Cell pairs are
 fine here (unlike grouping, which needs real evaluator rows)."""

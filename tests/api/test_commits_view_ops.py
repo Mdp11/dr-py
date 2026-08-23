@@ -86,10 +86,8 @@ def _rev(client: TestClient) -> int:
 
 
 def _seed_view(client: TestClient, folders: list[dict]) -> dict[str, str]:
-    """Build a (possibly nested) folder tree via ``POST /commits`` — the
-    commit-flow replacement for the retired ``PUT /view/snapshot`` one-shot
-    setup harness these tests used purely to seed named folders with ids.
-    *folders* uses the same nested shape the old PUT body did:
+    """Build a (possibly nested) folder tree via ``POST /commits`` purely to
+    seed named folders with ids. *folders* is
     ``[{"name": ..., "folders": [...]}, ...]``. Returns a flat {name: id} map
     (names are unique per test). A single ``root`` lease covers the whole
     batch — ids created earlier in the same batch need no lock to be
@@ -188,20 +186,14 @@ def test_commit_view_ops_without_existing_view_autocreates(client: TestClient) -
 def test_commit_after_view_cleared_hydrates_durable_view_not_an_empty_one(
     client: TestClient,
 ) -> None:
-    """Regression for the artefacts-revamp whole-branch-review Fix 1:
-    ``session.view is None`` does NOT mean "this project never had a view" —
-    clearing ONLY the in-memory cache (the retired ``DELETE /view`` route's
-    old behavior, reproduced directly below now that it's gone) leaves
-    ``ViewRow`` (12-ish pre-existing folders in the reviewer's repro, two
-    here) untouched. Before the fix, ``create_commit`` treated
-    ``session.view is None`` as "auto-create an EMPTY view", so the step 'e'
-    unconditional overwrite of ``ViewRow`` with that empty-based result
-    durably destroyed every pre-existing folder — the journal describing only
-    the unrelated ``create_folder`` that actually ran. The fix is to hydrate
-    from the still-live row instead."""
+    """``session.view is None`` does NOT mean "this project never had a
+    view" — clearing ONLY the in-memory cache (below) leaves ``ViewRow``
+    untouched, and ``create_commit`` must hydrate from that still-live row
+    rather than auto-creating an EMPTY view and durably overwriting the
+    pre-existing folders."""
     _seed_view(client, [{"name": "A"}, {"name": "B"}])
     prior_view_rev = client.get(papi("/view")).json()["view_rev"]
-    get_session().view = None  # clear ONLY the cache, mirroring DELETE /view
+    get_session().view = None  # clear ONLY the in-memory cache
     assert client.get(papi("/view")).json()["view"] is None
 
     base = _rev(client)
@@ -223,11 +215,11 @@ def test_commit_after_view_cleared_hydrates_durable_view_not_an_empty_one(
         },
     )
     assert r.status_code == 200, r.text
-    # view_rev advances from the PRIOR durable value either way (final-review
-    # round 2, Finding D: upsert_single_view finds the row by project_id
-    # alone and bumps whatever it finds — an empty auto-create would ALSO
-    # have reported prior_view_rev + 1 here, just with the wrong CONTENT).
-    # The real differentiator is the folder set asserted below.
+    # view_rev advances from the PRIOR durable value either way —
+    # upsert_single_view finds the row by project_id alone and bumps
+    # whatever it finds, so an empty auto-create would ALSO report
+    # prior_view_rev + 1 here, just with the wrong CONTENT. The real
+    # differentiator is the folder set asserted below.
     assert r.json()["view_rev"] == prior_view_rev + 1
 
     out = client.get(papi("/view")).json()
@@ -300,9 +292,9 @@ def test_mixed_batch_atomicity_view_rolls_back_with_model(client: TestClient) ->
 
 
 def test_failed_commit_with_no_prior_view_leaves_view_null(client: TestClient) -> None:
-    """Regression for final-review Finding 2: a batch that auto-creates an
-    empty view (project had none) and then hard-fails on its MODEL half must
-    not leave that auto-created empty view behind — GET /view still reports
+    """A batch that auto-creates an empty view (project had none) and then
+    hard-fails on its MODEL half must not leave that auto-created empty view
+    behind — GET /view still reports
     ``view: null``, exactly as it did before the request, not a materialized
     empty view with no ViewRow / view_rev to back it."""
     assert client.get(papi("/view")).json()["view"] is None
@@ -439,30 +431,21 @@ def test_commit_event_scope_includes_view(client: TestClient) -> None:
 def test_delete_folder_commit_requires_lease_on_subtree_child_after_view_cleared(
     client: TestClient,
 ) -> None:
-    """Regression for final-review round 2, Finding A (the create_commit
-    half of the ordering hole Fix 1 reopened). create_commit's own
-    pre-mutex staleness/conflict derivations, and its lock-verification
-    step, used to run BEFORE session.view was resolved — so a
-    delete_folder op's lock requirement (required_locks -> folder_subtree)
-    degraded to the named folder alone whenever session.view started COLD,
-    e.g. right after clearing only the in-memory cache (the retired
-    ``DELETE /view`` route's old behavior — reproduced directly below now
-    that it's gone) while leaving the durable ViewRow (and D's real child C)
-    fully intact.
+    """create_commit must resolve the hydrated view BEFORE its pre-mutex
+    staleness/conflict derivations and lock-verification step run — otherwise
+    a delete_folder op's lock requirement (required_locks -> folder_subtree)
+    degrades to the named folder alone whenever session.view starts COLD,
+    e.g. right after clearing only the in-memory cache, while leaving the
+    durable ViewRow (and D's real child C) fully intact.
 
-    The reviewer's verified repro: P leases folder:C (child of D); the
-    caller's view cache is cleared; the caller's own POST /locks request for
-    a DELETE lease on folder:D ALSO degrades — a separate, out-of-scope blind
-    spot in routes/locks.py's expand_targets, which sees the same None view
-    at that point — and is granted covering ONLY D, never C. Before this fix,
-    create_commit's OWN required_locks call also ran against that same None
-    view and agreed there was nothing more to check, so the commit
-    succeeded and the real (b3-hydrated) applier cascaded the delete
-    through C anyway — silently destroying a folder a peer had checked out.
-    After the fix, create_commit resolves the SAME hydrated view before its
-    lock derivation runs, independently re-derives the FULL {D, C}
-    requirement, finds C's lease missing from what the caller holds, and
-    409s instead — leaving D and C durably untouched."""
+    Repro: P leases folder:C (child of D); the caller's view cache is
+    cleared; the caller's own POST /locks request for a DELETE lease on
+    folder:D ALSO degrades — a separate blind spot in routes/locks.py's
+    expand_targets, which sees the same None view at that point — and is
+    granted covering ONLY D, never C. create_commit must independently
+    resolve the hydrated view, re-derive the FULL {D, C} requirement, find
+    C's lease missing from what the caller holds, and 409 instead — leaving
+    D and C durably untouched."""
     ids = _seed_view(client, [{"name": "D", "folders": [{"name": "C"}]}])
     d_id = ids["D"]
     c_id = ids["C"]
@@ -480,10 +463,9 @@ def test_delete_folder_commit_requires_lease_on_subtree_child_after_view_cleared
     assert r.status_code == 200, r.text
 
     # The caller's cache goes cold; the durable row (D -> C) is untouched.
-    # Setting session.view directly mirrors exactly what the retired
-    # ``DELETE /view`` route used to do (clear ONLY the in-memory cache)
-    # without going through full-session eviction, which P's live lease on
-    # C would refuse (evict-with-live-locks guard).
+    # Setting session.view directly clears ONLY the in-memory cache without
+    # going through full-session eviction, which P's live lease on C would
+    # refuse (evict-with-live-locks guard).
     get_session().view = None
     assert client.get(papi("/view")).json()["view"] is None
 

@@ -3,7 +3,7 @@ arity (see cells.py docstring for the design table). Covers present/editable
 derivation for property cells (declared-but-unset vs type-lacks-property vs
 expand-mode-never-editable) and the collapse-navigation cell cap/truncation.
 
-Fixture extends Task 4's Block/BlockHasPart metamodel with a `Widget` type
+Fixture extends the Block/BlockHasPart metamodel with a `Widget` type
 (deliberately WITHOUT `mass`, to exercise present=False) and a many-valued
 `tags` property on Block (to exercise expand-mode non-editability)."""
 
@@ -300,7 +300,7 @@ def test_column_ref_step_index_out_of_range_raises():
 
 
 def test_property_step_navigation_column_resolves_referenced_element():
-    # Regression: a `property`-kind navigation step (Task 1/2) must flow
+    # A `property`-kind navigation step must flow
     # through the table layer unchanged — one chain column per hop, terminal
     # step_index=None resolving to the referenced element. Distinct metamodel
     # (Building/Sensor) from the module fixture since it needs an
@@ -421,9 +421,8 @@ def test_scalar_property_step_expand_promotes_value_cell():
 
 def test_export_limits_ignore_per_column_cell_cap():
     # The export path must carry the COMPLETE reached set: `ignore_cell_caps`
-    # bypasses the per-column display cap (previously min(cell_cap, ...) kept
-    # truncating exports to 20 elements no matter the max_cell_elements
-    # override).
+    # bypasses the per-column display cap, not truncating exports to 20
+    # elements regardless of the max_cell_elements override.
     from data_rover.core.table.evaluate import TableLimits
 
     mm = _mm()

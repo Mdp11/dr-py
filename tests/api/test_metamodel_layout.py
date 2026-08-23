@@ -1,16 +1,15 @@
-"""GET /metamodel/layout — shared canvas positions (spec 2026-08-13 §5).
+"""GET /metamodel/layout — shared canvas positions.
 
 Presentation-only: last-write-wins, no lease, no commit journal entry. The
 authz matrix is the standard method-based one: any member reads, non-members
 403, unknown project 404.
 
-``PUT /metamodel/layout`` retired (Task 9, spec 2026-08-16): positions now
-land ONLY through ``POST /commits`` via the ``metamodel.move_node`` op
-(``content.stage_metamodel_layout``, exercised end-to-end by
+Positions land ONLY through ``POST /commits`` via the ``metamodel.move_node``
+op (``content.stage_metamodel_layout``, exercised end-to-end by
 ``test_commits_metamodel_ops.py``). This file keeps the GET-only read
-surface plus ``test_get_layout_reflects_a_commit_flow_move`` — the real
-replacement for the deleted PUT coverage, proving GET reflects a layout
-landed through the commit flow rather than through the old route directly.
+surface plus ``test_get_layout_reflects_a_commit_flow_move``, which proves
+GET reflects a layout landed through the commit flow. ``PUT
+/metamodel/layout`` no longer exists.
 """
 
 from __future__ import annotations
@@ -77,11 +76,10 @@ def test_layout_put_route_is_gone() -> None:
 
 
 def test_get_layout_reflects_a_commit_flow_move() -> None:
-    """The real replacement for the deleted PUT coverage: a position landed
-    through ``POST /commits`` via ``metamodel.move_node`` (Task 3) is what
-    ``GET /metamodel/layout`` serves back — proving the read surface stays
-    wired to ``content.stage_metamodel_layout``, the commit path's writer,
-    now that the standalone PUT writer is gone."""
+    """A position landed through ``POST /commits`` via
+    ``metamodel.move_node`` is what ``GET /metamodel/layout`` serves back —
+    proving the read surface stays wired to
+    ``content.stage_metamodel_layout``, the commit path's writer."""
     c = _bound_client()
     token = _acquire_mm(c)
     r = c.post(

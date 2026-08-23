@@ -407,7 +407,7 @@ def test_apply_cr_issues_equal_full_validation_of_result(
 
 
 # ---------------------------------------------------------------------------
-# Session mode (Phase C3): `model` field absent -> CR applies to the session
+# Session mode: `model` field absent -> CR applies to the session
 # model and the response is an OpsResponse-shaped delta
 # ---------------------------------------------------------------------------
 

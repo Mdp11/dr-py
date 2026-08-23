@@ -1,4 +1,4 @@
-"""Table-driven tests for `touched_keys` (Phase B): each op kind maps to an
+"""Table-driven tests for `touched_keys`: each op kind maps to an
 exact set of read-keys. Batches are applied through the REAL `_apply_batch`
 so the `_BatchResult` shapes match production."""
 
@@ -196,7 +196,7 @@ def test_create_element_keys() -> None:
 
 
 def test_typed_scan_always_carries_untyped_scan() -> None:
-    """Pins the Task 7 carry-in: `evict_touched` intersects `touched` with a
+    """`evict_touched` intersects `touched` with a
     cell's read-set with NO expansion, so a cell that only recorded
     `("scan", None)` (an untyped `dr.elements()` scan) would survive a
     touched set containing only `("scan", "Derived")` — a stale-value bug,

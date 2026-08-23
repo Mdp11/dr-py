@@ -19,7 +19,7 @@ from .conftest import AUTH_HEADERS, papi, seed_default_project
 from .test_commits_metamodel_ops import _acquire_mm
 
 
-#: a minimal but VALID metamodel blob — Task 2's hydration test re-parses it
+#: a minimal but VALID metamodel blob — the hydration test re-parses it
 #: via load_metamodel_str, so it must be loadable (not just any string).
 _MM_BLOB = "elements:\n  - name: Node\n"
 
@@ -80,7 +80,7 @@ def test_hydrate_session_loads_strict_mode() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Task 3 — HTTP route tests
+# HTTP route tests
 # ---------------------------------------------------------------------------
 
 
@@ -190,7 +190,7 @@ def test_editor_cannot_toggle_strict_mode(client) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Task 4 — strict-mode enforcement in the commit handler
+# strict-mode enforcement in the commit handler
 # ---------------------------------------------------------------------------
 
 

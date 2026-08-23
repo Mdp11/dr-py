@@ -73,7 +73,7 @@ def test_stdout_truncation():
     assert res.truncated and len(res.stdout) <= 8  # cap + ellipsis slack
 
 
-# --- additional coverage beyond the brief's 5 tests -------------------------
+# --- additional coverage ----------------------------------------------------
 
 
 def test_element_attrs_indexing_and_props():
@@ -256,7 +256,7 @@ def test_dr_types_and_dr_type_are_gone():
     assert "'type'" in res.error.message
 
 
-# --- Task 5: Relationship class, outgoing()/incoming() filters, expected= ----
+# --- Relationship class, outgoing()/incoming() filters, expected= ----------
 
 
 def test_outgoing_returns_relationship_objects():
@@ -512,9 +512,7 @@ def test_relationship_does_not_alias_list_valued_property_in_memo():
     assert res.result_repr == "2"
 
 
-# --- Fix wave: inheritance-aware hop filters + dangling far-endpoint skip ---
-# (closes two coverage gaps a reviewer found in Task 5's test suite: see
-# .superpowers/sdd/task-5-report.md's "Fix wave" section for the writeup.)
+# --- Inheritance-aware hop filters + dangling far-endpoint skip ------------
 
 
 def _inheritance_model():

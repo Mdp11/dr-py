@@ -1,18 +1,16 @@
-"""``POST /metamodel/rebind`` retired (Task 9, spec 2026-08-16): the rebind
-half of the ``metamodel.*`` op family now lands ONLY through ``POST
-/commits`` (Tasks 5-8 built that path — owner gate, ``mm`` lease
-verification, quiet-peers guard, forced snapshot, ``rebind_event``, journal
-columns — and ``test_commits_metamodel_ops.py`` is the exhaustive coverage
-for all of it). This file keeps two things:
+"""The rebind half of the ``metamodel.*`` op family lands ONLY through
+``POST /commits`` (owner gate, ``mm`` lease verification, quiet-peers guard,
+forced snapshot, ``rebind_event``, journal columns — ``test_commits_
+metamodel_ops.py`` is the exhaustive coverage for all of it). This file
+keeps two things:
 
-1. A tombstone proving the standalone route answers 404/405, next to a
+1. A tombstone proving ``POST /metamodel/rebind`` answers 404/405, next to a
    sibling on the same ``/metamodel`` prefix answering 200 — so a wholesale
    router-mounting mistake can't hide behind the tombstone.
-2. ``test_rebind_commit_survives_eviction``, ported to the commit flow: the
-   ONE behaviour from the old suite that had no commit-flow equivalent
-   anywhere else — a rebound project re-hydrating after eviction, with a
-   pre-existing element whose type the candidate metamodel no longer
-   declares surviving via ``strict=False`` decode instead of being dropped.
+2. ``test_rebind_commit_survives_eviction``: a rebound project re-hydrating
+   after eviction, with a pre-existing element whose type the candidate
+   metamodel no longer declares surviving via ``strict=False`` decode
+   instead of being dropped.
 """
 
 from __future__ import annotations

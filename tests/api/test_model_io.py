@@ -1,4 +1,4 @@
-"""Tests for the Phase C3 streaming load/save endpoints.
+"""Tests for the streaming load/save endpoints.
 
 POST /model/load, POST /model/upload, POST /model/save, GET /model/download
 (routes/model.py) — file-path loads, raw-body uploads, chunked save/download,

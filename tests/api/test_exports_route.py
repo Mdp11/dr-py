@@ -1,4 +1,4 @@
-"""POST /exports/run — the exporter artifact's zip assembly (spec §4.3)."""
+"""POST /exports/run — the exporter artifact's zip assembly."""
 
 import io
 import json
@@ -97,12 +97,11 @@ def _run(client, artifact_id):
 
 
 def _names(resp) -> list[str]:
-    """Zip member names MINUS `manifest.json`. Most of this module's tests
-    pin exact entry-naming/dedupe mechanics that predate the manifest
-    (Task 7) — output.manifest defaults True, so every run now carries a
-    root-level manifest member alongside the entries these tests actually
-    exercise; filtering it out here keeps those assertions about entry
-    naming, not about the manifest (which has its own tests below)."""
+    """Zip member names MINUS `manifest.json`. `output.manifest` defaults
+    True, so every run carries a root-level manifest member alongside the
+    entries these tests actually exercise; filtering it out here keeps those
+    assertions about entry naming, not about the manifest (which has its own
+    tests below)."""
     return [
         n for n in zipfile.ZipFile(io.BytesIO(resp.content)).namelist()
         if n != "manifest.json"
@@ -336,8 +335,7 @@ def test_colliding_entry_names_dedupe_with_a_suffix_in_entry_order(client):
 
 
 # --- _aggregate_pending: pure, so hand-built ScriptStatusOut values are
-# enough — no DB, no app fixture, no runner (see task-7-report.md, Finding 2
-# of the fix round). ---------------------------------------------------
+# enough — no DB, no app fixture, no runner. ----------------------------
 
 
 def test_aggregate_pending_prefers_computing_over_failed():
@@ -572,13 +570,12 @@ def test_split_entry_member_path_reserves_against_a_sibling_entry(client) -> Non
     (`folder=""`, `name="X"`, split json) writes `X/root.json` (its one
     partition is the single Block named "root"), and entry B
     (`folder="X"`, `name="root"`, plain json) independently renders to the
-    SAME member `X/root.json`. Before the fix, `taken` only ever held `"X"`
-    for entry A (never the actual `"X/root"` path its file landed at), so
-    `_dedupe_path` for entry B saw no collision and both entries wrote the
-    byte-identical zip member — `zipfile` warns and extraction is
-    last-wins. This must fail RED before the fix (both members present,
-    `len(names) != len(set(names))`) and pass GREEN after (entry B's
-    `root.json` deduped to `root_2.json`)."""
+    SAME member `X/root.json`. If `taken` only ever held `"X"` for entry A
+    (never the actual `"X/root"` path its file landed at), `_dedupe_path`
+    for entry B would see no collision and both entries would write the
+    byte-identical zip member — `zipfile` warns and extraction is last-wins.
+    Entry B's `root.json` must instead dedupe to `root_2.json`, with both
+    members present and `len(names) == len(set(names))`."""
     _bootstrap_model(client)
     scoped_payload = {
         "row_source": {
@@ -612,16 +609,14 @@ def test_split_entry_member_path_reserves_against_a_sibling_entry(client) -> Non
     assert set(names) == {"X/root.json", "X/root_2.json"}
 
 
-# ---- Phase 2: csv/jsonl entries + json_doc --------------------------------
+# ---- csv/jsonl entries + json_doc -----------------------------------------
 #
-# Coverage note on `on_error` (corrected during the Phase 2 final review — an
-# earlier version of this comment claimed engine-level coverage that does not
-# exist): `contains_error_marker` itself has unit tests
+# Coverage note on `on_error`: `contains_error_marker` itself has unit tests
 # (`tests/table/test_json_export.py`) and `JsonDocumentOptions.on_error` has
-# schema/round-trip tests (`tests/table/test_exporter.py`), but nothing
-# exercised `table_export_engine._check_on_error` — the function that actually
-# applies the policy to a rendered export — until the two tests below, which
-# use `SCRIPT_TABLE_PAYLOAD` (a script column with no runner configured, the
+# schema/round-trip tests (`tests/table/test_exporter.py`), but the two tests
+# below are what exercises `table_export_engine._check_on_error` — the
+# function that actually applies the policy to a rendered export — using
+# `SCRIPT_TABLE_PAYLOAD` (a script column with no runner configured, the
 # same mechanism `test_table_export_json.py`'s
 # `test_uncomputed_script_cells_become_error_markers` uses) to produce a real
 # `{"$error": ...}` cell through `/exports/run` end to end.
@@ -747,8 +742,8 @@ def test_json_doc_on_csv_entry_is_tolerated_and_ignored(client):
 
 
 def test_json_doc_shape_and_pretty_are_ignored_on_jsonl_entries(client):
-    """Plan + spec §6: on jsonl, `shape`/`pretty` are "ignored with
-    tolerance" but `on_error` still applies. The same `key_column: 99` probe
+    """On jsonl, `shape`/`pretty` are ignored with tolerance but `on_error`
+    still applies. The same `key_column: 99` probe
     as the two siblings above pins that `shape: "object"` (and the key column
     it would otherwise require/validate) never reaches jsonl's rendering at
     all — a real consult would 422 on the out-of-range column exactly like
@@ -853,7 +848,7 @@ def test_jsonl_entry_split_files_nest_under_the_entry_folder(client):
     assert len(names) == 3
 
 
-# ---- Phase 3: draft runs (spec §9.1) --------------------------------------
+# ---- draft runs -------------------------------------------------------
 
 
 def _run_draft(client, definition, name="draft"):
@@ -953,7 +948,7 @@ def test_draft_run_with_no_entries_422s(client):
     assert "no entries" in r.json()["detail"]
 
 
-# ---- Phase 3: run-by-name (spec §9.2) -------------------------------------
+# ---- run-by-name -------------------------------------------------------
 
 
 def _run_by_name(client, name):
@@ -993,11 +988,11 @@ def test_run_by_name_ambiguous_409s_listing_candidates(client, monkeypatch):
     _bootstrap_model(client)
     t = _mk_table(client, "parts")
     x1 = _mk_export(client, [{"source": {"ref": t}, "format": "json"}], name="dup")
-    # The brief's premise (a raw content-layer insert can slip a duplicate
-    # (kind, name) past the create/rename routes' 409) does not hold today:
     # `project_artifacts` carries a genuine DB-level UNIQUE constraint on
-    # (project_id, kind, name) (Alembic 0008, `db_models.ArtifactRow`), so
-    # ANY insert of a second "exporter"/"dup" row — through `content.
+    # (project_id, kind, name) (`db_models.ArtifactRow`), so a raw
+    # content-layer insert cannot slip a duplicate past the create/rename
+    # routes' 409 either — ANY insert of a second "exporter"/"dup" row —
+    # through `content.
     # create_artifact` or raw SQL alike — raises `IntegrityError`; a true
     # duplicate is unreachable through any write path against this schema.
     # The route's ambiguity handling is still worth proving deterministic
@@ -1029,7 +1024,7 @@ def test_run_by_name_ambiguous_409s_listing_candidates(client, monkeypatch):
     assert x2 in r.json()["detail"]
 
 
-# ---- Phase 3: project scoping on the two newly reachable paths -----------
+# ---- project scoping on the two newly reachable paths --------------------
 #
 # The code is already correct (`t.project_id != project_id` in
 # `_execute_export`; `ArtifactRow.project_id == project_id` in

@@ -1,6 +1,6 @@
-"""Lease mirror (Phase 7, scoped): seam, clock conversion, write-through,
-restore-on-hydrate, degradation. Redis itself is only touched by the
-integration-marked test in test_lock_mirror_redis.py."""
+"""Lease mirror: seam, clock conversion, write-through, restore-on-hydrate,
+degradation. Redis itself is only touched by the integration-marked test in
+test_lock_mirror_redis.py."""
 
 from __future__ import annotations
 
@@ -386,8 +386,8 @@ def _add_member(user_id: str, email: str) -> None:
 
 
 def test_leases_survive_restart(client: TestClient) -> None:
-    """The point of the phase: acquire -> 'restart' -> same token still works,
-    peers still conflict."""
+    """The point of the lease mirror: acquire -> 'restart' -> same token
+    still works, peers still conflict."""
     eid = _create_element(client)
     token = _acquire(client, eid)
 
@@ -456,8 +456,8 @@ def test_unreachable_redis_degrades_without_raising() -> None:
 
 def test_concurrent_calls_use_a_single_lock_for_transition_bookkeeping() -> None:
     # NOT a race-reproduction test (see the module's design note on why one
-    # isn't practical here): this pins the STRUCTURAL invariant the fix
-    # relies on -- _mark_down/_mark_up/_in_cooldown all take the SAME lock
+    # isn't practical here): this pins the STRUCTURAL invariant that
+    # correctness relies on -- _mark_down/_mark_up/_in_cooldown all take the SAME lock
     # instance around the read-check-write of `_down`/`_down_until`, so two
     # concurrent callers can never interleave through that region. A thread
     # holding the lock (simulated by acquiring it directly) must make a

@@ -46,13 +46,11 @@ def test_upload_on_nonempty_model_409(client: TestClient) -> None:
 
 
 # ---------------------------------------------------------------------------
-# `_peer_mm_conflict` honor rule (routes/metamodel.py): ported from
-# test_metamodel_rebind.py (Task 9) when POST /metamodel/rebind retired —
-# these exercise POST /metamodel (upload) and DELETE /metamodel (clear),
-# which stay alive and share the helper with the now-gone standalone rebind
-# route; the commit-flow ``metamodel.rebind`` op replaced the honor check
-# with hard lock verification instead (test_commits_metamodel_ops.py), so
-# this file is the only remaining coverage for the honor-rule callers.
+# `_peer_mm_conflict` honor rule (routes/metamodel.py): exercises POST
+# /metamodel (upload) and DELETE /metamodel (clear), the only two callers
+# left of the helper — the commit-flow ``metamodel.rebind`` op uses hard
+# lock verification instead (test_commits_metamodel_ops.py), so this file is
+# the only remaining coverage for the honor-rule callers.
 # ---------------------------------------------------------------------------
 
 _PEER = {"x-user-id": "peer", "x-user-email": "peer@example.com"}

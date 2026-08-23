@@ -173,7 +173,7 @@ def test_move_folder_cycle_422() -> None:
 
 def test_mid_batch_failure_leaves_prefix_applied() -> None:
     """apply_view_ops does NOT roll itself back — mirrors _apply_batch's
-    caller contract (Task 7 adds apply_view_ops_atomic for callers that want
+    caller contract (``apply_view_ops_atomic`` is for callers that want
     all-or-nothing). The pinned behavior: the applied prefix stays, and the
     exception fires on the offending op."""
     v = _view()
@@ -221,9 +221,9 @@ def test_apply_view_ops_atomic_rolls_back_prefix() -> None:
 
 
 def test_apply_view_ops_atomic_rolls_back_multi_op_inverse_unit() -> None:
-    """Regression for final-review Fix 4b: the rollback-prefix test above
-    only exercises a ``rename_folder`` prefix, whose inverse is a single,
-    trivially-exact op. This drives a ``delete_folder`` on a NON-EMPTY folder
+    """The rollback-prefix test above only exercises a ``rename_folder``
+    prefix, whose inverse is a single, trivially-exact op. This drives a
+    ``delete_folder`` on a NON-EMPTY folder
     (``A``, which has a nested subfolder, two placed elements, and a placed
     artifact ref — see ``_view()``) as the successful prefix, whose inverse is
     the MULTI-OP ``_recreate_ops`` unit (the shape ``rollback_view`` actually
@@ -272,12 +272,9 @@ def test_view_op_folder_ids() -> None:
 
 
 def test_view_op_folder_ids_delete_folder_expands_subtree() -> None:
-    """Regression for the artefacts-revamp final-review Fix 2: a
-    ``delete_folder`` op only NAMES its own id, but deleting it removes its
-    whole subtree — the undo route's peer-lease guard must see every
-    descendant too, or a peer's lease on a CHILD folder goes unenforced (the
-    docstring's old "over-reports on purpose, never hides a lease" claim was
-    false for exactly this op kind)."""
+    """A ``delete_folder`` op only NAMES its own id, but deleting it removes
+    its whole subtree — the undo route's peer-lease guard must see every
+    descendant too, or a peer's lease on a CHILD folder goes unenforced."""
     v = _view()
     f = _ids(v)
     assert view_op_folder_ids(v, [DeleteFolderOp(kind="delete_folder", id=f["A"])]) == {
@@ -287,8 +284,8 @@ def test_view_op_folder_ids_delete_folder_expands_subtree() -> None:
 
 
 def test_view_op_folder_ids_move_folder_resolves_current_parent() -> None:
-    """Regression for the artefacts-revamp final-review Fix 2: ``move_folder``
-    only names its DESTINATION parent in the op itself — the folder's CURRENT
+    """``move_folder`` only names its DESTINATION parent in the op itself —
+    the folder's CURRENT
     parent (resolved by walking ``view``, exactly like ``required_locks``
     does) must also be reported, or a peer's lease on the folder's old
     container goes unenforced."""

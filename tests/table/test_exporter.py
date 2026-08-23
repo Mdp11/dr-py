@@ -1,5 +1,5 @@
-"""The exporter payload schema and the presentation-override application
-(spec §3.3/§3.4). `overridden_table` output is RENDER ONLY — these tests pin
+"""The exporter payload schema and the presentation-override application.
+`overridden_table` output is RENDER ONLY — these tests pin
 that it never touches structural fields and never mutates its input."""
 
 import pytest
@@ -72,8 +72,8 @@ def test_overrides_replace_presentation_by_index():
 
 def test_unmentioned_columns_get_DEFAULTS_not_the_tables_own_settings():
     # Column 1 has json_export {"key": "own_key"} on the table — the entry
-    # doesn't mention it, so the override output must NOT inherit it (spec:
-    # the two config sets never bleed into each other).
+    # doesn't mention it, so the override output must NOT inherit it: the
+    # two config sets never bleed into each other.
     out = overridden_table(_defn(), _entry())
     assert out.columns[1].export is None
     assert out.columns[1].json_export is None

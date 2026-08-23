@@ -155,7 +155,7 @@ def test_resolve_table_inlines_script_column_refs() -> None:
     )
 
 
-# ---- Task 7: real ScriptColumn evaluation (cells, chaining, expand) ---------
+# ---- Real ScriptColumn evaluation (cells, chaining, expand) ---------------
 #
 # These exercise build_rows_ex/evaluate_cells with a real ScriptEvalContext
 # backed by TrustedRunner (test-only, no sandbox — see tests/script/
@@ -288,7 +288,7 @@ def test_script_memo_one_call_per_binding() -> None:
     ctx.close()
 
 
-# ---- Task 8: table sorting by script columns --------------------------------
+# ---- Table sorting by script columns ---------------------------------------
 
 
 def test_sort_by_script_column_mixed_kinds_and_errors() -> None:
@@ -322,9 +322,9 @@ def test_sort_by_script_column_mixed_kinds_and_errors() -> None:
     ctx.close()
 
 
-# ---- Task 5: PendingCell (cache-only misses) ---------------------------------
+# ---- PendingCell (cache-only misses) ---------------------------------------
 #
-# Task 4 gave ScriptEvalContext a cache-only mode: a cell-cache miss under
+# ScriptEvalContext's cache-only mode: a cell-cache miss under
 # cache_only synthesizes a `pending` CallResult instead of calling the guest.
 # These tests prove the table cell layer renders that as a `PendingCell`
 # (never as an `ErrorCell`, never setting `ctx.errored`) in both the collapse
@@ -426,7 +426,7 @@ def test_expand_rederive_is_cache_only() -> None:
     ctx.close()
 
 
-# ---- Task 3 (script correctness): navigation ScriptStep threaded through ----
+# ---- Navigation ScriptStep threaded through --------------------------------
 #
 # `evaluate.py`'s navigation helpers (row source AND navigation columns) must
 # forward the table's `ScriptEvalContext` into `navigation.evaluate.evaluate`

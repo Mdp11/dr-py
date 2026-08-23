@@ -1,18 +1,18 @@
 """Shared `ScriptRunner` stand-ins for the API script tests.
 
-`CountingRunner` (extracted from `test_script_cell_cache_api.py` in Task 6)
-counts real guest invocations so a test can prove the cell cache — not the
-guest — served a repeat call. `ScriptedRunner` scripts each call's outcome by
-CALL INDEX (the call's element ids are passed through too), so a sweep's
-timeout sequence is deterministic regardless of scope iteration order.
-`BlockingRunner` gates every call on a caller-controlled event, so an async
-sweep can be paused mid-run while a test cancels/evicts it, then released for a
-clean daemon-thread exit. `BarrierRunner` parks every session's FIRST call on a
-`threading.Barrier`, which is how a test proves a sharded sweep really opened N
-distinct guest sessions instead of asserting a scheduling-dependent count.
+`CountingRunner` counts real guest invocations so a test can prove the cell
+cache — not the guest — served a repeat call. `ScriptedRunner` scripts each
+call's outcome by CALL INDEX (the call's element ids are passed through too),
+so a sweep's timeout sequence is deterministic regardless of scope iteration
+order. `BlockingRunner` gates every call on a caller-controlled event, so an
+async sweep can be paused mid-run while a test cancels/evicts it, then released
+for a clean daemon-thread exit. `BarrierRunner` parks every session's FIRST
+call on a `threading.Barrier`, which is how a test proves a sharded sweep
+really opened N distinct guest sessions instead of asserting a
+scheduling-dependent count.
 
-THREAD SAFETY (Task 11): a sharded sweep drives these doubles from several
-worker threads at once, so every counter below is mutated under a private lock.
+THREAD SAFETY: a sharded sweep drives these doubles from several worker
+threads at once, so every counter below is mutated under a private lock.
 The public attributes keep their pre-existing shapes (`CountingRunner.calls` a
 plain `int`, `ScriptedRunner.calls`/`BlockingRunner.calls` a mutable `[count]`)
 so the single-threaded tests that read them are untouched.

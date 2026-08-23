@@ -1,4 +1,4 @@
-"""Tests for the paged/on-demand read endpoints (Phase C2-read):
+"""Tests for the paged/on-demand read endpoints:
 
 GET /model/summary, /model/elements (paged + search), /model/elements/{id}/
 neighborhood, /model/elements/{id}/relationships, /model/containment/roots,
@@ -1093,9 +1093,9 @@ def test_tree_items_endpoint_rejects_oversized_batch(client: TestClient) -> None
 
 
 def _seed_view(client: TestClient, folders: list[dict]) -> None:
-    """Build a view via POST /commits using the same nested folder-dict shape
-    the retired ``PUT /view/snapshot`` route accepted: each dict is
-    ``{"name": ..., "folders": [...], "elements": [...]}``. Folders created
+    """Build a view via POST /commits using a nested folder-dict shape: each
+    dict is ``{"name": ..., "folders": [...], "elements": [...]}``. Folders
+    created
     within the batch need no lock to be referenced by later ops in the SAME
     batch, so a single ``root`` lease covers the whole tree."""
     ops: list[dict] = []

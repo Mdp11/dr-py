@@ -1353,11 +1353,11 @@ def test_render_json_emits_the_row_number_at_its_position():
 def test_render_json_honors_export_order_for_a_grouped_column():
     """A grouped column's array moves with the export order, at BOTH levels.
 
-    `_render_level` used to emit `sorted([*columns, *groups])` — definition
-    order — which happens to put the array last in every naturally-ordered
-    table, so no other test can tell the two apart. Here the ranks reverse the
-    definition: the "Component" array leads its object, and inside each entry
-    "Component Mass" leads the grouped column's own value. Both levels are
+    Definition order happens to put the array last in every
+    naturally-ordered table, so no other test can tell definition order
+    apart from export order. Here the ranks reverse the definition: the
+    "Component" array leads its object, and inside each entry "Component
+    Mass" leads the grouped column's own value. Both levels are
     asserted verbatim because `_render_group` forwards `order` to the nested
     `_render_level` and nothing else pins that it does.
     """
@@ -1443,7 +1443,7 @@ def test_render_json_omits_the_row_number_inside_groups():
     ]
 
 
-# ---- JSONL serialization + on_error probe (Exporter v2 Phase 2) -----------
+# ---- JSONL serialization + on_error probe ----------------------------
 
 
 def test_jsonl_is_one_compact_object_per_line_newline_terminated():
@@ -1463,7 +1463,7 @@ def test_error_marker_found_at_any_depth():
     assert not contains_error_marker("plain")
 
 
-# ---- Object-shape document keys (Exporter v2 Phase 2, spec §7) -------------
+# ---- Object-shape document keys ----------------------------------------
 
 
 def _keys_doc(key_header_hidden: bool = False) -> dict:
@@ -1511,7 +1511,7 @@ def test_doc_keys_render_one_string_key_per_document():
 
 def test_doc_keys_work_for_a_hidden_key_column():
     # Hidden = evaluated but never emitted; the key reads the CELL, not the
-    # rendered doc, so include/hidden state is irrelevant (spec §7).
+    # rendered doc, so include/hidden state is irrelevant.
     mm = _parts_mm()
     model = _parts_model(mm)
     docs, keys = _render_ex(mm, model, _keys_doc(key_header_hidden=True), key_column=0)

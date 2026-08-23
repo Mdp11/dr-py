@@ -1,4 +1,4 @@
-"""GET /model/status: non-hydrating open/validation progress (spec §3/§4)."""
+"""GET /model/status: non-hydrating open/validation progress."""
 
 from __future__ import annotations
 

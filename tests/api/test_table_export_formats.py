@@ -1,7 +1,7 @@
-"""POST /tables/export with format=csv / format=jsonl (Exporter v2 Phase 2).
+"""POST /tables/export with format=csv / format=jsonl.
 
-The standalone route gets the new formats but NOT `json_doc` — document
-shaping stays exporter-entry-only (spec §6)."""
+The standalone route gets these formats but NOT `json_doc` — document
+shaping stays exporter-entry-only."""
 
 import csv
 import io

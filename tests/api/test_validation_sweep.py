@@ -1,4 +1,4 @@
-"""Chunked background validation sweep (spec §3).
+"""Chunked background validation sweep.
 
 Sync mode is what the rest of the API suite runs under (conftest pins it);
 these tests exercise both modes plus the abort-on-model-replace guard.

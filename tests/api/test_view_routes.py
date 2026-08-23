@@ -57,11 +57,9 @@ def test_get_view_rev_none_without_row(client: TestClient) -> None:
 
 def test_get_view_surfaces_validate_view_warnings(client: TestClient) -> None:
     """Wire-level coverage for GET /view surfacing ``validate_view`` warnings
-    (``IssueOut.from_core`` serialization) now that the only other exerciser
-    of this response shape — the retired ``PUT /view/snapshot`` route — is
-    gone. ``validate_view`` itself is unit-tested in depth at
-    tests/view/test_validation.py; this only proves the wire response still
-    carries its findings through GET /view."""
+    (``IssueOut.from_core`` serialization). ``validate_view`` itself is
+    unit-tested in depth at tests/view/test_validation.py; this only proves
+    the wire response still carries its findings through GET /view."""
     _bootstrap(client)
     setup = create_folder_via_commit(client, "F")
     fid = setup["id_map"]["tmp_setup"]

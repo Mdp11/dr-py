@@ -157,7 +157,7 @@ def test_create_unsupported_kind_422(dbs) -> None:
     assert e.value.status_code == 422
 
 
-# --- Finding 1: restore mode must 422 on a DB-level name clash, not 500 ----
+# --- Restore mode must 422 on a DB-level name clash, not 500 --------------
 
 
 def test_restore_create_into_taken_name_422(dbs) -> None:
@@ -227,7 +227,7 @@ def test_restore_create_of_an_existing_id_reports_the_id_not_a_name(dbs) -> None
     assert str(e.value.detail) == f"an artifact with id {row.id!r} already exists"
 
 
-# --- Finding 2: validate and apply must agree on batch-local name state ---
+# --- Validate and apply must agree on batch-local name state --------------
 
 
 def test_validate_and_apply_agree_on_delete_then_reuse_name(dbs) -> None:

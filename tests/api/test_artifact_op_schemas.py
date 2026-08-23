@@ -110,11 +110,11 @@ def test_legacy_model_ops_endpoint_rejects_artifact_ops(client: TestClient) -> N
 def test_commit_endpoints_route_artifact_ops_to_the_artifact_flow(
     client: TestClient,
 ) -> None:
-    # Task 5 replaced the temporary 422 guards here with the real flow, so
-    # these two now fail for their own domain's reasons rather than a blanket
-    # rejection: preview validates the op dry (unknown artifact -> 422) and
-    # commit checks the lease first (none held -> 409). Neither ever reaches
-    # the model applier. Full behavior lives in test_commits_artifact_ops.py.
+    # Preview and commit fail for their own domain's reasons rather than a
+    # blanket rejection: preview validates the op dry (unknown artifact ->
+    # 422) and commit checks the lease first (none held -> 409). Neither ever
+    # reaches the model applier. Full behavior lives in
+    # test_commits_artifact_ops.py.
     r = client.post(papi("/commits/preview"), json=_artifact_op_batch(client))
     assert r.status_code == 422
     assert "a1" in r.text  # rejected as an unknown artifact, not as an op kind

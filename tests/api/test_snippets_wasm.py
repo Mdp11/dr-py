@@ -5,8 +5,8 @@ Opt-in (``pytestmark = pytest.mark.integration``, deselected by the default
 CPython-WASI guest binary (`spikes/code_exec/fetch_python_wasi.sh`), which is
 too large to commit and isn't available in every dev/CI environment.
 
-Task 9 scope (see `.superpowers/sdd/task-9-brief.md`): `WasmScriptRunner.run()`
-now drives the REAL bridge loop — it injects `FACADE_SOURCE` + user code into
+`WasmScriptRunner.run()` drives the REAL bridge loop — it injects
+`FACADE_SOURCE` + user code into
 the guest, serves the guest's `dr` facade calls with a per-run
 `BridgeDispatcher`, enforces the two-sided wall deadline (shared epoch cadence
 ticker + wall-bounded FIFO reads), applies the determinism shims, and maps
@@ -49,7 +49,7 @@ def wasm_runner() -> Iterator[WasmScriptRunner]:
 @pytest.fixture
 def small_model():
     """Same tiny 3-`Building` model the standalone `run()` tests use, wrapped
-    as a fixture so the Task 14 session tests can address elements by id."""
+    as a fixture so the session tests can address elements by id."""
     from tests.script.conftest import tiny_model
 
     return tiny_model()
@@ -346,9 +346,7 @@ def test_wasm_runner_close_is_idempotent() -> None:
 
 
 def test_wasm_boot_failure_does_not_wedge_pool() -> None:
-    """Reviewer-found Critical fix regression test (Task 8).
-
-    A bad `guest_lib_path` makes `wasi.preopen_dir` raise inside the guest
+    """A bad `guest_lib_path` makes `wasi.preopen_dir` raise inside the guest
     worker thread almost immediately (before it ever writes the `ready`
     handshake line). Because both pool-instance FIFOs are opened O_RDWR on
     the host side (so `open()` never blocks and the FIFO never sees a
@@ -399,9 +397,9 @@ def test_wasm_boot_failure_does_not_wedge_pool() -> None:
 
 
 def test_wasm_session_repeated_calls_and_state(wasm_runner: WasmScriptRunner, small_model) -> None:
-    """Task 14: an embedded session execs the module once and keeps
-    module-level state (`n`) across repeated `call()`s on the same warm guest;
-    `close()` is idempotent."""
+    """An embedded session execs the module once and keeps module-level
+    state (`n`) across repeated `call()`s on the same warm guest; `close()`
+    is idempotent."""
     from data_rover.core.script.runner import RunLimits, ScriptBudget
 
     ids = sorted(small_model.elements)
@@ -486,7 +484,7 @@ def test_wasm_step_single_element_return(wasm_runner: WasmScriptRunner, small_mo
 
 
 def test_wasm_transform_call_roundtrip(wasm_runner: WasmScriptRunner, small_model) -> None:
-    """Real-sandbox leg of the Phase 4 `transform(doc)` hook: `call("transform",
+    """Real-sandbox leg of the `transform(doc)` hook: `call("transform",
     [], doc=...)` skips the (empty-anyway) element projection and round-trips
     an arbitrary JSON `doc` through the guest via the "json" wire tag."""
     from data_rover.core.script.runner import RunLimits, ScriptBudget

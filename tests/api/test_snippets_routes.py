@@ -1,15 +1,15 @@
-"""Tests for POST /snippets/run|lint|cancel (Task 11).
+"""Tests for POST /snippets/run|lint|cancel.
 
 **Tripwire note**: conftest pins ``DATA_ROVER_DEV_SEED=false`` (see
 conftest.py's env block), which would make ``snippet_runner="trusted"`` fail
-the RCE tripwire in ``script_runner.build_runner_from_settings`` (Task 10) if
-selected via settings. These tests never touch that settings knob at all —
-instead they inject the in-process, sandbox-free ``TrustedRunner`` directly
-via FastAPI's dependency-override seam:
+the RCE tripwire in ``script_runner.build_runner_from_settings`` if selected
+via settings. These tests never touch that settings knob at all — instead
+they inject the in-process, sandbox-free ``TrustedRunner`` directly via
+FastAPI's dependency-override seam:
 ``app.dependency_overrides[get_runner] = lambda: TrustedRunner()``. This works
 because the route consumes the runner through ``Depends(get_runner)`` (see
-routes/snippets.py::run_snippet), which is exactly the seam Task 10 built for
-this purpose. The tripwire itself stays untouched and unexercised here.
+routes/snippets.py::run_snippet). The tripwire itself stays untouched and
+unexercised here.
 """
 
 from __future__ import annotations
@@ -343,13 +343,13 @@ def test_cancel_own_active_run_204(client: TestClient) -> None:
 
 
 # ---------------------------------------------------------------------------
-# registry collision semantics (reviewer fix: project-scoped keys +
+# registry collision semantics (project-scoped keys +
 # token-guarded deregistration)
 # ---------------------------------------------------------------------------
 
 
 def test_registry_stale_deregister_does_not_kill_newer_entry() -> None:
-    """The race the reviewer walked: user A registers run_id "x"; while A's
+    """User A registers run_id "x"; while A's
     run is in flight, user B (any project) registers the SAME run_id "x" --
     `_register_run`'s last-write-wins semantics silently overwrite A's entry
     with B's. When A's request finishes and calls `_deregister_run` with
@@ -403,14 +403,14 @@ def test_registry_cross_project_isolation() -> None:
 
 
 # ---------------------------------------------------------------------------
-# concurrency guard (Task 10 settings, enforced here)
+# concurrency guard (settings, enforced here)
 # ---------------------------------------------------------------------------
 #
-# A live TestClient/threadpool race is awkward to drive deterministically
-# (per the brief's own acknowledgement), so this is a direct unit test on
-# `ConcurrencyGuard` -- the class the route calls into -- rather than an
-# HTTP-level race. `ConcurrencyGuard` moved to `snippet_concurrency.py`
-# (Task 10) so it can be shared with embedded evaluation (`script_eval.py`).
+# A live TestClient/threadpool race is awkward to drive deterministically,
+# so this is a direct unit test on `ConcurrencyGuard` -- the class the route
+# calls into -- rather than an HTTP-level race. `ConcurrencyGuard` lives in
+# `snippet_concurrency.py` so it can be shared with embedded evaluation
+# (`script_eval.py`).
 
 
 def test_concurrency_guard_global_limit() -> None:
@@ -457,7 +457,7 @@ def test_concurrency_429_over_global_cap(client: TestClient, monkeypatch: pytest
 
 
 # ---------------------------------------------------------------------------
-# docs (Task 2)
+# docs
 # ---------------------------------------------------------------------------
 
 
@@ -498,7 +498,7 @@ def test_docs_need_membership(client: TestClient) -> None:
 
 
 # ---------------------------------------------------------------------------
-# element_ids (Task 2 of the multi-element-value spec)
+# element_ids (multi-element value)
 # ---------------------------------------------------------------------------
 
 
@@ -574,11 +574,11 @@ def test_run_script_ignores_element_ids(client: TestClient) -> None:
 
 
 # ---------------------------------------------------------------------------
-# read-only entry mapping (Task 7): routes/snippets.py's
+# read-only entry mapping: routes/snippets.py's
 # record_ops=(payload.entry == "script") -- SECURITY TRIPWIRE, see module
-# note at the top of this file and the Task 7 brief. `value`/`step` console
-# runs must be blocked with zero recorded ops, exactly like the embedded
-# (open_session) path's record_ops=False.
+# note at the top of this file. `value`/`step` console runs must be blocked
+# with zero recorded ops, exactly like the embedded (open_session) path's
+# record_ops=False.
 # ---------------------------------------------------------------------------
 
 
@@ -613,7 +613,7 @@ def test_run_value_and_step_entries_are_read_only(
 
 
 # ---------------------------------------------------------------------------
-# Guest-proposed ARTIFACT ops are refused (final-review finding 3).
+# Guest-proposed ARTIFACT ops are refused.
 # `bridge._op_record_op` appends a guest-supplied op dict VERBATIM, and both
 # `OPS_ADAPTER` and `POST /commits` now accept the artifact op family — so
 # without this gate a snippet could propose rewriting another snippet's code,

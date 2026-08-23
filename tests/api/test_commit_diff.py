@@ -849,7 +849,7 @@ def test_diff_of_mixed_layout_and_rebind_renders_both_halves(
     client: TestClient,
 ) -> None:
     """A rebind-carrying batch may also move a node in the SAME commit
-    (spec 2026-08-16 lets a migration batch carry any number of
+    (a migration batch may carry any number of
     ``metamodel.move_node`` ops alongside its one rebind): the structural
     rebind rendering and the layout-moves summary must both fire on one
     page, and the scope union must carry ``model`` (the rebind) AND

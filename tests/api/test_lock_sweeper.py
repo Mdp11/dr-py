@@ -145,8 +145,8 @@ def test_sweep_expiry_broadcasts_lock_expired(feed_client: TestClient) -> None:
     with feed_client.websocket_connect(_feed_url()) as ws:
         ws.receive_json()  # snapshot
 
-        # Acquire a lease. After Task 6 is implemented, this also broadcasts
-        # "acquired" — drain any intervening events in the loop below.
+        # Acquire a lease; this also broadcasts "acquired" — drain any
+        # intervening events in the loop below.
         _lock(feed_client, eid)
 
         # Sweep with a far-future now so the lease is definitely expired.

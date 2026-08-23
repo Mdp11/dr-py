@@ -1,4 +1,4 @@
-"""SweepJob lifecycle against TrustedRunner-style fakes (spec 2026-07-20 §4.3).
+"""SweepJob lifecycle against TrustedRunner-style fakes.
 
 Uses the shared fakes in `tests/api/_script_fakes.py`: `CountingRunner` (all
 calls succeed), `ScriptedRunner` (per-call-INDEX outcome, so timeout sequences
@@ -104,7 +104,7 @@ def settings_sync_sweep(monkeypatch: pytest.MonkeyPatch) -> Settings:
     """Pin `snippet_sweep_sync=True` the same way conftest pins
     `validation_sweep_sync`: an env var, then a fresh `get_settings()`.
 
-    ALSO pins `snippet_sweep_workers=1` (Task 11). Sharding the cell work
+    ALSO pins `snippet_sweep_workers=1`. Sharding the cell work
     across workers makes `ScriptedRunner`'s call INDEX — and therefore any
     scripted timeout/success SEQUENCE, and any exact "aborted at exactly the
     threshold" call count — scheduling-dependent. The guard-semantics tests
@@ -441,7 +441,7 @@ def test_evict_refused_leaves_the_sweep_running() -> None:
     runner.proceed.set()
 
 
-# --- Task 11: sharding the cell work across parallel guest sessions ---------
+# --- Sharding the cell work across parallel guest sessions -----------------
 #
 # These tests opt BACK IN to the fan-out (`settings_sync_sweep` pins
 # `snippet_sweep_workers=1` for the deterministic-sequence tests above). Sync

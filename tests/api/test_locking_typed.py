@@ -1,5 +1,5 @@
 """Typed lock resources: artifact leases share the LockTable with element
-leases under a namespace, never containment-expand, and no longer block
+leases under a namespace, never containment-expand, and do not block
 metamodel rebinds (only bare model-resource leases do)."""
 
 from __future__ import annotations
@@ -124,7 +124,7 @@ def test_second_user_conflicts_on_same_artifact(client: TestClient) -> None:
 
 def test_rebind_ignores_artifact_leases(client: TestClient) -> None:
     # an artifact lease is live; rebind must proceed (artifacts degrade
-    # tolerantly under a retyped metamodel — spec, locking section)
+    # tolerantly under a retyped metamodel)
     r = client.post(
         papi("/locks"),
         json={

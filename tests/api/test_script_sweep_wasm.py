@@ -1,4 +1,4 @@
-"""End-to-end sweep coverage against the REAL wasmtime guest (Phase A-C).
+"""End-to-end sweep coverage against the REAL wasmtime guest.
 
 Opt-in (``pytestmark = pytest.mark.integration``, deselected by the default
 ``-m "not integration and not perf"`` addopts) because it needs the fetched
@@ -45,7 +45,7 @@ GUEST = "spikes/code_exec/vendor/python.wasm"
 LIB = "spikes/code_exec/vendor/lib/python3.14"
 
 #: Rows in the exercised table. Big enough that the whole-table pass is
-#: unambiguously the thing Phase B moved off the request thread, small enough
+#: unambiguously moved off the request thread, small enough
 #: that a synchronous sweep of it stays a few seconds.
 ROWS = 1000
 

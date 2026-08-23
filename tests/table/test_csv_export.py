@@ -1,5 +1,5 @@
 """CSV renderer: layout mirroring of the xlsx writer, RFC-4180 quoting,
-error-cell text, and the row-number pseudo-column (spec §6)."""
+error-cell text, and the row-number pseudo-column."""
 
 import csv
 import io

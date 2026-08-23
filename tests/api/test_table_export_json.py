@@ -286,8 +286,7 @@ def test_export_json_excludes_an_opted_out_column(client):
 
 
 def test_export_json_emits_row_numbers_when_the_grid_flag_is_on(client):
-    # Deliberate behaviour change (spec, "Behaviour change worth stating"):
-    # JSON has never carried row numbers, and now follows show_row_numbers.
+    # JSON export follows show_row_numbers.
     _bootstrap_model(client)
     body = _json_body(show_row_numbers=True)
     docs = client.post(papi("/tables/export"), json=body, headers=AUTH_HEADERS).json()

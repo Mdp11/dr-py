@@ -100,10 +100,8 @@ def _commit_rename(client: TestClient, fid: str, name: str) -> None:
 
 
 def _seed_view(client: TestClient, folders: list[dict]) -> dict[str, str]:
-    """Build a (possibly nested) folder tree via ``POST /commits`` — the
-    commit-flow replacement for the retired ``PUT /view/snapshot`` one-shot
-    setup harness these tests used purely to seed named folders with ids.
-    *folders* uses the same nested shape the old PUT body did:
+    """Build a (possibly nested) folder tree via ``POST /commits`` purely to
+    seed named folders with ids. *folders* is
     ``[{"name": ..., "folders": [...]}, ...]``. Returns a flat {name: id} map
     (names are unique per test, so a flat map is unambiguous even for
     nested folders). A single ``root`` lease covers the whole batch — ids
@@ -184,15 +182,14 @@ def test_non_overlapping_stale_commit_with_real_touched_ids_lands(client: TestCl
 
 
 def test_relationship_id_overlap_conflicts(client: TestClient) -> None:
-    """Model-op overlap coverage (the artifact path was the only one
-    exercised before this fix): a relationship delete/update's CANONICAL op
-    carries only its OWN id, never a ``source_id`` — so ``required_locks``
-    alone (which derives just the source element's lock) cannot detect a
-    same-relationship conflict once the first writer has already deleted it
-    out of the model (its source can no longer be resolved). This exercises
-    the explicit id re-add in ``_batch_touched_ids`` for
-    Update/DeleteRelationshipOp — without it, this test would wrongly land
-    r2 at 200 (or a 422 from the mutation boundary), never a clean 409."""
+    """A relationship delete/update's CANONICAL op carries only its OWN id,
+    never a ``source_id`` — so ``required_locks`` alone (which derives just
+    the source element's lock) cannot detect a same-relationship conflict
+    once the first writer has already deleted it out of the model (its
+    source can no longer be resolved). This exercises the explicit id
+    re-add in ``_batch_touched_ids`` for Update/DeleteRelationshipOp —
+    without it, this test would wrongly land r2 at 200 (or a 422 from the
+    mutation boundary), never a clean 409."""
     base = _rev(client)
     r = _commit(client, [
         {"kind": "create_element", "temp_id": "tmp_a", "type_name": "Node", "properties": {}},
@@ -224,9 +221,9 @@ def test_relationship_id_overlap_conflicts(client: TestClient) -> None:
 
 
 def test_overlapping_stale_commit_409(client: TestClient) -> None:
-    """Deterministic version of the brief's sample: the update path always
-    requires an ``art:`` lease (Task 5), so both writers acquire one up
-    front rather than branching on whether the route demanded it."""
+    """The update path always requires an ``art:`` lease, so both writers
+    acquire one up front rather than branching on whether the route
+    demanded it."""
     r = _commit(client, [{"kind": "create_artifact", "temp_id": "tmp_b",
                           "artifact_kind": "code_snippet", "name": "s",
                           "payload": SNIP}], _rev(client))
@@ -292,7 +289,7 @@ def test_short_tail_from_unjournaled_mutation_409(client: TestClient) -> None:
 
 
 def test_baseline_reset_after_upload_always_conflicts(client: TestClient) -> None:
-    """``POST /model/upload`` replaces the whole model and (Task 9) calls
+    """``POST /model/upload`` replaces the whole model and calls
     ``persist_baseline``: history is cleared and ONE marker commit with
     EMPTY ops is written at the new rev. The tail fully accounts for the rev
     gap (one row, one rev, so the short-tail check does NOT catch it), but
@@ -371,8 +368,8 @@ def test_no_durable_journal_keeps_strict_rule() -> None:
 def test_empty_commit_is_a_no_op_and_never_poisons_the_tail(
     client: TestClient,
 ) -> None:
-    """A message-only "checkpoint" commit must not burn a rev (final-review
-    finding 4). An empty-ops journal row IS ``persist_baseline``'s marker for
+    """A message-only "checkpoint" commit must not burn a rev. An empty-ops
+    journal row IS ``persist_baseline``'s marker for
     "the whole model was replaced opaquely", so writing one here would turn
     every later stale base_rev into an unconditional 409 forever — permanently
     disabling the overlap rule this module tests. Mirrors ``apply_ops``' own
@@ -482,8 +479,7 @@ def test_stale_view_batch_disjoint_from_tail_lands(client) -> None:
 
 
 def test_stale_batch_renaming_delete_folder_subtree_child_409s(client) -> None:
-    """Regression for final-review Fix 4a (the two "hardest kinds"):
-    ``_affected_ids`` reads BOTH a tail commit's forward AND inverse ops, so
+    """``_affected_ids`` reads BOTH a tail commit's forward AND inverse ops, so
     a ``delete_folder D`` tail commit's cascade victims (here child C) surface
     via the inverse unit's ``create_folder`` ops even though the forward op
     only names D. A stale batch that renames C — never mentioning D at all —
@@ -520,8 +516,8 @@ def test_stale_batch_renaming_delete_folder_subtree_child_409s(client) -> None:
 
 
 def test_stale_batch_creating_under_move_folders_old_parent_409s(client) -> None:
-    """Regression for final-review Fix 4a: a ``move_folder F`` tail commit's
-    canonical op only names F's DESTINATION parent (B) — its OLD parent (A)
+    """A ``move_folder F`` tail commit's canonical op only names F's
+    DESTINATION parent (B) — its OLD parent (A)
     surfaces only via the commit's own INVERSE op (``move_folder F`` back to
     A), which ``_affected_ids`` also scans. A stale batch that creates a new
     folder under A — the OLD parent, never named by the tail's forward op —
@@ -569,26 +565,23 @@ def test_stale_batch_creating_under_move_folders_old_parent_409s(client) -> None
 
 
 def test_stale_delete_folder_batch_hydrates_view_for_overlap_check(client) -> None:
-    """Regression for final-review round 3: the pre-mutex overlap check
-    (``_batch_touched_ids``, inside the ``base_rev < model_rev`` staleness
-    block) resolves its OWN local view — never assigned to ``session.view``,
-    since this whole block runs before ``session.write_mutex`` — so a stale
-    batch's own ``delete_folder``/``move_folder`` ops are expanded against
-    the REAL durable tree, not an unhydrated ``None``.
+    """The pre-mutex overlap check (``_batch_touched_ids``, inside the
+    ``base_rev < model_rev`` staleness block) resolves its OWN local view —
+    never assigned to ``session.view``, since this whole block runs before
+    ``session.write_mutex`` — so a stale batch's own
+    ``delete_folder``/``move_folder`` ops are expanded against the REAL
+    durable tree, not an unhydrated ``None``.
 
     The caller's lock is deliberately acquired while the cache is still WARM
-    (so ``expand_targets`` correctly grants a token covering the FULL {D, C}
-    subtree, not the narrower under-scoped grant round 2's finding covers) —
-    this isolates the pre-mutex overlap check as the ONLY thing that could
-    catch the conflict: the in-mutex ``required_locks``/``verify_held`` check
-    would find the caller's broad token sufficient regardless, so without
-    the local hydration fixed here, this batch would silently narrow its
-    touched-set to ``{folder:D}`` alone, miss the overlap with the tail's
-    rename of child C, sail through the lock check too, and land at 200 —
-    not a differently-worded 409, but a genuine lost update. (Verified by
-    literally deleting the local's hydration fallback and confirming this is
-    the one test in the whole suite that catches it — see the round 3
-    report for the exact experiment.)"""
+    so ``expand_targets`` correctly grants a token covering the FULL {D, C}
+    subtree — this isolates the pre-mutex overlap check as the ONLY thing
+    that could catch the conflict: the in-mutex
+    ``required_locks``/``verify_held`` check would find the caller's broad
+    token sufficient regardless, so without the local hydration, this batch
+    would silently narrow its touched-set to ``{folder:D}`` alone, miss the
+    overlap with the tail's rename of child C, sail through the lock check
+    too, and land at 200 — not a differently-worded 409, but a genuine lost
+    update."""
     ids = _seed_view(client, [{"name": "D", "folders": [{"name": "C"}]}])
     d_id = ids["D"]
     c_id = ids["C"]
@@ -599,16 +592,14 @@ def test_stale_delete_folder_batch_hydrates_view_for_overlap_check(client) -> No
     # Acquire the caller's DELETE lock on D while session.view is STILL
     # warm (untouched since the setup above) — expand_targets correctly
     # expands over the real subtree here, granting a token covering BOTH
-    # D and C (folder ids survive the rename). This is deliberately NOT
-    # round 2's narrow-lock repro: the point here is that even a properly
-    # broad lock cannot save a stale batch from landing if the PRE-mutex
-    # overlap check itself fails to consult the real tree.
+    # D and C (folder ids survive the rename). Even a properly broad lock
+    # cannot save a stale batch from landing if the PRE-mutex overlap check
+    # itself fails to consult the real tree.
     d_token = _folder_lease(client, d_id, intent="delete")
 
     # NOW the cache goes cold; the durable row (D -> C2) is untouched. Setting
-    # session.view directly mirrors exactly what the retired ``DELETE /view``
-    # route used to do (clear ONLY the in-memory cache, leaving ViewRow
-    # intact) without going through full-session eviction, which the live
+    # session.view directly clears ONLY the in-memory cache, leaving ViewRow
+    # intact, without going through full-session eviction, which the live
     # d_token lease held above would refuse (evict-with-live-locks guard).
     get_session().view = None
     assert client.get(papi("/view")).json()["view"] is None

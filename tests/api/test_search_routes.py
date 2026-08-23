@@ -1,9 +1,9 @@
 """POST /model/search — server-side advanced search.
 
-The advanced-search dialog used to evaluate criteria client-side over only the
-fetched subset of a lazily-loaded model, so matches outside the loaded page
-were silently missed. These tests pin the server-side engine (a port of
-frontend/src/lib/search/evaluate.ts) that evaluates over the WHOLE model.
+The search must evaluate criteria over the WHOLE model, not just the fetched
+subset of a lazily-loaded page — a client-side-only evaluation would
+silently miss matches outside the loaded page. These tests pin the
+server-side engine (a port of frontend/src/lib/search/evaluate.ts).
 """
 
 from __future__ import annotations
@@ -97,7 +97,7 @@ def _ids(page: dict) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# core regression: searches the WHOLE model, not a fetched page
+# searches the WHOLE model, not a fetched page
 # ---------------------------------------------------------------------------
 
 

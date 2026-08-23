@@ -1,4 +1,4 @@
-"""Pure-function tests for `api/export_manifest.py` (Task 7)."""
+"""Pure-function tests for `api/export_manifest.py`."""
 
 import json
 

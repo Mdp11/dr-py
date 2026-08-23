@@ -1,4 +1,4 @@
-"""The transform(doc) session call (spec §8): arbitrary JSON in, arbitrary
+"""The transform(doc) session call: arbitrary JSON in, arbitrary
 JSON out, through the same _dr_call_entry driver value/step use. Exercised
 against TrustedRunner; the WASM frame has its own integration test."""
 

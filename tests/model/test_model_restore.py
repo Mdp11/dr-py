@@ -1,4 +1,4 @@
-"""Tests for the undo-support mutation-boundary methods (Phase C1):
+"""Tests for the undo-support mutation-boundary methods:
 ``Model.delete_property``, ``Model.restore_element``,
 ``Model.restore_relationship``. All three must fire the same index hooks as
 their create/set counterparts, verified via ``IndexSet.verify_consistent``.

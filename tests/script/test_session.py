@@ -138,7 +138,7 @@ def test_serialize_step_shapes(small_model) -> None:
         ser("step", rel)
 
 
-# --- Session tests (M2) -----
+# --- Session tests -----
 
 
 def _open(model, code: str):

@@ -1,6 +1,6 @@
 """Differential check of incremental (dirty-set scoped) validation.
 
-THE key correctness gate for Phase B: seeded random op sequences run through
+THE key correctness gate: seeded random op sequences run through
 DirtyCollector's mutate-and-collect wrappers (the reference consumer of that
 API; the raw hooks are exercised by the cycle test below and by test_dirty);
 after every op the dirty scope is re-validated and spliced into a

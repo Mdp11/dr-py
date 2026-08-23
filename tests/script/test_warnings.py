@@ -24,7 +24,6 @@ def test_repeated_kind_aggregates_occurrences_and_total() -> None:
 
 
 def test_differing_counts_sum_into_one_entry() -> None:
-    # Previously these were THREE near-identical lines saying 1, 2 and 5.
     log = ScriptWarningLog()
     for n in (1, 2, 5):
         log.add(ScriptWarningCode.NAV_UNKNOWN_IDS, count=n)

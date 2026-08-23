@@ -71,10 +71,10 @@ def test_expand_navigation_column_cross_product():
 
 
 def test_expand_single_valued_property_yields_one_row_per_element():
-    # Regression: enabling "split into rows" on a single-valued property used to
-    # raise ("not multi-valued; cannot expand") and 422 the whole table. A
-    # scalar value now expands to exactly one row; elements without the value
-    # follow keep_empty as usual.
+    # Enabling "split into rows" on a single-valued property must not raise
+    # ("not multi-valued; cannot expand") and 422 the whole table. A scalar
+    # value expands to exactly one row; elements without the value follow
+    # keep_empty as usual.
     mm = _mm(); model, ids = _fixture()
     defn = TABLE_ADAPTER.validate_python({
         "row_source": {"kind": "scope", "types": ["Block"]},
@@ -170,7 +170,7 @@ def test_column_sourced_from_expand_column_binds_that_rows_element():
 
 
 def test_iter_export_rows_matches_evaluate_cells_regardless_of_chunk_size():
-    # Chunking is purely a memory-bounding detail (Task 10) — it must not
+    # Chunking is purely a memory-bounding detail — it must not
     # change which rows are produced or their order, so a chunk smaller than
     # the row count must agree byte-for-byte with one unchunked evaluate_cells
     # call over the same keys.
@@ -196,8 +196,8 @@ def test_iter_export_rows_matches_evaluate_cells_regardless_of_chunk_size():
 def test_navigation_row_source_truncation_propagates():
     # A navigation row source that hits its own max_chains budget yields an
     # INCOMPLETE row set even though max_rows never fires — build_rows must
-    # still report truncated=True (previously swallowed: the API said
-    # `truncated: false` over silently missing rows).
+    # still report truncated=True rather than silently dropping rows under
+    # `truncated: false`.
     from data_rover.core.navigation.evaluate import EvalLimits
 
     mm = _mm(); model, ids = _fixture()

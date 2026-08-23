@@ -1,4 +1,4 @@
-"""Tests for the lock acquire/release/renew/list endpoints (Phase 4).
+"""Tests for the lock acquire/release/renew/list endpoints.
 
 POST /locks, POST /locks/release, POST /locks/renew, GET /locks.
 """

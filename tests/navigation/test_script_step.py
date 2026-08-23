@@ -1,6 +1,6 @@
-"""ScriptStep schema + evaluation tests (Task 9 adds the evaluation tests at
-the bottom; model/metamodel fixtures follow tests/table/test_script_column.py's
-_mm()/_fixture() pattern rather than pytest fixtures)."""
+"""ScriptStep schema + evaluation tests (model/metamodel fixtures follow
+tests/table/test_script_column.py's _mm()/_fixture() pattern rather than
+pytest fixtures)."""
 
 from __future__ import annotations
 
@@ -75,7 +75,7 @@ def test_navigation_has_script() -> None:
     )
 
 
-# ---- Task 9: real ScriptStep evaluation (frontier hops, warnings) ----------
+# ---- Real ScriptStep evaluation (frontier hops, warnings) -----------------
 #
 # Fixture: three bare "Thing" elements, no properties needed — the snippets
 # below only touch `el.id`.
@@ -254,7 +254,7 @@ def test_script_step_no_runner_fallback_prunes_silently() -> None:
     # script=None is the DEGRADED fallback for callers with no runner at all.
     # Table/nav routes always open a context when the definition has script
     # work (table_has_script / navigation_has_script), so this path is never
-    # the table story -- see 2026-07-23 spec, section 1.
+    # reached from those routes.
     mm, model = _fixture()
     defn = _path([ScriptStep(snippet=_snip("def step(el): return []"))])
     res = evaluate(mm, model, defn)                      # script=None
@@ -265,8 +265,7 @@ def test_script_step_visited_drop_is_silent() -> None:
     # identity return: every id the step returns is already in the chain, so
     # the cycle guard drops them all. That is INTENDED -- "keep this element"
     # is the natural idiom for a step that filters rather than hops -- so it
-    # must not warn. It used to raise NAV_ALREADY_VISITED, which trained
-    # users to ignore the warnings badge.
+    # must not warn NAV_ALREADY_VISITED.
     mm, model = _fixture()
     defn = _path([ScriptStep(snippet=_snip("def step(el): return [el]"))])
     res = evaluate(mm, model, defn, script=_ctx(model))
@@ -290,7 +289,7 @@ def test_two_distinct_step_failures_stay_two_entries() -> None:
 def test_chain_result_warnings_are_this_call_only() -> None:
     """`ChainResult.warnings` carries deltas: a second evaluate over a context
     that already logged the same kind must not re-report the first call's
-    counts (the invariant `warnings[w0:]` slicing used to provide)."""
+    counts."""
     mm, model = _fixture()
     ctx = _ctx(model)
     # A step failure (unlike an identity return) still warns every call, so it

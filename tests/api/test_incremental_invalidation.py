@@ -269,7 +269,7 @@ def test_commit_structural_reject_leaves_cache_fully_cleared(
 
 
 # --------------------------------------------------------------------------
-# Randomized end-to-end soundness property test (Task 10).
+# Randomized end-to-end soundness property test.
 #
 # The route-level tests above pin exact touched-key sets for individual op
 # kinds; this test instead throws a long randomized sequence of batches (any
@@ -385,9 +385,7 @@ def _random_batch(rng: random.Random, model: Model) -> list[dict]:
     # Top up the graph when relationships are scarce instead of leaving hop-
     # reading cells (out/in_/children/parent) trivially "" for round after
     # round, which would let a stale hop survivor coincidentally match the
-    # fresh value. This branch runs BEFORE the weighted kind choice below, so
-    # it also replaces the old disconnect-with-no-rel_ids create-element
-    # fallback.
+    # fresh value. This branch runs BEFORE the weighted kind choice below.
     if len(rel_ids) < 2 and len(ids) >= 2:
         return _connect_batch(rng, ids)
     # `connect` is weighted heaviest to keep relationship coverage up across

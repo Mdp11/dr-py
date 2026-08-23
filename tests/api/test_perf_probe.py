@@ -1,4 +1,4 @@
-"""Opt-in perf probe for the interactive read path (spec §1).
+"""Opt-in perf probe for the interactive read path.
 
 Run:  pixi run -e core-dev pytest tests/api/test_perf_probe.py -m perf -s
 Env:  PERF_N (default 50000) controls the synthetic element count.

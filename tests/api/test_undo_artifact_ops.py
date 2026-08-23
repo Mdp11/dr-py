@@ -1,7 +1,7 @@
 """Undo of a commit containing artifact ops: the artifact row is restored
 (exact id), a compensating forward commit is journaled, both halves unwind
 together when the artifact replay fails, and revert refuses ranges containing
-artifact ops (Phase 1 boundary)."""
+artifact ops."""
 
 from __future__ import annotations
 

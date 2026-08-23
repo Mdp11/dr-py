@@ -1,16 +1,15 @@
 """End-to-end: a navigation with a `ScriptStep` used as a table's ROW SOURCE,
 over HTTP (`POST /tables/evaluate`).
 
-This is the exact scenario the 2026-07-23 spec's bug report covered. The table
-evaluator used to call `evaluate()` on the row source's navigation WITHOUT the
-request's `ScriptEvalContext`, so `_hop_script` took its `script is None`
-branch and pruned every chain SILENTLY: zero rows, no warning, and
-`script_status: ready` on every poll — indistinguishable from "this navigation
-genuinely reaches nothing". Both tests below fail (0 rows / no warning) if that
-threading is removed again.
+The table evaluator must call `evaluate()` on the row source's navigation
+WITH the request's `ScriptEvalContext` — otherwise `_hop_script` takes its
+`script is None` branch and prunes every chain SILENTLY: zero rows, no
+warning, and `script_status: ready` on every poll, indistinguishable from
+"this navigation genuinely reaches nothing". Both tests below fail (0 rows /
+no warning) if that threading is removed.
 
-WHY EACH TEST POLLS TWICE — the Phase B (spec 2026-07-20 §4.1-4.3) contract,
-which a nav script step rides exactly like a script column:
+WHY EACH TEST POLLS TWICE — the cache-only-then-sweep contract, which a nav
+script step rides exactly like a script column:
 
   poll 1  The route's whole-table `build_rows_ex` pass runs CACHE-ONLY, so the
           step's `call(code, "step", [id])` misses the session cell cache and
@@ -172,13 +171,13 @@ def test_nav_script_step_row_source_over_http(
     client: TestClient, seed_things: list[str], settings_sync_sweep: Settings
 ) -> None:
     """THE happy path: a navigation script step really does produce table rows
-    over HTTP — on the second poll, per the Phase B contract in the module
-    docstring.
+    over HTTP — on the second poll, per the cache-only-then-sweep contract in
+    the module docstring.
 
-    Reverting the row-source threading (`_navigation_row_keys` calling
-    `evaluate()` without `script=`) makes BOTH polls return 0 rows with no
-    warning and `ready` forever — the original bug — so every assertion here is
-    discriminating."""
+    The row-source threading (`_navigation_row_keys` calling `evaluate()`
+    WITH `script=`) is what makes this converge — without it BOTH polls
+    would return 0 rows with no warning and `ready` forever, so every
+    assertion here is discriminating."""
     session = get_session()
     rev = session.model_rev
 
@@ -321,12 +320,12 @@ def test_sort_by_nav_script_step_column_settles_instead_of_failing(
     sort-driven step cell, the re-probe missed again, and the page reported
     `script_status: failed` — on this poll and on every later one.
 
-    `limit: 2` is load-bearing. The visible window IS evaluated live, so a table
-    small enough to fit entirely on one page used to have its off-window
-    problem masked: poll 1's window pass cached every step cell and poll 2's
-    sort found them all. With one row left off the window that row's step cell
-    is never computed by anything — the permanently-`failed` shape a real
-    (50 000-row) table always had."""
+    `limit: 2` is load-bearing. The visible window IS evaluated live, so a
+    table small enough to fit entirely on one page would otherwise mask the
+    off-window problem: poll 1's window pass would cache every step cell and
+    poll 2's sort would find them all. With one row left off the window that
+    row's step cell is never computed by anything — the permanently-`failed`
+    shape a real (50 000-row) table always has."""
     payload = {
         "definition": _nav_column_table(ROTATE_CODE),
         "sort": {"column": 1, "direction": "asc"},
@@ -397,10 +396,10 @@ def test_sort_by_script_column_over_nav_script_step_converges(
     navigation's `step()` calls on the way. So one sweep round fills BOTH the
     step cells and the value cells, and the next poll sorts for real.
 
-    Degrading it instead is strictly worse than the bug the fallback was
-    written for: the degrade records no pending miss, so the page reports
-    `ready`, never kicks a sweep, and ties every row for the life of the rev —
-    a sort that can never converge, rather than one that converges next poll.
+    Degrading it instead would be strictly worse: the degrade records no
+    pending miss, so the page would report `ready`, never kick a sweep, and
+    tie every row for the life of the rev — a sort that can never converge,
+    rather than one that converges next poll.
     """
     payload = {
         "definition": _nav_then_script_column_table(ROTATE_CODE, REACHED_NAME_CODE),
@@ -426,8 +425,8 @@ def test_sort_by_script_column_over_nav_script_step_converges(
 
 
 # ---------------------------------------------------------------------------
-# read-only entry mapping (Task 7): script_runner.open_session's
-# record_ops=False -- SECURITY TRIPWIRE, see the Task 7 brief. A script
+# read-only entry mapping: script_runner.open_session's
+# record_ops=False -- SECURITY TRIPWIRE. A script
 # COLUMN's `value()` is embedded evaluation: it must never be able to record
 # an op, so a write attempt renders as an error cell (degraded-never-failing)
 # and the model is left untouched.

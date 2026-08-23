@@ -1,4 +1,4 @@
-"""TransformHost (spec §8 + §17.2): session reuse per code, size caps, the
+"""TransformHost: session reuse per code, size caps, the
 failure-is-failure ValueError mapping, and slot acquisition/release."""
 
 import pytest

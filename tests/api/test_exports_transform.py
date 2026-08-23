@@ -1,4 +1,4 @@
-"""ExporterEntry.transform through POST /exports/run (spec §8/§15): per-entry
+"""ExporterEntry.transform through POST /exports/run: per-entry
 application, no-bleed (entry -> table direction), session sharing, split
 per-file calls, jsonl list contract, manifest recording, 503/429."""
 
@@ -147,7 +147,7 @@ def test_on_error_fail_check_runs_before_transform_strips_markers(
     """A transform that strips every `{"$error": ...}` marker (returns `[]`)
     must not launder a `json_doc.on_error: "fail"` export into a clean 200 —
     `_check_on_error` must run on the RENDERED document BEFORE the transform
-    gets a chance to touch it (spec §17.4).
+    gets a chance to touch it.
 
     Pins `snippet_sweep_sync=True` (the idiom `test_tables_script_errors.py`
     and friends use) so the erroring cell's sweep settles inline on the

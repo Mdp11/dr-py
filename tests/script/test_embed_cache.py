@@ -1,5 +1,5 @@
 """ScriptEvalContext × ScriptCellCache: write-through, cross-context reuse,
-rev-mismatch miss, non-deterministic errors not written (spec §3.2)."""
+rev-mismatch miss, non-deterministic errors not written."""
 
 from typing import Literal
 

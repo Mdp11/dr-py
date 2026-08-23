@@ -1,6 +1,6 @@
 """POST /tables/evaluate: resolves navigation refs, builds/sorts/pages rows
 through the pure core evaluator, and caches the ordered row list per session
-(Task 7's TableOrderCache). Viewer-callable (read-only POST allowlist)."""
+(TableOrderCache). Viewer-callable (read-only POST allowlist)."""
 
 from __future__ import annotations
 
@@ -337,11 +337,11 @@ def test_truncated_flag_survives_cache_hit(
 
 
 def test_preview_rollback_invalidates_table_order_cache(client: TestClient) -> None:
-    """A1: /commits/preview applies ops in place and then ALWAYS rolls back
+    """/commits/preview applies ops in place and then ALWAYS rolls back
     without bumping model_rev (routes/commits.py:preview_commit). A cache
     entry populated at that unchanged rev must not survive the rollback —
     otherwise a later /tables/evaluate at the same rev could serve rows that
-    reflect the rolled-back, never-committed mutation (final-review A1)."""
+    reflect the rolled-back, never-committed mutation."""
     from data_rover.api.session import get_session
     from data_rover.api.table_cache import table_fingerprint
     from data_rover.core.table.schema import TABLE_ADAPTER

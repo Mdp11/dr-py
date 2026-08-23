@@ -1,5 +1,5 @@
-"""Phase A end-to-end (Task 3): two evaluates of the same script table hit the
-guest once; ``touch_model`` (an out-of-protocol mutation, e.g. a legacy
+"""End-to-end: two evaluates of the same script table hit the guest once;
+``touch_model`` (an out-of-protocol mutation, e.g. a legacy
 elements/relationships write) wipes the cache so a subsequent evaluate
 recomputes. Mirrors `test_script_embedding_routes.py`'s
 app/client/seed_thing_model fixture shape for a table with a real script

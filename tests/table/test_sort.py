@@ -125,7 +125,7 @@ def test_collapse_sort_is_unbounded():
 
 
 def test_expand_navigation_column_sorts_per_row_own_value():
-    # Regression: an `expand` nav column must sort each row by the ONE reached
+    # An `expand` nav column must sort each row by the ONE reached
     # element ITS row's slot holds, not by re-navigating from the shared root
     # (which would tie every row sharing that root on the root's WHOLE reached
     # set and silently ignore the per-row value expansion promoted into the key).
@@ -151,10 +151,11 @@ def test_expand_navigation_column_sorts_per_row_own_value():
 
 
 def test_element_column_sort_uses_case_insensitive_name_property():
-    # Regression: models whose name property is cased `Name` (importer output,
-    # legacy metamodels) displayed names in the grid (the frontend lookup is
-    # case-insensitive) but SORTED by element id — the comparator must use the
-    # shared `core.model.naming.display_name` lookup, not a literal `"name"`.
+    # Models whose name property is cased `Name` (importer output, legacy
+    # metamodels) must sort by that displayed name too — the comparator uses
+    # the shared `core.model.naming.display_name` lookup, not a literal
+    # `"name"`, so it agrees with the grid's case-insensitive lookup instead
+    # of falling back to sorting by element id.
     mm = Metamodel(
         elements=[
             ElementType(

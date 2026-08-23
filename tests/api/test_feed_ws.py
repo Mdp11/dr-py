@@ -1,4 +1,4 @@
-"""WebSocket feed endpoint (Phase 5): connect, authz, snapshot, presence."""
+"""WebSocket feed endpoint: connect, authz, snapshot, presence."""
 
 from __future__ import annotations
 
@@ -180,8 +180,8 @@ def test_commit_broadcasts_delta_to_feed(client: TestClient) -> None:
         ws.receive_json()  # snapshot
         rev = client.get(papi("/open")).json()["model_rev"]
         token = _lock(client, eid)
-        # Task 6 wires the lock-acquired broadcast; drain any intervening events
-        # so the while-loop below also handles the lock event if already present.
+        # The lock-acquire broadcasts too; drain any intervening events so
+        # the while-loop below also handles the lock event if already present.
         commit = client.post(
             papi("/commits"),
             json={

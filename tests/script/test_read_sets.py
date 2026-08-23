@@ -1,4 +1,4 @@
-"""Read-set attribution tests (Phase B): every read a call USES — including
+"""Read-set attribution tests: every read a call USES — including
 memo hits and piggyback-primed projections — lands in `CallResult.reads`."""
 
 from __future__ import annotations
@@ -184,9 +184,9 @@ def test_call_overflow_reports_none() -> None:
 
 
 def test_mixed_typed_and_untyped_scan_does_not_crash_the_call() -> None:
-    # Regression: sorting the merged read-set must never compare a scan's
-    # None (untyped) second element against another scan's type-name string
-    # -- that raised TypeError and turned a legitimate call into an error.
+    # Sorting the merged read-set must never compare a scan's None (untyped)
+    # second element against another scan's type-name string -- that would
+    # raise TypeError and turn a legitimate call into an error.
     res = _call(
         "def value(els):\n"
         "    a = sum(1 for _ in dr.elements(stereotypes='Building'))\n"

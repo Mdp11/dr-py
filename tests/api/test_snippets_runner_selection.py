@@ -1,15 +1,14 @@
-"""Tests for Task 10: runner selection, settings mapping, and the RCE
-tripwire that keeps `TrustedRunner` out of non-dev deployments.
+"""Tests for runner selection, settings mapping, and the RCE tripwire that
+keeps `TrustedRunner` out of non-dev deployments.
 
 Hermetic on purpose: none of these tests touch the wasmtime/CPython-WASI
 guest binary. The wasm-selection test proves `build_runner_from_settings`
 picks the `WasmScriptRunner` class and passes it the right constructor
 arguments WITHOUT booting a real pool, by monkeypatching the class binding
-in `script_runner`'s own module namespace (the "builder's namespace" the
-task brief calls out) -- the least invasive seam available, since
-`WasmScriptRunner` is resolved as a module global at call time inside
-`build_runner_from_settings`. No wasmtime engine, no guest process, no
-refill/epoch threads are ever created by this file.
+in `script_runner`'s own module namespace -- the least invasive seam
+available, since `WasmScriptRunner` is resolved as a module global at call
+time inside `build_runner_from_settings`. No wasmtime engine, no guest
+process, no refill/epoch threads are ever created by this file.
 
 See `tests/api/test_snippets_wasm.py` (integration-marked, needs the fetched
 guest binary) for the real `WasmScriptRunner` end-to-end coverage.
@@ -175,8 +174,8 @@ def test_create_app_lifespan_survives_missing_guest_binary(monkeypatch: pytest.M
     """Force a definitely-absent guest binary path (independent of whether
     THIS checkout happens to have `spikes/code_exec/vendor/` fetched) and
     drive the app through a real lifespan startup+shutdown via `with
-    TestClient(...)`. Must not raise; the runner must stay unset (routes are
-    Task 11's job to 503 on that), and shutdown must not error over a
+    TestClient(...)`. Must not raise; the runner must stay unset (routes
+    503 on that), and shutdown must not error over a
     never-booted runner (no thread leak)."""
     monkeypatch.setenv(
         "DATA_ROVER_SNIPPET_GUEST_WASM_PATH", "/nonexistent/dr-test-vendor/python.wasm"
@@ -198,7 +197,7 @@ _SWEEPER_THREAD_NAMES = {"idle-sweeper", "lock-sweeper"}
 def test_boot_script_runner_failure_does_not_leak_sweeper_threads(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Reviewer-found regression: the RCE tripwire firing (or any other
+    """The RCE tripwire firing (or any other
     `_boot_script_runner` failure, e.g. `WasmScriptRunner.__init__` against a
     present-but-broken binary) must not strand the idle-sweeper/lock-sweeper
     threads that lifespan startup already spawned earlier in the SAME call.

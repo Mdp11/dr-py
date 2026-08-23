@@ -171,8 +171,8 @@ def test_import_plan_malformed_envelope_422(client: TestClient) -> None:
 
 
 def test_import_plan_is_a_write_for_viewers(client: TestClient) -> None:
-    # /artifacts/import/plan is NOT in the read-only allowlist (spec decision:
-    # planning is part of the write flow). Expect 403.
+    # /artifacts/import/plan is NOT in the read-only allowlist: planning is
+    # part of the write flow. Expect 403.
     viewer_headers = _seed_viewer()
 
     r = client.post(

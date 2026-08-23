@@ -152,7 +152,7 @@ def test_delete_then_404(client: TestClient) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Peer-lease guard on the legacy write routes (final-review finding 1).
+# Peer-lease guard on the legacy write routes.
 # `art:` leases only mean anything if EVERY writer to the row honours them:
 # without this, an editor holding `art:X` mid-edit can have their commit
 # silently overwrite (or be overwritten by) a legacy PUT/DELETE.
@@ -421,8 +421,8 @@ def test_evaluate_row_rooted_navigation_binds_row_element(client: TestClient) ->
 def test_evaluate_property_step_hops_through_reference_property(
     client: TestClient,
 ) -> None:
-    # Regression: a `property`-kind navigation step (Task 1/2) must flow
-    # through the route unchanged. example.metamodel.yaml's
+    # A `property`-kind navigation step must flow through the route
+    # unchanged. example.metamodel.yaml's
     # Requirement.refines (datatype=Requirement, multiplicity 0..*) is an
     # existing element-reference property, so no metamodel upload is needed.
     _bootstrap_model(client)

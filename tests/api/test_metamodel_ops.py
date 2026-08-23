@@ -37,10 +37,9 @@ def client() -> TestClient:
     )
     assert r.status_code == 200, r.text
     # ``set_metamodel`` clears ``session.model`` to None (session.py), so an
-    # empty-model POST is needed too — matches the working fixture in
-    # test_commits_metamodel_ops.py (Task 2), not the brief's incomplete one:
-    # without it ``require_model`` 404s "No model loaded" before any op-family
-    # check ever runs.
+    # empty-model POST is needed too, matching the fixture in
+    # test_commits_metamodel_ops.py: without it ``require_model`` 404s "No
+    # model loaded" before any op-family check ever runs.
     r = c.post(papi("/model"), json={"elements": [], "relationships": []})
     assert r.status_code == 200, r.text
     return c

@@ -1,5 +1,5 @@
-"""POST /tables/script-errors — the per-table script-error recap
-(2026-07-23 spec §4). Cache-only like export: 202 + Retry-After while the
+"""POST /tables/script-errors — the per-table script-error recap.
+Cache-only like export: 202 + Retry-After while the
 sweep computes; 200 with the collected ErrorCells once settled; pending
 cells after a terminal sweep count as errors ("not computed").
 
@@ -183,7 +183,7 @@ def test_script_errors_empty_when_all_ok(
     settings_sync_sweep: Settings,
 ) -> None:
     """Every cell computes: the recap is empty, and it says so in the exact
-    wire shape Task 6 consumes."""
+    wire shape the client consumes."""
     app.dependency_overrides[get_runner] = lambda: ScriptedRunner(lambda i, ids: ok(1))
 
     page = _evaluate_until_ready(client)
@@ -345,10 +345,11 @@ def test_script_errors_zero_when_runner_unavailable(
 
     With `runner is None` the recap's cache-only context answers `pending` for
     every cell (cache-only wins over unavailable mode), and the sweep kick is
-    guarded on `runner is not None` — so the route used to fall straight
-    through to a 200 reporting `rows × script columns` "not computed" errors. A
-    50 000-row table badged "50000 script errors" when the truth was "the
-    sandbox isn't running". The recap now short-circuits to zero.
+    guarded on `runner is not None`. Without the short-circuit below, the
+    route would fall straight through to a 200 reporting
+    `rows × script columns` "not computed" errors — a 50 000-row table
+    badged "50000 script errors" when the truth is "the sandbox isn't
+    running". The recap short-circuits to zero instead.
 
     The two guards below are what make the empty body discriminating: an empty
     recap is byte-identical to the one the `script_ctx is None` early return

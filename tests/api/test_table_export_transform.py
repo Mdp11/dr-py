@@ -1,4 +1,4 @@
-"""TableDefinition.transform on POST /tables/export (spec §8: the standalone
+"""TableDefinition.transform on POST /tables/export (the standalone
 surface). Runner injected via dependency_overrides -> TrustedRunner."""
 
 import json

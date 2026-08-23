@@ -183,7 +183,7 @@ def test_truncation_never_materializes_more_than_the_cap(
 
 def test_viewer_may_read_issues(client: TestClient) -> None:
     """A viewer sees the issue list: it is a plain GET, and the panel is a
-    read-only surface every role gets (spec, 2026-08-12)."""
+    read-only surface every role gets."""
     with db_session() as s:
         tenancy.upsert_user(s, user_id="viewer-1", email="v@example.com")
         tenancy.add_member(s, project_id="default", user_id="viewer-1", role=Role.viewer)

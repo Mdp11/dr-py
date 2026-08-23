@@ -52,7 +52,7 @@ def test_ops_cap_enforced():
     assert "error" in resp and "cap" in resp["error"].lower()
 
 
-# --- additional coverage: read ops not exercised by the brief's tests ------
+# --- additional coverage: read ops -----------------------------------------
 
 
 def test_element_read_missing_returns_error():
@@ -164,7 +164,7 @@ def test_dispatch_with_missing_id_still_returns_a_response():
     assert "error" in resp
 
 
-# --- far-endpoint inlining (trip-collapse, spec 2026-07-21 Phase A') -------
+# --- far-endpoint inlining (trip-collapse) ---------------------------------
 
 
 def test_outgoing_response_inlines_far_endpoints():

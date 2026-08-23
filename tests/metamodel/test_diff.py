@@ -1,4 +1,4 @@
-"""Structural metamodel diff (artefacts revamp Phase 4).
+"""Structural metamodel diff.
 
 Identity is the NAME everywhere; a rename is remove+add. The diff mirrors the
 raw document (no inheritance flattening). `source`/`target` on relationship

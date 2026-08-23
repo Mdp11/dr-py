@@ -1,4 +1,4 @@
-"""Unit tests for the export template engine (spec 2026-08-19 §4)."""
+"""Unit tests for the export template engine."""
 
 import pytest
 

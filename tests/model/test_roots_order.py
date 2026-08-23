@@ -38,7 +38,7 @@ def test_create_orders_by_display_name_then_id() -> None:
     unnamed = m.create_element("Item")  # display name falls back to id
     # UUIDv7 ids are lowercase-hex and timestamp-prefixed, so an id-fallback
     # root always sorts before an uppercase display name -- assert relative
-    # order instead of absolute position (see task-3-report.md for detail).
+    # order instead of absolute position.
     page = m.indexes.roots_page(0, 10)
     assert page.index(alpha.id) < page.index(beta.id)
     assert m.indexes.roots_count() == 3

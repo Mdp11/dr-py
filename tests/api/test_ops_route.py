@@ -1,4 +1,4 @@
-"""Tests for the delta-protocol mutation endpoints (Phase C1):
+"""Tests for the delta-protocol mutation endpoints:
 POST /model/ops and POST /model/undo.
 """
 
@@ -484,7 +484,7 @@ def test_legacy_mutation_invalidates_ops_protocol_state(seeded: TestClient) -> N
     )
     assert res.status_code == 201, res.text
     assert _rev() == rev + 1  # model_rev bumped
-    # a batch computed against the pre-legacy rev is now stale -> 409
+    # a batch computed against the prior rev is now stale -> 409
     res = _post_ops(
         seeded, [{"kind": "delete_element", "id": "a"}], base_rev=rev
     )

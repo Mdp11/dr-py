@@ -1,4 +1,4 @@
-"""POST /tables/export: whole-table xlsx export (Task 10)."""
+"""POST /tables/export: whole-table xlsx export."""
 
 import io
 
@@ -64,9 +64,8 @@ def test_export_truncation_header(client):
 
 
 def test_export_includes_full_navigation_cell_beyond_cell_cap(client):
-    # Regression: export used min(cell_cap, max_cell_elements), so a
-    # navigation column's per-column display cap silently truncated exported
-    # cells. The workbook must carry the COMPLETE reached set.
+    # The workbook must carry the COMPLETE reached set for a navigation
+    # column, not truncated to the per-column display cap.
     _bootstrap_model(client)
     body = {
         "definition": {
@@ -284,7 +283,7 @@ def test_export_row_numbers_off_by_default(client):
 
 
 def test_export_url_like_value_stays_a_plain_string(client):
-    # A1 regression: xlsxwriter's default `strings_to_urls=True` routes any
+    # xlsxwriter's default `strings_to_urls=True` routes any
     # string matching the url/mailto/file/(in|ex)ternal patterns through its
     # hyperlink writer instead of a plain string write. That writer silently
     # discards the cell past 65,530 URL cells/sheet or a 2079+ char URL (only
@@ -363,9 +362,9 @@ def test_build_workbook_places_row_numbers_at_a_middle_column():
 
 
 def test_build_workbook_rejects_out_of_range_row_number_col():
-    # Review finding: Task 4 will compute `row_number_col` dynamically from
-    # user-draggable export settings, a caller that CAN get the index wrong.
-    # Both too-high and negative must raise a clear `ValueError` (not a bare
+    # `row_number_col` is computed dynamically from user-draggable export
+    # settings, so a caller CAN get the index wrong. Both too-high and
+    # negative must raise a clear `ValueError` (not a bare
     # `StopIteration`/`AssertionError`) so the route's
     # `except (NavigationResolveError, ValueError)` turns it into a 422.
     from data_rover.api.table_export import build_workbook
@@ -539,18 +538,15 @@ class TestSheetTitle:
         assert _sheet_title("") == "Table"
 
     def test_all_apostrophes_name_falls_back_to_table(self):
-        # The only way `cleaned.strip("'")` (unchanged by this fix, see
-        # module docstring / A3 report note) produces an empty string from a
+        # The only way `cleaned.strip("'")` produces an empty string from a
         # non-empty input: a name made entirely of apostrophes/quotes.
         assert _sheet_title("''''") == "Table"
 
     def test_31_char_name_with_apostrophe_as_32nd_char_regression(self):
-        # A3 regression: stripping BEFORE truncating would keep this name at
-        # 31 chars ending in "'" (the truncation would land exactly after
-        # the leading 31 chars, all non-apostrophe, but the ORIGINAL bug was
-        # stripping outer quotes first and truncating second — reproduced
-        # here as a name whose 31st character is itself an apostrophe, which
-        # must survive truncation and then be stripped).
+        # Truncation must happen BEFORE stripping outer quotes: a name whose
+        # 32nd character is itself an apostrophe must have the truncation
+        # land exactly after the leading 31 (non-apostrophe) chars and be
+        # stripped afterward, not stripped first and truncated second.
         name = "a" * 30 + "'" + "extra text past the limit"
         assert len(name) > 31
         assert name[30] == "'"

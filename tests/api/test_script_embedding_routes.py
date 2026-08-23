@@ -1,6 +1,5 @@
-"""M2/M3 embedded-evaluation route tests (TrustedRunner injected). Route-level
-coverage lands in Tasks 11-13; this file starts with the script_eval helper
-and now covers Task 11's `POST /tables/evaluate` script-column wiring."""
+"""Embedded-evaluation route tests (TrustedRunner injected): the script_eval
+helper plus `POST /tables/evaluate` script-column wiring."""
 
 from __future__ import annotations
 
@@ -32,8 +31,8 @@ def _settings(**kw) -> Settings:
 @pytest.fixture(autouse=True)
 def _reset_concurrency_guard():
     """Safety net for the module-singleton `concurrency_guard`: the tests in
-    this file release every slot they acquire (matching the brief's
-    `close_script_context` calls), but assert that held here so a leaked
+    this file release every slot they acquire (via `close_script_context`
+    calls), but assert that held here so a leaked
     acquire fails fast in THIS test rather than silently starving a later
     one."""
     yield
@@ -94,7 +93,7 @@ def test_open_context_busy(small_model) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Task 11: POST /tables/evaluate script-column wiring
+# POST /tables/evaluate script-column wiring
 # ---------------------------------------------------------------------------
 
 THING_MM = """
@@ -316,13 +315,13 @@ def test_evaluate_saved_snippet_ref_and_fingerprint(
 
 
 # ---------------------------------------------------------------------------
-# Task 12: POST /tables/export script-column wiring
+# POST /tables/export script-column wiring
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture
 def sync_sweep(monkeypatch: pytest.MonkeyPatch) -> Settings:
-    """Phase B: an export never runs O(rows) guest work inline — it answers 202
+    """An export never runs O(rows) guest work inline — it answers 202
     while a background `SweepJob` fills the script cell cache. Pin the sweep to
     run INLINE so exactly one retry is needed and no test has to sleep.
 
@@ -332,7 +331,7 @@ def sync_sweep(monkeypatch: pytest.MonkeyPatch) -> Settings:
     tests below would start racing a background daemon thread — flaking as an
     occasional 202-instead-of-200 rather than failing honestly.
 
-    `snippet_sweep_workers=1` is pinned alongside it (Task 11) so the inline
+    `snippet_sweep_workers=1` is pinned alongside it so the inline
     sweep also runs SERIALLY: these tests assert exact guest-call counts, which
     sharding makes scheduling-dependent."""
     monkeypatch.setenv("DATA_ROVER_SNIPPET_SWEEP_SYNC", "true")
@@ -344,7 +343,7 @@ def sync_sweep(monkeypatch: pytest.MonkeyPatch) -> Settings:
 
 
 def _export_after_sweep(client: TestClient, defn: dict) -> httpx.Response:
-    """The Phase B export handshake: 202 + `Retry-After: 1` first (the sweep
+    """The export handshake: 202 + `Retry-After: 1` first (the sweep
     runs inline under the `sync_sweep` fixture), then the real xlsx."""
     first = client.post(
         papi("/tables/export"), json={"definition": defn}, headers=AUTH_HEADERS
@@ -390,7 +389,7 @@ def test_export_script_column_no_errors_no_notice(
 
 
 # ---------------------------------------------------------------------------
-# Task 13: POST /navigations/evaluate script-step wiring
+# POST /navigations/evaluate script-step wiring
 # ---------------------------------------------------------------------------
 
 

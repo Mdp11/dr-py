@@ -389,7 +389,7 @@ def test_result_entities_are_deep_isolated_from_model_and_cr():
 
 
 # ---------------------------------------------------------------------------
-# Fix 1 regression — canonical id when after.id differs from op.id
+# Canonical id when after.id differs from op.id
 # ---------------------------------------------------------------------------
 
 
@@ -441,7 +441,7 @@ def test_modified_relationship_uses_op_id_not_after_id():
 
 
 # ---------------------------------------------------------------------------
-# Fix 3 — relationship coverage
+# Relationship coverage
 # ---------------------------------------------------------------------------
 
 

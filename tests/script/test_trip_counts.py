@@ -1,4 +1,4 @@
-"""Bridge round-trip counting tests for the trip-collapse work (Phase A').
+"""Bridge round-trip counting tests for the trip-collapse work.
 
 Every test asserts on `bridge_call_log` — the number of
 `BridgeDispatcher.dispatch` calls IS the host round-trip count. Tests use

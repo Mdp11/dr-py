@@ -1,8 +1,7 @@
 """Byte-identical parity between the index-backed fuzzy search and a
-reference O(n) scan (spec 2026-07-10-search-index-design: the trigram index
-is ONLY a candidate generator; ``_search_score`` stays the sole arbiter of
-matching and order). The reference below is the pre-index ``list_elements``
-query loop, verbatim."""
+reference O(n) scan. The trigram index is ONLY a candidate generator;
+``_search_score`` stays the sole arbiter of matching and order. The
+reference below is the pre-index ``list_elements`` query loop, verbatim."""
 
 from __future__ import annotations
 

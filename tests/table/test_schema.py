@@ -65,10 +65,10 @@ def test_chain_index_nonzero_requires_chains_source():
 
 
 def test_element_column_source_must_be_element_producing():
-    # A2 hazard: a ColumnRef to an EXPAND property column is single-binding
+    # A ColumnRef to an EXPAND property column is single-binding
     # (one value per row) but does NOT produce elements — it produces the
     # property's scalar value. An element column sourced from it must be
-    # rejected at schema validation, not crash at eval time (final-review A3).
+    # rejected at schema validation, not crash at eval time.
     with pytest.raises(ValidationError):
         _table(columns=[
             {"kind": "property", "source": {"kind": "row"}, "name": "mass",
@@ -202,7 +202,7 @@ def test_json_split_defaults_to_none_and_roundtrips():
 
 
 def test_json_split_accepts_any_template_at_schema_level():
-    # Strictness is EXPORT-time (spec §3.1): a stored bad template must not
+    # Strictness is EXPORT-time: a stored bad template must not
     # 422 unrelated saves/evaluates of the table.
     from data_rover.core.table.schema import JsonSplitOptions
 

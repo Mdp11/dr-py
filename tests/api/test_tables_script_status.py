@@ -1,4 +1,4 @@
-"""Evaluate-route Phase B behaviour (spec 2026-07-20 §4.1-4.2).
+"""Evaluate-route cache-only-then-sweep behaviour.
 
 The whole-table passes (`build_rows_ex` + `order_rows`) run CACHE-ONLY: the
 guest is never driven O(rows) times inside a request. A miss records a pending
@@ -103,7 +103,7 @@ def settings_sync_sweep(monkeypatch: pytest.MonkeyPatch) -> Settings:
     kicks it. `get_settings` is an uncached `Settings()` factory, so the route's
     own `Depends(get_settings)` picks the env var up too.
 
-    ALSO pins `snippet_sweep_workers=1` (Task 11): the tests below script
+    ALSO pins `snippet_sweep_workers=1`: the tests below script
     outcomes by `ScriptedRunner` CALL INDEX and assert exact call counts, both
     of which become scheduling-dependent once the sweep shards its cell work
     across worker threads. Fan-out behaviour is covered by the
@@ -157,7 +157,8 @@ def _expand_script_table() -> dict:
 
 def _plain_table() -> dict:
     """No script column anywhere: `script_ctx is None`, so the route must be
-    completely untouched by Phase B (`script_status is None`)."""
+    completely untouched by the cache-only-then-sweep machinery
+    (`script_status is None`)."""
     return {
         "row_source": {"kind": "scope", "types": ["Thing"]},
         "columns": [{"kind": "element"}],
@@ -363,7 +364,7 @@ def test_sorted_script_table_while_computing(
     sweep_threads: list[threading.Thread] = []
 
     def _outcome(i: int, ids: list[str]) -> CallResult:
-        # Prefix match: since Task 11 the cell work runs on `script-sweep-wN`
+        # Prefix match: the cell work runs on `script-sweep-wN`
         # shard workers, not on the `script-sweep` daemon itself.
         if threading.current_thread().name.startswith("script-sweep"):
             with lock:
@@ -622,7 +623,7 @@ def test_ops_persist_failure_restores_the_cell_cache_stamp(
     seed_thing_model: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """I1 — a backward rev move must not leave the cell cache stamped AHEAD.
+    """A backward rev move must not leave the cell cache stamped AHEAD.
 
     `/model/ops` mutates in place, bumps `model_rev`, and — if the durable
     persist fails — rolls the mutation back and does `model_rev -= 1`. Table
@@ -632,12 +633,11 @@ def test_ops_persist_failure_restores_the_cell_cache_stamp(
     write. That racing writer is simulated here from inside the failing
     persist, which is exactly the window it happens in.
 
-    Without the fix the stamp stays one rev AHEAD of `model_rev` forever, so
-    (a) every later `put`/`get` at the live rev is refused/misses — sweeps
-    cache nothing, end `done`, and strand the evaluate poller (C1's loop) —
-    and (b) when a LATER commit legitimately reaches that rev, the stamp
-    matches and the cache serves values computed against the ROLLED-BACK
-    model.
+    If the stamp stayed one rev AHEAD of `model_rev`, (a) every later
+    `put`/`get` at the live rev would be refused/miss — sweeps caching
+    nothing, ending `done`, and stranding the evaluate poller — and (b) when
+    a LATER commit legitimately reaches that rev, the stamp would match and
+    the cache would serve values computed against the ROLLED-BACK model.
     """
     session = get_session()
     base_rev = session.model_rev
@@ -684,15 +684,15 @@ def test_ops_persist_failure_restores_the_cell_cache_stamp(
 
 
 # --------------------------------------------------------------------------
-# /tables/export: 202 while the sweep is computing (Task 8, spec §4.4)
+# /tables/export: 202 while the sweep is computing
 # --------------------------------------------------------------------------
 
 
 def test_export_plain_table_never_202s(
     client: TestClient, app: FastAPI, seed_thing_model: None
 ) -> None:
-    """Regression net: no script column => `script_ctx is None` => no probe, no
-    202, byte-for-byte the pre-Phase-B export."""
+    """No script column => `script_ctx is None` => no probe, no 202 — the
+    export is byte-for-byte the plain (no-script) case."""
     app.dependency_overrides[get_runner] = lambda: CountingRunner()
     r = _export(client, _plain_table())
     assert r.status_code == 200

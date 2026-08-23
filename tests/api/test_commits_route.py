@@ -1,4 +1,4 @@
-"""Tests for POST /commits/preview (Phase 4 mandatory pre-commit validation)."""
+"""Tests for POST /commits/preview (mandatory pre-commit validation)."""
 
 from __future__ import annotations
 
@@ -102,7 +102,7 @@ def test_preview_base_rev_mismatch_409(client: TestClient) -> None:
 
 
 # ---------------------------------------------------------------------------
-# POST /commits tests (Phase 4 Task 9)
+# POST /commits tests
 # ---------------------------------------------------------------------------
 
 

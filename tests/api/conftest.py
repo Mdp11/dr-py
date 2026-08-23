@@ -13,7 +13,7 @@ os.environ.setdefault("DATA_ROVER_DEV_SEED", "false")
 os.environ.setdefault("DATA_ROVER_SNAPSHOT_STORE", "memory")
 os.environ.setdefault("DATA_ROVER_IDLE_EVICT_SECONDS", "0")
 os.environ.setdefault("DATA_ROVER_LOCK_SWEEP_SECONDS", "0")
-# Chunked background validation sweep (Task 5) runs inline so the existing
+# The chunked background validation sweep runs inline so the existing
 # suite's "validation seeded after load" assumption keeps holding.
 os.environ.setdefault("DATA_ROVER_VALIDATION_SWEEP_SYNC", "true")
 # Pin all existing data tests to the header provider so they keep working after
@@ -123,9 +123,9 @@ CSRF_HEADERS = {"x-requested-with": "data-rover"}
 
 
 # --- shared data-route test helpers ---------------------------------------
-# These mirror the HTTP-based helpers the Phase-8 commit tests grew locally.
-# They assume a default project seeded with a metamodel that defines a ``Node``
-# element type (the commit-history / revert suites both use such a metamodel).
+# HTTP-based helpers shared by the commit-history / revert suites, which
+# assume a default project seeded with a metamodel that defines a ``Node``
+# element type.
 
 
 def model_rev(c: TestClient) -> int:
@@ -169,10 +169,9 @@ def create_folder_via_commit(
     """Create one folder via ``POST /commits`` and return the full commit
     response body (``id_map``, ``view_rev``, etc).
 
-    The commit-flow replacement for the retired ``PUT /view/snapshot``
-    one-shot setup harness that many view-op tests used purely to seed an
-    initial named folder with an id. Acquires (and lets the commit release)
-    its own lease on *parent_id* — ``"root"`` by default.
+    Used by view-op tests purely to seed an initial named folder with an id.
+    Acquires (and lets the commit release) its own lease on *parent_id* —
+    ``"root"`` by default.
     """
     hdrs = headers if headers is not None else AUTH_HEADERS
     lease = c.post(

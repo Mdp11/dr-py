@@ -3,9 +3,9 @@
 Verifies that accepted op batches are recorded as Commit rows and that
 models.model_rev stays in lockstep with the in-memory session.model_rev.
 
-Setup uses the HTTP metamodel + upload routes, which now persist the DB model
-row themselves (Task 9), so _persist_commit's early-return guard fires
-correctly without manual DB seeding."""
+Setup uses the HTTP metamodel + upload routes, which persist the DB model
+row themselves, so _persist_commit's early-return guard fires correctly
+without manual DB seeding."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -24,7 +24,7 @@ def _client() -> TestClient:
     """Build a test client with a live in-memory session AND a DB model row.
 
     Both are populated by the HTTP routes (POST /metamodel, POST /model/upload),
-    which now persist the DB model row themselves (Task 9), so
+    which persist the DB model row themselves, so
     _persist_commit's ``get_model_row is None`` early-return does NOT fire
     and commits are actually written."""
     seed_default_project()

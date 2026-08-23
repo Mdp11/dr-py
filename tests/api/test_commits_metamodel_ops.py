@@ -1,5 +1,4 @@
-"""Metamodel ops through the commit flow (spec 2026-08-16). This file grows
-across Tasks 2-7; each task appends its section."""
+"""Metamodel ops through the commit flow."""
 
 from __future__ import annotations
 
@@ -105,7 +104,6 @@ def test_model_ops_route_rejects_metamodel_ops(client: TestClient) -> None:
 
 
 def test_validate_route_rejects_metamodel_ops(client: TestClient) -> None:
-    # Not in the brief's file list (found by grepping split_ops( call sites):
     # routes/validation.py destructures split_ops too, and mirrors the
     # existing PERMANENT artifact/view rejection there (test_view_op_schemas.py
     # ::test_validate_route_rejects_view_ops is the sibling for that pattern).
@@ -118,7 +116,7 @@ def test_validate_route_rejects_metamodel_ops(client: TestClient) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Task 5: metamodel ops through POST /commits
+# Metamodel ops through POST /commits
 # ---------------------------------------------------------------------------
 
 OTHER_HEADERS = {"x-user-id": "user-2", "x-user-email": "user2@example.com"}
@@ -194,20 +192,19 @@ def _create_node(client: TestClient, label: str | None = None) -> str:
 
 
 def test_migration_batch_lands_atomically(client: TestClient) -> None:
-    """The motivating scenario: change the schema AND fix the affected element
-    in ONE commit — the model op validated against the NEW schema, one rev,
-    one journal row, rebind columns set.
+    """Change the schema AND fix the affected element in ONE commit — the
+    model op validated against the NEW schema, one rev, one journal row,
+    rebind columns set.
 
-    Direction note (brief deviation, see the task report): the brief wrote
-    this as "drop `label` from the schema AND strip it from the element",
-    which the engine cannot express — ``_check_patch_keys``/
+    Dropping a property from the schema AND stripping it from the element
+    in one commit is inexpressible — ``_check_patch_keys``/
     ``Model.delete_property`` reject a key the CURRENT (i.e. already
-    swapped-in) schema does not declare, and the design spec §1 says so
-    outright: "model ops that need the outgoing schema belong in a prior
-    commit". The supported direction is the spec's other example — add a
-    property and fill it — which additionally PROVES the hoist: patching
-    ``owner_name`` is a 422 under V1 and only succeeds because the rebind
-    was applied first, even though the client listed it second.
+    swapped-in) schema does not declare, since model ops that need the
+    outgoing schema belong in a prior commit. So this exercises the
+    supported direction instead — add a property and fill it — which
+    additionally PROVES the hoist: patching ``owner_name`` is a 422 under
+    V1 and only succeeds because the rebind was applied first, even though
+    the client listed it second.
     """
     eid = _create_node(client, "hello")
     mm_token = _acquire_mm(client)
@@ -299,8 +296,7 @@ def test_rebind_batch_requires_owner(client: TestClient) -> None:
 
 
 def test_layout_ops_do_not_require_owner(client: TestClient) -> None:
-    """Only the REBIND half is owner-gated: a pure rearrange is editor+, the
-    same gate ``PUT /metamodel/layout`` used before it retired."""
+    """Only the REBIND half is owner-gated: a pure rearrange is editor+."""
     _seed_second_member("user-2", "user2@example.com", "editor")
     c2 = TestClient(create_app())
     c2.headers.update(OTHER_HEADERS)
@@ -516,7 +512,7 @@ def test_stale_batch_below_a_rebind_conflicts_unconditionally(
 
 def test_strict_mode_exempts_rebind_batches(client: TestClient) -> None:
     """A rebind that mints conformance issues still lands under strict mode
-    (Phase 6B: the engine stays inspectable)."""
+    — the engine stays inspectable."""
     _create_node(client)  # no label -> violates the mandatory-label candidate
     from data_rover.api import db as _db
     from data_rover.api.session import DEFAULT_PROJECT_ID
@@ -754,17 +750,16 @@ def test_layout_only_commit_broadcasts_the_metamodel_layout_scope(
 
 
 # ---------------------------------------------------------------------------
-# Task 6: POST /commits/preview dry-runs metamodel batches
+# POST /commits/preview dry-runs metamodel batches
 # ---------------------------------------------------------------------------
 
 
 def test_preview_dry_runs_a_migration_batch(client: TestClient) -> None:
-    """Direction note (see the task report): the brief wrote this scenario as
-    "drop `label` from the schema + strip it from the element", which is
-    inexpressible — the rebind is hoisted first, so by the time the model op
-    runs the CANDIDATE schema no longer declares `label` and
-    `_check_patch_keys` rejects the patch key (design spec §1: "model ops
-    that need the outgoing schema belong in a prior commit"). This mirrors
+    """Dropping `label` from the schema and stripping it from the element in
+    one batch is inexpressible — the rebind is hoisted first, so by the time
+    the model op runs the CANDIDATE schema no longer declares `label` and
+    `_check_patch_keys` rejects the patch key (model ops that need the
+    outgoing schema belong in a prior commit). This mirrors
     ``test_migration_batch_lands_atomically``'s supported direction instead:
     add a mandatory-looking property (``MM_V4``) and patch it in the SAME
     batch — legal only once the rebind has swapped the candidate in, which
@@ -854,7 +849,7 @@ def test_preview_restores_schema_when_model_ops_fail_mid_preview(
 
 
 # ---------------------------------------------------------------------------
-# Task 7: POST /model/undo — layout ops replay; rebind batches refuse cleanly
+# POST /model/undo — layout ops replay; rebind batches refuse cleanly
 # ---------------------------------------------------------------------------
 
 

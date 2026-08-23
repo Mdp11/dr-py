@@ -142,8 +142,7 @@ def test_hydration_heals_missing_folder_ids(client: TestClient) -> None:
 
 
 def test_view_op_commit_survives_eviction(client: TestClient) -> None:
-    """Regression for final-review Fix 4c: this is the test that would catch
-    a "wrong blob staged" bug. ``POST /commits``' view-op step 'e' stages the
+    """Catches a "wrong blob staged" bug: ``POST /commits``' view-op step 'e' stages the
     resulting ``session.view`` blob on the SAME DB transaction as the
     ``Commit`` row (see its docstring's atomicity note), but nothing else in
     the suite proves that staged blob is what a COLD session actually reads

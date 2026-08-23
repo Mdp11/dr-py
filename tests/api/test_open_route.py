@@ -1,4 +1,4 @@
-"""Tests for GET /open (Phase 4 open handshake)."""
+"""Tests for GET /open (the open handshake)."""
 
 from __future__ import annotations
 
