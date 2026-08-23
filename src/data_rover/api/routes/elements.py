@@ -8,9 +8,8 @@ from ..schemas import CreateElementRequest, ElementOut, UpdateElementRequest
 router = APIRouter()
 
 
-# NOTE: GET /model/elements (paged listing + search) lives in routes/read.py
-# since Phase C2-read; this module keeps the legacy mutation endpoints and the
-# single-element GET.
+# NOTE: GET /model/elements (paged listing + search) lives in routes/read.py;
+# this module keeps the legacy mutation endpoints and the single-element GET.
 
 
 @router.post("/model/elements", status_code=201)

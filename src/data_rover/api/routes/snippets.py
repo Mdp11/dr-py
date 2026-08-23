@@ -1,4 +1,4 @@
-"""Snippet execution endpoints (Task 11): POST /snippets/run|lint|cancel.
+"""Snippet execution endpoints: POST /snippets/run|lint|cancel.
 
 Model-access stance: matches routes/artifacts.py's ``POST /navigations/evaluate``
 and routes/tables.py's ``POST /tables/evaluate`` — reads ``session.model``
@@ -15,15 +15,15 @@ with concurrent commits, and the route reports whether the model moved under
 it (``stale = start_rev != end_rev``) instead of blocking those commits.
 
 Two per-process, in-memory pieces of state live at module scope (both
-thread-safe, both scoped to THIS API process — not mirrored across replicas,
-matching ``LockTable``'s Phase 7 deferral note):
+thread-safe, both scoped to THIS API process — not mirrored across
+replicas, a limitation shared with ``LockTable``):
 
 - ``_active_runs`` — a ``(project_id, run_id) -> _ActiveRun(owner, cancel)``
   registry so ``POST /snippets/cancel`` can look up and authorize a cancel
   request. Registered just before ``runner.run(...)`` is called, deregistered
   in a ``finally``.
 
-  **Collision semantics** (reviewer fix, see task-11 review): the key is the
+  **Collision semantics**: the key is the
   *pair* ``(project_id, run_id)``, not bare ``run_id`` — two different
   projects reusing the same client-chosen run_id no longer collide.
   Registration is last-register-wins: if the same key is registered twice
@@ -40,7 +40,7 @@ matching ``LockTable``'s Phase 7 deferral note):
   deregisters with its own token.
 - ``concurrency_guard`` (``..snippet_concurrency``) — a non-blocking global +
   per-user run limiter (``snippet_concurrency`` / ``snippet_per_user_concurrency``
-  settings from Task 10), shared with embedded evaluation (``script_eval.py``).
+  settings), shared with embedded evaluation (``script_eval.py``).
   Acquire fails fast (429) rather than queuing; released in a ``finally`` so
   an exception mid-run never leaks a permit.
 """
@@ -139,13 +139,12 @@ def _deregister_run(project_id: str, run_id: str, token: _ActiveRun) -> None:
 
 
 def _noop_cancel() -> None:
-    """M1 cancel seam.
+    """Cancel seam.
 
     ``WasmScriptRunner.run()`` (script_runner.py) drives its bridge loop to
     completion or to the wall-timeout with no external abort entry point
-    exposed today — there is no clean per-run cancel hook to wire this to
-    without changing that module, which is out of this task's scope. This
-    callable documents that gap rather than papering over it: the registry,
+    exposed today — there is no clean per-run cancel hook to wire this to.
+    This callable documents that gap rather than papering over it: the registry,
     ownership check, and 204/404 contract ``POST /snippets/cancel`` promises
     the frontend are fully implemented and real; only the actual abort is a
     no-op for now. A run a client "cancels" today still terminates on its

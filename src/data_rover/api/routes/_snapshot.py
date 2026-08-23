@@ -19,7 +19,7 @@ def _reject_reserved_id(entity_id: str, *, element: bool) -> None:
     """Reject ids carrying the ops-protocol temp-id prefix.
 
     ``tmp_``-prefixed ids are reserved for client-generated provisional ids
-    in POST /model/ops; a loaded entity carrying one would be ambiguous in
+    in POST /model/ops; a loaded entity carrying one would be ambiguous to
     the restore-mode applier (delete + undo would mint a fresh canonical id
     instead of reinstating the original), so they are banned at load time.
     """
@@ -50,6 +50,7 @@ def _reject_reserved_id(entity_id: str, *, element: bool) -> None:
 # ---------------------------------------------------------------------------
 
 
+
 def _guard_element(
     metamodel: Metamodel,
     seen_ids: set[str],
@@ -75,8 +76,8 @@ def _guard_element(
                 status_code=422,
                 detail=f"Unknown element type {type_name!r}",
             )
-        # non-strict: skip unknown-type and abstract checks (et is None);
-        # fall through to duplicate-id check below.
+        # non-strict: unknown type accepted; abstract check is skipped too
+        # since et is None here.
     else:
         if et.abstract:
             raise HTTPException(
@@ -122,8 +123,8 @@ def _guard_relationship(
                 status_code=422,
                 detail=f"Unknown relationship type {type_name!r}",
             )
-        # non-strict: silently accept the unknown type; source/target guards below
-        # still apply — endpoint-existence is structural and always enforced.
+        # non-strict: unknown type accepted; endpoint-existence is
+        # structural and still enforced below.
     if source_id not in existing_element_ids:
         raise HTTPException(
             status_code=422,
@@ -195,7 +196,7 @@ def _build_model_from_payload(
 
 
 # ---------------------------------------------------------------------------
-# Direct-dict builder (Phase C3 load endpoints)
+# Direct-dict builder (raw JSON load, no pydantic layer)
 # ---------------------------------------------------------------------------
 
 
@@ -256,11 +257,11 @@ def build_model_from_dicts(
     Missing ``elements``/``relationships`` keys mean empty lists.
 
     *strict* (default ``True``) controls whether unknown element/relationship
-    TYPES raise 422.  Pass ``strict=False`` during snapshot hydration so that a
-    project rebound onto a type-removing metamodel (Phase 6B) can still be
-    loaded after eviction — the validation pipeline will report the conformance
-    issues.  Reserved-id, duplicate-id, abstract-type, and endpoint-existence
-    guards still apply in both modes.
+    TYPES raise 422. Pass ``strict=False`` during snapshot hydration so that a
+    project rebound onto a type-removing metamodel can still be loaded after
+    eviction — the validation pipeline reports the conformance issues.
+    Reserved-id, duplicate-id, abstract-type, and endpoint-existence guards
+    still apply in both modes.
 
     ``on_progress(built, total)`` fires every 5000 entities and once at the
     end (hydration progress reporting); it must be cheap and must not touch

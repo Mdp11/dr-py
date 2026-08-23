@@ -1,11 +1,10 @@
 """POST /model/apply-cr — apply a change request.
 
-Two request modes, selected by the OPTIONAL ``model`` field (Phase C3):
+Two request modes, selected by the OPTIONAL ``model`` field:
 
-- legacy/inline mode (``model`` present): the CR is applied to the inline
+- inline mode (``model`` present): the CR is applied to the inline
   snapshot; the response carries the full result model + its issue list
-  (:class:`ApplyCrResponse`). The session model is never touched. Behavior
-  is byte-identical to the pre-C3 endpoint.
+  (:class:`ApplyCrResponse`). The session model is never touched.
 - session mode (``model`` absent): the CR is applied to the SESSION model
   (404 when none is loaded); on success the result REPLACES the session
   model and the response is an :class:`OpsResponse`-shaped delta
@@ -68,8 +67,7 @@ def _gate_cr_result(
     """422 gate for entities the CR introduced or rewired.
 
     The inline payload was already gated by ``_build_model_from_payload``, so
-    only the CR's delta needs checking (this replaces the former full
-    round-trip of the result model through a second payload build):
+    only the CR's delta needs checking:
 
     - added/modified elements: type must exist and not be abstract
     - added/modified relationships: type must exist, endpoints must resolve
@@ -78,11 +76,9 @@ def _gate_cr_result(
     The last two checks interlock: a relationship rewired onto a deleted
     element is already caught by the added/modified endpoint checks, so the
     deleted-elements loop only needs to walk the relationships incident in
-    the BASE model. Note also that the added/modified checks run on every
-    listed ``after`` state, so a CR that modifies an entity invalidly AND
-    deletes it in the same request is now rejected — more correct than the
-    old full-rebuild gate, where the delete silently won and the invalid
-    modification went unchecked.
+    the BASE model. The added/modified checks run on every listed ``after``
+    state, so a CR that modifies an entity invalidly AND deletes it in the
+    same request is rejected.
     """
     for el in (*cr.elements_added, *(m.after for m in cr.elements_modified)):
         et = metamodel.element_type(el.type_name)
@@ -126,12 +122,9 @@ def _gate_cr_result(
 def _apply_cr_inline(
     session: Session, inline: InlineModel, payload: ApplyCrRequest
 ) -> ApplyCrResponse | JSONResponse:
-    """Legacy mode: apply the CR to an inline snapshot (session untouched).
-
-    Deprecated: superseded by session mode (omit ``model`` from the request)
-    — the delta path of the large-model overhaul — which applies the CR to
-    the session model and returns an OpsResponse-shaped delta instead of the
-    full result model.
+    """Inline mode: apply the CR to an inline snapshot; the session model is
+    untouched. Returns the full result model — use session mode (omit
+    ``model``) for a delta response on large models.
     """
     metamodel = require_metamodel(session)
     base = _build_model_from_payload(
@@ -180,13 +173,12 @@ def _apply_cr_session(
 
     ``apply_change_request`` is pure, so the CR is applied base → result and
     on success the RESULT replaces the session model via ``set_model``. That
-    bumps ``model_rev`` and clears the op log — applying a CR resets undo
-    history (documented behavior: the recorded inverses describe a model
-    that no longer exists, and reconstructing them from the CR is not worth
-    the complexity for an action that semantically loads a new baseline).
+    bumps ``model_rev`` and clears the op log: applying a CR resets undo
+    history, since the recorded inverses describe a model that no longer
+    exists.
 
-    Validation is incremental (Phase B pattern): if the session has no
-    full-run baseline yet, the BASE model is fully validated once to seed
+    Validation is incremental: if the session has no full-run baseline yet,
+    the BASE model is fully validated once to seed
     it (``_ensure_validation_seeded``, shared with the ops endpoints); then
     only the CR's dirty set is re-validated on the result and spliced in,
     and the splice delta is returned. The spliced store describes the

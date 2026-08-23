@@ -160,7 +160,7 @@ def clear_model(session: Session = Depends(get_request_session)) -> Response:
 
 
 # ---------------------------------------------------------------------------
-# Streaming load/save endpoints (Phase C3 of the large-model overhaul)
+# Streaming load/save endpoints
 #
 # These move all heavy serialization server-side: the browser streams a file
 # body up without JSON.parsing it (or just sends a path) and pipes a chunked
@@ -184,8 +184,8 @@ def _install_model(
     routes, shared via _snapshot.py), install it with a PRESENT-but-EMPTY
     issue store via ``set_model`` (which bumps ``model_rev`` and clears the
     op log, so ``undo_depth`` is 0 afterwards) so ops batches can splice into
-    it immediately, then start the chunked background validation sweep — the
-    load is no longer the single O(model) validation cost; validation now
+    it immediately, then start the chunked background validation sweep — so
+    load itself is not the O(model) validation cost; validation
     streams in via ``validation_sweep`` and the returned summary's
     ``issue_counts`` starts at zero and grows as chunks land. Returns the same
     shape as GET /model/summary.
@@ -256,7 +256,7 @@ async def upload_model_body(
 ) -> ModelSummary:
     """Load a model from the raw request body (browser-streamed file).
 
-    The D2 frontend streams a picked ``File`` straight into ``fetch``'s body
+    The frontend streams a picked ``File`` straight into ``fetch``'s body
     — no JS-side parse, no string materialization in the browser. Here the
     body is buffered (``await request.body()``) and parsed in one
     ``json.loads``: at the ~80 MB target size that is one transient bytes
@@ -340,7 +340,7 @@ def download_model(
 ) -> StreamingResponse:
     """Stream the session model as an attachment (same bytes as /model/save).
 
-    The D2 frontend pipes ``response.body`` straight into a FileSystem
+    The frontend pipes ``response.body`` straight into a FileSystem
     writable, so the browser never holds the serialized model as a string.
     Chunks come from the same generator as /model/save — the two outputs are
     byte-identical by construction. Unlike save (which writes in-process to a

@@ -2,8 +2,6 @@
 
 Read-only (viewer-callable): running an export commits nothing — only edits
 to the artifact's DEFINITION go through POST /commits.
-Spec: docs/superpowers/specs/2026-08-13-table-export-split-and-custom-export-design.md §4.3
-Spec: docs/superpowers/specs/2026-08-19-custom-export-v2-design.md
 """
 
 from __future__ import annotations
@@ -89,10 +87,11 @@ def _aggregate_pending(statuses: list[ScriptStatusOut]) -> ScriptStatusOut:
     retryable in-flight state must never be reported as terminal, because
     this is a single response covering MULTIPLE entries — if even one of
     them will still fill in on its own, the honest answer for the whole
-    request is "poll again", not "give up" (same reasoning as the per-table
-    FIX B in `table_export_engine.status_from_job`: a client told `failed`
-    abandons the download the very next poll would have delivered). Only
-    when EVERY entry is dead does the aggregate report `failed`.
+    request is "poll again", not "give up" (same reasoning as
+    `table_export_engine.status_from_job`'s per-table check: a client told
+    `failed` abandons the download the very next poll would have
+    delivered). Only when EVERY entry is dead does the aggregate report
+    `failed`.
 
     `done`/`total` are summed across entries so a client rendering one
     progress bar for the whole export sees genuine combined progress rather
@@ -117,7 +116,7 @@ def run_export(
     runner: ScriptRunner | None = Depends(get_runner),
     settings: Settings = Depends(get_settings),
 ) -> Response:
-    # Spec §9.1: exactly one source for the definition. Checked here, not on
+    # Exactly one source for the definition. Checked here, not on
     # the model, so the 422 detail is one plain sentence rather than a
     # pydantic error tree — this is a contract line for CI scripts.
     if (payload.artifact_id is None) == (payload.definition is None):
@@ -140,7 +139,7 @@ def run_export(
     else:
         assert payload.definition is not None  # the XOR check above
         cdef = payload.definition
-        # `name` stands in for the artifact name (spec §9.1): ${name} in the
+        # `name` stands in for the artifact name: ${name} in the
         # zip filename template, the stem fallback, and the manifest's
         # `artifact_name` all read it. `artifact_id: None` is the manifest's
         # draft marker.
@@ -166,7 +165,7 @@ def run_export_by_name(
     runner: ScriptRunner | None = Depends(get_runner),
     settings: Settings = Depends(get_settings),
 ) -> Response:
-    """CI ergonomics (spec §9.2): run a committed exporter by NAME with one
+    """CI ergonomics: run a committed exporter by NAME with one
     `curl`. A QUERY parameter, not a path segment — artifact names are
     free-form text. GET is read-only by `authz`'s method-based write
     detection, so membership auth (header or cookie) works unchanged and the
@@ -210,14 +209,14 @@ def _execute_export(
     with an id or a draft definition, `GET /exports/run-by-name`), so the
     202/zip/bare/manifest contract cannot drift between them. `run_name` is
     the artifact's name for a committed run and the request's `name` for a
-    draft (`artifact_id` None marks the draft in the manifest, spec §9.1);
+    draft (`artifact_id` None marks the draft in the manifest);
     everything downstream is source-agnostic."""
     metamodel, model = require_model(session)
     if not cdef.entries:
         raise HTTPException(status_code=422, detail="exporter has no entries")
 
     # Run-level `${rev}`/`${date}`/`${project}` context, shared by every
-    # entry's name/folder template and by the zip filename (Task 6) — ONE
+    # entry's name/folder template and by the zip filename — ONE
     # `date` for the whole request, not one per entry.
     ctx = export_context_vars(session, project_id)
     try:
@@ -228,8 +227,8 @@ def _execute_export(
     # Resolve every table up front: an export artefact with a hole fails
     # LOUDLY (422 naming the entries) rather than shipping a partial zip that
     # looks complete — deliberate divergence from the bundle's
-    # tolerant-dangler stance (spec §4.3). Template/folder validation AND
-    # per-entry transform resolution (spec §8, Phase 4) are merged into this
+    # tolerant-dangler stance. Template/folder validation AND
+    # per-entry transform resolution are merged into this
     # SAME pass (rather than a second/third loop): each iteration appends
     # EXACTLY ONE slot to `folders` — on success the rendered segments, on a
     # `ValueError` an empty list — and EXACTLY ONE slot to `transform_codes`
@@ -305,7 +304,7 @@ def _execute_export(
         )
 
     # A run-level host: `TransformHost` shares one warm SnippetSession per
-    # DISTINCT code across every entry that uses it (spec §8), so it is
+    # DISTINCT code across every entry that uses it, so it is
     # opened ONCE for the whole request — never per entry — and only when at
     # least one entry actually carries a transform (an export with no
     # transforms takes no interactive concurrency slot at all). Mapped to
@@ -386,7 +385,7 @@ def _execute_export(
                 headers={"Retry-After": "1"},
             )
 
-        # Spec §5: the manifest is a zip-mode-only convenience — bare's whole
+        # The manifest is a zip-mode-only convenience — bare's whole
         # point is exactly one file, so a bare run neither seeds "manifest"
         # against the user's own filename nor injects a second member (which
         # would turn every bare run into the len(files) != 1 422 below).
@@ -512,7 +511,7 @@ def _execute_export(
             resp_headers["X-Table-Script-Errors"] = "true"
 
         if cdef.output.mode == "bare":
-            # Spec §9.3: bare is a CONTRACT (exactly one file), not best-effort —
+            # Bare is a CONTRACT (exactly one file), not best-effort —
             # a silent fallback to zip would change the content type under a
             # consuming script. Never blocks Save; enforced only here.
             if len(files) != 1:

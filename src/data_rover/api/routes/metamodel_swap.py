@@ -1,4 +1,4 @@
-"""Phase 6B metamodel swap: read-only sandbox diff + lint.
+"""Read-only metamodel sandbox: diff + lint.
 
 ``/metamodel/diff`` validates the live model against a CANDIDATE metamodel via
 a no-copy ``build_rebind_view`` (shares the instance payload, rebuilds indexes)
@@ -6,11 +6,8 @@ and returns a conformance diff, running under the per-project ``write_mutex``
 so the validation sweep can't race a concurrent commit. ``/metamodel/lint``
 is a cheap parse + schema check with no session/model/mutex at all.
 
-The non-destructive rebind itself (Phase 6B originally, then Task 9) now
-lands ONLY through the ``metamodel.rebind`` op family under ``POST
-/commits`` (``routes/commits.py`` + ``metamodel_ops.py``) — the standalone
-``POST /metamodel/rebind`` route this module used to carry was retired with
-no legacy window (spec 2026-08-16, Task 9).
+The non-destructive rebind itself lands through the ``metamodel.rebind`` op
+family under ``POST /commits`` (``routes/commits.py`` + ``metamodel_ops.py``).
 """
 
 from __future__ import annotations
@@ -109,9 +106,9 @@ async def lint_metamodel(
     owner-gated editing flow calls it, and viewers have nothing to lint.
 
     ``_read_metamodel_blob`` itself is called INSIDE this try block, not
-    before it: the helper is shared with ``diff_metamodel`` (a frozen
-    Phase 1-4 route whose contract is 422-on-bad-input, not always-200) so it
-    must not be changed to swallow its own decode errors. An undecodable body
+    before it: the helper is shared with ``diff_metamodel`` (whose contract
+    is 422-on-bad-input, not always-200), so it must not be changed to
+    swallow its own decode errors. An undecodable body
     (bad UTF-8, or malformed JSON under a JSON content-type) is exactly as
     much "the candidate text is bad" as a YAML/schema error, so it must land
     in the same always-200 result here.

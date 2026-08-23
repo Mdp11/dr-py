@@ -1,4 +1,4 @@
-"""Resource-lease endpoints (Phase 4 check-out). Holder == authenticated user.
+"""Resource-lease endpoints (check-out). Holder == authenticated user.
 
 Leases live in the per-project ``Session.lock_table`` (resolved via
 ``get_request_session``, so membership is already authorized). All times use

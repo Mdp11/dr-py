@@ -1,4 +1,4 @@
-"""WebSocket realtime feed (Phase 5 spec §3.2).
+"""WebSocket realtime feed.
 
 One socket per subscriber. On connect: authenticate via the IdentityProvider
 seam (query-param identity in dev — browsers can't set WS headers), authorize

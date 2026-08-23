@@ -26,13 +26,12 @@ router = APIRouter()
 def _peer_mm_conflict(session: Session, user_id: str) -> JSONResponse | None:
     """409 payload when a PEER holds the ``mm`` lease, else None.
 
-    Honor-don't-require (spec 2026-08-10): the caller's own lease never
-    blocks, and no lease at all is fine — the lease is a guarantee only if
-    every metamodel writer honors it, exactly like the artifact writers
-    honor ``art:`` leases. Callers: upload/clear here. The rebind path
-    (spec 2026-08-16) went the other way — `metamodel.rebind` ops hard-verify
-    the `mm` lease at `POST /commits` — so this honor-only check now covers
-    only the two routes left in this module.
+    Honor-don't-require: the caller's own lease never blocks, and no lease
+    at all is fine — the lease is a guarantee only if every metamodel writer
+    honors it, exactly like the artifact writers honor ``art:`` leases.
+    Callers: upload/clear here. `metamodel.rebind` ops instead hard-verify
+    the `mm` lease at `POST /commits`, so this honor-only check covers only
+    the two routes left in this module.
     """
     peers = session.lock_table.peer_leases(
         [METAMODEL_RESOURCE], user_id, now=time.monotonic()
@@ -56,12 +55,12 @@ async def upload_metamodel(
     db: DbSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Metamodel | JSONResponse:
-    # Phase 4: the mm lease honor rule comes FIRST, before the model-not-empty
+    # The mm lease honor rule comes FIRST, before the model-not-empty
     # check, so a locked metamodel refuses all writers uniformly.
     conflict = _peer_mm_conflict(session, user.id)
     if conflict is not None:
         return conflict
-    # Phase 6B: this destructive path is initial-bind only. Once a model has
+    # This destructive path is initial-bind only. Once a model has
     # content, a metamodel change must go through the non-destructive,
     # journaled `metamodel.rebind` op via POST /commits (this route clears
     # the model + history).
@@ -80,9 +79,9 @@ async def upload_metamodel(
     metamodel = load_metamodel_str(blob)
     session.set_metamodel(metamodel)  # clears the in-memory model (core semantics)
     # persist the metamodel + (re)bind the project's model row; changing the
-    # metamodel clears the model, so drop durable history too (Phase 6B added
-    # the non-destructive POST /metamodel/rebind for non-empty models; this
-    # path is now initial-bind only).
+    # metamodel clears the model, so drop durable history too. Non-empty
+    # models go through the non-destructive `metamodel.rebind` op instead
+    # (this path is initial-bind only).
     # Metamodel has no name field (only enums/elements/relationships); the row
     # name is cosmetic, leave it "".
     mm_row = content.create_metamodel(db, name="", version=1, blob=blob)
@@ -104,7 +103,7 @@ def get_metamodel_raw(
     session: Session = Depends(get_request_session),
     db: DbSession = Depends(get_db),
 ) -> RawMetamodelResponse:
-    """The current metamodel's source YAML for the live editor (Phase 5).
+    """The current metamodel's source YAML for the live editor.
 
     Prefers the stored blob (author's comments/formatting intact); a session
     whose metamodel never landed in a durable row (legacy/test setups)

@@ -1,26 +1,24 @@
-"""Project-artifact CRUD (saved navigations and tables; diagrams in a later
-stage).
+"""Project-artifact CRUD (saved navigations and tables; `diagram`/
+`diagram_kind` are unregistered and 422 on write).
 
 Artifacts are DB rows, NOT model content, so these routes take no
 `write_mutex`: they never touch the in-memory model, and that is also why
 broadcasting an `artifact_event` per successful write is safe here.
 
-Concurrency, since the Phase 1 artefacts revamp, is TWO-layered:
+Concurrency is TWO-layered:
 - optimistic `artifact_rev` (PUT echoes the loaded rev; mismatch -> 409
-  carrying `current_rev`) — this route family's own, older mechanism; and
+  carrying `current_rev`); and
 - the `art:<id>` LEASES `POST /commits` verifies. These routes are not
   lock-verified (they take no token and grant nothing), but they must still
   REFUSE (409) while a peer holds a lease, or the guarantee is empty in both
   directions: an editor checked out on `art:X` would find their commit
-  quietly overwriting — or overwritten by — a legacy write they never saw.
-  A legacy write bumps no `model_rev`, so the commit path's overlap backstop
-  cannot see it either; this guard is the only thing standing there. The
-  caller's OWN lease never blocks them (see `LockTable.peer_leases`).
+  quietly overwriting — or overwritten by — a write here they never saw.
+  This route family bumps no `model_rev`, so the commit path's overlap
+  backstop cannot see such a write either; this guard is the only thing
+  standing there. The caller's OWN lease never blocks them (see
+  `LockTable.peer_leases`).
 
-Payloads are validated per kind on write via the `artifact_kinds` registry;
-Stage 1 added `navigation` (`NAVIGATION_ADAPTER`), Stage 2 added `table`
-(`TABLE_ADAPTER`) — `diagram`/`diagram_kind` still 422 until their stage
-lands.
+Payloads are validated per kind on write via the `artifact_kinds` registry.
 """
 
 from __future__ import annotations

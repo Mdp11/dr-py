@@ -132,7 +132,7 @@ def _resolve_table(
 
 
 def _resolve_transform_code(db: DbSession, project_id: str, ref: str, name: str) -> str:
-    """Resolve a transform ref (spec §8) to its snippet CODE, strictly.
+    """Resolve a transform ref to its snippet CODE, strictly.
 
     Deliberately NOT the tolerant `_fetch_snippet`/resolve path script
     columns use: a dangling script-column ref degrades to error cells, but a
@@ -213,17 +213,17 @@ def evaluate_table(
     settings: Settings = Depends(get_settings),
 ) -> TablePageOut:
     """Read-only (viewer-callable; listed in authz._READ_ONLY_POST_SUFFIXES).
-    Row ORDER is cached per session (Task 7's TableOrderCache) keyed on the
+    Row ORDER is cached per session (`TableOrderCache`) keyed on the
     RESOLVED definition's fingerprint + sort + model_rev, so paging through a
     large table re-evaluates cells per page but not the (possibly expensive)
     row build+sort. No write_mutex — same benign-race stance as
     routes/read.py: a concurrent mutation simply misses the cache (stale
     model_rev) rather than corrupting it.
 
-    Script columns (spec §4.1-4.2): the WHOLE-TABLE passes (`build_rows_ex` +
+    Script columns: the WHOLE-TABLE passes (`build_rows_ex` +
     `order_rows`) run CACHE-ONLY — the guest is never invoked O(rows) times
-    inside a request, because that is precisely the grind that used to freeze
-    the UI. Every miss records a pending cell; if any were recorded the
+    inside a request, since driving it that many times synchronously would
+    stall the response. Every miss records a pending cell; if any were recorded the
     response DEGRADES to build order (a sort computed over half-pending values
     would reshuffle visibly on every poll) and a background `SweepJob` is
     kicked/joined to fill the cell cache. Only the visible window is evaluated
@@ -302,7 +302,7 @@ def evaluate_table(
                 ):
                     script_ctx.add_warning(ScriptWarningCode.SORT_NEEDS_SCRIPT_NAV)
             else:
-                # Whole-table passes are CACHE-ONLY (spec §4.1): the guest is
+                # Whole-table passes are CACHE-ONLY: the guest is
                 # never driven O(rows) times inside a request. A miss records a
                 # pending cell instead of blocking; the visible window below is
                 # still evaluated live.
@@ -523,16 +523,16 @@ def export_table(
 
     `payload.format` (default `"xlsx"`) picks what ships: a single `.xlsx`
     workbook, a single `.json` document, OR — when `json_split` is enabled
-    on the table (P-13) and produced more than one file — an
+    on the table and produced more than one file — an
     `application/zip` named `{name}.zip` bundling them (`build_zip`; same
     zip shape `/exports/run` uses for a whole exporter bundle). An
     `ExportPending` result short-circuits to the shared 202 protocol:
     `Retry-After: 1` with a `ScriptStatusOut` body the frontend polls on.
 
-    `defn.transform` (spec §8) is the table's OWN transform, applied ONLY
+    `defn.transform` is the table's OWN transform, applied ONLY
     here: an `/exports/run` entry over the same table artifact renders
-    UNtransformed (no-bleed — the entry's own `transform: None` unless it
-    sets one, Task 7's concern, not this route's)."""
+    UNtransformed (no-bleed — the entry's own `transform` stays `None`
+    unless it sets one)."""
     metamodel, model = require_model(session)
     transform_host = None
     try:

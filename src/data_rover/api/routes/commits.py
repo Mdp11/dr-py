@@ -1,11 +1,11 @@
-"""Check-out/commit endpoints (Phase 4 spec §7): open, preview, commit.
+"""Check-out/commit endpoints: open, preview, commit.
 
 Reuses the delta machinery from ``routes/ops.py`` — ``_apply_batch`` (atomic
 apply with inverse collection; raises 422 on a mutation-boundary error),
 ``_rollback`` (undo a previewed batch), and ``_ensure_validation_seeded``
 (full-run baseline). Preview runs apply → validate dirty set → roll back,
-all under ``session.write_mutex`` (spec §11). This module deliberately imports
-those module-private helpers — they are part of the ops package's internal
+all under ``session.write_mutex``. This module deliberately imports those
+module-private helpers — they are part of the ops package's internal
 surface, shared with this sibling. The artifact delta is likewise not built
 here: ``artifact_ops.artifact_delta_headers`` /
 ``artifact_ops.broadcast_artifact_events`` are shared with POST /model/undo,
@@ -13,10 +13,10 @@ over the single ``artifact_header`` row->header projection the artifact CRUD
 routes use (``routes/artifacts._header`` is an alias of it) — same fields on
 created, updated AND deleted events, so no two write paths can drift.
 
-Since the Phase 1 artefacts revamp a commit can carry artifact ops as well as
-model ops (``artifact_ops.split_ops`` separates the two families). Model ops
-mutate the in-memory model; artifact ops stage DB rows — see
-``create_commit``'s docstring for how the two are kept atomic.
+A commit can carry artifact ops as well as model ops
+(``artifact_ops.split_ops`` separates the two families). Model ops mutate
+the in-memory model; artifact ops stage DB rows — see ``create_commit``'s
+docstring for how the two are kept atomic.
 """
 
 from __future__ import annotations
@@ -231,8 +231,8 @@ def _affected_ids(commits: list[Commit]) -> set[str]:
 
 
 def _batch_touched_ids(model: Model, view: View | None, ops: list[OpIn]) -> set[str]:
-    """Conservative touched-set for the conflict backstop (spec 2026-07-29):
-    a batch conflicts with the commit tail iff their touched-id sets overlap.
+    """Conservative touched-set for the conflict backstop: a batch conflicts
+    with the commit tail iff their touched-id sets overlap.
 
     Starts from ``required_locks`` — the same per-op resource derivation the
     lock table already trusts to gate concurrent edits — then adds the raw
@@ -243,7 +243,7 @@ def _batch_touched_ids(model: Model, view: View | None, ops: list[OpIn]) -> set[
     relationship) must still register as touching it. A create's temp id
     never appears in `_affected_ids` (canonical ops carry the assigned id),
     so temp ids are filtered out at the end rather than tracked specially.
-    ``view`` is threaded straight through to ``required_locks`` (Task 6) so
+    ``view`` is threaded straight through to ``required_locks`` so
     folder-op lease derivation resolves correctly; the view ops themselves
     additionally run through ``view_ops.view_touched_resources`` below, which
     contributes the placement-subject markers (``viewel:``/``viewart:``) no
@@ -333,7 +333,7 @@ def _conflict_response(model_rev: int, detail: str) -> JSONResponse:
     Single-instance assumption: the completeness reasoning behind these
     branches (one journaled batch == one rev == one row) holds because ONE
     process owns the session and its journal writes. Multi-instance
-    deployment is Phase 7's debt, shared with ``LockTable``."""
+    deployment is not supported, a limitation shared with ``LockTable``."""
     return JSONResponse(
         status_code=409,
         content={"detail": detail, "model_rev": model_rev},
@@ -350,13 +350,9 @@ class _CommitUnwind:
     mutated IN PLACE, artifact rows are staged on this request's DB
     transaction, and the view is mutated IN PLACE plus staged as a blob on
     that same transaction. Every rejection/failure path therefore has to
-    undo *however many halves are live at that point* — which used to be
-    five hand-maintained, near-identical inline blocks whose contents had
-    to grow in lockstep with the flow (each new stage meant revisiting
-    every later block; the strict-mode gate and the Phase-2 view half both
-    did exactly that).
+    undo *however many halves are live at that point*.
 
-    The ledger inverts the maintenance direction: each stage REGISTERS what
+    The ledger tracks this by having each stage REGISTER what
     went live, at the moment it goes live and NEVER LATER (``model_res``
     after the model apply, ``created_view`` when this request materializes
     ``session.view`` from ``None``, ``view_res`` after the view apply,
@@ -382,8 +378,8 @@ class _CommitUnwind:
       Invalidation is tied to ``model_res``: it exists because the in-place
       apply-then-rollback leaves the model rev-identical but momentarily
       different, so a lock-free concurrent ``/tables/evaluate`` could have
-      cached rows computed mid-flight (final-review A1/I1).
-    - ``prior_metamodel`` (spec 2026-08-16) unwinds AFTER ``model_res``,
+      cached rows computed mid-flight.
+    - ``prior_metamodel`` unwinds AFTER ``model_res``,
       reversing apply order: the rebind is HOISTED to apply first (so the
       batch's model ops validate against the candidate schema), therefore it
       unwinds last among the in-memory halves. It restores the same four
@@ -394,16 +390,14 @@ class _CommitUnwind:
       BECAUSE of the rev-decrement ordering above. It nulls
       ``session.validation`` rather than restoring it: a rebind-carrying batch
       may already have called ``ValidationState.set_full`` by the time a
-      failure lands, so the only safe state is "force a re-seed on next read"
-      (mirrors the standalone rebind route's own failure path).
+      failure lands, so the only safe state is "force a re-seed on next read".
     - ``view_res`` rollback needs ``session.view`` non-None: the view half
       only ever applies to a resolved view, and nothing can null it
-      mid-request anymore (the retired ``DELETE /view`` was the last thing
-      that could — see the defensive-fallback comment at the b3 site).
+      mid-request (see the defensive-fallback comment at the b3 site).
     - ``created_view`` reset LAST among the view steps: a rejected request
       must be externally invisible, so the auto-create unwinds to the
       genuinely-empty ``None``, not a materialized empty view with no
-      ViewRow behind it (final-review Finding 1 / round 2 A+B).
+      ViewRow behind it.
     - ``op_log.pop()`` only when ``rev_bumped``: the batch enters the op
       log at the same instant the rev bumps (step d), never earlier.
     - ``db.rollback()`` last, and only once ``db_staged`` — the paths
@@ -499,7 +493,7 @@ def preview_commit(
             content={"detail": "stale base_rev", "model_rev": session.model_rev},
         )
     model_ops, artifact_ops, view_ops, metamodel_ops = split_ops(payload.ops)
-    # Pre-mutex, mirroring create_commit's own hoist (spec 2026-08-16 §7): both
+    # Pre-mutex, mirroring create_commit's own hoist: both
     # calls raise their 422s (more-than-one-rebind, an unparseable/schema-bad
     # candidate blob) before any lock or mutation work runs. Move-node ops
     # need nothing further here — pydantic already checked their shape, and
@@ -539,8 +533,8 @@ def preview_commit(
         # nothing to validate.
         if view_ops:
             # Resolve the SAME durable-vs-cached view create_commit's own
-            # pre-mutex resolve now uses (final-review round 2, Finding C):
-            # a None session.view does NOT mean "no durable view" — it can
+            # pre-mutex resolve uses: a None session.view does NOT mean
+            # "no durable view" — it can
             # mean a cold/evicted session's cache miss while ViewRow
             # survives (see load_or_create_view's docstring) — so
             # validating against validate_view_ops' own None-view fallback
@@ -603,8 +597,8 @@ def preview_commit(
                 model.indexes.rebuild()
             # The in-place apply-then-rollback leaves model_rev unchanged, so a
             # concurrent lock-free /tables/evaluate could have cached rows AND
-            # script cell values computed mid-preview at this rev (final-review
-            # A1/I1). Invalidate both caches and the sweeps behind them.
+            # script cell values computed mid-preview at this rev. Invalidate
+            # both caches and the sweeps behind them.
             session.invalidate_derived_caches()
     structural = [i for i in scoped if i.category is IssueCategory.STRUCTURAL]
     conformance = [i for i in scoped if i.category is IssueCategory.CONFORMANCE]
@@ -668,7 +662,7 @@ def model_at_rev(
     session: Session = Depends(get_request_session),
     db: DbSession = Depends(get_db),
 ) -> ModelOut | JSONResponse:
-    """Reconstruct the FULL model as it existed at ``rev`` (Phase 8 diffs).
+    """Reconstruct the FULL model as it existed at ``rev``.
 
     Read endpoint — any member (history is readable by viewers). O(model)
     response, like GET /model and the /compare page; the client diffs two of
@@ -695,8 +689,7 @@ def commit_diff_endpoint(
     session: Session = Depends(get_request_session),
     db: DbSession = Depends(get_db),
 ) -> CommitDiffOut | JSONResponse:
-    """Render one commit's changes across content families (Phase 1 artefacts
-    revamp).
+    """Render one commit's changes across content families.
 
     Read endpoint — any member (the ``session`` dependency only establishes
     membership, exactly like GET /commits above). O(model) like
@@ -722,12 +715,12 @@ def create_commit(
     user: User = Depends(get_current_user),
     membership: Membership = Depends(require_membership),
 ) -> CommitResponse | JSONResponse:
-    """Lock-verified, structural-gated commit (Phase 4 spec §7).
+    """Lock-verified, structural-gated commit.
 
     Flow:
     1. Staleness check (before the mutex — mirrors preview and apply_ops).
-       A future ``base_rev`` always 409s. A behind-head ``base_rev`` uses the
-       GENERALIZED rule (spec 2026-07-29): the batch conflicts iff the
+       A future ``base_rev`` always 409s. A behind-head ``base_rev`` uses a
+       GENERALIZED rule: the batch conflicts iff the
        resources it touches overlap what landed in ``(base_rev, head]`` — see
        ``_batch_touched_ids``/``_affected_ids``. Leases already prevent most
        conflicts up front; this is the backstop for the window where the
@@ -762,7 +755,7 @@ def create_commit(
        a. Verify the caller still holds every required lock (409 if any gone).
        a2. Quiet-peers guard for rebind-carrying batches (409 while a PEER
           holds a model-scope lease).
-       a3. Apply the metamodel half FIRST (spec 2026-08-16): the schema swap
+       a3. Apply the metamodel half FIRST: the schema swap
           is hoisted ahead of every other family so the batch's model ops
           validate against the NEW schema — that is what makes an atomic
           migration batch a migration batch.
@@ -792,8 +785,7 @@ def create_commit(
           reload banner.
     4. Return CommitResponse with full delta + commit metadata.
 
-    Mixed-batch atomicity (Phase 1 artefacts revamp; view half added Phase 2;
-    metamodel half added spec 2026-08-16)
+    Mixed-batch atomicity
     ---------------------------------------------------------------------
     A batch can span all four content families, and each lives in a
     different place: model ops mutate the in-memory model IN PLACE, artifact
@@ -840,10 +832,9 @@ def create_commit(
     # widens the feed scope) without re-scanning the family each time.
     rebind_op, mm_moves = split_rebind(metamodel_ops)
     if rebind_op is not None and membership.role is not Role.owner:
-        # Same gate the retired standalone POST /metamodel/rebind route used
-        # to carry (require_owner): a schema swap retypes the whole model.
-        # Layout moves are deliberately NOT owner-gated — presentation data,
-        # editor+ like the retired PUT /metamodel/layout route was.
+        # A schema swap retypes the whole model, so rebind requires the
+        # owner role. Layout moves are deliberately NOT owner-gated —
+        # presentation data only, editor+ suffices.
         # ``require_membership`` has already rejected a viewer for this write.
         raise HTTPException(
             status_code=403, detail="metamodel changes require the owner role"
@@ -857,10 +848,10 @@ def create_commit(
     # GET /view reported whatever it reported, and any return out of this
     # function must leave it reporting that again — for the genuinely-empty
     # case, not a materialized empty view with no ViewRow / view_rev to back
-    # it (final-review Finding 1, and round 2's Finding A/B extend this same
-    # guard to the resolve-view call site inside the mutex below).
+    # it. The same guard applies to the resolve-view call site inside the
+    # mutex below.
     #
-    # INVARIANT (final-review round 3): every ASSIGNMENT to session.view in
+    # INVARIANT: every ASSIGNMENT to session.view in
     # this function happens under session.write_mutex — the single point is
     # just inside the mutex below, right before required_locks; every ledger
     # unwind() that resets it runs later inside that same mutex block. A
@@ -879,7 +870,7 @@ def create_commit(
     if payload.base_rev > session.model_rev:
         return _conflict_response(session.model_rev, "stale base_rev")
     if payload.base_rev < session.model_rev:
-        # Generalized staleness (spec 2026-07-29) — see the docstring above
+        # Generalized staleness — see the docstring above
         # for the full rationale; branch order mirrors it: no-journal /
         # short-tail / baseline-or-rebind / overlap, cheapest-and-safest
         # first, each a fail-closed 409 before the real overlap check runs.
@@ -919,8 +910,8 @@ def create_commit(
             # computed against.
             return _conflict_response(session.model_rev, "stale base_rev")
         # Resolve a LOCAL view for the overlap check ONLY, immediately
-        # before the one check in this block that needs it (final-review
-        # round 2, Finding A) — not any earlier, so the three fail-closed
+        # before the one check in this block that needs it — not any
+        # earlier, so the three fail-closed
         # checks above (which never consult view content at all) can never
         # trigger an unnecessary hydration on their own return paths.
         # _batch_touched_ids -> required_locks' folder_subtree/locate_folder
@@ -930,10 +921,10 @@ def create_commit(
         # stale delete_folder/move_folder batch's conflict/touched-set here
         # would be computed against the WRONG (empty/absent) tree relative
         # to what the real, hydrated one actually contains. NEVER assigned
-        # to session.view here (final-review round 3: this whole block runs
-        # BEFORE the mutex, so a write here would be the exact race the
-        # invariant note above create_commit's mutex now forbids) — mirrors
-        # preview_commit's own local, read-only resolve.
+        # to session.view here: this whole block runs BEFORE the mutex, so a
+        # write here would be the exact race the invariant note above
+        # create_commit's mutex forbids — mirrors preview_commit's own
+        # local, read-only resolve.
         conflict_view = (
             session.view
             if session.view is not None
@@ -971,7 +962,7 @@ def create_commit(
         )
     with session.write_mutex:
         # Resolve/auto-create session.view HERE — the ONLY place this
-        # function ever ASSIGNS to it (final-review round 3), now that the
+        # function ever ASSIGNS to it, now that the
         # pre-mutex overlap check above uses its own read-only local
         # instead. required_locks just below needs it resolved for the same
         # reason that local did: against a ``None`` view, folder_subtree/
@@ -1062,9 +1053,8 @@ def create_commit(
         # b. apply the model half against the (possibly just-swapped) schema.
         #    _apply_batch already rolled ITSELF back on a mutation-boundary
         #    error, but the ledger still has to run: created_view may be True
-        #    (the resolve near the top — final-review round 2, Finding B) and
-        #    since spec 2026-08-16 the metamodel half may already be live in
-        #    memory AND staged in the transaction (a3).
+        #    (the resolve near the top) and the metamodel half may already
+        #    be live in memory AND staged in the transaction (a3).
         try:
             res = _apply_batch(model, model_ops, restore=False)
         except Exception:
@@ -1107,16 +1097,11 @@ def create_commit(
                 # Defensive fallback only: the resolve near the top of this
                 # SAME mutex block already hydrated/auto-created
                 # session.view whenever view_ops is non-empty, so this
-                # branch is dead in the ordinary case. It used to also guard
-                # a real race: the now-retired ``DELETE /view`` took NO lock
-                # at all (not even session.write_mutex), so a peer's
-                # concurrent DELETE could null session.view again between
-                # this request's own resolve and here, despite this request
-                # holding the mutex the entire time. That route is gone, and
-                # nothing else can null session.view mid-request anymore
-                # (every other assignment is this SAME request unwinding its
-                # own auto-create on a later failure) — this branch survives
-                # purely as a cheap, harmless backstop.
+                # branch is dead in the ordinary case. Nothing else can null
+                # session.view mid-request (every other assignment is this
+                # SAME request unwinding its own auto-create on a later
+                # failure) — this branch survives purely as a cheap,
+                # harmless backstop.
                 session.view = load_or_create_view(db, project_id)
                 unwind.created_view = True
             try:
@@ -1144,9 +1129,9 @@ def create_commit(
             # A schema change invalidates the dirty-scope premise for the
             # WHOLE model, not just this batch's touched entities: an element
             # nobody edited can start (or stop) conforming purely because the
-            # type it instantiates changed. So re-validate everything — the
-            # same O(model) cost the standalone rebind route pays — and REPLACE
-            # the issue store below rather than splicing into it.
+            # type it instantiates changed. So re-validate everything — an
+            # O(model) cost — and REPLACE the issue store below rather than
+            # splicing into it.
             scoped = default_pipeline().validate(model, Scope.all())
         else:
             scoped = default_pipeline().validate(model, res.dirty.to_scope())
@@ -1165,18 +1150,16 @@ def create_commit(
         # d. commit accepted: splice issues, bump rev, record batch
         conformance = [i for i in scoped if i.category is IssueCategory.CONFORMANCE]
         # strict-mode gate: an owner-enabled project promotes scoped conformance
-        # issues to a hard reject (spec: strict mode). Scoped to res.dirty only —
+        # issues to a hard reject. Scoped to res.dirty only —
         # pre-existing issues elsewhere never trip this.
         #
-        # Rebind batches are exempt BY DECISION (spec 2026-08-16, carrying
-        # forward Phase 6B's "the engine stays inspectable"): a schema
-        # migration must not be impossible on a strict project, and the
-        # rebind's own sweep above is whole-model, so gating on it would let
-        # ANY pre-existing conformance issue anywhere veto every future schema
-        # change. The count is still reported on the commit and the issue
-        # store still gets the full truth — the batch simply lands. It used to
-        # be exempt "by construction" (rebind had its own route); now it is
-        # exempt by this clause.
+        # Rebind batches are exempt BY DECISION — the engine must stay
+        # inspectable through a migration: a schema migration must not be
+        # impossible on a strict project, and the rebind's own sweep above
+        # is whole-model, so gating on it would let ANY pre-existing
+        # conformance issue anywhere veto every future schema change. The
+        # count is still reported on the commit and the issue store still
+        # gets the full truth — the batch simply lands.
         if session.strict_mode and conformance and not rebound:
             unwind.unwind()  # undo every live half — see _CommitUnwind
             return JSONResponse(
@@ -1208,7 +1191,7 @@ def create_commit(
             session.invalidate_derived_caches()
         elif get_settings().snippet_incremental_invalidation:
             # Selective eviction: cells this commit provably did not touch
-            # stay warm at the new rev (spec 2026-07-21 Phase B).
+            # stay warm at the new rev.
             session.evict_touched_caches(touched_keys(model, model.metamodel, res))
         else:
             session.invalidate_derived_caches()  # legacy clear-all
@@ -1266,8 +1249,7 @@ def create_commit(
         #    on its own (FK/constraint/connection error) — the same failure
         #    class this try/except exists to catch. Staging it outside would
         #    let that exception escape every rollback below with model_rev
-        #    already bumped and the batch already in op_log (final-review
-        #    Finding 1).
+        #    already bumped and the batch already in op_log.
         commit_id = uuid.uuid4().hex
         issues_json = [IssueOut.from_core(i).model_dump() for i in conformance]
         new_view_rev: int | None = None
@@ -1319,7 +1301,7 @@ def create_commit(
             # layout-only case can, and the guard costs nothing.)
             #
             # Inside the SAME try/except shape as the persist step above, and
-            # for the same reason (final-review Finding 4): this is still a
+            # for the same reason: this is still a
             # db.commit(), it can still raise on its own (constraint,
             # connection), and by this point model_rev is bumped and the batch
             # is in op_log — an escaping raise would leave both standing with
@@ -1389,9 +1371,9 @@ def create_commit(
         if rebound:
             # rebind_event INSTEAD of commit_event: there is no applyable
             # delta across a schema swap (every peer's cached elements are
-            # typed by a metamodel that no longer exists), so peers get the
-            # reload banner — exactly what the standalone rebind route emits.
-            # A migration batch's model delta is therefore deliberately NOT
+            # typed by a metamodel that no longer exists), so peers get a
+            # reload banner instead. A migration batch's model delta is
+            # therefore deliberately NOT
             # broadcast; the reload subsumes it.
             session.hub.broadcast(
                 rebind_event(
@@ -1472,15 +1454,13 @@ def revert_commit(
     db: DbSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> CommitResponse | JSONResponse:
-    """Revert the model to the state at ``target_rev`` (Phase 8 spec §3.2).
+    """Revert the model to the state at ``target_rev``.
 
-    Mechanism (the proven POST /model/undo compensating-commit shape, applied
+    Mechanism (the same POST /model/undo compensating-commit shape, applied
     to a *range*): apply the inverse_ops of every commit after target_rev,
     newest-first, in restore mode, recorded as ONE new forward commit. The
     journal stays append-only; model_rev only moves forward; the revert is
     itself revertible.
-
-    Guards (Tasks 5–7) are layered on top of this core; broadcast is Task 8.
     """
     _, model = require_model(session)
     if payload.base_rev != session.model_rev:
@@ -1526,7 +1506,7 @@ def revert_commit(
                     },
                 )
         for c in commits:
-            # Deliberate Phase-1 boundary, not a stub: reverting an artifact
+            # Deliberate boundary, not a stub: reverting an artifact
             # change means replaying row state a range of commits deep, and
             # ``ArtifactRow`` names are UNIQUE per (project, kind) — a range
             # revert can therefore collide with rows created after the target
@@ -1543,8 +1523,8 @@ def revert_commit(
                     },
                 )
         for c in commits:
-            # PERMANENT refusal (not a Task-N stub, unlike the artifact one
-            # above): a range revert over view changes has the same row-
+            # PERMANENT refusal, unlike the artifact refusal above: a range
+            # revert over view changes has the same row-
             # identity collision hazard the artifact refusal exists for
             # (folder ids reused after the target rev), and the view family
             # has no plan to lift this boundary.
@@ -1558,7 +1538,7 @@ def revert_commit(
                 )
         for c in commits:
             # Same permanent boundary as the view family: a range revert
-            # across a schema swap is exactly the undo refusal (Task 7), and
+            # across a schema swap is exactly the undo refusal, and
             # layout rows share the artifact family's row-identity hazard.
             # Checked on op KIND, not the from/to_metamodel_id FK columns the
             # rebind loop above already handles — a layout-only commit
@@ -1607,7 +1587,7 @@ def revert_commit(
             # Unreachable while the 409 guards above stand. An explicit raise
             # rather than an assert: `python -O` strips asserts, and silently
             # dropping artifact/view/metamodel ops on the floor is precisely
-            # the outcome the Phase-1 boundary exists to prevent, so a
+            # the outcome this boundary exists to prevent, so a
             # narrowed guard must fail loudly instead of half-reverting.
             raise HTTPException(
                 status_code=500,

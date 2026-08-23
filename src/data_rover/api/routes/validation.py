@@ -20,7 +20,7 @@ from .ops import _apply_batch, _ensure_validation_seeded, _rollback
 router = APIRouter()
 
 #: max issues returned by GET /model/issues; counts stay exact past the cap.
-#: One flat panel list is the consumer — paging buys nothing (spec, 2026-08-12).
+#: One flat panel list is the consumer — paging buys nothing.
 ISSUES_RESPONSE_MAX = 5000
 
 
@@ -135,7 +135,7 @@ def validate_model(
             )
         model_ops, artifact_ops, view_ops, metamodel_ops = split_ops(payload.ops)
         if artifact_ops:
-            # PERMANENT rule, not a stub (CLAUDE.md, Phase 4 "Artifact ops"):
+            # PERMANENT rule, not a stub:
             # this endpoint validates MODEL content — it applies ops to the
             # model, re-runs the pipeline over the dirty scope and rolls back.
             # An artifact op has nothing to contribute to that: its rows are
@@ -151,7 +151,7 @@ def validate_model(
         if view_ops:
             # Same PERMANENT rule, view family: view ops are not model content
             # either, and their own preconditions are dry-checked by
-            # POST /commits/preview once the view applier lands (Task 5).
+            # POST /commits/preview.
             raise HTTPException(
                 status_code=422,
                 detail="view ops are not supported on /model/validate; "
@@ -160,8 +160,7 @@ def validate_model(
         if metamodel_ops:
             # Same PERMANENT rule, metamodel family: schema edits are not
             # model content either, and their own preconditions are dry-
-            # checked by POST /commits/preview once the metamodel applier
-            # lands (Task 6).
+            # checked by POST /commits/preview.
             raise HTTPException(
                 status_code=422,
                 detail="metamodel ops are not supported on /model/validate; "

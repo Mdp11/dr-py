@@ -1,11 +1,11 @@
 """POST /model/ops and POST /model/undo — the delta mutation protocol.
 
-Phase C1 of the large-model overhaul: the session model is the source of
-truth and clients mutate it by sending small op batches (mirroring the
-frontend op union in ``frontend/src/lib/state/ops.ts``) instead of pushing
-whole-model snapshots. Each accepted batch returns a delta (changed/deleted
-entities + validation-issue delta), bumps ``session.model_rev`` once, and is
-appended to ``session.op_log`` so /model/undo can walk history backwards.
+The session model is the source of truth and clients mutate it by sending
+small op batches (mirroring the frontend op union in
+``frontend/src/lib/state/ops.ts``) instead of pushing whole-model snapshots.
+Each accepted batch returns a delta (changed/deleted entities + validation-
+issue delta), bumps ``session.model_rev`` once, and is appended to
+``session.op_log`` so /model/undo can walk history backwards.
 
 Atomicity without deep copies
 -----------------------------
@@ -20,8 +20,8 @@ Validation seeding
 ------------------
 Incremental validation needs a full-run baseline (``session.validation``).
 If none exists yet, one full validation of the PRE-batch model is run to
-seed it — a transitional cost: the C3 load endpoints will seed the store at
-load time, making this a no-op in practice.
+seed it; a session whose load endpoint already seeded the store at load
+time pays nothing here.
 
 Undo and rev counters
 ---------------------
@@ -42,8 +42,8 @@ compensating commit covers all four, and every failure path unwinds every
 half that was live (in-memory model rollback + ``rollback_view`` +
 ``db.rollback()``) AND pushes the popped batch back so undo history is never
 silently eaten. A popped batch whose metamodel half carries a
-``metamodel.rebind`` is refused outright with a 409 (spec amendment
-2026-08-16, see the 409 branch's own comment for why) rather than replayed —
+``metamodel.rebind`` is refused outright with a 409 (see the 409 branch's
+own comment for why) rather than replayed —
 restore-mode model inverses are schema-checked at the core mutation boundary,
 so no single replay order is correct across a schema swap in either
 direction. The view blob (when touched) rides the SAME DB transaction as the
@@ -450,10 +450,10 @@ def _ensure_validation_seeded(session: Session, model: Model) -> ValidationState
     """Make sure a full-run issue baseline exists BEFORE mutating.
 
     Shared by the ops endpoints and session-mode apply-cr
-    (routes/change_request.py). The C3 load endpoints seed the store at
-    load time, so this only does work for sessions populated through the
-    legacy snapshot routes. Seeding pre-batch keeps the post-batch
-    replace() delta exact.
+    (routes/change_request.py). Load endpoints that already seed the store
+    at load time make this a no-op; it only does work for sessions
+    populated through the legacy snapshot routes. Seeding pre-batch keeps
+    the post-batch replace() delta exact.
     """
     if session.validation is None:
         state = ValidationState()
@@ -520,26 +520,24 @@ def _persist_commit(
     the model-only caller passes a ``list[ModelOpIn]``, which is not a
     ``list[OpIn]`` under list invariance.
 
-    Only persists when the project actually has a durable model row (the
-    interactive/legacy in-memory-only flows have none yet — they persist a
-    baseline via the load/upload routes in Task 9). Keeps DB model_rev in
-    lockstep with the just-bumped session.model_rev.
+    Only persists when the project actually has a durable model row (an
+    in-memory-only session has none yet — it persists a baseline via the
+    load/upload routes). Keeps DB model_rev in lockstep with the
+    just-bumped session.model_rev.
 
     The keyword-only ``_commit_id``/``_message``/``_validation_error_count``/
     ``_issues`` parameters are optional metadata carried by the structured
     commit endpoint (``POST /commits``); the plain ``/model/ops`` path omits
     them and gets the same defaults as before (append-only, no message/issues).
 
-    ``_from_metamodel_id``/``_to_metamodel_id`` are the rebind FK columns
-    (spec 2026-08-16): a ``metamodel.rebind`` op in the batch sets both, and
-    every reader keyed off them — the staleness guard's unconditional-conflict
-    branch, ``content.first_rebind_after``, history's ``is_rebind``,
+    ``_from_metamodel_id``/``_to_metamodel_id`` are the rebind FK columns: a
+    ``metamodel.rebind`` op in the batch sets both, and every reader keyed
+    off them — the staleness guard's unconditional-conflict branch,
+    ``content.first_rebind_after``, history's ``is_rebind``,
     ``commit_diff``'s metamodel arm — is what MAKES a journal row a rebind.
-    Passing them through here (rather than journaling the swap as an op alone)
-    is why the retired standalone rebind route needed no schema change.
 
     Returns True if a durable row existed and the commit was persisted,
-    False when the project has no model row (in-memory-only legacy flow)."""
+    False when the project has no model row (in-memory-only session)."""
     if content.get_model_row(db, project_id) is None:
         return False
     content.append_commit(
@@ -691,7 +689,7 @@ def apply_ops(
             # at the higher rev (it only self-clears on a FORWARD stamp move),
             # which would brick every later write/read at the restored rev and
             # then serve values computed against this rolled-back model once a
-            # LATER commit reaches that rev again (final-review I1).
+            # LATER commit reaches that rev again.
             session.invalidate_derived_caches()
             session.op_log.pop()  # drop the batch we just recorded
             db.rollback()
@@ -727,20 +725,16 @@ def undo(
         # step below).
         model_inv, artifact_inv, view_inv, metamodel_inv = split_ops(batch.inverse_ops)
         if any(op.kind == "metamodel.rebind" for op in metamodel_inv):
-            # PLAN DEVIATION (spec amendment 2026-08-16): restore-mode model
-            # inverses are schema-checked at the core mutation boundary
-            # (_check_patch_keys + Model.set_property), so replaying them
-            # across a schema swap fails whichever side of the swap-back
-            # they run on — a migration batch's inverse patches name
+            # Restore-mode model inverses are schema-checked at the core
+            # mutation boundary (_check_patch_keys + Model.set_property), so
+            # replaying them across a schema swap fails whichever side of the
+            # swap-back they run on — a migration batch's inverse patches name
             # OLD-schema properties (invalid once the candidate is back out)
             # while an additive batch's inverse patches name NEW-schema ones
             # (invalid before it), and no single replay order is correct in
-            # both directions without teaching the core a schema-independent
-            # restore mode (deferred). Refused cleanly, history intact — a
-            # "new rebind back" through the metamodel editor is the supported
-            # path. The rebind's own full-state inverse is still sitting in
-            # this batch (journaled by create_commit), so a later phase can
-            # lift this 409 with no data migration.
+            # both directions without a schema-independent restore mode.
+            # Refused cleanly, history intact — a "new rebind back" through
+            # the metamodel editor is the supported path.
             session.op_log.append(batch)
             return JSONResponse(
                 status_code=409,
@@ -758,29 +752,26 @@ def undo(
         # externally invisible: before this undo attempt GET /view reported
         # whatever it reported, and any early return out of this block must
         # leave it reporting that again — for the genuinely-empty case, not a
-        # materialized empty view with no ViewRow / view_rev to back it
-        # (final-review Finding 1 — mirrors create_commit's own created_view
-        # guard, which exists for the identical reason on the auto-create
-        # path).
+        # materialized empty view with no ViewRow / view_rev to back it —
+        # mirrors create_commit's own created_view guard, which exists for
+        # the identical reason on the auto-create path.
         created_view = False
-        # Resolve the view ONCE, before the peer-lease guard below reads it
-        # (final-review round 2, Finding A): ``view_op_folder_ids`` degrades
-        # its delete_folder/move_folder subtree-and-current-parent expansion
-        # to a bare single-resource id when ``view`` is None (mirroring
-        # ``required_locks``'s own None-view degradation) — so undoing while
-        # session.view is COLD (e.g. a cold/evicted session's cache miss,
-        # which leaves ``ViewRow`` intact — see ``load_or_create_view``'s
-        # docstring) would derive the guard's resource set against an
-        # ABSENT tree while the applier below goes on to mutate the REAL,
-        # hydrated one — reopening exactly the "peer lease on a child gets
-        # silently stomped" hole Fix 2 closed for the case where
+        # Resolve the view ONCE, before the peer-lease guard below reads it:
+        # ``view_op_folder_ids`` degrades its delete_folder/move_folder
+        # subtree-and-current-parent expansion to a bare single-resource id
+        # when ``view`` is None (mirroring ``required_locks``'s own
+        # None-view degradation) — so undoing while session.view is COLD
+        # (e.g. a cold/evicted session's cache miss, which leaves
+        # ``ViewRow`` intact — see ``load_or_create_view``'s docstring)
+        # would derive the guard's resource set against an ABSENT tree while
+        # the applier below goes on to mutate the REAL, hydrated one,
+        # letting a peer's lease on a child go unnoticed for the case where
         # session.view was already warm. Guarded on
         # `view_inv` (an inverse batch with no view ops needs no view at
         # all) and wrapped so a raise here — DB error, e.g. — re-pushes the
         # JUST-POPPED batch before propagating: nothing else in this request
         # has touched anything yet, but the pop above already has, and an
-        # unre-pushed pop is a silently lost undo slot (final-review round 2,
-        # Finding B).
+        # unre-pushed pop is a silently lost undo slot.
         if view_inv and session.view is None:
             try:
                 session.view = load_or_create_view(db, project_id)
@@ -868,32 +859,19 @@ def undo(
             db.rollback()  # discard staged artifact rows
             raise
         view_res: ViewBatchResult | None = None
-        # This apply step used to be able to 422 even in a single-user,
-        # no-peer sequence: the now-retired legacy PUT /view/snapshot
-        # bypassed op_log entirely (no Commit row) and, unlike POST
-        # /commits, only refused a PEER's folder lease — the CALLER's own
-        # overwrite always went through, even if it dropped a
-        # folder/placement an already-journaled batch's inverse still
-        # expected to find. That route is gone, and every remaining view
-        # writer (POST /commits) is lock-verified and journaled, so this
-        # specific race is structurally gone too — the exception handling
-        # below survives purely as a general backstop, never a
-        # silently-wrong inverse applied over a view the caller has since
-        # replaced.
+        # Every view writer (POST /commits) is lock-verified and journaled,
+        # so the exception handling below is a general backstop: it should
+        # never see a silently-wrong inverse applied over a view the caller
+        # has since replaced.
         if view_inv:
             if session.view is None:
                 # Defensive fallback only: the resolve-view block near the
                 # top of this function already hydrated/auto-created
                 # session.view whenever view_inv is non-empty, so this branch
-                # is dead in the ordinary single-request case. It used to
-                # also guard a real race: the now-retired ``DELETE /view``
-                # took no lock at all, so a peer's concurrent DELETE could
-                # null session.view again between this request's earlier
-                # resolve and here. That route is gone, and nothing else can
-                # null session.view mid-request anymore — this branch
-                # survives purely as a cheap, harmless backstop. Same
-                # load_or_create_view call, same rationale (a ViewRow that
-                # exists IS the view — see its docstring).
+                # is dead in the ordinary single-request case; nothing else
+                # can null session.view mid-request. Same load_or_create_view
+                # call, same rationale (a ViewRow that exists IS the view —
+                # see its docstring).
                 session.view = load_or_create_view(db, project_id)
                 created_view = True
             try:
@@ -947,7 +925,7 @@ def undo(
         # no else: pre-branch /model/ops relied on the rev-stamp mismatch alone
         # append-only journal: the undo is a NEW forward commit whose ops are
         # the inverse batch, so hydration replays to the post-undo state and
-        # model_rev moves up (Phase 8 revert reuses this shape). ONE entry per
+        # model_rev moves up (revert reuses this same shape). ONE entry per
         # undo, spanning all four families: model ops first, then artifact
         # ops, then view ops, then metamodel ops. Metamodel LAST here mirrors
         # ``create_commit``'s own FORWARD list (see its comment) — but note

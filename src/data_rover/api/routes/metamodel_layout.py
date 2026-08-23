@@ -3,15 +3,12 @@
 Deliberately does NOT depend on ``get_request_session``: reading a layout
 must not hydrate a cold project's model. Membership is enforced directly by
 ``authz.require_membership`` (method-based: any member GETs). No lease, no
-journal — presentation only (spec 2026-08-13 §5/§6): layout is last-write-wins
-because a lost drag is re-dragged, unlike model content where a lost write is
-corruption.
+journal — presentation only: layout is last-write-wins because a lost drag
+is re-dragged, unlike model content where a lost write is corruption.
 
-The write side used to be a standalone ``PUT`` here; it is now the
-``metamodel.move_node`` op under ``POST /commits`` (``content.
-stage_metamodel_layout``, ``metamodel_ops.py``), which persists to the same
-``MetamodelLayoutRow`` this route reads — the standalone ``PUT`` was retired
-with no legacy window (spec 2026-08-16, Task 9).
+The write side is the ``metamodel.move_node`` op under ``POST /commits``
+(``content.stage_metamodel_layout``, ``metamodel_ops.py``), which persists
+to the same ``MetamodelLayoutRow`` this route reads.
 """
 
 from __future__ import annotations

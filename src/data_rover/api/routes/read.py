@@ -1,4 +1,4 @@
-"""Paged/on-demand read endpoints (Phase C2-read of the large-model overhaul).
+"""Paged/on-demand read endpoints.
 
 The frontend currently downloads the whole model (~80 MB) to browse it; these
 endpoints serve the same UI features server-side so it can fetch summaries,
@@ -88,7 +88,7 @@ def _require_element(model: Model, element_id: str) -> None:
 def model_summary(session: Session) -> ModelSummary:
     """Build the GET /model/summary payload for the current session model.
 
-    Shared with the Phase C3 load endpoints (routes/model.py), which return
+    Shared with the load endpoints (routes/model.py), which return
     this exact shape after installing a freshly loaded model. 404s through
     ``require_model`` when no model is loaded.
     """
@@ -113,7 +113,7 @@ def get_model_summary(session: Session = Depends(get_request_session)) -> ModelS
     """Cheap whole-model statistics for headers/status bars.
 
     ``issue_counts`` is ``None`` until a full validation run has seeded the
-    session issue store (POST /model/validate without scope, the C3 load
+    session issue store (POST /model/validate without scope, the load
     endpoints, or the first accepted ops batch) — "not validated" is
     distinct from "zero issues".
     """

@@ -1,6 +1,5 @@
-"""Admin console routes (all require_admin): user CRUD + system-wide project
-membership management. Membership management lives here (not on per-project
-owner routes) per the centralized-admin design decision."""
+"""Admin console routes (all require_admin): user CRUD and system-wide
+project membership management."""
 
 from __future__ import annotations
 
@@ -79,8 +78,8 @@ def patch_user(
             password=body.password,
         )
     except ValueError as exc:
-        # "unknown user" → 404 (user not found);
-        # last-admin guard message contains "last active admin" → 409 conflict.
+        # last-admin guard message contains "last active admin" -> 409;
+        # any other ValueError means the user was not found -> 404.
         status = 409 if "last active admin" in str(exc) else 404
         raise HTTPException(status_code=status, detail=str(exc)) from exc
     return _out(u)
@@ -91,7 +90,7 @@ def delete_user(user_id: str, db: Session = Depends(get_db)) -> Response:
     try:
         tenancy.delete_user(db, user_id)
     except ValueError as exc:
-        # last-admin guard → 409 conflict
+        # last-admin guard triggered
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return Response(status_code=204)
 
