@@ -1,5 +1,5 @@
-"""Shared per-request embedded-evaluation state (M2 script columns, M3 script
-steps).
+"""Shared per-request embedded-evaluation state for script columns and
+navigation script steps.
 
 One `ScriptEvalContext` is built per top-level evaluate/export request and
 threaded through table AND navigation evaluation, so all snippet work a
@@ -15,15 +15,15 @@ and one warnings channel.
   under the determinism guarantee (same code + same model ⇒ same output);
   entry points that mutate module globals between calls are outside that
   guarantee and documented as such. Calls are memoized per-request AND write
-  through to the session-level `ScriptCellCache` (spec §3), which makes
-  results durable across requests within one model rev.
+  through to the session-level `ScriptCellCache`, which makes results durable
+  across requests within one model rev.
 - **Degradation, not failure**: runner-unavailable / no-slot / budget-spent
   conditions synthesize error `CallResult`s (kinds `"unavailable"` /
   `"timeout"`), which the table layer renders as error cells and the nav
   layer as pruned-with-warning chains. `errored` records that ANY call failed
   — the route layer uses it to skip the row-order cache (cache-poisoning
   guard).
-- **Cache-only mode (`pending`, spec §4.1)**: a whole-table pass can run with
+- **Cache-only mode (`pending`)**: a whole-table pass can run with
   `cache_only=True` (instance attribute, flippable between phases, or a
   per-call `cache_only=` override) so it never invokes the guest inline — a
   cell-cache miss synthesizes a `CallResult` with error kind `"pending"`

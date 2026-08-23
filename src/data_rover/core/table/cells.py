@@ -12,7 +12,7 @@ API-layer projection over the API's own tree-item shape); the route maps ids to
 | navigation | expand   | single (req.) | `ElementCell` (one binding per row)     |
 
 An `expand` column already promoted its value(s) into a `RowKey` slot back in
-`build_rows` (Task 4) — one row per value. Re-deriving that slot's value here
+`build_rows` — one row per value. Re-deriving that slot's value here
 (rather than re-navigating/re-reading the property) is what makes an expand
 cell agree with the row it belongs to, including for `keep_empty` rows whose
 slot is `None`. `_expand_slot_of` (the SAME helper `build_rows` and
@@ -102,17 +102,17 @@ class ErrorCell:
 
 @dataclass
 class PendingCell:
-    """A script cell whose value is not computed yet (cache-only miss, spec
-    §4.2): a background sweep is filling it. Renders as a placeholder, never
-    as an error; sorts with empties; exports as #ERROR only in the
-    failed-sweep path (a completed sweep leaves no pending cells)."""
+    """A script cell whose value is not computed yet (cache-only miss): a
+    background sweep is filling it. Renders as a placeholder, never as an
+    error; sorts with empties; exports as #ERROR only in the failed-sweep
+    path (a completed sweep leaves no pending cells)."""
 
 
 #: Wire message for a cell that is still `pending` after a TERMINAL sweep.
 #: Deliberately the same wording `api/table_export.py` renders into a degraded
 #: workbook cell (`#ERROR: not computed`) and `json_export.py` puts in a
 #: `$error` marker, so every surface agrees. Lives HERE, beside `PendingCell`,
-#: because core cannot import from the API layer where it used to sit.
+#: because core cannot import from the API layer.
 NOT_COMPUTED_MESSAGE = "not computed"
 
 Cell = ElementCell | ValueCell | ValuesCell | ElementsCell | ErrorCell | PendingCell

@@ -8,8 +8,6 @@ The load-bearing idea is that an export never permutes the definition. Column
 order there is structural — a `ColumnRef` may only point backwards and expand
 slots are positional — so `export_order` describes an OUTPUT order and the
 renderers walk the definition through it.
-
-Spec: docs/superpowers/specs/2026-07-28-table-export-settings-design.md
 """
 
 from __future__ import annotations

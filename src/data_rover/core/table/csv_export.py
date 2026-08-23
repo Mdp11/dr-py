@@ -1,6 +1,6 @@
 """CSV renderer for table export. Pure over (model, headers, rows) — the CSV
 sibling of `api/table_export.py`'s xlsx writer, sharing its cell display text
-through `core/table/cell_text.py` so the two formats cannot drift (spec §6).
+through `core/table/cell_text.py` so the two formats cannot drift.
 
 Machine-consumer stance: UTF-8, NO BOM (Excel is what the xlsx format is
 for), stdlib `excel` dialect (RFC-4180 quoting, CRLF row terminator). No
@@ -22,10 +22,7 @@ neutralized formula, it is corrupted data, and RFC-4180 itself has no
 formula concept for a mitigation to appeal to. xlsx, in contrast, has no
 non-spreadsheet reader to protect: hardening it costs nothing a real
 consumer would ever notice. This is a deliberate, revisitable posture, not
-a settled one — see BACKLOG.md K-11 for the open question and its
-reasoning in full.
-
-Spec: docs/superpowers/specs/2026-08-19-custom-export-v2-design.md §6
+a settled one.
 """
 
 from __future__ import annotations

@@ -1,5 +1,5 @@
 """The `kind='exporter'` artifact payload: a named collection of table
-exports whose presentation lives IN the artefact (spec §3.3).
+exports whose presentation lives IN the artefact.
 
 `overridden_table` is the override mechanism: a copy of the table definition
 whose PRESENTATION fields are restated from an entry. RENDER ONLY — the copy
@@ -7,9 +7,6 @@ feeds `export_layout`/`export_header`/`export_definition`/`render_json` and
 nothing else; evaluation keeps the original definition so cell values, row
 order and script cache keys are independent of the artefact (the
 `export_definition` boundary, applied from a different source).
-
-Spec: docs/superpowers/specs/2026-08-13-table-export-split-and-custom-export-design.md
-Spec: docs/superpowers/specs/2026-08-19-custom-export-v2-design.md
 """
 
 from __future__ import annotations
@@ -29,18 +26,17 @@ from .schema import (
     # cycle) but every existing importer reaches it via exporter.py.
 )
 
-#: Hard cap on entries per exporter (spec §17.1). A schema bound in the
-#: tradition of SNIPPET_MAX_CODE_BYTES — enforced at validation (so it does
-#: reject at artifact save), NOT an export-time strictness rule. It closes
-#: the Phase-3 finding: POST /exports/run accepts viewer-supplied draft
-#: definitions, and an unbounded list let one request chain N whole-table
-#: exports (each O(model)) synchronously.
+#: Hard cap on entries per exporter. A schema bound in the tradition of
+#: SNIPPET_MAX_CODE_BYTES — enforced at validation (so it rejects at artifact
+#: save), NOT an export-time strictness rule. Without it, POST /exports/run's
+#: viewer-supplied draft definitions could chain unboundedly many whole-table
+#: exports (each O(model)) into one synchronous request.
 MAX_EXPORTER_ENTRIES = 50
 
 
 #: The four wire formats an export can ship as. One vocabulary for
 #: `ExporterEntry.format` and the standalone route's `ExportTableIn.format`
-#: (spec §6: extending both is nearly free — the engine branch is shared).
+#: (extending both is nearly free — the engine branch is shared).
 type ExportFormat = Literal["xlsx", "json", "csv", "jsonl"]
 
 #: The two formats that render through the JSON document list — ONE spelling
@@ -51,7 +47,7 @@ JSON_FAMILY: frozenset[ExportFormat] = frozenset({"json", "jsonl"})
 
 
 class JsonDocumentOptions(BaseModel):
-    """Document shaping for the `json` branch (spec §7): applied after
+    """Document shaping for the `json` branch: applied after
     `render_json`, before serialization. Exporter-entry-only by decision —
     `TableDefinition` never grows this. On `jsonl`, `shape`/`pretty` are
     ignored with tolerance; `on_error` applies. On `xlsx`/`csv` the whole
@@ -101,7 +97,7 @@ class ExporterEntry(BaseModel):
     export_row_number: RowNumberExportOptions | None = None
     json_split: JsonSplitOptions | None = None
     json_doc: JsonDocumentOptions | None = None
-    #: Per-entry snippet post-processor (spec §8): a `code_snippet` artifact
+    #: Per-entry snippet post-processor: a `code_snippet` artifact
     #: ref whose `transform(doc)` runs render -> shape -> TRANSFORM ->
     #: serialize, JSON-family formats only. Ref-only by design (no inline
     #: code, unlike SnippetSource). None means "no transform", never
@@ -155,9 +151,9 @@ def overridden_table(defn: TableDefinition, entry: ExporterEntry) -> TableDefini
             "export_row_number": entry.export_row_number,
             "json_split": entry.json_split,
             # The export engine reads its resolved code via an explicit
-            # parameter (Task 5), not off this copy — this restatement exists
-            # so the render copy carries the entry's presentation completely,
-            # the no-bleed rule made structural.
+            # parameter, not off this copy — this restatement exists so the
+            # render copy carries the entry's presentation completely, the
+            # no-bleed rule made structural.
             "transform": entry.transform,
         }
     )

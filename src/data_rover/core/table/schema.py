@@ -99,8 +99,7 @@ ColumnSource = Annotated[RowSlot | ColumnRef, Field(discriminator="kind")]
 
 # ---- columns ----------------------------------------------------------------
 class JsonColumnOptions(BaseModel):
-    """Per-column JSON-export settings (spec:
-    docs/superpowers/specs/2026-07-25-table-json-export-design.md).
+    """Per-column JSON-export settings.
 
     Lives on the COLUMN rather than on `TableDefinition` as an index-keyed map
     deliberately: column indices move under reorder/insert/remove (the frontend
@@ -129,8 +128,7 @@ class JsonColumnOptions(BaseModel):
 
 
 class ColumnExportOptions(BaseModel):
-    """Per-column export overrides (spec:
-    docs/superpowers/specs/2026-07-28-table-export-settings-design.md).
+    """Per-column export overrides.
 
     On the COLUMN rather than in an index-keyed map on `TableDefinition`, for
     the same reason `JsonColumnOptions` is: column indices move under reorder,
@@ -168,9 +166,7 @@ class RowNumberExportOptions(BaseModel):
 
 
 class JsonSplitOptions(BaseModel):
-    """Split the JSON export into one file per base element (spec:
-    docs/superpowers/specs/2026-08-13-table-export-split-and-custom-export-design.md,
-    docs/superpowers/specs/2026-08-19-custom-export-v2-design.md).
+    """Split the JSON export into one file per base element.
 
     Presentation-only, like `export_order`: never consulted during evaluation.
     `filename_template` must contain `${name}` — enforced at EXPORT time
@@ -302,7 +298,7 @@ class TableDefinition(BaseModel):
     #: JSON-export split settings; `None` = single-document export (today's
     #: behavior, and the no-migration guarantee for existing payloads).
     json_split: JsonSplitOptions | None = None
-    #: Standalone-export snippet post-processor (spec §8): applies to
+    #: Standalone-export snippet post-processor: applies to
     #: POST /tables/export in JSON-family formats ONLY — an exporter entry
     #: never consults it (no-bleed). Presentation-family: never consulted
     #: during evaluation; cell values, row order and script cache keys are

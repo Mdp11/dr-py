@@ -3,9 +3,6 @@
 Pure over (row keys, cells), like `json_export.py` — the renderer stays
 per-document; this module sits ABOVE it and decides which rows land in which
 file and what that file is called.
-
-Spec: docs/superpowers/specs/2026-08-13-table-export-split-and-custom-export-design.md
-Spec: docs/superpowers/specs/2026-08-19-custom-export-v2-design.md
 """
 
 from __future__ import annotations
@@ -19,13 +16,10 @@ from .cells import Cell
 from .evaluate import Binding, RowKey
 from .naming import sanitize_stem, substitute
 
-#: `sanitize_stem` now lives in `.naming` (imported above) and is re-exported
-#: here purely for backward compatibility — external callers
-#: (`routes/exports.py`, `tests/table/test_split.py`) import it FROM this
-#: module, not from `.naming`, for historical reasons predating the
-#: naming-engine extraction. Declared explicitly in `__all__` rather than
-#: left to look like an unused import, so ruff's re-export lint has
-#: something to trust instead of a diff-minimization alias standing in for it.
+#: Re-exported here (defined in `.naming`, imported above) because external
+#: callers (`routes/exports.py`, `tests/table/test_split.py`) import it FROM
+#: this module. Declared explicitly in `__all__` rather than left to look
+#: like an unused import, so ruff's re-export lint has something to trust.
 __all__ = [
     "sanitize_stem",
     "render_filenames",
@@ -41,8 +35,8 @@ _Pair = tuple[RowKey, list[Cell]]
 
 def validate_template(template: str) -> None:
     """`ValueError` when `${name}` is absent — the routes map `ValueError` to
-    422, and the frontend dialog mirrors this predicate (spec decision:
-    reject, don't normalize — the ONE strict export setting)."""
+    422, and the frontend dialog mirrors this predicate (reject, don't
+    normalize — the ONE strict export setting)."""
     if SPLIT_TOKEN not in template:
         raise ValueError(f"filename template must contain {SPLIT_TOKEN}")
 

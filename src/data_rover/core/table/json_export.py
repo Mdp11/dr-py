@@ -2,8 +2,6 @@
 cells) — no API imports, unlike `api/table_export.py`, which lives in the API
 layer only because core stays xlsx-free. JSON needs no dependency at all, so
 the whole thing is unit-testable against a plain `Model`.
-
-Spec: docs/superpowers/specs/2026-07-25-table-json-export-design.md
 """
 
 from __future__ import annotations
@@ -167,14 +165,14 @@ def render_cell(model: Model, cell: Cell, mode: str) -> object:
 
 
 def jsonl_bytes(docs: list[object]) -> bytes:
-    """One compact value per line, `\\n`-terminated (spec §6). A stream of
-    objects is inherently compact and array-like, which is why
-    `json_doc.shape`/`pretty` are ignored with tolerance for this format —
-    only `on_error` (see `contains_error_marker`) applies. `docs` is typed
-    `list[object]`, not `list[dict]`: pre-transform every element is a
-    rendered row object, but a Phase 4 `transform(doc)` (spec §8) may
-    return a list of ANY JSON value — `json.dumps` handles that fine, and a
-    post-transform line need not be an object."""
+    """One compact value per line, `\\n`-terminated. A stream of objects is
+    inherently compact and array-like, which is why `json_doc.shape`/`pretty`
+    are ignored with tolerance for this format — only `on_error` (see
+    `contains_error_marker`) applies. `docs` is typed `list[object]`, not
+    `list[dict]`: pre-transform every element is a rendered row object, but a
+    `transform(doc)` snippet may return a list of ANY JSON value —
+    `json.dumps` handles that fine, and a post-transform line need not be an
+    object."""
     return b"".join(
         json.dumps(d, ensure_ascii=False, separators=(",", ":")).encode("utf-8") + b"\n"
         for d in docs
@@ -183,7 +181,7 @@ def jsonl_bytes(docs: list[object]) -> bytes:
 
 def contains_error_marker(value: object) -> bool:
     """True when a rendered document carries any `{"$error": ...}` marker at
-    any depth — the `on_error: "fail"` probe (spec §7). Walks exactly the
+    any depth — the `on_error: "fail"` probe. Walks exactly the
     shapes `render_json` emits (dicts, lists, scalars). A user column whose
     resolved JSON key is literally `$error` would trip this too — accepted:
     strictness may over-fire on a pathological name, never under-fire."""
@@ -325,7 +323,7 @@ def render_json_ex(
     key_column: int | None = None,
 ) -> tuple[list[dict[str, object]], list[str] | None]:
     """The whole table as a list of JSON objects, plus optional per-document
-    keys for the object shape (spec §7).
+    keys for the object shape.
 
     `row_iter` yields cells in `row_keys` order (that is `iter_export_rows`'
     contract), so the two zip positionally.
@@ -359,7 +357,7 @@ def render_json_ex(
     Strict by decision, all `ValueError` (the routes' 422 mapping):
     `key_column` out of range; a key rendering `None`/`""`/non-scalar (an
     error cell renders a dict and lands here too); a duplicate key —
-    filenames dedupe, data keys never do (spec §7).
+    filenames dedupe, data keys never do.
     """
     plan = build_group_plan(defn, base_slots)
     keys = JsonKeys.resolve(defn)

@@ -1,4 +1,4 @@
-"""Per-session cache of embedded snippet call results (spec 2026-07-20 §3.1).
+"""Per-session cache of embedded snippet call results.
 
 Sound because of the WASM runner's determinism guarantee: same code + same
 model ⇒ same output, so a result keyed by (code hash, entry, element ids) is
@@ -24,8 +24,8 @@ Cached deterministic errors carry whatever `reads` their call reported
 (usually `None` — errored calls ship no read-set — so they are evicted by
 every commit; conservative and cheap).
 
-Selective eviction (`evict_touched`, spec 2026-07-21 Phase B): each entry now
-carries the read-set (`frozenset[ReadKey] | None`) its call reported
+Selective eviction (`evict_touched`): each entry carries the read-set
+(`frozenset[ReadKey] | None`) its call reported
 alongside the `CallResult`, so a commit that only touched a known subset of
 the model can drop just the cells that read what changed instead of the
 whole cache. See `evict_touched`'s docstring for the exact contract.
@@ -45,13 +45,12 @@ CellKey = tuple[str, str, tuple[str, ...]]
 _CACHEABLE_ERROR_KINDS = frozenset({"runtime", "syntax"})
 
 #: `put` degrades an oversized incoming read-set to `None` above this many
-#: keys. Storing read-sets (Phase B) changed the cache's memory profile by
-#: orders of magnitude: each entry can now carry up to `_MAX_READS` (2000,
-#: see `runner.py`) `ReadKey` tuples, each id up to 512 chars, times
-#: `snippet_cell_cache_max` (default 50 000) cells. Nothing bounds the
-#: aggregate, and a realistic pathological cell -- a multi-hop snippet
-#: charging dozens of keys per cell over a big table -- is already hundreds
-#: of MB of pure bookkeeping. `None` already means "evict on every commit"
+#: keys. Each entry can carry up to `_MAX_READS` (2000, see `runner.py`)
+#: `ReadKey` tuples, each id up to 512 chars, times `snippet_cell_cache_max`
+#: (default 50 000) cells; nothing bounds the aggregate, and a realistic
+#: pathological cell -- a multi-hop snippet charging dozens of keys per cell
+#: over a big table -- is already hundreds of MB of pure bookkeeping. `None`
+#: already means "evict on every commit"
 #: (the conservative, always-correct direction), so collapsing an oversized
 #: set to `None` here costs only extra recompute for that one cell; it can
 #: NEVER cause a stale value, only extra work. Deliberately far below
@@ -107,7 +106,7 @@ class ScriptCellCache:
                 self._d.popitem(last=False)
 
     def evict_touched(self, touched: frozenset[ReadKey], rev: int) -> None:
-        """Selective post-commit invalidation (spec 2026-07-21 Phase B).
+        """Selective post-commit invalidation.
 
         Called with the JUST-BUMPED `model_rev` while its commit's touched
         read-keys are in hand. Drops every entry whose read-set intersects
@@ -119,8 +118,8 @@ class ScriptCellCache:
         misses at the old one (the stamp has moved out from under it).
 
         `rev != stamp + 1` degrades to clear-all: some path moved the rev
-        without coming through here (a legacy `touch_model`/`set_model` full
-        clear, a rev jump during hydration, or a stale stamp surviving a lazy
+        without coming through here (a `touch_model`/`set_model` full clear,
+        a rev jump during hydration, or a stale stamp surviving a lazy
         period), so the intermediate history between the old stamp and `rev`
         is unknown and keeping anything would be a guess. Over-invalidation
         is always the safe direction — this mirrors `put`'s self-stamping

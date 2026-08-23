@@ -3,8 +3,8 @@ be resolved before calling (the API layer does this via resolve_refs).
 
 Rows are tuples of bindings (RowKey). `build_rows` evaluates the row source and
 every expand column across the WHOLE table (expansion determines the total, so
-it can't be page-local); it is guarded by `max_rows`. Cell evaluation (Task 5)
-runs per page. See core/table/schema.py for the binding model.
+it can't be page-local); it is guarded by `max_rows`. Cell evaluation runs per
+page. See core/table/schema.py for the binding model.
 """
 
 from __future__ import annotations
@@ -74,7 +74,7 @@ def _check_step_index(idx: int, chain_len: int) -> None:
 
 
 def _scope_row_keys(mm: Metamodel, model: Model, rs: ScopeRows) -> list[RowKey]:
-    from data_rover.core.navigation.evaluate import _scope_ids  # reuse Stage 1
+    from data_rover.core.navigation.evaluate import _scope_ids
     from data_rover.core.navigation.schema import Scope
 
     scope = Scope(types=rs.types, criteria=rs.criteria)
@@ -486,9 +486,9 @@ def _collapse_has_value(
     non-None (and, for lists, non-empty) value; a script cell is empty when
     the call returns an empty/None result — EXCEPT a call error, which counts
     as having a value (the row must stay visible so the cell can show the
-    error) same as a dangling snippet ref. A `pending` result (Task 5:
-    cache-only miss) is an error kind too, so a pending row is also KEPT — a
-    background sweep is expected to fill it in, not hide it."""
+    error) same as a dangling snippet ref. A `pending` result (cache-only
+    miss) is an error kind too, so a pending row is also KEPT — a background
+    sweep is expected to fill it in, not hide it."""
     if isinstance(col, ScriptColumn):
         # keep_empty=False filter for a collapse script column. ERRORS COUNT
         # AS VALUES (this includes `pending`): dropping an errored/pending row
@@ -538,8 +538,8 @@ def _expand_values(
         # Expand promotion: element ids promote raw (str); SCALARS promote
         # wrapped in PropertyValue so a scalar string can never be mistaken
         # for an element id (the Binding invariant); None scalars are skipped.
-        # A call ERROR (including the synthetic `pending` kind, Task 5:
-        # cache-only miss) promotes the single binding None — exactly one row
+        # A call ERROR (including the synthetic `pending` kind, a cache-only
+        # miss) promotes the single binding None — exactly one row
         # survives regardless of keep_empty, and the cell layer re-derives
         # the error/pending result with a forced cache-only call (never
         # from a memo — `pending` results are deliberately never memoized).
@@ -577,7 +577,7 @@ def _expand_values(
     return expand_property_values(model, col, roots), False
 
 
-# ---- sorting (Task 6) --------------------------------------------------------
+# ---- sorting -----------------------------------------------------------------
 #
 # Missing/empty values ALWAYS sort last, in BOTH directions — not the usual
 # nulls-first-on-desc SQL behaviour. `_sort_value` returns an `(is_empty,
@@ -783,7 +783,7 @@ def _property_is_numeric(
     Only meaningful for a `scope` row source, where the candidate type set is
     known upfront; a navigation/chain row source has no such fixed set (the
     reached elements can be of any type), so property sort there is always
-    string, per spec."""
+    string."""
     if defn.row_source.kind != "scope":
         return False
     declaring = [
@@ -932,9 +932,9 @@ def order_rows(
     without needing every value to be independently unique.
 
     `base_slots` is derived from the FULL key set exactly as in
-    `evaluate_cells` (Task 5): `keys` here is always the complete, already-built
-    row set (never a partial key mid-`build_rows`), so `len(keys[0])` minus one
-    slot per `expand` column recovers the row-source's own slot count."""
+    `evaluate_cells`: `keys` here is always the complete, already-built row set
+    (never a partial key mid-`build_rows`), so `len(keys[0])` minus one slot
+    per `expand` column recovers the row-source's own slot count."""
     if sort is None:
         return list(keys)
     col = defn.columns[sort.column]
@@ -965,7 +965,7 @@ def order_rows(
     return [d[2] for d in non_empty] + [d[2] for d in empty]
 
 
-# ---- export (Task 10) --------------------------------------------------------
+# ---- export -------------------------------------------------------------------
 #
 # The interactive route (`/tables/evaluate`) evaluates one PAGE of `keys` at a
 # time; export needs the WHOLE (already built+ordered) row set, which can be up

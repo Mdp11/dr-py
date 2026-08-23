@@ -6,14 +6,10 @@ reported — and this channel is how the user is told. It is deliberately
 DATA, not prose: every entry is a code plus counts, and the user-facing
 sentence is built client-side.
 
-That split is the fix for the channel's original defect. It deduped on the
-rendered message text while the navigation messages baked their counts INTO
-that text, so ten chains each dropping one id emitted ten identical strings,
-collapsed to a single line reading "1" — the user was told 1 when the truth
-was 10 — and chains dropping 1, 2 and 5 fragmented into three near-identical
-lines that also ate the cap. Aggregating by `(code, detail)` and carrying the
-numbers separately makes both cases come out right, and leaves the copy in one
-place (the client) instead of scattered across f-strings.
+Aggregating by `(code, detail)` and carrying the numbers separately (rather
+than deduping on rendered message text with counts baked in) keeps counts
+accurate when many calls hit the same kind, and leaves the copy in one place
+(the client) instead of scattered across f-strings.
 
 This module is deliberately a LEAF: it imports nothing from the rest of the
 core, so `navigation` and `table` can import the codes at runtime with no risk
@@ -40,11 +36,11 @@ class ScriptWarningCode(StrEnum):
 
     NAV_SNIPPET_NOT_FOUND = "nav_snippet_not_found"
     NAV_STEP_FAILED = "nav_step_failed"
-    #: No longer emitted: a navigation script step now DISPLAYS a returned
-    #: value that names no element (see navigation/evaluate.py::_hop_script)
-    #: instead of dropping it, so "unknown id" stopped being a failure mode.
-    #: Kept in the vocabulary because the wire is open by design — a client
-    #: must still format a code an older/other server sends.
+    #: Never emitted server-side today: a navigation script step DISPLAYS a
+    #: returned value that names no element (see
+    #: navigation/evaluate.py::_hop_script) rather than treating it as a
+    #: failure. Kept in the vocabulary because the wire is open by design —
+    #: a client must still format a code an older/other server sends.
     NAV_UNKNOWN_IDS = "nav_unknown_ids"
     SORT_NEEDS_SCRIPT_NAV = "sort_needs_script_nav"
 
@@ -100,9 +96,9 @@ class ScriptWarningLog:
         `MAX_SCRIPT_WARNINGS` caps distinct KINDS. Once full, a new kind is
         dropped but kinds already present keep counting — a cap that stopped
         counting would understate exactly the numbers this channel exists to
-        report. Overflow is far less likely than under the old text dedup:
-        keys are now bounded by 5 codes times distinct details, and only
-        `NAV_STEP_FAILED` / `NAV_SNIPPET_NOT_FOUND` carry unbounded details.
+        report. Overflow is unlikely: keys are bounded by ~5 codes times
+        distinct details, and only `NAV_STEP_FAILED` / `NAV_SNIPPET_NOT_FOUND`
+        carry unbounded details.
         """
         key = (code, detail)
         entry = self._by_key.get(key)
@@ -124,9 +120,9 @@ class ScriptWarningLog:
 
         Needed because a repeat `add()` of an existing key keeps that entry's
         POSITION in `_by_key` (insertion order is by first occurrence, not
-        last write): `navigation.evaluate` used to slice `warnings[w0:]` to
-        return only its own call's warnings, and a positional slice cannot
-        see growth in an entry that already existed earlier in the order.
+        last write): a positional slice of `entries` cannot see growth in an
+        entry that already existed earlier in the order, so a per-call view
+        needs a value snapshot instead.
         """
         return {k: (w.occurrences, w.total) for k, w in self._by_key.items()}
 

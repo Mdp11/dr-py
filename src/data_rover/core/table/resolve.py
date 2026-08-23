@@ -1,7 +1,7 @@
 """Inline navigation and snippet refs inside a `TableDefinition`.
 
-The table core evaluator (`build_rows`/`order_rows`/`evaluate_cells`, Tasks
-4-6) is deliberately ref-free: it assumes every `NavigationSource` it sees
+The table core evaluator (`build_rows`/`order_rows`/`evaluate_cells`) is
+deliberately ref-free: it assumes every `NavigationSource` it sees
 either carries a resolved `.definition` with no `Operand.ref` anywhere in
 its tree, or is EMPTY (unconfigured — evaluates to nothing). This module produces that shape from a possibly-ref-bearing
 `TableDefinition`, via an injected `fetch` callable that loads + parses a

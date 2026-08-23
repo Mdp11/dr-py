@@ -1,5 +1,5 @@
 """Server-side lint for snippet code. Single source of truth so editor
-diagnostics match the executor exactly (spec section 8).
+diagnostics match the executor exactly.
 
 Syntax errors block; unknown names, disallowed imports and bad entry-point
 signatures are non-blocking warnings (Python scope analysis has honest false
@@ -30,7 +30,7 @@ DR_NAMES: frozenset[str] = frozenset({"dr"})
 _ENTRY_NAMES = ("value", "step", "transform")
 #: What the single argument means, per entry — `value` receives the full list
 #: of bound elements; `step` receives its one simulated element; `transform`
-#: receives the rendered export document (spec §8).
+#: receives the rendered export document.
 _ENTRY_ARG_DESC = {
     "value": "the list of elements",
     "step": "the element",

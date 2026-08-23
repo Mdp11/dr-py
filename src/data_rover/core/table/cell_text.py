@@ -1,8 +1,7 @@
 """Display-text rendering for exported cells, shared by the xlsx writer
 (`api/table_export.py`) and the CSV renderer (`core/table/csv_export.py`) so
-the two formats cannot drift (spec §6 of the Exporter v2 design). Moved
-verbatim out of the xlsx writer — plain cell-to-text is core's business;
-only the xlsx machinery around it needs the API layer.
+the two formats cannot drift. Lives in core because plain cell-to-text is
+core's business; only the xlsx machinery around it needs the API layer.
 """
 
 from __future__ import annotations

@@ -5,7 +5,7 @@ ever exists as the string constant :data:`FACADE_SOURCE`, which a runner
 `exec`s (verbatim, prepended to the user's snippet) in a fresh namespace.
 That is deliberate, not an oversight:
 
-- In production (Tasks 8/9) the snippet + facade run inside a WASM guest
+- In production the snippet + facade run inside a WASM guest
   (wasmtime + CPython-WASI); there is no way to "import" a host-side `.py`
   file into that guest, so the facade has to travel as source text the guest
   interpreter compiles for itself.
@@ -227,7 +227,7 @@ def _stereotype_filter(kind, names):
 # reason the facade should overflow strictly before the host does.
 _READS_CAP = 2000
 
-# Read-set recording (Phase B): _boot_reads accumulates reads made during
+# Read-set recording: _boot_reads accumulates reads made during
 # module exec (an import-time index feeds every later call, so its reads
 # belong to every call's set); _call_reads[0] holds the active per-call set
 # while _dr_call_entry is driving, else None (console 'script' runs record
@@ -242,7 +242,7 @@ _call_overflow = [False]
 
 def _note_read(tag, ident):
     # LIMITATION -- cannot be fixed by more instrumentation, only by author
-    # discipline (see README.md's "Evaluation sessions (M2/M3)" section for
+    # discipline (see README.md's "Evaluation sessions" section for
     # the author-facing version of this warning): a read made during module
     # exec (boot) is charged to EVERY call via _boot_reads, which covers an
     # index built at true module top level. It does NOT cover the equally
@@ -366,7 +366,7 @@ class Element:
         if hit is None:
             resp = _read(direction, element_id=self.id)
             # Hop responses ship the far endpoints' element projections
-            # inline (trip-collapse, spec 2026-07-21 Phase A') -- prime the
+            # inline (trip-collapse) -- prime the
             # element memo with them BEFORE storing the relationships, so
             # `rel.destination()` / `rel.source()` is a memo hit instead of
             # one round trip per neighbor. `or []` keeps this tolerant of the
@@ -677,7 +677,7 @@ _WIRE_SCALARS = (str, int, float, bool)
 
 
 def _dr_call_entry(entry, element_ids, elements=None, doc=None):
-    # Single per-call driver for embedded sessions (M2/M3): prime the read
+    # Single per-call driver for embedded sessions: prime the read
     # memo with the host-projected roots, build handles, invoke the entry
     # point, serialize, and report the call's read-set (boot reads union
     # per-call reads; None on overflow). Both hosts call THIS — per-call
@@ -736,7 +736,7 @@ def _dr_call_entry(entry, element_ids, elements=None, doc=None):
 
 
 def _dr_serialize_entry_result(entry, value):
-    # Session wire serializer for embedded entry-point calls (M2/M3): maps a
+    # Session wire serializer for embedded entry-point calls: maps a
     # value()/step() return value to the tagged payload the host validates
     # with runner.decode_call_payload. Unsupported shapes raise ValueError;
     # the session loop reports that as the call's error. NOT part of the
@@ -807,8 +807,8 @@ def _dr_serialize_entry_result(entry, value):
 
 
 def _dr_check_json(value, _depth=0):
-    # transform() returns the REPLACEMENT DOCUMENT (spec §8): any JSON value.
-    # Checked recursively here so a bad return produces a teaching error
+    # transform() returns the REPLACEMENT DOCUMENT: any JSON value. Checked
+    # recursively here so a bad return produces a teaching error
     # instead of a json.dumps crash in the transport (which would kill the
     # whole session rather than fail the one call). Tuples are admitted —
     # json.dumps serializes them as arrays, matching author intuition.

@@ -16,7 +16,7 @@ Two invariants shape everything here:
   reads never needs a lock and can never corrupt the session's model.
 - **Writes are dry-run recording, not application.** `record_op` never calls
   into `Model`'s mutation boundary either: it appends the op dict *verbatim*
-  to `.ops` and returns. The op batch is a *proposal* — Task 11's route
+  to `.ops` and returns. The op batch is a *proposal* — the API route
   layer is the one that eventually validates it via `schemas.OPS_ADAPTER`
   and, if accepted, hands it to `POST /model/ops` (or the check-out/commit
   flow) the same way a human-driven client would. This keeps `bridge.py`
@@ -59,7 +59,7 @@ from ..model.relationship import Relationship
 
 #: A recorded write op: a (verbatim, unvalidated) `OpIn`-shaped dict, e.g.
 #: `{"kind": "delete_element", "id": "..."}`. Shape validation happens at the
-#: API route boundary (Task 11), not here — see the module docstring.
+#: API route boundary, not here — see the module docstring.
 RecordedOp = dict[str, Any]
 
 #: Above this many DISTINCT far endpoints, `_far_endpoints` skips inlining
@@ -169,8 +169,8 @@ project_element = _project_element
 
 def project_roots(model: Model, element_ids: Sequence[str]) -> list[dict[str, Any]]:
     """Project each of `element_ids` still present in `model`, in input
-    order, silently OMITTING any id no longer present (never a `None`
-    placeholder in its place).
+    order, silently OMITTING any id not present (never a `None` placeholder
+    in its place).
 
     This is the HOST half of the embedded-session root piggyback: both hosts
     (`api/script_runner.py`'s `_WasmSnippetSession.call` and `tests/script/
@@ -349,7 +349,7 @@ class BridgeDispatcher:
 
     def _far_endpoints(self, ids: Iterable[str]) -> list[dict[str, Any]]:
         """Inline far-endpoint projections shipped with a hop response
-        (trip-collapse, spec 2026-07-21 Phase A'): the facade primes its read
+        (trip-collapse): the facade primes its read
         memo with these, collapsing `out()` + N neighbor fetches into one
         trip. Deduped, in first-appearance (sorted-rel-id) order; an endpoint
         missing from the model (dangling reference — the engine stays
@@ -365,9 +365,8 @@ class BridgeDispatcher:
         not a truncation, so it is all-or-nothing rather than a partial/
         best-effort inline of the first N — a partial list would make the
         facade's memo-priming depend on which endpoints happened to fit,
-        i.e. make results depend on iteration order instead of just falling
-        back to the same per-neighbor fetch every hub hop already used
-        before trip-collapse existed."""
+        i.e. make results depend on iteration order instead of falling back
+        cleanly to a per-neighbor fetch."""
         seen: set[str] = set()
         unique_ids: list[str] = []
         for fid in ids:

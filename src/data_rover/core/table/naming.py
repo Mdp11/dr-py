@@ -1,9 +1,8 @@
-"""The `${token}` template engine behind export naming (spec 2026-08-19 §4).
+"""The `${token}` template engine behind export naming.
 
 One vocabulary, four contexts (zip filename, entry name, folder path, split
-filename) — but `${name}` BINDS to something different in each one, and that
-mapping otherwise lives only in the gitignored spec, so it is reproduced here
-in the module that owns the vocabulary:
+filename) — but `${name}` BINDS to something different in each one, so the
+mapping is documented here in the module that owns the vocabulary:
 
 | Token       | zip filename | entry name | folder path | split filename        |
 |-------------|:---:|:---:|:---:|-----------------------|

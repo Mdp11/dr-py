@@ -28,8 +28,8 @@ from typing import Literal, Protocol
 
 from ..model.model import Model
 
-#: One structured read dependency recorded by the guest facade (Phase B,
-#: spec 2026-07-21): ("el", id) | ("out", id) | ("in", id) |
+#: One structured read dependency recorded by the guest facade:
+#: ("el", id) | ("out", id) | ("in", id) |
 #: ("children", id) | ("parent", id) | ("scan", type_name_or_None).
 ReadKey = tuple[str, str | None]
 
@@ -177,7 +177,7 @@ class CallResult:
     clear-all invalidation and defeats the purpose — so author discipline is
     required. See the ``# LIMITATION`` comment beside ``facade_src.py``'s
     ``_note_read`` and the author-facing warning in ``core/script/README.md``'s
-    "Evaluation sessions (M2/M3)" section.
+    "Evaluation sessions" section.
     """
 
     value: dict | None
@@ -229,7 +229,7 @@ class ScriptError:
             - ``"memory"`` — exceeded :attr:`~RunLimits.memory_bytes`
             - ``"limit"`` — exceeded op count/size limit
             - ``"unavailable"`` — the script runner is not available (no runner constructed, or no concurrency slot free) — embedded evaluation degrades, never 5xxs
-            - ``"pending"`` — synthetic, produced only by :class:`~data_rover.core.script.embed.ScriptEvalContext` in cache-only mode (spec §4.1): the value is not computed yet; a background sweep is (or will be) filling it in. Never produced by a runner, never cached.
+            - ``"pending"`` — synthetic, produced only by :class:`~data_rover.core.script.embed.ScriptEvalContext` in cache-only mode: the value is not computed yet; a background sweep is (or will be) filling it in. Never produced by a runner, never cached.
         message: Human-readable error message.
         traceback: Python traceback string if available (``None`` for
             syntax/timeout/memory errors or when details are unavailable).
@@ -329,7 +329,7 @@ def decode_call_payload(entry: str, payload: object) -> tuple[dict | None, str |
     if not isinstance(payload, dict):
         return None, "malformed call result payload"
     if entry == "transform":
-        # Arbitrary JSON by contract (spec §8): the payload came through
+        # Arbitrary JSON by contract: the payload came through
         # json.loads, so it is structurally JSON already — the only
         # validation is the envelope. Size is the HOST's concern
         # (snippet_transform_max_bytes, enforced in TransformHost), not a
