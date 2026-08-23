@@ -3,14 +3,13 @@ import { ensureCheckout, lockHolderLabel, releaseMetamodelLease } from './checko
 /**
  * The `mm` lease lifecycle, keyed to whichever surface is editing the
  * metamodel — the metamodel editor tab today. Lives OUTSIDE that surface,
- * deliberately, so it outlived the swap drawer it was first written for:
- * nothing here may import anything surface-specific.
+ * deliberately: nothing here may import anything surface-specific.
  *
  * Generation-guarded (house async-dialog rule): a surface that closes while
  * an acquire is in flight bumps the generation, and the late grant — if one
  * lands — is released instead of recorded as held-by-nobody.
  *
- * TWO surfaces compose it now (spec 2026-08-16 §"Lease"): the editor's first
+ * TWO surfaces compose it: the editor's first
  * divergent keystroke and the diagram's first node drag. That makes concurrent
  * acquires an ordinary path rather than a rare race — one diagram RENAME
  * reaches both, staging a layout key migration and writing the buffer in the

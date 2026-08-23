@@ -3,9 +3,9 @@
  * rewrite (history Revert, metamodel Swap) is safe to run.
  *
  * It lives in its own module because it is composed from three different
- * stores and is read by two components that must never disagree — they used to
- * spell the same three-term expression out verbatim, which is exactly how the
- * `art:`-lease regression got into both of them at once.
+ * stores and is read by two components that must never disagree — spelling
+ * the same term expression out verbatim in each caller risks the two
+ * drifting apart.
  */
 
 import { getStagedDepth } from './model.svelte';
@@ -27,7 +27,7 @@ import { hasModelLocks } from './realtime.svelte';
  *    `POST /commits` batch too, so a revert/rebind invalidates them by the
  *    same rev bump as staged model/artifact ops.
  *  - **no staged METAMODEL ops** — the YAML draft and the diagram's node moves
- *    ride the same commit batch (spec 2026-08-16), so a revert invalidates
+ *    ride the same commit batch, so a revert invalidates
  *    them by the same rev bump. The draft half answers through the provider
  *    the metamodel editor registers, so a CLOSED tab contributes nothing;
  *    staged moves outlive the tab and keep counting.

@@ -7,7 +7,7 @@ import { VIEW_ROOT_ID, type ViewOp } from './ops';
 // tested directly. The `view.svelte.ts` mutators are thin wrappers that clone,
 // apply one of these transforms, and push the result to the backend.
 //
-// MIRROR FIDELITY (Phase 2 id addressing): `applyViewOp` below is the client
+// MIRROR FIDELITY: `applyViewOp` below is the client
 // twin of the backend's `apply_view_ops` (`api/view_ops.py`, ~:198-470). The
 // backend session is the source of truth (CLAUDE.md), but the client stages
 // ops optimistically before a commit round-trips, so `applyViewOp` must
@@ -39,20 +39,20 @@ export function cloneView(v: View): View {
 	return {
 		name: v.name,
 		folders: v.folders.map(cloneFolder),
-		// `?? []` guards a pre-Task-10 snapshot that lacks the field (the zod
+		// `?? []` guards a snapshot that lacks the field (the zod
 		// default already fills it on parse, but this keeps the clone safe even
 		// for a hand-built object bypassing the schema).
 		artifacts: (v.artifacts ?? []).map((a) => ({ ...a }))
 	};
 }
 
-// ----- id-addressed helpers (Phase 2) -----
+// ----- id-addressed helpers -----
 //
 // Folders carry a stable uuid id (`Folder.id`, healed server-side by
 // `core/view/ids.ensure_folder_ids`); these helpers address by id instead of
 // by name-path, mirroring `core/view/ids.py`'s `find_folder`/`locate_folder`/
-// `folder_subtree`. `view.svelte.ts` and the containment tree migrate onto
-// these across Tasks 5–7.
+// `folder_subtree`. `view.svelte.ts` and the containment tree address folders
+// through these.
 
 /** Depth-first search for the folder with `id`, or `null` if unknown. Client
  * twin of `core/view/ids.find_folder`. */

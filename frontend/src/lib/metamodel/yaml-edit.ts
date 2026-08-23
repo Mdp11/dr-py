@@ -19,8 +19,8 @@ import {
 } from '$lib/api/types';
 
 /**
- * Comment-preserving surgical edits over the metamodel YAML draft
- * (spec 2026-08-13 §4). The DRAFT STRING stays canonical: callers parse it,
+ * Comment-preserving surgical edits over the metamodel YAML draft.
+ * The DRAFT STRING stays canonical: callers parse it,
  * apply one semantic command to the Document, serialize, and hand the string
  * back to `editMetamodelBuffer`. This module is pure — no state, no I/O — so
  * every command is unit-testable against fixture text.
@@ -157,8 +157,8 @@ export function lineRangeForType(
 	return { start: lineAt(startOff), end: lineAt(Math.max(startOff, endOff - 1)) };
 }
 
-// --- semantic edit commands (Task 2: element-type & enum; Tasks 3-4 append
-// property and relationship handlers to the same switch below) -------------
+// --- semantic edit commands (element-type & enum handlers, plus the
+// property and relationship handlers in the same switch below) -------------
 
 export class YamlEditError extends Error {}
 
@@ -240,7 +240,7 @@ function setBoolAttr(m: YAMLMap, key: string, value: boolean, deflt: boolean): v
 
 /** Keep the `source`/`target` shorthand mirroring mappings[0] (the backend's
  * `_normalize_endpoints` invariant), and drop all endpoint keys when no
- * mappings remain. Exported for Task 4's mapping-add/remove handlers, which
+ * mappings remain. Exported for the mapping-add/remove handlers, which
  * touch `mappings` directly and must resync the shorthand the same way. */
 export function syncShorthand(m: YAMLMap): void {
 	const maps = m.get('mappings');
@@ -272,7 +272,7 @@ function renameDatatypeRefs(m: YAMLMap, from: string, to: string): void {
 
 /** Rename cascade for an element type: `extends` pointers, relationship
  * shorthand/`mappings` endpoints, and property `datatype`s across BOTH
- * sections. This is the auto-fixed half of the rename contract (spec §3);
+ * sections. This is the auto-fixed half of the rename contract;
  * anything the cascade can't reach (e.g. a `key` entry naming a relationship
  * end that no longer exists) is left for the lint pass to surface. */
 function renameElementRefs(doc: Document, from: string, to: string): void {
@@ -347,7 +347,7 @@ export function applyEdit(doc: Document, cmd: YamlEditCommand): void {
 					: seq.items.findIndex((it) => isMap(it) && (it as YAMLMap).get('name') === cmd.name);
 			if (seq === null || idx < 0) throw new YamlEditError(`unknown elements type: ${cmd.name}`);
 			seq.items.splice(idx, 1);
-			// Cascade (spec §3): mappings touching it and extends pointing at it
+			// Cascade: mappings touching it and extends pointing at it
 			// are auto-fixed; property datatypes / keys stay for lint to flag.
 			eachTypeMap(doc, 'elements', (m) => {
 				if (m.get('extends') === cmd.name) m.delete('extends');
@@ -487,7 +487,7 @@ export function applyEdit(doc: Document, cmd: YamlEditCommand): void {
 			if (seq === null || idx < 0)
 				throw new YamlEditError(`unknown relationships type: ${cmd.name}`);
 			seq.items.splice(idx, 1);
-			// Cascade (spec §3): extends pointing at it is auto-cleared; key DSL
+			// Cascade: extends pointing at it is auto-cleared; key DSL
 			// `out:`/`in:` entries naming it are left dangling for lint to flag —
 			// unlike rename below, which CAN follow the name across.
 			eachTypeMap(doc, 'relationships', (m) => {

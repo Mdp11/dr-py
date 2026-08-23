@@ -1,5 +1,5 @@
 /**
- * One-way realtime feed client (Phase 5). Opens a WebSocket to the project
+ * One-way realtime feed client. Opens a WebSocket to the project
  * feed, auto-reconnects with exponential backoff, and hands parsed events to a
  * callback. Pure transport — no app state. The socket is injectable
  * (`socketFactory`) so tests can drive it without a real server.

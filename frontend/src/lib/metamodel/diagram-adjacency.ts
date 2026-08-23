@@ -2,7 +2,7 @@ import { selectionForNodeId, type DiagramEdgeSpec } from './diagram-build';
 
 /**
  * Adjacency over a built diagram, derived ONCE per `buildDiagram` result and
- * read on every hover (spec 2026-08-20 §3.2). Pure and O(edges): hover
+ * read on every hover. Pure and O(edges): hover
  * handling must never walk the metamodel, and — the load-bearing rule — must
  * never rebuild the flow's node/edge arrays, so everything a node or edge
  * component needs to style itself is precomputed here.
@@ -60,7 +60,7 @@ export interface HighlightSet {
 	edges: ReadonlySet<string>;
 }
 
-/** The neighborhood a hover lights up (spec §5). Node → itself + incident
+/** The neighborhood a hover lights up. Node → itself + incident
  * edges + their other endpoints. Edge with a rel name → the WHOLE relationship
  * (all mappings, both tether halves — consistent with click-selection: one
  * relationship reads as one thing). Generalization edge → itself + its two
@@ -109,7 +109,7 @@ function siblingTetherId(id: string): string | null {
 	return null;
 }
 
-/** Tooltip copy for the LOD cursor tooltip (spec §4): the hovered thing's
+/** Tooltip copy for the LOD cursor tooltip: the hovered thing's
  * name, at whatever level of detail its kind supports.
  *
  * - Node → the type's own name.
@@ -177,7 +177,7 @@ export function hoverLabel(hover: DiagramHover, adj: DiagramAdjacency): string |
 
 /** The one place the hot/dim/normal decision lives, so the five components
  * that apply it (three nodes, two edges) cannot drift. Selected-but-outside
- * stays 'normal': selection must never be dimmed away (spec §5). */
+ * stays 'normal': selection must never be dimmed away. */
 export function visualState(
 	id: string,
 	kind: 'node' | 'edge',

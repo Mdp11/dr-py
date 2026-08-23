@@ -2,8 +2,8 @@ import { z } from 'zod';
 import { apiFetch, type ClientConfig } from './client';
 
 /**
- * GET /model/status (Task 6) — cheap poll target for the open-progress
- * overlay (Task 9's `trackOpenProgress`). Never triggers hydration itself;
+ * GET /model/status — cheap poll target for the open-progress
+ * overlay (`trackOpenProgress`). Never triggers hydration itself;
  * `hydration`/`validation` are only present while the corresponding phase is
  * in flight.
  */

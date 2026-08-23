@@ -1,6 +1,6 @@
 import type { Metamodel, PropertyDef, RelationshipType } from '$lib/api/types';
 
-/** Metamodel → UML diagram shapes (spec §2). Pure: positions, collapse state
+/** Metamodel → UML diagram shapes. Pure: positions, collapse state
  * and styling are the caller's concern; this module decides only WHAT exists.
  * Association-class rule: a relationship type that carries properties, is
  * abstract, extends another, or is extended, gets a `rel:` box node and its
@@ -209,8 +209,8 @@ const ROW_HEIGHT = 22;
 const HEADER_HEIGHT = 40;
 const MAX_ROWS = 12;
 
-/** Box footprint for elkjs layout and canvas rendering alike (Task 8 imports
- * this so the two never compute different sizes for the same node). Row
+/** Box footprint for elkjs layout and canvas rendering alike (shared so the
+ * two never compute different sizes for the same node). Row
  * count is capped so a type with dozens of properties doesn't blow out the
  * layout — the node scrolls internally past the cap rather than growing. */
 export function nodeSize(

@@ -76,7 +76,7 @@ import { bindTabToArtifact, closeTab, repointTabArtifact, retitleTab } from './w
 
 // Re-exported so `$lib/state`'s barrel (and TableView.svelte, which imports
 // the type through it) need no change: the retry-and-download loop itself
-// moved to `$lib/util/export-download.ts` (P-14 task 12) so `/exports/run`
+// lives in `$lib/util/export-download.ts` so `/exports/run`
 // (`ExporterTab.svelte`) can share it instead of copying it.
 export type { ExportProgress };
 
@@ -317,9 +317,10 @@ const _viewRanges = new Map<string, { start: number; end: number }>();
  * backend cache key, and for a script or navigation column that means paying
  * a full sweep. While the user is inside the settings dialog they are
  * *composing*: typing a snippet, trying a navigation chain, undoing it. Each
- * of those intermediate states used to kick off a full re-evaluation of a
- * table nobody could even see (the dialog is modal), so the grid behind it
- * churned and the final, real edit queued behind the throwaway ones.
+ * of those intermediate states, unguarded, would kick off a full
+ * re-evaluation of a table nobody can even see (the dialog is modal), so the
+ * grid behind it would churn and the final, real edit would queue behind the
+ * throwaway ones.
  *
  * So: `suspendTableEvaluation` records the definition as it stood when the
  * dialog opened; `updateTableDefinition` keeps updating the draft (the
@@ -952,13 +953,13 @@ export function getScriptErrorsPhase(tabId: string): 'idle' | 'loading' | 'done'
  * is what `requestScriptErrors` itself checks, so the badge and the action can
  * never disagree.
  *
- * NOT the same as "the tab has a terminal `script_status`", which is what the
- * badge used to be gated on: `_loadTablePage` drops the page-state signature
- * the moment a sort/reload request goes out, while the PREVIOUS page's status
- * stays until the new page lands (or forever, if the load fails). In that
- * window a status-gated badge still read "Check for script errors" and clicking
- * it did nothing at all — the request no-ops, the panel opens, and the effect
- * that closes it on an `idle` phase shuts it again in the same flush.
+ * NOT the same as "the tab has a terminal `script_status`": `_loadTablePage`
+ * drops the page-state signature the moment a sort/reload request goes out,
+ * while the PREVIOUS page's status stays until the new page lands (or
+ * forever, if the load fails). In that window a status-gated badge would
+ * still read "Check for script errors" while clicking it does nothing at
+ * all — the request no-ops, the panel opens, and the effect that closes it
+ * on an `idle` phase shuts it again in the same flush.
  */
 export function canRequestScriptErrors(tabId: string): boolean {
 	return _recapKeys.has(tabId);
@@ -1141,8 +1142,8 @@ export async function ensureTableDraft(tabId: string): Promise<TableDraft> {
  *   - a DIRTY draft — every unsaved settings edit (scope change, new column,
  *     restored config) would be silently ignored and the grid would appear
  *     frozen until Save;
- *   - a STAGED-but-uncommitted save (`hasStagedArtifactOp`) — Save no longer
- *     PUTs, it stages an op, so a clean draft can still be ahead of the server
+ *   - a STAGED-but-uncommitted save (`hasStagedArtifactOp`) — Save does not
+ *     PUT, it stages an op, so a clean draft can still be ahead of the server
  *     head until the DiffDrawer's Commit lands;
  *   - a TEMP id (a staged create) — the server has no such artifact at all,
  *     so the request would 404.
@@ -1596,7 +1597,7 @@ export function closeTableDraft(tabId: string): void {
 	abandonTableEvaluationSuspension(tabId);
 	clearScriptStatus(tabId);
 	bumpGeneration(tabId); // orphan any in-flight load
-	// Give the check-out back: no editor is behind this lease any more. A NO-OP
+	// Give the check-out back: no editor is behind this lease. A NO-OP
 	// when a staged op still needs it (a saved-but-uncommitted edit must keep its
 	// lease or the commit 409s "required lock not held") — that is
 	// `releaseArtifactIfUnneeded`'s whole job. A temp id has no server-side row

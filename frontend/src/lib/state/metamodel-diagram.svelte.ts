@@ -37,7 +37,7 @@ import { METAMODEL_RESOURCE } from './ops';
 import { onCommitEvent } from './realtime.svelte';
 
 /**
- * The DIAGRAM half of the metamodel tab (spec 2026-08-13 §3/§5). Its job is to
+ * The DIAGRAM half of the metamodel tab. Its job is to
  * make a canvas gesture look exactly like a keystroke in the YAML view, so the
  * whole existing lifecycle keeps working untouched.
  *
@@ -51,11 +51,10 @@ import { onCommitEvent } from './realtime.svelte';
  * than re-serializing a plain object) is also what keeps the author's comments
  * and formatting alive across a diagram edit.
  *
- * **Layout is presentation, but it is COMMITTED content** (spec 2026-08-16):
- * a drag no longer PUTs a shared blob, it stages a `metamodel.move_node` op
- * through `metamodel-stage.svelte.ts` and lands on `POST /commits` with
- * everything else. `GET /metamodel/layout` survives as the read of the
- * materialized baseline; `PUT /metamodel/layout` is gone. The STAGING gate is
+ * **Layout is presentation, but it is COMMITTED content**: a drag stages a
+ * `metamodel.move_node` op through `metamodel-stage.svelte.ts` and lands on
+ * `POST /commits` with everything else. `GET /metamodel/layout` is the read
+ * of the materialized baseline. The STAGING gate is
  * `getRole() !== 'viewer'` — editors stage too, unlike buffer editing which
  * stays owner-only through the editor module's own `isEditBlocked()` — so a
  * viewer still drags, purely locally, with nothing to commit. Staging also
@@ -64,9 +63,9 @@ import { onCommitEvent } from './realtime.svelte';
  * composes `metamodel-lease.svelte.ts` at all — see {@link stageMove} and
  * {@link maybeAcquireLayoutLease}.
  *
- * **There is no rename key-deferral any more**, and its deletion is the point
- * of that change: a staged position and the staged `metamodel.rebind` that
- * renamed its node ride the SAME commit batch, so the keys ever published are
+ * **A staged position never needs rename key-deferral**: a staged position and
+ * the staged `metamodel.rebind` that renamed its node ride the SAME commit
+ * batch, so the keys ever published are
  * atomically the ones the draft's own names produce. `_positions` is therefore
  * plain draft-key space from end to end — no inversion before a write, no
  * re-keying of a fetched blob, no map to persist and self-validate.
@@ -80,7 +79,7 @@ import { onCommitEvent } from './realtime.svelte';
  */
 
 /** Bounded because these are full buffer snapshots; the metamodel is tens of
- * KB, so 50 is cheap and deep enough for any realistic edit run (spec §3). */
+ * KB, so 50 is cheap and deep enough for any realistic edit run. */
 const UNDO_MAX = 50;
 
 type XY = { x: number; y: number };
@@ -205,7 +204,7 @@ let _placed: Positions | null = null;
 
 /** Positions handed to consumers ALWAYS cover every node: a type a peer added
  * (or a YAML edit introduced) has no stored position, and an invisible node is
- * worse than one placed next to its nearest neighbour (spec §5). The placement
+ * worse than one placed next to its nearest neighbour. The placement
  * is not staged — only a real drag or auto-arrange proposes a move op. */
 function positionsForView(mm: Metamodel | null): Positions {
 	const built = builtDiagram(mm);
@@ -325,9 +324,9 @@ export function setMetamodelView(v: 'yaml' | 'diagram'): void {
 
 // --- positions: baseline + staged overlay ----------------------------------
 
-/** Editors AND owners stage positions; only viewers are shut out (spec §5 —
- * layout is presentation, so it deliberately does NOT follow the owner-only
- * gate that buffer edits use). A viewer's drags stay local to their canvas.
+/** Editors AND owners stage positions; only viewers are shut out — layout is
+ * presentation, so it deliberately does NOT follow the owner-only gate that
+ * buffer edits use. A viewer's drags stay local to their canvas.
  *
  * The second term is the peer-lease one: `metamodel.move_node` needs the `mm`
  * lease at commit time exactly as a rebind does (`api/locking.py`'s
@@ -353,7 +352,7 @@ let _acquiringLayoutLease = false;
 /**
  * Ask for the `mm` lease because something is about to be staged.
  *
- * WHY (final-review Finding 1): a staged move is committed content, and
+ * WHY: a staged move is committed content, and
  * `create_commit` hard-verifies the singleton `mm` lease for EVERY op in the
  * `metamodel.*` family. The editor's own `maybeAcquireLease` cannot cover this
  * — it is owner-gated and fires only on a buffer edit, while an EDITOR may
@@ -726,7 +725,7 @@ export function moveNode(nodeId: string, pos: XY): void {
 }
 
 /** Re-run the layered layout over the whole diagram. Undoable because it is
- * destructive to hand-tuning (spec §5), and staged like any other position
+ * destructive to hand-tuning, and staged like any other position
  * change — this is the TOOLBAR button, a deliberate gesture, unlike the
  * first-open arrange in {@link initMetamodelDiagram} which stays local. */
 export async function runAutoArrange(): Promise<void> {
@@ -743,14 +742,11 @@ export async function runAutoArrange(): Promise<void> {
 }
 
 /**
- * A rebind LANDED (the legacy `MetamodelTab` Rebind path; the staged-commit
- * path reaches the same clear through the `onMetamodelCommitted` listener at
- * the bottom of this module). All it has left to do is drop the UNDO STACK,
- * because a rebind moves the baseline the stack's snapshots were taken
- * against: the buffer halves describe pre-rebind text that has since been
- * committed to the project, so "undo" is no longer a local operation on it,
- * and the key halves would re-stage positions for names the draft has moved on
- * from.
+ * A rebind LANDED. Drops the UNDO STACK, because a rebind moves the baseline
+ * the stack's snapshots were taken against: the buffer halves describe
+ * pre-rebind text that has since been committed to the project, so "undo" is
+ * no longer a local operation on it, and the key halves would re-stage
+ * positions for names the draft has moved on from.
  */
 export function onMetamodelRebound(): void {
 	// Every other public entry here is project-guarded; this one was not.

@@ -5,7 +5,7 @@
  * data requests that actually trigger hydration — the status endpoint itself
  * never hydrates, so polls return immediately.
  *
- * This loop no longer owns a progress token or any user-facing label — that is
+ * This loop does not own a progress token or any user-facing label — that is
  * the journey's job (lib/state/open-journey.ts). It only observes status and
  * decides when to stop (ready/empty, cold-timeout, cancel, or navigation).
  */

@@ -147,10 +147,11 @@ const _lockDenied = new SvelteMap<string, string>();
  * expanded; the root pathKey (`''`) is expanded by default. */
 const _expanded = new SvelteMap<string, SvelteSet<string>>();
 
-/** tabId -> pathKey -> the user's explicit card-collapse choice. PathCard's
- * disclosure USED to be component-local $state, which silently reset to
- * expanded whenever a card remounted (auto-wrap into a combination, dialog
- * reopen, editor reuse). Store-keyed state survives remounts; the DEFAULT
+/** tabId -> pathKey -> the user's explicit card-collapse choice. Store-keyed
+ * rather than component-local $state, because component-local state would
+ * silently reset to expanded whenever a card remounts (auto-wrap into a
+ * combination, dialog reopen, editor reuse). Store-keyed state survives
+ * remounts; the DEFAULT
  * (no entry) is collapsed for EMBEDDED drafts — a table-settings dialog
  * full of expanded navigation builders is unreadable — and expanded for
  * standalone navigation tabs. Follows `_expanded`'s lifecycle: moved by
@@ -824,10 +825,11 @@ export async function saveDraft(tabId: string): Promise<void> {
  * always a create, never a rename-in-place).
  *
  * Like `saveDraft`'s create branch this only STAGES — but UNLIKE it, the tab is
- * RE-KEYED to `nav:<tempId>` right here. That is not a violation of "don't
- * re-key at stage time" (Decision 4), it is what keeps that decision safe:
+ * RE-KEYED to `nav:<tempId>` right here. That does not violate the rule of
+ * "don't re-key at stage time" for a plain create — it is what keeps that
+ * rule safe:
  *
- *   - Decision 4 governs a create staged from a `nav:draft:N` tab. That key
+ *   - The rule governs a create staged from a `nav:draft:N` tab. That key
  *     names no artifact, so `openArtifactTab`'s deterministic `nav:<artifactId>`
  *     can never collide with it, and it is re-keyed only at commit.
  *   - Save-as is the other case: the tab is keyed to a REAL artifact it has
@@ -991,7 +993,7 @@ export function closeDraft(tabId: string): void {
 	_cardCollapsed.delete(tabId);
 	_selected.delete(tabId);
 	_lockDenied.delete(tabId);
-	// Give the check-out back: no editor is behind this lease any more. A NO-OP
+	// Give the check-out back: no editor is behind this lease. A NO-OP
 	// when a staged op still needs it (a saved-but-uncommitted edit must keep
 	// its lease or the commit 409s "required lock not held") — that is
 	// `releaseArtifactIfUnneeded`'s whole job. A temp id has no server-side row

@@ -1,7 +1,7 @@
 import type { Issue } from '$lib/api/types';
 
 /**
- * The Validate OVERLAY store (F-4/U-8 redesign, spec 2026-08-12).
+ * The Validate OVERLAY store.
  *
  * The live committed issue list lives in model.svelte.ts (`_issuesByOwner`,
  * fed by open-time adoption, commit-delta splices, and refetches). This store

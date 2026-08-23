@@ -112,8 +112,7 @@ const editorTheme = EditorView.theme(
 			color: 'var(--accent-foreground)'
 		},
 
-		// Lint UI — previously default light styling (white text on white).
-		// Squiggle underlines are tinted per severity (bottom-positioned wavy
+		// Lint UI — squiggle underlines are tinted per severity (bottom-positioned wavy
 		// SVGs so the glyph itself is untouched); the hover panel uses the
 		// popover surface with a coloured spine.
 		'.cm-lintRange-error': { backgroundImage: wavyUnderline('#e5646a') },

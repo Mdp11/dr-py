@@ -2,7 +2,7 @@ import type { Metamodel } from '$lib/api/types';
 import { buildDiagram, nodeIdFor, nodeSize, type DiagramSelection } from './diagram-build';
 
 /**
- * Where the canvas should GO to show a selection (spec 2026-08-20 §6): the
+ * Where the canvas should GO to show a selection: the
  * pure geometry half of the shared reveal path — search and the panel TOC
  * both route through it, so the two can never pan differently.
  *
@@ -14,8 +14,7 @@ import { buildDiagram, nodeIdFor, nodeSize, type DiagramSelection } from './diag
  * panning, and the form panel is the destination.
  *
  * Positions default to (0,0) exactly like `specToNode`, and sizes come from
- * `nodeSize`, so this works for nodes the viewport has never rendered —
- * same reasoning as the old `findAndCenter` (which this replaces).
+ * `nodeSize`, so this works for nodes the viewport has never rendered.
  */
 
 export type RevealTarget =

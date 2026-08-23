@@ -7,7 +7,7 @@
  * docstring for the full rationale; this module only owns the polling shape,
  * not why it exists.
  *
- * Extracted (P-14 task 12) rather than left duplicated because the two loops
+ * Extracted rather than left duplicated because the two loops
  * were byte-identical apart from the one call that produces the next
  * `ExportResult` — `downloadTable`'s public signature is unchanged by this,
  * so there was no reason to keep a second copy.

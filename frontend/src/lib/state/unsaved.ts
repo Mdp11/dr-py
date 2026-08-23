@@ -26,11 +26,9 @@ import { getStagedMetamodelDepth } from './metamodel-stage.svelte';
  * between — so without it a view-ONLY batch (rename a folder, close the tab)
  * walks out unguarded while the equivalent model or artifact batch is caught.
  *
- * The metamodel term is NEW (spec 2026-08-16) and reverses the note that used
- * to stand here ("deliberately NO metamodel-editor term: the draft mirrors to
- * localStorage, so navigating away loses nothing"). Both halves of that family
- * — the YAML buffer and the diagram's staged node moves — are commit CONTENT
- * now: they ride the next `POST /commits` batch exactly like a staged model,
+ * The metamodel term exists because both halves of that family
+ * — the YAML buffer and the diagram's staged node moves — are commit CONTENT:
+ * they ride the next `POST /commits` batch exactly like a staged model,
  * artifact or view op. They do still restore from localStorage, but so would a
  * table draft; what the guard is really about is that leaving the workspace
  * abandons an uncommitted batch, and answering differently for one of the four

@@ -36,7 +36,7 @@ export async function runExporter(artifactId: string, cfg?: ClientConfig): Promi
 
 /**
  * Run a STAGED exporter draft (`POST /exports/run` with an inline
- * `definition`, spec §9.1) — how the Export button works for a dirty or
+ * `definition`) — how the Export button works for a dirty or
  * never-committed draft. `name` stands in for the artifact name (zip-stem
  * fallback, manifest `artifact_name`). Same 202 protocol as `runExporter`;
  * the server validates the draft exactly like a committed payload, so the

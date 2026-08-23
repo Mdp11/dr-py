@@ -1,8 +1,8 @@
 import ELK from 'elkjs/lib/elk.bundled.js';
 import { nodeSize, type DiagramEdgeSpec, type DiagramNodeSpec } from './diagram-build';
 
-/** One-shot layered layout for the Auto-arrange button and first-open (spec
- * §5). elkjs runs client-side and the bundled build needs no separate worker
+/** One-shot layered layout for the Auto-arrange button and first-open.
+ * elkjs runs client-side and the bundled build needs no separate worker
  * file to serve, so `new ELK()` here is enough. It does NOT run off the main
  * thread, though: with no `workerUrl` elkjs falls back to a synchronous
  * in-process fake worker, so this function BLOCKS despite being `async` —
@@ -30,7 +30,7 @@ export async function autoArrange(
 /** Incremental placement for nodes with no stored position: next to their
  * nearest positioned neighbor (nudged until free), else on a grid below the
  * current extent. Never moves an already-positioned node — a peer's new type
- * must not implicitly re-layout the canvas under you (spec §5). */
+ * must not implicitly re-layout the canvas under you. */
 export function placeUnpositioned(
 	nodes: DiagramNodeSpec[],
 	edges: DiagramEdgeSpec[],

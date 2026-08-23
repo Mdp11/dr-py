@@ -67,10 +67,10 @@ import {
 import { getDynamicTabs } from './workspace.svelte';
 
 /**
- * Checkout store (Spec B): the editing-session state layered over the model
+ * Checkout store: the editing-session state layered over the model
  * store. Owns MY held locks (token-keyed; tokens are private to the acquirer
- * and never broadcast), the heartbeat (Task 6), and the preview/commit/discard
- * lifecycle (Task 7). Peer lock state (badges) comes from realtime.svelte.ts;
+ * and never broadcast), the heartbeat, and the preview/commit/discard
+ * lifecycle. Peer lock state (badges) comes from realtime.svelte.ts;
  * this store is the authoritative source for my own tokens.
  */
 
@@ -124,7 +124,7 @@ export function getStrictMode(): boolean {
 	return _strictMode;
 }
 
-/** Direct setter used by the owner Settings toggle (Task 8) after a successful
+/** Direct setter used by the owner Settings toggle after a successful
  * PATCH /settings, so the DiffDrawer gate reflects the new policy immediately. */
 export function setStrictMode(v: boolean): void {
 	_strictMode = v;
@@ -210,7 +210,7 @@ export async function ensureCheckout(
 		// makes its staged edits committable again — clear the stale mark so the
 		// StatusBar warning is not sticky.
 		for (const le of res.leases) _stale.delete(le.resource_id);
-		_maybeStartHeartbeat(); // defined in Task 6
+		_maybeStartHeartbeat();
 		return { ok: true };
 	} catch (err) {
 		if (err instanceof ConflictError) {
@@ -227,7 +227,7 @@ export function resetCheckout(): void {
 	_role = 'viewer';
 	_lockTtlSeconds = 300;
 	_strictMode = false;
-	_stopHeartbeat(); // defined in Task 6
+	_stopHeartbeat();
 }
 
 // --- heartbeat -------------------------------------------------------------
@@ -263,7 +263,7 @@ async function _renewAll(): Promise<void> {
 	if (_registry.size === 0) _stopHeartbeat();
 }
 
-// --- project open + expiry (Task 8) ----------------------------------------
+// --- project open + expiry ---------------------------------------------------
 
 /** Fetch role + lock TTL from /open and adopt them. */
 export async function loadProjectInfo(cfg?: ClientConfig): Promise<void> {
@@ -302,7 +302,7 @@ export function handleRemoteLockEvent(
 	if (_registry.size === 0) _stopHeartbeat();
 }
 
-/** Replace the Task 6 expiry stub: a renew-detected expiry also marks stale. */
+/** A renew-detected expiry also marks stale. */
 function _onTokenExpired(token: string): void {
 	// Caller (_renewAll / handleRemoteLockEvent) drops the token; this only stale-marks.
 	for (const [rid, lease] of _registry) {
@@ -352,8 +352,7 @@ export async function commitStaged(message: string, ackErrors: boolean): Promise
 	// text after the await — a straggler keystroke, a Discard. Everything
 	// downstream (the lock set, the request, and the post-success notify that
 	// tells the editor which blob became the baseline) must describe the ops
-	// that were actually SENT, which is exactly what the retired rebind route's
-	// caller used its own `sent` capture for. On the FAILURE
+	// that were actually SENT. On the FAILURE
 	// path nothing below runs at all, so a commit that never landed can never
 	// clear a buffer it did not adopt.
 	const mmOps = getStagedMetamodelOps();
@@ -416,7 +415,7 @@ export async function commitStaged(message: string, ackErrors: boolean): Promise
 	//    still claims them makes the next commitStaged send dead tokens and 409
 	//    — over a commit that already succeeded. `notifyArtifactCommit` fans out
 	//    to editor-store callbacks it does not guard (a bare `for … cb(info)`),
-	//    so one throwing listener used to strand exactly that state; applyDelta
+	//    so a throwing listener could strand exactly that state; applyDelta
 	//    is ordered after for the same reason.
 	clearStaged();
 	clearStagedArtifacts();
@@ -534,12 +533,10 @@ export async function releaseFolderLeaseIfUnneeded(folderId: string): Promise<vo
 /**
  * Release my `mm` lease (metamodel surface close). Best-effort like its
  * artifact/folder siblings ({@link releaseArtifactIfUnneeded},
- * {@link releaseFolderLeaseIfUnneeded}) — and, since the metamodel became a
- * staged commit family (spec 2026-08-16), guarded like them too.
+ * {@link releaseFolderLeaseIfUnneeded}) — and guarded like them too.
  *
- * The guard used to be absent because {@link lockedResourcesNeededBy} never
- * emitted `mm`, so no staged op could require the lease. That is no longer
- * true: a dirty YAML draft and every staged node move ride the SAME
+ * The guard matters because {@link lockedResourcesNeededBy} emits `mm` for a
+ * dirty YAML draft and every staged node move: they ride the SAME
  * `POST /commits` batch as model/artifact/view edits, and the backend
  * hard-verifies the `mm` lease on any batch carrying a rebind. Closing the
  * metamodel tab over a dirty draft would otherwise hand the lease back and
@@ -617,7 +614,7 @@ function openArtifactResources(): Set<string> {
  * that must not surface an unhandled rejection over a lease that will TTL out
  * anyway.
  *
- * ACCEPTED WRINKLE (Decision 7): `removeArtifact` (artifacts.svelte.ts) stages
+ * ACCEPTED WRINKLE: `removeArtifact` (artifacts.svelte.ts) stages
  * the artifact's `remove_artifact` view-placement scrub ops ALONGSIDE its
  * `delete_artifact` entry, but as separate entries in a separate journal
  * (`view-edits.svelte.ts`). This function only reverts the ONE artifact entry

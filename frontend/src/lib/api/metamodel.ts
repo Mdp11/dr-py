@@ -40,7 +40,7 @@ export function clearMetamodel(cfg?: ClientConfig): Promise<void> {
 }
 
 /**
- * Run the read-only sandbox conformance diff (Phase 6B). Validates the live
+ * Run the read-only sandbox conformance diff. Validates the live
  * model against a CANDIDATE metamodel without mutating anything. Any member.
  * The blob is sent as raw YAML (no JS-side parse), mirroring uploadMetamodel.
  */
@@ -54,10 +54,9 @@ export function diffMetamodel(body: string, cfg?: ClientConfig): Promise<Metamod
 	return apiFetch('/metamodel/diff', init, cfg);
 }
 
-// NOTE (spec 2026-08-16): there is no `rebindMetamodel` here any more.
-// `POST /metamodel/rebind` was retired server-side; a rebind is a
-// `metamodel.rebind` op staged into the next `POST /commits` batch
-// (`state/metamodel-stage.svelte.ts` → `commitStaged`).
+// A rebind is a `metamodel.rebind` op staged into the next `POST /commits`
+// batch (`state/metamodel-stage.svelte.ts` → `commitStaged`), not a direct
+// `POST /metamodel/rebind` call.
 
 export function getMetamodelRaw(cfg?: ClientConfig): Promise<RawMetamodel> {
 	return apiFetch('/metamodel/raw', { method: 'GET', schema: RawMetamodelSchema }, cfg);

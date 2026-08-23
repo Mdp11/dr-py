@@ -3,7 +3,7 @@ import { SvelteMap } from 'svelte/reactivity';
 import type { MetamodelOp } from './ops';
 
 /**
- * Staged-metamodel store (spec 2026-08-16) — the FOURTH staged family, beside
+ * Staged-metamodel store — the FOURTH staged family, beside
  * the model, artifact and view journals. It holds the two things a metamodel
  * gesture can stage:
  *

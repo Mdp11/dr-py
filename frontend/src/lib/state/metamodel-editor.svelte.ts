@@ -14,7 +14,7 @@ import {
 } from './metamodel-stage.svelte';
 
 /**
- * The live metamodel editor's state (Phase 5) — buffer, draft, lint,
+ * The live metamodel editor's state — buffer, draft, lint,
  * preview. COMPOSES the `mm` lease module: the lease is acquired on
  * the first divergent keystroke and released on close/discard/committed rebind.
  * It is NOT the only acquirer — `metamodel-diagram.svelte.ts` takes the same
@@ -122,13 +122,12 @@ export function isMetamodelEditorDirty(): boolean {
 /**
  * Whether the metamodel may be edited at all — BOTH the gate on a keystroke
  * that already happened and the SURFACE's read-only state (what the tab
- * renders and what CodeMirror enforces). One predicate, not two: the pair
- * differed only by the rebind-in-flight flag, and there is no such flight any
- * more (spec 2026-08-16 — a rebind is an op in the commit batch, and
- * `commitStaged` neither blocks the buffer nor needs it frozen: it captures
- * the blob it SENDS, and the {@link onMetamodelCommitted} listener adopts only
- * that text as the new baseline, so a straggler keystroke stays dirty local
- * work rather than being silently called saved).
+ * renders and what CodeMirror enforces). One predicate for both: a rebind is
+ * an op in the commit batch, and `commitStaged` neither blocks the buffer
+ * nor needs it frozen — it captures the blob it SENDS, and the
+ * {@link onMetamodelCommitted} listener adopts only that text as the new
+ * baseline, so a straggler keystroke stays dirty local work rather than
+ * being silently called saved.
  */
 function isEditBlocked(): boolean {
 	return _phase !== 'ready' || getRole() !== 'owner' || _lockedBy !== null;
@@ -239,8 +238,8 @@ export function editMetamodelBuffer(code: string): void {
 
 /**
  * "A peer holds the `mm` lease" — reported by a surface OTHER than this buffer.
- * The DIAGRAM's layout acquire is the only caller (final-review Finding 1):
- * layout moves are staged by EDITORS too, so the canvas acquires the same
+ * The DIAGRAM's layout acquire is the only caller: layout moves are staged
+ * by EDITORS too, so the canvas acquires the same
  * singleton lease and can be the first to learn it is taken.
  *
  * The holder lives here, and is not duplicated in the diagram module, because
@@ -265,10 +264,9 @@ export function retryMetamodelLease(): void {
 }
 
 export async function previewMetamodelChanges(): Promise<void> {
-	// `_previewing`: one preview at a time. (The other half of the old F-1 pair
-	// — refusing while a rebind was in flight — went with the rebind flight
-	// itself: a rebind is an op in the commit batch now, so there is no window
-	// in which a preview could compute against a metamodel that is mid-swap.)
+	// `_previewing`: one preview at a time. A rebind is an op in the commit
+	// batch, so there is no window in which a preview could compute against a
+	// metamodel that is mid-swap.
 	if (_phase !== 'ready' || _previewing) return;
 	const gen = _gen;
 	const buf = _buffer;
@@ -319,9 +317,8 @@ export function closeMetamodelEditor(): void {
 	if (_phase === 'ready') writeDraftNow();
 	_gen++;
 	clearTimers();
-	// BEFORE the lease drop, and that ordering is load-bearing since the
-	// metamodel became a staged commit family (spec 2026-08-16).
-	// `releaseMetamodelLease` now refuses to release while
+	// BEFORE the lease drop, and that ordering is load-bearing:
+	// `releaseMetamodelLease` refuses to release while
 	// `getStagedMetamodelDepth() > 0`, and this module's contribution to that
 	// depth is `isMetamodelEditorDirty()`, which is false outside `ready`. A
 	// CLOSED tab therefore stages no rebind op — so it must not keep the `mm`
@@ -355,7 +352,7 @@ export function closeMetamodelEditor(): void {
 	_acquiring = false;
 }
 
-// --- commit-flow seam (spec 2026-08-16) ------------------------------------
+// --- commit-flow seam --------------------------------------------------------
 //
 // The buffer is staged commit CONTENT now: a dirty draft becomes a
 // `metamodel.rebind` op in the next `POST /commits` batch. All three halves
@@ -373,8 +370,8 @@ registerMetamodelDraftProvider(() => ({
 }));
 
 onMetamodelCommitted(({ rebound, blob }) => {
-	// The commit-flow port of the deleted rebind route's success body: the
-	// server has adopted `blob`, whatever the buffer holds now.
+	// Mirrors the server's rebind-success body: it has adopted `blob`,
+	// whatever the buffer holds now.
 	if (blob === null || _phase !== 'ready') return;
 	_baseline = blob;
 	// A rebind always stores a blob, so a session that loaded through the
@@ -411,7 +408,7 @@ onMetamodelDiscardAll(() => discardMetamodelDraft());
  * — because this module is a singleton whose text belongs to ONE project: a tab
  * that survives an in-SPA switch would otherwise keep contributing project A's
  * YAML through {@link registerMetamodelDraftProvider} to project B's commit
- * batch (final-review Finding 3).
+ * batch.
  *
  * Does NOT touch the checkout registry, and does not flush: the draft's
  * localStorage mirror is written by the edit debounce and by

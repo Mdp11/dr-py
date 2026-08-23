@@ -1,5 +1,5 @@
 /**
- * PERSONAL preferences for the metamodel form panel (spec 2026-08-20 §7):
+ * PERSONAL preferences for the metamodel form panel:
  * whether the whole 320px column is collapsed, and which TOC sections are
  * folded. Per-project, in localStorage, mirroring the view/collapse
  * preferences in `metamodel-diagram.svelte.ts` — same try/catch stance
@@ -9,7 +9,7 @@
  * `setMetamodelPanelCollapsed(false)` is also the "reopen on reveal" hook:
  * `revealSelection` calls it because navigating via search or the TOC
  * implies wanting the form, while a plain canvas click deliberately does NOT
- * reopen a collapsed panel (spec §7.2).
+ * reopen a collapsed panel.
  */
 
 export type PanelSectionKey = 'elements' | 'relationships' | 'enums';

@@ -1,5 +1,5 @@
 /**
- * Client for the four Phase-3 bundle routes. Export + preview are
+ * Client for the four artifact bundle routes. Export + preview are
  * viewer-allowed reads; plan + confirm are part of the write flow (the
  * backend keeps them out of the read-only allowlist), so the UI must gate
  * their affordances on `canEdit()`.

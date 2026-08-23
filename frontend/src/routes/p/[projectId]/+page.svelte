@@ -141,7 +141,7 @@
 			// nulls `_view` AND resets the journal; the boot sequence's own
 			// refreshView() below repopulates it for this project.
 			clearViewState();
-			// Same leak, metamodel side (spec 2026-08-16): the staged-move store is
+			// Same leak, metamodel side: the staged-move store is
 			// a module-scope singleton too, and `commitStaged` reads it
 			// unconditionally. It is re-pointed only by `initMetamodelStage`, which
 			// the metamodel TAB's init calls — so switching from project A to B
@@ -153,7 +153,7 @@
 			// instead of destroying it.
 			closeMetamodelStage();
 			// The DRAFT half of that same family, and the last of the four staged
-			// families to get this guard (final-review Finding 3). The editor's
+			// families to get this guard. The editor's
 			// `_baseline`/`_buffer`/`_phase` are module-scope too, and the provider it
 			// registers with the stage is read UNCONDITIONALLY at batch-build time —
 			// so a tab that survives an in-SPA switch would offer project A's YAML
@@ -258,7 +258,7 @@
 	});
 
 	// View-discard banner: a peer's change made a staged view edit unreplayable,
-	// so `refreshView()` dropped the whole staged-view journal (Task 2). Unlike
+	// so `refreshView()` dropped the whole staged-view journal. Unlike
 	// the other banners above this one has no recovery action — the edits are
 	// already gone — so it is purely informational, dismissed by the user
 	// (the store keeps it live until the explicit Dismiss click; that survival
@@ -331,9 +331,8 @@
 			// resetModelStore() above emptied the live issue map while
 			// refreshSummary() just restored the exact issue COUNTS — without this
 			// the StatusBar reads "12 errors" over an IssuesPanel showing a green
-			// "No issues.", the exact disagreement F-4/U-8 close, and nothing in
-			// this path restarts the feed to heal it. Same best-effort call boot()
-			// makes, same placement.
+			// "No issues.", and nothing in this path restarts the feed to heal it.
+			// Same best-effort call boot() makes, same placement.
 			void refetchIssues();
 			try {
 				// resetCheckout() reset the role to 'viewer'; re-adopt role + lock TTL

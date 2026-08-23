@@ -1,14 +1,12 @@
 /**
- * View store (artefacts revamp Phase 2).
+ * View store.
  *
  * `_view` is the LOCAL working copy: server truth as of the last
  * `refreshView()`, with every staged `view.*` op already applied optimistically
  * on top (the `stage*` mutators below apply-then-stage in that order — see each
- * mutator's docstring). There is no more direct PUT path: every structural
- * change to the view goes out as a `ViewOp` in the `view-edits.svelte.ts`
- * journal and reaches the server only via `POST /commits` (checkout.svelte.ts's
- * `commitStaged`). The pre-Phase-2 whole-snapshot PUT wrapper is GONE — see
- * git history if you're looking for it.
+ * mutator's docstring). Every structural change to the view goes out as a
+ * `ViewOp` in the `view-edits.svelte.ts` journal and reaches the server only
+ * via `POST /commits` (checkout.svelte.ts's `commitStaged`).
  *
  * Every mutator follows the same three-phase shape: GUARD (client-side
  * precondition checks — name clash, cycle, no-op — so we never acquire a lease
@@ -216,7 +214,7 @@ function elLabel(id: string): string {
 
 /** Every element id placed anywhere within `folder`'s own subtree (itself plus
  * every descendant folder) — the excluded-pool injection payload for a staged
- * `delete_folder` (Task 1, artefacts-Phase-2 follow-ups). MUST be captured
+ * `delete_folder`. MUST be captured
  * from the live `_view` BEFORE the op pops the folder out: `applyViewOp`
  * detaches the folder (and its `elements`/`folders` lists with it) from the
  * tree, so this is unrecoverable afterwards — same shape as `label` capturing
@@ -227,7 +225,7 @@ function subtreeElementIds(folder: Folder): string[] {
 	return out;
 }
 
-// ----- STAGE mutators (artefacts revamp Phase 2) -----
+// ----- STAGE mutators -----
 
 export async function stageCreateFolder(parentId: string, name: string): Promise<boolean> {
 	if (_view === null) throw new Error('No active view');
@@ -317,7 +315,7 @@ export async function stageMoveFolder(id: string, toParentId: string): Promise<b
  * in the commit JSON). Never spell append as a huge literal index: the server
  * would clamp it, but the raw number would be journaled forever.
  *
- * Decision 11 index math: one op is emitted PER ID, applied locally between
+ * Index math: one op is emitted PER ID, applied locally between
  * emissions via `applyViewOp`, so each successive op's `index` reflects the
  * state the server will see replaying the batch in order. Two corrections ride
  * on a SAME-FOLDER reorder, and they are two halves of one fact:
@@ -373,7 +371,7 @@ export async function stagePlaceElementsAt(
 			const op: ViewOp = { kind: 'remove_element', element_id: id, folder_id: home };
 			const label = `Removed ${elLabel(id)} from "${folderDisplayName(_view, home)}"`;
 			_view = applyViewOp(_view, op);
-			stageViewOp(op, label, [id]); // excluded-pool injection payload (Task 1)
+			stageViewOp(op, label, [id]); // excluded-pool injection payload
 			continue;
 		}
 		if (home === null) {
@@ -466,7 +464,7 @@ export async function stageMoveArtifact(
  *
  * `displayName`, when given, labels the staged entry by name instead of the
  * raw id: `Removed placement of "<name>"` rather than `"<id>"`. The delete's
- * in-batch scrub (`removeArtifact`, Decision 7) passes the artifact's
+ * in-batch scrub (`removeArtifact`) passes the artifact's
  * COMMITTED header name, since it already looked one up to build the delete
  * entry itself. Every other caller — the sidebar row's own "remove from
  * folder" action — has no header handy and omits it, falling back to the id.
@@ -491,7 +489,7 @@ export async function stageRemoveArtifactRef(
 }
 
 /**
- * Decision 3's delete-all batch: stage a `delete_folder` per top-level folder
+ * The delete-all batch: stage a `delete_folder` per top-level folder
  * (each cascades its own subtree — see `applyViewOp`) plus a `remove_artifact`
  * per root-level artifact ref. An empty view is a no-op — never stage an empty
  * batch's worth of nothing. ONE `folderDeleteLock` call covering every folder
@@ -588,7 +586,7 @@ export async function discardViewChanges(): Promise<void> {
 // reinstating the very bug this registration exists to prevent.
 onViewDiscarded(() => refreshView());
 
-// Post-commit reconciliation (spec Decision 6): a commit that carried view
+// Post-commit reconciliation: a commit that carried view
 // ops refetches server truth ONCE (concretizes tmp_ folder ids — no client
 // id_map remap). Two subscriptions, both cheap:
 //  - our own commit: view-edits' listener registry (fired by commitStaged);
@@ -598,12 +596,9 @@ onViewDiscarded(() => refreshView());
 // Registered at MODULE SCOPE (the table-editor.svelte.ts:1689 precedent) but
 // DEFERRED past a macrotask boundary, unlike that precedent — this module
 // sits in a REAL three-hop cycle (view.svelte.ts -> realtime.svelte.ts ->
-// artifacts.svelte.ts -> view.svelte.ts). Task 9 deleted the OLD last edge
-// (`scrubArtifactFromView`, imported by artifacts.svelte.ts) but immediately
-// recreated the SAME edge: `removeArtifact`'s in-batch delete scrub
-// (Decision 7) imports `getView`/`stageRemoveArtifactRef` straight from THIS
-// module. The cycle is therefore unchanged in shape — only which names cross
-// the back-edge changed — so the deferral below still has to stay.
+// artifacts.svelte.ts -> view.svelte.ts): `removeArtifact`'s in-batch delete
+// scrub imports `getView`/`stageRemoveArtifactRef` straight from THIS
+// module, closing the cycle, so the deferral below has to stay.
 // table-editor's tap, by contrast, has no back-edge into realtime.svelte.ts
 // at all. A hoisted FUNCTION declaration (`onCommitEvent` itself) is safely
 // callable at any point in a cycle, but `realtime.svelte.ts`'s

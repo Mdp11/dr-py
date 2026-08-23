@@ -1,5 +1,5 @@
 /**
- * Global long-operation progress store (spec §4).
+ * Global long-operation progress store.
  *
  * A stack of active operations; the OLDEST entry drives the ProgressOverlay
  * (an outer operation like "opening project" is not hidden by a nested one).

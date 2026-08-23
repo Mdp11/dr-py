@@ -1,5 +1,5 @@
 /**
- * History store for the commit-history browser (Phase 8). Holds the loaded
+ * History store for the commit-history browser. Holds the loaded
  * commit page(s), the paging cursor, and a rev->ModelOut reconstruction cache
  * so flipping between diffs does not refetch a rev already materialized.
  */

@@ -31,8 +31,8 @@ export function evaluateTable(args: EvaluateArgs, cfg?: ClientConfig): Promise<T
  * Outcome of a `/tables/export` call. `'preparing'` means the backend's
  * cache-only export path hasn't finished computing every script cell yet — it
  * answered 202 with `Retry-After: 1` instead of the xlsx body. The caller is
- * expected to retry after a short delay (the retry loop itself is Task 10);
- * this task only distinguishes the two outcomes.
+ * expected to retry after a short delay; this type only distinguishes the
+ * two outcomes.
  */
 export type ExportResult =
 	| { kind: 'ready'; blob: Blob; filename: string }

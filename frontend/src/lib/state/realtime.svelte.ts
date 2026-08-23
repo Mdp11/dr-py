@@ -1,10 +1,10 @@
 /**
- * Realtime feed store (Phase 5, Spec A — thin). Subscribes to the project feed
+ * Realtime feed store. Subscribes to the project feed
  * and reduces its events into reactive state: connection status, the set of
  * connected users (presence), and the live lock table (resource_id -> lease).
  * Commit deltas from OTHER clients are applied into the existing model cache
  * via `applyDelta`. This store does NOT change the editing path; lock-badge
- * RENDERING and the lock->edit->commit UI land in Spec B.
+ * RENDERING and the lock->edit->commit UI live elsewhere.
  */
 
 import { SvelteMap } from 'svelte/reactivity';
@@ -170,8 +170,8 @@ export function handleFeedEvent(e: FeedEvent): void {
 			_lockState.clear();
 			for (const le of e.locks) _lockState.set(le.resource_id, le);
 			// If we are behind the server's rev, our cached subset may be stale.
-			// Spec A keeps this light: refresh the model-wide summary counters.
-			// (Spec B wires a full reload of the affected subset.)
+			// Kept light: refresh the model-wide summary counters rather than
+			// reloading the affected subset.
 			if (e.model_rev > getModelRev()) refreshSummary().catch(() => {});
 			// Unconditional, unlike the summary refresh above: the background
 			// validation sweep grows the server's issue store WITHOUT bumping

@@ -37,9 +37,9 @@ const STATUS_RANK: Record<StagedRowStatus, number> = { new: 0, modified: 1, dele
  * out (they show up as journal targets with no op of their own). Treating
  * those as staged relationship changes would badge the far endpoint of every
  * cascade-deleted rel as "edited" — a row whose revert button is a permanent
- * no-op, since no staged op targets that element. The spec defines Modified as
- * an endpoint of a staged relationship *op*, so the op buffer is the authority
- * and this set is the filter.
+ * no-op, since no staged op targets that element. Modified means an endpoint of
+ * a staged relationship *op*, so the op buffer is the authority and this set
+ * is the filter.
  */
 export function stagedRelationshipOpIds(ops: readonly ModelOp[]): Set<string> {
 	// Plain Set: computation scratch, never read reactively (and this is a plain

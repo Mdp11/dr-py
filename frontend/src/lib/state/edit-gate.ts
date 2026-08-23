@@ -95,8 +95,8 @@ export function folderTargets(folderIds: string[]): LockTargetIn[] {
 	}));
 }
 
-/** Folder gates (Phase 2): notice-based like the element gates — the sidebar
- * has no inline place to render a holder. Intent nuance (Decision 13):
+/** Folder gates: notice-based like the element gates — the sidebar
+ * has no inline place to render a holder. Intent nuance:
  * verify_held ignores intent, so `edit` fits every gesture except delete
  * (DELETE-intent conflicts with ANY peer lease — the backend's semantics for
  * a destructive claim over the subtree the CALLER walks and passes here) and

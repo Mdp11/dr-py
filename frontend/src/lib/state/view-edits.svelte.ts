@@ -1,5 +1,5 @@
 /**
- * Staged-view-ops store (artefacts revamp Phase 2, frontend rewire).
+ * Staged-view-ops store.
  *
  * An ORDERED JOURNAL of `ViewOp`s queued for commit, NOT a coalescing
  * per-id map (contrast: `artifact-edits.svelte.ts` holds ONE ENTRY PER
@@ -14,7 +14,7 @@
  * user just did, for undo history display and the DiffDrawer.
  *
  * `unplacedElementIds` is captured the same way, for the same reason (excluded-
- * pool injection, Task 1 of the artefacts-Phase-2 follow-ups): a `remove_element`
+ * pool injection): a `remove_element`
  * carries its own target on the op, but a `delete_folder` op's id is all that's
  * left once the folder (and everything placed anywhere in its subtree) has
  * popped out of `_view` — recovering "what did this op just unplace" from the

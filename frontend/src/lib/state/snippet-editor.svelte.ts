@@ -525,7 +525,7 @@ export function closeSnippetDraft(tabId: string): void {
 	_runs.delete(tabId);
 	bump(_lintGenerations, tabId);
 	bump(_runGenerations, tabId);
-	// Give the check-out back: no editor is behind this lease any more. A NO-OP
+	// Give the check-out back: no editor is behind this lease. A NO-OP
 	// when a staged op still needs it (a saved-but-uncommitted edit must keep its
 	// lease or the commit 409s "required lock not held") — that is
 	// `releaseArtifactIfUnneeded`'s whole job. A temp id has no server-side row

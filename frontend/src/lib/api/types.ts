@@ -119,7 +119,7 @@ export const MetamodelSchema = z.object({
 });
 export type Metamodel = z.infer<typeof MetamodelSchema>;
 
-// --- structural metamodel diff (Phase 4) -----------------------------------
+// --- structural metamodel diff ----------------------------------------------
 export const FieldChangeSchema = z.object({
 	field: z.string(),
 	from: z.unknown(),
@@ -199,7 +199,7 @@ export interface ArtifactRef {
 }
 
 export interface Folder {
-	/** Stable uuid4-hex id, healed server-side on every read (Phase 2). Locally
+	/** Stable uuid4-hex id, healed server-side on every read. Locally
 	 * staged folders carry a `tmp_` id until their commit's id_map lands. */
 	id: string;
 	name: string;
@@ -241,7 +241,7 @@ export interface Conflict {
 }
 
 // ---------------------------------------------------------------------------
-// Delta-protocol schemas (Phase D1) — mirror the backend pydantic models in
+// Delta-protocol schemas — mirror the backend pydantic models in
 // src/data_rover/api/schemas.py (OpsResponse, ModelSummary, the paged read
 // shapes, and the streaming load/save responses).
 // ---------------------------------------------------------------------------
@@ -268,10 +268,10 @@ export const OpsResponseSchema = z.object({
 });
 export type OpsResponse = z.infer<typeof OpsResponseSchema>;
 
-// ArtifactHeaderSchema is moved up here (from its home in the "Project
-// artifacts" section below) because CommitResponseSchema, just past the
-// Phase-4 section, references it — a `const` referenced before its module-init
-// assignment throws (TDZ), so definition order in this file must follow use.
+// ArtifactHeaderSchema sits here rather than in the "Project artifacts"
+// section below because CommitResponseSchema, just below, references it — a
+// `const` referenced before its module-init assignment throws (TDZ), so
+// definition order in this file must follow use.
 export const ArtifactHeaderSchema = z.object({
 	id: z.string(),
 	kind: z.string(),
@@ -283,7 +283,7 @@ export const ArtifactHeaderSchema = z.object({
 });
 export type ArtifactHeader = z.infer<typeof ArtifactHeaderSchema>;
 
-// --- Phase 4 check-out / commit (Spec B) -----------------------------------
+// --- check-out / commit -----------------------------------------------------
 
 export const LockTargetInSchema = z.object({
 	resource_id: z.string(),
@@ -383,7 +383,7 @@ export const MetamodelLintSchema = z.object({
 });
 export type MetamodelLint = z.infer<typeof MetamodelLintSchema>;
 
-// Shared canvas positions for the diagram editor (spec §5): presentation-only,
+// Shared canvas positions for the diagram editor: presentation-only,
 // last-write-wins, no lease — a missing row from GET /metamodel/layout comes
 // back as `{}` rather than 404, so `positions` defaults empty here too.
 export const LayoutPositionSchema = z.object({ x: z.number(), y: z.number() });
@@ -409,7 +409,7 @@ export const CommitResponseSchema = OpsResponseSchema.extend({
 	// Defaults keep every pre-artifact fixture parsing.
 	changed_artifacts: z.array(ArtifactHeaderSchema).default([]),
 	deleted_artifact_ids: z.array(z.string()).default([]),
-	// metamodel half (spec 2026-08-16): true when the batch carried a
+	// metamodel half: true when the batch carried a
 	// `metamodel.rebind`, in which case the project is bound to a NEW
 	// metamodel row named by `to_metamodel_id`. Optional rather than
 	// defaulted so a fixture that omits them stays distinguishable from one
@@ -1003,7 +1003,7 @@ export function isJsonFamily(format: ExportFormat): boolean {
 	return format === 'json' || format === 'jsonl';
 }
 
-/** Document shaping for JSON exports (spec §7) — exporter-entry-only.
+/** Document shaping for JSON exports — exporter-entry-only.
  *  `shape`/`pretty` apply to `json`; `on_error` to `json` and `jsonl`;
  *  ignored elsewhere. All strictness (missing/out-of-range/duplicate keys,
  *  on_error 'fail') is a 422 from POST /exports/run — never validated

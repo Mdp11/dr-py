@@ -3,8 +3,8 @@
  *
  * CodeMirror's stock search panel is browser-default `<input>`s, text buttons
  * ("next", "previous", "all", "replace", "replace all") and raw checkboxes;
- * `theme.ts` could only ever style the strip they sit in. This replaces the
- * panel's PRESENTATION and nothing else: every action delegates to
+ * `theme.ts` could only ever style the strip they sit in. This module owns
+ * the panel's PRESENTATION and nothing else: every action delegates to
  * `@codemirror/search`'s own commands and state, so `Mod-f`, `F3`,
  * `Mod-Shift-l` and the rest keep working exactly as configured upstream.
  *

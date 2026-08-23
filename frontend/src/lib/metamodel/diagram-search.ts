@@ -2,15 +2,15 @@ import type { Metamodel } from '$lib/api/types';
 import type { DiagramSelection } from './diagram-build';
 
 /**
- * Client-side type search for the metamodel canvas (spec 2026-08-20 §6).
+ * Client-side type search for the metamodel canvas.
  * Purely over the parsed draft — the metamodel is fully client-side, so
  * unlike element search there is no API call and no debounce-vs-staleness
  * protocol to manage. Case-insensitive substring; prefix matches rank first,
  * alphabetical within a rank. Mapless relationships are included (search is
  * one of only two ways to reach them) and flagged so the row can say so.
  * Each hit also carries the matched substring's position within `name` so
- * the dropdown can render it highlighted (spec §6) without re-deriving the
- * match itself.
+ * the dropdown can render it highlighted without re-deriving the match
+ * itself.
  *
  * The result reports the FULL match count beside the capped page of hits.
  * Returning the truncated list alone was silently lossy: at 300 types a
@@ -28,7 +28,7 @@ export interface TypeSearchHit {
 	/** Relationships only; always false for the other kinds. */
 	mapless: boolean;
 	/** Index in `name` where the query matched — for the dropdown's substring
-	 * highlight (spec §6). Always a real index: a hit only exists on a match. */
+	 * highlight. Always a real index: a hit only exists on a match. */
 	matchStart: number;
 	/** Length of the matched run, i.e. the trimmed query's length. */
 	matchLength: number;

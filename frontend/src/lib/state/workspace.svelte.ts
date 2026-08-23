@@ -1,7 +1,7 @@
 /**
  * Workspace tab strip: dynamic-tabs-only (navigation and table editors, the
  * metamodel editor, and the Issues panel — all closable). There is no fixed
- * built-in tab any more: a `null` active id means "nothing open", and the
+ * built-in tab: a `null` active id means "nothing open", and the
  * Workspace renders a placeholder in that state. Saved-artifact tabs are
  * persisted per project under `ui.workspace.tabs.<projectId>`; DRAFT tabs are
  * memory-only by design — that means `artifactId === null` AND a TEMP id (a

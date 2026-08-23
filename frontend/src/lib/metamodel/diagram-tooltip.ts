@@ -1,5 +1,5 @@
 /**
- * Where the LOD cursor tooltip goes (spec 2026-08-20 §4), as a pure function of
+ * Where the LOD cursor tooltip goes, as a pure function of
  * the cursor and the viewport so the placement rule is testable without a
  * layout engine.
  *

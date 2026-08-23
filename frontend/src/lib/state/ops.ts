@@ -48,13 +48,13 @@ export type RelationshipOp =
 	| { kind: 'delete_relationship'; id: string };
 
 /**
- * Artifact-content ops (artefacts revamp Phase 1) — mirror of the backend's
+ * Artifact-content ops — mirror of the backend's
  * ArtifactOpIn (api/schemas.py). Applied to ArtifactRow DB rows by
  * POST /commits, never to the in-memory model; /model/ops rejects them.
  * `update_artifact.payload` is a FULL replacement (omitted = name-only
  * change). The backend's optional `artifact_rev` OCC precondition is
  * deliberately never sent: the art: lease is the concurrency control
- * (CLAUDE.md "Lease rule"); OCC-on-ops is a deferred follow-up.
+ * (CLAUDE.md "Lease rule").
  */
 export type ArtifactOp =
 	| {
@@ -73,7 +73,7 @@ export type ArtifactOp =
 	| { kind: 'delete_artifact'; id: string };
 
 /**
- * View-content ops (artefacts revamp Phase 2) — mirror of the backend's
+ * View-content ops — mirror of the backend's
  * ViewOpIn (api/schemas.py). Applied by POST /commits to the session view
  * blob (api/view_ops.py), never to the model; /model/ops rejects them.
  * No `view_rev` precondition exists on any of these BY DECISION: the
@@ -112,7 +112,7 @@ export type ViewOp =
 	  };
 
 /**
- * Metamodel-family ops (spec 2026-08-16) — mirror of the backend's
+ * Metamodel-family ops — mirror of the backend's
  * MetamodelOpIn (api/schemas.py). Applied by POST /commits to the session
  * metamodel + metamodel_layouts blob; /model/ops rejects them. At most one
  * rebind per batch (the server hoists it first); `pos: null` removes a

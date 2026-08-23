@@ -9,7 +9,7 @@ import {
 /**
  * Ephemeral presentation state for the metamodel CANVAS: what is hovered,
  * whether the level-of-detail (simplified) render mode is on, and where the
- * cursor is for the LOD tooltip (spec 2026-08-20 §3.1, §4, §5).
+ * cursor is for the LOD tooltip.
  *
  * A separate module from `metamodel-diagram.svelte.ts` on purpose: that module
  * owns draft/positions/selection (durable-ish, per-project), this one owns
@@ -27,7 +27,7 @@ import {
 
 /** Hysteresis pair: enter simplified mode below ENTER, leave above EXIT. The
  * gap is what stops the boundary flickering while the user sits on it. Tuned
- * against examples/smart-city.metamodel.yaml (spec §4). */
+ * against examples/smart-city.metamodel.yaml. */
 export const LOD_ENTER = 0.4;
 export const LOD_EXIT = 0.5;
 
@@ -109,7 +109,7 @@ export function getHoverCursor(): { x: number; y: number } | null {
 	return _cursor;
 }
 
-/** The cursor sink the canvas's `pointermove` calls (spec §4): record
+/** The cursor sink the canvas's `pointermove` calls: record
  * the position ONLY while the LOD tooltip could be showing — simplified mode is
  * on AND something is hovered — and clear it otherwise.
  *

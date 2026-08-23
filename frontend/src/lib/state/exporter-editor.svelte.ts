@@ -4,7 +4,7 @@
  * An exporter artifact bundles many tables' exports into one zip; each
  * `ExporterEntry` carries its own presentation overrides, copied (never
  * referenced) from the source table's definition at the moment it is added
- * (`addExporterEntry` -> `entryForTable`, spec §5.2) — from that instant the
+ * (`addExporterEntry` -> `entryForTable`) — from that instant the
  * entry and the table are independent, so later edits to either do not
  * follow the other.
  *
@@ -165,7 +165,7 @@ export function setExporterName(tabId: string, name: string): void {
 	retitleTab(tabId, name);
 }
 
-/** Append one table's export, COPYING its current settings (spec §5.2) — the
+/** Append one table's export, COPYING its current settings — the
  * copy-at-add moment. From this instant the entry and the table are
  * independent: later edits to the table's definition must not follow the
  * entry, and later edits to the entry must not follow the table. */
@@ -256,7 +256,7 @@ export function closeExporterDraft(tabId: string): void {
 	const draft = _drafts.get(tabId); // read BEFORE the delete: it owns the lease
 	_drafts.delete(tabId);
 	_lockDenied.delete(tabId);
-	// Give the check-out back: no editor is behind this lease any more. A NO-OP
+	// Give the check-out back: no editor is behind this lease. A NO-OP
 	// when a staged op still needs it (a saved-but-uncommitted edit must keep
 	// its lease or the commit 409s "required lock not held") — that is
 	// `releaseArtifactIfUnneeded`'s whole job. A temp id has no server-side row

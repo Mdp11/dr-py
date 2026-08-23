@@ -85,7 +85,7 @@ export function entryForTable(tableId: string, defn: TableDefinition, name: stri
 		folder: '',
 		// Deliberately NOT copied from the table at add time: a transform is a
 		// functional contract, not cosmetic presentation, and entry `null`
-		// means "no transform" (no-bleed; §8).
+		// means "no transform" (no-bleed).
 		transform: null,
 		...overridesFromDefinition(defn)
 	};

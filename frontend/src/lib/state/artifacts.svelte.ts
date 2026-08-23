@@ -5,7 +5,7 @@
  * plain refetch: the list is small and headers are cheap.
  *
  * `_items` is SERVER TRUTH — the committed library, exactly as the backend last
- * reported it. Nothing in this module writes to the server any more: renames and
+ * reported it. Nothing in this module writes to the server: renames and
  * deletes STAGE an artifact op (`artifact-edits.svelte.ts`) under a lease, and
  * reach the server only when the DiffDrawer's Commit runs `POST /commits`. The
  * committed list is reconciled from that commit's authoritative delta, in the
@@ -185,12 +185,11 @@ export async function renameArtifact(id: string, name: string): Promise<void> {
  * tokens the batch actually needed, so nothing else would ever clean it up:
  * every path that acquires without staging must release it explicitly.
  *
- * Decision 7 — the delete's commit carries its own scrub: rather than reacting
- * to a completed commit (the old, now-deleted `onArtifactCommit` scrub call —
- * see git history), this STAGES a `remove_artifact` view op per placement in
- * the SAME batch as the `delete_artifact`, so the commit that destroys the
- * artifact leaves no dangling refs behind at all — there is no longer a window
- * where the view still names an artifact the server has already dropped.
+ * The delete's commit carries its own scrub: this STAGES a
+ * `remove_artifact` view op per placement in the SAME batch as the
+ * `delete_artifact`, so the commit that destroys the artifact leaves no
+ * dangling refs behind — the view never names an artifact the server has
+ * already dropped.
  *
  * Folder EDIT leases are acquired as a SECOND step, after the `art:` delete
  * lease — a peer's folder lock blocks the delete because the delete edits
@@ -264,11 +263,11 @@ export function resetArtifacts(): void {
  * would make a renamed artifact jump to the bottom of its sidebar section until
  * the next `artifact` feed event happened to refetch and reorder it.
  *
- * There is no view scrub here any more (Task 9): `removeArtifact` now stages
- * every placement's `remove_artifact` op IN THE SAME BATCH as the
+ * This listener does not scrub the view: `removeArtifact` stages every
+ * placement's `remove_artifact` op IN THE SAME BATCH as the
  * `delete_artifact`, so by the time this listener sees `deletedIds` the view
  * has already been scrubbed server-side, as part of the very commit that
- * dropped the artifact — see `removeArtifact`'s docstring (Decision 7).
+ * dropped the artifact — see `removeArtifact`'s docstring.
  */
 onArtifactCommit(({ changed, deletedIds }) => {
 	const kept = _items

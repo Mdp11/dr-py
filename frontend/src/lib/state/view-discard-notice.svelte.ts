@@ -1,5 +1,5 @@
 /**
- * View-discard notice store (artefacts revamp Phase 2 follow-up, Task 2).
+ * View-discard notice store.
  *
  * `refreshView()`'s conflict path (`view.svelte.ts`'s `dropConflictedJournal`)
  * wipes the WHOLE staged view-op journal when a peer's change makes a
@@ -11,10 +11,10 @@
  * dismiss.
  *
  * Deliberately its OWN leaf module rather than a branch of the shared
- * `lock-notice.svelte.ts` channel it replaces: that channel is TRANSIENT by
- * design (`edit-gate.ts`'s `noticed()` clears it on the very next successful
- * lease acquisition of any kind), which is right for "someone else is
- * editing this, try again" but wrong for a destructive discard the user must
+ * `lock-notice.svelte.ts` channel: that channel is TRANSIENT by design
+ * (`edit-gate.ts`'s `noticed()` clears it on the very next successful lease
+ * acquisition of any kind), which is right for "someone else is editing
+ * this, try again" but wrong for a destructive discard the user must
  * consciously acknowledge. A plain accessor store (Svelte 5 runes), same
  * shape as `access-notice.svelte.ts`. It imports nothing, so wiring it into
  * `view.svelte.ts` cannot widen that module's `view -> realtime -> artifacts

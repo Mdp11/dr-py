@@ -24,7 +24,7 @@ import { getSelection, select } from './selection.svelte';
 import { clearOverlay } from './validation.svelte';
 
 /**
- * Staged-commit model store (Spec B).
+ * Staged-commit model store.
  *
  * The backend session model is the source of truth; this store holds only
  * the FETCHED SUBSET of it (entities brought in by paged reads, searches,
@@ -34,7 +34,7 @@ import { clearOverlay } from './validation.svelte';
  * Mutations keep the synchronous-optimistic `emit(op)` contract: the op is
  * applied to the local caches immediately, then pushed onto the STAGED-EDITS
  * buffer (`_queue`) where it is held until an explicit commit. The frontend
- * no longer auto-flushes to POST /model/ops; the staged buffer is reviewed in
+ * does not auto-flush to POST /model/ops; the staged buffer is reviewed in
  * the commit panel, sent through preview → commit (see `checkout.svelte.ts`),
  * and cleared once the server's canonical post-commit delta is installed.
  * Property updates still coalesce into an already-staged update of the same
@@ -161,7 +161,7 @@ export function getTreeElements(): Map<string, Element> {
 }
 
 /** Upsert lite rows (from containment pages / by-id batch) and un-mark any
- * that were previously recorded missing. */
+ * that are currently recorded missing. */
 export function seedTreeItems(items: readonly TreeItem[]): void {
 	for (const t of items) {
 		_treeItems.set(t.id, t);
@@ -532,7 +532,7 @@ function isPropertyUpdate(
 /**
  * Apply `op` optimistically and append it to the STAGED-EDITS buffer.
  *
- * Spec B: edits no longer auto-flush. `emit` applies the op to the local
+ * Edits do not auto-flush. `emit` applies the op to the local
  * caches synchronously (they reflect it before this returns), records the
  * journal entries that restore the pre-op state, and pushes the op onto the
  * staged buffer (`_queue`) where it is held until an explicit commit. Property
@@ -598,7 +598,7 @@ function revertOptimistic(failed: QueuedOp[]): void {
 }
 
 // ---------------------------------------------------------------------------
-// Staged-edits surface (Spec B): the queue is the local-edit buffer held until
+// Staged-edits surface: the queue is the local-edit buffer held until
 // commit. No auto-flush. Discard/undo replay the per-op journal recorded at
 // emit time; commit drops the buffer (clearStaged) after applyDelta installs
 // the server's canonical post-commit state.

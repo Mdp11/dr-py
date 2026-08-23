@@ -1,5 +1,5 @@
 /**
- * Staged-artifact-ops store (artefacts revamp Phase 1, frontend rewire).
+ * Staged-artifact-ops store.
  *
  * The artifact sibling of `model.svelte.ts`'s staged-edits buffer: artifact
  * editors (navigations, tables, code snippets) "Save" by staging a
