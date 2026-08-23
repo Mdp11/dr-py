@@ -1,6 +1,6 @@
-// Render tests for the ref-only export transform picker (Phase 4 task 8).
-// Mirrors the mount scaffolding used across Export/__tests__ (mocked
-// $lib/api/artifacts + real $lib/state store, `mount`/`flushSync`/`unmount`).
+// Render tests for the ref-only export transform picker. Mirrors the mount
+// scaffolding used across Export/__tests__ (mocked $lib/api/artifacts + real
+// $lib/state store, `mount`/`flushSync`/`unmount`).
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as artifactsApi from '$lib/api/artifacts';

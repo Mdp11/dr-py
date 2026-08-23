@@ -12,8 +12,8 @@ const MODEL_PATH = join(__dirname, '..', '..', 'examples', 'smart-city.model.jso
 const VIEW_PATH = join(__dirname, '..', '..', 'examples', 'smart-city.view.json');
 
 /**
- * E2E smoke for the Table system (Stage 2, Task 11): build a navigation,
- * open it "as table", add a property column, edit a value cell through the
+ * E2E smoke for the Table system: build a navigation, open it "as table",
+ * add a property column, edit a value cell through the
  * exact commit-flow.spec.ts path (checkout -> stage -> DiffDrawer -> commit),
  * then Save as… a real table artifact and reopen it from the sidebar Tables
  * section.
@@ -28,7 +28,7 @@ const VIEW_PATH = join(__dirname, '..', '..', 'examples', 'smart-city.view.json'
  *    subtype, so adding it as a relationship step (mirroring navigation.spec's
  *    exact steps) stays non-empty without needing a filter step.
  *
- * UI facts (source-verified, NOT the placeholder selectors in the task brief):
+ * UI facts (source-verified selectors, not placeholders):
  *  - "Open as table" lives in NavigationBuilder's toolbar (no data-testid;
  *    `getByRole('button', { name: 'Open as table' })`), disabled until
  *    `isRunnable(draft.definition)`. Clicking it opens a brand-new `tbl:draft:N`
@@ -41,8 +41,8 @@ const VIEW_PATH = join(__dirname, '..', '..', 'examples', 'smart-city.view.json'
  *    Start column; no name yet) and opens its per-column PropertyColumnEditor
  *    — the property name is picked/typed there via a free-text input
  *    (`aria-label="Property name"`), not at creation time. This is the
- *    add-then-edit flow (Stage 2 Task 6): property columns stay editable at
- *    any time, not just immediately after adding. Typing "name" lands
+ *    add-then-edit flow: property columns stay editable at any time, not
+ *    just immediately after adding. Typing "name" lands
  *    editable ValueCells sourced from the SoftwareSystem elements.
  *  - ValueCell (Table/Cell/ValueCell.svelte) renders a plain
  *    `<input type="text">` for string properties, committing via `onchange`

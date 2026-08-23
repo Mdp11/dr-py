@@ -9,14 +9,12 @@ function bodyOf(file: FileArg): Buffer {
 }
 
 // --------------------------------------------------------------------------
-// View seeding — `PUT /view/snapshot` and `DELETE /view` are retired (only
-// `GET /view` remains, see CLAUDE.md's "View ops (artefacts revamp Phase 2)"
-// section); the client now reaches view content exclusively through the
-// lock-verified `POST /commits` flow, so this harness drives the same path
-// instead of the old one-shot upload. Shapes below mirror the wire types in
-// `src/data_rover/api/schemas.py` (`FolderOut`/`ViewOut`/`ArtifactRefOut`)
-// closely enough for this file's own purposes; they are not meant to be a
-// general client model of the view.
+// View seeding — only `GET /view` reads view content directly (see CLAUDE.md's
+// "View ops" section); the client reaches view content exclusively through
+// the lock-verified `POST /commits` flow, so this harness drives the same
+// path. Shapes below mirror the wire types in `src/data_rover/api/schemas.py`
+// (`FolderOut`/`ViewOut`/`ArtifactRefOut`) closely enough for this file's own
+// purposes; they are not meant to be a general client model of the view.
 // --------------------------------------------------------------------------
 
 type ArtifactRefIn = { id: string; kind: string };
@@ -113,10 +111,9 @@ function buildOps(fixture: ViewFixture): ViewOp[] {
 
 /**
  * Replace the OPEN project's view with *fixture* (`undefined` clears it to
- * empty) through `POST /commits` — the commit-flow replacement for the
- * retired `PUT /view/snapshot` / `DELETE /view` one-shot routes, driving the
- * exact path the real client uses (see CLAUDE.md's "View ops (artefacts
- * revamp Phase 2)" section) rather than a test-only shortcut.
+ * empty) through `POST /commits`, driving the exact path the real client
+ * uses (see CLAUDE.md's "View ops" section) rather than a test-only
+ * shortcut.
  *
  * Reads the CURRENT view, diffs it away (`clearOps`), then — when *fixture*
  * is given — rebuilds it from scratch (`buildOps`), and posts both as ONE

@@ -1,4 +1,4 @@
-// The script-sweep polling loop (Task 10). A `/tables/evaluate` response whose
+// The script-sweep polling loop. A `/tables/evaluate` response whose
 // `script_status.state` is `computing` means the backend served some cells from
 // a cache the background sweep is still filling — the client must poll the SAME
 // visible window until the status turns terminal (`ready`/`failed`).

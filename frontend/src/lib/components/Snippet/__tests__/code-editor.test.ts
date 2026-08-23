@@ -1,13 +1,12 @@
 // Regression coverage for the Mod-Enter -> onRun wiring in CodeEditor.svelte.
 //
-// The bug: basicSetup bundles @codemirror/commands' defaultKeymap, which ALSO
-// binds Mod-Enter (to insertBlankLine), and CodeMirror's keymap facet tries
-// earlier-registered extension groups first. basicSetup used to sit ABOVE
-// this component's own `keymap.of([...])` in the extensions array, so
-// insertBlankLine (which always returns true) consumed every Mod-Enter
-// keydown before the onRun binding was ever tried — onRun never fired, and
-// the document silently gained a blank line instead. The fix wraps the
-// binding in `Prec.highest(...)` so it wins regardless of array position.
+// basicSetup bundles @codemirror/commands' defaultKeymap, which ALSO binds
+// Mod-Enter (to insertBlankLine), and CodeMirror's keymap facet tries
+// earlier-registered extension groups first. The onRun binding must win
+// regardless of extensions-array order, or insertBlankLine (which always
+// returns true) would consume every Mod-Enter keydown before onRun is ever
+// tried, silently gaining a blank line instead of running. Wrapping the
+// binding in `Prec.highest(...)` is what guarantees that.
 //
 // This test dispatches a REAL keydown (not a synthetic facet lookup) so it
 // actually exercises CodeMirror's precedence resolution end to end.

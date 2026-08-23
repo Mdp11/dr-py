@@ -84,9 +84,8 @@ async function pickBundle(json: string, name = 'fleet.bundle.json'): Promise<voi
 	Object.defineProperty(input, 'files', { value: [file], configurable: true });
 	input.dispatchEvent(new Event('change', { bubbles: true }));
 	// file.text() + importPlan are async — let both microtasks settle. Matches
-	// ANY plan row (not just n1's) — the brief's literal `import-row-n1`
-	// selector never resolves for the rev:null test, whose mocked plan holds
-	// only the s1 entry; see task-5-report.md for the RED evidence.
+	// ANY plan row (not just n1's), since the rev:null test's mocked plan holds
+	// only the s1 entry.
 	await vi.waitFor(() => {
 		if (
 			!document.body.querySelector(
@@ -112,11 +111,11 @@ describe('ImportArtifactsDialog', () => {
 		expect(plan).not.toHaveBeenCalled();
 	});
 
-	// Regression for review finding #2: the file input's `value` was never
-	// cleared, so re-picking the SAME filename after a parse error never fired
-	// `change` again (browsers don't dispatch `change` for an unchanged
-	// `value`). Simulate that literally: dispatch `change` a second time with
-	// the identical File object and require the dialog to react.
+	// The file input's `value` must be cleared after a parse error, or
+	// re-picking the SAME filename never fires `change` again (browsers don't
+	// dispatch `change` for an unchanged `value`). Simulate that literally:
+	// dispatch `change` a second time with the identical File object and
+	// require the dialog to react.
 	it('clears the file input after a parse error so re-picking the same filename re-fires change', async () => {
 		vi.spyOn(bundleApi, 'importPlan').mockResolvedValue(PLAN);
 		const input = document.body.querySelector<HTMLInputElement>('[data-testid="import-file"]')!;
@@ -158,10 +157,10 @@ describe('ImportArtifactsDialog', () => {
 		);
 	});
 
-	// Regression for review finding #3: the "differs from existing" hint must
-	// be gated on the PLAN's own action, not the user's current selection — a
-	// `create` row (n1) flipped to Copy has no existing row to differ from,
-	// while s1's plan action really is 'copy' and should keep the hint.
+	// The "differs from existing" hint must be gated on the PLAN's own action,
+	// not the user's current selection — a `create` row (n1) flipped to Copy
+	// has no existing row to differ from, while s1's plan action really is
+	// 'copy' and should keep the hint.
 	it('does not show "differs from existing" for a create row flipped to copy', async () => {
 		vi.spyOn(bundleApi, 'importPlan').mockResolvedValue(PLAN);
 		await pickBundle(JSON.stringify(BUNDLE));
@@ -307,11 +306,9 @@ describe('ImportArtifactsDialog', () => {
 		expect(document.body.querySelector('[data-testid="import-parse-error"]')).toBeNull();
 	});
 
-	// Regression for review finding #1 (hole 1: "late settle after close"). The
-	// structural test above never leaves a request in flight across the close,
-	// so it cannot reach this: close the dialog WHILE importConfirm is pending,
-	// let it resolve only AFTER the close, then reopen — the reopened dialog
-	// must land on a blank pick phase, not the stale import's result screen.
+	// Close the dialog WHILE importConfirm is pending, let it resolve only
+	// AFTER the close, then reopen — the reopened dialog must land on a blank
+	// pick phase, not the stale import's result screen.
 	it('a confirm that settles after close does not leak its result into the reopened dialog', async () => {
 		vi.spyOn(bundleApi, 'importPlan').mockResolvedValue(PLAN);
 		const confirmDeferred = deferred<ImportConfirmResponse>();
@@ -344,15 +341,12 @@ describe('ImportArtifactsDialog', () => {
 		expect(document.body.querySelector('[data-testid="import-banner"]')).toBeNull();
 	});
 
-	// Regression for review finding #1 (hole 2: "close-then-reopen BEFORE
-	// settle"), which a reset-on-open alone cannot close — only the generation
-	// guard can. Reopen BEFORE the stale 409 settles, then let it reject: per
-	// the finding, a leaked `banner` write is INVISIBLE while `phase` stays
-	// 'pick' (the banner paragraph only renders in the review phase), so the
-	// only way to observe the corruption is to pick a FRESH bundle afterward —
-	// exactly the finding's literal bug ("the NEXT bundle the user picks
-	// renders in review under a stale... warning about a different import")
-	// — and assert that fresh review has no banner from the abandoned import.
+	// A reset-on-open alone cannot prevent this — only a generation guard can.
+	// Reopen BEFORE the stale 409 settles, then let it reject: a leaked
+	// `banner` write is INVISIBLE while `phase` stays 'pick' (the banner
+	// paragraph only renders in the review phase), so the only way to observe
+	// the corruption is to pick a FRESH bundle afterward and assert that
+	// fresh review has no banner from the abandoned import.
 	it('a stale-plan 409 that settles after a close-then-reopen does not leak a banner onto the next picked bundle', async () => {
 		vi.spyOn(bundleApi, 'importPlan').mockResolvedValue(PLAN);
 		const confirmDeferred = deferred<ImportConfirmResponse>();

@@ -203,12 +203,10 @@ describe('conflict-recovery reload drops the staged metamodel node moves', () =>
 });
 
 /**
- * The DRAFT half of the same family (final-review Finding 3). The moves above
- * were the obvious leak; the YAML buffer is the other one, and it was the only
- * one of the four staged families with no cross-project boot reset:
- * `metamodel-editor.svelte.ts` holds `_baseline`/`_buffer`/`_phase` at module
- * scope and registers a provider the stage reads UNCONDITIONALLY at batch-build
- * time, so an in-SPA switch from A to B where the tab is not re-initialised
+ * The DRAFT half of the same family: `metamodel-editor.svelte.ts` holds
+ * `_baseline`/`_buffer`/`_phase` at module scope and registers a provider the
+ * stage reads UNCONDITIONALLY at batch-build time, so an in-SPA switch from A
+ * to B where the tab is not re-initialised must reset the draft too, or it
  * emits project A's YAML as a `metamodel.rebind` inside B's commit batch.
  */
 describe('project (re)entry resets the metamodel YAML draft', () => {

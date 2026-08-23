@@ -1,9 +1,7 @@
-// Fix round 1 (Task 5 review): the per-artifact export button must render for
-// a VIEWER too — it replaces the old workspace-tab-strip button, which was
-// role-independent (bundle export is a viewer-allowed read-only POST; see
-// CLAUDE.md's artefacts-revamp Phase 3 notes), and Spec §6 states exactly one
-// visibility rule ("non-null, not a temp id" — nothing about role). This pins
-// that `ArtifactExportButton` sits OUTSIDE NavigationBuilder's `{#if editable}`
+// The per-artifact export button must render for a VIEWER too: bundle export
+// is a viewer-allowed read-only POST, and visibility is exactly one rule
+// ("non-null, not a temp id" — nothing about role). This pins that
+// `ArtifactExportButton` sits OUTSIDE NavigationBuilder's `{#if editable}`
 // group so a future edit can't silently nest it back inside that gate.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';

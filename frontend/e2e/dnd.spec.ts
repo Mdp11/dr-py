@@ -129,9 +129,9 @@ test.beforeEach(async ({ page }) => {
 	await bootstrap(page);
 });
 
-// A drag no longer PUTs a whole-document snapshot: it stages a `view.*` op
-// (drop-time `folder:` lease, optimistic local apply — see view.svelte.ts)
-// that reaches the server only through a DiffDrawer commit. So a drag's
+// A drag stages a `view.*` op (drop-time `folder:` lease, optimistic local
+// apply — see view.svelte.ts) rather than PUTting a whole-document snapshot;
+// it reaches the server only through a DiffDrawer commit. So a drag's
 // observable effects here are (1) the optimistic tree already shows the new
 // placement and (2) the TopBar's combined-changes counter picked up the
 // staged op(s) — persistence itself is covered end-to-end by view.spec.ts's
@@ -169,12 +169,10 @@ test('drag a placed element to the view root unplaces it', async ({ page }) => {
 	// view.spec.ts's "exclude" curation test for the full round trip through
 	// a commit.
 	await expect(mainTree(page).getByText('Alpha')).toHaveCount(0);
-	// RESOLVED(excluded-pool-gap): this used to be the SECOND half of a known
-	// BUG — Alpha sat in neither the tree nor the "Not in view" pool between
-	// the staged `remove_element` and the commit, i.e. it had vanished from
-	// the UI entirely. The excluded-pool injection fix (`registerExcludedRoots`
-	// in view-tree.ts) client-side-injects a staged-unplaced id into the pool
-	// immediately, ahead of any server round trip, so Alpha now appears there
+	// Alpha must not vanish from the UI entirely between the staged
+	// `remove_element` and the commit: `registerExcludedRoots` (view-tree.ts)
+	// client-side-injects a staged-unplaced id into the "Not in view" pool
+	// immediately, ahead of any server round trip, so Alpha appears there
 	// right away.
 	await expandExcludedPool(page);
 	await expect(row(page, 'Alpha')).toBeVisible();

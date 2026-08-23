@@ -1,7 +1,7 @@
-// The embedded Test panel (Task 3): component-local run state, run gating
-// mirroring the server's SnippetRunIn validators, and a read-only ops
-// surface. Follows the repo's mount/flushSync convention and drives
-// POST /snippets/run through MSW (see snippet-source-editor.test.ts).
+// The embedded Test panel: component-local run state, run gating mirroring
+// the server's SnippetRunIn validators, and a read-only ops surface. Follows
+// the repo's mount/flushSync convention and drives POST /snippets/run through
+// MSW (see snippet-source-editor.test.ts).
 import { flushSync, mount, unmount } from 'svelte';
 import { http, HttpResponse } from 'msw';
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';

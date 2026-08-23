@@ -6,12 +6,12 @@ import { isCheckedOutByMe, resetCheckout, setProjectInfo } from '../checkout.sve
 import { acquireMetamodelLease } from '../metamodel-lease.svelte';
 
 /**
- * The surface-agnostic `mm` lease module. It has TWO callers now
- * (final-review Finding 1): `metamodel-editor.svelte.ts` on a keystroke and
- * `metamodel-diagram.svelte.ts` on a node drag — and one gesture reaches both,
- * because a diagram rename stages a layout key migration AND writes the buffer.
- * So concurrent acquires are a normal path, not a rare race, and this file pins
- * the coalescing that makes them safe.
+ * The surface-agnostic `mm` lease module. It has TWO callers:
+ * `metamodel-editor.svelte.ts` on a keystroke and `metamodel-diagram.svelte.ts`
+ * on a node drag — and one gesture reaches both, because a diagram rename
+ * stages a layout key migration AND writes the buffer. So concurrent acquires
+ * are a normal path, not a rare race, and this file pins the coalescing that
+ * makes them safe.
  */
 
 const LEASE: LockResponse = {

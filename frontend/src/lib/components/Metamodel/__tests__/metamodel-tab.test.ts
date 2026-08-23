@@ -90,7 +90,7 @@ async function settleInit(): Promise<void> {
 }
 
 describe('MetamodelTab', () => {
-	it('owner sees Preview, and no Rebind control at all (spec 2026-08-16)', async () => {
+	it('owner sees Preview, and no Rebind control at all', async () => {
 		setProjectInfo({ role: 'owner', lockTtlSeconds: 300 });
 		const c = mount(MetamodelTab, { target: document.body });
 		await settle();

@@ -305,9 +305,10 @@ describe('table-editor', () => {
 	});
 
 	it('a dirty SAVED table evaluates its edited definition, not the stale artifact payload', async () => {
-		// Regression: a saved table always evaluated by artifactId, so the backend
-		// re-read the SAVED payload and every unsaved settings edit (scope change,
-		// new column, restored config) was silently ignored — the grid froze.
+		// A dirty saved table must not evaluate by artifactId alone: that
+		// would make the backend re-read the SAVED payload and silently
+		// ignore every unsaved settings edit (scope change, new column,
+		// restored config) — the grid would freeze.
 		vi.spyOn(artifactsApi, 'getArtifact').mockResolvedValue({
 			id: 'a9',
 			kind: 'table',
@@ -1094,7 +1095,7 @@ describe('staged-artifact listeners', () => {
 		expect(bound.artifactRev).toBe(7);
 		expect(getDynamicTabs()[0].id).toBe('tbl:a9');
 		expect(getDynamicTabs()[0].artifactId).toBe('a9');
-		// Per-tab state follows the rebind, as it used to on first save.
+		// Per-tab state follows the rebind, same as it does on first save.
 		expect(getTablePage('tbl:a9')?.total).toBe(250);
 		expect(getTableSort('tbl:a9')).toEqual({ column: 0, direction: 'asc' });
 		expect(getTablePage(tabId)).toBeUndefined();

@@ -16,7 +16,7 @@ export function changeBadge(page: Page): Locator {
  * Open the commit review and commit whatever is staged, waiting for the drawer
  * to close.
  *
- * Artifact editors no longer persist on Save — Save STAGES a
+ * Artifact editors do not persist on Save — Save STAGES a
  * `create_artifact`/`update_artifact` op, and only this drawer's Commit posts
  * the batch. Specs that save a navigation/table/snippet and then need it to
  * EXIST server-side (reopen it from the library, reference it from a picker)

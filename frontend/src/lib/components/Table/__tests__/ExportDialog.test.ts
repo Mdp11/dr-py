@@ -1,4 +1,4 @@
-// Render tests for the export settings dialog (Task 7). Follows the repo's
+// Render tests for the export settings dialog. Follows the repo's
 // established Svelte-5 render convention (mount/unmount/flushSync) used by
 // `Table/__tests__/ColumnManager.test.ts` and `TableGrid.test.ts` rather than
 // `@testing-library/svelte` — that package is not a project dependency.
@@ -11,12 +11,9 @@
 // wrote — spying on the wrong module path (table-editor.svelte.ts, not the
 // barrel) would silently no-op instead of failing loudly.
 //
-// The JSON half of this file is the surviving coverage of the deleted
-// `JsonExportEditor.test.ts`: the key/item-key/value/group controls, the
-// snake_case rule, the truncated badge and the preview's sort+debounce
-// contract all moved into `ExportDialog.svelte` verbatim, so their tests moved
-// with them (`json-key-N` became `export-name-{pos}`, everything else kept its
-// test id).
+// The JSON half of this file covers the key/item-key/value/group controls,
+// the snake_case rule, the truncated badge and the preview's sort+debounce
+// contract, all in `ExportDialog.svelte` (test id `export-name-{pos}`).
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 
@@ -43,8 +40,8 @@ const TAB_ID = 'tbl:draft:export-dialog-test';
 const SAVED_TAB_ID = 'tbl:art-export-dialog';
 
 /** A committed code_snippet artifact whose server-derived entry_points cover
- *  `transform` — the transform picker's option pool (Phase 4 task 10), same
- *  fixture shape as `ExporterTab.test.ts`'s `TRANSFORM_SNIPPET_HEADER`. */
+ *  `transform` — the transform picker's option pool, same fixture shape as
+ *  `ExporterTab.test.ts`'s `TRANSFORM_SNIPPET_HEADER`. */
 const TRANSFORM_SNIPPET_HEADER = {
 	id: 'snip-1',
 	kind: 'code_snippet',
@@ -303,12 +300,12 @@ describe('ExportDialog', () => {
 		expect(getTableLoading(TAB_ID)).toBe(false);
 	});
 
-	// The bug this pins: `cancel()` used to write the snapshot back
-	// unconditionally, and every definition write sets `dirty`. Opening the
-	// dialog on a saved, clean table and dismissing it therefore left the table
-	// unsaved — with an enabled Save button and one wasted evaluate — over an
-	// edit the user never made. A pristine draft is the only state that shows
-	// it, hence `ensureTableDraft` alone here (no seeding write).
+	// `cancel()` must not write the snapshot back unconditionally: every
+	// definition write sets `dirty`, so opening the dialog on a saved, clean
+	// table and dismissing it must not leave the table unsaved — with an
+	// enabled Save button and one wasted evaluate — over an edit the user
+	// never made. A pristine draft is the only state that shows it, hence
+	// `ensureTableDraft` alone here (no seeding write).
 	it('Cancel with no edits writes nothing and leaves the draft clean', async () => {
 		await ensureTableDraft(TAB_ID);
 		const before = getTableDraft(TAB_ID)!;
@@ -597,7 +594,7 @@ describe('ExportDialog', () => {
 		}
 	});
 
-	// --- json_split (P-13): one file per element, zipped ----------------------
+	// --- json_split: one file per element, zipped -----------------------------
 
 	it('json mode shows the split section and persists json_split', async () => {
 		await open('json');
@@ -628,7 +625,7 @@ describe('ExportDialog', () => {
 		expect(byTestId(document, 'json-split-enabled')).toBeNull();
 	});
 
-	// --- format toggle: csv/jsonl (exporter-v2 phase 2) ------------------------
+	// --- format toggle: csv/jsonl ------------------------------------------
 
 	it('offers all four formats and switches to CSV', async () => {
 		await open('xlsx');
@@ -652,11 +649,11 @@ describe('ExportDialog', () => {
 		expect(byTestId(document, 'json-preview')).toBeTruthy();
 	});
 
-	// --- transform picker (exporter-v2 phase 4 task 10) ------------------------
+	// --- transform picker ----------------------------------------------------
 	//
 	// This edits the table's OWN `transform` (standalone `POST /tables/export`
-	// only — an exporter entry never inherits it, no-bleed §8); strictness is
-	// server-side at export time.
+	// only — an exporter entry never inherits it); strictness is server-side
+	// at export time.
 
 	it('shows the transform picker for a JSON-family format and picking one writes transform', async () => {
 		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({
@@ -679,9 +676,9 @@ describe('ExportDialog', () => {
 		expect(byTestId(document, 'transform-picker')).toBeNull();
 	});
 
-	// Parity with ExporterTab's per-entry warning (Task 9): a format flip away
-	// from JSON-family must not silently hide a transform the server will 422
-	// at run time (spec §8) — surface it instead.
+	// Parity with ExporterTab's per-entry warning: a format flip away from
+	// JSON-family must not silently hide a transform the server will 422 at
+	// run time — surface it instead.
 	it('shows a warning instead of the picker when xlsx carries a leftover transform', async () => {
 		await open('xlsx', { transform: { ref: 'snip-1' } });
 		expect(byTestId(document, 'transform-picker')).toBeNull();

@@ -1,5 +1,5 @@
 /**
- * E2E smoke: strict-mode commit gate (Task 9)
+ * E2E smoke: strict-mode commit gate
  *
  * Flow:
  *   1. Load the app with the example metamodel + an empty model.
@@ -84,8 +84,7 @@ test('Strict mode: commit is blocked when on, enabled when off', async ({ page }
 	await page.getByRole('button', { name: 'New element' }).click();
 	await page.getByRole('button', { name: 'Block', exact: true }).click();
 	// The new element's stereotype shows in the Inspector header, which is
-	// deliberately a <p> rather than a heading — the <h2> this used to match
-	// belonged to the retired DetailView tab.
+	// deliberately a <p> rather than a heading.
 	await expect(page.getByTestId('inspector-stereotype')).toHaveText('Block');
 
 	// Confirm the staged buffer now shows uncommitted changes.

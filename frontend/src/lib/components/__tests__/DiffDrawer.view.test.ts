@@ -5,12 +5,12 @@ import type { View } from '$lib/api/types';
 import DiffDrawer from '../DiffDrawer.svelte';
 
 /**
- * The View half of the commit review (artefacts revamp Phase 2, Task 8):
- * the drawer now reads the staged VIEW-OP JOURNAL (`getStagedViewEntries`/
- * `getStagedViewDepth`) rather than a baseline diff, and the whole section
- * discards all-or-nothing (`discardViewChanges`) — no per-row undo, since
- * the journal is order-dependent. Mirrors `DiffDrawer.artifacts.test.ts`'s
- * wholesale `$lib/state` mock.
+ * The View half of the commit review: the drawer reads the staged VIEW-OP
+ * JOURNAL (`getStagedViewEntries`/`getStagedViewDepth`) rather than a
+ * baseline diff, and the whole section discards all-or-nothing
+ * (`discardViewChanges`) — no per-row undo, since the journal is
+ * order-dependent. Mirrors `DiffDrawer.artifacts.test.ts`'s wholesale
+ * `$lib/state` mock.
  */
 
 const EMPTY_DIFF = {
@@ -167,9 +167,9 @@ describe('DiffDrawer view changes', () => {
 		unmount(c);
 	});
 
-	// Regression: the Model tab is the default/active tab on open, and its
-	// four content sections (added/modified/deleted/artifacts) are all empty
-	// for a view-only batch — a naive `total === 0` fallback check leaves the
+	// The Model tab is the default/active tab on open, and its four content
+	// sections (added/modified/deleted/artifacts) are all empty for a
+	// view-only batch — a naive `total === 0` fallback check would leave the
 	// pane fully blank even though the tab label and Commit button both show
 	// a nonzero count. A pointer message must render instead.
 	it('shows a pointer to the View tab on the Model tab for a view-only batch, and keeps Commit enabled', async () => {

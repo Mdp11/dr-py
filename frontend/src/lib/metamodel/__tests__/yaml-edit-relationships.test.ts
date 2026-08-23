@@ -76,7 +76,7 @@ describe('relationship commands', () => {
 	it('removeRelationshipType leaves key DSL references for lint', () => {
 		const withDsl = FIXTURE.replace('key: [name]', 'key: [name, out:Contains]');
 		const out = run(withDsl, [{ kind: 'removeRelationshipType', name: 'Contains' }]);
-		expect(out).toContain('out:Contains'); // deliberate: lint flags it (spec §3)
+		expect(out).toContain('out:Contains'); // deliberate: lint flags the dangling reference
 		expect(parseDraft(out).mm!.relationships.some((r) => r.name === 'Contains')).toBe(false);
 	});
 });

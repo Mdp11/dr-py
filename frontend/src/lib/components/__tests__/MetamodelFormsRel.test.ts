@@ -6,8 +6,8 @@ import { parseDraft } from '$lib/metamodel/yaml-edit';
 
 /**
  * Relationship/enum forms, the delete-consequence dialog and the connection
- * popover (Task 12). Same shape as `MetamodelForms.test.ts`: the state module
- * is mocked, and what is asserted is the COMMAND each gesture emits.
+ * popover. Same shape as `MetamodelForms.test.ts`: the state module is
+ * mocked, and what is asserted is the COMMAND each gesture emits.
  *
  * The popover is mounted DIRECTLY rather than driven through a drag on the
  * canvas: Svelte Flow's connection gesture needs measured handles, and

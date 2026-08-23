@@ -1,5 +1,5 @@
-// Render tests for the per-entry layout dialog (P-14 task 12b step 2/5).
-// Mirrors `Table/__tests__/ExportDialog.test.ts`'s mount/unmount/flushSync
+// Render tests for the per-entry layout dialog. Mirrors
+// `Table/__tests__/ExportDialog.test.ts`'s mount/unmount/flushSync
 // convention. This dialog holds a LOCAL working copy (`effective`), never
 // writing through `$lib/state` — so unlike ExportDialog's tests, nothing
 // here drives a store; every assertion reads the mounted DOM and the
@@ -167,7 +167,7 @@ describe('EntryLayoutDialog', () => {
 		expect(document.querySelector('[data-testid="entry-split-template-warning"]')).toBeNull();
 	});
 
-	it('saves even while the split filename template is invalid (F-16)', () => {
+	it('saves even while the split filename template is invalid', () => {
 		const onSave = vi.fn();
 		const entry: ExporterEntry = {
 			source: { ref: 'tbl-1' },

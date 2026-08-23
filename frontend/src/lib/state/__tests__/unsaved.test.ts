@@ -152,7 +152,7 @@ describe('hasUnsavedWork', () => {
 		expect(hasUnsavedWork()).toBe(false);
 	});
 
-	it('is true for a staged METAMODEL node move (spec 2026-08-16)', () => {
+	it('is true for a staged METAMODEL node move', () => {
 		// Staged moves outlive the metamodel tab (they live in the stage module,
 		// not behind the editor's provider), so a drag-then-close leaves work the
 		// server has never seen with no draft anywhere to mark it — exactly the

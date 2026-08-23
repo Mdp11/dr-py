@@ -59,13 +59,12 @@ describe('MetamodelYamlEditor', () => {
 	});
 
 	it('an external code replacement updates the document without echoing through onChange', () => {
-		// Regression: MetamodelYamlEditor's updateListener used to fire for
-		// EVERY doc-changing transaction, including the one the component
-		// itself dispatches to apply an external `code` prop replacement
-		// (baseline load / draft restore / discard) — so setting `code` from
-		// outside would immediately call `onChange` back with that same value,
-		// as if the user had typed it. The component now tags that
-		// transaction and the listener skips it.
+		// MetamodelYamlEditor's updateListener must not fire for the
+		// transaction the component itself dispatches to apply an external
+		// `code` prop replacement (baseline load / draft restore / discard),
+		// or setting `code` from outside would immediately call `onChange`
+		// back with that same value, as if the user had typed it. The
+		// component tags that transaction and the listener skips it.
 		const onChange = vi.fn();
 		const c = mount(MetamodelYamlEditorHost, { target: document.body, props: { onChange } });
 		flushSync();

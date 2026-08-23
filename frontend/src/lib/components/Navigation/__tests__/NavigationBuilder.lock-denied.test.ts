@@ -1,9 +1,8 @@
-// Task 10: a lock-denied navigation tab used to leave the whole definition
-// canvas typeable — only the name input and Save/Save-as were disabled. This
-// pins the fix: the canvas goes `inert` while denied (the results dock stays
-// live, since it is a preview, not an editing surface) and the banner gains a
-// "Save as copy" escape hatch that reuses `saveAsDraft` — the same fork the
-// (disabled-while-locked) toolbar "Save as…" button already used.
+// A lock-denied navigation tab must not leave the whole definition canvas
+// typeable. The canvas goes `inert` while denied (the results dock stays
+// live, since it is a preview, not an editing surface) and the banner
+// carries a "Save as copy" escape hatch that reuses `saveAsDraft` — the same
+// fork the (disabled-while-locked) toolbar "Save as…" button uses.
 //
 // Uses the real navigation-editor store (mirrors results-dock.test.ts's
 // idiom) rather than mocking `$lib/state`: `setNavLockDenied` is a direct

@@ -12,9 +12,9 @@ import * as artifactsApi from '$lib/api/artifacts';
 import type { Column, ColumnSource, NavigationDefinition, RowSource } from '$lib/api/types';
 import ColumnSourceEditor from '../ColumnSourceEditor.svelte';
 
-// Exact literal from Task 3's navMaxStepIndex test (columns.test.ts): a
-// 2-hop path (start + 2 relationship steps; a filter step doesn't advance
-// the chain) → navMaxStepIndex === 2.
+// Exact literal from the navMaxStepIndex test (columns.test.ts): a 2-hop
+// path (start + 2 relationship steps; a filter step doesn't advance the
+// chain) → navMaxStepIndex === 2.
 const TWO_HOP_PATH: NavigationDefinition = {
 	kind: 'path',
 	schema_version: 2,

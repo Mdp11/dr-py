@@ -71,10 +71,10 @@ it('does not refetch the selected element relationships on every property keystr
 		flushSync();
 		await vi.waitFor(() => expect(relFetches).toBe(1)); // mount fetch only
 
-		// type a letter into the description: an optimistic update_element op.
-		// This replaces e1's cached object (new identity) — the regression is
-		// that this churn made the relationships fetch effect re-run. Spec B
-		// stages the edit locally; there is no flush ack.
+		// Type a letter into the description: an optimistic update_element op.
+		// This replaces e1's cached object (new identity), which must not make
+		// the relationships fetch effect re-run. The edit stages locally; there
+		// is no flush ack.
 		emit({ kind: 'update_element', id: 'e1', properties_patch: { description: 'a' } });
 		flushSync();
 		await settle();

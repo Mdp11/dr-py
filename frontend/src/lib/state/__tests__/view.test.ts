@@ -150,11 +150,10 @@ describe('stageDeleteFolder', () => {
 		expect(getView()!.folders.map((f) => f.id)).toEqual(['f2']);
 	});
 
-	// Excluded-pool injection payload (Task 1, artefacts-Phase-2 follow-ups):
-	// the entry must carry every element that was placed anywhere in the
-	// deleted subtree, captured BEFORE the pop (see `subtreeElementIds`'s
-	// docstring) — ContainmentTree.svelte mirrors this into the "Not in view"
-	// pool client-side, ahead of any commit.
+	// Excluded-pool injection payload: the entry must carry every element that
+	// was placed anywhere in the deleted subtree, captured BEFORE the pop (see
+	// `subtreeElementIds`'s docstring) — ContainmentTree.svelte mirrors this
+	// into the "Not in view" pool client-side, ahead of any commit.
 	it("stages the deleted subtree's placed elements as the injection payload", async () => {
 		seedView(baseView()); // f1 = ['e1', 'e2'], its nested f1a is empty
 		await refreshView();
@@ -225,7 +224,7 @@ describe('stageMoveFolder', () => {
 	});
 });
 
-describe('stagePlaceElementsAt — Decision 11 index math', () => {
+describe('stagePlaceElementsAt — index math', () => {
 	it('same-folder reorder emits post-pop index', async () => {
 		const view: View = {
 			name: 'v',
@@ -350,8 +349,8 @@ describe('stageRemoveElement', () => {
 		expect(getStagedViewOps()).toEqual([
 			{ kind: 'remove_element', element_id: 'e1', folder_id: 'f1' }
 		]);
-		// Excluded-pool injection payload (Task 1): a remove_element entry
-		// carries its own target id.
+		// Excluded-pool injection payload: a remove_element entry carries its
+		// own target id.
 		expect(getStagedViewEntries()[0].unplacedElementIds).toEqual(['e1']);
 	});
 });
@@ -457,8 +456,8 @@ describe('stageClearView', () => {
 			{ kind: 'remove_artifact', artifact_id: 'root-art', folder_id: 'root' }
 		]);
 		expect(getView()).toEqual({ name: 'v', folders: [], artifacts: [] });
-		// Excluded-pool injection payload (Task 1): each delete_folder entry
-		// carries its own subtree's placed elements; f2 has none.
+		// Excluded-pool injection payload: each delete_folder entry carries its
+		// own subtree's placed elements; f2 has none.
 		const entries = getStagedViewEntries();
 		expect(entries[0].unplacedElementIds).toEqual(['e1', 'e2']);
 		expect(entries[1].unplacedElementIds).toEqual([]);
@@ -545,9 +544,9 @@ describe('stagePlaceElementsAt — cursor advance on a same-folder multi-select'
 		artifacts: []
 	});
 
-	// Regression: `at` used to advance after EVERY emitted op, including one
-	// whose post-pop correction already advanced it — so the second id landed
-	// one slot short and, for the last id, did not move at all.
+	// `at` must not advance after an op whose post-pop correction already
+	// advanced it, or the second id lands one slot short and, for the last
+	// id, does not move at all.
 	it('holds the cursor after a pre-cursor pop (the [a,d] → index 2 repro)', async () => {
 		seedView(fourEl());
 		await refreshView();
@@ -640,8 +639,8 @@ describe('refreshView re-applies the staged journal on top of server truth', () 
 		expect(getView()!.folders.map((f) => f.name)).toEqual(['Folder 2']); // server truth
 		// The durable discard banner carries the message now...
 		expect(getViewDiscardNotice()).toMatch(/view changed/i);
-		// ...NOT the transient lock notice this replaced (Task 2: a destructive
-		// discard must not ride a channel the next successful lease clears).
+		// ...NOT the transient lock notice: a destructive discard must not ride
+		// a channel the next successful lease clears.
 		expect(getLockNotice()).toBeNull();
 		expect(checkoutStore.releaseFolderLeaseIfUnneeded).toHaveBeenCalledWith('f1');
 		expect(checkoutStore.releaseFolderLeaseIfUnneeded).toHaveBeenCalledWith('f2');

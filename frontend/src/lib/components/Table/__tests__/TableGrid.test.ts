@@ -1,9 +1,8 @@
-// Render smoke test for TableGrid (Task 5): a header per column, a row per
-// page row, and cells dispatched by kind. `@testing-library/svelte` is not a
-// project dependency, so this follows the repo's established Svelte-5 render
+// Render smoke test for TableGrid: a header per column, a row per page row,
+// and cells dispatched by kind. `@testing-library/svelte` is not a project
+// dependency, so this follows the repo's established Svelte-5 render
 // convention (mount/unmount/flushSync) used by
-// `Navigation/__tests__/results-dock.test.ts` rather than the brief's literal
-// `@testing-library/svelte` snippet.
+// `Navigation/__tests__/results-dock.test.ts`.
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -146,9 +145,8 @@ describe('TableGrid', () => {
 		}
 	});
 
-	// Task 10: a script cell the sweep hasn't computed yet arrives as
-	// `{kind:'pending'}`. Before this branch existed it rendered as NOTHING —
-	// a silently blank cell — so this is the regression guard. The sweep's
+	// A script cell the sweep hasn't computed yet arrives as `{kind:'pending'}`
+	// and must render a placeholder, not a silently blank cell. The sweep's
 	// done/total readout is NOT the grid's job: it is fixed chrome in
 	// TableView (see TableView.test.ts) so it cannot scroll away or offset the
 	// virtualizer's row math.
@@ -636,8 +634,8 @@ describe('TableGrid', () => {
 			unmount(c2);
 		}
 	});
-	// Task 6 (jump-to-cell): the script-error panel lives in TableView's fixed
-	// chrome, so it hands the grid a scroll request through the store. The grid
+	// The script-error panel lives in TableView's fixed chrome, so it hands
+	// the grid a scroll request through the store. The grid
 	// CONSUMES it (single-consumer — a request that survived would re-scroll
 	// the user on every unrelated cache change) and outlines the target cell.
 	// The scroll itself is best-effort and unobservable here: happy-dom has no

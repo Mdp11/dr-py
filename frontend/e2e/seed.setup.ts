@@ -7,7 +7,7 @@ const EXAMPLES = resolve(process.cwd(), '..', 'examples');
 const API = 'http://127.0.0.1:8000/api/v1';
 
 /**
- * The backend no longer autoloads a default model, so the e2e suite creates
+ * The backend does not autoload a default model, so the e2e suite creates
  * its "Smart City" project itself via the wizard API. Runs as a Playwright
  * setup project (webServer guaranteed up); the shared `request` context keeps
  * the session cookie from login across calls. Idempotent so `reuseExistingServer`

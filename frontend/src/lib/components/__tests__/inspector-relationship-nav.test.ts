@@ -1,11 +1,8 @@
-// I-3 regression guard: a relationship selection must not be a navigational
-// dead end.
+// A relationship selection must not be a navigational dead end.
 //
-// The Inspector's Relationships section is element-only, and the endpoint
-// links that used to live in the (now deleted) DetailView went with it — so a
-// user who landed on a relationship from an issue row had type + properties
-// and no way to either endpoint. These tests pin the two endpoint buttons and
-// the selection they hand off.
+// The Inspector's Relationships section is element-only, so a user who lands
+// on a relationship from an issue row needs a way to reach either endpoint.
+// These tests pin the two endpoint buttons and the selection they hand off.
 import { flushSync, mount, unmount } from 'svelte';
 import { http, HttpResponse } from 'msw';
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it } from 'vitest';

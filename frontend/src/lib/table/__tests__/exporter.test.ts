@@ -79,7 +79,7 @@ describe('exporter helpers', () => {
 	});
 });
 
-describe('phase 2 wire schema', () => {
+describe('exporter entry wire schema', () => {
 	it('parses all four formats and json_doc, defaulting json_doc off', () => {
 		for (const format of ['xlsx', 'json', 'csv', 'jsonl']) {
 			const e = ExporterEntrySchema.parse({ source: { ref: 't1' }, format });

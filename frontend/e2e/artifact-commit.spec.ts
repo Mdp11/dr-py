@@ -1,8 +1,7 @@
 /**
- * E2E: artifact lock → edit → commit round-trip (artefacts revamp Phase 1,
- * frontend rewire).
+ * E2E: artifact lock → edit → commit round-trip.
  *
- * Saving an artifact editor no longer persists anything: it STAGES a
+ * Saving an artifact editor does not persist anything: it STAGES a
  * `create_artifact`/`update_artifact` op onto the artifact buffer, and the
  * change reaches the server only when the commit review's Commit button posts
  * the mixed batch to `/commits`. This spec walks the whole visible arc of that
@@ -10,7 +9,7 @@
  *
  *   1. New table → name it → Save
  *      → the sidebar row carries the staged "new" badge and the TopBar's
- *        `● n changes` counter counts it (it counts artifact ops now, not just
+ *        `● n changes` counter counts it (it counts artifact ops, not just
  *        model ops).
  *   2. Open the commit review
  *      → the tab trigger reads "Changes (1)" (relabelled from "Model (n)"
@@ -106,7 +105,7 @@ test('artifact lock → edit → commit round-trip', async ({ page }) => {
 	await expect(row.locator('[data-staged-state]')).toHaveCount(0);
 
 	// The commit reached the journal under our message (History lives in the
-	// TopBar's Model dropdown — P-22).
+	// TopBar's Model dropdown).
 	await page.getByTestId('model-menu-trigger').click();
 	await page.getByRole('menuitem', { name: 'History', exact: true }).click();
 	const historyDrawer = page.getByRole('dialog', { name: /commit history/i });
@@ -120,7 +119,7 @@ test('artifact lock → edit → commit round-trip', async ({ page }) => {
 	// Close the editor tab so the rename below is a true library-only edit (the
 	// sidebar path, not the open editor's). The `art:` lease it releases on the
 	// way out is incidental: a lease left live here is harmless to later specs,
-	// since a model revert / metamodel rebind no longer counts `art:` leases as
+	// since a model revert / metamodel rebind does not count `art:` leases as
 	// "the project is busy" (see `state/quiet.ts`).
 	await page.getByRole('button', { name: `Close ${name}` }).click();
 

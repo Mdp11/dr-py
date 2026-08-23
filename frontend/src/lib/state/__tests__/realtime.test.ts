@@ -271,7 +271,7 @@ describe('issue refetch triggers', () => {
 		// refetch must NOT share that guard: the background validation sweep grows
 		// the server's issue store without bumping model_rev, so a reconnect that
 		// lands after the sweep finished is exactly the case a rev guard would
-		// wrongly skip. (Regressing this is a correctness bug, per the spec.)
+		// wrongly skip.
 		adoptSummary({
 			model_rev: 9,
 			element_count: 0,

@@ -1,7 +1,7 @@
 // "Use current selection" binds elements from the shared multi-selection.
-// The row is CONTROLLED (Task 1): it owns no list state, so these tests
-// assert the emitted callbacks rather than reading a store. Follows the
-// repo's raw mount/flushSync Svelte-5 convention (see
+// The row is CONTROLLED: it owns no list state, so these tests assert the
+// emitted callbacks rather than reading a store. Follows the repo's raw
+// mount/flushSync Svelte-5 convention (see
 // Table/__tests__/ColumnManager.test.ts).
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, expect, it, vi } from 'vitest';

@@ -185,8 +185,8 @@ describe('commit-time token partition: folder tokens ride the element rule', () 
 		// Folder tokens are not artifact-only, so the token partition's
 		// `artifactOnly && unneeded` keep clause never matches them: they are
 		// always sent, deliberately, even when the batch does not name their
-		// folder (Decision 10 — folders follow the element rule, not the
-		// artifact keep-open rule).
+		// folder — folders follow the element rule, not the artifact
+		// keep-open rule.
 		expect(commit.mock.calls[0][0].lockTokens.sort()).toEqual(['t_el_e1', 't_folder_f1']);
 		// the still-open artifact editor's lease survives, exactly as before.
 		expect(getHeldTokens()).toEqual(['t_art_a9']);
@@ -304,12 +304,13 @@ describe('discardAll wipes the view journal', () => {
 		expect(getHeldTokens()).toEqual([]);
 	});
 
-	// Regression: `discardAll` used to wipe the journal and stop there. The view
-	// store's optimistic applies are BAKED INTO its `_view`, so the sidebar kept
-	// showing folders/renames/placements that were no longer staged and did not
-	// exist on the server — and the next gesture staged against that phantom
-	// tree, 422ing at commit. `discardStagedView` now owns the refetch (it fires
-	// the view store's discard listener), so every discard surface gets it.
+	// `discardAll` must not just wipe the journal and stop there. The view
+	// store's optimistic applies are BAKED INTO its `_view`, so without a
+	// refetch the sidebar would keep showing folders/renames/placements that
+	// are no longer staged and do not exist on the server — and the next
+	// gesture would stage against that phantom tree, 422ing at commit.
+	// `discardStagedView` owns the refetch (it fires the view store's discard
+	// listener), so every discard surface gets it.
 	it('refetches GET /view so `_view` stops showing the discarded ops', async () => {
 		mockAcquire();
 		vi.spyOn(api, 'releaseLock').mockResolvedValue(undefined);

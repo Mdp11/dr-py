@@ -1,6 +1,5 @@
 /**
- * E2E: snippet workspace tab — lint, run (real WASM sandbox), stage, commit
- * (Code execution M1 frontend, Task 9).
+ * E2E: snippet workspace tab — lint, run (real WASM sandbox), stage, commit.
  *
  * Requires the WASM guest binary to be fetched (spikes/code_exec/vendor/
  * python.wasm — see spikes/code_exec/fetch_python_wasi.sh); without it
@@ -37,7 +36,7 @@ async function openNewSnippet(page: Page): Promise<void> {
  * runner (guest binary not fetched — /snippets/run 503s). A run that only
  * mutates the model (no print, no trailing expression) produces neither
  * stdout nor a result_repr — its terminal state is the ops list instead, so
- * that testid is included alongside the brief's four. */
+ * that testid is included too. */
 async function runAndAwait(page: Page): Promise<void> {
 	await page.getByTestId('snippet-run').click();
 	const outcome = page

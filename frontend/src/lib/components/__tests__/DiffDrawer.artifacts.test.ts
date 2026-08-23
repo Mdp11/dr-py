@@ -5,11 +5,11 @@ import type { StagedArtifactEntry } from '$lib/state';
 import DiffDrawer from '../DiffDrawer.svelte';
 
 /**
- * The artifact half of the commit review (artefacts revamp Phase 1). Mirrors
- * `DiffDrawer.strict.test.ts`'s wholesale `$lib/state` mock: the drawer is
- * exercised as a component over a stubbed store surface, so what is asserted
- * here is the drawer's own logic (counting, rendering, error mapping, the
- * post-commit lease sweep) and not the stores'.
+ * The artifact half of the commit review. Mirrors `DiffDrawer.strict.test.ts`'s
+ * wholesale `$lib/state` mock: the drawer is exercised as a component over a
+ * stubbed store surface, so what is asserted here is the drawer's own logic
+ * (counting, rendering, error mapping, the post-commit lease sweep) and not
+ * the stores'.
  */
 
 const EMPTY_DIFF = {

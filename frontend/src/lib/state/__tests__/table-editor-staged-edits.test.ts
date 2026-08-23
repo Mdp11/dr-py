@@ -1,8 +1,8 @@
 // Staged definition edits: while the table settings dialog is open, editing
 // the definition must NOT re-evaluate the table. Composing a script or
 // navigation column produces a long tail of intermediate definitions (type a
-// snippet, undo it, try a chain), and each one used to cost a full
-// re-evaluation — sweep included — of a grid the modal was covering anyway.
+// snippet, undo it, try a chain), and a full re-evaluation — sweep included —
+// per intermediate definition would cost a grid the modal is covering anyway.
 //
 // `evaluateTable` is spied on the module, exactly as the sibling store tests
 // do: its call count IS the assertion for "did the table reload".

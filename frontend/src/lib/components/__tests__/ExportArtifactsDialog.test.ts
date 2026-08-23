@@ -44,8 +44,8 @@ const HEADERS = [
 ];
 
 // An unregistered legacy kind the dialog has no section for — shared by the
-// two sibling regressions (row filtering and seed validation) for the same
-// review finding, so a fixture-shape change cannot make them diverge.
+// two sibling regression tests (row filtering and seed validation) so a
+// fixture-shape change cannot make them diverge.
 const LEGACY_DIAGRAM = {
 	id: 'd1',
 	kind: 'diagram',
@@ -169,13 +169,12 @@ describe('ExportArtifactsDialog', () => {
 		expect(save).toHaveBeenCalledWith(resp, 'artifacts.bundle.json');
 	});
 
-	// Regression for review finding #1: getCommittedArtifactHeaders() is a
-	// genuinely reactive $state that changes on ANY committed artifact
-	// create/rename/delete — including a peer's commit arriving over the
-	// realtime feed while this dialog stays open. The seeding effect must not
-	// resubscribe to it, or an unrelated headers change would wipe every
-	// checkbox the user had already toggled and re-seed from the stale
-	// original seed array.
+	// getCommittedArtifactHeaders() is a genuinely reactive $state that
+	// changes on ANY committed artifact create/rename/delete — including a
+	// peer's commit arriving over the realtime feed while this dialog stays
+	// open. The seeding effect must not resubscribe to it, or an unrelated
+	// headers change would wipe every checkbox the user had already toggled
+	// and re-seed from the stale original seed array.
 	it('a committed-headers change while open does not wipe the live selection', async () => {
 		vi.spyOn(bundleApi, 'exportPreview').mockResolvedValue({ artifacts: [], dangling_refs: [] });
 		open();
@@ -208,8 +207,6 @@ describe('ExportArtifactsDialog', () => {
 		expect(rowCheckbox('n1').checked).toBe(true);
 	});
 
-	// Review finding #2: the preview-rejection branch was previously
-	// unexercised.
 	it('a rejected preview call renders an inline alert', async () => {
 		vi.spyOn(bundleApi, 'exportPreview').mockRejectedValue(new Error('boom'));
 		open();
@@ -220,8 +217,6 @@ describe('ExportArtifactsDialog', () => {
 		expect(alert?.textContent).toContain('Could not compute the bundle preview.');
 	});
 
-	// Review finding #2: the AbortError-is-silent branch was previously
-	// unexercised.
 	it('a cancelled save picker (AbortError) is silent and keeps the dialog open', async () => {
 		vi.spyOn(bundleApi, 'exportPreview').mockResolvedValue({ artifacts: [], dangling_refs: [] });
 		vi.spyOn(bundleApi, 'exportBundle').mockResolvedValue(new Response('{}'));
@@ -241,8 +236,6 @@ describe('ExportArtifactsDialog', () => {
 		expect(btn.disabled).toBe(false); // `saving` was reset in `finally`
 	});
 
-	// Review finding #2: the generic-export-error branch was previously
-	// unexercised.
 	it('a generic export failure renders an inline alert and keeps the dialog open', async () => {
 		vi.spyOn(bundleApi, 'exportPreview').mockResolvedValue({ artifacts: [], dangling_refs: [] });
 		vi.spyOn(bundleApi, 'exportBundle').mockRejectedValue(new Error('network down'));
@@ -259,8 +252,6 @@ describe('ExportArtifactsDialog', () => {
 		expect(alert?.textContent).toContain('Export failed. Try again.');
 	});
 
-	// Review finding #2: the per-section "all" checkbox, the global "Select
-	// all" checkbox, and the staged-changes note were previously unexercised.
 	it('the per-section "all" checkbox toggles every row in that section only', async () => {
 		vi.spyOn(bundleApi, 'exportPreview').mockResolvedValue({ artifacts: [], dangling_refs: [] });
 		open();
@@ -294,12 +285,12 @@ describe('ExportArtifactsDialog', () => {
 		expect(rowCheckbox('s1').checked).toBe(false);
 	});
 
-	// Regression for review finding #4: GET /artifacts returns EVERY kind,
-	// including legacy/unregistered ones (`diagram`) SECTIONS has no row for.
-	// Before the fix, `headers` was unfiltered, so `allVisibleChecked` could
-	// never become true (the diagram row could never be checked) — "Select
-	// all" was permanently unreachable and `toggleAll` a one-way add that
-	// would silently promote the diagram row to an export root.
+	// GET /artifacts returns EVERY kind, including legacy/unregistered ones
+	// (`diagram`) SECTIONS has no row for. `headers` must filter those out, or
+	// `allVisibleChecked` could never become true (the diagram row could
+	// never be checked) — "Select all" would be permanently unreachable and
+	// `toggleAll` a one-way add that would silently promote the diagram row
+	// to an export root.
 	it('filters out unregistered artifact kinds so "Select all" is reachable and never exports them', async () => {
 		await loadWithLegacyDiagram();
 		vi.spyOn(bundleApi, 'exportPreview').mockResolvedValue({ artifacts: [], dangling_refs: [] });
@@ -413,10 +404,10 @@ describe('ExportArtifactsDialog', () => {
 		expect(document.body.textContent).toContain('Uncommitted artifact changes are not exported.');
 	});
 
-	// Review finding #3: no test previously drove bits-ui's OWN close
-	// (Escape/overlay) through `onOpenChange`, which is the path that must
-	// sync `getExportArtifactsOpen()` back to false and cancel any pending
-	// debounce. `cancelable: true` is load-bearing — bits-ui clones the event
+	// bits-ui's OWN close (Escape/overlay) goes through `onOpenChange`, which
+	// is the path that must sync `getExportArtifactsOpen()` back to false and
+	// cancel any pending debounce. `cancelable: true` is load-bearing — bits-ui
+	// clones the event
 	// via `new KeyboardEvent(e.type, e)` before dispatching it internally, so
 	// a non-cancelable event turns its own `preventDefault()` into a silent
 	// no-op (see ConfirmHost.test.ts for the same note).
@@ -440,9 +431,9 @@ describe('ExportArtifactsDialog', () => {
 		expect(preview).not.toHaveBeenCalled();
 	});
 
-	// Regression for review finding #7 (hygiene #1): a mounted-but-never-closed
-	// dialog (e.g. a caller that unmounts it directly, or a test) must not
-	// leak its pending debounce timer past the component's own lifetime.
+	// A mounted-but-never-closed dialog (e.g. a caller that unmounts it
+	// directly, or a test) must not leak its pending debounce timer past the
+	// component's own lifetime.
 	it('clears the pending debounce timer on unmount even if the dialog was never closed', async () => {
 		const preview = vi
 			.spyOn(bundleApi, 'exportPreview')

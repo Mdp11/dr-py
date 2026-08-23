@@ -79,10 +79,10 @@ afterEach(() => {
 });
 
 it('counts distinct kinds and formats the tooltip via the shared formatter', async () => {
-	// The count used to be the number of distinct backend STRINGS, which
-	// inflated whenever the same kind fired with different numbers. Now it's
-	// the number of structured warnings the backend already aggregated by
-	// (code, detail), and the tooltip is built from `formatScriptWarning`
+	// The count is the number of structured warnings the backend already
+	// aggregated by (code, detail), not the number of distinct backend
+	// STRINGS (which would inflate whenever the same kind fired with
+	// different numbers), and the tooltip is built from `formatScriptWarning`
 	// rather than stringifying the objects with `.join`.
 	const c = await renderDockWithWarnings([
 		{ code: 'nav_unknown_ids', occurrences: 17, total: 42, detail: null },

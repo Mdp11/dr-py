@@ -164,7 +164,7 @@ describe('computeCompletions', () => {
 		).toEqual(['Building']);
 	});
 
-	it('no longer special-cases dr.type or the old type= keyword', () => {
+	it('treats dr.type and type= as plain identifiers', () => {
 		expect(computeCompletions('dr.type("', DOCS, VOCAB)).toBeNull();
 		expect(computeCompletions('dr.types("', DOCS, VOCAB)).toBeNull();
 		expect(computeCompletions('dr.elements(type="', DOCS, VOCAB)).toBeNull();

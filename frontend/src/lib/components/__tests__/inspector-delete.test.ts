@@ -1,10 +1,6 @@
-// C-1 regression guard: element deletion has to have a UI trigger.
-//
-// The Delete affordance used to live in the (now deleted) DetailView tab; it
-// was re-homed into the Inspector beside the LockControl. Nothing covered the
-// old one, which is exactly how the whole capability vanished unnoticed when
-// DetailView was removed — so this file pins the FLOW (confirm → delete lease
-// → staged op), not just the button's presence.
+// Element deletion has to have a UI trigger: the Delete affordance lives in
+// the Inspector beside the LockControl. This file pins the FLOW (confirm →
+// delete lease → staged op), not just the button's presence.
 import { flushSync, mount, unmount } from 'svelte';
 import { http, HttpResponse } from 'msw';
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';

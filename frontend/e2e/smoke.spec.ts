@@ -35,10 +35,9 @@ test('load metamodel + empty model -> create element -> see in diff', async ({ p
 	// --- 3. Create a Block element via the Tree "New element" popover --------
 	await page.getByRole('button', { name: 'New element' }).click();
 	await page.getByRole('button', { name: 'Block', exact: true }).click();
-	// The stereotype now reads off the Inspector header. It is deliberately a
+	// The stereotype reads off the Inspector header. It is deliberately a
 	// <p>, not a heading (the Properties section below owns the only heading in
-	// that column), so this asserts the testid rather than a heading role — the
-	// <h2> it used to match belonged to the retired DetailView tab.
+	// that column), so this asserts the testid rather than a heading role.
 	await expect(page.getByTestId('inspector-stereotype')).toHaveText('Block');
 
 	// --- 4. Edit its `name` --------------------------------------------------
@@ -48,14 +47,14 @@ test('load metamodel + empty model -> create element -> see in diff', async ({ p
 	await nameInput.blur();
 
 	// --- 5. Open the commit drawer and confirm the change is listed ----------
-	// Spec B: "Save" was renamed to "Commit" (opens the DiffDrawer/commit panel).
+	// "Commit" opens the DiffDrawer/commit panel.
 	const commitButton = page.getByRole('button', { name: 'Commit', exact: true });
 	await expect(commitButton).toBeVisible();
 	await commitButton.click();
 
 	const drawer = page.getByRole('dialog', { name: /commit changes/i });
 	await expect(drawer).toBeVisible();
-	// Spec B: getStagedDiff tracks per-op reverts; a newly created element that is
+	// getStagedDiff tracks per-op reverts; a newly created element that is
 	// also edited in the same session appears as "Modified" (the update op's revert
 	// snapshot becomes the diff baseline), not "Added". Either status confirms the
 	// change is staged — the important assertion is the ENGINE_NAME check below.
@@ -74,9 +73,8 @@ test('Export button downloads the model as a .json file', async ({ page }) => {
 
 	await openDefaultProject(page);
 
-	// Spec B: the old DiffDrawer save-to-file flow (with "Export CR" checkbox) was
-	// replaced.  "Commit" now persists changes server-side; the separate "Export"
-	// button in the TopBar downloads the current model as JSON.
+	// "Commit" persists changes server-side; the separate "Export" button in
+	// the TopBar downloads the current model as JSON.
 	await loadFiles(page, {
 		metamodel: METAMODEL_PATH,
 		model: {
@@ -91,8 +89,8 @@ test('Export button downloads the model as a .json file', async ({ page }) => {
 	const downloads: Download[] = [];
 	page.on('download', (d) => downloads.push(d));
 
-	// Export lives in the TopBar's Model dropdown (P-22) — open the menu, then
-	// pick Export to download the active model JSON.
+	// Export lives in the TopBar's Model dropdown — open the menu, then pick
+	// Export to download the active model JSON.
 	await page.getByTestId('model-menu-trigger').click();
 	await page.getByRole('menuitem', { name: 'Export', exact: true }).click();
 

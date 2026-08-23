@@ -1,9 +1,8 @@
-// Render tests for the editable value cell (Task 6). `@testing-library/svelte`
-// is not a project dependency, so this follows the repo's established
-// Svelte-5 render convention (mount/unmount/flushSync + dispatchEvent) used by
+// Render tests for the editable value cell. `@testing-library/svelte` is not
+// a project dependency, so this follows the repo's established Svelte-5
+// render convention (mount/unmount/flushSync + dispatchEvent) used by
 // `Table/__tests__/TableGrid.test.ts` and
-// `components/__tests__/property-form-lock.test.ts`, rather than the task
-// brief's literal `@testing-library/svelte` snippet.
+// `components/__tests__/property-form-lock.test.ts`.
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 

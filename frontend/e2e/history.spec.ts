@@ -1,5 +1,5 @@
 /**
- * E2E smoke: History drawer — list → diff → revert (Phase 8)
+ * E2E smoke: History drawer — list → diff → revert
  *
  * Flow:
  *   1. Load the app with the simple example metamodel + an empty model.
@@ -76,8 +76,7 @@ test('History: list, diff, and revert a commit', async ({ page }) => {
 	await page.getByRole('button', { name: 'New element' }).click();
 	await page.getByRole('button', { name: 'Block', exact: true }).click();
 	// The new element's stereotype shows in the Inspector header, which is
-	// deliberately a <p> rather than a heading — the <h2> this used to match
-	// belonged to the retired DetailView tab.
+	// deliberately a <p> rather than a heading.
 	await expect(page.getByTestId('inspector-stereotype')).toHaveText('Block');
 
 	const inspector = page.getByTestId('inspector');
@@ -115,7 +114,7 @@ test('History: list, diff, and revert a commit', async ({ page }) => {
 	await commitStaged();
 	// commit B is now at model_rev N
 
-	// 4. Open the History drawer via the TopBar's Model dropdown (P-22).
+	// 4. Open the History drawer via the TopBar's Model dropdown.
 	await page.getByTestId('model-menu-trigger').click();
 	await page.getByRole('menuitem', { name: 'History', exact: true }).click();
 

@@ -751,12 +751,11 @@ describe('snippet lint + run', () => {
 	});
 
 	it('leaves the entry selected even when a new lint drops it — the hint bar needs it', async () => {
-		// Superseded contract (was "resets a stale entry to script..."): the
-		// select is always selectable now (SnippetTab hint bar + insert-stub),
+		// The select is always selectable (SnippetTab hint bar + insert-stub),
 		// so a lint response that doesn't (yet) include the chosen entry must
 		// NOT yank the selection back to 'script' out from under the user
-		// while they're still writing def value(elements):/step(el). The stale-send
-		// guarantee this reset used to provide now lives in runSnippetTab.
+		// while they're still writing def value(elements):/step(el). The
+		// stale-send guarantee lives in runSnippetTab.
 		vi.useFakeTimers();
 		const lint = vi.spyOn(snippetsApi, 'lintSnippet').mockResolvedValue({
 			diagnostics: [],
@@ -840,10 +839,9 @@ describe('snippet lint + run', () => {
 	});
 
 	it('rekey on COMMIT normalizes an in-flight run to idle with a discard notice', async () => {
-		// The rekey moved from first-save to the commit rebind (staging no longer
-		// re-keys the tab), but the hazard is the same: the in-flight run's
-		// closure is bound to the OLD tab id, so a running phase must never be
-		// carried to the new one.
+		// The rekey happens on the commit rebind, not on staging: the
+		// in-flight run's closure is bound to the OLD tab id, so a running
+		// phase must never be carried to the new one.
 		let resolveRun!: (v: typeof RUN_OUT) => void;
 		vi.spyOn(snippetsApi, 'runSnippet').mockReturnValue(new Promise((r) => (resolveRun = r)));
 		const tabId = openArtifactTab('snippet', { artifactId: null, title: 'New snippet' });

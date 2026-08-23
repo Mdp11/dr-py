@@ -77,9 +77,7 @@ function mockAcquireConflict() {
 }
 
 /** Seed the view store from a fixture, the way a real project open does
- * (mock the GET /view the staged-op rewrite now reads through — the
- * pre-Phase-2 whole-snapshot PUT wrapper is gone as of the artefacts
- * revamp). */
+ * (mock the GET /view that the staged-op rewrite reads through). */
 async function seedView(view: View): Promise<void> {
 	vi.spyOn(viewApi, 'getView').mockResolvedValue({ view, warnings: [] });
 	await refreshView();
@@ -291,7 +289,7 @@ describe('removeArtifact', () => {
 		expect(getArtifactHeaders()).toEqual([]);
 	});
 
-	it('stages a delete under a delete-intent lease, plus a remove_artifact per placement, in the same batch (Decision 7)', async () => {
+	it('stages a delete under a delete-intent lease, plus a remove_artifact per placement, in the same batch', async () => {
 		const acquire = mockAcquire();
 		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [HEADER] });
 		await loadArtifacts();
@@ -328,9 +326,9 @@ describe('removeArtifact', () => {
 			targets: [{ resource_id: 'a1', mode: 'exclusive', type: 'artifact' }],
 			intent: 'delete'
 		});
-		// ONE folderEditLock call covers every placement (Decision 7's two-step
-		// acquire) — the first call site is removeArtifact's own gate, ahead of
-		// the per-placement stageRemoveArtifactRef calls.
+		// ONE folderEditLock call covers every placement (a two-step acquire)
+		// — the first call site is removeArtifact's own gate, ahead of the
+		// per-placement stageRemoveArtifactRef calls.
 		expect(folderLock.mock.calls[0][0]).toEqual([VIEW_ROOT_ID, 'fa']);
 		expect(getStagedArtifactEntries()).toEqual([{ kind: 'delete', id: 'a1', header: HEADER }]);
 		expect(getStagedViewOps()).toEqual([
@@ -414,7 +412,7 @@ describe('removeArtifact', () => {
 });
 
 describe('commit listener', () => {
-	it('upserts changed headers and drops deleted ids; no longer touches the view at all (Task 9)', async () => {
+	it('upserts changed headers and drops deleted ids without touching the view', async () => {
 		vi.spyOn(api, 'listArtifacts').mockResolvedValue({ items: [HEADER, TABLE_HEADER] });
 		await loadArtifacts();
 		await seedView(viewPlacing('t1'));
@@ -439,11 +437,11 @@ describe('commit listener', () => {
 		expect(getCommittedArtifactHeaders()).toEqual([renamed, created]);
 		await Promise.resolve();
 		await Promise.resolve();
-		// The view scrub moved entirely into `removeArtifact`'s own staged batch
-		// (Decision 7): by the time a commit reaches this listener, any deleted
-		// artifact's placements were already scrubbed server-side as part of that
-		// SAME commit. This listener no longer reasons about the view at all —
-		// `_view` is reference-identical, not just content-equal.
+		// The view scrub lives entirely in `removeArtifact`'s own staged batch:
+		// by the time a commit reaches this listener, any deleted artifact's
+		// placements were already scrubbed server-side as part of that SAME
+		// commit, so this listener does not reason about the view at all —
+		// `_view` stays reference-identical, not just content-equal.
 		expect(getView()).toBe(before);
 	});
 

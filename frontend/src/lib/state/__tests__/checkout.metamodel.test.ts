@@ -31,10 +31,10 @@ import { ConflictError } from '$lib/api/errors';
 import type { CommitResponse, Metamodel } from '$lib/api/types';
 
 /**
- * The `mm` lease lifecycle module (Task 6) and the metamodel half of the
- * commit batch (spec 2026-08-16). Mirrors checkout.ensure.test.ts's mocking
- * style: spy on `$lib/api/checkout`'s `acquireLocks`/`releaseLock` rather than
- * mocking the whole module.
+ * The `mm` lease lifecycle module and the metamodel half of the commit batch.
+ * Mirrors checkout.ensure.test.ts's mocking style: spy on
+ * `$lib/api/checkout`'s `acquireLocks`/`releaseLock` rather than mocking the
+ * whole module.
  */
 
 function deferred<T>(): {

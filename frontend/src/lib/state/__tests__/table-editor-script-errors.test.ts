@@ -1,16 +1,16 @@
-// The script-error RECAP (Task 6, on-demand since the final review). A table's
-// failing script cells can sit anywhere in a virtualized grid the client only
-// ever holds a window of, so the backend's whole-table
-// `POST /tables/script-errors` is the only complete answer.
+// The script-error RECAP is fetched on demand. A table's failing script cells
+// can sit anywhere in a virtualized grid the client only ever holds a window
+// of, so the backend's whole-table `POST /tables/script-errors` is the only
+// complete answer.
 //
-// That answer is EXPENSIVE, and expensive in a way the plan did not anticipate:
-// the route renders the whole table CACHE-ONLY, so for the commonest shape (an
-// unsorted collapse script column) — where the page route makes zero `value()`
-// calls and reports `ready` without ever kicking a sweep — the recap misses on
-// every row outside the window and kicks a full background sweep. Fetching it
-// automatically would have turned "open a table with a script column" into
-// "sweep the whole table", plus up to 120 once-a-second retries. So the recap
-// is fetched only when the user asks for it. This suite pins the client half:
+// That answer is EXPENSIVE: the route renders the whole table CACHE-ONLY, so
+// for the commonest shape (an unsorted collapse script column) — where the
+// page route makes zero `value()` calls and reports `ready` without ever
+// kicking a sweep — the recap misses on every row outside the window and
+// kicks a full background sweep. Fetching it automatically would turn "open a
+// table with a script column" into "sweep the whole table", plus up to 120
+// once-a-second retries. So the recap is fetched only when the user asks for
+// it. This suite pins the client half:
 //
 //   * WHEN the recap is fetched — never on settle, only on `requestScriptErrors`
 //     (each call re-pays a whole-table pass server-side), and once per page
@@ -491,13 +491,13 @@ describe('jump-to-cell request', () => {
 	});
 });
 
-// Re-review finding (MINOR): the badge must never be DEAD. `_loadTablePage`
-// drops the recap signature the instant a re-evaluation goes out, but leaves
-// the previous page's `script_status` in place — so a badge gated on the status
-// alone kept reading "Check for script errors" while a sort was in flight, and
-// clicking it did literally nothing (`requestScriptErrors` no-ops without a
-// signature). The store owns the answer to "can this be asked for", so it says
-// so; the component does not re-derive it from a status that outlives it.
+// The badge must never be DEAD. `_loadTablePage` drops the recap signature
+// the instant a re-evaluation goes out, but leaves the previous page's
+// `script_status` in place, so a badge gated on the status alone would keep
+// reading "Check for script errors" while a sort is in flight and clicking it
+// would no-op (`requestScriptErrors` no-ops without a signature). The store
+// owns the answer to "can this be asked for", so it says so; the component
+// does not re-derive it from a status that outlives it.
 describe('script-error recap askability', () => {
 	it('is askable only while a settled page state is actually on screen', async () => {
 		await ensureTableDraft(TAB);
@@ -534,14 +534,14 @@ describe('script-error recap askability', () => {
 	});
 });
 
-// Re-review finding (IMPORTANT): with no script runner the backend now answers
-// the recap with ZERO errors — the honest server-side answer, since nothing was
-// evaluated and so nothing is KNOWN to have failed. Rendered as an affirmative
-// ("No script errors") it becomes a lie told directly above a grid whose every
-// script cell reads `script runner unavailable`. `ScriptErrorsOut` cannot carry
-// the distinction (its `state` is a one-valued literal and the wire shape is
-// deliberately frozen), so the client earns it from the evidence it already
-// holds: the cells of the page on screen.
+// With no script runner the backend answers the recap with ZERO errors — the
+// honest server-side answer, since nothing was evaluated and so nothing is
+// KNOWN to have failed. Rendered as an affirmative ("No script errors") it
+// becomes a lie told directly above a grid whose every script cell reads
+// `script runner unavailable`. `ScriptErrorsOut` cannot carry the distinction
+// (its `state` is a one-valued literal and the wire shape is deliberately
+// frozen), so the client earns it from the evidence it already holds: the
+// cells of the page on screen.
 describe('uncomputed script cells', () => {
 	it('reports no reason when every script cell on screen produced a value', async () => {
 		await ensureTableDraft(TAB);

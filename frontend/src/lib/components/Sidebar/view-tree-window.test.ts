@@ -141,7 +141,7 @@ describe('registerExcludedRoots', () => {
 		expect(rows.map((r) => r.key)).toEqual(['x1']);
 	});
 
-	describe('staged-removal injection (excluded-pool gap fix)', () => {
+	describe('staged-removal injection (fills the excluded-pool gap)', () => {
 		it('injects an id staged out of a folder (remove_element) that the committed pool does not know about yet', () => {
 			// Committed truth: 'a' is still placed in 'fa' (buildUnifiedTree sees it
 			// there), so the committed pool response omits it. The staged journal

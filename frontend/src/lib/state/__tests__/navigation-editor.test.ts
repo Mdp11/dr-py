@@ -636,7 +636,7 @@ describe('staged-artifact listeners', () => {
 		expect(bound.artifactRev).toBe(7);
 		expect(getDynamicTabs()[0].id).toBe('nav:a9');
 		expect(getDynamicTabs()[0].artifactId).toBe('a9');
-		// Per-node state follows the rebind, as it used to on first save.
+		// Per-node state follows the rebind, same as it does on first save.
 		expect(getPreview('nav:a9', [])?.total).toBe(1);
 		expect(getPreview(tabId, [])).toBeUndefined();
 		expect(isNodeVisible('nav:a9', [])).toBe(true);

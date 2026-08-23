@@ -1,5 +1,5 @@
-// SnippetResultView is pure presentation (Task 2): every branch is a function
-// of its props, so these tests need no store and no MSW.
+// SnippetResultView is pure presentation: every branch is a function of its
+// props, so these tests need no store and no MSW.
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, expect, it } from 'vitest';
 

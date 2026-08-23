@@ -77,9 +77,9 @@ function rows(): string[] {
 }
 
 describe('MetamodelSearch', () => {
-	// AMENDMENT 1: the fixture yields FOUR hits for 'o' (Observes, Contains,
-	// Monitors, Zone) — `Contains` has an 'o' at index 1 and was omitted from
-	// the original brief's count. Verified against Task 6's own matcher tests.
+	// The fixture yields FOUR hits for 'o' (Observes, Contains, Monitors,
+	// Zone) — `Contains` has an 'o' at index 1. Verified against the matcher
+	// tests in this same directory.
 	it('shows ranked hits with kind badges while typing', () => {
 		const c = mount(MetamodelSearchHost, { target: document.body, props: {} });
 		flushSync();
@@ -262,8 +262,8 @@ describe('MetamodelSearch', () => {
 		}
 	});
 
-	// AMENDMENT 2 (spec §6): each row highlights the matched substring via a
-	// dedicated element rather than rendering the name plain.
+	// Each row highlights the matched substring via a dedicated element
+	// rather than rendering the name plain.
 	it('highlights the matched substring in each row', () => {
 		const c = mount(MetamodelSearchHost, { target: document.body, props: {} });
 		flushSync();

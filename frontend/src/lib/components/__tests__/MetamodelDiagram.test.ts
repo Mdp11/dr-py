@@ -6,10 +6,11 @@ import type { DiagramSelection } from '$lib/metamodel/diagram-build';
 import type { MetamodelDiagramView, MetamodelEditorView } from '$lib/state';
 
 /**
- * Canvas + view-toggle tests (Task 10). The state module is mocked wholesale so
- * these exercise the COMPONENTS: what the canvas draws for a given view
- * snapshot, what it hides when the surface is read-only, and which state calls
- * a gesture makes. Task 9's own suite covers the module behind those calls.
+ * Canvas + view-toggle tests. The state module is mocked wholesale so these
+ * exercise the COMPONENTS: what the canvas draws for a given view snapshot,
+ * what it hides when the surface is read-only, and which state calls a
+ * gesture makes. `state/__tests__/metamodel-diagram.test.ts` covers the
+ * module behind those calls.
  *
  * The YAML editor is stubbed out (CodeMirror needs a real layout engine and has
  * nothing to do with the toggle); the diagram half is deliberately NOT stubbed,
@@ -204,7 +205,7 @@ describe('MetamodelDiagram', () => {
 		const c = mount(DiagramHost, { target: document.body });
 		flushSync();
 
-		// `Contains` carries no properties and no inheritance, so Task 7's
+		// `Contains` carries no properties and no inheritance, so the
 		// association-class rule renders it as a boxless edge, not a node.
 		expect(nodeByText('Zone')).toBeDefined();
 		expect(nodeByText('Building')).toBeDefined();
@@ -217,7 +218,7 @@ describe('MetamodelDiagram', () => {
 	/**
 	 * The premise of the whole navigation feature set: `getMetamodelDiagramView`
 	 * hands back a FRESH object literal on every recompute, so a plain canvas
-	 * click — which changes only `selection` — used to invalidate `built` and
+	 * click — which changes only `selection` — must NOT invalidate `built` and
 	 * re-run `buildDiagram` *and* `buildAdjacency` over the entire metamodel.
 	 * Fine at twenty types, wrong at three hundred. The component hoists the
 	 * parsed metamodel into its own `$derived`, and because the state module
@@ -268,9 +269,9 @@ describe('MetamodelDiagram', () => {
 		flushSync();
 
 		// Loose `/element type/i`/`/enum/i` would also match the panel TOC's
-		// section headers, which stay up on a read-only surface (task 10:
-		// navigation is a read affordance, not gated on `readOnly`) — so these
-		// pin the literal "+ ..." create-button text instead.
+		// section headers, which stay up on a read-only surface (navigation is
+		// a read affordance, not gated on `readOnly`) — so these pin the
+		// literal "+ ..." create-button text instead.
 		expect(findButton(/^\+ element type$/i)).toBeUndefined();
 		expect(findButton(/^\+ enum$/i)).toBeUndefined();
 		// Browsing affordances stay: read-only is not view-only.
@@ -280,13 +281,12 @@ describe('MetamodelDiagram', () => {
 	});
 
 	it('draws an expanded box whose type declares the same property name twice', () => {
-		// `+ Property` used to emit a fixed `new_property`, so two clicks put two
-		// identically-named rows on one type — and a draft is allowed to be
-		// invalid mid-edit anyway (hand-edited YAML reaches the same state). A
-		// box keyed on `p.name` throws `each_key_duplicate` in the PRODUCTION
-		// build, not just dev, taking the canvas down beside a panel that
-		// survives. Both box kinds are covered: `Contains` carries properties
-		// here, so the association-class rule gives it a box too.
+		// A draft is allowed to declare the same property name twice mid-edit
+		// (hand-edited YAML can reach that state). A box keyed on `p.name`
+		// throws `each_key_duplicate` in the PRODUCTION build, not just dev,
+		// taking the canvas down beside a panel that survives. Both box kinds
+		// are covered: `Contains` carries properties here, so the
+		// association-class rule gives it a box too.
 		const prop = MM.elements[0].properties[0];
 		diagramView = {
 			...DIAGRAM,

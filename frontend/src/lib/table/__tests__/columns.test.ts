@@ -264,11 +264,11 @@ describe('columns', () => {
 	});
 
 	it('helpers tolerate definitions that embed reactive-state proxies', () => {
-		// Regression: a Svelte $state proxy leaked into an inline navigation
-		// definition made every structuredClone-based edit throw DataCloneError
-		// ("#<Object> could not be cloned"), permanently bricking the table.
-		// The copy-on-write helpers never deep-clone, so they must keep working
-		// even when a proxy is present.
+		// A Svelte $state proxy leaked into an inline navigation definition
+		// must not make a structuredClone-based edit throw DataCloneError
+		// ("#<Object> could not be cloned"), which would permanently brick the
+		// table. The copy-on-write helpers never deep-clone, so they must keep
+		// working even when a proxy is present.
 		const proxied = new Proxy(
 			{
 				kind: 'path',

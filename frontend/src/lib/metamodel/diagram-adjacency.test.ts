@@ -187,7 +187,7 @@ describe('visualState', () => {
 		expect(visualState('e1', 'edge', false, hl)).toBe('hot');
 		expect(visualState('e2', 'edge', false, hl)).toBe('dim');
 	});
-	it('a selected element outside the set stays normal, never dim (spec §5)', () => {
+	it('a selected element outside the set stays normal, never dim', () => {
 		expect(visualState('el:B', 'node', true, hl)).toBe('normal');
 	});
 });

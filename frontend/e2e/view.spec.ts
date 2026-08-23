@@ -157,10 +157,10 @@ async function expandFolder(page: Page, name: string): Promise<void> {
 /**
  * Names among `candidates` that currently render as tree rows, in DOM
  * (i.e. visual top-to-bottom) order. Used to assert reorder/placement without
- * inspecting network bodies — a drag no longer PUTs a whole-document snapshot
- * (see the section header comment above), so the tree's own rendered order,
- * which mirrors the optimistically-applied `_view` state, is the only signal
- * left to read.
+ * inspecting network bodies — a drag stages a `view.*` op rather than PUTting
+ * a whole-document snapshot (see the section header comment above), so the
+ * tree's own rendered order, which mirrors the optimistically-applied `_view`
+ * state, is the only signal left to read.
  */
 async function visibleOrder(page: Page, candidates: string[]): Promise<string[]> {
 	const rows = await tree(page).getByRole('treeitem').allTextContents();
@@ -274,8 +274,8 @@ test('view curation: exclude a placed element back to the pool', async ({ page }
 	const badge = changeBadge(page);
 
 	// Exclude: drag Alpha from Grouped onto the "Not in view" panel header.
-	// STAGES a `remove_element` op; no PUT fires any more (see the include test
-	// above for the full rationale).
+	// STAGES a `remove_element` op; no PUT fires (see the include test above
+	// for the full rationale).
 	await dragRowOnto(page, row(page, 'Alpha'), poolHeader(page));
 	await expect(badge).toContainText('1 change');
 
@@ -288,11 +288,10 @@ test('view curation: exclude a placed element back to the pool', async ({ page }
 	// anyway.
 	await expect(tree(page).getByText('Alpha')).toHaveCount(0);
 	await expandPool(page);
-	// RESOLVED(excluded-pool-gap): this assertion used to PIN the bug (Alpha
-	// stuck in neither region between the staged remove and the commit,
-	// reading as data loss). The excluded-pool injection fix closed the gap —
-	// Alpha now appears in the pool the instant the op is staged, well before
-	// any commit round trip.
+	// Alpha must not sit stuck in neither region between the staged remove
+	// and the commit, which would read as data loss: the excluded-pool
+	// injection makes it appear in the pool the instant the op is staged,
+	// well before any commit round trip.
 	await expect(poolRow(page, 'Alpha')).toBeVisible();
 
 	await commitStaged(page);
@@ -368,8 +367,8 @@ test('change badge increments on view edit, tooltip shows View row, Save dialog 
 	// Excluding one element is exactly 1 view change; combined count must be 1.
 	await expect(badge).toContainText('1 change');
 
-	// Hovering the badge reveals the tooltip with both a "model" and a "view" row.
-	// Spec B renamed the labels from "Model"/"View" to "Uncommitted (model)"/"Unsaved (view)".
+	// Hovering the badge reveals the tooltip with both a "model" and a "view" row,
+	// labelled "Uncommitted (model)" and "Unsaved (view)".
 	// Scope to the badge's own group wrapper (the LAST div.group in the header) so
 	// we cannot accidentally match the Info/loaded-files tooltip in the first group.
 	await badge.hover();
@@ -379,8 +378,7 @@ test('change badge increments on view edit, tooltip shows View row, Save dialog 
 	await expect(tooltip).toContainText('Unsaved (view)');
 	await expect(tooltip).toContainText('Uncommitted (model)');
 
-	// Ctrl+S opens the Commit dialog (DiffDrawer). Spec B: dialog was renamed
-	// from "pending changes" to "Commit changes".
+	// Ctrl+S opens the Commit dialog (DiffDrawer), titled "Commit changes".
 	await page.keyboard.press('Control+s');
 	const drawer = page.getByRole('dialog', { name: /commit changes/i });
 	await expect(drawer).toBeVisible();

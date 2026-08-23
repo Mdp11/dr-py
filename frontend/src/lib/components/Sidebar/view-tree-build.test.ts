@@ -32,7 +32,7 @@ describe('buildUnifiedTree — curated scope', () => {
 		expect([...tree.placedElementIds]).toEqual(['a']);
 	});
 
-	it('keys a folder node by its id, NOT its name — the key must not change when the name does (Phase 2 point)', () => {
+	it('keys a folder node by its id, NOT its name — the key must not change when the name does', () => {
 		// Same folder id, two different names: the resulting node key is
 		// identical either way, and the display name (looked up separately via
 		// `folderName`) is the only thing that differs. This is the whole point
@@ -77,11 +77,11 @@ describe('buildUnifiedTree — curated scope', () => {
 	});
 
 	it('includes placed elements in placement order even when their bodies are NOT cached', () => {
-		// Regression: folder contents must NOT be gated on the element body already
-		// being in the local cache. Gating on `elementsById.has` made placed rows
-		// materialize one-by-one as the global roots page streamed them in (in
-		// display-name order), inserting them mid-folder. Rows must be present and
-		// in placement order from the first build so bodies fill in place.
+		// Folder contents must NOT be gated on the element body already being in
+		// the local cache. Gating on `elementsById.has` would make placed rows
+		// materialize one-by-one as the global roots page streams them in (in
+		// display-name order), inserting them mid-folder. Rows must be present
+		// and in placement order from the first build so bodies fill in place.
 		const view: View = {
 			name: 'v',
 			folders: [{ id: 'fa', name: 'F', folders: [], elements: ['c', 'a', 'b'], artifacts: [] }],

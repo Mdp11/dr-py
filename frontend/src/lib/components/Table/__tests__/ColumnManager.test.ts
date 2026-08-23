@@ -1,8 +1,7 @@
-// Render tests for the definition-editing panel (Task 7). Follows the repo's
+// Render tests for the definition-editing panel. Follows the repo's
 // established Svelte-5 render convention (mount/unmount/flushSync) used by
-// `Table/__tests__/TableGrid.test.ts` rather than the brief's literal
-// `@testing-library/svelte` snippet — that package is not a project
-// dependency.
+// `Table/__tests__/TableGrid.test.ts`; `@testing-library/svelte` is not a
+// project dependency.
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -507,7 +506,7 @@ describe('ColumnManager', () => {
 	});
 
 	it('the row-numbers toggle flips show_row_numbers on the definition', async () => {
-		await seedForClone(); // Task 4's seed helper in this same file
+		await seedForClone(); // the seed helper in this same file
 		const c = mount(ColumnManager, { target: document.body, props: { tabId: CLONE_TAB } });
 		flushSync();
 		try {

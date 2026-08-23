@@ -1,5 +1,5 @@
 /**
- * E2E smoke: check out → edit → commit (Spec B, Task 14)
+ * E2E smoke: check out → edit → commit
  *
  * Loads the smart-city metamodel + model via the file-load dialog to start
  * from a known state, then drives the check-out → edit → commit flow.

@@ -1,9 +1,8 @@
-// Render tests for the script-warnings recap panel (Task 7). Follows the
-// repo's established Svelte-5 render convention (mount/unmount/flushSync)
-// used by `Table/__tests__/ColumnManager.test.ts` and
-// `Table/__tests__/TableGrid.test.ts` rather than the brief's literal
-// `@testing-library/svelte` snippet — that package is not a project
-// dependency (see those files' own header comments).
+// Render tests for the script-warnings recap panel. Follows the repo's
+// established Svelte-5 render convention (mount/unmount/flushSync) used by
+// `Table/__tests__/ColumnManager.test.ts` and `Table/__tests__/TableGrid.test.ts`;
+// `@testing-library/svelte` is not a project dependency (see those files' own
+// header comments).
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, describe, expect, it } from 'vitest';
 

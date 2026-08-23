@@ -89,10 +89,10 @@ describe('isProjectQuiet', () => {
 		expect(isProjectQuiet()).toBe(true);
 	});
 
-	it('STAYS QUIET while only art: leases are live (regression)', () => {
-		// The branch-introduced regression: every open navigation/table/snippet
-		// tab takes an `art:` lease, so counting them here disabled Revert and
-		// Swap-metamodel project-wide for the full lock TTL.
+	it('STAYS QUIET while only art: leases are live', () => {
+		// Every open navigation/table/snippet tab takes an `art:` lease; those
+		// must not count toward quietness or Revert/Swap-metamodel stay
+		// disabled project-wide for the full lock TTL.
 		snapshotWithLocks('art:a9', 'art:a10');
 		expect(isProjectQuiet()).toBe(true);
 	});
@@ -116,13 +116,13 @@ describe('isProjectQuiet', () => {
 		expect(isProjectQuiet()).toBe(false);
 	});
 
-	it('is not quiet with only staged VIEW ops (F-3)', () => {
+	it('is not quiet with only staged VIEW ops', () => {
 		expect(isProjectQuiet()).toBe(true);
 		stageViewOp({ kind: 'rename_folder', id: 'f1', name: 'New name' }, 'Rename folder');
 		expect(isProjectQuiet()).toBe(false);
 	});
 
-	it('is not quiet with only a staged diagram node MOVE (spec 2026-08-16)', () => {
+	it('is not quiet with only a staged diagram node MOVE', () => {
 		// Metamodel ops ride the same `POST /commits` batch as everything else,
 		// so a whole-model rewrite invalidates them by the same rev bump — the
 		// identical argument the artifact and view terms rest on.

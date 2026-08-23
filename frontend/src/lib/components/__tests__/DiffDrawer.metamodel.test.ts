@@ -3,10 +3,10 @@ import { flushSync, mount, unmount } from 'svelte';
 import DiffDrawer from '../DiffDrawer.svelte';
 
 /**
- * The METAMODEL half of the commit review (spec 2026-08-16): the fourth staged
- * family folds into the drawer's total and gets its own section on the Changes
- * tab, rendering at most two rows — the YAML draft and the coalesced node moves
- * — because the family discards all-or-nothing like the View tab does.
+ * The METAMODEL half of the commit review: the fourth staged family folds
+ * into the drawer's total and gets its own section on the Changes tab,
+ * rendering at most two rows — the YAML draft and the coalesced node moves —
+ * because the family discards all-or-nothing like the View tab does.
  *
  * Mirrors `DiffDrawer.view.test.ts`'s wholesale `$lib/state` mock; only the
  * metamodel readers vary per case.

@@ -1,10 +1,10 @@
-// Behaviour test for the settings-popup refactor (Task 1): the definition
-// editor (ColumnManager) no longer sits inline in the tab — it lives behind a
-// ⚙ Settings button that opens a Dialog, and the button is editor-only. This
-// covers the button's edit-gating and that the manager is not mounted until the
-// popup opens; the full open→edit→grid-updates flow is covered by e2e
-// (e2e/table.spec.ts). Uses the repo's mount/flushSync/unmount Svelte-5 render
-// convention (see TableGrid.test.ts) rather than @testing-library/svelte.
+// Behaviour test for the settings popup: the definition editor (ColumnManager)
+// lives behind a ⚙ Settings button that opens a Dialog, not inline in the tab,
+// and the button is editor-only. This covers the button's edit-gating and that
+// the manager is not mounted until the popup opens; the full open→edit→grid-
+// updates flow is covered by e2e (e2e/table.spec.ts). Uses the repo's
+// mount/flushSync/unmount Svelte-5 render convention (see TableGrid.test.ts)
+// rather than @testing-library/svelte.
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -36,8 +36,8 @@ import TableView from '../TableView.svelte';
 const h = vi.hoisted(() => ({
 	editable: true,
 	page: undefined as unknown,
-	// Task 7: warnings are now structured (`ScriptWarning[]`, formatted via
-	// `formatScriptWarning`), not the old joined-string strip.
+	// Warnings are structured (`ScriptWarning[]`, formatted via
+	// `formatScriptWarning`), not a joined-string strip.
 	warnings: [] as ScriptWarning[],
 	scriptStatus: null as unknown,
 	scriptErrors: null as unknown,
@@ -45,7 +45,7 @@ const h = vi.hoisted(() => ({
 	/** Mirrors the store's `_recapKeys.has(tab)`: is there a settled page state
 	 * a recap could describe RIGHT NOW (false while a load is in flight). */
 	canCheckScriptErrors: true,
-	/** Task 10: non-null puts the tab in the lock-denied state. */
+	/** Non-null puts the tab in the lock-denied state. */
 	lockHolder: null as string | null,
 	/** Mirrors the store's evidence from the page on screen: why a script cell
 	 * holds no value, or null when they all do. */
@@ -77,8 +77,8 @@ vi.mock('$lib/state', () => ({
 	canEdit: () => h.editable,
 	getMetamodel: () => null,
 	ensureTableDraft: vi.fn(async () => {}),
-	// ArtifactExportButton's dependencies — the toolbar mounts it unconditionally
-	// now that the tab-strip export button is gone (Task 5). Mirrors h.draft's
+	// ArtifactExportButton's dependencies — the toolbar mounts it
+	// unconditionally; there is no tab-strip export button. Mirrors h.draft's
 	// static id/artifactId/name (typed `unknown` above, so restated as literals
 	// rather than read off it).
 	getDynamicTabs: () => [
@@ -129,9 +129,9 @@ vi.mock('$lib/state', () => ({
 	ensureEmbeddedDraft: vi.fn(),
 	getArtifactHeaders: () => [],
 	getDraft: () => undefined,
-	// ExportDialog's transform picker (exporter-v2 phase 4 task 10) — mounted
-	// unconditionally for a JSON-family export format, so its dependency must
-	// be present even though these tests never pick a transform.
+	// ExportDialog's transform picker is mounted unconditionally for a
+	// JSON-family export format, so its dependency must be present even
+	// though these tests never pick a transform.
 	referenceableArtifactHeaders: () => []
 }));
 
@@ -229,11 +229,11 @@ describe('TableView settings popup', () => {
 		}
 	});
 
-	// Regression: opening the dialog is a direct `settingsOpen = true`
-	// assignment (never a `Dialog.Trigger`), so bits-ui's onOpenChange(true)
-	// never fires for it — the flag Save sets must therefore be reset by
-	// openSettings itself, not by that branch, or it would stick from one
-	// open to the next and make a later Cancel wrongly keep the edits.
+	// Opening the dialog is a direct `settingsOpen = true` assignment (never
+	// a `Dialog.Trigger`), so bits-ui's onOpenChange(true) never fires for
+	// it — the flag Save sets must therefore be reset by openSettings itself,
+	// not by that branch, or it would stick from one open to the next and
+	// make a later Cancel wrongly keep the edits.
 	it('Cancel still reverts after a prior Save earlier in the same mount', async () => {
 		const c = render('tbl:draft:1');
 		try {
@@ -495,11 +495,10 @@ describe('TableView settings discard confirmation', () => {
 	});
 });
 
-// Task 10 / cross-impl adoption: the sweep readout is FIXED chrome next to the
-// conflict and warnings strips, NOT an in-flow element inside TableGrid's
-// scroll container (where it would scroll away on a long table and offset the
-// virtualizer's row math while `computing`). These two cases moved here from
-// TableGrid.test.ts with the strip itself.
+// The sweep readout is FIXED chrome next to the conflict and warnings
+// strips, NOT an in-flow element inside TableGrid's scroll container (where
+// it would scroll away on a long table and offset the virtualizer's row math
+// while `computing`).
 describe('TableView script-status strip', () => {
 	it('shows a bare spinner while computing, with no progress text', () => {
 		h.scriptStatus = { state: 'computing', done: 7, total: 42 };
@@ -533,8 +532,8 @@ describe('TableView script-status strip', () => {
 	});
 });
 
-// Task 6 + final review: the script-error recap, fetched ON DEMAND. A failing
-// script cell can be anywhere in a virtualized table, so the badge → panel (the
+// The script-error recap is fetched ON DEMAND. A failing script cell can be
+// anywhere in a virtualized table, so the badge → panel (the
 // whole list) → jump (scroll the grid to it) chain is the only way to reach
 // one. The recap comes from the store (whole-table `POST /tables/script-errors`,
 // stubbed here), and that route re-renders the whole table cache-only — so it
@@ -584,12 +583,12 @@ describe('TableView script-error badge + panel', () => {
 		}
 	});
 
-	// Re-review finding (MINOR): a badge that cannot be acted on. A sort or a
-	// reload drops the store's page-state signature the instant the request goes
-	// out, but the PREVIOUS page's `script_status` survives it — so a badge gated
-	// on the status alone stayed lit, and clicking it did nothing at all
-	// (`requestScriptErrors` no-ops, the panel opens and the effect shuts it in
-	// the same flush). Gate on the store's askability instead.
+	// A badge that cannot be acted on must not stay lit. A sort or a reload
+	// drops the store's page-state signature the instant the request goes
+	// out, but the PREVIOUS page's `script_status` survives it — so a badge
+	// gated on the status alone would stay lit while clicking it does nothing
+	// at all (`requestScriptErrors` no-ops, the panel opens and the effect
+	// shuts it in the same flush). Gate on the store's askability instead.
 	it('hides the badge while a re-evaluation is in flight', () => {
 		h.scriptStatus = READY; // still the previous page's, and stale
 		h.canCheckScriptErrors = false;
@@ -660,13 +659,12 @@ describe('TableView script-error badge + panel', () => {
 		}
 	});
 
-	// Re-review finding (IMPORTANT): with no script runner the recap route now
-	// answers ZERO errors (the honest server-side answer — nothing ran, so
-	// nothing is known to have failed), and the wire cannot carry the
-	// distinction. Rendering that as "No script errors" puts a green tick
-	// directly above a grid whose every script cell reads
-	// `#ERROR: script runner unavailable`. The cells are the evidence, so the
-	// client uses them.
+	// With no script runner the recap route answers ZERO errors (the honest
+	// server-side answer — nothing ran, so nothing is known to have failed),
+	// and the wire cannot carry the distinction. Rendering that as "No script
+	// errors" would put a green tick directly above a grid whose every script
+	// cell reads `#ERROR: script runner unavailable`. The cells are the
+	// evidence, so the client uses them.
 	it('does not claim a clean table when script cells were never computed', () => {
 		h.scriptStatus = READY; // the unsorted-collapse shape: no calls, so `ready`
 		h.scriptErrorsPhase = 'done';
@@ -957,9 +955,9 @@ describe('TableView header edit / add-column focus', () => {
 			const editBtn = document.querySelector('[data-testid="header-edit-1"]') as HTMLElement;
 			editBtn.click();
 			flushSync();
-			// Close the dialog via the custom X button (Task 6: the primitive's
-			// built-in X is gone — `showCloseButton={false}` — replaced by a plain
-			// button with a stable testid so it no longer needs picking out of a
+			// Close the dialog via the custom X button (the primitive's built-in
+			// X is disabled via `showCloseButton={false}`, replaced by a plain
+			// button with a stable testid instead of picking it out of a
 			// `data-slot="dialog-close"` list shared with Cancel/Save). Content
 			// unmount is still deferred until bits-ui's close "animation" resolves,
 			// since `requestClose()` (the X's click handler) closes by assigning
@@ -1118,12 +1116,11 @@ describe('TableView settings dialog sizing', () => {
 	});
 });
 
-// Task 7: the old strip joined raw backend prose with ' · ' behind
-// `data-testid="table-warnings"`. It is now a COUNT plus a disclosure
-// (`table-warnings-badge`) — the formatted prose lives behind a click, in
-// `ScriptWarningsPanel`. Uses this file's own mount/flushSync/unmount
-// convention, not the brief's literal `@testing-library/svelte`
-// `render`/`screen`/`fireEvent` snippet — see the file header.
+// The warnings strip is a COUNT plus a disclosure (`table-warnings-badge`) —
+// the formatted prose lives behind a click, in `ScriptWarningsPanel`. Uses
+// this file's own mount/flushSync/unmount convention, not
+// `@testing-library/svelte`'s `render`/`screen`/`fireEvent` — see the file
+// header.
 describe('TableView script-warnings badge + panel', () => {
 	const WARNINGS: ScriptWarning[] = [
 		{ code: 'nav_unknown_ids', occurrences: 17, total: 42, detail: null },
@@ -1249,8 +1246,8 @@ describe('TableView row count', () => {
 	});
 });
 
-// Task 10: the Export button is now a dropdown trigger (bits-ui's
-// DropdownMenu, not a Dialog) offering both file formats. Unlike the settings
+// The Export button is a dropdown trigger (bits-ui's DropdownMenu, not a
+// Dialog) offering both file formats. Unlike the settings
 // Dialog elsewhere in this file, DropdownMenu.Content is not gated behind a
 // requestAnimationFrame-deferred close "animation" — PathCard's "Combine
 // with… ▾" menu (path-card.test.ts) opens its items with a plain click +
@@ -1275,11 +1272,12 @@ describe('TableView export format menu', () => {
 		await waitFor(() => !!document.querySelector('[data-testid="export-confirm"]'));
 	}
 
-	// Task 7: the menu items no longer download — they open the export settings
-	// dialog on the chosen format, and the download happens on its Export
-	// button. Asserting only "the dialog opened" would let a component that
-	// downloaded anyway pass, so both halves are checked: nothing downloads on
-	// the menu click, and the right format downloads on the confirm click.
+	// The menu items must not download directly — they open the export
+	// settings dialog on the chosen format, and the download happens on its
+	// Export button. Asserting only "the dialog opened" would let a component
+	// that downloaded anyway pass, so both halves are checked: nothing
+	// downloads on the menu click, and the right format downloads on the
+	// confirm click.
 	it('opens the export dialog on the chosen format rather than downloading', async () => {
 		const c = render('tbl:draft:1');
 		try {
@@ -1317,11 +1315,10 @@ describe('TableView export format menu', () => {
 	});
 });
 
-// Task 11 gave the settings dialog a second tab (JSON export options + a live
-// preview); the export-settings task took it back out again — those options
-// moved to the export dialog, beside the inclusion/order settings they share a
-// file with. What is pinned here is that the settings dialog is a single body
-// once more, with no tab strip to switch. Uses this file's own
+// The JSON export options (with a live preview) live in the export dialog,
+// beside the inclusion/order settings they share a file with — not in the
+// column-settings dialog. What is pinned here is that the settings dialog is
+// a single body, with no tab strip to switch. Uses this file's own
 // mount/flushSync/unmount + waitFor convention.
 describe('TableView settings dialog body', () => {
 	afterEach(() => {
@@ -1362,13 +1359,12 @@ describe('TableView settings dialog body', () => {
 	});
 });
 
-// Task 10: a lock-denied table tab used to leave the grid's column-manager/
-// edit-column/add-column chrome fully live — only the name input and Save/
-// Save-as were disabled. This pins the fix: the grid host (and, inside the
+// A lock-denied table tab must not leave the grid's column-manager/
+// edit-column/add-column chrome fully live. The grid host (and, inside the
 // settings dialog, the column manager) goes `inert` while denied, and the
-// banner gains a "Save as copy" escape hatch that reuses `saveAsTableDraft` —
-// the same fork the (disabled-while-locked) toolbar "Save as…" button already
-// used.
+// banner carries a "Save as copy" escape hatch that reuses `saveAsTableDraft`
+// — the same fork the (disabled-while-locked) toolbar "Save as…" button
+// uses.
 describe('TableView lock-denied banner', () => {
 	afterEach(() => {
 		vi.mocked(saveAsTableDraft).mockClear();

@@ -163,9 +163,8 @@ describe('TopBar', () => {
 		});
 	});
 
-	// P-22 renamed the flat control "Edit Metamodel" → "Metamodel" and moved it
-	// first; it still opens the in-app metamodel editor tab (P-10.3 killed the
-	// old "Swap Metamodel" drawer).
+	// The "Metamodel" control opens the in-app metamodel editor tab; there is
+	// no "Swap Metamodel" drawer.
 	describe('Metamodel button', () => {
 		it('opens the metamodel tab and offers no Swap Metamodel entry', () => {
 			vi.mocked(getMetamodel).mockReturnValue({ elements: [], relationships: [] } as never);
@@ -195,10 +194,9 @@ describe('TopBar', () => {
 		});
 	});
 
-	// P-22: six left-nav controls in a fixed order, with Compare/Export/History
-	// folded into the Model dropdown. The P-10.3 guarantees (no overflow menu,
-	// no command palette) still hold.
-	describe('top bar layout (P-22)', () => {
+	// Six left-nav controls in a fixed order, with Compare/Export/History
+	// folded into the Model dropdown. No overflow menu, no command palette.
+	describe('top bar layout', () => {
 		it('renders Metamodel · Issues · Artifacts · Apply CR · Model · Settings, in order', () => {
 			const c = mount(TopBar, { target: document.body });
 			flushSync();
@@ -225,9 +223,9 @@ describe('TopBar', () => {
 		});
 	});
 
-	// P-22: History, Compare and Export live in the Model dropdown (same
-	// treatment as the Artifacts menu), no longer as flat controls.
-	describe('Model menu (P-22)', () => {
+	// History, Compare and Export live in the Model dropdown, the same
+	// treatment as the Artifacts menu, rather than as flat controls.
+	describe('Model menu', () => {
 		it('offers History, Compare and Export, in order', () => {
 			const c = mount(TopBar, { target: document.body });
 			flushSync();

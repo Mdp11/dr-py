@@ -472,7 +472,7 @@ describe('SnippetSourceEditor — test panel', () => {
 		// CodeEditor.svelte for the full why. That lets this test dispatch a
 		// REAL keydown on the view's contentDOM (as an actual keypress would
 		// arrive) instead of reaching into the keymap facet to invoke the
-		// binding directly, the way this test used to work around the bug.
+		// binding directly.
 		vi.useFakeTimers();
 		server.use(
 			http.post('*/snippets/lint', () =>

@@ -7,11 +7,11 @@ import { parseDraft } from '$lib/metamodel/yaml-edit';
 import type { MetamodelDiagramView } from '$lib/state';
 
 /**
- * Form-panel tests (Task 11). The state module is mocked wholesale, so what
- * these assert is the CONTRACT between a form control and the command it
- * emits: one `YamlEditCommand` per field change, carrying the full shape the
- * yaml-edit handler expects. Task 2-4's suites already prove what each command
- * does to the YAML; nothing here re-derives that.
+ * Form-panel tests. The state module is mocked wholesale, so what these
+ * assert is the CONTRACT between a form control and the command it emits:
+ * one `YamlEditCommand` per field change, carrying the full shape the
+ * yaml-edit handler expects. The yaml-edit suites already prove what each
+ * command does to the YAML; nothing here re-derives that.
  *
  * The metamodel under test is parsed from the SHARED yaml fixture rather than
  * hand-built, so the forms are exercised against exactly the shapes the

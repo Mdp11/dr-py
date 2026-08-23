@@ -1,7 +1,6 @@
-// Render tests for the exporter tab (P-14 task 12b step 3/5). Mirrors the
-// mount scaffolding the artifact-editor tab tests use (artifact/checkout
-// mocks, `setProjectInfo`) and `SnippetTab.lock-denied.test.ts` (the
-// conflict-shape lease stub).
+// Render tests for the exporter tab. Mirrors the mount scaffolding the
+// artifact-editor tab tests use (artifact/checkout mocks, `setProjectInfo`)
+// and `SnippetTab.lock-denied.test.ts` (the conflict-shape lease stub).
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import * as artifactsApi from '$lib/api/artifacts';
@@ -70,7 +69,7 @@ const TABLE_ARTIFACT = {
 };
 
 /** A committed code_snippet artifact whose server-derived entry_points cover
- *  `transform` — the transform picker's option pool (Phase 4 task 9). */
+ *  `transform` — the transform picker's option pool. */
 const TRANSFORM_SNIPPET_HEADER = {
 	id: 'snip-1',
 	kind: 'code_snippet',
@@ -82,7 +81,7 @@ const TRANSFORM_SNIPPET_HEADER = {
 };
 
 /** Two headers with names chosen so "par" matches one and not the other —
- *  the add-table picker's typeahead test fixture (P-15.1). */
+ *  the add-table picker's typeahead test fixture. */
 const PARTS_HEADER = {
 	id: 'tbl-parts',
 	kind: 'table',
@@ -348,22 +347,22 @@ describe('ExporterTab', () => {
 		expect(draft.dirty).toBe(false);
 		expect(draft.artifactId).not.toBeNull();
 		// A staged create's id names nothing server-side until the batch
-		// commits, but temp-id state no longer gates Export at all (spec §11:
-		// ungated on dirty/uncommitted) — the button stays disabled here only
-		// because the draft still has zero entries.
+		// commits, but temp-id state does not gate Export at all (ungated on
+		// dirty/uncommitted) — the button stays disabled here only because the
+		// draft still has zero entries.
 		expect(isTempId(draft.artifactId!)).toBe(true);
 		expect(runBtn.disabled).toBe(true);
 	});
 
-	// Regression (Important, task 12b fix round 1): two "Edit layout" clicks
-	// on DIFFERENT rows before either fetch resolves used to race. Whichever
-	// fetch resolved LAST won `editDefinition`/`editEntryIndex`, but if
-	// `editLayoutOpen` had already flipped true from the FIRST resolution,
-	// the already-mounted `EntryLayoutDialog` only got new PROPS, never a
-	// remount — so its `effective` `$state` (captured once, by design) stayed
-	// frozen on the FIRST entry's table while the dialog claimed to be
-	// editing the SECOND. Save then wrote the first table's layout into the
-	// second entry's slot: a persisted cross-wire.
+	// Two "Edit layout" clicks on DIFFERENT rows before either fetch resolves
+	// must not race. Whichever fetch resolves LAST must win
+	// `editDefinition`/`editEntryIndex` — if `editLayoutOpen` had already
+	// flipped true from the FIRST resolution, the already-mounted
+	// `EntryLayoutDialog` would only get new PROPS, never a remount, so its
+	// `effective` `$state` (captured once, by design) would stay frozen on
+	// the FIRST entry's table while the dialog claimed to be editing the
+	// SECOND. Save would then write the first table's layout into the second
+	// entry's slot: a persisted cross-wire.
 	it('a second Edit-layout click before the first fetch resolves does not cross-wire the saved patch', async () => {
 		const defA = deferred<typeof TABLE_A_ARTIFACT>();
 		const defB = deferred<typeof TABLE_B_ARTIFACT>();
@@ -383,8 +382,8 @@ describe('ExporterTab', () => {
 		document.querySelector<HTMLButtonElement>('[data-testid="export-entry-0-layout"]')!.click();
 		document.querySelector<HTMLButtonElement>('[data-testid="export-entry-1-layout"]')!.click();
 
-		// Entry 0's fetch (table A, 1 column) resolves FIRST — this is what
-		// used to open the dialog prematurely on the stale entry.
+		// Entry 0's fetch (table A, 1 column) resolves FIRST — a naive
+		// implementation would open the dialog prematurely on this stale entry.
 		defA.resolve(TABLE_A_ARTIFACT);
 		await Promise.resolve();
 		await Promise.resolve();
@@ -501,7 +500,7 @@ describe('ExporterTab', () => {
 		expect(hint.textContent).toMatch(/commit/i);
 	});
 
-	it('allows adding the same table twice (F-11)', async () => {
+	it('allows adding the same table twice', async () => {
 		getArtifactSpy.mockImplementation((id: string) =>
 			id === 'art-1' ? Promise.resolve(EXPORT_ARTIFACT) : Promise.resolve(TABLE_ARTIFACT)
 		);
@@ -521,8 +520,8 @@ describe('ExporterTab', () => {
 		flushSync();
 		await vi.waitFor(() => expect(getExporterDraft('exp:art-1')!.entries.length).toBe(2));
 
-		// The just-used table must still be offered by the picker — F-11 drops
-		// the usedRefs filter entirely; duplicate entries are legal.
+		// The just-used table must still be offered by the picker: there is no
+		// usedRefs filter; duplicate entries are legal.
 		input.value = 'Beta';
 		input.dispatchEvent(new Event('input', { bubbles: true }));
 		flushSync();
@@ -596,7 +595,7 @@ describe('ExporterTab', () => {
 	});
 
 	// A clean, committed draft still runs by artifact id — identical content,
-	// but the manifest then carries the real artifact id (spec §11).
+	// but the manifest then carries the real artifact id.
 	it('exports a clean committed draft by artifact id', async () => {
 		getArtifactSpy.mockResolvedValue(EXPORT_ARTIFACT);
 		render('exp:art-1');
@@ -658,9 +657,8 @@ describe('ExporterTab', () => {
 		expect(runBtn.title).toBe('');
 	});
 
-	// P-15.1: the bare <select> is replaced by a searchable typeahead
-	// (AddTablePicker.svelte) that filters client-side over the in-memory
-	// committed-table headers.
+	// The add-table control is a searchable typeahead (AddTablePicker.svelte)
+	// that filters client-side over the in-memory committed-table headers.
 	it('filters the add-table picker as the user types', async () => {
 		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({
 			items: [PARTS_HEADER, BUILDINGS_HEADER]
@@ -707,7 +705,7 @@ describe('ExporterTab', () => {
 		await vi.waitFor(() => expect(getExporterDraft('exp:draft:1')!.entries.length).toBe(1));
 		expect(document.querySelector('[data-testid="export-entry-0"]')).not.toBeNull();
 
-		// F-11: duplicates are legal and useful — the same table added twice.
+		// Duplicates are legal and useful — the same table added twice.
 		input.value = 'par';
 		input.dispatchEvent(new Event('input', { bubbles: true }));
 		flushSync();
@@ -745,8 +743,8 @@ describe('ExporterTab', () => {
 		expect(getExporterDraft('exp:draft:1')!.entries.length).toBe(0);
 	});
 
-	// Phase 4 task 9: the transform picker rides in each entry row, gated on
-	// the entry's own format — never a whole-artifact setting.
+	// The transform picker rides in each entry row, gated on the entry's own
+	// format — never a whole-artifact setting.
 	it('a json-family entry row renders the transform picker and picking a snippet patches the entry', async () => {
 		getArtifactSpy.mockResolvedValue(EXPORT_ARTIFACT);
 		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({

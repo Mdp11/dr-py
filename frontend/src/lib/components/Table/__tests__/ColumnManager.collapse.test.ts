@@ -1,5 +1,5 @@
-// Regression test for Task 6: PathCard's expand/collapse disclosure must live
-// in the navigation-editor store (not component-local $state), defaulting to
+// PathCard's expand/collapse disclosure must live in the navigation-editor
+// store (not component-local $state), defaulting to
 // COLLAPSED for embedded (table-settings) drafts so a settings dialog full of
 // inline navigation builders is readable, and surviving whatever remount an
 // unrelated structural edit (like adding a sibling column) triggers. Modeled

@@ -113,14 +113,12 @@ it('puts the kind badge and the name input inside a header band', async () => {
 	}
 });
 
-// Regression: `overflow-hidden` was added to the column card so the header
-// band's tint would reach the card's rounded corners, but it turned the card
-// into a clipping context that swallowed every popup rendered inside it
+// The column card must never carry `overflow-hidden`: it would turn the card
+// into a clipping context that swallows every popup rendered inside it
 // (PropertyColumnEditor's suggestion list, CodeMirror's completion/hover/lint
 // tooltips). A CSS clip is invisible to happy-dom (no real layout/paint), so
 // this asserts at the class level instead — the honest guard given the
-// tooling, paired with the why-comment on the card in ColumnManager.svelte
-// that says `overflow-hidden` must never come back here.
+// tooling, paired with the why-comment on the card in ColumnManager.svelte.
 it('does not clip the column card (no overflow-hidden), so descendant popups can escape it', async () => {
 	await seed([propertyColumn('Owner')]);
 	const c = mount(ColumnManager, { target: document.body, props: { tabId: TAB } });
@@ -152,11 +150,11 @@ it('tints the kind badge per column kind', async () => {
 	}
 });
 
-// Regression: a single property-column fixture alone cannot catch
-// kindBadgeClass collapsing every kind to the same tint (e.g. always
-// returning 'text-info') — it would still pass the test above. Seed all
-// four kinds and assert each gets its OWN tint class, distinct from every
-// other kind's, which is the entire point of the badge.
+// A single property-column fixture alone cannot catch kindBadgeClass
+// collapsing every kind to the same tint (e.g. always returning 'text-info')
+// — it would still pass the test above. Seed all four kinds and assert each
+// gets its OWN tint class, distinct from every other kind's, which is the
+// entire point of the badge.
 it('gives each column kind its own, mutually distinct badge tint', async () => {
 	await seed([
 		elementColumn('Block'),

@@ -1,8 +1,7 @@
-// Task 10: a lock-denied snippet tab used to leave the CodeMirror document
-// typeable — only the name input and Save were disabled. This pins the fix:
-// the CodeMirror host goes `inert` while denied (the console stays live,
+// A lock-denied snippet tab must not leave the CodeMirror document typeable.
+// The CodeMirror host goes `inert` while denied (the console stays live,
 // since it is a run/results surface, not an editing one) and the banner
-// gains a "Save as copy" escape hatch (`forkSnippetDraftAsCopy`) that forks
+// carries a "Save as copy" escape hatch (`forkSnippetDraftAsCopy`) that forks
 // the draft into a brand-new SEPARATE tab, leaving the source tab's draft,
 // denial state, and artifact binding untouched.
 //

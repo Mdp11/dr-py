@@ -46,7 +46,7 @@ describe('MetamodelFormPanel overview TOC', () => {
 			expect(sectionHeader('elements').textContent).toContain('3');
 			expect(sectionHeader('relationships').textContent).toContain('3');
 			expect(sectionHeader('enums').textContent).toContain('1');
-			// Element types are LISTED now (previously absent from the overview).
+			// Element types are LISTED in the overview.
 			expect(text).toContain('NamedElement');
 			expect(text).toContain('Building');
 			// All relationships listed, mapless one badged.

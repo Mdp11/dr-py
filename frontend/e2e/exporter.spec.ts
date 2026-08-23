@@ -1,6 +1,6 @@
 /**
  * E2E: exporter artifact — the add-table picker across every tab lifecycle
- * (Exporter v2 Phase 1's editor, `Export/ExporterTab.svelte`).
+ * (`Export/ExporterTab.svelte`).
  *
  * The picker copies the chosen table's definition into a new `ExporterEntry`
  * at add time (`addExporterEntry` → `entryForTable`), and the draft's tab id

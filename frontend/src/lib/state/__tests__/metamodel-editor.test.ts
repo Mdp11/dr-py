@@ -25,7 +25,7 @@ import { ConflictError } from '$lib/api/errors';
 import type { LockResponse, MetamodelDiff, RawMetamodel } from '$lib/api/types';
 
 /**
- * The live metamodel editor's state module (Phase 5). Mirrors
+ * The live metamodel editor's state module. Mirrors
  * checkout.metamodel.test.ts's style: spy on the api modules
  * (`$lib/api/metamodel`, `$lib/api/checkout`) rather than mocking whole
  * modules, so the real lease module runs underneath.
@@ -289,7 +289,7 @@ describe('previewMetamodelChanges', () => {
 	});
 });
 
-describe('the commit-flow seam (spec 2026-08-16)', () => {
+describe('the commit-flow seam', () => {
 	it('stages the dirty buffer as the rebind blob through the registered provider', async () => {
 		stubLintOk();
 		vi.spyOn(lockApi, 'acquireLocks').mockResolvedValue(LEASE);

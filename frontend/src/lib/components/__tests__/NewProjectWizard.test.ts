@@ -172,11 +172,11 @@ describe('NewProjectWizard', () => {
 		unmount(c);
 	});
 
-	// Regression for review finding #5: closing used to reset only
-	// artifacts/skipped/createdId, leaving name/metamodel/model/view showing
-	// the PREVIOUS attempt on reopen (with the artifacts slot alone blank —
-	// an inconsistent, confusing state). Drive an actual close→reopen cycle
-	// via NewProjectWizardHost (see its own comment for why a host is needed:
+	// Closing must reset name and every file slot, not just
+	// artifacts/skipped/createdId — leaving name/metamodel/model/view showing
+	// the PREVIOUS attempt on reopen (with the artifacts slot alone blank) is
+	// an inconsistent, confusing state. Drive an actual close→reopen cycle via
+	// NewProjectWizardHost (see its own comment for why a host is needed:
 	// `open` is a plain $bindable prop, not a store, so a top-level `mount()`
 	// cannot toggle it from the test directly).
 	it('resets name and every file slot on close, not just the artifacts slot', async () => {
@@ -485,9 +485,9 @@ describe('NewProjectWizard', () => {
 		unmount(c);
 	});
 
-	// Regression for review finding #7 (hygiene #2): the "Open project" click
-	// handler is fire-and-forget; a rejecting `onCreated` must not become an
-	// unhandled promise rejection. Deliberately NOT a `vi.fn()` mock: Vitest's
+	// The "Open project" click handler is fire-and-forget; a rejecting
+	// `onCreated` must not become an unhandled promise rejection. Deliberately
+	// NOT a `vi.fn()` mock: Vitest's
 	// spy instrumentation attaches its own internal `.then`/`.catch` to record
 	// `mock.results`, which would swallow the rejection regardless of whether
 	// the component itself handles it — masking exactly the bug this test

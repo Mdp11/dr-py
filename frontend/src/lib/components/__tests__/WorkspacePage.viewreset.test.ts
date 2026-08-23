@@ -3,7 +3,7 @@
  *
  * The journal (`view-edits.svelte.ts`) is a module-scope singleton, and its
  * ops name `folder:` ids that only mean anything for one project at one rev.
- * Two page-level resets therefore have to clear it, and neither used to:
+ * Two page-level resets therefore have to clear it:
  *
  *  - boot(): an in-SPA project switch would otherwise carry project A's staged
  *    view ops into project B and offer them for commit there.

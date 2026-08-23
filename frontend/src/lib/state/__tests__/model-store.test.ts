@@ -294,8 +294,7 @@ describe('emit', () => {
 		expect(getCachedRelationships().has('r3')).toBe(true);
 	});
 
-	// Converted from 'flushes structural ops immediately as one batch': Spec B
-	// stages edits in the buffer with NO auto-flush. Assert both structural ops
+	// Edits stage in the buffer with NO auto-flush. Assert both structural ops
 	// are staged (queue depth 2, both visible in getStagedOps), caches reflect
 	// them optimistically with their TEMP ids (no ack ⇒ no remap), and NO
 	// network request is fired (onUnhandledRequest:'error' would throw if one
@@ -322,11 +321,10 @@ describe('emit', () => {
 		expect(hasStagedOps()).toBe(true); // staged edits still pending commit
 	});
 
-	// Converted from 'debounces property updates and coalesces patches...': the
-	// coalescing logic is preserved but there is no debounce/flush. Assert two
-	// successive patches to the same entity collapse into ONE staged op (later
-	// keys win, nulls survive), the optimistic merge is visible immediately, and
-	// no network request fires.
+	// Coalescing logic applies with no debounce/flush. Assert two successive
+	// patches to the same entity collapse into ONE staged op (later keys win,
+	// nulls survive), the optimistic merge is visible immediately, and no
+	// network request fires.
 	it('coalesces property patches into one staged op without flushing', async () => {
 		vi.useFakeTimers();
 		applyDelta(delta({ model_rev: 2, changed_elements: [el('e1', { name: 'A' }, 1)] }));
@@ -346,12 +344,10 @@ describe('emit', () => {
 		expect(getModelRev()).toBe(2); // unchanged — nothing committed
 	});
 
-	// Converted from 'serializes flushes (single in-flight batch) and remaps
-	// queued temp ids': flush serialization no longer exists (no auto-flush, no
-	// in-flight batch). The staging analogue: a create followed by an update of
-	// the same temp id stays staged as two distinct ops (a create then a
-	// property update — they do NOT coalesce, only updates of the same id do),
-	// applied optimistically, with no network request.
+	// A create followed by an update of the same temp id stays staged as two
+	// distinct ops (a create then a property update — they do NOT coalesce,
+	// only updates of the same id do), applied optimistically, with no
+	// network request.
 	it('stages a create then an update of the same temp id (no flush)', async () => {
 		emit({ kind: 'create_element', temp_id: 'tmp_a', type_name: 'Block', properties: {} });
 		emit({ kind: 'update_element', id: 'tmp_a', properties_patch: { name: 'B' } });
@@ -513,8 +509,8 @@ describe('reads and lifecycle', () => {
 		await loadSummary();
 		expect(getModelSummary()?.element_count).toBe(10);
 		expect(getModelRev()).toBe(4);
-		// Spec B: the staged buffer (not the server's undo_depth) drives Undo;
-		// no edits staged here.
+		// The staged buffer (not the server's undo_depth) drives Undo; no edits
+		// staged here.
 		expect(getStagedDepth()).toBe(0);
 		expect(getIssueCounts()).toEqual({ warning: 2 });
 		await loadSummary(); // already loaded
@@ -523,8 +519,8 @@ describe('reads and lifecycle', () => {
 		expect(fetches).toBe(2);
 	});
 
-	// Spec B client-side undo: popLastStaged reverts the LAST STAGED op (there is
-	// no server-undo). Assert it reverts the staged create, drops it from the
+	// Client-side undo: popLastStaged reverts the LAST STAGED op (there is no
+	// server-undo). Assert it reverts the staged create, drops it from the
 	// buffer, and reports success; no network request is involved.
 	it('popLastStaged reverts the last staged op client-side', () => {
 		seedElements([el('e0', { name: 'kept' }, 1)]);

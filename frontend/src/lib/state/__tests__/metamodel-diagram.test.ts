@@ -24,8 +24,8 @@ import {
 } from '../metamodel-diagram.svelte';
 
 /**
- * The diagram half of the metamodel tab (Task 9; restaged by spec 2026-08-16).
- * This module owns NO draft state: it parses the editor module's buffer,
+ * The diagram half of the metamodel tab. This module owns NO draft state: it
+ * parses the editor module's buffer,
  * applies one semantic YAML command, and writes the text back through
  * `editMetamodelBuffer`. So the editor module is MOCKED down to the two
  * functions that seam touches — a tiny in-test buffer store — which keeps these
@@ -128,9 +128,9 @@ beforeEach(() => {
 	editorState.phase = 'ready';
 	editorState.writes = 0;
 	editorState.lintErrors = [];
-	// Staging a move now acquires the `mm` lease (final-review Finding 1), so
-	// every case that drags would otherwise reach the network. Granted by
-	// default; the conflict cases below re-spy with a 409.
+	// Staging a move acquires the `mm` lease, so every case that drags would
+	// otherwise reach the network. Granted by default; the conflict cases
+	// below re-spy with a 409.
 	vi.spyOn(lockApi, 'acquireLocks').mockResolvedValue(LEASE);
 });
 
@@ -261,16 +261,16 @@ describe('moveNode', () => {
 	});
 
 	it('has no layout PUT left to make', () => {
-		// The route is gone (`PUT /metamodel/layout`, spec 2026-08-16), and so is
-		// the client wrapper — a re-introduced live save would have to re-add it.
+		// There is no `PUT /metamodel/layout` route, and no client wrapper for
+		// one — a re-introduced live save would have to re-add it.
 		expect('putMetamodelLayout' in mmApi).toBe(false);
 	});
 });
 
 describe('the layout lease', () => {
 	/**
-	 * The merge-blocking half of the final review: `required_locks`
-	 * (api/locking.py) derives an EXCLUSIVE `mm` lease for BOTH members of the
+	 * The merge-blocking hazard: `required_locks` (api/locking.py) derives an
+	 * EXCLUSIVE `mm` lease for BOTH members of the
 	 * `metamodel.*` family, so a staged move with no lease behind it 409s the
 	 * WHOLE next commit — including unrelated model/artifact/view edits — and
 	 * keeps doing so until the user finds the drawer's discard. The editor's

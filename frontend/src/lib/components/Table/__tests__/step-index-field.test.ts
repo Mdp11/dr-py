@@ -6,7 +6,7 @@
 // core/table/evaluate.py::_check_step_index accepts 0..chain_len-1, so the
 // last option is chainColumns(path).length - 1; a set_op definition is a
 // single-element chain -> one option (0). With NO definition known the field
-// degrades to the free numeric input it used to be.
+// degrades to a free numeric input.
 import { flushSync, mount, unmount } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as artifactsApi from '$lib/api/artifacts';
