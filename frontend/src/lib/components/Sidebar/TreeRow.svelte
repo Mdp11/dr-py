@@ -239,6 +239,8 @@
 			openArtifactTab('snippet', { artifactId, title: artifactHeader.name });
 		} else if (artifactHeader.kind === 'exporter') {
 			openArtifactTab('exporter', { artifactId, title: artifactHeader.name });
+		} else if (artifactHeader.kind === 'validation_rules') {
+			openArtifactTab('rules', { artifactId, title: artifactHeader.name });
 		} else if (artifactHeader.kind === 'navigation') {
 			openNavigationTab({ artifactId, title: artifactHeader.name });
 		}

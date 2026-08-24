@@ -24,7 +24,8 @@
 		{ kind: 'navigation', title: 'Navigations', icon: KIND_ICONS.navigation },
 		{ kind: 'table', title: 'Tables', icon: KIND_ICONS.table },
 		{ kind: 'code_snippet', title: 'Snippets', icon: KIND_ICONS.code_snippet },
-		{ kind: 'exporter', title: 'Exporters', icon: KIND_ICONS.exporter }
+		{ kind: 'exporter', title: 'Exporters', icon: KIND_ICONS.exporter },
+		{ kind: 'validation_rules', title: 'Rules', icon: KIND_ICONS.validation_rules }
 	];
 
 	// A local mirror of the store's open flag, bound two-way to Dialog.Root —

@@ -119,6 +119,15 @@ describe('dynamic workspace tabs', () => {
 		expect(id).toBe('exp:a');
 		expect(getDynamicTabs().find((t) => t.id === id)?.kind).toBe('exporter');
 	});
+
+	it('opens rules tabs under the rules prefix and dedupes by artifact', () => {
+		const a = openArtifactTab('rules', { artifactId: 'r1', title: 'R' });
+		expect(a).toBe('rules:r1');
+		expect(getDynamicTabs().find((t) => t.id === a)?.kind).toBe('rules');
+		const b = openArtifactTab('rules', { artifactId: 'r1', title: 'R' });
+		expect(b).toBe(a);
+		expect(getDynamicTabs()).toHaveLength(1);
+	});
 });
 
 describe('metamodel singleton tab', () => {

@@ -61,6 +61,13 @@
 			singular: 'exporter',
 			icon: KIND_ICONS.exporter,
 			open: (o) => openArtifactTab('exporter', o)
+		},
+		{
+			kind: 'validation_rules',
+			title: 'Rules',
+			singular: 'Rule set',
+			icon: KIND_ICONS.validation_rules,
+			open: (o) => openArtifactTab('rules', o)
 		}
 	];
 
@@ -68,7 +75,8 @@
 		navigation: false,
 		table: false,
 		code_snippet: false,
-		exporter: false
+		exporter: false,
+		validation_rules: false
 	});
 	const editable = $derived(canEdit());
 

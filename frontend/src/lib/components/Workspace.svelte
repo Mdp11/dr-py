@@ -5,6 +5,7 @@
 		closeDraft,
 		closeExporterDraft,
 		closeMetamodelEditor,
+		closeRulesDraft,
 		closeSnippetDraft,
 		closeTab,
 		closeTableDraft,
@@ -19,6 +20,7 @@
 	import SnippetTab from './Snippet/SnippetTab.svelte';
 	import MetamodelTab from './Metamodel/MetamodelTab.svelte';
 	import ExporterTab from './Export/ExporterTab.svelte';
+	import RulesTab from './Rules/RulesTab.svelte';
 
 	const activeTab = $derived(getActiveTab());
 	const dynamicTabs = $derived(getDynamicTabs());
@@ -64,6 +66,7 @@
 							// keeps this close path symmetric with the other kinds.
 							else if (tab.kind === 'metamodel') closeMetamodelEditor();
 							else if (tab.kind === 'exporter') closeExporterDraft(tab.id);
+							else if (tab.kind === 'rules') closeRulesDraft(tab.id);
 							else if (tab.kind === 'navigation') closeDraft(tab.id);
 							closeTab(tab.id);
 						}}
@@ -83,6 +86,8 @@
 					<MetamodelTab />
 				{:else if tab.kind === 'exporter'}
 					<ExporterTab tabId={tab.id} />
+				{:else if tab.kind === 'rules'}
+					<RulesTab tabId={tab.id} />
 				{:else if tab.kind === 'navigation'}
 					<NavigationBuilder tabId={tab.id} />
 				{:else if tab.kind === 'issues'}

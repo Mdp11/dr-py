@@ -60,10 +60,12 @@ export function hasUnsavedWork(): boolean {
  * `metamodel-stage.svelte.ts`, not in the editor's buffer).
  */
 export function isTabDirty(
-	kind: 'navigation' | 'table' | 'snippet' | 'metamodel' | 'exporter',
+	kind: 'navigation' | 'table' | 'snippet' | 'metamodel' | 'exporter' | 'rules',
 	tabId: string
 ): boolean {
 	if (kind === 'metamodel') return isMetamodelEditorDirty() || getStagedMetamodelDepth() > 0;
+	// No rules draft store exists yet, so there is nothing to check.
+	if (kind === 'rules') return false;
 	const draft =
 		kind === 'table'
 			? getTableDraft(tabId)
@@ -85,5 +87,6 @@ export function isTabDirty(
 export function isArtifactDirty(kind: ArtifactKind, artifactId: string): boolean {
 	if (kind === 'code_snippet') return isTabDirty('snippet', `snip:${artifactId}`);
 	if (kind === 'exporter') return isTabDirty('exporter', `exp:${artifactId}`);
+	if (kind === 'validation_rules') return isTabDirty('rules', `rules:${artifactId}`);
 	return isTabDirty(kind, `${kind === 'table' ? 'tbl' : 'nav'}:${artifactId}`);
 }

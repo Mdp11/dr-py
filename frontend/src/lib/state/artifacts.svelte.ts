@@ -121,7 +121,8 @@ const NAME_CLASH_LABEL: Record<ArtifactKind, string> = {
 	navigation: 'navigation',
 	table: 'table',
 	code_snippet: 'code snippet',
-	exporter: 'exporter'
+	exporter: 'exporter',
+	validation_rules: 'rule set'
 };
 
 export function assertNoNameClash(

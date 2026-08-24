@@ -147,7 +147,8 @@
 		navigation: 'navigation',
 		table: 'table',
 		code_snippet: 'code snippet',
-		exporter: 'exporter'
+		exporter: 'exporter',
+		validation_rules: 'rule set'
 	};
 
 	function artifactEntryId(e: StagedArtifactEntry): string {

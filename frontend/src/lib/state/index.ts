@@ -442,6 +442,7 @@ export {
 	updateExporterOutput,
 	type ExporterDraft
 } from './exporter-editor.svelte';
+export { closeRulesDraft, ensureRulesDraft, resetRulesEditors } from './rules-editor.svelte';
 export {
 	abandonTableEvaluationSuspension,
 	canRequestScriptErrors,
