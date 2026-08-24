@@ -1,8 +1,10 @@
 """POST /rules/lint — parse + schema + drift check for the editor's debounced
-calls. Sibling of POST /metamodel/lint: always 200, viewers get 403."""
+calls. Sibling of POST /metamodel/lint: always 200 for a well-formed request
+(any string ``yaml``), 422 for a malformed envelope; viewers get 403."""
 
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 from data_rover.api import db
@@ -10,6 +12,7 @@ from data_rover.api.db_models import Role, User
 from data_rover.api.main import create_app
 from data_rover.api.session import DEFAULT_PROJECT_ID
 from data_rover.api.tenancy import add_member
+from data_rover.core.validation.rules.schema import RULES_MAX_YAML_BYTES
 
 from .conftest import AUTH_HEADERS, papi, seed_default_project
 
@@ -31,11 +34,7 @@ _VALID_YAML = (
 _SYNTAX_BAD_YAML = "rules: ["
 
 # Parses as YAML but violates the rule schema (missing required `then`).
-_SCHEMA_BAD_YAML = (
-    "rules:\n"
-    "  - name: no-then\n"
-    "    applies_to: Building\n"
-)
+_SCHEMA_BAD_YAML = "rules:\n  - name: no-then\n    applies_to: Building\n"
 
 # Schema-valid, but `applies_to` names a stereotype the metamodel doesn't have.
 _DRIFT_YAML = (
@@ -92,6 +91,47 @@ def test_lint_drift_is_warning_not_error() -> None:
     (warning,) = body["warnings"]
     assert warning["rule"] == "bogus-rule"
     assert "Bogus" in warning["message"]
+
+
+@pytest.mark.parametrize(
+    "yaml_text",
+    [
+        pytest.param(_SYNTAX_BAD_YAML, id="unparseable"),
+        pytest.param("hello", id="scalar"),
+        pytest.param("- 1\n- 2\n", id="list"),
+        pytest.param("", id="empty"),
+    ],
+)
+def test_lint_any_string_yaml_is_200(yaml_text: str) -> None:
+    """Every well-formed request body reaches the handler and gets a 200 —
+    the lint RESULT may be ok:false, but the HTTP status never is."""
+    r = _client().post(papi("/rules/lint"), json={"yaml": yaml_text})
+    assert r.status_code == 200, r.text
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        pytest.param({"json": {}}, id="missing-yaml"),
+        pytest.param({"json": {"yaml": 123}}, id="non-string-yaml"),
+        pytest.param(
+            {
+                "content": "{not valid json",
+                "headers": {"content-type": "application/json"},
+            },
+            id="invalid-json-body",
+        ),
+        pytest.param(
+            {"json": {"yaml": "x" * (RULES_MAX_YAML_BYTES + 1)}}, id="over-cap-yaml"
+        ),
+    ],
+)
+def test_lint_malformed_envelope_is_422(kwargs: dict) -> None:
+    """A malformed request ENVELOPE never reaches the handler: it is a
+    client contract violation, not a lint candidate, so FastAPI's request
+    validation 422s before ``lint_rules`` runs."""
+    r = _client().post(papi("/rules/lint"), **kwargs)
+    assert r.status_code == 422, r.text
 
 
 def test_lint_viewer_403() -> None:

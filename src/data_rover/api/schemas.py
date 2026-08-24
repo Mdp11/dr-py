@@ -21,6 +21,7 @@ from data_rover.core.script.warnings import ScriptWarning
 from data_rover.core.table.exporter import ExporterDefinition, ExportFormat
 from data_rover.core.table.schema import TableDefinition
 from data_rover.core.validation.issue import Issue
+from data_rover.core.validation.rules.schema import RULES_MAX_YAML_BYTES
 from data_rover.core.view.schema import Folder, View
 
 
@@ -213,7 +214,7 @@ class MetamodelLintResponse(BaseModel):
 
 
 class RulesLintRequest(BaseModel):
-    yaml: str
+    yaml: str = Field(max_length=RULES_MAX_YAML_BYTES)
 
 
 class RuleWarningOut(BaseModel):
