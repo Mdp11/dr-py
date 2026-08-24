@@ -116,19 +116,36 @@ def _run(model, compiled):
     return ValidationPipeline([RulesValidator(compiled)]).validate(model, Scope.all())
 
 
-def test_eval_errors_merge_once_per_run_and_log_once_per_rule(monkeypatch, caplog):
+def test_eval_errors_merge_once_per_run_and_log_once_per_rule(monkeypatch):
     """Counts land in one merge at the end of a run; a rule that fails on
     every element still yields a single traceback."""
     model = Model(_mm())
     compiled, seen = _always_raising(model, monkeypatch)
-    with caplog.at_level(logging.WARNING, logger="data_rover.core.validation.rules"):
+    # Captured off the emitting logger rather than pytest's `caplog`, which
+    # reads the root handler: anything that has already configured
+    # `data_rover.*` logging in the same session (the API app does, at import
+    # of its lifespan) decides whether a record ever propagates that far.
+    records: list[logging.LogRecord] = []
+    emitter = logging.getLogger("data_rover.core.validation.rules.validator")
+    handler = logging.Handler()
+    handler.emit = records.append  # type: ignore[method-assign]
+    emitter.addHandler(handler)
+    prior_level, prior_disabled = emitter.level, emitter.disabled
+    emitter.setLevel(logging.WARNING)
+    emitter.disabled = False
+    try:
         assert _run(model, compiled) == []  # degraded, not raised
+    finally:
+        emitter.removeHandler(handler)
+        emitter.setLevel(prior_level)
+        emitter.disabled = prior_disabled
     assert len(seen) == 3
     assert seen == [{}, {}, {}]  # nothing merged mid-run
     assert compiled.eval_error_counts() == {"rule:zoned": 3}
     # the API layer's unlocked read of the swapped-in Counter
     assert dict(compiled.eval_errors) == {"rule:zoned": 3}
-    assert len([r for r in caplog.records if r.name.endswith(".validator")]) == 1
+    assert len(records) == 1
+    assert records[0].exc_info is not None  # the one traceback, not a bare line
 
 
 def test_eval_errors_reset_and_accumulate(monkeypatch):
