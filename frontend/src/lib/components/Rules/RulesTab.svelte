@@ -30,6 +30,11 @@
 	 * edits that could never land. */
 	const lockHolder = $derived(getRulesLockHolder(tabId));
 	const locked = $derived(lockHolder !== null);
+	/** First message-only lint error (no line anchor) for the strip below the
+	 * toolbar; positioned errors render in the gutter instead. A rule set's
+	 * errors are message-only far more often than not — only a YAML PARSE
+	 * failure carries a position, so every schema violation lands here. */
+	const stripError = $derived(draft?.lintErrors.find((e) => e.line === null) ?? null);
 
 	let saveError = $state<string | null>(null);
 
@@ -71,6 +76,14 @@
 		</div>
 		{#if saveError}
 			<p class="px-3 py-1 text-xs text-destructive">{saveError}</p>
+		{/if}
+		{#if stripError}
+			<p
+				data-testid="rules-lint-error"
+				class="mx-3 my-1 max-h-24 overflow-auto whitespace-pre-wrap rounded border border-destructive/40 bg-destructive/15 px-2 py-1.5 text-xs text-destructive"
+			>
+				{stripError.message}
+			</p>
 		{/if}
 		{#if lockHolder !== null}
 			<div

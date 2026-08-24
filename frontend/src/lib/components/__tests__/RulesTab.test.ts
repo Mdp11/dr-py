@@ -85,6 +85,42 @@ describe('RulesTab', () => {
 		expect(host.querySelector('[data-testid="rules-save"]')!.textContent?.trim()).toBe('Save *');
 	});
 
+	it('renders a message-only lint error, which the gutter cannot show', async () => {
+		// The dominant error class for a rule set: only a YAML PARSE failure
+		// carries a position, so every schema violation arrives `line: null` and
+		// MetamodelYamlEditor filters it out of the gutter.
+		vi.spyOn(rulesApi, 'lintRules').mockResolvedValue({
+			ok: false,
+			errors: [
+				{ message: "Invalid rule set: rule 'r1' is missing applies_to", line: null, column: null }
+			],
+			warnings: []
+		});
+		const tabId = openArtifactTab('rules', { artifactId: null, title: 'New rules' });
+		await ensureRulesDraft(tabId);
+		await vi.waitFor(() => expect(getRulesDraft(tabId)?.lintErrors).toHaveLength(1));
+		app = mount(RulesTab, { target: host, props: { tabId } });
+		flushSync();
+
+		const strip = host.querySelector('[data-testid="rules-lint-error"]');
+		expect(strip?.textContent?.trim()).toBe("Invalid rule set: rule 'r1' is missing applies_to");
+	});
+
+	it('leaves a POSITIONED lint error to the editor gutter', async () => {
+		vi.spyOn(rulesApi, 'lintRules').mockResolvedValue({
+			ok: false,
+			errors: [{ message: 'Malformed rules YAML', line: 2, column: 5 }],
+			warnings: []
+		});
+		const tabId = openArtifactTab('rules', { artifactId: null, title: 'New rules' });
+		await ensureRulesDraft(tabId);
+		await vi.waitFor(() => expect(getRulesDraft(tabId)?.lintErrors).toHaveLength(1));
+		app = mount(RulesTab, { target: host, props: { tabId } });
+		flushSync();
+
+		expect(host.querySelector('[data-testid="rules-lint-error"]')).toBeNull();
+	});
+
 	it('renders the drift warnings strip when the lint reports drift', async () => {
 		vi.spyOn(rulesApi, 'lintRules').mockResolvedValue({
 			ok: true,
