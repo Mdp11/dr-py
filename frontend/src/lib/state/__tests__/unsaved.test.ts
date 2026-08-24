@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as artifactsApi from '$lib/api/artifacts';
+import * as rulesApi from '$lib/api/rules';
 import * as snippetsApi from '$lib/api/snippets';
 import * as tablesApi from '$lib/api/tables';
 import {
@@ -7,12 +8,15 @@ import {
 	emit,
 	ensureDraft,
 	ensureEmbeddedDraft,
+	ensureRulesDraft,
 	ensureSnippetDraft,
 	ensureTableDraft,
+	editRulesDraft,
 	hasDirtyNavDrafts,
 	hasDirtyTableDrafts,
 	resetModelStore,
 	resetNavigationEditors,
+	resetRulesEditors,
 	resetSnippetEditors,
 	resetTableEditors,
 	seedElements,
@@ -47,6 +51,7 @@ beforeEach(() => {
 	resetTableEditors();
 	resetNavigationEditors();
 	resetSnippetEditors();
+	resetRulesEditors();
 	resetWorkspaceTabs();
 	resetArtifacts();
 	resetArtifactEdits();
@@ -63,10 +68,13 @@ beforeEach(() => {
 		diagnostics: [],
 		entry_points: ['script']
 	});
+	// Same reason for the rules editor's own open-time lint.
+	vi.spyOn(rulesApi, 'lintRules').mockResolvedValue({ ok: true, errors: [], warnings: [] });
 });
 afterEach(() => {
 	resetNavigationEditors();
 	resetSnippetEditors();
+	resetRulesEditors();
 	vi.restoreAllMocks();
 });
 
@@ -127,6 +135,14 @@ describe('hasUnsavedWork', () => {
 		const draft = await ensureTableDraft('tbl:draft:1');
 		updateTableDefinition('tbl:draft:1', draft.definition);
 		expect(hasUnsavedWork()).toBe(true);
+	});
+
+	it('is true with a dirty rules draft only', async () => {
+		await ensureRulesDraft('rules:draft:1');
+		expect(hasUnsavedWork()).toBe(false); // the starter comment is not work
+		editRulesDraft('rules:draft:1', 'rules: []\n');
+		expect(hasUnsavedWork()).toBe(true);
+		expect(isTabDirty('rules', 'rules:draft:1')).toBe(true);
 	});
 
 	it('is true while only an artifact op is staged', () => {

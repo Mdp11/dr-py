@@ -1,6 +1,7 @@
 import type { ArtifactKind } from '$lib/artifacts/kinds';
 import { getExporterDraft, hasDirtyExporterDrafts } from './exporter-editor.svelte';
 import { getDraft, hasDirtyNavDrafts } from './navigation-editor.svelte';
+import { getRulesDraft, hasDirtyRulesDrafts } from './rules-editor.svelte';
 import { getSnippetDraft, hasDirtySnippetDrafts } from './snippet-editor.svelte';
 import { isMetamodelEditorDirty } from './metamodel-editor.svelte';
 import { getTableDraft, hasDirtyTableDrafts } from './table-editor.svelte';
@@ -13,7 +14,7 @@ import { getStagedMetamodelDepth } from './metamodel-stage.svelte';
  * True when leaving the workspace would lose work the server has not seen:
  * staged (uncommitted) model edits, staged (uncommitted) ARTIFACT ops, staged
  * (uncommitted) VIEW ops, staged (uncommitted) METAMODEL ops, or an unsaved
- * table / navigation / snippet draft.
+ * table / navigation / snippet / exporter / rules draft.
  * Drives the workspace unload guard (`beforeNavigate` in the project page).
  *
  * The artifact term is not redundant with the draft terms: saving an artifact
@@ -43,7 +44,8 @@ export function hasUnsavedWork(): boolean {
 		hasDirtyTableDrafts() ||
 		hasDirtyNavDrafts() ||
 		hasDirtySnippetDrafts() ||
-		hasDirtyExporterDrafts()
+		hasDirtyExporterDrafts() ||
+		hasDirtyRulesDrafts()
 	);
 }
 
@@ -64,8 +66,6 @@ export function isTabDirty(
 	tabId: string
 ): boolean {
 	if (kind === 'metamodel') return isMetamodelEditorDirty() || getStagedMetamodelDepth() > 0;
-	// No rules draft store exists yet, so there is nothing to check.
-	if (kind === 'rules') return false;
 	const draft =
 		kind === 'table'
 			? getTableDraft(tabId)
@@ -73,7 +73,9 @@ export function isTabDirty(
 				? getSnippetDraft(tabId)
 				: kind === 'exporter'
 					? getExporterDraft(tabId)
-					: getDraft(tabId);
+					: kind === 'rules'
+						? getRulesDraft(tabId)
+						: getDraft(tabId);
 	if (!draft) return false;
 	return draft.dirty || draft.artifactId === null;
 }

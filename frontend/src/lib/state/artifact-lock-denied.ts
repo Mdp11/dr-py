@@ -22,6 +22,7 @@
  */
 import { setExporterLockDenied } from './exporter-editor.svelte';
 import { setNavLockDenied } from './navigation-editor.svelte';
+import { setRulesLockDenied } from './rules-editor.svelte';
 import { setSnippetLockDenied } from './snippet-editor.svelte';
 import { setTableLockDenied } from './table-editor.svelte';
 
@@ -30,4 +31,5 @@ export function markEditorLockDenied(tabId: string, holder: string): void {
 	else if (tabId.startsWith('tbl:')) setTableLockDenied(tabId, holder);
 	else if (tabId.startsWith('snip:')) setSnippetLockDenied(tabId, holder);
 	else if (tabId.startsWith('exp:')) setExporterLockDenied(tabId, holder);
+	else if (tabId.startsWith('rules:')) setRulesLockDenied(tabId, holder);
 }

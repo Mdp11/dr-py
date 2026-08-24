@@ -14,11 +14,14 @@
 		code,
 		errors = [],
 		readOnly = false,
+		testid = 'metamodel-editor',
 		onChange
 	}: {
 		code: string;
 		errors?: MetamodelLintError[];
 		readOnly?: boolean;
+		/** Host `data-testid`, so a reusing tab can address its own editor. */
+		testid?: string;
 		onChange: (code: string) => void;
 	} = $props();
 
@@ -93,4 +96,4 @@
 	});
 </script>
 
-<div bind:this={host} class="h-full overflow-auto text-sm" data-testid="metamodel-editor"></div>
+<div bind:this={host} class="h-full overflow-auto text-sm" data-testid={testid}></div>

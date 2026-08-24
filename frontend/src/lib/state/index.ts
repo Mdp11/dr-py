@@ -442,7 +442,21 @@ export {
 	updateExporterOutput,
 	type ExporterDraft
 } from './exporter-editor.svelte';
-export { closeRulesDraft, ensureRulesDraft, resetRulesEditors } from './rules-editor.svelte';
+export {
+	closeRulesDraft,
+	editRulesDraft,
+	ensureRulesDraft,
+	getRulesDraft,
+	getRulesLockHolder,
+	hasDirtyRulesDrafts,
+	resetRulesEditors,
+	retryRulesLock,
+	RULES_LINT_DEBOUNCE_MS,
+	saveRulesDraft,
+	setRulesLockDenied,
+	setRulesName,
+	type RulesDraft
+} from './rules-editor.svelte';
 export {
 	abandonTableEvaluationSuspension,
 	canRequestScriptErrors,
