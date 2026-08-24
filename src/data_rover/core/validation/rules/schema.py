@@ -13,7 +13,7 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
-RULES_SCHEMA_VERSION = 1
+RULES_SCHEMA_VERSION: Literal[1] = 1
 RULES_MAX_YAML_BYTES = 64 * 1024
 MAX_RULES_PER_SET = 200
 MAX_CONDITION_DEPTH = 8
