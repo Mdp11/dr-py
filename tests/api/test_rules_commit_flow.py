@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from httpx import Response
 
 from data_rover.api.main import create_app
+from data_rover.api.session import get_session
 
 from .conftest import AUTH_HEADERS, papi, seed_default_project
 
@@ -54,6 +55,10 @@ NAMED_YAML = (
 
 # applies to a type the tests never instantiate: compiles clean, reports
 # nothing, so a commit that REPLACES it is the only source of new issues.
+# _MM with Building's `name` renamed. The rule that reads `name` drifts
+# against it, so a rebind onto this schema must drop every verdict it minted.
+_MM_RENAMED = _MM.replace("name: name", "name: title")
+
 INERT_YAML = (
     "rules:\n"
     "  - name: zone-has-label\n"
@@ -90,6 +95,19 @@ def _lock(c: TestClient, targets: list[dict[str, str]], intent: str = "edit") ->
 
 def _element_targets(*ids: str) -> list[dict[str, str]]:
     return [{"resource_id": i, "mode": "exclusive"} for i in ids]
+
+
+def _mm_lock(c: TestClient) -> str:
+    r = c.post(
+        papi("/locks"),
+        json={
+            "targets": [{"resource_id": "mm", "mode": "exclusive", "type": "metamodel"}],
+            "intent": "edit",
+        },
+    )
+    assert r.status_code == 200, r.text
+    token: str = r.json()["token"]
+    return token
 
 
 def _artifact_targets(*ids: str) -> list[dict[str, str]]:
@@ -387,3 +405,81 @@ def test_rejected_commit_restores_the_prior_compiled_rules(client: TestClient) -
     )
     assert after.status_code == 422, after.text
     assert "rule:has-name" in {i["check"] for i in after.json()["conformance_blockers"]}
+
+
+def test_rebind_recompiles_the_rules(client: TestClient) -> None:
+    """A schema swap is one of the two things that must recompile the rule
+    sets: a rule the new schema drifts stops reporting and turns into a
+    ``rules_status`` skip instead."""
+    r = _commit(
+        client,
+        [
+            _rules_op(NAMED_YAML),
+            {"kind": "create_element", "temp_id": "tmp_b", "type_name": "Building"},
+        ],
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert _stored_rule_checks(client) == {"rule:has-name"}
+
+    tok = _mm_lock(client)
+    r2 = _commit(
+        client,
+        [{"kind": "metamodel.rebind", "blob": _MM_RENAMED}],
+        base_rev=body["model_rev"],
+        lock_tokens=[tok],
+    )
+    assert r2.status_code == 200, r2.text
+
+    status = client.get(papi("/model/issues")).json()["rules_status"]
+    assert status["total"] == 0
+    assert [s["rule"] for s in status["skipped"]] == ["has-name"]
+    assert _stored_rule_checks(client) == set()
+
+
+def test_persist_failure_drops_the_spliced_issue_store(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A commit that dies at the persist step has already spliced the issue
+    store against the RECOMPILED rules, and the unwind restores the old ones.
+    The splice has no inverse, so the store must be dropped: keeping it would
+    leave the session reporting under one rule set and storing verdicts from
+    another, with no read path able to tell."""
+    r = _commit(
+        client,
+        [
+            _rules_op(NAMED_YAML),
+            {"kind": "create_element", "temp_id": "tmp_b", "type_name": "Building"},
+        ],
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    art_id = body["changed_artifacts"][0]["id"]
+    assert _stored_rule_checks(client) == {"rule:has-name"}
+
+    import data_rover.api.routes.commits as commits_mod
+
+    def _boom(*args: Any, **kwargs: Any) -> bool:
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(commits_mod, "_persist_commit", _boom)
+    tok = _lock(client, _artifact_targets(art_id))
+    failed = _commit(
+        client,
+        [
+            {
+                "kind": "update_artifact",
+                "id": art_id,
+                "payload": {"schema_version": 1, "yaml": INERT_YAML},
+            }
+        ],
+        base_rev=body["model_rev"],
+        lock_tokens=[tok],
+    )
+    assert failed.status_code == 500, failed.text
+    monkeypatch.undo()  # before the assertions below re-read through the DB
+
+    assert get_session().validation is None  # forced re-seed
+    assert _rev(client) == body["model_rev"]
+    # the re-seed runs the RESTORED rule set, so the verdict is back
+    assert _stored_rule_checks(client) == {"rule:has-name"}

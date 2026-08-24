@@ -11,9 +11,10 @@ does without this module.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Container, Iterable, Sequence
 from typing import TYPE_CHECKING
 
+from data_rover.core.validation.issue import Issue
 from data_rover.core.validation.pipeline import ValidationPipeline, default_validators
 from data_rover.core.validation.rules.compile import (
     CompiledRules,
@@ -24,6 +25,7 @@ from data_rover.core.validation.rules.compile import (
 )
 from data_rover.core.validation.rules.reach import expand_scope
 from data_rover.core.validation.rules.validator import RulesValidator
+from data_rover.core.validation.state import issue_owner
 
 from . import content
 from .db_models import ArtifactKind
@@ -41,6 +43,11 @@ if TYPE_CHECKING:
     from .session import Session
 
 RULES_KIND_VALUE = ArtifactKind.validation_rules.value
+
+#: ``Issue.check`` prefix a ``RulesValidator`` verdict carries
+#: (``rule:<rule-name>``), the one marker separating a user rule's
+#: verdict from a built-in validator's.
+RULE_CHECK_PREFIX = "rule:"
 
 
 def pipeline_for(compiled: CompiledRules) -> ValidationPipeline:
@@ -78,6 +85,14 @@ def rule_sources(db: DbSession, project_id: str) -> list[RuleSetSource]:
     return out
 
 
+def compile_sources(
+    sources: Sequence[RuleSetSource], metamodel: Metamodel
+) -> CompiledRules:
+    """``load_compiled_rules`` for sources already read off a DB session that
+    is gone: hydration lists the rows before it builds the metamodel."""
+    return compile_rule_sets(sources, metamodel)
+
+
 def load_compiled_rules(
     db: DbSession, project_id: str, metamodel: Metamodel | None
 ) -> CompiledRules:
@@ -91,6 +106,36 @@ def expand_dirty(session: Session, model: Model, dirty: DirtyCollector) -> None:
     extra = expand_scope(model, session.compiled_rules, list(dirty.ids))
     if extra:
         dirty.update(extra)
+
+
+def expand_ids(session: Session, model: Model, ids: Sequence[str]) -> list[str]:
+    """``expand_dirty`` for a plain id list: the ids plus everything user
+    rules reach back to them from, deduped in first-seen order so the
+    caller's splice scope stays deterministic."""
+    return list(
+        dict.fromkeys([*ids, *expand_scope(model, session.compiled_rules, ids)])
+    )
+
+
+def attributable_issues(
+    issues: Iterable[Issue], base_dirty: Container[str]
+) -> list[Issue]:
+    """The issues a mutation over ``base_dirty`` can be held responsible for.
+
+    Validating a WIDENED scope reruns every validator over elements the
+    batch never touched, so the raw result mixes two things: verdicts the
+    batch caused, and pre-existing built-in issues the widening merely
+    re-observed. Only a rule verdict survives the widening here — reach
+    expansion exists precisely because a rule reads across hops, so a far
+    edit genuinely flips one. A built-in check (multiplicity, facets,
+    uniqueness, endpoint typing, scalar type) is a function of the element
+    alone and cannot have been caused from elsewhere.
+    """
+    return [
+        i
+        for i in issues
+        if issue_owner(i) in base_dirty or i.check.startswith(RULE_CHECK_PREFIX)
+    ]
 
 
 def rules_touched(

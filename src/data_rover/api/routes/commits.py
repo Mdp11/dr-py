@@ -72,6 +72,7 @@ from ..metamodel_ops import (
 )
 from ..rules import (
     applies_population,
+    attributable_issues,
     candidate_pipeline,
     expand_dirty,
     load_compiled_rules,
@@ -411,8 +412,10 @@ class _CommitUnwind:
       must be externally invisible, so the auto-create unwinds to the
       genuinely-empty ``None``, not a materialized empty view with no
       ViewRow behind it.
-    - ``op_log.pop()`` only when ``rev_bumped``: the batch enters the op
-      log at the same instant the rev bumps (step d), never earlier.
+    - ``op_log.pop()`` and the ``session.validation`` null only when
+      ``rev_bumped``: the batch enters the op log — and the issue store gets
+      its irreversible splice — at the same instant the rev bumps (step d),
+      never earlier.
     - ``db.rollback()`` last, and only once ``db_staged`` — the paths
       before any staging (missing-lock 409, model-apply failure) never
       rolled the request transaction back and still must not.
@@ -461,6 +464,15 @@ class _CommitUnwind:
             # CompiledRules is never mutated in place (see ``api/rules``).
             self.session.compiled_rules = self.prior_compiled
         if self.rev_bumped:
+            # rev_bumped registers after step d, whose issue-store splice has
+            # no inverse: the pre-batch issues for the spliced owners are
+            # already gone, and once ``prior_compiled`` restores the rule sets
+            # the store would hold verdicts from rules the session no longer
+            # has — with no read path able to tell. Null it and let the next
+            # read pay one O(model) re-seed. Every rejection BEFORE step d
+            # (structural, strict-mode) leaves the store untouched and pays
+            # nothing.
+            self.session.validation = None
             self.session.model_rev -= 1
         if self.model_res is not None or self.prior_metamodel is not None:
             # Runs AFTER the rev decrement by the invariant above. The
@@ -589,6 +601,10 @@ def preview_commit(
             # metamodel swap above still needs undoing, which the outer
             # `finally` below does unconditionally.
             res = _apply_batch(model, model_ops, restore=False)
+            # The ops' OWN touched entities, snapshotted BEFORE the widening
+            # below: ``res.dirty.ids`` is a live view, so a reference would
+            # widen underneath the ``would_block`` gate.
+            base_dirty = set(res.dirty.ids)
             try:
                 # A rebind batch validates the FULL model, like create_commit
                 # does: a schema swap can mint issues on elements the batch's
@@ -637,10 +653,19 @@ def preview_commit(
         conformance_error_count=len(conformance),
         structural_blockers=[IssueOut.from_core(i) for i in structural],
         issues=[IssueOut.from_core(i) for i in scoped],
+        # ``attributable_issues`` mirrors create_commit's strict gate exactly:
+        # a preview that promises a landing followed by a 422 is worse than
+        # either answer alone. ``conformance_error_count`` and ``issues`` stay
+        # the UNFILTERED truth — the gate narrows, the report does not.
+        #
         # Rebind batches are strict-exempt, mirroring create_commit: the
         # engine must stay inspectable across a migration even under strict
         # mode, so a rebind preview never reports would_block.
-        would_block=session.strict_mode and len(conformance) > 0 and rebind_op is None,
+        would_block=(
+            session.strict_mode
+            and rebind_op is None
+            and bool(attributable_issues(conformance, base_dirty))
+        ),
     )
 
 
@@ -1178,6 +1203,10 @@ def create_commit(
         # c. hard-reject structural blockers. Model content only: an artifact
         #    op's own validity was settled at apply time (b2), and an artifact
         #    row can never make the MODEL structurally invalid.
+        # This batch's OWN touched entities, snapshotted BEFORE either arm
+        # below widens ``res.dirty`` — its ``ids`` is a live view, so a
+        # reference would widen underneath the strict-mode gate at step d.
+        base_dirty = set(res.dirty.ids)
         if rebound:
             # A schema change invalidates the dirty-scope premise for the
             # WHOLE model, not just this batch's touched entities: an element
@@ -1214,16 +1243,17 @@ def create_commit(
             )
         # d. commit accepted: splice issues, bump rev, record batch
         conformance = [i for i in scoped if i.category is IssueCategory.CONFORMANCE]
-        # strict-mode gate: an owner-enabled project promotes scoped conformance
-        # issues to a hard reject. Its scope is the WIDENED res.dirty — the
-        # batch's own touched entities plus everything user rules reach back
-        # from them, plus (on a rules-artifact edit) the whole applies_to
-        # population of the old and new rule sets. So on a strict project a
-        # pre-existing conformance issue on an element this batch never edited
-        # CAN reject the commit, and a rules artifact whose rules some existing
-        # element already violates cannot be saved until that element is fixed.
-        # That is the point of reach-aware widening: those verdicts are exactly
-        # the ones the batch changed.
+        # strict-mode gate: an owner-enabled project promotes THIS BATCH'S
+        # conformance issues to a hard reject. ``scoped`` is computed over the
+        # WIDENED res.dirty, so it also carries built-in verdicts on elements
+        # only the reach expansion (or a rules-artifact edit's applies_to
+        # population) pulled in; those pre-date the batch and never block it —
+        # pre-existing issues elsewhere stay reported, not fatal.
+        # ``attributable_issues`` keeps exactly what the batch can have caused:
+        # anything on a touched entity, plus rule verdicts anywhere, since a
+        # rule reads across hops and that is what the widening exists for. The
+        # commit row and the response still record the full ``conformance``
+        # list.
         #
         # Rebind batches are exempt BY DECISION — the engine must stay
         # inspectable through a migration: a schema migration must not be
@@ -1232,14 +1262,19 @@ def create_commit(
         # conformance issue anywhere veto every future schema change. The
         # count is still reported on the commit and the issue store still
         # gets the full truth — the batch simply lands.
-        if session.strict_mode and conformance and not rebound:
+        strict_blockers = (
+            attributable_issues(conformance, base_dirty)
+            if session.strict_mode and not rebound
+            else []
+        )
+        if strict_blockers:
             unwind.unwind()  # undo every live half — see _CommitUnwind
             return JSONResponse(
                 status_code=422,
                 content={
                     "detail": "strict-mode conformance blocker",
                     "conformance_blockers": [
-                        IssueOut.from_core(i).model_dump() for i in conformance
+                        IssueOut.from_core(i).model_dump() for i in strict_blockers
                     ],
                 },
             )
