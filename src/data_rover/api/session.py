@@ -269,8 +269,17 @@ class Session:
 
     def set_metamodel(self, metamodel: Metamodel | None) -> None:
         """Replace (or clear) the metamodel; the model conforms to it, so the
-        model and its validation baseline are cleared too."""
+        model and its validation baseline are cleared too.
+
+        ``compiled_rules`` resets to empty: every rule's applies-to closure,
+        relationship-type closure and drift diagnostic is resolved against the
+        OUTGOING schema, so keeping it would evaluate rules against types that
+        no longer exist. Empty is the safe default — no verdicts beats wrong
+        verdicts. A caller with a DB handle recompiles against the new schema
+        right after (``rules.load_compiled_rules``).
+        """
         self.metamodel = metamodel
+        self.compiled_rules = empty_compiled()
         self.set_model(None)
 
     def record_batch(self, batch: AppliedBatch) -> None:

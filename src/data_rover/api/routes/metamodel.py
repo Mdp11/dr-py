@@ -18,6 +18,7 @@ from ..deps import Session, get_request_session, require_metamodel
 from ..identity import get_current_user
 from ..locking import METAMODEL_RESOURCE
 from ..metamodel_ops import serialize_metamodel_blob
+from ..rules import load_compiled_rules
 from ..schemas import RawMetamodelResponse
 
 router = APIRouter()
@@ -78,6 +79,12 @@ async def upload_metamodel(
         blob = body
     metamodel = load_metamodel_str(blob)
     session.set_metamodel(metamodel)  # clears the in-memory model (core semantics)
+    # `set_metamodel` resets the compiled rules to empty; the project's
+    # `validation_rules` artifacts survive this upload (`clear_history` drops
+    # commits and snapshots, not artifact rows), so recompile them against the
+    # new schema. Rules the new schema drifts are reported skipped, never
+    # evaluated against the outgoing one's closures.
+    session.compiled_rules = load_compiled_rules(db, project_id, metamodel)
     # persist the metamodel + (re)bind the project's model row; changing the
     # metamodel clears the model, so drop durable history too. Non-empty
     # models go through the non-destructive `metamodel.rebind` op instead
@@ -128,5 +135,5 @@ def clear_metamodel(
     conflict = _peer_mm_conflict(session, user.id)
     if conflict is not None:
         return conflict
-    session.set_metamodel(None)
+    session.set_metamodel(None)  # also empties compiled_rules
     return Response(status_code=204)

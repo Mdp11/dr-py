@@ -13,6 +13,7 @@ from data_rover.core.metamodel.schema import (
     RelationshipType,
 )
 from data_rover.core.model.model import Model
+from data_rover.core.validation.dirty import DirtyCollector
 from data_rover.core.validation.rules.compile import RuleSetSource, compile_rule_sets
 from data_rover.core.validation.rules.reach import derive_paths, expand_scope
 from data_rover.core.validation.rules.schema import parse_rule_set
@@ -142,7 +143,15 @@ def test_unrelated_element_expands_nothing():
 
 
 def test_expansion_scoped_rerun_equals_full_rerun():
-    """Random mutations: full rule issues == splice-simulated rule issues."""
+    """Random mutations — property AND structural — through the real
+    ``DirtyCollector``: full rule issues == splice-simulated rule issues.
+
+    Structural churn (connect/disconnect/delete/create) is where the
+    dirty-set/reach interaction is least obvious: a mutation's own dirty set
+    names entities the rule never reports on, and the expansion is what has
+    to carry it back to the applies-to element. An under-approximating
+    ``expand_scope`` shows up here as a splice that drifts from the full run.
+    """
     mm = _mm()
     doc = TWO_HOP
     rng = random.Random(7)
@@ -162,21 +171,88 @@ def test_expansion_scoped_rerun_equals_full_rerun():
             for i in RulesValidator(compiled).validate(model, scope)
         }
 
+    def alive(elements):
+        return [e for e in elements if e.id in model.elements]
+
+    def rels_of_type(type_name):
+        return [r for r in model.relationships.values() if r.type_name == type_name]
+
     # maintained incrementally, seeded from a full run
     live = rule_issue_owners(Scope.all())
 
-    for _ in range(40):
-        s = rng.choice(sensors)
-        dirty = [s.id]
-        if rng.random() < 0.5:
-            model.set_property(s, "status", rng.choice(["ok", "bad"]))
-        else:
-            model.delete_property(s, "status")
+    fired: set[str] = set()
+
+    def mutate(d):
+        """One random mutation through the collector's wrappers, so the base
+        dirty set is built by exactly the hooks production uses."""
+        choices = ["prop", "prop", "connect", "disconnect", "delete", "create"]
+        match rng.choice(choices):
+            case "prop" if sensors:
+                s = rng.choice(sensors)
+                fired.add("prop")
+                if rng.random() < 0.5:
+                    d.set_property(model, s, "status", rng.choice(["ok", "bad"]))
+                else:
+                    d.delete_property(model, s, "status")
+            case "connect" if zones and sensors:
+                if rng.random() < 0.5:
+                    fired.add("connect")
+                    d.connect(
+                        model, "Watches", rng.choice(zones).id, rng.choice(sensors).id
+                    )
+                else:
+                    # only re-parent an orphan zone: a second containment
+                    # parent is a structural defect, not a rule scenario
+                    orphans = [
+                        z for z in zones if not model.indexes.incoming_ids(z.id)
+                    ]
+                    if orphans and buildings:
+                        fired.add("connect")
+                        d.connect(
+                            model,
+                            "Owns",
+                            rng.choice(buildings).id,
+                            rng.choice(orphans).id,
+                        )
+            case "disconnect":
+                rels = rels_of_type(rng.choice(["Watches", "Owns"]))
+                if rels:
+                    fired.add("disconnect")
+                    d.disconnect(model, rng.choice(rels).id)
+            case "delete":
+                pool = [*zones, *sensors, *buildings]
+                if pool:
+                    fired.add("delete")
+                    d.delete_element(model, rng.choice(pool).id)
+            case "create":
+                kind = rng.choice(["Building", "Zone", "Sensor"])
+                fired.add("create")
+                el = d.create_element(model, kind)
+                {"Building": buildings, "Zone": zones, "Sensor": sensors}[kind].append(
+                    el
+                )
+                if kind == "Zone" and buildings:
+                    d.connect(model, "Owns", rng.choice(buildings).id, el.id)
+                elif kind == "Sensor" and zones:
+                    d.connect(model, "Watches", rng.choice(zones).id, el.id)
+            case _:
+                pass
+
+    for _ in range(120):
+        d = DirtyCollector()
+        mutate(d)
+        # cascades can remove more than the chosen element
+        buildings, zones, sensors = alive(buildings), alive(zones), alive(sensors)
+        dirty = list(d.ids)
         extra = expand_scope(model, compiled, dirty)
         scoped_ids = list(dict.fromkeys([*dirty, *extra]))
         scoped_owners = rule_issue_owners(Scope(scoped_ids))
         live = (live - set(scoped_ids)) | scoped_owners
         assert live == rule_issue_owners(Scope.all())
+
+    # the pools can shrink under deletion; fail loudly rather than degenerate
+    # into a property-only run that quietly stops testing structural churn
+    assert fired == {"prop", "connect", "disconnect", "delete", "create"}
 
 
 def test_expand_incoming_direction_reaches_owner():

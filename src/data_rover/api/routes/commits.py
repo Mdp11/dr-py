@@ -35,9 +35,7 @@ from sqlalchemy.orm import Session as DbSession
 from data_rover.core.metamodel.schema import Metamodel
 from data_rover.core.model.model import Model
 from data_rover.core.validation.issue import IssueCategory
-from data_rover.core.validation.pipeline import ValidationPipeline, default_validators
-from data_rover.core.validation.rules.compile import CompiledRules, compile_rule_sets
-from data_rover.core.validation.rules.validator import RulesValidator
+from data_rover.core.validation.rules.compile import CompiledRules
 from data_rover.core.validation.scope import Scope
 from data_rover.core.view.schema import View
 
@@ -74,6 +72,7 @@ from ..metamodel_ops import (
 )
 from ..rules import (
     applies_population,
+    candidate_pipeline,
     expand_dirty,
     load_compiled_rules,
     rules_touched,
@@ -601,16 +600,9 @@ def preview_commit(
                 # is dry-validated and every preview reflects the COMMITTED
                 # rule sets.
                 if candidate is not None:
-                    # Recompile the committed sources against the candidate
-                    # schema: a rule that drifts under the new schema must
-                    # be reported as skipped here, not evaluated stale.
-                    compiled = compile_rule_sets(
-                        session.compiled_rules.sources, candidate
+                    scoped = candidate_pipeline(session, candidate).validate(
+                        model, Scope.all()
                     )
-                    pipeline = ValidationPipeline(
-                        [*default_validators(), RulesValidator(compiled)]
-                    )
-                    scoped = pipeline.validate(model, Scope.all())
                 else:
                     expand_dirty(session, model, res.dirty)
                     scoped = session_pipeline(session).validate(

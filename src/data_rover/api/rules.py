@@ -43,23 +43,39 @@ if TYPE_CHECKING:
 RULES_KIND_VALUE = ArtifactKind.validation_rules.value
 
 
-def session_pipeline(session: Session) -> ValidationPipeline:
-    """A fresh pipeline carrying the session's compiled rules.
+def pipeline_for(compiled: CompiledRules) -> ValidationPipeline:
+    """A fresh pipeline carrying ``compiled``.
 
     One per run — never cache the pipeline (or its validators) on the
     session.
     """
-    return ValidationPipeline(
-        [*default_validators(), RulesValidator(session.compiled_rules)]
-    )
+    return ValidationPipeline([*default_validators(), RulesValidator(compiled)])
+
+
+def session_pipeline(session: Session) -> ValidationPipeline:
+    """A fresh pipeline carrying the session's compiled rules."""
+    return pipeline_for(session.compiled_rules)
+
+
+def candidate_pipeline(session: Session, candidate: Metamodel) -> ValidationPipeline:
+    """Committed rule SOURCES recompiled against a candidate schema — a rule
+    the candidate drifts is skipped whole rather than evaluated stale."""
+    return pipeline_for(compile_rule_sets(session.compiled_rules.sources, candidate))
 
 
 def rule_sources(db: DbSession, project_id: str) -> list[RuleSetSource]:
     rows = content.list_artifacts(db, project_id, ArtifactKind.validation_rules)
-    return [
-        RuleSetSource(row.id, row.name, str(row.payload.get("yaml", "")))
-        for row in rows
-    ]
+    out: list[RuleSetSource] = []
+    for row in rows:
+        # A payload that is not a dict cannot happen through any write path
+        # (every one validates through RULES_ADAPTER), but hydration calls this
+        # outside a try: a raise here would 500 EVERY route for the project,
+        # not just validation. Degrade to an empty source — that set
+        # contributes no rules and no verdicts, and the rest of the project
+        # keeps working.
+        payload = row.payload if isinstance(row.payload, dict) else {}
+        out.append(RuleSetSource(row.id, row.name, str(payload.get("yaml", ""))))
+    return out
 
 
 def load_compiled_rules(

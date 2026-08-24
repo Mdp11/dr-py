@@ -34,6 +34,10 @@ def _mm() -> Metamodel:
                 mappings=[Mapping(source="Building", target="Zone")],
             ),
             RelationshipType(
+                name="SecureOwns", extends="Owns",
+                mappings=[Mapping(source="Building", target="Zone")],
+            ),
+            RelationshipType(
                 name="Monitors",
                 mappings=[Mapping(source="Building", target="Zone")],
             ),
@@ -130,6 +134,27 @@ def test_exists_count_to_and_where():
         "      relationship: {type: Owns, direction: incoming, exists: true}\n"))
     assert not evaluate_condition(model, b, _cond(
         "      relationship: {type: Monitors, direction: outgoing, exists: true}\n"))
+
+
+def test_relationship_subtype_counted_under_its_base_type():
+    """`type:` is a stereotype closure, subtypes included — the relationship
+    mirror of `to:`'s element closure."""
+    model = Model(_mm())
+    b = _building(model)
+    z1, z2 = model.create_element("Zone"), model.create_element("Zone")
+    model.connect("Owns", b.id, z1.id)
+    model.connect("SecureOwns", b.id, z2.id)
+    # BOTH hops count under the base type: an exact-name match would see 1
+    assert evaluate_condition(model, b, _cond(
+        "      relationship: {type: Owns, direction: outgoing, count: {eq: 2}}\n"))
+    assert not evaluate_condition(model, b, _cond(
+        "      relationship: {type: Owns, direction: outgoing, count: {eq: 1}}\n"))
+    # the subtype itself stays narrow: it does not match its own base
+    assert evaluate_condition(model, b, _cond(
+        "      relationship: {type: SecureOwns, direction: outgoing, count: {eq: 1}}\n"))
+    # incoming, from the subtype-connected zone's side
+    assert evaluate_condition(model, z2, _cond(
+        "      relationship: {type: Owns, direction: incoming, exists: true}\n"))
 
 
 def test_dangling_far_endpoint_semantics():

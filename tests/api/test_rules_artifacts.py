@@ -17,7 +17,10 @@ elements:
         datatype: string
 """
 
+# the comment is the point: the payload stores verbatim TEXT, not parsed JSON,
+# so a round trip that dropped it would be a real regression
 GOOD_YAML = (
+    "# house rules\n"
     "rules:\n"
     "  - name: has-name\n"
     "    applies_to: Building\n"

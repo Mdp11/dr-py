@@ -19,16 +19,11 @@ from data_rover.core.metamodel.diff import diff_metamodels
 from data_rover.core.metamodel.loader import MetamodelError, load_metamodel_str
 from data_rover.core.model.model import build_rebind_view
 from data_rover.core.validation.issue import Issue
-from data_rover.core.validation.pipeline import (
-    ValidationPipeline,
-    default_validators,
-)
-from data_rover.core.validation.rules.compile import compile_rule_sets
-from data_rover.core.validation.rules.validator import RulesValidator
 
 from ..authz import require_membership
 from ..db_models import Membership
 from ..deps import Session, get_request_session, require_model
+from ..rules import candidate_pipeline
 from ..schemas import (
     IssueOut,
     LintErrorOut,
@@ -50,11 +45,18 @@ async def _read_metamodel_blob(request: Request) -> str:
     return body
 
 
-def _issue_key(issue: Issue) -> tuple[str, str, str, tuple[str, ...]]:
-    """Stable identity for diffing two validation runs (Issue has no code)."""
+def _issue_key(issue: Issue) -> tuple[str, str, str, str, tuple[str, ...]]:
+    """Stable identity for diffing two validation runs (Issue has no code).
+
+    ``check`` is part of the key: two user rules can produce the same custom
+    message on the same element, and without it one of them vanishes from the
+    diff. Both sides are stamped by the same pipeline, so including it only
+    ever splits keys, never merges distinct issues.
+    """
     return (
         issue.category.value,
         issue.severity.value,
+        issue.check,
         issue.message,
         tuple(sorted(issue.target_ids)),
     )
@@ -83,14 +85,11 @@ async def diff_metamodel(
         current = _ensure_validation_seeded(session, model).all_issues()
         # The candidate side runs the session's rule SOURCES recompiled against
         # the CANDIDATE schema, so the diff reports rule flips the swap would
-        # cause. A rule the candidate drifts is skipped whole at compile
-        # (compile.py's drift stance), so it reports nothing here and its
-        # current issues land in ``now_passing``. Compiled per request, like
-        # every other pipeline: validators carry mutable memo caches.
-        compiled = compile_rule_sets(session.compiled_rules.sources, candidate)
-        candidate_issues = ValidationPipeline(
-            [*default_validators(), RulesValidator(compiled)]
-        ).validate(build_rebind_view(model, candidate))
+        # cause. A drifted rule reports nothing here and its current issues
+        # land in ``now_passing``.
+        candidate_issues = candidate_pipeline(session, candidate).validate(
+            build_rebind_view(model, candidate)
+        )
     cur_by_key = {_issue_key(i): i for i in current}
     cand_by_key = {_issue_key(i): i for i in candidate_issues}
     now_failing = [v for k, v in cand_by_key.items() if k not in cur_by_key]

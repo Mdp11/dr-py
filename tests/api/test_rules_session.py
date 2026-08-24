@@ -79,6 +79,9 @@ _REACH_YAML = (
     "      relationship: {type: Owns, direction: outgoing, to: Zone, exists: true}\n"
 )
 
+# the same schema with the property the rule reads renamed: the rule drifts
+_MM_RENAMED_PROP = _MM.replace("{name: name, datatype", "{name: title, datatype")
+
 
 def _rules_payload() -> dict:
     return {"schema_version": 1, "yaml": _RULES_YAML}
@@ -206,6 +209,89 @@ def test_hydration_compiles_rules(client: TestClient) -> None:
     assert len(rule_issues) == 1
     assert rule_issues[0]["target_ids"] == [eid]
     assert get_session().compiled_rules.total == 1
+
+
+def test_rule_sources_tolerates_a_malformed_payload(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``rule_sources`` runs inside hydration with no try around it, so a row
+    whose payload is not a dict must degrade to an empty rule set rather than
+    500 every route for the project."""
+    from data_rover.api import rules as rules_mod
+
+    class _Row:
+        id = "a1"
+        name = "broken"
+        payload = ["not", "a", "dict"]
+
+    monkeypatch.setattr(rules_mod.content, "list_artifacts", lambda *a, **k: [_Row()])
+    with db_session() as s:
+        got = rules_mod.rule_sources(s, DEFAULT_PROJECT_ID)
+    assert [(src.artifact_id, src.yaml) for src in got] == [("a1", "")]
+
+    mm = load_metamodel_str(_MM)
+    assert compile_rule_sets(got, mm).total == 0
+
+
+def test_metamodel_upload_recompiles_the_rules(client: TestClient) -> None:
+    """A metamodel upload leaves the project's rule artifacts in place, so the
+    compiled set must be rebuilt against the NEW schema: every applies-to
+    closure, relationship-type closure and drift diagnostic in it was resolved
+    against the outgoing one. Absent verdicts beat stale ones."""
+    r = client.post(
+        papi("/commits"),
+        json={
+            "base_rev": get_session().model_rev,
+            "ops": [
+                {
+                    "kind": "create_artifact",
+                    "temp_id": "tmp_rules",
+                    "artifact_kind": "validation_rules",
+                    "name": "house-rules",
+                    "payload": _rules_payload(),
+                }
+            ],
+            "lock_tokens": [],
+        },
+    )
+    assert r.status_code == 200, r.text
+    artifact_id = r.json()["id_map"]["tmp_rules"]
+    status = client.get(papi("/model/issues")).json()["rules_status"]
+    assert (status["total"], status["skipped"]) == (1, [])
+
+    res = client.post(
+        papi("/metamodel"),
+        content=_MM_RENAMED_PROP,
+        headers={"content-type": "application/x-yaml"},
+    )
+    assert res.status_code == 200, res.text
+    # a metamodel upload clears the model with it (core semantics)
+    res = client.post(papi("/model"), json={"elements": [], "relationships": []})
+    assert res.status_code == 200, res.text
+
+    status = client.get(papi("/model/issues")).json()["rules_status"]
+    assert status["total"] == 0
+    (skip,) = status["skipped"]
+    assert skip["artifact_id"] == artifact_id
+    assert skip["rule"] == "has-name"
+    assert "'name'" in skip["reason"]
+
+
+def test_clearing_the_metamodel_empties_the_compiled_rules(
+    client: TestClient,
+) -> None:
+    """A populated rule set behind a `None` metamodel would report a nonzero
+    `rules_status.total` for a project that can no longer validate anything."""
+    session = get_session()
+    assert session.metamodel is not None
+    session.compiled_rules = compile_rule_sets(
+        [RuleSetSource("a1", "house-rules", _RULES_YAML)], session.metamodel
+    )
+    assert session.compiled_rules.total == 1
+
+    assert client.delete(papi("/metamodel")).status_code == 204
+    assert get_session().compiled_rules.total == 0
+    assert get_session().compiled_rules.sources == ()
 
 
 class _SwapRulesOnSplice(ValidationState):

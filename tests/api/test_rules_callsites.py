@@ -31,8 +31,21 @@ relationships:
     target: Zone
 """
 
-# candidate schema that leaves the rule compiling clean (an added type only)
-_MM_EXTRA_TYPE = _MM + """  - name: Wing
+# candidate schema that leaves the rule compiling clean (an added element type)
+_MM_EXTRA_TYPE = """
+elements:
+  - name: Building
+    properties:
+      - {name: name, datatype: string, multiplicity: "0..1"}
+  - name: Zone
+    properties:
+      - {name: label, datatype: string, multiplicity: "0..1"}
+  - name: Wing
+relationships:
+  - name: Owns
+    containment: true
+    source: Building
+    target: Zone
 """
 
 # candidate schema that renames the property the rule reads: the rule drifts

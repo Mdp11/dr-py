@@ -196,9 +196,9 @@ class RawMetamodelResponse(BaseModel):
 
 
 class LintErrorOut(BaseModel):
-    """One metamodel lint finding. Position is best-effort: YAML syntax
-    errors carry a 1-based line/column from the parser mark; schema errors
-    (``MetamodelError``) are message-only."""
+    """One lint finding from a YAML editor surface (metamodel, rules).
+    Position is best-effort: YAML syntax errors carry a 1-based line/column
+    from the parser mark; schema errors are message-only."""
 
     message: str
     line: int | None = None
