@@ -122,6 +122,11 @@ def _chain_row_keys(
     # Chains may end in a PropertyValue terminal; it rides along as a RowKey
     # slot (see Binding) so a RowSlot column can never misread it as an id.
     keys: list[RowKey] = [tuple(chain) for chain in result.chains]
+    if rs.unique:
+        first: dict[Binding, RowKey] = {}
+        for key in keys:
+            first.setdefault(key[-1], key)
+        keys = list(first.values())
     return keys, result.truncated
 
 

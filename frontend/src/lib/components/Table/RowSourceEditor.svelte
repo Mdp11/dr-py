@@ -133,7 +133,7 @@
 		const kind = (e.currentTarget as HTMLSelectElement).value;
 		if (kind === 'scope') apply({ kind: 'scope', types: [], criteria: [] });
 		else if (kind === 'navigation') apply({ kind: 'navigation', navigation: {}, step_index: null });
-		else apply({ kind: 'chains', navigation: {} });
+		else apply({ kind: 'chains', navigation: {}, unique: false });
 	}
 
 	function onRefChange(e: Event): void {
@@ -207,6 +207,20 @@
 						<option value={h.id}>{h.name}</option>
 					{/each}
 				</select>
+			{/if}
+			{#if rowSource.kind === 'chains'}
+				<label class="flex items-center gap-1 text-[11px] text-muted-foreground/70">
+					<input
+						type="checkbox"
+						aria-label="Unique elements only"
+						checked={rowSource.unique}
+						onchange={(e) => {
+							if (rowSource.kind === 'chains')
+								apply({ ...rowSource, unique: e.currentTarget.checked });
+						}}
+					/>
+					Unique elements only
+				</label>
 			{/if}
 			{#if rowSource.kind === 'navigation'}
 				<label class="flex items-center gap-1 text-[11px] text-muted-foreground/70">

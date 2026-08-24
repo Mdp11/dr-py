@@ -178,6 +178,24 @@ describe('TableDefinitionSchema', () => {
 		).toBe('def value(els): return 1');
 	});
 
+	it('defaults chains row-source unique off for payloads that predate it', () => {
+		const definition = TableDefinitionSchema.parse({
+			schema_version: 1,
+			row_source: { kind: 'chains', navigation: {} },
+			columns: [{ kind: 'element' }]
+		});
+		expect(definition.row_source).toMatchObject({ kind: 'chains', unique: false });
+	});
+
+	it('round-trips chains row-source unique', () => {
+		const definition = TableDefinitionSchema.parse({
+			schema_version: 1,
+			row_source: { kind: 'chains', navigation: {}, unique: true },
+			columns: [{ kind: 'element' }]
+		});
+		expect(definition.row_source).toMatchObject({ kind: 'chains', unique: true });
+	});
+
 	it('parses a script column with ref', () => {
 		const definition = TableDefinitionSchema.parse({
 			schema_version: 1,

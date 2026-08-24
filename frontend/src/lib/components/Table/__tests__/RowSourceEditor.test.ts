@@ -84,7 +84,9 @@ describe('RowSourceEditor inline mode', () => {
 			steps: [],
 			exclude_visited: true
 		};
-		const c = render(defnWith({ kind: 'chains', navigation: { definition: inline } }));
+		const c = render(
+			defnWith({ kind: 'chains', navigation: { definition: inline }, unique: false })
+		);
 		try {
 			await vi.waitFor(() =>
 				expect(document.querySelector('[data-testid="inline-rowsource-editor"]')).toBeTruthy()
@@ -95,6 +97,29 @@ describe('RowSourceEditor inline mode', () => {
 			// No row context: the start-mode select must NOT offer the row option.
 			const select = document.querySelector('select[aria-label="Start mode"]')!;
 			expect([...select.querySelectorAll('option')].map((o) => o.value)).not.toContain('row');
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('chains row source offers a unique-elements toggle that patches unique', () => {
+		const upd = vi.spyOn(tableStore, 'updateTableDefinition').mockImplementation(() => {});
+		const c = render(defnWith({ kind: 'chains', navigation: { ref: 'nav1' }, unique: false }));
+		try {
+			const box = document.querySelector('input[aria-label="Unique elements only"]');
+			click(box);
+			const defn = upd.mock.calls.at(-1)![1] as TableDefinition;
+			expect(defn.row_source).toMatchObject({ kind: 'chains', unique: true });
+		} finally {
+			unmount(c);
+		}
+	});
+
+	it('the unique toggle only renders for the chains row source', () => {
+		vi.spyOn(tableStore, 'updateTableDefinition').mockImplementation(() => {});
+		const c = render(defnWith({ kind: 'navigation', navigation: {}, step_index: null }));
+		try {
+			expect(document.querySelector('input[aria-label="Unique elements only"]')).toBeNull();
 		} finally {
 			unmount(c);
 		}

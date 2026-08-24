@@ -893,7 +893,10 @@ export const NavigationRowsSchema = z.object({
 });
 export const ChainRowsSchema = z.object({
 	kind: z.literal('chains'),
-	navigation: NavigationSourceSchema
+	navigation: NavigationSourceSchema,
+	// Old saved payloads predate this field; default keeps their
+	// one-row-per-chain behavior.
+	unique: z.boolean().default(false)
 });
 export const RowSourceSchema = z.discriminatedUnion('kind', [
 	ScopeRowsSchema,

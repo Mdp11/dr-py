@@ -20,7 +20,7 @@ describe('navigationAsTableDefinition', () => {
 			exclude_visited: true
 		};
 		const d = navigationAsTableDefinition({ artifactId: 'nav1', definition });
-		expect(d.row_source).toEqual({ kind: 'chains', navigation: { ref: 'nav1' } });
+		expect(d.row_source).toEqual({ kind: 'chains', navigation: { ref: 'nav1' }, unique: false });
 		// one element column per chain step (start + 1 hop = 2)
 		expect(d.columns.filter((c) => c.kind === 'element')).toHaveLength(2);
 		expect(d.columns[1].source).toEqual({ kind: 'row', chain_index: 1 });
@@ -35,7 +35,7 @@ describe('navigationAsTableDefinition', () => {
 			exclude_visited: true
 		};
 		const d = navigationAsTableDefinition({ artifactId: null, definition });
-		expect(d.row_source).toEqual({ kind: 'chains', navigation: { definition } });
+		expect(d.row_source).toEqual({ kind: 'chains', navigation: { definition }, unique: false });
 	});
 
 	it('falls back to a single Start column for a set_op definition', () => {

@@ -71,6 +71,9 @@ class NavigationRows(BaseModel):
 class ChainRows(BaseModel):
     kind: Literal["chains"] = "chains"
     navigation: NavigationSource
+    #: keep only the FIRST chain reaching each distinct terminal node, so an
+    #: element (or property value) N chains end at yields one row, not N
+    unique: bool = False
 
 
 RowSource = Annotated[

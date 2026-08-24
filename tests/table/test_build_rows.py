@@ -6,7 +6,7 @@ column (see evaluate.py's `resolve_source_elements` docstring)."""
 from data_rover.core.metamodel.schema import ElementType, Metamodel, PropertyDef, RelationshipType
 from data_rover.core.model.model import Model
 from data_rover.core.table.evaluate import TableLimits, build_rows
-from data_rover.core.table.schema import TABLE_ADAPTER
+from data_rover.core.table.schema import TABLE_ADAPTER, ChainRows
 
 
 def _mm() -> Metamodel:
@@ -246,6 +246,63 @@ def test_empty_navigation_row_source_yields_no_rows():
         })
         keys, truncated = build_rows(mm, model, defn)
         assert keys == [] and truncated is False
+
+
+def _chains_defn(*, unique: bool | None = None, steps: list[dict] | None = None) -> dict:
+    rs: dict = {"kind": "chains", "navigation": {"definition": {
+        "kind": "path", "start": {"kind": "scope", "types": ["Block"]},
+        "steps": steps if steps is not None else [
+            {"kind": "relationship", "relationship_type": "BlockHasPart",
+             "direction": "out"}]}}}
+    if unique is not None:
+        rs["unique"] = unique
+    return {"row_source": rs,
+            "columns": [{"kind": "element", "source": {"kind": "row"}}]}
+
+
+def test_chain_rows_unique_keeps_first_chain_per_terminal():
+    # Two chains reach part1 (from root and from leaf); unique keeps one row
+    # per distinct terminal, and the SURVIVING row is the first-seen chain —
+    # its intermediate slots stay readable by RowSlot columns.
+    mm = _mm(); model, ids = _fixture()
+    model.connect("BlockHasPart", ids["leaf"], ids["part1"])
+
+    all_keys, _ = build_rows(mm, model, TABLE_ADAPTER.validate_python(_chains_defn()))
+    assert len(all_keys) == 3  # root->part1, root->part2, leaf->part1
+
+    keys, truncated = build_rows(
+        mm, model, TABLE_ADAPTER.validate_python(_chains_defn(unique=True)))
+    assert not truncated
+    first_per_terminal: dict = {}
+    for k in all_keys:
+        first_per_terminal.setdefault(k[-1], k)
+    assert keys == list(first_per_terminal.values())
+    assert len(keys) == 2
+
+
+def test_chain_rows_unique_defaults_off():
+    # Absent flag keeps the historical one-row-per-chain contract.
+    mm = _mm(); model, ids = _fixture()
+    model.connect("BlockHasPart", ids["leaf"], ids["part1"])
+    defn = TABLE_ADAPTER.validate_python(_chains_defn())
+    assert isinstance(defn.row_source, ChainRows)
+    assert defn.row_source.unique is False
+    keys, _ = build_rows(mm, model, defn)
+    assert len(keys) == 3
+
+
+def test_chain_rows_unique_dedupes_property_value_terminals():
+    # Terminals may be PropertyValue nodes (scalar property step) — unique
+    # must key on them too, not silently keep only element-id terminals.
+    mm = _mm(); model, ids = _fixture()
+    for key in ("part1", "part2"):
+        model.set_property(model.elements[ids[key]], "name", "Part")
+    defn = TABLE_ADAPTER.validate_python(_chains_defn(
+        unique=True, steps=[{"kind": "property", "property_name": "name"}]))
+    keys, _ = build_rows(mm, model, defn)
+    # 4 Blocks, but part1/part2 share the terminal value "Part"
+    terminals = [k[-1] for k in keys]
+    assert len(keys) == 3 and len(set(terminals)) == 3
 
 
 def test_empty_navigation_column_reaches_nothing():

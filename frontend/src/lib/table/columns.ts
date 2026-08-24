@@ -307,7 +307,8 @@ export function navigationAsTableDefinition({
 		schema_version: 1,
 		row_source: {
 			kind: 'chains',
-			navigation: artifactId ? { ref: artifactId } : { definition }
+			navigation: artifactId ? { ref: artifactId } : { definition },
+			unique: false
 		},
 		columns,
 		default_cell_mode: 'collapse',

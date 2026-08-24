@@ -236,7 +236,7 @@ describe('ColumnSourceEditor', () => {
 			source: { kind: 'row', chain_index: 0 },
 			columns: [propColumn()],
 			columnIndex: 1,
-			rowSource: { kind: 'chains', navigation: { definition: ONE_HOP_PATH } },
+			rowSource: { kind: 'chains', navigation: { definition: ONE_HOP_PATH }, unique: false },
 			onSourceChange
 		});
 		try {

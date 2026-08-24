@@ -104,7 +104,7 @@ describe('PropertyColumnEditor', () => {
 	it('falls back to all properties when the source types are unknowable', () => {
 		vi.spyOn(metamodelState, 'getMetamodel').mockReturnValue(MM as never);
 		const onChange = vi.fn();
-		const c = render(propColumn(), { kind: 'chains', navigation: {} }, onChange);
+		const c = render(propColumn(), { kind: 'chains', navigation: {}, unique: false }, onChange);
 		try {
 			focusNameInput();
 			const list = document.querySelector('[data-testid="property-suggestions"]');
@@ -119,7 +119,11 @@ describe('PropertyColumnEditor', () => {
 		vi.spyOn(metamodelState, 'getMetamodel').mockReturnValue(MM as never);
 		const onChange = vi.fn();
 		// name 'col' filters the union down to 'color'
-		const c = render(propColumn('col'), { kind: 'chains', navigation: {} }, onChange);
+		const c = render(
+			propColumn('col'),
+			{ kind: 'chains', navigation: {}, unique: false },
+			onChange
+		);
 		try {
 			focusNameInput();
 			const list = document.querySelector('[data-testid="property-suggestions"]');
@@ -198,7 +202,11 @@ describe('PropertyColumnEditor', () => {
 	it('keeps the split toggle enabled when the source types are unknowable or the property is undeclared', () => {
 		vi.spyOn(metamodelState, 'getMetamodel').mockReturnValue(MM as never);
 		// chains row source: any element type can arrive → cannot prove single
-		const c1 = render(propColumn('mass'), { kind: 'chains', navigation: {} }, vi.fn());
+		const c1 = render(
+			propColumn('mass'),
+			{ kind: 'chains', navigation: {}, unique: false },
+			vi.fn()
+		);
 		try {
 			expect(splitCheckbox().disabled).toBe(false);
 		} finally {
