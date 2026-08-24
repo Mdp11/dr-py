@@ -1,8 +1,11 @@
 """Rule-set compilation: parse, drift-check, and build the dispatch map.
 
 Compilation is pure and cheap; the output is treated as immutable and cached
-on the API Session (immutable-swap — never mutate a published CompiledRules,
-except the GIL-atomic `eval_errors` counter the validator increments).
+on the API Session (immutable-swap — never mutate a published CompiledRules).
+The `eval_errors` counter is the one piece that moves after publication, and
+it moves by whole-object swap under `_lock`: readers therefore always see a
+Counter no one is mutating, so an unlocked `dict(compiled.eval_errors)`
+snapshot cannot tear or raise.
 
 Drift stance: a rule referencing a schema name the metamodel doesn't have is
 skipped WHOLE with a diagnostic — never evaluated half-blind, never an error.
@@ -10,8 +13,9 @@ skipped WHOLE with a diagnostic — never evaluated half-blind, never an error.
 
 from __future__ import annotations
 
+import threading
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 
 from ...metamodel.schema import Metamodel
@@ -60,13 +64,37 @@ class CompiledRules:
     rules: tuple[CompiledRule, ...] = ()
     rules_by_type: dict[str, tuple[CompiledRule, ...]] = field(default_factory=dict)
     skipped: tuple[RuleDiagnostic, ...] = ()
-    #: per-rule unexpected-evaluation-failure counts (check name -> count);
-    #: mutated by RulesValidator under the callers' locking discipline
+    #: per-rule unexpected-evaluation-failure counts (check name -> count).
+    #: Replaced wholesale, never incremented in place — read it directly for a
+    #: snapshot, and go through the methods below to change it.
     eval_errors: Counter[str] = field(default_factory=Counter)
+    _lock: threading.Lock = field(
+        default_factory=threading.Lock, init=False, repr=False, compare=False
+    )
 
     @property
     def total(self) -> int:
         return len(self.rules)
+
+    def merge_eval_errors(self, counts: Mapping[str, int]) -> None:
+        """Fold one run's per-rule failure counts in (validators call this
+        once at the end of a run, not per element)."""
+        if not counts:
+            return
+        with self._lock:
+            merged = self.eval_errors.copy()
+            merged.update(counts)
+            self.eval_errors = merged
+
+    def eval_error_counts(self) -> dict[str, int]:
+        with self._lock:
+            return dict(self.eval_errors)
+
+    def reset_eval_errors(self) -> None:
+        """Zero the counter so it reports current state, not lifetime totals
+        (a full sweep re-derives every count from scratch)."""
+        with self._lock:
+            self.eval_errors = Counter()
 
 
 def empty_compiled() -> CompiledRules:
@@ -81,6 +109,10 @@ def _drift_reason(rule: Rule, mm: Metamodel) -> str | None:
     def props_of(type_name: str | None) -> set[str] | None:
         if type_name is None:
             return None  # unknown context: property names not checkable
+        # deliberately the DECLARED type's effective properties, not the
+        # subtype closure's union: a rule naming a property only some subtype
+        # declares is reported as drift even though it would evaluate on those
+        # instances — the narrow check is what makes the diagnostic actionable
         return {p.name for p in mm.effective_element_properties(type_name)}
 
     def walk(cond: Condition, context: str | None) -> str | None:

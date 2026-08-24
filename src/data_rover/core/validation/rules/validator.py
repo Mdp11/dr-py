@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections import Counter
 from typing import TYPE_CHECKING, Any, assert_never
 
 from ..issue import Issue, IssueCategory, Severity
@@ -21,6 +22,7 @@ from .schema import (
 
 if TYPE_CHECKING:
     from ...model.element import Element
+    from ..scope import Scope
     from ...model.model import Model
 
 logger = logging.getLogger(__name__)
@@ -162,12 +164,27 @@ def _issue_for(cr: CompiledRule, el: Element) -> Issue:
 
 
 class RulesValidator(EntityValidator):
-    """Evaluates user-defined rules; degraded-not-failed on any surprise."""
+    """Evaluates user-defined rules; degraded-not-failed on any surprise.
+
+    One instance per validation run (like every pipeline validator): failure
+    counts accumulate locally and are folded into the shared CompiledRules
+    once, in :meth:`validate_global`, which the pipeline calls at the end of
+    the run.
+    """
 
     check_name = ""  # per-issue checks are stamped at construction
 
     def __init__(self, compiled: CompiledRules) -> None:
         self._compiled = compiled
+        self._errors: Counter[str] = Counter()
+        #: (check, exception type) already logged — one traceback per rule per
+        #: run, not one per failing element
+        self._logged: set[tuple[str, type[BaseException]]] = set()
+
+    def validate_global(self, model: Model, scope: Scope) -> list[Issue]:
+        self._compiled.merge_eval_errors(self._errors)
+        self._errors.clear()
+        return []
 
     def validate_element(self, model: Model, el: Element) -> list[Issue]:
         rules = self._compiled.rules_by_type.get(el.type_name)
@@ -182,13 +199,16 @@ class RulesValidator(EntityValidator):
                     continue
                 if not evaluate_condition(model, el, cr.rule.then):
                     issues.append(_issue_for(cr, el))
-            except Exception:
+            except Exception as exc:
                 # a user rule must never break validation: count and move on
-                self._compiled.eval_errors[cr.check] += 1
-                logger.warning(
-                    "rule %s failed to evaluate on element %s",
-                    cr.check,
-                    el.id,
-                    exc_info=True,
-                )
+                self._errors[cr.check] += 1
+                key = (cr.check, type(exc))
+                if key not in self._logged:
+                    self._logged.add(key)
+                    logger.warning(
+                        "rule %s failed to evaluate (first on element %s)",
+                        cr.check,
+                        el.id,
+                        exc_info=True,
+                    )
         return issues
