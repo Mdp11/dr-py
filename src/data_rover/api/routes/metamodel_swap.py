@@ -19,7 +19,12 @@ from data_rover.core.metamodel.diff import diff_metamodels
 from data_rover.core.metamodel.loader import MetamodelError, load_metamodel_str
 from data_rover.core.model.model import build_rebind_view
 from data_rover.core.validation.issue import Issue
-from data_rover.core.validation.pipeline import default_pipeline
+from data_rover.core.validation.pipeline import (
+    ValidationPipeline,
+    default_validators,
+)
+from data_rover.core.validation.rules.compile import compile_rule_sets
+from data_rover.core.validation.rules.validator import RulesValidator
 
 from ..authz import require_membership
 from ..db_models import Membership
@@ -76,9 +81,16 @@ async def diff_metamodel(
     structural = diff_metamodels(current_mm, candidate)
     with session.write_mutex:
         current = _ensure_validation_seeded(session, model).all_issues()
-        candidate_issues = default_pipeline().validate(
-            build_rebind_view(model, candidate)
-        )
+        # The candidate side runs the session's rule SOURCES recompiled against
+        # the CANDIDATE schema, so the diff reports rule flips the swap would
+        # cause. A rule the candidate drifts is skipped whole at compile
+        # (compile.py's drift stance), so it reports nothing here and its
+        # current issues land in ``now_passing``. Compiled per request, like
+        # every other pipeline: validators carry mutable memo caches.
+        compiled = compile_rule_sets(session.compiled_rules.sources, candidate)
+        candidate_issues = ValidationPipeline(
+            [*default_validators(), RulesValidator(compiled)]
+        ).validate(build_rebind_view(model, candidate))
     cur_by_key = {_issue_key(i): i for i in current}
     cand_by_key = {_issue_key(i): i for i in candidate_issues}
     now_failing = [v for k, v in cand_by_key.items() if k not in cur_by_key]

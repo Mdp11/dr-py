@@ -36,6 +36,7 @@ from data_rover.core.validation.scope import Scope
 from data_rover.core.validation.state import ValidationState
 
 from ..deps import Session, get_request_session, require_metamodel, require_model
+from ..rules import expand_scope, session_pipeline
 from ..schemas import (
     ApplyCrRequest,
     ApplyCrResponse,
@@ -154,6 +155,9 @@ def _apply_cr_inline(
     # store, then only the entities the CR could have affected are
     # re-validated on the result and spliced in. The response still carries
     # the full-equivalent issue list for the result model.
+    #
+    # Rules-blind on purpose: this validates a CALLER-SUPPLIED model, not the
+    # session's, so the session's user rules do not apply to it.
     pipeline = default_pipeline()
     state = ValidationState()
     state.set_full(pipeline.validate(base, Scope.all()))
@@ -208,7 +212,15 @@ def _apply_cr_session(
 
     state = _ensure_validation_seeded(session, base)
     dirty = change_request_dirty_ids(base, result, cr)
-    delta = state.replace(dirty, default_pipeline().validate(result, Scope(dirty)))
+    # A user rule reports on the element it applies to but reads across
+    # relationship hops, so an element the CR never listed can still flip.
+    # Ordered-set dedupe keeps the splice scope deterministic.
+    dirty = list(
+        dict.fromkeys([*dirty, *expand_scope(result, session.compiled_rules, dirty)])
+    )
+    delta = state.replace(
+        dirty, session_pipeline(session).validate(result, Scope(dirty))
+    )
 
     # bumps rev, clears the op log, installs the spliced store in one step
     session.set_model(result, validation=state)

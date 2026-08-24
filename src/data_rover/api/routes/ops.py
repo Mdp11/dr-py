@@ -72,7 +72,6 @@ from sqlalchemy.orm import Session as DbSession
 
 from data_rover.core.model.model import Model
 from data_rover.core.validation.dirty import DirtyCollector, containment_closure
-from data_rover.core.validation.pipeline import default_pipeline
 from data_rover.core.validation.scope import Scope
 from data_rover.core.validation.state import ValidationState
 
@@ -92,7 +91,13 @@ from ..identity import get_current_user
 from ..invalidation import touched_keys
 from ..locking import METAMODEL_RESOURCE, artifact_resource, folder_resource
 from ..metamodel_ops import MetamodelBatchResult, apply_metamodel_ops
-from ..rules import session_pipeline
+from ..rules import (
+    applies_population,
+    expand_dirty,
+    load_compiled_rules,
+    rules_touched,
+    session_pipeline,
+)
 from ..settings import get_settings
 from ..view_ops import (
     ViewBatchResult,
@@ -473,8 +478,15 @@ def _finalize(
     the session). ``session.model_rev`` must already be bumped.
     Deterministic ordering throughout: changed/deleted ids in first-touch op
     application order, issues in dirty-set / scoped-pipeline order.
+
+    A user rule reports on the element it applies to but reads across
+    relationship hops, so the dirty set is first widened to every element the
+    compiled rules can reach back from this batch's own touched entities —
+    otherwise an edit to a FAR element would leave the owning element's rule
+    verdict stale in the store.
     """
-    scoped_issues = default_pipeline().validate(model, res.dirty.to_scope())
+    expand_dirty(session, model, res.dirty)
+    scoped_issues = session_pipeline(session).validate(model, res.dirty.to_scope())
     delta = state.replace(res.dirty.ids, scoped_issues)
     return OpsResponse(
         model_rev=session.model_rev,
@@ -1012,4 +1024,22 @@ def undo(
         # mutex, like every other broadcast site (enqueue order == rev order).
         headers, created_ids = artifact_delta_headers(db, art_res)
         broadcast_artifact_events(session.hub, headers, created_ids, art_res.deleted)
+        # Recompile the user rule sets when the artifact half put a rules
+        # artifact back (or took one away), and widen the dirty set to the
+        # applies-to population of BOTH the outgoing and the incoming sets so
+        # _finalize drops the issues the undone rules minted as well as adding
+        # the restored ones. Mirrors create_commit's step b4 — except the swap
+        # sits AFTER the durable commit rather than under an unwind ledger:
+        # every rollback path above has already been passed, so no failure can
+        # strand the session on rules the DB no longer backs. The metamodel
+        # cannot have changed here (a rebind-carrying batch is refused above),
+        # so model.metamodel is still the one the prior set compiled against.
+        if rules_touched(db, artifact_inv, art_res):
+            prior_compiled = session.compiled_rules
+            session.compiled_rules = load_compiled_rules(
+                db, project_id, model.metamodel
+            )
+            res.dirty.update(
+                applies_population(model, prior_compiled, session.compiled_rules)
+            )
         return _finalize(session, state, model, res)

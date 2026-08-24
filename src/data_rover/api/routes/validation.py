@@ -13,6 +13,7 @@ from data_rover.core.validation.state import ValidationState, issue_owner
 
 from ..artifact_ops import split_ops
 from ..deps import Session, get_request_session, require_model
+from ..rules import expand_dirty, session_pipeline
 from ..schemas import IssueListOut, IssueOut, ValidateRequest
 from ._snapshot import _build_model_from_payload
 from .ops import _apply_batch, _ensure_validation_seeded, _rollback
@@ -122,6 +123,8 @@ def validate_model(
             payload.inline.relationships,
         )
         scope = Scope(payload.scope) if payload.scope is not None else Scope.all()
+        # rules-blind on purpose: this validates a CALLER-SUPPLIED candidate
+        # model, not the session's, so the session's user rules do not apply.
         issues = default_pipeline().validate(model, scope)
         return [IssueOut.from_core(i) for i in issues]
 
@@ -176,7 +179,13 @@ def validate_model(
         with session.write_mutex:
             res = _apply_batch(current, model_ops, restore=False)
             try:
-                scoped = default_pipeline().validate(current, res.dirty.to_scope())
+                # widened before the run for the same reason _finalize widens:
+                # a staged edit to a FAR element flips the rule verdict of the
+                # element that owns the rule, which the batch never touched.
+                expand_dirty(session, current, res.dirty)
+                scoped = session_pipeline(session).validate(
+                    current, res.dirty.to_scope()
+                )
             finally:
                 _rollback(current, res.inverse_units)
         dirty_ids = set(res.dirty.ids)
@@ -190,7 +199,7 @@ def validate_model(
     scope = (
         Scope(payload.scope) if payload and payload.scope is not None else Scope.all()
     )
-    issues = default_pipeline().validate(current, scope)
+    issues = session_pipeline(session).validate(current, scope)
     if scope.is_all:
         state = ValidationState()
         state.set_full(issues)

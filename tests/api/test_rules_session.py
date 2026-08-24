@@ -194,7 +194,10 @@ def test_hydration_compiles_rules(client: TestClient) -> None:
     sweep reports their issues — no Validate click involved."""
     eid = _create_building(client)
     _save_rules(client)
-    assert _RULE_CHECK not in _issue_checks(client)  # not wired into /model/ops yet
+    # the legacy POST /artifacts route recompiles nothing, so the live
+    # session is still on its empty rule set and its seeded issue store
+    # stands: the rule only goes live once the project is rehydrated
+    assert _RULE_CHECK not in _issue_checks(client)
 
     get_registry().evict(DEFAULT_PROJECT_ID)  # snapshot-then-drop
 
