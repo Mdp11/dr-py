@@ -204,18 +204,19 @@ and script evaluation + the cell cache (same invalidation question as P-1).
 ### P-12 · Custom advanced validation rules · `done` (2026-08-24, `feat/validation-rules`)
 User-defined rules outside the metamodel, with arbitrary cross-element conditions
 ("if x has y, then z must have k"). Landed as a declarative YAML rule language
-evaluated natively as a seventh validator (`core/validation/rules/`) — not
-Python-snippet rules, which would have needed a second async evaluation
-subsystem (sweep, read-set capture, rev-stamped caching) and an
-eventual-consistency validation UI. Storage is the `validation_rules` artifact
-kind (verbatim YAML text, comments survive); `api/rules.py` is the one seam
-that builds rules-aware pipelines and widens dirty scopes, cached on
-`Session.compiled_rules` and rebuilt at hydration, on a rules-artifact-touching
-commit, and on metamodel rebind. As designed, rule issues are always
-CONFORMANCE (never block a commit) and a rule that drifts from the metamodel
-is skipped whole at compile and surfaced via `rules_status`, never as an
-ownerless issue. `POST /rules/lint` gives the editor a debounced, always-200
-lint call. Architecture notes: `CLAUDE.md` ("Custom validation rules"),
+(`core/validation/rules/`), evaluated natively as a seventh validator that the
+API-layer seam adds on top of core's six built-in defaults — not Python-snippet
+rules, which would have needed a second async evaluation subsystem (sweep,
+read-set capture, rev-stamped caching) and an eventual-consistency validation
+UI. Storage is the `validation_rules` artifact kind (verbatim YAML text,
+comments survive); `api/rules.py` is the one seam that builds rules-aware
+pipelines and widens dirty scopes, cached on `Session.compiled_rules` and
+rebuilt at hydration, on a rules-artifact-touching commit, and on metamodel
+rebind. As designed, rule issues are always CONFORMANCE (never block a
+commit) and a rule that drifts from the metamodel is skipped whole at
+compile and surfaced via `rules_status`, never as an ownerless issue.
+`POST /rules/lint` gives the editor a debounced, always-200 lint call.
+Architecture notes: `CLAUDE.md` ("Custom validation rules"),
 `frontend/README.md` ("Rules editor"). Source:
 `docs/superpowers/specs/2026-08-24-custom-validation-rules-design.md`.
 
