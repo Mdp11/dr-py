@@ -169,13 +169,8 @@ class ValidationPipeline:
         return issues
 
 
-def default_pipeline() -> ValidationPipeline:
-    """Build the standard pipeline with a fresh instance of every validator.
-
-    Thread-safety: the validators carry mutable per-metamodel memo caches, so
-    construct one pipeline per request/thread; do not share a pipeline (or
-    its validators) concurrently across models with different metamodels.
-    """
+def default_validators() -> list[Validator]:
+    """Fresh instances of the six built-in validators, in pipeline order."""
     # imported here to avoid a circular import at module load time
     from .validators.containment import ContainmentValidator
     from .validators.endpoint_typing import EndpointTypingValidator
@@ -184,16 +179,24 @@ def default_pipeline() -> ValidationPipeline:
     from .validators.type_conformance import TypeConformanceValidator
     from .validators.uniqueness import UniquenessValidator
 
-    return ValidationPipeline(
-        [
-            TypeConformanceValidator(),
-            MultiplicityValidator(),
-            FacetsValidator(),
-            EndpointTypingValidator(),
-            ContainmentValidator(),
-            UniquenessValidator(),
-        ]
-    )
+    return [
+        TypeConformanceValidator(),
+        MultiplicityValidator(),
+        FacetsValidator(),
+        EndpointTypingValidator(),
+        ContainmentValidator(),
+        UniquenessValidator(),
+    ]
+
+
+def default_pipeline() -> ValidationPipeline:
+    """Build the standard pipeline with a fresh instance of every validator.
+
+    Thread-safety: the validators carry mutable per-metamodel memo caches, so
+    construct one pipeline per request/thread; do not share a pipeline (or
+    its validators) concurrently across models with different metamodels.
+    """
+    return ValidationPipeline(default_validators())
 
 
 if TYPE_CHECKING:
