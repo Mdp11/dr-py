@@ -67,6 +67,34 @@ rules:
             where: {property: status, equals: ok}
 """
 
+INCOMING_HOP = """
+rules:
+  - name: has_owner_city
+    applies_to: Building
+    then:
+      relationship:
+        type: HasBuilding
+        direction: incoming
+        to: City
+        exists: true
+"""
+
+
+WHEN_ONLY = """
+rules:
+  - name: guarded
+    applies_to: Building
+    when:
+      relationship:
+        type: Owns
+        direction: outgoing
+        to: Zone
+        exists: true
+    then:
+      property: critical
+      equals: true
+"""
+
 
 def _compiled(mm, doc=TWO_HOP):
     return compile_rule_sets([RuleSetSource("a1", "s", doc)], mm)
@@ -149,3 +177,36 @@ def test_expansion_scoped_rerun_equals_full_rerun():
         scoped_owners = rule_issue_owners(Scope(scoped_ids))
         live = (live - set(scoped_ids)) | scoped_owners
         assert live == rule_issue_owners(Scope.all())
+
+
+def test_expand_incoming_direction_reaches_owner():
+    """direction: incoming means owner=target, far=source (the mirror of
+    outgoing); a swapped source/target inversion would either find nothing
+    or land on the wrong element, so pin the exact result."""
+    mm = _mm()
+    model = Model(mm)
+    c = model.create_element("City")
+    b = model.create_element("Building")
+    decoy = model.create_element("Building")  # not connected to c
+    model.connect("HasBuilding", c.id, b.id)
+    extra = expand_scope(model, _compiled(mm, INCOMING_HOP), [c.id])
+    assert extra == [b.id]
+    assert decoy.id not in extra
+
+
+def test_derive_paths_from_when_guard():
+    rs = parse_rule_set(WHEN_ONLY)
+    paths = derive_paths(rs.rules[0], _mm())
+    assert len(paths) == 1
+    assert paths[0].steps[0].rel_types == frozenset({"Owns"})
+    assert paths[0].steps[0].far_types == frozenset({"Zone"})
+
+
+def test_expand_reaches_owner_through_when_only_relationship():
+    mm = _mm()
+    model = Model(mm)
+    b = model.create_element("Building")
+    z = model.create_element("Zone")
+    model.connect("Owns", b.id, z.id)
+    extra = expand_scope(model, _compiled(mm, WHEN_ONLY), [z.id])
+    assert b.id in extra
