@@ -10,6 +10,7 @@ from data_rover.core.metamodel.schema import Metamodel
 from data_rover.core.model.model import Model
 from data_rover.core.script.cell_cache import ScriptCellCache
 from data_rover.core.script.runner import ReadKey
+from data_rover.core.validation.rules.compile import CompiledRules, empty_compiled
 from data_rover.core.validation.state import ValidationState
 from data_rover.core.view.schema import View
 
@@ -144,6 +145,12 @@ class Session:
         ),
         repr=False,
     )
+    #: compiled user-defined validation rules, built from the project's
+    #: `validation_rules` artifacts at hydration. Immutable-swap cache: a
+    #: rebuild REPLACES the whole object, since a reader holds its reference
+    #: across a full validation run. Empty (the default for a project with no
+    #: rule artifacts) validates exactly as an unruled project does.
+    compiled_rules: CompiledRules = field(default_factory=empty_compiled, repr=False)
     #: per-session background script-sweep jobs. One
     #: ``SweepJob`` per resolved-definition fingerprint, with FAILED-JOB
     #: memory: an aborted job stays registered at its ``(fingerprint, rev)`` so

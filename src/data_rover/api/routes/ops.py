@@ -92,6 +92,7 @@ from ..identity import get_current_user
 from ..invalidation import touched_keys
 from ..locking import METAMODEL_RESOURCE, artifact_resource, folder_resource
 from ..metamodel_ops import MetamodelBatchResult, apply_metamodel_ops
+from ..rules import session_pipeline
 from ..settings import get_settings
 from ..view_ops import (
     ViewBatchResult,
@@ -457,7 +458,7 @@ def _ensure_validation_seeded(session: Session, model: Model) -> ValidationState
     """
     if session.validation is None:
         state = ValidationState()
-        state.set_full(default_pipeline().validate(model, Scope.all()))
+        state.set_full(session_pipeline(session).validate(model, Scope.all()))
         session.validation = state
     return session.validation
 

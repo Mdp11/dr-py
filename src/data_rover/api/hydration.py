@@ -22,11 +22,12 @@ from typing import Any
 
 from data_rover.core.metamodel.loader import load_metamodel_str
 from data_rover.core.model.model import Model
+from data_rover.core.validation.rules.compile import compile_rule_sets
 from data_rover.core.validation.state import ValidationState
 from data_rover.core.view.ids import ensure_folder_ids
 from data_rover.core.view.schema import View
 
-from . import content
+from . import content, rules
 from .artifact_ops import split_ops
 from .db import db_session
 from .db_models import Commit
@@ -228,6 +229,9 @@ def _hydrate_session(project_id: str, progress: HydrationProgress) -> Session:
                     blob=view.model_dump_json(),
                     bump_rev=False,
                 )
+        # read here: compilation needs the metamodel built below, and the
+        # sweep it feeds runs with no DB session of its own
+        rule_sources = rules.rule_sources(s, project_id)
 
     metamodel = load_metamodel_str(mm_row.blob)
     if snap_key is None:
@@ -260,5 +264,6 @@ def _hydrate_session(project_id: str, progress: HydrationProgress) -> Session:
     session.view = view
     session.validation = ValidationState()
     session.strict_mode = strict_mode
+    session.compiled_rules = compile_rule_sets(rule_sources, metamodel)
     start_validation_sweep(session)
     return session

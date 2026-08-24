@@ -34,9 +34,9 @@ import threading
 from dataclasses import dataclass, field
 
 from data_rover.core.model.model import Model
-from data_rover.core.validation.pipeline import default_pipeline
 from data_rover.core.validation.scope import Scope
 
+from .rules import session_pipeline
 from .session import Session
 from .settings import get_settings
 
@@ -94,7 +94,8 @@ def _run(session: Session, model: Model, progress: SweepProgress) -> None:
         ids = list(model.elements.keys()) + list(model.relationships.keys())
         progress.total = len(ids)
         # one pipeline per sweep thread (validators carry mutable memo caches)
-        pipeline = default_pipeline()
+        compiled = session.compiled_rules
+        pipeline = session_pipeline(session)
         for start in range(0, len(ids), CHUNK_SIZE):
             chunk = ids[start : start + CHUNK_SIZE]
             with session.write_mutex:
@@ -103,6 +104,12 @@ def _run(session: Session, model: Model, progress: SweepProgress) -> None:
                 state = session.validation
                 if state is None:
                     return
+                if session.compiled_rules is not compiled:
+                    # a commit swapped the rules mid-sweep: rebuild so later
+                    # chunks don't splice stale rule verdicts over the
+                    # commit's fresh ones
+                    compiled = session.compiled_rules
+                    pipeline = session_pipeline(session)
                 # entities deleted since the id snapshot are skipped by the
                 # scoped pipeline and their (absent) issues dropped by replace
                 issues = pipeline.validate(model, Scope(chunk))
