@@ -133,6 +133,34 @@ describe('IssuesPanel skipped-rules banner', () => {
 		// a blank rule name renders as a placeholder, not an empty/missing token
 		expect(text).not.toContain('broken-set /  —');
 		expect(text).toMatch(/broken-set \/ \S/);
+		// A set that would not PARSE is not a set that drifted from the schema:
+		// the summary counts it as a rule set, and never calls it a mismatch.
+		const summary = banner!.querySelector('summary')!.textContent ?? '';
+		expect(summary).toContain('1 rule set skipped — parse failure');
+		expect(summary).not.toContain('schema mismatch');
+
+		unmount(c);
+	});
+
+	it('counts drifted rules and unparseable sets separately in the summary', async () => {
+		seedSummary();
+		await seedRulesStatus({
+			total: 4,
+			skipped: [
+				{ artifact_id: 'a1', set_name: 'zoning', rule: 'zoned', reason: 'unknown stereotype' },
+				{ artifact_id: 'a1', set_name: 'zoning', rule: 'owned', reason: 'unknown property' },
+				{ artifact_id: 'a2', set_name: 'broken-set', rule: '', reason: 'YAML parse error' }
+			],
+			eval_errors: {}
+		});
+		const c = mount(IssuesPanel, { target: document.body });
+		flushSync();
+
+		const summary =
+			document.body.querySelector('[data-testid="rules-skipped-banner"] summary')?.textContent ??
+			'';
+		expect(summary).toContain('2 rules skipped — schema mismatch');
+		expect(summary).toContain('1 rule set skipped — parse failure');
 
 		unmount(c);
 	});

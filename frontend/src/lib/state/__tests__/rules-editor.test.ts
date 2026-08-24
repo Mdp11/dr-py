@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as artifactsApi from '$lib/api/artifacts';
 import * as checkoutApi from '$lib/api/checkout';
 import * as rulesApi from '$lib/api/rules';
+import type { RulesLint } from '$lib/api/rules';
 import { ConflictError, ValidationError } from '$lib/api/errors';
 import type { ArtifactHeader } from '$lib/api/types';
 import {
@@ -348,6 +349,10 @@ describe('artifact lease on open', () => {
 });
 
 describe('debounced lint', () => {
+	// `lintNow` is gated on `canEdit()`: `POST /rules/lint` is outside the
+	// backend's read-only-POST allowlist, so a viewer would be answered 403.
+	beforeEach(asEditor);
+
 	it('coalesces keystrokes into one call and installs errors AND drift warnings', async () => {
 		vi.useFakeTimers();
 		const lint = vi.spyOn(rulesApi, 'lintRules').mockResolvedValue({
@@ -438,6 +443,119 @@ describe('debounced lint', () => {
 
 		expect(lint).not.toHaveBeenCalled();
 		expect(getRulesDraft(tabId)).toBeUndefined();
+		vi.useRealTimers();
+	});
+});
+
+describe('lint generation guards', () => {
+	beforeEach(asEditor);
+
+	/** A lint call whose settlement this test controls, so responses can be made
+	 * to land out of the order they were issued. */
+	function deferredLint() {
+		let settle!: (r: RulesLint) => void;
+		let fail!: (e: unknown) => void;
+		const promise = new Promise<RulesLint>((res, rej) => {
+			settle = res;
+			fail = rej;
+		});
+		return { promise, settle, fail };
+	}
+
+	const NEWER: RulesLint = {
+		ok: false,
+		errors: [{ message: 'newer result', line: 2, column: 2 }],
+		warnings: []
+	};
+	const STALE: RulesLint = {
+		ok: false,
+		errors: [{ message: 'stale result', line: 1, column: 1 }],
+		warnings: []
+	};
+
+	/** Open a draft and let its unconditional open-time lint settle, so the
+	 * generation counter is quiescent before the test issues its own calls. */
+	async function openQuiet(tabId: string) {
+		const lint = vi.spyOn(rulesApi, 'lintRules');
+		lint.mockResolvedValue({ ok: true, errors: [], warnings: [] });
+		await ensureRulesDraft(tabId);
+		await vi.advanceTimersByTimeAsync(0);
+		lint.mockClear();
+		return lint;
+	}
+
+	it('drops a stale lint response that resolves after a newer one', async () => {
+		vi.useFakeTimers();
+		const tabId = 'rules:draft:6';
+		const lint = await openQuiet(tabId);
+		const held = deferredLint();
+
+		lint.mockReturnValueOnce(held.promise); // issued first, settles last
+		editRulesDraft(tabId, 'rules: [');
+		await vi.advanceTimersByTimeAsync(RULES_LINT_DEBOUNCE_MS + 10);
+		lint.mockResolvedValueOnce(NEWER);
+		editRulesDraft(tabId, 'rules: [ {');
+		await vi.advanceTimersByTimeAsync(RULES_LINT_DEBOUNCE_MS + 10);
+
+		expect(lint).toHaveBeenCalledTimes(2);
+		expect(getRulesDraft(tabId)?.lintErrors).toEqual(NEWER.errors);
+
+		held.settle(STALE);
+		await vi.advanceTimersByTimeAsync(0);
+
+		// The older response lands last and must be discarded, not applied.
+		expect(getRulesDraft(tabId)?.lintErrors).toEqual(NEWER.errors);
+		vi.useRealTimers();
+	});
+
+	it('drops a stale REJECTED lint rather than clobbering a newer result', async () => {
+		vi.useFakeTimers();
+		const tabId = 'rules:draft:7';
+		const lint = await openQuiet(tabId);
+		const held = deferredLint();
+
+		lint.mockReturnValueOnce(held.promise);
+		editRulesDraft(tabId, 'rules: [');
+		await vi.advanceTimersByTimeAsync(RULES_LINT_DEBOUNCE_MS + 10);
+		lint.mockResolvedValueOnce(NEWER);
+		editRulesDraft(tabId, 'rules: [ {');
+		await vi.advanceTimersByTimeAsync(RULES_LINT_DEBOUNCE_MS + 10);
+
+		// A 422 is the one rejection the editor turns into a finding — so a STALE
+		// 422 is the one rejection that could overwrite a newer good result.
+		held.fail(new ValidationError(422, {}, 'too long'));
+		await vi.advanceTimersByTimeAsync(0);
+
+		expect(getRulesDraft(tabId)?.lintErrors).toEqual(NEWER.errors);
+		vi.useRealTimers();
+	});
+
+	it('a lint in flight when the tab closes lands on nothing', async () => {
+		vi.useFakeTimers();
+		const tabId = 'rules:draft:8';
+		const lint = await openQuiet(tabId);
+		const held = deferredLint();
+
+		lint.mockReturnValueOnce(held.promise);
+		editRulesDraft(tabId, 'rules: [');
+		await vi.advanceTimersByTimeAsync(RULES_LINT_DEBOUNCE_MS + 10);
+		expect(lint).toHaveBeenCalledTimes(1); // in flight, unlike the debounce-only case
+
+		closeRulesDraft(tabId);
+		expect(getRulesDraft(tabId)).toBeUndefined();
+
+		// Re-open the SAME tab id BEFORE the orphaned response settles: that is what
+		// makes the generation bump on close load-bearing. The draft map has an
+		// entry again, so `_drafts.has` no longer discriminates and only the
+		// generation tells the response it belongs to a tab that no longer exists.
+		lint.mockResolvedValue({ ok: true, errors: [], warnings: [] });
+		await ensureRulesDraft(tabId);
+		await vi.advanceTimersByTimeAsync(0);
+
+		held.settle(STALE);
+		await vi.advanceTimersByTimeAsync(0);
+
+		expect(getRulesDraft(tabId)?.lintErrors).toEqual([]);
 		vi.useRealTimers();
 	});
 });

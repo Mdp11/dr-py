@@ -1460,7 +1460,7 @@ blob does:
 - **Lint** — a debounced (500 ms) `POST /rules/lint` per edit, run once
   immediately on open too. Positioned errors (a YAML parse failure) land in
   the CodeMirror gutter (the metamodel tab's own YAML editor component,
-  reused unchanged); message-only errors (a schema violation — the common
+  shared, not forked); message-only errors (a schema violation — the common
   case, since only a parse failure carries a line) render in a strip under
   the toolbar. Drift warnings render in a separate, visually neutral strip
   below that — a drifted rule is a degradation, never presented as broken.
@@ -1580,7 +1580,7 @@ src/
                         lazily;
                         unsaved.ts — hasUnsavedWork() (staged model ops + staged
                         artifact ops + dirty table/navigation/snippet/
-                        exporter drafts), input to the workspace unload
+                        exporter/rules drafts), input to the workspace unload
                         guard (beforeNavigate in p/[projectId]/+page);
                         snippet-editor.svelte.ts — per-tab code-snippet
                         drafts, save lifecycle, debounced lint + run/stop

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { markEditorLockDenied } from '../artifact-lock-denied';
 import { getExporterLockHolder, resetExporterEditors } from '../exporter-editor.svelte';
 import { getNavLockHolder, resetNavigationEditors } from '../navigation-editor.svelte';
+import { getRulesLockHolder, resetRulesEditors } from '../rules-editor.svelte';
 import { getTableLockHolder, resetTableEditors } from '../table-editor.svelte';
 import { getSnippetLockHolder, resetSnippetEditors } from '../snippet-editor.svelte';
 
@@ -10,6 +11,7 @@ afterEach(() => {
 	resetTableEditors();
 	resetSnippetEditors();
 	resetExporterEditors();
+	resetRulesEditors();
 });
 
 describe('markEditorLockDenied', () => {
@@ -18,11 +20,13 @@ describe('markEditorLockDenied', () => {
 		markEditorLockDenied('tbl:a2', 'bob@example.com');
 		markEditorLockDenied('snip:a3', 'cal@example.com');
 		markEditorLockDenied('exp:a4', 'dee@example.com');
+		markEditorLockDenied('rules:a5', 'eve@example.com');
 
 		expect(getNavLockHolder('nav:a1')).toBe('ada@example.com');
 		expect(getTableLockHolder('tbl:a2')).toBe('bob@example.com');
 		expect(getSnippetLockHolder('snip:a3')).toBe('cal@example.com');
 		expect(getExporterLockHolder('exp:a4')).toBe('dee@example.com');
+		expect(getRulesLockHolder('rules:a5')).toBe('eve@example.com');
 	});
 
 	it('does not cross-wire the stores', () => {

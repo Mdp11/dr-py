@@ -11,6 +11,7 @@ import {
 	setExportArtifactsOpen,
 	stageArtifactUpdate
 } from '$lib/state';
+import { REGISTERED_KINDS } from '$lib/artifacts/kinds';
 import ExportArtifactsDialog from '../ExportArtifactsDialog.svelte';
 
 const HEADERS = [
@@ -449,5 +450,35 @@ describe('ExportArtifactsDialog', () => {
 		// If the timer had leaked, it would still fire and call exportPreview.
 		await vi.advanceTimersByTimeAsync(350);
 		expect(preview).not.toHaveBeenCalled();
+	});
+});
+
+describe('ExportArtifactsDialog kind coverage', () => {
+	// SECTIONS is an array, not a Record<ArtifactKind, …>, so a kind missing from
+	// it type-checks cleanly and silently drops that kind's artifacts from the
+	// dialog — they can never be selected as an export root. Derived from
+	// REGISTERED_KINDS rather than a second hand-written list, so the next kind
+	// added fails here.
+	it('renders one section per registered artifact kind', async () => {
+		resetArtifacts();
+		vi.spyOn(artifactsApi, 'listArtifacts').mockResolvedValue({
+			items: REGISTERED_KINDS.map((kind, i) => ({
+				id: `k${i}`,
+				kind,
+				name: `${kind} artifact`,
+				artifact_rev: 1,
+				updated_at: '',
+				updated_by: null,
+				entry_points: null
+			}))
+		});
+		await loadArtifacts();
+		vi.spyOn(bundleApi, 'exportPreview').mockResolvedValue({ artifacts: [], dangling_refs: [] });
+		open();
+
+		const rendered = [
+			...document.body.querySelectorAll('[data-testid^="export-section-all-"]')
+		].map((el) => el.getAttribute('data-testid')!.slice('export-section-all-'.length));
+		expect(new Set(rendered)).toEqual(new Set(REGISTERED_KINDS));
 	});
 });

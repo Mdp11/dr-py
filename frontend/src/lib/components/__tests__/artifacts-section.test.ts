@@ -16,6 +16,7 @@ import {
 } from '$lib/state';
 import { resetCheckout } from '$lib/state/checkout.svelte';
 import { endDrag, getDragPayload, isDragActive } from '$lib/state/tree-drag.svelte';
+import { REGISTERED_KINDS } from '$lib/artifacts/kinds';
 import ArtifactsSection from '../Sidebar/ArtifactsSection.svelte';
 
 const HEADER = {
@@ -216,5 +217,20 @@ describe('ArtifactsSection staged rows', () => {
 		// does not exist and, once the commit re-keys it, never will.
 		expect(isDragActive()).toBe(false);
 		expect(getDragPayload()).toBeNull();
+	});
+});
+
+describe('ArtifactsSection kind coverage', () => {
+	// SECTIONS is an array, not a Record<ArtifactKind, …>, so a kind missing from
+	// it type-checks cleanly and silently leaves that kind uncreatable and
+	// unopenable from the sidebar. Derived from REGISTERED_KINDS rather than a
+	// second hand-written list, so the next kind added fails here.
+	it('renders one section per registered artifact kind', () => {
+		app = mount(ArtifactsSection, { target: host });
+		flushSync();
+		const rendered = [...host.querySelectorAll('[data-testid^="artifacts-section-"]')].map((el) =>
+			el.getAttribute('data-testid')!.slice('artifacts-section-'.length)
+		);
+		expect(new Set(rendered)).toEqual(new Set(REGISTERED_KINDS));
 	});
 });
