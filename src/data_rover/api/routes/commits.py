@@ -1223,8 +1223,15 @@ def create_commit(
         # d. commit accepted: splice issues, bump rev, record batch
         conformance = [i for i in scoped if i.category is IssueCategory.CONFORMANCE]
         # strict-mode gate: an owner-enabled project promotes scoped conformance
-        # issues to a hard reject. Scoped to res.dirty only —
-        # pre-existing issues elsewhere never trip this.
+        # issues to a hard reject. Its scope is the WIDENED res.dirty — the
+        # batch's own touched entities plus everything user rules reach back
+        # from them, plus (on a rules-artifact edit) the whole applies_to
+        # population of the old and new rule sets. So on a strict project a
+        # pre-existing conformance issue on an element this batch never edited
+        # CAN reject the commit, and a rules artifact whose rules some existing
+        # element already violates cannot be saved until that element is fixed.
+        # That is the point of reach-aware widening: those verdicts are exactly
+        # the ones the batch changed.
         #
         # Rebind batches are exempt BY DECISION — the engine must stay
         # inspectable through a migration: a schema migration must not be

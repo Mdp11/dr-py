@@ -328,3 +328,62 @@ def test_preview_reports_rule_issues_without_side_effects(client: TestClient) ->
     assert again["structural_blockers"] == []
     assert _rev(client) == before
     assert _stored_rule_checks(client) == set()
+
+
+def test_rejected_commit_restores_the_prior_compiled_rules(client: TestClient) -> None:
+    """A commit rejected AFTER the recompile must leave the session on the
+    rule sets the DB still holds: the reject rolls the artifact row back, so
+    keeping the recompiled set would validate every later commit against rules
+    no artifact backs."""
+    r = _commit(
+        client,
+        [
+            _rules_op(NAMED_YAML),
+            {
+                "kind": "create_element",
+                "temp_id": "tmp_b",
+                "type_name": "Building",
+                "properties": {"name": "ok"},
+            },
+            {"kind": "create_element", "temp_id": "tmp_z", "type_name": "Zone"},
+        ],
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    art_id = body["changed_artifacts"][0]["id"]
+    assert not _rule_issues(body["issues_added"])
+
+    assert (
+        client.patch(papi("/settings"), json={"strict_mode": True}).status_code == 200
+    )
+    # Swapping in the Zone rule recompiles at b4, then trips the strict gate on
+    # the label-less Zone the swap brought into scope: a 422 from AFTER the
+    # recompile, which is the only way to reach the restore arm.
+    tok = _lock(client, _artifact_targets(art_id))
+    rejected = _commit(
+        client,
+        [
+            {
+                "kind": "update_artifact",
+                "id": art_id,
+                "payload": {"schema_version": 1, "yaml": INERT_YAML},
+            }
+        ],
+        base_rev=body["model_rev"],
+        lock_tokens=[tok],
+    )
+    assert rejected.status_code == 422, rejected.text
+    blockers = {i["check"] for i in rejected.json()["conformance_blockers"]}
+    assert "rule:zone-has-label" in blockers
+    assert _rev(client) == body["model_rev"]
+
+    # The OLD rule must still be the live one. Without the restore the session
+    # would be holding zone-has-label, under which a nameless Building is
+    # clean and this commit lands with a 200.
+    after = _commit(
+        client,
+        [{"kind": "create_element", "temp_id": "tmp_b2", "type_name": "Building"}],
+        base_rev=body["model_rev"],
+    )
+    assert after.status_code == 422, after.text
+    assert "rule:has-name" in {i["check"] for i in after.json()["conformance_blockers"]}
