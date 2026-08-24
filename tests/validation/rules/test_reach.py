@@ -12,8 +12,14 @@ from data_rover.core.metamodel.schema import (
     PropertyDef,
     RelationshipType,
 )
+from data_rover.core.model.change_request import (
+    ChangeRequest,
+    ModifiedElement,
+    apply_change_request,
+)
+from data_rover.core.model.element import Element
 from data_rover.core.model.model import Model
-from data_rover.core.validation.dirty import DirtyCollector
+from data_rover.core.validation.dirty import DirtyCollector, change_request_dirty_ids
 from data_rover.core.validation.rules.compile import RuleSetSource, compile_rule_sets
 from data_rover.core.validation.rules.reach import derive_paths, expand_scope
 from data_rover.core.validation.rules.schema import parse_rule_set
@@ -39,12 +45,19 @@ def _mm() -> Metamodel:
             ),
         ],
         relationships=[
-            RelationshipType(name="HasBuilding", containment=True,
-                             mappings=[Mapping(source="City", target="Building")]),
-            RelationshipType(name="Owns", containment=True,
-                             mappings=[Mapping(source="Building", target="Zone")]),
-            RelationshipType(name="Watches",
-                             mappings=[Mapping(source="Zone", target="Sensor")]),
+            RelationshipType(
+                name="HasBuilding",
+                containment=True,
+                mappings=[Mapping(source="City", target="Building")],
+            ),
+            RelationshipType(
+                name="Owns",
+                containment=True,
+                mappings=[Mapping(source="Building", target="Zone")],
+            ),
+            RelationshipType(
+                name="Watches", mappings=[Mapping(source="Zone", target="Sensor")]
+            ),
         ],
     )
 
@@ -167,8 +180,7 @@ def test_expansion_scoped_rerun_equals_full_rerun():
 
     def rule_issue_owners(scope):
         return {
-            i.target_ids[0]
-            for i in RulesValidator(compiled).validate(model, scope)
+            i.target_ids[0] for i in RulesValidator(compiled).validate(model, scope)
         }
 
     def alive(elements):
@@ -203,9 +215,7 @@ def test_expansion_scoped_rerun_equals_full_rerun():
                 else:
                     # only re-parent an orphan zone: a second containment
                     # parent is a structural defect, not a rule scenario
-                    orphans = [
-                        z for z in zones if not model.indexes.incoming_ids(z.id)
-                    ]
+                    orphans = [z for z in zones if not model.indexes.incoming_ids(z.id)]
                     if orphans and buildings:
                         fired.add("connect")
                         d.connect(
@@ -286,3 +296,113 @@ def test_expand_reaches_owner_through_when_only_relationship():
     model.connect("Owns", b.id, z.id)
     extra = expand_scope(model, _compiled(mm, WHEN_ONLY), [z.id])
     assert b.id in extra
+
+
+# -- retype (change-request path) -------------------------------------------
+
+SAFE_ZONE_REQUIRED = """
+rules:
+  - name: needs_safe_zone
+    applies_to: Building
+    then:
+      relationship: {type: Owns, direction: outgoing, to: SafeZone, exists: true}
+"""
+
+NO_SAFE_ZONE = """
+rules:
+  - name: no_safe_zone
+    applies_to: Building
+    then:
+      not:
+        relationship: {type: Owns, direction: outgoing, to: SafeZone, exists: true}
+"""
+
+
+def _retype_mm() -> Metamodel:
+    """Zone subtype hierarchy: retyping across it moves an element in and out
+    of a rule's ``to:`` closure."""
+    return Metamodel(
+        elements=[
+            ElementType(name="Building"),
+            ElementType(name="Zone"),
+            ElementType(name="SafeZone", extends="Zone"),
+        ],
+        relationships=[
+            RelationshipType(
+                name="Owns",
+                containment=True,
+                mappings=[Mapping(source="Building", target="Zone")],
+            ),
+        ],
+    )
+
+
+def _rule_owners(model, compiled, scope):
+    return {i.target_ids[0] for i in RulesValidator(compiled).validate(model, scope)}
+
+
+def _retype(model, element_id, new_type):
+    """Retype one element through the change-request path — the only route a
+    retype takes (the Model mutation boundary has no retype op). Returns the
+    result model and the CR's dirty ids."""
+    before = model.elements[element_id]
+    cr = ChangeRequest(
+        elements_modified=[
+            ModifiedElement(
+                id=element_id,
+                before=before,
+                after=Element(
+                    id=element_id,
+                    type_name=new_type,
+                    properties=dict(before.properties),
+                ),
+            )
+        ]
+    )
+    result = apply_change_request(model, cr)
+    return result, change_request_dirty_ids(model, result, cr)
+
+
+def _splice(model, compiled, live, dirty):
+    """The API's incremental update: expand, rerun scoped, splice."""
+    extra = expand_scope(model, compiled, dirty)
+    scoped_ids = list(dict.fromkeys([*dirty, *extra]))
+    return (live - set(scoped_ids)) | _rule_owners(model, compiled, Scope(scoped_ids))
+
+
+def test_retype_across_far_type_closure_splices_like_a_full_rerun():
+    """A retype flips the OWNER's verdict while the retyped element itself
+    stops matching the rule's ``to:`` closure. Gating the walk on the
+    element's current type would never start it, losing the owner's new
+    violation; the splice must track a full rerun across both transitions.
+    """
+    mm = _retype_mm()
+    model = Model(mm)
+    b = model.create_element("Building")
+    z = model.create_element("SafeZone")
+    model.connect("Owns", b.id, z.id)
+    compiled = _compiled(mm, SAFE_ZONE_REQUIRED)
+    live = _rule_owners(model, compiled, Scope.all())
+    assert live == set()
+    for new_type, expected in (("Zone", {b.id}), ("SafeZone", set())):
+        model, dirty = _retype(model, z.id, new_type)
+        assert z.id in dirty
+        live = _splice(model, compiled, live, dirty)
+        assert live == _rule_owners(model, compiled, Scope.all()) == expected
+
+
+def test_retype_out_of_far_type_closure_drops_the_owner_stale_issue():
+    """Mirror polarity: the far element's presence in the closure is what
+    violates, so leaving the closure must retract the owner's issue rather
+    than strand it."""
+    mm = _retype_mm()
+    model = Model(mm)
+    b = model.create_element("Building")
+    z = model.create_element("SafeZone")
+    model.connect("Owns", b.id, z.id)
+    compiled = _compiled(mm, NO_SAFE_ZONE)
+    live = _rule_owners(model, compiled, Scope.all())
+    assert live == {b.id}
+    model, dirty = _retype(model, z.id, "Zone")
+    live = _splice(model, compiled, live, dirty)
+    assert live == _rule_owners(model, compiled, Scope.all()) == set()

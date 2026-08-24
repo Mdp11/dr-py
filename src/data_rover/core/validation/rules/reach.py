@@ -6,7 +6,8 @@ Each relationship atom in a rule contributes one root-first path of
 dirty elements backwards along every path suffix they could sit on and
 adds the reached applies_to-typed elements. Over-approximation is safe
 (the scoped rerun just revalidates a few extra elements); too-small is
-the only correctness hazard.
+the only correctness hazard, so the walk ignores the paths' far-type
+closures and pays the extra adjacency hops instead.
 """
 
 from __future__ import annotations
@@ -98,32 +99,27 @@ def expand_scope(
     if not compiled.rules:
         return []
     extra: dict[str, None] = {}
-    dirty_elements = [
-        el for eid in dirty_ids if (el := model.elements.get(eid)) is not None
-    ]
+    seeds = {eid for eid in dirty_ids if eid in model.elements}
+    if not seeds:
+        return []
+    # Seeds and intermediate hops are deliberately UNFILTERED by far_types:
+    # those name the type an element has to match for the rule to reach it, and
+    # a retype is exactly the mutation that flips a verdict while making the
+    # element stop matching. Gating on the CURRENT type would then never start
+    # the walk and silently lose the owner's new violation.
     for cr in compiled.rules:
         for path in cr.paths:
             steps = path.steps
             for d in range(1, len(steps) + 1):
-                far = steps[d - 1].far_types
-                seeds = {
-                    el.id for el in dirty_elements if far is None or el.type_name in far
-                }
-                if not seeds:
-                    continue
                 frontier = seeds
                 for i in range(d - 1, -1, -1):
                     frontier = _owners(model, frontier, steps[i])
-                    gate = steps[i - 1].far_types if i > 0 else cr.applies_types
-                    if gate is not None:
-                        frontier = {
-                            fid
-                            for fid in frontier
-                            if (fel := model.elements.get(fid)) is not None
-                            and fel.type_name in gate
-                        }
                     if not frontier:
                         break
+                # the rule only ever reports on its own applies-to population;
+                # an owner whose OWN type changed is already in the dirty set
                 for fid in sorted(frontier):
-                    extra[fid] = None
+                    fel = model.elements.get(fid)
+                    if fel is not None and fel.type_name in cr.applies_types:
+                        extra[fid] = None
     return list(extra)
