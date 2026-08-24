@@ -754,6 +754,17 @@ Resolved in Phase 3: Save no longer blocks on it (matching F-10's principle and 
 `key_column` hint's stance) — an inline `entry-split-template-warning` next to Save replaces the
 gate, and enforcement stays the export-time 422.
 
+### F-17 · Rules tab Save stays enabled on a document the server will reject · `open` · *2026-08-24*
+`components/Rules/RulesTab.svelte` disables Save only while the tab is lock-denied, so an
+unparseable rule set can be staged. It then 422s the **whole** commit batch
+(`api/artifact_ops.py`: `invalid validation_rules payload: …`), taking unrelated model and view
+edits down with it. `POST /commits/preview` catches it first, which is the mitigation — but the
+client already knows the document is invalid, since `draft.lintErrors` is exactly that answer.
+Note the tension with F-10/F-16, which argue *against* Save-time gates: the difference is that
+those blocked on a **presentation** setting only export-time rendering could judge, whereas this
+one is a structural payload error the server refuses at save on every path. Disabling Save (or
+confirming) is the cheap version; the alternative is letting preview keep owning it.
+
 ---
 
 ## 6. Diagnosed issues — backend
@@ -902,30 +913,31 @@ only export-time rendering can detect, and an oversized entry list is detectable
 that on both paths. Surfaced during the
 Exporter v2 Phase 3 review; closed as the first task of Phase 4.
 
-### K-13 · `expand_scope` recomputes its seed set per `(rule, path, depth)` triple · `open` · perf · *2026-08-24*
-`core/validation/rules/reach.py::expand_scope` rebuilds `seeds` with a comprehension over
-the whole `dirty_elements` list inside its innermost loop, so the filtering cost is
-`O(rules × paths × depth × |dirty|)` before a single reverse hop is walked. The fix is to
-bucket `dirty_elements` into a `dict[str, list[str]]` keyed by `type_name` ONCE at the top
-of the function and build each seed set by unioning the buckets named by that step's
-`far_types` closure (with the whole set when `far_types is None`) — the closures are already
-materialized as frozensets on `ReverseStep`. **Deliberately deferred** rather than folded
-into the P-12 fix wave: it changes the one algorithm where a subtle mistake under-approximates
-the expansion — the single correctness hazard the rules design names — so it wants its own
-review, landed against the now-strengthened keystone property test
-(`tests/validation/rules/test_reach.py::test_expansion_scoped_rerun_equals_full_rerun`, which
-drives property AND structural mutations through a real `DirtyCollector`).
+### K-13 · `expand_scope` recomputed its seed set per `(rule, path, depth)` triple · `done` (2026-08-24, feat/validation-rules) · perf · *2026-08-24*
+Closed as a side effect of the retype under-approximation fix. Dropping the per-step
+`far_types` gates left the seed set independent of `(rule, path, depth)`, so it is now built
+once at the top of `expand_scope` instead of rebuilt in the innermost loop. The remaining
+cost is the reverse hops themselves — deliberately more of them than before, since the walk
+no longer prunes by far type (see the CLAUDE.md note on why that pruning was unsound).
+Re-open only if profiling shows the extra adjacency walking matters on a real model.
 
-### K-14 · `CompiledRules.eval_errors` never resets and has no reporting cap · `open` · *2026-08-24*
-`eval_errors` is a `Counter[str]` on the immutable `CompiledRules` that
-`RulesValidator` increments per failing rule evaluation, surfaced by `GET /model/issues`'s
-`rules_status.eval_errors`. It only ever grows: nothing clears it, so on a long-lived session
-a rule that fails on every sweep chunk accumulates an unbounded count, and the dict has one
-key per rule with no ceiling on how many are reported. The design calls for *capped* reporting.
-Options: reset at each rules recompile (the counter dies with the `CompiledRules` object
-anyway, so this is mostly about the within-a-compile window), or cap the wire dict the way
-`ScriptWarningLog` caps distinct warning kinds — keep counting a key already present, drop
-brand-new keys past the cap.
+### K-14 · `CompiledRules.eval_errors` has a `reset_eval_errors()` with no caller · `open` · *2026-08-24*
+Two thirds of this landed on `feat/validation-rules`: the counter is now replaced by whole-object
+swap under a lock (an unlocked `dict(compiled.eval_errors)` snapshot can no longer tear), and a
+rule that raises logs one traceback per `(check, exception type)` per run instead of one per
+failing element — the original hazard, which on a 100k-element model was 100k tracebacks per sweep.
+
+What remains: `reset_eval_errors()` exists and **nothing calls it**, so the number
+`GET /model/issues` reports is still lifetime evaluations rather than current state; and the wire
+dict still has one key per rule with no ceiling, where the design calls for *capped* reporting.
+The natural caller is the start of a full background sweep, which re-derives every count anyway.
+Cap the dict the way `ScriptWarningLog` caps distinct warning kinds — keep counting a key already
+present, drop brand-new keys past the cap.
+
+Separately, the client decodes `rules_status.eval_errors` (`frontend/src/lib/api/validation.ts`)
+and renders it nowhere, so a rule failing on every element it visits is invisible in the UI: no
+issue, no banner, no chip. Either surface it beside the skipped-rules banner or record the
+omission deliberately.
 
 ### K-15 · `POST /rules/lint` hydrates the session; `/metamodel/lint` deliberately does not · `open` · *2026-08-24*
 `routes/rules.py::lint_rules` depends on `get_request_session`, so a debounced per-keystroke
@@ -934,6 +946,36 @@ by taking no `Session` dependency at all. The dependency is not gratuitous: drif
 `session.metamodel`. A fix has to keep drift working without full hydration — read the
 metamodel blob straight off `MetamodelRow` for the lint, or make the drift half opt-in so the
 parse+schema half stays hydration-free.
+
+### K-16 · `core/metamodel/loader.py` has the alias-bomb weakness rules YAML just closed · `open` · *2026-08-24*
+`feat/validation-rules` taught `parse_rule_set` to refuse YAML aliases, because PyYAML memoizes
+anchors into a shared-reference DAG that loads in flat time while pydantic then walks it as a
+tree — ~360 bytes of nested aliases measured 6.4 s and 493 MB, and one more level OOMed, all
+under every size cap (they measure source text). `core/metamodel/loader.py` is the only other
+`yaml.safe_load` in the repo and has the identical shape on the metamodel upload and
+`POST /metamodel/lint` paths — and that lint route, like the rules one, is debounced per
+keystroke. Deliberately left out of the P-12 wave as out of that branch's scope. The rules fix
+(`_NoAliasLoader` in `core/validation/rules/schema.py`) is the model; a metamodel author has no
+more use for anchors than a rule author does, but confirm that against
+`examples/smart-city.metamodel.yaml` before refusing them.
+
+### K-18 · The strict gate cannot tell a flipped rule verdict from a pre-existing one · `open` · deliberate · *2026-08-24*
+`api/rules.py::attributable_issues` lets **every** `rule:` verdict through the strict-mode gate,
+wherever it sits, because reach expansion exists precisely so a far edit can flip a rule the batch
+never touched. The cost is the converse case: an element that ALREADY violated a rule, pulled into
+scope only by the expansion, blocks a strict commit that had nothing to do with it. Distinguishing
+the two needs a diff against the prior issue store for that owner (`ValidationState.issues_for`)
+rather than a check-name test. Chosen over-blocking rather than under-blocking, matching the
+widening's own over-approximation stance — but the built-in half of this problem was worth fixing,
+so the rule half is worth revisiting. Not a regression against `main`, where rules did not exist.
+
+### K-17 · A rules-artifact edit persists the whole `applies_to` population's issues · `open` · *2026-08-24*
+Same shape as K-8, different trigger. A commit touching a rules artifact widens the validation
+splice to the `applies_to` population of the old ∪ new compiled sets — correct, since issues
+minted by a deleted or renamed rule have to drop — but that population lands in the response's
+`issues_added` **and** in the `Commit.issues` JSON column, so on a large model one rule edit
+writes a very large journal row. K-8 already records the rebind case; rule edits are far more
+frequent than rebinds. Whatever caps K-8 should cap this too.
 
 ---
 
@@ -953,7 +995,9 @@ parse+schema half stays hydration-free.
 | C-10 | `done` (2026-08-19, feat/exporter-v2-phase1) — the wire entry was renamed `ExporterEntry` (not `CustomExportEntry`, per the `custom_export` → `exporter` kind rename that landed in the same pass) alongside `export-layout.ts`'s `ExportEntry` layout row, resolving the naming collision. | P-14 final review, 2026-08-14 |
 | C-11 | `pixi run -e core-dev ruff check tests/api/` reports 5 errors in files this branch never touched. No pixi task lints `tests/` at all (`core-lint` only covers `src/`), so this debt is invisible to the normal toolchain — it was found only by running the linter against the test tree by hand. Pre-existing, confirmed 2026-08-16. | metamodel commit-flow final review |
 | C-12 | `src/data_rover/api/routes/commits.py` is ~1785 lines and holds `/open`, `/commits`, `/commits/preview`, `/commits/revert`, the `_CommitUnwind` ledger, the lock-verification helpers and the staleness backstop. The natural seams are the preview/revert routes and the unwind ledger; the commit route itself is one long ordered sequence and does not want splitting. | P-12 final review, 2026-08-24 |
-| C-13 | `frontend/src/lib/api/rules.ts`'s `RulesLintErrorSchema` duplicates `api/types.ts`'s `MetamodelLintErrorSchema` field for field. The backend already collapsed the pair (`RulesLintResponse.errors` reuses `LintErrorOut`); the client should follow with one shared `LintErrorSchema`. | P-12 final review, 2026-08-24 |
+| C-14 | A rule's `check` is `rule:<name>`, and names are unique only *within* a rule set — two `validation_rules` artifacts can each define `has-zone`. Their issues then share one Issues-panel chip and one `eval_errors` bucket. Either qualify the check with the artifact id or record the merge as accepted. | P-12 re-review, 2026-08-24 |
+| C-15 | `RulesValidator`'s generated message is `"Rule 'x' violated[: description]"`, where the design's pinned shape is `"<rule-name>: <failed-assertion summary>"`, and it never names the far elements that witnessed the failure. The design hedges that context with "where cheaply available", so the omission is fine — but the format is a straight deviation. Match it or amend the design. | P-12 re-review, 2026-08-24 |
+| C-13 | ~~`frontend/src/lib/api/rules.ts`'s `RulesLintErrorSchema` duplicates `api/types.ts`'s `MetamodelLintErrorSchema` field for field.~~ **done** (2026-08-24, feat/validation-rules) — the client now reuses one shared schema, matching the backend's `LintErrorOut`. | P-12 final review, 2026-08-24 |
 
 ---
 
