@@ -217,6 +217,87 @@ def test_issue_out_parses_legacy_json_without_check() -> None:
     assert out.check == ""
 
 
+def _commit(client: TestClient, ops: list[dict], lock_tokens: list[str] | None = None):
+    return client.post(
+        f"{API}/commits",
+        json={
+            "base_rev": get_session().model_rev,
+            "ops": ops,
+            "lock_tokens": lock_tokens or [],
+        },
+    )
+
+
+def test_rules_status_reflects_drift_then_a_clean_fix(client: TestClient) -> None:
+    """A rules artifact reaches ``session.compiled_rules`` only through
+    ``POST /commits`` (hydration/undo too, but never the legacy artifact
+    route) — so ``rules_status`` is asserted straight off a committed set."""
+    drift_yaml = (
+        "rules:\n"
+        "  - name: bogus-rule\n"
+        "    applies_to: Bogus\n"
+        "    then: {property: tag, exists: true}\n"
+    )
+    r = _commit(
+        client,
+        [
+            {
+                "kind": "create_artifact",
+                "temp_id": "tmp_rules",
+                "artifact_kind": "validation_rules",
+                "name": "house-rules",
+                "payload": {"schema_version": 1, "yaml": drift_yaml},
+            }
+        ],
+    )
+    assert r.status_code == 200, r.text
+    artifact_id = r.json()["id_map"]["tmp_rules"]
+
+    body = client.get(f"{API}/model/issues").json()
+    status = body["rules_status"]
+    assert status["total"] == 0
+    (skip,) = status["skipped"]
+    assert skip["artifact_id"] == artifact_id
+    assert skip["rule"] == "bogus-rule"
+    assert "Bogus" in skip["reason"]
+
+    lock_res = client.post(
+        f"{API}/locks",
+        json={
+            "targets": [
+                {"resource_id": artifact_id, "mode": "exclusive", "type": "artifact"}
+            ],
+            "intent": "edit",
+        },
+    )
+    assert lock_res.status_code == 200, lock_res.text
+    token = lock_res.json()["token"]
+
+    clean_yaml = (
+        "rules:\n"
+        "  - name: has-tag\n"
+        "    applies_to: Item\n"
+        "    then: {property: tag, exists: true}\n"
+    )
+    r = _commit(
+        client,
+        [
+            {
+                "kind": "update_artifact",
+                "id": artifact_id,
+                "payload": {"schema_version": 1, "yaml": clean_yaml},
+            }
+        ],
+        lock_tokens=[token],
+    )
+    assert r.status_code == 200, r.text
+
+    body = client.get(f"{API}/model/issues").json()
+    status = body["rules_status"]
+    assert status["total"] == 1
+    assert status["skipped"] == []
+
+
 def test_membership_enforced(client: TestClient) -> None:
     stranger = {"x-user-id": "stranger", "x-user-email": "s@x.io"}
     res = client.get(f"{API}/model/issues", headers=stranger)

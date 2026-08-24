@@ -14,7 +14,13 @@ from data_rover.core.validation.state import ValidationState, issue_owner
 from ..artifact_ops import split_ops
 from ..deps import Session, get_request_session, require_model
 from ..rules import expand_dirty, session_pipeline
-from ..schemas import IssueListOut, IssueOut, ValidateRequest
+from ..schemas import (
+    IssueListOut,
+    IssueOut,
+    RuleSkipOut,
+    RulesStatusOut,
+    ValidateRequest,
+)
 from ._snapshot import _build_model_from_payload
 from .ops import _apply_batch, _ensure_validation_seeded, _rollback
 
@@ -97,6 +103,20 @@ def list_issues(
         issues = list(islice(state.iter_issues(), ISSUES_RESPONSE_MAX + 1))
         counts = state.counts()
         rev = session.model_rev
+        compiled = session.compiled_rules
+        rules_status = RulesStatusOut(
+            total=compiled.total,
+            skipped=[
+                RuleSkipOut(
+                    artifact_id=d.artifact_id,
+                    set_name=d.set_name,
+                    rule=d.rule,
+                    reason=d.reason,
+                )
+                for d in compiled.skipped
+            ],
+            eval_errors=dict(compiled.eval_errors),
+        )
     truncated = len(issues) > ISSUES_RESPONSE_MAX
     if truncated:
         del issues[ISSUES_RESPONSE_MAX:]
@@ -105,6 +125,7 @@ def list_issues(
         issues=[IssueOut.from_core(i) for i in issues],
         counts=counts,
         truncated=truncated,
+        rules_status=rules_status,
     )
 
 

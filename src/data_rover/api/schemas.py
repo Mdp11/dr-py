@@ -141,6 +141,27 @@ class IssueOut(BaseModel):
         )
 
 
+class RuleSkipOut(BaseModel):
+    """One rule (or whole set) skipped at compile time. ``rule`` is ``""``
+    when the whole set failed to parse."""
+
+    artifact_id: str
+    set_name: str
+    rule: str
+    reason: str
+
+
+class RulesStatusOut(BaseModel):
+    """Compiled-rules health, read straight off the session's cached
+    ``CompiledRules`` — never a model touch. Drift (a rule naming a schema
+    element the metamodel doesn't have) is skipped WHOLE, never evaluated
+    half-blind, and surfaced here rather than as an ownerless issue."""
+
+    total: int
+    skipped: list[RuleSkipOut] = Field(default_factory=list)
+    eval_errors: dict[str, int] = Field(default_factory=dict)
+
+
 class IssueListOut(BaseModel):
     """Snapshot of the session's maintained issue store (GET /model/issues).
 
@@ -156,6 +177,7 @@ class IssueListOut(BaseModel):
     issues: list[IssueOut] = Field(default_factory=list)
     counts: dict[str, int] = Field(default_factory=dict)
     truncated: bool = False
+    rules_status: RulesStatusOut | None = None
 
 
 class RawMetamodelResponse(BaseModel):
@@ -188,6 +210,29 @@ class MetamodelLintResponse(BaseModel):
 
     ok: bool
     errors: list[LintErrorOut] = Field(default_factory=list)
+
+
+class RulesLintRequest(BaseModel):
+    yaml: str
+
+
+class RuleWarningOut(BaseModel):
+    """One drift diagnostic: a rule referencing a schema element the
+    metamodel doesn't have. A warning, not an error — the metamodel can
+    change underneath a committed rule set regardless."""
+
+    rule: str
+    message: str
+
+
+class RulesLintResponse(BaseModel):
+    """Cheap parse/schema/drift check for the live rules editor. Always
+    200 — a failed parse is the RESULT, not an error. Drift is a warning
+    and leaves ``ok`` true."""
+
+    ok: bool
+    errors: list[LintErrorOut] = Field(default_factory=list)
+    warnings: list[RuleWarningOut] = Field(default_factory=list)
 
 
 class MetamodelDiffResponse(BaseModel):
