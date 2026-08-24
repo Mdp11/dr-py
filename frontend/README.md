@@ -1469,7 +1469,10 @@ blob does:
   reaches the server until Commit. An unsaved draft's create adopts a temp
   id but the tab is **not** re-keyed until the commit's `id_map` supplies the
   canonical id (`rules:<id>`), the same deferred-rebind shape every other
-  artifact editor uses.
+  artifact editor uses. Commit preview dry-validates a staged rules edit
+  against the **committed** rule sets — it never compiles the staged YAML —
+  so previewing a rules change shows the verdict the OLD rules give, not the
+  one the change is about to produce.
 - **Issues panel integration.** Rule issues stamp `check = "rule:<name>"`, so
   `Workspace/IssuesPanel.svelte` strips the `rule:` prefix and renders one
   filter chip per rule alongside the existing validator chips. A

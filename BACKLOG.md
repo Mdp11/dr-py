@@ -902,6 +902,39 @@ only export-time rendering can detect, and an oversized entry list is detectable
 that on both paths. Surfaced during the
 Exporter v2 Phase 3 review; closed as the first task of Phase 4.
 
+### K-13 · `expand_scope` recomputes its seed set per `(rule, path, depth)` triple · `open` · perf · *2026-08-24*
+`core/validation/rules/reach.py::expand_scope` rebuilds `seeds` with a comprehension over
+the whole `dirty_elements` list inside its innermost loop, so the filtering cost is
+`O(rules × paths × depth × |dirty|)` before a single reverse hop is walked. The fix is to
+bucket `dirty_elements` into a `dict[str, list[str]]` keyed by `type_name` ONCE at the top
+of the function and build each seed set by unioning the buckets named by that step's
+`far_types` closure (with the whole set when `far_types is None`) — the closures are already
+materialized as frozensets on `ReverseStep`. **Deliberately deferred** rather than folded
+into the P-12 fix wave: it changes the one algorithm where a subtle mistake under-approximates
+the expansion — the single correctness hazard the rules design names — so it wants its own
+review, landed against the now-strengthened keystone property test
+(`tests/validation/rules/test_reach.py::test_expansion_scoped_rerun_equals_full_rerun`, which
+drives property AND structural mutations through a real `DirtyCollector`).
+
+### K-14 · `CompiledRules.eval_errors` never resets and has no reporting cap · `open` · *2026-08-24*
+`eval_errors` is a `Counter[str]` on the immutable `CompiledRules` that
+`RulesValidator` increments per failing rule evaluation, surfaced by `GET /model/issues`'s
+`rules_status.eval_errors`. It only ever grows: nothing clears it, so on a long-lived session
+a rule that fails on every sweep chunk accumulates an unbounded count, and the dict has one
+key per rule with no ceiling on how many are reported. The design calls for *capped* reporting.
+Options: reset at each rules recompile (the counter dies with the `CompiledRules` object
+anyway, so this is mostly about the within-a-compile window), or cap the wire dict the way
+`ScriptWarningLog` caps distinct warning kinds — keep counting a key already present, drop
+brand-new keys past the cap.
+
+### K-15 · `POST /rules/lint` hydrates the session; `/metamodel/lint` deliberately does not · `open` · *2026-08-24*
+`routes/rules.py::lint_rules` depends on `get_request_session`, so a debounced per-keystroke
+lint hydrates a cold project — the exact cost `routes/metamodel_swap.py::lint_metamodel` avoids
+by taking no `Session` dependency at all. The dependency is not gratuitous: drift warnings need
+`session.metamodel`. A fix has to keep drift working without full hydration — read the
+metamodel blob straight off `MetamodelRow` for the lint, or make the drift half opt-in so the
+parse+schema half stays hydration-free.
+
 ---
 
 ## 7. Cleanups & dead code
@@ -919,12 +952,20 @@ Exporter v2 Phase 3 review; closed as the first task of Phase 4.
 | C-9 | `DropdownMenu.Item` uses `onclick` at 6 sites where `onSelect` is the repo majority (16 sites); `onSelect` also fires for keyboard selection. | SDD ledger |
 | C-10 | `done` (2026-08-19, feat/exporter-v2-phase1) — the wire entry was renamed `ExporterEntry` (not `CustomExportEntry`, per the `custom_export` → `exporter` kind rename that landed in the same pass) alongside `export-layout.ts`'s `ExportEntry` layout row, resolving the naming collision. | P-14 final review, 2026-08-14 |
 | C-11 | `pixi run -e core-dev ruff check tests/api/` reports 5 errors in files this branch never touched. No pixi task lints `tests/` at all (`core-lint` only covers `src/`), so this debt is invisible to the normal toolchain — it was found only by running the linter against the test tree by hand. Pre-existing, confirmed 2026-08-16. | metamodel commit-flow final review |
+| C-12 | `src/data_rover/api/routes/commits.py` is ~1785 lines and holds `/open`, `/commits`, `/commits/preview`, `/commits/revert`, the `_CommitUnwind` ledger, the lock-verification helpers and the staleness backstop. The natural seams are the preview/revert routes and the unwind ledger; the commit route itself is one long ordered sequence and does not want splitting. | P-12 final review, 2026-08-24 |
+| C-13 | `frontend/src/lib/api/rules.ts`'s `RulesLintErrorSchema` duplicates `api/types.ts`'s `MetamodelLintErrorSchema` field for field. The backend already collapsed the pair (`RulesLintResponse.errors` reuses `LintErrorOut`); the client should follow with one shared `LintErrorSchema`. | P-12 final review, 2026-08-24 |
 
 ---
 
 ## 8. Test gaps, flakes, and a11y
 
 ### T-2 · Untested branches · `open`
+- `routes/commits.py::revert_commit`'s rules path — the revert route validates through
+  `session_pipeline` (~:1677) like every other converted call site, but no test asserts a
+  revert refreshes rule issues.
+- `routes/commits.py::preview_commit`'s rebind path with rules — `candidate_pipeline`
+  (~:603) recompiles the committed rule sources against the candidate schema so a preview
+  of a `metamodel.rebind` shows rule flips; only the non-rebind preview branch is covered.
 - `Workspace.svelte` close-path metamodel branch (redundant by design with the
   component's own unmount teardown, but unpinned).
 - `commitMetamodelRebind`'s `isProjectQuiet()` guard branch.
