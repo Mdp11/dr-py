@@ -32,7 +32,7 @@ import {
 	stageArtifactCreate,
 	stageArtifactUpdate
 } from './artifact-edits.svelte';
-import { releaseArtifactIfUnneeded } from './checkout.svelte';
+import { canEdit, releaseArtifactIfUnneeded } from './checkout.svelte';
 import { acquireArtifactLease, lockHolderLabel } from './edit-gate';
 import { isTempId } from './ops';
 import { bindTabToArtifact, closeTab, repointTabArtifact, retitleTab } from './workspace.svelte';
@@ -96,7 +96,16 @@ function setLint(tabId: string, errors: RulesLintError[], warnings: RulesLintWar
 	_drafts.set(tabId, { ...draft, lintErrors: errors, lintWarnings: warnings });
 }
 
+/**
+ * Lint this tab's current text.
+ *
+ * `canEdit()` gates the call the way the metamodel editor's `isEditBlocked()`
+ * gates its own: `POST /rules/lint` is deliberately outside the backend's
+ * read-only-POST allowlist, so a viewer is answered 403 — only the editing
+ * flow lints, and a viewer has nothing to lint.
+ */
 async function lintNow(tabId: string): Promise<void> {
+	if (!canEdit()) return;
 	const draft = _drafts.get(tabId);
 	if (!draft) return;
 	const gen = bump(tabId);
@@ -193,7 +202,7 @@ export async function ensureRulesDraft(tabId: string): Promise<RulesDraft> {
 	// alone does not catch that shape.
 	if (tabId.startsWith('rules:draft:') || isTempId(id)) {
 		draft = {
-			name: 'New rules',
+			name: 'New rule set',
 			artifactId: null,
 			yaml: DEFAULT_YAML,
 			dirty: false,

@@ -29,9 +29,24 @@
 	const running = $derived(isRunning());
 	const lastError = $derived(getLastError());
 	const rulesStatus = $derived(getRulesStatus());
-	const skippedRuleCount = $derived(rulesStatus?.skipped.length ?? 0);
+	// A skip is one of two unrelated things, and the summary must not conflate
+	// them: a single rule the metamodel cannot satisfy (drift — `rule` names it),
+	// or a whole set that would not parse (`rule === ''`, listed as "(whole set)"
+	// below). Counting them together would call a YAML syntax error a schema
+	// mismatch.
+	const skippedSets = $derived(rulesStatus?.skipped.filter((s) => s.rule === '').length ?? 0);
+	const skippedRules = $derived((rulesStatus?.skipped.length ?? 0) - skippedSets);
 	const skippedRulesLabel = $derived(
-		`${skippedRuleCount} ${skippedRuleCount === 1 ? 'rule' : 'rules'} skipped — schema mismatch`
+		[
+			skippedRules > 0
+				? `${skippedRules} ${skippedRules === 1 ? 'rule' : 'rules'} skipped — schema mismatch`
+				: null,
+			skippedSets > 0
+				? `${skippedSets} ${skippedSets === 1 ? 'rule set' : 'rule sets'} skipped — parse failure`
+				: null
+		]
+			.filter((p) => p !== null)
+			.join('; ')
 	);
 	const summary = $derived(getModelSummary());
 	const elements = $derived(getCachedElements());

@@ -30,9 +30,14 @@
 		open: (opts: { artifactId: string | null; title: string }) => string;
 	};
 
-	// Drives both sidebar sections from one place: New / open (dblclick) /
+	// Drives every sidebar section from one place: New / open (dblclick) /
 	// rename / delete / drag all read `kind`/`title`/`singular`/`icon`/`open`
 	// off the matching entry rather than being duplicated per section.
+	//
+	// It is an ARRAY, not a Record<ArtifactKind, …>, so the type checker cannot
+	// see a kind fall out of it — a missing entry silently makes that kind
+	// uncreatable and unopenable. Totality against kinds.ts's REGISTERED_KINDS
+	// is pinned by a test instead.
 	const SECTIONS: SectionConfig[] = [
 		{
 			kind: 'navigation',
@@ -65,7 +70,7 @@
 		{
 			kind: 'validation_rules',
 			title: 'Rules',
-			singular: 'Rule set',
+			singular: 'rule set',
 			icon: KIND_ICONS.validation_rules,
 			open: (o) => openArtifactTab('rules', o)
 		}
@@ -166,7 +171,7 @@
 {#snippet section(cfg: SectionConfig)}
 	{@const Icon = cfg.icon}
 	{@const items = itemsFor(cfg.kind)}
-	<section class="border-b border-border px-2 py-1.5">
+	<section data-testid={`artifacts-section-${cfg.kind}`} class="border-b border-border px-2 py-1.5">
 		<div class="flex items-center justify-between">
 			<button
 				type="button"

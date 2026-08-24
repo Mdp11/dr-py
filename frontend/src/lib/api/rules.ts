@@ -1,14 +1,14 @@
 import { z } from 'zod';
 import { apiFetch, type ClientConfig } from './client';
+import { MetamodelLintErrorSchema } from './types';
 
 /** One rules-lint finding. Position is best-effort and 1-based: only a YAML
  * PARSE error carries a line/column (from the parser mark); a schema violation
- * is message-only. */
-export const RulesLintErrorSchema = z.object({
-	message: z.string(),
-	line: z.number().int().nullable().default(null),
-	column: z.number().int().nullable().default(null)
-});
+ * is message-only.
+ *
+ * The metamodel linter answers the same shape off the same server-side model,
+ * so the two share ONE schema rather than two copies that can drift. */
+export const RulesLintErrorSchema = MetamodelLintErrorSchema;
 export type RulesLintError = z.infer<typeof RulesLintErrorSchema>;
 
 /** Drift: a rule naming a stereotype, relationship or property the metamodel
