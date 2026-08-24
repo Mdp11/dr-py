@@ -15,6 +15,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from ...metamodel.schema import Metamodel
+from .reach import ReversePath, derive_paths
 from .schema import (
     AllCond,
     AnyCond,
@@ -50,6 +51,7 @@ class CompiledRule:
     rule: Rule
     applies_types: frozenset[str]
     check: str
+    paths: tuple[ReversePath, ...] = ()
 
 
 @dataclass
@@ -134,6 +136,7 @@ def compile_rule_sets(
                     rule=rule,
                     applies_types=metamodel.element_descendants(rule.applies_to),
                     check=f"rule:{rule.name}",
+                    paths=tuple(derive_paths(rule, metamodel)),
                 )
             )
     by_type: dict[str, list[CompiledRule]] = {}

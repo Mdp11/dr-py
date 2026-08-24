@@ -21,7 +21,15 @@ MAX_CONDITION_DEPTH = 8
 Scalar = str | int | float | bool
 
 _PROPERTY_TESTS = (
-    "exists", "equals", "not_equals", "in_", "gt", "gte", "lt", "lte", "contains",
+    "exists",
+    "equals",
+    "not_equals",
+    "in_",
+    "gt",
+    "gte",
+    "lt",
+    "lte",
+    "contains",
 )
 
 

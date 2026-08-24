@@ -103,7 +103,9 @@ def _eval_relationship(model: Model, el: Element, spec: RelationshipSpec) -> boo
     far_types = None if spec.to is None else mm.element_descendants(spec.to)
     outgoing = spec.direction == "outgoing"
     rel_ids = (
-        model.indexes.outgoing_ids(el.id) if outgoing else model.indexes.incoming_ids(el.id)
+        model.indexes.outgoing_ids(el.id)
+        if outgoing
+        else model.indexes.incoming_ids(el.id)
     )
     n = 0
     for rid in rel_ids:
@@ -117,7 +119,9 @@ def _eval_relationship(model: Model, el: Element, spec: RelationshipSpec) -> boo
                 continue  # dangling far endpoint: non-matching, never an error
             if far_types is not None and far.type_name not in far_types:
                 continue
-            if spec.where is not None and not evaluate_condition(model, far, spec.where):
+            if spec.where is not None and not evaluate_condition(
+                model, far, spec.where
+            ):
                 continue
         n += 1
     if spec.exists is not None:
@@ -145,7 +149,8 @@ def evaluate_condition(model: Model, el: Element, cond: Condition) -> bool:
 def _issue_for(cr: CompiledRule, el: Element) -> Issue:
     rule = cr.rule
     message = rule.message or (
-        f"Rule '{rule.name}' violated" + (f": {rule.description}" if rule.description else "")
+        f"Rule '{rule.name}' violated"
+        + (f": {rule.description}" if rule.description else "")
     )
     return Issue(
         severity=_SEVERITY[rule.severity],
@@ -171,7 +176,9 @@ class RulesValidator(EntityValidator):
         issues: list[Issue] = []
         for cr in rules:
             try:
-                if cr.rule.when is not None and not evaluate_condition(model, el, cr.rule.when):
+                if cr.rule.when is not None and not evaluate_condition(
+                    model, el, cr.rule.when
+                ):
                     continue
                 if not evaluate_condition(model, el, cr.rule.then):
                     issues.append(_issue_for(cr, el))
