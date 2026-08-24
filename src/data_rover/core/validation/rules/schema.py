@@ -8,7 +8,7 @@ authors never write a `kind` key.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
@@ -31,6 +31,14 @@ _PROPERTY_TESTS = (
     "lte",
     "contains",
 )
+
+#: field name -> the key an author writes (only `in_` differs)
+_PROPERTY_TEST_KEYS = {t: t.rstrip("_") for t in _PROPERTY_TESTS}
+
+#: the tests a null operand is meaningful for: comparing a property against
+#: null is a real query. Every other test would silently never match, so a
+#: null there is rejected at parse rather than dying per element.
+_NULLABLE_TESTS = frozenset({"equals", "not_equals"})
 
 
 class RuleSetError(ValueError):
@@ -59,6 +67,12 @@ class PropertyCond(BaseModel):
             raise ValueError(
                 f"property condition {self.property!r} needs exactly one test, "
                 f"got {given or 'none'}"
+            )
+        test = given[0]
+        if test not in _NULLABLE_TESTS and getattr(self, test) is None:
+            raise ValueError(
+                f"property condition {self.property!r}: test "
+                f"{_PROPERTY_TEST_KEYS[test]!r} needs a value, got null"
             )
         return self
 
@@ -162,7 +176,7 @@ class Rule(BaseModel):
 class RuleSetDefinition(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: int = RULES_SCHEMA_VERSION
+    schema_version: Literal[1] = RULES_SCHEMA_VERSION
     rules: list[Rule] = Field(default_factory=list, max_length=MAX_RULES_PER_SET)
 
     @model_validator(mode="after")
@@ -183,10 +197,35 @@ NotCond.model_rebuild()
 _RULE_SET_ADAPTER: TypeAdapter[RuleSetDefinition] = TypeAdapter(RuleSetDefinition)
 
 
+class _NoAliasLoader(yaml.SafeLoader):
+    """SafeLoader that refuses YAML aliases.
+
+    PyYAML memoizes anchors, so an aliased document loads as a shared-reference
+    DAG in flat time and memory — but pydantic then walks it as a tree, and a
+    few hundred bytes of nested aliases expands into gigabytes of validation
+    work, under every cap (which all measure the source text). Hand-written
+    rule sets have no use for anchors, so rejecting them outright keeps the
+    failure crisp and explainable instead of budgeting an expanded size.
+    """
+
+    def compose_node(self, parent: Any, index: Any) -> Any:
+        if self.check_event(yaml.events.AliasEvent):
+            event = self.peek_event()
+            raise yaml.constructor.ConstructorError(
+                None,
+                None,
+                f"YAML aliases are not supported in rule sets (found *{event.anchor})",
+                event.start_mark,
+            )
+        return super().compose_node(parent, index)
+
+
 def parse_rule_set(text: str) -> RuleSetDefinition:
     """YAML text -> validated rule set; RuleSetError on any failure."""
     try:
-        data = yaml.safe_load(text) or {}
+        data = yaml.load(text, _NoAliasLoader)
+        if data is None:
+            data = {}  # an empty document is an empty rule set; `false`/`0` are not
     except (yaml.YAMLError, RecursionError) as exc:
         # RecursionError: pyyaml's own parser recurses per nesting level and blows
         # the interpreter stack well before RULES_MAX_YAML_BYTES or
@@ -205,7 +244,7 @@ class RulesArtifactPayload(BaseModel):
     The text (not parsed JSON) is the stored form so author comments and
     formatting survive round trips, mirroring the metamodel blob."""
 
-    schema_version: int = RULES_SCHEMA_VERSION
+    schema_version: Literal[1] = RULES_SCHEMA_VERSION
     yaml: str = Field(max_length=RULES_MAX_YAML_BYTES)
 
     @model_validator(mode="after")

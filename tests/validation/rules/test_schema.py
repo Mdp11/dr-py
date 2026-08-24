@@ -133,9 +133,7 @@ def test_rule_count_cap():
 
 
 def test_payload_adapter_validates_embedded_yaml():
-    RULES_ADAPTER.validate_python(
-        {"schema_version": 1, "yaml": "rules: []\n"}
-    )
+    RULES_ADAPTER.validate_python({"schema_version": 1, "yaml": "rules: []\n"})
     with pytest.raises(ValidationError):
         RULES_ADAPTER.validate_python({"schema_version": 1, "yaml": "rules: [bad"})
     with pytest.raises(ValidationError):
@@ -156,7 +154,10 @@ def test_deeply_nested_yaml_raises_rule_set_error_not_recursion_error():
     # interpreter's recursion limit before pydantic (and MAX_CONDITION_DEPTH)
     # ever sees the data. This must surface as RuleSetError, not RecursionError.
     doc = _deeply_nested_not_doc(800)
-    with pytest.raises(RuleSetError):
+    # match the parse-stage message: pydantic's own depth cap would also raise
+    # RuleSetError, so a bare exception-type assertion would silently stop
+    # exercising the `except RecursionError` arm if PyYAML's stack threshold moved
+    with pytest.raises(RuleSetError, match="Malformed rules YAML"):
         parse_rule_set(doc)
 
 
@@ -165,3 +166,69 @@ def test_deeply_nested_yaml_payload_raises_validation_error():
     assert len(doc) <= RULES_MAX_YAML_BYTES
     with pytest.raises(ValidationError):
         RULES_ADAPTER.validate_python({"schema_version": 1, "yaml": doc})
+
+
+# -- YAML aliases -----------------------------------------------------------
+
+
+def _alias_bomb(levels: int) -> str:
+    """Nested YAML anchors: linear source text, exponential expanded shape."""
+    lines = ["a: &a0 [x, x, x, x, x, x, x, x, x]"]
+    for i in range(1, levels + 1):
+        row = ", ".join([f"*a{i - 1}"] * 9)
+        lines.append(f"b{i}: &a{i} [{row}]")
+    lines.append(f"rules: *a{levels}")
+    return "\n".join(lines) + "\n"
+
+
+def test_alias_bomb_rejected_at_parse():
+    """PyYAML loads an aliased document as a shared-reference DAG in flat time,
+    then pydantic walks it as a tree: a few hundred bytes — under every cap,
+    which all measure source text — expands into gigabytes of validation."""
+    doc = _alias_bomb(7)
+    assert len(doc) < 1024
+    with pytest.raises(RuleSetError, match="alias"):
+        parse_rule_set(doc)
+
+
+def test_alias_rejected_even_when_harmless():
+    doc = "rules: []\nreused: &anchor [1, 2]\nagain: *anchor\n"
+    with pytest.raises(RuleSetError, match="alias"):
+        parse_rule_set(doc)
+
+
+# -- null-valued tests ------------------------------------------------------
+
+
+@pytest.mark.parametrize("test", ["exists", "gt", "gte", "lt", "lte", "in", "contains"])
+def test_null_operand_rejected_where_it_cannot_mean_anything(test):
+    doc = f"rules:\n  - {{name: bad, applies_to: B, then: {{property: p, {test}: null}}}}\n"
+    with pytest.raises(RuleSetError, match="needs a value, got null"):
+        parse_rule_set(doc)
+
+
+@pytest.mark.parametrize("test", ["equals", "not_equals"])
+def test_null_operand_kept_for_equality_tests(test):
+    """Comparing a property against null is a real query."""
+    doc = f"rules:\n  - {{name: ok, applies_to: B, then: {{property: p, {test}: null}}}}\n"
+    assert test in parse_rule_set(doc).rules[0].then.model_fields_set
+
+
+# -- document shape ---------------------------------------------------------
+
+
+@pytest.mark.parametrize("doc", ["false", "0", "''", "[]", "- a\n- b\n"])
+def test_non_mapping_document_is_rejected_not_silently_empty(doc):
+    """A falsy-but-present document is a wrong rule set, not an empty one."""
+    with pytest.raises(RuleSetError):
+        parse_rule_set(doc)
+
+
+def test_empty_document_is_an_empty_rule_set():
+    assert parse_rule_set("").rules == []
+    assert parse_rule_set("# just a comment\n").rules == []
+
+
+def test_schema_version_is_pinned():
+    with pytest.raises(RuleSetError, match="schema_version"):
+        parse_rule_set("schema_version: 99\nrules: []\n")
