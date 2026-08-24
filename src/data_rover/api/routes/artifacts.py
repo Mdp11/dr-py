@@ -20,14 +20,16 @@ Concurrency is TWO-layered:
 
 Payloads are validated per kind on write via the `artifact_kinds` registry.
 
-A `validation_rules` write here deliberately leaves `session.compiled_rules`
-alone, so it takes effect only once the session is evicted and rehydrated.
-`POST /commits` is the path that keeps rules live, and it does TWO things
-together: it recompiles, and it re-splices the issue store over the
-applies-to population of the old and new rule sets. Doing only the first
-here would be WORSE than doing neither — the compiled rules would then
-report against a store still holding issues minted by the rules they
-replaced, and nothing in a read path can tell the two apart.
+A `validation_rules` write here — PUT and DELETE alike — deliberately leaves
+`session.compiled_rules` alone, so it takes effect only once the session is
+evicted and rehydrated. `POST /commits` is the path that keeps rules live,
+and it does TWO things together: it recompiles, and it re-splices the issue
+store over the applies-to population of the old and new rule sets. Doing only
+the first here would be WORSE than doing neither — the compiled rules would
+then report against a store still holding issues minted by the rules they
+replaced, and nothing in a read path can tell the two apart. A DELETE leaves
+one more stale trace: `rules_status.skipped[].artifact_id` keeps naming the
+row until the rehydrate.
 """
 
 from __future__ import annotations

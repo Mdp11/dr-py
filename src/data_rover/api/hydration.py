@@ -22,7 +22,6 @@ from typing import Any
 
 from data_rover.core.metamodel.loader import load_metamodel_str
 from data_rover.core.model.model import Model
-from data_rover.core.validation.rules.compile import compile_rule_sets
 from data_rover.core.validation.state import ValidationState
 from data_rover.core.view.ids import ensure_folder_ids
 from data_rover.core.view.schema import View
@@ -264,6 +263,6 @@ def _hydrate_session(project_id: str, progress: HydrationProgress) -> Session:
     session.view = view
     session.validation = ValidationState()
     session.strict_mode = strict_mode
-    session.compiled_rules = compile_rule_sets(rule_sources, metamodel)
+    session.compiled_rules = rules.compile_sources(rule_sources, metamodel)
     start_validation_sweep(session)
     return session
