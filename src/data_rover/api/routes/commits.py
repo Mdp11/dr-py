@@ -35,7 +35,9 @@ from sqlalchemy.orm import Session as DbSession
 from data_rover.core.metamodel.schema import Metamodel
 from data_rover.core.model.model import Model
 from data_rover.core.validation.issue import IssueCategory
-from data_rover.core.validation.pipeline import default_pipeline
+from data_rover.core.validation.pipeline import ValidationPipeline, default_validators
+from data_rover.core.validation.rules.compile import CompiledRules, compile_rule_sets
+from data_rover.core.validation.rules.validator import RulesValidator
 from data_rover.core.validation.scope import Scope
 from data_rover.core.view.schema import View
 
@@ -69,6 +71,13 @@ from ..metamodel_ops import (
     apply_metamodel_ops,
     load_candidate,
     split_rebind,
+)
+from ..rules import (
+    applies_population,
+    expand_dirty,
+    load_compiled_rules,
+    rules_touched,
+    session_pipeline,
 )
 from ..settings import get_settings
 from ..view_ops import (
@@ -391,6 +400,11 @@ class _CommitUnwind:
       ``session.validation`` rather than restoring it: a rebind-carrying batch
       may already have called ``ValidationState.set_full`` by the time a
       failure lands, so the only safe state is "force a re-seed on next read".
+    - ``prior_compiled`` restores the rule sets a batch recompiled (it
+      changed a rules artifact, or swapped the schema they compiled
+      against). Order-free — a single reassignment — but it sits beside the
+      metamodel step, whose swap is one of the two things that triggers the
+      recompile.
     - ``view_res`` rollback needs ``session.view`` non-None: the view half
       only ever applies to a resolved view, and nothing can null it
       mid-request (see the defensive-fallback comment at the b3 site).
@@ -424,6 +438,10 @@ class _CommitUnwind:
     #: state at all (``db.rollback()`` alone discards the staged
     #: ``metamodel_layouts`` row).
     prior_metamodel: Metamodel | None = None
+    #: the compiled rule sets this request swapped OUT. Registered at the
+    #: instant of the swap, like ``prior_metamodel``; None whenever the batch
+    #: left ``session.compiled_rules`` alone (the common case).
+    prior_compiled: CompiledRules | None = None
     db_staged: bool = False
     rev_bumped: bool = False
 
@@ -439,6 +457,10 @@ class _CommitUnwind:
             self.model.metamodel = self.prior_metamodel
             self.model.indexes.rebuild()
             self.session.validation = None
+        if self.prior_compiled is not None:
+            # One reassignment, exactly as the forward path swaps it — a
+            # CompiledRules is never mutated in place (see ``api/rules``).
+            self.session.compiled_rules = self.prior_compiled
         if self.rev_bumped:
             self.session.model_rev -= 1
         if self.model_res is not None or self.prior_metamodel is not None:
@@ -573,10 +595,27 @@ def preview_commit(
                 # does: a schema swap can mint issues on elements the batch's
                 # own ops never touched, which the dirty-scope shortcut a
                 # non-rebind batch uses would miss entirely.
-                scope_arg = (
-                    Scope.all() if candidate is not None else res.dirty.to_scope()
-                )
-                scoped = default_pipeline().validate(model, scope_arg)
+                #
+                # Rules are read-only here: preview NEVER assigns
+                # session.compiled_rules, so a previewed rules-artifact edit
+                # is dry-validated and every preview reflects the COMMITTED
+                # rule sets.
+                if candidate is not None:
+                    # Recompile the committed sources against the candidate
+                    # schema: a rule that drifts under the new schema must
+                    # be reported as skipped here, not evaluated stale.
+                    compiled = compile_rule_sets(
+                        session.compiled_rules.sources, candidate
+                    )
+                    pipeline = ValidationPipeline(
+                        [*default_validators(), RulesValidator(compiled)]
+                    )
+                    scoped = pipeline.validate(model, Scope.all())
+                else:
+                    expand_dirty(session, model, res.dirty)
+                    scoped = session_pipeline(session).validate(
+                        model, res.dirty.to_scope()
+                    )
             finally:
                 _rollback(model, res.inverse_units)  # always restore the model
         finally:
@@ -764,10 +803,14 @@ def create_commit(
           transaction).
        b3. Apply the view half (all-or-nothing via apply_view_ops_atomic) —
           auto-creating an empty view for a project that never had one.
+       b4. Recompile the user rule sets if this batch changed a rules
+          artifact or the schema they compiled against.
        c. Hard-reject structural blockers (422; rolls back every half). A
           rebind-carrying batch validates the FULL model (Scope.all()) here
           instead of the dirty scope — a schema change invalidates the
-          dirty-scope premise for the whole model.
+          dirty-scope premise for the whole model. Otherwise the dirty scope
+          is widened to what user rules can reach back from it (and, when the
+          rule sets changed, to everything the old and new ones apply to).
        d. Splice conformance issues into the issue store (a rebind REPLACES it
           wholesale via set_full), bump rev, record batch. Rebind batches are
           exempt from the strict-mode conformance reject.
@@ -1121,10 +1164,28 @@ def create_commit(
                 unwind.unwind()  # undo every live half — see _CommitUnwind
                 raise
             unwind.view_res = view_res
+        # b4. recompile the user rule sets when this batch invalidated them:
+        #     it created/changed/deleted a rules artifact (read back off the
+        #     rows b2 staged on this transaction), or it swapped the schema
+        #     they were compiled against. ``rebound`` is hoisted here from
+        #     step c, which branches on the same flag. Both calls read the
+        #     DB, so the try/except mirrors b2's: an infra failure here must
+        #     not be the one path that leaves the model half-mutated.
+        rebound = mm_res is not None and mm_res.rebound
+        prior_compiled = session.compiled_rules
+        try:
+            touched_rules = rules_touched(db, artifact_ops, art_res)
+            if rebound or touched_rules:
+                unwind.prior_compiled = prior_compiled
+                session.compiled_rules = load_compiled_rules(
+                    db, project_id, model.metamodel
+                )
+        except Exception:
+            unwind.unwind()  # undo every live half — see _CommitUnwind
+            raise
         # c. hard-reject structural blockers. Model content only: an artifact
         #    op's own validity was settled at apply time (b2), and an artifact
         #    row can never make the MODEL structurally invalid.
-        rebound = mm_res is not None and mm_res.rebound
         if rebound:
             # A schema change invalidates the dirty-scope premise for the
             # WHOLE model, not just this batch's touched entities: an element
@@ -1132,9 +1193,21 @@ def create_commit(
             # type it instantiates changed. So re-validate everything — an
             # O(model) cost — and REPLACE the issue store below rather than
             # splicing into it.
-            scoped = default_pipeline().validate(model, Scope.all())
+            scoped = session_pipeline(session).validate(model, Scope.all())
         else:
-            scoped = default_pipeline().validate(model, res.dirty.to_scope())
+            # A rule reports on the element it applies to, but reads across
+            # relationship hops — so an edit to a FAR element can flip an
+            # issue the batch never touched. Widen the dirty set to every
+            # element the compiled rules can reach back to.
+            expand_dirty(session, model, res.dirty)
+            if touched_rules:
+                # The rule sets THEMSELVES changed: revalidate everything the
+                # old and the new ones apply to, so issues minted by a
+                # removed or renamed rule are dropped as well as added.
+                res.dirty.update(
+                    applies_population(model, prior_compiled, session.compiled_rules)
+                )
+            scoped = session_pipeline(session).validate(model, res.dirty.to_scope())
         structural = [i for i in scoped if i.category is IssueCategory.STRUCTURAL]
         if structural:
             unwind.unwind()  # undo every live half — see _CommitUnwind
@@ -1598,7 +1671,11 @@ def revert_commit(
         # model-only subset: revert refuses artifact/view batches above, so
         # view_res/created_view stay at their defaults and are never touched.
         unwind = _CommitUnwind(session, db, model, model_res=res)
-        scoped = default_pipeline().validate(model, res.dirty.to_scope())
+        # Model-only by construction (artifact/view/metamodel ops 409 above),
+        # so the compiled rules cannot have changed — widen the dirty scope
+        # for reach, but never recompile.
+        expand_dirty(session, model, res.dirty)
+        scoped = session_pipeline(session).validate(model, res.dirty.to_scope())
         structural = [i for i in scoped if i.category is IssueCategory.STRUCTURAL]
         if structural:
             unwind.unwind()  # undo every live half — see _CommitUnwind
