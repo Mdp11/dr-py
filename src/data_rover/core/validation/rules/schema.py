@@ -179,7 +179,11 @@ def parse_rule_set(text: str) -> RuleSetDefinition:
     """YAML text -> validated rule set; RuleSetError on any failure."""
     try:
         data = yaml.safe_load(text) or {}
-    except yaml.YAMLError as exc:
+    except (yaml.YAMLError, RecursionError) as exc:
+        # RecursionError: pyyaml's own parser recurses per nesting level and blows
+        # the interpreter stack well before RULES_MAX_YAML_BYTES or
+        # MAX_CONDITION_DEPTH ever come into play (both only guard pydantic, which
+        # runs after this parse succeeds).
         raise RuleSetError(f"Malformed rules YAML: {exc}") from exc
     try:
         return _RULE_SET_ADAPTER.validate_python(data)

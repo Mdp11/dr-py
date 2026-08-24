@@ -142,3 +142,26 @@ def test_payload_adapter_validates_embedded_yaml():
         RULES_ADAPTER.validate_python(
             {"schema_version": 1, "yaml": "x" * (RULES_MAX_YAML_BYTES + 1)}
         )
+
+
+def _deeply_nested_not_doc(depth: int) -> str:
+    inner = "{property: p, exists: true}"
+    for _ in range(depth):
+        inner = "{not: " + inner + "}"
+    return f"rules:\n  - {{name: r, applies_to: B, then: {inner}}}\n"
+
+
+def test_deeply_nested_yaml_raises_rule_set_error_not_recursion_error():
+    # PyYAML's own parser recurses per nesting level and can blow the
+    # interpreter's recursion limit before pydantic (and MAX_CONDITION_DEPTH)
+    # ever sees the data. This must surface as RuleSetError, not RecursionError.
+    doc = _deeply_nested_not_doc(800)
+    with pytest.raises(RuleSetError):
+        parse_rule_set(doc)
+
+
+def test_deeply_nested_yaml_payload_raises_validation_error():
+    doc = _deeply_nested_not_doc(800)
+    assert len(doc) <= RULES_MAX_YAML_BYTES
+    with pytest.raises(ValidationError):
+        RULES_ADAPTER.validate_python({"schema_version": 1, "yaml": doc})
