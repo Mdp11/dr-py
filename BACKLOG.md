@@ -201,12 +201,32 @@ snippet rather than stored and directly editable. Touches four layers: metamodel
 checked as if it were stored input), the inspector (render read-only, show provenance),
 and script evaluation + the cell cache (same invalidation question as P-1).
 
-### P-12 · Custom advanced validation rules · `open` · design-heavy
+### P-12 · Custom advanced validation rules · `done` (2026-08-24, `feat/validation-rules`)
 User-defined rules outside the metamodel, with arbitrary cross-element conditions
-("if x has y, then z must have k"). One decision is already made for you: `IssueCategory`
-splits STRUCTURAL (hard-fails a commit, 422) from CONFORMANCE (counted, never blocks).
-User-authored rules almost certainly must be CONFORMANCE — a user rule that can block
-every commit is a foot-gun with no escape hatch.
+("if x has y, then z must have k"). Landed as a declarative YAML rule language
+evaluated natively as a seventh validator (`core/validation/rules/`) — not
+Python-snippet rules, which would have needed a second async evaluation
+subsystem (sweep, read-set capture, rev-stamped caching) and an
+eventual-consistency validation UI. Storage is the `validation_rules` artifact
+kind (verbatim YAML text, comments survive); `api/rules.py` is the one seam
+that builds rules-aware pipelines and widens dirty scopes, cached on
+`Session.compiled_rules` and rebuilt at hydration, on a rules-artifact-touching
+commit, and on metamodel rebind. As designed, rule issues are always
+CONFORMANCE (never block a commit) and a rule that drifts from the metamodel
+is skipped whole at compile and surfaced via `rules_status`, never as an
+ownerless issue. `POST /rules/lint` gives the editor a debounced, always-200
+lint call. Architecture notes: `CLAUDE.md` ("Custom validation rules"),
+`frontend/README.md` ("Rules editor"). Source:
+`docs/superpowers/specs/2026-08-24-custom-validation-rules-design.md`.
+
+**Deliberately deferred (spec §11), not designed:** `else` branches (today's
+workaround is two rules with mirrored guards); rules on relationship types;
+property tests on the relationship itself inside a relationship atom;
+value-vs-value joins (comparing two navigated values against each other); a
+snippet-backed rule kind (Python escape hatch, priced separately if the
+declarative wall is ever hit); per-element severity override/muting;
+STRUCTURAL user rules (permanently out, by decision). **e2e coverage joins
+T-7.**
 
 ### P-13 · JSON export: one file per base element, with a name template · `done` (2026-08-14)
 Landed as `json_split`: `core/table/split.py` groups rows by the leading `RowKey` slot
@@ -927,6 +947,10 @@ component is now an option (it wasn't when the finding was raised).
   integers`), passes in isolation and on re-run. **Reconfirmed 2026-08-16, pre-existing**:
   flakes roughly 1 run in 30 even in isolation, so "passes in isolation" above was an
   under-sample, not a clean bill of health.
+- `tests/api/test_exports_route.py::test_two_runs_at_one_rev_are_byte_identical` —
+  a zip/xlsx determinism test, unrelated to validation rules. Flaked once on a
+  full-suite run during the custom-validation-rules branch's work (2026-08-24),
+  reran clean twice; not yet diagnosed.
 
 ### T-5 · a11y: HistoryNav announces a popup that can't be opened · `open`
 The trigger keeps `aria-haspopup`/`aria-expanded` from bits-ui's `{...props}` spread while

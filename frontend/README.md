@@ -1440,6 +1440,43 @@ click the **Diagram** toggle in the tab's toolbar.
     disabled too, and the note says layout changes are not saved. With a peer
     holding the `mm` lease: the surface goes read-only and names the holder.
 
+### Rules editor (validation rules tab)
+
+`validation_rules` is a registered artifact kind (`artifacts/kinds.ts`: label
+"Rules", `ShieldCheck` icon) whose editor follows the same check-out → stage →
+commit shape as every other artifact family. `state/rules-editor.svelte.ts`
+(the `rules:` sibling of `snippet-editor.svelte.ts`) holds one `RulesDraft`
+per tab (`rules:draft:<n>` unsaved, `rules:<artifactId>` saved), carrying the
+YAML **verbatim** in both directions — never parsed and re-serialized here —
+so comments and formatting survive a round trip exactly as the metamodel
+blob does:
+
+- **Load** opens the artifact's `art:<id>` exclusive lease; a denial does not
+  refuse the tab — the payload still loads and the tab opens UNSAVEABLE
+  behind a "Checked out by X" banner (name field, editor and Save all
+  disabled, with a Retry), mirroring every other artifact editor. A brand-new
+  tab starts from a comment-only YAML stub that parses to an empty rule set,
+  so it opens lint-clean while still showing the shape a rule takes.
+- **Lint** — a debounced (500 ms) `POST /rules/lint` per edit, run once
+  immediately on open too. Positioned errors (a YAML parse failure) land in
+  the CodeMirror gutter (the metamodel tab's own YAML editor component,
+  reused unchanged); message-only errors (a schema violation — the common
+  case, since only a parse failure carries a line) render in a strip under
+  the toolbar. Drift warnings render in a separate, visually neutral strip
+  below that — a drifted rule is a degradation, never presented as broken.
+- **Save = stage.** `saveRulesDraft` pushes a `create_artifact` /
+  `update_artifact` op onto the shared staged-artifact buffer; nothing
+  reaches the server until Commit. An unsaved draft's create adopts a temp
+  id but the tab is **not** re-keyed until the commit's `id_map` supplies the
+  canonical id (`rules:<id>`), the same deferred-rebind shape every other
+  artifact editor uses.
+- **Issues panel integration.** Rule issues stamp `check = "rule:<name>"`, so
+  `Workspace/IssuesPanel.svelte` strips the `rule:` prefix and renders one
+  filter chip per rule alongside the existing validator chips. A
+  `rules-skipped-banner` (collapsible, off `GET /model/issues`'s
+  `rules_status.skipped`) reports rules the metamodel can no longer satisfy —
+  drift never appears as a phantom issue with no owning element.
+
 ### Where to find things
 
 ```
