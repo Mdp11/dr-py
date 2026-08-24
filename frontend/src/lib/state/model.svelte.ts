@@ -13,7 +13,7 @@ import type {
 import { getElement } from '../api/elements';
 import { NotFoundError } from '../api/errors';
 import * as modelReadApi from '../api/model-read';
-import { getModelIssues, validateModel } from '../api/validation';
+import { getModelIssues, validateModel, type RulesStatus } from '../api/validation';
 import { mergePatch } from './apply';
 import { computeDiff, type Diff } from './diff';
 import { remapVisitIds } from './inspection-history.svelte';
@@ -106,6 +106,9 @@ let _issueCounts: IssueCounts | null = $state(null);
 /** Exact total issue count when the last adoptIssues() was truncated at the
  * server cap; null when the live map is complete. Rendered by IssuesPanel. */
 let _issuesTruncatedTotal: number | null = $state(null);
+/** Compiled-rules health from the last GET /model/issues; null before the
+ * first fetch (distinct from a fetch that reports zero skips). */
+let _rulesStatus: RulesStatus | null = $state(null);
 let _error: ModelStoreError | null = $state(null);
 
 let _queue: QueuedOp[] = $state([]);
@@ -196,6 +199,11 @@ export function getLiveIssues(): Issue[] {
 
 export function getIssuesTruncatedTotal(): number | null {
 	return _issuesTruncatedTotal;
+}
+
+/** null before the first GET /model/issues fetch. */
+export function getRulesStatus(): RulesStatus | null {
+	return _rulesStatus;
 }
 
 export function getModelSummary(): ModelSummary | null {
@@ -1105,6 +1113,7 @@ export async function refetchIssues(): Promise<void> {
 		const res = await getModelIssues(_clientConfig);
 		if (gen !== _generation) return; // a different model was installed mid-flight
 		adoptIssues(res.issues, res.counts, res.model_rev, res.truncated);
+		_rulesStatus = res.rules_status;
 	} catch {
 		// keep the current map; the next commit delta or refetch heals
 	}
@@ -1137,6 +1146,7 @@ export function resetModelStore(): void {
 	_structureRev = 0;
 	_issueCounts = null;
 	_issuesTruncatedTotal = null;
+	_rulesStatus = null;
 	_error = null;
 	_queue = [];
 }

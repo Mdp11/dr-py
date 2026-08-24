@@ -64,6 +64,7 @@ export {
 	getIssueCounts,
 	getIssuesByOwner,
 	getIssuesTruncatedTotal,
+	getRulesStatus,
 	getLiveIssues,
 	adoptIssues,
 	refetchIssues,

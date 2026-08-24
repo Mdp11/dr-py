@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as validationApi from '$lib/api/validation';
 import type { Issue } from '$lib/api/types';
+import type { RulesStatus } from '$lib/api/validation';
 import {
 	adoptIssues,
 	adoptSummary,
@@ -9,6 +10,7 @@ import {
 	getIssuesByOwner,
 	getIssuesTruncatedTotal,
 	getLiveIssues,
+	getRulesStatus,
 	refetchIssues,
 	resetModelStore
 } from '../model.svelte';
@@ -132,7 +134,8 @@ describe('refetchIssues', () => {
 			model_rev: 1,
 			issues: [issue('fetched', 'e1')],
 			counts: { error: 1 },
-			truncated: false
+			truncated: false,
+			rules_status: null
 		});
 		await refetchIssues();
 		expect(getLiveIssues()[0].message).toBe('fetched');
@@ -157,7 +160,8 @@ describe('refetchIssues', () => {
 				model_rev: 7,
 				issues: [issue('project A', 'e1')],
 				counts: { error: 1 },
-				truncated: false
+				truncated: false,
+				rules_status: null
 			};
 		});
 
@@ -171,5 +175,40 @@ describe('refetchIssues', () => {
 		// capture is what drops it.
 		expect(getLiveIssues()).toHaveLength(0);
 		expect(getIssueCounts()).toBeNull();
+	});
+
+	it('threads rules_status from the response into the store', async () => {
+		summaryAtRev(1);
+		const rulesStatus: RulesStatus = {
+			total: 3,
+			skipped: [{ artifact_id: 'art1', set_name: 'zoning', rule: 'zoned', reason: 'drift' }],
+			eval_errors: {}
+		};
+		vi.spyOn(validationApi, 'getModelIssues').mockResolvedValue({
+			model_rev: 1,
+			issues: [],
+			counts: {},
+			truncated: false,
+			rules_status: rulesStatus
+		});
+		await refetchIssues();
+		expect(getRulesStatus()).toEqual(rulesStatus);
+	});
+});
+
+describe('resetModelStore clears rules_status', () => {
+	it('drops a previously fetched rules_status', async () => {
+		summaryAtRev(1);
+		vi.spyOn(validationApi, 'getModelIssues').mockResolvedValue({
+			model_rev: 1,
+			issues: [],
+			counts: {},
+			truncated: false,
+			rules_status: { total: 1, skipped: [], eval_errors: {} }
+		});
+		await refetchIssues();
+		expect(getRulesStatus()).not.toBeNull();
+		resetModelStore();
+		expect(getRulesStatus()).toBeNull();
 	});
 });

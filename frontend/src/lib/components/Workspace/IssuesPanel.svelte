@@ -10,6 +10,7 @@
 		getLastRunAt,
 		getModelSummary,
 		getOverlay,
+		getRulesStatus,
 		getViewWarnings,
 		isRunning,
 		select
@@ -27,6 +28,11 @@
 	const lastRunAt = $derived(getLastRunAt());
 	const running = $derived(isRunning());
 	const lastError = $derived(getLastError());
+	const rulesStatus = $derived(getRulesStatus());
+	const skippedRuleCount = $derived(rulesStatus?.skipped.length ?? 0);
+	const skippedRulesLabel = $derived(
+		`${skippedRuleCount} ${skippedRuleCount === 1 ? 'rule' : 'rules'} skipped — schema mismatch`
+	);
 	const summary = $derived(getModelSummary());
 	const elements = $derived(getCachedElements());
 	const relationships = $derived(getCachedRelationships());
@@ -63,7 +69,10 @@
 		uniqueness: 'Uniqueness',
 		view: 'View'
 	};
+	// User-authored validation rules stamp their check as "rule:<rule-name>";
+	// the chip shows the bare rule name rather than the raw check string.
 	function checkLabel(check: string): string {
+		if (check.startsWith('rule:')) return check.slice('rule:'.length);
 		return CHECK_LABELS[check] ?? (check === '' ? 'Other' : check);
 	}
 
@@ -228,6 +237,22 @@
 			class="border-b border-destructive/40 bg-destructive/15 px-3 py-2 text-xs text-destructive"
 		>
 			Validation failed: {lastError}
+		</div>
+	{/if}
+
+	{#if rulesStatus !== null && rulesStatus.skipped.length > 0}
+		<div
+			data-testid="rules-skipped-banner"
+			class="border-b border-warning/40 bg-warning/15 px-3 py-2 text-xs text-warning"
+		>
+			<details>
+				<summary class="cursor-pointer select-none">{skippedRulesLabel}</summary>
+				<ul class="mt-1 flex flex-col gap-0.5 pl-3 text-[10px] text-warning/90">
+					{#each rulesStatus.skipped as s, i (i)}
+						<li>{s.set_name} / {s.rule === '' ? '(whole set)' : s.rule} — {s.reason}</li>
+					{/each}
+				</ul>
+			</details>
 		</div>
 	{/if}
 

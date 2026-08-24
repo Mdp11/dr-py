@@ -30,6 +30,27 @@ export function validateModel(options?: ValidateOptions, cfg?: ClientConfig): Pr
 	return apiFetch('/model/validate', { method: 'POST', body, schema: IssueListSchema }, cfg);
 }
 
+/** One compiled rule skipped whole at compile time (metamodel drift): the
+ * rule references a stereotype/relationship type/property the metamodel
+ * doesn't have. `rule === ''` means the whole set failed to parse, not one
+ * rule drifting. */
+export const RuleSkipSchema = z.object({
+	artifact_id: z.string(),
+	set_name: z.string(),
+	rule: z.string(),
+	reason: z.string()
+});
+export type RuleSkip = z.infer<typeof RuleSkipSchema>;
+
+/** Compiled-rules health, read off the session's cached rule set. Nullable
+ * to mirror the backend's `RulesStatusOut | None`. */
+export const RulesStatusSchema = z.object({
+	total: z.number(),
+	skipped: z.array(RuleSkipSchema),
+	eval_errors: z.record(z.string(), z.number())
+});
+export type RulesStatus = z.infer<typeof RulesStatusSchema>;
+
 /** GET /model/issues — snapshot of the server's maintained issue store.
  * Cheap by contract (never a pipeline run); `counts` is exact even when
  * `issues` is truncated at the server-side cap. */
@@ -37,7 +58,8 @@ export const IssueListOutSchema = z.object({
 	model_rev: z.number().int(),
 	issues: z.array(IssueSchema).default([]),
 	counts: IssueCountsSchema.default({}),
-	truncated: z.boolean().default(false)
+	truncated: z.boolean().default(false),
+	rules_status: RulesStatusSchema.nullable().default(null)
 });
 export type IssueList = z.infer<typeof IssueListOutSchema>;
 

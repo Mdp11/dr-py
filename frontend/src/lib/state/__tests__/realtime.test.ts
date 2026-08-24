@@ -63,7 +63,8 @@ beforeEach(() => {
 		model_rev: 1,
 		issues: [],
 		counts: {},
-		truncated: false
+		truncated: false,
+		rules_status: null
 	});
 });
 afterEach(() => vi.restoreAllMocks());
@@ -248,7 +249,8 @@ describe('issue refetch triggers', () => {
 			model_rev: 2,
 			issues: [],
 			counts: {},
-			truncated: false
+			truncated: false,
+			rules_status: null
 		});
 		handleFeedEvent(commitEvent(2));
 		handleFeedEvent(commitEvent(3));
@@ -263,7 +265,8 @@ describe('issue refetch triggers', () => {
 			model_rev: 3,
 			issues: [],
 			counts: {},
-			truncated: false
+			truncated: false,
+			rules_status: null
 		});
 		const summarySpy = vi.spyOn(modelReadApi, 'getModelSummary');
 		// Our cached rev is AHEAD of the snapshot's, so the `e.model_rev >
@@ -295,7 +298,8 @@ describe('issue refetch triggers', () => {
 			model_rev: 2,
 			issues: [],
 			counts: {},
-			truncated: false
+			truncated: false,
+			rules_status: null
 		});
 		handleFeedEvent(commitEvent(2));
 		stopRealtime();
